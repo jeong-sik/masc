@@ -1,8 +1,6 @@
 open Alcotest
 module Cat = Masc.Keeper_memory_os_types
 module Types = Masc_tui_types
-module Decode = Masc.Tui_decode
-module Layout = Masc_tui_message_layout
 module Render_memory = Masc_tui_render_memory
 
 let make_state () =
@@ -11,14 +9,14 @@ let make_state () =
 
 (* The browser open on the snapshot's keeper, with its facts answered the way
    the answer handler settles them. *)
-let answer_memory_facts (state : Types.state) (snapshot : Masc.Tui_decode_memory_facts.memory_fact_snapshot) =
+let answer_memory_facts ?unread (state : Types.state) (snapshot : Masc.Tui_decode_memory_facts.memory_fact_snapshot) =
   let keeper = snapshot.Masc.Tui_decode_memory_facts.mfs_keeper in
   state.Types.memory_facts_keeper <- Some keeper;
   match Masc_tui_fetched.start ~equal:String.equal state.Types.memory_facts ~key:keeper with
   | Masc_tui_fetched.Already_loading -> Alcotest.fail "fixture already loading"
   | Masc_tui_fetched.Started (next, request) ->
       state.Types.memory_facts <-
-        Masc_tui_fetched.complete ~equal:String.equal next request (Ok (snapshot, None))
+        Masc_tui_fetched.complete ~equal:String.equal next request (Ok (snapshot, unread))
 ;;
 
 (* A refresh of the open keeper's facts that failed: the facts stay, stale. *)
@@ -38,54 +36,71 @@ let contains needle haystack =
   go 0
 ;;
 
+let wire_controls = "\x07\027[2J\027]0;title\x07\127"
+
 let multi_line_claim =
   "The chat pane keeps the model's reply verbatim.\n\n**Why**:\n1. first reason\n\
-   2. second reason\x07 rings"
+   2. second reason " ^ wire_controls
 
-(* The claim's rows are those before the first labeled provenance field;
-   detail wraps both prose and provenance to the frame width. *)
-let claim_rows lines =
+(* This is a terminal-safety boundary, independent of detail labels, field
+   order, wrapping, or row count. Ignore only the renderer's own SGR styling;
+   the fixture's clear-screen, OSC, BEL and DEL must remain visible escapes. *)
+let check_terminal_safe ~what lines =
   let plain = List.map Masc_tui_theme.strip_sgr lines in
-  let is_field line =
-    List.exists (fun label -> contains label line) [ "Keeper:"; "Category:"; "Bound Path:" ]
-  in
-  let rec take = function
-    | [] -> []
-    | line :: rest -> if is_field line then [] else line :: take rest
-  in
-  match plain with [] -> [] | _heading :: body -> take body
+  List.iter
+    (fun line ->
+      check bool (what ^ ": no wire control byte reaches a terminal row") false
+        (String.exists (fun ch -> Char.code ch < 0x20 || Char.code ch = 0x7f) line))
+    plain;
+  List.iter
+    (fun escaped ->
+      check bool (what ^ ": wire controls are escaped, not discarded") true
+        (List.exists (contains escaped) plain))
+    ["\\x07"; "\\x1B[2J"; "\\x1B]0;title"; "\\x7F"]
 
-let check_claim_rows ~what lines =
-  let raw_rows = claim_rows lines in
-  let rows = List.map String.trim raw_rows in
-  check bool (what ^ ": other control bytes are still escaped") true
-    (List.exists (contains "\\x07") rows)
-
-let test_detail_keeps_the_claim_line_breaks () =
+let test_detail_escapes_wire_controls_without_changing_facts () =
   let fact : Masc.Tui_decode_memory_facts.memory_fact =
-    { mf_keeper = "alpha"
+    { mf_keeper = "alpha" ^ wire_controls
     ; mf_claim = multi_line_claim
     ; mf_category = Cat.Constraint
-    ; mf_origin = "manual"
+    ; mf_origin = "manual" ^ wire_controls
     ; mf_first_seen = 100.0
     ; mf_last_seen = 200.0
-    ; mf_memory_id = "mem-lines-1"
+    ; mf_memory_id = "mem-lines-1" ^ wire_controls
     ; mf_events = Masc.Tui_decode_memory_facts.no_memory_fact_events
     }
   in
-  check_claim_rows ~what:"fact"
-    (Render_memory.memory_fact_detail_lines ~ko:false ~cols:40 (Types.Memory_row_fact fact));
   let sfact : Masc.Tui_decode_memory_facts.memory_source_fact =
-    { msf_keeper = "alpha"
+    { msf_keeper = "alpha" ^ wire_controls
     ; msf_claim = multi_line_claim
     ; msf_first_seen = 100.0
-    ; msf_path = "config/runtime.toml"
-    ; msf_sha256 = "abc123sha"
+    ; msf_path = "config/runtime.toml" ^ wire_controls
+    ; msf_sha256 = "abc123sha" ^ wire_controls
     }
   in
-  check_claim_rows ~what:"source-bound fact"
-    (Render_memory.memory_fact_detail_lines ~ko:false ~cols:40
-       (Types.Memory_row_source_fact sfact))
+  let invalidation : Masc.Tui_decode_memory_facts.memory_invalidation =
+    { mi_keeper = "alpha" ^ wire_controls
+    ; mi_source_path = "legacy_docs.md" ^ wire_controls
+    ; mi_invalidated_at = 300.0
+    ; mi_reason = "superseded " ^ wire_controls
+    }
+  in
+  List.iter (fun ko ->
+    List.iter (fun (what, row) ->
+      check_terminal_safe ~what (Render_memory.memory_fact_detail_lines ~ko ~cols:120 row))
+      ["fact", Types.Memory_row_fact fact;
+       "source-bound fact", Types.Memory_row_source_fact sfact;
+       "invalidation", Types.Memory_row_invalidation invalidation])
+    [false; true];
+  check string "the original claim still has its line breaks and wire bytes"
+    multi_line_claim fact.mf_claim;
+  check bool "the original typed category is preserved" true
+    (fact.mf_category = Cat.Constraint);
+  check string "the original source claim is preserved" multi_line_claim sfact.msf_claim;
+  check string "the original bound path is preserved" ("config/runtime.toml" ^ wire_controls)
+    sfact.msf_path;
+  check string "the original invalidation reason is preserved" ("superseded " ^ wire_controls)
+    invalidation.mi_reason
 ;;
 
 let make_keeper_health ~keeper_id ~facts ~snapshot_bytes : Masc.Tui_decode_memory_health.memory_keeper_health =
@@ -154,16 +169,6 @@ let make_fleet_health keeper : Masc.Tui_decode_memory_health.memory_health_snaps
   ; mhs_starving_keepers = 0
   }
 
-let rows_drawn ~cols ~budget state =
-  let count = ref 0 in
-  Render_memory.render_memory_body ~cols ~budget state
-    ~push:(fun _ -> incr count)
-    ~push_styled:(fun ~style:_ _ -> incr count)
-    ~push_selected:(fun _ -> incr count)
-    ~push_divider:(fun () -> incr count)
-    ~push_empty:(fun () -> incr count);
-  !count
-
 let fleet_health : Masc.Tui_decode_memory_health.memory_health_snapshot =
   let with_lag (keeper : Masc.Tui_decode_memory_health.memory_keeper_health) lag =
     { keeper with
@@ -197,7 +202,7 @@ let fleet_health : Masc.Tui_decode_memory_health.memory_health_snapshot =
   in
   health
 
-let test_the_librarian_line_names_a_stalled_gap () =
+let test_memory_diagnostics_escape_control_bytes () =
   let with_beta stalled =
     { fleet_health with
       Masc.Tui_decode_memory_health.mhs_keepers =
@@ -282,157 +287,59 @@ let three_kinds_state ?(keeper = "alpha") ?(extra_ordinary = []) () =
   state.memory_facts_cursor <- 0;
   state
 
-let test_category_rail_keeps_click_targets_and_frame_width () =
+let test_typed_category_filters_select_fact_identities () =
   let state = three_kinds_state () in
-  check int "default gives the facts all available width" 140
-    (Render_memory.memory_facts_pane_cols state 140);
-  state.memory_facts_categories_open <- true;
-  state.memory_facts_category <- Types.Category_ordinary Cat.Preference;
-  let render cols =
-    Masc_tui_hit.reset Masc_tui_press.press_marks;
-    let lines = ref [] in
-    let push line = lines := line :: !lines in
-    Render_memory.render_memory_facts_body ~cols ~budget:24 state ~push
-      ~push_styled:(fun ~style line -> push (style ^ line))
-      ~push_selected:push ~push_divider:(fun () -> push "") ~push_empty:(fun () -> push "");
-    Masc_tui_hit.extract Masc_tui_press.press_marks (List.rev !lines)
+  let verify category ordinary_ids source_paths dropped_paths =
+    state.memory_facts_category <- category;
+    let ordinary, source, dropped =
+      List.fold_left (fun (ordinary, source, dropped) -> function
+        | Types.Memory_row_fact fact -> fact.mf_memory_id :: ordinary, source, dropped
+        | Types.Memory_row_source_fact fact -> ordinary, fact.msf_path :: source, dropped
+        | Types.Memory_row_invalidation row -> ordinary, source, row.mi_source_path :: dropped)
+        ([], [], []) (Types.memory_fact_rows state)
+    in
+    check (list string) "ordinary fact identities" (List.sort String.compare ordinary_ids)
+      (List.sort String.compare ordinary);
+    check (list string) "source fact identities" source_paths source;
+    check (list string) "invalidation identities" dropped_paths dropped
   in
-  let wide, zones = render 140 in
-  check bool "Category rail visible" true
-    (List.exists (contains "CATEGORIES") wide);
-  check bool "Category counts visible" true
-    (List.exists (contains "preference (1)") wide);
-  check bool "frame width preserved" true
-    (List.for_all (fun line -> Layout.display_width line <= Masc_tui_frame.inner_width ~cols:140) wide);
-  check bool "selected Category has clickable rail target" true
-    (List.exists (fun (_, first, _, target) ->
-      first <= Masc_tui_roster_pane.pane_cols &&
-      target = Masc_tui_press.Press_memory_category (Types.Category_ordinary Cat.Preference))
-      (Masc_tui_hit.to_list zones));
-  List.iter (fun initially_open ->
-    state.memory_facts_categories_open <- initially_open;
-    let narrow, _ = render (Masc_tui_roster_pane.threshold_cols - 1) in
-    check bool "hidden Category rail offers no toggle" false
-      (List.exists (contains "d:") narrow);
-    let wide, _ = render Masc_tui_roster_pane.threshold_cols in
-    check bool "drawable Category rail offers its actual action" true
-      (List.exists (contains (if initially_open then "d:접기" else "d:Category 펼치기")) wide)
-  ) [false; true];
-  let narrow, _ = render 80 in
-  check bool "narrow frame keeps full fact width" false
-    (List.exists (contains "CATEGORIES") narrow);
-  state.memory_facts_categories_open <- false;
-  let closed, _ = render 140 in
-  check bool "closing Categories restores the fact reading" false
-    (List.exists (contains "CATEGORIES") closed)
+  verify (Types.Category_ordinary Cat.Preference)
+    ["mem-Roger reads for the tester"] [] [];
+  verify (Types.Category_ordinary Cat.Fact)
+    ["mem-The renderer draws the board"] [] [];
+  verify Types.Category_source [] ["config/rt.toml"] [];
+  verify Types.Category_dropped [] [] ["legacy_docs.md"];
+  verify Types.Category_all
+    ["mem-Roger reads for the tester"; "mem-The renderer draws the board"]
+    ["config/rt.toml"] ["legacy_docs.md"]
+;;
 
-let test_category_rail_bounds_large_label_preview () =
-  let name = "oversized_" ^ String.make 50_000 'a' in
+let test_custom_category_preserves_original_identity () =
+  let name = "custom_" ^ String.make 50_000 'a' in
   let category = Option.get (Cat.category_of_string name) in
-  let filter = Types.Category_ordinary category in
-  let state = three_kinds_state ~extra_ordinary:[make_memory_fact category "bounded preview"] () in
-  state.memory_facts_categories_open <- true;
-  state.memory_facts_category <- filter;
-  Masc_tui_hit.reset Masc_tui_press.press_marks;
-  let lines = ref [] in
-  let push line = lines := line :: !lines in
-  Render_memory.render_memory_facts_body ~cols:140 ~budget:7 state ~push
-    ~push_styled:(fun ~style line -> push (style ^ line)) ~push_selected:push
-    ~push_divider:(fun () -> push "") ~push_empty:(fun () -> push "");
-  let lines, _ = Masc_tui_hit.extract Masc_tui_press.press_marks (List.rev !lines) in
-  let rail = List.map (fun line -> Layout.take_cells (Masc_tui_theme.strip_sgr line)
-    Masc_tui_roster_pane.pane_cols) lines in
-  check bool "bounded preview exposes truncation and count in the visible rail" true
-    (List.exists (contains "… (1)") rail);
-  check bool "rendered rows fit the same terminal width" true
-    (List.for_all (fun line -> Layout.display_width line <= Masc_tui_frame.inner_width ~cols:140) lines)
-
-let test_category_rail_wrapped_range_and_overflow () =
-  let long_cat_name = "custom_architecture_infrastructure_deployment_pipeline_specification" in
-  let long_cat = Option.get (Cat.category_of_string long_cat_name) in
-  let cat_filter = Types.Category_ordinary long_cat in
-  let state =
-    three_kinds_state
-      ~extra_ordinary:[ make_memory_fact long_cat "Long category test claim" ]
-      ()
+  let original = make_memory_fact category "Custom category fact" in
+  let state = three_kinds_state ~extra_ordinary:[original] () in
+  state.memory_facts_category <- Types.Category_ordinary category;
+  let verify () =
+    match Types.memory_fact_rows state with
+    | [Types.Memory_row_fact fact] ->
+        check string "the selected fact keeps its ID" original.mf_memory_id fact.mf_memory_id;
+        check string "the selected fact keeps its claim" original.mf_claim fact.mf_claim;
+        (match fact.mf_category with
+         | Cat.Custom _ ->
+             check string "Custom preserves the entire API category" name
+               (Cat.category_to_string fact.mf_category)
+         | Cat.Code_change | Cat.Fact | Cat.Preference | Cat.Goal | Cat.Constraint
+         | Cat.Validated_approach | Cat.Lesson | Cat.Blocker ->
+             fail "Custom category changed to a built-in category")
+    | [] | Types.Memory_row_fact _ :: _
+    | Types.Memory_row_source_fact _ :: _ | Types.Memory_row_invalidation _ :: _ ->
+        fail "typed Custom filter did not isolate its original fact"
   in
-  state.memory_facts_category <- cat_filter;
-  state.memory_facts_categories_open <- true;
-  let render ~budget cols =
-    Masc_tui_hit.reset Masc_tui_press.press_marks;
-    let lines = ref [] in
-    let push line = lines := line :: !lines in
-    Render_memory.render_memory_facts_body ~cols ~budget state ~push
-      ~push_styled:(fun ~style line -> push (style ^ line))
-      ~push_selected:push ~push_divider:(fun () -> push "") ~push_empty:(fun () -> push "");
-    Masc_tui_hit.extract Masc_tui_press.press_marks (List.rev !lines)
-  in
-  let lines_fit, zones_fit = render ~budget:7 140 in
-  check bool "selected category start row visible when fitting in budget" true
-    (List.exists (contains "custom_architecture_infrastructu") lines_fit);
-  check bool "selected category end row with count visible when fitting in budget" true
-    (List.exists (contains "tion (1)") lines_fit);
-  check bool "clickable target exists when fitting" true
-    (List.exists (fun (_, first, _, target) ->
-      first <= Masc_tui_roster_pane.pane_cols &&
-      target = Masc_tui_press.Press_memory_category cat_filter)
-      (Masc_tui_hit.to_list zones_fit));
-  let lines_small, zones_small = render ~budget:5 140 in
-  check bool "selected category start anchored and visible under height overflow" true
-    (List.exists (contains "custom_architecture_infrastructu") lines_small);
-  check bool "clickable target exists on overflow" true
-    (List.exists (fun (_, first, _, target) ->
-      first <= Masc_tui_roster_pane.pane_cols &&
-      target = Masc_tui_press.Press_memory_category cat_filter)
-      (Masc_tui_hit.to_list zones_small));
-  state.view <- Types.Memory;
-  check bool "keeper is selected for detail access" true
-    (Option.is_some state.memory_facts_keeper);
-  state.memory_fact_detail_open <- true;
-  state.memory_fact_detail_scroll <- 0;
-  let rows = Types.memory_fact_rows state in
-  check int "category filter isolates long category fact" 1 (List.length rows);
-  let fact_row = List.hd rows in
-  let compact text = String.split_on_char ' ' text |> String.concat "" in
-  List.iter
-    (fun cols ->
-      let lines = Render_memory.memory_fact_detail_lines ~ko:false ~cols fact_row in
-      let body = match lines with [] -> [] | _heading :: body -> body in
-      List.iter
-        (fun line ->
-          check bool "detail body fits inner frame width" true
-            (Layout.display_width line <= Masc_tui_frame.inner_width ~cols))
-        body;
-      let text =
-        body |> List.map Masc_tui_theme.strip_sgr |> String.concat "" |> compact
-      in
-      check bool "wrapped detail lines preserve full category label" true
-        (contains (compact long_cat_name) text))
-    [ 80; 40; 30; 16 ];
-  let detail_cols = 40 in
-  let detail_lines = Render_memory.memory_fact_detail_lines ~ko:false ~cols:detail_cols fact_row in
-  let count = List.length detail_lines in
-  let small_height = 4 in
-  check bool "detail lines overflow small viewport" true (count > small_height);
-  let indexed = List.mapi (fun i line -> i, Masc_tui_theme.strip_sgr line) detail_lines in
-  let first_cat_idx = indexed |> List.find (fun (_, line) -> contains "Category:" line) |> fst in
-  let next_field_idx = indexed |> List.find (fun (i, line) -> i > first_cat_idx && contains "Origin:" line) |> fst in
-  let last_cat_idx = next_field_idx - 1 in
-  let initial_scroll = state.memory_fact_detail_scroll in
-  check int "initial detail scroll starts at top" 0 initial_scroll;
-  let scrolled =
-    Masc_tui_scroll.ensure_visible ~cursor:last_cat_idx ~height:small_height
-      initial_scroll
-  in
-  state.memory_fact_detail_scroll <- scrolled;
-  check bool "scrolled window reaches final category line" true
-    (scrolled <= last_cat_idx && last_cat_idx < scrolled + small_height);
-  check bool "scroll position indicator reports window" true
-    (Option.is_some
-       (Masc_tui_scroll.position_row ~scroll:scrolled ~height:small_height count));
-  let end_scroll = Masc_tui_scroll.normalize ~count ~height:small_height max_int in
-  check bool "normalizing the final viewport reaches bottom of detail" true
-    (end_scroll = Masc_tui_scroll.maximum ~count ~height:small_height)
+  verify ();
+  fail_memory_facts_refresh state "facts load failed: HTTP 503";
+  verify ()
+;;
 
 let test_memory_search_uses_the_filter_text_and_query () =
   let state = three_kinds_state () in
@@ -499,7 +406,7 @@ let test_memory_keeper_search_accepts_display_words () =
     let rows = Types.visible_memory_keepers state in
     check (list string) "the query selects the intended Keeper IDs" wanted
       (List.map (fun keeper -> keeper.H.mkh_keeper_id) rows);
-    check (option string) "Enter selects the matching Keeper" (List.nth_opt wanted 0)
+    check (option string) "the selection decision returns the matching Keeper" (List.nth_opt wanted 0)
       (Option.map (fun keeper -> keeper.H.mkh_keeper_id) (Types.selected_memory_keeper state));
     let texts = Option.get
         (Masc_tui_surface_search.surface_row_texts ~cols:120 state Types.Memory) in
@@ -532,7 +439,7 @@ let test_the_breakdown_counts_the_rows_the_screen_lists () =
   check int "which is the number the title counts" 1
     (List.length (Types.memory_fact_rows state))
 
-let test_render_memory_body_sorting () =
+let test_memory_selection_follows_sort_and_filter () =
   let state = make_state () in
   let k1 = make_keeper_health ~keeper_id:"alpha" ~facts:10 ~snapshot_bytes:2048 in
   let k2 = make_keeper_health ~keeper_id:"beta" ~facts:50 ~snapshot_bytes:1024 in
@@ -562,23 +469,13 @@ let test_render_memory_body_sorting () =
   in
   state.memory_health <- Some health;
   state.memory_overview_sort <- Types.Mem_overview_facts;
-  let lines = ref [] in
-  Render_memory.render_memory_body
-    ~cols:100
-    ~budget:20
-    state
-    ~push:(fun s -> lines := s :: !lines)
-    ~push_styled:(fun ~style:_ s -> lines := s :: !lines)
-    ~push_selected:(fun s -> lines := s :: !lines)
-    ~push_divider:(fun () -> ())
-    ~push_empty:(fun () -> ());
   let selected () = Option.map (fun k -> k.Masc.Tui_decode_memory_health.mkh_keeper_id) (Types.selected_memory_keeper state) in
-  check (option string) "Enter opens the first visible fact-sorted row" (Some "beta") (selected ());
+  check (option string) "the selection decision follows fact order" (Some "beta") (selected ());
   state.memory_overview_sort <- Types.Mem_overview_size;
-  check (option string) "size order and Enter agree" (Some "alpha") (selected ());
+  check (option string) "the selection decision follows size order" (Some "alpha") (selected ());
   state.search_last <- "beta";
   state.memory_health_cursor <- 99;
-  check (option string) "filter clamps Enter to the shown row" (Some "beta") (selected ());
+  check (option string) "the selection decision clamps to the matching Keeper" (Some "beta") (selected ());
   state.search_last <- "";
   state.memory_health_cursor <- 0;
   state.memory_health <- Some { health with mhs_keepers =
@@ -587,112 +484,87 @@ let test_render_memory_body_sorting () =
   check (option string) "known dates sort before absent snapshots" (Some "beta") (selected ())
 ;;
 
-let test_render_memory_overflow_selection () =
+let test_retained_health_filter_keeps_the_selected_owner () =
   let state = make_state () in
-  state.memory_overview_detail <- true;  (* pins the [d] detail rows (#39831) *)
   state.view <- Types.Memory;
+  state.memory_overview_sort <- Types.Mem_overview_name;
   let keepers = List.init 5 (fun index ->
-      let keeper =
-        make_keeper_health ~keeper_id:(Printf.sprintf "keeper-%d" index)
-          ~facts:10 ~snapshot_bytes:1024
-      in
-      if index <> 4 then keeper
-      else
-        { keeper with
-          mkh_source_read_error = Some "unreadable source snapshot"
-        ; mkh_alerts =
-            [{ ma_code = Masc.Tui_decode_memory_health.Source_snapshot_read_error
-             ; ma_label = "source"
-             ; ma_message = "unreadable source snapshot"
-             }]
-        })
-  in
-  state.memory_health <- Some
-    { mhs_generated_at = 1700000000.
-    ; mhs_keepers = keepers
-    ; mhs_refused_keepers = []
-    ; mhs_total_facts = 50
-    ; mhs_total_observed_facts = 50
-    ; mhs_total_derived_facts = 0
-    ; mhs_total_support_invalidations = 0
-    ; mhs_total_snapshot_bytes = 5120
-    ; mhs_total_source_facts = 0
-    ; mhs_total_source_invalidations = 0
-    ; mhs_total_source_snapshot_bytes = 0
-    ; mhs_total_librarian_failures = 0
-    ; mhs_total_librarian_unread_turns = Some 0
-    ; mhs_total_librarian_continuity_unread_atoms = 0
-    ; mhs_total_librarian_continuity_unmeasured = 0
-    ; mhs_total_vision_ingest_errors = 0
-    ; mhs_total_read_errors = 0
-    ; mhs_total_source_read_errors = 1
-    ; mhs_warn_alerts = 1
-    ; mhs_error_alerts = 0
-    ; mhs_starving_keepers = 0
-    };
-  (* The fleet header is as many rows as the frame wraps it to, and the list
-     gets what is left; pin the rows the header takes at 100 columns so the
-     list heights below stay the case this test is about. *)
-  let rows =
-    22 + List.length (Render_memory.memory_fleet_header_rows ~cols:100 state)
-  in
-  let budget = rows - Masc_tui_frame.chrome_rows in
-  let height layout =
-    Masc_tui_scroll.content_height ~rows ~chrome:layout.Types.sc_chrome
-      ~count:layout.sc_count ~preview_keep:layout.sc_preview_keep
-      ~overflow_takes_row:layout.sc_overflow_takes_row
-  in
-  (* One of the two list rows went to the context block when the Librarian
-     row started breaking at its clause mark rather than losing "failed N
-     since server start" to the frame. The block is paid for out of the same
-     rows as the list, and this fixture's frame is 22 rows: a terminal tall
-     enough to show the roster spends the row against many more. *)
-  check int "five keepers fit one list row beside their context" 1
-    (height (Render_memory.memory_overview_scrolled ~cols:100 ~budget state));
-  let assert_selected_visible () =
-    let used = ref 0 and selected = ref None in
-    let push _ = incr used in
-    Render_memory.render_memory_body ~cols:100 ~budget state
-      ~push ~push_styled:(fun ~style:_ line -> push line)
-      ~push_selected:(fun line ->
-        if !used < budget then selected := Some line;
-        incr used)
-      ~push_divider:(fun () -> push "") ~push_empty:(fun () -> push "");
-    let expected = Option.get (Types.selected_memory_keeper state) in
-    check bool "the selected keeper is inside the visible body" true
-      (Option.fold ~none:false ~some:(contains expected.mkh_keeper_id) !selected);
-    check bool "header, roster, overflow and detail fit their shared budget" true
-      (rows_drawn ~cols:100 ~budget state <= budget)
-  in
-  (* Move through an overflowing list using the same target-row layout as
-     keyboard input, including the context of the newly selected keeper. *)
-  for cursor = 0 to 4 do
-    let layout = Render_memory.memory_overview_scrolled ~cols:100 ~budget ~cursor state in
-    state.memory_health_cursor <- cursor;
-    state.memory_health_scroll <-
-      Masc_tui_scroll.ensure_visible ~cursor ~height:(height layout)
-        state.memory_health_scroll;
-    assert_selected_visible ()
-  done;
-  check int "the final row's error and alert leave one list row" 1
-    (height (Render_memory.memory_overview_scrolled ~cols:100 ~budget state));
-  check int "the final row requires scrolling" 4 state.memory_health_scroll;
-  state.search_last <- "keeper-4";
+    let keeper = make_keeper_health ~keeper_id:(Printf.sprintf "keeper-%d" index)
+        ~facts:10 ~snapshot_bytes:1024 in
+    if index <> 4 then keeper else
+      { keeper with mkh_source_read_error = Some "unreadable source snapshot" }) in
+  let health = { (make_fleet_health (List.hd keepers)) with
+    mhs_keepers = keepers; mhs_total_facts = 50; mhs_total_observed_facts = 50;
+    mhs_total_snapshot_bytes = 5120; mhs_total_source_read_errors = 1 } in
+  state.memory_health <- Some health;
+  let selected () = Option.map (fun keeper -> keeper.Masc.Tui_decode_memory_health.mkh_keeper_id)
+      (Types.selected_memory_keeper state) in
+  state.memory_health_cursor <- -1;
+  check (option string) "a negative cursor selects the first Keeper" (Some "keeper-0") (selected ());
+  state.memory_health_cursor <- 99;
+  check (option string) "an excessive cursor selects the last Keeper" (Some "keeper-4") (selected ());
   state.memory_health_error <- Some "refresh failed";
-  let layout = Render_memory.memory_overview_scrolled ~cols:100 ~budget state in
-  check int "filter bounds the cursor to the one visible keeper" 1 layout.sc_count;
-  check (option string) "search keeps the intended Keeper selected" (Some "keeper-4")
-    (Option.map (fun keeper -> keeper.Masc.Tui_decode_memory_health.mkh_keeper_id)
-       (Types.selected_memory_keeper state));
-  (* A refresh/filter can change the body before another keypress. *)
-  assert_selected_visible ()
+  state.search_last <- "keeper-4";
+  check (list string) "a retained snapshot still filters by Keeper identity" ["keeper-4"]
+    (List.map (fun keeper -> keeper.Masc.Tui_decode_memory_health.mkh_keeper_id)
+       (Types.visible_memory_keepers state));
+  check (option string) "filtering retained health keeps the requested owner" (Some "keeper-4")
+    (selected ());
+  check (option string) "the selected owner's source read error remains known"
+    (Some "unreadable source snapshot")
+    (Option.bind (Types.selected_memory_keeper state) (fun keeper -> keeper.mkh_source_read_error));
+  state.search_last <- "not-present";
+  check (option string) "an unmatched query has no fallback owner" None (selected ());
+  check bool "search does not replace the retained health data" true
+    (state.memory_health = Some health);
+  check (option string) "search does not clear the refresh failure" (Some "refresh failed")
+    state.memory_health_error
 ;;
 
-let test_a_failed_facts_refresh_keeps_the_facts () =
+let test_a_failed_facts_refresh_keeps_facts_and_unread_scope () =
+  let module F = Masc.Tui_decode_memory_facts in
   let state = three_kinds_state () in
-  state.view <- Types.Memory;
-  fail_memory_facts_refresh state "facts load failed: HTTP 503";
-  check int "the facts stay listed" 4 (List.length (Types.memory_fact_rows state))
+  let complete = Option.get (Types.memory_facts_snapshot state) in
+  let partial = { complete with
+    F.mfs_ordinary = F.Memory_store_read_error "ordinary snapshot unreadable";
+    mfs_events_read_error = Some "memory events unreadable" } in
+  List.iter (fun snapshot ->
+    answer_memory_facts state snapshot;
+    let before = Types.memory_fact_rows state in
+    let failure = "facts load failed: HTTP 503" in
+    fail_memory_facts_refresh state failure;
+    check bool "failed refresh retains the original fact identities and values" true
+      (Types.memory_fact_rows state = before);
+    check bool "failed refresh retains the original stores and unread scopes" true
+      (Types.memory_facts_snapshot state = Some snapshot);
+    check (option string) "the refresh failure remains separate from retained data" (Some failure)
+      (Types.memory_facts_failure state);
+    check bool "the failed refresh is a retained observation" true
+      (Types.memory_facts_view state = Masc_tui_fetched.Stale ((snapshot, None), failure)))
+    [complete; partial];
+  let retained = Option.get (Types.memory_facts_snapshot state) in
+  check (option int) "an unread ordinary store has no measured fact count" None
+    (F.memory_fact_count ~complete:true retained (F.Ordinary_facts None));
+  check (option int) "the readable source store retains its measured count" (Some 1)
+    (F.memory_fact_count ~complete:true retained F.Source_facts);
+  check (option int) "the readable invalidation store retains its measured count" (Some 1)
+    (F.memory_fact_count ~complete:true retained F.Dropped_facts);
+  check (option int) "partial store failure keeps the all-facts count unknown" None
+    (F.memory_fact_count ~complete:true retained F.All_facts);
+  let fleet, unread = F.merge_keeper_memory_facts
+      ~refused:[{ Masc.Tui_decode_memory_health.mkr_keeper_id = Some "beta";
+                  mkr_reason = "invalid health payload" }]
+      ["alpha", Ok complete] in
+  check bool "the fleet fixture has an unread scope" true (Option.is_some unread);
+  answer_memory_facts ?unread state fleet;
+  let failure = "fleet refresh failed: HTTP 503" in
+  fail_memory_facts_refresh state failure;
+  check bool "failed fleet refresh retains facts with their unread summary" true
+    (Types.memory_facts_view state = Masc_tui_fetched.Stale ((fleet, unread), failure));
+  List.iter (fun scope ->
+    check (option int) "an incomplete retained fleet has no measured total" None
+      (F.memory_fact_count ~complete:(Option.is_none unread) fleet scope))
+    [F.All_facts; F.Ordinary_facts None; F.Source_facts; F.Dropped_facts]
 ;;
 
 let test_memory_row_visibility () =
@@ -801,41 +673,34 @@ let test_memory_refresh_keeps_the_selected_keeper () =
 let () =
   run "tui_render_memory"
     [ "input statistics",
-      [ test_case "refresh preserves Keeper selection" `Quick test_memory_refresh_keeps_the_selected_keeper
-      ;]
-    ; ( "age_label"
-      , [] )
-    ; ( "row_lines"
-      , [] )
-    ; ( "detail_lines"
-      , [ test_case "the detail keeps the claim's line breaks" `Quick
-            test_detail_keeps_the_claim_line_breaks
-        ;] )
-    ; ( "render_body"
-      , [ test_case "memory recovery does not inherit historical failure state" `Quick
-            test_memory_state_tracks_current_pass_not_history
-        ; test_case "the row classifier keeps unread readings as actions" `Quick
-            test_memory_row_visibility
-        ; test_case "the librarian line names a stalled gap" `Quick
-            test_the_librarian_line_names_a_stalled_gap
-        ; test_case "memory_body_sorting" `Quick test_render_memory_body_sorting
-        ; test_case "memory_overflow_selection" `Quick test_render_memory_overflow_selection
-        ; test_case "Category rail keeps counts, click targets and frame width" `Quick
-            test_category_rail_keeps_click_targets_and_frame_width
-        ; test_case "Category rail wrapped range exposure and overflow" `Quick
-            test_category_rail_wrapped_range_and_overflow
-        ; test_case "category rail bounds oversized previews" `Quick
-            test_category_rail_bounds_large_label_preview
-        ; test_case "a failed facts refresh keeps the facts" `Quick
-            test_a_failed_facts_refresh_keeps_the_facts
-        ;] )
-    ; ( "one place per fact"
-      , [ test_case "search count and cursor share Memory filter text and query" `Quick
-            test_memory_search_uses_the_filter_text_and_query
-        ; test_case "Keeper queries accept canonical and both display languages" `Quick
-            test_memory_keeper_search_accepts_display_words
-        ; test_case "the breakdown counts the rows the screen lists" `Quick
-            test_the_breakdown_counts_the_rows_the_screen_lists
-        ;] )
+      [ test_case "refresh preserves Keeper selection" `Quick
+          test_memory_refresh_keeps_the_selected_keeper ]
+    ; "terminal safety",
+      [ test_case "fact detail escapes wire controls and preserves API values" `Quick
+          test_detail_escapes_wire_controls_without_changing_facts
+      ; test_case "Librarian diagnostics escape wire controls" `Quick
+          test_memory_diagnostics_escape_control_bytes ]
+    ; "memory decisions",
+      [ test_case "memory recovery does not inherit historical failure state" `Quick
+          test_memory_state_tracks_current_pass_not_history
+      ; test_case "the row classifier keeps unread readings as actions" `Quick
+          test_memory_row_visibility
+      ; test_case "selection follows sort and filter" `Quick
+          test_memory_selection_follows_sort_and_filter
+      ; test_case "retained health filter preserves the selected owner" `Quick
+          test_retained_health_filter_keeps_the_selected_owner
+      ; test_case "typed category filters select fact identities" `Quick
+          test_typed_category_filters_select_fact_identities
+      ; test_case "Custom category preserves its original identity" `Quick
+          test_custom_category_preserves_original_identity
+      ; test_case "failed facts refresh retains facts and unread scope" `Quick
+          test_a_failed_facts_refresh_keeps_facts_and_unread_scope ]
+    ; "one place per fact",
+      [ test_case "search count and cursor share Memory filter text and query" `Quick
+          test_memory_search_uses_the_filter_text_and_query
+      ; test_case "Keeper queries accept canonical and both display languages" `Quick
+          test_memory_keeper_search_accepts_display_words
+      ; test_case "the breakdown counts the rows the screen lists" `Quick
+          test_the_breakdown_counts_the_rows_the_screen_lists ]
     ]
 ;;

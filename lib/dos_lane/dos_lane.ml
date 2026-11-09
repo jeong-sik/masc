@@ -658,13 +658,6 @@ let advance st ~budget ~until_ready =
    A file the program deletes is not carried: the inventory copy comes back
    at the next load. None of the games this lane runs delete their saves. *)
 
-let rec mkdir_p dir =
-  if not (Sys.file_exists dir) then begin
-    mkdir_p (Filename.dirname dir);
-    Sys.mkdir dir 0o755
-  end
-;;
-
 (* A name a file may be kept under: one plain name, never a path or a drive.
    The inventory's names pass the same test, and so does every name a guest
    creates before it reaches [saves_dir] -- DOS accepts "/" as a separator,
@@ -693,14 +686,19 @@ let keep_writes st =
            Hashtbl.replace st.kept name now;
            Some (name ^ ": a path, not a file name; it stays in this machine only")
          | _ ->
-           (match mkdir_p st.saves_dir with
-            | () ->
-              (match Fs_compat.save_file_atomic (Filename.concat st.saves_dir name) now with
-               | Ok () ->
-                 Hashtbl.replace st.kept name now;
-                 None
-               | Error message -> Some (name ^ ": " ^ message))
-            | exception Sys_error message -> Some (name ^ ": " ^ message))))
+           (match
+              Fs_compat.mkdir_p st.saves_dir;
+              Fs_compat.save_file_atomic (Filename.concat st.saves_dir name) now
+            with
+            | Ok () ->
+              Hashtbl.replace st.kept name now;
+              None
+            | Error message -> Some (name ^ ": " ^ message)
+            | exception Sys_error message -> Some (name ^ ": " ^ message)
+            | exception Unix.Unix_error (error, operation, path) ->
+              Some (name ^ ": " ^ operation ^ " " ^ path ^ ": " ^ Unix.error_message error)
+            | exception (Eio.Io _ as exn) ->
+              Some (name ^ ": " ^ Printexc.to_string exn))))
     (Dos_machine.mounted_names st.m)
 ;;
 
@@ -1209,10 +1207,14 @@ let commit_load ~who prepared ~announce =
       prepared.load_machine := None;
       let ledger_path = Filename.concat prepared.load_ledger_dir "ledger.jsonl" in
       match
-        mkdir_p prepared.load_ledger_dir;
+        Fs_compat.mkdir_p prepared.load_ledger_dir;
         Out_channel.with_open_bin ledger_path (fun _ -> ())
       with
       | exception Sys_error message -> Error (Unreadable message)
+      | exception Unix.Unix_error (error, operation, path) ->
+        Error (Unreadable (operation ^ " " ^ path ^ ": " ^ Unix.error_message error))
+      | exception (Eio.Io _ as exn) ->
+        Error (Unreadable (Printexc.to_string exn))
       | () ->
         let st = {m; steps=0; program=prepared.load_program; ledger_path; entries=[];
           saves_dir=prepared.load_saves_dir; checkpoint_dir=prepared.load_checkpoint_dir; kept;
@@ -1654,7 +1656,7 @@ let prepare_restore ~dir ~slot ~previous_autosave ~ledger_dir ~saves_dir_of =
   let entries = List.rev meta.saved_ledger in
   let saves_dir = saves_dir_of meta.saved_saves in
   try
-    mkdir_p ledger_dir;
+    Fs_compat.mkdir_p ledger_dir;
     let temporary,channel = Filename.open_temp_file ~temp_dir:ledger_dir ".restore-ledger-" ".tmp" in
     let transferred = ref false in
     Fun.protect ~finally:(fun () ->
@@ -1674,6 +1676,8 @@ let prepare_restore ~dir ~slot ~previous_autosave ~ledger_dir ~saves_dir_of =
   | Sys_error message -> Error (Unreadable message)
   | Unix.Unix_error (error,operation,path) ->
       Error (Unreadable (operation ^ " " ^ path ^ ": " ^ Unix.error_message error))
+  | Eio.Io _ as exn ->
+      Error (Unreadable (Printexc.to_string exn))
 ;;
 
 (* The commit itself, under the lock, once the caller's activity and admission

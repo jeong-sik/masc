@@ -42668,18 +42668,32 @@ Use relative paths for resources already held in the package. -->
           ~live_transcript:(Option.is_some state.msg_live)
           ~lanes:state.standalone_lanes ~awaiting_detail_read
       in
+      (* An in-flight read keeps its age-gated row current without fetching
+         again or advancing a running mark. The existing activity controller
+         supplies its read clock when no moving mark is visible. *)
+      let pending_row_live =
+        Option.is_some (local_source_pending state Local_keepers)
+        || Option.is_some (local_source_pending state Local_work)
+      in
+      if not anything_running && state.activity_frame >= 0 then begin
+        state.activity_frame <- -1;
+        Render_schedule.request render_schedule Render_schedule.Background
+      end;
       (match Render_schedule.Activity_tick.take activity_tick ~now_ns
-          ~running:anything_running
-          ~motion_visible:(Render_schedule.Activity_tick.motion_visible ()
+          ~running:(anything_running || pending_row_live)
+          ~motion_visible:(anything_running
+            && Render_schedule.Activity_tick.motion_visible ()
             && not state.image_open && not state.msx_open) with
        | Quiet -> ()
        | Stop ->
            state.activity_frame <- -1;
            Render_schedule.request render_schedule Render_schedule.Background
        | Advance ->
-           state.activity_frame <-
-             (if state.activity_frame < 0 || state.activity_frame = max_int then 0
-              else state.activity_frame + 1);
+           if anything_running then begin
+             state.activity_frame <-
+               (if state.activity_frame < 0 || state.activity_frame = max_int then 0
+                else state.activity_frame + 1)
+           end;
            Render_schedule.request render_schedule Render_schedule.Background);
       (* /about has a finite arrival. A closed overlay and a final frame
          schedule no further candle work, even when the previous frame drew

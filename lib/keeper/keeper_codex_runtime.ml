@@ -1987,15 +1987,18 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~offi
 
 
 (* RFC claude-code-context-overflow-bounded-restart §6.3, same rule as the
-   Claude Code runtime: the same-run shrink retry is the one re-entry an
-   input rejection admits. [on_shrink_retry] fires only after the sequence
-   verified the typed observation-free overflow and the strictly smaller
-   next capacity, so consuming the just-written
-   [Input_rejected] recovery with the applicable explicit resolution
-   cannot bypass the fence. A failed resolution is not retried here; the next
-   attempt's claim surfaces the refusal instead. A Gate continuation never
-   gets here ([same_run_retry_authorized] in [run]), so the retry is always a
-   fresh start. *)
+   Claude Code runtime: the same-run retries of the shrink sequence are the
+   re-entries an input rejection admits. Both callbacks fire only after the
+   sequence verified a typed observation-free size refusal.
+   [on_shrink_retry] fires once a strictly smaller next capacity exists.
+   [on_memory_retry] fires at the same capacity once the capacity-refusal
+   hook made the request strictly shorter: the retained-result carrier's
+   address form, or a smaller memory delivery. So consuming the
+   just-written [Input_rejected] recovery with the applicable explicit
+   resolution cannot bypass the fence. A failed resolution is not retried
+   here; the next attempt's claim surfaces the refusal instead. A Gate
+   continuation never gets here ([same_run_retry_authorized] in [run]), so
+   the retry is always a fresh start. *)
 let resolve_input_rejected_for_shrink_retry ~base_path ~keeper_name ~runtime_id
   ()
   =
@@ -2112,12 +2115,25 @@ let run ?(on_guidance_prepared = fun () -> Ok ()) ~input_source ~media_store ?ar
       ~artifact_reader_available:
         (Result.is_ok (Keeper_recovery_transmission.require_reader tools))
   in
-  (* The carrier step answers a size refusal before memory and history do. *)
+  (* The carrier step answers a window overflow before memory and history
+     do. [input_too_large] counts only the turn/start input, the current-turn
+     context and the goal (codex-rs turn_processor.rs, turn_start_inner). The
+     carrier goes in by thread/inject_items, which nothing counts that way,
+     so its address form cannot shorten what was refused; it would only take
+     the receipts out of the model's sight. That refusal goes to memory
+     alone. *)
   let on_memory_capacity_refusal =
-    Keeper_client_tool_outbox.run_carrier_reprojection retained_results
-      ~then_:
-        (Option.value on_memory_capacity_refusal
-           ~default:(fun ~refusal:_ -> Ok Keeper_memory_delivery_reprojection.Unchanged))
+    let memory =
+      Option.value on_memory_capacity_refusal
+        ~default:(fun ~refusal:_ -> Ok Keeper_memory_delivery_reprojection.Unchanged)
+    in
+    let carrier_then_memory =
+      Keeper_client_tool_outbox.run_carrier_reprojection retained_results ~then_:memory
+    in
+    fun ~refusal ->
+      match Keeper_turn_driver_try_provider.size_refusal refusal with
+      | Some Keeper_turn_driver_try_provider.Window_exceeded -> carrier_then_memory ~refusal
+      | Some Keeper_turn_driver_try_provider.Body_refused | None -> memory ~refusal
   in
   let result =
     Eio.Switch.run (fun result_scope ->

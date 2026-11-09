@@ -591,6 +591,22 @@ val default_context_overflow_shrink_capacity : capacity:int -> int
     runtime-specific caller may clamp this target further to structural
     message boundaries. *)
 
+(** The two typed refusals that say the request outgrew what carries it. *)
+type size_refusal =
+  | Window_exceeded
+      (** The provider's context overflow. It counts everything the model
+          reads. *)
+  | Body_refused
+      (** The provider's refusal of the request body. It counts the request
+          it refused, which leaves out what a lane sent by another request:
+          Codex measures only the [turn/start] input, not the items sent by
+          [thread/inject_items] ([Keeper_codex_runtime]). *)
+
+val size_refusal : Agent_core.Error.t -> size_refusal option
+(** [None] for every other refusal, among them one whose only size signal is
+    its sentence. {!context_overflow_shrink_sequence} answers exactly the
+    refusals this names. *)
+
 val context_overflow_shrink_sequence :
   ?shrink_capacity:
     (capacity:int -> default_capacity:int -> int) ->

@@ -174,13 +174,14 @@ blob은 하나다. 바이트는 `Inline` 글 그대로다.
 - 묶음 hook이 `Unchanged`면 memory hook을 부른다.
 - memory hook도 이미 이런 식으로 이어져 있다. host memory 다음에 recall block이다(`keeper_run_tools_hooks.ml:707-713`).
 - 묶음을 먼저 둔다. receipt 개수만큼 길어지는 쪽을 먼저 줄여서, 넘침이 묶음 탓이면 다시 보내기 한 번으로 끝나게 한다.
+- Codex는 `input_too_large`(`Body_refused`)에서 묶음 hook을 건너뛰고 memory hook만 부른다. 이 거절이 재는 입력에 묶음이 없다(§7).
 
 ### 5.2 다시 보내기
 
 - Claude Code와 Codex의 `on_memory_retry`는 `resolve_input_rejected_for_shrink_retry`다(`keeper_claude_code_runtime.ml:681-710`).
   - Claude Code의 크기 거절과 Codex의 `contextWindowExceeded`는 `Input_rejected Bootstrap_floor_exceeded`로 기록된다. `on_memory_retry`가 이것을 `Restart_fresh`로 푼다.
-  - Codex의 `input_too_large`는 `Protocol_failed`로 기록된다(`keeper_codex_runtime.ml:826-828`). `on_memory_retry`는 아무것도 하지 않고, 다음 `plan_claim`이 fresh plan을 낸다(`keeper_official_client_session_store.ml:1520-1532`).
-  - 어느 쪽이든 다시 보내는 요청은 fresh Start다.
+  - Codex의 `input_too_large`에는 묶음 hook이 답하지 않는다(§5.1, §7).
+  - 다시 보내는 요청은 fresh Start다.
 - 같은 capacity로 다시 보내니 history는 그대로이고 묶음만 짧아진다.
 - 그다음 거절은 history를 줄인다. 그 view와 floor에도 `By_address`가 실린다.
 - floor는 history만 재니(§3) floor 계산은 그대로 맞다.
@@ -228,7 +229,10 @@ hook은 typed 크기 거절에만 불린다. 거절 문장을 읽어 크기 거�
 **닿는 경로**
 
 - Claude Code: `prompt_too_long`이 `Context_window_exceeded`로 온다. Start와 Resume에서 닿고, Gate continuation에서는 닿지 않는다(§5.4).
-- Codex: `turn/start`가 돌려준 `contextWindowExceeded`와 `input_too_large`다.
+- Codex: `turn/start`가 돌려준 `contextWindowExceeded`다.
+  - `input_too_large`도 hook에 닿지만 묶음 단계는 건너뛴다. memory hook만 부른다(`keeper_codex_runtime.ml`의 `run`).
+  - app-server는 `turn/start` 입력, 곧 이번 턴 블록과 goal의 글자 수만 잰다. `thread/inject_items`에는 글자 수 검사가 없다(openai/codex 8f2c15c3, `codex-rs/app-server/src/request_processors/turn_processor.rs`의 `turn_start_inner`, `thread_inject_items_response_inner`).
+  - 묶음은 `thread/inject_items`로 간다. 꼴을 바꿔도 거절된 입력은 줄지 않고, receipt만 모델 눈에서 빠진다.
 - agent_core: provider가 parse 경계에서 크기 거절을 typed로 줄 때만 닿는다.
 
 **닿지 않는 경로** (이슈로 남긴다. §12의 4)

@@ -2981,16 +2981,25 @@ let default_context_overflow_shrink_capacity ~capacity =
   capacity / context_overflow_shrink_divisor
 ;;
 
-(* The refusals that say the request outgrew what carries it: the provider's
-   context overflow and the provider's refusal of the request body.
-   Each is answered by moving the carried front, never by rotating first: a
-   shorter range of the SAME conversation can still answer the same turn.
+(* The refusals that say the request outgrew what carries it. Each is
+   answered by moving the carried front, never by rotating first: a shorter
+   range of the SAME conversation can still answer the same turn.
+   - [Window_exceeded], the provider's context overflow, counts everything
+     the model reads.
+   - [Body_refused], the provider's refusal of the request body, counts the
+     request it refused. A lane that sends part of its input by another
+     request leaves that part out ([Keeper_codex_runtime]).
    Enumerated so a new variant forces a decision here instead of a silent
-   [false]. *)
-let is_size_refusal = function
-  | Agent_core.Error.Api (ContextOverflow _)
+   [None]. *)
+type size_refusal =
+  | Window_exceeded
+  | Body_refused
+
+let size_refusal = function
+  | Agent_core.Error.Api (ContextOverflow _) -> Some Window_exceeded
   | Agent_core.Error.Api
-      (InvalidRequest { reason = Request_body_refused_by_provider _; _ }) -> true
+      (InvalidRequest { reason = Request_body_refused_by_provider _; _ }) ->
+    Some Body_refused
   (* A refusal whose cause agent core does not model names no size. Tool
      schema errors, unsupported parameters and unreadable images arrive
      here too, and a shorter range answers none of them: every retry would
@@ -3030,7 +3039,10 @@ let is_size_refusal = function
   | Agent_core.Error.Orchestration _
   | Agent_core.Error.Media _
   | Agent_core.Error.Internal _
-  | Agent_core.Error.Internal_carried _ -> false
+  | Agent_core.Error.Internal_carried _ -> None
+;;
+
+let is_size_refusal error = Option.is_some (size_refusal error)
 ;;
 
 (* The shrink-retry policy is expressed over an injected [attempt] callback

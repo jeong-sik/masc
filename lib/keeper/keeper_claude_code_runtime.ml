@@ -680,21 +680,26 @@ module For_testing = struct
   let unbounded_capacity_bytes = unbounded_model_input_capacity_bytes
 end
 
-(* RFC claude-code-context-overflow-bounded-restart §6.3: the same-run shrink
-   retry is the one re-entry an input rejection admits. [on_shrink_retry]
-   fires only after the sequence verified every authority condition — a typed
-   observation-free overflow (the only shape mapped to [Api ContextOverflow]
-   in [claude_error_to_core_error]) and a strictly smaller next capacity — so
-   consuming the just-written [Input_rejected] recovery with
-   an explicit recovery resolution cannot bypass the fence: a
-   next-cycle replay never passes through that callback, and [Effect_fenced]
-   recoveries are never resolved here because an effect-observed overflow is
-   never retry-safe. A failed resolution is not retried here; the next
-   attempt's claim surfaces the refusal instead. *)
+(* RFC claude-code-context-overflow-bounded-restart §6.3: the same-run
+   retries of the shrink sequence are the re-entries an input rejection
+   admits. Both callbacks fire only after the sequence verified every
+   authority condition: a typed observation-free overflow (the only shape
+   mapped to [Api ContextOverflow] in [claude_error_to_core_error]).
+   [on_shrink_retry] fires once a strictly smaller next capacity exists.
+   [on_memory_retry] fires at the same capacity once the capacity-refusal
+   hook made the request strictly shorter: the retained-result carrier's
+   address form, or a smaller memory delivery. So consuming the
+   just-written [Input_rejected] recovery with an explicit recovery
+   resolution cannot bypass the fence: a next-cycle replay never passes
+   through these callbacks, and [Effect_fenced] recoveries are never
+   resolved here because an effect-observed overflow is never retry-safe. A
+   failed resolution is not retried here; the next attempt's claim surfaces
+   the refusal instead. *)
 (* The retry is always a fresh start. A resume sends the vendor session the
-   same prompt at every capacity, so only a start carries the shrunk range;
-   an attempt bound to its previous session (a Gate continuation) is never
-   authorized to shrink-retry, see [context_overflow_retry_safe]. *)
+   same prompt however far the history shrinks, so only a start carries the
+   shrunk range; an attempt bound to its previous session (a Gate
+   continuation) is never authorized to shrink-retry, see
+   [context_overflow_retry_safe]. *)
 let resolve_input_rejected_for_shrink_retry ~base_path ~keeper_name ~runtime_id ()
   =
   match Session_store.load ~base_path ~keeper_name with

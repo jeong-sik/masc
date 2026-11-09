@@ -13,8 +13,9 @@
    pending [Connector_attention] stimulus for the same conversation into the
    same turn, in arrival order (RFC-0377 S3) — and the durable queue
    lifecycle applies to every admitted member, not only the primary: a turn
-   completion acks the whole batch, a turn failure leaves the whole batch
-   queued (no partial ack). *)
+   completion acknowledges the delivered connector batch and a turn failure
+   retains it. HITL cohorts additionally require each input's own continuation
+   receipt before its exact queue selection is acknowledged. *)
 
 open Alcotest
 open Masc
@@ -985,23 +986,17 @@ let test_failed_connector_batch_skips_shared_store_without_starving_other_work (
        |> Result.map Q.length |> Result.value ~default:(-1)))
 ;;
 
-let test_one_intake_admits_only_one_hitl_resolution () =
-  with_ctx "hitl-exact-replay-batch" (fun ~base_path ~keeper_name ~meta ~ctx ->
-    (* Intake reconciles approved wakes against the authoritative Gate store.
-       Exercise the real submit/resolve path, including its durable enqueue. *)
-    (match
-       Keeper_owner_registry.install_from_store
-         ~sw:ctx.sw ~operation_runner:None ~on_turn_slot_released:None ctx.config
-     with
-     | Ok _ -> ()
-     | Error error -> fail (Keeper_owner_registry.install_error_to_string error));
-    (match Keeper_owner_registry.create_meta ~base_path meta with
-     | Ok (Some _) -> ()
-     | Ok None -> fail "HITL fixture metadata disappeared"
-     | Error error -> fail (Keeper_owner_registry.command_error_to_string error));
+let with_hitl_ctx keeper_name f =
+  with_ctx keeper_name (fun ~base_path ~keeper_name ~meta ~ctx ->
+    start_owner ~ctx ~base_path ~meta ~operation_runner:None ~on_turn_slot_released:None;
     (match Keeper_approval_queue.install_persistence ~base_path with
      | Ok _ -> ()
-     | Error error -> fail (Masc.Keeper_approval_queue_result.install_error_to_string error));
+     | Error error -> fail (Keeper_approval_queue_result.install_error_to_string error));
+    f ~base_path ~keeper_name ~meta ~ctx)
+;;
+
+let test_model_issued_hitl_continues_individually () =
+  with_hitl_ctx "hitl-model-issued-singleton" (fun ~base_path ~keeper_name ~meta ~ctx ->
     let first_id = approve_grant_exn ~base_path ~keeper_name ~request:"first" in
     let second_id = approve_grant_exn ~base_path ~keeper_name ~request:"second" in
     let first, second =
@@ -1026,13 +1021,13 @@ let test_one_intake_admits_only_one_hitl_resolution () =
         ~meta_after_triage:meta
         ~pending_board_events:[]
     in
-    check int "one turn owns one exact HITL grant" 1 (Keeper_heartbeat_source_batch.count intake.source_batch);
+    check int "a model-issued operation continues individually" 1 (Keeper_heartbeat_source_batch.count intake.source_batch);
     check
       (list string)
-      "the oldest ready approval is the only admitted source"
+      "the first model-issued operation fences the next approval"
       [ first.post_id ]
       (List.map (fun (source : Q.stimulus) -> source.post_id) (Keeper_heartbeat_source_batch.stimuli intake.source_batch));
-    check int "turn completion can ACK only that exact approval" 1
+    check int "only the admitted source reaches settlement" 1
       (List.length (Keeper_heartbeat_source_batch.selections intake.source_batch));
     (match (Keeper_heartbeat_source_batch.selections intake.source_batch) with
      | [ selection ] ->
@@ -1076,6 +1071,157 @@ let test_one_intake_admits_only_one_hitl_resolution () =
       "the next turn admits the remaining exact approval"
       [ second.post_id ]
       (List.map (fun (source : Q.stimulus) -> source.post_id) (Keeper_heartbeat_source_batch.stimuli next.source_batch)))
+;;
+
+let hitl_ok = function Ok value -> value | Error detail -> fail detail
+
+let approve_host_replay ~base_path ~keeper_name ~channel request =
+  let tool_name = Keeper_gate.network_read_gate_operation in
+  let input = `Assoc
+    [ "capability", `String "web_search"
+    ; "input", `Assoc [ "query", `String request ] ] in
+  ignore (Keeper_tool_in_process_runtime.network_read_replay_of_gate_input input |> hitl_ok);
+  let submission = Keeper_approval_queue.submit_pending
+    ~origin:Keeper_approval_origin.unavailable ~base_path ~keeper_name ~tool_name ~input
+    ~call_summary:None ~continuation_channel:channel ()
+    |> Result.map_error Keeper_approval_queue_result.storage_error_to_string |> hitl_ok in
+  ignore (Keeper_approval_queue.resolve_with_policy ~base_path ~id:submission.approval_id
+    ~decision:Keeper_approval_queue_rules_types.Decision.Approve
+    ~source:Keeper_approval_queue_rules_types.Human_operator ()
+    |> Result.map_error Keeper_approval_queue.resolve_error_to_string |> hitl_ok);
+  submission.approval_id, tool_name, input
+;;
+
+let hitl_id (source : Q.stimulus) = match source.payload with
+  | Q.Hitl_resolved resolution -> resolution.approval_id
+  | _ -> fail "expected an actual HITL queue source"
+;;
+
+let hitl_queue ~base_path ~keeper_name =
+  Keeper_registry_event_queue.snapshot_result ~base_path keeper_name |> hitl_ok |> Q.to_list
+;;
+
+let consume_host_replay_fixture ~base_path ~keeper_name (id, tool_name, input) =
+  ignore (Keeper_approval_queue.consume_approved_resolution ~base_path ~id ~keeper_name ~tool_name ~input
+    |> Result.map_error Keeper_approval_queue_result.grant_error_to_string |> hitl_ok);
+  let artifact = Keeper_gate_replay.For_testing.persist_replay_artifact ~base_path
+    ("durable fixture result for " ^ id) |> hitl_ok in
+  ignore (Keeper_approval_queue.record_consumed_resolution_replay ~base_path ~id
+    ~outcome:(Keeper_approval_queue_result.Replay_applied artifact)
+    |> Result.map_error Keeper_approval_queue_result.grant_error_to_string |> hitl_ok)
+;;
+
+let poison_only_approval_key ~base_path ~keeper_name approval_id =
+  let path = Keeper_chat_store.chat_path ~base_dir:base_path ~keeper_name in
+  let contents = In_channel.with_open_bin path In_channel.input_all in
+  let duplicate = String.split_on_char '\n' contents |> List.find_map (fun line ->
+    if String.equal line "" then None else
+    let fields = Yojson.Safe.from_string line |> Yojson.Safe.Util.to_assoc in
+    match Keeper_chat_delivery_identity.delivery_provenance_of_fields fields with
+    | Ok (Some { delivery_key = Keeper_chat_delivery_identity.Approval_lifecycle id
+               ; transcript_slot = Keeper_chat_delivery_identity.Approval_request })
+      when String.equal approval_id (Keeper_chat_delivery_identity.Request_id.to_string id) ->
+      Some (Yojson.Safe.to_string (`Assoc
+        (("id", `String ("duplicate-" ^ approval_id)) :: List.remove_assoc "id" fields)))
+    | _ -> None) |> Option.get in
+  let channel = open_out_gen [ Open_wronly; Open_append; Open_binary ] 0o600 path in
+  Fun.protect ~finally:(fun () -> close_out channel)
+    (fun () -> output_string channel (duplicate ^ "\n"))
+;;
+
+let test_fresh_hitl_cohort_settles_and_acks_each_input () =
+  List.iter (fun case ->
+    with_hitl_ctx "hitl-fresh-cohort-ack" (fun ~base_path ~keeper_name ~meta ~ctx ->
+      let channel = Keeper_continuation_channel.unrouted "cohort fixture" in
+      let first = approve_host_replay ~base_path ~keeper_name ~channel "first request" in
+      let second = approve_host_replay ~base_path ~keeper_name ~channel "second request" in
+      let first_id, _, _ = first and second_id, _, _ = second in
+      let intake = Keeper_heartbeat_stimulus_intake.heartbeat_event_intake
+        ~ctx ~meta_after_triage:meta ~pending_board_events:[] in
+      let stimuli = Keeper_heartbeat_source_batch.stimuli intake.source_batch in
+      check (list string) "one turn admits both fresh exact inputs in queue order"
+        [ first_id; second_id ] (List.map hitl_id stimuli);
+      let batch = Keeper_heartbeat_loop.For_testing.select_hitl_resolutions
+        ~base_path ~keeper_name ~stimuli
+        ~peek:(fun () -> fail "a peek must never add to an admitted HITL vector")
+        |> Result.map_error Keeper_hitl_resolution_batch.join_error_to_string |> hitl_ok in
+      let third_id, _, _ = approve_host_replay ~base_path ~keeper_name ~channel "later request" in
+      consume_host_replay_fixture ~base_path ~keeper_name first;
+      (match case with
+       | `Second_unconsumed -> ()
+       | `Both_ready | `First_projection_fails -> consume_host_replay_fixture ~base_path ~keeper_name second);
+      (match case with
+       | `First_projection_fails -> poison_only_approval_key ~base_path ~keeper_name first_id
+       | `Both_ready | `Second_unconsumed -> ());
+      let projections = Keeper_heartbeat_loop.For_testing.settle_hitl_continuations
+        ~base_path ~keeper_name ~cycle_outcome:(Some (completed_outcome meta))
+        ~resolutions:(Keeper_hitl_resolution_batch.resolutions batch) in
+      check (list string) "each input keeps its own projection result"
+        [ first_id; second_id ]
+        (List.map (fun ((resolution : Q.hitl_resolution), _) -> resolution.approval_id) projections);
+      let can_ack = Keeper_heartbeat_loop.For_testing.hitl_selection_has_recorded_continuation
+        ~projections in
+      let selected = Keeper_heartbeat_source_batch.selections intake.source_batch
+        |> List.filter can_ack in
+      let expected_acked = match case with
+        | `Both_ready -> [ first_id; second_id ]
+        | `Second_unconsumed -> [ first_id ]
+        | `First_projection_fails -> [ second_id ] in
+      check (list string) "only each input's recorded continuation authorizes its ACK"
+        expected_acked (List.map (fun (selection : Keeper_event_queue_state.pending_selection) ->
+          hitl_id selection.source) selected);
+      List.iter (fun selection -> match Keeper_registry_event_queue.terminalize_pending_turn_completed_result
+          ~base_path keeper_name ~applied_at:1000.0 ~selection with
+        | Ok (Keeper_registry_event_queue.Turn_source_acked
+            (Keeper_registry_event_queue.Acked _ | Already_acked _)) -> ()
+        | Error detail -> fail detail
+        | Ok _ -> fail "an exact admitted source failed to ACK") selected;
+      let expected_pending = match case with
+        | `Both_ready -> [ third_id ]
+        | `Second_unconsumed -> [ second_id; third_id ]
+        | `First_projection_fails -> [ first_id; third_id ] in
+      check (list string) "failed, unconsumed and unselected wakes remain durable"
+        expected_pending (hitl_queue ~base_path ~keeper_name |> List.map hitl_id)))
+    [ `Both_ready; `Second_unconsumed; `First_projection_fails ]
+;;
+
+let test_incompatible_hitl_fences_the_later_ready_suffix () =
+  with_hitl_ctx "hitl-route-fence" (fun ~base_path ~keeper_name ~meta ~ctx ->
+    let no_reply = Keeper_continuation_channel.unrouted "no reply" in
+    let routed = Keeper_continuation_channel.discord ~guild_id:None ~channel_id:"other-room"
+      ~parent_channel_id:None ~thread_id:None ~reply_to_message_id:"original-message"
+      ~user_id:"operator" () |> hitl_ok in
+    let first, _, _ = approve_host_replay ~base_path ~keeper_name ~channel:no_reply "first" in
+    ignore (approve_host_replay ~base_path ~keeper_name ~channel:routed "incompatible second");
+    ignore (approve_host_replay ~base_path ~keeper_name ~channel:no_reply "compatible third");
+    let intake = Keeper_heartbeat_stimulus_intake.heartbeat_event_intake
+      ~ctx ~meta_after_triage:meta ~pending_board_events:[] in
+    check (list string) "a later matching route cannot pass an incompatible ready input"
+      [ first ] (Keeper_heartbeat_source_batch.stimuli intake.source_batch |> List.map hitl_id);
+    check int "intake alone consumes no exact grant wake" 3
+      (List.length (hitl_queue ~base_path ~keeper_name)))
+;;
+
+let test_changed_admitted_hitl_vector_is_not_replaced_by_a_peek () =
+  with_hitl_ctx "hitl-vector-revalidation" (fun ~base_path ~keeper_name ~meta ~ctx ->
+    let channel = Keeper_continuation_channel.unrouted "revalidation fixture" in
+    let first = approve_host_replay ~base_path ~keeper_name ~channel "first" in
+    let second_id, _, _ = approve_host_replay ~base_path ~keeper_name ~channel "second" in
+    let intake = Keeper_heartbeat_stimulus_intake.heartbeat_event_intake
+      ~ctx ~meta_after_triage:meta ~pending_board_events:[] in
+    check int "both fresh inputs were actually admitted" 2
+      (Keeper_heartbeat_source_batch.count intake.source_batch);
+    consume_host_replay_fixture ~base_path ~keeper_name first;
+    (match Keeper_heartbeat_loop.For_testing.select_hitl_resolutions ~base_path ~keeper_name
+      ~stimuli:(Keeper_heartbeat_source_batch.stimuli intake.source_batch)
+      ~peek:(fun () -> fail "a peek must not repair an incompatible actual vector") with
+     | Error _ -> () | Ok _ -> fail "changed actual input vector bypassed revalidation");
+    let delivery = Keeper_approval_queue.approved_resolution_delivery ~base_path ~id:second_id
+      |> Result.map_error Keeper_approval_queue_result.grant_error_to_string |> hitl_ok in
+    check bool "the unstarted sibling grant remains untouched" true
+      (delivery.state = Keeper_approval_queue_result.Resolution_unconsumed && delivery.replay_outcome = None);
+    check int "revalidation acknowledges neither wake" 2
+      (List.length (hitl_queue ~base_path ~keeper_name)))
 ;;
 
 (* Adversarial review P1-2: the turn-completion/failure batch disposition
@@ -1840,9 +1986,15 @@ let () =
         ; test_case "no-delivery schedules preserve connector reply routes in either queue order" `Quick
             test_unrouted_schedule_does_not_take_a_connector_reply_route
         ; test_case
-            "admits only one exact HITL resolution per turn"
+            "model-issued HITL resolutions continue individually"
             `Quick
-            test_one_intake_admits_only_one_hitl_resolution
+            test_model_issued_hitl_continues_individually
+        ; test_case "fresh HITL cohorts settle and acknowledge each exact input" `Quick
+            test_fresh_hitl_cohort_settles_and_acks_each_input
+        ; test_case "incompatible HITL input fences its ready suffix" `Quick
+            test_incompatible_hitl_fences_the_later_ready_suffix
+        ; test_case "changed admitted HITL vector cannot fall back to a peek" `Quick
+            test_changed_admitted_hitl_vector_is_not_replaced_by_a_peek
         ; test_case "missing connector file survives other completion and restoration" `Quick
             (test_unread_connector_sources_survive_other_completed_work ~failure:`Missing_file)
         ; test_case "missing connector rows survive other completion and restoration" `Quick

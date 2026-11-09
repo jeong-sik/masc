@@ -4103,7 +4103,7 @@ let test_tool_execute_raw_cmd_requires_typed_shell_ir () =
            let json = Yojson.Safe.from_string raw in
            check string "cmd is refused by the parser, which lists command"
              "$.cmd is not a supported typed Execute field; accepted: argv, \
-              command, shell, cwd, timeout_sec, intent"
+              command, shell, cwd, timeout_sec, intent, run_in_background"
              Yojson.Safe.Util.(member "error" json |> to_string);
            check bool "typed marker" true
              Yojson.Safe.Util.(member "typed" json |> to_bool))

@@ -231,9 +231,12 @@ val reconcile_spent_selection
     batch is projected. Other connector conversations remain queued. At most
     one [Hitl_resolved] is eligible because a turn carries one exact cycle grant.
     Later ready HITL resolutions remain queued for their own replay turns.
-    A scheduled occurrence owns its own work scope: it is never batched with
-    another occurrence or unrelated attention. Its exact durable source remains
-    the continuation input until the owning turn completes or it is withdrawn.
+    Scheduled requests without result delivery share the unrouted general batch;
+    they cannot remove another source's captured reply route. Requests
+    with result delivery share a batch only with scheduled requests for the same
+    exact reply route, preserving thread and reply-message coordinates. Every
+    exact occurrence remains continuation input until the turn completes or it
+    is withdrawn; batching does not retire a request based on its message text.
     [source_batch] carries all exact admitted selections. Payloads and counts
     are derived from that batch. [diagnostic_selection] retains a withdrawn
     or failed source separately; it is never an admitted batch member merely

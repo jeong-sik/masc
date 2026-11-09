@@ -2384,10 +2384,10 @@ let render_keeper_axes (state : state) =
        let fleet = Masc_tui_keeper_strip.fleet_cells ~now:now_unix ~grid
            ~wakes:(fun row -> Masc_tui_keeper_axis.wake_strip state ~now:now_unix
              ~ahead:grid.side_cells ~keeper_name:row.Keeper_list_model.keeper.Tui_decode.k_name) all_rows in
-       box_line buf cols (grid_line grid
+       box_line buf cols ((grid_line grid
          { gutter = String.make Grid.gutter_cells ' '; name = fit_width fleet.name grid.name_cells
-         ; pulse = fleet.pulse; now_cell = grid_blank_now; strip = fleet.strip
-         ; due = fit_width fleet.due Grid.due_cells; right = String.make grid.mem_cells ' ' }));
+         ; pulse = fleet.pulse; now_cell = still_row grid_blank_now; strip = fleet.strip
+         ; due = fit_width fleet.due Grid.due_cells; right = String.make grid.mem_cells ' ' }).text));
   Option.iter
     (fun message -> box_line buf cols
       (Theme.warn () ^ "  preferences: " ^ Terminal_text.single_line message ^ Ansi.reset))

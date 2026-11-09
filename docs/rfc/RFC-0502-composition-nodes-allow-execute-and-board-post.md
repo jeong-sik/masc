@@ -1,14 +1,14 @@
 ---
 rfc: "0502"
 title: "Keeper가 쓰는 합성의 노드 집합을 Execute와 게시까지 넓힌다"
-status: Draft
+status: Implemented
 created: 2026-11-06
-updated: 2026-11-06
+updated: 2026-11-09
 author: github-pr-checker
 supersedes: []
 superseded_by: null
 related: ["keeper-writes-own-compositions"]
-implementation_prs: []
+implementation_prs: ["#50328"]
 ---
 
 # RFC-0502 — 합성 노드 집합에 Execute와 게시를 허용한다

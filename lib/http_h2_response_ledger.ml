@@ -1,7 +1,5 @@
 type refusal = Capacity_exhausted | Request_closed
 exception Unbound_request
-exception Response_capacity_exhausted
-exception Response_writer_closed
 
 type t = { capacity : int; mutable used : int; mutex : Stdlib.Mutex.t }
 type lease_state = Reserved | Released

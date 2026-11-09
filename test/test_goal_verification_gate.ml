@@ -1643,7 +1643,10 @@ let test_goal_cache_scope_tracks_the_resolved_store () =
   let base = temp_dir () in
   let first = Filename.concat base "first" and second = Filename.concat base "second" in
   let link = Filename.concat base ".masc" in
-  Fun.protect ~finally:(fun () -> (try Unix.unlink link with Unix.Unix_error _ -> ()); rm_rf base)
+  (* [rm_rf] classifies with [lstat], so the link is removed as a link and the
+     [first]/[second] targets it points at stay inside [base] too. Nothing here
+     has to unlink it first, and no leftover depends on that ordering. *)
+  Fun.protect ~finally:(fun () -> rm_rf base)
     (fun () ->
       Unix.mkdir first 0o755;
       Unix.mkdir second 0o755;

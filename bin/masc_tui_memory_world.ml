@@ -4,12 +4,23 @@ type inventory = Wire.inventory
 
 type request = unit Masc_tui_fetched.request
 
+(* Why the line has no fresh inventory. [Suspended] is the one cause this module
+   makes itself: the workspace stopped being confirmed and the read in flight
+   was retired. Every answer that failed reaches [complete] as the text the
+   shared read path built (launcher precondition, transport, HTTP status,
+   missing receipt, decode). Those layers hand the same string to every
+   consumer, so the text is kept as received and is never read to tell one
+   cause from another. *)
+type failure =
+  | Suspended
+  | Request_failed of string
+
 (* [not_before] is the monotonic time before which no read starts. An answer,
    good or failed, sets it, so a down server is asked as rarely as a healthy
    one. A read that was retired without an answer sets nothing, which is why
    reading again once the workspace is confirmed does not wait. *)
 type t =
-  { fetched : (unit, inventory) Masc_tui_fetched.t
+  { fetched : (unit, inventory, failure) Masc_tui_fetched.source
   ; not_before : float option
   }
 
@@ -35,12 +46,17 @@ let start ~now t =
 let complete ~next_read_at t request result =
   if Masc_tui_fetched.is_current ~equal:Unit.equal t.fetched request
   then
-    { fetched = Masc_tui_fetched.complete ~equal:Unit.equal t.fetched request result
+    { fetched =
+        Masc_tui_fetched.complete ~equal:Unit.equal t.fetched request
+          (Result.map_error (fun text -> Request_failed text) result)
     ; not_before = Some next_read_at
     }
   else t
 
-let suspend t = { t with fetched = Masc_tui_fetched.suspend t.fetched }
+(* A retry over a failure keeps that failure's cause when it is retired: the
+   retry never answered, so it has nothing to add. A refresh over an inventory
+   takes [Suspended] as the cause of its stale mark. *)
+let suspend t = { t with fetched = Masc_tui_fetched.suspend_with ~reason:Suspended t.fetched }
 
 (* [Masc_tui_fetched.clear] keeps the generation counter, so a reply to a read
    made before this cannot pass for the next one. *)
@@ -49,16 +65,17 @@ let clear t = { fetched = Masc_tui_fetched.clear t.fetched; not_before = None }
 type reading =
   | Not_read
   | Reading
-  | Loaded of { world : inventory; refresh_failed : bool }
-  | Read_failed
+  | Loaded of { world : inventory; refresh_failure : failure option }
+  | Read_failed of failure
 
 let reading t =
   match Masc_tui_fetched.view_for ~equal:Unit.equal t.fetched ~key:() with
   | Masc_tui_fetched.Absent -> Not_read
   | Masc_tui_fetched.Loading -> Reading
-  | Masc_tui_fetched.Ready world -> Loaded { world; refresh_failed = false }
-  | Masc_tui_fetched.Stale (world, _) -> Loaded { world; refresh_failed = true }
-  | Masc_tui_fetched.Failed _ -> Read_failed
+  | Masc_tui_fetched.Ready world -> Loaded { world; refresh_failure = None }
+  | Masc_tui_fetched.Stale (world, failure) ->
+    Loaded { world; refresh_failure = Some failure }
+  | Masc_tui_fetched.Failed failure -> Read_failed failure
 
 (* The words the line and the sheet share are spelled here once, so the screen
    and the sheet cannot name a state two ways. The briefing statuses are the
@@ -70,6 +87,8 @@ let conflict_noun = "conflict"
 let briefing_word = "briefing"
 let building_word = "building"
 let read_failed_word ~ko = if ko then "읽기 실패" else "read failed"
+(* The Work screen words an unconfirmed workspace the same way. *)
+let suspended_word ~ko = if ko then "워크스페이스 미확인" else "workspace unconfirmed"
 let no_ledger_word ~ko = if ko then "장부 없음" else "no ledger"
 let label ~ko = if ko then "월드:" else "World:"
 
@@ -107,11 +126,61 @@ let value_clauses ~ko = function
        | None -> []
        | Some pass -> [ building_clause ~ko pass ])
 
-let clauses ~ko = function
+(* Below this many free cells a cut text is a few letters and the mark, which
+   names nothing, so the row goes without it. Ten keeps a head such as
+   "HTTP 503:" whole beside the mark. *)
+let min_cause_cells = 10
+
+let cut_to ~cells text =
+  if Masc_tui_message_layout.fits_within_cells ~max_cells:cells text
+  then text
+  else (
+    let head, _ =
+      Masc_tui_message_layout.split_at_cells
+        text
+        (cells - Masc_tui_message_layout.cut_mark_cells)
+    in
+    String.trim head ^ Masc_tui_message_layout.cut_mark)
+
+(* How a cause is drawn in the [cells] a row has left. The fixed word is drawn
+   whole or not at all, since "workspace..." names nothing. The text of a failed
+   answer is put on one printable line and cut, because it is the one part of
+   the line whose length this module does not choose. *)
+let cause_clause ~ko ~cells = function
+  | Suspended ->
+    let word = suspended_word ~ko in
+    if Masc_tui_message_layout.fits_within_cells ~max_cells:cells word
+    then Some word
+    else None
+  | Request_failed text ->
+    let text = String.trim (Masc.Tui_terminal_text.sanitize_terminal_text text) in
+    if text = "" || cells < min_cause_cells then None else Some (cut_to ~cells text)
+
+(* The cause goes after [fixed] on the row the packed clauses end on, in what
+   that row has left, so it never adds a row. The Memory list works out its
+   height from the header's rows, and a cause of any length must not move it. *)
+let with_cause ~ko ~room failure fixed =
+  let last_row_cells =
+    List.fold_left
+      (fun _ row -> Masc_tui_message_layout.display_width row)
+      0
+      (Masc_tui_message_layout.pack_clauses ~max_cells:room fixed)
+  in
+  let cells =
+    room
+    - last_row_cells
+    - Masc_tui_message_layout.display_width Masc_tui_message_layout.clause_separator
+  in
+  match cause_clause ~ko ~cells failure with
+  | Some clause -> fixed @ [ clause ]
+  | None -> fixed
+
+let clauses ~ko ~room = function
   | Not_read | Reading -> [ unknown ]
-  | Read_failed -> [ unknown; read_failed_word ~ko ]
-  | Loaded { world; refresh_failed } ->
-    value_clauses ~ko world @ (if refresh_failed then [ read_failed_word ~ko ] else [])
+  | Read_failed failure -> with_cause ~ko ~room failure [ unknown; read_failed_word ~ko ]
+  | Loaded { world; refresh_failure = None } -> value_clauses ~ko world
+  | Loaded { world; refresh_failure = Some failure } ->
+    with_cause ~ko ~room failure (value_clauses ~ko world @ [ read_failed_word ~ko ])
 
 (* What each word does not say, because the server does not say it either
    (RFC-0511 W3): the counts are the curator's records, [current] is a match
@@ -122,9 +191,9 @@ let legend =
   [ ( unknown
     , "world line: not read yet or still being read; nothing is known, and it is not zero" )
   ; ( read_failed_word ~ko:false
-    , "world line: the inventory could not be read just now, because the request failed or \
-       reading is suspended until the workspace is confirmed; any count beside it is from \
-       an earlier read" )
+    , "world line: the inventory could not be read just now; any count beside it is from \
+       an earlier read. After it, why: workspace unconfirmed (reading is suspended), or \
+       the failure as received, cut with … or left out when the row is short" )
   ; ( no_ledger_word ~ko:false
     , "world line: the server found no curator ledger file when it looked; that is a \
        value, not an unknown" )

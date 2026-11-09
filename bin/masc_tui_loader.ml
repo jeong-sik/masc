@@ -1570,12 +1570,15 @@ let load_memory_health_row ~(host : string) ~(port : int) ~(keeper : string) :
   | Ok json -> Masc.Tui_decode_memory_health.decode_memory_health_row ~keeper json
 
 (** The workspace memory world (RFC-0511 D2c). The answer is one small object,
-    so it is decoded where it is read and not handed to the decode domain. *)
+    so it is decoded where it is read and not handed to the decode domain. A
+    failure goes up as the text it was built with: the world line draws it
+    after "read failed", where a prefix naming the read would repeat the
+    line's own label. *)
 let load_memory_world ~(host : string) ~(port : int) :
     (Masc.Tui_decode_workspace_memory.inventory, string) result =
-  match fetch_workspace_memory_inventory ~host ~port with
-  | Error err -> Error ("memory world load failed: " ^ err)
-  | Ok json -> Masc.Tui_decode_workspace_memory.decode_inventory json
+  Result.bind
+    (fetch_workspace_memory_inventory ~host ~port)
+    Masc.Tui_decode_workspace_memory.decode_inventory
 
 let memo_memory_facts = json_memo ()
 

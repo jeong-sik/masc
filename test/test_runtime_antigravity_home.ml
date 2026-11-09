@@ -1,3 +1,7 @@
+(* A start of Antigravity, by the access the suite publishes first. *)
+let antigravity_host () =
+  Masc_test_deps.host_account Runtime_account_access.Antigravity
+
 open Alcotest
 
 let with_temp_root f =
@@ -43,7 +47,7 @@ let test_prepares_private_home_with_oauth_seed () =
   let oauth_source = Filename.concat runtime_root "operator-oauth-token" in
   write_file ~mode:0o600 oauth_source (Masc_test_deps.antigravity_oauth_fixture "operator-secret-canary");
   let layout =
-    Runtime_antigravity_home.prepare
+    Runtime_antigravity_home.prepare ~host:(antigravity_host ())
       ~runtime_root
       ~owner_leaf:"keeper-alpha"
       ~oauth_source
@@ -124,7 +128,7 @@ let test_pattern_syntax_in_managed_home_is_refused () =
   Unix.mkdir runtime_root 0o700;
   let source = Filename.concat root "source" in
   write_file ~mode:0o600 source (Masc_test_deps.antigravity_oauth_fixture "synthetic");
-  match Runtime_antigravity_home.prepare ~runtime_root ~owner_leaf:"native-policy" ~oauth_source:source with
+  match Runtime_antigravity_home.prepare ~host:(antigravity_host ()) ~runtime_root ~owner_leaf:"native-policy" ~oauth_source:source with
   | Error (Runtime_antigravity_home.Unsafe_directory { detail; _ }) ->
     check string "refusal names the pattern syntax" "managed HOME contains permission-pattern syntax" detail;
     let rec settings_files dir =
@@ -148,7 +152,7 @@ let test_keeper_account_switch_preserves_each_refreshed_home () =
   let prepare oauth_source =
     let owner_leaf = Runtime_antigravity_home.keeper_owner_leaf
         ~keeper_name:"keeper-alpha" ~oauth_source in
-    let home = Runtime_antigravity_home.prepare ~runtime_root ~owner_leaf ~oauth_source
+    let home = Runtime_antigravity_home.prepare ~host:(antigravity_host ()) ~runtime_root ~owner_leaf ~oauth_source
       |> require_ok in
     home in
   let first = prepare source_a in
@@ -196,7 +200,7 @@ let test_account_identity_preparation_does_not_reset_active_policy () =
   with_temp_root @@ fun runtime_root ->
   let oauth_source = Filename.concat runtime_root "source" in
   write_file ~mode:0o600 oauth_source (Masc_test_deps.antigravity_oauth_fixture "synthetic-source");
-  let home, _ = Runtime_antigravity_home.prepare_native ~runtime_root
+  let home, _ = Runtime_antigravity_home.prepare_native ~host:(antigravity_host ()) ~runtime_root
       ~owner_leaf:"active-policy" ~oauth_source ~posture:Runtime_native_tools.Native_read
       ~workspace:Runtime_antigravity_home.Private_workspace ~additional_workspaces:[] |> require_ok in
   let settings = (Runtime_antigravity_home.For_testing.paths home).settings_path in
@@ -204,7 +208,7 @@ let test_account_identity_preparation_does_not_reset_active_policy () =
   let refreshed = Masc_test_deps.antigravity_oauth_fixture
       ~revision:"native-refresh" "synthetic-source" in
   write_file ~mode:0o600 (Runtime_antigravity_home.oauth_path home) refreshed;
-  let planned = Runtime_antigravity_home.prepare_account ~runtime_root
+  let planned = Runtime_antigravity_home.prepare_account ~host:(antigravity_host ()) ~runtime_root
       ~owner_leaf:"active-policy" ~oauth_source |> require_ok in
   check string "planning retains the account generation" (Runtime_antigravity_home.home_dir home)
     (Runtime_antigravity_home.home_dir planned);
@@ -258,7 +262,7 @@ let test_generation_pointer_failure_retry ~after_rename () =
     with_temp_root @@ fun runtime_root ->
     let oauth_source = Filename.concat runtime_root "source" in
     let owner_leaf = "pointer-retry" in
-    let prepare () = Runtime_antigravity_home.prepare_account ~runtime_root ~owner_leaf ~oauth_source in
+    let prepare () = Runtime_antigravity_home.prepare_account ~host:(antigravity_host ()) ~runtime_root ~owner_leaf ~oauth_source in
     let refreshed_a = Masc_test_deps.antigravity_oauth_fixture ~revision:"native-refresh" "account-a" in
     let previous = if has_previous then (
       write_file ~mode:0o600 oauth_source (Masc_test_deps.antigravity_oauth_fixture "account-a");
@@ -357,7 +361,7 @@ let test_pointerless_store_reseeds_only_a_fresh_seed () =
   let owner_leaf = "orphan-reseed" in
   let store = Filename.concat runtime_root
       (Filename.concat "official-clients" (Filename.concat "antigravity" owner_leaf)) in
-  let prepare () = Runtime_antigravity_home.prepare ~runtime_root ~owner_leaf ~oauth_source in
+  let prepare () = Runtime_antigravity_home.prepare ~host:(antigravity_host ()) ~runtime_root ~owner_leaf ~oauth_source in
   let entries () = Sys.readdir store |> Array.to_list |> List.sort String.compare in
   seed_captured_orphan (Filename.concat store "00000000-0000-7000-8000-000000000000")
     ~seed:seed_a;
@@ -393,7 +397,7 @@ let test_pointerless_store_reseeds_only_a_fresh_seed () =
   write_file ~mode:0o600 oauth_source seed_a;
   let store = Filename.concat runtime_root
       (Filename.concat "official-clients" (Filename.concat "antigravity" owner_leaf)) in
-  let prepare () = Runtime_antigravity_home.prepare ~runtime_root ~owner_leaf ~oauth_source in
+  let prepare () = Runtime_antigravity_home.prepare ~host:(antigravity_host ()) ~runtime_root ~owner_leaf ~oauth_source in
   let third = Filename.concat store "00000000-0000-7000-8000-000000000001" in
   let refreshed = Masc_test_deps.antigravity_oauth_fixture ~revision:"vendor-refresh" "account-a" in
   seed_captured_orphan third ~seed:refreshed;
@@ -449,7 +453,7 @@ let test_pointerless_store_preserves_entries_outside_managed_scope () =
      | `Atomic_hardlink -> Unix.link oauth_source path);
     let entries () = Sys.readdir store |> Array.to_list |> List.sort String.compare in
     let before = entries () in
-    (match Runtime_antigravity_home.prepare_account
+    (match Runtime_antigravity_home.prepare_account ~host:(antigravity_host ())
        ~runtime_root ~owner_leaf ~oauth_source with
      | Error (Runtime_antigravity_home.Invalid_managed_oauth _) -> ()
      | Error error -> fail (Runtime_antigravity_home.error_to_string error)
@@ -481,7 +485,7 @@ let test_generation_pointer_is_private_under_standard_umask () =
   Fun.protect ~finally:(fun () -> ignore (Unix.umask previous_umask)) @@ fun () ->
   let oauth_source = Filename.concat runtime_root "source" in
   write_file ~mode:0o600 oauth_source (Masc_test_deps.antigravity_oauth_fixture "account-a");
-  let prepare () = Runtime_antigravity_home.prepare_account
+  let prepare () = Runtime_antigravity_home.prepare_account ~host:(antigravity_host ())
       ~runtime_root ~owner_leaf:"pointer-mode" ~oauth_source |> require_ok in
   let first = prepare () in
   let pointer = Filename.concat (Filename.dirname (Runtime_antigravity_home.home_dir first)) "current.json" in
@@ -501,7 +505,7 @@ let test_corrupt_generation_never_reseeds_managed_state () =
     let oauth_source = Filename.concat runtime_root "source" in
     let source = Masc_test_deps.antigravity_oauth_fixture "synthetic-source" in
     write_file ~mode:0o600 oauth_source source;
-    let prepare () = Runtime_antigravity_home.prepare ~runtime_root
+    let prepare () = Runtime_antigravity_home.prepare ~host:(antigravity_host ()) ~runtime_root
         ~owner_leaf:"corruption-fixture" ~oauth_source in
     let home = prepare () |> require_ok in
     let token = Runtime_antigravity_home.oauth_path home in
@@ -565,11 +569,11 @@ let test_interrupted_generation_creation_leaves_no_orphan () =
   check bool "failed creation publishes no pointer" false
     (Sys.file_exists (Filename.concat store "current.json"));
   let recovered =
-    Runtime_antigravity_home.prepare_account ~runtime_root ~owner_leaf ~oauth_source |> require_ok in
+    Runtime_antigravity_home.prepare_account ~host:(antigravity_host ()) ~runtime_root ~owner_leaf ~oauth_source |> require_ok in
   check int "retry publishes exactly one generation plus its pointer" 2
     (Sys.readdir store |> Array.to_list |> List.length);
   let readmitted =
-    Runtime_antigravity_home.prepare_account ~runtime_root ~owner_leaf ~oauth_source |> require_ok in
+    Runtime_antigravity_home.prepare_account ~host:(antigravity_host ()) ~runtime_root ~owner_leaf ~oauth_source |> require_ok in
   check string "retry completes the account generation"
     (Runtime_antigravity_home.home_dir recovered) (Runtime_antigravity_home.home_dir readmitted)
 ;;
@@ -713,7 +717,7 @@ let test_native_permissions_match_posture_and_workspace () =
   with_temp_root @@ fun runtime_root ->
   let source = Filename.concat runtime_root "source" in
   write_file ~mode:0o600 source (Masc_test_deps.antigravity_oauth_fixture "synthetic");
-  let home = Runtime_antigravity_home.prepare ~runtime_root ~owner_leaf:"native-policy"
+  let home = Runtime_antigravity_home.prepare ~host:(antigravity_host ()) ~runtime_root ~owner_leaf:"native-policy"
       ~oauth_source:source |> require_ok in
   let workspace = Filename.concat runtime_root "workspace" in
   Unix.mkdir workspace 0o700;
@@ -830,7 +834,7 @@ let test_published_read_hook_preserves_permissions_and_scopes_reads () =
   with_temp_root @@ fun runtime_root ->
   let oauth_source = Filename.concat runtime_root "oauth" in
   write_file ~mode:0o600 oauth_source (Masc_test_deps.antigravity_oauth_fixture "fixture");
-  let home = Runtime_antigravity_home.prepare ~runtime_root ~owner_leaf:"read-hook" ~oauth_source
+  let home = Runtime_antigravity_home.prepare ~host:(antigravity_host ()) ~runtime_root ~owner_leaf:"read-hook" ~oauth_source
     |> require_ok in
   let workspace = Filename.concat runtime_root "workspace" in
   Unix.mkdir workspace 0o700;
@@ -869,7 +873,7 @@ let test_native_roots_never_overlap_the_runtime_root () =
   Unix.mkdir runtime_root 0o700;
   let source = Filename.concat base "operator-oauth-token" in
   write_file ~mode:0o600 source (Masc_test_deps.antigravity_oauth_fixture "synthetic");
-  let home = Runtime_antigravity_home.prepare ~runtime_root ~owner_leaf:"overlap"
+  let home = Runtime_antigravity_home.prepare ~host:(antigravity_host ()) ~runtime_root ~owner_leaf:"overlap"
       ~oauth_source:source |> require_ok in
   let settings_path = (Runtime_antigravity_home.For_testing.paths home).settings_path in
   let sibling = Filename.concat base "project" in
@@ -941,7 +945,7 @@ let test_unknown_account_identity_causes_no_managed_mutation () =
   List.iter (fun (label, source, expected) -> with_temp_root (fun runtime_root ->
     let oauth_source = Filename.concat runtime_root "invalid-source" in
     write_file ~mode:0o600 oauth_source source;
-    (match Runtime_antigravity_home.prepare ~runtime_root ~owner_leaf:"unknown-account" ~oauth_source with
+    (match Runtime_antigravity_home.prepare ~host:(antigravity_host ()) ~runtime_root ~owner_leaf:"unknown-account" ~oauth_source with
      | Error (Runtime_antigravity_home.Unrecognized_oauth_source { path; rejection = actual }) ->
        check string (label ^ ": names the source") oauth_source path;
        check rejection label expected actual
@@ -1059,7 +1063,7 @@ let test_cli_1_5_login_file_selects_its_account_generation () =
   let owner_leaf = Runtime_antigravity_home.keeper_owner_leaf
       ~keeper_name:"keeper-alpha" ~oauth_source in
   let prepare () =
-    Runtime_antigravity_home.prepare ~runtime_root ~owner_leaf ~oauth_source |> require_ok in
+    Runtime_antigravity_home.prepare ~host:(antigravity_host ()) ~runtime_root ~owner_leaf ~oauth_source |> require_ok in
   let first = prepare () in
   check string "the login file seeds the managed copy" (login "account-a")
     (Fs_compat.load_file (Runtime_antigravity_home.oauth_path first));
@@ -1127,7 +1131,7 @@ let test_setup_names_which_login_it_cannot_read () =
   with_temp_root @@ fun runtime_root ->
   let oauth_source = Filename.concat runtime_root "operator-oauth-token" in
   let prepare () =
-    Runtime_antigravity_setup.prepare_from_credential_file ~runtime_root ~account_id:"setup"
+    Runtime_antigravity_setup.prepare_from_credential_file ~host:(antigravity_host ()) ~runtime_root ~account_id:"setup"
       ~oauth_source in
   let expect label expected = match prepare () with
     | Error actual when actual = expected -> ()
@@ -1161,7 +1165,7 @@ let test_rejects_non_private_or_indirect_oauth_source () =
   let oauth_source = Filename.concat runtime_root "operator-oauth-token" in
   write_file ~mode:0o644 oauth_source (Masc_test_deps.antigravity_oauth_fixture "secret");
   (match
-     Runtime_antigravity_home.prepare
+     Runtime_antigravity_home.prepare ~host:(antigravity_host ())
        ~runtime_root
        ~owner_leaf:"keeper-alpha"
        ~oauth_source
@@ -1175,7 +1179,7 @@ let test_rejects_non_private_or_indirect_oauth_source () =
   let oauth_symlink = Filename.concat runtime_root "oauth-symlink" in
   Unix.symlink oauth_source oauth_symlink;
   match
-    Runtime_antigravity_home.prepare
+    Runtime_antigravity_home.prepare ~host:(antigravity_host ())
       ~runtime_root
       ~owner_leaf:"keeper-alpha"
       ~oauth_source:oauth_symlink
@@ -1191,7 +1195,7 @@ let test_preserves_runtime_managed_oauth_after_initial_seed () =
   let oauth_source = Filename.concat runtime_root "operator-oauth-token" in
   write_file ~mode:0o600 oauth_source (Masc_test_deps.antigravity_oauth_fixture "operator-secret");
   let layout =
-    Runtime_antigravity_home.prepare
+    Runtime_antigravity_home.prepare ~host:(antigravity_host ())
       ~runtime_root
       ~owner_leaf:"keeper-alpha"
       ~oauth_source
@@ -1200,7 +1204,7 @@ let test_preserves_runtime_managed_oauth_after_initial_seed () =
   let layout_paths = Runtime_antigravity_home.For_testing.paths layout in
   write_file ~mode:0o600 layout_paths.oauth_path (Masc_test_deps.antigravity_oauth_fixture ~revision:"native-refresh" "operator-secret");
   let refreshed =
-    Runtime_antigravity_home.prepare
+    Runtime_antigravity_home.prepare ~host:(antigravity_host ())
       ~runtime_root
       ~owner_leaf:"keeper-alpha"
       ~oauth_source
@@ -1229,7 +1233,7 @@ let test_rejects_unsafe_existing_runtime_oauth () =
   let oauth_source = Filename.concat runtime_root "operator-oauth-token" in
   write_file ~mode:0o600 oauth_source (Masc_test_deps.antigravity_oauth_fixture "operator-secret");
   let layout =
-    Runtime_antigravity_home.prepare
+    Runtime_antigravity_home.prepare ~host:(antigravity_host ())
       ~runtime_root
       ~owner_leaf:"keeper-alpha"
       ~oauth_source
@@ -1238,7 +1242,7 @@ let test_rejects_unsafe_existing_runtime_oauth () =
   let oauth_path = (Runtime_antigravity_home.For_testing.paths layout).oauth_path in
   Unix.chmod oauth_path 0o644;
   match
-    Runtime_antigravity_home.prepare
+    Runtime_antigravity_home.prepare ~host:(antigravity_host ())
       ~runtime_root
       ~owner_leaf:"keeper-alpha"
       ~oauth_source
@@ -1254,7 +1258,7 @@ let test_mcp_capability_is_turn_scoped () =
   let oauth_source = Filename.concat runtime_root "operator-oauth-token" in
   write_file ~mode:0o600 oauth_source (Masc_test_deps.antigravity_oauth_fixture "operator-secret");
   let layout =
-    Runtime_antigravity_home.prepare
+    Runtime_antigravity_home.prepare ~host:(antigravity_host ())
       ~runtime_root
       ~owner_leaf:"keeper-alpha"
       ~oauth_source
@@ -1284,7 +1288,7 @@ let test_rejects_owner_path_escape_before_mutation () =
   let oauth_source = Filename.concat runtime_root "operator-oauth-token" in
   write_file ~mode:0o600 oauth_source (Masc_test_deps.antigravity_oauth_fixture "secret");
   (match
-     Runtime_antigravity_home.prepare
+     Runtime_antigravity_home.prepare ~host:(antigravity_host ())
        ~runtime_root
        ~owner_leaf:"../outside"
        ~oauth_source
@@ -1312,7 +1316,7 @@ let seeded_prepare runtime_root =
   let oauth_source = Filename.concat runtime_root "operator-oauth-token" in
   if not (Sys.file_exists oauth_source)
   then write_file ~mode:0o600 oauth_source (Masc_test_deps.antigravity_oauth_fixture "operator-secret-canary");
-  Runtime_antigravity_home.prepare
+  Runtime_antigravity_home.prepare ~host:(antigravity_host ())
     ~runtime_root
     ~owner_leaf:"keeper-alpha"
     ~oauth_source
@@ -1503,7 +1507,7 @@ let test_tolerates_a_cli_created_library_directory () =
 
 let test_explicit_setup_import_and_login_home () =
   with_temp_root (fun runtime_root ->
-    let account = match Runtime_antigravity_setup.prepare ~runtime_root ~account_id:"setup-account" with
+    let account = match Runtime_antigravity_setup.prepare ~host:(antigravity_host ()) ~runtime_root ~account_id:"setup-account" with
       | Ok account -> account | Error error -> fail (Runtime_antigravity_setup.error_message error) in
     (match Runtime_antigravity_setup.credential_reference account with
      | Error Sign_in_required -> () | _ -> fail "login preparation must not fabricate credentials");
@@ -1536,7 +1540,7 @@ let test_setup_reports_a_linked_runtime_root_as_the_private_home () =
   let oauth_source = Filename.concat root "operator-oauth-token" in
   write_file ~mode:0o600 oauth_source (Masc_test_deps.antigravity_oauth_fixture "operator-secret-canary");
   let prepare runtime_root =
-    Runtime_antigravity_setup.prepare_from_credential_file ~runtime_root ~account_id:"catalog" ~oauth_source in
+    Runtime_antigravity_setup.prepare_from_credential_file ~host:(antigravity_host ()) ~runtime_root ~account_id:"catalog" ~oauth_source in
   (match prepare linked_root with
    | Error Runtime_antigravity_setup.Private_home_unavailable -> ()
    | Error error -> fail (Runtime_antigravity_setup.error_message error)
@@ -1549,7 +1553,7 @@ let test_setup_reports_a_linked_runtime_root_as_the_private_home () =
 let test_keychain_selection_and_private_account_switch () =
   with_temp_root (fun runtime_root ->
     let module S = Runtime_antigravity_setup in
-    let account = match S.prepare ~runtime_root ~account_id:"switch-account" with
+    let account = match S.prepare ~host:(antigravity_host ()) ~runtime_root ~account_id:"switch-account" with
       | Ok account -> account | Error error -> fail (S.error_message error) in
     let source_home = Filename.concat runtime_root "source-switch" in
     Unix.mkdir source_home 0o700;
@@ -1679,7 +1683,7 @@ let test_a_removed_root_leaves_no_preparation_claim_behind () =
   let prepare runtime_root =
     let oauth_source = Filename.concat runtime_root "operator-oauth-token" in
     write_file ~mode:0o600 oauth_source (Masc_test_deps.antigravity_oauth_fixture "claim");
-    Runtime_antigravity_home.prepare ~runtime_root ~owner_leaf:"panelist" ~oauth_source
+    Runtime_antigravity_home.prepare ~host:(antigravity_host ()) ~runtime_root ~owner_leaf:"panelist" ~oauth_source
     |> require_ok
     |> ignore
   in
@@ -1696,6 +1700,7 @@ let test_a_removed_root_leaves_no_preparation_claim_behind () =
 ;;
 
 let () =
+  Masc_test_deps.publish_single_user_access ();
   run
     "runtime_antigravity_home"
     [ ( "setup", [test_case "explicit private account import" `Quick test_explicit_setup_import_and_login_home;

@@ -277,7 +277,8 @@ let account_request walk_owner ~runtime_id =
 
 (* HIGH-RISK-UNREVIEWED: an attempt starts an official CLI, Claude Code (plan
    D2-5), Codex (plan D2-6) or Muse (plan D3), only on an account the access
-   authorized for this walk. The refusal is masc's own,
+   authorized for this walk, and Antigravity only where the process shares
+   its host account (plan D3b). The refusal is masc's own,
    made before anything is sent, so it is the non-rotating local refusal of a
    provider_config_transform: no provider evidence names the candidate. *)
 let account_refused refusal =
@@ -296,6 +297,10 @@ let authorize_muse_account walk_owner ~runtime_id home =
     (account_request walk_owner ~runtime_id)
     (Runtime_account_access.Declared_home home)
   |> Result.map_error account_refused
+;;
+
+let authorize_host_account client =
+  Runtime_account_access.authorize_host client |> Result.map_error account_refused
 ;;
 
 (* How long a rate observation holds its path back: the provider's usable
@@ -3119,6 +3124,13 @@ let run_named
           official_model_input_observation hooks
         in
         let run_antigravity ~initial_messages () =
+          match authorize_host_account Runtime_account_access.Antigravity with
+          | Error error ->
+            { Keeper_antigravity_runtime.result = Error error
+            ; pending_result_receipts = None
+            ; settled_session = None
+            ; effect_disposition = Keeper_provider_attempt_effect.No_effect_observed }
+          | Ok host ->
           reset_model_input_observation ();
           let on_transmitted_model_input transmitted =
             record_transmitted_model_input transmitted;
@@ -3128,6 +3140,7 @@ let run_named
               on_request_attribution
           in
           Keeper_antigravity_runtime.run ~on_guidance_prepared ~input_source ?on_native_tool_completion
+            ~host
             ~configured_reasoning_effort:runtime.model.reasoning_effort
             ~turn_timeout_s:runtime.model.turn_timeout_s
             ?argument_source:official_argument_source

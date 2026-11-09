@@ -4599,28 +4599,28 @@ let antigravity_account_cmd =
 let antigravity_models_cmd =
   let cli_path = Arg.(value & opt string "agy" & info ["cli-path"] ~docv:"EXECUTABLE") in
   let credential = Arg.(required & opt (some string) None & info ["credential-file"] ~docv:"PRIVATE_REFERENCE") in
-  let run cli_path oauth_source =
-    Masc_cli_antigravity.models
+  let run base_path cli_path oauth_source =
+    Masc_cli_antigravity.models ~base_path
       ~cli_path:(Runtime_official_cli_install.spawn_path Antigravity ~command:cli_path)
       ~oauth_source ~timeout_s:runtime_probe_subscription_timeout_s
   in
-  Cmd.v (Cmd.info "runtime-antigravity-models" ~doc:"Refresh the selected Antigravity account's models without a model turn.")
-    Term.(const run $ cli_path $ credential)
+  Cmd.v (Cmd.info "runtime-antigravity-models" ~doc:"Refresh the selected Antigravity account's models without a model turn. The workspace decides whether the host account may start.")
+    Term.(const run $ base_path $ cli_path $ credential)
 
 let antigravity_context_cmd =
   let cli_path = Arg.(value & opt string "agy" & info ["cli-path"] ~docv:"EXECUTABLE") in
   let credential = Arg.(required & opt (some string) None & info ["credential-file"] ~docv:"PRIVATE_REFERENCE") in
   let model = Arg.(required & opt (some string) None & info ["model"] ~docv:"MODEL_ID") in
-  let run cli_path oauth_source model_id =
+  let run base_path cli_path oauth_source model_id =
     match Masc_cli_onboarding.python (Unix.realpath Sys.executable_name) with
     | None -> prerr_endline "The installed Python helper is missing. Reinstall the complete MASC release."; 1
     | Some python_path ->
-      Masc_cli_antigravity.context ~python_path
+      Masc_cli_antigravity.context ~base_path ~python_path
         ~cli_path:(Runtime_official_cli_install.spawn_path Antigravity ~command:cli_path)
         ~oauth_source ~model_id
         ~timeout_s:runtime_probe_subscription_timeout_s in
-  Cmd.v (Cmd.info "runtime-antigravity-context" ~doc:"Read the selected account model's actual CLI context without a model prompt.")
-    Term.(const run $ cli_path $ credential $ model)
+  Cmd.v (Cmd.info "runtime-antigravity-context" ~doc:"Read the selected account model's actual CLI context without a model prompt. The workspace decides whether the host account may start.")
+    Term.(const run $ base_path $ cli_path $ credential $ model)
 
 let setup_server_cmd =
   let inspect base_path port = Masc_cli_owner_upgrade.inspect ~base_path ~port in

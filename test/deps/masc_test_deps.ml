@@ -123,6 +123,13 @@ let authorized_muse account =
   | Ok authorized -> authorized
   | Error refusal -> failwith (Runtime_account_access.refusal_to_string refusal)
 
+(** A start of a host client, by the access {!publish_single_user_access}
+    published. *)
+let host_account client =
+  match Runtime_account_access.authorize_host client with
+  | Ok host -> host
+  | Error refusal -> failwith (Runtime_account_access.refusal_to_string refusal)
+
 (** Install the Eio clock + optional switch in every registry the lib
     code reads from.
 

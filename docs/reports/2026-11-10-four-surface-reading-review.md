@@ -95,8 +95,9 @@ in_progress였고 완료 후 API 결론은 success, runner의 407개 검사도 �
 확대하지 않는다. 공개 12개 head·base와 선택한 실행 로그는
 [실행 기록](../evidence/four-surface-memory-validation-20261110/README.md)에 남긴다.
 
-Usage changelog의 자기 PR 인용이 누락된 형식 오류도 이 문서 층에서
-`#50730`을 더해 고쳤다. 제품 코드를 바꾸거나 중간 층을 다시 게시하지 않았다.
+Usage changelog의 자기 PR 인용 누락은 처음에 문서 층에서 `#50730`을 더해 고쳤다.
+후속 리뷰에서 이 인용을 Usage 층 자체로 옮기고 상단 층을 다시 정렬했다.
+제품·테스트와 앞선 실행의 source·결과 기록은 그대로 유지했다.
 
 이 실행은 Full CI·native TUI 관측·실제 Enter
 이벤트 처리·설치·서버 재시작·병합·배포 검증이 아니다.

@@ -1,0 +1,160 @@
+{
+  "window": [
+    "2026-11-06T00:00:00+00:00",
+    "2026-11-09T00:00:00+00:00"
+  ],
+  "files": 24,
+  "skipped": {
+    "bad_lines": 0
+  },
+  "execute_calls": 21699,
+  "execute_hours": 50.807,
+  "pr_reads": {
+    "calls": 10609,
+    "hours": 24.387
+  },
+  "snapshot_only": {
+    "calls": 683,
+    "hours": 3.057,
+    "share_of_pr_read_hours": 0.1253,
+    "share_of_execute_hours": 0.0602,
+    "by_shape": {
+      "fan_out": {
+        "calls": 201,
+        "hours": 2.421
+      },
+      "wait": {
+        "calls": 1,
+        "hours": 0.017
+      },
+      "single": {
+        "calls": 481,
+        "hours": 0.619
+      }
+    },
+    "top_keepers": [
+      {
+        "keeper": "code-reviewer",
+        "calls": 375,
+        "hours": 2.567
+      },
+      {
+        "keeper": "context-reviewer",
+        "calls": 87,
+        "hours": 0.174
+      },
+      {
+        "keeper": "code-reviewer-mother",
+        "calls": 42,
+        "hours": 0.074
+      },
+      {
+        "keeper": "code-reviewer-father",
+        "calls": 41,
+        "hours": 0.066
+      },
+      {
+        "keeper": "code-reviewer-sister",
+        "calls": 51,
+        "hours": 0.043
+      },
+      {
+        "keeper": "code-reviewer-uncle",
+        "calls": 22,
+        "hours": 0.033
+      }
+    ]
+  },
+  "named": {
+    "closed_or_merged": {
+      "calls": 1968,
+      "hours": 6.036
+    },
+    "check_detail": {
+      "calls": 1101,
+      "hours": 4.643
+    },
+    "ci_run_or_main_tip": {
+      "calls": 1117,
+      "hours": 5.862
+    },
+    "times": {
+      "calls": 4118,
+      "hours": 5.513
+    },
+    "body_or_comments": {
+      "calls": 1117,
+      "hours": 1.966
+    },
+    "files_or_diff": {
+      "calls": 2314,
+      "hours": 3.849
+    },
+    "labels_or_requests": {
+      "calls": 500,
+      "hours": 2.022
+    },
+    "refs_or_author_login": {
+      "calls": 3320,
+      "hours": 7.153
+    },
+    "merge_state_detail": {
+      "calls": 944,
+      "hours": 3.582
+    },
+    "search": {
+      "calls": 429,
+      "hours": 0.897
+    },
+    "writes": {
+      "calls": 1495,
+      "hours": 3.06
+    }
+  },
+  "only": {
+    "closed_or_merged": {
+      "calls": 268,
+      "hours": 0.344
+    },
+    "check_detail": {
+      "calls": 167,
+      "hours": 1.455
+    },
+    "ci_run_or_main_tip": {
+      "calls": 97,
+      "hours": 0.631
+    },
+    "times": {
+      "calls": 2793,
+      "hours": 2.984
+    },
+    "body_or_comments": {
+      "calls": 88,
+      "hours": 0.078
+    },
+    "files_or_diff": {
+      "calls": 609,
+      "hours": 0.803
+    },
+    "labels_or_requests": {
+      "calls": 5,
+      "hours": 0.013
+    },
+    "refs_or_author_login": {
+      "calls": 357,
+      "hours": 0.801
+    },
+    "merge_state_detail": {
+      "calls": 51,
+      "hours": 0.341
+    },
+    "search": {
+      "calls": 71,
+      "hours": 0.139
+    },
+    "writes": {
+      "calls": 671,
+      "hours": 0.631
+    }
+  }
+}

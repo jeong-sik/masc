@@ -1278,21 +1278,24 @@ let render_keeper_list (state : state) =
   in
   let entries = keeper_display_entries ~folded:state.keeper_list_folded list_reading in
   let portrait_candidate =
-    match state.keeper_list_density, selected_reading with
-    | Keeper_list_model.Two_lines, Some reading -> (
+    match
+      Keeper_list_model.shows_portrait state.keeper_list_view state.keeper_list_density,
+      selected_reading
+    with
+    | true, Some reading -> (
         match reading.Keeper_control.liveness with
         | Keeper_control.Present runtime -> (
             match runtime.Tui_decode.kr_portrait with
             | Tui_decode.Ready equipment ->
                 Option.map (fun portrait -> reading.Keeper_control.name, portrait)
-                  (Masc_tui_chat_portrait.shown ~name:reading.Keeper_control.name
+                  (Masc_tui_chat_portrait.shown ~figure:Masc_tui_chat_portrait.Whole_body
+                     ~name:reading.Keeper_control.name
                      ~portrait:(Keeper_portrait_equipment.Ready equipment)
                      ~rows ~cols)
             | Tui_decode.Unavailable _ -> None)
         | Keeper_control.Unobserved | Keeper_control.Absent
         | Keeper_control.Invalid _ -> None)
-    | Keeper_list_model.Two_lines, None
-    | Keeper_list_model.One_line, _ -> None
+    | true, None | false, _ -> None
   in
   let portrait_list_rows =
     let target = min 4 keeper_count in

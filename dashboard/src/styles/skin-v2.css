@@ -101,9 +101,9 @@ html[data-skin="v2"]:not([data-theme="paper"]):not([data-theme="styleseed"]) {
   --font-display: 'Space Grotesk', 'Noto Sans KR', system-ui, sans-serif;
   --font-body:    'Noto Sans KR', 'Space Grotesk', system-ui, sans-serif;
   /* UI font was omitted here, so v2 fell through to the :root default
-     (Pretendard). Pin it to the prototype's intent
-     (design-system/prototype-v2/styles/colors_and_type.css:68) so UI chrome
-     reads in Noto Sans KR like the rest of the v2 skin. */
+     (Pretendard). Pin it to the prototype's intent so
+     UI chrome reads in Noto Sans KR like the rest of
+     the v2 skin. */
   --font-ui:      'Noto Sans KR', 'IBM Plex Sans KR', -apple-system, sans-serif;
 
   /* Base body weight. The :root token ladder sets --fw-body: 425 (a deliberate
@@ -126,9 +126,9 @@ html[data-skin="v2"]:not([data-theme="paper"]):not([data-theme="styleseed"]) {
   /* Composer input/control sizes — half-pixel literals from the
      Claude-Design prototype (composer.jsx via styles/v2.css). The 2px-base
      --fs-* ladder has no 14.5/12.5 step, so these are named to pixel-match:
-     textarea 14.5px (v2.css:934), send 12.5px (v2.css:948). */
-  --fs-composer-input: 14.5px;  /* prototype styles/v2.css:934 */
-  --fs-composer-send:  12.5px;  /* prototype styles/v2.css:948 */
+     textarea 14.5px, send 12.5px. */
+  --fs-composer-input: 14.5px;
+  --fs-composer-send:  12.5px;
 }
 
 html[data-skin="v2"][data-volt="blood"]:not([data-theme="paper"]):not([data-theme="styleseed"]) {

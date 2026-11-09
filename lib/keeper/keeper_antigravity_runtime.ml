@@ -1041,8 +1041,10 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~input_source ~arg
       (* Only the successful session owner may change an active generation's
          native permissions. Rejected concurrent planners never reach here. *)
       let* _native_cwd = Eio_guard.run_in_systhread ~label:"antigravity-native-policy" (fun () ->
-          Runtime_antigravity_home.prepare_native_tools home
-            ~posture:native_posture ~workspace:native_workspace ~additional_workspaces:add_dirs)
+          let* cwd = Runtime_antigravity_home.prepare_native_tools home
+            ~posture:native_posture ~workspace:native_workspace ~additional_workspaces:add_dirs in
+          let* () = Runtime_antigravity_home.prepare_read_hook home ~cwd ~additional_workspaces:add_dirs in
+          Ok cwd)
         |> Result.map_error (fun error ->
              recovery_failure := Session_store.Pre_dispatch_failed;
              home_error_to_core_error error) in

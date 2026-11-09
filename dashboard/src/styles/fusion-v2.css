@@ -204,8 +204,8 @@
   padding: 10px;
 }
 
-/* Carded run rows, matching the vendored prototype `.fus-row`
-   (keeper-v2/fusion.css:25-27). The live class is `.fus-run-row`, so the
+/* Carded run rows, matching the vendored prototype `.fus-row`.
+   The live class is `.fus-run-row`, so the
    vendored rule cannot apply by name — adopt its card treatment here instead of
    the prior transparent/min-height:96px row. Tokens are the same ones the
    working vendored `.fus-row` uses, so they resolve. */
@@ -338,7 +338,7 @@
 }
 
 /* .fus-pipe-node overrides removed — the live class matches the vendored
-   prototype rule (keeper-v2/fusion.css:68-73): mono font, mixed case, normal
+   prototype rule: mono font, mixed case, normal
    weight, 4px radius, subtle text-color-only state tints (outline chips). The
    prior override forced uppercase weight-800 filled chips. Live node types `.kp`
    and `.sink` have no dedicated vendored rule and fall back to the base
@@ -410,7 +410,7 @@
 }
 
 /* .fus-panel-grid override removed (base + both media-query rules below) so the
-   vendored prototype rule (keeper-v2/fusion.css:97) governs: a single
+   vendored prototype rule governs: a single
    `repeat(auto-fit, minmax(248px, 1fr))` that collapses columns intrinsically as
    the container narrows — no fixed 3/2/1-col breakpoints needed. */
 

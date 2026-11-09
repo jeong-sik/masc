@@ -200,7 +200,7 @@
 }
 
 /* Two-column layout: main scroll column + WorkAside right rail.
-   Ported from keeper-v2/styles/v2.css:809-810.
+   Ported from keeper-v2/styles/v2.css.
    .ov-2col switches flex-direction to row so the aside sits as a right column.
    .ov-scroll inside .ov-2col takes remaining width; the aside has its own
    fixed/draggable width. Hidden below 1180px (aside sets display:none via
@@ -256,7 +256,7 @@
   color: var(--text-mid);
 }
 
-/* eyebrow above the display header — surfaces.css:82 */
+/* eyebrow above the display header */
 .ov-eyebrow {
   display: inline-block;
   font-family: var(--font-mono);
@@ -267,7 +267,7 @@
   margin-bottom: 7px;
 }
 
-/* purpose line under the header — surfaces.css:83-84 */
+/* purpose line under the header */
 .ov-purpose {
   margin-top: 7px;
   font-size: 12.5px;
@@ -340,7 +340,7 @@
 .ov-kpi-v.warn { color: var(--status-warn); }
 .ov-kpi-v.volt { color: var(--volt-strong); }
 
-/* clickable KPI cell (deep link into a surface) — surfaces.css:141-142 */
+/* clickable KPI cell (deep link into a surface) */
 .ov-kpi.link { cursor: pointer; transition: background 0.14s; }
 .ov-kpi.link:hover { background: var(--bg-panel-alt); }
 
@@ -645,7 +645,7 @@
 /* Every value below is transcribed verbatim from the prototype's
  * styles/surfaces.css (line references in comments). */
 
-/* section header "도메인 현황" — surfaces.css:143 */
+/* section header "도메인 현황" */
 .ov-section-h {
   font-family: var(--font-display);
   font-weight: 500;
@@ -656,14 +656,14 @@
   margin: 4px 0 12px;
 }
 
-/* 7-card domain grid — surfaces.css:144 */
+/* 7-card domain grid */
 .ov-domains {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(290px, 1fr));
   gap: var(--gap-card);
 }
 
-/* domain summary card — surfaces.css:145-155 */
+/* domain summary card */
 .ov-dcard {
   background: var(--bg-panel);
   border: 1px solid var(--border-main);
@@ -747,7 +747,7 @@
   flex: 1;
 }
 
-/* WORK domain — goal rows — surfaces.css:158-167 */
+/* WORK domain — goal rows */
 .ov-goal {
   display: flex;
   flex-direction: column;
@@ -812,7 +812,7 @@
   color: var(--text-dim);
 }
 
-/* APPROVALS domain — urgent card — surfaces.css:170-176 */
+/* APPROVALS domain — urgent card */
 .ov-urg {
   padding: 9px 11px;
   border-radius: var(--radius-sm);
@@ -857,7 +857,7 @@
   margin-top: 4px;
 }
 
-/* mini lists (approvals / schedule digests) — surfaces.css:177-179 */
+/* mini lists (approvals / schedule digests) */
 .ov-mini-list {
   display: flex;
   flex-direction: column;
@@ -878,7 +878,7 @@
   text-overflow: ellipsis;
 }
 
-/* FUSION domain — surfaces.css:182-189 */
+/* FUSION domain */
 .ov-fus {
   padding: 9px 11px;
   border-radius: var(--radius-sm);
@@ -922,7 +922,7 @@
   color: var(--text-dim);
 }
 
-/* BOARD / SCHEDULE / FLEET stat rows — surfaces.css:192-195 */
+/* BOARD / SCHEDULE / FLEET stat rows */
 .ov-stat-row {
   display: flex;
   align-items: center;
@@ -947,7 +947,7 @@
   color: var(--text-bright);
 }
 
-/* CONNECTORS domain — pills — surfaces.css:198-204 */
+/* CONNECTORS domain — pills */
 .ov-conn-row {
   display: flex;
   flex-wrap: wrap;
@@ -991,7 +991,7 @@
   margin-top: 4px;
 }
 
-/* FLEET domain — summary tiles — surfaces.css:207-211
+/* FLEET domain — summary tiles
  * Six tiles (실행/복구/일시정지/주의/압박/전체) over three columns fill two rows
  * exactly. An empty trailing track would expose the container --border-soft as
  * a solid band through the 1px gap, the same failure documented on .ov-kpis. */

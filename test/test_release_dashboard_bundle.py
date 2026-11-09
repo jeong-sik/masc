@@ -201,7 +201,8 @@ class Distribution(unittest.TestCase):
         mirror.mkdir(parents=True)
         for name in [self.asset, "masc-tui-" + self.arch, "masc-deployment-preflight-helper-" + self.arch,
                      "masc-check-runtime-deployment-preflight-" + self.arch,
-                     "masc-exec-ssh-bootstrap-" + self.arch]:
+                     "masc-exec-ssh-bootstrap-" + self.arch,
+                     "masc-antigravity-path-hook-" + self.arch]:
             shutil.copy2(self.binary, mirror / name)
         companions = [(name, self.binary) for name in sorted(bundle.COMPANIONS)]
         runtime = None

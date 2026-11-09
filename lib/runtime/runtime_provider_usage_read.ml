@@ -99,7 +99,7 @@ let read_codex ~mgr ~clock ~cwd ~scope (codex : Runtime_execution.codex_app_serv
       (read_codex_report ~mgr ~clock ~cwd ~scope ~account codex)
 ;;
 
-let read_muse ~mgr ~clock ~cwd ~scope (config : Runtime_muse_serve.config) =
+let read_muse ~mgr ~clock ~cwd ~scope ~account (config : Runtime_muse_serve.config) =
   let config =
     { config with
       Runtime_muse_serve.admission_timeout_s =
@@ -107,7 +107,7 @@ let read_muse ~mgr ~clock ~cwd ~scope (config : Runtime_muse_serve.config) =
     ; timeout_s = Some read_timeout_s
     }
   in
-  match Runtime_muse_serve.read_usage ~mgr ~clock ~cwd config with
+  match Runtime_muse_serve.read_usage ~mgr ~clock ~cwd ~account config with
   | Ok usage ->
     Option.iter (Runtime_muse_usage.observe ~scope Runtime_muse_usage.Usage_read) usage;
     Ok ()
@@ -471,9 +471,9 @@ let read_client_in_background ~clock ~cwd ~scope read =
     Scheduling_failed
 ;;
 
-let read_muse_in_background ~clock ~cwd ~scope config =
+let read_muse_in_background ~clock ~cwd ~scope ~account config =
   read_client_in_background ~clock ~cwd ~scope
-    (fun ~mgr ~clock ~cwd ~scope -> read_muse ~mgr ~clock ~cwd ~scope config)
+    (fun ~mgr ~clock ~cwd ~scope -> read_muse ~mgr ~clock ~cwd ~scope ~account config)
 ;;
 
 module For_testing = struct

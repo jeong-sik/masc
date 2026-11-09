@@ -43,6 +43,8 @@ val read_muse :
   clock:_ Eio.Time.clock ->
   cwd:Eio.Fs.dir_ty Eio.Path.t ->
   scope:Runtime_quota_window.scope ->
+  account:_ Runtime_account_access.muse_authorized ->
+  (* The account the failed turn was authorized on. *)
   Runtime_muse_serve.config ->
   (unit, string) result
 (** Read [usage/read] without a model turn and record its windows under
@@ -154,6 +156,7 @@ val read_muse_in_background :
   clock:_ Eio.Time.clock ->
   cwd:Eio.Fs.dir_ty Eio.Path.t ->
   scope:Runtime_quota_window.scope ->
+  account:_ Runtime_account_access.muse_authorized ->
   Runtime_muse_serve.config ->
   background
 (** {!read_muse} after a Muse model-error terminal. The read outlives the

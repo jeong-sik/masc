@@ -20,12 +20,22 @@ let test_whole_body_uses_the_full_drawing () =
   let face = Option.get (Option.get (prepare cache "alpha")).Chat.placement in
   let body =
     Option.get (Option.get (prepare cache ~figure:Chat.Whole_body "alpha")).Chat.placement in
-  check int "the figure keeps the same box" face.box.rows body.box.rows;
   check bool "the whole body is not the face thumbnail" false
     (String.equal face.image.Keeper_portrait_draw.rgba body.image.Keeper_portrait_draw.rgba);
   let full = Portrait.image cache ~name:"alpha" ~equipment:Look.bare body.box.size in
-  check bool "the whole body is the full portrait the Items preview draws" true
+  check bool "placed pixels draw the full portrait" true
     (String.equal full.Keeper_portrait_draw.rgba body.image.Keeper_portrait_draw.rgba)
+
+let test_a_mosaic_whole_body_keeps_equipment_visible () =
+  let cache = Portrait.cache () in
+  let lines ?equipment figure =
+    (Option.get (prepare cache ~display:View.Mosaic ~figure ?equipment "alpha")).Chat.picture_lines
+  in
+  check bool "a mosaic whole body takes a larger box than the face" true
+    (List.length (lines Chat.Whole_body) > List.length (lines Chat.Face));
+  let glasses = { Look.bare with face = Look.Glasses } in
+  check bool "observed glasses change the mosaic whole body" false
+    (lines ~equipment:glasses Chat.Whole_body = lines Chat.Whole_body)
 
 let test_space_and_identity () =
   let cache = Portrait.cache () in
@@ -98,4 +108,6 @@ let () = run "chat portrait" ["conversation identity and layout", [
   test_case "owns its space and follows the conversation" `Quick test_space_and_identity;
   test_case "follows observed clothing without taking roster space" `Quick test_observed_equipment;
   test_case "yields to space and colour preferences" `Quick test_small_and_colourless;
-  test_case "a whole body uses the full drawing" `Quick test_whole_body_uses_the_full_drawing]]
+  test_case "a whole body uses the full drawing" `Quick test_whole_body_uses_the_full_drawing;
+  test_case "a mosaic whole body keeps equipment visible" `Quick
+    test_a_mosaic_whole_body_keeps_equipment_visible]]

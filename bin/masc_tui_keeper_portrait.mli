@@ -14,6 +14,11 @@ val band_size : Masc_tui_portrait_view.display -> band_size option
     shows in. A mosaic draws two pixels to a row, so it takes more rows than
     placed pixels do. [None] where no picture is drawn. *)
 
+val whole_body_band_size : Masc_tui_portrait_view.display -> band_size option
+(** The box a whole figure fits in on [display]: {!band_size} for placed
+    pixels, and the Items preview's larger box in a mosaic, the smallest
+    mosaic where observed equipment stays visible. *)
+
 val min_content_rows : band_size -> int
 (** The fewest content rows the detail pane must have for the portrait to
     show: the band's rows and the rows the facts keep below it. Under it the

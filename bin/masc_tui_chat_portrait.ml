@@ -25,8 +25,12 @@ let figure_image cache ~display ~figure ~name ~equipment size =
   | Whole_body, (View.Pixels _ | View.No_picture) ->
       Portrait.image cache ~name ~equipment size
 
+let figure_band display = function
+  | Face -> band_size display
+  | Whole_body -> Portrait.whole_body_band_size display
+
 let prepare cache ~display ~project ~figure ~name ~portrait ~rows ~cols =
-  match portrait, band_size display with
+  match portrait, figure_band display figure with
   | Keeper_portrait_equipment.Unavailable _, _
   | Keeper_portrait_equipment.Ready _, None -> None
   | Keeper_portrait_equipment.Ready equipment, Some band ->

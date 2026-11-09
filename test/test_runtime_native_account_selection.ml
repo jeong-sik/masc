@@ -65,12 +65,16 @@ let materialize ?account_home client =
 
 let child_environment runtime =
   match runtime.Runtime_instance.execution with
-  (* Both clients start their CLI with the environment of the captured account
-     they are authorized on, unchanged (plan D2-5 and D2-6). *)
+  (* Both clients start their CLI with the environment of the account they
+     are authorized on, unchanged (plan D2-5 and D2-6). The table holds the
+     account sealed, so the environment is read from the authorized account
+     (plan D2-7). *)
   | Runtime_execution.Claude_code execution ->
-    Runtime_official_account.environment execution.account_home
+    Runtime_official_account.environment
+      (Runtime_account_access.account (Masc_test_deps.authorized_account execution.account_home))
   | Codex_app_server execution ->
-    Runtime_official_account.environment execution.account_home
+    Runtime_official_account.environment
+      (Runtime_account_access.account (Masc_test_deps.authorized_account execution.account_home))
   | Agent_core _ | Antigravity_cli _ | Muse_serve _ | Vibe_cli _ -> fail "expected an official client"
 
 let test_inherited_home client () =
@@ -97,7 +101,8 @@ let test_inherited_home client () =
            | Claude_code execution ->
              check (option string) "ordinary account file remains in admitted HOME"
                (Some (Filename.concat first ".claude.json"))
-               (Runtime_claude_code.account_file (Runtime_official_account.Captured execution.account_home))
+               (Runtime_claude_code.account_file (Runtime_official_account.Captured
+                  (Runtime_account_access.account (Masc_test_deps.authorized_account execution.account_home))))
            | Agent_core _ | Codex_app_server _ | Antigravity_cli _ | Muse_serve _ | Vibe_cli _ ->
              fail "expected Claude execution")
         | Codex -> check (option string) "Codex store remains the admitted directory"
@@ -116,7 +121,8 @@ let test_inherited_directory client () =
           | Claude_code execution -> check (option string)
               "config-dir account file retains its original namespace"
               (Some (Filename.concat first ".claude.json"))
-              (Runtime_claude_code.account_file (Runtime_official_account.Captured execution.account_home))
+              (Runtime_claude_code.account_file (Runtime_official_account.Captured
+                  (Runtime_account_access.account (Masc_test_deps.authorized_account execution.account_home))))
           | Codex_app_server _ -> ()
           | Agent_core _ | Antigravity_cli _ | Muse_serve _ | Vibe_cli _ -> fail "expected native execution")))))
 
@@ -166,7 +172,8 @@ let test_claude_credential_diagnosis () =
           | Runtime_execution.Claude_code execution ->
             check bool "refusal diagnosis uses the credential actually passed to this child"
               true (Runtime_claude_code.runs_on_environment_credential
-                (Runtime_official_account.Captured execution.account_home))
+                (Runtime_official_account.Captured
+                  (Runtime_account_access.account (Masc_test_deps.authorized_account execution.account_home))))
           | Agent_core _ | Codex_app_server _ | Antigravity_cli _ | Muse_serve _ | Vibe_cli _ ->
             fail "expected Claude execution"))))
 
@@ -189,7 +196,8 @@ env_key = "OPENAI_API_KEY"
             (fun () -> match runtime.execution with
              | Runtime_execution.Codex_app_server execution ->
                let child = match Runtime_official_account.private_codex_environment
-                 ~home:private_home execution.account_home with
+                 ~home:private_home
+                 (Runtime_account_access.account (Masc_test_deps.authorized_account execution.account_home)) with
                  | Ok child -> child
                  | Error detail -> fail detail in
                check (option string) "private process uses the caller-owned verification store"
@@ -201,7 +209,7 @@ env_key = "OPENAI_API_KEY"
                  (env_value "OPENAI_API_KEY" child);
                check string "private projection cannot change the original account scope"
                  (Filename.concat home ".codex")
-                 (Runtime_official_account.home execution.account_home)
+                 (Runtime_account_access.home execution.account_home)
              | Agent_core _ | Claude_code _ | Antigravity_cli _ | Muse_serve _ | Vibe_cli _ ->
                fail "expected Codex execution"))))))
 
@@ -308,7 +316,8 @@ env_http_headers = { "X-Fixture" = "CUSTOM_GATEWAY_HEADER" }
               match runtime.execution with
               | Runtime_execution.Codex_app_server execution ->
                 let child = match Runtime_official_account.private_codex_environment
-                  ~home:private_home execution.account_home with
+                  ~home:private_home
+                  (Runtime_account_access.account (Masc_test_deps.authorized_account execution.account_home)) with
                   | Ok child -> child | Error detail -> fail detail in
                 check (option string) "declared env_key retains the admitted value"
                   (Some "declared-key-a") (env_value "CUSTOM_GATEWAY_KEY" child);
@@ -341,7 +350,9 @@ let test_missing_codex_home () =
         check (option string) "a valid inherited CLI directory does not require HOME"
           (Some directory) (env_value "CODEX_HOME" (child_environment (materialize Codex)))))))
 
-let () = run "native account selection"
+let () =
+  Masc_test_deps.publish_single_user_access ();
+  run "native account selection"
   ["admission to execution",
     [test_case "Claude inherited user home is captured" `Quick (test_inherited_home Claude);
      test_case "Codex inherited user home is captured" `Quick (test_inherited_home Codex);

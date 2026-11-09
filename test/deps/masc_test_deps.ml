@@ -72,12 +72,13 @@ let admit_catalogs ~models ~providers =
   | Ok snapshot -> snapshot
   | Error error -> failwith (Llm_provider.Catalog_snapshot.error_to_string error)
 
-(** Synthetic declared accounts for execution-record fixtures. Ordinary
-    admission supplies the allowed base environment for mock scripts; these
-    contexts are not vendor-login or real-account execution evidence. *)
+(** Synthetic declared accounts for execution-record fixtures, sealed as the
+    runtime table holds them. Ordinary admission supplies the allowed base
+    environment for mock scripts; these contexts are not vendor-login or
+    real-account execution evidence. *)
 let official_account ~client ~home =
   match Runtime_official_account.capture ~client ~declaration:(Some home) with
-  | Ok selected -> selected | Error detail -> failwith detail
+  | Ok selected -> Runtime_account_access.seal selected | Error detail -> failwith detail
 
 let claude_account ?(home="/synthetic/claude-account") () =
   official_account ~client:Claude_code ~home
@@ -102,13 +103,10 @@ let publish_single_user_access () =
   | Ok () -> ()
   | Error (first, _) -> failwith first
 
-(** [account] authorized for an operator call, after
+(** The sealed [account] authorized for an operator call, after
     {!publish_single_user_access}. *)
 let authorized_account account =
-  match
-    Runtime_account_access.authorize Runtime_account_access.Operator_call
-      (Runtime_account_access.seal account)
-  with
+  match Runtime_account_access.authorize Runtime_account_access.Operator_call account with
   | Ok authorized -> authorized
   | Error refusal -> failwith (Runtime_account_access.refusal_to_string refusal)
 

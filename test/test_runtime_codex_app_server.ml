@@ -406,7 +406,7 @@ let fixture_account ?account_home () =
     Runtime_official_account.capture ~client:Runtime_official_account.Codex
       ~declaration:account_home
   with
-  | Ok captured -> Masc_test_deps.authorized_account captured
+  | Ok captured -> Masc_test_deps.authorized_account (Runtime_account_access.seal captured)
   | Error detail -> failwith detail
 ;;
 

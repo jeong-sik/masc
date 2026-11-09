@@ -74,6 +74,26 @@ let step_label = function
   | Guest_builds -> "Keeper build cleanup"
   | Remote_workspace -> "Keeper workspace cleanup"
 
+(* The step comes from the TOML-resolved meta. A projected or stored meta
+   carries the JSON decoder's placeholder profile, not the declaration, so
+   choosing from it sent every Remote_ssh Keeper to [Guest_builds], whose
+   Remote_ssh arm returns [Ok None]: the 2026-11-09 09:09Z pass logged
+   owners=34 builds=34 workspaces=0. *)
+type selection =
+  | Unreadable of string
+  | No_stored_meta
+  | Switched_off
+  | Selected of step
+
+let select ~config ~builds ~remote_workspace ~keeper_name =
+  match read_cleanup_meta ~config ~keeper_name with
+  | Error detail -> Unreadable detail
+  | Ok None -> No_stored_meta
+  | Ok (Some meta) ->
+    (match step_for ~builds ~remote_workspace meta.sandbox_profile with
+     | None -> Switched_off
+     | Some step -> Selected step)
+
 type report =
   | Builds of Keeper_turn_sandbox_runtime.build_cleanup_report
   | Workspace of Keeper_remote_workspace_cleanup.report
@@ -109,16 +129,20 @@ let sweep ~sw ~running ~(config : Workspace.config) ~builds ~remote_workspace ()
     Log.Server.warn "Keeper cleanup pass: owner inventory unavailable: %s"
       (Keeper_owner_registry.lookup_error_to_string error)
   | Ok projections ->
-    let without_meta = ref 0 and switched_off = ref 0 and still_running = ref 0
-    and guest_builds = ref 0 and workspaces = ref 0 in
+    let without_meta = ref 0 and unreadable = ref 0 and switched_off = ref 0
+    and still_running = ref 0 and guest_builds = ref 0 and workspaces = ref 0 in
     List.iter
       (fun (projection : Keeper_owner_reducer.projection) ->
         match projection.meta with
         | None -> incr without_meta
         | Some meta ->
-          match step_for ~builds ~remote_workspace meta.sandbox_profile with
-          | None -> incr switched_off
-          | Some step ->
+          match select ~config ~builds ~remote_workspace ~keeper_name:meta.name with
+          | Unreadable detail ->
+            incr unreadable;
+            Log.Server.warn "Keeper cleanup keeper=%s: %s" meta.name detail
+          | No_stored_meta -> incr without_meta
+          | Switched_off -> incr switched_off
+          | Selected step ->
             let label = step_label step in
             let run () =
               match read_cleanup_meta ~config ~keeper_name:meta.name with
@@ -153,9 +177,9 @@ let sweep ~sw ~running ~(config : Workspace.config) ~builds ~remote_workspace ()
             else incr still_running)
       projections;
     Log.Server.info
-      "Keeper cleanup pass owners=%d without_meta=%d switched_off=%d builds=%d workspaces=%d still_running=%d"
-      (List.length projections) !without_meta !switched_off !guest_builds !workspaces
-      !still_running
+      "Keeper cleanup pass owners=%d without_meta=%d unreadable=%d switched_off=%d builds=%d workspaces=%d still_running=%d"
+      (List.length projections) !without_meta !unreadable !switched_off !guest_builds
+      !workspaces !still_running
 
 let start ~sw ~clock ~config =
   let running = create_running () in

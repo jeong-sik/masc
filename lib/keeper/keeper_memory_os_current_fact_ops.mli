@@ -93,9 +93,7 @@ module For_testing :
     val apply_program_with_publication_io :
       write_snapshot:(string ->
                       string ->
-                      (unit,
-                       Fs_compat_internal.Atomic_replace.atomic_replace_failure)
-                      result) ->
+                      (unit, Fs_compat.atomic_replace_failure) result) ->
       sync_snapshot:(string -> (unit, string) result) ->
       before_journal:(unit -> 'a) ->
       on_committed:(program_commit ->
@@ -112,9 +110,7 @@ module For_testing :
     val replace_with_publication_io :
       write_snapshot:(string ->
                       string ->
-                      (unit,
-                       Fs_compat_internal.Atomic_replace.atomic_replace_failure)
-                      result) ->
+                      (unit, Fs_compat.atomic_replace_failure) result) ->
       sync_snapshot:(string -> (unit, string) result) ->
       on_committed:(t ->
                     commit_effect -> unit) ->

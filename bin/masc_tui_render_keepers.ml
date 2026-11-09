@@ -878,6 +878,8 @@ let grid_activity_header (grid : Grid.t) =
      than the pulse pads the left with blanks. The header names the drawn
      hours, not ledger half hours. *)
   let window = Grid.hour_window_label ~hours:(min grid.side_cells Keeper_mark.pulse_hours) in
+  (* The strip draws the half hours ahead, so its header names half hours. *)
+  let strip_window = Grid.window_label ~slots:grid.side_cells in
   let side = grid.side_cells > 0 in
   String.concat ""
     [ String.make Grid.gutter_cells ' '
@@ -889,7 +891,7 @@ let grid_activity_header (grid : Grid.t) =
     ; Ansi.bold ^ fit_width Keeper_mark.axis_now_header Grid.now_cells ^ Ansi.reset
     ; line
     ; (if side then
-         Theme.info () ^ fit_width (Keeper_mark.grid_next_header ~window) (Grid.strip_cells grid)
+         Theme.info () ^ fit_width (Keeper_mark.grid_next_header ~window:strip_window) (Grid.strip_cells grid)
          ^ Ansi.reset ^ " "
        else "")
     ; recede (fit_width Keeper_mark.grid_due_header Grid.due_cells)

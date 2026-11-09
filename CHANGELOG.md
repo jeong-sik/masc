@@ -18,7 +18,7 @@
 12. Known issues: TUI 시그널·전송 계열 python 15사례(task-3471)·muse deadline 1사례(#50591) — 제품 경로가 아닌 시험 잔여이며 v0.71.0 창에서 수리합니다. GuestShim(#50050) 16건과 LocalBuildInstall 21건은 이번 창에 회복됐습니다.
 13. Known issues 추가: 이번 컷 창 도입 비필수 3건 — executor 합성 수령 1건(task-3483, #50684 의 retention receipt, 효과는 이미 커밋된 뒤 증거 수령이 상점 부재시 실행을 멈추는 경계), tui_decode memory-health 디코드 1건(task-3489), sandbox read_backend run_command 1건(task-3490). 기준선 상존 OCaml RED 54스위트는 Known issues 표에 군집으로 기재했습니다.
 14. 게이트 증거: 컷 635a443a(15:28Z) + 게이트 수리 #50721 = RC 8f3b2a57 — Test 전체 회귀 42657800048(필수 10/10 통과, 전체 실패는 Known issues 기재)·Release full checks 42657805305(4잡 초록)·RC 검증은 태그 전 dispatch 단계에 있습니다.
-15. 다음: v0.71.0 창에는 동결 기간(15:28Z~)에 main 에 착지한 수리 7건(#50666·#50668·#50682·#50717·#50718·#50719·#50729)과 위 Known issues 수리가 들어갑니다.
+15. 다음: v0.71.0 창에는 동결 시각(15:28Z) 이후 main 에 착지한 조각 23건 — 전체 명세는 아래 Known issues 의 '동결 이월' 줄 — 과 위 Known issues 수리가 들어갑니다.
 
 
 ### Upgrade notes

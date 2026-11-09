@@ -390,15 +390,24 @@ let keeper_column_header (columns : Render_schedule.keeper_columns) =
        else "")
     ]
 
-let keeper_row_content ~(columns : Render_schedule.keeper_columns)
-    ~now ~frame ~yolo ~selected (row : Keeper_list_model.row) =
-  let keeper = row.keeper in
-  let activity = Keeper_list_model.primary_activity_of_row row in
-  let runtime =
-    match row.reading.Keeper_control.liveness with
-    | Keeper_control.Present runtime -> Some runtime
-    | Keeper_control.Absent | Keeper_control.Unobserved | Keeper_control.Invalid _ -> None
+let keeper_row_runtime (row : Keeper_list_model.row) =
+  match row.reading.Keeper_control.liveness with
+  | Keeper_control.Present runtime -> Some runtime
+  | Keeper_control.Absent | Keeper_control.Unobserved | Keeper_control.Invalid _ -> None
+
+let keeper_row_marker ~selected = if selected then "\xe2\x80\xba  " (* › *) else "   "
+
+let keeper_row_name ~width ~yolo (row : Keeper_list_model.row) =
+  let name =
+    Message_layout.fit_middle width (Terminal_text.single_line row.keeper.Tui_decode.k_name)
   in
+  if yolo then Theme.bad () ^ name ^ Ansi.reset else name
+
+(* The NOW cell: the activity's mark and word, or the receipt's operator
+   disposition where nothing on the row is newer than the receipt. *)
+let keeper_now_cell ~frame (row : Keeper_list_model.row) =
+  let activity = Keeper_list_model.primary_activity_of_row row in
+  let runtime = keeper_row_runtime row in
   let operator_disposition =
     match runtime with
     | Some { kr_operator_disposition = Ok (Some (disp, _)); _ }
@@ -430,10 +439,13 @@ let keeper_row_content ~(columns : Render_schedule.keeper_columns)
     | Some disp -> Masc_tui_keeper_mark.operator_disposition_word disp
     | None -> keeper_activity_word activity
   in
-  let name =
-    Message_layout.fit_middle columns.kcol_name
-      (Terminal_text.single_line keeper.Tui_decode.k_name)
-  in
+  status_color ^ glyph ^ " "
+  ^ Message_layout.fit_width status_word (Render_schedule.keeper_status_width - 2)
+  ^ Ansi.reset
+
+let keeper_row_content ~(columns : Render_schedule.keeper_columns)
+    ~now ~frame ~yolo ~selected (row : Keeper_list_model.row) =
+  let runtime = keeper_row_runtime row in
   let failure_context =
     keeper_row_trail_sentence ~age:(keeper_trail_age ~now) row
   in
@@ -443,15 +455,11 @@ let keeper_row_content ~(columns : Render_schedule.keeper_columns)
         ~default:Masc_tui_theme.Glyph.no_value
     | None -> Masc_tui_theme.Glyph.no_value
   in
-  let marker = if selected then "\xe2\x80\xba  " (* › *) else "   " in
   String.concat ""
-    [ marker
-    ; (if yolo then Theme.bad () ^ name ^ Ansi.reset else name)
+    [ keeper_row_marker ~selected
+    ; keeper_row_name ~width:columns.kcol_name ~yolo row
     ; " "
-    ; status_color ^ glyph ^ " "
-      ^ Message_layout.fit_width status_word
-          (Render_schedule.keeper_status_width - 2)
-      ^ Ansi.reset
+    ; keeper_now_cell ~frame row
     ; (if columns.kcol_show_flags then " " ^ keeper_flag_cell runtime else "")
     ; " " ^ Theme.recede ()
       ^ Message_layout.pad_left age Render_schedule.keeper_last_turn_width
@@ -525,15 +533,14 @@ let style_axis_cell (cell : Masc_tui_keeper_axis_cell.t) =
   style ^ cell.text ^ Ansi.reset
 ;;
 
+(* A second line opens under the name, and its pieces stand this far apart. *)
+let secondary_indent_cells = Render_schedule.keeper_marker_width + 2
+let secondary_separator = "  ·  "
+
 let keeper_secondary_row_content ?now ?(cells = []) ~inner (row : Keeper_list_model.row) =
-  let indent_cells = Render_schedule.keeper_marker_width + 2 in
+  let indent_cells = secondary_indent_cells in
   let available = max 0 (inner - indent_cells) in
-  let runtime =
-    match row.reading.Keeper_control.liveness with
-    | Keeper_control.Present r -> Some r
-    | Keeper_control.Absent | Keeper_control.Unobserved | Keeper_control.Invalid _ -> None
-  in
-  let attempts = Masc_tui_keeper_trail.attempts_of_runtime runtime in
+  let attempts = Masc_tui_keeper_trail.attempts_of_runtime (keeper_row_runtime row) in
   let detail =
     match keeper_detail_text ?now row with
     | "" -> Masc_tui_theme.Glyph.no_value
@@ -554,7 +561,7 @@ let keeper_secondary_row_content ?now ?(cells = []) ~inner (row : Keeper_list_mo
         Message_layout.display_width cell.text)
       cells
   in
-  let sep = "  ·  " in
+  let sep = secondary_separator in
   let sep_cells = Message_layout.display_width sep in
   (* The chain drops its older attempts to leave the detail a floor of cells.
      Only when the last attempt does not fit beside that floor does the chain
@@ -594,6 +601,108 @@ let keeper_secondary_row_content ?now ?(cells = []) ~inner (row : Keeper_list_mo
   in
   String.make indent_cells ' ' ^ body
 ;;
+
+(* The axis row (RFC-0515 §2.4): the name, then ◂ before · ● now · ▹ next.
+   ◂ and ● keep their width, so the cells line up under the header; ▹ takes
+   the rest of the row, and the frame cuts it before anything on its left. *)
+module Axis_row = Masc_tui_keeper_axis_row
+
+let axis_name_header = "keeper"
+let axis_cell_gap = "  "
+
+let axis_before_header = function
+  | Axis_row.Hour_pulse -> Printf.sprintf "◂ %dh" Masc_tui_keeper_mark.pulse_hours
+
+let axis_before_width = function Axis_row.Hour_pulse -> Masc_tui_keeper_mark.pulse_hours
+let axis_current_header = function Axis_row.Activity -> "● now"
+let axis_current_width = function Axis_row.Activity -> Render_schedule.keeper_status_width
+let axis_next_header = function Axis_row.Run_path_lag -> "▹ next"
+
+(* The widest name, held between the list's floor and ceiling for a name. *)
+let axis_name_width rows =
+  let widest =
+    List.fold_left
+      (fun widest (row : Keeper_list_model.row) ->
+        max widest
+          (Message_layout.display_width (Terminal_text.single_line row.keeper.Tui_decode.k_name)))
+      0 rows
+  in
+  max Render_schedule.keeper_minimum_name_width
+    (min Render_schedule.keeper_maximum_name_width widest)
+
+let keeper_axis_header ~name_width (axis : Axis_row.axis) =
+  String.concat ""
+    [ String.make Render_schedule.keeper_marker_width ' '
+    ; Message_layout.fit_width axis_name_header name_width
+    ; " "
+    ; Message_layout.fit_width (axis_before_header axis.before) (axis_before_width axis.before)
+    ; axis_cell_gap
+    ; Message_layout.fit_width (axis_current_header axis.current)
+        (axis_current_width axis.current)
+    ; axis_cell_gap
+    ; axis_next_header axis.next
+    ]
+
+let keeper_axis_before_cell ~now (row : Keeper_list_model.row) before =
+  let cell =
+    match before with
+    | Axis_row.Hour_pulse ->
+        Masc_tui_keeper_pulse.hours_cell ~now
+          (Option.bind (keeper_row_runtime row) (fun runtime -> runtime.Tui_decode.kr_recent_turns))
+  in
+  style_axis_cell
+    { cell with Masc_tui_keeper_axis_cell.text =
+        Message_layout.fit_width cell.Masc_tui_keeper_axis_cell.text (axis_before_width before) }
+
+let keeper_axis_current_cell ~frame row = function
+  | Axis_row.Activity -> keeper_now_cell ~frame row
+
+let keeper_axis_next_cells state ~now (row : Keeper_list_model.row) = function
+  | Axis_row.Run_path_lag ->
+      let keeper_name = row.keeper.Tui_decode.k_name in
+      List.filter_map Fun.id
+        [ Masc_tui_keeper_axis.run_cell state ~now ~keeper_name
+        ; Option.map
+            (fun text -> { Masc_tui_keeper_axis_cell.text; tone = Masc_tui_keeper_axis_cell.Quiet })
+            (keeper_next_text ~now row)
+        ; Masc_tui_keeper_axis.lag_cell state ~keeper_name
+        ]
+
+let keeper_axis_row_content state ~(axis : Axis_row.axis) ~name_width ~now ~frame ~yolo
+    ~selected (row : Keeper_list_model.row) =
+  String.concat ""
+    [ keeper_row_marker ~selected
+    ; keeper_row_name ~width:name_width ~yolo row
+    ; " "
+    ; keeper_axis_before_cell ~now row axis.before
+    ; axis_cell_gap
+    ; keeper_axis_current_cell ~frame row axis.current
+    ; axis_cell_gap
+    ; String.concat Masc_tui_keeper_axis_cell.separator
+        (List.map style_axis_cell (keeper_axis_next_cells state ~now row axis.next))
+    ]
+
+(* The second line under a failing Keeper's axis row: the sentence about its
+   last failure, then the attempts of that turn, older ones dropped first to
+   fit beside the sentence. *)
+let keeper_axis_failure_row_content ~now ~inner (row : Keeper_list_model.row) =
+  let available = max 0 (inner - secondary_indent_cells) in
+  let sentence = keeper_row_trail_sentence ~age:(keeper_trail_age ~now) row in
+  let chain_cells =
+    match sentence with
+    | Some sentence ->
+        available - Message_layout.display_width sentence
+        - Message_layout.display_width secondary_separator
+    | None -> available
+  in
+  let pieces =
+    Option.to_list (Option.map (fun sentence -> Theme.warn () ^ sentence ^ Ansi.reset) sentence)
+    @ Option.to_list
+        (render_attempt_chain ~max_cells:chain_cells
+           (Masc_tui_keeper_trail.attempts_of_runtime (keeper_row_runtime row)))
+  in
+  String.make secondary_indent_cells ' '
+  ^ String.concat (Theme.recede () ^ secondary_separator ^ Ansi.reset) pieces
 
 (* The subtractions over the fleet's name lists. They answer different
    questions and only one of them is about being stopped: a keeper the fleet
@@ -1221,7 +1330,12 @@ let render_keeper_list (state : state) =
       ~prioritize_runtime:has_failing_keeper ~inner_width:inner
       ~widest_runtime ~widest_detail ()
   in
-  box_line_styled buf cols ~style:(Theme.recede ()) (keeper_column_header columns);
+  let shape = Axis_row.shape_of_view state.keeper_list_view in
+  let name_width = axis_name_width model_rows in
+  box_line_styled buf cols ~style:(Theme.recede ())
+    (match shape with
+     | Axis_row.List_columns -> keeper_column_header columns
+     | Axis_row.Axis axis -> keeper_axis_header ~name_width axis);
 
   (match keepers_error with
    | Some err -> box_line buf cols ((Theme.bad ()) ^ "  " ^ err ^ Ansi.reset)
@@ -1271,10 +1385,16 @@ let render_keeper_list (state : state) =
   let chrome_rows = count_frame_lines buf in
   let footer_rows = 2 in
   let keeper_count = List.length model_rows in
-  let entry_height =
-    match state.keeper_list_density with
-    | Keeper_list_model.Two_lines -> 2
-    | Keeper_list_model.One_line -> 1
+  let second_line (row : Keeper_list_model.row) =
+    Axis_row.second_line shape state.keeper_list_density (Keeper_list_model.trail_of_row row)
+  in
+  (* A heading is one line whatever the density. *)
+  let entry_lines = function
+    | Keeper_group_heading _ -> 1
+    | Keeper_display_row (_, row) -> (
+        match second_line row with
+        | Axis_row.No_second_line -> 1
+        | Axis_row.List_detail | Axis_row.Failure_chain -> 2)
   in
   let entries = keeper_display_entries ~folded:state.keeper_list_folded list_reading in
   let portrait_candidate =
@@ -1325,22 +1445,18 @@ let render_keeper_list (state : state) =
         portrait.Masc_tui_chat_portrait.placement)
     portrait;
 
-  let total_entry_lines = List.length entries * entry_height in
+  let heights = List.map entry_lines entries in
+  let total_entry_lines = List.fold_left ( + ) 0 heights in
   let overflowing = content_rows > 0 && total_entry_lines > content_rows in
   let entry_rows = if overflowing then max 0 (content_rows - 1) else content_rows in
-  let entry_capacity = entry_rows / entry_height in
   let selected_entry =
     Option.value ~default:0 (List.find_index (keeper_entry_selected stop) entries)
   in
-  let scroll_offset =
-    if entry_capacity > 0 then
-      min
-        (max 0 (List.length entries - entry_capacity))
-        (Masc_tui_scroll.ensure_visible ~cursor:selected_entry
-           ~height:entry_capacity state.keeper_list_scroll)
-    else 0
+  let scroll_offset, window_entries =
+    Masc_tui_scroll.window_of_heights ~heights ~cursor:selected_entry ~rows:entry_rows
+      state.keeper_list_scroll
   in
-  let entries_window = List.take entry_capacity (List.drop scroll_offset entries) in
+  let entries_window = List.take window_entries (List.drop scroll_offset entries) in
   List.iter
     (function
       | Keeper_group_heading (group, count) as entry ->
@@ -1355,11 +1471,17 @@ let render_keeper_list (state : state) =
           else box_line buf cols text
       | Keeper_display_row (_, row) as entry ->
           let selected = keeper_entry_selected stop entry in
+          let yolo =
+            List.mem row.Keeper_list_model.keeper.Tui_decode.k_name state.keeper_yolo_names
+          in
           let primary =
-            keeper_row_content ~columns ~now:now_unix ~frame:state.activity_frame
-              ~yolo:(List.mem row.Keeper_list_model.keeper.Tui_decode.k_name
-                       state.keeper_yolo_names)
-              ~selected row
+            match shape with
+            | Axis_row.List_columns ->
+                keeper_row_content ~columns ~now:now_unix ~frame:state.activity_frame ~yolo
+                  ~selected row
+            | Axis_row.Axis axis ->
+                keeper_axis_row_content state ~axis ~name_width ~now:now_unix
+                  ~frame:state.activity_frame ~yolo ~selected row
           in
           let press text =
             pressable (Press_keeper_row row.Keeper_list_model.keeper.Tui_decode.k_name)
@@ -1371,20 +1493,18 @@ let render_keeper_list (state : state) =
             else box_line buf cols (press text)
           in
           emit primary;
-          (* Only two lines draw the second row, so only they build one. *)
-          (match state.keeper_list_density with
-           | Keeper_list_model.Two_lines ->
+          (* Only a row that draws a second line builds one. *)
+          (match second_line row with
+           | Axis_row.No_second_line -> ()
+           | Axis_row.List_detail ->
                let cells =
                  Masc_tui_keeper_axis.segments state ~now:now_unix
                    ~keeper_name:row.Keeper_list_model.keeper.Tui_decode.k_name
-                   ~runtime:
-                     (match row.Keeper_list_model.reading.Keeper_control.liveness with
-                      | Keeper_control.Present runtime -> Some runtime
-                      | Keeper_control.Absent | Keeper_control.Unobserved
-                      | Keeper_control.Invalid _ -> None)
+                   ~runtime:(keeper_row_runtime row)
                in
                emit (keeper_secondary_row_content ~now:now_unix ~inner ~cells row)
-           | Keeper_list_model.One_line -> ()))
+           | Axis_row.Failure_chain ->
+               emit (keeper_axis_failure_row_content ~now:now_unix ~inner row)))
     entries_window;
 
   let note =
@@ -1404,13 +1524,8 @@ let render_keeper_list (state : state) =
       if entry_rows > 0 then box_line buf cols (Theme.recede () ^ text ^ Ansi.reset))
     note;
   let note_rows = match note with Some _ when entry_rows > 0 -> 1 | Some _ | None -> 0 in
-  (* A heading is one line whatever the density. *)
   let drawn_rows =
-    List.fold_left
-      (fun drawn -> function
-        | Keeper_group_heading _ -> drawn + 1
-        | Keeper_display_row _ -> drawn + entry_height)
-      note_rows entries_window
+    List.fold_left (fun drawn entry -> drawn + entry_lines entry) note_rows entries_window
   in
   for _ = 1 to max 0 (entry_rows - drawn_rows) do
     box_empty buf cols

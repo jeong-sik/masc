@@ -61,14 +61,19 @@ let runtime_cells ~now = function
           (Masc_tui_keeper_pulse.pulse_cell ~now runtime.Masc.Tui_decode.kr_recent_turns) )
 ;;
 
+let run_cell (state : Masc_tui_types.state) ~now ~keeper_name =
+  Masc_tui_keeper_next_run.cell ~now
+    (Masc_tui_keeper_next_run.find (get_schedule_index state) ~keeper_name)
+;;
+
+let lag_cell (state : Masc_tui_types.state) ~keeper_name =
+  Masc_tui_keeper_memory_reading.lag_cell
+    (Masc_tui_keeper_memory_reading.find (get_memory_index state) ~keeper_name)
+;;
+
 let segments (state : Masc_tui_types.state) ~now ~keeper_name ~runtime
   : Masc_tui_keeper_axis_cell.t list =
-  let next_run = Masc_tui_keeper_next_run.find (get_schedule_index state) ~keeper_name in
-  let schedule_cells =
-    match Masc_tui_keeper_next_run.cell ~now next_run with
-    | Some cell -> [ cell ]
-    | None -> []
-  in
+  let schedule_cells = Option.to_list (run_cell state ~now ~keeper_name) in
   let memory_reading =
     Masc_tui_keeper_memory_reading.find (get_memory_index state) ~keeper_name
   in

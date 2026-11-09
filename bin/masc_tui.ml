@@ -10030,12 +10030,15 @@ let owe_schedule_reads_for_queue_writes state ~keepers =
       in
       if rows_read_the_queue then owe_keeper_schedules_read state
 
-let settle_keeper_schedules_read state ~keeper result =
+(* A good answer that the pane did not take, or that is not the page it draws,
+   read nothing for it: the record stays in flight, and the loop owes the read
+   again as soon as none is on the wire. *)
+let settle_keeper_schedules_read state ~keeper ~settles result =
   match state.keeper_schedules_owed with
   | Some owed when String.equal owed.kso_keeper keeper ->
       let read =
         match result with
-        | Ok _ -> Masc_tui_owed_read.succeeded owed.kso_read
+        | Ok _ -> if settles then Masc_tui_owed_read.succeeded owed.kso_read else owed.kso_read
         | Error _ -> failed_read owed.kso_read
       in
       state.keeper_schedules_owed <- Some { owed with kso_read = read }
@@ -26312,9 +26315,12 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       then state.schedule_wake_history_inflight <- None
   | Keeper_msg (Keeper_schedules_loaded (request, result)) ->
       let current = keeper_schedules_answer_current state request in
+      (* Asked before the answer is applied, which retires its request. *)
+      let settles = keeper_schedules_answer_settles state request in
       apply_keeper_schedules_read state request result;
       if current then
-        settle_keeper_schedules_read state ~keeper:request.kspr_detail.drr_keeper result
+        settle_keeper_schedules_read state ~keeper:request.kspr_detail.drr_keeper ~settles
+          result
   | Schedule_msg (Schedule_cancel_done (schedule_id, result)) -> (
       match result with
       | Ok message ->

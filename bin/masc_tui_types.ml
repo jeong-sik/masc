@@ -1305,8 +1305,8 @@ type keeper_logs_owed = {
   klgo_read : Masc_tui_owed_read.t;
 }
 
-(* The read the schedules of one Keeper owe while the chat pane or the
-   Automation tab draws them. *)
+(* The read the schedules of one Keeper owe while the chat pane, the
+   Automation tab or the Story window draws them. *)
 type keeper_schedules_owed = {
   kso_keeper : string;
   kso_read : Masc_tui_owed_read.t;
@@ -17599,6 +17599,29 @@ let keeper_schedule_first_page_available state keeper_name =
        | Schedule_paging { page_cursor = Some _; _ } -> false)
   | Some _ | None -> false
 
+(* Whether the pane that draws a Keeper's schedules takes the answer of a
+   read: the Keeper is the one it draws, the chat pane takes only the first
+   page, and a navigation read answers only the tab it was made on. *)
+let keeper_schedules_answer_reaches_pane state request =
+  let detail = request.kspr_detail in
+  server_authority_ready state
+  && (if view_is_chat state.view then
+      state.msg_target_keeper_name = Some detail.drr_keeper
+      && Option.is_none request.kspr_page.sp_cursor
+    else keeper_detail_target_matches state detail.drr_keeper)
+  && (not request.kspr_navigation
+      || (state.view = Keepers Keeper_detail && state.detail_tab = Detail_automation
+          && state.detail_scroll = request.kspr_scroll)
+      || (view_is_chat state.view && Option.is_none request.kspr_page.sp_cursor))
+
+(* Whether the answer is what the pane owed. The Automation tab draws the page
+   it asked for; the chat pane and the Story window draw the first page, which
+   another page stored for the same Keeper does not stand in for. *)
+let keeper_schedules_answer_settles state request =
+  keeper_schedules_answer_reaches_pane state request
+  && (Option.is_none request.kspr_page.sp_cursor
+      || (state.view = Keepers Keeper_detail && state.detail_tab = Detail_automation))
+
 (* Retirement belongs to the request even off screen; presentation belongs
    only to the currently selected Keeper and the newest request generation. *)
 let apply_keeper_schedules_read state request result =
@@ -17608,15 +17631,7 @@ let apply_keeper_schedules_read state request result =
    | Some (pending, _, _) when pending.drr_generation = detail.drr_generation ->
        state.keeper_schedules_pending <- None
    | Some _ | None -> ());
-  if current && server_authority_ready state
-     && (if view_is_chat state.view then
-         state.msg_target_keeper_name = Some detail.drr_keeper
-         && Option.is_none request.kspr_page.sp_cursor
-       else keeper_detail_target_matches state detail.drr_keeper)
-     && (not request.kspr_navigation
-         || (state.view = Keepers Keeper_detail && state.detail_tab = Detail_automation
-             && state.detail_scroll = request.kspr_scroll)
-         || (view_is_chat state.view && Option.is_none request.kspr_page.sp_cursor)) then
+  if current && keeper_schedules_answer_reaches_pane state request then
     match result with
     | Ok snapshot ->
         let same_page = match state.keeper_schedules_page with

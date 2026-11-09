@@ -7,9 +7,8 @@
     2026-08-11: 103 keeper cycle failures in one day from exactly this).
 
     The table lives in process memory, so a restart forgets it and the next
-    refusal teaches it again. Every rest ends at the next success on its
-    scope; an observation without a reset also ends at the cap after it was
-    noted.
+    refusal teaches it again. An observation without a reset ends at the cap
+    after it was noted or at the next success.
 
     This module remembers that fact and lets candidate ordering act on it.
     For a Keeper walk it is an ordering preference, not an admission gate — a
@@ -78,11 +77,10 @@ val note_read_without_reset_at : now:float -> scope:scope -> unit
     {!note_observed_exhausted_at}. *)
 
 val note_succeeded : scope:scope -> unit
-(** A call on [scope] got through, so every rest recorded on it is dropped,
-    a stated window included: the provider let this call in, so its earlier
-    answer about a time no longer describes the account. When that answer
-    still held for another model on the same account, the next refusal states
-    it again (RFC-exact-lane-waits-for-a-stated-reset R6, RFC-0449 §2.6). *)
+(** A call on [scope] got through, so an observation recorded by
+    {!note_observed_exhausted} no longer holds and is dropped.  A stated
+    window is left alone: one call succeeding inside it does not make the
+    provider's answer about a time untrue. *)
 
 val is_exhausted : scope:scope -> now:float -> bool
 (** Whether ordering should hold [scope] back at [now] — a stated window or

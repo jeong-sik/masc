@@ -91,13 +91,13 @@ let note_read_without_reset_at ~now ~scope =
   note_observed_at ~now ~scope Read_named_no_reset
 
 let note_succeeded ~scope =
-  (* A call getting through ends every rest on the scope, a stated reset
-     included: the provider let this call in, so its earlier answer about a
-     time no longer describes the account. An Exact-output lane holds its
-     slots on a stated reset, so a reset left in place after a success would
-     keep holding a scope that answers (RFC-exact-lane-waits-for-a-stated-reset
-     R6, RFC-0449 §2.6). *)
-  Stdlib.Mutex.protect mu (fun () -> Hashtbl.remove windows scope);
+  Stdlib.Mutex.protect mu (fun () ->
+    match Hashtbl.find_opt windows scope with
+    (* Only an observation is cleared by a call getting through. A stated
+       window is the provider's own answer about a time, and one success
+       inside it does not make it untrue. *)
+    | Some (Observed _) -> Hashtbl.remove windows scope
+    | Some (Until _) | None -> ());
   Runtime_path_rest_signal.recorded ()
 
 (* The entry that still rests [scope] at [now], pruning one that has passed.

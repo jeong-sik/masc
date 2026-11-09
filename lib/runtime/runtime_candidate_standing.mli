@@ -60,11 +60,10 @@ val observe :
   candidate:Runtime_candidate_backpressure.candidate option ->
   quota_scope:Runtime_quota_window.scope option -> observation -> unit
 (** Record only facts about the actual dispatched frozen candidate/scope.
-    [Answered] precedes syntax/domain validation and clears candidate evidence
-    and the scope's quota rest, a provider-stated reset included
-    (RFC-exact-lane-waits-for-a-stated-reset R6). A rate limit never exhausts
-    sibling credentials. No ownerless failed-attempt is created. [None] means
-    the attempt did not retain that identity, not a live lookup. *)
+    [Answered] precedes syntax/domain validation, clears candidate evidence and
+    undated quota, and preserves provider-stated reset windows. A rate limit
+    never exhausts sibling credentials. No ownerless failed-attempt is created.
+    [None] means the attempt did not retain that identity, not a live lookup. *)
 
 val observe_http_error :
   now:float -> candidate:Runtime_candidate_backpressure.candidate ->

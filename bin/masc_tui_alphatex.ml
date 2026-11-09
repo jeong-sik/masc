@@ -33,11 +33,13 @@ let failure_text = function
    widest fret on any string contributes to that column's width.
 
    Systems normally end at bar lines. An oversized bar continues between
-   whole beats, retaining the original bar and beat objects. A continuation
-   is a display edge, not a musical barline. Only an indivisible beat with
-   its original edge marks can refuse the reading. The whole plan is checked
-   before drawing allocates any rows; each fragment then costs at most the
-   pane width per string. The full result still grows with the score. *)
+   whole beats, retaining the original bar and beat objects. A bar that has
+   to continue begins a system of its own, so the line breaks at a bar line
+   before it breaks between beats. A continuation is a display edge, not a
+   musical barline. Only an indivisible beat with its original edge marks can
+   refuse the reading. The whole plan is checked before drawing allocates any
+   rows; each fragment then costs at most the pane width per string. The full
+   result still grows with the score. *)
 
 (* What a note writes on its line: its fret, in parentheses when it is tied
    and held on rather than picked, and a [*] after it when it carried
@@ -187,7 +189,10 @@ let layout ~max_width (score : Score.t) =
     | fragment :: rest ->
         let width = fragment_width fragment in
         let systems, current, used = match current with
-          | _ :: _ when fragment.left = Continuation || used + width > max_width ->
+          | _ :: _
+            when fragment.left = Continuation
+                 || fragment.right = Continuation
+                 || used + width > max_width ->
               List.rev current :: systems, [], lead
           | [] | _ :: _ -> systems, current, used in
         let current = fragment :: current in

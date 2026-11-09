@@ -1,9 +1,9 @@
 ---
 rfc: "microvm-guest-agent-over-socket"
 title: "microVM 게스트에 상주 agent 를 두고 요청을 unix 소켓으로 보내요 — container exec 를 요청마다 부르지 않으려고"
-status: Draft
+status: Active
 created: 2026-11-03
-updated: 2026-11-03
+updated: 2026-11-09
 author: claude
 related: ["0395", "0405", "0427"]
 ---
@@ -118,7 +118,7 @@ agent 소켓은 root 전용 디렉터리에 있어서 Keeper uid 는 경로로 �
    - 선택은 Keeper TOML 의 `microvm_delivery` 예요(`exec_per_request` 가 기본, `agent_socket`). `sandbox_profile = "microvm"` 이고 `microvm_backend = "apple_container"` 일 때만 `agent_socket` 을 받아요. backend 를 적지 않은 Keeper 는 호스트 기본 backend 로 뜨지만, 그 값은 TOML 을 읽은 뒤에 정해져서 이 검사가 보지 못해요. 그래서 그런 Keeper 도 backend 줄을 적어요.
    - 턴마다 게스트를 다시 판정하면서 TOML 을 읽어요. 값을 바꾸면 다음 턴에 plan 이 달라져 게스트가 교체돼요.
 2. canary 기준(7절)을 넘으면 나머지 Apple Keeper 를 옮겨요.
-3. 모두 옮기면 `Exec_per_request` 전달 방식과 선택 값을 한 PR 에서 지워요. 그 뒤 되돌리기는 그 PR 의 revert 예요.
+3. 모두 옮기면 선택 값과 Apple 의 `Exec_per_request` 전달 방식을 한 PR 에서 지워요. Microsandbox·Nerdctl_kata 는 `Exec_per_request` 그대로예요(3.10, 사용자 결정 2026-11-09). 그 뒤 되돌리기는 그 PR 의 revert 예요. 진행 상황은 10절에 있어요.
 
 ### 3.10 바뀌지 않는 것
 
@@ -228,3 +228,26 @@ masc 가 그리는 모양 그대로(`--entrypoint <shim>`, 인자 `--serve <게�
 - 정지 사고: #46602
 - 레인 분류: #47787, #47805
 - apple/container PR #1928 "Fix XPC file handle ownership", #2060 "Reap completed exec host state in the Linux runtime helper" (11-03 확인 시 둘 다 open)
+
+## 10. 진행 상황 (2026-11-09)
+
+### 10.1 옮기는 순서(3.9)
+
+1. 1단계는 2026-11-03 에 병합했어요. canary 는 7.3 결과대로예요.
+2. 2단계: 라이브 Keeper TOML 34개 중 microVM Keeper 20개가 모두 `microvm_backend = "apple_container"`, `microvm_delivery = "agent_socket"` 이었어요(2026-11-09 읽기).
+3. 3단계: 선택 값(`microvm_delivery`)과 Apple 의 `Exec_per_request` 를 지웠어요.
+   - 전달 방식은 backend 가 정해요(`Keeper_microvm_backend.request_delivery`). Apple 은 `Guest_agent`, Microsandbox·Nerdctl_kata 는 `Exec_per_request` 예요.
+   - `Keeper_sandbox_microvm.shim_exec_prefix_for` 는 `Keeper_microvm_backend.exec_runtime`(Microsandbox·Nerdctl_kata)만 받아요. Apple 용 exec 접두사는 만들 수 없어요.
+   - Apple 게스트는 언제나 agent plan 으로 떠요. 붙이기(attach)는 게스트가 agent 소켓을 publish 하지 않으면 `microvm_agent_not_published` 로 거절해요. 그런 게스트는 plan 이 달라서 그 Keeper 의 다음 턴이 새 게스트로 바꿔요.
+   - 키가 남은 TOML 은 다른 모르는 키처럼 load 오류예요(`unknown keeper TOML keys`).
+
+### 10.2 검증 계획(7절) 결과
+
+- 7.2 테스트 하네스: 아직이에요. `test/keeper_guest_survival_runtime/` 의 가짜 `container` 는 `--publish-socket` 을 inspect 에 옮기지만 hello 와 요청 relay 는 흉내 내지 않아요. 3단계 뒤 이 하네스의 Apple 게스트는 요청을 받지 못해요.
+- 7.3 canary(#49316 본문): e-masc-the-leader 한 명을 2026-11-05 10:29Z 부터 24시간 37분 새 경로로 돌렸어요. 요청은 모두 소켓으로 갔어요.
+  - 기준 1(fd·pipe): 그 VM runtime 의 짝 없는 pipe 가 1 에서 11 로 늘었어요. 늘어난 10개는 서버 부팅 뒤 첫 dispatch 10번과 시각이 맞아요. 부팅마다 한 번 도는 build 디렉터리 생성의 `container exec -i` 였고, #49316(2026-11-07 병합)이 `-i` 를 뺐어요. Execute 127건이 있던 10분 창 54개에서는 늘지 않았어요. 같은 기간 옛 경로 VM 은 Execute 한 번에 1.1~2.2개씩 늘었어요(pr-updater +254, github-pr-checker +378).
+  - 기준 2(timeout): canary Execute 의 timeout 은 0건이에요.
+  - 기준 3(p50): Execute p50 이 전 2,164ms(n=305)에서 뒤 2,208ms(n=137)로 44ms 길었어요. 기준을 글자 그대로 넘지는 못했어요. 이 차이가 잡음인지는 따로 보지 않았어요.
+  - #49316 의 "배포 뒤" 재측정(서버 재시작 전후의 canary pipe)은 이 저장소에 기록이 없어요. 2026-11-09T09:23:29Z 에 같은 VM runtime 의 짝 없는 pipe 는 15개였어요. 11 에서 늘어난 원인은 나눠 보지 않았어요.
+- 7.4 pipe 용량: 2026-11-09T09:23:29Z 에 `bin/pipeleak.py once` 의 `bigwrite` 가 65,536 바이트였어요.
+  - 그때 agent 소켓을 publish 하지 않는 옛 게스트가 둘 떠 있었어요(2026-11-02 부팅, 짝 없는 pipe 220개·109개). 두 Keeper 의 TOML 은 이미 `agent_socket` 이었지만 게스트는 그대로였어요.

@@ -364,7 +364,7 @@ let reading_lines_carry_how_much_each_one_matters () =
     presence = Decode.Live; phase; applied_revision = None } in
   let tones_of label row = List.filter_map (function
     | L.Fact { label = name; tone; _ } when String.equal name label -> Some tone
-    | L.Fact _ | L.Title _ | L.Note _ -> None) (Display.detail_lines row) in
+    | L.Fact _ | L.Title _ | L.Note _ | L.Items _ -> None) (Display.detail_lines row) in
   let check name label expected row = Alcotest.(check (list tone)) name expected (tones_of label row) in
   let with_worker phase = row_of manual_selection (Decode.Package_state { declaration = None; instances = [ worker phase ] }) in
   check "a failed worker is a failure" "Worker" [ L.Failure ] (with_worker (Decode.Failed "cleanup incomplete"));

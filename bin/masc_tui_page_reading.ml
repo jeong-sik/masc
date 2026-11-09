@@ -2,6 +2,7 @@ module Ansi = Masc_tui_ansi.Ansi
 module Theme = Masc_tui_ansi.Theme
 module Terminal_text = Masc_tui_ansi.Terminal_text
 module Message_layout = Masc_tui_message_layout
+module Numbered_list = Masc_tui_numbered_list
 module Page_line = Masc_tui_page_line
 
 let detail_indent = "  "
@@ -58,6 +59,17 @@ let fact_rows ~max_cells ~label_cells ~tone label value =
               Ansi.reset, detail_indent ^ String.make (label_cells + 1) ' ' ^ styled_value line)
            rest
 
+(* A list is its label on a row of its own and one numbered row under it for
+   each value, a further indent in, so a value that wraps stays under its own
+   number. *)
+let items_rows ~max_cells ~tone label values =
+  wrap_indented_line ~max_cells (Theme.recede ()) (label ^ ":")
+  @ List.map
+      (fun row -> tone_style tone, detail_indent ^ detail_indent ^ row)
+      (Numbered_list.rows
+         ~max_cells:(max 1 (max_cells - String.length detail_indent))
+         (List.map Terminal_text.single_line values))
+
 let widest_label_cells lines =
   List.fold_left
     (fun widest -> function
@@ -66,7 +78,7 @@ let widest_label_cells lines =
            Message_layout.display_width (Terminal_text.single_line label) + 1
          in
          if cells <= label_cells_cap then max widest cells else widest
-       | Page_line.Title _ | Page_line.Note _ -> widest)
+       | Page_line.Title _ | Page_line.Note _ | Page_line.Items _ -> widest)
     0 lines
 
 let rows ?label_cells ~max_cells (lines : Page_line.t list) =
@@ -81,5 +93,7 @@ let rows ?label_cells ~max_cells (lines : Page_line.t list) =
       | Page_line.Note { text; tone } ->
         wrap_indented_line ~max_cells (tone_style tone) text
       | Page_line.Fact { label; value; tone } ->
-        fact_rows ~max_cells ~label_cells ~tone label value)
+        fact_rows ~max_cells ~label_cells ~tone label value
+      | Page_line.Items { label; values; tone } ->
+        items_rows ~max_cells ~tone label values)
     lines

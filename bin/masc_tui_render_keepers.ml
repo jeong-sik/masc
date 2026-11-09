@@ -873,7 +873,7 @@ let grid_gap (grid : Grid.t) memory =
         Masc_tui_chart.format_compact_num (past_last_atom - first_atom)
     | Memory_reading.No_row | Memory_reading.Row { gap = Memory_reading.Gap_unmeasured; _ } -> Keeper_mark.unknown_mark
     | Memory_reading.Row { gap = Memory_reading.Gap _ | Memory_reading.No_gap; _ }
-    | Memory_reading.Unknown | Memory_reading.No_row | Memory_reading.Refused _ -> ""
+    | Memory_reading.Unknown | Memory_reading.Refused _ -> ""
   in
   Theme.info () ^ Message_layout.pad_left text grid.mem_cells ^ Ansi.reset
 

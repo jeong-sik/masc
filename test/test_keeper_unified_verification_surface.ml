@@ -1151,12 +1151,12 @@ let test_scheduled_request_survives_discovery_and_checkpoint () =
         { tool_use_id = "discover-schedule-tools"; content = "Tools discovered";
           outcome = Agent_core.Types.Tool_succeeded; json = None; content_blocks = None } ] } in
     let transcript = [ original; search; tool_result ] in
-    let first = Masc.Keeper_run_prompt.assemble_request_context
+    let first = Masc.Keeper_run_prompt.assemble_request_context ~checkpoint_owner:Runtime_execution.Masc_agent_core
         ~system:(system_of_text "stable keeper contract") ~post_tool_round:false
         ~previous_assembly:None ~dynamic_context_partition:(Some prompt.world_partition)
         ~existing_extra_system_context:None
         ~blocks:[ Prompt_block_id.Dynamic_context, prompt.world_state ] in
-    let after_search = Masc.Keeper_run_prompt.assemble_request_context
+    let after_search = Masc.Keeper_run_prompt.assemble_request_context ~checkpoint_owner:Runtime_execution.Masc_agent_core
         ~system:(system_of_text "stable keeper contract") ~post_tool_round:true
         ~previous_assembly:(Some first)
         ~dynamic_context_partition:(Some prompt.world_partition)

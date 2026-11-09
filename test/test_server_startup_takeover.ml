@@ -6,14 +6,18 @@ let read_file path =
 let write_file path content =
   Out_channel.with_open_bin path (fun oc -> output_string oc content)
 
+(* [Sys.is_directory] stats through a link: a directory alias is walked into and
+   its [Unix.rmdir] fails with ENOTDIR, and a dangling link reads false from
+   [Sys.file_exists] and is skipped, leaving the parent behind (#26648). Read the
+   entry itself with [Unix.lstat] and only a real directory is descended. *)
 let rec rm_rf path =
-  if Sys.file_exists path then
-    if Sys.is_directory path then begin
-      Sys.readdir path
-      |> Array.iter (fun name -> rm_rf (Filename.concat path name));
-      Unix.rmdir path
-    end else
-      Sys.remove path
+  match Unix.lstat path with
+  | exception Unix.Unix_error ((Unix.ENOENT | Unix.ENOTDIR), _, _) -> ()
+  | { Unix.st_kind = Unix.S_DIR; _ } ->
+    Sys.readdir path
+    |> Array.iter (fun name -> rm_rf (Filename.concat path name));
+    Unix.rmdir path
+  | _ -> Sys.remove path
 
 let with_temp_dir prefix f =
   let dir = Filename.temp_file prefix "" in
@@ -1575,9 +1579,42 @@ let test_contention_recovery_guidance () =
     ; Server_startup_takeover.Owner_unnamed
     ]
 
+(* The lease fixtures link [alias] at a directory inside the tree their cleanup
+   removes, so the cleanup has to finish that link itself; a dangling one must
+   not be skipped and a followed one must not reach the target (#26648). *)
+let test_rm_rf_unlinks_symlinks () =
+  let fresh_dir prefix =
+    let path = Filename.temp_file prefix "" in
+    Sys.remove path;
+    Unix.mkdir path 0o755;
+    path
+  in
+  let root = fresh_dir "startup-rm-rf-root" in
+  let kept_dir = fresh_dir "startup-rm-rf-kept" in
+  Fun.protect
+    ~finally:(fun () ->
+      rm_rf root;
+      rm_rf kept_dir)
+  @@ fun () ->
+  let kept = Filename.concat kept_dir "kept" in
+  write_file kept "kept";
+  Unix.mkdir (Filename.concat root "real") 0o755;
+  Unix.symlink kept_dir (Filename.concat root "alias");
+  Unix.symlink (Filename.concat root "gone") (Filename.concat root "dangling");
+  rm_rf root;
+  Alcotest.(check bool) "the tree is gone" false (Sys.file_exists root);
+  Alcotest.(check bool) "the link target survived" true (Sys.file_exists kept);
+  Alcotest.(check string) "the link target kept its contents" "kept"
+    (read_file kept)
+
 let () =
   Alcotest.run "Server_startup_takeover"
     [
+      ( "temp directory cleanup",
+        [
+          Alcotest.test_case "rm_rf unlinks live and dangling links" `Quick
+            test_rm_rf_unlinks_symlinks;
+        ] );
       ( "helpers",
         [
           Alcotest.test_case "contention recovery includes host and lock evidence"

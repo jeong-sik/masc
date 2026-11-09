@@ -644,6 +644,10 @@ Runtime 조회: rg -n --glob '*.ml' '\bRuntime\.(get_runtime_by_id|resolve_assig
     - 선언된 홈이 꼭 있어야 하는 호출(Keeper 턴, verify)은 타입 인자 `declared`로 그 홈만 받는다. 프로토콜 fixture만 프로세스 환경을 쓴다.
     - 호출처: 턴 드라이버(시도마다 Keeper 턴 요청), verify, Fusion, capability probe, 사용량 읽기(실패한 턴의 계정), `masc runtime-muse-models`(작업 공간 판정 뒤 운영자 호출), setup의 모델 조회.
   - D3b Antigravity·Vibe. 호스트 계정은 1단계에서 공유하지 않으므로 다계정에서 시작을 모두 거절한다. 단일 사용자에서는 지금처럼 뜬다.
+    - `Runtime_account_access.authorize_host`가 단일 사용자 프로세스에만 `host_account`를 준다. 다계정은 `Host_account`로 거절한다. 판정에 요청은 쓰지 않는다. 1단계에서는 누가 묻든 같다.
+    - 토큰을 받는 곳은 호스트 자격 증명에 닿는 함수 전부다. Antigravity 턴(`run_turn`), 홈 준비(`prepare`, `prepare_account`, `prepare_native`, `prepare_for_login`), `/usage` 읽기, readiness 턴, 컨텍스트 관찰, Vibe 호출(`Runtime_vibe_cli.run`), vibe-acp readiness.
+    - 홈 준비도 토큰을 받는다. 홈에는 호스트 자격 증명의 사본이 들어가므로, 거절된 시작은 사본도 만들지 않는다.
+    - 호출처: 턴 드라이버(시도마다), verify, capability probe, Fusion, 사용량 읽기, setup 로그인, `masc runtime-antigravity-{account,models,context}`(작업 공간 판정 뒤), `masc lane-cli-probe`.
   - D3c lane 증거. 설계 §11.1의 lane 종류마다 다른 owner의 account-home을 읽으려다 거절되는 시험이다.
 
 **D6 범위**

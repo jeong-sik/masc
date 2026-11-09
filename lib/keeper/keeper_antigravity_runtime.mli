@@ -28,6 +28,8 @@ val run :
   ?required_native_posture:Runtime_native_tools.posture ->
   ?official_client_continuation:Keeper_semantic_execution.official_client_checkpoint ->
   runtime_id:string ->
+  host:Runtime_account_access.host_account ->
+    (** The start the access allowed for this attempt (plan D3b). *)
   configured_reasoning_effort:Llm_provider.Reasoning_effort.t option ->
   turn_timeout_s:float option ->
   keeper_name:string ->

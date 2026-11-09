@@ -6,7 +6,11 @@
     selected principal publishes a fresh opaque generation so another account
     cannot reuse the prior account's HOME or session.
     Old in-flight generations remain intact. Turn-scoped MCP configuration is
-    owned by the caller. *)
+    owned by the caller.
+
+    Every preparation takes a {!Runtime_account_access.host_account}: a HOME
+    holds a copy of a credential of the host, so a multi-account process
+    prepares none (multi-account plan D3b). *)
 
 type error =
   | Invalid_runtime_root of string
@@ -78,7 +82,8 @@ val keeper_prepare_lock_path : runtime_root:string -> owner_leaf:string -> strin
     composition; does not create anything. *)
 
 val prepare
-  :  runtime_root:string
+  :  host:Runtime_account_access.host_account
+  -> runtime_root:string
   -> owner_leaf:string
   -> oauth_source:string
   -> (t, error) result
@@ -107,13 +112,18 @@ val prepare
     returned actual HOME is the opaque account identity for session binding. *)
 
 val prepare_account
-  : runtime_root:string -> owner_leaf:string -> oauth_source:string -> (t, error) result
+  :  host:Runtime_account_access.host_account
+  -> runtime_root:string
+  -> owner_leaf:string
+  -> oauth_source:string
+  -> (t, error) result
 (** Validate and select the account generation without changing its permissions.
     Keeper uses this before comparing session identity: a losing concurrent
     planner must not reset an active client's policy. Before launching a client,
     its admitted owner must publish the intended policy with [prepare_native_tools]. *)
 
-val prepare_for_login : runtime_root:string -> owner_leaf:string -> (t, error) result
+val prepare_for_login
+  : host:Runtime_account_access.host_account -> runtime_root:string -> owner_leaf:string -> (t, error) result
 (** Prepare the private official-client HOME without fabricating an OAuth seed.
     Only an explicit sign-in action may use it to launch the interactive CLI. *)
 val oauth_path : t -> string
@@ -166,7 +176,8 @@ val prepare_read_hook
     Missing/unusable helper binaries refuse preparation. *)
 
 val prepare_native
-  : runtime_root:string -> owner_leaf:string -> oauth_source:string
+  : host:Runtime_account_access.host_account
+  -> runtime_root:string -> owner_leaf:string -> oauth_source:string
   -> posture:Runtime_native_tools.posture -> workspace:native_workspace
   -> additional_workspaces:string list -> (t * string, error) result
 (** Prepare persistent account storage and atomically publish the intended

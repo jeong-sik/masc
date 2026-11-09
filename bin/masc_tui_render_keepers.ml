@@ -2626,7 +2626,7 @@ let render_keeper_axes (state : state) =
           ^ Terminal_text.single_line err ^ Ansi.reset)
    | None -> ());
 
-  Option.iter (fun note -> box_line buf cols (Theme.recede () ^ note ^ Ansi.reset))
+  Option.iter (fun note -> box_line buf cols note)
     (local_source_pending_note state Local_keepers);
 
   let chrome_rows = count_frame_lines buf in

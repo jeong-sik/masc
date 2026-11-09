@@ -102,11 +102,12 @@ let refusal_answer (refusal : Runtime_account_access.refusal) =
   | Runtime_account_access.Not_a_keeper_id _
   | Runtime_account_access.No_membership _
   | Runtime_account_access.Not_a_declared_home
+  | Runtime_account_access.Host_account _
   | Runtime_account_access.Turn_refused Authz_keeper_turn.Not_bootstrapped ->
     (* The preview publishes its access before it listens, a turn is no
        operator call, the name was read as an id of the log, an admission
-       makes the membership, the runtime declares its home, and the zone
-       opened on a bootstrapped log. *)
+       makes the membership, the runtime declares its home, the preview
+       starts no host client, and the zone opened on a bootstrapped log. *)
     Log.Server.warn "A Keeper turn was refused: %s" text;
     error R.Internal_error_500 unexpected_refusal
 ;;

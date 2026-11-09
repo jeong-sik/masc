@@ -1,3 +1,7 @@
+(* A start of Antigravity, by the access the suite publishes first. *)
+let antigravity_host () =
+  Masc_test_deps.host_account Runtime_account_access.Antigravity
+
 open Alcotest
 open Masc
 
@@ -245,7 +249,7 @@ let run_fixture
       ; timeout_s = if no_turn_deadline then None else Some timeout_s
       }
     in
-    Runtime_antigravity.run_turn
+    Runtime_antigravity.run_turn ~host:(antigravity_host ())
       ?conversation_mode
       ?home_dir
       ?on_conversation_ready
@@ -1257,7 +1261,7 @@ let test_callback_timeout_origin_is_preserved_without_deadline () =
              ; timeout_s = None
              }
            in
-           Runtime_antigravity.run_turn
+           Runtime_antigravity.run_turn ~host:(antigravity_host ())
              ~mgr:(Eio.Stdenv.process_mgr env)
              ~clock:(Eio.Stdenv.clock env)
              ~cwd:Eio.Path.(Eio.Stdenv.fs env / "/tmp")
@@ -1280,7 +1284,7 @@ let test_operator_interrupt_callback_keeps_typed_cause () =
           let config = { (Runtime_antigravity.default_config
             ~cwd:"/tmp" ~model:"gemini-fixture") with
             cli_path = path; timeout_s = None } in
-          Runtime_antigravity.run_turn
+          Runtime_antigravity.run_turn ~host:(antigravity_host ())
             ~mgr:(Eio.Stdenv.process_mgr env)
             ~clock:(Eio.Stdenv.clock env)
             ~cwd:Eio.Path.(Eio.Stdenv.fs env / "/tmp")
@@ -2183,7 +2187,7 @@ let test_admission_is_process_free () =
   in
   let before_spawn_called = ref false in
   let result = Eio_main.run (fun env ->
-    Runtime_antigravity.run_turn
+    Runtime_antigravity.run_turn ~host:(antigravity_host ())
       ~before_spawn:(fun () -> before_spawn_called := true)
       ~mgr:(Eio.Stdenv.process_mgr env)
       ~clock:(Eio.Stdenv.clock env)
@@ -2219,7 +2223,7 @@ let test_live_start_and_resume () =
           }
         in
         let run ?conversation_mode prompt =
-          Runtime_antigravity.run_turn
+          Runtime_antigravity.run_turn ~host:(antigravity_host ())
             ?conversation_mode
             ~mgr:(Eio.Stdenv.process_mgr env)
             ~clock:(Eio.Stdenv.clock env)
@@ -2302,6 +2306,7 @@ let test_result_completes_when_the_cli_hangs_in_shutdown () =
 ;;
 
 let () =
+  Masc_test_deps.publish_single_user_access ();
   run
     "runtime_antigravity"
     [ ( "stream-json"

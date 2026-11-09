@@ -655,8 +655,16 @@ let probe_antigravity_invocation ~sw ~net ~secure_random ~mgr ~clock ~fs ~base_p
              (* The probe runs in the HOME's own empty folder. [base_path] would
                 make every Keeper's account files under [.masc] its workspace,
                 which agy reads without a rule (RFC-0490 2.2). *)
+             (* HIGH-RISK-UNREVIEWED: the probe starts the client on a
+                credential of the host, which a multi-account process shares
+                with no person (plan D3b). *)
+             (match Runtime_account_access.authorize_host Runtime_account_access.Antigravity with
+              | Error refusal ->
+                Error (Account_not_authorized (Runtime_account_access.refusal_to_string refusal))
+              | Ok host ->
              (match
                 Runtime_antigravity_home.prepare_native
+                  ~host
                   ~runtime_root
                   ~owner_leaf:antigravity_probe_owner_leaf
                   ~oauth_source:exec.oauth_source
@@ -735,6 +743,7 @@ let probe_antigravity_invocation ~sw ~net ~secure_random ~mgr ~clock ~fs ~base_p
                    (match
                       Runtime_antigravity.run_turn
                         ~home_dir:(Runtime_antigravity_home.home_dir home)
+                        ~host
                         ~mgr
                         ~clock
                         ~cwd:Eio.Path.(fs / native_cwd)
@@ -752,7 +761,7 @@ let probe_antigravity_invocation ~sw ~net ~secure_random ~mgr ~clock ~fs ~base_p
                            ~seen
                            ~elapsed_s:(now () -. started)
                            ~text:(Some turn.text)
-                           ~dynamic_tool_calls:(List.length !seen))))))))
+                           ~dynamic_tool_calls:(List.length !seen)))))))))
 ;;
 
 (* The same isolated, selected-account MCP runner used by setup verification.

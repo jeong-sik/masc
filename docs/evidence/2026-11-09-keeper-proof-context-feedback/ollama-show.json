@@ -1,0 +1,20 @@
+{
+  "observed_at": "2026-11-09T13:27:16.073828+00:00",
+  "endpoint": "https://ollama.com/api/show",
+  "model": "deepseek-v4.1-flash",
+  "capabilities": [
+    "completion",
+    "thinking",
+    "tools",
+    "vision"
+  ],
+  "thinking": {
+    "values": [
+      false,
+      "low",
+      "high",
+      "max"
+    ],
+    "default": "high"
+  }
+}

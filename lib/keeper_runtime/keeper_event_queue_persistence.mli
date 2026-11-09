@@ -602,9 +602,6 @@ val project_accepted_transfer_guarded_result :
     converges after target identity rotation, while a first projection cannot
     create state for an absent or replaced Keeper. *)
 
-val persist_snapshot :
-  base_path:string -> keeper_name:string -> (unit -> Keeper_event_queue.t) -> unit
-
 type queue_residence_unknown_reason = Keeper_event_queue_fleet_projection.queue_residence_unknown_reason =
   | First_admission_not_recorded
   | Queue_observation_incomplete

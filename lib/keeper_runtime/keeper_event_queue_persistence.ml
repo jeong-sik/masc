@@ -1489,10 +1489,6 @@ let persist ~base_path ~keeper_name queue =
   update ~base_path ~keeper_name (fun _ -> queue)
 ;;
 
-let persist_snapshot ~base_path ~keeper_name snapshot =
-  update ~base_path ~keeper_name (fun _ -> snapshot ())
-;;
-
 let peek_when_result ~base_path ~keeper_name ~now ~ready =
   match load_state_result ~base_path ~keeper_name with
   | Error _ as error -> error

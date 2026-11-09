@@ -231,7 +231,6 @@ let test_equal_times_keep_the_order_things_happen_in () =
 ;;
 
 let test_only_the_newest_wakes_enter () =
-  Alcotest.check Alcotest.int "two wakes are shown" 2 Masc_tui_keeper_feed.wakes_shown;
   Alcotest.check names "the third newest is left out, the rest keep their order"
     [ "wake w2"; "wake w3" ]
     (told ~turns:[]

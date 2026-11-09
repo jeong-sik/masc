@@ -1185,12 +1185,6 @@ let keeper_story_lines (state : state) ~now ~inner ~body_rows (row : Keeper_list
                ~failing_since:runtime.kr_failing_since)
         , Masc_tui_keeper_pulse.pulse_cell ~now runtime.kr_recent_turns )
   in
-  let digest_at =
-    match memory with
-    | Masc_tui_keeper_memory_reading.Row { digest_at; _ } -> digest_at
-    | Masc_tui_keeper_memory_reading.Unknown | Masc_tui_keeper_memory_reading.No_row
-    | Masc_tui_keeper_memory_reading.Refused _ -> None
-  in
   let lag =
     match memory with
     | Masc_tui_keeper_memory_reading.Row { lag = Masc_tui_keeper_memory_reading.Lag turns; _ }
@@ -1260,11 +1254,10 @@ let keeper_story_lines (state : state) ~now ~inner ~body_rows (row : Keeper_list
   (* The feed takes the lines the rest of the page leaves in the window. *)
   let feed =
     Masc_tui_render_keeper_story.feed_lines state ~now
-      ~cells:(max 0 (inner - story_label_cells))
       ~max_lines:
         (body_rows - List.length past_head - List.length past_tail - List.length now_entries
          - List.length next_entries)
-      ~keeper_name ~digest_at
+      ~keeper_name
   in
   let past_entries = past_head @ feed @ past_tail in
   labelled_lines "◂ past"

@@ -15,16 +15,13 @@ val at : item -> float
 (** When the event happened, in Unix seconds. A wake's time is when it started.
     A turn's is when its record was written, which is when the turn ended. *)
 
-val wakes_shown : int
-(** How many wakes enter a feed: the newest two. *)
-
 val of_sources :
   turns:Masc_tui_keeper_turns.turn list ->
   wakes:Masc_tui_keeper_wakes.t list ->
   digest_at:float option ->
   item list
 (** The events, oldest first. [wakes] is newest first, as
-    {!Masc_tui_keeper_wakes.of_page} gives them, and only the first
-    {!wakes_shown} enter. On equal times a wake comes before a turn and a turn
-    before a digest: a wake starts a turn and a digest follows the turns it
-    digested. Events of one kind keep the order they came in. *)
+    {!Masc_tui_keeper_wakes.of_page} gives them, and only the newest two
+    enter. On equal times a wake comes before a turn and a turn before a
+    digest: a wake starts a turn and a digest follows the turns it digested.
+    Events of one kind keep the order they came in. *)

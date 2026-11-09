@@ -932,11 +932,14 @@ named on its title row: `story`, `s schedules` and `m memory`.
   line gives its outcome and the schedule that woke the Keeper. A schedule
   records only its own last wake, so the two wakes are the last wakes of the
   two schedules on the Keeper's first schedule page whose wakes are newest. A
-  page too short for the feed drops its oldest lines first.
+  page too short for the feed drops its oldest events first.
   A source the window has not read, cannot read, has cut, is reading again or
-  whose read failed does not vanish from the feed: one line after the events
-  says so, for example `turns reading…`, `wakes from the first page only` or
-  `wakes (schedule read failed)`. A wake whose time cannot be read makes the wakes
+  whose read failed does not vanish from the feed: a line of its own after the
+  events says so, one line per source, for example `turns reading…`,
+  `wakes from the first page only` or `wakes (schedule read failed)`. The line
+  of a read that failed ends with the reason the read stored. These lines stay
+  when the page is short, and the lines of failed reads outlast the others. A
+  wake whose time cannot be read makes the wakes
   unknown. The window reads turns and schedules while the story page is open,
   one Keeper at a time as the cursor moves, and reads the turns again when the
   server announces a change in that Keeper's turns.

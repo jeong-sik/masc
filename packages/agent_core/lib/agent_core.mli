@@ -21,7 +21,6 @@ module Types = Agent_core_base.Types
 module History = Agent_core_base.History
 module Util = Agent_core_base.Util
 module Fs_result = Fs_result
-module Fs_atomic_eio = Fs_atomic_eio
 module Context = Agent_core_base.Context
 module Provider_runtime_binding = Provider_runtime_binding
 module Exact_output = Llm_provider.Exact_output

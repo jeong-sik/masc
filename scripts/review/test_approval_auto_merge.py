@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+import types
 import unittest
 from unittest.mock import patch
 
@@ -287,6 +288,11 @@ class AutomaticMergeReceipts(unittest.TestCase):
         self.scope = {'stack': {'number': 900},
                       'scope': [{'number': 101}, {'number': 102}]}
         self.receipt = {'status': 'pending', 'details': {'uuid': UUID}}
+        # Receipt tests read once unless they install a clock.
+        for patcher in (patch.object(MERGE, 'WAIT_SECONDS', 0),
+                        patch.object(MERGE, 'hand_off', side_effect=lambda repo, outcome: outcome)):
+            patcher.start()
+            self.addCleanup(patcher.stop)
 
     def operation(self, returncode=0):
         return subprocess.CompletedProcess([], returncode, json.dumps(self.receipt), '')
@@ -332,6 +338,248 @@ class AutomaticMergeReceipts(unittest.TestCase):
              redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
             code = MERGE.main()
         self.assertNotEqual(code, 0)
+
+
+class FollowingAcceptedMerges(unittest.TestCase):
+    """Follow the original receipt to a verified result; never resend."""
+
+    def setUp(self):
+        self.scope = {'stack': {'number': 900},
+                      'scope': [{'number': 101}, {'number': 102}]}
+        self.now = 0.0
+        clock = types.SimpleNamespace(monotonic=lambda: self.now, sleep=self.advance,
+                                      time=lambda: 1000.0 + self.now)
+        patcher = patch.object(MERGE, 'time', clock)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.puts = []
+
+    def advance(self, seconds):
+        self.now += seconds
+
+    def accepted(self, returncode=0, body=None):
+        body = {'status': 'pending', 'details': {'uuid': UUID}} if body is None else body
+        def run(command, **kwargs):
+            self.puts.append(command)
+            return subprocess.CompletedProcess(command, returncode,
+                                               body if isinstance(body, str) else json.dumps(body), '')
+        return patch.object(MERGE.subprocess, 'run', side_effect=run)
+
+    @staticmethod
+    def landed(number):
+        return {'merged': True, 'merge_commit_sha': sha(number + 5000)}
+
+    def test_pending_then_enqueued_is_final_and_members_decide_completion(self):
+        statuses = iter([{'status': 'pending'}, {'status': 'pending'}, {'status': 'enqueued'}])
+        merged_after = {'count': 0}
+        def pull(repo, number):
+            merged_after['count'] += 1
+            done = merged_after['count'] > 4  # first two polls: members still open
+            return self.landed(number) if done else {'merged': False}
+        with self.accepted(), patch.object(MERGE, 'read', side_effect=lambda path: next(statuses)), \
+             patch.object(MERGE, 'pull', side_effect=pull), redirect_stdout(io.StringIO()):
+            result = MERGE.submit(REPO, 102, sha(102), self.scope)
+        self.assertEqual(result['status'], 'merged')
+        self.assertEqual(result['uuid'], UUID)
+        self.assertEqual(result['head'], sha(102))
+        self.assertEqual(sorted(result['member_states']), [101, 102])
+        self.assertTrue(all(row['merge_commit_sha'] for row in result['member_states'].values()))
+        self.assertEqual(len(self.puts), 1)
+
+    def test_transient_read_failures_retry_the_same_receipt_without_resubmitting(self):
+        calls = {'n': 0}
+        def read(path):
+            calls['n'] += 1
+            self.assertEqual(path, PREFIX + f'/pulls/102/merge-async/{UUID}')
+            if calls['n'] < 3:
+                raise ValueError('temporary gateway error')
+            return {'status': 'merged'}
+        with self.accepted(), patch.object(MERGE, 'read', side_effect=read), \
+             patch.object(MERGE, 'pull', side_effect=lambda r, n: self.landed(n)), \
+             redirect_stdout(io.StringIO()):
+            result = MERGE.submit(REPO, 102, sha(102), self.scope)
+        self.assertEqual(result['status'], 'merged')
+        self.assertEqual(len(self.puts), 1)
+
+    def test_merged_receipt_is_not_success_until_every_member_has_a_commit(self):
+        for partial in ({'merged': False}, {'merged': True, 'merge_commit_sha': None}):
+            with self.subTest(partial=partial), self.accepted(), \
+                 patch.object(MERGE, 'read', return_value={'status': 'merged'}), \
+                 patch.object(MERGE, 'pull', side_effect=lambda r, n: (
+                     self.landed(n) if n == 101 else partial)), \
+                 redirect_stdout(io.StringIO()):
+                result = MERGE.submit(REPO, 102, sha(102), self.scope)
+            self.assertEqual(result['status'], 'resume_dispatched')
+            self.assertEqual(result['previous'], 'still_pending')
+
+    def test_a_queue_that_outlasts_the_wait_is_handed_off_with_its_receipt(self):
+        environment = {'GITHUB_REPOSITORY': REPO, 'GITHUB_EVENT_NAME': 'workflow_dispatch',
+                       'DISPATCH_PR': '102', 'GITHUB_STEP_SUMMARY': ''}
+        output = io.StringIO()
+        with patch.dict(os.environ, environment), patch.object(sys, 'argv', ['auto-merge']), \
+             patch.object(MERGE, 'auto_merge_default', return_value=None), \
+             patch.object(MERGE, 'prepare', return_value=(102, sha(102), self.scope)), \
+             self.accepted(), patch.object(MERGE, 'read', return_value={'status': 'pending'}), \
+             patch.object(MERGE, 'pull', return_value={'merged': False}), \
+             redirect_stdout(output), redirect_stderr(io.StringIO()):
+            code = MERGE.main()
+        self.assertEqual(code, 0)  # handed off, not a merge confirmation
+        self.assertIn('resume_dispatched', output.getvalue())
+        self.assertIn('still_pending', output.getvalue())
+        self.assertIn(UUID, output.getvalue())
+        self.assertEqual(len([c for c in self.puts if '--method' in c]), 1)
+        self.assertGreaterEqual(self.now, MERGE.WAIT_SECONDS)
+
+    def test_terminal_failure_keeps_the_reason(self):
+        failure = {'status': 'failed', 'details': {'message': 'rules rejected'}}
+        with self.accepted(), patch.object(MERGE, 'read', return_value=failure), \
+             patch.object(MERGE, 'pull', return_value={'merged': False}), \
+             redirect_stdout(io.StringIO()):
+            result = MERGE.submit(REPO, 102, sha(102), self.scope)
+        self.assertEqual(result['status'], 'failed')
+        self.assertEqual(result['reason'], {'message': 'rules rejected'})
+
+    def test_an_unreadable_answer_checks_state_and_never_resends(self):
+        for body in ('', 'not json', '[]'):
+            self.puts.clear()
+            with self.subTest(body=body), self.accepted(1, body), \
+                 patch.object(MERGE, 'pull', return_value={'merged': False}):
+                result = MERGE.submit(REPO, 102, sha(102), self.scope)
+            self.assertEqual(result['status'], 'submission_unknown')
+            self.assertEqual(result['request']['head'], sha(102))
+            self.assertEqual(len(self.puts), 1)
+
+    def test_an_unreadable_answer_after_a_real_merge_is_confirmed_from_the_members(self):
+        with self.accepted(0, 'lost'), \
+             patch.object(MERGE, 'pull', side_effect=lambda r, n: self.landed(n)):
+            result = MERGE.submit(REPO, 102, sha(102), self.scope)
+        self.assertEqual(result['status'], 'merged')
+        self.assertEqual(len(self.puts), 1)
+
+    def test_enqueued_never_becomes_merged_so_member_state_completes_it(self):
+        calls = {'n': 0}
+        def pull(repo, number):
+            calls['n'] += 1
+            return self.landed(number) if calls['n'] > 6 else {'merged': False}
+        with self.accepted(), patch.object(MERGE, 'read', return_value={'status': 'enqueued'}), \
+             patch.object(MERGE, 'pull', side_effect=pull), redirect_stdout(io.StringIO()):
+            result = MERGE.submit(REPO, 102, sha(102), self.scope)
+        self.assertEqual(result['status'], 'merged')
+        self.assertLess(self.now, MERGE.WAIT_SECONDS)
+
+    def test_enqueued_with_unmerged_members_is_not_success(self):
+        with self.accepted(), patch.object(MERGE, 'read', return_value={'status': 'enqueued'}), \
+             patch.object(MERGE, 'pull', return_value={'merged': False}), \
+             patch.object(MERGE.subprocess, 'run', side_effect=lambda c, **k: (
+                 subprocess.CompletedProcess(c, 0, json.dumps(self.receipt_body()), '')
+                 if 'merge-async' in ' '.join(c) and '--method' in c else
+                 subprocess.CompletedProcess(c, 0, '', ''))), \
+             redirect_stdout(io.StringIO()):
+            result = MERGE.submit(REPO, 102, sha(102), self.scope)
+        self.assertNotEqual(result['status'], 'merged')
+
+    @staticmethod
+    def receipt_body():
+        return {'status': 'pending', 'details': {'uuid': UUID}}
+
+    def test_a_long_wait_hands_the_original_receipt_to_a_new_run_without_a_new_merge(self):
+        runs = []
+        def run(command, **kwargs):
+            runs.append(command)
+            if command[:3] == ['gh', 'workflow', 'run']:
+                return subprocess.CompletedProcess(command, 0, '', '')
+            return subprocess.CompletedProcess(command, 0, json.dumps(self.receipt_body()), '')
+        with patch.object(MERGE.subprocess, 'run', side_effect=run), \
+             patch.object(MERGE, 'read', return_value={'status': 'pending'}), \
+             patch.object(MERGE, 'pull', return_value={'merged': False}), \
+             patch.object(MERGE.time, 'time', create=True, return_value=1000.0), \
+             redirect_stdout(io.StringIO()):
+            result = MERGE.submit(REPO, 102, sha(102), self.scope)
+        self.assertEqual(result['status'], 'resume_dispatched')
+        puts = [c for c in runs if '--method' in c]
+        dispatches = [c for c in runs if c[:3] == ['gh', 'workflow', 'run']]
+        self.assertEqual((len(puts), len(dispatches)), (1, 1))
+        receipt = json.loads(dispatches[0][dispatches[0].index('-f') + 3].removeprefix('receipt='))
+        self.assertEqual((receipt['uuid'], receipt['head'], receipt['pr'], receipt['members']),
+                         (UUID, sha(102), 102, [101, 102]))
+
+    def test_a_failed_dispatch_stays_red_and_age_never_ends_the_chain(self):
+        outcome = {'status': 'still_pending', 'uuid': UUID, 'pr': 102, 'head': sha(102),
+                   'members': [101, 102], 'since': 0}
+        with patch.object(MERGE.subprocess, 'run',
+                          return_value=subprocess.CompletedProcess([], 0, '', '')) as run:
+            old = MERGE.hand_off(REPO, outcome)  # submitted 50 hours ago in this test
+        self.assertEqual(old['status'], 'resume_dispatched')
+        self.assertEqual(run.call_count, 1)
+        with patch.object(MERGE.subprocess, 'run', side_effect=OSError('gh missing')):
+            failed = MERGE.hand_off(REPO, outcome)
+        self.assertEqual(failed['status'], 'still_pending')
+        self.assertIn('dispatch_failed', failed['resume'])
+
+    def resume_environment(self, **extra):
+        receipt = {'uuid': UUID, 'pr': 102, 'head': sha(102), 'members': [101, 102], 'since': 1.0}
+        return dict({'GITHUB_REPOSITORY': REPO, 'GITHUB_EVENT_NAME': 'workflow_dispatch',
+                     'DISPATCH_PR': '102', 'DISPATCH_RECEIPT': json.dumps(receipt),
+                     'GITHUB_STEP_SUMMARY': ''}, **extra)
+
+    def test_dry_run_with_a_receipt_reads_but_never_dispatches_or_writes(self):
+        with patch.dict(os.environ, self.resume_environment()), \
+             patch.object(sys, 'argv', ['auto-merge', '--dry-run']), \
+             patch.object(MERGE, 'read', return_value={'status': 'pending'}), \
+             patch.object(MERGE, 'pull', return_value={'merged': False, 'state': 'open'}), \
+             patch.object(MERGE.subprocess, 'run') as run, \
+             patch.object(MERGE.time, 'sleep'), patch.object(MERGE, 'WAIT_SECONDS', 0), \
+             redirect_stdout(io.StringIO()) as output:
+            code = MERGE.main()
+        run.assert_not_called()
+        self.assertEqual(code, 1)
+        self.assertIn('still_pending', output.getvalue())
+        self.assertNotIn('resume_dispatched', output.getvalue())
+
+    def test_a_request_that_is_gone_or_a_closed_member_ends_the_chain_visibly(self):
+        receipt = {'uuid': UUID, 'pr': 102, 'head': sha(102), 'members': [101, 102], 'since': 1.0}
+        with patch.object(MERGE, 'read', side_effect=ValueError('gh: Not Found (HTTP 404)')), \
+             patch.object(MERGE.subprocess, 'run') as run:
+            gone = MERGE.resume(REPO, receipt)
+        self.assertEqual(gone['status'], 'request_not_found')
+        run.assert_not_called()
+        with patch.object(MERGE, 'read', return_value={'status': 'pending'}), \
+             patch.object(MERGE, 'pull', return_value={'merged': False, 'state': 'closed'}), \
+             patch.object(MERGE.subprocess, 'run') as run:
+            closed = MERGE.resume(REPO, receipt)
+        self.assertEqual(closed['status'], 'member_closed_unmerged')
+        run.assert_not_called()
+        self.assertNotIn(gone['status'], MERGE.SUCCESS)
+        self.assertNotIn(closed['status'], MERGE.SUCCESS)
+
+    def test_resume_reads_only_the_recorded_receipt_and_completes(self):
+        receipt = {'uuid': UUID, 'pr': 102, 'head': sha(102), 'members': [101, 102], 'since': 1.0}
+        environment = {'GITHUB_REPOSITORY': REPO, 'GITHUB_EVENT_NAME': 'workflow_dispatch',
+                       'DISPATCH_PR': '102', 'DISPATCH_RECEIPT': json.dumps(receipt),
+                       'GITHUB_STEP_SUMMARY': ''}
+        with patch.dict(os.environ, environment), patch.object(sys, 'argv', ['auto-merge']), \
+             patch.object(MERGE, 'auto_merge_default') as arm, patch.object(MERGE, 'prepare') as admit, \
+             patch.object(MERGE.subprocess, 'run') as run, \
+             patch.object(MERGE, 'read', return_value={'status': 'enqueued'}) as read, \
+             patch.object(MERGE, 'pull', side_effect=lambda r, n: self.landed(n)), \
+             redirect_stdout(io.StringIO()) as output:
+            code = MERGE.main()
+        self.assertEqual(code, 0)
+        arm.assert_not_called(); admit.assert_not_called(); run.assert_not_called()
+        read.assert_called_once_with(PREFIX + f'/pulls/102/merge-async/{UUID}')
+        self.assertIn('"status": "merged"', output.getvalue())
+
+    def test_untrusted_receipts_are_rejected_before_any_read(self):
+        good = {'uuid': UUID, 'pr': 102, 'head': sha(102), 'members': [101, 102], 'since': 1.0}
+        bad = [dict(good, uuid='../../x'), dict(good, head='abc'), dict(good, pr=True),
+               dict(good, members=[]), dict(good, members=[1, 'x', 102]), dict(good, extra=1),
+               dict(good, pr=999), 'not json', []]
+        for case in bad:
+            with self.subTest(case=case), patch.object(MERGE, 'read') as read:
+                raw = case if isinstance(case, str) else json.dumps(case)
+                with self.assertRaises(ValueError):
+                    MERGE.parse_receipt(raw)
+                read.assert_not_called()
 
 
 if __name__ == '__main__':

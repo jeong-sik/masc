@@ -21,14 +21,11 @@ module Types = Agent_core_base.Types
 module History = Agent_core_base.History
 module Util = Agent_core_base.Util
 module Fs_result = Fs_result
-module Fs_atomic_eio = Fs_atomic_eio
 module Context = Agent_core_base.Context
 module Provider_runtime_binding = Provider_runtime_binding
 module Exact_output = Llm_provider.Exact_output
 module Binding_identity = Binding_identity
 module Provider_failure_attribution = Provider_failure_attribution
-module Image_generation = Llm_provider.Image_generation
-module Speech_generation = Llm_provider.Speech_generation
 module Retry = Llm_provider.Retry
 module Error = Agent_core_base.Error
 module Agent_input_request = Agent_core_base.Agent_input_request
@@ -113,7 +110,6 @@ module Tool_guidance_text = Tool_guidance_text
 module Otel_tracer = Otel_tracer
 module Otel_export = Otel_export
 module Runtime = Runtime
-module Artifact_service = Artifact_service
 module Sessions = Sessions
 module Sessions_store = Sessions_store
 module Harness = Harness
@@ -124,9 +120,7 @@ module Async_agent = Async_agent
 module Consumer = Consumer
 module Eval_stats = Eval_stats
 module Runtime_store = Runtime_store
-module Plan = Plan
 module Tool_input_validation = Tool_input_validation
-module Tool_middleware = Tool_middleware
 
 (** {1 Version} *)
 

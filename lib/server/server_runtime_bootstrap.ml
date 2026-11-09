@@ -1427,6 +1427,7 @@ let start_completion_authority ~sw ~clock (state : Mcp_server.server_state) =
    gate is illegal to merge without it (a gate no one calls wedges every goal
    that enters [Verifying]). *)
 let start_goal_verifier ~sw ~clock (state : Mcp_server.server_state) =
+  Goal_criterion_agent.start ~sw ~clock ~config:(Mcp_server.workspace_config state);
   Goal_verification_agent.start ~sw ~clock ~config:(Mcp_server.workspace_config state)
 
 let resume_model_configuration () =

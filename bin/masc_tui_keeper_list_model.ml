@@ -144,6 +144,13 @@ let next_density = function
   | One_line -> Two_lines
   | Two_lines -> One_line
 
+let shows_portrait view density =
+  match view, density with
+  | Plain, Two_lines -> true
+  | Plain, One_line -> false
+  | (By_state | By_cause | By_time | By_memory | By_age | By_runtime | Day_wall),
+    (One_line | Two_lines) -> false
+
 let density_label = function
   | One_line -> "compact"
   | Two_lines -> "detailed"

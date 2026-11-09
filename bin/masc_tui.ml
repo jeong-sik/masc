@@ -36665,7 +36665,6 @@ Use relative paths for resources already held in the package. -->
                         | Masc_tui_palette.Palette_addon_results _
                         | Masc_tui_palette.Palette_lane_history _
                         | Masc_tui_palette.Palette_goto _
-                        | Masc_tui_palette.Palette_goal_payouts
                         | Masc_tui_palette.Palette_usage_scope _
                         | Masc_tui_palette.Palette_config _
                         | Masc_tui_palette.Palette_ui_language _
@@ -36724,12 +36723,6 @@ Use relative paths for resources already held in the package. -->
                  | Some (_, Masc_tui_palette.Palette_lane_addons) ->
                      launch_lane_addons state ~mailbox:async_messages
                        Masc_tui_lane_addons.Inspect
-                 | Some (_, Masc_tui_palette.Palette_goal_payouts) ->
-                     goto_surface state ~mailbox:async_messages Planning;
-                     state.planning_filter <- Planning_filter_all;
-                     state.planning_mode <- Planning_list;
-                     state.planning_cursor <- 0;
-                     state.planning_scroll <- Planning_scroll_offset 0
                  | Some (_, Masc_tui_palette.Palette_addon_results declaration_id) ->
                      open_installation_results state ~mailbox:async_messages declaration_id
                  | Some (_, Masc_tui_palette.Palette_lane_history lane) ->
@@ -36786,9 +36779,7 @@ Use relative paths for resources already held in the package. -->
                        report_action state "error"
                          "Original Task creation is unavailable for this Keeper and confirmed workspace"
                  | Some (_, Masc_tui_palette.Palette_task task_id) ->
-                     (* The palette lands where Enter on the task list would:
-                        Overview with the task's detail open and the cursor
-                        on its row. *)
+                     (* Open the exact Task in Work, as the task list does. *)
                      goto_surface state ~mailbox:async_messages Planning;
                      state.planning_mode <- Planning_list;
                      state.task_detail_id <- Some task_id;
@@ -38176,8 +38167,11 @@ Use relative paths for resources already held in the package. -->
                   Masc_tui_scroll.step_uncounted ~delta state.memory_fact_detail_scroll)
        | Some ("\r" | "\n" | "enter")
          when state.view = Memory && Option.is_some state.memory_facts_keeper ->
-           state.memory_fact_detail_open <- true;
-           state.memory_fact_detail_scroll <- 0
+           (* A browser with no fact has no reading to open. *)
+           if not (List.is_empty (Masc_tui_types.memory_fact_rows state)) then begin
+             state.memory_fact_detail_open <- true;
+             state.memory_fact_detail_scroll <- 0
+           end
        | Some ("esc" | "left")
          when state.view = Acting && Option.is_some state.acting_detail ->
            state.acting_detail <- None;
@@ -41491,13 +41485,7 @@ Use relative paths for resources already held in the package. -->
        | Some "v" | Some "V"
          when state.view = Planning || state.view = Verification
               || state.view = Harness ->
-           (* Planning is the parent workspace; [v] walks its child modes
-              without putting any of them back on the top-level ring. The
-              order is the life of one piece of work: the goals it hangs
-              off, the queue waiting for a ruling, and the rulings the judge
-              recorded. Wakes and fusion runs left this walk when they became
-              tabs of the selected Keeper (RFC-tui-operator-ia section 3.1): they
-              belong to one Keeper, not to the fleet's planning workspace. *)
+           (* Work cycles from Goals through pending review to recorded verdicts. *)
            goto_surface state ~mailbox:async_messages
              (match state.view with
               | Planning -> Verification

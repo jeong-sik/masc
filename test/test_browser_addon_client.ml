@@ -87,9 +87,18 @@ let transport_policy () = Eio_main.run (fun env ->
             browser=Ego_lite;transport=Ego_task_space;version="test";engine_version="test";
             space=Some ({id=space;name="fixture Space"} : Browser_lane.ego_space)} in
           let ego=info "1" 51 and other=info "2" 52 and third=info "3" 53 in
+          let client_row client =
+            (* Worker inventory rows carry the wire client plus the activity and
+               Space columns the observation decoder requires; serve the same
+               shape a fresh worker publishes (empty activities, no observation). *)
+            match W.client_to_json client with
+            | `Assoc fields ->
+              `Assoc (("interactions",`List [])::("lastActivities",`List [])::
+                ("spaceObservation",`Null)::("spacePresence",`Null)::fields)
+            | json -> json in
           let snapshot clients =
             W.Snapshot_result (`Assoc ["state",`String "serving";
-              "clients",`List (List.map W.client_to_json clients)]) in
+              "clients",`List (List.map client_row clients)]) in
           let click=Browser_lane.Page_interact {tab_id=1;expected_url=Some "https://fixture.test/";
             action=Browser_lane.Click "#send"} in
           let goto=Browser_lane.Page_goto {url="https://fixture.test/";tab_id=Some 1} in

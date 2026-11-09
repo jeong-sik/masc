@@ -67,6 +67,10 @@ type runtime =
   }
 
 let active_runtime : runtime option Atomic.t = Atomic.make None
+let shared_review_slots = Eio.Semaphore.make 4
+let with_review_slot run =
+  Eio.Semaphore.acquire shared_review_slots;
+  Fun.protect ~finally:(fun () -> Eio.Semaphore.release shared_review_slots) run
 
 let review_key_equal left right =
   String.equal left.task_id right.task_id
@@ -1653,7 +1657,7 @@ let make_runtime ~sw ~clock ~(config:Workspace_utils_backend_setup.config) =
     ; retry_pending = Atomic.make None
     ; retry_interval_sec = Env_config.Timeouts.maintenance_pulse_interval_sec
     ; in_flight = Atomic.make []
-    ; review_slots = Eio.Semaphore.make 4
+    ; review_slots = shared_review_slots
     }
 
 ;;

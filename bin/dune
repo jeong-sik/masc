@@ -2,6 +2,17 @@
 ;; Uses h2-eio for unlimited SSE streams per connection (no browser 6-conn limit)
 
 (executable
+ (name masc_antigravity_path_hook)
+ (modules masc_antigravity_path_hook)
+ (public_name masc-antigravity-path-hook)
+ (package masc)
+ (libraries unix yojson))
+
+(rule
+ (target masc-antigravity-path-hook)
+ (action (copy %{exe:masc_antigravity_path_hook.exe} %{target})))
+
+(executable
  (name lane_fusion_container_probe)
  (modules lane_fusion_container_probe)
  (libraries masc_test_deps masc.server masc.build_commit mcp_protocol eio_main cohttp-eio unix))
@@ -21,6 +32,7 @@
  (modules main_eio masc_cli_setup masc_cli_runtime_sample masc_cli_onboarding masc_cli_prerequisites masc_cli_browser_lane_setup masc_cli_inspect_file masc_cli_checkpoint_inspect masc_cli_docker_session masc_cli_model_resume masc_cli_workspace_upgrade masc_cli_antigravity masc_cli_codex_models masc_cli_muse_models masc_cli_account_login masc_cli_owner_upgrade masc_cli_restart masc_cli_runtime_setup masc_cli_client_path masc_cli_web_search_setup masc_cli_config_set masc_cli_runtime_config_remote masc_cli_auth)
  (public_name masc)
  (package masc)
+ (link_deps masc-antigravity-path-hook)
  (libraries
   masc.workspace_connection
   masc.browser_configuration

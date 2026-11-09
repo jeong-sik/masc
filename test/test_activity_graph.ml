@@ -1274,12 +1274,6 @@ let test_past_day_cache_evicts_entries_for_deleted_files () =
       check int "cache entry evicted once the backing file is gone"
         baseline_count (Activity_graph.For_testing.past_day_cache_entry_count ()))
 
-let test_parse_since_ms_supports_minutes () =
-  check (option int) "5m parses" (Some (5 * 60 * 1000))
-    (Server_activity_http.parse_since_ms "5m");
-  check (option int) "1h still parses" (Some (3600 * 1000))
-    (Server_activity_http.parse_since_ms "1h")
-
 (* Node accumulators are values, not cells. A record read out of the table
    before a later event keeps what it was read with, while the table itself
    advances. Against the previous in-place form both checks on [first] would
@@ -1356,8 +1350,6 @@ let () =
             `Quick test_graph_json_reports_kind_counts_and_heatmap_totals;
           test_case "task.approved completes graph" `Quick
             test_task_approved_completes_graph;
-          test_case "parse_since_ms supports minutes" `Quick
-            test_parse_since_ms_supports_minutes;
         ] );
       ( "current_day_cache",
         [

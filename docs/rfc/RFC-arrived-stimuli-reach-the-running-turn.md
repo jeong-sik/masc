@@ -168,9 +168,9 @@ raw trace(`.masc/keepers/<keeper>/raw-traces`)와 reaction ledger(`reaction-ledg
 3. **모델의 반응.** 블록이 돌고 도는 실행을 끝내는지 모른다. 7개 중 2개는 모델이 스스로 답해서 끝났고 3개는 한도 오류로 끝났다. 7개 중 3개에는 ack 된 도착 행이 0개라서, 같은 일이 다시 벌어져도 블록이 나타나지 않는다. 큐에서 ack 없이 사라진 행은 reaction ledger 에 없어서 이 측정에 들어 있지 않다.
 4. **시작 시각의 경계.** 실행 시작은 hook 을 조립하는 시각이다(공식 클라이언트 경로는 그 턴의 도구 목록을 만드는 시각이다). 턴의 첫 intake 와 그 시각 사이에 도착한 행은 이 실행에서 보이지 않고 다음 턴이 처리한다. 그 틈의 길이는 재지 않았다.
 5. **다른 런타임.** Agent Core 경로는 3.1, 공식 클라이언트 경로는 3.3 이 닿는다. 닿지 않는 곳은 MASC 도구를 한 번도 부르지 않는 공식 클라이언트 실행과 클라이언트 자체 도구(Claude Code 의 Bash 등)의 결과다. Codex 의 `turn/steer` 처럼 도는 턴에 직접 말을 넣는 길은 `RFC-backlog-never-preempts-a-running-turn` 1.7 이 찾은 대로이고, 이 RFC 는 다루지 않는다.
-6. **한 줄의 글.** 설명은 ledger 의 preview 를 그대로 쓴다. 모델이 이 글로 행을 알아보는지는 재지 않았다.
+6. **한 줄의 글.** 설명은 ledger 의 preview 를 쓰고, `Tool_result_ready` 행만 8 이 뒤를 붙인다. 모델이 이 글로 행을 알아보는지는 재지 않았다.
 7. **측정 범위.** 도착 행의 91%가 이틀(11-04·11-05)에서 나왔다. 그 이틀의 부하(실행 1,495개와 2,048개)가 평소인지 모른다.
-8. **`Tool_result_ready` 한 줄.** 비동기 `Execute` 가 끝나서 큐에 든 행(`Tool_result_ready`)의 한 줄은 `tool_result_ready receipt_id=<sha256>` 이다. 모델은 이 글로 어떤 호출이 끝났는지 알 수 없다. 도구 이름과 호출 id 를 싣는 일은 두 경로 모두에 걸리는 별도 변경이다.
+8. **`Tool_result_ready` 한 줄.** 비동기 `Execute` 가 끝나서 큐에 든 행(`Tool_result_ready`)의 ledger 글은 `tool_result_ready receipt_id=<sha256>` 이다. sha256 은 영수증 파일의 해시라서 모델이 가진 요청 ID 와 이어지지 않는다. 블록의 줄은 이 글 뒤에 영수증의 `call_id`·`tool`·`outcome` 을 JSON 문자열로 붙인다. `outcome` 이 없는 영수증(벤더 턴의 것)은 그 칸을 뺀다. `Keeper_arrived_stimuli.render ~receipt` 가 붙이고, 읽는 쪽은 `Keeper_client_tool_outbox.summary_reader` 이며 두 경로(Agent Core 의 hook, 공식 클라이언트 `arrival_source`)가 같이 쓴다. outbox 를 못 읽거나 그 id 의 영수증이 없으면 줄은 예전 글 그대로다. ledger preview 와 TUI 글은 바뀌지 않는다. 모델이 이 줄로 요청을 알아보는지는 배포 뒤에 잰다.
 9. **공식 클라이언트 블록의 크기.** 이 창에서는 공식 클라이언트 실행에 도착한 행이 7개뿐이라 블록 크기와 노출 횟수는 값이 없다. 배포 뒤 `block_bytes` 로 잰다.
 
 ## 8. 관련

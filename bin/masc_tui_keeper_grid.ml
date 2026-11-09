@@ -157,6 +157,22 @@ let due_text ~now ~localtime = function
   | Masc_tui_keeper_next_run.Unknown -> Mark.unknown_mark
 ;;
 
+type strip_cell =
+  | Strip_wake
+  | Strip_empty
+  | Strip_unknown
+
+let strip_cell = function
+  | Masc_tui_keeper_next_run.Wakes count -> if count > 0 then Strip_wake else Strip_empty
+  | Masc_tui_keeper_next_run.Wakes_unknown -> Strip_unknown
+;;
+
+let strip_mark = function
+  | Strip_wake -> Mark.grid_wake_mark
+  | Strip_empty -> Mark.grid_dot_mark
+  | Strip_unknown -> Mark.unknown_mark
+;;
+
 let lag_fill ~cells ~peak lag =
   if lag <= 0 || cells <= 0 then 0
   else

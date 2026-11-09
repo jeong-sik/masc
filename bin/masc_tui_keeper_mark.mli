@@ -111,6 +111,10 @@ val grid_dot_mark : string
 (** [·]: a strip cell with nothing in it, and a pulse half hour in which no
     turn ended. *)
 
+val grid_wake_mark : string
+(** [◷]: a strip half hour that holds one scheduled wake or more, the
+    schedule badge's mark. *)
+
 val grid_failing_mark : string
 val grid_paused_mark : string
 val grid_recovered_mark : string

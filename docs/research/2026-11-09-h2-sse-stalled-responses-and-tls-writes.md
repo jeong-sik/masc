@@ -7,11 +7,11 @@
 
 ## 0. 요약
 
-- 창 0 을 알린 HTTP/2 클라이언트가 로그 SSE 스트림 3개를 열었다. 서버는 90초에 셋 다 정체로 판정했다. 그런데 105초까지 RST_STREAM 을 하나도 보내지 않았다. 창을 열자 쌓인 36,839 B 와 END_STREAM 이 나갔다. 정체한 HTTP/2 스트림은 상대가 움직일 때까지 끝나지 않는다(§1.4, §4.3).
+- 창 0 을 알린 HTTP/2 클라이언트가 로그 SSE 스트림 3개를 열었다. 105초 뒤 서버 로그에 정체 판정이 3줄 있었다. 판정 상한은 코드의 90초다. 그런데 105초까지 RST_STREAM 을 하나도 보내지 않았다. 창을 열자 쌓인 36,839 B 와 END_STREAM 이 나갔다. 측정은 105초까지다. 상대가 움직일 때까지 끝나지 않는다는 것은 코드에서 읽었다(§1.4, §4.3).
 - 읽지 않는 클라이언트 하나가 대시보드 번들 77개(66.3 MB)로 리스너 원장 64 MiB 를 채웠다. 그동안 다른 연결의 큰 응답은 모두 503 이었다(§4.2, #50294).
 - 로그·문서 초안·실행 출력의 생산자는 스트림이 끝난 뒤에도 다음 이벤트나 핑까지 산다(§1.5, #50295).
 - TLS handshake 와 평문 프로토콜 판별에는 시간 상한이 없다(§1.7, #49905).
-- TLS 처리량은 평문의 1/7~1/12 다. 원인은 tls-eio 가 암호문을 4 KiB 씩 쓰는 경로다. masc 밖 벤치에서 암호문을 16 KiB 이상으로 쓰면 서버 CPU 가 MB 당 41~45% 줄었다. AES-128 로 861 KB 를 한 번에 쓴 값이다(§1.8, §4.4, #50296).
+- TLS 처리량은 평문의 1/7~1/12 다. 큰 원인 하나는 tls-eio 가 암호문을 4 KiB 씩 쓰는 경로다(추정). masc 밖 벤치에서 암호문을 16 KiB 이상으로 쓰면 서버 CPU 가 MB 당 41~45% 줄었다. AES-128 로 861 KB 를 한 번에 쓴 값이다. 그래도 MB 당 5.4~5.7 ms 가 남는다. 이 arm64 빌드에는 AES 가속이 없다(§1.8, §4.4, #50296).
 - OCaml HTTP 서버·라이브러리 9개를 읽었다. 멈춘 응답의 시간 상한, 끊긴 상대 알림, SSE keepalive 를 다 갖춘 곳은 없다. 가져올 부품은 piaf 의 조각당 flush 대기, haha 의 reset 콜백, tiny_httpd 의 연결 semaphore 다(§2).
 - 성숙한 서버는 쓰기 시간을 스트림이나 연결 단위로 잰다(Go `WriteTimeout`, nginx `send_timeout`). 2026-06 에 공개된 HTTP/2 bomb 는 1바이트 WINDOW_UPDATE 로 진척을 흉내 낸다. 그래서 진척마다 늘어나는 타이머로는 막지 못한다(§3).
 
@@ -30,7 +30,7 @@ HTTP/2 응답이 아직 상대에게 못 보낸 바이트는 `Http_h2_response_l
 
 ### 1.2 h2 가 본문을 내보내는 방식
 
-h2 0.13.0 포크(`jeong-sik/ocaml-h2@d7601f2`)는 본문 Faraday 의 iovec 을 연결 writer 에 참조로 건다(`Body.Writer.transfer_to_writer`, body.ml 200~230줄). 연결 writer 가 그 바이트를 소켓에 쓴 뒤에야 본문 Faraday 를 비운다. 그래서 상대의 창이 0 이면 본문이 Faraday 에 그대로 남는다. 그 본문에 건 flush 콜백도 오지 않는다. flush 콜백이 오지 않는 경우는 §2.1 에 모았다.
+h2 0.13.0 포크(`jeong-sik/ocaml-h2@d7601f2`)는 본문 Faraday 의 iovec 을 연결 writer 에 참조로 건다(`Body.Writer.transfer_to_writer`, body.ml 200~221줄). 연결 writer 가 그 바이트를 소켓에 쓴 뒤에야 본문 Faraday 를 비운다. 그래서 상대의 창이 0 이면 본문이 Faraday 에 그대로 남는다. 그 본문에 건 flush 콜백도 오지 않는다. flush 콜백이 오지 않는 경우는 §2.1 에 모았다.
 
 - `Body.Writer.schedule_bigstring` 은 복사하지 않고 bigstring 을 건다(h2.mli 385줄). 공유하는 불변 bigstring 은 스트림마다 사본을 만들지 않는다.
 - 서버가 스트림을 끊는 공개 API 는 `Reqd.report_exn` 하나다. INTERNAL_ERROR 로 RST_STREAM 을 보낸다(reqd.ml 390줄). CANCEL 로 끊는 공개 API 는 없다.
@@ -45,7 +45,7 @@ h2 의 공개 API 는 스트림이 끝났다고 알려 주지 않는다(§2.1). 
 - 스트림 switch 는 `run_scope` 가 연다(30~36줄). 핸들러가 돌아온 뒤에도 `response_ended` 를 기다린다. 그래서 응답 생산자가 그 switch 에서 계속 돈다.
 - `Http_reqd.Stream_end` 는 스트림 switch 가 풀릴 때 기다리던 flush 를 모두 `` `Closed `` 로 답한다(`lib/http_reqd.ml` 16~63줄).
 - masc 가 `H2.Reqd.report_exn` 을 부르는 곳은 일곱이다. 레지스트리 35·56줄, `server_bootstrap_http.ml` 334·335줄, `lib/http_h2_stream.ml` 10줄, `http_reqd.ml` 295줄(원장 거절)과 474줄(`Http_reqd.report_exn`)이다. `Http_reqd.report_exn` 을 부르는 곳은 시험(`test/test_h2_response_window.ml`)뿐이다.
-- masc 가 RST_STREAM 을 보내면 `response_ended` 는 풀린다. 하지만 스트림 switch 는 실패하지 않는다. `Switch.run` 은 그 안의 fiber 가 모두 끝나야 돌아온다. h2 는 끊은 스트림의 flush 에 답하지 않는다. 그래서 flush 를 기다리는 fiber 가 있으면 switch 가 풀리지 않고, `Stream_end` 도 답하지 않는다.
+- masc 가 RST_STREAM 을 보내면 `response_ended` 는 풀린다. 하지만 스트림 switch 는 실패하지 않는다. `Switch.run` 은 daemon 이 아닌 fiber 가 모두 끝나야 돌아온다. daemon 만 남으면 그것들을 취소한다(eio switch.ml 70~73줄). h2 는 끊은 스트림의 flush 에 답하지 않는다. 그래서 daemon 이 아닌 fiber 가 flush 를 기다리면 그동안 switch 가 풀리지 않고 `Stream_end` 도 답하지 않는다. 요청 본문 작업은 daemon 이다(`lib/http_h2_stream.ml` 3줄). 핸들러 fiber 가 기다리는 `Server_sse_response.send` 에는 90초 정체 감시가 있다(`server_sse_response.ml` 72~86줄). 그래서 이 대기는 길어야 90초다(추정).
 
 ### 1.4 정체한 HTTP/2 응답은 끝나지 않는다
 
@@ -57,7 +57,7 @@ SSE 응답은 한 프레임이 `sse_stalled_after_s`(90초) 안에 소켓에 닿
 4. `response_ended` 는 END_STREAM 이 나가야 풀린다.
 5. END_STREAM 은 flush 뒤에 나간다.
 
-고리를 끊는 것은 상대의 RST_STREAM, 창을 여는 WINDOW_UPDATE, 연결 종료뿐이다. 그때까지 원장 예약과 보류한 바이트가 남는다. §4.3 이 이것을 격리 서버에서 확인한다.
+고리를 끊는 것은 상대의 RST_STREAM, 창을 여는 WINDOW_UPDATE, 연결 종료다. 초기 창을 키우는 SETTINGS 도 모든 스트림의 창을 키운다(포크 server_connection.ml 906~914줄). 그 뒤 writer 가 보류한 바이트를 내보내는지는 따라가 보지 않았다(추정). 그때까지 원장 예약과 보류한 바이트가 남는다. §4.3 은 보류한 바이트가 105초 동안 나가지 않은 것을 격리 서버에서 확인한다. 원장 예약은 재는 값이 없어서 코드로만 안다(§1.1).
 
 통째 본문에는 정체 판정이 아예 없다. 창을 열지 않는 상대에게 보낸 응답은 연결이 끝날 때까지 예약을 쥔다(§4.2).
 
@@ -75,7 +75,11 @@ SSE 응답은 한 프레임이 `sse_stalled_after_s`(90초) 안에 소켓에 닿
 
 ### 1.6 HTTP/1.1 은 응답하는 동안 소켓을 읽지 않는다
 
-httpun 은 요청 입력이 끝나고 응답이 진행 중이면 읽지 않는다(server_connection.ml 278~286줄). 연결이 persistent 가 아니면 reader 를 닫고, persistent 면 `Yield` 한다. 그래서 응답 중에는 상대가 보낸 FIN 을 볼 수 없다. HTTP/1.1 은 다음 쓰기가 실패할 때(EPIPE) 클라이언트가 떠난 것을 안다.
+httpun 은 요청 입력이 끝나고 응답이 진행 중이면 소켓을 더 읽지 않는다(server_connection.ml 278~286줄). 그 뒤는 연결이 persistent 인지에 따라 갈린다.
+
+- keep-alive 응답이면 reader 가 `Yield` 한다. 응답이 끝날 때까지 상대가 보낸 FIN 을 보지 못한다. 다음 쓰기가 실패해야(EPIPE·ECONNRESET) 클라이언트가 떠난 것을 안다.
+- `Connection: close` 응답이면 연결이 non-persistent 가 되고 reader 가 닫힌다(reqd.ml 157~158줄, server_connection.ml 279~281줄). gluten 은 닫힌 reader 로 마지막 읽기를 한 번 더 한다. 그 읽기가 EOF 를 보면 `report_exn` 을 부른다(gluten_eio.ml 121~145줄). httpun 은 응답 본문을 force-close 한다(reqd.ml 228~229줄).
+- masc 가 SSE 로 답하는 경로 대부분은 `Connection: close` 를 보낸다(로그, fleet, 실행 출력, MCP 등). 이 응답에서는 상대의 FIN 이 본문을 닫는다. 생산자는 다음 send 에서 그것을 안다. 경로마다 실행해 보지는 않았다(추정).
 
 httpun 에는 흐름 제어가 없다. 본문의 남은 바이트를 모두 연결 writer 로 넘긴다(body.ml 217줄 이하). HTTP/1.1 의 정체는 곧 TCP 송신 버퍼의 정체다. `Httpun.Reqd.report_exn` 은 본문을 force-close 하고 연결을 non-persistent 로 만든다. 그래도 막힌 소켓 쓰기는 풀지 못한다.
 
@@ -89,7 +93,8 @@ TLS 리스너는 `Tls_eio.server_of_flow` 를 시간 상한 없이 부른다(`se
 - eio 판은 `masc.opam.locked` 의 1.3 이다. eio_posix 소켓의 `copy` 는 원천이 `Read_source_buffer` 를 주지 않으면 `Eio.Flow.Pi.simple_copy` 로 간다(eio_posix flow.ml 74~80줄). `simple_copy` 는 4096 바이트 버퍼로 읽고 쓴다(eio flow.ml 62~76줄). `String_source` 는 read method 가 없다(139줄).
 - 그래서 TLS 응답은 암호문 4 KiB 마다 `writev` 를 한 번 부른다. accept 한 소켓은 `TCP_NODELAY` 라 조각마다 세그먼트가 따로 나간다.
 - 받는 쪽 버퍼도 4096 바이트다(tls_eio.ml 192줄).
-- masc 의 `Tls_stream_socket` 은 tls-eio 흐름을 그대로 넘긴다(`lib/server/tls_stream_socket.ml` 10줄 `copy`).
+- masc 는 accept 한 소켓을 그대로 `Tls_eio.server_of_flow` 에 넘긴다(`server_bootstrap_http.ml` 484줄). tls-eio 는 그 소켓에 암호문을 쓴다.
+- `Tls_stream_socket` 은 tls-eio 위에서 h2·httpun 이 평문을 쓰는 감싸개다(498줄). gluten 은 그 `single_write`(`tls_stream_socket.ml` 9줄)로 쓰고, `copy`(10줄)는 이 경로에 없다. 그래서 4 KiB 조각을 고치려면 `server_of_flow` 앞에서 소켓을 감싸야 한다.
 - upstream `mirleft/ocaml-tls` main 도 같은 경로다(2026-11-09 확인).
 
 암호는 서버 목록 순서로 고른다. tls 서버는 자기 목록에서 클라이언트도 낸 첫 suite 를 고른다(handshake_server13.ml 66줄 `Utils.first_match`). 기본 목록은 AES-128-GCM, AES-256-GCM, ChaCha20-Poly1305, AES-128-CCM 순서다(config.ml 103~108줄). 클라이언트가 셋을 다 내면 masc 는 AES-128-GCM 을 골랐다(§4.4 run3, `openssl s_client`). 이 arm64 빌드의 `Mirage_crypto.accelerated` 는 빈 목록이다. mirage-crypto 는 x86_64 에서만 AES·GHASH 가속을 켠다(mirage-crypto `config/cfg.ml` 34~38줄).
@@ -336,7 +341,7 @@ run1 은 TLS h2 연결 하나를 cloudflared 처럼 오래 열어 둔다. 그 �
 | TLS handshake 실패 | TLS 포트에 평문 요청 200번 | 해당 없음 |
 | 끝에 같은 TLS 연결로 GET | `/api/v1/openapi.json` 300번 | 200 ×300, 서버 reset 0 |
 
-RST_STREAM 으로 끊은 스트림은 모두 11,910개다. 연결째 끊은 스트림이 1,000개 더 있다.
+RST_STREAM 으로 끊은 스트림은 모두 11,910개다. TLS h2 연결 하나에서 9,660개, h2c 연결 하나에서 2,250개다. 연결째 끊은 스트림이 1,000개 더 있다.
 
 | 표본 | t s | descriptor | TCP descriptor | HTTPS 활성 연결 | HTTPS 누적 accept | handshake 실패 | `sse_clients` | live MB | RSS MB |
 |---|---|---|---|---|---|---|---|---|---|
@@ -352,7 +357,7 @@ RST_STREAM 으로 끊은 스트림은 모두 11,910개다. 연결째 끊은 스�
 | 끝(오래 연 연결을 닫은 뒤) | 1212.0 | 54 | 3 | 0 | 401 | 200 | 0 | 355.0 | 563.8 |
 
 - descriptor, TCP descriptor, 리스너 활성 연결은 모든 표본에서 warm 값이었다. 오래 연 연결을 닫은 뒤에는 cold 값이 됐다.
-- MCP GET 은 회마다 `sse_clients` 가 30 까지 올랐다. RST_STREAM 뒤 0.01 s 안에 0 으로 돌아왔다.
+- MCP GET 10회 동안 `sse_clients` 의 최댓값은 30 이었다. 탐침은 회마다가 아니라 10회 전체의 최댓값만 남겼다. 회마다 RST_STREAM 뒤 0.01 s 안에 0 으로 돌아왔다.
 - 끝에 보낸 GET 300개는 모두 200 이었다. 원장이 바닥나지 않았다.
 - handshake 실패 200번은 1,004 s 가 걸렸다(166.1 → 1170.0 s). 연결마다 탐침의 `recv` 가 5 s 기한을 다 썼다. 서버는 그동안 답하지도 닫지도 않았다(§1.7).
 
@@ -365,7 +370,7 @@ run2 는 HTTP/1.1 대조다. 연결 2,000개로 fleet 를, 다시 2,000개로 �
 | run1, TLS h2, 4,500개 reset | 132.1 | 292.2(+160.1) | 329.9(+197.8) |
 | run2, HTTP/1.1, 2,000개 close | 38.7 | 195.4(+156.7) | 227.4(+188.7) |
 
-fleet 스트림은 pump 가 바로 끝내서 이렇게 늘지 않았다. 로그 생산자가 다음 로그 줄이나 핑까지 남는 것은 코드로 확인했다(§1.5). 그 뒤의 해제는 이 값으로 보이지 않는다. `/health` 의 live 는 도달 가능한 메모리가 아니다. 부하 없이 잇달아 읽어도 65 MB 흔들리고, 쉬는 동안 줄지 않는다. RSS 도 279~909 MB 를 오갔다. 그래서 메모리 값은 이 묶음에서 누수 판정에 쓰지 않는다. 판정은 descriptor, 연결 수, `sse_clients`, 원장으로 한다.
+fleet 스트림 뒤의 변화는 warm 대비 +32.9 MB 다. 부하 없는 흔들림 안이라 판정에 쓰지 않는다. fleet pump 가 스트림 끝에 바로 끝나는 것은 코드로 본다(§1.5). 로그 스트림 뒤의 +160.1 MB 는 그 흔들림 밖이다. 로그 생산자가 다음 로그 줄이나 핑까지 남는 것도 코드로 확인했다(§1.5). 그 뒤의 해제는 이 값으로 보이지 않는다. `/health` 의 live 는 도달 가능한 메모리가 아니다. 부하 없이 0.4 s 사이로 읽은 두 표본(warm, warm 다시 읽기)이 99.2 MB 와 164.4 MB 였다. 쉬는 동안에도 줄지 않는다. RSS 도 279~909 MB 를 오갔다. 그래서 메모리 값은 이 묶음에서 누수 판정에 쓰지 않는다. 판정은 descriptor, 연결 수, `sse_clients`, 원장으로 한다.
 
 ### 4.2 원장 고갈(run5)
 
@@ -378,7 +383,7 @@ fleet 스트림은 pump 가 바로 끝내서 이렇게 늘지 않았다. 로그 
 | 5초 뒤 | 그대로 | 503 ×3 | 200 ×3 |
 | 느린 클라이언트가 떠난 뒤 | - | 200 ×3 | 200 ×3 |
 
-77개 × 861,256 B = 66,316,712 B 로 원장 64 MiB(67,108,864 B)가 찼다. 남은 자리보다 큰 응답은 느린 클라이언트가 떠날 때까지 모두 503 이다. 그 스트림들에는 시간 상한이 없다. 번들은 인증 없이 받는 정적 파일이다. 같은 응답을 77번 읽고 압축해서 77벌의 사본을 원장에 넣었다(§1.1).
+77개 × 861,256 B = 66,316,712 B 로 원장 64 MiB(67,108,864 B)가 찼다. 남은 자리보다 큰 응답은 느린 클라이언트가 떠날 때까지 모두 503 이다. 그 스트림들에는 시간 상한이 없다. 번들은 인증 없이 받는 정적 파일이다. 같은 파일을 77번 읽어 압축하지 않은 사본 77벌을 원장에 넣었다(§1.1). 탐침이 `accept-encoding` 을 보내지 않아 masc 는 압축하지 않았다(`http_response_payload.ml` 118~119·163~166줄).
 
 ### 4.3 정체한 SSE 스트림(run6)
 
@@ -386,13 +391,13 @@ TLS h2 연결 하나가 `SETTINGS_INITIAL_WINDOW_SIZE = 0` 을 알리고 로그 
 
 | 관찰 | 값 |
 |---|---|
-| 서버 정체 로그("accepted no frame for 90 seconds") | 3줄, 90초 시점 |
+| 서버 정체 로그("accepted no frame for 90 seconds") | 3줄(105초 뒤에 셈) |
 | 105초 동안 서버가 보낸 RST_STREAM | 0개 |
 | 105초 동안 받은 DATA | 스트림마다 0 B |
 | 105초에 창을 연 뒤 스트림마다 받은 바이트 | 36,839 B |
 | 그 뒤 END_STREAM | 3개 모두, reset 없음 |
 
-서버는 90초에 스트림을 정체로 판정하고 생산자를 끝냈다. 그런데 스트림은 닫지 못했다. 보류한 프레임과 그 원장 예약을 상대가 창을 열 때까지 쥐었다. 창을 끝내 열지 않으면 연결이 끝날 때까지 쥔다(§1.4 의 고리). cloudflared 처럼 연결을 오래 쓰는 클라이언트에서는 이것이 연결 수명만큼 쌓인다.
+서버는 105초 안에 세 스트림을 정체로 판정하고 생산자를 끝냈다(로그 3줄). 판정 시각은 재지 않았다. 그런데 스트림은 닫지 못했다. 105초 동안 RST_STREAM 도 DATA 도 나가지 않았고, 창을 연 뒤에야 보류한 바이트와 END_STREAM 이 나갔다. 원장 예약은 재는 값이 없어 이 실행으로는 보이지 않는다(§1.1). 탐침은 105초에 늘 창을 열었다. 창을 끝내 열지 않으면 연결이 끝날 때까지 쥔다는 것은 코드에서 읽었다(§1.4 의 고리). cloudflared 처럼 연결을 오래 쓰는 클라이언트에서는 이것이 연결 수명만큼 쌓인다(추정).
 
 ### 4.4 TLS 쓰기 경로(run3, run4, 벤치)
 
@@ -419,7 +424,7 @@ run3 은 같은 번들을 HTTP/1.1 파이프라인으로 받았다. 클라이언
 - `stock` 은 accept 한 소켓 그대로다. §1.8 의 4096 바이트 조각이다.
 - `copy:N` 은 tls-eio 의 `copy` 를 N 바이트 버퍼로 읽어 소켓에 쓰는 감싸개다.
 
-값은 run2(5회 중앙값)이다. run1(3회)도 방향이 같다. 서버 쓰기 크기는 861,256 B 다.
+값은 run2 다. 한 연결 열은 5회 중앙값이다. 4연결 두 열은 클라이언트 4개를 동시에 돌린 1회 값이다. run1(한 연결 3회 중앙값)도 방향이 같다. 서버 쓰기 크기는 861,256 B 다.
 
 | suite | 소켓 | 한 연결 MB/s | 서버 ms/MB | 클라이언트 ms/MB | 서버+클라이언트 | 4연결 합계 MB/s | 4연결 서버 ms/MB |
 |---|---|---|---|---|---|---|---|
@@ -434,8 +439,8 @@ run3 은 같은 번들을 HTTP/1.1 파이프라인으로 받았다. 클라이언
 | ChaCha20-Poly1305 | copy:262144 | 238.5 | 3.69 | 1.02 | 4.71 | 253.0 | 3.46 |
 | ChaCha20-Poly1305 | copy:1048576 | 221.2 | 3.81 | 1.13 | 4.94 | 171.5 | 3.48 |
 
-- stock AES-128 은 masc 리스너와 같은 크기다(벤치 9.69 ms/MB, masc 11.49 ms/MB). 원인은 masc 코드가 아니라 tls-eio 의 쓰기 경로다.
-- 암호문을 16 KiB 이상으로 쓰면 AES-128 서버 CPU 가 MB 당 41~45% 준다. 클라이언트 CPU 도 MB 당 4.19 ms 에서 0.58~1.19 ms 로 준다. 4 KiB 세그먼트마다 양쪽이 깨어나는 비용이 사라진다.
+- stock AES-128 은 masc 리스너와 같은 크기다(벤치 9.69 ms/MB, masc 11.49 ms/MB). 이 비용은 masc 코드가 아니라 tls-eio 와 그 아래(암호, 소켓 쓰기)에 있다.
+- 암호문을 16 KiB 이상으로 쓰면 AES-128 서버 CPU 가 MB 당 41~45% 준다. 클라이언트 CPU 도 MB 당 4.19 ms 에서 0.58~1.19 ms 로 준다. 4 KiB 세그먼트마다 양쪽이 깨어나는 비용이 줄었다고 본다(추정). 프로파일로 확인하지는 않았다.
 - ChaCha20 이 AES-128 보다 싼 정도는 조각 크기에 따라 다르다. 서버 CPU 는 stock 에서 10.8%, 16 KiB 에서 0.9%, 64 KiB 에서 23.2%, 256 KiB 에서 32.2%, 1 MiB 에서 28.9% 적다.
 - 이 클라이언트(OpenSSL)는 ChaCha20 에 CPU 를 더 쓴다. 서버와 클라이언트를 합치면 16 KiB 에서는 ChaCha20 이 10.9% 더 비싸다. 64 KiB~1 MiB 에서는 11.7~22.0% 싸다.
 - 가장 좋은 조합(ChaCha20, 256 KiB)은 stock AES-128 보다 서버 CPU 가 MB 당 61.9% 적다.
@@ -458,11 +463,11 @@ run3 은 같은 번들을 HTTP/1.1 파이프라인으로 받았다. 클라이언
 | 문제 | 원인 | 근거 |
 |---|---|---|
 | 정체한 HTTP/2 스트림이 끝나지 않는다 | masc 가 스트림을 끝내는 방법이 "다 보낸 뒤 닫기" 하나다. 창이 0 이면 그 조건이 오지 않는다 | §1.4, §4.3 |
-| 끊은 뒤에도 fiber 와 예약이 남을 수 있다 | masc 가 보낸 RST_STREAM 은 스트림 switch 를 실패시키지 않는다. flush 를 기다리는 fiber 가 switch 를 붙잡는다 | §1.3 |
+| 끊은 뒤에도 fiber 와 예약이 남을 수 있다 | masc 가 보낸 RST_STREAM 은 스트림 switch 를 실패시키지 않는다. flush 를 기다리는 daemon 아닌 fiber 가 정체 감시(90초)까지 switch 를 붙잡는다(추정) | §1.3 |
 | 원장이 바닥난다 | 통째 본문에는 시간 상한이 없다. 바뀌지 않는 정적 파일도 요청마다 사본을 원장에 넣는다 | §1.1, §4.2 |
 | 생산자가 스트림보다 오래 산다 | 로그·초안·실행 출력 생산자가 응답과 다른 switch 에서 돈다 | §1.5, §4.1 |
 | 연결 준비가 끝나지 않을 수 있다 | handshake 와 프로토콜 판별에 기한이 없다 | §1.7, §4.1 |
-| TLS 가 느리다 | tls-eio 가 암호문을 4 KiB 씩 쓴다 | §1.8, §4.4 |
+| TLS 가 느리다 | tls-eio 가 암호문을 4 KiB 씩 쓴다(큰 원인 하나, 추정). 이 arm64 빌드에는 AES 가속이 없다 | §1.8, §4.4 |
 
 ### 5.2 스트림을 끝내는 주체
 
@@ -477,9 +482,9 @@ run3 은 같은 번들을 HTTP/1.1 파이프라인으로 받았다. 클라이언
 - 단점: 코드는 INTERNAL_ERROR 하나뿐이다. `report_exn` 은 응답 상태에 따라 갈린다(reqd.ml [f] 343~370줄).
   - 응답 전이면 error handler 를 불러 500 응답을 연다(345줄).
   - 스트리밍 중이면 본문을 닫고 RST_STREAM 을 보낸다(355줄).
-  - 이미 에러를 보고한 스트림에 다시 부르면 `failwith "h2.Reqd.report_exn: NYI"` 다(369줄).
+  - 첫 보고가 응답 전 갈래(500)를 탔고 스트림이 아직 열려 있을 때 다시 부르면 `failwith "h2.Reqd.report_exn: NYI"` 다(369줄). 스트리밍·통째 응답 갈래에서는 `reset_stream` 이 스트림을 `Closed` 로 만든다(stream.ml 145·159~162줄). 그 뒤의 보고는 아무것도 하지 않는다(reqd.ml 388줄).
   - 그래서 masc 의 일곱 곳(§1.3)을 한 함수로 모으고, 이미 보고한 스트림은 건너뛰어야 한다.
-- 이 방법은 masc 가 보낸 RST_STREAM 이 스트림 switch 를 끝내야 완성된다. 그래야 flush 를 기다리는 fiber 와 원장 예약이 같이 풀린다(§1.3).
+- 이 방법은 masc 가 보낸 RST_STREAM 이 스트림 switch 를 끝내야 완성된다. 그래야 flush 를 기다리는 fiber 와 원장 예약이 정체 감시를 기다리지 않고 같이 풀린다(§1.3).
 
 ### 5.3 정체 상한의 모양
 
@@ -506,7 +511,7 @@ run3 은 같은 번들을 HTTP/1.1 파이프라인으로 받았다. 클라이언
 
 **바뀌지 않는 본문을 공유한다.** 대시보드 번들처럼 판마다 고정된 파일은 bigstring 하나를 모든 스트림이 참조한다.
 
-- 장점: h2 `schedule_bigstring` 은 복사 없이 건다(§1.2). 스트림마다 사본이 없으니 원장에 넣을 바이트도 없다. §4.2 의 장면에서 원장 사용량이 0 이 된다. 압축도 판마다 한 번이면 된다.
+- 장점: h2 `schedule_bigstring` 은 복사 없이 건다(§1.2). 스트림마다 사본이 없으니 원장에 넣을 바이트도 없다. §4.2 의 장면에서 원장 사용량이 0 이 된다. 압축도 판마다 한 번이면 된다. 지금은 `accept-encoding` 을 보낸 요청마다 압축한다(`server_routes_http_pages.ml` 253~255줄).
 - 단점: 소유 본문(artifact, MCP 결과)의 문제는 그대로다. 대시보드 asset 은 읽을 때마다 receipt 와 digest 를 검증하는 계약이 있다(`lib/installed_dashboard.mli` 29줄). 캐시는 검증한 digest 로 찾아야 이 계약을 지킨다.
 
 ### 5.5 생산자 수명과 연결 준비
@@ -519,7 +524,7 @@ run3 은 같은 번들을 HTTP/1.1 파이프라인으로 받았다. 클라이언
 **쓰기 조각.**
 
 - upstream 을 고친다. tls-eio 의 `write_t` 가 암호문을 `single_write` 로 바로 쓰면 된다. 장점은 원인 자리라는 점이다. 단점은 릴리스를 기다려야 한다는 점이다. upstream main 도 같은 경로다(§1.8).
-- masc 소켓 감싸개의 `copy` 가 큰 버퍼로 읽어 쓴다. 벤치의 `copy:N` 이 이 모양이다. 장점은 지금 된다는 점이다. 벤치에서 서버 CPU 가 MB 당 41~45% 줄었다(§4.4). 단점은 우회라는 점이다. tls-eio 는 쓰기 잠금이 없고 읽기 경로도 쓸 수 있다. 그래서 버퍼를 연결마다 하나 두고 나눠 쓰면 안 된다(코드 읽기).
+- masc 가 accept 한 소켓을 감싸 `Tls_eio.server_of_flow` 에 넘기고, 그 감싸개의 `copy` 가 큰 버퍼로 읽어 쓴다. 벤치의 `copy:N` 이 이 모양이다. 지금의 `Tls_stream_socket` 은 tls-eio 위에 있어 이 자리가 아니다(§1.8). 장점은 지금 된다는 점이다. 벤치에서 서버 CPU 가 MB 당 41~45% 줄었다(§4.4). 단점은 우회라는 점이다. tls-eio 는 쓰기 잠금이 없고 읽기 경로도 쓸 수 있다. 그래서 버퍼를 연결마다 하나 두고 나눠 쓰면 안 된다(코드 읽기).
 
 **암호 순서.** tls 서버는 자기 목록 순서로 고른다(§1.8). ChaCha20 을 앞에 두면 861 KB 를 한 번에 쓰는 벤치의 64 KiB 이상 조각에서 서버 CPU 가 23~32% 준다. 16 KiB 조각에서는 차이가 1% 안팎이다. 64 KiB 씩 쓰면 7~17% 다. OpenSSL 클라이언트는 ChaCha20 에 CPU 를 더 쓴다. cloudflared(Go) 쪽 비용은 재지 않았다. 순서를 바꾸려면 Go 클라이언트로 서버와 클라이언트의 합을 먼저 재야 한다.
 
@@ -532,7 +537,7 @@ run3 은 같은 번들을 HTTP/1.1 파이프라인으로 받았다. 클라이언
 - 연결 수, idle, 헤더 시간 상한. TLS 뒤 h2 preface 대기도 여기 든다.
 - 들어오는 창 2^27(연결당 128 MiB). Go 는 1 MiB, Envoy edge 권장은 스트림 64 KiB 다.
 - rapid reset(양방향 reset 세기), CONTINUATION, 헤더 개수 상한(§3.2).
-- HTTP/1.1 스트리밍 중 이탈 감지(§1.6).
+- keep-alive HTTP/1.1 스트리밍 중 이탈 감지(§1.6). `Connection: close` 응답에서는 gluten 이 FIN 을 본다.
 - 우아한 종료 GOAWAY. h2 0.13 공개 API 에 없다(§2.1).
 - h2 포크 정리: #278 조건 고침, `on_close_stream` 의 본문 drain, `Reqd.stream_id` 공개, upstream h2#265 이식.
 - 사전 압축 JSON 스냅샷과 artifact 바이트도 요청마다 사본을 만든다.

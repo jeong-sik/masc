@@ -3,7 +3,7 @@ rfc: "execute-background-through-the-tool-outbox"
 title: "Execute run_in_background: the result comes back as a tool-result receipt"
 status: Draft
 created: 2026-11-08
-updated: 2026-11-08
+updated: 2026-11-09
 author: vincent
 supersedes: []
 superseded_by: null
@@ -167,6 +167,33 @@ backend, and the receipt claims neither.
 - The outbox frames receipts as "retained after the previous vendor turn
   ended". For this producer they are results that arrived after the turn
   ended.
+- A receipt reaches a Keeper in a later run, not in the run that started the
+  command. `Keeper_client_tool_outbox.run_carrier_load` reads the outbox on the
+  first call of a run and returns that snapshot for the rest of the run, and
+  `settle_after_turn` acknowledges only that snapshot. A receipt written while
+  a run is going is first carried by the next run. In a run that installs the
+  arrival block (`keeper_run_tools_hooks.ml`, `RFC-arrived-stimuli-reach-the-running-turn`),
+  the queue row of the receipt is listed in a later round as
+  `tool_result_ready receipt_id=<id>` (`Keeper_reaction_ledger.stimulus_payload_preview`).
+  The id is the SHA-256 of the receipt (`Keeper_client_tool_outbox.receipt_ids`), so
+  the line names neither the request id the model holds nor the outcome. The run's own way to see
+  the result is `keeper_composition_status`. Five background runs ended 4.3 to
+  197.1 s after the start. The run that started each one made 10 to 104 more
+  tool calls after the end. The next run's first tool call came 130 to 472 s
+  after the end in four cases, and the fifth had none when it was read. One of
+  the five Keepers asked `keeper_composition_status`, 94 s after the end. Four
+  of the five ran on the Muse lane and one on the Claude Code lane.
+  `keeper_turn_driver.ml` runs them through `Keeper_muse_runtime.run` and
+  `Keeper_claude_code_runtime.run`, and neither file references
+  `Keeper_run_tools`, the only user of the arrival block, so those runs show no
+  line for the receipt. A command that ends in 4 to 16 s returns in that time
+  as a foreground call (three of the five). Figures and definitions are in
+  `docs/evidence/tool-efficiency-before-after-2026-11/README.md`, section
+  「스크립트 밖에서 센 값」, entry 「background Execute 5건」. Carrying newer
+  receipts inside a run would change
+  the one-snapshot-per-run contract of
+  `RFC-retained-results-carrier-shrinks-to-an-address`, and this change does
+  not.
 - If the Keeper acknowledged a receipt before a crash that left the request
   open, the outbox no longer shows the receipt, and the next start writes
   `unfinished` for the same `request_id`. A receipt is acknowledged only after a
@@ -217,6 +244,19 @@ backend, and the receipt claims neither.
    Keeper receives an `unfinished` receipt for that `request_id`.
 3. Compare the held Execute time of `github-pr-checker` and `pr-updater` with
    the 18.68 h above, over a window of the same length.
+
+### Observed 2026-11-08 to 2026-11-09
+
+1. Five background runs started, from `sangsu`, `code-reviewer-father`,
+   `glossary-maniac`, `ocaml-agent-ic` and `polisher`. The start calls
+   returned in 5.6 to 42.1 ms. Each Keeper's turn went on after the start (10
+   to 104 more tool calls once the command had ended). All five commands ended
+   with `ok` true. The `sleep 20` probe was not run.
+2. Not checked.
+3. Not measured with the definition above. The server restart at 2026-11-08
+   23:07Z started the build with #50012; in the 2 h 56 min windows around it
+   the two Keepers made 71 Execute calls before and 131 after, with 0 and 1
+   `sleep N` polls.
 
 ## 6. Workaround self-check
 

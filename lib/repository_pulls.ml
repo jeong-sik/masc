@@ -15,6 +15,36 @@ type mergeable =
   | Conflicting
   | Mergeable_unknown
 
+type actor =
+  | Actor_user of string
+  | Actor_bot of string
+  | Actor_other of
+      { typename : string option
+      ; login : string option
+      }
+  | Actor_absent
+
+type review_verdict =
+  | Verdict_approved
+  | Verdict_changes_requested
+  | Verdict_commented
+  | Verdict_dismissed
+  | Verdict_pending
+  | Verdict_unrecognized of string
+
+type latest_review =
+  { reviewer : actor
+  ; verdict : review_verdict
+  ; commit_oid : string option
+  }
+
+type latest_reviews =
+  | Reviews_not_read
+  | Reviews_read of
+      { reviews : latest_review list
+      ; truncated : bool
+      }
+
 type pull_request =
   { repo_slug : string
   ; number : int
@@ -23,7 +53,16 @@ type pull_request =
   ; review : review_state
   ; mergeable : mergeable
   ; author : string option
+  ; title : string option
+  ; head_oid : string option
+  ; reviews : latest_reviews
   }
+
+type head_review =
+  | Reviewed_on_head
+  | Not_reviewed_on_head
+  | Review_history_incomplete
+  | Head_review_unknown
 
 type failure =
   | Repository_not_visible
@@ -98,6 +137,20 @@ let keeper_of_author ~keepers pull =
   | Some author when List.exists (String.equal author) keepers -> Some author
   | Some _ | None -> None
 
+(* Only the review's commit and the head's object id are compared. *)
+let review_on_head ~head (review : latest_review) =
+  Option.equal String.equal review.commit_oid (Some head)
+
+let head_review_of pull =
+  match pull.head_oid, pull.reviews with
+  | None, (Reviews_not_read | Reviews_read _) | Some _, Reviews_not_read -> Head_review_unknown
+  | Some head, Reviews_read { reviews; truncated } ->
+    if List.exists (review_on_head ~head) reviews
+    then Reviewed_on_head
+    else if truncated
+    then Review_history_incomplete
+    else Not_reviewed_on_head
+
 (* --- JSON --- *)
 
 let check_state_to_string = function
@@ -121,6 +174,53 @@ let string_or_null = function
   | Some value -> `String value
   | None -> `Null
 
+let actor_to_yojson = function
+  | Actor_user login -> `Assoc [ "kind", `String "user"; "login", `String login ]
+  | Actor_bot login -> `Assoc [ "kind", `String "bot"; "login", `String login ]
+  | Actor_other { typename; login } ->
+    `Assoc
+      [ "kind", `String "other"; "typename", string_or_null typename; "login", string_or_null login ]
+  | Actor_absent -> `Assoc [ "kind", `String "absent" ]
+
+let verdict_to_string = function
+  | Verdict_approved -> "approved"
+  | Verdict_changes_requested -> "changes_requested"
+  | Verdict_commented -> "commented"
+  | Verdict_dismissed -> "dismissed"
+  | Verdict_pending -> "pending"
+  | Verdict_unrecognized _ -> "unrecognized"
+
+let head_review_to_string = function
+  | Reviewed_on_head -> "reviewed_on_head"
+  | Not_reviewed_on_head -> "not_reviewed_on_head"
+  | Review_history_incomplete -> "review_history_incomplete"
+  | Head_review_unknown -> "unknown"
+
+let latest_review_to_yojson ~head_oid (review : latest_review) =
+  `Assoc
+    [ "reviewer", actor_to_yojson review.reviewer
+    ; "verdict", `String (verdict_to_string review.verdict)
+    ; ( "verdict_raw"
+      , match review.verdict with
+        | Verdict_unrecognized raw -> `String raw
+        | Verdict_approved | Verdict_changes_requested | Verdict_commented | Verdict_dismissed
+        | Verdict_pending -> `Null )
+    ; "commit_oid", string_or_null review.commit_oid
+    ; ( "on_head"
+      , match head_oid with
+        | Some head -> `Bool (review_on_head ~head review)
+        | None -> `Null )
+    ]
+
+let latest_reviews_to_yojson ~head_oid = function
+  | Reviews_not_read -> `Assoc [ "state", `String "not_read" ]
+  | Reviews_read { reviews; truncated } ->
+    `Assoc
+      [ "state", `String "read"
+      ; "truncated", `Bool truncated
+      ; "latest", `List (List.map (latest_review_to_yojson ~head_oid) reviews)
+      ]
+
 (* ["keeper"] is [null] both for a pull request no Keeper authored and while
    the Keeper list is unread; the snapshot's ["keepers"] state tells the two
    apart. *)
@@ -139,6 +239,10 @@ let pull_request_to_yojson ~keepers pull =
     ; "mergeable", `String (mergeable_to_string pull.mergeable)
     ; "author", string_or_null pull.author
     ; "keeper", string_or_null keeper
+    ; "title", string_or_null pull.title
+    ; "head_oid", string_or_null pull.head_oid
+    ; "head_review", `String (head_review_to_string (head_review_of pull))
+    ; "reviews", latest_reviews_to_yojson ~head_oid:pull.head_oid pull.reviews
     ]
 
 let failure_to_yojson = function

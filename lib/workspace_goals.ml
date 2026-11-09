@@ -930,7 +930,7 @@ let answer_verifying_repeat ?evidence_refs ?expected_verification ~tool_name ~st
   | Ok (goal, (record, reconciled)) ->
       let retry = match goal.phase, record with
         | Goal_phase.Verifying, Some {Goal_verification.completion=Proof_pending {request_id; _}; _} ->
-          let store = Lane_addon_store.create ~root:(Filename.concat (Workspace.masc_dir ctx.config) "lane-addons") in
+          let store = Lane_addon_store.of_config ctx.config in
           Goal_verifier_worker.request_retry ~store
             ~installation_id:Goal_verifier_worker.host_installation_id
             ~package_id:Goal_verifier_worker.host_package_id ~goal_id ~request_id

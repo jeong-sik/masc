@@ -13,15 +13,27 @@ val render_byte_ceiling : int
     blocked write nobody can miss. *)
 
 val read_with_outcome : config:Workspace.config -> Keeper_tool_execution.t
-(** Read the ordered durable entries, active article count and rejected-line
-    diagnostics. This read-only surface lets a later Keeper recover removal
-    reasons without putting withdrawn norms back into its prompt. *)
+(** Read the ordered durable entries, active article count, rejected-line
+    diagnostics and isolated-line diagnostics. This read-only surface lets a
+    later Keeper recover removal reasons without putting withdrawn norms back
+    into its prompt. Lines whose subject the keeper roster does not resolve
+    are reported as isolated beside the unreadable lines, because a norm that
+    stopped rendering must not vanish quietly (RFC-0504 §2.4). *)
 
 val write_with_outcome :
   config:Workspace.config ->
   meta:Keeper_meta_contract.keeper_meta ->
   args:Yojson.Safe.t ->
   Keeper_tool_execution.t
+(** Write one norm, or merge a bundle of held norms into one (RFC-0504 §2.2).
+    An absent or empty [replaces] argument writes a plain [Added] line, capped
+    at 512 bytes as before. A non-empty [replaces] names held articles and
+    writes a [Replaced] line retiring them: every id must be held now, each
+    named once, and the replacement must render smaller than the bundle it
+    retires while the projected render stays within the ceiling (RFC-0504
+    §2.3). An optional [reason] argument lands in the [Replaced] line beside
+    [by]/[at]; it is refused on a plain write, where there is nothing it
+    could explain. *)
 
 val remove_with_outcome :
   config:Workspace.config ->

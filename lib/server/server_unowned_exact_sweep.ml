@@ -203,5 +203,5 @@ let run_for_workspace config =
     Error (Sweep_refused "the Lane declarations could not all be read")
   else
     run
-      ~store:(Store.create ~root:(Filename.concat (Workspace.masc_dir config) "lane-addons"))
+      ~store:(Store.of_config config)
       ~declarations:snapshot.declarations

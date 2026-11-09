@@ -1,0 +1,97 @@
+{
+  "window": [
+    "2026-11-08T23:08:04+00:00",
+    "2026-11-09T02:04:00+00:00"
+  ],
+  "warmup_hours": 0.0,
+  "files": 8,
+  "skipped": {
+    "bad_lines": 0
+  },
+  "remote_ssh_calls": {
+    "total": 1549,
+    "read": 1455,
+    "write": 94
+  },
+  "passes": [
+    {
+      "read_ttl_s": 60,
+      "write_ttl_s": 60.0,
+      "read": 376,
+      "write": 11,
+      "total": 387
+    },
+    {
+      "read_ttl_s": 120,
+      "write_ttl_s": 60.0,
+      "read": 254,
+      "write": 24,
+      "total": 278
+    },
+    {
+      "read_ttl_s": 300,
+      "write_ttl_s": 60.0,
+      "read": 148,
+      "write": 34,
+      "total": 182
+    },
+    {
+      "read_ttl_s": 600,
+      "write_ttl_s": 60.0,
+      "read": 95,
+      "write": 36,
+      "total": 131
+    },
+    {
+      "read_ttl_s": 1800,
+      "write_ttl_s": 60.0,
+      "read": 47,
+      "write": 38,
+      "total": 85
+    }
+  ],
+  "overhead_by_gap": {
+    "0-10s": {
+      "calls": 679,
+      "overhead_p50_s": 0.027,
+      "overhead_mean_s": 0.13,
+      "slow_calls": 22,
+      "overhead_hours": 0.025
+    },
+    "10-30s": {
+      "calls": 329,
+      "overhead_p50_s": 0.032,
+      "overhead_mean_s": 0.17,
+      "slow_calls": 17,
+      "overhead_hours": 0.016
+    },
+    "30-60s": {
+      "calls": 80,
+      "overhead_p50_s": 0.029,
+      "overhead_mean_s": 0.33,
+      "slow_calls": 6,
+      "overhead_hours": 0.007
+    },
+    "60-120s": {
+      "calls": 61,
+      "overhead_p50_s": 0.025,
+      "overhead_mean_s": 0.54,
+      "slow_calls": 10,
+      "overhead_hours": 0.009
+    },
+    "120-600s": {
+      "calls": 116,
+      "overhead_p50_s": 0.111,
+      "overhead_mean_s": 1.42,
+      "slow_calls": 54,
+      "overhead_hours": 0.046
+    },
+    "600s+": {
+      "calls": 25,
+      "overhead_p50_s": 2.531,
+      "overhead_mean_s": 2.52,
+      "slow_calls": 25,
+      "overhead_hours": 0.017
+    }
+  }
+}

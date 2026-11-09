@@ -120,6 +120,7 @@ type misc_operation =
   | Misc_dos_pass
   | Misc_dos_save
   | Misc_dos_restore
+  | Misc_pull_requests
 [@@deriving enumerate]
 (** Closed vocabulary routed by [Tool_misc.dispatch]. *)
 

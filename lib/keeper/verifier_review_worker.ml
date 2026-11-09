@@ -22,8 +22,8 @@ let map_load_error = function
 
 let run_attempt_with ~advance_events ?prepare_observer_registration ?on_verdict ?on_tool_result ?sw ~store ~verification_id ~attempt
     ~installation_id ~package_id ~prepare_notes ~base_path ~prepare_authority ~provider_rest () =
-  let expected_store = Lane_addon_store.create ~root:
-    (Filename.concat (Common.masc_dir_from_base_path ~base_path) "lane-addons") in
+  let expected_store = Lane_addon_store.create
+    ~root:(Lane_addon_store.directory ~masc_dir:(Common.masc_dir_from_base_path ~base_path)) in
   let* () = if Lane_addon_store.root store = Lane_addon_store.root expected_store
     then Ok () else Error (Grants_mismatch "review execution workspace differs from its original owner store") in
   let* retained = O.load_retained ~store ~verification_id ~attempt

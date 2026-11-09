@@ -115,6 +115,7 @@ let catalog_fixture_toml entry =
      max_output_tokens = 1024\n\
      supports_response_format_json = %b\n\
      supports_structured_output = %b\n\
+     json_schema_dialect = %S\n\
      %s\n\
      [[targets]]\n\
      id = %S\n\
@@ -129,6 +130,7 @@ let catalog_fixture_toml entry =
     entry.id
     entry.capabilities.supports_response_format_json
     entry.capabilities.supports_structured_output
+    (Capability_vocab.json_schema_dialect_to_string entry.capabilities.json_schema_dialect)
     (match entry.capabilities.supported_models with
      | None -> ""
      | Some models ->
@@ -853,8 +855,10 @@ let test_no_measure_one_post_and_wire_authority () =
     ~response:(openai_response content)
     (fun provenance body ->
        let format = Yojson.Safe.Util.member "response_format" body in
-       check bool "Cohere sends the entire raw domain schema" true
-         (format = `Assoc [ "type", `String "json_object"; "schema", annotated_domain ]);
+       let canonical_json json = Yojson.Safe.(json |> sort |> to_string) in
+       check string "Cohere sends the entire raw domain schema"
+         (canonical_json (`Assoc [ "type", `String "json_object"; "schema", annotated_domain ]))
+         (canonical_json format);
        match EO.plan_provenance_effective_schema_fingerprint provenance with
        | Some effective ->
          check string "Cohere effective schema describes the transmitted domain"

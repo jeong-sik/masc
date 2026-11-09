@@ -869,14 +869,12 @@ let inspect_checkout_identity ~budget ~catalog (checkout : Keeper_playground_che
     }
 ;;
 
-let checkout_identity_rows
-    ?(inspection_budget_sec = Repo_git.inspection_timeout_sec)
-    ~(config : Workspace.config)
-    checkouts
-  =
+let checkout_identity_rows ~(config : Workspace.config) checkouts =
   let catalog = Repo_store.load_all ~base_path:config.base_path in
   let budget =
-    Repo_git.Inspection_budget.create ~timeout_sec:inspection_budget_sec ()
+    Repo_git.Inspection_budget.create
+      ~timeout_sec:Repo_git.inspection_timeout_sec
+      ()
   in
   List.map (inspect_checkout_identity ~budget ~catalog) checkouts
 ;;

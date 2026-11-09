@@ -3,7 +3,7 @@ module Resources = Masc.Http_h2_response_ledger
 module Registry = Server_h2_stream_registry
 
 type lane = {mutable pending:string}
-type response = {reader:H2.Body.Reader.t; mutable waiting:bool;
+type response = {status:int; reader:H2.Body.Reader.t; mutable waiting:bool;
   mutable ended:bool; body:Buffer.t}
 type session = {server:H2.Server_connection.t; client:H2.Client_connection.t;
   upload:lane; download:lane; registry:Registry.t;
@@ -80,8 +80,9 @@ let request session id =
     (H2.Request.create ~scheme:"http" `GET (string_of_int id)
       ~headers:(H2.Headers.of_list [":authority","localhost"]))
     ~error_handler:(fun _ -> incr session.errors)
-    ~response_handler:(fun _ reader -> Hashtbl.add session.responses id
-      {reader;waiting=false;ended=false;body=Buffer.create 16}) in
+    ~response_handler:(fun response reader -> Hashtbl.add session.responses id
+      {status=H2.Status.to_code response.status;reader;waiting=false;ended=false;
+       body=Buffer.create 16}) in
   H2.Body.Writer.close writer
 
 let read_once response =
@@ -272,22 +273,58 @@ let reqd_of ~stream_sw h2_reqd =
 (* h2 answers an error reported before any response, and the stream then
    takes no response of its own. *)
 let test_response_after_a_report_gets_a_closed_writer () =
-  let ran=ref false and closed=ref None in
+  let ran=ref false and closed=ref None and ended=ref None in
   let handler _ ~stream_sw h2_reqd =
     ran:=true;
     let reqd=reqd_of ~stream_sw h2_reqd in
     Http_reqd.report_exn reqd First_report;
     let writer=Http_reqd.respond_with_streaming reqd (Httpun.Response.create `OK) in
     Http_reqd.Body_writer.write_string writer "dropped";
-    closed:=Some (Http_reqd.Body_writer.is_closed writer) in
+    closed:=Some (Http_reqd.Body_writer.is_closed writer);
+    ended:=Some (match Http_reqd.Body_writer.stream_end writer with
+      | Some signal -> Eio.Promise.is_resolved signal
+      | None -> false) in
   with_session ~capacity:1024 handler (fun _ session ->
     request session 1;
     until session (fun () -> !ran && Registry.active_streams session.registry=0);
     check (option bool) "the response opened after the report got a closed writer"
-      (Some true) !closed)
+      (Some true) !closed;
+    check (option bool) "the closed writer reports the stream's end at once"
+      (Some true) !ended)
 
-(* A fiber of the stream failed its switch. The handler's response comes after
-   that, and must not open an h2 response that nothing will finish. *)
+let contains ~sub text =
+  let n=String.length sub and m=String.length text in
+  let rec at i = i+n <= m && (String.equal (String.sub text i n) sub || at (i+1)) in
+  at 0
+
+(* A string response after the report is refused without asking h2. Asked,
+   h2 raises [Failure "... currently handling error"], and that reaches the
+   log as a warning with a backtrace. *)
+let test_string_response_after_a_report_is_refused_without_h2 () =
+  let lines=ref [] in
+  Console_sink.For_testing.reset ();
+  Console_sink.For_testing.set_writer (Some (fun line -> lines:=line :: !lines));
+  Fun.protect ~finally:Console_sink.For_testing.reset (fun () ->
+    let accepted=ref None in
+    let handler _ ~stream_sw h2_reqd =
+      let reqd=reqd_of ~stream_sw h2_reqd in
+      Http_reqd.report_exn reqd First_report;
+      accepted:=Some (Http_reqd.try_respond_with_string reqd
+        (Httpun.Response.create `OK) "late") in
+    with_session ~capacity:1024 handler (fun _ session ->
+      request session 1;
+      until session (fun () -> Option.is_some !accepted && Hashtbl.mem session.responses 1);
+      check bool "the late response was refused" true
+        (!accepted = Some Http_reqd.Rejected_by_writer);
+      check int "the client got the report's 500" 500
+        (Hashtbl.find session.responses 1).status;
+      check bool "h2 was not asked for a second response" false
+        (List.exists (contains ~sub:"currently handling error") !lines)))
+
+(* A fiber of the stream failed its switch before the handler answered. The
+   handler's response then gets a closed writer, and the client sees the 500
+   that the failure's report brings. Before, h2 opened the handler's 200 and
+   the report cut it with RST_STREAM. *)
 let test_response_after_the_scope_failed_gets_a_closed_writer () =
   let ran=ref false and closed=ref None in
   let handler _ ~stream_sw h2_reqd =
@@ -298,9 +335,12 @@ let test_response_after_the_scope_failed_gets_a_closed_writer () =
     closed:=Some (Http_reqd.Body_writer.is_closed writer) in
   with_session ~capacity:1024 handler (fun _ session ->
     request session 1;
-    until session (fun () -> !ran && Registry.active_streams session.registry=0);
+    until session (fun () ->
+      !ran && Registry.active_streams session.registry=0 && Hashtbl.mem session.responses 1);
     check (option bool) "the response opened after the switch failed got a closed writer"
-      (Some true) !closed)
+      (Some true) !closed;
+    check int "the client saw the failure's 500" 500
+      (Hashtbl.find session.responses 1).status)
 
 let test_refused_write_ends_the_scope_with_the_refusal () =
   let ended=ref None in
@@ -328,5 +368,6 @@ let () = run "H2 response resource boundary"
     test_case "a handler failure before the headers keeps h2's error answer" `Quick test_handler_failure_before_headers_keeps_the_error_answer;
     test_case "a second report on a reported stream raises nothing" `Quick test_second_report_raises_nothing;
     test_case "a response after a report gets a closed writer" `Quick test_response_after_a_report_gets_a_closed_writer;
+    test_case "a string response after a report is refused without h2" `Quick test_string_response_after_a_report_is_refused_without_h2;
     test_case "a response after the scope failed gets a closed writer" `Quick test_response_after_the_scope_failed_gets_a_closed_writer;
     test_case "a refused write ends the scope with the refusal" `Quick test_refused_write_ends_the_scope_with_the_refusal]]

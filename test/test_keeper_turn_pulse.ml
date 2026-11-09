@@ -74,7 +74,11 @@ let test_a_turn_prunes_slots_older_than_a_day () =
   Alcotest.(check (list int))
     "the slot a day before the newest stays, the one before it goes"
     [ base + ((slots_per_day + 1) * Pulse.slot_seconds); base + Pulse.slot_seconds ]
-    (List.map (fun (slot : Pulse.slot) -> slot.starts_at) pulse.slots)
+    (List.map (fun (slot : Pulse.slot) -> slot.starts_at) pulse.slots);
+  Alcotest.(check (float 0.001))
+    "known_since moves up to the pruned boundary"
+    (float_of_int (base + Pulse.slot_seconds))
+    pulse.known_since
 ;;
 
 let test_a_late_turn_lands_in_its_own_slot () =

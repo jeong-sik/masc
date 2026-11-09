@@ -42,10 +42,8 @@ let rec add_turn starts_at outcome = function
   | slot :: older -> slot :: add_turn starts_at outcome older
 ;;
 
-let within_window ~newest_slot slots =
-  List.filter (fun slot -> slot.starts_at >= newest_slot - window_seconds) slots
-;;
-
+(* Pruning forgets the turns before [horizon], so [known_since] moves up to
+   it: a reader drawing further back sees unknown hours, not quiet ones. *)
 let add_to_pulse pulse ~at outcome =
   let starts_at = slot_start at in
   let slots = add_turn starts_at outcome pulse.slots in
@@ -54,7 +52,10 @@ let add_to_pulse pulse ~at outcome =
     | newest :: _ -> newest.starts_at
     | [] -> starts_at
   in
-  { pulse with slots = within_window ~newest_slot slots }
+  let horizon = newest_slot - window_seconds in
+  { known_since = Float.max pulse.known_since (float_of_int horizon)
+  ; slots = List.filter (fun slot -> slot.starts_at >= horizon) slots
+  }
 ;;
 
 module Key = struct

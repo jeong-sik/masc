@@ -1,4 +1,4 @@
-(** Recursive goal-tree builder and runtime trust projection helpers. *)
+(** Goal tree-node builder and runtime trust projection helpers. *)
 
 open Dashboard_goals_types_accessor
 
@@ -15,6 +15,8 @@ type build_context = {
   goal_task_index : (string, string list) Hashtbl.t;
 }
 
-(** Recursive pure projection: given a [build_context] snapshot, build
-    the [tree_node] for [goal] and all descendants found in [goals]. *)
-val build_tree : build_context -> Goal_store.goal list -> Goal_store.goal -> tree_node
+(** Pure projection: given a [build_context] snapshot, build the [tree_node]
+    for [goal]. Goals are flat, so the node has no children. Applying
+    [build_tree] to a context indexes the snapshot once; apply the result to
+    each goal. *)
+val build_tree : build_context -> Goal_store.goal -> tree_node

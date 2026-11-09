@@ -921,16 +921,22 @@ named on its title row: `story`, `s schedules` and `m memory`.
 
 - `story` tells the Keeper as `◂ past`, `● now` and `▹ next`. Past holds the
   failing-for and turn-pulse cells, the last Librarian success, the Keeper's
-  last wake, the failure sentence and the attempt chain. Now holds the activity
-  word, the `DETAIL` text, `Mode S`, `AGE` and the lifecycle. Next holds the
-  schedule cell, the next dispatch path and the memory lag. Except the last
-  wake, they are the cells and sentences the list rows draw. The last wake is
+  last wake, its newest turns, the failure sentence and the attempt chain. Now
+  holds the activity word, the `DETAIL` text, `Mode S`, `AGE` and the
+  lifecycle. Next holds the schedule cell, the next dispatch path and the
+  memory lag. Except the last wake and the turns, they are the cells and
+  sentences the list rows draw. The last wake is
   the newest wake any schedule on the Keeper's first schedule page recorded,
   with its age, the schedule and its outcome. When the page is cut the line
   reads `last wake on the first page`, since a later page may hold a newer one.
   A reading that is read again or whose read failed says so in brackets at the
   head of the line, and a wake whose time cannot be read makes the last wake
-  unknown.
+  unknown. The newest turns are the last three records of the page Memory
+  reads, newest first, each with the stop reason the receipt recorded, as
+  written, and how long ago the turn ended. A record without a stop reason says
+  so. The window reads them while the story page is open, one Keeper at a time
+  as the cursor moves, and again when the server announces a change in that
+  Keeper's turns. A read that failed says so.
 - `s schedules` is the first page of the Keeper's own schedules, the page the
   Automation tab (`J`) draws first, led by the same `◷` cell the list draws and
   the counts of what the store holds. The window reads that page from the

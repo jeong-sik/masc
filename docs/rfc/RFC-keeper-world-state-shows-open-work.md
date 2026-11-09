@@ -490,6 +490,7 @@ Your other open pull requests: #39410 (draft) #39422 (checks running)
 - **[구현]** 2026-11-09 에 #50259 로 S5 가 S4 보다 먼저 들어갔다(S1 #50213, S2 #50214 위). §4.2 의 자리 판정은 `Repository_pulls_placement.placement_of` 에 있고 S4 는 이 함수를 부른다. 행은 World State 행(§4.6)이 아니라 JSON 이어서, 둘을 맞추는 일은 S4 에 남는다. 이 문서와 다른 점:
   - `Checks_unrecognized` 자리는 없다. `Repository_pulls` 는 모르는 check 상태가 든 PR 을 디코딩하지 않고 `undecodable` 로 센다.
   - 자리 `head_review_unknown` 이 있다. head 나 리뷰 목록을 못 읽은 PR 이 `Unreviewed_on_head` 에 섞이지 않는다.
+  - 자리 `awaiting_approval`(`Needs`)이 있다. `head_review` 는 리뷰의 판정을 안 보므로 COMMENTED·DISMISSED 한 줄도 "head 에 리뷰 있음"이다. 이 PR 이 기본 목록에서 빠지지 않도록, head 에 리뷰가 있어도 리뷰 결정이 `Review_waiting`(승인 필요, 승인 없음)이면 이 자리에 둔다. 표 6행의 `Reviewed_on_head` 가 둘로 갈린다. S4 는 이 자리를 묶음에 같이 그려야 한다.
   - §4.3 의 3번(`committedDate`)은 스냅숏에 칸이 없어 PR 번호로 대신한다.
   - 읽은 저장소가 하나도 없으면 `Dependency_unavailable` 에러에 저장소별 상태를 실어 돌려준다. 일부만 읽었으면 성공이고, 못 읽은 저장소는 `failed` 항목으로 나온다.
   - 스키마는 `defer_loading = true` 다. Keeper 는 도구 검색으로 찾아서 부른다.

@@ -25,6 +25,15 @@ let on_older_commit = reviews_of [ last_review ~commit:(Some "head-0") "someone"
 let cut_without_head = reviews_of ~truncated:true [ last_review ~commit:(Some "head-0") "someone" ]
 let cut_with_head = reviews_of ~truncated:true [ last_review ~commit:(Some "head-1") "someone" ]
 
+let dismissed_on_head =
+  reviews_of
+    [ { R.reviewer = R.Actor_user "someone"
+      ; verdict = R.Verdict_dismissed
+      ; commit_oid = Some "head-1"
+      }
+    ]
+;;
+
 let pull
       ?(draft = false)
       ?(checks = R.Checks_passing)
@@ -144,6 +153,33 @@ let placement_cases =
   ; "a cut list that holds the head", pull ~reviews:cut_with_head 12, "reviewed_on_head"
   ; "head commit not read", pull ~head_oid:None 13, "head_review_unknown"
   ; "review list not read", pull ~reviews:R.Reviews_not_read 14, "head_review_unknown"
+  ; ( "a comment on the head while GitHub waits for an approval"
+    , pull ~review:R.Review_waiting ~reviews:on_head 15
+    , "awaiting_approval" )
+  ; ( "a dismissed review on the head while GitHub waits for an approval"
+    , pull ~review:R.Review_waiting ~reviews:dismissed_on_head 16
+    , "awaiting_approval" )
+  ; ( "an approved decision closes a reviewed head"
+    , pull ~review:R.Review_approved ~reviews:on_head 17
+    , "reviewed_on_head" )
+  ; ( "waiting with no review on the head"
+    , pull ~review:R.Review_waiting ~reviews:no_reviews 18
+    , "unreviewed_on_head" )
+  ; ( "waiting with a cut list that lacks the head"
+    , pull ~review:R.Review_waiting ~reviews:cut_without_head 19
+    , "review_history_incomplete" )
+  ; ( "waiting with the review list not read"
+    , pull ~review:R.Review_waiting ~reviews:R.Reviews_not_read 20
+    , "head_review_unknown" )
+  ; ( "a conflict beats awaiting approval"
+    , pull ~review:R.Review_waiting ~mergeable:R.Conflicting ~reviews:on_head 21
+    , "conflicting" )
+  ; ( "running checks beat awaiting approval"
+    , pull ~review:R.Review_waiting ~checks:R.Checks_running ~reviews:on_head 22
+    , "checks_running" )
+  ; ( "changes requested beat awaiting approval"
+    , pull ~review:R.Review_changes_requested ~reviews:on_head 23
+    , "changes_requested" )
   ]
 ;;
 
@@ -155,14 +191,19 @@ let test_placement_table () =
 ;;
 
 let test_placements_are_ranked_in_table_order () =
-  check_int "nine placements" 9 (List.length P.all);
-  check_ints "rank is the position" (List.init 9 Fun.id) (List.map P.rank P.all);
+  check_int "ten placements" 10 (List.length P.all);
+  check_ints "rank is the position" (List.init 10 Fun.id) (List.map P.rank P.all);
   let names = List.map P.to_string P.all in
-  check_int "names are distinct" 9 (List.length (List.sort_uniq String.compare names));
+  check_int "names are distinct" 10 (List.length (List.sort_uniq String.compare names));
   check_strings
-    "the first four are the ones that need work"
-    [ "checks_failing"; "changes_requested"; "conflicting"; "unreviewed_on_head" ]
-    (List.filteri (fun index _ -> index < 4) names)
+    "the first five are the ones that need work"
+    [ "checks_failing"
+    ; "changes_requested"
+    ; "conflicting"
+    ; "unreviewed_on_head"
+    ; "awaiting_approval"
+    ]
+    (List.filteri (fun index _ -> index < 5) names)
 ;;
 
 (* --- arguments --- *)
@@ -289,6 +330,32 @@ let test_limit_cuts_after_the_order () =
   check_ints "the first three" [ 102; 101; 103 ] (numbers_of entry);
   check_int "matched still counts them all" 7 (to_int (member "matched" entry));
   check_int "shown" 3 (to_int (member "shown" entry))
+;;
+
+let test_a_head_with_only_comments_stays_in_the_default_rows () =
+  let pulls =
+    [ pull ~review:R.Review_waiting ~reviews:on_head 1
+    ; pull ~review:R.Review_approved ~reviews:on_head 2
+    ; pull ~review:R.Review_none ~reviews:on_head 3
+    ; pull ~review:R.Review_waiting ~reviews:no_reviews 4
+    ]
+  in
+  let entry =
+    first_entry (answered (request ()) (snapshot [ repo_entry "masc" (read ~at:1000. pulls) ]))
+  in
+  check_ints
+    "not reviewed first, then the head that still waits for an approval"
+    [ 4; 1 ]
+    (numbers_of entry);
+  let counts = member "counts" entry in
+  check_int "awaiting_approval" 1 (to_int (member "awaiting_approval" counts));
+  check_int "reviewed_on_head" 2 (to_int (member "reviewed_on_head" counts));
+  (match entry |> member "pulls" |> to_list with
+   | [ _; waiting ] ->
+     check_string "placement" "awaiting_approval" (to_string (member "placement" waiting));
+     check_string "review" "waiting" (to_string (member "review" waiting));
+     check_string "head_review" "reviewed_on_head" (to_string (member "head_review" waiting))
+   | other -> Alcotest.failf "expected two rows, got %d" (List.length other))
 ;;
 
 let test_head_review_orders_within_a_placement () =
@@ -548,6 +615,7 @@ let () =
         ; Alcotest.test_case "selection" `Quick test_selection_by_placement
         ; Alcotest.test_case "mine" `Quick test_mine_keeps_the_callers_pull_requests
         ; Alcotest.test_case "limit" `Quick test_limit_cuts_after_the_order
+        ; Alcotest.test_case "comments only" `Quick test_a_head_with_only_comments_stays_in_the_default_rows
         ; Alcotest.test_case "head review order" `Quick test_head_review_orders_within_a_placement
         ; Alcotest.test_case "row fields" `Quick test_row_fields
         ; Alcotest.test_case "title" `Quick test_title_is_cut_at_a_character_boundary

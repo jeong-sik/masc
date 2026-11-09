@@ -5,6 +5,7 @@ type attention =
   | Changes_requested
   | Conflicting
   | Unreviewed_on_head
+  | Awaiting_approval
 [@@deriving enumerate, eq]
 
 type not_listed =
@@ -30,6 +31,7 @@ let to_string = function
   | Needs Changes_requested -> "changes_requested"
   | Needs Conflicting -> "conflicting"
   | Needs Unreviewed_on_head -> "unreviewed_on_head"
+  | Needs Awaiting_approval -> "awaiting_approval"
   | Not_listed Draft -> "draft"
   | Not_listed Checks_running -> "checks_running"
   | Not_listed Reviewed_on_head -> "reviewed_on_head"
@@ -49,25 +51,42 @@ let rank placement =
   position 0 all
 ;;
 
-(* Rows 3 to 6 of the table. Every constructor of the review, mergeable and
+(* What the review decision says about approval once row 3 has taken the
+   changes-requested pull requests out. A review of any verdict sits "on the
+   head" (a comment, a dismissed approval, a line written by the author), so
+   only the decision tells a head that is done from a head GitHub still holds
+   for an approval. *)
+type approval =
+  | Approval_pending
+  | Approval_settled
+
+(* Rows 4 to 6 of the table. Every constructor of the mergeable and
    head-review columns is written, so a new constructor in
    {!Repository_pulls} fails to compile here until the table says where it
    goes. *)
+let from_mergeable ~approval ~running (pull : R.pull_request) =
+  match pull.mergeable with
+  | R.Conflicting -> Needs Conflicting
+  | R.Mergeable | R.Mergeable_unknown ->
+    if running
+    then Not_listed Checks_running
+    else (
+      match R.head_review_of pull with
+      | R.Not_reviewed_on_head -> Needs Unreviewed_on_head
+      | R.Review_history_incomplete -> Not_listed Review_history_incomplete
+      | R.Reviewed_on_head ->
+        (match approval with
+         | Approval_pending -> Needs Awaiting_approval
+         | Approval_settled -> Not_listed Reviewed_on_head)
+      | R.Head_review_unknown -> Not_listed Head_review_unknown)
+;;
+
+(* Rows 3 to 6 of the table. *)
 let after_checks ~running (pull : R.pull_request) =
   match pull.review with
   | R.Review_changes_requested -> Needs Changes_requested
-  | R.Review_approved | R.Review_waiting | R.Review_none ->
-    (match pull.mergeable with
-     | R.Conflicting -> Needs Conflicting
-     | R.Mergeable | R.Mergeable_unknown ->
-       if running
-       then Not_listed Checks_running
-       else (
-         match R.head_review_of pull with
-         | R.Not_reviewed_on_head -> Needs Unreviewed_on_head
-         | R.Review_history_incomplete -> Not_listed Review_history_incomplete
-         | R.Reviewed_on_head -> Not_listed Reviewed_on_head
-         | R.Head_review_unknown -> Not_listed Head_review_unknown))
+  | R.Review_waiting -> from_mergeable ~approval:Approval_pending ~running pull
+  | R.Review_approved | R.Review_none -> from_mergeable ~approval:Approval_settled ~running pull
 ;;
 
 let placement_of (pull : R.pull_request) =

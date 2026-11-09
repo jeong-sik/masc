@@ -12,7 +12,7 @@
 
 (** Which placements (see {!Repository_pulls_placement}) the rows may have. *)
 type selection =
-  | Needs_only  (** The four placements that need work: the default. *)
+  | Needs_only  (** The placements that need work ([Needs _]): the default. *)
   | Every_placement
   | Only of Repository_pulls_placement.placement
 

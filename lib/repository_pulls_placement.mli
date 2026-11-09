@@ -14,9 +14,20 @@
        the head review of the pull request:
          not reviewed on head                 Needs Unreviewed_on_head
          review history incomplete            Not_listed Review_history_incomplete
-         reviewed on head                     Not_listed Reviewed_on_head
+         reviewed on head, and the review
+           decision still waits for an
+           approval                           Needs Awaiting_approval
+         reviewed on head, otherwise          Not_listed Reviewed_on_head
          head or review list not read         Not_listed Head_review_unknown
     v}
+
+    {!Repository_pulls.head_review_of} counts a review of any verdict, so a
+    comment, a dismissed approval or a line written by the author puts a pull
+    request in "reviewed on head". The RFC table stops there. This module
+    adds [Awaiting_approval]: when the review decision is still
+    [Review_waiting] (GitHub requires an approval and has none), a reviewed
+    head stays among the pull requests that need work. Without it a head with
+    only comments would drop out of them.
 
     The RFC names three head-review values. {!Repository_pulls.head_review}
     has a fourth, [Head_review_unknown], for a pull request whose answer
@@ -32,6 +43,7 @@ type attention =
   | Changes_requested
   | Conflicting
   | Unreviewed_on_head
+  | Awaiting_approval
 
 type not_listed =
   | Draft
@@ -49,8 +61,9 @@ val all : placement list
 
 val to_string : placement -> string
 (** The lower-case constructor name: [checks_failing], [changes_requested],
-    [conflicting], [unreviewed_on_head], [draft], [checks_running],
-    [reviewed_on_head], [review_history_incomplete], [head_review_unknown]. *)
+    [conflicting], [unreviewed_on_head], [awaiting_approval], [draft],
+    [checks_running], [reviewed_on_head], [review_history_incomplete],
+    [head_review_unknown]. *)
 
 val equal : placement -> placement -> bool
 

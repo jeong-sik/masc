@@ -1633,6 +1633,30 @@ let commit_transition_unlocked =
     ~compact_wal:(fun _owner -> Ok ())
 ;;
 
+(* The frame the pending transitions below share: resolve the owner, take its
+   durable lock, load the state under the lock, and run [f] on it. An
+   exception other than a cancellation comes back as an [Error] that names
+   [what]. *)
+let with_locked_state ~base_path ~keeper_name ~what f =
+  match resolve_owner ~base_path ~keeper_name with
+  | Error _ as error -> error
+  | Ok owner ->
+    (try
+       Owner_lock.with_durable_lock owner (fun () ->
+         match load_state_unlocked owner with
+         | Error _ as error -> error
+         | Ok state -> f owner state)
+     with
+     | Eio.Cancel.Cancelled _ as exn -> raise exn
+     | exn ->
+       Error
+         (Printf.sprintf
+            "event queue %s raised keeper=%s: %s"
+            what
+            (keeper_name_of_owner owner)
+            (Printexc.to_string exn)))
+;;
+
 let cancel_pending_accepted_result
       ?(after_commit = fun _ -> ())
       ~base_path
@@ -1641,30 +1665,19 @@ let cancel_pending_accepted_result
       ~cancellation
       ()
   =
-  match resolve_owner ~base_path ~keeper_name with
-  | Error _ as error -> error
-  | Ok owner ->
-    (try
-       Owner_lock.with_durable_lock owner (fun () ->
-         match load_state_unlocked owner with
-         | Error _ as error -> error
-         | Ok state ->
-           commit_transition_unlocked
-             owner
-             ~after_commit
-             (State.cancel_pending_accepted
-                ~applied_at
-                ~cancellation)
-             state
-           |> Result.map fst)
-     with
-     | Eio.Cancel.Cancelled _ as exn -> raise exn
-     | exn ->
-       Error
-         (Printf.sprintf
-            "event queue pending accepted cancellation raised keeper=%s: %s"
-            (keeper_name_of_owner owner)
-            (Printexc.to_string exn)))
+  with_locked_state
+    ~base_path
+    ~keeper_name
+    ~what:"pending accepted cancellation"
+    (fun owner state ->
+       commit_transition_unlocked
+         owner
+         ~after_commit
+         (State.cancel_pending_accepted
+            ~applied_at
+            ~cancellation)
+         state
+       |> Result.map fst)
 ;;
 
 let cancel_pending_if_present_result
@@ -1675,32 +1688,22 @@ let cancel_pending_if_present_result
       ~cancellation
       ()
   =
-  match resolve_owner ~base_path ~keeper_name with
-  | Error _ as error -> error
-  | Ok owner ->
-    (try
-       Owner_lock.with_durable_lock owner (fun () ->
-         match load_state_unlocked owner with
-         | Error _ as error -> error
-         | Ok state when State.pending_cancellation_source_withdrawn ~cancellation state ->
-           Ok Cancellation_source_withdrawn
-         | Ok state ->
-           commit_transition_unlocked
-             owner
-             ~after_commit
-             (State.cancel_pending_accepted
-                ~applied_at
-                ~cancellation)
-             state
-           |> Result.map (fun (result, _pending) -> Cancellation_committed result))
-     with
-     | Eio.Cancel.Cancelled _ as exn -> raise exn
-     | exn ->
-       Error
-         (Printf.sprintf
-            "event queue pending accepted cancellation raised keeper=%s: %s"
-            (keeper_name_of_owner owner)
-            (Printexc.to_string exn)))
+  with_locked_state
+    ~base_path
+    ~keeper_name
+    ~what:"pending accepted cancellation"
+    (fun owner state ->
+       if State.pending_cancellation_source_withdrawn ~cancellation state
+       then Ok Cancellation_source_withdrawn
+       else
+         commit_transition_unlocked
+           owner
+           ~after_commit
+           (State.cancel_pending_accepted
+              ~applied_at
+              ~cancellation)
+           state
+         |> Result.map (fun (result, _pending) -> Cancellation_committed result))
 ;;
 
 let transfer_pending_accepted_result
@@ -1711,30 +1714,19 @@ let transfer_pending_accepted_result
       ~transfer
       ()
   =
-  match resolve_owner ~base_path ~keeper_name with
-  | Error _ as error -> error
-  | Ok owner ->
-    (try
-       Owner_lock.with_durable_lock owner (fun () ->
-         match load_state_unlocked owner with
-         | Error _ as error -> error
-         | Ok state ->
-           commit_transition_unlocked
-             owner
-             ~after_commit
-             (State.transfer_pending_accepted
-                ~applied_at
-                ~transfer)
-             state
-           |> Result.map fst)
-     with
-     | Eio.Cancel.Cancelled _ as exn -> raise exn
-     | exn ->
-       Error
-         (Printf.sprintf
-            "event queue pending accepted transfer raised keeper=%s: %s"
-            (keeper_name_of_owner owner)
-            (Printexc.to_string exn)))
+  with_locked_state
+    ~base_path
+    ~keeper_name
+    ~what:"pending accepted transfer"
+    (fun owner state ->
+       commit_transition_unlocked
+         owner
+         ~after_commit
+         (State.transfer_pending_accepted
+            ~applied_at
+            ~transfer)
+         state
+       |> Result.map fst)
 ;;
 
 let ack_source_terminal_with ~before_write
@@ -1745,31 +1737,20 @@ let ack_source_terminal_with ~before_write
       ~source_terminal
       ()
   =
-  match resolve_owner ~base_path ~keeper_name with
-  | Error _ as error -> error
-  | Ok owner ->
-    (try
-       Owner_lock.with_durable_lock owner (fun () ->
-         match load_state_unlocked owner with
-         | Error _ as error -> error
-         | Ok state ->
-           commit_transition_unlocked
-             ~before_wal_write:before_write
-             owner
-             ~after_commit
-             (State.ack_pending_source_terminal
-                ~applied_at:acked_at
-                ~source_terminal)
-             state
-           |> Result.map fst)
-     with
-     | Eio.Cancel.Cancelled _ as exn -> raise exn
-     | exn ->
-       Error
-         (Printf.sprintf
-            "event queue pending source-terminal ACK raised keeper=%s: %s"
-            (keeper_name_of_owner owner)
-            (Printexc.to_string exn)))
+  with_locked_state
+    ~base_path
+    ~keeper_name
+    ~what:"pending source-terminal ACK"
+    (fun owner state ->
+       commit_transition_unlocked
+         ~before_wal_write:before_write
+         owner
+         ~after_commit
+         (State.ack_pending_source_terminal
+            ~applied_at:acked_at
+            ~source_terminal)
+         state
+       |> Result.map fst)
 ;;
 
 let ack_pending_source_terminal_result =
@@ -1784,30 +1765,20 @@ let terminalize_pending_turn_result
       ~transition
       ()
   =
-  match resolve_owner ~base_path ~keeper_name with
-  | Error _ as error -> error
-  | Ok owner ->
-    (try
-       Owner_lock.with_durable_lock owner (fun () ->
-         match load_state_unlocked owner with
-         | Error _ as error -> error
-         | Ok state when State.pending_turn_selection_withdrawn ~selection state ->
-           Ok Turn_selection_withdrawn
-         | Ok state ->
-           commit_transition_unlocked
-             owner
-             ~after_commit
-             transition
-             state
-           |> Result.map (fun (result, _pending) -> Turn_terminal_committed result))
-     with
-     | Eio.Cancel.Cancelled _ as exn -> raise exn
-     | exn ->
-       Error
-         (Printf.sprintf
-            "event queue pending turn terminalization raised keeper=%s: %s"
-            (keeper_name_of_owner owner)
-            (Printexc.to_string exn)))
+  with_locked_state
+    ~base_path
+    ~keeper_name
+    ~what:"pending turn terminalization"
+    (fun owner state ->
+       if State.pending_turn_selection_withdrawn ~selection state
+       then Ok Turn_selection_withdrawn
+       else
+         commit_transition_unlocked
+           owner
+           ~after_commit
+           transition
+           state
+         |> Result.map (fun (result, _pending) -> Turn_terminal_committed result))
 ;;
 
 let terminalize_pending_turn_completed_result

@@ -160,6 +160,11 @@ val register_module_tag : schemas:Masc_domain.tool_schema list -> tag:module_tag
 val lookup_tag : string -> module_tag option
 (** Look up the module tag for a tool name. *)
 
+val mint_token_with_tag :
+  name:string -> (module_tag * Tool_token.t, string) Result.t
+(** Mint a [Tool_token.t] and resolve its [module_tag] in a single lookup
+    against the immutable tag snapshot. *)
+
 val lookup_schema : string -> Yojson.Safe.t option
 (** Look up the input_schema JSON for a tool name.
     Used by Tool_input_validation pre-hook for argument validation. *)

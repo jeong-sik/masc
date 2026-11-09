@@ -302,7 +302,7 @@ let entry_json (entry : help_entry) =
 
 let entry_markdown (entry : help_entry) =
   let meta = Tool_catalog.metadata entry.name in
-  let lifecycle = Tool_catalog.lifecycle_to_string meta.lifecycle in
+  let lifecycle = "active" in
   let visibility = Tool_catalog.visibility_to_string meta.visibility in
   let bullet item = "- " ^ item in
   let code_bullet item = "- `" ^ item ^ "`" in

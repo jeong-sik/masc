@@ -155,14 +155,13 @@ val emit_board_sse_event : board_sse_event -> unit
 
 (** {1 Backend lifecycle} *)
 
-type board_backend =
-  | Jsonl of Board.store
-(** Currently single-variant; new backends would be added here. *)
+type board_backend = Board.store
+(** The active JSONL [Board.store]. *)
 
 val backend : unit -> board_backend
-(** Returns the currently-active backend, lazy-initialising it on
-    first call (defaulting to {!Jsonl}). Exposed so the dispatch
-    test suite can reach into the underlying [Board.store] directly. *)
+(** Returns the currently-active [Board.store], lazy-initialising it on
+    first call. Exposed so the dispatch test suite can reach into the
+    underlying [Board.store] directly. *)
 
 type initialization_error =
   | Workspace_mismatch of

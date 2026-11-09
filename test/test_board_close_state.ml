@@ -41,9 +41,7 @@ let create_post_exn ~author ~content =
   | Ok post -> post
   | Error e -> Alcotest.fail (Board.Post_publication_failure.to_string e)
 
-let store () =
-  match Board_dispatch.backend () with
-  | Board_dispatch.Jsonl store -> store
+let store () = Board_dispatch.backend ()
 
 let restart () =
   Board.reset_global_for_test ();

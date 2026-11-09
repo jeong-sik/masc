@@ -4,8 +4,8 @@
     message collection, agent-session-bound checks, and formatted listing. *)
 
 open Masc_domain
-include Workspace_utils
-include Workspace_state
+open! Workspace_utils
+open! Workspace_state
 open Workspace_backlog
 open Workspace_identity
 

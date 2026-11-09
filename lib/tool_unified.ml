@@ -10,19 +10,48 @@
 type tool_info = {
   name : string;
   visibility : Tool_catalog.visibility;
-  lifecycle : Tool_catalog.lifecycle;
   is_registered : bool;
   is_read_only : bool;
   call_stats : Tool_registry.call_stats option;
 }
 
+let call_stats_of_metrics (m : Tool_metrics.tool_stats) : Tool_registry.call_stats =
+  {
+    Tool_registry.call_count = m.call_count;
+    success_count = m.success_count;
+    deferred_count = m.deferred_count;
+    failure_count = m.failure_count;
+    last_called_at = 0.0;
+    total_duration_ms =
+      Float.to_int (Float.round (m.mean_ms *. Float.of_int m.call_count));
+    external_mcp_count = 0;
+    agent_internal_count = 0;
+    last_assignment_id = None;
+  }
+
+let resolve_call_stats name =
+  match Tool_registry.find_stats name, Tool_metrics.stats_for name with
+  | Some reg, Some m when m.call_count > reg.call_count ->
+    Some
+      { reg with
+        call_count = m.call_count
+      ; success_count = m.success_count
+      ; deferred_count = m.deferred_count
+      ; failure_count = m.failure_count
+      ; total_duration_ms =
+          max reg.total_duration_ms
+            (Float.to_int (Float.round (m.mean_ms *. Float.of_int m.call_count)))
+      }
+  | Some reg, _ -> Some reg
+  | None, Some m -> Some (call_stats_of_metrics m)
+  | None, None -> None
+
 let tool_info name : tool_info =
   let meta = Tool_catalog.metadata name in
-  let stats = Tool_registry.find_stats name in
+  let stats = resolve_call_stats name in
   {
     name;
     visibility = meta.visibility;
-    lifecycle = meta.lifecycle;
     is_registered = Tool_dispatch.is_registered name;
     is_read_only = Tool_capability.has Tool_capability.Read_only name;
     call_stats = stats;
@@ -43,7 +72,7 @@ let tool_info_to_json (info : tool_info) : Yojson.Safe.t =
   `Assoc [
     ("name", `String info.name);
     ("visibility", `String (Tool_catalog.visibility_to_string info.visibility));
-    ("lifecycle", `String (Tool_catalog.lifecycle_to_string info.lifecycle));
+    ("lifecycle", `String "active");
     ("is_registered", `Bool info.is_registered);
     ("is_read_only", `Bool info.is_read_only);
     ("call_stats", stats_json);

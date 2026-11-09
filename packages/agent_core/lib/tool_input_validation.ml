@@ -339,7 +339,7 @@ let authoritative_schema_parts = function
    result. Stopping at the root let a nested shape error reach the tool
    handler, which names only its first problem, so a caller fixed one field
    per round trip. *)
-let rec object_errors ~prefix schema fields =
+let rec object_errors ?(check_undeclared = true) ~prefix schema fields =
   let required, properties = authoritative_schema_parts schema in
   let names =
     List.map fst properties
@@ -366,7 +366,9 @@ let rec object_errors ~prefix schema fields =
          | Some _, None -> [])
       names
   in
-  declared_errors @ undeclared_errors ~prefix schema properties fields
+  if check_undeclared
+  then declared_errors @ undeclared_errors ~prefix schema properties fields
+  else declared_errors
 
 (* A closed object ([additionalProperties: false]) refuses a field it does not
    declare. It is named in the same result as a missing required field, with
@@ -425,10 +427,10 @@ and value_errors ~path property value =
     | (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _), _ -> [])
 ;;
 
-let validate_authoritative input_schema input =
+let validate_authoritative ?(check_undeclared = true) input_schema input =
   match input with
   | `Assoc fields ->
-    let errors = object_errors ~prefix:"" input_schema fields in
+    let errors = object_errors ~check_undeclared ~prefix:"" input_schema fields in
     if errors = [] then Valid input else Invalid errors
   | other ->
     Invalid
@@ -441,9 +443,9 @@ let validate_authoritative input_schema input =
 
 (* ── Validation ──────────────────────────────────────────── *)
 
-let validate (schema : Types.tool_schema) (input : Yojson.Safe.t) : validation_result =
+let validate ?(check_undeclared = true) (schema : Types.tool_schema) (input : Yojson.Safe.t) : validation_result =
   match schema.input_schema with
-  | Some input_schema -> validate_authoritative input_schema input
+  | Some input_schema -> validate_authoritative ~check_undeclared input_schema input
   | None ->
     let params = schema.parameters in
     (match input with

@@ -78,9 +78,7 @@ let with_eio f () =
     ~recipient_lookup:Recipient_lookup.none_declared ());
   f ()
 
-let store () =
-  match Board_dispatch.backend () with
-  | Board_dispatch.Jsonl store -> store
+let store () = Board_dispatch.backend ()
 
 let refuse_posts_source () =
   let active = store () in
@@ -106,9 +104,7 @@ let create_post_exn ~content =
   | Ok post -> post
   | Error e -> Alcotest.fail (Board.Post_publication_failure.to_string e)
 
-let flush () =
-  match Board_dispatch.backend () with
-  | Board_dispatch.Jsonl store -> Board.flush_dirty store
+let flush () = Board.flush_dirty (Board_dispatch.backend ())
 
 let post_rows () = Fs_compat.load_jsonl (Board.persist_path (Board.global ()))
 

@@ -26,7 +26,7 @@ let protect f =
 (* Board is the process's active workspace store. Do not join it to task/Goal
    state belonging to another config, nor expose its directory as a file root. *)
 let require_workspace config =
-  let Board_dispatch.Jsonl store = Board_dispatch.backend () in
+  let store = Board_dispatch.backend () in
   match Board_dispatch.check_store_workspace ~base_path:config.Workspace.base_path store with
   | Ok () -> Ok ()
   | Error (Board_dispatch.Workspace_mismatch _

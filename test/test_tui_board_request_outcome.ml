@@ -32,7 +32,7 @@ let identity base_path : Masc.Tui_decode.server_identity =
 let noop : Masc.Board_metrics_hooks.observer =
   { observe_persist_lock_acquire_sec = (fun _ -> ())
   ; observe_persist_lock_held_sec = (fun _ -> ())
-  ; inc_dispatch_flusher_start_outcome = (fun ~outcome:_ -> ()) }
+  ; inc_dispatch_flusher_start_outcome = (fun () -> ()) }
 
 let serve env ~sw ~router ~posts =
   let socket = Eio.Net.listen (Eio.Stdenv.net env) ~sw ~backlog:8 ~reuse_addr:true

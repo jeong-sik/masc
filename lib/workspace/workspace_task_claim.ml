@@ -5,9 +5,9 @@
     via [include Workspace_task_claim]. *)
 
 open Masc_domain
-include Workspace_utils
-include Workspace_state
-include Workspace_broadcast
+open! Workspace_utils
+open! Workspace_state
+open! Workspace_broadcast
 open Workspace_backlog
 
 let active_owned_task_ids_for_agent config ~agent_name (backlog : Masc_domain.backlog)

@@ -4,10 +4,13 @@
 
 type t = { name : string }
 
+let mint_map ~resolve ~name =
+  match resolve name with
+  | Some value -> Ok (value, { name })
+  | None -> Error (Printf.sprintf "not in current tool set: %s" name)
+
 let mint_with ~validate ~name =
-  if validate name then
-    Ok { name }
-  else
-    Error (Printf.sprintf "not in current tool set: %s" name)
+  mint_map ~resolve:(fun n -> if validate n then Some () else None) ~name
+  |> Result.map snd
 
 

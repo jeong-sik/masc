@@ -295,12 +295,17 @@ let mark_tag_registry_initialized () =
 let is_tag_registry_initialized () =
   (Atomic.get routing_snapshot).initialized
 
+(** Mint a [Tool_token.t] validated against the tag registry, returning the
+    resolved [module_tag] and token from a single routing snapshot lookup. *)
+let mint_token_with_tag ~name =
+  let routing = Atomic.get routing_snapshot in
+  Tool_token.mint_map ~resolve:(fun n -> By_name.find_opt n routing.tags) ~name
+
 (** Mint a [Tool_token.t] validated against the tag registry.
     Handler-only registrations are executable only after a caller already
     holds a token minted through the canonical route registry. *)
 let mint_token ~name =
-  let routing = Atomic.get routing_snapshot in
-  Tool_token.mint_with ~validate:(fun n -> By_name.mem n routing.tags) ~name
+  Result.map snd (mint_token_with_tag ~name)
 
 (** Enumerate every tool name registered in the tag registry. Handler-only
     registrations have no tag entry, so they never appear here. *)

@@ -149,9 +149,8 @@ let board_records ~visibilities =
   let* () =
     Board_dispatch.require_persisted_sources_readable () |> Result.map_error Board.show_board_error
   in
-  match Board_dispatch.backend () with
-  | Board_dispatch.Jsonl store ->
-    let posts =
+  let store = Board_dispatch.backend () in
+  let posts =
       Board.search_posts store
         ~predicate:(fun (post : Board.post) -> List.mem post.visibility visibilities)
         ~limit:max_int

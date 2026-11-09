@@ -103,14 +103,15 @@ let execute_tool_eio
   let profile_permitted =
     Mcp_server_eio_tool_profile.tool_allowed_in_profile state profile name
   in
+  (* [tool_allowed_in_profile] already checks [Tool_catalog.allow_direct_call]
+     for [Full] as well as profile membership for restricted profiles. When
+     [profile_permitted] is [true], pass [Restricted_profile] so
+     [Mcp_server_eio_caller_identity.resolve] does not re-evaluate
+     [Tool_catalog.allow_direct_call] a second time. *)
   let direct_call_authority =
-    match profile with
-    | Mcp_server_eio_tool_profile.Full ->
-      Mcp_server_eio_caller_identity.Catalog_policy
-    | Managed_agent | Operator_remote | Seat ->
-      if profile_permitted
-      then Mcp_server_eio_caller_identity.Restricted_profile
-      else Mcp_server_eio_caller_identity.Catalog_policy
+    if profile_permitted
+    then Mcp_server_eio_caller_identity.Restricted_profile
+    else Mcp_server_eio_caller_identity.Catalog_policy
   in
   let caller_identity =
     Mcp_server_eio_caller_identity.resolve ~config ~tool_name:name ~arguments
@@ -600,20 +601,17 @@ let execute_tool_eio
                    in
                    Mcp_tool_runtime.dispatch mcp_runtime_ctx ~name)
             in
-            (* Primary dispatch: mint token at I/O boundary, then O(1) tag lookup.
-     Tool_token validates the name exists in the tag registry (Parse, Don't
-     Validate). If mint fails, the tool is truly unknown. *)
-            match Tool_dispatch.mint_token ~name with
+            (* Primary dispatch: mint token and resolve module tag in a single
+               routing snapshot lookup at the I/O boundary (Parse, Don't
+               Validate). If mint fails, the tool is truly unknown. *)
+            match Tool_dispatch.mint_token_with_tag ~name with
                | Error reason ->
                  with_non_public_tool_audit
                    ~agent_name
                    (runtime_error_result
                       ~tool_name:name
                       (Printf.sprintf "Unknown tool: %s (%s)" name reason))
-               | Ok _token ->
-                 (* Token proves the name is registered in at least one registry.
-         lookup_tag None after mint is a registry inconsistency (tool in
-         handler registry but not tag registry), not a user error. *)
+               | Ok (tag, _token) ->
                  (* RFC-0084 §2.2 (PR-8) — wrap the tag-based dispatch with
                     Tool_telemetry.with_span for 4-tuple emission. *)
                  let dispatch_tag_with_telemetry tag =
@@ -627,15 +625,10 @@ let execute_tool_eio
                    in
                    result
                  in
-                 let tag_result =
-                   match Tool_dispatch.lookup_tag name with
-                   | Some tag -> dispatch_tag_with_telemetry tag
-                   | None -> None
-                 in
-                 (match tag_result with
+                 (match dispatch_tag_with_telemetry tag with
                   | Some result -> with_non_public_tool_audit ~agent_name result
                   | None ->
-                    Log.Mcp.warn "registry inconsistency: %s minted but no tag" name;
+                    Log.Mcp.warn "registry inconsistency: %s minted but no handler" name;
                     with_non_public_tool_audit
                       ~agent_name
                       (runtime_error_result

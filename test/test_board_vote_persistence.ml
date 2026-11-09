@@ -170,8 +170,7 @@ let test_flush_preserves_cast_ts () =
   Alcotest.(check bool)
     "wall clock advanced past cast" true
     (before_flush_now > cast_ts +. 0.01);
-  (match Board_dispatch.backend () with
-   | Board_dispatch.Jsonl store -> Board.flush_dirty store);
+  Board.flush_dirty (Board_dispatch.backend ());
   let rewrite_rows = read_ts_rows (Board_votes.vote_log_path (Board.global ())) in
   let rewritten_ts =
     match find_row ~target ~voter rewrite_rows with
@@ -219,8 +218,7 @@ let test_flip_inherits_flip_time () =
       Alcotest.(check bool)
         "flip ts strictly greater than original up ts"
         true (flip_ts > up_ts +. 0.01);
-      (match Board_dispatch.backend () with
-       | Board_dispatch.Jsonl store -> Board.flush_dirty store);
+      Board.flush_dirty (Board_dispatch.backend ());
       let rewrite_rows = read_ts_rows (Board_votes.vote_log_path (Board.global ())) in
       let rewritten_ts =
         match find_row ~target ~voter rewrite_rows with
@@ -266,8 +264,7 @@ let test_comment_vote_flips_and_duplicate_survive_restart () =
   check_counts "rejected duplicate" 0 1;
   Alcotest.(check string) "duplicate does not append a durable row" before_duplicate
     (Fs_compat.load_file (Board_votes.vote_log_path (Board.global ())));
-  (match Board_dispatch.backend () with
-   | Board_dispatch.Jsonl store -> Board.flush_dirty store);
+  Board.flush_dirty (Board_dispatch.backend ());
   Board.reset_global_for_test ();
   Board_dispatch.reset_for_test ();
   Result.get_ok (Board_dispatch.init_jsonl
@@ -319,10 +316,7 @@ let test_restart_loads_only_current_vote_rows () =
   Result.get_ok (Board_dispatch.init_jsonl
     ~base_path:(Env_config_core.base_path ())
     ~recipient_lookup:Recipient_lookup.none_declared ());
-  let store =
-    match Board_dispatch.backend () with
-    | Board_dispatch.Jsonl store -> store
-  in
+  let store = Board_dispatch.backend () in
   Alcotest.(check int)
     "only one exact current row loaded"
     1
@@ -349,8 +343,7 @@ let test_namespaced_voter_survives_snapshot_and_restart () =
   (match Board_dispatch.vote ~voter ~post_id ~direction:Board.Up with
    | Ok _ -> ()
    | Error error -> Alcotest.fail (Board.show_board_error error));
-  (match Board_dispatch.backend () with
-   | Board_dispatch.Jsonl store -> Board.flush_dirty store);
+  Board.flush_dirty (Board_dispatch.backend ());
   let rows = read_ts_rows (Board_votes.vote_log_path (Board.global ())) in
   Alcotest.(check bool)
     "snapshot keeps the complete namespaced voter"
@@ -454,8 +447,7 @@ let test_missing_ledger_resets_persisted_vote_counts () =
    with
    | Ok _ -> ()
    | Error error -> Alcotest.fail (Board.show_board_error error));
-  (match Board_dispatch.backend () with
-   | Board_dispatch.Jsonl store -> Board.flush_dirty store);
+  Board.flush_dirty (Board_dispatch.backend ());
   Unix.unlink (Board_votes.vote_log_path (Board.global ()));
   Board.reset_global_for_test ();
   Board_dispatch.reset_for_test ();
@@ -501,8 +493,7 @@ let test_vote_persistence_failure_leaves_nothing_committed () =
   (match Board_dispatch.vote ~voter ~post_id ~direction:Board.Up with
    | Ok score -> Alcotest.(check int) "retry after unblock succeeds" 1 score
    | Error e -> Alcotest.fail ("retry must succeed, got " ^ Board.show_board_error e));
-  (match Board_dispatch.backend () with
-   | Board_dispatch.Jsonl store -> Board.flush_dirty store);
+  Board.flush_dirty (Board_dispatch.backend ());
   let rows = read_ts_rows (Board_votes.vote_log_path (Board.global ())) in
   let target = "post:" ^ post_id ^ ":" ^ voter in
   Alcotest.(check int)
@@ -546,8 +537,7 @@ let test_vote_flip_persistence_failure_leaves_original_direction_committed () =
   (match Board_dispatch.vote ~voter ~post_id ~direction:Board.Down with
    | Ok score -> Alcotest.(check int) "retried flip after unblock succeeds" (-1) score
    | Error e -> Alcotest.fail ("retried flip must succeed, got " ^ Board.show_board_error e));
-  (match Board_dispatch.backend () with
-   | Board_dispatch.Jsonl store -> Board.flush_dirty store);
+  Board.flush_dirty (Board_dispatch.backend ());
   let rows = read_ts_rows (Board_votes.vote_log_path (Board.global ())) in
   let target = "post:" ^ post_id ^ ":" ^ voter in
   Alcotest.(check int)
@@ -591,8 +581,7 @@ let test_vote_comment_persistence_failure_leaves_nothing_committed () =
   (match Board_dispatch.vote_comment ~voter ~comment_id ~direction:Board.Up with
    | Ok score -> Alcotest.(check int) "retry after unblock succeeds" 1 score
    | Error e -> Alcotest.fail ("retry must succeed, got " ^ Board.show_board_error e));
-  (match Board_dispatch.backend () with
-   | Board_dispatch.Jsonl store -> Board.flush_dirty store);
+  Board.flush_dirty (Board_dispatch.backend ());
   let rows = read_ts_rows (Board_votes.vote_log_path (Board.global ())) in
   let target = "comment:" ^ comment_id ^ ":" ^ voter in
   Alcotest.(check int)
@@ -627,9 +616,7 @@ let test_flush_under_cancellation_still_writes () =
     create_post_exn ~author:"vote-log-cancel-author" ~content:"vote log cancel body"
   in
   let post_id = Board.Post_id.to_string post.id in
-  let store =
-    match Board_dispatch.backend () with Board_dispatch.Jsonl store -> store
-  in
+  let store = Board_dispatch.backend () in
   (match Board_dispatch.vote ~voter ~post_id ~direction:Board.Up with
    | Ok _ -> ()
    | Error e -> Alcotest.fail ("vote must succeed: " ^ Board.show_board_error e));
@@ -660,7 +647,7 @@ let test_flush_writes_only_changed_primary_table () =
   let comment = add_comment_exn ~post_id ~author:"selective-commenter"
       ~content:"selective comment" in
   let comment_id = Board.Comment_id.to_string comment.id in
-  let store = match Board_dispatch.backend () with Board_dispatch.Jsonl s -> s in
+  let store = Board_dispatch.backend () in
   Board.flush_dirty store;
   let inode path = (Unix.stat path).Unix.st_ino in
   let comments_before = inode (Board.comments_path (Board.global ())) in
@@ -709,9 +696,7 @@ let test_flush_failure_keeps_the_vote_log_scheduled () =
     create_post_exn ~author:"vote-log-retry-author" ~content:"vote log retry body"
   in
   let post_id = Board.Post_id.to_string post.id in
-  let store =
-    match Board_dispatch.backend () with Board_dispatch.Jsonl store -> store
-  in
+  let store = Board_dispatch.backend () in
   (match Board_dispatch.vote ~voter ~post_id ~direction:Board.Up with
    | Ok _ -> ()
    | Error e -> Alcotest.fail ("vote must succeed: " ^ Board.show_board_error e));
@@ -754,10 +739,7 @@ let test_restart_keeps_a_vote_whose_post_is_absent () =
   Result.get_ok (Board_dispatch.init_jsonl
     ~base_path:(Env_config_core.base_path ())
     ~recipient_lookup:Recipient_lookup.none_declared ());
-  let store =
-    match Board_dispatch.backend () with
-    | Board_dispatch.Jsonl store -> store
-  in
+  let store = Board_dispatch.backend () in
   Alcotest.(check int) "the vote is loaded" 1 (Hashtbl.length store.vote_log);
   (* A vote on the loaded post marks it dirty, so the flush rewrites the
      whole ledger from memory. *)
@@ -803,10 +785,7 @@ let test_unreadable_snapshots_reject_mutation_and_survive_flush () =
   Result.get_ok (Board_dispatch.init_jsonl
     ~base_path:(Env_config_core.base_path ())
     ~recipient_lookup:Recipient_lookup.none_declared ());
-  let store =
-    match Board_dispatch.backend () with
-    | Board_dispatch.Jsonl store -> store
-  in
+  let store = Board_dispatch.backend () in
   List.iter
     (fun (label, result) ->
       match result with
@@ -854,9 +833,7 @@ let test_snapshot_waiting_after_edit_keeps_edited_post
   let author = "snapshot-order-author" in
   let post = create_post_exn ~author ~content:"before the edit" in
   let post_id = Board.Post_id.to_string post.id in
-  let store =
-    match Board_dispatch.backend () with Board_dispatch.Jsonl store -> store
-  in
+  let store = Board_dispatch.backend () in
   let write_snapshot = prepare_snapshot store ~post_id in
   Board.with_lock store (fun () -> store.Board.dirty_posts <- true);
   let completed = ref [] in

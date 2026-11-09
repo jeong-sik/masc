@@ -23,8 +23,9 @@ let () =
         [
           test_case "known tool exposes lifecycle metadata" `Quick (fun () ->
               let info = Tool_unified.tool_info "masc_bind" in
+              let open Yojson.Safe.Util in
               check string "lifecycle" "active"
-                (Tool_catalog.lifecycle_to_string info.lifecycle));
+                (Tool_unified.tool_info_to_json info |> member "lifecycle" |> to_string));
           test_case "unknown tool still returns info" `Quick (fun () ->
               let info = Tool_unified.tool_info "__test_unknown_xyz" in
               check string "visibility" "hidden"

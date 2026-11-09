@@ -5,9 +5,9 @@
     via [include Workspace_task_create]. *)
 
 open Masc_domain
-include Workspace_utils
-include Workspace_state
-include Workspace_broadcast
+open! Workspace_utils
+open! Workspace_state
+open! Workspace_broadcast
 open Workspace_backlog
 open Workspace_task_id
 

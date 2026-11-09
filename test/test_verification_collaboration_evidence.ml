@@ -334,7 +334,7 @@ let test_capture_failures_and_corruption () = with_fixture (fun config ->
              "after_comment_id", `String ("c-" ^ String.make 32 '0')];
      `Assoc ["post_id", `String (Board.Post_id.to_string p.id);
              "comment_tail", `Int 1; "comment_offset", `Int 0]];
-  let Board_dispatch.Jsonl store = Board_dispatch.backend () in
+  let store = Board_dispatch.backend () in
   let path = Board.persist_path store in
   Out_channel.with_open_gen [Open_wronly; Open_append; Open_binary] 0o600 path
     (fun out -> output_string out "{invalid-post-source\n");

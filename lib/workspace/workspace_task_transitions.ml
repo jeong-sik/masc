@@ -1,8 +1,8 @@
 (* * Workspace_task — Task lifecycle: add, claim, transition, complete, cancel, claim_next. *)
 open Masc_domain
-include Workspace_utils
-include Workspace_state
-include Workspace_broadcast
+open! Workspace_utils
+open! Workspace_state
+open! Workspace_broadcast
 open Workspace_backlog
 (* Sub-module includes — re-export all bindings from extracted modules. *)
 include Workspace_task_classify

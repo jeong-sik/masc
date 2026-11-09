@@ -13,6 +13,11 @@ type t = private { name : string }
     whole point: a value of this type cannot be fabricated, so holding one is
     the proof that [mint_with]'s predicate accepted the name. *)
 
+val mint_map :
+  resolve:(string -> 'a option) -> name:string -> ('a * t, string) Result.t
+(** [mint_map ~resolve ~name] resolves [name] once and returns both the
+    resolved witness and the minted [t] when [resolve name = Some value]. *)
+
 val mint_with : validate:(string -> bool) -> name:string -> (t, string) Result.t
 (** [mint_with ~validate ~name] returns [Ok token] when [validate name] is
     [true]. Use when the validation source is not a single Hashtbl

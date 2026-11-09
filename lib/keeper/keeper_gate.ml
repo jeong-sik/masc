@@ -158,7 +158,7 @@ type before_judge =
   | Local_output_only
   | Observation of Keeper_gate_readonly.classification
 
-let classify_before_judge (request : request) =
+let classify_before_judge ?shell_ir (request : request) =
   match replayable_operation request.operation with
   | Some Replay_voice_speak -> Local_output_only
   | Some
@@ -169,7 +169,8 @@ let classify_before_judge (request : request) =
       | Replay_identity )
   | None ->
     Observation
-      (Keeper_gate_readonly.classify_request
+      (Keeper_gate_readonly.classify_request_with_shell_ir
+         ~shell_ir
          ~operation:request.operation
          ~sandbox_profile:request.sandbox_profile
          ~input:request.input)
@@ -244,7 +245,7 @@ let decide_after_observation request ~observe =
        defer request Judge_requested)
 ;;
 
-let decide_from_selected_mode ~intent ?observe request = function
+let decide_from_selected_mode ~intent ?shell_ir ?observe request = function
   | Error detail -> defer request (Mode_state_invalid detail)
   | Ok Keeper_gate_mode.Manual -> defer request Human_requested
   | Ok Keeper_gate_mode.Auto_judge when intent = Keeper_tool_execute_typed_input.Request_effect ->
@@ -262,7 +263,7 @@ let decide_from_selected_mode ~intent ?observe request = function
        sees everything. A speak is sorted the same way before the judge is
        paid ([classify_before_judge]): its effect lands on the operator's
        own outputs, so it is allowed as [Local_output]. *)
-    (match classify_before_judge request with
+    (match classify_before_judge ?shell_ir request with
      | Local_output_only ->
        let source = Local_output in
        let audit_receipt =
@@ -326,7 +327,7 @@ let decide_from_selected_mode ~intent ?observe request = function
     allow request source [ audit_receipt ]
 ;;
 
-let decide_without_cycle_grant ~intent ~read_mode ?observe ~keeper_always_allow request =
+let decide_without_cycle_grant ~intent ~read_mode ?shell_ir ?observe ~keeper_always_allow request =
   if keeper_always_allow
   then (
     let source = Keeper_always_allow in
@@ -366,7 +367,7 @@ let decide_without_cycle_grant ~intent ~read_mode ?observe ~keeper_always_allow 
         with
         | Error error ->
           observe_exact_rule_store_degraded request error;
-          decide_from_selected_mode ~intent ?observe request mode
+          decide_from_selected_mode ~intent ?shell_ir ?observe request mode
         | Ok (Keeper_approval_queue_rules_types.Rule_match_active rule_match) ->
           let source = Exact_always_rule rule_match.rule_id in
           let audit_receipt =
@@ -379,12 +380,12 @@ let decide_without_cycle_grant ~intent ~read_mode ?observe ~keeper_always_allow 
           allow request source [ audit_receipt ]
         | Ok (Keeper_approval_queue_rules_types.Rule_match_expired rule_match) ->
           observe_exact_rule_expired request rule_match;
-          decide_from_selected_mode ~intent ?observe request mode
+          decide_from_selected_mode ~intent ?shell_ir ?observe request mode
         | Ok Keeper_approval_queue_rules_types.Rule_match_absent ->
-          decide_from_selected_mode ~intent ?observe request mode))
+          decide_from_selected_mode ~intent ?shell_ir ?observe request mode))
 ;;
 
-let decide_with_mode ?(intent = Keeper_tool_execute_typed_input.Auto) ~read_mode ?cycle_grant ?observe ~keeper_always_allow request =
+let decide_with_mode ?(intent = Keeper_tool_execute_typed_input.Auto) ~read_mode ?cycle_grant ?shell_ir ?observe ~keeper_always_allow request =
   match canonical_base_path request.base_path with
   | Error reason ->
     Unavailable
@@ -404,7 +405,7 @@ let decide_with_mode ?(intent = Keeper_tool_execute_typed_input.Auto) ~read_mode
     in
     allow request source [ grant_audit_receipt; gate_audit_receipt ]
   | Cycle_grant_not_applicable ->
-    decide_without_cycle_grant ~intent ~read_mode ?observe ~keeper_always_allow request
+    decide_without_cycle_grant ~intent ~read_mode ?shell_ir ?observe ~keeper_always_allow request
   | Cycle_grant_temporarily_unavailable (approval_id, reason) ->
     Log.Keeper.warn
       ~keeper_name:request.keeper_name
@@ -429,11 +430,12 @@ let decide_with_mode ?(intent = Keeper_tool_execute_typed_input.Auto) ~read_mode
     Unavailable reason
 ;;
 
-let decide ?(intent = Keeper_tool_execute_typed_input.Auto) ?cycle_grant ?observe ~keeper_always_allow request =
+let decide ?(intent = Keeper_tool_execute_typed_input.Auto) ?cycle_grant ?shell_ir ?observe ~keeper_always_allow request =
   decide_with_mode
     ~read_mode:Keeper_gate_mode.resolve
     ~intent
     ?cycle_grant
+    ?shell_ir
     ?observe
     ~keeper_always_allow
     request

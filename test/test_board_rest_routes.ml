@@ -661,9 +661,7 @@ let test_dashboard_delete_preserves_applied_pending_and_refused () =
       let retry_status, _ = delete post_id in
       check int "repeating the applied deletion is a lookup miss" 404 retry_status;
       check int "refused retry is not announced again" 1 !writes);
-  let store =
-    match Masc.Board_dispatch.backend () with Masc.Board_dispatch.Jsonl store -> store
-  in
+  let store = Masc.Board_dispatch.backend () in
   Masc.Board.flush_dirty store;
   let durable_id = create "delete with healthy snapshots" in
   let status, receipt = delete durable_id in
@@ -764,7 +762,7 @@ let test_board_post_route_preserves_publication_evidence () =
   let noop : Masc.Board_metrics_hooks.observer =
     { observe_persist_lock_acquire_sec = (fun _ -> ())
     ; observe_persist_lock_held_sec = (fun _ -> ())
-    ; inc_dispatch_flusher_start_outcome = (fun ~outcome:_ -> ()) }
+    ; inc_dispatch_flusher_start_outcome = (fun () -> ()) }
   in
   let calls = ref 0 in
   let status, failed =

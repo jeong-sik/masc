@@ -4,8 +4,7 @@
     the public Workspace interface.  Re-exports {!Workspace_utils} and
     {!Workspace_state}. *)
 
-include module type of Workspace_utils
-include module type of Workspace_state
+open! Workspace_utils
 
 val active_owned_task_ids_for_agent :
   config -> agent_name:string -> Masc_domain.backlog -> string list

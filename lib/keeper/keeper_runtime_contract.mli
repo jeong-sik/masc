@@ -3,23 +3,6 @@ val runtime_observability_contract_json :
   Keeper_meta_contract.keeper_meta -> Yojson.Safe.t
 (** Operator-facing runtime contract with sandbox backend details included. *)
 
-val runtime_contract_json_from_fields :
-  keeper_name:string ->
-  ?trace_id:string ->
-  ?session_id:string ->
-  ?keeper_turn_id:int ->
-  ?task_id:string ->
-  ?goal_ids:string list ->
-  ?sandbox_profile:string ->
-  ?sandbox_root:string ->
-  ?sandbox_roots:string list ->
-  ?network_mode:string ->
-  ?runtime_profile:string ->
-  unit ->
-  Yojson.Safe.t
-(** Build the keeper-visible runtime contract projection from turn-context
-    fields. Backend implementation details are intentionally omitted. *)
-
 val runtime_observability_contract_json_from_fields :
   keeper_name:string ->
   ?trace_id:string ->

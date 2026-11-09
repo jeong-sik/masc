@@ -7320,3 +7320,5 @@
 (include stanzas/test_schedule_tool_run_watch.inc)
 
 (include stanzas/test_keeper_chat_run_signal.inc)
+
+(include stanzas/test_server_skill_missing_on_disk.inc)

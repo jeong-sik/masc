@@ -44,6 +44,42 @@ let source_id () =
   Skill_source_config.source_id_of_string project_agents_source_id
 ;;
 
+(* RFC-0506 §2: one short Board receipt per Skill publish — the name, the
+   source and the publisher — so the next external deletion can be checked
+   against a public record of what existed. A receipt failure never fails
+   the publish it reports on. *)
+let post_board_receipt ~actor (reference : Skill_reference.t) ~status =
+  let identity = reference.Skill_reference.identity in
+  let package = Skill_reference.identity_package_id_to_string identity in
+  let source = Skill_reference.identity_source_id_to_string identity in
+  let content =
+    Printf.sprintf "[skill publish receipt] %s — source=%s publisher=%s status=%s"
+      package source actor status
+  in
+  match
+    Board_dispatch.create_post
+      ~author:actor
+      ~content
+      ~post_kind:Board.Automation_post
+      ~meta_json:
+        (`Assoc
+           [ ("kind", `String "skill_publish_receipt")
+           ; ("package_id", `String package)
+           ; ("source_id", `String source)
+           ; ("publisher", `String actor)
+           ; ("status", `String status)
+           ])
+      ~visibility:Board.Internal
+      ()
+  with
+  | Ok _post -> ()
+  | Error failure ->
+    Log.Server.warn "skill publish receipt not recorded: %s"
+      (Board.Post_publication_failure.to_string failure)
+  | exception exn ->
+    Log.Server.warn "skill publish receipt raised: %s" (Printexc.to_string exn)
+;;
+
 let publish ~refresh (config : Workspace.config) (request : Publish.request) =
   match source_id () with
   | Error detail ->
@@ -138,6 +174,7 @@ let publish ~refresh (config : Workspace.config) (request : Publish.request) =
          ~outcome:audit_outcome
          ()
        in
+       post_board_receipt ~actor:request.actor preview.profile.reference ~status;
        Ok { Publish.creation = result; audit })
 ;;
 

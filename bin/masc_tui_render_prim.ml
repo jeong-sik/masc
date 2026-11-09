@@ -649,11 +649,10 @@ let recovery_box_bottom state buf ~cols =
   draw_box_bottom_with_recovery buf ~cols selected;
   selected
 
-let footer_line ?help_door ?(status = []) ?position ?(recovery_in_slot = None)
+let footer_line ?help_door ?(status = []) ?position ?(recovery_in_slot = None) ?choices
     (state : state) ~max_cells ~hints =
-  (* Hints off trades the key text for status room; "?:help" stays as the
-     door back. One seam for every surface, which is what makes the setting
-     a setting instead of per-screen behaviour. *)
+  (* Hints off trades the key text for status room. "?:help" stays only
+     when the current input owner lets that key open the help sheet. *)
   (* The same seam names the sheet while the keys are visible, and asks the
      one named question for where [?] answers -- the rule and its reasons
      live with [Masc_tui_types.help_key_answers], beside the predicates it
@@ -663,7 +662,7 @@ let footer_line ?help_door ?(status = []) ?position ?(recovery_in_slot = None)
   let help_hint = ui_text state ~ko:"?:도움말" ~en:Masc_tui_footer.help_hint_item in
   let hints =
     if not state.hints_visible then
-      if Option.value help_door ~default:true then help_hint else ""
+      if door_answers then help_hint else ""
     else if door_answers then
       (* Inspect the key, as the shared fitter does, rather than its label. *)
       if List.exists (fun item ->
@@ -674,7 +673,8 @@ let footer_line ?help_door ?(status = []) ?position ?(recovery_in_slot = None)
     else hints
   in
   (* The keys this frame announces, for the navigation trace (RFC-0485). *)
-  Masc_tui_nav_trace_log.announce hints;
+  Masc_tui_nav_trace_log.announce
+    (match choices with None -> hints | Some text -> text ^ "  " ^ hints);
   (* Search status is literal text, not key hints: runs of spaces belong
      to the user's query and must survive compact hint-item fitting. *)
   let literal_prefix = search_marker state in
@@ -755,7 +755,8 @@ let footer_line ?help_door ?(status = []) ?position ?(recovery_in_slot = None)
     | None -> (match Masc_tui_action_notice.preferred state.last_action
             ~existing_action:(Option.is_some action_text)
             ~now:(Unix.gettimeofday ()) ~window:Masc_tui_types.last_action_window_s with
-    | No_preferred -> None
+    | No_preferred ->
+        Option.map (fun text -> Masc_tui_footer.Menu_choices text) choices
     | Csi_recovery ->
         Some (Masc_tui_footer.Outcome (Masc_tui_action_notice.csi_recovery_text, Fun.id))
     | Rejection notice ->
@@ -813,6 +814,7 @@ let footer_line ?help_door ?(status = []) ?position ?(recovery_in_slot = None)
     | Masc_tui_types.Workspace_identity_match -> []
   in
   Masc_tui_footer.line ?literal_prefix ?action_text ?preferred_action ?position
+    ~help_key_answers:door_answers
     ~status:(keeper_action_status state @ task_creation_status state
       @ List.filter (fun item -> Masc_tui_footer.needs_operator item
           && not (List.mem item (keeper_action_status state))) status
@@ -1506,6 +1508,7 @@ let finish_surface (state : state) ?clamped ~surface_key ~rows ~cols buf =
    last row instead. *)
 type acting_pane_footer =
   | Footer_hints of { hints : string; position : string option }
+  | Footer_choices of { choices : string; hints : string }
   | No_footer
 
 (* The end of a surface that draws its own composer and footer -- the Keeper
@@ -1520,12 +1523,16 @@ type acting_pane_footer =
    draw no agenda row: an open question would otherwise be on screen nowhere
    while the operator chats, which is where a Keeper's question goes unseen. *)
 let finish_frame_beside_acting_pane (state : state) ?clamped ?roster ?(recovery_in_slot = None)
+    ?help_door
     ~surface_key ~cursor ~rows ~cols ~footer buf =
   (match footer with
    | No_footer -> ()
    | Footer_hints { hints; position } ->
        Buffer.add_string buf
-         (footer_line ?position ~recovery_in_slot state ~max_cells:cols ~hints));
+         (footer_line ?help_door ?position ~recovery_in_slot state ~max_cells:cols ~hints)
+   | Footer_choices { choices; hints } ->
+       Buffer.add_string buf
+         (footer_line ?help_door ~choices ~recovery_in_slot state ~max_cells:cols ~hints));
   let framed = Buffer.create (Buffer.length buf + 4096) in
   let lines = frame_lines buf in
   (* These frames draw neither the shared composer nor the agenda. Only

@@ -20,7 +20,10 @@ let board_detail_request_still_current state request =
   match state.board_mode with
   | Board_read post_id ->
       String.equal post_id (Board_detail.request_post_id request)
-  | Board_list | Board_compose -> false
+  | Board_compose ->
+      Option.equal String.equal state.board_compose_reply_to
+        (Some (Board_detail.request_post_id request))
+  | Board_list -> false
 
 let apply_board_post_load state ~report_error request result =
   if board_detail_request_still_current state request then

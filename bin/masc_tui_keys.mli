@@ -227,9 +227,16 @@ val footer_hints_board_attach_input : lang:Masc_tui_types.ui_language -> string
 (** The Board attach path input while it takes letters: a literal "type the
     file path" and its two keys. The path itself is drawn on the pane. *)
 
-val footer_hints_board_compose_armed : lang:Masc_tui_types.ui_language -> reply:bool -> string
-(** The Board draft's send menu after Esc. [reply] drops the hearth cycle a
-    comment has no use for. *)
+type board_compose_menu_hints = {
+  choices : string;
+  hints : string;
+}
+
+val board_compose_menu_hints :
+  lang:Masc_tui_types.ui_language -> reply:bool -> board_compose_menu_hints
+(** The Board draft's send menu after Esc. [choices] keeps send, discard and
+    continue writing together; [hints] holds the editor and, for a new post,
+    the hearth cycle. Both come from the actual binding records. *)
 
 type approval_value_hint = No_value_reading | Readable_values | Byte_values
 val footer_hints_approval_detail : value_hint:approval_value_hint -> string

@@ -622,7 +622,10 @@ Runtime 조회: rg -n --glob '*.ml' '\bRuntime\.(get_runtime_by_id|resolve_assig
     - 라우트는 기록만 읽는다. Keeper 기록이 Runtime을, Runtime 기록이 계정을 정한다. 런타임은 그 계정의 login receipt가 이름 붙인 workspace provider에 그 계정 홈과 binding 하나를 얹은 것이다(`Server_setup_account_login.person_runtime`). binding은 이 계정에서 만드는 Runtime id가 Keeper 기록의 id와 같은 것이다(`Runtime_account_runtime.Runtime`). id를 자르지 않고 binding마다 만든 id와 통째로 비교한다.
     - 판정은 `authorize (Keeper_turn {channel = Direct; ...})` 하나다. 로그로 판정하고, 인가된 계정만 CLI를 띄운다. 남의 Keeper는 다른 Keeper 라우트처럼 404다.
     - 한 계정에서는 한 호출만 돈다(`Server_setup_account_login.one_call_of`). verify와 턴이 같은 잠금을 쓴다. 한 홈의 자격 증명을 두 CLI가 동시에 갱신하지 않게 하기 위해서다. 다른 계정의 호출은 기다리지 않는다.
-    - CLI는 `default_config`의 자세로 뜬다. 내장 도구는 deferred tool 조회(`--tools ToolSearch`)뿐이고 MASC의 MCP 서버는 없다. 턴은 로그에 기록을 남기지 않는다. Claude Code Runtime만 돌고, Codex는 D2-6 뒤에 연다.
+    - CLI는 `default_config`의 자세로 뜬다. 턴은 로그에 기록을 남기지 않는다.
+      - Claude Code: 내장 도구는 deferred tool 조회(`--tools ToolSearch`)뿐이고 MASC의 MCP 서버는 없다.
+      - Codex(D2-6b): `Ephemeral` 스레드로 돈다. Codex는 그 스레드의 rollout도 기록도 남기지 않는다. 자세는 Codex 기본값 `Native_read`다(권한 `:read-only`, shell 꺼짐). Codex에는 `Native_none`이 없다. MASC 도구는 넘기지 않는다.
+      - 실패 답은 두 클라이언트가 같은 문장을 쓴다. Codex는 구독 소진을 턴 실패로 보내므로(`refused_for_spent_usage`) 실패 종류보다 먼저 보고 429로 답한다.
   - 하지 않는 것: 다계정 Keeper 턴의 후보를 로그의 배정에서 고르는 드라이버 쪽 일(S1 전), Antigravity·Muse(D3), API provider(D4).
 
 **D6 범위**

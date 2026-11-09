@@ -274,7 +274,7 @@ let project
       match tool_delivery with
       | Tools_suppressed_runtime_unsupported -> 0
       | Tools_delivered ->
-        instruction_rows @ composition_rows
+        rows
         |> List.filter is_skill_row
         |> List.fold_left
              (fun total (_, tool) ->

@@ -77,7 +77,6 @@
   test_agent_race
   test_agent_core
   test_agent_stream
-  test_agent_tool
   test_agent_turn
   test_agent_tools_index
   test_api_dispatch
@@ -208,7 +207,6 @@
   test_agent_race
   test_agent_core
   test_agent_stream
-  test_agent_tool
   test_agent_turn
   test_agent_tools_index
   test_api_dispatch

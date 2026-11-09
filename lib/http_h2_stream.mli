@@ -95,11 +95,6 @@ module Stream_end : sig
   val with_current : t -> (unit -> 'a) -> 'a
   (** [with_current t f] runs [f] with [t] bound to the calling fiber and to
       the fibers it forks. *)
-
-  val current : unit -> t option
-  (** The stream bound to the calling fiber. [None] on the connection
-      reader, where h2 calls the error handler for the errors it finds in
-      frames. *)
 end
 
 val dispatch : Stream_end.t -> (unit -> unit) -> unit

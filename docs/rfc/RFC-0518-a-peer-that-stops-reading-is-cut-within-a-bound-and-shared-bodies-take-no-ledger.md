@@ -91,8 +91,11 @@ related: ["0512", "0493", "0350"]
   - `Http_reqd` 의 writer flush
   - masc 가 스트림 fiber 에서 보고해 연 오류 응답의 `Http_h2_stream.close_after_flush`(gateway error handler, `server_h2_gateway.ml` 25줄)
   - 요청 본문 콜백을 스트림 switch 로 미루는 `Http_h2_stream.dispatch`(`http_reqd.ml` 421줄). 이 fork 는 연결 reader fiber 에서 일어나므로 원장처럼 명시적으로 다시 묶는다.
-- **`Http_reqd.of_h2` 는 레지스트리가 만든 `Stream_end` 를 인자로 받는다.** 묶이지 않았을 때 쓸 기본값을 만들지 않는다. 레지스트리 없이 gateway 나 `of_h2` 를 부르는 시험(예: `test_dashboard_http_core.ml` 4983줄)은 L2b 에서 레지스트리를 거치게 고친다.
+- **H2 request handler 와 `Http_reqd.of_h2` 는 레지스트리가 만든 `Stream_end` 를 인자로 받는다.** handler 의 타입이 `stream_end:Http_h2_stream.Stream_end.t -> ...` 라서 `Stream_end` 없이 부를 수 없다. 묶이지 않았을 때 쓸 기본값을 만들지 않는다.
+  - 레지스트리 없이 gateway 나 `of_h2` 를 부르는 시험은 `Stream_end.create` 로 요청마다 하나 만든다(예: `test_dashboard_http_core.ml` 의 `stream_end_of`). 이 시험들은 연결 없이 h2 를 메모리 안에서 돌려서 frame tap 과 레지스트리가 없다. 레지스트리를 거치게 하려면 L2c 의 하네스 수정이 먼저 있어야 한다.
+  - 정체를 보지 않는 시험은 아무도 움직이지 않는 mock 시계나, 시험이 90초 안에 끝나는 실제 시계를 쓴다.
 - **원장의 flush 는 `Stream_end` 를 거치지 않는다.** 원장은 h2 의 flush 를 바로 건다(`http_h2_response_ledger.ml` 69줄). 그 예약은 범위가 끝날 때 `with_request` 의 release hook 이 푼다(52~60줄). 그래서 D1 이 범위를 끝내면 예약도 풀린다.
+- **gRPC 응답의 flush 도 `Stream_end` 를 거치지 않는다.** gRPC 리스너의 응답은 `Grpc_eio` 가 h2 에 바로 쓴다. 그 flush 는 D2 상한을 받지 않는다. 스트림 switch 는 레지스트리가 주므로, D1 으로 스트림이 끝나면 그 fiber 도 끝난다.
 - **h2 가 연결 reader fiber 에서 여는 오류 응답은 masc 범위 밖이다.** 프레임 해석 중 오류에 h2 는 reader fiber 에서 error handler 를 부른다(server_connection.ml 157~160줄). 그 `close_after_flush` 에는 `Stream_end` 가 묶이지 않는다. 본문은 고정 진단 문구 하나다(`server_h2_gateway.ml` 17~24줄). 창을 열지 않는 상대가 쥐는 이 응답은 연결 단위 상한(§7.4)에 맡긴다.
 - **SSE `send` 의 자체 타이머는 HTTP/1.1 에서만 돈다.** HTTP/2 에서 같은 상한의 타이머 둘이 겨루지 않는다. 로그 스트림의 자체 send 와 정체 판정은 지우고 `Server_sse_response` 를 쓴다.
 - **상한은 lib/ 의 상수 하나다.** 값은 지금과 같은 90초다. `sse_stalled_after_s`(`server_mcp_transport_http_headers.ml` 294줄), `observer_idle_timeout_ms`(299줄), 로그 스트림의 `stalled_after_s` 가 이 상수를 쓴다. `server_mcp_transport_http_agui.ml` 16줄의 따로 적은 `30.0` 은 `sse_ping_interval_s` 로 바꾼다. 핑 간격(30초)은 상한보다 짧아서 읽는 클라이언트는 상한 안에 늘 프레임을 받는다.

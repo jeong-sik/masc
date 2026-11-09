@@ -264,19 +264,19 @@ type wave_outcome =
    side together while a serial or terminal node holds the exclusive side
    alone. Waiting fibers suspend on a condition instead of spinning, and new
    shared arrivals queue behind a waiting writer so the writer cannot starve.
-   The gate is local to one execution; once the run aborts it is dropped. *)
+   The gate is local to one execution's [Fiber.all] on one domain. Testing
+   its state and changing it never switches fibers; only condition waits do.
+   Once the run aborts the gate is dropped. *)
 module Exclusive_gate = struct
   type t =
-    { mutex : Eio.Mutex.t
-    ; changed : Eio.Condition.t
+    { changed : Eio.Condition.t
     ; mutable readers : int
     ; mutable writer : bool
     ; mutable waiting_writers : int
     }
 
   let create () =
-    { mutex = Eio.Mutex.create ()
-    ; changed = Eio.Condition.create ()
+    { changed = Eio.Condition.create ()
     ; readers = 0
     ; writer = false
     ; waiting_writers = 0
@@ -284,52 +284,39 @@ module Exclusive_gate = struct
   ;;
 
   let acquire_shared gate =
-    (* [~protect:true]: [await] can cancel, and a cancelled acquire still
-       unlocks the mutex and completes the acquisition, so the caller's
-       [Fun.protect] release balances it. The old [~protect:false] form
-       poisoned the mutex: a cancelled [await] left it locked forever. *)
-    Eio.Mutex.use_rw ~protect:true gate.mutex (fun () ->
-      while gate.writer || gate.waiting_writers > 0 do
-        Eio.Condition.await gate.changed gate.mutex
-      done;
-      gate.readers <- gate.readers + 1)
+    Eio.Fiber.check ();
+    while gate.writer || gate.waiting_writers > 0 do
+      Eio.Condition.await_no_mutex gate.changed
+    done;
+    Eio.Fiber.check ();
+    gate.readers <- gate.readers + 1
   ;;
 
   let release_shared gate =
-    let underflow =
-      Eio.Mutex.use_rw ~protect:true gate.mutex (fun () ->
-        gate.readers <- gate.readers - 1;
-        if gate.readers = 0 then Eio.Condition.broadcast gate.changed;
-        gate.readers < 0)
-    in
-    if underflow then invalid_arg "tool plan gate released without a reader"
+    if gate.readers <= 0 then invalid_arg "tool plan gate released without a reader";
+    gate.readers <- gate.readers - 1;
+    if gate.readers = 0 then Eio.Condition.broadcast gate.changed
   ;;
 
   let acquire_exclusive gate =
-    (* [~protect:true]: cancellation is delivered after the acquisition
-       completes and the mutex unlocks, so the caller's [Fun.protect] release
-       always balances this acquire. The internal cancelled handler of the
-       old [~protect:false] form could repair the gate counters but could
-       never unlock the mutex it no longer held. *)
-    Eio.Mutex.use_rw ~protect:true gate.mutex (fun () ->
-      gate.waiting_writers <- gate.waiting_writers + 1;
-      while gate.writer || gate.readers > 0 do
-        Eio.Condition.await gate.changed gate.mutex
-      done;
-      gate.writer <- true;
-      gate.waiting_writers <- gate.waiting_writers - 1)
+    Eio.Fiber.check ();
+    gate.waiting_writers <- gate.waiting_writers + 1;
+    Fun.protect
+      ~finally:(fun () ->
+        gate.waiting_writers <- gate.waiting_writers - 1;
+        Eio.Condition.broadcast gate.changed)
+      (fun () ->
+        while gate.writer || gate.readers > 0 do
+          Eio.Condition.await_no_mutex gate.changed
+        done;
+        Eio.Fiber.check ();
+        gate.writer <- true)
   ;;
 
   let release_exclusive gate =
-    let released_without_writer =
-      Eio.Mutex.use_rw ~protect:true gate.mutex (fun () ->
-        let missing = not gate.writer in
-        gate.writer <- false;
-        Eio.Condition.broadcast gate.changed;
-        missing)
-    in
-    if released_without_writer
-    then invalid_arg "tool plan gate released without a writer"
+    if not gate.writer then invalid_arg "tool plan gate released without a writer";
+    gate.writer <- false;
+    Eio.Condition.broadcast gate.changed
   ;;
 end
 
@@ -897,13 +884,11 @@ let execute_with_tool_use_id
           let release () =
             if exclusive then Exclusive_gate.release_exclusive gate
             else Exclusive_gate.release_shared gate in
-          (* The gate is held across [execute_one], which suspends, so the
-             release must run on every exit — including the cancellation an
-             acquire delivers after completing under its default
-             [~protect:true]. *)
+          (* An interrupted wait never owns the gate. Install the release
+             only after acquisition; it does not suspend, even on cancellation. *)
+          if exclusive then Exclusive_gate.acquire_exclusive gate
+          else Exclusive_gate.acquire_shared gate;
           Fun.protect ~finally:release (fun () ->
-            if exclusive then Exclusive_gate.acquire_exclusive gate
-            else Exclusive_gate.acquire_shared gate;
             if halted () then skip ()
             else (
               let dispatch = match ready_files, binding with

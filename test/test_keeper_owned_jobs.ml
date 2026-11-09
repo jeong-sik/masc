@@ -174,7 +174,7 @@ let with_fixture ?fixture_base_path ?continuation_channel ?(parent_alias=false) 
       ~config ~meta ~publication_recovery ~capability_surface:surface
       ?continuation_channel
       ~ctx_snapshot:(Masc.Keeper_context_runtime.create ~eio:false ~system_prompt:"owned job fixture")
-      ~clock:(Eio.Stdenv.clock env) ~turn_ctx_cell:cell () in
+      ~clock:(Eio.Stdenv.clock env) ~turn_ctx_cell:cell () |> Result.get_ok in
   let fixture = {base_path;configured_base_path;meta;cell;make_bundle;capability_surface=surface;
       control_path=Filename.concat base_path "control.json";
       daemon_path=Filename.concat base_path "daemon.json";
@@ -1006,7 +1006,7 @@ value = { sha256 = %S }
   let make_bundle () = Bundle.make_tool_bundle_for_capability_surface ~config ~meta:fixture.meta
       ~publication_recovery ~capability_surface:surface ~skill_activation_context:recorder
       ~ctx_snapshot:(Masc.Keeper_context_runtime.create ~eio:false ~system_prompt:"canonical child result fixture")
-      ~clock:(Eio.Stdenv.clock env) ~turn_ctx_cell:fixture.cell () in
+      ~clock:(Eio.Stdenv.clock env) ~turn_ctx_cell:fixture.cell () |> Result.get_ok in
   let fixture = {fixture with make_bundle; capability_surface = surface} in
   let entered,notify_entered = Eio.Promise.create () in
   let released,notify_released = Eio.Promise.create () in
@@ -1354,7 +1354,7 @@ pointer = "/artifacts/0/_blob/sha256"
   let make_bundle () = Bundle.make_tool_bundle_for_capability_surface ~config ~meta:fixture.meta
     ~publication_recovery ~capability_surface:surface ~skill_activation_context:recorder
     ~ctx_snapshot:(Masc.Keeper_context_runtime.create ~eio:false ~system_prompt:"named producer refusal fixture")
-    ~clock:(Eio.Stdenv.clock env) ~turn_ctx_cell:fixture.cell () in
+    ~clock:(Eio.Stdenv.clock env) ~turn_ctx_cell:fixture.cell () |> Result.get_ok in
   let fixture = {fixture with make_bundle; capability_surface = surface} in
   let entered,notify_entered = Eio.Promise.create () in
   let released,notify_released = Eio.Promise.create () in
@@ -4332,7 +4332,7 @@ pointer = "/artifacts/0/_blob/sha256"
       ~publication_recovery ~capability_surface:surface ~skill_activation_context:recorder
       ~composition_result_delivery:delivery
       ~ctx_snapshot:(Masc.Keeper_context_runtime.create ~eio:false ~system_prompt:"nested owned-job fixture")
-      ~clock:(Eio.Stdenv.clock env) ~turn_ctx_cell:fixture.cell () in
+      ~clock:(Eio.Stdenv.clock env) ~turn_ctx_cell:fixture.cell () |> Result.get_ok in
   let fixture = {fixture with make_bundle; capability_surface = surface} in
   operation ~env ~fixture ~config ~surface ~reference ~runtime ~runtime_reads
     ~publication_recovery ~physical_turn_ref ~delivery ~recorder ~snapshot

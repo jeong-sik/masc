@@ -344,7 +344,7 @@ let setup ~base ~experiment ~counter ~receipt ~sw ~env =
     Keeper_tools_agent_core_bundle.make_tool_bundle_for_capability_surface ~config ~meta
       ~publication_recovery ~capability_surface:surface ~turn_ctx_cell:cell
       ~ctx_snapshot:(Keeper_context_runtime.create ~eio:false ~system_prompt:"fixture input preparation")
-      ~clock:env#clock ()) in
+      ~clock:env#clock () |> Result.get_ok) in
   Eio.Switch.on_release sw bundle.cleanup;
   let create index large =
     json (Filename.concat base "control.json")

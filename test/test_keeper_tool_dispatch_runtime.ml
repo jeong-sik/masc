@@ -5819,7 +5819,7 @@ let test_frozen_surface_production_bundle_executes_public_read () =
       ~publication_recovery
       ~ctx_snapshot:ctx_work
       ~capability_surface
-      ()
+      () |> Result.get_ok
   in
   Fun.protect
     ~finally:bundle.cleanup
@@ -8557,7 +8557,7 @@ let test_async_composition_binds_params_into_durable_status () =
        let skill_activation_context = make_activation_context ~absolute_turn:1 in
        let bundle = Masc.Keeper_tools_agent_core_bundle.make_tool_bundle_for_capability_surface
            ~config ~meta ~publication_recovery ~ctx_snapshot:ctx_work ~capability_surface
-           ~skill_activation_context () in
+           ~skill_activation_context () |> Result.get_ok in
        Fun.protect ~finally:bundle.cleanup @@ fun () ->
        let tools = bundle.tools in
        let async_tool =
@@ -8716,7 +8716,7 @@ let test_async_composition_binds_params_into_durable_status () =
        in
        let fresh_bundle = Masc.Keeper_tools_agent_core_bundle.make_tool_bundle_for_capability_surface
            ~config ~meta ~publication_recovery ~ctx_snapshot:ctx_work ~capability_surface
-           ~skill_activation_context:(make_activation_context ~absolute_turn:2) () in
+           ~skill_activation_context:(make_activation_context ~absolute_turn:2) () |> Result.get_ok in
        Fun.protect ~finally:fresh_bundle.cleanup (fun () ->
          let fresh_tool = match find_tool_by_name fresh_bundle.tools "keeper_compose_memory-background" with
            | Some tool -> tool | None -> fail "fresh Keeper frame lost its named Tool" in

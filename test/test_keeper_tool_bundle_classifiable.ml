@@ -439,7 +439,7 @@ let with_bundle_tools
            ~composition_plan_index
            ?skill_activation_context:
              (if record_activations then Some skill_activation_context else None)
-           ()
+           () |> Result.get_ok
        in
        Option.iter (fun cell -> cell := Some (Agent_core.Agent.create ~media_store:(Agent_core.History.Memory_store.create ())
          ~config:(Agent_core.Types.default_config ~model:"fixture-model")

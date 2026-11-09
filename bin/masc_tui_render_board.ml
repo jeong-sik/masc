@@ -389,7 +389,7 @@ let board_posts_status state =
     | Failed _ -> Some (if pending then (words "글 재조회 중 · 조회 실패" "retrying posts; unavailable") else (words "글 조회 실패" "posts unavailable")) in
   match board_posts_snapshot state with
   | Some snapshot when not (board_listing_matches_requested state) ->
-      let origin=Printf.sprintf (words "이전 관측: %s · 요청: %s" "last observed: %s; requested: %s")
+      let origin=Printf.sprintf (if state.ui_language = Lang_ko then "이전 관측: %s · 요청: %s" else "last observed: %s; requested: %s")
         (board_query_text state snapshot.bl_query)
         (board_query_text state (board_query state)) in
       Some (origin ^ (match status with None -> "" | Some status -> "; " ^ status))
@@ -418,7 +418,7 @@ let render_board_list (state : state) =
     match query.bq_hearth with
     | None -> ""
     | Some hearth ->
-        Printf.sprintf (words state "  %s게시판:%s%s" "  %shearth:%s%s") (Masc_tui_theme.tone Masc_tui_theme.Accent)
+        Printf.sprintf (if state.ui_language = Lang_ko then "  %s게시판:%s%s" else "  %shearth:%s%s") (Masc_tui_theme.tone Masc_tui_theme.Accent)
           (Terminal_text.single_line hearth) Ansi.reset
   in
   let observation,pending=board_posts_reading state in
@@ -476,7 +476,7 @@ let render_board_list (state : state) =
                sheet under [?]. *)
             c.push_styled ~style:(Theme.recede ())
               (board_heading_with_tail ~cols
-                 (Printf.sprintf (words state "%s정렬 [s]: %s" "%sSort [s]: %s")
+                 (Printf.sprintf (if state.ui_language = Lang_ko then "%s정렬 [s]: %s" else "%sSort [s]: %s")
                     (match board_posts_status state with None -> "" | Some status -> status ^ " · ")
                     (board_sort_text state query.bq_sort))
                  (words state " · H:게시판 선택" " · H:choose hearth")))
@@ -694,7 +694,7 @@ let draw_board_read_side ~focus buf (state : state) document ~rows ~body_cols
     if i = 0 && comment_header_rows > 0 then
       box_line comment_buf comment_cols
         (Ansi.bold
-        ^ Printf.sprintf (words state "%s댓글 (%d)" "%sComments (%d)")
+        ^ Printf.sprintf (if state.ui_language = Lang_ko then "%s댓글 (%d)" else "%sComments (%d)")
             (if focus = Right_pane && state.board_comments_focused
              then "> " else "  ")
             detail_comment_count
@@ -753,7 +753,7 @@ let board_read_pane ~focus (state : state) (list_post : board_post) ~rows ~cols 
           (Theme.warn ())
           Ansi.reset
     | Some Post_by_person ->
-        Printf.sprintf (words state "%s@%s%s %s[작성자]%s" "%s@%s%s %s[Author]%s")
+        Printf.sprintf (if state.ui_language = Lang_ko then "%s@%s%s %s[작성자]%s" else "%s@%s%s %s[Author]%s")
           (Masc_tui_theme.tone Masc_tui_theme.Accent)
           author_name
           Ansi.reset
@@ -874,7 +874,7 @@ let board_read_pane ~focus (state : state) (list_post : board_post) ~rows ~cols 
         | related ->
           (Ansi.dim ^ "" ^ Ansi.reset)
           :: (Ansi.bold
-              ^ Printf.sprintf (words state "  같은 대상을 다룬 글 (%d)" "  Also about this (%d)") (List.length related)
+              ^ Printf.sprintf (if state.ui_language = Lang_ko then "  같은 대상을 다룬 글 (%d)" else "  Also about this (%d)") (List.length related)
               ^ Ansi.reset)
           :: (related
               |> List.filteri (fun index _ -> index < 5)
@@ -1064,7 +1064,7 @@ let board_read_pane ~focus (state : state) (list_post : board_post) ~rows ~cols 
                 Option.map (fun (comment_id, row) -> comment_id, row + 1)
                   !initial_comment_offset;
               Board_read_layout.Thread_note
-                (Printf.sprintf (words state "  댓글 %d/%d개 (o:전체 댓글)" "  Showing %d of %d comments (o: all comments)")
+                (Printf.sprintf (if state.ui_language = Lang_ko then "  댓글 %d/%d개 (o:전체 댓글)" else "  Showing %d of %d comments (o: all comments)")
                    (List.length comments) post.bp_comment_count)
               :: comment_lines
             end else

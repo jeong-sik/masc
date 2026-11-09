@@ -703,9 +703,9 @@ let footer_line ?help_door ?(status = []) ?position ?(recovery_in_slot = None)
            && Masc_tui_types.image_reading_is_current state pending
            && not state.msx_open ->
         Some (Terminal_text.single_line
-          (Printf.sprintf (ui_text state
-             ~ko:"이미지 조회 중 (아무 키로 취소): %s"
-             ~en:"Loading image (any key cancels): %s") pending.sir_name))
+          (Printf.sprintf (if state.ui_language = Lang_ko
+             then "이미지 조회 중 (아무 키로 취소): %s"
+             else "Loading image (any key cancels): %s") pending.sir_name))
     | Some _ | None -> None
   in
   let current_quit = current_quit_confirmation state ~now:(Unix.gettimeofday ()) in

@@ -175,7 +175,7 @@ let confirmation_read_error_message ~ko ~credential_is_current =
   | Read_failed (None, _) -> (text "목표 확인 증거를 조회할 수 없습니다 · 다시 조회하세요" "Goal confirmation read unavailable; read the proof again")
   | Read_http_error (owner, 503) when credential_is_current owner ->
       (text "목표 확인 증거 조회 불가 (HTTP 503) · 서버·저장소·런타임을 확인하세요" "Goal confirmation unavailable (HTTP 503); check server availability, storage and runtime")
-  | Read_http_error (owner, status) when credential_is_current owner -> Printf.sprintf (text "목표 확인 증거 조회 실패 (HTTP %d)" "Goal confirmation read failed (HTTP %d)") status
+  | Read_http_error (owner, status) when credential_is_current owner -> Printf.sprintf (if ko then "목표 확인 증거 조회 실패 (HTTP %d)" else "Goal confirmation read failed (HTTP %d)") status
   | Read_http_error _ -> (text "인증 정보가 바뀌었습니다 · 증거를 다시 조회하세요" "Goal confirmation credential changed; read the proof again")
   | Server_changed owner when credential_is_current owner -> (text "서버가 바뀌었습니다 · 서버 식별 재확인 중" "Goal confirmation server changed; rechecking server identity")
   | Server_changed _ -> (text "인증 정보가 바뀌었습니다 · 증거를 다시 조회하세요" "Goal confirmation credential changed; read the proof again")
@@ -336,14 +336,14 @@ let submitted_original_text ~ko (original : submitted_original) =
   let text korean english = if ko then korean else english in
   match original with
   | Original_collaboration { reference; bytes } ->
-      Printf.sprintf (text "협업 원본 %s · %s" "collaboration %s · %s") reference (humanized_bytes bytes)
+      Printf.sprintf (if ko then "협업 원본 %s · %s" else "collaboration %s · %s") reference (humanized_bytes bytes)
   | Original_note { bytes } ->
-      Printf.sprintf (text "메모 · %s" "note · %s") (humanized_bytes bytes)
+      Printf.sprintf (if ko then "메모 · %s" else "note · %s") (humanized_bytes bytes)
   | Original_artifact { reference; bytes; truncated } ->
-      Printf.sprintf (text "자료 %s · %s%s" "artifact %s · %s%s") reference (humanized_bytes bytes)
+      Printf.sprintf (if ko then "자료 %s · %s%s" else "artifact %s · %s%s") reference (humanized_bytes bytes)
         (if truncated then (text " · 일부만 보존" " · truncated") else "")
   | Original_binary { reference; bytes; sha256; format } ->
-      Printf.sprintf (text "파일 %s · %s · %s · sha256 %s" "binary %s · %s · %s · sha256 %s")
+      Printf.sprintf (if ko then "파일 %s · %s · %s · sha256 %s" else "binary %s · %s · %s · sha256 %s")
         reference format (humanized_bytes bytes) (sha256_prefix sha256)
   | Original_unreadable { reference; reason } ->
       (match reference with
@@ -409,7 +409,7 @@ let confirmation_lines ~width ~ko { goal_id; phase; verdict; recorded_confirmati
   in
   let binding =
     labelled ~tone:Quiet (text "결속" "Binding")
-      (Printf.sprintf (text "목표 %s · 기준 %s · 요청 %s · 검증 실행 %s" "goal %s · criterion %s · request %s · verifier run %s")
+      (Printf.sprintf (if ko then "목표 %s · 기준 %s · 요청 %s · 검증 실행 %s" else "goal %s · criterion %s · request %s · verifier run %s")
          goal_id criterion.revision verdict.request_id
          verdict.verification_run_id)
   in

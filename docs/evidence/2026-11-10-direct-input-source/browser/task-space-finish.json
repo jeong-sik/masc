@@ -1,0 +1,15 @@
+{
+  "id": 44,
+  "name": "masc-26049-input-source-evidence",
+  "finished_at": "2026-11-09T15:52:55.599Z",
+  "result": {
+    "spaceId": 44,
+    "closedSpace": true,
+    "keptManagedLabels": [],
+    "closedManagedLabels": [
+      "p1"
+    ],
+    "preservedUnmanagedCount": 0
+  },
+  "keptPages": []
+}

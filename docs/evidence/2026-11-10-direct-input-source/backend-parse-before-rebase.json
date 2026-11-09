@@ -1,0 +1,261 @@
+{
+  "scope": "OCaml parsing only; NOT type/warning/build/test/CI/runtime proof",
+  "worktree": "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source",
+  "base_head": "dc3d82788d7ec099794d05de4402184c7964db89",
+  "ocamlc_version": "5.5.1",
+  "target_ocaml": "5.5.2",
+  "files": [
+    {
+      "file": "lib/keeper/keeper_context_assembly.ml",
+      "sha256": "7bb225b159fe7a7aead04905cc299088fe64479cad46e2e719cd564f787a7b45",
+      "exit_code": 0,
+      "reused_parse_receipt": "artifacts/issue-campaign-20261109/26049-peer-source/20261109T153829Z-parse-only.json"
+    },
+    {
+      "file": "lib/keeper/keeper_context_assembly.mli",
+      "sha256": "a818dc4436d724cf18524723e62e01bbf834e950ea7dede26bbb8dbfccf055a6",
+      "exit_code": 0,
+      "reused_parse_receipt": "artifacts/issue-campaign-20261109/26049-peer-source/20261109T153829Z-parse-only.json"
+    },
+    {
+      "file": "lib/keeper/keeper_context_layers.ml",
+      "sha256": "e6d958a44139e0650ec91b9dd4f6ac1d05a2c75db11165e7a51de64fbaf2cd16",
+      "exit_code": 0,
+      "reused_parse_receipt": "artifacts/issue-campaign-20261109/26049-peer-source/20261109T153829Z-parse-only.json"
+    },
+    {
+      "file": "lib/keeper/keeper_context_layers.mli",
+      "sha256": "c3e4c18ad09124359b9860528c53da797eff411355278a2f2d3693d08976d25c",
+      "exit_code": 0,
+      "reused_parse_receipt": "artifacts/issue-campaign-20261109/26049-peer-source/20261109T153829Z-parse-only.json"
+    },
+    {
+      "file": "lib/keeper/keeper_context_submission_link.ml",
+      "sha256": "d462ebb2e46361c0405b496b5c1ace1cc53998403fa51095f8885b38b7b4b787",
+      "exit_code": 0,
+      "reused_parse_receipt": "artifacts/issue-campaign-20261109/26049-peer-source/20261109T153829Z-parse-only.json"
+    },
+    {
+      "file": "lib/keeper/keeper_direct_input_source.ml",
+      "sha256": "64612cbe518d237ee078684aa112bd48aff728787adcdeec569dc347606e1a15",
+      "exit_code": 0,
+      "reused_parse_receipt": "artifacts/issue-campaign-20261109/26049-peer-source/20261109T153829Z-parse-only.json"
+    },
+    {
+      "file": "lib/keeper/keeper_direct_input_source.mli",
+      "sha256": "4b3198da4a9f79c98cf3dadb7358d7c1a2b23ce7ec87ca2416dba83f94197d3c",
+      "exit_code": 0,
+      "reused_parse_receipt": "artifacts/issue-campaign-20261109/26049-peer-source/20261109T153829Z-parse-only.json"
+    },
+    {
+      "file": "lib/keeper/keeper_direct_turn_context.ml",
+      "sha256": "f52b9f6ce033f23dfa327534b34b693ac4af41cf1323eb2d66270a1f2435fd9a",
+      "command": [
+        "ocamlc",
+        "-c",
+        "-stop-after",
+        "parsing",
+        "-impl",
+        "lib/keeper/keeper_direct_turn_context.ml",
+        "-o",
+        "/dev/null"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "file": "lib/keeper/keeper_direct_turn_context.mli",
+      "sha256": "b98b89ea4738235ddf478ca9d9f47ad0af6a067c550ad16e69710eabd44e8c6b",
+      "command": [
+        "ocamlc",
+        "-c",
+        "-stop-after",
+        "parsing",
+        "-intf",
+        "lib/keeper/keeper_direct_turn_context.mli",
+        "-o",
+        "/dev/null"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "file": "lib/keeper/keeper_input_speaker.mli",
+      "sha256": "82f1de356b71c073580f99d6413a6c069d6a2849c56d449c1642f1d8edae4752",
+      "command": [
+        "ocamlc",
+        "-c",
+        "-stop-after",
+        "parsing",
+        "-intf",
+        "lib/keeper/keeper_input_speaker.mli",
+        "-o",
+        "/dev/null"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "file": "lib/keeper/keeper_next_request_forecast.ml",
+      "sha256": "9f8ff465e1393ff3c470ec8e83b67aac7bb328c39b52d34b5fea1d5f0e6ae1bf",
+      "exit_code": 0,
+      "reused_parse_receipt": "artifacts/issue-campaign-20261109/26049-peer-source/20261109T153829Z-parse-only.json"
+    },
+    {
+      "file": "lib/keeper/keeper_official_client_context_projection.ml",
+      "sha256": "0ebcdbff5d1f1235b32b73bcac3dcb5692332bb12ef9c999d5daad7f8b405cc2",
+      "exit_code": 0,
+      "reused_parse_receipt": "artifacts/issue-campaign-20261109/26049-peer-source/20261109T153829Z-parse-only.json"
+    },
+    {
+      "file": "lib/keeper/keeper_run_prompt.ml",
+      "sha256": "f718769bca6af654bdb37a955a74f407e14b6235b2e00c6c7828c5afa0507aa1",
+      "exit_code": 0,
+      "reused_parse_receipt": "artifacts/issue-campaign-20261109/26049-peer-source/20261109T153829Z-parse-only.json"
+    },
+    {
+      "file": "lib/keeper/keeper_turn.ml",
+      "sha256": "ac42bb6c6a9b4fad9e01ec9bede8088fd655adb30496151e6a41225f99f41497",
+      "command": [
+        "ocamlc",
+        "-c",
+        "-stop-after",
+        "parsing",
+        "-impl",
+        "lib/keeper/keeper_turn.ml",
+        "-o",
+        "/dev/null"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "file": "lib/keeper/keeper_unified_prompt.ml",
+      "sha256": "3e5e5bad33eb6c44aa9d5d0b0de23fa76fd52e15e8b9e488e53d5048f3697944",
+      "command": [
+        "ocamlc",
+        "-c",
+        "-stop-after",
+        "parsing",
+        "-impl",
+        "lib/keeper/keeper_unified_prompt.ml",
+        "-o",
+        "/dev/null"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "file": "lib/prompt_registry/prompt_names.ml",
+      "sha256": "fa9f19ac1a94b93e6d538118ad31e868a61c07bf0ba5ad7710ed32e88fa50817",
+      "command": [
+        "ocamlc",
+        "-c",
+        "-stop-after",
+        "parsing",
+        "-impl",
+        "lib/prompt_registry/prompt_names.ml",
+        "-o",
+        "/dev/null"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "file": "lib/prompt_registry/prompt_names.mli",
+      "sha256": "4016161ea26c0cc3f5cead4896d80e1564efa662a9ceec4866d1a923dc40b06c",
+      "command": [
+        "ocamlc",
+        "-c",
+        "-stop-after",
+        "parsing",
+        "-intf",
+        "lib/prompt_registry/prompt_names.mli",
+        "-o",
+        "/dev/null"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "file": "lib/types/prompt_block_id.ml",
+      "sha256": "3b3fa461355e1868da6e561237ea9c5df144cf17d2128cb853f7baebb4dd9991",
+      "exit_code": 0,
+      "reused_parse_receipt": "artifacts/issue-campaign-20261109/26049-peer-source/20261109T153829Z-parse-only.json"
+    },
+    {
+      "file": "lib/types/prompt_block_id.mli",
+      "sha256": "785f0a60c548c479a6713975616017f8d635a51be2d918ab3b230bd976f5afec",
+      "exit_code": 0,
+      "reused_parse_receipt": "artifacts/issue-campaign-20261109/26049-peer-source/20261109T153829Z-parse-only.json"
+    },
+    {
+      "file": "test/test_keeper_context_layers.ml",
+      "sha256": "3fdb7fca76c4490970a9ff76fa4b3945e64703d014fb1c647b99ae580eecef29",
+      "exit_code": 0,
+      "reused_parse_receipt": "artifacts/issue-campaign-20261109/26049-peer-source/20261109T153829Z-parse-only.json"
+    },
+    {
+      "file": "test/test_keeper_direct_goal_provider_wire.ml",
+      "sha256": "18829a73ddcca707147f8857ef71b231764073d34e09619cd200ad9c7e53c101",
+      "command": [
+        "ocamlc",
+        "-c",
+        "-stop-after",
+        "parsing",
+        "-impl",
+        "test/test_keeper_direct_goal_provider_wire.ml",
+        "-o",
+        "/dev/null"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "file": "test/test_keeper_official_client_host.ml",
+      "sha256": "8a60541c76effba3692b4a523754a2e73a886f7a95358e28e66ff8d5c9503475",
+      "exit_code": 0,
+      "reused_parse_receipt": "artifacts/issue-campaign-20261109/26049-peer-source/20261109T153829Z-parse-only.json"
+    },
+    {
+      "file": "test/test_runtime_codex_app_server.ml",
+      "sha256": "e67e775189e442494598376c3fc9b904a925702ec67fdb11459ec79e5a20d353",
+      "exit_code": 0,
+      "reused_parse_receipt": "artifacts/issue-campaign-20261109/26049-peer-source/20261109T153829Z-parse-only.json"
+    },
+    {
+      "file": "test/test_turn_record.ml",
+      "sha256": "49eefda0f7d2a21ee7de146134d0cf11b51cfc70c7a36c538261e5f13f5bbf5a",
+      "exit_code": 0,
+      "reused_parse_receipt": "artifacts/issue-campaign-20261109/26049-peer-source/20261109T153829Z-parse-only.json"
+    },
+    {
+      "file": "bin/masc_tui_context_inspector.ml",
+      "sha256": "b645bbd6daf45be341991aaa8f4cf9990a4c4148eb63073e75166dfc318cc038",
+      "command": [
+        "ocamlc",
+        "-c",
+        "-stop-after",
+        "parsing",
+        "-impl",
+        "bin/masc_tui_context_inspector.ml",
+        "-o",
+        "/dev/null"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": "",
+      "evidence": "Root executed this exact command successfully after adding both explicit Direct_input_source consumer arms."
+    }
+  ],
+  "typed_or_behavior_tests_executed": false,
+  "ci_executed": false
+}

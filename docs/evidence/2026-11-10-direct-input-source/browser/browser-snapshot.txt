@@ -1,0 +1,160 @@
+[p1 "#26049 · MemoryInspector synthetic HTTP evidence" | space "masc-26049-input-source-evidence"(44): 1 managed, 0 untracked — p1* "#26049 · MemoryInspector synthetic HTTP evidence"]
+root
+  container
+    heading
+      text "#26049 · 요청 출처"
+    paragraph
+      text "실제 MemoryInspector 컴포넌트와 Dashboard CSS"
+    paragraph
+      text "Backend · synthetic HTTP fixture"
+    paragraph
+      text "설치·운영 중인 MASC, Keeper 실행 및 provider 요청의 증거가 아닙니다."
+    paragraph
+      text "원본 TurnRecord의 direct_input_source와 prompt.direct_input_source를 HTTP로 제공합니다."
+  container
+    container
+      heading
+        text "KEEPER 메모리"
+      text "synthetic-peer-source-26049"
+      container
+        button [ref=4]
+          text "이 keeper"
+        button [ref=5]
+          text "전체"
+      button [ref=6]
+        text "✕"
+    container [ref=7]
+      container
+        container
+          text "STORE"
+          container
+            text "revision"
+            text "0"
+          container
+            text "0"
+            text "facts · current snapshot"
+        container
+          text "SCOPE"
+          text "synthetic-peer-source-26049"
+          text "fresh state"
+        container
+          text "PROMPT LINK"
+          text "no memory block"
+          text "synthetic-trace-26049#7"
+      container
+        heading
+          text "최종 PROVIDER 입력 구성"
+        container
+          container
+            container
+              text "1.3KB"
+              text "wire ·"
+              text "1.2KB"
+              text "content"
+            container
+              text "5"
+              text "개 구성요소"
+              text "·"
+              text "범위 미상"
+              text "·"
+              container
+                text "설정"
+                text "미상"
+                text "· 클라이언트 보고"
+                text "미측정"
+              text "·"
+              text "설정 기준 컨텍스트"
+              text "점유율"
+              text "미상"
+              text "·"
+              text "synthetic.local"
+          container
+            container
+              text "Keeper 지침"
+              text "936B"
+            container
+              text "현재 Goal"
+              text "48B"
+            container
+              text "요청 출처"
+              text "113B"
+            container
+              text "도구 스키마"
+              text "87B"
+            container
+              text "사용자 메시지"
+              text "48B"
+      container
+        heading
+          text "회상 연결 · FULL PROMPT"
+        container
+          container
+            text "1"
+            container
+              text "snapshot writer"
+              text "fresh state"
+          container
+            text "2"
+            container
+              text "snapshot"
+              text "synthetic://memory-current"
+          container
+            text "3"
+            container
+              text "recall block"
+              text "not present in latest prompt record"
+          container
+            text "4"
+            container
+              text "Full Prompt"
+              button [ref=8]
+                text "마지막 캡처 보기"
+          container
+            text "latest assembly"
+            text "synthetic-trace-26049"
+            text "#"
+            text "7"
+            text "·"
+            text "2026. 11. 10. 오전 12:48"
+      container
+        heading
+          text "현재 기억 계약 ·"
+          text "FRESH STATE"
+        container
+          container
+            text "WRITER"
+            text "fresh state"
+            text "latest snapshot writer"
+          container
+            text "COMMIT"
+            text "synthetic://memory-current"
+            text "single atomic snapshot"
+          container
+            text "RECALL"
+            text "memory_os_recall"
+            text "exact current facts · no ranking/truncation"
+          container
+            text "DELTA"
+            container
+              text "revision"
+              text "0"
+            text "exact added / removed / retained"
+      container
+        container
+          heading
+            text "장기 메모리 스토어 · MEMORY-OS"
+          text "0"
+          container
+            text "추가"
+            text "0"
+            text "· 제거"
+            text "0"
+            text "· 지지 무효화"
+            text "0"
+            text "· 유지"
+            text "0"
+        text "장기 메모리 항목 없음."
+      container
+        heading
+          text "최근 회상 · 주입"
+        text "최근 memory_os_recall 주입 없음."

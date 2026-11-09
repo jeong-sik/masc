@@ -18,7 +18,7 @@ let article ?(author = "lane-smith") ?(at = 1.0) text =
     Alcotest.failf "article rejected: %s" (invalid_to_string invalid)
 
 let end_offset ~base_path =
-  match Store.load ~base_path with
+  match Store.load ~base_path ~resolve_subject:(fun _ -> true) with
   | Ok ledger -> ledger.Store.end_offset
   | Error error -> Alcotest.failf "%s" (Store.read_error_to_string error)
 
@@ -40,15 +40,30 @@ let remove ~base_path (article : t) =
   | Ok () -> ()
   | Error error -> Alcotest.failf "%s" (Store.append_error_to_string error)
 
-let load_or_fail ~base_path =
-  match Store.load ~base_path with
+let replace ~base_path ?(by = "critic") superseded article =
+  match
+    Store.append_at ~base_path
+      ~expected_end_offset:(end_offset ~base_path)
+      (Replaced
+         { superseded = List.map (fun (retired : t) -> retired.id) superseded
+         ; article
+         ; by
+         ; at = 9.0
+         ; reason = None
+         })
+  with
+  | Ok () -> ()
+  | Error error -> Alcotest.failf "%s" (Store.append_error_to_string error)
+
+let load_or_fail ?(resolve_subject = fun _ -> true) ~base_path =
+  match Store.load ~base_path ~resolve_subject with
   | Ok ledger -> ledger
   | Error error -> Alcotest.failf "%s" (Store.read_error_to_string error)
 
 let texts (ledger : Store.ledger) = List.map (fun (a : t) -> a.text) ledger.articles
 
-let load_articles_or_fail ~base_path =
-  match Store.load_articles ~base_path with
+let load_articles_or_fail ?(resolve_subject = fun _ -> true) ~base_path =
+  match Store.load_articles ~base_path ~resolve_subject with
   | Ok articles -> articles
   | Error error -> Alcotest.failf "%s" (Store.read_error_to_string error)
 
@@ -65,7 +80,8 @@ let test_a_world_without_a_ledger_has_no_articles () =
       let ledger = load_or_fail ~base_path in
       Alcotest.(check int) "no articles" 0 (List.length ledger.articles);
       Alcotest.(check int) "no history" 0 (List.length ledger.entries);
-      Alcotest.(check int) "nothing rejected" 0 (List.length ledger.rejected))
+      Alcotest.(check int) "nothing rejected" 0 (List.length ledger.rejected);
+      Alcotest.(check int) "nothing isolated" 0 (List.length ledger.isolated))
 
 let test_written_norms_come_back_in_order () =
   with_world (fun base_path ->
@@ -159,12 +175,12 @@ let test_articles_only_load_of_a_missing_ledger_is_empty () =
         (List.length (load_articles_or_fail ~base_path)))
 
 let held_or_fail ~base_path =
-  match Store.load_held ~base_path with
+  match Store.load_held ~base_path ~resolve_subject:(fun _ -> true) with
   | Ok held -> held
   | Error error -> Alcotest.failf "%s" (Store.read_error_to_string error)
 
 let articles_at_or_fail ~base_path position =
-  match Store.load_articles_at ~base_path position with
+  match Store.load_articles_at ~base_path ~resolve_subject:(fun _ -> true) position with
   | Ok articles -> articles
   | Error error -> Alcotest.failf "%s" (Store.read_error_to_string error)
 
@@ -255,6 +271,91 @@ let test_an_unterminated_last_line_is_reported_as_such () =
       | others ->
         Alcotest.failf "expected one rejection, got %d" (List.length others))
 
+(* RFC-0504: one line retires a bundle and names its replacement, so the
+   ledger keeps which norm replaced which. *)
+let test_replacing_retires_the_bundle_and_adds_the_replacement () =
+  with_world (fun base_path ->
+      let first = article "a norm with an older twin" in
+      let second = article "the older twin" in
+      add ~base_path first;
+      add ~base_path second;
+      replace ~base_path [ first; second ] (article "the merged norm");
+      let ledger = load_or_fail ~base_path in
+      Alcotest.(check (list string))
+        "only the replacement is held" [ "the merged norm" ] (texts ledger);
+      Alcotest.(check int) "every move stays in the history" 3
+        (List.length ledger.entries);
+      Alcotest.(check int) "nothing was rejected" 0 (List.length ledger.rejected);
+      Alcotest.(check int) "nothing was isolated" 0 (List.length ledger.isolated))
+
+let test_replacing_keeps_unrelated_norms_in_place () =
+  with_world (fun base_path ->
+      let first = article "a norm with an older twin" in
+      let unrelated = article "an unrelated norm" in
+      let second = article "the older twin" in
+      add ~base_path first;
+      add ~base_path unrelated;
+      add ~base_path second;
+      replace ~base_path [ first; second ] (article "the merged norm");
+      Alcotest.(check (list string))
+        "the unrelated norm stays where it was, the merge lands last"
+        [ "an unrelated norm"; "the merged norm" ]
+        (texts (load_or_fail ~base_path)))
+
+(* RFC-0504 §2.4: a line whose subject the roster does not resolve folds out
+   of the live set and is reported beside the rejected lines, never dropped
+   quietly. *)
+let test_a_line_from_outside_the_roster_is_isolated_not_dropped () =
+  with_world (fun base_path ->
+      add ~base_path (article "a norm the world holds");
+      add ~base_path (article ~author:"codex-operator" "a norm from outside the tool");
+      let ledger =
+        load_or_fail ~base_path
+          ~resolve_subject:(String.equal "lane-smith")
+      in
+      Alcotest.(check (list string))
+        "only the roster's norm is held" [ "a norm the world holds" ] (texts ledger);
+      Alcotest.(check int) "the decoded history keeps both lines" 2
+        (List.length ledger.entries);
+      (match ledger.isolated with
+      | [ isolated ] ->
+        Alcotest.(check int) "names the isolated line" 2 isolated.line_number;
+        Alcotest.(check string) "names the unresolved subject" "codex-operator"
+          isolated.subject
+      | others ->
+        Alcotest.failf "expected one isolated line, got %d" (List.length others)))
+
+let test_an_isolated_removal_moves_nothing () =
+  with_world (fun base_path ->
+      let held_norm = article "a norm that stays" in
+      add ~base_path held_norm;
+      (match
+         Store.append_at ~base_path
+           ~expected_end_offset:(end_offset ~base_path)
+           (Removed { id = held_norm.id; by = "codex-operator"; at = 9.0; reason = None })
+       with
+      | Ok () -> ()
+      | Error error -> Alcotest.failf "%s" (Store.append_error_to_string error));
+      let ledger =
+        load_or_fail ~base_path
+          ~resolve_subject:(String.equal "lane-smith")
+      in
+      Alcotest.(check (list string))
+        "a removal from outside the roster removes nothing" [ "a norm that stays" ]
+        (texts ledger);
+      Alcotest.(check int) "the removal is still reported" 1
+        (List.length ledger.isolated))
+
+let test_articles_only_load_folds_out_isolated_lines () =
+  with_world (fun base_path ->
+      add ~base_path (article "a norm the world holds");
+      add ~base_path (article ~author:"codex-operator" "a norm from outside the tool");
+      Alcotest.(check (list string))
+        "the prompt load holds the roster's norm only" [ "a norm the world holds" ]
+        (article_texts
+           (load_articles_or_fail ~base_path
+              ~resolve_subject:(String.equal "lane-smith"))))
+
 let () =
   Alcotest.run "world_constitution_store"
     [ ( "paths",
@@ -282,6 +383,18 @@ let () =
             test_a_position_reads_back_the_articles_held_then;
           Alcotest.test_case "a position the ledger no longer begins with reads nothing"
             `Quick test_a_position_the_ledger_no_longer_begins_with_reads_nothing;
+          Alcotest.test_case "replacing retires the bundle, adds the replacement"
+            `Quick test_replacing_retires_the_bundle_and_adds_the_replacement;
+          Alcotest.test_case "replacing keeps unrelated norms in place" `Quick
+            test_replacing_keeps_unrelated_norms_in_place;
+        ] );
+      ( "isolation",
+        [ Alcotest.test_case "a line from outside the roster is isolated, not dropped"
+            `Quick test_a_line_from_outside_the_roster_is_isolated_not_dropped;
+          Alcotest.test_case "an isolated removal moves nothing" `Quick
+            test_an_isolated_removal_moves_nothing;
+          Alcotest.test_case "articles-only load folds out isolated lines" `Quick
+            test_articles_only_load_folds_out_isolated_lines;
         ] );
       ( "rejections",
         [ Alcotest.test_case "a broken line is reported, not dropped" `Quick

@@ -518,7 +518,7 @@ let with_world ~keeper_name f =
 let append world entry =
   let base_path = world.config.Workspace.base_path in
   let ledger =
-    World_constitution_store.load ~base_path
+    World_constitution_store.load ~base_path ~resolve_subject:(fun _ -> true)
     |> Result.map_error World_constitution_store.read_error_to_string
     |> unwrap
   in

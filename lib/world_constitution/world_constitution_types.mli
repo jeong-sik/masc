@@ -72,6 +72,18 @@ val make :
 
 type entry =
   | Added of t
+  | Replaced of {
+      superseded : Article_id.t list;
+      (** The live articles this record retires. *)
+      article : t;
+      (** The article replacing the bundle — the same [t] an [Added]
+          carries, with its own id. *)
+      by : string;
+      at : float;
+      reason : string option;
+    }
+      (** One line retires a bundle and names its replacement, so the ledger
+          keeps which norm replaced which (RFC-0504). *)
   | Removed of {
       id : Article_id.t;
       by : string;

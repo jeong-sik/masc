@@ -120,11 +120,12 @@ let issue_system ~config ~profile_defaults ~(meta : keeper_meta) ~runtime_id ~he
     |> Result.map_error (fun detail -> Workspace_unavailable detail)
   in
   let base_path = config.Workspace.base_path in
+  let resolve_subject = Keeper_registry.is_registered ~base_path in
   let* current, at =
-    World_constitution_store.load_held ~base_path
+    World_constitution_store.load_held ~base_path ~resolve_subject
     |> Result.map_error (fun error -> Constitution_unreadable error)
   in
-  let articles_at = World_constitution_store.load_articles_at ~base_path in
+  let articles_at = World_constitution_store.load_articles_at ~base_path ~resolve_subject in
   let* system, held =
     (match recorded_system with
      | Some { runtime_id; text } ->

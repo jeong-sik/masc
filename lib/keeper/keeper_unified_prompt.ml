@@ -1260,6 +1260,7 @@ let build_system_prompt ~workspace_root ~(meta : Keeper_meta_contract.keeper_met
      the decoded history grows without bound and this turn renders just the
      held norms. *)
   World_constitution_store.load_articles ~base_path:config.Workspace.base_path
+    ~resolve_subject:(Keeper_registry.is_registered ~base_path:config.Workspace.base_path)
   |> Result.map (render_system_prompt ~workspace_root ~meta ?profile_defaults)
 ;;
 

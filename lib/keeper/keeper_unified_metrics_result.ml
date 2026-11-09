@@ -64,10 +64,9 @@ let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
   let aggregate_input_tokens, aggregate_output_tokens, aggregate_total_tokens =
     match usage_resolution.delta with
     | Some delta ->
-      let usage = Keeper_usage_resolution.api_usage_of_sample delta in
       ( delta.input_tokens
       , delta.output_tokens
-      , Inference_utils.total_tokens usage )
+      , Inference_utils.total_tokens delta )
     | None -> 0, 0, 0
   in
   let has_substantive_tools = has_substantive_tool_calls tool_names in

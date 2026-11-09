@@ -58,7 +58,7 @@ let replace attempt (updated : reading) =
 
 let observation_of_count = function
   | Keeper_client_usage_report.Running_count usage ->
-    Some (Keeper_usage_resolution.sample_of_api_usage usage)
+    Some usage
   | Keeper_client_usage_report.Count_replaced -> None
 ;;
 
@@ -161,7 +161,7 @@ let observe_agent_core_response t ~response_id ~ordinal ~model usage =
       ; ordinal
       ; model
       ; basis = Keeper_usage_resolution.Per_request
-      ; observation = Option.map Keeper_usage_resolution.sample_of_api_usage usage
+      ; observation = usage
       ; count_after = Count_continues
       }))
 ;;

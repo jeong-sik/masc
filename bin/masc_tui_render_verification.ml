@@ -12,16 +12,64 @@ module Keeper_chat = Masc_tui_keeper_chat_projection
 module Render_schedule = Masc_tui_render_schedule
 module Link = Masc_tui_link
 
-let review_label = function
-  | Review_unobserved -> "실행 미관측"
-  | Review_running _ -> "검증 중"
-  | Review_waiting_original _ -> "원 실행 확인 대기"
-  | Review_stopped {cause=Review_original_repair;_} -> "원 실행 확인 필요"
+let review_label state = function
+  | Review_unobserved -> ui_text state ~ko:"미관측" ~en:"not observed"
+  | Review_running _ -> ui_text state ~ko:"검증 중" ~en:"reviewing"
+  | Review_waiting_original _ -> ui_text state ~ko:"원 실행 확인" ~en:"checking original"
+  | Review_stopped {cause=Review_original_repair;_} ->
+      ui_text state ~ko:"확인 필요" ~en:"repair needed"
   | Review_stopped {cause=(Review_environment | Review_no_judgment | Review_commit_failure
-      | Review_failure | Review_cancelled);_} -> "검증 중단"
-  | Review_approved _ -> "승인 판정 기록"
-  | Review_rejected _ -> "반려 판정 기록"
-  | Review_superseded _ -> "다른 판정 적용"
+      | Review_failure | Review_cancelled);_} -> ui_text state ~ko:"중단" ~en:"stopped"
+  | Review_approved _ -> ui_text state ~ko:"승인 기록" ~en:"approved"
+  | Review_rejected _ -> ui_text state ~ko:"반려 기록" ~en:"rejected"
+  | Review_superseded _ -> ui_text state ~ko:"다른 판정 적용" ~en:"superseded"
+
+(* These are readings of the retained snapshot, including while a new read is
+   outstanding. The label qualifies the value even if a narrow title clips. *)
+let previous_reading_label state ~inflight ~error label =
+  if inflight || Option.is_some error then
+    ui_text state ~ko:"이전 " ~en:"last " ^ label
+  else label
+
+(* Both list headings and rows use these exact two widths. IDs, evaluator and
+   evidence metadata remain in the complete selected reading. *)
+let judgement_list_columns state ~cols ~status_header ~statuses =
+  let inner_width = max 1 (framed_inner_width cols - 2) in
+  let status_width =
+    List.fold_left (fun widest text -> max widest (Message_layout.display_width text))
+      (Message_layout.display_width status_header) statuses
+    |> min (max 1 (inner_width - 3)) in
+  let title_width = max 1 (inner_width - status_width - 2) in
+  let row title status =
+    "  " ^ fit_width (Terminal_text.single_line title) title_width
+    ^ "  " ^ fit_width status status_width in
+  row (ui_text state ~ko:"작업" ~en:"Task") status_header, row
+
+let reading_notice_lines state ~width ~inflight ~error =
+  let notice = match error, inflight with
+    | None, false -> None
+    | None, true -> Some (Theme.recede (),
+        ui_text state ~ko:"재조회 중 · 이전 조회 자료" ~en:"Refreshing · previous reading")
+    | Some detail, refreshing ->
+        let prefix = if refreshing then
+            ui_text state ~ko:"재조회 중 · 이전 자료 · 마지막 오류: "
+              ~en:"Refreshing · previous reading · last error: "
+          else ui_text state ~ko:"이전 자료 · 현재 상태 미확인: "
+              ~en:"Previous reading · current state unconfirmed: " in
+        Some (Theme.warn (), prefix ^ detail) in
+  match notice with
+  | None -> []
+  | Some (style, text) ->
+      Message_layout.wrap_body ~max_cells:(max 1 (width - 4))
+        ~sanitize:Keeper_chat.terminal_safe_text text
+      |> List.map (fun line -> style, "  " ^ line)
+
+let verification_status state (request : Tui_decode.verification_request) =
+  let label = match request.vr_evidence_error with
+    | Some _ -> ui_text state ~ko:"증거 읽기 실패" ~en:"evidence error"
+    | None -> review_label state request.vr_review in
+  previous_reading_label state ~inflight:state.verification_inflight
+    ~error:state.verification_error label
 
 let review_detail = function
   | Review_unobserved -> "자동 검증의 실행 기록이 아직 관측되지 않았습니다."
@@ -41,12 +89,8 @@ let review_detail = function
   | Review_rejected reason -> "반려 판정이 기록되었습니다. " ^ reason
   | Review_superseded actor -> "다른 판정이 먼저 적용되었습니다: " ^ actor
 
-(* What is waiting on a verdict.
-
-   The columns answer the questions an operator opens this for: which task,
-   who submitted it, and what would move it forward. Evidence counts rather
-   than paths -- a row is a queue entry, and the paths belong to whoever opens
-   the task. *)
+(* The task and its actual review state lead the list. Submission identity,
+   evidence counts and original source remain in the complete reading. *)
 let render_verification_list (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
@@ -55,11 +99,6 @@ let render_verification_list (state : state) =
     match state.verification with None -> [] | Some s -> s.Masc.Tui_decode.vs_requests
   in
   let shown = List.length requests in
-  let now = Unix.localtime (Unix.gettimeofday ()) in
-  let timestamp =
-    Printf.sprintf "%02d:%02d:%02d" now.Unix.tm_hour now.Unix.tm_min
-      now.Unix.tm_sec
-  in
   let header =
     match state.verification with
     | None ->
@@ -69,8 +108,7 @@ let render_verification_list (state : state) =
           | Some _ -> ""
         in
         let after =
-          Printf.sprintf "  %s  %s  %s" reading_note timestamp
-            (connection_badge state)
+          Printf.sprintf "  %s  %s" reading_note (connection_badge state)
         in
         Printf.sprintf "%s%s"
           (planning_workspace_title state ~cols ~tab:Planning_task_review ~window:""
@@ -91,34 +129,18 @@ let render_verification_list (state : state) =
           if total > 0 && shown >= total then ""
           else Printf.sprintf " (%d of %d)" shown total
         in
-        Printf.sprintf "%s  %s  %s"
+        Printf.sprintf "%s  %s"
           (planning_workspace_title state ~cols ~tab:Planning_task_review ~window
-             ~after:(Printf.sprintf "  %s  %s" timestamp (connection_badge state)))
-          timestamp (connection_badge state)
+             ~after:("  " ^ connection_badge state))
+          (connection_badge state)
   in
   box_top buf cols;
   box_line buf cols header;
   box_divider buf cols;
-  (* Measured from the rows. Sixteen was the fixed width and the longest
-     submitter on the wire is thirty-seven, so every [keeper-*-agent] row
-     pushed the two columns after it out of line with the rest. *)
-  let submitter_width =
-    List.fold_left
-      (fun widest (r : Masc.Tui_decode.verification_request) ->
-        max widest
-          (Message_layout.display_width
-             (Terminal_text.single_line r.Masc.Tui_decode.vr_submitted_by)))
-      16 requests
-    |> min 26
-  in
-  let layout =
-    Render_schedule.verification_layout
-      ~inner_width:(max 1 (framed_inner_width cols - 2))
-      ~submitter_width
-  in
-  let col_hdr =
-    "  " ^ Render_schedule.verification_header_row ~submitter_width ~layout
-  in
+  let col_hdr, request_row =
+    judgement_list_columns state ~cols
+      ~status_header:(ui_text state ~ko:"자동 검증" ~en:"Review")
+      ~statuses:(List.map (verification_status state) requests) in
   box_line_styled buf cols ~style:(Theme.recede ()) col_hdr;
   box_divider buf cols;
   (match state.verification_error with
@@ -137,8 +159,9 @@ let render_verification_list (state : state) =
           ~overflow_takes_row:layout.sc_overflow_takes_row
     | None -> max 1 (rows - listing_chrome ~error:state.verification_error)
   in
-  let max_scroll = max 0 (shown - content_height) in
-  let scroll = max 0 (min state.verification_scroll max_scroll) in
+  let scroll = Masc_tui_scroll.ensure_visible ~cursor:state.verification_cursor
+      ~height:content_height state.verification_scroll
+    |> Masc_tui_scroll.normalize ~count:shown ~height:content_height in
   let requests_window = Rows.of_list ~first:scroll ~height:content_height requests in
   if shown = 0 then begin
     let empty =
@@ -162,59 +185,11 @@ let render_verification_list (state : state) =
       | None -> box_empty buf cols
       | Some r ->
           let open Masc.Tui_decode in
-          (* Submitted against required -- but the pair only reads when a
-             requirement exists to pair against. Most requests owe no named
-             artifact, and the "/0" half of every such row said only that.
-             Those rows show the submitted count alone; the rows that do owe
-             artifacts are the ones an operator reads first, and they carry
-             the mark below rather than a longer cell. *)
-          let required_count = List.length r.vr_required_artifacts in
-          let evidence =
-            match r.vr_evidence_error with
-            | Some _ -> "unreadable"
-            | None ->
-                if required_count = 0 then
-                  Printf.sprintf "%d개 / 미지정" (List.length r.vr_submitted_evidence)
-                else
-                  Printf.sprintf "%d개 / %d항목"
-                    (List.length r.vr_submitted_evidence) required_count
-          in
-          (* The task's own title. This column read [next_action] and fell
-             back to [request_summary], and both are literals in the producer:
-             [submit_request_spec] sets [request_summary = ""] and
-             [next_action = ""] and writes them into the request. All 200
-             rows on the wire carry both empty, so the column had a header and
-             no content on every row that has ever been drawn.
-
-             The title is in the same object, filled on all 200, decoded into
-             [vr_task_title] already, and shown in the detail pane below --
-             just not in the list. What a verification request asks for is
-             that this task be verified, so the title is what it asks for. *)
-          let asks = r.vr_task_title in
-          let line =
-            "  "
-            ^ Render_schedule.verification_row ~submitter_width ~layout
-                { Render_schedule.vrow_task =
-                    Terminal_text.single_line r.vr_task_id
-                ; vrow_submitted_by =
-                    Terminal_text.single_line r.vr_submitted_by
-                ; vrow_evidence = evidence
-                ; vrow_review = review_label r.vr_review
-                ; vrow_title = Terminal_text.single_line asks
-                }
-          in
+          let line = request_row r.vr_task_title (verification_status state r) in
           let style =
-            (* Evidence that cannot be read is the one row that cannot be
-               judged as it stands, so it reads as a problem rather than as a
-               queue entry. Owing named artifacts is not a health state --
-               nothing about the row is well or unwell -- so its mark is a
-               kind colour, and this queue already draws bad and warn, which
-               leaves the slots. *)
             match r.vr_evidence_error with
             | Some _ -> (Theme.bad ())
-            | None ->
-                if required_count > 0 then Theme.category Theme.Slot_1
-                else Ansi.reset
+            | None -> Ansi.reset
           in
           if idx = state.verification_cursor then box_line_selected buf cols line
           else box_line_styled buf cols ~style line
@@ -251,7 +226,7 @@ let render_verification_list (state : state) =
          else ""
        in
        box_line_styled buf cols ~style:(Theme.recede ())
-         (Printf.sprintf "[%s%s%s] 자동 검증 대기 · Enter: 증거 확인 · 운영자 승인 가능" place rows_window more);
+         (Printf.sprintf "[%s%s%s]" place rows_window more);
        (* An empty queue carrying a reason is not an empty queue. *)
        (match snapshot.Masc.Tui_decode.vs_backlog_error with
         | Some detail ->
@@ -329,7 +304,6 @@ let verification_detail_lines ~width
       | Review_unobserved | Review_running _ | Review_approved _ | Review_rejected _
       | Review_superseded _ -> Ansi.reset)
       (review_detail request.vr_review)
-  @ wrap (Theme.recede ()) "작업 → 증거 제출 → 자동 검증 → Task 완료 · 운영자는 직접 승인하거나 반려할 수 있습니다."
   @ wrap (Theme.recede ()) (Printf.sprintf "제출 증거 %d개 · 요구 증거 %d항목 · 개수는 충족 여부가 아닙니다."
       (List.length request.vr_submitted_evidence) (List.length request.vr_required_artifacts))
   @ (match request.vr_evidence_error with None -> [] | Some detail -> wrap (Theme.bad ()) detail)
@@ -444,7 +418,10 @@ let verification_detail_pane (state : state) ~rows ~cols
   let content_height = max 1 (rows - framed_chrome_rows - fixed_rows) in
   (* The three parts are wrapped apart so the evidence section's row index is
      known: wrapping is per row, so this is the same rows as wrapping once. *)
-  let before = judgement_detail_rows ~width (verification_detail_lines ~width request) in
+  let before = judgement_detail_rows ~width
+      (reading_notice_lines state ~width ~inflight:state.verification_inflight
+         ~error:state.verification_error
+       @ verification_detail_lines ~width request) in
   (* What the verifier can actually inspect: the operator evidence bundle,
      lazily fetched on detail entry. The snapshot above lists references; this
      carries artifact content prefixes (server-capped, truncation marked), the
@@ -579,24 +556,9 @@ let render_verification (state : state) =
        | None -> render_verification_list state)
   | Some _, None | None, _ -> render_verification_list state
 
-(* What the harness decided, most recent first.
-
-   A verdict reached by a fallback evaluator is not the verdict that was asked
-   for, so the row says which evaluator answered and marks the ones that were
-   not the intended one. Reading a column of "approve" without that would say
-   the gate is working when it may only be degrading quietly. *)
-(* What the judge has decided over its whole life. The pane drew the recent
-   page and nothing else, so the line promising to say "where a fallback
-   answered instead" was the one thing it could not answer: 1,983 of this
-   workspace's 4,197 verdicts came from the fallback gate and the screen
-   showed a page of eight.
-
-   Rates are stated against what they were computed from. [labeled_count] is
-   zero here, which makes the agreement rate and the false-positive and
-   false-negative counts zero for want of ground truth rather than for want
-   of disagreement -- drawn as "0.0" they would read as a judge that never
-   errs. The pane says which of the two it is instead of printing the
-   number. *)
+(* Workspace-wide calibration is separate from the recent verdict page and
+   the selected Task. Preserve its original denominator and unknown labels
+   in the selected detail document. *)
 let harness_ledger_lines ~cols snapshot =
   match snapshot with
   | None -> []
@@ -658,11 +620,6 @@ let render_harness_list (state : state) =
     | Some s -> s.Masc.Tui_decode.hs_verdicts
   in
   let shown = List.length verdicts in
-  let now = Unix.localtime (Unix.gettimeofday ()) in
-  let timestamp =
-    Printf.sprintf "%02d:%02d:%02d" now.Unix.tm_hour now.Unix.tm_min
-      now.Unix.tm_sec
-  in
   let fallbacks =
     List.length
       (List.filter
@@ -679,19 +636,15 @@ let render_harness_list (state : state) =
           | Some _ -> ""
         in
         let after =
-          Printf.sprintf "  %s  %s  %s" reading_note timestamp
-            (connection_badge state)
+          Printf.sprintf "  %s  %s" reading_note (connection_badge state)
         in
         Printf.sprintf "%s%s"
           (planning_workspace_title state ~cols ~tab:Planning_verdicts ~window:""
              ~after)
           after
     | Some snapshot ->
-        (* The page and the ledger, apart. This read "(8 verdicts)" while the
-           server was reporting 4,197: the eight are the recent page, and
-           every proportion below is computed over the rest. A page count
-           worn as the total is the one number on this screen a reader would
-           act on. *)
+        (* The recent page and the workspace-wide ledger have distinct
+           denominators. The complete calibration is read in detail. *)
         let of_total =
           match snapshot.Masc.Tui_decode.hs_calibration with
           | Some calibration when calibration.Masc.Tui_decode.hcal_total > 0 ->
@@ -703,50 +656,29 @@ let render_harness_list (state : state) =
           if fallbacks > 0 then Printf.sprintf ", %d by fallback" fallbacks
           else ""
         in
-        Printf.sprintf "%s  %s  %s"
+        Printf.sprintf "%s  %s"
           (planning_workspace_title state ~cols ~tab:Planning_verdicts
              ~window:
                (Printf.sprintf " (%d%s%s)" shown of_total by_fallback)
-             ~after:(Printf.sprintf "  %s  %s" timestamp (connection_badge state)))
-          timestamp (connection_badge state)
+             ~after:("  " ^ connection_badge state))
+          (connection_badge state)
   in
   box_top buf cols;
   box_line buf cols header;
   box_divider buf cols;
-  (* The tab name alone says nothing; the surface introduces itself. Said in
-     terms of the queue next door, because that is the other half of it: Task
-     Review is what is still waiting for a ruling and this is what was ruled,
-     by whom, and where a fallback answered instead of the evaluator the Gate
-     names. *)
-  box_line_styled buf cols ~style:(Theme.recede ())
-    "  Task Verdicts = automatic Gate rulings on Tasks; not Goal proof.";
-  List.iter (box_line buf cols) (harness_ledger_lines ~cols state.harness);
-  (* A ledger that quietly stopped is this screen's own failure mode: it once
-     starved for a month while the judge kept running, and the stale rows
-     read as a working gate. Say the age instead of letting old rows pass as
-     current. *)
-  let stale_note =
-    match verdicts with
-    | [] -> None
-    | newest :: _ ->
-        let age_days =
-          (Unix.gettimeofday () -. newest.Masc.Tui_decode.hv_at) /. 86_400.
-        in
-        if age_days >= 2. then
-          Some (Printf.sprintf "  last verdict %.0f days ago \xe2\x80\x94 the judge runs but nothing is being recorded" age_days)
-        else None
-  in
-  (match stale_note with
-   | None -> ()
-   | Some note -> box_line_styled buf cols ~style:(Theme.warn ()) note);
-  (* The reason takes the cells the drawn columns leave. *)
-  let verdict_layout =
-    Render_schedule.harness_layout
-      ~inner_width:(max 1 (framed_inner_width cols - 2))
-  in
-  let col_hdr =
-    "  " ^ Render_schedule.harness_header_row ~layout:verdict_layout
-  in
+  let verdict_status (verdict : Tui_decode.harness_verdict) =
+    let text = Terminal_text.single_line verdict.hv_verdict in
+    let ruling = match String.index_opt text ':' with
+      | None -> text
+      | Some index -> String.sub text 0 index in
+    let label = match verdict.hv_fallback_reason with
+      | None -> ruling
+      | Some _ -> ui_text state ~ko:"대체 · " ~en:"fallback · " ^ ruling in
+    previous_reading_label state ~inflight:state.harness_inflight
+      ~error:state.harness_error label in
+  let col_hdr, verdict_row = judgement_list_columns state ~cols
+      ~status_header:(ui_text state ~ko:"판정" ~en:"Verdict")
+      ~statuses:(List.map verdict_status verdicts) in
   box_line_styled buf cols ~style:(Theme.recede ()) col_hdr;
   box_divider buf cols;
   (match state.harness_error with
@@ -755,38 +687,24 @@ let render_harness_list (state : state) =
        box_line_styled buf cols ~style:(Theme.bad ())
          ("  " ^ Keeper_chat.terminal_safe_text detail);
        box_divider buf cols);
-  (* Every row above the list, counted off the buffer they were drawn into
-     rather than declared beside them. The constant said seven where the head
-     draws nine: rows were added above the list and the number was not, so the
-     surface ran three rows past its budget. [finish_surface] takes an overrun
-     off the end, and the end of this surface is its footer -- the screen drew
-     no key hints at all, at every terminal height. The ledger block is a list
-     whose length varies, which is why this is measured and not counted by
-     hand. *)
-  let head_rows = count_frame_lines buf in
-  (* The rows still to come under the list: the frame's closing row and the
-     footer. Drawn now so their height is the same measured fact. *)
   let tail = Buffer.create 256 in
   box_bottom tail cols;
-  let link_hint =
-    match List.nth_opt verdicts state.harness_cursor with
-    | None -> ""
-    | Some verdict ->
-        "  selected:"
-        ^ Link.reference Task
-            (Terminal_text.single_line verdict.Masc.Tui_decode.hv_task_id)
-  in
   Buffer.add_string tail
     (footer_line state ~max_cells:cols
-       ~hints:
-         (Masc_tui_keys.footer_hints ~detail_open:false ~has_rows:(shown > 0)
-            state.view
-          ^ link_hint));
-  let room = max 1 (rows - head_rows - count_frame_lines tail) in
-  (* The window reading costs one of the rows it describes. *)
-  let content_height = if shown > room then max 1 (room - 1) else room in
-  let max_scroll = max 0 (shown - content_height) in
-  let scroll = max 0 (min state.harness_scroll max_scroll) in
+       ~hints:(Masc_tui_keys.footer_hints ~detail_open:false ~has_rows:(shown > 0)
+         state.view));
+  (* Drawing and cursor/page movement consume the same state-owned bound.
+     The list has the standard five-row head and two-row tail; aggregate
+     ledger rows are part of the selected detail document instead. *)
+  let content_height =
+    match scrolled_surface state ~cols Harness with
+    | Some layout -> Masc_tui_scroll.content_height ~rows ~chrome:layout.sc_chrome
+        ~count:layout.sc_count ~preview_keep:layout.sc_preview_keep
+        ~overflow_takes_row:layout.sc_overflow_takes_row
+    | None -> max 1 (rows - listing_chrome ~error:state.harness_error) in
+  let scroll = Masc_tui_scroll.ensure_visible ~cursor:state.harness_cursor
+      ~height:content_height state.harness_scroll
+    |> Masc_tui_scroll.normalize ~count:shown ~height:content_height in
   let verdicts_window = Rows.of_list ~first:scroll ~height:content_height verdicts in
   if shown = 0 then begin
     let empty =
@@ -807,45 +725,7 @@ let render_harness_list (state : state) =
       | None -> box_empty buf cols
       | Some v ->
           let open Masc.Tui_decode in
-          let evaluator =
-            match v.hv_fallback_reason with
-            | None -> v.hv_evaluator
-            | Some reason ->
-                Printf.sprintf "%s (fallback: %s)" v.hv_evaluator reason
-          in
-          let verdict = Terminal_text.single_line v.hv_verdict in
-          (* A rejection arrives as "reject:<why>", and the why runs to a
-             couple of hundred characters. Poured into the nine-column
-             verdict cell it pushed Evaluator off the right edge, so the
-             column that says who judged was readable on approvals and
-             missing on exactly the rows an operator opens: the rejections.
-
-             The ruling holds the cell; the reason follows the evaluator and
-             takes what width is left. The detail pane wraps it whole. *)
-          let ruling, reason =
-            match String.index_opt verdict ':' with
-            | None -> verdict, ""
-            | Some at ->
-                ( String.sub verdict 0 at
-                , String.trim
-                    (String.sub verdict (at + 1)
-                       (String.length verdict - at - 1)) )
-          in
-            let line =
-              "  "
-              ^ Render_schedule.harness_row
-                  ~verdict_style:(semantic_status_color ruling)
-                  ~layout:verdict_layout
-                  { Render_schedule.hrow_time =
-                    Terminal_text.clock_timestamp
-                      (Masc_domain.iso8601_of_unix_seconds v.hv_at)
-                ; hrow_task = Terminal_text.single_line v.hv_task_id
-                ; hrow_gate = Terminal_text.single_line v.hv_gate
-                ; hrow_verdict = ruling
-                ; hrow_evaluator = Terminal_text.single_line evaluator
-                ; hrow_reason = reason
-                }
-          in
+          let line = verdict_row v.hv_task_title (verdict_status v) in
           let style =
             match v.hv_fallback_reason with
             | Some _ -> (Theme.warn ())
@@ -948,7 +828,12 @@ let harness_detail_lines ~width (verdict : Masc.Tui_decode.harness_verdict) =
         , String.trim
             (String.sub whole (at + 1) (String.length whole - at - 1)) )
   in
-  detail_section_heading ~first:true "1. 판정 결과 · 사유 (Decision & Verdict)"
+  let title = Message_layout.wrap_body ~max_cells:(max 1 (width - 4))
+      ~sanitize:Keeper_chat.terminal_safe_text verdict.hv_task_title
+    |> List.map (fun line -> Ansi.bold, "  " ^ line)
+  in
+  title
+  @ detail_section_heading "1. 판정 결과 · 사유 (Decision & Verdict)"
   @ [ field ~style:(semantic_status_color ruling) "Verdict" ruling
     ; field "Gate" verdict.hv_gate
     ; field "Evaluator" verdict.hv_evaluator
@@ -962,7 +847,6 @@ let harness_detail_lines ~width (verdict : Masc.Tui_decode.harness_verdict) =
   @ (if reason = "" then [] else wrapped "Reason" reason)
   @ fallback
   @ detail_section_heading "2. 대상 태스크 · 에이전트 (Task & Agent)"
-  @ wrapped "Title" verdict.hv_task_title
   @ [ field "Task" verdict.hv_task_id
     ; field "Task link" (Link.reference Task verdict.hv_task_id)
     ; field "Agent" verdict.hv_agent
@@ -976,7 +860,9 @@ let harness_detail_pane (state : state) ~rows ~cols verdict buf =
        ~tail:(connection_badge state));
   box_divider buf cols;
   let lines =
-    harness_detail_lines ~width:(max 1 (framed_inner_width cols)) verdict
+    reading_notice_lines state ~width:(max 1 (framed_inner_width cols))
+      ~inflight:state.harness_inflight ~error:state.harness_error
+    @ harness_detail_lines ~width:(max 1 (framed_inner_width cols)) verdict
     (* Appended rather than woven in: the verdict block is what the server
        said, and what the task is aiming at is read from two other surfaces.
        Keeping them in that order keeps the judged fact above the context. *)
@@ -984,6 +870,10 @@ let harness_detail_pane (state : state) ~rows ~cols verdict buf =
        | [] -> []
        | goal_lines ->
            detail_section_heading "3. 연결된 목표 (Towards Goals)" @ goal_lines)
+    @ (match harness_ledger_lines ~cols state.harness with
+       | [] -> []
+       | lines -> detail_section_heading "전체 판정 집계"
+           @ List.map (fun line -> Ansi.reset, line) lines)
     |> judgement_detail_rows ~width:(max 1 (framed_inner_width cols))
   in
   let content_height = max 1 (rows - framed_chrome_rows - 1) in

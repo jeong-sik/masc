@@ -25447,10 +25447,15 @@ let scrolled_surface_rows (state : state) ~cols : surface -> scrolled option =
   | Harness ->
       if Option.is_some state.harness_detail then None
       else
-        listing ~error:state.harness_error
-          (match state.harness with
-           | None -> 0
-           | Some s -> List.length s.Tui_decode.hs_verdicts)
+        Some
+          { sc_count =
+              (match state.harness with
+               | None -> 0
+               | Some s -> List.length s.Tui_decode.hs_verdicts)
+          ; sc_chrome = listing_chrome ~error:state.harness_error
+          ; sc_overflow_takes_row = true
+          ; sc_preview_keep = None
+          }
   | Repositories ->
       if state.repository_changes_open then repository_changes_listing ()
       else

@@ -13,11 +13,12 @@ that a careful reader drops. In the audit's agreement check, one judge kept and
 another dropped one of 372 facts shown in full: it copied the role material.
 
 `e_synth_audit.py drops` makes one case per request with an off-label drop.
-Every case of a memory shows the same facts in full: each fact an answer
-dropped off label on that memory, filled up with facts drawn once for that
-memory. Laid side by side, the cases have no fact in common that marks a drop,
-and none shows the answer, the label or the target. Each drop is judged in the
-case of the request it was made on. When the judge takes the fact out as well
+Every case of a memory shows the same facts in full: the ones the label audit
+picks on any request of that memory, each fact an answer dropped off label on
+it, and a fill drawn once for that memory. Laid side by side, the cases have no
+fact in common that marks a drop, and none shows the answer, the label or the
+target. `adjudicate` refuses cases of one memory that show different facts.
+Each drop is judged in the case of the request it was made on. When the judge takes the fact out as well
 (`drop`, or `superseded:<k>`), the label is in doubt, and the verdict scores no
 request on that memory for any target. When the judge keeps the fact, the drop
 stays wrong, also when its memory leaves scoring for another drop:
@@ -157,18 +158,23 @@ NO_DROPS = Adjudication((), frozenset())
 
 
 def adjudicate(keys: list[JsonObject], decisions: list[JsonObject], drops: OffLabel) -> Adjudication:
-    """The judge's classes for `drops`. SystemExit when the cases were made for other drops, a case
-    does not show every off-label drop of its memory, or a decision is missing or malformed."""
+    """The judge's classes for `drops`. SystemExit when the cases were made for other drops, the cases
+    of one memory show different facts or not every off-label drop of the memory, or a decision is
+    missing or malformed."""
     if {cast(str, k["item"]): k["off_label"] for k in keys} != drops or len(keys) != len(drops):
         raise SystemExit("the drop cases were made for other drops: run e_synth_audit.py drops on this run")
     by_case = decisions_by_case(decisions)
     if set(by_case) != {cast(str, k["case"]) for k in keys}:
         raise SystemExit(f"decisions cover {len(by_case)} cases, the drop cases are {len(keys)}")
     on_memory = dropped_on_memory(drops)
+    shown: dict[str, set[str]] = {}
     judged: list[Judged] = []
     for key in keys:
         item = cast(str, key["item"])
-        if not on_memory[memory_of(item)] <= set(cast(dict[str, str], key["facts"])):
+        full = set(cast(dict[str, str], key["facts"]))
+        if shown.setdefault(memory_of(item), full) != full:
+            raise SystemExit(f"{key['case']}: the case shows other facts than another case of its memory")
+        if not on_memory[memory_of(item)] <= full:
             raise SystemExit(f"{key['case']}: the case does not show every off-label drop of its memory")
         _, facts = classes(key, by_case[cast(str, key["case"])])
         judged += [Judged(item, mid, tuple(targets), facts[mid]) for mid, targets in drops[item].items()]

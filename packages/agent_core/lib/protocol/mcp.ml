@@ -153,9 +153,9 @@ let mcp_tool_of_json = function
   | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ -> None
 ;;
 
-let initialize t =
+let initialize t ~client_version =
   match
-    Sdk_client.initialize t.client ~client_name:"agent-core-mcp-client" ~client_version:"0.10.0"
+    Sdk_client.initialize t.client ~client_name:"agent-core-mcp-client" ~client_version
   with
   | Ok _ -> Ok ()
   | Error detail -> Error (Error.Mcp (InitializeFailed { detail }))

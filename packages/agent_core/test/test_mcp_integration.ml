@@ -76,7 +76,7 @@ let sampling_round_trip ?sampling_handler ?(after_reply = fun _ -> ()) () =
         | Ok client -> client
         | Error error -> Alcotest.fail (Error.to_string error) in
       Fun.protect ~finally:(fun () -> Mcp.close client) (fun () ->
-        (match Mcp.initialize client with
+        (match Mcp.initialize client ~client_version:"test" with
          | Ok () -> () | Error error -> Alcotest.fail (Error.to_string error));
         match Mcp.call_tool_full client ~name:"compose" ~arguments:(`Assoc []) with
         | Ok result ->

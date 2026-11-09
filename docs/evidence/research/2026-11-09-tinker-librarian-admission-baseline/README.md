@@ -12,7 +12,7 @@ keeper-librarian Lane Add-on의 `admission` 출력을 Tinker에서 학습한 Ink
 
 ## 고정한 것
 
-`scripts/tinker/librarian/pass_lines.json` (sha256 `c0c1ce46a29fbc6696ba58eaab52034e3b6acea2983e1c93dc33c6f843909f4b`)
+`scripts/tinker/librarian/pass_lines.json` (sha256 `f0fd40bbd6a00ee6cebd041e16c3167df5f8f73e9958568a7a49d4d5566944a8`)
 
 - 요청 모양: MASC exact 레인처럼 admission 프롬프트 다음에 스키마 지시문을 보낸다.
   `reasoning_effort: "low"`, `max_tokens: 32768`이다.

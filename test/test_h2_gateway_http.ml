@@ -177,6 +177,131 @@ let test_a_path_the_router_lacks_is_not_found () =
     (fun ~player:_ ~reader:_ client ->
       check int "a method the table lacks" 405 (status ~meth:`GET client "/health"))
 
+(* A route that fails before its response gets a 500. One that fails after
+   its response started cannot: its headers already went out, so the
+   response is cut and the client sees the failure. One that fails after a
+   whole response keeps that response. Each failure is logged once. *)
+let early_failure = "fixture route failed before its response"
+let half_failure = "fixture route failed mid-stream"
+let answered_failure = "fixture route failed after its response"
+
+let failing_routes ~sw:_ ~clock:_ =
+  Masc.Http_server_eio.Router.create ()
+  |> Server_route.get Server_route.Always_public "/early" (fun _request _reqd ->
+    failwith early_failure)
+  |> Server_route.get Server_route.Always_public "/half" (fun _request reqd ->
+    let writer =
+      Masc.Http_reqd.respond_with_streaming ~flush_headers_immediately:true reqd
+        (Httpun.Response.create
+           ~headers:(Httpun.Headers.of_list [ "transfer-encoding", "chunked" ]) `OK)
+    in
+    Masc.Http_reqd.Body_writer.write_string writer "partial";
+    failwith half_failure)
+  |> Server_route.get Server_route.Always_public "/answered" (fun _request reqd ->
+    Masc.Http_server_eio.Response.text "done" reqd;
+    failwith answered_failure)
+
+let h2_outcome client path =
+  let result, resolve = Eio.Promise.create () in
+  let settle outcome =
+    if not (Eio.Promise.is_resolved result) then Eio.Promise.resolve resolve outcome in
+  let request = H2.Request.create ~scheme:"http" `GET path
+    ~headers:(H2.Headers.of_list [ ":authority", "localhost:8935" ]) in
+  let writer = H2_eio.Client.request client ~flush_headers_immediately:true request
+    ~error_handler:(fun _ -> settle `Reset)
+    ~response_handler:(fun response reader ->
+      let bytes = Buffer.create 64 in
+      (* h2 ends the body of a reset stream before it calls [error_handler]. *)
+      let rec read () = H2.Body.Reader.schedule_read reader
+        ~on_eof:(fun () ->
+          match H2.Body.Reader.completion reader with
+          | H2.Body.Reader.Complete ->
+            settle (`Ended (H2.Status.to_code response.status, Buffer.contents bytes))
+          | H2.Body.Reader.Aborted -> settle `Reset
+          | H2.Body.Reader.Pending -> fail "response body ended while still pending")
+        ~on_read:(fun chunk ~off ~len ->
+          Buffer.add_string bytes (Bigstringaf.substring chunk ~off ~len); read ()) in
+      read ()) in
+  H2.Body.Writer.close writer;
+  Eio.Promise.await result
+
+(* One HTTP/1.1 exchange in memory, through the ingress the HTTP/1.1
+   listener runs. Every step is synchronous, so a writer that yields is a
+   response nobody will finish. *)
+let h1_outcome ~routes path =
+  let trust_policy =
+    match
+      Server_request_authority.make_trust_policy
+        ~bind_host:"localhost" ~bind_port:8935 ~https_port:None ~explicit_base_url:None
+    with
+    | Ok policy -> policy
+    | Error error -> fail (Server_request_authority.trust_policy_error_to_string error)
+  in
+  let output = Buffer.create 256 in
+  let conn = Httpun.Server_connection.create (fun reqd ->
+    Server_http_ingress.serve ~routes
+      ~client_addr:(`Tcp (Eio.Net.Ipaddr.V4.loopback, 54321))
+      (Server_request_authority.classify_http1_request ~trust_policy (Httpun.Reqd.request reqd))
+      (Masc.Http_reqd.of_httpun reqd)) in
+  let request = Printf.sprintf "GET %s HTTP/1.1\r\nHost: localhost:8935\r\n\r\n" path in
+  let bytes = Bigstringaf.of_string ~off:0 ~len:(String.length request) request in
+  ignore (Httpun.Server_connection.read_eof conn bytes ~off:0 ~len:(Bigstringaf.length bytes));
+  let rec drain () =
+    match Httpun.Server_connection.next_write_operation conn with
+    | `Write iovecs ->
+      let count = List.fold_left (fun count (iov : Bigstringaf.t Httpun.IOVec.t) ->
+        Buffer.add_string output (Bigstringaf.substring iov.buffer ~off:iov.off ~len:iov.len);
+        count + iov.len) 0 iovecs in
+      Httpun.Server_connection.report_write_result conn (`Ok count);
+      drain ()
+    | `Yield -> `Open (Buffer.contents output)
+    | `Close _ -> `Closed (Buffer.contents output)
+  in
+  drain ()
+
+let test_route_failure_follows_the_response_state () =
+  let captured = ref None in
+  let lines = ref [] in
+  let logged text =
+    List.length (List.filter (fun line -> String_util.contains_substring line text) !lines) in
+  Console_sink.For_testing.reset ();
+  Console_sink.For_testing.set_writer (Some (fun line -> lines := line :: !lines));
+  Fun.protect ~finally:Console_sink.For_testing.reset (fun () ->
+    with_gateway ~on_routes:(fun routes -> captured := Some routes) ~make_routes:failing_routes
+      (fun ~player:_ ~reader:_ client ->
+        let routes = match !captured with Some routes -> routes | None -> fail "missing routes" in
+        check bool "HTTP/2: a failure before the response is a 500" true
+          (match h2_outcome client "/early" with `Ended (500, _) -> true | `Ended _ | `Reset -> false);
+        (match h1_outcome ~routes "/early" with
+         | `Open output -> failf "HTTP/1.1: the 500 did not end: %S" output
+         | `Closed output ->
+           check bool "HTTP/1.1: a failure before the response is a 500" true
+             (String_util.contains_substring output " 500 "));
+        check int "a failure before the response is logged on both" 2 (logged early_failure);
+        check bool "HTTP/2: the half-sent stream is reset" true
+          (match h2_outcome client "/half" with `Reset -> true | `Ended _ -> false);
+        check int "HTTP/2: the failure is logged once" 1 (logged half_failure);
+        (match h1_outcome ~routes "/half" with
+         | `Open output -> failf "HTTP/1.1: the half-sent body stayed open: %S" output
+         | `Closed output ->
+           check bool "HTTP/1.1: the bytes before the failure went out" true
+             (String_util.contains_substring output "7\r\npartial\r\n");
+           check bool "HTTP/1.1: the body has no last chunk" false
+             (String_util.contains_substring output "\r\n0\r\n\r\n"));
+        check int "HTTP/1.1: the failure is logged once" 2 (logged half_failure);
+        check bool "HTTP/2: a whole response stays whole" true
+          (match h2_outcome client "/answered" with
+           | `Ended (200, "done") -> true
+           | `Ended _ | `Reset -> false);
+        (match h1_outcome ~routes "/answered" with
+         | `Open output -> failf "HTTP/1.1: the whole response did not end: %S" output
+         | `Closed output ->
+           check bool "HTTP/1.1: a whole response stays whole" true
+             (String_util.contains_substring output " 200 "
+              && String_util.contains_substring output "\r\n\r\ndone"));
+        check int "a failure after a whole response is logged on both" 2
+          (logged answered_failure)))
+
 let test_fusion_workspace_admission () =
   with_gateway ~make_routes:production (fun ~player ~reader:_ client ->
     strict None (fun () ->
@@ -634,6 +759,8 @@ let () =
         ; test_case "a path the router lacks is not found" `Quick
             test_a_path_the_router_lacks_is_not_found
         ; test_case "health names the h2 listener" `Quick test_health_names_the_h2_listener
+        ; test_case "a route failure follows the response state" `Quick
+            test_route_failure_follows_the_response_state
         ; test_case "Fusion workspace admission" `Quick test_fusion_workspace_admission
         ; test_case "physical Skill turn evidence" `Quick test_physical_skill_turn_evidence
         ; test_case "bound Goal tree bypasses stale cache" `Quick test_goal_tree_bound_read_bypasses_stale_cache

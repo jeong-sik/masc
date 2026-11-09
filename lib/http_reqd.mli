@@ -130,6 +130,22 @@ val respond_with_streaming
     That is a stream h2 reset on its own whose RST_STREAM has not left the
     socket yet (RFC-0518 D1), or one whose response already ended. *)
 
+(** How far a request's response got. *)
+type response_state =
+  | Not_started  (** No response has started. *)
+  | Streaming_open
+      (** {!respond_with_streaming} returned a writer that is still open
+          ({!Body_writer.is_closed} is false). *)
+  | Answered
+      (** A response started and nothing more will be added to it: a whole
+          response, a 101, or a streaming response whose writer is closed. *)
+
+val response_state : t -> response_state
+(** Read from the transport and from the writer {!respond_with_streaming}
+    returned. A handler that failed is answered by it: a 500 fits only
+    [Not_started], and a [Streaming_open] response has to be ended with
+    {!report_exn}. *)
+
 (** Why a request body was not delivered. *)
 type body_read_error =
   | Too_large of int  (** The limit, in bytes, that the body exceeded. *)
@@ -151,9 +167,13 @@ val read_body
     a stream reset after EOF delivers nothing. *)
 
 val report_exn : t -> exn -> unit
-(** Tells the transport the request failed with [exn]: httpun answers its
-    error path; on HTTP/2 the stream is reset ({!Http_h2_stream.reset} with
-    [Raised]). *)
+(** Tells the transport the request failed with [exn]. Before a response,
+    both transports answer with the connection's error handler (500). After
+    a streaming response started, HTTP/1.1 cuts the body without its last
+    chunk and closes the connection after it; HTTP/2 resets the stream
+    ({!Http_h2_stream.reset} with [Raised]). [exn] is logged once at error:
+    on HTTP/2 the error handler logs the ones it answers
+    ({!Http_h2_stream.report_failure}). *)
 
 (** The late-response failure shapes of both libraries (#13059). *)
 module Late_response : sig

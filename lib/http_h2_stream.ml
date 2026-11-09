@@ -20,7 +20,21 @@ let report reqd exn =
     (try H2.Reqd.report_exn reqd exn with
      | Eio.Cancel.Cancelled _ as cancelled -> raise cancelled
      | failure ->
-       Log.Http.debug "[h2] stream report raised: %s" (Printexc.to_string failure))
+       Log.Http.warn "[h2] stream report raised: %s" (Printexc.to_string failure))
+;;
+
+(* h2 hands a report to the connection's error handler only on a stream with
+   no response and no error yet (reqd.ml [_report_error], the [Waiting,
+   No_error] arm), and the error handlers masc installs log what they get:
+   the gateway's and grpc-direct's. Any other report resets a started
+   response or changes nothing, and nobody else logs it. *)
+let report_failure reqd exn =
+  let unanswered =
+    Option.is_none (H2.Reqd.error_code reqd) && Option.is_none (H2.Reqd.response reqd)
+  in
+  report reqd exn;
+  if not (unanswered && Option.is_some (H2.Reqd.error_code reqd))
+  then Log.Http.error "[h2] stream failed: %s" (Printexc.to_string exn)
 ;;
 
 (* The first end wins. Failing a switch that already has an error adds the
@@ -36,10 +50,14 @@ let end_scope stream_sw cause =
    or answering with the error handler's response, which h2 opens when no
    response had started. That answer owns the stream until its END_STREAM and
    the RST_STREAM h2 writes after it (reqd.ml [close_stream]); ending the scope
-   first would cut it. *)
-let answering reqd = Option.is_some (H2.Reqd.response reqd)
+   first would cut it. Only that answer has both a response and an error code:
+   h2 ignores a report on a response the handler already completed and sets
+   no code (reqd.ml 370), and that scope ends here. *)
+let answering reqd =
+  Option.is_some (H2.Reqd.error_code reqd) && Option.is_some (H2.Reqd.response reqd)
+;;
 
-let report_then_end ~stream_sw reqd cause exn ~keep_answer =
+let report_then_end ~report ~stream_sw reqd cause exn ~keep_answer =
   match report reqd exn with
   | () -> if not (keep_answer && answering reqd) then end_scope stream_sw cause
   | exception (Eio.Cancel.Cancelled _ as cancelled) ->
@@ -54,10 +72,12 @@ let report_then_end ~stream_sw reqd cause exn ~keep_answer =
 let reset ~stream_sw reqd cause =
   match cause with
   | Reset_by_peer | Reset_by_us -> end_scope stream_sw cause
-  | Stalled -> report_then_end ~stream_sw reqd cause (Stream_reset cause) ~keep_answer:false
+  | Stalled ->
+    report_then_end ~report ~stream_sw reqd cause (Stream_reset cause) ~keep_answer:false
   | Out_of_capacity _ ->
-    report_then_end ~stream_sw reqd cause (Stream_reset cause) ~keep_answer:true
-  | Raised exn -> report_then_end ~stream_sw reqd cause exn ~keep_answer:true
+    report_then_end ~report ~stream_sw reqd cause (Stream_reset cause) ~keep_answer:true
+  | Raised exn ->
+    report_then_end ~report:report_failure ~stream_sw reqd cause exn ~keep_answer:true
 ;;
 
 let dispatch ~sw reqd work =

@@ -15,11 +15,15 @@ val serve
   -> Http_reqd.t
   -> unit
 (** Answers a refused authority with 400 and an [error_code]; binds an
-    admitted one to the request fiber and runs the admission steps above. A
-    handler exception becomes a 500 unless it is one of the late-response
-    shapes {!Http_reqd.Late_response} knows (logged, no second response) or
-    a response-ledger refusal (reported to the transport, which resets the
-    stream). Cancellation propagates. *)
+    admitted one to the request fiber and runs the admission steps above.
+
+    A handler exception is answered by {!Http_reqd.response_state}. With no
+    response yet it becomes a 500. An open streaming response is ended with
+    {!Http_reqd.report_exn}: HTTP/2 resets the stream, HTTP/1.1 cuts the
+    body and closes the connection. After a complete response the exception
+    is only logged. Outside an open streaming response, the late-response
+    shapes {!Http_reqd.Late_response} knows are logged at warn and get no
+    second response. Cancellation propagates. *)
 
 val respond_request_authority_bad_request
   :  error_code:string

@@ -37734,7 +37734,7 @@ Use relative paths for resources already held in the package. -->
              ~reopen:(fun () -> state.approval_detail_scroll <- 0)
        | Some (("[" | "]") as bracket)
          when state.view = System_logs
-              && Option.is_some (system_logs_page state).lp_detail_seq ->
+              && system_log_detail_open state ->
            step_detail_cursor
              ~count:
                (List.length (Masc_tui_types.visible_system_log_entries state))
@@ -39590,7 +39590,7 @@ Use relative paths for resources already held in the package. -->
             | Runtime when Option.is_some state.runtime_detail_target ->
                 state.runtime_detail_scroll <-
                   Masc_tui_scroll.step_uncounted ~delta:(direction * page) state.runtime_detail_scroll
-            | System_logs when Option.is_some (system_logs_page state).lp_detail_seq ->
+            | System_logs when system_log_detail_open state ->
                 edit_system_logs_page state (fun logs -> {logs with lp_detail_scroll=
                   Masc_tui_scroll.step_uncounted ~delta:(direction * page) logs.lp_detail_scroll})
             (* The Runs tab is read by a cursor, so its page key names a run
@@ -40185,7 +40185,7 @@ Use relative paths for resources already held in the package. -->
                 end
                 else goto_surface state ~mailbox:async_messages Config
             | System_logs ->
-                if Option.is_some (system_logs_page state).lp_detail_seq then begin
+                if system_log_detail_open state then begin
                   edit_system_logs_page state (fun page -> {page with lp_detail_seq=None});
                   edit_system_logs_page state (fun page -> {page with lp_detail_scroll=0})
                 end
@@ -40639,7 +40639,7 @@ Use relative paths for resources already held in the package. -->
                 state.metrics_scroll <-
                   Masc_tui_types.scroll_down_from state.metrics_scroll ~by:1
             | System_logs ->
-                if Option.is_some (system_logs_page state).lp_detail_seq then
+                if system_log_detail_open state then
                   edit_system_logs_page state (fun page -> {page with lp_detail_scroll=
                     Masc_tui_types.scroll_down_from page.lp_detail_scroll ~by:1})
                 else
@@ -40964,7 +40964,7 @@ Use relative paths for resources already held in the package. -->
                   if state.acting_scroll = 0 then state.acting_unseen <- 0
                 end
             | System_logs ->
-                if Option.is_some (system_logs_page state).lp_detail_seq then
+                if system_log_detail_open state then
                   edit_system_logs_page state (fun page -> {page with lp_detail_scroll=
                     max 0 (page.lp_detail_scroll - 1)})
                 else
@@ -41615,17 +41615,17 @@ Use relative paths for resources already held in the package. -->
              | Server -> System_logs_view.This_tui | This_tui -> Server in
            state.system_logs <- System_logs_view.select source state.system_logs;
            refresh_client_system_logs state
-       | Some ("l" | "L") when state.view = System_logs ->
+       | Some ("l" | "L") when state.view = System_logs && not (system_log_detail_open state) ->
            edit_system_logs_page state (fun page -> {page with
              lp_min_level=Masc.Tui_decode.next_system_log_min_level page.lp_min_level;
              lp_scroll=0;lp_cursor=0});
            refresh_system_logs_source state
-       | Some ("v" | "V") when state.view = System_logs ->
+       | Some ("v" | "V") when state.view = System_logs && not (system_log_detail_open state) ->
            edit_system_logs_page state (fun page -> {page with
              lp_min_level=Masc.Tui_decode.toggle_system_log_verbose page.lp_min_level;
              lp_scroll=0;lp_cursor=0});
            refresh_system_logs_source state
-       | Some ("c" | "C") when state.view = System_logs ->
+       | Some ("c" | "C") when state.view = System_logs && not (system_log_detail_open state) ->
            edit_system_logs_page state (fun page ->
              let entries=match page.lp_snapshot with None -> [] | Some snapshot -> snapshot.sys_entries in
              {page with lp_category=Masc.Tui_decode.next_system_log_category

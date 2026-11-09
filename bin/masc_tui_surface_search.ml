@@ -138,7 +138,7 @@ let surface_row_texts ~cols (state : state) : surface -> string list option =
                 s.Tui_decode.rss_resolved.Tui_decode.rrs_runtimes)
         state.runtime_surface
   | System_logs ->
-      if Option.is_some (system_logs_page state).lp_detail_seq then None
+      if system_log_detail_open state then None
       else Option.map
         (fun _ ->
           visible_system_log_entries state

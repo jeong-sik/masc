@@ -156,3 +156,7 @@ let outside (state : Masc_tui_types.state) ~now ~keeper_name : Masc_tui_keeper_l
   ; age = age_of_memory ~now memory
   }
 ;;
+
+let next_run (state : Masc_tui_types.state) ~keeper_name =
+  Masc_tui_keeper_next_run.find (get_schedule_index state) ~keeper_name
+;;

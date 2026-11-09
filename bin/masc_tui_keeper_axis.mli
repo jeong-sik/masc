@@ -54,3 +54,7 @@ val outside :
   Masc_tui_types.state -> now:float -> keeper_name:string -> Masc_tui_keeper_list_model.outside
 (** [keeper_name]'s readings from the state's schedule agenda and memory
     health, through the same cached indexes as {!segments}. *)
+
+val next_run : Masc_tui_types.state -> keeper_name:string -> Masc_tui_keeper_next_run.t
+(** [keeper_name]'s next run from the state's schedule agenda, through the
+    same cached index as {!segments}. The views' due column draws it. *)

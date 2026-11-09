@@ -4481,6 +4481,8 @@
 
 (include stanzas/test_tui_keeper_axis_row.inc)
 
+(include stanzas/test_tui_keeper_grid.inc)
+
 (test
  (name test_tui_keeper_trail)
  (modules test_tui_keeper_trail)

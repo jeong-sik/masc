@@ -4028,6 +4028,14 @@
  (modules test_tui_terminal_json)
  (libraries alcotest masc masc.string_util yojson))
 
+; task-3491: the terminal-text boundary had no test of its own. These cases
+; call the sanitizer directly: which bytes may reach the terminal, and that the
+; visible text survives the escape.
+(test
+ (name test_tui_terminal_text)
+ (modules test_tui_terminal_text)
+ (libraries alcotest masc masc.string_util))
+
 (test
  (name test_tui_json_document)
  (modules test_tui_json_document)

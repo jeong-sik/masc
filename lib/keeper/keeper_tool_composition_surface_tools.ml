@@ -1,3 +1,5 @@
+open Result.Syntax
+
 module Catalog = Keeper_tool_composition_catalog
 module Executor = Keeper_tool_plan_executor
 module Journal = Keeper_tool_execution_journal
@@ -446,7 +448,7 @@ let make_tools_with_authority
                ();
              result)))))
     in
-    let ordinary = make_tool () in
+    let* ordinary = make_tool () in
     let resource_candidate =
       match capability_authority, entry.execution, completion with
       | Keeper_tool_runtime.Frozen_surface _, Catalog.Inline,
@@ -469,17 +471,22 @@ let make_tools_with_authority
             match Keeper_prepared_inline_files.scopes prepared_files with
             | [] -> invalid_arg "prepared Inline file plan has no file footprint"
             | scope :: additional_scopes ->
-              let prepared = make_tool ~prepared_files () in
-              Ok (Some (Agent_core.Tool.scoped_call ~scope ~additional_scopes prepared.handler))
+              (match make_tool ~prepared_files () with
+               | Ok prepared ->
+                 Ok (Some (Agent_core.Tool.scoped_call ~scope ~additional_scopes prepared.handler))
+               | Error error ->
+                 Error { Agent_core.Types.message = Tool_bridge.schema_error_to_string error
+                       ; recoverable = false
+                       ; error_class = Some Agent_core.Types.Deterministic })
       in
       Agent_core.Tool.of_schema
         ~descriptor:(Agent_core.Tool.ordinary_descriptor_scoped
           ~call_effect:(Agent_core.Tool.call_effect ordinary) ~prepare)
         ordinary.schema ordinary.handler
     in
-    ( tool
-    , entry.Catalog.loading
-    , model_projection ))
+    Ok ( tool
+       , entry.Catalog.loading
+       , model_projection ))
   in
   let draft_tools =
     match capability_authority with
@@ -501,7 +508,7 @@ let make_tools_with_authority
       in
       let make (schema : Masc_domain.tool_schema) ~artifact_projection ~call_effect handle =
         let model_projection = Tool_output.default_model_projection in
-        (Tool_bridge.agent_core_tool_of_masc_with_execution_env
+        let+ tool = Tool_bridge.agent_core_tool_of_masc_with_execution_env
            ~descriptor:(Agent_core.Tool.ordinary_descriptor ~call_effect Agent_core.Tool_contract.Serial)
            ~base_path:config.base_path ~model_projection:(fun () -> model_projection)
            ?on_externalization_error ~name:schema.name ~description:schema.description
@@ -519,8 +526,8 @@ let make_tools_with_authority
                 | Error { message; _ } ->
                   Tool_result.make_err ~tool_name:schema.name ~class_:Tool_result.Runtime_failure
                     ~effect_disposition:Tool_result.Effect_outcome_unknown ~start_time message)
-        , Tool_loading_declarations.required schema.name
-        , model_projection)
+        in
+        (tool, Tool_loading_declarations.required schema.name, model_projection)
       in
       let run = make Draft.run_schema ~artifact_projection:Tool_output.Inline_with_structured_diagnostic
         ~call_effect:(fun _ -> Agent_core.Tool.Effect_possible)
@@ -686,7 +693,7 @@ let make_tools_with_authority
     | [] -> composition_tools
     | skills ->
       composition_tools
-      @ [ ( make_instruction_skill_tool
+      @ [ (let+ tool = make_instruction_skill_tool
             ~config
             ?record_activation:record_instruction_activation
             ~assess_applicability:(fun ~reference ~body ->
@@ -694,9 +701,9 @@ let make_tools_with_authority
               Typesafeai_skill_applicability.assess ?clock ~keeper_id:meta.name
                 ~context ~reference ~body ())
             ~instruction_skills:skills
-            ()
-          , Tool_loading_declarations.required Catalog.skill_tool_name
-          , Tool_output.bounded_inline_model_projection )
+            () in
+          (tool, Tool_loading_declarations.required Catalog.skill_tool_name,
+           Tool_output.bounded_inline_model_projection))
         ]
   in
   (* Built only where they can address something: an async entry on this
@@ -732,15 +739,23 @@ let make_tools_with_authority
   in
   (* The Skill reader and the two request controls are not Skill
      compositions; each is declared in its own [config/tools/<name>.toml]. *)
-  if async_controls
-  then
-    composition_tools
-    @ [ ( status_tool
-        , Tool_loading_declarations.required Catalog.status_tool_name
-        , Tool_output.default_model_projection )
-      ; ( cancel_tool
-        , Tool_loading_declarations.required Catalog.cancel_tool_name
-        , Tool_output.default_model_projection )
-      ]
-  else composition_tools
+  let rows =
+    if async_controls then
+      composition_tools
+      @ [ Result.map (fun tool ->
+            tool, Tool_loading_declarations.required Catalog.status_tool_name,
+            Tool_output.default_model_projection) status_tool
+        ; Result.map (fun tool ->
+            tool, Tool_loading_declarations.required Catalog.cancel_tool_name,
+            Tool_output.default_model_projection) cancel_tool ]
+    else composition_tools
+  in
+  let rec collect = function
+    | [] -> Ok []
+    | row :: rest ->
+      let* row = row in
+      let+ rest = collect rest in
+      row :: rest
+  in
+  collect rows
 ;;

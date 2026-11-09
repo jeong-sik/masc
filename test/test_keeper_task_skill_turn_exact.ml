@@ -816,11 +816,11 @@ let test_exact_reference_consumer_rejects_name_fallback () =
     Masc.Keeper_tool_composition_surface.For_testing.make_instruction_skill_tool
       ~config:(Masc.Workspace.default_config (Sys.getcwd ()))
       ~instruction_skills:[ instruction_skill reference selected.skill ]
-      ()
+      () |> Result.get_ok
   in
   let schema_tool =
     Masc.Keeper_tool_composition_surface.instruction_skill_schema_tool
-      ~instruction_skills:[ instruction_skill reference selected.skill ]
+      ~instruction_skills:[ instruction_skill reference selected.skill ] |> Result.get_ok
   in
   check string
     "executable and effective-surface descriptions match"
@@ -844,7 +844,7 @@ let test_exact_reference_consumer_rejects_name_fallback () =
         ignore observed;
         Error Masc.Keeper_skill_activation_recorder.Turn_scope_mismatch)
       ~instruction_skills:[ instruction_skill reference selected.skill ]
-      ()
+      () |> Result.get_ok
   in
   let failed_output =
     run_skill_tool failing_tool (Reference.to_yojson reference)
@@ -934,7 +934,7 @@ let test_resource_is_read_only_when_exact_file_is_requested () =
          Masc.Keeper_tool_composition_surface.For_testing.make_instruction_skill_tool
            ~config:(Masc.Workspace.default_config (Sys.getcwd ()))
            ~instruction_skills:[ instruction ]
-           ()
+           () |> Result.get_ok
        in
        let input =
          match Reference.to_yojson reference with
@@ -962,7 +962,7 @@ let test_resource_is_read_only_when_exact_file_is_requested () =
              incr activation_attempts;
              Error Masc.Keeper_skill_activation_recorder.Turn_scope_mismatch)
            ~instruction_skills:[ instruction ]
-           ()
+           () |> Result.get_ok
        in
        let oversized =
          match Reference.to_yojson reference with
@@ -1031,7 +1031,7 @@ let test_resource_is_read_only_when_exact_file_is_requested () =
          Masc.Keeper_tool_composition_surface.For_testing.make_instruction_skill_tool
            ~config:(Masc.Workspace.default_config (Sys.getcwd ()))
            ~instruction_skills:[ boundary_instruction ]
-           ()
+           () |> Result.get_ok
        in
        let boundary_input =
          match Reference.to_yojson boundary_reference with
@@ -1499,7 +1499,7 @@ let test_jev_advice_reaches_the_model_without_selecting_or_authorizing () =
           ~reference ~body () in
         received_assessment := Some assessment; assessment)
       ~on_result:(fun ~input:_ result -> captured := Some result)
-      ~instruction_skills:[ instruction_skill reference selected.skill ] () in
+      ~instruction_skills:[ instruction_skill reference selected.skill ] () |> Result.get_ok in
   let invoke expected =
     let output = run_skill_tool tool (Reference.to_yojson reference) in
     check bool "model still receives the frozen Skill body" true
@@ -1543,7 +1543,7 @@ let test_jev_advice_reaches_the_model_without_selecting_or_authorizing () =
          | Keeper_skill_activation_recorder.Resource _ -> fail "expected the original Skill body");
         Keeper_skill_activation_recorder.record_instruction ~config:activation_config recorder ~invocation ~content reference)
       ~on_result:(fun ~input:_ result -> captured := Some result)
-      ~instruction_skills:[instruction_skill reference selected.skill] () in
+      ~instruction_skills:[instruction_skill reference selected.skill] () |> Result.get_ok in
   Fun.protect ~finally:install_overrides (fun () ->
     Prompt_registry.set_override Prompt_names.skill_applicability_projection "{{advice}}" |> Result.get_ok;
     let output = run_skill_tool projection_tool (Reference.to_yojson reference) in
@@ -1585,7 +1585,7 @@ let test_jev_advice_reaches_the_model_without_selecting_or_authorizing () =
       ~record_activation:(fun ~invocation:_ ~content:_ _ ->
         Error Masc.Keeper_skill_activation_recorder.Turn_scope_mismatch)
       ~on_result:(fun ~input:_ result -> captured := Some result)
-      ~instruction_skills:[ instruction_skill reference selected.skill ] () in
+      ~instruction_skills:[ instruction_skill reference selected.skill ] () |> Result.get_ok in
   let refused = run_skill_tool activation_failed_tool (Reference.to_yojson reference) in
   check bool "activation failure still withholds the Skill body" false
     (String_util.contains_substring refused "FROZEN_SKILL_BODY");
@@ -1614,7 +1614,7 @@ let test_jev_advice_reaches_the_model_without_selecting_or_authorizing () =
         Masc.Typesafeai_skill_applicability.assess ~clock ~keeper_id:"skill-fixture"
           ~context:None ~reference ~body ())
       ~on_result:(fun ~input:_ result -> captured := Some result)
-      ~instruction_skills:[ instruction_skill reference selected.skill ] () in
+      ~instruction_skills:[ instruction_skill reference selected.skill ] () |> Result.get_ok in
   let unchanged_body = run_skill_tool no_context_tool (Reference.to_yojson reference) in
   check string "missing Context leaves the exact Skill body unchanged" frozen_body unchanged_body;
   check int "missing Context sends no request" sent (Exact_output_fixture.post_count server);
@@ -1681,7 +1681,7 @@ let test_jev_advice_reaches_the_model_without_selecting_or_authorizing () =
               ~reference ~body () in
             received_assessment := Some assessment; assessment)
           ~on_result:(fun ~input:_ result -> captured := Some result)
-          ~instruction_skills:[ instruction_skill near_reference near_selected.skill ] () in
+          ~instruction_skills:[ instruction_skill near_reference near_selected.skill ] () |> Result.get_ok in
       let output = run_skill_tool near_tool (Reference.to_yojson near_reference) in
       check string "advice cannot displace a body at the existing inline boundary" near_body output;
       let metadata = Tool_result.metadata (Option.get !captured) |> Option.get in
@@ -1700,7 +1700,7 @@ let test_jev_advice_reaches_the_model_without_selecting_or_authorizing () =
           ~config:(Masc.Workspace.default_config (Sys.getcwd ()))
           ~assess_applicability:(fun ~reference:_ ~body:_ -> retained_assessment)
           ~on_result:(fun ~input:_ result -> captured := Some result)
-          ~instruction_skills:[ instruction_skill near_reference near_selected.skill ] () in
+          ~instruction_skills:[ instruction_skill near_reference near_selected.skill ] () |> Result.get_ok in
         let output = run_skill_tool cached_tool (Reference.to_yojson near_reference) in
         check string "missing advice policy leaves the frozen body unchanged" near_body output;
         let metadata = Tool_result.metadata (Option.get !captured) |> Option.get in

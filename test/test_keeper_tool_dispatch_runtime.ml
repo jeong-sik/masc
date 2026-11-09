@@ -4491,6 +4491,7 @@ let make_dummy_agent_core_tool name =
          ; "required", `List []
          ])
     (fun _ -> Tool_result.make_ok ~tool_name:name ~start_time:(Tool_timing.start ()) ~data:(`String "") ())
+  |> Result.get_ok
 ;;
 
 let test_descriptor_route_miss_payload_is_typed_runtime_failure () =
@@ -5818,7 +5819,7 @@ let test_frozen_surface_production_bundle_executes_public_read () =
       ~publication_recovery
       ~ctx_snapshot:ctx_work
       ~capability_surface
-      ()
+      () |> Result.get_ok
   in
   Fun.protect
     ~finally:bundle.cleanup
@@ -8286,7 +8287,7 @@ name = "content"
        source ~trace_id ~keeper_turn_id:absolute_turn;
        let bundle = Masc.Keeper_tools_agent_core_bundle.make_tool_bundle_for_capability_surface
            ~config ~meta ~publication_recovery ~ctx_snapshot:ctx_work ~capability_surface
-           ~skill_activation_context ~turn_ctx_cell ~on_inline_receipt_committed () in
+           ~skill_activation_context ~turn_ctx_cell ~on_inline_receipt_committed () |> Result.get_ok in
        Fun.protect ~finally:bundle.cleanup @@ fun () ->
        let tool = match find_tool_by_name bundle.tools "keeper_compose_board-turn-proof" with
          | Some tool -> tool | None -> fail "the named inline Board Skill is missing" in
@@ -8555,7 +8556,7 @@ let test_async_composition_binds_params_into_durable_status () =
        let skill_activation_context = make_activation_context ~absolute_turn:1 in
        let bundle = Masc.Keeper_tools_agent_core_bundle.make_tool_bundle_for_capability_surface
            ~config ~meta ~publication_recovery ~ctx_snapshot:ctx_work ~capability_surface
-           ~skill_activation_context () in
+           ~skill_activation_context () |> Result.get_ok in
        Fun.protect ~finally:bundle.cleanup @@ fun () ->
        let tools = bundle.tools in
        let async_tool =
@@ -8714,7 +8715,7 @@ let test_async_composition_binds_params_into_durable_status () =
        in
        let fresh_bundle = Masc.Keeper_tools_agent_core_bundle.make_tool_bundle_for_capability_surface
            ~config ~meta ~publication_recovery ~ctx_snapshot:ctx_work ~capability_surface
-           ~skill_activation_context:(make_activation_context ~absolute_turn:2) () in
+           ~skill_activation_context:(make_activation_context ~absolute_turn:2) () |> Result.get_ok in
        Fun.protect ~finally:fresh_bundle.cleanup (fun () ->
          let fresh_tool = match find_tool_by_name fresh_bundle.tools "keeper_compose_memory-background" with
            | Some tool -> tool | None -> fail "fresh Keeper frame lost its named Tool" in
@@ -10556,7 +10557,7 @@ let test_peer_delegate_schema_reaches_model_wires () =
     let plain = Masc.Tool_bridge.agent_core_tool_of_masc
         ~descriptor:(Agent_core.Tool.ordinary_descriptor Agent_core.Tool_contract.Serial)
         ~name:"masc_keeper_delegate" ~description:descriptor.description ~input_schema:expected
-        (fun input -> Tool_result.make_ok ~tool_name:"masc_keeper_delegate" ~start_time:(Tool_timing.start ()) ~data:input ()) in
+        (fun input -> Tool_result.make_ok ~tool_name:"masc_keeper_delegate" ~start_time:(Tool_timing.start ()) ~data:input ()) |> Result.get_ok in
     let erased = Agent_core.Tool.create ~name:plain.schema.name
         ~description:plain.schema.description ~parameters:plain.schema.parameters
         (fun _ -> Ok { Agent_core.Types.content = "unused"; content_blocks = None; _meta = None }) in

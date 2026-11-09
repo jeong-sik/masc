@@ -101,14 +101,3 @@ val parse_openai_sse_chunk
     reads. There is no undeclared default: a caller without a resolved
     dialect passes {!Reasoning_dialect.No_streaming_reasoning} and gets no
     reasoning. *)
-
-(** Agent Core contract: [true] when the chunk carries either a non-empty
-    [delta_content] or a non-empty [delta_reasoning] or any
-    [delta_tool_calls] — that is, the consumer would surface a
-    visible token (or tool-call argument) to the application. Used
-    by the TTFT capture point in [Complete_stream] to distinguish prelude
-    chunks (empty role-only deltas, finish-only chunks) from the
-    first real token.
-
-    @stability Internal *)
-val chunk_has_non_empty_delta : openai_chunk -> bool

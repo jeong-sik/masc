@@ -7,7 +7,6 @@
     Launch helpers, lifecycle and backoff live in
     [Keeper_supervisor_launch]. *)
 
-open Keeper_types
 open Keeper_meta_contract
 open Keeper_meta_store
 open Keeper_types_profile

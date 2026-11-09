@@ -7,7 +7,6 @@
     future surgical change to either path does not need to wade through the
     other's flags. *)
 
-open Keeper_types
 open Keeper_meta_contract
 open Keeper_types_profile
 

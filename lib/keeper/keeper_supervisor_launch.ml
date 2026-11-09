@@ -2,9 +2,7 @@
     Uses [Keeper_registry] as SSOT for keeper state; manages
     liveness/restart policy outside the turn loop. *)
 
-open Keeper_types
 open Keeper_meta_contract
-open Keeper_meta_store
 open Keeper_types_profile
 module Startup_helpers = Keeper_supervisor_startup_helpers
 

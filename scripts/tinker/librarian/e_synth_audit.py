@@ -46,13 +46,17 @@ requests nobody judged.
 `drops` runs after the pass lines are fixed, on the verdict's E-synth run. It
 makes one case per request where a valid answer dropped a fact off label
 (`audit_decisions`), in the same form. Every case of one memory shows the same
-facts in full: each fact dropped off label on that memory, filled up to
-FULL_FACTS (at least MIN_DISTRACTORS more) with facts drawn once per memory
-from the pinned audit seed. A dropped fact is then not the one fact the cases
-have in common. The verdict reads the judge's decisions with `--drops`.
+facts in full: the ones the label audit picks on any request of that memory
+(planted stale facts, candidate targets, each candidate's SIMILAR closest
+facts), each fact dropped off label on it, and a fill drawn once per memory
+from the pinned audit seed (FULL_FACTS in all, at least MIN_DISTRACTORS more).
+A dropped fact is then neither the one fact the cases have in common nor, when
+a candidate restates it, the one fact in full that a candidate points at. The
+verdict reads the judge's decisions with `--drops`.
 
-The key stays in <out>; the judge's folder <out>/judge/ holds only the cases
-and JUDGE, since the key names the label's classes and the dropped facts.
+The key stays in <out>, since it names the label's classes and the dropped
+facts. The judge's folder <out>/judge/ holds the cases, JUDGE, and a copy of
+the rules JUDGE names at the same path (RULES).
 """
 
 from __future__ import annotations
@@ -67,6 +71,7 @@ from typing import cast
 import admission_validator as AV
 import audit_decisions as D
 import eval_admission as V
+import synth_render
 from tinker_oai import HTTP_OK, Call, call_from_row
 
 FULL_FACTS = 12
@@ -74,6 +79,9 @@ MIN_DISTRACTORS = 2
 # Facts shown in full for each candidate because their wording overlaps most with it.
 SIMILAR = 3
 HEAD = 90
+# JUDGE names the rules by this repository path. The judge's folder holds a copy of
+# synth_render.TEMPLATE there, so the path resolves inside the folder too.
+RULES = Path("config") / "prompts" / "librarian.md"
 JUDGE = """# E-synth 라벨 감사 판정 기준
 
 한 case는 keeper-librarian admission 요청 하나입니다. Keeper 역할 자료(role), 이번 턴
@@ -196,42 +204,54 @@ def render_case(case_id: str, request: JsonObject, full: set[str]) -> tuple[Json
     return case, key
 
 
-def case_of(case_id: str, request: JsonObject, shown: set[str],
-            rng: random.Random) -> tuple[JsonObject, JsonObject]:
-    """The label audit's case. `shown` are memory IDs to show in full besides the ones the label
-    and the candidates' wording pick."""
+def label_picks(request: JsonObject) -> set[str]:
+    """Memory IDs the label or a candidate's wording points at: the planted stale facts, the
+    candidates' targets, and for every candidate the SIMILAR facts closest to its claim."""
     facts = {cast(str, f["memory_id"]): f for f in cast(list[JsonObject], request["facts"])}
     _, fixed = expected(request)
     candidates = cast(list[JsonObject], request["candidates"])
-    suspects = set(fixed) | shown | {cast(str, c["target_memory_id"]) for c in candidates
-                                     if c["target_memory_id"] is not None}
+    picks = set(fixed) | {cast(str, c["target_memory_id"]) for c in candidates if c["target_memory_id"] is not None}
     for c in candidates:
-        suspects |= closest(cast(str, c["claim"]), facts, SIMILAR)
-    others = sorted(set(facts) - suspects, key=lambda m: int(m[1:]))
+        picks |= closest(cast(str, c["claim"]), facts, SIMILAR)
+    return picks
+
+
+def with_fill(request: JsonObject, suspects: set[str], rng: random.Random) -> set[str]:
+    """`suspects` and random other facts of the request: FULL_FACTS in all, at least MIN_DISTRACTORS others."""
+    others = sorted({cast(str, f["memory_id"]) for f in cast(list[JsonObject], request["facts"])} - suspects,
+                    key=lambda m: int(m[1:]))
     fill = max(FULL_FACTS - len(suspects), MIN_DISTRACTORS)
-    return render_case(case_id, request, suspects | set(rng.sample(others, min(fill, len(others)))))
+    return suspects | set(rng.sample(others, min(fill, len(others))))
+
+
+def case_of(case_id: str, request: JsonObject, shown: set[str],
+            rng: random.Random) -> tuple[JsonObject, JsonObject]:
+    """The label audit's case. `shown` are memory IDs to show in full besides the label's picks."""
+    return render_case(case_id, request, with_fill(request, label_picks(request) | shown, rng))
 
 
 def drop_full_sets(drops: D.OffLabel, requests: dict[str, JsonObject], seed: int) -> dict[str, set[str]]:
-    """Per memory with an off-label drop, the memory IDs every drop case of it shows in full:
-    each one dropped off label on the memory, filled up with facts drawn once for the memory."""
+    """Per memory with an off-label drop, the memory IDs every drop case of it shows in full: the
+    label's picks on each of the memory's requests and each fact dropped off label on the memory,
+    filled up with facts drawn once for the memory."""
     out: dict[str, set[str]] = {}
     for memory, dropped in sorted(D.dropped_on_memory(drops).items()):
         mine = [r for item, r in sorted(requests.items()) if D.memory_of(item) == memory]
         if any(r["facts"] != mine[0]["facts"] for r in mine):
-            raise SystemExit(f"{memory}: its requests carry different facts, so one fill cannot serve them")
-        facts = [cast(str, f["memory_id"]) for f in cast(list[JsonObject], mine[0]["facts"])]
-        others = sorted(set(facts) - dropped, key=lambda m: int(m[1:]))
-        fill = max(FULL_FACTS - len(dropped), MIN_DISTRACTORS)
-        out[memory] = dropped | set(random.Random(f"{seed}:{memory}").sample(others, min(fill, len(others))))
+            raise SystemExit(f"{memory}: its requests carry different facts, so one fact set cannot serve them")
+        suspects = dropped.union(*(label_picks(r) for r in mine))
+        out[memory] = with_fill(mine[0], suspects, random.Random(f"{seed}:{memory}"))
     return out
 
 
 def write_cases(out: Path, case_rows: list[JsonObject], key_rows: list[JsonObject]) -> None:
-    """The key in <out>; the cases and JUDGE in the judge's folder, which the key never enters."""
+    """The key in <out>; the cases, JUDGE and its RULES in the judge's folder, which the key never enters."""
+    judge = out / D.JUDGE_DIR
     write_jsonl(out / "key.jsonl", key_rows)
-    write_jsonl(out / D.JUDGE_DIR / "cases.jsonl", case_rows)
-    (out / D.JUDGE_DIR / "judge.md").write_text(JUDGE, encoding="utf-8")
+    write_jsonl(judge / "cases.jsonl", case_rows)
+    (judge / "judge.md").write_text(JUDGE, encoding="utf-8")
+    (judge / RULES).parent.mkdir(parents=True, exist_ok=True)
+    (judge / RULES).write_bytes(synth_render.TEMPLATE.read_bytes())
 
 
 def cases(args: argparse.Namespace) -> int:

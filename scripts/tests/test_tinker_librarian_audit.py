@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import random
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 from typing import cast
@@ -22,6 +23,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tinker" / "librari
 
 import audit_decisions as D
 import e_synth_audit as A
+import synth_render
 
 type JsonObject = dict[str, object]
 
@@ -74,11 +76,31 @@ class CaseTest(unittest.TestCase):
         self.assertTrue({"m37", "m5"} <= set(full_refs(cases[0])))
         self.assertEqual(len(full_refs(cases[0])), A.FULL_FACTS)
 
-    def test_one_fill_cannot_serve_requests_with_different_facts(self) -> None:
+    def test_a_drop_case_shows_the_label_picks_of_every_request_of_its_memory(self) -> None:
+        # Without them, a dropped fact a candidate restates is the one fact in full a candidate points at.
+        first = {**request([candidate("paraphrase", "m9")], stale=frozenset({"m2"}), facts=40), "item_id": "eval-k-0"}
+        second = {**request([candidate("correction", "m14")]), "item_id": "eval-k-1", "facts": first["facts"]}
+        cast(list[JsonObject], first["facts"])[30]["claim"] = "재시도는 세 번까지 하고 실패하면 담당자에게 넘긴다"
+        cast(list[JsonObject], second["candidates"])[0]["claim"] = "재시도는 세 번까지 하고 실패하면 담당자에게 넘긴다고 정했다"
+        full = A.drop_full_sets({"eval-k-0": {"m9": ["A"]}}, {"eval-k-0": first, "eval-k-1": second}, 20261109)
+        self.assertTrue(A.label_picks(first) | A.label_picks(second) <= full["eval-k"])
+        self.assertTrue({"m2", "m9", "m14", "m31"} <= full["eval-k"])
+
+    def test_one_fact_set_cannot_serve_requests_with_different_facts(self) -> None:
         first = {**request([candidate("new_durable")]), "item_id": "eval-k-0"}
         second = {**request([candidate("new_durable")], facts=21), "item_id": "eval-k-1"}
         with self.assertRaises(SystemExit):
             A.drop_full_sets({"eval-k-0": {"m3": ["A"]}}, {"eval-k-0": first, "eval-k-1": second}, 1)
+
+    def test_the_judge_folder_holds_the_rules_judge_names_and_not_the_key(self) -> None:
+        self.assertIn(f"`{A.RULES.as_posix()}`", A.JUDGE)
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp)
+            A.write_cases(out, [{"case": "d001"}], [{"case": "d001", "item": "eval-k-0"}])
+            judge = out / D.JUDGE_DIR
+            self.assertEqual((judge / A.RULES).read_bytes(), synth_render.TEMPLATE.read_bytes())
+            self.assertEqual(sorted(p.relative_to(judge).as_posix() for p in judge.rglob("*") if p.is_file()),
+                             sorted(["cases.jsonl", "judge.md", A.RULES.as_posix()]))
 
 
 class MisfitTest(unittest.TestCase):
@@ -154,6 +176,16 @@ class DropTest(unittest.TestCase):
         decision: JsonObject = {"case": "d001", "candidates": {"k1": "new"}, "facts": {"m2": "drop", "m7": "keep"}}
         with self.assertRaises(SystemExit):
             D.adjudicate([self.KEY], [decision, {**decision, "facts": {"m2": "drop", "m7": "drop"}}], self.DROPS)
+
+    def test_cases_of_one_memory_showing_different_facts_stop_the_verdict(self) -> None:
+        drops: D.OffLabel = {"eval-k-0": {"m7": ["A"]}, "eval-k-1": {"m7": ["B"]}}
+        keys: list[JsonObject] = [{**self.KEY, "off_label": drops["eval-k-0"]},
+                                  {**self.KEY, "case": "d002", "item": "eval-k-1", "off_label": drops["eval-k-1"],
+                                   "facts": {"m3": "keep", "m7": "keep"}, "refs": ["m3", "m7"]}]
+        decisions: list[JsonObject] = [{"case": "d001", "candidates": {"k1": "new"}, "facts": {"m2": "drop", "m7": "keep"}},
+                                       {"case": "d002", "candidates": {"k1": "new"}, "facts": {"m3": "keep", "m7": "keep"}}]
+        with self.assertRaisesRegex(SystemExit, "other facts"):
+            D.adjudicate(keys, decisions, drops)
 
     def test_a_case_without_every_drop_of_its_memory_stops_the_verdict(self) -> None:
         drops: D.OffLabel = {"eval-k-0": {"m7": ["A"]}, "eval-k-1": {"m9": ["B"]}}

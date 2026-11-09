@@ -53,7 +53,7 @@ class Call:
     status: int  # NO_RESPONSE when no HTTP response arrived
     finish: str | None
     content: str | None
-    reasoning: str | None  # reasoning_content, kept for training on the teacher's thinking
+    reasoning: str | None  # reasoning_content; eval rows count its length
     prompt_tokens: int
     cached_tokens: int
     completion_tokens: int

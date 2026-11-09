@@ -38,7 +38,7 @@ verdict's, and `apply` reads the decisions only for the pending.jsonl the cases
 were made from.
 
 Output: <out>/calls.jsonl (with the teacher's reasoning), <out>/kept.jsonl and
-<out>/pending.jsonl (item, attempt, answer, reasoning), <out>/summary.json,
+<out>/pending.jsonl (item, attempt, answer), <out>/summary.json,
 <out>/merges/ (the judge's folder and the key), and from `apply`
 <out>/accepted.jsonl, the training targets, with <out>/accepted-summary.json.
 """
@@ -147,8 +147,7 @@ def sample(args: argparse.Namespace) -> int:
                 return Sampled(None, tuple(rejected), None)
             if not call.replied():
                 return Sampled(None, tuple(rejected), call.status)
-            record: JsonObject = {"item": item.item_id, "attempt": attempt, "answer": call.answer(),
-                                  "reasoning": call.reasoning}
+            record: JsonObject = {"item": item.item_id, "attempt": attempt, "answer": call.answer()}
             got = screened(item, V.check(item.prompt, call.answer()), record)
             if isinstance(got, Target):
                 return Sampled(got, tuple(rejected), None)

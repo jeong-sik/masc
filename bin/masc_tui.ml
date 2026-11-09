@@ -41414,7 +41414,7 @@ Use relative paths for resources already held in the package. -->
              ~scope:Tui_decode.Repository_change_project
        | Some "d"
          when state.view = Code
-              && (state.code_scope = Code_scope_project
+              && (Masc_tui_keys.code_tree_opens_changes state.code_scope
                   && state.code_focus_file = Left_pane) ->
            open_repository_changes state ~mailbox:async_messages
              ~scope:Tui_decode.Repository_change_project

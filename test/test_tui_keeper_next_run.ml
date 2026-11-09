@@ -467,6 +467,20 @@ let test_strip_counts_each_recurrence () =
     (strip (Ok Schedule_domain.One_shot) "2026-11-07T13:45:00Z")
 ;;
 
+(* A late row's first time is already behind the clock. The strip counts
+   only the wakes still ahead, so the current hour holds fewer. *)
+let test_strip_counts_only_the_wakes_ahead_of_now () =
+  let strip recurrence due = Some (make_snapshot [ scheduled_row ~due ~recurrence () ]) in
+  check_strip "an interval due at 10:40 still wakes at 11:20 to 11:50 this hour"
+    (strip_of (function 0 -> Next_run.Hour_wakes 4 | _ -> Next_run.Hour_wakes 6))
+    (strip (Ok (Schedule_domain.Interval { interval_sec = 600 })) "2026-11-07T10:40:00Z");
+  check_strip "a half-hour cron due at 10:30 still wakes at 11:30 this hour"
+    (strip_of (function 0 -> Next_run.Hour_wakes 1 | _ -> Next_run.Hour_wakes 2))
+    (strip
+       (Ok (Schedule_domain.Cron { expression = "*/30 * * * *"; timezone = "UTC" }))
+       "2026-11-07T10:30:00Z")
+;;
+
 let test_strip_stops_at_the_expiry () =
   check_strip "nothing wakes at or after 13:00"
     (strip_of (function
@@ -510,6 +524,17 @@ let test_strip_after_an_unread_recurrence_is_unknown () =
     (Some
        (make_snapshot
           [ scheduled_row ~due:"2026-11-07T13:45:00Z"
+              ~recurrence:(Error "unknown recurrence kind: weekly") ()
+          ]));
+  check_strip "an expiry still ends it: from 15:00 nothing can wake"
+    (strip_of (function
+       | 0 | 1 -> Next_run.Hour_quiet
+       | 2 -> Next_run.Hour_wakes_at_least 1
+       | 3 -> Next_run.Hour_unknown
+       | _ -> Next_run.Hour_quiet))
+    (Some
+       (make_snapshot
+          [ scheduled_row ~due:"2026-11-07T13:45:00Z" ~expires_at_iso:"2026-11-07T15:00:00Z"
               ~recurrence:(Error "unknown recurrence kind: weekly") ()
           ]))
 ;;
@@ -600,6 +625,7 @@ let () =
         ] )
     ; ( "strip ahead"
       , [ Alcotest.test_case "each recurrence" `Quick test_strip_counts_each_recurrence
+        ; Alcotest.test_case "late row" `Quick test_strip_counts_only_the_wakes_ahead_of_now
         ; Alcotest.test_case "expiry" `Quick test_strip_stops_at_the_expiry
         ; Alcotest.test_case "held row" `Quick test_strip_leaves_out_a_held_row
         ; Alcotest.test_case "unread recurrence" `Quick test_strip_after_an_unread_recurrence_is_unknown

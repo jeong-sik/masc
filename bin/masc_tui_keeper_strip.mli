@@ -9,15 +9,26 @@ val header :
     Every non-empty group's count is reserved before marks; remaining width
     shows individual marks (with the selected Keeper bold) or [+n] overflow. *)
 
+type wake_style = Keeper_wakes of { paused : bool } | Wake_counts
+
+val wake_strip :
+  ko:bool -> style:wake_style -> Masc_tui_keeper_next_run.wake_slot list -> string
+(** One terminal cell per half hour. An entirely unknown window gets one
+    explicit label; a known empty window says no runs in this window. Mixed
+    windows retain every position: low bars for known wakes, thin lines for
+    unknown ranges and spaces for known empty slots. Only [Wake_counts]
+    scales known counts. Narrow labels fall back to one [?] or [-]. *)
+
 type fleet_cells = { name : string; pulse : string; strip : string; due : string }
 
 val fleet_cells :
-  now:float -> grid:Masc_tui_keeper_grid.t ->
+  ko:bool -> now:float -> grid:Masc_tui_keeper_grid.t ->
   wakes:(Masc_tui_keeper_list_model.row -> Masc_tui_keeper_next_run.wake_slot list) ->
   Masc_tui_keeper_list_model.row list -> fleet_cells
 (** Half-hour failed-Keeper counts, not failed-turn counts; rested counts as
-    failure. Missing pulse/wake readings remain [?] when no known count exists.
-    Paused Keepers do not contribute wakes. Draw these fields on the shared grid. *)
+    failure. Missing pulse readings remain [?]. The wake strip uses
+    {!wake_strip}; an unknown maximum remains [?]. Paused Keepers do not
+    contribute wakes. Draw these fields on the shared grid. *)
 
 val selected_summary :
   now:float -> activity_cell:string ->

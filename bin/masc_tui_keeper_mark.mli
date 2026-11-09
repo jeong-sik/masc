@@ -112,8 +112,12 @@ val grid_dot_mark : string
     turn ended. *)
 
 val grid_wake_mark : string
-(** [◷]: a strip half hour that holds one scheduled wake or more, the
-    schedule badge's mark. *)
+(** [▁]: a strip half hour that holds one scheduled wake or more. Adjacent
+    scheduled slots join into a low bar; the schedule badge stays a clock. *)
+
+val grid_unknown_range_mark : string
+(** [─]: a strip half hour without a known wake whose schedule is unknown.
+    An entirely unknown window is labelled once by the strip renderer. *)
 
 val grid_failing_mark : string
 val grid_paused_mark : string

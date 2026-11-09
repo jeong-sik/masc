@@ -143,6 +143,34 @@ let header ~now ~cells ~view ~selected ~age rows =
   in
   String.concat "  " (List.map2 draw mark_budgets groups)
 
+type wake_style = Keeper_wakes of { paused : bool } | Wake_counts
+
+let wake_strip ~ko ~style slots =
+  let cells = List.length slots in
+  let label full narrow =
+    Theme.recede ()
+    ^ Layout.fit_width (if Layout.display_width full <= cells then full else narrow) cells
+    ^ Ansi.reset in
+  if cells = 0 then ""
+  else if List.for_all (function Next.Wakes_unknown -> true | Wakes _ -> false) slots then
+    label (if ko then "일정 미확인" else "schedule unknown") "?"
+  else if List.for_all (function Next.Wakes n -> n <= 0 | Wakes_unknown -> false) slots then
+    label (if ko then "구간 내 예약 없음" else "no runs in window") "-"
+  else
+    let peak = List.fold_left (fun peak -> function
+      | Next.Wakes count -> max peak count | Wakes_unknown -> peak) 0 slots in
+    String.concat "" (List.mapi (fun index slot ->
+      let quiet cell = Theme.recede () ^ Grid.strip_mark cell ^ Ansi.reset in
+      match slot with
+      | Next.Wakes_unknown -> quiet Grid.Strip_unknown
+      | Wakes count ->
+          if count <= 0 then quiet Grid.Strip_empty else
+          let tone, mark = match style with
+            | Keeper_wakes { paused } ->
+                (if paused then Theme.recede () else Theme.info ()), Grid.strip_mark Grid.Strip_wake
+            | Wake_counts -> Theme.info (), Grid.level_glyph ~peak count in
+          (if index = 0 then Ansi.bold else "") ^ tone ^ mark ^ Ansi.reset) slots)
+
 type fleet_cells = { name : string; pulse : string; strip : string; due : string }
 
 let failed_count readings index =
@@ -152,7 +180,7 @@ let failed_count readings index =
     | Pulse.Half_hour_unknown -> count, true
     | Pulse.Half_hour_quiet | Pulse.Half_hour_ok -> count, unknown) (0, false) readings
 
-let fleet_cells ~now ~(grid : Grid.t) ~wakes rows =
+let fleet_cells ~ko ~now ~(grid : Grid.t) ~wakes rows =
   let readings = List.map (fun row ->
     let pulse = Option.bind (runtime row) (fun row -> row.Decode.kr_recent_turns) in
     Pulse.half_hours ~now ~count:grid.side_cells pulse) rows in
@@ -170,10 +198,7 @@ let fleet_cells ~now ~(grid : Grid.t) ~wakes rows =
         | None -> Next.unknown_strip ~ahead:(Grid.strip_cells grid - 1)) active) in
   let wake_peak = List.fold_left (fun p slot -> match slot with
     | Next.Wakes n -> max p n | Next.Wakes_unknown -> p) 0 future in
-  let strip = String.concat "" (List.map (function
-    | Next.Wakes_unknown -> "?"
-    | Next.Wakes 0 -> "·"
-    | Next.Wakes n -> Theme.info () ^ Grid.level_glyph ~peak:wake_peak n ^ Ansi.reset) future) in
+  let strip = wake_strip ~ko ~style:Wake_counts future in
   let pulse_max = if peak = 0 && List.exists snd counts then "?" else string_of_int peak in
   let wake_max = if wake_peak = 0 && List.exists (function
     | Next.Wakes_unknown -> true | Next.Wakes _ -> false) future then "?" else string_of_int wake_peak in

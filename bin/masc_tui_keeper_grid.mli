@@ -96,7 +96,7 @@ val strip_cell : Masc_tui_keeper_next_run.wake_slot -> strip_cell
     holds. *)
 
 val strip_mark : strip_cell -> string
-(** [◷] a wake, [·] none, [?] unknown. *)
+(** [▁] a wake, a space for known empty, [─] unknown. *)
 
 val lag_fill : cells:int -> peak:int -> int -> int
 (** How many of [cells] cells the lag bar fills for [lag] unread turns against

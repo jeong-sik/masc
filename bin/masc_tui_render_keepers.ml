@@ -754,27 +754,16 @@ let grid_half_hour_pulse (grid : Grid.t) ~now pulse =
          ^ Ansi.reset)
        (Masc_tui_keeper_pulse.half_hours ~now ~count:grid.side_cells pulse))
 
-(* The strip of the activity columns (§2.4.4): the Keeper's scheduled wakes
-   per half hour, the now slot first. As the mock's [drawRuler], a wake is in
-   the info colour, receded for a paused Keeper, and bold in the now slot. *)
+(* Scheduled wakes per half hour, the now slot first. Unknown windows get
+   one label; the shared renderer keeps mixed unknown and empty slots apart. *)
 let grid_wake_strip state (grid : Grid.t) ~now verdict ~keeper_name =
-  let wake_style =
-    match verdict with
-    | Grid.Paused -> Theme.recede ()
-    | Grid.Failing _ | Grid.Recovered | Grid.Sound | Grid.Other -> Theme.info ()
-  in
-  String.concat ""
-    (List.mapi
-       (fun index slot ->
-         let cell = Grid.strip_cell slot in
-         let style =
-           match cell with
-           | Grid.Strip_wake -> if index = 0 then Ansi.bold ^ wake_style else wake_style
-           | Grid.Strip_empty | Grid.Strip_unknown -> Theme.recede ()
-         in
-         style ^ Grid.strip_mark cell ^ Ansi.reset)
-       (Masc_tui_keeper_axis.wake_strip state ~now ~ahead:(Grid.strip_cells grid - 1)
-          ~keeper_name))
+  let paused = match verdict with
+    | Grid.Paused -> true
+    | Grid.Failing _ | Grid.Recovered | Grid.Sound | Grid.Other -> false in
+  Masc_tui_keeper_strip.wake_strip ~ko:(state.ui_language = Lang_ko)
+    ~style:(Masc_tui_keeper_strip.Keeper_wakes { paused })
+    (Masc_tui_keeper_axis.wake_strip state ~now ~ahead:(Grid.strip_cells grid - 1)
+       ~keeper_name)
 
 let grid_due ~now verdict next_run =
   let style =
@@ -1168,15 +1157,8 @@ let group_wake_strip state (grid : Grid.t) ~now members =
       members
     |> sum_wake_strips
   in
-  let peak = List.fold_left (fun peak -> function
-    | Wakes count -> max peak count
-    | Wakes_unknown -> peak) 0 slots in
-  String.concat "" (List.mapi (fun position -> function
-    | Wakes count when count > 0 ->
-        (if position = 0 then Ansi.bold else "") ^ Theme.info ()
-        ^ Grid.level_glyph ~peak count ^ Ansi.reset
-    | Wakes _ -> Theme.recede () ^ Keeper_mark.grid_dot_mark ^ Ansi.reset
-    | Wakes_unknown -> Theme.recede () ^ Keeper_mark.unknown_mark ^ Ansi.reset) slots)
+  Masc_tui_keeper_strip.wake_strip ~ko:(state.ui_language = Lang_ko)
+    ~style:Masc_tui_keeper_strip.Wake_counts slots
 
 let grid_group_title state (grid : Grid.t) ~now ~group ~members ~folded ~style ~pulse title =
   let count = List.length members in
@@ -2065,7 +2047,7 @@ let keeper_pulse_headers (state : state) ~now ~inner ~(grid : Grid.t) ~selected_
   header :: (match state.keeper_list_view with
   | Keeper_list_model.By_age -> []
   | Keeper_list_model.(Plain | By_state | By_cause | By_time | By_memory | By_runtime | Day_wall) ->
-      let fleet = Masc_tui_keeper_strip.fleet_cells ~now ~grid
+      let fleet = Masc_tui_keeper_strip.fleet_cells ~ko:(state.ui_language = Lang_ko) ~now ~grid
           ~wakes:(fun row -> Masc_tui_keeper_axis.wake_strip state ~now
             ~ahead:grid.side_cells ~keeper_name:row.Keeper_list_model.keeper.Tui_decode.k_name) all_rows in
       [(grid_line grid

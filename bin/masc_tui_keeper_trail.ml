@@ -288,3 +288,44 @@ let attempts_of_runtime (runtime : Decode.keeper_runtime option) : attempt list 
               attempts_of_evidence evidence
           | Some (Receipt.Runtime_lane_not_observed _ | Receipt.Runtime_lane_unreadable _)
           | None -> []))
+
+type matrix_head = Head_elsewhere | Head_serving | Head_resting | Head_unknown
+
+type matrix_failure = Matrix_failed | Matrix_clear | Matrix_unknown
+
+type matrix_cell = { failure : matrix_failure; head : matrix_head }
+
+let matrix_cell ~runtime_id runtime =
+  let failure =
+    if List.exists (fun (a : attempt) -> a.runtime_id = runtime_id)
+        (attempts_of_runtime runtime) then Matrix_failed
+    else match failed runtime with
+      | Trail_failed { walk = (Walk_ended _ | Walk_no_terminal _ | Walk_no_candidate_failure); _ } -> Matrix_clear
+      | Trail_failed { walk = (Walk_not_captured | Walk_unreadable | Walk_absent | Walk_not_applicable); _ }
+      | Trail_sound -> Matrix_unknown
+  in
+  let head =
+    match runtime with
+    | None -> Head_unknown
+    | Some row ->
+        (match row.Decode.kr_runtime_path_rest with
+         | Error _ | Ok None -> Head_unknown
+         | Ok (Some (Decode.Path_rest_serving path)) ->
+             if path.runtime_id = runtime_id then Head_serving else Head_elsewhere
+         | Ok (Some (Decode.Path_rest_resting path)) ->
+             if path.runtime_id = runtime_id then Head_resting else Head_elsewhere)
+  in
+  { failure; head }
+
+let matrix_runtime_ids runtime =
+  let attempts = List.map (fun (a : attempt) -> a.runtime_id) (attempts_of_runtime runtime) in
+  let head =
+    match runtime with
+    | None -> []
+    | Some row ->
+        (match row.Decode.kr_runtime_path_rest with
+         | Error _ | Ok None -> []
+         | Ok (Some (Decode.Path_rest_serving path)) -> [path.runtime_id]
+         | Ok (Some (Decode.Path_rest_resting path)) -> [path.runtime_id])
+  in
+  List.sort_uniq String.compare (attempts @ head)

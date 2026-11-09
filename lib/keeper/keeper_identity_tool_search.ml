@@ -124,6 +124,35 @@ let refusal message =
     }
 ;;
 
+(* task-3268: mirror an agent-core search outcome into the typed result the
+   shared dispatch observers read, so keeper_tool_search calls reach
+   tool_metric_events (#38824). The mapping inverts
+   [Tool_projection.agent_core_error_class_of_tool_failure_class]: Transient
+   is Dependency_unavailable, Unknown is Runtime_failure, and a recoverable
+   Deterministic refusal is a caller-argument Policy_rejection (corrected
+   arguments may succeed). A non-recoverable Deterministic error is a wiring
+   or state defect, hence Runtime_failure; [None] only arises without an
+   execution identity, also a wiring defect. Every refusal below is proven
+   pre-effect: no tool is extended or dispatched on those paths. *)
+let metrics_result ~tool_name ~start_time = function
+  | Ok { Agent_core.Types.content; _ } ->
+    Tool_result.make_ok ~tool_name ~start_time ~data:(`String content) ()
+  | Error { Agent_core.Types.message = message; recoverable; error_class } ->
+    let class_ =
+      match error_class with
+      | Some Agent_core.Types.Transient -> Tool_result.Dependency_unavailable
+      | Some Agent_core.Types.Unknown -> Tool_result.Runtime_failure
+      | Some Agent_core.Types.Deterministic when recoverable -> Tool_result.Policy_rejection
+      | Some Agent_core.Types.Deterministic | None -> Tool_result.Runtime_failure
+    in
+    Tool_result.make_err
+      ~tool_name
+      ~class_
+      ~start_time
+      ~effect_disposition:Tool_result.Proven_pre_effect
+      message
+;;
+
 let requested_names input =
   let of_item = function
     | `String name -> Ok name
@@ -529,7 +558,9 @@ let make ?(carried=[]) ?held_schemas ~keeper_name { deferred; agent_cell; histor
     in
     let held_schemas = Option.map (fun schemas -> schema :: schemas) held_schemas in
     let handler env input =
-      match requested_names input with
+      let start_time = Tool_timing.start () in
+      let outcome =
+        match requested_names input with
       | Error message -> refusal message
       | Ok requested ->
         (match Agent_core.Tool.Execution_env.invocation env with
@@ -542,6 +573,13 @@ let make ?(carried=[]) ?held_schemas ~keeper_name { deferred; agent_cell; histor
              }
          | Some invocation ->
            load ~held_schemas ~keeper_name ~agent_cell ~entries ~usage ~receipts ~invocation requested)
+      in
+      (* task-3268: the search tool answers in agent-core types and bypasses
+         the exec handler; mirror its honest outcome for the shared dispatch
+         observers (#38824). The agent-core answer itself is unchanged. *)
+      let metrics = metrics_result ~tool_name ~start_time outcome in
+      Tool_dispatch.run_dispatch_observers Dispatch_outcome.Handled (Some metrics);
+      outcome
     in
     Some
       { tool = Agent_core.Tool.of_schema schema handler

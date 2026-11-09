@@ -1588,6 +1588,75 @@ let test_invalid_restore_does_not_replace_live_state () =
     (Yojson.Safe.to_string (Agent_core.Context.to_json target))
 ;;
 
+(* task-3268 (#38824): the search tool answers in agent-core types and
+   bypasses the exec handler, so without the handler-local observer emission
+   tool_metric_events keeps zero keeper_tool_search rows. These tests pin the
+   emission contract: exactly one [Handled (Some _)] per call, with the
+   honest disposition. *)
+let collect_dispatch_observations f =
+  Tool_dispatch.clear_hooks ();
+  let seen = ref [] in
+  Tool_dispatch.register_dispatch_observer (fun outcome result ->
+    seen := (outcome, result) :: !seen);
+  Fun.protect
+    ~finally:(fun () -> Tool_dispatch.clear_hooks ())
+    (fun () ->
+      f ();
+      List.rev !seen)
+;;
+
+let check_single_handled ~label seen =
+  match seen with
+  | [ (outcome, Some result) ] ->
+    check bool (label ^ ": outcome is Handled") true
+      (match outcome with
+       | Dispatch_outcome.Handled -> true
+       | Dispatch_outcome.No_handler -> false);
+    result
+  | _ ->
+    failf "%s: expected exactly one Handled (Some _) observation, got %d" label
+      (List.length seen)
+;;
+
+let test_search_success_emits_one_completed_observation () =
+  let seen =
+    collect_dispatch_observations (fun () ->
+      with_placement (offered [ "jira_search", "Search" ]) (fun _agent p ->
+        (match
+           execute p.Keeper_identity_tool_search.tool
+             (names_input [ "atlassian_jira_search" ])
+         with
+         | Error e -> failf "loading failed: %s" e.Agent_core.Types.message
+         | Ok _ -> ())))
+  in
+  let result = check_single_handled ~label:"search success" seen in
+  check string "observed tool name" "keeper_tool_search"
+    (Tool_result.tool_name result);
+  check string "success maps to completed" "completed"
+    (Tool_result.string_of_disposition result)
+;;
+
+let test_search_refusal_emits_one_failed_observation () =
+  let seen =
+    collect_dispatch_observations (fun () ->
+      with_placement (offered [ "jira_search", "Search" ]) (fun _agent p ->
+        (match execute p.Keeper_identity_tool_search.tool (names_input []) with
+         | Ok { content; _ } -> failf "empty names were accepted: %s" content
+         | Error _ -> ())))
+  in
+  let result = check_single_handled ~label:"search refusal" seen in
+  check string "observed tool name" "keeper_tool_search"
+    (Tool_result.tool_name result);
+  check string "refusal maps to failed" "failed"
+    (Tool_result.string_of_disposition result);
+  (match Tool_result.failure_class result with
+   | Some Tool_result.Policy_rejection -> ()
+   | Some other ->
+     failf "expected Policy_rejection, got %s"
+       (Tool_result.tool_failure_class_to_string other)
+   | None -> fail "refusal must carry a failure class")
+;;
+
 let () =
   run
     "keeper_identity_tool_search"
@@ -1690,6 +1759,12 @@ let () =
             test_a_turn_that_loaded_and_called_nothing_names_what_it_loaded
         ; test_case "preserves prepared dispatch and retains refused preparation loads" `Quick
             test_scoped_dispatch_survives_loading_and_preparation_refusal_keeps_receipt
+        ] )
+    ; ( "dispatch observers (task-3268)"
+      , [ test_case "success emits one completed observation" `Quick
+            test_search_success_emits_one_completed_observation
+        ; test_case "refusal emits one failed observation" `Quick
+            test_search_refusal_emits_one_failed_observation
         ] )
     ]
 ;;

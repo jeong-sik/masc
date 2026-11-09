@@ -51,16 +51,62 @@ let temp_dir prefix =
   dir
 
 let cleanup_dir path =
+  (* [Unix.lstat], not [Sys.is_directory]: the latter follows symlinks, so a
+     directory link under the swept root would make this loop enumerate the
+     *target* and delete its entries, then fail its rmdir with ENOTDIR. That
+     failure used to be swallowed by the [with _ -> ()] below, so the cleanup
+     stopped halfway and the case still ended green. [S_LNK] falls through to
+     [Unix.unlink], which removes the link itself. A dangling link is unlinked
+     too instead of being skipped: [Sys.file_exists] reads false for it, which
+     would leave it in place for the parent rmdir to trip over. *)
   let rec rm target =
-    if Sys.file_exists target then
-      if Sys.is_directory target then begin
-        Sys.readdir target
-        |> Array.iter (fun name -> rm (Filename.concat target name));
-        Unix.rmdir target
-      end else
-        Unix.unlink target
+    match Unix.lstat target with
+    | exception Unix.Unix_error ((Unix.ENOENT | Unix.ENOTDIR), _, _) -> ()
+    | { Unix.st_kind = Unix.S_DIR; _ } ->
+      Sys.readdir target
+      |> Array.iter (fun name -> rm (Filename.concat target name));
+      Unix.rmdir target
+    | _ -> Unix.unlink target
   in
   try rm path with _ -> ()
+
+(* #26648: [cleanup_dir] must unlink symlinks instead of following them. The
+   fixture leaves a live directory link ([escape-link], created by the visible
+   cwd projection case) under the swept root. A following cleanup enumerated
+   the link target, deleted its entries, then failed its rmdir with ENOTDIR,
+   and [try rm path with _ -> ()] hid that — so the cleanup stopped halfway and
+   the case still ended green, leaking a temp tree on every run.
+
+   Two shapes pin the behaviour, and the target's contents pin the blast
+   radius: following the link empties [outside], unlinking it leaves the target
+   alone. [dangling] covers the second half of the old guard —
+   [Sys.file_exists] reads false for a dangling link, so the old code skipped
+   it and the parent rmdir tripped over the leftover entry. *)
+let test_cleanup_dir_unlinks_symlinks_without_following () =
+  let outside = Filename.temp_file "cleanup-dir-outside-" "" in
+  Sys.remove outside;
+  Unix.mkdir outside 0o755;
+  let keep = Filename.concat outside "keep.txt" in
+  let oc = open_out keep in
+  output_string oc "x";
+  close_out oc;
+  let root = Filename.temp_file "cleanup-dir-root-" "" in
+  Sys.remove root;
+  Unix.mkdir root 0o755;
+  let nested = Filename.concat root "nested" in
+  Unix.mkdir nested 0o755;
+  Unix.symlink outside (Filename.concat root "dir_link");
+  Unix.symlink (Filename.concat nested "missing") (Filename.concat root "dangling");
+  Fun.protect
+    ~finally:(fun () -> try cleanup_dir outside with _ -> ())
+    (fun () ->
+      cleanup_dir root;
+      check bool "a tree holding a directory link is fully removed" false
+        (Sys.file_exists root);
+      check bool "the link target still exists" true (Sys.file_exists outside);
+      check bool "the link target's entries are untouched" true
+        (Sys.file_exists keep))
+;;
 
 let mkdir_p path =
   let rec loop dir =
@@ -10779,5 +10825,9 @@ let () =
         test_model_visible_tools_keep_canonical_agent_core_descriptors;
       test_case "surface post description reaches the Agent Core bundle" `Quick
         test_surface_post_bundle_names_reader_and_repeat_cost;
+    ]);
+    ("fixture_cleanup", [
+      test_case "#26648 cleanup unlinks symlinks without following them" `Quick
+        test_cleanup_dir_unlinks_symlinks_without_following;
     ]);
   ]

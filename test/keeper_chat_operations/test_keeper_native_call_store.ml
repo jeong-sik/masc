@@ -108,6 +108,62 @@ let test_retired_replacement_is_atomic_and_normal_receipt_acknowledges () = with
   ignore (Store.succeed_running store ~now:5. ~operation_id ~outcome_ref:"verified-owner-receipt" |> ok);
   check bool "Owner receipt transaction retires locator" true (Native.equal_state Native.No_native_call (read store))
 
+let history store =
+  match Store.semantic_get store (Keeper_execution_scope_id.direct_operation operation_id) with
+  | Ok (Some execution) -> execution.Keeper_semantic_execution.native_calls
+  | Ok None -> []
+  | Error error -> fail (Store.semantic_error_to_string error)
+
+let test_completed_history_keeps_every_call_after_reopen () = with_store @@ fun path store operation ->
+  let first = make_call operation in
+  bind store operation first;
+  commit store operation (Native.Checkpoint {call_id; observed=checkpoint 1; checkpoint=checkpoint 2});
+  terminal store operation Agent.Retire;
+  let second_seed = Keeper_checkpoint_ref.of_persisted
+      ~trace_id:(Keeper_id.Trace_id.of_string "later-native-trace" |> value)
+      ~turn_count:1 ~sha256:(checkpoint 1).sha256
+    |> function Ok reference -> reference | Error _ -> fail "second trace fixture" in
+  let second = Native.create ~call_id:next_call_id ~runtime_id:"native.secondary"
+      ~operation_digest:operation.Operation.execution_digest
+      ~api:Native.Continue_from_checkpoint ~seed_checkpoint:second_seed
+      ~locator:(locator next_call_id) |> value in
+  commit store operation (Native.Bind {observed=read store; call=second});
+  commit store operation (Native.Terminal {call_id=next_call_id;
+    disposition={Agent.outcome=Agent.Terminal_succeeded; recovery=Agent.Retire}});
+  ignore (Store.succeed_running store ~now:5. ~operation_id ~outcome_ref:"owner-accepted" |> ok);
+  let expected = [Native.history_ref first; Native.history_ref second] in
+  with_reopened path store @@ fun reopened ->
+  check bool "settlement retains each original call, trace and opaque locator" true
+    (List.equal Native.equal_history_ref expected (history reopened));
+  check bool "historical references grant no continuation" true
+    (Native.equal_state Native.No_native_call (read reopened));
+  check bool "completed operation is not dispatched after restart" true
+    (Option.is_none (Store.claim_next reopened ~now:6. |> ok));
+  match Store.semantic_get reopened (Keeper_execution_scope_id.direct_operation operation_id) with
+  | Ok (Some execution) ->
+    check int "historical calls do not pin checkpoint payloads" 0
+      (List.length (Keeper_semantic_execution.checkpoint_references execution))
+  | Ok None | Error _ -> fail "completed execution is unavailable"
+
+let test_history_uses_the_native_bind_transaction () = with_store @@ fun _path store operation ->
+  let call = make_call operation in
+  Store.For_testing.fail_next_commit Store.For_testing.Fail_before_commit;
+  rejected "uncommitted Bind became successful" (mutate store operation (Native.Bind {observed=Native.No_native_call; call}));
+  check int "rolled back call has no historical association" 0 (List.length (history store));
+  Store.For_testing.fail_next_commit Store.For_testing.Fail_after_commit;
+  bind store operation call;
+  commit store operation (Native.Bind {observed=read store; call});
+  commit store operation (Native.Checkpoint {call_id; observed=checkpoint 1; checkpoint=checkpoint 2});
+  check int "uncertain commit readback and repeated callbacks keep one association" 1 (List.length (history store));
+  terminal store operation Agent.Retire;
+  let next = make_call ~id:next_call_id operation in
+  commit store operation (Native.Bind {observed=read store; call=next});
+  commit store operation (Native.Terminal {call_id=next_call_id; disposition=disposition Agent.Retire});
+  rejected "retired historical identity became a new call"
+    (mutate store operation (Native.Bind {observed=read store; call}));
+  check bool "rejected reactivation preserves both historical associations" true
+    (List.equal Native.equal_history_ref [Native.history_ref call; Native.history_ref next] (history store))
+
 let test_stale_checkpoint_digest_and_commit_readback () = with_store @@ fun _path store operation ->
   let call = make_call operation in
   Store.For_testing.fail_next_commit Store.For_testing.Fail_after_commit;
@@ -677,6 +733,8 @@ let () = run "native-call-owner-store" ["input ownership", [
   test_case "input and native checkpoint commit atomically" `Quick test_input_and_native_checkpoint_commit_atomically;
   test_case "input owner shares native retained liveness" `Quick test_input_retention_shares_native_liveness];
   "recovery", [
+  test_case "completed history keeps every call and original trace after reopen" `Quick test_completed_history_keeps_every_call_after_reopen;
+  test_case "history shares native Bind commit and rejects retired reactivation" `Quick test_history_uses_the_native_bind_transaction;
   test_case "active restart preserves exact admission" `Quick test_active_restart_preserves_seed_and_exact_identity;
   test_case "terminal restart keeps its receipt without dispatch" `Quick test_terminal_restart_never_dispatches;
   test_case "unknown effect survives settlement and rejects retry" `Quick test_unknown_effect_survives_failure_and_rejects_retry;

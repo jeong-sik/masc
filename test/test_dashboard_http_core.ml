@@ -231,7 +231,8 @@ let test_keeper_paused_work_route_is_admin_exact () =
   check bool
     "paused-work GET route kind"
     true
-    (Server_dashboard_http_keeper_api.is_keeper_paused_work_get_path path);
+    (Server_dashboard_http_keeper_get_route.of_path path
+     = Some Server_dashboard_http_keeper_get_route.(Keeper (Paused_work, "fixture-keeper")));
   check string
     "paused-work keeper name"
     "fixture-keeper"
@@ -240,8 +241,8 @@ let test_keeper_paused_work_route_is_admin_exact () =
        Server_dashboard_http_keeper_api.keeper_suffix_paused_work);
   check bool
     "paused-work route rejects trailing segment"
-    false
-    (Server_dashboard_http_keeper_api.is_keeper_paused_work_get_path (path ^ "/extra"))
+    true
+    (Server_dashboard_http_keeper_get_route.of_path (path ^ "/extra") = None)
 
 let test_keeper_up_route_classifies_and_extracts () =
   let path = "/api/v1/keepers/fixture-keeper/up" in
@@ -644,7 +645,8 @@ let test_keeper_sensitive_get_permissions_are_exact () =
        one here would be a second door onto the first door's content. *)
     [ "raw-traces"; "raw-trace"; "provider-input"; "provider-input/part"; "provider-input/continuity"
     ; "memory-journal"
-    ; "memory-facts"; "working-context"; "file-changes"; "tool-calls" ];
+    ; "memory-facts"; "working-context"; "file-changes"; "tool-calls"; "tool-result"
+    ; "github-identity"; "paused-work" ];
   check bool "safe chat history stays on its ordinary read route" true
     (permission "/api/v1/keepers/fixture-keeper/chat/history" = None);
   (* The operator snapshot serves the same inventory rows under public read;
@@ -667,7 +669,13 @@ let test_keeper_sensitive_get_permissions_are_exact () =
   check bool "turn records route rejects trailing segment" true
     (permission "/api/v1/keepers/fixture-keeper/turn-records/extra" = None);
   check bool "ordinary keeper read stays public" true
-    (permission "/api/v1/keepers/fixture-keeper/trajectory" = None)
+    (permission "/api/v1/keepers/fixture-keeper/trajectory" = None);
+  check bool "trajectory with hidden reasoning needs the raw-trace gate" true
+    (Server_dashboard_http_keeper_api.keeper_get_permission
+       ~include_thinking:true "/api/v1/keepers/fixture-keeper/trajectory"
+     = Some Masc_domain.CanAdmin);
+  check bool "a path that names no route needs no permission" true
+    (permission "/api/v1/keepers/fixture-keeper/not-a-route" = None)
 
 let test_internal_exact_lane_registry_is_admin_only () =
   check bool

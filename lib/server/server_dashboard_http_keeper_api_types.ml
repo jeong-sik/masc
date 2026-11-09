@@ -21,19 +21,13 @@ let keeper_suffix_checkpoints = "/checkpoints"
 let keeper_suffix_runtime_trace = "/runtime-trace"
 let keeper_suffix_directive = "/directive"
 let keeper_suffix_paused_work = "/paused-work"
-let keeper_suffix_raw_traces = "/raw-traces"
-let keeper_suffix_raw_trace = "/raw-trace"
 let keeper_suffix_provider_input = "/provider-input"
 let keeper_suffix_provider_input_part = "/provider-input/part"
 let keeper_suffix_provider_input_continuity = "/provider-input/continuity"
-let keeper_suffix_memory_journal = "/memory-journal"
-let keeper_suffix_memory_facts = "/memory-facts"
 let keeper_suffix_working_context = "/working-context"
-let keeper_suffix_turn_records = "/turn-records"
 let keeper_suffix_file_changes = "/file-changes"
 let keeper_suffix_fusion = "/fusion"
 let keeper_suffix_operator_note = "/operator-note"
-let keeper_suffix_trajectory = "/trajectory"
 let keeper_suffix_board_attention_quarantines = "/board-attention/quarantines"
 
 let cache_key_string_segment value =
@@ -203,56 +197,6 @@ let extract_keeper_name_for_suffix req_path suffix =
    definition is a rule that can drift on one side, and a test of the pair can
    only ever agree with itself. *)
 let extract_keeper_name_for_post = extract_keeper_name_for_suffix
-
-let is_keeper_checkpoints_get_path req_path =
-  keeper_path_ends_with req_path keeper_suffix_checkpoints
-
-let is_keeper_paused_work_get_path req_path =
-  keeper_path_ends_with req_path keeper_suffix_paused_work
-
-(* [include_thinking] is not in the path, so the caller reads it and passes it
-   here: this table is where a route's permission is decided, and deciding it
-   somewhere else is how the two doors ended up different.
-
-   `/raw-trace` requires CanAdmin because it returns hidden reasoning.
-   `/trajectory?include_thinking=true` returns the same reasoning and required
-   nothing, so the admin gate on the first door was reachable around. Same
-   data, same gate. *)
-let keeper_get_permission ?(include_thinking = false) req_path =
-  if keeper_path_ends_with req_path keeper_suffix_trajectory && include_thinking
-  then Some Masc_domain.CanAdmin
-  else if keeper_path_ends_with req_path keeper_suffix_turn_records
-       || keeper_path_ends_with req_path "/metrics"
-  then Some Masc_domain.CanReadState
-  else if
-    is_keeper_checkpoints_get_path req_path
-    || is_keeper_paused_work_get_path req_path
-    || keeper_path_ends_with req_path keeper_suffix_github_identity
-  then Some Masc_domain.CanAdmin
-  else if
-    keeper_path_ends_with req_path keeper_suffix_raw_traces
-    || keeper_path_ends_with req_path keeper_suffix_raw_trace
-    || keeper_path_ends_with req_path keeper_suffix_provider_input
-    (* Same data, same gate: a part is one item of the request the list
-       door above describes. *)
-    || keeper_path_ends_with req_path keeper_suffix_provider_input_part
-    || keeper_path_ends_with req_path keeper_suffix_provider_input_continuity
-    || keeper_path_ends_with req_path keeper_suffix_memory_journal
-    (* Same data, same gate: the fact rows are the journal's committed
-       content, read back as the current set. *)
-    || keeper_path_ends_with req_path keeper_suffix_memory_facts
-    || keeper_path_ends_with req_path keeper_suffix_working_context
-    (* Same data, same gate: [/file-changes] returns the exact text a keeper
-       wrote to a file, which is part of what the raw trace above already
-       holds. A lighter gate here would be a second door onto the first
-       door's content. *)
-    || keeper_path_ends_with req_path keeper_suffix_file_changes
-    (* Both tail and exact execution lookup return raw tool arguments/results,
-       so query parameters cannot select a weaker door onto the same bytes. *)
-    || keeper_path_ends_with req_path "/tool-calls"
-    || keeper_path_ends_with req_path "/tool-result"
-  then Some Masc_domain.CanAdmin
-  else None
 
 let trim_to_opt = String_util.trim_nonempty
 

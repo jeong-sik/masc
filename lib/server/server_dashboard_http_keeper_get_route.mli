@@ -63,3 +63,12 @@ val of_path : string -> t option
     keeper route needs a name: nothing, or only blanks, between the prefix and
     the suffix is no route. No suffix ends another, so at most one route fits
     a path. *)
+
+val permission : ?include_thinking:bool -> t -> Masc_domain.permission option
+(** The permission a GET on the route requires. [None] leaves the route on its
+    public-read policy. Every route is decided here, so a route added to
+    {!keeper_route} does not compile until its gate is chosen.
+
+    [include_thinking] is not in the path: the caller reads it from the query
+    string. A trajectory asked for with hidden reasoning needs the same
+    [CanAdmin] that [Raw_trace] needs, because it returns the same thing. *)

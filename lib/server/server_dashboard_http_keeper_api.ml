@@ -270,6 +270,10 @@ module Turn_reads = Server_dashboard_http_keeper_turn_reads
 module Trace_reads = Server_dashboard_http_keeper_trace_reads
 module Prompt_reads = Server_dashboard_http_keeper_prompt_reads
 
+let keeper_get_permission ?include_thinking path =
+  Option.bind (Route.of_path path) (Route.permission ?include_thinking)
+;;
+
 let handle_keeper_get_subroutes state req request reqd =
   match Route.of_path (Http.Request.path req) with
   | Some Route.(Keeper (Metrics, name)) -> (

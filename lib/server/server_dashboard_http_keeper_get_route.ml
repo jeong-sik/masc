@@ -106,3 +106,60 @@ let of_path path =
          else None)
       all)
 ;;
+
+(* HIGH-RISK-UNREVIEWED: this match decides which keeper GET routes need a
+   token.
+
+   A route's permission is decided here and nowhere else: deciding it
+   somewhere else is how two doors onto the same data ended up with different
+   gates. [Raw_trace] requires [CanAdmin] because it returns hidden reasoning;
+   [Trajectory] with [include_thinking] returns the same reasoning and once
+   required nothing. Same data, same gate. *)
+let permission ?(include_thinking = false) = function
+  | Fleet_composite -> None
+  | Keeper (route, _name) ->
+    (match route with
+     | Trajectory -> if include_thinking then Some Masc_domain.CanAdmin else None
+     | Turn_records | Metrics -> Some Masc_domain.CanReadState
+     | Checkpoints
+     | Paused_work
+     | Github_identity
+     | Raw_traces
+     | Raw_trace
+     (* A part and the continuity record are items of the request the list
+        door describes. *)
+     | Provider_input
+     | Provider_input_part
+     | Provider_input_continuity
+     | Memory_journal
+     (* The fact rows are the journal's committed content, read back as the
+        current set. *)
+     | Memory_facts
+     | Working_context
+     (* [File_changes] returns the exact text a keeper wrote to a file, which
+        is part of what the raw trace already holds. A lighter gate here would
+        be a second door onto the first door's content. *)
+     | File_changes
+     (* Both tail and exact execution lookup return raw tool arguments and
+        results, so query parameters cannot select a weaker door onto the same
+        bytes. *)
+     | Tool_calls
+     | Tool_result -> Some Masc_domain.CanAdmin
+     | Board_attention_quarantines
+     | Chat_history_page
+     | Chat_history
+     | Runtime_trace
+     | Config
+     | Tool_stats
+     | Waiting_inventory
+     | Feedback
+     | Operator_note
+     | Next_request
+     | Last_prompt
+     | Turn_transcript
+     | Transitions
+     | Lifecycle
+     | Eval
+     | State_diagram
+     | Composite -> None)
+;;

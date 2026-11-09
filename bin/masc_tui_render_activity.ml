@@ -12,7 +12,6 @@ module Rows = Masc_tui_rows
 module Keeper_chat = Masc_tui_keeper_chat_projection
 module Render_schedule = Masc_tui_render_schedule
 module Page_line = Masc_tui_page_line
-module Page_reading = Masc_tui_page_reading
 
 let system_log_level_mark : Masc.Tui_decode.system_log_level -> string = function
   | System_debug -> "\xc2\xb7"
@@ -83,25 +82,21 @@ let system_log_detail_lines (state : state) ~seq ~width =
         ; system_log_fact "Sequence" (string_of_int entry.sl_seq)
         ]
       in
-      (* Both blocks share one label column, so the values of the whole page
-         start at one cell and the page reads as one table. *)
-      let label_cells = Page_reading.widest_label_cells (core_facts @ metadata_facts) in
-      let max_cells = max 1 (width - String.length Page_reading.detail_indent) in
-      let facts_rows facts = Page_reading.rows ~label_cells ~max_cells facts in
-      let details =
-        match entry.sl_details with
-        | `Null -> Page_reading.rows ~max_cells [ Page_line.note ~tone:Page_line.Quiet "none" ]
-        | json ->
-            document_json ~width (Yojson.Safe.pretty_to_string json)
-            |> List.map (fun line -> Ansi.reset, "  " ^ line)
+      let blocks =
+        [ "1. 로그 메시지 · 핵심 상태 (Message & Severity)", core_facts
+        ; "2. 발생 위치 · 메타데이터 (Origin & Context)", metadata_facts
+        ]
       in
-      system_log_detail_section ~first:true
-        "1. 로그 메시지 · 핵심 상태 (Message & Severity)"
-      @ facts_rows core_facts
-      @ system_log_detail_section "2. 발생 위치 · 메타데이터 (Origin & Context)"
-      @ facts_rows metadata_facts
-      @ system_log_detail_section "3. 구조화 상세 (STRUCTURED DETAILS)"
-      @ details
+      let details_title = "3. 구조화 상세 (STRUCTURED DETAILS)" in
+      (match entry.sl_details with
+       | `Null ->
+           detail_page ~width
+             (blocks @ [ details_title, [ Page_line.note ~tone:Page_line.Quiet "none" ] ])
+       | json ->
+           detail_page ~width blocks
+           @ system_log_detail_section details_title
+           @ (document_json ~width (Yojson.Safe.pretty_to_string json)
+              |> List.map (fun line -> Ansi.reset, "  " ^ line)))
 
 let render_system_log_detail (state : state) seq =
   let terminal_rows, cols = get_terminal_size () in

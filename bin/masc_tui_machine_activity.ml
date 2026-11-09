@@ -141,7 +141,7 @@ let lines (t : t) =
     | None -> None, [L.fact "Current file" "unverified"]
     | Some document ->
       (match activity t.owner.machine document with
-       | Error detail -> None, [L.note ~tone:L.Attention detail]
+       | Error detail -> None, [L.note ~tone:L.Failure detail]
        | Ok enabled -> Some enabled, [L.fact "File" document.path; L.fact "Current file" (flag enabled)]) in
   let draft = match t.draft with None -> [] | Some draft ->
     (* A draft that differs from the file's activity has not been saved. *)
@@ -160,7 +160,7 @@ let lines (t : t) =
    L.note ~tone:L.Quiet "Machine state and checkpoints remain. Inspection, saving and cleanup stay available."]
   @ (match t.observed with
     | None -> [L.fact "Server activity" "not read"]
-    | Some (Error detail) -> [L.note ~tone:L.Attention ("Server activity read failed: " ^ detail)]
+    | Some (Error detail) -> [L.note ~tone:L.Failure ("Server activity read failed: " ^ detail)]
     | Some (Ok Machine_configuration.Enabled) -> [L.fact "Server activity" "On (last read)"]
     | Some (Ok Disabled) -> [L.fact "Server activity" "Off (last read)"]
     | Some (Ok Unobserved) -> [L.fact "Server activity" "configuration unavailable (last read)"])

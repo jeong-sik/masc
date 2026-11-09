@@ -94,14 +94,13 @@ type identity_row = {
 }
 
 val checkout_identity_rows :
-  ?inspection_budget_sec:float ->
   config:Workspace.config ->
   Keeper_playground_checkouts.checkout list ->
   identity_row list
 (** Measure checkouts that a host-side reader already discovered. Reads the
-    local clone only: no fetch, no working-tree status. [?inspection_budget_sec]
-    bounds the total git subprocess time across the list (default
-    {!Repo_git.inspection_timeout_sec}). *)
+    local clone only: no fetch, no working-tree status. The total git
+    subprocess time across the list is bounded by
+    {!Repo_git.inspection_timeout_sec}. *)
 
 module For_testing : sig
   val repository_checkouts_json_with_budget :

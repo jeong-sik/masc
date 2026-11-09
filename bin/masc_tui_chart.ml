@@ -89,6 +89,16 @@ let format_compact_num n =
       string_of_int n
 ;;
 
+let bar_filled_cells ~width ~value ~max_value =
+  if width <= 0 || max_value <= 0 || value <= 0 then 0
+  else Stdlib.max 1 (Stdlib.min width (Stdlib.min value max_value * width / max_value))
+;;
+
+let bar ~width ~value ~max_value =
+  let filled = bar_filled_cells ~width ~value ~max_value in
+  repeat bar_full filled ^ repeat bar_light (width - filled)
+;;
+
 (* A gauge states a proportion and nothing else. It used to colour the bar
    Warn past 70% and Bad past 85%; no caller ever passed other levels and no
    domain the three callers draw from (task completion, fact count, snapshot
@@ -132,10 +142,7 @@ let gauge ~width ~value ~max_value ?label () =
     let chrome_cells = prefix_cells + full_suffix_cells + 2 in
     if width >= chrome_cells + 4 then
       let bar_width = width - chrome_cells in
-      let filled =
-        if max_value <= 0 || clamped_val <= 0 then 0
-        else Stdlib.max 1 (Stdlib.min bar_width ((clamped_val * bar_width) / max_value))
-      in
+      let filled = bar_filled_cells ~width:bar_width ~value:clamped_val ~max_value in
       let unfilled = Stdlib.max 0 (bar_width - filled) in
       prefix ^ "[" ^ repeat bar_full filled ^ Masc_tui_theme.Sgr.dim
       ^ repeat bar_light unfilled ^ Masc_tui_theme.Sgr.reset ^ "]" ^ full_suffix
@@ -146,10 +153,7 @@ let gauge ~width ~value ~max_value ?label () =
       let short_chrome = prefix_cells + Layout.display_width short_suffix + 2 in
       if width >= short_chrome + 2 then
         let bar_width = width - short_chrome in
-        let filled =
-          if max_value <= 0 || clamped_val <= 0 then 0
-          else Stdlib.max 1 (Stdlib.min bar_width ((clamped_val * bar_width) / max_value))
-        in
+        let filled = bar_filled_cells ~width:bar_width ~value:clamped_val ~max_value in
         let unfilled = Stdlib.max 0 (bar_width - filled) in
         prefix ^ "[" ^ repeat bar_full filled ^ Masc_tui_theme.Sgr.dim
         ^ repeat bar_light unfilled ^ Masc_tui_theme.Sgr.reset ^ "]" ^ short_suffix

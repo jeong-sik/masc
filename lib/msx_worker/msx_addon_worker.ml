@@ -166,7 +166,7 @@ let definition (schema : Masc_domain.tool_schema) =
 
 let create ~base_path () =
   let history = Machine_input_history.create ~encode:Msx_lane.entry_json () in
-  let server = Server.create ~name:"masc-msx-addon" ~version:"0.1.0" () in
+  let server = Server.create ~name:"masc-msx-addon" ~version:Build_version.current () in
   let schemas = schemas () in
   let server = List.fold_left (fun server (_tool, (schema : Masc_domain.tool_schema)) ->
     Server.add_tool (definition schema)

@@ -1,6 +1,6 @@
 open Alcotest
 
-module Recovery = Keeper_turn_driver_try_provider
+module Recovery = Masc.Keeper_turn_driver_try_provider
 module Http = Llm_provider.Http_client
 
 let network kind = Agent_core.Error.Api (Agent_core.Retry.NetworkError {kind; message="fixture"})

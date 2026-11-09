@@ -528,7 +528,8 @@ let execute_tool_eio
                     | (Some (Tool_schemas_misc.Misc_play_room), None)
                     | (Some (Tool_schemas_misc.Misc_dos_pass), None)
                     | (Some (Tool_schemas_misc.Misc_dos_save), None)
-                    | (Some (Tool_schemas_misc.Misc_dos_restore), None) ->
+                    | (Some (Tool_schemas_misc.Misc_dos_restore), None)
+                    | (Some (Tool_schemas_misc.Misc_pull_requests), None) ->
                       dispatch ())
                  | Mod_wiki ->
                    Tool_wiki.dispatch

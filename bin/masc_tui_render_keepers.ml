@@ -423,7 +423,7 @@ let shift_motion ~prefix = function
 
 (* The NOW cell: the activity's mark and word, or the receipt's operator
    disposition where nothing on the row is newer than the receipt. *)
-let keeper_now_cell ?(ko = false) ~frame (row : Keeper_list_model.row) =
+let keeper_now_cell ?(ko = false) ?(padded = true) ~frame (row : Keeper_list_model.row) =
   let activity = Keeper_list_model.primary_activity_of_row row in
   let runtime = keeper_row_runtime row in
   let operator_disposition =
@@ -458,7 +458,7 @@ let keeper_now_cell ?(ko = false) ~frame (row : Keeper_list_model.row) =
     | None -> keeper_activity_word ~ko activity
   in
   let text = status_color ^ glyph ^ " "
-    ^ Message_layout.fit_width status_word (Render_schedule.keeper_status_width - 2)
+    ^ (if padded then Message_layout.fit_width status_word (Render_schedule.keeper_status_width - 2) else status_word)
     ^ Ansi.reset in
   let motion = match operator_disposition, activity with
     | None, (Preparing | Running) -> Masc_tui_answering.Moving (Message_layout.display_width glyph)
@@ -1621,111 +1621,6 @@ let keeper_group_heading_text ~available_cells rows group count =
       in
       Printf.sprintf "%s %d" label count
 
-(* A chip of the count row, in two lengths: [long] is "! 2 attention", [short]
-   is "! 2". A chip with a count takes the colour of its group, the one the
-   group heading of the grouped list has; a zero stays in the dim colour of the
-   row. The row is drawn dim, so the chip puts the dim colour back after
-   itself. Style bytes are zero-width to [display_width], so the fit below is
-   the same with or without them. *)
-type count_chip =
-  { count : int
-  ; long : string
-  ; short : string
-  }
-
-let count_chip group glyph count label =
-  let paint text =
-    if count > 0 then keeper_state_heading_style group ^ text ^ Ansi.reset ^ Theme.recede ()
-    else text
-  in
-  { count
-  ; long = paint (Printf.sprintf "%s %d %s" glyph count label)
-  ; short = paint (Printf.sprintf "%s %d" glyph count)
-  }
-
-(* The texts of the count row that fit [room] cells, in the order they are
-   drawn. When the row is too short for all the chips, the chips with a count
-   stay and the zeros take what is left, front to back. A zero says nothing is
-   there. At 80 columns the five zeros fit and the "? 3 unknown" behind them
-   did not, so a list of three Keepers sat under a row of zeros. When the chips
-   with a count are too long on their own, the last ones give up their word
-   first ("○ 5 inactive" becomes "○ 5"), so the first chips keep their names
-   and no count is cut. Only when every count is short and still too long does
-   [join_fitting] leave out the ones that do not fit whole. *)
-let count_chips_that_fit ~sep ~room chips =
-  let sep_cells = Message_layout.display_width sep in
-  (* A text and the separator in front of it. A row has one separator fewer
-     than it has texts, hence the start below zero. *)
-  let cost text = sep_cells + Message_layout.display_width text in
-  let held texts = List.fold_left (fun cells text -> cells + cost text) (- sep_cells) texts in
-  let long chip = chip.long in
-  let nonzero chip = chip.count > 0 in
-  let counted = List.filter nonzero chips in
-  if held (List.map long chips) <= room then List.map long chips
-  else if held (List.map long counted) > room then
-    let kept = List.length counted in
-    let short_tail given_up =
-      List.mapi (fun i chip -> if i >= kept - given_up then chip.short else chip.long) counted
-    in
-    let rec fewest_words given_up =
-      let texts = short_tail given_up in
-      if given_up >= kept || held texts <= room then texts else fewest_words (given_up + 1)
-    in
-    fewest_words 1
-  else
-    let rec fill left = function
-      | [] -> []
-      | chip :: later ->
-          if nonzero chip then chip.long :: fill left later
-          else if cost chip.long <= left then chip.long :: fill (left - cost chip.long) later
-          else List.map long (List.filter nonzero later)
-    in
-    fill (room - held (List.map long counted)) chips
-
-(* The frame cuts a row from the right. The counts are what a narrow screen
-   needs, so they lead and the density and sort name trail; the view strip
-   above names the view. An item that does not fit whole is left out,
-   because "0 inactiv…" reads as a number. *)
-let keeper_view_summary ~ko ~cells rows view density sort =
-  let mode =
-    String.concat " · "
-      [ Keeper_list_model.density_label density; Keeper_list_model.sort_label sort ]
-  in
-  let sep = "   " in
-  let lead = "  " in
-  let room = cells - Message_layout.display_width lead in
-  let texts =
-    (* A grouping view counts its rows in the headings. *)
-    match view with
-    | Keeper_list_model.By_age ->
-        (if ko then
-           [ "stale: 원본이 바뀐 기억"; "나이: 배운 지"; "saved: 마지막 저장"; mode ]
-         else
-           [ "stale: source changed"; "age: since learned"; "saved: last save"; mode ])
-    | Keeper_list_model.By_memory ->
-        (if ko then
-           [ "Librarian: 처리 관측"; "lag: 읽지 않은 턴"; mode ]
-         else [ "Librarian: observed pass"; "lag: unread turns"; mode ])
-    | Keeper_list_model.By_state | Keeper_list_model.By_cause | Keeper_list_model.By_time
-    | Keeper_list_model.By_runtime ->
-        [ mode ]
-    | Keeper_list_model.Plain | Keeper_list_model.Day_wall ->
-        let counts : Keeper_list_model.group_counts = Keeper_list_model.group_counts rows in
-        let chips =
-          [ count_chip Keeper_list_model.Attention "!" counts.attention_rows "attention"
-          ; count_chip Keeper_list_model.Failing failing_glyph counts.failing_rows "failing"
-          ; count_chip Keeper_list_model.Active "\xe2\x96\xb6" counts.active_rows "active"
-          ; count_chip Keeper_list_model.Waiting "\xe2\x97\x8c" counts.waiting_rows "waiting"
-          ; count_chip Keeper_list_model.Inactive "\xe2\x97\x8b" counts.inactive_rows "inactive"
-          ; count_chip Keeper_list_model.Unobserved "?" counts.unobserved_rows "unknown"
-          ]
-        in
-        let whole = List.map (fun chip -> chip.long) chips @ [ mode ] in
-        if Message_layout.display_width (String.concat sep whole) <= room then whole
-        else count_chips_that_fit ~sep ~room chips
-  in
-  lead ^ Message_layout.join_fitting ~sep ~cells:room texts
-
 (* The columns a Story window label takes: two of indent, the mark and the word. *)
 let story_label_cells = 10
 
@@ -2434,6 +2329,7 @@ let render_keeper_axes (state : state) =
   let inner = max 1 (framed_inner_width cols) in
   let list_reading = keeper_list_reading state in
   let model_rows = list_reading.klr_rows in
+  let all_rows = list_reading.klr_all_rows in
   let stop = keeper_list_stop state in
   (* Selection already follows this ordered model in list mode. Reuse it in
      this synchronous draw rather than rebuilding it through selected_keeper.
@@ -2452,6 +2348,7 @@ let render_keeper_axes (state : state) =
 
   (* One observation time for stale fleet readings and roster turn ages. *)
   let now_unix = Unix.gettimeofday () in
+  let grid = Grid.layout ~cols:inner in
   let heading =
     screen_title
       (Printf.sprintf " MASC Keepers %s"
@@ -2476,11 +2373,21 @@ let render_keeper_axes (state : state) =
   in
   box_line buf cols (heading ^ String.make gap ' ' ^ badge);
   box_line buf cols (keeper_view_tabs ~cols state.keeper_list_view);
-  box_line buf cols
-    (Theme.recede ()
-     ^ keeper_view_summary ~ko:(state.ui_language = Lang_ko) ~cells:inner model_rows state.keeper_list_view
-         state.keeper_list_density state.keeper_list_sort
-     ^ Ansi.reset);
+  let selected_name = Option.map (fun row -> row.Keeper_list_model.keeper.Tui_decode.k_name) selected_row in
+  box_line buf cols (Masc_tui_keeper_strip.header ~now:now_unix ~cells:inner
+    ~view:state.keeper_list_view ~selected:selected_name
+    ~age:(fun row -> (Masc_tui_keeper_axis.outside state ~now:now_unix
+        ~keeper_name:row.Keeper_list_model.keeper.Tui_decode.k_name).age) all_rows);
+  (match state.keeper_list_view with
+   | Keeper_list_model.By_age -> ()
+   | Keeper_list_model.(Plain | By_state | By_cause | By_time | By_memory | By_runtime | Day_wall) ->
+       let fleet = Masc_tui_keeper_strip.fleet_cells ~now:now_unix ~grid
+           ~wakes:(fun row -> Masc_tui_keeper_axis.wake_strip state ~now:now_unix
+             ~ahead:grid.side_cells ~keeper_name:row.Keeper_list_model.keeper.Tui_decode.k_name) all_rows in
+       box_line buf cols (grid_line grid
+         { gutter = String.make Grid.gutter_cells ' '; name = fit_width fleet.name grid.name_cells
+         ; pulse = fleet.pulse; now_cell = grid_blank_now; strip = fleet.strip
+         ; due = fit_width fleet.due Grid.due_cells; right = String.make grid.mem_cells ' ' }));
   Option.iter
     (fun message -> box_line buf cols
       (Theme.warn () ^ "  preferences: " ^ Terminal_text.single_line message ^ Ansi.reset))
@@ -2691,7 +2598,6 @@ let render_keeper_axes (state : state) =
   let matrix = match state.keeper_list_view with
     | Keeper_list_model.By_runtime -> Some (runtime_matrix ~inner model_rows)
     | Keeper_list_model.(Plain | By_state | By_cause | By_time | By_memory | By_age | Day_wall) -> None in
-  let grid = Grid.layout ~cols:inner in
   let peak_lag = axis_peak_lag state model_rows in
   let peak_facts = axis_peak_facts state model_rows in
   (match matrix, shape with
@@ -2818,7 +2724,19 @@ let render_keeper_axes (state : state) =
     | Some _ -> Masc_tui_render_keeper_story.rows ~budget:available_rows
     | None -> 0
   in
-  let content_rows = available_rows - story_rows in
+  let selected_summary = match state.keeper_story, selected_row with
+    | None, Some row when available_rows > 0 ->
+        let keeper_name = row.Keeper_list_model.keeper.Tui_decode.k_name in
+        Some (Masc_tui_keeper_strip.selected_summary ~now:now_unix
+          ~activity_cell:((keeper_now_cell ~padded:false ~frame:state.activity_frame row).text)
+          ~next_run:(match state.schedules_agenda_error with
+            | Some _ -> Masc_tui_keeper_next_run.Unknown
+            | None -> Masc_tui_keeper_axis.next_run state ~keeper_name)
+          ~recurrence:(Masc_tui_keeper_axis.next_recurrence state ~keeper_name)
+          ~memory:(keeper_memory_reading state row) row)
+    | (Some _ | None), (Some _ | None) -> None in
+  let summary_rows = match selected_summary with Some _ -> 1 | None -> 0 in
+  let content_rows = max 0 (available_rows - story_rows - summary_rows) in
   let legend = match matrix with
     | None -> []
     | Some matrix -> List.take (max 0 (content_rows - 2)) (matrix_legend ~inner matrix) in
@@ -2969,6 +2887,7 @@ let render_keeper_axes (state : state) =
       draw_keeper_story buf ~cols ~rows:story_rows ~now:now_unix ~inner state page selected_row)
     state.keeper_story;
 
+  Option.iter (fun summary -> box_line buf cols summary) selected_summary;
   box_divider buf cols;
   Buffer.add_string buf
     (footer_line state

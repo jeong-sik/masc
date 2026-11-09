@@ -12515,7 +12515,7 @@ type roster_inputs = {
           is in; 0 for a view the clock cannot reorder. *)
 }
 
-let rows_of_keepers ~now ~outside (inputs : roster_inputs) keepers : Masc_tui_keeper_list_model.row list =
+let rows_of_keepers (inputs : roster_inputs) keepers : Masc_tui_keeper_list_model.row list =
   let turns =
     first_row_by_name inputs.ri_turns
       ~name:(fun (row : Tui_decode.keeper_turn_row) -> row.ktr_keeper_name)
@@ -12606,8 +12606,6 @@ let rows_of_keepers ~now ~outside (inputs : roster_inputs) keepers : Masc_tui_ke
       ; last_activity_at = keeper_activity_at ~turn ~waiting:activity_waiting keeper
       })
     keepers
-  |> Masc_tui_keeper_list_model.order_rows ~view:inputs.ri_view
-       ~sort:inputs.ri_sort ~now ~outside
 
 (* The full pattern makes a new input field a build error here until it is
    both named (warning 9) and compared (warning 27). The project leaves both
@@ -12632,6 +12630,7 @@ let[@warning "+9+27"] same_roster_inputs
    read at one instant, so a row that crosses a due or age bound between two
    reads cannot sit in one group and under another's heading. *)
 type keeper_list_reading = {
+  klr_all_rows : Masc_tui_keeper_list_model.row list;
   klr_rows : Masc_tui_keeper_list_model.row list;
   klr_groups : Masc_tui_keeper_list_model.group option list;
 }
@@ -12661,15 +12660,13 @@ let keeper_list_reading (state : state) : keeper_list_reading =
   | Some (seen, reading) when same_roster_inputs seen inputs -> reading
   | Some _ | None ->
       let outside ~keeper_name = state.keeper_outside_reading state ~now ~keeper_name in
-      let rows =
-        match inputs.ri_keepers with
-        | [] -> []
-        | keepers -> rows_of_keepers ~now ~outside inputs keepers
-      in
+      let all_rows = rows_of_keepers inputs inputs.ri_keepers in
+      let rows = Masc_tui_keeper_list_model.order_rows ~view:inputs.ri_view
+          ~sort:inputs.ri_sort ~now ~outside all_rows in
       let groups =
         List.map (Masc_tui_keeper_list_model.group_of_view ~now ~outside inputs.ri_view) rows
       in
-      let reading = { klr_rows = rows; klr_groups = groups } in
+      let reading = { klr_all_rows = all_rows; klr_rows = rows; klr_groups = groups } in
       last_roster_rows := Some (inputs, reading);
       reading
   in

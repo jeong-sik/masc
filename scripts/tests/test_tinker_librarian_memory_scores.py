@@ -301,6 +301,13 @@ class PairTest(unittest.TestCase):
         req, c = one(K.COMPLEMENT)
         beside = scored(req, answer_text(((c.request_id, "incorporated", c.claim),), claims=(claim_json(c.claim),)))
         self.assertEqual(beside["merges_absorbed"], [])
+        # The complement's target goes into another candidate's claim: the expected merge is not made.
+        req, c, new = two(K.COMPLEMENT, K.NEW_DURABLE)
+        elsewhere = new.claim + " " + M1
+        moved = scored(req, answer_text(((c.request_id, "incorporated", c.claim),
+                                         (new.request_id, "incorporated", elsewhere)),
+                                        claims=(claim_json(c.claim), claim_json(elsewhere, absorbs=("m1",)))))
+        self.assertEqual(moved["merges_absorbed"], [])
 
 
 if __name__ == "__main__":

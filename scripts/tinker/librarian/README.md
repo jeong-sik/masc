@@ -97,11 +97,12 @@ checkpoint's binding declares an output ceiling of 32,768, and the lane's
    fact.
 7. When a valid E-synth answer absorbs a memory, a judge that sees no label,
    target or request answers the question MASC's absorb gate asks of it, in
-   the gate's words (`merge_cases.py`): can this memory retire into that claim?
-   An absorbed planted stale fact gets no case, since it is wrong either way.
-   Absorb precision is the share of absorbs judged mergeable; judged merge
-   recall counts a merge the label expects only when every absorb it made is
-   judged mergeable. Then `verdict`.
+   the gate's words and with the state the gate sends (`merge_cases.py`): can
+   this memory retire into that claim? An absorbed planted stale fact gets no
+   case: no candidate continues that transient state, so its label makes the
+   absorb wrong. Absorb precision is the share of absorbs judged mergeable;
+   judged merge recall counts a merge the label expects only when every absorb
+   it made is judged mergeable. Then `verdict`.
 
 ```sh
 MASC_BASE_PATH=<base> uv run scripts/tinker/librarian/e_real_manifest.py \
@@ -151,6 +152,10 @@ case stands for.
 `--out/judge-files.json` holds the sha256 of the three files the judge was
 given. `apply` and `verdict` read the decisions only while those files are
 unchanged and the rules copy equals this checkout's `config/prompts/librarian.md`.
+A merge case shows the claim of the call its row names, and
+`merge_cases.py` writes `--out/run-files.json`, the sha256 of the run's
+`calls.jsonl` and `rows.jsonl`: `verdict` reads the merge decisions only for
+the `--synth` run that holds those files.
 `verdict` refuses while an off-label drop or an absorb has no decision. It
 records each drop, its class, the memories left out, each target's wrong drops
 on them, each absorb's class, each target's absorb numbers and the judges' file

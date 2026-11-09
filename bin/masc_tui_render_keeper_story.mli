@@ -41,8 +41,18 @@ val memory_reading :
 
 val schedule_lines :
   Masc_tui_types.state -> now:float -> keeper_name:string -> string list
-(** The schedules of the fleet agenda that are aimed at [keeper_name]. A cut
-    agenda says so. *)
+(** The schedule page of [keeper_name]: the first page of the Keeper's own
+    read, the one the Automation tab draws first, led by the list's [◷] cell and
+    the store's counts. A page that is cut, a reading that is being read again
+    and a read that failed say so. The window asks for the read while it is
+    open. *)
+
+val last_wake_entry :
+  Masc_tui_types.state -> now:float -> keeper_name:string -> string option
+(** The line of the story page's past group that tells the Keeper's last wake,
+    from the same page of schedules. [None] when the page is read and no
+    schedule on it has woken the Keeper. A page that is not read, or not
+    readable, says so instead of saying nothing. *)
 
 val memory_lines :
   Masc_tui_types.state -> now:float -> keeper_name:string -> string list

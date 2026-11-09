@@ -9969,8 +9969,9 @@ let launch_owed_schedules state ~mailbox =
     then launch_schedule_agenda_load ~intent state ~mailbox
   end
 
-(* The Keeper whose schedules are drawn: the chat pane's Keeper, or the
-   Keeper the Automation tab shows. *)
+(* The Keeper whose schedules are drawn: the chat pane's Keeper, the Keeper
+   the Automation tab shows, or the Keeper under the cursor while the Story
+   window is open (its story page tells the last wake from the same page). *)
 let keeper_schedules_on_screen state =
   match state.view with
   | Keepers Keeper_message -> state.msg_target_keeper_name
@@ -9980,16 +9981,20 @@ let keeper_schedules_on_screen state =
       | Detail_info | Detail_items | Detail_sandbox | Detail_instructions | Detail_secrets
       | Detail_github | Detail_identity | Detail_channels | Detail_runs | Detail_terminal ->
           None)
-  | Keepers (Keeper_list | Keeper_logs | Keeper_calls | Keeper_runtime_pick)
+  | Keepers Keeper_list -> (
+      match state.keeper_story with
+      | Some _ -> Option.map (fun (keeper : keeper) -> keeper.k_name) (selected_keeper state)
+      | None -> None)
+  | Keepers (Keeper_logs | Keeper_calls | Keeper_runtime_pick)
   | Overview | Approvals | Acting | Metrics | Memory | Lanes | Clients | Board | Planning
   | Schedules | Verification | Harness | Fusion | Repositories | Code | Changes | Connectors
   | Runtime | Config | Resources | Tools | System_logs ->
       None
 
 (* One Keeper's schedules read again under the same rules as the fleet list,
-   while the chat pane or the Automation tab draws them: drawing a Keeper owes
-   the read, and so do a change, a revalidation, a resumed authority and a
-   failed read. *)
+   while the chat pane, the Automation tab or the Story window draws them:
+   drawing a Keeper owes the read, and so do a change, a revalidation, a
+   resumed authority and a failed read. *)
 let owe_keeper_schedules_read state =
   Option.iter
     (fun keeper ->
@@ -10073,9 +10078,22 @@ let launch_owed_keeper_schedules state ~mailbox =
         if reading then owed.kso_read else Masc_tui_owed_read.abandoned owed.kso_read
       in
       state.keeper_schedules_owed <- Some { owed with kso_read = read };
+      (* The Story window follows the cursor, so it has one Keeper's page on
+         the wire at a time: the Keeper the cursor has come to waits for the
+         read in flight, and every Keeper the cursor passed meanwhile starts
+         none. *)
+      let window_waits =
+        state.view = Keepers Keeper_list
+        && List.exists
+             (fun (request : detail_read_request) ->
+                request.drr_tab = Detail_automation
+                && not (String.equal request.drr_keeper keeper_name))
+             state.detail_reads
+      in
       if Masc_tui_owed_read.due ~now:(monotonic_now_s ()) read
          && server_authority_ready state
          && not reading
+         && not window_waits
       then begin
         launch_keeper_schedules_load state ~mailbox ~keeper_name;
         if keeper_schedules_reading state ~keeper_name then

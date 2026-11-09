@@ -957,16 +957,7 @@ let test_address_form_keeps_old_host_base64_out () = with_workspace (fun base_pa
   let raw = String.init 3000 (fun index -> Char.chr (index mod 256)) in
   let encoded = Base64.encode_string raw in
   let image = Llm_provider.Types.Image {media_type="image/png";source=Llm_provider.Types.Base64 encoded} in
-  let block = match Agent_core.Checkpoint.wire_content_block_to_json_result
-      ~scope:"official_client_original_tool_result" image with
-    | Ok block -> block
-    | Error error -> fail (Agent_core.Error.to_string error) in
-  let producer = get (Outbox.host_producer ~base_path ~keeper_name
-      ~runtime_label:"carrier-fixture" ~turn_count:1) in
-  get (Outbox.retain_host_result producer ~invocation_index:0 ~call_id:"old-host-image"
-         ~tool_name:"Screenshot" ~arguments:(`Assoc [])
-         ~response:(`Assoc ["success", `Bool true; "content", `String "screenshot taken";
-                            "content_blocks", `List [block]]));
+  retain_old_host_image_receipt base_path ~call_id:"old-host-image" image;
   retain_vendor_receipts base_path (List.init 4 (fun index ->
     vendor_receipt ~call_id:(Printf.sprintf "old-host-text-%d" index) ~tool_name:"Read"
       (`String (String.make 2048 'o'))));

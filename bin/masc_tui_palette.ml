@@ -73,8 +73,9 @@ type palette_action =
 (* The identifier names on the file pane's cursor line, in reading order,
    first occurrence only. The open file already carries its lexed segments,
    so the scan skips what the lexer called a keyword, a string, a comment,
-   or a number -- those offer no name a language server answers about --
-   rather than keeping a second keyword list that could drift. *)
+   a number, or a JSON literal -- those offer no name a language server
+   answers about -- rather than keeping a second keyword list that could
+   drift. *)
 let code_cursor_line_symbols (state : state) =
   match Masc_tui_fetched.current state.code_file with
   | Some (_, Masc_tui_fetched.Ready { cfd_rows = rows; _ }) -> (
@@ -87,7 +88,9 @@ let code_cursor_line_symbols (state : state) =
                  [ Masc_tui_code_lexer.kind_keyword;
                    Masc_tui_code_lexer.kind_string;
                    Masc_tui_code_lexer.kind_comment;
-                   Masc_tui_code_lexer.kind_number ])
+                   Masc_tui_code_lexer.kind_number;
+                   Masc_tui_code_lexer.kind_json_number;
+                   Masc_tui_code_lexer.kind_json_literal ])
           in
           let starts c =
             (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c = '_'

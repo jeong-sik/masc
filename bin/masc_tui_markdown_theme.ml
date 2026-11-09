@@ -52,6 +52,12 @@ let palette ~closing : Markdown.palette =
   ; code_comment = (Theme.Syntax.code_comment, closing)
   ; code_number = (Theme.Syntax.code_number, closing)
   ; code_type = (Ansi.bold ^ Theme.Syntax.code_type, closing)
+  (* A JSON body has the four roles the chat's tool results and a Task note
+     draw, so one payload reads the same wherever it is shown. *)
+  ; json_key = (Theme.Syntax.json_key, closing)
+  ; json_number = (Theme.Syntax.json_number, closing)
+  ; json_literal = (Theme.Syntax.json_literal, closing)
+  ; json_punctuation = (Theme.Syntax.json_punctuation, closing)
   (* Changed rows follow the dedicated diff surfaces: their background runs
      through the code gutter and the unused cells, so lines of different
      lengths still read as one patch. The fixed light foreground is paired

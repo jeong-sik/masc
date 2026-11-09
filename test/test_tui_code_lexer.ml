@@ -174,32 +174,65 @@ let test_a_toml_table_header_is_taken_whole () =
    the next one keeps the sign from swallowing a subtraction. *)
 let test_json_reads_a_negative_number () =
   check seg "the sign belongs to the number"
-    [ ("{", Masc_tui_code_lexer.kind_code)
-    ; ("\"a\"", Masc_tui_code_lexer.kind_type)
-    ; (": ", Masc_tui_code_lexer.kind_code)
-    ; ("-1", Masc_tui_code_lexer.kind_number)
-    ; ("}", Masc_tui_code_lexer.kind_code)
+    [ ("{", Masc_tui_code_lexer.kind_json_punctuation)
+    ; ("\"a\"", Masc_tui_code_lexer.kind_json_key)
+    ; (":", Masc_tui_code_lexer.kind_json_punctuation)
+    ; (" ", Masc_tui_code_lexer.kind_code)
+    ; ("-1", Masc_tui_code_lexer.kind_json_number)
+    ; ("}", Masc_tui_code_lexer.kind_json_punctuation)
     ]
     (spans "json" "{\"a\": -1}");
   check seg "a decimal keeps its sign too"
-    [ ("[", Masc_tui_code_lexer.kind_code)
-    ; ("-1.5", Masc_tui_code_lexer.kind_number)
-    ; ("]", Masc_tui_code_lexer.kind_code)
+    [ ("[", Masc_tui_code_lexer.kind_json_punctuation)
+    ; ("-1.5", Masc_tui_code_lexer.kind_json_number)
+    ; ("]", Masc_tui_code_lexer.kind_json_punctuation)
     ]
     (spans "json" "[-1.5]")
 
 let test_json_leaves_a_subtraction_alone () =
   check seg "the minus between two numbers is not a sign"
-    [ ("[", Masc_tui_code_lexer.kind_code)
-    ; ("3", Masc_tui_code_lexer.kind_number)
+    [ ("[", Masc_tui_code_lexer.kind_json_punctuation)
+    ; ("3", Masc_tui_code_lexer.kind_json_number)
     ; (" - ", Masc_tui_code_lexer.kind_code)
-    ; ("1", Masc_tui_code_lexer.kind_number)
-    ; ("]", Masc_tui_code_lexer.kind_code)
+    ; ("1", Masc_tui_code_lexer.kind_json_number)
+    ; ("]", Masc_tui_code_lexer.kind_json_punctuation)
     ]
     (spans "json" "[3 - 1]");
   check seg "a minus with no digit after it is plain text"
-    [ ("[-]", Masc_tui_code_lexer.kind_code) ]
+    [ ("[", Masc_tui_code_lexer.kind_json_punctuation)
+    ; ("-", Masc_tui_code_lexer.kind_code)
+    ; ("]", Masc_tui_code_lexer.kind_json_punctuation)
+    ]
     (spans "json" "[-]")
+
+(* The four roles a served JSON payload is drawn in are the chat's own, so the
+   lexer names each of them: the string before a colon, a number, the three
+   literals, and the six characters that only shape the document. A string
+   value keeps the generic string kind, and two shaping characters in a row are
+   one segment. *)
+let test_json_names_its_four_roles () =
+  check seg "key, number, literals, punctuation and a string value"
+    [ ("{", Masc_tui_code_lexer.kind_json_punctuation)
+    ; ("\"k\"", Masc_tui_code_lexer.kind_json_key)
+    ; (":", Masc_tui_code_lexer.kind_json_punctuation)
+    ; (" ", Masc_tui_code_lexer.kind_code)
+    ; ("[", Masc_tui_code_lexer.kind_json_punctuation)
+    ; ("1", Masc_tui_code_lexer.kind_json_number)
+    ; (",", Masc_tui_code_lexer.kind_json_punctuation)
+    ; (" ", Masc_tui_code_lexer.kind_code)
+    ; ("true", Masc_tui_code_lexer.kind_json_literal)
+    ; (",", Masc_tui_code_lexer.kind_json_punctuation)
+    ; (" ", Masc_tui_code_lexer.kind_code)
+    ; ("false", Masc_tui_code_lexer.kind_json_literal)
+    ; (",", Masc_tui_code_lexer.kind_json_punctuation)
+    ; (" ", Masc_tui_code_lexer.kind_code)
+    ; ("null", Masc_tui_code_lexer.kind_json_literal)
+    ; (",", Masc_tui_code_lexer.kind_json_punctuation)
+    ; (" ", Masc_tui_code_lexer.kind_code)
+    ; ("\"s\"", Masc_tui_code_lexer.kind_string)
+    ; ("]}", Masc_tui_code_lexer.kind_json_punctuation)
+    ]
+    (spans "json" "{\"k\": [1, true, false, null, \"s\"]}")
 
 let test_sql_reads_a_keyword_however_it_is_spelled () =
   let kinds text = List.map snd (spans "sql" text) in
@@ -808,6 +841,8 @@ let () =
             test_json_reads_a_negative_number
         ; Alcotest.test_case "a subtraction is not a signed number" `Quick
             test_json_leaves_a_subtraction_alone
+        ; Alcotest.test_case "key, number, literals and punctuation have their own kinds" `Quick
+            test_json_names_its_four_roles
         ] )
     ; ( "sql"
       , [ Alcotest.test_case "a keyword however it is spelled" `Quick

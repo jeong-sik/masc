@@ -63,7 +63,11 @@ type palette = {
           source, and padding through the available row width. Every hard-split
           chunk carries the same span. *)
   code_diff_removed : span;  (** The same fence's removed row. *)
-  code_type : span;  (** Also JSON object keys: a field name reads as one. *)
+  code_type : span;
+  json_key : span;  (** A JSON object key, and nothing else is drawn in it. *)
+  json_number : span;
+  json_literal : span;  (** [true], [false] and [null]. *)
+  json_punctuation : span;  (** The six characters that only shape a document. *)
 }
 
 val plain_palette : palette

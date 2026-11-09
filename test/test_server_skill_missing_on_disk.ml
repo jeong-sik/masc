@@ -257,21 +257,14 @@ let test_observation_identity_and_reactivation () =
   let recent = Time_codec.rfc3339_of_unix (Time_compat.now () -. 120.) in
   with_ghost_workspace ~activated_at:recent @@ fun root workspace_config trace snapshot ->
   let prior_row ~agent_id ~action ~outcome ~skill_name ~source_id =
-    Audit_log.append_entry workspace_config
-      { Audit_log.timestamp = Time_compat.now ()
-      ; agent_id
-      ; action
-      ; details =
-          `Assoc
-            [ "skill_name", `String skill_name
-            ; "source_id", `String source_id
-            ; "last_activated_at", `String recent
-            ]
-      ; outcome
-      ; cost_estimate = None
-      ; token_count = None
-      ; trace_id = None
-      }
+    Audit_log.log_action workspace_config ~agent_id ~action ~outcome
+      ~details:
+        (`Assoc
+           [ "skill_name", `String skill_name
+           ; "source_id", `String source_id
+           ; "last_activated_at", `String recent
+           ])
+      ()
   in
   let append_prior =
     prior_row ~action:(Audit_log.Custom Detection.event_type)

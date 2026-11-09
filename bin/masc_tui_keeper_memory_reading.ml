@@ -113,12 +113,29 @@ let find (idx : index) ~keeper_name : t =
             No_row
 ;;
 
+let unknown_cell = { Masc_tui_keeper_axis_cell.text = "mem ?"; tone = Quiet }
+let refused_cell = { Masc_tui_keeper_axis_cell.text = "mem !"; tone = Failure }
+
+let cell_of_lag = function
+  | Lag n ->
+      let tone =
+        if n > 0 then Masc_tui_keeper_axis_cell.Attention else Masc_tui_keeper_axis_cell.Quiet
+      in
+      { Masc_tui_keeper_axis_cell.text = Printf.sprintf "lag %d" n; tone }
+  | Lag_unmeasured -> { Masc_tui_keeper_axis_cell.text = "lag ?"; tone = Quiet }
+;;
+
+let lag_cell = function
+  | Unknown -> Some unknown_cell
+  | No_row -> None
+  | Refused _ -> Some refused_cell
+  | Row { lag; _ } -> Some (cell_of_lag lag)
+;;
+
 let cells ~now = function
-  | Unknown ->
-      [ { Masc_tui_keeper_axis_cell.text = "mem ?"; tone = Quiet } ]
+  | Unknown -> [ unknown_cell ]
   | No_row -> []
-  | Refused _ ->
-      [ { Masc_tui_keeper_axis_cell.text = "mem !"; tone = Failure } ]
+  | Refused _ -> [ refused_cell ]
   | Row { lag; gap; updated_at; added; removed; source_invalidations; _ } ->
       let gap_cells =
         match gap with
@@ -128,17 +145,6 @@ let cells ~now = function
         | Gap_unmeasured ->
             [ { Masc_tui_keeper_axis_cell.text = "gap ?"; tone = Attention } ]
         | No_gap -> []
-      in
-      let lag_cells =
-        match lag with
-        | Lag n ->
-            let tone =
-              if n > 0 then Masc_tui_keeper_axis_cell.Attention
-              else Masc_tui_keeper_axis_cell.Quiet
-            in
-            [ { Masc_tui_keeper_axis_cell.text = Printf.sprintf "lag %d" n; tone } ]
-        | Lag_unmeasured ->
-            [ { Masc_tui_keeper_axis_cell.text = "lag ?"; tone = Quiet } ]
       in
       let clock_cells =
         match updated_at with
@@ -152,5 +158,5 @@ let cells ~now = function
           [ { Masc_tui_keeper_axis_cell.text = Printf.sprintf "stale ×%d" source_invalidations; tone = Attention } ]
         else []
       in
-      gap_cells @ lag_cells @ clock_cells @ stale_cells
+      gap_cells @ [ cell_of_lag lag ] @ clock_cells @ stale_cells
 ;;

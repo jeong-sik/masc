@@ -101,6 +101,35 @@ let test_the_window_follows_the_row_that_left_it () =
   check int "a run the window already shows leaves the window alone" 10
     (Masc_tui_scroll.ensure_span_visible ~start:12 ~stop:13 ~height:5 10)
 
+(* Rows of different heights: the Keepers views draw a second line under a
+   failing Keeper alone. The window is counted in lines, and the scroll and
+   the rows drawn are counted in items. *)
+let test_a_window_of_uneven_rows_shows_the_cursor_whole () =
+  let window = Alcotest.(pair int int) in
+  let window_of = Masc_tui_scroll.window_of_heights in
+  check window "rows of one line move as ensure_visible moves them" (21, 10)
+    (window_of ~heights:(List.init 40 (fun _ -> 1)) ~cursor:30 ~rows:10 0);
+  check window "the window comes down until the tall row below it fits whole" (2, 3)
+    (window_of ~heights:[ 1; 2; 1; 1; 2; 1 ] ~cursor:4 ~rows:4 0);
+  check window "a row already in the window leaves the window alone" (2, 3)
+    (window_of ~heights:[ 1; 2; 1; 1; 2; 1 ] ~cursor:3 ~rows:4 2);
+  check window "a tall row at the end brings the window down to fit it" (1, 3)
+    (window_of ~heights:[ 2; 1; 1; 2 ] ~cursor:3 ~rows:4 0);
+  check window "a scroll past the last full window comes back to it" (2, 3)
+    (window_of ~heights:[ 1; 1; 1; 1; 1 ] ~cursor:4 ~rows:3 4);
+  check window "a row above the window brings the window up to it" (1, 2)
+    (window_of ~heights:[ 1; 1; 2; 1 ] ~cursor:1 ~rows:3 3);
+  check window "a cursor taller than the window starts it and draws nothing" (1, 0)
+    (window_of ~heights:[ 1; 3; 1 ] ~cursor:1 ~rows:2 0);
+  check window "a cursor past the end names the last row" (1, 2)
+    (window_of ~heights:[ 1; 1; 1 ] ~cursor:7 ~rows:2 0);
+  check window "a cursor before the start names the first row" (0, 2)
+    (window_of ~heights:[ 1; 1; 1 ] ~cursor:(-3) ~rows:2 1);
+  check window "a negative scroll is the top" (0, 2)
+    (window_of ~heights:[ 1; 1; 1; 1 ] ~cursor:1 ~rows:2 (-5));
+  check window "an empty list" (0, 0) (window_of ~heights:[] ~cursor:0 ~rows:5 3);
+  check window "a window of no lines" (0, 0) (window_of ~heights:[ 1; 1 ] ~cursor:1 ~rows:0 0)
+
 let test_the_cursor_stays_inside_the_list () =
   check int "down stops at the last row" 3
     (Masc_tui_scroll.cursor_down ~count:4 3);
@@ -209,6 +238,8 @@ let () =
             `Quick test_a_step_forward_from_the_end_value_stays_there
         ; Alcotest.test_case "the window follows the row that left it" `Quick
             test_the_window_follows_the_row_that_left_it
+        ; Alcotest.test_case "a window of uneven rows shows the cursor whole" `Quick
+            test_a_window_of_uneven_rows_shows_the_cursor_whole
         ] )
     ; ( "preview"
       , [ Alcotest.test_case "the preview never takes the list's floor" `Quick

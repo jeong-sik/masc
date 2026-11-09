@@ -305,6 +305,44 @@ let test_time_memory_and_age_views_follow_the_outside_reading () =
   Alcotest.(check bool) "the time view reorders by the minute" true
     (Model.order_clock_step Model.By_time = Some 60.)
 
+(* What a person is asked, for the next cell of the views (RFC-0515 §2.4):
+   the reading that made the activity a person wait, never another item of
+   the same row. *)
+let person_wait_kind = function
+  | None -> "none"
+  | Some (Model.Held_tool _) -> "held tool"
+  | Some (Model.Held_item _) -> "held item"
+  | Some (Model.Open_questions count) -> "questions " ^ string_of_int count
+  | Some (Model.Confirmation_item _) -> "confirmation"
+
+let person_wait_source = function
+  | Some (Model.Held_item item | Model.Confirmation_item item) -> Some item.Decode.kwi_source
+  | Some (Model.Held_tool _ | Model.Open_questions _) | None -> None
+
+let test_a_person_wait_is_the_reading_that_made_it () =
+  let check_wait name kind source row =
+    let wait = Model.person_wait row in
+    Alcotest.(check string) name kind (person_wait_kind wait);
+    Alcotest.(check bool) (name ^ ": the item's source") true (person_wait_source wait = source)
+  in
+  let schedule = waiting_item ~source:Model.Waiting_source_schedule_waiting () in
+  let confirm = waiting_item ~source:Model.Waiting_source_operator_pending_confirm () in
+  let hitl = waiting_item ~source:Model.Waiting_source_hitl_pending () in
+  let delegate = waiting_item ~producer:Model.Wake_keeper_delegate () in
+  check_wait "a confirmation behind a scheduled wake" "confirmation"
+    (Some Model.Waiting_source_operator_pending_confirm)
+    (row ~waiting:(waiting ~items:[ schedule; confirm ] "c") "c");
+  check_wait "a human-in-the-loop wait behind a delegate result" "held item"
+    (Some Model.Waiting_source_hitl_pending)
+    (row ~waiting:(waiting ~items:[ delegate; hitl ] "h") "h");
+  check_wait "a held tool call" "held tool" None
+    (row ~approval:(approval "t") ~waiting:(waiting ~items:[ hitl ] "t") "t");
+  check_wait "questions beside an unrelated wait" "questions 2" None
+    (row ~open_questions:2 ~waiting:(waiting ~items:[ schedule ] "q") "q");
+  check_wait "a scheduled wake waits on no person" "none" None
+    (row ~waiting:(waiting ~items:[ schedule ] "s") "s");
+  check_wait "a tool wait waits on no person" "none" None (row ~turn:tool_waiting "w")
+
 (* Stops (RFC-0515 E12): a state view over five rows, two attention, one
    failing, two active. *)
 let attention_group = Model.Group_state Model.Attention
@@ -727,6 +765,10 @@ let () =
             test_time_memory_and_age_views_follow_the_outside_reading
         ; Alcotest.test_case "the portrait shows only in the two-line list" `Quick
             test_portrait_shows_only_in_the_two_line_list
+        ] )
+    ; ( "person wait"
+      , [ Alcotest.test_case "a person wait is the reading that made it" `Quick
+            test_a_person_wait_is_the_reading_that_made_it
         ] )
     ; ( "stops"
       , [ Alcotest.test_case "each group opens with its heading" `Quick

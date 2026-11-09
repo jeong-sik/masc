@@ -38,13 +38,21 @@ let with_temp_dir f =
   Sys.remove dir;
   Unix.mkdir dir 0o755;
   let cleanup () =
+    (* [Unix.lstat], not [Sys.is_directory]: the latter follows symlinks, so a
+       link to a directory (as the symbolic-link fixtures below leave under the
+       swept root) would make [Sys.readdir] enumerate the *target*, delete its
+       entries, then fail [Unix.rmdir] on the link — an error this [try] used
+       to swallow, silently abandoning the rest of the temp tree (#26648).
+       [S_LNK] falls through to [Unix.unlink], which removes the link itself;
+       a dangling link is unlinked too instead of being skipped into an
+       ENOTEMPTY. *)
     let rec rm path =
-      if Sys.file_exists path then
-        if Sys.is_directory path then begin
-          Array.iter (fun n -> rm (Filename.concat path n)) (Sys.readdir path);
-          Unix.rmdir path
-        end
-        else Unix.unlink path
+      match Unix.lstat path with
+      | exception Unix.Unix_error ((Unix.ENOENT | Unix.ENOTDIR), _, _) -> ()
+      | { Unix.st_kind = Unix.S_DIR; _ } ->
+        Array.iter (fun n -> rm (Filename.concat path n)) (Sys.readdir path);
+        Unix.rmdir path
+      | _ -> Unix.unlink path
     in
     try rm dir with _ -> ()
   in
@@ -2563,6 +2571,31 @@ let test_maintenance_rejects_symbolic_link_shard () =
           (M.error_to_string error)
       | Ok _ -> Alcotest.fail "symbolic-link shard crossed blob ownership")
 
+(* #26648: the fixture cleanup must unlink symlinks instead of following them.
+   A directory link left under the swept root (as the symbolic-link shard
+   fixture above leaves) used to make the cleanup descend into the target and
+   delete its entries, then fail its rmdir — an error [with_temp_dir] silently
+   swallowed, so the rest of the temp tree survived every run. *)
+let test_cleanup_unlinks_symlinks_without_following () =
+  let outside = Filename.temp_file "blob-cleanup-outside-" "" in
+  Sys.remove outside;
+  Unix.mkdir outside 0o755;
+  let keep = Filename.concat outside "keep.txt" in
+  Fs_compat.save_file keep "outside";
+  let swept = ref "" in
+  with_temp_dir (fun dir ->
+      swept := dir;
+      let root = Filename.concat dir "shard-root" in
+      Unix.mkdir root 0o755;
+      Unix.symlink outside (Filename.concat root "aa");
+      Unix.symlink (Filename.concat root "missing") (Filename.concat root "dangling"));
+  Alcotest.(check bool) "swept tree with links is fully removed" false
+    (Sys.file_exists !swept);
+  Alcotest.(check bool) "outside target is untouched" true
+    (Sys.file_exists keep);
+  (try Sys.remove keep with Sys_error _ -> ());
+  (try Unix.rmdir outside with Unix.Unix_error _ -> ())
+
 let test_maintenance_rejects_symbolic_link_durable_source () =
   with_temp_dir (fun base_path ->
       let store = B.create ~base_path in
@@ -3005,6 +3038,10 @@ let () =
             "maintenance rejects symbolic-link shard"
             `Quick
             test_maintenance_rejects_symbolic_link_shard;
+          Alcotest.test_case
+            "cleanup unlinks symlinks without following"
+            `Quick
+            test_cleanup_unlinks_symlinks_without_following;
           Alcotest.test_case
             "maintenance rejects symbolic-link durable source"
             `Quick

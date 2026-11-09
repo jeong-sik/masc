@@ -3361,7 +3361,7 @@ let test_direct_reads_and_aggregates () =
     ~comment_id:(Board.Comment_id.to_string comment.id) ~direction:Board.Up));
   Alcotest.(check int) "operator sees both earned votes" 2
     (Board_dispatch.get_agent_karma ~reader:Masc_board_handlers.Board_access.Operator ~agent_name:owner);
-  let Board_dispatch.Jsonl store = Board_dispatch.backend () in
+  let store = Board_dispatch.backend () in
   let cached = store.Board.karma_cache in
   Alcotest.(check int) "non-reader cannot infer private comment karma" 1
     (Board_dispatch.get_agent_karma ~reader:stranger ~agent_name:owner);

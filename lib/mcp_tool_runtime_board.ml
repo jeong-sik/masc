@@ -214,7 +214,7 @@ let public_post ~post_id =
   | Error _ -> false
 
 let public_comment ~comment_id =
-  let Board_dispatch.Jsonl store = Board_dispatch.backend () in
+  let store = Board_dispatch.backend () in
   match Board.get_comment store ~comment_id with
   | Ok comment -> public_post ~post_id:(Board.Post_id.to_string comment.post_id)
   | Error _ -> false

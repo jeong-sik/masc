@@ -160,7 +160,8 @@ scope remain open. Existing answer-receipt/origin blocks can themselves exceed a
 short viewport; bounding those blocks remains a separate input-surface repair.
 No wording, layout or row-order tests are added.
 
-The subsequent Requests repair reserves the selected question, armed/in-flight
+The subsequent [Requests repair](https://github.com/jeong-sik/masc/pull/50802)
+reserves the selected question, armed/in-flight
 decision notice and footer before drawing bounded last-answer/source summaries.
 The oversized block affected the compact question list; the active answer
 editor already excludes those diagnostics. Browsing `v` captures the complete

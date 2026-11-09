@@ -427,7 +427,9 @@ esac
     (fun () -> use ~listing ~calls)
 ;;
 
-let fake_apple_guest_inspect ~container_name ~labels =
+(* [published_sockets] are (host path, guest path) pairs, as
+   [container inspect] reports them. *)
+let fake_apple_guest_inspect_publishing ~published_sockets ~container_name ~labels =
   `List [`Assoc
     ["id", `String container_name; "status", `Assoc ["state", `String "running"];
      "configuration", `Assoc
@@ -440,9 +442,17 @@ let fake_apple_guest_inspect ~container_name ~labels =
           "workingDirectory", `String "/masc-work"; "executable", `String "tail";
           "arguments", `List [`String "-f"; `String "/dev/null"]; "environment", `List []];
         "mounts", `List []; "readOnly", `Bool true; "capDrop", `List [];
-        "capAdd", `List []; "publishedSockets", `List []; "useInit", `Bool false;
+        "capAdd", `List [];
+        "publishedSockets", `List (List.map (fun (host_path, guest_path) ->
+          `Assoc ["hostPath", `String host_path; "containerPath", `String guest_path])
+          published_sockets);
+        "useInit", `Bool false;
         "networks", `List [];
         "labels", `Assoc (List.map (fun (key, value) -> key, `String value) labels)]]]
+;;
+
+let fake_apple_guest_inspect ~container_name ~labels =
+  fake_apple_guest_inspect_publishing ~published_sockets:[] ~container_name ~labels
 ;;
 
 let initialize_fixture_shim ~base =
@@ -4805,9 +4815,10 @@ esac
     (List.length (read_calls ()))
 ;;
 
-(* The running guest as a remote endpoint: the argv the remote runner spawns
-   is [container exec] into this guest, the shim it names is the mounted one,
-   and the identity it injects is the snapshot the guest already mounts. *)
+(* The running guest as a remote endpoint: each request goes to the agent
+   socket the guest publishes, the shim it names is the mounted one, and the
+   identity it injects is the snapshot the guest already mounts. A guest that
+   does not publish the agent is refused. *)
 let test_running_guest_is_a_remote_endpoint () =
   with_eio_fs @@ fun () ->
   let base = temp_dir "microvm_remote_endpoint_" in
@@ -4828,34 +4839,45 @@ let test_running_guest_is_a_remote_endpoint () =
   let labels = Masc.Keeper_sandbox_runtime_setup.stable_labels ~base_path:base ~keeper_name:meta.name
       ~container_kind:M.keeper_vm_container_kind ~network_label:"none"
     @ [ M.microvm_backend_label_key, Backend.to_string Backend.Apple_container ] in
-  let inspect = fake_apple_guest_inspect ~container_name ~labels in
-  Out_channel.with_open_bin (Filename.concat base "guest-inspect.json") (fun output ->
-    output_string output (Yojson.Safe.to_string inspect));
+  let host_socket =
+    Masc.Keeper_microvm_agent_socket.host_path ~base_path:base ~guest_name:container_name
+  in
+  let write_inspect ~published_sockets =
+    Out_channel.with_open_bin (Filename.concat base "guest-inspect.json") (fun output ->
+      output_string output (Yojson.Safe.to_string
+        (fake_apple_guest_inspect_publishing ~published_sockets ~container_name ~labels)))
+  in
   let runtime =
     Masc.Keeper_turn_sandbox_runtime.For_testing.create_minimal
       ~config ~meta ~state:(Running { container_name })
   in
+  write_inspect ~published_sockets:[];
+  (match
+     Masc.Keeper_turn_sandbox_runtime.microvm_remote_endpoint_of_running
+       runtime ~container_name
+   with
+   | Ok _ -> Alcotest.fail "a guest without the agent's socket must not become an endpoint"
+   | Error message ->
+     Alcotest.(check bool) "the missing agent is named" true
+       (String.starts_with ~prefix:"microvm_agent_not_published:" message));
+  write_inspect
+    ~published_sockets:[ host_socket, Masc.Keeper_microvm_agent_socket.guest_path ];
   match
     Masc.Keeper_turn_sandbox_runtime.microvm_remote_endpoint_of_running
       runtime ~container_name
   with
   | Error message -> Alcotest.fail message
   | Ok endpoint ->
-    let argv =
-      match Masc.Keeper_sandbox_remote.carrier endpoint with
-      | Masc.Keeper_sandbox_remote.Local_process { request; _ } -> request
-      | Masc.Keeper_sandbox_remote.Guest_agent _ ->
-        Alcotest.fail "a container exec guest has an exec argv"
-    in
-    Alcotest.(check bool) "execs into the guest" true
-      (adjacent ~flag:"exec" ~value:"-i" argv && contains container_name argv);
-    Alcotest.(check bool) "names the mounted shim" true (contains M.shim_guest_path argv);
-    Alcotest.(check bool) "hands the shim a writable guest HOME" true
-      (adjacent ~flag:"--env" ~value:("HOME=" ^ Backend.scratch_guest_root) argv);
-    Alcotest.(check bool) "hands the shim its config" true
-      (adjacent ~flag:"--env" ~value:("MASC_EXEC_SHIM_CONFIG=" ^ M.shim_config_guest_path) argv);
-    Alcotest.(check bool) "starts in the work root" true
-      (adjacent ~flag:"-w" ~value:M.work_volume_guest_root argv);
+    (match Masc.Keeper_sandbox_remote.carrier endpoint with
+     | Masc.Keeper_sandbox_remote.Guest_agent { host_socket = reached; expected } ->
+       Alcotest.(check string) "reaches the socket the guest publishes" host_socket reached;
+       (* [create_minimal] runs as 0:0, so this is the runtime's own pair
+          the agent's hello must report rather than a value the endpoint
+          invented. *)
+       Alcotest.(check (pair int int)) "expects the runtime's uid:gid" (0, 0)
+         (expected.uid, expected.gid)
+     | Masc.Keeper_sandbox_remote.Local_process _ ->
+       Alcotest.fail "an Apple guest is reached through its agent, not an exec");
     Alcotest.(check string) "keeper root is on the work volume" "/masc-work/lane-smith"
       (Masc.Keeper_sandbox_remote.workspace_root endpoint);
     Alcotest.(check string) "endpoint is named after the guest" container_name
@@ -4913,31 +4935,17 @@ let test_running_guest_is_a_remote_endpoint () =
          (List.assoc_opt "GIT_CONFIG_GLOBAL" configured_injected));
     (match Masc.Keeper_sandbox_remote.transport endpoint with
      | Masc.Keeper_sandbox_remote.Microvm
-         { shim_path; delivery = Masc.Keeper_sandbox_remote.Exec_per_request { prefix; _ }; _ } ->
-       (* The prefix arrives prebuilt, so what this pins is that the argv the
-          transport hands out is that prefix with the shim appended -- not a
-          second assembly the transport does on its own. *)
-       Alcotest.(check (list string)) "the transport appends only the shim"
-         (prefix @ [ shim_path ])
-         argv;
-       let probe_argv =
-         match Masc.Keeper_sandbox_remote.carrier endpoint with
-         | Masc.Keeper_sandbox_remote.Local_process { probe; _ } -> probe
-         | Masc.Keeper_sandbox_remote.Guest_agent _ ->
-           Alcotest.fail "a container exec guest has a probe argv"
-       in
-       Alcotest.(check bool) "probe argv does not pass -i (#33431)" false
-         (List.mem "-i" probe_argv);
-       Alcotest.(check bool) "probe argv ends with --probe" true
-         (list_ends_with [ "--probe" ] probe_argv);
-       (* [create_minimal] runs as 0:0, so this is the runtime's own pair
-          reaching the exec rather than a value the prefix invented. *)
-       Alcotest.(check bool) "execs as the runtime's uid:gid" true
-         (adjacent ~flag:"--user" ~value:"0:0" argv)
+         { container_name = guest
+         ; shim_path
+         ; delivery = Masc.Keeper_sandbox_remote.Agent_socket { host_socket = carried; _ }
+         } ->
+       Alcotest.(check string) "the transport is this guest's" container_name guest;
+       Alcotest.(check string) "names the mounted shim" M.shim_guest_path shim_path;
+       Alcotest.(check string) "the transport carries the same socket" host_socket carried
      | Masc.Keeper_sandbox_remote.Microvm
-         { delivery = Masc.Keeper_sandbox_remote.Agent_socket _; _ }
+         { delivery = Masc.Keeper_sandbox_remote.Exec_per_request _; _ }
      | Masc.Keeper_sandbox_remote.Openssh _ | Masc.Keeper_sandbox_remote.Docker_exec _ ->
-       Alcotest.fail "a microvm guest must retain its own transport");
+       Alcotest.fail "an Apple guest keeps the agent transport");
     let docker =
       Masc.Keeper_turn_sandbox_runtime.For_testing.create_minimal
         ~config ~meta:(docker_meta ~name:"lane-smith") ~state:(Running { container_name })
@@ -4959,7 +4967,7 @@ let test_shim_exec_prefix_for_microsandbox_probe_omits_stream () =
   (match
      Masc.Keeper_sandbox_microvm.shim_exec_prefix_for
        ~stdin:true
-       Masc.Keeper_microvm_backend.Microsandbox
+       Masc.Keeper_microvm_backend.Microsandbox_exec
        ~container_name
        ~uid:501
        ~gid:20
@@ -4975,7 +4983,7 @@ let test_shim_exec_prefix_for_microsandbox_probe_omits_stream () =
   (match
      Masc.Keeper_sandbox_microvm.shim_exec_prefix_for
        ~stdin:false
-       Masc.Keeper_microvm_backend.Microsandbox
+       Masc.Keeper_microvm_backend.Microsandbox_exec
        ~container_name
        ~uid:501
        ~gid:20
@@ -4995,21 +5003,7 @@ let test_shim_exec_prefix_for_microsandbox_probe_omits_stream () =
   (match
      Masc.Keeper_sandbox_microvm.shim_exec_prefix_for
        ~stdin:false
-       Masc.Keeper_microvm_backend.Apple_container
-       ~container_name
-       ~uid:501
-       ~gid:20
-       ~remote_root
-       ~shim_config_path
-   with
-   | Error err -> Alcotest.fail err
-   | Ok apple_probe_prefix ->
-     Alcotest.(check bool) "apple probe prefix omits -i" false
-       (List.mem "-i" apple_probe_prefix));
-  (match
-     Masc.Keeper_sandbox_microvm.shim_exec_prefix_for
-       ~stdin:false
-       Masc.Keeper_microvm_backend.Nerdctl_kata
+       Masc.Keeper_microvm_backend.Nerdctl_kata_exec
        ~container_name
        ~uid:501
        ~gid:20

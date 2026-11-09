@@ -462,6 +462,60 @@ let test_long_score_keeps_original_bars () =
   let score = read_score (String.concat " | " (List.init 1000 (fun _ -> ":16 r"))) in
   check_preserved score (reading ~max_width:8 score)
 
+(* The line breaks at a bar line before it breaks between beats: a bar the
+   pane cannot hold alone starts on a fresh system and continues there, so a
+   bar never begins in the middle of a line where another bar already is.
+   This is the operator's "the score breaks sideways" report: with a whole
+   note in the bar, the bar's first span fits the space left by the bar
+   before it, and the old rule began the bar there and put its tail on the
+   next line. *)
+let test_a_bar_that_must_continue_starts_its_own_system () =
+  let score = read_score ":4 0.6 | :1 0.6 0.6 0.6 0.6" in
+  match Alphatex.layout ~max_width:60 score with
+  | Error failure -> Alcotest.fail (Alphatex.failure_text failure)
+  | Ok systems ->
+      Alcotest.(check bool) "the bar that cannot fit alone continues" true
+        (List.exists
+           (fun (part : Alphatex.fragment) ->
+             part.bar = 2 && part.right = Alphatex.Continuation)
+           (List.concat systems));
+      List.iteri
+        (fun index system ->
+           match system with
+           | [] -> Alcotest.failf "system %d holds no fragment" index
+           | _ :: _ ->
+               (* The first fragment may begin its bar or resume one from the
+                  system before it. Every later fragment is a whole bar: a bar
+                  that has to continue was given a system of its own, so it
+                  never begins in the middle of a line. *)
+               List.iteri
+                 (fun position (part : Alphatex.fragment) ->
+                    if position > 0 then
+                      Alcotest.(check bool)
+                        (Printf.sprintf
+                           "system %d keeps bar %d whole after its first fragment"
+                           index part.bar)
+                        true
+                        (part.left = Alphatex.Barline
+                         && part.right = Alphatex.Barline))
+                 system)
+        systems
+
+(* A bar the pane holds is never divided: only a bar wider than the pane is
+   read between its beats. *)
+let test_a_bar_that_fits_is_never_divided () =
+  let score = read_score ":4 0.6 3.6 | :4 0.6 3.6 | :4 5.6 7.6" in
+  let fragments = reading ~max_width:40 score in
+  List.iter
+    (fun bar ->
+       Alcotest.(check int)
+         (Printf.sprintf "bar %d is one span" bar)
+         1
+         (List.length
+            (List.filter (fun (part : Alphatex.fragment) -> part.bar = bar)
+               fragments)))
+    [ 1; 2; 3 ]
+
 (* Two beats whose texts are wider than the ticks they hold (two-letter
    frets on sixteenths, a grace note ahead of a full beat) must not overwrite
    each other: the second keeps its own cells, so the first is still there. *)
@@ -876,6 +930,10 @@ let () =
             test_parallel_chords_remain_readable
         ; Alcotest.test_case "continuation keeps music and signs" `Quick
             test_continuation_keeps_music_and_signs
+        ; Alcotest.test_case "a bar that must continue starts its own system" `Quick
+            test_a_bar_that_must_continue_starts_its_own_system
+        ; Alcotest.test_case "a bar that fits is never divided" `Quick
+            test_a_bar_that_fits_is_never_divided
         ; Alcotest.test_case "long score keeps original bars" `Quick
             test_long_score_keeps_original_bars
         ; Alcotest.test_case "wide note text does not overwrite the next beat" `Quick

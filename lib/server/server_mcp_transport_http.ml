@@ -1103,10 +1103,23 @@ let handle_get_mcp ~deps ?(profile = Full) ?(sse_kind = Sse.Agent_stream)
                            ; binary_commit = Build_identity.embedded_commit }
                      | (Sse.Observer | Sse.Agent_stream | Sse.Presence), _, _, _ -> [])
               in
+              let stream_headers =
+                let headers = sse_stream_headers ~deps session_id protocol_version origin in
+                match standalone_observer_instance with
+                | None -> headers
+                | Some _ ->
+                  (* This id belongs only to the live SSE connection, not an MCP
+                     session. Returning it as a cookie or session header would
+                     cause a subsequent Observer request to fail session lookup. *)
+                  List.filter (fun (name, value) ->
+                    match String.lowercase_ascii name with
+                    | "mcp-session-id" -> false
+                    | "set-cookie" when String.starts_with ~prefix:"mcp-session-id=" value -> false
+                    | _ -> true) headers
+              in
               let headers =
                 Httpun.Headers.of_list
-                  (admission_headers @ observer_headers @ identity_headers
-                   @ sse_stream_headers ~deps session_id protocol_version origin)
+                  (admission_headers @ observer_headers @ identity_headers @ stream_headers)
               in
               let response = Httpun.Response.create ~headers `OK in
               if not (scope_is_current ()) then begin

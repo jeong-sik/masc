@@ -933,6 +933,7 @@ let test_standalone_observer_delivers_waiting_inventory_changes env =
   let module Transport = Server_mcp_transport_http in
   with_standalone_observer_server env (fun ~workspace ~state ~token ~sw ~clock ~port ->
     let profiles_before = Server_mcp_transport_http_session.For_testing.profile_count () in
+    let clients_before = (Atomic.get Masc.Sse.clients).entries in
     let response, publish_response = Eio.Promise.create () in
     let received, publish_received = Eio.Promise.create () in
     let ended, publish_ended = Eio.Promise.create () in
@@ -955,10 +956,16 @@ let test_standalone_observer_delivers_waiting_inventory_changes env =
     let await promise = Eio.Time.with_timeout_exn clock 3. (fun () -> Eio.Promise.await promise) in
     let status, response_headers = await response in
     Alcotest.(check int) "fresh observer opens without initialize or a session cookie" 200 status;
-    let header name = List.find_map (fun (key, value) ->
-      if String.equal (String.lowercase_ascii key) name then Some value else None) response_headers in
-    let session_id = match header "mcp-session-id" with
-      | Some value -> value | None -> Alcotest.fail "fresh observer has no connection id" in
+    (* The standalone connection id is internal; find this fixture's new
+       registration in the registry for the existing lifecycle assertions. *)
+    let authority = Masc.Sse.runtime_authority_exn ~base_path:workspace in
+    let session_ids = (Atomic.get Masc.Sse.clients).entries |> Masc.Sse.SMap.bindings
+      |> List.filter_map (fun (id, (client : Masc.Sse.client)) ->
+        if not (Masc.Sse.SMap.mem id clients_before)
+           && Masc.Sse.equal_runtime_authority authority client.runtime_authority
+        then Some id else None) in
+    let session_id = match session_ids with
+      | [id] -> id | _ -> Alcotest.fail "fresh observer has no unique registration" in
     Fun.protect
       ~finally:(fun () -> Eio.Cancel.protect (fun () -> Transport.stop_sse_session session_id))
       (fun () ->
@@ -1063,6 +1070,8 @@ let test_standalone_observer_keeps_auth_and_supplied_session_checks env =
       ; "forged credential", "/mcp?sse_kind=observer", ["Authorization", "Bearer forged"], 401
       ; "supplied unknown observer id", "/mcp?sse_kind=observer",
           ("Mcp-Session-Id", supplied_id) :: bearer, 404
+      ; "supplied unknown observer cookie", "/mcp?sse_kind=observer",
+          ("Cookie", "mcp-session-id=" ^ supplied_id) :: bearer, 404
       ; "agent stream without initialize", "/mcp", bearer, 404
       ] in
     List.iter (fun (label, target, credentials, expected_status) ->

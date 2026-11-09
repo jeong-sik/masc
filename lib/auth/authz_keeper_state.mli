@@ -17,10 +17,14 @@
     keeps its owner, and no record makes it again, for its owner or for anyone
     else. A later assignment replaces the Runtime of an earlier one. A Keeper
     with no assignment has no Runtime and falls back to none (user decision
-    2026-11-08). *)
+    2026-11-08). A policy id names one Keeper's policy for good: no other
+    Keeper record names it again. *)
 
 type keeper =
   { owner : Authz_types.User_id.t
+  ; policy_id : Authz_types.Policy_id.t
+      (** The policy the owner's turns of this Keeper run under. *)
+  ; turn_scope : Authz_types.Authorization_scope.t  (** The limits of that policy. *)
   ; runtime : Authz_types.Runtime_id.t option
       (** The Runtime of the latest assignment; [None] until the first. *)
   }
@@ -37,6 +41,8 @@ val owned_by : t -> Authz_types.User_id.t -> (Authz_types.Keeper_id.t * keeper) 
 
 type refusal =
   | Already_made of Authz_types.Keeper_id.t
+  | Policy_named_before of Authz_types.Policy_id.t
+      (** Another Keeper's record named this policy id. *)
   | Not_made of Authz_types.Keeper_id.t
       (** An assignment to a Keeper no record made. *)
   | Made_for_another of

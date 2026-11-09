@@ -72,7 +72,9 @@ let local_source_pending_note state source =
       let seconds = Printf.sprintf "%.1f" (Int64.to_float age_ns /. 1e9) ^ ui_text state ~ko:"초" ~en:"s" in
       let lead = match phase with
         | Local_read_observation.Read_failed _ | Read_not_started -> name
-        | _ -> ui_text state ~ko:(name ^ " 읽는 중") ~en:(name ^ " reading") in
+        | Awaiting_start | Io_queued | Io_running | Io_returning | Preparing
+        | Comparison_queued | Comparison_running | Comparison_returning | Awaiting_ui ->
+            ui_text state ~ko:(name ^ " 읽는 중") ~en:(name ^ " reading") in
       Some (Theme.recede () ^ "  " ^ String.concat " · " [lead; step; seconds] ^ Ansi.reset)
 module Markdown = Masc_tui_markdown
 module Message_layout = Masc_tui_message_layout

@@ -530,8 +530,6 @@ let keeper_phase_snapshot ?base_path () =
       sorted_unique_strings snapshot.official_client_recovery_required_names;
   }
 
-let keeper_phase_counts ?base_path () = (keeper_phase_snapshot ?base_path ()).counts
-
 type keeper_execution_owner =
   { keeper_name : string
   ; truth : Keeper_activation_readiness.owner_execution_truth

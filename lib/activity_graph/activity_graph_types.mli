@@ -8,7 +8,6 @@ type tool_execution_event_kind =
   | Keeper_in_turn_tool_executed
 
 val tool_execution_event_kind_to_string : tool_execution_event_kind -> string
-val tool_execution_event_kind_of_string : string -> tool_execution_event_kind option
 val all_tool_execution_event_kinds : tool_execution_event_kind list
 
 (** {1 Graph entities} *)

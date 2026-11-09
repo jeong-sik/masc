@@ -7,7 +7,6 @@ open Sessions_types
 open Result_syntax
 
 let make_store ?session_root () = Runtime_store.create ?root:session_root ()
-let file_read_error = Util.file_read_error
 
 (** [result_all xs] collects a list of results into a result of a list,
     short-circuiting on the first [Error] and preserving element order. *)
@@ -52,23 +51,4 @@ let get_raw_trace_runs ?session_root ~session_id () =
   List.sort
     (fun (a : raw_trace_run) (b : raw_trace_run) -> Int.compare a.start_seq b.start_seq)
     runs
-;;
-
-let get_raw_trace_run ?session_root ~session_id ~worker_run_id () =
-  let* runs = get_raw_trace_runs ?session_root ~session_id () in
-  match
-    List.find_opt
-      (fun (run : raw_trace_run) -> String.equal run.worker_run_id worker_run_id)
-      runs
-  with
-  | Some run -> Ok run
-  | None ->
-    Error
-      (file_read_error
-         ~path:worker_run_id
-         ~detail:
-           (Printf.sprintf
-              "Raw trace run '%s' not found in session %s"
-              worker_run_id
-              session_id))
 ;;

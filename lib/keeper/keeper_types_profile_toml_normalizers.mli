@@ -1,6 +1,5 @@
 val default_runtime_id : unit -> string
 val bool_of_env_default : string -> default:bool -> bool
-val bool_of_env_opt : string -> bool option
 val bool_of_string : string -> bool option
 val int_of_env_default :
   string -> default:int -> min_v:int -> max_v:int -> int

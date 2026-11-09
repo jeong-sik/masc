@@ -38,8 +38,8 @@ let with_fifo_workspace f =
       let reaped = ref false in
       Fun.protect ~finally:(fun () -> if not !reaped then (
         (try Unix.kill pid Sys.sigkill with Unix.Unix_error (Unix.ESRCH, _, _) -> ());
-        let _reaped_child = Unix.waitpid [] pid in ())) (fun () ->
-          let _, status = Unix.waitpid [] pid in
+        let _reaped_child = Masc_test_deps.waitpid_nointr pid in ())) (fun () ->
+          let _, status = Masc_test_deps.waitpid_nointr pid in
           reaped := true;
           match status with
           | Unix.WEXITED 0 -> ()

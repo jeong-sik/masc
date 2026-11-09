@@ -443,82 +443,6 @@ let test_evidence_capabilities () =
     v2
 ;;
 
-(* ── Participant lookup ─────────────────────────────────────────── *)
-
-let make_participant name : Runtime.participant =
-  let open Runtime in
-  { name
-  ; role = None
-  ; aliases = []
-  ; worker_id = None
-  ; runtime_actor = Some name
-  ; requested_provider = None
-  ; requested_model = None
-  ; provider = None
-  ; model = None
-  ; resolved_provider = None
-  ; resolved_model = None
-  ; state = Planned
-  ; summary = None
-  ; accepted_at = None
-  ; ready_at = None
-  ; first_progress_at = None
-  ; started_at = None
-  ; finished_at = None
-  ; last_progress_at = None
-  ; last_error = None
-  }
-;;
-
-let make_session participants : Runtime.session =
-  let open Runtime in
-  { session_id = "s-test"
-  ; goal = "test"
-  ; title = None
-  ; tag = None
-  ; phase = Bootstrapping
-  ; created_at = 0.0
-  ; updated_at = 0.0
-  ; provider = None
-  ; model = None
-  ; system_prompt = None
-  ; workdir = None
-  ; planned_participants = List.map (fun (p : participant) -> p.name) participants
-  ; participants
-  ; artifacts = []
-  ; pending_input = None
-  ; turn_count = 0
-  ; last_seq = 0
-  ; outcome = None
-  }
-;;
-
-let participant_name_opt result =
-  let open Runtime in
-  Option.map (fun (p : participant) -> p.name) result
-;;
-
-let test_participant_by_name_found () =
-  let session = make_session [ make_participant "alice"; make_participant "bob" ] in
-  let result = Sessions.participant_by_name session "alice" in
-  Alcotest.(check (option string))
-    "finds alice"
-    (Some "alice")
-    (participant_name_opt result)
-;;
-
-let test_participant_by_name_not_found () =
-  let session = make_session [ make_participant "alice" ] in
-  let result = Sessions.participant_by_name session "carol" in
-  Alcotest.(check (option string)) "not found" None (participant_name_opt result)
-;;
-
-let test_participant_by_name_empty () =
-  let session = make_session [] in
-  let result = Sessions.participant_by_name session "anyone" in
-  Alcotest.(check (option string)) "empty" None (participant_name_opt result)
-;;
-
 (* ── Suite ─────────────────────────────────────────────────────── *)
 
 let () =
@@ -555,10 +479,5 @@ let () =
         ] )
     ; ( "evidence_capabilities"
       , [ Alcotest.test_case "roundtrip" `Quick test_evidence_capabilities ] )
-    ; ( "participant_by_name"
-      , [ Alcotest.test_case "found" `Quick test_participant_by_name_found
-        ; Alcotest.test_case "not_found" `Quick test_participant_by_name_not_found
-        ; Alcotest.test_case "empty" `Quick test_participant_by_name_empty
-        ] )
     ]
 ;;

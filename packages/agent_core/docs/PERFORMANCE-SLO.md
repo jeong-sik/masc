@@ -75,5 +75,5 @@ is intentionally *not* coupled to this agent_core-side document.
 - RFC-AC-019 — Stream-lifetime telemetry aggregation (Active)
 - `lib/llm_provider/complete.ml` — capture site (`first_token_at_ref`,
   `first_event_at_ref`)
-- `lib/llm_provider/openai_wire.ml`, `lib/llm_provider/streaming.ml` — typed
-  predicates (`chunk_has_non_empty_delta`, `sse_event_is_first_token_signal`)
+- `lib/llm_provider/streaming.ml` — typed predicate
+  (`sse_event_is_first_token_signal`)

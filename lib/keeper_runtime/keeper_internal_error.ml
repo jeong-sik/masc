@@ -285,9 +285,8 @@ and masc_internal_error =
       response_shape : accept_response_shape option;
       (* RFC-0271 §4.5: typed provider stop_reason for the rejected response.
          [MaxTokens] marks an exhausted output budget and must be
-         distinguished from a clean [EndTurn] no-progress terminal — AGENT_CORE
-         gates its own [ended_without_deliverable_content] on [EndTurn] for
-         exactly this reason. Consumed by [accept_no_progress_retry_kind]: it
+         distinguished from a clean [EndTurn] no-progress terminal. Consumed by
+         [accept_no_progress_retry_kind]: it
          offers the thinking-off continuation to every [MaxTokens] no-progress
          rejection, while the retry kind follows the shape first (empty and
          thinking-only keep their rotation kinds) and is [`Truncated_no_progress]

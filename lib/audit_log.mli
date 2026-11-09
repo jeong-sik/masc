@@ -67,8 +67,6 @@ type audit_entry = {
   action : action;
   details : Yojson.Safe.t;
   outcome : outcome;
-  cost_estimate : float option;
-  token_count : int option;
   trace_id : string option;
 }
 
@@ -150,8 +148,6 @@ val log_action :
   agent_id:string ->
   action:action ->
   ?details:Yojson.Safe.t ->
-  ?cost_estimate:float ->
-  ?token_count:int ->
   ?trace_id:string ->
   outcome:outcome ->
   unit ->
@@ -166,8 +162,6 @@ val log_broadcast :
   config ->
   agent_id:string ->
   message_preview:string ->
-  ?cost_estimate:float ->
-  ?token_count:int ->
   unit -> unit
 (** Truncates [message_preview] to 100 chars before logging. *)
 
@@ -177,8 +171,6 @@ val log_tool_call :
   tool_name:string ->
   success:bool ->
   error_msg:string option ->
-  ?cost_estimate:float ->
-  ?token_count:int ->
   ?trace_id:string ->
   unit -> unit
 
@@ -189,8 +181,6 @@ val log_non_public_tool_call :
   success:bool ->
   error_msg:string option ->
   ?details:Yojson.Safe.t ->
-  ?cost_estimate:float ->
-  ?token_count:int ->
   ?trace_id:string ->
   unit -> unit
 (** Records under action [Custom "non_public_tool_call"] with a

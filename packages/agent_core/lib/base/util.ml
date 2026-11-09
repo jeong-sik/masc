@@ -23,10 +23,6 @@ let string_contains ~needle haystack =
 let json_parse_error detail = Error.Serialization (JsonParseError { detail })
 let file_read_error ~path ~detail = Error.Io (FileOpFailed { op = "read"; path; detail })
 
-let file_write_error ~path ~detail =
-  Error.Io (FileOpFailed { op = "write"; path; detail })
-;;
-
 (** Append a single element to the tail of a list.
     This is [O(n)] in the length of [xs] because it copies [xs]. It is fine
     for one-off appends, but using it inside a loop to build a list yields
@@ -35,30 +31,12 @@ let snoc xs x = xs @ [ x ]
 
 let snoc_list xs ys = xs @ ys
 
-(** Traverse a list with a function returning [result], short-circuit on first error. *)
-let result_traverse ~f items =
-  let rec loop acc = function
-    | [] -> Ok (List.rev acc)
-    | x :: rest ->
-      (match f x with
-       | Ok v -> loop (v :: acc) rest
-       | Error e -> Error e)
-  in
-  loop [] items
-;;
-
 (** Truncate string to [max_len] bytes on a UTF-8 character boundary,
     appending "..." if truncated. *)
 let clip s max_len =
   if String.length s > max_len
   then Agent_core_strings.utf8_prefix ~max_bytes:max_len s ^ "..."
   else s
-;;
-
-(** Safe substring: returns "" if start is past end or len is negative. *)
-let safe_sub s start len =
-  let actual_len = min len (String.length s - start) in
-  if actual_len <= 0 then "" else String.sub s start actual_len
 ;;
 
 let regex_match re str =
@@ -84,10 +62,6 @@ let trim_non_empty s =
 let trim_non_empty_opt = function
   | None -> None
   | Some s -> trim_non_empty s
-;;
-
-let json_member_bool key json =
-  Yojson.Safe.Util.(json |> member key |> to_bool_option) |> Option.value ~default:false
 ;;
 
 let json_of_int_opt = function

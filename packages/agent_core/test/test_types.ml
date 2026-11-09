@@ -1099,10 +1099,6 @@ let test_response_shape_thinking_only_is_not_deliverable () =
     "no deliverable content"
     false
     (Response_shape.has_deliverable_content shape);
-  Alcotest.(check bool)
-    "ended without deliverable content"
-    true
-    (Response_shape.ended_without_deliverable_content response);
   Alcotest.(check string)
     "shape label"
     "thinking_only"
@@ -1124,10 +1120,6 @@ let test_response_shape_empty_end_turn_is_not_deliverable () =
     "no deliverable content"
     false
     (Response_shape.has_deliverable_content shape);
-  Alcotest.(check bool)
-    "ended without deliverable content"
-    true
-    (Response_shape.ended_without_deliverable_content response);
   Alcotest.(check string)
     "shape label"
     "empty"
@@ -1181,10 +1173,6 @@ let test_response_shape_thinking_plus_text_is_deliverable () =
     "deliverable content"
     true
     (Response_shape.has_deliverable_content shape);
-  Alcotest.(check bool)
-    "not ended without deliverable content"
-    false
-    (Response_shape.ended_without_deliverable_content response);
   Alcotest.(check string)
     "shape label"
     "has_deliverable_content"
@@ -1225,10 +1213,6 @@ let test_response_shape_media_only_is_deliverable () =
          (label ^ " is deliverable")
          true
          (Response_shape.has_deliverable_content shape);
-       Alcotest.(check bool)
-         (label ^ " is not an empty completion")
-         false
-         (Response_shape.ended_without_deliverable_content response);
        Alcotest.(check string)
          (label ^ " retains the typed media-only diagnostic")
          "media_only"
@@ -1250,11 +1234,7 @@ let test_response_shape_thinking_plus_tool_use_is_deliverable () =
   Alcotest.(check bool)
     "deliverable tool use"
     true
-    (Response_shape.has_deliverable_content shape);
-  Alcotest.(check bool)
-    "not ended without deliverable content"
-    false
-    (Response_shape.ended_without_deliverable_content response)
+    (Response_shape.has_deliverable_content shape)
 ;;
 
 let () =

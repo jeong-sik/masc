@@ -63,7 +63,7 @@ let test_of_info_basic () =
 
 let test_capabilities_tools () =
   let card = Agent_card.of_info base_info in
-  Alcotest.(check bool) "has Tools" true (Agent_card.has_capability card Agent_card.Tools)
+  Alcotest.(check bool) "has Tools" true (List.mem Agent_card.Tools card.capabilities)
 ;;
 
 let test_capabilities_streaming () =
@@ -71,7 +71,7 @@ let test_capabilities_streaming () =
   Alcotest.(check bool)
     "has Streaming"
     true
-    (Agent_card.has_capability card Agent_card.Streaming)
+    (List.mem Agent_card.Streaming card.capabilities)
 ;;
 
 let test_capabilities_thinking () =
@@ -79,7 +79,7 @@ let test_capabilities_thinking () =
   Alcotest.(check bool)
     "has Thinking"
     true
-    (Agent_card.has_capability card Agent_card.Thinking)
+    (List.mem Agent_card.Thinking card.capabilities)
 ;;
 
 let test_capabilities_no_thinking () =
@@ -90,7 +90,7 @@ let test_capabilities_no_thinking () =
   Alcotest.(check bool)
     "no Thinking"
     false
-    (Agent_card.has_capability card Agent_card.Thinking)
+    (List.mem Agent_card.Thinking card.capabilities)
 ;;
 
 let test_capabilities_elicitation () =
@@ -99,7 +99,7 @@ let test_capabilities_elicitation () =
   Alcotest.(check bool)
     "has Elicitation"
     true
-    (Agent_card.has_capability card Agent_card.Elicitation)
+    (List.mem Agent_card.Elicitation card.capabilities)
 ;;
 
 let test_capabilities_no_elicitation () =
@@ -107,19 +107,7 @@ let test_capabilities_no_elicitation () =
   Alcotest.(check bool)
     "no Elicitation"
     false
-    (Agent_card.has_capability card Agent_card.Elicitation)
-;;
-
-let test_can_handle_tool () =
-  let card = Agent_card.of_info base_info in
-  Alcotest.(check bool)
-    "can handle get_weather"
-    true
-    (Agent_card.can_handle_tool card "get_weather");
-  Alcotest.(check bool)
-    "cannot handle unknown"
-    false
-    (Agent_card.can_handle_tool card "unknown_tool")
+    (List.mem Agent_card.Elicitation card.capabilities)
 ;;
 
 let test_no_tools () =
@@ -128,7 +116,7 @@ let test_no_tools () =
   Alcotest.(check bool)
     "no Tools cap"
     false
-    (Agent_card.has_capability card Agent_card.Tools)
+    (List.mem Agent_card.Tools card.capabilities)
 ;;
 
 let test_providers_empty_stays_empty () =
@@ -150,7 +138,10 @@ let test_skills_from_registry () =
   let info = { base_info with skills = [ skill ] } in
   let card = Agent_card.of_info info in
   Alcotest.(check int) "1 skill" 1 (List.length card.skills);
-  Alcotest.(check bool) "has greet" true (Agent_card.has_skill card "greet")
+  Alcotest.(check (list string))
+    "skill names"
+    [ "greet" ]
+    (List.map (fun (s : Agent_card.skill_meta) -> s.name) card.skills)
 ;;
 
 let test_json_roundtrip () =
@@ -377,18 +368,6 @@ let test_json_auth_no_credentials () =
          (auth.credential_ref = Agent_card.No_credential)
      | None -> Alcotest.fail "expected auth")
   | Error e -> Alcotest.fail (Error.to_string e)
-;;
-
-(* ── has_capability / has_skill ─────────────────────────── *)
-
-let test_has_capability_false () =
-  let card = Agent_card.of_info base_info in
-  Alcotest.(check bool) "no checkpoint" false (Agent_card.has_capability card Checkpoint)
-;;
-
-let test_has_skill_false () =
-  let card = Agent_card.of_info base_info in
-  Alcotest.(check bool) "no skill" false (Agent_card.has_skill card "nonexistent")
 ;;
 
 (* ── to_json with skills ─────────────────────────────────── *)
@@ -623,12 +602,9 @@ let () =
         ; test_case "no tools" `Quick test_no_tools
         ] )
     ; ( "queries"
-      , [ test_case "can_handle_tool" `Quick test_can_handle_tool
-        ; test_case "providers empty stays empty" `Quick test_providers_empty_stays_empty
+      , [ test_case "providers empty stays empty" `Quick test_providers_empty_stays_empty
         ; test_case "providers custom" `Quick test_providers_custom
         ; test_case "skills from registry" `Quick test_skills_from_registry
-        ; test_case "has_capability false" `Quick test_has_capability_false
-        ; test_case "has_skill false" `Quick test_has_skill_false
         ] )
     ; "capabilities", [ test_case "roundtrip all" `Quick test_capability_roundtrip ]
     ; ( "json"

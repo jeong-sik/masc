@@ -611,7 +611,7 @@ val context_overflow_shrink_sequence :
 (** Provider-oracle retry policy of the official-client runtimes, whose
     seed history is cut against a declared prompt byte cap; the capacity is
     in bytes. The Agent Core lane answers the same refusal by moving its
-    carried front ({!run_try_provider_with_history_recovery}).
+    carried front ({!run_try_provider_with_truncation_recovery}).
     After a typed window or request-body refusal and same-run effect
     authorization, memory
     reprojection is offered first. [Reprojected] retries at the same history
@@ -633,14 +633,6 @@ val context_overflow_shrink_sequence :
     hand rather than spending an attempt on a size that cannot succeed: the
     reserve does not shrink with the capacity, so a smaller window refuses
     for the same reason, one size lower. *)
-
-val run_try_provider :
-  ?continuation_checkpoint:Agent_core.Checkpoint.t ->
-  try_provider_ctx ->
-  Runtime_candidate.t ->
-  (Runtime_agent.run_result, Agent_core.Error.t) result
-  * Agent_core.Checkpoint.t option
-  * (string * Obj.t) option
 
 val boundary_resend_on : Agent_core.Error.t -> bool
 (** The refusals {!turn_boundary_resend_sequence} answers: a typed size
@@ -779,18 +771,6 @@ val memory_capacity_retry_sequence :
     retry. Receipt failure calls [on_projection_failure] so enclosing history
     recovery cannot bypass it. Unchanged memory returns the original refusal. *)
 
-val run_try_provider_with_history_recovery :
-  ?on_memory_capacity_refusal:Keeper_memory_delivery_reprojection.t ->
-  ?continuation_checkpoint:Agent_core.Checkpoint.t ->
-  try_provider_ctx ->
-  Runtime_candidate.t ->
-  (Runtime_agent.run_result, Agent_core.Error.t) result
-  * Agent_core.Checkpoint.t option
-  * (string * Obj.t) option
-(** A completion review runs once with its original evidence. A Keeper input
-    retains memory reprojection, verified boundary resend and current-tool
-    demotion under the existing checkpoint/effect retry authority. *)
-
 val run_try_provider_with_truncation_recovery :
   ?on_memory_capacity_refusal:Keeper_memory_delivery_reprojection.t ->
   ?continuation_checkpoint:Agent_core.Checkpoint.t ->
@@ -799,11 +779,27 @@ val run_try_provider_with_truncation_recovery :
   (Runtime_agent.run_result, Agent_core.Error.t) result
   * Agent_core.Checkpoint.t option
   * (string * Obj.t) option
-(** Run the carried-range eviction first. When the accepted
+(** One run: every provider attempt to this candidate. The history recovery
+    sends a completion review once with its original evidence; the
+    continuation below may follow it. A Keeper input retains memory
+    reprojection, verified boundary resend, current-tool demotion and the
+    resend from where this turn began, under the existing checkpoint/effect
+    retry authority; on a typed size refusal
+    the retained-result carrier is offered before [on_memory_capacity_refusal]
+    ({!Keeper_client_tool_outbox.run_carrier_reprojection}).
+
+    Run the carried-range eviction first. When the accepted
     boundary instead reports a typed [MaxTokens] truncation, remove only that
     incomplete Assistant message from the post-run checkpoint and continue the
     same candidate once with thinking disabled. No new User message is added,
-    so already-recorded tool results remain the continuation authority. *)
+    so already-recorded tool results remain the continuation authority.
+
+    The continuation is the run's next attempt, not a fresh one. It carries
+    the tool results a size refusal demoted as markers, and the
+    retained-result carrier in the form a size refusal left it. The first
+    attempt loads the outbox, and the attempt that completes acknowledges that
+    snapshot (RFC retained-results-carrier-shrinks-to-an-address §1, §5.1,
+    §6.1). *)
 
 val accept_rejected_error :
   runtime_id:string ->

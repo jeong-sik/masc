@@ -1085,7 +1085,12 @@ type sent_request =
 (* What one candidate carries between its requests and the retry policy
    around it: its working ledger, the range the last request composed, what
    the compositions do with the tool results the range carries, and how to
-   ask whether demoting them would shorten the last request. *)
+   ask whether demoting them would shorten the last request. One state serves
+   every request to the candidate, the max-tokens continuation among them
+   ([run_try_provider_with_truncation_recovery]). A continuation with a state
+   of its own would send verbatim the results a size refusal had demoted, and
+   the retained results inline after a refusal had switched them to the
+   address form. *)
 type attempt_state =
   { last_request : sent_request option ref
   ; request_range : Keeper_continuity_request.range option ref
@@ -1128,8 +1133,11 @@ let new_attempt_state (ctx : try_provider_ctx) =
   ; current_turn_results = ref Current_turn_verbatim
   ; current_turn_demotion = ref None
   ; retained_results =
-      (* Read from [ctx.tools], the request's own tools, as the model input
-         references below read [blob_reader_available]. *)
+      (* Read from [ctx.tools], the tools the candidate's agent starts with,
+         as [reader_available] is for the model input references. A request
+         can offer less: one whose tool choice is [None_] lets the model call
+         no tool, and the address text then names a reader that request
+         cannot call. *)
       Keeper_client_tool_outbox.run_carrier ~base_path:ctx.base_path
         ~keeper_name:ctx.keeper_name
         ~artifact_reader_available:
@@ -1797,10 +1805,10 @@ let bounded_model_input_projection
      Keeper.  Building the memo inside the per-request closure threw that work
      away between requests.
 
-     Safe to share: [run_try_provider] builds one closure per provider
-     attempt, so no two Keepers share a memo; AGENT_CORE drives the turn loop
-     sequentially (no [Fiber.fork] around [prepare_turn_for_agent] in
-     pipeline_stage_prepare.ml); and [Domain_pool.submit_cpu] is
+     Safe to share: [run_try_provider_attempt] builds one closure per
+     provider attempt, so no two Keepers share a memo; AGENT_CORE drives the
+     turn loop sequentially (no [Fiber.fork] around [prepare_turn_for_agent]
+     in pipeline_stage_prepare.ml); and [Domain_pool.submit_cpu] is
      [Eio.Executor_pool.submit_exn], which blocks until the job finishes, so
      successive jobs are ordered even when they land on different domains.
 
@@ -1834,7 +1842,9 @@ let bounded_model_input_projection
   (* Core may deserialize a retained native checkpoint after dispatch. Bind
      once to its first actual request, while closure eligibility still comes
      exclusively from the pre-admission seed. Result resends never rebind it.
-     The bound set is demoted only by the resend that answers a size refusal. *)
+     The bound set is demoted only once a size refusal has demoted the current
+     turn's results: by the resend that answers it and by every later request
+     of the run, the max-tokens continuation among them. *)
   let argument_binding = ref Arguments_unbound in
   let argument_protection_reported = ref false in
   let completed_arguments_for messages =
@@ -1973,8 +1983,10 @@ let bounded_model_input_projection
       | None | Some Without_snapshot -> None
     in
     let current_turn_results = !(state.current_turn_results) in
-    (* The bound arguments ride only on a resend that answers a size refusal;
-       any other request sends every argument as the range first sent it. *)
+    (* The bound arguments ride only on the requests sent after a size refusal
+       demoted the current turn's results: the resend that answers it and every
+       later request of the run, the max-tokens continuation among them. Any
+       other request sends every argument as the range first sent it. *)
     let view_arguments =
       match current_turn_results with
       | Current_turn_verbatim -> None
@@ -3043,7 +3055,8 @@ let is_size_refusal = function
    provider's refusal of the request body, enumerated exhaustively -- rather
    than [Keeper_error_classify.is_context_overflow]: the latter depends on
    [Keeper_turn_driver], which depends on this module (it calls
-   [run_try_provider]), so reaching it here would close a module cycle.
+   [run_try_provider_with_truncation_recovery]), so reaching it here would
+   close a module cycle.
    [same_run_retry_authorized] mirrors the exact same-run authority gate
    [Keeper_turn_driver]'s declared-lane walk applies before rotating
    candidates ([same_run_retry_allowed] / [checkpoint_progress]): a
@@ -3345,13 +3358,13 @@ let memory_capacity_retry_sequence ~same_run_retry_authorized
 ;;
 
 let run_try_provider_with_history_recovery
+      ~(state : attempt_state)
       ?(on_memory_capacity_refusal = fun ~refusal:_ ->
         Ok Keeper_memory_delivery_reprojection.Unchanged)
       ?continuation_checkpoint
       (ctx : try_provider_ctx)
       candidate
   =
-  let state = new_attempt_state ctx in
   (* The carrier step answers a size refusal before memory and history do. *)
   let on_memory_capacity_refusal =
     Keeper_client_tool_outbox.run_carrier_reprojection state.retained_results
@@ -3500,10 +3513,6 @@ let run_try_provider_with_history_recovery
       ()
   in
   result, !checkpoint_after, !success_sample
-;;
-
-let run_try_provider ?continuation_checkpoint ctx candidate =
-  run_try_provider_attempt ?continuation_checkpoint ~state:(new_attempt_state ctx) ctx candidate
 ;;
 
 let checkpoint_before_incomplete_response (checkpoint : Agent_core.Checkpoint.t) =
@@ -3665,8 +3674,11 @@ let run_try_provider_with_truncation_recovery
       (ctx : try_provider_ctx)
       candidate
   =
+  (* One state for the run, the continuation below included ([attempt_state]). *)
+  let state = new_attempt_state ctx in
   let first_result, checkpoint_after, success_sample =
-    run_try_provider_with_history_recovery ?on_memory_capacity_refusal ?continuation_checkpoint ctx candidate
+    run_try_provider_with_history_recovery ~state ?on_memory_capacity_refusal
+      ?continuation_checkpoint ctx candidate
   in
   let thinking_can_be_disabled = retry_without_thinking_admitted candidate in
   if not (native_retry_allowed ctx) then first_result, checkpoint_after, success_sample
@@ -3695,7 +3707,7 @@ let run_try_provider_with_truncation_recovery
           ; "thinking", `String "disabled"
           ])
       Keeper_runtime_manifest.Provider_lane_resolved;
-    run_try_provider
+    run_try_provider_attempt ~state
       ~continuation_checkpoint
       { ctx with enable_thinking = Some false; preserve_thinking = Some false;
                  native_retired_history_cut }

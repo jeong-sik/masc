@@ -8,7 +8,7 @@
       pulse carries every tick. No threshold lives in these functions --
       they only compute a delta, floored at zero for clock-skew safety.
     - The synthetic [Api (Timeout { phase = Some Wall_clock })] value that
-      [Keeper_turn_driver_try_provider.run_try_provider] constructs when the
+      [Keeper_turn_driver_try_provider.run_try_provider_attempt] constructs when the
       operator-configured deadline fires: this proves (not just documents)
       that it joins the EXISTING declared-lane candidate rotation
       ([Runtime_attempt_fsm.should_try_next]) and the EXISTING post-hoc
@@ -23,8 +23,9 @@
       production attempts that proved it, one of each kind.
 
     The Eio fiber race that applies the verdict has no unit fixture, matching
-    this file's existing coverage boundary (no test calls [run_try_provider]
-    directly either -- see test_keeper_turn_driver_failover.ml for the
+    this file's existing coverage boundary (no test calls
+    [run_try_provider_attempt] directly either -- see
+    test_keeper_turn_driver_failover.ml for the
     candidate-rotation layer's equivalent boundary). *)
 
 module Pulse = Masc.Keeper_heartbeat_loop_in_turn_pulse

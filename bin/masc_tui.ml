@@ -9953,9 +9953,9 @@ let owe_schedules_read state =
   state.schedules_page_owed <- Masc_tui_owed_read.changed state.schedules_page_owed
 
 (* The agenda strip says its list may be behind until a read that began after
-   this point answers: on a schedule change, on a newly opened observer and
-   after lost events. A read in flight is overtaken; its successor is the
-   owed read, which bursts share. *)
+   this point answers: on a schedule change, on an observer reopen that did
+   not resume cleanly, and after lost events. A read in flight is overtaken;
+   its successor is the owed read, which bursts share. *)
 let owe_agenda_revalidation state =
   state.schedules_agenda_freshness <- Masc_tui_agenda.Refresh_needed;
   owe_schedules_read state
@@ -24426,7 +24426,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       (* The local Keeper list is the metadata files and the Keepers runtime
          config declares without one. While the server or the feed is down
          nothing is announced; the Keepers run in the server, so their files
-         hold still, and a CLI write shows on reopen or [r]. *)
+         hold still, and a CLI write shows on a reopen that missed events or
+         on [r]. A clean resume replays the server's own roster events. *)
       if !local_keepers_changed || !observer_source_loss_seen || !runtime_config_changed then
         launch_local_keeper_read state ~mailbox ~intent:Snapshot_read.Refresh state.local_base_path;
       if !observer_source_loss_seen then owe_agenda_revalidation state;
@@ -24687,7 +24688,13 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       state.observer_machine <- None;
       state.observer_browser <- None;
       state.observer_play <- None;
-      state.schedules_agenda_freshness <- Masc_tui_agenda.Refresh_needed;
+      (* The disconnect itself is not agenda staleness: the observer status
+         display carries the broken-since time (RFC-0480 §3.3), and the reopen
+         settles the question -- a gap revalidates, a Resumed replay redelivers
+         the schedules events that changed anything. Marking Refresh_needed
+         here made every clean resume owe a read that proved nothing, and the
+         "may be out of date" marker then outlived the resume (review, PR
+         #50679). A real read debt is flagged where it is incurred. *)
       let was_opening = state.observer = Observer_opening in
       let reason =
         match outcome with

@@ -29,6 +29,7 @@ type guest_profile =
 type runtime_binding = private
   { runtime : Keeper_turn_sandbox_runtime.t
   ; guest_profile : guest_profile
+  ; network_mode : Keeper_types_profile_sandbox.network_mode
   ; image : (string, Keeper_sandbox_image_resolver.error) result
         (** The turn's [sandbox_image] resolved through the host catalog.
             [Error] still binds the runtime: a caller that only needs the

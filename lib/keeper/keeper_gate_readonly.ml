@@ -590,7 +590,9 @@ let classify_command_ir = function
    program is a shell with [-c] is a command line in an argv costume
    ([Keeper_tooling.Shell_costume]) and is classified as the line it is,
    because that is what the dispatcher runs. The sandbox labels at the top
-   level of the envelope are display/audit data only — the sandbox decision
+   level of the envelope, including network mode, are not independent proof of
+   isolation. They are available to the judge and exact approval matching, while
+   mounted filesystem effects still require their normal evaluation. The sandbox decision
    reads the typed [sandbox_profile] the request carries, never these
    strings. *)
 let classify_command input =

@@ -72,8 +72,9 @@ val try_respond_with_string : t -> Httpun.Response.t -> string -> acceptance
     [Rejected_by_writer]. On HTTP/2 the body is reserved in the ledger first;
     when the capacity is exhausted or the request is already closed, the
     client gets an empty 503 [no-store] that keeps the response's other
-    headers, and the result is [Rejected_by_writer]. [Eio.Cancel.Cancelled]
-    passes through. *)
+    headers, and the result is [Rejected_by_writer]. An HTTP/2 stream that is
+    already over (see {!respond_with_streaming}) gets no response, and the
+    result is [Rejected_by_writer]. [Eio.Cancel.Cancelled] passes through. *)
 
 val respond_with_string : t -> Httpun.Response.t -> string -> unit
 (** {!try_respond_with_string} for a caller that does not record acceptance.
@@ -85,8 +86,10 @@ module Body_writer : sig
 
   val write_string : t -> string -> unit
   (** On HTTP/2 the bytes are reserved in the ledger first. When that fails,
-      the stream is reset with the ledger's exception and the writer closed,
-      so the next {!flush} answers [`Closed] and {!is_closed} is true. *)
+      the stream is reset ({!Http_h2_stream.reset} with [Out_of_capacity])
+      and the writer closed, so the next {!flush} answers [`Closed] and
+      {!is_closed} is true. A writer for a stream that was already over drops
+      the bytes. *)
 
   val flush : t -> ([ `Written | `Closed ] -> unit) -> unit
   (** [flush t f] calls [f `Written] once every byte written so far reached
@@ -116,8 +119,14 @@ val respond_with_streaming
   -> t
   -> Httpun.Response.t
   -> Body_writer.t
-(** Starts a streaming response. Raises what the transport library raises when
-    the request can no longer take a response ([Failure] from either). *)
+(** Starts a streaming response. An HTTP/2 stream that is already over gets
+    a closed writer and h2 is not called: its switch failed or ended, or an
+    error was reported on it. That writer drops writes, {!Body_writer.flush}
+    answers [`Closed] and {!Body_writer.stream_end} is resolved. Otherwise
+    raises what the transport library raises when the request can no longer
+    take a response: [Failure] from either, and on HTTP/2 [Assert_failure]
+    for a stream h2 reset on its own whose RST_STREAM has not left the socket
+    yet (RFC-0518 D1). *)
 
 (** Why a request body was not delivered. *)
 type body_read_error =
@@ -141,7 +150,8 @@ val read_body
 
 val report_exn : t -> exn -> unit
 (** Tells the transport the request failed with [exn]: httpun answers its
-    error path, h2 resets the stream. *)
+    error path; on HTTP/2 the stream is reset ({!Http_h2_stream.reset} with
+    [Raised]). *)
 
 (** The late-response failure shapes of both libraries (#13059). *)
 module Late_response : sig

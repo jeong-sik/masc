@@ -8,8 +8,6 @@ type lease
 type refusal = Capacity_exhausted | Request_closed
 
 exception Unbound_request
-exception Response_capacity_exhausted
-exception Response_writer_closed
 
 val create : max_pending_bytes:int -> t
 val pending_bytes : t -> int

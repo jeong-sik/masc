@@ -174,11 +174,19 @@ sys.exit(int(open(exit_code).read()) if os.path.exists(exit_code) else 0)
             capture_output=True, text=True, timeout=30)
         self.assertEqual(help_result.returncode, 0, help_result.stderr)
         self.assertIn('--timeout-s', help_result.stdout)
-        with tempfile.TemporaryDirectory(prefix='masc-muse-deadline-cli-') as tmp:
+        with tempfile.TemporaryDirectory(prefix='masc-muse-deadline-cli-') as tmp, \
+             tempfile.TemporaryDirectory(prefix='masc-muse-deadline-workspace-') as ws:
+            # The command is a workspace command: it resolves the workspace
+            # before it looks at the deadline, so the fixture has to give it one
+            # or the test measures the workspace error instead of the argument
+            # check it is named for.
+            workspace = Path(ws) / 'workspace'
+            workspace.mkdir()
             for timeout in ('0', '-1', 'nan', 'inf'):
                 with self.subTest(timeout=timeout):
                     result = subprocess.run(
-                        [BINARY, 'runtime-muse-models', '--account-home', tmp,
+                        [BINARY, 'runtime-muse-models', '--base-path', str(workspace),
+                         '--account-home', tmp,
                          '--cli-path', str(Path(tmp) / 'must-not-spawn'),
                          '--timeout-s=' + timeout],
                         capture_output=True, text=True, timeout=30)

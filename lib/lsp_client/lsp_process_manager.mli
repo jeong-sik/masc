@@ -147,7 +147,6 @@ val command_for_lang : string -> (string * string list) option
     ["unknown"] for a file no server here covers. *)
 val lang_of_path : string -> string
 
-(** Allocate a fresh JSON-RPC request ID for this process. *)
 (** Write a complete Content-Length frame under this process's write mutex.
     No router table lock or other process's write lock is held. *)
 val write_message : lsp_process -> string -> unit

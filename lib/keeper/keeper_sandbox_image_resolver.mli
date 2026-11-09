@@ -20,12 +20,12 @@ type error =
       (** The profile starts no container ([remote_ssh]), or it is [microvm]
           with no [microvm_backend], so there is no store to look in. *)
 
+(** What is wrong and, where the operator can fix it, the commands to run. *)
 val error_to_string : error -> string
 
 val error_code : error -> string
 (** Stable category for localized presentation; the diagnostic text remains
     available separately. *)
-(** What is wrong and, where the operator can fix it, the commands to run. *)
 
 val resolve :
   config_root:string ->

@@ -263,14 +263,6 @@ val create_post_with_audience :
     Cancellation, [Eio.Time.Timeout], [Out_of_memory], [Stack_overflow] and
     [Sys.Break] propagate rather than becoming ordinary failures. *)
 
-(** Owner-gated in-place edit of an existing post's title/body.  Returns
-    [Unauthorized] when [editor] does not own the post, [Post_not_found] for a
-    missing id, and [Validation_error] for empty/oversized content or invalid
-    [new_author].  When provided, [new_author] transfers persisted ownership and
-    must parse through [Agent_id.of_string]. The body is normalized exactly as on
-    create and the existing [meta_json] is preserved independently, so editing
-    cannot silently drop metadata.
-    [post_kind]/[visibility]/[hearth] are preserved. *)
 (** What an edit stored: the post as saved, the audience recorded with the saved
     text, the names in that text no Keeper declares (for the response only,
     never stored), and whether the normalized title, body or author changed,
@@ -282,6 +274,14 @@ type post_edit =
   ; content_changed : bool
   }
 
+(** Owner-gated in-place edit of an existing post's title/body.  Returns
+    [Unauthorized] when [editor] does not own the post, [Post_not_found] for a
+    missing id, and [Validation_error] for empty/oversized content or invalid
+    [new_author].  When provided, [new_author] transfers persisted ownership and
+    must parse through [Agent_id.of_string]. The body is normalized exactly as on
+    create and the existing [meta_json] is preserved independently, so editing
+    cannot silently drop metadata.
+    [post_kind]/[visibility]/[hearth] are preserved. *)
 val update_post_with_outcome :
   store ->
   lookup:Recipient_lookup.t ->

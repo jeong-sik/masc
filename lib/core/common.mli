@@ -3,21 +3,18 @@
     Kept small and dependency-light so every module can depend on it
     without introducing cycles. *)
 
-(** Boolean environment variable with permissive truthy parsing:
-    ["1"], ["true"], ["yes"], ["on"] (case/whitespace insensitive)
-    all return [true]; absent, empty, or anything else returns [false]. *)
-(** [true] when [MASC_STRICT_FINALIZERS] env is truthy. Callers can
-    opt into raising finally-block exceptions instead of swallowing
-    them. *)
 val protect :
   module_name:string ->
   finally_label:string ->
   finally:(unit -> unit) ->
   (unit -> 'a) ->
   'a
-(** Like [Fun.protect], but routes finalizer failures through
-    {!handle_finalizer_error} so normal runs never lose the primary
-    exception and strict runs surface finally failures. *)
+(** Like [Fun.protect], but a failing [finally] is logged under [module_name]
+    and [finally_label] instead of replacing the exception of the body. When
+    the body returned normally, the failure is also re-raised if
+    [MASC_STRICT_FINALIZERS] is ["1"], ["true"], ["yes"] or ["on"] (case and
+    surrounding whitespace ignored). [Eio.Cancel.Cancelled] from [finally] is
+    always re-raised. *)
 
 val masc_dirname : string
 (** SSOT directory name for MASC runtime state. Value is [".masc"].

@@ -929,7 +929,8 @@ named on its title row: `story`, `s schedules` and `m memory`.
   Librarian's last digest, oldest first, one line each with how long ago it
   happened, so the newest is the last event of the feed. A turn line gives the
   stop reason the receipt recorded, as written, or `turn no stop reason`. A wake
-  line gives its outcome and the schedule that woke the Keeper. A schedule
+  line gives its outcome, the schedule that woke the Keeper and, for a failed
+  wake, the error the schedule recorded. A schedule
   records only its own last wake, so the two wakes are the last wakes of the
   two schedules on the Keeper's first schedule page whose wakes are newest. A
   page too short for the feed drops its oldest events first.
@@ -939,8 +940,8 @@ named on its title row: `story`, `s schedules` and `m memory`.
   `wakes from the first page only` or `wakes (schedule read failed)`. The line
   of a read that failed ends with the reason the read stored. These lines stay
   when the page is short, and the lines of failed reads outlast the others. A
-  wake whose time cannot be read makes the wakes
-  unknown. The window reads turns and schedules while the story page is open,
+  window with no line to spare for the feed shows none of it. A wake whose time
+  cannot be read makes the wakes unknown. The window reads turns and schedules while the story page is open,
   one Keeper at a time as the cursor moves, and reads the turns again when the
   server announces a change in that Keeper's turns.
 - `s schedules` is the first page of the Keeper's own schedules, the page the

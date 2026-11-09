@@ -60,9 +60,9 @@ val feed_lines :
     whatever the width: turns, schedules and the memory-health reading are the
     three sources. A note of a read that failed ends with the reason the read
     stored. A wake whose time cannot be read leaves the newest wakes unknown.
-    At most [max_lines] lines come back. The notes keep their lines and the
-    oldest events give way; a window too short for every note keeps the
-    cautions. *)
+    At most [max_lines] lines come back, none for a count of zero or less,
+    notes included. The notes keep their lines and the oldest events give way;
+    a window too short for every note keeps the cautions. *)
 
 val memory_lines :
   Masc_tui_types.state -> now:float -> keeper_name:string -> string list

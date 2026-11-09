@@ -136,6 +136,15 @@ let test_unreadable_time_leaves_the_newest_wakes_unknown () =
        ])
 ;;
 
+let test_a_start_time_without_a_status_is_a_wake () =
+  Alcotest.check Alcotest.string "the start time alone makes the wake" "whole [r]"
+    (reading
+       [ { (make_row "r") with
+           sch_last_wake_started_at_iso = Some "2026-11-07T09:00:00Z"
+         }
+       ])
+;;
+
 let test_a_cut_page_says_so () =
   Alcotest.check Alcotest.string "a cut page with no wake leaves a later page open"
     "first page []"
@@ -239,6 +248,12 @@ let test_only_the_newest_wakes_enter () =
          ; wake_at "w2" "2026-11-09T11:00:00Z"
          ; wake_at "w1" "2026-11-09T10:00:00Z"
          ]
+       ~digest_at:None);
+  let noon = "2026-11-09T12:00:00Z" in
+  Alcotest.check names "of three wakes at one instant the first two given enter"
+    [ "wake a"; "wake b" ]
+    (told ~turns:[]
+       ~wakes:[ wake_at "a" noon; wake_at "b" noon; wake_at "c" noon ]
        ~digest_at:None)
 ;;
 
@@ -267,6 +282,8 @@ let () =
             test_offsets_compare_as_instants
         ; Alcotest.test_case "unreadable time leaves the newest wakes unknown" `Quick
             test_unreadable_time_leaves_the_newest_wakes_unknown
+        ; Alcotest.test_case "a start time without a status" `Quick
+            test_a_start_time_without_a_status_is_a_wake
         ; Alcotest.test_case "a cut page says so" `Quick test_a_cut_page_says_so
         ] )
     ; ( "feed"

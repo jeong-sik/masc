@@ -1251,17 +1251,21 @@ let keeper_story_lines (state : state) ~now ~inner ~body_rows (row : Keeper_list
   let next_entries =
     match next_parts with [] -> [ dim "nothing announced" ] | _ -> [ join next_parts ]
   in
-  (* The feed takes the lines the rest of the page leaves in the window. *)
+  (* The feed takes the lines the rest of the page leaves in the window. With
+     none left it tells nothing, not even that a source failed, so an empty past
+     says "nothing recorded" only where the feed had room to say more. *)
+  let feed_room =
+    body_rows - List.length past_head - List.length past_tail - List.length now_entries
+    - List.length next_entries
+  in
   let feed =
-    Masc_tui_render_keeper_story.feed_lines state ~now
-      ~max_lines:
-        (body_rows - List.length past_head - List.length past_tail - List.length now_entries
-         - List.length next_entries)
-      ~keeper_name
+    Masc_tui_render_keeper_story.feed_lines state ~now ~max_lines:feed_room ~keeper_name
   in
   let past_entries = past_head @ feed @ past_tail in
   labelled_lines "◂ past"
-    (match past_entries with [] -> [ dim "nothing recorded" ] | _ -> past_entries)
+    (match past_entries with
+     | [] when feed_room > 0 -> [ dim "nothing recorded" ]
+     | [] | _ :: _ -> past_entries)
   @ labelled_lines "● now" now_entries
   @ labelled_lines "▹ next" next_entries
 

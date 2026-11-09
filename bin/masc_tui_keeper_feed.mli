@@ -1,6 +1,6 @@
 (** The past of one Keeper told in time order (RFC-0515 section 2.5): its
     newest turns, its newest wakes and its last digest, oldest first, so that
-    the newest event sits next to the story page's "now" group.
+    the newest event ends the list.
 
     The feed holds what the three reads gave and says nothing about the time
     between two of its events: a turn older than the oldest one listed, or a

@@ -11,18 +11,10 @@ let at = function
 
 let wakes_shown = 2
 
-(* The order the events happen in when two of them carry one time. *)
-let rank = function
-  | Wake _ -> 0
-  | Turn _ -> 1
-  | Digest _ -> 2
-;;
-
-let compare_items left right =
-  match Float.compare (at left) (at right) with
-  | 0 -> Int.compare (rank left) (rank right)
-  | order -> order
-;;
+(* The sort is stable, so events of one time keep the order the sources are
+   joined in below: wakes, turns, digest. That is the order they happen in: a
+   wake starts a turn and a digest follows the turns it digested. *)
+let compare_items left right = Float.compare (at left) (at right)
 
 let of_sources ~turns ~wakes ~digest_at =
   List.stable_sort compare_items

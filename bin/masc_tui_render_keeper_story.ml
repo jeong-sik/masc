@@ -342,12 +342,12 @@ let digest_source (state : Masc_tui_types.state) ~keeper_name =
 ;;
 
 (* The past group of the story page as one feed: the newest turns, the newest
-   wakes and the last digest, oldest first, so that the newest sits next to the
-   now group. A source that is not read, or whose read failed, has no event to
-   put in its place, so it gets a line of its own after the events, whatever
-   the width. The cautions come before the notices. The notes keep their lines
-   and the oldest events give way to the window's height; a window too short
-   for every note keeps the cautions. *)
+   wakes and the last digest, oldest first, so that the newest ends the feed. A
+   source that is not read, or whose read failed, has no event to put in its
+   place, so it gets a line of its own after the events, whatever the width. The
+   cautions come before the notices. The notes keep their lines and the oldest
+   events give way to the window's height; a window too short for every note
+   keeps the cautions. With no line to spare the feed is empty, notes included. *)
 let feed_lines (state : Masc_tui_types.state) ~now ~max_lines ~keeper_name =
   let turns, turn_notes = turns_source state ~keeper_name in
   let wakes, wake_notes = wakes_source state ~keeper_name in
@@ -364,7 +364,7 @@ let feed_lines (state : Masc_tui_types.state) ~now ~max_lines ~keeper_name =
   else
     let note_lines = List.take max_lines (List.map note_line (cautions @ notices)) in
     let room = max_lines - List.length note_lines in
-    List.drop (List.length item_lines - room) item_lines @ note_lines
+    List.drop (max 0 (List.length item_lines - room)) item_lines @ note_lines
 ;;
 
 let schedule_lines (state : Masc_tui_types.state) ~now ~keeper_name =

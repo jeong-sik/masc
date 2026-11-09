@@ -26,12 +26,14 @@ type t =
       ; removed : int
       ; source_invalidations : int
       ; age_bins : Masc.Keeper_memory_age_bins.t option
+      ; pass_end : Tui_decode_memory_health.memory_librarian_pass_end option
       }
 
 type index =
   { ind_snapshot : Tui_decode_memory_health.memory_health_snapshot option
   ; ind_has_anonymous_refusal : bool
   ; ind_keepers : (string, t) Hashtbl.t
+  ; ind_peak_lag : int
   }
 
 let unread_lag (librarian : Tui_decode_memory_health.memory_librarian_health) =
@@ -46,6 +48,7 @@ let index_of_snapshot (snap_opt : Tui_decode_memory_health.memory_health_snapsho
       { ind_snapshot = None
       ; ind_has_anonymous_refusal = false
       ; ind_keepers = Hashtbl.create 0
+      ; ind_peak_lag = 0
       }
   | Some snap ->
       let has_anonymous_refusal =
@@ -90,13 +93,23 @@ let index_of_snapshot (snap_opt : Tui_decode_memory_health.memory_health_snapsho
               ; removed = k.mkh_removed
               ; source_invalidations = k.mkh_source_invalidations
               ; age_bins = k.mkh_age_bins
+              ; pass_end = k.mkh_librarian.mlh_state
               }
           in
           Hashtbl.replace table k.mkh_keeper_id row)
         snap.mhs_keepers;
+      let peak_lag =
+        List.fold_left
+          (fun peak (k : Tui_decode_memory_health.memory_keeper_health) ->
+            match unread_lag k.mkh_librarian with
+            | Some turns -> max peak turns
+            | None -> peak)
+          0 snap.mhs_keepers
+      in
       { ind_snapshot = Some snap
       ; ind_has_anonymous_refusal = has_anonymous_refusal
       ; ind_keepers = table
+      ; ind_peak_lag = peak_lag
       }
 ;;
 
@@ -113,16 +126,20 @@ let find (idx : index) ~keeper_name : t =
             No_row
 ;;
 
-let unknown_cell = { Masc_tui_keeper_axis_cell.text = "mem ?"; tone = Quiet }
+(* A value the row came without. The header above a view's cell names the
+   value; the second row's cells name it before the mark. *)
+let unmeasured_mark = "?"
+
+let unknown_cell = { Masc_tui_keeper_axis_cell.text = "mem " ^ unmeasured_mark; tone = Quiet }
 let refused_cell = { Masc_tui_keeper_axis_cell.text = "mem !"; tone = Failure }
 
+let lag_tone turns =
+  if turns > 0 then Masc_tui_keeper_axis_cell.Attention else Masc_tui_keeper_axis_cell.Quiet
+;;
+
 let cell_of_lag = function
-  | Lag n ->
-      let tone =
-        if n > 0 then Masc_tui_keeper_axis_cell.Attention else Masc_tui_keeper_axis_cell.Quiet
-      in
-      { Masc_tui_keeper_axis_cell.text = Printf.sprintf "lag %d" n; tone }
-  | Lag_unmeasured -> { Masc_tui_keeper_axis_cell.text = "lag ?"; tone = Quiet }
+  | Lag n -> { Masc_tui_keeper_axis_cell.text = Printf.sprintf "lag %d" n; tone = lag_tone n }
+  | Lag_unmeasured -> { Masc_tui_keeper_axis_cell.text = "lag " ^ unmeasured_mark; tone = Quiet }
 ;;
 
 let lag_cell = function
@@ -132,31 +149,156 @@ let lag_cell = function
   | Row { lag; _ } -> Some (cell_of_lag lag)
 ;;
 
+let gap_cells = function
+  | Gap { first_atom; past_last_atom } ->
+      let count = past_last_atom - first_atom in
+      [ { Masc_tui_keeper_axis_cell.text = Printf.sprintf "gap %d" count; tone = Attention } ]
+  | Gap_unmeasured ->
+      [ { Masc_tui_keeper_axis_cell.text = "gap " ^ unmeasured_mark; tone = Attention } ]
+  | No_gap -> []
+;;
+
+let stale_cells source_invalidations =
+  if source_invalidations > 0 then
+    [ { Masc_tui_keeper_axis_cell.text = Printf.sprintf "stale ×%d" source_invalidations
+      ; tone = Attention
+      } ]
+  else []
+;;
+
+let span_since ~now at = Masc_tui_message_layout.span_text (max 0.0 (now -. at))
+
 let cells ~now = function
   | Unknown -> [ unknown_cell ]
   | No_row -> []
   | Refused _ -> [ refused_cell ]
   | Row { lag; gap; updated_at; added; removed; source_invalidations; _ } ->
-      let gap_cells =
-        match gap with
-        | Gap { first_atom; past_last_atom } ->
-            let count = past_last_atom - first_atom in
-            [ { Masc_tui_keeper_axis_cell.text = Printf.sprintf "gap %d" count; tone = Attention } ]
-        | Gap_unmeasured ->
-            [ { Masc_tui_keeper_axis_cell.text = "gap ?"; tone = Attention } ]
-        | No_gap -> []
-      in
       let clock_cells =
         match updated_at with
         | Some at ->
-            let age_span = Masc_tui_message_layout.span_text (max 0.0 (now -. at)) in
-            [ { Masc_tui_keeper_axis_cell.text = Printf.sprintf "+%s +%d -%d" age_span added removed; tone = Quiet } ]
+            [ { Masc_tui_keeper_axis_cell.text =
+                  Printf.sprintf "+%s +%d -%d" (span_since ~now at) added removed
+              ; tone = Quiet
+              } ]
         | None -> []
       in
-      let stale_cells =
-        if source_invalidations > 0 then
-          [ { Masc_tui_keeper_axis_cell.text = Printf.sprintf "stale ×%d" source_invalidations; tone = Attention } ]
-        else []
-      in
-      gap_cells @ [ cell_of_lag lag ] @ clock_cells @ stale_cells
+      gap_cells gap @ [ cell_of_lag lag ] @ clock_cells @ stale_cells source_invalidations
+;;
+
+type 'a field =
+  | Measured of 'a
+  | Unmeasured
+  | Snapshot_unknown
+  | Row_absent
+  | Row_refused
+
+let pass_end = function
+  | Unknown -> Snapshot_unknown
+  | No_row -> Row_absent
+  | Refused _ -> Row_refused
+  | Row { pass_end = Some ending; _ } -> Measured ending
+  | Row { pass_end = None; _ } -> Unmeasured
+;;
+
+let updated_at = function
+  | Unknown -> Snapshot_unknown
+  | No_row -> Row_absent
+  | Refused _ -> Row_refused
+  | Row { updated_at = Some at; _ } -> Measured at
+  | Row { updated_at = None; _ } -> Unmeasured
+;;
+
+let age_bins = function
+  | Unknown -> Snapshot_unknown
+  | No_row -> Row_absent
+  | Refused _ -> Row_refused
+  | Row { age_bins = Some bins; _ } -> Measured bins
+  | Row { age_bins = None; _ } -> Unmeasured
+;;
+
+let peak_lag index = index.ind_peak_lag
+
+let field_cell ~unmeasured ~measured = function
+  | Measured value -> measured value
+  | Unmeasured -> { Masc_tui_keeper_axis_cell.text = unmeasured; tone = Quiet }
+  | Snapshot_unknown -> unknown_cell
+  | Row_refused -> refused_cell
+  | Row_absent -> { Masc_tui_keeper_axis_cell.text = Masc_tui_theme.Glyph.no_value; tone = Quiet }
+;;
+
+(* The Memory pane's sentence for each ending ("caught up", "work still
+   pending"), shortened to a word for the axis row's ● column. *)
+let pass_word = function
+  | Tui_decode_memory_health.Pass_off -> "switched off"
+  | Tui_decode_memory_health.Pass_lane_unconfigured -> "no lane"
+  | Tui_decode_memory_health.Pass_drained -> "caught up"
+  | Tui_decode_memory_health.Pass_yielded_to_waiting_unit -> "yielded"
+  | Tui_decode_memory_health.Pass_pending -> "pending"
+  | Tui_decode_memory_health.Pass_not_committed -> "saved none"
+  | Tui_decode_memory_health.Pass_stopped _ -> "stopped"
+  | Tui_decode_memory_health.Pass_raised _ -> "crashed"
+;;
+
+(* A pass that broke is a failure. A pass that saved nothing, or a librarian
+   with no lane to run on, keeps the Keeper's memory where it was. *)
+let pass_tone = function
+  | Tui_decode_memory_health.Pass_stopped _ | Tui_decode_memory_health.Pass_raised _ ->
+      Masc_tui_keeper_axis_cell.Failure
+  | Tui_decode_memory_health.Pass_not_committed
+  | Tui_decode_memory_health.Pass_lane_unconfigured -> Masc_tui_keeper_axis_cell.Attention
+  | Tui_decode_memory_health.Pass_off | Tui_decode_memory_health.Pass_drained
+  | Tui_decode_memory_health.Pass_yielded_to_waiting_unit
+  | Tui_decode_memory_health.Pass_pending -> Masc_tui_keeper_axis_cell.Quiet
+;;
+
+let pass_cell reading =
+  field_cell ~unmeasured:unmeasured_mark
+    ~measured:(fun ending -> { Masc_tui_keeper_axis_cell.text = pass_word ending; tone = pass_tone ending })
+    (pass_end reading)
+;;
+
+let updated_cell ~now reading =
+  field_cell ~unmeasured:unmeasured_mark
+    ~measured:(fun at -> { Masc_tui_keeper_axis_cell.text = span_since ~now at; tone = Quiet })
+    (updated_at reading)
+;;
+
+let fact_ages_cell reading =
+  field_cell ~unmeasured:Masc_tui_keeper_age_ladder.unmeasured_mark
+    ~measured:(fun bins ->
+      { Masc_tui_keeper_axis_cell.text = Masc_tui_keeper_age_ladder.strip bins; tone = Quiet })
+    (age_bins reading)
+;;
+
+let lag_bar_cells = 8
+
+let lag_bar_cell ~peak_lag = function
+  | Lag turns ->
+      let bar = Masc_tui_chart.bar ~width:lag_bar_cells ~value:turns ~max_value:peak_lag in
+      { Masc_tui_keeper_axis_cell.text = Printf.sprintf "%s %d" bar turns; tone = lag_tone turns }
+  | Lag_unmeasured -> cell_of_lag Lag_unmeasured
+;;
+
+let digest_cell ~now digest_at =
+  let age =
+    match digest_at with
+    | Some at -> span_since ~now at
+    | None -> Masc_tui_theme.Glyph.no_value
+  in
+  { Masc_tui_keeper_axis_cell.text = "digest " ^ age; tone = Quiet }
+;;
+
+(* The ● cell of both views is read from the same reading and already marks
+   a reading without a row, so the next cells draw only a row's values. *)
+let lag_digest_gap_cells ~now ~peak_lag = function
+  | Unknown | No_row | Refused _ -> []
+  | Row { lag; digest_at; gap; _ } ->
+      [ lag_bar_cell ~peak_lag lag; digest_cell ~now digest_at ] @ gap_cells gap
+;;
+
+let lag_stale_facts_cells ~peak_lag = function
+  | Unknown | No_row | Refused _ -> []
+  | Row { lag; source_invalidations; age_bins; _ } ->
+      (lag_bar_cell ~peak_lag lag :: stale_cells source_invalidations)
+      @ [ Masc_tui_keeper_age_ladder.count_cell age_bins ]
 ;;

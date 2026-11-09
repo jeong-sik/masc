@@ -290,6 +290,7 @@ let memory_row ?(lag = Reading.Lag 0) ?(gap = Reading.No_gap) ?updated_at () =
     ; removed = 0
     ; source_invalidations = 0
     ; age_bins = None
+    ; pass_end = None
     }
 ;;
 

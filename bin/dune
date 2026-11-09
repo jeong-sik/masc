@@ -2008,6 +2008,9 @@
  (libraries
   masc
   masc_tui_types
+  masc_tui_chart
+  masc_tui_theme
+  masc_tui_keeper_age_ladder
   masc_tui_keeper_axis_cell
   masc_tui_message_layout))
 

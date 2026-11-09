@@ -97,7 +97,7 @@ let argv ~cli_path = function
 
 let environment = function
   | Native {client=Codex_home; account_home} ->
-    Runtime_codex_app_server.client_environment (Runtime_official_account.Current (Some account_home))
+    Runtime_codex_app_server.login_environment ~account_home
     |> Result.map_error Runtime_codex_app_server.error_to_string
   | Native {client=Claude_home; account_home} ->
     Runtime_claude_code.login_environment ~account_home
@@ -115,16 +115,9 @@ let authorize ~account_request ~client ~account_home =
 
 let observe ~mgr ~clock ~cwd ~cli_path ~account_request = function
   | Native {client=Codex_home; account_home} ->
-    (* WORKAROUND: the Codex client still takes the account in its config, so
-       the authorized account goes there. Root fix: plan D2-6, where every
-       Codex function that starts the CLI takes the authorized account. *)
-    let* account =
-      authorize ~account_request ~client:Codex ~account_home
-      |> Result.map Runtime_account_access.account
-    in
-    let config = { (Runtime_codex_app_server.default_config ()) with
-      cli_path; account_home=Runtime_official_account.Captured account } in
-    let* result = Runtime_codex_app_server.probe_subscription ~mgr ~clock ~cwd config
+    let* account = authorize ~account_request ~client:Codex ~account_home in
+    let config = { (Runtime_codex_app_server.default_config ()) with cli_path } in
+    let* result = Runtime_codex_app_server.probe_subscription ~mgr ~clock ~cwd ~account config
       |> Result.map_error Runtime_codex_app_server.error_to_string in
     (match result.subscription with
      | Runtime_codex_app_server.Chatgpt _ | Api_key -> Ok Authenticated

@@ -17,16 +17,20 @@ type probe_result =
   ; user_agent : string option
   }
 
-type account = Runtime_official_account.codex Runtime_official_account.selection
+(** An account a CLI may start on ({!Runtime_account_access.authorize}). Every
+    function that starts the app-server takes one; the config holds no
+    account. *)
+type authorized_account =
+  Runtime_official_account.codex Runtime_account_access.authorized
 
 type config =
   { cli_path : string
-  ; account_home : account
-    (** Current declaration or captured login context. A captured selection
-        retains its admitted home and private credential environment. *)
   ; isolated_home : string option
     (** Verification-only private CODEX_HOME prepared with projected auth and
-        provider configuration. Its safe CLI overrides apply only here. *)
+        provider configuration. Its safe CLI overrides apply only here. The
+        app-server starts with the environment of the authorized account and
+        this home as its CODEX_HOME
+        ({!Runtime_official_account.private_codex_environment}). *)
   ; model : string option
   ; context_window : int option
     (** Resolved MASC model window, passed to the actual client on both start
@@ -414,10 +418,10 @@ val input_capacity_refusal : error -> input_capacity option
     remain ordinary RPC errors. Counts come from the server, never a local cap. *)
 
 val error_to_string : error -> string
-val client_environment : ?isolated_home:string -> account -> (string array, error) result
-(** Selected-account child environment shared by execution and explicit login.
-    A private verification home reapplies the explicit isolation filter to the
-    captured environment and the private config's declared environment keys. *)
+val login_environment : account_home:string -> (string array, error) result
+(** The environment of the login CLI on [account_home], which the login
+    creates the account in. It starts no CLI itself, and no turn or read runs
+    on it: those take an {!authorized_account}. *)
 
 
 val refused_for_spent_usage : error -> bool
@@ -442,6 +446,7 @@ val probe_subscription :
   mgr:_ Eio.Process.mgr ->
   clock:_ Eio.Time.clock ->
   cwd:Eio.Fs.dir_ty Eio.Path.t ->
+  account:authorized_account ->
   config ->
   (probe_result, error) result
 (** Start the official app-server and measure only [initialize] plus
@@ -454,21 +459,22 @@ type listed_model = {
 }
 val list_models :
   mgr:_ Eio.Process.mgr -> clock:_ Eio.Time.clock -> cwd:Eio.Fs.dir_ty Eio.Path.t ->
-  config -> (listed_model list, error) result
+  account:authorized_account -> config -> (listed_model list, error) result
 (** Account admission followed by paginated model/list, without thread/start or
     turn/start. The CLI owns cache policy; callers needing refresh use an isolated
     connection home without a model cache. This response has no context window. *)
 
 val read_rate_limits :
   mgr:_ Eio.Process.mgr -> clock:_ Eio.Time.clock -> cwd:Eio.Fs.dir_ty Eio.Path.t ->
-  config -> (Runtime_provider_usage_window.report, error) result
+  account:authorized_account -> config -> (Runtime_provider_usage_window.report, error) result
 (** Account admission followed by [account/rateLimits/read], without
     thread/start or turn/start. The windows are for the operator projection;
     the app-server's schema says clients must not infer recovery from them. *)
 
 val delete_threads :
   mgr:_ Eio.Process.mgr -> clock:_ Eio.Time.clock -> cwd:Eio.Fs.dir_ty Eio.Path.t ->
-  config -> string list -> ((string * (unit, error) result) list, error) result
+  account:authorized_account -> config -> string list ->
+  ((string * (unit, error) result) list, error) result
 (** [initialize] followed by one [thread/delete] per id, in order, without
     account/read. The app-server removes the thread's rollout and state rows.
     [Error] means the client did not start or the handshake failed; otherwise
@@ -561,6 +567,9 @@ val run_turn :
   ?on_turn_starting:(thread_id:string -> (unit, string) result) ->
   ?on_turn_started:(thread_id:string -> turn_id:string -> (unit, string) result) ->
   ?on_stream_event:(stream_event -> unit) ->
+  account:authorized_account ->
+  (* The account the app-server starts on. Its environment comes from this
+     value alone. *)
   config ->
   prompt:string ->
   images:image_input list ->

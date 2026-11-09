@@ -19,11 +19,11 @@ type probe_result =
   ; user_agent : string option
   }
 
-type account = Runtime_official_account.codex Runtime_official_account.selection
+type authorized_account =
+  Runtime_official_account.codex Runtime_account_access.authorized
 
 type config =
   { cli_path : string
-  ; account_home : account
   ; isolated_home : string option
   ; model : string option
   ; context_window : int option
@@ -48,7 +48,6 @@ let client_version = Runtime_build_version.current
 
 let default_config () =
   { cli_path = "codex"
-  ; account_home = Runtime_official_account.Current None
   ; isolated_home = None
   ; model = None
   ; context_window = None
@@ -2770,24 +2769,22 @@ let run_protocol io (config : config) ~on_undelivered_tool_result ~on_tool_respo
     }
 ;;
 
-let selected_account = function
-  | Runtime_official_account.Current declaration ->
-    Runtime_official_account.capture ~client:Codex ~declaration
-  | Captured selected -> Ok selected
+(* The environment of the app-server comes from the authorized account alone.
+   A private verification home keeps that account's environment with the
+   private home as its CODEX_HOME. *)
+let client_environment ?isolated_home account =
+  let selected = Runtime_account_access.account account in
+  match isolated_home with
+  | None -> Ok (Runtime_official_account.environment selected)
+  | Some home ->
+    Runtime_official_account.private_codex_environment ~home selected
+    |> Result.map_error (fun detail -> Invalid_config detail)
 ;;
 
-let client_environment ?isolated_home account =
-  let result = match account, isolated_home with
-    | Runtime_official_account.Current (Some _), Some _ ->
-      Error "account_home and isolated_home cannot both be selected"
-    | Current None, Some home ->
-      Runtime_official_account.capture ~client:Codex ~declaration:(Some home)
-      |> Result.map Runtime_official_account.environment
-    | (Current _ | Captured _), None ->
-      selected_account account |> Result.map Runtime_official_account.environment
-    | Captured selected, Some home ->
-      Runtime_official_account.private_codex_environment ~home selected in
-  result |> Result.map_error (fun detail -> Invalid_config detail)
+let login_environment ~account_home =
+  Runtime_official_account.capture ~client:Codex ~declaration:(Some account_home)
+  |> Result.map Runtime_official_account.environment
+  |> Result.map_error (fun detail -> Invalid_config detail)
 ;;
 
 let drain_stderr flow tail =
@@ -2938,8 +2935,8 @@ let context_submission frame json payload =
       write=Write.json_line (context_selection method_) json payload}
 ;;
 
-let with_spawned_client ?(on_context_submission = fun _ -> ()) ~mgr ~clock ~cwd config run =
-  let* environment = client_environment ?isolated_home:config.isolated_home config.account_home in
+let with_spawned_client ?(on_context_submission = fun _ -> ()) ~mgr ~clock ~cwd ~account config run =
+  let* environment = client_environment ?isolated_home:config.isolated_home account in
   Eio.Switch.run (fun sw ->
     let stdin_r, stdin_w = Eio.Process.pipe ~sw mgr in
     let stdout_r, stdout_w = Eio.Process.pipe ~sw mgr in
@@ -3049,7 +3046,7 @@ let with_spawned_client ?(on_context_submission = fun _ -> ()) ~mgr ~clock ~cwd 
            }))
 ;;
 
-let run_spawned ~mgr ~clock ~cwd ~protocol_cwd config ~on_undelivered_tool_result ~on_tool_response_confirmed ~dynamic_tools ~on_context_submission
+let run_spawned ~mgr ~clock ~cwd ~account ~protocol_cwd config ~on_undelivered_tool_result ~on_tool_response_confirmed ~dynamic_tools ~on_context_submission
     ~reasoning_effort ~thread ~history ~developer_context ~prompt ~images ~on_thread_ready
     ~on_turn_starting ~on_turn_dispatched ~on_prompt_sent ~on_turn_started ~on_stream_event
     ~on_reasoning_effort_resolved =
@@ -3057,6 +3054,7 @@ let run_spawned ~mgr ~clock ~cwd ~protocol_cwd config ~on_undelivered_tool_resul
     ~mgr
     ~clock
     ~cwd
+    ~account
     config
     (fun io ->
     let with_admission_timeout callback =
@@ -3103,26 +3101,15 @@ let native_cwd cwd =
 ;;
 
 let validate_process_config config =
-  let declared_account = match config.account_home with
-    | Runtime_official_account.Current (Some _) -> true
-    | Current None | Captured _ -> false in
   if String.trim config.cli_path = ""
   then Error (Invalid_config "cli_path must not be empty")
   else if Option.fold ~none:false ~some:(fun tokens -> tokens <= 0) config.context_window
   then Error (Invalid_config "context_window must be positive")
-  else if declared_account && Option.is_some config.isolated_home
-  then Error (Invalid_config "account_home and isolated_home cannot both be selected")
   else
   let* () = match config.isolated_home with
     | None -> Ok ()
     | Some home -> Runtime_account_home.of_string home
       |> Result.map (fun _ -> ()) |> Result.map_error (fun detail -> Invalid_config detail) in
-  let* _ = match config.account_home, config.isolated_home with
-    | Runtime_official_account.Current None, Some home ->
-      Runtime_official_account.capture ~client:Codex ~declaration:(Some home)
-      |> Result.map_error (fun detail -> Invalid_config detail)
-    | (Current _ | Captured _), (None | Some _) ->
-      selected_account config.account_home |> Result.map_error (fun detail -> Invalid_config detail) in
   if
     not (Float.is_finite config.admission_timeout_s)
     || config.admission_timeout_s <= 0.0
@@ -3180,7 +3167,7 @@ let validate_turn ?(dynamic_tools = []) ~thread ~cwd config ~prompt ~images =
 
 let subscription_probe_label = "subscription probe"
 
-let probe_metadata ~label ~mgr ~clock ~cwd config protocol =
+let probe_metadata ~label ~mgr ~clock ~cwd ~account config protocol =
   let result =
     let* () = validate_process_config config in
     let* _ = native_cwd cwd in
@@ -3189,6 +3176,7 @@ let probe_metadata ~label ~mgr ~clock ~cwd config protocol =
         ~mgr
         ~clock
         ~cwd
+        ~account
         config
         protocol
     with
@@ -3210,21 +3198,21 @@ let probe_metadata ~label ~mgr ~clock ~cwd config protocol =
   result
 ;;
 
-let delete_threads ~mgr ~clock ~cwd config thread_ids =
-  probe_metadata ~label:"thread delete" ~mgr ~clock ~cwd config
+let delete_threads ~mgr ~clock ~cwd ~account config thread_ids =
+  probe_metadata ~label:"thread delete" ~mgr ~clock ~cwd ~account config
     (thread_delete_protocol thread_ids)
 ;;
 
-let probe_subscription ~mgr ~clock ~cwd config =
-  probe_metadata ~label:subscription_probe_label ~mgr ~clock ~cwd config probe_protocol
+let probe_subscription ~mgr ~clock ~cwd ~account config =
+  probe_metadata ~label:subscription_probe_label ~mgr ~clock ~cwd ~account config probe_protocol
 ;;
 
-let list_models ~mgr ~clock ~cwd config =
-  probe_metadata ~label:subscription_probe_label ~mgr ~clock ~cwd config model_list_protocol
+let list_models ~mgr ~clock ~cwd ~account config =
+  probe_metadata ~label:subscription_probe_label ~mgr ~clock ~cwd ~account config model_list_protocol
 ;;
 
-let read_rate_limits ~mgr ~clock ~cwd config =
-  probe_metadata ~label:subscription_probe_label ~mgr ~clock ~cwd config rate_limits_read_protocol
+let read_rate_limits ~mgr ~clock ~cwd ~account config =
+  probe_metadata ~label:subscription_probe_label ~mgr ~clock ~cwd ~account config rate_limits_read_protocol
 ;;
 
 let run_turn ?(dynamic_tools = []) ?(on_undelivered_tool_result = fun _ -> Error "No durable owner is configured for the undelivered tool result") ?(on_tool_response_confirmed = fun ~call_id:_ -> ()) ?reasoning_effort ~thread ~mgr ~clock ~cwd
@@ -3236,7 +3224,7 @@ let run_turn ?(dynamic_tools = []) ?(on_undelivered_tool_result = fun _ -> Error
     ?(on_thread_ready = fun ~thread_id:_ -> Ok ())
     ?(on_turn_starting = fun ~thread_id:_ -> Ok ())
     ?(on_turn_started = fun ~thread_id:_ ~turn_id:_ -> Ok ()) ?on_stream_event
-    config ~prompt ~images =
+    ~account config ~prompt ~images =
   (* A complete [turn/start] write already makes a later timeout ambiguous:
      the upstream may accept and execute it without returning an acknowledgement.
      The legacy [turn_accepted] flag is this conservative dispatch fence, not
@@ -3274,6 +3262,7 @@ let run_turn ?(dynamic_tools = []) ?(on_undelivered_tool_result = fun _ -> Error
               ~mgr
               ~clock
               ~cwd
+              ~account
               ~protocol_cwd
               config
               ~on_undelivered_tool_result

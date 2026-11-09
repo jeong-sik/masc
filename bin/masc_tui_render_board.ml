@@ -118,9 +118,14 @@ let render_board_compose (state : state) =
              [ unidentified
              ; (Theme.bad ()) ^ Terminal_text.single_line detail ^ Ansi.reset
              ]
-         | Ready _ | Absent ->
+         | Absent ->
              [ unidentified
-             ; words state "원문을 확인할 수 없습니다" "Original post unavailable"
+             ; words state "원문 미조회" "Original post not loaded"
+             ]
+         | Ready _ ->
+             [ unidentified
+             ; words state "조회한 글이 댓글 대상과 다릅니다"
+                 "Loaded post does not match the reply target"
              ])
     | None ->
         let hearth_label =

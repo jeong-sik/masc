@@ -8,9 +8,11 @@ val apply_board_post_load :
   Masc_tui_types.state -> report_error:(string -> unit) ->
   Masc_tui_board_detail.request ->
   (Masc_tui_types.board_post * Masc_tui_types.board_comment list * string option, string) result -> unit
-(** Only the current request and selected post may populate detail. Success
-    enriches the matching list row without reranking. Failure is reported to
-    [report_error] only when the operator is away from the Board surface. *)
+(** Only the current request for the post being read or replied to may populate
+    detail. Entering reply composition retains that read; a new post or a
+    different reply target cannot consume it. Success enriches the matching list
+    row without reranking. Failure is reported to [report_error] only when the
+    operator is away from the Board surface. *)
 
 val apply_publication :
   Masc_tui_types.state -> report:(string -> string -> unit) ->

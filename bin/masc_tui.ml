@@ -9222,7 +9222,7 @@ let owe_keeper_calls_read state ~mailbox ~keeper_name =
   update_calls_owed state ~keeper_name Masc_tui_owed_read.changed;
   launch_owed_keeper_calls state ~mailbox
 
-(* The open Board post reads when it opens or [r] asks, when
+(* The Board post being read or replied to reads when it opens or [r] asks, when
    [notifications/board] names it or names no post, after the operator's own
    comment or vote, on a revalidation or a resumed authority, and again after
    a failed read (RFC-0480 §3.1). *)
@@ -9230,7 +9230,8 @@ let board_post_on_screen state =
   if state.view = Board then
     match state.board_mode with
     | Board_read post_id -> Some post_id
-    | Board_list | Board_compose -> None
+    | Board_compose -> state.board_compose_reply_to
+    | Board_list -> None
   else None
 
 let settle_board_post_owed state ~post_id transition =
@@ -20382,9 +20383,8 @@ let resume_reads_after_authority_change state ~mailbox ~refresh_inflight
               launch_fusion_launch_options_load state ~mailbox
           | Some (Fusion_launch_open _ | Fusion_launch_started _) | None -> ())
      | Board ->
-         (match state.board_mode with
-          | Board_read post_id -> owe_board_post_read state ~mailbox ~post_id
-          | Board_list | Board_compose -> ())
+         Option.iter (fun post_id -> owe_board_post_read state ~mailbox ~post_id)
+           (board_post_on_screen state)
      | Keepers Keeper_message ->
          Option.iter (fun keeper_name ->
            launch_keeper_chat_file_changes_load ~force:true state ~mailbox ~keeper_name;
@@ -41964,7 +41964,11 @@ Use relative paths for resources already held in the package. -->
                 state.board_compose_reply_to <- Some post_id;
                 state.board_compose_hearth <- None;
                 state.board_compose_attach_input <- None;
-                state.board_post_error <- None
+                state.board_post_error <- None;
+                (match Board_detail.view_for state.board_detail ~post_id with
+                 | Absent ->
+                     owe_board_post_read state ~mailbox:async_messages ~post_id
+                 | Loading | Ready _ | Failed _ -> ())
             | Board_list | Board_compose -> ())
        | Some "v" | Some "V" when state.view = Board ->
            (* Lowercase votes up, uppercase votes down -- the shift is the

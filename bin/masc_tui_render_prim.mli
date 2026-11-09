@@ -217,7 +217,8 @@ type acting_pane_footer =
   | Footer_hints of { hints : string; position : string option }
       (** Drawn by {!footer_line}; [position] as there. *)
   | Footer_choices of { choices : string; hints : string }
-      (** An open menu's choices, with its other key hints kept separate. *)
+      (** An open menu's decisions remain visible when passive key hints are
+          hidden. [hints] contains the optional shortcuts beside those choices. *)
   | No_footer
 
 (** The end of a surface that draws its own composer and footer instead of

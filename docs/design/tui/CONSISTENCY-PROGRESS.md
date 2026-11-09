@@ -149,12 +149,16 @@ wall clock are removed, and an absent selected approval contributes no empty
 detail rows. Header, selected context, questions, footer and queue window still
 share the actual measured buffers. The selected question's compact allowance and
 any armed approval notice are reserved before optional source rows and selected
-context. Context is clipped only at complete prepared rows, with the full-reader
-hint when it has room. Question diagnostics do not follow the active editor.
+context. When both need space, the question uses its existing shorter preview
+before an armed/in-flight approval loses its decision notice. Context is clipped
+only at complete prepared rows, with the full-reader hint when it has room.
+Question diagnostics do not follow the active editor.
 
 This is source work, not native or installed confirmation. Full question
 answering/follow-up readers, Verification/Harness, and the rest of the 23-surface
-scope remain open. No wording, layout or row-order tests are added.
+scope remain open. Existing answer-receipt/origin blocks can themselves exceed a
+short viewport; bounding those blocks remains a separate input-surface repair.
+No wording, layout or row-order tests are added.
 
 The [second four-surface source review](../../reports/2026-11-10-four-surface-reading-review.md)
 keeps Memory health queries aligned with the displayed canonical/KO/EN state

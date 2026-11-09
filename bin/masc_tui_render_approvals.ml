@@ -958,16 +958,19 @@ let render_approvals (state : state) =
   draw_ask_answer_feedback intro_buf cols state;
   draw_ask_origin intro_buf cols state;
   let intro_rows = count_frame_lines intro_buf in
-  (* Reserve the original selected question before optional source details or
-     approval context: divider/title plus the existing compact prompt allowance.
-     Receipt/origin rows retain their original complete rendering. *)
-  let question_rows = match Masc_tui_approvals_model.approvals_open_questions state with
-    | None -> 0
-    | Some [] -> 3
-    | Some (_ :: _) -> 2 + Ask_layout.min_expanded_rows in
   let preview_minimum =
     if Option.is_some state.pending_approval_action || action_inflight then 1 else 0 in
   let base_head_rows = count_frame_lines buf + count_frame_lines policy_buf in
+  (* Keep an armed decision or in-flight receipt visible before reserving the
+     question preview. Ask_layout can use one or two prompt rows when its
+     usual compact allowance does not fit beside that active decision. *)
+  let question_room = max 0
+      (rows - base_head_rows - footer_rows - 2 - intro_rows - preview_minimum) in
+  let question_rows = min question_room
+      (match Masc_tui_approvals_model.approvals_open_questions state with
+       | None -> 0
+       | Some [] -> 3
+       | Some (_ :: _) -> 2 + Ask_layout.min_expanded_rows) in
   let primary_rows = 1 (* queue *) + 1 (* closing edge *) + footer_rows
       + intro_rows + question_rows + preview_minimum in
   let notice_room = max 0 (rows - base_head_rows - primary_rows) in

@@ -569,7 +569,8 @@ let with_authentication ~strict f =
          | Ok (token, _) -> token
          | Error error -> fail (Masc_domain.masc_error_to_string error)
        in
-       f ~base_path ~worker:(token "worker") ~admin:(token "admin"))
+       f ~base_path ~worker:(token "worker") ~admin:(token "admin")
+         ~clock:(Eio.Stdenv.clock env))
 ;;
 
 (* The status each kind answers with no credential, with a Worker token and with
@@ -597,7 +598,7 @@ let expected_status ~strict =
 
 let test_typed_routes_answer_like_the_wrapper_by_hand ~strict () =
   with_authentication ~strict
-  @@ fun ~base_path:_ ~worker ~admin ->
+  @@ fun ~base_path:_ ~worker ~admin ~clock:_ ->
   let typed =
     List.fold_left (fun r (_, typed, _) -> typed r) (Router.create ()) dispatch_kinds
   in
@@ -624,7 +625,7 @@ let test_typed_routes_answer_like_the_wrapper_by_hand ~strict () =
 ;;
 
 let test_tool_observation_does_not_consume_operation_quota () =
-  with_authentication ~strict:false @@ fun ~base_path:_ ~worker ~admin ->
+  with_authentication ~strict:false @@ fun ~base_path:_ ~worker ~admin ~clock:_ ->
   let routes = Router.create ()
     |> Server_route.get (Server_route.Tool_observation {tool_name = "masc_status"})
          "/observation" (on_state "observation")
@@ -650,7 +651,7 @@ let test_tool_observation_does_not_consume_operation_quota () =
 ;;
 
 let test_tool_observation_preserves_anonymous_tool_authorization () =
-  with_authentication ~strict:false @@ fun ~base_path ~worker:_ ~admin:_ ->
+  with_authentication ~strict:false @@ fun ~base_path ~worker:_ ~admin:_ ~clock:_ ->
   Auth.save_auth_config base_path
     { Masc_domain.default_auth_config with enabled = false; require_token = false };
   Server_auth.For_testing.restore_auth_config (Some Server_auth_config.fail_closed);
@@ -668,6 +669,66 @@ let test_tool_observation_preserves_anonymous_tool_authorization () =
       check bool "same-origin admits; missing or foreign origin refuses"
         expected (observation.status = 200))
       [Same_origin, true; No_origin, false; Origin "http://elsewhere.invalid:8935", false])
+;;
+
+(* Exercise the production subpath dispatcher. Invalid cursors/identities stop
+   at input validation (400), proving admission without dispatching a turn or
+   modifying an operation. Checking only a permission value missed #26364. *)
+let keeper_operation_reads =
+  [ "/api/v1/keepers/alpha/chat/operations?state=queued&after_sequence=-1"
+  ; "/api/v1/keepers/alpha/chat/operations/%21"
+  ]
+;;
+
+let keeper_operation_writes =
+  List.map
+    (fun action -> "/api/v1/keepers/alpha/chat/operations/%21/" ^ action)
+    [ "edit"; "move-to-end"; "cancel"; "retry-preparation" ]
+;;
+
+let test_keeper_queue_controls_follow_submit_auth_without_required_tokens () =
+  with_authentication ~strict:false
+  @@ fun ~base_path ~worker:_ ~admin:_ ~clock ->
+  Eio.Switch.run @@ fun sw ->
+  let routes = Server_routes_http_routes_keepers.add_routes ~sw ~clock (Router.create ()) in
+  Server_auth.For_testing.restore_auth_config (Some Server_auth_config.fail_closed);
+  Fun.protect ~finally:(fun () -> Server_auth.For_testing.restore_auth_config None) (fun () ->
+    List.iter (fun enabled ->
+      Auth.save_auth_config base_path
+        { Masc_domain.default_auth_config with enabled; require_token = false };
+      List.iter (fun path ->
+        check int "anonymous operation read reaches input validation" 400
+          (dispatch routes path).status) keeper_operation_reads;
+      List.iter (fun (origin, expected) ->
+        check int "submit uses the expected origin policy" expected
+          (dispatch ~method_:"POST" ~origin routes "/api/v1/keepers/chat/stream").status;
+        List.iter (fun path ->
+          check int "queue control uses the same origin policy" expected
+            (dispatch ~method_:"POST" ~origin routes path).status)
+          keeper_operation_writes)
+        [ Same_origin, 400; No_origin, 401; Origin "http://elsewhere.invalid:8935", 403 ];
+      check int "anonymous reasoning remains token-bound" 401
+        (dispatch routes "/api/v1/keepers/alpha/chat/events?operation_id=%21").status)
+      [ false; true ])
+;;
+
+let test_keeper_queue_controls_preserve_token_and_reasoning_authority () =
+  with_authentication ~strict:true
+  @@ fun ~base_path:_ ~worker ~admin ~clock ->
+  Eio.Switch.run @@ fun sw ->
+  let routes = Server_routes_http_routes_keepers.add_routes ~sw ~clock (Router.create ()) in
+  List.iter (fun (token, expected) ->
+    List.iter (fun path ->
+      check int "operation read enforces required credentials" expected
+        (dispatch ?token routes path).status) keeper_operation_reads;
+    List.iter (fun path ->
+      check int "queue control enforces required credentials" expected
+        (dispatch ~method_:"POST" ?token routes path).status) keeper_operation_writes)
+    [ None, 401; Some "invalid-token", 401; Some worker, 400; Some admin, 400 ];
+  let events = "/api/v1/keepers/alpha/chat/events?operation_id=%21" in
+  check int "worker cannot read reasoning" 403 (dispatch ~token:worker routes events).status;
+  check int "admin reasoning read reaches input validation" 400
+    (dispatch ~token:admin routes events).status
 ;;
 
 (* ---- the canonical-host redirect runs before the public read ---- *)
@@ -715,7 +776,7 @@ let test_alias_host_is_redirected_while_the_server_is_not_ready () =
    the canonical host gets the answer of the public read. *)
 let test_alias_host_is_redirected_before_the_workspace_precondition () =
   with_authentication ~strict:false
-  @@ fun ~base_path:_ ~worker:_ ~admin:_ ->
+  @@ fun ~base_path:_ ~worker:_ ~admin:_ ~clock:_ ->
   let routes = page_routes () in
   let one_parameter = "?expected_base_path=/x" in
   let mismatch = "?expected_base_path=/nowhere&expected_masc_root=/nowhere/.masc" in
@@ -885,6 +946,10 @@ let () =
             test_tool_observation_does_not_consume_operation_quota
         ; test_case "tool observations preserve anonymous origin authorization" `Quick
             test_tool_observation_preserves_anonymous_tool_authorization
+        ; test_case "Keeper queue controls work without required tokens" `Quick
+            test_keeper_queue_controls_follow_submit_auth_without_required_tokens
+        ; test_case "Keeper queue controls preserve token and reasoning authority" `Quick
+            test_keeper_queue_controls_preserve_token_and_reasoning_authority
         ; test_case
             "strict auth: each kind answers like its wrapper by hand"
             `Quick

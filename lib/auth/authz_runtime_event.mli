@@ -13,8 +13,12 @@
     record, and design 4.3 makes the grant in the same append as the Runtime.
 
     {b Body.}
-    [{"event":"made","runtime_id":...,"provider_account_id":...,"user_id":...,"grant_id":...}],
-    with the members in this order and every value a string. The labels are on
+    [{"event":"made","runtime_id":...,"provider_account_id":...,"user_id":...,"grant_id":...,"self_effects":[...]}],
+    with the members in this order. Every value is a string but
+    [self_effects], the effects the Self grant allows: a list of effect labels
+    in strictly ascending order ({!Authz_scope_body.effect_set_to_body}). The
+    Self grant of design 4.3 names its effects, and the decision of design 6.2
+    reads them from here (user decision 2026-11-09). The labels are on
     disk and renaming one orphans every record written with it. A body with
     other members, the same members in another order, or a member of another
     type is refused.
@@ -29,6 +33,7 @@ type t =
       ; provider_account_id : Authz_types.Provider_account_id.t
       ; user_id : Authz_types.User_id.t  (** The owner, who makes it. *)
       ; grant_id : Authz_types.Grant_id.t  (** The Self grant of the owner. *)
+      ; self_effects : Authz_types.Effect.Set.t  (** What the Self grant allows. *)
       }
 
 val equal : t -> t -> bool
@@ -42,11 +47,12 @@ type error =
   | Unknown_event of string  (** The first member is [event], but not a label of it. *)
   | Wrong_members
       (** An object, but not exactly the members of one event, in their order,
-          each a string. *)
+          each of its type. *)
   | Invalid_runtime_id of Authz_id.error
   | Invalid_provider_account_id of Authz_id.error
   | Invalid_user_id of Authz_id.error
   | Invalid_grant_id of Authz_id.error
+  | Invalid_self_effects of Authz_scope_body.error
 
 val error_to_string : error -> string
 

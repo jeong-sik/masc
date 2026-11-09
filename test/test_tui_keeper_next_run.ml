@@ -455,38 +455,47 @@ let test_interval_wakes_every_period () =
     (strip_of [ scheduled ~h:0 ~m:0 ~recurrence:(interval 600) () ])
 ;;
 
-let test_missed_interval_counts_once_in_the_now_slot () =
-  (* Due at 21:00 the day before and not late: the runner fires it once, so
-     22:00 and 23:00 are not counted. 00:00 lies on the now slot's start and
-     counts there beside the missed due. *)
-  let row =
-    make_row ~keeper_name:"alpha" ~due_at_iso:"2026-11-06T21:00:00Z"
-      ~recurrence:(interval 3600) ()
+(* A due before the now slot and not late: the runner fires it once, so the
+   occurrences between it and the slot start are not counted. An occurrence
+   on the slot start, 00:00, counts in the now slot beside the missed due. *)
+let test_an_occurrence_on_the_slot_start_counts () =
+  let missed ~due_at_iso recurrence =
+    strip_of [ make_row ~keeper_name:"alpha" ~due_at_iso ~recurrence () ]
   in
-  Alcotest.check strip "the missed due and 00:00 in the now slot, then every hour"
+  let hourly =
+    List.init (ahead + 1) (fun index ->
+      Masc_tui_keeper_next_run.Wakes
+        (if index = 0 then 2 else if index mod 2 = 0 then 1 else 0))
+  in
+  Alcotest.check strip "interval: 21:00 missed, then 00:00 and every hour" hourly
+    (missed ~due_at_iso:"2026-11-06T21:00:00Z" (interval 3600));
+  Alcotest.check strip "cron: 21:00 missed, then 00:00 and every hour" hourly
+    (missed ~due_at_iso:"2026-11-06T21:00:00Z"
+       (Ok (Schedule_domain.Cron { expression = "0 * * * *"; timezone = "UTC" })));
+  Alcotest.check strip "daily: yesterday's 00:00 missed, then today's 00:00"
     (List.init (ahead + 1) (fun index ->
-       Masc_tui_keeper_next_run.Wakes
-         (if index = 0 then 2 else if index mod 2 = 0 then 1 else 0)))
-    (strip_of [ row ])
+       Masc_tui_keeper_next_run.Wakes (if index = 0 then 2 else 0)))
+    (missed ~due_at_iso:"2026-11-06T00:00:00Z"
+       (Ok (Schedule_domain.Daily { hour = 0; minute = 0; second = 0; timezone = "UTC" })))
 ;;
 
 let test_strip_is_the_same_for_every_now_in_one_slot () =
-  (* At 00:25 the occurrences at 00:10 and 00:20 have passed. They are in the
-     now slot all the same, so the strip read at 00:01 and at 00:25 agree. *)
+  (* At 00:20 the occurrence at 00:10 has passed. It is in the now slot all
+     the same, so the strip read at 00:01 and at 00:20 agree. *)
   let index =
     agenda_index (Some (make_snapshot [ scheduled ~h:0 ~m:0 ~recurrence:(interval 600) () ]))
   in
   let read now = Masc_tui_keeper_next_run.wake_strip index ~now ~ahead ~keeper_name:"alpha" in
   let early = read (day +. 60.) in
-  let late = read (day +. 1500.) in
+  let late = read (day +. 1200.) in
   Alcotest.check strip "00:01 reads three wakes a slot"
     (every (Masc_tui_keeper_next_run.Wakes 3)) early;
-  Alcotest.check strip "00:25 reads the same strip" early late;
-  Alcotest.check strip "a fresh index at 00:25 agrees"
+  Alcotest.check strip "00:20 reads the same strip" early late;
+  Alcotest.check strip "a fresh index at 00:20 agrees"
     early
     (Masc_tui_keeper_next_run.wake_strip
        (agenda_index (Some (make_snapshot [ scheduled ~h:0 ~m:0 ~recurrence:(interval 600) () ])))
-       ~now:(day +. 1500.) ~ahead ~keeper_name:"alpha")
+       ~now:(day +. 1200.) ~ahead ~keeper_name:"alpha")
 ;;
 
 let test_daily_wakes_once () =
@@ -617,8 +626,8 @@ let () =
         ] )
     ; ( "wake strip"
       , [ Alcotest.test_case "interval" `Quick test_interval_wakes_every_period
-        ; Alcotest.test_case "missed interval" `Quick
-            test_missed_interval_counts_once_in_the_now_slot
+        ; Alcotest.test_case "occurrence on the slot start" `Quick
+            test_an_occurrence_on_the_slot_start_counts
         ; Alcotest.test_case "same strip within one slot" `Quick
             test_strip_is_the_same_for_every_now_in_one_slot
         ; Alcotest.test_case "daily" `Quick test_daily_wakes_once

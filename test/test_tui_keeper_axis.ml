@@ -468,6 +468,25 @@ let contains_substring ~needle haystack =
   loop 0
 ;;
 
+let strip_ansi s =
+  let buf = Buffer.create (String.length s) in
+  let n = String.length s in
+  let rec loop i =
+    if i >= n then Buffer.contents buf
+    else if s.[i] = '\027' && i + 1 < n && s.[i + 1] = '[' then
+      let rec skip j =
+        if j >= n then Buffer.contents buf
+        else if s.[j] = 'm' then loop (j + 1)
+        else skip (j + 1)
+      in
+      skip (i + 2)
+    else (
+      Buffer.add_char buf s.[i];
+      loop (i + 1))
+  in
+  loop 0
+;;
+
 let test_header_preserves_every_group_count_on_large_rosters () =
   let slot_start = Keeper_turn_pulse.slot_start reading_now in
   let recent_recovery : Keeper_turn_pulse.pulse =
@@ -503,7 +522,7 @@ let test_header_preserves_every_group_count_on_large_rosters () =
             Strip.header ~now:reading_now ~cells ~view:Model.By_state
               ~selected:(Some last_ok) ~age:(fun _ -> Model.Age_within_3h) rows
           in
-          let plain = Masc_tui_ansi.Terminal_text.strip_ansi rendered in
+          let plain = strip_ansi rendered in
           let width = Masc_tui_message_layout.display_width plain in
           Alcotest.(check bool)
             (Printf.sprintf "total=%d cells=%d fits within cells (got %d)" total cells width)
@@ -537,7 +556,7 @@ let test_header_preserves_every_group_count_on_large_rosters () =
             Strip.header ~now:reading_now ~cells ~view:Model.By_age
               ~selected:(Some last_ok) ~age:age_for rows
           in
-          let plain_age = Masc_tui_ansi.Terminal_text.strip_ansi rendered_age in
+          let plain_age = strip_ansi rendered_age in
           let width_age = Masc_tui_message_layout.display_width plain_age in
           Alcotest.(check bool)
             (Printf.sprintf "By_age total=%d cells=%d fits within cells (got %d)" total cells width_age)

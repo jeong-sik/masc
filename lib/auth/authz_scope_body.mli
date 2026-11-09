@@ -50,3 +50,14 @@ val error_to_string : error -> string
     check that fails is the result: its shape, its order, and then each label
     in turn. *)
 val of_body : Authz_body.t -> (Authz_types.Authorization_scope.t, error) result
+
+(** {b A set of effects alone.} The list of labels that [allowed_effects]
+    holds, in the same strictly ascending order, and never ["all"]: a grant
+    names the effects it allows (design 4.3), and a set has no [All]. A Self
+    grant in a Runtime record is written this way (plan D2). *)
+val effect_set_to_body : Authz_types.Effect.Set.t -> (Authz_body.t, Authz_body.error) result
+
+(** Reads a set of effects. ["all"] and anything but a list of strings is
+    [Not_a_scope Allowed_effects]; the order and the labels are checked as in
+    {!of_body}. *)
+val effect_set_of_body : Authz_body.t -> (Authz_types.Effect.Set.t, error) result

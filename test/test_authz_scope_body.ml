@@ -220,6 +220,32 @@ let refused () =
     ]
 ;;
 
+(* ---- a set of effects alone ---- *)
+
+let an_effect_set () =
+  let set = Effect.Set.of_list Effect.[ Use_tool; Read_state; Invoke_model ] in
+  (match B.effect_set_to_body set with
+   | Error _ -> Alcotest.fail "the set was not written"
+   | Ok body ->
+     Alcotest.(check string)
+       "the bytes"
+       {|["invoke_model","read_state","use_tool"]|}
+       (Authz_body.to_string body);
+     (match B.effect_set_of_body body with
+      | Ok read -> Alcotest.(check bool) "reads back" true (Effect.Set.equal set read)
+      | Error e -> Alcotest.failf "not read back: %s" (B.error_to_string e)));
+  List.iter
+    (fun (name, json, expected) ->
+       match B.effect_set_of_body (body_of_json json) with
+       | Ok _ -> Alcotest.failf "%s: read as a set" name
+       | Error e -> Alcotest.check error name expected e)
+    [ "all", `String "all", B.Not_a_scope B.Allowed_effects
+    ; "an object", `Assoc [], B.Not_a_scope B.Allowed_effects
+    ; "out of order", strings [ "use_tool"; "read_state" ], B.Not_ascending B.Allowed_effects
+    ; "an unknown effect", strings [ "write" ], B.Unknown_effect "write"
+    ]
+;;
+
 let () =
   Alcotest.run
     "authz_scope_body"
@@ -238,5 +264,6 @@ let () =
         ; Alcotest.test_case "a scope reads back" `Quick a_scope_reads_back
         ] )
     ; "refused", [ Alcotest.test_case "bodies that are not a scope" `Quick refused ]
+    ; "effect set", [ Alcotest.test_case "written, read back and refused" `Quick an_effect_set ]
     ]
 ;;

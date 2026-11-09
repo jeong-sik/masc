@@ -33,6 +33,19 @@ let parse = function
     let integer key = match List.assoc_opt key fields with
       | Some (`Int value) when Int64.abs (Int64.of_int value) <= 9007199254740991L -> Ok value
       | _ -> Error (key ^ " must be a JavaScript-safe integer") in
+    (* A scroll distance is a CSS-pixel delta, so a delta left out moves
+       nothing on that axis. The tool schema never required x or y, yet
+       scroll with y alone was refused as "x must be a JavaScript-safe
+       integer": 19 times between 2026-11-02 and 11-09, and 18 of them were
+       followed within 25 seconds by the same call with x set to 0. At least
+       one axis has to be named. *)
+    let scroll_deltas () =
+      let delta key = match List.assoc_opt key fields with
+        | None -> Ok 0
+        | Some _ -> integer key in
+      if List.mem_assoc "x" fields || List.mem_assoc "y" fields
+      then let* x = delta "x" in let* y = delta "y" in Ok (x, y)
+      else Error "scroll and scroll_at take x, y or both as CSS-pixel deltas; an axis left out does not move" in
     let pointer_target fields =
       match fields with
       | ["selector", `String selector] when String.trim selector <> "" ->
@@ -205,13 +218,13 @@ let parse = function
         Ok (Browser_lane.Select_option {selector;selection})
       | Some (`String "scroll") ->
         let* () = excludes ["selector"; "text"; "documentId"; "nodeId"; "point"; "from"; "to"; "viewport"] in
-        let* x = integer "x" in let* y = integer "y" in Ok (Browser_lane.Scroll {x; y})
+        let* x, y = scroll_deltas () in Ok (Browser_lane.Scroll {x; y})
       | Some (`String "scroll_at") ->
         let* () = excludes ["selector";"text";"documentId";"nodeId";"from";"to"] in
         let* () = match expected_url with Some _ -> Ok () | None -> Error "pointer actions require expectedUrl" in
         let* viewport = geometry Browser_lane.Pointer.viewport_of_json "viewport" in
         let* point = geometry Browser_lane.Pointer.point_of_json "point" in
-        let* x = integer "x" in let* y = integer "y" in
+        let* x, y = scroll_deltas () in
         Ok (Browser_lane.Scroll_at {point;viewport;x;y})
       | Some (`String "tap_at") ->
         let* () = excludes ["selector";"text";"documentId";"nodeId";"x";"y";"from";"to"] in

@@ -108,6 +108,32 @@ let test_invalid_actions () =
      fields "click" @ ["selector", `String "#query"; "script", `String "arbitrary()"];
      fields "click" @ ["selector", `String "#query"; "tabId", `Int 9];
      fields "evaluate"]
+let test_scroll_axis_left_out () =
+  let scroll args = (parsed (fields "scroll" @ args)).action in
+  check bool "y alone leaves x at 0" true
+    (scroll ["y", `Int 200] = Browser_lane.Scroll {x=0; y=200});
+  check bool "x alone leaves y at 0" true
+    (scroll ["x", `Int (-10)] = Browser_lane.Scroll {x= -10; y=0});
+  check bool "both axes are kept as given" true
+    (scroll ["x", `Int (-10); "y", `Int 200] = Browser_lane.Scroll {x= -10; y=200});
+  let request = parsed (fields "scroll" @ ["y", `Int 200]) in
+  let wire = Browser_lane.interaction_args ~tab_id:request.tab_id ~expected_url:request.expected_url request.action in
+  check bool "the wire form names both axes and parses back to the same action" true
+    ((parsed Yojson.Safe.Util.(to_assoc wire)).action = request.action);
+  List.iter (fun args -> check bool "no axis, or an axis that is not an integer, is refused" true
+    (Result.is_error (Interaction.parse (`Assoc (fields "scroll" @ args)))))
+    [[]; ["x", `Null; "y", `Int 2]; ["y", `Float 2.]; ["x", `String "2"; "y", `Int 2]];
+  let viewport = `Assoc ["documentId",`String "fixture";"width",`Int 800;
+    "height",`Int 600;"scrollX",`Int 0;"scrollY",`Int 0] in
+  let at args = fields "scroll_at" @ ["expectedUrl",`String "https://example.org";
+    "viewport",viewport;"point",`Assoc ["x",`Float 0.25;"y",`Float 0.5]] @ args in
+  (match (parsed (at ["y", `Int 120])).action with
+   | Browser_lane.Scroll_at {x; y; _} ->
+     check int "scroll_at leaves x at 0" 0 x;
+     check int "scroll_at keeps y" 120 y
+   | _ -> fail "scroll_at did not parse as scroll_at");
+  check bool "scroll_at without any axis is refused" true
+    (Result.is_error (Interaction.parse (`Assoc (at []))))
 let test_source_context () =
   let module Source = Masc.Browser_source_context in
   let fields = ["schema",`String "masc.source.v1";"file",`String "dashboard/src/demo.ts";
@@ -396,4 +422,5 @@ let () = run "browser interaction" ["typed boundary", [
   test_case "source hints preserve scope and reject malformed paths" `Quick test_source_context;
   test_case "observed node reference contract" `Quick test_scene_reference;
   test_case "closed live write actions" `Quick test_typed_actions;
-  test_case "malformed or mixed actions rejected" `Quick test_invalid_actions]]
+  test_case "malformed or mixed actions rejected" `Quick test_invalid_actions;
+  test_case "scroll with one axis left out moves only the other" `Quick test_scroll_axis_left_out]]

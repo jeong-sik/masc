@@ -8,6 +8,8 @@
 
 `idle_repeats.py` 는 같은 Keeper 가 같은 명령을 다시 돌려 같은 결과를 받은 Execute 호출을 세고, 시간대별로 나누고, 그 Keeper 의 모델 요청·입력 토큰과 나란히 놓아요.
 
+`pr_state_reads.py` 는 `gh` 로 PR 을 읽는 Execute 호출을 세고, 턴을 붙든 시간과 모양(반복문, 기다림, 한 번 읽기)을 UTC 날짜별로 나눠요.
+
 ## 왜 재나요
 
 도구를 고치고 배포한 뒤 "좋아졌다"고 말하려면 같은 정의로 앞뒤를 세야 해요. 정의를 쓸 때마다 바꾸면 값이 달라져도 이유를 알 수 없어요. 이 스크립트는 정의를 한 곳에 고정해요. 배포가 끝나면 부팅 시각만 넣어서 다시 돌려요.
@@ -203,6 +205,39 @@ python3 docs/evidence/tool-efficiency-before-after-2026-11/idle_repeats.py \
 - `date -u +%Y-%m-%dT%H:%MZ` 처럼 결과가 분 단위로 같은 명령은 기다림이 아니어도 되풀이로 세요. 반대로 초 단위 시각이 결과에 들어가는 명령은 되풀이로 안 세서, 시계 읽기를 따로 세요(`execute.date_calls`, `date_callers`). 두 값은 겹칠 수 있어서 더하지 않았어요. 시계 읽기는 명령 전체가 `date` 하나(`command` 나 `argv`, 파이프·`;`·치환 없음)인 호출만 세요.
 - 창을 잘라서 따로 돌리면 창 시작 30분 안의 되풀이는 첫 실행으로 세요. 시간대별 값은 창을 한 번 훑은 뒤 나눠서 이 문제가 없어요.
 
+## PR 을 읽는 Execute (`pr_state_reads.py`)
+
+Keeper 가 `gh pr view`·`gh pr list`·`gh pr checks`·`gh pr status`, 또는 `/pulls` 나 `pullRequest` 를 부르는 `gh api` 로 PR 을 읽는 Execute 호출을 세어요. 정의는 스크립트 머리말에 있어요. 호출 모양은 셋이에요. 반복문(`fan_out`)은 `gh` 가 만든 목록을 돌면서 하나씩 읽는 호출이고, 기다림(`wait`)은 `sleep N` 이나 `--watch` 가 든 호출이고, 나머지는 한 번 읽기(`single`)예요. 한 호출은 맞는 첫 모양에 들어가요.
+
+```bash
+python3 docs/evidence/tool-efficiency-before-after-2026-11/pr_state_reads.py \
+  --base-path ~/me --since 2026-11-06T00:00:00 --end 2026-11-09T00:00:00 \
+  --json-out docs/evidence/tool-efficiency-before-after-2026-11/result-pr-state-reads-2026-11-06_11-08.json
+```
+
+| 날짜 (UTC) | Execute | PR 읽기 | Execute 시간 중 몫 | 반복문 | 기다림 | 한 번 읽기 |
+|---|---|---|---|---|---|---|
+| 11-06 | 7,840호출, 23.283 h | 2,334호출, 6.885 h (Keeper 15명) | 29.6% | 280호출, 1.563 h | 48호출, 2.094 h | 2,006호출, 3.228 h |
+| 11-07 | 8,242호출, 15.362 h | 4,340호출, 8.597 h (13명) | 56.0% | 838호출, 2.140 h | 99호출, 2.544 h | 3,403호출, 3.913 h |
+| 11-08 | 5,617호출, 12.162 h | 3,935호출, 8.905 h (13명) | 73.2% | 1,891호출, 4.944 h | 82호출, 1.445 h | 1,962호출, 2.516 h |
+| 합계 | 21,699호출, 50.807 h | 10,609호출, 24.387 h | 48.0% | 3,009호출, 8.648 h | 229호출, 6.082 h | 7,371호출, 9.657 h |
+
+PR 읽기가 붙든 시간은 하루 6.9 ~ 8.9 h 로 비슷해요. 나머지 Execute 시간이 16.4 h 에서 3.3 h 로 줄어서 몫이 올랐어요. Keeper 별로는 3일 합계로 아래가 가장 커요.
+
+| Keeper | PR 읽기 | 그중 반복문 |
+|---|---|---|
+| `code-reviewer` | 1,412호출, 4.714 h | 424호출, 3.387 h, 중앙값 13.4초 |
+| `context-reviewer` | 3,779호출, 4.291 h | 2,061호출, 2.648 h, 중앙값 3.2초 |
+| `github-pr-checker` | 423호출, 4.017 h | 2호출, 0.008 h |
+| `pr-updater` | 789호출, 3.236 h | 260호출, 1.664 h, 중앙값 14.9초 |
+| `sangsu` | 205호출, 1.629 h | 4호출, 0.006 h |
+| `code-reviewer-uncle` | 888호출, 1.520 h | 36호출, 0.168 h, 중앙값 10.5초 |
+
+- 이 시간은 Keeper 턴을 붙든 시간이에요. 서버가 PR 을 한 번 읽어 두고 Keeper 가 그 값을 읽게 되면 이만큼 준다는 뜻은 아니에요. `gh` 를 띄우는 시간과 GitHub 응답 시간이 섞여 있어요.
+- 글자 맞춤이라 오차가 양쪽으로 있어요. 명령을 인용만 한 호출, PR 본문이나 댓글을 읽는 호출이 들어가요. `gh pr diff` 와 `curl`·MCP 로 GitHub 를 읽는 호출은 빠져요.
+- `RFC-keeper-world-state-shows-open-work` 가 이 읽기를 서버 PR 스냅숏(RFC-0465)과 Keeper 도구(`keeper_pull_requests_list`)로 바꾸자고 적었어요. 그 구현은 main 에 없어요(2026-11-09). `Repository_pulls`·`Pull_requests`·`keeper_pull_requests_list`·`watch_repositories` 를 `lib`·`bin`·`config` 에서 `rg` 로 찾으면 0건이고, 스냅숏 쿼리는 `title`·`headRefOid`·리뷰 목록을 읽지 않아요.
+- 그 RFC 의 M6 은 `gh pr view`·`gh pr list`·`gh pr checks` 의 하루 수예요. 위 표는 `gh pr status` 와 `/pulls` 를 부르는 `gh api` 도 세므로 M6 보다 넓어요. 같은 정의로 앞뒤를 견줄 때는 이 스크립트를 다시 돌려요.
+
 ## 스크립트 밖에서 센 값
 
 이 폴더의 스크립트가 만들지 않는 값이 있어요. 결과 JSON 의 개수로 손계산한 값과, 원장을 `measure_before_after.read_calls` 로 읽어 센 값이에요.
@@ -213,6 +248,13 @@ python3 docs/evidence/tool-efficiency-before-after-2026-11/idle_repeats.py \
 - 호출: `Execute` 중 `duration_ms` 가 60,000 이상인 29호출(2.142 h, 결과 JSON 의 `after.execute.held_60s_or_more_calls`). Keeper 별로는 `sangsu` 14호출 1.413 h, `github-pr-checker` 0.275 h, `wkbl-web-leader` 0.238 h 순이에요.
 - 명령: `input` 의 `command`, 없으면 `argv` 가 `["sh", "-c", 스크립트]` 일 때 그 스크립트예요.
 - `sangsu` 14호출을 명령이 시작하는 말로 나누면 `gh run watch` 5호출 0.443 h, `sleep` 8호출 0.886 h(`sleep 300`~`480` 뒤에 `gh pr view`, 그중 2호출은 `gh pr checks` 도 들어 있어요), 그 밖의 1호출 0.084 h(`git commit`)예요.
+
+**`code-reviewer` 의 PR 훑기**(「PR 을 읽는 Execute」)
+
+- 구간: 11-08 17:30Z ~ 11-09 00:00Z(23:07Z 재시작을 가로질러요). `code-reviewer` 의 Execute 는 190호출 1.96 h 이고, 그중 60초 이상이 67호출 1.68 h 예요. 67호출이 모두 `for n in $(gh pr list -R jeong-sik/masc --state open --limit 100 ...); do` 로 시작하는 반복문이에요.
+  앞 230자가 같은 세 모양이 18호출 0.58 h(중앙값 116.3초), 23호출 0.58 h(89.1초), 26호출 0.52 h(70.4초)예요.
+- 한 번 훑을 때 PR 마다 `gh pr view` 한 번과 `gh api repos/jeong-sik/masc/pulls/$n/reviews` 두 번을 불러요. 열린 PR 이 N개면 `gh` 를 1 + 3N번 불러요. 출력에 `total=` 이 있는 44호출에서 열린 PR 수는 39 ~ 67개라서 118 ~ 202번이에요.
+- 서버는 열린 PR 의 draft·checks·review·mergeable 을 60초마다 GraphQL 한 번으로 읽어 둬요. `RFC-keeper-world-state-shows-open-work` §3.2 가 2026-09-27 에 열린 PR 89개 한 페이지로 잰 그 쿼리의 cost 는 2 예요.
 
 **#50012 첫 측정**(「결과 2」)
 
@@ -227,7 +269,7 @@ python3 docs/evidence/tool-efficiency-before-after-2026-11/idle_repeats.py \
 python3 -m unittest discover -s docs/evidence/tool-efficiency-before-after-2026-11
 ```
 
-합성 원장으로 세는 법을 확인하는 시험 120개예요. 창과 부팅 직후 제외, 크기 중앙값과 상한, `sleep` 폴링의 정의, 백그라운드 호출, 오버헤드(샌드박스별과 그 안의 의도별 포함), 디스크 바닥 거절의 의도별 구분, 회전 파일 읽기, 점검 재생의 읽기·쓰기 구분과 시작 시각, 간격별 오버헤드, 겹친 구간 합치기와 자르기, 60초 문턱(포함), 시작하지 않은 작업 제외, 읽지 못한 저장소 알림을 봐요. 되풀이 쪽은 같은 결과의 정의(`execution_time_ms` 제외, 키 순서 무시, JSON 이 아니면 글자 비교), 30분 간격(포함, 마지막 실행부터 잼), 연속 횟수와 10회 문턱, Keeper별로 따로 세기, 모델 요청 읽기(창 끝 제외, 다른 이벤트 제외), UTC 시 나누기, 시계 읽기로 세는 명령과 세지 않는 명령(`;`·파이프·치환·`argv` 변형), 같은 턴(직전 실행과 비교, 턴 번호가 없는 줄은 제외, Keeper별과 전체 합)과 원장 줄의 턴 읽기(추적 번호와 턴 번호 한 쌍, 정수가 아닌 값 제외, Execute 만), 되풀이 간격(끝에서 끝까지, 마지막 실행부터 잼)과 p50·p90 위치 규칙, 명령 머리별 실행 수(되풀이가 아닌 실행 포함, Keeper별)를 봐요.
+합성 원장으로 세는 법을 확인하는 시험 157개예요. 창과 부팅 직후 제외, 크기 중앙값과 상한, `sleep` 폴링의 정의, 백그라운드 호출, 오버헤드(샌드박스별과 그 안의 의도별 포함), 디스크 바닥 거절의 의도별 구분, 회전 파일 읽기, 점검 재생의 읽기·쓰기 구분과 시작 시각, 간격별 오버헤드, 겹친 구간 합치기와 자르기, 60초 문턱(포함), 시작하지 않은 작업 제외, 읽지 못한 저장소 알림을 봐요. 되풀이 쪽은 같은 결과의 정의(`execution_time_ms` 제외, 키 순서 무시, JSON 이 아니면 글자 비교), 30분 간격(포함, 마지막 실행부터 잼), 연속 횟수와 10회 문턱, Keeper별로 따로 세기, 모델 요청 읽기(창 끝 제외, 다른 이벤트 제외), UTC 시 나누기, 시계 읽기로 세는 명령과 세지 않는 명령(`;`·파이프·치환·`argv` 변형), 같은 턴(직전 실행과 비교, 턴 번호가 없는 줄은 제외, Keeper별과 전체 합)과 원장 줄의 턴 읽기(추적 번호와 턴 번호 한 쌍, 정수가 아닌 값 제외, Execute 만), 되풀이 간격(끝에서 끝까지, 마지막 실행부터 잼)과 p50·p90 위치 규칙, 명령 머리별 실행 수(되풀이가 아닌 실행 포함, Keeper별)를 봐요. PR 읽기 쪽(37개)은 명령 글자 읽기(`command`, `argv`, `sh -c`, JSON 이 아닌 입력), PR 읽기로 세는 명령과 세지 않는 명령(`gh pr diff`, 단어 경계, 파이프), 모양 셋과 우선순위(반복문의 세 가지 목록 만들기, 목록 없는 반복문, `sleep` 에 숫자 없음), UTC 날짜 경계, 날짜별 몫과 합계, 순위와 이름순 동률, 여섯 명 제한, 반복문 중앙값, 창 거절을 봐요.
 
 ## 못 잰 것
 

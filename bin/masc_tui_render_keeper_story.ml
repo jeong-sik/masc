@@ -151,14 +151,24 @@ let schedule_lines (state : Masc_tui_types.state) ~now ~keeper_name =
       in
       let count = Message_layout.count_noun (List.length entries) "schedule" in
       let notes =
-        (if snapshot.scs_truncated then [ warn "  agenda is cut: more schedules may exist" ] else [])
+        (if snapshot.scs_truncated then [ "partial" ] else [])
         @ (match error with
-           | Some detail -> [ warn ("  agenda read failed, last reading kept: " ^ Terminal_text.single_line detail) ]
+           | Some _ -> [ "read failed, last reading kept" ]
            | None -> [])
+        |> function
+        | [] -> []
+        | _ :: _ as flags ->
+            [ warn
+                ("  agenda: " ^ String.concat " · " flags
+                 ^ (match error with
+                    | Some detail -> ": " ^ Terminal_text.single_line detail
+                    | None -> "")) ]
       in
-      (dim ("  " ^ lead ^ " · " ^ count ^ " aimed at " ^ Terminal_text.single_line keeper_name)
-       :: List.map (schedule_row_line ~now) entries)
-      @ notes
+      (* The window cuts its body to the available rows. Keep failed/partial
+         read provenance ahead of the entries so that cut cannot hide it. *)
+      notes
+      @ (dim ("  " ^ lead ^ " · " ^ count ^ " aimed at " ^ Terminal_text.single_line keeper_name)
+         :: List.map (schedule_row_line ~now) entries)
 ;;
 
 let memory_state_style : Masc_tui_types.memory_state -> string = function

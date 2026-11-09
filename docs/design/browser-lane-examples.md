@@ -75,12 +75,14 @@ BrowserRead {"lane":"live","clientId":<관측한 UUID>,"tabId":<반환된 id>,"m
 
 `BrowserRead mode=elements`로 현재 컨트롤의 selector, 상태, 선택 항목의
 실제 value를 관측한다. 그 결과로 `BrowserInteract`의 click, fill, select_option,
-scroll을 호출하고 다시 읽어 결과를 확인한다. `BrowserAct`는 탭 열기·닫기,
+scroll을 호출하고 다시 읽어 결과를 확인한다. 키 입력 직전에는 `BrowserRead mode=scene`으로
+현재 `documentId`와 URL을 다시 관측한다. `BrowserAct`는 탭 열기·닫기,
 back, forward, reload, 대화상자, 업로드처럼 브라우저 수준 동작만 맡는다.
 
 ```text
 BrowserRead {"lane":"live","clientId":<id>,"tabId":<tab>,"mode":"elements"}
 BrowserInteract {"clientId":<id>,"action":"fill","tabId":<tab>,"selector":<관측한 selector>,"text":"검색어"}
+BrowserRead {"lane":"live","clientId":<id>,"tabId":<tab>,"mode":"scene"}
 BrowserInteract {"clientId":<id>,"action":"press_key","tabId":<tab>,"documentId":<관측한 documentId>,"expectedUrl":<읽은 URL>,"key":"Enter"}
 BrowserRead {"lane":"live","clientId":<id>,"tabId":<tab>}
 BrowserRead {"lane":"live","clientId":<id>,"tabId":<tab>,"mode":"screenshot"}

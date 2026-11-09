@@ -2631,6 +2631,7 @@
   masc_tui_task_payloads
   masc
   masc.masc_core
+  masc.masc_candle
   masc.masc_types
   masc.masc_log
   masc.masc_schedule

@@ -3973,12 +3973,12 @@ type keeper_memory_catch_up_outcome =
 let decode_keeper_memory_catch_up_receipt ~keeper_name json =
   let open Result.Syntax in
   let context = "Librarian catch-up receipt" in
-  let* fields = Masc.Candle_json.object_fields ~context json in
-  let* schema, fields = Masc.Candle_json.field ~context "schema" Masc.Candle_json.as_string fields in
-  let* keeper, fields = Masc.Candle_json.field ~context "keeper" Masc.Candle_json.as_non_blank fields in
-  let* submission, fields = Masc.Candle_json.field ~context "submission" Masc.Candle_json.as_string fields in
-  let* completion, fields = Masc.Candle_json.field ~context "completion" Masc.Candle_json.as_string fields in
-  let* () = Masc.Candle_json.finish ~context fields in
+  let* fields = Candle_json.object_fields ~context json in
+  let* schema, fields = Candle_json.field ~context "schema" Candle_json.as_string fields in
+  let* keeper, fields = Candle_json.field ~context "keeper" Candle_json.as_non_blank fields in
+  let* submission, fields = Candle_json.field ~context "submission" Candle_json.as_string fields in
+  let* completion, fields = Candle_json.field ~context "completion" Candle_json.as_string fields in
+  let* () = Candle_json.finish ~context fields in
   if schema <> "keeper.memory.catch_up.v1" || keeper <> keeper_name || completion <> "unobserved"
   then Error "Librarian catch-up receipt does not match the requested Keeper and contract"
   else match submission with

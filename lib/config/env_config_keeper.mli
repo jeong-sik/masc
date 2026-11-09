@@ -310,7 +310,7 @@ module KeeperKeepalive : sig
   (** Total HTTP body-consumption deadline for non-streaming AGENT_CORE
       completion calls, read on every call from the environment (the setting
       has no runtime.toml key). [None] (unset) leaves the runtime builder wire
-      untouched. [Some s] forwards to [Builder.with_body_timeout]: it bounds
+      untouched. [Some s] forwards to [Agent.options.body_timeout_s]: it bounds
       a non-streaming completion's round trip, and the count-tokens
       measurement an exact-fit binding makes before either kind of
       completion. A streaming completion itself is bounded by

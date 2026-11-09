@@ -106,7 +106,6 @@ module Agent_tool_pre_execution_gate = Agent_tool_pre_execution_gate
 module Agent_checkpoint = Agent_checkpoint
 module Terminal_tool_receipt = Terminal_tool_receipt
 module Agent = Agent
-module Builder = Builder
 module Agent_card = Agent_card
 module Tool_guidance_text = Tool_guidance_text
 module Otel_tracer = Otel_tracer

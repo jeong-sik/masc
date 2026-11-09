@@ -15,7 +15,7 @@ import {
 
 function keeperMemoryHealthPayload(): KeeperMemoryHealthResponse {
   return {
-    schema: 'keeper.memory_os.current_health.v10',
+    schema: 'keeper.memory_os.current_health.v11',
     generated_at: 1_700_000_000,
     keepers: [{
       keeper_id: 'healthy',
@@ -130,7 +130,7 @@ function keeperMemoryHealthPayload(): KeeperMemoryHealthResponse {
 
 function starvingKeeperPayload(): KeeperMemoryHealthResponse {
   return {
-    schema: 'keeper.memory_os.current_health.v10',
+    schema: 'keeper.memory_os.current_health.v11',
     generated_at: 1_700_000_000,
     keepers: [{
       keeper_id: 'starving',
@@ -373,7 +373,7 @@ describe('fetchKeeperMemoryHealth', () => {
 
     const response = await fetchKeeperMemoryHealth()
 
-    expect(response.schema).toBe('keeper.memory_os.current_health.v10')
+    expect(response.schema).toBe('keeper.memory_os.current_health.v11')
     expect(response.keepers[0]).toMatchObject({
       keeper_id: 'healthy',
       revision: 7,

@@ -878,7 +878,11 @@ let test_keeper_list_cycles_preserve_selected_name () =
   Alcotest.(check bool) "the saved view names both choices" true
     (keeper_view_preference state
      = Masc_tui_config.Keeper_view { view = "state"; density = "detailed" });
-  state.keeper_turns <- [roster_turn "alpha"; roster_turn "gamma"];
+  (* In the By_state view the two running Keepers move above beta. The app
+     takes such a change through [preserve_keeper_list_selection], which keeps
+     the cursor on beta; a bare assignment would leave it on the second row. *)
+  preserve_keeper_list_selection state (fun () ->
+    state.keeper_turns <- [roster_turn "alpha"; roster_turn "gamma"]);
   cycle_keeper_list_sort state;
   Alcotest.(check bool) "sort cycles" true
     (state.keeper_list_sort = Masc_tui_keeper_list_model.Priority);

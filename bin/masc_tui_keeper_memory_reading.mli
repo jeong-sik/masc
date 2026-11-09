@@ -26,6 +26,8 @@ type t =
       ; removed : int
       ; source_invalidations : int
       ; age_bins : Masc.Keeper_memory_age_bins.t option
+      ; pass_end : Masc.Tui_decode_memory_health.memory_librarian_pass_end option
+          (** How the librarian's last pass ended, from the same row. *)
       }
 
 type index
@@ -42,3 +44,50 @@ val lag_cell : t -> Masc_tui_keeper_axis_cell.t option
 (** The lag cell of {!cells}. A reading with no row has no lag, so it gives the
     cell that stands for the whole reading in {!cells}, or [None] for a
     snapshot with no row for the Keeper. *)
+
+(** {1 Cells of the memory and age views} (RFC-0515 §2.4) *)
+
+(** One value of a reading, or why there is none. *)
+type 'a field =
+  | Measured of 'a
+  | Unmeasured  (** The Keeper's row came without the value: not measured. *)
+  | No_snapshot  (** The row says the Keeper has no memory snapshot to have it. *)
+  | Snapshot_unknown  (** The reading is {!Unknown}. *)
+  | Row_absent  (** The reading is {!No_row}. *)
+  | Row_refused  (** The reading is {!Refused}. *)
+
+val pass_end : t -> Masc.Tui_decode_memory_health.memory_librarian_pass_end field
+val digest_at : t -> float field
+
+val updated_at : t -> float field
+(** The server stamps an update exactly when the snapshot is present, so a row
+    without one is {!No_snapshot}. *)
+
+val age_bins : t -> Masc.Keeper_memory_age_bins.t field
+
+val peak_lag : t list -> int
+(** The most unread turns among the readings that measured them; 0 when none
+    did. The caller passes the readings of the Keepers it draws, and the lag
+    bars are drawn against it. *)
+
+val pass_word : Masc.Tui_decode_memory_health.memory_librarian_pass_end -> string
+(** How the librarian's last pass ended, in one word for the Memory pane and
+    the memory view. *)
+
+val pass_cell : t -> Masc_tui_keeper_axis_cell.t
+val updated_cell : now:float -> t -> Masc_tui_keeper_axis_cell.t
+val fact_ages_cell : t -> Masc_tui_keeper_axis_cell.t
+(** The ● cell of the memory view (the pass end), the ● cell of the age view
+    (how long ago the snapshot changed) and the ◂ cell of the age view (the
+    age strip). A value the row came without draws
+    {!Masc_tui_keeper_age_ladder.unmeasured_mark}. A Keeper without a memory
+    snapshot, or without a row, draws the no-value mark; {!Unknown} draws
+    [mem ?] and {!Refused} draws [mem !]. None draws a value in their place. *)
+
+val lag_digest_gap_cells :
+  now:float -> peak_lag:int -> t -> Masc_tui_keeper_axis_cell.t list
+val lag_stale_facts_cells : peak_lag:int -> t -> Masc_tui_keeper_axis_cell.t list
+(** The ▹ cells of the memory view and of the age view. Both open with the
+    unread turns as a bar against [peak_lag], or with [lag ?] and no bar when
+    the lag was not measured. A reading without a row draws none: its ● cell
+    already marks it. *)

@@ -20747,6 +20747,9 @@ let observer_play_of_state state =
 let system_logs_page (state : state) = System_logs_view.current state.system_logs
 let edit_system_logs_page (state : state) change =
   state.system_logs <- System_logs_view.update_current change state.system_logs
+(* A log entry is open while the page names one. The dispatcher, the footer
+   and the surface's needs all ask this one question. *)
+let system_log_detail_open (state : state) = Option.is_some (system_logs_page state).lp_detail_seq
 let visible_system_log_entries (state : state) = System_logs_view.visible (system_logs_page state)
 
 (* The row the renderer draws and the row this counts have to come from one
@@ -25021,7 +25024,7 @@ let scrolled_surface_rows (state : state) ~cols : surface -> scrolled option =
   in
   function
   | System_logs ->
-      if Option.is_some (System_logs_view.current state.system_logs).lp_detail_seq then None
+      if system_log_detail_open state then None
       else Some
         { sc_count =
             (match (System_logs_view.current state.system_logs).lp_snapshot with

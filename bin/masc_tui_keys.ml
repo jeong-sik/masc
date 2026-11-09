@@ -1318,11 +1318,15 @@ let for_surface = function
       ; row_list_page
       ; b Navigate "[ / ]" "previous / next" ~detail:Detail_only
           ~help:"while detail is open, inspect the adjacent visible log entry"
-      ; b Act "l" "level floor"
+      (* The three filter keys put the cursor back on the first row. An open
+         entry keeps its place, so [ and ] would then step from the wrong row
+         and closing the entry would land on a list nobody saw change. They
+         answer on the list only. *)
+      ; b Act "l" "level floor" ~detail:List_only
           ~help:"raise the minimum level; after error, back to everything"
-      ; b Act "v" "verbose"
+      ; b Act "v" "verbose" ~detail:List_only
           ~help:"toggle DEBUG rows directly; off uses the INFO floor"
-      ; b Act "c" "category"
+      ; b Act "c" "category" ~detail:List_only
           ~help:"cycle through the categories this page carries"
       (* Opens the entry under the cursor. Inside the detail the dispatcher
          has nothing left to open, and a list the filters emptied has no

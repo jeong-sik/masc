@@ -2787,13 +2787,12 @@ let config_cmd =
 (* HIGH-RISK-UNREVIEWED: a probe is a call of the operator. As a host tool it
    publishes its access after its own judgment, and the client starts only on
    an account that access allows (plan D2-5 for Claude Code, D2-6 for Codex). *)
-let runtime_probe_account ~base_path account_home =
+let runtime_probe_account ~base_path account =
   Result.bind
     (Runtime_account_access.publish_host_tool ~base_path
        ~config_dir:(Env_config_core.masc_config_dir_opt ()))
     (fun () ->
-      Runtime_account_access.authorize Runtime_account_access.Operator_call
-        (Runtime_account_access.seal account_home)
+      Runtime_account_access.authorize Runtime_account_access.Operator_call account
       |> Result.map_error (fun refusal ->
         Runtime_account_access.refusal_to_string refusal, []))
 

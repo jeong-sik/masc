@@ -135,6 +135,9 @@ module Activity_tick = struct
   let motion_visible () = Domain.DLS.get observed_motion
   let note_motion_if_visible ~text ~width ~through_cell =
     if through_cell > 0 && width >= through_cell then begin
+      (* The fitting helper owns unstyled semantic source; SGR changes no
+         cells, so the moving span keeps its original cell endpoint. *)
+      let text = Masc_tui_theme.strip_sgr text in
       let bytes = Masc_tui_message_layout.fitted_source_bytes text width in
       if bytes = String.length text
          || Masc_tui_message_layout.display_width (String.sub text 0 bytes) >= through_cell

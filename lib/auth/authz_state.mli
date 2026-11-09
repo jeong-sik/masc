@@ -60,6 +60,7 @@ type t = private
   ; service_credentials : Authz_service_credential_state.t  (** Plan C4. *)
   ; provider_accounts : Authz_provider_account_state.t  (** Plan D1-1. *)
   ; runtimes : Authz_runtime_state.t  (** Plan D1. *)
+  ; keepers : Authz_keeper_state.t  (** Plan D1-5. *)
   ; revocation_pending : held list
         (** The reductions whose intent the external store gave up (design
             8.3). No record adds one: the writer zone does, from the store
@@ -169,6 +170,8 @@ type refusal =
   | Provider_account of Authz_provider_account_state.refusal
   | Runtime_unreadable of Authz_runtime_event.error
   | Runtime of Authz_runtime_state.refusal
+  | Keeper_unreadable of Authz_keeper_event.error
+  | Keeper of Authz_keeper_state.refusal
 
 val refusal_to_string : refusal -> string
 
@@ -193,7 +196,8 @@ val refusal_to_string : refusal -> string
     none: a log restored from before it leaves the account with no owner, and
     no Runtime may spend it (plan D1-1). A Runtime has none either: a log
     restored from before it has no such Runtime and no Self grant on it (plan
-    D1). *)
+    D1). Nor does a Keeper record: a log restored from before it leaves the Keeper
+    with no owner, or with the Runtime it was given before (plan D1-5). *)
 type applied =
   { state : t
   ; high_water : Authz_external_store.Change.t option

@@ -27,6 +27,7 @@ type t =
   ; service_credentials : Authz_service_credential_state.t
   ; provider_accounts : Authz_provider_account_state.t
   ; runtimes : Authz_runtime_state.t
+  ; keepers : Authz_keeper_state.t
   ; revocation_pending : held list
   ; latest_at_ms : int option
   }
@@ -41,6 +42,7 @@ let empty =
   ; service_credentials = Authz_service_credential_state.empty
   ; provider_accounts = Authz_provider_account_state.empty
   ; runtimes = Authz_runtime_state.empty
+  ; keepers = Authz_keeper_state.empty
   ; revocation_pending = []
   ; latest_at_ms = None
   }
@@ -124,6 +126,8 @@ type refusal =
   | Provider_account of Authz_provider_account_state.refusal
   | Runtime_unreadable of Authz_runtime_event.error
   | Runtime of Authz_runtime_state.refusal
+  | Keeper_unreadable of Authz_keeper_event.error
+  | Keeper of Authz_keeper_state.refusal
 
 let refusal_to_string = function
   | Before_bootstrap kind ->
@@ -206,6 +210,9 @@ let refusal_to_string = function
   | Runtime_unreadable error ->
     "the Runtime record cannot be read: " ^ Authz_runtime_event.error_to_string error
   | Runtime refusal -> Authz_runtime_state.refusal_to_string refusal
+  | Keeper_unreadable error ->
+    "the Keeper record cannot be read: " ^ Authz_keeper_event.error_to_string error
+  | Keeper refusal -> Authz_keeper_state.refusal_to_string refusal
 ;;
 
 type applied =
@@ -617,6 +624,24 @@ let runtime state (record : R.t) =
      | Ok runtimes -> Ok { state = { state with runtimes }; high_water = None })
 ;;
 
+(* A Keeper takes no intent either: cut back to before its record, the Keeper
+   has no owner, or no Runtime its turns run on. *)
+let keeper state (record : R.t) =
+  match Authz_keeper_event.of_body record.R.body with
+  | Error error -> Error (Keeper_unreadable error)
+  | Ok event ->
+    (match
+       Authz_keeper_state.apply
+         state.keepers
+         ~author:record.R.author
+         ~is_active:(Authz_principal_state.is_active state.principals)
+         ~runtime_owner:(Authz_runtime_state.owner state.runtimes)
+         event
+     with
+     | Error refusal -> Error (Keeper refusal)
+     | Ok keepers -> Ok { state = { state with keepers }; high_water = None })
+;;
+
 (* Every kind but a mode event is matched with the mode, so the branch of a
    kind says what a record of it means before the bootstrap, and a layer gets
    the workspace of the bootstrap only from a branch that has one. *)
@@ -647,6 +672,8 @@ let read state (record : R.t) =
   | K.Provider_account, Authz_mode_state.Off _ -> Error (Accounts_off K.Provider_account)
   | K.Runtime, Authz_mode_state.Multi_account _ -> runtime state record
   | K.Runtime, Authz_mode_state.Off _ -> Error (Accounts_off K.Runtime)
+  | K.Keeper, Authz_mode_state.Multi_account _ -> keeper state record
+  | K.Keeper, Authz_mode_state.Off _ -> Error (Accounts_off K.Keeper)
   | ( ( K.Runtime_grant
       | K.Delegate_policy
       | K.Principal
@@ -665,7 +692,8 @@ let read state (record : R.t) =
       | K.Session
       | K.Pat
       | K.Provider_account
-      | K.Runtime ) as kind )
+      | K.Runtime
+      | K.Keeper ) as kind )
     , Authz_mode_state.Not_bootstrapped -> Error (Before_bootstrap kind)
   | ( ( K.Runtime_grant
       | K.Delegate_policy
@@ -771,7 +799,8 @@ let closed_by (record : R.t) =
   | K.Session
   | K.Pat
   | K.Provider_account
-  | K.Runtime -> record.R.closes
+  | K.Runtime
+  | K.Keeper -> record.R.closes
 ;;
 
 let step state record =

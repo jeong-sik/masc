@@ -68,6 +68,7 @@ let other_kinds =
       && kind <> K.Pat
       && kind <> K.Provider_account
       && kind <> K.Runtime
+      && kind <> K.Keeper
       && kind <> K.Internal_service_credential)
     K.all
 
@@ -1614,6 +1615,144 @@ let test_runtimes () =
     (S.Runtime (Rs.Not_a_human (Authz_types.Principal.Service keeper_service)))
 ;;
 
+(* ---- Keepers ---- *)
+
+module Ke = Authz_keeper_event
+module Ks = Authz_keeper_state
+
+let first_keeper = id_of_string Authz_types.Keeper_id.of_string "keeper-1"
+let second_keeper = id_of_string Authz_types.Keeper_id.of_string "keeper-2"
+let second_account = id_of_string Authz_types.Provider_account_id.of_string "claude-code-bob"
+let bob_runtime = id_of_string Authz_types.Runtime_id.of_string "claude-code-bob.claude-sonnet-5-5"
+
+(* No admission names this id. *)
+let stranger = id_of_string Authz_types.User_id.of_string "user-9"
+
+let keeper_record ~author event =
+  match Ke.to_body event with
+  | Error _ -> Alcotest.fail "fixture Keeper body refused"
+  | Ok body -> record_by ~author K.Keeper body
+;;
+
+let keeper_made ?(keeper_id = first_keeper) ~by () = Ke.Made { keeper_id; user_id = by }
+
+let assigned ?(keeper_id = first_keeper) runtime_id = Ke.Assigned { keeper_id; runtime_id }
+
+let owned_keepers state user_id =
+  List.map
+    (fun (keeper_id, (keeper : Ks.keeper)) ->
+      ( Authz_types.Keeper_id.to_string keeper_id
+      , Option.map Authz_types.Runtime_id.to_string keeper.Ks.runtime ))
+    (Authz_keeper.owned state user_id)
+;;
+
+(* Plan D1-5: a person makes a Keeper for themselves, once, and gives it only
+   a Runtime they own. Both people here are Admins: an Admin makes no Keeper
+   for another person, gives no Runtime to the Keeper of another person, and
+   gives their own Keeper no Runtime of another person. *)
+let test_keepers () =
+  let state =
+    applied_change "a Keeper" (two_admins ()) (keeper_record ~author:(human user) (keeper_made ~by:user ())) None
+  in
+  Alcotest.(check (list (pair string (option string))))
+    "its owner owns it, with no Runtime yet"
+    [ Authz_types.Keeper_id.to_string first_keeper, None ]
+    (owned_keepers state user);
+  Alcotest.(check int) "another person owns none" 0 (List.length (Authz_keeper.owned state bob));
+  refused_as
+    "made twice"
+    state
+    (keeper_record ~author:(human user) (keeper_made ~by:user ()))
+    (S.Keeper (Ks.Already_made first_keeper));
+  refused_as
+    "made again by another"
+    state
+    (keeper_record ~author:(human bob) (keeper_made ~by:bob ()))
+    (S.Keeper (Ks.Already_made first_keeper));
+  refused_as
+    "an Admin makes one for another"
+    (two_admins ())
+    (keeper_record ~author:(human bob) (keeper_made ~by:user ()))
+    (S.Keeper (Ks.Made_for_another { author = bob; user_id = user }));
+  refused_as
+    "a person who never joined"
+    (two_admins ())
+    (keeper_record ~author:(human stranger) (keeper_made ~by:stranger ()))
+    (S.Keeper (Ks.User_not_active stranger));
+  refused_as
+    "a service"
+    (two_admins ())
+    (keeper_record
+       ~author:(Authz_records.Author.Authenticated (Authz_types.Principal.Service keeper_service))
+       (keeper_made ~by:user ()))
+    (S.Keeper (Ks.Not_a_human (Authz_types.Principal.Service keeper_service)));
+  refused_as
+    "a Runtime for a Keeper no record made"
+    (two_admins ())
+    (keeper_record ~author:(human user) (assigned first_runtime))
+    (S.Keeper (Ks.Not_made first_keeper));
+  refused_as
+    "a Runtime no record made"
+    state
+    (keeper_record ~author:(human user) (assigned first_runtime))
+    (S.Keeper (Ks.Runtime_not_made first_runtime));
+  let state =
+    List.fold_left
+      (fun state (label, record) -> applied_change label state record None)
+      state
+      [ "a link", account_record ~author:(human user) (linked ~by:user)
+      ; "a Runtime", runtime_record ~author:(human user) (made ~by:user ())
+      ; ( "a link of the Admin"
+        , account_record
+            ~author:(human bob)
+            (Pae.Linked { provider_account_id = second_account; user_id = bob }) )
+      ; ( "a Runtime of the Admin"
+        , runtime_record
+            ~author:(human bob)
+            (Re.Made
+               { runtime_id = bob_runtime
+               ; provider_account_id = second_account
+               ; user_id = bob
+               ; grant_id = second_grant
+               }) )
+      ; ( "a Keeper of the Admin"
+        , keeper_record ~author:(human bob) (keeper_made ~keeper_id:second_keeper ~by:bob ()) )
+      ]
+  in
+  refused_as
+    "a Runtime of another Admin"
+    state
+    (keeper_record ~author:(human user) (assigned bob_runtime))
+    (S.Keeper
+       (Ks.Not_the_owners_runtime
+          { keeper_id = first_keeper; runtime_id = bob_runtime; runtime_owner = bob }));
+  refused_as
+    "the other way round"
+    state
+    (keeper_record ~author:(human bob) (assigned ~keeper_id:second_keeper first_runtime))
+    (S.Keeper
+       (Ks.Not_the_owners_runtime
+          { keeper_id = second_keeper; runtime_id = first_runtime; runtime_owner = user }));
+  refused_as
+    "an Admin gives a Runtime to the Keeper of another"
+    state
+    (keeper_record ~author:(human bob) (assigned bob_runtime))
+    (S.Keeper (Ks.Assigned_by_another { author = bob; keeper_id = first_keeper; owner = user }));
+  let state =
+    applied_change
+      "a Runtime of the owner"
+      state
+      (keeper_record ~author:(human user) (assigned first_runtime))
+      None
+  in
+  Alcotest.(check (list (pair string (option string))))
+    "its turns run on that Runtime"
+    [ ( Authz_types.Keeper_id.to_string first_keeper
+      , Some (Authz_types.Runtime_id.to_string first_runtime) )
+    ]
+    (owned_keepers state user)
+;;
+
 let () =
   Alcotest.run
     "authz_state"
@@ -1694,6 +1833,7 @@ let () =
         ] )
     ; "provider accounts", [ Alcotest.test_case "linked by their owner" `Quick test_provider_accounts ]
     ; "runtimes", [ Alcotest.test_case "made by their owner on their account" `Quick test_runtimes ]
+    ; "keepers", [ Alcotest.test_case "made by their owner, given their Runtimes" `Quick test_keepers ]
     ; "log", [ Alcotest.test_case "of a real bootstrap" `Quick test_fresh_bootstrap_log ]
     ]
 ;;

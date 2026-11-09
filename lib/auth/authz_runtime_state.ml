@@ -18,6 +18,7 @@ type t =
 
 let empty = { runtimes = Runtime_map.empty; grants = Grant_id.Set.empty }
 let find t runtime_id = Runtime_map.find_opt runtime_id t.runtimes
+let owner t runtime_id = Option.map (fun runtime -> runtime.owner) (find t runtime_id)
 
 let owned_by t user_id =
   Runtime_map.bindings t.runtimes

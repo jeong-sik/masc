@@ -21,7 +21,6 @@ let string_contains ~needle haystack =
 ;;
 
 let json_parse_error detail = Error.Serialization (JsonParseError { detail })
-let file_read_error ~path ~detail = Error.Io (FileOpFailed { op = "read"; path; detail })
 
 (** Append a single element to the tail of a list.
     This is [O(n)] in the length of [xs] because it copies [xs]. It is fine

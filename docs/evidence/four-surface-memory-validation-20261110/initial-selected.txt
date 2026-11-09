@@ -1,0 +1,23 @@
+2026-11-09T15:50:57.7783321Z Test Successful in 0.028s. 407 tests run.
+2026-11-09T15:50:57.7783773Z [targeted] test/test_tui_decode: OK in 0s
+2026-11-09T15:50:57.9154604Z ASSERT five keepers fit one list row beside their context
+2026-11-09T15:50:57.9154882Z   [FAIL]        render_body                 4   memory_overflow_selection.
+2026-11-09T15:50:57.9157143Z ASSERT Category rail visible
+2026-11-09T15:50:57.9157382Z   [FAIL]        render_body                 5   Category rail keeps counts, c...
+2026-11-09T15:50:57.9158712Z ASSERT selected category start row visible when fitting in budget
+2026-11-09T15:50:57.9158883Z   [FAIL]        render_body                 6   Category rail wrapped range e...
+2026-11-09T15:50:57.9280145Z   [OK]          one place per fact          1   Keeper queries accept canonic...
+2026-11-09T15:50:57.9281014Z │ [FAIL]        render_body                 4   memory_overflow_selection.     │
+2026-11-09T15:50:57.9281510Z FAIL five keepers fit one list row beside their context
+2026-11-09T15:50:57.9281587Z    Expected: `1'
+2026-11-09T15:50:57.9281662Z    Received: `3'
+2026-11-09T15:50:57.9283448Z │ [FAIL]        render_body                 5   Category rail keeps counts...  │
+2026-11-09T15:50:57.9283870Z FAIL Category rail visible
+2026-11-09T15:50:57.9283957Z    Expected: `true'
+2026-11-09T15:50:57.9284053Z    Received: `false'
+2026-11-09T15:50:57.9285989Z │ [FAIL]        render_body                 6   Category rail wrapped rang...  │
+2026-11-09T15:50:57.9286464Z FAIL selected category start row visible when fitting in budget
+2026-11-09T15:50:57.9286545Z    Expected: `true'
+2026-11-09T15:50:57.9286625Z    Received: `false'
+2026-11-09T15:50:57.9288296Z 3 failures! in 0.011s. 14 tests run.
+2026-11-09T15:50:57.9334858Z [targeted] test/test_tui_render_memory: FAIL exit 1 in 0s

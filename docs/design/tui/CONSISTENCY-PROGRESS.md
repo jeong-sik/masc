@@ -135,4 +135,8 @@ keeps Memory health queries aligned with the displayed canonical/KO/EN state
 and carries refused health rows into fleet fact coverage, including anonymous
 refusals and retained results. Filtered listing counts are named separately from
 store totals. New checks concern selected Keeper IDs and observation scope;
-their execution and a native capture of this follow-up are not claimed.
+the [targeted execution record](../../evidence/four-surface-memory-validation-20261110/README.md)
+keeps both failed runs and the later decoder-fixture repair. Memory's 13 cases
+passed on b5655270; the decoder's 407 cases passed on f35a50b9. Only the decoder
+test changed between those sources. This does not cover the later Usage layer
+or establish a native capture of this follow-up.

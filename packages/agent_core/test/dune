@@ -77,7 +77,6 @@
   test_agent_race
   test_agent_core
   test_agent_stream
-  test_agent_tool
   test_agent_turn
   test_agent_tools_index
   test_api_dispatch
@@ -190,7 +189,6 @@
   test_trajectory
   test_trajectory_unit
   test_turn_params
-  test_typed_tool
   test_usage_accumulation
   test_types
   test_util)
@@ -208,7 +206,6 @@
   test_agent_race
   test_agent_core
   test_agent_stream
-  test_agent_tool
   test_agent_turn
   test_agent_tools_index
   test_api_dispatch
@@ -321,7 +318,6 @@
   test_trajectory
   test_trajectory_unit
   test_turn_params
-  test_typed_tool
   test_usage_accumulation
   test_types
   test_util)

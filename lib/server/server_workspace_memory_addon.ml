@@ -90,7 +90,7 @@ let restore ~store ~workspace original =
     ~load:(fun ~request_id -> Owner.load ~store ~scope:Capture.scope ~request_id
       |> Result.map_error Owner.error_to_string) original) |> rejected
 let restore_original ~config ~request_id =
-  let store=Lane_addon_store.create ~root:(Filename.concat (Workspace.masc_dir config) "lane-addons") in
+  let store=Lane_addon_store.of_config config in
   let* original=Systhread_host.run (fun () -> Owner.load ~store ~scope:Capture.scope ~request_id) |> owned in
   let* original=match original with Some original -> Ok original
     | None -> Error (Unavailable "Original Curator capture disappeared") in
@@ -116,7 +116,7 @@ let resume_with ~store ~base_path ~request_id ~prepare ~call =
   | Submit.Settled record -> Ok (Settled record)
 let resume ~config ~request_id =
   let reserved=Unified_tool_registry.reserved_tool_names () in
-  let store=Lane_addon_store.create ~root:(Filename.concat (Workspace.masc_dir config) "lane-addons") in
+  let store=Lane_addon_store.of_config config in
   let rebind () =
     let* export=resolve ~config ~reserved in
     (* Re-retain the exact original capture through the live Runtime owner.
@@ -296,7 +296,7 @@ let settle_with ~store ~base_path ~request_id ~briefing_contract ~save =
     Error (Rejected "Original Curator request is not ready to commit")
 let settle ~config ~request_id =
   let base_path=config.Workspace.base_path in
-  let store=Lane_addon_store.create ~root:(Filename.concat (Workspace.masc_dir config) "lane-addons") in
+  let store=Lane_addon_store.of_config config in
   let briefing_contract ()=let prompt=Prompt_registry.resolve_prompt Prompt_names.workspace_memory_briefing in
     Briefing.contract ~template:prompt.effective in
   settle_with ~store ~base_path ~request_id ~briefing_contract ~save:(save_domain ~base_path)
@@ -404,7 +404,7 @@ let recover_successor ~store ~base_path ~request_id =
   let* _ = complete_with ~store ~workspace ~original parent in
   Ok ()
 let narrow ~config ~request_id =
-  let store=Lane_addon_store.create ~root:(Filename.concat (Workspace.masc_dir config) "lane-addons") in
+  let store=Lane_addon_store.of_config config in
   let admit original publish =
     let reserved=Unified_tool_registry.reserved_tool_names () in
     let* export=resolve ~config ~reserved in
@@ -524,10 +524,10 @@ let settle_chains_with ~store settling originals =
   List.fold_left (fun settled (root,leaf_first) -> let* () = settled in settle_chain_with ~store root leaf_first)
     (Ok ()) chains
 let settle_chains ~config settling originals =
-  let store=Lane_addon_store.create ~root:(Filename.concat (Workspace.masc_dir config) "lane-addons") in
+  let store=Lane_addon_store.of_config config in
   settle_chains_with ~store settling originals
 let discover ~config =
-  let store=Lane_addon_store.create ~root:(Filename.concat (Workspace.masc_dir config) "lane-addons") in
+  let store=Lane_addon_store.of_config config in
   discover_with ~store ~base_path:config.Workspace.base_path
 module Observation = Workspace_memory_observation_receipt
 module Receipt = Lane_addon_request_receipt
@@ -564,7 +564,7 @@ let prepare_observation_with ~store ~base_path ~request_id ~now =
       let* original = publish original (Receipt.Intended (Receipt.Completion,completion.receipt)) in
       Ok {original;registration;completion=Some completion}
 let prepare_observation ~config ~request_id =
-  let store = Lane_addon_store.create ~root:(Filename.concat (Workspace.masc_dir config) "lane-addons") in
+  let store = Lane_addon_store.of_config config in
   prepare_observation_with ~store ~base_path:config.Workspace.base_path ~request_id ~now:Time_compat.now
 module Runs = Exact_lane_run_registry
 type observation_error =
@@ -623,7 +623,7 @@ let deliver_observation_with ~store ~base_path ~registry ~request_id ~now =
     | Some completion -> acknowledge Receipt.Completion completion.receipt |> integrity in
   prepare_observation_with ~store ~base_path ~request_id ~now |> integrity
 let deliver_observation ~config ~request_id =
-  let store=Lane_addon_store.create ~root:(Filename.concat (Workspace.masc_dir config) "lane-addons") in
+  let store=Lane_addon_store.of_config config in
   deliver_observation_with ~store ~base_path:config.Workspace.base_path
     ~registry:(Runs.global ()) ~request_id ~now:Time_compat.now
 module For_testing = struct

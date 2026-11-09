@@ -1259,7 +1259,10 @@ let build_system_prompt ~workspace_root ~(meta : Keeper_meta_contract.keeper_met
      to the caller, which refuses the turn before dispatch. Articles only:
      the decoded history grows without bound and this turn renders just the
      held norms. *)
+  let open Result.Syntax in
+  let* resolve_subject = Keeper_constitution_roster.read ~config in
   World_constitution_store.load_articles ~base_path:config.Workspace.base_path
+    ~resolve_subject
   |> Result.map (render_system_prompt ~workspace_root ~meta ?profile_defaults)
 ;;
 

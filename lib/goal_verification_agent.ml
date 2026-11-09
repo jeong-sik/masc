@@ -167,8 +167,7 @@ module Host = Goal_verifier_host
 module Progress = Lane_addon_request_progress
 module Registry = Goal_verification_run_registry
 open Result.Syntax
-let owner_store config = Lane_addon_store.create
-  ~root:(Filename.concat (Workspace.masc_dir config) "lane-addons")
+let owner_store config = Lane_addon_store.of_config config
 let worker_detail = function
   | Worker.Store_unavailable detail | Original_invalid detail | Authority_changed detail
   | Execution_pending detail -> detail

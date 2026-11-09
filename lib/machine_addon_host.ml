@@ -82,7 +82,8 @@ let execution_machine operation arguments =
   | Some (Tool_schemas_misc.Misc_candle_gift) | Some (Tool_schemas_misc.Misc_dos_meta)
   | Some (Tool_schemas_misc.Misc_dos_inventory) | Some (Tool_schemas_misc.Misc_dos_eject)
   | Some (Tool_schemas_misc.Misc_dos_screen) | Some (Tool_schemas_misc.Misc_dos_peek)
-  | Some (Tool_schemas_misc.Misc_play_room) | Some (Tool_schemas_misc.Misc_dos_save) -> None
+  | Some (Tool_schemas_misc.Misc_play_room) | Some (Tool_schemas_misc.Misc_dos_save)
+  | Some (Tool_schemas_misc.Misc_pull_requests) -> None
 
 let require_activity machine =
   match Runtime.machine_configuration () with

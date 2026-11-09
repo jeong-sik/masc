@@ -6,6 +6,16 @@ val create : root:string -> t
     resulting absolute ownership boundary is retained by the store. *)
 val root : t -> string
 
+val name_in_masc_dir : string
+(** The store's directory name below [<base>/.masc]. *)
+
+val directory : masc_dir:string -> string
+(** The root of a workspace's store, below its [.masc] directory [masc_dir].
+    It is the argument of {!create}, so a relative [masc_dir] stays relative. *)
+
+val of_config : Workspace.config -> t
+(** [create] over {!directory} of the workspace's [.masc] directory. *)
+
 val digest : string -> string
 (** SHA-256 of every original byte, unchanged by internal feed boundaries.
     Bounded C feeds allow the runtime to service another systhread between

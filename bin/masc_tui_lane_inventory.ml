@@ -2,6 +2,7 @@ module Inventory = Masc.Tui_decode_lane_inventory
 open Inventory
 
 module Category = Masc.Lane_addon_category
+module L = Masc_tui_page_line
 let row_category (row : row) = match row.selection with
   | Exact _ | Browser _ | Machine _ -> row.ui_category
   | Declaration _ ->
@@ -195,40 +196,56 @@ let row_standing_in (snapshot : snapshot) (row : row) =
        | Some lane -> exact_standing admission lane)
   | Browser _ | Machine _ | Declaration _ | Manual_instance _ -> admission
 
+(* How a standing reads on a page: a failure is a failure, what the operator
+   still has to wait for or set up needs attention, and what is off or unseen
+   recedes. *)
+let standing_tone : Standing.t -> L.tone = function
+  | Standing.Failing -> L.Failure
+  | Standing.(Waiting | Changing | Not_set_up) -> L.Attention
+  | Standing.(Off | Unobserved) -> L.Quiet
+  | Standing.Ready -> L.Plain
+
+let worker_tone (item : instance) = match item.phase with
+  | Failed _ -> L.Failure
+  | Detaching -> L.Attention
+  | Detached -> L.Quiet
+  | Attached | Observing -> L.Plain
 let instance_lines (item : instance) =
-  ["Instance: " ^ item.instance_id; "Incarnation: " ^ item.incarnation;
-   "Run: " ^ item.run_id; "Package: " ^ item.package_id ^ " · " ^ item.package_revision;
-   "Worker: " ^ instance_summary item]
-  @ (match item.applied_revision with None -> [] | Some revision -> ["Applied declaration revision: " ^ revision])
+  [L.fact "Instance" item.instance_id; L.fact "Incarnation" item.incarnation;
+   L.fact "Run" item.run_id; L.fact "Package" (item.package_id ^ " · " ^ item.package_revision);
+   L.fact ~tone:(worker_tone item) "Worker" (instance_summary item)]
+  @ (match item.applied_revision with
+     | None -> []
+     | Some revision -> [L.fact "Applied declaration revision" revision])
+let refused_cli_slots_line refused = L.fact ~tone:L.Attention "Refused CLI slots" (String.concat ", " refused)
 let refused_cli_slot_lines
     (values : Masc.Keeper_lane_cli_oneshot.refused_slot list)
   =
   match values with
   | [] -> []
   | values ->
-    [ "Refused CLI slots: "
-      ^ String.concat
-          ", "
-          (List.map
-             (fun (r : Masc.Keeper_lane_cli_oneshot.refused_slot) ->
-                r.slot ^ " (" ^ Runtime.refusal_to_string r.refusal ^ ")")
-             values)
+    [ refused_cli_slots_line
+        (List.map
+           (fun (r : Masc.Keeper_lane_cli_oneshot.refused_slot) ->
+              r.slot ^ " (" ^ Runtime.refusal_to_string r.refusal ^ ")")
+           values)
     ]
 
 let detail_lines (row : row) =
-  [row.label; row.purpose; "Surface: " ^ family_label row.selection;
-   "Identity: " ^ row.id; "Reading: " ^ row_summary row]
+  [L.fact "Surface" (family_label row.selection);
+   L.fact "Identity" row.id;
+   L.fact ~tone:(standing_tone (row_standing row)) "Reading" (row_summary row)]
   @ (match row.selection with
-     | Exact _ -> ["Exact-output admission and retained run evidence are separate readings."]
-     | Browser _ -> ["Opening this row reads the selected browser backend; it does not open a new session."]
-     | Machine _ -> ["Activity configuration and the last published screen are separate readings."]
-     | Declaration path -> ["TOML: " ^ path]
-     | Manual_instance _ -> ["No declaration file; this is a manual attachment."])
+     | Exact _ -> [L.note ~tone:L.Quiet "Exact-output admission and retained run evidence are separate readings."]
+     | Browser _ -> [L.note ~tone:L.Quiet "Opening this row reads the selected browser backend; it does not open a new session."]
+     | Machine _ -> [L.note ~tone:L.Quiet "Activity configuration and the last published screen are separate readings."]
+     | Declaration path -> [L.fact "TOML" path]
+     | Manual_instance _ -> [L.note ~tone:L.Quiet "No declaration file; this is a manual attachment."])
   @ (match row.state with
      | Exact_state (Disabled c) ->
-         ["New work is off; accepted runs finish with their acquired candidates.";
-          "Declared HTTP slots: " ^ String.concat ", " c.declared_slots;
-          "Declared CLI slots: " ^ String.concat ", " c.declared_cli_slots]
+         [L.note ~tone:L.Quiet "New work is off; accepted runs finish with their acquired candidates.";
+          L.fact "Declared HTTP slots" (String.concat ", " c.declared_slots);
+          L.fact "Declared CLI slots" (String.concat ", " c.declared_cli_slots)]
      | Exact_state (Configured c) ->
          let refused_cli =
            List.filter
@@ -246,27 +263,35 @@ let detail_lines (row : row) =
              in
              (match partitioned.refused_cli_slots with
               | _ :: _ as typed_refusals -> refused_cli_slot_lines typed_refusals
-              | [] -> ["Refused CLI slots: " ^ String.concat ", " refused])
+              | [] -> [refused_cli_slots_line refused])
            | (Browser _ | Machine _ | Declaration _ | Manual_instance _), refused ->
-             ["Refused CLI slots: " ^ String.concat ", " refused]
+             [refused_cli_slots_line refused]
          in
-         ["Declared HTTP slots: " ^ String.concat ", " c.declared_slots;
-          "Declared CLI slots: " ^ String.concat ", " c.declared_cli_slots]
-         @ (match c.dropped_slots with [] -> [] | values -> ["Dropped HTTP slots: " ^ String.concat ", " values])
+         [L.fact "Declared HTTP slots" (String.concat ", " c.declared_slots);
+          L.fact "Declared CLI slots" (String.concat ", " c.declared_cli_slots)]
+         @ (match c.dropped_slots with
+            | [] -> []
+            | values -> [L.fact ~tone:L.Attention "Dropped HTTP slots" (String.concat ", " values)])
          @ refused_cli_lines
-         @ (match c.admission_error with None -> [] | Some detail -> ["Admission: " ^ detail])
-     | Exact_state (Unconfigured detail | Registry_unavailable detail) -> [detail]
-     | Browser_clients _ -> [browser_switch_line]
-     | Machine_state _ -> ["Off refuses new execution and input; existing machine state and checkpoints are retained.";
-         "Select this machine in All Lanes and press Space for activity settings."]
+         @ (match c.admission_error with
+            | None -> []
+            | Some detail -> [L.fact ~tone:L.Failure "Admission" detail])
+     | Exact_state (Unconfigured detail | Registry_unavailable detail) -> [L.note ~tone:L.Attention detail]
+     | Browser_clients _ -> [L.note browser_switch_line]
+     | Machine_state _ ->
+         [L.note ~tone:L.Quiet "Off refuses new execution and input; existing machine state and checkpoints are retained.";
+          L.note "Select this machine in All Lanes and press Space for activity settings."]
      | Package_state {declaration;instances} ->
          (match declaration with
           | None -> []
-          | Some (Valid value) -> ["Installation: " ^ value.installation_id; "Run: " ^ value.run_id;
-              "Package: " ^ value.package_id ^ " · " ^ value.title; "Desired revision: " ^ value.desired_revision; "Source revision: " ^ value.source_revision]
-          | Some (Invalid messages) -> List.map (fun message -> "Declaration error: " ^ message) messages
-          | Some Absent -> ["No declaration was observed in the complete directory reading; retained worker state is separate."]
-          | Some Unobserved -> ["Directory reading is incomplete; declaration absence is not established."])
+          | Some (Valid value) ->
+              [L.fact "Installation" value.installation_id; L.fact "Run" value.run_id;
+               L.fact "Package" (value.package_id ^ " · " ^ value.title);
+               L.fact "Desired revision" value.desired_revision;
+               L.fact "Source revision" value.source_revision]
+          | Some (Invalid messages) -> List.map (fun message -> L.fact ~tone:L.Failure "Declaration error" message) messages
+          | Some Absent -> [L.note ~tone:L.Attention "No declaration was observed in the complete directory reading; retained worker state is separate."]
+          | Some Unobserved -> [L.note ~tone:L.Attention "Directory reading is incomplete; declaration absence is not established."])
          @ List.concat_map instance_lines instances)
 
 (* A package row's exact outputs, first and the rest, with the installation

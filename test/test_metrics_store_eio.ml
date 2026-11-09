@@ -5,13 +5,19 @@ open Masc
 let () = Random.init 42
 
 let rec rm_rf path =
-  if Sys.file_exists path then
-    if Sys.is_directory path then begin
-      Sys.readdir path
-      |> Array.iter (fun name -> rm_rf (Filename.concat path name));
-      Unix.rmdir path
-    end else
-      Sys.remove path
+  (* [Unix.lstat], not [Sys.is_directory]: the latter follows symlinks, so a
+     link to a directory would make [Sys.readdir] enumerate the *target* and
+     this loop delete entries outside the swept tree, then fail its rmdir.
+     [S_LNK] falls through to [Sys.remove], which unlinks the link itself.
+     A dangling link ([Sys.file_exists] reads false) is unlinked too instead
+     of being skipped into an ENOTEMPTY. *)
+  match Unix.lstat path with
+  | exception Unix.Unix_error ((Unix.ENOENT | Unix.ENOTDIR), _, _) -> ()
+  | { Unix.st_kind = Unix.S_DIR; _ } ->
+    Sys.readdir path
+    |> Array.iter (fun name -> rm_rf (Filename.concat path name));
+    Unix.rmdir path
+  | _ -> Sys.remove path
 
 let with_temp_masc_dir f =
   let base =
@@ -397,6 +403,29 @@ let test_filter_recent_month_filenames () =
   assert (filtered = expected);
   print_endline "✓ test_filter_recent_month_filenames passed"
 
+(* #26648: the fixture cleanup must unlink symlinks instead of following
+   them. A directory link under the swept root used to make [rm_rf] enumerate
+   the target and delete its entries, then fail its rmdir; a dangling link
+   was skipped into an ENOTEMPTY. *)
+let test_rm_rf_unlinks_symlinks_without_following () =
+  let outside = Filename.temp_file "rm-rf-symlink-outside-" "" in
+  Sys.remove outside;
+  Unix.mkdir outside 0o755;
+  let keep = Filename.concat outside "keep.txt" in
+  let oc = open_out keep in
+  output_string oc "x";
+  close_out oc;
+  let root = Filename.temp_file "rm-rf-symlink-" "" in
+  Sys.remove root;
+  Unix.mkdir root 0o755;
+  Unix.symlink outside (Filename.concat root "dir_link");
+  Unix.symlink (Filename.concat root "missing") (Filename.concat root "dangling");
+  rm_rf root;
+  assert (not (Sys.file_exists root));
+  assert (Sys.file_exists keep);
+  rm_rf outside;
+  print_endline "✓ test_rm_rf_unlinks_symlinks_without_following passed"
+
 let () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -417,4 +446,5 @@ let () =
   test_invalid_observations_and_real_zero ();
   test_generate_id ();
   test_filter_recent_month_filenames ();
+  test_rm_rf_unlinks_symlinks_without_following ();
   print_endline "\n✅ All Metrics_store_eio tests passed!\n"

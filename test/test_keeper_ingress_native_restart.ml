@@ -145,7 +145,8 @@ let check_effect_counts root =
   let article_rows, target_tool_log_rows = effect_counts root in
   check int "one durable article append, not a repeated write" 1 article_rows;
   check (list (pair string string)) "the original article persists" [keeper_name, article_text]
-    (World_constitution_store.load_articles ~base_path:root |> require "constitution articles"
+    (World_constitution_store.load_articles ~base_path:root ~resolve_subject:(fun _ -> true)
+     |> require "constitution articles"
      |> List.map (fun (article : World_constitution_types.t) -> article.author, article.text));
   check int "one committed target tool-call row" 1 target_tool_log_rows;
   check int "target approval pre-hook ran once" 1 (count root "approval");

@@ -1823,6 +1823,16 @@ let proactive_outcome_word ?(ko = false) =
   | Masc.Keeper_meta_contract.Proactive_error -> text "오류 보고" "error"
   | Masc.Keeper_meta_contract.Proactive_rested -> text "제공자 할당량을 기다림" "rested on a provider quota"
 
+(* The awaiting flag turns on for every waiting change event and off at the
+   next successful read. With a live roster that is a burst per event, so
+   drawing the flag directly made header rows come and go with each burst.
+   The age names how long the screen has actually been behind; only that,
+   past the pending display bar, is worth a row or a word. *)
+let keeper_waiting_refresh_slow state =
+  match Keeper_waiting_read.awaiting_age state.keeper_waiting_read with
+  | Some age when past_pending_display_bar age -> Some age
+  | Some _ | None -> None
+
 (* The operator roster uses the same row readings as the axis views. These
    sentences do not turn missing observations into idle work or no requests. *)
 let keeper_plain_work (state : state) (row : Keeper_list_model.row) =
@@ -1854,7 +1864,7 @@ let keeper_plain_work (state : state) (row : Keeper_list_model.row) =
            (if Option.is_some state.keeper_waiting_error || Option.is_some state.keeper_waiting_failure
                || Option.is_some state.keeper_turns_error then
               text "마지막 대기 관측 · 갱신 실패: " "last waiting observation · refresh failed: "
-            else if Keeper_waiting_read.awaiting_change state.keeper_waiting_read then
+            else if Option.is_some (keeper_waiting_refresh_slow state) then
               text "마지막 대기 관측 · 갱신 대기: " "last waiting observation · refresh pending: "
             else text "관측된 대기: " "observed wait: ") ^ reason
        | None ->
@@ -1902,7 +1912,7 @@ let keeper_plain_help (state : state) (row : Keeper_list_model.row) =
         else
             (match request with
              | Keeper_list_model.Held_item _ | Keeper_list_model.Confirmation_item _
-               when Keeper_waiting_read.awaiting_change state.keeper_waiting_read ->
+               when Option.is_some (keeper_waiting_refresh_slow state) ->
                  text "마지막 관측 · 갱신 대기 · " "last observed · refresh pending · "
              | Keeper_list_model.Held_item _ | Keeper_list_model.Confirmation_item _
              | Keeper_list_model.Held_tool _ | Keeper_list_model.Open_questions _ -> "")
@@ -1968,7 +1978,7 @@ let keeper_plain_detail_lines (state : state) ~now ~width ~compact row =
               && state.keeper_tool_approvals_error = None && state.asks_error = None
               && state.keeper_waiting_error = None && state.keeper_waiting_failure = None
               && state.keeper_turns_error = None
-              && not (Keeper_waiting_read.awaiting_change state.keeper_waiting_read)
+              && Option.is_none (keeper_waiting_refresh_slow state)
             in
             Theme.recede () ^ (if requests_observed then
               text "관측된 사람 대기 없음 · Approvals에서 확인"
@@ -2090,9 +2100,14 @@ let keeper_plain_headers (state : state) ~now ~cols ~inner ~selected_reading =
     | Some (Tui_decode.Keeper_waiting_sources_unavailable _) ->
         [warning "" (text "대기 원본을 읽지 못했습니다 · 대기 목록이 업무 차단을 뜻하지는 않습니다"
                        "waiting sources unavailable · inventory is not a work blocker")]
-    | None when Keeper_waiting_read.awaiting_change state.keeper_waiting_read ->
-        [warning "" (text "대기 목록 갱신 중 · 마지막 관측을 표시합니다" "waiting refresh pending · showing last observation")]
-    | None -> []
+    | None ->
+        (match keeper_waiting_refresh_slow state with
+         | Some age ->
+             let elapsed = Printf.sprintf "%.1f" (Int64.to_float age /. 1e9) in
+             [warning "" (text
+                ("대기 목록 갱신 중 · 마지막 관측을 표시합니다 · " ^ elapsed ^ "초")
+                ("waiting refresh pending · showing last observation · " ^ elapsed ^ "s"))]
+         | None -> [])
   in
   [(if errors <> [] || roster <> [] || waiting <> [] then
       Theme.warn () ^ text "일부 관측 미확인 · " "some observations unknown · " ^ Ansi.reset else "")
@@ -2597,11 +2612,15 @@ let render_keeper_axes (state : state) =
    | Some err ->
        box_line buf cols
          (Theme.warn () ^ "  waiting refresh failed: " ^ Terminal_text.single_line err ^ Ansi.reset)
-   | None when Keeper_waiting_read.awaiting_change state.keeper_waiting_read ->
-       let detail = if Keeper_waiting_read.in_flight state.keeper_waiting_read
-         then "refreshing" else "refresh pending" in
-       box_line buf cols (Theme.warn () ^ "  waiting inventory: " ^ detail ^ Ansi.reset)
-   | None -> ());
+   | None ->
+       (match keeper_waiting_refresh_slow state with
+        | Some age ->
+            let detail = if Keeper_waiting_read.in_flight state.keeper_waiting_read
+              then "refreshing" else "refresh pending" in
+            let elapsed = Printf.sprintf "%.1f" (Int64.to_float age /. 1e9) in
+            box_line buf cols
+              (Theme.warn () ^ "  waiting inventory: " ^ detail ^ " · " ^ elapsed ^ "s" ^ Ansi.reset)
+        | None -> ()));
   (match state.keeper_waiting_failure with
    | None -> ()
    | Some failure ->

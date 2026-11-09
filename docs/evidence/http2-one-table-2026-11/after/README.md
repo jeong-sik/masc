@@ -38,7 +38,6 @@
 
 - 원격 클라이언트가 보는 값, cloudflared 를 거친 값. 측정 시점에 터널은 아직 평문 origin(8935)으로 붙어 있었다. Keeper 가 도는 서버.
 - 전송별 경로 차이의 전체 목록(`scripts/auth-route-baseline/`). `tools/auth_route_inventory` 실행 파일이 필요하다.
-- 브라우저의 Protocol 열과 대시보드 한 탭의 연결 수.
 - 왜 HTTP/1.1 동시 연결에서 p99 가 길어지는지. 어디까지가 TLS 암호화 비용인지.
 
 ## 파일
@@ -47,6 +46,7 @@
 - `results.json`: 시나리오·전송·반복마다 한 행(원본 그대로). SSE 행의 `sample_events` 는 프레임 앞 80바이트다.
 - `summary.md`: 생성된 표. 바이너리 경로의 사용자 경로만 `~` 로 바꿨다.
 - `download-crosscheck/`: 같은 세 파일, download·curl 시나리오만.
+- `browser.md`: 브라우저가 보는 전송(문서·자원의 `nextHopProtocol`, 한 탭의 연결 수). 2026-11-09 측정.
 - 서버 로그는 임시 경로가 들어 있어 남기지 않았다.
 
 ## 다시 재기

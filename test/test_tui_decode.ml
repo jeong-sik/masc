@@ -6520,7 +6520,7 @@ let test_merge_keeper_memory_facts_names_unread_keepers () =
       { Masc.Tui_decode_memory_facts.mos_facts = List.map merge_fixture_fact claims }
   in
   let snapshot, unread =
-    Masc.Tui_decode_memory_facts.merge_keeper_memory_facts
+    Masc.Tui_decode_memory_facts.merge_keeper_memory_facts ~refused:[]
       [ "alpha", Ok (merge_fixture_snapshot ~ordinary:(present [ "a1" ]) "alpha")
       ; "beta", Error "connection refused"
       ; ( "gamma"
@@ -6549,11 +6549,52 @@ let test_merge_keeper_memory_facts_names_unread_keepers () =
         "gamma: source-bound store: unreadable" ]
 
 let test_merge_keeper_memory_facts_all_read () =
-  let _, unread =
-    Masc.Tui_decode_memory_facts.merge_keeper_memory_facts
+  let snapshot, unread =
+    Masc.Tui_decode_memory_facts.merge_keeper_memory_facts ~refused:[]
       [ "alpha", Ok (merge_fixture_snapshot "alpha") ]
   in
-  Alcotest.(check (option string)) "nothing unread" None unread
+  Alcotest.(check (option string)) "nothing unread" None unread;
+  Alcotest.(check (option int)) "read empty fleet has a known zero" (Some 0)
+    (Masc.Tui_decode_memory_facts.memory_fact_count ~complete:(Option.is_none unread)
+       snapshot Masc.Tui_decode_memory_facts.All_facts)
+
+let test_merge_keeper_memory_facts_keeps_health_refusals () =
+  let module Facts = Masc.Tui_decode_memory_facts in
+  let refusal keeper reason : Masc.Tui_decode_memory_health.memory_keeper_refusal =
+    { mkr_keeper_id = keeper; mkr_reason = reason } in
+  let readable =
+    [ "alpha", Ok (merge_fixture_snapshot
+        ~ordinary:(Facts.Memory_store_present
+          { mos_facts = [merge_fixture_fact "retained claim"] }) "alpha") ] in
+  List.iter (fun (label, refused, loads, claims) ->
+    let snapshot, unread = Facts.merge_keeper_memory_facts ~refused loads in
+    Alcotest.(check (list (triple string string string)))
+      (label ^ ": readable claims remain") claims (merged_claims snapshot);
+    (match unread with
+     | None -> Alcotest.failf "%s: health refusals lost fleet incompleteness" label
+     | Some summary -> List.iter
+         (fun (refusal : Masc.Tui_decode_memory_health.memory_keeper_refusal) ->
+           Alcotest.(check bool) (label ^ ": refusal reason retained") true
+             (String_util.contains_substring summary refusal.mkr_reason);
+           Option.iter (fun keeper ->
+             Alcotest.(check bool) (label ^ ": refused keeper retained") true
+               (String_util.contains_substring summary keeper)) refusal.mkr_keeper_id)
+         refused);
+    List.iter (fun scope ->
+      Alcotest.(check (option int)) (label ^ ": fleet count stays unknown") None
+        (Facts.memory_fact_count ~complete:(Option.is_none unread) snapshot scope))
+      [ Facts.All_facts; Ordinary_facts None; Source_facts; Dropped_facts ])
+    [ "named refusal with a readable keeper",
+        [refusal (Some "named-refused") "named health row was refused"], readable,
+        ["alpha", "authored", "retained claim"]
+    ; "anonymous refusal with a readable keeper",
+        [refusal None "anonymous health row was refused"], readable,
+        ["alpha", "authored", "retained claim"]
+    ; "only refused keepers",
+        [refusal (Some "named-refused") "named refusal";
+         refusal None "first anonymous refusal";
+         refusal None "second anonymous refusal"], [], []
+    ]
 
 (* Source-bound facts and dropped facts take their keeper from the list too,
    and the server's text stays as it is: a colon in a path or a space in an
@@ -6585,7 +6626,7 @@ let test_merge_keeper_memory_facts_names_every_row_kind_and_keeps_the_text () =
       }
   in
   let snapshot, _ =
-    Masc.Tui_decode_memory_facts.merge_keeper_memory_facts
+    Masc.Tui_decode_memory_facts.merge_keeper_memory_facts ~refused:[]
       [ ( "alpha"
         , Ok
             { (merge_fixture_snapshot ~ordinary "alpha") with
@@ -14787,6 +14828,8 @@ let () =
           test_merge_keeper_memory_facts_names_unread_keepers;
         Alcotest.test_case "merge with every keeper read" `Quick
           test_merge_keeper_memory_facts_all_read;
+        Alcotest.test_case "merge keeps health refusals and unknown fleet counts" `Quick
+          test_merge_keeper_memory_facts_keeps_health_refusals;
         Alcotest.test_case "merge names every row kind and keeps the text" `Quick
           test_merge_keeper_memory_facts_names_every_row_kind_and_keeps_the_text;
         Alcotest.test_case "memory facts keep both stores" `Quick

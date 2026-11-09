@@ -114,3 +114,10 @@ at 8ebbe020. Its retained runner log records the three selected suites:
 `test_tui_memory_facts_explorer` (9 cases), `test_tui_planning_detail` (8), and
 `test_tui_task_document_style` (4). These are category-search, proof-boundary and
 document-identity/style checks; they are not the complete TUI regression.
+
+The [second four-surface source review](../../reports/2026-11-10-four-surface-reading-review.md)
+keeps Memory health queries aligned with the displayed canonical/KO/EN state
+and carries refused health rows into fleet fact coverage, including anonymous
+refusals and retained results. Filtered listing counts are named separately from
+store totals. New checks concern selected Keeper IDs and observation scope;
+their execution and a native capture of this follow-up are not claimed.

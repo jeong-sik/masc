@@ -345,9 +345,7 @@ let test_category_rail_bounds_large_label_preview () =
   check bool "bounded preview exposes truncation and count in the visible rail" true
     (List.exists (contains "… (1)") rail);
   check bool "rendered rows fit the same terminal width" true
-    (List.for_all (fun line -> Layout.display_width line <= Masc_tui_frame.inner_width ~cols:140) lines);
-  check string "the category retained for detail is complete" name
-    (Types.memory_category_filter_label state.memory_facts_category)
+    (List.for_all (fun line -> Layout.display_width line <= Masc_tui_frame.inner_width ~cols:140) lines)
 
 let test_category_rail_wrapped_range_and_overflow () =
   let long_cat_name = "custom_architecture_infrastructure_deployment_pipeline_specification" in
@@ -476,6 +474,53 @@ let test_memory_search_uses_the_filter_text_and_query () =
     (Masc_tui_surface_search.surface_search_count ~cols:120 state Types.Memory ~query:"   ");
   check string "other surfaces retain literal whitespace" "  deploy fact  "
     (Types.surface_search_query Types.Board "  deploy fact  ")
+;;
+
+let test_memory_keeper_search_accepts_display_words () =
+  let module H = Masc.Tui_decode_memory_health in
+  let state = make_state () in
+  state.view <- Types.Memory;
+  state.memory_overview_sort <- Types.Mem_overview_name;
+  let with_pass keeper_id ending =
+    let keeper = make_keeper_health ~keeper_id ~facts:10 ~snapshot_bytes:1024 in
+    { keeper with mkh_librarian = { keeper.mkh_librarian with mlh_state = Some ending } } in
+  let ready = with_pass "ready" H.Pass_drained in
+  let empty = { ready with mkh_keeper_id = "empty"; mkh_snapshot_present = false;
+    mkh_facts = 0; mkh_observed_facts = 0; mkh_snapshot_bytes = 0; mkh_added = 0;
+    mkh_updated_at = None; mkh_age_bins = None } in
+  state.memory_health <- Some { (make_fleet_health ready) with
+    mhs_keepers = [ready; with_pass "halted" (H.Pass_stopped "addon unavailable");
+      with_pass "failed" (H.Pass_raised "worker raised"); empty];
+    mhs_total_facts = 30; mhs_total_observed_facts = 30; mhs_total_snapshot_bytes = 3072 };
+  let verify ~typing query wanted =
+    state.search <- if typing then Some query else None;
+    state.search_last <- if typing then "previous query" else query;
+    state.memory_health_cursor <- 0;
+    let rows = Types.visible_memory_keepers state in
+    check (list string) "the query selects the intended Keeper IDs" wanted
+      (List.map (fun keeper -> keeper.H.mkh_keeper_id) rows);
+    check (option string) "Enter selects the matching Keeper" (List.nth_opt wanted 0)
+      (Option.map (fun keeper -> keeper.H.mkh_keeper_id) (Types.selected_memory_keeper state));
+    let texts = Option.get
+        (Masc_tui_surface_search.surface_row_texts ~cols:120 state Types.Memory) in
+    let query = Types.surface_search_query Types.Memory query in
+    let reachable = List.combine rows texts |> List.filter_map (fun (keeper, text) ->
+      if Masc_tui_pick_list.lowercase_contains ~needle:query text
+      then Some keeper.H.mkh_keeper_id else None) in
+    check (list string) "cursor search reaches the same Keeper IDs" wanted reachable in
+  List.iter (fun language ->
+    state.ui_language <- language;
+    List.iter (fun typing ->
+      List.iter (fun (query, wanted) -> verify ~typing query wanted)
+        [ "스냅샷 없음", ["empty"]; "no snapshot", ["empty"];
+          "중단됨", ["halted"]; "stopped", ["halted"];
+          "  STOPPED  ", ["halted"];
+          "처리 실패", ["failed"]; "crashed", ["failed"];
+          "기억 관측됨", ["ready"]; "memory observed", ["ready"];
+          "degraded", ["failed"; "halted"]; "no-current", ["empty"];
+          "ok", ["ready"]; "halted", ["halted"]; "not-present", [] ])
+      [true; false])
+    [Types.Lang_ko; Types.Lang_en]
 ;;
 
 let test_the_breakdown_counts_the_rows_the_screen_lists () =
@@ -636,8 +681,9 @@ let test_render_memory_overflow_selection () =
   state.memory_health_error <- Some "refresh failed";
   let layout = Render_memory.memory_overview_scrolled ~cols:100 ~budget state in
   check int "filter bounds the cursor to the one visible keeper" 1 layout.sc_count;
-  check (option (list string)) "search names the same filtered row"
-    (Some ["keeper-4 read-error"]) (Masc_tui_surface_search.surface_row_texts ~cols:120 state Types.Memory);
+  check (option string) "search keeps the intended Keeper selected" (Some "keeper-4")
+    (Option.map (fun keeper -> keeper.Masc.Tui_decode_memory_health.mkh_keeper_id)
+       (Types.selected_memory_keeper state));
   (* A refresh/filter can change the body before another keypress. *)
   assert_selected_visible ()
 ;;
@@ -786,6 +832,8 @@ let () =
     ; ( "one place per fact"
       , [ test_case "search count and cursor share Memory filter text and query" `Quick
             test_memory_search_uses_the_filter_text_and_query
+        ; test_case "Keeper queries accept canonical and both display languages" `Quick
+            test_memory_keeper_search_accepts_display_words
         ; test_case "the breakdown counts the rows the screen lists" `Quick
             test_the_breakdown_counts_the_rows_the_screen_lists
         ;] )

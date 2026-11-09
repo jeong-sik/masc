@@ -43,7 +43,8 @@ the implementation authority.
 | --- | --- |
 | Chat admission, terminal precedence, native tool boundary, checkpoint resume | `Test`, [run 42610164608](https://github.com/jeong-sik/masc/actions/runs/42610164608), ref `fix/keeper-queue-handoff-20261109`, head `e4b22934d5e498e604690f504ec52f08ae5b5777`, conclusion `success` |
 | Selected suites in that run | `test_keeper_owner` 112, `test_keeper_turn_outcome` 44, `test_keeper_official_client_host` 97, `test_keeper_repetition_scope` 12, `test_keeper_agent_core_result_outbox` 12; 277 tests passed |
-| Final scheduled batching and combined handoff scenario | Pending the selected run for the upper PR; not established by the bottom run |
+| First upper run | `Test`, [42612825975](https://github.com/jeong-sik/masc/actions/runs/42612825975), ref `fix/keeper-queue-batching-20261109`, head `5c47fb86b093acffc4a44b2a9e9c7f4b800dd0b6`, conclusion `failure`: the new test runner lacked an explicit operation record type. The one-line annotation is the repair; behavior tests did not run. |
+| Final scheduled batching and combined handoff scenario | Pending the replacement selected run for the upper PR; not established by the bottom run |
 | Local source checks | OCaml 5.5.2 parsing of changed OCaml files, raw typechecking of Owner and intake, `git diff --check`; no local Dune build |
 | Independent review | One separate agent reviewed both units. Two reply-routing P2 findings were fixed: Slack thread conflation and no-delivery schedules erasing a connector route. The reviewer found no remaining P0/P1/P2 in the repaired scopes. This is source review, not a GitHub account approval or runtime observation. |
 

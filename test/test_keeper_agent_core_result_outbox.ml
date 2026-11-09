@@ -130,7 +130,7 @@ streaming = false
       let meta = get (Masc_test_deps.meta_of_json_fixture
         (`Assoc ["name",`String keeper_name;"trace_id",`String session_id])) in
       let execute ~sw:_ ~keeper_name:_ ~claim =
-        let operation = match owner_ok (claim ()) with
+        let operation : Keeper_chat_operation.t = match owner_ok (claim ()) with
           | Some operation -> operation | None -> fail "ready chat was not claimed" in
         check bool "chat starts after the autonomous tool checkpoint is durable" true !tool_boundary_saved;
         check int "the autonomous effect finished before chat starts" 1 !effects;

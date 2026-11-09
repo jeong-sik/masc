@@ -649,7 +649,7 @@ let recovery_box_bottom state buf ~cols =
   draw_box_bottom_with_recovery buf ~cols selected;
   selected
 
-let footer_line ?help_door ?(status = []) ?position ?(recovery_in_slot = None)
+let footer_line ?help_door ?(status = []) ?position ?(recovery_in_slot = None) ?choices
     (state : state) ~max_cells ~hints =
   (* Hints off trades the key text for status room; "?:help" stays as the
      door back. One seam for every surface, which is what makes the setting
@@ -674,7 +674,8 @@ let footer_line ?help_door ?(status = []) ?position ?(recovery_in_slot = None)
     else hints
   in
   (* The keys this frame announces, for the navigation trace (RFC-0485). *)
-  Masc_tui_nav_trace_log.announce hints;
+  Masc_tui_nav_trace_log.announce
+    (match choices with None -> hints | Some text -> text ^ "  " ^ hints);
   (* Search status is literal text, not key hints: runs of spaces belong
      to the user's query and must survive compact hint-item fitting. *)
   let literal_prefix = search_marker state in
@@ -755,7 +756,8 @@ let footer_line ?help_door ?(status = []) ?position ?(recovery_in_slot = None)
     | None -> (match Masc_tui_action_notice.preferred state.last_action
             ~existing_action:(Option.is_some action_text)
             ~now:(Unix.gettimeofday ()) ~window:Masc_tui_types.last_action_window_s with
-    | No_preferred -> None
+    | No_preferred ->
+        Option.map (fun text -> Masc_tui_footer.Pending_question (text, Fun.id)) choices
     | Csi_recovery ->
         Some (Masc_tui_footer.Outcome (Masc_tui_action_notice.csi_recovery_text, Fun.id))
     | Rejection notice ->
@@ -1506,6 +1508,7 @@ let finish_surface (state : state) ?clamped ~surface_key ~rows ~cols buf =
    last row instead. *)
 type acting_pane_footer =
   | Footer_hints of { hints : string; position : string option }
+  | Footer_choices of { choices : string; hints : string }
   | No_footer
 
 (* The end of a surface that draws its own composer and footer -- the Keeper
@@ -1525,7 +1528,10 @@ let finish_frame_beside_acting_pane (state : state) ?clamped ?roster ?(recovery_
    | No_footer -> ()
    | Footer_hints { hints; position } ->
        Buffer.add_string buf
-         (footer_line ?position ~recovery_in_slot state ~max_cells:cols ~hints));
+         (footer_line ?position ~recovery_in_slot state ~max_cells:cols ~hints)
+   | Footer_choices { choices; hints } ->
+       Buffer.add_string buf
+         (footer_line ~choices ~recovery_in_slot state ~max_cells:cols ~hints));
   let framed = Buffer.create (Buffer.length buf + 4096) in
   let lines = frame_lines buf in
   (* These frames draw neither the shared composer nor the agenda. Only

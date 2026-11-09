@@ -173,13 +173,16 @@ val footer_line :
   ?status:Masc_tui_footer.status_item list ->
   ?position:string ->
   ?recovery_in_slot:recovery_row option ->
+  ?choices:string ->
   Masc_tui_types.state -> max_cells:int -> hints:string -> string
 (** [position] is where a scrolling surface stands in what it is scrolling.
     It is separate from [hints] because the fitter gives up key items from
     the back, and a position is the one item on the row that [?] cannot
     recover; kept with the keys that cannot be dropped. Use the footer when
     the detail has no spare content row; list panes with a window-reading row
-    keep their position in the body. *)
+    keep their position in the body. [choices] is an open menu's complete
+    decision, retained ahead of ambient notices. Quit and input-recovery
+    notices keep their existing priority. It does not authorize an action. *)
 
 val keeper_split_threshold_cols : int
 
@@ -212,6 +215,8 @@ val finish_surface :
 type acting_pane_footer =
   | Footer_hints of { hints : string; position : string option }
       (** Drawn by {!footer_line}; [position] as there. *)
+  | Footer_choices of { choices : string; hints : string }
+      (** An open menu's choices, with its other key hints kept separate. *)
   | No_footer
 
 (** The end of a surface that draws its own composer and footer instead of

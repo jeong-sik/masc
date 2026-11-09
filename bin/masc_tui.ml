@@ -42790,7 +42790,12 @@ Use relative paths for resources already held in the package. -->
              ~write:(output_string stdout) ~flush:(fun () -> flush stdout)
              (present_frame frame approval presses panes acting_pane chat_row_actions change_authority
                 ~drawn_detail_reading:!drawn_detail_reading ~drawn_tools_task
-                ~input_pending:asynchronous_input_pending clamped)
+                ~input_pending:asynchronous_input_pending clamped);
+           (* An overrun must leave time to consume the input it accumulated.
+              Measuring the interval from Build start made every queued key
+              start another overdue frame before the reader could catch up.
+              Drained input still bypasses the interval in [take]. *)
+           Render_schedule.completed render_schedule ~now_ns:(Mtime_clock.elapsed_ns ())
        | Render_schedule.Idle | Render_schedule.Wait_until _ -> ())
     done
   in

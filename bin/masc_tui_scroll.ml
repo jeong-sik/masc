@@ -31,7 +31,9 @@ let down ~count ~height scroll =
 
 let up ~count ~height scroll = Int.max 0 (normalize ~count ~height scroll - 1)
 
-let step_uncounted ~delta scroll = Int.max 0 (scroll + delta)
+let step_uncounted ~delta scroll =
+  if delta > 0 && scroll > max_int - delta then max_int
+  else Int.max 0 (scroll + delta)
 
 (* A page keeps one row from the window it leaves. Moving a full [height]
    would put the row the reader stopped on just past the edge, so a long list

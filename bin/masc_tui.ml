@@ -20577,16 +20577,10 @@ let open_board_post state ~mailbox ~focus (post : board_post) =
   open_board_post_id state ~mailbox ~focus post.bp_id
 
 let move_board_read_scroll state ~by =
-  let current =
-    if state.board_comments_focused then state.board_comment_scroll
-    else state.board_scroll
-  in
-  let next =
-    if by > 0 then Masc_tui_types.scroll_down_from current ~by
-    else max 0 (current + by)
-  in
-  if state.board_comments_focused then state.board_comment_scroll <- next
-  else state.board_scroll <- next
+  if state.board_comments_focused then
+    state.board_comment_scroll <-
+      Masc_tui_scroll.step_uncounted ~delta:by state.board_comment_scroll
+  else state.board_scroll <- Masc_tui_scroll.step_uncounted ~delta:by state.board_scroll
 
 (* The open post's comment ids in drawn order and the comment its read
    landed on, while its thread is on screen. *)
@@ -35506,9 +35500,9 @@ Use relative paths for resources already held in the package. -->
                    Masc_tui_types.runtime_params_viewport state ~terminal_rows in
                  let page = max 1 (detail_height - 1) in
                  state.config_scroll <-
-                   (if String.equal k "pagedown" then
-                      Masc_tui_types.scroll_down_from state.config_scroll ~by:page
-                    else max 0 (state.config_scroll - page))
+                   Masc_tui_scroll.step_uncounted
+                     ~delta:(if String.equal k "pagedown" then page else -page)
+                     state.config_scroll
                | "\r" | "\n" | "enter" -> handle_runtime_param_edit_apply ()
                | "\127" | "\b" | "backspace" ->
                  set (Masc_tui_types.runtime_param_edit_backspace edit);
@@ -36075,8 +36069,7 @@ Use relative paths for resources already held in the package. -->
              | "g" | "home" -> state.client_detail_scroll <- 0
              | "G" | "end" -> state.client_detail_scroll <- max_int
              | _ -> state.client_detail_scroll <-
-                 (if delta > 0 then scroll_down_from state.client_detail_scroll ~by:delta
-                  else max 0 (state.client_detail_scroll + delta)))
+                 Masc_tui_scroll.step_uncounted ~delta state.client_detail_scroll)
        | Some ("\r" | "\n" | "enter")
          when state.view = Clients && not (modal_owns_keys state)
               && not state.palette_open && not state.answering_open
@@ -36542,9 +36535,7 @@ Use relative paths for resources already held in the package. -->
               (match state.repository_changes_diff_path with
                | Some _ ->
                    state.repository_changes_diff_scroll <-
-                     (if direction > 0 then
-                        Masc_tui_types.scroll_down_from state.repository_changes_diff_scroll ~by:page
-                      else max 0 (state.repository_changes_diff_scroll + (direction * page)))
+                     Masc_tui_scroll.step_uncounted ~delta:(direction * page) state.repository_changes_diff_scroll
                | None ->
                    let cursor, scroll =
                      move_row_cursor state ~delta:(direction * page)
@@ -38169,10 +38160,7 @@ Use relative paths for resources already held in the package. -->
                   | "j" | "down" -> 1 | "k" | "up" -> -1
                   | "pageup" -> -page | _ -> page in
                 state.memory_fact_detail_scroll <-
-                  (if delta > 0 then
-                     Masc_tui_types.scroll_down_from state.memory_fact_detail_scroll
-                       ~by:delta
-                   else max 0 (state.memory_fact_detail_scroll + delta)))
+                  Masc_tui_scroll.step_uncounted ~delta state.memory_fact_detail_scroll)
        | Some ("\r" | "\n" | "enter")
          when state.view = Memory && Option.is_some state.memory_facts_keeper ->
            state.memory_fact_detail_open <- true;
@@ -38198,10 +38186,7 @@ Use relative paths for resources already held in the package. -->
                    evidence pane reports no clamp to replace it, so a step
                    down in between would carry it into [+]. *)
                 state.acting_detail_scroll <-
-                  (if delta > 0 then
-                     Masc_tui_types.scroll_down_from state.acting_detail_scroll
-                       ~by:delta
-                   else max 0 (state.acting_detail_scroll + delta)))
+                  Masc_tui_scroll.step_uncounted ~delta state.acting_detail_scroll)
        | Some ("j" | "down" | "k" | "up" | "pageup" | "pagedown" as move)
          when state.view = Acting && state.acting_filter <> Masc_tui_acting.Turns ->
            let terminal_rows, _ = get_terminal_size () in
@@ -39517,9 +39502,7 @@ Use relative paths for resources already held in the package. -->
                          (min (count - 1) (state.fusion_cursor + (direction * page)))
                  | Fusion_detail _ | Fusion_historical_detail _ ->
                      state.fusion_scroll <-
-                       (if direction > 0 then
-                     Masc_tui_types.scroll_down_from state.fusion_scroll ~by:page
-                   else max 0 (state.fusion_scroll + (direction * page))))
+                       Masc_tui_scroll.step_uncounted ~delta:(direction * page) state.fusion_scroll)
             | Schedules ->
                 if Option.is_some (schedule_detail_on_screen state) then
                   let count, height = Masc_tui_render.schedule_detail_viewport state in
@@ -39539,9 +39522,7 @@ Use relative paths for resources already held in the package. -->
             | Verification ->
                 if Option.is_some state.verification_detail_request_id then
                   state.verification_detail_scroll <-
-                    (if direction > 0 then
-                     Masc_tui_types.scroll_down_from state.verification_detail_scroll ~by:page
-                   else max 0 (state.verification_detail_scroll + (direction * page)))
+                    Masc_tui_scroll.step_uncounted ~delta:(direction * page) state.verification_detail_scroll
                 else
                   let cursor, scroll =
                     move_row_cursor state ~delta:(direction * page)
@@ -39553,9 +39534,7 @@ Use relative paths for resources already held in the package. -->
             | Harness ->
                 if Option.is_some state.harness_detail then
                   state.harness_detail_scroll <-
-                    (if direction > 0 then
-                     Masc_tui_types.scroll_down_from state.harness_detail_scroll ~by:page
-                   else max 0 (state.harness_detail_scroll + (direction * page)))
+                    Masc_tui_scroll.step_uncounted ~delta:(direction * page) state.harness_detail_scroll
                 else
                   let cursor, scroll =
                     move_row_cursor state ~delta:(direction * page)
@@ -39571,9 +39550,6 @@ Use relative paths for resources already held in the package. -->
                 let count, height = Masc_tui_render.presets_viewport state in
                 let move = if direction > 0 then Masc_tui_scroll.page_down else Masc_tui_scroll.page_up in
                 state.config_scroll <- move ~count ~height state.config_scroll
-            | Config when state.config_pane = Config_prompts ->
-                state.config_scroll <-
-                  max 0 (state.config_scroll + (direction * page))
             | Config when state.config_pane = Config_params ->
                 let terminal_rows, _ = get_terminal_size () in
                 let _, detail_height =
@@ -39582,27 +39558,19 @@ Use relative paths for resources already held in the package. -->
                    the same detail height as the renderer, including forms. *)
                 let page = max 1 (detail_height - 1) in
                 state.config_scroll <-
-                  (if direction > 0 then
-                     Masc_tui_types.scroll_down_from state.config_scroll ~by:page
-                   else max 0 (state.config_scroll + (direction * page)))
+                  Masc_tui_scroll.step_uncounted ~delta:(direction * page) state.config_scroll
             | Config when state.config_pane = Config_voice ->
                 state.config_scroll <-
-                  (if direction > 0 then
-                     Masc_tui_types.scroll_down_from state.config_scroll ~by:page
-                   else max 0 (state.config_scroll + (direction * page)))
+                  Masc_tui_scroll.step_uncounted ~delta:(direction * page) state.config_scroll
             | Config when state.config_pane = Config_runtime ->
                 set_runtime_config_cursor_near state ~direction
                   ~target:(state.runtime_config_cursor + (direction * page))
             | Runtime when Option.is_some state.runtime_detail_target ->
                 state.runtime_detail_scroll <-
-                  (if direction > 0 then
-                     Masc_tui_types.scroll_down_from state.runtime_detail_scroll ~by:page
-                   else max 0 (state.runtime_detail_scroll + (direction * page)))
+                  Masc_tui_scroll.step_uncounted ~delta:(direction * page) state.runtime_detail_scroll
             | System_logs when Option.is_some (system_logs_page state).lp_detail_seq ->
                 edit_system_logs_page state (fun logs -> {logs with lp_detail_scroll=
-                  (if direction > 0 then
-                     Masc_tui_types.scroll_down_from logs.lp_detail_scroll ~by:page
-                   else max 0 (logs.lp_detail_scroll + (direction * page)))})
+                  Masc_tui_scroll.step_uncounted ~delta:(direction * page) logs.lp_detail_scroll})
             (* The Runs tab is read by a cursor, so its page key names a run
                the way Home and End do. Scrolling it instead wrote a value the
                drawing pulled straight back to the selected run, which is the
@@ -39617,16 +39585,9 @@ Use relative paths for resources already held in the package. -->
                 move_identity_cursor state ~delta:(direction * page)
             | Keepers Keeper_detail when state.detail_tab = Detail_terminal ->
                 Masc_tui_types.move_keeper_terminal state ~by:(-direction * page)
-            | Keepers Keeper_detail when state.detail_tab = Detail_channels ->
-                state.detail_scroll <-
-                  (if direction > 0 then
-                     Masc_tui_types.scroll_down_from state.detail_scroll ~by:page
-                   else max 0 (state.detail_scroll + (direction * page)))
             | Keepers Keeper_detail ->
                 state.detail_scroll <-
-                  (if direction > 0 then
-                     Masc_tui_types.scroll_down_from state.detail_scroll ~by:page
-                   else max 0 (state.detail_scroll + (direction * page)))
+                  Masc_tui_scroll.step_uncounted ~delta:(direction * page) state.detail_scroll
             (* The log pane owns its own height, so it pages by that rather
                than by [page]: the generic surface size counts chrome this
                pane does not have, and a page that overshoots the window skips
@@ -39658,9 +39619,7 @@ Use relative paths for resources already held in the package. -->
                          ~height:state.lane_run_detail_content_height
                      in
                      state.lane_run_detail_scroll <-
-                       (if direction > 0 then
-                     Masc_tui_types.scroll_down_from state.lane_run_detail_scroll ~by:page
-                   else max 0 (state.lane_run_detail_scroll + (direction * page)))
+                       Masc_tui_scroll.step_uncounted ~delta:(direction * page) state.lane_run_detail_scroll
                  | Lanes_run_list _ ->
                      let count =
                        match state.lane_runs with
@@ -39689,15 +39648,9 @@ Use relative paths for resources already held in the package. -->
                  | Lanes_overview ->
                      move_list_by_rows state ~delta:(direction * page))
              | Metrics ->
-                 (* Saturating, like every other clamped scroll: the frame
-                    reports the row it drew and until it has, the stored value
-                    may be a row past the end. *)
                  let page = Masc_tui_scroll.page_step ~height:state.metrics_content_height in
                  state.metrics_scroll <-
-                   (if direction > 0 then
-                      Masc_tui_types.scroll_down_from state.metrics_scroll
-                        ~by:page
-                    else max 0 (state.metrics_scroll + (direction * page)))
+                   Masc_tui_scroll.step_uncounted ~delta:(direction * page) state.metrics_scroll
              | Approvals when state.approval_detail_open ->
                  Option.iter (fun viewport ->
                    ignore (Masc_tui_approvals_model.page_detail state

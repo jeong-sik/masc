@@ -6,7 +6,8 @@ module Model = Masc_tui_keeper_list_model
 module Layout = Masc_tui_message_layout
 module Terminal_text = Masc_tui_ansi.Terminal_text
 
-type row_cells = { pulse : string; now_cell : string; strip : string; due : string; right : string }
+type pulse = Ledger_and_briefing | Fact_ages of Masc.Keeper_memory_age_bins.t option
+type row_cells = { pulse : pulse; now_cell : string; strip : string; due : string; right : string }
 
 let briefing_word = function
   | Wire.Pending -> "◷ pending"
@@ -28,30 +29,37 @@ let fleet_ladder snapshot =
   Ladder.fleet_of ~refused_rows:(List.length snapshot.Health.mhs_refused_keepers)
     snapshot.Health.mhs_keepers
 
-let age_strip = function
-  | None -> "?"
+let age_bins = function
+  | None -> None
   | Some snapshot ->
       (match fleet_ladder snapshot with
-       | Ladder.Nobody_measured _ -> "?"
-       | Ladder.Measured { unmeasured_keepers = 0; bins } -> Ladder.strip bins
-       | Ladder.Measured { unmeasured_keepers = _; bins = _ } -> "?")
+       | Ladder.Nobody_measured _ -> None
+       | Ladder.Measured { unmeasured_keepers = 0; bins } -> Some bins
+       | Ladder.Measured { unmeasured_keepers = _; bins = _ } -> None)
 
 let row_cells ~health_error ~view snapshot world =
+  let partial_reads = match snapshot with
+    | None -> false
+    | Some snapshot -> snapshot.Health.mhs_total_read_errors > 0
+        || snapshot.mhs_total_source_read_errors > 0 in
   let age = match view with
     | Model.By_age -> true
     | Model.Plain | Model.By_state | Model.By_cause | Model.By_time
     | Model.By_memory | Model.By_runtime | Model.Day_wall -> false in
-  { pulse = if age then age_strip snapshot else "ledger + briefing"
-  ; now_cell = (match health_error with Some _ -> "mem! " | None -> "") ^ now_word world
+  { pulse = if age then Fact_ages (age_bins snapshot) else Ledger_and_briefing
+  ; now_cell = (match health_error with
+      | Some _ -> "mem! "
+      | None -> if partial_reads then "mem! " else "") ^ now_word world
   ; strip = "? absent"
   ; due = if age then (match snapshot with
-      | Some snapshot -> let count = snapshot.Health.mhs_total_source_invalidations
+      | Some snapshot when not partial_reads -> let count = snapshot.Health.mhs_total_source_invalidations
           + snapshot.mhs_total_support_invalidations in
           if count = 0 then "" else "×" ^ Layout.compact_count count
-      | None -> "?") else "?"
+      | Some _ | None -> "?") else "?"
   ; right = if age then (match snapshot with
-      | Some snapshot -> Layout.compact_count snapshot.Health.mhs_total_facts
-      | None -> "?") else "?" }
+      | Some snapshot when snapshot.Health.mhs_total_read_errors = 0 ->
+          Layout.compact_count snapshot.mhs_total_facts
+      | Some _ | None -> "?") else "?" }
 
 let health_partial = function
   | None -> false

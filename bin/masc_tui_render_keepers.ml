@@ -2789,7 +2789,10 @@ let render_keeper_axes (state : state) =
           let text = grid_line grid
             { gutter = Theme.info () ^ "▌ ■ " ^ Ansi.reset
             ; name = fit_width "world · shared" grid.name_cells
-            ; pulse = fit_width world.pulse grid.side_cells
+            ; pulse = (match world.pulse with
+                | Masc_tui_keeper_world.Ledger_and_briefing ->
+                    fit_width "ledger + briefing" grid.side_cells
+                | Masc_tui_keeper_world.Fact_ages bins -> grid_age_ladder_reading grid bins)
             ; now_cell = fit_width world.now_cell Grid.now_cells
             ; strip = fit_width world.strip (Grid.strip_cells grid)
             ; due = fit_width world.due Grid.due_cells

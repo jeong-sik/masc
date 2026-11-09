@@ -440,6 +440,11 @@ let test_incomplete_queries_preserve_hidden_target_boundary base_path =
       Alcotest.(check bool) label false (String_util.contains_substring text private_marker);
       Alcotest.(check bool) (label ^ ": no source path") false
         (String_util.contains_substring text path) in
+    (match Board_dispatch.require_persisted_sources_readable () with
+     | Error (Board.Io_error message) ->
+       no_private_fragment "shared evidence gate hides private parser content" message
+     | Error error -> Alcotest.fail (Board.show_board_error error)
+     | Ok () -> Alcotest.fail "shared evidence gate accepted an incomplete comments source");
     let public_result = query_thread ~reader public_id in
     check_runtime_failure "unrelated readable public thread reports source failure" public_result;
     no_private_fragment "MCP response hides private parser content" (Tool_result.message public_result);

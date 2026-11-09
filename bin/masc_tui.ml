@@ -8775,7 +8775,7 @@ let cycle_surface state ~mailbox ~backwards =
   if count > 0 then begin
     let step = if backwards then count - 1 else 1 in
     let index =
-      (Masc_tui_surface_navigation.surface_ring_index state state.view + step) mod count
+      (Masc_tui_surface_navigation.surface_ring_index state.view + step) mod count
     in
     goto_surface state ~mailbox (fst (List.nth ring index))
   end
@@ -17397,7 +17397,8 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
   state.runtime_config_view_error <- None;
   withdraw_config_models state;
   state.runtime_config_jump_section <- None;
-  state.runtime_config_status_open <- false;
+  state.runtime_config_status_open <- true;
+  state.runtime_config_status_scroll <- 0;
   state.runtime_account_form <- None;
   state.memory_recall_form <- None;
   state.typesafeai_exclusion_form <- None;
@@ -18931,6 +18932,7 @@ let enter_config_pane state ~mailbox pane =
   state.runtime_config_jump_section <- None;
   let arriving = not (runtime_config_on_screen state) in
   state.config_pane <- pane;
+  if pane = Config_runtime then state.runtime_config_status_open <- false;
   (* Moving between panes stays inside the Config view, so
      [launch_surface_reads] never sees it. Arriving on a pane that draws
      runtime.toml owes it a read here instead. *)
@@ -36756,6 +36758,7 @@ Use relative paths for resources already held in the package. -->
                      goto_surface state ~mailbox:async_messages Metrics
                  | Some (_, Masc_tui_palette.Palette_config pane) ->
                      state.config_pane <- pane;
+                     if pane = Config_runtime then state.runtime_config_status_open <- false;
                      state.config_scroll <- 0;
                      state.runtime_params_cursor <- 0;
                      state.runtime_param_edit <- None;

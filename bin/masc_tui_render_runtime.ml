@@ -1,4 +1,4 @@
-(** System / Runtime, Tools, Usage / Metrics, and Keeper runtime picker screens. *)
+(** System / Runtime, Features / Tools, Operations / Usage, and Keeper runtime picker screens. *)
 
 open Masc_tui_types
 open Tui_decode
@@ -1068,7 +1068,7 @@ let render_tools (state : state) =
   in
   let header =
     Printf.sprintf "%s  %s  %s"
-      (screen_title " MASC System / Tools") timestamp
+      (screen_title " MASC Features & plugins / Tools") timestamp
       (connection_badge state)
   in
   box_top buf cols;
@@ -1448,8 +1448,8 @@ let render_metrics (state : state) =
      title does not name it a second time. *)
   let heading =
     screen_title
-      (if state.usage_telemetry_open then " MASC Usage / Telemetry"
-       else " MASC Usage")
+      (if state.usage_telemetry_open then " MASC Operations / Usage / Telemetry"
+       else " MASC Operations / Usage")
   in
   let connection = usage_connection_badge state in
   let timed_title = Printf.sprintf "%s  %s  %s" heading timestamp connection in

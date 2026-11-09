@@ -158,7 +158,7 @@ let health_word tone word = Theme.text_status tone ^ word ^ Ansi.reset
 (* The Dashboard keeps its working layout through loading and failure. *)
 let overview_header (state : state) ~cols =
   badge_row ~cols
-    ~lead:(screen_title " MASC Dashboard")
+    ~lead:(screen_title (ui_text state ~ko:" MASC 운영" ~en:" MASC Operations"))
     ~label:(Terminal_text.single_line state.workspace)
     ~badge:(connection_badge state)
 
@@ -261,7 +261,9 @@ let render_overview (state : state) home =
            ^ Ansi.reset);
       c.push
         (" " ^ pressable (Press_surface Approvals)
-           (Ansi.dim ^ "p:Approvals / Questions" ^ Ansi.reset));
+           (Ansi.dim ^ ui_text state ~ko:"p:승인·질문" ~en:"p:Requests" ^ Ansi.reset)
+         ^ "  " ^ pressable (Press_surface Metrics)
+           (Ansi.dim ^ ui_text state ~ko:"m:사용량" ~en:"m:Usage" ^ Ansi.reset));
       (* The key loop stores the window's first row from the same number. *)
       let budget = Masc_tui_home.home_requests_budget home ~chrome_budget in
       let row_indent = "  " in

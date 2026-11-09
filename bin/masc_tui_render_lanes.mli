@@ -1,4 +1,4 @@
-(** Lanes and System / Runtime / Clients screen entry points and shared helpers. *)
+(** Features, plugin and client screen entry points and shared helpers. *)
 
 type lane_run_tool_counts = {
   completed : int;

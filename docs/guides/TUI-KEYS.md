@@ -31,7 +31,7 @@ The command palette is `:`.
 | `Ctrl-]` | follow the reference under the cursor; Esc on the surface it opens comes back here |
 | `q` | quit |
 
-## Dashboard
+## Operations
 
 | Keys | What it does |
 |---|---|
@@ -195,7 +195,7 @@ if controls move; an originally non-Board read stays unrequested in that context
 Dispatch/rebind/cleanup observations are separate from actual HTTP starts, received
 data and paint. A missing finish record remains an unfinished observation.
 
-## Usage
+## Operations / Usage
 
 | Keys | What it does |
 |---|---|
@@ -209,7 +209,7 @@ data and paint. A missing finish record remains an unfinished observation.
 | `1 / 2 / 3` | on Telemetry: Engine, Work, or Tools |
 | `Esc` | Dashboard |
 
-## Board
+## Work / Board
 
 | Keys | What it does |
 |---|---|
@@ -475,7 +475,7 @@ and UI admission decision; these are not painted-frame or key-latency evidence.
 | `d` | drop this Keeper's own binding and follow [runtime].default |
 | `Esc` | back |
 
-## Features
+## Features & plugins
 
 | Keys | What it does |
 |---|---|
@@ -497,7 +497,7 @@ and UI admission decision; these are not painted-frame or key-latency evidence.
 | `Home/End` | top/bottom |
 | `d` | in Librarian preflight run detail: expand or fold model, probabilities and original input/output evidence |
 
-## System / Runtime / Clients
+## Features & plugins / Clients
 
 | Keys | What it does |
 |---|---|
@@ -723,7 +723,7 @@ count is drawn beyond the available space.
 | `n / N` | next / previous match |
 | `Home/End` | top/bottom |
 
-## System / Resources
+## Features & plugins / Resources
 
 | Keys | What it does |
 |---|---|
@@ -759,7 +759,7 @@ count is drawn beyond the available space.
 | `n / N` | next / previous match |
 | `r` | reload |
 
-## System / Tools
+## Features & plugins / Tools
 
 | Keys | What it does |
 |---|---|
@@ -848,7 +848,7 @@ or completion.
 | `LIFECYCLE` | the keeper process |
 | `◂ 12h ● now ▹ next` | every view but the list draws a keeper on one axis row. The memory and age views pick their own cells; the others draw its turn pulse, its NOW cell, then what comes next -- what it waits on a person for, the next scheduled run, the next dispatch path and the librarian lag. With two lines only a failing keeper adds a second line |
 | `◂ 12h ● librarian ▹ lag · digest · gap` | the memory view: the turn pulse, how the librarian's last pass ended, then the unread turns as a bar against the listed keeper furthest behind, the time since its last digest and the atoms requests skip; ? is a value the server did not measure |
-| `◂ fact age ● updated ▹ lag · stale · facts` | the age view: the keeper's facts by age as the facts strip draws them, the time since its memory last changed, then the unread-turn bar, invalidated sources and the fact count; ? is a value the server did not measure |
+| `◂ fact age ● saved ▹ lag · stale · facts` | the age view: the keeper's facts by age as the facts strip draws them, the time since its memory last changed, then the unread-turn bar, invalidated sources and the fact count; ? is a value the server did not measure |
 | `◂` | a failing keeper's last failure: how long ago · cause · the runtime that ended it · candidates tried. The list draws it in place of its runtime or first in DETAIL, the views on a failing keeper's second line |
 | `failing` | how long the keeper has been in the failing phase; ? when the server recorded no start, or the start is ahead of this screen's clock (Detailed second row) |
 | `✓ ⊘ ✗ · ?` | autonomous turn results of the last 12 clock hours, one mark per hour, newest on the right: ✓ ok / ⊘ rested / ✗ failed / · no turn / ? unknown; chat turns are not counted, and an hour from before the server's record of the keeper reads ? (Detailed second row, and ◂ 12h in the views) |

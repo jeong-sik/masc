@@ -1,11 +1,13 @@
 module Tui_decode = Masc.Tui_decode
 
-(* Drawing order of the held statuses. [None] for a status that gets no row.
-   The match names every status so a new one has to be placed here. *)
+(* Submitted work awaiting a ruling comes before work still running: entering
+   the operator's task list selects something already waiting on a decision.
+   This is a display projection; it changes no Task state or authority.
+   [None] is a status that gets no held row. *)
 let group (status : Masc_domain.task_status) =
   match status with
-  | Masc_domain.InProgress _ -> Some 0
-  | Masc_domain.AwaitingVerification _ -> Some 1
+  | Masc_domain.AwaitingVerification _ -> Some 0
+  | Masc_domain.InProgress _ -> Some 1
   | Masc_domain.Claimed _ -> Some 2
   | Masc_domain.Todo | Masc_domain.Done _ | Masc_domain.Cancelled _ -> None
 

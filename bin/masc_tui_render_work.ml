@@ -14,9 +14,26 @@ module Task_selection = Masc_tui_task_selection
 module Overview_tasks = Masc_tui_overview_tasks
 module Planning_detail = Masc_tui_planning_detail
 module Link = Masc_tui_link
+module Press = Masc_tui_press
 module Chart = Masc_tui_chart
 
 module Task_id_set = Set.Make (String)
+
+(* Board lives under Work. Both links use the existing destinations; the
+   palette spelling also gives keyboard users a path without claiming [b],
+   which already opens the Goal summary. This is one physical header row. *)
+let work_hub_navigation (state : state) ~cols =
+  let requests = ui_text state ~ko:"p:요청" ~en:"p:Requests" in
+  let board = ui_text state ~ko:":게시판" ~en:":Board" in
+  let links =
+    if Message_layout.display_width ("  " ^ requests ^ "  " ^ board)
+       <= framed_inner_width cols
+    then
+      Press.pressable (Press.Press_surface Approvals) requests ^ "  "
+      ^ Press.pressable (Press.Press_surface Board) board
+    else Press.pressable (Press.Press_surface Board) board
+  in
+  "  " ^ Theme.recede () ^ links ^ Ansi.reset
 
 let goal_receipt_authority_current (state : state) (receipt : goal_action_receipt) =
   match receipt.gar_authority with
@@ -271,6 +288,7 @@ let render_work_tasks (state : state) =
     ~title:(screen_title " MASC Work / Tasks")
     ~hints:Masc_tui_keys.footer_hints_work_tasks
     ~body:(fun ~budget c ->
+      c.push (work_hub_navigation state ~cols);
       let pending_note = local_source_pending_note state Local_work in
       Option.iter c.push pending_note;
       (match state.local_workspace, state.task_flow with
@@ -310,7 +328,7 @@ let render_work_tasks (state : state) =
         c.push_styled ~style:(Theme.recede ())
           ("  " ^ Render_schedule.work_task_header_row ~layout);
       let header_rows =
-        3 + (if Option.is_some pending_note then 1 else 0)
+        4 + (if Option.is_some pending_note then 1 else 0)
         + (if reasons = [] then 0 else 1)
         + (if rows = [] then 0 else 1)
       in
@@ -737,6 +755,7 @@ let render_planning_list (state : state) =
   (* Show the modes once, but do not hide them behind a clipped title. *)
   if not modes_fit_header then
     box_line_styled buf cols ~style:(Theme.recede ()) ("  " ^ modes);
+  box_line buf cols (work_hub_navigation state ~cols);
   List.iter (box_line buf cols) (planning_stale_notice_rows state ~cols);
   box_divider buf cols;
 

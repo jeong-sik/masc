@@ -1121,7 +1121,7 @@ let count_chips_that_fit ~sep ~room chips =
    needs, so they lead and the density and sort name trail; the view strip
    above names the view. An item that does not fit whole is left out,
    because "0 inactiv…" reads as a number. *)
-let keeper_view_summary ~cells rows view density sort =
+let keeper_view_summary ~ko ~cells rows view density sort =
   let mode =
     String.concat " · "
       [ Keeper_list_model.density_label density; Keeper_list_model.sort_label sort ]
@@ -1132,8 +1132,17 @@ let keeper_view_summary ~cells rows view density sort =
   let texts =
     (* A grouping view counts its rows in the headings. *)
     match view with
+    | Keeper_list_model.By_age ->
+        (if ko then
+           [ "stale: 출처 무효화"; "나이: 처음 본 시각"; "saved: 저장 갱신"; mode ]
+         else
+           [ "stale: source invalidated"; "age: first seen"; "saved: snapshot"; mode ])
+    | Keeper_list_model.By_memory ->
+        (if ko then
+           [ "Librarian: 처리 관측"; "lag: 읽지 않은 턴"; mode ]
+         else [ "Librarian: observed pass"; "lag: unread turns"; mode ])
     | Keeper_list_model.By_state | Keeper_list_model.By_cause | Keeper_list_model.By_time
-    | Keeper_list_model.By_memory | Keeper_list_model.By_age | Keeper_list_model.By_runtime ->
+    | Keeper_list_model.By_runtime ->
         [ mode ]
     | Keeper_list_model.Plain | Keeper_list_model.Day_wall ->
         let counts : Keeper_list_model.group_counts = Keeper_list_model.group_counts rows in
@@ -1204,7 +1213,7 @@ let render_keeper_list (state : state) =
   box_line buf cols (keeper_view_tabs ~cols state.keeper_list_view);
   box_line buf cols
     (Theme.recede ()
-     ^ keeper_view_summary ~cells:inner model_rows state.keeper_list_view
+     ^ keeper_view_summary ~ko:(state.ui_language = Lang_ko) ~cells:inner model_rows state.keeper_list_view
          state.keeper_list_density state.keeper_list_sort
      ^ Ansi.reset);
   Option.iter
@@ -1229,10 +1238,23 @@ let render_keeper_list (state : state) =
           ^ Masc_tui_fleet_line.unavailable_text ~now:now_unix ~degradation ~disconnected_since
           ^ Ansi.reset)
    | Masc_tui_fleet_stream.Reading { reading = { fleet; _ }; trouble } ->
-       let tone =
-         if fleet.fs_operator_action_required then (Theme.bad ())
-         else if Masc_tui_fleet_line.status_is_ok fleet.fs_status then (Theme.ok ())
-         else (Theme.warn ())
+       let tone, lead =
+         let status = Masc_tui_fleet_line.status_text fleet.fs_status in
+         match trouble with
+         | None ->
+             let tone =
+               if fleet.fs_operator_action_required then Theme.bad ()
+               else if Masc_tui_fleet_line.status_is_ok fleet.fs_status then Theme.ok ()
+               else Theme.warn ()
+             in
+             tone, Printf.sprintf "  fleet %s" status
+         | Some
+             (Masc_tui_fleet_stream.Scans_failing _
+             | Masc_tui_fleet_stream.Disconnected _) ->
+             (* The grade, counts and blocker below all belong to the retained
+                reading. Qualify that same row before any stale zero or blocker
+                can be read as the fleet's current state. *)
+             Theme.warn (), Printf.sprintf "  fleet last observed: %s" status
        in
        let running =
          Printf.sprintf "running %d/%d" fleet.fs_running_count
@@ -1251,10 +1273,6 @@ let render_keeper_list (state : state) =
          @ (match Masc_tui_fleet_line.blocker_text fleet with
            | None -> []
            | Some text -> [ Masc_tui_fleet_summary.Blocker, text ])
-       in
-       let lead =
-         Printf.sprintf "  fleet %s"
-           (Masc_tui_fleet_line.status_text fleet.fs_status)
        in
        let separator = "   " in
        let selected =

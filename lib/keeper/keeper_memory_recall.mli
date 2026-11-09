@@ -19,12 +19,21 @@ type tail_completion =
     truncated write at the tail of an append-only log from real corruption,
     which [Read_drop_reason.Tail_partial_write] exists to classify. *)
 
+type tail_lines = {
+  lines : string list;  (** Oldest first. *)
+  completion : tail_completion;
+  from_file_start : bool;
+      (** The read began at the file's first byte and kept every line, so the
+          file held no line before [lines] when it was opened. *)
+}
+
 val read_file_tail_lines_with_completion :
   string -> max_bytes:int -> max_lines:int
-  -> (string list * tail_completion, Keeper_memory_recall_exn_class.t) result
-(** As {!read_file_tail_lines_result}, and additionally reports whether the
-    final line was terminated. The window's leading partial line is already
-    dropped by the reader; this covers the trailing end. *)
+  -> (tail_lines, Keeper_memory_recall_exn_class.t) result
+(** As {!read_file_tail_lines_result}, and additionally reports both ends of
+    the read: whether the final line was terminated, and whether the read
+    reached the file's start. The window's leading partial line is already
+    dropped by the reader. *)
 
 val read_file_tail_lines_result :
   string -> max_bytes:int -> max_lines:int

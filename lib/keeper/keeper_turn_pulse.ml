@@ -105,12 +105,22 @@ type sample =
   ; outcome : outcome
   }
 
+(* Chat turns write the same [event = "turn"] row; only the autonomous cycle
+   records into the live pulse, so only its rows seed it (#49984). *)
 let sample_of_decision_line line =
   match Yojson.Safe.from_string line with
   | exception _ -> None
   | json ->
+    let autonomous =
+      match Json_util.get_string json "execution_path" with
+      | Some label ->
+        (match Keeper_unified_metrics_decision.execution_path_of_string label with
+         | Some Autonomous_cycle -> true
+         | Some Direct_turn | None -> false)
+      | None -> false
+    in
     (match Json_util.get_string json "event" with
-     | Some "turn" ->
+     | Some "turn" when autonomous ->
        let ts_opt =
          match Yojson.Safe.Util.member "ts_unix" json with
          | `Float f when Float.is_finite f -> Some f
@@ -149,8 +159,10 @@ type tail_reading =
       }
 
 (* [Error] is a log that exists but could not be read. It says nothing about
-   its turns, so the caller must not turn it into an empty pulse. *)
-let read_tail ~window_start path =
+   its turns, so the caller must not turn it into an empty pulse. A turn
+   stamped after [now] is dropped: its slot would lie past every hour the TUI
+   draws and would prune the day behind it. *)
+let read_tail ~now ~window_start path =
   if not (Fs_compat.file_exists path)
   then Ok Log_absent
   else (
@@ -166,19 +178,13 @@ let read_tail ~window_start path =
         path
         exn_class;
       Error exn_class
-    | Ok (lines, _completion) ->
-      let whole_file () =
-        List.length lines < seed_tail_max_lines
-        &&
-        match Fs_compat.file_size path with
-        | Some size -> size <= seed_tail_max_bytes
-        | None -> false
-      in
+    | Ok { lines; completion = _; from_file_start } ->
       (* [lines] runs oldest to newest; walk it newest first. *)
       let rec collect acc = function
-        | [] -> Starts_inside_window { samples = List.rev acc; whole_file = whole_file () }
+        | [] -> Starts_inside_window { samples = List.rev acc; whole_file = from_file_start }
         | line :: rest ->
           (match sample_of_decision_line line with
+           | Some s when s.at > now -> collect acc rest
            | Some s when s.at >= window_start -> collect (s :: acc) rest
            | Some _ -> Reaches_window_start (List.rev acc)
            | None -> collect acc rest)
@@ -200,27 +206,47 @@ let pulse_of_samples ~known_since samples =
     (List.rev samples)
 ;;
 
+(* With no rotated copy kept, rotation deletes the primary log, so a whole
+   primary without [.1] may follow a deleted day. With a copy kept, a missing
+   [.1] means the primary never rotated and holds the keeper's whole log. *)
+let rotation_discards_logs () =
+  Env_config.KeeperMetrics.max_file_bytes () > 0
+  && Env_config.KeeperMetrics.max_rotated_files () = 0
+;;
+
 let seed_from_decision_log ?(now = Time_compat.now ()) ~config ~keeper_name () =
   let base_path = config.Workspace.base_path in
   let primary_path = Keeper_types_support.keeper_decision_log_path config keeper_name in
-  let rotated_path = primary_path ^ ".1" in
   let window_start = now -. float_of_int window_seconds in
-  let seeded =
-    match read_tail ~window_start primary_path with
+  let read path = read_tail ~now ~window_start path in
+  (* [newer] are the turns read from the primary log, which ends where the
+     rotated log begins. [if_absent] is what a missing rotated log means. *)
+  let with_rotated ~if_absent newer =
+    match read (primary_path ^ ".1") with
     | Error _ -> None
-    | Ok Log_absent -> Some (window_start, [])
+    | Ok Log_absent -> Some (if_absent, newer)
+    | Ok (Reaches_window_start older) -> Some (window_start, newer @ older)
+    | Ok (Starts_inside_window { samples = older; _ }) ->
+      (* Rotation dropped whatever came before the rotated log. *)
+      let samples = newer @ older in
+      Some (oldest_or ~now samples, samples)
+  in
+  let seeded =
+    match read primary_path with
+    | Error _ -> None
+    | Ok Log_absent ->
+      (* Rotation renames or deletes the primary and appends to a new one in
+         the same call, so a rotated log alone is one whose next append never
+         came, and no log at all is a keeper that never logged a turn. *)
+      with_rotated ~if_absent:window_start []
     | Ok (Reaches_window_start samples) -> Some (window_start, samples)
     | Ok (Starts_inside_window { samples; whole_file = false }) ->
       Some (oldest_or ~now samples, samples)
-    | Ok (Starts_inside_window { samples = primary; whole_file = true }) ->
-      (match read_tail ~window_start rotated_path with
-       | Error _ -> None
-       | Ok Log_absent -> Some (window_start, primary)
-       | Ok (Reaches_window_start rotated) -> Some (window_start, primary @ rotated)
-       | Ok (Starts_inside_window { samples = rotated; _ }) ->
-         (* Rotation dropped whatever came before the rotated log. *)
-         let samples = primary @ rotated in
-         Some (oldest_or ~now samples, samples))
+    | Ok (Starts_inside_window { samples; whole_file = true }) ->
+      let if_absent =
+        if rotation_discards_logs () then oldest_or ~now samples else window_start
+      in
+      with_rotated ~if_absent samples
   in
   match seeded with
   | Some (known_since, samples) ->

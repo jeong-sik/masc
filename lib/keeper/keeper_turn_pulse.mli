@@ -57,20 +57,21 @@ type sample = {
 }
 
 val sample_of_decision_line : string -> sample option
-(** A decision log line that is a turn event with a known outcome and a finite
-    time; [None] for any other line. *)
+(** A decision log line that is an autonomous-cycle turn with a known outcome
+    and a finite time; [None] for any other line, chat turns included. *)
 
 val seed_from_decision_log :
   ?now:float -> config:Workspace.config -> keeper_name:string -> unit -> unit
 (** Fill a keeper's pulse from the tail of [decisions.jsonl], and from
-    [decisions.jsonl.1] only when the primary log's tail ends inside the
-    window. Seeding leaves a keeper that already has a pulse alone.
+    [decisions.jsonl.1] when the primary log is missing or was read whole
+    without reaching the window start. Turns stamped after [now] are dropped.
+    Seeding leaves a keeper that already has a pulse alone.
 
-    [known_since] is the window start when the logs are absent, when the read
+    [known_since] is the window start when no log exists, when the read
     reached a turn older than the window, or when the primary log was read
-    whole and no rotated log exists. Otherwise it is the oldest turn read, or
-    [now] when no turn was read. A log that exists but cannot be read leaves
-    the keeper unseeded, so [get] stays [None]. *)
+    whole, no rotated log exists and rotation keeps a copy. Otherwise it is
+    the oldest turn read, or [now] when no turn was read. A log that exists
+    but cannot be read leaves the keeper unseeded, so [get] stays [None]. *)
 
 val seed_all_from_decision_logs : ?now:float -> config:Workspace.config -> unit -> unit
 

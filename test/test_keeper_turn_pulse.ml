@@ -106,19 +106,24 @@ let test_pulses_are_kept_per_workspace_and_keeper () =
 ;;
 
 let test_sample_of_decision_line () =
-  let valid_turn = {|{"event":"turn","ts_unix":1794037335.0,"outcome":"success"}|} in
-  (match Pulse.sample_of_decision_line valid_turn with
+  let line ?(path = {|,"execution_path":"autonomous_cycle"|}) ~event ~ts ~outcome () =
+    Printf.sprintf {|{"event":"%s","ts_unix":%.1f,"outcome":"%s"%s}|} event ts outcome path
+  in
+  (match Pulse.sample_of_decision_line (line ~event:"turn" ~ts:1794037335.0 ~outcome:"success" ()) with
    | None -> Alcotest.fail "expected sample"
    | Some s ->
      Alcotest.(check (float 0.001)) "ts" 1794037335.0 s.at;
      Alcotest.(check bool) "outcome ok" true (s.outcome = Pulse.Turn_ok));
-  let failed_turn = {|{"event":"turn","ts_unix":1794036000.0,"outcome":"error"}|} in
-  (match Pulse.sample_of_decision_line failed_turn with
+  (match Pulse.sample_of_decision_line (line ~event:"turn" ~ts:1794036000.0 ~outcome:"error" ()) with
    | None -> Alcotest.fail "expected sample"
    | Some s -> Alcotest.(check bool) "outcome failed" true (s.outcome = Pulse.Turn_failed));
-  let non_turn = {|{"event":"heartbeat","ts_unix":1794035000.0,"outcome":"success"}|} in
-  Alcotest.(check bool) "ignore non-turn" true (Pulse.sample_of_decision_line non_turn = None);
-  Alcotest.(check bool) "ignore bad json" true (Pulse.sample_of_decision_line "not json" = None)
+  let ignored label raw = Alcotest.(check bool) label true (Pulse.sample_of_decision_line raw = None) in
+  ignored "ignore non-turn" (line ~event:"heartbeat" ~ts:1794035000.0 ~outcome:"success" ());
+  ignored
+    "ignore a chat turn"
+    (line ~path:{|,"execution_path":"direct_turn"|} ~event:"turn" ~ts:1794035000.0 ~outcome:"success" ());
+  ignored "ignore a turn with no path" (line ~path:"" ~event:"turn" ~ts:1794035000.0 ~outcome:"success" ());
+  ignored "ignore bad json" "not json"
 ;;
 
 let rec remove_tree path =
@@ -131,12 +136,25 @@ let rec remove_tree path =
     else Sys.remove path
 ;;
 
-let turn_line at = Printf.sprintf {|{"event":"turn","ts_unix":%.1f,"outcome":"success"}|} at
+let turn_line at =
+  Printf.sprintf
+    {|{"event":"turn","ts_unix":%.1f,"outcome":"success","execution_path":"autonomous_cycle"}|}
+    at
+;;
 
 let write_turns path ats =
   Out_channel.with_open_text path (fun oc ->
     List.iter (fun at -> output_string oc (turn_line at ^ "\n")) ats)
 ;;
+
+(* An empty value reads as the default, so restoring "" stands in for unset. *)
+let with_env name value f =
+  let previous = Option.value (Sys.getenv_opt name) ~default:"" in
+  Unix.putenv name value;
+  Fun.protect ~finally:(fun () -> Unix.putenv name previous) f
+;;
+
+let max_rotated = "MASC_KEEPER_METRICS_MAX_ROTATED"
 
 let with_workspace f =
   Pulse.reset_for_tests ();
@@ -168,6 +186,7 @@ let check_known label expected = function
    passes, and every read of it fails. That is a log the pulse cannot read, as
    opposed to a log that is missing or holds no turns. *)
 let test_seed_reads_what_the_logs_can_tell () =
+  with_env max_rotated "1" @@ fun () ->
   with_workspace (fun config log_path ->
     check_known "a missing log knows the whole window" window_start (seeded config "no-log");
     write_turns (log_path "whole") [ at_slot 90; at_slot 95 ];
@@ -199,6 +218,59 @@ let test_seed_reads_what_the_logs_can_tell () =
       (seeded config "unreadable-rotated" = None))
 ;;
 
+let slot_count = function
+  | Some (pulse : Pulse.pulse) -> List.length pulse.slots
+  | None -> Alcotest.fail "expected a seeded pulse"
+;;
+
+let test_seed_reads_the_primary_log_alone_when_it_reaches_the_window () =
+  with_workspace (fun config log_path ->
+    write_turns (log_path "reaches") [ window_start -. 60.0; at_slot 90 ];
+    let reaches = seeded config "reaches" in
+    check_known "a primary log that reaches the window start knows the window" window_start reaches;
+    Alcotest.(check int) "the turn before the window is not slotted" 1 (slot_count reaches))
+;;
+
+let test_seed_reads_the_rotated_log_when_the_primary_is_missing () =
+  with_workspace (fun config log_path ->
+    write_turns (log_path "lone-rotated" ^ ".1") [ at_slot 70; at_slot 80 ];
+    let lone = seeded config "lone-rotated" in
+    check_known "a lone rotated log is known from its oldest turn" (at_slot 70) lone;
+    Alcotest.(check int) "its turns are slotted" 2 (slot_count lone))
+;;
+
+let test_seed_does_not_claim_a_day_rotation_deleted () =
+  with_workspace (fun config log_path ->
+    write_turns (log_path "discarded") [ at_slot 90; at_slot 95 ];
+    with_env max_rotated "0" (fun () ->
+      check_known
+        "with no rotated copy kept, a whole log is known from its oldest turn"
+        (at_slot 90)
+        (seeded config "discarded")))
+;;
+
+let test_seed_drops_turns_stamped_after_now () =
+  with_workspace (fun config log_path ->
+    write_turns (log_path "skewed") [ at_slot 90; now +. 600.0 ];
+    match seeded config "skewed" with
+    | Some { slots = [ only ]; _ } ->
+      Alcotest.(check int) "only the past turn is slotted" (Pulse.slot_start (at_slot 90)) only.starts_at
+    | Some _ | None -> Alcotest.fail "expected one slot")
+;;
+
+(* The reader stops at the line bound, so the oldest turns of a long log are
+   not read and the pulse is known only from the oldest one that was. *)
+let test_seed_knows_a_long_log_from_its_oldest_read_turn () =
+  with_workspace (fun config log_path ->
+    let first = window_start +. 60.0 in
+    let lines = 10_050 in
+    write_turns (log_path "long") (List.init lines (fun i -> first +. float_of_int i));
+    check_known
+      "known from the oldest turn the bounded read kept"
+      (first +. float_of_int (lines - 10_000))
+      (seeded config "long"))
+;;
+
 let test_seed_leaves_a_recorded_keeper_alone () =
   with_workspace (fun config log_path ->
     let base_path = config.Masc.Workspace.base_path in
@@ -226,6 +298,16 @@ let () =
       , [ Alcotest.test_case "sample of decision line" `Quick test_sample_of_decision_line
         ; Alcotest.test_case "seed reads what the logs can tell" `Quick
             test_seed_reads_what_the_logs_can_tell
+        ; Alcotest.test_case "seed reads the primary log alone when it reaches the window" `Quick
+            test_seed_reads_the_primary_log_alone_when_it_reaches_the_window
+        ; Alcotest.test_case "seed reads the rotated log when the primary is missing" `Quick
+            test_seed_reads_the_rotated_log_when_the_primary_is_missing
+        ; Alcotest.test_case "seed does not claim a day rotation deleted" `Quick
+            test_seed_does_not_claim_a_day_rotation_deleted
+        ; Alcotest.test_case "seed drops turns stamped after now" `Quick
+            test_seed_drops_turns_stamped_after_now
+        ; Alcotest.test_case "seed knows a long log from its oldest read turn" `Quick
+            test_seed_knows_a_long_log_from_its_oldest_read_turn
         ; Alcotest.test_case "seed leaves a recorded keeper alone" `Quick
             test_seed_leaves_a_recorded_keeper_alone
         ] )

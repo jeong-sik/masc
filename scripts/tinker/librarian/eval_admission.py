@@ -38,22 +38,34 @@ Definitions:
 - E-real absorbed_not_in_live: memory IDs a valid answer absorbs that the live
   answer keeps. Listed for human review with G2's IDs, not gated: absorbing
   merges a fact into a new claim, which MASC's absorb gate checks at commit.
+- E-synth memory-state accuracy: candidates whose memory the answer leaves as
+  their label kind needs (`memory_scores`), over every candidate (an answer
+  that is not valid is wrong), also per kind. Reported; G3 gates outcome
+  accuracy until the gates are fixed again.
 - E-synth outcome accuracy: candidates whose outcome equals the label and whose
   `memory_claim` points where the label's kind needs it, over every candidate
-  (an answer that is not valid is wrong). A new fact names a claim the answer
-  adds; a paraphrase names the existing claim it restates; a correction names a
-  claim that supersedes the label's target, and the target is dropped.
+  (an answer that is not valid is wrong). A new fact or a complement names a
+  claim the answer adds; a paraphrase names the existing claim it restates; a
+  correction names a claim that supersedes the label's target, and the target
+  is dropped.
 - E-synth drop precision: dropped IDs that are planted stale facts or label
   correction targets, over all dropped IDs of valid answers (1.0 with no drops).
-  Any other dropped ID is an off-label drop. Rows list them, and `verdict`
-  needs a blind judge's class for each one (`audit_decisions`): when the judge
-  takes the fact out as well, no target is scored on that memory's requests.
-  A drop the judge keeps stays wrong, also when its memory leaves scoring.
-- E-synth absorbed: memory IDs valid answers absorb. No label asks for one.
-  Reported apart, not gated, as E-real reports its absorbs: MASC's absorb gate
-  checks each absorb at commit, while nothing checks a drop.
-- E-synth stale drop recall: planted stale facts dropped, over all planted. An
-  absorbed stale fact is not dropped: its text lives on in the new claim.
+  A dropped complement target or duplicate fact counts against it, since the
+  label absorbs those (`dropped_unmerged`). Any other dropped ID is an off-label
+  drop. Rows list them, and `verdict` needs a blind judge's class for each one
+  (`audit_decisions`): when the judge takes the fact out as well, no target is
+  scored on that memory's requests. A drop the judge keeps stays wrong, also
+  when its memory leaves scoring.
+- E-synth absorbed: memory IDs valid answers absorb, each with what the label
+  says of that fact. Reported, not gated: MASC's absorb gate checks each absorb
+  at commit, while nothing checks a drop.
+- E-synth merge recall: complement targets absorbed into the complement's claim
+  and duplicate pairs left as one fact, over the merges the labels expect.
+- E-synth stale drop recall: planted stale facts dropped, over the planted stale
+  facts the labels expect to leave. An absorbed stale fact is not dropped: its
+  text lives on in the new claim.
+- Growth: claims an answer adds minus the memory IDs it takes out, per item,
+  beside the labels' (E-synth) or the live answers' (E-real).
 - latency p50 (G5): median wall time of E-real calls that returned HTTP 200.
   Every target first gets each prompt with WARM_MAX_TOKENS, so the measured
   calls all read a cached prefix. `verdict` refuses when fewer than
@@ -84,7 +96,9 @@ import admission_request as R
 import admission_validator as AV
 import audit_decisions as D
 import exact_store as E
+import memory_scores as M
 import synth_render
+import synth_spec as S
 import yojson_wire as Y
 from tinker_oai import HTTP_OK, Caller
 
@@ -105,23 +119,7 @@ INSTRUCTION = ("Return exactly one JSON value matching this JSON Schema. Do not 
 type JsonObject = dict[str, object]
 
 
-@dataclass(frozen=True, slots=True)
-class RealItem:
-    item_id: str
-    prompt: R.AdmissionPrompt
-    text: str
-    live: AV.AdmissionAnswer
-
-
-@dataclass(frozen=True, slots=True)
-class SynthItem:
-    item_id: str
-    prompt: R.AdmissionPrompt
-    text: str
-    label: JsonObject  # synth_spec.RequestLabel as JSON
-
-
-type Item = RealItem | SynthItem
+type Item = M.RealItem | M.SynthItem
 
 
 @dataclass(frozen=True, slots=True)
@@ -163,10 +161,10 @@ def load_pass_lines() -> JsonObject:
     return lines
 
 
-def real_items(manifest: Path, base: Path) -> list[RealItem]:
+def real_items(manifest: Path, base: Path) -> list[M.RealItem]:
     """E-real items. A prompt this checkout's template cannot read, or a live answer the
     checker refuses, stops the run: the checker would then not be MASC's."""
-    items: list[RealItem] = []
+    items: list[M.RealItem] = []
     for record in E.records_for(manifest, base):
         prompt = R.parse(record.prompt, synth_render.template())
         if isinstance(prompt, R.ParseError):
@@ -174,77 +172,27 @@ def real_items(manifest: Path, base: Path) -> list[RealItem]:
         live = check(prompt, Y.write(record.answer))
         if live.answer is None:
             raise SystemExit(f"{record.digest[:16]}: the live answer is refused: {live.problems}")
-        items.append(RealItem(record.digest[:16], prompt, record.prompt, live.answer))
+        items.append(M.RealItem(record.digest[:16], prompt, record.prompt, live.answer))
     return items
 
 
-def synth_items(path: Path) -> list[SynthItem]:
-    """Rendered synthetic requests with their labels, from synth_generate.py output."""
-    items: list[SynthItem] = []
-    for line in path.read_text(encoding="utf-8").splitlines():
+def synth_items(path: Path) -> list[M.SynthItem]:
+    """Rendered synthetic requests with their labels, from synth_generate.py output. SystemExit on a
+    label that is not a `synth_spec` label, such as one an earlier generator wrote."""
+    items: list[M.SynthItem] = []
+    for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
         row = cast(JsonObject, json.loads(line))
         request = cast(JsonObject, row["request"])
+        label = S.label_from_json(row["label"])
+        if label is None:
+            raise SystemExit(f"{path}:{number}: the label is not a synth_spec label")
         prompt = synth_render.prompt_of(request)
-        items.append(SynthItem(cast(str, request["item_id"]), prompt, R.render(prompt),
-                               cast(JsonObject, row["label"])))
+        items.append(M.SynthItem(cast(str, request["item_id"]), prompt, R.render(prompt), label))
     return items
-
-
-def outcomes(answer: AV.AdmissionAnswer) -> dict[str, tuple[str, str | None]]:
-    return {j.request_id: (j.outcome, j.memory_claim) for j in answer.judgments}
-
-
-def removed(answer: AV.AdmissionAnswer) -> set[str]:
-    """Memory IDs the answer takes out of current memory: dropped, or absorbed into a new claim."""
-    return set(answer.dropped) | {mid for mid, _ in answer.absorbed}
-
-
-def score_real(item: RealItem, mine: AV.AdmissionAnswer | None) -> JsonObject:
-    live = outcomes(item.live)
-    got = outcomes(mine) if mine is not None else {}
-    gone = removed(item.live)
-    return {"candidates": len(live), "agree": sum(got.get(k, ("",))[0] == v[0] for k, v in live.items()),
-            "outcomes": {k: [v[0], got.get(k, ("",))[0]] for k, v in live.items()},
-            "dropped_not_in_live": sorted(set(mine.dropped) - gone) if mine is not None else [],
-            "absorbed_not_in_live": sorted({mid for mid, _ in mine.absorbed} - gone) if mine is not None else [],
-            "live_removed": len(gone)}
-
-
-def claim_matches(label: JsonObject, claim: str | None, answer: AV.AdmissionAnswer) -> bool:
-    """Whether a judgment's `memory_claim` points where the label's kind needs it.
-    MASC accepts any claim of final memory, so an outcome alone can name the wrong one."""
-    target = label.get("supersedes")
-    match label["outcome"]:
-        case "incorporated" if target is not None:
-            supersedes = {new: old for old, new in answer.revisions}
-            return claim is not None and supersedes.get(claim) == target and target in answer.dropped
-        case "incorporated":
-            return claim is not None and claim in answer.added_claims
-        case "already_represented":
-            return claim == label.get("already_claim")
-        case _:
-            return True
-
-
-def score_synth(item: SynthItem, mine: AV.AdmissionAnswer | None) -> JsonObject:
-    labels = {cast(str, c["request_id"]): c for c in cast(list[JsonObject], item.label["candidates"])}
-    planted = set(cast(list[str], item.label["planted_stale"]))
-    targets = {cast(str, c["supersedes"]) for c in labels.values() if c.get("supersedes") is not None}
-    got = outcomes(mine) if mine is not None else {}
-    drops = set(mine.dropped) if mine is not None else set[str]()
-    gone = removed(mine) if mine is not None else set[str]()
-    correct: dict[str, bool] = {}
-    for rid, label in labels.items():
-        outcome, claim = got.get(rid, ("", None))
-        correct[rid] = mine is not None and outcome == label["outcome"] and claim_matches(label, claim, mine)
-    return {"candidates": len(labels), "correct": sum(correct.values()), "per_candidate": correct,
-            "dropped": len(drops), "absorbed": len(gone - drops), "dropped_expected": len(drops & (planted | targets)),
-            "dropped_off_label": sorted(drops - planted - targets),
-            "planted": len(planted), "planted_dropped": len(drops & planted)}
 
 
 def run_item(caller: Caller, request: JsonObject, targets: list[tuple[str, str]], item: Item) -> list[JsonObject]:
-    kind = "real" if isinstance(item, RealItem) else "synth"
+    kind = "real" if isinstance(item, M.RealItem) else "synth"
     messages = [item.text, schema_instruction()]
     effort = cast(str, request["reasoning_effort"])
     for name, model in targets:
@@ -259,10 +207,10 @@ def run_item(caller: Caller, request: JsonObject, targets: list[tuple[str, str]]
             break
         result = check(item.prompt, call.answer())
         match item:
-            case RealItem():
-                score = score_real(item, result.answer)
-            case SynthItem():
-                score = score_synth(item, result.answer)
+            case M.RealItem():
+                score = M.score_real(item, result.answer)
+            case M.SynthItem():
+                score = M.score_synth(item, result.answer)
         rows.append({"set": kind, "item": item.item_id, "target": name, "status": call.status, "finish": call.finish,
                      "sent_at": call.sent_at, "wall_s": call.wall_s, "prompt_tokens": call.prompt_tokens,
                      "cached_tokens": call.cached_tokens,
@@ -274,6 +222,16 @@ def run_item(caller: Caller, request: JsonObject, targets: list[tuple[str, str]]
 
 def warm(row: JsonObject) -> bool:
     return cast(int, row["cached_tokens"]) >= WARM_CACHED_SHARE * max(1, cast(int, row["prompt_tokens"]))
+
+
+def by_kind(rows: list[JsonObject]) -> JsonObject:
+    """Memory-state accuracy per label kind, over the rows' candidates of that kind."""
+    totals: dict[str, tuple[int, int]] = {}
+    for r in rows:
+        for kind, (n, ok) in cast(dict[str, list[int]], r["state_by_kind"]).items():
+            before = totals.get(kind, (0, 0))
+            totals[kind] = (before[0] + n, before[1] + ok)
+    return {kind: {"candidates": n, "accuracy": ok / n} for kind, (n, ok) in sorted(totals.items())}
 
 
 def summarize(kind: str, rows: list[JsonObject], wrong_elsewhere: dict[str, int] | None = None) -> JsonObject:
@@ -294,6 +252,10 @@ def summarize(kind: str, rows: list[JsonObject], wrong_elsewhere: dict[str, int]
             part["outcome_agreement"] = sum(cast(int, r["agree"]) for r in mine) / cands
             part["dropped_not_in_live"] = sum(len(cast(list[str], r["dropped_not_in_live"])) for r in mine)
             part["absorbed_not_in_live"] = sum(len(cast(list[str], r["absorbed_not_in_live"])) for r in mine)
+            part["net_per_item"] = (sum(cast(int, r["added"]) for r in mine)
+                                    - sum(cast(int, r["removed"]) for r in mine)) / len(mine)
+            part["live_net_per_item"] = (sum(cast(int, r["live_added"]) for r in mine)
+                                         - sum(cast(int, r["live_removed"]) for r in mine)) / len(mine)
         else:
             drops = sum(cast(int, r["dropped"]) for r in mine) + (wrong_elsewhere or {}).get(name, 0)
             part["outcome_accuracy"] = sum(cast(int, r["correct"]) for r in mine) / cands
@@ -301,6 +263,16 @@ def summarize(kind: str, rows: list[JsonObject], wrong_elsewhere: dict[str, int]
             part["absorbed"] = sum(cast(int, r["absorbed"]) for r in mine)
             part["stale_drop_recall"] = (sum(cast(int, r["planted_dropped"]) for r in mine)
                                          / max(1, sum(cast(int, r["planted"]) for r in mine)))
+            part["memory_state_accuracy"] = sum(cast(int, r["state_correct"]) for r in mine) / cands
+            part["state_by_kind"] = by_kind(mine)
+            part["dropped_unmerged"] = sum(len(cast(list[str], r["dropped_unmerged"])) for r in mine)
+            part["planted_absorbed"] = sum(cast(int, r["planted_absorbed"]) for r in mine)
+            merges = sum(cast(int, r["merges"]) for r in mine)
+            part["merge_recall"] = sum(cast(int, r["merges_done"]) for r in mine) / merges if merges else None
+            part["net_per_item"] = (sum(cast(int, r["added"]) for r in mine)
+                                    - sum(cast(int, r["removed"]) for r in mine)) / len(mine)
+            part["expected_net_per_item"] = (sum(cast(int, r["expected_added"]) for r in mine)
+                                             - sum(cast(int, r["expected_removed"]) for r in mine)) / len(mine)
         out[name] = part
     return out
 

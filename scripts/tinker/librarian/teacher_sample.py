@@ -12,7 +12,7 @@
 The teacher is the base model on the 256K training ID at reasoning_effort
 "high", asked exactly as MASC's exact lane asks. Each request gets up to
 ATTEMPTS answers. The first answer is kept when MASC's checks accept it, every
-candidate is scored correct (`eval_admission.score_synth`: the outcome and the
+candidate is scored correct (`memory_scores.score_synth`: the outcome and the
 claim it names), every planted stale fact is dropped, nothing else is dropped,
 and nothing is absorbed, since no label asks for an absorb. Answers from
 other providers are never used for training. An HTTP error or a missing
@@ -34,6 +34,7 @@ from pathlib import Path
 from typing import cast
 
 import eval_admission as V
+import memory_scores as M
 from tinker_oai import HTTP_OK, Caller
 
 TEACHER = "thinkingmachines/Inkling-2-Small:peft:262144"
@@ -45,11 +46,11 @@ WORKERS = 8
 type JsonObject = dict[str, object]
 
 
-def rejection(item: V.SynthItem, check: V.Check) -> str | None:
+def rejection(item: M.SynthItem, check: V.Check) -> str | None:
     """Why the answer cannot be a training target, or None when it can."""
     if check.answer is None:
         return "invalid:" + check.problems[0]
-    score = V.score_synth(item, check.answer)
+    score = M.score_synth(item, check.answer)
     if score["correct"] != score["candidates"]:
         return "outcome"
     if score["planted_dropped"] != score["planted"]:
@@ -75,7 +76,7 @@ def main() -> int:
     reasons: Counter[str] = Counter()
     errors: Counter[int] = Counter()
 
-    def one(item: V.SynthItem) -> JsonObject | None:
+    def one(item: M.SynthItem) -> JsonObject | None:
         for attempt in range(ATTEMPTS):
             call = caller.ask(model=TEACHER, label=f"teacher:{item.item_id}", messages=[item.text, instruction],
                               effort=EFFORT, max_tokens=MAX_TOKENS, attempt=attempt)

@@ -131,10 +131,10 @@ let quota_scope_of_materialized
   match execution with
   | Runtime_execution.Claude_code client ->
     Ok (Runtime_quota_window.scope_of_claude_code_home
-      (Some (Runtime_official_account.home client.account_home)))
+      (Some (Runtime_account_access.home client.account_home)))
   | Runtime_execution.Codex_app_server client ->
     Ok (Runtime_quota_window.scope_of_codex_home
-      (Some (Runtime_official_account.home client.account_home)))
+      (Some (Runtime_account_access.home client.account_home)))
   | Runtime_execution.Muse_serve client ->
     Runtime_account_home.of_string client.account_home
     |> Result.map Runtime_quota_window.scope_of_muse_home

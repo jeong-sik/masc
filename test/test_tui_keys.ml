@@ -865,10 +865,17 @@ let test_keeper_list_cycles_preserve_selected_name () =
   state.keeper_list_sort <- Masc_tui_keeper_list_model.Name;
   state.keeper_cursor <- 1;
   Alcotest.(check (option string)) "initial selection" (Some "beta") (selected_roster_name state);
-  cycle_keeper_list_layout state;
-  Alcotest.(check bool) "layout cycles" true
-    (state.keeper_list_layout = Masc_tui_keeper_list_model.Detailed);
-  Alcotest.(check (option string)) "layout preserves the name" (Some "beta") (selected_roster_name state);
+  cycle_keeper_list_view state;
+  Alcotest.(check bool) "view cycles" true
+    (state.keeper_list_view = Masc_tui_keeper_list_model.By_state);
+  Alcotest.(check (option string)) "view preserves the name" (Some "beta") (selected_roster_name state);
+  cycle_keeper_list_density state;
+  Alcotest.(check bool) "density cycles" true
+    (state.keeper_list_density = Masc_tui_keeper_list_model.Two_lines);
+  Alcotest.(check (option string)) "density preserves the name" (Some "beta") (selected_roster_name state);
+  Alcotest.(check bool) "the saved view names both choices" true
+    (keeper_view_preference state
+     = Masc_tui_config.Keeper_view { view = "state"; density = "detailed" });
   state.keeper_turns <- [roster_turn "alpha"; roster_turn "gamma"];
   cycle_keeper_list_sort state;
   Alcotest.(check bool) "sort cycles" true
@@ -898,7 +905,7 @@ let test_activity_keeper_selection_uses_the_current_roster () =
   state.view <- Keepers Keeper_list;
   state.keepers <- List.map roster_keeper ["alpha"; "beta"];
   state.keeper_turns <- [roster_turn "beta"];
-  state.keeper_list_layout <- Masc_tui_keeper_list_model.Grouped;
+  state.keeper_list_view <- Masc_tui_keeper_list_model.By_state;
   state.keeper_list_sort <- Masc_tui_keeper_list_model.Name;
   keeper_list_select_name state "alpha";
   Alcotest.(check bool) "first activity selection switches to beta" true
@@ -931,7 +938,7 @@ let test_keeper_preference_failures_are_retained_by_kind () =
     ignore (apply_keeper_preference_completion state completion)
   in
   let order_old = Masc_tui_config.Keeper_order "recent" in
-  let view = Masc_tui_config.Keeper_view "grouped" in
+  let view = Masc_tui_config.Keeper_view { view = "state"; density = "compact" } in
   let old_id = submit order_old in
   complete old_id order_old (Masc_tui_config.Preference_unconfirmed "write failed");
   Alcotest.(check bool) "order failure retained" true
@@ -996,7 +1003,7 @@ let test_keeper_preference_exit_keeps_drained_and_pending_failures () =
         ~apply:(fun completion -> ignore (apply_keeper_preference_completion state completion)) in
     submit (Masc_tui_config.Keeper_order "recent");
     drain ();
-    submit (Masc_tui_config.Keeper_view "grouped");
+    submit (Masc_tui_config.Keeper_view { view = "state"; density = "compact" });
     Masc_tui_config.close_keeper_preference_writer writer;
     drain ();
     Alcotest.(check bool) "exit keeps the previously applied order failure" true
@@ -1011,7 +1018,7 @@ let test_keeper_preference_cancelled_submission_and_exit () =
     let cancelled_state = create_state ~workspace:"" ~port:0 () in
     let pending_state = create_state ~workspace:"" ~port:0 () in
     let order = Masc_tui_config.Keeper_order "recent" in
-    let view = Masc_tui_config.Keeper_view "grouped" in
+    let view = Masc_tui_config.Keeper_view { view = "state"; density = "compact" } in
     let previous : Masc_tui_config.keeper_preference_completion =
       { request_id = -1; preference = order;
         outcome = Masc_tui_config.Preference_unconfirmed "previous failure" } in
@@ -1064,7 +1071,7 @@ let test_keeper_preference_cancelled_submission_and_exit () =
        && List.length (keeper_preference_unresolved_warnings cancelled_state) = 1);
     Alcotest.(check bool) "protected close settles the earlier pending request" true
       (match !pending_receipts with
-       | [{ request_id; preference = Keeper_view "grouped"; outcome = Preference_not_started _ }] ->
+       | [{ request_id; preference = Keeper_view { view = "state"; density = "compact" }; outcome = Preference_not_started _ }] ->
            pending_state.keeper_list_view_save_request = Some request_id
            && Option.is_some pending_state.keeper_list_view_save_error
        | _ -> false))

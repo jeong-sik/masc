@@ -1357,6 +1357,8 @@ module Keeper_history_read : sig
   val publish : t -> source -> ready_at_ns:int64 -> result -> unit
   val take_ready : t -> (source * observation) list
   val settle : t -> source -> bool
+  (** Admit only an offered source once. When History and Memory have both
+      settled, withdraw the optional reply so it cannot block a failure retry. *)
   val publish_page : t -> ready_at_ns:int64 -> page_result -> unit
   val take_page_ready : t -> page_observation option
   val settle_page : t -> bool

@@ -1,6 +1,0 @@
-/target/
-/dist/
-*.wasm
-
-# Large fonts — download at build time
-assets/fonts/NotoSansKR-Regular.ttf

@@ -104,8 +104,11 @@ if [ -n "$base_ref" ]; then
   python3 "$ROOT_DIR/scripts/changelog-fragments.py" missing \
     --base "$base_ref" --dir "$ROOT_DIR/changelog.d" --strict \
     >"$missing_out" 2>"$missing_err" || missing_status=$?
-  if grep -q "without a changelog fragment:" "$missing_out"; then
-    # Findings refuse the bump: write the fragment (or backfill it) first.
+  if [ "$missing_status" -eq 3 ]; then
+    # Exit 3 is the strict gate's "findings" verdict: the report listed
+    # non-exempt pull requests without fragments. Refuse the bump — write
+    # or backfill the fragments first. (Exempt-only output exits 0 and the
+    # report still prints, so the operator sees every omission.)
     cat "$missing_out" >&2
     echo "error: merged pull requests above lack changelog fragments; refusing to bump" >&2
     rm -f "$missing_err" "$missing_out"

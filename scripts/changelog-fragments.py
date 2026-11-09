@@ -14,7 +14,7 @@ bullet cites the fragment's own pull request as `#<number>`.
 Modes:
   check [--dir D]                      refuse a malformed fragment
   assemble [--dir D] [--changelog C]   fold fragments into [Unreleased], delete them
-  missing --base B [--head H] [--dir D] [--strict]
+  missing --base B [--head H] [--dir D] [--strict]  (exit 3 on findings)
                                        list PRs merged since B whose changes
                                        carry no fragment — reported once, at
                                        the fold, so the release author can
@@ -380,7 +380,11 @@ def missing(base: str, head: str, directory: pathlib.Path, strict: bool = False)
         f"{FRAGMENT_DIR}/<PR number>.md before folding, or note here why a "
         "release omits one."
     )
-    return 1 if strict and blocking else 0
+    if strict and blocking:
+        # Exit 3, not 1: a Python crash also exits 1, and callers must tell
+        # "findings" from "broken report" apart.
+        return 3
+    return 0
 
 
 def _escape_annotation_data(value: str) -> str:
@@ -475,7 +479,7 @@ def main() -> int:
     miss.add_argument("--base", required=True)
     miss.add_argument("--head", default="HEAD")
     miss.add_argument("--strict", action="store_true",
-                        help="exit 1 when any merged pull request lacks a fragment")
+                        help="exit 3 when any non-exempt merged pull request lacks a fragment")
     miss.add_argument("--dir", default=FRAGMENT_DIR)
     guard = sub.add_parser("pr-guard")
     guard.add_argument("--base", required=True)

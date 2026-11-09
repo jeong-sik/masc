@@ -151,6 +151,10 @@ read-only admission or reservation plan, including head, base and review
 checks; it never replays a merge or reservation write. An accepted merge keeps
 its original UUID through read recovery. Other HTTP errors and missing or
 conflicting quota headers remain visible failures.
+When a quota wait reaches the existing follow deadline, the unsettled receipt
+also carries its server `retry_at`. Each resumed run waits before its first GET
+and preserves that time through further handoffs until the server allows reads.
+Receipts without quota metadata keep their existing behavior.
 
 ### Manual integration
 

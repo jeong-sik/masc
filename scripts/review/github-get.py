@@ -131,15 +131,19 @@ class Client:
             except QuotaLimited as failure:
                 self.pauses += 1
                 self.on_quota(failure)
-                while (remaining := failure.retry_at - self.clock()) > 0:
-                    budget = None if self.deadline is None else self.deadline - self.clock()
-                    if budget is not None and budget <= 0:
-                        raise QuotaWaitCutShort(
-                            failure.path, failure.status, failure.headers,
-                            f'{failure.details["message"]} (quota wait cut short; '
-                            f'retry at {failure.retry_at})',
-                            failure.retry_at) from failure
-                    self.sleep(min(remaining, budget) if budget is not None else remaining)
+                self.wait_for_quota(failure)
+
+    def wait_for_quota(self, failure):
+        """Honor an observed retry time, including one carried by a receipt."""
+        while (remaining := failure.retry_at - self.clock()) > 0:
+            budget = None if self.deadline is None else self.deadline - self.clock()
+            if budget is not None and budget <= 0:
+                raise QuotaWaitCutShort(
+                    failure.path, failure.status, failure.headers,
+                    f'{failure.details["message"]} (quota wait cut short; '
+                    f'retry at {failure.retry_at})',
+                    failure.retry_at) from failure
+            self.sleep(min(remaining, budget) if budget is not None else remaining)
 
     def read(self, path):
         return self.get(path).data

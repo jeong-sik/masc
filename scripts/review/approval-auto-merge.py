@@ -251,16 +251,25 @@ def follow(repo, result_endpoint, receipt, scope):
     """
     deadline = time.monotonic() + WAIT_SECONDS
     CLIENT.deadline = CLIENT.clock() + WAIT_SECONDS
+    receipt = dict(receipt)
+    retry_at = receipt.pop('retry_at', None)
     try:
         observation = states = None
         error = None
+        if retry_at is not None:
+            try:
+                CLIENT.wait_for_quota(GET.QuotaLimited(
+                    result_endpoint, None, {}, 'quota retry time from the merge receipt', retry_at))
+            except GET.QuotaWaitCutShort as failure:
+                return dict(receipt, status='observation_unavailable', error=str(failure),
+                            retry_at=failure.retry_at, observation=observation, member_states=states)
         while True:
             try:
                 observation = read(result_endpoint)
                 status = observation['status']
             except GET.QuotaWaitCutShort as failure:
                 return dict(receipt, status='observation_unavailable', error=str(failure),
-                            observation=observation, member_states=states)
+                            retry_at=failure.retry_at, observation=observation, member_states=states)
             except (ValueError, KeyError, TypeError, OSError) as failure:
                 error = str(failure)
                 if isinstance(failure, GET.ApiFailure) and failure.status in (404, 410):
@@ -273,7 +282,7 @@ def follow(repo, result_endpoint, receipt, scope):
                     states = member_states(repo, scope)
                 except GET.QuotaWaitCutShort as failure:
                     return dict(receipt, status='observation_unavailable', error=str(failure),
-                                observation=observation, member_states=states)
+                                retry_at=failure.retry_at, observation=observation, member_states=states)
                 except (ValueError, KeyError, TypeError, OSError) as failure:
                     error = str(failure)
                 else:
@@ -300,6 +309,8 @@ def follow(repo, result_endpoint, receipt, scope):
 def hand_off(repo, outcome):
     """Continue an unsettled receipt in a new run; never submit a merge again."""
     receipt = {key: outcome[key] for key in ('uuid', 'pr', 'head', 'members', 'since')}
+    if 'retry_at' in outcome:
+        receipt['retry_at'] = outcome['retry_at']
     command = ['gh', 'workflow', 'run', 'approval-auto-merge.yml', '--repo', repo,
                '--ref', 'main', '-f', f'pr={receipt["pr"]}',
                '-f', f'receipt={json.dumps(receipt, separators=(",", ":"))}']
@@ -318,7 +329,7 @@ def parse_receipt(raw):
     except ValueError as error:
         raise ValueError(f'invalid receipt: {error}') from error
     if (not isinstance(receipt, dict) or
-            set(receipt) != {'uuid', 'pr', 'head', 'members', 'since'} or
+            set(receipt) - {'retry_at'} != {'uuid', 'pr', 'head', 'members', 'since'} or
             not isinstance(receipt['uuid'], str) or UUID.fullmatch(receipt['uuid']) is None or
             not isinstance(receipt['head'], str) or SHA.fullmatch(receipt['head']) is None or
             isinstance(receipt['pr'], bool) or not isinstance(receipt['pr'], int) or
@@ -328,6 +339,10 @@ def parse_receipt(raw):
                     for n in receipt['members']) or receipt['pr'] not in receipt['members'] or
             isinstance(receipt['since'], bool) or not isinstance(receipt['since'], (int, float))):
         raise ValueError('invalid receipt shape')
+    if 'retry_at' in receipt and (isinstance(receipt['retry_at'], bool) or
+            not isinstance(receipt['retry_at'], (int, float)) or
+            not 0 < receipt['retry_at'] < float('inf')):
+        raise ValueError('invalid receipt retry_at')
     return receipt
 
 

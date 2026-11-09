@@ -128,7 +128,7 @@ let run ~repo_root ~output_dir ~head_sha =
       ignore (Workspace.init config ~agent_name:(Some "container-probe-operator"));
       let directory = R.configuration_directory config in
       Fs_compat.mkdir_p directory;
-      let store = Store.create ~root:(Filename.concat (Workspace.masc_dir config) "lane-addons") in
+      let store = Store.of_config config in
       let tracked = ref [] and store_removed = ref false in
       let snapshot () = let value = inspect config in last_snapshot := value;
         tracked := List.sort_uniq String.compare (owned_instances value @ !tracked); value in

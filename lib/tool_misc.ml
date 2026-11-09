@@ -293,7 +293,7 @@ let dispatch ?ask_source_turn_ref ?dos_admission ?(lane_access = Lane_addon_sour
         | Tool_schemas_misc.Misc_dos_click | Tool_schemas_misc.Misc_dos_type
         | Tool_schemas_misc.Misc_dos_peek | Tool_schemas_misc.Misc_play_room
         | Tool_schemas_misc.Misc_dos_pass | Tool_schemas_misc.Misc_dos_save
-        | Tool_schemas_misc.Misc_dos_restore -> Lane_addon_runtime.save_declaration ~access:lane_access ~config:ctx.config args in
+        | Tool_schemas_misc.Misc_dos_restore | Tool_schemas_misc.Misc_pull_requests -> Lane_addon_runtime.save_declaration ~access:lane_access ~config:ctx.config args in
       Some (match result with
         | Ok data -> Tool_result.make_ok ~tool_name:name ~start_time:start ~data ()
         | Error error ->
@@ -380,6 +380,8 @@ let dispatch ?ask_source_turn_ref ?dos_admission ?(lane_access = Lane_addon_sour
       Some (handle_dashboard ~tool_name:name ~start_time:start ctx args)
   | Some Tool_schemas_misc.Misc_keeper_waiting_inventory ->
       Some (handle_keeper_waiting_inventory ~tool_name:name ~start_time:start ctx args)
+  | Some Tool_schemas_misc.Misc_pull_requests ->
+      Some (Tool_pull_requests.handle ~tool_name:name ~start_time:start ~caller:lane_caller args)
   | Some Tool_schemas_misc.Misc_gc ->
       Some (handle_gc ~tool_name:name ~start_time:start ctx args)
   | Some Tool_schemas_misc.Misc_sandbox_volume_gc ->
@@ -451,6 +453,9 @@ let is_read_only = function
   | Tool_schemas_misc.Misc_keeper_waiting_inventory
   | Tool_schemas_misc.Misc_tool_help
   | Tool_schemas_misc.Misc_candle_catalog
+  (* Reads the stored snapshot of the open pull requests; nothing is written
+     and GitHub is not called. *)
+  | Tool_schemas_misc.Misc_pull_requests
   (* Read-back only: records nothing, matching the descriptor's readonly flag
      and the MCP lane's runtime_tool_policy. *)
   | Tool_schemas_misc.Misc_ask_status -> true

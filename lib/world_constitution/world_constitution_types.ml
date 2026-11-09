@@ -73,6 +73,13 @@ let make ~id ~text ~author ~at ~evidence =
 
 type entry =
   | Added of t
+  | Replaced of {
+      superseded : Article_id.t list;
+      article : t;
+      by : string;
+      at : float;
+      reason : string option;
+    }
   | Removed of {
       id : Article_id.t;
       by : string;

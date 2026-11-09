@@ -31,9 +31,12 @@ val cleanup :
   meta:Keeper_meta_contract.keeper_meta ->
   retention_sec:float ->
   unit ->
-  (report option, string) result
-(** [Ok None] for a Keeper that is not Remote_ssh. It runs beside the
-    Keeper's turns, not in its Maintenance slot: the payload leaves alone an
-    entry a live process is inside or that was touched within the retention.
+  (report, string) result
+(** An error names the stored profile when [meta] is not Remote_ssh: the
+    caller picked this step from a Remote_ssh projection, so a different
+    stored profile is a disagreement to show, not a Keeper to pass over.
+    It runs beside the Keeper's turns, not in its Maintenance slot: the
+    payload leaves alone an entry a live process is inside or that was
+    touched within the retention.
     The endpoint is built without the disk preflight: that preflight refuses
     a full disk, which is when this sweep matters most. *)

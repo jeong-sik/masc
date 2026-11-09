@@ -159,14 +159,17 @@ let test_slow_keeper_does_not_block_another_cleanup () =
   let release, allow_release = Eio.Promise.create () in
   let other, mark_other = Eio.Promise.create () in
   let duplicate = ref false in
-  Server_keeper_build_maintenance.schedule ~sw ~running ~keeper_name:"slow" (fun () ->
-    Eio.Promise.resolve mark_started ();
-    Eio.Promise.await release);
+  Alcotest.(check bool) "first attempt is scheduled" true
+    (Server_keeper_build_maintenance.schedule ~sw ~running ~keeper_name:"slow" (fun () ->
+       Eio.Promise.resolve mark_started ();
+       Eio.Promise.await release));
   Eio.Promise.await started;
-  Server_keeper_build_maintenance.schedule ~sw ~running ~keeper_name:"slow"
-    (fun () -> duplicate := true);
-  Server_keeper_build_maintenance.schedule ~sw ~running ~keeper_name:"other"
-    (fun () -> Eio.Promise.resolve mark_other ());
+  Alcotest.(check bool) "second attempt reports the one still running" false
+    (Server_keeper_build_maintenance.schedule ~sw ~running ~keeper_name:"slow"
+       (fun () -> duplicate := true));
+  Alcotest.(check bool) "another Keeper is scheduled" true
+    (Server_keeper_build_maintenance.schedule ~sw ~running ~keeper_name:"other"
+       (fun () -> Eio.Promise.resolve mark_other ()));
   Eio.Promise.await other;
   Alcotest.(check bool) "in-flight Keeper is not duplicated" false !duplicate;
   Eio.Promise.resolve allow_release ()
@@ -179,18 +182,21 @@ let test_cancelled_cleanup_releases_its_reservation () =
   let joined = ref false in
   (try Eio.Switch.run (fun sw ->
      let started, mark_started = Eio.Promise.create () in
-     Server_keeper_build_maintenance.schedule ~sw ~running ~keeper_name:"cancelled"
-       (fun () -> Fun.protect
-         ~finally:(fun () -> joined := true)
-         (fun () -> Eio.Promise.resolve mark_started (); Eio.Fiber.await_cancel ()));
+     ignore
+       (Server_keeper_build_maintenance.schedule ~sw ~running ~keeper_name:"cancelled"
+          (fun () -> Fun.protect
+            ~finally:(fun () -> joined := true)
+            (fun () -> Eio.Promise.resolve mark_started (); Eio.Fiber.await_cancel ()))
+        : bool);
      Eio.Promise.await started;
      Eio.Switch.fail sw Stop_cleanup_fixture)
    with Stop_cleanup_fixture -> ());
   Alcotest.(check bool) "cancelled callback joined before scope returns" true !joined;
   let reran = ref false in
   Eio.Switch.run (fun sw ->
-    Server_keeper_build_maintenance.schedule ~sw ~running ~keeper_name:"cancelled"
-      (fun () -> reran := true));
+    Alcotest.(check bool) "released reservation is scheduled again" true
+      (Server_keeper_build_maintenance.schedule ~sw ~running ~keeper_name:"cancelled"
+         (fun () -> reran := true)));
   Alcotest.(check bool) "next scope can schedule the Keeper again" true !reran
 
 let () =

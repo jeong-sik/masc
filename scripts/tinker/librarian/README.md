@@ -31,7 +31,8 @@ Synthetic Keepers, memories and candidates are invented by the model from
 | `synth_spec.py` | Plan of a synthetic request: measured distributions, ID shapes, labels |
 | `synth_candidate_plan.py` | Plans a split's candidates before any call, dealing marks and lengths out per label kind |
 | `synth_prompts.py` | Prompts that ask the model for role material, memories and candidates |
-| `synth_generate.py` | Builds synthetic requests with labels (`--split eval` or `train`) |
+| `synth_generate.py` | Builds synthetic requests (`--split eval` or `train`) |
+| `synth_rows.py` | Writes a synthetic request as a row of requests.jsonl, and reads a row back into typed facts, candidates and their label |
 | `synth_render.py` | Renders a synthetic request as the admission prompt MASC would send |
 | `e_synth_audit.py` | Picks requests for a blind judge and drops the ones whose labels the judge does not confirm; at verdict time, makes the judge's cases for facts an answer dropped off label |
 | `audit_decisions.py` | Checks the judge's decisions, and turns its classes for off-label drops into the memories the verdict leaves out |
@@ -54,8 +55,9 @@ Synthetic Keepers, memories and candidates are invented by the model from
 | `train_sft.py` | Trains branch A (answer only) or B (teacher thinking and answer) |
 
 The tests are `scripts/tests/test_tinker_librarian_*.py`. They read only
-invented rows and the invented Keeper in
-`scripts/tests/tinker_librarian_fixtures.py`. Each one runs as
+invented rows and the invented Keepers in
+`scripts/tests/tinker_librarian_fixtures.py` and
+`scripts/tests/tinker_librarian_synth_fixtures.py`. Each one runs as
 `uv run --python 3.12 scripts/tests/<test file>`; the verdict test imports the
 Tinker caller, so its header pins openai. `pyrightconfig.json` puts this
 directory on the tests' import path, so `pyright` checks them from the

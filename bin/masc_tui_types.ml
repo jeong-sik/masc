@@ -3919,6 +3919,23 @@ let observer_replay_description ?(source_loss = false) replay =
   if source_loss then "SOURCE EVENTS LOST · " ^ description
   else description
 
+(* One word for the transport log: which replay a newly opened observer
+   connection negotiated. Same cases as [observer_replay_description], so
+   connection cadence and resume quality are countable per word. *)
+let observer_replay_word = function
+  | Observer_replay_unobserved -> "unobserved"
+  | Observer_replay_unavailable _ -> "unavailable"
+  | Observer_replay_rejected _ -> "rejected"
+  | Observer_replay_scoped { Sse_wire.replay = Fresh; _ } -> "fresh"
+  | Observer_replay_scoped { Sse_wire.replay = Resumed; _ } -> "resumed"
+  | Observer_replay_scoped { Sse_wire.replay = Resumed_after_gap _; _ } -> "after_gap"
+  | Observer_replay_scoped { Sse_wire.replay = Reset Sse_wire.Instance_changed; _ } ->
+      "reset_instance_changed"
+  | Observer_replay_scoped { Sse_wire.replay = Reset Sse_wire.Unscoped_cursor; _ } ->
+      "reset_unscoped_cursor"
+  | Observer_replay_scoped { Sse_wire.replay = Reset Sse_wire.Cursor_ahead; _ } ->
+      "reset_cursor_ahead"
+
 (* A retry after a partially published SSE event can have a new transport
    cursor. Remember the highest notice sequence independently per source. *)
 let note_observer_source_loss ~source_id ~sequence seen =

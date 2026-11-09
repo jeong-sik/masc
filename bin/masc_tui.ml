@@ -19702,14 +19702,21 @@ let launch_fleet_stream state ~expected_workspace ~host ~port ~mailbox =
           in
           (match outcome with
            | Error (Masc_tui_http.Http_refused { status; detail }) ->
-               Masc_tui_fleet_stream.refused reader ~status ~detail
+               Masc_tui_fleet_stream.refused reader ~status ~detail;
+               Log.Transport.info "tui_fleet_stream_connection_ended outcome=refused status=%d"
+                 status detail
            | Error (Masc_tui_http.Transport_failed detail) ->
                Log.Transport.warn "tui_fleet_stream_lost detail=%s" detail
            | Error (Masc_tui_http.Invalid_handshake detail) ->
-               Masc_tui_fleet_stream.invalid_response reader detail
+               Masc_tui_fleet_stream.invalid_response reader detail;
+               Log.Transport.info
+                 "tui_fleet_stream_connection_ended outcome=invalid_handshake detail=%s" detail
            | Error (Masc_tui_http.Retry_without_cursor (_, detail)) ->
-               Masc_tui_fleet_stream.invalid_response reader detail
-           | Ok () -> Log.Transport.debug "tui_fleet_stream_ended");
+               Masc_tui_fleet_stream.invalid_response reader detail;
+               Log.Transport.info
+                 "tui_fleet_stream_connection_ended outcome=retry_without_cursor detail=%s" detail
+           | Ok () ->
+               Log.Transport.info "tui_fleet_stream_connection_ended outcome=closed_by_server");
           Masc_tui_fleet_stream.lost reader ~now:(Eio.Time.now clock);
           post ()
         in

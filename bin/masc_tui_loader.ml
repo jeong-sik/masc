@@ -335,11 +335,21 @@ let add_event (state : state) event_type content =
 let record_observer_opened (state : state) ~session_id ~at =
   state.observer_last_close <- None;
   state.observer <- Observer_live { session_id; since = at; events = 0 };
+  Log.Transport.info "tui_observer_opened replay=%s"
+    (observer_replay_word state.observer_replay);
   add_event state "observer"
     (observer_replay_description ~source_loss:state.observer_source_loss state.observer_replay);
   add_event state "observer" "runtime event feed open"
 
 let record_observer_closed (state : state) ~workspace outcome ~reason ~at =
+  (* The transport log is how connection cadence is measured at all: the
+     session event list is bounded and in-memory. lived_s says whether this
+     was a long-lived stream ending or another flap. *)
+  (match state.observer with
+   | Observer_live { since; _ } ->
+       Log.Transport.info "tui_observer_closed lived_s=%.1f reason=%s" (at -. since) reason
+   | Observer_off | Observer_opening | Observer_closed_before_answer _
+   | Observer_closed_after_live _ -> Log.Transport.info "tui_observer_closed reason=%s" reason);
   let repeated =
     match state.observer_last_close with
     | Some (previous_workspace, previous) ->

@@ -47,6 +47,15 @@ type binding = {
 let b ?help ?ko ?(detail = Either) ?(rows = Rowless) group key label =
   { key; label; label_ko = ko; help; group; detail; rows }
 
+(* The one spelling of "key:label". The footer atoms, the Keeper tab row and
+   the Questions heading all read it. Hand-written copies had drifted: the
+   queue footer said [a:answer a question] where the heading said
+   [a:open answers]. [label] replaces the binding's own: [hints_in_order]
+   passes the Korean wording, and the Approvals footer passes a shorter word
+   for one mode. *)
+let key_hint ?label (binding : binding) =
+  binding.key ^ ":" ^ (match label with Some word -> word | None -> binding.label)
+
 (* [None] is shared by all Config panes; [Some panes] belongs only to those
    input handlers. Keep availability beside the binding, not in a second key
    list inferred from the rendered label. *)
@@ -428,11 +437,6 @@ let approval_read =
 let approval_value_bytes =
   b Navigate "v" "string bytes" ~detail:Detail_only
     ~help:"read decoded top-level Gate string values as bytes, not JSON wire; v or Esc returns"
-(* One spelling of "key:label". The queue footer and the Questions heading both
-   name the answer key, and two hand-written spellings of it had drifted
-   ([a:open answers] over [a:answer a question]). *)
-let key_hint ?label (binding : binding) =
-  binding.key ^ ":" ^ (match label with Some word -> word | None -> binding.label)
 let approval_answer =
   b Act "a" "answer a question"
     ~help:"open the selected question, from a Keeper or a Lane Add-on installation, in its own mode; Esc leaves it"
@@ -1313,12 +1317,12 @@ let group_rank = function Navigate -> 0 | Act -> 1 | Search -> 2 | Meta -> 3
 
 let hints_in_order ?(lang = Lang_en) bindings =
   bindings
-  |> List.map (fun { key; label; label_ko; _ } ->
+  |> List.map (fun (binding : binding) ->
       let label = match lang with
-        | Lang_ko -> Option.value label_ko ~default:label
-        | Lang_en -> label
+        | Lang_ko -> Option.value binding.label_ko ~default:binding.label
+        | Lang_en -> binding.label
       in
-      key ^ ":" ^ label)
+      key_hint ~label binding)
   |> String.concat "  "
 
 (* Sort by group, then flatten to the footer's "key:label  key:label" form.
@@ -2523,7 +2527,7 @@ let keeper_detail_tab_hint tab =
   String.concat "  "
     ("[ ]:tab"
      :: List.map
-          (fun binding -> binding.key ^ ":" ^ binding.label)
+          (fun binding -> key_hint binding)
           (keeper_detail_tab_bindings tab))
 
 (* A surface's rows on the sheet. The shared tail -- r, Tab and q exactly as

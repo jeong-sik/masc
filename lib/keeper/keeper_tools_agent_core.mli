@@ -27,13 +27,6 @@ type terminal_effect_state =
   | Terminal_effect_completed of Keeper_tool_execution.terminal_effect_receipt
   | Terminal_effect_failed of terminal_effect_failure
 
-type gate_replay_delivery =
-  { approval_id : string
-  ; outcome : Keeper_gate_replay.outcome
-  ; terminal_effect_receipt :
-      Keeper_tool_execution.terminal_effect_receipt option
-  }
-
 (** What a Keeper is attached to, before the turn decides how to show it.
 
     The bundle takes this rather than a finished listing because deciding what
@@ -154,7 +147,7 @@ type tool_bundle =
             The unprojected fields above remain the configured turn surface. *)
   ; cleanup : unit -> unit
   ; terminal_effect_state : unit -> terminal_effect_state
-  ; gate_replay_delivery : gate_replay_delivery option
+  ; gate_replay_inputs : Keeper_gate_replay.resolution_input list
   ; turn_sandbox_factory : Keeper_sandbox_factory.t option
         (** The factory the bundle's tools resolve through, handed back so
             turn setup can reach the same endpoint the turn's own calls will

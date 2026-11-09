@@ -383,7 +383,7 @@ let batched_replay_admission () = with_directory (fun root ->
       channel = Keeper_continuation_channel.unrouted "batch admission fixture" } in
   let observed approval_id outcome =
     Replay.resolution_input ~resolution:(resolution approval_id)
-      ~replay_delivery:(Some (approval_id, outcome)) |> unwrap in
+      ~replay_delivery:(Some (approval_id, { Replay.outcome; terminal_effect_receipt = None })) |> unwrap in
   let model = Replay.compose_model_message ~base_path:root
     ~user_message:"Continue the original request."
     ~inputs:[ observed "approval-a" first_outcome; observed "approval-b" second_outcome ] in
@@ -467,7 +467,7 @@ let resolution_input_ownership () =
     { approval_id = "approval-a"; decision = Keeper_event_queue.Hitl_approved;
       channel = Keeper_continuation_channel.unrouted "resolution ownership fixture" } in
   (match Replay.resolution_input ~resolution
-    ~replay_delivery:(Some ("approval-b", Replay.Not_applicable)) with
+    ~replay_delivery:(Some ("approval-b", { Replay.outcome = Replay.Not_applicable; terminal_effect_receipt = None })) with
    | Error (Replay.Replay_approval_mismatch { resolution_id; replay_id }) ->
      Alcotest.(check string) "resolution owner" "approval-a" resolution_id;
      Alcotest.(check string) "unrelated replay owner" "approval-b" replay_id
@@ -475,7 +475,7 @@ let resolution_input_ownership () =
      Alcotest.fail "an unrelated replay was bound to this resolution");
   let rejected = { resolution with decision = Keeper_event_queue.Hitl_rejected "no" } in
   match Replay.resolution_input ~resolution:rejected
-    ~replay_delivery:(Some ("approval-a", Replay.Not_applicable)) with
+    ~replay_delivery:(Some ("approval-a", { Replay.outcome = Replay.Not_applicable; terminal_effect_receipt = None })) with
   | Error (Replay.Replay_for_rejected_resolution approval_id) ->
     Alcotest.(check string) "rejected resolution owner" "approval-a" approval_id
   | Ok _ | Error (Replay.Replay_approval_mismatch _) ->

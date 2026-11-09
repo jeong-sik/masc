@@ -90,7 +90,7 @@ let run_keeper_cycle_admitted
       ?deferred_runtime_lane
       ?on_deferred_runtime_consumed
       ?event_bus
-      ?hitl_resolution
+      ?hitl_resolutions
       ~ctx
       ~meta_after_triage
       ~stop
@@ -112,7 +112,7 @@ let run_keeper_cycle_admitted
         ~publication_recovery_provider:ctx.publication_recovery_provider
         ~observation:obs
         ~turn_input
-        ?hitl_resolution
+        ?hitl_resolutions
         (* RFC-0315: pass the whole decision, not just its channel — the
            prompt renders the verdict reasons so the turn knows why it woke. *)
         ~turn_decision
@@ -208,7 +208,7 @@ let run_keeper_cycle
       ?deferred_runtime_lane
       ?on_deferred_runtime_consumed
       ?event_bus
-      ?hitl_resolution
+      ?hitl_resolutions
       ~ctx
       ~meta_after_triage
       ~stop
@@ -237,6 +237,6 @@ let run_keeper_cycle
     ~shared_context
     ~turn_input
     ?event_bus
-    ?hitl_resolution
+    ?hitl_resolutions
     ()
 ;;

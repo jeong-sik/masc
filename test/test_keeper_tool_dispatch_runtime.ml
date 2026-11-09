@@ -147,6 +147,8 @@ let fetch_artifact_exn ~base_path artifact_ref =
 ;;
 
 let resolution_input_exn resolution replay_delivery =
+  let replay_delivery = Option.map (fun (id, outcome) ->
+    id, { Masc.Keeper_gate_replay.outcome; terminal_effect_receipt = None }) replay_delivery in
   match Masc.Keeper_gate_replay.resolution_input ~resolution ~replay_delivery with
   | Ok input -> input
   | Error error -> fail (Masc.Keeper_gate_replay.resolution_input_error_to_string error)
@@ -3259,15 +3261,15 @@ let test_approved_web_search_replays_without_model_resubmission () =
               ~meta
               ~publication_recovery
               ~ctx_snapshot:ctx_work
-              ~hitl_resolution:resolution
+              ~hitl_resolutions:(Masc.Keeper_hitl_resolution_batch.singleton resolution)
               ()
           in
           Fun.protect
             ~finally:bundle.cleanup
             (fun () ->
-               match bundle.gate_replay_delivery with
-               | Some
-                   { outcome =
+               match List.filter_map Masc.Keeper_gate_replay.input_replay_execution
+                 bundle.gate_replay_inputs with
+               | [ { outcome =
                        Masc.Keeper_gate_replay.Applied
                          { operation = "network_read"
                          ; output_ref
@@ -3275,7 +3277,7 @@ let test_approved_web_search_replays_without_model_resubmission () =
                              Masc.Keeper_gate_replay.Replay_journal_recorded
                          }
                    ; _
-                   } ->
+                   } ] ->
                  let output =
                    fetch_artifact_exn
                      ~base_path:config.base_path
@@ -3285,15 +3287,14 @@ let test_approved_web_search_replays_without_model_resubmission () =
                    "stored WebSearch effect executed"
                    true
                    (String_util.contains_substring output "Replayed result")
-               | Some
-                   { outcome = Masc.Keeper_gate_replay.Applied _; _ } ->
+               | [ { outcome = Masc.Keeper_gate_replay.Applied _; _ } ] ->
                  fail
                    "replayed WebSearch did not durably journal its exact result"
-               | Some { outcome; _ } ->
+               | [ { outcome; _ } ] ->
                  failf
                    "stored WebSearch effect was not replayed: %s"
                    (Masc.Keeper_gate_replay.outcome_to_string outcome)
-               | None ->
+               | [] | _ :: _ :: _ ->
                  fail
                    "production tool bundle dropped the approved replay outcome"));
       (match
@@ -3477,7 +3478,7 @@ let test_durable_connector_replay_settles_terminal_turn () =
            ~meta
            ~publication_recovery
            ~ctx_snapshot:ctx_work
-           ~hitl_resolution:resolution
+           ~hitl_resolutions:(Masc.Keeper_hitl_resolution_batch.singleton resolution)
            ()
        in
        Fun.protect ~finally:bundle.cleanup @@ fun () ->
@@ -3558,6 +3559,154 @@ let approved_web_search_resolution
     }
   in
   input, approval_id, resolution
+;;
+
+let approve_stored_replay_resolution ~config ~meta ~tool_name ~input =
+  let approval_id = match Masc.Keeper_approval_queue.submit_pending
+    ~base_path:config.Masc.Workspace.base_path ~keeper_name:meta.Masc.Keeper_meta_contract.name
+    ~tool_name ~input ~call_summary:None ~origin:Keeper_approval_origin.unavailable () with
+    | Ok submission -> submission.approval_id
+    | Error error -> fail (Masc.Keeper_approval_queue_result.storage_error_to_string error) in
+  (match Masc.Keeper_approval_queue.resolve_with_policy ~base_path:config.base_path
+    ~id:approval_id ~decision:Keeper_approval_queue_rules_types.Decision.Approve
+    ~source:Keeper_approval_queue_rules_types.Human_operator () with
+   | Ok _ -> ()
+   | Error error -> fail (Masc.Keeper_approval_queue.resolve_error_to_string error));
+  { Keeper_event_queue.approval_id; decision = Keeper_event_queue.Hitl_approved
+  ; channel = Keeper_continuation_channel.unrouted "stored cohort fixture" }
+;;
+
+let test_fresh_approval_cohort_replays_each_exact_grant () =
+  with_exec_fixture "keeper_gate_replay_fresh_cohort"
+    (fun ~config ~meta ~publication_recovery ~ctx_work ->
+      let module Batch = Masc.Keeper_hitl_resolution_batch in
+      let module Replay = Masc.Keeper_gate_replay in
+      (match Masc.Keeper_gate_mode.set config ~actor:"test" Masc.Keeper_gate_mode.Manual with
+       | Ok _ -> () | Error detail -> fail detail);
+      let approve tool_call_id =
+        let _, _, resolution = approved_web_search_resolution
+          ~config ~meta ~publication_recovery ~ctx_work ~tool_call_id in resolution in
+      let first = approve "cohort-first" in
+      let second = approve "cohort-second" in
+      let make sources = Batch.of_resolutions ~base_path:config.base_path
+        ~keeper_name:meta.name sources in
+      let batch = match make [ first; second ] with
+        | Ok batch -> batch | Error error -> fail (Batch.join_error_to_string error) in
+      check bool "unrouted cohort does not invent a shared reply route" false
+        (Keeper_continuation_channel.same_route first.channel second.channel);
+      check bool "multiple approvals have no representative singleton grant" true
+        (Option.is_none (Batch.singleton_resolution batch));
+      let other_meta = { meta with name = meta.name ^ "-other"; always_allow = Some true } in
+      let wrong_owner = Masc.Tool_misc.with_web_search_simulation_for_test
+        ~outcomes:[ "searxng", `Error "scope refusal must precede every effect" ] (fun () ->
+          Replay.replay_resolution_inputs ~config ~meta:other_meta ~publication_recovery
+            ~turn_sandbox_factory:None batch) in
+      (match List.map Replay.input_replay_execution wrong_owner with
+       | [ Some { outcome = Replay.Repair_required { stage = Replay.Invalid_resolution_state; _ }; _ } ] -> ()
+       | _ -> fail "another Keeper's AlwaysAllow policy must not spend this cohort");
+      List.iter (fun (r : Keeper_event_queue.hitl_resolution) ->
+        match Masc.Keeper_approval_queue.approved_resolution_state
+          ~base_path:config.base_path ~id:r.approval_id with
+        | Ok Masc.Keeper_approval_queue_result.Resolution_unconsumed -> ()
+        | Ok Masc.Keeper_approval_queue_result.Resolution_consumed | Error _ ->
+          fail "scope refusal must leave every original grant unconsumed") [ first; second ];
+      (match make [ first; first ] with
+       | Error (Batch.Duplicate_resolution id) -> check string "duplicate owner" first.approval_id id
+       | Ok _ | Error _ -> fail "duplicate approval was admitted twice");
+      let route name = match Keeper_continuation_channel.dashboard ~thread_id:name with
+        | Ok channel -> channel | Error detail -> fail detail in
+      (match make [ { first with channel = route "one" }; { second with channel = route "two" } ] with
+       | Error Batch.Different_reply_partitions -> ()
+       | Ok _ | Error _ -> fail "different reply destinations entered one cohort");
+      (match make [ first; { second with decision = Keeper_event_queue.Hitl_rejected "denied" } ] with
+       | Error (Batch.Single_only { reason = Batch.Rejected_resolution; _ }) -> ()
+       | Ok _ | Error _ -> fail "rejection entered the evidence-only cohort");
+      let terminal = approve_stored_replay_resolution ~config ~meta
+        ~tool_name:"connector_post" ~input:(`Assoc []) in
+      (match make [ first; terminal ] with
+       | Error (Batch.Single_only { reason = Batch.Terminal_operation "connector_post"; _ }) -> ()
+       | Ok _ | Error _ -> fail "terminal connector replay entered a shared continuation");
+      Masc.Tool_misc.with_web_search_simulation_for_test
+        ~outcomes:[ "searxng", `Hits [ "cohort result", "https://example.com/cohort", "exact replay" ] ]
+        (fun () ->
+          let bundle = Masc.Keeper_tools_agent_core_bundle.For_testing.make_tool_bundle
+            ~config ~meta ~publication_recovery ~ctx_snapshot:ctx_work ~hitl_resolutions:batch () in
+          Fun.protect ~finally:bundle.cleanup (fun () ->
+            let model inputs = Replay.compose_model_message ~base_path:config.base_path
+              ~user_message:"Continue both approved effects." ~inputs in
+            let initial = model bundle.gate_replay_inputs in
+            check (list string) "each actual replay keeps its source order"
+              [ first.approval_id; second.approval_id ]
+              (List.map (fun (r : Keeper_event_queue.hitl_resolution) -> r.approval_id) initial.resolutions);
+            List.iter (fun input ->
+              match Replay.input_replay_execution input with
+              | Some { outcome = Replay.Applied { journal = Replay.Replay_journal_recorded; _ }
+                     ; terminal_effect_receipt = None } -> ()
+              | None | Some _ -> fail "each cohort member must finish its own nonterminal replay")
+              bundle.gate_replay_inputs;
+            let canonical model = List.map (fun evidence ->
+              match Replay.approval_input evidence with
+              | Ok input -> input
+              | Error error -> fail (Masc.Keeper_approval_input_admission.error_to_string error))
+              model.Replay.replay_evidence in
+            check int "both independent canonical inputs survive" 2 (List.length (canonical initial));
+            let recovered = Masc.Tool_misc.with_web_search_simulation_for_test
+              ~outcomes:[ "searxng", `Error "a consumed effect must not run again" ] (fun () ->
+                Replay.replay_resolution_inputs ~config ~meta ~publication_recovery
+                  ~turn_sandbox_factory:bundle.turn_sandbox_factory batch |> model) in
+            check bool "same-turn recovery retains both durable results without new effects" true
+              (canonical initial = canonical recovered);
+            match make [ first; second ] with
+            | Error (Batch.Single_only { reason = Batch.Recovery_resolution; _ }) -> ()
+            | Ok _ | Error _ -> fail "new intake must recover consumed history individually")))
+;;
+
+let test_cohort_repair_retains_completed_prefix_and_unstarted_suffix () =
+  with_exec_fixture "keeper_gate_replay_cohort_repair"
+    (fun ~config ~meta ~publication_recovery ~ctx_work ->
+      let module Batch = Masc.Keeper_hitl_resolution_batch in
+      let module Replay = Masc.Keeper_gate_replay in
+      (match Masc.Keeper_gate_mode.set config ~actor:"test" Masc.Keeper_gate_mode.Manual with
+       | Ok _ -> () | Error detail -> fail detail);
+      let approve tool_call_id =
+        let _, _, resolution = approved_web_search_resolution
+          ~config ~meta ~publication_recovery ~ctx_work ~tool_call_id in resolution in
+      let first = approve "repair-prefix" in
+      let broken = approve_stored_replay_resolution ~config ~meta ~tool_name:"network_read"
+        ~input:(`Assoc [ "capability", `String "unknown-capability"; "input", `Assoc [] ]) in
+      let last = approve "unstarted-suffix" in
+      let batch = match Batch.of_resolutions ~base_path:config.base_path
+        ~keeper_name:meta.name [ first; broken; last ] with
+        | Ok batch -> batch | Error error -> fail (Batch.join_error_to_string error) in
+      Masc.Tool_misc.with_web_search_simulation_for_test
+        ~outcomes:[ "searxng", `Hits [ "prefix", "https://example.com/prefix", "applied once" ] ]
+        (fun () ->
+          let run () = Replay.replay_resolution_inputs ~config ~meta ~publication_recovery
+            ~turn_sandbox_factory:(Masc_test_deps.fixture_turn_sandbox_factory ~config ~meta) batch in
+          let initial = run () in
+          check (list string) "repair stops before unstarted approval"
+            [ first.approval_id; broken.approval_id ]
+            (List.map (fun input -> (Replay.input_resolution input).approval_id) initial);
+          (match List.map Replay.input_replay_execution initial with
+           | [ Some { outcome = Replay.Applied _; _ }
+             ; Some { outcome = Replay.Repair_required { stage = Replay.Request_decode; _ }; _ } ] -> ()
+           | _ -> fail "completed effect and repair must retain their separate owners");
+          let state r = match Masc.Keeper_approval_queue.approved_resolution_state
+            ~base_path:config.base_path ~id:r.Keeper_event_queue.approval_id with
+            | Ok state -> state
+            | Error error -> fail (Masc.Keeper_approval_queue_result.grant_error_to_string error) in
+          check bool "prefix grant was durably consumed" true
+            (state first = Masc.Keeper_approval_queue_result.Resolution_consumed);
+          List.iter (fun r -> check bool "repair and suffix grants remain unspent" true
+            (state r = Masc.Keeper_approval_queue_result.Resolution_unconsumed)) [ broken; last ];
+          let recovered = Masc.Tool_misc.with_web_search_simulation_for_test
+            ~outcomes:[ "searxng", `Error "prefix must recover its durable effect" ] run in
+          (match List.map Replay.input_replay_execution recovered with
+           | [ Some { outcome = Replay.Applied _; _ }
+             ; Some { outcome = Replay.Repair_required _; _ } ] -> ()
+           | _ -> fail "repair retry reran or lost the completed prefix");
+          check bool "repair retry never starts the suffix" true
+            (state last = Masc.Keeper_approval_queue_result.Resolution_unconsumed)))
 ;;
 
 let test_blob_failure_repairs_journal_without_second_effect () =
@@ -10833,6 +10982,10 @@ let () =
         test_approved_web_search_grant_executes_exact_request;
       test_case "approved WebSearch replays without model resubmission" `Quick
         test_approved_web_search_replays_without_model_resubmission;
+      test_case "fresh approval cohort spends each exact grant once" `Quick
+        test_fresh_approval_cohort_replays_each_exact_grant;
+      test_case "cohort repair preserves completed prefix and unstarted suffix" `Quick
+        test_cohort_repair_retains_completed_prefix_and_unstarted_suffix;
       test_case "durable connector replay settles terminal turn" `Quick
         test_durable_connector_replay_settles_terminal_turn;
       test_case "blob failure repairs journal without second effect" `Quick

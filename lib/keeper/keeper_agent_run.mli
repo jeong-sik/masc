@@ -258,7 +258,7 @@ val run_turn
   -> ?event_bus:Agent_core.Event_bus.t
   -> ?trace_link:string * string
   -> ?continuation_channel:Keeper_continuation_channel.t
-  -> ?hitl_resolution:Keeper_event_queue.hitl_resolution
+  -> ?hitl_resolutions:Keeper_hitl_resolution_batch.t
   -> ?on_gate_deferred:(string -> unit)
   -> ?on_checkpoint_stage:(Agent_core.Agent.checkpoint_stage -> unit)
   -> unit

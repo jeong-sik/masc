@@ -2100,11 +2100,12 @@ let test_resolution_is_durable_and_origin_scoped () =
              ~replay_delivery:
                (Some
                   ( id
-                  , Masc.Keeper_gate_replay.Applied
-                      { operation = "external-effect"
-                      ; output_ref = replay_output_ref
-                      ; journal = Masc.Keeper_gate_replay.Replay_journal_recorded
-                      } ))
+                  , { Masc.Keeper_gate_replay.outcome = Masc.Keeper_gate_replay.Applied
+                        { operation = "external-effect"
+                        ; output_ref = replay_output_ref
+                        ; journal = Masc.Keeper_gate_replay.Replay_journal_recorded
+                        }
+                    ; terminal_effect_receipt = None } ))
          in
          let input =
            match input with

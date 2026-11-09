@@ -1269,7 +1269,7 @@ let run_keepalive_unified_turn
               ?deferred_runtime_lane
               ~on_deferred_runtime_consumed
               ?event_bus
-              ?hitl_resolution
+              ?hitl_resolutions:(Option.map Keeper_hitl_resolution_batch.singleton hitl_resolution)
               ~ctx
               ~meta_after_triage
               ~stop

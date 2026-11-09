@@ -157,7 +157,6 @@ val grid_since_word : string
 val grid_ago_word : string
 val grid_wait_word : string
 val grid_no_data_word : string
-val grid_no_librarian_word : string
 val grid_no_snapshot_word : string
 val grid_turns_word : string
 (** The words of the memory and age views and the failure line. *)

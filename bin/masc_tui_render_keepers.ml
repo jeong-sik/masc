@@ -785,15 +785,16 @@ let grid_fitted cells (cell : Masc_tui_keeper_axis_cell.t) =
 
 let grid_quiet text = { Masc_tui_keeper_axis_cell.text; tone = Masc_tui_keeper_axis_cell.Quiet }
 
-(* The memory view's ● cell: how the librarian's last pass ended. *)
+(* The memory view's ● cell: how the librarian's last pass ended. A row with
+   no pass is one this server process has not seen a pass for yet, not a
+   Keeper without a librarian, so it keeps the unmeasured mark. *)
 let grid_librarian memory =
   grid_fitted Grid.now_cells
     (match Memory_reading.pass_end memory with
-     | Memory_reading.Unmeasured -> grid_quiet Keeper_mark.grid_no_librarian_word
      | Memory_reading.No_snapshot | Memory_reading.Row_absent ->
          grid_quiet Keeper_mark.grid_no_data_word
-     | Memory_reading.Measured _ | Memory_reading.Snapshot_unknown | Memory_reading.Row_refused ->
-         Memory_reading.pass_cell memory)
+     | Memory_reading.Measured _ | Memory_reading.Unmeasured | Memory_reading.Snapshot_unknown
+     | Memory_reading.Row_refused -> Memory_reading.pass_cell memory)
 
 (* The strip column of the memory and age views: the unread turns as a bar
    against [peak_lag] on a ground of dots, in the info colour when requests

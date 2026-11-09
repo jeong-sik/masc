@@ -178,7 +178,6 @@ let grid_since_word = "since"
 let grid_ago_word = "ago"
 let grid_wait_word = "wait"
 let grid_no_data_word = "no data"
-let grid_no_librarian_word = "no librarian"
 let grid_no_snapshot_word = "no snapshot"
 let grid_turns_word = "turns"
 let grid_librarian_header = "librarian"
@@ -228,11 +227,10 @@ let column_legend =
         ; grid_now_line; grid_lag_bar_short_header; grid_digest_header; grid_gap_header ]
     , Printf.sprintf
         "the memory view: the turn pulse, how the librarian's last pass ended (%s without a \
-         memory row, %s when the row has no pass), the unread turns as a bar against the \
-         listed keeper furthest behind, the time since the last digest (%s before the first) \
-         and the atoms requests skip; %s is a value the server did not measure"
-        grid_no_data_word grid_no_librarian_word Masc_tui_theme.Glyph.no_value
-        Masc_tui_keeper_age_ladder.unmeasured_mark )
+         memory row), the unread turns as a bar against the listed keeper furthest behind, \
+         the time since the last digest (%s before the first) and the atoms requests skip; %s \
+         is a value the server did not measure, a pass this server has not seen yet too"
+        grid_no_data_word Masc_tui_theme.Glyph.no_value Masc_tui_keeper_age_ladder.unmeasured_mark )
   ; ( String.concat " "
         [ grid_facts_by_age_header; grid_now_line; grid_renewed_header; grid_now_line
         ; grid_lag_bar_short_header; grid_stale_header; grid_facts_header ]

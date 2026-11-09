@@ -84,6 +84,7 @@
   keeper_turn_sandbox_runtime_boot
   keeper_turn_sandbox_runtime_record
   keeper_turn_sandbox_runtime_run_argv
+  keeper_turn_sandbox_runtime_container
   keeper_approval_queue_registry
   keeper_approval_queue_persist
   keeper_approval_queue_load

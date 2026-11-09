@@ -750,3 +750,12 @@ let checkpoint_head_with_version path version =
   checkpoint_head_bytes_with_field
     (In_channel.with_open_bin path In_channel.input_all)
     "version" (`Int version)
+
+(** [waitpid_nointr pid] is [Unix.waitpid [] pid] retried when a caught
+    signal interrupts the wait. EINTR is the kernel asking us to wait again,
+    not a failed wait; without the retry the same tree passes or fails by
+    signal-delivery timing, and inside a [Fun.protect] ~finally the
+    interruption surfaces as [Fun.Finally_raised] over the test outcome. *)
+let rec waitpid_nointr pid =
+  try Unix.waitpid [] pid with
+  | Unix.Unix_error (Unix.EINTR, _, _) -> waitpid_nointr pid

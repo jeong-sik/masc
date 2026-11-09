@@ -245,9 +245,11 @@ let memory_context_lines ?(full = false) ~ko ~cols ~detail ~unit ~input (k : Mas
       k.mkh_facts k.mkh_observed_facts k.mkh_derived_facts k.mkh_added
       k.mkh_removed k.mkh_support_invalidations
   in
+  (* The facts line above already counts the facts, so the ages follow
+     without a count of their own. *)
   let ladder_rows =
     clause_rows ~full ~cols
-      (Masc_tui_keeper_age_ladder.keeper_clauses ~ko k.mkh_age_bins)
+      (Masc_tui_keeper_age_ladder.ages_clauses ~ko k.mkh_age_bins)
   in
   (* RFC librarian-lifecycle §4.9: how far behind, when that was counted,
      and what the journal last said. A count the durable drain could not take prints
@@ -962,7 +964,7 @@ let memory_fleet_header_rows ~cols (state : state) : string list =
          ]
   in
   (* The ordinary facts counted by time since first seen, summed over the
-     Keepers whose row carries the server's ladder (RFC-0511 D2). A Keeper
+     Keepers whose row carries the server's ladder (RFC-0515 §2.4.5). A Keeper
      without one, and a row this build refused, are counted at the end of the
      row, so a partial sum does not read as the whole. *)
   let age_ladder_rows (snapshot : memory_health_snapshot) =

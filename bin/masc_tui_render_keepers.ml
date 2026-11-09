@@ -715,13 +715,6 @@ let grid_name (grid : Grid.t) ~yolo verdict name =
 
 let grid_repeat count mark = String.concat "" (List.init (max 0 count) (fun _ -> mark))
 
-(* Marks on the right of the pulse column, the newest on the right. A column
-   narrower than the marks keeps the newest. *)
-let grid_newest_marks (grid : Grid.t) marks =
-  Message_layout.pad_left
-    (String.concat "" (List.drop (max 0 (List.length marks - grid.side_cells)) marks))
-    grid.side_cells
-
 (* Each half hour in the mock's colour: failed ones warn, ok ones are the
    receded ok, quiet and unknown ones recede. *)
 let grid_half_hour_style = function
@@ -863,19 +856,41 @@ let grid_gap (grid : Grid.t) memory =
   in
   Theme.info () ^ Message_layout.pad_left text grid.mem_cells ^ Ansi.reset
 
-(* The age view's pulse column: the facts in the server's age bins, oldest on
-   the left. *)
+module Age_ladder = Masc_tui_keeper_age_ladder
+
+(* A ladder cell takes the colour of the newest bin it adds (the mock's
+   [cellZone]): a bin that starts within a day is the info colour, within a
+   week the row's own, and older facts recede. *)
+let grid_age_group_style = function
+  | Age_ladder.Within_hour | Age_ladder.Within_day -> Theme.info ()
+  | Age_ladder.Within_week -> ""
+  | Age_ladder.Past_week -> Theme.recede ()
+
+(* The age view's ladder (§2.4.5): the server's 24 bins added 1, 2 or 4 to a
+   cell, oldest on the left, on the right of the pulse column. An empty cell is
+   a dot, the others a level against the line's largest cell. A column under
+   six cells draws nothing. A Keeper row, a group title and the world row draw
+   their ladders the same way. *)
+let grid_age_ladder (grid : Grid.t) bins =
+  match Age_ladder.merge_of_column grid.side_cells with
+  | None -> String.make grid.side_cells ' '
+  | Some merge ->
+      let cells = Age_ladder.cells merge bins in
+      let peak = List.fold_left (fun peak (cell : Age_ladder.cell) -> max peak cell.count) 0 cells in
+      String.make (grid.side_cells - List.length cells) ' '
+      ^ String.concat ""
+          (List.map
+             (fun (cell : Age_ladder.cell) ->
+               if cell.count = 0 then Theme.recede () ^ Keeper_mark.grid_dot_mark ^ Ansi.reset
+               else
+                 grid_age_group_style cell.group ^ Grid.level_glyph ~peak cell.count ^ Ansi.reset)
+             cells)
+
+(* The age view's pulse column: the Keeper's ladder, or the word its age cell
+   uses when there is none. *)
 let grid_fact_ages (grid : Grid.t) memory =
   match Memory_reading.age_bins memory with
-  | Memory_reading.Measured bins ->
-      Theme.recede ()
-      ^ grid_newest_marks grid
-          (List.map
-             (function
-               | Masc_tui_keeper_age_ladder.Empty -> Keeper_mark.grid_dot_mark
-               | Masc_tui_keeper_age_ladder.Bar bar -> bar)
-             (Masc_tui_keeper_age_ladder.marks bins))
-      ^ Ansi.reset
+  | Memory_reading.Measured bins -> grid_age_ladder grid bins
   | Memory_reading.Unmeasured | Memory_reading.No_snapshot | Memory_reading.Snapshot_unknown
   | Memory_reading.Row_absent | Memory_reading.Row_refused ->
       let cell = Memory_reading.fact_ages_cell memory in
@@ -1067,21 +1082,57 @@ let grid_failure_line (grid : Grid.t) ~now (row : Keeper_list_model.row) =
 
 (* A group title on the grid (§2.4.7): [▌] in the group's colour, [−] open or
    [+] folded, and the title over the name and pulse columns, then the band.
-   The group's sums are not drawn yet. *)
+   A title with a sum for the pulse column ([pulse]) keeps to the name column.
+   The age view's ladder sum is the only one drawn yet. *)
 let grid_title_cells (grid : Grid.t) = grid.name_cells + grid.side_cells
 
-let grid_group_title (grid : Grid.t) ~folded ~style title =
+let grid_group_title (grid : Grid.t) ~folded ~style ~pulse title =
+  let bold_title cells = style ^ Ansi.bold ^ fit_width title cells ^ Ansi.reset in
   String.concat ""
     [ style ^ Keeper_mark.grid_gutter_glyph ^ Ansi.reset ^ " "
     ; Ansi.bold
       ^ (if folded then Keeper_mark.grid_folded_mark else Keeper_mark.grid_open_mark)
       ^ Ansi.reset ^ " "
-    ; style ^ Ansi.bold
-      ^ fit_width (fit_width title (grid_title_cells grid)) (grid_lead_cells grid - Grid.gutter_cells)
-      ^ Ansi.reset
+    ; (match pulse with
+       | Some pulse when grid.side_cells > 0 -> bold_title grid.name_cells ^ " " ^ pulse
+       | Some _ | None ->
+           style ^ Ansi.bold
+           ^ fit_width (fit_width title (grid_title_cells grid)) (grid_lead_cells grid - Grid.gutter_cells)
+           ^ Ansi.reset)
     ; " "
     ; grid_band grid_blank_now
     ]
+
+(* The rows of one group, folded or not. [klr_groups] is mapped from
+   [klr_rows], one group per row. *)
+let keeper_group_rows (reading : Masc_tui_types.keeper_list_reading) group =
+  let rec members rows groups =
+    match rows, groups with
+    | row :: rows, Some other :: groups when other = group -> row :: members rows groups
+    | _ :: rows, _ :: groups -> members rows groups
+    | [], _ | _, [] -> []
+  in
+  members reading.klr_rows reading.klr_groups
+
+(* The age view's group title draws the ladders of its Keepers added up
+   (§2.4.7). A Keeper without a ladder adds nothing. *)
+let grid_group_pulse state (grid : Grid.t) reading group =
+  match (group : Keeper_list_model.group) with
+  | Keeper_list_model.Group_age _ ->
+      let bins =
+        List.fold_left
+          (fun sum row ->
+            match Memory_reading.age_bins (keeper_memory_reading state row) with
+            | Memory_reading.Measured bins -> Masc.Keeper_memory_age_bins.add sum bins
+            | Memory_reading.Unmeasured | Memory_reading.No_snapshot
+            | Memory_reading.Snapshot_unknown | Memory_reading.Row_absent
+            | Memory_reading.Row_refused -> sum)
+          Masc.Keeper_memory_age_bins.zero
+          (keeper_group_rows reading group)
+      in
+      Some (grid_age_ladder grid bins)
+  | Keeper_list_model.Group_state _ | Keeper_list_model.Group_cause _
+  | Keeper_list_model.Group_due _ | Keeper_list_model.Group_memory _ -> None
 
 (* A header word on the left of its column and [tail] on its right, or the
    word alone when the column is too narrow for both. *)
@@ -1113,18 +1164,19 @@ let grid_header (grid : Grid.t) (columns : Axis_row.columns) =
     if Grid.strip_cells grid >= grid_lag_bar_header_cells then Keeper_mark.grid_lag_bar_header
     else Keeper_mark.grid_lag_bar_short_header
   in
+  let pulse_header word = grid_spread ~cells:grid.side_cells word Grid.slot_label in
   let name, pulse, now_word, strip, due, right =
     match columns with
     | Axis_row.Activity_columns ->
         ( Keeper_mark.grid_keeper_header
-        , Some (Keeper_mark.grid_pulse_header ~window)
+        , pulse_header (Keeper_mark.grid_pulse_header ~window)
         , Keeper_mark.axis_now_header
         , Keeper_mark.grid_next_header ~window
         , Keeper_mark.grid_due_header
         , Message_layout.pad_left Keeper_mark.grid_lag_header (grid.mem_cells - grid_level_cells) )
     | Axis_row.Memory_columns ->
         ( Keeper_mark.grid_keeper_header
-        , Some (Keeper_mark.grid_pulse_header ~window:(Keeper_mark.grid_turns_word ^ " " ^ window))
+        , pulse_header (Keeper_mark.grid_pulse_header ~window:(Keeper_mark.grid_turns_word ^ " " ^ window))
         , Keeper_mark.grid_librarian_header
         , lag_bar
         , Keeper_mark.grid_digest_header
@@ -1134,7 +1186,7 @@ let grid_header (grid : Grid.t) (columns : Axis_row.columns) =
              fit_width Keeper_mark.grid_keeper_header grid_facts_by_age_offset
              ^ Keeper_mark.grid_facts_by_age_header
            else Keeper_mark.grid_keeper_header)
-        , None
+        , Age_ladder.tick_line ~column:grid.side_cells
         , Keeper_mark.grid_saved_header
         , lag_bar
         , Keeper_mark.grid_stale_header
@@ -1143,13 +1195,7 @@ let grid_header (grid : Grid.t) (columns : Axis_row.columns) =
   String.concat ""
     [ String.make Grid.gutter_cells ' '
     ; recede (fit_width name grid.name_cells)
-    ; (if side then
-         " "
-         ^ recede
-             (match pulse with
-              | Some pulse -> grid_spread ~cells:grid.side_cells pulse Grid.slot_label
-              | None -> String.make grid.side_cells ' ')
-       else "")
+    ; (if side then " " ^ recede pulse else "")
     ; line
     ; Ansi.bold ^ fit_width now_word Grid.now_cells ^ Ansi.reset
     ; line
@@ -1511,9 +1557,9 @@ let keeper_view_summary ~ko ~cells rows view density sort =
     match view with
     | Keeper_list_model.By_age ->
         (if ko then
-           [ "stale: 출처 무효화"; "나이: 처음 본 시각"; "saved: 저장 갱신"; mode ]
+           [ "stale: 원본이 바뀐 기억"; "나이: 배운 지"; "saved: 마지막 저장"; mode ]
          else
-           [ "stale: source invalidated"; "age: first seen"; "saved: snapshot"; mode ])
+           [ "stale: source changed"; "age: since learned"; "saved: last save"; mode ])
     | Keeper_list_model.By_memory ->
         (if ko then
            [ "Librarian: 처리 관측"; "lag: 읽지 않은 턴"; mode ]
@@ -2176,7 +2222,8 @@ let render_keeper_list (state : state) =
             match matrix with
             | Some _ -> keeper_group_heading_style group ^ "▌   " ^ title ^ Ansi.reset
             | None -> grid_group_title grid ~folded:(List.mem group state.keeper_list_folded)
-                ~style:(keeper_group_heading_style group) title
+                ~style:(keeper_group_heading_style group)
+                ~pulse:(grid_group_pulse state grid list_reading group) title
           in
           if keeper_entry_selected stop entry then
             box_line_selected buf cols (Masc_tui_theme.strip_sgr text)

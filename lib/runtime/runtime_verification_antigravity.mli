@@ -5,6 +5,7 @@ type error = Private_home_unavailable | Client_error of Runtime_antigravity.erro
 val run : secure_random:Eio.Flow.source_ty Eio.Resource.t ->
   net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t -> mgr:_ Eio.Process.mgr ->
   clock:_ Eio.Time.clock -> cwd:Eio.Fs.dir_ty Eio.Path.t -> directory:string ->
+  host:Runtime_account_access.host_account ->
   oauth_source:string -> config:Runtime_antigravity.config ->
   tool:Runtime_official_client_tool.dynamic_tool -> prompt:string ->
   (Runtime_antigravity.turn_result, error) result

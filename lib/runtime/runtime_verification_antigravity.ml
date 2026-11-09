@@ -1,6 +1,6 @@
 type error = Private_home_unavailable | Client_error of Runtime_antigravity.error
 
-let run ~secure_random ~net ~mgr ~clock ~cwd ~directory ~oauth_source ~config ~tool ~prompt =
+let run ~secure_random ~net ~mgr ~clock ~cwd ~directory ~host ~oauth_source ~config ~tool ~prompt =
   Eio.Switch.run (fun sw ->
     let runtime_root = Filename.concat directory ("antigravity-readiness-" ^ Random_id.hex ~bytes:16) in
     let created =
@@ -11,7 +11,7 @@ let run ~secure_random ~net ~mgr ~clock ~cwd ~directory ~oauth_source ~config ~t
       Eio.Switch.on_release sw (fun () -> Fs_compat.remove_tree runtime_root);
       (* The turn runs in the HOME's own empty folder, not in [cwd], which
          holds the HOME itself (RFC-0490 2.2). *)
-      match Runtime_antigravity_home.prepare_native ~runtime_root ~owner_leaf:"readiness" ~oauth_source
+      match Runtime_antigravity_home.prepare_native ~host ~runtime_root ~owner_leaf:"readiness" ~oauth_source
           ~posture:Runtime_native_tools.Native_none ~workspace:Runtime_antigravity_home.Private_workspace
           ~additional_workspaces:[] with
       | Error _ -> Error Private_home_unavailable
@@ -34,6 +34,6 @@ let run ~secure_random ~net ~mgr ~clock ~cwd ~directory ~oauth_source ~config ~t
              ~eager_tools:[ tool.Runtime_official_client_tool.name ]) with
         | Error _ -> Error Private_home_unavailable
         | Ok () ->
-          Runtime_antigravity.run_turn ~home_dir:(Runtime_antigravity_home.home_dir home)
+          Runtime_antigravity.run_turn ~home_dir:(Runtime_antigravity_home.home_dir home) ~host
             ~mgr ~clock ~cwd:Eio.Path.(cwd / native_cwd) { config with cwd = native_cwd } ~prompt
           |> Result.map_error (fun error -> Client_error error)))

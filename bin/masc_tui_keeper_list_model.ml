@@ -600,10 +600,21 @@ let order_rows ~view ~sort ~now ~outside rows =
   |> List.map (fun (ranked, _) -> ranked.row)
 
 type stop =
+  | Stop_world
   | Stop_heading of group
   | Stop_row of int
 
 type heading_focus = { heading : group; cursor_at : int }
+
+type focus = Focus_heading of heading_focus | Focus_world
+
+let has_world = function
+  | By_memory | By_age -> true
+  | Plain | By_state | By_cause | By_time | By_runtime | Day_wall -> false
+
+let keeper_position = function
+  | Some (Stop_row position) -> Some position
+  | Some (Stop_world | Stop_heading _) | None -> None
 
 type group_direction = Previous_group | Next_group
 
@@ -611,7 +622,7 @@ type fold_change = Fold | Unfold
 
 (* [groups] holds the group of each ordered row, and the rows of one group
    are next to each other, so a heading opens each run. *)
-let stops ~folded groups =
+let stops ~view ~folded groups =
   let rec walk previous position acc = function
     | [] -> List.rev acc
     | None :: rest -> walk None (position + 1) (Stop_row position :: acc) rest
@@ -620,24 +631,27 @@ let stops ~folded groups =
         let acc = if List.mem group folded then acc else Stop_row position :: acc in
         walk current (position + 1) acc rest
   in
-  walk None 0 [] groups
+  let rows = walk None 0 [] groups in
+  if has_world view then Stop_world :: rows else rows
 
-let current_stop ~folded ~focus ~cursor groups =
-  match groups with
-  | [] -> None
+let current_stop ~view ~folded ~focus ~cursor groups =
+  if has_world view && focus = Some Focus_world then Some Stop_world
+  else match groups with
+  | [] -> if has_world view then Some Stop_world else None
   | _ :: _ ->
       let position = max 0 (min cursor (List.length groups - 1)) in
       (match List.nth groups position, focus with
-       | Some group, Some { heading; cursor_at }
+       | Some group, Some (Focus_heading { heading; cursor_at })
          when cursor_at = cursor && group = heading -> Some (Stop_heading heading)
-       | Some group, (Some _ | None) when List.mem group folded -> Some (Stop_heading group)
-       | (Some _ | None), (Some _ | None) -> Some (Stop_row position))
+       | Some group, (Some (Focus_heading _ | Focus_world) | None) when List.mem group folded -> Some (Stop_heading group)
+       | (Some _ | None), (Some (Focus_heading _ | Focus_world) | None) -> Some (Stop_row position))
 
-let placement groups = function
+let placement ~view groups = function
+  | Stop_world -> if has_world view then Some (Some Focus_world, 0) else None
   | Stop_row position -> Some (None, position)
   | Stop_heading heading ->
       Option.map
-        (fun first -> Some { heading; cursor_at = first }, first)
+        (fun first -> Some (Focus_heading { heading; cursor_at = first }), first)
         (List.find_index (( = ) (Some heading)) groups)
 
 let step_stop ~delta stops current =
@@ -645,7 +659,7 @@ let step_stop ~delta stops current =
     List.nth_opt stops (max 0 (min (List.length stops - 1) (index + delta))))
 
 let group_jump direction stops current =
-  let is_heading = function Stop_heading _ -> true | Stop_row _ -> false in
+  let is_heading = function Stop_heading _ -> true | Stop_world | Stop_row _ -> false in
   Option.bind (List.find_index (( = ) current) stops) (fun index ->
     List.find_opt is_heading
       (match direction with

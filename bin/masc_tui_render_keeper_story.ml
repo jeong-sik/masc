@@ -33,7 +33,10 @@ let tab ~current page =
 (* Every tab when the title has room for them beside its lead, the current one
    alone when it has not. *)
 let title ~inner ~lead ~current =
-  let all = String.concat " " (List.map (tab ~current) Story.pages) in
+  let tabs = match current with
+    | Story.World -> [Story.World]
+    | Story.Story | Story.Schedule | Story.Memory -> Story.pages in
+  let all = String.concat " " (List.map (tab ~current) tabs) in
   let tabs =
     if Message_layout.display_width lead + 1 + Message_layout.display_width all <= inner
     then all

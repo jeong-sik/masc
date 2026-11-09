@@ -1,0 +1,35 @@
+ KEEPERS 36    cause  time  memory  age │  runtime  24h                                                      13:30:33
+ ! 2 failing ▫▫  ✓ 20 recovered ▪▪▪▪▪▪▪▪▪▪▪▪▪▪▪▪▪▪▪▪  ○ 14 paused ··············
+    fleet fail/30m max 20            ▂▃▅▄▂▃▂▂▂▂▂▂▆▅▃·█▁▃▁▁▃·· ┃              ┃ █▆·▂···▂·▃·▁·▂▁▁▃·▁······ max 8
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+    keeper                           ◂ turns 12h          30m ┃ librarian    ┃ lag · unread turns ▹      digest    gap
+▌ ■ world · shared                   ledger + briefing        ┃ ◌ building   ┃ ███············465 absent 10m       465
+▌ − gap · requests skip atoms                                 ┃ 17           ┃ Σ lag 1572                          20k
+▌ ● keeper-08-alphax                 ···················▁▁▄▁▁ ┃  pending     ┃ █████████████████████████ 2d       4.2k
+▌ ● keeper-02-alp                    ▁▄▁▁▁▁▁▁▁▄▁▁▁▄··▄▁▁▁▁▁▁▁ ┃  pending     ┃ █████████████············ 79m      3.7k
+▌ ● k29-ag                           ▁▁▁▁▁▁▁▁▁··▁▁█··█·▄▁▁▁▁· ┃  pending     ┃ ███████████·············· 17h      2.5k
+▌ ● keeper-23-al                     ··▄▁▁▁▁▁▁···▄▁█·█▁▁▁▁▁▁· ┃  pending     ┃ ███████·················· 27h      1.6k
+▌ ● keeper-22-alpha                  ███████████████·█▁▄▄▁▁▁▁ ┃  pending     ┃ █························ 33h      1.3k
+▌ ● keeper-21-alpha-brav             ▁▁█████▁▁▁▁▁███·█▁▁·▁▄▁· ┃  pending     ┃ ███████████████████······ 2d       1.1k
+▌ ○ keeper-15-alp                    ························ ┃  pending     ┃ █████████················ 36h      1.1k
+▌ ● keeper-34-a                      ··█····▁▁▁▁▁▁█··▄▁▁·▁▄·· ┃  pending     ┃ ████████████············· 37h       870
+▌ ● keeper-32                        ··█····█····█···█···▁▁▁· ┃  pending     ┃ ████████████············· 32h       740
+▌ ● keeper-35-alpha                  ▁▁·█··▁▁▁▁▁▁█···▄▁▁·▁▄▁· ┃  pending     ┃ ████████████████········· 41h       738
+▌ ● keeper-16-alpha-bravo-charli     ▁▁█···▁·▁▁▁▁█···█▁▁·▁▁▁· ┃  pending     ┃ ██████████··············· 37h       582
+▌ ● keeper-07-alpha-bra              ▁·▁█··█·▁▁▁▁█···▄▁·▁··▁· ┃  pending     ┃ ████····················· 20h       506
+┌─ world · shared workspace memory ──────────────────────────────────────────────────────────────────────────────────┐
+│ ◂ keepers       2031 facts (+49 source-bound) · 37 keepers · newest 79m · re-observed 0 of 2031                    │
+│   ↓ ledger      1613 facts → 1400 claims · 3 conflicts · 10 excluded · saved 13:26 (4m)                            │
+│   ↓ absent      465 keeper facts are absent from the ledger (23%) · 30h–4d old, none newer                         │
+│ ● now           building 0/1395 · from scratch · ledger 1403 · published 13:20                                     │
+│ ▹ next          no time announced · rebuilds when the source set or contract changes                               │
+│   server says   stored_bindings_not_revalidated · individual_store_snapshots                                       │
+│                 ledger semantic_verification: not_performed                                                        │
+│ ✗ stale events  164 source invalidations · source_changed 43 · source_unavailable 121                              │
+│   last 20 days  ··▁·▁▁····▅▁█▂▁▁▆▁▃▁ oldest ◂ today                                                                │
+│   older than 20 days: 87 · stale = the source file changed or vanished                                             │
+│                                                                                                                    │
+│                                                                                                                    │
+│                                                                                                                    │
+└────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+ ↑↓ move  ⏎ feed  s schedules  m memory  esc close  o lens  n color  t theme  f/r sim  x reset

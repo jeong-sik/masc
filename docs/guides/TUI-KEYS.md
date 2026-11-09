@@ -83,9 +83,9 @@ The command palette is `:`.
 | `o` | cycle priority / recent / oldest / activity / name |
 | `J` | open the selected Keeper's schedules |
 | `K` | browse Keeper-origin requests queued for the selected Keeper |
-| `Enter` | open the Story window below the list for the Keeper under the cursor; on its story page it closes the window |
+| `Enter` | open the selected Keeper Story or shared World window; Enter closes its story/world page |
 | `Right` | keeper detail |
-| `Tab / s / m` | with the Story window open: next page / schedules / memory; Esc closes it |
+| `Tab / s / m` | with a Keeper Story open: next page / schedules / memory; World keeps its own page; Esc closes either window |
 | `c` | chat with the keeper |
 | `l` | logs |
 | `t` | tool calls |

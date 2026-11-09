@@ -254,6 +254,7 @@ val order_rows :
     position there. *)
 
 type stop =
+  | Stop_world
   | Stop_heading of group
   | Stop_row of int
 
@@ -262,23 +263,29 @@ type heading_focus = { heading : group; cursor_at : int }
     The cursor rests on the group's first row, so a cursor moved by any
     other path leaves the heading. *)
 
+type focus = Focus_heading of heading_focus | Focus_world
+
+val has_world : view -> bool
+val keeper_position : stop option -> int option
+(** Only a real Keeper stop has an actionable row position. *)
+
 type group_direction = Previous_group | Next_group
 type fold_change = Fold | Unfold
 
-val stops : folded:group list -> group option list -> stop list
+val stops : view:view -> folded:group list -> group option list -> stop list
 (** The stops in drawing order: a heading for each group, then its rows
     unless the group is [folded]. A row of a view that does not group is a
-    stop of its own. *)
+    stop of its own. Memory and age views begin with [Stop_world]. *)
 
 val current_stop :
-  folded:group list -> focus:heading_focus option -> cursor:int -> group option list ->
+  view:view -> folded:group list -> focus:focus option -> cursor:int -> group option list ->
   stop option
 (** The stop the cursor is on: the focused heading while the cursor still
     rests where the focus placed it inside that group; else the row at
     [cursor], clamped to the list, or its group's heading when that group is
-    folded. [None] for an empty list. *)
+    folded. An empty memory/age view still selects [Stop_world]. *)
 
-val placement : group option list -> stop -> (heading_focus option * int) option
+val placement : view:view -> group option list -> stop -> (focus option * int) option
 (** The focus and row cursor a stop is placed with. A heading rests the
     cursor on its group's first row; [None] for a heading no row is under. *)
 

@@ -7,6 +7,8 @@ type 'client sealed = 'client Runtime_official_account.t
 type 'client authorized = 'client Runtime_official_account.t
 
 let seal account = account
+let home sealed = Runtime_official_account.home sealed
+let same left right = Runtime_official_account.same left right
 let account authorized = authorized
 
 type t =

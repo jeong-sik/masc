@@ -79,7 +79,24 @@ is not a full raw-event export.
 
 ## Remaining product integration
 
-Issue [#25338](https://github.com/jeong-sik/masc/issues/25338) also tracks the actual
-Dashboard consumer and broader execution-history coverage. Source and regression
-scenarios do not establish that the candidate was executed, installed or shown
-in a browser. The direct-operation endpoints do not index unbound calls.
+The conversation view offers a **Core 실행 이력** card for a message with an
+explicit operation delivery identity. It reads the endpoints above, pages one
+fixed Core prefix, and uses canonical node/parent IDs for the tree. A Keeper,
+operation or credential change drops the previous observation and cancels its
+request through body consumption. Missing or damaged evidence is displayed as
+an error.
+
+The separate conversation/tool observations remain available. A delivery key
+does not identify the historical runtime driver; neither an empty native call
+list nor the Keeper's current runtime proves an official-client-only execution.
+Core evidence does not replace the valid observations of official clients or
+mixed-runtime failover. These surfaces are selected independently; a Core error
+does not activate a fallback.
+
+Issue [#25338](https://github.com/jeong-sik/masc/issues/25338) continues to track
+the full history transition, historical driver provenance, unbound calls and
+aggregate consumers. The direct-operation endpoints do not index unbound calls.
+Source checks and the synthetic browser fixture do not prove installed-server
+or completed-call process-restart behavior. That boundary has a regression
+scenario in `test_keeper_ingress_native_restart.ml`; its execution result must
+be reported separately.

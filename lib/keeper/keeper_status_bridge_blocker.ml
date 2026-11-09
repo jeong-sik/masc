@@ -182,7 +182,6 @@ let runtime_blocker_surface_of_failure_reason
        Keeper_provider_runtime_boundary.classify_provider_runtime_error_record
          ?agent_core_timeout
          ~code
-         ~detail
          ()
      with
      | Keeper_provider_runtime_boundary.Provider_timeout { source; phase } ->

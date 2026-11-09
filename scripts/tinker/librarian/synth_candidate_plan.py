@@ -16,7 +16,7 @@ it wrote new facts at a median of 489 chars and paraphrases at 717, because
 a paraphrase follows its target (correlation 0.50). The live candidates do
 not differ that way: already_represented 679, incorporated 741, not_durable
 738. So a written candidate counts only when its length stays within
-CANDIDATE_LENGTH_BAND of its plan, and a correction or a paraphrase targets
+CANDIDATE_LENGTH_BAND of its plan, and a correction, a complement or a paraphrase targets
 a fact that can be restated at its planned length.
 
 Pure code: no I/O, no clock, no global random state.
@@ -119,7 +119,7 @@ def length_holds(claim: str, planned: int) -> bool:
 
 
 def target_near(rng: random.Random, facts: list[S.MemoryFact], planned: int) -> S.MemoryFact:
-    """A fact to correct or restate in about `planned` chars: one whose own length fits the band, else the nearest."""
+    """A fact to correct, complement or restate in about `planned` chars: one whose own length fits the band, else the nearest."""
     near = [f for f in facts if length_holds(f.claim, planned)]
     if near:
         return rng.choice(near)

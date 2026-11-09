@@ -8,6 +8,8 @@ including the date, time and number each claim must carry.
 
 from __future__ import annotations
 
+from typing import Literal
+
 import synth_spec as S
 
 STYLE =("한국어로 쓰고 기술 용어, 서비스 이름, 식별자, 명령은 영어 그대로 둡니다. "
@@ -97,11 +99,52 @@ TASK_CORRECTION = """제안 내용: 아래 현재 기억 하나를 바로잡는 
 바로잡을 현재 기억:
 {target}"""
 
+TASK_COMPLEMENT = """제안 내용: 아래 현재 기억과 같은 대상에 함께 적용되는 조건, 예외, 근거 하나를 이번 턴에 새로 관측한 것.
+현재 기억은 그대로 유효합니다. 그 내용을 바꾸거나 부정하지 않고, 다시 쓰지도 않습니다. 어느 대상에 더하는 내용인지 알 수 있게 씁니다.
+현재 기억의 날짜나 번호는 옮기지 않고, 아래 표기만 따릅니다.
+
+현재 기억:
+{target}"""
+
 TASK_PARAPHRASE = """제안 내용: 아래 현재 기억과 같은 지식을 이번 턴에 다시 관측한 것. 같은 내용을 다른 문장으로 쓰고, 새 조건, 예외, 결정은 더하지 않습니다.
 현재 기억의 날짜나 번호는 옮기지 않고, 아래 표기만 따릅니다.
 
 현재 기억:
 {target}"""
+
+type TargetedKind = Literal[S.CandidateKind.CORRECTION, S.CandidateKind.COMPLEMENT, S.CandidateKind.PARAPHRASE]
+
+
+def targeted_task(kind: TargetedKind, target: str) -> str:
+    """The task text of a candidate written against the current fact `target`."""
+    match kind:
+        case S.CandidateKind.CORRECTION:
+            return TASK_CORRECTION.format(target=target)
+        case S.CandidateKind.COMPLEMENT:
+            return TASK_COMPLEMENT.format(target=target)
+        case S.CandidateKind.PARAPHRASE:
+            return TASK_PARAPHRASE.format(target=target)
+
+
+DUPLICATE_PROMPT = """아래 Keeper의 장기 기억에 같은 지식이 다른 문장으로 한 번 더 들어간 기억 하나를 만드세요. 다른 날 같은 지식을 다시 기록한 것입니다.
+
+Keeper 역할 자료:
+{role}
+
+Keeper가 일하는 환경:
+{world}
+
+카테고리 `{category}`의 현재 기억:
+{target}
+
+같은 지식을 다른 문장으로 씁니다. 조건, 예외, 결정은 그대로 두고 새로 더하지 않습니다.
+현재 기억의 날짜나 번호는 옮기지 않고, 아래 표기만 따릅니다.
+
+길이는 대략 {length}자입니다.
+{surface}
+{marks}
+{style}
+출력 모양: {{"claim": "..."}}"""
 
 TASK_TRANSIENT = """제안 내용: 이번 턴의 일시적 상태 하나. 예: 특정 PR이나 CI 실행의 현재 상태, 기다리는 작업, 큐에 쌓인 개수, 다음 깨움 시각, 이번 턴의 진행 상황, 인사.
 지속되는 교훈이나 규칙은 넣지 않습니다. 카테고리 `{category}` 주제와 관련된 상태로 씁니다."""

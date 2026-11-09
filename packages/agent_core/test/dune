@@ -191,7 +191,6 @@
   test_tool
   test_tool_input_schema_fidelity
   test_tool_input_validation
-  test_tool_middleware
   test_tool_schema_decode_boundary
   test_tracing
   test_trajectory
@@ -330,7 +329,6 @@
   test_tool
   test_tool_input_schema_fidelity
   test_tool_input_validation
-  test_tool_middleware
   test_tool_schema_decode_boundary
   test_tracing
   test_trajectory

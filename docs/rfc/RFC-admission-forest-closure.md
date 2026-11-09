@@ -90,6 +90,16 @@ archive sweep은 closure manifest가 가리키는 marker를 보호한다. closur
 끝난 뒤의 archive 정책은 기존 sweep을 따른다. live backlog의 임의 삭제,
 나이 기준 삭제, 검사 생략 옵션과 수동 bulk cleanup은 추가하지 않는다.
 
+마지막 anchor의 record 이동과 body 제거 사이에 중단되면, 다른 기존 settle과
+같이 참조 없는 anchor body가 남을 수 있다. 이 제안은 archive 전체를 다시
+검색하거나 그 body를 추정 삭제하지 않는다. 이후 실행을 막거나 원래 후보를
+재실행시키지는 않지만, startup의 body inventory에는 비용이 남을 수 있다.
+member의 큰 execution body는 anchor를 닫기 전에 모두 제거·동기화한다.
+
+기존 active part/execution 형식은 바꾸지 않아 별도 hard cut이 필요하지 않다.
+다만 live closure를 모르는 구버전은 그 scope의 검사에서 멈춘다. 부분 이동
+중인 상태를 구버전으로 복구할 수 있다고 주장하지 않는다.
+
 ## 검증과 비교
 
 모델 없는 fixture에서 전체 커밋, subset만 커밋, ACK 미완료, 새 tail,

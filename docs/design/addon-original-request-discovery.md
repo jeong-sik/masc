@@ -53,12 +53,13 @@ filesystem mutation, not a live process/worker restart or a domain commit.
 
 `Lane_addon_tool_request_owner.settle` moves one original out of the scope that
 discovery reads, into `tool-request-owners-settled/<scope digest>/<YYYY-MM-DD>/`,
-its record under `records/` and its body under `bodies/`. It first reads the
+its record under `records/`, then removes its live body. It keeps no body in
+the archive. It first reads the
 record the scope holds now, and moves nothing and returns `Settle_changed` when
 that record differs from the one the caller read. The read and the move each
 take the scope serializer, so the caller's lease and serialization keep the
 record from changing between them, as for `advance`. The record moves first
-and then its body, the reverse of publication: a settle that stops between the
+and then removes its body, the reverse of publication: a settle that stops between the
 two leaves a body no record names, as an interrupted retain does, never a
 record without its body. A file already in the archive counts as moved, so the
 store's settle call run again completes the move; a file in neither place is

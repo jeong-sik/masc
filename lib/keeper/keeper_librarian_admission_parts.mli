@@ -3,7 +3,9 @@
     serializes the complete operation. All Store work is blocking; offload the
     whole scope in Eio. These ports never call a provider, save Memory or ACK
     queue candidates. Historical captures remain readable after an explicitly
-    qualified terminal frontier is replaced; only the active frontier runs. *)
+    qualified terminal frontier is replaced, until the whole forest closes
+    after complete committed-receipt and queue-ACK proof; only the active
+    frontier runs. *)
 type part
 type inventory
 type size_evidence

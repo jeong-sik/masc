@@ -529,16 +529,17 @@ let test_header_preserves_every_group_count_on_large_rosters () =
             true
             (width <= cells);
           List.iter
-            (fun token ->
+            (fun (short_tok, long_tok) ->
               Alcotest.(check bool)
-                (Printf.sprintf "total=%d cells=%d preserves group count %s in %S" total cells token plain)
+                (Printf.sprintf "total=%d cells=%d preserves group count %s in %S" total cells short_tok plain)
                 true
-                (contains_substring ~needle:token plain))
-            [ Printf.sprintf "!%d" n_fail
-            ; Printf.sprintf "✓%d" n_rec
-            ; Printf.sprintf "●%d" n_ok
-            ; Printf.sprintf "○%d" n_paused
-            ; Printf.sprintf "?%d" n_unknown
+                (contains_substring ~needle:short_tok plain
+                 || contains_substring ~needle:long_tok plain))
+            [ Printf.sprintf "!%d" n_fail, Printf.sprintf "! %d " n_fail
+            ; Printf.sprintf "✓%d" n_rec, Printf.sprintf "✓ %d " n_rec
+            ; Printf.sprintf "●%d" n_ok, Printf.sprintf "● %d " n_ok
+            ; Printf.sprintf "○%d" n_paused, Printf.sprintf "○ %d " n_paused
+            ; Printf.sprintf "?%d" n_unknown, Printf.sprintf "? %d " n_unknown
             ];
           Alcotest.(check bool)
             (Printf.sprintf "total=%d cells=%d preserves bold mark for selected tail keeper" total cells)
@@ -563,16 +564,17 @@ let test_header_preserves_every_group_count_on_large_rosters () =
             true
             (width_age <= cells);
           List.iter
-            (fun token ->
+            (fun (short_tok, long_tok) ->
               Alcotest.(check bool)
-                (Printf.sprintf "By_age total=%d cells=%d preserves group count %s in %S" total cells token plain_age)
+                (Printf.sprintf "By_age total=%d cells=%d preserves group count %s in %S" total cells short_tok plain_age)
                 true
-                (contains_substring ~needle:token plain_age))
-            [ Printf.sprintf "█%d" n_fail
-            ; Printf.sprintf "▆%d" n_rec
-            ; Printf.sprintf "▃%d" n_ok
-            ; Printf.sprintf "▁%d" n_paused
-            ; Printf.sprintf "?%d" n_unknown
+                (contains_substring ~needle:short_tok plain_age
+                 || contains_substring ~needle:long_tok plain_age))
+            [ Printf.sprintf "█%d" n_fail, Printf.sprintf "█ %d " n_fail
+            ; Printf.sprintf "▆%d" n_rec, Printf.sprintf "▆ %d " n_rec
+            ; Printf.sprintf "▃%d" n_ok, Printf.sprintf "▃ %d " n_ok
+            ; Printf.sprintf "▁%d" n_paused, Printf.sprintf "▁ %d " n_paused
+            ; Printf.sprintf "?%d" n_unknown, Printf.sprintf "? %d " n_unknown
             ])
         [ 78; 80; 118; 120 ])
     [ 40; 100; 300 ]

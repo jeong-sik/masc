@@ -1136,30 +1136,6 @@ let graph_json config ?(kinds = []) ?(limit = 500)
   build_graph_json ~events ~events_store_total ~limit ~timeline_limit ~kinds ()
 ;;
 
-type default_projections = {
-  events_default : Yojson.Safe.t;
-  graph_default : Yojson.Safe.t;
-}
-
-let default_projections config : default_projections =
-  let events_1000, total, latest_store_seq, latest_matching_seq =
-    list_events_with_meta config ~kinds:[] ~after_seq:0 ~limit:1000 ()
-  in
-  let events_default =
-    build_json_response config ~events:events_1000 ~total_matching:total
-      ~latest_store_seq ~latest_matching_seq ~after_seq:0 ~limit:1000 ~kinds:[]
-  in
-  let count_1000 = List.length events_1000 in
-  let events_500 =
-    if count_1000 > 500 then List.drop (count_1000 - 500) events_1000 else events_1000
-  in
-  let graph_default =
-    build_graph_json ~events:events_500 ~events_store_total:total ~limit:500
-      ~timeline_limit:80 ~kinds:[] ()
-  in
-  { events_default; graph_default }
-;;
-
 module For_testing = struct
   let reset_current_day_cache_for_testing = reset_current_day_cache_for_testing
   let reset_past_day_cache_for_testing = reset_past_day_cache_for_testing

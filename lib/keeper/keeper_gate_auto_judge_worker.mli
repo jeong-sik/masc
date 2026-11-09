@@ -3,7 +3,6 @@
     retry chain for one entry, and the drain of one owner and of a workspace.
     [Keeper_gate] includes this module. *)
 
-open Keeper_gate_types
 open Keeper_gate_auto_judge_queue
 
 type hitl_worker_spawner =

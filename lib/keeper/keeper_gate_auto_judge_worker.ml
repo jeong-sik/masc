@@ -1,4 +1,3 @@
-open Keeper_gate_types
 open Keeper_gate_auto_judge_queue
 
 let log_auto_resolution_error ~keeper_name ~approval_id reason =

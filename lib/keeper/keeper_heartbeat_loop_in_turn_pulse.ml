@@ -5,7 +5,6 @@
     a bounded interval while a keeper turn is executing, so operators
     see continued presence and the registry can detect stuck turns. *)
 
-open Keeper_types
 open Keeper_meta_contract
 open Keeper_types_profile
 

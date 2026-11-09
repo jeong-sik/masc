@@ -5,11 +5,8 @@
 
    Extracted from keeper_keepalive.ml. *)
 
-open Keeper_types
 open Keeper_meta_contract
-open Keeper_meta_store
 open Keeper_types_profile
-open Keeper_memory
 open Keeper_keepalive_signal
 module Cycle = Keeper_heartbeat_loop_cycle
 

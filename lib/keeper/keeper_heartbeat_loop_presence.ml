@@ -6,11 +6,8 @@
     [sync_keeper_presence] step that publishes the heartbeat into the
     registry. *)
 
-open Keeper_types
 open Keeper_meta_contract
 open Keeper_types_profile
-open Keeper_memory
-open Keeper_keepalive_signal
 
 let effective_keepalive_meta
       ~base_path

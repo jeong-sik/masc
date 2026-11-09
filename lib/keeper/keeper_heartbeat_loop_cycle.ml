@@ -28,7 +28,6 @@
     Keeper_metrics, Keeper_registry) or other siblings
     ([Keeper_heartbeat_loop_in_turn_pulse], [Observations]). *)
 
-open Keeper_types
 open Keeper_meta_contract
 open Keeper_meta_store
 open Keeper_types_profile

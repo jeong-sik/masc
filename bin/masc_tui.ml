@@ -42830,7 +42830,13 @@ let run_with_eio_context f =
               ~cwd_default:(Eio.Stdenv.cwd env)
               ~proc_mgr:(Eio.Stdenv.process_mgr env)
               ~clock:(Eio.Stdenv.clock env);
-            let cpu_pool=Domain_pool.create ~sw (Eio.Stdenv.domain_mgr env) in
+            (* One background worker keeps response decoding and local reads
+               off the UI domain. HTTP requests already have their own domain.
+               The server's core-sized default adds idle domains to every
+               stop-the-world collection while the chat allocates scroll rows;
+               the client has no Keeper actors to distribute over that pool. *)
+            let cpu_pool=Domain_pool.create ~sw ~domain_count:1
+                (Eio.Stdenv.domain_mgr env) in
             Domain_pool_ref.set cpu_pool;
             Eio_context.set_env env;
             Eio_context.set_switch sw;

@@ -9,8 +9,6 @@ type run_result =
   ; elapsed : float
   }
 
-let agent_name agent = (Agent.state agent).config.name
-
 let run_agent ~sw ?clock ?harness agent prompt =
   let t0 = Unix.gettimeofday () in
   let response =
@@ -28,15 +26,4 @@ let run_agent ~sw ?clock ?harness agent prompt =
       Some (Harness.Behavioral.evaluate obs expectation)
   in
   { response; trace_ref; harness_verdict; elapsed }
-;;
-
-let run_agents ~sw ?clock ?max_fibers agents =
-  let run_one (agent, prompt) =
-    let name = agent_name agent in
-    let result = run_agent ~sw ?clock agent prompt in
-    name, result
-  in
-  match max_fibers with
-  | Some n -> Eio.Fiber.List.map ~max_fibers:n run_one agents
-  | None -> Eio.Fiber.List.map run_one agents
 ;;

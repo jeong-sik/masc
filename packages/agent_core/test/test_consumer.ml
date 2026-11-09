@@ -129,32 +129,6 @@ let test_run_agent_harness_fails () =
   | Exit -> ()
 ;;
 
-(* ── run_agents tests ──────────────────────────────────────────── *)
-
-let test_run_agents_multiple () =
-  Eio_main.run
-  @@ fun env ->
-  let clock = Eio.Stdenv.clock env in
-  try
-    Eio.Switch.run
-    @@ fun sw ->
-    let url1 = start_mock ~sw ~net:env#net ~clock "res-1" in
-    let url2 = start_mock ~sw ~net:env#net ~clock "res-2" in
-    let a1 = make_agent ~net:env#net url1 "multi-1" in
-    let a2 = make_agent ~net:env#net url2 "multi-2" in
-    let results = Consumer.run_agents ~sw ~clock ~max_fibers:2 [ a1, "go"; a2, "go" ] in
-    check int "2 results" 2 (List.length results);
-    List.iter
-      (fun (name, r) ->
-         match r.Consumer.response with
-         | Ok _ -> ()
-         | Error e -> fail (Printf.sprintf "%s: %s" name (Error.to_string e)))
-      results;
-    Eio.Switch.fail sw Exit
-  with
-  | Exit -> ()
-;;
-
 (* ── Test suite ───────────────────────────────────────────────── *)
 
 let () =
@@ -165,6 +139,5 @@ let () =
         ; test_case "with_harness" `Quick test_run_agent_with_harness
         ; test_case "harness_fails" `Quick test_run_agent_harness_fails
         ] )
-    ; "run_agents", [ test_case "multiple" `Quick test_run_agents_multiple ]
     ]
 ;;

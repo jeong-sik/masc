@@ -15,7 +15,9 @@ type t = private {
       then holds the defaults, with the last conversation unread rather
       than none. *)
   keeper_list_sort : string option;
-  keeper_list_layout : string option;
+  keeper_list_view : string option;
+  keeper_list_density : string option;
+      (** [view] and [density] of [tui-keepers.toml] (RFC-0515 §2.6). *)
   keeper_list_error : string option;
 }
 
@@ -49,14 +51,17 @@ val prepare_startup_read :
     outcomes, not defaults. *)
 
 val set_keeper_list_sort : base_path:string -> string -> (unit, string) result
-val set_keeper_list_layout : base_path:string -> string -> (unit, string) result
-(** Update one preference in the resolved config directory's
-    [tui-keepers.toml], under its own read-modify-write lock. A held lock is
+val set_keeper_list_view :
+  base_path:string -> view:string -> density:string -> (unit, string) result
+(** Update the order, or the view with its density, in the resolved config
+    directory's [tui-keepers.toml], under one read-modify-write lock. A held lock is
     reported without waiting. Symbolic links and special files are refused.
     An error can mean a post-rename durability failure, so the stored value is
     unconfirmed. *)
 
-type keeper_preference = Keeper_order of string | Keeper_view of string
+type keeper_preference =
+  | Keeper_order of string
+  | Keeper_view of { view : string; density : string }
 type keeper_preference_outcome =
   | Preference_saved
   | Preference_unconfirmed of string

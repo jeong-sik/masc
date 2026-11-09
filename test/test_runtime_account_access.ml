@@ -57,6 +57,11 @@ let test_published_once () =
           (fun (label, request) ->
             match Access.authorize request sealed with
             | Error Access.Not_published -> ()
+            | Error refusal ->
+              Alcotest.failf
+                "a %s was refused for another reason: %s"
+                label
+                (Access.refusal_to_string refusal)
             | Ok (_ : Account.claude_code Access.authorized) ->
               Alcotest.failf "a %s was authorized before the publication" label)
           requests;

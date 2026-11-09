@@ -41,6 +41,8 @@ and their actual renderings have been verified.
 
 ## 2026-11-09: simplify every operator surface
 
+Tracked in [#50676](https://github.com/jeong-sik/masc/issues/50676).
+
 The current request covers all six entry points and all 23 surfaces in
 [the screen map](SCREENS.md), including their child readings and input overlays.
 It does not stop at the Task list. The operator asked for ordinary words and

@@ -989,8 +989,9 @@ let surface_strip (state : state) ~cols =
   let lo, hi =
     if window_width 0 (n - 1) <= budget then (0, n - 1)
     else begin
-      (* Markers for hidden entries cost room; reserve it up front. *)
-      let budget = max 8 (budget - 10) in
+      (* The active-only window has the largest hidden-entry markers. Any
+         expansion can only reduce their cost; never borrow badge cells. *)
+      let budget = max 0 (budget - active_hidden_cells) in
       let lo = ref active and hi = ref active in
       let grew = ref true in
       while !grew do

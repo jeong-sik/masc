@@ -99,7 +99,6 @@ let claude_config ~base_dir ~turn_timeout_s ~system_prompt ~override_s ~output_s
   : Runtime_claude_code.config
   =
   { cli_path = execution.cli_path
-  ; account_home = Runtime_official_account.Captured execution.account_home
   ; cwd = base_dir
   ; model = execution.model
   ; native = Runtime_native_tools.claude_code_default
@@ -744,6 +743,16 @@ let run_with_images ?(on_usage = fun _ -> ()) ~images ~base_dir ~(runtime : Runt
           on_usage usage;
           Error (Vibe_failure (Vibe_not_answered error))))
   | Runtime_execution.Claude_code execution ->
+    (* HIGH-RISK-UNREVIEWED: a panelist is a call of the operator, not a
+       Keeper turn, so its CLI starts only where the access allows one (plan
+       D2-5). A refusal starts no process and observes nothing of the
+       candidate. *)
+    (match
+       Runtime_account_access.authorize Runtime_account_access.Operator_call
+         (Runtime_account_access.seal execution.account_home)
+     with
+     | Error refusal -> Error (Setup_failure (Runtime_account_access.refusal_to_string refusal))
+     | Ok account ->
     let config =
       claude_config ~base_dir ~turn_timeout_s:runtime.model.turn_timeout_s
         ~system_prompt ~override_s:timeout_s
@@ -759,6 +768,7 @@ let run_with_images ?(on_usage = fun _ -> ()) ~images ~base_dir ~(runtime : Runt
          ~mgr
          ~clock
          ~cwd
+         ~account
          probe_config
      with
      | Error error -> claude_failed ~admission:true error
@@ -785,12 +795,13 @@ let run_with_images ?(on_usage = fun _ -> ()) ~images ~base_dir ~(runtime : Runt
             ~mgr
             ~clock
             ~cwd
+            ~account
             config
             ~prompt
             ~images
         with
         | Ok (result : Runtime_claude_code.turn_result) -> succeeded { text = result.text; model = result.model; usage = optional_usage claude_usage result.usage.turn_total }
-        | Error error -> claude_failed ~admission:false error))
+        | Error error -> claude_failed ~admission:false error)))
   | Runtime_execution.Codex_app_server execution ->
     let config =
       codex_config ~runtime ~system_prompt ~override_s:timeout_s ~output_schema execution

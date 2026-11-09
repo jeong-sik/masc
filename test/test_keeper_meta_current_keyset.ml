@@ -2,6 +2,25 @@
 
 open Masc
 
+let target_keys =
+  [ "instructions"
+  ; "last_runtime_attempt"
+  ; "current_task_id"
+  ; "keeper_id"
+  ; "agent_core_env"
+  ; "schema"
+  ]
+
+let test_current_fields_include_runtime_keys () =
+  let current = Keeper_meta_json.current_field_names in
+  List.iter
+    (fun key ->
+      Alcotest.(check bool)
+        (Printf.sprintf "current_field_names contains %s" key)
+        true
+        (List.mem key current))
+    target_keys
+
 let valid_json () =
   let meta =
     Masc_test_deps.meta_of_json_fixture
@@ -44,6 +63,10 @@ let () =
     "keeper_meta_current_keyset"
     [ ( "drift_gate"
       , [ Alcotest.test_case
+            "runtime keys present"
+            `Quick
+            test_current_fields_include_runtime_keys
+        ; Alcotest.test_case
             "unknown field is rejected"
             `Quick
             test_unknown_field_is_rejected

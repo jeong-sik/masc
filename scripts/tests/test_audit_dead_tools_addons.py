@@ -200,6 +200,48 @@ class Classification(unittest.TestCase):
         self.assertNotIn("admit_memory", unused_names)
 
 
+class WindowBoundary(unittest.TestCase):
+    """#50544: a row after the window end must not qualify a source to judge zero.
+
+    This regression already happened once: a branch built from a file fetched
+    before #50544 landed silently dropped the guard, and nothing in this file
+    noticed. Pin it here so a stale base cannot pass again.
+    """
+
+    def test_row_after_window_end_does_not_qualify_zero(self):
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            ledger_dir = root / "ledger"
+            (ledger_dir / "2026-11").mkdir(parents=True)
+            end = 1_800_000_000.0
+            start = end - 7 * 86400
+            path = ledger_dir / "2026-11" / "09.jsonl"
+            with path.open("w", encoding="utf-8") as handle:
+                # Five calls, all after the reported window's end.
+                for _ in range(5):
+                    handle.write(json.dumps({"ts": end + 86400, "tool": "tool_read_file"}) + "\n")
+
+            source = AUDIT.load_ledger(ledger_dir, start, end)
+        self.assertEqual(source.rows, 0)
+        self.assertIsNone(source.newest_ts)
+        self.assertFalse(AUDIT.can_judge_zero(source, start))
+
+    def test_row_inside_window_still_qualifies_zero(self):
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            ledger_dir = root / "ledger"
+            (ledger_dir / "2026-11").mkdir(parents=True)
+            end = 1_800_000_000.0
+            start = end - 7 * 86400
+            (ledger_dir / "2026-11" / "09.jsonl").write_text(
+                json.dumps({"ts": end - 3600, "tool": "tool_read_file"}) + "\n",
+                encoding="utf-8",
+            )
+            source = AUDIT.load_ledger(ledger_dir, start, end)
+        self.assertEqual(source.rows, 1)
+        self.assertTrue(AUDIT.can_judge_zero(source, start))
+
+
 class Rendering(unittest.TestCase):
     """An addon error must reach the markdown report, not only the JSON."""
 

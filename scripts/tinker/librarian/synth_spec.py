@@ -72,10 +72,12 @@ GOAL_WEIGHTS: tuple[tuple[GoalShape, float], ...] = (
 # an oversized part, #49910, and is left out).
 CANDIDATES_PER_REQUEST_WEIGHTS = ((1, 0.6), (2, 0.25), (3, 0.15))
 STALE_FACTS_PER_MEMORY_WEIGHTS = ((0, 0.3), (1, 0.4), (2, 0.3))
-# Share of a split's memories that hold one planted duplicate pair. The live answers of the
-# 99 E-real records absorb into a kept current claim on 5 records and into a candidate's new
-# claim on 27 (30 records absorb). With this share and the COMPLEMENT weight below, 0.31 of
-# planned requests expect an absorb (15,000 planned requests on 4,000 memories).
+# Share of a split's memories that hold one planted duplicate pair. In expectation 0.16 of
+# planned requests merge a pair (it needs a supporting candidate) and 0.195 hold a COMPLEMENT,
+# so 0.32 expect an absorb. Of the 99 live E-real records, 30 absorb: 5 into a kept current
+# claim and 27 into a candidate's new claim. Pairs are planted more often than live so E-synth
+# holds enough to measure. Complements match live per candidate (below), and are fewer per
+# request because a planned request carries 1.55 candidates on average and these records 2.35.
 DUPLICATE_PAIR_SHARE = 0.2
 
 
@@ -133,8 +135,8 @@ class CandidateKind(Enum):
 # incorporated candidate's final claim does: 81 add a claim, 31 absorb current facts (2 of
 # them also supersede one), 9 only supersede. CORRECTION keeps 0.15, above the live 9 of 233,
 # so E-synth holds enough corrections to measure; NEW_DURABLE takes the rest of incorporated.
-# Kinds are drawn per candidate, so 0.19 of planned requests have only transient candidates;
-# 11 of the 99 live records judge every candidate not_durable or deferred.
+# Kinds are drawn per candidate, so in expectation 0.20 of planned requests have only transient
+# candidates; 11 of the 99 live records judge every candidate not_durable or deferred.
 CANDIDATE_KIND_WEIGHTS: tuple[tuple[CandidateKind, float], ...] = (
     (CandidateKind.NEW_DURABLE, 0.236),
     (CandidateKind.CORRECTION, 0.15),

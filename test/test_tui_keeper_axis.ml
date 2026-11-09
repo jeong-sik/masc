@@ -470,7 +470,7 @@ let contains_substring ~needle haystack =
 
 let test_header_preserves_every_group_count_on_large_rosters () =
   let slot_start = Keeper_turn_pulse.slot_start reading_now in
-  let recent_recovery : Keeper_turn_pulse.t =
+  let recent_recovery : Keeper_turn_pulse.pulse =
     { known_since = reading_now -. (24. *. hour)
     ; slots = [ { starts_at = slot_start; tally = { ok = 1; rested = 0; failed = 1 } } ]
     }

@@ -29472,6 +29472,7 @@ let main
       ~local_base_path:base_path ~preference_send ~preference_read:read_settings ~port ()
   in
   state.observation_store <- Result.to_option observation_store;
+  state.keeper_outside_reading <- Masc_tui_keeper_axis.outside;
   state.view <- Overview;
 
   (* Bind the bearer to the workspace actually opened, before any request is

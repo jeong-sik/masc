@@ -744,24 +744,25 @@ type keeper_display_entry =
   | Keeper_group_heading of Keeper_list_model.group * int
   | Keeper_display_row of int * Keeper_list_model.row
 
-(* [rows] come ordered by group, so a heading opens each run of rows that
+(* The rows come ordered by group, so a heading opens each run of rows that
    share one. *)
-let keeper_display_entries rows view =
+let keeper_display_entries (reading : Masc_tui_types.keeper_list_reading) =
   let rec runs acc = function
     | [] -> List.rev acc
-    | (position, row) :: rest ->
-        (match Keeper_list_model.group_of_view view row with
-         | None -> runs (Keeper_display_row (position, row) :: acc) rest
-         | Some group ->
-             let same (_, other) = Keeper_list_model.group_of_view view other = Some group in
-             let members = (position, row) :: List.take_while same rest in
-             let rest = List.drop_while same rest in
-             let entries =
-               List.rev_map (fun (position, row) -> Keeper_display_row (position, row)) members
-             in
-             runs (entries @ (Keeper_group_heading (group, List.length members) :: acc)) rest)
+    | (position, None, row) :: rest -> runs (Keeper_display_row (position, row) :: acc) rest
+    | (position, (Some group as heading), row) :: rest ->
+        let same (_, other, _) = other = heading in
+        let members = (position, heading, row) :: List.take_while same rest in
+        let rest = List.drop_while same rest in
+        let entries =
+          List.rev_map (fun (position, _, row) -> Keeper_display_row (position, row)) members
+        in
+        runs (entries @ (Keeper_group_heading (group, List.length members) :: acc)) rest
   in
-  runs [] (List.mapi (fun position (row : Keeper_list_model.row) -> position, row) rows)
+  runs []
+    (List.mapi
+       (fun position ((row : Keeper_list_model.row), group) -> position, group, row)
+       (List.combine reading.klr_rows reading.klr_groups))
 
 let keeper_state_heading_style = function
   | Keeper_list_model.Attention -> Theme.bad ()
@@ -776,6 +777,22 @@ let keeper_group_heading_style = function
   | Keeper_list_model.Group_cause (Keeper_list_model.Cause_named _ | Keeper_list_model.Cause_unnamed) ->
       Theme.warn ()
   | Keeper_list_model.Group_cause Keeper_list_model.Not_failing -> Theme.recede ()
+  | Keeper_list_model.Group_due (Keeper_list_model.Due_late | Keeper_list_model.Due_held) ->
+      Theme.warn ()
+  | Keeper_list_model.Group_due
+      ( Keeper_list_model.Due_within_hour | Keeper_list_model.Due_within_half_day
+      | Keeper_list_model.Due_later ) -> Theme.info ()
+  | Keeper_list_model.Group_due (Keeper_list_model.Due_none | Keeper_list_model.Due_unknown) ->
+      Theme.recede ()
+  | Keeper_list_model.Group_memory Keeper_list_model.Memory_refused -> Theme.bad ()
+  | Keeper_list_model.Group_memory (Keeper_list_model.Memory_gap | Keeper_list_model.Memory_lagging) ->
+      Theme.warn ()
+  | Keeper_list_model.Group_memory Keeper_list_model.Memory_following -> Theme.ok ()
+  | Keeper_list_model.Group_memory Keeper_list_model.Memory_unread -> Theme.recede ()
+  | Keeper_list_model.Group_age
+      ( Keeper_list_model.Age_within_3h | Keeper_list_model.Age_within_day
+      | Keeper_list_model.Age_within_3d | Keeper_list_model.Age_older ) -> Theme.info ()
+  | Keeper_list_model.Group_age Keeper_list_model.Age_unknown -> Theme.recede ()
   | Keeper_list_model.Group_runtime (Keeper_list_model.Runtime_named _) -> Theme.info ()
   | Keeper_list_model.Group_runtime Keeper_list_model.Runtime_unread -> Theme.warn ()
 
@@ -810,6 +827,40 @@ let keeper_group_heading_text ~available_cells rows group count =
       Printf.sprintf "%s FAILING · CAUSE NOT RECORDED %d" failing_glyph count
   | Keeper_list_model.Group_cause Keeper_list_model.Not_failing ->
       Printf.sprintf "NOT FAILING %d" count
+  | Keeper_list_model.Group_due due ->
+      let label =
+        match due with
+        | Keeper_list_model.Due_late -> "LATE"
+        | Keeper_list_model.Due_held -> "HELD"
+        | Keeper_list_model.Due_within_hour -> "WITHIN 1H"
+        | Keeper_list_model.Due_within_half_day -> "WITHIN 12H"
+        | Keeper_list_model.Due_later -> "LATER"
+        | Keeper_list_model.Due_none -> "NO SCHEDULE"
+        | Keeper_list_model.Due_unknown -> "SCHEDULE UNKNOWN"
+      in
+      Printf.sprintf "%s %s %d"
+        (Masc_tui_keeper_mark.badge_glyph Keeper_list_model.Badge_schedule)
+        label count
+  | Keeper_list_model.Group_memory follow ->
+      let label =
+        match follow with
+        | Keeper_list_model.Memory_refused -> "MEMORY REFUSED"
+        | Keeper_list_model.Memory_gap -> "MEMORY GAP"
+        | Keeper_list_model.Memory_lagging -> "MEMORY LAGGING"
+        | Keeper_list_model.Memory_following -> "MEMORY FOLLOWING"
+        | Keeper_list_model.Memory_unread -> "NO MEMORY READING"
+      in
+      Printf.sprintf "%s %d" label count
+  | Keeper_list_model.Group_age age ->
+      let label =
+        match age with
+        | Keeper_list_model.Age_within_3h -> "UPDATED WITHIN 3H"
+        | Keeper_list_model.Age_within_day -> "UPDATED WITHIN 24H"
+        | Keeper_list_model.Age_within_3d -> "UPDATED WITHIN 3D"
+        | Keeper_list_model.Age_older -> "UPDATED EARLIER"
+        | Keeper_list_model.Age_unknown -> "UPDATE TIME UNKNOWN"
+      in
+      Printf.sprintf "%s %d" label count
   | Keeper_list_model.Group_runtime (Keeper_list_model.Runtime_named runtime_id) ->
       Printf.sprintf "%s %d" (Terminal_text.single_line runtime_id) count
   | Keeper_list_model.Group_runtime Keeper_list_model.Runtime_unread ->
@@ -892,7 +943,8 @@ let keeper_view_summary ~cells rows view density sort =
   let texts =
     (* A grouping view counts its rows in the headings. *)
     match view with
-    | Keeper_list_model.By_state | Keeper_list_model.By_cause | Keeper_list_model.By_runtime ->
+    | Keeper_list_model.By_state | Keeper_list_model.By_cause | Keeper_list_model.By_time
+    | Keeper_list_model.By_memory | Keeper_list_model.By_age | Keeper_list_model.By_runtime ->
         [ mode ]
     | Keeper_list_model.Plain | Keeper_list_model.Day_wall ->
         let counts : Keeper_list_model.group_counts = Keeper_list_model.group_counts rows in
@@ -918,7 +970,8 @@ let render_keeper_list (state : state) =
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   let buf = Buffer.create 4096 in
   let inner = max 1 (framed_inner_width cols) in
-  let model_rows = keeper_list_rows state in
+  let list_reading = keeper_list_reading state in
+  let model_rows = list_reading.klr_rows in
   (* Selection already follows this ordered model in list mode. Reuse it in
      this synchronous draw rather than rebuilding it through selected_keeper. *)
   let selected_reading =
@@ -1206,7 +1259,7 @@ let render_keeper_list (state : state) =
     | Keeper_list_model.Two_lines -> 2
     | Keeper_list_model.One_line -> 1
   in
-  let entries = keeper_display_entries model_rows state.keeper_list_view in
+  let entries = keeper_display_entries list_reading in
   let portrait_candidate =
     match state.keeper_list_density, selected_reading with
     | Keeper_list_model.Two_lines, Some reading -> (

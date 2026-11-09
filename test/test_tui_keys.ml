@@ -863,6 +863,8 @@ let test_keeper_list_cycles_preserve_selected_name () =
   state.view <- Keepers Keeper_list;
   state.keepers <- List.map roster_keeper ["alpha"; "beta"; "gamma"];
   state.keeper_list_sort <- Masc_tui_keeper_list_model.Name;
+  state.keeper_list_view <- Masc_tui_keeper_list_model.Plain;
+  state.keeper_list_density <- Masc_tui_keeper_list_model.One_line;
   state.keeper_cursor <- 1;
   Alcotest.(check (option string)) "initial selection" (Some "beta") (selected_roster_name state);
   cycle_keeper_list_view state;

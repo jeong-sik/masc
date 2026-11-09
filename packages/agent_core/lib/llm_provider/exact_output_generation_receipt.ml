@@ -119,10 +119,6 @@ let provider_trace receipt =
   | Not_started_state | Before_dispatch_state | Dispatch_started_state -> None
 ;;
 
-let responses_lifecycle receipt =
-  Option.bind (provider_trace receipt) Trace.responses_lifecycle
-;;
-
 let plan_fingerprint (receipt : t) = receipt.plan_fingerprint
 let request_body_sha256 (receipt : t) = receipt.request_body_sha256
 let catalog_generation (receipt : t) = receipt.catalog_generation

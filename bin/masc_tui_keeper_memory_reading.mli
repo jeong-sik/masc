@@ -37,3 +37,8 @@ val index_of_snapshot : Masc.Tui_decode_memory_health.memory_health_snapshot opt
 val find : index -> keeper_name:string -> t
 
 val cells : now:float -> t -> Masc_tui_keeper_axis_cell.t list
+
+val lag_cell : t -> Masc_tui_keeper_axis_cell.t option
+(** The lag cell of {!cells}. A reading with no row has no lag, so it gives the
+    cell that stands for the whole reading in {!cells}, or [None] for a
+    snapshot with no row for the Keeper. *)

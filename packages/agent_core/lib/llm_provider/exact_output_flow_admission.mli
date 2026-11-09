@@ -73,9 +73,6 @@ type 'callback_error outcome =
 
 val operation_id_to_string : measurement_operation_id -> string
 val receipt_snapshot : measurement_receipt -> receipt_snapshot
-val receipt_request_body_sha256 : receipt_snapshot -> string
-val receipt_phase : receipt_snapshot -> measurement_receipt_phase
-val receipt_outcome : receipt_snapshot -> measurement_outcome option
 
 val admit
   :  admission_config:Provider_config.t

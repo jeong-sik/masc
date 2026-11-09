@@ -69,7 +69,6 @@ type execute_once_error_with_evidence =
 
 val receipt_phase : one_dispatch_receipt -> effect_phase
 val receipt_http_status : one_dispatch_receipt -> int option
-val receipt_request_body_sha256 : one_dispatch_receipt -> string
 
 val execute_once_with_evidence
   :  net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t

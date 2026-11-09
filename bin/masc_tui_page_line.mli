@@ -4,9 +4,10 @@
 
 (** [Quiet] is background the reader may skip, [Plain] is the default,
     [Info] is something live or just done that the reader may want to follow,
-    [Attention] is what the reader has to know before acting on the page, and
-    [Failure] is something that broke and has to be fixed. *)
-type tone = Quiet | Plain | Info | Attention | Failure
+    [Success] is a check that passed and says so, [Attention] is what the
+    reader has to know before acting on the page, and [Failure] is something
+    that broke and has to be fixed. *)
+type tone = Quiet | Plain | Info | Success | Attention | Failure
 
 type t =
   | Title of string
@@ -20,9 +21,10 @@ val fact : ?tone:tone -> string -> string -> t
 val note : ?tone:tone -> string -> t
 
 val items : ?tone:tone -> string -> string list -> t
-(** [items label values]: a list whose order matters, one numbered row per value
-    under the label. A list that can be empty is a fact with a word for none
-    when it is. *)
+(** [items label values]: one numbered row per value under the label, so a long
+    list can be counted and a row can be named by its number. A list with no
+    values draws nothing. A list that has a word for none is a fact when it is
+    empty. *)
 
 val text : t -> string
 (** The line as plain text. A fact reads [label: value] and a list reads the

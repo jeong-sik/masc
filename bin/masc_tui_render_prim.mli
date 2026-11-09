@@ -710,8 +710,9 @@ val config_metadata_summary :
   Masc_tui_types.state -> (Masc_tui_runtime_config_view.tone * string) list
 
 val runtime_config_status_lines :
-  Masc_tui_types.state ->
-  cols:int -> (Masc_tui_runtime_config_view.tone * string) list
+  Masc_tui_types.state -> cols:int -> (string * string) list
+(** The runtime configuration's status page as styled rows, drawn as headed
+    blocks of reading lines. *)
 
 val help_masthead : Masc_tui_types.state -> string list
 

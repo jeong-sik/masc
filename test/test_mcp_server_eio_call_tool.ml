@@ -988,7 +988,7 @@ let with_runtime_mcp_board_call
       Masc.Board_dispatch.reset_for_test ();
       Masc.Board.reset_global_for_test ()) @@ fun () ->
     (match Masc.Board_dispatch.init_jsonl ~base_path
-        ~recipient_lookup:Recipient_lookup.none_declared () with
+        ~recipient_lookup:Masc_board_handlers.Recipient_lookup.none_declared () with
      | Ok () -> () | Error detail -> fail detail);
     ignore (Masc.Keeper_registry.register_offline ~base_path keeper_name meta);
     Masc.Keeper_registry.mark_turn_started

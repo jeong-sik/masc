@@ -241,7 +241,8 @@ let test_native_terminal_evidence_precedes_scope_failure () =
   ignore (Runtime.Execution.prepare execution ~source ~target |> require "prepare");
   Runtime.Execution.observe execution ~target { call with output_fingerprint = Some "invalid" };
   let decide = Masc.Keeper_agent_run.For_testing.tool_boundary_state
-      ~repetition_execution:(Some execution) in
+      ~repetition_execution:(Some execution)
+      ~chat_handoff:(fun () -> fail "terminal/scope failure must precede chat handoff") in
   let completed = Masc.Keeper_tools_agent_core.Terminal_effect_completed
       (Masc.Keeper_tool_execution.Surface_post_completed
          Masc.Keeper_surface_post.To_dashboard) in

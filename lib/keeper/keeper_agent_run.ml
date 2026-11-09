@@ -50,14 +50,21 @@ type raw_trace_sink_outcome =
   | Sink_ready of Agent_core.Raw_trace.t
   | Sink_degraded of Agent_core.Error.t
 
-(** Official tools stop the host loop only on an explicit terminal effect,
-    which the host derives itself. Repetition observation failures stop the
-    turn here; receipts alone never do. *)
-let official_client_tool_boundary ~repetition_execution ~tool_name:_ =
+(** The host's explicit terminal effect takes priority. Otherwise a settled
+    tool can hand an autonomous slot to ready chat; repetition observation
+    failures remain errors and receipts alone never request a handoff. *)
+let official_client_tool_boundary ~repetition_execution ~chat_handoff ~tool_name =
   match Option.bind repetition_execution Keeper_repetition_scope.Execution.failure with
   | Some error ->
     Error (Agent_core.Error.Internal (Keeper_repetition_snapshot.error_to_string error))
-  | None -> Ok None
+  | None ->
+    Result.map
+      (fun ready ->
+         if ready then
+           Some (Keeper_official_client_host.Terminal_tool_boundary
+             { tool_name; outcome = Durable_stimulus_deferred })
+         else None)
+      (chat_handoff ())
 ;;
 
 let keeper_raw_trace_sink
@@ -336,7 +343,7 @@ let terminal_effect_failure_error error terminal_effect_state =
   | Agent_core.Error.Orchestration _ | Agent_core.Error.Media _ -> error
 ;;
 
-let tool_boundary_state ~repetition_execution state =
+let tool_boundary_state ~repetition_execution ~chat_handoff state =
   match terminal_effect_boundary_decision state with
   | Error _ as error -> error
   | Ok (Runtime_agent.Yield _ as decision) -> Ok decision
@@ -344,7 +351,11 @@ let tool_boundary_state ~repetition_execution state =
     match Option.bind repetition_execution Keeper_repetition_scope.Execution.failure with
     | Some error ->
       Error (Agent_core.Error.Internal (Keeper_repetition_snapshot.error_to_string error))
-    | None -> Ok Runtime_agent.Continue
+    | None ->
+      Result.map
+        (fun ready -> if ready then Runtime_agent.Yield Runtime_agent.Durable_stimulus_waiting
+          else Runtime_agent.Continue)
+        (chat_handoff ())
 ;;
 
 let finalize_turn_surface ~response_text ~stop_reason terminal_effect_state =
@@ -1303,8 +1314,28 @@ let run_turn
           how the error path below knows the turn ran on an official client. *)
        let last_dispatched_checkpoint_owner = ref None in
        let turn_result =
+         let chat_handoff () =
+           match turn_kind, Keeper_turn_preview_owner.current () with
+           | Turn_record.Direct, _ | Turn_record.Autonomous, None -> Ok false
+           | Turn_record.Autonomous, Some _ ->
+             let ready =
+               match Keeper_owner_registry.get ~base_path:config.base_path ~keeper_name:meta.name with
+               | Error error -> Error (Keeper_owner_registry.lookup_error_to_string error)
+               | Ok owner ->
+                 Keeper_owner.autonomous_chat_handoff_ready owner
+                 |> Result.map_error Keeper_owner.error_to_string
+             in
+             (match ready with
+              | Error detail -> Error (Agent_core.Error.Internal
+                  ("autonomous chat handoff unavailable: " ^ detail))
+              | Ok false -> Ok false
+              | Ok true ->
+                Log.Keeper.info ~keeper_name:meta.name
+                  "turn checkpoint: handing the autonomous slot to ready queued chat";
+                Ok true)
+         in
          let on_official_client_tool_boundary ~tool_name =
-           official_client_tool_boundary ~repetition_execution ~tool_name
+           official_client_tool_boundary ~repetition_execution ~chat_handoff ~tool_name
          in
          let cooperative_yield_probe =
            Some
@@ -1316,6 +1347,7 @@ let run_turn
                      neither state can re-enter the provider loop. *)
                   tool_boundary_state
                     ~repetition_execution
+                    ~chat_handoff
                     (s.terminal_effect_state ())
                 with
                 | Eio.Cancel.Cancelled _ as exn -> raise exn

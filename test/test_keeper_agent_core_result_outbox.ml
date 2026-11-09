@@ -147,7 +147,9 @@ streaming = false
       ?cooperative_yield_probe:probe
       ~raw_trace:None ~walk_owner:Keeper_turn_driver.One_shot_walk ~sw ~net:env#net () in
   let result = run ?probe:(match scenario with Deferred ->
-      Some (fun _ -> Ok (Runtime_agent.Yield Runtime_agent.Durable_stimulus_waiting))
+      Some (fun _ -> Keeper_agent_run.For_testing.tool_boundary_state
+        ~repetition_execution:None ~chat_handoff:(fun () -> Ok true)
+        Keeper_tools_agent_core.Terminal_effect_open)
     | Completed | Projection_failed | Provider_failed | Rejected | Save_failed
     | Stale_save | Noop_sink | No_sink | Review -> None) () in
   (match scenario with

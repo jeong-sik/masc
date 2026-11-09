@@ -1,12 +1,4 @@
-(** Tool_shard_types — pure Keeper schema families and enum-string mirrors. *)
-
-val memory_search_source_enum_strings : string list
-(** Hand-mirrored from [Keeper_tool_memory_runtime.valid_memory_search_source_strings]
-    (#8484). *)
-
-val fs_write_mode_enum_strings : string list
-(** Hand-mirrored from [Keeper_tool_filesystem_runtime.valid_fs_write_mode_strings]
-    (#8490). *)
+(** Tool_shard_types — pure Keeper schema families. *)
 
 val base_tools : Masc_domain.tool_schema list
 (** Pure: base tool schemas (always-on tools every keeper sees). *)

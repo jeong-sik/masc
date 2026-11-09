@@ -1,0 +1,4221 @@
+{
+  "reviewed_at": "2026-11-09T07:40:30.622243+00:00",
+  "scope": "Fixed 50-run paired-bae cohort; observational comparison of the two retained native binaries",
+  "expected_runs": 50,
+  "observed_runs": 50,
+  "issues": [],
+  "expected_binary_sha256": {
+    "before": "ebcbe53ff38f8a60ce456bd20d8f05a9542f8deb7fa450400475505078fdb93b",
+    "after": "85c7d5bc40b0b99de9bfd9492604f0c3b4176d7cd4f53d85a34d4bd5a1924139"
+  },
+  "expected_probe_sha256": "b43594f33f14edbe18d07eb98fac62e8a99c3803f74b0a04fd215ed0e0d30efd",
+  "expected_history_sha256": "b1d4d6fa6c3ffc1a1ee129bd2057d57f0460ee5ccc30b138e2dcaca7b584703b",
+  "after_native_receipt": {
+    "file": "native-bae45a3e/receipt.json",
+    "sha256": "2bee1bc40b92e0fbfba8a16ecba229f8dadab85c77f6f26367c02d7c80d63949",
+    "source_sha": "bae45a3e0e70de9c238e2a16410ccf15d295a4be",
+    "workflow_sha": "e04036c538bf1fabff497d5f0358fab012379719",
+    "binary_sha256": "85c7d5bc40b0b99de9bfd9492604f0c3b4176d7cd4f53d85a34d4bd5a1924139"
+  },
+  "order_sha256": "a0026b4465daf9b74aa8f6bf8e1f0558e5bbe26e569919d375755beb5472fa3a",
+  "groups": [
+    {
+      "condition": "typing",
+      "pairs": [
+        {
+          "pair": 0,
+          "execution_order": [
+            "before",
+            "after"
+          ],
+          "before_p95_ms": 2.554332953877747,
+          "after_p95_ms": 7.387334015220404,
+          "paired_p95_delta_ms": 4.833001061342657,
+          "paired_p95_ratio": 2.8920795168874327,
+          "p95_lower_after": false,
+          "before_cpu_lifecycle_seconds": 0.703399,
+          "after_cpu_lifecycle_seconds": 0.6018159999999999,
+          "paired_cpu_ratio": 0.8555826778258142,
+          "before_load1": 239.02587890625,
+          "after_load1": 247.76220703125,
+          "before_type_gap_median_ms": 54.24116610083729,
+          "after_type_gap_median_ms": 54.229166940785944,
+          "before_scroll_hz": null,
+          "after_scroll_hz": null
+        },
+        {
+          "pair": 1,
+          "execution_order": [
+            "after",
+            "before"
+          ],
+          "before_p95_ms": 17.871999996714294,
+          "after_p95_ms": 16.060875030234456,
+          "paired_p95_delta_ms": -1.811124966479838,
+          "paired_p95_ratio": 0.8986613156438671,
+          "p95_lower_after": true,
+          "before_cpu_lifecycle_seconds": 0.615327999999999,
+          "after_cpu_lifecycle_seconds": 0.5124800000000009,
+          "paired_cpu_ratio": 0.8328566228093014,
+          "before_load1": 262.83251953125,
+          "after_load1": 259.771484375,
+          "before_type_gap_median_ms": 54.64016692712903,
+          "after_type_gap_median_ms": 53.92850004136562,
+          "before_scroll_hz": null,
+          "after_scroll_hz": null
+        },
+        {
+          "pair": 2,
+          "execution_order": [
+            "before",
+            "after"
+          ],
+          "before_p95_ms": 15.16683294903487,
+          "after_p95_ms": 3.5148749593645334,
+          "paired_p95_delta_ms": -11.651957989670336,
+          "paired_p95_ratio": 0.23174745651749265,
+          "p95_lower_after": true,
+          "before_cpu_lifecycle_seconds": 0.6208929999999997,
+          "after_cpu_lifecycle_seconds": 0.5426839999999995,
+          "paired_cpu_ratio": 0.8740378777019547,
+          "before_load1": 265.0673828125,
+          "after_load1": 266.2626953125,
+          "before_type_gap_median_ms": 54.82537508942187,
+          "after_type_gap_median_ms": 54.436458041891456,
+          "before_scroll_hz": null,
+          "after_scroll_hz": null
+        },
+        {
+          "pair": 3,
+          "execution_order": [
+            "after",
+            "before"
+          ],
+          "before_p95_ms": 11.912332964129746,
+          "after_p95_ms": 12.282416922971606,
+          "paired_p95_delta_ms": 0.3700839588418603,
+          "paired_p95_ratio": 1.0310672947067758,
+          "p95_lower_after": false,
+          "before_cpu_lifecycle_seconds": 0.5900840000000027,
+          "after_cpu_lifecycle_seconds": 0.5134919999999985,
+          "paired_cpu_ratio": 0.870201530629531,
+          "before_load1": 294.615234375,
+          "after_load1": 292.92822265625,
+          "before_type_gap_median_ms": 54.14245801512152,
+          "after_type_gap_median_ms": 53.93695808015764,
+          "before_scroll_hz": null,
+          "after_scroll_hz": null
+        },
+        {
+          "pair": 4,
+          "execution_order": [
+            "before",
+            "after"
+          ],
+          "before_p95_ms": 8.265041979029775,
+          "after_p95_ms": 10.154000017791986,
+          "paired_p95_delta_ms": 1.8889580387622118,
+          "paired_p95_ratio": 1.2285479061757838,
+          "p95_lower_after": false,
+          "before_cpu_lifecycle_seconds": 0.5638050000000021,
+          "after_cpu_lifecycle_seconds": 0.5384199999999986,
+          "paired_cpu_ratio": 0.9549755677938233,
+          "before_load1": 271.4580078125,
+          "after_load1": 272.4619140625,
+          "before_type_gap_median_ms": 54.74695796146989,
+          "after_type_gap_median_ms": 54.773458978161216,
+          "before_scroll_hz": null,
+          "after_scroll_hz": null
+        }
+      ],
+      "p95_lower_after_pairs": 2,
+      "before_run_p95_median_ms": 11.912332964129746,
+      "after_run_p95_median_ms": 10.154000017791986,
+      "paired_p95_delta_ms": {
+        "n": 5,
+        "min": -11.651957989670336,
+        "median": 0.3700839588418603,
+        "max": 4.833001061342657
+      },
+      "paired_p95_ratio": {
+        "n": 5,
+        "min": 0.23174745651749265,
+        "median": 1.0310672947067758,
+        "max": 2.8920795168874327
+      },
+      "paired_cpu_ratio": {
+        "n": 5,
+        "min": 0.8328566228093014,
+        "median": 0.870201530629531,
+        "max": 0.9549755677938233
+      },
+      "before_max_key_latency_ms": 31.607583980076015,
+      "after_max_key_latency_ms": 49.33362500742078
+    },
+    {
+      "condition": "pageup",
+      "pairs": [
+        {
+          "pair": 0,
+          "execution_order": [
+            "before",
+            "after"
+          ],
+          "before_p95_ms": 22.695707972161472,
+          "after_p95_ms": 9.932749904692173,
+          "paired_p95_delta_ms": -12.762958067469299,
+          "paired_p95_ratio": 0.437648824036495,
+          "p95_lower_after": true,
+          "before_cpu_lifecycle_seconds": 1.172856,
+          "after_cpu_lifecycle_seconds": 0.827505,
+          "paired_cpu_ratio": 0.7055469725183655,
+          "before_load1": 241.37451171875,
+          "after_load1": 231.65478515625,
+          "before_type_gap_median_ms": 54.423416033387184,
+          "after_type_gap_median_ms": 53.94020909443498,
+          "before_scroll_hz": 41.99238000136248,
+          "after_scroll_hz": 42.8021293470862
+        },
+        {
+          "pair": 1,
+          "execution_order": [
+            "after",
+            "before"
+          ],
+          "before_p95_ms": 18.31216597929597,
+          "after_p95_ms": 12.528000050224364,
+          "paired_p95_delta_ms": -5.784165929071605,
+          "paired_p95_ratio": 0.68413534829188,
+          "p95_lower_after": true,
+          "before_cpu_lifecycle_seconds": 1.0834939999999995,
+          "after_cpu_lifecycle_seconds": 0.8119379999999996,
+          "paired_cpu_ratio": 0.7493700934199912,
+          "before_load1": 244.2587890625,
+          "after_load1": 240.7998046875,
+          "before_type_gap_median_ms": 53.75391698908061,
+          "after_type_gap_median_ms": 54.2962501058355,
+          "before_scroll_hz": 41.25923379557335,
+          "after_scroll_hz": 42.30765436668423
+        },
+        {
+          "pair": 2,
+          "execution_order": [
+            "before",
+            "after"
+          ],
+          "before_p95_ms": 31.45866608247161,
+          "after_p95_ms": 17.026124987751245,
+          "paired_p95_delta_ms": -14.432541094720364,
+          "paired_p95_ratio": 0.5412220894273072,
+          "p95_lower_after": true,
+          "before_cpu_lifecycle_seconds": 0.9964679999999992,
+          "after_cpu_lifecycle_seconds": 0.8098850000000013,
+          "paired_cpu_ratio": 0.8127556529662788,
+          "before_load1": 272.5673828125,
+          "after_load1": 277.166015625,
+          "before_type_gap_median_ms": 54.04075002297759,
+          "after_type_gap_median_ms": 53.51070791948587,
+          "before_scroll_hz": 40.83238468183053,
+          "after_scroll_hz": 42.356573675231076
+        },
+        {
+          "pair": 3,
+          "execution_order": [
+            "after",
+            "before"
+          ],
+          "before_p95_ms": 14.092749916017056,
+          "after_p95_ms": 16.407166025601327,
+          "paired_p95_delta_ms": 2.314416109584272,
+          "paired_p95_ratio": 1.1642274306559455,
+          "p95_lower_after": false,
+          "before_cpu_lifecycle_seconds": 1.072893999999998,
+          "after_cpu_lifecycle_seconds": 0.7767049999999998,
+          "paired_cpu_ratio": 0.7239345172962112,
+          "before_load1": 293.44140625,
+          "after_load1": 295.20654296875,
+          "before_type_gap_median_ms": 54.710458032786846,
+          "after_type_gap_median_ms": 53.497917018830776,
+          "before_scroll_hz": 41.658854617652345,
+          "after_scroll_hz": 41.81256178570505
+        },
+        {
+          "pair": 4,
+          "execution_order": [
+            "before",
+            "after"
+          ],
+          "before_p95_ms": 16.94641704671085,
+          "after_p95_ms": 13.915957999415696,
+          "paired_p95_delta_ms": -3.030459047295153,
+          "paired_p95_ratio": 0.821174054731331,
+          "p95_lower_after": true,
+          "before_cpu_lifecycle_seconds": 1.3339450000000017,
+          "after_cpu_lifecycle_seconds": 0.8138240000000003,
+          "paired_cpu_ratio": 0.610088122073998,
+          "before_load1": 271.9296875,
+          "after_load1": 270.89404296875,
+          "before_type_gap_median_ms": 54.3402909534052,
+          "after_type_gap_median_ms": 54.23666606657207,
+          "before_scroll_hz": 42.29880791328001,
+          "after_scroll_hz": 42.15192504286913
+        }
+      ],
+      "p95_lower_after_pairs": 4,
+      "before_run_p95_median_ms": 18.31216597929597,
+      "after_run_p95_median_ms": 13.915957999415696,
+      "paired_p95_delta_ms": {
+        "n": 5,
+        "min": -14.432541094720364,
+        "median": -5.784165929071605,
+        "max": 2.314416109584272
+      },
+      "paired_p95_ratio": {
+        "n": 5,
+        "min": 0.437648824036495,
+        "median": 0.68413534829188,
+        "max": 1.1642274306559455
+      },
+      "paired_cpu_ratio": {
+        "n": 5,
+        "min": 0.610088122073998,
+        "median": 0.7239345172962112,
+        "max": 0.8127556529662788
+      },
+      "before_max_key_latency_ms": 61.257958062924445,
+      "after_max_key_latency_ms": 48.97150001488626
+    },
+    {
+      "condition": "pagedown",
+      "pairs": [
+        {
+          "pair": 0,
+          "execution_order": [
+            "before",
+            "after"
+          ],
+          "before_p95_ms": 24.76666704751551,
+          "after_p95_ms": 37.8217080142349,
+          "paired_p95_delta_ms": 13.055040966719389,
+          "paired_p95_ratio": 1.5271214306581078,
+          "p95_lower_after": false,
+          "before_cpu_lifecycle_seconds": 1.3080700000000003,
+          "after_cpu_lifecycle_seconds": 0.9956189999999996,
+          "paired_cpu_ratio": 0.7611358719334588,
+          "before_load1": 234.72509765625,
+          "after_load1": 231.5,
+          "before_type_gap_median_ms": 54.74954191595316,
+          "after_type_gap_median_ms": 54.263917030766606,
+          "before_scroll_hz": 41.22891790464336,
+          "after_scroll_hz": 41.42154424951911
+        },
+        {
+          "pair": 1,
+          "execution_order": [
+            "after",
+            "before"
+          ],
+          "before_p95_ms": 25.014499900862575,
+          "after_p95_ms": 26.580875040963292,
+          "paired_p95_delta_ms": 1.5663751401007175,
+          "paired_p95_ratio": 1.062618687013875,
+          "p95_lower_after": false,
+          "before_cpu_lifecycle_seconds": 1.389464999999999,
+          "after_cpu_lifecycle_seconds": 1.0563080000000014,
+          "paired_cpu_ratio": 0.7602264180817812,
+          "before_load1": 263.58447265625,
+          "after_load1": 258.0361328125,
+          "before_type_gap_median_ms": 53.67208400275558,
+          "after_type_gap_median_ms": 54.07787498552352,
+          "before_scroll_hz": 40.90872497963674,
+          "after_scroll_hz": 41.76622097457474
+        },
+        {
+          "pair": 2,
+          "execution_order": [
+            "before",
+            "after"
+          ],
+          "before_p95_ms": 7.83587503246963,
+          "after_p95_ms": 14.178541954606771,
+          "paired_p95_delta_ms": 6.342666922137141,
+          "paired_p95_ratio": 1.809439519626709,
+          "p95_lower_after": false,
+          "before_cpu_lifecycle_seconds": 1.3347100000000012,
+          "after_cpu_lifecycle_seconds": 1.0862339999999984,
+          "paired_cpu_ratio": 0.8138352151403656,
+          "before_load1": 259.62939453125,
+          "after_load1": 254.61376953125,
+          "before_type_gap_median_ms": 54.611042025499046,
+          "after_type_gap_median_ms": 54.06625010073185,
+          "before_scroll_hz": 41.39053415067389,
+          "after_scroll_hz": 41.72590692652076
+        },
+        {
+          "pair": 3,
+          "execution_order": [
+            "after",
+            "before"
+          ],
+          "before_p95_ms": 20.65595902968198,
+          "after_p95_ms": 8.225042023696005,
+          "paired_p95_delta_ms": -12.430917005985975,
+          "paired_p95_ratio": 0.3981922123236627,
+          "p95_lower_after": true,
+          "before_cpu_lifecycle_seconds": 1.4309790000000024,
+          "after_cpu_lifecycle_seconds": 1.0483049999999992,
+          "paired_cpu_ratio": 0.7325788848054355,
+          "before_load1": 302.82763671875,
+          "after_load1": 294.04638671875,
+          "before_type_gap_median_ms": 54.21141698025167,
+          "after_type_gap_median_ms": 53.34183294326067,
+          "before_scroll_hz": 40.677370236305,
+          "after_scroll_hz": 41.09589140723166
+        },
+        {
+          "pair": 4,
+          "execution_order": [
+            "before",
+            "after"
+          ],
+          "before_p95_ms": 29.082708992064,
+          "after_p95_ms": 19.432125031016767,
+          "paired_p95_delta_ms": -9.650583961047232,
+          "paired_p95_ratio": 0.6681676399650165,
+          "p95_lower_after": true,
+          "before_cpu_lifecycle_seconds": 1.3589689999999965,
+          "after_cpu_lifecycle_seconds": 1.0690990000000031,
+          "paired_cpu_ratio": 0.7866985928303043,
+          "before_load1": 272.18359375,
+          "after_load1": 279.20458984375,
+          "before_type_gap_median_ms": 54.50404097791761,
+          "after_type_gap_median_ms": 54.268207983113825,
+          "before_scroll_hz": 41.919807259586385,
+          "after_scroll_hz": 41.95764666224322
+        }
+      ],
+      "p95_lower_after_pairs": 2,
+      "before_run_p95_median_ms": 24.76666704751551,
+      "after_run_p95_median_ms": 19.432125031016767,
+      "paired_p95_delta_ms": {
+        "n": 5,
+        "min": -12.430917005985975,
+        "median": 1.5663751401007175,
+        "max": 13.055040966719389
+      },
+      "paired_p95_ratio": {
+        "n": 5,
+        "min": 0.3981922123236627,
+        "median": 1.062618687013875,
+        "max": 1.809439519626709
+      },
+      "paired_cpu_ratio": {
+        "n": 5,
+        "min": 0.7325788848054355,
+        "median": 0.7611358719334588,
+        "max": 0.8138352151403656
+      },
+      "before_max_key_latency_ms": 72.61370902415365,
+      "after_max_key_latency_ms": 75.69687499199063
+    },
+    {
+      "condition": "wheelup",
+      "pairs": [
+        {
+          "pair": 0,
+          "execution_order": [
+            "before",
+            "after"
+          ],
+          "before_p95_ms": 6.2285419553518295,
+          "after_p95_ms": 8.466957951895893,
+          "paired_p95_delta_ms": 2.238415996544063,
+          "paired_p95_ratio": 1.359380415607656,
+          "p95_lower_after": false,
+          "before_cpu_lifecycle_seconds": 0.8482480000000006,
+          "after_cpu_lifecycle_seconds": 0.7009219999999992,
+          "paired_cpu_ratio": 0.8263173034301274,
+          "before_load1": 228.39306640625,
+          "after_load1": 231.00390625,
+          "before_type_gap_median_ms": 53.8752080174163,
+          "after_type_gap_median_ms": 53.78099996596575,
+          "before_scroll_hz": 42.08936477442813,
+          "after_scroll_hz": 42.4734820224956
+        },
+        {
+          "pair": 1,
+          "execution_order": [
+            "after",
+            "before"
+          ],
+          "before_p95_ms": 53.18137491121888,
+          "after_p95_ms": 28.074000030755997,
+          "paired_p95_delta_ms": -25.107374880462885,
+          "paired_p95_ratio": 0.5278915800432539,
+          "p95_lower_after": true,
+          "before_cpu_lifecycle_seconds": 0.7910829999999995,
+          "after_cpu_lifecycle_seconds": 0.651999,
+          "paired_cpu_ratio": 0.8241853256864329,
+          "before_load1": 261.3369140625,
+          "after_load1": 263.89111328125,
+          "before_type_gap_median_ms": 54.33962494134903,
+          "after_type_gap_median_ms": 54.741333005949855,
+          "before_scroll_hz": 41.19606587507773,
+          "after_scroll_hz": 40.575131551044834
+        },
+        {
+          "pair": 2,
+          "execution_order": [
+            "before",
+            "after"
+          ],
+          "before_p95_ms": 7.334957947023213,
+          "after_p95_ms": 7.691084058023989,
+          "paired_p95_delta_ms": 0.3561261110007763,
+          "paired_p95_ratio": 1.0485518953991146,
+          "p95_lower_after": false,
+          "before_cpu_lifecycle_seconds": 0.765664000000001,
+          "after_cpu_lifecycle_seconds": 0.6805049999999992,
+          "paired_cpu_ratio": 0.8887775839010301,
+          "before_load1": 252.7958984375,
+          "after_load1": 257.8076171875,
+          "before_type_gap_median_ms": 54.387458018027246,
+          "after_type_gap_median_ms": 54.209584021009505,
+          "before_scroll_hz": 41.81771699733427,
+          "after_scroll_hz": 41.40725973450411
+        },
+        {
+          "pair": 3,
+          "execution_order": [
+            "after",
+            "before"
+          ],
+          "before_p95_ms": 14.127833070233464,
+          "after_p95_ms": 18.516083946451545,
+          "paired_p95_delta_ms": 4.3882508762180805,
+          "paired_p95_ratio": 1.3106103288737092,
+          "p95_lower_after": false,
+          "before_cpu_lifecycle_seconds": 0.7404209999999969,
+          "after_cpu_lifecycle_seconds": 0.6450950000000013,
+          "paired_cpu_ratio": 0.8712543269302249,
+          "before_load1": 291.4951171875,
+          "after_load1": 284.0390625,
+          "before_type_gap_median_ms": 53.62112505827099,
+          "after_type_gap_median_ms": 54.56158297602087,
+          "before_scroll_hz": 41.911791831026456,
+          "after_scroll_hz": 41.36857339428932
+        },
+        {
+          "pair": 4,
+          "execution_order": [
+            "before",
+            "after"
+          ],
+          "before_p95_ms": 17.03991601243615,
+          "after_p95_ms": 16.39695803169161,
+          "paired_p95_delta_ms": -0.6429579807445407,
+          "paired_p95_ratio": 0.9622675381571544,
+          "p95_lower_after": true,
+          "before_cpu_lifecycle_seconds": 0.8460049999999981,
+          "after_cpu_lifecycle_seconds": 0.6752050000000018,
+          "paired_cpu_ratio": 0.7981099402485841,
+          "before_load1": 278.8076171875,
+          "after_load1": 278.42236328125,
+          "before_type_gap_median_ms": 54.198291967622936,
+          "after_type_gap_median_ms": 54.19566703494638,
+          "before_scroll_hz": 41.18212018464231,
+          "after_scroll_hz": 41.530964983581214
+        }
+      ],
+      "p95_lower_after_pairs": 2,
+      "before_run_p95_median_ms": 14.127833070233464,
+      "after_run_p95_median_ms": 16.39695803169161,
+      "paired_p95_delta_ms": {
+        "n": 5,
+        "min": -25.107374880462885,
+        "median": 0.3561261110007763,
+        "max": 4.3882508762180805
+      },
+      "paired_p95_ratio": {
+        "n": 5,
+        "min": 0.5278915800432539,
+        "median": 1.0485518953991146,
+        "max": 1.359380415607656
+      },
+      "paired_cpu_ratio": {
+        "n": 5,
+        "min": 0.7981099402485841,
+        "median": 0.8263173034301274,
+        "max": 0.8887775839010301
+      },
+      "before_max_key_latency_ms": 121.33658397942781,
+      "after_max_key_latency_ms": 48.38749999180436
+    },
+    {
+      "condition": "wheeldown",
+      "pairs": [
+        {
+          "pair": 0,
+          "execution_order": [
+            "before",
+            "after"
+          ],
+          "before_p95_ms": 13.61316698603332,
+          "after_p95_ms": 7.032667053863406,
+          "paired_p95_delta_ms": -6.580499932169914,
+          "paired_p95_ratio": 0.5166077123037351,
+          "p95_lower_after": true,
+          "before_cpu_lifecycle_seconds": 0.7149860000000003,
+          "after_cpu_lifecycle_seconds": 0.6627120000000006,
+          "paired_cpu_ratio": 0.92688807892742,
+          "before_load1": 237.64990234375,
+          "after_load1": 241.56591796875,
+          "before_type_gap_median_ms": 54.28150005172938,
+          "after_type_gap_median_ms": 53.81033301819116,
+          "before_scroll_hz": 41.95939089363343,
+          "after_scroll_hz": 41.96306362896036
+        },
+        {
+          "pair": 1,
+          "execution_order": [
+            "after",
+            "before"
+          ],
+          "before_p95_ms": 5.43729099445045,
+          "after_p95_ms": 15.943082980811596,
+          "paired_p95_delta_ms": 10.505791986361146,
+          "paired_p95_ratio": 2.9321739441725376,
+          "p95_lower_after": false,
+          "before_cpu_lifecycle_seconds": 0.6768469999999995,
+          "after_cpu_lifecycle_seconds": 0.6041240000000005,
+          "paired_cpu_ratio": 0.8925562202388442,
+          "before_load1": 263.84326171875,
+          "after_load1": 267.39892578125,
+          "before_type_gap_median_ms": 54.057916975580156,
+          "after_type_gap_median_ms": 54.48512500151992,
+          "before_scroll_hz": 41.44117523547902,
+          "after_scroll_hz": 41.11481864879773
+        },
+        {
+          "pair": 2,
+          "execution_order": [
+            "before",
+            "after"
+          ],
+          "before_p95_ms": 6.195749971084297,
+          "after_p95_ms": 18.013499910011888,
+          "paired_p95_delta_ms": 11.81774993892759,
+          "paired_p95_ratio": 2.907396198052099,
+          "p95_lower_after": false,
+          "before_cpu_lifecycle_seconds": 0.767831000000001,
+          "after_cpu_lifecycle_seconds": 0.6135929999999998,
+          "paired_cpu_ratio": 0.7991250678860309,
+          "before_load1": 261.26611328125,
+          "after_load1": 263.00634765625,
+          "before_type_gap_median_ms": 54.12674997933209,
+          "after_type_gap_median_ms": 53.93274989910424,
+          "before_scroll_hz": 41.57849941124757,
+          "after_scroll_hz": 41.52320975129106
+        },
+        {
+          "pair": 3,
+          "execution_order": [
+            "after",
+            "before"
+          ],
+          "before_p95_ms": 25.29687504284084,
+          "after_p95_ms": 16.838334035128355,
+          "paired_p95_delta_ms": -8.458541007712483,
+          "paired_p95_ratio": 0.6656290157030167,
+          "p95_lower_after": true,
+          "before_cpu_lifecycle_seconds": 0.6974130000000018,
+          "after_cpu_lifecycle_seconds": 0.6632240000000005,
+          "paired_cpu_ratio": 0.9509773978976571,
+          "before_load1": 291.51123046875,
+          "after_load1": 289.29296875,
+          "before_type_gap_median_ms": 54.59016701206565,
+          "after_type_gap_median_ms": 54.15004107635468,
+          "before_scroll_hz": 41.509896542693276,
+          "after_scroll_hz": 42.11170509263539
+        },
+        {
+          "pair": 4,
+          "execution_order": [
+            "before",
+            "after"
+          ],
+          "before_p95_ms": 19.54758306965232,
+          "after_p95_ms": 26.32779104169458,
+          "paired_p95_delta_ms": 6.7802079720422626,
+          "paired_p95_ratio": 1.3468565882484242,
+          "p95_lower_after": false,
+          "before_cpu_lifecycle_seconds": 0.7211759999999998,
+          "after_cpu_lifecycle_seconds": 0.6684509999999975,
+          "paired_cpu_ratio": 0.9268902459316417,
+          "before_load1": 289.71875,
+          "after_load1": 279.33251953125,
+          "before_type_gap_median_ms": 54.990667034871876,
+          "after_type_gap_median_ms": 54.55391702707857,
+          "before_scroll_hz": 40.328417202727834,
+          "after_scroll_hz": 41.31593080918955
+        }
+      ],
+      "p95_lower_after_pairs": 2,
+      "before_run_p95_median_ms": 13.61316698603332,
+      "after_run_p95_median_ms": 16.838334035128355,
+      "paired_p95_delta_ms": {
+        "n": 5,
+        "min": -8.458541007712483,
+        "median": 6.7802079720422626,
+        "max": 11.81774993892759
+      },
+      "paired_p95_ratio": {
+        "n": 5,
+        "min": 0.5166077123037351,
+        "median": 1.3468565882484242,
+        "max": 2.9321739441725376
+      },
+      "paired_cpu_ratio": {
+        "n": 5,
+        "min": 0.7991250678860309,
+        "median": 0.92688807892742,
+        "max": 0.9509773978976571
+      },
+      "before_max_key_latency_ms": 47.24108404479921,
+      "after_max_key_latency_ms": 65.15433301683515
+    }
+  ],
+  "runs": [
+    {
+      "pair": 0,
+      "label": "before",
+      "condition": "typing",
+      "input_result": "paired-bae/pair-00-before-typing/typing/result.json",
+      "result_sha256": "2c23d8fffabbef6ca577ea7eba74b5b19990724e92db1e31382a8304fffed542",
+      "binary_sha256": "ebcbe53ff38f8a60ce456bd20d8f05a9542f8deb7fa450400475505078fdb93b",
+      "probe_sha256": "b43594f33f14edbe18d07eb98fac62e8a99c3803f74b0a04fd215ed0e0d30efd",
+      "fixture_modules_sha256": {
+        "test_tui_chat_owed_history.py": "1c71418a7fb85c958be82cb4b4a00ff6e374164debe65a1ab33affeeb096c928",
+        "test_tui_fusion_recovery.py": "51a3675250ef38dfec902211bd3e4761063375bb16692837e73a1bdde28cf81a"
+      },
+      "history_sha256": "b1d4d6fa6c3ffc1a1ee129bd2057d57f0460ee5ccc30b138e2dcaca7b584703b",
+      "latency": {
+        "n": 32,
+        "p50_ms": 1.5106670325621963,
+        "p95_ms": 2.554332953877747,
+        "max_ms": 3.624957986176014,
+        "mean_ms": 1.691154935542727
+      },
+      "missing": 0,
+      "errors": [],
+      "checks": {
+        "binary_hash_stable_and_expected": true,
+        "probe_hash_expected": true,
+        "fixture_copies_match_expected_hashes": true,
+        "same_retained_history": true,
+        "same_history_shape": true,
+        "all_input_bytes_written": true,
+        "exact_typing_bytes_and_count": true,
+        "all_expected_prefixes_observed": true,
+        "ordered_prefixes_match_sent_text": true,
+        "reported_p95_matches_raw_record_clocks": true,
+        "clock_order": true,
+        "capture_chunk_lengths_exact": true,
+        "condition_positioning": true,
+        "observation_complete_echo_off": true,
+        "no_errors_clean_exit": true,
+        "profiling_disabled": true
+      },
+      "type_gaps_ms": {
+        "n": 31,
+        "min": 50.153792020864785,
+        "median": 54.24116610083729,
+        "max": 56.50466599036008
+      },
+      "scroll_gaps_ms": null,
+      "scroll_events": 0,
+      "typing_span_seconds": 1.6636723330011591,
+      "actual_scroll_hz": null,
+      "child_cpu_lifecycle_seconds": 0.703399,
+      "wall_lifecycle_plus_analysis_seconds": 6.5036514170933515,
+      "phase_start": 600289.556165791,
+      "phase_end": 600291.274154458,
+      "load_before": [
+        239.02587890625,
+        166.8115234375,
+        132.43017578125
+      ],
+      "load_after": [
+        247.76220703125,
+        171.05078125,
+        134.3349609375
+      ],
+      "submitted_message_exact": null
+    },
+    {
+      "pair": 0,
+      "label": "after",
+      "condition": "typing",
+      "input_result": "paired-bae/pair-00-after-typing/typing/result.json",
+      "result_sha256": "b97d27f2710a7f19cd97795bc4b4a9a62cafa7e0c966ee4104adcde620a2b068",
+      "binary_sha256": "85c7d5bc40b0b99de9bfd9492604f0c3b4176d7cd4f53d85a34d4bd5a1924139",
+      "probe_sha256": "b43594f33f14edbe18d07eb98fac62e8a99c3803f74b0a04fd215ed0e0d30efd",
+      "fixture_modules_sha256": {
+        "test_tui_chat_owed_history.py": "1c71418a7fb85c958be82cb4b4a00ff6e374164debe65a1ab33affeeb096c928",
+        "test_tui_fusion_recovery.py": "51a3675250ef38dfec902211bd3e4761063375bb16692837e73a1bdde28cf81a"
+      },
+      "history_sha256": "b1d4d6fa6c3ffc1a1ee129bd2057d57f0460ee5ccc30b138e2dcaca7b584703b",
+      "latency": {
+        "n": 32,
+        "p50_ms": 1.3257079990580678,
+        "p95_ms": 7.387334015220404,
+        "max_ms": 15.010792063549161,
+        "mean_ms": 2.3218958704092074
+      },
+      "missing": 0,
+      "errors": [],
+      "checks": {
+        "binary_hash_stable_and_expected": true,
+        "probe_hash_expected": true,
+        "fixture_copies_match_expected_hashes": true,
+        "same_retained_history": true,
+        "same_history_shape": true,
+        "all_input_bytes_written": true,
+        "exact_typing_bytes_and_count": true,
+        "all_expected_prefixes_observed": true,
+        "ordered_prefixes_match_sent_text": true,
+        "reported_p95_matches_raw_record_clocks": true,
+        "clock_order": true,
+        "capture_chunk_lengths_exact": true,
+        "condition_positioning": true,
+        "observation_complete_echo_off": true,
+        "no_errors_clean_exit": true,
+        "profiling_disabled": true
+      },
+      "type_gaps_ms": {
+        "n": 31,
+        "min": 50.475041032768786,
+        "median": 54.229166940785944,
+        "max": 56.421375018544495
+      },
+      "scroll_gaps_ms": null,
+      "scroll_events": 0,
+      "typing_span_seconds": 1.6664778750855476,
+      "actual_scroll_hz": null,
+      "child_cpu_lifecycle_seconds": 0.6018159999999999,
+      "wall_lifecycle_plus_analysis_seconds": 5.8972641250584275,
+      "phase_start": 600295.73195475,
+      "phase_end": 600297.453425125,
+      "load_before": [
+        247.76220703125,
+        171.05078125,
+        134.3349609375
+      ],
+      "load_after": [
+        241.37451171875,
+        171.0,
+        134.53173828125
+      ],
+      "submitted_message_exact": null
+    },
+    {
+      "pair": 0,
+      "label": "before",
+      "condition": "pageup",
+      "input_result": "paired-bae/pair-00-before-pageup/pageup/result.json",
+      "result_sha256": "040019c9fb99117684700b185199a08b40d526156dc492d052cff6a53268a4f8",
+      "binary_sha256": "ebcbe53ff38f8a60ce456bd20d8f05a9542f8deb7fa450400475505078fdb93b",
+      "probe_sha256": "b43594f33f14edbe18d07eb98fac62e8a99c3803f74b0a04fd215ed0e0d30efd",
+      "fixture_modules_sha256": {
+        "test_tui_chat_owed_history.py": "1c71418a7fb85c958be82cb4b4a00ff6e374164debe65a1ab33affeeb096c928",
+        "test_tui_fusion_recovery.py": "51a3675250ef38dfec902211bd3e4761063375bb16692837e73a1bdde28cf81a"
+      },
+      "history_sha256": "b1d4d6fa6c3ffc1a1ee129bd2057d57f0460ee5ccc30b138e2dcaca7b584703b",
+      "latency": {
+        "n": 32,
+        "p50_ms": 2.5185419945046306,
+        "p95_ms": 22.695707972161472,
+        "max_ms": 61.257958062924445,
+        "mean_ms": 7.8307785879587755
+      },
+      "missing": 0,
+      "errors": [],
+      "checks": {
+        "binary_hash_stable_and_expected": true,
+        "probe_hash_expected": true,
+        "fixture_copies_match_expected_hashes": true,
+        "same_retained_history": true,
+        "same_history_shape": true,
+        "all_input_bytes_written": true,
+        "exact_typing_bytes_and_count": true,
+        "all_expected_prefixes_observed": true,
+        "ordered_prefixes_match_sent_text": true,
+        "reported_p95_matches_raw_record_clocks": true,
+        "clock_order": true,
+        "capture_chunk_lengths_exact": true,
+        "condition_positioning": true,
+        "observation_complete_echo_off": true,
+        "no_errors_clean_exit": true,
+        "profiling_disabled": true
+      },
+      "type_gaps_ms": {
+        "n": 31,
+        "min": 50.362917012535036,
+        "median": 54.423416033387184,
+        "max": 66.56416598707438
+      },
+      "scroll_gaps_ms": {
+        "n": 72,
+        "min": 20.176875055767596,
+        "median": 23.901291482616216,
+        "max": 29.97687493916601
+      },
+      "scroll_events": 73,
+      "typing_span_seconds": 1.6793887090170756,
+      "actual_scroll_hz": 41.99238000136248,
+      "child_cpu_lifecycle_seconds": 1.172856,
+      "wall_lifecycle_plus_analysis_seconds": 5.925599624984898,
+      "phase_start": 600301.805736291,
+      "phase_end": 600303.537210958,
+      "load_before": [
+        241.37451171875,
+        171.0,
+        134.53173828125
+      ],
+      "load_after": [
+        231.65478515625,
+        170.1533203125,
+        134.4462890625
+      ],
+      "submitted_message_exact": null
+    },
+    {
+      "pair": 0,
+      "label": "after",
+      "condition": "pageup",
+      "input_result": "paired-bae/pair-00-after-pageup/pageup/result.json",
+      "result_sha256": "35bc7f6a74d93858b787e773ae48b8b07395144fa968c40c3ed750d48bca275f",
+      "binary_sha256": "85c7d5bc40b0b99de9bfd9492604f0c3b4176d7cd4f53d85a34d4bd5a1924139",
+      "probe_sha256": "b43594f33f14edbe18d07eb98fac62e8a99c3803f74b0a04fd215ed0e0d30efd",
+      "fixture_modules_sha256": {
+        "test_tui_chat_owed_history.py": "1c71418a7fb85c958be82cb4b4a00ff6e374164debe65a1ab33affeeb096c928",
+        "test_tui_fusion_recovery.py": "51a3675250ef38dfec902211bd3e4761063375bb16692837e73a1bdde28cf81a"
+      },
+      "history_sha256": "b1d4d6fa6c3ffc1a1ee129bd2057d57f0460ee5ccc30b138e2dcaca7b584703b",
+      "latency": {
+        "n": 32,
+        "p50_ms": 1.9465410150587559,
+        "p95_ms": 9.932749904692173,
+        "max_ms": 17.206416931003332,
+        "mean_ms": 4.006953124189749
+      },
+      "missing": 0,
+      "errors": [],
+      "checks": {
+        "binary_hash_stable_and_expected": true,
+        "probe_hash_expected": true,
+        "fixture_copies_match_expected_hashes": true,
+        "same_retained_history": true,
+        "same_history_shape": true,
+        "all_input_bytes_written": true,
+        "exact_typing_bytes_and_count": true,
+        "all_expected_prefixes_observed": true,
+        "ordered_prefixes_match_sent_text": true,
+        "reported_p95_matches_raw_record_clocks": true,
+        "clock_order": true,
+        "capture_chunk_lengths_exact": true,
+        "condition_positioning": true,
+        "observation_complete_echo_off": true,
+        "no_errors_clean_exit": true,
+        "profiling_disabled": true
+      },
+      "type_gaps_ms": {
+        "n": 31,
+        "min": 50.48933299258351,
+        "median": 53.94020909443498,
+        "max": 55.8948329417035
+      },
+      "scroll_gaps_ms": {
+        "n": 73,
+        "min": 20.424999995157123,
+        "median": 23.58333393931389,
+        "max": 25.579291977919638
+      },
+      "scroll_events": 74,
+      "typing_span_seconds": 1.6567492090398446,
+      "actual_scroll_hz": 42.8021293470862,
+      "child_cpu_lifecycle_seconds": 0.827505,
+      "wall_lifecycle_plus_analysis_seconds": 6.096762542030774,
+      "phase_start": 600308.174638291,
+      "phase_end": 600309.886429666,
+      "load_before": [
+        231.65478515625,
+        170.1533203125,
+        134.4462890625
+      ],
+      "load_after": [
+        234.72509765625,
+        171.810546875,
+        135.240234375
+      ],
+      "submitted_message_exact": null
+    },
+    {
+      "pair": 0,
+      "label": "before",
+      "condition": "pagedown",
+      "input_result": "paired-bae/pair-00-before-pagedown/pagedown/result.json",
+      "result_sha256": "7162057c8646b4c54717c74a73f3b36185a0404842ba7cfd79744b48dfbd0aaa",
+      "binary_sha256": "ebcbe53ff38f8a60ce456bd20d8f05a9542f8deb7fa450400475505078fdb93b",
+      "probe_sha256": "b43594f33f14edbe18d07eb98fac62e8a99c3803f74b0a04fd215ed0e0d30efd",
+      "fixture_modules_sha256": {
+        "test_tui_chat_owed_history.py": "1c71418a7fb85c958be82cb4b4a00ff6e374164debe65a1ab33affeeb096c928",
+        "test_tui_fusion_recovery.py": "51a3675250ef38dfec902211bd3e4761063375bb16692837e73a1bdde28cf81a"
+      },
+      "history_sha256": "b1d4d6fa6c3ffc1a1ee129bd2057d57f0460ee5ccc30b138e2dcaca7b584703b",
+      "latency": {
+        "n": 32,
+        "p50_ms": 2.3091669427230954,
+        "p95_ms": 24.76666704751551,
+        "max_ms": 72.61370902415365,
+        "mean_ms": 7.449651129718404
+      },
+      "missing": 0,
+      "errors": [],
+      "checks": {
+        "binary_hash_stable_and_expected": true,
+        "probe_hash_expected": true,
+        "fixture_copies_match_expected_hashes": true,
+        "same_retained_history": true,
+        "same_history_shape": true,
+        "all_input_bytes_written": true,
+        "exact_typing_bytes_and_count": true,
+        "all_expected_prefixes_observed": true,
+        "ordered_prefixes_match_sent_text": true,
+        "reported_p95_matches_raw_record_clocks": true,
+        "clock_order": true,
+        "capture_chunk_lengths_exact": true,
+        "condition_positioning": true,
+        "observation_complete_echo_off": true,
+        "no_errors_clean_exit": true,
+        "profiling_disabled": true
+      },
+      "type_gaps_ms": {
+        "n": 31,
+        "min": 50.28912494890392,
+        "median": 54.74954191595316,
+        "max": 57.62345902621746
+      },
+      "scroll_gaps_ms": {
+        "n": 71,
+        "min": 20.349457976408303,
+        "median": 24.4365829275921,
+        "max": 30.79145890660584
+      },
+      "scroll_events": 72,
+      "typing_span_seconds": 1.6848466249648482,
+      "actual_scroll_hz": 41.22891790464336,
+      "child_cpu_lifecycle_seconds": 1.3080700000000003,
+      "wall_lifecycle_plus_analysis_seconds": 8.470333624980412,
+      "phase_start": 600316.768771041,
+      "phase_end": 600318.508388958,
+      "load_before": [
+        234.72509765625,
+        171.810546875,
+        135.240234375
+      ],
+      "load_after": [
+        231.5,
+        173.22412109375,
+        136.1708984375
+      ],
+      "submitted_message_exact": null
+    },
+    {
+      "pair": 0,
+      "label": "after",
+      "condition": "pagedown",
+      "input_result": "paired-bae/pair-00-after-pagedown/pagedown/result.json",
+      "result_sha256": "1ad059c7fff3242cce6cd1786095ba643bdb6770fe43e8d05cec7169d9a4fa68",
+      "binary_sha256": "85c7d5bc40b0b99de9bfd9492604f0c3b4176d7cd4f53d85a34d4bd5a1924139",
+      "probe_sha256": "b43594f33f14edbe18d07eb98fac62e8a99c3803f74b0a04fd215ed0e0d30efd",
+      "fixture_modules_sha256": {
+        "test_tui_chat_owed_history.py": "1c71418a7fb85c958be82cb4b4a00ff6e374164debe65a1ab33affeeb096c928",
+        "test_tui_fusion_recovery.py": "51a3675250ef38dfec902211bd3e4761063375bb16692837e73a1bdde28cf81a"
+      },
+      "history_sha256": "b1d4d6fa6c3ffc1a1ee129bd2057d57f0460ee5ccc30b138e2dcaca7b584703b",
+      "latency": {
+        "n": 32,
+        "p50_ms": 4.07970801461488,
+        "p95_ms": 37.8217080142349,
+        "max_ms": 63.76895902212709,
+        "mean_ms": 10.251209816487972
+      },
+      "missing": 0,
+      "errors": [],
+      "checks": {
+        "binary_hash_stable_and_expected": true,
+        "probe_hash_expected": true,
+        "fixture_copies_match_expected_hashes": true,
+        "same_retained_history": true,
+        "same_history_shape": true,
+        "all_input_bytes_written": true,
+        "exact_typing_bytes_and_count": true,
+        "all_expected_prefixes_observed": true,
+        "ordered_prefixes_match_sent_text": true,
+        "reported_p95_matches_raw_record_clocks": true,
+        "clock_order": true,
+        "capture_chunk_lengths_exact": true,
+        "condition_positioning": true,
+        "observation_complete_echo_off": true,
+        "no_errors_clean_exit": true,
+        "profiling_disabled": true
+      },
+      "type_gaps_ms": {
+        "n": 31,
+        "min": 50.27845804579556,
+        "median": 54.263917030766606,
+        "max": 66.94412499200553
+      },
+      "scroll_gaps_ms": {
+        "n": 72,
+        "min": 20.057042012922466,
+        "median": 24.050042033195496,
+        "max": 36.76416596863419
+      },
+      "scroll_events": 73,
+      "typing_span_seconds": 1.6949850000673905,
+      "actual_scroll_hz": 41.42154424951911,
+      "child_cpu_lifecycle_seconds": 0.9956189999999996,
+      "wall_lifecycle_plus_analysis_seconds": 8.504783167038113,
+      "phase_start": 600325.377987791,
+      "phase_end": 600327.133547791,
+      "load_before": [
+        231.5,
+        173.22412109375,
+        136.1708984375
+      ],
+      "load_after": [
+        228.39306640625,
+        174.443359375,
+        137.03369140625
+      ],
+      "submitted_message_exact": null
+    },
+    {
+      "pair": 0,
+      "label": "before",
+      "condition": "wheelup",
+      "input_result": "paired-bae/pair-00-before-wheelup/wheelup/result.json",
+      "result_sha256": "84a89a03a77b0f66438a8cf15755cc9f6594cd330ac4ea19a30bac038460f65a",
+      "binary_sha256": "ebcbe53ff38f8a60ce456bd20d8f05a9542f8deb7fa450400475505078fdb93b",
+      "probe_sha256": "b43594f33f14edbe18d07eb98fac62e8a99c3803f74b0a04fd215ed0e0d30efd",
+      "fixture_modules_sha256": {
+        "test_tui_chat_owed_history.py": "1c71418a7fb85c958be82cb4b4a00ff6e374164debe65a1ab33affeeb096c928",
+        "test_tui_fusion_recovery.py": "51a3675250ef38dfec902211bd3e4761063375bb16692837e73a1bdde28cf81a"
+      },
+      "history_sha256": "b1d4d6fa6c3ffc1a1ee129bd2057d57f0460ee5ccc30b138e2dcaca7b584703b",
+      "latency": {
+        "n": 32,
+        "p50_ms": 1.822417019866407,
+        "p95_ms": 6.2285419553518295,
+        "max_ms": 8.710916968993843,
+        "mean_ms": 2.5802916497923434
+      },
+      "missing": 0,
+      "errors": [],
+      "checks": {
+        "binary_hash_stable_and_expected": true,
+        "probe_hash_expected": true,
+        "fixture_copies_match_expected_hashes": true,
+        "same_retained_history": true,
+        "same_history_shape": true,
+        "all_input_bytes_written": true,
+        "exact_typing_bytes_and_count": true,
+        "all_expected_prefixes_observed": true,
+        "ordered_prefixes_match_sent_text": true,
+        "reported_p95_matches_raw_record_clocks": true,
+        "clock_order": true,
+        "capture_chunk_lengths_exact": true,
+        "condition_positioning": true,
+        "observation_complete_echo_off": true,
+        "no_errors_clean_exit": true,
+        "profiling_disabled": true
+      },
+      "type_gaps_ms": {
+        "n": 31,
+        "min": 50.17312499694526,
+        "median": 53.8752080174163,
+        "max": 57.59045900776982
+      },
+      "scroll_gaps_ms": {
+        "n": 72,
+        "min": 20.10624995455146,
+        "median": 24.044603516813368,
+        "max": 27.250415994785726
+      },
+      "scroll_events": 73,
+      "typing_span_seconds": 1.6652874579885975,
+      "actual_scroll_hz": 42.08936477442813,
+      "child_cpu_lifecycle_seconds": 0.8482480000000006,
+      "wall_lifecycle_plus_analysis_seconds": 6.038704124977812,
+      "phase_start": 600331.798210041,
+      "phase_end": 600333.518782416,
+      "load_before": [
+        228.39306640625,
+        174.443359375,
+        137.03369140625
+      ],
+      "load_after": [
+        231.00390625,
+        175.8798828125,
+        137.759765625
+      ],
+      "submitted_message_exact": null
+    },
+    {
+      "pair": 0,
+      "label": "after",
+      "condition": "wheelup",
+      "input_result": "paired-bae/pair-00-after-wheelup/wheelup/result.json",
+      "result_sha256": "6b7db00dc1bd916b8add21e539b0beb53b44071c3c3644eadbb1f10dfb3656a5",
+      "binary_sha256": "85c7d5bc40b0b99de9bfd9492604f0c3b4176d7cd4f53d85a34d4bd5a1924139",
+      "probe_sha256": "b43594f33f14edbe18d07eb98fac62e8a99c3803f74b0a04fd215ed0e0d30efd",
+      "fixture_modules_sha256": {
+        "test_tui_chat_owed_history.py": "1c71418a7fb85c958be82cb4b4a00ff6e374164debe65a1ab33affeeb096c928",
+        "test_tui_fusion_recovery.py": "51a3675250ef38dfec902211bd3e4761063375bb16692837e73a1bdde28cf81a"
+      },
+      "history_sha256": "b1d4d6fa6c3ffc1a1ee129bd2057d57f0460ee5ccc30b138e2dcaca7b584703b",
+      "latency": {
+        "n": 32,
+        "p50_ms": 2.249541925266385,
+        "p95_ms": 8.466957951895893,
+        "max_ms": 9.90900001488626,
+        "mean_ms": 3.474032535450533
+      },
+      "missing": 0,
+      "errors": [],
+      "checks": {
+        "binary_hash_stable_and_expected": true,
+        "probe_hash_expected": true,
+        "fixture_copies_match_expected_hashes": true,
+        "same_retained_history": true,
+        "same_history_shape": true,
+        "all_input_bytes_written": true,
+        "exact_typing_bytes_and_count": true,
+        "all_expected_prefixes_observed": true,
+        "ordered_prefixes_match_sent_text": true,
+        "reported_p95_matches_raw_record_clocks": true,
+        "clock_order": true,
+        "capture_chunk_lengths_exact": true,
+        "condition_positioning": true,
+        "observation_complete_echo_off": true,
+        "no_errors_clean_exit": true,
+        "profiling_disabled": true
+      },
+      "type_gaps_ms": {
+        "n": 31,
+        "min": 50.57237495202571,
+        "median": 53.78099996596575,
+        "max": 56.02579202968627
+      },
+      "scroll_gaps_ms": {
+        "n": 73,
+        "min": 20.35624999552965,
+        "median": 23.954291944392025,
+        "max": 26.007542037405074
+      },
+      "scroll_events": 74,
+      "typing_span_seconds": 1.6673226250568405,
+      "actual_scroll_hz": 42.4734820224956,
+      "child_cpu_lifecycle_seconds": 0.7009219999999992,
+      "wall_lifecycle_plus_analysis_seconds": 6.084487542044371,
+      "phase_start": 600338.03076675,
+      "phase_end": 600339.753432875,
+      "load_before": [
+        231.00390625,
+        175.8798828125,
+        137.759765625
+      ],
+      "load_after": [
+        237.64990234375,
+        178.1728515625,
+        138.7919921875
+      ],
+      "submitted_message_exact": null
+    },
+    {
+      "pair": 0,
+      "label": "before",
+      "condition": "wheeldown",
+      "input_result": "paired-bae/pair-00-before-wheeldown/wheeldown/result.json",
+      "result_sha256": "9447dfc11581a2fdd29184b0bffc1677fabd353ca68557e7208d12f8725a16b0",
+      "binary_sha256": "ebcbe53ff38f8a60ce456bd20d8f05a9542f8deb7fa450400475505078fdb93b",
+      "probe_sha256": "b43594f33f14edbe18d07eb98fac62e8a99c3803f74b0a04fd215ed0e0d30efd",
+      "fixture_modules_sha256": {
+        "test_tui_chat_owed_history.py": "1c71418a7fb85c958be82cb4b4a00ff6e374164debe65a1ab33affeeb096c928",
+        "test_tui_fusion_recovery.py": "51a3675250ef38dfec902211bd3e4761063375bb16692837e73a1bdde28cf81a"
+      },
+      "history_sha256": "b1d4d6fa6c3ffc1a1ee129bd2057d57f0460ee5ccc30b138e2dcaca7b584703b",
+      "latency": {
+        "n": 32,
+        "p50_ms": 2.671249909326434,
+        "p95_ms": 13.61316698603332,
+        "max_ms": 47.24108404479921,
+        "mean_ms": 5.776582056569168
+      },
+      "missing": 0,
+      "errors": [],
+      "checks": {
+        "binary_hash_stable_and_expected": true,
+        "probe_hash_expected": true,
+        "fixture_copies_match_expected_hashes": true,
+        "same_retained_history": true,
+        "same_history_shape": true,
+        "all_input_bytes_written": true,
+        "exact_typing_bytes_and_count": true,
+        "all_expected_prefixes_observed": true,
+        "ordered_prefixes_match_sent_text": true,
+        "reported_p95_matches_raw_record_clocks": true,
+        "clock_order": true,
+        "capture_chunk_lengths_exact": true,
+        "condition_positioning": true,
+        "observation_complete_echo_off": true,
+        "no_errors_clean_exit": true,
+        "profiling_disabled": true
+      },
+      "type_gaps_ms": {
+        "n": 31,
+        "min": 50.5805000429973,
+        "median": 54.28150005172938,
+        "max": 56.556500028818846
+      },
+      "scroll_gaps_ms": {
+        "n": 72,
+        "min": 20.125958020798862,
+        "median": 23.96341651910916,
+        "max": 31.494749942794442
+      },
+      "scroll_events": 73,
+      "typing_span_seconds": 1.6682369160698727,
+      "actual_scroll_hz": 41.95939089363343,
+      "child_cpu_lifecycle_seconds": 0.7149860000000003,
+      "wall_lifecycle_plus_analysis_seconds": 6.13390791695565,
+      "phase_start": 600344.321187083,
+      "phase_end": 600346.044499208,
+      "load_before": [
+        237.64990234375,
+        178.1728515625,
+        138.7919921875
+      ],
+      "load_after": [
+        241.56591796875,
+        180.96630859375,
+        140.24267578125
+      ],
+      "submitted_message_exact": null
+    },
+    {
+      "pair": 0,
+      "label": "after",
+      "condition": "wheeldown",
+      "input_result": "paired-bae/pair-00-after-wheeldown/wheeldown/result.json",
+      "result_sha256": "b236a5b5cee237c07ceade883baee9ed126dafc67fbfcd15d3655424c23c8f56",
+      "binary_sha256": "85c7d5bc40b0b99de9bfd9492604f0c3b4176d7cd4f53d85a34d4bd5a1924139",
+      "probe_sha256": "b43594f33f14edbe18d07eb98fac62e8a99c3803f74b0a04fd215ed0e0d30efd",
+      "fixture_modules_sha256": {
+        "test_tui_chat_owed_history.py": "1c71418a7fb85c958be82cb4b4a00ff6e374164debe65a1ab33affeeb096c928",
+        "test_tui_fusion_recovery.py": "51a3675250ef38dfec902211bd3e4761063375bb16692837e73a1bdde28cf81a"
+      },
+      "history_sha256": "b1d4d6fa6c3ffc1a1ee129bd2057d57f0460ee5ccc30b138e2dcaca7b584703b",
+      "latency": {
+        "n": 32,
+        "p50_ms": 1.5572910197079182,
+        "p95_ms": 7.032667053863406,
+        "max_ms": 17.629291978664696,
+        "mean_ms": 2.8409140977601055
+      },
+      "missing": 0,
+      "errors": [],
+      "checks": {
+        "binary_hash_stable_and_expected": true,
+        "probe_hash_expected": true,
+        "fixture_copies_match_expected_hashes": true,
+        "same_retained_history": true,
+        "same_history_shape": true,
+        "all_input_bytes_written": true,
+        "exact_typing_bytes_and_count": true,
+        "all_expected_prefixes_observed": true,
+        "ordered_prefixes_match_sent_text": true,
+        "reported_p95_matches_raw_record_clocks": true,
+        "clock_order": true,
+        "capture_chunk_lengths_exact": true,
+        "condition_positioning": true,
+        "observation_complete_echo_off": true,
+        "no_errors_clean_exit": true,
+        "profiling_disabled": true
+      },
+      "type_gaps_ms": {
+        "n": 31,
+        "min": 51.06304201763123,
+        "median": 53.81033301819116,
+        "max": 59.677124954760075
+      },
+      "scroll_gaps_ms": {
+        "n": 71,
+        "min": 20.31470905058086,
+        "median": 24.17195902671665,
+        "max": 29.939624946564436
+      },
+      "scroll_events": 72,
+      "typing_span_seconds": 1.6612269169418141,
+      "actual_scroll_hz": 41.96306362896036,
+      "child_cpu_lifecycle_seconds": 0.6627120000000006,
+      "wall_lifecycle_plus_analysis_seconds": 6.226245375000872,
+      "phase_start": 600350.919687875,
+      "phase_end": 600352.63677675,
+      "load_before": [
+        241.56591796875,
+        180.96630859375,
+        140.24267578125
+      ],
+      "load_after": [
+        240.7998046875,
+        181.8134765625,
+        140.7802734375
+      ],
+      "submitted_message_exact": null
+    },
+    {
+      "pair": 1,
+      "label": "before",
+      "condition": "typing",
+      "input_result": "paired-bae/pair-01-before-typing/typing/result.json",
+      "result_sha256": "85fbf7a592adf12cc60222bdae5a95935f2aee2367ff3b86f804d1e1c04bb576",
+      "binary_sha256": "ebcbe53ff38f8a60ce456bd20d8f05a9542f8deb7fa450400475505078fdb93b",
+      "probe_sha256": "b43594f33f14edbe18d07eb98fac62e8a99c3803f74b0a04fd215ed0e0d30efd",
+      "fixture_modules_sha256": {
+        "test_tui_chat_owed_history.py": "1c71418a7fb85c958be82cb4b4a00ff6e374164debe65a1ab33affeeb096c928",
+        "test_tui_fusion_recovery.py": "51a3675250ef38dfec902211bd3e4761063375bb16692837e73a1bdde28cf81a"
+      },
+      "history_sha256": "b1d4d6fa6c3ffc1a1ee129bd2057d57f0460ee5ccc30b138e2dcaca7b584703b",
+      "latency": {
+        "n": 32,
+        "p50_ms": 2.0830839639529586,
+        "p95_ms": 17.871999996714294,
+        "max_ms": 20.327124977484345,
+        "mean_ms": 4.671953109209426
+      },
+      "missing": 0,
+      "errors": [],
+      "checks": {
+        "binary_hash_stable_and_expected": true,
+        "probe_hash_expected": true,
+        "fixture_copies_match_expected_hashes": true,
+        "same_retained_history": true,
+        "same_history_shape": true,
+        "all_input_bytes_written": true,
+        "exact_typing_bytes_and_count": true,
+        "all_expected_prefixes_observed": true,
+        "ordered_prefixes_match_sent_text": true,
+        "reported_p95_matches_raw_record_clocks": true,
+        "clock_order": true,
+        "capture_chunk_lengths_exact": true,
+        "condition_positioning": true,
+        "observation_complete_echo_off": true,
+        "no_errors_clean_exit": true,
+        "profiling_disabled": true
+      },
+      "type_gaps_ms": {
+        "n": 31,
+        "min": 50.61329202726483,
+        "median": 54.64016692712903,
+        "max": 59.1385830193758
+      },
+      "scroll_gaps_ms": null,
+      "scroll_events": 0,
+      "typing_span_seconds": 1.6920480420812964,
+      "actual_scroll_hz": null,
+      "child_cpu_lifecycle_seconds": 0.615327999999999,
+      "wall_lifecycle_plus_analysis_seconds": 6.02940595895052,
+      "phase_start": 600423.871287833,
+      "phase_end": 600425.616651666,
+      "load_before": [
+        262.83251953125,
+        200.783203125,
+        150.9892578125
+      ],
+      "load_after": [
+        259.62939453125,
+        202.14013671875,
+        152.05224609375
+      ],
+      "submitted_message_exact": null
+    },
+    {
+      "pair": 1,
+      "label": "after",
+      "condition": "typing",
+      "input_result": "paired-bae/pair-01-after-typing/typing/result.json",
+      "result_sha256": "049aefcd70ea7a0caf066f9d0667e36712a2f8752b8e5a453d9265395e63faef",
+      "binary_sha256": "85c7d5bc40b0b99de9bfd9492604f0c3b4176d7cd4f53d85a34d4bd5a1924139",
+      "probe_sha256": "b43594f33f14edbe18d07eb98fac62e8a99c3803f74b0a04fd215ed0e0d30efd",
+      "fixture_modules_sha256": {
+        "test_tui_chat_owed_history.py": "1c71418a7fb85c958be82cb4b4a00ff6e374164debe65a1ab33affeeb096c928",
+        "test_tui_fusion_recovery.py": "51a3675250ef38dfec902211bd3e4761063375bb16692837e73a1bdde28cf81a"
+      },
+      "history_sha256": "b1d4d6fa6c3ffc1a1ee129bd2057d57f0460ee5ccc30b138e2dcaca7b584703b",
+      "latency": {
+        "n": 32,
+        "p50_ms": 1.553541049361229,
+        "p95_ms": 16.060875030234456,
+        "max_ms": 22.206833004020154,
+        "mean_ms": 3.5089947523374576
+      },
+      "missing": 0,
+      "errors": [],
+      "checks": {
+        "binary_hash_stable_and_expected": true,
+        "probe_hash_expected": true,
+        "fixture_copies_match_expected_hashes": true,
+        "same_retained_history": true,
+        "same_history_shape": true,
+        "all_input_bytes_written": true,
+        "exact_typing_bytes_and_count": true,
+        "all_expected_prefixes_observed": true,
+        "ordered_prefixes_match_sent_text": true,
+        "reported_p95_matches_raw_record_clocks": true,
+        "clock_order": true,
+        "capture_chunk_lengths_exact": true,
+        "condition_positioning": true,
+        "observation_complete_echo_off": true,
+        "no_errors_clean_exit": true,
+        "profiling_disabled": true
+      },
+      "type_gaps_ms": {
+        "n": 31,
+        "min": 50.6485840305686,
+        "median": 53.92850004136562,
+        "max": 63.55958303902298
+      },
+      "scroll_gaps_ms": null,
+      "scroll_events": 0,
+      "typing_span_seconds": 1.6776426250580698,
+      "actual_scroll_hz": null,
+      "child_cpu_lifecycle_seconds": 0.5124800000000009,
+      "wall_lifecycle_plus_analysis_seconds": 5.56225758290384,
+      "phase_start": 600418.033109833,
+      "phase_end": 600419.763796583,
+      "load_before": [
+        259.771484375,
+        199.14208984375,
+        150.123046875
+      ],
+      "load_after": [
+        262.83251953125,
+        200.783203125,
+        150.9892578125
+      ],
+      "submitted_message_exact": null
+    },
+    {
+      "pair": 1,
+      "label": "before",
+      "condition": "pageup",
+      "input_result": "paired-bae/pair-01-before-pageup/pageup/result.json",
+      "result_sha256": "a51f6e70d3a399034cd34ce23712a79e62d83d5388c1d485b35ca10cd04e06a1",
+      "binary_sha256": "ebcbe53ff38f8a60ce456bd20d8f05a9542f8deb7fa450400475505078fdb93b",
+      "probe_sha256": "b43594f33f14edbe18d07eb98fac62e8a99c3803f74b0a04fd215ed0e0d30efd",
+      "fixture_modules_sha256": {
+        "test_tui_chat_owed_history.py": "1c71418a7fb85c958be82cb4b4a00ff6e374164debe65a1ab33affeeb096c928",
+        "test_tui_fusion_recovery.py": "51a3675250ef38dfec902211bd3e4761063375bb16692837e73a1bdde28cf81a"
+      },
+      "history_sha256": "b1d4d6fa6c3ffc1a1ee129bd2057d57f0460ee5ccc30b138e2dcaca7b584703b",
+      "latency": {
+        "n": 32,
+        "p50_ms": 2.7310410514473915,
+        "p95_ms": 18.31216597929597,
+        "max_ms": 44.58666709251702,
+        "mean_ms": 7.778421851980966
+      },
+      "missing": 0,
+      "errors": [],
+      "checks": {
+        "binary_hash_stable_and_expected": true,
+        "probe_hash_expected": true,
+        "fixture_copies_match_expected_hashes": true,
+        "same_retained_history": true,
+        "same_history_shape": true,
+        "all_input_bytes_written": true,
+        "exact_typing_bytes_and_count": true,
+        "all_expected_prefixes_observed": true,
+        "ordered_prefixes_match_sent_text": true,
+        "reported_p95_matches_raw_record_clocks": true,
+        "clock_order": true,
+        "capture_chunk_lengths_exact": true,
+        "condition_positioning": true,
+        "observation_complete_echo_off": true,
+        "no_errors_clean_exit": true,
+        "profiling_disabled": true
+      },
+      "type_gaps_ms": {
+        "n": 31,
+        "min": 50.88999995496124,
+        "median": 53.75391698908061,
+        "max": 56.101791094988585
+      },
+      "scroll_gaps_ms": {
+        "n": 70,
+        "min": 20.337666966952384,
+        "median": 24.579770513810217,
+        "max": 33.92195806372911
+      },
+      "scroll_events": 71,
+      "typing_span_seconds": 1.6601433750474826,
+      "actual_scroll_hz": 41.25923379557335,
+      "child_cpu_lifecycle_seconds": 1.0834939999999995,
+      "wall_lifecycle_plus_analysis_seconds": 6.754439374897629,
+      "phase_start": 600364.569195083,
+      "phase_end": 600366.284952208,
+      "load_before": [
+        244.2587890625,
+        183.509765625,
+        141.619140625
+      ],
+      "load_after": [
+        258.0361328125,
+        188.4375,
+        143.85546875
+      ],
+      "submitted_message_exact": null
+    },
+    {
+      "pair": 1,
+      "label": "after",
+      "condition": "pageup",
+      "input_result": "paired-bae/pair-01-after-pageup/pageup/result.json",
+      "result_sha256": "bef9f43f19ed24c4d396455052ccac47e5b3912428f491473b0228bad47963f5",
+      "binary_sha256": "85c7d5bc40b0b99de9bfd9492604f0c3b4176d7cd4f53d85a34d4bd5a1924139",
+      "probe_sha256": "b43594f33f14edbe18d07eb98fac62e8a99c3803f74b0a04fd215ed0e0d30efd",
+      "fixture_modules_sha256": {
+        "test_tui_chat_owed_history.py": "1c71418a7fb85c958be82cb4b4a00ff6e374164debe65a1ab33affeeb096c928",
+        "test_tui_fusion_recovery.py": "51a3675250ef38dfec902211bd3e4761063375bb16692837e73a1bdde28cf81a"
+      },
+      "history_sha256": "b1d4d6fa6c3ffc1a1ee129bd2057d57f0460ee5ccc30b138e2dcaca7b584703b",
+      "latency": {
+        "n": 32,
+        "p50_ms": 2.547375042922795,
+        "p95_ms": 12.528000050224364,
+        "max_ms": 31.008249963633716,
+        "mean_ms": 4.832012982660672
+      },
+      "missing": 0,
+      "errors": [],
+      "checks": {
+        "binary_hash_stable_and_expected": true,
+        "probe_hash_expected": true,
+        "fixture_copies_match_expected_hashes": true,
+        "same_retained_history": true,
+        "same_history_shape": true,
+        "all_input_bytes_written": true,
+        "exact_typing_bytes_and_count": true,
+        "all_expected_prefixes_observed": true,
+        "ordered_prefixes_match_sent_text": true,
+        "reported_p95_matches_raw_record_clocks": true,
+        "clock_order": true,
+        "capture_chunk_lengths_exact": true,
+        "condition_positioning": true,
+        "observation_complete_echo_off": true,
+        "no_errors_clean_exit": true,
+        "profiling_disabled": true
+      },
+      "type_gaps_ms": {
+        "n": 31,
+        "min": 50.604333053343,
+        "median": 54.2962501058355,
+        "max": 58.02420899271965
+      },
+      "scroll_gaps_ms": {
+        "n": 72,
+        "min": 20.43300005607307,
+        "median": 24.07970797503367,
+        "max": 26.451708050444722
+      },
+      "scroll_events": 73,
+      "typing_span_seconds": 1.66864266700577,
+      "actual_scroll_hz": 42.30765436668423,
+      "child_cpu_lifecycle_seconds": 0.8119379999999996,
+      "wall_lifecycle_plus_analysis_seconds": 6.270455416990444,
+      "phase_start": 600357.485334041,
+      "phase_end": 600359.206698583,
+      "load_before": [
+        240.7998046875,
+        181.8134765625,
+        140.7802734375
+      ],
+      "load_after": [
+        244.2587890625,
+        183.509765625,
+        141.619140625
+      ],
+      "submitted_message_exact": null
+    },
+    {
+      "pair": 1,
+      "label": "before",
+      "condition": "pagedown",
+      "input_result": "paired-bae/pair-01-before-pagedown/pagedown/result.json",
+      "result_sha256": "a75d7db82a06d48160f89faeac3721f13d6ad3094c8ad6b3917eac3a7bf9b198",
+      "binary_sha256": "ebcbe53ff38f8a60ce456bd20d8f05a9542f8deb7fa450400475505078fdb93b",
+      "probe_sha256": "b43594f33f14edbe18d07eb98fac62e8a99c3803f74b0a04fd215ed0e0d30efd",
+      "fixture_modules_sha256": {
+        "test_tui_chat_owed_history.py": "1c71418a7fb85c958be82cb4b4a00ff6e374164debe65a1ab33affeeb096c928",
+        "test_tui_fusion_recovery.py": "51a3675250ef38dfec902211bd3e4761063375bb16692837e73a1bdde28cf81a"
+      },
+      "history_sha256": "b1d4d6fa6c3ffc1a1ee129bd2057d57f0460ee5ccc30b138e2dcaca7b584703b",
+      "latency": {
+        "n": 32,
+        "p50_ms": 5.014042020775378,
+        "p95_ms": 25.014499900862575,
+        "max_ms": 32.767417025752366,
+        "mean_ms": 9.96635290357517
+      },
+      "missing": 0,
+      "errors": [],
+      "checks": {
+        "binary_hash_stable_and_expected": true,
+        "probe_hash_expected": true,
+        "fixture_copies_match_expected_hashes": true,
+        "same_retained_history": true,
+        "same_history_shape": true,
+        "all_input_bytes_written": true,
+        "exact_typing_bytes_and_count": true,
+        "all_expected_prefixes_observed": true,
+        "ordered_prefixes_match_sent_text": true,
+        "reported_p95_matches_raw_record_clocks": true,
+        "clock_order": true,
+        "capture_chunk_lengths_exact": true,
+        "condition_positioning": true,
+        "observation_complete_echo_off": true,
+        "no_errors_clean_exit": true,
+        "profiling_disabled": true
+      },
+      "type_gaps_ms": {
+        "n": 31,
+        "min": 50.32641696743667,
+        "median": 53.67208400275558,
+        "max": 59.218417038209736
+      },
+      "scroll_gaps_ms": {
+        "n": 70,
+        "min": 20.303708035498857,
+        "median": 24.203937500715256,
+        "max": 33.75291696283966
+      },
+      "scroll_events": 71,
+      "typing_span_seconds": 1.676370625034906,
+      "actual_scroll_hz": 40.90872497963674,
+      "child_cpu_lifecycle_seconds": 1.389464999999999,
+      "wall_lifecycle_plus_analysis_seconds": 9.568872374948114,
+      "phase_start": 600383.49660125,
+      "phase_end": 600385.229028375,
+      "load_before": [
+        263.58447265625,
+        191.9140625,
+        145.609375
+      ],
+      "load_after": [
+        263.89111328125,
+        194.37646484375,
+        147.02587890625
+      ],
+      "submitted_message_exact": null
+    },
+    {
+      "pair": 1,
+      "label": "after",
+      "condition": "pagedown",
+      "input_result": "paired-bae/pair-01-after-pagedown/pagedown/result.json",
+      "result_sha256": "261c3b5bcfcaa562c72356c8fb937456c1d97a976124f8c2fd3b4069e10a6f9d",
+      "binary_sha256": "85c7d5bc40b0b99de9bfd9492604f0c3b4176d7cd4f53d85a34d4bd5a1924139",
+      "probe_sha256": "b43594f33f14edbe18d07eb98fac62e8a99c3803f74b0a04fd215ed0e0d30efd",
+      "fixture_modules_sha256": {
+        "test_tui_chat_owed_history.py": "1c71418a7fb85c958be82cb4b4a00ff6e374164debe65a1ab33affeeb096c928",
+        "test_tui_fusion_recovery.py": "51a3675250ef38dfec902211bd3e4761063375bb16692837e73a1bdde28cf81a"
+      },
+      "history_sha256": "b1d4d6fa6c3ffc1a1ee129bd2057d57f0460ee5ccc30b138e2dcaca7b584703b",
+      "latency": {
+        "n": 32,
+        "p50_ms": 3.1559589551761746,
+        "p95_ms": 26.580875040963292,
+        "max_ms": 30.602458049543202,
+        "mean_ms": 6.08891285082791
+      },
+      "missing": 0,
+      "errors": [],
+      "checks": {
+        "binary_hash_stable_and_expected": true,
+        "probe_hash_expected": true,
+        "fixture_copies_match_expected_hashes": true,
+        "same_retained_history": true,
+        "same_history_shape": true,
+        "all_input_bytes_written": true,
+        "exact_typing_bytes_and_count": true,
+        "all_expected_prefixes_observed": true,
+        "ordered_prefixes_match_sent_text": true,
+        "reported_p95_matches_raw_record_clocks": true,
+        "clock_order": true,
+        "capture_chunk_lengths_exact": true,
+        "condition_positioning": true,
+        "observation_complete_echo_off": true,
+        "no_errors_clean_exit": true,
+        "profiling_disabled": true
+      },
+      "type_gaps_ms": {
+        "n": 31,
+        "min": 50.66049995366484,
+        "median": 54.07787498552352,
+        "max": 60.838666977360845
+      },
+      "scroll_gaps_ms": {
+        "n": 72,
+        "min": 20.292083965614438,
+        "median": 24.402416485827416,
+        "max": 29.494874994270504
+      },
+      "scroll_events": 73,
+      "typing_span_seconds": 1.6833610839676112,
+      "actual_scroll_hz": 41.76622097457474,
+      "child_cpu_lifecycle_seconds": 1.0563080000000014,
+      "wall_lifecycle_plus_analysis_seconds": 9.172847000067122,
+      "phase_start": 600374.22465825,
+      "phase_end": 600375.960437958,
+      "load_before": [
+        258.0361328125,
+        188.4375,
+        143.85546875
+      ],
+      "load_after": [
+        263.58447265625,
+        191.9140625,
+        145.609375
+      ],
+      "submitted_message_exact": null
+    },
+    {
+      "pair": 1,
+      "label": "before",
+      "condition": "wheelup",
+      "input_result": "paired-bae/pair-01-before-wheelup/wheelup/result.json",
+      "result_sha256": "08b04e462bc6eaf3cbfa4f469b8a8c7f94921af5595fbba42031c167b1cefc0d",
+      "binary_sha256": "ebcbe53ff38f8a60ce456bd20d8f05a9542f8deb7fa450400475505078fdb93b",
+      "probe_sha256": "b43594f33f14edbe18d07eb98fac62e8a99c3803f74b0a04fd215ed0e0d30efd",
+      "fixture_modules_sha256": {
+        "test_tui_chat_owed_history.py": "1c71418a7fb85c958be82cb4b4a00ff6e374164debe65a1ab33affeeb096c928",
+        "test_tui_fusion_recovery.py": "51a3675250ef38dfec902211bd3e4761063375bb16692837e73a1bdde28cf81a"
+      },
+      "history_sha256": "b1d4d6fa6c3ffc1a1ee129bd2057d57f0460ee5ccc30b138e2dcaca7b584703b",
+      "latency": {
+        "n": 32,
+        "p50_ms": 3.858832991681993,
+        "p95_ms": 53.18137491121888,
+        "max_ms": 121.33658397942781,
+        "mean_ms": 12.539178373117466
+      },
+      "missing": 0,
+      "errors": [],
+      "checks": {
+        "binary_hash_stable_and_expected": true,
+        "probe_hash_expected": true,
+        "fixture_copies_match_expected_hashes": true,
+        "same_retained_history": true,
+        "same_history_shape": true,
+        "all_input_bytes_written": true,
+        "exact_typing_bytes_and_count": true,
+        "all_expected_prefixes_observed": true,
+        "ordered_prefixes_match_sent_text": true,
+        "reported_p95_matches_raw_record_clocks": true,
+        "clock_order": true,
+        "capture_chunk_lengths_exact": true,
+        "condition_positioning": true,
+        "observation_complete_echo_off": true,
+        "no_errors_clean_exit": true,
+        "profiling_disabled": true
+      },
+      "type_gaps_ms": {
+        "n": 31,
+        "min": 51.35591595899314,
+        "median": 54.33962494134903,
+        "max": 59.69258304685354
+      },
+      "scroll_gaps_ms": {
+        "n": 71,
+        "min": 20.52295906469226,
+        "median": 24.49191699270159,
+        "max": 35.16758303157985
+      },
+      "scroll_events": 72,
+      "typing_span_seconds": 1.6821026250254363,
+      "actual_scroll_hz": 41.19606587507773,
+      "child_cpu_lifecycle_seconds": 0.7910829999999995,
+      "wall_lifecycle_plus_analysis_seconds": 6.641817915951833,
+      "phase_start": 600398.278291666,
+      "phase_end": 600400.012075666,
+      "load_before": [
+        261.3369140625,
+        195.0009765625,
+        147.5234375
+      ],
+      "load_after": [
+        267.39892578125,
+        198.501953125,
+        149.3212890625
+      ],
+      "submitted_message_exact": null
+    },
+    {
+      "pair": 1,
+      "label": "after",
+      "condition": "wheelup",
+      "input_result": "paired-bae/pair-01-after-wheelup/wheelup/result.json",
+      "result_sha256": "cbecbfd8fb4fb6b0806b1c6fd9cadf0ee6ea6d738552e5153a6ff2e585917fc6",
+      "binary_sha256": "85c7d5bc40b0b99de9bfd9492604f0c3b4176d7cd4f53d85a34d4bd5a1924139",
+      "probe_sha256": "b43594f33f14edbe18d07eb98fac62e8a99c3803f74b0a04fd215ed0e0d30efd",
+      "fixture_modules_sha256": {
+        "test_tui_chat_owed_history.py": "1c71418a7fb85c958be82cb4b4a00ff6e374164debe65a1ab33affeeb096c928",
+        "test_tui_fusion_recovery.py": "51a3675250ef38dfec902211bd3e4761063375bb16692837e73a1bdde28cf81a"
+      },
+      "history_sha256": "b1d4d6fa6c3ffc1a1ee129bd2057d57f0460ee5ccc30b138e2dcaca7b584703b",
+      "latency": {
+        "n": 32,
+        "p50_ms": 2.7052079094573855,
+        "p95_ms": 28.074000030755997,
+        "max_ms": 47.353959060274065,
+        "mean_ms": 8.83634247657028
+      },
+      "missing": 0,
+      "errors": [],
+      "checks": {
+        "binary_hash_stable_and_expected": true,
+        "probe_hash_expected": true,
+        "fixture_copies_match_expected_hashes": true,
+        "same_retained_history": true,
+        "same_history_shape": true,
+        "all_input_bytes_written": true,
+        "exact_typing_bytes_and_count": true,
+        "all_expected_prefixes_observed": true,
+        "ordered_prefixes_match_sent_text": true,
+        "reported_p95_matches_raw_record_clocks": true,
+        "clock_order": true,
+        "capture_chunk_lengths_exact": true,
+        "condition_positioning": true,
+        "observation_complete_echo_off": true,
+        "no_errors_clean_exit": true,
+        "profiling_disabled": true
+      },
+      "type_gaps_ms": {
+        "n": 31,
+        "min": 51.79045896511525,
+        "median": 54.741333005949855,
+        "max": 60.751958983018994
+      },
+      "scroll_gaps_ms": {
+        "n": 71,
+        "min": 20.454499986954033,
+        "median": 24.84500000718981,
+        "max": 30.209125019609928
+      },
+      "scroll_events": 72,
+      "typing_span_seconds": 1.7077173329889774,
+      "actual_scroll_hz": 40.575131551044834,
+      "child_cpu_lifecycle_seconds": 0.651999,
+      "wall_lifecycle_plus_analysis_seconds": 6.252208209014498,
+      "phase_start": 600391.249272833,
+      "phase_end": 600393.011998041,
+      "load_before": [
+        263.89111328125,
+        194.37646484375,
+        147.02587890625
+      ],
+      "load_after": [
+        261.3369140625,
+        195.0009765625,
+        147.5234375
+      ],
+      "submitted_message_exact": null
+    },
+    {
+      "pair": 1,
+      "label": "before",
+      "condition": "wheeldown",
+      "input_result": "paired-bae/pair-01-before-wheeldown/wheeldown/result.json",
+      "result_sha256": "ee9affdebbbee58d4b09bc5d61416d8df8f574dcb3439132730f09ed6c5c8567",
+      "binary_sha256": "ebcbe53ff38f8a60ce456bd20d8f05a9542f8deb7fa450400475505078fdb93b",
+      "probe_sha256": "b43594f33f14edbe18d07eb98fac62e8a99c3803f74b0a04fd215ed0e0d30efd",
+      "fixture_modules_sha256": {
+        "test_tui_chat_owed_history.py": "1c71418a7fb85c958be82cb4b4a00ff6e374164debe65a1ab33affeeb096c928",
+        "test_tui_fusion_recovery.py": "51a3675250ef38dfec902211bd3e4761063375bb16692837e73a1bdde28cf81a"
+      },
+      "history_sha256": "b1d4d6fa6c3ffc1a1ee129bd2057d57f0460ee5ccc30b138e2dcaca7b584703b",
+      "latency": {
+        "n": 32,
+        "p50_ms": 2.2042919881641865,
+        "p95_ms": 5.43729099445045,
+        "max_ms": 19.78416705969721,
+        "mean_ms": 3.420694156375248
+      },
+      "missing": 0,
+      "errors": [],
+      "checks": {
+        "binary_hash_stable_and_expected": true,
+        "probe_hash_expected": true,
+        "fixture_copies_match_expected_hashes": true,
+        "same_retained_history": true,
+        "same_history_shape": true,
+        "all_input_bytes_written": true,
+        "exact_typing_bytes_and_count": true,
+        "all_expected_prefixes_observed": true,
+        "ordered_prefixes_match_sent_text": true,
+        "reported_p95_matches_raw_record_clocks": true,
+        "clock_order": true,
+        "capture_chunk_lengths_exact": true,
+        "condition_positioning": true,
+        "observation_complete_echo_off": true,
+        "no_errors_clean_exit": true,
+        "profiling_disabled": true
+      },
+      "type_gaps_ms": {
+        "n": 31,
+        "min": 50.82620901521295,
+        "median": 54.057916975580156,
+        "max": 57.04733298625797
+      },
+      "scroll_gaps_ms": {
+        "n": 71,
+        "min": 20.628000027500093,
+        "median": 24.35104106552899,
+        "max": 30.70608398411423
+      },
+      "scroll_events": 72,
+      "typing_span_seconds": 1.6709209999535233,
+      "actual_scroll_hz": 41.44117523547902,
+      "child_cpu_lifecycle_seconds": 0.6768469999999995,
+      "wall_lifecycle_plus_analysis_seconds": 6.12149441591464,
+      "phase_start": 600411.547043625,
+      "phase_end": 600413.272710458,
+      "load_before": [
+        263.84326171875,
+        198.908203125,
+        149.7529296875
+      ],
+      "load_after": [
+        259.771484375,
+        199.14208984375,
+        150.123046875
+      ],
+      "submitted_message_exact": null
+    },
+    {
+      "pair": 1,
+      "label": "after",
+      "condition": "wheeldown",
+      "input_result": "paired-bae/pair-01-after-wheeldown/wheeldown/result.json",
+      "result_sha256": "dc1967eaa500e6e2a8c5f05375ccb835abe59af0e3566c5c3b5c429f722e4ed4",
+      "binary_sha256": "85c7d5bc40b0b99de9bfd9492604f0c3b4176d7cd4f53d85a34d4bd5a1924139",
+      "probe_sha256": "b43594f33f14edbe18d07eb98fac62e8a99c3803f74b0a04fd215ed0e0d30efd",
+      "fixture_modules_sha256": {
+        "test_tui_chat_owed_history.py": "1c71418a7fb85c958be82cb4b4a00ff6e374164debe65a1ab33affeeb096c928",
+        "test_tui_fusion_recovery.py": "51a3675250ef38dfec902211bd3e4761063375bb16692837e73a1bdde28cf81a"
+      },
+      "history_sha256": "b1d4d6fa6c3ffc1a1ee129bd2057d57f0460ee5ccc30b138e2dcaca7b584703b",
+      "latency": {
+        "n": 32,
+        "p50_ms": 2.011417062021792,
+        "p95_ms": 15.943082980811596,
+        "max_ms": 32.201041001826525,
+        "mean_ms": 5.690895730367629
+      },
+      "missing": 0,
+      "errors": [],
+      "checks": {
+        "binary_hash_stable_and_expected": true,
+        "probe_hash_expected": true,
+        "fixture_copies_match_expected_hashes": true,
+        "same_retained_history": true,
+        "same_history_shape": true,
+        "all_input_bytes_written": true,
+        "exact_typing_bytes_and_count": true,
+        "all_expected_prefixes_observed": true,
+        "ordered_prefixes_match_sent_text": true,
+        "reported_p95_matches_raw_record_clocks": true,
+        "clock_order": true,
+        "capture_chunk_lengths_exact": true,
+        "condition_positioning": true,
+        "observation_complete_echo_off": true,
+        "no_errors_clean_exit": true,
+        "profiling_disabled": true
+      },
+      "type_gaps_ms": {
+        "n": 31,
+        "min": 50.3677079686895,
+        "median": 54.48512500151992,
+        "max": 58.82912501692772
+      },
+      "scroll_gaps_ms": {
+        "n": 71,
+        "min": 20.505583030171692,
+        "median": 24.404791998676956,
+        "max": 30.007499968633056
+      },
+      "scroll_events": 72,
+      "typing_span_seconds": 1.6863468328956515,
+      "actual_scroll_hz": 41.11481864879773,
+      "child_cpu_lifecycle_seconds": 0.6041240000000005,
+      "wall_lifecycle_plus_analysis_seconds": 6.26406529196538,
+      "phase_start": 600405.140528958,
+      "phase_end": 600406.882311833,
+      "load_before": [
+        267.39892578125,
+        198.501953125,
+        149.3212890625
+      ],
+      "load_after": [
+        263.84326171875,
+        198.908203125,
+        149.7529296875
+      ],
+      "submitted_message_exact": null
+    },
+    {
+      "pair": 2,
+      "label": "before",
+      "condition": "typing",
+      "input_result": "paired-bae/pair-02-before-typing/typing/result.json",
+      "result_sha256": "104eb0dc8680b5d164522040ddff57c9cb36023768c55683af79c34de439a682",
+      "binary_sha256": "ebcbe53ff38f8a60ce456bd20d8f05a9542f8deb7fa450400475505078fdb93b",
+      "probe_sha256": "b43594f33f14edbe18d07eb98fac62e8a99c3803f74b0a04fd215ed0e0d30efd",
+      "fixture_modules_sha256": {
+        "test_tui_chat_owed_history.py": "1c71418a7fb85c958be82cb4b4a00ff6e374164debe65a1ab33affeeb096c928",
+        "test_tui_fusion_recovery.py": "51a3675250ef38dfec902211bd3e4761063375bb16692837e73a1bdde28cf81a"
+      },
+      "history_sha256": "b1d4d6fa6c3ffc1a1ee129bd2057d57f0460ee5ccc30b138e2dcaca7b584703b",
+      "latency": {
+        "n": 32,
+        "p50_ms": 1.855666982010007,
+        "p95_ms": 15.16683294903487,
+        "max_ms": 31.607583980076015,
+        "mean_ms": 4.374205847852863
+      },
+      "missing": 0,
+      "errors": [],
+      "checks": {
+        "binary_hash_stable_and_expected": true,
+        "probe_hash_expected": true,
+        "fixture_copies_match_expected_hashes": true,
+        "same_retained_history": true,
+        "same_history_shape": true,
+        "all_input_bytes_written": true,
+        "exact_typing_bytes_and_count": true,
+        "all_expected_prefixes_observed": true,
+        "ordered_prefixes_match_sent_text": true,
+        "reported_p95_matches_raw_record_clocks": true,
+        "clock_order": true,
+        "capture_chunk_lengths_exact": true,
+        "condition_positioning": true,
+        "observation_complete_echo_off": true,
+        "no_errors_clean_exit": true,
+        "profiling_disabled": true
+      },
+      "type_gaps_ms": {
+        "n": 31,
+        "min": 50.65020895563066,
+        "median": 54.82537508942187,
+        "max": 59.9700000602752
+      },
+      "scroll_gaps_ms": null,
+      "scroll_events": 0,
+      "typing_span_seconds": 1.6967054590350017,
+      "actual_scroll_hz": null,
+      "child_cpu_lifecycle_seconds": 0.6208929999999997,
+      "wall_lifecycle_plus_analysis_seconds": 5.9452768749324605,
+      "phase_start": 600474.905191416,
+      "phase_end": 600476.654037166,
+      "load_before": [
+        265.0673828125,
+        211.1396484375,
+        157.91455078125
+      ],
+      "load_after": [
+        266.2626953125,
+        212.28271484375,
+        158.6298828125
+      ],
+      "submitted_message_exact": null
+    },
+    {
+      "pair": 2,
+      "label": "after",
+      "condition": "typing",
+      "input_result": "paired-bae/pair-02-after-typing/typing/result.json",
+      "result_sha256": "627c1ac60a52d4c7fc7b398ee8cab2b89329080a49cbbbe7dc87da350bb36257",
+      "binary_sha256": "85c7d5bc40b0b99de9bfd9492604f0c3b4176d7cd4f53d85a34d4bd5a1924139",
+      "probe_sha256": "b43594f33f14edbe18d07eb98fac62e8a99c3803f74b0a04fd215ed0e0d30efd",
+      "fixture_modules_sha256": {
+        "test_tui_chat_owed_history.py": "1c71418a7fb85c958be82cb4b4a00ff6e374164debe65a1ab33affeeb096c928",
+        "test_tui_fusion_recovery.py": "51a3675250ef38dfec902211bd3e4761063375bb16692837e73a1bdde28cf81a"
+      },
+      "history_sha256": "b1d4d6fa6c3ffc1a1ee129bd2057d57f0460ee5ccc30b138e2dcaca7b584703b",
+      "latency": {
+        "n": 32,
+        "p50_ms": 1.85870798304677,
+        "p95_ms": 3.5148749593645334,
+        "max_ms": 15.802458045072854,
+        "mean_ms": 2.552704478148371
+      },
+      "missing": 0,
+      "errors": [],
+      "checks": {
+        "binary_hash_stable_and_expected": true,
+        "probe_hash_expected": true,
+        "fixture_copies_match_expected_hashes": true,
+        "same_retained_history": true,
+        "same_history_shape": true,
+        "all_input_bytes_written": true,
+        "exact_typing_bytes_and_count": true,
+        "all_expected_prefixes_observed": true,
+        "ordered_prefixes_match_sent_text": true,
+        "reported_p95_matches_raw_record_clocks": true,
+        "clock_order": true,
+        "capture_chunk_lengths_exact": true,
+        "condition_positioning": true,
+        "observation_complete_echo_off": true,
+        "no_errors_clean_exit": true,
+        "profiling_disabled": true
+      },
+      "type_gaps_ms": {
+        "n": 31,
+        "min": 50.42154202237725,
+        "median": 54.436458041891456,
+        "max": 57.117459014989436
+      },
+      "scroll_gaps_ms": null,
+      "scroll_events": 0,
+      "typing_span_seconds": 1.6771099170437083,
+      "actual_scroll_hz": null,
+      "child_cpu_lifecycle_seconds": 0.5426839999999995,
+      "wall_lifecycle_plus_analysis_seconds": 5.474845707998611,
+      "phase_start": 600480.935597875,
+      "phase_end": 600482.665286458,
+      "load_before": [
+        266.2626953125,
+        212.28271484375,
+        158.6298828125
+      ],
+      "load_after": [
+        272.5673828125,
+        214.48583984375,
+        159.7216796875
+      ],
+      "submitted_message_exact": null
+    },
+    {
+      "pair": 2,
+      "label": "before",
+      "condition": "pageup",
+      "input_result": "paired-bae/pair-02-before-pageup/pageup/result.json",
+      "result_sha256": "e7a13dbbbfcce50739ff85f5375ac022d2788de7e1aa54ff84a764e77c98421d",
+      "binary_sha256": "ebcbe53ff38f8a60ce456bd20d8f05a9542f8deb7fa450400475505078fdb93b",
+      "probe_sha256": "b43594f33f14edbe18d07eb98fac62e8a99c3803f74b0a04fd215ed0e0d30efd",
+      "fixture_modules_sha256": {
+        "test_tui_chat_owed_history.py": "1c71418a7fb85c958be82cb4b4a00ff6e374164debe65a1ab33affeeb096c928",
+        "test_tui_fusion_recovery.py": "51a3675250ef38dfec902211bd3e4761063375bb16692837e73a1bdde28cf81a"
+      },
+      "history_sha256": "b1d4d6fa6c3ffc1a1ee129bd2057d57f0460ee5ccc30b138e2dcaca7b584703b",
+      "latency": {
+        "n": 32,
+        "p50_ms": 2.4041669676080346,
+        "p95_ms": 31.45866608247161,
+        "max_ms": 37.62820898555219,
+        "mean_ms": 6.238604215468513
+      },
+      "missing": 0,
+      "errors": [],
+      "checks": {
+        "binary_hash_stable_and_expected": true,
+        "probe_hash_expected": true,
+        "fixture_copies_match_expected_hashes": true,
+        "same_retained_history": true,
+        "same_history_shape": true,
+        "all_input_bytes_written": true,
+        "exact_typing_bytes_and_count": true,
+        "all_expected_prefixes_observed": true,
+        "ordered_prefixes_match_sent_text": true,
+        "reported_p95_matches_raw_record_clocks": true,
+        "clock_order": true,
+        "capture_chunk_lengths_exact": true,
+        "condition_positioning": true,
+        "observation_complete_echo_off": true,
+        "no_errors_clean_exit": true,
+        "profiling_disabled": true
+      },
+      "type_gaps_ms": {
+        "n": 31,
+        "min": 51.684875041246414,
+        "median": 54.04075002297759,
+        "max": 56.66124995332211
+      },
+      "scroll_gaps_ms": {
+        "n": 70,
+        "min": 20.960957976058125,
+        "median": 24.471166543662548,
+        "max": 32.81941602472216
+      },
+      "scroll_events": 71,
+      "typing_span_seconds": 1.6751260000746697,
+      "actual_scroll_hz": 40.83238468183053,
+      "child_cpu_lifecycle_seconds": 0.9964679999999992,
+      "wall_lifecycle_plus_analysis_seconds": 6.11478712502867,
+      "phase_start": 600486.827120958,
+      "phase_end": 600488.553047416,
+      "load_before": [
+        272.5673828125,
+        214.48583984375,
+        159.7216796875
+      ],
+      "load_after": [
+        277.166015625,
+        216.4033203125,
+        160.71923828125
+      ],
+      "submitted_message_exact": null
+    },
+    {
+      "pair": 2,
+      "label": "after",
+      "condition": "pageup",
+      "input_result": "paired-bae/pair-02-after-pageup/pageup/result.json",
+      "result_sha256": "47bb0452c374c94b7b2b946dfd4c73d66f6e881619ba17b99c6cbbe9493581c1",
+      "binary_sha256": "85c7d5bc40b0b99de9bfd9492604f0c3b4176d7cd4f53d85a34d4bd5a1924139",
+      "probe_sha256": "b43594f33f14edbe18d07eb98fac62e8a99c3803f74b0a04fd215ed0e0d30efd",
+      "fixture_modules_sha256": {
+        "test_tui_chat_owed_history.py": "1c71418a7fb85c958be82cb4b4a00ff6e374164debe65a1ab33affeeb096c928",
+        "test_tui_fusion_recovery.py": "51a3675250ef38dfec902211bd3e4761063375bb16692837e73a1bdde28cf81a"
+      },
+      "history_sha256": "b1d4d6fa6c3ffc1a1ee129bd2057d57f0460ee5ccc30b138e2dcaca7b584703b",
+      "latency": {
+        "n": 32,
+        "p50_ms": 2.55537498742342,
+        "p95_ms": 17.026124987751245,
+        "max_ms": 21.70554199256003,
+        "mean_ms": 4.933593707391992
+      },
+      "missing": 0,
+      "errors": [],
+      "checks": {
+        "binary_hash_stable_and_expected": true,
+        "probe_hash_expected": true,
+        "fixture_copies_match_expected_hashes": true,
+        "same_retained_history": true,
+        "same_history_shape": true,
+        "all_input_bytes_written": true,
+        "exact_typing_bytes_and_count": true,
+        "all_expected_prefixes_observed": true,
+        "ordered_prefixes_match_sent_text": true,
+        "reported_p95_matches_raw_record_clocks": true,
+        "clock_order": true,
+        "capture_chunk_lengths_exact": true,
+        "condition_positioning": true,
+        "observation_complete_echo_off": true,
+        "no_errors_clean_exit": true,
+        "profiling_disabled": true
+      },
+      "type_gaps_ms": {
+        "n": 31,
+        "min": 50.63450010493398,
+        "median": 53.51070791948587,
+        "max": 56.29441700875759
+      },
+      "scroll_gaps_ms": {
+        "n": 72,
+        "min": 20.62158298213035,
+        "median": 23.57845799997449,
+        "max": 28.276124969124794
+      },
+      "scroll_events": 73,
+      "typing_span_seconds": 1.6676674170885235,
+      "actual_scroll_hz": 42.356573675231076,
+      "child_cpu_lifecycle_seconds": 0.8098850000000013,
+      "wall_lifecycle_plus_analysis_seconds": 5.950440457905643,
+      "phase_start": 600493.051759083,
+      "phase_end": 600494.77451275,
+      "load_before": [
+        277.166015625,
+        216.4033203125,
+        160.71923828125
+      ],
+      "load_after": [
+        284.0390625,
+        218.8369140625,
+        161.904296875
+      ],
+      "submitted_message_exact": null
+    },
+    {
+      "pair": 2,
+      "label": "before",
+      "condition": "pagedown",
+      "input_result": "paired-bae/pair-02-before-pagedown/pagedown/result.json",
+      "result_sha256": "95a19e16aaaa43ba07d636f4456125bc27ffa2101a4774eb2103c6e9e3f26244",
+      "binary_sha256": "ebcbe53ff38f8a60ce456bd20d8f05a9542f8deb7fa450400475505078fdb93b",
+      "probe_sha256": "b43594f33f14edbe18d07eb98fac62e8a99c3803f74b0a04fd215ed0e0d30efd",
+      "fixture_modules_sha256": {
+        "test_tui_chat_owed_history.py": "1c71418a7fb85c958be82cb4b4a00ff6e374164debe65a1ab33affeeb096c928",
+        "test_tui_fusion_recovery.py": "51a3675250ef38dfec902211bd3e4761063375bb16692837e73a1bdde28cf81a"
+      },
+      "history_sha256": "b1d4d6fa6c3ffc1a1ee129bd2057d57f0460ee5ccc30b138e2dcaca7b584703b",
+      "latency": {
+        "n": 32,
+        "p50_ms": 2.474459004588425,
+        "p95_ms": 7.83587503246963,
+        "max_ms": 9.487750008702278,
+        "mean_ms": 3.5558189629227854
+      },
+      "missing": 0,
+      "errors": [],
+      "checks": {
+        "binary_hash_stable_and_expected": true,
+        "probe_hash_expected": true,
+        "fixture_copies_match_expected_hashes": true,
+        "same_retained_history": true,
+        "same_history_shape": true,
+        "all_input_bytes_written": true,
+        "exact_typing_bytes_and_count": true,
+        "all_expected_prefixes_observed": true,
+        "ordered_prefixes_match_sent_text": true,
+        "reported_p95_matches_raw_record_clocks": true,
+        "clock_order": true,
+        "capture_chunk_lengths_exact": true,
+        "condition_positioning": true,
+        "observation_complete_echo_off": true,
+        "no_errors_clean_exit": true,
+        "profiling_disabled": true
+      },
+      "type_gaps_ms": {
+        "n": 31,
+        "min": 51.016083103604615,
+        "median": 54.611042025499046,
+        "max": 56.414625025354326
+      },
+      "scroll_gaps_ms": {
+        "n": 72,
+        "min": 20.374041981995106,
+        "median": 24.522229039575905,
+        "max": 27.536541922017932
+      },
+      "scroll_events": 73,
+      "typing_span_seconds": 1.6829162089852616,
+      "actual_scroll_hz": 41.39053415067389,
+      "child_cpu_lifecycle_seconds": 1.3347100000000012,
+      "wall_lifecycle_plus_analysis_seconds": 8.875674624927342,
+      "phase_start": 600432.987759458,
+      "phase_end": 600434.730424166,
+      "load_before": [
+        259.62939453125,
+        202.14013671875,
+        152.05224609375
+      ],
+      "load_after": [
+        254.61376953125,
+        202.0546875,
+        152.3154296875
+      ],
+      "submitted_message_exact": null
+    },
+    {
+      "pair": 2,
+      "label": "after",
+      "condition": "pagedown",
+      "input_result": "paired-bae/pair-02-after-pagedown/pagedown/result.json",
+      "result_sha256": "45a6df34bd205205c4848ba71f6544417dd0accc667d22c173988e3d6369d40d",
+      "binary_sha256": "85c7d5bc40b0b99de9bfd9492604f0c3b4176d7cd4f53d85a34d4bd5a1924139",
+      "probe_sha256": "b43594f33f14edbe18d07eb98fac62e8a99c3803f74b0a04fd215ed0e0d30efd",
+      "fixture_modules_sha256": {
+        "test_tui_chat_owed_history.py": "1c71418a7fb85c958be82cb4b4a00ff6e374164debe65a1ab33affeeb096c928",
+        "test_tui_fusion_recovery.py": "51a3675250ef38dfec902211bd3e4761063375bb16692837e73a1bdde28cf81a"
+      },
+      "history_sha256": "b1d4d6fa6c3ffc1a1ee129bd2057d57f0460ee5ccc30b138e2dcaca7b584703b",
+      "latency": {
+        "n": 32,
+        "p50_ms": 2.031042007729411,
+        "p95_ms": 14.178541954606771,
+        "max_ms": 33.748041023500264,
+        "mean_ms": 4.239270801917883
+      },
+      "missing": 0,
+      "errors": [],
+      "checks": {
+        "binary_hash_stable_and_expected": true,
+        "probe_hash_expected": true,
+        "fixture_copies_match_expected_hashes": true,
+        "same_retained_history": true,
+        "same_history_shape": true,
+        "all_input_bytes_written": true,
+        "exact_typing_bytes_and_count": true,
+        "all_expected_prefixes_observed": true,
+        "ordered_prefixes_match_sent_text": true,
+        "reported_p95_matches_raw_record_clocks": true,
+        "clock_order": true,
+        "capture_chunk_lengths_exact": true,
+        "condition_positioning": true,
+        "observation_complete_echo_off": true,
+        "no_errors_clean_exit": true,
+        "profiling_disabled": true
+      },
+      "type_gaps_ms": {
+        "n": 31,
+        "min": 50.94166693743318,
+        "median": 54.06625010073185,
+        "max": 57.939124992117286
+      },
+      "scroll_gaps_ms": {
+        "n": 71,
+        "min": 20.2888329513371,
+        "median": 24.3326670024544,
+        "max": 30.281458981335163
+      },
+      "scroll_events": 72,
+      "typing_span_seconds": 1.6653566249879077,
+      "actual_scroll_hz": 41.72590692652076,
+      "child_cpu_lifecycle_seconds": 1.0862339999999984,
+      "wall_lifecycle_plus_analysis_seconds": 8.85551933303941,
+      "phase_start": 600442.022218625,
+      "phase_end": 600443.74244175,
+      "load_before": [
+        254.61376953125,
+        202.0546875,
+        152.3154296875
+      ],
+      "load_after": [
+        252.7958984375,
+        203.4013671875,
+        153.37451171875
+      ],
+      "submitted_message_exact": null
+    },
+    {
+      "pair": 2,
+      "label": "before",
+      "condition": "wheelup",
+      "input_result": "paired-bae/pair-02-before-wheelup/wheelup/result.json",
+      "result_sha256": "0d0f72bbccfa813254869541acd338f0f6a1f43ecc2c2af70d1bbd15427e6b79",
+      "binary_sha256": "ebcbe53ff38f8a60ce456bd20d8f05a9542f8deb7fa450400475505078fdb93b",
+      "probe_sha256": "b43594f33f14edbe18d07eb98fac62e8a99c3803f74b0a04fd215ed0e0d30efd",
+      "fixture_modules_sha256": {
+        "test_tui_chat_owed_history.py": "1c71418a7fb85c958be82cb4b4a00ff6e374164debe65a1ab33affeeb096c928",
+        "test_tui_fusion_recovery.py": "51a3675250ef38dfec902211bd3e4761063375bb16692837e73a1bdde28cf81a"
+      },
+      "history_sha256": "b1d4d6fa6c3ffc1a1ee129bd2057d57f0460ee5ccc30b138e2dcaca7b584703b",
+      "latency": {
+        "n": 32,
+        "p50_ms": 1.9265409791842103,
+        "p95_ms": 7.334957947023213,
+        "max_ms": 17.822999972850084,
+        "mean_ms": 3.1753880612086505
+      },
+      "missing": 0,
+      "errors": [],
+      "checks": {
+        "binary_hash_stable_and_expected": true,
+        "probe_hash_expected": true,
+        "fixture_copies_match_expected_hashes": true,
+        "same_retained_history": true,
+        "same_history_shape": true,
+        "all_input_bytes_written": true,
+        "exact_typing_bytes_and_count": true,
+        "all_expected_prefixes_observed": true,
+        "ordered_prefixes_match_sent_text": true,
+        "reported_p95_matches_raw_record_clocks": true,
+        "clock_order": true,
+        "capture_chunk_lengths_exact": true,
+        "condition_positioning": true,
+        "observation_complete_echo_off": true,
+        "no_errors_clean_exit": true,
+        "profiling_disabled": true
+      },
+      "type_gaps_ms": {
+        "n": 31,
+        "min": 50.61766703147441,
+        "median": 54.387458018027246,
+        "max": 56.36933399364352
+      },
+      "scroll_gaps_ms": {
+        "n": 71,
+        "min": 20.394374965690076,
+        "median": 24.192000040784478,
+        "max": 27.284500072710216
+      },
+      "scroll_events": 72,
+      "typing_span_seconds": 1.6670644170371816,
+      "actual_scroll_hz": 41.81771699733427,
+      "child_cpu_lifecycle_seconds": 0.765664000000001,
+      "wall_lifecycle_plus_analysis_seconds": 6.264739082893357,
+      "phase_start": 600448.731946541,
+      "phase_end": 600450.4578715,
+      "load_before": [
+        252.7958984375,
+        203.4013671875,
+        153.37451171875
+      ],
+      "load_after": [
+        257.8076171875,
+        206.103515625,
+        154.91796875
+      ],
+      "submitted_message_exact": null
+    },
+    {
+      "pair": 2,
+      "label": "after",
+      "condition": "wheelup",
+      "input_result": "paired-bae/pair-02-after-wheelup/wheelup/result.json",
+      "result_sha256": "f5e9afaa4010897196b40db4dd59387787d09511691fa17b8f12bd33d24ecf9a",
+      "binary_sha256": "85c7d5bc40b0b99de9bfd9492604f0c3b4176d7cd4f53d85a34d4bd5a1924139",
+      "probe_sha256": "b43594f33f14edbe18d07eb98fac62e8a99c3803f74b0a04fd215ed0e0d30efd",
+      "fixture_modules_sha256": {
+        "test_tui_chat_owed_history.py": "1c71418a7fb85c958be82cb4b4a00ff6e374164debe65a1ab33affeeb096c928",
+        "test_tui_fusion_recovery.py": "51a3675250ef38dfec902211bd3e4761063375bb16692837e73a1bdde28cf81a"
+      },
+      "history_sha256": "b1d4d6fa6c3ffc1a1ee129bd2057d57f0460ee5ccc30b138e2dcaca7b584703b",
+      "latency": {
+        "n": 32,
+        "p50_ms": 2.0574999507516623,
+        "p95_ms": 7.691084058023989,
+        "max_ms": 48.38749999180436,
+        "mean_ms": 5.253776063909754
+      },
+      "missing": 0,
+      "errors": [],
+      "checks": {
+        "binary_hash_stable_and_expected": true,
+        "probe_hash_expected": true,
+        "fixture_copies_match_expected_hashes": true,
+        "same_retained_history": true,
+        "same_history_shape": true,
+        "all_input_bytes_written": true,
+        "exact_typing_bytes_and_count": true,
+        "all_expected_prefixes_observed": true,
+        "ordered_prefixes_match_sent_text": true,
+        "reported_p95_matches_raw_record_clocks": true,
+        "clock_order": true,
+        "capture_chunk_lengths_exact": true,
+        "condition_positioning": true,
+        "observation_complete_echo_off": true,
+        "no_errors_clean_exit": true,
+        "profiling_disabled": true
+      },
+      "type_gaps_ms": {
+        "n": 31,
+        "min": 50.298042013309896,
+        "median": 54.209584021009505,
+        "max": 59.66750008519739
+      },
+      "scroll_gaps_ms": {
+        "n": 71,
+        "min": 20.531166926957667,
+        "median": 24.30699998512864,
+        "max": 31.32545796688646
+      },
+      "scroll_events": 72,
+      "typing_span_seconds": 1.6803199579007924,
+      "actual_scroll_hz": 41.40725973450411,
+      "child_cpu_lifecycle_seconds": 0.6805049999999992,
+      "wall_lifecycle_plus_analysis_seconds": 6.112227457924746,
+      "phase_start": 600455.404735833,
+      "phase_end": 600457.139850958,
+      "load_before": [
+        257.8076171875,
+        206.103515625,
+        154.91796875
+      ],
+      "load_after": [
+        261.26611328125,
+        207.6787109375,
+        155.7734375
+      ],
+      "submitted_message_exact": null
+    },
+    {
+      "pair": 2,
+      "label": "before",
+      "condition": "wheeldown",
+      "input_result": "paired-bae/pair-02-before-wheeldown/wheeldown/result.json",
+      "result_sha256": "46a9e4d3537cc2fda5b9da09c0523e0b8bbbcd4b207a9cfd29e3a402a1668695",
+      "binary_sha256": "ebcbe53ff38f8a60ce456bd20d8f05a9542f8deb7fa450400475505078fdb93b",
+      "probe_sha256": "b43594f33f14edbe18d07eb98fac62e8a99c3803f74b0a04fd215ed0e0d30efd",
+      "fixture_modules_sha256": {
+        "test_tui_chat_owed_history.py": "1c71418a7fb85c958be82cb4b4a00ff6e374164debe65a1ab33affeeb096c928",
+        "test_tui_fusion_recovery.py": "51a3675250ef38dfec902211bd3e4761063375bb16692837e73a1bdde28cf81a"
+      },
+      "history_sha256": "b1d4d6fa6c3ffc1a1ee129bd2057d57f0460ee5ccc30b138e2dcaca7b584703b",
+      "latency": {
+        "n": 32,
+        "p50_ms": 2.715415903367102,
+        "p95_ms": 6.195749971084297,
+        "max_ms": 9.851749986410141,
+        "mean_ms": 3.42042712145485
+      },
+      "missing": 0,
+      "errors": [],
+      "checks": {
+        "binary_hash_stable_and_expected": true,
+        "probe_hash_expected": true,
+        "fixture_copies_match_expected_hashes": true,
+        "same_retained_history": true,
+        "same_history_shape": true,
+        "all_input_bytes_written": true,
+        "exact_typing_bytes_and_count": true,
+        "all_expected_prefixes_observed": true,
+        "ordered_prefixes_match_sent_text": true,
+        "reported_p95_matches_raw_record_clocks": true,
+        "clock_order": true,
+        "capture_chunk_lengths_exact": true,
+        "condition_positioning": true,
+        "observation_complete_echo_off": true,
+        "no_errors_clean_exit": true,
+        "profiling_disabled": true
+      },
+      "type_gaps_ms": {
+        "n": 31,
+        "min": 50.49058306030929,
+        "median": 54.12674997933209,
+        "max": 55.366417043842375
+      },
+      "scroll_gaps_ms": {
+        "n": 71,
+        "min": 20.464666071347892,
+        "median": 24.33399995788932,
+        "max": 28.117749956436455
+      },
+      "scroll_events": 72,
+      "typing_span_seconds": 1.6704457920277491,
+      "actual_scroll_hz": 41.57849941124757,
+      "child_cpu_lifecycle_seconds": 0.767831000000001,
+      "wall_lifecycle_plus_analysis_seconds": 6.238465375034139,
+      "phase_start": 600461.992829791,
+      "phase_end": 600463.719257541,
+      "load_before": [
+        261.26611328125,
+        207.6787109375,
+        155.7734375
+      ],
+      "load_after": [
+        263.00634765625,
+        208.9287109375,
+        156.5185546875
+      ],
+      "submitted_message_exact": null
+    },
+    {
+      "pair": 2,
+      "label": "after",
+      "condition": "wheeldown",
+      "input_result": "paired-bae/pair-02-after-wheeldown/wheeldown/result.json",
+      "result_sha256": "8233e2241a3362ed55d2f70e2f298f9f17cf7a5247bdfedc1c23de234868c028",
+      "binary_sha256": "85c7d5bc40b0b99de9bfd9492604f0c3b4176d7cd4f53d85a34d4bd5a1924139",
+      "probe_sha256": "b43594f33f14edbe18d07eb98fac62e8a99c3803f74b0a04fd215ed0e0d30efd",
+      "fixture_modules_sha256": {
+        "test_tui_chat_owed_history.py": "1c71418a7fb85c958be82cb4b4a00ff6e374164debe65a1ab33affeeb096c928",
+        "test_tui_fusion_recovery.py": "51a3675250ef38dfec902211bd3e4761063375bb16692837e73a1bdde28cf81a"
+      },
+      "history_sha256": "b1d4d6fa6c3ffc1a1ee129bd2057d57f0460ee5ccc30b138e2dcaca7b584703b",
+      "latency": {
+        "n": 32,
+        "p50_ms": 2.340374980121851,
+        "p95_ms": 18.013499910011888,
+        "max_ms": 28.57608301565051,
+        "mean_ms": 5.27243238320807
+      },
+      "missing": 0,
+      "errors": [],
+      "checks": {
+        "binary_hash_stable_and_expected": true,
+        "probe_hash_expected": true,
+        "fixture_copies_match_expected_hashes": true,
+        "same_retained_history": true,
+        "same_history_shape": true,
+        "all_input_bytes_written": true,
+        "exact_typing_bytes_and_count": true,
+        "all_expected_prefixes_observed": true,
+        "ordered_prefixes_match_sent_text": true,
+        "reported_p95_matches_raw_record_clocks": true,
+        "clock_order": true,
+        "capture_chunk_lengths_exact": true,
+        "condition_positioning": true,
+        "observation_complete_echo_off": true,
+        "no_errors_clean_exit": true,
+        "profiling_disabled": true
+      },
+      "type_gaps_ms": {
+        "n": 31,
+        "min": 50.917915999889374,
+        "median": 53.93274989910424,
+        "max": 58.78124991431832
+      },
+      "scroll_gaps_ms": {
+        "n": 71,
+        "min": 20.32074995804578,
+        "median": 24.437042069621384,
+        "max": 29.994457960128784
+      },
+      "scroll_events": 72,
+      "typing_span_seconds": 1.6718185000354424,
+      "actual_scroll_hz": 41.52320975129106,
+      "child_cpu_lifecycle_seconds": 0.6135929999999998,
+      "wall_lifecycle_plus_analysis_seconds": 6.110500333015807,
+      "phase_start": 600468.605867666,
+      "phase_end": 600470.332348958,
+      "load_before": [
+        263.00634765625,
+        208.9287109375,
+        156.5185546875
+      ],
+      "load_after": [
+        265.0673828125,
+        211.1396484375,
+        157.91455078125
+      ],
+      "submitted_message_exact": null
+    },
+    {
+      "pair": 3,
+      "label": "before",
+      "condition": "typing",
+      "input_result": "paired-bae/pair-03-before-typing/typing/result.json",
+      "result_sha256": "e589e22c31f14bf876e5c060ec27291370115591956c744af4e73413305c833d",
+      "binary_sha256": "ebcbe53ff38f8a60ce456bd20d8f05a9542f8deb7fa450400475505078fdb93b",
+      "probe_sha256": "b43594f33f14edbe18d07eb98fac62e8a99c3803f74b0a04fd215ed0e0d30efd",
+      "fixture_modules_sha256": {
+        "test_tui_chat_owed_history.py": "1c71418a7fb85c958be82cb4b4a00ff6e374164debe65a1ab33affeeb096c928",
+        "test_tui_fusion_recovery.py": "51a3675250ef38dfec902211bd3e4761063375bb16692837e73a1bdde28cf81a"
+      },
+      "history_sha256": "b1d4d6fa6c3ffc1a1ee129bd2057d57f0460ee5ccc30b138e2dcaca7b584703b",
+      "latency": {
+        "n": 32,
+        "p50_ms": 1.7774999141693115,
+        "p95_ms": 11.912332964129746,
+        "max_ms": 27.547250036150217,
+        "mean_ms": 4.187356829788769
+      },
+      "missing": 0,
+      "errors": [],
+      "checks": {
+        "binary_hash_stable_and_expected": true,
+        "probe_hash_expected": true,
+        "fixture_copies_match_expected_hashes": true,
+        "same_retained_history": true,
+        "same_history_shape": true,
+        "all_input_bytes_written": true,
+        "exact_typing_bytes_and_count": true,
+        "all_expected_prefixes_observed": true,
+        "ordered_prefixes_match_sent_text": true,
+        "reported_p95_matches_raw_record_clocks": true,
+        "clock_order": true,
+        "capture_chunk_lengths_exact": true,
+        "condition_positioning": true,
+        "observation_complete_echo_off": true,
+        "no_errors_clean_exit": true,
+        "profiling_disabled": true
+      },
+      "type_gaps_ms": {
+        "n": 31,
+        "min": 50.763666979037225,
+        "median": 54.14245801512152,
+        "max": 58.24204091913998
+      },
+      "scroll_gaps_ms": null,
+      "scroll_events": 0,
+      "typing_span_seconds": 1.6754120829282328,
+      "actual_scroll_hz": null,
+      "child_cpu_lifecycle_seconds": 0.5900840000000027,
+      "wall_lifecycle_plus_analysis_seconds": 6.437003165949136,
+      "phase_start": 600532.90718475,
+      "phase_end": 600534.635304875,
+      "load_before": [
+        294.615234375,
+        228.76416015625,
+        167.822265625
+      ],
+      "load_after": [
+        295.20654296875,
+        229.97998046875,
+        168.6083984375
+      ],
+      "submitted_message_exact": null
+    },
+    {
+      "pair": 3,
+      "label": "after",
+      "condition": "typing",
+      "input_result": "paired-bae/pair-03-after-typing/typing/result.json",
+      "result_sha256": "f346c8c4ec95ac8c70e16770f6baf1df578b2ddc81e004dd92a4ca397e1684ef",
+      "binary_sha256": "85c7d5bc40b0b99de9bfd9492604f0c3b4176d7cd4f53d85a34d4bd5a1924139",
+      "probe_sha256": "b43594f33f14edbe18d07eb98fac62e8a99c3803f74b0a04fd215ed0e0d30efd",
+      "fixture_modules_sha256": {
+        "test_tui_chat_owed_history.py": "1c71418a7fb85c958be82cb4b4a00ff6e374164debe65a1ab33affeeb096c928",
+        "test_tui_fusion_recovery.py": "51a3675250ef38dfec902211bd3e4761063375bb16692837e73a1bdde28cf81a"
+      },
+      "history_sha256": "b1d4d6fa6c3ffc1a1ee129bd2057d57f0460ee5ccc30b138e2dcaca7b584703b",
+      "latency": {
+        "n": 32,
+        "p50_ms": 1.573708956129849,
+        "p95_ms": 12.282416922971606,
+        "max_ms": 16.53074997011572,
+        "mean_ms": 3.315324313007295
+      },
+      "missing": 0,
+      "errors": [],
+      "checks": {
+        "binary_hash_stable_and_expected": true,
+        "probe_hash_expected": true,
+        "fixture_copies_match_expected_hashes": true,
+        "same_retained_history": true,
+        "same_history_shape": true,
+        "all_input_bytes_written": true,
+        "exact_typing_bytes_and_count": true,
+        "all_expected_prefixes_observed": true,
+        "ordered_prefixes_match_sent_text": true,
+        "reported_p95_matches_raw_record_clocks": true,
+        "clock_order": true,
+        "capture_chunk_lengths_exact": true,
+        "condition_positioning": true,
+        "observation_complete_echo_off": true,
+        "no_errors_clean_exit": true,
+        "profiling_disabled": true
+      },
+      "type_gaps_ms": {
+        "n": 31,
+        "min": 50.62491702847183,
+        "median": 53.93695808015764,
+        "max": 56.34999996982515
+      },
+      "scroll_gaps_ms": null,
+      "scroll_events": 0,
+      "typing_span_seconds": 1.6583888339810073,
+      "actual_scroll_hz": null,
+      "child_cpu_lifecycle_seconds": 0.5134919999999985,
+      "wall_lifecycle_plus_analysis_seconds": 6.021051874966361,
+      "phase_start": 600525.827236166,
+      "phase_end": 600527.540963083,
+      "load_before": [
+        292.92822265625,
+        227.32568359375,
+        166.9609375
+      ],
+      "load_after": [
+        294.615234375,
+        228.76416015625,
+        167.822265625
+      ],
+      "submitted_message_exact": null
+    },
+    {
+      "pair": 3,
+      "label": "before",
+      "condition": "pageup",
+      "input_result": "paired-bae/pair-03-before-pageup/pageup/result.json",
+      "result_sha256": "b819f50669255669b7254a59ec6a4c8c0f69c136c20a0ba601806f8c52f59b1a",
+      "binary_sha256": "ebcbe53ff38f8a60ce456bd20d8f05a9542f8deb7fa450400475505078fdb93b",
+      "probe_sha256": "b43594f33f14edbe18d07eb98fac62e8a99c3803f74b0a04fd215ed0e0d30efd",
+      "fixture_modules_sha256": {
+        "test_tui_chat_owed_history.py": "1c71418a7fb85c958be82cb4b4a00ff6e374164debe65a1ab33affeeb096c928",
+        "test_tui_fusion_recovery.py": "51a3675250ef38dfec902211bd3e4761063375bb16692837e73a1bdde28cf81a"
+      },
+      "history_sha256": "b1d4d6fa6c3ffc1a1ee129bd2057d57f0460ee5ccc30b138e2dcaca7b584703b",
+      "latency": {
+        "n": 32,
+        "p50_ms": 2.298083039931953,
+        "p95_ms": 14.092749916017056,
+        "max_ms": 29.125290922820568,
+        "mean_ms": 5.3432668682944495
+      },
+      "missing": 0,
+      "errors": [],
+      "checks": {
+        "binary_hash_stable_and_expected": true,
+        "probe_hash_expected": true,
+        "fixture_copies_match_expected_hashes": true,
+        "same_retained_history": true,
+        "same_history_shape": true,
+        "all_input_bytes_written": true,
+        "exact_typing_bytes_and_count": true,
+        "all_expected_prefixes_observed": true,
+        "ordered_prefixes_match_sent_text": true,
+        "reported_p95_matches_raw_record_clocks": true,
+        "clock_order": true,
+        "capture_chunk_lengths_exact": true,
+        "condition_positioning": true,
+        "observation_complete_echo_off": true,
+        "no_errors_clean_exit": true,
+        "profiling_disabled": true
+      },
+      "type_gaps_ms": {
+        "n": 31,
+        "min": 51.20683403220028,
+        "median": 54.710458032786846,
+        "max": 56.562375044450164
+      },
+      "scroll_gaps_ms": {
+        "n": 72,
+        "min": 20.837082993239164,
+        "median": 24.195999489165843,
+        "max": 28.242541011422873
+      },
+      "scroll_events": 73,
+      "typing_span_seconds": 1.6846925829304382,
+      "actual_scroll_hz": 41.658854617652345,
+      "child_cpu_lifecycle_seconds": 1.072893999999998,
+      "wall_lifecycle_plus_analysis_seconds": 6.335224417038262,
+      "phase_start": 600545.61538125,
+      "phase_end": 600547.3561455,
+      "load_before": [
+        293.44140625,
+        231.76953125,
+        169.96142578125
+      ],
+      "load_after": [
+        294.04638671875,
+        232.91845703125,
+        170.72900390625
+      ],
+      "submitted_message_exact": null
+    },
+    {
+      "pair": 3,
+      "label": "after",
+      "condition": "pageup",
+      "input_result": "paired-bae/pair-03-after-pageup/pageup/result.json",
+      "result_sha256": "876518bd53042c61c3089fe2f2c1dc0893a88b8d776f7d13e6232bf9c9567c62",
+      "binary_sha256": "85c7d5bc40b0b99de9bfd9492604f0c3b4176d7cd4f53d85a34d4bd5a1924139",
+      "probe_sha256": "b43594f33f14edbe18d07eb98fac62e8a99c3803f74b0a04fd215ed0e0d30efd",
+      "fixture_modules_sha256": {
+        "test_tui_chat_owed_history.py": "1c71418a7fb85c958be82cb4b4a00ff6e374164debe65a1ab33affeeb096c928",
+        "test_tui_fusion_recovery.py": "51a3675250ef38dfec902211bd3e4761063375bb16692837e73a1bdde28cf81a"
+      },
+      "history_sha256": "b1d4d6fa6c3ffc1a1ee129bd2057d57f0460ee5ccc30b138e2dcaca7b584703b",
+      "latency": {
+        "n": 32,
+        "p50_ms": 3.1437090365216136,
+        "p95_ms": 16.407166025601327,
+        "max_ms": 48.97150001488626,
+        "mean_ms": 5.815097556478577
+      },
+      "missing": 0,
+      "errors": [],
+      "checks": {
+        "binary_hash_stable_and_expected": true,
+        "probe_hash_expected": true,
+        "fixture_copies_match_expected_hashes": true,
+        "same_retained_history": true,
+        "same_history_shape": true,
+        "all_input_bytes_written": true,
+        "exact_typing_bytes_and_count": true,
+        "all_expected_prefixes_observed": true,
+        "ordered_prefixes_match_sent_text": true,
+        "reported_p95_matches_raw_record_clocks": true,
+        "clock_order": true,
+        "capture_chunk_lengths_exact": true,
+        "condition_positioning": true,
+        "observation_complete_echo_off": true,
+        "no_errors_clean_exit": true,
+        "profiling_disabled": true
+      },
+      "type_gaps_ms": {
+        "n": 31,
+        "min": 50.722540938295424,
+        "median": 53.497917018830776,
+        "max": 59.38937491737306
+      },
+      "scroll_gaps_ms": {
+        "n": 71,
+        "min": 20.325416000559926,
+        "median": 24.22762499190867,
+        "max": 31.522249919362366
+      },
+      "scroll_events": 72,
+      "typing_span_seconds": 1.6652671250049025,
+      "actual_scroll_hz": 41.81256178570505,
+      "child_cpu_lifecycle_seconds": 0.7767049999999998,
+      "wall_lifecycle_plus_analysis_seconds": 5.758952916949056,
+      "phase_start": 600539.046574333,
+      "phase_end": 600540.762532458,
+      "load_before": [
+        295.20654296875,
+        229.97998046875,
+        168.6083984375
+      ],
+      "load_after": [
+        293.44140625,
+        231.76953125,
+        169.96142578125
+      ],
+      "submitted_message_exact": null
+    },
+    {
+      "pair": 3,
+      "label": "before",
+      "condition": "pagedown",
+      "input_result": "paired-bae/pair-03-before-pagedown/pagedown/result.json",
+      "result_sha256": "887b56494adda3c833042e0cd517669dcfc0c2343e740e425e75d9e00edd3d48",
+      "binary_sha256": "ebcbe53ff38f8a60ce456bd20d8f05a9542f8deb7fa450400475505078fdb93b",
+      "probe_sha256": "b43594f33f14edbe18d07eb98fac62e8a99c3803f74b0a04fd215ed0e0d30efd",
+      "fixture_modules_sha256": {
+        "test_tui_chat_owed_history.py": "1c71418a7fb85c958be82cb4b4a00ff6e374164debe65a1ab33affeeb096c928",
+        "test_tui_fusion_recovery.py": "51a3675250ef38dfec902211bd3e4761063375bb16692837e73a1bdde28cf81a"
+      },
+      "history_sha256": "b1d4d6fa6c3ffc1a1ee129bd2057d57f0460ee5ccc30b138e2dcaca7b584703b",
+      "latency": {
+        "n": 32,
+        "p50_ms": 2.0697920117527246,
+        "p95_ms": 20.65595902968198,
+        "max_ms": 26.501749991439283,
+        "mean_ms": 5.517102868907386
+      },
+      "missing": 0,
+      "errors": [],
+      "checks": {
+        "binary_hash_stable_and_expected": true,
+        "probe_hash_expected": true,
+        "fixture_copies_match_expected_hashes": true,
+        "same_retained_history": true,
+        "same_history_shape": true,
+        "all_input_bytes_written": true,
+        "exact_typing_bytes_and_count": true,
+        "all_expected_prefixes_observed": true,
+        "ordered_prefixes_match_sent_text": true,
+        "reported_p95_matches_raw_record_clocks": true,
+        "clock_order": true,
+        "capture_chunk_lengths_exact": true,
+        "condition_positioning": true,
+        "observation_complete_echo_off": true,
+        "no_errors_clean_exit": true,
+        "profiling_disabled": true
+      },
+      "type_gaps_ms": {
+        "n": 31,
+        "min": 51.192666054703295,
+        "median": 54.21141698025167,
+        "max": 59.50733309146017
+      },
+      "scroll_gaps_ms": {
+        "n": 70,
+        "min": 20.520249963738024,
+        "median": 24.093604064546525,
+        "max": 39.41845800727606
+      },
+      "scroll_events": 71,
+      "typing_span_seconds": 1.6881004580063745,
+      "actual_scroll_hz": 40.677370236305,
+      "child_cpu_lifecycle_seconds": 1.4309790000000024,
+      "wall_lifecycle_plus_analysis_seconds": 12.13911116705276,
+      "phase_start": 600567.910422208,
+      "phase_end": 600569.652736916,
+      "load_before": [
+        302.82763671875,
+        236.83349609375,
+        172.84619140625
+      ],
+      "load_after": [
+        289.71875,
+        236.14404296875,
+        173.345703125
+      ],
+      "submitted_message_exact": null
+    },
+    {
+      "pair": 3,
+      "label": "after",
+      "condition": "pagedown",
+      "input_result": "paired-bae/pair-03-after-pagedown/pagedown/result.json",
+      "result_sha256": "ae903c52d7e2fe0181229a913458a71ed4b4e60b100cd852b0e5af372890e5df",
+      "binary_sha256": "85c7d5bc40b0b99de9bfd9492604f0c3b4176d7cd4f53d85a34d4bd5a1924139",
+      "probe_sha256": "b43594f33f14edbe18d07eb98fac62e8a99c3803f74b0a04fd215ed0e0d30efd",
+      "fixture_modules_sha256": {
+        "test_tui_chat_owed_history.py": "1c71418a7fb85c958be82cb4b4a00ff6e374164debe65a1ab33affeeb096c928",
+        "test_tui_fusion_recovery.py": "51a3675250ef38dfec902211bd3e4761063375bb16692837e73a1bdde28cf81a"
+      },
+      "history_sha256": "b1d4d6fa6c3ffc1a1ee129bd2057d57f0460ee5ccc30b138e2dcaca7b584703b",
+      "latency": {
+        "n": 32,
+        "p50_ms": 2.1226670360192657,
+        "p95_ms": 8.225042023696005,
+        "max_ms": 9.659708011895418,
+        "mean_ms": 2.945777367131086
+      },
+      "missing": 0,
+      "errors": [],
+      "checks": {
+        "binary_hash_stable_and_expected": true,
+        "probe_hash_expected": true,
+        "fixture_copies_match_expected_hashes": true,
+        "same_retained_history": true,
+        "same_history_shape": true,
+        "all_input_bytes_written": true,
+        "exact_typing_bytes_and_count": true,
+        "all_expected_prefixes_observed": true,
+        "ordered_prefixes_match_sent_text": true,
+        "reported_p95_matches_raw_record_clocks": true,
+        "clock_order": true,
+        "capture_chunk_lengths_exact": true,
+        "condition_positioning": true,
+        "observation_complete_echo_off": true,
+        "no_errors_clean_exit": true,
+        "profiling_disabled": true
+      },
+      "type_gaps_ms": {
+        "n": 31,
+        "min": 51.017832942306995,
+        "median": 53.34183294326067,
+        "max": 56.11850006971508
+      },
+      "scroll_gaps_ms": {
+        "n": 70,
+        "min": 21.38554200064391,
+        "median": 24.12231295602396,
+        "max": 28.037792071700096
+      },
+      "scroll_events": 71,
+      "typing_span_seconds": 1.6559571659890935,
+      "actual_scroll_hz": 41.09589140723166,
+      "child_cpu_lifecycle_seconds": 1.0483049999999992,
+      "wall_lifecycle_plus_analysis_seconds": 9.207349958945997,
+      "phase_start": 600554.945214166,
+      "phase_end": 600556.656745708,
+      "load_before": [
+        294.04638671875,
+        232.91845703125,
+        170.72900390625
+      ],
+      "load_after": [
+        302.82763671875,
+        236.83349609375,
+        172.84619140625
+      ],
+      "submitted_message_exact": null
+    },
+    {
+      "pair": 3,
+      "label": "before",
+      "condition": "wheelup",
+      "input_result": "paired-bae/pair-03-before-wheelup/wheelup/result.json",
+      "result_sha256": "7e77947e8eecefba0708703850e1232b128b48f2682ec6da1a51218612cbe40d",
+      "binary_sha256": "ebcbe53ff38f8a60ce456bd20d8f05a9542f8deb7fa450400475505078fdb93b",
+      "probe_sha256": "b43594f33f14edbe18d07eb98fac62e8a99c3803f74b0a04fd215ed0e0d30efd",
+      "fixture_modules_sha256": {
+        "test_tui_chat_owed_history.py": "1c71418a7fb85c958be82cb4b4a00ff6e374164debe65a1ab33affeeb096c928",
+        "test_tui_fusion_recovery.py": "51a3675250ef38dfec902211bd3e4761063375bb16692837e73a1bdde28cf81a"
+      },
+      "history_sha256": "b1d4d6fa6c3ffc1a1ee129bd2057d57f0460ee5ccc30b138e2dcaca7b584703b",
+      "latency": {
+        "n": 32,
+        "p50_ms": 2.2928339894860983,
+        "p95_ms": 14.127833070233464,
+        "max_ms": 28.73933408409357,
+        "mean_ms": 5.089199217763962
+      },
+      "missing": 0,
+      "errors": [],
+      "checks": {
+        "binary_hash_stable_and_expected": true,
+        "probe_hash_expected": true,
+        "fixture_copies_match_expected_hashes": true,
+        "same_retained_history": true,
+        "same_history_shape": true,
+        "all_input_bytes_written": true,
+        "exact_typing_bytes_and_count": true,
+        "all_expected_prefixes_observed": true,
+        "ordered_prefixes_match_sent_text": true,
+        "reported_p95_matches_raw_record_clocks": true,
+        "clock_order": true,
+        "capture_chunk_lengths_exact": true,
+        "condition_positioning": true,
+        "observation_complete_echo_off": true,
+        "no_errors_clean_exit": true,
+        "profiling_disabled": true
+      },
+      "type_gaps_ms": {
+        "n": 31,
+        "min": 50.77287496533245,
+        "median": 53.62112505827099,
+        "max": 62.49537493567914
+      },
+      "scroll_gaps_ms": {
+        "n": 72,
+        "min": 20.361167029477656,
+        "median": 23.9526245277375,
+        "max": 28.43308402225375
+      },
+      "scroll_events": 73,
+      "typing_span_seconds": 1.6683963329996914,
+      "actual_scroll_hz": 41.911791831026456,
+      "child_cpu_lifecycle_seconds": 0.7404209999999969,
+      "wall_lifecycle_plus_analysis_seconds": 6.392736333073117,
+      "phase_start": 600505.545141708,
+      "phase_end": 600507.268466125,
+      "load_before": [
+        291.4951171875,
+        222.61865234375,
+        163.91357421875
+      ],
+      "load_after": [
+        289.29296875,
+        223.30517578125,
+        164.5
+      ],
+      "submitted_message_exact": null
+    },
+    {
+      "pair": 3,
+      "label": "after",
+      "condition": "wheelup",
+      "input_result": "paired-bae/pair-03-after-wheelup/wheelup/result.json",
+      "result_sha256": "b8be6fe70bfa5a324df0d394ade42dff5ef0fa1efe377b6c92a77fed7f760aa9",
+      "binary_sha256": "85c7d5bc40b0b99de9bfd9492604f0c3b4176d7cd4f53d85a34d4bd5a1924139",
+      "probe_sha256": "b43594f33f14edbe18d07eb98fac62e8a99c3803f74b0a04fd215ed0e0d30efd",
+      "fixture_modules_sha256": {
+        "test_tui_chat_owed_history.py": "1c71418a7fb85c958be82cb4b4a00ff6e374164debe65a1ab33affeeb096c928",
+        "test_tui_fusion_recovery.py": "51a3675250ef38dfec902211bd3e4761063375bb16692837e73a1bdde28cf81a"
+      },
+      "history_sha256": "b1d4d6fa6c3ffc1a1ee129bd2057d57f0460ee5ccc30b138e2dcaca7b584703b",
+      "latency": {
+        "n": 32,
+        "p50_ms": 3.111874917522073,
+        "p95_ms": 18.516083946451545,
+        "max_ms": 33.57287496328354,
+        "mean_ms": 5.999169290589634
+      },
+      "missing": 0,
+      "errors": [],
+      "checks": {
+        "binary_hash_stable_and_expected": true,
+        "probe_hash_expected": true,
+        "fixture_copies_match_expected_hashes": true,
+        "same_retained_history": true,
+        "same_history_shape": true,
+        "all_input_bytes_written": true,
+        "exact_typing_bytes_and_count": true,
+        "all_expected_prefixes_observed": true,
+        "ordered_prefixes_match_sent_text": true,
+        "reported_p95_matches_raw_record_clocks": true,
+        "clock_order": true,
+        "capture_chunk_lengths_exact": true,
+        "condition_positioning": true,
+        "observation_complete_echo_off": true,
+        "no_errors_clean_exit": true,
+        "profiling_disabled": true
+      },
+      "type_gaps_ms": {
+        "n": 31,
+        "min": 51.10791709739715,
+        "median": 54.56158297602087,
+        "max": 58.54816595092416
+      },
+      "scroll_gaps_ms": {
+        "n": 71,
+        "min": 20.423625013791025,
+        "median": 24.34708399232477,
+        "max": 29.483124963007867
+      },
+      "scroll_events": 72,
+      "typing_span_seconds": 1.6851811250671744,
+      "actual_scroll_hz": 41.36857339428932,
+      "child_cpu_lifecycle_seconds": 0.6450950000000013,
+      "wall_lifecycle_plus_analysis_seconds": 6.064752292004414,
+      "phase_start": 600499.175957291,
+      "phase_end": 600500.915879,
+      "load_before": [
+        284.0390625,
+        218.8369140625,
+        161.904296875
+      ],
+      "load_after": [
+        291.4951171875,
+        222.61865234375,
+        163.91357421875
+      ],
+      "submitted_message_exact": null
+    },
+    {
+      "pair": 3,
+      "label": "before",
+      "condition": "wheeldown",
+      "input_result": "paired-bae/pair-03-before-wheeldown/wheeldown/result.json",
+      "result_sha256": "fffcaf9b3cf708b8a2697919aad78f0f6db33f0157cc7955850f4fadca7ea8d2",
+      "binary_sha256": "ebcbe53ff38f8a60ce456bd20d8f05a9542f8deb7fa450400475505078fdb93b",
+      "probe_sha256": "b43594f33f14edbe18d07eb98fac62e8a99c3803f74b0a04fd215ed0e0d30efd",
+      "fixture_modules_sha256": {
+        "test_tui_chat_owed_history.py": "1c71418a7fb85c958be82cb4b4a00ff6e374164debe65a1ab33affeeb096c928",
+        "test_tui_fusion_recovery.py": "51a3675250ef38dfec902211bd3e4761063375bb16692837e73a1bdde28cf81a"
+      },
+      "history_sha256": "b1d4d6fa6c3ffc1a1ee129bd2057d57f0460ee5ccc30b138e2dcaca7b584703b",
+      "latency": {
+        "n": 32,
+        "p50_ms": 2.116458024829626,
+        "p95_ms": 25.29687504284084,
+        "max_ms": 44.10583304706961,
+        "mean_ms": 6.1721093516098335
+      },
+      "missing": 0,
+      "errors": [],
+      "checks": {
+        "binary_hash_stable_and_expected": true,
+        "probe_hash_expected": true,
+        "fixture_copies_match_expected_hashes": true,
+        "same_retained_history": true,
+        "same_history_shape": true,
+        "all_input_bytes_written": true,
+        "exact_typing_bytes_and_count": true,
+        "all_expected_prefixes_observed": true,
+        "ordered_prefixes_match_sent_text": true,
+        "reported_p95_matches_raw_record_clocks": true,
+        "clock_order": true,
+        "capture_chunk_lengths_exact": true,
+        "condition_positioning": true,
+        "observation_complete_echo_off": true,
+        "no_errors_clean_exit": true,
+        "profiling_disabled": true
+      },
+      "type_gaps_ms": {
+        "n": 31,
+        "min": 50.41308293584734,
+        "median": 54.59016701206565,
+        "max": 59.73895895294845
+      },
+      "scroll_gaps_ms": {
+        "n": 72,
+        "min": 20.54716693237424,
+        "median": 24.527604517061263,
+        "max": 29.66366696637124
+      },
+      "scroll_events": 73,
+      "typing_span_seconds": 1.6884522080654278,
+      "actual_scroll_hz": 41.509896542693276,
+      "child_cpu_lifecycle_seconds": 0.6974130000000018,
+      "wall_lifecycle_plus_analysis_seconds": 6.4070673329988495,
+      "phase_start": 600519.296486625,
+      "phase_end": 600521.039524625,
+      "load_before": [
+        291.51123046875,
+        224.8603515625,
+        165.3935546875
+      ],
+      "load_after": [
+        292.92822265625,
+        227.32568359375,
+        166.9609375
+      ],
+      "submitted_message_exact": null
+    },
+    {
+      "pair": 3,
+      "label": "after",
+      "condition": "wheeldown",
+      "input_result": "paired-bae/pair-03-after-wheeldown/wheeldown/result.json",
+      "result_sha256": "354e8ae89f546e921fadd2fd04d94286171ca40550700f300db061f7fa5289a9",
+      "binary_sha256": "85c7d5bc40b0b99de9bfd9492604f0c3b4176d7cd4f53d85a34d4bd5a1924139",
+      "probe_sha256": "b43594f33f14edbe18d07eb98fac62e8a99c3803f74b0a04fd215ed0e0d30efd",
+      "fixture_modules_sha256": {
+        "test_tui_chat_owed_history.py": "1c71418a7fb85c958be82cb4b4a00ff6e374164debe65a1ab33affeeb096c928",
+        "test_tui_fusion_recovery.py": "51a3675250ef38dfec902211bd3e4761063375bb16692837e73a1bdde28cf81a"
+      },
+      "history_sha256": "b1d4d6fa6c3ffc1a1ee129bd2057d57f0460ee5ccc30b138e2dcaca7b584703b",
+      "latency": {
+        "n": 32,
+        "p50_ms": 3.001832985319197,
+        "p95_ms": 16.838334035128355,
+        "max_ms": 32.28320798370987,
+        "mean_ms": 5.42938020589645
+      },
+      "missing": 0,
+      "errors": [],
+      "checks": {
+        "binary_hash_stable_and_expected": true,
+        "probe_hash_expected": true,
+        "fixture_copies_match_expected_hashes": true,
+        "same_retained_history": true,
+        "same_history_shape": true,
+        "all_input_bytes_written": true,
+        "exact_typing_bytes_and_count": true,
+        "all_expected_prefixes_observed": true,
+        "ordered_prefixes_match_sent_text": true,
+        "reported_p95_matches_raw_record_clocks": true,
+        "clock_order": true,
+        "capture_chunk_lengths_exact": true,
+        "condition_positioning": true,
+        "observation_complete_echo_off": true,
+        "no_errors_clean_exit": true,
+        "profiling_disabled": true
+      },
+      "type_gaps_ms": {
+        "n": 31,
+        "min": 50.20604201126844,
+        "median": 54.15004107635468,
+        "max": 58.116624946706
+      },
+      "scroll_gaps_ms": {
+        "n": 72,
+        "min": 20.591584034264088,
+        "median": 23.738145479001105,
+        "max": 28.434500098228455
+      },
+      "scroll_events": 73,
+      "typing_span_seconds": 1.6669844170100987,
+      "actual_scroll_hz": 42.11170509263539,
+      "child_cpu_lifecycle_seconds": 0.6632240000000005,
+      "wall_lifecycle_plus_analysis_seconds": 6.470807290985249,
+      "phase_start": 600512.311002083,
+      "phase_end": 600514.0309445,
+      "load_before": [
+        289.29296875,
+        223.30517578125,
+        164.5
+      ],
+      "load_after": [
+        291.51123046875,
+        224.8603515625,
+        165.3935546875
+      ],
+      "submitted_message_exact": null
+    },
+    {
+      "pair": 4,
+      "label": "before",
+      "condition": "typing",
+      "input_result": "paired-bae/pair-04-before-typing/typing/result.json",
+      "result_sha256": "2763ec6c3be061ce862361f9d0f41cfe8750dd3c5162e7d6ae897c0a6ec255c1",
+      "binary_sha256": "ebcbe53ff38f8a60ce456bd20d8f05a9542f8deb7fa450400475505078fdb93b",
+      "probe_sha256": "b43594f33f14edbe18d07eb98fac62e8a99c3803f74b0a04fd215ed0e0d30efd",
+      "fixture_modules_sha256": {
+        "test_tui_chat_owed_history.py": "1c71418a7fb85c958be82cb4b4a00ff6e374164debe65a1ab33affeeb096c928",
+        "test_tui_fusion_recovery.py": "51a3675250ef38dfec902211bd3e4761063375bb16692837e73a1bdde28cf81a"
+      },
+      "history_sha256": "b1d4d6fa6c3ffc1a1ee129bd2057d57f0460ee5ccc30b138e2dcaca7b584703b",
+      "latency": {
+        "n": 32,
+        "p50_ms": 1.6274580266326666,
+        "p95_ms": 8.265041979029775,
+        "max_ms": 12.722124927677214,
+        "mean_ms": 2.8199258085805923
+      },
+      "missing": 0,
+      "errors": [],
+      "checks": {
+        "binary_hash_stable_and_expected": true,
+        "probe_hash_expected": true,
+        "fixture_copies_match_expected_hashes": true,
+        "same_retained_history": true,
+        "same_history_shape": true,
+        "all_input_bytes_written": true,
+        "exact_typing_bytes_and_count": true,
+        "all_expected_prefixes_observed": true,
+        "ordered_prefixes_match_sent_text": true,
+        "reported_p95_matches_raw_record_clocks": true,
+        "clock_order": true,
+        "capture_chunk_lengths_exact": true,
+        "condition_positioning": true,
+        "observation_complete_echo_off": true,
+        "no_errors_clean_exit": true,
+        "profiling_disabled": true
+      },
+      "type_gaps_ms": {
+        "n": 31,
+        "min": 52.644666051492095,
+        "median": 54.74695796146989,
+        "max": 62.587292050011456
+      },
+      "scroll_gaps_ms": null,
+      "scroll_events": 0,
+      "typing_span_seconds": 1.7008889169665053,
+      "actual_scroll_hz": null,
+      "child_cpu_lifecycle_seconds": 0.5638050000000021,
+      "wall_lifecycle_plus_analysis_seconds": 6.174528916948475,
+      "phase_start": 600587.383935125,
+      "phase_end": 600589.1382155,
+      "load_before": [
+        271.4580078125,
+        234.79736328125,
+        173.96533203125
+      ],
+      "load_after": [
+        272.4619140625,
+        235.61376953125,
+        174.60986328125
+      ],
+      "submitted_message_exact": null
+    },
+    {
+      "pair": 4,
+      "label": "after",
+      "condition": "typing",
+      "input_result": "paired-bae/pair-04-after-typing/typing/result.json",
+      "result_sha256": "3a4de34e613bb7ff7b5ed6ab5c8ff69e81b882e214f2b8c2130b20da84cb2316",
+      "binary_sha256": "85c7d5bc40b0b99de9bfd9492604f0c3b4176d7cd4f53d85a34d4bd5a1924139",
+      "probe_sha256": "b43594f33f14edbe18d07eb98fac62e8a99c3803f74b0a04fd215ed0e0d30efd",
+      "fixture_modules_sha256": {
+        "test_tui_chat_owed_history.py": "1c71418a7fb85c958be82cb4b4a00ff6e374164debe65a1ab33affeeb096c928",
+        "test_tui_fusion_recovery.py": "51a3675250ef38dfec902211bd3e4761063375bb16692837e73a1bdde28cf81a"
+      },
+      "history_sha256": "b1d4d6fa6c3ffc1a1ee129bd2057d57f0460ee5ccc30b138e2dcaca7b584703b",
+      "latency": {
+        "n": 32,
+        "p50_ms": 1.6544590471312404,
+        "p95_ms": 10.154000017791986,
+        "max_ms": 49.33362500742078,
+        "mean_ms": 4.355704331828747
+      },
+      "missing": 0,
+      "errors": [],
+      "checks": {
+        "binary_hash_stable_and_expected": true,
+        "probe_hash_expected": true,
+        "fixture_copies_match_expected_hashes": true,
+        "same_retained_history": true,
+        "same_history_shape": true,
+        "all_input_bytes_written": true,
+        "exact_typing_bytes_and_count": true,
+        "all_expected_prefixes_observed": true,
+        "ordered_prefixes_match_sent_text": true,
+        "reported_p95_matches_raw_record_clocks": true,
+        "clock_order": true,
+        "capture_chunk_lengths_exact": true,
+        "condition_positioning": true,
+        "observation_complete_echo_off": true,
+        "no_errors_clean_exit": true,
+        "profiling_disabled": true
+      },
+      "type_gaps_ms": {
+        "n": 31,
+        "min": 50.67070899531245,
+        "median": 54.773458978161216,
+        "max": 59.1417500982061
+      },
+      "scroll_gaps_ms": null,
+      "scroll_events": 0,
+      "typing_span_seconds": 1.6898172080982476,
+      "actual_scroll_hz": null,
+      "child_cpu_lifecycle_seconds": 0.5384199999999986,
+      "wall_lifecycle_plus_analysis_seconds": 6.041893125046045,
+      "phase_start": 600593.445514541,
+      "phase_end": 600595.187260375,
+      "load_before": [
+        272.4619140625,
+        235.61376953125,
+        174.60986328125
+      ],
+      "load_after": [
+        271.9296875,
+        236.66015625,
+        175.6904296875
+      ],
+      "submitted_message_exact": null
+    },
+    {
+      "pair": 4,
+      "label": "before",
+      "condition": "pageup",
+      "input_result": "paired-bae/pair-04-before-pageup/pageup/result.json",
+      "result_sha256": "028efb93b8753e4f48a48ac87f3040a4d077d9aae551ce195e2babe8606f0255",
+      "binary_sha256": "ebcbe53ff38f8a60ce456bd20d8f05a9542f8deb7fa450400475505078fdb93b",
+      "probe_sha256": "b43594f33f14edbe18d07eb98fac62e8a99c3803f74b0a04fd215ed0e0d30efd",
+      "fixture_modules_sha256": {
+        "test_tui_chat_owed_history.py": "1c71418a7fb85c958be82cb4b4a00ff6e374164debe65a1ab33affeeb096c928",
+        "test_tui_fusion_recovery.py": "51a3675250ef38dfec902211bd3e4761063375bb16692837e73a1bdde28cf81a"
+      },
+      "history_sha256": "b1d4d6fa6c3ffc1a1ee129bd2057d57f0460ee5ccc30b138e2dcaca7b584703b",
+      "latency": {
+        "n": 32,
+        "p50_ms": 2.866583992727101,
+        "p95_ms": 16.94641704671085,
+        "max_ms": 45.822791988030076,
+        "mean_ms": 6.196877657203004
+      },
+      "missing": 0,
+      "errors": [],
+      "checks": {
+        "binary_hash_stable_and_expected": true,
+        "probe_hash_expected": true,
+        "fixture_copies_match_expected_hashes": true,
+        "same_retained_history": true,
+        "same_history_shape": true,
+        "all_input_bytes_written": true,
+        "exact_typing_bytes_and_count": true,
+        "all_expected_prefixes_observed": true,
+        "ordered_prefixes_match_sent_text": true,
+        "reported_p95_matches_raw_record_clocks": true,
+        "clock_order": true,
+        "capture_chunk_lengths_exact": true,
+        "condition_positioning": true,
+        "observation_complete_echo_off": true,
+        "no_errors_clean_exit": true,
+        "profiling_disabled": true
+      },
+      "type_gaps_ms": {
+        "n": 31,
+        "min": 51.26079102046788,
+        "median": 54.3402909534052,
+        "max": 60.985750053077936
+      },
+      "scroll_gaps_ms": {
+        "n": 73,
+        "min": 20.449416944757104,
+        "median": 23.571374942548573,
+        "max": 30.916416086256504
+      },
+      "scroll_events": 74,
+      "typing_span_seconds": 1.6828070839401335,
+      "actual_scroll_hz": 42.29880791328001,
+      "child_cpu_lifecycle_seconds": 1.3339450000000017,
+      "wall_lifecycle_plus_analysis_seconds": 6.657129665953107,
+      "phase_start": 600600.580495625,
+      "phase_end": 600602.316881708,
+      "load_before": [
+        271.9296875,
+        236.66015625,
+        175.6904296875
+      ],
+      "load_after": [
+        270.89404296875,
+        237.03076171875,
+        176.17822265625
+      ],
+      "submitted_message_exact": null
+    },
+    {
+      "pair": 4,
+      "label": "after",
+      "condition": "pageup",
+      "input_result": "paired-bae/pair-04-after-pageup/pageup/result.json",
+      "result_sha256": "3f85505e24cdd028b0098e9ece52772106270d59398974f590210f1b45f34491",
+      "binary_sha256": "85c7d5bc40b0b99de9bfd9492604f0c3b4176d7cd4f53d85a34d4bd5a1924139",
+      "probe_sha256": "b43594f33f14edbe18d07eb98fac62e8a99c3803f74b0a04fd215ed0e0d30efd",
+      "fixture_modules_sha256": {
+        "test_tui_chat_owed_history.py": "1c71418a7fb85c958be82cb4b4a00ff6e374164debe65a1ab33affeeb096c928",
+        "test_tui_fusion_recovery.py": "51a3675250ef38dfec902211bd3e4761063375bb16692837e73a1bdde28cf81a"
+      },
+      "history_sha256": "b1d4d6fa6c3ffc1a1ee129bd2057d57f0460ee5ccc30b138e2dcaca7b584703b",
+      "latency": {
+        "n": 32,
+        "p50_ms": 2.971207955852151,
+        "p95_ms": 13.915957999415696,
+        "max_ms": 40.50466604530811,
+        "mean_ms": 5.68615098745795
+      },
+      "missing": 0,
+      "errors": [],
+      "checks": {
+        "binary_hash_stable_and_expected": true,
+        "probe_hash_expected": true,
+        "fixture_copies_match_expected_hashes": true,
+        "same_retained_history": true,
+        "same_history_shape": true,
+        "all_input_bytes_written": true,
+        "exact_typing_bytes_and_count": true,
+        "all_expected_prefixes_observed": true,
+        "ordered_prefixes_match_sent_text": true,
+        "reported_p95_matches_raw_record_clocks": true,
+        "clock_order": true,
+        "capture_chunk_lengths_exact": true,
+        "condition_positioning": true,
+        "observation_complete_echo_off": true,
+        "no_errors_clean_exit": true,
+        "profiling_disabled": true
+      },
+      "type_gaps_ms": {
+        "n": 31,
+        "min": 50.61383300926536,
+        "median": 54.23666606657207,
+        "max": 58.637040900066495
+      },
+      "scroll_gaps_ms": {
+        "n": 72,
+        "min": 20.98549995571375,
+        "median": 24.053875007666647,
+        "max": 26.292915921658278
+      },
+      "scroll_events": 73,
+      "typing_span_seconds": 1.675060541019775,
+      "actual_scroll_hz": 42.15192504286913,
+      "child_cpu_lifecycle_seconds": 0.8138240000000003,
+      "wall_lifecycle_plus_analysis_seconds": 6.016538333031349,
+      "phase_start": 600606.777815416,
+      "phase_end": 600608.505302666,
+      "load_before": [
+        270.89404296875,
+        237.03076171875,
+        176.17822265625
+      ],
+      "load_after": [
+        272.18359375,
+        237.85986328125,
+        176.8271484375
+      ],
+      "submitted_message_exact": null
+    },
+    {
+      "pair": 4,
+      "label": "before",
+      "condition": "pagedown",
+      "input_result": "paired-bae/pair-04-before-pagedown/pagedown/result.json",
+      "result_sha256": "d6334074d97f7cf8ee926127ec85b5a374f8001cc1065511708883542108cdbd",
+      "binary_sha256": "ebcbe53ff38f8a60ce456bd20d8f05a9542f8deb7fa450400475505078fdb93b",
+      "probe_sha256": "b43594f33f14edbe18d07eb98fac62e8a99c3803f74b0a04fd215ed0e0d30efd",
+      "fixture_modules_sha256": {
+        "test_tui_chat_owed_history.py": "1c71418a7fb85c958be82cb4b4a00ff6e374164debe65a1ab33affeeb096c928",
+        "test_tui_fusion_recovery.py": "51a3675250ef38dfec902211bd3e4761063375bb16692837e73a1bdde28cf81a"
+      },
+      "history_sha256": "b1d4d6fa6c3ffc1a1ee129bd2057d57f0460ee5ccc30b138e2dcaca7b584703b",
+      "latency": {
+        "n": 32,
+        "p50_ms": 3.735083038918674,
+        "p95_ms": 29.082708992064,
+        "max_ms": 50.35645794123411,
+        "mean_ms": 8.047510407777736
+      },
+      "missing": 0,
+      "errors": [],
+      "checks": {
+        "binary_hash_stable_and_expected": true,
+        "probe_hash_expected": true,
+        "fixture_copies_match_expected_hashes": true,
+        "same_retained_history": true,
+        "same_history_shape": true,
+        "all_input_bytes_written": true,
+        "exact_typing_bytes_and_count": true,
+        "all_expected_prefixes_observed": true,
+        "ordered_prefixes_match_sent_text": true,
+        "reported_p95_matches_raw_record_clocks": true,
+        "clock_order": true,
+        "capture_chunk_lengths_exact": true,
+        "condition_positioning": true,
+        "observation_complete_echo_off": true,
+        "no_errors_clean_exit": true,
+        "profiling_disabled": true
+      },
+      "type_gaps_ms": {
+        "n": 31,
+        "min": 51.1174580315128,
+        "median": 54.50404097791761,
+        "max": 62.7446249127388
+      },
+      "scroll_gaps_ms": {
+        "n": 74,
+        "min": 20.176165970042348,
+        "median": 24.116583459544927,
+        "max": 29.45383300539106
+      },
+      "scroll_events": 75,
+      "typing_span_seconds": 1.703366959001869,
+      "actual_scroll_hz": 41.919807259586385,
+      "child_cpu_lifecycle_seconds": 1.3589689999999965,
+      "wall_lifecycle_plus_analysis_seconds": 9.067479041987099,
+      "phase_start": 600616.009337916,
+      "phase_end": 600617.775589916,
+      "load_before": [
+        272.18359375,
+        237.85986328125,
+        176.8271484375
+      ],
+      "load_after": [
+        279.20458984375,
+        240.51025390625,
+        178.48193359375
+      ],
+      "submitted_message_exact": null
+    },
+    {
+      "pair": 4,
+      "label": "after",
+      "condition": "pagedown",
+      "input_result": "paired-bae/pair-04-after-pagedown/pagedown/result.json",
+      "result_sha256": "2699a3e068d8bc11b8d05fb2aa5f02b8684cd18c8e31ca1f54fdc8f1bc08d561",
+      "binary_sha256": "85c7d5bc40b0b99de9bfd9492604f0c3b4176d7cd4f53d85a34d4bd5a1924139",
+      "probe_sha256": "b43594f33f14edbe18d07eb98fac62e8a99c3803f74b0a04fd215ed0e0d30efd",
+      "fixture_modules_sha256": {
+        "test_tui_chat_owed_history.py": "1c71418a7fb85c958be82cb4b4a00ff6e374164debe65a1ab33affeeb096c928",
+        "test_tui_fusion_recovery.py": "51a3675250ef38dfec902211bd3e4761063375bb16692837e73a1bdde28cf81a"
+      },
+      "history_sha256": "b1d4d6fa6c3ffc1a1ee129bd2057d57f0460ee5ccc30b138e2dcaca7b584703b",
+      "latency": {
+        "n": 32,
+        "p50_ms": 2.4132500402629375,
+        "p95_ms": 19.432125031016767,
+        "max_ms": 75.69687499199063,
+        "mean_ms": 6.436700503400061
+      },
+      "missing": 0,
+      "errors": [],
+      "checks": {
+        "binary_hash_stable_and_expected": true,
+        "probe_hash_expected": true,
+        "fixture_copies_match_expected_hashes": true,
+        "same_retained_history": true,
+        "same_history_shape": true,
+        "all_input_bytes_written": true,
+        "exact_typing_bytes_and_count": true,
+        "all_expected_prefixes_observed": true,
+        "ordered_prefixes_match_sent_text": true,
+        "reported_p95_matches_raw_record_clocks": true,
+        "clock_order": true,
+        "capture_chunk_lengths_exact": true,
+        "condition_positioning": true,
+        "observation_complete_echo_off": true,
+        "no_errors_clean_exit": true,
+        "profiling_disabled": true
+      },
+      "type_gaps_ms": {
+        "n": 31,
+        "min": 50.452833995223045,
+        "median": 54.268207983113825,
+        "max": 57.31679208111018
+      },
+      "scroll_gaps_ms": {
+        "n": 72,
+        "min": 20.48216701950878,
+        "median": 24.280874989926815,
+        "max": 27.014041901566088
+      },
+      "scroll_events": 73,
+      "typing_span_seconds": 1.6753375420812517,
+      "actual_scroll_hz": 41.95764666224322,
+      "child_cpu_lifecycle_seconds": 1.0690990000000031,
+      "wall_lifecycle_plus_analysis_seconds": 8.754071083036251,
+      "phase_start": 600625.313230833,
+      "phase_end": 600627.043761166,
+      "load_before": [
+        279.20458984375,
+        240.51025390625,
+        178.48193359375
+      ],
+      "load_after": [
+        278.8076171875,
+        241.65625,
+        179.61083984375
+      ],
+      "submitted_message_exact": null
+    },
+    {
+      "pair": 4,
+      "label": "before",
+      "condition": "wheelup",
+      "input_result": "paired-bae/pair-04-before-wheelup/wheelup/result.json",
+      "result_sha256": "89a5085717b2e1b2ac5e58e0654e947b7cc9935a32576254d9e783ff3bfc3863",
+      "binary_sha256": "ebcbe53ff38f8a60ce456bd20d8f05a9542f8deb7fa450400475505078fdb93b",
+      "probe_sha256": "b43594f33f14edbe18d07eb98fac62e8a99c3803f74b0a04fd215ed0e0d30efd",
+      "fixture_modules_sha256": {
+        "test_tui_chat_owed_history.py": "1c71418a7fb85c958be82cb4b4a00ff6e374164debe65a1ab33affeeb096c928",
+        "test_tui_fusion_recovery.py": "51a3675250ef38dfec902211bd3e4761063375bb16692837e73a1bdde28cf81a"
+      },
+      "history_sha256": "b1d4d6fa6c3ffc1a1ee129bd2057d57f0460ee5ccc30b138e2dcaca7b584703b",
+      "latency": {
+        "n": 32,
+        "p50_ms": 1.8935420084744692,
+        "p95_ms": 17.03991601243615,
+        "max_ms": 31.316125066950917,
+        "mean_ms": 5.2255391819926444
+      },
+      "missing": 0,
+      "errors": [],
+      "checks": {
+        "binary_hash_stable_and_expected": true,
+        "probe_hash_expected": true,
+        "fixture_copies_match_expected_hashes": true,
+        "same_retained_history": true,
+        "same_history_shape": true,
+        "all_input_bytes_written": true,
+        "exact_typing_bytes_and_count": true,
+        "all_expected_prefixes_observed": true,
+        "ordered_prefixes_match_sent_text": true,
+        "reported_p95_matches_raw_record_clocks": true,
+        "clock_order": true,
+        "capture_chunk_lengths_exact": true,
+        "condition_positioning": true,
+        "observation_complete_echo_off": true,
+        "no_errors_clean_exit": true,
+        "profiling_disabled": true
+      },
+      "type_gaps_ms": {
+        "n": 31,
+        "min": 51.05916690081358,
+        "median": 54.198291967622936,
+        "max": 61.00120802875608
+      },
+      "scroll_gaps_ms": {
+        "n": 71,
+        "min": 20.716749946586788,
+        "median": 24.376666988246143,
+        "max": 31.60908306017518
+      },
+      "scroll_events": 72,
+      "typing_span_seconds": 1.6827395000727847,
+      "actual_scroll_hz": 41.18212018464231,
+      "child_cpu_lifecycle_seconds": 0.8460049999999981,
+      "wall_lifecycle_plus_analysis_seconds": 6.252563125104643,
+      "phase_start": 600631.868321625,
+      "phase_end": 600633.606646291,
+      "load_before": [
+        278.8076171875,
+        241.65625,
+        179.61083984375
+      ],
+      "load_after": [
+        278.42236328125,
+        242.19287109375,
+        180.16357421875
+      ],
+      "submitted_message_exact": null
+    },
+    {
+      "pair": 4,
+      "label": "after",
+      "condition": "wheelup",
+      "input_result": "paired-bae/pair-04-after-wheelup/wheelup/result.json",
+      "result_sha256": "5c58217f4fc8a09ebc4208503bd0975fe904d2ddf8057620ffcdb35996f91c92",
+      "binary_sha256": "85c7d5bc40b0b99de9bfd9492604f0c3b4176d7cd4f53d85a34d4bd5a1924139",
+      "probe_sha256": "b43594f33f14edbe18d07eb98fac62e8a99c3803f74b0a04fd215ed0e0d30efd",
+      "fixture_modules_sha256": {
+        "test_tui_chat_owed_history.py": "1c71418a7fb85c958be82cb4b4a00ff6e374164debe65a1ab33affeeb096c928",
+        "test_tui_fusion_recovery.py": "51a3675250ef38dfec902211bd3e4761063375bb16692837e73a1bdde28cf81a"
+      },
+      "history_sha256": "b1d4d6fa6c3ffc1a1ee129bd2057d57f0460ee5ccc30b138e2dcaca7b584703b",
+      "latency": {
+        "n": 32,
+        "p50_ms": 2.5711660273373127,
+        "p95_ms": 16.39695803169161,
+        "max_ms": 43.26745797879994,
+        "mean_ms": 5.437208244984504
+      },
+      "missing": 0,
+      "errors": [],
+      "checks": {
+        "binary_hash_stable_and_expected": true,
+        "probe_hash_expected": true,
+        "fixture_copies_match_expected_hashes": true,
+        "same_retained_history": true,
+        "same_history_shape": true,
+        "all_input_bytes_written": true,
+        "exact_typing_bytes_and_count": true,
+        "all_expected_prefixes_observed": true,
+        "ordered_prefixes_match_sent_text": true,
+        "reported_p95_matches_raw_record_clocks": true,
+        "clock_order": true,
+        "capture_chunk_lengths_exact": true,
+        "condition_positioning": true,
+        "observation_complete_echo_off": true,
+        "no_errors_clean_exit": true,
+        "profiling_disabled": true
+      },
+      "type_gaps_ms": {
+        "n": 31,
+        "min": 50.523375044576824,
+        "median": 54.19566703494638,
+        "max": 74.52962500974536
+      },
+      "scroll_gaps_ms": {
+        "n": 72,
+        "min": 20.59816604014486,
+        "median": 24.18852102709934,
+        "max": 35.574791952967644
+      },
+      "scroll_events": 73,
+      "typing_span_seconds": 1.6851243340643123,
+      "actual_scroll_hz": 41.530964983581214,
+      "child_cpu_lifecycle_seconds": 0.6752050000000018,
+      "wall_lifecycle_plus_analysis_seconds": 6.322222499991767,
+      "phase_start": 600638.242578,
+      "phase_end": 600639.982116416,
+      "load_before": [
+        278.42236328125,
+        242.19287109375,
+        180.16357421875
+      ],
+      "load_after": [
+        277.02685546875,
+        242.5048828125,
+        180.63720703125
+      ],
+      "submitted_message_exact": null
+    },
+    {
+      "pair": 4,
+      "label": "before",
+      "condition": "wheeldown",
+      "input_result": "paired-bae/pair-04-before-wheeldown/wheeldown/result.json",
+      "result_sha256": "d8ea19004919a83186493a27c138cc8ae5530ccabdcb242a6e72d91061ce7fb1",
+      "binary_sha256": "ebcbe53ff38f8a60ce456bd20d8f05a9542f8deb7fa450400475505078fdb93b",
+      "probe_sha256": "b43594f33f14edbe18d07eb98fac62e8a99c3803f74b0a04fd215ed0e0d30efd",
+      "fixture_modules_sha256": {
+        "test_tui_chat_owed_history.py": "1c71418a7fb85c958be82cb4b4a00ff6e374164debe65a1ab33affeeb096c928",
+        "test_tui_fusion_recovery.py": "51a3675250ef38dfec902211bd3e4761063375bb16692837e73a1bdde28cf81a"
+      },
+      "history_sha256": "b1d4d6fa6c3ffc1a1ee129bd2057d57f0460ee5ccc30b138e2dcaca7b584703b",
+      "latency": {
+        "n": 32,
+        "p50_ms": 2.702082972973585,
+        "p95_ms": 19.54758306965232,
+        "max_ms": 29.18604202568531,
+        "mean_ms": 6.632320193602936
+      },
+      "missing": 0,
+      "errors": [],
+      "checks": {
+        "binary_hash_stable_and_expected": true,
+        "probe_hash_expected": true,
+        "fixture_copies_match_expected_hashes": true,
+        "same_retained_history": true,
+        "same_history_shape": true,
+        "all_input_bytes_written": true,
+        "exact_typing_bytes_and_count": true,
+        "all_expected_prefixes_observed": true,
+        "ordered_prefixes_match_sent_text": true,
+        "reported_p95_matches_raw_record_clocks": true,
+        "clock_order": true,
+        "capture_chunk_lengths_exact": true,
+        "condition_positioning": true,
+        "observation_complete_echo_off": true,
+        "no_errors_clean_exit": true,
+        "profiling_disabled": true
+      },
+      "type_gaps_ms": {
+        "n": 31,
+        "min": 50.54641701281071,
+        "median": 54.990667034871876,
+        "max": 67.40520801395178
+      },
+      "scroll_gaps_ms": {
+        "n": 71,
+        "min": 20.93350002542138,
+        "median": 24.706583004444838,
+        "max": 31.909459037706256
+      },
+      "scroll_events": 72,
+      "typing_span_seconds": 1.7138153749983758,
+      "actual_scroll_hz": 40.328417202727834,
+      "child_cpu_lifecycle_seconds": 0.7211759999999998,
+      "wall_lifecycle_plus_analysis_seconds": 6.019889084040187,
+      "phase_start": 600574.064044583,
+      "phase_end": 600575.832328583,
+      "load_before": [
+        289.71875,
+        236.14404296875,
+        173.345703125
+      ],
+      "load_after": [
+        279.33251953125,
+        235.70556640625,
+        173.92431640625
+      ],
+      "submitted_message_exact": null
+    },
+    {
+      "pair": 4,
+      "label": "after",
+      "condition": "wheeldown",
+      "input_result": "paired-bae/pair-04-after-wheeldown/wheeldown/result.json",
+      "result_sha256": "b591e1811431e41fd08b36c31be18274c0ada3751cf12ce21ef905caaf6659dd",
+      "binary_sha256": "85c7d5bc40b0b99de9bfd9492604f0c3b4176d7cd4f53d85a34d4bd5a1924139",
+      "probe_sha256": "b43594f33f14edbe18d07eb98fac62e8a99c3803f74b0a04fd215ed0e0d30efd",
+      "fixture_modules_sha256": {
+        "test_tui_chat_owed_history.py": "1c71418a7fb85c958be82cb4b4a00ff6e374164debe65a1ab33affeeb096c928",
+        "test_tui_fusion_recovery.py": "51a3675250ef38dfec902211bd3e4761063375bb16692837e73a1bdde28cf81a"
+      },
+      "history_sha256": "b1d4d6fa6c3ffc1a1ee129bd2057d57f0460ee5ccc30b138e2dcaca7b584703b",
+      "latency": {
+        "n": 32,
+        "p50_ms": 1.8552910769358277,
+        "p95_ms": 26.32779104169458,
+        "max_ms": 65.15433301683515,
+        "mean_ms": 7.174212238169275
+      },
+      "missing": 0,
+      "errors": [],
+      "checks": {
+        "binary_hash_stable_and_expected": true,
+        "probe_hash_expected": true,
+        "fixture_copies_match_expected_hashes": true,
+        "same_retained_history": true,
+        "same_history_shape": true,
+        "all_input_bytes_written": true,
+        "exact_typing_bytes_and_count": true,
+        "all_expected_prefixes_observed": true,
+        "ordered_prefixes_match_sent_text": true,
+        "reported_p95_matches_raw_record_clocks": true,
+        "clock_order": true,
+        "capture_chunk_lengths_exact": true,
+        "condition_positioning": true,
+        "observation_complete_echo_off": true,
+        "no_errors_clean_exit": true,
+        "profiling_disabled": true
+      },
+      "type_gaps_ms": {
+        "n": 31,
+        "min": 50.31625006813556,
+        "median": 54.55391702707857,
+        "max": 62.948458013124764
+      },
+      "scroll_gaps_ms": {
+        "n": 71,
+        "min": 20.219458965584636,
+        "median": 24.61129194125533,
+        "max": 32.00395789463073
+      },
+      "scroll_events": 72,
+      "typing_span_seconds": 1.6866239999653772,
+      "actual_scroll_hz": 41.31593080918955,
+      "child_cpu_lifecycle_seconds": 0.6684509999999975,
+      "wall_lifecycle_plus_analysis_seconds": 6.429199457983486,
+      "phase_start": 600580.410494666,
+      "phase_end": 600582.151231208,
+      "load_before": [
+        279.33251953125,
+        235.70556640625,
+        173.92431640625
+      ],
+      "load_after": [
+        271.4580078125,
+        234.79736328125,
+        173.96533203125
+      ],
+      "submitted_message_exact": null
+    }
+  ],
+  "all_25_pairs_cpu_lower_after": true,
+  "all_run_missing_count": 0,
+  "actual_type_gap_run_medians_ms": {
+    "n": 50,
+    "min": 53.34183294326067,
+    "median": 54.23291650367901,
+    "max": 54.990667034871876
+  },
+  "actual_type_gap_global_max_ms": 74.52962500974536,
+  "actual_scroll_rates_hz": {
+    "n": 40,
+    "min": 40.328417202727834,
+    "median": 41.554732197414396,
+    "max": 42.8021293470862
+  },
+  "host_load1_endpoints": {
+    "n": 100,
+    "min": 228.39306640625,
+    "median": 265.0673828125,
+    "max": 302.82763671875
+  },
+  "verdict": "PageUp latency shows an improvement direction (4/5 pairs); general mixed-scroll typing latency improvement is not established. Child process lifecycle CPU is lower in all 25 pairs.",
+  "limitations": [
+    "Independent repeat unit is a run/pair, not each of its 32 serially correlated keys.",
+    "The p95 estimator is the helper's lower empirical quantile at floor((n-1)*0.95); for n=32 it is the third-largest sample.",
+    "Requested input cadence is 50ms typing / 20ms scroll; actual rates are retained separately.",
+    "CPU covers TUI startup, history load, positioning, measured typing and teardown, not only the typing phase.",
+    "Wall time also includes helper shutdown and post-run analysis; do not interpret child_cpu/wall as phase CPU utilization.",
+    "High, changing host load and only five paired runs limit extrapolation and individual-change causal attribution.",
+    "PTY prefix emission is not physical terminal paint or proof of exact submitted/stored draft identity; these performance runs did not enable verify-submit."
+  ]
+}

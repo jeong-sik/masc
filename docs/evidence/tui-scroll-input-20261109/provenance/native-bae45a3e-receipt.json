@@ -1,0 +1,81 @@
+{
+  "source_sha": "bae45a3e0e70de9c238e2a16410ccf15d295a4be",
+  "workflow_sha": "e04036c538bf1fabff497d5f0358fab012379719",
+  "scenario": "detail-ownership",
+  "platform": "macos-arm64",
+  "sha256": "85c7d5bc40b0b99de9bfd9492604f0c3b4176d7cd4f53d85a34d4bd5a1924139",
+  "key_reference": {
+    "path": "key-reference.md",
+    "sha256": "2a0e025c4bb21d11cb5cb76be78222a2cb870bc174e2905fb31e742a2268183c",
+    "producer": "bin/masc_tui_keys_doc_cli.exe"
+  },
+  "server_sha256": null,
+  "native_addon_launcher": null,
+  "browser_addon_worker": null,
+  "build_targets": [
+    "bin/masc_tui.exe",
+    "bin/masc_tui_keys_doc_cli.exe",
+    "test/test_tui_detail_reading.exe",
+    "test/test_tui_board_successor.exe",
+    "test/test_tui_usage_scope.exe"
+  ],
+  "expected_tests": [
+    "test_tui_detail_reading",
+    "test_tui_board_successor",
+    "test_tui_usage_scope"
+  ],
+  "executed_tests": [
+    "test_tui_detail_reading",
+    "test_tui_board_successor",
+    "test_tui_usage_scope"
+  ],
+  "test_results": [
+    {
+      "suite": "test_tui_detail_reading",
+      "suite_exit_code": 0,
+      "log_exit_code": 0
+    },
+    {
+      "suite": "test_tui_board_successor",
+      "suite_exit_code": 0,
+      "log_exit_code": 0
+    },
+    {
+      "suite": "test_tui_usage_scope",
+      "suite_exit_code": 0,
+      "log_exit_code": 0
+    }
+  ],
+  "test_invocations": [
+    {
+      "suite": "test_tui_detail_reading",
+      "arguments": []
+    },
+    {
+      "suite": "test_tui_board_successor",
+      "arguments": []
+    },
+    {
+      "suite": "test_tui_usage_scope",
+      "arguments": []
+    }
+  ],
+  "expected_invocations": [
+    {
+      "suite": "test_tui_detail_reading",
+      "arguments": []
+    },
+    {
+      "suite": "test_tui_board_successor",
+      "arguments": []
+    },
+    {
+      "suite": "test_tui_usage_scope",
+      "arguments": []
+    }
+  ],
+  "behavior_passed": true,
+  "installed_runtime_verified": false,
+  "visible_ui_verified": false,
+  "packaging": "native executable; see native-dependencies.txt for dynamic libraries"
+}

@@ -1159,6 +1159,12 @@ let add_routes ~sw ~clock router =
     Server_route.ws_get
       ide_lsp_upgrade_path
       (fun ~upgrade request reqd ->
+         match upgrade with
+         | None ->
+           Http.Response.text ~status:`Upgrade_required
+             "426 Upgrade Required: WebSocket upgrade unavailable on this transport"
+             reqd
+         | Some upgrade ->
          (* Token-gated like /api/v1/lsp/question, and for the same reason:
             every connection spawns resident language-server processes. A
             browser WebSocket cannot set an Authorization header, so the

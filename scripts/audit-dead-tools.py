@@ -536,7 +536,25 @@ def render_markdown(report: Report) -> str:
     lines.append(f"## {report.window_days}일 0회 ({len(unused)}개)")
     lines.append("")
     if not unused:
-        lines.append("없음 — 사용 가능한 원천이 기록하는 모든 계열에서 호출이 있었습니다.")
+        # "no unused tools" has three different meanings and the report must
+        # not collapse them: nothing was countable, something was countable but
+        # part of the inventory is unverified, or the whole inventory was
+        # counted. A reader who sees only the first sentence would take
+        # "0회 없음" as "다 씀".
+        if not available_sources:
+            lines.append(
+                "없음 — **그러나 0회를 셀 수 없습니다.** 사용 가능한 원천이 하나도 없어 "
+                f"등록 도구 {len(unverified)}개가 전부 `판정 불가` 입니다. "
+                "이 줄은 \"0회 도구가 없다\"는 뜻이 아닙니다."
+            )
+        elif unverified:
+            lines.append(
+                f"없음 — 사용 가능한 원천이 기록하는 계열에서는 호출이 있었습니다. "
+                f"다만 {len(unverified)}개는 원천 커버리지가 확인되지 않아 `판정 불가` 이며, "
+                "그 도구들에 대해서는 이 목록이 아무것도 주장하지 않습니다."
+            )
+        else:
+            lines.append("없음 — 사용 가능한 원천이 기록하는 모든 계열에서 호출이 있었습니다.")
     else:
         lines.append(
             "| 도구 | 계열 |"

@@ -6,7 +6,7 @@ module Transport = Server_mcp_transport_http
    renamed probe stays exempt from rate limits without a separate manual edit
    here. *)
 let is_rate_limit_exempt path =
-  String.equal path "/health" || Server_health_paths.is_public path
+  String.equal path Server_health_paths.health || Server_health_paths.is_public path
 ;;
 
 let charges_agent_bucket (request : Httpun.Request.t) =

@@ -83,7 +83,7 @@ let observe ~clock ~run_dir ~base_path ~port =
      | Ok identity when String.equal identity.base_path base_path ->
        let pid =
          match Masc_http_client.get_sync ~clock ~headers:[]
-                 ~url:(loopback_url port "/health/ready") () with
+                 ~url:(loopback_url port Server_health_paths.readiness) () with
          | Ok (_, body) -> answered_pid body
          | Error _ -> None
        in
@@ -183,7 +183,7 @@ let describe_answer ~child_pid = function
    counts once it carries the replacement's own pid. *)
 let watch ~clock ~port (child : Posix_spawn_detached.t) =
   let rec ready last =
-    let answer = fresh_get ~clock ~port "/health/ready" in
+    let answer = fresh_get ~clock ~port Server_health_paths.readiness in
     match answer with
     | Ok (200, body) when answered_pid body = Some child.pid -> Replacement_ready
     | Ok _ | Error _ ->
@@ -199,7 +199,7 @@ let watch ~clock ~port (child : Posix_spawn_detached.t) =
     (fun () -> ready None)
 
 let build_summary ~clock ~port =
-  match fresh_get ~clock ~port "/health" with
+  match fresh_get ~clock ~port Server_health_paths.health with
   | Ok (200, body) ->
     (match json_field "build" body with
      | Some (`Assoc build) ->

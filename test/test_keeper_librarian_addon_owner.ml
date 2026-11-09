@@ -619,6 +619,7 @@ let test_gap_and_new_tail_are_rejudged_together ()=with_fixture (fun ~sw:_ fixtu
   check (list int) "original partial commit leaves a sparse gap" [1]
     (io (fun () -> List.map (fun (row:Queue.candidate) -> row.sequence) (pending_rows fixture.keepers_dir)));
   let originals=observed_originals fixture in
+  check bool "a partial commit retains original input before whole-batch completion" true (originals<>[]);
   (* The partial commit added B to actual Memory. That changed context can
      legitimately retain a new original for gap A before another queue tail.
      Wait for that real Deferred answer before changing the fixture response. *)

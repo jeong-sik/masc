@@ -1,15 +1,9 @@
-(** Keeper-owned current Memory OS snapshot. *)
+(** Keeper-owned current Memory OS snapshot.
 
-open Keeper_memory_os_types
-open Result.Syntax
-
-module Snapshot_codec = Keeper_memory_os_snapshot_codec
-module Journal_codec = Keeper_memory_os_journal_codec
-module Successor_recall = Keeper_memory_os_successor_recall
-module Receipt_selection = Keeper_memory_os_receipt_selection
+    The module is the [Keeper_memory_os_current_*] modules included in order.
+    Each one reads only the ones before it. *)
 
 include Keeper_memory_os_current_types
-open Keeper_memory_os_support_core
 include Keeper_memory_os_current_layout
 include Keeper_memory_os_current_range_codec
 include Keeper_memory_os_current_receipt_store
@@ -21,4 +15,3 @@ include Keeper_memory_os_current_update
 include Keeper_memory_os_current_revision_evidence
 include Keeper_memory_os_current_program_apply
 include Keeper_memory_os_current_fact_ops
-

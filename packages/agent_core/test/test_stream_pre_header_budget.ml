@@ -170,15 +170,22 @@ let check_timeout_phase ~label ~expected ~budget_s (outcome, elapsed) =
    | Ended (Error (Http_client.TimeoutError { phase; _ })) when phase = expected -> ()
    | other ->
      Alcotest.failf
-       "[%s] expected TimeoutError phase=%s, got %s after %.2fs"
+       "[%s] expected TimeoutError phase=%s, got %s after %.6fs (budget %.6fs)"
        label
        (Http_client.timeout_phase_to_label expected)
        (describe other)
-       elapsed);
+       elapsed
+       budget_s);
+  (* Six decimals, not two: a failure here has read as "ended at 0.50s; the
+     0.5s budget should have ended it inside [0.5, 3.0)", which looks like the
+     message contradicting itself because [%.2f] rounds 0.4950 up to "0.50".
+     The exact value decides whether the timer fired early, whether the budget
+     the client used differed from [budget_s], or whether the measurement
+     started later than [started]. *)
   if elapsed < budget_s || elapsed >= budget_s +. slack_s
   then
     Alcotest.failf
-      "[%s] ended at %.2fs; the %.1fs budget should have ended it inside [%.1f, %.1f)"
+      "[%s] ended at %.6fs; the %.6fs budget should have ended it inside [%.6f, %.6f)"
       label
       elapsed
       budget_s

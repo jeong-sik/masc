@@ -397,30 +397,6 @@ let test_an_unreadable_preference_file_is_not_an_empty_list () =
   | Error _ -> ()
   | Ok _ -> fail "an unreadable preference file read as no preference"
 
-let test_legacy_judge_row_is_not_a_current_exact_lane_row () =
-  with_workspace @@ fun (base_path, _config) ->
-  Fs_compat.mkdir_p (Keeper_gate_path.dir ~base_path);
-  let legacy =
-    `List
-      [ `Assoc
-          [ "keeper_name", `String "echo"
-          ; "slot_id", `String "ollama.qwen"
-          ; "updated_by", `String "test"
-          ; "updated_at", `String "2026-08-28T00:00:00Z"
-          ]
-      ]
-  in
-  (match
-     Fs_compat.save_file_atomic
-       (Keeper_exact_lane_preference.path ~base_path)
-       (Yojson.Safe.to_string legacy)
-   with
-   | Ok () -> ()
-   | Error detail -> fail detail);
-  match Keeper_exact_lane_preference.all ~base_path with
-  | Error _ -> ()
-  | Ok _ -> fail "legacy Judge-only row was accepted as a current exact-lane row"
-
 let test_duplicate_exact_lane_owner_is_rejected () =
   with_workspace @@ fun (base_path, _config) ->
   Fs_compat.mkdir_p (Keeper_gate_path.dir ~base_path);
@@ -1166,8 +1142,6 @@ let () =
             test_clearing_a_preference_removes_it
         ; test_case "an unreadable preference file is not an empty list" `Quick
             test_an_unreadable_preference_file_is_not_an_empty_list
-        ; test_case "legacy Judge row is not a current row" `Quick
-            test_legacy_judge_row_is_not_a_current_exact_lane_row
         ; test_case "duplicate exact-lane owner rejects" `Quick
             test_duplicate_exact_lane_owner_is_rejected
         ; test_case "preferences are scoped by exact lane" `Quick

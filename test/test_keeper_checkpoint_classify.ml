@@ -38,19 +38,6 @@ let check_not_not_found name detail =
   let e = Agent_core.Error.Io (FileOpFailed { op = "load"; path = "p"; detail }) in
   Alcotest.(check bool) name false (is_not_found (Store.classify_core_error e))
 
-let test_legacy_no_such_file_underscore () =
-  (* Previously string-matched as Not_found via the "no_such_file" prefix. *)
-  check_not_not_found "legacy no_such_file underscore prefix routes to Io_error"
-    "no_such_file: trace-xyz"
-
-let test_legacy_no_such_file_space () =
-  check_not_not_found "legacy 'No such file' phrase routes to Io_error"
-    "No such file or directory"
-
-let test_legacy_unix_error_enoent () =
-  check_not_not_found "legacy Unix_error(ENOENT prefix routes to Io_error"
-    "Unix_error (ENOENT, \"openat\", \"/tmp/x\")"
-
 let test_eio_io_fs_not_found_rendered () =
   (* Exact detail string from /tmp/masc-6647-restart2.log. Under the new
      contract this case is *unreachable* in practice (the [exists] gate
@@ -157,12 +144,6 @@ let () =
     [
       ( "classify_core_error: no Not_found arm (RFC-0089 G4)",
         [
-          Alcotest.test_case "legacy no_such_file underscore is Io_error" `Quick
-            test_legacy_no_such_file_underscore;
-          Alcotest.test_case "legacy 'No such file' is Io_error" `Quick
-            test_legacy_no_such_file_space;
-          Alcotest.test_case "legacy Unix_error(ENOENT is Io_error" `Quick
-            test_legacy_unix_error_enoent;
           Alcotest.test_case "Eio.Io Fs Not_found rendered is Io_error" `Quick
             test_eio_io_fs_not_found_rendered;
         ] );

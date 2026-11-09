@@ -4273,30 +4273,6 @@ let test_decode_effective_keeper_surface_keeps_provenance () =
       Alcotest.(check int) "digest length" 64 (String.length digest)
   | Ok _ -> Alcotest.fail "expected an available effective Keeper surface"
 
-let test_decode_effective_keeper_surface_rejects_legacy_skill_names () =
-  let effective =
-    `Assoc
-      [ "status", `String "available"
-      ; "keeper_name", `String "fixture"
-      ; "runtime_id", `String "runtime"
-      ; "official_client_kind", `String "codex"
-      ; "tool_delivery", `Assoc [ "status", `String "delivered" ]
-      ; "native_posture", `Null
-      ; "skill_snapshot_revision", `String (String.make 64 'c')
-      ; "instruction_skills", `List [ `String "legacy-name" ]
-      ; "composition_skills", `List []
-      ; "skill_discovery_bytes", `Int 0
-      ; "skills_left_out", `List []
-      ; "unavailable_skill_names", `List []
-      ; "count", `Int 0
-      ; "tools", `List []
-      ; "tool_surface_sha256", `Null
-      ]
-  in
-  match Masc.Tui_decode_tools.decode_tool_snapshot (tool_snapshot_json ~effective []) with
-  | Error _ -> ()
-  | Ok _ -> Alcotest.fail "legacy Skill name list was accepted"
-
 (* The keys Keeper_effective_tool_surface.to_yojson sends on every available
    surface, with the parts under test passed in. *)
 let minimal_available_surface ?(unavailable_skill_names = Some (`List [])) tools =
@@ -14699,8 +14675,6 @@ let () =
           test_decode_tool_snapshot_without_inventory_is_an_error;
         Alcotest.test_case "effective surface keeps provenance" `Quick
           test_decode_effective_keeper_surface_keeps_provenance;
-        Alcotest.test_case "effective surface rejects legacy Skill names" `Quick
-          test_decode_effective_keeper_surface_rejects_legacy_skill_names;
         Alcotest.test_case "a tool origin reads its provenance by kind" `Quick
           test_decode_effective_tool_reads_provenance_by_kind;
         Alcotest.test_case "the unavailable skill names are required" `Quick

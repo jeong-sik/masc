@@ -41,8 +41,11 @@ let text = function
   | `String value when value<>"" && String.trim value=value -> Ok value
   | _ -> Error "Admission closure requires canonical nonblank text"
 let list decode = function
-  | `List values -> List.fold_right (fun json rest ->
-      let* rest=rest in let+ value=decode json in value::rest) values (Ok [])
+  | `List values ->
+    let rec loop found = function
+      | [] -> Ok (List.rev found)
+      | json::rest -> let* value=decode json in loop (value::found) rest in
+    loop [] values
   | _ -> Error "Admission closure requires an array"
 let candidate_json=Keeper_memory_os_current_range_codec.explicit_candidate_id_to_json
 let candidate_of_json json=Keeper_memory_os_current_range_codec.explicit_candidate_id_of_json json

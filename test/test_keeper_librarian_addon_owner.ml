@@ -579,6 +579,26 @@ let test_production_lane_closes_without_another_external_event ()=with_fixture (
     check (list string) "the real committed Memory remains" ["Durable A";"Durable B"]
       (io (fun () -> claims fixture.keepers_dir))))
 
+let test_a_new_tail_survives_closing_the_finished_forest ()=with_fixture (fun ~sw:_ fixture ->
+  drive_until fixture settled |> assert_settled;
+  let previous=observed_originals fixture in
+  io (fun () -> ignore (append fixture.keepers_dir "new-tail" "Durable tail"));
+  let seen=ref [] in
+  fixture.set_response (fun capture ->
+    seen:=List.map (fun (row:Queue.candidate) -> row.request_id) (Queue.candidates (Capture.batch capture)) :: !seen;
+    `OK,F.openai_response (answer (fun _ -> true) capture));
+  drive_until fixture settled |> assert_settled;
+  check (list (list string)) "only the distinct new input reaches the next provider" [["new-tail"]] (List.rev !seen);
+  let owner=io (fun () -> original_owner fixture.base_path fixture.keepers_dir) in
+  List.iter (fun (record,_) ->
+    let original=io (fun () -> Owner.load ~store:fixture.store ~scope:record.Owner.scope
+      ~request_id:record.request_id |> owned) in
+    check bool "old execution is no longer active" true (Option.is_none original)) previous;
+  check int "the new root does not retain a supersession link to a closed forest" 1
+    (io (fun () -> Parts.discover ~store:fixture.store ~owner |> get |> Parts.roots |> List.length));
+  check (list string) "old admitted facts and the tail remain" ["Durable A";"Durable B";"Durable tail"]
+    (io (fun () -> claims fixture.keepers_dir)))
+
 let test_unchanged_deferred_does_not_remint ()=with_fixture (fun ~sw:_ fixture ->
   fixture.set_response (fun capture -> `OK,F.openai_response (answer (fun _ -> false) capture));
   drive_original_terminal fixture;
@@ -2005,6 +2025,8 @@ let () =
   test_case "a pass with no new input after the commit is Idle" `Quick test_pass_without_new_input_after_commit_is_idle;
   test_case "the production lane closes a completed Keeper without another external event" `Quick
     test_production_lane_closes_without_another_external_event;
+  test_case "a distinct new tail survives closing its predecessor forest" `Quick
+    test_a_new_tail_survives_closing_the_finished_forest;
   test_case "unchanged semantic deferral preserves the same original" `Quick test_unchanged_deferred_does_not_remint;
   test_case "new tail rejudges the complete old sparse gap against current Memory" `Quick test_gap_and_new_tail_are_rejudged_together;
   test_case "an absent destination ends the original once and its candidate is judged again" `Quick

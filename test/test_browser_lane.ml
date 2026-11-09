@@ -377,7 +377,7 @@ let test_answers_state_their_connection () = with_clients (fun sw connect ->
        = Some (`Assoc (expected ego "ego_task_space" @ ["html", `String "<html></html>"])))
   | _ -> fail "the document read did not answer")
 
-let test_unsupported_message_names_the_serving_transport () =
+let test_unsupported_message_never_renames_the_refusing_transport () =
   let client_id = (info Lane.Ego_lite).client_id in
   (* [live_transport] has one constructor and it serves every capability, so
      [live_transports_serving] is never empty: no issue path can build
@@ -783,7 +783,8 @@ let () = run "browser client routing" ["ownership", [
   test_case "agent activity follows queue ownership and cleanup" `Quick test_agent_activity;
   test_case "each live transport serves its part of the table" `Quick test_transport_table;
   test_case "unserved live work is refused before queue admission" `Quick test_unserved_work_queues_nothing;
-  test_case "an unserved request names the transport that serves it" `Quick test_unsupported_message_names_the_serving_transport;
+  test_case "an unserved request names only the other connections" `Quick
+    test_unsupported_message_never_renames_the_refusing_transport;
   test_case "inventory observes without pruning a pending client" `Quick test_inventory_does_not_prune;
   test_case "optional document preserves existing work" `Quick test_optional_document_preserves_existing_work;
   test_case "colliding tab IDs and spoofed results" `Quick test_colliding_tabs_are_isolated;

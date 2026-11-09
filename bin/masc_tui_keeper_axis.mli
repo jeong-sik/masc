@@ -11,6 +11,13 @@ val segments :
     live roster, [None] when the roster did not read it; the failing-for and
     turn-pulse cells (RFC-0511 D1) come from it and the others from [state]. *)
 
+val run_cell :
+  Masc_tui_types.state -> now:float -> keeper_name:string -> Masc_tui_keeper_axis_cell.t option
+(** The next scheduled run cell of {!segments}. *)
+
+val lag_cell : Masc_tui_types.state -> keeper_name:string -> Masc_tui_keeper_axis_cell.t option
+(** {!Masc_tui_keeper_memory_reading.lag_cell} of the state's memory health. *)
+
 (** {1 Readings for the Keepers views} (RFC-0515 §2.3)
 
     The bounds below are display values. They are not server state, and the

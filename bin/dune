@@ -1997,6 +1997,12 @@
   masc_tui_keeper_memory_reading))
 
 (library
+ (name masc_tui_keeper_axis_row)
+ (wrapped false)
+ (modules masc_tui_keeper_axis_row)
+ (libraries masc_tui_keeper_list_model masc_tui_keeper_trail))
+
+(library
  (name masc_tui_keeper_age_ladder)
  (wrapped false)
  (modules masc_tui_keeper_age_ladder)
@@ -2775,6 +2781,7 @@
   masc_tui_keeper_axis_cell
   masc_tui_keeper_next_run
   masc_tui_keeper_axis
+  masc_tui_keeper_axis_row
   masc_tui_keeper_memory_reading
   masc_tui_lane_standing
   masc_tui_async_protocol

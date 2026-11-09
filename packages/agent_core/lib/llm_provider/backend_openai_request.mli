@@ -24,7 +24,10 @@ val effective_tools : Provider_config.t -> Yojson.Safe.t list -> Yojson.Safe.t l
 val structured_schema_of_config : Provider_config.t -> Types.json_schema option
 val capabilities_of_config : Provider_config.t -> Capabilities.capabilities
 
-(** Resolve the output-token budget for optional request envelopes.
+(** Resolve the output-token budget for optional request envelopes once,
+    preserving whether its ceiling came from the model catalog, an explicit
+    capability override, or the typed provider default used by
+    {!capabilities_of_config}.
     [Capabilities.max_output_tokens] is a validation ceiling, not a
     request default: caller [Some n] is clamped to it (one-shot WARN on
     clamp); caller [None] resolves to [None] and the emitters omit the
@@ -35,12 +38,7 @@ val capabilities_of_config : Provider_config.t -> Capabilities.capabilities
     Responses envelope as [max_output_tokens] — the field name is
     per-envelope, the resolution policy is single-sourced here. The
     required Anthropic envelope uses
-    [Backend_anthropic.required_max_output_tokens] instead. *)
-val effective_max_output_tokens : Provider_config.t -> int option
-
-(** Resolve the optional output-token decision once, preserving whether its
-    ceiling came from the model catalog, an explicit capability override, or
-    the typed provider default used by {!capabilities_of_config}. *)
+    [Backend_anthropic.required_output_token_receipt] instead. *)
 val output_token_receipt
   :  envelope:Types.output_token_envelope
   -> Provider_config.t

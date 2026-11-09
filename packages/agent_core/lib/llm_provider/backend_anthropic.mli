@@ -112,12 +112,6 @@ val output_config_for_config
   -> Provider_config.t
   -> Yojson.Safe.t option
 
-(** Optional-envelope resolver re-exported from
-    {!Backend_openai_request.effective_max_output_tokens}: caller override
-    clamped to the model capability (one-shot WARN), [None] on caller
-    [None] — the ceiling is never injected as a request value. *)
-val effective_max_output_tokens : Provider_config.t -> int option
-
 (** Resolve the Messages required [max_tokens] decision. Caller [None] falls
     back to a model-catalog ceiling or an explicit capability-override ceiling,
     preserving the source in the resulting receipt. *)
@@ -127,17 +121,11 @@ val required_output_token_receipt
 
 (** Render a typed required-output-token rejection with the selected model
     context. Internal completion boundaries use this to preserve the
-    [AcceptRejected] result contract instead of crossing the compatibility
-    [Invalid_argument] projection below. *)
+    [AcceptRejected] result contract. *)
 val required_output_token_error_message
   :  Provider_config.t
   -> Types.required_output_token_error
   -> string
-
-(** Compatibility projection of {!required_output_token_receipt}. Raises
-    [Invalid_argument] naming the model when no explicit value, catalog
-    ceiling, or capability-override ceiling exists. *)
-val required_max_output_tokens : Provider_config.t -> int
 
 (** Build one immutable Messages request artifact. Missing required
     [max_tokens] metadata is returned as a typed error before any HTTP payload

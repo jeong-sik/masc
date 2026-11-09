@@ -58,3 +58,9 @@ val outside :
 val next_run : Masc_tui_types.state -> keeper_name:string -> Masc_tui_keeper_next_run.t
 (** [keeper_name]'s next run from the state's schedule agenda, through the
     same cached index as {!segments}. The views' due column draws it. *)
+
+val next_recurrence :
+  Masc_tui_types.state -> keeper_name:string -> Schedule_domain.recurrence option
+(** The decoded recurrence of the unique scheduled row at {!next_run}'s
+    exact due time. [None] for an unread/failed agenda, unknown recurrence,
+    ambiguous equal due times, or a held/late/non-scheduled next run. *)

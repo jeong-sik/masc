@@ -151,6 +151,7 @@ type raw_trace_stage =
   | Native_tool_start
   | Native_tool_finish
   | Context_compaction
+  | Arrival_projection
   | Run_finish
 
 val observe_raw_trace
@@ -767,6 +768,8 @@ val prepare_turn :
 val dynamic_tools :
   result_scope:Eio.Switch.t option ->
   ?base_path:string ->
+  ?read_arrived:
+    (unit -> (Keeper_event_queue_state.pending_selection list, string) result) ->
   content_transport:Runtime_official_client_tool.content_transport ->
   accepts_image_input:bool ->
   tool_approval:Agent_core.Hooks.tool_approval_callback option ->
@@ -812,10 +815,26 @@ val dynamic_tools :
     The returned producer is [Some] exactly when tools and [base_path] exist;
     it freezes physical response writes at the client's terminal boundary.
     The result's [on_response_sent] marks only an unchanged original response.
+    A block of arrived rows appended after it (below) leaves the original a
+    prefix of the written response, so the marker still runs.
     Retention failure records [terminal_error] and a typed terminal failure,
     so the runtime cannot settle it as successful consumption. Without
     [base_path] no producer or durable result is created. Prevalidation omits
     [base_path].
+
+    [read_arrived] reads the Keeper's pending queue rows; it defaults to
+    {!Keeper_registry_event_queue.pending_selections_result} of [base_path] and
+    [keeper_name], and without either no rows are read. The official client
+    runs its own model loop and asks MASC for nothing between rounds, so the
+    rows that reached the queue after this projection was built
+    ({!Keeper_arrived_stimuli}) go out after the text of the next tool result,
+    once each, and stay queued. The block is the last step on a settled result:
+    a result that ends the turn, and one that the block would take past the
+    tool's [Bounded_bytes] ceiling, go out without it and the rows wait for the
+    next result. A block that is appended is also recorded as the RAW trace
+    hook [arrived_stimuli_projection], naming each listed row by its queue
+    entry number and arrival time. A queue that cannot be read costs the
+    result nothing: it goes out as it was.
 
     [tool_approval] settles a [pre_tool_use] hook that answers
     [ElicitToolApproval], exactly as it does on AGENT_CORE's own tool loop --

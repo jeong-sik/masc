@@ -46,8 +46,25 @@ that arrived while the Keeper was idle.
   many rows would be listed by each request that has one, and how often that
   reaches the limit of 8 rows a request.
 
+- `visible_at_next_tool_result`: the same replay for the rows that arrived inside a run with no round
+  records, the way an official client runs. The first MASC tool result after the arrival is where the
+  host appends a block (`tool_execution_finished` in the trace). `rows_after_the_last_tool_result` counts
+  the rows with no tool result left in their run.
+- `arrived_stimuli_projection`: what a deployed Keeper showed an official client
+  (Claude Code, Codex, Antigravity, Muse), a measurement. The host appends a block of
+  arrived rows to a tool result and records an `arrived_stimuli_projection` hook in the
+  run's raw trace, naming each listed row by queue entry number and arrival time.
+  `rows_shown` counts a row once, at the first block that listed it.
+  `seconds_to_first_block` is the wait of those rows until that block;
+  `seconds_to_run_end_of_the_same_rows` is how long the same rows would have waited
+  without it; `hours_earlier_than_the_run_end` sums the difference. `block_bytes` is
+  what the blocks added to tool results. A run records the append, not the client's
+  read: a result can be lost between the host and the model. `{"blocks": 0}` means no
+  run in the window recorded one, as in every window before the host change deployed.
+
 Reads the two stores and never writes to them. A line that is not a JSON object
-is counted under `unreadable_lines`. A file that is listed and gone before it is
+is counted under `unreadable_lines`; an `arrived_stimuli_projection` record whose
+detail is not what the host writes, under `unreadable_projection_records`. A file that is listed and gone before it is
 opened (a Keeper rotates its raw traces while this runs) is counted under
 `unreadable_files`. Measure a window whose last UTC day is over to get a
 repeatable result.
@@ -72,8 +89,10 @@ JsonObject = dict[str, object]
 
 BEFORE_TURN_PARAMS = "before_turn_params"
 CLIENT_CONTEXT_HOOK = "client_context_submission"
+PROJECTION_HOOK = "arrived_stimuli_projection"
 RECORD_HOOK = "hook_invoked"
 RECORD_TOOL_STARTED = "tool_execution_started"
+RECORD_TOOL_FINISHED = "tool_execution_finished"
 RECORD_RUN_STARTED = "run_started"
 RECORD_RUN_FINISHED = "run_finished"
 ACK_KIND = "event_queue_ack"
@@ -92,6 +111,23 @@ ERROR_KIND_CHARS = 40
 
 
 @dataclass(frozen=True, slots=True)
+class ProjectedRow:
+    arrival: int
+    arrived_at: float
+
+
+@dataclass(frozen=True, slots=True)
+class Projection:
+    """One `arrived_stimuli_projection` record: a block of arrived rows appended to a tool result."""
+
+    ts: float
+    tool: str
+    later: int
+    text_bytes: int
+    rows: tuple[ProjectedRow, ...]
+
+
+@dataclass(frozen=True, slots=True)
 class Run:
     keeper: str
     profile: str
@@ -99,11 +135,13 @@ class Run:
     end: float
     rounds: int
     round_times: tuple[float, ...]
+    tool_finish_times: tuple[float, ...]
     tool_calls: int
     top_tool: str | None
     top_tool_calls: int
     error_kind: str | None
     client_context: bool
+    projections: tuple[Projection, ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -120,6 +158,7 @@ class Ack:
 class Unreadable:
     lines: int = 0
     files: int = 0
+    projections: int = 0
 
 
 def as_object(value: object) -> JsonObject | None:
@@ -138,6 +177,43 @@ def as_text(value: object) -> str | None:
     return value if isinstance(value, str) else None
 
 
+def as_count(value: object) -> int | None:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        return None
+    return value
+
+
+def projected_row_of(value: object) -> ProjectedRow | None:
+    entry = as_object(value)
+    arrival = as_count(entry.get("arrival")) if entry else None
+    arrived_at = as_float(entry.get("arrived_at")) if entry else None
+    if arrival is None or arrived_at is None:
+        return None
+    return ProjectedRow(arrival, arrived_at)
+
+
+def projection_of(row: JsonObject, ts: float) -> Projection | None:
+    """The block an `arrived_stimuli_projection` record describes, or None when its detail is not
+    what the host writes: a block lists at least one row."""
+    text = as_text(row.get("hook_detail"))
+    try:
+        detail = as_object(json.loads(text)) if text is not None else None
+    except ValueError:
+        return None
+    if detail is None:
+        return None
+    tool = as_text(detail.get("tool"))
+    later = as_count(detail.get("later"))
+    text_bytes = as_count(detail.get("text_bytes"))
+    listed = detail.get("rows")
+    if tool is None or later is None or text_bytes is None or not isinstance(listed, list) or not listed:
+        return None
+    rows = [projected_row_of(item) for item in cast("list[object]", listed)]
+    if any(item is None for item in rows):
+        return None
+    return Projection(ts, tool, later, text_bytes, tuple(item for item in rows if item is not None))
+
+
 def profile_of(agent_name: str | None) -> str:
     """`agent_core-glm-coding.glm-5.3-flash` names the profile after the first dot."""
     if agent_name is None:
@@ -147,12 +223,14 @@ def profile_of(agent_name: str | None) -> str:
 
 def read_run(path: pathlib.Path, keeper: str, unreadable: Unreadable) -> Run | None:
     round_times: list[float] = []
+    tool_finishes: list[float] = []
     tools: Counter[str] = Counter()
     first_ts: float | None = None
     last_ts: float | None = None
     agent: str | None = None
     error: str | None = None
     client_context = False
+    projections: list[Projection] = []
     with path.open("rb") as handle:
         for line in handle:
             try:
@@ -172,10 +250,19 @@ def read_run(path: pathlib.Path, keeper: str, unreadable: Unreadable) -> Run | N
                     round_times.append(ts)
             elif kind == RECORD_HOOK and row.get("hook_name") == CLIENT_CONTEXT_HOOK:
                 client_context = True
+            elif kind == RECORD_HOOK and row.get("hook_name") == PROJECTION_HOOK:
+                projection = projection_of(row, ts) if ts is not None else None
+                if projection is None:
+                    unreadable.projections += 1
+                else:
+                    projections.append(projection)
             elif kind == RECORD_RUN_STARTED:
                 agent = as_text(row.get("agent_name"))
             elif kind == RECORD_TOOL_STARTED:
                 tools[as_text(row.get("tool_name")) or "?"] += 1
+            elif kind == RECORD_TOOL_FINISHED:
+                if ts is not None:
+                    tool_finishes.append(ts)
             elif kind == RECORD_RUN_FINISHED:
                 error = as_text(row.get("error"))
     if first_ts is None or last_ts is None:
@@ -188,11 +275,13 @@ def read_run(path: pathlib.Path, keeper: str, unreadable: Unreadable) -> Run | N
         end=last_ts,
         rounds=len(round_times),
         round_times=tuple(round_times),
+        tool_finish_times=tuple(sorted(tool_finishes)),
         tool_calls=sum(tools.values()),
         top_tool=top[0][0] if top else None,
         top_tool_calls=top[0][1] if top else 0,
         error_kind=error[:ERROR_KIND_CHARS] if error else None,
         client_context=client_context,
+        projections=tuple(projections),
     )
 
 
@@ -278,9 +367,13 @@ def round_stats(runs: list[Run]) -> JsonObject:
     `client_context_submission` hook instead; `runs_without_rounds_with_client_context_submission` counts those."""
     with_rounds = [run for run in runs if run.rounds > 0]
     without_rounds = [run for run in runs if run.rounds == 0]
+    wall = [run.end - run.start for run in without_rounds]
     apart: JsonObject = {
         "runs_without_rounds": len(without_rounds),
         "runs_without_rounds_with_client_context_submission": sum(1 for run in without_rounds if run.client_context),
+        "wall_seconds_of_runs_without_rounds": {**spread(wall), "hours": round(sum(wall) / SECONDS_PER_HOUR, 1)}
+        if wall
+        else {},
     }
     if not with_rounds:
         return {"runs": len(runs), **apart}
@@ -451,6 +544,7 @@ def arrivals_during_runs(
         "acked_before_run_end": sum(1 for ack, run in during if ack.acked < run.end),
         "all": summarize(during) if during else {"rows": 0},
         "visible_at_next_round": visible_at_next_round(during),
+        "visible_at_next_tool_result": visible_at_next_tool_result(during),
         "by_run_size": {name: summarize(by_bucket[name]) for name in bucket_names() if name in by_bucket},
         "by_kind": {
             kind: summarize(pairs) for kind, pairs in sorted(by_kind.items(), key=lambda item: -len(item[1]))
@@ -461,11 +555,49 @@ def arrivals_during_runs(
     }
 
 
-def next_round_after(run: Run, ts: float) -> float | None:
-    for round_time in run.round_times:
-        if round_time >= ts:
-            return round_time
+def first_at_or_after(times: tuple[float, ...], ts: float) -> float | None:
+    for time in times:
+        if time >= ts:
+            return time
     return None
+
+
+def next_round_after(run: Run, ts: float) -> float | None:
+    return first_at_or_after(run.round_times, ts)
+
+
+def visible_at_next_tool_result(during: list[tuple[Ack, Run]]) -> JsonObject:
+    """A replay for rows that arrived inside a run with no round records, which is how an official client
+    runs: the first MASC tool result after the arrival is where the host appends a block. Compared with the
+    wait to the run's end, for the same rows. Tool results of the client's own tools never reach MASC and
+    are not in the trace."""
+    waits: list[float] = []
+    saved: list[float] = []
+    blocked = 0.0
+    in_such_runs = 0
+    for ack, run in during:
+        if run.rounds > 0:
+            continue
+        in_such_runs += 1
+        blocked += run.end - ack.arrived
+        later = first_at_or_after(run.tool_finish_times, ack.arrived)
+        if later is None or later > run.end:
+            continue
+        waits.append(later - ack.arrived)
+        saved.append(run.end - later)
+    apart: JsonObject = {
+        "rows_in_runs_without_rounds": in_such_runs,
+        "blocked_hours": round(blocked / SECONDS_PER_HOUR, 2),
+        "rows_after_the_last_tool_result": in_such_runs - len(waits),
+    }
+    if not waits:
+        return {"rows": 0, **apart}
+    return {
+        "rows": len(waits),
+        **apart,
+        "seconds_to_next_tool_result": spread(waits),
+        "hours_earlier_than_the_run_end": round(sum(saved) / SECONDS_PER_HOUR, 2),
+    }
 
 
 def visible_at_next_round(during: list[tuple[Ack, Run]]) -> JsonObject:
@@ -540,6 +672,66 @@ def arrivals_by_day(acks: list[Ack], during: list[tuple[Ack, Run]], runs: list[R
     ]
 
 
+def first_shown(run: Run) -> list[tuple[float, float]]:
+    """Per queue entry number of a run, the row's arrival time and the time of the first block that listed it.
+    A block the client never read lists its rows again in a later one; the later listing is not a new row."""
+    shown: dict[int, tuple[float, float]] = {}
+    for projection in sorted(run.projections, key=lambda item: item.ts):
+        for row in projection.rows:
+            shown.setdefault(row.arrival, (row.arrived_at, projection.ts))
+    return list(shown.values())
+
+
+def spread(values: list[float]) -> dict[str, float]:
+    ordered = sorted(values)
+    return {
+        "p50": round(percentile(ordered, P50), 1),
+        "p90": round(percentile(ordered, P90), 1),
+        "max": round(ordered[-1], 1),
+    }
+
+
+def arrived_stimuli_projection(runs: list[Run]) -> JsonObject:
+    """The blocks of arrived rows an official-client run was shown, from the run's own raw trace."""
+    blocks = [projection for run in runs for projection in run.projections]
+    if not blocks:
+        return {"blocks": 0}
+    to_first_block: list[float] = []
+    to_run_end: list[float] = []
+    rows_by_day: Counter[str] = Counter()
+    earlier_by_day: dict[str, float] = defaultdict(float)
+    for run in runs:
+        for arrived_at, shown_at in first_shown(run):
+            to_first_block.append(shown_at - arrived_at)
+            to_run_end.append(run.end - arrived_at)
+            rows_by_day[day_of(shown_at)] += 1
+            earlier_by_day[day_of(shown_at)] += run.end - shown_at
+    blocks_by_day: Counter[str] = Counter(day_of(block.ts) for block in blocks)
+    sizes = [float(block.text_bytes) for block in blocks]
+    return {
+        "blocks": len(blocks),
+        "runs_with_a_block": sum(1 for run in runs if run.projections),
+        "rows_shown": len(to_first_block),
+        "blocks_with_rows_left_for_later": sum(1 for block in blocks if block.later > 0),
+        "blocks_by_tool": dict(Counter(block.tool for block in blocks).most_common()),
+        "block_bytes": {"total": sum(block.text_bytes for block in blocks), **{
+            key: int(value) for key, value in spread(sizes).items()
+        }},
+        "seconds_to_first_block": spread(to_first_block),
+        "seconds_to_run_end_of_the_same_rows": spread(to_run_end),
+        "hours_earlier_than_the_run_end": round(sum(earlier_by_day.values()) / SECONDS_PER_HOUR, 2),
+        "by_day": [
+            {
+                "day": day,
+                "blocks": blocks_by_day[day],
+                "rows_shown": rows_by_day[day],
+                "hours_earlier_than_the_run_end": round(earlier_by_day[day] / SECONDS_PER_HOUR, 2),
+            }
+            for day in sorted(set(blocks_by_day) | set(rows_by_day))
+        ],
+    }
+
+
 def measure(
     base: pathlib.Path,
     first_day: date | None,
@@ -561,6 +753,7 @@ def measure(
         "read_at_utc": datetime.now(UTC).strftime("%Y-%m-%dT%H:%MZ"),
         "unreadable_lines": unreadable.lines,
         "unreadable_files": unreadable.files,
+        "unreadable_projection_records": unreadable.projections,
         "runs": {
             **round_stats(runs),
             **{f"ge_{threshold}": long_run_stats(runs, threshold) for threshold in LONG_RUN_ROUNDS},
@@ -569,6 +762,7 @@ def measure(
         "by_day": day_table(runs),
         "spin_runs": spin_rows(runs, spin_min_rounds, spin_top_share, Counter(run for _, run in during)),
         "arrivals_during_runs": arrivals_during_runs(runs, acks, considered, during, first_day, last_day),
+        "arrived_stimuli_projection": arrived_stimuli_projection(runs),
     }
 
 

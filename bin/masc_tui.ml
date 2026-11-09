@@ -7671,8 +7671,10 @@ let row_list (state : state) : row_list option =
   else
   match state.view with
   | Keepers Keeper_list ->
+      (* Search, Home/End and the page keys choose a row, which a folded
+         group opens to show. *)
       windowed ~count:(List.length state.keepers) ~cursor:state.keeper_cursor
-        (fun index -> state.keeper_cursor <- index)
+        (choose_keeper_row state)
   | Lanes ->
       (match state.lanes_mode with
        (* The run list moves [lane_runs_cursor] for j/k and the page keys, so
@@ -19070,11 +19072,6 @@ let open_keeper_detail state ~mailbox (keeper : keeper) =
   launch_detail_tab_reading state ~mailbox keeper
 ;;
 
-(* Selection changes are reconciled by the render owner; moving the cursor
-   never performs the live-context store read in the input handler. *)
-let choose_keeper_row state index = state.keeper_cursor <- index
-;;
-
 (* The answer receipt of an installation's question leads to that
    installation's Results, where its reveal row appears (RFC operator-quiz K6).
    The live worker is found in a fresh inventory read, not in the last one:
@@ -19169,6 +19166,14 @@ let apply_ui_language state lang =
        ~en:("UI language: " ^ ui_language_label lang));
   store_preference state (Masc.Tui_preference.Language_chosen lang)
 
+(* The view and its density are saved together, the way [v] and [V] save
+   them. *)
+let save_keeper_view_preference state =
+  let preference = keeper_view_preference state in
+  ignore (Masc_tui_config.submit_keeper_preference state.keeper_preference_writer
+    ~on_request_id:(fun request_id -> note_keeper_preference_submission state ~request_id preference)
+    ~sw:(Eio_context.get_switch_opt ()) ~base_path:state.local_base_path preference)
+
 let press_marked_target state ~mailbox (target : press_target) =
   match target with
   | Press_input_rejection _ | Press_quit_confirmation _ | Press_notice_fragment _ -> ()
@@ -19243,9 +19248,16 @@ let press_marked_target state ~mailbox (target : press_target) =
          left the list (Enter opened a Keeper) is not the list's any more. *)
       | Some _ when state.view <> Keepers Keeper_list -> ()
       | None -> ()
-      | Some index when index = state.keeper_cursor ->
+      (* On a heading the cursor rests on its group's first row, and a press
+         there chooses that row rather than opening it. *)
+      | Some index when index = state.keeper_cursor && not (keeper_list_on_heading state) ->
           Option.iter (open_keeper_detail state ~mailbox) (selected_keeper state)
       | Some _ -> keeper_list_select_name state name)
+  | Press_keeper_view view ->
+      if state.view = Keepers Keeper_list && view <> state.keeper_list_view then begin
+        set_keeper_list_view state view;
+        save_keeper_view_preference state
+      end
 ;;
 
 (* A failed Fusion read is retried with the streams' reconnect backoff; a
@@ -39086,6 +39098,19 @@ Use relative paths for resources already held in the package. -->
            ignore (Masc_tui_config.submit_keeper_preference state.keeper_preference_writer
              ~on_request_id:(fun request_id -> note_keeper_preference_submission state ~request_id preference)
              ~sw:(Eio_context.get_switch_opt ()) ~base_path preference)
+       | Some (("[" | "]") as bracket)
+         when state.view = Keepers Keeper_list && Option.is_none (current_detail_reading state) ->
+           jump_keeper_list_group state
+             (if bracket = "]" then Masc_tui_keeper_list_model.Next_group
+              else Masc_tui_keeper_list_model.Previous_group)
+       (* On a heading Left folds and Right unfolds, before Left's back and
+          Right's detail; on a row both keep those meanings (RFC-0515 E12). *)
+       | Some (("left" | "right") as arrow)
+         when state.view = Keepers Keeper_list && Option.is_none (current_detail_reading state)
+              && keeper_list_on_heading state ->
+           refold_keeper_list_heading state
+             (if arrow = "left" then Masc_tui_keeper_list_model.Fold
+              else Masc_tui_keeper_list_model.Unfold)
        | Some "o" when state.view = Keepers Keeper_list ->
            cycle_keeper_list_sort state;
            let preference =
@@ -39229,7 +39254,7 @@ Use relative paths for resources already held in the package. -->
                              String.equal keeper.k_name keeper_name)
                           (keepers_for_selection state)
                       with
-                      | Some index -> state.keeper_cursor <- index
+                      | Some index -> choose_keeper_row state index
                       | None -> ())
                  | (Link.Board_post | Link.Goal | Link.Schedule | Link.Task
                    | Link.Fusion_run | Link.Keeper),
@@ -40330,9 +40355,7 @@ Use relative paths for resources already held in the package. -->
                     Masc_tui_scroll.cursor_down
                       ~count:(List.length (code_entries state))
                       state.code_cursor
-            | Keepers Keeper_list ->
-                if state.keeper_cursor < List.length state.keepers - 1 then
-                  choose_keeper_row state (state.keeper_cursor + 1)
+            | Keepers Keeper_list -> step_keeper_list_stop state ~delta:1
             | Keepers Keeper_detail ->
                 if
                   Masc_tui_roster_pane.arrows_go_left
@@ -40678,9 +40701,7 @@ Use relative paths for resources already held in the package. -->
                     Masc_tui_scroll.cursor_up
                       ~count:(List.length (code_entries state))
                       state.code_cursor
-            | Keepers Keeper_list ->
-                if state.keeper_cursor > 0 then
-                  choose_keeper_row state (state.keeper_cursor - 1)
+            | Keepers Keeper_list -> step_keeper_list_stop state ~delta:(-1)
             | Keepers Keeper_detail ->
                 if
                   Masc_tui_roster_pane.arrows_go_left

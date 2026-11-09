@@ -68,6 +68,7 @@
   keeper_msg_async_cancel
   keeper_memory_os_current_types
   keeper_memory_os_current_layout
+  keeper_memory_os_current_range_codec
   keeper_memory_os_receipt_selection
   keeper_memory_os_support_core
   keeper_memory_os_disposition_core

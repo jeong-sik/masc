@@ -62,14 +62,25 @@ module Stream_end = struct
   ;;
 end
 
+(* The body writer [respond_with_streaming] opened on an HTTP/2 stream.
+   [closed_by_route] is set by [Body_writer.close]. h2 closes the writer only
+   once the bytes written before the close have drained (close_after_flush),
+   so until then the writer looks open although the route finished it. *)
+type h2_body =
+  { writer : H2.Body.Writer.t
+  ; mutable closed_by_route : bool
+  }
+
 (* One constructor per transport that carries requests. [streaming] is the
    body writer [respond_with_streaming] opened: neither library hands it back,
-   and [response_state] needs to know whether it is still open. *)
+   and [response_state] needs to know whether it is still open. [reported]
+   is set once [report_exn] reported the request failed. *)
 type t =
   | Http1 of
       { reqd : Httpun.Reqd.t
       ; upgrade : upgrade option
       ; mutable streaming : Httpun.Body.Writer.t option
+      ; mutable reported : bool
       }
   | Http2 of
       { reqd : H2.Reqd.t
@@ -77,7 +88,7 @@ type t =
       ; ledger : Http_h2_response_ledger.request
       ; stream_sw : Eio.Switch.t
       ; stream_end : Stream_end.t
-      ; mutable streaming : H2.Body.Writer.t option
+      ; mutable streaming : h2_body option
       }
 
 let of_gluten (gluten_reqd : Httpun.Reqd.t Gluten.Reqd.t) =
@@ -90,10 +101,11 @@ let of_gluten (gluten_reqd : Httpun.Reqd.t Gluten.Reqd.t) =
           ; drive = gluten_reqd.Gluten.Reqd.upgrade
           }
     ; streaming = None
+    ; reported = false
     }
 ;;
 
-let of_httpun reqd = Http1 { reqd; upgrade = None; streaming = None }
+let of_httpun reqd = Http1 { reqd; upgrade = None; streaming = None; reported = false }
 
 let http2_version = { Httpun.Version.major = 2; minor = 0 }
 
@@ -299,7 +311,7 @@ module Body_writer = struct
     | H1 of Httpun.Body.Writer.t
     | H2 of
         { reqd : H2.Reqd.t
-        ; writer : H2.Body.Writer.t
+        ; body : h2_body
         ; ledger : Http_h2_response_ledger.request
         ; stream_sw : Eio.Switch.t
         ; stream_end : Stream_end.t
@@ -312,7 +324,7 @@ module Body_writer = struct
   let write_string t s =
     match t with
     | H1 writer -> Httpun.Body.Writer.write_string writer s
-    | H2 { reqd; writer; ledger; stream_sw; _ } ->
+    | H2 { reqd; body = { writer; _ }; ledger; stream_sw; _ } ->
       (match Http_h2_response_ledger.reserve ledger ~bytes:(String.length s) with
        | Ok lease -> Http_h2_response_ledger.write_reserved lease writer s
        | Error refusal ->
@@ -325,7 +337,7 @@ module Body_writer = struct
 
   let is_closed = function
     | H1 writer -> Httpun.Body.Writer.is_closed writer
-    | H2 { reqd; writer; stream_sw; stream_end; _ } ->
+    | H2 { reqd; body = { writer; _ }; stream_sw; stream_end; _ } ->
       h2_writer_closed ~stream_sw ~stream_end reqd writer
     | Ended -> true
   ;;
@@ -350,13 +362,15 @@ module Body_writer = struct
     else (
       match t with
       | H1 writer -> Httpun.Body.Writer.flush writer f
-      | H2 { writer; stream_end; _ } -> Stream_end.flush stream_end writer f
+      | H2 { body = { writer; _ }; stream_end; _ } -> Stream_end.flush stream_end writer f
       | Ended -> f `Closed)
   ;;
 
   let close = function
     | H1 writer -> Httpun.Body.Writer.close writer
-    | H2 { writer; stream_end; _ } -> close_after_flush ~stream_end writer
+    | H2 { body; stream_end; _ } ->
+      body.closed_by_route <- true;
+      close_after_flush ~stream_end body.writer
     | Ended -> ()
   ;;
 end
@@ -378,9 +392,10 @@ let respond_with_streaming ?flush_headers_immediately t response =
       let writer =
         H2.Reqd.respond_with_streaming reqd ?flush_headers_immediately (h2_response_of response)
       in
-      http2.streaming <- Some writer;
+      let body = { writer; closed_by_route = false } in
+      http2.streaming <- Some body;
       Body_writer.H2
-        { reqd; writer; ledger = http2.ledger; stream_sw; stream_end = http2.stream_end })
+        { reqd; body; ledger = http2.ledger; stream_sw; stream_end = http2.stream_end })
 ;;
 
 type response_state =
@@ -397,8 +412,9 @@ let response_state = function
      | None, None -> Not_started)
   | Http2 { reqd; stream_sw; stream_end; streaming; _ } ->
     (match streaming, H2.Reqd.response reqd with
-     | Some writer, _ ->
-       if h2_writer_closed ~stream_sw ~stream_end reqd writer
+     | Some body, _ ->
+       if body.closed_by_route
+          || h2_writer_closed ~stream_sw ~stream_end reqd body.writer
        then Answered
        else Streaming_open
      | None, Some _ -> Answered
@@ -430,7 +446,23 @@ let body_buffer ~declared =
   Http_body_buffer.create initial_capacity
 ;;
 
-let read_body_h1 reqd ~max_bytes ~on_body ~on_error =
+(* httpun ends a request body the same way whether its parser finished it
+   or a report cut it short: the reader closes, and a read still pending sees
+   its end with the bytes so far. Only a body that ended whole is delivered.
+   A body with a length is whole when that many bytes arrived; the length is
+   the one httpun's parser reads the body by. A chunked body leaves a trace
+   only when its cut was reported: by masc ([reported]), or by httpun before
+   a response started, which sets the request's error code. httpun's own
+   report after a response started leaves none, and that body is taken as
+   whole: httpun keeps no completion state, unlike h2's reader. *)
+let ended_whole reqd ~reported ~received =
+  match Httpun.Request.body_length (Httpun.Reqd.request reqd) with
+  | `Fixed length -> Int64.equal length (Int64.of_int received)
+  | `Chunked | `Error `Bad_request ->
+    (not (reported ())) && Option.is_none (Httpun.Reqd.error_code reqd)
+;;
+
+let read_body_h1 reqd ~reported ~max_bytes ~on_body ~on_error =
   let request = Httpun.Reqd.request reqd in
   let declared =
     match Httpun.Headers.get request.headers "content-length" with
@@ -459,7 +491,9 @@ let read_body_h1 reqd ~max_bytes ~on_body ~on_error =
     let rec read_loop () =
       Httpun.Body.Reader.schedule_read
         body
-        ~on_eof:(fun () -> deliver_body ~on_body ~on_error (Http_body_buffer.contents buf))
+        ~on_eof:(fun () ->
+          if ended_whole reqd ~reported ~received:(Http_body_buffer.length buf)
+          then deliver_body ~on_body ~on_error (Http_body_buffer.contents buf))
         ~on_read:(fun buffer ~off ~len ->
           if !stopped
           then ()
@@ -527,7 +561,13 @@ let read_body_h2 reqd ~ledger ~stream_sw ~max_bytes ~on_body ~on_error =
 
 let read_body t ~max_bytes ~on_body ~on_error =
   match t with
-  | Http1 { reqd; _ } -> read_body_h1 reqd ~max_bytes ~on_body ~on_error
+  | Http1 http1 ->
+    read_body_h1
+      http1.reqd
+      ~reported:(fun () -> http1.reported)
+      ~max_bytes
+      ~on_body
+      ~on_error
   | Http2 { reqd; ledger; stream_sw; _ } ->
     read_body_h2 reqd ~ledger ~stream_sw ~max_bytes ~on_body ~on_error
 ;;
@@ -536,8 +576,9 @@ let read_body t ~max_bytes ~on_body ~on_error =
    body calls no handler at all, so the HTTP/1.1 failure is logged here. *)
 let report_exn t exn =
   match t with
-  | Http1 { reqd; _ } ->
+  | Http1 http1 ->
     Log.Http.error "[http] request failed: %s" (Printexc.to_string exn);
-    Httpun.Reqd.report_exn reqd exn
+    http1.reported <- true;
+    Httpun.Reqd.report_exn http1.reqd exn
   | Http2 { reqd; stream_sw; _ } -> Http_h2_stream.reset ~stream_sw reqd (Http_h2_stream.Raised exn)
 ;;

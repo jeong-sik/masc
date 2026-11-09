@@ -88,9 +88,18 @@ let request_with_headers ?token ?(extra_headers = []) ?(scheme = "http")
       Eio.Promise.resolve resolve (Error "stream failed"))
     ~response_handler:(fun response reader ->
       let bytes = Buffer.create 256 in
+      (* h2 ends the body of a reset stream before it calls [error_handler];
+         only [Complete] is a whole response. *)
       let rec read () = H2.Body.Reader.schedule_read reader
-        ~on_eof:(fun () -> Eio.Promise.resolve resolve
-          (Ok (H2.Status.to_code response.status, H2.Headers.to_list response.headers, Buffer.contents bytes)))
+        ~on_eof:(fun () ->
+          if not (Eio.Promise.is_resolved result) then
+            Eio.Promise.resolve resolve
+              (match H2.Body.Reader.completion reader with
+               | H2.Body.Reader.Complete ->
+                 Ok (H2.Status.to_code response.status, H2.Headers.to_list response.headers,
+                     Buffer.contents bytes)
+               | H2.Body.Reader.Aborted -> Error "stream reset"
+               | H2.Body.Reader.Pending -> Error "response body ended while still pending"))
         ~on_read:(fun chunk ~off ~len ->
           Buffer.add_string bytes (Bigstringaf.substring chunk ~off ~len); read ()) in
       read ()) in
@@ -178,12 +187,19 @@ let test_a_path_the_router_lacks_is_not_found () =
       check int "a method the table lacks" 405 (status ~meth:`GET client "/health"))
 
 (* A route that fails before its response gets a 500. One that fails after
-   its response started cannot: its headers already went out, so the
-   response is cut and the client sees the failure. One that fails after a
-   whole response keeps that response. Each failure is logged once. *)
+   its response started cannot: its headers already went out. HTTP/2 resets
+   the stream. HTTP/1.1 stops the body and closes the connection, which a
+   chunked body shows as a missing last chunk. One that fails after a whole
+   response, or after closing its own body, keeps that response. Each
+   failure is logged once. *)
 let early_failure = "fixture route failed before its response"
 let half_failure = "fixture route failed mid-stream"
 let answered_failure = "fixture route failed after its response"
+let closed_failure = "fixture route failed after closing its body"
+
+(* An unreadable auth configuration keeps its own answer, a 503. *)
+let auth_config_failure =
+  Auth.Auth_config_error { file = "fixture/auth/config.json"; reason = "fixture" }
 
 let failing_routes ~sw:_ ~clock:_ =
   Masc.Http_server_eio.Router.create ()
@@ -200,6 +216,17 @@ let failing_routes ~sw:_ ~clock:_ =
   |> Server_route.get Server_route.Always_public "/answered" (fun _request reqd ->
     Masc.Http_server_eio.Response.text "done" reqd;
     failwith answered_failure)
+  |> Server_route.get Server_route.Always_public "/closed" (fun _request reqd ->
+    let writer =
+      Masc.Http_reqd.respond_with_streaming ~flush_headers_immediately:true reqd
+        (Httpun.Response.create
+           ~headers:(Httpun.Headers.of_list [ "transfer-encoding", "chunked" ]) `OK)
+    in
+    Masc.Http_reqd.Body_writer.write_string writer "done";
+    Masc.Http_reqd.Body_writer.close writer;
+    failwith closed_failure)
+  |> Server_route.get Server_route.Always_public "/auth-config" (fun _request _reqd ->
+    raise auth_config_failure)
 
 let h2_outcome client path =
   let result, resolve = Eio.Promise.create () in
@@ -226,9 +253,12 @@ let h2_outcome client path =
   Eio.Promise.await result
 
 (* One HTTP/1.1 exchange in memory, through the ingress the HTTP/1.1
-   listener runs. Every step is synchronous, so a writer that yields is a
+   listener runs. The client sends [request], then leaves ([eof]) or goes
+   quiet. The read operation that follows is the one the listener's read
+   loop asks for next: httpun handles a request it could not read to the
+   end there. Every step is synchronous, so a writer that yields is a
    response nobody will finish. *)
-let h1_outcome ~routes path =
+let h1_exchange ?(eof = true) ~routes request =
   let trust_policy =
     match
       Server_request_authority.make_trust_policy
@@ -243,9 +273,12 @@ let h1_outcome ~routes path =
       ~client_addr:(`Tcp (Eio.Net.Ipaddr.V4.loopback, 54321))
       (Server_request_authority.classify_http1_request ~trust_policy (Httpun.Reqd.request reqd))
       (Masc.Http_reqd.of_httpun reqd)) in
-  let request = Printf.sprintf "GET %s HTTP/1.1\r\nHost: localhost:8935\r\n\r\n" path in
   let bytes = Bigstringaf.of_string ~off:0 ~len:(String.length request) request in
-  ignore (Httpun.Server_connection.read_eof conn bytes ~off:0 ~len:(Bigstringaf.length bytes));
+  let feed =
+    if eof then Httpun.Server_connection.read_eof else Httpun.Server_connection.read
+  in
+  ignore (feed conn bytes ~off:0 ~len:(Bigstringaf.length bytes));
+  ignore (Httpun.Server_connection.next_read_operation conn);
   let rec drain () =
     match Httpun.Server_connection.next_write_operation conn with
     | `Write iovecs ->
@@ -258,6 +291,10 @@ let h1_outcome ~routes path =
     | `Close _ -> `Closed (Buffer.contents output)
   in
   drain ()
+
+let h1_outcome ~routes path =
+  h1_exchange ~routes
+    (Printf.sprintf "GET %s HTTP/1.1\r\nHost: localhost:8935\r\n\r\n" path)
 
 let test_route_failure_follows_the_response_state () =
   let captured = ref None in
@@ -278,6 +315,15 @@ let test_route_failure_follows_the_response_state () =
            check bool "HTTP/1.1: a failure before the response is a 500" true
              (String_util.contains_substring output " 500 "));
         check int "a failure before the response is logged on both" 2 (logged early_failure);
+        check bool "HTTP/2: an auth configuration failure is a 503" true
+          (match h2_outcome client "/auth-config" with
+           | `Ended (503, _) -> true
+           | `Ended _ | `Reset -> false);
+        (match h1_outcome ~routes "/auth-config" with
+         | `Open output -> failf "HTTP/1.1: the 503 did not end: %S" output
+         | `Closed output ->
+           check bool "HTTP/1.1: an auth configuration failure is a 503" true
+             (String_util.contains_substring output " 503 "));
         check bool "HTTP/2: the half-sent stream is reset" true
           (match h2_outcome client "/half" with `Reset -> true | `Ended _ -> false);
         check int "HTTP/2: the failure is logged once" 1 (logged half_failure);
@@ -300,7 +346,82 @@ let test_route_failure_follows_the_response_state () =
              (String_util.contains_substring output " 200 "
               && String_util.contains_substring output "\r\n\r\ndone"));
         check int "a failure after a whole response is logged on both" 2
-          (logged answered_failure)))
+          (logged answered_failure);
+        check bool "HTTP/2: a body the route closed stays whole" true
+          (match h2_outcome client "/closed" with
+           | `Ended (200, "done") -> true
+           | `Ended _ | `Reset -> false);
+        (match h1_outcome ~routes "/closed" with
+         | `Open output -> failf "HTTP/1.1: the closed body did not end: %S" output
+         | `Closed output ->
+           check bool "HTTP/1.1: a body the route closed keeps its last chunk" true
+             (String_util.contains_substring output "4\r\ndone\r\n"
+              && String_util.contains_substring output "\r\n0\r\n\r\n"));
+        check int "a failure after the route closed its body is logged on both" 2
+          (logged closed_failure)))
+
+(* A request body that ends short reaches no route; the request has its
+   answer or its end by then. A client that leaves mid-body cuts its body,
+   and httpun answers that request itself. A route that fails after its
+   response started cuts a chunked body still coming in. *)
+let body_failure = "fixture route failed while its body was still coming"
+
+let body_routes ~delivered ~sw:_ ~clock:_ =
+  Masc.Http_server_eio.Router.create ()
+  |> Server_route.post Server_route.Always_public "/upload" (fun _request reqd ->
+    Masc.Http_server_eio.Request.read_body_async reqd (fun body ->
+      delivered := body :: !delivered;
+      Masc.Http_server_eio.Response.text "stored" reqd))
+  |> Server_route.post Server_route.Always_public "/read-then-fail" (fun _request reqd ->
+    let writer =
+      Masc.Http_reqd.respond_with_streaming ~flush_headers_immediately:true reqd
+        (Httpun.Response.create
+           ~headers:(Httpun.Headers.of_list [ "transfer-encoding", "chunked" ]) `OK)
+    in
+    Masc.Http_reqd.Body_writer.write_string writer "partial";
+    Masc.Http_server_eio.Request.read_body_async reqd (fun body ->
+      delivered := body :: !delivered);
+    failwith body_failure)
+
+let post path ~fields body =
+  Printf.sprintf "POST %s HTTP/1.1\r\nHost: localhost:8935\r\n%s\r\n%s" path fields body
+
+let test_a_cut_request_body_reaches_no_route () =
+  let delivered = ref [] in
+  let captured = ref None in
+  with_gateway ~on_routes:(fun routes -> captured := Some routes)
+    ~make_routes:(body_routes ~delivered)
+    (fun ~player:_ ~reader:_ _client ->
+      let routes = match !captured with Some routes -> routes | None -> fail "missing routes" in
+      (match h1_exchange ~routes (post "/upload" ~fields:"Content-Length: 5\r\n" "hello") with
+       | `Open output -> failf "HTTP/1.1: the answer to a whole body did not end: %S" output
+       | `Closed output ->
+         check bool "a whole body gets the route's answer" true
+           (String_util.contains_substring output "stored"));
+      check (list string) "the route got the whole body" [ "hello" ] !delivered;
+      delivered := [];
+      (match h1_exchange ~routes (post "/upload" ~fields:"Content-Length: 10\r\n" "hello") with
+       | `Open output -> failf "HTTP/1.1: the answer to a cut body did not end: %S" output
+       | `Closed output ->
+         check bool "httpun answers a body the client cut" true
+           (String_util.contains_substring output " 400 "));
+      check (list string) "a body the client cut reaches no route" [] !delivered;
+      (match
+         h1_exchange ~routes (post "/upload" ~fields:"Transfer-Encoding: chunked\r\n" "5\r\nhello\r\n")
+       with
+       | `Open output -> failf "HTTP/1.1: the answer to a cut chunked body did not end: %S" output
+       | `Closed output ->
+         check bool "httpun answers a chunked body the client cut" true
+           (String_util.contains_substring output " 400 "));
+      check (list string) "a chunked body the client cut reaches no route" [] !delivered;
+      (match
+         h1_exchange ~eof:false ~routes
+           (post "/read-then-fail" ~fields:"Transfer-Encoding: chunked\r\n" "5\r\nhello\r\n")
+       with
+       | `Open output -> failf "HTTP/1.1: the failed route's response stayed open: %S" output
+       | `Closed _ -> ());
+      check (list string) "a chunked body its route's failure cut reaches no route" []
+        !delivered)
 
 let test_fusion_workspace_admission () =
   with_gateway ~make_routes:production (fun ~player ~reader:_ client ->
@@ -761,6 +882,8 @@ let () =
         ; test_case "health names the h2 listener" `Quick test_health_names_the_h2_listener
         ; test_case "a route failure follows the response state" `Quick
             test_route_failure_follows_the_response_state
+        ; test_case "a cut request body reaches no route" `Quick
+            test_a_cut_request_body_reaches_no_route
         ; test_case "Fusion workspace admission" `Quick test_fusion_workspace_admission
         ; test_case "physical Skill turn evidence" `Quick test_physical_skill_turn_evidence
         ; test_case "bound Goal tree bypasses stale cache" `Quick test_goal_tree_bound_read_bypasses_stale_cache

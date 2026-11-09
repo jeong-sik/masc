@@ -3,12 +3,12 @@ rfc: "keeper-world-state-shows-open-work"
 title: "Keeper 의 World State 에 열린 PR 과 할 일을 제목과 함께 보여 준다"
 status: Draft
 created: 2026-09-27
-updated: 2026-09-28
+updated: 2026-11-09
 author: dancer + claude
 supersedes: []
 superseded_by: null
 related: ["0465", "keeper-github-apps", "0385", "0462", "connector-ambient-attention-wake", "prompts-and-tool-definitions-outside-ocaml", "every-durable-store-has-one-boot-policy"]
-implementation_prs: []
+implementation_prs: [50213, 50214, 50259]
 ---
 
 # RFC: Keeper 는 World State 에서 열린 일을 본다
@@ -486,6 +486,13 @@ Your other open pull requests: #39410 (draft) #39422 (checks running)
 - checkout 대상 규칙을 적용하지 않는다. 어느 Keeper 든 부르면 모든 저장소 행을 읽는다. World State 는 매 턴 싣는 몫이고, 도구는 Keeper 가 골라 부르는 몫이다.
 - GitHub 을 부르지 않는다. 스냅숏이 `Pulls_failed` 이면 그 실패를 그대로 돌려준다.
 - 정의는 `config/tools/` 의 TOML 로 둔다.
+
+- **[구현]** 2026-11-09 에 #50259 로 S5 가 S4 보다 먼저 들어갔다(S1 #50213, S2 #50214 위). §4.2 의 자리 판정은 `Repository_pulls_placement.placement_of` 에 있고 S4 는 이 함수를 부른다. 행은 World State 행(§4.6)이 아니라 JSON 이어서, 둘을 맞추는 일은 S4 에 남는다. 이 문서와 다른 점:
+  - `Checks_unrecognized` 자리는 없다. `Repository_pulls` 는 모르는 check 상태가 든 PR 을 디코딩하지 않고 `undecodable` 로 센다.
+  - 자리 `head_review_unknown` 이 있다. head 나 리뷰 목록을 못 읽은 PR 이 `Unreviewed_on_head` 에 섞이지 않는다.
+  - §4.3 의 3번(`committedDate`)은 스냅숏에 칸이 없어 PR 번호로 대신한다.
+  - 읽은 저장소가 하나도 없으면 `Dependency_unavailable` 에러에 저장소별 상태를 실어 돌려준다. 일부만 읽었으면 성공이고, 못 읽은 저장소는 `failed` 항목으로 나온다.
+  - 스키마는 `defer_loading = true` 다. Keeper 는 도구 검색으로 찾아서 부른다.
 
 ## 5. GitHub 변화로 깨우나
 

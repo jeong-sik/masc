@@ -795,25 +795,63 @@ let test_a_goal_under_proof_is_current_system_state () =
 ;;
 
 let test_proof_state_follows_the_runtime_execution_owner () =
+  let operation = "kmsg-eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee" in
+  let peer = "proof-source-peer" in
+  let operation_id = match Keeper_chat_operation.Operation_id.of_string operation with
+    | Ok id -> id | Error detail -> fail detail in
+  let keeper_id = match Keeper_identity.Keeper_id.of_string peer with
+    | Some id -> id | None -> fail "fixture peer must have a canonical Keeper identity" in
+  let source = Keeper_direct_input_source.of_admitted_input ~operation_id
+      ~speaker:(Keeper_input_speaker.Person (Keeper_input_speaker.Keeper keeper_id))
+      |> Keeper_direct_input_source.render in
+  List.iter (fun identity -> check bool "the admitted source names its original operation and peer"
+    true (contains_in source identity)) [operation; peer];
   let partition = Keeper_context_layers.assemble ~content_of:(function
     | Keeper_context_layers.Goals_awaiting_proof -> Some "CURRENT_PROOF_STATE"
     | Keeper_context_layers.Active_goals -> Some "CURRENT_GOAL"
-    | _ -> None) in
+    | Keeper_context_layers.Direct_input_source -> Some source
+    | Keeper_context_layers.Goal_observations | Current_task | Approval_authority
+    | Connected_surfaces | Namespace_state | Workspace_memory | Wiki | Lane_updates
+    | Autonomous_trigger | Scheduled_automation | Completion_authority | Task_cancellations
+    | Pending_mentions | Scope_messages | Own_board_posts | Board_activity
+    | Own_recent_actions | Recent_work | Fleet_messages -> None) in
   let assemble checkpoint_owner post_tool_round previous_assembly blocks =
     Keeper_run_prompt.assemble_request_context ~checkpoint_owner
       ~system:(system_of_text "BASE") ~post_tool_round ~previous_assembly
       ~dynamic_context_partition:(Some partition) ~existing_extra_system_context:None ~blocks in
+  let check_source (assembly : Keeper_context_assembly.t) =
+    let sources = match assembly.system_prompt with
+      | None -> fail "the admitted source requires an issued System"
+      | Some issued -> List.filter_map (function
+          | Keeper_context_assembly.Direct_input_source text -> Some text
+          | Active_goals _ | Goals_awaiting_proof _ -> None) issued.observations in
+    check (list string) "the exact admitted source stays in System once" [source] sources;
+    check bool "the actual issued System retains the exact source bytes" true
+      (contains_in (issued_system assembly) source);
+    check bool "the source acquires no User context block" false
+      (List.mem_assoc Prompt_block_id.Direct_input_source assembly.blocks);
+    List.iter (fun identity ->
+      check bool "the original operation and peer are not replayed in a User carrier" false
+        (match assembly.extra_system_context with
+         | Some carrier -> contains_in carrier identity
+         | None -> false)) [operation; peer] in
   List.iter (fun extra_blocks ->
     let first = assemble Runtime_execution.Masc_agent_core false None
         ((Prompt_block_id.Dynamic_context, Keeper_context_layers.text partition) :: extra_blocks) in
+    check_source first;
     check bool "only renderer-issued proof enters System" false
       (contains_in (issued_system first) "UNISSUED_PROOF");
     let official = assemble Runtime_execution.Official_client true (Some first) [] in
+    check_source official;
     check bool "official System retains no turn-scoped proof state" false
       (contains_in (issued_system official) "CURRENT_PROOF_STATE");
     check (list string) "official fallback receives only the renderer-issued proof state"
       ["CURRENT_PROOF_STATE"] (awaiting_blocks official);
+    check (list (pair string string)) "only proof moves to the official User carrier"
+      ["goals_awaiting_proof", "CURRENT_PROOF_STATE"]
+      (List.map (fun (id, text) -> Prompt_block_id.to_string id, text) official.blocks);
     let core = assemble Runtime_execution.Masc_agent_core true (Some official) [] in
+    check_source core;
     check string "Agent Core fallback restores the same System"
       (issued_system first) (issued_system core);
     check (option string) "Agent Core fallback leaves no proof User carrier" None core.extra_system_context)

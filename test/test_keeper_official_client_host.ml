@@ -2934,6 +2934,172 @@ let test_a_changed_system_goal_reaches_a_held_official_session () =
       |> member "issuer_attribution" |> member "status" |> to_string)
 ;;
 
+(* Source is issued outside the User body and its Librarian-only metadata.
+   Exercise the common assembler and actual official host preparation, then
+   the held-session projection and its physical source receipt. *)
+let test_direct_operation_source_reaches_official_start_and_resume () =
+  use_markdown_prompts ();
+  let module A = Keeper_context_assembly in
+  let module Source = Keeper_direct_input_source in
+  let module Speaker = Keeper_input_speaker in
+  let module Session = Keeper_official_client_session_store in
+  let operation raw = match Keeper_chat_operation.Operation_id.of_string raw with
+    | Ok id -> id | Error detail -> fail detail in
+  let peer_id = match Keeper_identity.Keeper_id.of_string "peer-source-sender" with
+    | Some id -> id | None -> fail "valid fixture Keeper id" in
+  let peer = Speaker.Person (Speaker.Keeper peer_id) in
+  let local = Speaker.Person Speaker.Owner in
+  let host = Speaker.Host_prompt Speaker.Official_client_resume in
+  let peer_operation = operation "peer-source-operation" in
+  let local_operation = operation "local-source-operation" in
+  let body = "Inspect the queued task and report what you find." in
+  let goal = "Goal source-observation-fixture; criterion unchanged\n\n" in
+  let source_for operation_id speaker = Source.of_admitted_input ~operation_id ~speaker in
+  let prepare ?(partition_known = true) source speaker user_message =
+    let source_text = Option.map Source.render source in
+    let partition = Layers.assemble ~content_of:(function
+      | Layers.Active_goals -> Some goal
+      | Layers.Direct_input_source -> source_text
+      | Layers.Goal_observations | Layers.Goals_awaiting_proof | Layers.Current_task
+      | Layers.Approval_authority | Layers.Connected_surfaces | Layers.Namespace_state
+      | Layers.Workspace_memory | Layers.Wiki | Layers.Lane_updates | Layers.Autonomous_trigger
+      | Layers.Scheduled_automation | Layers.Completion_authority | Layers.Task_cancellations
+      | Layers.Pending_mentions | Layers.Scope_messages | Layers.Own_board_posts
+      | Layers.Board_activity | Layers.Own_recent_actions | Layers.Recent_work
+      | Layers.Fleet_messages -> None)
+      |> fun partition -> Layers.append_unattributed partition Direct_turn "TASK GATE LANE" in
+    let assembly = Keeper_run_prompt.assemble_request_context ~checkpoint_owner:Runtime_execution.Official_client
+        ~system:(system_of_text "BASE_INSTRUCTIONS") ~post_tool_round:false ~previous_assembly:None
+        ~dynamic_context_partition:(if partition_known then Some partition else None) ~existing_extra_system_context:None
+        ~blocks:[Prompt_block_id.Dynamic_context, Layers.text partition] in
+    let request = Agent_core.Types.make_message ~metadata:(Speaker.metadata speaker)
+        ~role:Agent_core.Types.User [Agent_core.Types.Text user_message] in
+    let hooks = {Agent_core.Hooks.empty with before_turn_params=Some (function
+      | Agent_core.Hooks.BeforeTurnParams {current_params;_} ->
+        Agent_core.Hooks.AdjustParams {current_params with
+          extra_system_context=assembly.extra_system_context;
+          system_prompt_override=A.system_prompt_override ~previous:current_params.system_prompt_override assembly}
+      | BeforeTurn _ | AfterTurn _ | PreToolUse _ | PostToolUse _ | PostToolUseFailure _
+      | OnStop _ | OnError _ | OnToolError _ -> Agent_core.Hooks.Continue)} in
+    let prepared = match Host.prepare_turn ~runtime_label:"direct-input-source-fixture"
+        ~composed_context:(Some (fun () -> Some assembly)) ~keeper_name:"source-recipient"
+        ~turn_count:1 ~system_prompt:"BASE_INSTRUCTIONS" ~tools:[] ~initial_messages:[request]
+        ~model_input_projection:None ~hooks:(Some hooks) ~configured_reasoning_effort:None with
+      | Ok prepared -> prepared | Error error -> fail (Agent_core.Error.to_string error) in
+    check bool "host preparation preserves the original User body and metadata" true
+      (List.exists ((=) request) prepared.messages);
+    assembly, prepared in
+  let source = source_for peer_operation peer in
+  let peer_text = Source.render source in
+  let first, first_prepared = prepare (Some source) peer body in
+  check bool "Start carries the exact admitted peer source in its System" true
+    (contains first_prepared.system_prompt peer_text);
+  check bool "the source carries the original operation id" true
+    (contains peer_text "\"operation_id\":\"peer-source-operation\"");
+  check bool "the source carries the typed registered Keeper identity" true
+    (contains peer_text "\"speaker\":{\"kind\":\"keeper\",\"keeper_id\":\"peer-source-sender\"}");
+  let issued = match first.system_prompt with
+    | Some issued -> issued | None -> fail "issued System required" in
+  check (list string) "Goal then operation source are independent System observations"
+    ["active_goals"; "direct_input_source"]
+    (List.map (fun observation -> A.observation_block observation |> fst |> Prompt_block_id.to_string)
+       issued.observations);
+  check bool "source is removed from the extra context carrier" false
+    (contains (Option.value ~default:"" first.extra_system_context) peer_text);
+  let after_tool = Keeper_run_prompt.assemble_request_context ~checkpoint_owner:Runtime_execution.Official_client
+      ~system:(system_of_text "BASE_INSTRUCTIONS") ~post_tool_round:true ~previous_assembly:(Some first)
+      ~dynamic_context_partition:None ~existing_extra_system_context:None
+      ~blocks:[Prompt_block_id.Dynamic_context, "TRANSIENT-WORLD"] in
+  check string "tool rounds retain the same Goal and original operation source"
+    issued.text (A.effective_system_prompt ~base_text:"BASE_INSTRUCTIONS" after_tool);
+  check bool "a tool round does not rebroadcast the transient world" false
+    (contains (Option.value ~default:"" after_tool.extra_system_context) "TRANSIENT-WORLD");
+  let held = Host.start_held_context ~turn_observation:None ~composed_context:first first_prepared.messages in
+  let resume assembly (prepared : Host.prepared_turn) ~goal ~held =
+    Host.resume_prompt ~turn_observation:None ~goal ~held ~composed_context:assembly prepared.messages in
+  let cue = "Resume the original admitted operation without repeating completed effects." in
+  let resumed, resumed_prepared = prepare (Some source) host cue in
+  check bool "a host resume cue keeps the admitted operation's original peer source" true
+    (contains resumed_prepared.system_prompt peer_text);
+  let same = resume resumed resumed_prepared ~goal:cue ~held in
+  check string "the same operation source is held without resending it" cue same.prompt;
+  let local_source = source_for local_operation local in
+  let local_text = Source.render local_source in
+  let second, second_prepared = prepare (Some local_source) local body in
+  let changed = resume second second_prepared ~goal:body ~held:same.held_context in
+  check bool "a local request is explicitly a local request, without an operator claim" true
+    (contains local_text "\"speaker\":{\"kind\":\"local_request\"}");
+  check bool "peer to local transition delivers the new operation's source" true
+    (contains changed.prompt (Host.encode_history_message (Agent_core.Types.user_msg local_text)));
+  check bool "the old peer is not carried as the new operation's source" false
+    (contains changed.prompt "peer-source-sender");
+  let open Yojson.Safe.Util in
+  let binding = Keeper_context_submission_link.binding_to_json
+      ~slot:Runtime_official_client_write.Whole_write changed.context_projection
+      (Runtime_official_client_write.raw changed.prompt) in
+  check string "the delivered resume bytes bind to their actual write slot" "matched_completed_slot"
+    (binding |> member "status" |> to_string);
+  let proof = match binding |> member "occurrences" |> to_list with
+    | [occurrence] -> member "source" occurrence
+    | _ -> fail "only the changed operation source is delivered" in
+  check string "resume delivery is attributed to the separate System carrier" "system_prompt"
+    (proof |> member "source_carrier" |> to_string);
+  let physical = match second.system_prompt with
+    | Some issued -> issued | None -> fail "new operation System required" in
+  let span_index = match proof |> member "source_span_indices" |> to_list with
+    | [index] -> to_int index | _ -> fail "one operation-source span required" in
+  let span = List.nth physical.partition.spans span_index in
+  check bool "the proof names the operation source, independently of the Goal" true
+    (span.kind = A.Block Prompt_block_id.Direct_input_source);
+  check string "the exact proved source bytes are the new local operation source" local_text
+    (String.sub physical.text span.offset span.bytes);
+  let later_peer = source_for (operation "later-peer-operation") peer in
+  let later, later_prepared = prepare (Some later_peer) peer body in
+  let later_delivery = resume later later_prepared ~goal:body ~held:held in
+  check bool "identical peer and User body still distinguish a new operation" true
+    (contains later_delivery.prompt
+       (Host.encode_history_message (Agent_core.Types.user_msg (Source.render later_peer))));
+  let autonomous, autonomous_prepared = prepare None
+      (Speaker.Host_prompt (Speaker.Autonomous_wake {answered_asks=[]})) "AUTONOMOUS-CUE" in
+  let autonomous_delivery = resume autonomous autonomous_prepared ~goal:"AUTONOMOUS-CUE"
+      ~held:changed.held_context in
+  check bool "an autonomous turn issues no source for a prior direct operation" false
+    (contains autonomous_prepared.system_prompt local_text);
+  check bool "an autonomous turn does not deliver a prior direct source as current" false
+    (contains autonomous_delivery.prompt "local-source-operation");
+  let holds_source held = List.exists (fun (item : Session.held_context) ->
+      item.context = Session.Context_block Prompt_block_id.Direct_input_source) held in
+  check bool "a known autonomous partition retires the prior direct source's held receipt" false
+    (holds_source autonomous_delivery.held_context);
+  let reappeared = resume second second_prepared ~goal:body ~held:autonomous_delivery.held_context in
+  check bool "a retired operation source is delivered again when it returns" true
+    (contains reappeared.prompt (Host.encode_history_message (Agent_core.Types.user_msg local_text)));
+  let unknown, unknown_prepared = prepare ~partition_known:false None
+      (Speaker.Host_prompt (Speaker.Autonomous_wake {answered_asks=[]})) "UNKNOWN-PARTITION-CUE" in
+  let unknown_delivery = resume unknown unknown_prepared ~goal:"UNKNOWN-PARTITION-CUE"
+      ~held:changed.held_context in
+  check bool "an unavailable renderer partition cannot retire a known source receipt" true
+    (holds_source unknown_delivery.held_context);
+  let host_observation = Source.render (source_for (operation "host-source-operation")
+      (Speaker.Host_prompt (Speaker.Autonomous_wake {answered_asks=[Speaker.Keeper peer_id]}))) in
+  check bool "a Host input projects its cue kind" true
+    (contains host_observation "\"host_prompt\":\"autonomous_wake\"");
+  check bool "a Host source does not forward embedded Ask speakers" false
+    (contains host_observation "peer-source-sender");
+  let external_speaker = Speaker.Person
+      (Speaker.External {channel="chat";user_id=Some "external-7";user_name=Some "A \"quoted\" name"}) in
+  let external_source = source_for (operation "external-source-operation") external_speaker in
+  let external_assembly, external_prepared = prepare (Some external_source) external_speaker body in
+  check bool "an external source keeps its known identity as structured data" true
+    (contains external_prepared.system_prompt (Source.render external_source));
+  check bool "an external source remains external" true
+    (contains (Source.render external_source) "\"kind\":\"external\"");
+  check bool "the new operation source has a distinct held identity" true
+    (holds_source changed.held_context);
+  check bool "the external source is also separate from the extra context" false
+    (List.mem_assoc Prompt_block_id.Direct_input_source external_assembly.blocks)
+;;
+
 (* RFC-0491 §3.1: the issuer carries Completion Authority as a block of its
    context carrier, so the Agent Core System holds standing instructions only.
    An official client keeps the System-role carrier in the vendor's persistent
@@ -3715,6 +3881,8 @@ let () =
     ; ( "World State sections on resume"
       , [ test_case "changed System Goal reaches a held session" `Quick
             test_a_changed_system_goal_reaches_a_held_official_session
+        ; test_case "direct operation source reaches official Start and Resume" `Quick
+            test_direct_operation_source_reaches_official_start_and_resume
         ; test_case "carrier authority is current-turn input on official Start and Resume" `Quick
             test_carrier_authority_is_current_turn_input_on_official_start_and_resume
         ; test_case "the carrier authority block is valid UTF-8" `Quick

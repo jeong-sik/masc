@@ -12,6 +12,7 @@ module L = Masc.Keeper_context_layers
 let all_layers =
   [
     L.Active_goals;
+    L.Direct_input_source;
     L.Goal_observations;
     L.Goals_awaiting_proof;
     L.Current_task;

@@ -15,10 +15,12 @@ type receipt =
   }
 type system_observation =
   | Active_goals of string
+  | Direct_input_source of string
   | Goals_awaiting_proof of string
 
 let observation_block = function
   | Active_goals text -> Prompt_block_id.Active_goals, text
+  | Direct_input_source text -> Prompt_block_id.Direct_input_source, text
   | Goals_awaiting_proof text -> Prompt_block_id.Goals_awaiting_proof, text
 
 type proof_state = { proof_text : string }
@@ -65,7 +67,7 @@ let assemble ~dynamic_context_partition ~existing_extra_system_context ~blocks =
         when String.equal text (Keeper_context_layers.text rendered) ->
         Issued (Keeper_context_layers.receipt_to_json rendered)
       | Block Prompt_block_id.Dynamic_context, _ -> Unavailable
-      | ((Block (Prompt_block_id.Keeper_instructions | Prompt_block_id.Active_goals
+      | ((Block (Prompt_block_id.Keeper_instructions | Prompt_block_id.Active_goals | Prompt_block_id.Direct_input_source
           | Prompt_block_id.Completion_authority | Prompt_block_id.Goals_awaiting_proof
           | Prompt_block_id.Constitution_amendments)
          | Unattributed _), _)

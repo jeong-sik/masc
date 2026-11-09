@@ -68,6 +68,7 @@ import json
 import re
 import sqlite3
 import sys
+import tomllib
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -171,10 +172,60 @@ class Registry:
     tools: dict[str, str] = field(default_factory=dict)  # norm -> wire name
     duplicates: list[str] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
+    # A second registry: `addons/<id>/lane.toml` declares its exported tool
+    # names under `[world.tools].export`. Those names are real tools, but they
+    # live in a per-addon contract rather than in `config/tools`, so a report
+    # that reads only `config/tools` calls each of them "outside the registry"
+    # (#3446). Kept separate from `tools` so the config/tools population and
+    # its count do not move.
+    addon_directory: str = ""
+    addon_files: int = 0
+    addons: dict[str, str] = field(default_factory=dict)  # norm -> addon id
+    addon_errors: list[str] = field(default_factory=list)
 
     @property
     def count(self) -> int:
         return len(self.tools)
+
+    @property
+    def addon_count(self) -> int:
+        return len(self.addons)
+
+
+def load_addon_exports(directory: Path) -> tuple[dict[str, str], int, list[str]]:
+    """Read `[world.tools].export` from every `addons/*/lane.toml`.
+
+    Returns (norm -> addon id, files read, errors). A missing directory is not
+    an error: callers that pass `--no-addons` never get here, and a checkout
+    without addons is legitimate.
+    """
+    exports: dict[str, str] = {}
+    errors: list[str] = []
+    files = 0
+    if not directory.is_dir():
+        return exports, files, errors
+    for path in sorted(directory.glob("*/lane.toml")):
+        files += 1
+        try:
+            data = tomllib.loads(path.read_text(encoding="utf-8"))
+        except (OSError, tomllib.TOMLDecodeError) as exc:
+            errors.append(f"{path}: {exc}")
+            continue
+        world = data.get("world")
+        tools = world.get("tools") if isinstance(world, dict) else None
+        names = tools.get("export") if isinstance(tools, dict) else None
+        if not isinstance(names, list):
+            continue
+        addon_id = path.parent.name
+        for name in names:
+            if not isinstance(name, str) or not name:
+                continue
+            key = norm(name)
+            if key in exports and exports[key] != addon_id:
+                errors.append(f"{path}: {name} already exported by {exports[key]}")
+                continue
+            exports[key] = addon_id
+    return exports, files, errors
 
 
 def load_registry(directory: Path) -> Registry:
@@ -434,6 +485,10 @@ class Report:
     rows: list[ToolRow]
     unregistered_observed: list[tuple[str, dict[str, int]]]
     retired: list[str]
+    # Names the ledger saw that `config/tools` does not declare but an
+    # `addons/<id>/lane.toml` export does. Split out so "outside the registry"
+    # keeps meaning what it says (#3446): (name, addon id, per-source counts).
+    unregistered_addon: list[tuple[str, str, dict[str, int]]] = field(default_factory=list)
 
     def by_status(self, status: str) -> list[ToolRow]:
         return [row for row in self.rows if row.status == status]
@@ -519,6 +574,7 @@ def build_report(
             for member in group:
                 alias_of.setdefault(member, set()).update(group)
     unregistered: list[tuple[str, dict[str, int]]] = []
+    addon_explained: list[tuple[str, str, dict[str, int]]] = []
     for key in sorted(observed_keys - registered):
         group = alias_of.get(key) or {key}
         if group & registered:
@@ -528,7 +584,14 @@ def build_report(
             for source in sources
             if key in source.counts
         }
-        unregistered.append((source_label(key, sources), per_source))
+        addon_id = next(
+            (registry.addons[member] for member in sorted(group) if member in registry.addons),
+            None,
+        )
+        if addon_id is not None:
+            addon_explained.append((source_label(key, sources), addon_id, per_source))
+        else:
+            unregistered.append((source_label(key, sources), per_source))
 
     retired = [name for name in retired_names if norm(name) not in registry.tools]
     return Report(
@@ -541,6 +604,7 @@ def build_report(
         coverage=coverage,
         rows=rows,
         unregistered_observed=unregistered,
+        unregistered_addon=addon_explained,
         retired=retired,
     )
 
@@ -676,23 +740,56 @@ def render_markdown(report: Report) -> str:
         lines.append("")
         for name in report.retired:
             lines.append(f"- `{name}`")
+    if registry.addons or report.unregistered_addon:
+        lines.append("")
+        lines.append(
+            f"## addon export 로 설명되는 이름 ({registry.addon_count}개 선언, "
+            f"관측 {len(report.unregistered_addon)}개)"
+        )
+        lines.append("")
+        lines.append(
+            f"`{registry.addon_directory or 'addons'}/*/lane.toml` 의 `[world.tools].export` 가 "
+            f"선언한 도구입니다({registry.addon_files}개 파일). `config/tools` 등록부가 아니라 "
+            "addon 계약이 정본이므로 \"등록부 밖\"이 아닙니다."
+        )
+        lines.append("")
+        lines.append(
+            "> 경고: addon 도구는 프로필·설치에 따라 존재 여부가 달라집니다. "
+            "이 목록의 `0회` 를 삭제 근거로 쓰지 마세요. 여기서는 **분류**만 바로잡습니다."
+        )
+        lines.append("")
+        if report.unregistered_addon:
+            lines.append(
+                "| 이름 | 정본 등록부 | "
+                + " | ".join(f"`{source.name}`" for source in report.sources)
+                + " |"
+            )
+            lines.append("|---|---|" + "---|" * len(report.sources))
+            for name, addon_id, per_source in report.unregistered_addon:
+                cells = " | ".join(
+                    str(per_source.get(source.name, "")) for source in report.sources
+                )
+                lines.append(f"| `{name}` | `addons/{addon_id}` | {cells} |")
     if report.unregistered_observed:
         lines.append("")
         lines.append(f"## 등록부 밖에서 관측된 이름 ({len(report.unregistered_observed)}개)")
         lines.append("")
         lines.append(
-            "원천에는 있으나 `config/tools/*.toml` 에 없는 이름입니다"
+            "원천에는 있으나 `config/tools/*.toml` 에도, addon `lane.toml` 의 "
+            "`[world.tools].export` 에도 없는 이름입니다"
             "(삭제된 도구, 외부 MCP, 클라이언트 도구)."
         )
         lines.append("")
         lines.append(
-            "| 이름 | " + " | ".join(f"`{source.name}`" for source in report.sources) + " |"
+            "| 이름 | 정본 등록부 | "
+            + " | ".join(f"`{source.name}`" for source in report.sources)
+            + " |"
         )
-        lines.append("|---|" + "---|" * len(report.sources))
+        lines.append("|---|---|" + "---|" * len(report.sources))
         for name, per_source in report.unregistered_observed:
             cells = " | ".join(str(per_source.get(source.name, "")) for source in report.sources)
-            lines.append(f"| `{name}` | {cells} |")
-    if registry.errors or registry.duplicates:
+            lines.append(f"| `{name}` | 없음 | {cells} |")
+    if registry.errors or registry.duplicates or registry.addon_errors:
         lines.append("")
         lines.append("## 등록부 경고")
         lines.append("")
@@ -700,6 +797,12 @@ def render_markdown(report: Report) -> str:
             lines.append(f"- {error}")
         for duplicate in registry.duplicates:
             lines.append(f"- 이름 중복: {duplicate}")
+        # An addon lane.toml that cannot be read or that exports one name twice
+        # silently shrinks the second registry, which is the same failure the
+        # config/tools errors are reported for. JSON already carried these;
+        # the markdown report must not drop them (review on #50548).
+        for error in registry.addon_errors:
+            lines.append(f"- addon: {error}")
     lines.append("")
     return "\n".join(lines)
 
@@ -712,6 +815,10 @@ def render_json(report: Report) -> str:
             "count": report.registry.count,
             "errors": report.registry.errors,
             "duplicates": report.registry.duplicates,
+            "addon_directory": report.registry.addon_directory,
+            "addon_files": report.registry.addon_files,
+            "addon_count": report.registry.addon_count,
+            "addon_errors": report.registry.addon_errors,
         },
         "window": {
             "start": iso(report.window_start),
@@ -753,6 +860,10 @@ def render_json(report: Report) -> str:
             {"tool": name, "calls": per_source}
             for name, per_source in report.unregistered_observed
         ],
+        "unregistered_addon": [
+            {"tool": name, "addon": addon_id, "calls": per_source}
+            for name, addon_id, per_source in report.unregistered_addon
+        ],
     }
     return json.dumps(payload, ensure_ascii=False, indent=2)
 
@@ -786,6 +897,16 @@ def main(argv: list[str] | None = None) -> int:
         description="Report registered tools with no recorded call in a trailing window."
     )
     parser.add_argument("--registry-dir", default="config/tools", help="tool registry TOML directory")
+    parser.add_argument(
+        "--addon-dir",
+        default="addons",
+        help="read `[world.tools].export` from <dir>/*/lane.toml as a second registry",
+    )
+    parser.add_argument(
+        "--no-addons",
+        action="store_true",
+        help="ignore addon lane.toml exports (a name they declare is then reported as outside the registry)",
+    )
     parser.add_argument("--data-dir", default=".masc", help="base directory holding runtime state")
     parser.add_argument("--ledger-dir", default=None, help="override: tool_calls ledger directory")
     parser.add_argument("--metrics-db", default=None, help="override: tool-metrics.sqlite3 path")
@@ -811,6 +932,13 @@ def main(argv: list[str] | None = None) -> int:
     start, end = start_dt.timestamp(), end_dt.timestamp()
 
     registry = load_registry(Path(args.registry_dir))
+    if not args.no_addons:
+        addon_dir = Path(args.addon_dir)
+        exports, addon_files, addon_errors = load_addon_exports(addon_dir)
+        registry.addon_directory = str(addon_dir)
+        registry.addon_files = addon_files
+        registry.addons = exports
+        registry.addon_errors = addon_errors
     coverage = load_coverage(Path(args.coverage_json) if args.coverage_json else None)
 
     sources: list[SourceResult] = []

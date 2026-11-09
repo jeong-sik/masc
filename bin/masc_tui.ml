@@ -19074,6 +19074,29 @@ let open_keeper_detail state ~mailbox (keeper : keeper) =
   launch_detail_tab_reading state ~mailbox keeper
 ;;
 
+(* What a key does to the Story window under the Keepers list. With no Keeper
+   under the cursor -- a group heading, a list with no Keeper -- the window
+   leaves Enter and Right to the list. Esc first cancels a settings editor that
+   is being prepared: that is the innermost intent it can cancel, and it would
+   open the editor behind a window that had just closed. *)
+let keeper_story_action state key =
+  if String.equal key "esc" && Option.is_some state.keeper_settings_intent then None
+  else
+    Masc_tui_keeper_story.action_of_key
+      ~on_keeper:(Option.is_some (selected_keeper state))
+      state.keeper_story key
+;;
+
+(* What a key or a press does to the Story window. Only [Open_detail] leaves
+   the list, so it is the one that needs the mailbox. *)
+let apply_keeper_story_action state ~mailbox = function
+  | Masc_tui_keeper_story.Show page -> state.keeper_story <- Some page
+  | Masc_tui_keeper_story.Close -> state.keeper_story <- None
+  | Masc_tui_keeper_story.Open_detail ->
+      state.keeper_story <- None;
+      Option.iter (open_keeper_detail state ~mailbox) (selected_keeper state)
+;;
+
 (* The answer receipt of an installation's question leads to that
    installation's Results, where its reveal row appears (RFC operator-quiz K6).
    The live worker is found in a fresh inventory read, not in the last one:
@@ -19251,9 +19274,14 @@ let press_marked_target state ~mailbox (target : press_target) =
       | Some _ when state.view <> Keepers Keeper_list -> ()
       | None -> ()
       (* On a heading the cursor rests on its group's first row, and a press
-         there chooses that row rather than opening it. *)
+         there chooses that row rather than opening it. A press on the Keeper
+         the cursor is on is Enter on it, which opens the window, and on an
+         open window it is Right, which opens the detail: a press is the
+         pointer's only way to either. *)
       | Some index when index = state.keeper_cursor && not (keeper_list_on_heading state) ->
-          Option.iter (open_keeper_detail state ~mailbox) (selected_keeper state)
+          let key = if Option.is_some state.keeper_story then "right" else "\r" in
+          Option.iter (apply_keeper_story_action state ~mailbox)
+            (Masc_tui_keeper_story.action_of_key ~on_keeper:true state.keeper_story key)
       | Some _ -> keeper_list_select_name state name)
   | Press_keeper_view view ->
       if state.view = Keepers Keeper_list && view <> state.keeper_list_view then begin
@@ -33867,6 +33895,7 @@ Use relative paths for resources already held in the package. -->
       if Masc_tui_types.reconcile_fusion_launch state then
         report_action state "system"
           "Fusion launch left while its answer was out; the run may have started - r refreshes the list";
+      Masc_tui_types.reconcile_keeper_story state;
       let _terminal_rows, terminal_columns = get_terminal_size () in
       let message_mode =
         (not compact_viewport) && view_is_chat state.view
@@ -39083,6 +39112,14 @@ Use relative paths for resources already held in the package. -->
               state.keeper_sandbox_logs_error <- None;
               launch_keeper_sandbox_logs state ~mailbox:async_messages
                 keeper.k_name)
+       (* The Story window under the list takes its keys before the list and the
+          surface ring do: an open window owns Tab, Esc, [s] and [m] (RFC-0515
+          section 2.5, E15). A closed one takes Enter alone. *)
+       | Some key
+         when state.view = Keepers Keeper_list
+              && Option.is_some (keeper_story_action state key) ->
+           Option.iter (apply_keeper_story_action state ~mailbox:async_messages)
+             (keeper_story_action state key)
        | Some "v" when state.view = Keepers Keeper_list ->
            cycle_keeper_list_view state;
            let preference = keeper_view_preference state in

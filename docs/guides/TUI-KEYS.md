@@ -83,7 +83,9 @@ The command palette is `:`.
 | `o` | cycle priority / recent / oldest / activity / name |
 | `J` | open the selected Keeper's schedules |
 | `K` | browse Keeper-origin requests queued for the selected Keeper |
-| `Right / Enter` | keeper detail |
+| `Enter` | open the Story window below the list for the Keeper under the cursor; on its story page it closes the window |
+| `Right` | keeper detail |
+| `Tab / s / m` | with the Story window open: next page / schedules / memory; Esc closes it |
 | `c` | chat with the keeper |
 | `l` | logs |
 | `t` | tool calls |

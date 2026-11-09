@@ -9848,6 +9848,12 @@ type state = {
      choice [tui-keepers.toml] stores. *)
   mutable keeper_list_heading: Masc_tui_keeper_list_model.heading_focus option;
   mutable keeper_list_folded: Masc_tui_keeper_list_model.group list;
+  mutable keeper_story: Masc_tui_keeper_story.page option;
+  (** The Story window below the Keepers list: [None] while it is closed,
+      otherwise the page it shows. It follows the list cursor (RFC-0515
+      section 2.5). The loop closes it once the view is not the Keepers list
+      ([reconcile_keeper_story]), and [transition_keeper_view] closes it at
+      once. *)
   mutable keeper_list_sort: Masc_tui_keeper_list_model.sort;
   mutable keeper_list_preference_notice: string option;
   mutable keeper_list_preference_startup_error: string option;
@@ -12856,6 +12862,9 @@ let select_activity_keeper state keeper_name =
 let transition_keeper_view state view =
   let resting = resting_keeper_name state in
   state.view <- view;
+  (* A transition closes the Story window even to the list itself; every other
+     assignment of [view] is caught by [reconcile_keeper_story]. *)
+  state.keeper_story <- None;
   Option.iter (select_keeper_name state) resting
 
 (* A heading keeps the cursor on its group's first row, so the Keeper the
@@ -15729,6 +15738,15 @@ let withdraw_fusion_workspace (state : state) =
    notice: dropping the form does not unsend the request. *)
 let reconcile_fusion_launch (state : state) =
   state.view <> Fusion && abandon_fusion_launch state
+
+(* The Story window belongs to the Keepers list and to nothing else, so the loop
+   closes it whenever the surface under it is not that list, for the reason
+   [reconcile_fusion_launch] gives. The chat entry, the chat's way back, the
+   browser lane's way back and the roster's reconcile all assign [view]
+   directly, and a window left open through any of them came back open with the
+   list. *)
+let reconcile_keeper_story (state : state) =
+  if state.view <> Keepers Keeper_list then state.keeper_story <- None
 
 type text_input_target =
   | Text_collab_form
@@ -20048,6 +20066,7 @@ let create_state
   keeper_list_density = Masc_tui_keeper_list_model.Two_lines;
   keeper_list_heading = None;
   keeper_list_folded = [];
+  keeper_story = None;
   keeper_list_sort = Masc_tui_keeper_list_model.Priority;
   keeper_list_preference_notice = None;
   keeper_list_preference_startup_error = None;

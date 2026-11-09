@@ -921,8 +921,40 @@ malformed or mismatched identities before applying any directive. Clients may
 omit the precondition entirely; the TUI always sends both components. On 409,
 refresh identity before issuing a new command; retained input stays local.
 
+`Enter` opens the Story window under the list for the Keeper the cursor is on.
+The window takes rows from the list, so the list keeps scrolling to the cursor
+in what is left, and it follows the cursor as `j`/`k` move. It has three pages
+named on its title row: `story`, `s schedules` and `m memory`.
+
+- `story` tells the Keeper as `◂ past`, `● now` and `▹ next`. Past holds the
+  failing-for and turn-pulse cells, the last Librarian success, the failure
+  sentence and the attempt chain. Now holds the activity word, the `DETAIL`
+  text, `Mode S`, `AGE` and the lifecycle. Next holds the schedule cell, the
+  next dispatch path and the memory lag. They are the cells and sentences the
+  list rows draw.
+- `s schedules` lists the fleet agenda's schedules aimed at this Keeper, led by
+  the same `◷` cell the list draws. When the agenda was cut, the page says
+  more schedules may exist. The full table, with the Keeper's own page from the
+  server, is the Automation tab (`J`).
+- `m memory` shows the Keeper's memory-health row: state, update age, the fact
+  age ladder, the Librarian's lag and last digest, the gap and the stale
+  events.
+
+While the window is open it takes `Tab` (next page), `s`, `m`, `Enter`, `Esc`
+and `Right`, and `S` and `M` as it takes `s` and `m`; every other key reaches the
+list. `Enter` closes the window on the story page and returns to it from the
+other pages, `Esc` closes it, and `Right` closes it and opens the detail. While
+a settings editor is being prepared, the first `Esc` cancels that. A closed
+window takes `Enter` and nothing else, so `s` still shuts a Keeper down and `m`
+still opens the chat. Where no Keeper is under the cursor, on a group heading or
+in a list with no Keeper, the window says so, `Enter` opens nothing, and the
+arrows work as they do with the window closed: `Left` folds a group and `Right`
+unfolds it. When the screen has fewer than eight rows below the list's header,
+the window takes them all and covers the list. Leaving the list closes the
+window.
+
 Execution facts are not on the list. Open the selected Keeper's detail
-(`right`/`enter`); its Info tab shows `Lifecycle`, `Turn`, `Idle`,
+(`right`); its Info tab shows `Lifecycle`, `Turn`, `Idle`,
 `Last outcome` and `Last runtime` (the runtime that produced the last
 outcome, which after a failover is not the runtime the Keeper is assigned),
 read from
@@ -1095,7 +1127,7 @@ Verifier history is therefore not hidden behind a busier Librarian window.
 
 ### Keeper detail
 
-Right or `Enter` from the Keeper list or Lanes. Live context comes from the
+Right from the Keeper list, or Right or `Enter` from Lanes. Live context comes from the
 newest trace-matched TurnRecord; missing, malformed, unreadable, usage-less,
 and prior-trace observations stay distinct unavailable states rather than
 collapsing to zero.
@@ -1318,7 +1350,8 @@ What the transcript draws for a live, an observed and a settled turn is the
 table under the same diagram in
 [`diagrams/tui-chat-pane-anatomy.html`](diagrams/tui-chat-pane-anatomy.html).
 
-`c` (or `m`) from the roster or detail. Sends to the keeper over
+`c` (or `m`, except while the roster's Story window is open) from the roster or
+detail. Sends to the keeper over
 `POST /api/v1/keepers/chat/stream` with a durable UUIDv7 request ID. The send
 runs in the background, so refresh and navigation stay responsive while the
 turn runs. `Esc` returns to the roster when chat opened there, and to detail
@@ -2949,8 +2982,9 @@ Per surface:
 | `j` / `k` | Keeper detail, logs, Planning detail, Fusion detail | Scroll content |
 | `j` / `k` | Board read | Scroll the focused post body or comments |
 | `b` | Board read | Switch focus between the post body and comments |
-| Right / `Enter` | Keepers | Open keeper detail |
-| Mouse click | Keepers | Select a row; click the selected row again to open its detail |
+| `Right` | Keepers | Open keeper detail |
+| `Enter` | Keepers | Open the Story window under the list; on its story page, close it |
+| Mouse click | Keepers | Select a row; click the selected row to open the Story window, and click it again to open the detail |
 | Right / `Enter` | Lanes | Open the selected Lane's management surface |
 | `d` / `i` | Lanes overview | Read full selected-row observation / inventory diagnostics |
 | `c` / `m` | Lanes | Explain that standalone lanes have no Keeper chat target |
@@ -2984,7 +3018,7 @@ Per surface:
 | `Enter` | Memory | Browse the selected keeper's facts, both stores |
 | `c` | Memory facts | Cycle the category filter through the loaded categories |
 | `Esc` | Memory facts | Close the browser, back to the health table |
-| `c` / `m` | Keeper list or detail | Open message input for the selected keeper |
+| `c` / `m` | Keeper list or detail | Open message input for the selected keeper; `m` is the memory page while the Story window is open |
 | `y` / `n` | Approvals | Confirm / deny the selected request |
 | `n` | Schedules | Create a schedule through the `$EDITOR` JSON form |
 | `e` | Schedules | Modify the selected active schedule atomically |
@@ -3064,7 +3098,7 @@ Tab cycles the surfaces:
 
 Within a surface:
 
-  Keepers   --Right/Enter-->  Keeper detail  --o-->  Keeper logs
+  Keepers   --Right-->  Keeper detail  --o-->  Keeper logs
   Lanes     --Right/Enter-->  Selected Lane management
 
   Keeper list/detail  --c-->  Message input

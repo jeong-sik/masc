@@ -18,12 +18,8 @@ type visibility =
   | Default
   | Hidden
 
-type lifecycle =
-  | Active
-
 type metadata = {
   visibility : visibility;
-  lifecycle : lifecycle;
   reason : string option;
   allow_direct_call_when_hidden : bool;
   readonly : bool option;
@@ -94,7 +90,6 @@ let execution_policy_of_metadata ~tool_name (metadata : metadata) =
 let default_metadata ~required_permission =
   {
     visibility = Default;
-    lifecycle = Active;
     reason = None;
     allow_direct_call_when_hidden = false;
     readonly = None;
@@ -106,7 +101,6 @@ let default_metadata ~required_permission =
 let hidden_active ?(allow_direct_call_when_hidden = true) ~required_permission reason =
   {
     visibility = Hidden;
-    lifecycle = Active;
     reason = Some reason;
     allow_direct_call_when_hidden;
     readonly = None;
@@ -681,9 +675,6 @@ let visibility_to_string = function
   | Default -> "default"
   | Hidden -> "hidden"
 
-let lifecycle_to_string = function
-  | Active -> "active"
-
 (* ================================================================ *)
 (* JSON metadata helpers                                            *)
 (* ================================================================ *)
@@ -695,7 +686,7 @@ let metadata_to_fields name =
   let base =
     [
       ("visibility", `String (visibility_to_string meta.visibility));
-      ("lifecycle", `String (lifecycle_to_string meta.lifecycle));
+      ("lifecycle", `String "active");
       ("implementationStatus", `String "real");
       ( "requiredPermission"
       , `String (Masc_domain.permission_to_string meta.required_permission) );

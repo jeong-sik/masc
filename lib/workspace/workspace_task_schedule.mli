@@ -1,7 +1,6 @@
 (** Workspace task scheduling — claim pool state and the [claim_next] entry. *)
 
-include module type of Workspace_utils
-include module type of Workspace_state
+open! Workspace_utils
 
 val task_status_label : Masc_domain.task_status -> string
 val task_is_claim_pool_candidate : Masc_domain.task -> bool

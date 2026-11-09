@@ -1,14 +1,13 @@
-(** Pins Board metric label strings emitted by the typed hook adapter. *)
+(** Pins Board metric label strings emitted by the hook adapter. *)
 
 module BPH = Masc.Board_metric_hooks_adapter
-module BMH = Masc.Board_metrics_hooks
 
 let check_label name expected actual =
   Alcotest.(check string) name expected actual
 
 let test_flusher_outcome_to_label () =
-  check_label "Switch_finished" "switch_finished"
-    (BPH.flusher_outcome_to_label BMH.Switch_finished)
+  check_label "switch_finished" "switch_finished"
+    BPH.flusher_switch_finished_label
 
 let () =
   Alcotest.run "board_metrics_labels"

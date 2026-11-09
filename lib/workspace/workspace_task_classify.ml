@@ -6,9 +6,9 @@
     by [Workspace_task] via [include Workspace_task_classify]. *)
 
 open Masc_domain
-include Workspace_utils
-include Workspace_state
-include Workspace_broadcast
+open! Workspace_utils
+open! Workspace_state
+open! Workspace_broadcast
 open Workspace_backlog
 
 

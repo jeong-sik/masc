@@ -5,8 +5,8 @@
     transitions. *)
 
 open Masc_domain
-include Workspace_utils
-include Workspace_state
+open! Workspace_utils
+open! Workspace_state
 open Workspace_backlog
 
 (** #10421: stable lowercase string label for a [task_status] suitable

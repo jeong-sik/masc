@@ -62,6 +62,7 @@ val observed_refusal :
 val decide :
   ?intent:Keeper_tool_execute_typed_input.intent ->
   ?cycle_grant:cycle_grant ->
+  ?shell_ir:Masc_exec.Shell_ir.t ->
   ?observe:(unit -> observation) ->
   keeper_always_allow:bool ->
   request ->

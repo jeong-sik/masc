@@ -1034,8 +1034,16 @@ let check_arguments ~contract ~(schema : Yojson.Safe.t option) ~name ~args =
               | Ok authoritative ->
                 (* Declared ranges are checked only once agent core has accepted
                    the declared types, so a mistyped value reports its type
-                   error rather than a confusing range error. *)
-                (match Agent_core.Tool_input_validation.validate authoritative prepared_args with
+                   error rather than a confusing range error. Top-level closed
+                   properties were already checked by [schema_shape_error] /
+                   [unsupported_arg_names] above, so skip the duplicate
+                   top-level [undeclared_errors] pass here. *)
+                (match
+                   Agent_core.Tool_input_validation.validate
+                     ~check_undeclared:false
+                     authoritative
+                     prepared_args
+                 with
                  | Agent_core.Tool_input_validation.Invalid errors ->
                    reject
                      (Field_errors errors)

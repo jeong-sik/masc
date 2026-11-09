@@ -54,7 +54,7 @@ type validation_result =
     type mismatches return [Invalid]. Nullable type arrays keep [null] valid
     instead of being collapsed by the lossy parameter projection. A successful
     result contains the same value passed by the caller. *)
-val validate : Types.tool_schema -> Yojson.Safe.t -> validation_result
+val validate : ?check_undeclared:bool -> Types.tool_schema -> Yojson.Safe.t -> validation_result
 
 (** Format field errors as a structured, LLM-readable feedback string.
     Designed for a failed [ToolResult] outcome. *)

@@ -130,8 +130,8 @@ let test_default_backend () =
     "jsonl" (Board_dispatch.backend_name ())
 
 let test_backend_returns_jsonl () =
-  match Board_dispatch.backend () with
-  | Board_dispatch.Jsonl _ -> ()
+  let (_ : Board.store) = Board_dispatch.backend () in
+  ()
 
 (** {1 Post CRUD via Dispatch} *)
 
@@ -1140,8 +1140,7 @@ let test_comment_persists_post_reply_count () =
   (* Write-ahead (#28952): the comment append is the durable WAL row;
      the posts snapshot picks up the bumped reply_count on the next
      flush, exactly like vote counts — not inline with the comment. *)
-  (match Board_dispatch.backend () with
-   | Board_dispatch.Jsonl store -> Board.flush_dirty store);
+  Board.flush_dirty (Board_dispatch.backend ());
   let persisted_reply_count =
     Board.persist_path (Board.global ())
     |> Fs_compat.load_jsonl
@@ -1419,10 +1418,7 @@ let test_vote_persisted_by_flusher_actor () =
         (match Board_dispatch.vote ~voter:"judge" ~post_id ~direction:Board.Up with
          | Error e -> Alcotest.fail (Board.show_board_error e)
          | Ok _ -> ());
-        let store =
-          match Board_dispatch.backend () with
-          | Board_dispatch.Jsonl store -> store
-        in
+        let store = Board_dispatch.backend () in
         store.last_flush <- 0.0;
         (match Board_dispatch.get_post ~post_id with
          | Ok _ -> ()
@@ -3170,9 +3166,8 @@ let test_initialization_preserves_captured_workspace_and_lookup () =
               (retained == Board.global ());
             Alcotest.(check bool) "failed init creates no target directory" false
               (Sys.file_exists root_b);
-            (match Board_dispatch.backend () with
-             | Board_dispatch.Jsonl active ->
-               Alcotest.(check bool) "read-started backend retains A" true (active == retained));
+            let active = Board_dispatch.backend () in
+            Alcotest.(check bool) "read-started backend retains A" true (active == retained);
             check_mismatch "read-started A refuses init B before lookup installation"
               (Board_dispatch.init_jsonl ~base_path:base_b
                 ~recipient_lookup:rejected_lookup ());

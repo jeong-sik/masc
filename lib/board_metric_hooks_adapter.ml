@@ -8,9 +8,7 @@
     variant is a compile obligation here. *)
 
 (* outcome label for masc_board_dispatch_flusher_start_outcomes_total *)
-let flusher_outcome_to_label : Board_metrics_hooks.flusher_outcome -> string =
-  function
-  | Switch_finished -> "switch_finished"
+let flusher_switch_finished_label = "switch_finished"
 
 let install () =
   Board_metrics_hooks.set_observer
@@ -26,9 +24,9 @@ let install () =
              Otel_metric_store.metric_board_persist_lock_held_sec
              seconds);
       inc_dispatch_flusher_start_outcome =
-        (fun ~outcome ->
+        (fun () ->
            Otel_metric_store.inc_counter
              Otel_metric_store.metric_board_dispatch_flusher_start_outcomes
-             ~labels:[ ("outcome", flusher_outcome_to_label outcome) ]
+             ~labels:[ ("outcome", flusher_switch_finished_label) ]
              ());
     }

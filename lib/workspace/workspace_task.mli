@@ -11,8 +11,7 @@
     - {!Workspace_task_create} — dedup logic, add_task, batch_add_tasks
     - {!Workspace_task_claim} — claim_task_r and claim helpers *)
 
-include module type of Workspace_utils
-include module type of Workspace_state
+open! Workspace_utils
 
 (** {1 Sub-module re-exports} *)
 

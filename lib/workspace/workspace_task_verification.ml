@@ -12,7 +12,6 @@
     to the system LLM reviewer at the Task boundary. *)
 
 open Masc_domain
-include Workspace_state
 
 let flatten_lock_result = function
   | Ok result -> result

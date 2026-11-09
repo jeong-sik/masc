@@ -88,7 +88,7 @@ let create_post_exn ~author ~content =
 let noop_observer : Board_metrics_hooks.observer =
   { observe_persist_lock_acquire_sec = (fun _ -> ())
   ; observe_persist_lock_held_sec = (fun _ -> ())
-  ; inc_dispatch_flusher_start_outcome = (fun ~outcome:_ -> ())
+  ; inc_dispatch_flusher_start_outcome = (fun () -> ())
   }
 
 let with_observer observer f =
@@ -329,8 +329,7 @@ let test_acquire_observer_failure_proves_no_publication () =
     (List.length (post_rows ()))
 
 let flush () =
-  match Board_dispatch.backend () with
-  | Board_dispatch.Jsonl store -> Board.flush_dirty store
+  Board.flush_dirty (Board_dispatch.backend ())
 
 let comment_rows () = Fs_compat.load_jsonl (Board.comments_path (Board.global ()))
 
@@ -491,10 +490,7 @@ let test_restart_recomputes_reply_count_from_comment_wal () =
    (#26168). The flags now survive the failure. *)
 let test_flush_failure_keeps_the_post_bump_scheduled () =
   let post = create_post_exn ~author:"flush-retry-author" ~content:"flush retry body" in
-  let store =
-    match Board_dispatch.backend () with
-    | Board_dispatch.Jsonl store -> store
-  in
+  let store = Board_dispatch.backend () in
   flush ();
   Alcotest.(check bool) "flushed clean before the comment" false store.Board.dirty_posts;
   (match
@@ -525,9 +521,7 @@ let test_flush_failure_keeps_the_post_bump_scheduled () =
 ;;
 
 let test_creation_commits_before_releasing_persistence () =
-  let store =
-    match Board_dispatch.backend () with Board_dispatch.Jsonl store -> store
-  in
+  let store = Board_dispatch.backend () in
   let counts store =
     Board.with_lock store (fun () ->
       [ Hashtbl.length store.Board.posts
@@ -539,7 +533,7 @@ let test_creation_commits_before_releasing_persistence () =
   let noop : Board_metrics_hooks.observer =
     { observe_persist_lock_acquire_sec = (fun _ -> ())
     ; observe_persist_lock_held_sec = (fun _ -> ())
-    ; inc_dispatch_flusher_start_outcome = (fun ~outcome:_ -> ())
+    ; inc_dispatch_flusher_start_outcome = (fun () -> ())
     }
   in
   Eio.Switch.run (fun sw ->
@@ -571,9 +565,7 @@ let test_creation_commits_before_releasing_persistence () =
   Result.get_ok (Board_dispatch.init_jsonl
     ~base_path:(Env_config_core.base_path ())
     ~recipient_lookup:Recipient_lookup.none_declared ());
-  let reloaded =
-    match Board_dispatch.backend () with Board_dispatch.Jsonl store -> store
-  in
+  let reloaded = Board_dispatch.backend () in
   Alcotest.(check (list int)) "all three creations survive snapshot and reload"
     [1; 1; 1] (counts reloaded)
 
@@ -620,11 +612,9 @@ let test_dispatch_preparation_failure_proves_no_publication () =
       with_observer
         { noop_observer with
           observe_persist_lock_acquire_sec = (fun _ -> incr persistence_calls)
-        ; inc_dispatch_flusher_start_outcome = (fun ~outcome ->
-            match outcome with
-            | Board_metrics_hooks.Switch_finished ->
-              incr preparation_calls;
-              raise expected_exception)
+        ; inc_dispatch_flusher_start_outcome = (fun () ->
+            incr preparation_calls;
+            raise expected_exception)
         }
         (fun () -> Eio_context.with_turn_switch finished (fun () ->
           check_pre_effect "create_post_with_unresolved"

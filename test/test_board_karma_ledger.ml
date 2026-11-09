@@ -315,10 +315,7 @@ let test_delete_post_rewrites_persisted_snapshots () =
     "reaction snapshot removes deleted comment reaction"
     (Board.reactions_path (Board.global ()))
     cid;
-  let store =
-    match Board_dispatch.backend () with
-    | Board_dispatch.Jsonl store -> store
-  in
+  let store = Board_dispatch.backend () in
   Alcotest.(check bool) "dirty posts cleared after delete" false store.dirty_posts;
   Alcotest.(check bool)
     "dirty comments cleared after delete"

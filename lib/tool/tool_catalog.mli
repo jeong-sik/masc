@@ -8,12 +8,8 @@
 (** {1 Types} *)
 
 type visibility = Default | Hidden
-type lifecycle = Active
-(** Only [Active] exists today; the field rides [tool_info]'s JSON, so a
-    second kind is a dashboard wire change, not a local edit. *)
 type metadata = {
   visibility : visibility;
-  lifecycle : lifecycle;
   reason : string option;
   allow_direct_call_when_hidden : bool;
   readonly : bool option;
@@ -60,7 +56,6 @@ val allow_direct_call : string -> bool
 (** {1 String conversions} *)
 
 val visibility_to_string : visibility -> string
-val lifecycle_to_string : lifecycle -> string
 (** {1 JSON metadata} *)
 
 val metadata_to_fields : string -> (string * Yojson.Safe.t) list

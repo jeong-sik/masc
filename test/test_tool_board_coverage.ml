@@ -2974,7 +2974,7 @@ let test_post_get_a_sweep_between_pages_shows_in_the_next_page () =
     ~returned:page_limit
     ~total:comment_count
     ~next_offset:(Some page_limit);
-  let (Board_dispatch.Jsonl store) = Board_dispatch.backend () in
+  let store = Board_dispatch.backend () in
   let oldest =
     match Board_dispatch.get_post_and_comments ~post_id with
     | Ok (_, oldest :: _) -> oldest
@@ -3128,7 +3128,7 @@ let test_post_get_header_counts_the_comments_it_read () =
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
   let post_id = create_post_with_comments ~count:3 in
-  let (Board_dispatch.Jsonl store) = Board_dispatch.backend () in
+  let store = Board_dispatch.backend () in
   let post = Hashtbl.find store.Board.posts post_id in
   let drifted_count = 999 in
   Hashtbl.replace store.Board.posts post_id { post with Board.reply_count = drifted_count };

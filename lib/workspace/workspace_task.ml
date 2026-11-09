@@ -4,6 +4,9 @@
     create, claim sub-modules). *)
 
 open Masc_domain
+open! Workspace_utils
+open! Workspace_state
+open! Workspace_broadcast
 open Workspace_backlog
 
 include Workspace_task_transitions

@@ -562,6 +562,29 @@ let classify_script script =
     Needs_observation Unproven_request
 ;;
 
+(* Classify an already-lowered [Masc_exec.Shell_ir.t] directly without
+   re-parsing the JSON [gate_input] envelope. When the IR is a simple command
+   wearing a shell costume ([sh -c script]), unwrap and classify the script
+   just as [classify_command] does for raw [argv] / [command] JSON. *)
+let classify_command_ir = function
+  | Ir.Simple simple as ir ->
+    (match
+       if List.concat_map Ir.subst_children_of_arg
+            (simple.Ir.args @ List.map snd simple.Ir.env) = []
+          && env_assignments_inert simple.Ir.env
+          && List.for_all redirect_is_observation simple.Ir.redirects
+       then literals_of_args simple.Ir.args
+       else None
+     with
+     | Some args ->
+       let argv = Masc_exec.Exec_program.to_string simple.Ir.bin :: args in
+       (match Keeper_tooling.Shell_costume.of_argv argv with
+        | Some costume -> classify_script costume.Keeper_tooling.Shell_costume.script
+        | None -> classify_ir ir)
+     | None -> classify_ir ir)
+  | (Ir.Pipeline _ | Ir.Sequence _) as ir -> classify_ir ir
+;;
+
 (* Mirrors [Keeper_tool_execute_runtime.execute_gate_input]: the command
    lives under the nested [input] as [argv] or [command]. An argv whose
    program is a shell with [-c] is a command line in an argv costume
@@ -632,10 +655,15 @@ let network_capability_of_gate_input input =
 (* A missing/remote profile cannot turn a static command into an unboxed
    observation request. A command-specific reason still survives that
    profile check, so execution records can say why Git needed the box. *)
-let classify_request ~operation ~sandbox_profile ~input =
+let classify_request_with_shell_ir ~shell_ir ~operation ~sandbox_profile ~input =
   match operation with
   | "tool_execute" ->
-    (match classify_command input with
+    let command_classification =
+      match shell_ir with
+      | Some ir -> classify_command_ir ir
+      | None -> classify_command input
+    in
+    (match command_classification with
      | (Needs_observation _ | Needs_judgment _) as classification -> classification
      | Static_observation ->
        static_if
@@ -648,4 +676,8 @@ let classify_request ~operation ~sandbox_profile ~input =
        | Some capability -> List.mem capability observation_network_capabilities
        | None -> false)
   | _ -> Needs_observation Unproven_request
+;;
+
+let classify_request ~operation ~sandbox_profile ~input =
+  classify_request_with_shell_ir ~shell_ir:None ~operation ~sandbox_profile ~input
 ;;

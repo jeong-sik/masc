@@ -12,7 +12,6 @@
 type tool_info = {
   name : string;
   visibility : Tool_catalog.visibility;
-  lifecycle : Tool_catalog.lifecycle;
   is_registered : bool;
   is_read_only : bool;
   call_stats : Tool_registry.call_stats option;
@@ -22,11 +21,9 @@ type tool_info = {
 
 (** [tool_info name] assembles the combined view for a single tool. *)
 val tool_info : string -> tool_info
-(** [call_stats] here is [Tool_registry]'s process-lifetime in-memory
-    counter: it resets on server restart and separates external-MCP from
-    agent-internal sources. Durability and percentiles live in
-    {!summary_report}, which reads [Tool_metrics]. Three systems, three
-    scopes — by design, not an accident. *)
+(** [call_stats] reconciles [Tool_registry]'s in-memory counter with
+    [Tool_metrics]'s retained snapshot so per-tool lookups and
+    {!summary_report} stay consistent across restarts. *)
 
 val tool_info_to_json : tool_info -> Yojson.Safe.t
 

@@ -44,6 +44,21 @@ val classify_request
     executors own network destination validation; this function performs no
     DNS lookup or output-location inference. *)
 
+val classify_request_with_shell_ir
+  :  shell_ir:Masc_exec.Shell_ir.t option
+  -> operation:string
+  -> sandbox_profile:Keeper_types_profile_sandbox.sandbox_profile option
+  -> input:Yojson.Safe.t
+  -> classification
+(** Like {!classify_request}, but when [shell_ir] is [Some ir], classifies
+    the already-lowered [Shell_ir.t] directly via {!classify_command_ir}
+    without re-parsing the JSON [gate_input] envelope. *)
+
+val classify_command_ir : Masc_exec.Shell_ir.t -> classification
+(** Classify an already-lowered [Shell_ir.t] directly, unwrapping shell
+    costumes ([sh -c script]) on simple commands just as the JSON envelope
+    path does. *)
+
 val classify_script : string -> classification
 (** Classifies pipeline, sequence and substitution stages through the
     dispatcher's parser. A recognized [Needs_judgment] command takes priority

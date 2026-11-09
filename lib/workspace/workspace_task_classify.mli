@@ -5,8 +5,7 @@
     the public Workspace interface.  Re-exports {!Workspace_utils} and
     {!Workspace_state}. *)
 
-include module type of Workspace_utils
-include module type of Workspace_state
+open! Workspace_utils
 
 (** {1 Task activity helpers} *)
 

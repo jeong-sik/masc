@@ -744,6 +744,7 @@ let handle_tool_execute_typed
           Keeper_gate.decide
             ~intent:input.intent
             ?cycle_grant:gate_grant
+            ~shell_ir:ir
             ~observe:(Keeper_tool_execute_observe.observe observation)
             (* NDT-OK: this typed, caller-owned policy input is consumed only
                at the external-effect authorization boundary. *)

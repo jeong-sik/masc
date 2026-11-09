@@ -36,8 +36,7 @@ let sort_order_of_string_opt s =
   | "discussed" -> Some Discussed
   | _ -> None
 
-type board_backend =
-  | Jsonl of Board.store
+type board_backend = Board.store
 
 type initialization_error =
   | Workspace_mismatch of
@@ -228,8 +227,7 @@ let ensure_flusher_actor store =
                 in
                 match exn with
                 | Invalid_argument msg when String.equal msg "Switch finished!" ->
-                    Board_metrics_hooks.inc_dispatch_flusher_start_outcome
-                      ~outcome:Switch_finished;
+                    Board_metrics_hooks.inc_dispatch_flusher_start_outcome ();
                     Log.BoardLog.warn
                       "Skipping board flusher actor startup on finished switch"
                 | _ -> raise exn
@@ -325,7 +323,7 @@ let init_jsonl ~base_path ~recipient_lookup () =
   let installed = Lookup_installed recipient_lookup in
   let rec install () =
     match Atomic.get backend_state with
-    | Active ((Jsonl store as backend), flusher, lookup) as current ->
+    | Active (store, flusher, lookup) as current ->
       (match validate_workspace requested store with
        | Error _ as error -> error
        | Ok () ->
@@ -337,7 +335,7 @@ let init_jsonl ~base_path ~recipient_lookup () =
             (* A read started this same workspace before the server supplied
                its lookup. A different workspace cannot replace that authority. *)
             if Atomic.compare_and_set
-                 backend_state current (Active (backend, flusher, installed))
+                 backend_state current (Active (store, flusher, installed))
             then (
               Log.BoardLog.info "JSONL backend recipient lookup installed";
               Ok ())
@@ -347,7 +345,7 @@ let init_jsonl ~base_path ~recipient_lookup () =
       (match validate_workspace requested store with
        | Error _ as error -> error
        | Ok () ->
-         let backend = Active (Jsonl store, false, installed) in
+         let backend = Active (store, false, installed) in
          if Atomic.compare_and_set backend_state Uninitialized backend then (
            ensure_flusher_actor store;
            warn_comment_cap_once ();
@@ -366,26 +364,25 @@ let reset_for_test () =
 
 let backend () =
   match Atomic.get backend_state with
-  | Active (Jsonl store as backend, _, _) ->
+  | Active (store, _, _) ->
       ensure_flusher_actor store;
-      backend
+      store
   | Uninitialized ->
       Log.BoardLog.warn "backend() called before server init, auto-initializing JSONL";
       let store = Board.global () in
-      let b = Jsonl store in
-      let backend_val = Active (b, false, Lookup_not_installed) in
+      let backend_val = Active (store, false, Lookup_not_installed) in
       let won = Atomic.compare_and_set backend_state Uninitialized backend_val in
       (* Same emission contract as [init_jsonl]: the call that performs the
          Uninitialized -> Active transition warns once when the cap is off,
          so the auto-init path cannot stay silent (wool-nova P2). *)
       if won then warn_comment_cap_once ();
       match Atomic.get backend_state with
-      | Active (Jsonl active_store as active_b, _, _) ->
+      | Active (active_store, _, _) ->
           ensure_flusher_actor active_store;
-          active_b
+          active_store
       | Uninitialized ->
           ensure_flusher_actor store;
-          b
+          store
 
 (* The lookup the writes ask.  [backend ()] runs first so a write on a backend
    nobody started still starts it; the lookup it then finds is the server's, or
@@ -471,7 +468,7 @@ let notify_post_creation (creation : Board.post_creation) =
 
 let resolve_post_dispatch_context () =
   try
-    let Jsonl store = backend () in
+    let store = backend () in
     let lookup = recipient_lookup () in
     Ok (store, lookup)
   with
@@ -558,53 +555,48 @@ let emit_post_edited (post : Board.post) =
     (Post_changed { post_id = Board.Post_id.to_string post.id; change = Post_edited })
 
 let update_post_with_unresolved ~post_id ~editor ~content ?title ?body ?new_author () =
-  match backend () with
-  | Jsonl store ->
-      match Board.update_post_with_outcome store ~lookup:(recipient_lookup ())
-        ~post_id ~editor ~content ?title ?body ?new_author () with
-      | Error _ as error -> error
-      | Ok { edited = post; content_changed = false; recorded_audience = _; unresolved } ->
-        emit_post_edited post;
-        Ok (post, unresolved)
-      | Ok { edited = post; content_changed = true; recorded_audience = audience
-           ; unresolved } ->
-        emit_post_edited post;
-        emit_board_signal
-          { signal =
-              { kind = Board_post_updated { content_updated_at = post.content_updated_at }
-              ; post_id = Board.Post_id.to_string post.id
-              ; author = Board.Agent_id.to_string post.author
-              ; title = post.title
-              ; content = post.body
-              ; hearth = post.hearth
-              ; updated_at = Some post.updated_at
-              }
-          ; audience
-          };
-        Ok (post, unresolved)
+  let store = backend () in
+  match Board.update_post_with_outcome store ~lookup:(recipient_lookup ())
+    ~post_id ~editor ~content ?title ?body ?new_author () with
+  | Error _ as error -> error
+  | Ok { edited = post; content_changed = false; recorded_audience = _; unresolved } ->
+    emit_post_edited post;
+    Ok (post, unresolved)
+  | Ok { edited = post; content_changed = true; recorded_audience = audience
+       ; unresolved } ->
+    emit_post_edited post;
+    emit_board_signal
+      { signal =
+          { kind = Board_post_updated { content_updated_at = post.content_updated_at }
+          ; post_id = Board.Post_id.to_string post.id
+          ; author = Board.Agent_id.to_string post.author
+          ; title = post.title
+          ; content = post.body
+          ; hearth = post.hearth
+          ; updated_at = Some post.updated_at
+          }
+      ; audience
+      };
+    Ok (post, unresolved)
 
 let update_post ~post_id ~editor ~content ?title ?body ?new_author () =
   update_post_with_unresolved ~post_id ~editor ~content ?title ?body ?new_author ()
   |> Result.map fst
 
 let read_post ~post_id =
-  match backend () with
-  | Jsonl store -> Board.read_post store ~post_id
+  Board.read_post (backend ()) ~post_id
 
 let read_post_for_evidence ~post_id =
-  match backend () with
-  | Jsonl store -> Board.read_post_for_evidence store ~post_id
+  Board.read_post_for_evidence (backend ()) ~post_id
 
 let get_post ~post_id =
   read_post ~post_id |> Result.map_error Board.board_error_of_read_error
 
 let list_posts_by_run_origin () =
-  match backend () with
-  | Jsonl store -> Board.list_posts_by_run_origin store
+  Board.list_posts_by_run_origin (backend ())
 
 let find_post_by_run_id ~run_id =
-  match backend () with
-  | Jsonl store -> Board.find_post_by_run_id store ~run_id
+  Board.find_post_by_run_id (backend ()) ~run_id
 
 let list_posts ?(visibility_filter = None) ?hearth ?author_filter ?exclude_author_filter
     ?post_kind_filter
@@ -635,99 +627,92 @@ let list_posts ?(visibility_filter = None) ?hearth ?author_filter ?exclude_autho
              (fun (p : Board.post) -> (=) (Board.classify_post_kind p) kind)
        | None -> Stdlib.Fun.id)
   in
-  match backend () with
-  | Jsonl store ->
-      let needs_full_scan =
-        Option.is_some author_filter
-        || Option.is_some exclude_author_filter
-        ||
-        match sort_by with
-        | Hot -> false
-        | Trending | Recent | Updated | Discussed -> true
-      in
-      let fetch_limit = if needs_full_scan then Stdlib.max_int else max limit 500 in
-      let posts =
-        if needs_full_scan then
-          Board.search_posts store ~predicate:(fun _ -> true) ~limit:fetch_limit
-        else
-          Board.list_posts store ~visibility_filter ?hearth ~limit:fetch_limit ()
-      in
-      let sorted =
-        if needs_full_scan then
-          posts
-          |> apply_visibility_and_hearth_filters
-          |> sort_posts_in_memory ~sort_by
-        else
-          posts
-      in
-      let filtered = apply_post_kind_filter sorted in
-      let filtered =
-        match author_filter with
-        | None -> filtered
-        | Some needle ->
-            let matching_comment_post_ids =
-              Board.list_comments store ~limit:Stdlib.max_int ()
-              |> matching_post_ids_for_comment_author_filter ~needle
-            in
-            List.filter
-              (fun (post : Board.post) ->
-                agent_matches_author_filter ~needle post.author
-                || Post_id_set.mem
-                     (Board.Post_id.to_string post.id)
-                     matching_comment_post_ids)
-              filtered
-      in
-      (* Exclude posts by author (post author only, not comment author).
-         Unlike the positive author_filter which matches comment authors too,
-         exclusion is post-author-only: hiding agent X should not remove
-         agent Y's post just because X commented on it. *)
-      let filtered =
-        match exclude_author_filter with
-        | None -> filtered
-        | Some needle ->
-            List.filter
-              (fun (post : Board.post) ->
-                not (agent_matches_author_filter ~needle post.author))
-              filtered
-      in
-      Board.take limit filtered
+  let store = backend () in
+  let needs_full_scan =
+    Option.is_some author_filter
+    || Option.is_some exclude_author_filter
+    ||
+    match sort_by with
+    | Hot -> false
+    | Trending | Recent | Updated | Discussed -> true
+  in
+  let fetch_limit = if needs_full_scan then Stdlib.max_int else max limit 500 in
+  let posts =
+    if needs_full_scan then
+      Board.search_posts store ~predicate:(fun _ -> true) ~limit:fetch_limit
+    else
+      Board.list_posts store ~visibility_filter ?hearth ~limit:fetch_limit ()
+  in
+  let sorted =
+    if needs_full_scan then
+      posts
+      |> apply_visibility_and_hearth_filters
+      |> sort_posts_in_memory ~sort_by
+    else
+      posts
+  in
+  let filtered = apply_post_kind_filter sorted in
+  let filtered =
+    match author_filter with
+    | None -> filtered
+    | Some needle ->
+        let matching_comment_post_ids =
+          Board.list_comments store ~limit:Stdlib.max_int ()
+          |> matching_post_ids_for_comment_author_filter ~needle
+        in
+        List.filter
+          (fun (post : Board.post) ->
+            agent_matches_author_filter ~needle post.author
+            || Post_id_set.mem
+                 (Board.Post_id.to_string post.id)
+                 matching_comment_post_ids)
+          filtered
+  in
+  (* Exclude posts by author (post author only, not comment author).
+     Unlike the positive author_filter which matches comment authors too,
+     exclusion is post-author-only: hiding agent X should not remove
+     agent Y's post just because X commented on it. *)
+  let filtered =
+    match exclude_author_filter with
+    | None -> filtered
+    | Some needle ->
+        List.filter
+          (fun (post : Board.post) ->
+            not (agent_matches_author_filter ~needle post.author))
+          filtered
+  in
+  Board.take limit filtered
 
 let list_recent_posts_matching_author ~author_matches ~limit () =
-  match backend () with
-  | Jsonl store ->
-    Board.search_posts
-      store
-      ~predicate:(fun (post : Board.post) -> author_matches post.author)
-      ~limit:(max 0 limit)
+  let store = backend () in
+  Board.search_posts
+    store
+    ~predicate:(fun (post : Board.post) -> author_matches post.author)
+    ~limit:(max 0 limit)
 ;;
 
 let current_post_cursor () =
-  match backend () with
-  | Jsonl store -> Board.current_post_cursor store
+  Board.current_post_cursor (backend ())
 
 let read_comments ~post_id =
-  match backend () with
-  | Jsonl store -> Board.read_comments store ~post_id
+  Board.read_comments (backend ()) ~post_id
 
 let get_comments ~post_id =
   read_comments ~post_id |> Result.map_error Board.board_error_of_read_error
 
 let require_persisted_sources_readable () =
-  match backend () with
-  | Jsonl store ->
-      Board.with_persist_lock store (fun () ->
-        let open Result.Syntax in
-        let* () = Board.require_posts_source_readable store in
-        Board.with_lock store (fun () ->
-          match store.Board.comments_load_result with
-          | Ok () -> Ok ()
-          | Error detail -> Error (Board.Io_error detail)))
+  let store = backend () in
+  Board.with_persist_lock store (fun () ->
+    let open Result.Syntax in
+    let* () = Board.require_posts_source_readable store in
+    Board.with_lock store (fun () ->
+      match store.Board.comments_load_result with
+      | Ok () -> Ok ()
+      | Error detail -> Error (Board.Io_error detail)))
 
 let get_post_and_comments ~post_id =
-  match backend () with
-  | Jsonl store ->
-      Board.read_post_and_comments store ~post_id
-      |> Result.map_error Board.board_error_of_read_error
+  Board.read_post_and_comments (backend ()) ~post_id
+  |> Result.map_error Board.board_error_of_read_error
 
 (* One owner for board-operation failure lines. A re-vote is a routine
    re-click at debug, a missing target is an ordinary race at info, and
@@ -750,47 +735,45 @@ let log_signal_skip ~op ~read ~id detail =
 
 let add_comment_with_unresolved ~post_id ~author ~content ?parent_id
     ?(ttl_hours = Board.Limits.default_ttl_hours) () =
-  match backend () with
-  | Jsonl store ->
-      (match
-         Board.add_comment_with_audience store ~lookup:(recipient_lookup ())
-           ~post_id ~author ~content ?parent_id ~ttl_hours ()
-       with
-      | Ok creation ->
-          let comment = creation.comment in
-          let cid = Board.Comment_id.to_string comment.id in
-          let auth = Board.Agent_id.to_string comment.author in
-          (match Board.read_post store ~post_id with
-          | Ok post ->
-              emit_board_signal
-                { signal =
-                    { kind =
-                        Board_comment_added
-                          { comment_id = comment.id; parent_id = comment.parent_id }
-                    ; post_id
-                    ; author = auth
-                    ; title = post.title
-                    ; content
-                    ; hearth = post.hearth
-                    ; updated_at = Some post.updated_at
-                    }
-                ; audience = creation.audience
+  let store = backend () in
+  match
+    Board.add_comment_with_audience store ~lookup:(recipient_lookup ())
+      ~post_id ~author ~content ?parent_id ~ttl_hours ()
+  with
+  | Ok creation ->
+      let comment = creation.comment in
+      let cid = Board.Comment_id.to_string comment.id in
+      let auth = Board.Agent_id.to_string comment.author in
+      (match Board.read_post store ~post_id with
+      | Ok post ->
+          emit_board_signal
+            { signal =
+                { kind =
+                    Board_comment_added
+                      { comment_id = comment.id; parent_id = comment.parent_id }
+                ; post_id
+                ; author = auth
+                ; title = post.title
+                ; content
+                ; hearth = post.hearth
+                ; updated_at = Some post.updated_at
                 }
-          | Error e ->
-              log_signal_skip ~op:"signal" ~read:"read_post" ~id:post_id
-                (Board_types.show_board_read_error e));
-          emit_board_sse_event
-            (Comment_added { post_id; comment_id = cid; author = auth });
-          Ok (comment, creation.unresolved)
-      | Error _ as err -> err)
+            ; audience = creation.audience
+            }
+      | Error e ->
+          log_signal_skip ~op:"signal" ~read:"read_post" ~id:post_id
+            (Board_types.show_board_read_error e));
+      emit_board_sse_event
+        (Comment_added { post_id; comment_id = cid; author = auth });
+      Ok (comment, creation.unresolved)
+  | Error _ as err -> err
 
 let add_comment ~post_id ~author ~content ?parent_id ?ttl_hours () =
   add_comment_with_unresolved ~post_id ~author ~content ?parent_id ?ttl_hours ()
   |> Result.map fst
 
 let current_vote_for_post ~voter ~post_id =
-  match backend () with
-  | Jsonl store -> Board.current_vote_for_post store ~voter ~post_id
+  Board.current_vote_for_post (backend ()) ~voter ~post_id
 
 (* A vote is thread activity the voted-on author can act on, so it travels
    the same hook as comments and reactions. The signal's [author] is the
@@ -812,22 +795,21 @@ let emit_vote_board_signal ~target ~target_author ~voter ~direction
     }
 
 let vote ~voter ~post_id ~direction =
+  let store = backend () in
   let result =
-    match backend () with
-    | Jsonl store ->
-        (match Board.vote store ~voter ~post_id ~direction with
-         | Ok _score as ok ->
-             (match Board.read_post store ~post_id with
-              | Ok post ->
-                  emit_vote_board_signal
-                    ~target:(Vote_on_post (Board.Post_id.to_string post.id))
-                    ~target_author:(Board.Agent_id.to_string post.author)
-                    ~voter ~direction post
-              | Error e ->
-                  log_signal_skip ~op:"vote signal" ~read:"read_post" ~id:post_id
-                    (Board_types.show_board_read_error e));
-             ok
-         | Error _ as err -> err)
+    match Board.vote store ~voter ~post_id ~direction with
+    | Ok _score as ok ->
+        (match Board.read_post store ~post_id with
+         | Ok post ->
+             emit_vote_board_signal
+               ~target:(Vote_on_post (Board.Post_id.to_string post.id))
+               ~target_author:(Board.Agent_id.to_string post.author)
+               ~voter ~direction post
+         | Error e ->
+             log_signal_skip ~op:"vote signal" ~read:"read_post" ~id:post_id
+               (Board_types.show_board_read_error e));
+        ok
+    | Error _ as err -> err
   in
   (match result with
    | Ok _score ->
@@ -839,33 +821,31 @@ let vote ~voter ~post_id ~direction =
   result
 
 let current_vote_for_comment ~voter ~comment_id =
-  match backend () with
-  | Jsonl store -> Board.current_vote_for_comment store ~voter ~comment_id
+  Board.current_vote_for_comment (backend ()) ~voter ~comment_id
 
 let vote_comment ~voter ~comment_id ~direction =
+  let store = backend () in
   let result =
-    match backend () with
-    | Jsonl store ->
-        (match Board.vote_comment store ~voter ~comment_id ~direction with
-         | Ok _score as ok ->
-             (match Board.get_comment store ~comment_id with
+    match Board.vote_comment store ~voter ~comment_id ~direction with
+    | Ok _score as ok ->
+        (match Board.get_comment store ~comment_id with
+         | Error e ->
+             log_signal_skip ~op:"comment vote signal" ~read:"get_comment"
+               ~id:comment_id (Board_types.show_board_error e)
+         | Ok comment ->
+             let post_id = Board.Post_id.to_string comment.post_id in
+             (match Board.read_post store ~post_id with
+              | Ok post ->
+                  emit_vote_board_signal
+                    ~target:
+                      (Vote_on_comment (Board.Comment_id.to_string comment.id))
+                    ~target_author:(Board.Agent_id.to_string comment.author)
+                    ~voter ~direction post
               | Error e ->
-                  log_signal_skip ~op:"comment vote signal" ~read:"get_comment"
-                    ~id:comment_id (Board_types.show_board_error e)
-              | Ok comment ->
-                  let post_id = Board.Post_id.to_string comment.post_id in
-                  (match Board.read_post store ~post_id with
-                   | Ok post ->
-                       emit_vote_board_signal
-                         ~target:
-                           (Vote_on_comment (Board.Comment_id.to_string comment.id))
-                         ~target_author:(Board.Agent_id.to_string comment.author)
-                         ~voter ~direction post
-                   | Error e ->
-                       log_signal_skip ~op:"comment vote signal" ~read:"read_post"
-                         ~id:post_id (Board_types.show_board_read_error e)));
-             ok
-         | Error _ as err -> err)
+                  log_signal_skip ~op:"comment vote signal" ~read:"read_post"
+                    ~id:post_id (Board_types.show_board_read_error e)));
+        ok
+    | Error _ as err -> err
   in
   (match result with
    | Ok _score ->
@@ -922,14 +902,13 @@ let emit_reaction_board_signal store (toggled : Board.reaction_toggle_result) =
         (Board_types.show_board_error e)
 
 let toggle_reaction ~target_type ~target_id ~user_id ~emoji =
+  let store = backend () in
   let result =
-    match backend () with
-    | Jsonl store ->
-        (match Board.toggle_reaction store ~target_type ~target_id ~user_id ~emoji with
-         | Ok toggled as ok ->
-             emit_reaction_board_signal store toggled;
-             ok
-         | Error _ as err -> err)
+    match Board.toggle_reaction store ~target_type ~target_id ~user_id ~emoji with
+    | Ok toggled as ok ->
+        emit_reaction_board_signal store toggled;
+        ok
+    | Error _ as err -> err
   in
   (match result with
    | Ok toggled ->
@@ -950,88 +929,72 @@ let toggle_reaction ~target_type ~target_id ~user_id ~emoji =
   result
 
 let list_reactions ~target_type ~target_id ?user_id () =
-  match backend () with
-  | Jsonl store -> Board.list_reactions store ~target_type ~target_id ?user_id ()
+  Board.list_reactions (backend ()) ~target_type ~target_id ?user_id ()
 
 let list_reactions_batch ~targets ?user_id () =
-  match backend () with
-  | Jsonl store -> Board.list_reactions_batch store ~targets ?user_id ()
+  Board.list_reactions_batch (backend ()) ~targets ?user_id ()
 
 let stats () =
-  match backend () with
-  | Jsonl store -> Board.stats store
+  Board.stats (backend ())
 
 let list_comments ?(limit = 1000) () =
-  match backend () with
-  | Jsonl store -> Board.list_comments store ~limit ()
+  Board.list_comments (backend ()) ~limit ()
 
 let list_hearths ?(exclude_system = false) ?(exclude_automation = false) () =
-  match backend () with
-  | Jsonl store -> Board.list_hearths store ~exclude_system ~exclude_automation ()
+  Board.list_hearths (backend ()) ~exclude_system ~exclude_automation ()
 
 let set_thread_id ~post_id ~thread_id =
-  match backend () with
-  | Jsonl store ->
-    write_post ~post_id Post_thread_set (fun post_id ->
-      Board.set_thread_id store ~post_id ~thread_id)
+  let store = backend () in
+  write_post ~post_id Post_thread_set (fun post_id ->
+    Board.set_thread_id store ~post_id ~thread_id)
 
 let set_pinned ~post_id ~pinned =
-  match backend () with
-  | Jsonl store ->
-    write_post ~post_id (if pinned then Post_pinned else Post_unpinned) (fun post_id ->
-      Board.set_pinned store ~post_id ~pinned)
+  let store = backend () in
+  write_post ~post_id (if pinned then Post_pinned else Post_unpinned) (fun post_id ->
+    Board.set_pinned store ~post_id ~pinned)
 
 let set_closed ~post_id ~closed_by ~successor ~summary () =
-  match backend () with
-  | Jsonl store ->
-    write_post ~post_id Post_closed (fun post_id ->
-      Board.set_closed store ~post_id ~closed_by ~successor ~summary ())
+  let store = backend () in
+  write_post ~post_id Post_closed (fun post_id ->
+    Board.set_closed store ~post_id ~closed_by ~successor ~summary ())
 
 let reopen ~post_id =
-  match backend () with
-  | Jsonl store ->
-    write_post ~post_id Post_reopened (fun post_id -> Board.reopen store ~post_id)
+  let store = backend () in
+  write_post ~post_id Post_reopened (fun post_id -> Board.reopen store ~post_id)
 
 let delete_post ~post_id =
-  match backend () with
-  | Jsonl store ->
-    write_post ~post_id Post_deleted (fun post_id -> Board.delete_post store ~post_id)
+  let store = backend () in
+  write_post ~post_id Post_deleted (fun post_id -> Board.delete_post store ~post_id)
 
 let search ~query ~limit =
-  match backend () with
-  | Jsonl store ->
-      let query_lower = String.lowercase_ascii query in
-      let matches_str s =
-        String_util.contains_substring (String.lowercase_ascii s) query_lower
-      in
-      let predicate (p : Board.post) =
-        matches_str p.title
-        || matches_str p.body
-        || matches_str (Board.Agent_id.to_string p.author)
-        || (match p.hearth with Some h -> matches_str h | None -> false)
-      in
-      Board.search_posts store ~predicate ~limit
+  let store = backend () in
+  let query_lower = String.lowercase_ascii query in
+  let matches_str s =
+    String_util.contains_substring (String.lowercase_ascii s) query_lower
+  in
+  let predicate (p : Board.post) =
+    matches_str p.title
+    || matches_str p.body
+    || matches_str (Board.Agent_id.to_string p.author)
+    || (match p.hearth with Some h -> matches_str h | None -> false)
+  in
+  Board.search_posts store ~predicate ~limit
 
 let flush () =
   match Atomic.get backend_state with
-  | Active (Jsonl store, _, _) -> Board.flush_dirty store
+  | Active (store, _, _) -> Board.flush_dirty store
   | Uninitialized -> ()
 
 let get_all_karma () =
-  match backend () with
-  | Jsonl store -> Board.get_all_karma store
+  Board.get_all_karma (backend ())
 
 let get_agent_karma ~agent_name =
-  match backend () with
-  | Jsonl store -> Board.get_agent_karma store ~agent_name
+  Board.get_agent_karma (backend ()) ~agent_name
 
 let karma_score_for_direction = Board.karma_score_for_direction
 
 let get_karma_ledger ?agent ?(limit = max_int) () =
-  let events =
-    match backend () with
-    | Jsonl store -> Board.build_karma_ledger store
-  in
+  let events = Board.build_karma_ledger (backend ()) in
   let filtered =
     match agent with
     | None -> events
@@ -1045,7 +1008,7 @@ let post_to_yojson_with_karma (p : Board.post) ~author_karma =
 
 let backend_name () =
   match Atomic.get backend_state with
-  | Active (Jsonl _, _, _) -> "jsonl"
+  | Active (_, _, _) -> "jsonl"
   | Uninitialized -> "uninitialized"
 
 (* AI curation delegate — thin wrappers around Board_curation *)
@@ -1074,22 +1037,16 @@ let latest_curation_snapshot () =
 (** {1 SubBoard operations} *)
 
 let create_sub_board ~slug ~name ~description ~owner ?members ?access () =
-  match backend () with
-  | Jsonl store ->
-      Board.create_sub_board store ~slug ~name ~description ~owner ?members ?access ()
+  Board.create_sub_board (backend ()) ~slug ~name ~description ~owner ?members ?access ()
 
 let get_sub_board ~sub_board_id =
-  match backend () with
-  | Jsonl store -> Board.get_sub_board store ~sub_board_id
+  Board.get_sub_board (backend ()) ~sub_board_id
 
 let list_sub_boards () =
-  match backend () with
-  | Jsonl store -> Board.list_sub_boards store
+  Board.list_sub_boards (backend ())
 
 let delete_sub_board ~sub_board_id =
-  match backend () with
-  | Jsonl store -> Board.delete_sub_board store ~sub_board_id
+  Board.delete_sub_board (backend ()) ~sub_board_id
 
 let update_sub_board ~sub_board_id ?name ?description ?members ?access () =
-  match backend () with
-  | Jsonl store -> Board.update_sub_board store ~sub_board_id ?name ?description ?members ?access ()
+  Board.update_sub_board (backend ()) ~sub_board_id ?name ?description ?members ?access ()

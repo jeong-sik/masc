@@ -5,7 +5,6 @@
 
 open Keeper_types
 open Keeper_meta_contract
-open Keeper_types_profile
 
 (* The failure-reason / turn-phase clusters live in Keeper_registry_types;
    keeper_registry.mli re-exports them with [include module type of], so the

@@ -1,9 +1,6 @@
 (** Keeper_registry — SSOT for keeper state. Atomic.t + persistent StringMap; no mutex needed in single-domain Eio. *)
 
-open Keeper_types
 open Keeper_meta_contract
-open Keeper_meta_store
-open Keeper_types_profile
 open Keeper_id
 open Keeper_registry_types
 

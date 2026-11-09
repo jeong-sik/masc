@@ -28,8 +28,9 @@ The judge gets one folder, JUDGE_DIR, decides in that folder itself and writes
 its decisions there. Beside the key, JUDGE_FILES records the sha256 of each
 GIVEN file. `judge_decisions` reads the decisions only while those files are
 unchanged and the rules copy is the checkout's rules, so a judge cannot decide
-under rules it rewrote. The cases are written once: `e_synth_audit.write_cases`
-refuses a folder that already holds decisions.
+under rules it rewrote. Once the folder holds decisions, `e_synth_audit.write_cases`
+refuses to write cases there again. Decisions are not bound to the record: ones
+copied in from another folder pass whatever rules they were made under.
 """
 
 from __future__ import annotations

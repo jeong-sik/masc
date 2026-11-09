@@ -13,24 +13,20 @@
 (*    carrier's address form needs a blob written first; when that write  *)
 (*    fails, the carrier stays inline and the floor is sent anyway.        *)
 (*                                                                         *)
-(* No size is measured to pick the next rung: the provider judges every    *)
-(* request. A turn-text refusal (Codex input_too_large) also reports its   *)
-(* bound, max_chars. From then on masc counts each rung's turn text before *)
-(* sending it and skips a rung over the bound. masc's count is taken to    *)
-(* equal the provider's here; the RFC cross-checks it against actual_chars.*)
+(* No size is measured and no reported number is used to pick the next    *)
+(* rung: the provider judges every request. Both refusal kinds step down  *)
+(* the same way: a turn-text refusal (Codex input_too_large) counts only  *)
+(* the turn field, a window refusal counts the whole request.             *)
 (*                                                                         *)
-(* A request is laid out in two fields. The turn field holds the turn text *)
-(* a turn-text refusal counts; a window refusal counts both fields.        *)
-(* Layouts is every placement of the parts, so TLC also visits placements  *)
-(* no runtime uses today.                                                  *)
+(* A request is laid out in two fields. Layouts is every placement of the *)
+(* parts, so TLC also visits placements no runtime uses today.            *)
 (*                                                                         *)
-(* Six ways to get this wrong are modelled, each as Next \/ BugAction:     *)
+(* Six ways to get this wrong are modelled, each as Next \/ BugAction:    *)
 (*                                                                         *)
 (*  - the refused rung is sent again;                                      *)
-(*  - after a turn-text refusal, a rung over the reported bound is sent,   *)
-(*    as the Codex input_too_large ladder does before this RFC;            *)
-(*  - a window refusal of the full Start ends the run before the floor     *)
-(*    was asked;                                                           *)
+(*  - a refused Resume goes straight to the floor, skipping the fresh     *)
+(*    Start;                                                               *)
+(*  - a refusal of the full Start ends the run before the floor was asked;*)
 (*  - a failed blob write ends the run with the refusal in hand instead of *)
 (*    sending the floor with the carrier inline (#50170);                  *)
 (*  - the floor's forms are written before the floor is chosen, and a run  *)
@@ -41,8 +37,8 @@
 EXTENDS Naturals
 
 CONSTANTS
-  TurnLimit,        \* the bound a turn-text refusal reports (max_chars)
-  WindowLimit,      \* the largest request, both fields counted; never reported
+  TurnLimit,        \* the turn text the provider takes (Codex max_chars)
+  WindowLimit,      \* the largest request, both fields counted
   FixedTurnSizes,   \* what no form change removes from the turn field (goal)
   FixedSideSizes,   \* what no form change removes from the other field
   ResumeTurnSizes,  \* the turn text a Resume sends
@@ -55,7 +51,6 @@ CONSTANTS
   HistoryFloor      \* the range the floor keeps
 
 Fields    == {"turn", "side"}
-Kinds     == {"window", "turn_text"}
 Rungs     == {"resume", "start", "floor"}
 Layouts   == [carrier : Fields, memory : Fields, history : Fields]
 Histories == {HistoryFloor, HistoryFull \div 2, HistoryFull}
@@ -82,12 +77,10 @@ VARIABLES
   rung,        \* the rung of the request in hand
   forms,       \* the forms masc's parts take in that request
   written,     \* whether the floor's forms have been written
-  phase,       \* "sending" | "refused" | "accepted" | "ended"
-  kind,        \* the kind of the last refusal; "none" before the first
-  bound        \* the turn-text bound a refusal reported; 0 while none has
+  phase        \* "sending" | "refused" | "accepted" | "ended"
 
 vars == << layout, fixedTurn, fixedSide, resumeTurn, vendor, blobOk,
-           rung, forms, written, phase, kind, bound >>
+           rung, forms, written, phase >>
 
 Full == [carrier |-> "inline", memory |-> "full", history |-> HistoryFull]
 
@@ -116,25 +109,12 @@ Window(r, x) == IF r = "resume"
                   THEN resumeTurn + vendor
                   ELSE FieldSize("turn", x) + FieldSize("side", x)
 
-Order(r) == IF r = "resume" THEN 0 ELSE IF r = "start" THEN 1 ELSE 2
-Lower(r) == IF r = "resume" THEN "start" ELSE IF r = "start" THEN "floor" ELSE "none"
+(* The provider refuses a request whose turn text is over its bound, as
+   Codex input_too_large does at turn/start, or whose whole is over the
+   window. The walk does not ask which. *)
+Refused(r, x) == Turn(r, x) > TurnLimit \/ Window(r, x) > WindowLimit
 
-(* A rung may be sent unless a reported bound is known to exclude it. *)
-Fits(r) == bound = 0 \/ Turn(r, FormsOf(r)) <= bound
-
-(* The next rung down that may be sent; "none" when no rung is left. *)
-NextRung(r) ==
-  IF r = "resume"
-    THEN IF Fits("start") THEN "start"
-         ELSE IF Fits("floor") THEN "floor" ELSE "none"
-  ELSE IF r = "start"
-    THEN IF Fits("floor") THEN "floor" ELSE "none"
-  ELSE "none"
-
-(* What the provider accepts, as Send answers. *)
-Acceptable(x) ==
-  /\ FieldSize("turn", x) <= TurnLimit
-  /\ FieldSize("turn", x) + FieldSize("side", x) <= WindowLimit
+Lower(r) ==IF r = "resume" THEN "start" ELSE IF r = "start" THEN "floor" ELSE "none"
 
 TypeOK ==
   /\ layout \in Layouts
@@ -147,8 +127,6 @@ TypeOK ==
   /\ forms \in Forms
   /\ written \in BOOLEAN
   /\ phase \in {"sending", "refused", "accepted", "ended"}
-  /\ kind \in Kinds \cup {"none"}
-  /\ bound \in {0, TurnLimit}
 
 Init ==
   /\ layout \in Layouts
@@ -164,46 +142,32 @@ Init ==
   /\ forms = Full
   /\ written = FALSE
   /\ phase = "sending"
-  /\ kind = "none"
-  /\ bound = 0
 
-(* The provider answers. The turn text is checked before the model reads
-   anything, as Codex does at turn/start; then the whole window. *)
+(* The provider answers. *)
 Send ==
   /\ phase = "sending"
-  /\ IF Turn(rung, forms) > TurnLimit
-       THEN /\ phase' = "refused"
-            /\ kind' = "turn_text"
-            /\ bound' = TurnLimit
-       ELSE IF Window(rung, forms) > WindowLimit
-         THEN /\ phase' = "refused"
-              /\ kind' = "window"
-              /\ UNCHANGED bound
-         ELSE /\ phase' = "accepted"
-              /\ UNCHANGED << kind, bound >>
+  /\ phase' = IF Refused(rung, forms) THEN "refused" ELSE "accepted"
   /\ UNCHANGED << layout, fixedTurn, fixedSide, resumeTurn, vendor, blobOk,
                   rung, forms, written >>
 
-(* Step down one rung, or two when a known bound excludes the first. The
-   floor's forms are written as the floor is chosen, right before it is
-   sent. *)
+(* Step down one rung. The floor's forms are written as the floor is
+   chosen, right before it is sent. *)
 StepDown ==
   /\ phase = "refused"
-  /\ NextRung(rung) # "none"
-  /\ rung' = NextRung(rung)
+  /\ Lower(rung) # "none"
+  /\ rung' = Lower(rung)
   /\ forms' = FormsOf(rung')
   /\ written' = (written \/ rung' = "floor")
   /\ phase' = "sending"
-  /\ UNCHANGED << layout, fixedTurn, fixedSide, resumeTurn, vendor, blobOk,
-                  kind, bound >>
+  /\ UNCHANGED << layout, fixedTurn, fixedSide, resumeTurn, vendor, blobOk >>
 
 (* No rung is left: the run ends with the refusal in hand. *)
 End ==
   /\ phase = "refused"
-  /\ NextRung(rung) = "none"
+  /\ Lower(rung) = "none"
   /\ phase' = "ended"
   /\ UNCHANGED << layout, fixedTurn, fixedSide, resumeTurn, vendor, blobOk,
-                  rung, forms, written, kind, bound >>
+                  rung, forms, written >>
 
 Next == Send \/ StepDown \/ End
 
@@ -213,14 +177,10 @@ SpecClean == Init /\ [][Next]_vars /\ WF_vars(Next)
 (* Properties                                                              *)
 (***************************************************************************)
 
-(* Every resend is a lower rung than the refused request. *)
+(* Every resend is the rung right below the refused request: no rung is
+   sent again and none is skipped. *)
 EveryResendStepsDown ==
-  [][(phase = "refused" /\ phase' = "sending") => Order(rung') > Order(rung)]_vars
-
-(* Once a refusal reported its bound, no resend is over it by masc's count. *)
-NoResendOverTheBound ==
-  [][(phase = "refused" /\ phase' = "sending" /\ bound > 0)
-       => Turn(rung', forms') <= bound]_vars
+  [][(phase = "refused" /\ phase' = "sending") => rung' = Lower(rung)]_vars
 
 (* The fresh Start that answers a Resume refusal carries everything masc
    holds: the Resume sent none of masc's range, so nothing of it is cut. *)
@@ -232,10 +192,10 @@ FreshStartCarriesEverything ==
 WritesOnlyForTheFloor == written => rung = "floor"
 
 (* A run ends without being accepted only when no rung is left. *)
-EndsOnlyWhenNoRungIsLeft == (phase = "ended") => NextRung(rung) = "none"
+EndsOnlyWhenNoRungIsLeft == (phase = "ended") => Lower(rung) = "none"
 
 (* No run gives up while the provider would have accepted the floor. *)
-NoPrematureEnd == (phase = "ended") => ~Acceptable(Floor)
+NoPrematureEnd == (phase = "ended") => Refused("floor", Floor)
 
 (* Every run is accepted or ends. *)
 RunEnds == <>(phase \in {"accepted", "ended"})
@@ -247,37 +207,33 @@ ResendTheRefusedRung ==
   /\ phase = "refused"
   /\ phase' = "sending"
   /\ UNCHANGED << layout, fixedTurn, fixedSide, resumeTurn, vendor, blobOk,
-                  rung, forms, written, kind, bound >>
+                  rung, forms, written >>
 
 SpecResendRefused == Init /\ [][Next \/ ResendTheRefusedRung]_vars
 
 (***************************************************************************)
-(* The next rung is sent though masc counted it over the reported bound.   *)
+(* A refused Resume goes straight to the floor; the fresh Start is skipped.*)
 (***************************************************************************)
-SendOverTheBound ==
+SkipTheFreshStart ==
   /\ phase = "refused"
-  /\ bound > 0
-  /\ Lower(rung) # "none"
-  /\ ~Fits(Lower(rung))
-  /\ rung' = Lower(rung)
-  /\ forms' = FormsOf(rung')
-  /\ written' = (written \/ rung' = "floor")
+  /\ rung = "resume"
+  /\ rung' = "floor"
+  /\ forms' = Floor
+  /\ written' = TRUE
   /\ phase' = "sending"
-  /\ UNCHANGED << layout, fixedTurn, fixedSide, resumeTurn, vendor, blobOk,
-                  kind, bound >>
+  /\ UNCHANGED << layout, fixedTurn, fixedSide, resumeTurn, vendor, blobOk >>
 
-SpecOverBound == Init /\ [][Next \/ SendOverTheBound]_vars
+SpecSkipFreshStart == Init /\ [][Next \/ SkipTheFreshStart]_vars
 
 (***************************************************************************)
-(* A window refusal of the full Start ends the run; the floor is not asked.*)
+(* A refusal of the full Start ends the run; the floor is not asked.       *)
 (***************************************************************************)
 EndBeforeTheFloor ==
   /\ phase = "refused"
-  /\ kind = "window"
   /\ rung = "start"
   /\ phase' = "ended"
   /\ UNCHANGED << layout, fixedTurn, fixedSide, resumeTurn, vendor, blobOk,
-                  rung, forms, written, kind, bound >>
+                  rung, forms, written >>
 
 SpecSkipFloor == Init /\ [][Next \/ EndBeforeTheFloor]_vars
 
@@ -287,10 +243,10 @@ SpecSkipFloor == Init /\ [][Next \/ EndBeforeTheFloor]_vars
 EndOnWriteFailure ==
   /\ phase = "refused"
   /\ ~blobOk
-  /\ NextRung(rung) = "floor"
+  /\ Lower(rung) = "floor"
   /\ phase' = "ended"
   /\ UNCHANGED << layout, fixedTurn, fixedSide, resumeTurn, vendor, blobOk,
-                  rung, forms, written, kind, bound >>
+                  rung, forms, written >>
 
 SpecWriteFailure == Init /\ [][Next \/ EndOnWriteFailure]_vars
 
@@ -303,7 +259,7 @@ WriteBeforeChoosing ==
   /\ ~written
   /\ written' = TRUE
   /\ UNCHANGED << layout, fixedTurn, fixedSide, resumeTurn, vendor, blobOk,
-                  rung, forms, phase, kind, bound >>
+                  rung, forms, phase >>
 
 SpecCommitFirst == Init /\ [][Next \/ WriteBeforeChoosing]_vars
 
@@ -313,12 +269,11 @@ SpecCommitFirst == Init /\ [][Next \/ WriteBeforeChoosing]_vars
 CutOnTheSessionDrop ==
   /\ phase = "refused"
   /\ rung = "resume"
-  /\ Fits("start")
   /\ rung' = "start"
   /\ forms' = [Full EXCEPT !.history = HistoryFull \div 2]
   /\ phase' = "sending"
   /\ UNCHANGED << layout, fixedTurn, fixedSide, resumeTurn, vendor, blobOk,
-                  written, kind, bound >>
+                  written >>
 
 SpecCutOnDrop == Init /\ [][Next \/ CutOnTheSessionDrop]_vars
 

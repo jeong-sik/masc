@@ -2,7 +2,10 @@
 
 type cycle_outcome =
   | Completed of { meta : Keeper_meta_contract.keeper_meta }
-  | Checkpointed of { meta : Keeper_meta_contract.keeper_meta }
+  | Checkpointed of
+      { meta : Keeper_meta_contract.keeper_meta
+      ; followup : Keeper_agent_result.checkpoint_followup
+      }
   | Input_required of Keeper_meta_contract.keeper_meta
   | Cancelled of Keeper_meta_contract.keeper_meta
   | Skipped of Keeper_meta_contract.keeper_meta

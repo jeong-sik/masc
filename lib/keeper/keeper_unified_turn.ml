@@ -102,7 +102,10 @@ let execution_boundary_of_turn_failure error =
 
 type turn_success =
   | Turn_completed of { meta : keeper_meta }
-  | Turn_checkpointed of { meta : keeper_meta }
+  | Turn_checkpointed of
+      { meta : keeper_meta
+      ; followup : Keeper_agent_result.checkpoint_followup
+      }
   | Turn_input_required of keeper_meta
   | Turn_cancelled of keeper_meta
   | Turn_skipped of keeper_meta
@@ -112,10 +115,10 @@ type turn_success =
       ; deferred_runtime_lane : Keeper_turn_driver.deferred_runtime_lane option
       }
 
-let turn_success_of_stop_reason ~meta = function
+let turn_success_of_stop_reason ~meta ~followup = function
   | Runtime_agent.Completed _ -> Turn_completed { meta }
   | Runtime_agent.Yielded_to_durable_stimulus _ ->
-    Turn_checkpointed { meta }
+    Turn_checkpointed { meta; followup }
   | Runtime_agent.InputRequired _ -> Turn_input_required meta
 ;;
 
@@ -1277,6 +1280,7 @@ let run_keeper_cycle
                      Ok
                        (turn_success_of_stop_reason
                           ~meta:updated_meta
+                          ~followup:result.Keeper_agent_run.checkpoint_followup
                           result.Keeper_agent_run.stop_reason),
                      turn_state))))
                      )

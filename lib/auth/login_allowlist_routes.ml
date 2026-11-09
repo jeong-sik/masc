@@ -66,7 +66,9 @@ let state_status = function
   | S.Service_credential_unreadable _
   | S.Service_credential _
   | S.Provider_account_unreadable _
-  | S.Provider_account _ -> R.Internal_error_500
+  | S.Provider_account _
+  | S.Runtime_unreadable _
+  | S.Runtime _ -> R.Internal_error_500
 ;;
 
 let error_status = function

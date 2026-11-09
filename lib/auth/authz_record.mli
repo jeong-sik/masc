@@ -91,6 +91,10 @@ module Kind : sig
       (** A person links a subscription as their own provider account (design
           4.2 and 5.4, plan D1-1). The body is that of
           {!Authz_provider_account_event}. *)
+    | Runtime
+      (** A person makes a Runtime on a provider account they own, with its
+          Self grant in the same record (design 4.2-4.3, plan D1). The body is
+          that of {!Authz_runtime_event}. *)
 
   val all : t list
   val to_string : t -> string
@@ -111,7 +115,8 @@ end
     principal may invite is a question of the state, so {!Authz_state} answers
     it. A [Session] record needs an authenticated principal too: the person
     whose session it is, and so does a [Pat] record: the person whose PAT it
-    is, and a [Provider_account] record: the person who links the account. An [Internal_service_credential] record is written by the local
+    is, a [Provider_account] record: the person who links the account, and a
+    [Runtime] record: the person who makes the Runtime. An [Internal_service_credential] record is written by the local
     operator: the host CLI issues and revokes the credentials of the services
     the host starts (user decision 2026-11-07). *)
 val admits : Kind.t -> Author.t -> bool

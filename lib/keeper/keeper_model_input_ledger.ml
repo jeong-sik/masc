@@ -358,14 +358,6 @@ let int_opt = function
   | None -> `Null
 ;;
 
-let block_to_json b =
-  `Assoc
-    [ "first_atom", `Int b.block_first_atom
-    ; "end_atom", `Int b.block_end_atom
-    ; "tokens", int_opt b.tokens
-    ]
-;;
-
 let to_json t =
   `Assoc
     [ "prefix_digest", `String t.prefix_digest
@@ -385,8 +377,6 @@ let to_json t =
       , int_opt (Option.map (fun (u : usage) -> u.cache_read_input_tokens) t.last_usage) )
     ]
 ;;
-
-let blocks_to_json t = `List (List.map block_to_json t.blocks)
 
 let observation_to_json o =
   `Assoc

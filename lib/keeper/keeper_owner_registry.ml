@@ -822,11 +822,6 @@ let edit_queued_operation ~base_path ~keeper_name ~operation_id ~input =
   result
 ;;
 
-let move_queued_operation_to_front ~base_path ~keeper_name operation_id =
-  with_owner_command ~base_path ~keeper_name (fun owner ->
-    Keeper_owner.move_queued_operation_to_front owner operation_id)
-;;
-
 let move_queued_operation_to_end ~base_path ~keeper_name operation_id =
   with_owner_command ~base_path ~keeper_name (fun owner ->
     Keeper_owner.move_queued_operation_to_end owner operation_id)

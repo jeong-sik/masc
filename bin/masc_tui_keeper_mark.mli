@@ -101,6 +101,13 @@ val axis_next_header : string
 (** The header words over the views' axis row (RFC-0515 §2.4): the turn pulse,
     the NOW cell and the next cell. {!column_legend} names them. *)
 
+val fact_age_header : string
+val librarian_header : string
+val updated_header : string
+val lag_digest_gap_header : string
+val lag_stale_facts_header : string
+(** The header words over the cells of the memory and age views. *)
+
 val column_legend : (string * string) list
 (** The Keepers header words, the sentence about a failing keeper's past and
     the Mode S letters, each with what it means. The sheet prints it; the

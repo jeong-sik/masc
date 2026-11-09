@@ -149,6 +149,16 @@ let pulse_header = Printf.sprintf "%s %dh" axis_before_glyph pulse_hours
 let axis_now_header = axis_now_glyph ^ " now"
 let axis_next_header = axis_next_glyph ^ " next"
 
+(* The memory and age views put values of their own in the same three cells. *)
+let header_words words = String.concat " \xc2\xb7 " words (* · *)
+let fact_age_header = axis_before_glyph ^ " fact age"
+let librarian_header = axis_now_glyph ^ " librarian"
+let updated_header = axis_now_glyph ^ " updated"
+let lag_digest_gap_header = axis_next_glyph ^ " " ^ header_words [ "lag"; "digest"; "gap" ]
+
+let lag_stale_facts_header =
+  axis_next_glyph ^ " " ^ header_words [ "lag"; "stale"; Masc_tui_keeper_age_ladder.cell_label ]
+
 let column_legend =
   let letters letter values = String.concat "/" (List.map letter values) in
   let words word values = String.concat " / " (List.map word values) in
@@ -166,10 +176,23 @@ let column_legend =
        reports one), else the later of its last turn and the start of its wait" )
   ; "LIFECYCLE", "the keeper process"
   ; ( String.concat " " [ pulse_header; axis_now_header; axis_next_header ]
-    , "every view but the list draws a keeper on one axis row: its turn pulse, its NOW \
-       cell, then what comes next -- what it waits on a person for, the next scheduled \
-       run, the next dispatch path and the librarian lag. With two lines only a failing \
-       keeper adds a second line" )
+    , "every view but the list draws a keeper on one axis row. The memory and age views \
+       pick their own cells; the others draw its turn pulse, its NOW cell, then what \
+       comes next -- what it waits on a person for, the next scheduled run, the next \
+       dispatch path and the librarian lag. With two lines only a failing keeper adds a \
+       second line" )
+  ; ( String.concat " " [ pulse_header; librarian_header; lag_digest_gap_header ]
+    , Printf.sprintf
+        "the memory view: the turn pulse, how the librarian's last pass ended, then the \
+         unread turns as a bar against the keeper furthest behind, the time since its last \
+         digest and the atoms requests skip; %s is a value the server did not measure"
+        unknown_mark )
+  ; ( String.concat " " [ fact_age_header; updated_header; lag_stale_facts_header ]
+    , Printf.sprintf
+        "the age view: the keeper's facts by age as the %s strip draws them, the time since \
+         its memory last changed, then the unread-turn bar, invalidated sources and the fact \
+         count; %s is a value the server did not measure"
+        Masc_tui_keeper_age_ladder.cell_label unknown_mark )
   ; ( failing_glyph
     , "a failing keeper's last failure: how long ago · cause · the runtime that ended it \
        · candidates tried. The list draws it in place of its runtime or first in DETAIL, \

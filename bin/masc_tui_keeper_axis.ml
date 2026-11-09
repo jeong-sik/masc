@@ -33,7 +33,7 @@ let get_schedule_index (state : Masc_tui_types.state) =
       index
 ;;
 
-let get_memory_index (state : Masc_tui_types.state) =
+let memory_index (state : Masc_tui_types.state) =
   match !last_memory_index with
   | Some entry when entry.snap == state.memory_health ->
       entry.index
@@ -66,16 +66,11 @@ let run_cell (state : Masc_tui_types.state) ~now ~keeper_name =
     (Masc_tui_keeper_next_run.find (get_schedule_index state) ~keeper_name)
 ;;
 
-let lag_cell (state : Masc_tui_types.state) ~keeper_name =
-  Masc_tui_keeper_memory_reading.lag_cell
-    (Masc_tui_keeper_memory_reading.find (get_memory_index state) ~keeper_name)
-;;
-
 let segments (state : Masc_tui_types.state) ~now ~keeper_name ~runtime
   : Masc_tui_keeper_axis_cell.t list =
   let schedule_cells = Option.to_list (run_cell state ~now ~keeper_name) in
   let memory_reading =
-    Masc_tui_keeper_memory_reading.find (get_memory_index state) ~keeper_name
+    Masc_tui_keeper_memory_reading.find (memory_index state) ~keeper_name
   in
   let memory_cells = Masc_tui_keeper_memory_reading.cells ~now memory_reading in
   let failing_cells, pulse_cells = runtime_cells ~now runtime in
@@ -144,7 +139,7 @@ let age_of_memory ~now = function
 ;;
 
 let outside (state : Masc_tui_types.state) ~now ~keeper_name : Masc_tui_keeper_list_model.outside =
-  let memory = Masc_tui_keeper_memory_reading.find (get_memory_index state) ~keeper_name in
+  let memory = Masc_tui_keeper_memory_reading.find (memory_index state) ~keeper_name in
   { due =
       due_of_next_run ~now
         (Masc_tui_keeper_next_run.find (get_schedule_index state) ~keeper_name)

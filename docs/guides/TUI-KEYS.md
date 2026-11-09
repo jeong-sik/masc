@@ -846,7 +846,9 @@ or completion.
 | `NOW` | what the keeper is doing at this moment |
 | `AGE` | time since it last moved: the open turn's latest update (its start before it reports one), else the later of its last turn and the start of its wait |
 | `LIFECYCLE` | the keeper process |
-| `◂ 12h ● now ▹ next` | every view but the list draws a keeper on one axis row: its turn pulse, its NOW cell, then what comes next -- what it waits on a person for, the next scheduled run, the next dispatch path and the librarian lag. With two lines only a failing keeper adds a second line |
+| `◂ 12h ● now ▹ next` | every view but the list draws a keeper on one axis row. The memory and age views pick their own cells; the others draw its turn pulse, its NOW cell, then what comes next -- what it waits on a person for, the next scheduled run, the next dispatch path and the librarian lag. With two lines only a failing keeper adds a second line |
+| `◂ 12h ● librarian ▹ lag · digest · gap` | the memory view: the turn pulse, how the librarian's last pass ended, then the unread turns as a bar against the keeper furthest behind, the time since its last digest and the atoms requests skip; ? is a value the server did not measure |
+| `◂ fact age ● updated ▹ lag · stale · facts` | the age view: the keeper's facts by age as the facts strip draws them, the time since its memory last changed, then the unread-turn bar, invalidated sources and the fact count; ? is a value the server did not measure |
 | `◂` | a failing keeper's last failure: how long ago · cause · the runtime that ended it · candidates tried. The list draws it in place of its runtime or first in DETAIL, the views on a failing keeper's second line |
 | `failing` | how long the keeper has been in the failing phase; ? when the server recorded no start, or the start is ahead of this screen's clock (Detailed second row) |
 | `✓ ⊘ ✗ · ?` | autonomous turn results of the last 12 clock hours, one mark per hour, newest on the right: ✓ ok / ⊘ rested / ✗ failed / · no turn / ? unknown; chat turns are not counted, and an hour from before the server's record of the keeper reads ? (Detailed second row, and ◂ 12h in the views) |

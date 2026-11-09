@@ -198,7 +198,7 @@ streaming = false
         {post_id="keeper-tool-result:" ^ receipt_id;urgency=Immediate;
          arrived_at=Time_compat.now ();payload=Tool_result_ready receipt_id} in
       get (Keeper_registry_event_queue.enqueue_durable_result ~base_path keeper_name source);
-      (match get (Keeper_registry_event_queue.pending_selections_result ~base_path keeper_name) with
+      (match get (Keeper_event_queue_persistence.pending_selections_result ~base_path ~keeper_name) with
        | [selection] -> Some selection
        | [] | _ :: _ :: _ -> fail "expected one original pending source")
     | Completed | Projection_failed | Provider_failed | Rejected | Save_failed
@@ -230,7 +230,7 @@ streaming = false
      let selected = Option.get selected_source in
      get (Keeper_heartbeat_loop.For_testing.retain_checkpoint_continuations
        ~base_path ~keeper_name [selected]);
-     let retained = match get (Keeper_registry_event_queue.pending_selections_result ~base_path keeper_name) with
+     let retained = match get (Keeper_event_queue_persistence.pending_selections_result ~base_path ~keeper_name) with
       | [retained] ->
         check int "the original source has one durable checkpoint retention" 1 retained.checkpoint_retentions;
         check bool "retention preserves the original source" true (selected.source = retained.source);
@@ -272,7 +272,7 @@ streaming = false
      let starts_now = Keeper_heartbeat_loop.For_testing.next_cycle_starts_now
        ~after_failure:None ~stimuli_acked:false ~checkpoint_followup
        ~pending_stimulus:(fun () ->
-         get (Keeper_registry_event_queue.pending_selections_result ~base_path keeper_name) <> []) in
+         get (Keeper_event_queue_persistence.pending_selections_result ~base_path ~keeper_name) <> []) in
      check bool "the retained original source resumes without another event or cadence tick" true starts_now;
      let resumed = core (run_on_owner (fun () -> run ~checkpoint ())) in
      (match resumed.run_result.stop_reason with
@@ -287,7 +287,7 @@ streaming = false
       | Turn_source_acked (Already_acked _ | Ack_committed_followup_failed _) | Turn_selection_withdrawn ->
         fail "completed continuation did not settle its exact original source");
      check int "the single original source drains with no new stimulus" 0
-       (List.length (get (Keeper_registry_event_queue.pending_selections_result ~base_path keeper_name)))
+       (List.length (get (Keeper_event_queue_persistence.pending_selections_result ~base_path ~keeper_name)))
    | Completed ->
      let result = core result in
      check bool "consumer completion was persisted" true (!saved_assistants > 0);

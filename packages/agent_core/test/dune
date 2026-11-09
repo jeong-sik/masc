@@ -108,7 +108,6 @@
   test_elicitation
   test_error
   test_error_domain
-  test_eval_coverage
   test_eval_stats
   test_event_bus
   test_event_envelope
@@ -235,7 +234,6 @@
   test_elicitation
   test_error
   test_error_domain
-  test_eval_coverage
   test_eval_stats
   test_event_bus
   test_event_envelope

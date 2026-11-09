@@ -860,7 +860,7 @@ or completion.
 | `쉬는 중` | resting path: relative duration (제공자 stated / 상한 bounded); in DETAIL ▹ prefixes next candidate after turn failure |
 | `◷` | next scheduled run or hold status (Detailed second row; due in the views) |
 | `mem · lag · stale` | keeper memory health: unread gap/lag, update clock, invalidated sources (Detailed second row; its lag under lag in the views, and the memory and age views draw their own cells). mem ? is memory health not read yet, or a refused row that may be this keeper's; mem ! is this keeper's row, refused; — is a keeper with no memory snapshot |
-| `facts` | ordinary memory facts counted by time since first seen, oldest on the left (7d or older, 1d to 7d, 1h to 1d, under 1h); bar height is relative to the tallest bin of the same strip, 0 is none, ? is not measured (Detailed second row; the age view draws the bins under facts by age ▸, · for an empty one) |
+| `facts` | ordinary memory facts counted by time since first seen in 24 bins, oldest on the left: 30 days or older, then log steps back to one hour, then under an hour; bar height is relative to the tallest bin of the same strip, 0 is none, ? is not measured (Detailed second row; the age view draws the bins under facts by age ▸, · for an empty one) |
 | `사람 몫 / 효과 확인 / 분류 안 됨` | requires human operator action, effect review, or unmapped fault (NOW column) |
 
 ## Memory marks

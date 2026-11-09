@@ -1366,8 +1366,6 @@ let keeper_group_heading_style = function
       ( Keeper_list_model.Age_within_3h | Keeper_list_model.Age_within_day
       | Keeper_list_model.Age_within_3d | Keeper_list_model.Age_older ) -> Theme.info ()
   | Keeper_list_model.Group_age Keeper_list_model.Age_unknown -> Theme.recede ()
-  | Keeper_list_model.Group_runtime (Keeper_list_model.Runtime_named _) -> Theme.info ()
-  | Keeper_list_model.Group_runtime Keeper_list_model.Runtime_unread -> Theme.warn ()
 
 let keeper_state_heading_text ~available_cells rows group count =
   let glyph, label =
@@ -1434,10 +1432,6 @@ let keeper_group_heading_text ~available_cells rows group count =
         | Keeper_list_model.Age_unknown -> "UPDATE TIME UNKNOWN"
       in
       Printf.sprintf "%s %d" label count
-  | Keeper_list_model.Group_runtime (Keeper_list_model.Runtime_named runtime_id) ->
-      Printf.sprintf "%s %d" (Terminal_text.single_line runtime_id) count
-  | Keeper_list_model.Group_runtime Keeper_list_model.Runtime_unread ->
-      Printf.sprintf "RUNTIME UNREAD %d" count
 
 (* A chip of the count row, in two lengths: [long] is "! 2 attention", [short]
    is "! 2". A chip with a count takes the colour of its group, the one the
@@ -1687,6 +1681,68 @@ let draw_keeper_story buf ~cols ~rows ~now ~inner (state : state) page
                Masc_tui_render_keeper_story.memory_lines state ~now ~keeper_name) )
   in
   Masc_tui_render_keeper_story.draw buf ~cols ~rows ~lead ~current:page lines
+
+(* The matrix keeps runtime identities separate from their display labels. *)
+type runtime_matrix =
+  { matrix_ids : string list; matrix_omitted : int
+  ; matrix_name_cells : int; matrix_cell_cells : int; matrix_pulse_slots : int }
+
+let runtime_matrix ~inner rows =
+  let ids = List.concat_map (fun row -> Keeper_trail.matrix_runtime_ids (keeper_row_runtime row)) rows
+    |> List.sort_uniq String.compare in
+  let count id = List.length (List.filter (fun row ->
+    List.mem id (Keeper_trail.matrix_runtime_ids (keeper_row_runtime row))) rows) in
+  let ids = List.sort (fun a b ->
+    let order = Int.compare (count b) (count a) in
+    if order = 0 then String.compare a b else order) ids in
+  let matrix_cell_cells = if inner >= 100 then 3 else 2 in
+  let matrix_name_cells = min 24 (max 0 (inner - 25)) in
+  let matrix_pulse_slots = min (if inner >= 100 then 12 else 8) (max 0 (inner - matrix_name_cells - 11)) in
+  let capacity = max 0 ((inner - matrix_name_cells - matrix_pulse_slots - 11) / matrix_cell_cells) in
+  { matrix_ids = List.take capacity ids; matrix_omitted = max 0 (List.length ids - capacity)
+  ; matrix_name_cells; matrix_cell_cells; matrix_pulse_slots }
+
+let rec matrix_letter index =
+  let last = String.make 1 (Char.chr (Char.code 'A' + index mod 26)) in
+  if index < 26 then last else matrix_letter (index / 26 - 1) ^ last
+
+let matrix_header matrix =
+  String.make Grid.gutter_cells ' ' ^ fit_width "keeper" matrix.matrix_name_cells ^ " "
+  ^ String.concat "" (List.mapi (fun index _ -> fit_width (matrix_letter index) matrix.matrix_cell_cells) matrix.matrix_ids)
+  ^ " " ^ fit_width "last" 5
+  ^ fit_width ("◂ " ^ Grid.window_label ~slots:matrix.matrix_pulse_slots) matrix.matrix_pulse_slots
+
+let matrix_keeper_row matrix ~now row =
+  let runtime = keeper_row_runtime row in
+  let cells = List.map (fun runtime_id ->
+    let cell = Keeper_trail.matrix_cell ~runtime_id runtime in
+    let head = match cell.head with
+      | Keeper_trail.Head_elsewhere -> " "
+      | Keeper_trail.Head_serving -> Theme.info () ^ "▹"
+      | Keeper_trail.Head_resting -> Theme.recede () ^ "◌"
+      | Keeper_trail.Head_unknown -> Theme.recede () ^ "?" in
+    let failure = match cell.failure with
+      | Keeper_trail.Matrix_failed -> Theme.warn () ^ "✗"
+      | Keeper_trail.Matrix_clear -> " "
+      | Keeper_trail.Matrix_unknown -> Theme.recede () ^ "?" in
+    fit_width (failure ^ head ^ Ansi.reset) matrix.matrix_cell_cells) matrix.matrix_ids in
+  let last = match Keeper_list_model.trail_of_row row with
+    | Keeper_trail.Trail_failed { ended_at = Some at; _ } when at <= now -> Grid.short_span (now -. at)
+    | Keeper_trail.Trail_failed _ | Keeper_trail.Trail_sound -> "?" in
+  let pulse = Option.bind runtime (fun r -> r.Tui_decode.kr_recent_turns)
+    |> Masc_tui_keeper_pulse.half_hours ~now ~count:matrix.matrix_pulse_slots
+    |> List.map Masc_tui_keeper_pulse.half_hour_mark |> String.concat "" in
+  Theme.warn () ^ "▌ ! " ^ Ansi.reset
+  ^ fit_width (Terminal_text.single_line row.Keeper_list_model.keeper.Tui_decode.k_name) matrix.matrix_name_cells
+  ^ " " ^ String.concat "" cells ^ " " ^ Theme.recede () ^ fit_width last 5
+  ^ Theme.warn () ^ pulse ^ Ansi.reset
+
+let matrix_legend ~inner matrix =
+  let ids = List.mapi (fun index id -> matrix_letter index ^ " " ^ Terminal_text.single_line id) matrix.matrix_ids in
+  let omitted = if matrix.matrix_omitted = 0 then [] else
+    [Printf.sprintf "+%d runtime columns outside this width" matrix.matrix_omitted] in
+  "✗ failed in last walk · ▹ next head · ◌ resting head · ? unread head"
+  :: Message_layout.wrap_words ~max_cells:inner (String.concat " · " (ids @ omitted))
 
 let render_keeper_list (state : state) =
   let terminal_rows, cols = get_terminal_size () in
@@ -1951,13 +2007,22 @@ let render_keeper_list (state : state) =
       ~widest_runtime ~widest_detail ()
   in
   let shape = Axis_row.shape_of_view state.keeper_list_view in
+  let matrix = match state.keeper_list_view with
+    | Keeper_list_model.By_runtime -> Some (runtime_matrix ~inner model_rows)
+    | Keeper_list_model.(Plain | By_state | By_cause | By_time | By_memory | By_age | Day_wall) -> None in
   let grid = Grid.layout ~cols:inner in
   let peak_lag = axis_peak_lag state model_rows in
   let peak_facts = axis_peak_facts state model_rows in
-  (match shape with
-   | Axis_row.List_columns ->
+  (match matrix, shape with
+   | Some matrix, (Axis_row.List_columns | Axis_row.Wall_columns | Axis_row.Grid _) ->
+       box_line_styled buf cols ~style:(Theme.recede ()) (matrix_header matrix)
+   | None, Axis_row.Wall_columns ->
+       box_line buf cols (Masc_tui_keeper_wall.header ~cols:inner ~now:now_unix);
+       box_line buf cols (Masc_tui_keeper_wall.fleet ~cols:inner ~now:now_unix
+         (List.map keeper_row_runtime model_rows))
+   | None, Axis_row.List_columns ->
        box_line_styled buf cols ~style:(Theme.recede ()) (keeper_column_header columns)
-   | Axis_row.Grid grid_columns -> box_line buf cols (grid_header grid grid_columns));
+   | None, Axis_row.Grid grid_columns -> box_line buf cols (grid_header grid grid_columns));
 
   (match keepers_error with
    | Some err -> box_line buf cols ((Theme.bad ()) ^ "  " ^ err ^ Ansi.reset)
@@ -2012,10 +2077,17 @@ let render_keeper_list (state : state) =
       (Keeper_list_model.trail_of_row row)
   in
   (* A heading is one line whatever the density. *)
+  let wall_separator position =
+    match shape, List.nth_opt model_rows position, List.nth_opt model_rows (max 0 (position - 1)) with
+    | Axis_row.Wall_columns, Some row, Some previous when position > 0 ->
+        Masc_tui_keeper_wall.group ~now:now_unix (keeper_row_runtime row) <>
+        Masc_tui_keeper_wall.group ~now:now_unix (keeper_row_runtime previous)
+    | (Axis_row.Wall_columns | Axis_row.List_columns | Axis_row.Grid _), (Some _ | None), (Some _ | None) -> false in
   let entry_lines = function
     | Keeper_group_heading _ -> 1
-    | Keeper_display_row (_, row) -> (
-        match second_line row with
+    | Keeper_display_row (position, row) ->
+        (if wall_separator position then 1 else 0) +
+        (match second_line row with
         | Axis_row.No_second_line -> 1
         | Axis_row.List_detail | Axis_row.Failure_chain -> 2)
   in
@@ -2066,6 +2138,10 @@ let render_keeper_list (state : state) =
     | None -> 0
   in
   let content_rows = available_rows - story_rows in
+  let legend = match matrix with
+    | None -> []
+    | Some matrix -> List.take (max 0 (content_rows - 2)) (matrix_legend ~inner matrix) in
+  let content_rows = max 0 (content_rows - List.length legend) in
   Option.iter
     (fun (name, portrait) ->
       box_line buf cols
@@ -2096,25 +2172,32 @@ let render_keeper_list (state : state) =
     (function
       | Keeper_group_heading (group, count) as entry ->
           let text =
-            grid_group_title grid ~folded:(List.mem group state.keeper_list_folded)
-              ~style:(keeper_group_heading_style group)
-              (keeper_group_heading_text ~available_cells:(grid_title_cells grid) model_rows group
-                 count)
+            let title = keeper_group_heading_text ~available_cells:inner model_rows group count in
+            match matrix with
+            | Some _ -> keeper_group_heading_style group ^ "▌   " ^ title ^ Ansi.reset
+            | None -> grid_group_title grid ~folded:(List.mem group state.keeper_list_folded)
+                ~style:(keeper_group_heading_style group) title
           in
           if keeper_entry_selected stop entry then
             box_line_selected buf cols (Masc_tui_theme.strip_sgr text)
           else box_line buf cols text
-      | Keeper_display_row (_, row) as entry ->
+      | Keeper_display_row (position, row) as entry ->
+          if wall_separator position then box_line buf cols (Theme.recede () ^ draw_hline inner ^ Ansi.reset);
           let selected = keeper_entry_selected stop entry in
           let yolo =
             List.mem row.Keeper_list_model.keeper.Tui_decode.k_name state.keeper_yolo_names
           in
           let primary =
-            match shape with
-            | Axis_row.List_columns ->
+            match matrix, shape with
+            | Some matrix, (Axis_row.List_columns | Axis_row.Wall_columns | Axis_row.Grid _) ->
+                matrix_keeper_row matrix ~now:now_unix row
+            | None, Axis_row.Wall_columns ->
+                Masc_tui_keeper_wall.row ~cols:inner ~now:now_unix
+                  ~name:row.Keeper_list_model.keeper.Tui_decode.k_name (keeper_row_runtime row)
+            | None, Axis_row.List_columns ->
                 keeper_row_content ~columns ~now:now_unix ~frame:state.activity_frame ~yolo
                   ~selected row
-            | Axis_row.Grid grid_columns ->
+            | None, Axis_row.Grid grid_columns ->
                 grid_keeper_row state grid grid_columns ~view:state.keeper_list_view ~peak_lag
                   ~peak_facts ~now:now_unix ~frame:state.activity_frame ~yolo row
           in
@@ -2145,6 +2228,7 @@ let render_keeper_list (state : state) =
     if keeper_count > 0 then None
     else
       match keeper_rows_page state ~error:keepers_error with
+      | Page_empty when Option.is_some matrix -> Some "   no failing Keepers"
       | Page_empty -> Some (match state.workspace_identity with
           | Workspace_identity_mismatch _ -> "   server Keeper roster is empty"
           | Workspace_identity_match | Workspace_identity_match_unconfirmed _
@@ -2162,10 +2246,12 @@ let render_keeper_list (state : state) =
     List.fold_left (fun drawn entry -> drawn + entry_lines entry) note_rows entries_window
   in
   for _ = 1 to max 0 (entry_rows - drawn_rows) do
-    match shape with
-    | Axis_row.Grid _ -> box_line buf cols (grid_blank_line grid)
-    | Axis_row.List_columns -> box_empty buf cols
+    match matrix, shape with
+    | Some _, (Axis_row.Grid _ | Axis_row.List_columns | Axis_row.Wall_columns)
+    | None, (Axis_row.List_columns | Axis_row.Wall_columns) -> box_empty buf cols
+    | None, Axis_row.Grid _ -> box_line buf cols (grid_blank_line grid)
   done;
+  List.iter (fun line -> box_line_styled buf cols ~style:(Theme.recede ()) line) legend;
 
   if overflowing then begin
     (* Positions rather than a count of the rows drawn above, since a

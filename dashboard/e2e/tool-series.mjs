@@ -142,7 +142,7 @@ try {
   for (const label of ['호출', '실패', '실패율', '실행 시간 합계', '지연 p50', '지연 p95']) {
     check(labels.includes(label), `stat tile "${label}" is missing, tiles: ${labels.join(' | ')}`)
   }
-  for (const label of ['구간별 호출 수', '구간별 실행 시간 합계', '구간별 지연 p50 / p95']) {
+  for (const label of ['구간별 호출 수', '구간별 실패율', '구간별 실행 시간 합계', '구간별 지연 p50 / p95']) {
     check((await page.getByLabel(label, { exact: true }).count()) >= 1, `chart "${label}" is missing`)
     const polylines = await page.locator(`figure[aria-label="${label}"] polyline`).count()
     check(polylines >= 1, `chart "${label}" draws no line`)
@@ -161,6 +161,11 @@ try {
     check(latency.split('관측 22/23 · 미관측 1').length === 3, `the quiet bucket is not a gap in both latency lines: ${latency.replace(/\s+/g, ' ')}`)
     const latencyLines = await page.locator('figure[aria-label="구간별 지연 p50 / p95"] polyline').count()
     check(latencyLines === 4, `a quiet bucket must split each latency line in two, found ${latencyLines} polylines`)
+    // The failure rate of the quiet bucket is not 0%: no call ran, so there is nothing to divide.
+    const rate = await page.locator('figure[aria-label="구간별 실패율"] figcaption').innerText()
+    check(rate.includes('관측 22/23 · 미관측 1'), `the quiet bucket is not a gap in the failure rate: ${rate.replace(/\s+/g, ' ')}`)
+    const rateLines = await page.locator('figure[aria-label="구간별 실패율"] polyline').count()
+    check(rateLines === 2, `a quiet bucket must split the failure rate line in two, found ${rateLines} polylines`)
     check((await page.locator('table caption', { hasText: '시간을 가장 많이 쓴 도구' }).count()) === 1, 'the top-by-time table is missing')
     const rows = await page.locator('table:has(caption:text("시간을 가장 많이 쓴 도구")) tbody tr').count()
     check(rows === TOOLS.length, `expected ${TOOLS.length} tool rows, found ${rows}`)

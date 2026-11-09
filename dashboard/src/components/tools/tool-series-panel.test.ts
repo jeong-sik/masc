@@ -6,6 +6,7 @@ import {
   ToolSeriesView,
   callSeries,
   failureRatePercent,
+  failureRateSeries,
   latencySeries,
   type ToolSeriesViewProps,
 } from './tool-series-panel'
@@ -109,6 +110,23 @@ describe('chart series', () => {
     expect(failures?.readings.map(reading => reading.value)).toEqual([0, 2])
   })
 
+  it('draws the share of failed calls per bucket, and a gap where no call ran', () => {
+    const [rate] = failureRateSeries(series)
+    expect(rate?.name).toBe('실패율')
+    expect(rate?.readings.map(reading => reading.value)).toEqual([null, 20])
+  })
+
+  it('reads the rate of a bucket from that bucket, not from the window total', () => {
+    const lopsided: ToolMetricsSeriesResponse = {
+      ...series,
+      buckets: [
+        { start: 0, ...busy, call_count: 100, failure_count: 1 },
+        { start: 3600, ...busy, call_count: 4, failure_count: 3 },
+      ],
+    }
+    expect(failureRateSeries(lopsided)[0]?.readings.map(reading => reading.value)).toEqual([1, 75])
+  })
+
   it('leaves a gap in latency where no call ran', () => {
     const [p95, p50] = latencySeries(series)
     expect(p95?.readings.map(reading => reading.value)).toEqual([null, 900])
@@ -131,6 +149,19 @@ describe('failureRatePercent', () => {
 })
 
 describe('ToolSeriesView', () => {
+  it('draws the calls, the failure rate, the time spent and the latency, one chart each', () => {
+    mount(view())
+    const charts = Array.from(container.querySelectorAll('figure[aria-label]')).map(figure =>
+      figure.getAttribute('aria-label'),
+    )
+    expect(charts).toEqual([
+      '구간별 호출 수',
+      '구간별 실패율',
+      '구간별 실행 시간 합계',
+      '구간별 지연 p50 / p95',
+    ])
+  })
+
   it('lists the tools that spent the most time, one row each', () => {
     mount(view())
     expect(toolButtons().map(button => button.textContent)).toEqual(['tool_execute', 'tool_read_file'])

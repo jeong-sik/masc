@@ -205,8 +205,8 @@ let test_segments_extracts_scheduled_and_memory_cells () =
     (last_cell cells_with_memory = Some (Masc_tui_keeper_age_ladder.cell None));
 
   (* The server's ladder replaces the unmeasured cell, still last. *)
-  let bins : Masc.Keeper_memory_age_bins.t =
-    { under_hour = 1; under_day = 2; under_week = 3; older = 4 }
+  let bins =
+    Masc.Keeper_memory_age_bins.of_first_seen ~now [ now; now -. 7200.0; now -. 90000.0 ]
   in
   let kh_with_bins =
     make_keeper_health ~keeper_id:"edgar" ~updated_at:(now -. 60.0) ~age_bins:bins lib

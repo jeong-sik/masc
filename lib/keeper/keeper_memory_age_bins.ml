@@ -1,82 +1,93 @@
-type bin =
-  | Under_hour
-  | Under_day
-  | Under_week
-  | Older
+let bin_count = 24
 
-type t =
-  { under_hour : int
-  ; under_day : int
-  ; under_week : int
-  ; older : int
-  }
+type bin = int
 
-let zero =
-  { under_hour = 0
-  ; under_day = 0
-  ; under_week = 0
-  ; older = 0
-  }
+(* The ladder's two exact edges. The bins between them start on equal log
+   steps, so bin 1 starts at the lower edge and bin 23 at the upper one. *)
+let hour_edge = Masc_time_constants.hour
+let month_edge = Masc_time_constants.days_to_seconds 30
+let log_steps = bin_count - 2
+let span_ratio = month_edge /. hour_edge
+let log_step = Float.log span_ratio /. float_of_int log_steps
+let newest = 0
+let oldest = bin_count - 1
+let bins = List.init bin_count Fun.id
+let index bin = bin
+
+(* [span_ratio ** 1.0] is [span_ratio] exactly, so bin 23 starts at 30 days
+   to the second, and bin 1 at one hour. *)
+let edges =
+  Array.init bin_count (fun k ->
+    if k = newest
+    then 0.0
+    else hour_edge *. Float.pow span_ratio (float_of_int (k - 1) /. float_of_int log_steps))
 ;;
+
+let lower_edge bin = edges.(bin)
+
+let nearest_edge age =
+  if age <= hour_edge
+  then 1
+  else if age >= month_edge
+  then oldest
+  else (
+    let k = Float.to_int (Float.round (Float.log (age /. hour_edge) /. log_step)) + 1 in
+    max 1 (min oldest k))
+;;
+
+(* An array the module builds and never hands out, so the counts cannot change
+   after construction. *)
+type t = int array
+
+let zero = Array.make bin_count 0
 
 let classify ~now ts =
   let age = if ts > now then 0.0 else now -. ts in
-  if age < Masc_time_constants.hour
-  then Under_hour
-  else if age < Masc_time_constants.day
-  then Under_day
-  else if age < Masc_time_constants.days_to_seconds 7
-  then Under_week
-  else Older
+  (* The oldest bin whose lower edge the age reaches. *)
+  let rec reached k = if k = newest || age >= edges.(k) then k else reached (k - 1) in
+  reached oldest
 ;;
 
 let of_first_seen ~now timestamps =
-  List.fold_left
-    (fun acc ts ->
-      match classify ~now ts with
-      | Under_hour -> { acc with under_hour = acc.under_hour + 1 }
-      | Under_day -> { acc with under_day = acc.under_day + 1 }
-      | Under_week -> { acc with under_week = acc.under_week + 1 }
-      | Older -> { acc with older = acc.older + 1 })
-    zero
-    timestamps
+  let counts = Array.make bin_count 0 in
+  List.iter
+    (fun ts ->
+      let bin = classify ~now ts in
+      counts.(bin) <- counts.(bin) + 1)
+    timestamps;
+  counts
 ;;
 
-let total t = t.under_hour + t.under_day + t.under_week + t.older
-
-let to_json t =
-  `Assoc
-    [ "under_hour", `Int t.under_hour
-    ; "under_day", `Int t.under_day
-    ; "under_week", `Int t.under_week
-    ; "older", `Int t.older
-    ]
-;;
+let count t bin = t.(bin)
+let total t = Array.fold_left ( + ) 0 t
+let add a b = Array.init bin_count (fun k -> a.(k) + b.(k))
+let to_json t = `List (Array.to_list (Array.map (fun n -> `Int n) t))
 
 let of_json = function
-  | `Assoc fields ->
-    let get_int name =
-      match List.assoc_opt name fields with
-      | Some (`Int i) when i >= 0 -> Ok i
-      | Some (`Int _) -> Error (Printf.sprintf "field %S must be non-negative" name)
-      | Some _ -> Error (Printf.sprintf "field %S must be an int" name)
-      | None -> Error (Printf.sprintf "missing required field %S" name)
+  | `List items ->
+    let rec counts acc = function
+      | [] -> Ok (List.rev acc)
+      | `Int n :: rest when n >= 0 -> counts (n :: acc) rest
+      | `Int n :: _ -> Error (Printf.sprintf "age_bins count %d is negative" n)
+      | other :: _ ->
+        Error
+          (Printf.sprintf
+             "age_bins count must be an int, got %s"
+             (Yojson.Safe.to_string other))
     in
-    (match
-       ( get_int "under_hour"
-       , get_int "under_day"
-       , get_int "under_week"
-       , get_int "older" )
-     with
-     | Ok under_hour, Ok under_day, Ok under_week, Ok older ->
-       Ok { under_hour; under_day; under_week; older }
-     | Error err, _, _, _
-     | _, Error err, _, _
-     | _, _, Error err, _
-     | _, _, _, Error err -> Error err)
+    (match counts [] items with
+     | Error err -> Error err
+     | Ok counts when List.length counts = bin_count -> Ok (Array.of_list counts)
+     | Ok counts ->
+       Error
+         (Printf.sprintf
+            "age_bins must hold %d counts, got %d"
+            bin_count
+            (List.length counts)))
   | other ->
     Error
       (Printf.sprintf
-         "expected age_bins object, got %s"
+         "expected age_bins array of %d counts, got %s"
+         bin_count
          (Yojson.Safe.to_string other))
 ;;

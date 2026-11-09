@@ -8,7 +8,6 @@ open Result_syntax
 
 let make_store ?session_root () = Runtime_store.create ?root:session_root ()
 let file_read_error = Util.file_read_error
-let first_some = Util.first_some
 
 (** [result_all xs] collects a list of results into a result of a list,
     short-circuiting on the first [Error] and preserving element order. *)
@@ -21,13 +20,6 @@ let result_all xs =
     (Ok [])
     xs
   |> Result.map List.rev
-;;
-
-let primary_alias aliases =
-  match aliases with
-  | alias :: _ when String.trim alias <> "" -> Some alias
-  | [] -> None
-  | _blank_alias :: _ -> None
 ;;
 
 let get_raw_trace_dir ?session_root ~session_id () =
@@ -47,11 +39,6 @@ let get_raw_trace_files ?session_root ~session_id () =
     |> List.sort String.compare
     |> List.map (fun name -> Filename.concat dir name)
     |> fun paths -> Ok paths
-;;
-
-let get_session ?session_root session_id =
-  let* store = make_store ?session_root () in
-  Runtime_store.load_session store session_id
 ;;
 
 let get_raw_trace_runs ?session_root ~session_id () =
@@ -84,40 +71,4 @@ let get_raw_trace_run ?session_root ~session_id ~worker_run_id () =
               "Raw trace run '%s' not found in session %s"
               worker_run_id
               session_id))
-;;
-
-let get_raw_trace_records ?session_root ~session_id ~worker_run_id () =
-  let* run = get_raw_trace_run ?session_root ~session_id ~worker_run_id () in
-  Raw_trace_query.read_run run
-;;
-
-let get_raw_trace_summary ?session_root ~session_id ~worker_run_id () =
-  let* run = get_raw_trace_run ?session_root ~session_id ~worker_run_id () in
-  Raw_trace_query.summarize_run run
-;;
-
-let validate_raw_trace_run ?session_root ~session_id ~worker_run_id () =
-  let* run = get_raw_trace_run ?session_root ~session_id ~worker_run_id () in
-  Raw_trace_query.validate_run run
-;;
-
-let get_latest_raw_trace_run ?session_root ~session_id () =
-  let* runs = get_raw_trace_runs ?session_root ~session_id () in
-  match List.rev runs with
-  | latest :: _ -> Ok (Some latest)
-  | [] -> Ok None
-;;
-
-let summarize_runs runs = runs |> List.map Raw_trace_query.summarize_run |> result_all
-
-let get_raw_trace_summaries ?session_root ~session_id () =
-  let* runs = get_raw_trace_runs ?session_root ~session_id () in
-  summarize_runs runs
-;;
-
-let validate_runs runs = runs |> List.map Raw_trace_query.validate_run |> result_all
-
-let get_raw_trace_validations ?session_root ~session_id () =
-  let* runs = get_raw_trace_runs ?session_root ~session_id () in
-  validate_runs runs
 ;;

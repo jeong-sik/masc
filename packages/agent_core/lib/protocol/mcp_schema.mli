@@ -20,11 +20,6 @@ type mcp_tool =
   ; input_schema : Yojson.Safe.t
   }
 
-type mcp_resource = Sdk_types.resource
-type mcp_resource_contents = Sdk_types.resource_contents
-type mcp_prompt = Sdk_types.prompt
-type mcp_prompt_result = Sdk_types.prompt_result
-
 (** {1 Tool construction} *)
 
 (** Build a tool from one authoritative JSON Schema: [parameters] are derived

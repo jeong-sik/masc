@@ -34,7 +34,7 @@ let value_of_pieces (pieces : Shell_ir.arg list) : Shell_ir.arg =
   | [ single ] -> single
   | many -> Shell_ir.Concat many
 
-let rec arg_as_assignment (arg : Shell_ir.arg) :
+let arg_as_assignment (arg : Shell_ir.arg) :
     (string * Shell_ir.arg) option =
   match arg with
   | Shell_ir.Var _ -> None

@@ -290,42 +290,8 @@ let test_agent_run_stream_append_only_raw_trace () =
            ~worker_run_id:run1.worker_run_id
            ())
     in
-    let run1_records_from_session =
-      unwrap
-        (Sessions.get_raw_trace_records
-           ~session_root:root
-           ~session_id:"sess-raw"
-           ~worker_run_id:run1.worker_run_id
-           ())
-    in
-    let run1_summary =
-      unwrap
-        (Sessions.get_raw_trace_summary
-           ~session_root:root
-           ~session_id:"sess-raw"
-           ~worker_run_id:run1.worker_run_id
-           ())
-    in
-    let run1_validation =
-      unwrap
-        (Sessions.validate_raw_trace_run
-           ~session_root:root
-           ~session_id:"sess-raw"
-           ~worker_run_id:run1.worker_run_id
-           ())
-    in
-    let latest_run =
-      unwrap
-        (Sessions.get_latest_raw_trace_run ~session_root:root ~session_id:"sess-raw" ())
-    in
-    let summaries =
-      unwrap
-        (Sessions.get_raw_trace_summaries ~session_root:root ~session_id:"sess-raw" ())
-    in
-    let validations =
-      unwrap
-        (Sessions.get_raw_trace_validations ~session_root:root ~session_id:"sess-raw" ())
-    in
+    let run1_summary = unwrap (Raw_trace_query.summarize_run run1) in
+    let run1_validation = unwrap (Raw_trace_query.validate_run run1) in
     Alcotest.(check string) "trace path preserved" trace_path run1.path;
     Alcotest.(check bool)
       "run2 starts after run1 ends"
@@ -333,7 +299,6 @@ let test_agent_run_stream_append_only_raw_trace () =
       (run2.start_seq > run1.end_seq);
     Alcotest.(check int) "two discovered runs" 2 (List.length discovered_runs);
     Alcotest.(check int) "two session runs" 2 (List.length session_runs);
-    Alcotest.(check bool) "latest run present" true (Option.is_some latest_run);
     Alcotest.(check string)
       "session getter worker run id"
       run1.worker_run_id
@@ -342,10 +307,6 @@ let test_agent_run_stream_append_only_raw_trace () =
       "append only all records"
       (List.length run1_records + List.length run2_records)
       (List.length all_records);
-    Alcotest.(check int)
-      "session records match direct records"
-      (List.length run1_records)
-      (List.length run1_records_from_session);
     assert_monotonic_seq all_records;
     Alcotest.(check int)
       "run_started count"
@@ -502,8 +463,6 @@ let test_agent_run_stream_append_only_raw_trace () =
       run1_summary.selection_outcome;
     Alcotest.(check bool) "summary saw_tool_use" true run1_summary.saw_tool_use;
     Alcotest.(check bool) "summary saw_thinking" false run1_summary.saw_thinking;
-    Alcotest.(check int) "two summaries" 2 (List.length summaries);
-    Alcotest.(check int) "two validations" 2 (List.length validations);
     Alcotest.(check bool) "validation ok" true run1_validation.ok;
     Alcotest.(check bool)
       "validation mentions tool pairs"

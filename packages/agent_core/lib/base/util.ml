@@ -76,10 +76,6 @@ let contains_substring_ci = Agent_core_strings.contains_substring_ci
 
 let filter_non_empty = List.filter (fun s -> s <> "")
 
-let split_on_char_trim sep s =
-  String.split_on_char sep s |> List.map String.trim |> filter_non_empty
-;;
-
 let trim_non_empty s =
   let trimmed = String.trim s in
   if trimmed = "" then None else Some trimmed

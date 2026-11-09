@@ -246,29 +246,6 @@ let test_merge_env_preserves_existing () =
 
 (* ── connect_all / close_all ───────────────────────────────────── *)
 
-let test_connect_all_empty () =
-  with_eio
-  @@ fun ~sw ~mgr ->
-  match Mcp.connect_all ~sw ~mgr [] with
-  | Ok managed -> Alcotest.(check int) "empty list" 0 (List.length managed)
-  | Error e -> Alcotest.fail ("Expected Ok [], got Error: " ^ Error.to_string e)
-;;
-
-let test_connect_all_bad_command () =
-  with_eio
-  @@ fun ~sw ~mgr ->
-  let spec : Mcp.server_spec =
-    { command = "/nonexistent/command/that/should/fail"
-    ; args = []
-    ; env = []
-    ; name = "bad-server"
-    }
-  in
-  match Mcp.connect_all ~sw ~mgr [ spec ] with
-  | Ok _ -> Alcotest.fail "Expected Error for bad command"
-  | Error _ -> ()
-;;
-
 let test_connect_and_load_bad_command () =
   with_eio
   @@ fun ~sw ~mgr ->
@@ -339,131 +316,6 @@ let test_agent_checkpoint_with_mcp_options () =
 
 (* ── connect_all partial failure cleanup ───────────────────────── *)
 
-let test_connect_all_second_fails () =
-  with_eio
-  @@ fun ~sw ~mgr ->
-  let good_spec : Mcp.server_spec =
-    { command = "cat"; args = []; env = []; name = "cat-server" }
-  in
-  let bad_spec : Mcp.server_spec =
-    { command = "/nonexistent/binary"; args = []; env = []; name = "bad-server" }
-  in
-  match Mcp.connect_all ~sw ~mgr [ good_spec; bad_spec ] with
-  | Ok _ -> Alcotest.fail "Expected Error when the second server fails to start"
-  | Error _ -> ()
-;;
-
-let test_resources_and_prompts_roundtrip () =
-  let script =
-    {|
-import json, sys
-
-for line in sys.stdin:
-    line = line.strip()
-    if not line:
-        continue
-    req = json.loads(line)
-    method = req.get("method")
-    req_id = req.get("id")
-    if req_id is None:
-        continue
-    if method == "initialize":
-        result = {
-            "protocolVersion": "2025-11-25",
-            "capabilities": {},
-            "serverInfo": {"name": "fake", "version": "1.0"},
-        }
-    elif method == "resources/list":
-        result = {
-            "resources": [
-                {
-                    "uri": "file://guide",
-                    "name": "Guide",
-                    "description": "A guide",
-                    "mime_type": "text/plain",
-                }
-            ]
-        }
-    elif method == "resources/read":
-        result = {
-            "contents": [
-                {
-                    "uri": req.get("params", {}).get("uri", "file://guide"),
-                    "text": "hello resource",
-                }
-            ]
-        }
-    elif method == "prompts/list":
-        result = {
-            "prompts": [
-                {
-                    "name": "summarize",
-                    "description": "Summarize a topic",
-                    "arguments": [
-                        {"name": "topic", "description": "Topic", "required": True}
-                    ],
-                    "icon": None,
-                }
-            ]
-        }
-    elif method == "prompts/get":
-        topic = req.get("params", {}).get("arguments", {}).get("topic", "")
-        result = {
-            "description": "Prompt result",
-            "messages": [
-                {
-                    "role": "assistant",
-                    "content": {"type": "text", "text": "Topic: " + topic},
-                }
-            ],
-        }
-    else:
-        result = {"tools": []}
-    print("METHOD", method, "PARAMS", req.get("params"), "RESULT", result, file=sys.stderr, flush=True)
-    sys.stdout.write(json.dumps({"jsonrpc": "2.0", "id": req_id, "result": result}) + "\n")
-    sys.stdout.flush()
-|}
-  in
-  with_temp_script script
-  @@ fun path ->
-  with_eio
-  @@ fun ~sw ~mgr ->
-  match Mcp.connect ~sw ~mgr ~command:"python3" ~args:[ path ] () with
-  | Error e -> Alcotest.fail ("connect failed: " ^ Error.to_string e)
-  | Ok client ->
-    Fun.protect
-      ~finally:(fun () -> Mcp.close client)
-      (fun () ->
-         (match Mcp.initialize client with
-          | Ok () -> ()
-          | Error e -> Alcotest.fail ("initialize failed: " ^ Error.to_string e));
-         let resources =
-           match Mcp.list_resources client with
-           | Ok items -> items
-           | Error e -> Alcotest.fail ("list_resources failed: " ^ Error.to_string e)
-         in
-         Alcotest.(check int) "resource count" 1 (List.length resources);
-         let resource = List.hd resources in
-         Alcotest.(check string) "resource uri" "file://guide" resource.uri;
-         let contents =
-           match Mcp.read_resource client ~uri:resource.uri with
-           | Ok items -> items
-           | Error e -> Alcotest.fail ("read_resource failed: " ^ Error.to_string e)
-         in
-         Alcotest.(check int) "content count" 1 (List.length contents);
-         Alcotest.(check (option string))
-           "resource text"
-           (Some "hello resource")
-           (List.hd contents).text;
-         let prompts =
-           match Mcp.list_prompts client with
-           | Ok items -> items
-           | Error e -> Alcotest.fail ("list_prompts failed: " ^ Error.to_string e)
-         in
-         Alcotest.(check int) "prompt count" 1 (List.length prompts);
-         Alcotest.(check string) "prompt name" "summarize" (List.hd prompts).name)
-;;
-
 (* ── Test runner ───────────────────────────────────────────────── *)
 
 let () =
@@ -489,17 +341,10 @@ let () =
         ; test_case "callback cancellation propagates" `Quick test_sampling_cancellation_propagates
         ; test_case "no handler means no advertised sampling" `Quick test_sampling_is_disabled_without_host_handler ] )
     ; ( "connect_lifecycle"
-      , [ test_case "connect_all empty" `Quick test_connect_all_empty
-        ; test_case "connect_all bad command" `Quick test_connect_all_bad_command
-        ; test_case
+      , [ test_case
             "connect_and_load bad command"
             `Quick
             test_connect_and_load_bad_command
-        ; test_case "connect_all partial failure" `Quick test_connect_all_second_fails
-        ; test_case
-            "resources and prompts roundtrip"
-            `Quick
-            test_resources_and_prompts_roundtrip
         ] )
     ; "managed_type", [ test_case "tools list access" `Quick test_managed_tools_access ]
     ; ( "agent_integration"

@@ -385,8 +385,9 @@ let keeper_column_header (columns : Render_schedule.keeper_columns) =
     ; (if columns.kcol_show_runtime then
          " " ^ fit_width "LIFECYCLE / RUNTIME" columns.kcol_runtime
        else "")
-    ; " "
-    ; Message_layout.fit_width "DETAIL" columns.kcol_task
+    ; (if columns.kcol_show_detail then
+         " " ^ Message_layout.fit_width "DETAIL" columns.kcol_task
+       else "")
     ]
 
 let keeper_row_content ~(columns : Render_schedule.keeper_columns)
@@ -458,12 +459,14 @@ let keeper_row_content ~(columns : Render_schedule.keeper_columns)
     ; (if columns.kcol_show_runtime then
          " " ^ keeper_runtime_cell ~width:columns.kcol_runtime ?failure_context runtime
        else "")
-    ; " "
-    ; keeper_detail_cell ~now ~width:columns.kcol_task
-        ~failure_context:
-          (Render_schedule.keeper_failure_context_for_detail
-             ~show_runtime:columns.kcol_show_runtime failure_context)
-        row
+    ; (if columns.kcol_show_detail then
+         " "
+         ^ keeper_detail_cell ~now ~width:columns.kcol_task
+             ~failure_context:
+               (Render_schedule.keeper_failure_context_for_detail
+                  ~show_runtime:columns.kcol_show_runtime failure_context)
+             row
+       else "")
     ]
 
 let format_attempt_node (a : Masc_tui_keeper_trail.attempt) =
@@ -1111,10 +1114,14 @@ let render_keeper_list (state : state) =
   let columns =
     Render_schedule.allocate_keeper_columns
       (* Compact and grouped views give the available row to the current
-         work. The detailed view keeps the explicit runtime column. *)
+         work. The detailed view keeps the explicit runtime column and states
+         the detail once, on its second row (RFC-0515 P2). *)
       ~runtime_visible:(match state.keeper_list_layout with
         | Keeper_list_model.Detailed -> true
         | Keeper_list_model.Compact | Keeper_list_model.Grouped -> false)
+      ~detail_beside_runtime:(match state.keeper_list_layout with
+        | Keeper_list_model.Detailed -> false
+        | Keeper_list_model.Compact | Keeper_list_model.Grouped -> true)
       ~prioritize_runtime:has_failing_keeper ~inner_width:inner
       ~widest_runtime ~widest_detail ()
   in

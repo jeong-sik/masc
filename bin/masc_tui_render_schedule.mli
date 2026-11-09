@@ -73,6 +73,7 @@ val keeper_flags_minimum_inner_width : int
 type keeper_columns = {
   kcol_show_flags : bool;
   kcol_show_runtime : bool;
+  kcol_show_detail : bool;
   kcol_name : int;
   kcol_runtime : int;
   kcol_task : int;
@@ -81,6 +82,7 @@ type keeper_columns = {
 
 val allocate_keeper_columns :
   ?runtime_visible:bool ->
+  ?detail_beside_runtime:bool ->
   ?widest_detail:int ->
   prioritize_runtime:bool ->
   inner_width:int ->
@@ -95,7 +97,12 @@ val allocate_keeper_columns :
     is reserved for the detail column from slack before name expands, ensuring
     failure sentences are not clipped on narrow viewports.
     [runtime_visible] defaults to [true]. When it is [false], the runtime cell
-    is absent and its width is available to the other columns. *)
+    is absent and its width is available to the other columns.
+    [detail_beside_runtime] defaults to [true]. When it is [false] and the
+    runtime column is drawn, the row has no detail column, [kcol_task] is 0,
+    and the slack the detail would have taken is left unused: the Detailed
+    layout states the detail once, on its second row. Without the runtime
+    column the detail column stays, since it carries the failure sentence. *)
 
 val keeper_columns_used_width : keeper_columns -> int
 (** Total cells the allocation occupies, separators included. Never exceeds the

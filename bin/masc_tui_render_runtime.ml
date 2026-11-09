@@ -15,6 +15,7 @@ module Render_tools = Masc_tui_render_tools
 module Metrics_page = Masc_tui_render_metrics
 
 let runtime_lane_notice_style = Masc_tui_render_lanes.runtime_lane_notice_style
+let runtime_lane_notice_tone = Masc_tui_render_lanes.runtime_lane_notice_tone
 
 (* The runtime picker measures this string to decide its column widths, so the
    format lives beside that arithmetic. *)
@@ -191,64 +192,55 @@ let runtime_table_cells ~ko ~cols ~status_cells ~mode ~lane ~lane_is_label ~cand
     let column_width = if column = Runtime_candidate_column then layout.flex_width else width column in
     Masc_tui_table.cell ~header ~width:column_width ~fold value) layout.shown
 
-let runtime_detail_field ~width ~style label value =
-  let prefix = "  " ^ label ^ ": " in
-  let continuation = String.make (Message_layout.display_width prefix) ' ' in
-  let lines =
-    Message_layout.wrap_words
-      ~max_cells:(max 1 (width - Message_layout.display_width prefix))
-      (Terminal_text.single_line value)
-  in
-  if Message_layout.display_width prefix >= width then
-    Message_layout.wrap_words ~max_cells:width
-      (prefix ^ Terminal_text.single_line value)
-    |> List.map (fun line -> style, line)
-  else match lines with
-  | [] -> [ style, prefix ^ Masc_tui_theme.Glyph.no_value ]
-  | first :: rest ->
-      (style, prefix ^ first)
-      :: List.map (fun line -> style, continuation ^ line) rest
-
 let runtime_bool = function true -> "yes" | false -> "no"
 
-let runtime_detail_section = detail_section_heading
+(* A field as one fact line, so an absent field is [[]] and a repeated one is a
+   [List.concat_map]. A blank value draws the empty mark, as it did when each
+   page formatted its own fields. *)
+let runtime_fact ?(tone = Page_line.Plain) label value =
+  let value =
+    if String.equal (String.trim (Terminal_text.single_line value)) ""
+    then Masc_tui_theme.Glyph.no_value
+    else value
+  in
+  [ Page_line.fact ~tone label value ]
 
 (* A route is not a candidate. This reading remains available when the
    inventory is empty, and retains diagnostics beside a last-good snapshot. *)
 let runtime_routes_detail_lines state ~width =
   let ko = state.ui_language = Lang_ko in
   let text korean english = if ko then korean else english in
-  let field ?(style = Ansi.reset) label value =
-    runtime_detail_field ~width ~style label value
-  in
+  let fact = runtime_fact in
   let optional label = function
     | None -> []
-    | Some value -> field ~style:(Theme.warn ()) label value
+    | Some value -> fact ~tone:Page_line.Attention label value
   in
   let notice_and_stale =
     (match state.runtime_lane_notice with
      | None -> []
      | Some notice ->
-         field ~style:(runtime_lane_notice_style notice) (text "작업 결과" "Action result")
+         fact ~tone:(runtime_lane_notice_tone notice) (text "작업 결과" "Action result")
            (Masc_tui_types.runtime_lane_notice_text notice))
-    @ List.concat_map (field ~style:(Theme.warn ()) (text "이전 설정 관측" "Stale configuration"))
+    @ List.concat_map (fact ~tone:Page_line.Attention (text "이전 설정 관측" "Stale configuration"))
         (Masc_tui_types.runtime_lane_stale_lines state)
   in
+  let default_routes = text "1. 기본 라우트 · 진입 런타임" "1. Default routes" in
   match state.runtime_surface with
   | None ->
-      runtime_detail_section ~first:true (if ko then "1. 기본 라우트 · 진입 런타임" else "1. Default routes")
-      @ optional (text "런타임 조회 경고" "Runtime read warning") state.runtime_surface_error
-      @ field (text "설정" "Resolved") (text "관측 없음" "No configuration observation")
-      @ notice_and_stale
+      detail_page ~width
+        [ ( default_routes
+          , optional (text "런타임 조회 경고" "Runtime read warning") state.runtime_surface_error
+            @ fact (text "설정" "Resolved") (text "관측 없음" "No configuration observation")
+            @ notice_and_stale ) ]
   | Some snapshot ->
       let resolved = snapshot.Tui_decode.rss_resolved in
       let route label values =
         match values with
-        | [] -> field label (text "없음" "none")
+        | [] -> fact label (text "없음" "none")
         | values ->
             List.mapi
               (fun index value ->
-                field (Printf.sprintf "%s %d" label (index + 1)) value)
+                fact (Printf.sprintf "%s %d" label (index + 1)) value)
               values
             |> List.concat
       in
@@ -257,32 +249,40 @@ let runtime_routes_detail_lines state ~width =
           (fun id -> not (List.exists (String.equal id) resolved.rrs_media_failover))
           resolved.rrs_media_failover_declared
       in
-      runtime_detail_section ~first:true (if ko then "1. 기본 라우트 · 진입 런타임" else "1. Default routes")
-      @ field (text "기본 라우트" "Default route") (Option.value resolved.rrs_default_route ~default:(text "없음" "none"))
-      @ field (text "시작 런타임" "Entry runtime") (Option.value resolved.rrs_default_runtime_id ~default:(text "없음" "none"))
-      @ field (text "설정 원본" "Source") (Option.value resolved.rrs_config_path ~default:(text "미확인" "unavailable"))
-      @ field (text "생성 시각" "Recorded") resolved.rrs_generated_at_iso
-      @ (match runtime_fleet_summary state with
-         | None -> []
-         | Some summary -> field (text "키퍼 전체" "Fleet") summary)
-      @ notice_and_stale
-      @ runtime_detail_section (if ko then "2. 미디어 대체 순서" else "2. Media failover")
-      @ route (text "해소된 미디어 후보" "Admitted media") resolved.rrs_media_failover
-      @ route (text "선언된 미디어 후보" "Declared media") resolved.rrs_media_failover_declared
-      @ route (text "미해결 미디어 후보" "Unresolved media") dropped
-      @ runtime_detail_section (if ko then "3. 연결 진단 · 프로브 상태" else "3. Probe & diagnostics")
-      @ optional (text "런타임 조회 경고" "Runtime read warning") state.runtime_surface_error
-      @ optional (text "프로브 조회 오류" "Probe read error") snapshot.rss_probe_error
-      @ (if snapshot.rss_unassigned_probe_count = 0 then []
-         else field (text "후보 순서 외 프로브" "Probes outside candidate orders")
-                (string_of_int snapshot.rss_unassigned_probe_count))
-      @ (match snapshot.rss_probe with
-         | None -> field (text "프로브" "Probe")
-             (text "미확인; 관측을 읽지 못함" "unavailable; no observation has been read")
-         | Some probe ->
-             field (text "프로브 상태" "Probe status") (runtime_overall_label ~ko probe.rps_status)
-             @ List.concat_map (field ~style:(Theme.warn ()) (text "프로브 오류" "Probe error")) probe.rps_errors
-             @ List.concat_map (field (text "프로브 한계" "Probe limitation")) probe.rps_limitations)
+      let routes =
+        fact (text "기본 라우트" "Default route") (Option.value resolved.rrs_default_route ~default:(text "없음" "none"))
+        @ fact (text "시작 런타임" "Entry runtime") (Option.value resolved.rrs_default_runtime_id ~default:(text "없음" "none"))
+        @ fact (text "설정 원본" "Source") (Option.value resolved.rrs_config_path ~default:(text "미확인" "unavailable"))
+        @ fact (text "생성 시각" "Recorded") resolved.rrs_generated_at_iso
+        @ (match runtime_fleet_summary state with
+           | None -> []
+           | Some summary -> fact (text "키퍼 전체" "Fleet") summary)
+        @ notice_and_stale
+      in
+      let media =
+        route (text "해소된 미디어 후보" "Admitted media") resolved.rrs_media_failover
+        @ route (text "선언된 미디어 후보" "Declared media") resolved.rrs_media_failover_declared
+        @ route (text "미해결 미디어 후보" "Unresolved media") dropped
+      in
+      let probe =
+        optional (text "런타임 조회 경고" "Runtime read warning") state.runtime_surface_error
+        @ optional (text "프로브 조회 오류" "Probe read error") snapshot.rss_probe_error
+        @ (if snapshot.rss_unassigned_probe_count = 0 then []
+           else fact (text "후보 순서 외 프로브" "Probes outside candidate orders")
+                  (string_of_int snapshot.rss_unassigned_probe_count))
+        @ (match snapshot.rss_probe with
+           | None -> fact (text "프로브" "Probe")
+               (text "미확인; 관측을 읽지 못함" "unavailable; no observation has been read")
+           | Some probe ->
+               fact (text "프로브 상태" "Probe status") (runtime_overall_label ~ko probe.rps_status)
+               @ List.concat_map (fact ~tone:Page_line.Attention (text "프로브 오류" "Probe error")) probe.rps_errors
+               @ List.concat_map (fact (text "프로브 한계" "Probe limitation")) probe.rps_limitations)
+      in
+      detail_page ~width
+        [ default_routes, routes
+        ; text "2. 미디어 대체 순서" "2. Media failover", media
+        ; text "3. 연결 진단 · 프로브 상태" "3. Probe & diagnostics", probe
+        ]
 ;;
 
 let runtime_detail_lines state target ~width =
@@ -323,14 +323,12 @@ let runtime_detail_lines state target ~width =
       (match target with
        | Runtime_routes -> runtime_routes_detail_lines state ~width
        | Runtime_lane_candidate _ | Runtime_catalog_entry _ ->
-           runtime_detail_field ~width ~style:(Theme.warn ()) "Runtime"
-             "This runtime row is no longer present in the refreshed projection")
+           Masc_tui_page_reading.rows
+             ~max_cells:(max 1 (width - String.length Masc_tui_page_reading.detail_indent))
+             (runtime_fact ~tone:Page_line.Attention "Runtime"
+                "This runtime row is no longer present in the refreshed projection"))
   | Some (runtime, lanes, position, probe) ->
-      (* A field as one fact line, so an absent field is [[]] and a repeated
-         one is a [List.concat_map]. *)
-      let fact ?(tone = Page_line.Plain) label value =
-        [ Page_line.fact ~tone label value ]
-      in
+      let fact = runtime_fact in
       let model_fields =
         fact "Runtime ID" runtime.ro_id
         @ fact "Provider" runtime.ro_provider

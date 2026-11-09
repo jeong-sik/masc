@@ -4,13 +4,15 @@ module Message_layout = Masc_tui_message_layout
 module Story = Masc_tui_keeper_story
 module Memory_reading = Masc_tui_keeper_memory_reading
 
-(* The window is a rule, a title and up to eight lines: the story page of a
-   failing Keeper with a last wake and its newest turns is that long. The list
-   keeps four rows whenever the window can keep its own four beside them, which
-   takes eight rows. On a shorter screen the window takes every row and covers
-   the list -- the overlay RFC-0515 section 2.5 gives a screen too short for
-   both -- rather than leave a list of one to three rows. *)
-let target_rows = 10
+(* The window is a rule, a title and up to ten lines: the story page of a
+   Keeper whose feed holds its newest turns, its newest wakes and its last
+   digest is that long. A page with more lines gives the feed's oldest events
+   up first. The list keeps four rows whenever the window can keep its own four
+   beside them, which takes eight rows. On a shorter screen the window takes
+   every row and covers the list -- the overlay RFC-0515 section 2.5 gives a
+   screen too short for both -- rather than leave a list of one to three
+   rows. *)
+let target_rows = 12
 let least_rows = 4
 let list_floor = 4
 
@@ -41,9 +43,12 @@ let title ~inner ~lead ~current =
   lead ^ String.make gap ' ' ^ tabs
 ;;
 
+(* The lines a window of [rows] rows holds: all but its rule and its title. *)
+let body_rows ~rows = max 0 (rows - 2)
+
 let draw buf ~cols ~rows ~lead ~current lines =
   let inner = max 1 (framed_inner_width cols) in
-  let body_rows = max 0 (rows - 2) in
+  let body_rows = body_rows ~rows in
   if rows >= 1 then box_divider buf cols;
   if rows >= 2 then box_line buf cols (title ~inner ~lead ~current);
   let total = List.length lines in
@@ -183,23 +188,35 @@ let schedules (state : Masc_tui_types.state) ~keeper_name =
 ;;
 
 (* A page drawn from an earlier reading, or whose re-read failed, is the last
-   reading and not the Keeper's present one. The note sits at the head of the
-   line, where a narrow screen's cut does not reach it. *)
-let refresh_note = function
+   reading and not the Keeper's present one. *)
+let refresh_suffix = function
   | Current -> ""
-  | Refreshing -> dim " (reading again)"
-  | Refresh_failed _ -> warn " (schedule read failed)"
+  | Refreshing -> " (reading again)"
+  | Refresh_failed _ -> " (schedule read failed)"
 ;;
 
-(* The newest wake among the Keeper's schedules. A schedule that is closed or
-   held still counts: its wake happened. *)
-let wake_text ~now ~head (wake : Masc_tui_keeper_last_wake.t) =
-  let row = Masc_tui_keeper_last_wake.row wake in
+(* What a source says about itself where its events may be missing from the
+   feed. A [Caution] is a source whose read failed or whose answer cannot be
+   placed in time. A [Notice] is a source not read yet, being read, cut, or
+   drawn from an earlier reading. *)
+type note =
+  | Caution of string
+  | Notice of string
+
+let note_line = function
+  | Caution text -> warn text
+  | Notice text -> dim text
+;;
+
+(* One wake the way the schedule row tells it: how it ended, and the schedule
+   that woke the Keeper. A schedule that is closed or held still counts: its
+   wake happened. *)
+let wake_item_text wake =
+  let row = Masc_tui_keeper_wakes.row wake in
   let outcome = Terminal_text.single_line (Masc_tui_render_work.schedule_outcome_word row) in
   let outcome_text =
     if String.equal outcome Masc_tui_theme.Glyph.no_value then ""
-    else
-      dim " · " ^ Masc_tui_render_prim.semantic_status_color outcome ^ outcome ^ Ansi.reset
+    else " " ^ Masc_tui_render_prim.semantic_status_color outcome ^ outcome ^ Ansi.reset
   in
   let error_text =
     match row.sch_last_wake_status with
@@ -210,79 +227,144 @@ let wake_text ~now ~head (wake : Masc_tui_keeper_last_wake.t) =
     | Some (Schedule_contract_values.Wake_running | Schedule_contract_values.Wake_succeeded)
     | None -> ""
   in
-  head
+  dim "wake" ^ outcome_text
   ^ dim
-      (Printf.sprintf " %s · %s"
-         (ago ~now (Masc_tui_keeper_last_wake.at wake))
-         (Terminal_text.single_line
-            (Option.value ~default:row.sch_schedule_id row.sch_payload_summary)))
-  ^ outcome_text ^ error_text
+      (" · "
+       ^ Terminal_text.single_line (Option.value ~default:row.sch_schedule_id row.sch_payload_summary))
+  ^ error_text
 ;;
 
-let last_wake_entry (state : Masc_tui_types.state) ~now ~keeper_name =
-  match schedules state ~keeper_name with
-  | Not_read -> Some (dim "last wake not read yet")
-  | Reading -> Some (dim "last wake reading…")
-  | Read_failed _ -> Some (warn "last wake unknown, the schedule read failed")
-  | Store_unreadable _ -> Some (warn "last wake unknown, the schedule store is unreadable")
-  | Page { snapshot; refresh } ->
-      let note = refresh_note refresh in
-      (match
-         Masc_tui_keeper_last_wake.of_page ~truncated:snapshot.scs_truncated snapshot.scs_rows
-       with
-       | Masc_tui_keeper_last_wake.Newest wake ->
-           Some (wake_text ~now ~head:(dim "last wake" ^ note) wake)
-       | Masc_tui_keeper_last_wake.Newest_on_first_page wake ->
-           Some (wake_text ~now ~head:(dim "last wake on the first page" ^ note) wake)
-       | Masc_tui_keeper_last_wake.Not_on_first_page ->
-           Some (dim "last wake not on the first page" ^ note)
-       | Masc_tui_keeper_last_wake.Unplaced ->
-           Some (warn "last wake unknown, a wake time is unreadable" ^ note)
-       | Masc_tui_keeper_last_wake.No_wake ->
-           (match refresh with
-            | Current | Refreshing -> None
-            (* The earlier reading found no wake; whether one came since is
-               not known. *)
-            | Refresh_failed _ -> Some (warn "last wake unknown, the schedule read failed")))
-;;
-
-(* One turn the way the page tells it: the stop reason as the receipt wrote it
-   and how long ago the turn ended. A record without a stop reason is told as
-   that, in the warning colour. No reason is sorted into ok or failed here. *)
-let turn_text ~now (turn : Masc_tui_keeper_turns.turn) =
-  let age = ago ~now turn.at in
+(* One turn the way the receipt tells it: the stop reason as it wrote it. A
+   record without a stop reason is told as that, in the warning colour. No
+   reason is sorted into ok or failed here. *)
+let turn_item_text (turn : Masc_tui_keeper_turns.turn) =
   match turn.stop with
-  | Masc_tui_keeper_turns.Stopped reason ->
-      dim (Printf.sprintf "%s %s" (Terminal_text.single_line reason) age)
-  | Masc_tui_keeper_turns.No_stop_reason -> warn (Printf.sprintf "no stop reason %s" age)
+  | Masc_tui_keeper_turns.Stopped reason -> dim ("turn " ^ Terminal_text.single_line reason)
+  | Masc_tui_keeper_turns.No_stop_reason -> warn "turn no stop reason"
 ;;
 
-(* The Keeper's newest turns, newest first, so that a narrow screen leaves out
-   the oldest and not the last. *)
-let turns_entry (state : Masc_tui_types.state) ~now ~cells ~keeper_name =
-  let told ~note turns =
-    match List.rev turns with
-    | [] -> None
-    | newest_first ->
-        let head = dim "last turns" ^ note ^ dim " · " in
-        Some
-          (head
-           ^ Message_layout.join_fitting
-               ~sep:(dim " · ")
-               ~cells:(max 0 (cells - Message_layout.display_width head))
-               (List.map (turn_text ~now) newest_first))
-  in
+let feed_item_text = function
+  | Masc_tui_keeper_feed.Wake wake -> wake_item_text wake
+  | Masc_tui_keeper_feed.Turn turn -> turn_item_text turn
+  | Masc_tui_keeper_feed.Digest _ -> dim "digest ok · librarian"
+;;
+
+(* The column of ages, wide enough for the longest the ladder writes (a hundred
+   days, or ninety-nine days and 23 hours) and the word after it. *)
+let feed_age_cells = 11
+
+let feed_item_line ~now item =
+  dim (Message_layout.fit_width (ago ~now (Masc_tui_keeper_feed.at item)) feed_age_cells)
+  ^ feed_item_text item
+;;
+
+(* The reason a read stored when it failed, after the words that say what
+   failed. A reason with no text once on one line adds nothing. *)
+let with_detail text detail =
+  match Terminal_text.single_line detail with
+  | "" -> text
+  | detail -> text ^ ": " ^ detail
+;;
+
+(* The Keeper's newest turns, and a note for a read that has not answered or
+   that failed. A failed read with nothing held to show leaves it unknown
+   whether a turn came, and a failed re-read leaves the held turns as the last
+   reading. *)
+let turns_source (state : Masc_tui_types.state) ~keeper_name =
   match
     Masc_tui_fetched.view_for ~equal:String.equal state.keeper_story_turns ~key:keeper_name
   with
-  | Masc_tui_fetched.Absent -> Some (dim "turns not read yet")
-  | Masc_tui_fetched.Loading -> Some (dim "turns reading…")
-  | Masc_tui_fetched.Ready turns -> told ~note:"" turns
-  (* Whether a turn came since is not known, and nothing held to show. *)
-  | Masc_tui_fetched.Stale ([], _) | Masc_tui_fetched.Failed _ ->
-      Some (warn "turns unknown, the read failed")
-  | Masc_tui_fetched.Stale ((_ :: _ as turns), _) ->
-      told ~note:(warn " (read failed)") turns
+  | Masc_tui_fetched.Absent -> [], [ Notice "turns not read yet" ]
+  | Masc_tui_fetched.Loading -> [], [ Notice "turns reading…" ]
+  | Masc_tui_fetched.Ready turns -> turns, []
+  | Masc_tui_fetched.Stale ([], detail) | Masc_tui_fetched.Failed detail ->
+      [], [ Caution (with_detail "turns unknown, the read failed" detail) ]
+  | Masc_tui_fetched.Stale ((_ :: _ as turns), detail) ->
+      turns, [ Caution (with_detail "turns (read failed)" detail) ]
+;;
+
+(* The note of a schedule page that is not the Keeper's present reading. *)
+let refresh_note refresh text =
+  match refresh with
+  | Current | Refreshing -> Notice (text ^ refresh_suffix refresh)
+  | Refresh_failed detail -> Caution (with_detail (text ^ refresh_suffix refresh) detail)
+;;
+
+(* The Keeper's wakes on its schedule page, newest first, and a note for a
+   page that is not read, not readable, cut, being read again or whose re-read
+   failed. A wake whose time cannot be read leaves the newest unknown. *)
+let wakes_source (state : Masc_tui_types.state) ~keeper_name =
+  match schedules state ~keeper_name with
+  | Not_read -> [], [ Notice "wakes not read yet" ]
+  | Reading -> [], [ Notice "wakes reading…" ]
+  | Read_failed detail ->
+      [], [ Caution (with_detail "wakes unknown, the schedule read failed" detail) ]
+  | Store_unreadable detail ->
+      let text = "wakes unknown, the schedule store is unreadable" in
+      ( []
+      , [ Caution
+            (match detail with
+             | Some detail -> with_detail text detail
+             | None -> text)
+        ] )
+  | Page { snapshot; refresh } ->
+      (match
+         Masc_tui_keeper_wakes.of_page ~truncated:snapshot.scs_truncated snapshot.scs_rows
+       with
+       | Masc_tui_keeper_wakes.Unplaced ->
+           let text = "wakes unknown, a wake time is unreadable" ^ refresh_suffix refresh in
+           ( []
+           , [ Caution
+                 (match refresh with
+                  | Refresh_failed detail -> with_detail text detail
+                  | Current | Refreshing -> text)
+             ] )
+       | Masc_tui_keeper_wakes.Wakes { newest_first; coverage } ->
+           ( newest_first
+           , (match coverage, refresh with
+              | Masc_tui_keeper_wakes.Whole_page, Current -> []
+              | Masc_tui_keeper_wakes.Whole_page, (Refreshing | Refresh_failed _) ->
+                  [ refresh_note refresh "wakes" ]
+              | Masc_tui_keeper_wakes.First_page, (Current | Refreshing | Refresh_failed _) ->
+                  [ refresh_note refresh "wakes from the first page only" ]) ))
+;;
+
+(* The librarian's last digest from the memory-health reading, and a note for a
+   reading that is not there. A reading that says the Keeper has no digest, or
+   no memory-health row, has nothing to note. *)
+let digest_source (state : Masc_tui_types.state) ~keeper_name =
+  match memory_reading state ~keeper_name with
+  | Memory_reading.Row { digest_at; _ } -> digest_at, []
+  | Memory_reading.No_row -> None, []
+  | Memory_reading.Unknown -> None, [ Notice "digest not read yet" ]
+  | Memory_reading.Refused reason ->
+      None, [ Caution (with_detail "digest unknown, the memory-health row was refused" reason) ]
+;;
+
+(* The past group of the story page as one feed: the newest turns, the newest
+   wakes and the last digest, oldest first, so that the newest ends the feed. A
+   source that is not read, or whose read failed, has no event to put in its
+   place, so it gets a line of its own after the events, whatever the width. The
+   cautions come before the notices. The notes keep their lines and the oldest
+   events give way to the window's height; a window too short for every note
+   keeps the cautions. With no line to spare the feed is empty, notes included. *)
+let feed_lines (state : Masc_tui_types.state) ~now ~max_lines ~keeper_name =
+  let turns, turn_notes = turns_source state ~keeper_name in
+  let wakes, wake_notes = wakes_source state ~keeper_name in
+  let digest_at, digest_notes = digest_source state ~keeper_name in
+  let cautions, notices =
+    List.partition
+      (function Caution _ -> true | Notice _ -> false)
+      (turn_notes @ wake_notes @ digest_notes)
+  in
+  let item_lines =
+    List.map (feed_item_line ~now) (Masc_tui_keeper_feed.of_sources ~turns ~wakes ~digest_at)
+  in
+  if max_lines <= 0 then []
+  else
+    let note_lines = List.take max_lines (List.map note_line (cautions @ notices)) in
+    let room = max_lines - List.length note_lines in
+    List.drop (max 0 (List.length item_lines - room)) item_lines @ note_lines
 ;;
 
 let schedule_lines (state : Masc_tui_types.state) ~now ~keeper_name =

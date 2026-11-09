@@ -927,23 +927,30 @@ in what is left, and it follows the cursor as `j`/`k` move. It has three pages
 named on its title row: `story`, `s schedules` and `m memory`.
 
 - `story` tells the Keeper as `◂ past`, `● now` and `▹ next`. Past holds the
-  failing-for and turn-pulse cells, the last Librarian success, the Keeper's
-  last wake, its newest turns, the failure sentence and the attempt chain. Now
-  holds the activity word, the `DETAIL` text, `Mode S`, `AGE` and the
-  lifecycle. Next holds the schedule cell, the next dispatch path and the
-  memory lag. Except the last wake and the turns, they are the cells and
-  sentences the list rows draw. The last wake is
-  the newest wake any schedule on the Keeper's first schedule page recorded,
-  with its age, the schedule and its outcome. When the page is cut the line
-  reads `last wake on the first page`, since a later page may hold a newer one.
-  A reading that is read again or whose read failed says so in brackets at the
-  head of the line, and a wake whose time cannot be read makes the last wake
-  unknown. The newest turns are the last three records of the page Memory
-  reads, newest first, each with the stop reason the receipt recorded, as
-  written, and how long ago the turn ended. A record without a stop reason says
-  so. The window reads them while the story page is open, one Keeper at a time
-  as the cursor moves, and again when the server announces a change in that
-  Keeper's turns. A read that failed says so.
+  failing-for and turn-pulse cells, the feed, the failure sentence and the
+  attempt chain. Now holds the activity word, the `DETAIL` text, `Mode S`,
+  `AGE` and the lifecycle. Next holds the schedule cell, the next dispatch path
+  and the memory lag. Except the feed, they are the cells and sentences the
+  list rows draw.
+  The feed lists the Keeper's newest turns, its newest two wakes and the
+  Librarian's last digest, oldest first, one line each with how long ago it
+  happened, so the newest is the last event of the feed. A turn line gives the
+  stop reason the receipt recorded, as written, or `turn no stop reason`. A wake
+  line gives its outcome, the schedule that woke the Keeper and, for a failed
+  wake, the error the schedule recorded. A schedule
+  records only its own last wake, so the two wakes are the last wakes of the
+  two schedules on the Keeper's first schedule page whose wakes are newest. A
+  page too short for the feed drops its oldest events first.
+  A source the window has not read, cannot read, has cut, is reading again or
+  whose read failed does not vanish from the feed: a line of its own after the
+  events says so, one line per source, for example `turns reading…`,
+  `wakes from the first page only` or `wakes (schedule read failed)`. The line
+  of a read that failed ends with the reason the read stored. These lines stay
+  when the page is short, and the lines of failed reads outlast the others. A
+  window with no line to spare for the feed shows none of it. A wake whose time
+  cannot be read makes the wakes unknown. The window reads turns and schedules while the story page is open,
+  one Keeper at a time as the cursor moves, and reads the turns again when the
+  server announces a change in that Keeper's turns.
 - `s schedules` is the first page of the Keeper's own schedules, the page the
   Automation tab (`J`) draws first, led by the same `◷` cell the list draws and
   the counts of what the store holds. The window reads that page from the

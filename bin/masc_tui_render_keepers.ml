@@ -1167,7 +1167,7 @@ let story_label_cells = 10
 (* The story page of the Story window (RFC-0515 section 2.5): the Keeper under
    the cursor told as past, now and next. Every part is a cell or a sentence the
    list rows already draw, so the window states no value a row does not. *)
-let keeper_story_lines (state : state) ~now ~inner (row : Keeper_list_model.row) =
+let keeper_story_lines (state : state) ~now ~inner ~body_rows (row : Keeper_list_model.row) =
   let keeper_name = row.keeper.Tui_decode.k_name in
   let runtime =
     match row.reading.Keeper_control.liveness with
@@ -1194,15 +1194,6 @@ let keeper_story_lines (state : state) ~now ~inner (row : Keeper_list_model.row)
                ~failing_since:runtime.kr_failing_since)
         , Masc_tui_keeper_pulse.pulse_cell ~now runtime.kr_recent_turns )
   in
-  let digest =
-    match memory with
-    | Masc_tui_keeper_memory_reading.Row { digest_at = Some at; _ } ->
-        Option.map (fun span -> "librarian ok " ^ span ^ " ago")
-          (Message_layout.age_text ~now ~since:at)
-    | Masc_tui_keeper_memory_reading.Row { digest_at = None; _ }
-    | Masc_tui_keeper_memory_reading.Unknown | Masc_tui_keeper_memory_reading.No_row
-    | Masc_tui_keeper_memory_reading.Refused _ -> None
-  in
   let lag =
     match memory with
     | Masc_tui_keeper_memory_reading.Row { lag = Masc_tui_keeper_memory_reading.Lag turns; _ }
@@ -1225,19 +1216,14 @@ let keeper_story_lines (state : state) ~now ~inner (row : Keeper_list_model.row)
                   Printf.sprintf "last %dh %s" Masc_tui_keeper_mark.pulse_hours cell.text
               })
           pulse_cell
-      ; Option.map dim digest
       ]
   in
-  let past_entries =
-    (match past_parts with [] -> [] | _ -> [ join past_parts ])
-    @ Option.to_list (Masc_tui_render_keeper_story.last_wake_entry state ~now ~keeper_name)
-    @ Option.to_list
-        (Masc_tui_render_keeper_story.turns_entry state ~now
-           ~cells:(max 0 (inner - story_label_cells)) ~keeper_name)
-    @ Option.to_list
-        (Option.map
-           (fun sentence -> Theme.warn () ^ sentence ^ Ansi.reset)
-           (keeper_row_trail_sentence ~age:(keeper_trail_age ~now) row))
+  let past_head = match past_parts with [] -> [] | _ -> [ join past_parts ] in
+  let past_tail =
+    Option.to_list
+      (Option.map
+         (fun sentence -> Theme.warn () ^ sentence ^ Ansi.reset)
+         (keeper_row_trail_sentence ~age:(keeper_trail_age ~now) row))
     @ Option.to_list
         (render_attempt_chain
            ~max_cells:(max 0 (inner - story_label_cells))
@@ -1271,11 +1257,26 @@ let keeper_story_lines (state : state) ~now ~inner (row : Keeper_list_model.row)
       ; lag
       ]
   in
+  let next_entries =
+    match next_parts with [] -> [ dim "nothing announced" ] | _ -> [ join next_parts ]
+  in
+  (* The feed takes the lines the rest of the page leaves in the window. With
+     none left it tells nothing, not even that a source failed, so an empty past
+     says "nothing recorded" only where the feed had room to say more. *)
+  let feed_room =
+    body_rows - List.length past_head - List.length past_tail - List.length now_entries
+    - List.length next_entries
+  in
+  let feed =
+    Masc_tui_render_keeper_story.feed_lines state ~now ~max_lines:feed_room ~keeper_name
+  in
+  let past_entries = past_head @ feed @ past_tail in
   labelled_lines "◂ past"
-    (match past_entries with [] -> [ dim "nothing recorded" ] | _ -> past_entries)
+    (match past_entries with
+     | [] when feed_room > 0 -> [ dim "nothing recorded" ]
+     | [] | _ :: _ -> past_entries)
   @ labelled_lines "● now" now_entries
-  @ labelled_lines "▹ next"
-      (match next_parts with [] -> [ dim "nothing announced" ] | _ -> [ join next_parts ])
+  @ labelled_lines "▹ next" next_entries
 
 (* The Keeper's name and what it is doing, at the left of the window's title. *)
 let keeper_story_lead (row : Keeper_list_model.row) =
@@ -1294,7 +1295,9 @@ let draw_keeper_story buf ~cols ~rows ~now ~inner (state : state) page
         let keeper_name = row.keeper.Tui_decode.k_name in
         ( keeper_story_lead row
         , (match page with
-           | Masc_tui_keeper_story.Story -> keeper_story_lines state ~now ~inner row
+           | Masc_tui_keeper_story.Story ->
+               keeper_story_lines state ~now ~inner
+                 ~body_rows:(Masc_tui_render_keeper_story.body_rows ~rows) row
            | Masc_tui_keeper_story.Schedule ->
                Masc_tui_render_keeper_story.schedule_lines state ~now ~keeper_name
            | Masc_tui_keeper_story.Memory ->

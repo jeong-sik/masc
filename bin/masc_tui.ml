@@ -6586,8 +6586,9 @@ let launch_memory_input_load state ~mailbox ~refresh =
   end
 
 (* The newest turns of the Keeper the Story window draws. The window follows
-   the cursor, so a read for another Keeper replaces the one held: the answer
-   to the replaced one is dropped when it lands. *)
+   the cursor, so asking for a Keeper other than the one held starts a read for
+   it and the held turns are no longer drawn. The caller asks for none while a
+   read for another Keeper is on the wire: see [launch_owed_keeper_story_turns]. *)
 let launch_keeper_story_turns_load state ~mailbox ~keeper_name ~refresh =
   if server_authority_ready state then begin
     let current = Masc_tui_fetched.current_key state.keeper_story_turns in

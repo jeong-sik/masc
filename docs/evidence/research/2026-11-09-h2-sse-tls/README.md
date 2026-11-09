@@ -22,14 +22,14 @@
 
 | 기록 | 끝난 시각 | 탐침 | 결과 | 내용 |
 | --- | --- | --- | --- | --- |
-| run1 | 02:27:58 | `h2_sse_leak_probe.py` | `run1-runs.json`, `run1-samples.jsonl` | TLS h2 연결 하나에서 SSE 스트림 11,910개를 열고 RST_STREAM 으로 끊음. TLS 연결 200개 절단, TLS 포트에 평문 200번, 끝에 GET 300번. 시나리오 사이마다 `/health` 와 descriptor 표본 |
+| run1 | 02:27:58 | `h2_sse_leak_probe.py` | `run1-runs.json`, `run1-samples.jsonl` | SSE 스트림을 열고 RST_STREAM 으로 끊음: TLS h2 연결 하나에서 9,660개, h2c 연결 하나에서 2,250개. TLS 연결 200개 절단, TLS 포트에 평문 200번, 끝에 GET 300번. 시나리오 사이마다 `/health` 와 descriptor 표본 |
 | run2 | 02:31:23 | `h1_sse_leak_probe.py` | `run2-h1.log` | HTTP/1.1 fleet 2,000 연결, 로그 스트림 2,000 연결. 표준 출력을 그대로 남김 |
 | run3 | 02:37:10 | `tls_cipher_probe.py` | `run3-tls.json` | suite 하나로 묶은 `openssl s_client` 로 번들 60개 파이프라인. 모든 suite 를 낼 때 서버가 고른 suite, handshake 30번 |
 | run4 | 02:39:54 | `tls_cpu_probe.py`, `tls_client.py` | `run4-tls-cpu.json` | suite 별 처리량과 서버 CPU(ms/MB), 연결 1개·4개, 3회 중앙값 |
 | run5 | 02:41:17 | `ledger_starvation_probe.py` | `run5-ledger.json` | 느린 클라이언트가 번들 스트림 90개를 쥐는 동안 다른 연결의 번들·`/health` |
 | run6 | 03:20:18 | `h2_stall_probe.py` | `run6-stall.json` | 창 0 을 알린 연결에서 로그 스트림 3개, 105 s 기다린 뒤 창을 엶 |
-| 벤치 run1 | 03:05:18 | `tls-write-bench/harness.py` | `tls-write-bench/run1.jsonl` | 소켓 3종 × suite 2종 × 쓰기 크기 2종, 3회 중앙값 |
-| 벤치 run2 | 03:09:07 | `tls-write-bench/harness2.py` | `tls-write-bench/run2.jsonl` | 소켓 5종 × suite 2종 × 쓰기 크기 2종, 5회 중앙값 |
+| 벤치 run1 | 03:05:18 | `tls-write-bench/harness.py` | `tls-write-bench/run1.jsonl` | 소켓 3종 × suite 2종 × 쓰기 크기 2종. 한 연결은 3회 중앙값, 4연결은 동시 실행 1회 |
+| 벤치 run2 | 03:09:07 | `tls-write-bench/harness2.py` | `tls-write-bench/run2.jsonl` | 소켓 5종 × suite 2종 × 쓰기 크기 2종. 한 연결은 5회 중앙값, 4연결은 동시 실행 1회 |
 
 `summarize.py` 는 run1 의 출력 디렉터리를 표로 바꾼다. run3 의 macOS `sample` 프로파일 두 개는 호스트 경로가 들어 있고 문서가 쓰지 않아서 남기지 않았다.
 
@@ -50,6 +50,7 @@ python3 summarize.py <h2_sse_leak_probe 의 --out dir>
 - `--repo` 는 `scripts/harness/perf/http_multiplex_probe.py` 를 가진 masc 트리다.
 - `--assets` 는 `dashboard/assets/index-*.js` 를 가진 asset 루트다. `OwnedServer` 가 `MASC_ASSETS_DIR` 로 넘긴다.
 - `tls_cpu_probe.py` 는 클라이언트를 `/opt/homebrew/bin/python3` 로 띄운다. 다른 호스트에서는 그 경로를 바꾼다.
+- `tls_cipher_probe.py` 는 PATH 의 `openssl` 을 부른다. OpenSSL 의 `openssl` 이 PATH 에서 먼저 와야 한다. macOS 의 `/usr/bin/openssl` 은 LibreSSL 3.3.6 이고, 그 `s_client` 에는 `-ciphersuites` 가 없다.
 - run5 와 run6 는 각각 `h2_sse_leak_probe.py` 의 `H2Conn` 을 가져다 쓴다. 같은 디렉터리에 둔다.
 
 TLS 벤치는 이 묶음 밖의 빈 디렉터리로 복사해서 빌드한다. 저장소의 dune 이 `docs/` 의 빌드 파일을 읽지 않도록, 아래 dune 파일은 묶음에 넣지 않았다.
@@ -74,6 +75,8 @@ dune build ./bench_server.exe ./accel/accel.exe
 ./_build/default/accel/accel.exe        # 빈 줄이면 mirage-crypto 가속 없음
 python3 harness2.py > run2.jsonl
 ```
+
+`-O3` 는 flambda 컴파일러에서만 뜻이 있다. 벤치를 빌드한 5.5.1 switch 는 flambda 가 아니다(`ocamlfind ocamlopt -config` 의 `flambda: false`). 그래서 이 플래그는 결과에 아무 영향이 없다. 돌린 그대로 남겼다.
 
 `bench_server` 의 소켓 종류는 이렇다.
 

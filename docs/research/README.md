@@ -12,6 +12,7 @@ See the [storage guide](../guides/WORKSPACE-STORAGE.md) for output locations.
 | — | [Vibe Code official-client lane — research (2026-11-07)](vibe-official-client-lane-20261107.md) |
 | — | [TUI frame cost and terminal output: prior art and what applies to masc](tui-frame-cost-and-terminal-output-prior-art-20261104.md) |
 | — | [Extreme TUI/server performance: measured baseline and next decisions](extreme-performance-20261030.md) |
+| 2026-11-09 | [Librarian 이 한 번 받은 지시를 상시 제약으로 굳힐 때: 사례, 글 4편·논문 19편 대조, 선택지 (r1)](2026-11-09-librarian-scoped-instruction-stale-constraint-r1.md) |
 | 2026-11-09 | [librarian 이 지식마다 맞는 fact 하나를 남기는가 — 남는 기억으로 다시 잰 값, 운영 사실, 프롬프트 충돌](2026-11-09-librarian-keeps-one-correct-fact.md) |
 | 2026-11-07 | [Tinker·Inkling 2 Small: exact 레인 실측과 학습으로 갈 수 있는 범위](2026-11-07-tinker-inkling-exact-lane-feasibility.md) |
 | 2026-11-07 | [HTTP 전송 스택 조사: masc 가 OCaml 생태계에서 HTTP/1.1·HTTP/2·TLS 를 어디까지 쓸 수 있나](2026-11-07-http-transport-stack.md) |

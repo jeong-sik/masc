@@ -93,6 +93,7 @@ let make_tool_bundle_for_descriptors_with_policy
       ?composition_plan_index
       ?skill_activation_context
       ?composition_result_delivery
+      ?on_inline_receipt_committed
       ?(allow_unrecorded_skill_surface = false)
       ?turn_ctx_cell
       ?capability_surface
@@ -636,6 +637,7 @@ let make_tool_bundle_for_descriptors_with_policy
     in
     let tools = make_composition_tools
         ?result_delivery:composition_result_delivery
+        ?on_inline_receipt_committed
         ~instruction_skills
         ~skill_compositions:composition_skills
         ?composition_plan_index
@@ -953,6 +955,7 @@ let make_tool_bundle_for_capability_surface
       ?composition_plan_index
       ?skill_activation_context
       ?composition_result_delivery
+      ?on_inline_receipt_committed
       ?turn_ctx_cell
       ?checkpoint_owner
       ?tool_result_inline_ceiling_bytes
@@ -974,6 +977,7 @@ let make_tool_bundle_for_capability_surface
     ?composition_plan_index
     ?skill_activation_context
     ?composition_result_delivery
+    ?on_inline_receipt_committed
     ~allow_unrecorded_skill_surface:false
     ?turn_ctx_cell
     ?checkpoint_owner

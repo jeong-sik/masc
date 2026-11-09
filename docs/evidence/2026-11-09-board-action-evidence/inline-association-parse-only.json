@@ -1,0 +1,75 @@
+{
+  "recorded_at": "2026-11-09T14:09:34.654510+00:00",
+  "compiler": "5.5.1",
+  "target_compiler": "5.5.2",
+  "check": "ocamlc -stop-after parsing only",
+  "results": [
+    {
+      "file": "lib/keeper/keeper_run_tools_hook_accumulator.mli",
+      "exit_code": 0,
+      "sha256": "0b35ec59ba9d00d7701523c987ff58d906291ddef7735a51faba6fa0d9c41343"
+    },
+    {
+      "file": "lib/keeper/keeper_run_tools.mli",
+      "exit_code": 0,
+      "sha256": "a2abcd9b2a6f9c7f2eba2c9048d635f9a7e5c30fb508813e58e59491fe4a8edd"
+    },
+    {
+      "file": "lib/keeper/keeper_tools_agent_core_bundle.mli",
+      "exit_code": 0,
+      "sha256": "dcc72f5f7bcd83a48cf06a53f6a65702ca39bbe49f18d9d0e6efc46d6264bf65"
+    },
+    {
+      "file": "lib/keeper/keeper_tool_composition_surface_tools.mli",
+      "exit_code": 0,
+      "sha256": "a86b6342097c552217a8d70ec59c323001d69fc8d42cda06bcc808c2bbbb2d7d"
+    },
+    {
+      "file": "lib/keeper/keeper_tool_composition_surface.mli",
+      "exit_code": 0,
+      "sha256": "6d66e4f177159f832e8138cde7f575d0018185f11f8b314bf88a56639af7b263"
+    },
+    {
+      "file": "lib/keeper/keeper_run_tools_hook_accumulator.ml",
+      "exit_code": 0,
+      "sha256": "0b6a3c784bef5a5aa62e556678a796d98bf37333e95b2be6e16615fa1f99ccea"
+    },
+    {
+      "file": "lib/keeper/keeper_run_tools.ml",
+      "exit_code": 0,
+      "sha256": "df09d589eb95ff23f44335165397af1b3d82c55d8edcddffe5d741ac7db2957d"
+    },
+    {
+      "file": "lib/keeper/keeper_tools_agent_core_bundle.ml",
+      "exit_code": 0,
+      "sha256": "68904786cee9fe39964dd68b05b6af33832e17815b465f0069c41cbc404be6a0"
+    },
+    {
+      "file": "lib/keeper/keeper_tool_composition_surface_tools.ml",
+      "exit_code": 0,
+      "sha256": "aa62e7c54c59c61513e7c83286b3cd49873ab8dc615d235daf9918aa36108901"
+    },
+    {
+      "file": "lib/keeper/keeper_run_tools_setup.ml",
+      "exit_code": 0,
+      "sha256": "f67f0b451e1bed14dbfcb3a2715067927707843d7264d93c198508266b2201e6"
+    },
+    {
+      "file": "lib/keeper/keeper_agent_run.ml",
+      "exit_code": 0,
+      "sha256": "c649fe22baa34b7be009bce2eb04e2c9a82b8fbd8833cc79c7e110c1477d7b3d"
+    },
+    {
+      "file": "test/test_keeper_tool_dispatch_runtime.ml",
+      "exit_code": 0,
+      "sha256": "eb4c0fd25f226e5a5d25919147fb564a1be67cb88b5c0ee3168db8650c63f6e9"
+    }
+  ],
+  "test_execution": "not run",
+  "typecheck_or_build": "not run",
+  "limits": [
+    "Installed compiler 5.5.1; required target 5.5.2 remains unverified.",
+    "No OCaml test execution, Dune, CI, runtime operations, Git commit or push.",
+    "Parent-owned concurrent documentation changes excluded from this parse scope."
+  ]
+}

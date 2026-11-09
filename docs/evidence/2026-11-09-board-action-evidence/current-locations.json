@@ -1,0 +1,163 @@
+{
+  "schema": "masc.evidence.current-locations.v1",
+  "purpose": "Locate unchanged synthetic Chromium captures and exact capture-time source blobs for #26034.",
+  "paths_relative_to": "repository_root",
+  "recorded_manifest": {
+    "path": "captured-sha256.json",
+    "sha256": "66c8a488ffeed36eec0de5b57a7c367776d5b4d5b2af77d007ecc029839d31d8"
+  },
+  "files": {
+    "docs/evidence/2026-11-09-board-action-evidence/observed.png": {
+      "recorded_path": "artifacts/issue-campaign-20261109/26034-browser/observed.png",
+      "recorded_sha256": "71394ca4cda060775a6d21f4cf62c94374d1c1bab56d5ff0844bca90484c7471",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/2026-11-09-board-action-evidence/observed.json": {
+      "recorded_path": "artifacts/issue-campaign-20261109/26034-browser/observed.json",
+      "recorded_sha256": "4c3997df0947c6725f09234bea7b94bb8c9659f28ec486ff0eef884cfba00078",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/2026-11-09-board-action-evidence/denied.png": {
+      "recorded_path": "artifacts/issue-campaign-20261109/26034-browser/denied.png",
+      "recorded_sha256": "9d72409bf9a6743f6d3712cba5fc1e4859b1dc4bd4b4a1f5c2b661872c00298c",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/2026-11-09-board-action-evidence/denied.json": {
+      "recorded_path": "artifacts/issue-campaign-20261109/26034-browser/denied.json",
+      "recorded_sha256": "182a9c91149727ed022795438e61d46369b16223db1e841011557763ca4fa3d2",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/2026-11-09-board-action-evidence/duplicate.png": {
+      "recorded_path": "artifacts/issue-campaign-20261109/26034-browser/duplicate.png",
+      "recorded_sha256": "eddb9abb85f46cdbaa3b82704e9c4a9fa2d7d6bb5002d6f5e52d62820f097e37",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/2026-11-09-board-action-evidence/duplicate.json": {
+      "recorded_path": "artifacts/issue-campaign-20261109/26034-browser/duplicate.json",
+      "recorded_sha256": "c13ec4da6c30f5a13f85b41af43459548e566215a789a706c8a5edd32468300c",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/2026-11-09-board-action-evidence/navigation.json": {
+      "recorded_path": "artifacts/issue-campaign-20261109/26034-browser/navigation.json",
+      "recorded_sha256": "1d734d74a84d1e894d38f37b65e8994b89d8fd493acf2fc662b093d4d0684320",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/2026-11-09-board-action-evidence/fixture.ts": {
+      "recorded_path": "artifacts/issue-campaign-20261109/26034-browser/fixture.ts",
+      "recorded_sha256": "9f894876ad5e22920cace37407ddccfafd9c1fb64e3b4ec814f7184f04d17127",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/2026-11-09-board-action-evidence/index.html": {
+      "recorded_path": "artifacts/issue-campaign-20261109/26034-browser/index.html",
+      "recorded_sha256": "30ce6ef47162dfd335d492b241ed8d23ea9c9c88417ab363d211097306ae8be5",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/2026-11-09-board-action-evidence/styles.ts": {
+      "recorded_path": "artifacts/issue-campaign-20261109/26034-browser/styles.ts",
+      "recorded_sha256": "d5db3c79bfb45e8670410416d37bd2729b492cee6e3bf11e977ee9d78715c6de",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/2026-11-09-board-action-evidence/tailwind.css": {
+      "recorded_path": "artifacts/issue-campaign-20261109/26034-browser/tailwind.css",
+      "recorded_sha256": "54ac6c6c8184cc16a2ef1a5f9c60a2fff0b43d1c963fd318bce4740eb14e6238",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/2026-11-09-board-action-evidence/vite.config.mjs": {
+      "recorded_path": "artifacts/issue-campaign-20261109/26034-browser/vite.config.mjs",
+      "recorded_sha256": "c78c9ddebd33a6b4e84cbf2b883363a1cec1540d13b88709b36b3d73f9b7b44b",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/2026-11-09-board-action-evidence/capture-manifest.json": {
+      "recorded_path": "artifacts/issue-campaign-20261109/26034-browser/capture-manifest.json",
+      "recorded_sha256": "1cd99850627f102ac8500a93563757a75dbde17684901279c892d81d7e49c7c1",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/2026-11-09-board-action-evidence/frontend-tests.txt": {
+      "recorded_path": "artifacts/issue-campaign-20261109/issue-26034-applied-r5-tests.log",
+      "recorded_sha256": "5dd1b15418c5385f141f2ed8f05e635fe6cfdc79a2f28d83368fbdba26a076d9",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/2026-11-09-board-action-evidence/backend-parse-only.json": {
+      "recorded_path": "artifacts/issue-campaign-20261109/issue-26034-backend-precommit.json",
+      "recorded_sha256": "c08ebcd51829e6b2d3e8d60575eae3cea857c1dde057b7d41eebd57fdd6fd316",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/2026-11-09-board-action-evidence/backend-postrebase-source.json": {
+      "recorded_path": "artifacts/issue-campaign-20261109/issue-26034-backend-postrebase-source.json",
+      "recorded_sha256": "eb5f7f65da56aabafc600c5f17aa9a6e017429befac3b828fc8d01faf9c06bf9",
+      "content_kind": "retained_capture"
+    }
+  },
+  "historical_records": [
+    {
+      "recorded_path": "dashboard/src/api/dashboard-keeper-tool-calls.ts",
+      "recorded_sha256": "efd89358ea456e4825d99350b0a2db3f2868e9fd6e32c9dfa0bffaaf0cfb287a",
+      "location": {
+        "kind": "git_blob",
+        "commit": "cbd4d82af44b6a90f187c59e2a759a72b8ab0e4c",
+        "path": "dashboard/src/api/dashboard-keeper-tool-calls.ts",
+        "url": "https://github.com/jeong-sik/masc/blob/cbd4d82af44b6a90f187c59e2a759a72b8ab0e4c/dashboard/src/api/dashboard-keeper-tool-calls.ts"
+      }
+    },
+    {
+      "recorded_path": "dashboard/src/components/keeper-turn-flow.ts",
+      "recorded_sha256": "42604b1e77f180c54cfe0f72e732fa728b83c517a4ba4b5ea75b2479bf3f0de4",
+      "location": {
+        "kind": "git_blob",
+        "commit": "cbd4d82af44b6a90f187c59e2a759a72b8ab0e4c",
+        "path": "dashboard/src/components/keeper-turn-flow.ts",
+        "url": "https://github.com/jeong-sik/masc/blob/cbd4d82af44b6a90f187c59e2a759a72b8ab0e4c/dashboard/src/components/keeper-turn-flow.ts"
+      }
+    },
+    {
+      "recorded_path": "dashboard/src/components/common/route-link.ts",
+      "recorded_sha256": "713acd076ca18eef5aa0f2e099b6d6e9878c5d57854e6fd33039b039b294fa11",
+      "location": {
+        "kind": "git_blob",
+        "commit": "cbd4d82af44b6a90f187c59e2a759a72b8ab0e4c",
+        "path": "dashboard/src/components/common/route-link.ts",
+        "url": "https://github.com/jeong-sik/masc/blob/cbd4d82af44b6a90f187c59e2a759a72b8ab0e4c/dashboard/src/components/common/route-link.ts"
+      }
+    },
+    {
+      "recorded_path": "dashboard/src/components/board/board-route.ts",
+      "recorded_sha256": "78b0d74988ca0e7697d45478938251fffe3ecc4028f7f5067f794b63c9404c97",
+      "location": {
+        "kind": "git_blob",
+        "commit": "cbd4d82af44b6a90f187c59e2a759a72b8ab0e4c",
+        "path": "dashboard/src/components/board/board-route.ts",
+        "url": "https://github.com/jeong-sik/masc/blob/cbd4d82af44b6a90f187c59e2a759a72b8ab0e4c/dashboard/src/components/board/board-route.ts"
+      }
+    },
+    {
+      "recorded_path": "dashboard/src/api/keeper-turn-flow.ts",
+      "recorded_sha256": "73d1f7d9f44fecb63f535252673733bae6812b81e99c5322fac903b32bcc4e9e",
+      "location": {
+        "kind": "git_blob",
+        "commit": "cbd4d82af44b6a90f187c59e2a759a72b8ab0e4c",
+        "path": "dashboard/src/api/keeper-turn-flow.ts",
+        "url": "https://github.com/jeong-sik/masc/blob/cbd4d82af44b6a90f187c59e2a759a72b8ab0e4c/dashboard/src/api/keeper-turn-flow.ts"
+      }
+    },
+    {
+      "recorded_path": "dashboard/src/api/keeper-turn-source-outcomes.ts",
+      "recorded_sha256": "278ad964a43bd65b905768086c27963409f9a7173b3ba392dbd89fbbfed24f5c",
+      "location": {
+        "kind": "git_blob",
+        "commit": "cbd4d82af44b6a90f187c59e2a759a72b8ab0e4c",
+        "path": "dashboard/src/api/keeper-turn-source-outcomes.ts",
+        "url": "https://github.com/jeong-sik/masc/blob/cbd4d82af44b6a90f187c59e2a759a72b8ab0e4c/dashboard/src/api/keeper-turn-source-outcomes.ts"
+      }
+    },
+    {
+      "recorded_path": "dashboard/src/api/keeper-physical-skill-evidence.ts",
+      "recorded_sha256": "b1e34f2be3191acf07c7c94abe9c85d71741c9a4147facb2423e8448f7599b48",
+      "location": {
+        "kind": "git_blob",
+        "commit": "cbd4d82af44b6a90f187c59e2a759a72b8ab0e4c",
+        "path": "dashboard/src/api/keeper-physical-skill-evidence.ts",
+        "url": "https://github.com/jeong-sik/masc/blob/cbd4d82af44b6a90f187c59e2a759a72b8ab0e4c/dashboard/src/api/keeper-physical-skill-evidence.ts"
+      }
+    }
+  ]
+}

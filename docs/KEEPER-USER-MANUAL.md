@@ -873,11 +873,20 @@ absolute turn together — rather than joining nearby timestamps.
   snapshot references, admission revisions and first-admission clocks. This
   records intake. Queue outcomes are joined from the reaction ledger by the
   exact stimulus ID, snapshot reference and admission revision. The view keeps
-  completed-turn ACK, failed-attempt ACK, cancellation and transfer distinct.
+  completed-turn ACK, Fusion/HITL terminal ACK, cancellation and transfer distinct.
   It shows when the ledger was read and any damaged rows or storage failures.
   No matching receipt means only that none was observed in that read; it does
   not establish current queue status. An ACK is not proof of PR approval or
   another business result. Conflicting receipts remain unresolved.
+- **Board comments and reactions** links the writer-recorded comment, parent
+  reply and reaction target, including reaction removal. It reads the selected
+  turn's exact executions, including committed inline Skill children, beyond
+  the recent-call window and requires the
+  existing Admin permission for raw tool records. These are same-turn actions;
+  they do not establish which input caused each action. Missing or malformed
+  facts, including older records without this evidence, remain unconfirmed.
+  No-action intent is not inferred from missing writes. Async work completed
+  after the turn is not backfilled into that finished turn's actions.
 - **Runtime choices** shows the same turn's manifest events and recorded routing
   reasons. Multiple starts remain ambiguous; incomplete or damaged scans cannot
   establish that a start was unique.

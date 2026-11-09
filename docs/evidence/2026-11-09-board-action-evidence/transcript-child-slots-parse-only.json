@@ -1,0 +1,27 @@
+{
+  "base_head": "20f5de3e695cd82e446c7f037fe2ec827c7dfbf8",
+  "compiler": "5.5.1",
+  "scope": "parse_only",
+  "typecheck": false,
+  "test_execution": false,
+  "results": [
+    {
+      "file": "lib/keeper/keeper_autonomous_turn_source.mli",
+      "exit_code": 0,
+      "diagnostic": "",
+      "sha256": "f412d1716814bc972e1c39c47d7992e9e1460da676aa181ceffe242ec985bb61"
+    },
+    {
+      "file": "lib/keeper/keeper_autonomous_turn_source.ml",
+      "exit_code": 0,
+      "diagnostic": "",
+      "sha256": "0cc1476d84c6be945f474d3aab0bed39af8642185d24057cf498aee80a138f17"
+    },
+    {
+      "file": "test/test_keeper_autonomous_turn_source.ml",
+      "exit_code": 0,
+      "diagnostic": "",
+      "sha256": "4fedd4b9c01054c518c7edde1a30900cd5764a52ad4eabd84fe1516d2c21c782"
+    }
+  ]
+}

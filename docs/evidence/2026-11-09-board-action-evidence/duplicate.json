@@ -1,0 +1,36 @@
+{
+  "body": "KEEPER 턴 · 입력과 실행\n\nSynthetic fixture · duplicate · 실제 컴포넌트, 가상 HTTP 응답\n\nfixture-trace#7\n\n입력 자극\n\n선택 채널: reactive · 2개\n\n처리 원장 조회 2026. 11. 9. 오후 10:30:00 · 2행 읽음 · 손상 0행\n\n종류\nboard_signal\n자극 ID\nboard-input-1\n원본 참조\nsha256:1111111111111111111111111111111111111111111111111111111111111111\n선택 버전\n1\n최초 선택\n2026-11-09T13:28:20.000Z\n큐 처리\n일치하는 처리 기록 관측 없음. 현재 대기 상태인지는 확정할 수 없습니다.\n종류\nboard_signal\n자극 ID\nboard-input-2\n원본 참조\nsha256:2222222222222222222222222222222222222222222222222222222222222222\n선택 버전\n2\n최초 선택\n2026-11-09T13:28:20.000Z\n큐 처리\n일치하는 처리 기록 관측 없음. 현재 대기 상태인지는 확정할 수 없습니다.\n\nACK는 큐 처리 기록입니다. 실제 요청 전송과 PR 승인 같은 업무 결과는 해당 증거에서 확인하세요.\n\n같은 턴의 BOARD 댓글·반응\n\n같은 턴에 기록된 행동입니다. 각 입력 자극에 대한 응답인지는 확정하지 않습니다.\n\n정확한 턴·실행 기록 미확인 1개\n\nfixture-trace#7 · fixture-reaction-remove\n\n반응 제거 · 👍 · fixture-reviewer\n\nBoard 글 p-fixture\n댓글 c-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n\n도구 응답 ok · 처리 상태 completed\n\nfixture-trace#7 · fixture-reaction-add\n\n반응 추가 · 🎉 · fixture-reviewer\n\nBoard 글 p-other\n\n도구 응답 ok · 처리 상태 completed\n\n기록이 없으면 댓글·반응 여부와 무응답 이유를 알 수 없습니다.\n\n프롬프트와 실제 입력\n\n이 턴의 프롬프트 블록 0개. 요청 캡처의 메시지와 도구 스키마를 같은 턴 기준으로 확인합니다.\n\n실제 메시지 열기\nSYSTEM·도구 스키마 열기\n런타임 선택과 진행\n\n반환 1행 / 관측 1행 · ok\n\n지원하지 않는 행 0개 · 손상 행 0개\n\nturn_started · ok\n\n모델 내부 판단은 추정하지 않습니다. 여기에는 런타임이 기록한 선택과 실행 경계만 표시합니다.\n\nSKILL 호출과 사용\n\n보존된 모든 원장 확인 · trace 0개 조회 · 원장 0개 읽음\n\n이 턴의 호출 0개 · 이 턴에서 받은 비동기 결과 0개 · 비동기 결과 사용 0건 · 인과 연결 0개\n\n도구 실행 결과\n\n이 턴의 실행 ID 3개 · 최근 도구 목록에서 일치 1개\n\nmasc_board_comment · error · fixture-comment\n최근 목록에 실행 상세 없음 · fixture-reaction-remove\n최근 목록에 실행 상세 없음 · fixture-reaction-add\n\n도구 반환 상태입니다. PR 승인·병합 같은 외부 결과의 성공을 대신하지 않습니다.",
+  "board": "같은 턴의 Board 댓글·반응같은 턴에 기록된 행동입니다. 각 입력 자극에 대한 응답인지는 확정하지 않습니다.정확한 턴·실행 기록 미확인 1개fixture-trace#7 · fixture-reaction-remove반응 제거 · 👍 · fixture-reviewerBoard 글 p-fixture댓글 c-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa도구 응답 ok · 처리 상태 completedfixture-trace#7 · fixture-reaction-add반응 추가 · 🎉 · fixture-reviewerBoard 글 p-other도구 응답 ok · 처리 상태 completed기록이 없으면 댓글·반응 여부와 무응답 이유를 알 수 없습니다.",
+  "links": [
+    {
+      "text": "Board 글 p-fixture",
+      "href": "#workspace?section=board&post=p-fixture"
+    },
+    {
+      "text": "댓글 c-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "href": "#workspace?section=board&post=p-fixture&comment=c-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+      "text": "Board 글 p-other",
+      "href": "#workspace?section=board&post=p-other"
+    }
+  ],
+  "requests": [
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/fixture-reviewer/tool-calls?execution_ids=%5B%22fixture-comment%22%2C%22fixture-reaction-remove%22%2C%22fixture-reaction-add%22%5D",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/fixture-reviewer/runtime-trace?trace_id=fixture-trace&turn_id=7&limit=500",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/dashboard/skill-activations/physical-turn?turn_ref=fixture-trace%237",
+      "status": 200
+    }
+  ],
+  "failures": []
+}

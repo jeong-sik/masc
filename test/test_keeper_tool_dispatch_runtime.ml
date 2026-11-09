@@ -8196,6 +8196,162 @@ let test_terminal_composition_unknown_write_failure_closes_official_client_loop 
               fail "official-client provider loop remained open after unknown effect"))
 ;;
 
+let test_inline_board_children_join_only_their_committed_turn () =
+  let module Acc = Masc.Keeper_run_tools_hook_accumulator in
+  let module Call_log = Masc.Keeper_tool_call_log in
+  let module Context = Masc.Keeper_tool_call_log_context in
+  with_exec_fixture ~always_allow:true "inline-board-turn-association"
+    (fun ~config ~meta ~publication_recovery ~ctx_work ->
+       Mirage_crypto_rng_unix.use_default ();
+       Masc.Board_dispatch.reset_for_test ();
+       Masc.Board.reset_global_for_test ();
+       Call_log.reset_for_testing ();
+       Fun.protect ~finally:(fun () ->
+         Call_log.reset_for_testing ();
+         Masc.Board_dispatch.reset_for_test ();
+         Masc.Board.reset_global_for_test ()) @@ fun () ->
+       (match Masc.Board_dispatch.init_jsonl ~base_path:config.base_path
+           ~recipient_lookup:Masc_board_handlers.Recipient_lookup.none_declared () with
+        | Ok () -> () | Error detail -> fail detail);
+       (match Masc.Keeper_gate_mode.set config ~actor:"composition-test"
+           Masc.Keeper_gate_mode.Always_allow with
+        | Ok _ -> () | Error detail -> fail detail);
+       Call_log.init ~base_path:config.base_path ();
+       let post = Board_tool.handle_tool
+           ~reader:Masc_board_handlers.Board_access.Operator
+           ~result_boundary:Tool_output.Sent_to_client "masc_board_post"
+           (`Assoc ["author", `String meta.name; "content", `String "Inline child target"]) in
+       check bool "the real Board target was created" true (Tool_result.is_success post);
+       let post_id = Yojson.Safe.Util.(Tool_result.data post |> member "id" |> to_string) in
+       let declaration = Printf.sprintf {|[[compositions]]
+name = "board-turn-proof"
+execution = "inline"
+[[compositions.params]]
+name = "content"
+type = "string"
+description = "The comment to commit."
+[[compositions.nodes]]
+id = "comment"
+tool = "masc_board_comment"
+[compositions.nodes.input]
+kind = "object"
+[[compositions.nodes.input.fields]]
+name = "post_id"
+[compositions.nodes.input.fields.value]
+kind = "literal"
+value = %S
+[[compositions.nodes.input.fields]]
+name = "content"
+[compositions.nodes.input.fields.value]
+kind = "param"
+name = "content"
+|} post_id in
+       let snapshot, skill_catalog = skill_catalog_with_snapshot_of_composition
+           ~name:"board-turn-proof" declaration in
+       let capability_surface = Masc.Keeper_capability_surface.create
+           ~tool_deny:[] ~sandbox_profile:meta.sandbox_profile ~skill_names:None
+           ~global_skill_catalog:skill_catalog
+           ~skill_inventory:(Masc.Keeper_skill_inventory.of_snapshot snapshot) ~task_skills:[] in
+       let task_selection = Masc.Keeper_task_skill_turn.resolve ~snapshot []
+           |> function Ok value -> value | Error error ->
+             fail (Masc.Keeper_task_skill_turn.error_to_string error) in
+       let absolute_turn = 13 in
+       let trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
+       let skill_activation_context = Masc.Keeper_skill_activation_recorder.make
+           ~keeper_name:meta.name ~trace_id:meta.runtime.trace_id
+           ~turn_ref:(Ids.Turn_ref.make ~trace_id ~absolute_turn)
+           ~runtime_id:(fun () -> Some "inline-board.fixture")
+           ~snapshot_revision:(Skill_catalog_snapshot.snapshot_revision snapshot)
+           ~task_selection
+           |> function Ok value -> value | Error error ->
+             fail (Masc.Keeper_skill_activation_recorder.error_to_string error) in
+       let acc = Acc.create ~meta ~tool_surface:
+           { turn_lane = Masc.Keeper_agent_tool_surface.Lane_text_only
+           ; config_root = "inline-board.fixture"; runtime_config_path = None } in
+       let collect = Acc.record_inline_receipt_committed acc ~keeper_turn_id:absolute_turn in
+       let callbacks_rev = ref [] in
+       let on_inline_receipt_committed ~keeper_name ~turn_context execution_id =
+         let row = tool_call_rows ~keeper_name () |> List.find_opt (fun row ->
+           Yojson.Safe.Util.(row |> member "execution_id") = Ids.Execution_id.to_yojson execution_id)
+           |> function Some row -> row | None ->
+             fail "the canonical child row is not readable before its callback" in
+         check string "the real child carries its committed Board fact" "comment_added"
+           Yojson.Safe.Util.(row |> member "board_action_evidence" |> member "kind" |> to_string);
+         check string "the committed fact links the real Board target" post_id
+           Yojson.Safe.Util.(row |> member "board_action_evidence" |> member "post_id" |> to_string);
+         callbacks_rev := execution_id :: !callbacks_rev;
+         collect ~keeper_name ~turn_context execution_id in
+       let turn_ctx_cell = Context.create_cell () in
+       let source ~trace_id ~keeper_turn_id = Context.set_turn_context ~cell:turn_ctx_cell
+           ~agent_name:meta.name ~trace_id ~keeper_turn_id ~turn:7 () in
+       source ~trace_id ~keeper_turn_id:absolute_turn;
+       let bundle = Masc.Keeper_tools_agent_core_bundle.make_tool_bundle_for_capability_surface
+           ~config ~meta ~publication_recovery ~ctx_snapshot:ctx_work ~capability_surface
+           ~skill_activation_context ~turn_ctx_cell ~on_inline_receipt_committed () in
+       Fun.protect ~finally:bundle.cleanup @@ fun () ->
+       let tool = match find_tool_by_name bundle.tools "keeper_compose_board-turn-proof" with
+         | Some tool -> tool | None -> fail "the named inline Board Skill is missing" in
+       let invoke content = Agent_core.Tool.execute
+           ~invocation:(composition_invocation
+             ~completion:Agent_core.Tool_contract.Continue_after_success)
+           tool (`Assoc ["content", `String content]) in
+       let run content =
+         (match invoke content with Ok _ -> () | Error error -> fail error.Agent_core.Types.message);
+         match !callbacks_rev with
+         | id :: _ -> id | [] -> fail "inline child commit was not observed" in
+       let first = run "owner first" in
+       source ~trace_id:"foreign-inline-trace" ~keeper_turn_id:absolute_turn;
+       let foreign_trace = run "foreign trace" in
+       source ~trace_id ~keeper_turn_id:(absolute_turn + 1);
+       let foreign_turn = run "foreign absolute turn" in
+       source ~trace_id ~keeper_turn_id:absolute_turn;
+       let second = run "owner second" in
+       collect ~keeper_name:"foreign-keeper"
+         ~turn_context:(Context.get_turn_context_record ~cell:turn_ctx_cell ()) foreign_trace;
+       check int "all four real inline child rows committed" 4 (List.length !callbacks_rev);
+       Call_log.reset_for_testing ();
+       ignore (invoke "no committed tool-call row");
+       check int "a missing log commit never reaches the collector" 4 (List.length !callbacks_rev);
+       let outer = Ids.Execution_id.generate () in
+       let execution_ids = Acc.take_execution_ids acc
+           ~trajectory_execution_ids:[outer; first; outer] in
+       let strings = List.map Ids.Execution_id.to_string in
+       check (list string) "stable union keeps only the exact owner's committed children"
+         (strings [outer; first; second]) (strings execution_ids);
+       check bool "foreign trace excluded" false (List.exists (Ids.Execution_id.equal foreign_trace) execution_ids);
+       check bool "foreign absolute turn excluded" false (List.exists (Ids.Execution_id.equal foreign_turn) execution_ids);
+       Masc.Keeper_turn_record_writer.write ~config ~keeper_name:meta.name ~agent_name:meta.name
+         ~turn_kind:Turn_record.Autonomous ~trace_id ~absolute_turn ~runtime_profile:"fixture"
+         ~selected_model:None ~finish_reason:None ~context_window:None
+         ~price_input_per_million:None ~price_output_per_million:None
+         ~request_latency_ms:None ~ttfrc_ms:None ~request_wire_observation:None
+         ~model_input_window:None ~response_observed_model_input:None ~raw_trace_run_ref:None
+         ~request_observations:[]
+         ~sampling:{temperature=None;top_p=None;max_tokens=None;enable_thinking=None}
+         ~usage:{input_tokens=None;output_tokens=None;cache_creation_input_tokens=None;
+           cache_read_input_tokens=None;scope=Runtime_usage_scope.Usage_scope_unavailable;input_provenance=None}
+         ~turn_output_tokens:None ~execution_ids ~blocks:[] ~input_components:None ~tool_surface_ref:None ();
+       let location = Dated_jsonl.Store.keeper (Workspace.dated_store_root config)
+           ~keeper:meta.name Dated_jsonl.Store.Keeper.Turn_records in
+       let stored = match Dated_jsonl.read_recent_result (Dated_jsonl.open_store location) 1 with
+         | Ok entries -> entries | Error _ -> fail "the owning TurnRecord is unreadable" in
+       let json = match stored with
+         | [entry] ->
+           (match entry with
+            | Dated_jsonl.Parsed json -> json
+            | Dated_jsonl.Malformed_json _ -> fail "the owning TurnRecord is malformed")
+         | [] | _ :: _ -> fail "the owning TurnRecord was not persisted" in
+       let record = match Turn_record.of_json json with
+         | Ok record -> record | Error detail -> fail detail in
+       check (list string) "the persisted TurnRecord contains the actual child execution IDs"
+         (strings execution_ids) (strings record.execution_ids);
+       Call_log.init ~base_path:config.base_path ();
+       ignore (run "committed after collector sealed");
+       check int "a later row really committed" 5 (List.length !callbacks_rev);
+       check (list string) "a sealed turn cannot adopt a later receipt" []
+         (Acc.take_execution_ids acc ~trajectory_execution_ids:[] |> strings))
+;;
+
 let test_write_then_unchanged_read_completes () =
   with_exec_fixture "composition-conditional-read-completion"
     (fun ~config ~meta ~publication_recovery ~ctx_work ->
@@ -10783,6 +10939,8 @@ let () =
         test_terminal_composition_unknown_write_failure_closes_official_client_loop;
       test_case "write then unchanged read completes" `Quick
         test_write_then_unchanged_read_completes;
+      test_case "inline Board children join only their committed owning turn" `Quick
+        test_inline_board_children_join_only_their_committed_turn;
       test_case "async composition binds params into durable status" `Quick
         test_async_composition_binds_params_into_durable_status;
       test_case "named submission crash before broker entry stays fail-closed" `Quick

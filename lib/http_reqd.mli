@@ -70,11 +70,11 @@ val try_respond_with_string : t -> Httpun.Response.t -> string -> acceptance
     logged once (debug for the late-response shapes {!Late_response} knows,
     warn with a backtrace for anything else) and reported as
     [Rejected_by_writer]. On HTTP/2 the body is reserved in the ledger first;
-    when the capacity is exhausted or the request is already closed, the
-    client gets an empty 503 [no-store] that keeps the response's other
-    headers, and the result is [Rejected_by_writer]. An HTTP/2 stream that is
-    already over (see {!respond_with_streaming}) gets no response, and the
-    result is [Rejected_by_writer]. [Eio.Cancel.Cancelled] passes through. *)
+    when the capacity is exhausted, the client gets an empty 503 [no-store]
+    that keeps the response's other headers, and the result is
+    [Rejected_by_writer]. An HTTP/2 stream that is already over (see
+    {!respond_with_streaming}) gets no response, and the result is
+    [Rejected_by_writer]. [Eio.Cancel.Cancelled] passes through. *)
 
 val respond_with_string : t -> Httpun.Response.t -> string -> unit
 (** {!try_respond_with_string} for a caller that does not record acceptance.
@@ -104,7 +104,8 @@ module Body_writer : sig
       ends first (peer reset) answers that wait and the writer closes. *)
 
   val is_closed : t -> bool
-  (** On HTTP/2 also true once the stream's switch ended. *)
+  (** On HTTP/2 also true once the stream is over: its switch failed or
+      ended, or an error was reported on it. *)
 
   val stream_end : t -> unit Eio.Promise.t option
   (** On HTTP/2, resolved once the stream's switch ended: the peer reset the
@@ -125,8 +126,9 @@ val respond_with_streaming
     answers [`Closed] and {!Body_writer.stream_end} is resolved. Otherwise
     raises what the transport library raises when the request can no longer
     take a response: [Failure] from either, and on HTTP/2 [Assert_failure]
-    for a stream h2 reset on its own whose RST_STREAM has not left the socket
-    yet (RFC-0518 D1). *)
+    for a stream h2 already closed while the stream's switch is still open.
+    That is a stream h2 reset on its own whose RST_STREAM has not left the
+    socket yet (RFC-0518 D1), or one whose response already ended. *)
 
 (** Why a request body was not delivered. *)
 type body_read_error =

@@ -1,6 +1,14 @@
 (** Pure activity, grouping, and ordering decisions for the Keepers list. *)
 
-type view = Plain | By_state | By_cause | By_runtime | Day_wall
+type view =
+  | Plain
+  | By_state
+  | By_cause
+  | By_time
+  | By_memory
+  | By_age
+  | By_runtime
+  | Day_wall
 (** How the Keepers list groups its rows (RFC-0515 §2.3). [Plain] and
     [Day_wall] do not group; [Day_wall] puts the rows with the most failed
     half-hours of the last day first. *)
@@ -159,12 +167,46 @@ type runtime_bucket =
   | Runtime_named of string  (** The roster row's current runtime id. *)
   | Runtime_unread  (** The roster did not read this Keeper. *)
 
+type due =
+  | Due_late  (** A due run has not started. *)
+  | Due_held  (** The schedule runner holds the next run. *)
+  | Due_within_hour
+  | Due_within_half_day
+  | Due_later
+  | Due_none  (** No active schedule. *)
+  | Due_unknown  (** The schedules were not read, or the next time is unknown. *)
+
+type memory_follow =
+  | Memory_refused  (** The memory reading refused this Keeper. *)
+  | Memory_gap  (** The librarian stalled on a gap. *)
+  | Memory_lagging  (** Turns the librarian has not read yet. *)
+  | Memory_following
+  | Memory_unread  (** No memory reading for this Keeper. *)
+
+type memory_age =
+  | Age_within_3h
+  | Age_within_day
+  | Age_within_3d
+  | Age_older
+  | Age_unknown  (** No snapshot update time. *)
+
+type outside = { due : due; follow : memory_follow; age : memory_age }
+(** The readings a row does not carry: the next scheduled run and the memory
+    snapshot. A caller that sees the schedules and memory health reduces them
+    to these closed values. *)
+
+val outside_unread : outside
+(** Every value unknown, for a caller that has not read them. *)
+
 type group =
   | Group_state of attention
   | Group_cause of cause_bucket
+  | Group_due of due
+  | Group_memory of memory_follow
+  | Group_age of memory_age
   | Group_runtime of runtime_bucket
 
-val group_of_view : view -> row -> group option
+val group_of_view : outside:(keeper_name:string -> outside) -> view -> row -> group option
 (** The heading [row] sits under in [view]; [None] for a view that does not
     group. {!order_rows} keeps the rows of one group next to each other. *)
 
@@ -176,7 +218,9 @@ val order_clock_step : view -> float option
 (** How often, in seconds, the clock alone can change the order of [view];
     [None] when only the readings change it. *)
 
-val order_rows : view:view -> sort:sort -> now:float -> row list -> row list
+val order_rows :
+  view:view -> sort:sort -> now:float -> outside:(keeper_name:string -> outside) ->
+  row list -> row list
 (** The groups of [view] in a fixed order, and [sort] within each group.
     [Day_wall] orders by {!failed_half_hours}, most first, rows without a
     pulse last. The same order is used for drawing, navigation, and search. *)

@@ -1,4 +1,13 @@
-type view = Plain | By_state | By_cause | By_runtime | Day_wall
+type view =
+  | Plain
+  | By_state
+  | By_cause
+  | By_time
+  | By_memory
+  | By_age
+  | By_runtime
+  | Day_wall
+
 type density = One_line | Two_lines
 type sort = Priority | Recent | Oldest | Activity | Name
 type attention = Attention | Failing | Active | Waiting | Inactive | Unobserved
@@ -94,7 +103,10 @@ type row = {
 let next_view = function
   | Plain -> By_state
   | By_state -> By_cause
-  | By_cause -> By_runtime
+  | By_cause -> By_time
+  | By_time -> By_memory
+  | By_memory -> By_age
+  | By_age -> By_runtime
   | By_runtime -> Day_wall
   | Day_wall -> Plain
 
@@ -102,6 +114,9 @@ let view_label = function
   | Plain -> "list"
   | By_state -> "state"
   | By_cause -> "cause"
+  | By_time -> "time"
+  | By_memory -> "memory"
+  | By_age -> "age"
   | By_runtime -> "runtime"
   | Day_wall -> "24h"
 
@@ -109,6 +124,9 @@ let view_of_string = function
   | "list" -> Some Plain
   | "state" -> Some By_state
   | "cause" -> Some By_cause
+  | "time" -> Some By_time
+  | "memory" -> Some By_memory
+  | "age" -> Some By_age
   | "runtime" -> Some By_runtime
   | "24h" -> Some Day_wall
   | _ -> None
@@ -353,9 +371,39 @@ type runtime_bucket =
   | Runtime_named of string
   | Runtime_unread
 
+type due =
+  | Due_late
+  | Due_held
+  | Due_within_hour
+  | Due_within_half_day
+  | Due_later
+  | Due_none
+  | Due_unknown
+
+type memory_follow =
+  | Memory_refused
+  | Memory_gap
+  | Memory_lagging
+  | Memory_following
+  | Memory_unread
+
+type memory_age =
+  | Age_within_3h
+  | Age_within_day
+  | Age_within_3d
+  | Age_older
+  | Age_unknown
+
+type outside = { due : due; follow : memory_follow; age : memory_age }
+
+let outside_unread = { due = Due_unknown; follow = Memory_unread; age = Age_unknown }
+
 type group =
   | Group_state of attention
   | Group_cause of cause_bucket
+  | Group_due of due
+  | Group_memory of memory_follow
+  | Group_age of memory_age
   | Group_runtime of runtime_bucket
 
 let cause_bucket_of_row row =
@@ -375,11 +423,16 @@ let runtime_bucket_of_row row =
   | Some runtime -> Runtime_named runtime.Masc.Tui_decode.kr_runtime_id
   | None -> Runtime_unread
 
-let group_of_view view row =
+let keeper_name_of_row row = row.keeper.Masc.Tui_decode.k_name
+
+let group_of_view ~outside view row =
   match view with
   | Plain | Day_wall -> None
   | By_state -> Some (Group_state (group_of_row row))
   | By_cause -> Some (Group_cause (cause_bucket_of_row row))
+  | By_time -> Some (Group_due (outside ~keeper_name:(keeper_name_of_row row)).due)
+  | By_memory -> Some (Group_memory (outside ~keeper_name:(keeper_name_of_row row)).follow)
+  | By_age -> Some (Group_age (outside ~keeper_name:(keeper_name_of_row row)).age)
   | By_runtime -> Some (Group_runtime (runtime_bucket_of_row row))
 
 let failed_half_hours ~now row =
@@ -396,9 +449,11 @@ let failed_half_hours ~now row =
                pulse.slots))
         runtime.Masc.Tui_decode.kr_recent_turns
 
-(* A slot leaves the last day once every half hour. *)
+(* A slot leaves the last day once every half hour; a due time and a
+   snapshot age cross their bounds by the minute. *)
 let order_clock_step = function
-  | Plain | By_state | By_cause | By_runtime -> None
+  | Plain | By_state | By_cause | By_memory | By_runtime -> None
+  | By_time | By_age -> Some 60.
   | Day_wall -> Some (float_of_int Masc.Keeper_turn_pulse.slot_seconds)
 
 let cause_rank = function
@@ -418,13 +473,39 @@ let cause_rank = function
   | Cause_unnamed -> 11
   | Not_failing -> 12
 
+let due_rank = function
+  | Due_late -> 0
+  | Due_held -> 1
+  | Due_within_hour -> 2
+  | Due_within_half_day -> 3
+  | Due_later -> 4
+  | Due_none -> 5
+  | Due_unknown -> 6
+
+let follow_rank = function
+  | Memory_refused -> 0
+  | Memory_gap -> 1
+  | Memory_lagging -> 2
+  | Memory_following -> 3
+  | Memory_unread -> 4
+
+let age_rank = function
+  | Age_within_3h -> 0
+  | Age_within_day -> 1
+  | Age_within_3d -> 2
+  | Age_older -> 3
+  | Age_unknown -> 4
+
 (* What a view orders by before [sort]: a rank, then a name for the groups
    that are named by the reading itself. *)
-let view_key ~now view ranked =
+let view_key ~now ~outside view ranked =
   match view with
   | Plain -> 0, ""
   | By_state -> attention_rank ranked.group, ""
   | By_cause -> cause_rank (cause_bucket_of_row ranked.row), ""
+  | By_time -> due_rank (outside ~keeper_name:(keeper_name_of_row ranked.row)).due, ""
+  | By_memory -> follow_rank (outside ~keeper_name:(keeper_name_of_row ranked.row)).follow, ""
+  | By_age -> age_rank (outside ~keeper_name:(keeper_name_of_row ranked.row)).age, ""
   | By_runtime ->
       (match runtime_bucket_of_row ranked.row with
        | Runtime_named runtime_id -> 0, runtime_id
@@ -450,8 +531,8 @@ let compare_sorted sort left right =
       let order = Int.compare (attention_rank left.group) (attention_rank right.group) in
       if order = 0 then compare_recent left.row right.row else order
 
-let order_rows ~view ~sort ~now rows =
-  List.map (fun row -> let ranked = rank row in ranked, view_key ~now view ranked) rows
+let order_rows ~view ~sort ~now ~outside rows =
+  List.map (fun row -> let ranked = rank row in ranked, view_key ~now ~outside view ranked) rows
   |> List.stable_sort (fun (left, left_key) (right, right_key) ->
     let order = compare_view_key left_key right_key in
     if order <> 0 then order else compare_sorted sort left right)

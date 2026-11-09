@@ -130,7 +130,11 @@ let preparing = turn Masc.Keeper_turn_preview.Preparing
 let model_waiting = turn Masc.Keeper_turn_preview.Awaiting_response
 let tool_waiting = turn Masc.Keeper_turn_preview.Tool_observed
 
-let views = [ Model.Plain; Model.By_state; Model.By_cause; Model.By_runtime; Model.Day_wall ]
+let views =
+  [ Model.Plain; Model.By_state; Model.By_cause; Model.By_time; Model.By_memory; Model.By_age
+  ; Model.By_runtime; Model.Day_wall ]
+
+let unread ~keeper_name:_ = Model.outside_unread
 
 let test_cycles () =
   Alcotest.(check (list string)) "v walks the views in the RFC order and comes back"
@@ -173,7 +177,7 @@ let test_priority_orders_attention_activity_waiting_then_inactive () =
   in
   Alcotest.(check (list string)) "attention, failing, activity, waiting, inactive"
     [ "held"; "question"; "failure"; "async"; "stream"; "delegate"; "model"; "verify"; "idle"; "paused"; "unknown" ]
-    (names (Model.order_rows ~view:Model.Plain ~now:0. ~sort:Model.Priority rows))
+    (names (Model.order_rows ~outside:unread ~view:Model.Plain ~now:0. ~sort:Model.Priority rows))
 
 let test_recent_and_name_have_deterministic_ties () =
   let rows =
@@ -184,12 +188,12 @@ let test_recent_and_name_have_deterministic_ties () =
     ]
   in
   Alcotest.(check (list string)) "recent descending, name tie, unknown last"
-    [ "alpha"; "beta"; "old"; "unknown" ] (names (Model.order_rows ~view:Model.Plain ~now:0. ~sort:Model.Recent rows));
+    [ "alpha"; "beta"; "old"; "unknown" ] (names (Model.order_rows ~outside:unread ~view:Model.Plain ~now:0. ~sort:Model.Recent rows));
   Alcotest.(check (list string)) "name ignores activity"
-    [ "alpha"; "beta"; "old"; "unknown" ] (names (Model.order_rows ~view:Model.Plain ~now:0. ~sort:Model.Name rows));
+    [ "alpha"; "beta"; "old"; "unknown" ] (names (Model.order_rows ~outside:unread ~view:Model.Plain ~now:0. ~sort:Model.Name rows));
   let duplicates = [ row ~last_activity_at:(Some 10.) "same-a"; row ~last_activity_at:(Some 10.) "same-b" ] in
   Alcotest.(check (list string)) "identical sort keys remain stable"
-    [ "same-a"; "same-b" ] (names (Model.order_rows ~view:Model.Plain ~now:0. ~sort:Model.Recent duplicates))
+    [ "same-a"; "same-b" ] (names (Model.order_rows ~outside:unread ~view:Model.Plain ~now:0. ~sort:Model.Recent duplicates))
 
 let with_runtime_id runtime_id (runtime : Decode.keeper_runtime) = { runtime with kr_runtime_id = runtime_id }
 
@@ -204,26 +208,26 @@ let test_runtime_view_groups_by_runtime_id () =
   in
   Alcotest.(check (list string)) "runtime ids in order, then the unread row"
     [ "a1"; "b1"; "b2"; "unread" ]
-    (names (Model.order_rows ~view:Model.By_runtime ~sort:Model.Name ~now:0. rows));
+    (names (Model.order_rows ~outside:unread ~view:Model.By_runtime ~sort:Model.Name ~now:0. rows));
   Alcotest.(check bool) "a read row is grouped by its runtime id" true
-    (Model.group_of_view Model.By_runtime (List.hd rows)
+    (Model.group_of_view ~outside:unread Model.By_runtime (List.hd rows)
      = Some (Model.Group_runtime (Model.Runtime_named "b.runtime")));
   Alcotest.(check bool) "an unread row has its own group" true
-    (Model.group_of_view Model.By_runtime (List.nth rows 1)
+    (Model.group_of_view ~outside:unread Model.By_runtime (List.nth rows 1)
      = Some (Model.Group_runtime Model.Runtime_unread));
   Alcotest.(check bool) "the plain list does not group" true
-    (Model.group_of_view Model.Plain (List.hd rows) = None)
+    (Model.group_of_view ~outside:unread Model.Plain (List.hd rows) = None)
 
 let test_cause_view_puts_failing_rows_first () =
   let rows = [ row ~health:(health "healthy") "sound"; row ~health:(health "failing") "failing" ] in
   Alcotest.(check (list string)) "a failing row before a sound one"
     [ "failing"; "sound" ]
-    (names (Model.order_rows ~view:Model.By_cause ~sort:Model.Name ~now:0. rows));
+    (names (Model.order_rows ~outside:unread ~view:Model.By_cause ~sort:Model.Name ~now:0. rows));
   Alcotest.(check bool) "a failure with no receipt names no cause" true
-    (Model.group_of_view Model.By_cause (List.nth rows 1)
+    (Model.group_of_view ~outside:unread Model.By_cause (List.nth rows 1)
      = Some (Model.Group_cause Model.Cause_unnamed));
   Alcotest.(check bool) "a sound row is not failing" true
-    (Model.group_of_view Model.By_cause (List.hd rows) = Some (Model.Group_cause Model.Not_failing))
+    (Model.group_of_view ~outside:unread Model.By_cause (List.hd rows) = Some (Model.Group_cause Model.Not_failing))
 
 let day = float_of_int Masc.Keeper_turn_pulse.window_seconds
 let slot_seconds = Masc.Keeper_turn_pulse.slot_seconds
@@ -252,13 +256,52 @@ let test_day_wall_puts_the_most_failed_half_hours_first () =
     (List.map (Model.failed_half_hours ~now) rows);
   Alcotest.(check (list string)) "most failed first, rows without a pulse last"
     [ "two"; "one"; "older"; "no-pulse" ]
-    (names (Model.order_rows ~view:Model.Day_wall ~sort:Model.Name ~now rows));
+    (names (Model.order_rows ~outside:unread ~view:Model.Day_wall ~sort:Model.Name ~now rows));
   Alcotest.(check bool) "the day wall does not group" true
-    (Model.group_of_view Model.Day_wall (List.hd rows) = None);
+    (Model.group_of_view ~outside:unread Model.Day_wall (List.hd rows) = None);
   Alcotest.(check bool) "the day wall can reorder every half hour" true
     (Model.order_clock_step Model.Day_wall = Some (float_of_int slot_seconds));
   Alcotest.(check bool) "the state view only reorders on new readings" true
     (Model.order_clock_step Model.By_state = None)
+
+let reading_by_name readings ~keeper_name =
+  match List.assoc_opt keeper_name readings with
+  | Some reading -> reading
+  | None -> Model.outside_unread
+
+let test_time_memory_and_age_views_follow_the_outside_reading () =
+  let rows = List.map (fun keeper_name -> row keeper_name) [ "a"; "b"; "c"; "d"; "e" ] in
+  let read field values =
+    reading_by_name (List.map2 (fun r value -> name r, field value) rows values)
+  in
+  let due =
+    read (fun due -> { Model.outside_unread with Model.due })
+      [ Model.Due_unknown; Model.Due_none; Model.Due_later; Model.Due_within_hour; Model.Due_late ]
+  in
+  Alcotest.(check (list string)) "late first, an unknown time last"
+    [ "e"; "d"; "c"; "b"; "a" ]
+    (names (Model.order_rows ~outside:due ~view:Model.By_time ~sort:Model.Name ~now rows));
+  Alcotest.(check bool) "a late row heads the late group" true
+    (Model.group_of_view ~outside:due Model.By_time (List.nth rows 4)
+     = Some (Model.Group_due Model.Due_late));
+  let follow =
+    read (fun follow -> { Model.outside_unread with Model.follow })
+      [ Model.Memory_unread; Model.Memory_following; Model.Memory_lagging; Model.Memory_gap
+      ; Model.Memory_refused ]
+  in
+  Alcotest.(check (list string)) "a refused reading first, then gap, lag, following, unread"
+    [ "e"; "d"; "c"; "b"; "a" ]
+    (names (Model.order_rows ~outside:follow ~view:Model.By_memory ~sort:Model.Name ~now rows));
+  let age =
+    read (fun age -> { Model.outside_unread with Model.age })
+      [ Model.Age_unknown; Model.Age_older; Model.Age_within_3d; Model.Age_within_day
+      ; Model.Age_within_3h ]
+  in
+  Alcotest.(check (list string)) "the latest update first, an unknown age last"
+    [ "e"; "d"; "c"; "b"; "a" ]
+    (names (Model.order_rows ~outside:age ~view:Model.By_age ~sort:Model.Name ~now rows));
+  Alcotest.(check bool) "the time view reorders by the minute" true
+    (Model.order_clock_step Model.By_time = Some 60.)
 
 let test_streaming_keeps_async_and_schedule_badges () =
   let value =
@@ -544,5 +587,7 @@ let () =
             test_cause_view_puts_failing_rows_first
         ; Alcotest.test_case "day wall puts the most failed half-hours first" `Quick
             test_day_wall_puts_the_most_failed_half_hours_first
+        ; Alcotest.test_case "time, memory and age views follow the outside reading" `Quick
+            test_time_memory_and_age_views_follow_the_outside_reading
         ] )
     ]

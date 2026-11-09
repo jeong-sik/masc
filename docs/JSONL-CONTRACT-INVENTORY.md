@@ -7,8 +7,8 @@ Scope: current JSONL writer substrates and store inventory under `<base-path>/.m
 
 | Substrate | Current contract | Used for | Evidence |
 | --- | --- | --- | --- |
-| `Fs_compat.append_jsonl` | Creates parent dir, serializes appends through a per-path `Stdlib.Mutex`, opens a fresh fd per call, writes `json + "\n"`, closes fd. No fsync. | Single-file append stores and `Dated_jsonl` day files. | `lib/fs_compat/fs_compat.ml` |
-| `Fs_compat.append_file` | Shares the same per-path mutex registry as `append_jsonl`, but accepts raw string content. | Board posts/comments/votes, keeper single-file logs via support helpers. | `lib/fs_compat/fs_compat.ml`, `lib/keeper/keeper_types_support.ml` |
+| `Fs_compat.append_jsonl` | Creates parent dir, serializes appends through a per-path `Stdlib.Mutex`, opens a fresh fd per call, writes `json + "\n"`, closes fd. No fsync. | Single-file append stores and `Dated_jsonl` day files. | `lib/fs_compat/fs_compat_private_file_update.ml` |
+| `Fs_compat.append_file` | Shares the same per-path mutex registry as `append_jsonl`, but accepts raw string content. | Board posts/comments/votes, keeper single-file logs via support helpers. | `lib/fs_compat/fs_compat_owned_file.ml`, `lib/keeper/keeper_types_support.ml` |
 | `Dated_jsonl` & `Dated_jsonl.Store` | Date-split `base_dir/YYYY-MM/DD.jsonl`, base-dir mutex registry, append guard hook, recent/range reads, malformed JSON read skip. Appends delegate to `Fs_compat.append_jsonl`. `Dated_jsonl.Store` registers date-sharded stores so the daily maintenance loop prunes them under a single `MASC_JSONL_RETENTION_DAYS` (`[maintenance] jsonl_retention_days`, default `30` days) policy. | Audit, telemetry, tool usage, keeper receipts, tool calls, runtime events, gate events, verifications, board dated posts, activity graph. | `lib/dated_jsonl/dated_jsonl.ml` |
 | `Keeper_types_support.append_jsonl_line` | Optional size rotation, UTF-8 repair, then raw `Fs_compat.append_file`. | Keeper memory/decision/policy/feedback/manifest single-file logs. | `lib/keeper/keeper_types_support.ml` |
 

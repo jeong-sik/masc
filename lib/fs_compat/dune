@@ -76,6 +76,7 @@
   fs_compat_owned_inventory
   fs_compat_owned_reader
   fs_compat_path_ops
+  fs_compat_private_file_update
   fs_compat_private_jsonl_read
   fs_compat_private_jsonl_transaction
   fs_compat_private_jsonl_write)

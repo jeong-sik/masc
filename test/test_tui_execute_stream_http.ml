@@ -933,6 +933,7 @@ let test_standalone_observer_delivers_waiting_inventory_changes env =
   let module Transport = Server_mcp_transport_http in
   with_standalone_observer_server env (fun ~workspace ~state ~token ~sw ~clock ~port ->
     let profiles_before = Server_mcp_transport_http_session.For_testing.profile_count () in
+    let clients_before = (Atomic.get Masc.Sse.clients).entries in
     let response, publish_response = Eio.Promise.create () in
     let received, publish_received = Eio.Promise.create () in
     let ended, publish_ended = Eio.Promise.create () in
@@ -955,10 +956,16 @@ let test_standalone_observer_delivers_waiting_inventory_changes env =
     let await promise = Eio.Time.with_timeout_exn clock 3. (fun () -> Eio.Promise.await promise) in
     let status, response_headers = await response in
     Alcotest.(check int) "fresh observer opens without initialize or a session cookie" 200 status;
-    let header name = List.find_map (fun (key, value) ->
-      if String.equal (String.lowercase_ascii key) name then Some value else None) response_headers in
-    let session_id = match header "mcp-session-id" with
-      | Some value -> value | None -> Alcotest.fail "fresh observer has no connection id" in
+    (* The standalone connection id is internal; find this fixture's new
+       registration in the registry for the existing lifecycle assertions. *)
+    let authority = Masc.Sse.runtime_authority_exn ~base_path:workspace in
+    let session_ids = (Atomic.get Masc.Sse.clients).entries |> Masc.Sse.SMap.bindings
+      |> List.filter_map (fun (id, (client : Masc.Sse.client)) ->
+        if not (Masc.Sse.SMap.mem id clients_before)
+           && Masc.Sse.equal_runtime_authority authority client.runtime_authority
+        then Some id else None) in
+    let session_id = match session_ids with
+      | [id] -> id | _ -> Alcotest.fail "fresh observer has no unique registration" in
     Fun.protect
       ~finally:(fun () -> Eio.Cancel.protect (fun () -> Transport.stop_sse_session session_id))
       (fun () ->
@@ -1003,6 +1010,61 @@ let test_standalone_observer_delivers_waiting_inventory_changes env =
           (Masc.Sse.exists session_id)))
 ;;
 
+(* Reproduce a browser's cookie jar and a client that returns the MCP header.
+   Each request uses exactly the identifier the first response supplied. *)
+let test_standalone_observer_reconnects_with_response_identifiers env =
+  let module Transport = Server_mcp_transport_http in
+  with_standalone_observer_server env (fun ~workspace ~state:_ ~token ~sw ~clock ~port ->
+    let before = (Atomic.get Masc.Sse.clients).entries in
+    let authority = Masc.Sse.runtime_authority_exn ~base_path:workspace in
+    let pending = ref [] in
+    let await promise = Eio.Time.with_timeout_exn clock 3. (fun () -> Eio.Promise.await promise) in
+    let url = Printf.sprintf "http://127.0.0.1:%d/mcp?sse_kind=observer" port in
+    (* This legacy revision emits session identifiers before the fix. *)
+    let legacy_version = "2025-03-26" in
+    let base_headers = ["Accept", "text/event-stream"; "Authorization", "Bearer " ^ token;
+                        "Mcp-Protocol-Version", legacy_version] in
+    let open_stream extra_headers =
+      let response, publish_response = Eio.Promise.create () in
+      let ended, publish_ended = Eio.Promise.create () in
+      pending := ended :: !pending;
+      Eio.Fiber.fork ~sw (fun () ->
+        let result = Masc_http_client.get_stream ~clock ~idle_timeout_sec:3. ~url
+            ~headers:(extra_headers @ base_headers)
+            ~on_response:(fun ~status ~headers ->
+              ignore (Eio.Promise.try_resolve publish_response (status, headers)))
+            ~on_chunk:ignore () in
+        Eio.Promise.resolve publish_ended result);
+      await response
+    in
+    Fun.protect
+      ~finally:(fun () -> Eio.Cancel.protect (fun () ->
+        let entries = (Atomic.get Masc.Sse.clients).entries in
+        Masc.Sse.SMap.iter (fun id (client : Masc.Sse.client) ->
+          if not (Masc.Sse.SMap.mem id before)
+             && Masc.Sse.equal_runtime_authority authority client.runtime_authority
+          then Transport.stop_sse_session id) entries;
+        List.iter (fun ended -> ignore (await ended)) !pending))
+      (fun () ->
+        let status, headers = open_stream [] in
+        Alcotest.(check int) "initial standalone observer opens" 200 status;
+        let header name = List.find_map (fun (key, value) ->
+          if String.equal (String.lowercase_ascii key) name then Some value else None) headers in
+        Alcotest.(check (option string)) "observer uses the legacy protocol"
+          (Some legacy_version) (header "mcp-protocol-version");
+        let cookie = Option.map (fun value ->
+          match String.split_on_char ';' value with first :: _ -> first | [] -> value)
+          (header "set-cookie") in
+        let session_id = header "mcp-session-id" in
+        let returned name = function Some value -> [name, value] | None -> [] in
+        let cookie_status, _ = open_stream (returned "Cookie" cookie) in
+        Alcotest.(check int) "reconnect with the response cookie" 200 cookie_status;
+        let header_status, _ = open_stream (returned "Mcp-Session-Id" session_id) in
+        Alcotest.(check int) "reconnect with the response session header" 200 header_status;
+        Alcotest.(check (option string)) "standalone response has no session cookie" None cookie;
+        Alcotest.(check (option string)) "standalone response has no MCP session id" None session_id))
+;;
+
 let test_standalone_observer_keeps_auth_and_supplied_session_checks env =
   with_standalone_observer_server env (fun ~workspace:_ ~state:_ ~token ~sw:_ ~clock ~port ->
     let client_count = Masc.Sse.client_count () in
@@ -1013,6 +1075,8 @@ let test_standalone_observer_keeps_auth_and_supplied_session_checks env =
       ; "forged credential", "/mcp?sse_kind=observer", ["Authorization", "Bearer forged"], 401
       ; "supplied unknown observer id", "/mcp?sse_kind=observer",
           ("Mcp-Session-Id", supplied_id) :: bearer, 404
+      ; "supplied unknown observer cookie", "/mcp?sse_kind=observer",
+          ("Cookie", "mcp-session-id=" ^ supplied_id) :: bearer, 404
       ; "agent stream without initialize", "/mcp", bearer, 404
       ] in
     List.iter (fun (label, target, credentials, expected_status) ->
@@ -1803,6 +1867,8 @@ let () =
     ; ( "observer replay"
       , [ case "standalone Observer delivers a waiting invalidation and inventory read"
             test_standalone_observer_delivers_waiting_inventory_changes
+        ; case "standalone Observer reconnects with response identifiers"
+            test_standalone_observer_reconnects_with_response_identifiers
         ; case "standalone Observer keeps auth and supplied-session checks"
             test_standalone_observer_keeps_auth_and_supplied_session_checks
         ; case "invalid handshake is not opened or read" test_observer_rejects_bad_replay_before_delivering_bytes

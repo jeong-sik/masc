@@ -24,8 +24,3 @@ let gate_enabled gate ~(global : flags) ~(meta : flags) =
   | Reactive -> global.reactive && meta.reactive
   | Proactive -> global.proactive && meta.proactive
   | Autonomous -> global.autonomous && meta.autonomous
-
-let gate_to_string = function
-  | Reactive -> "reactive"
-  | Proactive -> "proactive"
-  | Autonomous -> "autonomous"

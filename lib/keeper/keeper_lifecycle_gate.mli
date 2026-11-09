@@ -34,7 +34,3 @@ val all_enabled : flags
     per-keeper flag for [g] are [true]. Exhaustive over [gate]: adding a
     variant fails compilation until it is wired here. *)
 val gate_enabled : gate -> global:flags -> meta:flags -> bool
-
-(** Canonical lowercase label (["reactive"], …). Used in WARN/metric
-    labels so operators can attribute a suppressed activity to its gate. *)
-val gate_to_string : gate -> string

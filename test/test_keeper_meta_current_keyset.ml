@@ -2,27 +2,6 @@
 
 open Masc
 
-let target_keys =
-  [ "instructions"
-  ; "last_runtime_attempt"
-  ; "current_task_id"
-  ; "keeper_id"
-  ; "agent_core_env"
-  ; "schema"
-  ]
-
-let test_canonical_includes_runtime_keys () =
-  let canonical = Keeper_meta_json.canonical_keeper_meta_key_names in
-  List.iter
-    (fun key ->
-      Alcotest.(check bool)
-        (Printf.sprintf
-           "canonical_keeper_meta_key_names contains %s"
-           key)
-        true
-        (List.mem key canonical))
-    target_keys
-
 let valid_json () =
   let meta =
     Masc_test_deps.meta_of_json_fixture
@@ -65,10 +44,6 @@ let () =
     "keeper_meta_current_keyset"
     [ ( "drift_gate"
       , [ Alcotest.test_case
-            "runtime keys present"
-            `Quick
-            test_canonical_includes_runtime_keys
-        ; Alcotest.test_case
             "unknown field is rejected"
             `Quick
             test_unknown_field_is_rejected

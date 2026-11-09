@@ -342,19 +342,13 @@ let output_config_for_config _mode (config : Provider_config.t) =
   | _ :: _ -> Some (`Assoc (List.rev fields))
 ;;
 
-(* Anthropic and OpenAI-compatible request envelopes have different field
-   names, but the optional-envelope output-budget policy (caller override
-   clamped to the ceiling, omission on [None]) is owned by the OpenAI
-   request module so the high-level Agent API and the standalone backend
-   cannot drift. *)
-let effective_max_output_tokens = Backend_openai_request.effective_max_output_tokens
-
 (* The Messages API requires [max_tokens] on every request, so this wire
    cannot express omission the way the optional-field envelopes do (#2517).
    Explicit required-envelope policy, distinct from the optional-envelope
-   resolver above:
+   policy that [Backend_openai_request.output_token_receipt] applies to the
+   other wires:
    - caller [Some n] -> clamped to the catalog ceiling with a one-shot
-     WARN (shared clamp semantics via [effective_max_output_tokens]).
+     WARN (the clamp is [Backend_openai_request.output_token_receipt]'s).
    - caller [None] -> the model-catalog maximum or the caller's declared
      capability-override maximum. This is AGENT_CORE's explicit required-envelope
      fallback, not a claim that the provider supplies that value as its
@@ -373,7 +367,7 @@ let required_output_token_receipt (config : Provider_config.t) =
 let required_output_token_error_message (config : Provider_config.t) = function
   | Types.Required_output_token_ceiling_missing ->
     Printf.sprintf
-      "Backend_anthropic.required_max_output_tokens: model %s declares no \
+      "Backend_anthropic.required_output_token_receipt: model %s declares no \
        max_output_tokens and the caller passed none; the Anthropic Messages API requires \
        max_tokens — declare max_output_tokens in the model catalog, provide an explicit \
        capability override, or pass ~max_tokens"
@@ -386,12 +380,6 @@ let required_output_token_value receipt =
   | None ->
     invalid_arg
       "Backend_anthropic: required output-token receipt has no effective wire value"
-;;
-
-let required_max_output_tokens config =
-  match required_output_token_receipt config with
-  | Ok receipt -> required_output_token_value receipt
-  | Error error -> invalid_arg (required_output_token_error_message config error)
 ;;
 
 (** Build Anthropic Messages API request body from {!Provider_config.t}.

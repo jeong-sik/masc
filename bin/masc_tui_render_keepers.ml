@@ -1230,6 +1230,7 @@ let keeper_story_lines (state : state) ~now ~inner (row : Keeper_list_model.row)
   in
   let past_entries =
     (match past_parts with [] -> [] | _ -> [ join past_parts ])
+    @ Option.to_list (Masc_tui_render_keeper_story.last_wake_entry state ~now ~keeper_name)
     @ Option.to_list
         (Option.map
            (fun sentence -> Theme.warn () ^ sentence ^ Ansi.reset)

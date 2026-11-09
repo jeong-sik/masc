@@ -430,6 +430,34 @@ let test_schedule_responses_follow_keeper_and_generation () =
       kspr_navigation = true; kspr_scroll = 0 } (Ok (snapshot 5));
   check (option int) "chat may accept a shared navigation to the first page" (Some 5)
     (Option.bind state.keeper_schedules (fun (_, page) -> page.scs_request_count));
+  (* A pane's read is settled by an answer that is what the pane draws: the
+     Story window draws the first page of the cursor's Keeper, the Automation
+     tab the page it asked for. Another page stored for the window's Keeper is
+     not what it owed, and a navigation answer outside the tab reaches no pane. *)
+  let selected_name () =
+    match Option.map (fun (keeper : Types.keeper) -> keeper.k_name) (Types.selected_keeper state) with
+    | Some name -> name
+    | None -> fail "the cursor names no Keeper" in
+  let settles ?(navigation = false) name page =
+    Types.keeper_schedules_answer_settles state
+      ({ kspr_detail = ask name; kspr_page = page; kspr_navigation = navigation;
+         kspr_scroll = 0 } : Types.keeper_schedule_page_request) in
+  state.view <- Types.Keepers Types.Keeper_list;
+  let window_keeper = selected_name () in
+  check bool "the window's first page settles its read" true
+    (settles window_keeper Types.schedule_first_page);
+  check bool "another page of the window's Keeper settles nothing" false
+    (settles window_keeper page2);
+  check bool "a navigation answer outside the tab reaches no pane" false
+    (settles ~navigation:true window_keeper Types.schedule_first_page);
+  state.view <- Types.Keepers Types.Keeper_detail;
+  state.detail_tab <- Types.Detail_automation;
+  state.detail_scroll <- 0;
+  let tab_keeper = selected_name () in
+  check bool "the tab takes the page it asked for" true (settles tab_keeper page2);
+  check bool "an answer for a Keeper the tab does not draw settles nothing" false
+    (settles (if String.equal tab_keeper "alpha" then "beta" else "alpha")
+       Types.schedule_first_page);
   state.view <- Types.Schedules;
   state.schedules <- Some first;
   state.schedules_page <- Types.schedule_first_page;

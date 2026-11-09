@@ -4533,6 +4533,16 @@
  (libraries alcotest masc_tui_keeper_story))
 
 (test
+ (name test_tui_keeper_last_wake)
+ (modules test_tui_keeper_last_wake)
+ (libraries
+  alcotest
+  masc
+  masc.masc_schedule
+  masc_tui_types
+  masc_tui_keeper_last_wake))
+
+(test
  (name test_tui_keeper_age_ladder)
  (modules test_tui_keeper_age_ladder)
  (libraries

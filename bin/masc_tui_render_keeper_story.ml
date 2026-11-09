@@ -4,12 +4,13 @@ module Message_layout = Masc_tui_message_layout
 module Story = Masc_tui_keeper_story
 module Memory_reading = Masc_tui_keeper_memory_reading
 
-(* The window is a rule, a title and up to six lines. The list keeps four rows
+(* The window is a rule, a title and up to seven lines: the story page of a
+   failing Keeper with a last wake is that long. The list keeps four rows
    whenever the window can keep its own four beside them, which takes eight
    rows. On a shorter screen the window takes every row and covers the list --
    the overlay RFC-0515 section 2.5 gives a screen too short for both -- rather
    than leave a list of one to three rows. *)
-let target_rows = 8
+let target_rows = 9
 let least_rows = 4
 let list_floor = 4
 
@@ -132,46 +133,174 @@ let memory_reading (state : Masc_tui_types.state) ~keeper_name =
   Memory_reading.find (Memory_reading.index_of_snapshot state.memory_health) ~keeper_name
 ;;
 
+(* One Keeper's own schedule page as the window holds it: the first page of the
+   Automation tab's read, which the window asks for while it is open. [Not_read]
+   is the moment before that read starts, or a server that cannot be asked. The
+   fleet agenda is not a source here: its page is capped with live rows first,
+   so a Keeper whose schedules are closed or further down is missing from it. *)
+type schedules =
+  | Not_read
+  | Reading
+  | Read_failed of string
+  | Store_unreadable of string option
+  | Page of { snapshot : Masc_tui_types.schedule_snapshot; refresh : refresh }
+
+(* Whether a page drawn from an earlier read is being read again. *)
+and refresh =
+  | Current
+  | Refreshing
+  | Refresh_failed of string
+
+let schedules (state : Masc_tui_types.state) ~keeper_name =
+  (* A page another pane left (the Automation tab on its third page) is not the
+     first page this window asked for. *)
+  let first_page =
+    match state.keeper_schedules with
+    | Some (name, snapshot) when String.equal name keeper_name ->
+        (match snapshot.scs_paging with
+         | Masc_tui_types.Schedule_paging_unavailable
+         | Masc_tui_types.Schedule_paging { page_cursor = None; _ } -> Some snapshot
+         | Masc_tui_types.Schedule_paging { page_cursor = Some _; _ } -> None)
+    | Some _ | None -> None
+  in
+  let failure =
+    match state.keeper_schedules_error with
+    | Some (name, detail) when String.equal name keeper_name -> Some detail
+    | Some _ | None -> None
+  in
+  let waiting =
+    Masc_tui_types.detail_read_waiting state ~tab:Masc_tui_types.Detail_automation
+      ~keeper:keeper_name
+  in
+  match first_page, failure with
+  | None, Some detail -> Read_failed detail
+  | None, None -> if waiting then Reading else Not_read
+  | Some snapshot, (Some _ | None)
+    when Option.is_some snapshot.scs_read_error || Option.is_none snapshot.scs_request_count ->
+      Store_unreadable snapshot.scs_read_error
+  | Some snapshot, Some detail -> Page { snapshot; refresh = Refresh_failed detail }
+  | Some snapshot, None -> Page { snapshot; refresh = (if waiting then Refreshing else Current) }
+;;
+
+(* A page drawn from an earlier reading, or whose re-read failed, is the last
+   reading and not the Keeper's present one. The note sits at the head of the
+   line, where a narrow screen's cut does not reach it. *)
+let refresh_note = function
+  | Current -> ""
+  | Refreshing -> dim " (reading again)"
+  | Refresh_failed _ -> warn " (schedule read failed)"
+;;
+
+(* The newest wake among the Keeper's schedules. A schedule that is closed or
+   held still counts: its wake happened. *)
+let wake_text ~now ~head (wake : Masc_tui_keeper_last_wake.t) =
+  let row = Masc_tui_keeper_last_wake.row wake in
+  let outcome = Terminal_text.single_line (Masc_tui_render_work.schedule_outcome_word row) in
+  let outcome_text =
+    if String.equal outcome Masc_tui_theme.Glyph.no_value then ""
+    else
+      dim " · " ^ Masc_tui_render_prim.semantic_status_color outcome ^ outcome ^ Ansi.reset
+  in
+  let error_text =
+    match row.sch_last_wake_status with
+    | Some Schedule_contract_values.Wake_failed ->
+        (match row.sch_last_wake_error with
+         | Some error -> dim (" · " ^ Terminal_text.single_line error)
+         | None -> "")
+    | Some (Schedule_contract_values.Wake_running | Schedule_contract_values.Wake_succeeded)
+    | None -> ""
+  in
+  head
+  ^ dim
+      (Printf.sprintf " %s · %s"
+         (ago ~now (Masc_tui_keeper_last_wake.at wake))
+         (Terminal_text.single_line
+            (Option.value ~default:row.sch_schedule_id row.sch_payload_summary)))
+  ^ outcome_text ^ error_text
+;;
+
+let last_wake_entry (state : Masc_tui_types.state) ~now ~keeper_name =
+  match schedules state ~keeper_name with
+  | Not_read -> Some (dim "last wake not read yet")
+  | Reading -> Some (dim "last wake reading…")
+  | Read_failed _ -> Some (warn "last wake unknown, the schedule read failed")
+  | Store_unreadable _ -> Some (warn "last wake unknown, the schedule store is unreadable")
+  | Page { snapshot; refresh } ->
+      let note = refresh_note refresh in
+      (match
+         Masc_tui_keeper_last_wake.of_page ~truncated:snapshot.scs_truncated snapshot.scs_rows
+       with
+       | Masc_tui_keeper_last_wake.Newest wake ->
+           Some (wake_text ~now ~head:(dim "last wake" ^ note) wake)
+       | Masc_tui_keeper_last_wake.Newest_on_first_page wake ->
+           Some (wake_text ~now ~head:(dim "last wake on the first page" ^ note) wake)
+       | Masc_tui_keeper_last_wake.Not_on_first_page ->
+           Some (dim "last wake not on the first page" ^ note)
+       | Masc_tui_keeper_last_wake.Unplaced ->
+           Some (warn "last wake unknown, a wake time is unreadable" ^ note)
+       | Masc_tui_keeper_last_wake.No_wake ->
+           (match refresh with
+            | Current | Refreshing -> None
+            (* The earlier reading found no wake; whether one came since is
+               not known. *)
+            | Refresh_failed _ -> Some (warn "last wake unknown, the schedule read failed")))
+;;
+
 let schedule_lines (state : Masc_tui_types.state) ~now ~keeper_name =
-  match state.schedules_agenda, state.schedules_agenda_error with
-  | None, Some detail -> [ warn ("  ◷ schedule agenda not read: " ^ Terminal_text.single_line detail) ]
-  | None, None -> [ dim "  ◷ the schedule agenda is not read yet" ]
-  | Some snapshot, _ when Option.is_some snapshot.scs_read_error ->
+  (* The cell the list draws for this Keeper, so the header and the list row
+     cannot disagree about the next run. *)
+  let lead =
+    match next_run_cell state ~now ~keeper_name with
+    | Some cell -> cell.Masc_tui_keeper_axis_cell.text
+    | None -> "◷ none"
+  in
+  match schedules state ~keeper_name with
+  | Not_read -> [ dim "  ◷ this Keeper's schedules are not read yet" ]
+  | Reading -> [ dim "  ◷ reading this Keeper's schedules…" ]
+  | Read_failed detail ->
+      [ warn ("  ◷ schedule read failed: " ^ Terminal_text.single_line detail) ]
+  | Store_unreadable detail ->
       [ warn
           ("  ◷ schedule store unreadable"
-           ^ (match snapshot.scs_read_error with
+           ^ (match detail with
               | Some detail -> ": " ^ Terminal_text.single_line detail
               | None -> ""))
       ]
-  | Some snapshot, error ->
+  | Page { snapshot; refresh } ->
+      let counts =
+        match snapshot.scs_counts with
+        | Some counts -> " · " ^ Masc_tui_types.schedule_counts_line counts
+        | None -> ""
+      in
       let entries = Masc_tui_types.chat_schedule_entries ~keeper_name snapshot in
-      (* The cell the list draws for this Keeper, so the header and the list
-         row cannot disagree about the next run. *)
-      let lead =
-        match next_run_cell state ~now ~keeper_name with
-        | Some cell -> cell.Masc_tui_keeper_axis_cell.text
-        | None -> "◷ none"
+      let rows =
+        match entries, snapshot.scs_rows with
+        | [], [] ->
+            (match
+               Masc_tui_render_schedule.classify_keeper_schedule_absence
+                 ~truncated:snapshot.scs_truncated ~shown:0 ~total:snapshot.scs_request_count
+             with
+             | Masc_tui_render_schedule.Store_has_none -> [ dim "  no schedules for this Keeper" ]
+             | Masc_tui_render_schedule.Page_capped _ ->
+                 [ warn "  none on the first page: more schedules may exist" ])
+        | [], _ :: _ -> [ dim "  nothing live or recent on this page" ]
+        | _ :: _, ([] | _ :: _) -> List.map (schedule_row_line ~now) entries
       in
-      let count = Message_layout.count_noun (List.length entries) "schedule" in
+      let observed = Terminal_text.short_timestamp snapshot.scs_observed_at_iso in
       let notes =
-        (if snapshot.scs_truncated then [ "partial" ] else [])
-        @ (match error with
-           | Some _ -> [ "read failed, last reading kept" ]
-           | None -> [])
-        |> function
-        | [] -> []
-        | _ :: _ as flags ->
-            [ warn
-                ("  agenda: " ^ String.concat " · " flags
-                 ^ (match error with
-                    | Some detail -> ": " ^ Terminal_text.single_line detail
-                    | None -> "")) ]
+        (if snapshot.scs_truncated then [ warn "  the page is cut: more schedules may exist" ] else [])
+        @ (match refresh with
+           | Current -> []
+           | Refreshing -> [ dim (Printf.sprintf "  showing the reading of %s, reading again" observed) ]
+           | Refresh_failed detail ->
+               [ warn
+                   (Printf.sprintf "  read failed, showing the reading of %s: %s" observed
+                      (Terminal_text.single_line detail))
+               ])
       in
-      (* The window cuts its body to the available rows. Keep failed/partial
-         read provenance ahead of the entries so that cut cannot hide it. *)
-      notes
-      @ (dim ("  " ^ lead ^ " · " ^ count ^ " aimed at " ^ Terminal_text.single_line keeper_name)
-         :: List.map (schedule_row_line ~now) entries)
+      (* The window cuts its body to the available rows. Keep the read's
+         provenance ahead of the rows so that cut cannot hide it. *)
+      notes @ (dim ("  " ^ lead ^ counts) :: rows)
 ;;
 
 let memory_state_style : Masc_tui_types.memory_state -> string = function

@@ -10,18 +10,6 @@ let member_bool key json =
   Yojson.Safe.Util.(json |> member key |> to_bool_option) |> Option.value ~default:false
 ;;
 
-let json_of_string_list lst = `List (List.map (fun s -> `String s) lst)
-
-let string_list_of_json lst =
-  List.filter_map
-    (function
-      | `String s -> Some s
-      | _ -> None)
-    lst
-;;
-
-let json_of_string_pairs pairs = `Assoc (List.map (fun (k, v) -> k, `String v) pairs)
-
 [@@@coverage off]
 
 let%test "member_str missing key" = member_str "nope" (`Assoc []) = ""

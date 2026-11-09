@@ -61,11 +61,6 @@ val record_admission
   -> 'admission
   -> unit
 
-val record_attempt
-  :  ('admission, 'attempt, 'measurement, 'advance) progress
-  -> 'attempt
-  -> unit
-
 val publish_attempt
   :  ('admission, 'attempt, 'measurement, 'advance) progress
   -> same:('attempt -> 'attempt -> bool)

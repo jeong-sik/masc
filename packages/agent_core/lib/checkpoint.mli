@@ -70,10 +70,6 @@ val of_json : Yojson.Safe.t -> (t, Error.t) result
 (** Serialize checkpoint to a JSON string. *)
 val to_string : t -> string
 
-val content_block_of_json : Yojson.Safe.t -> (Types.content_block, Error.t) result
-(** Decode one canonical checkpoint block. Duplicate/invalid JSON values,
-    unknown fields, unsupported variants and malformed provenance are errors. *)
-
 (** The provider block codec the execution journal records tool results and
     responses with, base64 media included. A durable owner of provider blocks
     that are not history uses it; checkpoint messages never do. *)

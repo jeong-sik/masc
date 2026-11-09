@@ -45,15 +45,6 @@ let drop_unencodable_json = Checkpoint_codec.drop_unencodable_json
 let of_json = Checkpoint_codec.of_json
 let to_string = Checkpoint_codec.to_string
 
-let content_block_of_json json =
-  let open Result.Syntax in
-  let* () = Checkpoint_codec.validate_checkpoint_json ~context:"Checkpoint content block" json in
-  History.content_block_of_json json
-  |> Result.map_error (fun error ->
-    Error.Serialization
-      (JsonParseError
-         { detail = "Checkpoint content block: " ^ History.decode_error_to_string error }))
-
 let wire_content_block_to_json_result ~scope block =
   let open Result.Syntax in
   let json = Checkpoint_codec.wire_content_block_to_json block in

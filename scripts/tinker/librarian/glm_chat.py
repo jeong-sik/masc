@@ -5,27 +5,37 @@
 (packages/agent_core/lib/llm_provider: exact_output_ready_admission.ml
 `exact_config`, backend_openai_request.ml, reasoning_dialect.ml
 `request_control_fields`): the model, the user messages in order, thinking
-enabled and a `json_object` response format. GLM's wire takes no schema, so the
-schema instruction rides as the last user message, as in MASC. `exact_config`
-clears the sampling fields, and the live slot (2026-11-09) declares no output
-ceiling and no effort, so the body carries no max_tokens, reasoning_effort,
-sampling field or stream flag: the endpoint applies its own defaults.
+enabled, a `json_object` response format and `max_tokens`. GLM's wire takes no
+schema, so the schema instruction rides as the last user message, as in MASC.
+MASC copies the exact lane's `max_output_tokens` to every slot as `max_tokens`
+(runtime_exact_output_registry.ml) and leaves the field out only when the lane
+declares none; the caller passes the value the lane holds after rollout.
+`exact_config` clears the sampling fields and keeps the slot's effort, and the
+GLM slot declares none, so the body carries no reasoning_effort, sampling field
+or stream flag.
 
 GLM names a failure by a code in the body, {"error": {"code", "message"}}, also
 under an HTTP 429: a spent usage window (1308) arrives as a 429 that the status
-alone reads as a rate limit. `read_reply` reads the code first, as
-backend_glm.ml `check_glm_error_json` and `classify_glm_error` do. An auth or
-quota class stops the run and keeps GLM's message, which names the reset time.
-A rate limit or server class, no response, or a 408, 429 or 5xx without a code
-is sent again up to TRANSIENT_RETRIES times. Any other failure is that call's
-result, as MASC then moves on to its next slot.
+alone reads as a rate limit. `read_reply` reads the code as MASC does
+(backend_glm.ml `check_glm_error_json` and `classify_glm_error`). Under another
+status than 200, only the quota and context-overflow classes take the place of
+the status (complete_common.ml `provider_refusal`); every other class keeps it.
+In a 200 body the class decides (complete_sync.ml). A quota or auth class stops
+the run and keeps GLM's message, which names the reset time. MASC moves on to
+its next slot after an auth failure; the harness stops, since no later request
+under the same key passes. A 408, 429 or 5xx whose code does not decide, no
+response, and a rate limit or server class in a 200 body are sent again up to
+TRANSIENT_RETRIES times. Any other failure is that call's result, as MASC then
+moves on to its next slot.
 
 Every attempt is appended to the call log as a `tinker_oai.Call` row. A rerun
 with the same log reuses each reply, so a run stopped on a spent window resumes
 after the reset. A caller sends at most `max_calls` requests under one log,
-counting the attempts already in it. Calls draw on the key's usage quota and
-carry no per-token price here. ZAI_API_KEY comes from the environment and is
-never written.
+counting the attempts already in it. An attempt counts once its row is written:
+a run killed while requests wait for their reply leaves no rows for them, so
+the next run can send one request more than the cap for each one in flight.
+Calls draw on the key's usage quota and carry no per-token price here.
+ZAI_API_KEY comes from the environment and is never written.
 """
 
 from __future__ import annotations
@@ -121,7 +131,7 @@ class Answered:
 
 @dataclass(frozen=True, slots=True)
 class Stop:
-    """An auth or quota failure: the caller stops, and a rerun with the same log resumes."""
+    """A quota or auth failure: the caller stops, and a rerun with the same log resumes."""
 
     error: str
 
@@ -144,6 +154,7 @@ type Reply = Answered | Stop | Transient | Failed
 
 
 def refusal(error: GlmError) -> Reply:
+    """An error in a 200 body: complete_sync.ml gives its class an HTTP status, and that decides."""
     text = error.text()
     match error.error_class():
         case ErrorClass.AUTH | ErrorClass.QUOTA:
@@ -152,6 +163,22 @@ def refusal(error: GlmError) -> Reply:
             return Transient(text)
         case ErrorClass.INVALID_REQUEST | ErrorClass.CONTEXT_OVERFLOW:
             return Failed(text)
+        case _ as never:
+            assert_never(never)
+
+
+def status_refusal(status: int, error: GlmError | None) -> Reply:
+    """Another status than 200: only a quota, auth or context-overflow class takes its place."""
+    if error is None:
+        return Transient(None) if transient(status) else Failed(None)
+    text = error.text()
+    match error.error_class():
+        case ErrorClass.AUTH | ErrorClass.QUOTA:
+            return Stop(text)
+        case ErrorClass.CONTEXT_OVERFLOW:
+            return Failed(text)
+        case ErrorClass.RATE_LIMITED | ErrorClass.SERVER | ErrorClass.INVALID_REQUEST:
+            return Transient(text) if transient(status) else Failed(text)
         case _ as never:
             assert_never(never)
 
@@ -165,25 +192,25 @@ def json_object(text: str) -> JsonObject | None:
 
 
 def read_reply(response: tuple[int, str] | None) -> Reply:
-    """What one attempt came back with: the body's error code first, then the HTTP status."""
+    """What one attempt came back with, read as MASC reads it."""
     if response is None:
         return Transient(None)
     status, text = response
     data = json_object(text)
     error = error_of(data) if data is not None else None
+    if status != HTTP_OK:
+        return status_refusal(status, error)
     if error is not None:
         return refusal(error)
-    if status != HTTP_OK:
-        return Transient(None) if transient(status) else Failed(None)
     if data is None:
         return Failed("the HTTP 200 body is not a JSON object")
     return Answered(data)
 
 
-def request_body(model: str, messages: Sequence[str]) -> bytes:
+def request_body(model: str, messages: Sequence[str], max_tokens: int) -> bytes:
     """The body MASC sends a glm-coding slot for an exact output."""
     body = {"response_format": {"type": "json_object"}, "thinking": {"type": "enabled"}, "model": model,
-            "messages": [{"role": "user", "content": m} for m in messages]}
+            "max_tokens": max_tokens, "messages": [{"role": "user", "content": m} for m in messages]}
     return json.dumps(body, ensure_ascii=False, separators=(",", ":")).encode()
 
 
@@ -230,12 +257,12 @@ class Caller:
         self._post = post if post is not None else sender(os.environ[KEY_ENV])
         self._sleep = sleep
 
-    def ask(self, *, model: str, label: str, messages: Sequence[str]) -> Call | None:
+    def ask(self, *, model: str, label: str, messages: Sequence[str], max_tokens: int) -> Call | None:
         """Send user messages in order. A logged reply with the same key is returned without sending.
         Otherwise the last attempt: a reply, a failure that is the call's result, or a transient
-        failure that used up TRANSIENT_RETRIES. None once the caller stops: on an auth or quota
+        failure that used up TRANSIENT_RETRIES. None once the caller stops: on a quota or auth
         failure, or instead of a request past `max_calls`."""
-        body = request_body(model, messages)
+        body = request_body(model, messages, max_tokens)
         key = call_key(body)
         retry = 0
         while True:

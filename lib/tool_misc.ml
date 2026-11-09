@@ -79,8 +79,29 @@ let handle_gc ~tool_name ~start_time ctx args : Tool_result.result =
     let gc_result = Workspace.gc ctx.config ~days () in
     text_ok ~tool_name ~start_time gc_result
 
+(* [execute] reclaims only the keepers the call names, by the keeper names a
+   report's verdicts carry, so the second call cannot reach a keeper the
+   operator did not see. A report takes no names, since names on a report
+   would read as a delete that never happens. *)
+let sandbox_volume_gc_keepers_field = "keepers"
+
+let sandbox_volume_gc_request args =
+  let missing_names = "execute needs keepers: the reclaim candidates a report listed" in
+  match
+    get_bool args "execute" false, Json_util.assoc_member_opt sandbox_volume_gc_keepers_field args
+  with
+  | false, None -> Ok Keeper_volume_gc.Report_only
+  | false, Some _ -> Error "keepers names what execute reclaims; a report takes no keepers"
+  | true, None -> Error missing_names
+  | true, Some _ ->
+    (match Json_util.json_string_list_member_strict sandbox_volume_gc_keepers_field args with
+     | None -> Error "keepers must be a list of non-blank keeper names"
+     | Some [] -> Error missing_names
+     | Some names -> Ok (Keeper_volume_gc.Reclaim_named (Json_util.dedupe_keep_order names)))
+
 (* The operator's Apple-volume reclamation: a report the operator reads
-   before anything is deleted. The image argument names either a sandbox
+   before anything is deleted, then an execute that names the report's
+   candidates. The image argument names either a sandbox
    image catalog entry (resolved for the Apple store) or a full reference;
    without it there is no claim evidence, and every unowned keeper stays
    kept as unverified rather than reclaimed on a guess. *)
@@ -116,7 +137,9 @@ let handle_sandbox_volume_gc ~tool_name ~start_time (ctx : context) args : Tool_
           (Env_config_sandbox.Shell_timeout.timeout_sec ~bucket:Env_config_sandbox.Shell_timeout.Io ())
     in
     let image_argument = String.trim (get_string args "image" "") in
-    let execute = get_bool args "execute" false in
+    match sandbox_volume_gc_request args with
+    | Error detail -> workflow_err ~tool_name ~start_time detail
+    | Ok request ->
     match resolve_gc_image image_argument with
     | Error detail -> workflow_err ~tool_name ~start_time detail
     | Ok claims_image ->
@@ -156,7 +179,7 @@ let handle_sandbox_volume_gc ~tool_name ~start_time (ctx : context) args : Tool_
            ~timeout_sec
            ~registered_keeper
            ~claims_image
-           ~execute
+           ~request
        with
        | Error detail ->
          Tool_result.make_err
@@ -171,7 +194,10 @@ let handle_sandbox_volume_gc ~tool_name ~start_time (ctx : context) args : Tool_
            ~data:
              (Keeper_volume_gc_answer.to_json
                 (Keeper_volume_gc_answer.of_report
-                   ~executed:execute
+                   ~executed:
+                     (match request with
+                      | Keeper_volume_gc.Report_only -> false
+                      | Keeper_volume_gc.Reclaim_named _ -> true)
                    ~image_given:(Option.is_some claims_image)
                    report))
            ())

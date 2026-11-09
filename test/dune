@@ -5853,7 +5853,7 @@
 (test
  (name test_tui_runtime_config_view)
  (modules test_tui_runtime_config_view)
- (libraries masc.runtime masc_tui_runtime_config_view masc_tui_account_login))
+ (libraries masc.runtime masc_tui_runtime_config_view masc_tui_account_login masc_tui_page_line))
 
 (test
  (name test_tui_runtime_listing)
@@ -7322,3 +7322,5 @@
 (include stanzas/test_schedule_tool_run_watch.inc)
 
 (include stanzas/test_keeper_chat_run_signal.inc)
+
+(include stanzas/test_server_skill_missing_on_disk.inc)

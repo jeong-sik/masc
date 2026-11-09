@@ -28,10 +28,20 @@
     ({!Authz_keeper_turn.decide}) and names the Runtime and the account. No
     operator owns the account of a person, so an operator call is refused. *)
 
-(** An account captured from a declaration. No CLI starts on it. *)
+(** An account captured from a declaration. No CLI starts on it, and it
+    gives no environment: the runtime table holds this, so a reader of the
+    table cannot take the credentials of an account. *)
 type 'client sealed
 
 val seal : 'client Runtime_official_account.t -> 'client sealed
+
+(** The home of a sealed account. It names the account, as its quota window
+    does, and carries no credential. *)
+val home : 'client sealed -> string
+
+(** Whether two sealed accounts are the same capture, for a reload of the
+    table. It renders no credential. *)
+val same : 'client sealed -> 'client sealed -> bool
 
 (** An account a CLI may start on. Only {!authorize} makes one. *)
 type 'client authorized

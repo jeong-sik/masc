@@ -692,10 +692,13 @@ let grid_tail_cells (grid : Grid.t) =
 let grid_blank_line (grid : Grid.t) =
   String.make (grid_lead_cells grid) ' ' ^ " " ^ grid_band grid_blank_now
 
+(* The mock's [okd]: the ok colour, receded. *)
+let grid_receded_ok () = Masc_tui_theme.tone Masc_tui_theme.Dim ^ Theme.ok ()
+
 let grid_gutter_style = function
   | Grid.Failing { resting = false } -> Theme.warn ()
   | Grid.Failing { resting = true } | Grid.Paused | Grid.Other -> Theme.recede ()
-  | Grid.Recovered -> Masc_tui_theme.tone Masc_tui_theme.Dim ^ Theme.ok ()
+  | Grid.Recovered -> grid_receded_ok ()
   | Grid.Sound -> Theme.ok ()
 
 let grid_gutter view verdict =
@@ -719,23 +722,23 @@ let grid_newest_marks (grid : Grid.t) marks =
     (String.concat "" (List.drop (max 0 (List.length marks - grid.side_cells)) marks))
     grid.side_cells
 
-let grid_hour_pulse (grid : Grid.t) ~now pulse =
-  let hours = Masc_tui_keeper_pulse.slots ~now pulse in
-  let shown = List.drop (max 0 (List.length hours - grid.side_cells)) hours in
-  let failed =
-    List.exists
-      (function
-        | Masc_tui_keeper_pulse.Slot_turn Masc.Keeper_turn_pulse.Turn_failed -> true
-        | Masc_tui_keeper_pulse.Slot_turn
-            (Masc.Keeper_turn_pulse.Turn_ok | Masc.Keeper_turn_pulse.Turn_rested)
-        | Masc_tui_keeper_pulse.Slot_unknown | Masc_tui_keeper_pulse.Slot_quiet -> false)
-      shown
-  in
-  style_axis_cell
-    { Masc_tui_keeper_axis_cell.text =
-        grid_newest_marks grid (List.map Masc_tui_keeper_pulse.slot_mark shown)
-    ; tone = (if failed then Masc_tui_keeper_axis_cell.Attention else Masc_tui_keeper_axis_cell.Quiet)
-    }
+(* Each half hour in the mock's colour: failed ones warn, ok ones are the
+   receded ok, quiet and unknown ones recede. *)
+let grid_half_hour_style = function
+  | Masc_tui_keeper_pulse.Half_hour_failed | Masc_tui_keeper_pulse.Half_hour_failed_and_ok ->
+      Theme.warn ()
+  | Masc_tui_keeper_pulse.Half_hour_ok -> grid_receded_ok ()
+  | Masc_tui_keeper_pulse.Half_hour_quiet | Masc_tui_keeper_pulse.Half_hour_unknown ->
+      Theme.recede ()
+
+(* One mark per half hour of the column, the now slot on the right. *)
+let grid_half_hour_pulse (grid : Grid.t) ~now pulse =
+  String.concat ""
+    (List.map
+       (fun half_hour ->
+         grid_half_hour_style half_hour ^ Masc_tui_keeper_pulse.half_hour_mark half_hour
+         ^ Ansi.reset)
+       (Masc_tui_keeper_pulse.half_hours ~now ~count:grid.side_cells pulse))
 
 let grid_quiet_strip (grid : Grid.t) =
   Theme.recede () ^ grid_repeat (Grid.strip_cells grid) Keeper_mark.grid_dot_mark ^ Ansi.reset
@@ -904,8 +907,8 @@ let grid_keeper_row state (grid : Grid.t) columns ~view ~peak_lag ~peak_facts ~n
   let memory = keeper_memory_reading state row in
   let gutter = grid_gutter view verdict in
   let name = grid_name grid ~yolo verdict keeper_name in
-  let hour_pulse () =
-    grid_hour_pulse grid ~now
+  let pulse () =
+    grid_half_hour_pulse grid ~now
       (Option.bind runtime (fun runtime -> runtime.Tui_decode.kr_recent_turns))
   in
   grid_line grid
@@ -913,7 +916,7 @@ let grid_keeper_row state (grid : Grid.t) columns ~view ~peak_lag ~peak_facts ~n
      | Axis_row.Activity_columns ->
          { gutter
          ; name
-         ; pulse = hour_pulse ()
+         ; pulse = pulse ()
          ; now_cell = keeper_now_cell ~frame row
          ; strip = grid_quiet_strip grid
          ; due = grid_due ~now verdict (Masc_tui_keeper_axis.next_run state ~keeper_name)
@@ -922,7 +925,7 @@ let grid_keeper_row state (grid : Grid.t) columns ~view ~peak_lag ~peak_facts ~n
      | Axis_row.Memory_columns ->
          { gutter
          ; name
-         ; pulse = hour_pulse ()
+         ; pulse = pulse ()
          ; now_cell = grid_librarian memory
          ; strip = grid_lag_bar grid ~peak_lag memory
          ; due = grid_digest ~now memory
@@ -1082,12 +1085,9 @@ let grid_facts_by_age_offset = 8
 let grid_header (grid : Grid.t) (columns : Axis_row.columns) =
   let recede text = Theme.recede () ^ text ^ Ansi.reset in
   let line = " " ^ Theme.info () ^ Keeper_mark.grid_now_line ^ Ansi.reset ^ " " in
-  (* The pulse column draws whole clock hours, newest last; a column wider
-     than the pulse pads the left with blanks. The header names the drawn
-     hours, not ledger half hours. *)
-  let window = Grid.hour_window_label ~hours:(min grid.side_cells Keeper_mark.pulse_hours) in
-  (* The strip draws the half hours ahead, so its header names half hours. *)
-  let strip_window = Grid.window_label ~slots:grid.side_cells in
+  (* The pulse draws [side_cells] half hours up to the now slot and the strip
+     as many after it, so one span names both. *)
+  let window = Grid.window_label ~slots:grid.side_cells in
   let side = grid.side_cells > 0 in
   let mem = grid.mem_cells > 0 in
   let lag_bar =
@@ -1100,7 +1100,7 @@ let grid_header (grid : Grid.t) (columns : Axis_row.columns) =
         ( Keeper_mark.grid_keeper_header
         , Some (Keeper_mark.grid_pulse_header ~window)
         , Keeper_mark.axis_now_header
-        , Keeper_mark.grid_next_header ~window:strip_window
+        , Keeper_mark.grid_next_header ~window
         , Keeper_mark.grid_due_header
         , Message_layout.pad_left Keeper_mark.grid_lag_header (grid.mem_cells - grid_level_cells) )
     | Axis_row.Memory_columns ->
@@ -1128,7 +1128,7 @@ let grid_header (grid : Grid.t) (columns : Axis_row.columns) =
          " "
          ^ recede
              (match pulse with
-              | Some pulse -> grid_spread ~cells:grid.side_cells pulse Grid.hour_slot_label
+              | Some pulse -> grid_spread ~cells:grid.side_cells pulse Grid.slot_label
               | None -> String.make grid.side_cells ' ')
        else "")
     ; line
@@ -1775,6 +1775,10 @@ let render_keeper_list (state : state) =
            - fleet.fs_reaction_capacity_shortfall)
            fleet.fs_target_reaction_capacity
        in
+       (* [select] keeps a prefix, so the last reading is the first a narrow
+          screen drops. The proactive interval goes last: it is a setting the
+          operator chose, the same on every scan, while the counts and the
+          blocker are what changed and what needs an answer. *)
        let readings =
          [ Masc_tui_fleet_summary.Running, running
          ; Masc_tui_fleet_summary.Turn_capacity, turn_capacity
@@ -1782,6 +1786,8 @@ let render_keeper_list (state : state) =
          @ (match Masc_tui_fleet_line.blocker_text fleet with
            | None -> []
            | Some text -> [ Masc_tui_fleet_summary.Blocker, text ])
+         @ [ ( Masc_tui_fleet_summary.Proactive_interval
+             , Masc_tui_fleet_line.proactive_text fleet ) ]
        in
        let separator = "   " in
        let selected =

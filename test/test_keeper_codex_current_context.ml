@@ -220,7 +220,8 @@ default = "codex.%s"
       ~initial_messages
       ~model_input_projection ~on_transmitted_model_input:(fun report -> reports := report :: !reports)
       ~hooks:(Some hooks) ~context_injector:None ~context:(Some (Agent_core.Context.create ()))
-      ~event_bus:None ~raw_trace:None ~on_event ~config ()
+      ~event_bus:None ~raw_trace:None ~on_event
+      ~account:(Masc_test_deps.authorized_account config.account_home) ~config ()
   in
   test ~run ~capture ~reports
 
@@ -1643,7 +1644,9 @@ let test_codex_resume_overflow_restarts_with_the_address_form () =
     fail (Printf.sprintf "expected the refused and the restarted injection, saw %d"
       (List.length injected))
 
-let () = run "Keeper current Codex context" ["native requests",[
+let () =
+  Masc_test_deps.publish_single_user_access ();
+  run "Keeper current Codex context" ["native requests",[
   test_case "a Keeper's Codex client runs in its private directory" `Quick
     test_codex_runs_in_the_keepers_private_directory;
   test_case "selected high survives a replacement low on start and resume" `Quick

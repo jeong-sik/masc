@@ -290,6 +290,26 @@ let () = test "dispatch_sandbox_volume_gc_rejects_a_non_image" (fun () ->
   | None -> failwith "dispatch returned None"
 )
 
+(* execute deletes only the keepers a call names, so an execute without
+   names, and names without execute, are the caller's error before any CLI
+   call. A host without Apple Container would answer dependency_unavailable
+   instead, so the class tells the two refusals apart. *)
+let () = test "dispatch_sandbox_volume_gc_refuses_execute_without_keeper_names" (fun () ->
+  let ctx = make_test_ctx () in
+  List.iter
+    (fun fields ->
+      match Tool_misc.dispatch ctx ~name:"masc_sandbox_volume_gc" ~args:(`Assoc fields) with
+      | Some result ->
+          assert (not (Tool_result.is_success result));
+          assert (Tool_result.failure_class result = Some Tool_result.Workflow_rejection)
+      | None -> failwith "dispatch returned None")
+    [ [ "execute", `Bool true ]
+    ; [ "execute", `Bool true; "keepers", `List [] ]
+    ; [ "execute", `Bool true; "keepers", `List [ `String " " ] ]
+    ; [ "keepers", `List [ `String "retired" ] ]
+    ]
+)
+
 let () = test "validate_web_search_preserves_opaque_query" (fun () ->
   match
     Tool_misc_web_search.validate_query

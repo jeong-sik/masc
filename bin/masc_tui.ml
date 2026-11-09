@@ -5943,7 +5943,7 @@ let launch_volume_gc state ~mailbox request =
       let+ outcome =
         Masc_tui_http.call_mcp_tool_within ~timeout_sec:Masc_tui_volume_gc.timeout_sec
           ~host ~port ~session_id ~request_id:("tui-volume-gc-" ^ Random_id.uuid_v7 ())
-          ~tool:Masc_tui_volume_gc.tool ~arguments:(Masc_tui_volume_gc.arguments ~execute)
+          ~tool:Masc_tui_volume_gc.tool ~arguments:(Masc_tui_volume_gc.arguments request)
       in
       Masc_tui_volume_gc.answer_of_text ~is_error:outcome.Masc_tui_mcp.is_error
         outcome.Masc_tui_mcp.text)

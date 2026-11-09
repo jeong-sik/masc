@@ -17,16 +17,20 @@
     [Direct] channel from the log, and the client starts only on the account
     it authorizes.
 
-    {b The call.} {!Runtime_claude_code.run_turn} once, in the posture of
-    {!Runtime_claude_code.default_config}: no built-in tool but the lookup of
-    deferred tools, no MCP server of MASC, and the client's own system
-    prompt. It runs
-    in a private directory that is removed after it, and the client may be
-    silent for 120 seconds. One call of an account runs at a time
-    ({!Server_setup_account_login.one_call_of}). Nothing is written: the log
-    keeps no record of a turn.
+    {b The call.} One turn of the client of the Runtime:
+    - Claude Code: {!Runtime_claude_code.run_turn} in the posture of
+      {!Runtime_claude_code.default_config}: no built-in tool but the lookup
+      of deferred tools, no MCP server of MASC, and the client's own system
+      prompt.
+    - Codex: {!Runtime_codex_app_server.run_turn} on an [Ephemeral] thread,
+      in the posture of {!Runtime_codex_app_server.default_config}:
+      read-only permissions with no shell, no tool of MASC, and the client's
+      own instructions. Codex keeps no rollout or history of the thread.
 
-    Only a Claude Code Runtime runs here. Codex follows in plan D2-6. *)
+    The turn runs in a private directory that is removed after it, and the
+    client may be silent for 120 seconds. One call of an account runs at a
+    time ({!Server_setup_account_login.one_call_of}). Nothing is written: the
+    log keeps no record of a turn. *)
 
 (** The longest message, in bytes: 4096. *)
 val max_message_bytes : int
@@ -40,7 +44,8 @@ val max_message_bytes : int
 
     The other answers are a JSON [{"error": ...}]:
     - 400: the body is not that, the message is blank or longer than
-      {!max_message_bytes}, or the Runtime is not a Claude Code Runtime.
+      {!max_message_bytes}, or the Runtime is neither a Claude Code nor a
+      Codex Runtime.
     - 403: {!Runtime_account_access.authorize} refused the turn.
     - 404: the Keeper is not the person's.
     - 409: the Keeper has no Runtime, a call of the account runs, or the

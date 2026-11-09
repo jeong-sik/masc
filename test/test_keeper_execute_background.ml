@@ -212,6 +212,107 @@ let test_outbox_keeps_the_receipt () =
     (get (Background.holds_receipt ~base_path ~keeper_name ~request_id:"req-3"))
 ;;
 
+(* The arrival line points at a receipt by the SHA-256 of its file. The model
+   holds the request id of the run, so [receipt_summary] reads the id and the
+   outcome back from the receipt a background run wrote. *)
+let test_summary_names_the_request_and_the_outcome () =
+  Eio_main.run
+  @@ fun env ->
+  Eio.Switch.run
+  @@ fun sw ->
+  Masc_test_deps.init_eio_clock ~sw env;
+  Fs_compat.set_fs env#fs;
+  let base_path = Filename.temp_dir "execute-background-" "" in
+  Eio.Switch.on_release sw (fun () -> Fs_compat.remove_tree base_path);
+  let config = Workspace.default_config base_path in
+  ignore (Workspace.init config ~agent_name:(Some keeper_name));
+  let finished =
+    Background.receipt_of_execution
+      ~request_id:"req-1"
+      ~arguments
+      (Keeper_tool_execution.success_data payload)
+  in
+  let failed =
+    Background.receipt_of_execution
+      ~request_id:"req-2"
+      ~arguments
+      (Keeper_tool_execution.failure ~class_:Tool_result.Runtime_failure "sandbox start failed")
+  in
+  let unfinished =
+    Background.receipt_of_unfinished
+      ~request_id:"req-3"
+      ~arguments
+      ~cause:Background.restart_cause
+  in
+  List.iter
+    (fun receipt -> get (Outbox.retain ~base_path ~keeper_name receipt))
+    [ finished; failed; unfinished ];
+  let snapshot = get (Outbox.load ~base_path ~keeper_name) in
+  let summaries =
+    List.filter_map
+      (fun receipt_id -> Outbox.receipt_summary snapshot ~receipt_id)
+      (Outbox.receipt_ids snapshot)
+  in
+  check int "every receipt has a summary" 3 (List.length summaries);
+  let outcome_of request_id =
+    match
+      List.find_opt (fun (summary : Outbox.Summary.t) -> String.equal summary.Outbox.Summary.call_id request_id) summaries
+    with
+    | Some summary -> summary
+    | None -> failf "no summary for %s" request_id
+  in
+  check (option string) "finished" (Some "completed") (outcome_of "req-1").Outbox.Summary.outcome;
+  check (option string) "failed" (Some "failed") (outcome_of "req-2").Outbox.Summary.outcome;
+  check (option string) "unfinished" (Some "unfinished") (outcome_of "req-3").Outbox.Summary.outcome;
+  check string "tool" tool_execute_name (outcome_of "req-1").Outbox.Summary.tool_name;
+  check
+    bool
+    "an identity the outbox does not hold has no summary"
+    true
+    (Option.is_none (Outbox.receipt_summary snapshot ~receipt_id:"0000"));
+  (* The reader answers from one load: a receipt written after the first lookup
+     is not in it, and a lookup of an identity it does not hold is [None]. *)
+  let unavailable = ref [] in
+  let reader =
+    Outbox.summary_reader ~base_path ~keeper_name ~on_unavailable:(fun detail ->
+      unavailable := detail :: !unavailable)
+  in
+  let first_id =
+    match Outbox.receipt_ids snapshot with
+    | id :: _ -> id
+    | [] -> fail "three receipts were retained"
+  in
+  check bool "the reader finds a held receipt" true (Option.is_some (reader first_id));
+  check bool "and none for another identity" true (Option.is_none (reader "0000"));
+  check int "a readable outbox reports nothing" 0 (List.length !unavailable)
+;;
+
+(* An outbox that cannot be read is reported once and answers no summary, so a
+   line keeps its bare description and the round goes on. *)
+let test_summary_reader_reports_an_unreadable_outbox_once () =
+  Eio_main.run
+  @@ fun env ->
+  Eio.Switch.run
+  @@ fun sw ->
+  Masc_test_deps.init_eio_clock ~sw env;
+  Fs_compat.set_fs env#fs;
+  let base_path = Filename.temp_dir "execute-background-" "" in
+  Eio.Switch.on_release sw (fun () -> Fs_compat.remove_tree base_path);
+  let config = Workspace.default_config base_path in
+  ignore (Workspace.init config ~agent_name:(Some keeper_name));
+  let outbox = get (Keeper_official_client_paths.outbox_dir ~base_path ~keeper_name) in
+  Fs_compat.mkdir_p (Filename.dirname outbox);
+  Fs_compat.save_file outbox "a file where the directory belongs";
+  let reported = ref [] in
+  let reader =
+    Outbox.summary_reader ~base_path ~keeper_name ~on_unavailable:(fun detail ->
+      reported := detail :: !reported)
+  in
+  check bool "no summary" true (Option.is_none (reader "abc"));
+  check bool "still none on the second lookup" true (Option.is_none (reader "def"));
+  check int "reported once" 1 (List.length !reported)
+;;
+
 let () =
   run
     "keeper_execute_background"
@@ -239,6 +340,16 @@ let () =
             `Quick
             test_unfinished_run_says_the_status_was_not_recorded
         ] )
-    ; "outbox", [ test_case "outbox keeps the receipt" `Quick test_outbox_keeps_the_receipt ]
+    ; ( "outbox"
+      , [ test_case "outbox keeps the receipt" `Quick test_outbox_keeps_the_receipt
+        ; test_case
+            "summary names the request and the outcome"
+            `Quick
+            test_summary_names_the_request_and_the_outcome
+        ; test_case
+            "summary reader reports an unreadable outbox once"
+            `Quick
+            test_summary_reader_reports_an_unreadable_outbox_once
+        ] )
     ]
 ;;

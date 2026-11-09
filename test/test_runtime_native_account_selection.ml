@@ -65,14 +65,16 @@ let materialize ?account_home client =
 
 let child_environment runtime =
   match runtime.Runtime_instance.execution with
+  (* Both clients start their CLI with the environment of the account they
+     are authorized on, unchanged (plan D2-5 and D2-6). The table holds the
+     account sealed, so the environment is read from the authorized account
+     (plan D2-7). *)
   | Runtime_execution.Claude_code execution ->
-    (* The Claude Code client starts its CLI with the environment of the
-       captured account it is authorized on, unchanged. *)
-    Runtime_official_account.environment execution.account_home
+    Runtime_official_account.environment
+      (Runtime_account_access.account (Masc_test_deps.authorized_account execution.account_home))
   | Codex_app_server execution ->
-    (match Runtime_codex_app_server.client_environment (Runtime_official_account.Captured execution.account_home) with
-     | Ok environment -> environment
-     | Error error -> fail (Runtime_codex_app_server.error_to_string error))
+    Runtime_official_account.environment
+      (Runtime_account_access.account (Masc_test_deps.authorized_account execution.account_home))
   | Agent_core _ | Antigravity_cli _ | Muse_serve _ | Vibe_cli _ -> fail "expected an official client"
 
 let test_inherited_home client () =
@@ -99,7 +101,8 @@ let test_inherited_home client () =
            | Claude_code execution ->
              check (option string) "ordinary account file remains in admitted HOME"
                (Some (Filename.concat first ".claude.json"))
-               (Runtime_claude_code.account_file (Runtime_official_account.Captured execution.account_home))
+               (Runtime_claude_code.account_file (Runtime_official_account.Captured
+                  (Runtime_account_access.account (Masc_test_deps.authorized_account execution.account_home))))
            | Agent_core _ | Codex_app_server _ | Antigravity_cli _ | Muse_serve _ | Vibe_cli _ ->
              fail "expected Claude execution")
         | Codex -> check (option string) "Codex store remains the admitted directory"
@@ -118,7 +121,8 @@ let test_inherited_directory client () =
           | Claude_code execution -> check (option string)
               "config-dir account file retains its original namespace"
               (Some (Filename.concat first ".claude.json"))
-              (Runtime_claude_code.account_file (Runtime_official_account.Captured execution.account_home))
+              (Runtime_claude_code.account_file (Runtime_official_account.Captured
+                  (Runtime_account_access.account (Masc_test_deps.authorized_account execution.account_home))))
           | Codex_app_server _ -> ()
           | Agent_core _ | Antigravity_cli _ | Muse_serve _ | Vibe_cli _ -> fail "expected native execution")))))
 
@@ -158,22 +162,6 @@ let test_environment_copy client () =
       check (option string) "spawn-array mutation cannot alter the admitted context"
         (Some home) (env_value "HOME" (child_environment runtime))))
 
-(* Only Codex still selects its account at call time; a Claude Code turn or
-   probe starts on an authorized captured account (plan D2-5). *)
-let current_environment () =
-  match Runtime_codex_app_server.client_environment (Runtime_official_account.Current None) with
-  | Ok environment -> environment
-  | Error error -> fail (Runtime_codex_app_server.error_to_string error)
-
-let test_current_call_timing () =
-  with_directory (fun first -> with_directory (fun second ->
-    with_env (("HOME", Some first) :: environment) (fun () ->
-      check (option string) "direct current call starts with the caller's HOME"
-        (Some first) (env_value "HOME" (current_environment ()));
-      with_env ["HOME", Some second] (fun () ->
-        check (option string) "a later direct current call reads its current declaration"
-          (Some second) (env_value "HOME" (current_environment ()))))))
-
 let test_claude_credential_diagnosis () =
   with_directory (fun home ->
     with_env (("HOME", Some home) :: environment) (fun () ->
@@ -184,7 +172,8 @@ let test_claude_credential_diagnosis () =
           | Runtime_execution.Claude_code execution ->
             check bool "refusal diagnosis uses the credential actually passed to this child"
               true (Runtime_claude_code.runs_on_environment_credential
-                (Runtime_official_account.Captured execution.account_home))
+                (Runtime_official_account.Captured
+                  (Runtime_account_access.account (Masc_test_deps.authorized_account execution.account_home))))
           | Agent_core _ | Codex_app_server _ | Antigravity_cli _ | Muse_serve _ | Vibe_cli _ ->
             fail "expected Claude execution"))))
 
@@ -206,10 +195,11 @@ env_key = "OPENAI_API_KEY"
           with_env ["HOME", Some private_home; "OPENAI_API_KEY", Some "replacement-fixture-key"]
             (fun () -> match runtime.execution with
              | Runtime_execution.Codex_app_server execution ->
-               let child = match Runtime_codex_app_server.client_environment
-                 ~isolated_home:private_home (Runtime_official_account.Captured execution.account_home) with
+               let child = match Runtime_official_account.private_codex_environment
+                 ~home:private_home
+                 (Runtime_account_access.account (Masc_test_deps.authorized_account execution.account_home)) with
                  | Ok child -> child
-                 | Error error -> fail (Runtime_codex_app_server.error_to_string error) in
+                 | Error detail -> fail detail in
                check (option string) "private process uses the caller-owned verification store"
                  (Some private_home) (env_value "CODEX_HOME" child);
                check (option string) "private view retains the captured user environment"
@@ -219,7 +209,7 @@ env_key = "OPENAI_API_KEY"
                  (env_value "OPENAI_API_KEY" child);
                check string "private projection cannot change the original account scope"
                  (Filename.concat home ".codex")
-                 (Runtime_official_account.home execution.account_home)
+                 (Runtime_account_access.home execution.account_home)
              | Agent_core _ | Claude_code _ | Antigravity_cli _ | Muse_serve _ | Vibe_cli _ ->
                fail "expected Codex execution"))))))
 
@@ -325,9 +315,10 @@ env_http_headers = { "X-Fixture" = "CUSTOM_GATEWAY_HEADER" }
               "CUSTOM_GATEWAY_HEADER", Some "declared-header-b"] (fun () ->
               match runtime.execution with
               | Runtime_execution.Codex_app_server execution ->
-                let child = match Runtime_codex_app_server.client_environment
-                  ~isolated_home:private_home (Runtime_official_account.Captured execution.account_home) with
-                  | Ok child -> child | Error error -> fail (Runtime_codex_app_server.error_to_string error) in
+                let child = match Runtime_official_account.private_codex_environment
+                  ~home:private_home
+                  (Runtime_account_access.account (Masc_test_deps.authorized_account execution.account_home)) with
+                  | Ok child -> child | Error detail -> fail detail in
                 check (option string) "declared env_key retains the admitted value"
                   (Some "declared-key-a") (env_value "CUSTOM_GATEWAY_KEY" child);
                 check (option string) "declared header retains the admitted value"
@@ -346,12 +337,6 @@ let test_retired_codex_profiles () =
       ["profile = \"gateway\""; "profile = 42";
        "[profiles.gateway]\nmodel_provider = \"custom\""])
 
-let test_conflicting_current_codex_homes () =
-  with_directory (fun declared -> with_directory (fun private_home ->
-    check bool "a direct call cannot replace its declared account with a private home" true
-      (Result.is_error (Runtime_codex_app_server.client_environment
-        ~isolated_home:private_home (Runtime_official_account.Current (Some declared))))))
-
 let test_missing_codex_home () =
   with_directory (fun directory ->
     with_cwd directory (fun () ->
@@ -359,16 +344,15 @@ let test_missing_codex_home () =
       List.iter (fun home -> List.iter (fun codex_home ->
         with_env ["HOME", home; "CODEX_HOME", codex_home] (fun () ->
           check bool "an absent or empty HOME cannot select a cwd credential store" true
-            (Result.is_error (materialization Codex));
-          check bool "direct current calls reject the same missing selection" true
-            (Result.is_error (Runtime_codex_app_server.client_environment
-              (Runtime_official_account.Current None))))) [None; Some ""])
+            (Result.is_error (materialization Codex)))) [None; Some ""])
         [None; Some ""];
       with_env ["HOME", Some ""; "CODEX_HOME", Some directory] (fun () ->
         check (option string) "a valid inherited CLI directory does not require HOME"
           (Some directory) (env_value "CODEX_HOME" (child_environment (materialize Codex)))))))
 
-let () = run "native account selection"
+let () =
+  Masc_test_deps.publish_single_user_access ();
+  run "native account selection"
   ["admission to execution",
     [test_case "Claude inherited user home is captured" `Quick (test_inherited_home Claude);
      test_case "Codex inherited user home is captured" `Quick (test_inherited_home Codex);
@@ -381,13 +365,11 @@ let () = run "native account selection"
    "captured context boundaries",
     [test_case "Claude spawn environment is a copy" `Quick (test_environment_copy Claude);
      test_case "Codex spawn environment is a copy" `Quick (test_environment_copy Codex);
-     test_case "Codex direct current calls keep call-time selection" `Quick test_current_call_timing;
      test_case "Claude refusal diagnosis retains admitted credentials" `Quick test_claude_credential_diagnosis;
      test_case "Codex private home blocks unconfigured credentials" `Quick (test_private_codex_environment false);
      test_case "Codex private home retains declared captured credentials" `Quick (test_private_codex_environment true);
      test_case "Codex declared provider retains captured credential keys" `Quick test_declared_codex_credentials;
      test_case "Codex retired profiles fail before dispatch" `Quick test_retired_codex_profiles;
-     test_case "Codex direct calls reject conflicting homes" `Quick test_conflicting_current_codex_homes;
      test_case "Codex empty or missing HOME cannot select a cwd store" `Quick test_missing_codex_home;
      test_case "Claude relative CLI directory is captured" `Quick (test_relative_cli_directory Claude);
      test_case "Codex relative CLI directory is captured" `Quick (test_relative_cli_directory Codex);

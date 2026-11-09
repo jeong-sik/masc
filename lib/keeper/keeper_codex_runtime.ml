@@ -257,9 +257,9 @@ let record_usage_windows ~quota_scope report =
    can still say when it resets without a turn, so ask it once. The read
    outlives this turn ({!Runtime_provider_usage_read.read_codex_after_spent_usage_refusal}),
    and the refused turn returns without waiting on it. *)
-let read_usage_after_quota_refusal ~keeper_name ~quota_scope ~clock ~cwd config =
+let read_usage_after_quota_refusal ~keeper_name ~quota_scope ~clock ~cwd ~account config =
   match Runtime_provider_usage_read.read_codex_after_spent_usage_refusal
-          ~clock ~cwd ~scope:quota_scope config with
+          ~clock ~cwd ~scope:quota_scope ~account config with
   | Runtime_provider_usage_read.Started | Runtime_provider_usage_read.Already_reading -> ()
   | Runtime_provider_usage_read.No_root_switch ->
     Log.Keeper.warn
@@ -298,10 +298,10 @@ let forgotten_threads ~keeper_name ~visited ~final =
     [] visited
 ;;
 
-let delete_forgotten_threads ~keeper_name ~mgr ~clock ~cwd config = function
+let delete_forgotten_threads ~keeper_name ~mgr ~clock ~cwd ~account config = function
   | [] -> ()
   | thread_ids ->
-    (match Runtime_codex_app_server.delete_threads ~mgr ~clock ~cwd config thread_ids with
+    (match Runtime_codex_app_server.delete_threads ~mgr ~clock ~cwd ~account config thread_ids with
      | Error error ->
        Log.Keeper.warn ~keeper_name "Codex thread delete for %d thread(s) failed: %s"
          (List.length thread_ids) (Runtime_codex_app_server.error_to_string error)
@@ -994,7 +994,8 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~offi
     ~context_injector ~context ~terminal_effect_state ~event_bus ~raw_trace ~on_event
     ~observe_effect_attempted ~observe_successful_tool_completion ~observe_transport_uncertain
     ~on_tool_execution ~on_official_client_tool_boundary ~on_official_client_result_handoff ~on_native_action ~on_native_tool_completion ~on_native_tool_progress
-    ~on_usage_report ~(config : Runtime_execution.codex_app_server) =
+    ~on_usage_report ~(account : Runtime_codex_app_server.authorized_account)
+    ~(config : Runtime_execution.codex_app_server) =
   on_results_ready None;
   match Eio_context.get_env_opt (), Eio_context.get_clock_opt () with
   | None, _ ->
@@ -1094,7 +1095,7 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~offi
     let* () = on_guidance_prepared () in
     let tool_surface_sha256 =
       Keeper_official_client_session_store.tool_surface_sha256
-        ?account_home:(Some (Runtime_official_account.home config.account_home))
+        ?account_home:(Some (Runtime_official_account.home (Runtime_account_access.account account)))
         ~native_posture
         tools
     in
@@ -1292,7 +1293,6 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~offi
     in
     let client_config =
       { Runtime_codex_app_server.cli_path = config.cli_path
-      ; account_home = Runtime_official_account.Captured config.account_home
       ; isolated_home = None
       ; model = config.model
       ; context_window
@@ -1734,6 +1734,7 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~offi
                ~turn_id
                ~turn_count
                ~updated_at:(Time_compat.now ())))
+         ~account
          client_config
          ~prompt
          ~images
@@ -1768,6 +1769,7 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~offi
          read_usage_after_quota_refusal
            ~keeper_name ~quota_scope ~clock
            ~cwd:process_cwd
+           ~account
            config;
        (match stored_session with
         | Some restore ->
@@ -1817,6 +1819,7 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~offi
          read_usage_after_quota_refusal
            ~keeper_name ~quota_scope ~clock
            ~cwd:process_cwd
+           ~account
            config;
        recovery_failure :=
          recovery_failure_of_attempt ~thread_mode
@@ -1980,7 +1983,7 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~offi
     delete_forgotten_threads ~keeper_name
       ~mgr:(Posix_spawn_process_mgr.foreground_mgr ~clock
         ~grace_seconds:Process_eio.child_exit_grace_seconds)
-      ~clock ~cwd:process_cwd client_config
+      ~clock ~cwd:process_cwd ~account client_config
       (forgotten_threads ~keeper_name ~visited:!visited_sessions ~final:!session_state);
     outcome
 ;;
@@ -2079,10 +2082,11 @@ let run ?(on_guidance_prepared = fun () -> Ok ()) ~input_source ~media_store ?ar
     ?on_native_tool_completion
     ?on_native_action
     ?on_usage_report
-    ~event_bus ~raw_trace ~on_event ~(config : Runtime_execution.codex_app_server) () =
+    ~event_bus ~raw_trace ~on_event ~(account : Runtime_codex_app_server.authorized_account)
+    ~(config : Runtime_execution.codex_app_server) () =
   let quota_scope =
     Runtime_quota_window.scope_of_codex_home
-      (Some (Runtime_official_account.home config.account_home))
+      (Some (Runtime_official_account.home (Runtime_account_access.account account)))
   in
   let settled_session = Atomic.make None in
   let pending_result_receipts = Atomic.make None in
@@ -2231,6 +2235,7 @@ let run ?(on_guidance_prepared = fun () -> Ok ()) ~input_source ~media_store ?ar
           ~observe_effect_attempted
           ~observe_successful_tool_completion
         ~observe_transport_uncertain
+          ~account
           ~config)
       ()))
   in

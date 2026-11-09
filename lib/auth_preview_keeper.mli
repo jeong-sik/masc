@@ -3,9 +3,10 @@
 
 (** The Keeper routes of the localhost preview (plan D1-5): a person makes a
     Keeper, gives it one of their Runtimes, and lists their Keepers. The
-    records are those of {!Authz_keeper}; no Keeper TOML is written, and no
-    turn runs. The preview command judges the request with
-    {!Auth_preview.keeper_owner} and hands the person here.
+    records are those of {!Authz_keeper}; no Keeper TOML is written. The
+    preview command judges the request with {!Auth_preview.keeper_owner} and
+    hands the person here. A turn of a Keeper made here runs through
+    {!turn_path} (plan D2-8), which the server answers.
 
     A Keeper or a Runtime of another person is answered as one that is not
     there (404), so the answer does not say whose it is. A Keeper name is
@@ -20,6 +21,15 @@ val keepers_path : string
 
 (** [/api/v1/auth/keepers/assign]: [POST] is {!assign}. *)
 val assign_path : string
+
+(** [/api/v1/auth/keepers/turn]: [POST] runs one turn of the person's Keeper
+    on the Runtime they gave it ([Server_preview_keeper_turn], plan D2-8). *)
+val turn_path : string
+
+(** A Keeper name of the Keeper grammar ({!Keeper_id.Keeper_name}), which is
+    also the name of its TOML, as an id of the log. A name that is not both
+    gets a 400 JSON [{"error": ...}]. *)
+val keeper_id_of : string -> (Authz_types.Keeper_id.t, Login_routes.answer) result
 
 (** A 200 JSON [{"keepers": [{"keeper_id":...,"runtime_id":...}]}]: the
     Keepers the person owns, each with the Runtime of its latest assignment

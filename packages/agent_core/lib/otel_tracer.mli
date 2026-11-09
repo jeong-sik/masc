@@ -174,38 +174,6 @@ val inst_drain_metrics : instance -> metric_entry list
 (** Clear all recorded metrics from the instance. *)
 val inst_clear_metrics : instance -> unit
 
-(** Convert metric type to its OTLP string representation. *)
-val metric_type_to_string : metric_type -> string
-
-(** {1 Global operations} *)
-
-val start_span : Tracing.span_attrs -> span
-val end_span : span -> ok:bool -> unit
-val add_event : span -> string -> unit
-val add_attrs : span -> (string * string) list -> unit
-val add_link : span -> trace_id:string -> span_id:string -> unit
-
-(** Run within a span. If the entropy source cannot mint a valid W3C ID, record
-    [otel.id_entropy_failures] and run the operation untraced. *)
-val with_span : Tracing.span_attrs -> (unit -> 'a) -> 'a
-
-val current_span : unit -> span option
-val flush : unit -> span list
-val reset : unit -> unit
-val completed_count : unit -> int
-val active_count : unit -> int
-
-(** {1 Global metric operations} *)
-
-(** Record a metric on the global instance. *)
-val record_metric : name:string -> value:float -> metric_type:metric_type -> unit
-
-(** Retrieve all metrics from the global instance. *)
-val get_metrics : unit -> (string * float * metric_type) list
-
-(** Clear all metrics from the global instance. *)
-val clear_metrics : unit -> unit
-
 (** {1 JSON serialization} *)
 
 val attrs_to_json : (string * string) list -> Yojson.Safe.t
@@ -213,26 +181,11 @@ val event_to_json : otel_event -> Yojson.Safe.t
 val status_to_json : span -> Yojson.Safe.t
 val span_to_json : span -> Yojson.Safe.t
 val metric_entry_to_json : metric_entry -> Yojson.Safe.t
-val to_otlp_json : config -> Yojson.Safe.t
 
 (** {1 First-class module constructors} *)
 
+(** Build a first-class tracer backed by the instance. Its [with_span]
+    operation degrades only the observation span on {!Entropy_unavailable}: it
+    records [otel.id_entropy_failures] on the instance and the wrapped
+    operation still runs. *)
 val tracer_of_instance : instance -> Tracing.t
-
-(** Build a first-class tracer backed by a stdlib-mutex instance.
-
-    If [config] is omitted, [default_config_from_env ()] is called at creation
-    time, which reads [otel_endpoint_env_var] from the environment.
-    [getenv] is forwarded to [default_config_from_env] and is useful for tests.
-    Its [with_span] operation degrades only the observation span on
-    {!Entropy_unavailable}; the wrapped operation still runs. *)
-val create : ?config:config -> ?getenv:(string -> string option) -> unit -> Tracing.t
-
-(** Build a first-class tracer backed by an Eio-mutex instance.
-
-    If [config] is omitted, [default_config_from_env ()] is called at creation
-    time, which reads [otel_endpoint_env_var] from the environment.
-    [getenv] is forwarded to [default_config_from_env] and is useful for tests.
-    Its [with_span] operation degrades only the observation span on
-    {!Entropy_unavailable}; the wrapped operation still runs. *)
-val create_eio : ?config:config -> ?getenv:(string -> string option) -> unit -> Tracing.t

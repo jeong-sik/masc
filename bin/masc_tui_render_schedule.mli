@@ -65,6 +65,10 @@ val keeper_flags_gap : int
 
 val keeper_last_turn_width : int
 
+val keeper_minimum_name_width : int
+val keeper_maximum_name_width : int
+(** The name column's floor, and the widest name worth reading whole. *)
+
 val keeper_flags_minimum_inner_width : int
 (** The inner width from which the roster shows its flag columns. The
     Activity pane opens only where a surface keeps this much inside its

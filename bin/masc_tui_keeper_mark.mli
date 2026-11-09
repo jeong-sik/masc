@@ -91,6 +91,16 @@ val pulse_quiet_mark : string
 (** An hour in which no autonomous turn ran. The mark of a keeper with no turn
     yet. *)
 
+val axis_next_glyph : string
+(** ▹: what comes next. It opens the next cell of the views' header, and
+    DETAIL puts it before the runtime the next dispatch of a failed turn takes. *)
+
+val pulse_header : string
+val axis_now_header : string
+val axis_next_header : string
+(** The header words over the views' axis row (RFC-0515 §2.4): the turn pulse,
+    the NOW cell and the next cell. {!column_legend} names them. *)
+
 val column_legend : (string * string) list
 (** The Keepers header words, the sentence about a failing keeper's past and
     the Mode S letters, each with what it means. The sheet prints it; the

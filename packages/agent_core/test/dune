@@ -82,7 +82,6 @@
   test_agent_tools_index
   test_api_dispatch
   test_tool_execution
-  test_artifact_service
   test_async_agent
   test_backend_openai_codec
   test_provider_agnostic_reasoning_replay
@@ -144,7 +143,6 @@
   test_multimodal
   test_multivendor_events
   test_multivendor_live
-  test_otel
   test_otel_export
   test_otel_tracer
   test_pipeline
@@ -215,7 +213,6 @@
   test_agent_tools_index
   test_api_dispatch
   test_tool_execution
-  test_artifact_service
   test_async_agent
   test_backend_openai_codec
   test_provider_agnostic_reasoning_replay
@@ -277,7 +274,6 @@
   test_multimodal
   test_multivendor_events
   test_multivendor_live
-  test_otel
   test_otel_export
   test_otel_tracer
   test_pipeline

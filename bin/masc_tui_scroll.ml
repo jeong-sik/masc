@@ -79,6 +79,32 @@ let ensure_visible ~cursor ~height scroll =
   else if cursor > scroll + height - 1 then cursor - height + 1
   else Int.max 0 scroll
 
+let window_of_heights ~heights ~cursor ~rows scroll =
+  let heights = Array.of_list heights in
+  let count = Array.length heights in
+  if count = 0 || rows <= 0 then 0, 0
+  else
+    (* [before.(i)] is the lines the items ahead of item [i] take. *)
+    let before = Array.make (count + 1) 0 in
+    Array.iteri (fun i height -> before.(i + 1) <- before.(i) + height) heights;
+    let lines ~first ~stop = before.(stop) - before.(first) in
+    let cursor = Int.max 0 (Int.min cursor (count - 1)) in
+    let rec bottom first =
+      if first > 0 && lines ~first:(first - 1) ~stop:count <= rows then bottom (first - 1)
+      else first
+    in
+    let rec down first =
+      if first < cursor && lines ~first ~stop:(cursor + 1) > rows then down (first + 1)
+      else first
+    in
+    let first =
+      Int.min (bottom count) (if cursor < scroll then cursor else down (Int.max 0 scroll))
+    in
+    let rec fitting stop =
+      if stop < count && lines ~first ~stop:(stop + 1) <= rows then fitting (stop + 1) else stop
+    in
+    first, fitting first - first
+
 let preview_height ~total ~keep = Int.max 0 (Int.min (total - keep) (total / 2))
 let body_height ~total ~keep = Int.max 1 (total - preview_height ~total ~keep)
 

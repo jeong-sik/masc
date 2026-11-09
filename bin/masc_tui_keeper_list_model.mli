@@ -157,6 +157,22 @@ val holds_awaiting_verification : verification_holders -> keeper_name:string -> 
     The row's current task cannot be relied on for this, since submission
     clears it. *)
 val primary_activity_of_row : row -> activity
+
+(** What a Keeper waits on a person for. *)
+type person_wait =
+  | Held_tool of Masc.Tui_decode.keeper_tool_approval  (** The tool call held for approval. *)
+  | Held_item of Masc.Tui_decode.waiting_item
+      (** The human-in-the-loop wait, when the row carries no tool approval. *)
+  | Open_questions of int  (** The questions the Keeper asked and nobody answered. *)
+  | Confirmation_item of Masc.Tui_decode.waiting_item
+      (** The wait for an operator's confirmation. *)
+
+val person_wait : row -> person_wait option
+(** The reading that makes the row's activity [Held_call], [Question] or
+    [Confirmation]: the held tool call, else the item whose source is the
+    human-in-the-loop wait; the open questions; the item whose source is the
+    operator's pending confirmation. Never another item of the same row.
+    [None] for every other activity. *)
 val badges_of_row : row -> badge list
 val group_of_row : row -> attention
 val trail_of_row : row -> Masc_tui_keeper_trail.trail

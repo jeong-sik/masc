@@ -58,13 +58,12 @@ val classify_core_error : Agent_core.Error.t -> t
 val classify_provider_runtime_error_record
   :  ?agent_core_timeout:Keeper_turn_terminal_code.agent_core_timeout
   -> code:string
-  -> detail:string
   -> unit
   -> t
 (** Classify a registry [Provider_runtime_error] from its typed timeout
     observation when present, preserving the API/provider source and phase.
     Without typed evidence, only existing provider timeout wire markers such as
-    ["provider_error_timeout:http_operation"] are recognized. [detail] is
-    not trusted for classification. *)
+    ["provider_error_timeout:http_operation"] are recognized. The record's
+    free-text detail is not an input. *)
 
 val is_provider_timeout_error : Agent_core.Error.t -> bool

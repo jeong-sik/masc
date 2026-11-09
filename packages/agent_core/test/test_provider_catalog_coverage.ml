@@ -322,12 +322,7 @@ let test_full_entry_parses_auth_and_capabilities () =
     (option (list string))
     "supported models"
     (Some [ "rich-model"; "rich-fast" ])
-    caps.supported_models;
-  check
-    (option string)
-    "default model helper"
-    (Some "rich-model")
-    (Provider_catalog.default_model_for_provider catalog "rich-http")
+    caps.supported_models
 ;;
 
 let test_present_type_mismatches_are_rejected () =

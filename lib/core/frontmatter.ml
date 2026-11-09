@@ -25,7 +25,7 @@ let read content =
     let c0 = String.unsafe_get content 0 in
     if c0 <> '-' && c0 <> ' ' && c0 <> '\t' && c0 <> '\r' then Absent
     else
-      let rec next_line start =
+      let next_line start =
         match String.index_from_opt content start '\n' with
         | Some idx -> idx, idx + 1
         | None -> len, len

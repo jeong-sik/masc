@@ -36,9 +36,6 @@ let respond_ide_error ~status ~request err reqd =
     reqd
 ;;
 
-
-type ide_scope = Server_ide_scope.ide_scope = Scope_codebase of { slug : string }
-
 let codebase_of_ide_scope = Server_ide_scope.codebase_of_ide_scope
 let resolve_ide_scope_for_query = Server_ide_scope.resolve_ide_scope_for_query
 

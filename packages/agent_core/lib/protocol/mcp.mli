@@ -17,11 +17,6 @@ type mcp_tool = Mcp_schema.mcp_tool =
   ; input_schema : Yojson.Safe.t
   }
 
-type mcp_resource = Mcp_schema.mcp_resource
-type mcp_resource_contents = Mcp_schema.mcp_resource_contents
-type mcp_prompt = Mcp_schema.mcp_prompt
-type mcp_prompt_result = Mcp_schema.mcp_prompt_result
-
 val json_schema_type_to_param_type : string -> Types.param_type
 val json_schema_type_to_param_type_result : string -> (Types.param_type, string) result
 val json_schema_to_params : Yojson.Safe.t -> Types.tool_param list
@@ -112,7 +107,6 @@ val process_id : t -> int
 val await_exit : t -> Eio.Process.exit_status
 (** Await the owned process handle; does not close the connection or impose a
     timeout. The process manager defines descendant cleanup. *)
-val is_alive : t -> bool
 
 (** {1 Tool operations} *)
 
@@ -133,24 +127,6 @@ val list_tools_full : t -> (Mcp_schema.Sdk_types.tool list, Error.t) result
 val call_tool_full :
   t -> name:string -> arguments:Yojson.Safe.t ->
   (Mcp_schema.Sdk_types.tool_result, Error.t) result
-
-(** {1 Resource and prompt operations} *)
-
-val list_resources : t -> (Mcp_schema.mcp_resource list, Error.t) result
-
-val read_resource
-  :  t
-  -> uri:string
-  -> (Mcp_schema.mcp_resource_contents list, Error.t) result
-
-val list_prompts : t -> (Mcp_schema.mcp_prompt list, Error.t) result
-
-val get_prompt
-  :  t
-  -> name:string
-  -> ?arguments:(string * string) list
-  -> unit
-  -> (Mcp_schema.mcp_prompt_result, Error.t) result
 
 (** {1 Managed connections} *)
 val text_of_tool_result : Mcp_schema.Sdk_types.tool_result -> string
@@ -186,12 +162,6 @@ val connect_and_load
   -> mgr:_ Eio.Process.mgr
   -> server_spec
   -> (managed, Error.t) result
-
-val connect_all
-  :  sw:Eio.Switch.t
-  -> mgr:_ Eio.Process.mgr
-  -> server_spec list
-  -> (managed list, Error.t) result
 
 val close_managed : managed -> unit
 val close_all : managed list -> unit

@@ -111,5 +111,3 @@ let json_of_string_opt = function
 ;;
 
 let json_of_string_list lst = `List (List.map (fun s -> `String s) lst)
-
-let json_of_string_pairs pairs = `Assoc (List.map (fun (k, v) -> k, `String v) pairs)

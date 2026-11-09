@@ -109,7 +109,6 @@ module Runtime = Runtime
 module Sessions = Sessions
 module Sessions_store = Sessions_store
 module Harness = Harness
-module Eval = Eval
 module Trajectory = Trajectory
 module Metrics = Metrics
 module Async_agent = Async_agent

@@ -72,6 +72,3 @@ val json_of_string_opt : string option -> Yojson.Safe.t
 
 (** Serialize string list to JSON: [["a"; "b"]] -> [`List [`String "a"; `String "b"]]. *)
 val json_of_string_list : string list -> Yojson.Safe.t
-
-(** Serialize (string * string) list to JSON assoc: [[("k","v")]] -> [`Assoc [["k", `String "v"]]]. *)
-val json_of_string_pairs : (string * string) list -> Yojson.Safe.t

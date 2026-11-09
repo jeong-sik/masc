@@ -268,7 +268,9 @@ let () =
          | Masc.Keeper_lane_cli_oneshot.Not_an_official_client _ -> "not_an_official_client"
          | Masc.Keeper_lane_cli_oneshot.Execution_failed _ -> "execution_failed"
          | Masc.Keeper_lane_cli_oneshot.Invalid_json_output _ -> "invalid_json_output"
-         | Masc.Keeper_lane_cli_oneshot.Invalid_domain_output _ -> "invalid_domain_output");
+         | Masc.Keeper_lane_cli_oneshot.Invalid_domain_output _ -> "invalid_domain_output"
+         (* [run] calls the slot it is given; only a walk holds a slot. *)
+         | Masc.Keeper_lane_cli_oneshot.Held _ -> "held");
       Printf.printf "%s %s trial=%d FAIL %.1fs %s\n%!" !lane !runtime trial elapsed detail
   done;
   let summary =

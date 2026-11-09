@@ -84,7 +84,8 @@ val of_cli_observation : cli_observation -> t
 val cli_observation_slot : cli_observation -> string
 val cli_was_dispatched : cli_observation -> bool
 (** The original per-slot runner observes dispatch before native execution or
-    output validation, but never for an unresolved/non-official runtime. *)
+    output validation, but never for an unresolved/non-official runtime or a
+    slot held until a provider-stated time. *)
 val combine : t -> t -> t
 
 type local_rejection = Runtime_unavailable | Runtime_contract | Input_contract

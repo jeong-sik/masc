@@ -5469,6 +5469,10 @@ type scrolled = {
    moves has to move the typed layout in the same change. *)
 let listing_chrome ~error = if Option.is_some error then 9 else 7
 
+(* The verdict list also draws the newest recorded timestamp above its column
+   heading, including when the page is empty or has not been observed. *)
+let harness_listing_chrome ~error = listing_chrome ~error + 1
+
 (* A listing draws a reading of the selected row under its list, and both are
    paid for out of the same frame. The reading was given exactly one row and
    cut there, while a list shorter than the frame drew blank rows under its
@@ -25478,10 +25482,15 @@ let scrolled_surface_rows (state : state) ~cols : surface -> scrolled option =
   | Harness ->
       if Option.is_some state.harness_detail then None
       else
-        listing ~error:state.harness_error
-          (match state.harness with
-           | None -> 0
-           | Some s -> List.length s.Tui_decode.hs_verdicts)
+        Some
+          { sc_count =
+              (match state.harness with
+               | None -> 0
+               | Some s -> List.length s.Tui_decode.hs_verdicts)
+          ; sc_chrome = harness_listing_chrome ~error:state.harness_error
+          ; sc_overflow_takes_row = true
+          ; sc_preview_keep = None
+          }
   | Repositories ->
       if state.repository_changes_open then repository_changes_listing ()
       else

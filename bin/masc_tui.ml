@@ -39804,6 +39804,14 @@ Use relative paths for resources already held in the package. -->
                let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
                let projection = Masc_tui_types.lanes_overview_projection state ~rows ~cols in
                Masc_tui_scroll.page_step ~height:projection.lop_list_height
+             else if (state.view = Verification
+                       && Option.is_none state.verification_detail_request_id)
+                     || (state.view = Harness && Option.is_none state.harness_detail) then
+               (match scrolled_surface state state.view with
+                | None -> surface_page_rows state
+                | Some scrolled ->
+                    Masc_tui_scroll.page_step
+                      ~height:(surface_body_height ~rows:(surface_rows state) scrolled))
              else surface_page_rows state
            in
            let direction = if key = Some "pagedown" then 1 else -1 in

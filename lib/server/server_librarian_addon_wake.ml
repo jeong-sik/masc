@@ -104,7 +104,7 @@ let discover ~fold_originals ~config ~store =
       else Error "Librarian result hint belongs to a different original installation"
 let install ~sw ~config =
   let base_path=config.Workspace.base_path in
-  let store=Lane_addon_store.create ~root:(Filename.concat (Workspace.masc_dir config) "lane-addons") in
+  let store=Lane_addon_store.of_config config in
   let stopped=Atomic.make false in
   let rescan_state=Atomic.make Idle in
   let run_discovery event =

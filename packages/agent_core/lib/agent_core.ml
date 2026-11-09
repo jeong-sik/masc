@@ -123,7 +123,6 @@ module Sessions_store = Sessions_store
 module Harness = Harness
 module Eval = Eval
 module Trajectory = Trajectory
-module Tool_middleware = Tool_middleware
 module Metrics = Metrics
 module Async_agent = Async_agent
 module Consumer = Consumer

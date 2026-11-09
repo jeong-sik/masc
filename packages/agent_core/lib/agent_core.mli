@@ -125,7 +125,6 @@ module Consumer = Consumer
 module Eval_stats = Eval_stats
 module Runtime_store = Runtime_store
 module Tool_input_validation = Tool_input_validation
-module Tool_middleware = Tool_middleware
 
 (** {1 Version} *)
 

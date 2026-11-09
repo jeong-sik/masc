@@ -846,7 +846,9 @@ or completion.
 | `NOW` | what the keeper is doing at this moment |
 | `AGE` | time since it last moved: the open turn's latest update (its start before it reports one), else the later of its last turn and the start of its wait |
 | `LIFECYCLE` | the keeper process |
-| `◂ 12h ● now ▹ next` | every view but the list draws a keeper on one axis row: its turn pulse, its NOW cell, then what comes next -- what it waits on a person for, the next scheduled run, the next dispatch path and the librarian lag. With two lines only a failing keeper adds a second line |
+| `◂ 12h ● now ▹ next` | every view but the list draws a keeper on one axis row. The memory and age views pick their own cells; the others draw its turn pulse, its NOW cell, then what comes next -- what it waits on a person for, the next scheduled run, the next dispatch path and the librarian lag. With two lines only a failing keeper adds a second line |
+| `◂ 12h ● librarian ▹ lag · digest · gap` | the memory view: the turn pulse, how the librarian's last pass ended, then the unread turns as a bar against the listed keeper furthest behind, the time since its last digest and the atoms requests skip; ? is a value the server did not measure |
+| `◂ fact age ● updated ▹ lag · stale · facts` | the age view: the keeper's facts by age as the facts strip draws them, the time since its memory last changed, then the unread-turn bar, invalidated sources and the fact count; ? is a value the server did not measure |
 | `◂` | a failing keeper's last failure: how long ago · cause · the runtime that ended it · candidates tried. The list draws it in place of its runtime or first in DETAIL, the views on a failing keeper's second line |
 | `failing` | how long the keeper has been in the failing phase; ? when the server recorded no start, or the start is ahead of this screen's clock (Detailed second row) |
 | `✓ ⊘ ✗ · ?` | autonomous turn results of the last 12 clock hours, one mark per hour, newest on the right: ✓ ok / ⊘ rested / ✗ failed / · no turn / ? unknown; chat turns are not counted, and an hour from before the server's record of the keeper reads ? (Detailed second row, and ◂ 12h in the views) |
@@ -854,8 +856,8 @@ or completion.
 | `S D/M/R` | sandbox: docker / microvm / remote_ssh |
 | `쉬는 중` | resting path: relative duration (제공자 stated / 상한 bounded); in DETAIL ▹ prefixes next candidate after turn failure |
 | `◷` | next scheduled run or hold status (Detailed second row, and ▹ next in the views) |
-| `mem · lag · stale` | keeper memory health: unread gap/lag, update clock, invalidated sources (Detailed second row, and its lag in ▹ next in the views) |
-| `facts` | ordinary memory facts counted by time since first seen, oldest on the left (7d or older, 1d to 7d, 1h to 1d, under 1h); bar height is relative to the tallest bin of the same strip, 0 is none, ? is not measured (Detailed second row) |
+| `mem · lag · stale` | keeper memory health: unread gap/lag, update clock, invalidated sources (Detailed second row; its lag in ▹ next in the views, and the memory and age views draw their own cells). mem ? is memory health not read yet, or a refused row that may be this keeper's; mem ! is this keeper's row, refused; — is a keeper with no memory snapshot |
+| `facts` | ordinary memory facts counted by time since first seen, oldest on the left (7d or older, 1d to 7d, 1h to 1d, under 1h); bar height is relative to the tallest bin of the same strip, 0 is none, ? is not measured (Detailed second row, and ◂ fact age in the age view) |
 | `사람 몫 / 효과 확인 / 분류 안 됨` | requires human operator action, effect review, or unmapped fault (NOW column) |
 
 ## Memory marks

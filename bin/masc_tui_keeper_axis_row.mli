@@ -8,15 +8,24 @@
 
 type before =
   | Hour_pulse  (** The turn pulse, one mark per clock hour, newest on the right. *)
+  | Fact_ages  (** The Keeper's facts counted into the server's four age bins. *)
 
 type current =
   | Activity  (** The activity mark and word the list draws under NOW. *)
+  | Librarian_pass  (** How the librarian's last pass ended. *)
+  | Update_age  (** How long ago the Keeper's memory snapshot last changed. *)
 
 type next =
   | Wait_run_path_lag
       (** What the Keeper waits on a person for, the next scheduled run, the
           rest of the next dispatch path, and the turns the librarian has not
           read. *)
+  | Lag_digest_gap
+      (** The unread turns as a bar, the time since the librarian's last
+          digest, and the atoms requests skip. *)
+  | Lag_stale_facts
+      (** The unread turns as a bar, the invalidated sources, and the fact
+          count. *)
 
 type axis = { before : before; current : current; next : next }
 
@@ -25,6 +34,10 @@ type shape =
   | Axis of axis
 
 val shape_of_view : Masc_tui_keeper_list_model.view -> shape
+(** The memory view draws the pulse, the librarian's last pass and how far
+    it trails; the age view draws the facts by age, the last change and how
+    far the librarian trails. The other views draw the pulse, the activity and
+    what comes next. *)
 
 type second_line =
   | No_second_line

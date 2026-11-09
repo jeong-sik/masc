@@ -100,8 +100,11 @@ module Body_writer : sig
       comes from the end of the stream's switch ({!of_h2}). *)
 
   val close : t -> unit
-  (** On HTTP/2 the close waits for the bytes written so far; a stream that
-      ends first (peer reset) answers that wait and the writer closes. *)
+  (** Ends the body as complete. On HTTP/2 the close waits for the bytes
+      written so far; a stream that ends first (peer reset) answers that wait
+      and the writer closes. A route that raises after closing keeps its
+      response ({!response_state} is [Answered]), so a route that fails does
+      not close. *)
 
   val is_closed : t -> bool
   (** On HTTP/2 also true once the stream is over: its switch failed or

@@ -196,12 +196,16 @@ let early_failure = "fixture route failed before its response"
 let half_failure = "fixture route failed mid-stream"
 let answered_failure = "fixture route failed after its response"
 let closed_failure = "fixture route failed after closing its body"
+let sse_failure = "fixture SSE route failed before its stream ended"
 
 (* An unreadable auth configuration keeps its own answer, a 503. *)
 let auth_config_failure =
   Auth.Auth_config_error { file = "fixture/auth/config.json"; reason = "fixture" }
 
-let failing_routes ~sw:_ ~clock:_ =
+let chunked_ok =
+  Httpun.Response.create ~headers:(Httpun.Headers.of_list [ "transfer-encoding", "chunked" ]) `OK
+
+let failing_routes ~sw:_ ~clock =
   Masc.Http_server_eio.Router.create ()
   |> Server_route.get Server_route.Always_public "/early" (fun _request _reqd ->
     failwith early_failure)
@@ -227,6 +231,20 @@ let failing_routes ~sw:_ ~clock:_ =
     failwith closed_failure)
   |> Server_route.get Server_route.Always_public "/auth-config" (fun _request _reqd ->
     raise auth_config_failure)
+  |> Server_route.get Server_route.Always_public "/auth-config-late" (fun _request reqd ->
+    let writer =
+      Masc.Http_reqd.respond_with_streaming ~flush_headers_immediately:true reqd chunked_ok in
+    Masc.Http_reqd.Body_writer.write_string writer "partial";
+    raise auth_config_failure)
+  (* A route that fails leaves its SSE response open, so the failure cuts it
+     instead of ending it as complete. *)
+  |> Server_route.get Server_route.Always_public "/sse-failed" (fun _request reqd ->
+    let response =
+      Server_sse_response.respond ~clock
+        ~stalled_after_s:Server_mcp_transport_http_headers.sse_stalled_after_s
+        ~flush_headers_immediately:true reqd chunked_ok
+    in
+    Server_sse_response.close_after response (fun () -> failwith sse_failure))
 
 let h2_outcome client path =
   let result, resolve = Eio.Promise.create () in
@@ -358,7 +376,25 @@ let test_route_failure_follows_the_response_state () =
              (String_util.contains_substring output "4\r\ndone\r\n"
               && String_util.contains_substring output "\r\n0\r\n\r\n"));
         check int "a failure after the route closed its body is logged on both" 2
-          (logged closed_failure)))
+          (logged closed_failure);
+        (* HTTP/1.1 first: a response nobody ends stays open there at once,
+           while the HTTP/2 client would wait for the test's timeout. *)
+        (match h1_outcome ~routes "/auth-config-late" with
+         | `Open output -> failf "HTTP/1.1: the late auth failure left the body open: %S" output
+         | `Closed output ->
+           check bool "HTTP/1.1: a late auth failure cuts the body like any failure" true
+             (String_util.contains_substring output "7\r\npartial\r\n"
+              && not (String_util.contains_substring output "\r\n0\r\n\r\n")));
+        check bool "HTTP/2: a late auth failure resets the stream" true
+          (match h2_outcome client "/auth-config-late" with `Reset -> true | `Ended _ -> false);
+        (match h1_outcome ~routes "/sse-failed" with
+         | `Open output -> failf "HTTP/1.1: the failed SSE response stayed open: %S" output
+         | `Closed output ->
+           check bool "HTTP/1.1: a failed SSE route's body has no last chunk" false
+             (String_util.contains_substring output "\r\n0\r\n\r\n"));
+        check bool "HTTP/2: a failed SSE route's stream is reset" true
+          (match h2_outcome client "/sse-failed" with `Reset -> true | `Ended _ -> false);
+        check int "a failed SSE route is logged on both" 2 (logged sse_failure)))
 
 (* A request body that ends short reaches no route; the request has its
    answer or its end by then. A client that leaves mid-body cuts its body,
@@ -399,6 +435,16 @@ let test_a_cut_request_body_reaches_no_route () =
          check bool "a whole body gets the route's answer" true
            (String_util.contains_substring output "stored"));
       check (list string) "the route got the whole body" [ "hello" ] !delivered;
+      delivered := [];
+      (match
+         h1_exchange ~routes
+           (post "/upload" ~fields:"Transfer-Encoding: chunked\r\n" "5\r\nhello\r\n0\r\n\r\n")
+       with
+       | `Open output -> failf "HTTP/1.1: the answer to a whole chunked body did not end: %S" output
+       | `Closed output ->
+         check bool "a whole chunked body gets the route's answer" true
+           (String_util.contains_substring output "stored"));
+      check (list string) "the route got the whole chunked body" [ "hello" ] !delivered;
       delivered := [];
       (match h1_exchange ~routes (post "/upload" ~fields:"Content-Length: 10\r\n" "hello") with
        | `Open output -> failf "HTTP/1.1: the answer to a cut body did not end: %S" output

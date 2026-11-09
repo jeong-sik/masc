@@ -9,8 +9,7 @@ type t =
 val to_string : t -> string
 
 val valid_strings : string list
-(** The canonical enum [Tool_shard_types_enum_mirrors.fs_write_mode_enum_strings]
-    hand-copies. *)
+(** The canonical enum the Write/Edit tool schema lists by hand. *)
 
 val of_args : Yojson.Safe.t -> (t, string) result
 (** The [mode] member of a Write/Edit call. An absent member, a non-string

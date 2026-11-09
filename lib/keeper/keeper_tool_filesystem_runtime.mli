@@ -1,9 +1,8 @@
 (** Filesystem runtime handlers for descriptor-backed Read/Edit/Write tools. *)
 
 val valid_fs_write_mode_strings : string list
-(** The canonical enum [Tool_shard_types_enum_mirrors.fs_write_mode_enum_strings]
-    hand-copies. Exported so test_enum_mirror_sync can compare the copy against
-    it; the mirror module names this value as the owner. *)
+(** The canonical enum the Write/Edit tool schema lists by hand. Exported so
+    test_enum_mirror_sync can compare the schema's [enum] array against it. *)
 val resolve_write_attribution
   :  base_dir:string
   -> file_path:string

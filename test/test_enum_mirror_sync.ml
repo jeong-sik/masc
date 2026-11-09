@@ -1,19 +1,14 @@
-(** The sync guard [Tool_shard_types_enum_mirrors] says it already has.
+(** Sync guard for the enum string lists that keeper and board modules own.
 
-    That module hand-copies four enum string lists that downstream keeper and
-    board modules own, and its header states the copies are "protected by a sync
-    regression test in [test/test_types.ml]" and that "the test suite then forces
-    a sync edit here". No such module exists — twenty-five sites under [lib/]
-    cite it. Until this file, nothing compared the copies against their owners,
-    so a fifth enum value added to an owner would have shipped a schema that
-    never offered it, and the tool would have rejected the value its own
-    documentation advertised.
+    The tool schemas an LLM is handed list these values by hand. Until this file,
+    nothing compared those lists against their owners, so a fifth enum value
+    added to an owner would have shipped a schema that never offered it, and the
+    tool would have rejected the value its own documentation advertised.
 
-    The mirror module is private to [masc_tool_surface], so the comparison runs
-    against the observable end of the copy: the [enum] arrays that reach the
-    tool schemas an LLM is handed. That is the contract that actually matters —
-    if a mirror drifts, no emitted enum matches its owner's [valid_*_strings]
-    any more. *)
+    The schemas are built inside [masc_tool_surface], so the comparison runs
+    against the observable end: the [enum] arrays that reach the tool schemas.
+    That is the contract that actually matters — if a copy drifts, no emitted
+    enum matches its owner's [valid_*_strings] any more. *)
 
 open Alcotest
 
@@ -121,7 +116,7 @@ let published_enums () =
   |> List.concat_map (fun (t : Masc_domain.tool_schema) -> enum_arrays t.input_schema)
 ;;
 
-let check_mirror_in_sync ?(copy_lives_in = "Tool_shard_types_enum_mirrors") ~label ~owner () =
+let check_mirror_in_sync ?(copy_lives_in = "the tool schemas") ~label ~owner () =
   let published = published_enums () in
   let matched = List.exists (fun e -> e = owner) published in
   if not matched

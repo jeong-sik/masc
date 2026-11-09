@@ -82,7 +82,6 @@ type trajectory =
   ; started_at : float
   ; finished_at : float option
   ; success : bool
-  ; metrics : Eval.run_metrics option
   ; error : string option
   }
 
@@ -347,7 +346,6 @@ let of_raw_trace_records (records : Raw_trace.record list) : trajectory =
   ; started_at = final_state.p_started_at
   ; finished_at = final_state.p_finished_at
   ; success = final_state.p_success
-  ; metrics = None
   ; error = final_state.p_error_msg
   }
 ;;
@@ -444,10 +442,6 @@ let to_json t =
         | Some f -> `Float f
         | None -> `Null )
     ; "success", `Bool t.success
-    ; ( "metrics"
-      , match t.metrics with
-        | Some m -> Eval.run_metrics_to_yojson m
-        | None -> `Null )
     ; ( "error"
       , match t.error with
         | Some e -> `String e
@@ -485,9 +479,7 @@ let of_json json =
              | `Null -> None
              | j -> Some (to_float j))
         ; success = json |> member "success" |> to_bool
-        ; metrics = None
-        ; (* Metrics not round-tripped for simplicity *)
-          error = json |> member "error" |> to_string_option
+        ; error = json |> member "error" |> to_string_option
         }
   with
   | Type_error (msg, _) -> Error msg

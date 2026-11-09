@@ -21,7 +21,7 @@ request, with no deprecation window, version bump or migration guide.
 ### Stable
 
 - Types and functions that most callers in the repository import directly.
-- Core abstractions: `Types`, `Error`, `Agent`, `Builder`, `Tool`, `Llm_provider`, `Hooks`.
+- Core abstractions: `Types`, `Error`, `Agent`, `Tool`, `Llm_provider`, `Hooks`.
 
 ### Evolving
 
@@ -66,7 +66,6 @@ Core types and interfaces that most of the repository depends on.
 | Types | `lib/base/types.mli` |
 | Error | `lib/base/error.mli` |
 | Agent | `lib/agent/agent.mli` |
-| Builder | `lib/agent/builder.mli` |
 | Tool | `lib/base/tool.mli` |
 | Tool_set | `lib/tool_set.mli` |
 | Hooks | `lib/base/hooks.mli` |

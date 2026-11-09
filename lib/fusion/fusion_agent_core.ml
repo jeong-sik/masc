@@ -383,7 +383,7 @@ let build_agent
        in
        (* preset 데드라인은 [Runtime_agent.config.body_timeout_s]와
           [call_timeout_s]로 집행한다 — AGENT_CORE가 이미 소유한 손잡이이며
-          (Builder.with_body_timeout → 비스트리밍 왕복 cap, Builder.with_call_timeout
+          (body_timeout_s → 비스트리밍 왕복 cap, call_timeout_s
           → admission 대기까지 포함한 호출 전체 cap), provider의
           [connect_timeout_s]와 달리 이름이 하는 일과 일치한다. provider config를
           변형하지 않으므로 같은 런타임을 쓰는 다른 소비자(키퍼 턴 등)의 예산은

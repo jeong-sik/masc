@@ -4,7 +4,7 @@
     and skill inventory queries.  Skills in the registry are {b not}
     injected into the agent's system prompt — they exist purely as
     metadata.  To compose a skill into the runtime prompt, use
-    {!Contract.with_skill} (or {!Builder.with_skill}).
+    {!Contract.with_skill}.
 
     Wraps a [Hashtbl.t] keyed by skill name. Decoding and filesystem effects
     stay at the runtime boundary; this module provides CRUD and a JSON

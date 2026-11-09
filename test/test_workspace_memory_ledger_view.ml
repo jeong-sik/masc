@@ -166,7 +166,7 @@ let test_inventory_representation () = with_base (fun base_path ->
   Alcotest.(check string) "missing status" "missing"
     (missing |> member "status" |> to_string);
   Alcotest.(check (list string)) "missing has no other keys"
-    ["generated_at"; "schema"; "status"]
+    ["generated_at"; "ordinary_absence"; "schema"; "status"]
     (match missing with `Assoc fields -> List.sort String.compare (List.map fst fields) | _ -> []);
   let database = ledger ["First claim"; "Second claim"] in
   Ledger.save ~base_path database |> require;

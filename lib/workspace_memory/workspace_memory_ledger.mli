@@ -136,6 +136,24 @@ val reconcile : t -> Workspace_memory_context.keeper list -> reconciliation
     loses any member is dropped, and its other members lose their
     disposition, also in an [Unavailable] store. Makes no model call. *)
 
+type ordinary_absence_counts = {
+  facts : int;
+  absent : int;
+  available_stores : int;
+  missing_stores : int;
+}
+type ordinary_absence =
+  | Complete of ordinary_absence_counts
+  | Partial of { counts : ordinary_absence_counts; unavailable_stores : int }
+
+val ordinary_absence : t -> Workspace_memory_context.keeper list -> ordinary_absence
+(** Distinct current ordinary fact identities without a disposition in the
+    input ledger. Claim, conflict and excluded dispositions all count as present.
+    Unlike [reconcile.new_facts], this does not use the reconciled ledger.
+    Missing stores are known empty; unavailable ordinary stores make [facts]
+    and [absent] lower bounds. Source-bound stores do not affect this count.
+    This observes membership only, never why a fact is absent. *)
+
 (** One model decision for a changed fact. A new claim or conflict receives a
     stable id derived from its text; existing ids must already be in [t]. *)
 type decision =

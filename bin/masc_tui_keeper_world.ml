@@ -25,6 +25,19 @@ let now_word = function
         | Wire.Available world -> briefing_word world.Wire.briefing.status in
       word ^ (match refresh_failure with None -> "" | Some _ -> " !")
 
+let inventory_absence = function
+  | Wire.Missing { ordinary_absence; _ } -> ordinary_absence
+  | Wire.Available world -> world.Wire.ordinary_absence
+
+let absence_number = function
+  | World.Not_read | World.Reading | World.Read_failed _ -> "?"
+  | World.Loaded { world; refresh_failure } ->
+      let value = match inventory_absence world with
+        | Wire.Absence_complete counts -> string_of_int counts.absent
+        | Wire.Absence_partial { counts; _ } -> "≥" ^ string_of_int counts.absent
+        | Wire.Absence_unavailable _ -> "?" in
+      (match refresh_failure with None -> "" | Some _ -> "last ") ^ value
+
 let fleet_ladder snapshot =
   Ladder.fleet_of ~refused_rows:(List.length snapshot.Health.mhs_refused_keepers)
     snapshot.Health.mhs_keepers
@@ -50,7 +63,7 @@ let row_cells ~health_error ~view snapshot world =
   ; now_cell = (match health_error with
       | Some _ -> "mem! "
       | None -> if partial_reads then "mem! " else "") ^ now_word world
-  ; strip = "? absent"
+  ; strip = absence_number world ^ " absent"
   ; due = if age then (match snapshot with
       | Some snapshot when not partial_reads -> let count = snapshot.Health.mhs_total_source_invalidations
           + snapshot.mhs_total_support_invalidations in
@@ -113,13 +126,24 @@ let detail_lines ~health_error ~cells snapshot world =
           world.Wire.excluded_count world.classified_count]
         @ (match world.briefing.building with None -> [] | Some pass ->
             [Printf.sprintf "briefing building · %d of %d left" pass.Wire.remaining pass.target]) in
-  health @ inventory @ memory @ inventory_details
-    @ ["absent Keeper facts · ?"; "▹ Next · no time announced"]
+  let stores (counts : Wire.absence_counts) unavailable =
+    Printf.sprintf "ordinary stores · %d read / %d missing / %d unreadable"
+      counts.available_stores counts.missing_stores unavailable in
+  let absence_details = match world with
+    | World.Not_read | World.Reading | World.Read_failed _ -> []
+    | World.Loaded { world; refresh_failure = _ } ->
+        (match inventory_absence world with
+         | Wire.Absence_unavailable detail ->
+             ["ordinary membership unread · " ^ Terminal_text.single_line detail]
+         | Wire.Absence_complete counts -> [stores counts 0]
+         | Wire.Absence_partial { counts; unavailable_stores } -> [stores counts unavailable_stores]) in
+  health @ inventory @ memory @ inventory_details @ absence_details
+    @ ["absent ordinary facts · " ^ absence_number world; "▹ Next · no time announced"]
 
 let dock_lines ~health_error ~cells ~max_lines snapshot world =
   let stage tag clauses = Layout.join_fitting ~sep:" · " ~cells (tag :: clauses) in
   let memory = memory_summary ~health_error snapshot in
-  let ledger = inventory_summary world in
+  let ledger = inventory_summary world @ ["ordinary absent " ^ absence_number world] in
   let briefing = now_word world in
   let core = [stage "◂ Keepers" memory; stage "↓ Ledger" ledger; stage "● Briefing" [briefing]] in
   if max_lines <= 0 then []

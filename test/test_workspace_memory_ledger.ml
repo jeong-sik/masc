@@ -505,6 +505,47 @@ let test_apply_refuses_unselected_or_missing_decisions () =
   refused Ledger.Blank_value [writer]
     [{ Ledger.fact = writer.fact; decision = Ledger.Exclude " " }]
 
+let test_ordinary_absence_uses_fact_identity_and_all_dispositions () =
+  let database = decode (ledger_json ~claims:["c", "shared"] ~conflicts:["x", "conflict"]
+    [ordinary_ref "writer" "shared", claim_member "c";
+     source_ref "writer" "file" "source-only", claim_member "c";
+     ordinary_ref "writer" "conflict", conflict_member "x";
+     ordinary_ref "writer" "excluded", excluded "not shared"]) in
+  let observed = Ledger.ordinary_absence database
+    [keeper "writer" ~ordinary:(Context.Available (ordinary
+       ["shared"; "shared"; "source-only"; "conflict"; "excluded"; "new"]))
+       ~source_bound:(Context.Available (source_bound ["file", "source-only"]));
+     keeper "reviewer" ~ordinary:(Context.Available (ordinary ["shared"]))
+       ~source_bound:(Context.Unavailable "source read failed")] in
+  Alcotest.(check bool) "same Keeper duplicates collapse; another Keeper and source store stay distinct"
+    true (observed = Ledger.Complete {facts=6; absent=3; available_stores=2; missing_stores=0})
+
+let test_absence_uses_original_ledger_not_reclassification_queue () =
+  let database = decode (ledger_json ~claims:["c", "shared"]
+    [ordinary_ref "writer" "shared", claim_member "c";
+     ordinary_ref "reviewer" "shared", claim_member "c"]) in
+  let keepers = [keeper "writer" ~ordinary:(Context.Available (ordinary ["shared"]));
+                 keeper "reviewer"] in
+  Alcotest.(check int) "lost member makes the retained member pending for reclassification" 1
+    (List.length (Ledger.reconcile database keepers).new_facts);
+  Alcotest.(check bool) "that member remains present in the observed durable ledger" true
+    (Ledger.ordinary_absence database keepers =
+     Ledger.Complete {facts=1; absent=0; available_stores=1; missing_stores=1})
+
+let test_absence_preserves_unreadable_ordinary_stores () =
+  Alcotest.(check bool) "a failed store leaves only a lower bound" true
+    (Ledger.ordinary_absence Ledger.empty
+      [keeper "read" ~ordinary:(Context.Available (ordinary ["fact"])); keeper "missing";
+       keeper "broken" ~ordinary:(Context.Unavailable "bad snapshot")] =
+     Ledger.Partial {counts={facts=1; absent=1; available_stores=1; missing_stores=1}; unavailable_stores=1});
+  Alcotest.(check bool) "all unavailable is not a measured zero" true
+    (Ledger.ordinary_absence Ledger.empty [keeper "broken" ~ordinary:(Context.Unavailable "bad snapshot")] =
+     Ledger.Partial {counts={facts=0; absent=0; available_stores=0; missing_stores=0}; unavailable_stores=1});
+  Alcotest.(check bool) "missing is known empty and distinct from a readable empty snapshot" true
+    (Ledger.ordinary_absence Ledger.empty [keeper "missing";
+       keeper "empty" ~ordinary:(Context.Available (ordinary []))] =
+     Ledger.Complete {facts=0; absent=0; available_stores=1; missing_stores=1})
+
 let () =
   Alcotest.run "workspace memory ledger"
     [ ( "identity"
@@ -537,4 +578,11 @@ let () =
       , [ Alcotest.test_case "selected decisions make one durable ledger" `Quick
             test_selected_decisions_update_one_durable_ledger
         ; Alcotest.test_case "unselected or incomplete answers fail closed" `Quick
-            test_apply_refuses_unselected_or_missing_decisions ] ) ]
+            test_apply_refuses_unselected_or_missing_decisions ] )
+    ; ( "ordinary absence"
+      , [ Alcotest.test_case "identity, deduplication and dispositions" `Quick
+            test_ordinary_absence_uses_fact_identity_and_all_dispositions
+        ; Alcotest.test_case "original membership differs from reclassification" `Quick
+            test_absence_uses_original_ledger_not_reclassification_queue
+        ; Alcotest.test_case "unavailable stores preserve partial coverage" `Quick
+            test_absence_preserves_unreadable_ordinary_stores ] ) ]

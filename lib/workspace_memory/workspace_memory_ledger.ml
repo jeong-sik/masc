@@ -507,6 +507,31 @@ let reconcile t keepers =
   in
   { ledger; current_facts; new_facts; vanished }
 
+type ordinary_absence_counts = {
+  facts : int;
+  absent : int;
+  available_stores : int;
+  missing_stores : int;
+}
+type ordinary_absence =
+  | Complete of ordinary_absence_counts
+  | Partial of { counts : ordinary_absence_counts; unavailable_stores : int }
+
+let ordinary_absence ledger keepers =
+  let available_stores, missing_stores, unavailable_stores =
+    List.fold_left (fun (available, missing, unavailable) (keeper : Workspace_memory_context.keeper) ->
+      match keeper.ordinary with
+      | Workspace_memory_context.Available _ -> available + 1, missing, unavailable
+      | Workspace_memory_context.Missing -> available, missing + 1, unavailable
+      | Workspace_memory_context.Unavailable _ -> available, missing, unavailable + 1)
+      (0, 0, 0) keepers in
+  let facts, absent = List.fold_left (fun (facts, absent) (row : pending_fact) ->
+    match row.fact with
+    | Ordinary _ -> facts + 1, absent + (if Fact_map.mem row.fact ledger.dispositions then 0 else 1)
+    | Source_bound _ -> facts, absent) (0, 0) (reconcile ledger keepers).current_facts in
+  let counts = { facts; absent; available_stores; missing_stores } in
+  if unavailable_stores = 0 then Complete counts else Partial { counts; unavailable_stores }
+
 type decision =
   | Join_claim of string
   | Create_claim of string

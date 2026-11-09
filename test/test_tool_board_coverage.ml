@@ -3370,8 +3370,53 @@ let test_comment_add_accepts_body () =
          ])
   in
   Alcotest.(check bool) "comment with body accepted" true ok;
-  Alcotest.(check bool) "comment body echoed" true
-    (String_util.contains_substring body "sent as body, not content")
+  (* The write does not repeat the text it was sent, so the thread is where the
+     body shows up as the comment's content. *)
+  Alcotest.(check bool)
+    "the answer does not repeat the body"
+    false
+    (String_util.contains_substring body "sent as body, not content");
+  let ok, page = dispatch "masc_board_post_get" (post_get_args post_id []) in
+  Alcotest.(check bool) "thread read ok" true ok;
+  Alcotest.(check bool)
+    "the body is stored as the comment's content"
+    true
+    (String_util.contains_substring page "sent as body, not content")
+
+(* The writer sent the text in this call, so the answer does not carry it back:
+   it names the comment, its post and author, and where it landed. A text long
+   enough to be cut in an answer is stored whole. *)
+let test_comment_add_does_not_repeat_the_text () =
+  with_eio @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  cleanup ();
+  let post_id = create_post_with_comments ~count:0 in
+  let text = "echo-probe " ^ String.concat " " (List.init 400 (fun i -> Printf.sprintf "word%03d" i)) in
+  let result =
+    dispatch_result
+      "masc_board_comment"
+      (make_args
+         [ "post_id", `String post_id; "content", `String text; "author", `String "writer-a" ])
+  in
+  Alcotest.(check bool) "comment ok" true (Tool_result.is_success result);
+  let message = Tool_result.message result in
+  Alcotest.(check bool) "the answer does not hold the probe word" false (contains message "echo-probe");
+  Alcotest.(check bool) "nor any of the text" false (contains message "word200");
+  let written = parse_create_response_json message in
+  let open Yojson.Safe.Util in
+  Alcotest.(check bool) "no content member" true (member "content" written = `Null);
+  Alcotest.(check string) "its post" post_id (written |> member "post_id" |> to_string);
+  Alcotest.(check string) "its author" "writer-a" (written |> member "author" |> to_string);
+  Alcotest.(check bool)
+    "it is named by a comment id"
+    true
+    (String.length (written |> member "id" |> to_string) > 2
+     && String.equal (String.sub (written |> member "id" |> to_string) 0 2) "c-");
+  Alcotest.(check int) "where it landed" 0 (written |> member "comment_offset" |> to_int);
+  let ok, page = dispatch "masc_board_post_get" (post_get_args post_id []) in
+  Alcotest.(check bool) "thread read ok" true ok;
+  Alcotest.(check bool) "the first word is stored" true (contains page "echo-probe");
+  Alcotest.(check bool) "so is the last one" true (contains page "word399")
 
 let test_comment_vote_missing () =
   with_eio @@ fun env ->
@@ -3872,6 +3917,8 @@ let () =
             test_comment_add_reports_its_position;
           Alcotest.test_case "comment write position follows the thread" `Quick
             test_comment_add_position_follows_the_thread;
+          Alcotest.test_case "comment write does not repeat the text" `Quick
+            test_comment_add_does_not_repeat_the_text;
           Alcotest.test_case "comment vote missing" `Quick test_comment_vote_missing;
           Alcotest.test_case "comment vote not found" `Quick
             test_comment_vote_not_found;

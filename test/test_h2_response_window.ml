@@ -59,7 +59,7 @@ let transfer lane next_write report_write read =
    stream, stops making progress and the pump fails instead of hanging. *)
 let exchange ?error_handler
     ?(capacity=H2_response_limits.default_max_pending_bytes) ~handler target =
-  Eio_main.run (fun _ -> Eio.Switch.run (fun sw ->
+  Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
   let resources=Masc.Http_h2_response_ledger.create
     ~max_pending_bytes:capacity in
   Masc.Http_h2_response_ledger.with_request resources ~sw (fun () ->
@@ -98,8 +98,13 @@ let exchange ?error_handler
   H2.Body.Writer.close writer;
   let server =
     H2.Server_connection.create ?error_handler (fun h2_reqd ->
+      (* No case waits the 90 s bound for a flush. *)
+      let stream_end =
+        Masc.Http_h2_stream.Stream_end.create ~stream_sw:sw ~clock:(Eio.Stdenv.clock env)
+          ~stalled_after_s:Server_mcp_transport_http_headers.sse_stalled_after_s h2_reqd
+      in
       handler
-        (Masc.Http_reqd.of_h2 ~stream_sw:sw
+        (Masc.Http_reqd.of_h2 ~stream_end
            ~ledger:(Masc.Http_h2_response_ledger.current_exn ()) h2_reqd))
   in
   let to_server = { pending = "" } in

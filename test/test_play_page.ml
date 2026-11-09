@@ -310,9 +310,16 @@ let test_the_guide_over_h2 () =
             | Ok policy -> policy
             | Error error -> fail (Server_request_authority.trust_policy_error_to_string error)
           in
-          let handler =
-            Server_h2_gateway.make_request_handler ~routes:(Server_routes_http.make_routes ~port:0 ~host:"127.0.0.1" ~sw ~clock:(Eio.Stdenv.clock env)) ~trust_policy ~request_sw:sw
-              (`Tcp (Eio.Net.Ipaddr.V4.loopback, 54321))
+          let gateway =
+            Server_h2_gateway.make_request_handler ~routes:(Server_routes_http.make_routes ~port:0 ~host:"127.0.0.1" ~sw ~clock:(Eio.Stdenv.clock env)) ~trust_policy
+          in
+          (* Every answer comes at once, far inside the 90 s flush bound. *)
+          let handler h2_reqd =
+            gateway
+              ~stream_end:
+                (Masc.Http_h2_stream.Stream_end.create ~stream_sw:sw ~clock:(Eio.Stdenv.clock env)
+                   ~stalled_after_s:Server_mcp_transport_http_headers.sse_stalled_after_s h2_reqd)
+              (`Tcp (Eio.Net.Ipaddr.V4.loopback, 54321)) h2_reqd
           in
           let get target = exchange_h2 ~handler target in
           Masc_test_deps.with_process_env "MASC_HTTP_AUTH_STRICT" (Some "1") (fun () ->

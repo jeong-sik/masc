@@ -9731,6 +9731,7 @@ default = "official.primary"
         ~tools:[tool] ~initial_messages:[] ~model_input_projection:None
         ~on_transmitted_model_input:on_transmitted ~hooks:None ~context_injector:None
         ~context:(Some (Agent_core.Context.create ())) ~event_bus:None ~raw_trace:None ~on_event:None
+        ~account:(Masc_test_deps.authorized_account native_config.account_home)
         ~config:native_config ()) in
   run, capture, executions
 
@@ -10495,6 +10496,7 @@ let test_write_content_artifact_mode_uses_typed_parser () =
 
 let () =
   Masc_test_deps.init_unified_tool_registry ();
+  Masc_test_deps.publish_single_user_access ();
   run "Keeper_tool_dispatch_runtime" [
     ("peer_artifacts", [test_case "materializes exact binary through recipient write" `Quick test_peer_artifact_materializes_exact_binary]);
     ("peer_delegate_schema", [test_case "nested artifact and target schemas reach API and official clients" `Quick test_peer_delegate_schema_reaches_model_wires]);

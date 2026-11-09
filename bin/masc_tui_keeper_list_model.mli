@@ -126,6 +126,8 @@ type waiting_summary = {
 (** Primary waiting reasons and actual background async running in that group. *)
 
 val next_view : view -> view
+val views : view list
+(** Every view in the order {!next_view} walks them from [Plain]. *)
 val view_label : view -> string
 val view_of_string : string -> view option
 (** The labels are the values [tui-keepers.toml] stores under [view]. *)
@@ -224,6 +226,53 @@ val order_rows :
 (** The groups of [view] in a fixed order, and [sort] within each group.
     [Day_wall] orders by {!failed_half_hours}, most first, rows without a
     pulse last. The same order is used for drawing, navigation, and search. *)
+
+(** {1 Stops} (RFC-0515 §2.6, E12)
+
+    The places [j] and [k] land on. [groups] is the group of each row
+    {!order_rows} returned, in that order; a stop names a row by its
+    position there. *)
+
+type stop =
+  | Stop_heading of group
+  | Stop_row of int
+
+type heading_focus = { heading : group; cursor_at : int }
+(** The heading the cursor stands on, and the row cursor it was placed with.
+    The cursor rests on the group's first row, so a cursor moved by any
+    other path leaves the heading. *)
+
+type group_direction = Previous_group | Next_group
+type fold_change = Fold | Unfold
+
+val stops : folded:group list -> group option list -> stop list
+(** The stops in drawing order: a heading for each group, then its rows
+    unless the group is [folded]. A row of a view that does not group is a
+    stop of its own. *)
+
+val current_stop :
+  folded:group list -> focus:heading_focus option -> cursor:int -> group option list ->
+  stop option
+(** The stop the cursor is on: the focused heading while the cursor still
+    rests where the focus placed it inside that group; else the row at
+    [cursor], clamped to the list, or its group's heading when that group is
+    folded. [None] for an empty list. *)
+
+val placement : group option list -> stop -> (heading_focus option * int) option
+(** The focus and row cursor a stop is placed with. A heading rests the
+    cursor on its group's first row; [None] for a heading no row is under. *)
+
+val step_stop : delta:int -> stop list -> stop -> stop option
+(** The stop [delta] places from [current], held at either end. [None] when
+    [current] is not one of [stops]. *)
+
+val group_jump : group_direction -> stop list -> stop -> stop option
+(** The nearest heading before or after [current]; [None] past the first or
+    last one, and in a view without headings. *)
+
+val refold : fold_change -> group -> group list -> group list
+(** The folded groups after folding or unfolding [group]. *)
+
 type group_counts = {
   attention_rows : int;
   failing_rows : int;

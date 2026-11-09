@@ -110,6 +110,15 @@ let next_view = function
   | By_runtime -> Day_wall
   | Day_wall -> Plain
 
+(* Read off the walk itself, so a list of the views cannot name one [v]
+   skips. *)
+let views =
+  let rec walk view =
+    let next = next_view view in
+    view :: (if next = Plain then [] else walk next)
+  in
+  walk Plain
+
 let view_label = function
   | Plain -> "list"
   | By_state -> "state"
@@ -537,6 +546,65 @@ let order_rows ~view ~sort ~now ~outside rows =
     let order = compare_view_key left_key right_key in
     if order <> 0 then order else compare_sorted sort left right)
   |> List.map (fun (ranked, _) -> ranked.row)
+
+type stop =
+  | Stop_heading of group
+  | Stop_row of int
+
+type heading_focus = { heading : group; cursor_at : int }
+
+type group_direction = Previous_group | Next_group
+
+type fold_change = Fold | Unfold
+
+(* [groups] holds the group of each ordered row, and the rows of one group
+   are next to each other, so a heading opens each run. *)
+let stops ~folded groups =
+  let rec walk previous position acc = function
+    | [] -> List.rev acc
+    | None :: rest -> walk None (position + 1) (Stop_row position :: acc) rest
+    | (Some group as current) :: rest ->
+        let acc = if current = previous then acc else Stop_heading group :: acc in
+        let acc = if List.mem group folded then acc else Stop_row position :: acc in
+        walk current (position + 1) acc rest
+  in
+  walk None 0 [] groups
+
+let current_stop ~folded ~focus ~cursor groups =
+  match groups with
+  | [] -> None
+  | _ :: _ ->
+      let position = max 0 (min cursor (List.length groups - 1)) in
+      (match List.nth groups position, focus with
+       | Some group, Some { heading; cursor_at }
+         when cursor_at = cursor && group = heading -> Some (Stop_heading heading)
+       | Some group, (Some _ | None) when List.mem group folded -> Some (Stop_heading group)
+       | (Some _ | None), (Some _ | None) -> Some (Stop_row position))
+
+let placement groups = function
+  | Stop_row position -> Some (None, position)
+  | Stop_heading heading ->
+      Option.map
+        (fun first -> Some { heading; cursor_at = first }, first)
+        (List.find_index (( = ) (Some heading)) groups)
+
+let step_stop ~delta stops current =
+  Option.bind (List.find_index (( = ) current) stops) (fun index ->
+    List.nth_opt stops (max 0 (min (List.length stops - 1) (index + delta))))
+
+let group_jump direction stops current =
+  let is_heading = function Stop_heading _ -> true | Stop_row _ -> false in
+  Option.bind (List.find_index (( = ) current) stops) (fun index ->
+    List.find_opt is_heading
+      (match direction with
+       | Previous_group -> List.rev (List.take index stops)
+       | Next_group -> List.drop (index + 1) stops))
+
+let refold change group folded =
+  let others = List.filter (fun other -> other <> group) folded in
+  match change with
+  | Fold -> group :: others
+  | Unfold -> others
 
 type group_counts = {
   attention_rows : int;

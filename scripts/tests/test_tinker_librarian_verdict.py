@@ -20,6 +20,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import admission_validator as AV
 import eval_admission as V
+import memory_scores as M
+import synth_spec as S
 
 from tinker_librarian_fixtures import make_prompt
 
@@ -44,7 +46,10 @@ def answer(judgments: tuple[tuple[str, AV.Outcome, str | None], ...], *, dropped
 def synth_row(**counts: int) -> Row:
     base: Row = {"target": "A", "status": 200, "wall_s": 1.0, "valid": True, "cost_usd": 0.0,
                  "prompt_tokens": 1, "cached_tokens": 1, "candidates": 2, "correct": 2,
-                 "dropped": 0, "absorbed": 0, "dropped_expected": 0, "planted": 1, "planted_dropped": 0}
+                 "dropped": 0, "absorbed": 0, "dropped_expected": 0, "planted": 1, "planted_dropped": 0,
+                 "state_correct": 2, "state_by_kind": {"new": [2, 2]}, "dropped_unmerged": [],
+                 "planted_absorbed": 0, "merges": 0, "merges_done": 0, "added": 0, "removed": 0,
+                 "expected_added": 0, "expected_removed": 0}
     return {**base, **counts}
 
 
@@ -139,47 +144,43 @@ class BindingTest(unittest.TestCase):
 class ScoreTest(unittest.TestCase):
     def test_real_counts_absorbs_as_live_removals(self) -> None:
         live = answer((("r1", "incorporated", "c"),), dropped=("m1",), absorbed=(("m2", "c"),))
-        item = V.RealItem("i1", make_prompt(), "", live)
+        item = M.RealItem("i1", make_prompt(), "", live)
         mine = answer((("r1", "incorporated", "c"),), dropped=("m2", "m3"), absorbed=(("m4", "c"),))
-        score = V.score_real(item, mine)
+        score = M.score_real(item, mine)
         self.assertEqual((score["agree"], score["dropped_not_in_live"], score["absorbed_not_in_live"]),
                          (1, ["m3"], ["m4"]))
 
     def test_synth_correction_needs_the_revision_and_the_drop(self) -> None:
-        label: dict[str, object] = {"candidates": [{"request_id": "r1", "outcome": "incorporated", "supersedes": "m1"},
-                                                   {"request_id": "r2", "outcome": "not_durable"}],
-                                    "planted_stale": ["m5"]}
-        item = V.SynthItem("i1", make_prompt(), "", label)
+        label = S.RequestLabel((S.CandidateLabel("r1", "incorporated", "m1", None, None),
+                                S.CandidateLabel("r2", "not_durable", None, None, None)), frozenset({"m5"}), ())
+        item = M.SynthItem("i1", make_prompt(), "", label)
         both = answer((("r1", "incorporated", "new"), ("r2", "not_durable", None)),
                       dropped=("m1", "m5", "m6"), revisions=(("m1", "new"),))
-        score = V.score_synth(item, both)
+        score = M.score_synth(item, both)
         self.assertEqual((score["correct"], score["dropped"], score["dropped_expected"], score["planted_dropped"],
                           score["dropped_off_label"]), (2, 3, 2, 1, ["m6"]))
         no_drop = answer((("r1", "incorporated", "new"), ("r2", "not_durable", None)), revisions=(("m1", "new"),))
-        self.assertEqual(V.score_synth(item, no_drop)["correct"], 1)
-        self.assertEqual(V.score_synth(item, None)["correct"], 0)
+        self.assertEqual(M.score_synth(item, no_drop)["correct"], 1)
+        self.assertEqual(M.score_synth(item, None)["correct"], 0)
 
     def test_synth_new_fact_and_paraphrase_need_the_claim_their_kind_names(self) -> None:
-        label: dict[str, object] = {"candidates": [
-            {"request_id": "r1", "outcome": "incorporated", "supersedes": None, "already_claim": None},
-            {"request_id": "r2", "outcome": "already_represented", "supersedes": None, "already_claim": "old"}],
-            "planted_stale": []}
-        item = V.SynthItem("i1", make_prompt(), "", label)
+        label = S.RequestLabel((S.CandidateLabel("r1", "incorporated", None, None, None),
+                                S.CandidateLabel("r2", "already_represented", None, None, "old")), frozenset(), ())
+        item = M.SynthItem("i1", make_prompt(), "", label)
         right = answer((("r1", "incorporated", "new"), ("r2", "already_represented", "old")), added=("new",))
         # MASC accepts both: every named claim is in final memory.
         wrong = answer((("r1", "incorporated", "old"), ("r2", "already_represented", "new")), added=("new",))
-        self.assertEqual(V.score_synth(item, right)["correct"], 2)
-        self.assertEqual(V.score_synth(item, wrong)["correct"], 0)
+        self.assertEqual(M.score_synth(item, right)["correct"], 2)
+        self.assertEqual(M.score_synth(item, wrong)["correct"], 0)
 
     def test_synth_absorbs_are_counted_apart_and_never_drops(self) -> None:
-        label: dict[str, object] = {"candidates": [
-            {"request_id": "r1", "outcome": "incorporated", "supersedes": None, "already_claim": None}],
-            "planted_stale": ["m5"]}
-        item = V.SynthItem("i1", make_prompt(), "", label)
+        label = S.RequestLabel((S.CandidateLabel("r1", "incorporated", None, None, None),), frozenset({"m5"}), ())
+        item = M.SynthItem("i1", make_prompt(), "", label)
         mine = answer((("r1", "incorporated", "new"),), added=("new",), absorbed=(("m5", "new"), ("m6", "new")))
-        score = V.score_synth(item, mine)
+        score = M.score_synth(item, mine)
         self.assertEqual((score["correct"], score["dropped"], score["absorbed"], score["dropped_expected"],
-                          score["planted_dropped"]), (1, 0, 2, 0, 0))
+                          score["planted_dropped"], score["planted_absorbed"], score["absorbs"]),
+                         (1, 0, 2, 0, 0, 1, {"m5": "stale", "m6": "other"}))
 
     def test_synth_precision_counts_drops_and_reports_absorbs(self) -> None:
         part = V.summarize("synth", [synth_row(dropped=2, absorbed=3, dropped_expected=1,

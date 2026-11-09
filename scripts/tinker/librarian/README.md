@@ -49,6 +49,7 @@ Synthetic Keepers, memories and candidates are invented by the model from
 | `check_validator_on_store.py` | Runs the parser and the validator over every retained admission record and prints counts, read only |
 | `tinker_oai.py` | Budgeted calls to Tinker's OpenAI-compatible endpoint, cached for resume |
 | `eval_admission.py` | Measures targets on E-real and E-synth, then applies the gates |
+| `memory_scores.py` | Scores one answer: E-real against the live answer, E-synth by the memory it leaves |
 | `teacher_sample.py` | Keeps teacher answers that match the training labels |
 | `train_sft.py` | Trains branch A (answer only) or B (teacher thinking and answer) |
 
@@ -80,8 +81,9 @@ checkpoint's binding declares an output ceiling of 32,768, and the lane's
 3. Fix `pass_lines.json` and commit it before any training.
 4. Generate the training split, sample the teacher, train branch A and branch B.
 5. Measure the base model, A and B in one run per set, from an empty `--out`.
-6. When a valid E-synth answer dropped a fact that is neither planted stale nor
-   a correction target, a judge that sees neither the labels nor the answers
+6. When a valid E-synth answer dropped a fact its label does not name (not
+   planted stale, not a correction or complement target, not a fact of a
+   duplicate pair), a judge that sees neither the labels nor the answers
    classifies that fact among others of the same memory (`e_synth_audit.py
    drops`). Every case of one memory shows the same facts: the ones the label
    audit picks on any request of that memory, the dropped ones and a fill. If

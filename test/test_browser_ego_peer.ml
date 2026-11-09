@@ -1913,6 +1913,7 @@ let test_the_peer_serves_what_the_lane_table_says () =
     | "page.emulation" -> answered (obj ["applied",`List [str "locale"];"before",`Null;"observed",`Null])
     | "page.block_requests" -> answered (obj ["blocked",`List [str "ads.example.com"]])
     | "page.set_cookie" -> answered (cookie_answer ~name:"n" ())
+    | "page.delete_cookie" -> answered (obj ["deleted",`List []])
     | "page.target" -> answered resolved
     | "page.pointer" | "page.keyboard" | "page.viewport" | "page.touch" -> input_answer ()
     | "page.input" -> dom_answer (obj ["action",str "fill"])

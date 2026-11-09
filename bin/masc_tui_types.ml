@@ -20101,7 +20101,7 @@ let create_state
   opening_notice = None;
   followed_from = None;
   keeper_cursor = 0;
-  keeper_list_view = Masc_tui_keeper_list_model.By_state;
+  keeper_list_view = Masc_tui_keeper_list_model.Plain;
   keeper_outside_reading = (fun _ ~now:_ ~keeper_name:_ -> Masc_tui_keeper_list_model.outside_unread);
   keeper_list_density = Masc_tui_keeper_list_model.Two_lines;
   keeper_list_heading = None;
@@ -22971,39 +22971,6 @@ let lane_inventory_notice_lines ~cols state =
   List.concat_map (fun line -> Masc.Tui_terminal_text.sanitize_terminal_text line
     |> Masc_tui_message_layout.wrap_words ~max_cells:(max 1 (Masc_tui_frame.inner_width ~cols - 2))) notices
 
-let lanes_scrolled (state : state) ~cols =
-  match state.lanes_mode with
-  | Lanes_run_list _ ->
-      (* The run list replaces the two-section overview, so the typed model
-         counts its rows instead of the Keeper table's. *)
-      { sc_count =
-          (match state.lane_runs with
-           | None -> 0
-           | Some runs -> List.length runs)
-      ; sc_chrome = listing_chrome ~error:state.lane_runs_error
-      ; sc_overflow_takes_row = true
-      ; sc_preview_keep = None
-      }
-  | Lanes_run_detail _ | Lanes_measurement_detail _ | Lanes_inventory_detail _ ->
-      (* The detail's lines are built by the drawing; the frame reports the
-         clamp through [clamped_scroll], so no count is knowable here. *)
-      { sc_count = 0
-      ; sc_chrome = 0
-      ; sc_overflow_takes_row = false
-      ; sc_preview_keep = None
-      }
-  | Lanes_overview ->
-      let notices = lane_inventory_notice_lines ~cols state in
-      { sc_count = List.length (lane_inventory_entries state)
-      ; sc_chrome = Masc_tui_frame.chrome_rows + 3
-          + List.length notices
-          + lanes_action_error_row_count ~cols state.lanes_action_error
-          + runtime_lane_notice_lines ~cols state.runtime_lane_notice
-          + List.length (runtime_lane_stale_lines state)
-      ; sc_overflow_takes_row = true
-      ; sc_preview_keep = Some 1
-      }
-
 (* One browsable row of the Memory fact browser. The three kinds keep their
    sections apart -- an ordinary fact, a fact bound to a file, and a fact
    the store dropped -- while the cursor walks them as one flat list. *)
@@ -23795,6 +23762,171 @@ let runtime_picker_projection ?(page=runtime_picker_page) (state : state) =
         runtime_catalog_reading_suffix state.runtime_catalog_reading;
       rlp_filter = view.Masc_tui_pick_list.filter })
     state.runtime_lane_pick
+
+(* The feature landing and its key viewport share the complete physical
+   heading, catalogue links and panel geometry. Destinations stay in Types;
+   the renderer alone adds click marks and native panel styling. *)
+let lanes_overview_heading_rows (state : state) ~cols =
+  let cells = max 1 (Masc_tui_frame.inner_width ~cols) in
+  [ ui_text state ~ko:"여기서 무엇을 사용할 수 있나" ~en:"What can be used here"
+  ; ui_text state ~ko:"기능과 관측 상태를 고르고, 설정·워커·조치를 읽습니다."
+      ~en:"Select a capability and observation, then read configuration, workers and actions."
+  ] |> List.concat_map (Masc_tui_message_layout.wrap_words ~max_cells:cells)
+
+let lanes_overview_link_rows (state : state) ~cols =
+  let cells = max 1 (Masc_tui_frame.inner_width ~cols) in
+  let links =
+    [ Some Tools, ui_text state ~ko:"도구·스킬" ~en:"Tools & skills"
+    ; Some Resources, ui_text state ~ko:"리소스" ~en:"Resources"
+    ; Some Connectors, ui_text state ~ko:"채널" ~en:"Channels"
+    ; Some Clients, ui_text state ~ko:"클라이언트" ~en:"Clients"
+    ; None, ui_text state ~ko:"플러그인 /addons" ~en:"Plugins /addons"
+    ] in
+  let rec group used current groups = function
+    | [] -> List.rev (if current = [] then groups else List.rev current :: groups)
+    | (target, label) :: rest ->
+        let label = Masc_tui_message_layout.truncate_middle cells label in
+        let needed = Masc_tui_message_layout.display_width label + (if current = [] then 0 else 3) in
+        if current <> [] && used + needed > cells then
+          group 0 [] (List.rev current :: groups) ((target, label) :: rest)
+        else group (used + needed) ((target, label) :: current) groups rest
+  in
+  group 0 [] [] links
+
+let lanes_overview_panel_widths (state : state) ~cols =
+  let width = max 1 (Masc_tui_frame.inner_width ~cols) in
+  let list_min = 4 + 20 + Masc_tui_message_layout.display_width
+      (ui_text state ~ko:"기능 · 하는 일" ~en:"Feature · purpose") in
+  let detail_min = 4 + 20 + Masc_tui_message_layout.display_width
+      (ui_text state ~ko:"설정 선언" ~en:"Declaration") in
+  if width >= list_min + detail_min + 2 then
+    let list_width = max list_min ((width - 2) * 3 / 5) in
+    let list_width = min list_width (width - 2 - detail_min) in
+    true, list_width, width - 2 - list_width
+  else false, width, width
+
+let lanes_overview_picker_rows (state : state) =
+  match runtime_picker_projection state with
+  | None -> 0
+  | Some picker ->
+      1 + max 1 (List.fold_left (fun count -> function
+        | Lane_choice _ -> count
+        | Runtime_choice _ -> count + 2) 0 picker.rlp_choices)
+
+let lanes_scrolled (state : state) ~cols:_ =
+  match state.lanes_mode with
+  | Lanes_run_list _ ->
+      (* The run list replaces the two-section overview, so the typed model
+         counts its rows instead of the Keeper table's. *)
+      { sc_count =
+          (match state.lane_runs with
+           | None -> 0
+           | Some runs -> List.length runs)
+      ; sc_chrome = listing_chrome ~error:state.lane_runs_error
+      ; sc_overflow_takes_row = true
+      ; sc_preview_keep = None
+      }
+  | Lanes_overview | Lanes_run_detail _ | Lanes_measurement_detail _ | Lanes_inventory_detail _ ->
+      (* The detail's lines are built by the drawing; the frame reports the
+         clamp through [clamped_scroll]. The overview needs both terminal
+         dimensions and is counted by [lanes_overview_projection] below. *)
+      { sc_count = 0
+      ; sc_chrome = 0
+      ; sc_overflow_takes_row = false
+      ; sc_preview_keep = None
+      }
+
+type lanes_overview_projection = {
+  lop_headings : string list;
+  lop_links : (surface option * string) list list;
+  lop_observation : bool;
+  lop_notices : string list;
+  lop_boxed : bool;
+  lop_split : bool;
+  lop_list_width : int;
+  lop_detail_width : int;
+  lop_list_height : int;
+  lop_detail_height : int;
+  lop_position : bool;
+  lop_tail : string list option;
+  lop_scroll : scrolled;
+}
+
+let lanes_overview_projection (state : state) ~rows ~cols =
+  let budget = max 0 (rows - Masc_tui_frame.chrome_rows) in
+  let width = max 1 (Masc_tui_frame.inner_width ~cols) in
+  let headings = lanes_overview_heading_rows state ~cols in
+  let links = lanes_overview_link_rows state ~cols in
+  let notices = lane_inventory_notice_lines ~cols state in
+  let split, list_width, detail_width = lanes_overview_panel_widths state ~cols in
+  let safe_boxed_rows text =
+    Masc.Tui_terminal_text.sanitize_terminal_lines text
+    |> boxed_row_count ~cols in
+  let full_tail_rows = Option.fold ~none:0 ~some:safe_boxed_rows state.lanes_action_error
+      + Option.fold ~none:0 ~some:(fun notice ->
+          safe_boxed_rows (runtime_lane_notice_text notice)) state.runtime_lane_notice
+      + List.length (runtime_lane_stale_lines state)
+      + lanes_overview_picker_rows state in
+  let panel_edges = 2 in
+  let native_minimum = (panel_edges + 1) * (if split then 1 else 2) in
+  let full = List.length headings + List.length links + List.length notices
+      + 1 + full_tail_rows + native_minimum <= budget in
+  let compact_tail =
+    let picker = match runtime_picker_projection state with
+      | None -> []
+      | Some picker ->
+          let choice = match Option.bind picker.rlp_selected_row (List.nth_opt picker.rlp_choices) with
+             | Some (Runtime_choice runtime) ->
+                 let refusal = match runtime_pick_availability picker.rlp_pick runtime with
+                   | Pick_available -> ""
+                   | Pick_refused refusal -> "[" ^ runtime_pick_refusal_tag refusal ^ "] " in
+                 "> " ^ refusal ^ runtime_model_picker_title runtime
+             | Some (Lane_choice _) | None -> runtime_picker_empty_note picker in
+          [ui_text state ~ko:"후보 추가 · " ~en:"Add candidate · " ^ choice
+           ^ " → " ^ picker.rlp_lane
+           ^ runtime_catalog_reading_suffix picker.rlp_catalog_reading] in
+    let failures = Option.to_list state.lanes_action_error
+      @ Option.to_list (Option.map runtime_lane_notice_text state.runtime_lane_notice)
+      @ runtime_lane_stale_lines state in
+    (* The picker owns Enter while open. Its selected action target survives
+       even when only one body row fits; with another row the feature list
+       keeps its selection too. *)
+    let reserved_list = min 1 (max 0 (budget - List.length picker)) in
+    picker @ failures
+    |> List.map (fun line -> Masc.Tui_terminal_text.sanitize_terminal_text line
+         |> Masc_tui_message_layout.truncate_middle width)
+    |> List.take (max 0 (budget - reserved_list)) in
+  let tail = if full then None else Some compact_tail in
+  let tail_rows = if full then full_tail_rows else List.length compact_tail in
+  let minimum_body = min 2 (max 0 (budget - tail_rows)) in
+  let intro_room = max 0 (budget - tail_rows - minimum_body) in
+  let headings, links, observation, notices = if full then headings, links, true, notices
+    else
+      let observation = intro_room > 0 in
+      let room = max 0 (intro_room - if observation then 1 else 0) in
+      let notices = List.take room notices in
+      let links = List.take (max 0 (room - List.length notices)) links in
+      [], links, observation, notices in
+  let intro_rows = List.length headings + List.length links
+      + (if observation then 1 else 0) + List.length notices in
+  let boxed = full in
+  let split = boxed && split in
+  let list_width, detail_width = if split then list_width, detail_width else width, width in
+  let pane_rows = max 0 (budget - intro_rows - tail_rows
+      - if boxed then panel_edges * (if split then 1 else 2) else 0) in
+  let list_slots, detail_height =
+    if split then pane_rows, pane_rows
+    else (pane_rows + 1) / 2, pane_rows / 2 in
+  let count = List.length (lane_inventory_entries state) in
+  let position = list_slots > 1 && count > list_slots in
+  let list_height = max 0 (list_slots - if position then 1 else 0) in
+  { lop_headings = headings; lop_links = links; lop_observation = observation;
+    lop_notices = notices; lop_boxed = boxed; lop_split = split;
+    lop_list_width = list_width; lop_detail_width = detail_width;
+    lop_list_height = list_height; lop_detail_height = detail_height;
+    lop_position = position; lop_tail = tail;
+    lop_scroll = {sc_count = count; sc_chrome = rows - list_height;
+      sc_overflow_takes_row = false; sc_preview_keep = None} }
 
 (* The one-line prompt the lane editor puts above the Runtime rows: a name
    being typed for a new lane or for a rename, or the lane a second [D] would
@@ -25079,7 +25211,12 @@ let scrolled_surface_rows (state : state) ~cols : surface -> scrolled option =
   | Lanes ->
       (match state.lanes_mode with
        | Lanes_run_detail _ | Lanes_measurement_detail _ | Lanes_inventory_detail _ -> None
-       | Lanes_overview | Lanes_run_list _ -> Some (lanes_scrolled state ~cols))
+       | Lanes_overview ->
+           (* The overview's compact fallback depends on the available rows
+              as well as columns. Its main-loop wrapper shares the complete
+              [lanes_overview_projection] with the renderer. *)
+           None
+       | Lanes_run_list _ -> Some (lanes_scrolled state ~cols))
   | Clients ->
       listing ~error:state.clients_surface_error
         (match state.clients_surface with

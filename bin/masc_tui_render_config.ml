@@ -1634,15 +1634,14 @@ let config_content_height (state : state) =
      - surface_chrome_rows - config_heading_rows ~cols state)
 
 (* The System landing and its scroll bounds use these same physical rows.
-   Identity rows already account for their indentation and clickable menu;
-   status rows reserve the two cells the source-status reader leaves out. *)
+   Identity rows already account for their indentation and clickable menu. *)
 let runtime_config_status_rows state ~cols =
   List.map (fun line -> config_metadata_style Masc_tui_runtime_config_view.Neutral, line)
     (config_identity_rows ~cols state)
   @ runtime_config_status_lines state ~cols
 
 let runtime_config_status_scroll_limit state ~terminal_rows ~cols =
-  let room = max 1 (Masc_tui_types.surface_body_rows state ~terminal_rows - 5) in
+  let room = max 1 (Masc_tui_types.surface_body_rows state ~terminal_rows - surface_chrome_rows) in
   max 0 (List.length (runtime_config_status_rows state ~cols) - room)
 
 let render_runtime_config_status state =

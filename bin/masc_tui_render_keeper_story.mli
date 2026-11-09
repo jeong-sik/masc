@@ -68,4 +68,7 @@ val feed_lines :
 
 val memory_lines :
   Masc_tui_types.state -> now:float -> keeper_name:string -> string list
-(** The memory-health row of [keeper_name] with its fact age ladder. *)
+(** Five separate observations for [keeper_name]: fact age, snapshot save,
+    source invalidation, Librarian continuity and the shared-World entry
+    path. An age or save time does not establish source validity; retained
+    Librarian state does not establish that a model is running now. *)

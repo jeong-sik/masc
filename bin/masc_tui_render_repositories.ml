@@ -28,12 +28,6 @@ let repository_context_fields (repo : Masc.Tui_decode.repository) =
     | None -> [] | Some reason -> ["Error", reason] in
   failure @ ["Path", repo.rp_resolved_local_path] @ stored_path @ ["Keepers", keepers]
 
-let repository_context_lines ~width repo =
-  repository_context_fields repo
-  |> List.concat_map (fun (label, value) ->
-      Masc_tui_text_block.rows ~max_cells:(max 1 width)
-        (Printf.sprintf "  %s: %s" label value))
-
 let selected_repository_reading (state : state) =
   let selected = Option.bind state.repositories (fun snapshot ->
     List.nth_opt snapshot.rs_repositories state.repositories_cursor) in
@@ -168,58 +162,143 @@ let render_workspace_activity (state : state) repo_id =
             ("  Refresh failed, showing the last read: " ^ Terminal_text.single_line message);
           show ~budget:(max 1 (budget - 1)) reading)
 
+(* The inventory names registered paths, not a fresh Git observation. Never
+   substitute [rp_default_branch] for the branch checked out at that path. *)
+let repository_git_observation (state : state) (repo : Tui_decode.repository) =
+  match state.repository_changes_scope, state.repository_changes with
+  | Some (Tui_decode.Repository_change_repository requested), Some snapshot ->
+      (match snapshot.Tui_decode.rcs_scope with
+       | Tui_decode.Repository_change_repository observed
+         when String.equal requested repo.rp_id && String.equal observed repo.rp_id ->
+           let branch = match snapshot.rcs_branch with
+             | Tui_decode.Repository_detached -> "detached HEAD"
+             | Tui_decode.Repository_on_branch {name; upstream = _} ->
+                 Terminal_text.single_line name in
+           let reading = Printf.sprintf "%s · %s %d"
+               branch (ui_text state ~ko:"변경" ~en:"changes") snapshot.rcs_total in
+           Some (match state.repository_changes_error with
+             | Some _ -> ui_text state ~ko:"이전 관측 · 갱신 실패 · " ~en:"Last read · refresh failed · " ^ reading
+             | None -> ui_text state ~ko:"마지막 조회 · " ~en:"Last read · " ^ reading)
+       | Tui_decode.Repository_change_project
+       | Tui_decode.Repository_change_repository _ -> None)
+  | (Some Tui_decode.Repository_change_project | None), _
+  | Some (Tui_decode.Repository_change_repository _), None -> None
+
+let repository_preview_lines state ~width (repo : Tui_decode.repository) =
+  let fields =
+    [ ui_text state ~ko:"작업 경로" ~en:"Checkout", repo.rp_resolved_local_path
+    ; ui_text state ~ko:"기준 브랜치 (등록)" ~en:"Default branch (registered)", repo.rp_default_branch
+    ; "Keeper", (match repo.rp_keepers with
+        | [] -> ui_text state ~ko:"미배정" ~en:"Unassigned"
+        | names -> String.concat ", " names)
+    ; ui_text state ~ko:"Git 관측" ~en:"Git observation",
+        (match repository_git_observation state repo with
+         | Some reading -> reading
+         | None -> ui_text state ~ko:"d:현재 Git 읽기" ~en:"d:read current Git")
+    ] in
+  let failure = match Tui_decode.repository_status_reason repo.rp_status with
+    | None -> []
+    | Some reason -> [ui_text state ~ko:"등록 상태의 문제" ~en:"Repository issue", reason] in
+  (failure @ fields)
+  |> List.concat_map (fun (label, value) ->
+      Message_layout.wrap_words ~max_cells:(max 1 width)
+        (label ^ "  " ^ Terminal_text.single_line value))
+
+let repository_inventory_intro (state : state) ~width =
+  let observation = match state.repositories, state.repositories_error,
+      state.repositories_inflight with
+    | Some _, Some _, _ -> ui_text state
+        ~ko:"등록 경로·배정 · 마지막 목록, 갱신 실패"
+        ~en:"Registered paths and assignments · retained inventory, refresh failed"
+    | None, Some _, _ -> ui_text state ~ko:"저장소 목록을 읽지 못했습니다"
+        ~en:"Repository inventory unavailable"
+    | Some _, None, true -> ui_text state ~ko:"등록 경로·배정 · 이전 목록, 다시 읽는 중"
+        ~en:"Registered paths and assignments · previous inventory, refreshing"
+    | Some _, None, false -> ui_text state ~ko:"등록 경로·배정 관측 · 현재 Git과 기록된 쓰기는 별도 조회"
+        ~en:"Registered paths and assignments · current Git and recorded writes are separate reads"
+    | None, None, true -> ui_text state ~ko:"등록된 저장소 목록 조회 중"
+        ~en:"Reading registered repositories"
+    | None, None, false -> ui_text state ~ko:"등록된 저장소 목록 미관측"
+        ~en:"Repository inventory not observed" in
+  let actions = match state.repositories with
+    | Some {rs_repositories = _ :: _; _} -> ui_text state
+        ~ko:"d:현재 Git  H:쓰기 이력  Enter:파일 탐색  v:전체 경로·배정"
+        ~en:"d:current Git  H:recorded writes  Enter:files  v:complete context"
+    | Some {rs_repositories = []; _} | None -> ui_text state
+        ~ko:"a:저장소 등록  r:다시 읽기" ~en:"a:register repository  r:read again" in
+  [ui_text state ~ko:"어느 checkout의 결과인가" ~en:"Which checkout produced this result?";
+   observation; actions]
+  |> List.mapi (fun index text ->
+      Message_layout.wrap_words ~max_cells:(max 1 (width - 2)) text
+      |> List.map (fun line -> "  "
+          ^ (if index = 0 then Ansi.bold else Theme.recede ()) ^ line ^ Ansi.reset))
+  |> List.concat
+
+type repository_studio_geometry = {
+  rsg_intro : string list;
+  rsg_split : bool;
+  rsg_boxed : bool;
+  rsg_list_width : int;
+  rsg_detail_width : int;
+  rsg_detail : string list;
+  rsg_errors : string list;
+  rsg_content_height : int;
+  rsg_overflowing : bool;
+}
+
 let repository_studio_geometry (state : state) ~cols ~budget ~cursor =
   let repos = match state.repositories with
     | None -> [] | Some snapshot -> snapshot.rs_repositories in
   let shown = List.length repos in
-      let width = framed_inner_width cols in
-      let named_width =
-        Render_schedule.workspace_minimum_width + 4
-      in
-      let detail_minimum = Message_layout.display_width "Keepers: none assigned" + 4 in
-      let split = width >= named_width + detail_minimum + 2 && budget >= 8 in
-      let detail_width = if split then min (width - named_width - 2) (max detail_minimum (width / 3)) else width in
-      let list_width = if split then width - detail_width - 2 else width in
-      let selected = List.nth_opt repos cursor in
-      let context_lines = match selected with
-        | None -> []
-        | Some repo -> repository_context_lines ~width:(detail_width - 4) repo in
-      let detail_title = match selected with
-        | None -> "Selected repository"
-        | Some repo -> Terminal_text.single_line repo.rp_name in
-      let errors = match state.repositories_error with
-        | None -> []
-        | Some detail ->
-            Message_layout.wrap_words ~max_cells:(max 1 (list_width - 4))
-              (Terminal_text.single_line detail)
-            |> List.map (fun line -> Theme.bad () ^ line ^ Ansi.reset) in
-      (* Keep the header, panel edges and a selected repository visible.
-         The stacked layout also needs the selected-context panel edges. *)
-      let error_budget = max 0 (budget - if split then 4 else 6) in
-      let errors =
-        if List.length errors <= error_budget then errors
-        else List.take (max 0 (error_budget - 1)) errors
-          @ (if error_budget > 0 then ["v:read complete error"] else []) in
-      let context_budget = max 0 (if split then budget - 2 else budget - 6 - List.length errors) in
-      let truncated = List.length context_lines > context_budget in
-      let show_notice = truncated && context_budget >= 2 in
-      let visible_context =
-        List.take (max 0 (context_budget - if show_notice then 1 else 0)) context_lines in
-      let detail = studio_panel ~width:detail_width ~title:detail_title
-          ~lines:(visible_context @
-            (if show_notice
-             then ["v:read complete context"] else [])) in
-      let list_budget =
-        if split then budget else max 4 (budget - List.length detail) in
-      let room = max 1 (list_budget - 3 - List.length errors) in
-      let overflowing = shown > room && room > 1 in
-      let content_height = if overflowing && room > 1 then room - 1 else room in
-  (split, list_width, detail_width, detail, errors, content_height, overflowing)
+  let width = max 1 (framed_inner_width cols) in
+  (* Four rows preserve a panel's edges, heading and one selected row. On a
+     shorter viewport the list remains unboxed and still keeps its cursor. *)
+  let intro = repository_inventory_intro state ~width
+    |> List.take (max 0 (budget - 4)) in
+  let panel_budget = max 1 (budget - List.length intro) in
+  let boxed = panel_budget >= 4 in
+  let named_width = Message_layout.display_width "Repository · status" + 4 in
+  let detail_minimum = Message_layout.display_width "d:Git  H:history  Enter:files" + 4 in
+  let split = boxed && width >= named_width + detail_minimum + 2 && panel_budget >= 8 in
+  let detail_width =
+    if split then min (width - named_width - 2) (max detail_minimum (width / 2))
+    else width in
+  let list_width = if split then width - detail_width - 2 else width in
+  let selected = List.nth_opt repos cursor in
+  let context_lines = match selected with
+    | None -> []
+    | Some repo -> repository_preview_lines state ~width:(detail_width - 4) repo in
+  let context_budget = max 0
+      (if split then panel_budget - 2
+       else min (panel_budget / 2 - 2) (panel_budget - 6)) in
+  let truncated = List.length context_lines > context_budget in
+  let show_notice = truncated && context_budget >= 2 in
+  let visible_context = List.take
+      (max 0 (context_budget - if show_notice then 1 else 0)) context_lines in
+  let detail = match selected with
+    | Some repo when context_budget > 0 ->
+        studio_panel ~width:detail_width
+          ~title:(ui_text state ~ko:"선택한 checkout · " ~en:"Selected checkout · "
+                  ^ Terminal_text.single_line repo.rp_name)
+          ~lines:(visible_context @ if show_notice then
+            [ui_text state ~ko:"v:전체 경로·배정 읽기" ~en:"v:read complete context"] else [])
+    | Some _ | None -> [] in
+  let list_budget = if split then panel_budget else panel_budget - List.length detail in
+  let errors = match state.repositories_error with
+    | Some reason when boxed && list_budget > 4 ->
+        [Theme.bad () ^ Message_layout.truncate_middle (max 1 (list_width - 4))
+           (Terminal_text.single_line reason) ^ Ansi.reset]
+    | Some _ | None -> [] in
+  let room = max 1 (list_budget - (if boxed then 3 else 0) - List.length errors) in
+  let overflowing = shown > room && room > 1 in
+  let content_height = max 1 (min shown (room - if overflowing then 1 else 0)) in
+  {rsg_intro = intro; rsg_split = split; rsg_boxed = boxed;
+   rsg_list_width = list_width; rsg_detail_width = detail_width;
+   rsg_detail = detail; rsg_errors = errors;
+   rsg_content_height = content_height; rsg_overflowing = overflowing}
 
 let repository_studio_content_height state ~cols ~budget ~cursor =
-  let _, _, _, _, _, content_height, _ =
-    repository_studio_geometry state ~cols ~budget ~cursor in
-  content_height
+  (repository_studio_geometry state ~cols ~budget ~cursor).rsg_content_height
 
 let render_repository_list (state : state) =
   let terminal_rows, cols = get_terminal_size () in
@@ -229,26 +308,10 @@ let render_repository_list (state : state) =
     | Some s -> s.Masc.Tui_decode.rs_repositories
   in
   let shown = List.length repos in
-  let now = Unix.localtime (Unix.gettimeofday ()) in
-  let timestamp =
-    Printf.sprintf "%02d:%02d:%02d" now.Unix.tm_hour now.Unix.tm_min
-      now.Unix.tm_sec
-  in
   let title =
-    match state.repositories with
-    | None ->
-        let reading_note =
-          match state.repositories_error with
-          | None -> title_missing_reading ~error:None
-          | Some _ -> ""
-        in
-        Printf.sprintf "%s  %s  %s  %s"
-          (screen_title " MASC Workspace") reading_note timestamp
-          (connection_badge state)
-    | Some _ ->
-        Printf.sprintf "%s (%d)  %s  %s"
-          (screen_title " MASC Workspace") shown timestamp
-          (connection_badge state)
+    badge_row ~cols
+      ~lead:(screen_title (ui_text state ~ko:" MASC 워크스페이스" ~en:" MASC Workspace"))
+      ~label:(Terminal_text.single_line state.workspace) ~badge:(connection_badge state)
   in
   surface_chrome ~overflow:Paged_by_cursor state ~terminal_rows ~cols ~surface_key:"repositories"
     ~title
@@ -256,10 +319,22 @@ let render_repository_list (state : state) =
               ~has_reading:(Option.is_some (selected_repository_reading state))
               state.view)
     ~body:(fun ~budget c ->
-      let split, list_width, detail_width, detail, errors, content_height, overflowing =
+      let geometry =
         repository_studio_geometry state ~cols ~budget ~cursor:state.repositories_cursor in
-      let repository_layout = Render_schedule.workspace_layout
-          ~inner_width:(max 1 (list_width - 4)) in
+      List.iter c.push geometry.rsg_intro;
+      let list_width = geometry.rsg_list_width in
+      let detail_width = geometry.rsg_detail_width in
+      let content_height = geometry.rsg_content_height in
+      let row_width = max 1 (list_width - if geometry.rsg_boxed then 4 else 0) in
+      let row repo =
+        let status = Terminal_text.single_line (Tui_decode.repository_status_word repo.rp_status) in
+        let status_cells = min (row_width / 3) (Message_layout.display_width status) in
+        let name_cells = max 1 (row_width - status_cells - 2) in
+        let name = Terminal_text.single_line repo.rp_name in
+        if row_width < 4 then Message_layout.truncate_middle row_width name
+        else Message_layout.fit_width
+          (Message_layout.truncate_middle name_cells name) name_cells
+          ^ "  " ^ Message_layout.truncate_middle status_cells status in
       let max_scroll = max 0 (shown - content_height) in
       let scroll = max 0 (min max_scroll
           (Masc_tui_scroll.ensure_visible ~cursor:state.repositories_cursor
@@ -276,29 +351,28 @@ let render_repository_list (state : state) =
           match Rows.at repos_window idx with
           | None -> ""
           | Some r ->
-              let line = Render_schedule.workspace_row ~layout:repository_layout
-                { Render_schedule.wrow_name = Terminal_text.single_line r.rp_name
-                ; wrow_branch = Terminal_text.single_line r.rp_default_branch
-                ; wrow_status = Terminal_text.single_line
-                    (Masc.Tui_decode.repository_status_word r.rp_status)
-                ; wrow_sync = if r.rp_auto_sync then "auto" else "manual"
-                ; wrow_path = Terminal_text.single_line r.rp_resolved_local_path } in
+              let line = row r in
               if idx = state.repositories_cursor then
-                Theme.selection ^ fit_width line (list_width - 4) ^ Ansi.reset
+                Theme.selection ^ fit_width line row_width ^ Ansi.reset
               else line)
       in
-      let lines = [Theme.recede () ^ Render_schedule.workspace_header_row ~layout:repository_layout ^ Ansi.reset]
-        @ errors @ lines
-        @ (if overflowing then
+      let lines =
+        (if geometry.rsg_boxed then
+          [Theme.recede () ^ ui_text state ~ko:"저장소 · 등록 상태" ~en:"Repository · registered state" ^ Ansi.reset]
+         else [])
+        @ geometry.rsg_errors @ lines
+        @ (if geometry.rsg_overflowing then
              ["repositories " ^ Masc_tui_scroll.window_text ~scroll ~height:content_height shown]
            else []) in
       (* [j/k] steps over a row; with none, the title does not offer it. *)
       let listing_title =
-        if shown = 0 then "Repositories" else "Repositories · j/k select" in
-      let listing = studio_panel ~width:list_width ~title:listing_title ~lines in
-      if split then begin
+        ui_text state ~ko:"등록된 저장소" ~en:"Registered repositories" in
+      let listing = if geometry.rsg_boxed then
+          studio_panel ~width:list_width ~title:listing_title ~lines else lines in
+      let detail = geometry.rsg_detail in
+      if geometry.rsg_split then begin
         let height = max (List.length listing) (List.length detail) in
-        let count = min budget height in
+        let count = min (budget - List.length geometry.rsg_intro) height in
         (* Both panels through the list-window helper the scroll panes read:
            one array per panel, each row reads its own cells. No row of the
            loop walks either list to find itself -- the walk is what #40177's

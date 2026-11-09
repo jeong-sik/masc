@@ -11,10 +11,15 @@ val blocker_text : Masc.Fleet_stream.fleet -> string option
     uses for the same Keepers. The line below carries the numbers, so this
     names the reason only. [None] when the scan names no blocker. *)
 
+val interval_text : Masc.Fleet_stream.Proactive_interval.t -> string
+(** The interval in the largest unit that divides it exactly: [1h] for 3600
+    seconds, [5m] for 300. Any other value is
+    {!Masc_tui_message_layout.span_text}: [1m30s], [45s]. Never rounded, since
+    it names a setting. *)
+
 val proactive_text : Masc.Fleet_stream.fleet -> string
-(** [proactive every <span>]: how far apart each Keeper's periodic turns
-    start, one value for the fleet. The span is
-    {!Masc_tui_message_layout.span_text}, so 300 seconds reads [5m00s]. *)
+(** [proactive every <interval>]: how far apart each Keeper's periodic turns
+    start, one value for the fleet, as {!interval_text}. *)
 
 val failing_text : Masc.Fleet_stream.fleet -> string option
 (** [failing N] with the classes that hold a failing Keeper, each class only

@@ -1947,8 +1947,7 @@ let run_pass
                    ?cli_runner ~clock ~net ~base_path ~keeper_id
                    ~messages:[ message Agent_core.Types.User prompt ]
                    ~usage_observer:(fun usage ->
-                      observed_usage :=
-                        Option.map Exact_lane_run_registry.usage_of_api_usage usage)
+                      observed_usage := usage)
                    ()
                  |> Result.map (fun (accepted, source) -> (accepted, Some source)) in
                if Typesafeai_librarian_preflight.keeps_current observation then (

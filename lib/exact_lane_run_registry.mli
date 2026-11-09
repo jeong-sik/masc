@@ -54,15 +54,13 @@ type persistence_failure =
     provider-reported charge, [None] when the wire carried none. [None] on
     the status field means the run's transport reported no usage at all
     (CLI slot, vendor-system-one judging, or a body without a usage report). *)
-type usage =
+type usage = Agent_core.Types.api_usage =
   { input_tokens : int
   ; output_tokens : int
   ; cache_creation_input_tokens : int
   ; cache_read_input_tokens : int
   ; cost_usd : float option
   }
-
-val usage_of_api_usage : Agent_core.Types.api_usage -> usage
 
 type completion_origin = Producer | Restart_replay
 (** [Restart_replay] describes only the observation fiber lost at restart,

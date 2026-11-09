@@ -44,22 +44,13 @@ type persistence_failure =
   ; state : persistence_state
   }
 
-type usage =
+type usage = Agent_core.Types.api_usage =
   { input_tokens : int
   ; output_tokens : int
   ; cache_creation_input_tokens : int
   ; cache_read_input_tokens : int
   ; cost_usd : float option
   }
-
-let usage_of_api_usage (api_usage : Agent_core.Types.api_usage) =
-  { input_tokens = api_usage.input_tokens
-  ; output_tokens = api_usage.output_tokens
-  ; cache_creation_input_tokens = api_usage.cache_creation_input_tokens
-  ; cache_read_input_tokens = api_usage.cache_read_input_tokens
-  ; cost_usd = api_usage.cost_usd
-  ;}
-;;
 
 type completion_origin = Producer | Restart_replay
 

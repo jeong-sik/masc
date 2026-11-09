@@ -443,8 +443,7 @@ let spawn_with
             ~clock
             ~on_summary
             ~on_usage:(fun usage ->
-               observed_usage :=
-                 Option.map Exact_lane_run_registry.usage_of_api_usage usage)
+               observed_usage := usage)
             prepared
         with
         | Executed -> `Completed

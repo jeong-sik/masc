@@ -115,6 +115,40 @@ let test_non_official_ids_are_refused_before_the_runner () =
     | Ok _ | Error _ -> fail "an HTTP binding must be refused as non-official")
 ;;
 
+(* RFC-exact-lane-waits-for-a-stated-reset R1, R4: a lane whose only CLI slot
+   waits for a reset its provider stated starts no client. Before the rule
+   the walk called that slot on every run until the reset (85 calls in 86
+   minutes on 2026-11-09). [unreachable_runner] fails the test if called. *)
+let test_a_held_only_slot_calls_no_runner () =
+  with_runtime (fun () ->
+    Runtime_quota_window.reset_for_testing ();
+    Fun.protect ~finally:Runtime_quota_window.reset_for_testing (fun () ->
+      let runtime =
+        match Runtime.get_runtime_by_id official_client_runtime with
+        | Some runtime -> runtime
+        | None -> fail "the official-client fixture runtime must exist"
+      in
+      let resets_at = Time_compat.now () +. 3600.0 in
+      Runtime_quota_window.note_exhausted
+        ~scope:(Runtime_instance.quota_scope_of_runtime runtime) ~resets_at;
+      let observed = ref [] in
+      match
+        Cli_oneshot.walk ~runner:unreachable_runner ~base_dir:"/tmp"
+          ~cli_slots:[ official_client_runtime ] ~system_prompt:"You judge."
+          ~requirement ~prompt:"Judge this." ~validate:Result.ok
+          ~on_failure:(fun failure -> observed := failure :: !observed) ()
+      with
+      | Error [ (Cli_oneshot.Held { runtime_id; until } as held) ] ->
+        check string "the held slot is named" official_client_runtime runtime_id;
+        check (float 0.0) "it waits for the reset the provider stated" resets_at until;
+        check int "on_failure observes it once" 1 (List.length !observed);
+        check bool "a held slot reads as the account's rest" true
+          (Cli_oneshot.refused_for_binding_rest held);
+        check bool "and never as an oversized input" false
+          (Cli_oneshot.refused_for_input_size held)
+      | Ok _ | Error _ -> fail "a lane whose only slot is held must end held, uncalled"))
+;;
+
 let test_prompt_carries_the_exact_agent_core_schema_sentence () =
   with_runtime (fun () ->
     let seen_prompt = ref None in
@@ -661,16 +695,41 @@ let test_provider_reset_and_success_before_json_validation () =
       (Runtime_quota_window.active_until ~scope:account ~now:(Time_compat.now ()));
     write_file ~path:claude_cli ~perm:0o700
       (claude_script ~marker ~body:(claude_answer "not JSON"));
+    let calls_before = calls marker in
+    (match walk_real ~dir [a1] with
+     | Error [Cli_oneshot.Held { runtime_id; until }] ->
+       check string "the slot inside the stated reset is held" a1 runtime_id;
+       check (float 0.0) "until the reset the refusal stated" (float_of_int resets_at) until
+     | Ok _ | Error _ -> fail "a slot inside its provider's stated reset must not be called");
+    check (list string) "the client is not started inside a stated reset" calls_before
+      (calls marker);
+    Runtime_quota_window.reset_for_testing ();
+    Runtime_quota_window.note_observed_exhausted ~scope:account;
     (match walk_real ~dir [a1] with
      | Error [Cli_oneshot.Invalid_json_output _] -> ()
      | _ -> fail "transport success must still fail strict domain JSON parsing");
-    check bool "success does not erase provider-stated window" true
-      (Runtime_quota_window.is_exhausted ~scope:account ~now:(Time_compat.now ()));
-    Runtime_quota_window.reset_for_testing ();
-    Runtime_quota_window.note_observed_exhausted ~scope:account;
-    ignore (walk_real ~dir [a1]);
     check bool "transport success clears observation despite invalid JSON" false
       (Runtime_quota_window.is_exhausted ~scope:account ~now:(Time_compat.now ())))
+;;
+
+(* The walk reads the standing again before each dispatch, so the reset one
+   slot's refusal states holds its sibling on the same account before the
+   sibling is called. With a refusal that states no reset the sibling is still
+   called (test_real_quota_reorders_siblings_and_next_walk). *)
+let test_a_stated_reset_holds_the_sibling_before_its_dispatch () =
+  with_quota_fixture (fun ~dir ~path:_ ~marker ~claude_cli ~load_config:_ ~env:_ ->
+    let resets_at = int_of_float (Time_compat.now ()) + 3600 in
+    write_file ~path:claude_cli ~perm:0o700
+      (claude_script ~marker ~body:(rejection ~resets_at ()));
+    match walk_real ~dir [a1; a2] with
+    | Error [Cli_oneshot.Execution_failed {runtime_id = first; _};
+             Cli_oneshot.Held {runtime_id = second; until}] ->
+      check string "the first slot was called" a1 first;
+      check string "its sibling on the same account was held" a2 second;
+      check (float 0.0) "until the reset the refusal stated" (float_of_int resets_at) until;
+      check (list string) "only the first slot started its client" ["A:claude-sonnet-5"]
+        (calls marker)
+    | Ok _ | Error _ -> fail "the sibling must be held by the reset the first refusal stated")
 ;;
 
 (* A Codex account out of usage must leave the same record a Claude quota
@@ -722,9 +781,13 @@ let candidate_state runtime =
     ~candidate:runtime.Runtime_instance.candidate_backpressure
 ;;
 
+(* A rate limit without a usable Retry-After states no time, so an exact walk
+   still calls the slot (RFC-exact-lane-waits-for-a-stated-reset R2); one
+   with a stated Retry-After would hold it and the answer under test would
+   never arrive. *)
 let seed_candidate runtime =
   let candidate = runtime.Runtime_instance.candidate_backpressure in
-  Runtime_candidate_backpressure.note_rate_limit ~candidate ~retry_after:(Some 3600.);
+  Runtime_candidate_backpressure.note_rate_limit ~candidate ~retry_after:None;
   Runtime_candidate_backpressure.note_failed_attempt ~candidate
     ~failure:Runtime_candidate_backpressure.Network_transient
     ~recorded_by:(Runtime_candidate_backpressure.keeper_recorder ~keeper_name:"fixture-owner")
@@ -749,8 +812,11 @@ let test_preseeded_rate_dispatches_other_cli_candidate () =
      | Error _ -> fail "unrested adapter must answer");
     check (list string) "A never dispatched" ["B"] (calls marker);
     check bool "B answer does not clear A" true (Option.is_some (candidate_state original));
-    check (list string) "unknown declared identity survives ordering"
-      ["missing.runtime"; b; a1] (Cli_oneshot.order_slots [a1; "missing.runtime"; b]))
+    let split = Cli_oneshot.order_slots [a1; "missing.runtime"; b] in
+    check (list string) "unknown declared identity survives ordering and is never held"
+      ["missing.runtime"; b] split.Runtime_candidate_standing.walk;
+    check (list string) "the slot inside its provider's Retry-After is held"
+      [a1] (List.map fst split.Runtime_candidate_standing.held))
 ;;
 
 let test_real_rate_is_candidate_only_across_walks () =
@@ -1226,10 +1292,15 @@ let () =
             "input-size guard and refusal classification"
             `Quick
             test_input_size_guard_and_refusal_classification
+        ; test_case
+            "a lane whose only slot is held calls no runner"
+            `Quick
+            test_a_held_only_slot_calls_no_runner
         ] )
     ; ( "quota across real adapters",
         [ test_case "new and prior rejection order account siblings" `Quick test_real_quota_reorders_siblings_and_next_walk
         ; test_case "absolute reset and transport success before JSON parsing" `Quick test_provider_reset_and_success_before_json_validation
+        ; test_case "a stated reset holds the sibling before its dispatch" `Quick test_a_stated_reset_holds_the_sibling_before_its_dispatch
         ; test_case "Codex usage limit is read by the next walk" `Quick test_codex_usage_limit_is_read_by_the_next_walk
         ; test_case "preseeded rate orders actual CLI dispatch" `Quick test_preseeded_rate_dispatches_other_cli_candidate
         ; test_case "typed rate crosses walks without account quota" `Quick test_real_rate_is_candidate_only_across_walks

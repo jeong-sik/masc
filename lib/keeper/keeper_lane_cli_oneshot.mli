@@ -50,6 +50,15 @@ type failure =
       ; detail : string
       }
       (** JSON parsed, but the consumer rejected its domain value. *)
+  | Held of
+      { runtime_id : string
+      ; until : float
+      }
+      (** Not called: the provider stated a time before which this runtime
+          is not to be called -- its quota scope's stated reset, or the end of
+          its own usable Retry-After, whichever is later
+          (RFC-exact-lane-waits-for-a-stated-reset). [until] is that time in
+          Unix epoch seconds. *)
 
 val failure_to_string : failure -> string
 
@@ -58,7 +67,8 @@ val refused_for_binding_rest : failure -> bool
     its typed failure: Claude [Quota_blocked], or a Codex turn tagged
     [Usage_limit_exceeded], [Rate_limit_exceeded] or [Server_overloaded]. Such
     a refusal says nothing about the prompt, so the same prompt can be served
-    once the account frees. Every other failure, including an Antigravity
+    once the account frees. A [Held] slot is that refusal without the call,
+    so it is [true] too. Every other failure, including an Antigravity
     refusal (its quota arrives only as turn text), is [false]. *)
 
 val refused_for_input_size : failure -> bool
@@ -153,13 +163,15 @@ val run
 (** Execute [prompt] (suffixed with the lane schema instruction) once on
     [runtime_id] and parse the answer as a single JSON value. *)
 
-val order_slots : string list -> string list
-(** Stable quota and candidate rate-rest ordering for declared CLI candidates.
+val order_slots : string list -> string Runtime_candidate_standing.exact_order
+(** {!Runtime_candidate_standing.order_exact} over declared CLI candidates.
     Both observations come from one resolved runtime per declared entry; an
-    unknown entry is preserved for [run] to report. Reapply
-    before dispatch and after a failed candidate; exhausted scopes move to the
-    tail, but every declared candidate remains eligible. Shared with the HITL
-    walker, whose release/bind transitions must precede each dispatch. *)
+    unknown entry is never held and is preserved for [run] to report. Reapply
+    before dispatch and after a failed candidate: a candidate resting on a
+    rest MASC chose moves to the tail of [walk], and a candidate whose
+    provider stated a time is in [held] with that time and must not be
+    dispatched. Shared with the HITL walker, whose release/bind transitions
+    must precede each dispatch. *)
 
 val walk
   :  ?runner:runner
@@ -179,8 +191,11 @@ val walk
     candidates and is retained as [Invalid_domain_output]. [validate] must be
     side-effect-free. [on_failure] observes each refusal once before advancing,
     including refusals before a later success, so accepted fallbacks do not
-    erase their preceding failure evidence. [Error failures] carries every
-    slot's failure in walk order when all of them failed; an empty
+    erase their preceding failure evidence. The walk reorders with
+    {!order_slots} before each dispatch; a slot that read holds is reported
+    once as [Held] at that point and never dispatched, so a lane whose every
+    slot is held calls no runner. [Error failures] carries every slot's
+    failure in the order the walk reached it when all of them failed; an empty
     [cli_slots] is [Error []] — the caller distinguishes "nothing declared"
     from "declared and exhausted" by the list it passed in.
 

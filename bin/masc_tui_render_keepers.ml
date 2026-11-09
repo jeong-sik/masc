@@ -2727,13 +2727,16 @@ let render_keeper_axes (state : state) =
   let selected_summary = match state.keeper_story, selected_row with
     | None, Some row when available_rows > 0 ->
         let keeper_name = row.Keeper_list_model.keeper.Tui_decode.k_name in
-        Some (Masc_tui_keeper_strip.selected_summary ~now:now_unix
-          ~activity_cell:((keeper_now_cell ~padded:false ~frame:state.activity_frame row).text)
+        let now_cell = keeper_now_cell ~padded:false ~frame:state.activity_frame row in
+        let text = Masc_tui_keeper_strip.selected_summary ~now:now_unix
+          ~activity_cell:now_cell.text
           ~next_run:(match state.schedules_agenda_error with
             | Some _ -> Masc_tui_keeper_next_run.Unknown
             | None -> Masc_tui_keeper_axis.next_run state ~keeper_name)
           ~recurrence:(Masc_tui_keeper_axis.next_recurrence state ~keeper_name)
-          ~memory:(keeper_memory_reading state row) row)
+          ~memory:(keeper_memory_reading state row) row in
+        Some { text; motion = shift_motion
+          ~prefix:(Terminal_text.single_line keeper_name ^ " ") now_cell.motion }
     | (Some _ | None), (Some _ | None) -> None in
   let summary_rows = match selected_summary with Some _ -> 1 | None -> 0 in
   let content_rows = max 0 (available_rows - story_rows - summary_rows) in
@@ -2887,7 +2890,12 @@ let render_keeper_axes (state : state) =
       draw_keeper_story buf ~cols ~rows:story_rows ~now:now_unix ~inner state page selected_row)
     state.keeper_story;
 
-  Option.iter (fun summary -> box_line buf cols summary) selected_summary;
+  Option.iter (fun summary ->
+    (match summary.motion with
+     | Masc_tui_answering.Still -> ()
+     | Moving through_cell -> Render_schedule.Activity_tick.note_motion_if_visible
+         ~text:summary.text ~width:inner ~through_cell);
+    box_line buf cols summary.text) selected_summary;
   box_divider buf cols;
   Buffer.add_string buf
     (footer_line state

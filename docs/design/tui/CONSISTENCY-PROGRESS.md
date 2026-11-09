@@ -76,3 +76,18 @@ or GUI screenshot proof. Raw captures stay private under `artifacts/` because
 they contain workspace requests and settings. The Task list, narrow Task detail
 entry and return were observed; detail still places identity fields before the
 request body and needs the same reading-first treatment.
+
+## RFC-0519: four reading surfaces
+
+[#50689](https://github.com/jeong-sik/masc/pull/50689) records the source audit
+and the shared list/detail reading and language contract.
+[#50698](https://github.com/jeong-sik/masc/pull/50698) builds on the existing
+Task/Goal previews: requests, criteria and evidence precede diagnostics; Board
+content has fewer repeated headings; Memory claims retain their read scope.
+The existing KO/EN setting reaches target labels, key footers and prepared
+Task/Board document identities. Authored content and raw diagnostics stay intact.
+
+Independent source reviews covered the three ownership areas. The partial
+fleet count and retained-scope defects found in review were repaired. This
+records implementation and source review, not current-head CI, native
+rendering, installation or completion of the broader 23-surface request.

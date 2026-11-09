@@ -748,6 +748,36 @@ let validate_schema db =
   Ok ()
 ;;
 
+let decode_semantic stmt =
+  let identity = "semantic execution " ^ Sqlite3.column_text stmt 0 in
+  let* json = json_of_stored identity (Sqlite3.column_text stmt 3) in
+  let* execution = Semantic.of_json json
+    |> Result.map_error (fun error ->
+      Integrity_error (identity ^ ": " ^ Semantic.error_to_string error)) in
+  if scope_key execution.id <> Sqlite3.column_text stmt 0
+     || execution.revision <> Sqlite3.column_int64 stmt 1
+     || Semantic.phase_name execution.phase <> Sqlite3.column_text stmt 2 then
+    Error (Integrity_error (identity ^ ": index and record disagree"))
+  else Ok execution
+;;
+
+let validate_saved_state db =
+  let* () = validate_schema db in
+  let operation = "validate saved semantic executions" in
+  with_statement db ~operation
+    "SELECT scope_key, revision, phase, record_json FROM semantic_executions ORDER BY scope_key"
+    (fun stmt ->
+      let rec loop () =
+        let rc = Sqlite3.step stmt in
+        if rc = Sqlite3.Rc.DONE then Ok ()
+        else if rc = Sqlite3.Rc.ROW then
+          let* _execution = decode_semantic stmt in
+          loop ()
+        else Error (Store_unavailable (sqlite_error db operation rc))
+      in
+      loop ())
+;;
+
 let configure db =
   (* Boot opens several stores at once; a sibling writer holding the lock for
      a moment must be waited out. Without this, the first concurrent commit
@@ -783,7 +813,7 @@ let validate_open_candidate db =
     let* version = single_int64 db ~operation:"inspect empty schema version" "PRAGMA user_version" in
     if application_id = 0L && version = 0L then Ok ()
     else Error (Integrity_error "empty database has a foreign or damaged identity")
-  else validate_schema db
+  else validate_saved_state db
 ;;
 
 let open_or_create ~path =
@@ -821,7 +851,7 @@ let open_existing ~path =
   | exception Sqlite3.Error detail -> Error (Store_unavailable detail)
   | db ->
     let result =
-      let* () = validate_schema db in
+      let* () = validate_saved_state db in
       let* () = configure db in
       Ok { db; path; closed = Atomic.make false; dropped = Atomic.make []; released = Atomic.make [] }
     in
@@ -847,17 +877,6 @@ let close store =
     then Ok ()
     else Error (Store_unavailable "failed to close SQLite database")
   else Ok ()
-;;
-
-let decode_semantic stmt =
-  let* json = json_of_stored "semantic execution" (Sqlite3.column_text stmt 3) in
-  let* execution = Semantic.of_json json
-    |> Result.map_error (fun error -> Integrity_error (Semantic.error_to_string error)) in
-  if scope_key execution.id <> Sqlite3.column_text stmt 0
-     || execution.revision <> Sqlite3.column_int64 stmt 1
-     || Semantic.phase_name execution.phase <> Sqlite3.column_text stmt 2 then
-    Error (Integrity_error "semantic execution index and record disagree")
-  else Ok execution
 ;;
 
 let semantic_get_with_db db id =

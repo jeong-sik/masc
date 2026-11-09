@@ -29,9 +29,25 @@ the `native_calls` list, including an explicit empty list. Other record versions
 are rejected. An older record cannot prove that an absent association list
 means no calls occurred. There is no inferred empty-history conversion.
 
-Existing runtime records need an operator decision before using this version.
-Preserve their workspace and evidence; use a separate fresh base path for a
-fresh runtime. This source change does not reset or alter an installed workspace.
+The SQLite database schema remains `masc.keeper_chat_operations.v3`.
+Both ordinary store open functions decode every saved semantic execution,
+including settled rows, and validate its indexed scope, revision and phase
+before configuring an existing database or returning an Owner handle. A
+record error names its saved scope and the exact codec or index failure.
+`open_or_create` repeats the check under its existing writer lock. The scan
+discards each decoded record without collecting the history in memory.
+Deployment preflight already performs the full read-only durable-record scan;
+the open check also prevents startup settlement or admission from reaching an
+unsupported record. Individual record lookups keep their existing validation.
+
+An existing store containing earlier semantic records requires fresh state;
+there is no conversion. The affected file is
+`<base-path>/.masc/keepers/<keeper>/chat-operations.sqlite3` and its SQLite
+sidecars. Choosing a separate fresh base path preserves the old workspace.
+For the exact per-store fresh-state scope and checkpoint ownership effects,
+see [the stored-state guide](../guides/DURABLE-STORE-HARD-CUT.md#keeper-chat-operation-journals)
+and [the #50583 fresh-state entry](../../changelog.d/50583.md).
+This source change does not reset or alter an installed workspace.
 
 ## Remaining product integration
 

@@ -1,6 +1,8 @@
 open Alcotest
 module Store = Keeper_chat_operation_store
 module Operation = Keeper_chat_operation
+module Semantic = Keeper_semantic_execution
+module Scope = Keeper_execution_scope_id
 module Native = Keeper_native_call
 module Agent = Agent_core.Agent
 let ok = function Ok value -> value | Error error -> fail (Store.error_to_string error)
@@ -163,6 +165,131 @@ let test_history_uses_the_native_bind_transaction () = with_store @@ fun _path s
     (mutate store operation (Native.Bind {observed=read store; call}));
   check bool "rejected reactivation preserves both historical associations" true
     (List.equal Native.equal_history_ref [Native.history_ref call; Native.history_ref next] (history store))
+
+let semantic_record store id =
+  match Store.semantic_get store id with
+  | Ok (Some execution) -> execution
+  | Ok None -> fail "native execution disappeared"
+  | Error error -> fail (Store.semantic_error_to_string error)
+
+let with_mixed_native_records f =
+  with_store ~before:(fun store ->
+    let inventory = Store.inventory store |> ok in
+    check int "a fresh store has no queued operations" 0 inventory.queued_count;
+    check int "a fresh store has no settled operations" 0 inventory.terminal_count;
+    check bool "a fresh store has no running operation" true
+      (Option.is_none inventory.running_operation_id)) @@ fun path store settled ->
+  bind store settled (make_call settled);
+  terminal store settled Agent.Retire;
+  ignore (Store.succeed_running store ~now:4. ~operation_id ~outcome_ref:"accepted-before-restart" |> ok);
+  let active_id = Operation.Operation_id.of_string "native-active-operation" |> value in
+  submit store active_id "active input";
+  let active = claim store in
+  check bool "the second operation is claimed" true
+    (Operation.Operation_id.equal active.operation_id active_id);
+  Store.update_direct_native_call store ~now:5. ~operation_id:active_id
+    ~execution_digest:active.execution_digest
+    (Native.Bind {observed=Native.No_native_call; call=make_call ~id:next_call_id active}) |> ok;
+  let settled = semantic_record store (Scope.direct_operation operation_id) in
+  let active = semantic_record store (Scope.direct_operation active_id) in
+  check bool "the fixture retains a settled execution" true (Semantic.is_terminal settled);
+  check bool "the fixture retains an active execution" false (Semantic.is_terminal active);
+  Store.close store |> ok;
+  f path settled active
+
+let test_openers_accept_fresh_and_current_native_records () =
+  with_mixed_native_records @@ fun path settled active ->
+  List.iter (fun (label, opener) ->
+    let store = opener ~path |> ok in
+    Fun.protect ~finally:(fun () -> Store.close store |> ok) (fun () ->
+      List.iter (fun expected ->
+        let actual = semantic_record store expected.Semantic.id in
+        check bool (label ^ " preserves the exact native record") true
+          (Semantic.to_json expected = Semantic.to_json actual)) [settled; active]))
+    ["open_or_create", Store.open_or_create; "open_existing", Store.open_existing]
+
+let sqlite_fixture path f =
+  let db = Sqlite3.db_open path in
+  Fun.protect ~finally:(fun () -> check bool "fixture connection closed" true (Sqlite3.db_close db))
+    (fun () -> f db)
+
+let fixture_statement db query f =
+  let stmt = Sqlite3.prepare db query in
+  Fun.protect ~finally:(fun () -> check bool "fixture statement finalized" true
+      (Sqlite3.finalize stmt = Sqlite3.Rc.OK)) (fun () -> f stmt)
+
+let scope_key id = Yojson.Safe.to_string (Scope.to_json id)
+
+let rewrite_semantic_fixture path id ~column replacement =
+  sqlite_fixture path @@ fun db ->
+  let sql query = check bool "fixture SQL succeeds" true (Sqlite3.exec db query = Sqlite3.Rc.OK) in
+  sql "BEGIN IMMEDIATE";
+  let trigger = fixture_statement db
+      "SELECT sql FROM sqlite_master WHERE name='semantic_terminal_update_immutable'" (fun stmt ->
+        check bool "terminal trigger exists" true (Sqlite3.step stmt = Sqlite3.Rc.ROW);
+        let trigger = Sqlite3.column_text stmt 0 in
+        check bool "terminal trigger is unique" true (Sqlite3.step stmt = Sqlite3.Rc.DONE);
+        trigger) in
+  (* Alter saved fixture bytes, then restore the exact schema before opening.
+     The refusal must concern the record, not an absent immutability trigger. *)
+  sql "DROP TRIGGER semantic_terminal_update_immutable";
+  fixture_statement db ("UPDATE semantic_executions SET " ^ column ^ "=? WHERE scope_key=?")
+    (fun stmt ->
+      check bool "replacement bound" true (Sqlite3.bind stmt 1 replacement = Sqlite3.Rc.OK);
+      check bool "scope bound" true (Sqlite3.bind_text stmt 2 (scope_key id) = Sqlite3.Rc.OK);
+      check bool "saved record changed" true (Sqlite3.step stmt = Sqlite3.Rc.DONE);
+      check int "exactly one record changed" 1 (Sqlite3.changes db));
+  sql trigger;
+  sql "COMMIT"
+
+let saved_files path =
+  let directory = Filename.dirname path in
+  Sys.readdir directory |> Array.to_list |> List.sort String.compare
+  |> List.map (fun name -> name,
+      In_channel.with_open_bin (Filename.concat directory name) In_channel.input_all)
+
+let assert_saved_state_refused path id detail =
+  let before = saved_files path in
+  let open_candidate opener () =
+    match opener ~path with
+    | Error error -> Error error
+    | Ok store -> Store.close store |> ok; Ok () in
+  List.iter (fun (label, inspect) ->
+    (match inspect () with
+     | Error (Store.Integrity_error actual) ->
+       check string (label ^ " identifies the saved scope and decoder failure")
+         ("semantic execution " ^ scope_key id ^ ": " ^ detail) actual
+     | Error ((Store.Invalid_input _ | Store.Unknown_operation _ | Store.Not_queued _
+              | Store.Not_running _ | Store.Idempotency_conflict _
+              | Store.Store_unavailable _ | Store.Native_call_unsettled) as error) ->
+       fail (label ^ ": " ^ Store.error_to_string error)
+     | Ok () -> fail (label ^ " admitted unsupported saved state"));
+    check bool (label ^ " preserves the database and SQLite sidecar bytes") true
+      (before = saved_files path))
+    [ "open_or_create", open_candidate Store.open_or_create
+    ; "open_existing", open_candidate Store.open_existing
+    ; "inspect_outstanding", (fun () -> Store.inspect_outstanding ~path |> Result.map (fun _ -> ()))
+    ; "inspect_durable_records", (fun () -> Store.inspect_durable_records ~path |> Result.map (fun _ -> ())) ]
+
+let test_openers_refuse_mixed_unsupported_records () =
+  List.iter (fun corrupt_settled ->
+    with_mixed_native_records @@ fun path settled active ->
+    let execution = if corrupt_settled then settled else active in
+    let fields = Semantic.to_json execution |> Yojson.Safe.Util.to_assoc in
+    let json = `Assoc (("schema", `String "masc.keeper_semantic_execution.v1")
+      :: List.remove_assoc "native_calls" (List.remove_assoc "schema" fields)) in
+    let detail = match Semantic.of_json json with
+      | Error error -> Semantic.error_to_string error
+      | Ok _ -> fail "unsupported saved-record fixture is readable" in
+    rewrite_semantic_fixture path execution.id ~column:"record_json"
+      (Sqlite3.Data.TEXT (Operation.canonical_json_string json |> value));
+    assert_saved_state_refused path execution.id detail) [false; true]
+
+let test_openers_refuse_semantic_index_mismatch () =
+  with_mixed_native_records @@ fun path settled _active ->
+  rewrite_semantic_fixture path settled.id ~column:"revision"
+    (Sqlite3.Data.INT (Int64.succ settled.revision));
+  assert_saved_state_refused path settled.id "index and record disagree"
 
 let test_stale_checkpoint_digest_and_commit_readback () = with_store @@ fun _path store operation ->
   let call = make_call operation in
@@ -733,6 +860,9 @@ let () = run "native-call-owner-store" ["input ownership", [
   test_case "input and native checkpoint commit atomically" `Quick test_input_and_native_checkpoint_commit_atomically;
   test_case "input owner shares native retained liveness" `Quick test_input_retention_shares_native_liveness];
   "recovery", [
+  test_case "openers preserve fresh and current mixed native records" `Quick test_openers_accept_fresh_and_current_native_records;
+  test_case "openers and preflight refuse mixed unsupported records without writes" `Quick test_openers_refuse_mixed_unsupported_records;
+  test_case "openers and preflight identify a mismatched settled index" `Quick test_openers_refuse_semantic_index_mismatch;
   test_case "completed history keeps every call and original trace after reopen" `Quick test_completed_history_keeps_every_call_after_reopen;
   test_case "history shares native Bind commit and rejects retired reactivation" `Quick test_history_uses_the_native_bind_transaction;
   test_case "active restart preserves exact admission" `Quick test_active_restart_preserves_seed_and_exact_identity;

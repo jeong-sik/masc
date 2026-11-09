@@ -28,7 +28,7 @@ jobs:
         run: |
           [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo 'source-sha must be 40 lowercase hex characters' >&2; exit 1; }
           case "$PROOF_SCENARIO" in
-            detail-ownership|workspace-files|rich-workspace|rich-chat-workspace|original-tool-result|code-references|resource-reading|addon-lifecycle|browser-lane|source-readers|code-drafts) ;;
+            detail-ownership|workspace-files|rich-workspace|rich-chat-workspace|original-tool-result|code-references|resource-reading|addon-lifecycle|browser-lane|source-readers|code-drafts|tui-performance) ;;
             *) echo 'unsupported native proof scenario' >&2; exit 1 ;;
           esac
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -96,6 +96,14 @@ jobs:
             code-references)
               command -v python3 >/dev/null
               targets+=(bin/main_eio.exe test/test_lsp_workspace_pool.exe test/test_lsp_questions.exe test/test_lsp_message_router.exe test/test_lsp_process_manager.exe test/test_server_ide_lsp_proxy.exe)
+              ;;
+            tui-performance)
+              targets+=(test/test_tui_message_input.exe test/test_tui_render_schedule.exe
+                test/test_tui_memory_facts_explorer.exe test/test_tui_memory_back.exe
+                test/test_tui_detail_reading.exe test/test_tui_resource_document_search.exe
+                test/test_tui_resource_copy.exe
+                test/test_tui_resource_export.exe test/test_tui_code_draft.exe
+                test/test_tui_keeper_memory_reading.exe test/test_tui_answering.exe)
               ;;
             code-drafts)
               targets+=(bin/main_eio.exe test/test_tui_code_draft.exe test/test_tui_workspace_entries.exe test/test_workspace_file_confidentiality.exe test/test_tui_keys.exe test/test_tui_palette_matching.exe)

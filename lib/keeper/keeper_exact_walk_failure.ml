@@ -68,6 +68,11 @@ let execution ~historical_range_size ~named_input_capacity =
 ;;
 
 let size_independent = execution ~historical_range_size:false ~named_input_capacity:false
+
+(* The account's rest refusal without the call (RFC-exact-lane-waits-for-a-
+   stated-reset R5): what an HTTP 429 gives, and with no native run nothing
+   is unsettled. *)
+let held = size_independent
 let historical_size = execution ~historical_range_size:true ~named_input_capacity:false
 let input_size = execution ~historical_range_size:true ~named_input_capacity:true
 let provider_input_size refusal = { input_size with provider_input_refusals = [refusal] }
@@ -297,8 +302,7 @@ let of_cli_observation observation = match observation.cause with
   (* The account's rest refusal without the call (R5): it says nothing about
      size, so another slot's size refusal does not prove the input must be
      split, and with no native run there is nothing unsettled. *)
-  | Held _ -> {empty with size_independent_execution_failure=true;
-                          non_capacity_execution_failure=true}
+  | Held _ -> held
   | Codex_context_refused {tool_effect_attempted=false;message=_}
   | Claude_context_refused {tool_effect_attempted=false;response_emitted=false;message=_} ->
     {empty with named_input_capacity=true;provider_input_refusals=[Context_overflow]}

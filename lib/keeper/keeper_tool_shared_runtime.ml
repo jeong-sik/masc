@@ -1,7 +1,5 @@
-open Keeper_types
 open Keeper_meta_contract
 open Keeper_types_profile
-open Keeper_alerting
 module StringMap = Set_util.StringMap
 module StringSet = Set_util.StringSet
 

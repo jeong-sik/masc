@@ -28,6 +28,22 @@ class YojsonWireTest(unittest.TestCase):
             with self.subTest(text=text):
                 self.assertIsInstance(W.parse(text), W.JsonError)
 
+    def test_integers_past_the_ocaml_range_stay_text_at_any_length(self) -> None:
+        # CPython's int() refuses more than 4300 digits; Yojson reads any length as Intlit.
+        self.assertEqual(W.parse("4611686018427387903"), 2**62 - 1)
+        self.assertEqual(W.parse("9999999999999999999"), W.IntLit("9999999999999999999"))
+        for text in ("1" * 4301, "-" + "9" * 100_000):
+            with self.subTest(length=len(text)):
+                self.assertEqual(W.parse(text), W.IntLit(text))
+
+    def test_depth_is_bounded_by_memory_not_the_call_stack(self) -> None:
+        depth = 100_000
+        text = '{"a":' * depth + "[" * depth + "]" * depth + "}" * depth
+        value = W.parse(text)
+        assert not isinstance(value, W.JsonError)
+        self.assertEqual(W.write(value), text)
+        self.assertEqual(W.parse("[" * depth + "]" * (depth - 1)), W.JsonError(2 * depth - 1, "expected ',' or ']'"))
+
     def test_writer_matches_yojson(self) -> None:
         self.assertEqual(W.write(1e16), "1e+16")
         self.assertEqual(W.write(-0.0), "-0.0")

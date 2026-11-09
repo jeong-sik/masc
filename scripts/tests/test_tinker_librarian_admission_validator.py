@@ -295,6 +295,32 @@ class ValidatorTest(unittest.TestCase):
             with self.subTest(case=number):
                 self.assertIsInstance(V.validate(make_prompt(), text), V.Valid)
 
+    def test_masc_reads_any_integer_length_and_depth(self) -> None:
+        # Checked against a MASC harness (Yojson 3.0.0) on 2026-11-09: it accepts all three.
+        # CPython's int() refuses past 4300 digits and a recursive reader stopped near 500 levels.
+        depth = 100_000
+        for value in ("1" * 5000, "[" * depth + "]" * depth, '{"a":' * depth + "1.0" + "}" * depth):
+            with self.subTest(length=len(value)):
+                text = VALID.replace('"working_state":null', '"working_state":' + value)
+                self.assertIsInstance(V.validate(make_prompt(), text), V.Valid)
+        broken = VALID.replace('"working_state":null', '"working_state":' + "[" * depth + "]" * (depth - 1))
+        result = V.validate(make_prompt(), broken)
+        assert isinstance(result, V.Invalid)
+        self.assertEqual(result.violations[0].kind, V.Kind.INVALID_JSON)
+
+    def test_the_first_refusal_in_source_order_wins(self) -> None:
+        # Same kinds from the MASC harness on 2026-11-09: an object's names are
+        # checked before its members, and members in source order.
+        cases = (('{"b":NaN,"a":1,"a":2}', V.Kind.DUPLICATE_MEMBER),
+                 ('[{"x":NaN},{"a":1,"a":2}]', V.Kind.NON_FINITE_NUMBER),
+                 ('[{"a":1,"a":2},{"x":NaN}]', V.Kind.DUPLICATE_MEMBER))
+        for value, kind in cases:
+            with self.subTest(value=value):
+                text = VALID.replace('"working_state":null', '"working_state":' + value)
+                result = V.validate(make_prompt(), text)
+                assert isinstance(result, V.Invalid)
+                self.assertEqual(result.violations[0].kind, kind)
+
     def test_category_grammar(self) -> None:
         for name in ("fact", "release_schedule", "a1_b2", "x"):
             self.assertTrue(V.category_valid(name), name)

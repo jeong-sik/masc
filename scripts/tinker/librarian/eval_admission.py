@@ -9,7 +9,8 @@
         --target base=thinkingmachines/Inkling-2-Small:peft:262144 --target A=tinker://... \
         --out artifacts/tinker/librarian/eval-<name>-real --budget 6
     uv run scripts/tinker/librarian/eval_admission.py run --set synth --requests <requests.jsonl> ...
-    uv run scripts/tinker/librarian/eval_admission.py verdict --real <dir> --synth <dir>
+    uv run scripts/tinker/librarian/eval_admission.py verdict --real <dir> --synth <dir> \
+        --train A=artifacts/tinker/librarian/train-A --train B=artifacts/tinker/librarian/train-B
 
 `pass_lines.json` fixes the request, the sets, the baseline, the candidates and
 the gates. `run` refuses to start when a file it pins has changed. Each item
@@ -36,16 +37,27 @@ Definitions:
 - E-real absorbed_not_in_live: memory IDs a valid answer absorbs that the live
   answer keeps. Listed for human review with G2's IDs, not gated: absorbing
   merges a fact into a new claim, which MASC's absorb gate checks at commit.
-- E-synth outcome accuracy: candidates whose outcome equals the label, over
-  every candidate (an answer that is not valid is wrong). A correction also
-  needs the claim it names to supersede the label's target.
+- E-synth outcome accuracy: candidates whose outcome equals the label and whose
+  `memory_claim` points where the label's kind needs it, over every candidate
+  (an answer that is not valid is wrong). A new fact names a claim the answer
+  adds; a paraphrase names the existing claim it restates; a correction names a
+  claim that supersedes the label's target, and the target is dropped.
 - E-synth drop precision: dropped IDs that are planted stale facts or label
   correction targets, over all dropped IDs of valid answers (1.0 with no drops).
-- E-synth stale drop recall: planted stale facts dropped, over all planted.
+- E-synth absorbed: memory IDs valid answers absorb. No label asks for one.
+  Reported apart, not gated, as E-real reports its absorbs: MASC's absorb gate
+  checks each absorb at commit, while nothing checks a drop.
+- E-synth stale drop recall: planted stale facts dropped, over all planted. An
+  absorbed stale fact is not dropped: its text lives on in the new claim.
 - latency p50 (G5): median wall time of E-real calls that returned HTTP 200.
   Every target first gets each prompt with WARM_MAX_TOKENS, so the measured
   calls all read a cached prefix. `verdict` refuses when fewer than
-  `warm_share_min` of a target's calls did.
+  `warm_share_min` of a target's calls did. `tinker_oai` retries a transient
+  failure itself and logs every attempt, so wall_s is one attempt. A call that
+  still failed is an answer that is not valid, and `http_errors` counts them.
+- `verdict` recomputes every number from rows.jsonl. It refuses unless both runs
+  sent the same model under each name, and each candidate is the sampler_path
+  `train_sft.py` saved for that branch under these pass lines.
 
 Output: <out>/calls.jsonl holds raw answers (E-real answers carry Keeper memory;
 keep them local), <out>/rows.jsonl numbers, IDs and verdicts, <out>/summary.json.
@@ -153,7 +165,7 @@ def real_items(manifest: Path, base: Path) -> list[RealItem]:
         prompt = R.parse(record.prompt, synth_render.template())
         if isinstance(prompt, R.ParseError):
             raise SystemExit(f"{record.digest[:16]}: prompt does not parse: {prompt.detail}")
-        live = check(prompt, json.dumps(record.answer, ensure_ascii=False))
+        live = check(prompt, Y.write(record.answer))
         if live.answer is None:
             raise SystemExit(f"{record.digest[:16]}: the live answer is refused: {live.problems}")
         items.append(RealItem(record.digest[:16], prompt, record.prompt, live.answer))
@@ -192,23 +204,35 @@ def score_real(item: RealItem, mine: AV.AdmissionAnswer | None) -> JsonObject:
             "live_removed": len(gone)}
 
 
+def claim_matches(label: JsonObject, claim: str | None, answer: AV.AdmissionAnswer) -> bool:
+    """Whether a judgment's `memory_claim` points where the label's kind needs it.
+    MASC accepts any claim of final memory, so an outcome alone can name the wrong one."""
+    target = label.get("supersedes")
+    match label["outcome"]:
+        case "incorporated" if target is not None:
+            supersedes = {new: old for old, new in answer.revisions}
+            return claim is not None and supersedes.get(claim) == target and target in answer.dropped
+        case "incorporated":
+            return claim is not None and claim in answer.added_claims
+        case "already_represented":
+            return claim == label.get("already_claim")
+        case _:
+            return True
+
+
 def score_synth(item: SynthItem, mine: AV.AdmissionAnswer | None) -> JsonObject:
     labels = {cast(str, c["request_id"]): c for c in cast(list[JsonObject], item.label["candidates"])}
     planted = set(cast(list[str], item.label["planted_stale"]))
     targets = {cast(str, c["supersedes"]) for c in labels.values() if c.get("supersedes") is not None}
     got = outcomes(mine) if mine is not None else {}
     drops = set(mine.dropped) if mine is not None else set[str]()
-    supersedes = {claim: old for old, claim in mine.revisions} if mine is not None else {}
+    gone = removed(mine) if mine is not None else set[str]()
     correct: dict[str, bool] = {}
     for rid, label in labels.items():
         outcome, claim = got.get(rid, ("", None))
-        ok = outcome == label["outcome"]
-        target = label.get("supersedes")
-        if ok and target is not None:
-            ok = claim is not None and supersedes.get(claim) == target and target in drops
-        correct[rid] = ok
+        correct[rid] = mine is not None and outcome == label["outcome"] and claim_matches(label, claim, mine)
     return {"candidates": len(labels), "correct": sum(correct.values()), "per_candidate": correct,
-            "dropped": len(drops), "dropped_expected": len(drops & (planted | targets)),
+            "dropped": len(drops), "absorbed": len(gone - drops), "dropped_expected": len(drops & (planted | targets)),
             "planted": len(planted), "planted_dropped": len(drops & planted)}
 
 
@@ -252,6 +276,7 @@ def summarize(kind: str, rows: list[JsonObject]) -> JsonObject:
         ok = [cast(float, r["wall_s"]) for r in mine if r["status"] == HTTP_OK]
         valid = sum(bool(r["valid"]) for r in mine)
         part: JsonObject = {"items": len(mine), "valid": valid, "valid_rate": valid / len(mine),
+                            "http_errors": len(mine) - len(ok),
                             "latency_p50_s": statistics.median(ok) if ok else None,
                             "warm_share": sum(warm(r) for r in mine) / len(mine),
                             "cost_usd": round(sum(cast(float, r["cost_usd"]) for r in mine), 4)}
@@ -264,6 +289,7 @@ def summarize(kind: str, rows: list[JsonObject]) -> JsonObject:
             drops = sum(cast(int, r["dropped"]) for r in mine)
             part["outcome_accuracy"] = sum(cast(int, r["correct"]) for r in mine) / cands
             part["drop_precision"] = sum(cast(int, r["dropped_expected"]) for r in mine) / drops if drops else 1.0
+            part["absorbed"] = sum(cast(int, r["absorbed"]) for r in mine)
             part["stale_drop_recall"] = (sum(cast(int, r["planted_dropped"]) for r in mine)
                                          / max(1, sum(cast(int, r["planted"]) for r in mine)))
         out[name] = part
@@ -339,44 +365,76 @@ def widest_gap_s(rows: list[JsonObject], baseline: str, name: str) -> float | No
     return max(gaps)
 
 
-def choose(names: list[str], result: JsonObject, synth: dict[str, JsonObject], margin: float) -> str | None:
-    """The first passing candidate in pass_lines order, unless a later passing one leads it by
-    `margin` on both E-synth outcome accuracy and the G4 lead."""
+def choose(names: list[str], result: JsonObject, synth: dict[str, JsonObject], rows: list[JsonObject],
+           margin: float) -> str | None:
+    """The first passing candidate in pass_lines order, unless a later passing one leads it by `margin`
+    on E-synth outcome accuracy and on E-real agreement over the items both answered validly.
+    The two are compared with each other, not through their leads over the baseline: those leads
+    are measured on different items."""
     passing = [n for n in names if cast(JsonObject, result[n])["pass"]]
     if not passing:
         return None
-
-    def lead(name: str) -> float:
-        return cast(float, cast(JsonObject, cast(JsonObject, result[name])["paired"])["lead"])
-
     pick = passing[0]
     for other in passing[1:]:
+        ahead = paired(rows, pick, other)["lead"]
         if (cast(float, synth[other]["outcome_accuracy"]) - cast(float, synth[pick]["outcome_accuracy"]) >= margin
-                and lead(other) - lead(pick) >= margin):
+                and ahead is not None and cast(float, ahead) >= margin):
             pick = other
     return pick
+
+
+def trained_runs(pairs: list[str]) -> dict[str, JsonObject]:
+    """name=<train_sft --out> pairs, read as {name: summary.json}."""
+    out: dict[str, JsonObject] = {}
+    for pair in pairs:
+        name, _, folder = pair.partition("=")
+        out[name] = cast(JsonObject, json.loads((Path(folder) / "summary.json").read_text(encoding="utf-8")))
+    return out
+
+
+def binding_problem(real_targets: dict[str, str], synth_targets: dict[str, str], baseline: str,
+                    baseline_model: str, names: list[str], trained: dict[str, JsonObject], pin: str) -> str | None:
+    """Why the two runs cannot be judged together, or None. Each name must send the same model in
+    both runs, and each candidate must be the checkpoint its training run saved under `pin`."""
+    if synth_targets != real_targets:
+        return f"the runs sent different models: real {real_targets}, synth {synth_targets}"
+    if real_targets.get(baseline) != baseline_model:
+        return f"the runs have no {baseline}={baseline_model} target"
+    for name in names:
+        run_ = trained.get(name)
+        if run_ is None:
+            return f"no --train {name}=<dir>: {name} cannot be tied to the run that trained it"
+        if (run_.get("branch"), run_.get("pass_lines_sha256"), run_.get("sampler_path")) != (
+                name, pin, real_targets.get(name)):
+            return f"{name}={real_targets.get(name)} is not the checkpoint branch {name} saved under these pass lines"
+    return None
 
 
 def verdict(args: argparse.Namespace) -> int:
     lines = load_pass_lines()
     real_dir, synth_dir = Path(cast(str, args.real)), Path(cast(str, args.synth))
+    pin = sha256_file(PASS_LINES)
     real = cast(JsonObject, json.loads((real_dir / "summary.json").read_text(encoding="utf-8")))
     synth = cast(JsonObject, json.loads((synth_dir / "summary.json").read_text(encoding="utf-8")))
-    if {real["pass_lines_sha256"], synth["pass_lines_sha256"]} != {sha256_file(PASS_LINES)}:
+    if {real["pass_lines_sha256"], synth["pass_lines_sha256"]} != {pin}:
         raise SystemExit("a run used other pass lines")
     gates, comparison = cast(JsonObject, lines["gates"]), cast(JsonObject, lines["comparison"])
     choice = cast(JsonObject, lines["choice"])
     base, names = cast(str, comparison["baseline"]), cast(list[str], choice["order"])
+    problem = binding_problem(cast(dict[str, str], real["targets"]), cast(dict[str, str], synth["targets"]),
+                              base, cast(str, comparison["baseline_model"]), names,
+                              trained_runs(cast(list[str], args.train)), pin)
+    if problem is not None:
+        raise SystemExit(problem)
+    rows, synth_rows = read_rows(real_dir), read_rows(synth_dir)
+    # Recomputed from the rows, so an edited or stale summary.json cannot pass a gate.
+    r_all = cast(dict[str, JsonObject], summarize("real", rows))
+    s_all = cast(dict[str, JsonObject], summarize("synth", synth_rows))
     expected = {"real": cast(JsonObject, lines["e_real"])["items"], "synth": cast(JsonObject, lines["e_synth"])["items"]}
-    for summary in (real, synth):
-        kind = cast(str, summary["set"])
-        if cast(dict[str, str], summary["targets"]).get(base) != comparison["baseline_model"]:
-            raise SystemExit(f"the {kind} run has no {base}={comparison['baseline_model']} target")
-        counts = {n: t["items"] for n, t in cast(dict[str, JsonObject], summary["by_target"]).items()}
+    for kind, part in (("real", r_all), ("synth", s_all)):
+        counts = {n: t["items"] for n, t in part.items()}
         if any(counts.get(n) != expected[kind] for n in [base, *names]):
             raise SystemExit(f"the {kind} run has not answered every item for every target: {counts}")
-    rows = read_rows(real_dir)
-    r_all, s_all = cast(dict[str, JsonObject], real["by_target"]), cast(dict[str, JsonObject], synth["by_target"])
     window = cast(float, comparison["same_item_window_s"])
     result: JsonObject = {}
     warm_min = cast(float, comparison["warm_share_min"])
@@ -403,7 +461,7 @@ def verdict(args: argparse.Namespace) -> int:
                    and cast(float, p50) <= cast(float, b50) * cast(float, gates["G5_e_real_latency_p50_ratio_max"])),
         }
         result[name] = {"pass": all(checks.values()), **checks, "paired": pair, "widest_gap_s": round(gap, 1)}
-    result["choice"] = choose(names, result, s_all, cast(float, choice["prefer_later_when_ahead_by"]))
+    result["choice"] = choose(names, result, s_all, rows, cast(float, choice["prefer_later_when_ahead_by"]))
     print(json.dumps(result))
     (real_dir / "verdict.json").write_text(json.dumps(result, indent=1) + "\n", encoding="utf-8")
     return 0
@@ -422,6 +480,7 @@ def main() -> int:
     v = sub.add_parser("verdict")
     v.add_argument("--real", required=True)
     v.add_argument("--synth", required=True)
+    v.add_argument("--train", action="append", required=True, help="name=<train_sft --out>, one per candidate")
     args = ap.parse_args()
     return run(args) if args.command == "run" else verdict(args)
 

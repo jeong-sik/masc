@@ -1,10 +1,12 @@
 # pyright: strict
 """Budgeted, cached chat calls to Tinker's OpenAI-compatible endpoint.
 
-Every call is appended to one JSONL log. A rerun that points at the same log
-reuses each HTTP 200 answer under the same key, so an interrupted run resumes
-and pays only for calls that have no answer yet. A connection error or an error
-status is sent again on the rerun.
+Every HTTP attempt is appended to one JSONL log. A rerun that points at the same
+log reuses each HTTP 200 answer under the same key, so an interrupted run resumes
+and pays only for calls that have no answer yet. A transient failure (no
+response, 408, 429, 5xx) is sent again up to TRANSIENT_RETRIES times after a
+pause. Each attempt is its own row and its own wall_s, so a returned call's
+wall_s never holds a retry. A failure left after that is sent again on a rerun.
 
 TINKER_API_KEY comes from the environment and is never written.
 """
@@ -32,6 +34,15 @@ CHARS_TO_TOKENS = 0.7
 HTTP_OK = 200
 NO_RESPONSE = 0
 TIMEOUT_S = 900
+TRANSIENT_RETRIES = 2
+RETRY_PAUSE_S = 10.0
+HTTP_REQUEST_TIMEOUT = 408
+HTTP_TOO_MANY_REQUESTS = 429
+HTTP_SERVER_ERROR = 500
+
+
+def transient(status: int) -> bool:
+    return status in (NO_RESPONSE, HTTP_REQUEST_TIMEOUT, HTTP_TOO_MANY_REQUESTS) or status >= HTTP_SERVER_ERROR
 
 
 @dataclass(frozen=True, slots=True)
@@ -96,31 +107,39 @@ class Caller:
         self.budget = budget
         self.spent = sum(c.cost() for c in logged)
         self.stopped: str | None = None
+        # The SDK's own retries would add their time to wall_s and leave no row; `ask` retries.
         self._client = OpenAI(base_url=BASE_URL, api_key=os.environ["TINKER_API_KEY"], timeout=TIMEOUT_S,
-                              max_retries=2)
+                              max_retries=0)
 
     def ask(self, *, model: str, label: str, messages: Sequence[str], effort: str, max_tokens: int,
             attempt: int = 0) -> Call | None:
-        """Send user messages in order. A cached HTTP 200 call with the same key is returned without sending."""
+        """Send user messages in order. A cached HTTP 200 call with the same key is returned without
+        sending. Otherwise the last attempt is returned: an answer, a failure that is not transient,
+        or the transient failure that used up TRANSIENT_RETRIES."""
         key = call_key(model, effort, max_tokens, attempt, messages)
-        with self._lock:
-            hit = self._cache.get(key)
-            if hit is not None:
-                return hit
-            chars = sum(len(m) for m in messages)
-            worst = (chars * CHARS_TO_TOKENS * PRICE["prefill"] + max_tokens * PRICE["sample"]) / 1e6
-            if self.stopped is not None or self.spent + worst > self.budget:
-                self.stopped = self.stopped or f"spent {self.spent:.4f} + worst {worst:.4f} > {self.budget}"
-                return None
-            self.spent += worst  # reserved, corrected below
-        call = self._send(key, label, model, messages, effort, max_tokens)
-        with self._lock:
-            self.spent += call.cost() - worst
-            if call.status == HTTP_OK:
-                self._cache[key] = call
-            with self._log.open("a", encoding="utf-8") as fh:
-                fh.write(json.dumps(asdict(call), ensure_ascii=False) + "\n")
-        return call
+        retry = 0
+        while True:
+            with self._lock:
+                hit = self._cache.get(key)
+                if hit is not None:
+                    return hit
+                chars = sum(len(m) for m in messages)
+                worst = (chars * CHARS_TO_TOKENS * PRICE["prefill"] + max_tokens * PRICE["sample"]) / 1e6
+                if self.stopped is not None or self.spent + worst > self.budget:
+                    self.stopped = self.stopped or f"spent {self.spent:.4f} + worst {worst:.4f} > {self.budget}"
+                    return None
+                self.spent += worst  # reserved, corrected below
+            call = self._send(key, label, model, messages, effort, max_tokens)
+            with self._lock:
+                self.spent += call.cost() - worst
+                if call.status == HTTP_OK:
+                    self._cache[key] = call
+                with self._log.open("a", encoding="utf-8") as fh:
+                    fh.write(json.dumps(asdict(call), ensure_ascii=False) + "\n")
+            if not transient(call.status) or retry == TRANSIENT_RETRIES:
+                return call
+            retry += 1
+            time.sleep(RETRY_PAUSE_S * retry)
 
     def _send(self, key: str, label: str, model: str, messages: Sequence[str], effort: str,
               max_tokens: int) -> Call:

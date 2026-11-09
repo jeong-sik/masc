@@ -2,7 +2,7 @@
 """MASC's acceptance checks for a keeper-librarian admission answer.
 
 `validate(prompt, answer_text)` follows the path an exact-lane admission answer
-takes in MASC (main 4b770e51972c) and stops at the first refusal, as MASC does,
+takes in MASC (main d2bc93109055) and stops at the first refusal, as MASC does,
 so `Invalid` carries exactly one violation:
 
 1. exact_output_plan.ml:641-647 `normalize_json`: `Yojson.Safe.from_string`

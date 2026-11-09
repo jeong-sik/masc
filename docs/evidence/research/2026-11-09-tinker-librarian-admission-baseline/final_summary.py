@@ -3,7 +3,7 @@
 # dependencies = ["openai==3.46.0"]
 # ///
 # pyright: strict
-"""Print the base model's E-synth summary on the 142 requests the audit kept.
+"""Print the base model's E-synth summary on the 119 requests the audit kept.
 
     uv run docs/evidence/research/2026-11-09-tinker-librarian-admission-baseline/final_summary.py
 

@@ -20,15 +20,25 @@ A request carries labels by construction:
 
 A memory fact with `planted_stale=True` is a transient state that slipped into
 memory; the expected answer drops it without a superseding claim.
+
+What a claim carries besides its meaning (a date, a time, a PR/issue/task
+number) is planned from shares measured on the retained records, and
+`surface_holds` checks the written text against the plan. A memory fact draws
+its marks one by one with `plan_surface`, the same way stale or durable.
+Candidates are planned for a whole split at once by `synth_candidate_plan`,
+which deals each mark and the length out within each label kind. A label then
+leaves no mark in those strings.
 Rules: `config/prompts/librarian.md` 143-208 (keep, drop, correct) and
 586-616 (admission).
 """
 
 from __future__ import annotations
 
+import datetime as dt
 import itertools
 import json
 import random
+import re
 import string
 from dataclasses import dataclass
 from enum import Enum
@@ -39,7 +49,9 @@ from typing import Literal, assert_never, cast
 FACTS_PER_MEMORY = ((0.0, 12.0), (0.1, 27.0), (0.5, 66.0), (0.9, 96.0), (1.0, 140.0))
 CATEGORIES_PER_MEMORY = ((0.0, 3.0), (0.1, 4.0), (0.5, 8.0), (0.9, 10.0), (1.0, 14.0))
 CLAIM_CHARS = ((0.0, 120.0), (0.1, 214.0), (0.5, 492.0), (0.9, 1410.0), (1.0, 2400.0))
-CANDIDATE_CLAIM_CHARS = ((0.0, 150.0), (0.1, 302.0), (0.5, 475.0), (0.9, 1166.0), (1.0, 2000.0))
+# Candidates: the 233 of the 99 E-real records, measured 2026-11-09 (p10 399, p50 737,
+# p90 1,234). The 11-08 points (p50 475) matched no retained set this split is checked on.
+CANDIDATE_CLAIM_CHARS = ((0.0, 150.0), (0.1, 399.0), (0.5, 737.0), (0.9, 1234.0), (1.0, 2000.0))
 # Days between the earliest and the latest fact of one memory: p10 8, p50 41, p90 61.
 MEMORY_SPAN_DAYS = ((0.0, 2.0), (0.1, 8.0), (0.5, 41.0), (0.9, 61.0), (1.0, 90.0))
 # Measured: 1,111 of 6,743 facts cite a Board post.
@@ -54,6 +66,42 @@ GOAL_WEIGHTS: tuple[tuple[GoalShape, float], ...] = (
 # an oversized part, #49910, and is left out).
 CANDIDATES_PER_REQUEST_WEIGHTS = ((1, 0.6), (2, 0.25), (3, 0.15))
 STALE_FACTS_PER_MEMORY_WEIGHTS = ((0, 0.3), (1, 0.4), (2, 0.3))
+
+
+@dataclass(frozen=True, slots=True)
+class SurfaceShares:
+    date: float
+    time_given_date: float
+    reference: float
+
+
+# Measured 2026-11-09 on the 99 E-real records (counts only, no text kept):
+# distinct current facts (1,621) carry a date 0.349, a time given a date 0.18 and a
+# PR/issue/task number 0.389; candidates (233) carry a date 0.691, a time given a date
+# 0.379 and a number 0.403. Over both, dates are ISO 0.63, MM-DD 0.19, MM/DD 0.16 and
+# Korean 0.01; numbers are #N 0.75 and task-N 0.25; times are almost all HH:MM.
+FACT_SURFACE = SurfaceShares(date=0.349, time_given_date=0.18, reference=0.389)
+CANDIDATE_SURFACE = SurfaceShares(date=0.691, time_given_date=0.379, reference=0.403)
+DateFormat = Literal["iso", "month_day_dash", "month_day_slash", "korean"]
+DATE_FORMAT_WEIGHTS: tuple[tuple[DateFormat, float], ...] = (
+    ("iso", 0.63), ("month_day_dash", 0.19), ("month_day_slash", 0.16), ("korean", 0.02))
+ReferenceFormat = Literal["hash", "task"]
+REFERENCE_FORMAT_WEIGHTS: tuple[tuple[ReferenceFormat, float], ...] = (("hash", 0.75), ("task", 0.25))
+# What counts as a date, a time and a number in a claim. A range like 3-5 or a ratio like
+# 1/3 reads as a date, so the generator never keeps one.
+DATE_PATTERN = re.compile(r"(?<!\d)20\d\d-\d\d-\d\d(?!\d)|(?<![\d-])\d{1,2}-\d{1,2}(?![\d-])"
+                          r"|(?<!\d)\d{1,2}/\d{1,2}(?!\d)|\d{1,2}월\s*\d{1,2}일")
+TIME_PATTERN = re.compile(r"(?<!\d)\d{1,2}:\d{2}(?!\d)|\d{1,2}시(?!간)")
+REFERENCE_PATTERN = re.compile(r"#\d+|\btask-\d+|\bPR\s*\d+")
+
+
+@dataclass(frozen=True, slots=True)
+class Surface:
+    """The exact date, time and number text one claim carries; None carries none of that kind."""
+
+    date: str | None
+    time: str | None  # only with a date
+    reference: str | None
 # Operator caps in every measured request (`keeper_memory_limits.ml`).
 CATEGORY_CAP = 30
 FACTS_PER_CATEGORY_CAP = 30
@@ -230,12 +278,16 @@ def label_of(request: SynthRequest) -> RequestLabel:
 # --- sampling ---------------------------------------------------------------
 
 
-def sample_quantile(rng: random.Random, points: tuple[tuple[float, float], ...]) -> float:
-    u = rng.random()
+def value_at(points: tuple[tuple[float, float], ...], u: float) -> float:
+    """The piecewise-linear inverse CDF `points` at quantile u."""
     for (q0, v0), (q1, v1) in itertools.pairwise(points):
         if u <= q1:
             return v0 + (v1 - v0) * (u - q0) / (q1 - q0)
     return points[-1][1]
+
+
+def sample_quantile(rng: random.Random, points: tuple[tuple[float, float], ...]) -> float:
+    return value_at(points, rng.random())
 
 
 def sample_weighted[T](rng: random.Random, weights: tuple[tuple[T, float], ...]) -> T:
@@ -263,6 +315,51 @@ def allocate_counts(rng: random.Random, n_facts: int, n_categories: int) -> tupl
             counts[j] -= 1
         i += 1
     return tuple(counts)
+
+
+def date_text(when: dt.datetime, form: DateFormat) -> str:
+    match form:
+        case "iso":
+            return when.strftime("%Y-%m-%d")
+        case "month_day_dash":
+            return f"{when.month:02d}-{when.day:02d}"
+        case "month_day_slash":
+            return f"{when.month}/{when.day}"
+        case "korean":
+            return f"{when.month}월 {when.day}일"
+        case _:
+            assert_never(form)
+
+
+def reference_text(rng: random.Random, form: ReferenceFormat) -> str:
+    match form:
+        case "hash":
+            return f"#{rng.randrange(120, 52000)}"
+        case "task":
+            return f"task-{rng.randrange(10, 9999)}"
+        case _:
+            assert_never(form)
+
+
+def plan_surface(rng: random.Random, shares: SurfaceShares, when: dt.datetime) -> Surface:
+    """Surface traits for one claim written about `when`. The caller passes no label."""
+    dated = rng.random() < shares.date
+    timed = dated and rng.random() < shares.time_given_date
+    cited = rng.random() < shares.reference
+    return Surface(date_text(when, sample_weighted(rng, DATE_FORMAT_WEIGHTS)) if dated else None,
+                   when.strftime("%H:%M") if timed else None,
+                   reference_text(rng, sample_weighted(rng, REFERENCE_FORMAT_WEIGHTS)) if cited else None)
+
+
+def mark_holds(claim: str, pattern: re.Pattern[str], planned: str | None) -> bool:
+    found = {m.group(0) for m in pattern.finditer(claim)}
+    return not found if planned is None else found == {planned}
+
+
+def surface_holds(claim: str, surface: Surface) -> bool:
+    """The claim carries exactly the planned date, time and number text, and no other of each kind."""
+    return (mark_holds(claim, DATE_PATTERN, surface.date) and mark_holds(claim, TIME_PATTERN, surface.time)
+            and mark_holds(claim, REFERENCE_PATTERN, surface.reference))
 
 
 def hex_string(rng: random.Random, n: int) -> str:

@@ -124,9 +124,13 @@ uv run scripts/tinker/librarian/eval_admission.py verdict \
 `--out/judge/`. Give the judge only that folder: it reads `judge.md` and
 `cases.jsonl` there and writes `decisions.jsonl` next to them. `judge.md` names
 its rules as `config/prompts/librarian.md`, and the folder holds a copy at that
-path. The key holds the label's classes and the dropped facts. `verdict` refuses while an
-off-label drop has no decision, and records each drop, its class, the memories
-left out and the kept drops on them in `verdict.json`.
+path. The key holds the label's classes and the dropped facts.
+`--out/judge-files.json` holds the sha256 of the three files the judge was
+given. `apply` and `verdict` read the decisions only while those files are
+unchanged and the rules copy equals this checkout's `config/prompts/librarian.md`.
+`verdict` refuses while an off-label drop has no decision, and records each
+drop, its class, the memories left out, the kept drops on them and the judge's
+file sha256 values in `verdict.json`.
 
 A rerun with the same `--out` reuses every answered call and pays only for the
 rest. A budget stop exits with status 2. `verdict` refuses a run where a

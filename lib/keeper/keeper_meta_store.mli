@@ -76,7 +76,6 @@ val read_meta_file_path_read_only :
 val validate_current_meta_file_result :
   string -> (unit, current_meta_rejection) result
 
-(** [true] when [f] has an exact canonical Keeper-metadata interpretation. *)
 (** List keeper names with persisted JSON in [.masc/keepers/].
     Sidecars filtered, names validated, sorted ascending. *)
 val persisted_keeper_names_result : Workspace.config -> (string list, string) result

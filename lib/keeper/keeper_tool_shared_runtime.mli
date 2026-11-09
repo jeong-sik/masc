@@ -6,8 +6,6 @@ module StringMap : Map.S with type key = string
 (** Render an error JSON envelope: [{"error": <message>; ...fields}]. *)
 val error_json : ?fields:(string * Yojson.Safe.t) list -> string -> string
 
-(** Render a failed [Tool_result.result] as [error_json], preserving
-    [failure_class] for keeper-facing routing and diagnostics. *)
 (** Render a missing-file JSON envelope with the error, path, and
     path-resolution guidance.
     #10349: directory entries are intentionally excluded to prevent
@@ -23,7 +21,6 @@ val missing_file_error_json
     it to the front. Non-assoc values pass through unchanged. *)
 val assoc_override_string : string -> string -> Yojson.Safe.t -> Yojson.Safe.t
 
-(** Re-export of [Keeper_alerting_path.sandbox_roots]. *)
 (** Sandbox playground root for [meta]; ensures the bundle dirs
     exist as a side effect. *)
 val keeper_playground_root
@@ -75,9 +72,12 @@ type cwd_existence =
 val cwd_existence : meta:Keeper_meta_contract.keeper_meta -> string -> cwd_existence
 
 (** Project a Keeper-visible write path into its deterministic logical
-    namespace and return the opaque allowed-root capability locator. This is
-    the single owner of relative-path and Docker-visible-path projection for
-    local filesystem writes. *)
+    namespace and return the opaque allowed-root capability locator. A relative
+    path is rooted at that Keeper's playground; an absolute path, including a
+    Docker-visible path projected to its host mount, keeps its explicit
+    identity. The projected path is then checked against the allowed roots.
+    This is the single owner of relative-path and Docker-visible-path
+    projection for local filesystem writes. *)
 val resolve_keeper_confined_write_path
   :  config:Workspace.config
   -> meta:Keeper_meta_contract.keeper_meta
@@ -85,11 +85,6 @@ val resolve_keeper_confined_write_path
   -> raw_path:string
   -> (Keeper_alerting_path.confined_path, Keeper_alerting_path.path_refusal) result
 
-(** Resolve a write target in the Keeper's deterministic logical namespace.
-    Relative paths are always rooted at that Keeper's playground. Absolute
-    paths, including a Docker-visible path projected to its host mount, retain
-    their explicit identity. The resulting path is checked once against the
-    objective allowed-root containment boundary. *)
 (** Resolve a read target using the same deterministic namespace as
     {!resolve_keeper_confined_write_path}, without existence inference. *)
 val resolve_keeper_read_path
@@ -138,8 +133,6 @@ val keeper_agent_sender : meta:Keeper_meta_contract.keeper_meta -> string
     shell commands. *)
 val shell_readonly_limit : Yojson.Safe.t -> int
 
-(** Clamp [args.max_bytes] to [256..100000] (default 4000) for
-    the structured [cat] read operation. *)
 (** Total payload [lines_to_json] keeps by default, and the size an
     [rg] error text is cut to. *)
 val search_result_max_bytes : int

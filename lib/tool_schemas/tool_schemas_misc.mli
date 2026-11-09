@@ -29,6 +29,8 @@ val control_schemas : Masc_domain.tool_schema list
 val web_search_schema : Masc_domain.tool_schema
 val web_fetch_schema : Masc_domain.tool_schema
 val web_schemas : Masc_domain.tool_schema list
+(** Canonical input schemas owned by the Tool_misc web handlers. *)
+
 val browser_tabs_schema : Masc_domain.tool_schema
 val browser_read_schema : Masc_domain.tool_schema
 val browser_session_schema : Masc_domain.tool_schema
@@ -37,7 +39,6 @@ val browser_act_schema : Masc_domain.tool_schema
 val browser_interact_schema : Masc_domain.tool_schema
 val browser_lane_schemas : Masc_domain.tool_schema list
 (** Browser-lane reader tools (docs/design/browser-lane.md). *)
-(** Canonical input schemas owned by the Tool_misc web handlers. *)
 
 val schemas : Masc_domain.tool_schema list
 (** [schemas] is the generated [Masc_domain.tool_schema list] for misc tools.

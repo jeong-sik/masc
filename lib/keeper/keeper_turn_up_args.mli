@@ -46,8 +46,6 @@ type parsed_args =
   ; instructions_opt : string option
   }
 
-(** Project an [`Assoc] member at [key]; [None] for non-objects or
-    missing keys. *)
 (** Parse the explicit context override. Missing is [(false, None)]; null or
     zero explicitly clears it; positive integers are preserved exactly. *)
 val parse_max_context_override :

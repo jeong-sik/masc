@@ -79,6 +79,15 @@ let with_lane f = with_lane_config (fun ~path:_ resolved -> f resolved)
 let slot_ids (resolved : Registry.resolved_lane) =
   List.map (fun (slot : Registry.selected_slot) -> slot.slot_id) resolved.selected_slots
 
+(* What the lane will call, in walk order. *)
+let walked (ordered : Lane.ordered) = slot_ids ordered.lane
+
+(* What the lane holds, with the time each one waits for. *)
+let held (ordered : Lane.ordered) =
+  List.map (fun (slot : Lane.held_slot) -> slot.slot_id, slot.until) ordered.held_http
+
+let held_ids ordered = List.map fst (held ordered)
+
 (* The rate limit's own stamp, so every [now] below is a distance from it. *)
 let note_rate_limit runtime_id ~retry_after =
   let candidate = candidate runtime_id in
@@ -97,52 +106,108 @@ let note_rate_limit runtime_id ~retry_after =
 let declared = [ primary; secondary ]
 let demoted = [ secondary; primary ]
 
-let test_resting_slot_goes_behind_and_returns_after_retry_after () =
+(* RFC-exact-lane-waits-for-a-stated-reset R1: a Retry-After is a time the
+   provider stated, so the lane does not call the slot before it. Before this
+   rule the slot only went behind, and a lane whose sibling also refused
+   called it inside the provider's own Retry-After. *)
+let test_retry_after_holds_the_slot_until_its_time () =
   with_lane @@ fun resolved ->
-  check (list string) "no evidence keeps the declared order" declared
-    (slot_ids (Lane.order_at ~now:(Unix.gettimeofday ()) resolved));
+  let fresh = Lane.order_at ~now:(Unix.gettimeofday ()) resolved in
+  check (list string) "no evidence walks the declared order" declared (walked fresh);
+  check (list string) "and holds nothing" [] (held_ids fresh);
   let noted_at = note_rate_limit primary ~retry_after:(Some 30.0) in
-  check (list string) "inside the provider's Retry-After the slot goes behind" demoted
-    (slot_ids (Lane.order_at ~now:(noted_at +. 1.0) resolved));
-  check (list string) "after the Retry-After the slot is back in its place" declared
-    (slot_ids (Lane.order_at ~now:(noted_at +. 31.0) resolved))
+  let inside = Lane.order_at ~now:(noted_at +. 1.0) resolved in
+  check (list string) "inside the provider's Retry-After the slot is not walked"
+    [ secondary ] (walked inside);
+  check (list (pair string (float 0.0))) "it is held until the stated time"
+    [ primary, noted_at +. 30.0 ] (held inside);
+  let at_time = Lane.order_at ~now:(noted_at +. 30.0) resolved in
+  check (list string) "at the stated time the slot is walked in its place" declared
+    (walked at_time);
+  check (list string) "and no longer held" [] (held_ids at_time)
 
-(* The case the second commit fixed: a 429 with no Retry-After used to keep
-   the slot behind until it answered, and a lane whose sibling keeps
-   answering never asks it again. *)
+(* A 429 with no Retry-After states no time: the floor is a rest MASC chose,
+   so the slot only goes behind for it (R2). *)
 let test_unhinted_rate_limit_rests_the_floor_then_returns () =
   with_lane @@ fun resolved ->
   let floor = Env_config_keeper.KeeperKeepalive.rate_limit_backoff_floor_sec in
   let noted_at = note_rate_limit primary ~retry_after:None in
+  let inside = Lane.order_at ~now:(noted_at +. floor -. 1.0) resolved in
   check (list string) "inside the configured floor the slot goes behind" demoted
-    (slot_ids (Lane.order_at ~now:(noted_at +. floor -. 1.0) resolved));
+    (walked inside);
+  check (list string) "and is not held" [] (held_ids inside);
   check (list string) "after the configured floor the slot is back in its place" declared
-    (slot_ids (Lane.order_at ~now:(noted_at +. floor +. 1.0) resolved))
+    (walked (Lane.order_at ~now:(noted_at +. floor +. 1.0) resolved))
 
 let test_provider_hint_outlives_the_fallback_cap () =
   with_lane @@ fun resolved ->
   let cap = Env_config_keeper.KeeperKeepalive.rate_limit_backoff_cap_sec in
   let retry_after = cap +. 3600.0 in
   let noted_at = note_rate_limit primary ~retry_after:(Some retry_after) in
-  check (list string) "the fallback cap does not promote the refused slot" demoted
-    (slot_ids (Lane.order_at ~now:(noted_at +. cap +. 1.0) resolved));
+  check (list string) "the fallback cap does not release the refused slot"
+    [ primary ] (held_ids (Lane.order_at ~now:(noted_at +. cap +. 1.0) resolved));
   check (list string) "the provider release restores declared order" declared
-    (slot_ids (Lane.order_at ~now:(noted_at +. retry_after +. 1.0) resolved))
+    (walked (Lane.order_at ~now:(noted_at +. retry_after +. 1.0) resolved))
 
 let test_answer_clears_the_rest () =
   with_lane @@ fun resolved ->
   let noted_at = note_rate_limit primary ~retry_after:(Some 30.0) in
   Backpressure.note_candidate_success ~candidate:(candidate primary);
-  check (list string) "an answer clears the rest at once" declared
-    (slot_ids (Lane.order_at ~now:(noted_at +. 1.0) resolved))
+  let ordered = Lane.order_at ~now:(noted_at +. 1.0) resolved in
+  check (list string) "an answer clears the rest at once" declared (walked ordered);
+  check (list string) "and holds nothing" [] (held_ids ordered)
 
-let test_every_slot_resting_keeps_declared_order () =
+(* R4: a lane whose every slot waits for a stated time walks none of them,
+   and still names each one with its time, in declared order. *)
+let test_every_slot_held_walks_none () =
   with_lane @@ fun resolved ->
   let noted_at = note_rate_limit primary ~retry_after:(Some 30.0) in
-  ignore (note_rate_limit secondary ~retry_after:(Some 30.0) : float);
-  check (list string) "a lane of resting slots keeps every slot, in declared order"
-    declared
-    (slot_ids (Lane.order_at ~now:(noted_at +. 1.0) resolved))
+  let secondary_noted_at = note_rate_limit secondary ~retry_after:(Some 60.0) in
+  let ordered = Lane.order_at ~now:(noted_at +. 1.0) resolved in
+  check (list string) "a lane of held slots walks none" [] (walked ordered);
+  check (list (pair string (float 0.0))) "and names every slot with its own time"
+    [ primary, noted_at +. 30.0; secondary, secondary_noted_at +. 60.0 ]
+    (held ordered)
+
+let with_quota_window f =
+  Runtime_quota_window.reset_for_testing ();
+  Fun.protect ~finally:Runtime_quota_window.reset_for_testing f
+
+let runtime_scope id =
+  match Runtime.get_runtime_by_id id with
+  | Some runtime -> Runtime_instance.quota_scope_of_runtime runtime
+  | None -> fail ("missing runtime scope " ^ id)
+
+(* The loop the RFC measured (section 1.1): the lane's account had a stated
+   reset, and every run called it again. A stated reset now holds every slot
+   on that account until the reset; an observation without a reset still
+   only moves them back (R2); a success on the account ends the reset (R6).
+   Where a slot also has its own Retry-After, the later time wins. *)
+let test_stated_account_reset_holds_every_slot_on_it () =
+  with_lane @@ fun resolved ->
+  with_quota_window @@ fun () ->
+  let scope = runtime_scope primary in
+  check bool "the declared slots share one account" true
+    (Runtime_quota_window.scope_equal scope (runtime_scope secondary));
+  let now = Unix.gettimeofday () in
+  Runtime_quota_window.note_observed_exhausted ~scope;
+  let observed = Lane.order_at ~now resolved in
+  check (list string) "an observation without a reset walks every slot" declared
+    (walked observed);
+  check (list string) "and holds none" [] (held_ids observed);
+  let resets_at = now +. 3600.0 in
+  Runtime_quota_window.note_exhausted ~scope ~resets_at;
+  let noted_at = note_rate_limit primary ~retry_after:(Some 7200.0) in
+  let stated = Lane.order_at ~now resolved in
+  check (list string) "a stated reset walks no slot on that account" [] (walked stated);
+  check (list (pair string (float 0.0)))
+    "each slot waits for the later of the reset and its own Retry-After"
+    [ primary, noted_at +. 7200.0; secondary, resets_at ]
+    (held stated);
+  Backpressure.note_candidate_success ~candidate:(candidate primary);
+  Runtime_quota_window.note_succeeded ~scope;
+  check (list string) "a success on the account walks every slot again" declared
+    (walked (Lane.order_at ~now resolved))
 
 let test_unchanged_save_shares_pressure_cell () =
   with_lane_config @@ fun ~path _resolved ->
@@ -243,11 +308,6 @@ let with_http_observation_fixture ?(unreachable=false) env behavior f =
   Fun.protect ~finally:Runtime_quota_window.reset_for_testing @@ fun () ->
   f ~server resolved
 
-let runtime_scope id =
-  match Runtime.get_runtime_by_id id with
-  | Some runtime -> Runtime_instance.quota_scope_of_runtime runtime
-  | None -> fail ("missing runtime scope " ^ id)
-
 let test_http_payment_records_account_and_provider_reset env () =
   List.iter (fun retry_after ->
     let body = Yojson.Safe.to_string (`Assoc ["error",`Assoc
@@ -276,12 +336,20 @@ let test_http_payment_records_account_and_provider_reset env () =
          | None,Some _ | Some _,None -> fail "402 reset was invented or discarded");
         check bool "payment refusal creates no candidate rate or fake Fleet owner" true
           (Option.is_none (Backpressure.candidate_backpressure ~now:after ~candidate:(candidate primary)));
-        check (list string) "both exhausted siblings remain in declared order" declared
-          (slot_ids (Lane.order_at ~now:after resolved));
+        let ordered = Lane.order_at ~now:after resolved in
+        (match retry_after with
+         | None ->
+           check (list string) "an undated refusal walks both siblings in declared order"
+             declared (walked ordered);
+           check (list string) "and holds neither" [] (held_ids ordered)
+         | Some _ ->
+           check (list string) "a stated reset holds both siblings in declared order"
+             declared (held_ids ordered);
+           check (list string) "and walks neither" [] (walked ordered));
         check int "one actual HTTP generation refusal" 1 (Atomic.get server.posts)))
     [None;Some 3600.0]
 
-let test_http_answer_clears_undated_account_before_semantic_validation env () =
+let test_http_answer_clears_account_rest_before_semantic_validation env () =
   List.iter (fun (reject,stated_reset) ->
     with_http_observation_fixture env
       (Exact_output_fixture.Reply (Exact_output_fixture.openai_response (`Assoc ["ok",`Bool true])))
@@ -301,11 +369,8 @@ let test_http_answer_clears_undated_account_before_semantic_validation env () =
         let now = Unix.gettimeofday () in
         check bool "actual answer clears candidate rate and old Fleet mark" true
           (Option.is_none (Backpressure.candidate_backpressure ~now ~candidate:(candidate primary)));
-        check bool "answer clears undated quota and preserves a stated window" stated_reset
+        check bool "an answer clears the account rest, a stated reset included (R6)" false
           (Runtime_quota_window.is_exhausted ~scope ~now);
-        if stated_reset then
-          check (option (float 0.0)) "stated reset remains exact" (Some reset)
-            (Runtime_quota_window.active_until ~scope ~now);
         check int "semantic validation never dispatches another candidate" 1 (Atomic.get server.posts)))
     [false,false;true,false;false,true]
 
@@ -355,15 +420,16 @@ let () =
   Fun.protect ~finally:Fs_compat.clear_fs @@ fun () ->
   run "Exact lane backpressure"
     [ "order", [
-        test_case "a rate-limited slot goes behind, then returns after Retry-After" `Quick
-          test_resting_slot_goes_behind_and_returns_after_retry_after;
+        test_case "a Retry-After holds the slot until its time" `Quick
+          test_retry_after_holds_the_slot_until_its_time;
         test_case "an unhinted rate limit rests the configured floor, then returns" `Quick
           test_unhinted_rate_limit_rests_the_floor_then_returns;
         test_case "a provider hint outlives the fallback cap" `Quick
           test_provider_hint_outlives_the_fallback_cap;
         test_case "an answer clears the rest" `Quick test_answer_clears_the_rest;
-        test_case "every slot resting keeps the declared order" `Quick
-          test_every_slot_resting_keeps_declared_order ];
+        test_case "a lane of held slots walks none" `Quick test_every_slot_held_walks_none;
+        test_case "a stated account reset holds every slot on it" `Quick
+          test_stated_account_reset_holds_every_slot_on_it ];
       "account rebind", [
         test_case "unchanged save preserves shared registry pressure" `Quick
           test_unchanged_save_shares_pressure_cell;
@@ -374,7 +440,7 @@ let () =
       "HTTP account observations", [
         test_case "actual payment refusal records account and provider reset" `Quick
           (test_http_payment_records_account_and_provider_reset env);
-        test_case "actual answer clears undated quota before semantic validation" `Quick
-          (test_http_answer_clears_undated_account_before_semantic_validation env);
+        test_case "actual answer clears the account rest before semantic validation" `Quick
+          (test_http_answer_clears_account_rest_before_semantic_validation env);
         test_case "typed quota port respects actual generation dispatch receipts" `Quick
           (test_typed_quota_uses_actual_generation_dispatch_receipt env) ] ]

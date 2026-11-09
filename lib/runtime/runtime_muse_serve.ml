@@ -5,7 +5,6 @@ module Msp = Runtime_muse_msp
 type config =
   { cli_path : string
   ; prepared_home : Runtime_muse_home.t option
-  ; account_home : string option
   ; model : string option
   ; native : Runtime_native_tools.posture
   ; admission_timeout_s : float
@@ -27,7 +26,6 @@ let client_name = "masc"
 let default_config () =
   { cli_path = "muse"
   ; prepared_home = None
-  ; account_home = None
   ; model = None
   ; native = Runtime_native_tools.Native_read
   ; admission_timeout_s = default_timeout_s
@@ -439,16 +437,9 @@ let valid_utf8 name value =
   else Error (Invalid_config (name ^ " is not valid UTF-8"))
 ;;
 
-(* What any spawn needs, with or without a session. *)
+(* What any spawn needs, with or without a session. The account home was
+   parsed when it was declared ({!Runtime_account_access.declare_muse_home}). *)
 let validate_process_config config =
-  let* () =
-    match config.account_home with
-    | None -> Ok ()
-    | Some home ->
-      Runtime_account_home.of_string home
-      |> Result.map (fun _ -> ())
-      |> Result.map_error (fun detail -> Invalid_config ("account_home: " ^ detail))
-  in
   let* () =
     if String.trim config.cli_path = ""
     then Error (Invalid_config "cli_path is empty")
@@ -761,7 +752,8 @@ let turn_start_selection =
   Runtime_official_client_write.(Fields [ "params", Fields [ "input", turn_input ] ])
 ;;
 
-let with_spawned_client ?storage_root ?(on_subscription_usage = fun _ -> ()) ~mgr ~clock ~cwd config run =
+let with_spawned_client ?storage_root ?(on_subscription_usage = fun _ -> ()) ~mgr ~clock ~cwd
+      ~account_home config run =
   Eio.Switch.run (fun sw ->
     let stdin_r, stdin_w = Eio.Process.pipe ~sw mgr in
     let stdout_r, stdout_w = Eio.Process.pipe ~sw mgr in
@@ -771,7 +763,7 @@ let with_spawned_client ?storage_root ?(on_subscription_usage = fun _ -> ()) ~mg
         ~sw
         mgr
         ~cwd
-        ~env:(client_environment ?storage_root config.account_home config.prepared_home)
+        ~env:(client_environment ?storage_root account_home config.prepared_home)
         ~stdin:stdin_r
         ~stdout:stdout_w
         ~stderr:stderr_w
@@ -1887,8 +1879,8 @@ let guard_idle_timeout f =
   | Idle_timeout seconds -> Error (Timeout { seconds; turn_accepted = false })
 ;;
 
-let prepare_account_config config =
-  match config.prepared_home, config.account_home with
+let prepare_account_config ~account_home config =
+  match config.prepared_home, account_home with
   | Some home, Some selected when String.equal selected (Runtime_muse_home.account_home home) -> Ok config
   | Some _, Some _ -> Error (Invalid_config "prepared_home does not match the selected account_home")
   | None, None -> Ok config
@@ -1919,11 +1911,13 @@ let run_turn
       ~mgr
       ~clock
       ~cwd
+      ~account
       config
       ~workspace_root
       ~prompt
       ~images
   =
+  let account_home = Runtime_account_access.muse_account_home account in
   let* () =
     if Filename.is_relative (storage_root storage)
     then Error (Invalid_config "Muse Code storage root must be absolute")
@@ -1934,14 +1928,14 @@ let run_turn
   in
   let* () = validate_turn ~session_mode config ~workspace_root ~prompt ~images in
   let* () = validate_mcp_servers mcp_servers in
-  let* config = prepare_account_config config in
+  let* config = prepare_account_config ~account_home config in
   let* approval_mode = approval_mode_of_posture config.native in
   guard_idle_timeout (fun () ->
     with_spawned_client
       ~storage_root:(storage_root storage)
       ~on_subscription_usage:(fun usage ->
         emit_stream_event on_stream_event (Subscription_usage_observed usage))
-      ~mgr ~clock ~cwd config (fun io ->
+      ~mgr ~clock ~cwd ~account_home config (fun io ->
       run_protocol
         io
         config
@@ -1959,21 +1953,23 @@ let run_turn
         ~on_stream_event))
 ;;
 
-let read_usage ~mgr ~clock ~cwd config =
+let read_usage ~mgr ~clock ~cwd ~account config =
+  let account_home = Runtime_account_access.muse_account_home account in
   let* () = validate_process_config config in
-  let* config = prepare_account_config config in
+  let* config = prepare_account_config ~account_home config in
   guard_idle_timeout (fun () ->
-    with_spawned_client ~mgr ~clock ~cwd config (fun io ->
+    with_spawned_client ~mgr ~clock ~cwd ~account_home config (fun io ->
       let* (_ : Msp.initialize_result) = handshake io ~requested_capabilities:[] ~requires_durable_session:true in
       let* result = request io ~method_:"usage/read" (fun ~id -> Msp.usage_read_request ~id) in
       lift (Msp.parse_usage_read_result result)))
 ;;
 
-let list_models ~mgr ~clock ~cwd config =
+let list_models ~mgr ~clock ~cwd ~account config =
+  let account_home = Runtime_account_access.muse_account_home account in
   let* () = validate_process_config config in
-  let* config = prepare_account_config config in
+  let* config = prepare_account_config ~account_home config in
   guard_idle_timeout (fun () ->
-    with_spawned_client ~mgr ~clock ~cwd config (fun io ->
+    with_spawned_client ~mgr ~clock ~cwd ~account_home config (fun io ->
       let* (_ : Msp.initialize_result) = handshake io ~requested_capabilities:[]
           ~requires_durable_session:false in
       let* result = request io ~method_:"model/list" Msp.model_list_request in

@@ -42,6 +42,22 @@ No local Dune build, OCaml typecheck, Core/Owner behavior run, CI, installation
 or deployment is established here. The new-process completed-history scenario
 in `test_keeper_ingress_native_restart.ml` remains unexecuted in this record.
 
-The full transition in [#25338](https://github.com/jeong-sik/masc/issues/25338)
-remains open: historical driver provenance, official/native mixed execution,
-unbound calls and aggregate consumers are not covered by this frontend fixture.
+At capture, the full transition in
+[#25338](https://github.com/jeong-sik/masc/issues/25338) remained open:
+historical driver provenance, official/native mixed execution, unbound calls
+and aggregate consumers are not covered by this frontend fixture.
+
+## Later store validation repair
+
+Bottom-layer candidate `391971f2d2ca1e8a8e7cc7985f105a254f7faa56`, rebased onto
+`b577c0b56cdf3b1185877effd1199c6471f715e7`, additionally validates saved semantic
+records before ordinary store configuration. Refusal identifies the scope;
+the deployment diagnostic and fresh-state documentation describe the affected
+journal and checkpoint ownership. Mixed active/settled refusal scenarios were
+added as source, with no OCaml behavior execution claimed.
+
+The captures, validation and manifest above retain their original candidate
+and hashes. The API client, Core history component and ChatTranscript wrapper
+are byte-identical at top candidate `d8e6f80ed9574b9b02207768fc57602dc63a3bc0`.
+This later repair does not turn the synthetic browser observation into proof
+of a backend restart, installation or deployment.

@@ -58,6 +58,7 @@
   "e_synth_audit.py": "06c36ee8a1616952c300e10a3c9f6ce8469f8d635ff9cd744e75389a7fc1e0fb",
   "eval_admission.py": "e7bff0bf10ae83eca6d5d49e7be5ae5d89ed3223d732f50bcadaf4bf5b9c0d04",
   "exact_store.py": "c47d1ba5c4092ba4624335813538140641b50d392bcd76eaf6eadfea34b9fa57",
+  "glm_chat.py": "c3a5a1055f05f61152aa6a431ae4f0740e57e1faa1997445f99c5cc7a44dae2a",
   "lane_addon_checks.py": "d4f50ecd293243c9af6edb9612cb54ac6cd2771e48704ed86d1d3e22b53f1ccd",
   "librarian_selection.py": "2847371ccabb72031bb4f4dad8cef8b6f80ea17c3d3e94f9f72f1483cb9ed6de",
   "memory_scores.py": "36635e959efe09912fe68be5cdf9ac4975779c1cec0c3f2e21d1152d79de50f3",

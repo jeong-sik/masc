@@ -223,6 +223,10 @@ class ScoreTest(unittest.TestCase):
                 assert isinstance(part, dict)
                 self.assertEqual(part["drop_precision"], precision)
 
+    def test_a_reply_that_states_an_error_is_a_failed_call(self) -> None:
+        part = part_of(V.summarize("synth", [synth_row(), synth_row(error="GLM 1305: busy", wall_s=9.0, valid=False)]))
+        self.assertEqual((part["http_errors"], part["latency_p50_s"]), (1, 1.0))
+
     def test_synth_without_drops_has_full_precision(self) -> None:
         part = V.summarize("synth", [synth_row()])["A"]
         assert isinstance(part, dict)

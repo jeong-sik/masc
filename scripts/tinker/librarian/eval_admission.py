@@ -9,6 +9,8 @@
         --target base=thinkingmachines/Inkling-2-Small:peft:262144 --target A=tinker://... \
         --out artifacts/tinker/librarian/eval-<name>-real --budget 6
     uv run scripts/tinker/librarian/eval_admission.py run --set synth --requests <requests.jsonl> ...
+    uv run scripts/tinker/librarian/eval_admission.py run --provider glm --target glm=<model> \
+        --set synth --requests <requests.jsonl> --out <dir> --max-calls 300
     uv run scripts/tinker/librarian/eval_admission.py verdict --real <dir> --synth <dir> \
         --drops <e_synth_audit.py drops --out> --merges <merge_cases.py --out> \
         --train A=artifacts/tinker/librarian/train-A --train B=artifacts/tinker/librarian/train-B
@@ -27,9 +29,16 @@ again from the same data, an E-synth prompt is drawn from its request. The
 summary records the sha256 of the template the prompts were drawn with, and
 `verdict` refuses a run drawn with another template than the pinned one.
 
+`run --provider glm` sends the same messages to Z.AI's GLM coding endpoint in
+the request MASC's GLM slot sends (`glm_chat`), so a prompt change can be
+measured on that model too. It sends no warm call, `--max-calls` caps its
+requests in place of `--budget`, and its rows cost nothing per token: the calls
+draw on the key's usage quota. The summary names the provider of the run.
+
 Definitions:
-- valid: HTTP 200, finish_reason "stop", and `admission_validator.validate`
-  accepts the content against the prompt, as MASC would.
+- valid: HTTP 200 with no provider error, finish_reason "stop", and
+  `admission_validator.validate` accepts the content against the prompt, as
+  MASC would.
 - E-real outcome agreement: candidates whose outcome equals the live answer's,
   over every candidate (an answer that is not valid agrees with nothing).
   Reported, not gated.
@@ -111,12 +120,13 @@ import admission_request as R
 import admission_validator as AV
 import audit_decisions as D
 import exact_store as E
+import glm_chat as G
 import memory_scores as M
 import merge_decisions as MD
 import synth_render
 import synth_rows as RW
 import yojson_wire as Y
-from tinker_oai import HTTP_OK, Caller
+from tinker_oai import HTTP_OK, Call, Caller
 
 HERE = Path(__file__).resolve().parent
 PASS_LINES = HERE / "pass_lines.json"
@@ -213,20 +223,67 @@ def retemplated(item: Item, template: R.AdmissionTemplate) -> Item:
     return replace(item, prompt=prompt, text=R.render(prompt))
 
 
-def run_item(caller: Caller, request: JsonObject, targets: list[tuple[str, str]], item: Item) -> list[JsonObject]:
+@dataclass(frozen=True, slots=True)
+class TinkerLane:
+    """Tinker's endpoint: the pass lines' effort and output budget, a warm call first, a price per token."""
+
+    caller: Caller
+    effort: str
+    max_tokens: int
+
+
+@dataclass(frozen=True, slots=True)
+class GlmLane:
+    """GLM's coding endpoint in MASC's request (`glm_chat`): no warm call, no price per token."""
+
+    caller: G.Caller
+
+
+type Lane = TinkerLane | GlmLane
+
+
+def measured(lane: Lane, model: str, label: str, messages: list[str]) -> tuple[Call, float] | None:
+    """The measured call and what it cost in USD, or None once the lane stops."""
+    match lane:
+        case TinkerLane(caller=caller, effort=effort, max_tokens=max_tokens):
+            call = caller.ask(model=model, label=label, messages=messages, effort=effort, max_tokens=max_tokens)
+            return (call, round(call.cost(), 6)) if call is not None else None
+        case GlmLane(caller=caller):
+            call = caller.ask(model=model, label=label, messages=messages)
+            return (call, 0.0) if call is not None else None
+        case _:
+            assert_never(lane)
+
+
+def spending(lane: Lane) -> JsonObject:
+    match lane:
+        case TinkerLane(caller=caller):
+            return {"provider": "tinker", "spent_usd": round(caller.spent, 4)}
+        case GlmLane(caller=caller):
+            return {"provider": "glm", "requests_sent": caller.sent}
+        case _:
+            assert_never(lane)
+
+
+def run_item(lane: Lane, targets: list[tuple[str, str]], item: Item) -> list[JsonObject]:
     kind = "real" if isinstance(item, M.RealItem) else "synth"
     messages = [item.text, schema_instruction()]
-    effort = cast(str, request["reasoning_effort"])
-    for name, model in targets:
-        if caller.ask(model=model, label=f"{kind}:{name}:{item.item_id}:warm", messages=messages, effort=effort,
-                      max_tokens=WARM_MAX_TOKENS) is None:
-            return []
+    match lane:
+        case TinkerLane(caller=caller, effort=effort):
+            for name, model in targets:
+                if caller.ask(model=model, label=f"{kind}:{name}:{item.item_id}:warm", messages=messages,
+                              effort=effort, max_tokens=WARM_MAX_TOKENS) is None:
+                    return []
+        case GlmLane():
+            pass
+        case _:
+            assert_never(lane)
     rows: list[JsonObject] = []
     for name, model in targets:
-        call = caller.ask(model=model, label=f"{kind}:{name}:{item.item_id}", messages=messages, effort=effort,
-                          max_tokens=cast(int, request["max_tokens"]))
-        if call is None:
+        got = measured(lane, model, f"{kind}:{name}:{item.item_id}", messages)
+        if got is None:
             break
+        call, cost = got
         result = check(item.prompt, call.answer())
         match item:
             case M.RealItem():
@@ -234,11 +291,11 @@ def run_item(caller: Caller, request: JsonObject, targets: list[tuple[str, str]]
             case M.SynthItem():
                 score = M.score_synth(item, result.answer)
         rows.append({"set": kind, "item": item.item_id, "target": name, "call_key": call.key,
-                     "status": call.status, "finish": call.finish,
+                     "status": call.status, "error": call.error, "finish": call.finish,
                      "sent_at": call.sent_at, "wall_s": call.wall_s, "prompt_tokens": call.prompt_tokens,
                      "cached_tokens": call.cached_tokens,
                      "completion_tokens": call.completion_tokens, "reasoning_chars": len(call.reasoning or ""),
-                     "cost_usd": round(call.cost(), 6), "valid": result.answer is not None,
+                     "cost_usd": cost, "valid": result.answer is not None,
                      "problems": list(result.problems), **score})
     return rows
 
@@ -263,7 +320,7 @@ def summarize(kind: str, rows: list[JsonObject], wrong_elsewhere: dict[str, int]
     out: JsonObject = {}
     for name in dict.fromkeys(cast(str, r["target"]) for r in rows):
         mine = [r for r in rows if r["target"] == name]
-        ok = [cast(float, r["wall_s"]) for r in mine if r["status"] == HTTP_OK]
+        ok = [cast(float, r["wall_s"]) for r in mine if r["status"] == HTTP_OK and r.get("error") is None]
         valid = sum(bool(r["valid"]) for r in mine)
         part: JsonObject = {"items": len(mine), "valid": valid, "valid_rate": valid / len(mine),
                             "http_errors": len(mine) - len(ok),
@@ -300,10 +357,24 @@ def summarize(kind: str, rows: list[JsonObject], wrong_elsewhere: dict[str, int]
     return out
 
 
+def lane_of(args: argparse.Namespace, log: Path, request: JsonObject) -> Lane:
+    """The lane --provider names, with its limit: --budget on Tinker, --max-calls on GLM."""
+    budget, max_calls = cast(float | None, args.budget), cast(int | None, args.max_calls)
+    match cast(str, args.provider), budget, max_calls:
+        case "tinker", float(), None:
+            return TinkerLane(Caller(log, budget), cast(str, request["reasoning_effort"]),
+                              cast(int, request["max_tokens"]))
+        case "glm", None, int():
+            return GlmLane(G.Caller(log, max_calls))
+        case _:
+            raise SystemExit("--provider tinker needs --budget alone, --provider glm needs --max-calls alone")
+
+
 def run(args: argparse.Namespace) -> int:
     lines = load_pass_lines()
     kind, out = cast(str, args.set), Path(cast(str, args.out))
     out.mkdir(parents=True, exist_ok=True)
+    lane = lane_of(args, out / "calls.jsonl", cast(JsonObject, lines["request"]))
     targets = [cast(tuple[str, str], tuple(t.split("=", 1))) for t in cast(list[str], args.target)]
     items: list[Item]
     if kind == "real":
@@ -321,22 +392,20 @@ def run(args: argparse.Namespace) -> int:
     if args.template is not None:
         drawn = synth_render.template_at(template)
         items = [retemplated(i, drawn) for i in items]
-    caller = Caller(out / "calls.jsonl", cast(float, args.budget))
-    request = cast(JsonObject, lines["request"])
 
     def one(item: Item) -> list[JsonObject]:
-        return run_item(caller, request, targets, item)
+        return run_item(lane, targets, item)
 
     with ThreadPoolExecutor(max_workers=WORKERS) as pool:
         rows = [r for rs in pool.map(one, items) for r in rs]
     with (out / "rows.jsonl").open("w", encoding="utf-8") as fh:
         fh.writelines(json.dumps(r, ensure_ascii=False) + "\n" for r in rows)
     summary = {"set": kind, "pass_lines_sha256": sha256_file(PASS_LINES), "template_sha256": sha256_file(template),
-               "targets": dict(targets),
-               "spent_usd": round(caller.spent, 4), "stopped": caller.stopped, "by_target": summarize(kind, rows)}
+               "targets": dict(targets), **spending(lane), "stopped": lane.caller.stopped,
+               "by_target": summarize(kind, rows)}
     (out / "summary.json").write_text(json.dumps(summary, indent=1) + "\n", encoding="utf-8")
     print(json.dumps(summary["by_target"]))
-    return 2 if caller.stopped is not None else 0
+    return 2 if lane.caller.stopped is not None else 0
 
 
 def read_rows(out: Path) -> list[JsonObject]:
@@ -511,7 +580,9 @@ def main() -> int:
     r.add_argument("--requests", help="E-synth requests.jsonl (for --set synth)")
     r.add_argument("--base", default=None, help="MASC base path (default: MASC_BASE_PATH)")
     r.add_argument("--out", required=True)
-    r.add_argument("--budget", type=float, required=True)
+    r.add_argument("--provider", choices=["tinker", "glm"], default="tinker")
+    r.add_argument("--budget", type=float, default=None, help="USD, for --provider tinker")
+    r.add_argument("--max-calls", type=int, default=None, help="requests under --out, for --provider glm")
     r.add_argument("--template", default=None,
                    help="a librarian.md to draw every prompt with (default: the pinned config/prompts/librarian.md)")
     v = sub.add_parser("verdict")

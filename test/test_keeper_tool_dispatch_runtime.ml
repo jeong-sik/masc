@@ -146,11 +146,17 @@ let fetch_artifact_exn ~base_path artifact_ref =
   | Error error -> fail (Tool_blob_store.fetch_error_to_string error)
 ;;
 
+let resolution_input_exn resolution replay_delivery =
+  match Masc.Keeper_gate_replay.resolution_input ~resolution ~replay_delivery with
+  | Ok input -> input
+  | Error error -> fail (Masc.Keeper_gate_replay.resolution_input_error_to_string error)
+;;
+
 let project_replay_message_exn ~base_path
     (message : Masc.Keeper_gate_replay.model_message) =
   match message.replay_evidence with
-  | None -> fail "model message has no replay evidence"
-  | Some evidence ->
+  | [] | _ :: _ :: _ -> fail "model message requires one replay evidence"
+  | [ evidence ] ->
     (match
        Masc.Keeper_gate_replay.project_model_input
          ~base_path
@@ -4008,8 +4014,7 @@ let test_unsupported_approved_operation_retains_exact_model_issued_path () =
          Masc.Keeper_gate_replay.compose_model_message
            ~base_path:config.base_path
            ~user_message:"continue"
-           ~hitl_resolution:(Some resolution)
-           ~replay_delivery:(Some (approval_id, outcome))
+           ~inputs:[ resolution_input_exn resolution (Some (approval_id, outcome)) ]
        in
        let model_message = model_message.Masc.Keeper_gate_replay.text in
        check bool
@@ -10212,12 +10217,14 @@ let test_direct_gate_current_history_resume ?(failed_producer=false) ?(source_un
             ~user_message:"Finish the original research" (Some resolution) in
           if one_shot then (
             check bool "one-shot instruction has no invented replay evidence" true
-              (model.replay_evidence = None);
+              (model.replay_evidence = []);
             check bool "one-shot instruction retains typed approval" true
-              (model.instruction_resolution = Some resolution);
+              (model.instruction_resolutions = [ resolution ]);
             checkpoint)
           else
-            let evidence = match model.replay_evidence with Some value -> value | None -> fail "missing replay evidence" in
+            let evidence = match model.replay_evidence with
+              | [ value ] -> value
+              | [] | _ :: _ :: _ -> fail "replay evidence is not singular" in
             let identity, message = Masc.Keeper_gate_replay.approval_input evidence |> require "evidence identity" in
             if native then checkpoint else
             Masc.Keeper_approval_input_checkpoint.admit ~session_dir ~identity ~message checkpoint |> require "durable model evidence" in
@@ -10244,13 +10251,27 @@ let test_direct_gate_current_history_resume ?(failed_producer=false) ?(source_un
               observation.tool_name) prior = ["Write"]);
          let prepared_prompt = "Finish the original research\n\n[Retained paste correction]\nExact pasted context remains in this turn." in
          let model = Masc.Keeper_gate_replay.compose_model_message ~base_path
-           ~user_message:prepared_prompt ~hitl_resolution:(Some (Gate.resolution admission))
-           ~replay_delivery:!native_replay_delivery in
+           ~user_message:prepared_prompt
+           ~inputs:[ resolution_input_exn (Gate.resolution admission) !native_replay_delivery ] in
+         let unrelated = { (Gate.resolution admission) with approval_id = "unrelated-repair" } in
+         let unrelated_outcome = Masc.Keeper_gate_replay.Repair_required
+           { operation = "tool_execute"; stage = Resolution_lookup; detail = "unrelated repair" } in
+         let mixed = Masc.Keeper_gate_replay.compose_model_message ~base_path
+           ~user_message:prepared_prompt
+           ~inputs:
+             [ resolution_input_exn (Gate.resolution admission) !native_replay_delivery
+             ; resolution_input_exn unrelated (Some (unrelated.approval_id, unrelated_outcome)) ] in
+         (match Gate.observe_native_input ~prepared:mixed ~config
+           ~user_message:"Finish the original research" admission ~transmitted:mixed.text with
+          | Error _ -> ()
+          | Ok () -> fail "direct Gate accepted a second resolution with no evidence projection");
          (match !native_replay_delivery with
           | None | Some (_, Masc.Keeper_gate_replay.Not_applicable) ->
             let require_instruction_rejected label hitl_resolution =
               let wrong = Masc.Keeper_gate_replay.compose_model_message ~base_path
-                ~user_message:prepared_prompt ~hitl_resolution ~replay_delivery:None in
+                ~user_message:prepared_prompt
+                ~inputs:(Option.to_list hitl_resolution
+                  |> List.map (fun resolution -> resolution_input_exn resolution None)) in
               match Gate.observe_native_input ~prepared:wrong ~config
                 ~user_message:"Finish the original research" admission ~transmitted:wrong.text with
               | Error _ -> () | Ok () -> fail label in

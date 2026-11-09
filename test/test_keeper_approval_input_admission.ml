@@ -174,7 +174,9 @@ let stable_replay_identity () = with_directory (fun root ->
   let evidence journal =
     let result = Replay.append_model_evidence ~approval_id:"approval-a" ~user_message:"changing wake"
       (Applied { operation = "write"; output_ref; journal }) in
-    Option.get result.replay_evidence
+    match result.replay_evidence with
+    | [ evidence ] -> evidence
+    | [] | _ :: _ :: _ -> Alcotest.fail "expected one independent replay evidence"
   in
   let initial = evidence Replay.Replay_journal_recorded in
   let recovered = evidence Replay.Replay_journal_already_recorded in
@@ -365,9 +367,125 @@ let answered_ask_prompt_upgrade () =
   expect_conflict
     (Admission.prepare ~identity:conflicting_id ~message:reworded_msg upgraded_cp)
 
+let batched_replay_admission () = with_directory (fun root ->
+  let module Replay = Masc.Keeper_gate_replay in
+  let session_dir = Filename.concat root "batch-session" in
+  let artifact bytes =
+    Replay.For_testing.persist_replay_artifact ~base_path:root bytes |> unwrap in
+  let first_outcome = Replay.Applied
+    { operation = "filesystem_write"; output_ref = artifact "first effect";
+      journal = Replay.Replay_journal_recorded } in
+  let second_outcome = Replay.Failed
+    { operation = "tool_execute"; detail_ref = artifact "second refusal";
+      journal = Replay.Replay_journal_recorded } in
+  let resolution approval_id : Keeper_event_queue.hitl_resolution =
+    { approval_id; decision = Keeper_event_queue.Hitl_approved;
+      channel = Keeper_continuation_channel.unrouted "batch admission fixture" } in
+  let observed approval_id outcome =
+    Replay.resolution_input ~resolution:(resolution approval_id)
+      ~replay_delivery:(Some (approval_id, outcome)) |> unwrap in
+  let model = Replay.compose_model_message ~base_path:root
+    ~user_message:"Continue the original request."
+    ~inputs:[ observed "approval-a" first_outcome; observed "approval-b" second_outcome ] in
+  Alcotest.(check (list string)) "both source resolutions retain their order"
+    [ "approval-a"; "approval-b" ]
+    (List.map (fun (resolution : Keeper_event_queue.hitl_resolution) -> resolution.approval_id)
+       model.resolutions);
+  let first, second = match model.replay_evidence with
+    | [ first; second ] -> Replay.approval_input first |> unwrap,
+                           Replay.approval_input second |> unwrap
+    | [] | [ _ ] | _ :: _ :: _ :: _ ->
+      Alcotest.fail "both approvals must keep independent canonical evidence" in
+  let first_identity, first_message = first in
+  let second_identity, second_message = second in
+  Alcotest.(check bool) "approval identities remain distinct" false
+    (first_identity = second_identity);
+  let original = Agent_core.Types.user_msg "Original conversation" in
+  let admit cp = Masc.Keeper_approval_input_checkpoint.admit
+    ~session_dir ~identity:first_identity ~message:first_message ~co_inputs:[ second ] cp
+    |> unwrap in
+  let initial = admit (checkpoint [ original ]) in
+  Alcotest.(check int) "original conversation plus both approval inputs" 3
+    (List.length initial.messages);
+  List.iter (fun (identity, message) ->
+    Alcotest.(check bool) "each approval has its own admission marker" true
+      (Admission.contains ~identity ~message initial.messages)) [ first; second ];
+  let later = Agent_core.Types.assistant_msg "Later work" in
+  let progressed = { initial with messages = initial.messages @ [ later ]; turn_count = 4 } in
+  ignore (Masc.Keeper_checkpoint_store.save_agent_core_classified
+    ~boundary:Agent_core.Checkpoint_objects.Turn_closes
+    ~history_retained:(history_retained ()) ~session_dir progressed |> unwrap);
+  let restarted = admit (checkpoint []) in
+  Alcotest.(check bool) "retry preserves newer history without duplicating either approval" true
+    (restarted.messages = progressed.messages && restarted.turn_count = 4);
+  let without_second = List.filter (fun message ->
+    not (Admission.contains ~identity:second_identity ~message:second_message [ message ]))
+    restarted.messages in
+  let projected = Masc.Keeper_run_tools_hooks.project_model_input ~base_path:root
+    ~gate_replay_evidence:model.replay_evidence without_second |> unwrap in
+  Alcotest.(check int) "provider restores only the windowed second evidence" 4
+    (List.length projected);
+  Alcotest.(check bool) "restored evidence belongs to the second approval" true
+    (List.hd (List.rev projected) = second_message);
+  let without_first = List.filter (fun message ->
+    not (Admission.contains ~identity:first_identity ~message:first_message [ message ]))
+    restarted.messages in
+  let restored_first = Masc.Keeper_run_tools_hooks.project_model_input ~base_path:root
+    ~gate_replay_evidence:model.replay_evidence without_first |> unwrap in
+  let tagged_first, tagged_second = match initial.messages with
+    | [ _; first; second ] -> first, second
+    | _ -> Alcotest.fail "both canonical approval inputs must be admitted" in
+  Alcotest.(check bool) "missing first evidence is restored before the surviving second" true
+    (restored_first = [ original; first_message; tagged_second; later ]);
+  let content = Masc.Keeper_agent_prompt_metrics.provider_content_of_transmitted
+    ~prompt_context_present:false ~messages:restored_first |> unwrap in
+  Alcotest.(check bool) "input attribution retains ordered inserted evidence" true
+    (content = restored_first);
+  let unchanged = Masc.Keeper_run_tools_hooks.project_model_input ~base_path:root
+    ~gate_replay_evidence:model.replay_evidence restarted.messages |> unwrap in
+  Alcotest.(check bool) "intact evidence and newer messages remain unchanged" true
+    (unchanged = restarted.messages);
+  let restored_both = Masc.Keeper_run_tools_hooks.project_model_input ~base_path:root
+    ~gate_replay_evidence:model.replay_evidence [ original; later ] |> unwrap in
+  Alcotest.(check bool) "both missing inputs are appended in resolution order" true
+    (restored_both = [ original; later; first_message; second_message ]);
+  let rejected messages =
+    match Masc.Keeper_run_tools_hooks.project_model_input ~base_path:root
+      ~gate_replay_evidence:model.replay_evidence messages with
+    | Error _ -> ()
+    | Ok _ -> Alcotest.fail "corrupt surviving evidence order must be refused" in
+  rejected [ original; tagged_second; tagged_first; later ];
+  rejected [ original; tagged_first; tagged_first; tagged_second; later ];
+  let disk = Masc.Keeper_checkpoint_store.load_agent_core
+    ~session_dir ~session_id:initial.session_id |> unwrap in
+  Alcotest.(check bool) "provider projection does not rewrite canonical history" true
+    (disk.messages = progressed.messages))
+
+let resolution_input_ownership () =
+  let module Replay = Masc.Keeper_gate_replay in
+  let resolution : Keeper_event_queue.hitl_resolution =
+    { approval_id = "approval-a"; decision = Keeper_event_queue.Hitl_approved;
+      channel = Keeper_continuation_channel.unrouted "resolution ownership fixture" } in
+  (match Replay.resolution_input ~resolution
+    ~replay_delivery:(Some ("approval-b", Replay.Not_applicable)) with
+   | Error (Replay.Replay_approval_mismatch { resolution_id; replay_id }) ->
+     Alcotest.(check string) "resolution owner" "approval-a" resolution_id;
+     Alcotest.(check string) "unrelated replay owner" "approval-b" replay_id
+   | Ok _ | Error (Replay.Replay_for_rejected_resolution _) ->
+     Alcotest.fail "an unrelated replay was bound to this resolution");
+  let rejected = { resolution with decision = Keeper_event_queue.Hitl_rejected "no" } in
+  match Replay.resolution_input ~resolution:rejected
+    ~replay_delivery:(Some ("approval-a", Replay.Not_applicable)) with
+  | Error (Replay.Replay_for_rejected_resolution approval_id) ->
+    Alcotest.(check string) "rejected resolution owner" "approval-a" approval_id
+  | Ok _ | Error (Replay.Replay_approval_mismatch _) ->
+    Alcotest.fail "a rejection accepted an approved replay"
+
 let () = Alcotest.run "approval input admission"
   [ "durable conversation", List.map (fun (name, test) -> Alcotest.test_case name `Quick test)
       [ "Gate and answered Ask atomic admission", gate_and_answer_co_admission
+      ; "multiple approval inputs survive restart and provider projection", batched_replay_admission
+      ; "resolution input owns its replay", resolution_input_ownership
       ; "restart", restart; "newer history", newer_history; "removed evidence", removed
       ; "rewritten evidence", rewritten; "conflicting effect", conflict
       ; "malformed marker", malformed; "duplicate admission", duplicate

@@ -584,18 +584,21 @@ let prepare_agent_setup
          approval_id, outcome)
       gate_replay_delivery
   in
+  let cleanup_after_gate_setup_failure () =
+    try keeper_tools_cleanup () with
+    | Eio.Cancel.Cancelled _ as exn -> raise exn
+    | exn ->
+      Log.Keeper.error
+        "keeper tool cleanup after Gate setup failure raised: %s"
+        (Printexc.to_string exn)
+  in
   let* () =
     match replay_delivery with
     | Some
         ( approval_id
         , Keeper_gate_replay.Repair_required
             { operation; stage; detail } ) ->
-      (try keeper_tools_cleanup () with
-       | Eio.Cancel.Cancelled _ as exn -> raise exn
-       | exn ->
-         Log.Keeper.error
-           "keeper tool cleanup after Gate replay repair failure raised: %s"
-           (Printexc.to_string exn));
+      cleanup_after_gate_setup_failure ();
       Error
         (Keeper_internal_error.core_error_of_masc_internal_error
            (Keeper_internal_error.Gate_replay_repair_required
@@ -651,12 +654,26 @@ let prepare_agent_setup
     | None -> user_message
     | Some correction -> user_message ^ "\n\n" ^ correction
   in
+  let* resolution_inputs =
+    match hitl_resolution, replay_delivery with
+    | None, None -> Ok []
+    | None, Some _ ->
+      cleanup_after_gate_setup_failure ();
+      Error (Agent_core.Error.Internal "Gate replay has no owning resolution")
+    | Some resolution, replay_delivery ->
+      (match Keeper_gate_replay.resolution_input ~resolution ~replay_delivery with
+       | Ok input -> Ok [ input ]
+       | Error error ->
+         cleanup_after_gate_setup_failure ();
+         Error
+           (Agent_core.Error.Internal
+              (Keeper_gate_replay.resolution_input_error_to_string error)))
+  in
   let model_message =
     Keeper_gate_replay.compose_model_message
       ~base_path:config.base_path
       ~user_message
-      ~hitl_resolution
-      ~replay_delivery
+      ~inputs:resolution_inputs
   in
   let user_message = model_message.Keeper_gate_replay.text in
   let prompt_metrics =

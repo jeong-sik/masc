@@ -79,9 +79,32 @@ type model_evidence
 
 type model_message = private
   { text : string
-  ; replay_evidence : model_evidence option
-  ; instruction_resolution : Keeper_event_queue.hitl_resolution option
+  ; resolutions : Keeper_event_queue.hitl_resolution list
+      (** Every observed resolution, including repair/absence states that
+          produce neither canonical evidence nor an exact-call instruction. *)
+  ; replay_evidence : model_evidence list
+  ; instruction_resolutions : Keeper_event_queue.hitl_resolution list
   }
+(** Each resolution keeps its own evidence identity. The text contains the
+    original user input once; a list grants neither replay nor queue ACK
+    authority. Canonical admission and provider projection must preserve every
+    evidence item in this order. *)
+
+type resolution_input
+
+type resolution_input_error =
+  | Replay_approval_mismatch of { resolution_id : string; replay_id : string }
+  | Replay_for_rejected_resolution of string
+
+val resolution_input_error_to_string : resolution_input_error -> string
+
+val resolution_input :
+  resolution:Keeper_event_queue.hitl_resolution ->
+  replay_delivery:(string * outcome) option ->
+  (resolution_input, resolution_input_error) result
+(** Bind one observed resolution to its own host replay outcome. A replay
+    for a different approval or a rejected resolution is refused; two lists
+    cannot be joined by their positions. No grant is created or consumed. *)
 
 val append_model_evidence :
   approval_id:string -> user_message:string -> outcome -> model_message
@@ -113,6 +136,17 @@ val project_model_input :
     [keeper_artifact_read], so replay evidence cannot bypass provider-input
     windowing. *)
 
+val project_model_inputs :
+  base_path:string ->
+  model_evidence list ->
+  Agent_core.Types.message list ->
+  (Agent_core.Types.message list, Agent_core.Error.t) result
+(** Restore ordered evidence in a provider-only view. Intact surviving inputs
+    anchor missing predecessors immediately before them; missing successors
+    are appended after the retained view. Existing messages remain in place.
+    Duplicate or reversed surviving evidence is refused rather than silently
+    changing the causal order. Canonical history is never rewritten. *)
+
 val approved_resolution_message :
   approval_id:string ->
   tool_name:string ->
@@ -136,13 +170,12 @@ val user_message_with_hitl_resolution :
 val compose_model_message :
   base_path:string ->
   user_message:string ->
-  hitl_resolution:Keeper_event_queue.hitl_resolution option ->
-  replay_delivery:(string * outcome) option ->
+  inputs:resolution_input list ->
   model_message
-(** Build the model message once, after host replay. A fresh replay starts from
-    the undecorated user message, so the pre-replay exact approval payload
-    cannot survive beside a consumed result. Canonical history/checkpoints keep
-    only the artifact reference. *)
+(** Build the model message once, after host replay, in input order. Every
+    input appends only its own current instruction or result to the accumulated
+    text. A fresh replay never retains its pre-replay exact approval payload.
+    Canonical history/checkpoints keep each independent artifact reference. *)
 
 type replayable = Keeper_gate.replayable
 (** Which approved operations can be spent without the Keeper re-emitting the

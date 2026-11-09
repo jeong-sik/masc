@@ -583,11 +583,44 @@ type model_evidence =
 
 type model_message =
   { text : string
-  ; replay_evidence : model_evidence option
-  ; instruction_resolution : Keeper_event_queue.hitl_resolution option
+  ; resolutions : Keeper_event_queue.hitl_resolution list
+  ; replay_evidence : model_evidence list
+  ; instruction_resolutions : Keeper_event_queue.hitl_resolution list
   }
 
-let plain_model_message text = { text; replay_evidence = None; instruction_resolution = None }
+type resolution_input =
+  | Stored_resolution of Keeper_event_queue.hitl_resolution
+  | Approved_replay of
+      { resolution : Keeper_event_queue.hitl_resolution
+      ; outcome : outcome
+      }
+
+type resolution_input_error =
+  | Replay_approval_mismatch of { resolution_id : string; replay_id : string }
+  | Replay_for_rejected_resolution of string
+
+let resolution_input_error_to_string = function
+  | Replay_approval_mismatch { resolution_id; replay_id } ->
+    Printf.sprintf "Gate resolution %s does not own replay %s" resolution_id replay_id
+  | Replay_for_rejected_resolution approval_id ->
+    Printf.sprintf "rejected Gate resolution %s cannot own an approved replay" approval_id
+;;
+
+let resolution_input ~(resolution : Keeper_event_queue.hitl_resolution) ~replay_delivery =
+  match replay_delivery with
+  | None -> Ok (Stored_resolution resolution)
+  | Some (replay_id, outcome) ->
+    if not (String.equal resolution.approval_id replay_id)
+    then Error (Replay_approval_mismatch { resolution_id = resolution.approval_id; replay_id })
+    else
+      (match resolution.decision with
+       | Keeper_event_queue.Hitl_approved -> Ok (Approved_replay { resolution; outcome })
+       | Keeper_event_queue.Hitl_rejected _ ->
+         Error (Replay_for_rejected_resolution resolution.approval_id))
+;;
+
+let plain_model_message text =
+  { text; resolutions = []; replay_evidence = []; instruction_resolutions = [] }
 
 let replay_evidence_effect_to_string = function
   | Evidence_applied -> "applied"
@@ -659,8 +692,9 @@ let replay_model_message
       String.concat
         "\n"
         [ user_message; ""; canonical_replay_evidence_fragment replay_evidence ]
-  ; replay_evidence = Some replay_evidence
-  ; instruction_resolution = None
+  ; resolutions = []
+  ; replay_evidence = [ replay_evidence ]
+  ; instruction_resolutions = []
   }
 ;;
 
@@ -739,14 +773,49 @@ let append_model_evidence_block evidence blocks =
   @ [ Agent_core.Types.Text (canonical_replay_evidence_fragment evidence) ]
 ;;
 
-let project_model_input ~base_path:_ evidence messages =
-  match approval_input evidence with
-  | Error error -> Error (Agent_core.Error.Internal
-      (Keeper_approval_input_admission.error_to_string error))
-  | Ok (identity, message) ->
-    if Keeper_approval_input_admission.contains ~identity ~message messages
-    then Ok messages
-    else Ok (messages @ [message])
+let project_model_inputs ~base_path:_ evidence messages =
+  let module Approval_ids = Set.Make (String) in
+  let invalid detail = Error (Agent_core.Error.Internal detail) in
+  let rec prepare seen reversed = function
+    | [] -> Ok (List.rev reversed)
+    | evidence :: rest ->
+      if Approval_ids.mem evidence.approval_id seen
+      then invalid "duplicate approval in ordered Gate evidence"
+      else
+        match approval_input evidence with
+        | Error error -> invalid (Keeper_approval_input_admission.error_to_string error)
+        | Ok (identity, message) ->
+          prepare (Approval_ids.add evidence.approval_id seen)
+            ((evidence.approval_id, identity, message) :: reversed) rest
+  in
+  match prepare Approval_ids.empty [] evidence with
+  | Error _ as error -> error
+  | Ok inputs ->
+    let matches current (_, identity, message) =
+      Keeper_approval_input_admission.contains ~identity ~message [ current ] in
+    let rec before approval_id reversed = function
+      | [] -> invalid "duplicate or reversed surviving Gate evidence"
+      | (id, _, message) :: rest ->
+        if String.equal id approval_id then Ok (reversed, rest)
+        else before approval_id (message :: reversed) rest in
+    let rec restore remaining reversed = function
+      | [] ->
+        let suffix = List.map (fun (_, _, message) -> message) remaining in
+        Ok (List.rev_append reversed suffix)
+      | current :: rest ->
+        match List.find_opt (matches current) inputs with
+        | None -> restore remaining (current :: reversed) rest
+        | Some (approval_id, _, _) ->
+          (match before approval_id reversed remaining with
+           | Error _ as error -> error
+           | Ok (reversed, remaining) ->
+             restore remaining (current :: reversed) rest)
+    in
+    restore inputs [] messages
+;;
+
+let project_model_input ~base_path evidence messages =
+  project_model_inputs ~base_path [ evidence ] messages
 ;;
 
 let approved_resolution_message ~approval_id ~tool_name ~input ~user_message =
@@ -781,7 +850,7 @@ let approved_resolution_message ~approval_id ~tool_name ~input ~user_message =
   String.concat "\n" [ user_message; ""; resolution_fragment ]
 ;;
 
-let user_message_with_hitl_resolution ~base_path ~user_message = function
+let message_for_stored_resolution ~base_path ~user_message = function
   | Some
       ({ Keeper_event_queue.approval_id
       ; decision = Keeper_event_queue.Hitl_approved
@@ -803,7 +872,7 @@ let user_message_with_hitl_resolution ~base_path ~user_message = function
             ~tool_name:request.tool_name
             ~input:request.input
             ~user_message) in
-       { message with instruction_resolution = Some resolution }
+       { message with instruction_resolutions = [ resolution ] }
      | Ok
          { request
          ; state = Keeper_approval_queue_result.Resolution_consumed
@@ -900,32 +969,56 @@ let user_message_with_hitl_resolution ~base_path ~user_message = function
                   ; Printf.sprintf "- rationale: %s" rationale
                   ])
          ]) in
-    { message with instruction_resolution = Some resolution }
+    { message with instruction_resolutions = [ resolution ] }
   | None -> plain_model_message user_message
+;;
+
+let user_message_with_hitl_resolution ~base_path ~user_message resolution =
+  let message = message_for_stored_resolution ~base_path ~user_message resolution in
+  { message with resolutions = Option.to_list resolution }
 ;;
 
 let compose_model_message
       ~base_path
       ~user_message
-      ~hitl_resolution
-      ~replay_delivery
+      ~inputs
   =
-  match replay_delivery with
-  | Some
-      ( approval_id
-      , ( ( Applied _
-          | Applied_with_warning _
-          | Failed _
-          | Indeterminate _ )
-          as outcome ) ) ->
-    append_model_evidence ~approval_id ~user_message outcome
-  | Some (approval_id, ((Repair_required _ | Resolution_absent _) as outcome)) ->
-    append_model_evidence ~approval_id ~user_message outcome
-  | Some (_, Not_applicable) | None ->
-    user_message_with_hitl_resolution
-      ~base_path
-      ~user_message
-      hitl_resolution
+  let text, resolutions_rev, evidence_rev, instructions_rev =
+    List.fold_left
+      (fun (text, resolutions_rev, evidence_rev, instructions_rev) input ->
+         let resolution =
+           match input with
+           | Stored_resolution resolution
+           | Approved_replay { resolution; _ } -> resolution
+         in
+         let next =
+           match input with
+           | Stored_resolution resolution ->
+             user_message_with_hitl_resolution
+               ~base_path ~user_message:text (Some resolution)
+           | Approved_replay { resolution; outcome = Not_applicable } ->
+             user_message_with_hitl_resolution
+               ~base_path ~user_message:text (Some resolution)
+           | Approved_replay
+               { resolution
+               ; outcome =
+                   ( Applied _ | Applied_with_warning _ | Failed _
+                   | Indeterminate _ | Repair_required _ | Resolution_absent _ ) as outcome
+               } ->
+             append_model_evidence
+               ~approval_id:resolution.approval_id ~user_message:text outcome
+         in
+         next.text,
+         resolution :: resolutions_rev,
+         List.rev_append next.replay_evidence evidence_rev,
+         List.rev_append next.instruction_resolutions instructions_rev)
+      (user_message, [], [], []) inputs
+  in
+  { text
+  ; resolutions = List.rev resolutions_rev
+  ; replay_evidence = List.rev evidence_rev
+  ; instruction_resolutions = List.rev instructions_rev
+  }
 ;;
 
 let connector_post_terminal_effect_receipt connector_post =

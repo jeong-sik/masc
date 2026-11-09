@@ -2094,19 +2094,28 @@ let test_resolution_is_durable_and_origin_scoped () =
          true
          (replay_outcome_wire |> member "output" = `Null);
        let fresh_replay_message =
+         let input =
+           Masc.Keeper_gate_replay.resolution_input
+             ~resolution
+             ~replay_delivery:
+               (Some
+                  ( id
+                  , Masc.Keeper_gate_replay.Applied
+                      { operation = "external-effect"
+                      ; output_ref = replay_output_ref
+                      ; journal = Masc.Keeper_gate_replay.Replay_journal_recorded
+                      } ))
+         in
+         let input =
+           match input with
+           | Ok input -> input
+           | Error error ->
+             Alcotest.fail (Masc.Keeper_gate_replay.resolution_input_error_to_string error)
+         in
          Masc.Keeper_gate_replay.compose_model_message
            ~base_path
            ~user_message:"continue"
-           ~hitl_resolution:(Some resolution)
-           ~replay_delivery:
-             (Some
-                ( id
-                , Masc.Keeper_gate_replay.Applied
-                    { operation = "external-effect"
-                    ; output_ref = replay_output_ref
-                    ; journal =
-                        Masc.Keeper_gate_replay.Replay_journal_recorded
-                    } ))
+           ~inputs:[ input ]
        in
        let fresh_replay_text =
          fresh_replay_message.Masc.Keeper_gate_replay.text
@@ -2158,8 +2167,8 @@ let test_resolution_is_durable_and_origin_scoped () =
             "Do not request the approved operation again");
        let projected_text =
          match retry_message.replay_evidence with
-         | None -> Alcotest.fail "retry lost its replay evidence projection"
-         | Some evidence ->
+         | [] | _ :: _ :: _ -> Alcotest.fail "retry requires one replay evidence projection"
+         | [ evidence ] ->
            (match
               Masc.Keeper_gate_replay.project_model_input
                 ~base_path

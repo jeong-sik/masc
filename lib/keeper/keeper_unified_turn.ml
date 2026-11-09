@@ -617,12 +617,6 @@ let run_keeper_cycle
                let drain_turn_event_bus ?(site = "unspecified") () =
                  Keeper_unified_turn_event_bus.drain ~site turn_event_bus_state
                in
-               let event_bus_integrity_error_snapshot () =
-                 Keeper_unified_turn_event_bus.integrity_error turn_event_bus_state
-               in
-               let tool_completed_count_snapshot () =
-                 Keeper_unified_turn_event_bus.tool_completed_count turn_event_bus_state
-               in
                let start_background_turn_event_bus_drain ~clock =
                  Keeper_unified_turn_event_bus.start_background_drain
                    ~clock
@@ -777,12 +771,9 @@ let run_keeper_cycle
                                (Keeper_heartbeat_source_batch.selections
                                   (Keeper_heartbeat_source_batch.sources turn_input))
                            ; hitl_resolution
-                           ; cleanup
                            ; config
                            ; drain_turn_event_bus
                            ; event_bus
-                           ; event_bus_integrity_error_snapshot
-                           ; tool_completed_count_snapshot
                            ; keeper_turn_id
                            ; meta
                            ; preview
@@ -794,7 +785,6 @@ let run_keeper_cycle
                            ; task_skill_selection
                            ; shared_context
                            ; trajectory_acc
-                           ; turn_id = keeper_turn_id
                            ; deferred_runtime_lane
                            ; on_deferred_runtime_consumed
                            }
@@ -802,10 +792,7 @@ let run_keeper_cycle
                            ~turn_state
                            ~before_dispatch_authority
                            ~user_message
-                           ~registry_base_path
                            ~record_streaming_cancelled_observation
-                           ~runtime_id_of_meta
-                           ~start_background_turn_event_bus_drain
                        in
                        run_result, turn_state
                     )

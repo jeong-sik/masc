@@ -63,12 +63,9 @@ type ctx =
   ; hitl_resolution : Keeper_event_queue.hitl_resolution option
       (* Typed decision for the originating Keeper's exact external-effect
          Gate. It is never converted to a generic AGENT_CORE approval. *)
-  ; cleanup : unit -> unit
   ; config : Workspace.config
   ; drain_turn_event_bus : ?site:string -> unit -> Keeper_turn_runtime_budget.turn_event_bus_summary
   ; event_bus : Agent_core.Event_bus.t option
-  ; event_bus_integrity_error_snapshot : unit -> Agent_core.Error.t option
-  ; tool_completed_count_snapshot : unit -> int
   ; keeper_turn_id : int
   ; meta : keeper_meta
   ; preview : Keeper_turn_preview.writer
@@ -82,7 +79,6 @@ type ctx =
       (Keeper_task_skill_turn.t, Keeper_task_skill_turn.error) result
   ; shared_context : Agent_core.Context.t option
   ; trajectory_acc : Trajectory.accumulator
-  ; turn_id : int
   ; deferred_runtime_lane : Keeper_turn_driver.deferred_runtime_lane option
   ; on_deferred_runtime_consumed : (unit -> unit) option
   }
@@ -94,10 +90,7 @@ let run (ctx : ctx)
       ~(turn_state : turn_state)
       ~(before_dispatch_authority : unit -> (unit, string) result)
       ~(user_message : string)
-      ~(registry_base_path : string)
       ~(record_streaming_cancelled_observation : config:Workspace.config -> run_meta:keeper_meta -> runtime_id:string -> keeper_turn_id:int -> unit -> unit)
-      ~(runtime_id_of_meta : keeper_meta -> string)
-      ~(start_background_turn_event_bus_drain : clock:float Eio.Time.clock_ty Eio.Resource.t -> unit)
   : (Keeper_agent_run.run_result, Agent_core.Error.t) result * turn_state
 =
   let { config
@@ -106,7 +99,6 @@ let run (ctx : ctx)
       ; turn_ctx_cell
       ; observation
       ; keeper_turn_id
-      ; turn_id
       ; channel
       ; continuation_channel
       ; approval_admission
@@ -119,11 +111,8 @@ let run (ctx : ctx)
       ; publication_recovery
       ; skill_snapshot
       ; task_skill_selection
-      ; cleanup
       ; drain_turn_event_bus
       ; event_bus
-      ; event_bus_integrity_error_snapshot = _
-      ; tool_completed_count_snapshot = _
       ; deferred_runtime_lane
       ; on_deferred_runtime_consumed
       } =

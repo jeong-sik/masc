@@ -1169,8 +1169,7 @@ let param_by_name name params =
 let legacy_background_flag_name = "run_" ^ "in_background"
 
 let execute_async_lifecycle_field_names =
-  [ legacy_background_flag_name
-  ; "job_id"
+  [ "job_id"
   ; "request_id"
   ; "backgroundTaskId"
   ; "poll"
@@ -1210,10 +1209,8 @@ let test_tool_execute_schema_exposes_typed_boundary () =
   Alcotest.(check bool)
     "stages alias rejected by schema" true
     (Option.is_none (param_by_name "stages" params));
-  Alcotest.(check bool)
-    "legacy background flag not exposed"
-    true
-    (Option.is_none (param_by_name legacy_background_flag_name params));
+  (* #49825 exposes run_in_background on purpose: the schema is the contract. *)
+  check_param_type legacy_background_flag_name "boolean" params;
   List.iter
     (fun field ->
       Alcotest.(check bool)
@@ -1344,7 +1341,9 @@ let test_validate_args_tool_execute_accepts_command_string () =
       "expected tool_execute command string to pass validation, got %s"
       (Yojson.Safe.to_string (Tool_result.data result))
 
-let test_validate_args_tool_execute_rejects_background_flag () =
+let test_validate_args_tool_execute_accepts_background_flag () =
+  (* run_in_background is a schema field since #49825, so the typed input
+     validator must accept it instead of rejecting it as a legacy flag. *)
   let args =
     `Assoc
       [ "argv", `List [ `String "pwd" ]; legacy_background_flag_name, `Bool true ]
@@ -1356,16 +1355,15 @@ let test_validate_args_tool_execute_rejects_background_flag () =
       ~args
       ()
   with
-  | Ok _ -> Alcotest.fail "expected tool_execute background flag to be rejected"
+  | Ok _ -> ()
   | Error result ->
-    let msg = Yojson.Safe.to_string (Tool_result.data result) in
-    Alcotest.(check bool) "mentions legacy background flag" true
-      (string_contains msg legacy_background_flag_name)
+    Alcotest.failf
+      "expected tool_execute background flag to validate, got %s"
+      (Yojson.Safe.to_string (Tool_result.data result))
 
 let test_validate_args_tool_execute_rejects_async_lifecycle_fields () =
   let cases =
-    [ legacy_background_flag_name, `Bool true
-    ; "job_id", `String "job-123"
+    [ "job_id", `String "job-123"
     ; "request_id", `String "req-123"
     ; "backgroundTaskId", `String "bg-123"
     ; "poll", `Bool true
@@ -2812,7 +2810,7 @@ let () =
       Alcotest.test_case "tool_execute accepts command string" `Quick
         test_validate_args_tool_execute_accepts_command_string;
       Alcotest.test_case "tool_execute rejects background flag" `Quick
-        test_validate_args_tool_execute_rejects_background_flag;
+        test_validate_args_tool_execute_accepts_background_flag;
       Alcotest.test_case "tool_execute rejects async lifecycle fields" `Quick
         test_validate_args_tool_execute_rejects_async_lifecycle_fields;
       Alcotest.test_case "tool_execute accepts typed exec" `Quick

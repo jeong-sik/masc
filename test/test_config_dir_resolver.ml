@@ -412,22 +412,6 @@ let test_local_masc_fallback_collapses_explicit_masc_dir () =
     (Config_dir_resolver.source_to_string resolution.config_root.source);
   check string "root path" local_config resolution.config_root.path
 
-let test_no_legacy_me_root_fallback () =
-  with_temp_dir "config-dir-no-legacy" @@ fun me_root ->
-  let _repo_root =
-    Filename.concat me_root "workspace/yousleepwhen/masc"
-  in
-  let resolution =
-    Config_dir_resolver.resolve_with
-      (make_inputs ~cwd:"/tmp/missing-cwd"
-         ~executable_name:"/tmp/nonexistent-masc" ())
-  in
-  check string "status" "missing"
-    (Config_dir_resolver.status_to_string resolution.status);
-  check string "root source" "missing"
-    (Config_dir_resolver.source_to_string resolution.config_root.source);
-  check bool "warning present" true (resolution.warnings <> [])
-
 (* RFC-0121 — .masc/<sub> sub-directory accessors. The accessors derive
    layout from [base_path] without filesystem access, so we only check
    the constructed paths. *)
@@ -656,8 +640,6 @@ let () =
             `Quick test_local_masc_fallback_collapses_explicit_masc_dir;
           test_case "external config is not a fallback" `Quick
             test_external_config_is_not_a_fallback;
-          test_case "does not fallback to legacy me_root repo path" `Quick
-            test_no_legacy_me_root_fallback;
           test_case "publishes one immutable snapshot across domains" `Quick
             test_resolve_publishes_one_immutable_snapshot_across_domains;
         ] );

@@ -8,6 +8,7 @@ open Masc_tui_press
 
 module Message_layout = Masc_tui_message_layout
 module Rows = Masc_tui_rows
+module Page_line = Masc_tui_page_line
 module Keeper_chat = Masc_tui_keeper_chat_projection
 module Overview_providers = Masc_tui_overview_providers
 module Render_tools = Masc_tui_render_tools
@@ -325,25 +326,30 @@ let runtime_detail_lines state target ~width =
            runtime_detail_field ~width ~style:(Theme.warn ()) "Runtime"
              "This runtime row is no longer present in the refreshed projection")
   | Some (runtime, lanes, position, probe) ->
+      (* A field as one fact line, so an absent field is [[]] and a repeated
+         one is a [List.concat_map]. *)
+      let fact ?(tone = Page_line.Plain) label value =
+        [ Page_line.fact ~tone label value ]
+      in
       let model_fields =
-        runtime_detail_field ~width ~style:Ansi.reset "Runtime ID" runtime.ro_id
-        @ runtime_detail_field ~width ~style:Ansi.reset "Provider" runtime.ro_provider
-        @ runtime_detail_field ~width ~style:Ansi.reset "Model" runtime.ro_model
-        @ runtime_detail_field ~width ~style:Ansi.reset "Effective context"
+        fact "Runtime ID" runtime.ro_id
+        @ fact "Provider" runtime.ro_provider
+        @ fact "Model" runtime.ro_model
+        @ fact "Effective context"
             (Printf.sprintf "%d tokens" runtime.ro_effective_max_context)
-        @ runtime_detail_field ~width ~style:Ansi.reset "Context source"
+        @ fact "Context source"
             (runtime_context_source_label runtime.ro_max_context_source)
-        @ runtime_detail_field ~width ~style:Ansi.reset "Max output"
+        @ fact "Max output"
             (match runtime.ro_max_output_tokens with
              | Some tokens -> Printf.sprintf "%d tokens" tokens
              | None -> "not specified")
-        @ runtime_detail_field ~width ~style:Ansi.reset "Local runtime"
+        @ fact "Local runtime"
             (runtime_bool runtime.ro_is_local)
       in
       let connection_fields =
-        runtime_detail_field ~width ~style:Ansi.reset "Connection / provider ID" runtime.ro_provider_id
-        @ runtime_detail_field ~width ~style:Ansi.reset "Quota scope" (runtime_quota_scope_label runtime)
-        @ runtime_detail_field ~width ~style:Ansi.reset "Response-local quota scope"
+        fact "Connection / provider ID" runtime.ro_provider_id
+        @ fact "Quota scope" (runtime_quota_scope_label runtime)
+        @ fact "Response-local quota scope"
             (Option.value ~default:"not reported" runtime.ro_quota_scope)
       in
       let assignment_fields =
@@ -353,18 +359,18 @@ let runtime_detail_lines state target ~width =
              (* The lane is named because "Used by lanes" below can now hold
                 several, and a position without its lane is a place in an
                 unnamed list. *)
-             runtime_detail_field ~width ~style:Ansi.reset "Lane position"
+             fact "Lane position"
                (Printf.sprintf "%d of %d in %s" at total lane))
-        @ runtime_detail_field ~width ~style:Ansi.reset "Used by lanes"
+        @ fact "Used by lanes"
             (match lanes with [] -> "unassigned" | values -> String.concat ", " values)
-        @ runtime_detail_field ~width ~style:Ansi.reset "Default runtime"
+        @ fact "Default runtime"
             (runtime_bool runtime.ro_is_default)
       in
       let quota =
         match runtime_quota_badge runtime with
         | None -> []
         | Some _ ->
-            runtime_detail_field ~width ~style:(Theme.warn ()) "Quota"
+            fact ~tone:Page_line.Attention "Quota"
               (match runtime.ro_quota_resets_at with
                | Some resets_at ->
                  let tm = Unix.localtime resets_at in
@@ -377,36 +383,36 @@ let runtime_detail_lines state target ~width =
         | false, _ -> []
         | true, Some resets_at ->
           let tm = Unix.localtime resets_at in
-          runtime_detail_field ~width ~style:(Theme.warn ()) "Rate limit"
+          fact ~tone:Page_line.Attention "Rate limit"
             (Printf.sprintf "until %02d:%02d or the next successful answer"
                tm.Unix.tm_hour tm.Unix.tm_min)
         | true, None ->
-          runtime_detail_field ~width ~style:(Theme.warn ()) "Rate limit"
+          fact ~tone:Page_line.Attention "Rate limit"
             "no wait stated, cleared by the next successful answer"
       in
       let probe_lines =
         match probe with
-        | None -> [ Ansi.dim, "  Probe: unobserved" ]
+        | None -> fact ~tone:Page_line.Quiet "Probe" "unobserved"
         | Some row ->
             let transport =
               match row.rpp_transport with
               | Runtime_probe_http -> "http"
               | Runtime_probe_cli -> "cli"
             in
-            runtime_detail_field ~width ~style:Ansi.reset "Probe status"
+            fact "Probe status"
               (runtime_probe_status_label ~ko row.rpp_status)
-            @ runtime_detail_field ~width ~style:Ansi.reset "Probe transport" transport
+            @ fact "Probe transport" transport
             @ (match row.rpp_latency_ms with
                | None -> []
                | Some value ->
-                   runtime_detail_field ~width ~style:Ansi.reset "Latency"
+                   fact "Latency"
                      (Printf.sprintf "%.0fms" value))
             @ (match row.rpp_http_status with
                | None -> []
                | Some value ->
-                   runtime_detail_field ~width ~style:Ansi.reset "HTTP status"
+                   fact "HTTP status"
                      (string_of_int value))
-            @ runtime_detail_field ~width ~style:Ansi.reset "Checked at"
+            @ fact "Checked at"
                 (Terminal_text.short_timestamp row.rpp_checked_at)
             (* No Reachable row: the decoder admits a probe only when its
                reachable flag agrees with its status, so the row could only
@@ -415,15 +421,15 @@ let runtime_detail_lines state target ~width =
             @ (match runtime_probe_annotation ~status:row.rpp_status row.rpp_error with
                | None -> []
                | Some (Runtime_probe_note note) ->
-                   runtime_detail_field ~width ~style:Ansi.dim "Probe note" note
+                   fact ~tone:Page_line.Quiet "Probe note" note
                | Some (Runtime_probe_failure error) ->
-                   runtime_detail_field ~width ~style:(Theme.bad ()) "Probe error" error)
+                   fact ~tone:Page_line.Failure "Probe error" error)
       in
       let probe_limitations =
         match state.runtime_surface with
         | Some { rss_probe = Some snapshot; _ } ->
             List.concat_map
-              (runtime_detail_field ~width ~style:Ansi.reset "Probe limitation")
+              (fact "Probe limitation")
               snapshot.rps_limitations
         | Some { rss_probe = None; _ } | None -> []
       in
@@ -438,7 +444,7 @@ let runtime_detail_lines state target ~width =
         in
         match target_keepers with
         | [] ->
-            runtime_detail_field ~width ~style:Ansi.dim "Bound keepers" "none"
+            fact ~tone:Page_line.Quiet "Bound keepers" "none"
         | ks ->
             let names = String.concat ", " (List.map (fun (k : Tui_decode.keeper) -> k.k_name) ks) in
             let activity_str = match aggregate_keeper_stats ks with
@@ -447,19 +453,19 @@ let runtime_detail_lines state target ~width =
                 Printf.sprintf "%d turns · %s tokens · %s" turns
                   (format_context_tokens tokens) (Tui_decode.keeper_cost_summary cost)
             in
-            runtime_detail_field ~width ~style:Ansi.reset "Bound keepers" names
-            @ runtime_detail_field ~width ~style:Ansi.reset "Keeper lifetime" (activity_str ^ " · across all runtimes")
+            fact "Bound keepers" names
+            @ fact "Keeper lifetime" (activity_str ^ " · across all runtimes")
       in
       let usage_lines =
         match state.runtime_surface with
-        | None -> runtime_detail_field ~width ~style:Ansi.dim "Account usage" "unavailable"
+        | None -> fact ~tone:Page_line.Quiet "Account usage" "unavailable"
         | Some snapshot ->
           match runtime_spent_usage snapshot.rss_resolved runtime with
-          | Error detail -> runtime_detail_field ~width ~style:Ansi.dim "Account usage"
+          | Error detail -> fact ~tone:Page_line.Quiet "Account usage"
               (Terminal_text.single_line detail)
           | Ok [] -> []
           | Ok windows ->
-            runtime_detail_field ~width ~style:(Theme.warn ()) "Account usage"
+            fact ~tone:Page_line.Attention "Account usage"
               "A model-call limit is spent; this account report does not identify which models are refused."
             @ List.concat_map (fun (window : Masc.Tui_decode_usage.provider_usage_window) ->
                 let limit = match window.puw_limit_id with
@@ -469,31 +475,31 @@ let runtime_detail_lines state target ~width =
                 let observed = Printf.sprintf "%04d-%02d-%02d %02d:%02d"
                     (tm.Unix.tm_year + 1900) (tm.Unix.tm_mon + 1) tm.Unix.tm_mday
                     tm.Unix.tm_hour tm.Unix.tm_min in
-                runtime_detail_field ~width ~style:(Theme.warn ()) "Spent limit"
+                fact ~tone:Page_line.Attention "Spent limit"
                   (limit ^ " (observed " ^ observed ^ ")")) windows
       in
       let evidence_lines = match state.runtime_evidence with
-        | None -> runtime_detail_field ~width ~style:Ansi.dim "Runtime history" "not read"
-        | Some (Error detail) -> runtime_detail_field ~width ~style:Ansi.dim "Runtime history" detail
+        | None -> fact ~tone:Page_line.Quiet "Runtime history" "not read"
+        | Some (Error detail) -> fact ~tone:Page_line.Quiet "Runtime history" detail
         | Some (Ok evidence) ->
           Masc_tui_runtime_evidence.lines evidence ~runtime_id:runtime.ro_id
-          |> List.concat_map (fun (label, value) ->
-            runtime_detail_field ~width ~style:Ansi.reset label value) in
+          |> List.concat_map (fun (label, value) -> fact label value) in
       let failed_attempt =
         match runtime.ro_failed_attempt with
         | None -> []
         | Some attempt ->
-          runtime_detail_field ~width ~style:(Theme.warn ()) "Last failure"
+          fact ~tone:Page_line.Attention "Last failure"
             (Terminal_text.single_line (runtime_failed_attempt_text attempt))
       in
-      runtime_detail_section ~first:true (if ko then "1. 현재 상태 · 연결 진단" else "1. Health & probe")
-      @ probe_lines @ failed_attempt @ quota @ rate_limit @ usage_lines @ probe_limitations
-      @ runtime_detail_section (if ko then "2. 레인 배정 · 실행 성적" else "2. Assignment & history")
-      @ assignment_fields @ keeper_lines @ evidence_lines
-      @ runtime_detail_section (if ko then "3. 모델 · 컨텍스트" else "3. Model & context")
-      @ model_fields
-      @ runtime_detail_section (if ko then "4. 쿼터 범위 · 계정 연결" else "4. Quota & connection")
-      @ connection_fields
+      detail_page ~width
+        [ (if ko then "1. 현재 상태 · 연결 진단" else "1. Health & probe"),
+          probe_lines @ failed_attempt @ quota @ rate_limit @ usage_lines @ probe_limitations
+        ; (if ko then "2. 레인 배정 · 실행 성적" else "2. Assignment & history"),
+          assignment_fields @ keeper_lines @ evidence_lines
+        ; (if ko then "3. 모델 · 컨텍스트" else "3. Model & context"), model_fields
+        ; (if ko then "4. 쿼터 범위 · 계정 연결" else "4. Quota & connection"),
+          connection_fields
+        ]
 
 let render_runtime_detail (state : state) target =
   let terminal_rows, cols = get_terminal_size () in

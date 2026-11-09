@@ -2428,6 +2428,7 @@
   masc.masc_types
   masc.agent_core
   masc.keeper_chat_delivery_identity
+  masc.keeper_runtime
   masc.runtime
   unix))
 

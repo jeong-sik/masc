@@ -85,7 +85,7 @@ let approval_lifecycle_is_continuation = function
 let append_approval_lifecycle_at_slot_once
       ~base_dir
       ~keeper_name
-      ~lifecycle
+      ~(lifecycle : approval_lifecycle)
       ~transcript_slot
   =
   let open Keeper_chat_delivery_identity in
@@ -146,7 +146,11 @@ let append_approval_lifecycle_at_slot_once
          detail;
        Error detail)
 
-let append_approval_lifecycle_once ~base_dir ~keeper_name ~lifecycle =
+let append_approval_lifecycle_once
+      ~base_dir
+      ~keeper_name
+      ~(lifecycle : approval_lifecycle)
+  =
   let open Keeper_chat_delivery_identity in
   let transcript_slot =
     match lifecycle.phase with
@@ -215,7 +219,11 @@ let existing_approval_lifecycle_at_slot
       , (None | Some _) ) -> None)
 ;;
 
-let reconcile_approval_replay_lifecycle_once ~base_dir ~keeper_name ~lifecycle =
+let reconcile_approval_replay_lifecycle_once
+      ~base_dir
+      ~keeper_name
+      ~(lifecycle : approval_lifecycle)
+  =
   let open Keeper_chat_delivery_identity in
   if not (approval_lifecycle_is_replay lifecycle.phase)
   then Error "approval replay reconciliation requires a replay lifecycle phase"

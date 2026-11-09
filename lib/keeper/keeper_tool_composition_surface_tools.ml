@@ -136,7 +136,8 @@ let make_tools_with_authority
       ~description:(entry_description entry)
       ~input_schema:(Catalog.input_schema_of_params entry.params)
       (fun execution_env input ->
-        let start_time = Tool_timing.start () in
+        let dispatch_result =
+          let start_time = Tool_timing.start () in
         match
           Tool_input_validation.validate_args
             ~schema:(Catalog.input_schema_of_params entry.params)
@@ -446,7 +447,14 @@ let make_tools_with_authority
                ~duration_ms:(Tool_result.duration_ms result)
                ~typed_result:result
                ();
-             result)))))
+             result))))
+        in
+        (* task-3268: compositions bypass the exec handler, so emit the shared
+           dispatch observers here with the honest typed result — Deferred
+           included — or tool_metric_events keeps zero keeper_compose_* rows
+           (#38824). *)
+        Tool_dispatch.run_dispatch_observers Dispatch_outcome.Handled (Some dispatch_result);
+        dispatch_result)
     in
     let* ordinary = make_tool () in
     let resource_candidate =
@@ -514,7 +522,8 @@ let make_tools_with_authority
            ?on_externalization_error ~name:schema.name ~description:schema.description
            ~input_schema:schema.input_schema
            (fun execution_env input ->
-              let start_time = Tool_timing.start () in
+              let dispatch_result =
+                let start_time = Tool_timing.start () in
               match Tool_input_validation.validate_args ~schema:schema.input_schema
                       ~name:schema.name ~args:input () with
               | Error rejected -> rejected
@@ -525,7 +534,12 @@ let make_tools_with_authority
                 | Ok result -> result
                 | Error { message; _ } ->
                   Tool_result.make_err ~tool_name:schema.name ~class_:Tool_result.Runtime_failure
-                    ~effect_disposition:Tool_result.Effect_outcome_unknown ~start_time message)
+                    ~effect_disposition:Tool_result.Effect_outcome_unknown ~start_time message
+              in
+              (* task-3268: the transient run tool bypasses the exec handler,
+                 so emit the shared dispatch observers here (#38824). *)
+              Tool_dispatch.run_dispatch_observers Dispatch_outcome.Handled (Some dispatch_result);
+              dispatch_result)
         in
         (tool, Tool_loading_declarations.required schema.name, model_projection)
       in

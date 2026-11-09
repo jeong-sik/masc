@@ -15,11 +15,17 @@ A request carries labels by construction:
 | --- | --- | --- |
 | NEW_DURABLE | incorporated | a new claim, supported by the candidate |
 | CORRECTION | incorporated | a new claim superseding the target; the target in `dropped` |
+| COMPLEMENT | incorporated | a new claim that absorbs the target |
 | PARAPHRASE | already_represented | none; `memory_claim` is the target's claim |
 | TRANSIENT | not_durable | none |
 
 A memory fact with `planted_stale=True` is a transient state that slipped into
-memory; the expected answer drops it without a superseding claim.
+memory; the expected answer drops it without a superseding claim. A fact with
+`duplicate_of` restates another fact of its memory in other words; the expected
+answer keeps one of the two and absorbs the other into it. MASC accepts a Memory
+change only when an incorporated or already_represented candidate supports it
+(`keeper_memory_admission_judgment.ml` `verify_support`), so in a request whose
+candidates are all transient the planted facts stay too.
 
 What a claim carries besides its meaning (a date, a time, a PR/issue/task
 number) is planned from shares measured on the retained records, and
@@ -28,8 +34,8 @@ its marks one by one with `plan_surface`, the same way stale or durable.
 Candidates are planned for a whole split at once by `synth_candidate_plan`,
 which deals each mark and the length out within each label kind. A label then
 leaves no mark in those strings.
-Rules: `config/prompts/librarian.md` 143-208 (keep, drop, correct) and
-586-616 (admission).
+Rules: `config/prompts/librarian.md` 58-64 (relations), 143-208 (keep, drop,
+correct, absorb) and 586-616 (admission).
 """
 
 from __future__ import annotations
@@ -66,6 +72,11 @@ GOAL_WEIGHTS: tuple[tuple[GoalShape, float], ...] = (
 # an oversized part, #49910, and is left out).
 CANDIDATES_PER_REQUEST_WEIGHTS = ((1, 0.6), (2, 0.25), (3, 0.15))
 STALE_FACTS_PER_MEMORY_WEIGHTS = ((0, 0.3), (1, 0.4), (2, 0.3))
+# Share of a split's memories that hold one planted duplicate pair. The live answers of the
+# 99 E-real records absorb into a kept current claim on 5 records and into a candidate's new
+# claim on 27 (30 records absorb). With this share and the COMPLEMENT weight below, 0.31 of
+# planned requests expect an absorb (15,000 planned requests on 4,000 memories).
+DUPLICATE_PAIR_SHARE = 0.2
 
 
 @dataclass(frozen=True, slots=True)
@@ -112,18 +123,24 @@ HEX = "0123456789abcdef"
 class CandidateKind(Enum):
     NEW_DURABLE = "new_durable"
     CORRECTION = "correction"
+    COMPLEMENT = "complement"
     PARAPHRASE = "paraphrase"
     TRANSIENT = "transient"
 
 
-# Live outcomes of 233 judged candidates: incorporated 120, not_durable 68,
-# already_represented 43, deferred 1. Incorporated is split into new and
-# correction; deferred is not generated.
+# Live outcomes of the 233 judged candidates of the 99 E-real records (11-09): incorporated
+# 121, not_durable 68, already_represented 43, deferred 1 (not generated). By what an
+# incorporated candidate's final claim does: 81 add a claim, 31 absorb current facts (2 of
+# them also supersede one), 9 only supersede. CORRECTION keeps 0.15, above the live 9 of 233,
+# so E-synth holds enough corrections to measure; NEW_DURABLE takes the rest of incorporated.
+# Kinds are drawn per candidate, so 0.19 of planned requests have only transient candidates;
+# 11 of the 99 live records judge every candidate not_durable or deferred.
 CANDIDATE_KIND_WEIGHTS: tuple[tuple[CandidateKind, float], ...] = (
-    (CandidateKind.NEW_DURABLE, 0.37),
+    (CandidateKind.NEW_DURABLE, 0.236),
     (CandidateKind.CORRECTION, 0.15),
+    (CandidateKind.COMPLEMENT, 0.133),
     (CandidateKind.PARAPHRASE, 0.185),
-    (CandidateKind.TRANSIENT, 0.295),
+    (CandidateKind.TRANSIENT, 0.292),
 )
 
 Outcome = Literal["incorporated", "already_represented", "not_durable"]
@@ -131,7 +148,7 @@ Outcome = Literal["incorporated", "already_represented", "not_durable"]
 
 def expected_outcome(kind: CandidateKind) -> Outcome:
     match kind:
-        case CandidateKind.NEW_DURABLE | CandidateKind.CORRECTION:
+        case CandidateKind.NEW_DURABLE | CandidateKind.CORRECTION | CandidateKind.COMPLEMENT:
             return "incorporated"
         case CandidateKind.PARAPHRASE:
             return "already_represented"
@@ -197,6 +214,7 @@ class MemoryFact:
     board: BoardRef | None
     seen_at: str  # MASC writes first_seen and last_seen equal; both render from this
     planted_stale: bool
+    duplicate_of: str | None  # a planted duplicate: the memory ID of the fact it restates
 
 
 @dataclass(frozen=True, slots=True)
@@ -244,35 +262,62 @@ class SynthRequest:
 
 @dataclass(frozen=True, slots=True)
 class CandidateLabel:
+    """The candidate's outcome and its target, if it has one: the fact a correction supersedes,
+    the fact a complement's claim absorbs, or the claim of the fact a paraphrase restates."""
+
     request_id: str
     outcome: Outcome
     supersedes: str | None
+    absorbs: str | None
     already_claim: str | None
 
 
 @dataclass(frozen=True, slots=True)
 class RequestLabel:
+    """`planted_stale` are the planted stale facts the answer drops. `duplicates` pairs a fact
+    with its planted duplicate; the answer keeps one of each pair and absorbs the other into it.
+    Both are empty when no candidate can support a Memory change."""
+
     candidates: tuple[CandidateLabel, ...]
     planted_stale: frozenset[str]
+    duplicates: tuple[tuple[str, str], ...]
+
+
+def can_support(outcome: Outcome) -> bool:
+    """Whether a candidate with this outcome may support a Memory change (`verify_support`)."""
+    match outcome:
+        case "incorporated" | "already_represented":
+            return True
+        case "not_durable":
+            return False
+        case _:
+            assert_never(outcome)
+
+
+def candidate_label(candidate: Candidate, by_id: dict[str, MemoryFact]) -> CandidateLabel:
+    rid, target = candidate.request_id, candidate.target_memory_id
+    match candidate.kind:
+        case CandidateKind.CORRECTION:
+            return CandidateLabel(rid, "incorporated", target, None, None)
+        case CandidateKind.COMPLEMENT:
+            return CandidateLabel(rid, "incorporated", None, target, None)
+        case CandidateKind.PARAPHRASE:
+            return CandidateLabel(rid, "already_represented", None, None,
+                                  by_id[target].claim if target is not None else None)
+        case CandidateKind.NEW_DURABLE | CandidateKind.TRANSIENT:
+            return CandidateLabel(rid, expected_outcome(candidate.kind), None, None, None)
+        case _:
+            assert_never(candidate.kind)
 
 
 def label_of(request: SynthRequest) -> RequestLabel:
     by_id = {f.memory_id: f for f in request.facts}
-    labels: list[CandidateLabel] = []
-    for c in request.candidates:
-        match c.kind:
-            case CandidateKind.CORRECTION:
-                labels.append(CandidateLabel(c.request_id, "incorporated", c.target_memory_id, None))
-            case CandidateKind.PARAPHRASE:
-                target = by_id[c.target_memory_id] if c.target_memory_id is not None else None
-                labels.append(CandidateLabel(c.request_id, "already_represented", None,
-                                             target.claim if target is not None else None))
-            case CandidateKind.NEW_DURABLE | CandidateKind.TRANSIENT:
-                labels.append(CandidateLabel(c.request_id, expected_outcome(c.kind), None, None))
-            case _:
-                assert_never(c.kind)
+    labels = tuple(candidate_label(c, by_id) for c in request.candidates)
+    if not any(can_support(label.outcome) for label in labels):
+        return RequestLabel(labels, frozenset(), ())
     stale = frozenset(f.memory_id for f in request.facts if f.planted_stale)
-    return RequestLabel(tuple(labels), stale)
+    pairs = tuple((f.duplicate_of, f.memory_id) for f in request.facts if f.duplicate_of is not None)
+    return RequestLabel(labels, stale, pairs)
 
 
 # --- sampling ---------------------------------------------------------------

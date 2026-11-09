@@ -448,7 +448,8 @@ let spawn ~sw ~mgr ~cwd ~cli_path =
   proc, stdin_w, stdout_r, stderr_r
 ;;
 
-let read ~mgr ~clock ~fs ~workdir ~cli_path ~timeout_s () =
+let read ~host:(_ : Runtime_account_access.host_account) ~mgr ~clock ~fs ~workdir ~cli_path
+    ~timeout_s () =
   if Filename.is_relative workdir
   then Error (Workdir_not_absolute workdir)
   else if not (valid_timeout timeout_s)

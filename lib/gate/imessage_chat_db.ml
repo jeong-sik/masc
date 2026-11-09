@@ -1,10 +1,7 @@
 (* Imessage_chat_db — the only place that opens Messages.app's chat.db.
 
-   Two queries, both lifted verbatim from the sidecar this module replaces
-   (sidecars/imessage-bot/src/imessage_bridge.py). They are copied rather than
-   rewritten on purpose: the schema belongs to Apple, the sidecar's version was
-   working against the real database, and a port is the wrong moment to also
-   change what gets selected. *)
+   The table and column names in the queries are Apple's schema, which this
+   repository does not control. *)
 
 type error =
   | Db_missing of string

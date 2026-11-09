@@ -1,5 +1,5 @@
-(** Server_discord_in_process_gateway — OCaml gateway that replaces
-    the deleted [sidecars/discord-bot/] Python connector.
+(** Server_discord_in_process_gateway — the Discord gateway that runs inside
+    the server process.
 
     Spawned once during server bootstrap. Forks a long-running fiber
     on the server-wide [Eio.Switch.t] that:

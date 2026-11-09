@@ -1,9 +1,8 @@
 (* Imessage_applescript — outbound side of the iMessage connector.
 
-   Ported from sidecars/imessage-bot/src/imessage_bridge.py:send_message. The
-   `on run argv` shape is the part worth keeping deliberately: Messages.app
-   bodies are user text, and building the script by concatenation would make
-   every reply an injection site. *)
+   The script takes its arguments through `on run argv`: Messages.app bodies
+   are user text, and building the script by concatenation would make every
+   reply an injection site. *)
 
 type error =
   | Missing_chat_guid

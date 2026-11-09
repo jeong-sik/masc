@@ -42,23 +42,38 @@ module Status = Masc.Keeper_status_runtime
 module Keeper_chat_transcript = Masc_tui_keeper_chat_transcript
 module Keeper_control = Masc_tui_keeper_control
 
+(* One header row, and only for a read that has been running past the display
+   bar in [Masc_tui_types.local_read_display_bar_ns]. A read inside the bar
+   draws nothing: it is expected to settle before a person could read about
+   it, and the row appearing and disappearing on every poll is what made the
+   Keeper list jump. The stage words live on here because at this age they
+   have stopped flickering -- they name where the read is stuck -- and the
+   structured tui_local_read log keeps the millisecond choreography. *)
 let local_source_pending_note state source =
-  Option.map (fun phase ->
-    let step=match phase with
-      | Local_read_observation.Awaiting_start -> "starting read"
-      | Io_queued -> "waiting for I/O worker"
-      | Io_running -> "reading local files"
-      | Io_returning -> "returning I/O result"
-      | Preparing -> "preparing snapshot"
-      | Comparison_queued -> "waiting for Task comparison worker"
-      | Comparison_running -> "comparing Task values"
-      | Comparison_returning -> "returning Task comparison"
-      | Awaiting_ui -> "result awaiting state application"
-      | Local_read_observation.Read_failed Raised -> "read failed"
-      | Local_read_observation.Read_failed Interrupted -> "read interrupted"
-      | Read_not_started -> "read not started" in
-    let name=match source with Local_keepers -> "Keeper metadata" | Local_work -> "Work" in
-    "  " ^ name ^ " · " ^ step) (local_source_pending state source)
+  match local_source_slow_pending state source with
+  | None -> None
+  | Some (phase, age_ns) ->
+      let step = match phase with
+        | Local_read_observation.Awaiting_start -> ui_text state ~ko:"시작 대기" ~en:"starting read"
+        | Io_queued -> ui_text state ~ko:"I/O 대기" ~en:"waiting for I/O worker"
+        | Io_running -> ui_text state ~ko:"로컬 파일 읽는 중" ~en:"reading local files"
+        | Io_returning -> ui_text state ~ko:"I/O 결과 전달 중" ~en:"returning I/O result"
+        | Preparing -> ui_text state ~ko:"스냅샷 준비 중" ~en:"preparing snapshot"
+        | Comparison_queued -> ui_text state ~ko:"Task 비교 대기" ~en:"waiting for Task comparison worker"
+        | Comparison_running -> ui_text state ~ko:"Task 값 비교 중" ~en:"comparing Task values"
+        | Comparison_returning -> ui_text state ~ko:"비교 결과 전달 중" ~en:"returning Task comparison"
+        | Awaiting_ui -> ui_text state ~ko:"상태 적용 대기" ~en:"result awaiting state application"
+        | Local_read_observation.Read_failed Raised -> ui_text state ~ko:"읽기 실패" ~en:"read failed"
+        | Local_read_observation.Read_failed Interrupted -> ui_text state ~ko:"읽기 중단됨" ~en:"read interrupted"
+        | Read_not_started -> ui_text state ~ko:"읽기 시작 전" ~en:"read not started" in
+      let name = match source with
+        | Local_keepers -> ui_text state ~ko:"Keeper 메타데이터" ~en:"Keeper metadata"
+        | Local_work -> ui_text state ~ko:"작업 목록" ~en:"Work" in
+      let seconds = Printf.sprintf "%.1f" (Int64.to_float age_ns /. 1e9) ^ ui_text state ~ko:"초" ~en:"s" in
+      let lead = match phase with
+        | Local_read_observation.Read_failed _ | Read_not_started -> name
+        | _ -> ui_text state ~ko:(name ^ " 읽는 중") ~en:(name ^ " reading") in
+      Some (Theme.recede () ^ "  " ^ String.concat " · " [lead; step; seconds] ^ Ansi.reset)
 module Markdown = Masc_tui_markdown
 module Message_layout = Masc_tui_message_layout
 module Rows = Masc_tui_rows

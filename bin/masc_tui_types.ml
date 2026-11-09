@@ -12117,6 +12117,25 @@ let local_source_pending state source =
     Option.map Local_read_observation.pending (local_source_observation state source)
   else None
 
+(* A display bar, not a gate on the read. A local read younger than this is
+   expected to settle before a person could read a line about it, so drawing
+   its phase only makes the header grow and shrink on every poll. Past the
+   bar the same line is a readable symptom: the phase word is stable at that
+   age and the elapsed seconds say how long it has been stuck. *)
+let local_read_display_bar_ns = 1_000_000_000L
+
+let local_source_slow_pending state source =
+  if Local_read_order.in_flight (local_source_order state source) then
+    match local_source_observation state source with
+    | Some observation ->
+        let requested = (Local_read_observation.facts observation).requested_ns in
+        let age = Int64.sub (Mtime_clock.elapsed_ns ()) requested in
+        if Int64.compare age local_read_display_bar_ns >= 0 then
+          Some (Local_read_observation.pending observation, age)
+        else None
+    | None -> None
+  else None
+
 let local_source_cancellation (state : state) = function
   | Local_keepers -> state.local_keeper_read_cancel
   | Local_work -> state.local_work_read_cancel

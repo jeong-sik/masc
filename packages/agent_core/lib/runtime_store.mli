@@ -1,7 +1,7 @@
 (** File-based session store for the AGENT_CORE runtime.
 
     Provides path construction, text I/O, and serialization for
-    sessions, events, artifacts, reports, and proofs.
+    sessions, artifacts, reports, and proofs.
 
     @stability Internal
     @since 0.93.1 *)
@@ -30,18 +30,6 @@ type run_listing =
   ; failures : run_load_failure list
   }
 
-(** Runtime replay window selector.
-
-    [Last_n_runs n] selects the newest [n] valid runs by the stable ordering,
-    then returns them in chronological order. [Rolling_seconds s] uses the
-    newest valid run's [updated_at] as the anchor and selects runs with
-    [updated_at >= anchor - s]. This makes replay deterministic and avoids
-    wall-clock-dependent tests. *)
-type run_window =
-  | Last_n_runs of int
-  | Session of string
-  | Rolling_seconds of float
-
 (** {1 Store creation} *)
 
 val create : ?root:string -> unit -> (t, Error.t) result
@@ -52,7 +40,6 @@ val ensure_tree : t -> string -> (unit, Error.t) result
 
 val session_dir : t -> string -> string
 val session_path : t -> string -> string
-val events_path : t -> string -> string
 val artifacts_dir : t -> string -> string
 val raw_traces_dir : t -> string -> string
 
@@ -66,15 +53,3 @@ val load_text : string -> (string, Error.t) result
 val save_session : t -> Runtime.session -> (unit, Error.t) result
 val load_session : t -> string -> (Runtime.session, Error.t) result
 val list_runs : t -> (run_listing, Error.t) result
-val select_run_windows : t -> run_window list -> (run_listing, Error.t) result
-
-(** {1 Event I/O} *)
-
-val append_event : t -> string -> Runtime.event -> (unit, Error.t) result
-
-val read_events
-  :  t
-  -> string
-  -> ?after_seq:int
-  -> unit
-  -> (Runtime.event list, Error.t) result

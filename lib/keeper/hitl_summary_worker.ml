@@ -65,6 +65,9 @@ let execute_prepared_flow_with_queue_ops_current
            ~reason:"HITL CLI-only lane could not bind a runtime"
            ~cause:Exact_flow_execution_failed);
       Executed
+    | Http_held { slot_id; until } ->
+      settle_held_slot ~queue_ops prepared ~slot_id ~until;
+      Executed
     | Http_attempt (attempt, resolved) ->
     let flow =
       Exact_lane_slot_capture.flow attempt (fun () ->
@@ -625,7 +628,7 @@ module For_testing = struct
 
   let flow_evidence prepared =
     match prepared.transport with
-    | Cli_only -> None
+    | Cli_only | Http_held _ -> None
     | Http_attempt (attempt, _) -> Some (Exact_output.flow_attempt_evidence attempt)
   let system_prompt = system_prompt
   let lane_id = lane_id

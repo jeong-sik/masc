@@ -1,18 +1,8 @@
 # Resolve stored-state deployment refusals
 
-`scripts/install-local-build.sh` checks `runtime.toml` and replaces binaries.
-It does not scan stored history. Use the candidate build's
-`deployment_preflight_helper.exe validate-stores` explicitly when inspecting a
-storage-format change or investigating a runtime refusal. The full deployment
-gate, including the container entrypoint, still runs this scan before startup.
-Installing binaries does not prove that saved state is compatible; startup and
-the stores' runtime readers keep their own refusal policies.
-Normal startup reads only its boot-policy stores. `Preflight_only` stores are
-first read by their runtime consumers, so local installation and startup do not
-audit them. For a storage-format change, follow its **Fresh state required**
-entry and run the full check explicitly before restarting.
-
-`rows` is the number examined by a store;
+`install-local-build.sh` checks stored state with the candidate build's
+`deployment_preflight_helper.exe validate-stores`. It changes no installed
+binary when this check fails. `rows` is the number examined by a store;
 `refused` is the number that its current reader rejected. The final error sums
 refusals across stores, not just the last lines printed. A store with
 `refused=0` needs nothing because another store failed.
@@ -23,7 +13,7 @@ between those lines. Original-request body decoding is reused within one scope
 scan only after freshly read bytes exactly match a previously verified body;
 records, scope listings and body bytes are still read on every request. Changed,
 missing or unreadable bodies receive the current decoder's refusal. This reuse
-does not persist between scope scans or helper invocations.
+does not persist between scope scans or installations.
 
 The helper reads one store after another in its own process. `--jobs N` reads
 up to N stores at once, each in its own process. A store's `scan_started` line
@@ -35,10 +25,9 @@ store order, after the reports of the stores before it, whatever N is.
 `on refusal` describes what the running server does with such a row.
 
 The `memory OS current snapshot` scan also reports `pending recovery` for a
-readable publication receipt. That receipt is current state, not a decode
-refusal. The full scan reports failure while recovery is pending; the running
-owner finishes the publication. Local binary replacement does not wait for
-this audit.
+readable publication receipt. That receipt is current state, not a refusal: the
+running owner finishes the publication, and installation waits until a later
+scan passes.
 
 ## Fresh state
 
@@ -54,7 +43,7 @@ no longer read and what to delete in its **Fresh state required** entry in
 4. Install and start the server.
 
 Run the helper from the build being installed, against the workspace the
-installer resolves:
+installer prints:
 
 ```sh
 _build/default/bin/deployment_preflight_helper.exe validate-stores \

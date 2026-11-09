@@ -61,9 +61,8 @@ def addon_calls(prefix):
 # Stands in for the new build's deployment preflight helper and records every
 # call in helper-calls beside it. install-local-build asks it which workspace
 # masc would use; the gate asks for its identity and filenames, then for the
-# runtime.toml verdict. A stored-state verdict is available to detect an
-# unwanted audit during binary replacement. [unnamed_workspace] is what
-# resolve-workspace answers
+# runtime.toml verdict, and install-local-build then asks for the stored-state
+# verdict. [unnamed_workspace] is what resolve-workspace answers
 # without --base-path: a (root, source) pair, a raw answer body for malformed
 # answers, or None for no workspace. An [old] helper predates the check and
 # knows neither subcommand.
@@ -520,9 +519,11 @@ class LocalBuildInstall(unittest.TestCase):
             self.assertFalse(prefix.exists(), "a build that refused the live runtime.toml was installed")
             self.assertFalse(any(call.startswith("validate-stores") for call in helper_calls(build)))
 
-    # Replacing binaries must not depend on a full audit of growing runtime
-    # history. The separate deployment gate still owns that audit.
-    def test_stored_state_does_not_block_binary_replacement(self):
+    # #43483: a store this build cannot decode stops the install the way the
+    # deploy preflight stops a deploy. #42020 changed the Memory admission
+    # queue file; the install went ahead and five Keepers could not write
+    # explicit Memory for a week.
+    def test_unreadable_stored_state_installs_nothing(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary).resolve()
             build = root / "build"
@@ -530,23 +531,38 @@ class LocalBuildInstall(unittest.TestCase):
             binaries(build)
             preflight_helper(build, stores_exit=124)
             prefix = root / "prefix"
-            prefix.mkdir()
-            executable(prefix / "masc", "old masc")
             base = workspace(root)
-            state = base / ".masc" / "keepers" / "fixture.json"
-            state.parent.mkdir(parents=True)
-            state.write_text("unreadable stored state\n")
-            previous_state = state.read_bytes()
+            result = subprocess.run(["bash", str(SCRIPT), "--skip-build", "--build-dir", str(build),
+                                     "--prefix", str(prefix),
+                                     "--base-path", str(base)],
+                                    capture_output=True, text=True)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("stored state fixture verdict", result.stdout)
+            self.assertIn("nothing installed", result.stderr)
+            self.assertIn("Fresh state required", result.stderr)
+            self.assertIn(f"validate-stores --base-path {base}", helper_calls(build))
+            self.assertFalse(prefix.exists(), "a build that cannot read the stored state was installed")
+
+    # The stored state is read after runtime.toml passes and before anything
+    # is replaced; a readable state lets the install go ahead.
+    def test_readable_stored_state_is_checked_and_installed(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            build = root / "build"
+            build.mkdir()
+            binaries(build)
+            preflight_helper(build)
+            prefix = root / "prefix"
+            base = workspace(root)
             result = subprocess.run(["bash", str(SCRIPT), "--skip-build", "--build-dir", str(build),
                                      "--prefix", str(prefix),
                                      "--base-path", str(base)],
                                     check=True, capture_output=True, text=True)
+            self.assertIn(f"checking stored state of {base}", result.stdout)
             calls = helper_calls(build)
-            self.assertIn(f"validate-runtime-config --base-path {base}", calls)
-            self.assertFalse(any(call.startswith("validate-stores") for call in calls))
-            self.assertEqual((prefix / "masc").read_bytes(), (build / "main_eio.exe").read_bytes())
-            self.assertTrue((prefix / "masc-tui").is_file())
-            self.assertEqual(state.read_bytes(), previous_state)
+            self.assertLess(calls.index(f"validate-runtime-config --base-path {base}"),
+                            calls.index(f"validate-stores --base-path {base}"))
+            self.assertTrue((prefix / "masc").is_file())
 
     # Without --base-path the check runs on the workspace masc itself would use,
     # as the helper resolves it, and the install goes ahead once it passes.

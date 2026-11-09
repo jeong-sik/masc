@@ -679,6 +679,27 @@ let render_harness_list (state : state) =
   let col_hdr, verdict_row = judgement_list_columns state ~cols
       ~status_header:(ui_text state ~ko:"판정" ~en:"Verdict")
       ~statuses:(List.map verdict_status verdicts) in
+  (* This is the newest record in the returned page, not evidence that the
+     judge is running or has stopped. A retained page keeps its qualification
+     while a new read is outstanding or failed. *)
+  let latest_label =
+    match state.harness with
+    | Some _ when state.harness_inflight || Option.is_some state.harness_error ->
+        ui_text state ~ko:"이전 판정" ~en:"Prior verdict"
+    | Some _ | None -> ui_text state ~ko:"최근 판정" ~en:"Latest verdict"
+  in
+  let latest_record =
+    match verdicts, state.harness with
+    (* The producer also emits zero for an absent/unreadable timestamp. The
+       current wire cannot distinguish that from the Unix epoch. *)
+    | newest :: _, _ when Float.equal newest.hv_at 0.0 ->
+        ui_text state ~ko:"시각 미관측" ~en:"time not observed"
+    | newest :: _, _ -> Masc_domain.iso8601_of_unix_seconds newest.hv_at
+    | [], None -> ui_text state ~ko:"미관측" ~en:"not observed"
+    | [], Some _ -> ui_text state ~ko:"이 페이지에 판정 없음" ~en:"none on this page"
+  in
+  box_line_styled buf cols ~style:(Theme.recede ())
+    (Printf.sprintf "  %s: %s" latest_label latest_record);
   box_line_styled buf cols ~style:(Theme.recede ()) col_hdr;
   box_divider buf cols;
   (match state.harness_error with
@@ -694,14 +715,14 @@ let render_harness_list (state : state) =
        ~hints:(Masc_tui_keys.footer_hints ~detail_open:false ~has_rows:(shown > 0)
          state.view));
   (* Drawing and cursor/page movement consume the same state-owned bound.
-     The list has the standard five-row head and two-row tail; aggregate
-     ledger rows are part of the selected detail document instead. *)
+     The timestamp makes six head rows and two tail rows; aggregate ledger
+     rows are part of the selected detail document instead. *)
   let content_height =
     match scrolled_surface state ~cols Harness with
     | Some layout -> Masc_tui_scroll.content_height ~rows ~chrome:layout.sc_chrome
         ~count:layout.sc_count ~preview_keep:layout.sc_preview_keep
         ~overflow_takes_row:layout.sc_overflow_takes_row
-    | None -> max 1 (rows - listing_chrome ~error:state.harness_error) in
+    | None -> max 1 (rows - harness_listing_chrome ~error:state.harness_error) in
   let scroll = Masc_tui_scroll.ensure_visible ~cursor:state.harness_cursor
       ~height:content_height state.harness_scroll
     |> Masc_tui_scroll.normalize ~count:shown ~height:content_height in

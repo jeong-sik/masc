@@ -199,12 +199,17 @@ Verdicts lead each row with the original Task title
 and its actual review/result label. Long identifiers, evidence counts and
 evaluator metadata stay in the complete reading. Workspace-wide calibration
 moves to the verdict detail, retaining the original denominator and unknown
-ground-truth labels. The verdict's recorded timestamp remains there; age alone
-no longer implies a running judge or a recording failure. The repeating wall
+ground-truth labels. The verdict's recorded timestamp remains there, and the
+list names its newest returned record in UTC without opening a verdict. Empty
+pages and an unobserved snapshot differ, and a retained reading stays qualified
+during refresh or failure. The producer's ambiguous zero timestamp is shown as
+unobserved time, preserving its current identity. Age alone no longer implies a running judge or a
+recording failure. The repeating wall
 clock and the fixed linear completion explanation are removed.
 
 Harness rendering and navigation use the same state-owned list bound, including
-the overflow row. Its list no longer has uncounted aggregate/intro rows. Page
+the overflow row and the timestamp row. Its list no longer has uncounted
+aggregate/intro rows. Page
 movement on both lists uses that actual content height. Each renderer also
 brings the selected original row into the new viewport after resize. These
 changes preserve request IDs, evidence keys, verdict/notes identity, ordering

@@ -43,7 +43,7 @@ module Keeper_chat_transcript = Masc_tui_keeper_chat_transcript
 module Keeper_control = Masc_tui_keeper_control
 
 (* One header row, and only for a read that has been running past the display
-   bar in [Masc_tui_types.local_read_display_bar_ns]. A read inside the bar
+   bar in [Masc_tui_types.pending_display_bar_ns]. A read inside the bar
    draws nothing: it is expected to settle before a person could read about
    it, and the row appearing and disappearing on every poll is what made the
    Keeper list jump. The stage words live on here because at this age they

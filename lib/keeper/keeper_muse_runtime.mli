@@ -105,15 +105,17 @@ val run :
   event_bus:Agent_core.Event_bus.t option ->
   raw_trace:Agent_core.Raw_trace.t option ->
   on_event:(Agent_core.Types.sse_event -> unit) option ->
+  account:Runtime_account_access.declared Runtime_account_access.muse_authorized ->
   config:Runtime_muse_serve.config ->
   unit ->
   attempt_outcome
 (** Inference values and [quota_scope] come from the selected runtime snapshot;
     this adapter does not re-resolve its id after hooks or effects.
     [workspace_root] is an explicitly selected absolute native directory.
-    The caller owns selecting the Keeper's workspace and account home.
-    The adapter prepares a managed profile and credential generation before
-    the claim; an absent account home is refused. [native_workspace_context]
+    The caller owns selecting the Keeper's workspace and authorizing its
+    account: [account] is the declared home the access allowed for this
+    attempt. The adapter prepares a managed profile and credential generation
+    before the claim. [native_workspace_context]
     describes the selected host/guest coordinate to the model and is appended
     after instruction hooks, so a system prompt override cannot erase it. This adapter selects no host or guest path implicitly.
 

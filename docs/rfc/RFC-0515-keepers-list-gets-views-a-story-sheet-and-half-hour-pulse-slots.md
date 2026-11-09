@@ -15,7 +15,7 @@ related: ["0511", "0503", "0481", "0418"]
 - Status: **Draft.** 운영자가 2026-11-09 에 착수를 지시했다("1,2,3 전체 진행해줘"). §7 의 기본값은 이 RFC 를 병합하면서 받아들인다.
 - 2026-11-09 정정: 리뷰와 시안 대조에서 나온 것을 고쳤다. §2.1 의 `known_since` 규칙을 구현(#50190)과 맞추고, 키 사실(§1.3), 기본 보기(E8), 시안과 다르게 정한 것(§2.7)과 층(§3)을 더했다.
 - 2026-11-09 두 번째 정정: 운영자가 V1 을 깔고 시안과 견줬다. 시안의 보기별 칸(기억별 · 나이별 · 앞 12시간 일정 띠)과 머리 띠가 어느 층에도 없었다. §2.4 를 보기가 칸 값을 고르는 줄로 고치고 §2.8, 층 V6 · V8, 앞 12시간 띠, E16–E19 를 더했다.
-- 2026-11-09 세 번째 정정: 운영자가 V6 설치본을 보고 시안과 너무 다르다고 했다. 시안을 headless 로 그려 같은 폭 캡처와 견줬다. 줄의 뼈대가 달랐다. 열 배치, `┃` 지금 선, 30분 맥박 칸 수, ▹ 의 띠 · due · lag 열, 묶음 접기, 나이 사다리 칸 수다. §2.4 를 시안 `layout(cols)` 그대로 다시 썼다. E2 · E16 · E17 을 바꾸고 E21–E25 를 더했다. 층 G1–G4 · A1 · A2 를 더했다. 앞 12시간 띠는 G3 이 올린다. 운영자는 나이 사다리를 서버 24칸으로 고르고(E17), 시안 그대로 다시 올리기를 골랐다.
+- 2026-11-09 세 번째 정정: 운영자가 V6 설치본을 보고 시안과 너무 다르다고 했다. 시안을 headless 로 그려 같은 폭 캡처와 견줬다. 줄의 뼈대가 달랐다. 열 배치, `┃` 지금 선, 30분 맥박 칸 수, ▹ 의 띠 · due · lag 열, 묶음 접기, 나이 사다리 칸 수다. §2.4 를 시안 `layout(cols)` 그대로 다시 썼다. E2 · E16 · E17 을 바꾸고 E23–E27 을 더했다. 층 G1–G4 · A1 을 더했다. 앞 12시간 띠는 G3 이 올린다. 운영자는 나이 사다리를 서버 24칸으로 고르고(E17), 시안 그대로 다시 올리기를 골랐다.
 - 시안: `docs/research/2026-11-06-keepers-list-past-now-next-preview.html` (Artifact `Keeper Pulse` 3판).
 - 앞 RFC: RFC-0511 §4 가 보기 6개 · Story 창 · `s` `m` `w` 키를 "값이 main 에 오른 뒤 별도 RFC" 로 미뤘다. 이 RFC 가 그 별도 RFC 다.
 
@@ -96,7 +96,7 @@ type pulse = { known_since : float; slots : slot list }   (* 새 칸이 앞 *)
   - 기록할 때 `가장 새 칸 − 24시간` 보다 앞이면 그 시각으로 올라간다. 그 밖에는 바뀌지 않는다.
 - 아는 틈: 쉼 턴은 결정 로그에 실패로 적히고, 결정 행 없이 끝나는 실패가 있다. 그래서 재시작 뒤 일부 칸의 결과가 바뀐다(#50211). 부팅 때 Keeper 시작이 시드보다 앞이라, 첫 턴이 시드보다 먼저 기록되면 시드를 건너뛰고 지난 하루를 잃는다. 기본 warmup 60초에서는 시드가 대개 먼저 끝난다(#50258).
 - 행 JSON `recent_turns` 는 `{known_since, slots: [[starts_at, ok, rested, failed], ...]}` 이다. 옛 `{truncated, turns}` 는 hard cut 이고 읽지 않는다.
-- TUI 는 행에 30분 칸을 `pulseW` 개(§2.4.1, 최대 24) 그린다. 칸의 결과는 failed > rested > ok 순으로 가장 나쁜 것이다. 턴이 없는 칸은 칸 시작이 `known_since` 보다 앞이면 `?`, 아니면 `·` 다(E2).
+- 한 축 줄 보기는 행에 30분 칸을 `pulseW` 개(§2.4.1, 최대 24) 그린다. 칸 글리프는 §2.4.3 이다. 목록 보기는 지금처럼 벽시계 정시 1시간 칸 12개를 그린다(E2).
 
 ### 2.2 Detailed 둘째 줄은 첫 줄 문장을 다시 쓰지 않는다
 
@@ -116,7 +116,7 @@ type pulse = { known_since : float; slots : slot list }   (* 새 칸이 앞 *)
 | --- | --- | --- |
 | 목록 | — | 묶지 않는다 |
 | 상태별 | 누가 무엇을 기다리나 | `Keeper_list_model.attention`(지금의 `grouped`) |
-| 원인별 | 왜 실패하나 | `Masc_tui_keeper_trail.cause_group`, 실패 없음 |
+| 원인별 | 왜 실패하나 | `cause_bucket`: 실패 원인(`Masc_tui_keeper_trail.cause_group`) · 원인 모름 · 회복 · 실패 없음 · 멈춤(§2.4.2 판정). 멈춤이 먼저다 |
 | 시간별 | 언제 일하나 | `Masc_tui_keeper_next_run.t` 를 늦음 · 1시간 안 · 12시간 안 · 그 뒤 · 보류 · 일정 없음 · 모름 으로 |
 | 기억별 | 기억이 따라오나 | `Masc_tui_keeper_memory_reading` 의 gap 있음 · 밀림(lag > 0) · 따라옴 · 거부 · 모름 |
 | 나이별 | 기억이 식어 가나 | 스냅샷 `updated_at` 나이 3시간 · 24시간 · 3일 · 그 뒤 · 모름 |
@@ -132,7 +132,7 @@ type pulse = { known_since : float; slots : slot list }   (* 새 칸이 앞 *)
 
 ### 2.4 한 축 줄은 시안의 격자를 그대로 쓴다
 
-목록 외의 다섯 보기(상태별 · 원인별 · 시간별 · 기억별 · 나이별)는 Keeper 한 줄을 시안의 격자로 그린다. 격자는 시안 `layout(cols)` 를 그대로 옮긴다(E21). 열은 오른쪽 끝부터 고정하고, 남는 폭은 이름이 갖는다. 보기는 열마다 무엇을 넣을지만 고른다(E16).
+목록 외의 보기는 Keeper 한 줄을 시안의 격자로 그린다. 격자는 시안 `layout(cols)` 를 그대로 옮긴다(E23). 열은 오른쪽 끝부터 고정하고, 남는 폭은 이름이 갖는다. 보기는 열마다 무엇을 넣을지만 고른다(E16). 시안과 다르게 정한 것은 §2.7 에 모았다.
 
 ```
 ▌ ● 이름 ……………  ◂ 맥박 ┃ ● 지금 ┃ ▹ 띠  due  lag
@@ -144,7 +144,7 @@ type pulse = { known_since : float; slots : slot list }   (* 새 칸이 앞 *)
 - 계산은 시안과 같다.
   - `memW` 는 `cols ≥ 96` 이면 7, 아니면 0 이다. `timeW` 는 5, `bandW` 는 12 다.
   - `nameMin` 은 `cols ≥ 96` 이면 22, 아니면 18 이다.
-  - `side = min 24 ((cols − 30 − extra − nameMin) / 2)` 다. `extra` 는 `memW` 가 있으면 8, 없으면 0 이다. 나눗셈은 내림이고, 음수면 0 이다. `pulseW = futW = side` 다.
+  - `side = min 24 ((cols − 30 − extra − nameMin) / 2)` 다. `extra` 는 `memW` 가 있으면 8, 없으면 0 이다. 나눗셈은 내림이다. `pulseW = futW = side` 다.
   - 오른쪽부터 차례로 정한다.
     - `memX = cols − memW`
     - `timeX` 는 `memW` 가 있으면 `memX − 1 − 5`, 없으면 `cols − 5`
@@ -152,6 +152,7 @@ type pulse = { known_since : float; slots : slot list }   (* 새 칸이 앞 *)
     - `ph2 = slotX − 2`, `nowX = ph2 − 1 − 12`, `ph1 = nowX − 2`
     - `pulseX = ph1 − 1 − pulseW`
   - 이름은 4열에서 시작해 `pulseX − 1` 앞까지다. 0열은 `▌`, 2열은 상태 표지다.
+- 시안에 없는 좁은 폭의 규칙이다. `side` 가 0 이하면 맥박 · 띠 열을 그리지 않는다. 이름 폭이 1 보다 작으면 이름을 그리지 않는다. 목록 폭이 48 보다 좁을 때만 생긴다.
 - 폭별 값:
 
 | 목록 폭 | 이름 | ◂ 맥박 | ┃ ● ┃ | ▹ 띠 | due | 오른쪽 열 |
@@ -160,73 +161,119 @@ type pulse = { known_since : float; slots : slot list }   (* 새 칸이 앞 *)
 | 120 | 34 | 24 | 12 | 1 + 24 | 5 | 7 |
 | 80 | 18 | 16 | 12 | 1 + 16 | 5 | 없음 |
 
-- `ph1` · `ph2` 에 `┃` 를 긋고 그 사이를 띠 배경으로 칠한다. 이 선이 지금이다. 열 머리 · 제목 줄 · Keeper 줄 · 목록의 빈 줄에 모두 긋는다.
+- `ph1` · `ph2` 에 `┃` 를 긋고 그 사이를 띠 배경으로 칠한다. 이 선이 지금이다. 띠 배경은 제목 줄 · Keeper 줄 · 목록의 빈 줄 · 머리 띠 둘째 줄에 칠한다. 열 머리 줄에는 `┃` 만 긋는다.
 - 이름이 열보다 길면 끝을 `…` 로 자른다.
 - 고른 줄은 줄 전체를 고른 배경으로 칠한다.
-- 열 머리 줄은 같은 열에 이름을 쓴다. 예: `keeper  ◂ 12h  30m ┃ ● now ┃ next ▹ 12h  due  lag`. 시간 길이는 `pulseW` · `futW` 에서 구한다(30분 × 칸 수).
+- 값이 없는 칸은 비운다. 따로 정한 곳만 `—` 이나 낱말을 쓴다.
 
-#### 2.4.2 보기별 열 값
+#### 2.4.2 판정
+
+열 값이 쓰는 판정은 아래 닫힌 값에서만 온다.
+
+| 판정 | 닫힌 값 |
+| --- | --- |
+| 실패 Keeper | `Masc_tui_keeper_pulse.failing_of_health` 가 `Failing_since _` 또는 `Failing_unrecorded` |
+| 쉬는 중 | `kr_runtime_path_rest` 가 `Ok (Some (Path_rest_resting _))` |
+| 멈춤 | `kr_paused` |
+| 실패 칸 | 맥박 30분 칸의 `failed + rested > 0`. 쉼 턴은 결정 로그에 실패로 적힌다(§2.1) |
+| 회복 | 실패 Keeper 도 멈춤도 아니고, 맥박의 마지막 24칸(12시간)에 실패 칸이 있다 |
+| 정상 | 실패 Keeper 도 멈춤도 아니고, health 가 `Health_running` 또는 `Health_idle` |
+
+- "쉬는 중" 은 runtime 경로가 쉬는 것이다. 맥박의 rested(쉼 턴)와 다른 말이다.
+
+#### 2.4.3 보기별 열 값
 
 | 열 | 상태별 · 원인별 · 시간별 | 기억별 | 나이별 |
 | --- | --- | --- | --- |
-| `▌` 색 | 실패면 경고(쉬는 중이면 흐림), 멈춤이면 흐림, 정상이면 정상(12시간 안에 실패가 있었으면 흐린 정상) | 같음 | 같음 |
-| 표지(2열) | `!` 실패 · `○` 멈춤 · `●` 그 밖. 원인별만 12시간 안에 실패했다 회복한 Keeper 에 `✓` | 같음 | 같음 |
-| ◂ 맥박(`pulseW`) | 30분 맥박(§2.1, E2). 오른쪽이 지금 칸 | 같은 맥박 | 사실 나이 사다리(§2.4.4) |
-| ● 지금(12) | 지금 표지와 낱말. 사람 몫 표지도 여기 쓴다(E25) | Librarian 패스 끝 낱말 | `+ <마지막 갱신 나이>` |
-| ▹ 띠(1 + `futW`) | 앞 12시간 깰 시각(§2.4.3) | lag 막대 | lag 막대 |
-| due(5) | 가장 이른 깰 시각 `HH:MM`, 늦었으면 `late` | 마지막 digest 나이 | stale 수 `×N` |
-| 오른쪽(7) | lag 수와 단계 글리프 | gap 수(`1.2k` 꼴) | facts 수와 단계 글리프 |
+| `▌` 색 | 실패 Keeper 는 경고, 쉬는 중이면 흐림. 회복은 흐린 정상. 정상은 정상. 그 밖(멈춤 · `Health_offline`)은 흐림 | 같음 | 같음 |
+| 표지(2열) | `!` 실패 Keeper · `○` 멈춤 · `●` 그 밖. 원인별만 회복에 `✓` | 같음 | 같음 |
+| ◂ 맥박(`pulseW`) | 30분 맥박. 오른쪽이 지금 칸 | 같은 맥박 | 사실 나이 사다리(§2.4.5) |
+| ● 지금(12) | 지금 표지와 낱말. 사람 몫 표지도 여기 쓴다(E27) | Librarian 패스 끝 낱말 | `+ <마지막 갱신 나이>`, 스냅숏이 없으면 `— no snapshot` |
+| ▹ 띠(1 + `futW`) | 앞 12시간 깰 시각(§2.4.4) | lag 막대 | lag 막대 |
+| due(5) | 가장 이른 깰 시각 `HH:MM`, 늦었으면 `late` | 마지막 digest 나이, 없으면 `—` | stale 수 `×N`, 0 이면 비움 |
+| 오른쪽(7) | lag 수와 단계 글리프 | gap 수(`1.2k` 꼴), 0 이면 비움 | facts 수와 단계 글리프 |
 
-- 맥박 칸은 30분 칸 하나다. 칸의 가장 나쁜 결과를 그린다. 턴이 없으면 `·`, ok 는 `▁`, rested 는 `▄`, failed 는 `█` 다. 칸 시작이 `known_since` 보다 앞이면 `?` 다.
-- 단계 글리프는 `▁▂▃▄▅▆▇█` 여덟 단계다. 값을 최댓값으로 나눈 비율로 고른다(시안 `levelChar`). 최댓값은 지금 목록에 보이는 Keeper 의 최댓값이다.
-- lag 막대는 바탕이 `·` 다. lag 이 0 보다 크면 앞에서부터 `█` 를 `round(lag ÷ 최대 lag × 폭)` 개 그린다. 적어도 1개다. 최대 lag 은 목록에 보이는 Keeper 중 가장 큰 값이다(V6 의 `peak_lag`). lag 을 모르면 띠 첫 칸에 `?` 를 쓴다.
-- Librarian 패스 끝 낱말은 `mkh_librarian.mlh_state` 에서 온다(V6). 기억 스냅숏이 없으면 `no data` 다.
+- 맥박 칸은 30분 칸 하나다. 시안 범례와 같다.
+  - 턴이 없으면 `·` 다. 턴이 없고 칸 시작이 `known_since` 보다 앞이면 `?` 다.
+  - 실패 칸이 아니면 `▁` 다.
+  - 실패 칸이고 ok 가 0 이면 `█`, ok 도 1 이상이면 `▄` 다(같은 30분 안에 실패한 뒤 성공).
+- 단계 글리프는 `▁▂▃▄▅▆▇█` 여덟 단계다. 값 ÷ 분모의 비율로 고른다(시안 `levelChar`). 분모는 쓰는 곳마다 다르다.
+
+| 쓰는 곳 | 분모 |
+| --- | --- |
+| Keeper 줄 오른쪽 열의 lag · facts | roster 의 모든 Keeper 중 가장 큰 값 |
+| Keeper 줄의 lag 막대 | 같음(가장 큰 lag) |
+| 나이 사다리(Keeper · 묶음 · 월드 줄) | 그 줄의 가장 큰 칸 |
+| 묶음 제목 줄의 맥박 합 | 그 묶음의 Keeper 수 |
+| 묶음 제목 줄의 띠 합, 머리 띠 둘째 줄 | 그 줄의 가장 큰 칸 |
+
+- lag 막대는 바탕이 `·` 다. lag 이 0 보다 크면 앞에서부터 `█` 를 `round(lag ÷ 분모 × 폭)` 개 그린다. 적어도 1개다. lag 을 모르면 띠 첫 칸에 `?` 를 쓴다.
+- Librarian 패스 끝 낱말은 `mkh_librarian.mlh_state` 에서 온다(V6). 기억 스냅숏이 없으면 `no data`, librarian 이 없으면 `no librarian` 이다.
 - 지금 낱말은 `Keeper_list_model.primary_activity_of_row` 의 낱말 하나다. 도는 턴은 기존 running 표지(`◐◓◑◒`, 150ms 걸음)를 그대로 쓴다. 새 움직임은 만들지 않는다.
 - Mode · S · AGE · LIFECYCLE 은 Story 창으로 옮긴다.
+- runtime 보기는 V5 전까지 상태별과 같은 열 값을 쓴다.
 
-#### 2.4.3 앞 12시간 깰 시각 띠
+#### 2.4.4 앞 12시간 깰 시각 띠
 
-- 띠는 지금 칸 하나와 그 뒤 30분 칸 `futW` 개다. 지금 칸은 지금이 든 30분 칸의 남은 시간이다. 칸 경계는 맥박과 같은 1800초 경계다.
-- 칸에 깰 시각이 하나라도 있으면 `◷`, 없으면 `·` 다. 묶음 제목 줄과 머리 띠는 개수를 단계 글리프로 그린다.
-- 깰 시각은 일정의 반복(`Schedule_domain.recurrence`)을 펼쳐 구한다(E19).
+- 띠는 지금 칸 하나와 그 뒤 30분 칸 `futW` 개다. 지금 칸은 지금이 든 30분 칸이다. 칸 경계는 맥박과 같은 1800초 경계다.
+- Keeper 줄은 칸에 아는 깰 시각이 하나라도 있으면 `◷`, 모르는 칸이면 `?`, 그 밖은 `·` 다.
+- 깰 시각은 일정의 반복(`Schedule_domain.recurrence`)을 펼쳐 구한다(E19). 시안은 일정마다 다음 시각 하나만 찍는다(§2.7).
   - 첫 시각은 행의 다음 due 다. `Interval` 은 그 뒤로 주기를 더하고, `Daily` · `Cron` 은 `Schedule_domain.first_due_after` 를 되풀이한다. `One_shot` 은 첫 시각 하나다.
-  - 만료 시각 뒤와 지금 앞의 시각은 세지 않는다.
-  - 늦은 일정은 띠에 넣지 않는다. due 열이 `late` 로 말한다. 보류된 일정도 띠에 넣지 않는다.
-  - 반복을 디코드하지 못한 일정은 첫 시각만 세고, 그 뒤 칸은 `?` 다. 일정 읽기가 실패했으면 띠 전체가 `?` 다.
-  - 잘린 일정 쪽(`scs_truncated`)은 받은 쪽의 마지막 due 뒤 칸을 `?` 로 둔다. 서버 agenda 가 due 순인지 G3 에서 확인한다. due 순이 아니면 잘린 쪽의 띠는 전체가 `?` 다.
+  - 만료 시각 뒤의 시각은 세지 않는다.
+  - 지났지만 아직 늦음으로 판정되지 않은 시각은 지금 칸에 센다. §2.3 의 시간별 규칙과 같다.
+  - 늦은 일정(`Late_since`)은 띠에 넣지 않는다. due 열이 `late` 로 말한다. 보류된 일정도 띠에 넣지 않는다.
+  - 반복을 디코드하지 못한 일정은 첫 시각만 세고, 그 뒤 칸은 모름이다. 일정 읽기가 실패했으면 모든 칸이 모름이다.
+  - 잘린 일정 쪽(`scs_truncated`)은 받은 쪽의 마지막 due 뒤 칸을 모름으로 둔다. 서버 agenda 가 due 순인지 G3 에서 확인한다. due 순이 아니면 잘린 쪽의 모든 칸이 모름이다.
+- 묶음 제목 줄과 머리 띠 둘째 줄은 펼친 깰 시각 수를 단계 글리프로 그린다. 합이 0 이고 모르는 칸이 하나라도 있으면 `?` 다. 합이 1 이상이면 아는 수만 센 단계 글리프다.
 - TUI 는 반복을 닫힌 값으로 든다. `sch_recurrence` 는 `Schedule_domain.recurrence_of_yojson` 으로 디코드한 결과다. 디코드하지 못하면 행은 남기고 `Error` 로만 든다. 수정 폼은 `Error` 반복이면 편집기를 열지 않는다.
 
-#### 2.4.4 사실 나이 사다리
+#### 2.4.5 사실 나이 사다리
 
 - 서버가 Keeper 마다 사실의 `first_seen` 을 24칸 로그 사다리로 센다(E17).
-  - 칸 0 은 1시간 안이다. 칸 1–23 은 1시간에서 30일까지 로그 간격이다.
-  - 칸 번호는 `age < 1h` 면 0, 아니면 `min 23 (floor (ln (age ÷ 1h) ÷ r) + 1)` 이다. `r = ln 720 ÷ 22` 다. 30일 넘는 사실은 칸 23 이다.
+  - 칸 번호는 `age < 1h` 면 0, 아니면 `min 23 (floor (ln (age ÷ 1h) ÷ r) + 1)` 이다. `r = ln 720 ÷ 22` 다(시안 `ladderBins`, n = 24).
+  - 그래서 칸 0 은 1시간 안, 칸 1–22 는 1시간 이상 30일 미만의 로그 간격, 칸 23 은 30일 이상이다.
   - 미래 시각은 나이 0 이다.
-- 행 JSON `age_bins` 는 길이 24 의 정수 배열이다. i 번째가 칸 i 이고, 새 칸이 앞이다. 옛 `{under_hour, under_day, under_week, older}` 는 hard cut 이고 읽지 않는다. Memory 화면도 같은 값을 쓴다.
+- 행 JSON `age_bins` 는 길이 24 의 정수 배열이다. i 번째가 칸 i 이고, 새 칸이 앞이다. 합은 facts 수와 같다. 옛 `{under_hour, under_day, under_week, older}` 는 hard cut 이고 읽지 않는다. TUI · dashboard · Memory 화면이 같은 값을 쓴다.
 - TUI 는 오래된 칸을 왼쪽에, 새 칸을 오른쪽에 그린다. 맥박과 같은 방향이다.
-  - `pulseW` 가 24 이상이면 24칸이다. 12–23 이면 이웃한 두 칸을 더해 12칸, 6–11 이면 네 칸씩 더해 6칸이다. 6 미만이면 그리지 않는다. 열의 오른쪽에 붙인다(E23).
-  - 빈 칸은 `·`, 그 밖은 그 줄 최댓값에 대한 단계 글리프다.
-  - 색은 칸의 아래 경계로 정한다. 하루 안은 강조, 7일 안은 보통, 그 뒤는 흐림이다.
-- 열 머리는 칸 경계 위에 `30d 7d 1d 6h 1h` 눈금을 쓴다(시안 `ladderTicks`). 자리가 겹치는 눈금은 뺀다.
+  - 합치는 수 `merge` 는 `pulseW ≥ 24` 면 1, 12–23 이면 2, 6–11 이면 4 다. 칸 수 `cells = 24 ÷ merge` 다. 6 미만이면 그리지 않는다(E25).
+  - 그린 칸 c(오른쪽이 0)는 서버 칸 `c × merge` 부터 `merge` 개의 합이다. 칸들은 열의 오른쪽에 붙인다. 왼쪽 `pulseW − cells` 칸은 비운다.
+  - 빈 칸은 `·`, 그 밖은 단계 글리프다.
+  - 색은 칸의 가장 새 서버 칸으로 정한다. 그 칸의 아래 경계가 하루 안이면 강조, 7일 안이면 보통, 그 뒤면 흐림이다(시안 `cellZone`).
+- 열 머리는 눈금 `1h 6h 1d 7d 30d` 를 쓴다. 눈금 나이 a 의 서버 칸은 `k = round (ln (a ÷ 1h) ÷ r) + 1` 이다. 열 안 위치는 `(pulseW − cells) + cells − 1 − floor (k ÷ merge)` 다. 새 눈금부터 놓고, 앞 눈금과 겹치는 눈금은 뺀다(시안 `ladderTicks`).
 
-#### 2.4.5 두 줄과 묶음 제목 줄
+#### 2.4.6 두 줄
 
-- 두 줄 밀도에서 둘째 줄은 실패한 Keeper 에게만 있다.
-  - 이름 열에 `◂ since <실패 시작 시각>` 을 쓴다.
-  - 맥박 열부터 그 턴의 시도 사슬 `✗━✗`(최대 넷, 넘으면 `…`)과 실패 낱말을 쓴다.
-  - 띠 열부터 다음 경로를 쓴다. 다음 후보면 `▹ <runtime id>`, 쉬는 중이면 `◌ wait <runtime id>` 다.
-- runtime id 는 이 둘째 줄에만 쓴다(E22). 줄 끝에서 `…` 로 자른다. 실패하지 않은 Keeper 의 ▹ 에는 경로를 쓰지 않는다.
+- 두 줄 밀도에서 둘째 줄은 상태별 · 원인별 보기의 실패 Keeper 에게만 있다. 시안은 원인별에만 둔다(§2.7).
+  - 이름 열에 실패 시작을 쓴다. `Failing_since t` 면 `◂ since <t>` 다. 이름 열이 좁으면 `since` 를 빼고 시각만 쓴다. `Failing_unrecorded` 면 `◂ <마지막 실패 턴 나이> ago` 이고, 그 나이도 모르면 비운다.
+  - 맥박 열부터 그 턴의 시도 사슬 `✗━✗`(최대 넷, 넘으면 `…`)과 실패 낱말을 쓴다. `ph1` 앞에서 자른다.
+  - 띠 열부터 다음 경로를 쓴다. 다음 후보면 `▹ <runtime id>`, 쉬는 중이면 `◌ wait <runtime id>` 다. 줄 끝에서 `…` 로 자른다.
+- Keeper 줄의 ▹ 에는 runtime id 를 쓰지 않는다(E24).
+
+#### 2.4.7 묶음 제목 줄과 처음 접힘
+
 - 묶음 제목 줄은 같은 격자를 쓴다.
   - 0열 `▌` 는 묶음 색이다. 2열은 펼침 `−`, 접힘 `+` 다. 4열부터 제목을 쓴다.
-  - `pulseW ≥ 20` 이고 기억별이 아니면, 맥박 열 오른쪽 12칸에 칸마다 실패한 Keeper 수를 단계 글리프로 그린다. 나이별은 묶음 사다리 합을 그린다.
-  - ● 열은 묶음의 수다. 원인별 실패 묶음은 `! 2 failing` 꼴이다.
-  - ▹ 열은 묶음 깰 시각 합의 띠다. 기억별은 `Σ lag N`, 나이별은 `Σ <facts> facts · lag N` 이다.
-- 처음 열 때 접힌 묶음은 시안을 따른다(E24).
-  - 원인별: 실패 없는 묶음 중 Keeper 가 넷보다 많은 묶음, 그리고 멈춤 묶음
+  - 기억별 · 나이별이 아니고 `pulseW ≥ 20` 이면, 맥박 열 오른쪽 12칸에 칸마다 실패 칸인 Keeper 수를 단계 글리프로 그린다. 0 이면 `·` 다. 이때 제목은 그 12칸과 한 칸 앞에서 자른다.
+  - 나이별은 `pulseW` 조건 없이 묶음 Keeper 의 사다리 합을 그린다. 제목은 이름 열에서 자른다.
+- ● 열과 ▹ 쪽은 보기마다 다르다.
+
+| 보기 · 묶음 | ● 열 | ▹ 쪽 | 오른쪽 열 |
+| --- | --- | --- | --- |
+| 원인별 실패 묶음 | `! N failing` | `▹ retry R  ◌ wait W`(쉬지 않는 수 R, 쉬는 수 W, 0 인 쪽은 뺀다) | 비움 |
+| 원인별 회복 · 실패 없음 · 멈춤 | `✓ N` · `● N` · `○ N` | 깰 시각 합의 띠 | 비움 |
+| 상태별 · 시간별 · runtime | `N` | 깰 시각 합의 띠 | 비움 |
+| 기억별 | `N` | `Σ lag L` | gap 합(`1.2k` 꼴), 0 이면 비움 |
+| 나이별 | `N`, 오래 쉰 자율 Keeper 가 K 명이면 `N · K!` | `Σ <facts> facts · lag L` | 비움 |
+
+- "오래 쉰 자율 Keeper" 는 나이별 `그 뒤`(3일 이상) 묶음에 있고, 멈춤이 아니며, Mode 가 autonomous 인 Keeper 다(시안 `oddDormant`).
+- 원인별 묶음은 실패 원인 묶음(`Cause_named` · `Cause_unnamed`) 뒤에 회복 · 실패 없음 · 멈춤을 둔다(§2.3, G4).
+- 처음 열 때 접힌 묶음은 시안을 따른다(E26).
+  - 원인별: 회복, Keeper 가 넷보다 많은 실패 없음, 멈춤
   - 시간별: 일정 없음
   - 기억별: 따라옴 · 모름
   - 나이별: 24시간 · 모름
-  - 상태별: 접지 않는다
+  - 상태별 · runtime: 접지 않는다
+- 월드 줄은 같은 격자를 쓴다(시안 `paintWorld`). W1 이 올린다.
 - 고른 Keeper 의 초상은 목록 보기의 두 줄에서만 그리고, 전신으로 그린다(E20).
 
 ### 2.5 Story 창
@@ -271,15 +318,22 @@ type pulse = { known_since : float; slots : slot list }   (* 새 칸이 앞 *)
 | 실패 Keeper 둘째 줄의 짧은 runtime 이름(`sonnet·acct-c`) | runtime id 를 줄 끝에서 자른다 | 시안의 이름은 시안 데이터에 손으로 적은 라벨이다. TUI 는 id 만 받는다. id 를 갈라 짧게 만들면 문자열 분류가 된다 |
 | 보기 여섯(cause · time · memory · age · runtime · 24h) | 여덟. 목록 · 상태별을 앞에 둔다 | E7 |
 | 나이별 머리 띠의 `stale events/day` · `changed` · `gone` | 그리지 않는다 | 무효화 시각은 약 3MB 인 `workspace-memory-context` 응답에만 있다(E18) |
+| 깰 시각 띠는 일정마다 다음 시각 하나(`futCounts`) | 반복을 펼쳐 12시간 안의 깰 시각을 모두 찍는다. 묶음 합과 머리 띠도 펼친 수를 센다 | E19. 10분 간격 일정이 띠에 `◷` 하나로 보이면 다음 12시간 동안 거의 쉬는 Keeper 와 구별되지 않는다 |
+| 둘째 줄은 원인별 실패 행에만 | 상태별 · 원인별 실패 행 | 상태별은 시안에 없는 보기이고, 실패 묶음을 둔다 |
+| 맥박 칸이 넷(없음 · ok · 실패 · 실패 뒤 ok) | 같다. rested(쉼 턴)는 실패 칸에 센다 | 시안에는 쉼 턴이 없다. 쉼 턴은 결정 로그에 실패로 적힌다(§2.1) |
+| 좁은 폭에서 나이 사다리 축을 칸 수에 맞게 다시 나눈다 | 서버 24칸을 2 · 4 칸씩 더한다 | E25 |
 
 ### 2.8 머리 띠와 묶음 제목 줄
 
 시안은 목록 위에 두 줄 띠를 둔다. V8 이 띠와 고른 Keeper 줄을 올린다. 묶음 제목 줄은 G4 가 올린다.
 
-- 띠 첫 줄은 지금 보기의 묶음마다 표지 · 수 · 수만큼의 막대를 그린다. 예: `! 2 failing ▫▫  ✓ 20 recovered ■■■■  ○ 14 paused ····`
-- 띠 둘째 줄은 열 머리와 같은 격자를 쓴다. 맥박 열에는 30분 칸마다 실패(failed · rested)한 Keeper 수를, ▹ 띠 열에는 멈추지 않은 Keeper 의 깰 시각 수를 단계 글리프로 그린다. 이름 열에 `fleet fail/30m max N`, due 열에 `max N` 을 쓴다. 띠 열 값은 G3 의 값이다.
-- 묶음 제목 줄은 §2.4.5 를 따른다. G4 가 올린다.
-- 맨 아래의 고른 Keeper 줄은 지금의 `selected ·` 줄을 세 칸 요약으로 바꾼다. 예: `ocaml-agent-ic ○ idle 77m · since 11-05 18:51 · ◷ 13:33 every 10m · lag 1`. 반복 표기(`every 10m`)는 G3 이 디코드한 닫힌 반복 값으로 쓴다.
+- 띠 첫 줄은 보기의 묶음이 아니라 고정된 넷을 그린다(시안 `stripGroups`). 묶음마다 표지 · 수 · 이름을 쓰고 Keeper 하나에 글리프 하나를 잇는다. 빈 묶음은 뺀다. 줄에 다 들어가지 않으면 이름을 빼고 `!2` 꼴로 쓴다. 고른 Keeper 의 글리프는 굵게 칠한다.
+  - 나이별이 아닌 보기: `! N failing`(쉬는 중 `▫`, 그 밖 `▪`), `✓ N recovered`(`▪`), `● N ok`(`▪`), `○ N paused`(`·`)
+  - 나이별: `█ N fresh` · `▆ N today` · `▃ N cooling`(모두 `▪`), `▁ N dormant`(오래 쉰 자율 Keeper 는 경고 `▪`, 그 밖 `▫`). 경계는 §2.3 나이별의 3시간 · 24시간 · 3일이다
+  - 예: `! 2 failing ▫▫  ✓ 20 recovered ▪▪▪▪▪▪▪▪▪▪▪▪▪▪▪▪▪▪▪▪  ○ 14 paused ··············`
+- 띠 둘째 줄은 열 머리와 같은 격자를 쓴다. 맥박 열에는 30분 칸마다 실패(failed · rested)한 Keeper 수를, ▹ 띠 열에는 멈추지 않은 Keeper 의 깰 시각 수를 단계 글리프로 그린다. 이름 열에 `fleet fail/30m max N` 을 쓴다(이름 열이 21칸보다 좁으면 `fleet max N`). due 열에는 `max N` 을 쓰고, 5칸에 안 들어가면 `N` 을 `1.2k` 꼴로 쓴다. 띠 열 값은 G3 의 값이다. 나이별 보기는 둘째 줄을 그리지 않는다(E18).
+- 묶음 제목 줄은 §2.4.7 을 따른다. G4 가 올린다.
+- 맨 아래의 고른 Keeper 줄은 지금의 `selected ·` 줄을 세 칸 요약으로 바꾼다. 예: `ocaml-agent-ic ○ idle 77m · since 11-05 18:51 · ◷ 13:33 every 10m · lag 1`. 실패 Keeper 면 다음 경로의 runtime id 도 쓴다(E24). 반복 표기(`every 10m`)는 G3 이 디코드한 닫힌 반복 값으로 쓴다.
 - 고른 Keeper 줄은 Story 창이 닫혀 있을 때만 그린다. 창 story 쪽의 ● 지금 · ▹ 다음이 같은 값이라서다(시안도 창이 열리면 이 줄 대신 창을 그린다). 창과 이 줄은 목록 끝과 푸터 구분선 사이 같은 자리를 쓴다.
 
 ## 3. 층
@@ -294,22 +348,21 @@ type pulse = { known_since : float; slots : slot list }   (* 새 칸이 앞 *)
 | V1 | 보기 타입 · 묶는 함수 · `v` `V` · 설정 hard cut · 기본값(E8) | `bin/masc_tui_keeper_list_model.ml(i)`, `bin/masc_tui_config.ml(i)`(`layout` 을 읽는 갈래와 그 오류, 다른 선택을 지키는 검사의 `layout` 을 함께 지운다), `bin/masc_tui.ml` 키 두 곳, `bin/masc_tui_render_keepers.ml` 묶음 제목 |
 | V2 | 보기 탭 줄과 누르기, `[` `]` 묶음 이동, 제목 줄 `←` `→` 접기 | `bin/masc_tui_render_keepers.ml`, `bin/masc_tui.ml` |
 | V3 | 한 축 줄과 상태별 · 원인별 · 시간별 칸 값(main #50366). G1 이 이 값을 격자 열로 옮긴다 | `bin/masc_tui_render_keepers.ml`, `bin/masc_tui_keeper_axis.ml` |
-| V4 | 24h 보기의 48칸 맥박, 세 묶음, 시간 눈금자 | `bin/masc_tui_keeper_pulse.ml`, `bin/masc_tui_render_keepers.ml` |
+| V4 | 24h 보기의 30분 맥박(시안처럼 폭이 모자라면 48칸보다 적게), 세 묶음, 시간 눈금자 | `bin/masc_tui_keeper_pulse.ml`, `bin/masc_tui_render_keepers.ml` |
 | V5 | runtime 보기의 교차표 | `bin/masc_tui_render_keepers.ml`, `bin/masc_tui_keeper_trail.ml` |
 | V6 | 기억별 · 나이별 칸 값(main #50394). G1 이 이 값을 격자 열로 옮긴다 | `bin/masc_tui_render_keepers.ml`, `bin/masc_tui_keeper_memory_reading.ml(i)` |
-| G1 | 격자(§2.4.1): `layout`, `▌` · 표지, `┃` 지금 선, due · 오른쪽 열, 열 머리. V3 · V6 값을 새 열로 옮기고 runtime id 를 실패 둘째 줄로 옮긴다(§2.4.5) | 새 모듈 `bin/masc_tui_keeper_grid.ml(i)`, `bin/masc_tui_render_keepers.ml`, `bin/masc_tui_keeper_mark.ml` |
-| G2 | 30분 맥박 `pulseW` 칸 `·▁▄█`(§2.4.2, E2) | `bin/masc_tui_keeper_pulse.ml`, `bin/masc_tui_keeper_mark.ml` |
-| G3 | 앞 12시간 깰 시각 띠와 due 열(§2.4.3). 반복 디코더를 열고 `sch_recurrence` 를 닫힌 값으로 든다 | `lib/schedule/schedule_domain.mli`, `bin/masc_tui_types.ml`, `bin/masc_tui_schedule_decode.ml`, `bin/masc_tui_keeper_next_run.ml(i)`, 시험 |
-| G4 | 묶음 제목 줄의 합과 처음 접힘(§2.4.5, E24) | `bin/masc_tui_render_keepers.ml`, `bin/masc_tui_keeper_list_model.ml(i)` |
-| A1 | 서버 나이 사다리 24칸과 행 JSON `age_bins` hard cut(§2.4.4) | `lib/keeper/keeper_memory_age_bins.ml(i)`, `lib/server/server_dashboard_http_keeper_memory_health.ml`, `lib/tui_decode_memory_health.ml`, 시험 |
-| A2 | TUI 나이 사다리 칸 · 합치기 · 눈금 머리(§2.4.4, E23), Memory 화면 | `bin/masc_tui_keeper_age_ladder.ml`, `bin/masc_tui_keeper_memory_reading.ml(i)`, `bin/masc_tui_render_memory.ml` |
+| G1 | 격자(§2.4.1 – §2.4.3): `layout`, `▌` · 표지, `┃` 지금 선, due · 오른쪽 열, 열 머리. V3 · V6 값을 새 열로 옮기고 runtime id 를 실패 둘째 줄로 옮긴다(§2.4.6). 제목 줄은 틀(`▌` · `−` `+` · 제목 · `┃`)만 | 새 모듈 `bin/masc_tui_keeper_grid.ml(i)`, `bin/masc_tui_render_keepers.ml`, `bin/masc_tui_keeper_mark.ml` |
+| G2 | 한 축 줄의 30분 맥박 `pulseW` 칸 `·▁▄█`(§2.4.3, E2). 목록 보기의 1시간 12칸은 그대로 | `bin/masc_tui_keeper_pulse.ml(i)`, `bin/masc_tui_keeper_mark.ml` |
+| G3 | 앞 12시간 깰 시각 띠(§2.4.4). 반복 디코더를 열고 `sch_recurrence` 를 닫힌 값으로 든다. due 열은 G1 이 그린다 | `lib/schedule/schedule_domain.mli`, `bin/masc_tui_types.ml`, `bin/masc_tui_schedule_decode.ml`, `bin/masc_tui_keeper_next_run.ml(i)`, 시험 |
+| G4 | 원인별 묶음에 회복 · 멈춤을 더하고(§2.3), 묶음 제목 줄의 합과 처음 접힘(§2.4.7, E26) | `bin/masc_tui_keeper_list_model.ml(i)`(`cause_bucket`), `bin/masc_tui_render_keepers.ml` |
+| A1 | 나이 사다리 24칸 hard cut(§2.4.5, E25): 서버 셈과 행 JSON `age_bins`, TUI · dashboard 디코더, TUI 사다리 칸 · 합치기 · 눈금 머리, 나이별 묶음 사다리, Memory 화면 | `lib/keeper/keeper_memory_age_bins.ml(i)`, `lib/server/server_dashboard_http_keeper_memory_health.ml`, `lib/tui_decode_memory_health.ml`, `dashboard/src/api/dashboard-misc.ts`, `bin/masc_tui_keeper_age_ladder.ml`, `bin/masc_tui_keeper_memory_reading.ml(i)`, `bin/masc_tui_render_memory.ml`, `bin/masc_tui_render_keepers.ml`, 시험 |
 | V8 | 머리 띠 두 줄과 고른 Keeper 줄(§2.8) | `bin/masc_tui_render_keepers.ml`, `bin/masc_tui_keeper_axis.ml` |
 | S1 | Story 창(A 단계 값만): story · 일정 · 기억 세 쪽 | 새 모듈 `bin/masc_tui_keeper_story.ml(i)`, 키 처리 |
 | S2 | Story 창의 마지막 wake 줄(B 단계) | Story 모듈, 일정 읽기 |
 | S3 | Story 창의 시간순 피드 | Story 모듈, 값 출처는 확인 필요 |
 | W1 | 월드 줄 고르기와 월드 창 | `bin/masc_tui_render_keepers.ml`, 월드 줄 모듈 |
 
-- V2 · V3 · V6 은 main 에 있다. 그 뒤는 G1 → G2 → G3 → G4 → A1 → A2 → V8 → V4 → V5 → W1 순서다. G1 이 격자를 한 번 만들고, 뒤 층은 열 값만 더한다(E16). A1 과 A2 는 hard cut 이라 같은 날 병합하고 서버와 TUI 를 같이 깐다. S 층은 V 층과 따로 main 위에 올린다.
+- V2 · V3 · V6 은 main 에 있다. 그 뒤는 G1 → G2 → G3 → G4 → A1 → V8 → V4 → V5 → W1 순서다. G1 이 격자를 한 번 만들고, 뒤 층은 열 값만 더한다(E16). A1 은 `Keeper_memory_age_bins.t` 를 바꾸는 hard cut 이라 서버 · TUI · dashboard 가 한 PR 에서 함께 컴파일돼야 한다. 그래서 300줄 기준을 넘을 수 있다. 서버와 TUI 를 같이 깐다. S 층은 V 층과 따로 main 위에 올린다.
 - P1 · P2 는 보기와 무관하게 지금 화면을 고친다. 그래서 R0 · P1 · P2 를 한 스택으로 먼저 착지하고, V1 부터는 그 뒤에 새로 쌓는다(E14). 어느 스택이든 맨 위 PR 로 한 번에 병합한다(`docs/guides/NATIVE-GITHUB-STACKS.md`).
 - P1 은 서버 저장 · 행 JSON · 디코더 · TUI 칸이 hard cut 으로 함께 바뀌어야 해서 300줄 기준을 넘었다(+707 · −577).
 - `docs/guides/TUI-KEYS.md` 는 생성 문서다. 키나 범례를 바꾼 층이 생성기 출력과 맞춘다.
@@ -327,7 +380,7 @@ type pulse = { known_since : float; slots : slot list }   (* 새 칸이 앞 *)
 ## 5. 확인 방법
 
 1. **타입.** 로컬 dune 빌드를 하지 않는다. PR 의 `type-check` 가 판정한다. 실행을 인용할 때 workflow 이름, run id, head SHA, 결과를 같이 적는다.
-2. **동작 시험.** P1 은 서버 저장(칸 경계 · 24시간 지우기 · `known_since`)과 디코더의 닫힌 갈래를 본다. V1 은 보기마다 묶는 함수가 닫힌 값만 쓰는지 본다. G3 은 반복(`Interval` · `Daily` · `Cron` · `One_shot`)마다 띠 칸 값을 고르는 함수와 수정 폼의 `Error` 반복 거절을 본다. A1 은 칸 경계(1시간 · 30일 · 미래 시각)를 본다. 격자 계산과 화면 글은 시험하지 않는다(헌법 354-355).
+2. **동작 시험.** P1 은 서버 저장(칸 경계 · 24시간 지우기 · `known_since`)과 디코더의 닫힌 갈래를 본다. V1 은 보기마다 묶는 함수가 닫힌 값만 쓰는지 본다. G3 은 반복(`Interval` · `Daily` · `Cron` · `One_shot`)마다 띠 칸 값을 고르는 함수와 수정 폼의 `Error` 반복 거절을 본다. A1 은 칸 경계(1시간 · 30일 · 미래 시각)와 칸 합이 facts 수와 같은지를 본다. G4 는 원인별 묶는 함수가 닫힌 판정(§2.4.2)만 쓰는지 본다. 격자 계산과 화면 글은 시험하지 않는다(헌법 354-355).
 3. **실측.** P1 은 §1.2 표를 같은 로그로 다시 센다. 바쁜 Keeper 의 맥박 칸 중 `?` 는 서버 기록 범위(`known_since`) 앞에서만 나와야 한다.
 4. **캡처.** TUI 층은 120x35 와 80x24 전 · 후 tmux 캡처를 남긴다. 절대 경로 · 토큰 · 계정 이름을 가린다.
 5. **시안 대조.** 시안 HTML 끝에 `buildScreen()` 결과를 글로 적는 스크립트를 붙인다. headless 브라우저로 `#qa` 를 열어 보기마다 같은 목록 폭의 글 화면을 얻는다. 같은 폭 캡처와 열 단위로 견준다. 재는 것은 `┃` 열 위치, 맥박 · 띠 칸 수, 이름 폭, 열마다 쓰는 글리프 집합이다. 결과는 PR 본문에 표로 남긴다. 낱말이 있는지만 세는 비교는 뼈대 차이를 못 본다(세 번째 정정). CI 시험이 아니다.
@@ -336,7 +389,7 @@ type pulse = { known_since : float; slots : slot list }   (* 새 칸이 앞 *)
 ## 6. 위험
 
 - 행 JSON 크기. 칸 하나는 숫자 넷이고 Keeper 하나는 최대 49칸이다. 2026-11-09 결정 로그로 같은 규칙을 계산하면 Keeper 39명의 `recent_turns` 합이 23,504바이트(최근 24턴)에서 13,852바이트(30분 칸)로 준다. 가장 큰 행은 861바이트다. 쉬는 Keeper 는 칸이 적어서 작아진다.
-- 정시 칸은 30분 경계마다 보이는 행 거의 전부가 한 칸 민다. 30분에 한 번이라 다시 그리는 비용은 작다(시안 「끊김 없이 움직이나」 표).
+- 맥박과 띠는 30분 경계마다 보이는 행 거의 전부가 한 칸 민다. 30분에 한 번이라 다시 그리는 비용은 작다(시안 「끊김 없이 움직이나」 표).
 - `Enter` 의 뜻이 바뀐다. 상세로 바로 가던 손버릇은 `→` 로 옮겨야 한다.
 
 ## 7. 정할 것
@@ -344,7 +397,7 @@ type pulse = { known_since : float; slots : slot list }   (* 새 칸이 앞 *)
 | # | 정할 것 | 기본값 | 이유 · 대안 |
 | --- | --- | --- | --- |
 | E1 | 맥박 저장 | 30분 칸 · 24시간 · 칸마다 결과별 개수 | 대안 "턴을 24시간 동안 다 보관" 은 바쁜 Keeper 가 하루 360턴이라 행 JSON 이 턴 수에 비례한다 |
-| E2 | 행의 맥박 칸 | 30분 칸 `pulseW` 개(§2.4.1, 최대 24). 24h 보기는 48 | 시안과 같다. 1시간 칸 12개로 합치던 기본값은 세 번째 정정에서 버렸다. 격자가 맥박 열에 24칸을 준다 |
+| E2 | 행의 맥박 칸 | 한 축 줄은 30분 칸 `pulseW` 개(§2.4.1, 최대 24), 24h 보기는 30분 칸. 목록 보기는 1시간 칸 12개 | 격자가 맥박 열에 24칸을 준다. 목록 보기의 열은 12칸 폭이고 시안에 없다 |
 | E3 | 보기 순환 키 | `v` | 시안의 `o` 는 정렬이다. 푸터는 이미 `v:view` 다 |
 | E4 | 한 줄 / 두 줄 키 | `V` | `v` 를 보기에 쓰면 밀도 전환이 갈 곳이 필요하다 |
 | E5 | `Enter` | Story 창 | 대안은 `Enter` 를 상세로 두고 Story 를 `→` 에 두는 것이다. 시안을 따른다 |
@@ -363,11 +416,11 @@ type pulse = { known_since : float; slots : slot list }   (* 새 칸이 앞 *)
 | E18 | 나이별 머리 띠 둘째 줄 | 그리지 않는다 | 무효화 시각은 약 3MB 응답에만 있다. 서버가 하루 무효화 수를 주면 다시 본다 |
 | E19 | 앞 12시간 일정 띠의 재료 | `Schedule_domain` 의 반복 디코더를 열고, TUI 가 같은 `lib/schedule` 함수로 깰 시각을 구한다 | 대안은 서버가 앞 12시간 깰 시각을 행에 실어 주는 것이다. 서버와 TUI 가 같은 계산 함수를 링크하니 행 JSON 을 늘리지 않는다 |
 | E20 | 초상 | 목록 보기 · 두 줄에서만, 전신(픽셀은 `Keeper_portrait_draw.render` 를 얼굴 초상과 같은 상자에, 모자이크는 Items 미리보기와 같은 24칸) | 2026-11-09 실측: 두 줄 보기 120x35 에서 초상이 약 9줄을 써서 Keeper 36명 중 4~6명만 보였다. 시안에는 초상이 없다. 운영자가 목록 보기에만 남기고 얼굴 대신 전신을 그리라고 골랐다. 모자이크 16칸에서는 관찰된 장비가 몸 색으로 뭉개져서 전신은 Items 의 24칸을 쓴다. 대화 머리의 얼굴 초상은 그대로다 |
-| E21 | 격자 | 시안 `layout(cols)` 를 그대로 옮긴다. `cols` 는 목록이 쓰는 폭이다 | 오른쪽 열을 고정해야 `┃` 지금 선과 띠가 줄마다 같은 열에 선다. 왼쪽에 이름 33칸을 고정하면 80칸에서 ▹ 가 잘린다(11-09 캡처) |
-| E22 | runtime id 자리 | 실패한 Keeper 의 둘째 줄에만 | 시안과 같다. 정상 Keeper 의 ▹ 에 긴 id 를 쓰면 띠 · due · lag 열을 밀어낸다 |
-| E23 | 좁은 폭의 나이 사다리 | 24 → 12 → 6 칸으로 이웃 칸을 더한다 | 서버 칸은 24개로 고정이다. 시안처럼 폭마다 로그 축을 다시 나누려면 사실 시각이 모두 필요하다(약 3MB) |
-| E24 | 처음 접힌 묶음 | 원인별 실패 없는 큰 묶음 · 멈춤, 시간별 일정 없음, 기억별 따라옴 · 모름, 나이별 24시간 · 모름 | 시안의 `fold0` 이다. 상태별은 시안에 없는 보기라 접지 않는다 |
-| E25 | 사람 몫 표지 자리 | ● 지금 낱말 | 시안의 ▹ 에는 사람 몫 칸이 없다. 지금 낱말이 이미 `? question` 으로 말한다 |
+| E23 | 격자 | 시안 `layout(cols)` 를 그대로 옮긴다. `cols` 는 목록이 쓰는 폭이다 | 오른쪽 열을 고정해야 `┃` 지금 선과 띠가 줄마다 같은 열에 선다. 왼쪽에 이름 33칸을 고정하면 80칸에서 ▹ 가 잘린다(11-09 캡처) |
+| E24 | runtime id 자리 | 실패한 Keeper 의 둘째 줄과 고른 Keeper 줄(§2.8). Keeper 줄의 ▹ 에는 쓰지 않는다 | 시안과 같다. Keeper 줄 ▹ 에 긴 id 를 쓰면 띠 · due · lag 열을 밀어낸다 |
+| E25 | 좁은 폭의 나이 사다리 | 24 → 12 → 6 칸으로 이웃 칸을 더한다 | 서버 칸은 24개로 고정이다. 시안처럼 폭마다 로그 축을 다시 나누려면 사실 시각이 모두 필요하다(약 3MB) |
+| E26 | 처음 접힌 묶음 | 원인별 회복 · 넷보다 많은 실패 없음 · 멈춤, 시간별 일정 없음, 기억별 따라옴 · 모름, 나이별 24시간 · 모름 | 시안의 `fold0` 이다. 상태별 · runtime 은 시안에 없는 보기라 접지 않는다 |
+| E27 | 사람 몫 표지 자리 | ● 지금 낱말 | 시안의 ▹ 에는 사람 몫 칸이 없다. 지금 낱말이 이미 `? question` 으로 말한다 |
 
 ## 8. 참고
 

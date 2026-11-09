@@ -59,17 +59,56 @@ val end_scope : Eio.Switch.t -> reset_cause -> unit
     [stream_sw] with [Stream_reset cause] unless the switch already has an
     error or has finished. It sends nothing to the peer. *)
 
-val dispatch : sw:Eio.Switch.t -> H2.Reqd.t -> (unit -> unit) -> unit
-(** [dispatch ~sw reqd work] runs [work] in a daemon fiber of [sw], the
-    stream's switch, after yielding once, so the h2 parser gets its turn
-    before any request computation, pool wait or response mutation starts
-    (RFC-0350). The response ledger scope of the calling fiber is carried
-    into [work]. An exception from [work] {!reset}s the stream with
-    [Raised]; cancellation propagates.
+(** The end of one stream's scope and the bound on its flushes (RFC-0518
+    D2). The stream registry makes one for each stream it runs and binds it
+    to that stream's fibers. *)
+module Stream_end : sig
+  type t
 
-    [sw] must be the stream's own switch. The reset fails it, and with it
-    every fiber forked on it; a switch shared with other streams or with the
-    connection would end them too. *)
+  val create
+    :  stream_sw:Eio.Switch.t
+    -> clock:_ Eio.Time.clock
+    -> stalled_after_s:float
+    -> H2.Reqd.t
+    -> t
+  (** [create ~stream_sw ~clock ~stalled_after_s reqd] ends with [stream_sw]:
+      once the switch is released, {!ended} is true, {!signal} is resolved
+      and every flush still waiting is answered with [`Closed]. It also forks
+      a daemon on [stream_sw] that watches the flushes. When one has waited
+      [stalled_after_s] by [clock] without an answer, the daemon logs the
+      request method and target at warn and {!reset}s the stream with
+      [Stalled]. *)
+
+  val switch : t -> Eio.Switch.t
+  (** The stream's switch. *)
+
+  val ended : t -> bool
+  (** True once the stream's switch was released. *)
+
+  val signal : t -> unit Eio.Promise.t
+  (** Resolved once the stream's switch was released. *)
+
+  val flush : t -> H2.Body.Writer.t -> ([ `Written | `Closed ] -> unit) -> unit
+  (** [flush t writer f] calls [f] once: with h2's answer to the flush, or
+      with [`Closed] when the stream's switch is released first. *)
+
+  val with_current : t -> (unit -> 'a) -> 'a
+  (** [with_current t f] runs [f] with [t] bound to the calling fiber and to
+      the fibers it forks. *)
+
+  val current : unit -> t option
+  (** The stream bound to the calling fiber. [None] on the connection
+      reader, where h2 calls the error handler for the errors it finds in
+      frames. *)
+end
+
+val dispatch : Stream_end.t -> (unit -> unit) -> unit
+(** [dispatch stream_end work] runs [work] in a daemon fiber of the stream's
+    switch, after yielding once, so the h2 parser gets its turn before any
+    request computation, pool wait or response mutation starts (RFC-0350).
+    [work] runs with [stream_end] bound ({!Stream_end.with_current}) and in
+    the response ledger scope of the calling fiber. An exception from [work]
+    {!reset}s the stream with [Raised]; cancellation propagates. *)
 
 val close_after_flush : H2.Body.Writer.t -> unit
 (** [close_after_flush writer] closes [writer] once every byte written to it
@@ -79,4 +118,8 @@ val close_after_flush : H2.Body.Writer.t -> unit
     (anmonteiro/ocaml-h2#278).
 
     Write the whole body first. Bytes written after this call are cut the
-    same way, because the flush only covers the bytes already written. *)
+    same way, because the flush only covers the bytes already written.
+
+    A fiber with a bound {!Stream_end} flushes through it, so the writer
+    also closes when the stream ends or stalls. Elsewhere, as for the error
+    answers h2 opens on the connection reader, the close waits for h2. *)

@@ -82,7 +82,133 @@ let reset ~stream_sw reqd cause =
     report_then_end ~report:report_failure ~stream_sw reqd cause exn ~keep_answer:true
 ;;
 
-let dispatch ~sw reqd work =
+(* h2 answers a flush only when the connection writer drains the body. A
+   stream the peer reset, and a connection that ended while the stream's
+   window was 0, are never drained, so a flush registered before that would
+   wait for ever. The stream switch ends in both cases:
+   Server_h2_stream_registry fails it on RST_STREAM, and the connection scope
+   cancels it. That end answers every flush still waiting with [`Closed].
+
+   A peer that keeps the stream open with its window at 0 drains nothing
+   either, and nothing ends that stream. The watchdog gives every flush
+   [stalled_after_s] to be answered and resets the stream with [Stalled] when
+   one is not (RFC-0518 D2). The bound holds for each flush, so WINDOW_UPDATEs
+   of a byte or two do not stretch it (RFC-0518 §3.3). *)
+module Stream_end = struct
+  type t =
+    { stream_sw : Eio.Switch.t
+    ; reqd : H2.Reqd.t
+    ; clock : float Eio.Time.clock_ty Eio.Resource.t
+    ; stalled_after_s : float
+    ; mutable ended : bool
+    ; waiting : (int, unit -> unit) Hashtbl.t
+    ; deadlines : (int * float) Queue.t
+    ; registered : Eio.Condition.t
+    ; mutable next_id : int
+    ; signal : unit Eio.Promise.t
+    ; resolve_signal : unit Eio.Promise.u
+    }
+
+  let key : t Eio.Fiber.key = Eio.Fiber.create_key ()
+  let with_current t f = Eio.Fiber.with_binding key t f
+  let current () = Eio.Fiber.get key
+  let switch t = t.stream_sw
+  let ended t = t.ended
+  let signal t = t.signal
+
+  let stall t =
+    let request = H2.Reqd.request t.reqd in
+    Log.Http.warn
+      "[h2] %s %s took no response bytes for %.0fs; resetting the stream"
+      (H2.Method.to_string request.meth)
+      request.target
+      t.stalled_after_s;
+    reset ~stream_sw:t.stream_sw t.reqd Stalled
+  ;;
+
+  (* Flushes are registered in time order and their deadlines with them, so
+     the oldest flush still waiting is the first that can miss its deadline.
+     Answered flushes leave the front of the queue as they are answered. *)
+  let rec watch t =
+    match Queue.peek_opt t.deadlines with
+    | None ->
+      Eio.Condition.await_no_mutex t.registered;
+      watch t
+    | Some (id, _) when not (Hashtbl.mem t.waiting id) ->
+      ignore (Queue.pop t.deadlines);
+      watch t
+    | Some (id, deadline) ->
+      Eio.Time.sleep_until t.clock deadline;
+      if Hashtbl.mem t.waiting id then stall t else watch t
+  ;;
+
+  let rec drop_answered t =
+    match Queue.peek_opt t.deadlines with
+    | Some (id, _) when not (Hashtbl.mem t.waiting id) ->
+      ignore (Queue.pop t.deadlines);
+      drop_answered t
+    | Some _ | None -> ()
+  ;;
+
+  let create ~stream_sw ~clock ~stalled_after_s reqd =
+    let signal, resolve_signal = Eio.Promise.create () in
+    let t =
+      { stream_sw
+      ; reqd
+      ; clock = (clock :> float Eio.Time.clock_ty Eio.Resource.t)
+      ; stalled_after_s
+      ; ended = false
+      ; waiting = Hashtbl.create 2
+      ; deadlines = Queue.create ()
+      ; registered = Eio.Condition.create ()
+      ; next_id = 0
+      ; signal
+      ; resolve_signal
+      }
+    in
+    Eio.Switch.on_release stream_sw (fun () ->
+      t.ended <- true;
+      (* The signal goes first: a flush answer that raised would otherwise
+         leave the stream's end unreported to a waiting producer. *)
+      Eio.Promise.resolve t.resolve_signal ();
+      let answers = Hashtbl.fold (fun _ answer answers -> answer :: answers) t.waiting [] in
+      Hashtbl.reset t.waiting;
+      List.iter (fun answer -> answer ()) answers);
+    (* A daemon: the stream's scope ends with its response, not with this
+       fiber. *)
+    Eio.Fiber.fork_daemon ~sw:stream_sw (fun () ->
+      watch t;
+      `Stop_daemon);
+    t
+  ;;
+
+  (* [f] runs once: when h2 drains the body, or when the stream's end comes
+     first. *)
+  let flush t writer f =
+    if t.ended
+    then f `Closed
+    else (
+      let id = t.next_id in
+      t.next_id <- id + 1;
+      let answered = ref false in
+      let once outcome =
+        if not !answered
+        then (
+          answered := true;
+          Hashtbl.remove t.waiting id;
+          drop_answered t;
+          f outcome)
+      in
+      Hashtbl.replace t.waiting id (fun () -> once `Closed);
+      Queue.push (id, Eio.Time.now t.clock +. t.stalled_after_s) t.deadlines;
+      Eio.Condition.broadcast t.registered;
+      H2.Body.Writer.flush writer once)
+  ;;
+end
+
+let dispatch stream_end work =
+  let sw = Stream_end.switch stream_end
+  and reqd = stream_end.Stream_end.reqd in
   let ledger = Http_h2_response_ledger.current () in
   Eio.Fiber.fork_daemon ~sw (fun () ->
     (* fork starts its child immediately. Return to h2's parser before any
@@ -93,9 +219,10 @@ let dispatch ~sw reqd work =
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn -> reset ~stream_sw:sw reqd (Raised exn)
     in
-    (match ledger with
-     | Some ledger -> Http_h2_response_ledger.with_current ledger run
-     | None -> run ());
+    Stream_end.with_current stream_end (fun () ->
+      match ledger with
+      | Some ledger -> Http_h2_response_ledger.with_current ledger run
+      | None -> run ());
     `Stop_daemon)
 ;;
 
@@ -114,8 +241,17 @@ let dispatch ~sw reqd work =
    which skips it while the window is 0, and that is the only path that drains
    the body when the connection dies. The writer is then left open and goes
    when the stream does. Measured on a peer RST_STREAM, on a connection kept
-   alive for 30 pings afterwards, and on transport close. *)
+   alive for 30 pings afterwards, and on transport close.
+
+   In a stream fiber the flush goes through the stream's [Stream_end], so a
+   peer that never drains the body is reset after the stall bound and the
+   writer closes then. h2 opens its own error answers on the connection
+   reader, which has no stream fiber; those wait as before (RFC-0518 D2). *)
 let close_after_flush writer =
-  H2.Body.Writer.flush writer (function
-    | `Written | `Closed -> H2.Body.Writer.close writer)
+  let close = function
+    | `Written | `Closed -> H2.Body.Writer.close writer
+  in
+  match Stream_end.current () with
+  | Some stream_end -> Stream_end.flush stream_end writer close
+  | None -> H2.Body.Writer.flush writer close
 ;;

@@ -44,15 +44,17 @@ val of_httpun : Httpun.Reqd.t -> t
     in-memory connections in tests, fixtures. *)
 
 val of_h2
-  :  stream_sw:Eio.Switch.t
+  :  stream_end:Http_h2_stream.Stream_end.t
   -> ledger:Http_h2_response_ledger.request
   -> H2.Reqd.t
   -> t
-(** The handle for one HTTP/2 stream. [stream_sw] is the switch that ends
-    with the stream: deferred body work runs on it, and its end answers the
-    response flushes still waiting ({!Body_writer.flush}). [ledger] is the request's
-    scope in the listener's response ledger: every response byte is reserved
-    there before it is written. The request is read as httpun's: the method
+(** The handle for one HTTP/2 stream. [stream_end] is the stream's scope,
+    which the stream registry makes: deferred body work runs on its switch,
+    its end answers the response flushes still waiting
+    ({!Body_writer.flush}), and a flush that waits past its stall bound
+    resets the stream. [ledger] is the request's scope in the listener's
+    response ledger: every response byte is reserved there before it is
+    written. The request is read as httpun's: the method
     and target are shared types, [:authority] becomes a [host] field when the
     request carries none, and the version is 2.0. *)
 
@@ -97,7 +99,9 @@ module Body_writer : sig
       writer that is already closed it calls [f `Closed] at once. The h2
       library drains neither a stream the peer reset nor a connection that
       ended while the stream's window was 0, so on HTTP/2 [f `Closed] also
-      comes from the end of the stream's switch ({!of_h2}). *)
+      comes from the end of the stream's switch ({!of_h2}). An HTTP/2 flush
+      that waits past the stall bound resets the stream, and [f] then gets
+      [`Closed]. *)
 
   val close : t -> unit
   (** Ends the body as complete. On HTTP/2 the close waits for the bytes
@@ -112,7 +116,7 @@ module Body_writer : sig
 
   val stream_end : t -> unit Eio.Promise.t option
   (** On HTTP/2, resolved once the stream's switch ended: the peer reset the
-      stream or the connection ended ({!of_h2}). A producer that waits for
+      stream, the stream stalled, or the connection ended ({!of_h2}). A producer that waits for
       events elsewhere races it to stop for a client that is gone. [None] on
       HTTP/1.1: httpun reports no end of the connection before the body
       closes, so there a client that went away is noticed by the next write. *)

@@ -7,60 +7,7 @@ type acceptance = Transport_metrics.response_write_acceptance =
   | Accepted_by_writer
   | Rejected_by_writer
 
-(* The h2 library answers a flush only when the connection writer drains the
-   body (Http_h2_stream). A stream the peer reset, and a connection that ended
-   while the stream's window was 0, are never drained, so a flush registered
-   before that would wait for ever. The stream switch ends in both cases:
-   Server_h2_stream_registry fails it on RST_STREAM, and the connection scope
-   cancels it. That end answers every flush still waiting with [`Closed]. *)
-module Stream_end = struct
-  type t =
-    { mutable ended : bool
-    ; waiting : (int, unit -> unit) Hashtbl.t
-    ; mutable next_id : int
-    ; signal : unit Eio.Promise.t
-    ; resolve_signal : unit Eio.Promise.u
-    }
-
-  let create ~stream_sw =
-    let signal, resolve_signal = Eio.Promise.create () in
-    let t =
-      { ended = false; waiting = Hashtbl.create 2; next_id = 0; signal; resolve_signal }
-    in
-    Eio.Switch.on_release stream_sw (fun () ->
-      t.ended <- true;
-      (* The signal goes first: a flush answer that raised would otherwise
-         leave the stream's end unreported to a waiting producer. *)
-      Eio.Promise.resolve t.resolve_signal ();
-      let answers = Hashtbl.fold (fun _ answer answers -> answer :: answers) t.waiting [] in
-      Hashtbl.reset t.waiting;
-      List.iter (fun answer -> answer ()) answers);
-    t
-  ;;
-
-  let ended t = t.ended
-  let signal t = t.signal
-
-  (* [f] runs once: when h2 drains the body, or when the stream's end comes
-     first. *)
-  let flush t writer f =
-    if t.ended
-    then f `Closed
-    else (
-      let id = t.next_id in
-      t.next_id <- id + 1;
-      let answered = ref false in
-      let once outcome =
-        if not !answered
-        then (
-          answered := true;
-          Hashtbl.remove t.waiting id;
-          f outcome)
-      in
-      Hashtbl.replace t.waiting id (fun () -> once `Closed);
-      H2.Body.Writer.flush writer once)
-  ;;
-end
+module Stream_end = Http_h2_stream.Stream_end
 
 (* The body writer [respond_with_streaming] opened on an HTTP/2 stream.
    [closed_by_route] is set by [Body_writer.close]. masc closes the h2 writer
@@ -130,13 +77,13 @@ let request_of_h2 (h2_request : H2.Request.t) =
     h2_request.target
 ;;
 
-let of_h2 ~stream_sw ~ledger reqd =
+let of_h2 ~stream_end ~ledger reqd =
   Http2
     { reqd
     ; request = request_of_h2 (H2.Reqd.request reqd)
     ; ledger
-    ; stream_sw
-    ; stream_end = Stream_end.create ~stream_sw
+    ; stream_sw = Stream_end.switch stream_end
+    ; stream_end
     ; streaming = None
     }
 ;;
@@ -514,10 +461,10 @@ let read_body_h1 reqd ~reported ~max_bytes ~on_body ~on_error =
    [Http_h2_stream.dispatch]; completion is checked again after the deferral
    because the parser can observe a reset after EOF, before the request fiber
    gets its turn. Aborted readers never reach [on_body]. *)
-let read_body_h2 reqd ~ledger ~stream_sw ~max_bytes ~on_body ~on_error =
+let read_body_h2 reqd ~ledger ~stream_end ~max_bytes ~on_body ~on_error =
   let dispatch work =
     Http_h2_response_ledger.with_current ledger (fun () ->
-      Http_h2_stream.dispatch ~sw:stream_sw reqd work)
+      Http_h2_stream.dispatch stream_end work)
   in
   let body = H2.Reqd.request_body reqd in
   let reject error =
@@ -569,8 +516,8 @@ let read_body t ~max_bytes ~on_body ~on_error =
       ~max_bytes
       ~on_body
       ~on_error
-  | Http2 { reqd; ledger; stream_sw; _ } ->
-    read_body_h2 reqd ~ledger ~stream_sw ~max_bytes ~on_body ~on_error
+  | Http2 { reqd; ledger; stream_end; _ } ->
+    read_body_h2 reqd ~ledger ~stream_end ~max_bytes ~on_body ~on_error
 ;;
 
 (* masc's HTTP/1.1 error handler writes the 500 without logging, and a cut

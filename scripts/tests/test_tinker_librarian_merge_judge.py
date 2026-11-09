@@ -324,6 +324,36 @@ class FolderTest(unittest.TestCase):
                 with self.assertRaisesRegex(SystemExit, "other run files"):
                     MD.for_run(self.rows, out, synth_render.TEMPLATE, run)
 
+    def test_decisions_on_one_run_do_not_pass_for_a_run_that_absorbs_the_same_ids_into_other_claims(self) -> None:
+        req = complement_and_new()
+        k1, _ = req.candidates
+        items = {ITEM: item_of(req)}
+        merged_text = label_answer(req)
+        # The same absorbs, but m1 goes into the complement's bare claim and its rule is gone.
+        bare_text = merged_text.replace(merged(BY_ID["m1"], k1), k1.claim)
+        with tempfile.TemporaryDirectory() as tmp:
+            runs: dict[str, tuple[Path, list[MD.JsonObject]]] = {}
+            for name, text in (("merged", merged_text), ("bare", bare_text)):
+                run = Path(tmp) / name
+                run.mkdir()
+                (run / "calls.jsonl").write_text(json.dumps(call_row("k1", 2.0, text)) + "\n", encoding="utf-8")
+                row = {"item": ITEM, "target": "A", "call_key": "k1", "sent_at": 2.0, "valid": True,
+                       **M.score_synth(items[ITEM], accepted(req, text))}
+                (run / "rows.jsonl").write_text(json.dumps(row, ensure_ascii=False) + "\n", encoding="utf-8")
+                runs[name] = (run, [row])
+            (merged_run, merged_rows), (bare_run, bare_rows) = runs["merged"], runs["bare"]
+            self.assertEqual(MD.to_judge(merged_rows), MD.to_judge(bare_rows))
+            out = Path(tmp) / "merges"
+            case_rows, key_rows = MC.render(MC.collect(items, MC.answers_of(merged_run, items), SLOTS), "s")
+            A.write_cases(out, case_rows, key_rows, MC.judging(SLOTS))
+            MD.record_run_files(out, merged_run)
+            (out / D.JUDGE_DIR / D.DECISIONS).write_text(
+                "".join(json.dumps({"case": c["case"], "decision": "mergeable"}) + "\n" for c in case_rows),
+                encoding="utf-8")
+            self.assertEqual(len(MD.for_run(merged_rows, out, synth_render.TEMPLATE, merged_run).judged), 2)
+            with self.assertRaisesRegex(SystemExit, "other run files"):
+                MD.for_run(bare_rows, out, synth_render.TEMPLATE, bare_run)
+
     def test_the_report_gives_precision_over_every_row_and_recall_over_the_scored(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             run, out = self.folder(tmp)

@@ -591,7 +591,7 @@ let test_boundary_preserves_explicit_terminal_outcomes () =
 ;;
 
 let test_settled_official_tool_keeps_turn_running () =
-  List.iter (fun ready -> with_active_raw_trace (fun ~path:_ ~active ->
+  List.iter (fun handoff_outcome -> with_active_raw_trace (fun ~path:_ ~active ->
     let handed_off = ref false in
     let boundary_calls = ref 0 in
     let tool, terminal_error =
@@ -601,7 +601,7 @@ let test_settled_official_tool_keeps_turn_running () =
           incr boundary_calls;
           check bool "tool result handed off before boundary decision" true !handed_off;
           Keeper_agent_run.For_testing.official_client_tool_boundary
-            ~repetition_execution:None ~chat_handoff:(fun () -> Ok ready) ~tool_name)
+            ~repetition_execution:None ~chat_handoff:(fun () -> handoff_outcome) ~tool_name)
         (fun _ ->
           Ok { Agent_core.Types.content = "settled result"; content_blocks = None; _meta = None })
     in
@@ -610,14 +610,14 @@ let test_settled_official_tool_keeps_turn_running () =
     check string "settled content remains intact" "settled result" result.content;
     check int "one boundary decision" 1 !boundary_calls;
     check (option string) "no terminal failure" None !terminal_error;
-    match ready, result.abort_turn with
-    | false, None
-    | true, Some (Terminal_tool_boundary {outcome = Durable_stimulus_deferred; _}) -> ()
-    | false, Some (Terminal_tool_boundary _)
-    | true, (None | Some (Terminal_tool_boundary
+    match handoff_outcome, result.abort_turn with
+    | (Ok false | Error _), None
+    | Ok true, Some (Terminal_tool_boundary {outcome = Durable_stimulus_deferred; _}) -> ()
+    | (Ok false | Error _), Some (Terminal_tool_boundary _)
+    | Ok true, (None | Some (Terminal_tool_boundary
         {outcome = Terminal_completed | Terminal_failed _; _})) ->
       fail "the official-client boundary did not preserve the chat handoff decision"))
-    [false; true]
+    [Ok false; Ok true; Error (Agent_core.Error.Internal "inventory stopping")]
 ;;
 
 let test_terminal_post_effect_failure_aborts_the_official_client_turn () =

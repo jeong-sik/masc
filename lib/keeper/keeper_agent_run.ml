@@ -52,19 +52,28 @@ type raw_trace_sink_outcome =
 
 (** The host's explicit terminal effect takes priority. Otherwise a settled
     tool can hand an autonomous slot to ready chat; repetition observation
-    failures remain errors and receipts alone never request a handoff. *)
+    failures remain errors and receipts alone never request a handoff.
+    A read-only chat handoff probe failure degrades to keeping the current turn
+    running so a settled tool is never reclassified as an unknown-outcome
+    failure when the owner pool is stopping or unavailable. *)
 let official_client_tool_boundary ~repetition_execution ~chat_handoff ~tool_name =
   match Option.bind repetition_execution Keeper_repetition_scope.Execution.failure with
   | Some error ->
     Error (Agent_core.Error.Internal (Keeper_repetition_snapshot.error_to_string error))
   | None ->
-    Result.map
-      (fun ready ->
-         if ready then
-           Some (Keeper_official_client_host.Terminal_tool_boundary
-             { tool_name; outcome = Durable_stimulus_deferred })
-         else None)
-      (chat_handoff ())
+    (match chat_handoff () with
+     | Ok true ->
+       Ok
+         (Some
+            (Keeper_official_client_host.Terminal_tool_boundary
+               { tool_name; outcome = Durable_stimulus_deferred }))
+     | Ok false -> Ok None
+     | Error error ->
+       Log.Keeper.warn
+         "autonomous chat handoff probe failed at official tool boundary (%s); continuing turn: %s"
+         tool_name
+         (Agent_core.Error.to_string error);
+       Ok None)
 ;;
 
 let keeper_raw_trace_sink
@@ -352,10 +361,14 @@ let tool_boundary_state ~repetition_execution ~chat_handoff state =
     | Some error ->
       Error (Agent_core.Error.Internal (Keeper_repetition_snapshot.error_to_string error))
     | None ->
-      Result.map
-        (fun ready -> if ready then Runtime_agent.Yield Runtime_agent.Durable_stimulus_waiting
-          else Runtime_agent.Continue)
-        (chat_handoff ())
+      (match chat_handoff () with
+       | Ok true -> Ok (Runtime_agent.Yield Runtime_agent.Durable_stimulus_waiting)
+       | Ok false -> Ok Runtime_agent.Continue
+       | Error error ->
+         Log.Keeper.warn
+           "autonomous chat handoff probe failed at tool boundary; continuing turn: %s"
+           (Agent_core.Error.to_string error);
+         Ok Runtime_agent.Continue)
 ;;
 
 let finalize_turn_surface ~response_text ~stop_reason terminal_effect_state =
@@ -1326,8 +1339,11 @@ let run_turn
                  |> Result.map_error Keeper_owner.error_to_string
              in
              (match ready with
-              | Error detail -> Error (Agent_core.Error.Internal
-                  ("autonomous chat handoff unavailable: " ^ detail))
+              | Error detail ->
+                Log.Keeper.warn ~keeper_name:meta.name
+                  "autonomous chat handoff probe unavailable; continuing current turn: %s"
+                  detail;
+                Ok false
               | Ok false -> Ok false
               | Ok true ->
                 Log.Keeper.info ~keeper_name:meta.name

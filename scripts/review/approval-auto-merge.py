@@ -11,6 +11,7 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import re
 import subprocess
 import sys
 import time
@@ -33,8 +34,19 @@ REQUIRED_APPROVALS = 2  # Operator-requested distinct GitHub accounts.
 # same request (HTTP 409) instead of submitting another.
 WAIT_SECONDS = 600
 POLL_SECONDS = 10
-IN_FLIGHT = frozenset({'pending', 'enqueued'})
-LANDED = frozenset({'merged', 'eligible_dry_run'})
+# A run that outlives its wait hands the receipt to a fresh run of the same
+# workflow instead of ending the follow-up. The chain stops this long after the
+# original submission and the stop is a visible failure.
+RESUME_LIMIT_SECONDS = 3600
+# Only `pending` is still being decided. `enqueued` and `merged` are final
+# answers about the request; whether the pull requests landed is read from the
+# members themselves, because the receipt never changes afterwards.
+IN_FLIGHT = frozenset({'pending'})
+ACCEPTED = frozenset({'merged', 'enqueued'})
+SUCCESS = frozenset({'merged', 'eligible_dry_run', 'resume_dispatched'})
+UNSETTLED = frozenset({'still_pending', 'observation_unavailable'})
+UUID = re.compile(r'[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}')
+SHA = re.compile(r'[0-9a-f]{40}')
 
 
 class Hold(ValueError):
@@ -194,8 +206,9 @@ def follow(repo, result_endpoint, receipt, scope):
     """Follow one accepted request until it lands, fails, or the wait ends.
 
     Read failures never resubmit: the receipt already names the effect, so the
-    same endpoint is read again. Success needs the receipt to say merged and
-    every scope member to be merged with a merge commit.
+    same endpoint is read again. Success needs every scope member to be merged
+    with a merge commit. A `pending` answer is still undecided; `merged` and
+    `enqueued` are final answers about the request, so the members decide.
     """
     deadline = time.monotonic() + WAIT_SECONDS
     observation = states = None
@@ -209,22 +222,66 @@ def follow(repo, result_endpoint, receipt, scope):
             error = str(failure)
         else:
             status = observation['status']
-            if status == 'merged' and all_landed(states):
+            if status in ACCEPTED and all_landed(states):
                 return dict(receipt, status='merged', observation=observation,
-                            members=states)
-            if status not in IN_FLIGHT and status != 'merged':
+                            member_states=states)
+            if status not in IN_FLIGHT and status not in ACCEPTED:
                 return dict(receipt, status=status, observation=observation,
-                            members=states, reason=observation.get('details'))
+                            member_states=states, reason=observation.get('details'))
         if time.monotonic() >= deadline:
             break
         time.sleep(POLL_SECONDS)
     if error is not None:
         return dict(receipt, status='observation_unavailable', error=error,
-                    observation=observation, members=states)
-    if observation['status'] == 'merged':
-        return dict(receipt, status='observation_unavailable', observation=observation,
-                    members=states, error='not all member merge states are confirmed')
-    return dict(receipt, status='still_pending', observation=observation, members=states)
+                    observation=observation, member_states=states)
+    return dict(receipt, status='still_pending', observation=observation, member_states=states)
+
+
+def hand_off(repo, outcome):
+    """Continue an unsettled receipt in a new run; never submit a merge again."""
+    receipt = {key: outcome[key] for key in ('uuid', 'pr', 'head', 'members', 'since')}
+    if time.time() - receipt['since'] > RESUME_LIMIT_SECONDS:
+        return dict(outcome, resume='limit_reached')
+    command = ['gh', 'workflow', 'run', 'approval-auto-merge.yml', '--repo', repo,
+               '--ref', 'main', '-f', f'pr={receipt["pr"]}',
+               '-f', f'receipt={json.dumps(receipt, separators=(",", ":"))}']
+    try:
+        subprocess.run(command, check=True, capture_output=True, text=True)
+    except (subprocess.CalledProcessError, OSError) as error:
+        return dict(outcome, resume=f'dispatch_failed: {error}')
+    return dict(outcome, status='resume_dispatched', previous=outcome['status'],
+                resume='dispatched')
+
+
+def parse_receipt(raw):
+    """Untrusted dispatch input: shape-checked data that is only ever read."""
+    try:
+        receipt = json.loads(raw)
+    except ValueError as error:
+        raise ValueError(f'invalid receipt: {error}') from error
+    if (not isinstance(receipt, dict) or
+            set(receipt) != {'uuid', 'pr', 'head', 'members', 'since'} or
+            not isinstance(receipt['uuid'], str) or UUID.fullmatch(receipt['uuid']) is None or
+            not isinstance(receipt['head'], str) or SHA.fullmatch(receipt['head']) is None or
+            isinstance(receipt['pr'], bool) or not isinstance(receipt['pr'], int) or
+            receipt['pr'] <= 0 or not isinstance(receipt['members'], list) or
+            not receipt['members'] or len(receipt['members']) > 100 or
+            not all(isinstance(n, int) and not isinstance(n, bool) and n > 0
+                    for n in receipt['members']) or receipt['pr'] not in receipt['members'] or
+            isinstance(receipt['since'], bool) or not isinstance(receipt['since'], (int, float))):
+        raise ValueError('invalid receipt shape')
+    return receipt
+
+
+def resume(repo, receipt):
+    """Read the original request again; no admission and no new merge request."""
+    endpoint = f'repos/{repo}/pulls/{receipt["pr"]}/merge-async/{receipt["uuid"]}'
+    scope = {'scope': [{'number': n} for n in receipt['members']]}
+    outcome = follow(repo, endpoint, dict(receipt, status='resumed', result_endpoint=endpoint),
+                     scope)
+    if outcome['status'] in UNSETTLED:
+        outcome = hand_off(repo, outcome)
+    return outcome
 
 
 def submit(repo, selected, head, scope):
@@ -256,7 +313,7 @@ def submit(repo, selected, head, scope):
             return {'status': 'submission_unknown', 'request': request, 'error': str(error),
                     'exit_code': operation.returncode}
         status = 'merged' if all_landed(states) else 'submission_unknown'
-        return {'status': status, 'request': request, 'members': states,
+        return {'status': status, 'request': request, 'member_states': states,
                 'exit_code': operation.returncode, 'stderr': operation.stderr.strip()[:500],
                 'response': response}
     # HTTP 409 returns the existing pending request. Observe that receipt;
@@ -265,11 +322,12 @@ def submit(repo, selected, head, scope):
         raise ValueError(f'GitHub refused the merge: {response}')
     result_endpoint = f'{endpoint}/merge-async/{uuid}'
     receipt = {'status': 'submitted' if operation.returncode == 0 else 'existing_request',
-               'request': response, 'uuid': uuid, 'head': head,
+               'request': response, 'uuid': uuid, 'pr': selected, 'head': head,
                'members': [member['number'] for member in scope['scope']],
-               'result_endpoint': result_endpoint}
+               'since': time.time(), 'result_endpoint': result_endpoint}
     emit(receipt)  # Preserve the external effect before any fallible readback.
-    return follow(repo, result_endpoint, receipt, scope)
+    outcome = follow(repo, result_endpoint, receipt, scope)
+    return hand_off(repo, outcome) if outcome['status'] in UNSETTLED else outcome
 
 
 def requested_pr():
@@ -303,6 +361,14 @@ def main():
         if REVIEWS.REPO.fullmatch(repo) is None:
             raise ValueError('invalid repository')
         number = requested_pr()
+        raw_receipt = os.environ.get('DISPATCH_RECEIPT', '')
+        if raw_receipt and os.environ['GITHUB_EVENT_NAME'] == 'workflow_dispatch':
+            receipt = parse_receipt(raw_receipt)
+            if receipt['pr'] != number:
+                raise ValueError('receipt does not belong to the requested pull request')
+            outcome = resume(repo, receipt)
+            emit({'pr': number, 'result': outcome})
+            return 0 if outcome.get('status') in SUCCESS else 1
         if not args.dry_run:
             automatic = auto_merge_default(repo, number)
             if automatic is not None:
@@ -314,7 +380,7 @@ def main():
         outcome = ({'status': 'eligible_dry_run'} if args.dry_run else
                    submit(repo, selected, head, scope))
         result = {'pr': selected, 'head': head, 'scope': scope, 'result': outcome}
-        if outcome.get('status') not in LANDED:
+        if outcome.get('status') not in SUCCESS:
             exit_code = 1  # merged is the only success; everything else is visible red
     except Hold as error:
         result = {'status': 'held', 'reason': str(error)}

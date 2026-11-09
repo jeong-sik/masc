@@ -58,22 +58,29 @@ let github_login_stream_send response event json =
   | Server_sse_response.Written | Closed | Stalled -> ()
 ;;
 
-let handle_keeper_github_login_post ~clock state req reqd =
-  let req_path = Http.Request.path req in
-  let name = extract_keeper_name_for_suffix req_path keeper_suffix_github_login in
+(* Run [run] for the Keeper the request path names, once its meta has been
+   read with [read_meta]. [extract_keeper_name_for_suffix] answers "" both for
+   a path with no name and for a name [Keeper_config.validate_name] refuses, so
+   a name that gets past the empty check needs no second validation. *)
+let with_existing_keeper ~read_meta ~suffix state req reqd run =
+  let name = extract_keeper_name_for_suffix (Http.Request.path req) suffix in
   let config = Mcp_server.workspace_config state in
   if name = "" then respond_error reqd "keeper name is required"
-  else if not (Keeper_config.validate_name name) then
-    respond_error reqd (Printf.sprintf "invalid keeper name: %s" name)
   else
-    (* Effective meta, not persisted meta: [sandbox_profile] is TOML-owned and
-       a persisted read answers with the default, which would send every
-       Keeper's login to this host. *)
-    match Keeper_meta_store.read_effective_meta config name with
+    match read_meta config name with
     | Error message -> respond_error ~status:`Internal_server_error reqd message
     | Ok None ->
       respond_error ~status:`Not_found reqd (Printf.sprintf "keeper %S not found" name)
-    | Ok (Some meta) ->
+    | Ok (Some meta) -> run ~config ~name ~meta
+;;
+
+let handle_keeper_github_login_post ~clock state req reqd =
+  (* Effective meta, not persisted meta: [sandbox_profile] is TOML-owned and
+     a persisted read answers with the default, which would send every
+     Keeper's login to this host. *)
+  with_existing_keeper ~read_meta:Keeper_meta_store.read_effective_meta
+    ~suffix:keeper_suffix_github_login state req reqd
+    (fun ~config ~name ~meta ->
       let hostname =
         match Server_utils.query_param req "hostname" with
         | Some hostname -> hostname
@@ -113,7 +120,7 @@ let handle_keeper_github_login_post ~clock state req reqd =
                response
                "error"
                (`Assoc [ "message", `String message ])
-           | Error _ -> ())
+           | Error _ -> ()))
 ;;
 
 let handle_keeper_github_token_post state req reqd body_str =
@@ -121,8 +128,6 @@ let handle_keeper_github_token_post state req reqd body_str =
   let name = extract_keeper_name_for_suffix req_path keeper_suffix_github_token in
   let config = Mcp_server.workspace_config state in
   if name = "" then respond_error reqd "keeper name is required"
-  else if not (Keeper_config.validate_name name) then
-    respond_error reqd (Printf.sprintf "invalid keeper name: %s" name)
   else
     let parsed =
       try
@@ -188,78 +193,58 @@ let declared_provider_id json =
   | None -> Error "provider required"
 ;;
 
+(* The request of the three handlers below, which act on one work service the
+   body declares: the Keeper in the path exists, and the body is JSON that
+   names a provider. *)
+let with_declared_provider ~suffix state req reqd body_str run =
+  with_existing_keeper ~read_meta:Keeper_meta_store.read_meta ~suffix state req
+    reqd (fun ~config ~name ~meta:_ ->
+      match Yojson.Safe.from_string body_str with
+      | exception Yojson.Json_error detail -> respond_error reqd detail
+      | args ->
+        (match declared_provider_id args with
+         | Error message -> respond_error reqd message
+         | Ok provider_id -> run ~config ~name ~args ~provider_id))
+;;
+
 (* Attaching one Keeper to one declared work service. Answers with the URL
    the operator has to open; the provider sends the browser to
    [Server_keeper_oauth_http]'s callback, which is where credentials are
    actually written. Nothing is written to the Keeper by this request. *)
 let handle_keeper_oauth_login_post ~clock state req reqd body_str =
-  let req_path = Http.Request.path req in
-  let name = extract_keeper_name_for_suffix req_path keeper_suffix_oauth_login in
-  let config = Mcp_server.workspace_config state in
-  if name = "" then respond_error reqd "keeper name is required"
-  else if not (Keeper_config.validate_name name) then
-    respond_error reqd (Printf.sprintf "invalid keeper name: %s" name)
-  else
-    match Keeper_meta_store.read_meta config name with
-    | Error message -> respond_error ~status:`Internal_server_error reqd message
-    | Ok None ->
-      respond_error ~status:`Not_found reqd (Printf.sprintf "keeper %S not found" name)
-    | Ok (Some _) ->
-      (match Yojson.Safe.from_string body_str with
-       | exception Yojson.Json_error detail -> respond_error reqd detail
-       | args ->
-         (match declared_provider_id args with
-          | Error message -> respond_error reqd message
-          | Ok provider_id ->
-            (match
-               Server_keeper_oauth.start
-                 ~clock
-                 ~config
-                 ~keeper:name
-                 ~provider_id
-                 ~now:(Unix.gettimeofday ())
-                 ()
-             with
-             | Error message -> respond_error reqd message
-             | Ok payload ->
-               Http.Response.json_value ~compress:true ~request:req payload reqd)))
+  with_declared_provider ~suffix:keeper_suffix_oauth_login state req reqd body_str
+    (fun ~config ~name ~args:_ ~provider_id ->
+      match
+        Server_keeper_oauth.start
+          ~clock
+          ~config
+          ~keeper:name
+          ~provider_id
+          ~now:(Unix.gettimeofday ())
+          ()
+      with
+      | Error message -> respond_error reqd message
+      | Ok payload ->
+        Http.Response.json_value ~compress:true ~request:req payload reqd)
 ;;
 
 (* Ask an attached service again what tools it has. The same work the
    callback does when a Keeper attaches, reachable on its own so a catalog
    that went stale does not need a whole new consent. *)
 let handle_keeper_identity_refresh_post ~clock state req reqd body_str =
-  let req_path = Http.Request.path req in
-  let name =
-    extract_keeper_name_for_suffix req_path keeper_suffix_identity_refresh
-  in
-  let config = Mcp_server.workspace_config state in
-  if name = "" then respond_error reqd "keeper name is required"
-  else if not (Keeper_config.validate_name name) then
-    respond_error reqd (Printf.sprintf "invalid keeper name: %s" name)
-  else
-    match Keeper_meta_store.read_meta config name with
-    | Error message -> respond_error ~status:`Internal_server_error reqd message
-    | Ok None ->
-      respond_error ~status:`Not_found reqd (Printf.sprintf "keeper %S not found" name)
-    | Ok (Some _) ->
-      (match Yojson.Safe.from_string body_str with
-       | exception Yojson.Json_error detail -> respond_error reqd detail
-       | args ->
-         (match declared_provider_id args with
-          | Error message -> respond_error reqd message
-          | Ok provider_id ->
-            (match
-               Server_keeper_oauth.refresh_tools
-                 ~clock
-                 ~config
-                 ~keeper:name
-                 ~provider_id
-                 ~now:(Unix.gettimeofday ())
-             with
-             | Error message -> respond_error reqd message
-             | Ok payload ->
-               Http.Response.json_value ~compress:true ~request:req payload reqd)))
+  with_declared_provider ~suffix:keeper_suffix_identity_refresh state req reqd
+    body_str (fun ~config ~name ~args:_ ~provider_id ->
+      match
+        Server_keeper_oauth.refresh_tools
+          ~clock
+          ~config
+          ~keeper:name
+          ~provider_id
+          ~now:(Unix.gettimeofday ())
+      with
+      | Error message -> respond_error reqd message
+      | Ok payload ->
+        Http.Response.json_value ~compress:true ~request:req payload reqd)
 ;;
 
 (* Turn one attached service on or off for this keeper without touching the
@@ -267,59 +252,41 @@ let handle_keeper_identity_refresh_post ~clock state req reqd body_str =
    that provider's tools. The actor comes from the authenticated operator so
    the audit row says who threw the switch. *)
 let handle_keeper_identity_switch_post state ~actor req reqd body_str =
-  let req_path = Http.Request.path req in
-  let name =
-    extract_keeper_name_for_suffix req_path keeper_suffix_identity_switch
-  in
-  let config = Mcp_server.workspace_config state in
-  if name = "" then respond_error reqd "keeper name is required"
-  else if not (Keeper_config.validate_name name) then
-    respond_error reqd (Printf.sprintf "invalid keeper name: %s" name)
-  else
-    match Keeper_meta_store.read_meta config name with
-    | Error message -> respond_error ~status:`Internal_server_error reqd message
-    | Ok None ->
-      respond_error ~status:`Not_found reqd (Printf.sprintf "keeper %S not found" name)
-    | Ok (Some _) ->
-      (match Yojson.Safe.from_string body_str with
-       | exception Yojson.Json_error detail -> respond_error reqd detail
-       | args ->
-         (match declared_provider_id args with
-          | Error message -> respond_error reqd message
-          | Ok provider_id ->
-            let enabled =
-              match args with
-              | `Assoc fields ->
-                (match List.assoc_opt "enabled" fields with
-                 | Some (`Bool value) -> Ok value
-                 | Some _ -> Error "enabled must be a boolean"
-                 | None -> Error "enabled is required")
-              | _ -> Error "body must be a JSON object"
-            in
-            (match enabled with
-             | Error message -> respond_error reqd message
-             | Ok enabled ->
-               (match
-                  Keeper_identity_switch.set
-                    config
-                    ~actor
-                    ~keeper_name:name
-                    ~provider_id
-                    ~enabled
-                with
-                | Error message ->
-                  respond_error ~status:`Internal_server_error reqd message
-                | Ok () ->
-                  Http.Response.json_value
-                    ~compress:true
-                    ~request:req
-                    (`Assoc
-                       [ "ok", `Bool true
-                       ; "keeper", `String name
-                       ; "provider", `String provider_id
-                       ; "enabled", `Bool enabled
-                       ])
-                    reqd))))
+  with_declared_provider ~suffix:keeper_suffix_identity_switch state req reqd
+    body_str (fun ~config ~name ~args ~provider_id ->
+      let enabled =
+        match args with
+        | `Assoc fields ->
+          (match List.assoc_opt "enabled" fields with
+           | Some (`Bool value) -> Ok value
+           | Some _ -> Error "enabled must be a boolean"
+           | None -> Error "enabled is required")
+        | _ -> Error "body must be a JSON object"
+      in
+      match enabled with
+      | Error message -> respond_error reqd message
+      | Ok enabled ->
+        (match
+           Keeper_identity_switch.set
+             config
+             ~actor
+             ~keeper_name:name
+             ~provider_id
+             ~enabled
+         with
+         | Error message ->
+           respond_error ~status:`Internal_server_error reqd message
+         | Ok () ->
+           Http.Response.json_value
+             ~compress:true
+             ~request:req
+             (`Assoc
+                [ "ok", `Bool true
+                ; "keeper", `String name
+                ; "provider", `String provider_id
+                ; "enabled", `Bool enabled
+                ])
+             reqd))
 ;;
 
 let parse_fusion_result text =
@@ -343,8 +310,6 @@ let handle_keeper_fusion_post state req reqd body_str =
   let req_path = Http.Request.path req in
   let name = extract_keeper_name_for_suffix req_path keeper_suffix_fusion in
   if name = "" then respond_error reqd "keeper name required"
-  else if not (Keeper_config.validate_name name) then
-    respond_error reqd (Printf.sprintf "invalid keeper name: %s" name)
   else
     try
       let args = Yojson.Safe.from_string body_str in

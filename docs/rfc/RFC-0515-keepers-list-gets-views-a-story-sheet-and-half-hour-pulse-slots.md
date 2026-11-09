@@ -287,7 +287,7 @@ type pulse = { known_since : float; slots : slot list }   (* 새 칸이 앞 *)
 - 마지막 wake 줄은 일정 응답의 `last_wake` 를 창이 열릴 때 읽는다(시안 B 단계). 첫 Story 층에는 넣지 않는다.
 - 시안의 시간순 피드(지난 턴 · wake · digest 를 한 줄씩)는 S3 가 두 층으로 나눠 다룬다.
   - S3a 는 지난 턴 3개를 past 에 한 줄로 그린다. 값은 Memory 가 이미 읽는 `GET /api/v1/keepers/<name>/turn-records` 에 `limit=3` 을 준 응답이다(E21). 턴의 시각은 레코드의 `ts` 다. 멈춘 이유는 영수증이 적은 `finish_reason` 을 그대로 보여 주고, 이유가 없는 레코드는 이유가 없다고 적는다. 이유 문자열을 ok 나 failed 로 가르지 않는다.
-  - S3b 는 이 턴, S2 가 읽는 wake, 기억 건강 행의 `digest_at` 을 시간순으로 합쳐 한 목록으로 그린다.
+  - S3b 는 S3a 의 한 줄을 이 목록으로 바꾼다. 이 턴, S2 가 읽는 일정 행의 wake, 기억 건강 행의 `digest_at` 을 시각 오름차순으로 한 줄씩 그리고, 가장 새것이 목록의 끝에 온다(E22). 창 높이가 모자라면 오래된 줄부터 빠진다. 읽지 않았거나 읽기에 실패한 출처는 사건 자리를 비우지 않고 목록 끝에 줄 하나로 말한다. digest 는 첫 past 줄에서 목록으로 옮겨 간다.
 
 ### 2.6 키
 
@@ -362,7 +362,7 @@ type pulse = { known_since : float; slots : slot list }   (* 새 칸이 앞 *)
 | S1 | Story 창(A 단계 값만): story · 일정 · 기억 세 쪽 | 새 모듈 `bin/masc_tui_keeper_story.ml(i)`, 키 처리 |
 | S2 | Story 창의 마지막 wake 줄(B 단계) | Story 모듈, 일정 읽기 |
 | S3a | Story 창 story 쪽의 지난 턴 줄 | 새 모듈 `bin/masc_tui_keeper_turns.ml(i)`, 턴 기록 쪽을 읽는 모듈 `bin/masc_tui_turn_record_page.ml(i)`, 읽기 · 상태 · story 쪽 |
-| S3b | 지난 턴 · wake · digest 를 시간순 한 목록으로 | 새 모듈 `bin/masc_tui_keeper_feed.ml(i)`, story 쪽 |
+| S3b | 지난 턴 · wake · digest 를 시간순 한 목록으로 | 새 모듈 `bin/masc_tui_keeper_feed.ml(i)`, `masc_tui_keeper_last_wake` 를 `masc_tui_keeper_wakes` 로 바꾸고 일정 행마다 가진 wake 를 모두 새것부터 내줌, story 쪽 |
 | W1 | 월드 줄 고르기와 월드 창 | `bin/masc_tui_render_keepers.ml`, 월드 줄 모듈 |
 
 - V2 · V3 · V6 은 main 에 있다. 그 뒤는 G1 → G2 → G3 → G4 → A1 → V8 → V4 → V5 → W1 순서다. G1 이 격자를 한 번 만들고, 뒤 층은 열 값만 더한다(E16). A1 은 `Keeper_memory_age_bins.t` 를 바꾸는 hard cut 이라 서버 · TUI · dashboard 가 한 PR 에서 함께 컴파일돼야 한다. 그래서 300줄 기준을 넘을 수 있다. 서버와 TUI 를 같이 깐다. S 층은 V 층과 따로 main 위에 올린다.
@@ -420,6 +420,7 @@ type pulse = { known_since : float; slots : slot list }   (* 새 칸이 앞 *)
 | E19 | 앞 12시간 일정 띠의 재료 | `Schedule_domain` 의 반복 디코더를 열고, TUI 가 같은 `lib/schedule` 함수로 깰 시각을 구한다 | 대안은 서버가 앞 12시간 깰 시각을 행에 실어 주는 것이다. 서버와 TUI 가 같은 계산 함수를 링크하니 행 JSON 을 늘리지 않는다 |
 | E20 | 초상 | 목록 보기 · 두 줄에서만, 전신(픽셀은 `Keeper_portrait_draw.render` 를 얼굴 초상과 같은 상자에, 모자이크는 Items 미리보기와 같은 24칸) | 2026-11-09 실측: 두 줄 보기 120x35 에서 초상이 약 9줄을 써서 Keeper 36명 중 4~6명만 보였다. 시안에는 초상이 없다. 운영자가 목록 보기에만 남기고 얼굴 대신 전신을 그리라고 골랐다. 모자이크 16칸에서는 관찰된 장비가 몸 색으로 뭉개져서 전신은 Items 의 24칸을 쓴다. 대화 머리의 얼굴 초상은 그대로다 |
 | E21 | 지난 턴을 읽는 곳 | Memory 가 읽는 `GET /api/v1/keepers/<name>/turn-records` 에 `limit=3`. 창이 story 쪽일 때 커서가 선 Keeper 하나씩 읽고, 그 Keeper 의 `keeper_turn_changed` 가 오면 다시 읽는다 | 2026-11-09 05:39Z 실측: 디스크에 턴 기록이 있는 Keeper 30명의 최근 3레코드 크기가 중앙값 10,441바이트, p90 26,025바이트, 최대 120,245바이트였다(응답의 `diff_vs_prev` 는 재지 않았다). Memory 는 같은 응답을 `limit=50` 으로 읽는다. 대안 (1) 맥박 칸으로 그리기: 칸은 30분 단위라 턴 하나하나의 시각을 못 준다. 대안 (2) 서버에 가벼운 "최근 턴" 응답을 새로 만들기: 서버 값을 새로 정하는 일이라 이 RFC 밖이다 |
+| E22 | 피드가 말하는 사건 | 지난 턴 3개(E21), 일정 행이 가진 wake 중 가장 새 둘, 기억 건강 행의 `digest_at` 하나를 시각 오름차순으로. 같은 시각이면 wake, 턴, digest 순이다 | 시안 `feedPast` 와 같은 구성이다(턴 3 · wake 2 · digest 1). 시안은 턴을 ✓ ✗ 로 가르지만 여기서는 `finish_reason` 을 그대로 적는다(E21). 일정 행은 자기 일정의 마지막 wake 하나만 가진다. 그래서 피드의 wake 는 "Keeper 의 가장 새 wake 둘"이 아니라 "마지막 wake 가 가장 새 일정 둘의 wake"이고, 한 일정이 여러 번 깨웠어도 하나만 나온다. 피드는 사건 사이의 빈 시간을 말하지 않는다. 읽은 턴보다 오래된 턴과 일정이 덮어쓴 wake 는 목록에 없다. 시각은 턴이 레코드의 `ts`(턴이 끝난 시각), wake 가 `last_wake.started_at`, digest 가 `digest_at` 이다. 같은 시각에는 wake 가 턴을 시작하고 digest 가 그 턴들을 소화하니 이 순서가 일어난 순서와 같다 |
 | E23 | 격자 | 시안 `layout(cols)` 를 그대로 옮긴다. `cols` 는 목록이 쓰는 폭이다 | 오른쪽 열을 고정해야 `┃` 지금 선과 띠가 줄마다 같은 열에 선다. 왼쪽에 이름 33칸을 고정하면 80칸에서 ▹ 가 잘린다(11-09 캡처) |
 | E24 | runtime id 자리 | 실패한 Keeper 의 둘째 줄과 고른 Keeper 줄(§2.8). Keeper 줄의 ▹ 에는 쓰지 않는다 | 시안과 같다. Keeper 줄 ▹ 에 긴 id 를 쓰면 띠 · due · lag 열을 밀어낸다 |
 | E25 | 좁은 폭의 나이 사다리 | 24 → 12 → 6 칸으로 이웃 칸을 더한다 | 서버 칸은 24개로 고정이다. 시안처럼 폭마다 로그 축을 다시 나누려면 사실 시각이 모두 필요하다(약 3MB) |

@@ -985,17 +985,17 @@ let with_prepared_account ?(read_keychain=Apple_keychain.read) ~runtime_root ~ow
     ~runtime_root ~owner_leaf ~oauth_source publish_policy
 ;;
 
-let prepare_account ~runtime_root ~owner_leaf ~oauth_source =
+let prepare_account ~host:(_ : Runtime_account_access.host_account) ~runtime_root ~owner_leaf ~oauth_source =
   with_prepared_account ~runtime_root ~owner_leaf ~oauth_source Result.ok
 ;;
 
-let prepare ~runtime_root ~owner_leaf ~oauth_source =
+let prepare ~host:(_ : Runtime_account_access.host_account) ~runtime_root ~owner_leaf ~oauth_source =
   with_prepared_account ~runtime_root ~owner_leaf ~oauth_source (fun home ->
     let* () = write_private_settings home in
     Ok home)
 ;;
 
-let prepare_for_login ~runtime_root ~owner_leaf =
+let prepare_for_login ~host:(_ : Runtime_account_access.host_account) ~runtime_root ~owner_leaf =
   let* paths = Eio_guard.run_in_systhread ~label:"antigravity-login-storage" (fun () ->
     let* home_dir = prepare_owner_directory ~runtime_root ~owner_leaf in
     prepare_home_storage ~home_dir ~oauth_seed:None) in
@@ -1139,8 +1139,8 @@ let prepare_read_hook t ~cwd ~additional_workspaces =
    account to the default policy first would revoke an overlapping reader's
    permissions between two atomic writes. The credential seed still only
    initializes missing managed state, retaining vendor refreshes. *)
-let prepare_native ~runtime_root ~owner_leaf ~oauth_source ~posture ~workspace
-    ~additional_workspaces =
+let prepare_native ~host:(_ : Runtime_account_access.host_account) ~runtime_root ~owner_leaf ~oauth_source ~posture
+    ~workspace ~additional_workspaces =
   with_prepared_account ~runtime_root ~owner_leaf ~oauth_source (fun home ->
     let* cwd = Eio_guard.run_in_systhread ~label:"antigravity-native-policy" (fun () ->
       prepare_native_tools home ~posture ~workspace ~additional_workspaces) in

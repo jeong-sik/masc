@@ -36,7 +36,7 @@ run(runtime 호출 하나. 한 후보에게 보내는 provider 시도 전부)은
 
 - 고정부(system prompt, 도구, 목표)와 `By_address` 묶음이 창에 들어가면, 효과 전에 온 크기 거절로 그 Keeper가 floor에서 잠기지 않는다(`Bootstrap_floor_exceeded`). receipt 개수와 상관없다.
 - 넘친 턴은 같은 턴 안에서 사람 손 없이 다시 보내진다. 그 턴의 `Completed`가 receipt를 지운다.
-  - RFC-size-refusal-starts-fresh-then-cuts-to-the-floor 뒤로 Codex Start `input_too_large`는 masc 셈이 `actual_chars`와 같으면 다시 보내지 않고 막힌다. 묶음은 그 거절이 세는 `turn/start` 글에 없다(그 RFC §7).
+  - RFC-size-refusal-starts-fresh-then-cuts-to-the-floor 뒤로 Codex Start `input_too_large`는 floor까지 내려간 뒤 막힌다. 묶음은 그 거절이 세는 `turn/start` 글에 없다(그 RFC §7).
 - 모델은 호출 몇 개가 이미 결과를 돌려줬는지 안다. reader가 있으면 그 결과도 읽는다. 「끝난 효과를 반복하지 말라」는 안내는 두 꼴 모두에 있다.
 - 효과 뒤에 턴 안에서 넘치는 경우(`Effect_fenced`)는 지금처럼 운영자 몫이다(§9).
 
@@ -191,7 +191,7 @@ official-client lane에서는 RFC-size-refusal-starts-fresh-then-cuts-to-the-flo
 - Claude Code와 Codex의 `on_memory_retry`는 `resolve_input_rejected_for_shrink_retry`다(`keeper_claude_code_runtime.ml:681-710`).
   - Claude Code의 크기 거절과 Codex의 `contextWindowExceeded`는 `Input_rejected Bootstrap_floor_exceeded`로 기록된다. `on_memory_retry`가 이것을 `Restart_fresh`로 푼다.
   - Codex의 `input_too_large`는 `Protocol_failed`로 기록된다(`keeper_codex_runtime.ml:826-828`). `on_memory_retry`는 아무것도 하지 않고, 다음 `plan_claim`이 fresh plan을 낸다(`keeper_official_client_session_store.ml:1520-1532`).
-    - RFC-size-refusal-starts-fresh-then-cuts-to-the-floor 뒤로는 masc 셈이 `actual_chars`와 같을 때 이렇게 기록된다(그 RFC §7). Start면 `Input_rejected Bootstrap_floor_exceeded`다. Resume은 fresh Start 글도 한도를 넘어 끝날 때 `Provider_rejected`다.
+    - RFC-size-refusal-starts-fresh-then-cuts-to-the-floor 뒤로는 Gate가 아니면 창 거절과 같은 `Input_rejected Bootstrap_floor_exceeded`로 기록된다(그 RFC §4). Gate continuation은 지금처럼 `Protocol_failed`다(그 RFC §6, #50398).
   - 어느 쪽이든 다시 보내는 요청은 fresh Start다.
 - 같은 capacity로 다시 보내니 history는 그대로이고 묶음만 짧아진다.
 - 그다음 거절은 history를 줄인다. 그 view와 floor에도 `By_address`가 실린다.
@@ -299,7 +299,7 @@ hook은 typed 크기 거절에만 불린다. 거절 문장을 읽어 크기 거�
   - receipt가 있는 run은 크기 거절을 받으면 history를 줄여 보지 않고 끝난다. 묶음이 작고 history가 넘친 경우도 그렇다.
   - agent_core에서는 그 run의 다른 다시 보내기(turn boundary resend, demotion)도 막힌다. `memory_capacity_retry_sequence`가 `Error`에 `on_projection_failure`를 부르기 때문이다(`keeper_turn_driver_try_provider.ml:3320-3330`).
   - blob 저장소가 고장 나면 큰 도구 결과와 그림 저장도 같이 실패한다. 그래서 묶음만 따로 살리는 길은 두지 않는다.
-  - RFC-size-refusal-starts-fresh-then-cuts-to-the-floor 뒤로 official-client lane에서는 묶음만 `Inline`으로 두고 floor를 보낸다. 실패는 원래 거절로 덮지 않고 typed 결과에 남긴다(그 RFC §8, #50170).
+  - RFC-size-refusal-starts-fresh-then-cuts-to-the-floor 뒤로 official-client lane에서는 묶음만 `Inline`으로 두고 floor를 보낸다. 실패는 원래 거절로 덮지 않고 warn 로그에 남긴다(그 RFC §8, #50170).
 - Gate continuation이 묶음 때문에 넘치면 `Vendor_session_full`로 잘못 기록된다(§5.4).
 - Completion review 요청은 같은 run에서 다시 보내지 않는다(`keeper_claude_code_runtime.ml:1768`, `keeper_codex_runtime.ml:2112`). 그래도 묶음 때문에 넘치지는 않는다. review는 Keeper가 아닌 임시 base path에서 돌아서(`lib/workspace_metric_hooks.ml:369-394`) 그 Keeper의 receipt를 싣지 않는다.
 - ACK된 뒤의 blob은 배포 때 오프라인 검사 두 번이 지나면 지워질 수 있다. 그 뒤에 vendor 대화에 남은 주소로 읽으면 실패한다.

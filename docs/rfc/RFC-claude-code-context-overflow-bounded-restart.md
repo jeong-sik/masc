@@ -194,10 +194,8 @@ floor 거부  -> 끝
 - 크기를 재서 view를 고르지 않는다. 들어가는지는 provider가 판정한다.
 - floor와 현재 view가 같으면 provider를 다시 호출하지 않는다.
 - provider dispatch 수는 run마다 많아야 셋이다. 처음 요청 하나와 다시 보내기 둘이다.
-- 마지막 dispatch가 floor가 아니면 “attempts exhausted”를 선언할 수 없다. 예외는
-  하나다. 거절이 글자 한도를 주고(Codex `input_too_large`의 `max_chars`), masc가 거절된
-  글을 센 값이 `actual_chars`와 같고, floor의 그 글도 한도를 넘으면 floor를 보내지 않고
-  끝난다(같은 RFC §7).
+- 마지막 dispatch가 floor가 아니면 “attempts exhausted”를 선언할 수 없다. 거절 종류와
+  상관없다. Codex `input_too_large`도 floor까지 간다(같은 RFC §7).
 
 floor 성공은 durable history가 불필요하다는 뜻이 아니다. 그 turn의 provider bootstrap
 view만 최소화됐다는 뜻이며, durable checkpoint와 memory retrieval은 그대로 남는다.
@@ -242,7 +240,7 @@ safe overflow 뒤 다음 단계가 있을 때만 현재 process가 exact recover
 - `response_emitted = false`
 - 다음 단계가 있다. Resume 다음은 fresh Start, full 다음은 floor이고, floor 다음은 없다.
   floor가 현재 view와 같으면 다음 단계가 없다.
-- walk는 floor에서 끝나고, floor rejection이 마지막이다. §5의 글자 한도 예외도 같다. (2026-09-05 geek-scout 실측: 4.1MB history가 1.9MB, 507KB,
+- walk는 floor에서 끝나고, floor rejection이 마지막이다. (2026-09-05 geek-scout 실측: 4.1MB history가 1.9MB, 507KB,
   498KB에서 거절된 뒤 floor를 묻지 않은 채 `Bootstrap_floor_exceeded`로 commit됐고,
   keeper는 두 번만 더 줄이면 빠져나올 자리에서 operator recovery에 멈춰 있었다.)
 
@@ -273,12 +271,11 @@ Claude process spawn 자체는 outer lane에서 계속
   거부함; system prompt, current goal, tool surface, pinned context를 줄이거나 runtime을
   변경해야 함. retained tool-result carrier가 floor에 `By_address`로 실렸으면 receipt를
   outbox에서 옮기는 것은 조치가 아니다. floor의 한 부분이 floor 꼴을 만들지 못했으면
-  (blob 쓰기 실패 등) 그 부분은 지금 꼴로 실리고, 그 실패가 typed 결과에 남는다
+  (blob 쓰기 실패 등) 그 부분은 지금 꼴로 실리고, 그 실패는 warn 로그에 남는다
   (RFC-size-refusal-starts-fresh-then-cuts-to-the-floor §8).
-  Codex Start의 `input_too_large`는 masc가 거절된 글을 센 값이 `actual_chars`와 같으면
-  floor를 보내지 않고 이 기록을 남긴다. floor의 `turn/start` 글이 거절된 글과 같기
-  때문이다(같은 RFC §7). 그때 줄일 것은 current goal과 start context다. Resume의
-  `input_too_large`는 이 기록이 아니라 `Provider_rejected`로 끝난다
+  Codex `input_too_large`도 floor까지 간다. floor의 `turn/start` 글은 거절된 Start의
+  글과 같아서 floor도 거절되고 이 기록이 남는다(같은 RFC §7). 그때 줄일 것은 current
+  goal과 start context다
 
 same-episode local refusal은 provider error처럼 위장하지 않는다. dashboard blocker와
 turn receipt는 다음을 포함한다.
@@ -351,7 +348,7 @@ generic untyped `tool_call(name, json)`로 policy boundary를 우회하는 설�
 7. retained tool-result carrier만으로 창을 넘으면 첫 typed 거절 뒤 floor가 `By_address`로
    가고 받아들여진다.
 8. `By_address` floor도 거절되면 `Bootstrap_floor_exceeded`다. floor로 갈 때 blob 쓰기가
-   실패하면 carrier는 `Inline`으로 floor에 실리고, 실패는 typed 결과에 남는다.
+   실패하면 carrier는 `Inline`으로 floor에 실려 간다.
 
 ### 10.4 Durable re-entry
 

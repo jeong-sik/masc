@@ -144,7 +144,7 @@ let test_create_and_get_post () =
   | Ok post ->
       let pid = Board.Post_id.to_string post.id in
       Alcotest.(check string) "author" "test-agent" (Board.Agent_id.to_string post.author);
-      match Board_dispatch.get_post ~post_id:pid with
+      match Board_dispatch.get_post ~reader:Masc_board_handlers.Board_access.Operator ~post_id:pid with
       | Error e -> Alcotest.fail (Board.show_board_error e)
       | Ok fetched ->
           Alcotest.(check string) "content matches"
@@ -156,7 +156,7 @@ let test_content_update_time_survives_activity_and_reload () =
       ~title:"original title" ~body:"original body" ~content:"original body"
       ~post_kind:Board.Human_post ()) in
   let post_id = Board.Post_id.to_string post.id in
-  let read () = get (Board_dispatch.get_post ~post_id) in
+  let read () = get (Board_dispatch.get_post ~reader:Masc_board_handlers.Board_access.Operator ~post_id) in
   let same expected = Alcotest.(check (float 0.0)) "content clock preserved"
       expected (read ()).content_updated_at in
   Alcotest.(check (float 0.0)) "content starts at creation"
@@ -220,7 +220,7 @@ let test_edit_emits_exact_signal_only_for_changed_content () =
    | _ -> Alcotest.fail "expected one addressed edit event");
   ignore (edit "@reader inspect this edit");
   Alcotest.(check int) "repeated normalized content emits no new event" 1 (List.length !signals);
-  let fetched = get (Board_dispatch.get_post ~post_id) in
+  let fetched = get (Board_dispatch.get_post ~reader:Masc_board_handlers.Board_access.Operator ~post_id) in
   Alcotest.(check string) "published edit is readable" updated.body fetched.body
 
 let test_edit_rejects_invalid_audience_before_mutation () =
@@ -236,7 +236,7 @@ let test_edit_rejects_invalid_audience_before_mutation () =
    | Error error -> Alcotest.fail (Board.show_board_error error)
    | Ok _ -> Alcotest.fail "invalid direct audience must reject edit");
   Alcotest.(check int) "invalid edit emits nothing" 0 !signals;
-  Alcotest.(check string) "invalid edit preserves body" post.body (get (Board_dispatch.get_post ~post_id)).body
+  Alcotest.(check string) "invalid edit preserves body" post.body (get (Board_dispatch.get_post ~reader:Masc_board_handlers.Board_access.Operator ~post_id)).body
 
 let test_edit_persistence_failure_emits_no_signal () =
   let post = match Board_dispatch.create_post ~author:"editor" ~content:"original"
@@ -251,7 +251,7 @@ let test_edit_persistence_failure_emits_no_signal () =
    | Error error -> Alcotest.fail (Board.show_board_error error)
    | Ok _ -> Alcotest.fail "blocked persistence must fail");
   Alcotest.(check int) "unpersisted edit emits nothing" 0 !signals;
-  (match Board_dispatch.get_post ~post_id:(Board.Post_id.to_string post.id) with
+  (match Board_dispatch.get_post ~reader:Masc_board_handlers.Board_access.Operator ~post_id:(Board.Post_id.to_string post.id) with
    | Ok unchanged ->
      Alcotest.(check string) "failed edit preserves in-memory body" post.body unchanged.body;
      Alcotest.(check (float 0.)) "failed edit preserves content clock" post.content_updated_at unchanged.content_updated_at
@@ -283,7 +283,7 @@ let test_update_post_by_owner () =
           Alcotest.(check bool) "updated_at not regressed" true
             (updated.updated_at >= post.updated_at);
           (* edit persists: a fresh get returns the edited content *)
-          match Board_dispatch.get_post ~post_id:pid with
+          match Board_dispatch.get_post ~reader:Masc_board_handlers.Board_access.Operator ~post_id:pid with
           | Error e -> Alcotest.fail (Board.show_board_error e)
           | Ok fetched ->
               Alcotest.(check string) "edit persisted via get"
@@ -304,7 +304,7 @@ let test_update_post_rejects_non_owner () =
       | Ok _ -> Alcotest.fail "non-owner edit must be rejected"
       | Error (Board.Unauthorized _) -> (
           (* the original content must survive a rejected edit *)
-          match Board_dispatch.get_post ~post_id:pid with
+          match Board_dispatch.get_post ~reader:Masc_board_handlers.Board_access.Operator ~post_id:pid with
           | Error e -> Alcotest.fail (Board.show_board_error e)
           | Ok fetched ->
               Alcotest.(check string) "original preserved on rejected edit"
@@ -330,7 +330,7 @@ let test_update_post_transfers_author_by_owner () =
             (Board.Agent_id.to_string updated.author);
           Alcotest.(check string) "content updated during transfer"
             "transfer updated body" updated.body;
-          match Board_dispatch.get_post ~post_id:pid with
+          match Board_dispatch.get_post ~reader:Masc_board_handlers.Board_access.Operator ~post_id:pid with
           | Error e -> Alcotest.fail (Board.show_board_error e)
           | Ok fetched ->
               Alcotest.(check string) "transferred author persisted"
@@ -351,7 +351,7 @@ let test_update_post_rejects_non_owner_transfer () =
       with
       | Ok _ -> Alcotest.fail "non-owner transfer must be rejected"
       | Error (Board.Unauthorized _) -> (
-          match Board_dispatch.get_post ~post_id:pid with
+          match Board_dispatch.get_post ~reader:Masc_board_handlers.Board_access.Operator ~post_id:pid with
           | Error e -> Alcotest.fail (Board.show_board_error e)
           | Ok fetched ->
               Alcotest.(check string) "original author preserved"
@@ -376,7 +376,7 @@ let test_update_post_rejects_invalid_new_author () =
       with
       | Ok _ -> Alcotest.fail "invalid new_author must be rejected"
       | Error (Board.Validation_error _) -> (
-          match Board_dispatch.get_post ~post_id:pid with
+          match Board_dispatch.get_post ~reader:Masc_board_handlers.Board_access.Operator ~post_id:pid with
           | Error e -> Alcotest.fail (Board.show_board_error e)
           | Ok fetched ->
               Alcotest.(check string) "author preserved after invalid transfer"
@@ -557,7 +557,7 @@ let test_identical_content_creates_two_posts () =
   let create () =
     Board_dispatch.create_post ~author:"dedup-agent"
       ~content:"same post body from one keeper turn"
-      ~post_kind:Board.Automation_post ~hearth:"keepers" ~thread_id:"turn-15650" ()
+      ~visibility:Board.Public ~post_kind:Board.Automation_post ~hearth:"keepers" ~thread_id:"turn-15650" ()
   in
   let first =
     match create () with
@@ -605,7 +605,7 @@ let test_create_post_persistence_failure_returns_error_without_fanout () =
   Alcotest.(check int)
     "failed create rolled back in-memory post"
     0
-    (List.length (Board_dispatch.list_posts ~limit:10 ()))
+    (List.length (Board_dispatch.list_posts ~reader:Masc_board_handlers.Board_access.Operator ~limit:10 ()))
   )
 
 let test_structured_post_roundtrip () =
@@ -627,7 +627,7 @@ let test_structured_post_roundtrip () =
       Result.get_ok (Board_dispatch.init_jsonl
         ~base_path:(Env_config_core.base_path ())
         ~recipient_lookup:every_name_declared ());
-      match Board_dispatch.get_post ~post_id:pid with
+      match Board_dispatch.get_post ~reader:Masc_board_handlers.Board_access.Operator ~post_id:pid with
       | Error e -> Alcotest.fail (Board.show_board_error e)
       | Ok fetched ->
           Alcotest.(check string) "roundtrip title" "Explicit title" fetched.title;
@@ -644,7 +644,7 @@ let test_board_sse_post_created_includes_post_kind () =
   (match
      Board_dispatch.create_post ~author:"sse-agent"
        ~content:"sse post kind payload"
-       ~post_kind:Board.Automation_post ()
+       ~visibility:Board.Public ~post_kind:Board.Automation_post ()
    with
    | Error e -> Alcotest.fail (Board.Post_publication_failure.to_string e)
    | Ok _ -> ());
@@ -660,21 +660,21 @@ let test_list_posts () =
             ~post_kind:Board.Human_post ());
   ignore (Board_dispatch.create_post ~author:"lister" ~content:"list test 2"
             ~post_kind:Board.Human_post ());
-  let posts = Board_dispatch.list_posts ~limit:10 () in
+  let posts = Board_dispatch.list_posts ~reader:Masc_board_handlers.Board_access.Operator ~limit:10 () in
   Alcotest.(check bool) "at least 2 posts" true (List.length posts >= 2)
 
 let test_list_posts_negative_limit_returns_empty () =
   ignore (Board_dispatch.create_post ~author:"negative-limit"
             ~content:"negative limit probe" ~post_kind:Board.Human_post ());
-  let posts = Board_dispatch.list_posts ~limit:(-1) () in
+  let posts = Board_dispatch.list_posts ~reader:Masc_board_handlers.Board_access.Operator ~limit:(-1) () in
   Alcotest.(check int) "negative limit closes to empty" 0 (List.length posts)
 
 let test_list_posts_with_sort () =
-  let posts_hot = Board_dispatch.list_posts ~sort_by:Board_dispatch.Hot ~limit:5 () in
-  let posts_recent = Board_dispatch.list_posts ~sort_by:Board_dispatch.Recent ~limit:5 () in
-  let posts_trending = Board_dispatch.list_posts ~sort_by:Board_dispatch.Trending ~limit:5 () in
-  let posts_updated = Board_dispatch.list_posts ~sort_by:Board_dispatch.Updated ~limit:5 () in
-  let posts_discussed = Board_dispatch.list_posts ~sort_by:Board_dispatch.Discussed ~limit:5 () in
+  let posts_hot = Board_dispatch.list_posts ~reader:Masc_board_handlers.Board_access.Operator ~sort_by:Board_dispatch.Hot ~limit:5 () in
+  let posts_recent = Board_dispatch.list_posts ~reader:Masc_board_handlers.Board_access.Operator ~sort_by:Board_dispatch.Recent ~limit:5 () in
+  let posts_trending = Board_dispatch.list_posts ~reader:Masc_board_handlers.Board_access.Operator ~sort_by:Board_dispatch.Trending ~limit:5 () in
+  let posts_updated = Board_dispatch.list_posts ~reader:Masc_board_handlers.Board_access.Operator ~sort_by:Board_dispatch.Updated ~limit:5 () in
+  let posts_discussed = Board_dispatch.list_posts ~reader:Masc_board_handlers.Board_access.Operator ~sort_by:Board_dispatch.Discussed ~limit:5 () in
   let counts = List.map List.length [posts_hot; posts_recent; posts_trending; posts_updated; posts_discussed] in
   let all_same = List.for_all (fun c -> c = List.hd counts) counts in
   Alcotest.(check bool) "all sort orders return same count" true all_same
@@ -890,10 +890,10 @@ let test_recent_sort_bypasses_hot_cutoff () =
   in
   let cold_post_id = Board.Post_id.to_string cold_post.id in
   let recent_posts =
-    Board_dispatch.list_posts ~sort_by:Board_dispatch.Recent ~limit:1 ()
+    Board_dispatch.list_posts ~reader:Masc_board_handlers.Board_access.Operator ~sort_by:Board_dispatch.Recent ~limit:1 ()
   in
   let hot_posts =
-    Board_dispatch.list_posts ~sort_by:Board_dispatch.Hot ~limit:1 ()
+    Board_dispatch.list_posts ~reader:Masc_board_handlers.Board_access.Operator ~sort_by:Board_dispatch.Hot ~limit:1 ()
   in
   let recent_post_id =
     match recent_posts with
@@ -924,21 +924,21 @@ let test_list_posts_with_filters () =
   ignore (Board_dispatch.create_post ~author:"filter-keeper" ~content:"keeper"
             ~post_kind:Board.Automation_post ~meta_json:keeper_meta ());
   let all_posts =
-    Board_dispatch.list_posts ~sort_by:Board_dispatch.Recent ~limit:50 ()
+    Board_dispatch.list_posts ~reader:Masc_board_handlers.Board_access.Operator ~sort_by:Board_dispatch.Recent ~limit:50 ()
     |> List.filter is_scoped_author
   in
   let no_system =
-    Board_dispatch.list_posts ~sort_by:Board_dispatch.Recent ~exclude_system:true
+    Board_dispatch.list_posts ~reader:Masc_board_handlers.Board_access.Operator ~sort_by:Board_dispatch.Recent ~exclude_system:true
       ~limit:50 ()
     |> List.filter is_scoped_author
   in
   let no_automation =
-    Board_dispatch.list_posts ~sort_by:Board_dispatch.Recent
+    Board_dispatch.list_posts ~reader:Masc_board_handlers.Board_access.Operator ~sort_by:Board_dispatch.Recent
       ~exclude_automation:true ~limit:50 ()
     |> List.filter is_scoped_author
   in
   let human_only =
-    Board_dispatch.list_posts ~sort_by:Board_dispatch.Recent ~exclude_system:true
+    Board_dispatch.list_posts ~reader:Masc_board_handlers.Board_access.Operator ~sort_by:Board_dispatch.Recent ~exclude_system:true
       ~exclude_automation:true ~limit:50 ()
     |> List.filter is_scoped_author
   in
@@ -983,7 +983,7 @@ let test_list_posts_matches_comment_author () =
    | Ok _ -> ()
    | Error e -> Alcotest.fail (Board.show_board_error e));
   let filtered =
-    Board_dispatch.list_posts ~sort_by:Board_dispatch.Recent
+    Board_dispatch.list_posts ~reader:Masc_board_handlers.Board_access.Operator ~sort_by:Board_dispatch.Recent
       ~author_filter:"MATCH-AGENT" ~limit:20 ()
   in
   let ids =
@@ -999,7 +999,7 @@ let test_author_filter_treats_wildcards_literally () =
     (Board_dispatch.create_post ~author:"wildcard-alpha"
        ~content:"literal wildcard filter" ~post_kind:Board.Human_post ());
   let filtered =
-    Board_dispatch.list_posts ~sort_by:Board_dispatch.Recent
+    Board_dispatch.list_posts ~reader:Masc_board_handlers.Board_access.Operator ~sort_by:Board_dispatch.Recent
       ~author_filter:"%" ~limit:20 ()
   in
   Alcotest.(check int) "percent does not match all authors" 0
@@ -1024,7 +1024,7 @@ let test_recent_author_match_applies_before_limit () =
          ())
   done;
   let posts =
-    Board_dispatch.list_recent_posts_matching_author
+    Board_dispatch.list_recent_posts_matching_author_unchecked
       ~author_matches:(fun author ->
         String.equal (Board.Agent_id.to_string author) "exact-owner")
       ~limit:1
@@ -1040,7 +1040,7 @@ let test_recent_author_match_applies_before_limit () =
 
 let test_post_without_kind_is_rejected () =
   let post_id = seed_post_without_kind () in
-  match Board_dispatch.get_post ~post_id with
+  match Board_dispatch.get_post ~reader:Masc_board_handlers.Board_access.Operator ~post_id with
   | Error (Board.Post_not_found _) -> ()
   | Error e -> Alcotest.fail (Board.show_board_error e)
   | Ok _ -> Alcotest.fail "post without post_kind must be rejected"
@@ -1058,7 +1058,7 @@ let test_add_and_get_comments () =
       (match Board_dispatch.add_comment ~post_id:pid ~author:"responder" ~content:"nice post" () with
        | Error e -> Alcotest.fail (Board.show_board_error e)
        | Ok _ -> ());
-      match Board_dispatch.get_comments ~post_id:pid with
+      match Board_dispatch.get_comments ~reader:Masc_board_handlers.Board_access.Operator ~post_id:pid with
       | Error e -> Alcotest.fail (Board.show_board_error e)
       | Ok comments ->
           Alcotest.(check bool) "has comment" true (List.length comments >= 1)
@@ -1159,7 +1159,7 @@ let test_comment_persists_post_reply_count () =
   Result.get_ok (Board_dispatch.init_jsonl
     ~base_path:(Env_config_core.base_path ())
     ~recipient_lookup:every_name_declared ());
-  match Board_dispatch.get_post ~post_id with
+  match Board_dispatch.get_post ~reader:Masc_board_handlers.Board_access.Operator ~post_id with
   | Error e -> Alcotest.fail (Board.show_board_error e)
   | Ok fetched ->
     Alcotest.(check int) "reply_count survives restart" 1 fetched.reply_count
@@ -1198,11 +1198,11 @@ let test_add_comment_persistence_failure_rolls_back_without_fanout () =
     (Board.persist_error_count () > before_errors);
   Alcotest.(check int) "keeper signal not emitted" 0 !keeper_signals;
   Alcotest.(check int) "SSE comment_added not emitted" 0 !sse_comment_added;
-  (match Board_dispatch.get_post ~post_id with
+  (match Board_dispatch.get_post ~reader:Masc_board_handlers.Board_access.Operator ~post_id with
    | Error e -> Alcotest.fail (Board.show_board_error e)
    | Ok fetched ->
        Alcotest.(check int) "reply_count rolled back" 0 fetched.reply_count);
-  match Board_dispatch.get_comments ~post_id with
+  match Board_dispatch.get_comments ~reader:Masc_board_handlers.Board_access.Operator ~post_id with
   | Error e -> Alcotest.fail (Board.show_board_error e)
   | Ok comments ->
       Alcotest.(check int)
@@ -1231,7 +1231,7 @@ let test_get_post_and_comments_atomic () =
        with
        | Error e -> Alcotest.fail (Board.show_board_error e)
        | Ok _ -> ());
-      match Board_dispatch.get_post_and_comments ~post_id:pid with
+      match Board_dispatch.get_post_and_comments ~reader:Masc_board_handlers.Board_access.Operator ~post_id:pid with
       | Error e -> Alcotest.fail (Board.show_board_error e)
       | Ok (fetched, comments) ->
           Alcotest.(check string) "post content matches"
@@ -1239,7 +1239,7 @@ let test_get_post_and_comments_atomic () =
           Alcotest.(check int) "comment count" 2 (List.length comments)
 
 let test_get_post_and_comments_missing_post () =
-  match Board_dispatch.get_post_and_comments ~post_id:"never-existed" with
+  match Board_dispatch.get_post_and_comments ~reader:Masc_board_handlers.Board_access.Operator ~post_id:"never-existed" with
   | Ok _ -> Alcotest.fail "expected Post_not_found"
   | Error (Board.Post_not_found _) -> ()
   | Error e ->
@@ -1250,19 +1250,19 @@ let test_get_post_and_comments_missing_post () =
 (* A read answers only that the id did not parse or that nothing has it. The
    [board_error] form keeps the same answers for callers that also write. *)
 let test_read_answers_only_parse_and_absence () =
-  (match Board_dispatch.read_post ~post_id:"never-existed" with
+  (match Board_dispatch.read_post ~reader:Masc_board_handlers.Board_access.Operator ~post_id:"never-existed" with
    | Error (Board.Read_post_not_found "never-existed") -> ()
    | Error e -> Alcotest.fail ("expected Read_post_not_found, got " ^ Board.show_board_read_error e)
    | Ok _ -> Alcotest.fail "a missing post was read");
-  (match Board_dispatch.read_comments ~post_id:"../escape" with
+  (match Board_dispatch.read_comments ~reader:Masc_board_handlers.Board_access.Operator ~post_id:"../escape" with
    | Error (Board.Read_invalid_id _) -> ()
    | Error e -> Alcotest.fail ("expected Read_invalid_id, got " ^ Board.show_board_read_error e)
    | Ok _ -> Alcotest.fail "an invalid post id was read");
-  (match Board_dispatch.read_comments ~post_id:"never-existed" with
-   | Ok [] -> ()
+  (match Board_dispatch.read_comments ~reader:Masc_board_handlers.Board_access.Operator ~post_id:"never-existed" with
+   | Error (Board.Read_post_not_found "never-existed") -> ()
    | Ok _ -> Alcotest.fail "a missing post returned comments"
-   | Error e -> Alcotest.fail ("expected Ok [], got " ^ Board.show_board_read_error e));
-  match Board_dispatch.get_post ~post_id:"never-existed" with
+   | Error e -> Alcotest.fail ("expected Read_post_not_found, got " ^ Board.show_board_read_error e));
+  match Board_dispatch.get_post ~reader:Masc_board_handlers.Board_access.Operator ~post_id:"never-existed" with
   | Error (Board.Post_not_found "never-existed") -> ()
   | Error e -> Alcotest.fail ("expected Post_not_found, got " ^ Board.show_board_error e)
   | Ok _ -> Alcotest.fail "a missing post was read"
@@ -1319,13 +1319,13 @@ let test_current_vote_lookup () =
   | Error e -> Alcotest.fail (Board.Post_publication_failure.to_string e)
   | Ok post ->
       let pid = Board.Post_id.to_string post.id in
-      (match Board_dispatch.current_vote_for_post ~voter:"reader" ~post_id:pid with
+      (match Board_dispatch.current_vote_for_post ~reader:Masc_board_handlers.Board_access.Operator ~voter:"reader" ~post_id:pid with
        | Error e -> Alcotest.fail (Board.show_board_error e)
        | Ok vote ->
            Alcotest.(check (option string)) "post vote starts empty" None
              (vote_label vote));
       ignore (Board_dispatch.vote ~voter:"reader" ~post_id:pid ~direction:Board.Up);
-      (match Board_dispatch.current_vote_for_post ~voter:"reader" ~post_id:pid with
+      (match Board_dispatch.current_vote_for_post ~reader:Masc_board_handlers.Board_access.Operator ~voter:"reader" ~post_id:pid with
        | Error e -> Alcotest.fail (Board.show_board_error e)
        | Ok vote ->
            Alcotest.(check (option string)) "post vote state" (Some "up")
@@ -1338,7 +1338,7 @@ let test_current_vote_lookup () =
        | Ok comment ->
            let cid = Board.Comment_id.to_string comment.id in
            (match
-              Board_dispatch.current_vote_for_comment ~voter:"reader"
+              Board_dispatch.current_vote_for_comment ~reader:Masc_board_handlers.Board_access.Operator ~voter:"reader"
                 ~comment_id:cid
             with
             | Error e -> Alcotest.fail (Board.show_board_error e)
@@ -1349,7 +1349,7 @@ let test_current_vote_lookup () =
              (Board_dispatch.vote_comment ~voter:"reader" ~comment_id:cid
                 ~direction:Board.Down);
            match
-             Board_dispatch.current_vote_for_comment ~voter:"reader"
+             Board_dispatch.current_vote_for_comment ~reader:Masc_board_handlers.Board_access.Operator ~voter:"reader"
                ~comment_id:cid
            with
            | Error e -> Alcotest.fail (Board.show_board_error e)
@@ -1420,7 +1420,7 @@ let test_vote_persisted_by_flusher_actor () =
          | Ok _ -> ());
         let store = Board_dispatch.backend () in
         store.last_flush <- 0.0;
-        (match Board_dispatch.get_post ~post_id with
+        (match Board_dispatch.get_post ~reader:Masc_board_handlers.Board_access.Operator ~post_id with
          | Ok _ -> ()
          | Error e -> Alcotest.fail (Board.show_board_error e));
         Eio.Time.sleep clock 0.1;
@@ -1429,7 +1429,7 @@ let test_vote_persisted_by_flusher_actor () =
         Result.get_ok (Board_dispatch.init_jsonl
           ~base_path:(Env_config_core.base_path ())
           ~recipient_lookup:every_name_declared ());
-        (match Board_dispatch.get_post ~post_id with
+        (match Board_dispatch.get_post ~reader:Masc_board_handlers.Board_access.Operator ~post_id with
          | Error e -> Alcotest.fail (Board.show_board_error e)
          | Ok post ->
              Alcotest.(check int) "vote persisted after restart" 1 post.votes_up);
@@ -1446,7 +1446,7 @@ let test_reaction_toggle_and_summary () =
   | Ok post ->
       let post_id = Board.Post_id.to_string post.id in
       (match
-         Board_dispatch.toggle_reaction ~target_type:Board.Reaction_post
+         Board_dispatch.toggle_reaction ~reader:Masc_board_handlers.Board_access.Operator ~target_type:Board.Reaction_post
            ~target_id:post_id ~user_id:"reactor" ~emoji:"🚀"
        with
        | Error e -> Alcotest.fail (Board.show_board_error e)
@@ -1462,7 +1462,7 @@ let test_reaction_toggle_and_summary () =
                   [ "reactor" ] summary.recent_user_ids
             | [] -> Alcotest.fail "expected reaction summary"));
       (match
-         Board_dispatch.list_reactions ~target_type:Board.Reaction_post
+         Board_dispatch.list_reactions ~reader:Masc_board_handlers.Board_access.Operator ~target_type:Board.Reaction_post
            ~target_id:post_id ~user_id:"reactor" ()
        with
       | Error e -> Alcotest.fail (Board.show_board_error e)
@@ -1470,7 +1470,7 @@ let test_reaction_toggle_and_summary () =
            Alcotest.(check int) "listed summary length" 1
              (List.length summaries));
       (match
-         Board_dispatch.toggle_reaction ~target_type:Board.Reaction_post
+         Board_dispatch.toggle_reaction ~reader:Masc_board_handlers.Board_access.Operator ~target_type:Board.Reaction_post
            ~target_id:post_id ~user_id:"reactor" ~emoji:"🚀"
        with
        | Error e -> Alcotest.fail (Board.show_board_error e)
@@ -1503,7 +1503,7 @@ let test_reaction_persistence_failure_returns_error_without_publish () =
   let before_errors = Board.persist_error_count () in
   check_io_error
     ~where:"rewrite_reactions"
-    (Board_dispatch.toggle_reaction
+    (Board_dispatch.toggle_reaction ~reader:Masc_board_handlers.Board_access.Operator
        ~target_type:Board.Reaction_post
        ~target_id:post_id
        ~user_id:"reactor"
@@ -1515,7 +1515,7 @@ let test_reaction_persistence_failure_returns_error_without_publish () =
   Alcotest.(check int) "Keeper signal not published" 0 !keeper_signals;
   Alcotest.(check int) "SSE reaction not published" 0 !sse_reactions;
   match
-    Board_dispatch.list_reactions
+    Board_dispatch.list_reactions ~reader:Masc_board_handlers.Board_access.Operator
       ~target_type:Board.Reaction_post
       ~target_id:post_id
       ~user_id:"reactor"
@@ -1544,7 +1544,7 @@ let test_comment_reaction_survives_restart () =
         | Ok comment -> Board.Comment_id.to_string comment.id
       in
       (match
-         Board_dispatch.toggle_reaction ~target_type:Board.Reaction_comment
+         Board_dispatch.toggle_reaction ~reader:Masc_board_handlers.Board_access.Operator ~target_type:Board.Reaction_comment
            ~target_id:comment_id ~user_id:"reactor" ~emoji:"👏"
        with
        | Error e -> Alcotest.fail (Board.show_board_error e)
@@ -1555,7 +1555,7 @@ let test_comment_reaction_survives_restart () =
         ~base_path:(Env_config_core.base_path ())
         ~recipient_lookup:every_name_declared ());
       match
-        Board_dispatch.list_reactions ~target_type:Board.Reaction_comment
+        Board_dispatch.list_reactions ~reader:Masc_board_handlers.Board_access.Operator ~target_type:Board.Reaction_comment
           ~target_id:comment_id ~user_id:"reactor" ()
       with
       | Error e -> Alcotest.fail (Board.show_board_error e)
@@ -1582,14 +1582,14 @@ let test_reaction_summary_recent_user_ids () =
       List.iter
         (fun user_id ->
            match
-             Board_dispatch.toggle_reaction ~target_type:Board.Reaction_post
+             Board_dispatch.toggle_reaction ~reader:Masc_board_handlers.Board_access.Operator ~target_type:Board.Reaction_post
                ~target_id:post_id ~user_id ~emoji:"👍"
            with
            | Ok _ -> ()
            | Error e -> Alcotest.fail (Board.show_board_error e))
         [ "reactor-a"; "reactor-b"; "reactor-c" ];
       match
-        Board_dispatch.list_reactions ~target_type:Board.Reaction_post
+        Board_dispatch.list_reactions ~reader:Masc_board_handlers.Board_access.Operator ~target_type:Board.Reaction_post
           ~target_id:post_id ~user_id:"reactor-b" ()
       with
       | Error e -> Alcotest.fail (Board.show_board_error e)
@@ -1630,7 +1630,7 @@ let test_reaction_summary_batch () =
       List.iter
         (fun (target_type, target_id, user_id, emoji) ->
            match
-             Board_dispatch.toggle_reaction ~target_type ~target_id ~user_id
+             Board_dispatch.toggle_reaction ~reader:Masc_board_handlers.Board_access.Operator ~target_type ~target_id ~user_id
                ~emoji
            with
            | Ok _ -> ()
@@ -1641,7 +1641,7 @@ let test_reaction_summary_batch () =
           (Board.Reaction_comment, comment_id, "reactor-b", "👏");
         ];
       let rows =
-        Board_dispatch.list_reactions_batch
+        Board_dispatch.list_reactions_batch ~reader:Masc_board_handlers.Board_access.Operator
           ~targets:
             [
               (Board.Reaction_post, post_id);
@@ -1679,7 +1679,7 @@ let test_dashboard_detail_uses_authenticated_reaction_actor () =
   in
   let post_id = Board.Post_id.to_string post.id in
   (match
-     Board_dispatch.toggle_reaction
+     Board_dispatch.toggle_reaction ~reader:Masc_board_handlers.Board_access.Operator
        ~target_type:Board.Reaction_post
        ~target_id:post_id
        ~user_id:"credential-owner"
@@ -1688,7 +1688,7 @@ let test_dashboard_detail_uses_authenticated_reaction_actor () =
    | Ok _ -> ()
    | Error error -> Alcotest.fail (Board.show_board_error error));
   let status, body =
-    Server_routes_http_runtime.board_post_detail_json
+    Server_routes_http_runtime.board_post_detail_json ~reader:Masc_board_handlers.Board_access.Operator
       ~config:None
       ~voter:(Some "forgeable-query-voter")
       ~reaction_actor:(Some "credential-owner")
@@ -1725,7 +1725,7 @@ let test_dashboard_comment_context_contains_page_and_focus_ancestors () =
   for index = 1 to 20 do ignore (add (string_of_int index)) done;
   let newest_reply = add ~parent_id:root "newest reply" in
   let read ?focused_comment () =
-    let status, body = Server_routes_http_runtime.board_post_detail_json
+    let status, body = Server_routes_http_runtime.board_post_detail_json ~reader:Masc_board_handlers.Board_access.Operator
       ?focused_comment ~config:None ~voter:None ~reaction_actor:None
       ~response_format:Server_board_post_response_format.Flat ~post_id () in
     Alcotest.(check bool) "detail available" true (status = `OK);
@@ -1793,7 +1793,7 @@ let test_board_sse_reaction_changed () =
   let post_id =
     match
       Board_dispatch.create_post ~author:"reaction-author"
-        ~content:"sse reaction parent" ~post_kind:Board.Human_post ()
+        ~content:"sse reaction parent" ~visibility:Board.Public ~post_kind:Board.Human_post ()
     with
     | Error e -> Alcotest.fail (Board.Post_publication_failure.to_string e)
     | Ok post -> Board.Post_id.to_string post.id
@@ -1801,7 +1801,7 @@ let test_board_sse_reaction_changed () =
   let seen = ref None in
   Board_dispatch.set_board_sse_hook (fun event -> seen := Some event);
   (match
-     Board_dispatch.toggle_reaction ~target_type:Board.Reaction_post
+     Board_dispatch.toggle_reaction ~reader:Masc_board_handlers.Board_access.Operator ~target_type:Board.Reaction_post
        ~target_id:post_id ~user_id:"reactor" ~emoji:"🔥"
    with
    | Error e -> Alcotest.fail (Board.show_board_error e)
@@ -1843,7 +1843,7 @@ let test_board_signal_reaction_changed_resolves_comment_parent () =
   let seen = ref None in
   Board_dispatch.set_board_signal_hook (fun signal -> seen := Some signal);
   (match
-     Board_dispatch.toggle_reaction ~target_type:Board.Reaction_comment
+     Board_dispatch.toggle_reaction ~reader:Masc_board_handlers.Board_access.Operator ~target_type:Board.Reaction_comment
        ~target_id:comment_id ~user_id:"reactor" ~emoji:"👏"
    with
    | Error e -> Alcotest.fail (Board.show_board_error e)
@@ -1975,7 +1975,7 @@ let test_reaction_rejects_unsupported_emoji () =
   | Ok post ->
       let post_id = Board.Post_id.to_string post.id in
       match
-        Board_dispatch.toggle_reaction ~target_type:Board.Reaction_post
+        Board_dispatch.toggle_reaction ~reader:Masc_board_handlers.Board_access.Operator ~target_type:Board.Reaction_post
           ~target_id:post_id ~user_id:"reactor" ~emoji:"😄"
       with
       | Ok _ -> Alcotest.fail "expected Validation_error"
@@ -1985,7 +1985,7 @@ let test_reaction_rejects_unsupported_emoji () =
 (** {1 Stats / Search / Hearth} *)
 
 let test_stats () =
-  let stats = Board_dispatch.stats () in
+  let stats = Board_dispatch.stats ~reader:Masc_board_handlers.Board_access.Operator () in
   match stats with
   | `Assoc fields ->
       Alcotest.(check bool) "has post_count"
@@ -1995,7 +1995,7 @@ let test_stats () =
 let test_search () =
   ignore (Board_dispatch.create_post ~author:"searcher"
             ~content:"unique_dispatch_search_term" ~post_kind:Board.Human_post ());
-  let results = Board_dispatch.search ~query:"unique_dispatch_search_term" ~limit:10 in
+  let results = Board_dispatch.search ~reader:Masc_board_handlers.Board_access.Operator ~query:"unique_dispatch_search_term" ~limit:10 in
   Alcotest.(check bool) "found search result" true (List.length results >= 1)
 
 let test_hearths () =
@@ -2005,16 +2005,16 @@ let test_hearths () =
     ~hearth:"system-hearth" ~post_kind:Board.System_post ());
   ignore (Board_dispatch.create_post ~author:"hearth-automation" ~content:"automation topic"
     ~hearth:"automation-hearth" ~post_kind:Board.Automation_post ());
-  let hearths = Board_dispatch.list_hearths () in
+  let hearths = Board_dispatch.list_hearths ~reader:Masc_board_handlers.Board_access.Operator () in
   let count name rows = List.assoc_opt name rows |> Option.value ~default:0 in
   Alcotest.(check bool) "has hearths" true (List.length hearths >= 3);
   Alcotest.(check int) "unfiltered system count" 1 (count "system-hearth" hearths);
   Alcotest.(check int) "unfiltered automation count" 1 (count "automation-hearth" hearths);
-  let without_system = Board_dispatch.list_hearths ~exclude_system:true () in
+  let without_system = Board_dispatch.list_hearths ~reader:Masc_board_handlers.Board_access.Operator ~exclude_system:true () in
   Alcotest.(check int) "system excluded" 0 (count "system-hearth" without_system);
   Alcotest.(check int) "automation retained" 1 (count "automation-hearth" without_system);
   let direct_only =
-    Board_dispatch.list_hearths ~exclude_system:true ~exclude_automation:true ()
+    Board_dispatch.list_hearths ~reader:Masc_board_handlers.Board_access.Operator ~exclude_system:true ~exclude_automation:true ()
   in
   Alcotest.(check int) "automation excluded" 0 (count "automation-hearth" direct_only);
   Alcotest.(check int) "human retained" 1 (count "test-hearth" direct_only)
@@ -2044,7 +2044,7 @@ let test_set_thread_id () =
       match Board_dispatch.set_thread_id ~post_id:pid ~thread_id:"thread-abc" with
       | Error e -> Alcotest.fail (Board.show_board_error e)
       | Ok () ->
-          match Board_dispatch.get_post ~post_id:pid with
+          match Board_dispatch.get_post ~reader:Masc_board_handlers.Board_access.Operator ~post_id:pid with
           | Error e -> Alcotest.fail (Board.show_board_error e)
           | Ok p ->
               Alcotest.(check (option string)) "thread_id set"
@@ -2062,7 +2062,7 @@ let test_set_pinned () =
       (match Board_dispatch.set_pinned ~post_id:pid ~pinned:true with
        | Error e -> Alcotest.fail (Board.show_board_error e)
        | Ok () -> ());
-      (match Board_dispatch.get_post ~post_id:pid with
+      (match Board_dispatch.get_post ~reader:Masc_board_handlers.Board_access.Operator ~post_id:pid with
        | Error e -> Alcotest.fail (Board.show_board_error e)
        | Ok p -> Alcotest.(check bool) "pinned set in memory" true p.pinned);
       (* set_pinned marks the post dirty, so the flag must survive a restart
@@ -2072,13 +2072,13 @@ let test_set_pinned () =
       Result.get_ok (Board_dispatch.init_jsonl
         ~base_path:(Env_config_core.base_path ())
         ~recipient_lookup:every_name_declared ());
-      (match Board_dispatch.get_post ~post_id:pid with
+      (match Board_dispatch.get_post ~reader:Masc_board_handlers.Board_access.Operator ~post_id:pid with
        | Error e -> Alcotest.fail (Board.show_board_error e)
        | Ok p -> Alcotest.(check bool) "pinned survives restart" true p.pinned);
       (match Board_dispatch.set_pinned ~post_id:pid ~pinned:false with
        | Error e -> Alcotest.fail (Board.show_board_error e)
        | Ok () -> ());
-      match Board_dispatch.get_post ~post_id:pid with
+      match Board_dispatch.get_post ~reader:Masc_board_handlers.Board_access.Operator ~post_id:pid with
       | Error e -> Alcotest.fail (Board.show_board_error e)
       | Ok p -> Alcotest.(check bool) "unpinned after toggle off" false p.pinned
 
@@ -2111,7 +2111,7 @@ let test_set_pinned_persistence_failure_rolls_back () =
     "persist error counter incremented"
     true
     (Board.persist_error_count () > before_errors);
-  match Board_dispatch.get_post ~post_id with
+  match Board_dispatch.get_post ~reader:Masc_board_handlers.Board_access.Operator ~post_id with
   | Error e -> Alcotest.fail (Board.show_board_error e)
   | Ok fetched ->
       Alcotest.(check bool) "pinned rolled back" false fetched.pinned
@@ -2131,7 +2131,7 @@ let test_each_post_write_announces_its_change () =
   let post =
     match
       Board_dispatch.create_post ~author:"write-hook" ~content:"a post to write to"
-        ~post_kind:Board.Human_post ()
+        ~visibility:Board.Public ~post_kind:Board.Human_post ()
     with
     | Ok post -> post
     | Error e -> Alcotest.fail (Board.Post_publication_failure.to_string e)
@@ -2165,6 +2165,26 @@ let test_each_post_write_announces_its_change () =
   Alcotest.(check int) "no other event was raised" 1 !others
 
 (* A write the store refuses changed nothing, so nothing is announced. *)
+let test_direct_comments_cannot_expand_readership () =
+  let post = get_created (Board_dispatch.create_post ~author:"writer"
+      ~content:"@reader private thread" ~visibility:Board.Direct ~post_kind:Board.Human_post ()) in
+  let post_id = Board.Post_id.to_string post.id in
+  let store = Board.global () in
+  let count () = List.length (Result.get_ok (Board.read_comments store ~post_id)) in
+  let before = count () in
+  List.iter (fun content ->
+    match Board.add_comment store ~lookup:every_name_declared ~post_id ~author:"writer" ~content () with
+    | Error (Board.Validation_error _) -> ()
+    | Error error -> Alcotest.fail (Board.show_board_error error)
+    | Ok _ -> Alcotest.fail "a comment enlarged the private thread's readers")
+    ["@@all secret"; "@outsider secret"];
+  Alcotest.(check int) "refused comments leave no rows" before (count ());
+  List.iter (fun content ->
+    match Board.add_comment store ~lookup:every_name_declared ~post_id ~author:"writer" ~content () with
+    | Ok _ -> () | Error error -> Alcotest.fail (Board.show_board_error error))
+    ["@reader allowed"; "@writer allowed"; "ordinary reply"];
+  Alcotest.(check int) "existing readers and ordinary replies still work" (before + 3) (count ())
+
 let test_a_refused_post_write_announces_nothing () =
   let events = ref 0 in
   Board_dispatch.set_board_sse_hook (fun _ -> incr events);
@@ -2200,7 +2220,7 @@ let test_set_closed_and_reopen_round_trip () =
        with
        | Error e -> Alcotest.fail (Board.show_board_error e)
        | Ok () -> ());
-      (match Board_dispatch.get_post ~post_id:pid with
+      (match Board_dispatch.get_post ~reader:Masc_board_handlers.Board_access.Operator ~post_id:pid with
        | Error e -> Alcotest.fail (Board.show_board_error e)
        | Ok p ->
            (match p.closed with
@@ -2217,7 +2237,7 @@ let test_set_closed_and_reopen_round_trip () =
       Result.get_ok (Board_dispatch.init_jsonl
         ~base_path:(Env_config_core.base_path ())
         ~recipient_lookup:every_name_declared ());
-      (match Board_dispatch.get_post ~post_id:pid with
+      (match Board_dispatch.get_post ~reader:Masc_board_handlers.Board_access.Operator ~post_id:pid with
        | Error e -> Alcotest.fail (Board.show_board_error e)
        | Ok p ->
            Alcotest.(check bool) "closed survives restart" true
@@ -2225,7 +2245,7 @@ let test_set_closed_and_reopen_round_trip () =
       (match Board_dispatch.reopen ~post_id:pid with
        | Error e -> Alcotest.fail (Board.show_board_error e)
        | Ok () -> ());
-      match Board_dispatch.get_post ~post_id:pid with
+      match Board_dispatch.get_post ~reader:Masc_board_handlers.Board_access.Operator ~post_id:pid with
       | Error e -> Alcotest.fail (Board.show_board_error e)
       | Ok p ->
           Alcotest.(check bool) "reopened after toggle off" true
@@ -2257,7 +2277,7 @@ let refused_close_leaves_post_open ~successor ~expect_message () =
              (expect_message pid message)
        | Ok () -> Alcotest.fail "the close was accepted"
        | Error e -> Alcotest.fail (Board.show_board_error e));
-      (match Board_dispatch.get_post ~post_id:pid with
+      (match Board_dispatch.get_post ~reader:Masc_board_handlers.Board_access.Operator ~post_id:pid with
        | Error e -> Alcotest.fail (Board.show_board_error e)
        | Ok p ->
            Alcotest.(check bool) "refused close leaves the post open" true
@@ -2649,16 +2669,16 @@ let test_post_audience_survives_edit_and_restart () =
   Alcotest.(check (list string)) "creation retains audience" ["first-reader"]
     (targets created);
   let edited = get (Board_dispatch.update_post ~post_id ~editor:"audience-owner"
-      ~content:"@second-reader revised evidence" ()) in
-  Alcotest.(check (list string)) "edit replaces audience with its content" ["second-reader"]
+      ~content:"@first-reader revised evidence" ()) in
+  Alcotest.(check (list string)) "edit preserves Direct readers" ["first-reader"]
     (targets edited);
   Board.reset_global_for_test ();
   Board_dispatch.reset_for_test ();
   Result.get_ok (Board_dispatch.init_jsonl
     ~base_path:(Env_config_core.base_path ())
     ~recipient_lookup:every_name_declared ());
-  let reloaded = get (Board_dispatch.get_post ~post_id) in
-  Alcotest.(check (list string)) "restart keeps exact edited audience" ["second-reader"]
+  let reloaded = get (Board_dispatch.get_post ~reader:Masc_board_handlers.Board_access.Operator ~post_id) in
+  Alcotest.(check (list string)) "restart keeps exact edited audience" ["first-reader"]
     (targets reloaded);
   let wire = Board.post_to_yojson reloaded in
   let without_audience = match wire with
@@ -2711,7 +2731,7 @@ let test_comment_audience_survives_restart () =
   let reloaded id =
     match List.find_opt (fun (c : Board.comment) ->
             String.equal (Board.Comment_id.to_string c.id) (Board.Comment_id.to_string id))
-            (match Board_dispatch.read_comments ~post_id with
+            (match Board_dispatch.read_comments ~reader:Masc_board_handlers.Board_access.Operator ~post_id with
              | Ok comments -> comments
              | Error _ -> Alcotest.fail "comments unreadable after restart") with
     | Some comment -> comment
@@ -2747,7 +2767,7 @@ let test_comment_audience_survives_restart () =
 (** {1 SubBoard CRUD} *)
 
 let test_sub_board_create_and_get () =
-  (match Board_dispatch.create_sub_board ~slug:"alpha-board" ~name:"Alpha"
+  (match Board_dispatch.create_sub_board ~reader:Masc_board_handlers.Board_access.Operator ~slug:"alpha-board" ~name:"Alpha"
            ~description:"First sub-board" ~owner:"agent-1" () with
   | Error e -> Alcotest.fail (Board.show_board_error e)
   | Ok sb ->
@@ -2756,35 +2776,35 @@ let test_sub_board_create_and_get () =
       Alcotest.(check string) "owner matches" "agent-1"
         (Board.Agent_id.to_string sb.owner);
       let id = Board.Sub_board_id.to_string sb.id in
-      (match Board_dispatch.get_sub_board ~sub_board_id:id with
+      (match Board_dispatch.get_sub_board ~reader:Masc_board_handlers.Board_access.Operator ~sub_board_id:id with
        | Error e -> Alcotest.fail (Board.show_board_error e)
        | Ok fetched ->
            Alcotest.(check string) "fetched id" id (Board.Sub_board_id.to_string fetched.id)));
   (* lookup by slug *)
-  (match Board_dispatch.get_sub_board ~sub_board_id:"alpha-board" with
+  (match Board_dispatch.get_sub_board ~reader:Masc_board_handlers.Board_access.Operator ~sub_board_id:"alpha-board" with
    | Error e -> Alcotest.fail (Board.show_board_error e)
    | Ok fetched ->
        Alcotest.(check string) "slug lookup" "alpha-board" fetched.Board.slug)
 
 let test_sub_board_list () =
-  ignore (Board_dispatch.create_sub_board ~slug:"list-a" ~name:"A" ~description:""
+  ignore (Board_dispatch.create_sub_board ~reader:Masc_board_handlers.Board_access.Operator ~slug:"list-a" ~name:"A" ~description:""
             ~owner:"agent-1" ());
-  ignore (Board_dispatch.create_sub_board ~slug:"list-b" ~name:"B" ~description:""
+  ignore (Board_dispatch.create_sub_board ~reader:Masc_board_handlers.Board_access.Operator ~slug:"list-b" ~name:"B" ~description:""
             ~owner:"agent-2" ());
-  let all = Board_dispatch.list_sub_boards () in
+  let all = Board_dispatch.list_sub_boards ~reader:Masc_board_handlers.Board_access.Operator () in
   Alcotest.(check bool) "has sub-boards" true (List.length all >= 2)
 
 let test_sub_board_slug_conflict () =
-  ignore (Board_dispatch.create_sub_board ~slug:"conflict-slug" ~name:"First"
+  ignore (Board_dispatch.create_sub_board ~reader:Masc_board_handlers.Board_access.Operator ~slug:"conflict-slug" ~name:"First"
             ~description:"" ~owner:"agent-1" ());
-  (match Board_dispatch.create_sub_board ~slug:"conflict-slug" ~name:"Second"
+  (match Board_dispatch.create_sub_board ~reader:Masc_board_handlers.Board_access.Operator ~slug:"conflict-slug" ~name:"Second"
            ~description:"" ~owner:"agent-2" () with
   | Error Board.Already_exists _ -> ()  (* expected *)
   | Ok _ -> Alcotest.fail "expected Already_exists for duplicate slug"
   | Error e -> Alcotest.fail ("unexpected error: " ^ Board.show_board_error e))
 
 let test_sub_board_delete () =
-  (match Board_dispatch.create_sub_board ~slug:"delete-me" ~name:"Temp"
+  (match Board_dispatch.create_sub_board ~reader:Masc_board_handlers.Board_access.Operator ~slug:"delete-me" ~name:"Temp"
            ~description:"" ~owner:"agent-1" () with
   | Error e -> Alcotest.fail (Board.show_board_error e)
   | Ok sb ->
@@ -2792,7 +2812,7 @@ let test_sub_board_delete () =
       (match Board_dispatch.delete_sub_board ~sub_board_id:id with
        | Error e -> Alcotest.fail (Board.show_board_error e)
        | Ok () ->
-           (match Board_dispatch.get_sub_board ~sub_board_id:id with
+           (match Board_dispatch.get_sub_board ~reader:Masc_board_handlers.Board_access.Operator ~sub_board_id:id with
             | Error (Board.Invalid_id _) -> ()  (* expected after delete *)
             | Ok _ -> Alcotest.fail "expected not found after delete"
             | Error e -> Alcotest.fail (Board.show_board_error e))))
@@ -2809,7 +2829,7 @@ let sub_board_slugs_from_disk () =
 
 let test_sub_board_create_delete_persisted_snapshot () =
   let created =
-    Board_dispatch.create_sub_board ~slug:"persisted-team" ~name:"Persisted"
+    Board_dispatch.create_sub_board ~reader:Masc_board_handlers.Board_access.Operator ~slug:"persisted-team" ~name:"Persisted"
       ~description:"" ~owner:"agent-1" ()
   in
   let id =
@@ -2826,7 +2846,7 @@ let test_sub_board_create_delete_persisted_snapshot () =
     (List.exists (String.equal "persisted-team") (sub_board_slugs_from_disk ()))
 
 let test_sub_board_access_default_open () =
-  (match Board_dispatch.create_sub_board ~slug:"open-board" ~name:"Open"
+  (match Board_dispatch.create_sub_board ~reader:Masc_board_handlers.Board_access.Operator ~slug:"open-board" ~name:"Open"
            ~description:"" ~owner:"agent-1" () with
   | Error e -> Alcotest.fail (Board.show_board_error e)
   | Ok sb ->
@@ -2834,7 +2854,7 @@ let test_sub_board_access_default_open () =
         true (sb.Board.access = Board.Open))
 
 let test_sub_board_members_include_owner () =
-  (match Board_dispatch.create_sub_board ~slug:"member-board" ~name:"Members"
+  (match Board_dispatch.create_sub_board ~reader:Masc_board_handlers.Board_access.Operator ~slug:"member-board" ~name:"Members"
            ~description:"" ~owner:"agent-owner"
            ~members:[" member-a "; "agent-owner"; "member-a"]
            ~access:Board.Members_only () with
@@ -2846,7 +2866,7 @@ let test_sub_board_members_include_owner () =
 
 let test_sub_board_members_only_post_policy () =
   ignore
-    (Board_dispatch.create_sub_board ~slug:"policy-team" ~name:"Policy"
+    (Board_dispatch.create_sub_board ~reader:Masc_board_handlers.Board_access.Operator ~slug:"policy-team" ~name:"Policy"
        ~description:"" ~owner:"agent-owner" ~members:["agent-member"]
        ~access:Board.Members_only ());
   (match
@@ -2875,7 +2895,7 @@ let test_sub_board_members_only_post_policy () =
 
 let test_sub_board_owner_only_post_policy () =
   ignore
-    (Board_dispatch.create_sub_board ~slug:"owner-space" ~name:"Owner"
+    (Board_dispatch.create_sub_board ~reader:Masc_board_handlers.Board_access.Operator ~slug:"owner-space" ~name:"Owner"
        ~description:"" ~owner:"agent-owner" ~members:["agent-member"]
        ~access:Board.Owner_only ());
   (match
@@ -2913,7 +2933,7 @@ let post_in_sub_board ~author ~slug ~content =
 
 let test_sub_board_members_only_comment_policy () =
   ignore
-    (Board_dispatch.create_sub_board ~slug:"comment-policy-team"
+    (Board_dispatch.create_sub_board ~reader:Masc_board_handlers.Board_access.Operator ~slug:"comment-policy-team"
        ~name:"CommentPolicy" ~description:"" ~owner:"agent-owner"
        ~members:["agent-member"] ~access:Board.Members_only ());
   let post_id =
@@ -2945,7 +2965,7 @@ let test_sub_board_members_only_comment_policy () =
 
 let test_sub_board_owner_only_comment_policy () =
   ignore
-    (Board_dispatch.create_sub_board ~slug:"comment-owner-space"
+    (Board_dispatch.create_sub_board ~reader:Masc_board_handlers.Board_access.Operator ~slug:"comment-owner-space"
        ~name:"CommentOwner" ~description:"" ~owner:"agent-owner"
        ~members:["agent-member"] ~access:Board.Owner_only ());
   let post_id =
@@ -2971,7 +2991,7 @@ let test_sub_board_owner_only_comment_policy () =
 
 let test_sub_board_open_comment_policy_allows_anyone () =
   ignore
-    (Board_dispatch.create_sub_board ~slug:"comment-open"
+    (Board_dispatch.create_sub_board ~reader:Masc_board_handlers.Board_access.Operator ~slug:"comment-open"
        ~name:"CommentOpen" ~description:"" ~owner:"agent-owner"
        ~access:Board.Open ());
   let post_id =
@@ -2987,12 +3007,12 @@ let test_sub_board_open_comment_policy_allows_anyone () =
 
 let test_sub_board_update () =
   let id =
-    match Board_dispatch.create_sub_board ~slug:"update-target" ~name:"Before"
+    match Board_dispatch.create_sub_board ~reader:Masc_board_handlers.Board_access.Operator ~slug:"update-target" ~name:"Before"
              ~description:"old desc" ~owner:"agent-owner" ~access:Board.Open () with
     | Error e -> Alcotest.fail (Board.show_board_error e)
     | Ok sb -> Board.Sub_board_id.to_string sb.Board.id
   in
-  (match Board_dispatch.update_sub_board ~sub_board_id:id ~name:"After"
+  (match Board_dispatch.update_sub_board ~reader:Masc_board_handlers.Board_access.Operator ~sub_board_id:id ~name:"After"
            ~description:"new desc" ~access:Board.Members_only ~members:["agent-a"] () with
    | Error e -> Alcotest.fail (Board.show_board_error e)
    | Ok sb ->
@@ -3002,14 +3022,14 @@ let test_sub_board_update () =
        let members = List.map Board.Agent_id.to_string sb.members in
        Alcotest.(check (list string)) "updated members include owner" ["agent-owner"; "agent-a"] members);
   (* lookup still works after update *)
-  (match Board_dispatch.get_sub_board ~sub_board_id:id with
+  (match Board_dispatch.get_sub_board ~reader:Masc_board_handlers.Board_access.Operator ~sub_board_id:id with
    | Error e -> Alcotest.fail (Board.show_board_error e)
    | Ok sb ->
        Alcotest.(check string) "persisted name" "After" sb.Board.name)
 
 let test_sub_board_delete_clears_orphan_hearth () =
   let sb_id =
-    match Board_dispatch.create_sub_board ~slug:"orphan-hearth" ~name:"Orphan"
+    match Board_dispatch.create_sub_board ~reader:Masc_board_handlers.Board_access.Operator ~slug:"orphan-hearth" ~name:"Orphan"
              ~description:"" ~owner:"agent-owner" () with
     | Error e -> Alcotest.fail (Board.show_board_error e)
     | Ok sb -> Board.Sub_board_id.to_string sb.Board.id
@@ -3023,7 +3043,7 @@ let test_sub_board_delete_clears_orphan_hearth () =
     | Error e -> Alcotest.fail (Board.Post_publication_failure.to_string e)
     | Ok post -> Board.Post_id.to_string post.id
   in
-  (match Board_dispatch.get_post ~post_id with
+  (match Board_dispatch.get_post ~reader:Masc_board_handlers.Board_access.Operator ~post_id with
    | Error e -> Alcotest.fail (Board.show_board_error e)
    | Ok post ->
        Alcotest.(check (option string)) "post has hearth before delete"
@@ -3031,7 +3051,7 @@ let test_sub_board_delete_clears_orphan_hearth () =
   (match Board_dispatch.delete_sub_board ~sub_board_id:sb_id with
    | Error e -> Alcotest.fail (Board.show_board_error e)
    | Ok () -> ());
-  (match Board_dispatch.get_post ~post_id with
+  (match Board_dispatch.get_post ~reader:Masc_board_handlers.Board_access.Operator ~post_id with
    | Error e -> Alcotest.fail (Board.show_board_error e)
    | Ok post ->
        Alcotest.(check (option string)) "post hearth cleared after sub-board delete"
@@ -3042,7 +3062,7 @@ let test_sub_board_delete_clears_orphan_hearth () =
   Result.get_ok (Board_dispatch.init_jsonl
     ~base_path:(Env_config_core.base_path ())
     ~recipient_lookup:every_name_declared ());
-  (match Board_dispatch.get_post ~post_id with
+  (match Board_dispatch.get_post ~reader:Masc_board_handlers.Board_access.Operator ~post_id with
    | Error e -> Alcotest.fail (Board.show_board_error e)
    | Ok post ->
        Alcotest.(check (option string)) "cleared hearth survives restart" None
@@ -3050,7 +3070,7 @@ let test_sub_board_delete_clears_orphan_hearth () =
 
 let test_sub_board_post_count_projection () =
   ignore
-    (Board_dispatch.create_sub_board ~slug:"counted" ~name:"Counted"
+    (Board_dispatch.create_sub_board ~reader:Masc_board_handlers.Board_access.Operator ~slug:"counted" ~name:"Counted"
        ~description:"" ~owner:"agent-owner" ());
   ignore
     (Board_dispatch.create_post ~author:"agent-a" ~content:"one"
@@ -3061,11 +3081,11 @@ let test_sub_board_post_count_projection () =
   ignore
     (Board_dispatch.create_post ~author:"agent-c" ~content:"other"
        ~post_kind:Board.Human_post ~hearth:"other" ());
-  (match Board_dispatch.get_sub_board ~sub_board_id:"counted" with
+  (match Board_dispatch.get_sub_board ~reader:Masc_board_handlers.Board_access.Operator ~sub_board_id:"counted" with
    | Error e -> Alcotest.fail (Board.show_board_error e)
    | Ok sb -> Alcotest.(check int) "derived post_count" 2 sb.Board.post_count);
   let listed =
-    Board_dispatch.list_sub_boards ()
+    Board_dispatch.list_sub_boards ~reader:Masc_board_handlers.Board_access.Operator ()
     |> List.find_opt (fun sb -> String.equal sb.Board.slug "counted")
   in
   match listed with
@@ -3302,8 +3322,71 @@ let test_initialization_refuses_foreign_workspace_alias ~lookup_installed () =
             Eio.Switch.fail sw Exit)
       with Exit -> ())
 
+let test_direct_reads_and_aggregates () =
+  let owner = "direct-owner" in
+  let stranger = Masc_board_handlers.Board_access.named "stranger" in
+  let target = Masc_board_handlers.Board_access.named "direct-target" in
+  let public = get_created (Board_dispatch.create_post ~author:owner
+      ~content:"public metric" ~visibility:Board.Public ~hearth:"shared"
+      ~post_kind:Board.Human_post ()) in
+  let private_post = get_created (Board_dispatch.create_post ~author:owner
+      ~content:"@direct-target private metric" ~visibility:Board.Direct ~hearth:"shared"
+      ~post_kind:Board.Human_post ()) in
+  let public_id = Board.Post_id.to_string public.id in
+  let private_id = Board.Post_id.to_string private_post.id in
+  let comment = Result.get_ok (Board_dispatch.add_comment ~post_id:private_id
+      ~author:owner ~content:"private reply" ()) in
+  List.iter (fun reader ->
+    Alcotest.(check bool) "Direct lookup is absent" true
+      (match Board_dispatch.get_post ~reader ~post_id:private_id with
+       | Error (Board.Post_not_found _) -> true | Ok _ | Error _ -> false);
+    Alcotest.(check (list string)) "hidden newest posts do not consume the page" [public_id]
+      (Board_dispatch.list_posts ~reader ~sort_by:Board_dispatch.Recent ~limit:1 ()
+       |> List.map (fun (post : Board.post) -> Board.Post_id.to_string post.id));
+    Alcotest.(check int) "search hides Direct" 1
+      (List.length (Board_dispatch.search ~reader ~query:"metric" ~limit:10));
+    Alcotest.(check int) "comments hide their private parent" 0
+      (List.length (Board_dispatch.list_comments ~reader ()));
+    Alcotest.(check int) "hearth count excludes private posts" 1
+      (List.assoc "shared" (Board_dispatch.list_hearths ~reader ())))
+    [stranger; Masc_board_handlers.Board_access.Anonymous];
+  List.iter (fun reader ->
+    Alcotest.(check bool) "Direct author, target and operator may read" true
+      (Result.is_ok (Board_dispatch.get_post ~reader ~post_id:private_id)))
+    [Masc_board_handlers.Board_access.named owner; target; Masc_board_handlers.Board_access.Operator];
+  Alcotest.(check bool) "internal observation remains available" true
+    (Result.is_ok (Board_dispatch.read_post_unchecked ~post_id:private_id));
+  ignore (Result.get_ok (Board_dispatch.vote ~voter:"peer" ~post_id:public_id ~direction:Board.Up));
+  ignore (Result.get_ok (Board_dispatch.vote_comment ~voter:"peer"
+    ~comment_id:(Board.Comment_id.to_string comment.id) ~direction:Board.Up));
+  Alcotest.(check int) "operator sees both earned votes" 2
+    (Board_dispatch.get_agent_karma ~reader:Masc_board_handlers.Board_access.Operator ~agent_name:owner);
+  let store = Board_dispatch.backend () in
+  let cached = store.Board.karma_cache in
+  Alcotest.(check int) "non-reader cannot infer private comment karma" 1
+    (Board_dispatch.get_agent_karma ~reader:stranger ~agent_name:owner);
+  Alcotest.(check bool) "reader projection reuses the shared karma index" true
+    (cached == store.Board.karma_cache);
+  Alcotest.(check int) "target sees both votes" 2
+    (Board_dispatch.get_agent_karma ~reader:target ~agent_name:owner);
+  let reactions = Board_dispatch.list_reactions_batch ~reader:stranger
+    ~targets:[Board.Reaction_post, private_id; Board.Reaction_post, public_id] () in
+  Alcotest.(check bool) "reaction batch contains no private target" false
+    (List.exists (fun ((_, id), _) -> String.equal id private_id) reactions);
+  (match Board_dispatch.update_post ~post_id:private_id ~editor:owner
+     ~content:"@other-target private metric" () with
+   | Error (Board.Validation_error _) -> ()
+   | Ok _ | Error _ -> Alcotest.fail "Direct edit changed the recorded readers");
+  (match Board_dispatch.update_post ~post_id:private_id ~editor:owner
+     ~content:private_post.body ~new_author:"other-author" () with
+   | Error (Board.Validation_error _) -> ()
+   | Ok _ | Error _ -> Alcotest.fail "Direct edit transferred readership through authorship")
+;;
+
 let () =
   Alcotest.run "Board_dispatch" [
+    "Direct access", [Alcotest.test_case "reads, pages and aggregates share readership" `Quick
+      (with_eio test_direct_reads_and_aggregates)];
     "backend", [
       Alcotest.test_case "initialization preserves captured workspace and lookup" `Quick
         test_initialization_preserves_captured_workspace_and_lookup;
@@ -3352,6 +3435,8 @@ let () =
       Alcotest.test_case "create append failure returns error without fanout" `Quick
         (with_eio test_create_post_persistence_failure_returns_error_without_fanout);
       Alcotest.test_case "structured roundtrip" `Quick (with_eio test_structured_post_roundtrip);
+      Alcotest.test_case "Direct comments retain parent readership" `Quick
+        (with_eio test_direct_comments_cannot_expand_readership);
       Alcotest.test_case "SSE post_created includes post_kind" `Quick
         (with_eio test_board_sse_post_created_includes_post_kind);
       Alcotest.test_case "list" `Quick (with_eio test_list_posts);

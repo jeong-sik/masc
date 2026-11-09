@@ -57,7 +57,7 @@ let queued_hitl_wake_ids ~base_path ~keeper_name =
           |> List.filter_map (fun (stimulus : Keeper_event_queue.stimulus) ->
             match stimulus.payload with
             | Keeper_event_queue.Hitl_resolved resolution -> Some resolution.approval_id
-            | Keeper_event_queue.Board_signal _
+            | Keeper_event_queue.Board_routing_pending _ | Keeper_event_queue.Board_signal _
             | Keeper_event_queue.Board_attention _
             | Keeper_event_queue.Bootstrap
             | Keeper_event_queue.Fusion_completed _

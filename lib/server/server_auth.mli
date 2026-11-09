@@ -441,6 +441,20 @@ val authorize_optional_token_bound_permission_request :
     return its canonical agent name. Malformed, empty, invalid, or
     underprivileged credentials are errors rather than anonymous fallbacks. *)
 
+val board_access_for_request :
+  base_path:string -> Httpun.Request.t ->
+  (Masc_board_handlers.Board_access.reader * string option, Masc_domain.masc_error) result
+(** Resolve Board readership and the authenticated reaction actor from the
+    same credential observation. Only a verified Admin or an uncredentialled
+    non-strict local request is Operator. Verified workers and internal Keeper
+    callers are Named; request hints and query parameters grant no readership.
+    Credential rejection never falls back to local operator access. *)
+
+val with_board_access :
+  base_path:string -> Httpun.Request.t -> Http_reqd.t ->
+  (Masc_board_handlers.Board_access.reader -> string option -> unit) -> unit
+(** Run the handler with the above access, or send the ordinary auth error. *)
+
 val not_initialized_status : [ `Service_unavailable ]
 (** HTTP 503 until the startup readiness barrier and state publication agree. *)
 

@@ -101,6 +101,7 @@ val json_response :
   ?kinds:string list ->
   after_seq:int ->
   limit:int ->
+  keep:(event -> bool) ->
   unit ->
   Yojson.Safe.t
 (** Polling-friendly JSON envelope: [generated_at_iso],
@@ -111,7 +112,21 @@ val json_response :
     last returned event so the caller can resume cleanly on the
     next poll.  [latest_seq] is the max of the persisted counter
     and JSONL rows so stale [_seq] files cannot make dashboard
-    cursors move backward. *)
+    cursors move backward. [keep] applies before paging and exact totals. *)
+
+val recent_json_response :
+  Workspace_utils.config ->
+  raw_limit:int ->
+  keep:(event -> bool) ->
+  unit ->
+  Yojson.Safe.t
+(** Bounded recent-candidate projection for the default events query. Read the
+    newest [raw_limit] raw rows, then apply [keep] before returning them. The
+    response reports [coverage="recent_window"] and [raw_window_limit]; this
+    does not promise the newest [raw_limit] authorized rows across all history.
+    [total_matching_events] and [latest_matching_seq] are JSON null because
+    older rows were not checked. Explicit {!json_response} queries retain
+    exact full-history filtered totals and report [coverage="full_history"]. *)
 
 type cache_stats = {
   past_day_files : int;  (** parsed day files held *)

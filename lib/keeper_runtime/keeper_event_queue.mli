@@ -106,6 +106,13 @@ type board_stimulus = {
 
 type stimulus_payload =
   | Board_signal of board_stimulus
+  | Board_routing_pending of board_stimulus
+      (** The original event and audience, retained when an authoritative
+          parent read prevented routing. This is pending routing, never an
+          admitted delivery: consumers must recheck parent authority and
+          readership and derive the actual route before opening any content.
+          It shares event identity with [Board_signal], so retries and cursor
+          replay retain the first durable occurrence. *)
   | Board_attention of board_attention
       (** A Board signal admitted by the configured relevance judge. The
           opaque [candidate_id] is the producer-owned durable event identity;

@@ -228,7 +228,7 @@ let test_verify_title_names_the_verification () =
       ~verification_id
       ~claim:(Masc_domain.Completion_evidence { evidence_refs = [] });
     let titles =
-      Masc.Board_dispatch.list_posts ~hearth:"verification" ~limit:200 ()
+      Masc.Board_dispatch.list_posts ~reader:Masc_board_handlers.Board_access.Operator ~hearth:"verification" ~limit:200 ()
       |> List.filter_map (fun (post : Masc.Board.post) ->
         match post.meta_json with
         | Some (`Assoc fields)

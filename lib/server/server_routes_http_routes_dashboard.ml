@@ -49,14 +49,16 @@ let respond_goal_tree_workspace_refusal req reqd error =
       ~content_type:"application/json; charset=utf-8" body reqd)
 ;;
 
-let fusion_run_list_response ~registry =
+let fusion_run_list_response ~reader ~registry =
   Server_dashboard_fusion_run_projection.list_response
+    ~reader
     ~generated_at:(Masc_domain.now_iso ())
     ~registry
 ;;
 
-let fusion_run_detail_response ~registry ~path =
+let fusion_run_detail_response ~reader ~registry ~path =
   Server_dashboard_fusion_run_projection.detail_response
+    ~reader
     ~generated_at:(Masc_domain.now_iso ())
     ~registry
     ~path
@@ -276,17 +278,24 @@ let add_routes ~sw ~clock router =
      re-fetches on the [fusion_run_status] SSE event. Registry reads are O(runs)
      in-memory, so no Dashboard_cache layer; each run serializes through the shared
      Fusion_run_registry.run_to_yojson so the shape matches the SSE delta. *)
-  |> Server_route.get Server_route.Public_read "/api/v1/dashboard/fusion-runs" (fun _state req reqd ->
+  |> Server_route.get Server_route.Public_read "/api/v1/dashboard/fusion-runs" (fun state req reqd ->
+         Server_auth.with_board_access
+           ~base_path:(Mcp_server.workspace_config state).base_path req reqd
+           (fun reader _actor ->
          let json =
-           fusion_run_list_response ~registry:(Fusion_run_registry.global ())
+           fusion_run_list_response ~reader ~registry:(Fusion_run_registry.global ())
          in
          Http.Response.json_value ~compress:true ~request:req json reqd
-       )
+       ))
   |> Server_route.prefix_get Server_route.Public_read
        Server_dashboard_fusion_run_projection.detail_prefix
-       (fun _state req reqd ->
+       (fun state req reqd ->
+         Server_auth.with_board_access
+           ~base_path:(Mcp_server.workspace_config state).base_path req reqd
+           (fun reader _actor ->
          let status, json =
            fusion_run_detail_response
+             ~reader
              ~registry:(Fusion_run_registry.global ())
              ~path:(Http.Request.path req)
          in
@@ -296,7 +305,7 @@ let add_routes ~sw ~clock router =
            ~request:req
            json
            reqd
-       )
+       ))
   (* RFC-0361 D4: read-only snapshot of the completion-authority review registry
      (in-progress + recently completed). Sibling of the fusion route above and
      shaped identically; each run serializes through the shared
@@ -685,9 +694,12 @@ let add_routes ~sw ~clock router =
          Http.Response.json_value ~compress:true ~request:req json reqd
        )
   |> Server_route.get Server_route.Public_read "/api/v1/dashboard/board" (fun state req reqd ->
+         let config = Mcp_server.workspace_config state in
+         Server_auth.with_board_access ~base_path:config.base_path req reqd
+           (fun reader actor ->
          Server_cached_read_http.respond ~request:req reqd
-           (dashboard_memory_http_payload ~config:(Mcp_server.workspace_config state) req)
-       )
+           (dashboard_memory_http_payload ~config ~reader ~actor req)
+       ))
   |> Server_route.post (Server_route.Permission Masc_domain.CanReadState) "/api/v1/dashboard/link-previews" (fun state req reqd ->
            Http.Request.read_body_async reqd (fun body_str ->
              handle_dashboard_link_previews state req reqd body_str))

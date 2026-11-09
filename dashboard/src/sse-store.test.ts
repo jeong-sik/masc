@@ -891,6 +891,30 @@ describe('setupServerPushReaction reconnect hydration', () => {
     expect(refreshBoard).toHaveBeenCalledTimes(1)
   })
 
+  it('refreshes board projections from an invalidation with no private post identity', async () => {
+    const { sseStore } = await loadSseStore()
+    route.value = { tab: 'workspace', params: { section: 'board' }, postId: null }
+
+    sseStore.routeServerPushEvent({ type: 'board_changed' })
+    vi.advanceTimersByTime(1_000)
+    await flushAsyncWork()
+
+    expect(refreshBoard).toHaveBeenCalledTimes(1)
+  })
+
+  it('refetches the fusion board-sink track when a non-public board change arrives', async () => {
+    const { sseStore } = await loadSseStore()
+    const refreshFusion = vi.fn()
+    sseStore.registerFusionBoardRefresh(refreshFusion)
+    route.value = { tab: 'fusion', params: {}, postId: null }
+
+    sseStore.routeServerPushEvent({ type: 'board_changed' })
+    vi.advanceTimersByTime(1_000)
+    await flushAsyncWork()
+
+    expect(refreshFusion).toHaveBeenCalledTimes(1)
+  })
+
   it('refetches the fusion board-sink track when a post is created', async () => {
     const { sseStore } = await loadSseStore()
     const refreshFusion = vi.fn()

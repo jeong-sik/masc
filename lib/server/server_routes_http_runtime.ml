@@ -1965,9 +1965,9 @@ let board_comment_context ~focused_comment comments selected =
       Comment_id_set.mem (Board.Comment_id.to_string comment.id) included)
     comments
 
-let board_post_detail_json ?(comment_request = default_board_comment_request) ?focused_comment ~config ~voter
+let board_post_detail_json ~reader ?(comment_request = default_board_comment_request) ?focused_comment ~config ~voter
     ~reaction_actor ~response_format ~post_id () =
-  match Board_dispatch.get_post_and_comments ~post_id with
+  match Board_dispatch.get_post_and_comments ~reader ~post_id with
   | Error err ->
       (* Render a human-readable message (e.g. "Post not found: <id>") via the
          shared Board_tool.board_error_to_string, matching the 404 contract in
@@ -1994,7 +1994,7 @@ let board_post_detail_json ?(comment_request = default_board_comment_request) ?f
                      | Some parent -> `String (Board.Comment_id.to_string parent)) ]) comments)
         |> Yojson.Safe.to_string |> Agent_core_sha256.digest_string |> Agent_core_sha256.to_hex in
       let author = Board.Agent_id.to_string post.author in
-      let author_karma = Board_dispatch.get_agent_karma ~agent_name:author in
+      let author_karma = Board_dispatch.get_agent_karma ~reader ~agent_name:author in
       match
         Board.Comment_page.select
           ~comment_id_of:(fun (comment : Board.comment) ->
@@ -2027,7 +2027,7 @@ let board_post_detail_json ?(comment_request = default_board_comment_request) ?f
           Board.Comment_page.Position.to_yojson
             (Board.Comment_page.Position.of_page page)
         in
-        let current_vote = board_current_vote_for_post ~voter ~post_id in
+        let current_vote = board_current_vote_for_post ~reader ~voter ~post_id in
         let reaction_targets =
           (Board.Reaction_post, post_id)
           :: List.map
@@ -2036,7 +2036,7 @@ let board_post_detail_json ?(comment_request = default_board_comment_request) ?f
                context_comments
         in
         let reaction_rows =
-          board_reactions_batch ~targets:reaction_targets ~voter:reaction_actor
+          board_reactions_batch ~reader ~targets:reaction_targets ~voter:reaction_actor
         in
         let reactions_for = board_reactions_lookup reaction_rows in
         let reactions = reactions_for (Board.Reaction_post, post_id) in
@@ -2046,7 +2046,7 @@ let board_post_detail_json ?(comment_request = default_board_comment_request) ?f
         in
         let comment_json (comment : Board.comment) =
           let comment_id = Board.Comment_id.to_string comment.id in
-          let current_vote = board_current_vote_for_comment ~voter ~comment_id in
+          let current_vote = board_current_vote_for_comment ~reader ~voter ~comment_id in
           let reactions = reactions_for (Board.Reaction_comment, comment_id) in
           board_comment_dashboard_json ?current_vote ~reactions comment in
         let context_comment_json (comment : Board.comment) =
@@ -2074,12 +2074,12 @@ let board_post_detail_json ?(comment_request = default_board_comment_request) ?f
 
 let board_sub_board_detail_prefix = "/api/v1/board/sub-boards/"
 
-let board_sub_board_detail_json ~path =
+let board_sub_board_detail_json ~reader ~path =
   match extract_path_param ~prefix:board_sub_board_detail_prefix path with
   | None ->
     (`Bad_request, `Assoc [ ("error", `String "sub_board_id is required") ])
   | Some sub_board_id ->
-    (match Board_dispatch.get_sub_board ~sub_board_id with
+    (match Board_dispatch.get_sub_board ~reader ~sub_board_id with
      | Ok sb -> (`OK, Board.sub_board_to_yojson sb)
      | Error e ->
        ( `Not_found,

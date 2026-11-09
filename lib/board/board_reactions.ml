@@ -283,6 +283,7 @@ let toggle_reaction store ~target_type ~target_id ~user_id ~emoji
   | _, Error e -> Error e
   | Ok user_id, Ok emoji ->
     with_persist_lock store (fun () ->
+      let* () = require_posts_source_readable store in
       match
         with_lock store (fun () ->
           stage_reaction_toggle_unlocked

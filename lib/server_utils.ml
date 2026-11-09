@@ -165,19 +165,19 @@ let board_voter_query request =
   |> Option.map String.trim
   |> Fun.flip Option.bind (fun raw -> if raw = "" then None else Some raw)
 
-let board_current_vote_for_post ~voter ~post_id =
+let board_current_vote_for_post ~reader ~voter ~post_id =
   match voter with
   | None -> None
   | Some voter -> (
-      match Board_dispatch.current_vote_for_post ~voter ~post_id with
+      match Board_dispatch.current_vote_for_post ~reader ~voter ~post_id with
       | Ok vote -> Some vote
       | Error _ -> Some None)
 
-let board_current_vote_for_comment ~voter ~comment_id =
+let board_current_vote_for_comment ~reader ~voter ~comment_id =
   match voter with
   | None -> None
   | Some voter -> (
-      match Board_dispatch.current_vote_for_comment ~voter ~comment_id with
+      match Board_dispatch.current_vote_for_comment ~reader ~voter ~comment_id with
       | Ok vote -> Some vote
       | Error _ -> Some None)
 
@@ -197,9 +197,9 @@ let board_vote_state_fields = function
         ("has_voted", `Bool true);
       ]
 
-let board_reactions_for_post ~voter ~post_id =
+let board_reactions_for_post ~reader ~voter ~post_id =
   match
-    Board_dispatch.list_reactions ~target_type:Board.Reaction_post
+    Board_dispatch.list_reactions ~reader ~target_type:Board.Reaction_post
       ~target_id:post_id ?user_id:voter ()
   with
   | Ok summaries -> summaries
@@ -208,9 +208,9 @@ let board_reactions_for_post ~voter ~post_id =
         (Board_types.show_board_error err);
       []
 
-let board_reactions_for_comment ~voter ~comment_id =
+let board_reactions_for_comment ~reader ~voter ~comment_id =
   match
-    Board_dispatch.list_reactions ~target_type:Board.Reaction_comment
+    Board_dispatch.list_reactions ~reader ~target_type:Board.Reaction_comment
       ~target_id:comment_id ?user_id:voter ()
   with
   | Ok summaries -> summaries
@@ -219,10 +219,10 @@ let board_reactions_for_comment ~voter ~comment_id =
         comment_id (Board_types.show_board_error err);
       []
 
-let board_reactions_batch ~targets ~voter =
+let board_reactions_batch ~reader ~targets ~voter =
   match targets with
   | [] -> []
-  | _ -> Board_dispatch.list_reactions_batch ~targets ?user_id:voter ()
+  | _ -> Board_dispatch.list_reactions_batch ~reader ~targets ?user_id:voter ()
 
 module Reaction_target_map = Map.Make (struct
   type t = Board.reaction_target_type * string

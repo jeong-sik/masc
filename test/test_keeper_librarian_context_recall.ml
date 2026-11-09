@@ -23,7 +23,10 @@ let with_store f =
   f ~base_path ~keepers_dir
 
 let commit ~keepers_dir ~previous text =
-  let source : Context.source = {reference = "event:campaign"; content = `String "continue"} in
+  let source : Context.source =
+    {reference = "event:campaign";
+     content = Keeper_event_queue.stimulus_to_yojson
+       {post_id="campaign";urgency=Normal;arrived_at=0.;payload=Bootstrap}} in
   let pocket : Context.pocket =
     { id = "campaign"; merge_contexts = []; sources = [source.reference]; context = text;
       next_steps = ["DO_NOT_REPEAT_DEPLOYMENT"]; completeness = Context.Current } in
@@ -471,10 +474,48 @@ let test_missing_guidance_precedes_artifact_publication () =
     (Option.map Context.version (ok (Context.read ~keepers_dir ~keeper_id:"keeper"))
      = Some (Context.version next))
 
+
+let test_unresolved_board_context_withholds_existing_artifact () =
+  with_store @@ fun ~base_path ~keepers_dir ->
+  let first = commit ~keepers_dir ~previous:None "PRIVATE_RETAINED_CONTEXT" in
+  ok (Recall.publish ~base_path ~keepers_dir ~keeper_name:"keeper" first);
+  let reference = artifact_of_index ~keepers_dir in
+  let source : Context.source =
+    {reference="event:pending-board";
+     content=Keeper_event_queue.stimulus_to_yojson
+       {post_id="private-parent";urgency=Normal;arrived_at=10.;
+        payload=Board_routing_pending
+          {kind=Post_created;author="actor";title="PRIVATE_TITLE";content="PRIVATE_BODY";
+           hearth=None;updated_at=Some 10.;audience=Audience_targets ["reader"]}}} in
+  let pocket : Context.pocket =
+    {id="private";merge_contexts=[];sources=[source.reference];context="PRIVATE_RETAINED_CONTEXT";
+     next_steps=["PRIVATE_NEXT_STEP"];completeness=Context.Current} in
+  let current = ok (Context.commit ~keepers_dir ~keeper_id:"keeper"
+    ~expected_version:(Some (Context.version first)) ~sources:[source] [pocket]) in
+  (* Simulate an old derived index which is current by generation/revision:
+     its bytes were published before this parent/readership gate existed. *)
+  let file = Recall.path ~keepers_dir ~keeper_name:"keeper" in
+  let old = Yojson.Safe.from_file file in
+  let fields = Yojson.Safe.Util.to_assoc old in
+  let fields = List.map (fun (key,value) -> key,
+    if key="generation" then `String current.generation
+    else if key="revision" then `Int current.revision else value) fields in
+  Fs_compat.save_file file (Yojson.Safe.to_string (`Assoc fields));
+  let before = Fs_compat.load_file (Context.path ~keepers_dir ~keeper_id:"keeper") in
+  ignore (check_notice ~base_path ~keepers_dir ~status:"unavailable");
+  (match Recall.publish ~base_path ~keepers_dir ~keeper_name:"keeper" current with
+   | Error _ -> () | Ok () -> fail "unresolved Board context was published");
+  check string "stored context is preserved" before
+    (Fs_compat.load_file (Context.path ~keepers_dir ~keeper_id:"keeper"));
+  check bool "historical artifact bytes remain intact" true (artifact_present ~base_path reference)
+;;
+
 let () =
   Prompt_registry.set_markdown_dir (prompts_dir ());
   run "working context recall"
   ["progress", [
+    test_case "unresolved Board context withholds an existing artifact" `Quick
+      test_unresolved_board_context_withholds_existing_artifact;
     test_case "managed guidance preserves actual artifact payload and reference" `Quick test_managed_guidance_preserves_artifact_payload;
     test_case "missing guidance precedes artifact publication" `Quick test_missing_guidance_precedes_artifact_publication;
     test_case "failed publication recovers on recall" `Quick test_failed_publication_recovers_on_recall;

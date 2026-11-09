@@ -11,6 +11,7 @@ let emit_tool_exec
       ~task_id
       ()
   =
+  let board_tool = Option.is_some (Tool_name.Board_name.of_string tool_name) in
   try
     ignore
       (Activity_graph.emit
@@ -27,7 +28,8 @@ let emit_tool_exec
                ; "duration_ms", `Int duration_ms
                ; ( "typed_outcome"
                  , match typed_outcome with
-                   | Some outcome -> Keeper_tool_outcome.to_json outcome
+                   | Some outcome when not board_tool -> Keeper_tool_outcome.to_json outcome
+                   | Some _ -> `Null
                    | None -> `Null )
                ; "provider", `String provider
                ; "keeper_name", `String meta.name
@@ -35,6 +37,7 @@ let emit_tool_exec
                ; "agent_core_turn", `Int agent_core_turn
                ; "task_id", Json_util.string_opt_to_json task_id
                ; "source", `String "keeper_in_turn"
+               ; "tool_io_redacted", `Bool board_tool
                ])
          ~tags:[ "tool"; "keeper"; (if success then "success" else "failure") ]
          ()

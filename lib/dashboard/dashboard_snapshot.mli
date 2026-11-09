@@ -50,13 +50,16 @@ type t = private {
   namespace_truth : Yojson.Safe.t;
   telemetry_summary : Yojson.Safe.t;
   activity_events_default : Yojson.Safe.t;
-  (** RFC-0201 Step 1.  [Activity_graph.json_response] computed against
-      the default-shaped query ([kinds=[]], [after_seq=0],
-      [limit=1000]).  Handlers slice this to the request's [limit] for
-      default-shaped queries; non-default queries (cursor, kinds
-      filter, since) fall through to the synchronous compute path.
-      [`Null] until the refresh fiber's first successful publish. *)
+  (** Public rows within the newest 1000 raw candidates, with
+      [coverage="recent_window"] and unknown/null historical totals.
+      HTTP revalidates the shared {!public_activity_events} cache before
+      slicing to its requested limit. [`Null] before first publish. *)
 }
+
+val public_activity_events : Workspace.config -> Yojson.Safe.t
+(** Shared events-only projection for background refresh and HTTP. Every hit
+    revalidates its Public parent proof; rejected sources cannot authorize
+    fallback to a retained snapshot. Invoke on a worker. *)
 
 val current : unit -> t option
 (** [Atomic.get] from the live slot.  Returns [None] until the first
@@ -121,6 +124,7 @@ val register_namespace_truth_snapshot :
 module For_testing : sig
   type cache
   type tools_cache
+  type activity_cache
 
   val make_cache : unit -> cache
 
@@ -135,6 +139,12 @@ module For_testing : sig
     cache:cache ->
     (unit -> Yojson.Safe.t) ->
     Yojson.Safe.t
+
+  val make_activity_cache : unit -> activity_cache
+  val refresh_activity_events :
+    config:Workspace.config ->
+    now:(unit -> float) -> ttl:float -> cache:activity_cache ->
+    (keep:(Activity_graph.event -> bool) -> Yojson.Safe.t) -> Yojson.Safe.t
 
   val should_reuse_projection :
     now:float -> ttl:float -> refreshed_at:float -> bool

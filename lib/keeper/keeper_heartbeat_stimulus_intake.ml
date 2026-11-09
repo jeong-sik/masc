@@ -122,7 +122,7 @@ let pending_board_events_of_stimulus_result ~(config : Workspace_utils.config) ~
        ~base_path ~keeper_name:meta_after_triage.name ~arrived_at:stim.arrived_at completion with
      | Ok event -> Stimulus_consumed [event]
      | Error error -> Stimulus_job_unavailable (completion.oj_job_id,error))
-  | Keeper_event_queue.Board_signal _ | Keeper_event_queue.Board_attention _
+  | Keeper_event_queue.Board_routing_pending _ | Keeper_event_queue.Board_signal _ | Keeper_event_queue.Board_attention _
   | Keeper_event_queue.Tool_result_ready _
   | Keeper_event_queue.Bootstrap | Keeper_event_queue.Fusion_completed _
   | Keeper_event_queue.Schedule_due _ | Keeper_event_queue.Connector_attention _
@@ -235,7 +235,7 @@ let event_queue_trigger_of_stimulus (stim : Keeper_event_queue.stimulus) =
        instead of silently proceeding on its own state. This changes only how
        the turn is described, not whether it runs. *)
     Some Keeper_world_observation.Hitl_resolved_stimulus
-  | Keeper_event_queue.Board_signal _
+  | Keeper_event_queue.Board_routing_pending _ | Keeper_event_queue.Board_signal _
   | Keeper_event_queue.Board_attention _
   | Keeper_event_queue.Fusion_completed _
   | Keeper_event_queue.Delegate_completed _
@@ -275,7 +275,7 @@ let consume_single_heartbeat_stimulus
   let class_str = Keeper_event_queue.payload_kind_label stim.payload in
   let intake_result =
     match stim.payload with
-    | Keeper_event_queue.Board_signal _ | Keeper_event_queue.Board_attention _ ->
+    | Keeper_event_queue.Board_routing_pending _ | Keeper_event_queue.Board_signal _ | Keeper_event_queue.Board_attention _ ->
       pending_board_events_of_stimulus_result ~config:ctx.config ~meta_after_triage stim
     | Keeper_event_queue.Fusion_completed c ->
       (* RFC-0266: an async fusion deliberation finished and woke this keeper.
@@ -486,7 +486,7 @@ let stimulus_ready_for_intake ~base_path (stimulus : Keeper_event_queue.stimulus
          resolution.approval_id
          (Keeper_approval_queue_result.storage_error_to_string detail);
        false)
-  | Keeper_event_queue.Board_signal _
+  | Keeper_event_queue.Board_routing_pending _ | Keeper_event_queue.Board_signal _
   | Keeper_event_queue.Board_attention _
   | Keeper_event_queue.Bootstrap
   | Keeper_event_queue.Fusion_completed _
@@ -566,7 +566,7 @@ let ready_hitl_resolution_peek ~base_path ~keeper_name =
              && not (continuation_settled ~base_path ~keeper_name resolution)
            then Some resolution
            else None
-         | Keeper_event_queue.Board_signal _
+         | Keeper_event_queue.Board_routing_pending _ | Keeper_event_queue.Board_signal _
          | Keeper_event_queue.Board_attention _
          | Keeper_event_queue.Bootstrap
          | Keeper_event_queue.Fusion_completed _
@@ -796,7 +796,7 @@ let reconcile_spent_selection
           | Ok () -> Ok Spent_grant_replay_acknowledged)
      | Error message -> Error ("approval resolution projection failed: " ^ message))
   | Ask_answered _
-  | Board_signal _
+  | Board_routing_pending _ | Board_signal _
   | Board_attention _
   | Bootstrap
   | Fusion_completed _
@@ -827,7 +827,7 @@ type intake_source_scope =
 let source_scope (selection : Keeper_event_queue_state.pending_selection) =
   match selection.source.payload with
   | Keeper_event_queue.Schedule_due _ -> Scheduled_work selection
-  | Keeper_event_queue.Board_signal _ | Board_attention _ | Bootstrap
+  | Keeper_event_queue.Board_routing_pending _ | Keeper_event_queue.Board_signal _ | Board_attention _ | Bootstrap
   | Fusion_completed _ | Connector_attention _ | Hitl_resolved _
   | Ask_answered _ | Completion_authority_rejected _ | Task_cancelled _
   | Workspace_message _ | Delegate_completed _ | Composition_completed _
@@ -859,7 +859,7 @@ let heartbeat_event_intake
   let connector_attention_event_id (s : Keeper_event_queue.stimulus) =
     match s.Keeper_event_queue.payload with
     | Keeper_event_queue.Connector_attention { event_id; _ } -> Some event_id
-    | Keeper_event_queue.Board_signal _
+    | Keeper_event_queue.Board_routing_pending _ | Keeper_event_queue.Board_signal _
     | Keeper_event_queue.Board_attention _
     | Keeper_event_queue.Bootstrap
     | Keeper_event_queue.Fusion_completed _
@@ -897,7 +897,7 @@ let heartbeat_event_intake
               below selects one readable conversation. A new kind is listed here on
               purpose, so whether it may share a batch is decided, not
               inherited. *)
-           | Keeper_event_queue.Board_signal _
+           | Keeper_event_queue.Board_routing_pending _ | Keeper_event_queue.Board_signal _
            | Keeper_event_queue.Board_attention _
            | Keeper_event_queue.Bootstrap
            | Keeper_event_queue.Fusion_completed _
@@ -919,7 +919,7 @@ let heartbeat_event_intake
   let max_events = Env_config_keeper.KeeperAdmissionBounds.max_events () in
   let is_board_source (selection : Keeper_event_queue_state.pending_selection) =
     match selection.source.payload with
-    | Keeper_event_queue.Board_signal _ | Keeper_event_queue.Board_attention _ -> true
+    | Keeper_event_queue.Board_routing_pending _ | Keeper_event_queue.Board_signal _ | Keeper_event_queue.Board_attention _ -> true
     | Keeper_event_queue.Ask_answered _
     | Keeper_event_queue.Bootstrap
     | Keeper_event_queue.Fusion_completed _
@@ -1103,7 +1103,7 @@ let heartbeat_event_intake
                    ask_snapshot := Some snapshot;
                    snapshot in
                Some snapshot
-             | Keeper_event_queue.Board_signal _ | Keeper_event_queue.Board_attention _
+             | Keeper_event_queue.Board_routing_pending _ | Keeper_event_queue.Board_signal _ | Keeper_event_queue.Board_attention _
              | Keeper_event_queue.Bootstrap | Keeper_event_queue.Fusion_completed _
              | Keeper_event_queue.Schedule_due _ | Keeper_event_queue.Connector_attention _
              | Keeper_event_queue.Hitl_resolved _ | Keeper_event_queue.Completion_authority_rejected _

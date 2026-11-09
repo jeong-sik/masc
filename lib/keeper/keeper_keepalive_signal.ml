@@ -400,12 +400,30 @@ let deliver_addressed_board_signal
   | Keeper_registry_event_queue.Stimulus_storage_error detail -> Error detail
 ;;
 
-(* A relevance read touches the board store only on the [Thread_participants]
-   route ([Board_signal.wake_reason] re-reads the post and its comments); the
-   [Targets] and [Broadcast] routes are payload-only and never answer
-   [Unavailable]. A read is served from memory, so [Unavailable] means the
-   post was swept or an id does not parse, and reading again would give the
-   same answer. *)
+let retain_unavailable_board_routing ~(config : Workspace.config)
+      ~(meta : keeper_meta) (addressed : Board_dispatch.addressed_board_signal)
+      (unavailable : Board_wake.board_unavailable)
+  =
+  match unavailable.error with
+  | Board.Read_invalid_id _ | Board.Read_post_not_found _ | Board.Read_comment_not_found _ -> ()
+  | Board.Read_source_unavailable _ ->
+    let stimulus = Board_wake.board_routing_pending_stimulus
+      ~arrived_at:(Time_compat.now ()) addressed in
+    (* No owner signal or model input is authorized by unavailable evidence.
+       The existing owner intake retries the exact original audience later. *)
+    (match Keeper_registry_event_queue.enqueue_stimulus_durable_result
+       ~base_path:config.base_path meta.name stimulus with
+     | Keeper_registry_event_queue.Stimulus_enqueued
+     | Keeper_registry_event_queue.Stimulus_already_present -> ()
+     | Keeper_registry_event_queue.Stimulus_storage_error detail ->
+       Log.Keeper.warn
+         "board routing retention failed: keeper=%s post=%s error=%s"
+         meta.name addressed.signal.post_id detail)
+;;
+
+(* Every route checks current parent readership. A transient source refusal
+   retains the exact signal without waking a lane; permanent absence can be
+   retired. Intake retries the recorded audience after authority recovers. *)
 let wakeup_relevant_keeper_for_board_signal
       ?dispatch_attention
       ?dispatch_discoverable_post
@@ -537,6 +555,7 @@ let wakeup_relevant_keeper_for_board_signal
                     meta.name
                     signal.post_id
                 | Keeper_world_observation_board_signal.Unavailable unavailable ->
+                  retain_unavailable_board_routing ~config ~meta addressed unavailable;
                   Otel_metric_store.inc_counter
                     Keeper_metrics.(to_string KeepaliveSignalFailures)
                     ~labels:
@@ -632,14 +651,13 @@ let wakeup_relevant_keeper_for_board_signal
         | Ok (Some meta) ->
           (match Keeper_board_audience.route_for_keeper ~audience ~meta ~signal with
            | Keeper_world_observation_board_signal.Unavailable unavailable ->
+             retain_unavailable_board_routing ~config ~meta addressed unavailable;
              Otel_metric_store.inc_counter
                Keeper_metrics.(to_string KeepaliveSignalFailures)
                ~labels:[ ("keeper", meta.name); ("phase", "board_signal_read") ]
                ();
-             (* The post was swept or an id does not parse; the cursor scan
-                skips it the same way. *)
              Log.Keeper.warn
-               "board signal relevance read unavailable, lane dropped: \
+               "board signal relevance read unavailable: \
                 keeper=%s post=%s error=%s"
                meta.name
                signal.post_id

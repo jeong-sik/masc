@@ -64,6 +64,7 @@ const FIXED_SSE_EVENT_TYPES = new Set([
   'comment_voted',
   'reaction_changed',
   'post_changed',
+  'board_changed',
   'heartbeat',
   'keeper_heartbeat',
   'keeper_phase_changed',

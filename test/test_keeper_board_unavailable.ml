@@ -2,7 +2,7 @@
    [Board_unavailable] exception (and [raise_unavailable]) were removed in
    favor of an explicit [(_, board_unavailable) result] contract.
 
-   Incident this replaces: [Board_dispatch.get_post] returning
+   Incident this replaces: [Board_dispatch.get_post ~reader:Masc_board_handlers.Board_access.Operator] returning
    [Post_not_found] (a post swept from the in-memory store — permanent) was
    modeled as a transient exception. Nothing on the stimulus-intake path
    caught it, so it crashed the keeper heartbeat cycle via the generic
@@ -350,7 +350,7 @@ let test_unavailable_posts_source_retains_the_exact_durable_selection () =
   @@ fun () ->
   (match Masc_board_handlers.Board_votes_json.load_persisted_posts store with
    | Error _ -> () | Ok _ -> fail "missing posts source was admitted");
-  (match Board_dispatch.read_post ~post_id with
+  (match Board_dispatch.read_post ~reader:Masc_board_handlers.Board_access.Operator ~post_id with
    | Ok _ -> () | Error error -> fail (Board.show_board_read_error error));
   let selected = intake () in
   check (list string) "an unavailable source is not admitted" [] (admitted_ids selected);
@@ -870,6 +870,46 @@ let test_malformed_queued_audience_is_a_failed_read () =
     [ []; [ "../not-a-keeper" ]; [ "alpha"; "../not-a-keeper" ] ]
 ;;
 
+
+let test_direct_durable_intake_and_model_side_observers () =
+  let meta = test_meta "private-reader" in
+  let outsider = test_meta "outsider" in
+  let post = match Board_dispatch.create_post ~author:"external-author"
+    ~title:"PRIVATE_TITLE" ~content:"@private-reader PRIVATE_BODY"
+    ~post_kind:Board.Human_post ~visibility:Board.Direct () with
+    | Ok post -> post | Error error -> fail (Board.Post_publication_failure.to_string error) in
+  let post_id = Board.Post_id.to_string post.id in
+  let comment = match Board_dispatch.add_comment ~post_id ~author:"external-author"
+    ~content:"PRIVATE_COMMENT" () with
+    | Ok comment -> comment | Error error -> fail (Board.show_board_error error) in
+  let kinds = Keeper_event_queue.[Post_created; Post_updated {content_updated_at=post.created_at +. 1.};
+    Comment_added {comment_id=Board.Comment_id.to_string comment.id; parent_id=None};
+    Reaction_changed {target_type=Reaction_post;target_id=post_id;user_id="external-author";emoji="secret";reacted=true};
+    Vote_cast {target=Vote_on_post post_id;target_author="external-author";voter="external-voter";direction=Vote_up}] in
+  List.iter (fun kind ->
+    let bs : Keeper_event_queue.board_stimulus =
+      {kind;author="external-author";title="PRIVATE_TITLE";content="PRIVATE_COMMENT";
+       hearth=None;updated_at=Some post.created_at;audience=Audience_targets [meta.name]} in
+    let signal : Keeper_event_queue.stimulus =
+      {post_id; urgency=Normal;arrived_at=post.created_at;payload=Board_signal bs} in
+    let attention = {signal with payload=Keeper_event_queue.Board_attention {candidate_id="private-candidate";signal=bs}} in
+    let pending = {signal with payload=Keeper_event_queue.Board_routing_pending bs} in
+    let project meta source = Keeper_world_observation.pending_board_event_of_stimulus
+      ~base_path:(Sys.getenv "MASC_BASE_PATH") ~meta source in
+    List.iter (fun source ->
+      (match project outsider source with Ok None -> () | _ -> fail "outsider projected a Direct source");
+      check bool "model-side observer withholds outsider payload" false
+        (Keeper_board_audience.can_project_queued_stimulus ~meta:outsider source)) [signal;attention;pending];
+    (match project meta signal with Ok (Some _) -> () | _ -> fail "actual reader lost Direct delivery");
+    (match project meta attention with Ok None -> () | _ -> fail "Direct entered discoverable attention");
+    check bool "authorized signal remains visible" true
+      (Keeper_board_audience.can_project_queued_stimulus ~meta signal);
+    check bool "pending routing never enters raw model input" false
+      (Keeper_board_audience.can_project_queued_stimulus ~meta pending);
+    check string "pending preview carries no title or body" "board_routing_pending"
+      (Keeper_reaction_ledger.stimulus_payload_preview pending.payload)) kinds
+;;
+
 let () =
   run
     "keeper_board_unavailable"
@@ -888,7 +928,9 @@ let () =
             test_poison_durable_source_is_retired_during_intake
         ] )
     ; ( "admission"
-      , [ test_case "an empty-observation source still spends an admission slot" `Quick
+      , [ test_case "Direct durable intake and model-side observers recheck readership" `Quick
+            (with_eio test_direct_durable_intake_and_model_side_observers)
+        ; test_case "an empty-observation source still spends an admission slot" `Quick
             test_empty_observation_source_still_spends_an_admission_slot
         ; test_case "permanent absence does not spend an admission slot" `Quick
             test_permanent_absence_does_not_spend_an_admission_slot

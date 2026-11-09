@@ -439,7 +439,7 @@ let stimulus_owns_turn_reaction (stimulus : Keeper_event_queue.stimulus) =
   | Keeper_event_queue.Schedule_due _
   | Keeper_event_queue.Hitl_resolved _
   | Keeper_event_queue.Ask_answered _ -> true
-  | Keeper_event_queue.Board_signal _
+  | Keeper_event_queue.Board_routing_pending _ | Keeper_event_queue.Board_signal _
   | Keeper_event_queue.Board_attention _
   | Keeper_event_queue.Fusion_completed _
   | Keeper_event_queue.Bootstrap
@@ -473,7 +473,7 @@ let record_replay_owned_turn_started_reactions ~ctx ~keeper_name stimuli =
          | Keeper_event_queue.Hitl_resolved _
          | Keeper_event_queue.Ask_answered _ ) ->
          record_event_queue_stimulus_turn_started ~ctx ~keeper_name stimulus
-       | Keeper_event_queue.Board_signal _
+       | Keeper_event_queue.Board_routing_pending _ | Keeper_event_queue.Board_signal _
        | Keeper_event_queue.Board_attention _
        | Keeper_event_queue.Fusion_completed _
        | Keeper_event_queue.Bootstrap
@@ -639,7 +639,7 @@ let checkpoint_source_policy : Keeper_event_queue.stimulus_payload -> checkpoint
   | Keeper_event_queue.Workspace_message _ | Keeper_event_queue.Ask_answered _
   | Keeper_event_queue.Completion_authority_rejected _ | Keeper_event_queue.Task_cancelled _
   | Keeper_event_queue.Task_outcome _ | Keeper_event_queue.Schedule_due _ -> Preserve_and_rotate
-  | Keeper_event_queue.Bootstrap | Keeper_event_queue.Board_signal _
+  | Keeper_event_queue.Bootstrap | Keeper_event_queue.Board_routing_pending _ | Keeper_event_queue.Board_signal _
   | Keeper_event_queue.Board_attention _
   | Keeper_event_queue.Hitl_resolved _ -> Attention_delivered
 ;;
@@ -1204,7 +1204,7 @@ let run_keepalive_unified_turn
                 (fun (stim : Keeper_event_queue.stimulus) ->
                   match stim.Keeper_event_queue.payload with
                   | Keeper_event_queue.Hitl_resolved resolution -> Some resolution
-                  | Keeper_event_queue.Bootstrap | Keeper_event_queue.Board_signal _
+                  | Keeper_event_queue.Bootstrap | Keeper_event_queue.Board_routing_pending _ | Keeper_event_queue.Board_signal _
                   | Keeper_event_queue.Board_attention _ | Keeper_event_queue.Fusion_completed _
                   | Keeper_event_queue.Schedule_due _ | Keeper_event_queue.Connector_attention _
                   | Keeper_event_queue.Ask_answered _
@@ -1373,7 +1373,7 @@ let run_keepalive_unified_turn
                match selection.Keeper_event_queue_state.source.payload with
                | Keeper_event_queue.Hitl_resolved _ ->
                  !hitl_continuation_projection_ok
-               | Keeper_event_queue.Bootstrap | Keeper_event_queue.Board_signal _
+               | Keeper_event_queue.Bootstrap | Keeper_event_queue.Board_routing_pending _ | Keeper_event_queue.Board_signal _
                | Keeper_event_queue.Board_attention _ | Keeper_event_queue.Fusion_completed _
                | Keeper_event_queue.Schedule_due _ | Keeper_event_queue.Connector_attention _
                | Keeper_event_queue.Ask_answered _

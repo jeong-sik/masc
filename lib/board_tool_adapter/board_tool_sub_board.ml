@@ -30,8 +30,8 @@ let same_agent_id left right =
   String.equal (Board.Agent_id.to_string left) (Board.Agent_id.to_string right)
 ;;
 
-let require_sub_board_owner ~sub_board_id ~owner =
-  match Board_dispatch.get_sub_board ~sub_board_id with
+let require_sub_board_owner ~reader ~sub_board_id ~owner =
+  match Board_dispatch.get_sub_board ~reader ~sub_board_id with
   | Error _ as err -> err
   | Ok sb ->
     if same_agent_id sb.Board.owner owner
@@ -46,7 +46,7 @@ let require_sub_board_owner ~sub_board_id ~owner =
               (Board.Agent_id.to_string sb.owner)))
 ;;
 
-let handle_sub_board_create ~tool_name ~start_time args : Tool_result.result =
+let handle_sub_board_create ~reader ~tool_name ~start_time args : Tool_result.result =
   let slug = get_string_opt args "slug" |> Option.value ~default:"" in
   let name = get_string_opt args "name" |> Option.value ~default:"" in
   let description = get_string_opt args "description" |> Option.value ~default:"" in
@@ -56,7 +56,7 @@ let handle_sub_board_create ~tool_name ~start_time args : Tool_result.result =
   | Error e -> Board_tool_format.error_of_board_error ~tool_name ~start_time e
   | Ok access ->
   match
-    Board_dispatch.create_sub_board
+    Board_dispatch.create_sub_board ~reader
       ~slug
       ~name
       ~description
@@ -77,8 +77,8 @@ let handle_sub_board_create ~tool_name ~start_time args : Tool_result.result =
     Board_tool_format.error_of_board_error ~tool_name ~start_time e
 ;;
 
-let handle_sub_board_list ~tool_name ~start_time _args : Tool_result.result =
-  let boards = Board_dispatch.list_sub_boards () in
+let handle_sub_board_list ~reader ~tool_name ~start_time _args : Tool_result.result =
+  let boards = Board_dispatch.list_sub_boards ~reader () in
   let lines =
     List.map
       (fun (sb : Board.sub_board) ->
@@ -99,9 +99,9 @@ let handle_sub_board_list ~tool_name ~start_time _args : Tool_result.result =
     ()
 ;;
 
-let handle_sub_board_get ~tool_name ~start_time args : Tool_result.result =
+let handle_sub_board_get ~reader ~tool_name ~start_time args : Tool_result.result =
   let sub_board_id = get_string_opt args "sub_board_id" |> Option.value ~default:"" in
-  match Board_dispatch.get_sub_board ~sub_board_id with
+  match Board_dispatch.get_sub_board ~reader ~sub_board_id with
   | Ok sb ->
     let members =
       List.map Board.Agent_id.to_string sb.Board.members |> String.concat ", "
@@ -125,7 +125,7 @@ let handle_sub_board_get ~tool_name ~start_time args : Tool_result.result =
     Board_tool_format.error_of_board_error ~tool_name ~start_time e
 ;;
 
-let handle_sub_board_update ~tool_name ~start_time args : Tool_result.result =
+let handle_sub_board_update ~reader ~tool_name ~start_time args : Tool_result.result =
   let sub_board_id = get_string_opt args "sub_board_id" |> Option.value ~default:"" in
   let name = get_string_opt args "name" in
   let description = get_string_opt args "description" in
@@ -137,11 +137,11 @@ let handle_sub_board_update ~tool_name ~start_time args : Tool_result.result =
   match owner_arg args with
   | Error e -> Board_tool_format.error_of_board_error ~tool_name ~start_time e
   | Ok owner ->
-  match require_sub_board_owner ~sub_board_id ~owner with
+  match require_sub_board_owner ~reader ~sub_board_id ~owner with
   | Error e -> Board_tool_format.error_of_board_error ~tool_name ~start_time e
   | Ok () ->
   match
-    Board_dispatch.update_sub_board
+    Board_dispatch.update_sub_board ~reader
       ~sub_board_id
       ?name
       ?description
@@ -161,12 +161,12 @@ let handle_sub_board_update ~tool_name ~start_time args : Tool_result.result =
     Board_tool_format.error_of_board_error ~tool_name ~start_time e
 ;;
 
-let handle_sub_board_delete ~tool_name ~start_time args : Tool_result.result =
+let handle_sub_board_delete ~reader ~tool_name ~start_time args : Tool_result.result =
   let sub_board_id = get_string_opt args "sub_board_id" |> Option.value ~default:"" in
   match owner_arg args with
   | Error e -> Board_tool_format.error_of_board_error ~tool_name ~start_time e
   | Ok owner ->
-  match require_sub_board_owner ~sub_board_id ~owner with
+  match require_sub_board_owner ~reader ~sub_board_id ~owner with
   | Error e -> Board_tool_format.error_of_board_error ~tool_name ~start_time e
   | Ok () ->
   match Board_dispatch.delete_sub_board ~sub_board_id with

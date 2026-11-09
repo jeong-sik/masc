@@ -24,13 +24,9 @@ let kind_filters deps request =
   from_kinds @ from_kind |> List.sort_uniq String.compare
 
 
-(* RFC-0201 Step 1.  Default-shaped queries (kinds=[], after_seq=0)
-   read from [Dashboard_snapshot.current ()].activity_events_default —
-   the snapshot is refreshed every interval_sec by the background
-   refresh fiber, so the HTTP path is a wait-free atomic read plus a
-   list slice down to the request's [limit].  Non-default queries
-   (cursor, kinds filter) fall through to the cache+offload path
-   from PR #19150. *)
+(* The default HTTP query and background snapshot share the bounded Public
+   events cache. Its parent proof is revalidated before slicing, so an old
+   retained snapshot cannot expose a deleted/private Board parent. *)
 let slice_default_events_to_limit json ~limit =
   match json with
   | `Assoc fields ->
@@ -84,10 +80,9 @@ let events_http_json ~deps ~state request =
   let is_default_query = kinds = [] && after_seq = 0 in
   let snapshot_hit =
     if is_default_query then
-      match Dashboard_snapshot.current () with
-      | Some snap when snap.activity_events_default <> `Null ->
-        Some (slice_default_events_to_limit snap.activity_events_default ~limit)
-      | _ -> None
+      let events = Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
+        Dashboard_snapshot.public_activity_events (Mcp_server.workspace_config state)) in
+      Some (slice_default_events_to_limit events ~limit)
     else None
   in
   match snapshot_hit with
@@ -99,5 +94,6 @@ let events_http_json ~deps ~state request =
        Offload via Domain_pool_ref still protects the HTTP main
        domain from JSONL-scan stall. *)
     Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
+      let reader = Board_activity_access.create () in
       Activity_graph.json_response (Mcp_server.workspace_config state) ~kinds
-        ~after_seq ~limit ())
+        ~after_seq ~limit ~keep:(Board_activity_access.keep reader) ())

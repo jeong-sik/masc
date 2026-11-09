@@ -618,7 +618,7 @@ let announced ~name ~kind =
 (* Bodies of this test agent's arcade posts, sorted: the board's own order
    (Hot) is not what is under test. *)
 let arcade_posts () =
-  Board_dispatch.list_posts ~limit:200 ()
+  Board_dispatch.list_posts ~reader:Masc_board_handlers.Board_access.Operator ~limit:200 ()
   |> List.filter_map (fun (post : Board.post) ->
     if String.equal post.title "MSX 아케이드"
        && String.equal (Board.Agent_id.to_string post.author) "msx-test"

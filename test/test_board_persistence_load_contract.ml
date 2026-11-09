@@ -466,7 +466,7 @@ let test_all_persistence_stays_in_captured_workspace () =
       Unix.putenv "MASC_BASE_PATH" base_a;
       let store_a = init_a () in
       Unix.putenv "MASC_BASE_PATH" base_b;
-      let room = board_ok (Board_dispatch.create_sub_board ~slug:"a-room" ~name:"A room"
+      let room = board_ok (Board_dispatch.create_sub_board ~reader:Masc_board_handlers.Board_access.Operator ~slug:"a-room" ~name:"A room"
         ~description:"A policy" ~owner:"a-owner" ()) in
       let room_id = Board.Sub_board_id.to_string room.id in
       let post = post_ok (Board_dispatch.create_post ~author:"a-owner" ~content:"A post"
@@ -478,14 +478,14 @@ let test_all_persistence_stays_in_captured_workspace () =
       ignore (board_ok (Board_dispatch.vote ~voter:"a-voter" ~post_id:pid ~direction:Board.Up));
       ignore (board_ok (Board_dispatch.vote_comment ~voter:"a-voter" ~comment_id:cid
         ~direction:Board.Down));
-      ignore (board_ok (Board_dispatch.toggle_reaction ~target_type:Board.Reaction_post
+      ignore (board_ok (Board_dispatch.toggle_reaction ~reader:Masc_board_handlers.Board_access.Operator ~target_type:Board.Reaction_post
         ~target_id:pid ~user_id:"a-reader" ~emoji:"🚀"));
-      ignore (board_ok (Board_dispatch.toggle_reaction ~target_type:Board.Reaction_comment
+      ignore (board_ok (Board_dispatch.toggle_reaction ~reader:Masc_board_handlers.Board_access.Operator ~target_type:Board.Reaction_comment
         ~target_id:cid ~user_id:"a-owner" ~emoji:"🚀"));
       ignore (board_ok (Board_dispatch.update_post ~post_id:pid ~editor:"a-owner"
         ~content:"A edited under EnvB" ()));
       ignore (board_ok (Board_dispatch.set_pinned ~post_id:pid ~pinned:true));
-      ignore (board_ok (Board_dispatch.update_sub_board ~sub_board_id:room_id
+      ignore (board_ok (Board_dispatch.update_sub_board ~reader:Masc_board_handlers.Board_access.Operator ~sub_board_id:room_id
         ~access:Board.Members_only ~members:["a-reader"] ()));
       Board.flush_dirty store_a;
       b_unchanged "after producers and flush under EnvB";
@@ -498,22 +498,22 @@ let test_all_persistence_stays_in_captured_workspace () =
         store
       in
       let reloaded = restart_a () in
-      let retained = board_ok (Board_dispatch.get_post ~post_id:pid) in
+      let retained = board_ok (Board_dispatch.get_post ~reader:Masc_board_handlers.Board_access.Operator ~post_id:pid) in
       Alcotest.(check string) "edited post reloaded" "A edited under EnvB" retained.body;
       Alcotest.(check bool) "pin reloaded" true retained.pinned;
       Alcotest.(check int) "post vote reloaded" 1 retained.votes_up;
       Alcotest.(check int) "reply count rebuilt" 1 retained.reply_count;
-      let comments = board_ok (Board_dispatch.get_comments ~post_id:pid) in
+      let comments = board_ok (Board_dispatch.get_comments ~reader:Masc_board_handlers.Board_access.Operator ~post_id:pid) in
       Alcotest.(check (list string)) "comment identity reloaded" [cid]
         (List.map (fun (c : Board.comment) -> Board.Comment_id.to_string c.id) comments);
       Alcotest.(check bool) "comment vote ledger reloaded" true
-        (board_ok (Board_dispatch.current_vote_for_comment ~voter:"a-voter" ~comment_id:cid)
+        (board_ok (Board_dispatch.current_vote_for_comment ~reader:Masc_board_handlers.Board_access.Operator ~voter:"a-voter" ~comment_id:cid)
           = Some Board.Down);
       List.iter (fun (target_type, target_id) ->
-        let reactions = board_ok (Board_dispatch.list_reactions ~target_type ~target_id ()) in
+        let reactions = board_ok (Board_dispatch.list_reactions ~reader:Masc_board_handlers.Board_access.Operator ~target_type ~target_id ()) in
         Alcotest.(check int) "reaction reloaded" 1 (List.length reactions))
         [Board.Reaction_post, pid; Board.Reaction_comment, cid];
-      let room = board_ok (Board_dispatch.get_sub_board ~sub_board_id:room_id) in
+      let room = board_ok (Board_dispatch.get_sub_board ~reader:Masc_board_handlers.Board_access.Operator ~sub_board_id:room_id) in
       Alcotest.(check bool) "updated policy reloaded" true (room.access = Board.Members_only);
       ignore (board_ok (Board_dispatch.delete_sub_board ~sub_board_id:room_id));
       (match board_ok (Board_dispatch.delete_post ~post_id:pid) with
@@ -523,11 +523,11 @@ let test_all_persistence_stays_in_captured_workspace () =
       b_unchanged "after deletion under EnvB";
       let deleted = restart_a () in
       Alcotest.(check bool) "deleted post cannot resurrect" true
-        (Result.is_error (Board_dispatch.get_post ~post_id:pid));
+        (Result.is_error (Board_dispatch.get_post ~reader:Masc_board_handlers.Board_access.Operator ~post_id:pid));
       Alcotest.(check int) "cascaded comment cannot resurrect" 0
-        (List.length (board_ok (Board_dispatch.get_comments ~post_id:pid)));
+        (List.length (board_ok (Board_dispatch.get_comments ~reader:Masc_board_handlers.Board_access.Operator ~post_id:pid)));
       Alcotest.(check bool) "deleted policy cannot resurrect" true
-        (Result.is_error (Board_dispatch.get_sub_board ~sub_board_id:room_id));
+        (Result.is_error (Board_dispatch.get_sub_board ~reader:Masc_board_handlers.Board_access.Operator ~sub_board_id:room_id));
       Alcotest.(check int) "deleted votes cannot resurrect" 0 (Hashtbl.length deleted.vote_log);
       Alcotest.(check int) "deleted reactions cannot resurrect" 0 (Hashtbl.length deleted.reactions);
       b_unchanged "after complete reload")

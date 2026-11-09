@@ -198,9 +198,17 @@ module Offline : sig
 end
 
 val open_or_create : path:string -> (t, error) result
+(** Create a fresh store or open the current authoritative schema. Before
+    configuring an existing database or returning a handle, decode every
+    semantic execution, including settled records, and validate its indexed
+    identity, revision and phase. Initial saved-record refusal reports its
+    scope before database configuration; no record is rewritten, converted or
+    recovered. Existing candidates are rechecked under the writer lock. *)
+
 val open_existing : path:string -> (t, error) result
-(** Open and validate the current authoritative schema without creating or
-    migrating a database. Used only by the serialized Owner recovery path. *)
+(** Open without creating or migrating a database, with the same saved-record
+    validation and refusal contract as {!open_or_create}. Used only by the
+    serialized Owner recovery path. *)
 type released_checkpoint
 (** A retained checkpoint a committed transaction of this store released.
     Only {!take_released_checkpoints} makes one, so holding one is the proof

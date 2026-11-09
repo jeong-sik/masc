@@ -302,7 +302,15 @@ let assign_keeper (t : R.t) request reqd =
     with_body reqd (fun body -> respond reqd (Auth_preview_keeper.assign t.zone user_id ~body)))
 ;;
 
-let add_preview_routes t ~base_path router =
+(* A turn starts the client of the person's account on a home under their
+   namespace, so its gate gives the namespace too. *)
+let keeper_turn t ~env ~base_path request reqd =
+  as_gated t ~gate:Auth_preview.keeper_owner_person request reqd (fun (_ : Authz_state.t) person ->
+    with_body reqd (fun body ->
+      respond reqd (Server_preview_keeper_turn.run ~env ~person:(person_of t person) ~base_path ~body)))
+;;
+
+let add_preview_routes t ~env ~base_path router =
   router
   |> Server_route.get Server_route.Always_public "/" (page Auth_preview.home_page t)
   |> Server_route.get Server_route.Always_public Authz_activation.invitation_path (page Auth_preview.invite_page t)
@@ -313,6 +321,7 @@ let add_preview_routes t ~base_path router =
   |> Server_route.get access Auth_preview_keeper.keepers_path (keepers t)
   |> Server_route.post access Auth_preview_keeper.keepers_path (make_keeper t)
   |> Server_route.post access Auth_preview_keeper.assign_path (assign_keeper t)
+  |> Server_route.post access Auth_preview_keeper.turn_path (keeper_turn t ~env ~base_path)
   |> Server_route.prefix_get access Auth_preview.connect_prefix (login_status t ~base_path)
   |> Server_route.prefix_post access Auth_preview.connect_prefix (login_control t ~base_path)
 ;;

@@ -258,6 +258,7 @@ type installation =
   ; routes : R.t
   ; github : github
   ; base : string
+  ; env : Eio_unix.Stdenv.base
   }
 
 let start_instant =
@@ -267,7 +268,7 @@ let start_instant =
 ;;
 
 let with_installation f =
-  Eio_main.run (fun _env ->
+  Eio_main.run (fun env ->
     let root = Filename.temp_dir "server-login-http-" "" in
     Fun.protect
       ~finally:(fun () -> remove_tree root)
@@ -330,6 +331,7 @@ let with_installation f =
             ; routes
             ; github
             ; base
+            ; env
             }))
 ;;
 
@@ -462,7 +464,7 @@ let whoami router browser ?(headers = []) () =
    pages, a GitHub login from the invitation, who-am-I, and the sign-out. *)
 let the_preview_follows_a_login () =
   with_installation (fun t ->
-    let router = Server_login_http.add_preview_routes t.routes ~base_path:t.base t.router in
+    let router = Server_login_http.add_preview_routes t.routes ~env:t.env ~base_path:t.base t.router in
     let admin = fresh_browser () in
     let home = send admin router ~meth:"GET" ~path:"/" in
     Alcotest.(check int) "the home page" 200 home.status;
@@ -569,6 +571,18 @@ let the_preview_follows_a_login () =
       "the Keeper on its Runtime"
       (200, {|{"keepers":[{"keeper_id":"keeper-1","runtime_id":"account-1.claude-sonnet-5-5"}]}|})
       (keepers ());
+    (* Plan D2-8: a turn is judged as [Manage_own_keeper] with the person's
+       namespace. A turn of a Keeper no one made gets past the gate and stops
+       at the records, before any client starts. *)
+    let turn = Masc.Auth_preview_keeper.turn_path in
+    Alcotest.(check int)
+      "a turn without the CSRF token stops at the gate"
+      403
+      (fst (keeper_post ~csrf:None turn {|{"keeper_id":"keeper-1","message":"hello"}|}));
+    check_reply
+      "a turn of a Keeper no one made"
+      (404, {|{"error":"No Keeper of yours has this name."}|})
+      (keeper_post turn {|{"keeper_id":"keeper-2","message":"hello"}|});
     Alcotest.(check int)
       "a connect without the CSRF token stops at the gate"
       403

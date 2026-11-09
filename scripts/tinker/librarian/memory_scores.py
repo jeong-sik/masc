@@ -5,20 +5,25 @@ Pure code. `eval_admission.py` runs the calls, writes one row per answer from
 these scores and sums the rows.
 
 E-synth: a candidate counts as right when the memory the answer leaves is the
-one its label kind needs (`state_ok`).
+one its label kind needs (`state_ok`). A candidate adds a claim when it is
+judged incorporated and names a claim the answer adds.
 
 | kind | right when |
 | --- | --- |
-| new | incorporated, naming a claim the answer adds |
-| corrects | as new, and the target leaves by `dropped` or absorbed |
-| complements | as new, and the target is absorbed into that claim |
-| restates | already_represented, or a claim the answer adds absorbs the target |
-| transient | not_durable or already_represented: nothing is added for it |
+| new | it adds a claim |
+| corrects | it adds a claim, and the target is dropped or absorbed into that claim |
+| complements | it adds a claim, and the target is absorbed into that claim |
+| restates | it adds a claim that absorbs the restated fact; or it adds none, and the fact stays or is absorbed into a claim the answer adds |
+| transient | it adds no claim |
 
-The outcome with the claim it names (`claim_matches`) stays in the rows as a
-record. A planted stale fact leaves by `dropped`: config/prompts/librarian.md
-133-135 rules out absorbing a stale state. A duplicate pair ends as one fact:
-one stays and the other is absorbed into its claim, or both go into one claim.
+A candidate the answer leaves unjudged or defers is right for no kind: nothing
+about it is settled. A claim already in memory keeps its text when it absorbs
+a fact, so only a fact that says the same can go into it. A duplicate pair
+ends as one fact: one fact goes into the other's claim, or both go into one
+claim the answer adds. A planted stale fact leaves by `dropped`:
+config/prompts/librarian.md 133-135 rules out absorbing a stale state. The
+outcome with the claim it names (`claim_matches`) stays in the rows as a record.
+
 The drops a label asks for take out planted stale facts and correction
 targets. A complement target or a fact of a duplicate pair is to be absorbed,
 so dropping it goes against the label too. Any other drop is off label, and a
@@ -62,25 +67,28 @@ class SynthItem:
 @dataclass(frozen=True, slots=True)
 class Left:
     """What an answer does to current memory: the claims it adds, the IDs it drops, each absorbed
-    ID with the claim it went into, and the claims of final memory."""
+    ID with the claim it went into, each superseded ID with the claim that supersedes it, and the
+    claims of final memory."""
 
     added: frozenset[str]
     dropped: frozenset[str]
     absorbed: Mapping[str, str]
+    revisions: frozenset[tuple[str, str]]
     after: frozenset[str]
 
 
-# A refused answer changes nothing, so no check finds what it looks for.
-REFUSED = Left(frozenset(), frozenset(), MappingProxyType({}), frozenset())
+# A refused answer changes nothing and judges no candidate, so no check finds what it looks for.
+REFUSED = Left(frozenset(), frozenset(), MappingProxyType({}), frozenset(), frozenset())
 
 
 def left_of(answer: AV.AdmissionAnswer) -> Left:
     return Left(frozenset(answer.added_claims), frozenset(answer.dropped), MappingProxyType(dict(answer.absorbed)),
-                frozenset(answer.memory_after))
+                frozenset(answer.revisions), frozenset(answer.memory_after))
 
 
-def outcomes(answer: AV.AdmissionAnswer) -> dict[str, tuple[str, str | None]]:
-    return {j.request_id: (j.outcome, j.memory_claim) for j in answer.judgments}
+def judgments_of(answer: AV.AdmissionAnswer | None) -> dict[str, AV.Judgment]:
+    """Each judgment by its request ID. A refused answer judges nothing."""
+    return {j.request_id: j for j in answer.judgments} if answer is not None else {}
 
 
 def removed(answer: AV.AdmissionAnswer) -> set[str]:
@@ -89,11 +97,11 @@ def removed(answer: AV.AdmissionAnswer) -> set[str]:
 
 
 def score_real(item: RealItem, mine: AV.AdmissionAnswer | None) -> JsonObject:
-    live = outcomes(item.live)
-    got = outcomes(mine) if mine is not None else {}
+    live = judgments_of(item.live)
+    said = {k: j.outcome for k, j in judgments_of(mine).items()}
     gone = removed(item.live)
-    return {"candidates": len(live), "agree": sum(got.get(k, ("",))[0] == v[0] for k, v in live.items()),
-            "outcomes": {k: [v[0], got.get(k, ("",))[0]] for k, v in live.items()},
+    return {"candidates": len(live), "agree": sum(said.get(k) == j.outcome for k, j in live.items()),
+            "outcomes": {k: [j.outcome, said.get(k)] for k, j in live.items()},
             "dropped_not_in_live": sorted(set(mine.dropped) - gone) if mine is not None else [],
             "absorbed_not_in_live": sorted({mid for mid, _ in mine.absorbed} - gone) if mine is not None else [],
             "live_added": len(set(item.live.added_claims)), "live_removed": len(gone),
@@ -113,16 +121,16 @@ def kind_of(label: S.CandidateLabel) -> Kind:
             assert_never(label.outcome)
 
 
-def claim_matches(label: S.CandidateLabel, claim: str | None, answer: AV.AdmissionAnswer) -> bool:
+def claim_matches(label: S.CandidateLabel, claim: str | None, left: Left) -> bool:
     """Whether a judgment's `memory_claim` points where the label's kind needs it.
-    MASC accepts any claim of final memory, so an outcome alone can name the wrong one."""
-    target = label.supersedes
+    MASC accepts any claim of final memory, so an outcome alone can name the wrong one. A
+    correction names a claim that supersedes its target; MASC refuses a `supersedes` whose target
+    is not dropped."""
     match label.outcome:
-        case "incorporated" if target is not None:
-            supersedes = {new: old for old, new in answer.revisions}
-            return claim is not None and supersedes.get(claim) == target and target in answer.dropped
+        case "incorporated" if label.supersedes is not None:
+            return (label.supersedes, claim) in left.revisions
         case "incorporated":
-            return claim is not None and claim in answer.added_claims
+            return claim in left.added
         case "already_represented":
             return claim == label.already_claim
         case "not_durable":
@@ -131,31 +139,36 @@ def claim_matches(label: S.CandidateLabel, claim: str | None, answer: AV.Admissi
             assert_never(label.outcome)
 
 
-def state_ok(label: S.CandidateLabel, outcome: str, claim: str | None, left: Left, ids: Mapping[str, str]) -> bool:
+def state_ok(label: S.CandidateLabel, judgment: AV.Judgment | None, left: Left, ids: Mapping[str, str]) -> bool:
     """Whether the memory the answer leaves is the one the candidate's label kind needs."""
-    new_claim = outcome == "incorporated" and claim is not None and claim in left.added
+    if judgment is None or judgment.outcome == "deferred":
+        return False
+    claim = judgment.memory_claim
+    added = judgment.outcome == "incorporated" and claim in left.added
     match kind_of(label):
         case "new":
-            return new_claim
+            return added
         case "corrects":
             target = label.supersedes
-            return new_claim and target is not None and (target in left.dropped or target in left.absorbed)
+            return added and target is not None and (target in left.dropped or left.absorbed.get(target) == claim)
         case "complements":
-            return new_claim and label.absorbs is not None and left.absorbed.get(label.absorbs) == claim
+            return added and label.absorbs is not None and left.absorbed.get(label.absorbs) == claim
         case "restates":
             restated = ids.get(label.already_claim) if label.already_claim is not None else None
-            return (outcome == "already_represented" and label.already_claim in left.after) or (
-                new_claim and restated is not None and left.absorbed.get(restated) == claim)
+            if restated is None:
+                return False
+            into = left.absorbed.get(restated)
+            return into == claim if added else label.already_claim in left.after or into in left.added
         case "transient":
-            return outcome in ("not_durable", "already_represented")
+            return not added
 
 
 def left_one(a: str, b: str, claims: Mapping[str, str], left: Left) -> bool:
-    """Whether a duplicate pair ends as one fact: one stays and the other went into its claim, or
-    both went into one claim."""
+    """Whether a duplicate pair ends as one fact: one went into the other's claim, or both went
+    into one claim the answer adds. MASC keeps a fact whose claim another fact went into."""
     into_a, into_b = left.absorbed.get(a), left.absorbed.get(b)
-    return ((claims[a] in left.after and into_b == claims[a]) or (claims[b] in left.after and into_a == claims[b])
-            or (into_a is not None and into_a == into_b))
+    return (into_b == claims[a] or into_a == claims[b]
+            or (into_a is not None and into_a == into_b and into_a in left.added))
 
 
 def fact_claims(prompt: R.AdmissionPrompt) -> dict[str, str]:
@@ -174,15 +187,16 @@ def score_synth(item: SynthItem, mine: AV.AdmissionAnswer | None) -> JsonObject:
     paired = {mid for pair in label.duplicates for mid in pair}
     restated = {ids[c.already_claim] for c in label.candidates if c.already_claim is not None and c.already_claim in ids}
     left = left_of(mine) if mine is not None else REFUSED
-    got = outcomes(mine) if mine is not None else {}
+    got = judgments_of(mine)
     word: dict[str, bool] = {}
     by_kind: dict[Kind, list[int]] = {kind: [0, 0] for kind in KINDS}
     for c in label.candidates:
-        outcome, claim = got.get(c.request_id, ("", None))
-        word[c.request_id] = mine is not None and outcome == c.outcome and claim_matches(c, claim, mine)
+        judgment = got.get(c.request_id)
+        word[c.request_id] = (judgment is not None and judgment.outcome == c.outcome
+                              and claim_matches(c, judgment.memory_claim, left))
         tally = by_kind[kind_of(c)]
         tally[0] += 1
-        tally[1] += mine is not None and state_ok(c, outcome, claim, left, ids)
+        tally[1] += state_ok(c, judgment, left, ids)
     # The class of each absorbed ID, for the merge judge: what the label says of that fact.
     labeled = ({m: "correction" for m in corrected} | {m: "paraphrase" for m in restated}
                | {m: "complement" for m in complemented} | {m: "duplicate" for m in paired}

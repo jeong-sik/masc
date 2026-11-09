@@ -161,7 +161,8 @@ let cli_failure_slot = function
   | Keeper_lane_cli_oneshot.Not_an_official_client { runtime_id }
   | Keeper_lane_cli_oneshot.Execution_failed { runtime_id; _ }
   | Keeper_lane_cli_oneshot.Invalid_json_output { runtime_id; _ }
-  | Keeper_lane_cli_oneshot.Invalid_domain_output { runtime_id; _ } -> runtime_id
+  | Keeper_lane_cli_oneshot.Invalid_domain_output { runtime_id; _ }
+  | Keeper_lane_cli_oneshot.Held { runtime_id; _ } -> runtime_id
 
 let cli_prompt messages =
   let rec texts acc = function
@@ -176,12 +177,26 @@ let cli_prompt messages =
    retains Outcome_unknown under its existing exception boundary instead. *)
 exception Dispatch_authority_refused of string
 
-let call ~before_dispatch ~admission_class ~cli_runner ~base_path ~(resolved : Registry.resolved_lane) ~schema (request : Addon.request) ~validate =
-  let resolved=Runtime_exact_lane_backpressure.order resolved in
+let call ~before_dispatch ~admission_class ~cli_runner ~base_path
+    ~(ordered : Runtime_exact_lane_backpressure.ordered) ~schema (request : Addon.request) ~validate =
+  let resolved = ordered.lane in
+  let held_http =
+    List.map (fun (held : Runtime_exact_lane_backpressure.held_slot) -> held.slot_id) ordered.held_http
+  in
   let http=ref (Receipt.http_not_started ~detail:"no HTTP generation flow started") in
   let visited=ref [] and dispatched=ref [] and cli_failures=ref [] in
   let failures = ref [] in
   let note slot failure detail = failures := { slot; failure; detail } :: !failures in
+  (* A held slot ends this call as a slot that refused for its account's rest
+     would, minus the call (RFC-exact-lane-waits-for-a-stated-reset R5): it
+     may pass once its time comes, so [ending] keeps the request open even if
+     every walked slot refuses the input. *)
+  List.iter
+    (fun ({ slot_id; until } : Runtime_exact_lane_backpressure.held_slot) ->
+       note slot_id Failure.Transient
+         ("not called: its provider stated it waits until "
+          ^ Masc_domain.iso8601_of_unix_seconds until))
+    ordered.held_http;
   let requirement = Exact.make_output_requirement ~schema ~minimum_guarantee:Exact.Json_syntax in
   let messages =
     Option.to_list
@@ -197,9 +212,13 @@ let call ~before_dispatch ~admission_class ~cli_runner ~base_path ~(resolved : R
   let ended () = ending (List.rev !failures) in
   let complete cli_result outcome =
     let cli=Receipt.cli ~visited:(List.rev !visited) ~dispatched:(List.rev !dispatched) ~failures:(List.rev !cli_failures) ~result:cli_result in
+    (* The receipt compares the walked candidates with [declared_http] minus
+       [excluded_http] in order, so the walked slots come first and the held
+       ones, which no flow saw, follow as exclusions. *)
     let receipt=match Receipt.make_v2
-      ~declared_http:(List.map (fun (slot : Registry.selected_slot) -> slot.slot_id) resolved.selected_slots)
-      ~excluded_http:[] ~declared_cli:resolved.cli_slots ~http:!http ~cli with
+      ~declared_http:(List.map (fun (slot : Registry.selected_slot) -> slot.slot_id) resolved.selected_slots
+                      @ held_http)
+      ~excluded_http:held_http ~declared_cli:resolved.cli_slots ~http:!http ~cli with
       | Ok receipt -> receipt
       | Error detail -> invalid_arg ("invalid original Addon walk: " ^ detail) in
     {Addon.outcome;receipt} in
@@ -251,11 +270,32 @@ let resolve ~lane_key =
     | Ok { Registry.selected_slots = []; cli_slots = []; _ } -> Error Addon.No_admitted_slots
     | Ok resolved -> Ok resolved
 
+(* The earliest stated time when no slot of either kind may be called now.
+   [resolve] admits a lane only with a slot, and both orders keep every slot
+   in [walk] or [held], so an empty walk on both sides has a held slot. *)
+let every_slot_held ({ lane; held_http } : Runtime_exact_lane_backpressure.ordered) =
+  let { Runtime_candidate_standing.walk = cli_walk; held = cli_held } =
+    Keeper_lane_cli_oneshot.order_slots lane.Registry.cli_slots
+  in
+  match lane.Registry.selected_slots, cli_walk with
+  | _ :: _, _ | [], _ :: _ -> None
+  | [], [] ->
+    (match
+       List.map (fun (held : Runtime_exact_lane_backpressure.held_slot) -> held.until) held_http
+       @ List.map snd cli_held
+     with
+     | [] -> None
+     | first :: rest -> Some (List.fold_left Float.min first rest))
+
 let runner_with ~cli_runner ~base_path : Addon.runner =
   fun ~before_dispatch ~admission_class ~lane_key ~schema request ->
-  Result.map
-    (fun resolved -> fun ~validate -> call ~before_dispatch ~admission_class ~cli_runner ~base_path ~resolved ~schema request ~validate)
-    (resolve ~lane_key)
+  Result.bind (resolve ~lane_key) (fun resolved ->
+    let ordered = Runtime_exact_lane_backpressure.order resolved in
+    match every_slot_held ordered with
+    | Some until -> Error (Addon.Every_slot_held { until })
+    | None ->
+      Ok (fun ~validate ->
+        call ~before_dispatch ~admission_class ~cli_runner ~base_path ~ordered ~schema request ~validate))
 
 let runner ~base_path = runner_with ~cli_runner:None ~base_path
 let authorize_request ~base_path ~store ~declaration_id ~package request =

@@ -2025,7 +2025,8 @@ let runtime_wizard_catalog_cmd =
    Output contract (stdout first word, then exit code) so a shell caller can
    read either: authenticated (0) / not-authenticated (1) / not-a-subscription
    (2, an HTTP provider) / unsupported (3, antigravity has no login probe) /
-   the runtime id is not configured (4). *)
+   the runtime id is not configured (4) / account-not-authorized (5, the
+   account access of the workspace refused the probe). *)
 let runtime_probe_subscription_timeout_s = 20.0
 
 let runtime_verification_timeout_s = 120.0
@@ -2781,6 +2782,24 @@ let config_cmd =
     (Cmd.info "config" ~doc:"Write the workspace configuration.")
     [ config_set_cmd ]
 
+(* HIGH-RISK-UNREVIEWED: a probe is a call of the operator. As a host tool it
+   publishes its access after its own judgment, and the client starts only on
+   an account that access allows (plan D2-5 for Claude Code, D2-6 for Codex). *)
+let runtime_probe_account ~base_path account_home =
+  Result.bind
+    (Runtime_account_access.publish_host_tool ~base_path
+       ~config_dir:(Env_config_core.masc_config_dir_opt ()))
+    (fun () ->
+      Runtime_account_access.authorize Runtime_account_access.Operator_call
+        (Runtime_account_access.seal account_home)
+      |> Result.map_error (fun refusal ->
+        Runtime_account_access.refusal_to_string refusal, []))
+
+let runtime_probe_refused (first, rest) =
+  print_string "account-not-authorized\n";
+  Printf.eprintf "%s\n" (String.concat "; " (first :: rest));
+  5
+
 let runtime_probe_cmd_exit base_path runtime_id =
   let runtime_config_path = runtime_config_path_for_base_path base_path in
   match Runtime.load_list ~config_path:runtime_config_path with
@@ -2821,24 +2840,8 @@ let runtime_probe_cmd_exit base_path runtime_id =
                 runtime_id;
               3
           | Runtime_execution.Claude_code exec ->
-              (* HIGH-RISK-UNREVIEWED: a probe is a call of the operator. As a
-                 host tool it publishes its access after its own judgment, and
-                 the client starts only on an account that access allows
-                 (plan D2-5). *)
-              (match
-                 Result.bind
-                   (Runtime_account_access.publish_host_tool ~base_path
-                      ~config_dir:(Env_config_core.masc_config_dir_opt ()))
-                   (fun () ->
-                     Runtime_account_access.authorize Runtime_account_access.Operator_call
-                       (Runtime_account_access.seal exec.account_home)
-                     |> Result.map_error (fun refusal ->
-                       Runtime_account_access.refusal_to_string refusal, []))
-               with
-               | Error (first, rest) ->
-                   print_string "account-not-authorized\n";
-                   Printf.eprintf "%s\n" (String.concat "; " (first :: rest));
-                   5
+              (match runtime_probe_account ~base_path exec.account_home with
+               | Error reasons -> runtime_probe_refused reasons
                | Ok account ->
               Eio_main.run @@ fun env ->
               let bound =
@@ -2873,6 +2876,9 @@ let runtime_probe_cmd_exit base_path runtime_id =
                    Printf.eprintf "%s\n" (Runtime_claude_code.error_to_string e);
                    1))
           | Runtime_execution.Codex_app_server exec ->
+              (match runtime_probe_account ~base_path exec.account_home with
+               | Error reasons -> runtime_probe_refused reasons
+               | Ok account ->
               Eio_main.run @@ fun env ->
               let bound =
                 Float.min runtime_probe_subscription_timeout_s exec.timeout_s
@@ -2880,7 +2886,6 @@ let runtime_probe_cmd_exit base_path runtime_id =
               let config =
                 { (Runtime_codex_app_server.default_config ()) with
                   cli_path = exec.cli_path
-                ; account_home = Runtime_official_account.Captured exec.account_home
                 ; model = exec.model
                 ; admission_timeout_s = bound
                 ; timeout_s = Some bound
@@ -2893,6 +2898,7 @@ let runtime_probe_cmd_exit base_path runtime_id =
                      ~grace_seconds:Process_eio.child_exit_grace_seconds)
                    ~clock:(Eio.Stdenv.clock env)
                    ~cwd:Eio.Path.(Eio.Stdenv.fs env / base_path)
+                   ~account
                    config
                with
                | Ok result ->
@@ -2903,7 +2909,7 @@ let runtime_probe_cmd_exit base_path runtime_id =
                    print_string "not-authenticated\n";
                    Printf.eprintf "%s\n"
                      (Runtime_codex_app_server.error_to_string e);
-                   1)))
+                   1))))
 
 let runtime_probe_id =
   let doc = "Runtime id (provider.model) to probe for subscription sign-in" in
@@ -4242,13 +4248,13 @@ let runtime_codex_models_cmd =
   let cli = Arg.(value & opt string "codex" & info ["cli-path"] ~docv:"EXECUTABLE") in
   let account_home = Arg.(value & opt (some string) None & info ["account-home"]
     ~docv:"DIRECTORY" ~doc:"Selected CODEX_HOME for metadata discovery.") in
-  let run cli_path account_home =
-    Masc_cli_codex_models.run
+  let run base_path cli_path account_home =
+    Masc_cli_codex_models.run ~base_path
       ~cli_path:(Runtime_official_cli_install.spawn_path Codex ~command:cli_path)
       ~account_home ~timeout_s:runtime_probe_subscription_timeout_s
   in
-  Cmd.v (Cmd.info "runtime-codex-models" ~doc:"Refresh selected Codex model metadata in an isolated connection home without a model turn.")
-    Term.(const run $ cli $ account_home)
+  Cmd.v (Cmd.info "runtime-codex-models" ~doc:"Refresh selected Codex model metadata in an isolated connection home without a model turn. The workspace decides whether the operator may start Codex on the account.")
+    Term.(const run $ base_path $ cli $ account_home)
 
 let runtime_muse_models_cmd =
   let cli = Arg.(value & opt string "muse" & info ["cli-path"] ~docv:"EXECUTABLE") in

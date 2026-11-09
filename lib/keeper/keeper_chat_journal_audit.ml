@@ -65,75 +65,39 @@ let is_surface_post_row ~first_ts ~last_ts (row : Store.chat_message) =
   && Float.compare row.ts last_ts <= 0
 ;;
 
-let is_terminal_event = function
-  | Events.Run_finished _ | Events.Event_error _ -> true
-  | Keeper_chat_events.Text_message_end | Keeper_chat_events.Agent_core_stream_connected
-  | Keeper_chat_events.Agent_core_stream_ping | Keeper_chat_events.Run_started _
-  | Keeper_chat_events.Batch_bound _ | Keeper_chat_events.Text_message_start _
-  | Keeper_chat_events.Text_delta _ | Keeper_chat_events.External_effect_completed _
-  | Keeper_chat_events.Reply_details _ | Keeper_chat_events.Continuation_checkpoint _
-  | Keeper_chat_events.Provider_retry_observed _
-  | Keeper_chat_events.Agent_core_runtime_attempt_started _
-  | Keeper_chat_events.Agent_core_stream_message_start _
-  | Keeper_chat_events.Agent_core_stream_message_delta _
-  | Keeper_chat_events.Agent_core_stream_message_stop _
-  | Keeper_chat_events.Agent_core_content_block_start _
-  | Keeper_chat_events.Agent_core_content_block_stop _ | Keeper_chat_events.Model_content_activity _
-  | (Keeper_chat_events.Agent_core_thinking_delta _ | Keeper_chat_events.Agent_core_thinking_snapshot _)
-  | Keeper_chat_events.Agent_core_thinking_signature_delta _
-  | Keeper_chat_events.Agent_core_media_delta _
-  | Keeper_chat_events.Agent_core_stream_protocol_error _ | Keeper_chat_events.Tool_call_start _ | Keeper_chat_events.Tool_call_admitted _
-  | Keeper_chat_events.Tool_call_args _ | Keeper_chat_events.Tool_call_args_snapshot _
-  | Keeper_chat_events.Tool_call_end _ | Keeper_chat_events.Native_tool_start _
-  | Keeper_chat_events.Native_tool_end (_, _) | Keeper_chat_events.Native_tool_progress (_, _)
-  | Keeper_chat_events.Tool_approval_requested _ | Keeper_chat_events.Tool_approval_settled _
-  | Keeper_chat_events.Tool_result_ready _ | Keeper_chat_events.Tool_transcript_committed _
-  | Keeper_chat_events.Link_block _ | Keeper_chat_events.Image_block _
-  | Keeper_chat_events.Status_block _ | Keeper_chat_events.Audio_block _
-  | Keeper_chat_events.Tool_context_block _ -> false
+(* How the last terminal event of a journal ended the turn. *)
+type terminal =
+  | Ended
+  | Errored
+
+let terminal_of_event event =
+  match Keeper_chat_run_signal.of_event event with
+  | Keeper_chat_run_signal.Finished -> Some Ended
+  | Keeper_chat_run_signal.Failed _ -> Some Errored
+  | Keeper_chat_run_signal.Closed
+  | Keeper_chat_run_signal.Reply _
+  | Keeper_chat_run_signal.Progress -> None
 ;;
 
-let last_terminal_event entries =
+let last_terminal entries =
   entries
   |> List.filter_map (fun (entry : Journal.journaled_event) ->
-       if is_terminal_event entry.event then Some entry.event else None)
+       terminal_of_event entry.event)
   |> List.rev
   |> function
-  | event :: _ -> Some event
+  | terminal :: _ -> Some terminal
   | [] -> None
 ;;
 
 let last_reply_details entries =
   entries
   |> List.filter_map (fun (entry : Journal.journaled_event) ->
-       match entry.event with
-       | Events.Reply_details details -> Some details
-       | Keeper_chat_events.Text_message_end | Keeper_chat_events.Agent_core_stream_connected
-       | Keeper_chat_events.Agent_core_stream_ping | Keeper_chat_events.Run_started _
-       | Keeper_chat_events.Batch_bound _ | Keeper_chat_events.Text_message_start _
-       | Keeper_chat_events.Text_delta _ | Keeper_chat_events.External_effect_completed _
-       | Keeper_chat_events.Run_finished _ | Keeper_chat_events.Event_error _
-       | Keeper_chat_events.Continuation_checkpoint _ | Keeper_chat_events.Provider_retry_observed _
-       | Keeper_chat_events.Agent_core_runtime_attempt_started _
-       | Keeper_chat_events.Agent_core_stream_message_start _
-       | Keeper_chat_events.Agent_core_stream_message_delta _
-       | Keeper_chat_events.Agent_core_stream_message_stop _
-       | Keeper_chat_events.Agent_core_content_block_start _
-       | Keeper_chat_events.Agent_core_content_block_stop _
-       | Keeper_chat_events.Model_content_activity _
-       | (Keeper_chat_events.Agent_core_thinking_delta _ | Keeper_chat_events.Agent_core_thinking_snapshot _)
-       | Keeper_chat_events.Agent_core_thinking_signature_delta _
-       | Keeper_chat_events.Agent_core_media_delta _
-       | Keeper_chat_events.Agent_core_stream_protocol_error _
-       | Keeper_chat_events.Tool_call_start _ | Keeper_chat_events.Tool_call_admitted _ | Keeper_chat_events.Tool_call_args _
-       | Keeper_chat_events.Tool_call_args_snapshot _ | Keeper_chat_events.Tool_call_end _
-       | Keeper_chat_events.Native_tool_start _ | Keeper_chat_events.Native_tool_end (_, _)
-       | Keeper_chat_events.Native_tool_progress (_, _)
-       | Keeper_chat_events.Tool_approval_requested _ | Keeper_chat_events.Tool_approval_settled _
-       | Keeper_chat_events.Tool_result_ready _ | Keeper_chat_events.Tool_transcript_committed _
-       | Keeper_chat_events.Link_block _ | Keeper_chat_events.Image_block _
-       | Keeper_chat_events.Status_block _ | Keeper_chat_events.Audio_block _
-       | Keeper_chat_events.Tool_context_block _ -> None)
+       match Keeper_chat_run_signal.of_event entry.event with
+       | Keeper_chat_run_signal.Reply details -> Some details
+       | Keeper_chat_run_signal.Closed
+       | Keeper_chat_run_signal.Finished
+       | Keeper_chat_run_signal.Failed _
+       | Keeper_chat_run_signal.Progress -> None)
   |> List.rev
   |> function
   | details :: _ -> Some details
@@ -193,9 +157,9 @@ let terminal_result_row rows =
 
 (* Rule 2: the journal's terminal event and the terminal row's durable
    lifecycle and row type must agree on how the turn ended. *)
-let terminal_outcome_mismatch ~terminal_event rows =
-  match terminal_event with
-  | Events.Run_finished _ ->
+let terminal_outcome_mismatch ~terminal rows =
+  match terminal with
+  | Ended ->
     (match terminal_result_row rows with
      | Some row ->
        Store.Role.equal row.role Store.Role.Request_failure
@@ -203,7 +167,7 @@ let terminal_outcome_mismatch ~terminal_event rows =
      (* No assistant row: visible-reply absence is the Assistant_text check's
         call; a tool-calls-only continuation legitimately persists none. *)
      | None -> false)
-  | Events.Event_error _ ->
+  | Errored ->
     let failure_recorded =
       List.exists
         (fun (row : Store.chat_message) ->
@@ -213,30 +177,6 @@ let terminal_outcome_mismatch ~terminal_event rows =
         rows
     in
     not failure_recorded
-  | Keeper_chat_events.Text_message_end | Keeper_chat_events.Agent_core_stream_connected
-  | Keeper_chat_events.Agent_core_stream_ping | Keeper_chat_events.Run_started _
-  | Keeper_chat_events.Batch_bound _ | Keeper_chat_events.Text_message_start _
-  | Keeper_chat_events.Text_delta _ | Keeper_chat_events.External_effect_completed _
-  | Keeper_chat_events.Reply_details _ | Keeper_chat_events.Continuation_checkpoint _
-  | Keeper_chat_events.Provider_retry_observed _
-  | Keeper_chat_events.Agent_core_runtime_attempt_started _
-  | Keeper_chat_events.Agent_core_stream_message_start _
-  | Keeper_chat_events.Agent_core_stream_message_delta _
-  | Keeper_chat_events.Agent_core_stream_message_stop _
-  | Keeper_chat_events.Agent_core_content_block_start _
-  | Keeper_chat_events.Agent_core_content_block_stop _ | Keeper_chat_events.Model_content_activity _
-  | (Keeper_chat_events.Agent_core_thinking_delta _ | Keeper_chat_events.Agent_core_thinking_snapshot _)
-  | Keeper_chat_events.Agent_core_thinking_signature_delta _
-  | Keeper_chat_events.Agent_core_media_delta _
-  | Keeper_chat_events.Agent_core_stream_protocol_error _ | Keeper_chat_events.Tool_call_start _ | Keeper_chat_events.Tool_call_admitted _
-  | Keeper_chat_events.Tool_call_args _ | Keeper_chat_events.Tool_call_args_snapshot _
-  | Keeper_chat_events.Tool_call_end _ | Keeper_chat_events.Native_tool_start _
-  | Keeper_chat_events.Native_tool_end (_, _) | Keeper_chat_events.Native_tool_progress (_, _)
-  | Keeper_chat_events.Tool_approval_requested _ | Keeper_chat_events.Tool_approval_settled _
-  | Keeper_chat_events.Tool_result_ready _ | Keeper_chat_events.Tool_transcript_committed _
-  | Keeper_chat_events.Link_block _ | Keeper_chat_events.Image_block _
-  | Keeper_chat_events.Status_block _ | Keeper_chat_events.Audio_block _
-  | Keeper_chat_events.Tool_context_block _ -> false
 ;;
 
 (* Rule 3: the persisted terminal text is [Reply_details.reply]; both sides
@@ -336,16 +276,16 @@ let compare entries rows =
         (fun row -> not (is_surface_post_row ~first_ts ~last_ts row))
         rows
     in
-    (match last_terminal_event entries with
+    (match last_terminal entries with
      | None -> Journal_truncated
-     | Some terminal_event ->
+     | Some terminal ->
        let mismatches =
          (if seqs_are_contiguous entries then [] else [ Seq_gap ])
          @
          match joined with
          | [] -> [ Missing_terminal_row ]
          | _ ->
-           (if terminal_outcome_mismatch ~terminal_event joined
+           (if terminal_outcome_mismatch ~terminal joined
             then [ Terminal_outcome ]
             else [])
            @ (if assistant_text_mismatch
@@ -459,7 +399,7 @@ let store_unreadable_detail ~base_dir ~keeper_name =
    [Store_unreadable] when the store file is visibly non-empty; without a
    terminal event the [Journal_truncated] verdict stands on its own. *)
 let audit_loaded ~base_dir ~keeper_name ~operation_id ~rows entries =
-  match last_terminal_event entries, rows with
+  match last_terminal entries, rows with
   | Some _, [] ->
     (match store_unreadable_detail ~base_dir ~keeper_name with
      | Some detail -> Store_unreadable detail

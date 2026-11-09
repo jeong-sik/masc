@@ -107,33 +107,79 @@ class WarmTest(unittest.TestCase):
         self.assertFalse(V.warm(row("A", "i1", prompt_tokens=0, cached_tokens=0)))
 
 
+GATES: dict[str, object] = {
+    "G1_e_real_valid_rate_min": 0.95, "G2_e_real_dropped_not_in_live_max": 2,
+    "G3_e_synth_memory_state_accuracy_min": 0.95, "G3_e_synth_drop_precision_min": 1.0,
+    "G3_e_synth_stale_drop_recall_min": 0.9, "G4_e_real_paired_lead_min": -0.06,
+    "G5_e_real_latency_p50_ratio_max": 1.16, "G6_e_synth_absorb_precision_min": 0.8,
+    "G6_e_synth_judged_merge_recall_min": 0.7}
+
+
+class GatesTest(unittest.TestCase):
+    def test_every_gate_is_read_as_a_number(self) -> None:
+        gates = V.gates_of(GATES)
+        self.assertEqual((gates.g2_e_real_dropped_not_in_live_max, gates.g3_e_synth_memory_state_accuracy_min,
+                          gates.g6_e_synth_absorb_precision_min, gates.g6_e_synth_judged_merge_recall_min),
+                         (2.0, 0.95, 0.8, 0.7))
+
+    def test_a_gate_without_a_number_stops_the_verdict(self) -> None:
+        unset = {k: v for k, v in GATES.items() if k != "G6_e_synth_judged_merge_recall_min"}
+        for raw in (unset, {**GATES, "G6_e_synth_absorb_precision_min": None},
+                    {**GATES, "G1_e_real_valid_rate_min": True}):
+            with self.subTest(raw=raw), self.assertRaises(SystemExit):
+                V.gates_of(raw)
+
+    def test_a_gate_the_verdict_does_not_read_stops_it(self) -> None:
+        with self.assertRaises(SystemExit):
+            V.gates_of({**GATES, "G3_e_synth_outcome_accuracy_min": 0.95})
+
+
+class GateChecksTest(unittest.TestCase):
+    # Every number sits on its line in GATES; the outcome words are far below any line.
+    REAL: dict[str, object] = {"valid_rate": 0.95, "dropped_not_in_live": 2, "latency_p50_s": 10.0 * 1.16}
+    BASELINE: dict[str, object] = {"latency_p50_s": 10.0}
+    SYNTH: dict[str, object] = {"memory_state_accuracy": 0.95, "outcome_accuracy": 0.5, "drop_precision": 1.0,
+                                "stale_drop_recall": 0.9}
+    MERGES: dict[str, object] = {"absorb_precision": 0.8, "judged_merge_recall": 0.7}
+    PAIR: dict[str, object] = {"lead": -0.06}
+
+    def checks(self, synth: dict[str, object] | None = None, merges: dict[str, object] | None = None,
+               real: dict[str, object] | None = None, pair: dict[str, object] | None = None) -> dict[str, bool]:
+        return V.gate_checks(V.gates_of(GATES), real or self.REAL, synth or self.SYNTH, merges or self.MERGES,
+                             pair or self.PAIR, self.BASELINE)
+
+    def test_a_candidate_on_every_line_passes(self) -> None:
+        self.assertEqual(self.checks(), dict.fromkeys(("G1", "G2", "G3", "G4", "G5", "G6"), True))
+
+    def test_each_e_real_gate_fails_just_past_its_line(self) -> None:
+        cases: tuple[tuple[str, dict[str, object], dict[str, object]], ...] = (
+            ("G1", {**self.REAL, "valid_rate": 0.94}, self.PAIR),
+            ("G2", {**self.REAL, "dropped_not_in_live": 3}, self.PAIR),
+            ("G4", self.REAL, {"lead": -0.07}), ("G4", self.REAL, {"lead": None}),
+            ("G5", {**self.REAL, "latency_p50_s": 11.7}, self.PAIR),
+            ("G5", {**self.REAL, "latency_p50_s": None}, self.PAIR))
+        for gate, real, pair in cases:
+            with self.subTest(gate=gate, real=real, pair=pair):
+                self.assertEqual({k for k, v in self.checks(real=real, pair=pair).items() if not v}, {gate})
+
+    def test_g3_reads_the_memory_state_and_not_the_outcome_words(self) -> None:
+        self.assertFalse(self.checks({**self.SYNTH, "memory_state_accuracy": 0.94, "outcome_accuracy": 1.0})["G3"])
+        for key, value in (("drop_precision", 0.99), ("stale_drop_recall", 0.89)):
+            with self.subTest(key=key):
+                self.assertFalse(self.checks({**self.SYNTH, key: value})["G3"])
+
+    def test_g6_needs_both_merge_numbers_at_their_lines(self) -> None:
+        for merges in ({**self.MERGES, "absorb_precision": 0.79}, {**self.MERGES, "judged_merge_recall": 0.69},
+                       {**self.MERGES, "judged_merge_recall": None}):
+            with self.subTest(merges=merges):
+                self.assertEqual({k for k, v in self.checks(merges=merges).items() if not v}, {"G6"})
+
+
 class ChooseTest(unittest.TestCase):
-    @staticmethod
-    def result(a_pass: bool, b_pass: bool) -> dict[str, object]:
-        return {"A": {"pass": a_pass}, "B": {"pass": b_pass}}
-
-    @staticmethod
-    def rows(a_agree: int, b_agree: int) -> list[Row]:
-        return [row("A", "i1", agree=a_agree, candidates=100), row("B", "i1", agree=b_agree, candidates=100)]
-
-    def test_a_wins_unless_b_leads_it_on_both_by_the_margin(self) -> None:
-        synth: dict[str, dict[str, object]] = {"A": {"outcome_accuracy": 0.95}, "B": {"outcome_accuracy": 0.98}}
-        self.assertEqual(V.choose(["A", "B"], self.result(True, True), synth, self.rows(80, 83), 0.03), "B")
-        self.assertEqual(V.choose(["A", "B"], self.result(True, True), synth, self.rows(80, 82), 0.03), "A")
-        synth["B"] = {"outcome_accuracy": 0.97}
-        self.assertEqual(V.choose(["A", "B"], self.result(True, True), synth, self.rows(80, 90), 0.03), "A")
-
-    def test_the_two_are_compared_on_items_both_answered_validly(self) -> None:
-        # B's lead over the baseline could come from i2, which A did not answer validly.
-        synth: dict[str, dict[str, object]] = {"A": {"outcome_accuracy": 0.95}, "B": {"outcome_accuracy": 0.99}}
-        rows = [row("A", "i1", agree=50, candidates=100), row("B", "i1", agree=50, candidates=100),
-                row("A", "i2", valid=False, candidates=100), row("B", "i2", agree=100, candidates=100)]
-        self.assertEqual(V.choose(["A", "B"], self.result(True, True), synth, rows, 0.03), "A")
-
-    def test_only_passing_candidates_are_chosen(self) -> None:
-        synth: dict[str, dict[str, object]] = {"A": {"outcome_accuracy": 0.99}, "B": {"outcome_accuracy": 0.95}}
-        self.assertEqual(V.choose(["A", "B"], self.result(False, True), synth, self.rows(0, 0), 0.03), "B")
-        self.assertIsNone(V.choose(["A", "B"], self.result(False, False), synth, self.rows(0, 0), 0.03))
+    def test_the_first_passing_candidate_in_order_is_chosen(self) -> None:
+        result: dict[str, object] = {"A": {"pass": False}, "C": {"pass": True}, "D": {"pass": True}}
+        self.assertEqual(V.choose(["A", "C", "D"], result), "C")
+        self.assertIsNone(V.choose(["A"], result))
 
 
 class BindingTest(unittest.TestCase):
@@ -145,20 +191,21 @@ class BindingTest(unittest.TestCase):
 
     def test_a_candidate_is_the_checkpoint_its_training_run_saved(self) -> None:
         targets = {"base": self.BASE, "A": "tinker://run-a/sampler"}
-        saved: dict[str, object] = {"branch": "A", "pass_lines_sha256": self.PIN, "sampler_path": "tinker://run-a/sampler"}
+        saved: dict[str, object] = {"candidate": "A", "pass_lines_sha256": self.PIN, "sampler_path": "tinker://run-a/sampler"}
         self.assertIsNone(self.problem(targets, dict(targets), {"A": saved}))
         self.assertIsNotNone(self.problem(targets, dict(targets), {"A": {**saved, "sampler_path": "tinker://other"}}))
         self.assertIsNotNone(self.problem(targets, dict(targets), {"A": {**saved, "pass_lines_sha256": "q" * 64}}))
+        self.assertIsNotNone(self.problem(targets, dict(targets), {"A": {**saved, "candidate": "B"}}))
         self.assertIsNotNone(self.problem(targets, dict(targets), {}))
 
     def test_a_target_the_pass_lines_do_not_name_is_refused(self) -> None:
         targets = {"base": self.BASE, "A": "tinker://run-a/sampler", "C": "tinker://run-c/sampler"}
-        saved: dict[str, object] = {"branch": "A", "pass_lines_sha256": self.PIN, "sampler_path": "tinker://run-a/sampler"}
+        saved: dict[str, object] = {"candidate": "A", "pass_lines_sha256": self.PIN, "sampler_path": "tinker://run-a/sampler"}
         self.assertIsNotNone(self.problem(targets, dict(targets), {"A": saved}))
 
     def test_both_runs_send_the_same_model_under_each_name(self) -> None:
         real = {"base": self.BASE, "A": "tinker://run-a/sampler"}
-        saved: dict[str, object] = {"branch": "A", "pass_lines_sha256": self.PIN, "sampler_path": "tinker://run-a/sampler"}
+        saved: dict[str, object] = {"candidate": "A", "pass_lines_sha256": self.PIN, "sampler_path": "tinker://run-a/sampler"}
         self.assertIsNotNone(self.problem(real, {**real, "A": "tinker://run-b/sampler"}, {"A": saved}))
         self.assertIsNotNone(self.problem({**real, "base": "other"}, {**real, "base": "other"}, {"A": saved}))
 

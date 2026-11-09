@@ -3,17 +3,16 @@
 # dependencies = ["openai==3.46.0", "tinker==0.39.0", "tinker-cookbook==0.6.1", "torch>=2.10"]
 # ///
 # pyright: strict
-"""Train one LoRA branch on the teacher answers that matched their labels.
+"""Train the LoRA candidate on the teacher answers that matched their labels.
 
-    uv run scripts/tinker/librarian/train_sft.py --branch A \
+    uv run scripts/tinker/librarian/train_sft.py \
         --requests artifacts/tinker/librarian/synth-train/requests.jsonl \
         --accepted artifacts/tinker/librarian/teacher/accepted.jsonl \
         --out artifacts/tinker/librarian/train-A --budget 70
 
-Branch A learns the answer only. Branch B learns the teacher's thinking and the
-answer. Both render with reasoning effort 0.2, the value the binding's
-`reasoning-effort = "low"` sends; the tml_v0 renderer would otherwise render
-0.9. The run refuses to start unless pass_lines.json has the bytes it was fixed
+The candidate learns the answer only, rendered with reasoning effort 0.2, the
+value the binding's `reasoning-effort = "low"` sends; the tml_v0 renderer would
+otherwise render 0.9. The run refuses to start unless pass_lines.json has the bytes it was fixed
 with, so the gates exist before any weights change. It also refuses while a file
 the pass lines pin has other bytes (`eval_admission.load_pass_lines`), so the
 prompts it trains on are the ones the verdict renders. It refuses requests from a
@@ -31,11 +30,11 @@ import random
 import sys
 import time
 from pathlib import Path
-from typing import Literal, cast
+from typing import cast
 
 import tinker
 from tinker_cookbook import model_info, renderers
-from tinker_cookbook.renderers.base import ContentPart, Message, TextPart, ThinkingPart
+from tinker_cookbook.renderers.base import Message, TextPart
 from tinker_cookbook.renderers.tml_v0 import TmlV0Renderer
 from tinker_cookbook.supervised.common import (
     compute_mean_nll,
@@ -51,6 +50,8 @@ from eval_admission import PASS_LINES, load_pass_lines, schema_instruction
 # sha256 of pass_lines.json as fixed on 2026-11-09, before any training run.
 PASS_LINES_SHA256 = "63fee812026ac6c830cc22455d029998017f47efa6ee779c3480505456d2b712"
 MODEL = "thinkingmachines/Inkling-2-Small:peft:262144"
+# The candidate pass_lines.json `choice.order` names; `verdict` ties it to this run's summary.
+CANDIDATE = "A"
 EFFORT = 0.2
 RANK = 8
 LEARNING_RATE = 2e-4
@@ -62,23 +63,10 @@ CHECKPOINT_TTL_S = 30 * 86400
 TRAIN_PRICE = 3.00
 
 type JsonObject = dict[str, object]
-type Branch = Literal["A", "B"]
-
-
-def assistant_content(branch: Branch, answer: str, reasoning: str | None) -> list[ContentPart]:
-    text: TextPart = {"type": "text", "text": answer}
-    match branch:
-        case "A":
-            return [text]
-        case "B":
-            if not reasoning:
-                raise SystemExit("branch B needs the teacher's reasoning for every example")
-            thinking: ThinkingPart = {"type": "thinking", "thinking": reasoning}
-            return [thinking, text]
 
 
 def examples(requests: Path, accepted: Path, n: int) -> list[tuple[JsonObject, JsonObject]]:
-    """n accepted teacher answers with their requests, the same n for both branches."""
+    """n accepted teacher answers with their requests."""
     by_id = {cast(str, cast(JsonObject, r["request"])["item_id"]): cast(JsonObject, r["request"])
              for r in (cast(JsonObject, json.loads(line)) for line in requests.read_text(encoding="utf-8").splitlines())}
     held_out = sorted({cast(str, cast(JsonObject, r["keeper"])["key"]) for r in by_id.values()} & S.EVAL_KEEPERS)
@@ -102,7 +90,6 @@ def renderer_of(model: str) -> TmlV0Renderer:
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--branch", choices=["A", "B"], required=True)
     ap.add_argument("--requests", required=True)
     ap.add_argument("--accepted", required=True)
     ap.add_argument("--examples", type=int, default=200)
@@ -113,7 +100,6 @@ def main() -> int:
     if hashlib.sha256(PASS_LINES.read_bytes()).hexdigest() != PASS_LINES_SHA256:
         raise SystemExit("pass_lines.json is not the fixed one; fix and commit the pass lines first")
     load_pass_lines()
-    branch = cast(Branch, args.branch)
     out = Path(cast(str, args.out))
     out.mkdir(parents=True, exist_ok=True)
     renderer = renderer_of(MODEL)
@@ -121,11 +107,11 @@ def main() -> int:
     datums: list[tinker.Datum] = []
     for request, kept in examples(Path(cast(str, args.requests)), Path(cast(str, args.accepted)),
                                   cast(int, args.examples)):
+        answer: TextPart = {"type": "text", "text": cast(str, kept["answer"])}
         messages: list[Message] = [
             {"role": "user", "content": R.render(synth_render.prompt_of(request))},
             {"role": "user", "content": instruction},
-            {"role": "assistant", "content": assistant_content(branch, cast(str, kept["answer"]),
-                                                               cast(str | None, kept["reasoning"]))}]
+            {"role": "assistant", "content": [answer]}]
         model_input, weights = renderer.build_supervised_example(
             messages, train_on_what=renderers.TrainOnWhat.ALL_ASSISTANT_MESSAGES, effort=EFFORT)
         datums.append(datum_from_model_input_weights(model_input, weights, None, reduction="mean"))
@@ -133,7 +119,7 @@ def main() -> int:
     per_epoch = sum(lengths)
     estimate = per_epoch * EPOCHS * TRAIN_PRICE / 1e6
     config: JsonObject = {
-        "model": MODEL, "branch": branch, "examples": len(datums), "effort": EFFORT, "rank": RANK,
+        "model": MODEL, "candidate": CANDIDATE, "examples": len(datums), "effort": EFFORT, "rank": RANK,
         "learning_rate": LEARNING_RATE, "batch": BATCH, "epochs": EPOCHS, "seed": SEED,
         "tokens": {"per_epoch": per_epoch, "p50": lengths[len(lengths) // 2], "max": lengths[-1]},
         "estimate_usd": round(estimate, 2), "budget_usd": cast(float, args.budget),
@@ -167,7 +153,7 @@ def main() -> int:
                 fh.write(json.dumps(step) + "\n")
                 fh.flush()
                 print("STEP", json.dumps(step), flush=True)
-    saved = trainer.save_weights_for_sampler(name=f"masc-librarian-admission-{branch}",
+    saved = trainer.save_weights_for_sampler(name=f"masc-librarian-admission-{CANDIDATE}",
                                              ttl_seconds=CHECKPOINT_TTL_S).result()
     summary: JsonObject = {**config, "sampler_path": saved.path, "checkpoint_ttl_s": CHECKPOINT_TTL_S,
                            "spent_usd": round(spent, 4)}

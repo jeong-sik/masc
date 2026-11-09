@@ -13,7 +13,7 @@
         --set synth --requests <requests.jsonl> --out <dir> --max-calls 300
     uv run scripts/tinker/librarian/eval_admission.py verdict --real <dir> --synth <dir> \
         --drops <e_synth_audit.py drops --out> --merges <merge_cases.py --out> \
-        --train A=artifacts/tinker/librarian/train-A --train B=artifacts/tinker/librarian/train-B
+        --train A=artifacts/tinker/librarian/train-A
 
 `pass_lines.json` fixes the request, the sets, the baseline, the candidates and
 the gates. `run` refuses to start when a file it pins has changed. Each item
@@ -56,17 +56,17 @@ Definitions:
 - E-real absorbed_not_in_live: memory IDs a valid answer absorbs that the live
   answer keeps. Listed for human review with G2's IDs, not gated: absorbing
   merges a fact into a new claim, which MASC's absorb gate checks at commit.
-- E-synth memory-state accuracy: candidates whose memory the answer leaves as
-  their label kind needs (`memory_scores`), over every candidate (an answer
-  that is not valid is wrong), also per kind. Reported; G3 gates outcome
-  accuracy until the gates are fixed again.
+- E-synth memory-state accuracy (G3): candidates whose memory the answer leaves
+  as their label kind needs (`memory_scores`), over every candidate (an answer
+  that is not valid is wrong), also per kind.
 - E-synth outcome accuracy: candidates whose outcome equals the label and whose
   `memory_claim` points where the label's kind needs it, over every candidate
   (an answer that is not valid is wrong). A new fact or a complement names a
   claim the answer adds that is not another candidate's text; a paraphrase
   names the existing claim it restates; a correction names such a claim that
-  supersedes the label's target, and the target is dropped.
-- E-synth drop precision: dropped IDs that are planted stale facts or label
+  supersedes the label's target, and the target is dropped. Reported, not
+  gated.
+- E-synth drop precision (G3): dropped IDs that are planted stale facts or label
   correction targets, over all dropped IDs of valid answers (1.0 with no drops).
   A dropped complement target or duplicate fact counts against it, since the
   label absorbs those (`dropped_unmerged`). Any other dropped ID is an off-label
@@ -79,13 +79,13 @@ Definitions:
   says of that fact.
 - E-synth merge recall: complement targets absorbed into the complement's claim
   and duplicate pairs left as one fact, over the merges the labels expect.
-- E-synth absorb precision and judged merge recall: `verdict` asks a blind
-  judge what MASC's absorb gate asks of every absorb, in the gate's words
+- E-synth absorb precision and judged merge recall (G6): `verdict` asks a
+  blind judge what MASC's absorb gate asks of every absorb, in the gate's words
   (`merge_cases.py`, `merge_decisions`). Absorb precision is absorbs judged
   mergeable over all absorbs; judged merge recall counts a merge the label
-  expects only when every absorb it made is judged mergeable. Reported; G6
-  gates them once the gates are fixed again.
-- E-synth stale drop recall: planted stale facts dropped, over the planted stale
+  expects only when every absorb it made is judged mergeable. A run with no
+  expected merge has no judged merge recall and fails G6.
+- E-synth stale drop recall (G3): planted stale facts dropped, over the planted stale
   facts the labels expect to leave. An absorbed stale fact is not dropped: its
   text lives on in the new claim. Labels expect merges and stale drops only on
   requests with a candidate that can support a change; elsewhere a dropped
@@ -100,7 +100,9 @@ Definitions:
   still failed is an answer that is not valid, and `http_errors` counts them.
 - `verdict` recomputes every number from rows.jsonl. It refuses unless both runs
   sent the same model under each name, and each candidate is the sampler_path
-  `train_sft.py` saved for that branch under these pass lines.
+  `train_sft.py` saved for it under these pass lines. It also refuses while
+  pass_lines.json sets no number for a gate, or sets a gate it does not read.
+  The choice is the first candidate in `choice.order` that passes every gate.
 
 Output: <out>/calls.jsonl holds raw answers (E-real answers carry Keeper memory;
 keep them local), <out>/rows.jsonl numbers, IDs and verdicts, each row naming
@@ -468,22 +470,73 @@ def widest_gap_s(rows: list[JsonObject], baseline: str, name: str) -> float | No
     return max(gaps)
 
 
-def choose(names: list[str], result: JsonObject, synth: dict[str, JsonObject], rows: list[JsonObject],
-           margin: float) -> str | None:
-    """The first passing candidate in pass_lines order, unless a later passing one leads it by `margin`
-    on E-synth outcome accuracy and on E-real agreement over the items both answered validly.
-    The two are compared with each other, not through their leads over the baseline: those leads
-    are measured on different items."""
-    passing = [n for n in names if cast(JsonObject, result[n])["pass"]]
-    if not passing:
-        return None
-    pick = passing[0]
-    for other in passing[1:]:
-        ahead = paired(rows, pick, other)["lead"]
-        if (cast(float, synth[other]["outcome_accuracy"]) - cast(float, synth[pick]["outcome_accuracy"]) >= margin
-                and ahead is not None and cast(float, ahead) >= margin):
-            pick = other
-    return pick
+@dataclass(frozen=True, slots=True)
+class Gates:
+    """pass_lines.json `gates`."""
+
+    g1_e_real_valid_rate_min: float
+    g2_e_real_dropped_not_in_live_max: float
+    g3_e_synth_memory_state_accuracy_min: float
+    g3_e_synth_drop_precision_min: float
+    g3_e_synth_stale_drop_recall_min: float
+    g4_e_real_paired_lead_min: float
+    g5_e_real_latency_p50_ratio_max: float
+    g6_e_synth_absorb_precision_min: float
+    g6_e_synth_judged_merge_recall_min: float
+
+
+def gates_of(raw: JsonObject) -> Gates:
+    """The gates. SystemExit when pass_lines.json sets no number for one, or sets one the verdict does
+    not read: a gate left over from earlier pass lines would look applied and be ignored."""
+    read: list[str] = []
+
+    def number(key: str) -> float:
+        read.append(key)
+        value = raw.get(key)
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise SystemExit(f"pass_lines.json sets no number for {key}")
+        return float(value)
+
+    gates = Gates(
+        g1_e_real_valid_rate_min=number("G1_e_real_valid_rate_min"),
+        g2_e_real_dropped_not_in_live_max=number("G2_e_real_dropped_not_in_live_max"),
+        g3_e_synth_memory_state_accuracy_min=number("G3_e_synth_memory_state_accuracy_min"),
+        g3_e_synth_drop_precision_min=number("G3_e_synth_drop_precision_min"),
+        g3_e_synth_stale_drop_recall_min=number("G3_e_synth_stale_drop_recall_min"),
+        g4_e_real_paired_lead_min=number("G4_e_real_paired_lead_min"),
+        g5_e_real_latency_p50_ratio_max=number("G5_e_real_latency_p50_ratio_max"),
+        g6_e_synth_absorb_precision_min=number("G6_e_synth_absorb_precision_min"),
+        g6_e_synth_judged_merge_recall_min=number("G6_e_synth_judged_merge_recall_min"))
+    unread = sorted(set(raw) - set(read))
+    if unread:
+        raise SystemExit(f"pass_lines.json sets gates the verdict does not read: {', '.join(unread)}")
+    return gates
+
+
+def gate_checks(gates: Gates, real: JsonObject, synth: JsonObject, merges: JsonObject, pair: JsonObject,
+                baseline_real: JsonObject) -> dict[str, bool]:
+    """Each gate for one candidate: its E-real and E-synth numbers (`summarize`), its merge numbers
+    (`merge_decisions.MergeAdjudication.numbers`), its pairing with the baseline (`paired`) and the
+    baseline's E-real numbers."""
+    lead, p50, b50 = pair["lead"], real["latency_p50_s"], baseline_real["latency_p50_s"]
+    recall = merges["judged_merge_recall"]
+    return {
+        "G1": cast(float, real["valid_rate"]) >= gates.g1_e_real_valid_rate_min,
+        "G2": cast(int, real["dropped_not_in_live"]) <= gates.g2_e_real_dropped_not_in_live_max,
+        "G3": (cast(float, synth["memory_state_accuracy"]) >= gates.g3_e_synth_memory_state_accuracy_min
+               and cast(float, synth["drop_precision"]) >= gates.g3_e_synth_drop_precision_min
+               and cast(float, synth["stale_drop_recall"]) >= gates.g3_e_synth_stale_drop_recall_min),
+        "G4": lead is not None and cast(float, lead) >= gates.g4_e_real_paired_lead_min,
+        "G5": (p50 is not None and b50 is not None
+               and cast(float, p50) <= cast(float, b50) * gates.g5_e_real_latency_p50_ratio_max),
+        "G6": (cast(float, merges["absorb_precision"]) >= gates.g6_e_synth_absorb_precision_min
+               and recall is not None and cast(float, recall) >= gates.g6_e_synth_judged_merge_recall_min),
+    }
+
+
+def choose(names: list[str], result: JsonObject) -> str | None:
+    """The first candidate in pass_lines order that passes every gate."""
+    return next((n for n in names if cast(JsonObject, result[n])["pass"]), None)
 
 
 def trained_runs(pairs: list[str]) -> dict[str, JsonObject]:
@@ -520,9 +573,9 @@ def binding_problem(real_targets: dict[str, str], synth_targets: dict[str, str],
         run_ = trained.get(name)
         if run_ is None:
             return f"no --train {name}=<dir>: {name} cannot be tied to the run that trained it"
-        if (run_.get("branch"), run_.get("pass_lines_sha256"), run_.get("sampler_path")) != (
+        if (run_.get("candidate"), run_.get("pass_lines_sha256"), run_.get("sampler_path")) != (
                 name, pin, real_targets.get(name)):
-            return f"{name}={real_targets.get(name)} is not the checkpoint branch {name} saved under these pass lines"
+            return f"{name}={real_targets.get(name)} is not the checkpoint {name} saved under these pass lines"
     return None
 
 
@@ -535,9 +588,8 @@ def verdict(args: argparse.Namespace) -> int:
     pinned = pinned_problem([real, synth], pin, sha256_file(synth_render.TEMPLATE))
     if pinned is not None:
         raise SystemExit(pinned)
-    gates, comparison = cast(JsonObject, lines["gates"]), cast(JsonObject, lines["comparison"])
-    choice = cast(JsonObject, lines["choice"])
-    base, names = cast(str, comparison["baseline"]), cast(list[str], choice["order"])
+    gates, comparison = gates_of(cast(JsonObject, lines["gates"])), cast(JsonObject, lines["comparison"])
+    base, names = cast(str, comparison["baseline"]), cast(list[str], cast(JsonObject, lines["choice"])["order"])
     problem = binding_problem(cast(dict[str, str], real["targets"]), cast(dict[str, str], synth["targets"]),
                               base, cast(str, comparison["baseline_model"]), names,
                               trained_runs(cast(list[str], args.train)), pin)
@@ -560,6 +612,9 @@ def verdict(args: argparse.Namespace) -> int:
     if not scored:
         raise SystemExit("the judge's drops leave no E-synth request to score")
     s_all = cast(dict[str, JsonObject], summarize("synth", scored, judged.wrong_outside(synth_rows)))
+    merges = MD.report(synth_rows, scored, Path(cast(str, args.merges)) if args.merges is not None else None,
+                       synth_render.TEMPLATE, synth_dir, [base, *names])
+    m_all = cast(dict[str, JsonObject], merges["by_target"])
     window = cast(float, comparison["same_item_window_s"])
     result: JsonObject = {}
     warm_min = cast(float, comparison["warm_share_min"])
@@ -572,25 +627,12 @@ def verdict(args: argparse.Namespace) -> int:
             if share < warm_min:
                 raise SystemExit(f"{share:.2f} of {who}'s E-real calls met a warm cache, {warm_min} needed: "
                                  "G5 would compare unlike cache states")
-        r, s, rb = r_all[name], s_all[name], r_all[base]
         pair = paired(rows, base, name)
-        lead, p50, b50 = pair["lead"], r["latency_p50_s"], rb["latency_p50_s"]
-        checks = {
-            "G1": cast(float, r["valid_rate"]) >= cast(float, gates["G1_e_real_valid_rate_min"]),
-            "G2": cast(int, r["dropped_not_in_live"]) <= cast(int, gates["G2_e_real_dropped_not_in_live_max"]),
-            "G3": (cast(float, s["outcome_accuracy"]) >= cast(float, gates["G3_e_synth_outcome_accuracy_min"])
-                   and cast(float, s["drop_precision"]) >= cast(float, gates["G3_e_synth_drop_precision_min"])
-                   and cast(float, s["stale_drop_recall"]) >= cast(float, gates["G3_e_synth_stale_drop_recall_min"])),
-            "G4": lead is not None and cast(float, lead) >= cast(float, gates["G4_e_real_paired_lead_min"]),
-            "G5": (p50 is not None and b50 is not None
-                   and cast(float, p50) <= cast(float, b50) * cast(float, gates["G5_e_real_latency_p50_ratio_max"])),
-        }
+        checks = gate_checks(gates, r_all[name], s_all[name], m_all[name], pair, r_all[base])
         result[name] = {"pass": all(checks.values()), **checks, "paired": pair, "widest_gap_s": round(gap, 1)}
     result["e_synth_drops"] = judged.record(synth_rows)
-    result["e_synth_merges"] = MD.report(synth_rows, scored,
-                                         Path(cast(str, args.merges)) if args.merges is not None else None,
-                                         synth_render.TEMPLATE, synth_dir, [base, *names])
-    result["choice"] = choose(names, result, s_all, rows, cast(float, choice["prefer_later_when_ahead_by"]))
+    result["e_synth_merges"] = merges
+    result["choice"] = choose(names, result)
     print(json.dumps(result))
     (real_dir / "verdict.json").write_text(json.dumps(result, indent=1) + "\n", encoding="utf-8")
     return 0

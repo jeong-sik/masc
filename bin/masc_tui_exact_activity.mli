@@ -32,5 +32,5 @@ val reapply : t -> t
 val discard : t -> t
 val start_save : generation:int -> t -> (t * request * write, string) result
 val finish_save : request -> write_result -> t -> t
-val lines : t -> string list
+val lines : t -> Masc_tui_page_line.t list
 val matches : request -> t -> bool

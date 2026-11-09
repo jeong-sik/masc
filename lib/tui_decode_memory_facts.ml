@@ -214,7 +214,8 @@ let decode_memory_fact_snapshot json =
   in
   Ok { mfs_keeper; mfs_ordinary; mfs_source; mfs_events_read_error }
 
-let merge_keeper_memory_facts loads =
+let merge_keeper_memory_facts
+    ~(refused : Tui_decode_memory_health.memory_keeper_refusal list) loads =
   let step (ord, src, invals, event_errors, unread) (keeper_name, load) =
     match load with
     | Error detail -> ord, src, invals, event_errors, (keeper_name, detail) :: unread
@@ -275,15 +276,27 @@ let merge_keeper_memory_facts loads =
          | errors -> Some (String.concat "; " errors))
     }
   in
+  let failures =
+    List.rev_map (fun (keeper, detail) -> Some keeper, detail) unread
+    @ List.map (fun (refusal : Tui_decode_memory_health.memory_keeper_refusal) ->
+        refusal.mkr_keeper_id, refusal.mkr_reason) refused
+  in
   let unread_summary =
-    match List.rev unread with
+    match failures with
     | [] -> None
     | failures ->
+      let named = List.filter_map fst failures |> List.sort_uniq String.compare in
+      let unidentified = List.fold_left
+          (fun count (keeper, _) -> match keeper with
+            | None -> count + 1
+            | Some _ -> count)
+          0 failures in
       Some
         (Printf.sprintf "%d of %d keepers not read: %s"
-           (List.length (List.sort_uniq String.compare (List.map fst failures)))
-           (List.length loads)
+           (List.length named + unidentified)
+           (List.length loads + List.length refused)
            (String.concat "; "
-              (List.map (fun (keeper_name, detail) -> keeper_name ^ ": " ^ detail) failures)))
+              (List.map (fun (keeper, detail) ->
+                 Option.value keeper ~default:"unidentified keeper" ^ ": " ^ detail) failures)))
   in
   snapshot, unread_summary

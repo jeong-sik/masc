@@ -71,7 +71,7 @@ let facts_title ~ko ~cols ~screen ~keeper ~reading ~timestamp ~badge =
     | Facts_unread { reading } -> "  " ^ reading
     | Facts_loaded { total; filter_label; query_label } ->
       Printf.sprintf " (%s \xc2\xb7 %s%s)"
-        (if ko then Printf.sprintf "읽힌 사실 %d개" total else Masc_tui_message_layout.count_noun total "listed fact") filter_label
+        (if ko then Printf.sprintf "목록 %d개" total else Masc_tui_message_layout.count_noun total "listed row") filter_label
         query_label
   in
   detail_heading ~cols ~lead:(Lead_text (screen ^ " \xe2\x96\xb8 ")) ~id:keeper
@@ -87,7 +87,7 @@ let facts_title ~ko ~cols ~screen ~keeper ~reading ~timestamp ~badge =
 
    [grand_total] is not passed in because it is not drawn here. *)
 let facts_stats_row ~ko ~ordinary ~source ~dropped ~sort_label =
-  Printf.sprintf (if ko then "  %s읽힌 사실: 일반 %d · 원본 %d · 무효화 %d%s · %s정렬 [s]:%s %s"
+  Printf.sprintf (if ko then "  %s목록: 일반 %d · 원본 %d · 무효화 %d%s · %s정렬 [s]:%s %s"
     else "  %sListed: %d ordinary · %d source · %d dropped%s · %sSort [s]:%s %s")
     (Theme.recede ()) ordinary source dropped Ansi.reset
     (Theme.recede ()) Ansi.reset sort_label
@@ -283,32 +283,6 @@ type memory_context_projection =
   ; primary_rows : int
   ; stalled_row : (int * string) option
   }
-
-let memory_pass_text ~ko ending =
-  if not ko then Masc_tui_keeper_memory_reading.pass_word ending
-  else match ending with
-    | Pass_off -> "꺼짐"
-    | Pass_lane_unconfigured -> "처리 레인 없음"
-    | Pass_drained -> "현재까지 처리됨"
-    | Pass_yielded_to_waiting_unit -> "대기 중인 처리에 양보"
-    | Pass_pending _ -> "처리 대기"
-    | Pass_not_committed -> "저장 없음"
-    | Pass_stopped _ -> "중단됨"
-    | Pass_raised _ -> "처리 실패"
-
-let memory_state_text ~ko keeper =
-  let text korean english = if ko then korean else english in
-  let pass () = match keeper.mkh_librarian.mlh_state with
-    | Some ending -> memory_pass_text ~ko ending
-    | None -> text "처리 결과 미관측" "pass not observed" in
-  match memory_state keeper with
-  | Memory_ordinary -> text "기억 관측됨" "memory observed"
-  | Memory_warning -> text "보고된 주의" "warning reported"
-  | Memory_degraded -> "Librarian " ^ pass ()
-  | Memory_no_current -> text "스냅샷 없음" "no snapshot"
-  | Memory_source_only -> text "출처 기억만 있음" "source memory only"
-  | Memory_starving -> text "스냅샷 없음 · " "no snapshot; " ^ "Librarian " ^ pass ()
-  | Memory_read_error -> text "기억 읽기 실패" "memory read failed"
 
 let memory_operator_state (state : state) keeper =
   memory_state_text ~ko:(state.ui_language = Lang_ko) keeper

@@ -55,8 +55,10 @@ val facts_title :
   timestamp:string ->
   badge:string ->
   string
-(** The facts title row of a frame [cols] wide. It carries the total and the
-    filters; the breakdown and the sort belong to the row under it, which this
+(** The facts title row of a frame [cols] wide. Its total counts the current
+    filtered rows, including invalidation rows, rather than the stores' total
+    knowledge. Category counts separately retain unknown store/fleet coverage.
+    The breakdown and the sort belong to the row under it, which this
     module also draws. The title is the narrow line and the clock and the
     connection badge sit at its end, so a fact spelled here and there goes off
     the right edge. The clock and the badge are never shortened; the keeper's

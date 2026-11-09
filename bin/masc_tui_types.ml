@@ -6299,12 +6299,6 @@ let memory_category_text ~ko category =
     | Memory_category.Custom _ -> Memory_category.category_to_string category in
   Masc.Tui_terminal_text.sanitize_terminal_text label
 
-let memory_category_filter_label = function
-  | Category_all -> "All"
-  | Category_ordinary cat -> Memory_category.category_to_string cat
-  | Category_source -> "source"
-  | Category_dropped -> "dropped"
-
 type memory_state =
   | Memory_ordinary
   | Memory_warning
@@ -6367,6 +6361,66 @@ let memory_state_label = function
   | Memory_source_only -> "source-only"
   | Memory_starving -> "STARVING"
   | Memory_read_error -> "read-error"
+
+(* The health row and Keeper axis use the same words for a typed pass end.
+   Keeping both languages here also lets search follow either display without
+   depending on the active UI language or on a renderer. *)
+let memory_pass_text ~ko ending =
+  let open Masc.Tui_decode_memory_health in
+  let korean, english = match ending with
+    | Pass_off -> "꺼짐", "switched off"
+    | Pass_lane_unconfigured -> "처리 레인 없음", "no lane set"
+    | Pass_drained -> "현재까지 처리됨", "caught up"
+    | Pass_yielded_to_waiting_unit -> "대기 중인 처리에 양보", "yielded"
+    | Pass_pending pending ->
+        (match pending with
+         | Masc.Keeper_librarian_pending.Worker { wait = Capacity; _ } ->
+             "대기열 가득 참", "queue full"
+         | Worker { wait = Processing; _ } -> "처리 중", "processing"
+         | Worker { wait = (Outcome_unknown | Missing_after_dispatch); _ } ->
+             "결과 확인 필요", "check outcome"
+         | Worker { wait = Unreachable; _ } -> "작업자 연결 안 됨", "worker offline"
+         | Worker { wait = Journal_recheck; _ } -> "다시 확인 중", "rechecking"
+         | Publication _ -> "저장 확정 중", "settling"
+         | Basis_changed _ -> "원문 변경됨", "source changed"
+         | Message_floor _ -> "나누어 읽는 중", "reading parts"
+         | Local_failure _ -> "복구 실패", "recovery failed")
+    | Pass_not_committed -> "저장 없음", "saved none"
+    | Pass_stopped _ -> "중단됨", "stopped"
+    | Pass_raised _ -> "처리 실패", "crashed" in
+  if ko then korean else english
+
+let memory_state_text ~ko (keeper : Masc.Tui_decode_memory_health.memory_keeper_health) =
+  let text korean english = if ko then korean else english in
+  let pass () = match keeper.mkh_librarian.mlh_state with
+    | Some ending -> memory_pass_text ~ko ending
+    | None -> text "처리 결과 미관측" "pass not observed" in
+  match memory_state keeper with
+  | Memory_ordinary -> text "기억 관측됨" "memory observed"
+  | Memory_warning -> text "보고된 주의" "warning reported"
+  | Memory_degraded -> "Librarian " ^ pass ()
+  | Memory_no_current -> text "스냅샷 없음" "no snapshot"
+  | Memory_source_only -> text "출처 기억만 있음" "source memory only"
+  | Memory_starving -> text "스냅샷 없음 · " "no snapshot; " ^ "Librarian " ^ pass ()
+  | Memory_read_error -> text "기억 읽기 실패" "memory read failed"
+
+let memory_keeper_search_text (keeper : Masc.Tui_decode_memory_health.memory_keeper_health) =
+  let pass_words ending =
+    [memory_pass_text ~ko:true ending; memory_pass_text ~ko:false ending] in
+  let observed_pass_words =
+    Option.to_list keeper.mkh_librarian.mlh_state |> List.concat_map pass_words in
+  let admission_words =
+    match keeper.mkh_librarian.mlh_admission_wait with
+    | None -> []
+    | Some worker ->
+        pass_words (Masc.Tui_decode_memory_health.Pass_pending
+          (Masc.Keeper_librarian_pending.Worker worker)) in
+  String.concat " "
+    ([ keeper.mkh_keeper_id
+    ; memory_state_label (memory_state keeper)
+    ; memory_state_text ~ko:true keeper
+    ; memory_state_text ~ko:false keeper
+    ] @ observed_pass_words @ admission_words)
 
 type memory_overview_sort =
   | Mem_overview_facts
@@ -23293,8 +23347,7 @@ let project_memory_keepers ~sort ~query snapshot =
   else
     List.filter
       (fun k ->
-        Masc_tui_pick_list.lowercase_contains ~needle:query k.mkh_keeper_id
-        || Masc_tui_pick_list.lowercase_contains ~needle:query (memory_state_label (memory_state k)))
+        Masc_tui_pick_list.lowercase_contains ~needle:query (memory_keeper_search_text k))
       sorted_keepers
 
 let visible_memory_keepers (state : state) =

@@ -1637,10 +1637,9 @@ let config_content_height (state : state) =
    Identity rows already account for their indentation and clickable menu;
    status rows reserve the two cells the source-status reader leaves out. *)
 let runtime_config_status_rows state ~cols =
-  List.map (fun line -> Masc_tui_runtime_config_view.Neutral, line)
+  List.map (fun line -> config_metadata_style Masc_tui_runtime_config_view.Neutral, line)
     (config_identity_rows ~cols state)
-  @ List.map (fun (tone, line) -> tone, "  " ^ line)
-      (runtime_config_status_lines state ~cols)
+  @ runtime_config_status_lines state ~cols
 
 let runtime_config_status_scroll_limit state ~terminal_rows ~cols =
   let room = max 1 (Masc_tui_types.surface_body_rows state ~terminal_rows - 5) in
@@ -1660,7 +1659,7 @@ let render_runtime_config_status state =
       let lines = runtime_config_status_rows state ~cols in
       let scroll = min state.runtime_config_status_scroll (max 0 (List.length lines - budget)) in
       lines |> List.filteri (fun i _ -> i >= scroll && i < scroll + budget)
-      |> List.iter (fun (tone, text) -> c.push_styled ~style:(config_metadata_style tone) text))
+      |> List.iter (fun (style, text) -> c.push_styled ~style text))
 
 (* What voice resolved to, and on which microphone.
 

@@ -187,8 +187,8 @@ let short_revision revision =
 
    The counts are spelled with the plural the number asks for. *)
 
-let validation_line = function
-  | Parse_error _ -> Bad, "Validation: invalid TOML"
+let validation_verdict = function
+  | Parse_error _ -> Bad, "invalid TOML"
   | Checked report ->
       let count severity = List.length (List.filter (fun issue -> issue.severity = severity) report.issues) in
       let errors = count Error_issue and warnings = count Warning_issue in
@@ -198,7 +198,11 @@ let validation_line = function
         @ (if warnings = 0 then [] else [ Masc_tui_message_layout.count_noun warnings "warning" ])
       in
       (if report.valid then (if warnings = 0 then Good else Warning) else Bad),
-      String.concat " \xc2\xb7 " (("Validation: " ^ verdict) :: counts)
+      String.concat " \xc2\xb7 " (verdict :: counts)
+
+let validation_line validation =
+  let tone, verdict = validation_verdict validation in
+  tone, "Validation: " ^ verdict
 (* The revision row, and the two verdict rows under it. Both screens draw the
    same verdict and differ only in how much of the revision they spend a row on,
    so the verdict lives in one place and the revision is the caller's: the
@@ -218,35 +222,63 @@ let verdict_rows metadata =
 let summary_lines metadata =
   revision_row (short_revision metadata.source_revision) :: verdict_rows metadata
 
-let detail_lines metadata =
-  let keys label tone values =
-    if values = [] then [] else List.map (fun key -> tone, label ^ ": " ^ key) values
-  in
+(* The same facts the compact summary prints, as the reading lines of the status
+   page. The tone of each fact is decided here, in this module's own tones, and
+   only then mapped to a reading tone, so the summary and the page cannot
+   disagree about which state is a warning. *)
+let page_tone = function
+  | Neutral -> Masc_tui_page_line.Plain
+  | Good -> Masc_tui_page_line.Success
+  | Warning -> Masc_tui_page_line.Attention
+  | Bad -> Masc_tui_page_line.Failure
+
+let routing_tone metadata = if metadata.routing_requires_restart then Warning else Neutral
+
+let keeper_tone metadata =
+  if metadata.keeper = Invalid_configuration then Bad
+  else if metadata.keeper_requires_restart || metadata.preempted_keys <> [] then Warning
+  else Neutral
+
+let source_heading = "1. 설정 출처 · 유효성 및 스키마 검증 (Source & Schema Validation)"
+
+let detail_blocks ~lead metadata =
+  let module Line = Masc_tui_page_line in
+  let fact tone label value = Line.fact ~tone:(page_tone tone) label value in
+  let validation_tone, validation_value = validation_verdict metadata.validation in
   let validation = match metadata.validation with
-    | Parse_error detail -> [Bad, "TOML parse error: " ^ detail]
+    | Parse_error detail -> [ Line.note ~tone:Line.Failure ("TOML parse error: " ^ detail) ]
     | Checked report ->
-        [ (if report.forward_schema then Warning else Neutral),
-          Printf.sprintf "Schema: %d · current %d%s" report.schema_version report.current_schema_version
-            (if report.forward_schema then " · future schema" else "") ]
-        @ List.map (fun issue ->
-            (match issue.severity with Error_issue -> Bad | Warning_issue -> Warning),
-            Printf.sprintf "%s · %s: %s" issue.key (issue_kind_label issue.kind) issue.detail) report.issues
+        fact (if report.forward_schema then Warning else Neutral) "Schema"
+          (Printf.sprintf "%d · current %d%s" report.schema_version report.current_schema_version
+             (if report.forward_schema then " · future schema" else ""))
+        :: List.map (fun issue ->
+            Line.note
+              ~tone:(match issue.severity with Error_issue -> Line.Failure | Warning_issue -> Line.Attention)
+              (Printf.sprintf "%s · %s: %s" issue.key (issue_kind_label issue.kind) issue.detail))
+          report.issues
   in
-  let key_rows =
-    keys "Pending restart" Warning metadata.pending_keys
-    @ keys "Preempted by environment" Warning metadata.preempted_keys
-    @ keys "Applied" Neutral metadata.applied_keys
+  let restart_word required = if required then "required" else "not required" in
+  let source =
+    lead
+    @ [ fact Neutral "Source revision" metadata.source_revision;
+        fact validation_tone "Validation" validation_value;
+        fact (routing_tone metadata) "Routing"
+          (routing_label metadata.routing ~requires_restart:metadata.routing_requires_restart);
+        fact (keeper_tone metadata) "Keeper" (keeper_label metadata.keeper) ]
+    @ validation
   in
-  [ Neutral, "[ 1. 설정 출처 · 유효성 및 스키마 검증 (Source & Schema Validation) ]" ]
-  @ (revision_row metadata.source_revision :: verdict_rows metadata)
-  @ validation
-  @ [ Neutral, "[ 2. 라우팅 · 키퍼 적용 상태 (Routing & Keeper Application) ]";
-      (if metadata.routing_requires_restart then Warning else Neutral),
-      "Routing restart: " ^ (if metadata.routing_requires_restart then "required" else "not required");
-      (if metadata.keeper_requires_restart then Warning else Neutral),
-      "Keeper restart: " ^ (if metadata.keeper_requires_restart then "required" else "not required");
-      Neutral, Printf.sprintf "Keeper settings configured: %d" metadata.configured_count ]
-  @ (if key_rows = [] then []
+  let application =
+    [ fact (routing_tone metadata) "Routing restart" (restart_word metadata.routing_requires_restart);
+      fact (if metadata.keeper_requires_restart then Warning else Neutral) "Keeper restart"
+        (restart_word metadata.keeper_requires_restart);
+      fact Neutral "Keeper settings" (Printf.sprintf "%d configured" metadata.configured_count) ]
+  in
+  let keys label tone values = Line.items ~tone:(page_tone tone) label values in
+  [ source_heading, source;
+    "2. 라우팅 · 키퍼 적용 상태 (Routing & Keeper Application)", application ]
+  @ (if metadata.pending_keys = [] && metadata.preempted_keys = [] && metadata.applied_keys = [] then []
      else
-       (Neutral, "[ 3. 키퍼 설정 키 · 재시작 대기 및 환경변수 우선 (Pending / Preempted / Applied Keys) ]")
-       :: key_rows)
+       [ "3. 키퍼 설정 키 · 재시작 대기 및 환경변수 우선 (Pending / Preempted / Applied Keys)",
+         [ keys "Pending restart" Warning metadata.pending_keys;
+           keys "Preempted by environment" Warning metadata.preempted_keys;
+           keys "Applied" Neutral metadata.applied_keys ] ])

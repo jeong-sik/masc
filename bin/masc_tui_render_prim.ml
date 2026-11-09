@@ -3928,29 +3928,6 @@ let config_metadata_summary (state : state) =
        | _ -> lines)
 
 
-let runtime_config_status_lines state ~cols =
-  let lines =
-    (match state.runtime_config_view_error with
-     | None -> []
-     | Some detail -> [Masc_tui_runtime_config_view.Bad, detail])
-    @ match runtime_config_unmatched_current state with
-      | Some current ->
-          [Masc_tui_runtime_config_view.Neutral, "Source: " ^ current.path;
-           Masc_tui_runtime_config_view.Neutral, "Current snapshot revision: " ^ current.source_revision;
-           Masc_tui_runtime_config_view.Warning, "Validation and application state not read for this snapshot"]
-      | None -> match state.runtime_config_view with
-      | None -> [Masc_tui_runtime_config_view.Neutral, "Configuration has not been read"]
-      | Some reading ->
-          [Masc_tui_runtime_config_view.Neutral,
-           (if Option.is_some state.runtime_config_view_error then "Previous source: " else "Source: ") ^ reading.rcv_path]
-          @ Masc_tui_runtime_config_view.detail_lines reading.rcv_metadata
-  in
-  List.concat_map (fun (tone, text) ->
-    Message_layout.wrap_words ~max_cells:(max 1 (framed_inner_width cols - 2))
-      (Terminal_text.single_line text)
-    |> List.map (fun text -> tone, text)) lines
-
-
 (* The sheet's masthead: the product's name and a blank row. It carries no keys
    and no surface name: both scroll away with it, and both are said by rows
    that do not. The overlay's title row is fixed chrome that says whether hints
@@ -6120,6 +6097,44 @@ let detail_page ~width blocks =
           detail_section_heading ~first:(index = 0) title
           @ Masc_tui_page_reading.rows ~label_cells ~max_cells lines)
        blocks)
+
+(* The status page of the runtime configuration: the source it names, then the
+   validation and application state the server read with it. A page with no
+   reading to draw (none read yet, or a snapshot the read does not match) is the
+   same first block with what is known. The rows come back styled, the width
+   they are drawn at the frame's own. *)
+let runtime_config_status_lines state ~cols =
+  let module Line = Masc_tui_page_line in
+  let module View = Masc_tui_runtime_config_view in
+  let error =
+    match state.runtime_config_view_error with
+    | None -> []
+    | Some detail -> [ Line.note ~tone:Line.Failure detail ]
+  in
+  let blocks =
+    match runtime_config_unmatched_current state with
+    | Some current ->
+      [ ( View.source_heading,
+          error
+          @ [ Line.fact "Source" current.path;
+              Line.fact "Current snapshot revision" current.source_revision;
+              Line.note ~tone:Line.Attention
+                "Validation and application state not read for this snapshot" ] ) ]
+    | None ->
+      (match state.runtime_config_view with
+       | None ->
+         [ ( View.source_heading,
+             error @ [ Line.note ~tone:Line.Quiet "Configuration has not been read" ] ) ]
+       | Some reading ->
+         let source =
+           if Option.is_some state.runtime_config_view_error then "Previous source"
+           else "Source"
+         in
+         View.detail_blocks
+           ~lead:(error @ [ Line.fact source reading.rcv_path ])
+           reading.rcv_metadata)
+  in
+  detail_page ~width:(framed_inner_width cols) blocks
 
 let detail_section_lines ?(first = false) title =
   let heading = [ "  " ^ Theme.info () ^ Ansi.bold ^ "[ " ^ title ^ " ]" ^ Ansi.reset ] in

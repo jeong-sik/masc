@@ -107,7 +107,7 @@ let run_case source () =
   let partition = Direct.project_partition prepared ~workspace_memory_access:None in
   let dynamic = Keeper_context_layers.text partition in
   let base_system_prompt = "Respond to the owner using current workspace observations." in
-  let assembled = Keeper_run_prompt.assemble_request_context ~system:(system_of_text base_system_prompt)
+  let assembled = Keeper_run_prompt.assemble_request_context ~checkpoint_owner:Runtime_execution.Masc_agent_core ~system:(system_of_text base_system_prompt)
       ~post_tool_round:false ~previous_assembly:None
       ~dynamic_context_partition:(Some partition) ~existing_extra_system_context:None
       ~blocks:[Prompt_block_id.Dynamic_context, dynamic] in
@@ -244,7 +244,7 @@ let test_goal_survives_read_then_task_creation () =
       let post_tool_round = Keeper_run_prompt.is_later_round_of_this_turn
           ~injected_this_turn:(Option.is_some !previous) messages in
       let current_params = {current_params with system_prompt_override=Some existing_override} in
-      let issued = Keeper_run_prompt.assemble_request_context
+      let issued = Keeper_run_prompt.assemble_request_context ~checkpoint_owner:Runtime_execution.Masc_agent_core
           ~system:(system_of_text (Option.get current_params.system_prompt_override)) ~post_tool_round
           ~previous_assembly:!previous ~dynamic_context_partition:(Some partition)
           ~existing_extra_system_context:current_params.extra_system_context
@@ -432,7 +432,7 @@ let test_completion_observation_survives_tool_reply approved () =
   let issued_requests = ref [] in
   let hooks = {Agent_core.Hooks.empty with before_turn_params=Some (function
     | Agent_core.Hooks.BeforeTurnParams {current_params;messages;_} ->
-      let issued = Keeper_run_prompt.assemble_request_context ~system:(system_of_text "BASE_AUTHORITY_WIRE")
+      let issued = Keeper_run_prompt.assemble_request_context ~checkpoint_owner:Runtime_execution.Masc_agent_core ~system:(system_of_text "BASE_AUTHORITY_WIRE")
           ~post_tool_round:(Keeper_run_prompt.is_later_round_of_this_turn
             ~injected_this_turn:(Option.is_some !previous) messages)
           ~previous_assembly:!previous ~dynamic_context_partition:(Some rendered.world_partition)
@@ -513,9 +513,8 @@ let test_completion_observation_survives_tool_reply approved () =
     | Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _ | ToolResult _
     | Image _ | Document _ | Audio _ -> ()) message.content) checkpoint.messages
 
-(* RFC-0491 §3.3: a Goal under proof is named in the end context of every
-   request of a tool loop, so a later round does not read it as ordinary open
-   work (RFC-0387 review P0-1), and its System row carries no mark. *)
+(* Proof state remains visible through the tool loop without appending a
+   new User-role state notice after every tool result. *)
 let test_goal_under_proof_survives_tool_reply () =
   Eio_main.run @@ fun env -> Eio.Switch.run @@ fun sw ->
   Masc_test_deps.init_eio_clock ~sw env;
@@ -539,7 +538,7 @@ let test_goal_under_proof_survives_tool_reply () =
   let issued_requests = ref [] in
   let hooks = {Agent_core.Hooks.empty with before_turn_params=Some (function
     | Agent_core.Hooks.BeforeTurnParams {current_params;messages;_} ->
-      let issued = Keeper_run_prompt.assemble_request_context ~system:(system_of_text "BASE_PROOF_WIRE")
+      let issued = Keeper_run_prompt.assemble_request_context ~checkpoint_owner:Runtime_execution.Masc_agent_core ~system:(system_of_text "BASE_PROOF_WIRE")
           ~post_tool_round:(Keeper_run_prompt.is_later_round_of_this_turn
             ~injected_this_turn:(Option.is_some !previous) messages)
           ~previous_assembly:!previous ~dynamic_context_partition:(Some partition)
@@ -559,6 +558,9 @@ let test_goal_under_proof_survives_tool_reply () =
   let responses = [|
     reply (`Assoc ["role",`String "assistant";"content",`Null;"tool_calls",`List [`Assoc [
       "id",`String "read-under-proof";"type",`String "function";"function",`Assoc [
+        "name",`String "Read";"arguments",`String "{}"]]]]) "tool_calls";
+    reply (`Assoc ["role",`String "assistant";"content",`Null;"tool_calls",`List [`Assoc [
+      "id",`String "read-under-proof-again";"type",`String "function";"function",`Assoc [
         "name",`String "Read";"arguments",`String "{}"]]]]) "tool_calls";
     reply (`Assoc ["role",`String "assistant";"content",`String "Observed."]) "stop" |] in
   let received = ref [] in
@@ -580,40 +582,40 @@ let test_goal_under_proof_survives_tool_reply () =
    | Ok _ -> fail "proof fixture did not complete"
    | Error error -> fail (Agent_core.Error.to_string error));
   let requests = List.rev !received and assemblies = List.rev !issued_requests in
-  check int "a tool result follows the first request" 2 (List.length requests);
+  check int "proof state survives two tool results" 3 (List.length requests);
   let systems = List.mapi (fun index (body, issued) ->
     let messages = Json.member "messages" (Yojson.Safe.from_string body) |> Json.to_list in
     let system = match List.filter (fun message -> Json.member "role" message = `String "system") messages with
       | [message] -> Json.member "content" message |> Json.to_string
       | _ -> fail "one System carrier required" in
-    let newest, before_newest = match List.rev messages with
-      | newest :: before_newest :: _ -> newest, before_newest
-      | [_] | [] -> fail "a context carrier after the conversation required" in
-    let carrier = Json.member "content" newest |> Json.to_string in
-    check bool "the context carrier is the request's tail" true
-      (Json.member "role" newest = `String "user"
-       && String.starts_with ~prefix:"[system context] " carrier);
-    check bool "every request names the Goal under proof with its mark" true
-      (contains ~needle:mark carrier);
+    let newest = match List.rev messages with
+      | newest :: _ -> newest
+      | [] -> fail "the request must retain its conversation" in
+    List.iter (fun message ->
+      if Json.member "role" message = `String "user" then
+        check bool "no User message repeats the proof notice" false
+          (contains ~needle:mark (Json.member "content" message |> Json.to_string))) messages;
     check bool "the System names the Goal" true (contains ~needle:goal.id system);
-    check bool "the System carries no proof-pending mark" false (contains ~needle:mark system);
+    check bool "every request System carries the current proof mark" true (contains ~needle:mark system);
     let issued_system = match issued.Keeper_context_assembly.system_prompt with
       | Some issued -> issued | None -> fail "physical System receipt missing" in
     check string "physical issuer bytes match the received System carrier" issued_system.text system;
-    let receipt = match issued.Keeper_context_assembly.receipt with
-      | Some receipt -> receipt | None -> fail "carrier receipt missing" in
-    check int "exactly one Goals_awaiting_proof span in the carrier" 1
+    check int "the proof span is attributed to the actual System" 1
       (List.length (List.filter (fun (span : Keeper_context_assembly.span) ->
-        span.kind = Keeper_context_assembly.Block Prompt_block_id.Goals_awaiting_proof) receipt.spans));
+        span.kind = Keeper_context_assembly.Block Prompt_block_id.Goals_awaiting_proof)
+        issued_system.partition.spans));
     if index > 0 then (
-      check bool "tool feedback is the newest conversation message" true
-        (Json.member "role" before_newest = `String "tool");
+      check bool "the actual tool result is the request's newest message" true
+        (Json.member "role" newest = `String "tool");
+      check (option string) "proof state creates no post-tool carrier" None issued.extra_system_context;
       check bool "clock is not rebroadcast" false (contains ~needle:"INITIAL_CLOCK" body));
     system)
     (List.combine requests assemblies) in
   match systems with
-  | [first; later] -> check string "both rounds send the same System" first later
-  | _ -> fail "two requests expected"
+  | [first; second; third] ->
+    check string "the second request sends the same System" first second;
+    check string "the third request sends the same System" first third
+  | _ -> fail "three requests expected"
 
 let () = run "direct Goal context on actual provider wire"
   ["direct owner requests",[

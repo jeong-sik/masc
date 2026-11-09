@@ -1533,7 +1533,7 @@ let test_goal_observation_cannot_mask_blank_keeper_instructions () =
         let base_system_prompt = Option.value ~default:initial current_params.system_prompt_override in
         let partition = Keeper_context_layers.singleton Keeper_context_layers.Active_goals
             "Goal observation: current revision and reported measurement 1/3" in
-        let assembly = Keeper_run_prompt.assemble_request_context ~system:(system_of_text base_system_prompt)
+        let assembly = Keeper_run_prompt.assemble_request_context ~checkpoint_owner:Runtime_execution.Official_client ~system:(system_of_text base_system_prompt)
             ~post_tool_round:false ~previous_assembly:None ~dynamic_context_partition:(Some partition)
             ~existing_extra_system_context:None
             ~blocks:[Prompt_block_id.Dynamic_context, Keeper_context_layers.text partition] in
@@ -2858,7 +2858,7 @@ let test_a_changed_system_goal_reaches_a_held_official_session () =
       | None -> Layers.unattributed Direct_turn "TASK GATE LANE"
       | Some text -> Layers.singleton Layers.Active_goals text
           |> fun goals -> Layers.append_unattributed goals Direct_turn "TASK GATE LANE" in
-    let assembly = Keeper_run_prompt.assemble_request_context
+    let assembly = Keeper_run_prompt.assemble_request_context ~checkpoint_owner:Runtime_execution.Official_client
         ~system:(system_of_text "BASE_INSTRUCTIONS") ~post_tool_round:false ~previous_assembly:None
         ~dynamic_context_partition:(Some partition) ~existing_extra_system_context:None
         ~blocks:[Prompt_block_id.Dynamic_context, Layers.text partition] in
@@ -2950,7 +2950,7 @@ let test_carrier_authority_is_current_turn_input_on_official_start_and_resume ()
       | Layers.Completion_authority -> authority
       | Layers.Fleet_messages -> Some "FLEET-WORLD"
       | _ -> None) in
-    Keeper_run_prompt.assemble_request_context ~system:(system_of_text "BASE")
+    Keeper_run_prompt.assemble_request_context ~checkpoint_owner:Runtime_execution.Official_client ~system:(system_of_text "BASE")
       ~post_tool_round:false ~previous_assembly:None ~dynamic_context_partition:(Some partition)
       ~existing_extra_system_context:None
       ~blocks:[Prompt_block_id.Dynamic_context, Layers.text partition] in
@@ -3091,7 +3091,7 @@ let test_carrier_authority_block_is_valid_utf8 () =
     | Layers.Completion_authority ->
       Some ("Approved task-cut " ^ truncated_dash ^ "; verification vrf-cut")
     | _ -> None) in
-  let assembly = Keeper_run_prompt.assemble_request_context ~system:(system_of_text "BASE")
+  let assembly = Keeper_run_prompt.assemble_request_context ~checkpoint_owner:Runtime_execution.Official_client ~system:(system_of_text "BASE")
       ~post_tool_round:false ~previous_assembly:None ~dynamic_context_partition:(Some partition)
       ~existing_extra_system_context:None
       ~blocks:[Prompt_block_id.Dynamic_context, Layers.text partition] in
@@ -3112,7 +3112,7 @@ let test_authority_leaves_the_carrier_when_the_sent_system_is_not_the_issued_one
     | Layers.Completion_authority -> Some authority_text
     | Layers.Fleet_messages -> Some "FLEET-WORLD"
     | _ -> None) in
-  let assembly = Keeper_run_prompt.assemble_request_context ~system:(system_of_text "ISSUED BASE")
+  let assembly = Keeper_run_prompt.assemble_request_context ~checkpoint_owner:Runtime_execution.Official_client ~system:(system_of_text "ISSUED BASE")
       ~post_tool_round:false ~previous_assembly:None ~dynamic_context_partition:(Some partition)
       ~existing_extra_system_context:None
       ~blocks:[Prompt_block_id.Dynamic_context, Layers.text partition] in
@@ -3173,7 +3173,7 @@ let assemble_world_round ~system ~post_tool_round previous_assembly =
   let partition = Layers.assemble ~content_of:(function
     | Layers.Fleet_messages -> Some "FLEET-WORLD"
     | _ -> None) in
-  Keeper_run_prompt.assemble_request_context ~system ~post_tool_round ~previous_assembly
+  Keeper_run_prompt.assemble_request_context ~checkpoint_owner:Runtime_execution.Official_client ~system ~post_tool_round ~previous_assembly
     ~dynamic_context_partition:(Some partition) ~existing_extra_system_context:None
     ~blocks:[Prompt_block_id.Dynamic_context, Layers.text partition]
 
@@ -3242,14 +3242,14 @@ let test_goals_awaiting_proof_are_current_turn_input_on_official_start_and_resum
       | Layers.Completion_authority -> Some authority_text
       | Layers.Fleet_messages -> Some "FLEET-WORLD"
       | _ -> None) in
-    Keeper_run_prompt.assemble_request_context ~system:(system_of_text "BASE")
+    Keeper_run_prompt.assemble_request_context ~checkpoint_owner:Runtime_execution.Official_client ~system:(system_of_text "BASE")
       ~post_tool_round:false ~previous_assembly:None ~dynamic_context_partition:(Some partition)
       ~existing_extra_system_context:None
       ~blocks:[Prompt_block_id.Dynamic_context, Layers.text partition] in
   let assembly = issue ~awaiting:(Some awaiting_text) in
-  check string "the Agent Core System carries no Goal phase" "BASE"
+  check string "the official issuer System carries no Goal phase" "BASE"
     (A.effective_system_prompt ~base_text:"BASE" assembly);
-  check (option string) "the Agent Core carrier holds the block" (Some awaiting_text)
+  check (option string) "the official issuer carrier holds the block" (Some awaiting_text)
     (List.assoc_opt Prompt_block_id.Goals_awaiting_proof assembly.blocks);
   let prepared = prepare_authority_turn ~system_prompt:"BASE" assembly in
   let carried needle = List.exists (fun message ->

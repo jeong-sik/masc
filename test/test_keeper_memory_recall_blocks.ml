@@ -615,7 +615,7 @@ let test_no_clock_with_an_unreadable_status_prompt_keeps_status_only () =
           (before +. 1.) (total_preparation_failures ()))))
 
 let assemble_recall ~post_tool_round texts =
-  Keeper_run_prompt.assemble_request_context
+  Keeper_run_prompt.assemble_request_context ~checkpoint_owner:Runtime_execution.Masc_agent_core
     ~system:(system_of_text "fixture instructions") ~post_tool_round ~previous_assembly:None
     ~dynamic_context_partition:None ~existing_extra_system_context:None
     ~blocks:(Blocks.prompt_blocks texts)

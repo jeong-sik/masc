@@ -66,8 +66,9 @@ must-do: true
 ```
 ````
 
-The vocabulary SSOT is `.github/issue-taxonomy.json`. Labels are set from the `masc-triage`
-block when the issue is created; nothing reconciles them afterwards.
+The vocabulary SSOT is `.github/issue-taxonomy.json`. Labels are attached from the `masc-triage`
+block by whoever triages the issue: the hourly reconciliation workflow was removed in #41275, so
+nothing reads the block automatically and nothing reconciles labels afterwards.
 `APPLY=1 bash scripts/sync-issue-labels.sh` reports and repairs drift between the
 repository labels and the SSOT.
 
@@ -107,14 +108,15 @@ and overlap is real - a boundary violation that also swallows errors takes both.
 ### Issue intake
 
 Humans file through the issue form; keepers file with `gh issue create`. Both produce the same fenced
-`masc-triage` block, so there is one format and one parser. An issue filed without the block gets a comment
-naming the expected shape, and no labels. Do not pass `--label` to `gh issue create`: labels set that way
-have no declaration behind them.
+`masc-triage` block, so there is one format and one parser. An issue filed without the block has no
+declaration to project, so triage adds the block before it adds any label. Do not pass `--label` to
+`gh issue create`: labels set that way have no declaration behind them, and with no reconciliation
+running afterwards the two never meet again.
 
 ### PR status labels
 
-The `Issue Taxonomy` workflow skips pull requests outright: `kind`/`area`/`impact` describe a problem and a
-PR is an answer.
+The removed `Issue Taxonomy` workflow skipped pull requests outright: `kind`/`area`/`impact`
+describe a problem and a PR is an answer. Keep that split when you triage by hand.
 
 GitHub's native mergeability, review decision, and unresolved-thread views are
 the source of truth for PR status.

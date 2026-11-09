@@ -613,17 +613,24 @@ let failure_of_codex_turn detail (info : Runtime_codex_app_server.Codex_error_in
 (* True only when a typed window is spent: one already observed during the
    turn, or one a fresh [usage/read] reports. A failed read records nothing,
    so the caller keeps the original failure. *)
-let muse_account_spent ~mgr ~clock ~cwd ~scope config =
+let muse_account_spent ~mgr ~clock ~cwd ~scope ~account config =
   let exhausted () = Runtime_quota_window.is_exhausted ~scope ~now:(Time_compat.now ()) in
   exhausted ()
-  || (match Runtime_provider_usage_read.read_muse ~mgr ~clock ~cwd ~scope config with
+  || (match Runtime_provider_usage_read.read_muse ~mgr ~clock ~cwd ~scope ~account config with
       | Ok () -> exhausted ()
       | Error _ -> false)
 
+let not_authorized refusal =
+  Unavailable (Account_not_authorized (Runtime_account_access.refusal_to_string refusal))
+;;
+
 let authorize ~account_request account =
-  Runtime_account_access.authorize account_request account
-  |> Result.map_error (fun refusal ->
-    Unavailable (Account_not_authorized (Runtime_account_access.refusal_to_string refusal)))
+  Runtime_account_access.authorize account_request account |> Result.map_error not_authorized
+;;
+
+let authorize_muse ~account_request home =
+  Runtime_account_access.authorize_muse account_request (Runtime_account_access.Declared_home home)
+  |> Result.map_error not_authorized
 ;;
 
 let verify ~secure_random ~sw ~net ~mgr ~clock ~cwd ~cwd_path ~timeout_s ~account_request (runtime : Runtime_instance.t) =
@@ -637,8 +644,11 @@ let verify ~secure_random ~sw ~net ~mgr ~clock ~cwd ~cwd_path ~timeout_s ~accoun
     else (
       match runtime.execution with
       | Runtime_execution.Muse_serve execution ->
+        (match authorize_muse ~account_request execution.account_home with
+         | Error failure -> Error failure
+         | Ok account ->
         let config = { (Runtime_muse_serve.default_config ()) with
-          cli_path = execution.cli_path; account_home = Some execution.account_home;
+          cli_path = execution.cli_path;
           model = Some execution.model; native = Runtime_native_tools.Native_read;
           admission_timeout_s = Float.min timeout_s execution.timeout_s;
           timeout_s = Some timeout_s } in
@@ -646,7 +656,7 @@ let verify ~secure_random ~sw ~net ~mgr ~clock ~cwd ~cwd_path ~timeout_s ~accoun
           Option.map Runtime_muse_msp.reasoning_effort_of_requested
             runtime.model.reasoning_effort in
         (match Runtime_verification_muse.run ~secure_random ~net ~mgr ~clock ~cwd
-           ~directory:cwd_path ~account_home:execution.account_home
+           ~directory:cwd_path ~account
            ~quota_scope:(Runtime_instance.quota_scope_of_runtime runtime) ~config
            ~reasoning_effort ~tool ~prompt with
          | Ok result ->
@@ -705,7 +715,7 @@ let verify ~secure_random ~sw ~net ~mgr ~clock ~cwd ~cwd_path ~timeout_s ~accoun
               usage/read says whether a subscription window is spent. *)
            let detail = Runtime_muse_serve.error_to_string error in
            if muse_account_spent ~mgr ~clock ~cwd
-                ~scope:(Runtime_instance.quota_scope_of_runtime runtime) config
+                ~scope:(Runtime_instance.quota_scope_of_runtime runtime) ~account config
            then Error (Quota_exhausted detail)
            else Error (Provider_rejected detail)
          | Error (Client_error
@@ -745,7 +755,7 @@ let verify ~secure_random ~sw ~net ~mgr ~clock ~cwd ~cwd_path ~timeout_s ~accoun
                           | Runtime_muse_serve.Exit_signal _ ) )
                   ; _
                   } ) as error)) ->
-           Error (Provider_rejected (Runtime_muse_serve.error_to_string error)))
+           Error (Provider_rejected (Runtime_muse_serve.error_to_string error))))
       | Runtime_execution.Antigravity_cli execution ->
         let config = { (Runtime_antigravity.default_config ~cwd:cwd_path ~model:execution.model) with
           cli_path = execution.cli_path;

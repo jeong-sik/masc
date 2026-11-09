@@ -12,7 +12,8 @@ val run :
   secure_random:Eio.Flow.source_ty Eio.Resource.t ->
   net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t ->
   mgr:_ Eio.Process.mgr -> clock:_ Eio.Time.clock ->
-  cwd:Eio.Fs.dir_ty Eio.Path.t -> directory:string -> account_home:string ->
+  cwd:Eio.Fs.dir_ty Eio.Path.t -> directory:string ->
+  account:Runtime_account_access.declared Runtime_account_access.muse_authorized ->
   quota_scope:Runtime_quota_window.scope ->
   config:Runtime_muse_serve.config ->
   reasoning_effort:Runtime_muse_msp.reasoning_effort option ->

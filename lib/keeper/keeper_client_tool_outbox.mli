@@ -116,6 +116,42 @@ val contains_call : snapshot -> call_id:string -> bool
 (** Whether a retained receipt, vendor or host, carries this [call_id]. A
     producer that mints its own call ids uses it to see that the Keeper already
     holds a receipt for a call before it writes a second one. *)
+
+(** What a line that points at a receipt says about it. A module of its own so
+    its labels do not shadow those of {!receipt}. *)
+module Summary : sig
+  type t =
+    { call_id : string
+    ; tool_name : string
+    ; outcome : string option
+      (** [response.outcome] when the response is an object holding a string
+          under that key. A background run's receipt carries [completed],
+          [deferred], [failed] or [unfinished]; a vendor turn's receipt has
+          none. *)
+    }
+end
+
+val receipt_summary : snapshot -> receipt_id:string -> Summary.t option
+(** What one loaded receipt says about itself, for a line that points at it.
+    [None] when the snapshot holds no receipt with this identity. It reads the
+    loaded snapshot only: nothing is read from disk and nothing is
+    acknowledged. *)
+
+val summary_reader :
+  base_path:string ->
+  keeper_name:string ->
+  on_unavailable:(string -> unit) ->
+  string ->
+  Summary.t option
+(** [summary_reader ~base_path ~keeper_name ~on_unavailable] is a lookup from a
+    receipt identity to its {!Summary.t}. It loads the outbox at the
+    first lookup and answers every later lookup from that load, so a round that
+    points at no receipt reads nothing. An outbox that cannot be loaded calls
+    [on_unavailable] with the reason once and answers [None]. A reader belongs
+    to one round: it never sees a receipt written after its load, and two
+    fibers must not force the first lookup together, so each round makes its
+    own. *)
+
 val developer_context : snapshot -> string list
 (** The retained receipts as model-facing text, in snapshot order. Base64
     media in a response is shown by its identity

@@ -105,15 +105,6 @@ let tuning_for_agent agent_id =
   | Some { Voice_config.tts = None; _ } | None ->
       { Voice_config.stability = 0.5; similarity_boost = 0.75; style = 0.0 }
 
-let local_playback_enabled_for_agent agent_id =
-  match
-    config_or_report
-      ~what:"local_playback_enabled_for_agent"
-      (Voice_config.load_detailed ())
-  with
-  | Some config -> Voice_config.local_playback_enabled_for_agent config agent_id
-  | None -> false
-
 let default_voice_uri path =
   Uri.of_string (Voice_runtime_overlay.default_session_url ~path)
 

@@ -56,6 +56,19 @@ module Names : sig
   val equal : t -> t -> bool
 end
 
+module Proactive_interval : sig
+  type t
+  (** How many seconds apart a Keeper's periodic (proactive) turns start. One
+      value for the whole fleet: the server's
+      [keeper.keepalive_interval_sec] setting as the scan read it. The setting
+      refuses anything below one second, so neither does this. *)
+
+  val of_seconds : int -> t option
+  (** [None] below 1. *)
+
+  val to_seconds : t -> int
+end
+
 (** The fleet scan's reading, with the fields the Keepers screen draws. *)
 type fleet =
   { fs_status : Keeper_fleet_grade.t
@@ -79,6 +92,7 @@ type fleet =
   ; fs_active_task_owner_without_fiber_count : int
   ; fs_completion_authority_pending_count : int
   ; fs_active_task_owner_scan_error_count : int
+  ; fs_proactive_interval : Proactive_interval.t
   }
 
 type degraded_reason =

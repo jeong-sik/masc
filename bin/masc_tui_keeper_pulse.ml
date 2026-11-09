@@ -121,3 +121,58 @@ let pulse_cell ~now pulse =
   let hours = slots ~now pulse in
   if List.for_all is_quiet hours then None else Some (cell_of_hours hours)
 ;;
+
+type half_hour =
+  | Half_hour_unknown
+  | Half_hour_quiet
+  | Half_hour_ok
+  | Half_hour_failed
+  | Half_hour_failed_and_ok
+
+let no_turns : Pulse.tally = { Pulse.ok = 0; rested = 0; failed = 0 }
+
+let add_tally (a : Pulse.tally) (b : Pulse.tally) : Pulse.tally =
+  { Pulse.ok = a.ok + b.ok; rested = a.rested + b.rested; failed = a.failed + b.failed }
+;;
+
+(* The decision log writes a rest as a failure (RFC-0515 §2.1), so a rested
+   turn makes a failed half hour. *)
+let half_hour_of_tally ~starts_before_known ({ ok; rested; failed } : Pulse.tally) =
+  if failed + rested > 0 then if ok > 0 then Half_hour_failed_and_ok else Half_hour_failed
+  else if ok > 0 then Half_hour_ok
+  else if starts_before_known then Half_hour_unknown
+  else Half_hour_quiet
+;;
+
+(* Half hour [back] 0 is the server slot that holds [now]. A slot stamped
+   after it (the two clocks disagree) belongs to it. *)
+let half_hours ~now ~count pulse =
+  let count = max 0 count in
+  let all_unknown () = List.init count (fun _ -> Half_hour_unknown) in
+  match pulse with
+  | None -> all_unknown ()
+  | Some _ when not (Float.is_finite now) -> all_unknown ()
+  | Some { Pulse.known_since; slots } ->
+      let now_slot = Pulse.slot_start now in
+      let back_of (slot : Pulse.slot) =
+        max 0 ((now_slot - slot.starts_at) / Pulse.slot_seconds)
+      in
+      let tally_of back =
+        List.fold_left
+          (fun tally (slot : Pulse.slot) ->
+            if back_of slot = back then add_tally tally slot.tally else tally)
+          no_turns slots
+      in
+      List.init count (fun position ->
+          let back = count - 1 - position in
+          let starts = Float.of_int (now_slot - (back * Pulse.slot_seconds)) in
+          half_hour_of_tally ~starts_before_known:(starts < known_since) (tally_of back))
+;;
+
+let half_hour_mark = function
+  | Half_hour_unknown -> Mark.unknown_mark
+  | Half_hour_quiet -> Mark.grid_dot_mark
+  | Half_hour_ok -> Mark.grid_pulse_ok_mark
+  | Half_hour_failed -> Mark.grid_full_mark
+  | Half_hour_failed_and_ok -> Mark.grid_pulse_failed_and_ok_mark
+;;

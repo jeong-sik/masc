@@ -11,7 +11,8 @@ type view =
   | Day_wall
 (** How the Keepers list groups its rows (RFC-0515 §2.3). [Plain] and
     [Day_wall] do not group; [Day_wall] puts the rows with the most failed
-    half-hours of the last day first. *)
+    half-hours of the last day first. [By_runtime] contains only failing rows,
+    grouped by failure cause for the runtime cross-table. *)
 
 type density = One_line | Two_lines
 (** Whether each row also draws its second line (RFC-0515 §2.6). *)
@@ -186,10 +187,6 @@ type cause_bucket =
   | Cause_unnamed  (** The trail is failed and no receipt names a cause. *)
   | Not_failing
 
-type runtime_bucket =
-  | Runtime_named of string  (** The roster row's current runtime id. *)
-  | Runtime_unread  (** The roster did not read this Keeper. *)
-
 type due =
   | Due_late  (** A due run has not started. *)
   | Due_held  (** The schedule runner holds the next run. *)
@@ -227,7 +224,6 @@ type group =
   | Group_due of due
   | Group_memory of memory_follow
   | Group_age of memory_age
-  | Group_runtime of runtime_bucket
 
 val group_of_view : outside:(keeper_name:string -> outside) -> view -> row -> group option
 (** The heading [row] sits under in [view]; [None] for a view that does not
@@ -246,7 +242,8 @@ val order_rows :
   row list -> row list
 (** The groups of [view] in a fixed order, and [sort] within each group.
     [Day_wall] orders by {!failed_half_hours}, most first, rows without a
-    pulse last. The same order is used for drawing, navigation, and search. *)
+    pulse last. [By_runtime] removes rows without a failing health reading before ordering
+    them by cause. The same rows are used for drawing, navigation, and search. *)
 
 (** {1 Stops} (RFC-0515 §2.6, E12)
 

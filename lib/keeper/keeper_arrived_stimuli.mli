@@ -17,6 +17,9 @@ type row =
   ; arrived_at : float
   ; preview : string
     (** The one-line description the reaction ledger writes for the row. *)
+  ; receipt_id : string option
+    (** The identity of the retained tool result the row points at, for a
+        [Tool_result_ready] row. [None] for every other row. *)
   }
 
 val max_rows_per_round : int
@@ -37,10 +40,26 @@ val next_round :
     [arrival] is not in [shown]. Rows that arrived before the run began are not
     listed: the turn's first request already carried what the queue held. *)
 
-val render : now:float -> round -> string option
+val render :
+  now:float ->
+  ?receipt:(string -> Keeper_client_tool_outbox.Summary.t option) ->
+  round ->
+  string option
 (** The block text, or [None] when nothing is listed. It states how many rows
     arrived and that they stay queued; it gives each row's urgency, age and
-    description. *)
+    description.
+
+    A [Tool_result_ready] row points at its receipt by SHA-256, a number the
+    model never held. [receipt] resolves that identity: when it answers, the
+    row's line goes on with the receipt's [call_id], [tool] and [outcome], each
+    a JSON string cut at [max_receipt_field_bytes], so what the producer wrote
+    stays inside its quotes. A background run's [call_id] is the request id its
+    start result named. Without [receipt], or when it answers [None], the line
+    stays the description alone. [receipt] is asked for the rows that have a
+    [receipt_id] only. *)
+
+val max_receipt_field_bytes : int
+(** How many bytes of a receipt's [call_id], [tool] or [outcome] a line keeps. *)
 
 (** What one run has already listed. A row counts as listed only once the model
     has answered the request that carried it, so a request that failed before
@@ -61,6 +80,7 @@ val confirm : tracker -> unit
     listed for the rest of the run. *)
 
 val block :
+  ?receipt:(string -> Keeper_client_tool_outbox.Summary.t option) ->
   tracker ->
   now:float ->
   read:(unit -> (Keeper_event_queue_state.pending_selection list, string) result) ->
@@ -86,6 +106,7 @@ type claim =
   }
 
 val claim :
+  ?receipt:(string -> Keeper_client_tool_outbox.Summary.t option) ->
   tracker ->
   now:float ->
   read:(unit -> (Keeper_event_queue_state.pending_selection list, string) result) ->

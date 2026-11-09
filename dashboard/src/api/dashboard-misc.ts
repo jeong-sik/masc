@@ -155,12 +155,16 @@ export interface ContextCycle {
   } | null
 }
 
-export interface KeeperMemoryAgeBins {
-  under_hour: number
-  under_day: number
-  under_week: number
-  older: number
-}
+/** How many bins the server's memory age ladder has (RFC-0515 §2.4.5). */
+export const KEEPER_MEMORY_AGE_BIN_COUNT = 24
+
+/**
+ * The server's memory age ladder: the ordinary facts counted by the time since
+ * each was first seen, {@link KEEPER_MEMORY_AGE_BIN_COUNT} counts, the newest
+ * bin (under an hour) first and 30 days or older last. The counts add up to
+ * the row's `facts`.
+ */
+export type KeeperMemoryAgeBins = readonly number[]
 
 export interface KeeperMemoryHealthKeeperEntry {
   keeper_id: string
@@ -191,7 +195,7 @@ export interface KeeperMemoryHealthKeeperEntry {
 }
 
 export interface KeeperMemoryHealthResponse {
-  schema: 'keeper.memory_os.current_health.v9'
+  schema: 'keeper.memory_os.current_health.v10'
   generated_at: number
   keepers: KeeperMemoryHealthKeeperEntry[]
   totals: {
@@ -529,14 +533,15 @@ function decodeContextCycle(raw: unknown): ContextCycle | null {
 }
 
 function decodeKeeperMemoryAgeBins(raw: unknown, expectedFacts: number): KeeperMemoryAgeBins | null {
-  if (!isRecord(raw) || !exactKeys(raw, ['under_hour', 'under_day', 'under_week', 'older'])) return null
-  const under_hour = nonNegativeInteger(raw.under_hour)
-  const under_day = nonNegativeInteger(raw.under_day)
-  const under_week = nonNegativeInteger(raw.under_week)
-  const older = nonNegativeInteger(raw.older)
-  if (under_hour === null || under_day === null || under_week === null || older === null) return null
-  if (under_hour + under_day + under_week + older !== expectedFacts) return null
-  return { under_hour, under_day, under_week, older }
+  if (!Array.isArray(raw) || raw.length !== KEEPER_MEMORY_AGE_BIN_COUNT) return null
+  const counts: number[] = []
+  for (const item of raw) {
+    const count = nonNegativeInteger(item)
+    if (count === null) return null
+    counts.push(count)
+  }
+  if (counts.reduce((sum, count) => sum + count, 0) !== expectedFacts) return null
+  return counts
 }
 
 function decodeKeeperMemoryHealthEntry(raw: unknown): KeeperMemoryHealthKeeperEntry | null {
@@ -601,7 +606,10 @@ function decodeKeeperMemoryHealthEntry(raw: unknown): KeeperMemoryHealthKeeperEn
   const alerts = Array.isArray(raw.alerts)
     ? raw.alerts.map(decodeKeeperMemoryHealthAlert)
     : null
-  const age_bins = raw.age_bins === null ? null : decodeKeeperMemoryAgeBins(raw.age_bins, facts)
+  // A ladder needs the fact count it adds up to; without one the row fails below.
+  const age_bins = raw.age_bins === null || facts === null
+    ? null
+    : decodeKeeperMemoryAgeBins(raw.age_bins, facts)
   if (
     keeper_id === null
     || revision === null
@@ -676,7 +684,7 @@ function decodeKeeperMemoryHealth(raw: unknown): KeeperMemoryHealthResponse | nu
     ? ['schema', 'generated_at', 'keepers', 'totals', 'alert_summary', 'execution']
     : ['schema', 'generated_at', 'keepers', 'totals', 'alert_summary']
   if (!exactKeys(raw, expectedKeys)) return null
-  if (raw.schema !== 'keeper.memory_os.current_health.v9') return null
+  if (raw.schema !== 'keeper.memory_os.current_health.v10') return null
   const generated_at = finiteNumber(raw.generated_at)
   const keepers = Array.isArray(raw.keepers)
     ? raw.keepers.map(decodeKeeperMemoryHealthEntry)

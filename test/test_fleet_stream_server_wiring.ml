@@ -22,7 +22,8 @@ let hub_for state scope =
 ;;
 
 (* The fleet section as the scan writes it. Only the running count varies; the
-   other keys take the empty value of their type. *)
+   other keys take the empty value of their type, except the proactive
+   interval, which has none and takes the setting's default. *)
 let fleet_section ~running : Yojson.Safe.t =
   let counts =
     List.map
@@ -57,6 +58,7 @@ let fleet_section ~running : Yojson.Safe.t =
      ; "blocker", `Null
      ; "operator_action_required", `Bool false
      ; "running_keeper_fiber_count", `Int running
+     ; "proactive_interval_sec", `Int 300
      ]
      @ counts
      @ names)

@@ -53,9 +53,10 @@ Definitions:
   A dropped complement target or duplicate fact counts against it, since the
   label absorbs those (`dropped_unmerged`). Any other dropped ID is an off-label
   drop. Rows list them, and `verdict` needs a blind judge's class for each one
-  (`audit_decisions`): when the judge takes the fact out as well, no target is
-  scored on that memory's requests. A drop the judge keeps stays wrong, also
-  when its memory leaves scoring.
+  (`audit_decisions`): unless the judge keeps the fact, no target is scored on
+  that memory's requests. A drop the judge keeps or finds restating
+  another fact stays wrong, also when its memory leaves scoring, and so does a
+  dropped complement target or duplicate fact.
 - E-synth absorbed: memory IDs valid answers absorb, each with what the label
   says of that fact. Reported, not gated: MASC's absorb gate checks each absorb
   at commit, while nothing checks a drop.
@@ -426,7 +427,7 @@ def verdict(args: argparse.Namespace) -> int:
     scored = judged.scored(synth_rows)
     if not scored:
         raise SystemExit("the judge's drops leave no E-synth request to score")
-    s_all = cast(dict[str, JsonObject], summarize("synth", scored, judged.wrong_outside()))
+    s_all = cast(dict[str, JsonObject], summarize("synth", scored, judged.wrong_outside(synth_rows)))
     window = cast(float, comparison["same_item_window_s"])
     result: JsonObject = {}
     warm_min = cast(float, comparison["warm_share_min"])
@@ -453,7 +454,7 @@ def verdict(args: argparse.Namespace) -> int:
                    and cast(float, p50) <= cast(float, b50) * cast(float, gates["G5_e_real_latency_p50_ratio_max"])),
         }
         result[name] = {"pass": all(checks.values()), **checks, "paired": pair, "widest_gap_s": round(gap, 1)}
-    result["e_synth_drops"] = judged.record(len({r["item"] for r in scored}))
+    result["e_synth_drops"] = judged.record(synth_rows)
     result["choice"] = choose(names, result, s_all, rows, cast(float, choice["prefer_later_when_ahead_by"]))
     print(json.dumps(result))
     (real_dir / "verdict.json").write_text(json.dumps(result, indent=1) + "\n", encoding="utf-8")

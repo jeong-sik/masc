@@ -149,21 +149,28 @@ type position = {
   digest : string;
 }
 
+type projection_status =
+  | Resolved
+  | Isolated_history
+      (** An isolated move exists in the folded history. A native System of
+          unknown provenance may still contain an earlier version even when
+          every affected id was explicitly readopted. This status does not
+          grow with inactive history. *)
+
 type held_projection = private {
   articles : World_constitution_types.t list;
   at : position;
-  withheld_ids : World_constitution_types.Article_id.t list;
-      (** Distinct ids named by isolated moves and absent from [articles].
-          They are currently withheld even when replaying an older prefix
-          would no longer show the text in a previously issued System. An
-          id explicitly readopted later is not withheld. *)
+  status : projection_status;
+      (** Whether historical isolation makes a previous System's article
+          projection uncertain. Readopted articles are active in [articles]
+          and are included in the complete current snapshot. *)
 }
 
 val load_held :
   base_path:string ->
   resolve_subject:(string -> bool) ->
   (held_projection, read_error) result
-(** {!load_articles}, its withheld ids and the position of the bytes it folded.
+(** {!load_articles}, its projection status and the position of the bytes it folded.
     Withholding describes the current projection, not an approved removal.
     The same
     [resolve_subject] must fold both this read and the later

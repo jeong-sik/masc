@@ -113,7 +113,7 @@ let assemble_request_context ~checkpoint_owner ~(system : Keeper_turn_system.t) 
     | None -> observations, blocks
   in
   let amendments =
-    match List.filter_map Fun.id [system.amendments; system.withheld] with
+    match List.filter_map Fun.id [system.amendments; system.current_norms] with
     | [] -> []
     | sections ->
       [Prompt_block_id.Constitution_amendments,

@@ -223,18 +223,12 @@ let parse_with ~keep_history ~resolve_subject contents =
 let parse ~resolve_subject contents =
   parse_with ~keep_history:true ~resolve_subject contents
 
-let withheld_article_ids (ledger : ledger) =
-  List.fold_left
-    (fun ids (line : isolated_line) ->
-      List.fold_left
-        (fun ids id ->
-          if List.exists (same_id id) ledger.articles
-             || List.exists (World_constitution_types.Article_id.equal id) ids
-          then ids
-          else id :: ids)
-        ids line.article_ids)
-    [] ledger.isolated
-  |> List.rev
+type projection_status = Resolved | Isolated_history
+
+let projection_status (ledger : ledger) =
+  match ledger.isolated with
+  | [] -> Resolved
+  | _ :: _ -> Isolated_history
 
 let read_contents ~base_path =
   let path = ledger_path ~base_path in
@@ -264,7 +258,7 @@ type position = {
 type held_projection = {
   articles : World_constitution_types.t list;
   at : position;
-  withheld_ids : World_constitution_types.Article_id.t list;
+  status : projection_status;
 }
 
 let position_of contents =
@@ -278,7 +272,7 @@ let load_held ~base_path ~resolve_subject =
     let contents = Option.value contents ~default:"" in
     let ledger = parse_with ~keep_history:false ~resolve_subject contents in
     Ok { articles = ledger.articles; at = position_of contents;
-         withheld_ids = withheld_article_ids ledger }
+         status = projection_status ledger }
 
 (* Appends never rewrite a byte already written, so the first [end_offset]
    bytes of the ledger now are the ledger [position] read, exactly when they

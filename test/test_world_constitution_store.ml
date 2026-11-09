@@ -191,17 +191,15 @@ let check_articles label expected actual =
   Alcotest.(check (list (pair string string))) label
     (article_values expected) (article_values actual)
 
-let check_loads ?(withheld_ids = []) ~base_path ~resolve_subject expected =
+let check_loads ?(status = Store.Resolved) ~base_path ~resolve_subject expected =
   let ledger = load_or_fail ~base_path ~resolve_subject () in
   check_articles "full replay holds the resolved articles" expected ledger.articles;
   check_articles "articles-only replay agrees" expected
     (load_articles_or_fail ~base_path ~resolve_subject ());
   let held = held_or_fail ~base_path ~resolve_subject () in
   check_articles "held replay agrees" expected held.Store.articles;
-  let ids = List.map Article_id.to_string in
-  Alcotest.(check (list string)) "withheld ids are complete and distinct"
-    (List.sort_uniq String.compare (ids withheld_ids))
-    (List.sort String.compare (ids held.withheld_ids));
+  Alcotest.(check bool) "the projection reports its isolation status" true
+    (held.status = status);
   (match articles_at_or_fail ~base_path ~resolve_subject held.at with
    | Some articles -> check_articles "position replay agrees" expected articles
    | None -> Alcotest.fail "the position just read no longer matches the ledger");
@@ -240,6 +238,8 @@ let test_a_position_reads_back_the_articles_held_then () =
         (Some (article_texts then_articles))
         (Option.map article_texts (articles_at_or_fail ~base_path position));
       let now = held_or_fail ~base_path () in
+      Alcotest.(check bool) "resolved edits and removals keep a resolved projection" true
+        (now.Store.status = Store.Resolved);
       Alcotest.(check bool) "the ledger grew past it" true
         (now.Store.at.end_offset > position.Store.end_offset))
 
@@ -372,7 +372,7 @@ let test_an_unresolved_removal_withholds_without_erasing_history () =
         check_loads ~base_path ~resolve_subject [ withdrawn; unrelated ] in
       remove ~base_path withdrawn;
       let ledger, isolated_position =
-        check_loads ~base_path ~resolve_subject ~withheld_ids:[ withdrawn.id ] [ unrelated ] in
+        check_loads ~base_path ~resolve_subject ~status:Store.Isolated_history [ unrelated ] in
       let removal =
         Removed { id = withdrawn.id; by = "critic"; at = 9.0; reason = None } in
       Alcotest.(check bool) "the addition and unresolved removal remain in history" true
@@ -383,7 +383,8 @@ let test_an_unresolved_removal_withholds_without_erasing_history () =
         ~article_ids:[ withdrawn.id ] ledger;
       add ~base_path withdrawn;
       let readopted, _ =
-        check_loads ~base_path ~resolve_subject ~withheld_ids:[] [ unrelated; withdrawn ] in
+        check_loads ~base_path ~resolve_subject ~status:Store.Isolated_history
+          [ unrelated; withdrawn ] in
       Alcotest.(check bool) "readoption appends without erasing the unresolved history" true
         (readopted.entries = ledger.entries @ [ Added withdrawn ]);
       check_isolation ~line_number:3 ~subject:"critic"
@@ -413,7 +414,7 @@ let test_an_unresolved_replacement_withholds_every_affected_id () =
       replace ~base_path ~by:"former-keeper" [ first; second ] replacement;
       let ledger, _ =
         check_loads ~base_path ~resolve_subject:(String.equal "lane-smith")
-          ~withheld_ids:[ first.id; second.id; replacement.id ] [ unrelated ] in
+          ~status:Store.Isolated_history [ unrelated ] in
       check_isolation ~line_number:(List.length originals + 1) ~subject:"former-keeper"
         ~article_ids:[ first.id; second.id; replacement.id ] ledger;
       Alcotest.(check bool) "the replacement keeps its complete decoded history" true
@@ -433,7 +434,7 @@ let test_an_unresolved_edit_does_not_revive_the_previous_text () =
       add ~base_path edit;
       let ledger, _ =
         check_loads ~base_path ~resolve_subject:(String.equal "lane-smith")
-          ~withheld_ids:[ original.id ] [ unrelated ] in
+          ~status:Store.Isolated_history [ unrelated ] in
       Alcotest.(check bool) "both versions remain in history" true
         (ledger.entries = [ Added original; Added unrelated; Added edit ]);
       check_isolation ~line_number:3 ~subject:"unknown-author"
@@ -443,7 +444,7 @@ let test_an_unresolved_edit_does_not_revive_the_previous_text () =
       add ~base_path repeated;
       let repeated_ledger, _ =
         check_loads ~base_path ~resolve_subject:(String.equal "lane-smith")
-          ~withheld_ids:[ original.id ] [ unrelated ] in
+          ~status:Store.Isolated_history [ unrelated ] in
       Alcotest.(check bool) "repeated isolation preserves every disputed edit" true
         (repeated_ledger.entries = ledger.entries @ [ Added repeated ]);
       Alcotest.(check (list (pair int string))) "both unresolved lines remain reported"
@@ -462,7 +463,7 @@ let test_a_resolved_replacer_cannot_admit_an_unresolved_author () =
       let resolve_subject subject = List.mem subject [ "lane-smith"; "critic" ] in
       let ledger, _ =
         check_loads ~base_path ~resolve_subject
-          ~withheld_ids:[ original.id; replacement.id ] [ unrelated ] in
+          ~status:Store.Isolated_history [ unrelated ] in
       check_isolation ~line_number:3 ~subject:"unknown-author"
         ~article_ids:[ original.id; replacement.id ] ledger;
       Alcotest.(check bool) "the resolved mover and unresolved author remain in history" true

@@ -127,9 +127,9 @@
         "lib/world_constitution/world_constitution_types.mli": "c8584576aaa32685757d48fe8fe08d4b884ce37a92eb06c0c5865b196d302f1f",
         "lib/world_constitution/world_constitution_wire.ml": "cd3f54ab9fc9bc029ca0478f307b65b75cf354bc73234270257dae44b1bf175f",
         "lib/world_constitution/world_constitution_wire.mli": "5976f664173d4d63d90600e3bc0936e59a34c448cdeabd77a08fa3ed353e9fe3",
-        "lib/world_constitution/world_constitution_store.ml": "f848ddafcc1aacabdae2a4999ba89cec3613b0f82bb63b04c2700ff86762141a"
+        "lib/world_constitution/world_constitution_store.ml": "f1a28c93a11bb1fdd122611b969fafd521f0f9d3826f811f0a5907dfd76ddf9b"
       },
-      "fold_slice_sha256": "f6eb28af37e359947ac91925c146f6438a77d9f11b1e0143d5aa146c48171171",
+      "fold_slice_sha256": "09d8514a9ca204009efd038816c86e4ded8c67662c54617da5805577c2b2c82e",
       "compile_command": [
         "ocamlfind",
         "ocamlc",

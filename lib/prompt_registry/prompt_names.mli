@@ -166,8 +166,8 @@ val keeper_constitution_amendments_added : string
 val keeper_constitution_amendments_removed : string
 (** The added and the removed articles, one line each. Variable: [articles]. *)
 
-val keeper_constitution_withheld : string
-(** Current ids withheld due to unresolved ledger moves. Variable: [articles]. *)
+val keeper_constitution_current : string
+(** Complete current norms when some articles are withheld. Variable: [articles]. *)
 
 val keeper_tags_system_open : string
 val keeper_tags_system_close : string

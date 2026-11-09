@@ -45,14 +45,10 @@ let constitution_amendments_block (amendments : World_constitution_render.amendm
        [ "changes", String.concat "\n" (added @ removed) ])
 ;;
 
-let constitution_withheld_block ids =
-  let articles =
-    ids |> List.map (fun id ->
-      Printf.sprintf "- [%s]" (World_constitution_types.Article_id.to_string id))
-    |> String.concat "\n"
-  in
+let constitution_current_block articles =
   String.trim
-    (render_instruction Prompt_names.keeper_constitution_withheld [ "articles", articles ])
+    (render_instruction Prompt_names.keeper_constitution_current
+       [ "articles", World_constitution_render.articles articles ])
 ;;
 
 let build_keeper_system_prompt

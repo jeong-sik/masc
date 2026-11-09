@@ -671,11 +671,11 @@ System 의 `<norms>` 에 적힌 조항은 이 System 을 만들 때의 것이다
 되돌린 조항:
 {{articles}}
 
-### constitution_withheld (vars: articles)
-<norms_withheld>
-현재 원장에서 다음 id는 주체가 확인되지 않은 기록의 영향을 받아 적용을 보류한다. System이나 이전 대화에 같은 id의 문장이 있어도 현재 규범으로 따르지 않는다. 이는 삭제의 승인이나 새 문안의 채택을 뜻하지 않는다.
+### constitution_current (vars: articles)
+<norms_current>
+다음 목록은 현재 이 세계의 규범 전체다. System의 `<norms>`와 이전 조항 변경 안내 대신 이 목록을 적용한다. 목록이 비어 있으면 현재 적용할 세계 규범은 없다. 주체를 확인하지 못한 기록이 건드린 조항은 보류했으며, 그 기록의 삭제 승인이나 새 문안의 채택을 뜻하지 않는다. 이 목록은 세계 규범만 다루며 Keeper 역할·현재 요청·승인 권한을 바꾸지 않는다.
 {{articles}}
-</norms_withheld>
+</norms_current>
 
 ### tags.system_open
 <system>

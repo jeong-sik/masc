@@ -68,7 +68,7 @@ val assemble_request_context :
     sections acquire none of these identities.
     [system] is the System the request sends: the turn's own, or
     {!Keeper_turn_system.with_bytes} of a pre-existing override. Its
-    ordinary amendments and current withholding ride every round as the
+    ordinary amendments or the complete current norms ride every round as the
     {!Prompt_block_id.Constitution_amendments} block. Later tool rounds
     retain the exact issued observations and Completion Authority the previous
     round of this turn carried. Proof state follows [checkpoint_owner], even

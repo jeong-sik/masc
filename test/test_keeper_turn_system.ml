@@ -373,7 +373,7 @@ let test_a_resent_system_of_unknown_provenance_has_no_block () =
    native call must keep its recorded bytes while every request, including a
    tool continuation or an override, receives the current authority notice. *)
 let check_withholding_reaches_requests (system : System.t) =
-  let withheld = match system.withheld with
+  let withheld = match system.current_norms with
     | Some block -> block
     | None -> Alcotest.fail "the current withholding notice is required"
   in
@@ -409,12 +409,12 @@ let test_withholding_survives_unknown_native_bases_and_overrides () =
   in
   List.iter
     (fun (system : System.t) ->
-      let issued = System.with_withheld [taken.id] system in
+      let issued = System.with_current_norms [] system in
       Alcotest.(check string) "native System bytes stay exact" system.text issued.text;
       check_withholding_reaches_requests issued;
       let overridden = System.with_bytes ~issued "an independently supplied override" in
       Alcotest.(check (option string)) "overriding bytes retains current withholding"
-        issued.withheld overridden.withheld;
+        issued.current_norms overridden.current_norms;
       check_withholding_reaches_requests overridden)
     [missing; unknown; mismatched]
 ;;
@@ -812,7 +812,7 @@ let test_a_native_continuation_after_a_restart_keeps_the_block () =
   in
   Alcotest.(check string) "the continuation sends the recorded bytes" seeded.system.text
     resumed.system.text;
-  match resumed.system.amendments with
+  match resumed.system.current_norms with
   | None -> Alcotest.fail "the articles the recorded System lacks ride the end context"
   | Some block ->
     Alcotest.(check bool) "the article written before the seed" true
@@ -821,23 +821,24 @@ let test_a_native_continuation_after_a_restart_keeps_the_block () =
       (contains ~sub:(Render.articles [ later ]) block)
 ;;
 
-(* A seed from before its session context named its System renders with the
-   articles of that moment; which ones is not known, so no block is sent. *)
-let test_a_native_continuation_without_a_recorded_basis_sends_no_block () =
+(* A seed whose original article basis is unknown still carries the complete
+   current set, without rewriting its recorded System. *)
+let test_a_native_continuation_without_a_recorded_basis_carries_current_norms () =
   with_world ~keeper_name:"turn-system-native-unrecorded" @@ fun world ->
-  let (_ : Types.t) = write_article world "open before you record" in
+  let kept = write_article world "open before you record" in
   let seeded = prepare_context world ~runtime_id:agent_core_runtime in
   let seed =
     { (checkpoint_of_turn seeded) with Agent_core.Checkpoint.context = Agent_core.Context.create_sync () }
   in
-  let (_ : Types.t) = write_article world "cite the ledger row, not the frame" in
+  let written = write_article world "cite the ledger row, not the frame" in
   let resumed =
     prepare_context world ~runtime_id:agent_core_runtime ~checkpoint:seed
       ~recorded_system:{ Keeper_run_context.runtime_id = agent_core_runtime; text = seeded.system.text }
   in
   Alcotest.(check string) "the continuation sends the recorded bytes" seeded.system.text
     resumed.system.text;
-  Alcotest.(check bool) "with no block" true (Option.is_none resumed.system.amendments)
+  Alcotest.(check (option string)) "current norms do not depend on a recorded basis"
+    (Some (Keeper_prompt.constitution_current_block [kept; written])) resumed.system.current_norms
 ;;
 
 (* The old fold issued a basis whose position already included an unresolved
@@ -872,10 +873,8 @@ let test_a_native_seed_with_a_reinterpreted_basis_carries_current_withholding ()
     seeded.system.text resumed.system.text;
   Alcotest.(check bool) "reinterpreted basis alone finds no ordinary amendment" true
     (Option.is_none resumed.system.amendments);
-  (match resumed.system.withheld with
-   | None -> Alcotest.fail "current withholding must survive a reinterpreted basis"
-   | Some block -> Alcotest.(check bool) "the exact affected id is withheld" true
-       (contains ~sub:(Types.Article_id.to_string taken.id) block));
+  Alcotest.(check (option string)) "an empty current set still overrides the stale norms"
+    (Some (Keeper_prompt.constitution_current_block [])) resumed.system.current_norms;
   check_withholding_reaches_requests resumed.system;
   let without_basis = { seed with Agent_core.Checkpoint.context = Agent_core.Context.create_sync () } in
   let unknown =
@@ -883,9 +882,58 @@ let test_a_native_seed_with_a_reinterpreted_basis_carries_current_withholding ()
       ~recorded_system:{ Keeper_run_context.runtime_id = agent_core_runtime; text = seeded.system.text }
   in
   check_withholding_reaches_requests unknown.system;
+  let former_operator =
+    Masc_test_deps.meta_of_json_fixture (`Assoc ["name", `String "former-operator"]) |> unwrap
+  in
+  Keeper_meta_store.replace_snapshot world.config former_operator |> unwrap;
+  let resolver = Keeper_constitution_roster.read ~config:world.config
+    |> Result.map_error World_constitution_store.read_error_to_string |> unwrap in
+  let now_resolved = World_constitution_store.load_held
+    ~base_path:world.config.base_path ~resolve_subject:resolver
+    |> Result.map_error World_constitution_store.read_error_to_string |> unwrap in
+  Alcotest.(check bool) "the new durable roster now resolves every move" true
+    (now_resolved.status = World_constitution_store.Resolved);
+  let resolved_native =
+    prepare_context world ~runtime_id:agent_core_runtime
+      ~checkpoint:{ seed with Agent_core.Checkpoint.context = Agent_core.Context.create_sync () }
+      ~recorded_system:{ Keeper_run_context.runtime_id = agent_core_runtime; text = seeded.system.text }
+  in
+  Alcotest.(check (option string)) "roster changes cannot revive the native System's old norm"
+    unknown.system.current_norms resolved_native.system.current_norms;
+  check_withholding_reaches_requests resolved_native.system;
+  let another_isolated =
+    Types.make ~id:(Types.Article_id.generate ()) ~text:"an unrelated unverified norm"
+      ~author:"another-former-keeper" ~at:2.5 ~evidence:[]
+    |> Result.map_error Types.invalid_to_string |> unwrap
+  in
+  append world (Types.Added another_isolated);
+  let more_history =
+    prepare_context world ~runtime_id:agent_core_runtime
+      ~checkpoint:{ seed with Agent_core.Checkpoint.context = Agent_core.Context.create_sync () }
+      ~recorded_system:{ Keeper_run_context.runtime_id = agent_core_runtime; text = seeded.system.text }
+  in
+  Alcotest.(check (option string)) "more inactive history does not enlarge the request snapshot"
+    unknown.system.current_norms more_history.system.current_norms;
   let ordinary = prepare_context world ~runtime_id:agent_core_runtime ~checkpoint:seed in
   Alcotest.(check bool) "an ordinary turn rebuilds without the withdrawn text" false
-    (holds ordinary.system taken)
+    (holds ordinary.system taken);
+  let readopted =
+    Types.make ~id:taken.id ~text:"the explicitly readopted new text"
+      ~author:"lane-smith" ~at:3.0 ~evidence:[]
+    |> Result.map_error Types.invalid_to_string |> unwrap
+  in
+  append world (Types.Added readopted);
+  let readopted_native =
+    prepare_context world ~runtime_id:agent_core_runtime
+      ~checkpoint:{ seed with Agent_core.Checkpoint.context = Agent_core.Context.create_sync () }
+      ~recorded_system:{ Keeper_run_context.runtime_id = agent_core_runtime; text = seeded.system.text }
+  in
+  Alcotest.(check string) "readoption preserves the native seed bytes"
+    seeded.system.text readopted_native.system.text;
+  Alcotest.(check (option string)) "readoption replaces an unknown native's old same-id body"
+    (Some (Keeper_prompt.constitution_current_block [readopted]))
+    readopted_native.system.current_norms;
+  check_withholding_reaches_requests readopted_native.system
 ;;
 
 let () =
@@ -945,8 +993,8 @@ let () =
             test_an_official_client_turn_takes_the_current_articles
         ; Alcotest.test_case "a native continuation after a restart keeps the block" `Quick
             test_a_native_continuation_after_a_restart_keeps_the_block
-        ; Alcotest.test_case "a native continuation without a recorded basis sends no block" `Quick
-            test_a_native_continuation_without_a_recorded_basis_sends_no_block
+        ; Alcotest.test_case "a native continuation without a recorded basis carries current norms" `Quick
+            test_a_native_continuation_without_a_recorded_basis_carries_current_norms
         ; Alcotest.test_case "a reinterpreted native basis carries current withholding" `Quick
             test_a_native_seed_with_a_reinterpreted_basis_carries_current_withholding
         ] )

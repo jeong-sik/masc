@@ -10,8 +10,9 @@ manifest file map; it is not a new capture or binary attestation.
 
 The source work follows #50578: V5 → V4 → G4 → V8 → W1. Source review,
 parse-only checking, GitHub type checking, and candidate execution are separate
-evidence. Candidate execution and same-width after comparisons are not yet
-present in this bundle. A missing after capture is not a visual pass.
+evidence. The [frozen candidate bundle](candidate-ea87978/README.md) adds actual
+after captures, same-width comparisons, exact-source checks and their limits.
+Later restacked source is distinguished from the executed candidate.
 
 New runs are written under `artifacts/rfc0515-remaining-20261109/`, outside
 this retained bundle. The read-only capture runner isolates local preferences

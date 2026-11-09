@@ -161,3 +161,42 @@ let due_text ~now ~localtime = function
       if at -. now > half_day_seconds then past_half_day_text else Mark.unknown_mark
   | Masc_tui_keeper_next_run.Unknown -> Mark.unknown_mark
 ;;
+
+let lag_fill ~cells ~peak lag =
+  if lag <= 0 || cells <= 0 then 0
+  else
+    let ratio = float_of_int lag /. float_of_int (max peak lag) in
+    max 1 (int_of_float (Float.round (ratio *. float_of_int cells)))
+;;
+
+(* The mock's [dur] ladder, which keeps a span within the due column: seconds
+   under a minute and a half, minutes under a hundred, hours and minutes under
+   ten hours, hours under two days, then days. *)
+let seconds_ceiling = 90
+let minutes_ceiling = 100
+let hours_with_minutes_ceiling = 10
+let hours_ceiling = 48
+let hours_per_day = Masc_time_constants.day_int / Masc_time_constants.hour_int
+
+let short_span seconds =
+  let seconds = max 0 (int_of_float (Float.round seconds)) in
+  let minutes = int_of_float (Float.round (float_of_int seconds /. float_of_int minute_seconds)) in
+  let hours = minutes / minutes_per_hour and rest = minutes mod minutes_per_hour in
+  if seconds < seconds_ceiling then Printf.sprintf "%ds" seconds
+  else if minutes < minutes_ceiling then Printf.sprintf "%dm" minutes
+  else if hours < hours_with_minutes_ceiling then
+    if rest = 0 then Printf.sprintf "%dh" hours else Printf.sprintf "%dh%02dm" hours rest
+  else if hours < hours_ceiling then Printf.sprintf "%dh" hours
+  else
+    Printf.sprintf "%dd"
+      (int_of_float (Float.round (float_of_int hours /. float_of_int hours_per_day)))
+;;
+
+let dated_clock_text ~now ~localtime at =
+  if now -. at < half_day_seconds then clock_text ~localtime at
+  else
+    let tm = localtime at in
+    Printf.sprintf "%02d-%02d %s" (tm.Unix.tm_mon + 1) tm.Unix.tm_mday (clock_text ~localtime at)
+;;
+
+let chain_attempts = 4

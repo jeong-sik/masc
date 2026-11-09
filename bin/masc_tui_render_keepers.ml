@@ -613,81 +613,8 @@ let keeper_secondary_row_content ?now ?(cells = []) ~inner (row : Keeper_list_mo
   String.make indent_cells ' ' ^ body
 ;;
 
-(* The axis row of the memory and age views (RFC-0515 §2.4): the name, then
-   ◂ before · ● now · ▹ next. ◂ and ● keep their width, so the cells line up
-   under the header; ▹ takes the rest of the row, and the frame cuts it before
-   anything on its left. *)
 module Axis_row = Masc_tui_keeper_axis_row
 module Memory_reading = Masc_tui_keeper_memory_reading
-
-let axis_name_header = "keeper"
-let axis_cell_gap = "  "
-
-(* ◂ is as wide as the pulse and ● as the NOW column in every view, so a
-   view change keeps ● in its column. *)
-let axis_before_cells = Masc_tui_keeper_mark.pulse_hours
-let axis_current_cells = Render_schedule.keeper_status_width
-
-let axis_before_header = function
-  | Axis_row.Hour_pulse -> Masc_tui_keeper_mark.pulse_header
-  | Axis_row.Fact_ages -> Masc_tui_keeper_mark.fact_age_header
-
-let axis_current_header = function
-  | Axis_row.Librarian_pass -> Masc_tui_keeper_mark.librarian_header
-  | Axis_row.Update_age -> Masc_tui_keeper_mark.updated_header
-
-let axis_next_header = function
-  | Axis_row.Lag_digest_gap -> Masc_tui_keeper_mark.lag_digest_gap_header
-  | Axis_row.Lag_stale_facts -> Masc_tui_keeper_mark.lag_stale_facts_header
-
-(* The widest name, held between the list's floor and ceiling for a name. *)
-let axis_name_width rows =
-  let widest =
-    List.fold_left
-      (fun widest (row : Keeper_list_model.row) ->
-        max widest
-          (Message_layout.display_width (Terminal_text.single_line row.keeper.Tui_decode.k_name)))
-      0 rows
-  in
-  max Render_schedule.keeper_minimum_name_width
-    (min Render_schedule.keeper_maximum_name_width widest)
-
-let keeper_axis_header ~name_width (axis : Axis_row.axis) =
-  String.concat ""
-    [ String.make Render_schedule.keeper_marker_width ' '
-    ; Message_layout.fit_width axis_name_header name_width
-    ; " "
-    ; Message_layout.fit_width (axis_before_header axis.before) axis_before_cells
-    ; axis_cell_gap
-    ; Message_layout.fit_width (axis_current_header axis.current) axis_current_cells
-    ; axis_cell_gap
-    ; axis_next_header axis.next
-    ]
-
-let fitted_axis_cell cells (cell : Masc_tui_keeper_axis_cell.t) =
-  style_axis_cell
-    { cell with
-      Masc_tui_keeper_axis_cell.text =
-        Message_layout.fit_width cell.Masc_tui_keeper_axis_cell.text cells
-    }
-
-let keeper_axis_before_cell ~now ~memory (row : Keeper_list_model.row) = function
-  | Axis_row.Hour_pulse ->
-      fitted_axis_cell axis_before_cells
-        (Masc_tui_keeper_pulse.hours_cell ~now
-           (Option.bind (keeper_row_runtime row) (fun runtime -> runtime.Tui_decode.kr_recent_turns)))
-  | Axis_row.Fact_ages ->
-      fitted_axis_cell axis_before_cells (Memory_reading.fact_ages_cell memory)
-
-let keeper_axis_current_cell ~now ~memory = function
-  | Axis_row.Librarian_pass ->
-      fitted_axis_cell axis_current_cells (Memory_reading.pass_cell memory)
-  | Axis_row.Update_age ->
-      fitted_axis_cell axis_current_cells (Memory_reading.updated_cell ~now memory)
-
-let keeper_axis_next_cells ~now ~memory ~peak_lag = function
-  | Axis_row.Lag_digest_gap -> Memory_reading.lag_digest_gap_cells ~now ~peak_lag memory
-  | Axis_row.Lag_stale_facts -> Memory_reading.lag_stale_facts_cells ~peak_lag memory
 
 let keeper_memory_reading state (row : Keeper_list_model.row) =
   Memory_reading.find (Masc_tui_keeper_axis.memory_index state)
@@ -698,20 +625,15 @@ let keeper_memory_reading state (row : Keeper_list_model.row) =
    longer lists does not set the scale. *)
 let axis_peak_lag state rows = Memory_reading.peak_lag (List.map (keeper_memory_reading state) rows)
 
-let keeper_axis_row_content state ~(axis : Axis_row.axis) ~name_width ~peak_lag ~now
-    ~yolo ~selected (row : Keeper_list_model.row) =
-  let memory = keeper_memory_reading state row in
-  String.concat ""
-    [ keeper_row_marker ~selected
-    ; keeper_row_name ~width:name_width ~yolo row
-    ; " "
-    ; keeper_axis_before_cell ~now ~memory row axis.before
-    ; axis_cell_gap
-    ; keeper_axis_current_cell ~now ~memory axis.current
-    ; axis_cell_gap
-    ; String.concat Masc_tui_keeper_axis_cell.separator
-        (List.map style_axis_cell (keeper_axis_next_cells ~now ~memory ~peak_lag axis.next))
-    ]
+(* The fact counts are drawn against the listed Keeper with the most facts. *)
+let axis_peak_facts state rows =
+  List.fold_left
+    (fun peak row ->
+      match Memory_reading.age_bins (keeper_memory_reading state row) with
+      | Memory_reading.Measured bins -> max peak (Masc.Keeper_memory_age_bins.total bins)
+      | Memory_reading.Unmeasured | Memory_reading.No_snapshot | Memory_reading.Snapshot_unknown
+      | Memory_reading.Row_absent | Memory_reading.Row_refused -> peak)
+    0 rows
 
 (* The grid of the views (RFC-0515 §2.4.1): the columns stand in the same
    cells on every row, fixed from the right edge, and the name takes what is
@@ -728,6 +650,8 @@ let grid_band now_text =
   ground ^ line ^ " "
   ^ String_util.replace_substring ~needle:Ansi.reset ~by:restore now_text
   ^ " " ^ line ^ Ansi.reset
+
+let grid_blank_now = String.make Grid.now_cells ' '
 
 type grid_cells =
   { gutter : string
@@ -753,11 +677,20 @@ let grid_line (grid : Grid.t) cells =
     ; (if grid.mem_cells > 0 then " " ^ cells.right else "")
     ]
 
+(* The cells before the band: the gutter, the name and the pulse. *)
+let grid_lead_cells (grid : Grid.t) =
+  Grid.gutter_cells + grid.name_cells + if grid.side_cells > 0 then 1 + grid.side_cells else 0
+
+(* The cells after the band: the strip, the due column and the right column. *)
+let grid_tail_cells (grid : Grid.t) =
+  (if grid.side_cells > 0 then Grid.strip_cells grid + 1 else 0)
+  + Grid.due_cells
+  + if grid.mem_cells > 0 then 1 + grid.mem_cells else 0
+
 (* A list row with nothing drawn still carries the band, so the now lines run
    down to the footer. *)
 let grid_blank_line (grid : Grid.t) =
-  let before = Grid.gutter_cells + grid.name_cells + if grid.side_cells > 0 then 1 + grid.side_cells else 0 in
-  String.make before ' ' ^ " " ^ grid_band (String.make Grid.now_cells ' ')
+  String.make (grid_lead_cells grid) ' ' ^ " " ^ grid_band grid_blank_now
 
 let grid_gutter_style = function
   | Grid.Failing { resting = false } -> Theme.warn ()
@@ -777,8 +710,15 @@ let grid_name (grid : Grid.t) ~yolo verdict name =
     | Grid.Paused -> Theme.recede () ^ text ^ Ansi.reset
     | Grid.Failing _ | Grid.Recovered | Grid.Sound | Grid.Other -> text
 
-(* The hour pulse on the right of its column. A column narrower than the
-   pulse keeps the newest hours. *)
+let grid_repeat count mark = String.concat "" (List.init (max 0 count) (fun _ -> mark))
+
+(* Marks on the right of the pulse column, the newest on the right. A column
+   narrower than the marks keeps the newest. *)
+let grid_newest_marks (grid : Grid.t) marks =
+  Message_layout.pad_left
+    (String.concat "" (List.drop (max 0 (List.length marks - grid.side_cells)) marks))
+    grid.side_cells
+
 let grid_hour_pulse (grid : Grid.t) ~now pulse =
   let hours = Masc_tui_keeper_pulse.slots ~now pulse in
   let shown = List.drop (max 0 (List.length hours - grid.side_cells)) hours in
@@ -793,16 +733,12 @@ let grid_hour_pulse (grid : Grid.t) ~now pulse =
   in
   style_axis_cell
     { Masc_tui_keeper_axis_cell.text =
-        Message_layout.pad_left
-          (String.concat "" (List.map Masc_tui_keeper_pulse.slot_mark shown))
-          grid.side_cells
+        grid_newest_marks grid (List.map Masc_tui_keeper_pulse.slot_mark shown)
     ; tone = (if failed then Masc_tui_keeper_axis_cell.Attention else Masc_tui_keeper_axis_cell.Quiet)
     }
 
 let grid_quiet_strip (grid : Grid.t) =
-  Theme.recede ()
-  ^ String.concat "" (List.init (Grid.strip_cells grid) (fun _ -> Keeper_mark.grid_dot_mark))
-  ^ Ansi.reset
+  Theme.recede () ^ grid_repeat (Grid.strip_cells grid) Keeper_mark.grid_dot_mark ^ Ansi.reset
 
 let grid_due ~now verdict next_run =
   let style =
@@ -844,22 +780,285 @@ let grid_lag_cell (grid : Grid.t) ~peak_lag memory =
       | Some cell -> fitted cell
       | None -> String.make grid.mem_cells ' ')
 
-let grid_activity_row state (grid : Grid.t) ~view ~peak_lag ~now ~frame ~yolo
+let grid_fitted cells (cell : Masc_tui_keeper_axis_cell.t) =
+  style_axis_cell { cell with text = fit_width cell.text cells }
+
+let grid_quiet text = { Masc_tui_keeper_axis_cell.text; tone = Masc_tui_keeper_axis_cell.Quiet }
+
+(* The memory view's ● cell: how the librarian's last pass ended. *)
+let grid_librarian memory =
+  grid_fitted Grid.now_cells
+    (match Memory_reading.pass_end memory with
+     | Memory_reading.Unmeasured -> grid_quiet Keeper_mark.grid_no_librarian_word
+     | Memory_reading.No_snapshot | Memory_reading.Row_absent ->
+         grid_quiet Keeper_mark.grid_no_data_word
+     | Memory_reading.Measured _ | Memory_reading.Snapshot_unknown | Memory_reading.Row_refused ->
+         Memory_reading.pass_cell memory)
+
+(* The strip column of the memory and age views: the unread turns as a bar
+   against [peak_lag] on a ground of dots, in the info colour when requests
+   skip atoms. A reading without a row leaves it to the ● cell. *)
+let grid_lag_bar (grid : Grid.t) ~peak_lag memory =
+  let cells = Grid.strip_cells grid in
+  let ground count = Theme.recede () ^ grid_repeat count Keeper_mark.grid_dot_mark ^ Ansi.reset in
+  match memory with
+  | Memory_reading.Row { lag = Memory_reading.Lag turns; gap; _ } ->
+      let filled = Grid.lag_fill ~cells ~peak:peak_lag turns in
+      let fill =
+        match gap with
+        | Memory_reading.Gap _ | Memory_reading.Gap_unmeasured -> Theme.info ()
+        | Memory_reading.No_gap -> Theme.recede ()
+      in
+      fill ^ grid_repeat filled Keeper_mark.grid_full_mark ^ Ansi.reset ^ ground (cells - filled)
+  | Memory_reading.Row { lag = Memory_reading.Lag_unmeasured; _ } ->
+      Theme.recede () ^ Keeper_mark.unknown_mark ^ Ansi.reset ^ ground (cells - 1)
+  | Memory_reading.Unknown | Memory_reading.No_row | Memory_reading.Refused _ ->
+      String.make cells ' '
+
+(* The memory view's due column: how long ago the last digest succeeded, [—]
+   before the first. *)
+let grid_digest ~now memory =
+  let text =
+    match Memory_reading.digest_at memory with
+    | Memory_reading.Measured at -> Grid.short_span (now -. at)
+    | Memory_reading.Unmeasured -> Masc_tui_theme.Glyph.no_value
+    | Memory_reading.No_snapshot | Memory_reading.Snapshot_unknown | Memory_reading.Row_absent
+    | Memory_reading.Row_refused -> ""
+  in
+  Theme.recede () ^ fit_width text Grid.due_cells ^ Ansi.reset
+
+(* The memory view's right column: the atoms requests skip. *)
+let grid_gap (grid : Grid.t) memory =
+  let text =
+    match memory with
+    | Memory_reading.Row { gap = Memory_reading.Gap { first_atom; past_last_atom }; _ }
+      when past_last_atom > first_atom ->
+        Masc_tui_chart.format_compact_num (past_last_atom - first_atom)
+    | Memory_reading.Row { gap = Memory_reading.Gap_unmeasured; _ } -> Keeper_mark.unknown_mark
+    | Memory_reading.Row { gap = Memory_reading.Gap _ | Memory_reading.No_gap; _ }
+    | Memory_reading.Unknown | Memory_reading.No_row | Memory_reading.Refused _ -> ""
+  in
+  Theme.info () ^ Message_layout.pad_left text grid.mem_cells ^ Ansi.reset
+
+(* The age view's pulse column: the facts in the server's age bins, oldest on
+   the left. *)
+let grid_fact_ages (grid : Grid.t) memory =
+  match Memory_reading.age_bins memory with
+  | Memory_reading.Measured bins ->
+      Theme.recede ()
+      ^ grid_newest_marks grid
+          (List.map
+             (function
+               | Masc_tui_keeper_age_ladder.Empty -> Keeper_mark.grid_dot_mark
+               | Masc_tui_keeper_age_ladder.Bar bar -> bar)
+             (Masc_tui_keeper_age_ladder.marks bins))
+      ^ Ansi.reset
+  | Memory_reading.Unmeasured | Memory_reading.No_snapshot | Memory_reading.Snapshot_unknown
+  | Memory_reading.Row_absent | Memory_reading.Row_refused ->
+      let cell = Memory_reading.fact_ages_cell memory in
+      style_axis_cell { cell with text = Message_layout.pad_left cell.text grid.side_cells }
+
+(* The age view's ● cell: how long ago the memory last changed. *)
+let grid_renewed ~now memory =
+  match Memory_reading.updated_at memory with
+  | Memory_reading.Measured at ->
+      fit_width (Keeper_mark.grid_renewed_mark ^ " " ^ Grid.short_span (now -. at)) Grid.now_cells
+  | Memory_reading.No_snapshot | Memory_reading.Row_absent ->
+      grid_fitted Grid.now_cells
+        (grid_quiet (Masc_tui_theme.Glyph.no_value ^ " " ^ Keeper_mark.grid_no_snapshot_word))
+  | Memory_reading.Unmeasured | Memory_reading.Snapshot_unknown | Memory_reading.Row_refused ->
+      grid_fitted Grid.now_cells (Memory_reading.updated_cell ~now memory)
+
+(* The age view's due column: the invalidated sources. *)
+let grid_stale memory =
+  let text =
+    match memory with
+    | Memory_reading.Row { source_invalidations; _ } when source_invalidations > 0 ->
+        Keeper_mark.grid_stale_mark ^ string_of_int source_invalidations
+    | Memory_reading.Row _ | Memory_reading.Unknown | Memory_reading.No_row
+    | Memory_reading.Refused _ -> ""
+  in
+  Theme.warn () ^ fit_width text Grid.due_cells ^ Ansi.reset
+
+(* The age view's right column: the fact count and its level against
+   [peak_facts]. *)
+let grid_facts (grid : Grid.t) ~peak_facts memory =
+  match Memory_reading.age_bins memory with
+  | Memory_reading.Measured bins ->
+      let facts = Masc.Keeper_memory_age_bins.total bins in
+      Theme.recede ()
+      ^ Message_layout.pad_left (Masc_tui_chart.format_compact_num facts)
+          (grid.mem_cells - grid_level_cells)
+      ^ " " ^ Grid.level_glyph ~peak:peak_facts facts ^ Ansi.reset
+  | Memory_reading.Unmeasured ->
+      Theme.recede () ^ Message_layout.pad_left Keeper_mark.unknown_mark grid.mem_cells ^ Ansi.reset
+  | Memory_reading.No_snapshot | Memory_reading.Snapshot_unknown | Memory_reading.Row_absent
+  | Memory_reading.Row_refused -> String.make grid.mem_cells ' '
+
+let grid_keeper_row state (grid : Grid.t) columns ~view ~peak_lag ~peak_facts ~now ~frame ~yolo
     (row : Keeper_list_model.row) =
   let runtime = keeper_row_runtime row in
   let verdict = Grid.verdict ~now runtime in
   let keeper_name = row.keeper.Tui_decode.k_name in
+  let memory = keeper_memory_reading state row in
+  let gutter = grid_gutter view verdict in
+  let name = grid_name grid ~yolo verdict keeper_name in
+  let hour_pulse () =
+    grid_hour_pulse grid ~now
+      (Option.bind runtime (fun runtime -> runtime.Tui_decode.kr_recent_turns))
+  in
   grid_line grid
-    { gutter = grid_gutter view verdict
-    ; name = grid_name grid ~yolo verdict keeper_name
-    ; pulse =
-        grid_hour_pulse grid ~now
-          (Option.bind runtime (fun runtime -> runtime.Tui_decode.kr_recent_turns))
-    ; now_cell = keeper_now_cell ~frame row
-    ; strip = grid_quiet_strip grid
-    ; due = grid_due ~now verdict (Masc_tui_keeper_axis.next_run state ~keeper_name)
-    ; right = grid_lag_cell grid ~peak_lag (keeper_memory_reading state row)
-    }
+    (match (columns : Axis_row.columns) with
+     | Axis_row.Activity_columns ->
+         { gutter
+         ; name
+         ; pulse = hour_pulse ()
+         ; now_cell = keeper_now_cell ~frame row
+         ; strip = grid_quiet_strip grid
+         ; due = grid_due ~now verdict (Masc_tui_keeper_axis.next_run state ~keeper_name)
+         ; right = grid_lag_cell grid ~peak_lag memory
+         }
+     | Axis_row.Memory_columns ->
+         { gutter
+         ; name
+         ; pulse = hour_pulse ()
+         ; now_cell = grid_librarian memory
+         ; strip = grid_lag_bar grid ~peak_lag memory
+         ; due = grid_digest ~now memory
+         ; right = grid_gap grid memory
+         }
+     | Axis_row.Age_columns ->
+         { gutter
+         ; name
+         ; pulse = grid_fact_ages grid memory
+         ; now_cell = grid_renewed ~now memory
+         ; strip = grid_lag_bar grid ~peak_lag memory
+         ; due = grid_stale memory
+         ; right = grid_facts grid ~peak_facts memory
+         })
+
+(* The failure line under a failing Keeper of the state and cause views
+   (§2.4.6). Under the name: when the failing phase began, or how long ago the
+   last failure was when the server recorded no start. *)
+let grid_failure_since ~now ~room (runtime : keeper_runtime option) trail =
+  let failing =
+    match runtime with
+    | None -> Masc_tui_keeper_pulse.Not_failing
+    | Some runtime ->
+        Masc_tui_keeper_pulse.failing_of_health
+          ~health:(Tui_decode.keeper_health_reading runtime.Tui_decode.kr_health)
+          ~failing_since:runtime.Tui_decode.kr_failing_since
+  in
+  match failing, trail with
+  | Masc_tui_keeper_pulse.Failing_since at, (Keeper_trail.Trail_failed _ | Keeper_trail.Trail_sound) ->
+      let clock = Grid.dated_clock_text ~now ~localtime:Unix.localtime at in
+      let worded = Keeper_mark.grid_since_word ^ " " ^ clock in
+      (* The word goes first, so a cut never leaves a minute that reads as data. *)
+      if Message_layout.display_width worded <= room then worded else clock
+  | Masc_tui_keeper_pulse.Failing_unrecorded, Keeper_trail.Trail_failed { ended_at = Some at; _ }
+    when at <= now ->
+      Grid.short_span (now -. at) ^ " " ^ Keeper_mark.grid_ago_word
+  | ( (Masc_tui_keeper_pulse.Failing_unrecorded | Masc_tui_keeper_pulse.Not_failing)
+    , (Keeper_trail.Trail_failed _ | Keeper_trail.Trail_sound) ) -> ""
+
+(* The word for why the failed turn ended: the receipt's cause when it names
+   the runtime that ended it, the server's own cause word otherwise. *)
+let grid_failure_word = function
+  | Keeper_trail.Trail_failed { walk = Keeper_trail.Walk_ended { cause; _ }; _ } ->
+      keeper_cause_group_word cause
+  | Keeper_trail.Trail_failed
+      { walk =
+          ( Keeper_trail.Walk_no_terminal _ | Keeper_trail.Walk_no_candidate_failure
+          | Keeper_trail.Walk_not_captured | Keeper_trail.Walk_unreadable | Keeper_trail.Walk_absent
+          | Keeper_trail.Walk_not_applicable )
+      ; last = Some cause
+      ; ended_at = _
+      } -> keeper_failure_cause_word cause
+  | Keeper_trail.Trail_failed { last = None; _ } | Keeper_trail.Trail_sound -> ""
+
+(* In the pulse column: one ✗ per attempt of the failed turn, at most
+   [Grid.chain_attempts], then the failure word. *)
+let grid_failure_chain (grid : Grid.t) runtime trail =
+  let recede text = Theme.recede () ^ text ^ Ansi.reset in
+  let attempts = Masc_tui_keeper_trail.attempts_of_runtime runtime in
+  let shown = List.take Grid.chain_attempts attempts in
+  let chain =
+    match shown with
+    | [] -> []
+    | _ :: _ ->
+        [ String.concat (recede Keeper_mark.grid_chain_link)
+            (List.map (fun _ -> Theme.warn () ^ Keeper_mark.attempt_glyph ^ Ansi.reset) shown)
+          ^ if List.length attempts > Grid.chain_attempts then recede Keeper_mark.grid_more_mark
+            else ""
+        ]
+  in
+  let word =
+    match grid_failure_word trail with
+    | "" -> []
+    | word -> [ recede word ]
+  in
+  fit_width (String.concat " " (chain @ word)) grid.side_cells
+
+(* From the strip column on: the runtime the next dispatch takes, or the one
+   whose rest it waits out. *)
+let grid_next_dispatch (runtime : keeper_runtime option) =
+  match runtime with
+  | Some runtime when Tui_decode.keeper_phase_executes_turns runtime.Tui_decode.kr_phase -> (
+      match runtime.Tui_decode.kr_runtime_path_rest with
+      | Ok (Some (Tui_decode.Path_rest_serving { runtime_id })) ->
+          Theme.info () ^ Keeper_mark.axis_next_glyph ^ " " ^ Terminal_text.single_line runtime_id
+          ^ Ansi.reset
+      | Ok (Some (Tui_decode.Path_rest_resting { runtime_id; release_at = _; release_basis = _ })) ->
+          Theme.recede ()
+          ^ String.concat " "
+              [ Keeper_mark.grid_wait_glyph; Keeper_mark.grid_wait_word
+              ; Terminal_text.single_line runtime_id ]
+          ^ Ansi.reset
+      | Ok None -> ""
+      | Error _ ->
+          Theme.recede () ^ Keeper_mark.axis_next_glyph ^ " " ^ Keeper_mark.unknown_mark ^ Ansi.reset)
+  | Some _ | None -> ""
+
+let grid_since_lead = Keeper_mark.failing_glyph ^ " "
+
+let grid_failure_line (grid : Grid.t) ~now (row : Keeper_list_model.row) =
+  let runtime = keeper_row_runtime row in
+  let trail = Keeper_list_model.trail_of_row row in
+  let since =
+    grid_failure_since ~now
+      ~room:(grid.name_cells - Message_layout.display_width grid_since_lead)
+      runtime trail
+  in
+  String.concat ""
+    [ grid_gutter_style (Grid.verdict ~now runtime) ^ Keeper_mark.grid_gutter_glyph ^ Ansi.reset
+      ^ String.make (Grid.gutter_cells - 1) ' '
+    ; (match since with
+       | "" -> String.make grid.name_cells ' '
+       | since -> Theme.recede () ^ fit_width (grid_since_lead ^ since) grid.name_cells ^ Ansi.reset)
+    ; (if grid.side_cells > 0 then " " ^ grid_failure_chain grid runtime trail else "")
+    ; " "
+    ; grid_band grid_blank_now
+    ; " "
+    ; fit_width (grid_next_dispatch runtime) (grid_tail_cells grid)
+    ]
+
+(* A group title on the grid (§2.4.7): [▌] in the group's colour, [−] open or
+   [+] folded, and the title over the name and pulse columns, then the band.
+   The group's sums are not drawn yet. *)
+let grid_title_cells (grid : Grid.t) = grid.name_cells + grid.side_cells
+
+let grid_group_title (grid : Grid.t) ~folded ~style title =
+  String.concat ""
+    [ style ^ Keeper_mark.grid_gutter_glyph ^ Ansi.reset ^ " "
+    ; Ansi.bold
+      ^ (if folded then Keeper_mark.grid_folded_mark else Keeper_mark.grid_open_mark)
+      ^ Ansi.reset ^ " "
+    ; style ^ Ansi.bold
+      ^ fit_width (fit_width title (grid_title_cells grid)) (grid_lead_cells grid - Grid.gutter_cells)
+      ^ Ansi.reset
+    ; " "
+    ; grid_band grid_blank_now
+    ]
 
 (* A header word on the left of its column and [tail] on its right, or the
    word alone when the column is too narrow for both. *)
@@ -870,8 +1069,16 @@ let grid_spread ~cells lead tail =
     lead ^ String.make (cells - lead_cells - tail_cells) ' ' ^ tail
   else fit_width lead cells
 
-(* The column headers draw the two lines and no band. *)
-let grid_activity_header (grid : Grid.t) =
+(* The mock's room for the longer header words: the lag bar's long header
+   needs a strip of 20 cells, and [facts by age ▸] a name column of 20 cells,
+   8 cells after [keeper]. *)
+let grid_lag_bar_header_cells = 20
+let grid_facts_by_age_name_cells = 20
+let grid_facts_by_age_offset = 8
+
+(* The column headers draw the two lines and no band. A header word over the
+   due column may run into the gap after it. *)
+let grid_header (grid : Grid.t) (columns : Axis_row.columns) =
   let recede text = Theme.recede () ^ text ^ Ansi.reset in
   let line = " " ^ Theme.info () ^ Keeper_mark.grid_now_line ^ Ansi.reset ^ " " in
   (* The pulse column draws whole clock hours, newest last; a column wider
@@ -881,50 +1088,56 @@ let grid_activity_header (grid : Grid.t) =
   (* The strip draws the half hours ahead, so its header names half hours. *)
   let strip_window = Grid.window_label ~slots:grid.side_cells in
   let side = grid.side_cells > 0 in
+  let mem = grid.mem_cells > 0 in
+  let lag_bar =
+    if Grid.strip_cells grid >= grid_lag_bar_header_cells then Keeper_mark.grid_lag_bar_header
+    else Keeper_mark.grid_lag_bar_short_header
+  in
+  let name, pulse, now_word, strip, due, right =
+    match columns with
+    | Axis_row.Activity_columns ->
+        ( Keeper_mark.grid_keeper_header
+        , Some (Keeper_mark.grid_pulse_header ~window)
+        , Keeper_mark.axis_now_header
+        , Keeper_mark.grid_next_header ~window:strip_window
+        , Keeper_mark.grid_due_header
+        , Message_layout.pad_left Keeper_mark.grid_lag_header (grid.mem_cells - grid_level_cells) )
+    | Axis_row.Memory_columns ->
+        ( Keeper_mark.grid_keeper_header
+        , Some (Keeper_mark.grid_pulse_header ~window:(Keeper_mark.grid_turns_word ^ " " ^ window))
+        , Keeper_mark.grid_librarian_header
+        , lag_bar
+        , Keeper_mark.grid_digest_header
+        , Message_layout.pad_left Keeper_mark.grid_gap_header grid.mem_cells )
+    | Axis_row.Age_columns ->
+        ( (if grid.name_cells >= grid_facts_by_age_name_cells then
+             fit_width Keeper_mark.grid_keeper_header grid_facts_by_age_offset
+             ^ Keeper_mark.grid_facts_by_age_header
+           else Keeper_mark.grid_keeper_header)
+        , None
+        , Keeper_mark.grid_renewed_header
+        , lag_bar
+        , Keeper_mark.grid_stale_header
+        , Message_layout.pad_left Keeper_mark.grid_facts_header grid.mem_cells )
+  in
   String.concat ""
     [ String.make Grid.gutter_cells ' '
-    ; recede (fit_width Keeper_mark.grid_keeper_header grid.name_cells)
+    ; recede (fit_width name grid.name_cells)
     ; (if side then
-         " " ^ recede (grid_spread ~cells:grid.side_cells (Keeper_mark.grid_pulse_header ~window) Grid.hour_slot_label)
-       else "")
-    ; line
-    ; Ansi.bold ^ fit_width Keeper_mark.axis_now_header Grid.now_cells ^ Ansi.reset
-    ; line
-    ; (if side then
-         Theme.info () ^ fit_width (Keeper_mark.grid_next_header ~window:strip_window) (Grid.strip_cells grid)
-         ^ Ansi.reset ^ " "
-       else "")
-    ; recede (fit_width Keeper_mark.grid_due_header Grid.due_cells)
-    ; (if grid.mem_cells > 0 then
          " "
          ^ recede
-             (fit_width
-                (Message_layout.pad_left Keeper_mark.grid_lag_header (grid.mem_cells - grid_level_cells))
-                grid.mem_cells)
+             (match pulse with
+              | Some pulse -> grid_spread ~cells:grid.side_cells pulse Grid.hour_slot_label
+              | None -> String.make grid.side_cells ' ')
        else "")
+    ; line
+    ; Ansi.bold ^ fit_width now_word Grid.now_cells ^ Ansi.reset
+    ; line
+    ; (if side then Theme.info () ^ fit_width strip (Grid.strip_cells grid) ^ Ansi.reset ^ " "
+       else "")
+    ; recede (fit_width due (Grid.due_cells + if mem then 1 else 0))
+    ; (if mem then recede (fit_width right grid.mem_cells) else "")
     ]
-
-(* The second line under a failing Keeper's axis row: the sentence about its
-   last failure, then the attempts of that turn, older ones dropped first to
-   fit beside the sentence. *)
-let keeper_axis_failure_row_content ~now ~inner (row : Keeper_list_model.row) =
-  let available = max 0 (inner - secondary_indent_cells) in
-  let sentence = keeper_row_trail_sentence ~age:(keeper_trail_age ~now) row in
-  let chain_cells =
-    match sentence with
-    | Some sentence ->
-        available - Message_layout.display_width sentence
-        - Message_layout.display_width secondary_separator
-    | None -> available
-  in
-  let pieces =
-    Option.to_list (Option.map (fun sentence -> Theme.warn () ^ sentence ^ Ansi.reset) sentence)
-    @ Option.to_list
-        (render_attempt_chain ~max_cells:chain_cells
-           (Masc_tui_keeper_trail.attempts_of_runtime (keeper_row_runtime row)))
-  in
-  String.make secondary_indent_cells ' '
-  ^ String.concat (Theme.recede () ^ secondary_separator ^ Ansi.reset) pieces
 
 (* The subtractions over the fleet's name lists. They answer different
    questions and only one of them is about being stopped: a keeper the fleet
@@ -1093,10 +1306,6 @@ let keeper_display_entries ~folded (reading : Masc_tui_types.keeper_list_reading
 let keeper_entry_selected stop = function
   | Keeper_group_heading (group, _) -> stop = Some (Keeper_list_model.Stop_heading group)
   | Keeper_display_row (position, _) -> stop = Some (Keeper_list_model.Stop_row position)
-
-(* A folded group's heading, in the mark the Code tree gives a closed
-   folder, where an open heading leaves the same two cells blank. *)
-let keeper_group_lead ~folded = if folded then "\xe2\x96\xb8 " else "  "
 
 (* The views [v] walks, one press each (RFC-0515 §2.3). *)
 let keeper_view_tabs ~cols view =
@@ -1716,15 +1925,13 @@ let render_keeper_list (state : state) =
       ~widest_runtime ~widest_detail ()
   in
   let shape = Axis_row.shape_of_view state.keeper_list_view in
-  let name_width = axis_name_width model_rows in
   let grid = Grid.layout ~cols:inner in
   let peak_lag = axis_peak_lag state model_rows in
+  let peak_facts = axis_peak_facts state model_rows in
   (match shape with
    | Axis_row.List_columns ->
        box_line_styled buf cols ~style:(Theme.recede ()) (keeper_column_header columns)
-   | Axis_row.Grid Axis_row.Activity_columns -> box_line buf cols (grid_activity_header grid)
-   | Axis_row.Axis axis ->
-       box_line_styled buf cols ~style:(Theme.recede ()) (keeper_axis_header ~name_width axis));
+   | Axis_row.Grid grid_columns -> box_line buf cols (grid_header grid grid_columns));
 
   (match keepers_error with
    | Some err -> box_line buf cols ((Theme.bad ()) ^ "  " ^ err ^ Ansi.reset)
@@ -1775,7 +1982,8 @@ let render_keeper_list (state : state) =
   let footer_rows = 2 in
   let keeper_count = List.length model_rows in
   let second_line (row : Keeper_list_model.row) =
-    Axis_row.second_line shape state.keeper_list_density (Keeper_list_model.trail_of_row row)
+    Axis_row.second_line state.keeper_list_view state.keeper_list_density
+      (Keeper_list_model.trail_of_row row)
   in
   (* A heading is one line whatever the density. *)
   let entry_lines = function
@@ -1862,10 +2070,10 @@ let render_keeper_list (state : state) =
     (function
       | Keeper_group_heading (group, count) as entry ->
           let text =
-            keeper_group_heading_style group ^ Ansi.bold
-            ^ keeper_group_lead ~folded:(List.mem group state.keeper_list_folded)
-            ^ keeper_group_heading_text ~available_cells:(inner - 2) model_rows group count
-            ^ Ansi.reset
+            grid_group_title grid ~folded:(List.mem group state.keeper_list_folded)
+              ~style:(keeper_group_heading_style group)
+              (keeper_group_heading_text ~available_cells:(grid_title_cells grid) model_rows group
+                 count)
           in
           if keeper_entry_selected stop entry then
             box_line_selected buf cols (Masc_tui_theme.strip_sgr text)
@@ -1880,12 +2088,9 @@ let render_keeper_list (state : state) =
             | Axis_row.List_columns ->
                 keeper_row_content ~columns ~now:now_unix ~frame:state.activity_frame ~yolo
                   ~selected row
-            | Axis_row.Grid Axis_row.Activity_columns ->
-                grid_activity_row state grid ~view:state.keeper_list_view ~peak_lag ~now:now_unix
-                  ~frame:state.activity_frame ~yolo row
-            | Axis_row.Axis axis ->
-                keeper_axis_row_content state ~axis ~name_width ~peak_lag ~now:now_unix ~yolo
-                  ~selected row
+            | Axis_row.Grid grid_columns ->
+                grid_keeper_row state grid grid_columns ~view:state.keeper_list_view ~peak_lag
+                  ~peak_facts ~now:now_unix ~frame:state.activity_frame ~yolo row
           in
           let press text =
             pressable (Press_keeper_row row.Keeper_list_model.keeper.Tui_decode.k_name)
@@ -1907,8 +2112,7 @@ let render_keeper_list (state : state) =
                    ~runtime:(keeper_row_runtime row)
                in
                emit (keeper_secondary_row_content ~now:now_unix ~inner ~cells row)
-           | Axis_row.Failure_chain ->
-               emit (keeper_axis_failure_row_content ~now:now_unix ~inner row)))
+           | Axis_row.Failure_chain -> emit (grid_failure_line grid ~now:now_unix row)))
     entries_window;
 
   let note =
@@ -1934,7 +2138,7 @@ let render_keeper_list (state : state) =
   for _ = 1 to max 0 (entry_rows - drawn_rows) do
     match shape with
     | Axis_row.Grid _ -> box_line buf cols (grid_blank_line grid)
-    | Axis_row.List_columns | Axis_row.Axis _ -> box_empty buf cols
+    | Axis_row.List_columns -> box_empty buf cols
   done;
 
   if overflowing then begin

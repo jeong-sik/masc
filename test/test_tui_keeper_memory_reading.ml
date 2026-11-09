@@ -325,36 +325,6 @@ let test_the_peak_lag_is_the_drawn_keeper_furthest_behind () =
     (peak [ "alpha"; "ghost" ]);
   Alcotest.(check int) "no measured lag has no peak" 0 (peak [ "gamma"; "delta" ])
 
-let test_the_lag_cell_opens_the_next_cells_of_a_row () =
-  let first_tone cells =
-    match cells with
-    | (cell : Cell.t) :: _ -> Some cell.tone
-    | [] -> None
-  in
-  List.iter
-    (fun (name, librarian, expected) ->
-      let reading = reading_of [ make_keeper_health ~keeper_id:"alpha" librarian ] "alpha" in
-      let check view cells =
-        Alcotest.(check bool) (name ^ ": " ^ view) true (Some expected = first_tone cells)
-      in
-      check "memory view" (Reading.lag_digest_gap_cells ~now:1794050000.0 ~peak_lag:8 reading);
-      check "age view" (Reading.lag_stale_facts_cells ~peak_lag:8 reading))
-    [ "an unmeasured lag is quiet", make_librarian ~unread_atom_turns:5 (), Cell.Quiet
-    ; "no unread turn is quiet", make_librarian ~unread_atom_turns:0 ~unread_official_turns:0 (),
-      Cell.Quiet
-    ; "unread turns ask for attention",
-      make_librarian ~unread_atom_turns:2 ~unread_official_turns:1 (), Cell.Attention
-    ]
-
-let test_a_reading_without_a_row_draws_no_next_cells () =
-  List.iter
-    (fun (name, reading) ->
-      Alcotest.(check int) (name ^ ": memory view") 0
-        (List.length (Reading.lag_digest_gap_cells ~now:1794050000.0 ~peak_lag:8 reading));
-      Alcotest.(check int) (name ^ ": age view") 0
-        (List.length (Reading.lag_stale_facts_cells ~peak_lag:8 reading)))
-    [ "unknown", Reading.Unknown; "no row", Reading.No_row; "refused", Reading.Refused "corrupt" ]
-
 let () =
   Alcotest.run "tui_keeper_memory_reading"
     [ ( "memory reading"
@@ -372,9 +342,5 @@ let () =
             test_the_pass_cell_tone_follows_how_the_pass_ended
         ; Alcotest.test_case "the peak lag is the drawn keeper furthest behind" `Quick
             test_the_peak_lag_is_the_drawn_keeper_furthest_behind
-        ; Alcotest.test_case "the lag cell opens the next cells of a row" `Quick
-            test_the_lag_cell_opens_the_next_cells_of_a_row
-        ; Alcotest.test_case "a reading without a row draws no next cells" `Quick
-            test_a_reading_without_a_row_draws_no_next_cells
         ] )
     ]

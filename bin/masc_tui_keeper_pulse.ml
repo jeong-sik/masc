@@ -117,8 +117,6 @@ let cell_of_hours hours =
   }
 ;;
 
-let hours_cell ~now pulse = cell_of_hours (slots ~now pulse)
-
 let pulse_cell ~now pulse =
   let hours = slots ~now pulse in
   if List.for_all is_quiet hours then None else Some (cell_of_hours hours)

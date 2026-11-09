@@ -202,3 +202,52 @@ let boot ~base_path ~config_dir ~anonymous_mutations =
   | Boot_single_user -> Ok (Judged_single_user base_path)
   | Stop stop -> Error (messages input stop)
 ;;
+
+let tool_refused =
+  "a host tool runs turns only on a base path that was never set up for accounts, and does \
+   not open the authorization files a server may be writing"
+;;
+
+(* What says the base path was set up for accounts, as presence only: the log,
+   and the install record that names the external store. *)
+let traces ~base_path ~config_dir =
+  let log_path = L.path_of_base_path ~base_path in
+  let log =
+    match P.of_path log_path with
+    | P.Not_there -> []
+    | P.There -> [ "the authorization log " ^ log_path ^ " is there" ]
+    | P.Cannot_check detail -> [ "the authorization log " ^ log_path ^ ": " ^ detail ]
+  in
+  let record =
+    match I.locate ~config_dir ~base_path with
+    | Error error -> [ I.locate_error_to_string error ]
+    | Ok located ->
+      (match I.read located with
+       | Ok None -> []
+       | Ok (Some store) ->
+         [ "an install record names this base path and the external store "
+           ^ (store : I.Store_path.t :> string)
+         ]
+       | Error error -> [ I.read_error_to_string error ])
+  in
+  log @ record
+;;
+
+let tool ~base_path ~config_dir =
+  match traces ~base_path ~config_dir with
+  | _ :: _ as found -> Error (tool_refused, found)
+  | [] ->
+    let requested, settings = read_config ~base_path in
+    (* A tool serves no HTTP, so it has no anonymous mutations. *)
+    let input =
+      { B.requested
+      ; log_mode = B.No_mode_event
+      ; high_water = B.Judged H.Absent
+      ; settings
+      ; anonymous_mutations = false
+      }
+    in
+    (match decide input with
+     | Boot_single_user -> Ok (Judged_single_user base_path)
+     | Stop stop -> Error (messages input stop))
+;;

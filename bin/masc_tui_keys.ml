@@ -30,6 +30,9 @@ type detail_state =
 type row_need =
   | Rowless  (** answers with no row under the cursor; the default *)
   | Needs_row  (** steps over, opens or answers a row; refused on an empty list *)
+  | Needs_reading
+      (** opens a reading: a row's details, or what replaced the list when
+          its read failed. An empty list has one only after a failed read. *)
 
 type binding = {
   key : string;
@@ -849,7 +852,10 @@ let for_surface = function
       ]
       @ row_list_jumps @ listing_meta
   | Planning ->
-      [ b Navigate "j/k" "move"
+      (* With no Goal on the list, the keys that read the one under the cursor
+         do nothing or answer with a notice. [b], [t], [p], [v], [f] and [s]
+         still act: a filter that leaves no Goal is undone with [f]. *)
+      [ b Navigate "j/k" "move" ~rows:Needs_row
       ; b Act "b" "summary" ~detail:List_only
           ~help:"read captured Goal totals, the global Task backlog, history, and snapshot changes"
         (* [t] and [p] answer on the list only. In a Goal detail [p] is Pause
@@ -862,7 +868,7 @@ let for_surface = function
       ; b Navigate "v" "next Work tab"
           ~help:"Goals, then the two task surfaces: Task Review and \
                  Task Verdicts. Not stages of one flow"
-      ; b Act "Right / Enter" "detail" ~detail:List_only
+      ; b Act "Right / Enter" "detail" ~detail:List_only ~rows:Needs_row
         (* Left only closes an open Goal or Task detail ([Planning_list -> ()]
            in the [Some "left"] arm of masc_tui.ml); Esc also leaves Work. *)
       ; b Act "Esc" "back" ~detail:List_only ~help:"leave Work for the Dashboard"
@@ -879,14 +885,16 @@ let for_surface = function
           ~help:"in Goal detail, enter a reason and press Enter"
       ; b Act "o" "reopen" ~detail:Detail_only
           ~help:"in Goal detail, press twice to request reopening"
-      ; b Act goal_candle_refresh_key "Candle"
+      ; b Act goal_candle_refresh_key "Candle" ~rows:Needs_row
           ~help:"open the selected Goal's Candle payout from the list, or read it again in detail"
-      ; b Act "Y" "copy link" ~help:"copy the selected goal reference"
+      ; b Act "Y" "copy link" ~rows:Needs_row
+          ~help:"copy the selected goal reference"
         (* Over the goals [f] and [s] left on screen, in the order they are
            drawn: the search walks what the list shows, not the snapshot. *)
-      ; b Search "/" "find" ~detail:List_only
+      ; b Search "/" "find" ~detail:List_only ~rows:Needs_row
           ~help:"jump the cursor to a matching goal id or title"
       ; b Search "n / N" "next / previous match" ~detail:List_only
+          ~rows:Needs_row
       ]
       @ row_list_jumps @ listing_meta
   | Schedules ->
@@ -1037,8 +1045,9 @@ let for_surface = function
       (* With no repository registered, the keys that read the one under the
          cursor do nothing or answer with a notice. [a] and [/] still act:
          the first opens the editor to register one, the second opens the
-         search line. *)
-      [ b Navigate "v" "full details" ~rows:Needs_row
+         search line. [v] needs a reading, not a row: after a failed read it
+         opens the failure with no repository selected. *)
+      [ b Navigate "v" "full details" ~rows:Needs_reading
           ~help:"read the complete selected path, Keeper assignments and errors"
       ; b Navigate "j/k" "scroll" ~rows:Needs_row
       ; b Act "Enter" "browse" ~rows:Needs_row
@@ -1325,33 +1334,40 @@ let hints_of_bindings ?(lang = Lang_en) bindings =
 
    [has_rows] is how a list renderer says whether the list on screen holds a
    row. [Some false] leaves out the keys that need one; a renderer that does
-   not pass it keeps every binding, as before. *)
-let answers_in_state ?detail_open ?has_rows binding =
+   not pass it keeps every binding, as before. [has_reading] is the same
+   answer for the keys that open a reading, which a failed read can leave
+   with nothing selected. *)
+let answers_in_state ?detail_open ?has_rows ?has_reading binding =
   (match detail_open, binding.detail with
    | _, Either -> true
    | None, (List_only | Detail_only) -> true
    | Some open_, List_only -> not open_
    | Some open_, Detail_only -> open_)
-  && (match has_rows, binding.rows with
-      | Some false, Needs_row -> false
-      | Some false, Rowless -> true
-      | (Some true | None), (Rowless | Needs_row) -> true)
+  && (match binding.rows with
+      | Rowless -> true
+      | Needs_row -> (match has_rows with Some false -> false | Some true | None -> true)
+      | Needs_reading ->
+          (match has_reading with Some false -> false | Some true | None -> true))
 
-let footer_hints ?detail_open ?has_rows surface =
+let footer_hints ?detail_open ?has_rows ?has_reading surface =
   hints_of_bindings
-    (List.filter (answers_in_state ?detail_open ?has_rows) (for_surface surface))
+    (List.filter (answers_in_state ?detail_open ?has_rows ?has_reading)
+       (for_surface surface))
 
 (* [r] is Resume for a paused Goal, so the generic refresh label must not
    advertise it as a read in this detail. The Candle read has its own key. *)
-let planning_goal_hints ~detail_open =
+let planning_goal_hints ~detail_open ~has_rows =
   let bindings = for_surface Planning
-    |> List.filter (answers_in_state ~detail_open)
+    |> List.filter (answers_in_state ~detail_open ?has_rows)
     |> List.filter (fun binding -> not detail_open || not (String.equal binding.key "r")) in
   let read, others = List.partition (fun binding -> String.equal binding.key goal_candle_refresh_key) bindings in
   hints_in_order (read @ List.stable_sort (fun a b -> compare (group_rank a.group) (group_rank b.group)) others)
 
-let footer_hints_planning_goal_list = planning_goal_hints ~detail_open:false
-let footer_hints_planning_goal_detail = planning_goal_hints ~detail_open:true
+let footer_hints_planning_goal_list ~has_rows =
+  planning_goal_hints ~detail_open:false ~has_rows:(Some has_rows)
+
+let footer_hints_planning_goal_detail =
+  planning_goal_hints ~detail_open:true ~has_rows:None
 
 let footer_hints_tools ~pane =
   let bracket = tools_bracket_binding ~pane in
@@ -1419,7 +1435,7 @@ let has_row_scoped_keys surface =
     (fun binding ->
       match binding.rows with
       | Rowless -> false
-      | Needs_row -> true)
+      | Needs_row | Needs_reading -> true)
     (for_surface surface)
 
 let footer_hints_metrics ~telemetry =

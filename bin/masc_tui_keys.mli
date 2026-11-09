@@ -38,6 +38,9 @@ type detail_state =
 type row_need =
   | Rowless  (** answers with no row under the cursor; the default *)
   | Needs_row  (** steps over, opens or answers a row; refused on an empty list *)
+  | Needs_reading
+      (** opens a reading: a row's details, or what replaced the list when
+          its read failed. An empty list has one only after a failed read. *)
 
 type binding = {
   key : string;
@@ -129,14 +132,20 @@ val goal_candle_refresh_key : string
 val keeper_navigation_hints : string
 (** Keys while the Keeper navigator opened with Left holds focus. *)
 
-val footer_hints_planning_goal_list : string
-(** The Goal list offers a direct route to its selected Candle record. *)
+val footer_hints_planning_goal_list : has_rows:bool -> string
+(** The Goal list offers a direct route to its selected Candle record.
+    [has_rows] is whether the list on screen holds a Goal: with none, the
+    keys that read the Goal under the cursor are left out. *)
 
 val footer_hints_planning_goal_detail : string
 (** The Goal detail has a separate Candle read key: its [r] may mean Resume. *)
 
 val footer_hints :
-  ?detail_open:bool -> ?has_rows:bool -> Masc_tui_types.surface -> string
+  ?detail_open:bool ->
+  ?has_rows:bool ->
+  ?has_reading:bool ->
+  Masc_tui_types.surface ->
+  string
 (** [key:label] pairs joined by two spaces, groups in Navigate, Act, Search,
     Meta order.
 
@@ -149,7 +158,12 @@ val footer_hints :
 
     [has_rows] is how a list renderer says whether the list on screen holds a
     row. [false] leaves out the keys that need one; left out, every binding
-    stands. *)
+    stands.
+
+    [has_reading] is how it says whether the screen has a reading to open: a
+    row's details, or the failure that replaced the list. [false] leaves out
+    the keys that need one, [Needs_reading] in the table. A failed read leaves
+    no row and still has this, so the two answers differ there. *)
 
 val footer_hints_tools : pane:Masc_tui_types.tools_pane -> string
 (** Tools' bracket keys select retained runs in Available and Keepers in other panes. *)

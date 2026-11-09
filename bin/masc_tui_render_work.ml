@@ -672,12 +672,24 @@ let render_planning_list (state : state) =
   (* The composer owns the terminal's last row; everything this surface
      lays out fits above it. *)
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
+  (* The goals the filter and sort leave on screen. The footer asks for them
+     first: with none, the keys that read the Goal under the cursor do not
+     answer, and the dispatcher counts the same list. *)
+  let goals =
+    match state.planning with
+    | None -> []
+    | Some p ->
+        planning_visible_goals ~filter:state.planning_filter
+          ~sort:state.planning_sort p.pl_goals
+  in
+  let count = List.length goals in
   let buf = Buffer.create 4096 in
   let tail = Buffer.create 256 in
   box_bottom tail cols;
   Buffer.add_string tail
     (footer_line state ~max_cells:cols
-       ~hints:Masc_tui_keys.footer_hints_planning_goal_list);
+       ~hints:(Masc_tui_keys.footer_hints_planning_goal_list
+                 ~has_rows:(count > 0)));
   let tail_rows = count_frame_lines tail in
 
   let now_unix = Unix.gettimeofday () in
@@ -728,14 +740,6 @@ let render_planning_list (state : state) =
   List.iter (box_line buf cols) (planning_stale_notice_rows state ~cols);
   box_divider buf cols;
 
-  let goals =
-    match state.planning with
-    | None -> []
-    | Some p ->
-        planning_visible_goals ~filter:state.planning_filter
-          ~sort:state.planning_sort p.pl_goals
-  in
-  let count = List.length goals in
   let planning_error =
     Terminal_text.optional_single_line state.planning_error
   in

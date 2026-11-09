@@ -251,7 +251,10 @@ let render_repository_list (state : state) =
           (connection_badge state)
   in
   surface_chrome ~overflow:Paged_by_cursor state ~terminal_rows ~cols ~surface_key:"repositories"
-    ~title ~hints:(Masc_tui_keys.footer_hints ~has_rows:(shown > 0) state.view)
+    ~title
+    ~hints:(Masc_tui_keys.footer_hints ~has_rows:(shown > 0)
+              ~has_reading:(Option.is_some (selected_repository_reading state))
+              state.view)
     ~body:(fun ~budget c ->
       let split, list_width, detail_width, detail, errors, content_height, overflowing =
         repository_studio_geometry state ~cols ~budget ~cursor:state.repositories_cursor in
@@ -289,7 +292,10 @@ let render_repository_list (state : state) =
         @ (if overflowing then
              ["repositories " ^ Masc_tui_scroll.window_text ~scroll ~height:content_height shown]
            else []) in
-      let listing = studio_panel ~width:list_width ~title:"Repositories · j/k select" ~lines in
+      (* [j/k] steps over a row; with none, the title does not offer it. *)
+      let listing_title =
+        if shown = 0 then "Repositories" else "Repositories · j/k select" in
+      let listing = studio_panel ~width:list_width ~title:listing_title ~lines in
       if split then begin
         let height = max (List.length listing) (List.length detail) in
         let count = min budget height in

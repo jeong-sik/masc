@@ -38,7 +38,7 @@ tmux 3.6a 안의 TUI 로 명령 팔레트에서 `go Workspace`, `go Changes` 를
 행이 없는 목록에서 푸터가 고르는 것이 바뀌었어요.
 
 - 100x30 Workspace: `a:add` 가 보여요. 고치기 전에는 `…?` 뒤에 있었어요. 저장소가 없는 Workspace 에서 할 수 있는 일은 이 키뿐이에요.
-- 100x30 Changes: `ACTION NEEDED` 이유가 길게 나오고 키는 `Esc:back  q:quit` 만 보여요. 이 PR 은 푸터가 알림 이유를 키보다 먼저 그리는 우선순위(#49925)를 건드리지 않았어요. 눈에 보이는 키가 늘지 않아요(`[ / ]:keeper` 도 이유 문구에 밀려요).
+- 100x30 Changes: `ACTION NEEDED` 이유가 길게 나오고 키는 `Esc:back  q:quit` 만 보여요. 쓸 수 있는 키 하나가 줄어요. 고치기 전에는 `[ / ]:keeper` 가 보였는데 고친 뒤에는 가려져요. 푸터는 알림을 키보다 먼저 두고 키를 뒤에서부터 버려요(`masc_tui_footer.ml` 의 `drop_hint_items`). 안 움직이는 `Right / Enter` 가 빠져서 남은 폭을 긴 이유 문구가 차지해요. 이 PR 은 이 우선순위(#49925)를 건드리지 않았어요.
 - 80x24 Workspace: `a:add`, `/:find`, `r:refresh`, `Tab:next`, `?:help` 가 모두 들어가서 `…?` 가 사라져요.
 - 80x24 Changes: `[ / ]:keeper`, `r:refresh`, `Tab:next`, `?:help` 가 보이고 `…?` 가 사라져요.
 

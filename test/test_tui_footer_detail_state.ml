@@ -104,7 +104,7 @@ let back_keys_of_surface name surface =
 
 let scoped_keys =
   [ ( "Planning",
-      Keys.footer_hints_planning_goal_list,
+      Keys.footer_hints_planning_goal_list ~has_rows:true,
       Keys.footer_hints_planning_goal_detail,
       [ "t"; "p"; "/"; "n / N" ] )
   ; ( "Board",
@@ -130,7 +130,7 @@ let scoped_keys =
       [ "v" ] )
   ]
   @ back_keys "Planning"
-      ~list:Keys.footer_hints_planning_goal_list
+      ~list:(Keys.footer_hints_planning_goal_list ~has_rows:true)
       ~detail:Keys.footer_hints_planning_goal_detail
   @ back_keys_of_surface "Board" Masc_tui_types.Board
   @ back_keys_of_surface "Schedules" Masc_tui_types.Schedules

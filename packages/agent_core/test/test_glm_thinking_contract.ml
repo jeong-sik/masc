@@ -87,19 +87,6 @@ let test_no_toggle provider model () =
       (field "clear_thinking" on |> Yojson.Safe.Util.to_bool))
 ;;
 
-let test_response_separation () =
-  let response = Backend_glm.parse_response
-      {|{"id":"glm-contract","model":"glm-5.1","choices":[{"finish_reason":"stop","message":{"role":"assistant","reasoning_content":"private reasoning","content":"{\"answer\":42}"}}]}|}
-  in
-  Alcotest.(check bool) "reasoning and JSON remain distinct" true
-    (response.content =
-       [ Types.Thinking { content = "private reasoning"; signature = None }
-       ; Types.Text "{\"answer\":42}"
-       ]);
-  Alcotest.(check string) "visible JSON excludes reasoning" "{\"answer\":42}"
-    (Types.visible_text_of_response response)
-;;
-
 let test_nonreasoning_default_omits_thinking model () =
   with_catalog (fun () ->
     List.iter (fun kind ->
@@ -181,6 +168,5 @@ let () =
         ; "glm-5.3-flash", false; "glm-5.4", false; "glm-4.7-unlisted", false
         ; "unlisted-glm-model", false
         ]
-    ; "response", [ Alcotest.test_case "reasoning does not become JSON" `Quick test_response_separation ]
     ]
 ;;

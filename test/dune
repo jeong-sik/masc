@@ -7312,6 +7312,8 @@
 
 (include stanzas/test_list_util.inc)
 
+(include stanzas/test_release_companion_consistency.inc)
+
 (include stanzas/test_tui_code_msg.inc)
 (include stanzas/test_tui_context_msg.inc)
 (include stanzas/test_tui_fleet_msg.inc)

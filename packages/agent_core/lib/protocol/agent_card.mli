@@ -111,9 +111,3 @@ type agent_info =
   }
 
 val of_info : agent_info -> agent_card
-
-(** {1 Queries} *)
-
-val has_capability : agent_card -> capability -> bool
-val can_handle_tool : agent_card -> string -> bool
-val has_skill : agent_card -> string -> bool

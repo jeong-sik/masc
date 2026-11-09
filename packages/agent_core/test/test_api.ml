@@ -909,18 +909,6 @@ let test_string_is_blank () =
   check bool "tabs blank" true (Llm_provider.Api_common.string_is_blank "\t\n ")
 ;;
 
-let test_json_of_string_or_raw_valid () =
-  let result = Llm_provider.Api_common.json_of_string_or_raw {|{"key":"value"}|} in
-  let open Yojson.Safe.Util in
-  check string "parsed" "value" (result |> member "key" |> to_string)
-;;
-
-let test_json_of_string_or_raw_invalid () =
-  let result = Llm_provider.Api_common.json_of_string_or_raw "not json" in
-  let open Yojson.Safe.Util in
-  check string "fallback raw" "not json" (result |> member "raw" |> to_string)
-;;
-
 (* ------------------------------------------------------------------ *)
 (* Test runner                                                          *)
 (* ------------------------------------------------------------------ *)
@@ -1086,11 +1074,6 @@ let () =
     ; ( "api_common_helpers"
       , [ test_case "text_blocks_to_string" `Quick test_text_blocks_to_string
         ; test_case "string_is_blank" `Quick test_string_is_blank
-        ; test_case "json_of_string_or_raw valid" `Quick test_json_of_string_or_raw_valid
-        ; test_case
-            "json_of_string_or_raw invalid"
-            `Quick
-            test_json_of_string_or_raw_invalid
         ; test_case
             "kimi tool_result uses text blocks"
             `Quick

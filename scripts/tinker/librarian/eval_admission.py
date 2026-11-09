@@ -25,15 +25,18 @@ admission prompt, then the schema instruction as the last user message.
 
 `run --template <librarian.md>` sends every prompt drawn with that file's
 template instead: an E-real prompt is read with the pinned template and drawn
-again from the same data, an E-synth prompt is drawn from its request. The
-summary records the sha256 of the template the prompts were drawn with, and
-`verdict` refuses a run drawn with another template than the pinned one.
+again from the same data, an E-synth prompt is drawn from its request. A
+prompt's retirement evidence goes out under the new template's retirement
+policy, and a template without one cannot draw it, as in MASC. The summary
+records the sha256 of the template the prompts were drawn with, and `verdict`
+refuses a run drawn with another template than the pinned one.
 
 `run --provider glm` sends the same messages to Z.AI's GLM coding endpoint in
-the request MASC's GLM slot sends (`glm_chat`), so a prompt change can be
-measured on that model too. It sends no warm call, `--max-calls` caps its
-requests in place of `--budget`, and its rows cost nothing per token: the calls
-draw on the key's usage quota. The summary names the provider of the run.
+the request MASC's GLM slot sends (`glm_chat`), with the pass lines'
+`max_tokens`, so a prompt change can be measured on that model too. It sends no
+warm call, `--max-calls` caps its requests in place of `--budget`, and its rows
+cost nothing per token: the calls draw on the key's usage quota. The summary
+names the provider of the run.
 
 Definitions:
 - valid: HTTP 200 with no provider error, finish_reason "stop", and
@@ -218,9 +221,25 @@ def synth_items(path: Path) -> list[M.SynthItem]:
 
 
 def retemplated(item: Item, template: R.AdmissionTemplate) -> Item:
-    """The item with its prompt drawn with `template` from the same data."""
-    prompt = replace(item.prompt, template=template)
+    """The item with its prompt drawn with `template` from the same data, its retirement evidence
+    under the template's retirement policy. SystemExit when the template has no policy for the
+    evidence: MASC refuses that admission (keeper_librarian_runtime.ml `admission_suffix`)."""
+    retirement = item.prompt.retirement
+    if retirement is not None:
+        if template.retirement_policy is None:
+            raise SystemExit(f"{item.item_id}: the template has no retirement policy for the prompt's evidence")
+        retirement = replace(retirement, policy=template.retirement_policy)
+    prompt = replace(item.prompt, template=template, retirement=retirement)
     return replace(item, prompt=prompt, text=R.render(prompt))
+
+
+def drawn_with(template: Path | None, items: list[Item]) -> tuple[Path, list[Item]]:
+    """The template file the prompts go out in, and the items: as read with the pinned template,
+    or each drawn again with the file `template` names."""
+    if template is None:
+        return synth_render.TEMPLATE, items
+    drawn = synth_render.template_at(template)
+    return template, [retemplated(i, drawn) for i in items]
 
 
 @dataclass(frozen=True, slots=True)
@@ -234,9 +253,11 @@ class TinkerLane:
 
 @dataclass(frozen=True, slots=True)
 class GlmLane:
-    """GLM's coding endpoint in MASC's request (`glm_chat`): no warm call, no price per token."""
+    """GLM's coding endpoint in MASC's request (`glm_chat`): the pass lines' output budget, no warm
+    call, no price per token."""
 
     caller: G.Caller
+    max_tokens: int
 
 
 type Lane = TinkerLane | GlmLane
@@ -248,8 +269,8 @@ def measured(lane: Lane, model: str, label: str, messages: list[str]) -> tuple[C
         case TinkerLane(caller=caller, effort=effort, max_tokens=max_tokens):
             call = caller.ask(model=model, label=label, messages=messages, effort=effort, max_tokens=max_tokens)
             return (call, round(call.cost(), 6)) if call is not None else None
-        case GlmLane(caller=caller):
-            call = caller.ask(model=model, label=label, messages=messages)
+        case GlmLane(caller=caller, max_tokens=max_tokens):
+            call = caller.ask(model=model, label=label, messages=messages, max_tokens=max_tokens)
             return (call, 0.0) if call is not None else None
         case _:
             assert_never(lane)
@@ -357,6 +378,15 @@ def summarize(kind: str, rows: list[JsonObject], wrong_elsewhere: dict[str, int]
     return out
 
 
+def run_summary(kind: str, template: Path, targets: list[tuple[str, str]], lane: Lane,
+                rows: list[JsonObject]) -> JsonObject:
+    """summary.json of a run: the pins and the template file it went out under, the lane's spending
+    and stop, and the numbers per target."""
+    return {"set": kind, "pass_lines_sha256": sha256_file(PASS_LINES), "template_sha256": sha256_file(template),
+            "targets": dict(targets), **spending(lane), "stopped": lane.caller.stopped,
+            "by_target": summarize(kind, rows)}
+
+
 def lane_of(args: argparse.Namespace, log: Path, request: JsonObject) -> Lane:
     """The lane --provider names, with its limit: --budget on Tinker, --max-calls on GLM."""
     budget, max_calls = cast(float | None, args.budget), cast(int | None, args.max_calls)
@@ -365,7 +395,7 @@ def lane_of(args: argparse.Namespace, log: Path, request: JsonObject) -> Lane:
             return TinkerLane(Caller(log, budget), cast(str, request["reasoning_effort"]),
                               cast(int, request["max_tokens"]))
         case "glm", None, int():
-            return GlmLane(G.Caller(log, max_calls))
+            return GlmLane(G.Caller(log, max_calls), cast(int, request["max_tokens"]))
         case _:
             raise SystemExit("--provider tinker needs --budget alone, --provider glm needs --max-calls alone")
 
@@ -388,10 +418,7 @@ def run(args: argparse.Namespace) -> int:
         if sha256_file(requests) != cast(JsonObject, lines["e_synth"])["requests_sha256"]:
             raise SystemExit("the E-synth requests differ from pass_lines.json")
         items = list(synth_items(requests))
-    template = synth_render.TEMPLATE if args.template is None else Path(cast(str, args.template))
-    if args.template is not None:
-        drawn = synth_render.template_at(template)
-        items = [retemplated(i, drawn) for i in items]
+    template, items = drawn_with(None if args.template is None else Path(cast(str, args.template)), items)
 
     def one(item: Item) -> list[JsonObject]:
         return run_item(lane, targets, item)
@@ -400,9 +427,7 @@ def run(args: argparse.Namespace) -> int:
         rows = [r for rs in pool.map(one, items) for r in rs]
     with (out / "rows.jsonl").open("w", encoding="utf-8") as fh:
         fh.writelines(json.dumps(r, ensure_ascii=False) + "\n" for r in rows)
-    summary = {"set": kind, "pass_lines_sha256": sha256_file(PASS_LINES), "template_sha256": sha256_file(template),
-               "targets": dict(targets), **spending(lane), "stopped": lane.caller.stopped,
-               "by_target": summarize(kind, rows)}
+    summary = run_summary(kind, template, targets, lane, rows)
     (out / "summary.json").write_text(json.dumps(summary, indent=1) + "\n", encoding="utf-8")
     print(json.dumps(summary["by_target"]))
     return 2 if lane.caller.stopped is not None else 0

@@ -18,25 +18,15 @@ val json_parse_error : string -> Error.t
 (** Construct a {!Error.Io} [FileOpFailed] with [op = "read"]. *)
 val file_read_error : path:string -> detail:string -> Error.t
 
-(** Construct a {!Error.Io} [FileOpFailed] with [op = "write"]. *)
-val file_write_error : path:string -> detail:string -> Error.t
-
 (** Append a single element to the end of a list. *)
 val snoc : 'a list -> 'a -> 'a list
 
 (** Concatenate two lists (alias for [@]). *)
 val snoc_list : 'a list -> 'a list -> 'a list
 
-(** Traverse a list with [f], collecting [Ok] values.
-    Short-circuits on first [Error]. *)
-val result_traverse : f:('a -> ('b, 'e) result) -> 'a list -> ('b list, 'e) result
-
 (** Truncate string to [max_len] bytes on a UTF-8 character boundary,
     appending "..." if truncated. *)
 val clip : string -> int -> string
-
-(** Safe substring: returns "" if start is past end or len is negative. *)
-val safe_sub : string -> int -> int -> string
 
 (** Case-insensitive substring search. *)
 val contains_substring_ci : haystack:string -> needle:string -> bool
@@ -53,10 +43,6 @@ val trim_non_empty : string -> string option
 
 (** [trim_non_empty_opt opt] maps [trim_non_empty] over an option. *)
 val trim_non_empty_opt : string option -> string option
-
-(** [json_member_bool key json] returns the bool value for [key] in [json],
-    or [false] if missing or wrong type. *)
-val json_member_bool : string -> Yojson.Safe.t -> bool
 
 (** Serialize optional int to JSON: [Some n] -> [`Int n], [None] -> [`Null]. *)
 val json_of_int_opt : int option -> Yojson.Safe.t

@@ -1,0 +1,5845 @@
+{
+  "reviewed_at": "2026-11-09T08:56:50.076432+00:00",
+  "expected_runs": 50,
+  "observed_runs": 50,
+  "issues": [],
+  "binary_sha256": {
+    "before": "ebcbe53ff38f8a60ce456bd20d8f05a9542f8deb7fa450400475505078fdb93b",
+    "after": "1181f65f190aa4894aa6d1067448159cdd3acd4b06bf6eaf4af1223a078e4bd6"
+  },
+  "helper_sha256": "6f4332edf51fad53d73ebbcb1908f1bcb07b322a952583b413c2a5749a6b1428",
+  "history_sha256": "b1d4d6fa6c3ffc1a1ee129bd2057d57f0460ee5ccc30b138e2dcaca7b584703b",
+  "order_sha256": "9b1ac6bc84d81bf0bfa3f73fefc91fc23f2cbfc77598e8480f1ec5133735665f",
+  "native_receipt": {
+    "sha256": "f717e3f8cf5444be7bfaa78f2b3534c19318d3dc29e53aba1b7d5d17a9e6a17a",
+    "source_sha": "ff1cc7700b081c6ce7f1abebea42ef352d518ed5",
+    "workflow_sha": "e26416eace6d3f1bc7f47e751b6f27041e1d225e"
+  },
+  "viewport_v1_sha256": "3b8fbafe7b1a441b975eff0b67455a131d0bbc11f115bab2ad3642f9709141e3",
+  "viewport_v2_sha256": "aa83371b59629f3f8e19b04d66c1a8e354fb7843701af43790c2c3f97121b19c",
+  "observer_source_sha256": "7908b6374f292dee8d9f8935fb415ddaa1654929876b989dc567027254c6a666",
+  "pyte_version": "0.8.2",
+  "wcwidth_version": "0.9.4",
+  "comparisons": [
+    {
+      "condition": "typing",
+      "pairs": [
+        {
+          "pair": 0,
+          "order": [
+            "before",
+            "after"
+          ],
+          "before_p95_ms": 9.324499987997115,
+          "after_p95_ms": 1.7987500177696347,
+          "p95_delta_ms": -7.52574997022748,
+          "before_cpu_s": 0.6633859999999999,
+          "after_cpu_s": 0.5322420000000001,
+          "before_type_gap_ms": 28.666457976214588,
+          "after_type_gap_ms": 27.770916931331158,
+          "before_scroll_hz": null,
+          "after_scroll_hz": null,
+          "before_load1": 263.88720703125,
+          "after_load1": 246.9091796875
+        },
+        {
+          "pair": 1,
+          "order": [
+            "after",
+            "before"
+          ],
+          "before_p95_ms": 16.092333011329174,
+          "after_p95_ms": 6.163291051052511,
+          "p95_delta_ms": -9.929041960276663,
+          "before_cpu_s": 0.6074520000000012,
+          "after_cpu_s": 0.490918999999999,
+          "before_type_gap_ms": 29.242791002616286,
+          "after_type_gap_ms": 28.753416030667722,
+          "before_scroll_hz": null,
+          "after_scroll_hz": null,
+          "before_load1": 163.9931640625,
+          "after_load1": 162.7744140625
+        },
+        {
+          "pair": 2,
+          "order": [
+            "before",
+            "after"
+          ],
+          "before_p95_ms": 5.116416956298053,
+          "after_p95_ms": 6.804749951697886,
+          "p95_delta_ms": 1.6883329953998327,
+          "before_cpu_s": 0.5951500000000012,
+          "after_cpu_s": 0.4716590000000016,
+          "before_type_gap_ms": 29.62408389430493,
+          "after_type_gap_ms": 29.256624984554946,
+          "before_scroll_hz": null,
+          "after_scroll_hz": null,
+          "before_load1": 202.06005859375,
+          "after_load1": 207.90087890625
+        },
+        {
+          "pair": 3,
+          "order": [
+            "after",
+            "before"
+          ],
+          "before_p95_ms": 4.698542063124478,
+          "after_p95_ms": 4.831874975934625,
+          "p95_delta_ms": 0.1333329128101468,
+          "before_cpu_s": 0.5617400000000004,
+          "after_cpu_s": 0.4791660000000002,
+          "before_type_gap_ms": 29.363583074882627,
+          "after_type_gap_ms": 29.053749982267618,
+          "before_scroll_hz": null,
+          "after_scroll_hz": null,
+          "before_load1": 233.78857421875,
+          "after_load1": 239.4287109375
+        },
+        {
+          "pair": 4,
+          "order": [
+            "before",
+            "after"
+          ],
+          "before_p95_ms": 8.748249965719879,
+          "after_p95_ms": 3.9410829776898026,
+          "p95_delta_ms": -4.807166988030076,
+          "before_cpu_s": 0.5841160000000016,
+          "after_cpu_s": 0.4797020000000014,
+          "before_type_gap_ms": 29.180165962316096,
+          "after_type_gap_ms": 29.412708012387156,
+          "before_scroll_hz": null,
+          "after_scroll_hz": null,
+          "before_load1": 236.58837890625,
+          "after_load1": 239.423828125
+        }
+      ],
+      "pooled_descriptive_ms": {
+        "before": {
+          "n": 160,
+          "min": 0.9018339915201068,
+          "median": 1.6714580124244094,
+          "p95": 13.580708997324109,
+          "max": 23.903457913547754
+        },
+        "after": {
+          "n": 160,
+          "min": 0.6652079755440354,
+          "median": 1.090791542083025,
+          "p95": 6.202624994330108,
+          "max": 22.286541992798448
+        }
+      },
+      "p95_lower_pairs": 3,
+      "median_paired_p95_delta_ms": -4.807166988030076,
+      "cpu_lower_pairs": 5
+    },
+    {
+      "condition": "pageup",
+      "pairs": [
+        {
+          "pair": 0,
+          "order": [
+            "before",
+            "after"
+          ],
+          "before_p95_ms": 65.38916600402445,
+          "after_p95_ms": 63.24258306995034,
+          "p95_delta_ms": -2.146582934074104,
+          "before_cpu_s": 1.110264,
+          "after_cpu_s": 0.989448,
+          "before_type_gap_ms": 28.9224999723956,
+          "after_type_gap_ms": 29.21608299948275,
+          "before_scroll_hz": 159.9304718981042,
+          "after_scroll_hz": 165.64715444392144,
+          "before_load1": 238.02734375,
+          "after_load1": 228.17529296875
+        },
+        {
+          "pair": 1,
+          "order": [
+            "after",
+            "before"
+          ],
+          "before_p95_ms": 47.111624968238175,
+          "after_p95_ms": 16.57750003505498,
+          "p95_delta_ms": -30.534124933183193,
+          "before_cpu_s": 1.2385070000000002,
+          "after_cpu_s": 0.8329140000000002,
+          "before_type_gap_ms": 29.099584091454744,
+          "after_type_gap_ms": 29.64637498371303,
+          "before_scroll_hz": 161.96763500795203,
+          "after_scroll_hz": 157.09573033615774,
+          "before_load1": 204.7294921875,
+          "after_load1": 207.31787109375
+        },
+        {
+          "pair": 2,
+          "order": [
+            "before",
+            "after"
+          ],
+          "before_p95_ms": 38.72449998743832,
+          "after_p95_ms": 86.39666601084173,
+          "p95_delta_ms": 47.672166023403406,
+          "before_cpu_s": 1.4090229999999968,
+          "after_cpu_s": 0.8233139999999999,
+          "before_type_gap_ms": 29.228625004179776,
+          "after_type_gap_ms": 29.440916958265007,
+          "before_scroll_hz": 161.34820958011244,
+          "after_scroll_hz": 163.32032366799717,
+          "before_load1": 208.22900390625,
+          "after_load1": 210.85302734375
+        },
+        {
+          "pair": 3,
+          "order": [
+            "after",
+            "before"
+          ],
+          "before_p95_ms": 61.48891698103398,
+          "after_p95_ms": 25.687041925266385,
+          "p95_delta_ms": -35.801875055767596,
+          "before_cpu_s": 1.1181649999999994,
+          "after_cpu_s": 0.8272750000000002,
+          "before_type_gap_ms": 28.496042010374367,
+          "after_type_gap_ms": 29.570624930784106,
+          "before_scroll_hz": 160.2368798080864,
+          "after_scroll_hz": 158.97819349380072,
+          "before_load1": 238.93603515625,
+          "after_load1": 234.92626953125
+        },
+        {
+          "pair": 4,
+          "order": [
+            "before",
+            "after"
+          ],
+          "before_p95_ms": 37.260166951455176,
+          "after_p95_ms": 23.79483391996473,
+          "p95_delta_ms": -13.465333031490445,
+          "before_cpu_s": 1.330931999999999,
+          "after_cpu_s": 0.8395630000000001,
+          "before_type_gap_ms": 29.185707913711667,
+          "after_type_gap_ms": 28.44033297151327,
+          "before_scroll_hz": 155.06933363127658,
+          "after_scroll_hz": 159.3845983667628,
+          "before_load1": 242.8330078125,
+          "after_load1": 242.68603515625
+        }
+      ],
+      "pooled_descriptive_ms": {
+        "before": {
+          "n": 160,
+          "min": 0.9040840668603778,
+          "median": 9.575333504471928,
+          "p95": 61.48891698103398,
+          "max": 142.1059580752626
+        },
+        "after": {
+          "n": 160,
+          "min": 0.5112079670652747,
+          "median": 4.406312480568886,
+          "p95": 47.03858389984816,
+          "max": 142.4866250017658
+        }
+      },
+      "p95_lower_pairs": 4,
+      "median_paired_p95_delta_ms": -13.465333031490445,
+      "cpu_lower_pairs": 5
+    },
+    {
+      "condition": "pagedown",
+      "pairs": [
+        {
+          "pair": 0,
+          "order": [
+            "before",
+            "after"
+          ],
+          "before_p95_ms": 22.464417037554085,
+          "after_p95_ms": 4.250832949765027,
+          "p95_delta_ms": -18.21358408778906,
+          "before_cpu_s": 1.947273,
+          "after_cpu_s": 1.248211,
+          "before_type_gap_ms": 28.517666971310973,
+          "after_type_gap_ms": 29.091208009049296,
+          "before_scroll_hz": 163.54683745355442,
+          "after_scroll_hz": 166.4539753700014,
+          "before_load1": 222.3251953125,
+          "after_load1": 212.3935546875
+        },
+        {
+          "pair": 1,
+          "order": [
+            "after",
+            "before"
+          ],
+          "before_p95_ms": 16.748666064813733,
+          "after_p95_ms": 6.525583914481103,
+          "p95_delta_ms": -10.22308215033263,
+          "before_cpu_s": 2.048676,
+          "after_cpu_s": 1.2008909999999995,
+          "before_type_gap_ms": 28.790874988771975,
+          "after_type_gap_ms": 28.92175002489239,
+          "before_scroll_hz": 157.4564652501538,
+          "after_scroll_hz": 163.55293678226488,
+          "before_load1": 186.6630859375,
+          "after_load1": 199.1455078125
+        },
+        {
+          "pair": 2,
+          "order": [
+            "before",
+            "after"
+          ],
+          "before_p95_ms": 15.248292009346187,
+          "after_p95_ms": 11.013415991328657,
+          "p95_delta_ms": -4.23487601801753,
+          "before_cpu_s": 1.910258999999999,
+          "after_cpu_s": 1.2548860000000017,
+          "before_type_gap_ms": 28.060999931767583,
+          "after_type_gap_ms": 29.49375007301569,
+          "before_scroll_hz": 164.13848569564172,
+          "after_scroll_hz": 160.16773464698346,
+          "before_load1": 171.52099609375,
+          "after_load1": 184.734375
+        },
+        {
+          "pair": 3,
+          "order": [
+            "after",
+            "before"
+          ],
+          "before_p95_ms": 9.061541990377009,
+          "after_p95_ms": 22.766790934838355,
+          "p95_delta_ms": 13.705248944461346,
+          "before_cpu_s": 1.8735840000000028,
+          "after_cpu_s": 1.203104999999999,
+          "before_type_gap_ms": 28.74425007030368,
+          "after_type_gap_ms": 28.95266597624868,
+          "before_scroll_hz": 158.32347160530662,
+          "after_scroll_hz": 158.92178227491974,
+          "before_load1": 239.9951171875,
+          "after_load1": 241.02294921875
+        },
+        {
+          "pair": 4,
+          "order": [
+            "before",
+            "after"
+          ],
+          "before_p95_ms": 28.516499907709658,
+          "after_p95_ms": 53.0439589638263,
+          "p95_delta_ms": 24.52745905611664,
+          "before_cpu_s": 2.113363999999999,
+          "after_cpu_s": 1.1871890000000036,
+          "before_type_gap_ms": 29.59104091860354,
+          "after_type_gap_ms": 28.553958050906658,
+          "before_scroll_hz": 160.65086768177014,
+          "after_scroll_hz": 161.2253123699903,
+          "before_load1": 244.47265625,
+          "after_load1": 255.86865234375
+        }
+      ],
+      "pooled_descriptive_ms": {
+        "before": {
+          "n": 160,
+          "min": 0.877333921380341,
+          "median": 2.133854490239173,
+          "p95": 22.727542091161013,
+          "max": 35.39870900567621
+        },
+        "after": {
+          "n": 160,
+          "min": 0.48749998677521944,
+          "median": 1.5008124755695462,
+          "p95": 27.125374996103346,
+          "max": 80.86245902813971
+        }
+      },
+      "p95_lower_pairs": 3,
+      "median_paired_p95_delta_ms": -4.23487601801753,
+      "cpu_lower_pairs": 5
+    },
+    {
+      "condition": "wheelup",
+      "pairs": [
+        {
+          "pair": 0,
+          "order": [
+            "before",
+            "after"
+          ],
+          "before_p95_ms": 31.422667088918388,
+          "after_p95_ms": 7.93029204942286,
+          "p95_delta_ms": -23.492375039495528,
+          "before_cpu_s": 0.8892690000000003,
+          "after_cpu_s": 0.6420939999999995,
+          "before_type_gap_ms": 29.043750022538006,
+          "after_type_gap_ms": 28.86304201092571,
+          "before_scroll_hz": 161.91758558232576,
+          "after_scroll_hz": 165.02641304844482,
+          "before_load1": 203.00830078125,
+          "after_load1": 198.44287109375
+        },
+        {
+          "pair": 1,
+          "order": [
+            "after",
+            "before"
+          ],
+          "before_p95_ms": 32.09308395162225,
+          "after_p95_ms": 3.883749945089221,
+          "p95_delta_ms": -28.209334006533027,
+          "before_cpu_s": 0.9287640000000001,
+          "after_cpu_s": 0.6119789999999994,
+          "before_type_gap_ms": 28.846499975770712,
+          "after_type_gap_ms": 29.09608301706612,
+          "before_scroll_hz": 155.4500184490797,
+          "after_scroll_hz": 162.2524635230084,
+          "before_load1": 171.4443359375,
+          "after_load1": 173.92041015625
+        },
+        {
+          "pair": 2,
+          "order": [
+            "before",
+            "after"
+          ],
+          "before_p95_ms": 8.86537495534867,
+          "after_p95_ms": 18.299417104572058,
+          "p95_delta_ms": 9.434042149223387,
+          "before_cpu_s": 0.799516999999998,
+          "after_cpu_s": 0.5966180000000012,
+          "before_type_gap_ms": 29.082541936077178,
+          "after_type_gap_ms": 28.874791925773025,
+          "before_scroll_hz": 161.8553729899809,
+          "after_scroll_hz": 160.20179603189672,
+          "before_load1": 196.28955078125,
+          "after_load1": 204.67431640625
+        },
+        {
+          "pair": 3,
+          "order": [
+            "after",
+            "before"
+          ],
+          "before_p95_ms": 52.12770798243582,
+          "after_p95_ms": 12.727500055916607,
+          "p95_delta_ms": -39.400207926519215,
+          "before_cpu_s": 0.7719610000000001,
+          "after_cpu_s": 0.601904000000002,
+          "before_type_gap_ms": 28.557542013004422,
+          "after_type_gap_ms": 28.88254204299301,
+          "before_scroll_hz": 156.91520672219715,
+          "after_scroll_hz": 158.49211621049494,
+          "before_load1": 230.4423828125,
+          "after_load1": 224.03955078125
+        },
+        {
+          "pair": 4,
+          "order": [
+            "before",
+            "after"
+          ],
+          "before_p95_ms": 29.15954205673188,
+          "after_p95_ms": 29.262666939757764,
+          "p95_delta_ms": 0.10312488302588463,
+          "before_cpu_s": 0.8068869999999961,
+          "after_cpu_s": 0.5996089999999974,
+          "before_type_gap_ms": 29.4915420236066,
+          "after_type_gap_ms": 29.31145904585719,
+          "before_scroll_hz": 160.06971198931282,
+          "after_scroll_hz": 155.42753626454484,
+          "before_load1": 259.36669921875,
+          "after_load1": 261.7392578125
+        }
+      ],
+      "pooled_descriptive_ms": {
+        "before": {
+          "n": 160,
+          "min": 0.8831250015646219,
+          "median": 3.200229548383504,
+          "p95": 39.64425006415695,
+          "max": 99.87604105845094
+        },
+        "after": {
+          "n": 160,
+          "min": 0.5134579259902239,
+          "median": 1.9071870483458042,
+          "p95": 20.9332910599187,
+          "max": 42.502958909608424
+        }
+      },
+      "p95_lower_pairs": 3,
+      "median_paired_p95_delta_ms": -23.492375039495528,
+      "cpu_lower_pairs": 5
+    },
+    {
+      "condition": "wheeldown",
+      "pairs": [
+        {
+          "pair": 0,
+          "order": [
+            "before",
+            "after"
+          ],
+          "before_p95_ms": 37.27595799136907,
+          "after_p95_ms": 3.1559580238536,
+          "p95_delta_ms": -34.11999996751547,
+          "before_cpu_s": 1.0321860000000003,
+          "after_cpu_s": 0.6932490000000002,
+          "before_type_gap_ms": 29.14345799945295,
+          "after_type_gap_ms": 29.18283292092383,
+          "before_scroll_hz": 154.86683945617514,
+          "after_scroll_hz": 163.009698681981,
+          "before_load1": 208.34521484375,
+          "after_load1": 210.4794921875
+        },
+        {
+          "pair": 1,
+          "order": [
+            "after",
+            "before"
+          ],
+          "before_p95_ms": 23.33799994084984,
+          "after_p95_ms": 11.852749972604215,
+          "p95_delta_ms": -11.485249968245625,
+          "before_cpu_s": 1.0029250000000003,
+          "after_cpu_s": 0.7071560000000003,
+          "before_type_gap_ms": 29.463417013175786,
+          "after_type_gap_ms": 28.96562498062849,
+          "before_scroll_hz": 156.32609238362434,
+          "after_scroll_hz": 163.07981514945487,
+          "before_load1": 163.45166015625,
+          "after_load1": 168.36572265625
+        },
+        {
+          "pair": 2,
+          "order": [
+            "before",
+            "after"
+          ],
+          "before_p95_ms": 19.979374948889017,
+          "after_p95_ms": 3.880332922562957,
+          "p95_delta_ms": -16.09904202632606,
+          "before_cpu_s": 1.0403320000000011,
+          "after_cpu_s": 0.7054219999999978,
+          "before_type_gap_ms": 28.813833952881396,
+          "after_type_gap_ms": 28.896416071802378,
+          "before_scroll_hz": 152.3419353118705,
+          "after_scroll_hz": 158.2869475814541,
+          "before_load1": 196.2919921875,
+          "after_load1": 198.6708984375
+        },
+        {
+          "pair": 3,
+          "order": [
+            "after",
+            "before"
+          ],
+          "before_p95_ms": 1.8364579882472754,
+          "after_p95_ms": 6.897250073961914,
+          "p95_delta_ms": 5.060792085714638,
+          "before_cpu_s": 0.9345499999999989,
+          "after_cpu_s": 0.7129500000000002,
+          "before_type_gap_ms": 29.00187496561557,
+          "after_type_gap_ms": 28.828792041167617,
+          "before_scroll_hz": 161.3682564957858,
+          "after_scroll_hz": 160.33665565480558,
+          "before_load1": 237.1162109375,
+          "after_load1": 233.20947265625
+        },
+        {
+          "pair": 4,
+          "order": [
+            "before",
+            "after"
+          ],
+          "before_p95_ms": 12.054792023263872,
+          "after_p95_ms": 26.92487509921193,
+          "p95_delta_ms": 14.87008307594806,
+          "before_cpu_s": 1.0067989999999991,
+          "after_cpu_s": 0.7053109999999982,
+          "before_type_gap_ms": 29.491666005924344,
+          "after_type_gap_ms": 29.278083005920053,
+          "before_scroll_hz": 158.9985028040586,
+          "after_scroll_hz": 154.01970562731307,
+          "before_load1": 237.615234375,
+          "after_load1": 238.20654296875
+        }
+      ],
+      "pooled_descriptive_ms": {
+        "before": {
+          "n": 160,
+          "min": 0.7200830150395632,
+          "median": 1.982396061066538,
+          "p95": 23.828875040635467,
+          "max": 54.9907919485122
+        },
+        "after": {
+          "n": 160,
+          "min": 0.4324170295149088,
+          "median": 1.2229375424794853,
+          "p95": 13.884417014196515,
+          "max": 39.21616601292044
+        }
+      },
+      "p95_lower_pairs": 3,
+      "median_paired_p95_delta_ms": -11.485249968245625,
+      "cpu_lower_pairs": 5
+    }
+  ],
+  "runs": [
+    {
+      "pair": 0,
+      "label": "before",
+      "condition": "typing",
+      "result": "paired-ff1-active-burst/pair-00-before-typing/typing/result.json",
+      "result_sha256": "83b0f140886d132a221c6f391f638024b9e37af06772c72e37e608dfb1c6d914",
+      "capture_sha256": "b38620a8651e62847770f6cd71dce84635e16f920b4f2e2cbe0438f57f8e7530",
+      "checks": {
+        "frozen_expected_binary": true,
+        "frozen_expected_helper": true,
+        "frozen_expected_fixtures": true,
+        "frozen_expected_history": true,
+        "800_by_8_history": true,
+        "32_exact_typed_bytes": true,
+        "33_expected_prefixes": true,
+        "all_writes_complete": true,
+        "all_acknowledged_and_causal": true,
+        "acks_reproduced_from_capture": true,
+        "all_chunk_bytes_retained": true,
+        "p95_matches_record_clocks": true,
+        "clean_complete_echo_off": true,
+        "profiling_off": true,
+        "positioning_count": true,
+        "v1_capture_digest": true,
+        "v1_all_marker_frames_reproduced": true,
+        "v2_capture_digest": true,
+        "v2_paired_present_frames_reproduced": true,
+        "v2_unpaired_marker_count": true,
+        "v2_post_write_observed_count": true,
+        "v2_during_change_count": true
+      },
+      "latency_ms": {
+        "n": 32,
+        "min": 1.0082079097628593,
+        "median": 1.704604015685618,
+        "p95": 9.324499987997115,
+        "max": 19.013999961316586
+      },
+      "type_gaps_ms": {
+        "n": 31,
+        "min": 25.158208096399903,
+        "median": 28.666457976214588,
+        "p95": 30.3668329725042,
+        "max": 33.25358300935477
+      },
+      "scroll_gaps_ms": null,
+      "scroll_writes": 0,
+      "actual_scroll_hz": null,
+      "cpu_lifecycle_s": 0.6633859999999999,
+      "load_before": [
+        263.88720703125,
+        271.95361328125,
+        218.0400390625
+      ],
+      "load_after": [
+        246.9091796875,
+        268.0390625,
+        217.27978515625
+      ],
+      "phase_start": 604415.314907666,
+      "phase_end": 604416.221272541,
+      "prefix_missing": 0,
+      "errors": [],
+      "viewport": {
+        "prephase_last": {
+          "at": 604415.307378916,
+          "record_ids": [
+            782
+          ]
+        },
+        "during_first": {
+          "at": 604415.328501,
+          "record_ids": [
+            782
+          ]
+        },
+        "during_last": {
+          "at": 604416.194662166,
+          "record_ids": [
+            782
+          ]
+        },
+        "during_present_count": 32,
+        "during_present_without_record_ids": 0,
+        "record_set_changes": 0,
+        "record_min": 782,
+        "record_max": 782,
+        "observed_present_ends_after_last_scroll_return": 0,
+        "excluded_unpaired_enable_markers": 2,
+        "last_real_present_with_records": {
+          "at": 604416.194662166,
+          "record_ids": [
+            782
+          ]
+        }
+      }
+    },
+    {
+      "pair": 0,
+      "label": "after",
+      "condition": "typing",
+      "result": "paired-ff1-active-burst/pair-00-after-typing/typing/result.json",
+      "result_sha256": "4435426875d92c0f712aaf6afe9b3a8848e9f3cffe37e58100d200b69ff4c33b",
+      "capture_sha256": "a53e35a478e4188d02f0f4d9cffcb36886e5aad8b0c0853cc81556cbde80a7c8",
+      "checks": {
+        "frozen_expected_binary": true,
+        "frozen_expected_helper": true,
+        "frozen_expected_fixtures": true,
+        "frozen_expected_history": true,
+        "800_by_8_history": true,
+        "32_exact_typed_bytes": true,
+        "33_expected_prefixes": true,
+        "all_writes_complete": true,
+        "all_acknowledged_and_causal": true,
+        "acks_reproduced_from_capture": true,
+        "all_chunk_bytes_retained": true,
+        "p95_matches_record_clocks": true,
+        "clean_complete_echo_off": true,
+        "profiling_off": true,
+        "positioning_count": true,
+        "v1_capture_digest": true,
+        "v1_all_marker_frames_reproduced": true,
+        "v2_capture_digest": true,
+        "v2_paired_present_frames_reproduced": true,
+        "v2_unpaired_marker_count": true,
+        "v2_post_write_observed_count": true,
+        "v2_during_change_count": true
+      },
+      "latency_ms": {
+        "n": 32,
+        "min": 0.7237499812617898,
+        "median": 0.9306254796683788,
+        "p95": 1.7987500177696347,
+        "max": 1.9334160024300218
+      },
+      "type_gaps_ms": {
+        "n": 31,
+        "min": 25.22079204209149,
+        "median": 27.770916931331158,
+        "p95": 29.643625020980835,
+        "max": 30.099084018729627
+      },
+      "scroll_gaps_ms": null,
+      "scroll_writes": 0,
+      "actual_scroll_hz": null,
+      "cpu_lifecycle_s": 0.5322420000000001,
+      "load_before": [
+        246.9091796875,
+        268.0390625,
+        217.27978515625
+      ],
+      "load_after": [
+        238.02734375,
+        265.8466796875,
+        216.80322265625
+      ],
+      "phase_start": 604423.020672875,
+      "phase_end": 604423.915243583,
+      "prefix_missing": 0,
+      "errors": [],
+      "viewport": {
+        "prephase_last": {
+          "at": 604423.011018666,
+          "record_ids": [
+            782
+          ]
+        },
+        "during_first": {
+          "at": 604423.021708333,
+          "record_ids": [
+            782
+          ]
+        },
+        "during_last": {
+          "at": 604423.886625666,
+          "record_ids": [
+            782
+          ]
+        },
+        "during_present_count": 32,
+        "during_present_without_record_ids": 0,
+        "record_set_changes": 0,
+        "record_min": 782,
+        "record_max": 782,
+        "observed_present_ends_after_last_scroll_return": 0,
+        "excluded_unpaired_enable_markers": 2,
+        "last_real_present_with_records": {
+          "at": 604423.886625666,
+          "record_ids": [
+            782
+          ]
+        }
+      }
+    },
+    {
+      "pair": 0,
+      "label": "before",
+      "condition": "pageup",
+      "result": "paired-ff1-active-burst/pair-00-before-pageup/pageup/result.json",
+      "result_sha256": "2ece4ac90850bd871c00952d7419c85e8a1996757658e5ec27dd95168e224d5e",
+      "capture_sha256": "c45de4671f26218c0a8f9c2c043961be79353e8ae618feb01ebbe91b71ebd697",
+      "checks": {
+        "frozen_expected_binary": true,
+        "frozen_expected_helper": true,
+        "frozen_expected_fixtures": true,
+        "frozen_expected_history": true,
+        "800_by_8_history": true,
+        "32_exact_typed_bytes": true,
+        "33_expected_prefixes": true,
+        "all_writes_complete": true,
+        "all_acknowledged_and_causal": true,
+        "acks_reproduced_from_capture": true,
+        "all_chunk_bytes_retained": true,
+        "p95_matches_record_clocks": true,
+        "clean_complete_echo_off": true,
+        "profiling_off": true,
+        "positioning_count": true,
+        "v1_capture_digest": true,
+        "v1_all_marker_frames_reproduced": true,
+        "v2_capture_digest": true,
+        "v2_paired_present_frames_reproduced": true,
+        "v2_unpaired_marker_count": true,
+        "v2_post_write_observed_count": true,
+        "v2_during_change_count": true
+      },
+      "latency_ms": {
+        "n": 32,
+        "min": 0.9870830690488219,
+        "median": 17.048812995199114,
+        "p95": 65.38916600402445,
+        "max": 91.01049997843802
+      },
+      "type_gaps_ms": {
+        "n": 31,
+        "min": 25.442291982471943,
+        "median": 28.9224999723956,
+        "p95": 30.633209040388465,
+        "max": 34.1977080097422
+      },
+      "scroll_gaps_ms": {
+        "n": 147,
+        "min": 5.093666957691312,
+        "median": 6.299291038885713,
+        "p95": 7.168708019889891,
+        "max": 11.828375048935413
+      },
+      "scroll_writes": 148,
+      "actual_scroll_hz": 159.9304718981042,
+      "cpu_lifecycle_s": 1.110264,
+      "load_before": [
+        238.02734375,
+        265.8466796875,
+        216.80322265625
+      ],
+      "load_after": [
+        228.17529296875,
+        263.34228515625,
+        216.20654296875
+      ],
+      "phase_start": 604428.412220833,
+      "phase_end": 604429.333627791,
+      "prefix_missing": 0,
+      "errors": [],
+      "viewport": {
+        "prephase_last": {
+          "at": 604428.4029865,
+          "record_ids": [
+            782
+          ]
+        },
+        "during_first": {
+          "at": 604428.417484833,
+          "record_ids": [
+            780,
+            781
+          ]
+        },
+        "during_last": {
+          "at": 604429.331149041,
+          "record_ids": [
+            528,
+            529
+          ]
+        },
+        "during_present_count": 87,
+        "during_present_without_record_ids": 0,
+        "record_set_changes": 76,
+        "record_min": 528,
+        "record_max": 781,
+        "observed_present_ends_after_last_scroll_return": 1,
+        "excluded_unpaired_enable_markers": 2,
+        "last_real_present_with_records": {
+          "at": 604429.338343833,
+          "record_ids": [
+            524,
+            525
+          ]
+        }
+      }
+    },
+    {
+      "pair": 0,
+      "label": "after",
+      "condition": "pageup",
+      "result": "paired-ff1-active-burst/pair-00-after-pageup/pageup/result.json",
+      "result_sha256": "79c3337eae8fdd7a521776170208cc518ff95b72a3d76eafe9cee615ccf09a45",
+      "capture_sha256": "9afe0e2d53236f601576fd59cf3da82b0c6f985a6a3a5ffe2f3b50c521353beb",
+      "checks": {
+        "frozen_expected_binary": true,
+        "frozen_expected_helper": true,
+        "frozen_expected_fixtures": true,
+        "frozen_expected_history": true,
+        "800_by_8_history": true,
+        "32_exact_typed_bytes": true,
+        "33_expected_prefixes": true,
+        "all_writes_complete": true,
+        "all_acknowledged_and_causal": true,
+        "acks_reproduced_from_capture": true,
+        "all_chunk_bytes_retained": true,
+        "p95_matches_record_clocks": true,
+        "clean_complete_echo_off": true,
+        "profiling_off": true,
+        "positioning_count": true,
+        "v1_capture_digest": true,
+        "v1_all_marker_frames_reproduced": true,
+        "v2_capture_digest": true,
+        "v2_paired_present_frames_reproduced": true,
+        "v2_unpaired_marker_count": true,
+        "v2_post_write_observed_count": true,
+        "v2_during_change_count": true
+      },
+      "latency_ms": {
+        "n": 32,
+        "min": 0.858625047840178,
+        "median": 4.096666467376053,
+        "p95": 63.24258306995034,
+        "max": 88.44429207965732
+      },
+      "type_gaps_ms": {
+        "n": 31,
+        "min": 25.089625036343932,
+        "median": 29.21608299948275,
+        "p95": 30.053416034206748,
+        "max": 30.141708091832697
+      },
+      "scroll_gaps_ms": {
+        "n": 150,
+        "min": 5.046083009801805,
+        "median": 6.058833037968725,
+        "p95": 6.862166919745505,
+        "max": 8.644624962471426
+      },
+      "scroll_writes": 151,
+      "actual_scroll_hz": 165.64715444392144,
+      "cpu_lifecycle_s": 0.989448,
+      "load_before": [
+        228.17529296875,
+        263.34228515625,
+        216.20654296875
+      ],
+      "load_after": [
+        222.3251953125,
+        260.9013671875,
+        215.88916015625
+      ],
+      "phase_start": 604434.9696025,
+      "phase_end": 604435.880951041,
+      "prefix_missing": 0,
+      "errors": [],
+      "viewport": {
+        "prephase_last": {
+          "at": 604434.960576875,
+          "record_ids": [
+            782
+          ]
+        },
+        "during_first": {
+          "at": 604434.972174916,
+          "record_ids": [
+            780,
+            781
+          ]
+        },
+        "during_last": {
+          "at": 604435.862950541,
+          "record_ids": [
+            524,
+            525
+          ]
+        },
+        "during_present_count": 138,
+        "during_present_without_record_ids": 0,
+        "record_set_changes": 123,
+        "record_min": 524,
+        "record_max": 781,
+        "observed_present_ends_after_last_scroll_return": 1,
+        "excluded_unpaired_enable_markers": 2,
+        "last_real_present_with_records": {
+          "at": 604435.883798666,
+          "record_ids": [
+            523
+          ]
+        }
+      }
+    },
+    {
+      "pair": 0,
+      "label": "before",
+      "condition": "pagedown",
+      "result": "paired-ff1-active-burst/pair-00-before-pagedown/pagedown/result.json",
+      "result_sha256": "5090ac48af9b9e11d17af44d1ca402e3d298a18e9bb5123c4147fa48062db303",
+      "capture_sha256": "435bb6abd305b40c1ccb4a62edccf6074da8dfafd8ade5ee16004c5932c47775",
+      "checks": {
+        "frozen_expected_binary": true,
+        "frozen_expected_helper": true,
+        "frozen_expected_fixtures": true,
+        "frozen_expected_history": true,
+        "800_by_8_history": true,
+        "32_exact_typed_bytes": true,
+        "33_expected_prefixes": true,
+        "all_writes_complete": true,
+        "all_acknowledged_and_causal": true,
+        "acks_reproduced_from_capture": true,
+        "all_chunk_bytes_retained": true,
+        "p95_matches_record_clocks": true,
+        "clean_complete_echo_off": true,
+        "profiling_off": true,
+        "positioning_count": true,
+        "v1_capture_digest": true,
+        "v1_all_marker_frames_reproduced": true,
+        "v2_capture_digest": true,
+        "v2_paired_present_frames_reproduced": true,
+        "v2_unpaired_marker_count": true,
+        "v2_post_write_observed_count": true,
+        "v2_during_change_count": true
+      },
+      "latency_ms": {
+        "n": 32,
+        "min": 0.9344160789623857,
+        "median": 1.5063544851727784,
+        "p95": 22.464417037554085,
+        "max": 33.3164589246735
+      },
+      "type_gaps_ms": {
+        "n": 31,
+        "min": 25.251624989323318,
+        "median": 28.517666971310973,
+        "p95": 30.024625011719763,
+        "max": 32.6824999647215
+      },
+      "scroll_gaps_ms": {
+        "n": 148,
+        "min": 5.092791980132461,
+        "median": 6.125395477283746,
+        "p95": 6.806124933063984,
+        "max": 12.85670802462846
+      },
+      "scroll_writes": 149,
+      "actual_scroll_hz": 163.54683745355442,
+      "cpu_lifecycle_s": 1.947273,
+      "load_before": [
+        222.3251953125,
+        260.9013671875,
+        215.88916015625
+      ],
+      "load_after": [
+        212.3935546875,
+        257.47119140625,
+        215.19580078125
+      ],
+      "phase_start": 604446.529696916,
+      "phase_end": 604447.44701,
+      "prefix_missing": 0,
+      "errors": [],
+      "viewport": {
+        "prephase_last": {
+          "at": 604446.518608916,
+          "record_ids": [
+            452
+          ]
+        },
+        "during_first": {
+          "at": 604446.531202125,
+          "record_ids": [
+            453,
+            454
+          ]
+        },
+        "during_last": {
+          "at": 604447.4372775,
+          "record_ids": [
+            709
+          ]
+        },
+        "during_present_count": 155,
+        "during_present_without_record_ids": 0,
+        "record_set_changes": 135,
+        "record_min": 453,
+        "record_max": 709,
+        "observed_present_ends_after_last_scroll_return": 2,
+        "excluded_unpaired_enable_markers": 2,
+        "last_real_present_with_records": {
+          "at": 604447.462086916,
+          "record_ids": [
+            710,
+            711
+          ]
+        }
+      }
+    },
+    {
+      "pair": 0,
+      "label": "after",
+      "condition": "pagedown",
+      "result": "paired-ff1-active-burst/pair-00-after-pagedown/pagedown/result.json",
+      "result_sha256": "3e6795b1e99f849c8517f5ee457095fb836664b04b05d7fc940e418f8bddf5d2",
+      "capture_sha256": "b1537ce5ba6f3a440204c780ca4d630a14a1126c7764cfeb4590b9f865deb2f7",
+      "checks": {
+        "frozen_expected_binary": true,
+        "frozen_expected_helper": true,
+        "frozen_expected_fixtures": true,
+        "frozen_expected_history": true,
+        "800_by_8_history": true,
+        "32_exact_typed_bytes": true,
+        "33_expected_prefixes": true,
+        "all_writes_complete": true,
+        "all_acknowledged_and_causal": true,
+        "acks_reproduced_from_capture": true,
+        "all_chunk_bytes_retained": true,
+        "p95_matches_record_clocks": true,
+        "clean_complete_echo_off": true,
+        "profiling_off": true,
+        "positioning_count": true,
+        "v1_capture_digest": true,
+        "v1_all_marker_frames_reproduced": true,
+        "v2_capture_digest": true,
+        "v2_paired_present_frames_reproduced": true,
+        "v2_unpaired_marker_count": true,
+        "v2_post_write_observed_count": true,
+        "v2_during_change_count": true
+      },
+      "latency_ms": {
+        "n": 32,
+        "min": 0.5574170500040054,
+        "median": 1.6154375043697655,
+        "p95": 4.250832949765027,
+        "max": 23.79904210101813
+      },
+      "type_gaps_ms": {
+        "n": 31,
+        "min": 25.130541995167732,
+        "median": 29.091208009049296,
+        "p95": 30.17591603565961,
+        "max": 31.926499912515283
+      },
+      "scroll_gaps_ms": {
+        "n": 152,
+        "min": 5.096374894492328,
+        "median": 6.043208995833993,
+        "p95": 6.560166017152369,
+        "max": 10.197083000093699
+      },
+      "scroll_writes": 153,
+      "actual_scroll_hz": 166.4539753700014,
+      "cpu_lifecycle_s": 1.248211,
+      "load_before": [
+        212.3935546875,
+        257.47119140625,
+        215.19580078125
+      ],
+      "load_after": [
+        203.00830078125,
+        254.00634765625,
+        214.4619140625
+      ],
+      "phase_start": 604457.886903416,
+      "phase_end": 604458.8055045,
+      "prefix_missing": 0,
+      "errors": [],
+      "viewport": {
+        "prephase_last": {
+          "at": 604457.876737291,
+          "record_ids": [
+            452
+          ]
+        },
+        "during_first": {
+          "at": 604457.888156625,
+          "record_ids": [
+            453,
+            454
+          ]
+        },
+        "during_last": {
+          "at": 604458.801348333,
+          "record_ids": [
+            717,
+            718
+          ]
+        },
+        "during_present_count": 163,
+        "during_present_without_record_ids": 0,
+        "record_set_changes": 148,
+        "record_min": 453,
+        "record_max": 718,
+        "observed_present_ends_after_last_scroll_return": 1,
+        "excluded_unpaired_enable_markers": 2,
+        "last_real_present_with_records": {
+          "at": 604458.801348333,
+          "record_ids": [
+            717,
+            718
+          ]
+        }
+      }
+    },
+    {
+      "pair": 0,
+      "label": "before",
+      "condition": "wheelup",
+      "result": "paired-ff1-active-burst/pair-00-before-wheelup/wheelup/result.json",
+      "result_sha256": "5500a14355453a00613ae66bc3edaed4f83b46052d8ae301c4dbed15e36a3bca",
+      "capture_sha256": "6d51f8195273361ff8a8201fc3a62a5d81c43b4851166a7b0f455c22a271a02e",
+      "checks": {
+        "frozen_expected_binary": true,
+        "frozen_expected_helper": true,
+        "frozen_expected_fixtures": true,
+        "frozen_expected_history": true,
+        "800_by_8_history": true,
+        "32_exact_typed_bytes": true,
+        "33_expected_prefixes": true,
+        "all_writes_complete": true,
+        "all_acknowledged_and_causal": true,
+        "acks_reproduced_from_capture": true,
+        "all_chunk_bytes_retained": true,
+        "p95_matches_record_clocks": true,
+        "clean_complete_echo_off": true,
+        "profiling_off": true,
+        "positioning_count": true,
+        "v1_capture_digest": true,
+        "v1_all_marker_frames_reproduced": true,
+        "v2_capture_digest": true,
+        "v2_paired_present_frames_reproduced": true,
+        "v2_unpaired_marker_count": true,
+        "v2_post_write_observed_count": true,
+        "v2_during_change_count": true
+      },
+      "latency_ms": {
+        "n": 32,
+        "min": 0.8867910364642739,
+        "median": 4.118375014513731,
+        "p95": 31.422667088918388,
+        "max": 36.72008402645588
+      },
+      "type_gaps_ms": {
+        "n": 31,
+        "min": 25.210667052306235,
+        "median": 29.043750022538006,
+        "p95": 30.745667056180537,
+        "max": 31.898000044748187
+      },
+      "scroll_gaps_ms": {
+        "n": 148,
+        "min": 5.0765000050887465,
+        "median": 6.156541465315968,
+        "p95": 7.6528750360012054,
+        "max": 8.554166997782886
+      },
+      "scroll_writes": 149,
+      "actual_scroll_hz": 161.91758558232576,
+      "cpu_lifecycle_s": 0.8892690000000003,
+      "load_before": [
+        203.00830078125,
+        254.00634765625,
+        214.4619140625
+      ],
+      "load_after": [
+        198.44287109375,
+        252.212890625,
+        214.060546875
+      ],
+      "phase_start": 604464.035365375,
+      "phase_end": 604464.955291125,
+      "prefix_missing": 0,
+      "errors": [],
+      "viewport": {
+        "prephase_last": {
+          "at": 604464.018989583,
+          "record_ids": [
+            782
+          ]
+        },
+        "during_first": {
+          "at": 604464.037795875,
+          "record_ids": [
+            781,
+            782
+          ]
+        },
+        "during_last": {
+          "at": 604464.953858208,
+          "record_ids": [
+            758,
+            759
+          ]
+        },
+        "during_present_count": 135,
+        "during_present_without_record_ids": 0,
+        "record_set_changes": 44,
+        "record_min": 758,
+        "record_max": 782,
+        "observed_present_ends_after_last_scroll_return": 2,
+        "excluded_unpaired_enable_markers": 2,
+        "last_real_present_with_records": {
+          "at": 604464.953858208,
+          "record_ids": [
+            758,
+            759
+          ]
+        }
+      }
+    },
+    {
+      "pair": 0,
+      "label": "after",
+      "condition": "wheelup",
+      "result": "paired-ff1-active-burst/pair-00-after-wheelup/wheelup/result.json",
+      "result_sha256": "f541142f7ca6e2b0058ebc1da8c930c18ce3710254f1f698688d06d29c6a4d11",
+      "capture_sha256": "7da8c2b3542c525c812764184de3b31666a4e7feb557efed5ef4b63051b1e729",
+      "checks": {
+        "frozen_expected_binary": true,
+        "frozen_expected_helper": true,
+        "frozen_expected_fixtures": true,
+        "frozen_expected_history": true,
+        "800_by_8_history": true,
+        "32_exact_typed_bytes": true,
+        "33_expected_prefixes": true,
+        "all_writes_complete": true,
+        "all_acknowledged_and_causal": true,
+        "acks_reproduced_from_capture": true,
+        "all_chunk_bytes_retained": true,
+        "p95_matches_record_clocks": true,
+        "clean_complete_echo_off": true,
+        "profiling_off": true,
+        "positioning_count": true,
+        "v1_capture_digest": true,
+        "v1_all_marker_frames_reproduced": true,
+        "v2_capture_digest": true,
+        "v2_paired_present_frames_reproduced": true,
+        "v2_unpaired_marker_count": true,
+        "v2_post_write_observed_count": true,
+        "v2_during_change_count": true
+      },
+      "latency_ms": {
+        "n": 32,
+        "min": 0.5789999850094318,
+        "median": 1.8513125251047313,
+        "p95": 7.93029204942286,
+        "max": 15.088208019733429
+      },
+      "type_gaps_ms": {
+        "n": 31,
+        "min": 25.274624931626022,
+        "median": 28.86304201092571,
+        "p95": 30.080833937972784,
+        "max": 30.21129104308784
+      },
+      "scroll_gaps_ms": {
+        "n": 151,
+        "min": 5.114791914820671,
+        "median": 6.226708996109664,
+        "p95": 6.500166957266629,
+        "max": 7.348709041252732
+      },
+      "scroll_writes": 152,
+      "actual_scroll_hz": 165.02641304844482,
+      "cpu_lifecycle_s": 0.6420939999999995,
+      "load_before": [
+        198.44287109375,
+        252.212890625,
+        214.060546875
+      ],
+      "load_after": [
+        204.8935546875,
+        252.6572265625,
+        214.44091796875
+      ],
+      "phase_start": 604469.588672875,
+      "phase_end": 604470.507317333,
+      "prefix_missing": 0,
+      "errors": [],
+      "viewport": {
+        "prephase_last": {
+          "at": 604469.578618958,
+          "record_ids": [
+            782
+          ]
+        },
+        "during_first": {
+          "at": 604469.590245791,
+          "record_ids": [
+            781,
+            782
+          ]
+        },
+        "during_last": {
+          "at": 604470.505098583,
+          "record_ids": [
+            758
+          ]
+        },
+        "during_present_count": 168,
+        "during_present_without_record_ids": 0,
+        "record_set_changes": 47,
+        "record_min": 758,
+        "record_max": 782,
+        "observed_present_ends_after_last_scroll_return": 1,
+        "excluded_unpaired_enable_markers": 2,
+        "last_real_present_with_records": {
+          "at": 604470.505098583,
+          "record_ids": [
+            758
+          ]
+        }
+      }
+    },
+    {
+      "pair": 0,
+      "label": "before",
+      "condition": "wheeldown",
+      "result": "paired-ff1-active-burst/pair-00-before-wheeldown/wheeldown/result.json",
+      "result_sha256": "33a90cced87209c7488552147446de4897017da02f316f2b56ee607643c29143",
+      "capture_sha256": "2e247bab8ca6afaa84f71327dcd8ec6e77cc065fe91f9220c867613109013411",
+      "checks": {
+        "frozen_expected_binary": true,
+        "frozen_expected_helper": true,
+        "frozen_expected_fixtures": true,
+        "frozen_expected_history": true,
+        "800_by_8_history": true,
+        "32_exact_typed_bytes": true,
+        "33_expected_prefixes": true,
+        "all_writes_complete": true,
+        "all_acknowledged_and_causal": true,
+        "acks_reproduced_from_capture": true,
+        "all_chunk_bytes_retained": true,
+        "p95_matches_record_clocks": true,
+        "clean_complete_echo_off": true,
+        "profiling_off": true,
+        "positioning_count": true,
+        "v1_capture_digest": true,
+        "v1_all_marker_frames_reproduced": true,
+        "v2_capture_digest": true,
+        "v2_paired_present_frames_reproduced": true,
+        "v2_unpaired_marker_count": true,
+        "v2_post_write_observed_count": true,
+        "v2_during_change_count": true
+      },
+      "latency_ms": {
+        "n": 32,
+        "min": 0.8147080661728978,
+        "median": 1.9017915474250913,
+        "p95": 37.27595799136907,
+        "max": 53.78579208627343
+      },
+      "type_gaps_ms": {
+        "n": 31,
+        "min": 25.173500063829124,
+        "median": 29.14345799945295,
+        "p95": 30.652375076897442,
+        "max": 34.77654198650271
+      },
+      "scroll_gaps_ms": {
+        "n": 143,
+        "min": 5.162041983567178,
+        "median": 6.297125015407801,
+        "p95": 8.350166957825422,
+        "max": 15.494958031922579
+      },
+      "scroll_writes": 144,
+      "actual_scroll_hz": 154.86683945617514,
+      "cpu_lifecycle_s": 1.0321860000000003,
+      "load_before": [
+        208.34521484375,
+        252.57958984375,
+        214.63720703125
+      ],
+      "load_after": [
+        210.4794921875,
+        252.28759765625,
+        214.75634765625
+      ],
+      "phase_start": 604476.172110791,
+      "phase_end": 604477.099717166,
+      "prefix_missing": 0,
+      "errors": [],
+      "viewport": {
+        "prephase_last": {
+          "at": 604476.161596583,
+          "record_ids": [
+            712,
+            713
+          ]
+        },
+        "during_first": {
+          "at": 604476.174109208,
+          "record_ids": [
+            712,
+            713
+          ]
+        },
+        "during_last": {
+          "at": 604477.09721875,
+          "record_ids": [
+            735,
+            736
+          ]
+        },
+        "during_present_count": 138,
+        "during_present_without_record_ids": 0,
+        "record_set_changes": 42,
+        "record_min": 712,
+        "record_max": 736,
+        "observed_present_ends_after_last_scroll_return": 1,
+        "excluded_unpaired_enable_markers": 2,
+        "last_real_present_with_records": {
+          "at": 604477.09721875,
+          "record_ids": [
+            735,
+            736
+          ]
+        }
+      }
+    },
+    {
+      "pair": 0,
+      "label": "after",
+      "condition": "wheeldown",
+      "result": "paired-ff1-active-burst/pair-00-after-wheeldown/wheeldown/result.json",
+      "result_sha256": "37fd64d7936b1f4b2c81af270fe294b4ca60afbcb0b68f3ef97eec8c7db524fd",
+      "capture_sha256": "32b15d2ff5ba5c10c150f65874005e06814e85391db801d7057dad6411064c95",
+      "checks": {
+        "frozen_expected_binary": true,
+        "frozen_expected_helper": true,
+        "frozen_expected_fixtures": true,
+        "frozen_expected_history": true,
+        "800_by_8_history": true,
+        "32_exact_typed_bytes": true,
+        "33_expected_prefixes": true,
+        "all_writes_complete": true,
+        "all_acknowledged_and_causal": true,
+        "acks_reproduced_from_capture": true,
+        "all_chunk_bytes_retained": true,
+        "p95_matches_record_clocks": true,
+        "clean_complete_echo_off": true,
+        "profiling_off": true,
+        "positioning_count": true,
+        "v1_capture_digest": true,
+        "v1_all_marker_frames_reproduced": true,
+        "v2_capture_digest": true,
+        "v2_paired_present_frames_reproduced": true,
+        "v2_unpaired_marker_count": true,
+        "v2_post_write_observed_count": true,
+        "v2_during_change_count": true
+      },
+      "latency_ms": {
+        "n": 32,
+        "min": 0.4324170295149088,
+        "median": 0.9506249916739762,
+        "p95": 3.1559580238536,
+        "max": 7.715374929830432
+      },
+      "type_gaps_ms": {
+        "n": 31,
+        "min": 25.341250002384186,
+        "median": 29.18283292092383,
+        "p95": 30.045374995097518,
+        "max": 30.608083005063236
+      },
+      "scroll_gaps_ms": {
+        "n": 149,
+        "min": 5.060166935436428,
+        "median": 6.296874955296516,
+        "p95": 6.905791931785643,
+        "max": 8.810750092379749
+      },
+      "scroll_writes": 150,
+      "actual_scroll_hz": 163.009698681981,
+      "cpu_lifecycle_s": 0.6932490000000002,
+      "load_before": [
+        210.4794921875,
+        252.28759765625,
+        214.75634765625
+      ],
+      "load_after": [
+        207.31787109375,
+        250.93798828125,
+        214.49951171875
+      ],
+      "phase_start": 604483.020960125,
+      "phase_end": 604483.941430916,
+      "prefix_missing": 0,
+      "errors": [],
+      "viewport": {
+        "prephase_last": {
+          "at": 604483.009192375,
+          "record_ids": [
+            712,
+            713
+          ]
+        },
+        "during_first": {
+          "at": 604483.022118875,
+          "record_ids": [
+            712,
+            713
+          ]
+        },
+        "during_last": {
+          "at": 604483.936183125,
+          "record_ids": [
+            736
+          ]
+        },
+        "during_present_count": 174,
+        "during_present_without_record_ids": 0,
+        "record_set_changes": 47,
+        "record_min": 712,
+        "record_max": 736,
+        "observed_present_ends_after_last_scroll_return": 1,
+        "excluded_unpaired_enable_markers": 2,
+        "last_real_present_with_records": {
+          "at": 604483.936183125,
+          "record_ids": [
+            736
+          ]
+        }
+      }
+    },
+    {
+      "pair": 1,
+      "label": "after",
+      "condition": "pageup",
+      "result": "paired-ff1-active-burst/pair-01-after-pageup/pageup/result.json",
+      "result_sha256": "d67d3678e95c6e6260db575a2d08e49e84d7e9b8cf53ce69c99f0d51ed0101b2",
+      "capture_sha256": "922fa5fa20c8675b70cdcbb1ede0faf198f1b2f4ee232373feb695eb7207eb38",
+      "checks": {
+        "frozen_expected_binary": true,
+        "frozen_expected_helper": true,
+        "frozen_expected_fixtures": true,
+        "frozen_expected_history": true,
+        "800_by_8_history": true,
+        "32_exact_typed_bytes": true,
+        "33_expected_prefixes": true,
+        "all_writes_complete": true,
+        "all_acknowledged_and_causal": true,
+        "acks_reproduced_from_capture": true,
+        "all_chunk_bytes_retained": true,
+        "p95_matches_record_clocks": true,
+        "clean_complete_echo_off": true,
+        "profiling_off": true,
+        "positioning_count": true,
+        "v1_capture_digest": true,
+        "v1_all_marker_frames_reproduced": true,
+        "v2_capture_digest": true,
+        "v2_paired_present_frames_reproduced": true,
+        "v2_unpaired_marker_count": true,
+        "v2_post_write_observed_count": true,
+        "v2_during_change_count": true
+      },
+      "latency_ms": {
+        "n": 32,
+        "min": 0.5112079670652747,
+        "median": 2.98241653945297,
+        "p95": 16.57750003505498,
+        "max": 31.302125076763332
+      },
+      "type_gaps_ms": {
+        "n": 31,
+        "min": 25.825874996371567,
+        "median": 29.64637498371303,
+        "p95": 30.307666980661452,
+        "max": 31.40987502411008
+      },
+      "scroll_gaps_ms": {
+        "n": 146,
+        "min": 5.05645910743624,
+        "median": 6.299500004388392,
+        "p95": 8.538000052794814,
+        "max": 10.638374951668084
+      },
+      "scroll_writes": 147,
+      "actual_scroll_hz": 157.09573033615774,
+      "cpu_lifecycle_s": 0.8329140000000002,
+      "load_before": [
+        207.31787109375,
+        250.93798828125,
+        214.49951171875
+      ],
+      "load_after": [
+        204.7294921875,
+        249.67724609375,
+        214.26806640625
+      ],
+      "phase_start": 604488.381178791,
+      "phase_end": 604489.312556375,
+      "prefix_missing": 0,
+      "errors": [],
+      "viewport": {
+        "prephase_last": {
+          "at": 604488.371276791,
+          "record_ids": [
+            782
+          ]
+        },
+        "during_first": {
+          "at": 604488.3842065,
+          "record_ids": [
+            780,
+            781
+          ]
+        },
+        "during_last": {
+          "at": 604489.30660725,
+          "record_ids": [
+            528,
+            529
+          ]
+        },
+        "during_present_count": 151,
+        "during_present_without_record_ids": 0,
+        "record_set_changes": 134,
+        "record_min": 528,
+        "record_max": 781,
+        "observed_present_ends_after_last_scroll_return": 1,
+        "excluded_unpaired_enable_markers": 2,
+        "last_real_present_with_records": {
+          "at": 604489.313801708,
+          "record_ids": [
+            526,
+            527
+          ]
+        }
+      }
+    },
+    {
+      "pair": 1,
+      "label": "before",
+      "condition": "pageup",
+      "result": "paired-ff1-active-burst/pair-01-before-pageup/pageup/result.json",
+      "result_sha256": "7eec39c7937cebaef5f8fc61d065266385e88ab899561693a8a1a1816ac0083b",
+      "capture_sha256": "65a866deee1fced059f75a37fb1d89ff97bad151500048322d8c86980c1de422",
+      "checks": {
+        "frozen_expected_binary": true,
+        "frozen_expected_helper": true,
+        "frozen_expected_fixtures": true,
+        "frozen_expected_history": true,
+        "800_by_8_history": true,
+        "32_exact_typed_bytes": true,
+        "33_expected_prefixes": true,
+        "all_writes_complete": true,
+        "all_acknowledged_and_causal": true,
+        "acks_reproduced_from_capture": true,
+        "all_chunk_bytes_retained": true,
+        "p95_matches_record_clocks": true,
+        "clean_complete_echo_off": true,
+        "profiling_off": true,
+        "positioning_count": true,
+        "v1_capture_digest": true,
+        "v1_all_marker_frames_reproduced": true,
+        "v2_capture_digest": true,
+        "v2_paired_present_frames_reproduced": true,
+        "v2_unpaired_marker_count": true,
+        "v2_post_write_observed_count": true,
+        "v2_during_change_count": true
+      },
+      "latency_ms": {
+        "n": 32,
+        "min": 0.9040840668603778,
+        "median": 4.396104020997882,
+        "p95": 47.111624968238175,
+        "max": 53.011166979558766
+      },
+      "type_gaps_ms": {
+        "n": 31,
+        "min": 25.12875001411885,
+        "median": 29.099584091454744,
+        "p95": 30.101084033958614,
+        "max": 30.61445790808648
+      },
+      "scroll_gaps_ms": {
+        "n": 149,
+        "min": 5.0482089864090085,
+        "median": 6.292541977018118,
+        "p95": 7.316792034544051,
+        "max": 9.86204098444432
+      },
+      "scroll_writes": 150,
+      "actual_scroll_hz": 161.96763500795203,
+      "cpu_lifecycle_s": 1.2385070000000002,
+      "load_before": [
+        204.7294921875,
+        249.67724609375,
+        214.26806640625
+      ],
+      "load_after": [
+        199.1455078125,
+        247.77294921875,
+        213.80322265625
+      ],
+      "phase_start": 604493.434885791,
+      "phase_end": 604494.358932166,
+      "prefix_missing": 0,
+      "errors": [],
+      "viewport": {
+        "prephase_last": {
+          "at": 604493.424324625,
+          "record_ids": [
+            782
+          ]
+        },
+        "during_first": {
+          "at": 604493.43752625,
+          "record_ids": [
+            780,
+            781
+          ]
+        },
+        "during_last": {
+          "at": 604494.352897916,
+          "record_ids": [
+            523
+          ]
+        },
+        "during_present_count": 134,
+        "during_present_without_record_ids": 0,
+        "record_set_changes": 121,
+        "record_min": 523,
+        "record_max": 781,
+        "observed_present_ends_after_last_scroll_return": 1,
+        "excluded_unpaired_enable_markers": 2,
+        "last_real_present_with_records": {
+          "at": 604494.359439791,
+          "record_ids": [
+            521,
+            522
+          ]
+        }
+      }
+    },
+    {
+      "pair": 1,
+      "label": "after",
+      "condition": "pagedown",
+      "result": "paired-ff1-active-burst/pair-01-after-pagedown/pagedown/result.json",
+      "result_sha256": "20a02562031ac1ec2cf09bcf1d0b8b681cc2b4b3c0e2f09d30e88f55f53b299d",
+      "capture_sha256": "e1b3ab6f859ced891b213f60736d3c618de42c89266106a92d3d2d3448742a5d",
+      "checks": {
+        "frozen_expected_binary": true,
+        "frozen_expected_helper": true,
+        "frozen_expected_fixtures": true,
+        "frozen_expected_history": true,
+        "800_by_8_history": true,
+        "32_exact_typed_bytes": true,
+        "33_expected_prefixes": true,
+        "all_writes_complete": true,
+        "all_acknowledged_and_causal": true,
+        "acks_reproduced_from_capture": true,
+        "all_chunk_bytes_retained": true,
+        "p95_matches_record_clocks": true,
+        "clean_complete_echo_off": true,
+        "profiling_off": true,
+        "positioning_count": true,
+        "v1_capture_digest": true,
+        "v1_all_marker_frames_reproduced": true,
+        "v2_capture_digest": true,
+        "v2_paired_present_frames_reproduced": true,
+        "v2_unpaired_marker_count": true,
+        "v2_post_write_observed_count": true,
+        "v2_during_change_count": true
+      },
+      "latency_ms": {
+        "n": 32,
+        "min": 0.48749998677521944,
+        "median": 1.1707915109582245,
+        "p95": 6.525583914481103,
+        "max": 25.280250003561378
+      },
+      "type_gaps_ms": {
+        "n": 31,
+        "min": 25.521458010189235,
+        "median": 28.92175002489239,
+        "p95": 30.19095805939287,
+        "max": 30.52549995481968
+      },
+      "scroll_gaps_ms": {
+        "n": 150,
+        "min": 5.106333061121404,
+        "median": 6.282125483267009,
+        "p95": 7.011207984760404,
+        "max": 7.97641696408391
+      },
+      "scroll_writes": 151,
+      "actual_scroll_hz": 163.55293678226488,
+      "cpu_lifecycle_s": 1.2008909999999995,
+      "load_before": [
+        199.1455078125,
+        247.77294921875,
+        213.80322265625
+      ],
+      "load_after": [
+        186.6630859375,
+        243.4990234375,
+        212.68359375
+      ],
+      "phase_start": 604504.020292291,
+      "phase_end": 604504.938387458,
+      "prefix_missing": 0,
+      "errors": [],
+      "viewport": {
+        "prephase_last": {
+          "at": 604504.005470208,
+          "record_ids": [
+            452
+          ]
+        },
+        "during_first": {
+          "at": 604504.023706666,
+          "record_ids": [
+            453,
+            454
+          ]
+        },
+        "during_last": {
+          "at": 604504.937450083,
+          "record_ids": [
+            714,
+            715
+          ]
+        },
+        "during_present_count": 168,
+        "during_present_without_record_ids": 0,
+        "record_set_changes": 147,
+        "record_min": 453,
+        "record_max": 715,
+        "observed_present_ends_after_last_scroll_return": 2,
+        "excluded_unpaired_enable_markers": 2,
+        "last_real_present_with_records": {
+          "at": 604504.937450083,
+          "record_ids": [
+            714,
+            715
+          ]
+        }
+      }
+    },
+    {
+      "pair": 1,
+      "label": "before",
+      "condition": "pagedown",
+      "result": "paired-ff1-active-burst/pair-01-before-pagedown/pagedown/result.json",
+      "result_sha256": "651e5498bfe8b929f5c247903e76554ff478eaa79e17d04c29aab86cc706bcdf",
+      "capture_sha256": "907dd4ed94560a79689b8e0d68207ea4304fa30abf7cab8284226894467fd2e9",
+      "checks": {
+        "frozen_expected_binary": true,
+        "frozen_expected_helper": true,
+        "frozen_expected_fixtures": true,
+        "frozen_expected_history": true,
+        "800_by_8_history": true,
+        "32_exact_typed_bytes": true,
+        "33_expected_prefixes": true,
+        "all_writes_complete": true,
+        "all_acknowledged_and_causal": true,
+        "acks_reproduced_from_capture": true,
+        "all_chunk_bytes_retained": true,
+        "p95_matches_record_clocks": true,
+        "clean_complete_echo_off": true,
+        "profiling_off": true,
+        "positioning_count": true,
+        "v1_capture_digest": true,
+        "v1_all_marker_frames_reproduced": true,
+        "v2_capture_digest": true,
+        "v2_paired_present_frames_reproduced": true,
+        "v2_unpaired_marker_count": true,
+        "v2_post_write_observed_count": true,
+        "v2_during_change_count": true
+      },
+      "latency_ms": {
+        "n": 32,
+        "min": 0.877333921380341,
+        "median": 2.025020483415574,
+        "p95": 16.748666064813733,
+        "max": 31.00858407560736
+      },
+      "type_gaps_ms": {
+        "n": 31,
+        "min": 25.520541006699204,
+        "median": 28.790874988771975,
+        "p95": 30.205750023014843,
+        "max": 32.79204200953245
+      },
+      "scroll_gaps_ms": {
+        "n": 143,
+        "min": 5.074957967735827,
+        "median": 6.3035000348463655,
+        "p95": 7.650875020772219,
+        "max": 12.145458022132516
+      },
+      "scroll_writes": 144,
+      "actual_scroll_hz": 157.4564652501538,
+      "cpu_lifecycle_s": 2.048676,
+      "load_before": [
+        186.6630859375,
+        243.4990234375,
+        212.68359375
+      ],
+      "load_after": [
+        173.92041015625,
+        237.826171875,
+        211.193359375
+      ],
+      "phase_start": 604514.794497291,
+      "phase_end": 604515.719506291,
+      "prefix_missing": 0,
+      "errors": [],
+      "viewport": {
+        "prephase_last": {
+          "at": 604514.782616458,
+          "record_ids": [
+            452
+          ]
+        },
+        "during_first": {
+          "at": 604514.795884958,
+          "record_ids": [
+            453,
+            454
+          ]
+        },
+        "during_last": {
+          "at": 604515.707925625,
+          "record_ids": [
+            702
+          ]
+        },
+        "during_present_count": 153,
+        "during_present_without_record_ids": 0,
+        "record_set_changes": 132,
+        "record_min": 453,
+        "record_max": 702,
+        "observed_present_ends_after_last_scroll_return": 1,
+        "excluded_unpaired_enable_markers": 2,
+        "last_real_present_with_records": {
+          "at": 604515.707925625,
+          "record_ids": [
+            702
+          ]
+        }
+      }
+    },
+    {
+      "pair": 1,
+      "label": "after",
+      "condition": "wheelup",
+      "result": "paired-ff1-active-burst/pair-01-after-wheelup/wheelup/result.json",
+      "result_sha256": "b390b729b59f1f75d877a1ef8e7c4a3c0ec837369f923a324c7d8723dd50b28f",
+      "capture_sha256": "0a958b1c836e897fb4e6642c0c5b8892d665ecb9e4fb2b78a59d1957f201fd49",
+      "checks": {
+        "frozen_expected_binary": true,
+        "frozen_expected_helper": true,
+        "frozen_expected_fixtures": true,
+        "frozen_expected_history": true,
+        "800_by_8_history": true,
+        "32_exact_typed_bytes": true,
+        "33_expected_prefixes": true,
+        "all_writes_complete": true,
+        "all_acknowledged_and_causal": true,
+        "acks_reproduced_from_capture": true,
+        "all_chunk_bytes_retained": true,
+        "p95_matches_record_clocks": true,
+        "clean_complete_echo_off": true,
+        "profiling_off": true,
+        "positioning_count": true,
+        "v1_capture_digest": true,
+        "v1_all_marker_frames_reproduced": true,
+        "v2_capture_digest": true,
+        "v2_paired_present_frames_reproduced": true,
+        "v2_unpaired_marker_count": true,
+        "v2_post_write_observed_count": true,
+        "v2_during_change_count": true
+      },
+      "latency_ms": {
+        "n": 32,
+        "min": 0.5134579259902239,
+        "median": 1.0216039954684675,
+        "p95": 3.883749945089221,
+        "max": 29.002832947298884
+      },
+      "type_gaps_ms": {
+        "n": 31,
+        "min": 25.261042057536542,
+        "median": 29.09608301706612,
+        "p95": 30.073249945417047,
+        "max": 30.911791953258216
+      },
+      "scroll_gaps_ms": {
+        "n": 149,
+        "min": 5.062416079454124,
+        "median": 6.21395802590996,
+        "p95": 6.749541964381933,
+        "max": 11.244375025853515
+      },
+      "scroll_writes": 150,
+      "actual_scroll_hz": 162.2524635230084,
+      "cpu_lifecycle_s": 0.6119789999999994,
+      "load_before": [
+        173.92041015625,
+        237.826171875,
+        211.193359375
+      ],
+      "load_after": [
+        171.4443359375,
+        236.25146484375,
+        210.79345703125
+      ],
+      "phase_start": 604520.420367958,
+      "phase_end": 604521.341041166,
+      "prefix_missing": 0,
+      "errors": [],
+      "viewport": {
+        "prephase_last": {
+          "at": 604520.411866375,
+          "record_ids": [
+            782
+          ]
+        },
+        "during_first": {
+          "at": 604520.422916,
+          "record_ids": [
+            781,
+            782
+          ]
+        },
+        "during_last": {
+          "at": 604521.339414291,
+          "record_ids": [
+            758,
+            759
+          ]
+        },
+        "during_present_count": 166,
+        "during_present_without_record_ids": 0,
+        "record_set_changes": 45,
+        "record_min": 758,
+        "record_max": 782,
+        "observed_present_ends_after_last_scroll_return": 1,
+        "excluded_unpaired_enable_markers": 2,
+        "last_real_present_with_records": {
+          "at": 604521.339414291,
+          "record_ids": [
+            758,
+            759
+          ]
+        }
+      }
+    },
+    {
+      "pair": 1,
+      "label": "before",
+      "condition": "wheelup",
+      "result": "paired-ff1-active-burst/pair-01-before-wheelup/wheelup/result.json",
+      "result_sha256": "9c0754c5f02ea1f28a22bf738da8bdd4b5e33c62837cd25e3a7776dc83a0c46a",
+      "capture_sha256": "c793580e5e8ff9d4238620b103927089ae7cb6824a5ce6f16d882f87f48fffdd",
+      "checks": {
+        "frozen_expected_binary": true,
+        "frozen_expected_helper": true,
+        "frozen_expected_fixtures": true,
+        "frozen_expected_history": true,
+        "800_by_8_history": true,
+        "32_exact_typed_bytes": true,
+        "33_expected_prefixes": true,
+        "all_writes_complete": true,
+        "all_acknowledged_and_causal": true,
+        "acks_reproduced_from_capture": true,
+        "all_chunk_bytes_retained": true,
+        "p95_matches_record_clocks": true,
+        "clean_complete_echo_off": true,
+        "profiling_off": true,
+        "positioning_count": true,
+        "v1_capture_digest": true,
+        "v1_all_marker_frames_reproduced": true,
+        "v2_capture_digest": true,
+        "v2_paired_present_frames_reproduced": true,
+        "v2_unpaired_marker_count": true,
+        "v2_post_write_observed_count": true,
+        "v2_during_change_count": true
+      },
+      "latency_ms": {
+        "n": 32,
+        "min": 0.8831250015646219,
+        "median": 1.905521028675139,
+        "p95": 32.09308395162225,
+        "max": 48.25791693292558
+      },
+      "type_gaps_ms": {
+        "n": 31,
+        "min": 25.254082982428372,
+        "median": 28.846499975770712,
+        "p95": 30.905500054359436,
+        "max": 35.617834073491395
+      },
+      "scroll_gaps_ms": {
+        "n": 141,
+        "min": 5.057874950580299,
+        "median": 6.28216692712158,
+        "p95": 8.852583006955683,
+        "max": 15.570916002616286
+      },
+      "scroll_writes": 142,
+      "actual_scroll_hz": 155.4500184490797,
+      "cpu_lifecycle_s": 0.9287640000000001,
+      "load_before": [
+        171.4443359375,
+        236.25146484375,
+        210.79345703125
+      ],
+      "load_after": [
+        168.36572265625,
+        234.537109375,
+        210.33740234375
+      ],
+      "phase_start": 604525.487730083,
+      "phase_end": 604526.400813291,
+      "prefix_missing": 0,
+      "errors": [],
+      "viewport": {
+        "prephase_last": {
+          "at": 604525.4681055,
+          "record_ids": [
+            782
+          ]
+        },
+        "during_first": {
+          "at": 604525.493160791,
+          "record_ids": [
+            781,
+            782
+          ]
+        },
+        "during_last": {
+          "at": 604526.398684416,
+          "record_ids": [
+            759,
+            760
+          ]
+        },
+        "during_present_count": 150,
+        "during_present_without_record_ids": 0,
+        "record_set_changes": 43,
+        "record_min": 759,
+        "record_max": 782,
+        "observed_present_ends_after_last_scroll_return": 2,
+        "excluded_unpaired_enable_markers": 2,
+        "last_real_present_with_records": {
+          "at": 604526.398684416,
+          "record_ids": [
+            759,
+            760
+          ]
+        }
+      }
+    },
+    {
+      "pair": 1,
+      "label": "after",
+      "condition": "wheeldown",
+      "result": "paired-ff1-active-burst/pair-01-after-wheeldown/wheeldown/result.json",
+      "result_sha256": "9a2dff067a99b5a9cfa307b69bfbe256d9597be4de327c115c6d82d0332dee83",
+      "capture_sha256": "f58e93eacf68cb47d0d4a519c37c59f342cc6272fe0c07fe97ee3fa3d01510ad",
+      "checks": {
+        "frozen_expected_binary": true,
+        "frozen_expected_helper": true,
+        "frozen_expected_fixtures": true,
+        "frozen_expected_history": true,
+        "800_by_8_history": true,
+        "32_exact_typed_bytes": true,
+        "33_expected_prefixes": true,
+        "all_writes_complete": true,
+        "all_acknowledged_and_causal": true,
+        "acks_reproduced_from_capture": true,
+        "all_chunk_bytes_retained": true,
+        "p95_matches_record_clocks": true,
+        "clean_complete_echo_off": true,
+        "profiling_off": true,
+        "positioning_count": true,
+        "v1_capture_digest": true,
+        "v1_all_marker_frames_reproduced": true,
+        "v2_capture_digest": true,
+        "v2_paired_present_frames_reproduced": true,
+        "v2_unpaired_marker_count": true,
+        "v2_post_write_observed_count": true,
+        "v2_during_change_count": true
+      },
+      "latency_ms": {
+        "n": 32,
+        "min": 0.5784999812021852,
+        "median": 1.0945204994641244,
+        "p95": 11.852749972604215,
+        "max": 25.467542000114918
+      },
+      "type_gaps_ms": {
+        "n": 31,
+        "min": 25.463416939601302,
+        "median": 28.96562498062849,
+        "p95": 30.063917045481503,
+        "max": 31.24549996573478
+      },
+      "scroll_gaps_ms": {
+        "n": 149,
+        "min": 5.0544580444693565,
+        "median": 6.232790998183191,
+        "p95": 7.007417036220431,
+        "max": 10.516791953705251
+      },
+      "scroll_writes": 150,
+      "actual_scroll_hz": 163.07981514945487,
+      "cpu_lifecycle_s": 0.7071560000000003,
+      "load_before": [
+        168.36572265625,
+        234.537109375,
+        210.33740234375
+      ],
+      "load_after": [
+        163.45166015625,
+        232.41943359375,
+        209.7314453125
+      ],
+      "phase_start": 604531.856448041,
+      "phase_end": 604532.77275675,
+      "prefix_missing": 0,
+      "errors": [],
+      "viewport": {
+        "prephase_last": {
+          "at": 604531.848998833,
+          "record_ids": [
+            712,
+            713
+          ]
+        },
+        "during_first": {
+          "at": 604531.857329333,
+          "record_ids": [
+            712,
+            713
+          ]
+        },
+        "during_last": {
+          "at": 604532.771358125,
+          "record_ids": [
+            736
+          ]
+        },
+        "during_present_count": 161,
+        "during_present_without_record_ids": 0,
+        "record_set_changes": 46,
+        "record_min": 712,
+        "record_max": 736,
+        "observed_present_ends_after_last_scroll_return": 1,
+        "excluded_unpaired_enable_markers": 2,
+        "last_real_present_with_records": {
+          "at": 604532.771358125,
+          "record_ids": [
+            736
+          ]
+        }
+      }
+    },
+    {
+      "pair": 1,
+      "label": "before",
+      "condition": "wheeldown",
+      "result": "paired-ff1-active-burst/pair-01-before-wheeldown/wheeldown/result.json",
+      "result_sha256": "4c5d84033ed40f6e674186a46d3fc86ff477af74a0e293a230e5b62ec911e9e1",
+      "capture_sha256": "dd3e5c51970151e38fc07202bcf237860b85f29add700ae74929d76599a63205",
+      "checks": {
+        "frozen_expected_binary": true,
+        "frozen_expected_helper": true,
+        "frozen_expected_fixtures": true,
+        "frozen_expected_history": true,
+        "800_by_8_history": true,
+        "32_exact_typed_bytes": true,
+        "33_expected_prefixes": true,
+        "all_writes_complete": true,
+        "all_acknowledged_and_causal": true,
+        "acks_reproduced_from_capture": true,
+        "all_chunk_bytes_retained": true,
+        "p95_matches_record_clocks": true,
+        "clean_complete_echo_off": true,
+        "profiling_off": true,
+        "positioning_count": true,
+        "v1_capture_digest": true,
+        "v1_all_marker_frames_reproduced": true,
+        "v2_capture_digest": true,
+        "v2_paired_present_frames_reproduced": true,
+        "v2_unpaired_marker_count": true,
+        "v2_post_write_observed_count": true,
+        "v2_during_change_count": true
+      },
+      "latency_ms": {
+        "n": 32,
+        "min": 1.07179197948426,
+        "median": 3.571916022337973,
+        "p95": 23.33799994084984,
+        "max": 54.9907919485122
+      },
+      "type_gaps_ms": {
+        "n": 31,
+        "min": 25.963874999433756,
+        "median": 29.463417013175786,
+        "p95": 30.90995899401605,
+        "max": 32.629083027131855
+      },
+      "scroll_gaps_ms": {
+        "n": 145,
+        "min": 5.079791997559369,
+        "median": 6.308292038738728,
+        "p95": 7.789457915350795,
+        "max": 9.414167026989162
+      },
+      "scroll_writes": 146,
+      "actual_scroll_hz": 156.32609238362434,
+      "cpu_lifecycle_s": 1.0029250000000003,
+      "load_before": [
+        163.45166015625,
+        232.41943359375,
+        209.7314453125
+      ],
+      "load_after": [
+        162.7744140625,
+        231.1337890625,
+        209.41064453125
+      ],
+      "phase_start": 604538.627349125,
+      "phase_end": 604539.558737208,
+      "prefix_missing": 0,
+      "errors": [],
+      "viewport": {
+        "prephase_last": {
+          "at": 604538.620768583,
+          "record_ids": [
+            712,
+            713
+          ]
+        },
+        "during_first": {
+          "at": 604538.629144291,
+          "record_ids": [
+            712,
+            713
+          ]
+        },
+        "during_last": {
+          "at": 604539.550060791,
+          "record_ids": [
+            735,
+            736
+          ]
+        },
+        "during_present_count": 139,
+        "during_present_without_record_ids": 0,
+        "record_set_changes": 45,
+        "record_min": 712,
+        "record_max": 736,
+        "observed_present_ends_after_last_scroll_return": 1,
+        "excluded_unpaired_enable_markers": 2,
+        "last_real_present_with_records": {
+          "at": 604539.569182,
+          "record_ids": [
+            735,
+            736
+          ]
+        }
+      }
+    },
+    {
+      "pair": 1,
+      "label": "after",
+      "condition": "typing",
+      "result": "paired-ff1-active-burst/pair-01-after-typing/typing/result.json",
+      "result_sha256": "7c84ed9ac8a192b52f1e51fd1d90be6c27686611c87ff395479e06ac7b9a1ee9",
+      "capture_sha256": "622336532f26360911f92d68f5a203d33a0a0fc73e015914d67b2b2e3ab86bfd",
+      "checks": {
+        "frozen_expected_binary": true,
+        "frozen_expected_helper": true,
+        "frozen_expected_fixtures": true,
+        "frozen_expected_history": true,
+        "800_by_8_history": true,
+        "32_exact_typed_bytes": true,
+        "33_expected_prefixes": true,
+        "all_writes_complete": true,
+        "all_acknowledged_and_causal": true,
+        "acks_reproduced_from_capture": true,
+        "all_chunk_bytes_retained": true,
+        "p95_matches_record_clocks": true,
+        "clean_complete_echo_off": true,
+        "profiling_off": true,
+        "positioning_count": true,
+        "v1_capture_digest": true,
+        "v1_all_marker_frames_reproduced": true,
+        "v2_capture_digest": true,
+        "v2_paired_present_frames_reproduced": true,
+        "v2_unpaired_marker_count": true,
+        "v2_post_write_observed_count": true,
+        "v2_during_change_count": true
+      },
+      "latency_ms": {
+        "n": 32,
+        "min": 0.7042920915409923,
+        "median": 1.113707956392318,
+        "p95": 6.163291051052511,
+        "max": 11.025082902051508
+      },
+      "type_gaps_ms": {
+        "n": 31,
+        "min": 25.13312501832843,
+        "median": 28.753416030667722,
+        "p95": 30.296499957330525,
+        "max": 33.30533392727375
+      },
+      "scroll_gaps_ms": null,
+      "scroll_writes": 0,
+      "actual_scroll_hz": null,
+      "cpu_lifecycle_s": 0.490918999999999,
+      "load_before": [
+        162.7744140625,
+        231.1337890625,
+        209.41064453125
+      ],
+      "load_after": [
+        163.9931640625,
+        230.25146484375,
+        209.2265625
+      ],
+      "phase_start": 604543.697306916,
+      "phase_end": 604544.61873125,
+      "prefix_missing": 0,
+      "errors": [],
+      "viewport": {
+        "prephase_last": {
+          "at": 604543.687008791,
+          "record_ids": [
+            782
+          ]
+        },
+        "during_first": {
+          "at": 604543.700515291,
+          "record_ids": [
+            782
+          ]
+        },
+        "during_last": {
+          "at": 604544.591332083,
+          "record_ids": [
+            782
+          ]
+        },
+        "during_present_count": 32,
+        "during_present_without_record_ids": 0,
+        "record_set_changes": 0,
+        "record_min": 782,
+        "record_max": 782,
+        "observed_present_ends_after_last_scroll_return": 0,
+        "excluded_unpaired_enable_markers": 2,
+        "last_real_present_with_records": {
+          "at": 604544.591332083,
+          "record_ids": [
+            782
+          ]
+        }
+      }
+    },
+    {
+      "pair": 1,
+      "label": "before",
+      "condition": "typing",
+      "result": "paired-ff1-active-burst/pair-01-before-typing/typing/result.json",
+      "result_sha256": "2f93e52e36ef64a3f146e1822e94daba3aa178b1dd83df870542e57b55b7e83c",
+      "capture_sha256": "4c31015e10ac03f1160058ffd9d748262420bc876b6e4577d3a06287269116e6",
+      "checks": {
+        "frozen_expected_binary": true,
+        "frozen_expected_helper": true,
+        "frozen_expected_fixtures": true,
+        "frozen_expected_history": true,
+        "800_by_8_history": true,
+        "32_exact_typed_bytes": true,
+        "33_expected_prefixes": true,
+        "all_writes_complete": true,
+        "all_acknowledged_and_causal": true,
+        "acks_reproduced_from_capture": true,
+        "all_chunk_bytes_retained": true,
+        "p95_matches_record_clocks": true,
+        "clean_complete_echo_off": true,
+        "profiling_off": true,
+        "positioning_count": true,
+        "v1_capture_digest": true,
+        "v1_all_marker_frames_reproduced": true,
+        "v2_capture_digest": true,
+        "v2_paired_present_frames_reproduced": true,
+        "v2_unpaired_marker_count": true,
+        "v2_post_write_observed_count": true,
+        "v2_during_change_count": true
+      },
+      "latency_ms": {
+        "n": 32,
+        "min": 0.9034581016749144,
+        "median": 1.3160415110178292,
+        "p95": 16.092333011329174,
+        "max": 23.903457913547754
+      },
+      "type_gaps_ms": {
+        "n": 31,
+        "min": 25.45466599985957,
+        "median": 29.242791002616286,
+        "p95": 30.930083943530917,
+        "max": 34.11141596734524
+      },
+      "scroll_gaps_ms": null,
+      "scroll_writes": 0,
+      "actual_scroll_hz": null,
+      "cpu_lifecycle_s": 0.6074520000000012,
+      "load_before": [
+        163.9931640625,
+        230.25146484375,
+        209.2265625
+      ],
+      "load_after": [
+        171.52099609375,
+        230.7119140625,
+        209.51220703125
+      ],
+      "phase_start": 604549.367178208,
+      "phase_end": 604550.29344725,
+      "prefix_missing": 0,
+      "errors": [],
+      "viewport": {
+        "prephase_last": {
+          "at": 604549.35869575,
+          "record_ids": [
+            782
+          ]
+        },
+        "during_first": {
+          "at": 604549.368208375,
+          "record_ids": [
+            782
+          ]
+        },
+        "during_last": {
+          "at": 604550.266979041,
+          "record_ids": [
+            782
+          ]
+        },
+        "during_present_count": 32,
+        "during_present_without_record_ids": 0,
+        "record_set_changes": 0,
+        "record_min": 782,
+        "record_max": 782,
+        "observed_present_ends_after_last_scroll_return": 0,
+        "excluded_unpaired_enable_markers": 2,
+        "last_real_present_with_records": {
+          "at": 604550.266979041,
+          "record_ids": [
+            782
+          ]
+        }
+      }
+    },
+    {
+      "pair": 2,
+      "label": "before",
+      "condition": "pagedown",
+      "result": "paired-ff1-active-burst/pair-02-before-pagedown/pagedown/result.json",
+      "result_sha256": "94d3ab348617c259e7bbe9773f5e4e4712081b90c7adeec2f316b5bb579181e0",
+      "capture_sha256": "deecf67e59cd2517827463dfef72cd35382290b30427e371322b4b34ebda0818",
+      "checks": {
+        "frozen_expected_binary": true,
+        "frozen_expected_helper": true,
+        "frozen_expected_fixtures": true,
+        "frozen_expected_history": true,
+        "800_by_8_history": true,
+        "32_exact_typed_bytes": true,
+        "33_expected_prefixes": true,
+        "all_writes_complete": true,
+        "all_acknowledged_and_causal": true,
+        "acks_reproduced_from_capture": true,
+        "all_chunk_bytes_retained": true,
+        "p95_matches_record_clocks": true,
+        "clean_complete_echo_off": true,
+        "profiling_off": true,
+        "positioning_count": true,
+        "v1_capture_digest": true,
+        "v1_all_marker_frames_reproduced": true,
+        "v2_capture_digest": true,
+        "v2_paired_present_frames_reproduced": true,
+        "v2_unpaired_marker_count": true,
+        "v2_post_write_observed_count": true,
+        "v2_during_change_count": true
+      },
+      "latency_ms": {
+        "n": 32,
+        "min": 1.0196249932050705,
+        "median": 2.605812973342836,
+        "p95": 15.248292009346187,
+        "max": 35.39870900567621
+      },
+      "type_gaps_ms": {
+        "n": 31,
+        "min": 25.632207980379462,
+        "median": 28.060999931767583,
+        "p95": 30.040708952583373,
+        "max": 33.51037495303899
+      },
+      "scroll_gaps_ms": {
+        "n": 147,
+        "min": 5.093957995995879,
+        "median": 6.288415985181928,
+        "p95": 6.752207991667092,
+        "max": 8.379542035982013
+      },
+      "scroll_writes": 148,
+      "actual_scroll_hz": 164.13848569564172,
+      "cpu_lifecycle_s": 1.910258999999999,
+      "load_before": [
+        171.52099609375,
+        230.7119140625,
+        209.51220703125
+      ],
+      "load_after": [
+        184.734375,
+        230.73974609375,
+        209.89208984375
+      ],
+      "phase_start": 604560.120510375,
+      "phase_end": 604561.020773833,
+      "prefix_missing": 0,
+      "errors": [],
+      "viewport": {
+        "prephase_last": {
+          "at": 604560.110051625,
+          "record_ids": [
+            452
+          ]
+        },
+        "during_first": {
+          "at": 604560.122152333,
+          "record_ids": [
+            453,
+            454
+          ]
+        },
+        "during_last": {
+          "at": 604561.018322333,
+          "record_ids": [
+            709
+          ]
+        },
+        "during_present_count": 144,
+        "during_present_without_record_ids": 0,
+        "record_set_changes": 131,
+        "record_min": 453,
+        "record_max": 709,
+        "observed_present_ends_after_last_scroll_return": 1,
+        "excluded_unpaired_enable_markers": 2,
+        "last_real_present_with_records": {
+          "at": 604561.018322333,
+          "record_ids": [
+            709
+          ]
+        }
+      }
+    },
+    {
+      "pair": 2,
+      "label": "after",
+      "condition": "pagedown",
+      "result": "paired-ff1-active-burst/pair-02-after-pagedown/pagedown/result.json",
+      "result_sha256": "b2d497f56aefb79015d37841543a864ef426f9102e1a7d9f76cd2fcb8adc548f",
+      "capture_sha256": "a34b6868aa46b29e53c2c35f9bc9611958fa173f3855e772f676851c845582a1",
+      "checks": {
+        "frozen_expected_binary": true,
+        "frozen_expected_helper": true,
+        "frozen_expected_fixtures": true,
+        "frozen_expected_history": true,
+        "800_by_8_history": true,
+        "32_exact_typed_bytes": true,
+        "33_expected_prefixes": true,
+        "all_writes_complete": true,
+        "all_acknowledged_and_causal": true,
+        "acks_reproduced_from_capture": true,
+        "all_chunk_bytes_retained": true,
+        "p95_matches_record_clocks": true,
+        "clean_complete_echo_off": true,
+        "profiling_off": true,
+        "positioning_count": true,
+        "v1_capture_digest": true,
+        "v1_all_marker_frames_reproduced": true,
+        "v2_capture_digest": true,
+        "v2_paired_present_frames_reproduced": true,
+        "v2_unpaired_marker_count": true,
+        "v2_post_write_observed_count": true,
+        "v2_during_change_count": true
+      },
+      "latency_ms": {
+        "n": 32,
+        "min": 0.648624962195754,
+        "median": 1.5756880748085678,
+        "p95": 11.013415991328657,
+        "max": 27.125374996103346
+      },
+      "type_gaps_ms": {
+        "n": 31,
+        "min": 26.150000048801303,
+        "median": 29.49375007301569,
+        "p95": 32.2433749679476,
+        "max": 33.60487497411668
+      },
+      "scroll_gaps_ms": {
+        "n": 150,
+        "min": 5.091208033263683,
+        "median": 6.142208527307957,
+        "p95": 7.802416919730604,
+        "max": 10.243625030852854
+      },
+      "scroll_writes": 151,
+      "actual_scroll_hz": 160.16773464698346,
+      "cpu_lifecycle_s": 1.2548860000000017,
+      "load_before": [
+        184.734375,
+        230.73974609375,
+        209.89208984375
+      ],
+      "load_after": [
+        196.28955078125,
+        231.71484375,
+        210.482421875
+      ],
+      "phase_start": 604571.370619458,
+      "phase_end": 604572.309286375,
+      "prefix_missing": 0,
+      "errors": [],
+      "viewport": {
+        "prephase_last": {
+          "at": 604571.362180541,
+          "record_ids": [
+            452
+          ]
+        },
+        "during_first": {
+          "at": 604571.372272958,
+          "record_ids": [
+            453,
+            454
+          ]
+        },
+        "during_last": {
+          "at": 604572.303358708,
+          "record_ids": [
+            712,
+            713
+          ]
+        },
+        "during_present_count": 160,
+        "during_present_without_record_ids": 0,
+        "record_set_changes": 140,
+        "record_min": 453,
+        "record_max": 713,
+        "observed_present_ends_after_last_scroll_return": 1,
+        "excluded_unpaired_enable_markers": 2,
+        "last_real_present_with_records": {
+          "at": 604572.309840875,
+          "record_ids": [
+            714,
+            715
+          ]
+        }
+      }
+    },
+    {
+      "pair": 2,
+      "label": "before",
+      "condition": "wheelup",
+      "result": "paired-ff1-active-burst/pair-02-before-wheelup/wheelup/result.json",
+      "result_sha256": "b2a0a4e262f75ffc604727e4b78d9f53ccf0164a7cc05a54a403d3c8f8214fcd",
+      "capture_sha256": "422985b94163e1d8787abd55cee51201e8da2277ddcbdd8a5b6472ef32b480b3",
+      "checks": {
+        "frozen_expected_binary": true,
+        "frozen_expected_helper": true,
+        "frozen_expected_fixtures": true,
+        "frozen_expected_history": true,
+        "800_by_8_history": true,
+        "32_exact_typed_bytes": true,
+        "33_expected_prefixes": true,
+        "all_writes_complete": true,
+        "all_acknowledged_and_causal": true,
+        "acks_reproduced_from_capture": true,
+        "all_chunk_bytes_retained": true,
+        "p95_matches_record_clocks": true,
+        "clean_complete_echo_off": true,
+        "profiling_off": true,
+        "positioning_count": true,
+        "v1_capture_digest": true,
+        "v1_all_marker_frames_reproduced": true,
+        "v2_capture_digest": true,
+        "v2_paired_present_frames_reproduced": true,
+        "v2_unpaired_marker_count": true,
+        "v2_post_write_observed_count": true,
+        "v2_during_change_count": true
+      },
+      "latency_ms": {
+        "n": 32,
+        "min": 0.9608749533072114,
+        "median": 2.953166433144361,
+        "p95": 8.86537495534867,
+        "max": 33.52670802269131
+      },
+      "type_gaps_ms": {
+        "n": 31,
+        "min": 25.943999993614852,
+        "median": 29.082541936077178,
+        "p95": 30.12174996547401,
+        "max": 30.39037494454533
+      },
+      "scroll_gaps_ms": {
+        "n": 148,
+        "min": 5.080915987491608,
+        "median": 6.27306301612407,
+        "p95": 6.93608308210969,
+        "max": 10.09837503079325
+      },
+      "scroll_writes": 149,
+      "actual_scroll_hz": 161.8553729899809,
+      "cpu_lifecycle_s": 0.799516999999998,
+      "load_before": [
+        196.28955078125,
+        231.71484375,
+        210.482421875
+      ],
+      "load_after": [
+        204.67431640625,
+        232.86474609375,
+        211.0126953125
+      ],
+      "phase_start": 604576.788406416,
+      "phase_end": 604577.706758166,
+      "prefix_missing": 0,
+      "errors": [],
+      "viewport": {
+        "prephase_last": {
+          "at": 604576.779906541,
+          "record_ids": [
+            782
+          ]
+        },
+        "during_first": {
+          "at": 604576.791156,
+          "record_ids": [
+            781,
+            782
+          ]
+        },
+        "during_last": {
+          "at": 604577.700908291,
+          "record_ids": [
+            758,
+            759
+          ]
+        },
+        "during_present_count": 150,
+        "during_present_without_record_ids": 0,
+        "record_set_changes": 45,
+        "record_min": 758,
+        "record_max": 782,
+        "observed_present_ends_after_last_scroll_return": 1,
+        "excluded_unpaired_enable_markers": 2,
+        "last_real_present_with_records": {
+          "at": 604577.707289833,
+          "record_ids": [
+            758,
+            759
+          ]
+        }
+      }
+    },
+    {
+      "pair": 2,
+      "label": "after",
+      "condition": "wheelup",
+      "result": "paired-ff1-active-burst/pair-02-after-wheelup/wheelup/result.json",
+      "result_sha256": "ba7c55a3900c862d7ef04e814229dc705fa04c4b6c4ecab5cb811441361531d0",
+      "capture_sha256": "cfe871d3f85c2e4d87cfbed3e4df51f4b2bc2dc6387a24529bd7106b0cf9907a",
+      "checks": {
+        "frozen_expected_binary": true,
+        "frozen_expected_helper": true,
+        "frozen_expected_fixtures": true,
+        "frozen_expected_history": true,
+        "800_by_8_history": true,
+        "32_exact_typed_bytes": true,
+        "33_expected_prefixes": true,
+        "all_writes_complete": true,
+        "all_acknowledged_and_causal": true,
+        "acks_reproduced_from_capture": true,
+        "all_chunk_bytes_retained": true,
+        "p95_matches_record_clocks": true,
+        "clean_complete_echo_off": true,
+        "profiling_off": true,
+        "positioning_count": true,
+        "v1_capture_digest": true,
+        "v1_all_marker_frames_reproduced": true,
+        "v2_capture_digest": true,
+        "v2_paired_present_frames_reproduced": true,
+        "v2_unpaired_marker_count": true,
+        "v2_post_write_observed_count": true,
+        "v2_during_change_count": true
+      },
+      "latency_ms": {
+        "n": 32,
+        "min": 0.719166942872107,
+        "median": 2.2124785464257,
+        "p95": 18.299417104572058,
+        "max": 42.502958909608424
+      },
+      "type_gaps_ms": {
+        "n": 31,
+        "min": 25.12716595083475,
+        "median": 28.874791925773025,
+        "p95": 30.17633396666497,
+        "max": 32.44470793288201
+      },
+      "scroll_gaps_ms": {
+        "n": 147,
+        "min": 5.0591250183060765,
+        "median": 6.210832973010838,
+        "p95": 7.664417033083737,
+        "max": 9.61158296559006
+      },
+      "scroll_writes": 148,
+      "actual_scroll_hz": 160.20179603189672,
+      "cpu_lifecycle_s": 0.5966180000000012,
+      "load_before": [
+        204.67431640625,
+        232.86474609375,
+        211.0126953125
+      ],
+      "load_after": [
+        196.2919921875,
+        230.65869140625,
+        210.36181640625
+      ],
+      "phase_start": 604581.984381375,
+      "phase_end": 604582.903000708,
+      "prefix_missing": 0,
+      "errors": [],
+      "viewport": {
+        "prephase_last": {
+          "at": 604581.973225,
+          "record_ids": [
+            782
+          ]
+        },
+        "during_first": {
+          "at": 604581.986445541,
+          "record_ids": [
+            781,
+            782
+          ]
+        },
+        "during_last": {
+          "at": 604582.902378416,
+          "record_ids": [
+            758,
+            759
+          ]
+        },
+        "during_present_count": 144,
+        "during_present_without_record_ids": 0,
+        "record_set_changes": 45,
+        "record_min": 758,
+        "record_max": 782,
+        "observed_present_ends_after_last_scroll_return": 1,
+        "excluded_unpaired_enable_markers": 2,
+        "last_real_present_with_records": {
+          "at": 604582.902378416,
+          "record_ids": [
+            758,
+            759
+          ]
+        }
+      }
+    },
+    {
+      "pair": 2,
+      "label": "before",
+      "condition": "wheeldown",
+      "result": "paired-ff1-active-burst/pair-02-before-wheeldown/wheeldown/result.json",
+      "result_sha256": "a758191a1134916e54f7d791c9a7fbd25aefd45de74976971cf6703b92dc5331",
+      "capture_sha256": "861a4006017f697f4baa9c05a3cb8ebdf46cadb934481e5863208ee1df713192",
+      "checks": {
+        "frozen_expected_binary": true,
+        "frozen_expected_helper": true,
+        "frozen_expected_fixtures": true,
+        "frozen_expected_history": true,
+        "800_by_8_history": true,
+        "32_exact_typed_bytes": true,
+        "33_expected_prefixes": true,
+        "all_writes_complete": true,
+        "all_acknowledged_and_causal": true,
+        "acks_reproduced_from_capture": true,
+        "all_chunk_bytes_retained": true,
+        "p95_matches_record_clocks": true,
+        "clean_complete_echo_off": true,
+        "profiling_off": true,
+        "positioning_count": true,
+        "v1_capture_digest": true,
+        "v1_all_marker_frames_reproduced": true,
+        "v2_capture_digest": true,
+        "v2_paired_present_frames_reproduced": true,
+        "v2_unpaired_marker_count": true,
+        "v2_post_write_observed_count": true,
+        "v2_during_change_count": true
+      },
+      "latency_ms": {
+        "n": 32,
+        "min": 1.2131669791415334,
+        "median": 2.8476870502345264,
+        "p95": 19.979374948889017,
+        "max": 28.658083989284933
+      },
+      "type_gaps_ms": {
+        "n": 31,
+        "min": 25.532875093631446,
+        "median": 28.813833952881396,
+        "p95": 31.366290990263224,
+        "max": 33.39691599830985
+      },
+      "scroll_gaps_ms": {
+        "n": 139,
+        "min": 5.120124900713563,
+        "median": 6.305874907411635,
+        "p95": 9.270000038668513,
+        "max": 11.088749975897372
+      },
+      "scroll_writes": 140,
+      "actual_scroll_hz": 152.3419353118705,
+      "cpu_lifecycle_s": 1.0403320000000011,
+      "load_before": [
+        196.2919921875,
+        230.65869140625,
+        210.36181640625
+      ],
+      "load_after": [
+        198.6708984375,
+        230.5810546875,
+        210.453125
+      ],
+      "phase_start": 604588.217255333,
+      "phase_end": 604589.133726875,
+      "prefix_missing": 0,
+      "errors": [],
+      "viewport": {
+        "prephase_last": {
+          "at": 604588.212811708,
+          "record_ids": [
+            712,
+            713
+          ]
+        },
+        "during_first": {
+          "at": 604588.223329,
+          "record_ids": [
+            712,
+            713
+          ]
+        },
+        "during_last": {
+          "at": 604589.13257875,
+          "record_ids": [
+            734,
+            735
+          ]
+        },
+        "during_present_count": 139,
+        "during_present_without_record_ids": 0,
+        "record_set_changes": 43,
+        "record_min": 712,
+        "record_max": 735,
+        "observed_present_ends_after_last_scroll_return": 1,
+        "excluded_unpaired_enable_markers": 2,
+        "last_real_present_with_records": {
+          "at": 604589.13257875,
+          "record_ids": [
+            734,
+            735
+          ]
+        }
+      }
+    },
+    {
+      "pair": 2,
+      "label": "after",
+      "condition": "wheeldown",
+      "result": "paired-ff1-active-burst/pair-02-after-wheeldown/wheeldown/result.json",
+      "result_sha256": "898b838459e29103616091be76f3f2c91626e185e85b8499031bb552123a7818",
+      "capture_sha256": "6da04a3044443b806f0c816df963bc0fd8dbd7402700650fb47ee0e7b4088d20",
+      "checks": {
+        "frozen_expected_binary": true,
+        "frozen_expected_helper": true,
+        "frozen_expected_fixtures": true,
+        "frozen_expected_history": true,
+        "800_by_8_history": true,
+        "32_exact_typed_bytes": true,
+        "33_expected_prefixes": true,
+        "all_writes_complete": true,
+        "all_acknowledged_and_causal": true,
+        "acks_reproduced_from_capture": true,
+        "all_chunk_bytes_retained": true,
+        "p95_matches_record_clocks": true,
+        "clean_complete_echo_off": true,
+        "profiling_off": true,
+        "positioning_count": true,
+        "v1_capture_digest": true,
+        "v1_all_marker_frames_reproduced": true,
+        "v2_capture_digest": true,
+        "v2_paired_present_frames_reproduced": true,
+        "v2_unpaired_marker_count": true,
+        "v2_post_write_observed_count": true,
+        "v2_during_change_count": true
+      },
+      "latency_ms": {
+        "n": 32,
+        "min": 0.594333978369832,
+        "median": 1.6696879756636918,
+        "p95": 3.880332922562957,
+        "max": 30.938249896280468
+      },
+      "type_gaps_ms": {
+        "n": 31,
+        "min": 26.046124985441566,
+        "median": 28.896416071802378,
+        "p95": 30.24699992965907,
+        "max": 34.259791020303965
+      },
+      "scroll_gaps_ms": {
+        "n": 147,
+        "min": 5.117124994285405,
+        "median": 6.269291043281555,
+        "p95": 7.629625033587217,
+        "max": 10.671791969798505
+      },
+      "scroll_writes": 148,
+      "actual_scroll_hz": 158.2869475814541,
+      "cpu_lifecycle_s": 0.7054219999999978,
+      "load_before": [
+        198.6708984375,
+        230.5810546875,
+        210.453125
+      ],
+      "load_after": [
+        202.06005859375,
+        230.75390625,
+        210.6318359375
+      ],
+      "phase_start": 604594.490592916,
+      "phase_end": 604595.41970225,
+      "prefix_missing": 0,
+      "errors": [],
+      "viewport": {
+        "prephase_last": {
+          "at": 604594.479559041,
+          "record_ids": [
+            712,
+            713
+          ]
+        },
+        "during_first": {
+          "at": 604594.492454875,
+          "record_ids": [
+            712,
+            713
+          ]
+        },
+        "during_last": {
+          "at": 604595.415579833,
+          "record_ids": [
+            735,
+            736
+          ]
+        },
+        "during_present_count": 163,
+        "during_present_without_record_ids": 0,
+        "record_set_changes": 46,
+        "record_min": 712,
+        "record_max": 736,
+        "observed_present_ends_after_last_scroll_return": 1,
+        "excluded_unpaired_enable_markers": 2,
+        "last_real_present_with_records": {
+          "at": 604595.420914208,
+          "record_ids": [
+            735,
+            736
+          ]
+        }
+      }
+    },
+    {
+      "pair": 2,
+      "label": "before",
+      "condition": "typing",
+      "result": "paired-ff1-active-burst/pair-02-before-typing/typing/result.json",
+      "result_sha256": "1135f6bf60b9611e3d0d3031d6c8e34895033d68ed1e1c6f25d0e64842405514",
+      "capture_sha256": "4c39c29a5cf1f86e5a2a5857d44527cf37ae6e718802ff41def6ff383b067f4f",
+      "checks": {
+        "frozen_expected_binary": true,
+        "frozen_expected_helper": true,
+        "frozen_expected_fixtures": true,
+        "frozen_expected_history": true,
+        "800_by_8_history": true,
+        "32_exact_typed_bytes": true,
+        "33_expected_prefixes": true,
+        "all_writes_complete": true,
+        "all_acknowledged_and_causal": true,
+        "acks_reproduced_from_capture": true,
+        "all_chunk_bytes_retained": true,
+        "p95_matches_record_clocks": true,
+        "clean_complete_echo_off": true,
+        "profiling_off": true,
+        "positioning_count": true,
+        "v1_capture_digest": true,
+        "v1_all_marker_frames_reproduced": true,
+        "v2_capture_digest": true,
+        "v2_paired_present_frames_reproduced": true,
+        "v2_unpaired_marker_count": true,
+        "v2_post_write_observed_count": true,
+        "v2_during_change_count": true
+      },
+      "latency_ms": {
+        "n": 32,
+        "min": 1.1656669666990638,
+        "median": 1.8806045409291983,
+        "p95": 5.116416956298053,
+        "max": 9.646292077377439
+      },
+      "type_gaps_ms": {
+        "n": 31,
+        "min": 25.333500001579523,
+        "median": 29.62408389430493,
+        "p95": 30.590042006224394,
+        "max": 31.88145800959319
+      },
+      "scroll_gaps_ms": null,
+      "scroll_writes": 0,
+      "actual_scroll_hz": null,
+      "cpu_lifecycle_s": 0.5951500000000012,
+      "load_before": [
+        202.06005859375,
+        230.75390625,
+        210.6318359375
+      ],
+      "load_after": [
+        207.90087890625,
+        231.48828125,
+        211.0087890625
+      ],
+      "phase_start": 604599.568346916,
+      "phase_end": 604600.498007583,
+      "prefix_missing": 0,
+      "errors": [],
+      "viewport": {
+        "prephase_last": {
+          "at": 604599.560443125,
+          "record_ids": [
+            782
+          ]
+        },
+        "during_first": {
+          "at": 604599.569530541,
+          "record_ids": [
+            782
+          ]
+        },
+        "during_last": {
+          "at": 604600.472143166,
+          "record_ids": [
+            782
+          ]
+        },
+        "during_present_count": 32,
+        "during_present_without_record_ids": 0,
+        "record_set_changes": 0,
+        "record_min": 782,
+        "record_max": 782,
+        "observed_present_ends_after_last_scroll_return": 0,
+        "excluded_unpaired_enable_markers": 2,
+        "last_real_present_with_records": {
+          "at": 604600.472143166,
+          "record_ids": [
+            782
+          ]
+        }
+      }
+    },
+    {
+      "pair": 2,
+      "label": "after",
+      "condition": "typing",
+      "result": "paired-ff1-active-burst/pair-02-after-typing/typing/result.json",
+      "result_sha256": "95563d40be2f4d0bb1e75cb7b54d99cf710c90d8d3422cb3698d1a6a8c7222bf",
+      "capture_sha256": "3c2d4711e31e872fc6397deb0e839e9e31c4ecef30eb59ffc51cec2a73c82239",
+      "checks": {
+        "frozen_expected_binary": true,
+        "frozen_expected_helper": true,
+        "frozen_expected_fixtures": true,
+        "frozen_expected_history": true,
+        "800_by_8_history": true,
+        "32_exact_typed_bytes": true,
+        "33_expected_prefixes": true,
+        "all_writes_complete": true,
+        "all_acknowledged_and_causal": true,
+        "acks_reproduced_from_capture": true,
+        "all_chunk_bytes_retained": true,
+        "p95_matches_record_clocks": true,
+        "clean_complete_echo_off": true,
+        "profiling_off": true,
+        "positioning_count": true,
+        "v1_capture_digest": true,
+        "v1_all_marker_frames_reproduced": true,
+        "v2_capture_digest": true,
+        "v2_paired_present_frames_reproduced": true,
+        "v2_unpaired_marker_count": true,
+        "v2_post_write_observed_count": true,
+        "v2_during_change_count": true
+      },
+      "latency_ms": {
+        "n": 32,
+        "min": 0.7740419823676348,
+        "median": 1.2584165087901056,
+        "p95": 6.804749951697886,
+        "max": 22.286541992798448
+      },
+      "type_gaps_ms": {
+        "n": 31,
+        "min": 25.867750053294003,
+        "median": 29.256624984554946,
+        "p95": 30.616584001109004,
+        "max": 32.07137493882328
+      },
+      "scroll_gaps_ms": null,
+      "scroll_writes": 0,
+      "actual_scroll_hz": null,
+      "cpu_lifecycle_s": 0.4716590000000016,
+      "load_before": [
+        207.90087890625,
+        231.48828125,
+        211.0087890625
+      ],
+      "load_after": [
+        208.22900390625,
+        231.16455078125,
+        211.01416015625
+      ],
+      "phase_start": 604604.548161208,
+      "phase_end": 604605.468541125,
+      "prefix_missing": 0,
+      "errors": [],
+      "viewport": {
+        "prephase_last": {
+          "at": 604604.538272166,
+          "record_ids": [
+            782
+          ]
+        },
+        "during_first": {
+          "at": 604604.549743291,
+          "record_ids": [
+            782
+          ]
+        },
+        "during_last": {
+          "at": 604605.4421845,
+          "record_ids": [
+            782
+          ]
+        },
+        "during_present_count": 32,
+        "during_present_without_record_ids": 0,
+        "record_set_changes": 0,
+        "record_min": 782,
+        "record_max": 782,
+        "observed_present_ends_after_last_scroll_return": 0,
+        "excluded_unpaired_enable_markers": 2,
+        "last_real_present_with_records": {
+          "at": 604605.4421845,
+          "record_ids": [
+            782
+          ]
+        }
+      }
+    },
+    {
+      "pair": 2,
+      "label": "before",
+      "condition": "pageup",
+      "result": "paired-ff1-active-burst/pair-02-before-pageup/pageup/result.json",
+      "result_sha256": "b11f0856869c847639b53742ecaddebe80aa274ef03b03dda0ac380fe462cc2c",
+      "capture_sha256": "e7b22f63cf7890ea456281f70135cccfacd48a7da62a1c880c7c8bca30836111",
+      "checks": {
+        "frozen_expected_binary": true,
+        "frozen_expected_helper": true,
+        "frozen_expected_fixtures": true,
+        "frozen_expected_history": true,
+        "800_by_8_history": true,
+        "32_exact_typed_bytes": true,
+        "33_expected_prefixes": true,
+        "all_writes_complete": true,
+        "all_acknowledged_and_causal": true,
+        "acks_reproduced_from_capture": true,
+        "all_chunk_bytes_retained": true,
+        "p95_matches_record_clocks": true,
+        "clean_complete_echo_off": true,
+        "profiling_off": true,
+        "positioning_count": true,
+        "v1_capture_digest": true,
+        "v1_all_marker_frames_reproduced": true,
+        "v2_capture_digest": true,
+        "v2_paired_present_frames_reproduced": true,
+        "v2_unpaired_marker_count": true,
+        "v2_post_write_observed_count": true,
+        "v2_during_change_count": true
+      },
+      "latency_ms": {
+        "n": 32,
+        "min": 1.155667006969452,
+        "median": 9.51577047817409,
+        "p95": 38.72449998743832,
+        "max": 47.17512510251254
+      },
+      "type_gaps_ms": {
+        "n": 31,
+        "min": 25.531499995850027,
+        "median": 29.228625004179776,
+        "p95": 30.685750069096684,
+        "max": 30.707916943356395
+      },
+      "scroll_gaps_ms": {
+        "n": 148,
+        "min": 5.08816703222692,
+        "median": 6.1502084718085825,
+        "p95": 7.586374995298684,
+        "max": 10.467292042449117
+      },
+      "scroll_writes": 149,
+      "actual_scroll_hz": 161.34820958011244,
+      "cpu_lifecycle_s": 1.4090229999999968,
+      "load_before": [
+        208.22900390625,
+        231.16455078125,
+        211.01416015625
+      ],
+      "load_after": [
+        210.85302734375,
+        231.32763671875,
+        211.189453125
+      ],
+      "phase_start": 604609.566497916,
+      "phase_end": 604610.489843833,
+      "prefix_missing": 0,
+      "errors": [],
+      "viewport": {
+        "prephase_last": {
+          "at": 604609.558900041,
+          "record_ids": [
+            782
+          ]
+        },
+        "during_first": {
+          "at": 604609.571741333,
+          "record_ids": [
+            780,
+            781
+          ]
+        },
+        "during_last": {
+          "at": 604610.487798,
+          "record_ids": [
+            523
+          ]
+        },
+        "during_present_count": 125,
+        "during_present_without_record_ids": 0,
+        "record_set_changes": 113,
+        "record_min": 523,
+        "record_max": 781,
+        "observed_present_ends_after_last_scroll_return": 1,
+        "excluded_unpaired_enable_markers": 2,
+        "last_real_present_with_records": {
+          "at": 604610.487798,
+          "record_ids": [
+            523
+          ]
+        }
+      }
+    },
+    {
+      "pair": 2,
+      "label": "after",
+      "condition": "pageup",
+      "result": "paired-ff1-active-burst/pair-02-after-pageup/pageup/result.json",
+      "result_sha256": "5a7db77329224cc301e702497ba72b934350f8d5f291f0f68bb5472ed57aa26d",
+      "capture_sha256": "4881dfdcee36496cb65cdbbd9a3ec71ba433dccae55f40bf34897ed898361755",
+      "checks": {
+        "frozen_expected_binary": true,
+        "frozen_expected_helper": true,
+        "frozen_expected_fixtures": true,
+        "frozen_expected_history": true,
+        "800_by_8_history": true,
+        "32_exact_typed_bytes": true,
+        "33_expected_prefixes": true,
+        "all_writes_complete": true,
+        "all_acknowledged_and_causal": true,
+        "acks_reproduced_from_capture": true,
+        "all_chunk_bytes_retained": true,
+        "p95_matches_record_clocks": true,
+        "clean_complete_echo_off": true,
+        "profiling_off": true,
+        "positioning_count": true,
+        "v1_capture_digest": true,
+        "v1_all_marker_frames_reproduced": true,
+        "v2_capture_digest": true,
+        "v2_paired_present_frames_reproduced": true,
+        "v2_unpaired_marker_count": true,
+        "v2_post_write_observed_count": true,
+        "v2_during_change_count": true
+      },
+      "latency_ms": {
+        "n": 32,
+        "min": 0.6777909584343433,
+        "median": 4.952958493959159,
+        "p95": 86.39666601084173,
+        "max": 142.4866250017658
+      },
+      "type_gaps_ms": {
+        "n": 31,
+        "min": 26.033666916191578,
+        "median": 29.440916958265007,
+        "p95": 30.286290915682912,
+        "max": 31.540125026367605
+      },
+      "scroll_gaps_ms": {
+        "n": 152,
+        "min": 5.161709035746753,
+        "median": 6.2234579818323255,
+        "p95": 6.661709048785269,
+        "max": 9.363832999952137
+      },
+      "scroll_writes": 153,
+      "actual_scroll_hz": 163.32032366799717,
+      "cpu_lifecycle_s": 0.8233139999999999,
+      "load_before": [
+        210.85302734375,
+        231.32763671875,
+        211.189453125
+      ],
+      "load_after": [
+        218.47216796875,
+        232.56689453125,
+        211.74462890625
+      ],
+      "phase_start": 604614.851869333,
+      "phase_end": 604615.784761125,
+      "prefix_missing": 0,
+      "errors": [],
+      "viewport": {
+        "prephase_last": {
+          "at": 604614.840735791,
+          "record_ids": [
+            782
+          ]
+        },
+        "during_first": {
+          "at": 604614.855380333,
+          "record_ids": [
+            780,
+            781
+          ]
+        },
+        "during_last": {
+          "at": 604615.774095666,
+          "record_ids": [
+            519,
+            520
+          ]
+        },
+        "during_present_count": 140,
+        "during_present_without_record_ids": 0,
+        "record_set_changes": 125,
+        "record_min": 519,
+        "record_max": 781,
+        "observed_present_ends_after_last_scroll_return": 1,
+        "excluded_unpaired_enable_markers": 2,
+        "last_real_present_with_records": {
+          "at": 604615.786477166,
+          "record_ids": [
+            518
+          ]
+        }
+      }
+    },
+    {
+      "pair": 3,
+      "label": "after",
+      "condition": "wheelup",
+      "result": "paired-ff1-active-burst/pair-03-after-wheelup/wheelup/result.json",
+      "result_sha256": "12899a774d69a32e086b80d188155627d11264e248d69b3bc75c24f495a64230",
+      "capture_sha256": "dbe04e5c7fb45422562b588c3d0a3b55aa5d23390d2dae950eb8fb28cf4cea05",
+      "checks": {
+        "frozen_expected_binary": true,
+        "frozen_expected_helper": true,
+        "frozen_expected_fixtures": true,
+        "frozen_expected_history": true,
+        "800_by_8_history": true,
+        "32_exact_typed_bytes": true,
+        "33_expected_prefixes": true,
+        "all_writes_complete": true,
+        "all_acknowledged_and_causal": true,
+        "acks_reproduced_from_capture": true,
+        "all_chunk_bytes_retained": true,
+        "p95_matches_record_clocks": true,
+        "clean_complete_echo_off": true,
+        "profiling_off": true,
+        "positioning_count": true,
+        "v1_capture_digest": true,
+        "v1_all_marker_frames_reproduced": true,
+        "v2_capture_digest": true,
+        "v2_paired_present_frames_reproduced": true,
+        "v2_unpaired_marker_count": true,
+        "v2_post_write_observed_count": true,
+        "v2_during_change_count": true
+      },
+      "latency_ms": {
+        "n": 32,
+        "min": 0.6325000431388617,
+        "median": 2.6603954611346126,
+        "p95": 12.727500055916607,
+        "max": 41.695083025842905
+      },
+      "type_gaps_ms": {
+        "n": 31,
+        "min": 25.43299994431436,
+        "median": 28.88254204299301,
+        "p95": 30.4110839497298,
+        "max": 33.24970894027501
+      },
+      "scroll_gaps_ms": {
+        "n": 144,
+        "min": 5.068750004284084,
+        "median": 6.157249503303319,
+        "p95": 7.797917001880705,
+        "max": 17.46737491339445
+      },
+      "scroll_writes": 145,
+      "actual_scroll_hz": 158.49211621049494,
+      "cpu_lifecycle_s": 0.601904000000002,
+      "load_before": [
+        224.03955078125,
+        233.48681640625,
+        212.19140625
+      ],
+      "load_after": [
+        224.03955078125,
+        233.48681640625,
+        212.19140625
+      ],
+      "phase_start": 604619.855892916,
+      "phase_end": 604620.764834875,
+      "prefix_missing": 0,
+      "errors": [],
+      "viewport": {
+        "prephase_last": {
+          "at": 604619.846946208,
+          "record_ids": [
+            782
+          ]
+        },
+        "during_first": {
+          "at": 604619.857850125,
+          "record_ids": [
+            781,
+            782
+          ]
+        },
+        "during_last": {
+          "at": 604620.761119541,
+          "record_ids": [
+            759,
+            760
+          ]
+        },
+        "during_present_count": 146,
+        "during_present_without_record_ids": 0,
+        "record_set_changes": 41,
+        "record_min": 759,
+        "record_max": 782,
+        "observed_present_ends_after_last_scroll_return": 1,
+        "excluded_unpaired_enable_markers": 2,
+        "last_real_present_with_records": {
+          "at": 604620.765743708,
+          "record_ids": [
+            759
+          ]
+        }
+      }
+    },
+    {
+      "pair": 3,
+      "label": "before",
+      "condition": "wheelup",
+      "result": "paired-ff1-active-burst/pair-03-before-wheelup/wheelup/result.json",
+      "result_sha256": "f339f32e52c75f60268a6b691cb271971cbc5f11dfdb2baeb7f3caea6f6b8166",
+      "capture_sha256": "9f74f47bad01cc5e565891fb613afe51b0e5e8c58ad0ea26c5b0515f7a4c8a24",
+      "checks": {
+        "frozen_expected_binary": true,
+        "frozen_expected_helper": true,
+        "frozen_expected_fixtures": true,
+        "frozen_expected_history": true,
+        "800_by_8_history": true,
+        "32_exact_typed_bytes": true,
+        "33_expected_prefixes": true,
+        "all_writes_complete": true,
+        "all_acknowledged_and_causal": true,
+        "acks_reproduced_from_capture": true,
+        "all_chunk_bytes_retained": true,
+        "p95_matches_record_clocks": true,
+        "clean_complete_echo_off": true,
+        "profiling_off": true,
+        "positioning_count": true,
+        "v1_capture_digest": true,
+        "v1_all_marker_frames_reproduced": true,
+        "v2_capture_digest": true,
+        "v2_paired_present_frames_reproduced": true,
+        "v2_unpaired_marker_count": true,
+        "v2_post_write_observed_count": true,
+        "v2_during_change_count": true
+      },
+      "latency_ms": {
+        "n": 32,
+        "min": 1.0501249926164746,
+        "median": 3.819291538093239,
+        "p95": 52.12770798243582,
+        "max": 99.87604105845094
+      },
+      "type_gaps_ms": {
+        "n": 31,
+        "min": 25.81262495368719,
+        "median": 28.557542013004422,
+        "p95": 30.8319159084931,
+        "max": 31.662459019571543
+      },
+      "scroll_gaps_ms": {
+        "n": 144,
+        "min": 5.069584003649652,
+        "median": 6.301770510617644,
+        "p95": 8.128416957333684,
+        "max": 13.779708999209106
+      },
+      "scroll_writes": 145,
+      "actual_scroll_hz": 156.91520672219715,
+      "cpu_lifecycle_s": 0.7719610000000001,
+      "load_before": [
+        230.4423828125,
+        234.6572265625,
+        212.72900390625
+      ],
+      "load_after": [
+        233.20947265625,
+        235.16064453125,
+        213.03515625
+      ],
+      "phase_start": 604625.161354333,
+      "phase_end": 604626.1010845,
+      "prefix_missing": 0,
+      "errors": [],
+      "viewport": {
+        "prephase_last": {
+          "at": 604625.155459625,
+          "record_ids": [
+            782
+          ]
+        },
+        "during_first": {
+          "at": 604625.16609075,
+          "record_ids": [
+            781,
+            782
+          ]
+        },
+        "during_last": {
+          "at": 604626.089484708,
+          "record_ids": [
+            759,
+            760
+          ]
+        },
+        "during_present_count": 132,
+        "during_present_without_record_ids": 0,
+        "record_set_changes": 40,
+        "record_min": 759,
+        "record_max": 782,
+        "observed_present_ends_after_last_scroll_return": 2,
+        "excluded_unpaired_enable_markers": 2,
+        "last_real_present_with_records": {
+          "at": 604626.104349625,
+          "record_ids": [
+            759,
+            760
+          ]
+        }
+      }
+    },
+    {
+      "pair": 3,
+      "label": "after",
+      "condition": "wheeldown",
+      "result": "paired-ff1-active-burst/pair-03-after-wheeldown/wheeldown/result.json",
+      "result_sha256": "78603bf38d523cc40b845fe3203b941f1d99492c3f9673d80c18161d4321b0a1",
+      "capture_sha256": "6fb74e78701358be4c8a1e94953023ca28915797b8bf9d78f49c27ab9c3678a0",
+      "checks": {
+        "frozen_expected_binary": true,
+        "frozen_expected_helper": true,
+        "frozen_expected_fixtures": true,
+        "frozen_expected_history": true,
+        "800_by_8_history": true,
+        "32_exact_typed_bytes": true,
+        "33_expected_prefixes": true,
+        "all_writes_complete": true,
+        "all_acknowledged_and_causal": true,
+        "acks_reproduced_from_capture": true,
+        "all_chunk_bytes_retained": true,
+        "p95_matches_record_clocks": true,
+        "clean_complete_echo_off": true,
+        "profiling_off": true,
+        "positioning_count": true,
+        "v1_capture_digest": true,
+        "v1_all_marker_frames_reproduced": true,
+        "v2_capture_digest": true,
+        "v2_paired_present_frames_reproduced": true,
+        "v2_unpaired_marker_count": true,
+        "v2_post_write_observed_count": true,
+        "v2_during_change_count": true
+      },
+      "latency_ms": {
+        "n": 32,
+        "min": 0.7156661013141274,
+        "median": 1.5075000119395554,
+        "p95": 6.897250073961914,
+        "max": 17.15454098302871
+      },
+      "type_gaps_ms": {
+        "n": 31,
+        "min": 25.713999988511205,
+        "median": 28.828792041167617,
+        "p95": 30.146874953061342,
+        "max": 31.041125068441033
+      },
+      "scroll_gaps_ms": {
+        "n": 146,
+        "min": 5.093249958008528,
+        "median": 6.267208489589393,
+        "p95": 6.983208004385233,
+        "max": 11.308250017464161
+      },
+      "scroll_writes": 147,
+      "actual_scroll_hz": 160.33665565480558,
+      "cpu_lifecycle_s": 0.7129500000000002,
+      "load_before": [
+        233.20947265625,
+        235.16064453125,
+        213.03515625
+      ],
+      "load_after": [
+        237.1162109375,
+        235.93798828125,
+        213.43896484375
+      ],
+      "phase_start": 604631.719320083,
+      "phase_end": 604632.634249458,
+      "prefix_missing": 0,
+      "errors": [],
+      "viewport": {
+        "prephase_last": {
+          "at": 604631.710705708,
+          "record_ids": [
+            712,
+            713
+          ]
+        },
+        "during_first": {
+          "at": 604631.721332,
+          "record_ids": [
+            712,
+            713
+          ]
+        },
+        "during_last": {
+          "at": 604632.625326166,
+          "record_ids": [
+            735,
+            736
+          ]
+        },
+        "during_present_count": 163,
+        "during_present_without_record_ids": 0,
+        "record_set_changes": 46,
+        "record_min": 712,
+        "record_max": 736,
+        "observed_present_ends_after_last_scroll_return": 1,
+        "excluded_unpaired_enable_markers": 2,
+        "last_real_present_with_records": {
+          "at": 604632.635353375,
+          "record_ids": [
+            735,
+            736
+          ]
+        }
+      }
+    },
+    {
+      "pair": 3,
+      "label": "before",
+      "condition": "wheeldown",
+      "result": "paired-ff1-active-burst/pair-03-before-wheeldown/wheeldown/result.json",
+      "result_sha256": "98f3e7f9e2b440c88038536d7e77d7f17ebab58759f633d637235c5464036a52",
+      "capture_sha256": "4cbffa32887edda0cd4977b649bfaa94627e04b4a904e82f52a2a1f926feb0b7",
+      "checks": {
+        "frozen_expected_binary": true,
+        "frozen_expected_helper": true,
+        "frozen_expected_fixtures": true,
+        "frozen_expected_history": true,
+        "800_by_8_history": true,
+        "32_exact_typed_bytes": true,
+        "33_expected_prefixes": true,
+        "all_writes_complete": true,
+        "all_acknowledged_and_causal": true,
+        "acks_reproduced_from_capture": true,
+        "all_chunk_bytes_retained": true,
+        "p95_matches_record_clocks": true,
+        "clean_complete_echo_off": true,
+        "profiling_off": true,
+        "positioning_count": true,
+        "v1_capture_digest": true,
+        "v1_all_marker_frames_reproduced": true,
+        "v2_capture_digest": true,
+        "v2_paired_present_frames_reproduced": true,
+        "v2_unpaired_marker_count": true,
+        "v2_post_write_observed_count": true,
+        "v2_during_change_count": true
+      },
+      "latency_ms": {
+        "n": 32,
+        "min": 0.7200830150395632,
+        "median": 1.0680414852686226,
+        "p95": 1.8364579882472754,
+        "max": 29.524833080358803
+      },
+      "type_gaps_ms": {
+        "n": 31,
+        "min": 25.368875009007752,
+        "median": 29.00187496561557,
+        "p95": 30.040042009204626,
+        "max": 30.09912499692291
+      },
+      "scroll_gaps_ms": {
+        "n": 147,
+        "min": 5.060250055976212,
+        "median": 6.302790949121118,
+        "p95": 6.46929198410362,
+        "max": 13.475708081386983
+      },
+      "scroll_writes": 148,
+      "actual_scroll_hz": 161.3682564957858,
+      "cpu_lifecycle_s": 0.9345499999999989,
+      "load_before": [
+        237.1162109375,
+        235.93798828125,
+        213.43896484375
+      ],
+      "load_after": [
+        239.4287109375,
+        236.43701171875,
+        213.74658203125
+      ],
+      "phase_start": 604637.958536166,
+      "phase_end": 604638.871550041,
+      "prefix_missing": 0,
+      "errors": [],
+      "viewport": {
+        "prephase_last": {
+          "at": 604637.951396625,
+          "record_ids": [
+            712,
+            713
+          ]
+        },
+        "during_first": {
+          "at": 604637.959777333,
+          "record_ids": [
+            712,
+            713
+          ]
+        },
+        "during_last": {
+          "at": 604638.864970833,
+          "record_ids": [
+            735,
+            736
+          ]
+        },
+        "during_present_count": 169,
+        "during_present_without_record_ids": 0,
+        "record_set_changes": 46,
+        "record_min": 712,
+        "record_max": 736,
+        "observed_present_ends_after_last_scroll_return": 1,
+        "excluded_unpaired_enable_markers": 2,
+        "last_real_present_with_records": {
+          "at": 604638.872803666,
+          "record_ids": [
+            735,
+            736
+          ]
+        }
+      }
+    },
+    {
+      "pair": 3,
+      "label": "after",
+      "condition": "typing",
+      "result": "paired-ff1-active-burst/pair-03-after-typing/typing/result.json",
+      "result_sha256": "2a05481235c0d16a803599308a2b83eb5ad7be94aecb65b64ee18f0dea5134f8",
+      "capture_sha256": "2f936dbe529016bc879494fd4ce4be77395c018bb05c3472e2ce74c7cca93eb3",
+      "checks": {
+        "frozen_expected_binary": true,
+        "frozen_expected_helper": true,
+        "frozen_expected_fixtures": true,
+        "frozen_expected_history": true,
+        "800_by_8_history": true,
+        "32_exact_typed_bytes": true,
+        "33_expected_prefixes": true,
+        "all_writes_complete": true,
+        "all_acknowledged_and_causal": true,
+        "acks_reproduced_from_capture": true,
+        "all_chunk_bytes_retained": true,
+        "p95_matches_record_clocks": true,
+        "clean_complete_echo_off": true,
+        "profiling_off": true,
+        "positioning_count": true,
+        "v1_capture_digest": true,
+        "v1_all_marker_frames_reproduced": true,
+        "v2_capture_digest": true,
+        "v2_paired_present_frames_reproduced": true,
+        "v2_unpaired_marker_count": true,
+        "v2_post_write_observed_count": true,
+        "v2_during_change_count": true
+      },
+      "latency_ms": {
+        "n": 32,
+        "min": 0.6915000267326832,
+        "median": 1.1693959240801632,
+        "p95": 4.831874975934625,
+        "max": 7.544292020611465
+      },
+      "type_gaps_ms": {
+        "n": 31,
+        "min": 25.156292016617954,
+        "median": 29.053749982267618,
+        "p95": 30.78154195100069,
+        "max": 35.13887501321733
+      },
+      "scroll_gaps_ms": null,
+      "scroll_writes": 0,
+      "actual_scroll_hz": null,
+      "cpu_lifecycle_s": 0.4791660000000002,
+      "load_before": [
+        239.4287109375,
+        236.43701171875,
+        213.74658203125
+      ],
+      "load_after": [
+        233.78857421875,
+        235.3173828125,
+        213.484375
+      ],
+      "phase_start": 604643.471251583,
+      "phase_end": 604644.394085458,
+      "prefix_missing": 0,
+      "errors": [],
+      "viewport": {
+        "prephase_last": {
+          "at": 604643.46259475,
+          "record_ids": [
+            782
+          ]
+        },
+        "during_first": {
+          "at": 604643.475230708,
+          "record_ids": [
+            782
+          ]
+        },
+        "during_last": {
+          "at": 604644.365957458,
+          "record_ids": [
+            782
+          ]
+        },
+        "during_present_count": 32,
+        "during_present_without_record_ids": 0,
+        "record_set_changes": 0,
+        "record_min": 782,
+        "record_max": 782,
+        "observed_present_ends_after_last_scroll_return": 0,
+        "excluded_unpaired_enable_markers": 2,
+        "last_real_present_with_records": {
+          "at": 604644.365957458,
+          "record_ids": [
+            782
+          ]
+        }
+      }
+    },
+    {
+      "pair": 3,
+      "label": "before",
+      "condition": "typing",
+      "result": "paired-ff1-active-burst/pair-03-before-typing/typing/result.json",
+      "result_sha256": "54d6d18f428601064e8baafebb91d961757ccc7f6725506c044b10616c10e2d4",
+      "capture_sha256": "a76c1d8f0bd4eb74c15af9c0b4190ee6eabfcc2693eabd89e428b17313736afd",
+      "checks": {
+        "frozen_expected_binary": true,
+        "frozen_expected_helper": true,
+        "frozen_expected_fixtures": true,
+        "frozen_expected_history": true,
+        "800_by_8_history": true,
+        "32_exact_typed_bytes": true,
+        "33_expected_prefixes": true,
+        "all_writes_complete": true,
+        "all_acknowledged_and_causal": true,
+        "acks_reproduced_from_capture": true,
+        "all_chunk_bytes_retained": true,
+        "p95_matches_record_clocks": true,
+        "clean_complete_echo_off": true,
+        "profiling_off": true,
+        "positioning_count": true,
+        "v1_capture_digest": true,
+        "v1_all_marker_frames_reproduced": true,
+        "v2_capture_digest": true,
+        "v2_paired_present_frames_reproduced": true,
+        "v2_unpaired_marker_count": true,
+        "v2_post_write_observed_count": true,
+        "v2_during_change_count": true
+      },
+      "latency_ms": {
+        "n": 32,
+        "min": 1.0504999663680792,
+        "median": 1.4916459913365543,
+        "p95": 4.698542063124478,
+        "max": 19.869958981871605
+      },
+      "type_gaps_ms": {
+        "n": 31,
+        "min": 25.58854199014604,
+        "median": 29.363583074882627,
+        "p95": 30.417583999224007,
+        "max": 32.29108301457018
+      },
+      "scroll_gaps_ms": null,
+      "scroll_writes": 0,
+      "actual_scroll_hz": null,
+      "cpu_lifecycle_s": 0.5617400000000004,
+      "load_before": [
+        233.78857421875,
+        235.3173828125,
+        213.484375
+      ],
+      "load_after": [
+        234.92626953125,
+        235.52783203125,
+        213.6865234375
+      ],
+      "phase_start": 604648.539887625,
+      "phase_end": 604649.464401166,
+      "prefix_missing": 0,
+      "errors": [],
+      "viewport": {
+        "prephase_last": {
+          "at": 604648.533919291,
+          "record_ids": [
+            782
+          ]
+        },
+        "during_first": {
+          "at": 604648.541073333,
+          "record_ids": [
+            782
+          ]
+        },
+        "during_last": {
+          "at": 604649.4356765,
+          "record_ids": [
+            782
+          ]
+        },
+        "during_present_count": 32,
+        "during_present_without_record_ids": 0,
+        "record_set_changes": 0,
+        "record_min": 782,
+        "record_max": 782,
+        "observed_present_ends_after_last_scroll_return": 0,
+        "excluded_unpaired_enable_markers": 2,
+        "last_real_present_with_records": {
+          "at": 604649.4356765,
+          "record_ids": [
+            782
+          ]
+        }
+      }
+    },
+    {
+      "pair": 3,
+      "label": "after",
+      "condition": "pageup",
+      "result": "paired-ff1-active-burst/pair-03-after-pageup/pageup/result.json",
+      "result_sha256": "e77b5c274530331800949d1303ebd5559c05033e3ef46a2e6c23345f75502c92",
+      "capture_sha256": "4854ab16f35da5f4363b1eaadbb797c7ee700c355b0f0d1e3d583f91f744ab70",
+      "checks": {
+        "frozen_expected_binary": true,
+        "frozen_expected_helper": true,
+        "frozen_expected_fixtures": true,
+        "frozen_expected_history": true,
+        "800_by_8_history": true,
+        "32_exact_typed_bytes": true,
+        "33_expected_prefixes": true,
+        "all_writes_complete": true,
+        "all_acknowledged_and_causal": true,
+        "acks_reproduced_from_capture": true,
+        "all_chunk_bytes_retained": true,
+        "p95_matches_record_clocks": true,
+        "clean_complete_echo_off": true,
+        "profiling_off": true,
+        "positioning_count": true,
+        "v1_capture_digest": true,
+        "v1_all_marker_frames_reproduced": true,
+        "v2_capture_digest": true,
+        "v2_paired_present_frames_reproduced": true,
+        "v2_unpaired_marker_count": true,
+        "v2_post_write_observed_count": true,
+        "v2_during_change_count": true
+      },
+      "latency_ms": {
+        "n": 32,
+        "min": 0.6177499890327454,
+        "median": 6.934542034287006,
+        "p95": 25.687041925266385,
+        "max": 57.83962504938245
+      },
+      "type_gaps_ms": {
+        "n": 31,
+        "min": 26.58075001090765,
+        "median": 29.570624930784106,
+        "p95": 30.239708023145795,
+        "max": 38.25904207769781
+      },
+      "scroll_gaps_ms": {
+        "n": 149,
+        "min": 5.140332970768213,
+        "median": 6.30141596775502,
+        "p95": 7.398959016427398,
+        "max": 15.068709035404027
+      },
+      "scroll_writes": 150,
+      "actual_scroll_hz": 158.97819349380072,
+      "cpu_lifecycle_s": 0.8272750000000002,
+      "load_before": [
+        234.92626953125,
+        235.52783203125,
+        213.6865234375
+      ],
+      "load_after": [
+        238.93603515625,
+        236.34912109375,
+        214.10400390625
+      ],
+      "phase_start": 604653.962817458,
+      "phase_end": 604654.900326541,
+      "prefix_missing": 0,
+      "errors": [],
+      "viewport": {
+        "prephase_last": {
+          "at": 604653.954646458,
+          "record_ids": [
+            782
+          ]
+        },
+        "during_first": {
+          "at": 604653.97878725,
+          "record_ids": [
+            780,
+            781
+          ]
+        },
+        "during_last": {
+          "at": 604654.899843541,
+          "record_ids": [
+            523
+          ]
+        },
+        "during_present_count": 129,
+        "during_present_without_record_ids": 0,
+        "record_set_changes": 120,
+        "record_min": 523,
+        "record_max": 781,
+        "observed_present_ends_after_last_scroll_return": 2,
+        "excluded_unpaired_enable_markers": 2,
+        "last_real_present_with_records": {
+          "at": 604654.906046916,
+          "record_ids": [
+            521,
+            522
+          ]
+        }
+      }
+    },
+    {
+      "pair": 3,
+      "label": "before",
+      "condition": "pageup",
+      "result": "paired-ff1-active-burst/pair-03-before-pageup/pageup/result.json",
+      "result_sha256": "a4f531f49bc315831f9377c4bdf08f87f027a10692dbb29cfaad61851cf783fb",
+      "capture_sha256": "9a96ae258b708b2358b210f390dd4491276a45f29daf47ccb79256a7babc11e3",
+      "checks": {
+        "frozen_expected_binary": true,
+        "frozen_expected_helper": true,
+        "frozen_expected_fixtures": true,
+        "frozen_expected_history": true,
+        "800_by_8_history": true,
+        "32_exact_typed_bytes": true,
+        "33_expected_prefixes": true,
+        "all_writes_complete": true,
+        "all_acknowledged_and_causal": true,
+        "acks_reproduced_from_capture": true,
+        "all_chunk_bytes_retained": true,
+        "p95_matches_record_clocks": true,
+        "clean_complete_echo_off": true,
+        "profiling_off": true,
+        "positioning_count": true,
+        "v1_capture_digest": true,
+        "v1_all_marker_frames_reproduced": true,
+        "v2_capture_digest": true,
+        "v2_paired_present_frames_reproduced": true,
+        "v2_unpaired_marker_count": true,
+        "v2_post_write_observed_count": true,
+        "v2_during_change_count": true
+      },
+      "latency_ms": {
+        "n": 32,
+        "min": 1.1075830552726984,
+        "median": 13.421583455055952,
+        "p95": 61.48891698103398,
+        "max": 142.1059580752626
+      },
+      "type_gaps_ms": {
+        "n": 31,
+        "min": 25.133791961707175,
+        "median": 28.496042010374367,
+        "p95": 30.251458985731006,
+        "max": 30.972708016633987
+      },
+      "scroll_gaps_ms": {
+        "n": 146,
+        "min": 5.087500088848174,
+        "median": 6.2924789963290095,
+        "p95": 7.33625004068017,
+        "max": 11.286415974609554
+      },
+      "scroll_writes": 147,
+      "actual_scroll_hz": 160.2368798080864,
+      "cpu_lifecycle_s": 1.1181649999999994,
+      "load_before": [
+        238.93603515625,
+        236.34912109375,
+        214.10400390625
+      ],
+      "load_after": [
+        241.02294921875,
+        236.82470703125,
+        214.40185546875
+      ],
+      "phase_start": 604659.297724625,
+      "phase_end": 604660.335915958,
+      "prefix_missing": 0,
+      "errors": [],
+      "viewport": {
+        "prephase_last": {
+          "at": 604659.291703375,
+          "record_ids": [
+            782
+          ]
+        },
+        "during_first": {
+          "at": 604659.303667583,
+          "record_ids": [
+            780,
+            781
+          ]
+        },
+        "during_last": {
+          "at": 604660.325110333,
+          "record_ids": [
+            526,
+            527
+          ]
+        },
+        "during_present_count": 97,
+        "during_present_without_record_ids": 0,
+        "record_set_changes": 92,
+        "record_min": 526,
+        "record_max": 781,
+        "observed_present_ends_after_last_scroll_return": 3,
+        "excluded_unpaired_enable_markers": 2,
+        "last_real_present_with_records": {
+          "at": 604660.325110333,
+          "record_ids": [
+            526,
+            527
+          ]
+        }
+      }
+    },
+    {
+      "pair": 3,
+      "label": "after",
+      "condition": "pagedown",
+      "result": "paired-ff1-active-burst/pair-03-after-pagedown/pagedown/result.json",
+      "result_sha256": "ecbc367c4113cb163b3c658661da86b1e4ec789b1067cb6e79fabcdde6b95fc5",
+      "capture_sha256": "64af07822b3d01c0435380be4db506c733651e9b1391b21f85474508fe8ae1ff",
+      "checks": {
+        "frozen_expected_binary": true,
+        "frozen_expected_helper": true,
+        "frozen_expected_fixtures": true,
+        "frozen_expected_history": true,
+        "800_by_8_history": true,
+        "32_exact_typed_bytes": true,
+        "33_expected_prefixes": true,
+        "all_writes_complete": true,
+        "all_acknowledged_and_causal": true,
+        "acks_reproduced_from_capture": true,
+        "all_chunk_bytes_retained": true,
+        "p95_matches_record_clocks": true,
+        "clean_complete_echo_off": true,
+        "profiling_off": true,
+        "positioning_count": true,
+        "v1_capture_digest": true,
+        "v1_all_marker_frames_reproduced": true,
+        "v2_capture_digest": true,
+        "v2_paired_present_frames_reproduced": true,
+        "v2_unpaired_marker_count": true,
+        "v2_post_write_observed_count": true,
+        "v2_during_change_count": true
+      },
+      "latency_ms": {
+        "n": 32,
+        "min": 0.505249947309494,
+        "median": 1.4030209858901799,
+        "p95": 22.766790934838355,
+        "max": 37.90100000333041
+      },
+      "type_gaps_ms": {
+        "n": 31,
+        "min": 25.381749961525202,
+        "median": 28.95266597624868,
+        "p95": 32.38291700836271,
+        "max": 35.58420902118087
+      },
+      "scroll_gaps_ms": {
+        "n": 147,
+        "min": 5.049541010521352,
+        "median": 6.28950004465878,
+        "p95": 8.17775004543364,
+        "max": 19.26279196050018
+      },
+      "scroll_writes": 148,
+      "actual_scroll_hz": 158.92178227491974,
+      "cpu_lifecycle_s": 1.203104999999999,
+      "load_before": [
+        241.02294921875,
+        236.82470703125,
+        214.40185546875
+      ],
+      "load_after": [
+        239.9951171875,
+        236.81298828125,
+        214.7900390625
+      ],
+      "phase_start": 604670.172849958,
+      "phase_end": 604671.111457291,
+      "prefix_missing": 0,
+      "errors": [],
+      "viewport": {
+        "prephase_last": {
+          "at": 604670.162837166,
+          "record_ids": [
+            452
+          ]
+        },
+        "during_first": {
+          "at": 604670.173919291,
+          "record_ids": [
+            453,
+            454
+          ]
+        },
+        "during_last": {
+          "at": 604671.106887208,
+          "record_ids": [
+            709
+          ]
+        },
+        "during_present_count": 147,
+        "during_present_without_record_ids": 0,
+        "record_set_changes": 129,
+        "record_min": 453,
+        "record_max": 709,
+        "observed_present_ends_after_last_scroll_return": 1,
+        "excluded_unpaired_enable_markers": 2,
+        "last_real_present_with_records": {
+          "at": 604671.106887208,
+          "record_ids": [
+            709
+          ]
+        }
+      }
+    },
+    {
+      "pair": 3,
+      "label": "before",
+      "condition": "pagedown",
+      "result": "paired-ff1-active-burst/pair-03-before-pagedown/pagedown/result.json",
+      "result_sha256": "b73bd59ede429c25db179811ad26e8807ca6124f0c6b05dc05076d4fcd6c6eaa",
+      "capture_sha256": "4c480e0510e3c3be1794294715b7b7bfebc86c4e6a5fa2a51f899a86e84827cc",
+      "checks": {
+        "frozen_expected_binary": true,
+        "frozen_expected_helper": true,
+        "frozen_expected_fixtures": true,
+        "frozen_expected_history": true,
+        "800_by_8_history": true,
+        "32_exact_typed_bytes": true,
+        "33_expected_prefixes": true,
+        "all_writes_complete": true,
+        "all_acknowledged_and_causal": true,
+        "acks_reproduced_from_capture": true,
+        "all_chunk_bytes_retained": true,
+        "p95_matches_record_clocks": true,
+        "clean_complete_echo_off": true,
+        "profiling_off": true,
+        "positioning_count": true,
+        "v1_capture_digest": true,
+        "v1_all_marker_frames_reproduced": true,
+        "v2_capture_digest": true,
+        "v2_paired_present_frames_reproduced": true,
+        "v2_unpaired_marker_count": true,
+        "v2_post_write_observed_count": true,
+        "v2_during_change_count": true
+      },
+      "latency_ms": {
+        "n": 32,
+        "min": 0.8827919373288751,
+        "median": 1.9207499572075903,
+        "p95": 9.061541990377009,
+        "max": 15.016125049442053
+      },
+      "type_gaps_ms": {
+        "n": 31,
+        "min": 25.3303749486804,
+        "median": 28.74425007030368,
+        "p95": 30.19645798485726,
+        "max": 30.763749964535236
+      },
+      "scroll_gaps_ms": {
+        "n": 144,
+        "min": 5.198583006858826,
+        "median": 6.301854446064681,
+        "p95": 7.331957924179733,
+        "max": 14.030500082299113
+      },
+      "scroll_writes": 145,
+      "actual_scroll_hz": 158.32347160530662,
+      "cpu_lifecycle_s": 1.8735840000000028,
+      "load_before": [
+        239.9951171875,
+        236.81298828125,
+        214.7900390625
+      ],
+      "load_after": [
+        237.615234375,
+        236.43359375,
+        214.9140625
+      ],
+      "phase_start": 604681.354717541,
+      "phase_end": 604682.268662083,
+      "prefix_missing": 0,
+      "errors": [],
+      "viewport": {
+        "prephase_last": {
+          "at": 604681.3425765,
+          "record_ids": [
+            452
+          ]
+        },
+        "during_first": {
+          "at": 604681.357151208,
+          "record_ids": [
+            453,
+            454
+          ]
+        },
+        "during_last": {
+          "at": 604682.265725375,
+          "record_ids": [
+            703,
+            704
+          ]
+        },
+        "during_present_count": 164,
+        "during_present_without_record_ids": 0,
+        "record_set_changes": 141,
+        "record_min": 453,
+        "record_max": 704,
+        "observed_present_ends_after_last_scroll_return": 1,
+        "excluded_unpaired_enable_markers": 2,
+        "last_real_present_with_records": {
+          "at": 604682.265725375,
+          "record_ids": [
+            703,
+            704
+          ]
+        }
+      }
+    },
+    {
+      "pair": 4,
+      "label": "before",
+      "condition": "wheeldown",
+      "result": "paired-ff1-active-burst/pair-04-before-wheeldown/wheeldown/result.json",
+      "result_sha256": "f6b66d5034afb0d4b89f9d6b1b045b7d425e93196d89d29897f5cc1bf2cadca0",
+      "capture_sha256": "34c30a6dce8a0eb2a8ad9c7fbcfac9d53d3ac72b85c81cfc9c412a6d035e683a",
+      "checks": {
+        "frozen_expected_binary": true,
+        "frozen_expected_helper": true,
+        "frozen_expected_fixtures": true,
+        "frozen_expected_history": true,
+        "800_by_8_history": true,
+        "32_exact_typed_bytes": true,
+        "33_expected_prefixes": true,
+        "all_writes_complete": true,
+        "all_acknowledged_and_causal": true,
+        "acks_reproduced_from_capture": true,
+        "all_chunk_bytes_retained": true,
+        "p95_matches_record_clocks": true,
+        "clean_complete_echo_off": true,
+        "profiling_off": true,
+        "positioning_count": true,
+        "v1_capture_digest": true,
+        "v1_all_marker_frames_reproduced": true,
+        "v2_capture_digest": true,
+        "v2_paired_present_frames_reproduced": true,
+        "v2_unpaired_marker_count": true,
+        "v2_post_write_observed_count": true,
+        "v2_during_change_count": true
+      },
+      "latency_ms": {
+        "n": 32,
+        "min": 0.7572920294478536,
+        "median": 2.086729451548308,
+        "p95": 12.054792023263872,
+        "max": 15.863000066019595
+      },
+      "type_gaps_ms": {
+        "n": 31,
+        "min": 25.72754106950015,
+        "median": 29.491666005924344,
+        "p95": 30.761958099901676,
+        "max": 31.13554196897894
+      },
+      "scroll_gaps_ms": {
+        "n": 148,
+        "min": 5.176582955755293,
+        "median": 6.261833477765322,
+        "p95": 8.046417031437159,
+        "max": 8.695582975633442
+      },
+      "scroll_writes": 149,
+      "actual_scroll_hz": 158.9985028040586,
+      "cpu_lifecycle_s": 1.0067989999999991,
+      "load_before": [
+        237.615234375,
+        236.43359375,
+        214.9140625
+      ],
+      "load_after": [
+        238.20654296875,
+        236.57568359375,
+        215.09033203125
+      ],
+      "phase_start": 604687.83555525,
+      "phase_end": 604688.770769416,
+      "prefix_missing": 0,
+      "errors": [],
+      "viewport": {
+        "prephase_last": {
+          "at": 604687.826429791,
+          "record_ids": [
+            712,
+            713
+          ]
+        },
+        "during_first": {
+          "at": 604687.836904,
+          "record_ids": [
+            712,
+            713
+          ]
+        },
+        "during_last": {
+          "at": 604688.768403416,
+          "record_ids": [
+            736
+          ]
+        },
+        "during_present_count": 160,
+        "during_present_without_record_ids": 0,
+        "record_set_changes": 46,
+        "record_min": 712,
+        "record_max": 736,
+        "observed_present_ends_after_last_scroll_return": 1,
+        "excluded_unpaired_enable_markers": 2,
+        "last_real_present_with_records": {
+          "at": 604688.768403416,
+          "record_ids": [
+            736
+          ]
+        }
+      }
+    },
+    {
+      "pair": 4,
+      "label": "after",
+      "condition": "wheeldown",
+      "result": "paired-ff1-active-burst/pair-04-after-wheeldown/wheeldown/result.json",
+      "result_sha256": "c0fc911840f85e30babb724280a2a5f91701735d1d0e1b6f75464c73f6c47f87",
+      "capture_sha256": "efb689f8298af6c8b401c6a0e2c0e18f6faba46ca36a27ee7c57549184418ed8",
+      "checks": {
+        "frozen_expected_binary": true,
+        "frozen_expected_helper": true,
+        "frozen_expected_fixtures": true,
+        "frozen_expected_history": true,
+        "800_by_8_history": true,
+        "32_exact_typed_bytes": true,
+        "33_expected_prefixes": true,
+        "all_writes_complete": true,
+        "all_acknowledged_and_causal": true,
+        "acks_reproduced_from_capture": true,
+        "all_chunk_bytes_retained": true,
+        "p95_matches_record_clocks": true,
+        "clean_complete_echo_off": true,
+        "profiling_off": true,
+        "positioning_count": true,
+        "v1_capture_digest": true,
+        "v1_all_marker_frames_reproduced": true,
+        "v2_capture_digest": true,
+        "v2_paired_present_frames_reproduced": true,
+        "v2_unpaired_marker_count": true,
+        "v2_post_write_observed_count": true,
+        "v2_during_change_count": true
+      },
+      "latency_ms": {
+        "n": 32,
+        "min": 0.4974169423803687,
+        "median": 1.5652294969186187,
+        "p95": 26.92487509921193,
+        "max": 39.21616601292044
+      },
+      "type_gaps_ms": {
+        "n": 31,
+        "min": 26.86095901299268,
+        "median": 29.278083005920053,
+        "p95": 30.59933299664408,
+        "max": 32.51799999270588
+      },
+      "scroll_gaps_ms": {
+        "n": 143,
+        "min": 5.163541994988918,
+        "median": 6.312417099252343,
+        "p95": 8.01533309277147,
+        "max": 13.882374973036349
+      },
+      "scroll_writes": 144,
+      "actual_scroll_hz": 154.01970562731307,
+      "cpu_lifecycle_s": 0.7053109999999982,
+      "load_before": [
+        238.20654296875,
+        236.57568359375,
+        215.09033203125
+      ],
+      "load_after": [
+        236.58837890625,
+        236.26708984375,
+        215.10693359375
+      ],
+      "phase_start": 604693.984585416,
+      "phase_end": 604694.918521125,
+      "prefix_missing": 0,
+      "errors": [],
+      "viewport": {
+        "prephase_last": {
+          "at": 604693.974365666,
+          "record_ids": [
+            712,
+            713
+          ]
+        },
+        "during_first": {
+          "at": 604693.985482708,
+          "record_ids": [
+            712,
+            713
+          ]
+        },
+        "during_last": {
+          "at": 604694.914157041,
+          "record_ids": [
+            735,
+            736
+          ]
+        },
+        "during_present_count": 150,
+        "during_present_without_record_ids": 0,
+        "record_set_changes": 45,
+        "record_min": 712,
+        "record_max": 736,
+        "observed_present_ends_after_last_scroll_return": 1,
+        "excluded_unpaired_enable_markers": 2,
+        "last_real_present_with_records": {
+          "at": 604694.914157041,
+          "record_ids": [
+            735,
+            736
+          ]
+        }
+      }
+    },
+    {
+      "pair": 4,
+      "label": "before",
+      "condition": "typing",
+      "result": "paired-ff1-active-burst/pair-04-before-typing/typing/result.json",
+      "result_sha256": "5774f3c74efb59bee66d5cca2e807431cf49b2572f8ca989bb237c323ac52205",
+      "capture_sha256": "8bbe072b8695f3304440e808c5766a9b6269e6c7a66d14c286596ac7e0b1738e",
+      "checks": {
+        "frozen_expected_binary": true,
+        "frozen_expected_helper": true,
+        "frozen_expected_fixtures": true,
+        "frozen_expected_history": true,
+        "800_by_8_history": true,
+        "32_exact_typed_bytes": true,
+        "33_expected_prefixes": true,
+        "all_writes_complete": true,
+        "all_acknowledged_and_causal": true,
+        "acks_reproduced_from_capture": true,
+        "all_chunk_bytes_retained": true,
+        "p95_matches_record_clocks": true,
+        "clean_complete_echo_off": true,
+        "profiling_off": true,
+        "positioning_count": true,
+        "v1_capture_digest": true,
+        "v1_all_marker_frames_reproduced": true,
+        "v2_capture_digest": true,
+        "v2_paired_present_frames_reproduced": true,
+        "v2_unpaired_marker_count": true,
+        "v2_post_write_observed_count": true,
+        "v2_during_change_count": true
+      },
+      "latency_ms": {
+        "n": 32,
+        "min": 0.9018339915201068,
+        "median": 2.0477084908634424,
+        "p95": 8.748249965719879,
+        "max": 15.57974994648248
+      },
+      "type_gaps_ms": {
+        "n": 31,
+        "min": 25.090625043958426,
+        "median": 29.180165962316096,
+        "p95": 31.965209054760635,
+        "max": 37.806250038556755
+      },
+      "scroll_gaps_ms": null,
+      "scroll_writes": 0,
+      "actual_scroll_hz": null,
+      "cpu_lifecycle_s": 0.5841160000000016,
+      "load_before": [
+        236.58837890625,
+        236.26708984375,
+        215.10693359375
+      ],
+      "load_after": [
+        239.423828125,
+        236.85986328125,
+        215.43994140625
+      ],
+      "phase_start": 604699.034200333,
+      "phase_end": 604699.957718083,
+      "prefix_missing": 0,
+      "errors": [],
+      "viewport": {
+        "prephase_last": {
+          "at": 604699.029260375,
+          "record_ids": [
+            782
+          ]
+        },
+        "during_first": {
+          "at": 604699.035799083,
+          "record_ids": [
+            782
+          ]
+        },
+        "during_last": {
+          "at": 604699.933575208,
+          "record_ids": [
+            782
+          ]
+        },
+        "during_present_count": 32,
+        "during_present_without_record_ids": 0,
+        "record_set_changes": 0,
+        "record_min": 782,
+        "record_max": 782,
+        "observed_present_ends_after_last_scroll_return": 0,
+        "excluded_unpaired_enable_markers": 2,
+        "last_real_present_with_records": {
+          "at": 604699.933575208,
+          "record_ids": [
+            782
+          ]
+        }
+      }
+    },
+    {
+      "pair": 4,
+      "label": "after",
+      "condition": "typing",
+      "result": "paired-ff1-active-burst/pair-04-after-typing/typing/result.json",
+      "result_sha256": "9a8096f708402a7582e5fab11d06a706276e8d19ff00715e065f3a4c75702023",
+      "capture_sha256": "e5c3d2f85c9523c926d3f78bc50ef71ce4d7c32c07e726725e45791b54a846c1",
+      "checks": {
+        "frozen_expected_binary": true,
+        "frozen_expected_helper": true,
+        "frozen_expected_fixtures": true,
+        "frozen_expected_history": true,
+        "800_by_8_history": true,
+        "32_exact_typed_bytes": true,
+        "33_expected_prefixes": true,
+        "all_writes_complete": true,
+        "all_acknowledged_and_causal": true,
+        "acks_reproduced_from_capture": true,
+        "all_chunk_bytes_retained": true,
+        "p95_matches_record_clocks": true,
+        "clean_complete_echo_off": true,
+        "profiling_off": true,
+        "positioning_count": true,
+        "v1_capture_digest": true,
+        "v1_all_marker_frames_reproduced": true,
+        "v2_capture_digest": true,
+        "v2_paired_present_frames_reproduced": true,
+        "v2_unpaired_marker_count": true,
+        "v2_post_write_observed_count": true,
+        "v2_during_change_count": true
+      },
+      "latency_ms": {
+        "n": 32,
+        "min": 0.6652079755440354,
+        "median": 1.0584164992906153,
+        "p95": 3.9410829776898026,
+        "max": 8.428792003542185
+      },
+      "type_gaps_ms": {
+        "n": 31,
+        "min": 25.244707940146327,
+        "median": 29.412708012387156,
+        "p95": 31.62258304655552,
+        "max": 31.793874921277165
+      },
+      "scroll_gaps_ms": null,
+      "scroll_writes": 0,
+      "actual_scroll_hz": null,
+      "cpu_lifecycle_s": 0.4797020000000014,
+      "load_before": [
+        239.423828125,
+        236.85986328125,
+        215.43994140625
+      ],
+      "load_after": [
+        242.8330078125,
+        237.60888671875,
+        215.82958984375
+      ],
+      "phase_start": 604704.039112958,
+      "phase_end": 604704.963821416,
+      "prefix_missing": 0,
+      "errors": [],
+      "viewport": {
+        "prephase_last": {
+          "at": 604704.031307666,
+          "record_ids": [
+            782
+          ]
+        },
+        "during_first": {
+          "at": 604704.039847333,
+          "record_ids": [
+            782
+          ]
+        },
+        "during_last": {
+          "at": 604704.936165666,
+          "record_ids": [
+            782
+          ]
+        },
+        "during_present_count": 32,
+        "during_present_without_record_ids": 0,
+        "record_set_changes": 0,
+        "record_min": 782,
+        "record_max": 782,
+        "observed_present_ends_after_last_scroll_return": 0,
+        "excluded_unpaired_enable_markers": 2,
+        "last_real_present_with_records": {
+          "at": 604704.936165666,
+          "record_ids": [
+            782
+          ]
+        }
+      }
+    },
+    {
+      "pair": 4,
+      "label": "before",
+      "condition": "pageup",
+      "result": "paired-ff1-active-burst/pair-04-before-pageup/pageup/result.json",
+      "result_sha256": "7851b8284de7720ba954886b20d1fd7a63454ee4560f5ad036382713ff7da99b",
+      "capture_sha256": "7068675aaec986fee16243594137b413c2de03fbe2e7ef108bff0f5dc7f91de9",
+      "checks": {
+        "frozen_expected_binary": true,
+        "frozen_expected_helper": true,
+        "frozen_expected_fixtures": true,
+        "frozen_expected_history": true,
+        "800_by_8_history": true,
+        "32_exact_typed_bytes": true,
+        "33_expected_prefixes": true,
+        "all_writes_complete": true,
+        "all_acknowledged_and_causal": true,
+        "acks_reproduced_from_capture": true,
+        "all_chunk_bytes_retained": true,
+        "p95_matches_record_clocks": true,
+        "clean_complete_echo_off": true,
+        "profiling_off": true,
+        "positioning_count": true,
+        "v1_capture_digest": true,
+        "v1_all_marker_frames_reproduced": true,
+        "v2_capture_digest": true,
+        "v2_paired_present_frames_reproduced": true,
+        "v2_unpaired_marker_count": true,
+        "v2_post_write_observed_count": true,
+        "v2_during_change_count": true
+      },
+      "latency_ms": {
+        "n": 32,
+        "min": 1.3844590866938233,
+        "median": 8.323979505803436,
+        "p95": 37.260166951455176,
+        "max": 41.62770800758153
+      },
+      "type_gaps_ms": {
+        "n": 31,
+        "min": 26.006625033915043,
+        "median": 29.185707913711667,
+        "p95": 30.32687504310161,
+        "max": 40.24504194967449
+      },
+      "scroll_gaps_ms": {
+        "n": 144,
+        "min": 5.075750057585537,
+        "median": 6.305999995674938,
+        "p95": 7.896541967056692,
+        "max": 15.057125012390316
+      },
+      "scroll_writes": 145,
+      "actual_scroll_hz": 155.06933363127658,
+      "cpu_lifecycle_s": 1.330931999999999,
+      "load_before": [
+        242.8330078125,
+        237.60888671875,
+        215.82958984375
+      ],
+      "load_after": [
+        242.68603515625,
+        237.6650390625,
+        215.97705078125
+      ],
+      "phase_start": 604709.137243291,
+      "phase_end": 604710.07760275,
+      "prefix_missing": 0,
+      "errors": [],
+      "viewport": {
+        "prephase_last": {
+          "at": 604709.129642791,
+          "record_ids": [
+            782
+          ]
+        },
+        "during_first": {
+          "at": 604709.1749845,
+          "record_ids": [
+            780,
+            781
+          ]
+        },
+        "during_last": {
+          "at": 604710.068330708,
+          "record_ids": [
+            533,
+            534
+          ]
+        },
+        "during_present_count": 135,
+        "during_present_without_record_ids": 0,
+        "record_set_changes": 120,
+        "record_min": 533,
+        "record_max": 781,
+        "observed_present_ends_after_last_scroll_return": 2,
+        "excluded_unpaired_enable_markers": 2,
+        "last_real_present_with_records": {
+          "at": 604710.078975916,
+          "record_ids": [
+            530
+          ]
+        }
+      }
+    },
+    {
+      "pair": 4,
+      "label": "after",
+      "condition": "pageup",
+      "result": "paired-ff1-active-burst/pair-04-after-pageup/pageup/result.json",
+      "result_sha256": "2c53e14dc5e214be1f5b910e5ee522198fcf75607c2946b05490ea05957eefa0",
+      "capture_sha256": "a7f87af619da4ae6ab9c279be325ca42e306392334fa890223d71bf4ff51831c",
+      "checks": {
+        "frozen_expected_binary": true,
+        "frozen_expected_helper": true,
+        "frozen_expected_fixtures": true,
+        "frozen_expected_history": true,
+        "800_by_8_history": true,
+        "32_exact_typed_bytes": true,
+        "33_expected_prefixes": true,
+        "all_writes_complete": true,
+        "all_acknowledged_and_causal": true,
+        "acks_reproduced_from_capture": true,
+        "all_chunk_bytes_retained": true,
+        "p95_matches_record_clocks": true,
+        "clean_complete_echo_off": true,
+        "profiling_off": true,
+        "positioning_count": true,
+        "v1_capture_digest": true,
+        "v1_all_marker_frames_reproduced": true,
+        "v2_capture_digest": true,
+        "v2_paired_present_frames_reproduced": true,
+        "v2_unpaired_marker_count": true,
+        "v2_post_write_observed_count": true,
+        "v2_during_change_count": true
+      },
+      "latency_ms": {
+        "n": 32,
+        "min": 0.5447090370580554,
+        "median": 4.03087493032217,
+        "p95": 23.79483391996473,
+        "max": 44.5657919626683
+      },
+      "type_gaps_ms": {
+        "n": 31,
+        "min": 25.331125012598932,
+        "median": 28.44033297151327,
+        "p95": 30.45608289539814,
+        "max": 31.619040993973613
+      },
+      "scroll_gaps_ms": {
+        "n": 144,
+        "min": 5.062041920609772,
+        "median": 6.297520536463708,
+        "p95": 7.393790991045535,
+        "max": 9.667209000326693
+      },
+      "scroll_writes": 145,
+      "actual_scroll_hz": 159.3845983667628,
+      "cpu_lifecycle_s": 0.8395630000000001,
+      "load_before": [
+        242.68603515625,
+        237.6650390625,
+        215.97705078125
+      ],
+      "load_after": [
+        244.47265625,
+        238.11865234375,
+        216.26416015625
+      ],
+      "phase_start": 604714.259744416,
+      "phase_end": 604715.17096275,
+      "prefix_missing": 0,
+      "errors": [],
+      "viewport": {
+        "prephase_last": {
+          "at": 604714.249295541,
+          "record_ids": [
+            782
+          ]
+        },
+        "during_first": {
+          "at": 604714.262774333,
+          "record_ids": [
+            780,
+            781
+          ]
+        },
+        "during_last": {
+          "at": 604715.15673875,
+          "record_ids": [
+            531,
+            532
+          ]
+        },
+        "during_present_count": 141,
+        "during_present_without_record_ids": 0,
+        "record_set_changes": 126,
+        "record_min": 531,
+        "record_max": 781,
+        "observed_present_ends_after_last_scroll_return": 1,
+        "excluded_unpaired_enable_markers": 2,
+        "last_real_present_with_records": {
+          "at": 604715.193308666,
+          "record_ids": [
+            530
+          ]
+        }
+      }
+    },
+    {
+      "pair": 4,
+      "label": "before",
+      "condition": "pagedown",
+      "result": "paired-ff1-active-burst/pair-04-before-pagedown/pagedown/result.json",
+      "result_sha256": "110d400f341f4fe05bc734a04123001393996ed4d01138aa85bc1308f907dc5d",
+      "capture_sha256": "9dbb0e12979856e594967de2a5a83eefdae6b3c9df5ac58a9cf85a850b1adc05",
+      "checks": {
+        "frozen_expected_binary": true,
+        "frozen_expected_helper": true,
+        "frozen_expected_fixtures": true,
+        "frozen_expected_history": true,
+        "800_by_8_history": true,
+        "32_exact_typed_bytes": true,
+        "33_expected_prefixes": true,
+        "all_writes_complete": true,
+        "all_acknowledged_and_causal": true,
+        "acks_reproduced_from_capture": true,
+        "all_chunk_bytes_retained": true,
+        "p95_matches_record_clocks": true,
+        "clean_complete_echo_off": true,
+        "profiling_off": true,
+        "positioning_count": true,
+        "v1_capture_digest": true,
+        "v1_all_marker_frames_reproduced": true,
+        "v2_capture_digest": true,
+        "v2_paired_present_frames_reproduced": true,
+        "v2_unpaired_marker_count": true,
+        "v2_post_write_observed_count": true,
+        "v2_during_change_count": true
+      },
+      "latency_ms": {
+        "n": 32,
+        "min": 1.0059160413220525,
+        "median": 2.6109794853255153,
+        "p95": 28.516499907709658,
+        "max": 34.81133293826133
+      },
+      "type_gaps_ms": {
+        "n": 31,
+        "min": 25.2095420146361,
+        "median": 29.59104091860354,
+        "p95": 30.651208013296127,
+        "max": 31.360665918327868
+      },
+      "scroll_gaps_ms": {
+        "n": 148,
+        "min": 5.142792011611164,
+        "median": 6.268625031225383,
+        "p95": 7.668124977499247,
+        "max": 8.791791973635554
+      },
+      "scroll_writes": 149,
+      "actual_scroll_hz": 160.65086768177014,
+      "cpu_lifecycle_s": 2.113363999999999,
+      "load_before": [
+        244.47265625,
+        238.11865234375,
+        216.26416015625
+      ],
+      "load_after": [
+        255.86865234375,
+        240.89990234375,
+        217.634765625
+      ],
+      "phase_start": 604724.921154875,
+      "phase_end": 604725.846071,
+      "prefix_missing": 0,
+      "errors": [],
+      "viewport": {
+        "prephase_last": {
+          "at": 604724.908173458,
+          "record_ids": [
+            452
+          ]
+        },
+        "during_first": {
+          "at": 604724.92387975,
+          "record_ids": [
+            453,
+            454
+          ]
+        },
+        "during_last": {
+          "at": 604725.841409958,
+          "record_ids": [
+            709
+          ]
+        },
+        "during_present_count": 142,
+        "during_present_without_record_ids": 0,
+        "record_set_changes": 126,
+        "record_min": 453,
+        "record_max": 709,
+        "observed_present_ends_after_last_scroll_return": 1,
+        "excluded_unpaired_enable_markers": 2,
+        "last_real_present_with_records": {
+          "at": 604725.846595,
+          "record_ids": [
+            710,
+            711
+          ]
+        }
+      }
+    },
+    {
+      "pair": 4,
+      "label": "after",
+      "condition": "pagedown",
+      "result": "paired-ff1-active-burst/pair-04-after-pagedown/pagedown/result.json",
+      "result_sha256": "d92b6804fced6ebdd51b344c3c7c7afd00dc5f5add40ae1f8424ef3a0fb89ad4",
+      "capture_sha256": "436512eaca524663a0260e68531653f1229e62c4637334d725594c7e10dd8437",
+      "checks": {
+        "frozen_expected_binary": true,
+        "frozen_expected_helper": true,
+        "frozen_expected_fixtures": true,
+        "frozen_expected_history": true,
+        "800_by_8_history": true,
+        "32_exact_typed_bytes": true,
+        "33_expected_prefixes": true,
+        "all_writes_complete": true,
+        "all_acknowledged_and_causal": true,
+        "acks_reproduced_from_capture": true,
+        "all_chunk_bytes_retained": true,
+        "p95_matches_record_clocks": true,
+        "clean_complete_echo_off": true,
+        "profiling_off": true,
+        "positioning_count": true,
+        "v1_capture_digest": true,
+        "v1_all_marker_frames_reproduced": true,
+        "v2_capture_digest": true,
+        "v2_paired_present_frames_reproduced": true,
+        "v2_unpaired_marker_count": true,
+        "v2_post_write_observed_count": true,
+        "v2_during_change_count": true
+      },
+      "latency_ms": {
+        "n": 32,
+        "min": 0.5547499749809504,
+        "median": 1.5477705746889114,
+        "p95": 53.0439589638263,
+        "max": 80.86245902813971
+      },
+      "type_gaps_ms": {
+        "n": 31,
+        "min": 25.39604192133993,
+        "median": 28.553958050906658,
+        "p95": 30.039833043701947,
+        "max": 30.17479192931205
+      },
+      "scroll_gaps_ms": {
+        "n": 146,
+        "min": 5.125915980897844,
+        "median": 6.150229484774172,
+        "p95": 7.873499998822808,
+        "max": 10.682207997888327
+      },
+      "scroll_writes": 147,
+      "actual_scroll_hz": 161.2253123699903,
+      "cpu_lifecycle_s": 1.1871890000000036,
+      "load_before": [
+        255.86865234375,
+        240.89990234375,
+        217.634765625
+      ],
+      "load_after": [
+        259.36669921875,
+        242.125,
+        218.34033203125
+      ],
+      "phase_start": 604736.138709625,
+      "phase_end": 604737.046519291,
+      "prefix_missing": 0,
+      "errors": [],
+      "viewport": {
+        "prephase_last": {
+          "at": 604736.12711675,
+          "record_ids": [
+            452
+          ]
+        },
+        "during_first": {
+          "at": 604736.139770958,
+          "record_ids": [
+            453,
+            454
+          ]
+        },
+        "during_last": {
+          "at": 604737.025874541,
+          "record_ids": [
+            702
+          ]
+        },
+        "during_present_count": 128,
+        "during_present_without_record_ids": 0,
+        "record_set_changes": 114,
+        "record_min": 453,
+        "record_max": 702,
+        "observed_present_ends_after_last_scroll_return": 1,
+        "excluded_unpaired_enable_markers": 2,
+        "last_real_present_with_records": {
+          "at": 604737.047683833,
+          "record_ids": [
+            705,
+            706
+          ]
+        }
+      }
+    },
+    {
+      "pair": 4,
+      "label": "before",
+      "condition": "wheelup",
+      "result": "paired-ff1-active-burst/pair-04-before-wheelup/wheelup/result.json",
+      "result_sha256": "24d4d8173d10845d7652fdca75650b630a7c7723689878d1f286988662cab15b",
+      "capture_sha256": "0ffc68ac22f0bf583e6064842f22ff6f2ae08e183ade5a80e0096b8305833ddd",
+      "checks": {
+        "frozen_expected_binary": true,
+        "frozen_expected_helper": true,
+        "frozen_expected_fixtures": true,
+        "frozen_expected_history": true,
+        "800_by_8_history": true,
+        "32_exact_typed_bytes": true,
+        "33_expected_prefixes": true,
+        "all_writes_complete": true,
+        "all_acknowledged_and_causal": true,
+        "acks_reproduced_from_capture": true,
+        "all_chunk_bytes_retained": true,
+        "p95_matches_record_clocks": true,
+        "clean_complete_echo_off": true,
+        "profiling_off": true,
+        "positioning_count": true,
+        "v1_capture_digest": true,
+        "v1_all_marker_frames_reproduced": true,
+        "v2_capture_digest": true,
+        "v2_paired_present_frames_reproduced": true,
+        "v2_unpaired_marker_count": true,
+        "v2_post_write_observed_count": true,
+        "v2_during_change_count": true
+      },
+      "latency_ms": {
+        "n": 32,
+        "min": 0.8873329497873783,
+        "median": 2.430125023238361,
+        "p95": 29.15954205673188,
+        "max": 73.37983406614512
+      },
+      "type_gaps_ms": {
+        "n": 31,
+        "min": 25.22299997508526,
+        "median": 29.4915420236066,
+        "p95": 31.43708291463554,
+        "max": 32.239958993159235
+      },
+      "scroll_gaps_ms": {
+        "n": 147,
+        "min": 5.1126249600201845,
+        "median": 6.093209027312696,
+        "p95": 7.9431249760091305,
+        "max": 10.31104102730751
+      },
+      "scroll_writes": 148,
+      "actual_scroll_hz": 160.06971198931282,
+      "cpu_lifecycle_s": 0.8068869999999961,
+      "load_before": [
+        259.36669921875,
+        242.125,
+        218.34033203125
+      ],
+      "load_after": [
+        261.7392578125,
+        242.90283203125,
+        218.75390625
+      ],
+      "phase_start": 604741.419508125,
+      "phase_end": 604742.401318958,
+      "prefix_missing": 0,
+      "errors": [],
+      "viewport": {
+        "prephase_last": {
+          "at": 604741.4095125,
+          "record_ids": [
+            782
+          ]
+        },
+        "during_first": {
+          "at": 604741.421761583,
+          "record_ids": [
+            781,
+            782
+          ]
+        },
+        "during_last": {
+          "at": 604742.388968375,
+          "record_ids": [
+            759
+          ]
+        },
+        "during_present_count": 155,
+        "during_present_without_record_ids": 0,
+        "record_set_changes": 43,
+        "record_min": 759,
+        "record_max": 782,
+        "observed_present_ends_after_last_scroll_return": 4,
+        "excluded_unpaired_enable_markers": 2,
+        "last_real_present_with_records": {
+          "at": 604742.405415,
+          "record_ids": [
+            758,
+            759
+          ]
+        }
+      }
+    },
+    {
+      "pair": 4,
+      "label": "after",
+      "condition": "wheelup",
+      "result": "paired-ff1-active-burst/pair-04-after-wheelup/wheelup/result.json",
+      "result_sha256": "cc06ea6e44af94406a91983a0e87ab56694f9fe5385015ec39fe8322fd74f45a",
+      "capture_sha256": "f44630d3b65ef039ee0674347bfc1137d85cd0d4f0f13e33b583a69dea318022",
+      "checks": {
+        "frozen_expected_binary": true,
+        "frozen_expected_helper": true,
+        "frozen_expected_fixtures": true,
+        "frozen_expected_history": true,
+        "800_by_8_history": true,
+        "32_exact_typed_bytes": true,
+        "33_expected_prefixes": true,
+        "all_writes_complete": true,
+        "all_acknowledged_and_causal": true,
+        "acks_reproduced_from_capture": true,
+        "all_chunk_bytes_retained": true,
+        "p95_matches_record_clocks": true,
+        "clean_complete_echo_off": true,
+        "profiling_off": true,
+        "positioning_count": true,
+        "v1_capture_digest": true,
+        "v1_all_marker_frames_reproduced": true,
+        "v2_capture_digest": true,
+        "v2_paired_present_frames_reproduced": true,
+        "v2_unpaired_marker_count": true,
+        "v2_post_write_observed_count": true,
+        "v2_during_change_count": true
+      },
+      "latency_ms": {
+        "n": 32,
+        "min": 0.701082986779511,
+        "median": 1.9652085029520094,
+        "p95": 29.262666939757764,
+        "max": 39.955458021722734
+      },
+      "type_gaps_ms": {
+        "n": 31,
+        "min": 26.694207917898893,
+        "median": 29.31145904585719,
+        "p95": 30.329499975778162,
+        "max": 31.20341699104756
+      },
+      "scroll_gaps_ms": {
+        "n": 145,
+        "min": 5.187249975278974,
+        "median": 6.303207948803902,
+        "p95": 8.560082991607487,
+        "max": 12.410875060595572
+      },
+      "scroll_writes": 146,
+      "actual_scroll_hz": 155.42753626454484,
+      "cpu_lifecycle_s": 0.5996089999999974,
+      "load_before": [
+        261.7392578125,
+        242.90283203125,
+        218.75390625
+      ],
+      "load_after": [
+        262.080078125,
+        243.2861328125,
+        219.0302734375
+      ],
+      "phase_start": 604746.927242833,
+      "phase_end": 604747.865785166,
+      "prefix_missing": 0,
+      "errors": [],
+      "viewport": {
+        "prephase_last": {
+          "at": 604746.917195,
+          "record_ids": [
+            782
+          ]
+        },
+        "during_first": {
+          "at": 604746.956508125,
+          "record_ids": [
+            781,
+            782
+          ]
+        },
+        "during_last": {
+          "at": 604747.861891625,
+          "record_ids": [
+            758,
+            759
+          ]
+        },
+        "during_present_count": 147,
+        "during_present_without_record_ids": 0,
+        "record_set_changes": 45,
+        "record_min": 758,
+        "record_max": 782,
+        "observed_present_ends_after_last_scroll_return": 1,
+        "excluded_unpaired_enable_markers": 2,
+        "last_real_present_with_records": {
+          "at": 604747.861891625,
+          "record_ids": [
+            758,
+            759
+          ]
+        }
+      }
+    }
+  ],
+  "cpu_lower_pairs": 25,
+  "cpu_total_s": {
+    "before": 28.325080999999994,
+    "after": 19.436776000000002
+  },
+  "actual_type_gap_run_medians_ms": {
+    "n": 50,
+    "min": 27.770916931331158,
+    "median": 29.068145959172398,
+    "p95": 29.570624930784106,
+    "max": 29.64637498371303
+  },
+  "actual_scroll_hz": {
+    "n": 40,
+    "min": 152.3419353118705,
+    "median": 160.1847653394401,
+    "p95": 165.02641304844482,
+    "max": 166.4539753700014
+  },
+  "host_load1_endpoints": {
+    "n": 100,
+    "min": 162.7744140625,
+    "median": 215.432861328125,
+    "p95": 259.36669921875,
+    "max": 263.88720703125
+  },
+  "viewport_summary": {
+    "scroll_runs": 40,
+    "all_show_prephase_records": true,
+    "all_show_record_set_changes": true,
+    "all_have_observed_present_end_after_last_scroll_return": true,
+    "total_excluded_unpaired_markers": 100,
+    "during_presents_without_record_ids": 0
+  },
+  "source_bound": {
+    "terminal_rows": 45,
+    "fixed_chrome_rows": 8,
+    "maximum_page_rows": 37,
+    "minimum_fixture_content_rows": 6400,
+    "maximum_observed_direction_writes": 153,
+    "max_153_page_down_rows": 5661,
+    "minimum_available_scroll_rows": 6363,
+    "page_down_initial_pageup_writes": 200,
+    "wheel_down_initial_pageup_writes": 50
+  },
+  "scope": "Installed eb4 snapshot versus ff1 upgrade, not C-only causal isolation. Five independent pairs per condition; 32 keys within each run are correlated.",
+  "limits": [
+    "VT replay observes the emitted terminal text model, not physical paint. pyte Screen is an in-memory emulator; this does not validate every xterm/Ghostty extension.",
+    "Read-chunk timestamps are upper bounds on emission. A present end observed after a returned scroll write does not prove that write or all later writes were consumed.",
+    "Changing non-boundary Record sets supports actual viewport movement. It does not prove every scroll event changed a viewport or that movement was uniformly smooth.",
+    "CPU totals cover child startup, history reads, positioning, typing and teardown; positioning increased in this cohort, so old-cohort totals are not a causal comparator.",
+    "Earlier C normal-rate PageDown and burst/control results remain retained historical adverse evidence. They concern a different candidate; no normal-rate ff1 cohort was audited here.",
+    "Pooled p95 is descriptive. PageDown pooled p95 worsens despite a negative paired median; no uniform improvement or no-regression claim is supported.",
+    "Exact Unicode request verification, physical display, final installation CAS and live smoke are separate evidence layers."
+  ]
+}

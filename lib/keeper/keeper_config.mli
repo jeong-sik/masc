@@ -27,13 +27,9 @@ val validate_max_context_override_value : int -> (int, string) result
     Recognizes 1/true/yes/y/on and 0/false/no/n/off. *)
 val bool_of_env_default : string -> default:bool -> bool
 
-(** Parse a boolean env var, returning [None] when unset or unrecognized. *)
-val bool_of_env_opt : string -> bool option
-
 (** Parse a raw string as a boolean.
     Recognizes 1/true/yes/y/on and 0/false/no/n/off (case-insensitive).
-    Returns [None] for other values. Shared parsing logic for
-    [bool_of_env_default] and [bool_of_env_opt]. *)
+    Returns [None] for other values. *)
 val bool_of_string : string -> bool option
 
 (** Parse an integer env var with default and clamping. *)

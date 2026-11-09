@@ -12,8 +12,6 @@ val bool_of_string : string -> bool option
 
 val bool_of_env_default : string -> default:bool -> bool
 
-val bool_of_env_opt : string -> bool option
-
 (* ── Name validation ────────────────────────────────────────── *)
 
 val validate_name : string -> bool

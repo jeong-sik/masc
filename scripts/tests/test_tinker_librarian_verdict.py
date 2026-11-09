@@ -30,7 +30,7 @@ import synth_render
 import synth_rows as RW
 import synth_spec as S
 
-from tinker_librarian_fixtures import make_prompt
+from tinker_librarian_fixtures import make_prompt, make_template
 from tinker_librarian_synth_fixtures import PLANTED, candidates_of, request
 
 type Row = dict[str, object]
@@ -290,7 +290,9 @@ class RetemplateTest(unittest.TestCase):
             [item] = V.synth_items(path)
             other_rules = Path(tmp) / "librarian.md"
             other_rules.write_text(rules[:first_slot] + "\n" + added + rules[first_slot:], encoding="utf-8")
-            other = V.retemplated(item, synth_render.template_at(other_rules))
+            path, [other] = V.drawn_with(other_rules, [item])
+        self.assertEqual(path, other_rules)
+        self.assertEqual(V.drawn_with(None, [item]), (synth_render.TEMPLATE, [item]))
         self.assertEqual(V.retemplated(item, synth_render.template()), item)
         self.assertNotIn(added, item.text)
         self.assertIn(added, other.text)
@@ -298,6 +300,18 @@ class RetemplateTest(unittest.TestCase):
                          (item.prompt.current_memory, item.prompt.candidates))
         data = item.text.index(R.CANDIDATE_HEADER)
         self.assertTrue(other.text.endswith(item.text[data:]))
+
+    def test_retirement_evidence_goes_out_under_the_new_templates_policy(self) -> None:
+        payload = '{"evidence_kind":"exact_identity_retirement_history","status":"unavailable","detail":"x"}'
+        old, new = "Old retirement policy.", "New retirement policy."
+        prompt = make_prompt(make_template(old), retirement=R.RetirementSection(old, payload))
+        item = M.RealItem("i1", prompt, R.render(prompt), answer((("r1", "deferred", None),)))
+        other = V.retemplated(item, make_template(new))
+        self.assertTrue(other.text.endswith("\n\n" + new + "\n" + payload))
+        self.assertNotIn(old, other.text)
+        self.assertEqual(R.parse(other.text, make_template(new)), other.prompt)
+        with self.assertRaises(SystemExit):
+            V.retemplated(item, make_template())
 
 
 if __name__ == "__main__":

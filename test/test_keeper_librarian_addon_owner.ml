@@ -1736,7 +1736,7 @@ let run_guarded_scenario key =
   let exe = Unix.realpath Sys.executable_name in
   let pid=Unix.create_process "python3" [|"python3";"-c";program;exe;key|]
     Unix.stdin Unix.stdout Unix.stderr in
-  match snd (Unix.waitpid [] pid) with
+  match snd (Masc_test_deps.waitpid_nointr pid) with
   | Unix.WEXITED 0 -> ()
   | Unix.WEXITED 124 -> Alcotest.fail "scenario exceeded the process hang guard"
   | Unix.WEXITED code -> Alcotest.fail (Printf.sprintf "scenario exited %d" code)

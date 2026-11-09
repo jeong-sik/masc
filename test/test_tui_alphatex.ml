@@ -483,22 +483,22 @@ let test_a_bar_that_must_continue_starts_its_own_system () =
         (fun index system ->
            match system with
            | [] -> Alcotest.failf "system %d holds no fragment" index
-           | first :: rest ->
-               Alcotest.(check bool)
-                 (Printf.sprintf "system %d begins where its bar begins" index)
-                 true (first.left = Alphatex.Barline);
-               (* After the first fragment every fragment is a whole bar: a
-                  bar that continues was put on a line of its own. *)
+           | _ :: _ ->
+               (* The first fragment may begin its bar or resume one from the
+                  system before it. Every later fragment is a whole bar: a bar
+                  that has to continue was given a system of its own, so it
+                  never begins in the middle of a line. *)
                List.iteri
                  (fun position (part : Alphatex.fragment) ->
                     if position > 0 then
                       Alcotest.(check bool)
-                        (Printf.sprintf "system %d starts bar %d mid-line" index
-                           part.bar)
+                        (Printf.sprintf
+                           "system %d keeps bar %d whole after its first fragment"
+                           index part.bar)
                         true
                         (part.left = Alphatex.Barline
                          && part.right = Alphatex.Barline))
-                 rest)
+                 system)
         systems
 
 (* A bar the pane holds is never divided: only a bar wider than the pane is

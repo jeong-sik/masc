@@ -160,7 +160,7 @@ type failure =
       (** provider 가 말한 시각 전이라 부르지 않았다. *)
 ```
 
-`refused_for_binding_rest (Held _)` 는 `true` 다. CLI 실패를 갈래별로 다루는 lib 파일은 여섯 개다. 모두 `_ ->` 없이 새 갈래를 적는다.
+`refused_for_binding_rest (Held _)` 는 `true` 다. CLI 실패를 갈래별로 다루는 곳은 lib 다섯 파일과 `bin/masc_lane_cli_probe.ml` 이다. 모두 `_ ->` 없이 새 갈래를 적는다. walk receipt 의 원인 타입(`cli_cause`, `keeper_exact_walk_failure.ml:215`)에도 갈래가 생긴다. `cli_was_dispatched (Held _)` 는 `false` 다(`:285`). receipt 는 부른 slot 을 이 함수로 고르기 때문이다(`keeper_exact_walk_receipt.ml:292`).
 
 **Lane Add-on.** `lane_unavailable` 에 갈래를 하나 더한다.
 
@@ -171,16 +171,18 @@ type lane_unavailable =
       (** 모든 slot 이 provider 가 말한 시각까지 기다린다. 가장 이른 시각. *)
 ```
 
-이 타입의 뜻은 「Nothing was sent」다(`lane_addon_exact.mli:128`). runner 는 HTTP 와 CLI 의 `walk` 가 모두 비면 `call` 을 만들지 않고 이 값을 돌려준다(`server_lane_addon_exact.ml:254-258`). 그러면 host 는 `Started` 를 적지 않고 `Deferred (Lane_unavailable _)` 를 적는다(`lane_addon_exact.ml:938-942`). 일부만 기다리면 `call` 을 만든다. 기다리는 HTTP slot 은 receipt 의 `excluded_http` 에 적는다. 그 필드는 preflight 제외를 담는 자리이고(`keeper_exact_walk_receipt.mli:39-44`), 지금은 늘 `[]` 다(`server_lane_addon_exact.ml:202`).
+이 타입의 뜻은 「Nothing was sent」다(`lane_addon_exact.mli:128`). runner 는 HTTP 와 CLI 의 `walk` 가 모두 비면 `call` 을 만들지 않고 이 값을 돌려준다(`server_lane_addon_exact.ml:254-258`). 그러면 host 는 `Started` 를 적지 않고 `Deferred (Lane_unavailable _)` 를 적는다(`lane_addon_exact.ml:938-942`). 일부만 기다리면 `call` 을 만든다. 기다리는 HTTP slot 은 receipt 의 `excluded_http` 에 적는다. 그 필드는 preflight 제외를 담는 자리이고(`keeper_exact_walk_receipt.mli:39-44`), 지금은 늘 `[]` 다(`server_lane_addon_exact.ml:202`). `declared_http` 에는 기다리는 slot 도 넣는다. receipt 는 `excluded_http` 가 `declared_http` 안에 있어야 받는다(`keeper_exact_walk_receipt.ml:192`).
+
+새 `not_final` 값은 host 화면에도 나간다. JSON codec(`lane_addon_exact.ml` 의 `not_final_to_json`·`not_final_of_json`), health 표면의 코드(`keeper_memory_execution_availability.ml:103-112`), TUI(`bin/masc_tui_lane_addons.ml`), dashboard(`dashboard/src/api/lane-addon-host-requests.ts`, `dashboard/src/components/lane-addon-host-requests.ts`)를 같이 고친다.
 
 ### 3.4 호출처별 처리
 
 | 호출처 | 모두 기다릴 때 | 일부만 기다릴 때 |
 |---|---|---|
 | Lane Add-on (Candle) | runner 가 `Every_slot_held` 를 돌려준다. host 는 `Deferred` 로 적고 다음 event 를 기다린다. Candle 은 다음 tick 에 다시 읽고, 시각 전에는 provider 를 부르지 않는다 | 남은 slot 을 걷는다 |
-| Board attention | 걸을 HTTP slot 이 없고 기다리는 slot 이 있으면 HTTP 쪽은 `Lane_resting` 이다. CLI 쪽 `Held` 는 `Lane_resting` 이다. 둘 다 쉼이면 `Execution_deferred` 다(`keeper_board_attention_worker_disposition.ml:196-212`). 격리하지 않는다 | 지금 규칙 그대로. 기다리는 slot 은 쉼으로 센다 |
-| HITL 요약 | 기다리는 slot 은 identity 를 묶지 않는다. entry 는 걸음 전 상태로 남는다. 승인도 격리도 하지 않는다. `Cli_only` 와 HTTP 걸음 사이 갈림(`hitl_summary_flow_prepare.ml:117-127`)에 「모두 기다림」을 더한다 | 지금 규칙 그대로 |
-| Librarian | CLI 걸음이 `Slot_failures` 에 `Held` 를 담아 돌려준다(`keeper_librarian_runtime.ml:1125`). 크기 거절이 아니므로 줄이거나 나누거나 확정하지 않는다. 읽은 위치는 그대로다 | 지금 규칙 그대로 |
+| Board attention | CLI slot 이 있으면 CLI 걸음의 `Held` 가 `refused_for_binding_rest` 라서 지금 규칙대로 `Lane_resting` 이 되고 `Execution_deferred` 로 간다(`keeper_board_attention_worker_disposition.ml:196-212`). HTTP slot 만 있고 모두 기다리면 지금은 준비 단계의 설정 오류 `Lane_resolved_without_slots` 가 된다(`keeper_board_attention_exact_flow.ml:213`). 준비 결과에 「모두 기다림」을 더해 `Execution_deferred` 로 보낸다. 격리하지 않는다 | 지금 규칙 그대로. 기다리는 slot 은 쉼으로 센다 |
+| HITL 요약 | 기다리는 slot 은 identity 를 묶지 않는다. 지금 CLI 만 있는 lane 의 `Cli_fell_back` 은 entry 를 정산한다(`hitl_summary_worker.ml:60-65`). 그래서 CLI 걸음은 「모두 기다림」을 `Cli_fell_back` 과 다른 결과로 돌려준다. HTTP 만 있는 lane 은 지금 「no usable candidates」 오류가 된다(`hitl_summary_flow_prepare.ml:73`). 준비 결과(`:117-127`)에도 「모두 기다림」을 더한다. entry 는 걸음 전 상태로 남고, 승인도 격리도 하지 않는다 | 지금 규칙 그대로 |
+| Librarian | CLI 걸음이 `Slot_failures` 에 `Held` 를 담아 돌려준다(`keeper_librarian_runtime.ml:1125`). HTTP 만 있는 lane 에서 모두 기다리면 지금은 `No_transport_declared`(설정 실패, `:109`)로 읽힌다. 「모두 기다림」을 따로 돌려준다. 크기 거절이 아니므로 줄이거나 나누거나 확정하지 않는다. 읽은 위치는 그대로다 | 지금 규칙 그대로 |
 | vision tool | 「모든 image runtime 이 시각 t 까지 기다림」을 typed 결과로 돌려준다. `Vo_no_runtime`(`keeper_vision_tool.ml:678`)과 가른다 | 기다리지 않는 runtime 을 쓴다 |
 
 일부만 기다리는데 부른 slot 이 쉼이 아닌 이유로 실패하면 지금처럼 처분한다. 기다리는 slot 이 나중에 답할 수 있다는 이유로 격리를 미루지 않는다. 지금도 불렀다가 쉼으로 거절된 slot 은 그 이유로 격리를 막지 않는다. 이 RFC 는 그 규칙을 바꾸지 않는다.
@@ -231,7 +233,7 @@ L1(구현):
 - **verifier lane.** 이미 헌법 104-107 대로 기다린다.
 - **Stagehand.** 이 정렬을 쓰지 않는다.
 - **Antigravity 한도를 쉼으로 적기(#39696).** 기록하는 쪽 문제다. 적히면 이 규칙이 따른다.
-- **Anthropic API 사용 한도 400.** 사용 한도 초과가 잘못된 요청과 같은 400 `invalid_request_error` 로 온다. 공식 문서는 메시지 문자열로 가르지 말라고 한다. typed 신호가 없으므로 별도 이슈로 남긴다.
+- **Anthropic API 사용 한도 400.** 사용 한도 초과가 잘못된 요청과 같은 400 `invalid_request_error` 로 온다. 공식 문서는 메시지 문자열로 가르지 말라고 한다. typed 신호가 없으므로 #49686 에서 따로 정한다.
 
 ## 5. 고르지 않은 대안
 
@@ -265,7 +267,7 @@ TLA+ 모델은 두지 않는다. 이 규칙은 한 시점의 표를 읽는 순�
 ## 7. 단계
 
 - **L0 (이 PR, 문서만).** 이 RFC 와 3.7 의 L0 문장.
-- **L1 (구현, PR 하나).** 공유 판정, 세 정렬, 네 호출처와 Lane Add-on, vision tool, R6, `.mli` 문장, 6장의 테스트. 호출처를 나눠 내지 않는다. 나누면 한 호출처만 기다리고 나머지는 계속 부르는 중간 상태가 main 에 남는다. 고칠 파일은 약 20개다. 커밋은 5개 파일씩 나눈다.
+- **L1 (구현, PR 하나).** 공유 판정, 세 정렬, 네 호출처와 Lane Add-on, vision tool, R6, `.mli` 문장, 6장의 테스트. 호출처를 나눠 내지 않는다. 나누면 한 호출처만 기다리고 나머지는 계속 부르는 중간 상태가 main 에 남는다. 고칠 파일은 약 38개다(lib 23, bin 2, dashboard 3, test 10). 커밋은 5개 파일씩 나눈다. 새 갈래가 닿는 곳은 OCaml 과 TypeScript 타입 검사가 모두 짚는다.
 
 ## 8. 확인 못 한 것
 

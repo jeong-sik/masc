@@ -74,7 +74,6 @@ module Tool_contract = Agent_core_base.Tool_contract
 module Execution_json = Execution_json
 module Execution_tool_schedule = Execution_tool_schedule
 module Tool = Agent_core_base.Tool
-module Typed_tool = Typed_tool
 module Mcp = Mcp
 module Mcp_http = Mcp_http
 module Mcp_session = Mcp_session

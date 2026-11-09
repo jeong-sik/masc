@@ -7,7 +7,7 @@
 | --- | --- | --- | --- |
 | [42647821236](https://github.com/jeong-sik/masc/actions/runs/42647821236) | `671cf26047fdb8a8785bff33355972b3a1f03d66` | decode·Memory | failure. decode 407개 성공, Memory 14개 중 11개 성공·기존 UI 검사 3개 실패 |
 | [42652183034](https://github.com/jeong-sik/masc/actions/runs/42652183034) | `b56552704a5b1350d636449d57c1ff0d920c8adc` | decode·Memory, `minimal=true` | failure. Memory 13개 성공, decode 407개 중 406개 성공·집계가 불일치하는 fixture 1개 실패 |
-| [42654972273](https://github.com/jeong-sik/masc/actions/runs/42654972273) | `f35a50b9ec9ba4d3cdd03cf0d03ea57f5924f657` | decode만, `minimal=true` | 요청 직후 in_progress. 완료 성공은 아직 주장하지 않음 |
+| [42654972273](https://github.com/jeong-sik/masc/actions/runs/42654972273) | `f35a50b9ec9ba4d3cdd03cf0d03ea57f5924f657` | decode만, `minimal=true` | completed/success. 407개 모두 성공 |
 
 `initial-result.json`은 첫 실행의 terminal 결과다. `initial-selected.txt`는
 선택된 결과 행과 세 실패의 기대·관측값을 원래 runner 시각과 함께 보존한다.
@@ -31,6 +31,10 @@ payload·admission 대기에 맞춰 공통 표현과 검색을 결합했으므�
 이후 변경은 `test/test_tui_decode.ml` 한 파일뿐이다. 이미 성공한 Memory는
 반복하지 않고 decoder suite만 다시 요청했다. `decoder-recheck-request.json`은
 그 요청 직후의 실제 source 확인이다.
+`decoder-recheck-result.json`과 `decoder-recheck-selected.txt`는 완료 뒤
+API 결론과 runner의 407개 성공을 기록한다. 미관측 합계 보존과 잘못된 0의
+거절 검사도 이 실행의 선택 로그에 있다. Memory 13개 성공은 앞 실행에,
+decode 407개 성공은 후속 실행에 결속한다.
 
 `source-binding.json`은 실행 source의 Git entries에서 `docs/`와
 `changelog.d/`를 제외한 SHA-256이다. 후속 문서 커밋에서 소스·검사 입력이

@@ -85,7 +85,8 @@ fixture의 집계 불일치였다. 미관측 durable 행의 unread는 `null`인�
 수정 source `f35a50b9ec9ba4d3cdd03cf0d03ea57f5924f657`에서
 [Test 실행 42654972273](https://github.com/jeong-sik/masc/actions/runs/42654972273)를
 decode만 `minimal=true`로 요청하고 API의 실제 head를 확인했다. 당시 상태는
-in_progress다. `b565527…` 이후에는 `test/test_tui_decode.ml`만 바뀌어 이미
+in_progress였고 완료 후 API 결론은 success, runner의 407개 검사도 모두 성공했다.
+`b565527…` 이후에는 `test/test_tui_decode.ml`만 바뀌어 이미
 성공한 Memory 13개를 반복하지 않았다. 결과 기록은 Usage 층 위의 별도
 문서 층에 두며 그 Usage 구현을 이 검사로 실행했다고 주장하지 않는다.
 뒤에 추가된 Usage #50730도 함께 native rebase하고 atomic lease push했다.
@@ -93,6 +94,9 @@ in_progress다. `b565527…` 이후에는 `test/test_tui_decode.ml`만 바뀌어
 그 아래 10개 공개 head도 보존했다. 이 보존 확인을 Usage의 새 승인으로
 확대하지 않는다. 공개 12개 head·base와 선택한 실행 로그는
 [실행 기록](../evidence/four-surface-memory-validation-20261110/README.md)에 남긴다.
+
+Usage changelog의 자기 PR 인용이 누락된 형식 오류도 이 문서 층에서
+`#50730`을 더해 고쳤다. 제품 코드를 바꾸거나 중간 층을 다시 게시하지 않았다.
 
 이 실행은 Full CI·native TUI 관측·실제 Enter
 이벤트 처리·설치·서버 재시작·병합·배포 검증이 아니다.

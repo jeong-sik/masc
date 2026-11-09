@@ -136,5 +136,7 @@ and carries refused health rows into fleet fact coverage, including anonymous
 refusals and retained results. Filtered listing counts are named separately from
 store totals. New checks concern selected Keeper IDs and observation scope;
 the [targeted execution record](../../evidence/four-surface-memory-validation-20261110/README.md)
-keeps the initial failed run separate from the follow-up on the restacked
-v12-health source. A native capture of this follow-up is not claimed.
+keeps both failed runs and the later decoder-fixture repair. Memory's 13 cases
+passed on b5655270; the decoder's 407 cases passed on f35a50b9. Only the decoder
+test changed between those sources. This does not cover the later Usage layer
+or establish a native capture of this follow-up.

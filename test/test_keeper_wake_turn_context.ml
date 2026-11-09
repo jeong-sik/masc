@@ -428,6 +428,7 @@ let artifact_reader ~base_path =
       | Tool_result.Failed class_ -> Tool_result.make_err ~tool_name:schema.name
           ~class_ ~start_time:(Tool_timing.start ()) execution.raw_output
       | Tool_result.Deferred () -> fail "artifact read unexpectedly deferred")
+    |> Result.get_ok
 ;;
 
 let test_failed_payloads_remain_retrievable () =

@@ -30,7 +30,7 @@ val make_tool_bundle_for_capability_surface
   -> ?tool_result_inline_ceiling_bytes:(unit -> int)
   -> capability_surface:Keeper_capability_surface.t
   -> unit
-  -> Keeper_tools_agent_core.tool_bundle
+  -> (Keeper_tools_agent_core.tool_bundle, Tool_bridge.schema_error) result
 (** Build a bundle from the immutable Tool and Skill authority frozen by the
     turn caller. Named compositions receive its exact descriptor list, so they
     cannot widen the configured Tool Group surface.

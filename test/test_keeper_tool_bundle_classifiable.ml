@@ -1429,7 +1429,7 @@ let test_bundle_matches_expected_projection () =
         ~skill_snapshot:snapshot
         ~task_selection:(Some task_selection)
     with
-    | Error error -> fail (Keeper_task_skill_turn.error_to_string error)
+    | Error error -> fail (Keeper_effective_tool_surface.projection_error_to_string error)
     | Ok surface ->
       let effective_names =
         identity_names

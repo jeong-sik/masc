@@ -72,6 +72,7 @@ let artifact_reader base_path =
       | Tool_result.Failed class_ -> Tool_result.make_err ~tool_name:schema.name ~class_
           ~start_time:(Tool_timing.start ()) execution.raw_output
       | Tool_result.Deferred () -> fail "the artifact reader cannot defer")
+    |> Result.get_ok
 
 (* One Keeper turn on an outbox holding six receipts that do not fit inline.
    The provider refuses any request body over [carrier_window_bytes] with

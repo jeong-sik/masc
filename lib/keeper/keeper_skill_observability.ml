@@ -79,7 +79,9 @@ let tool_component_bytes (tool : Agent_core.Tool.t) =
 ;;
 
 let composition_tool_component_bytes entry =
-  Some (Keeper_tool_composition_surface.composition_schema_tool entry |> tool_component_bytes)
+  Keeper_tool_composition_surface.composition_schema_tool entry
+  |> Result.to_option
+  |> Option.map tool_component_bytes
 ;;
 
 let schedule_profile plan =

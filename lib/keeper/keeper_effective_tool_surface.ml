@@ -1,3 +1,5 @@
+open Result.Syntax
+
 type tool_origin =
   | Descriptor
   | Instruction_skill
@@ -68,6 +70,20 @@ type outcome =
   | Available of t
   | Unavailable of unavailable
 
+type projection_error =
+  | Task_skill_error of Keeper_task_skill_turn.error
+  | Tool_schema_error of Tool_bridge.schema_error
+
+let projection_error_to_string = function
+  | Task_skill_error error -> Keeper_task_skill_turn.error_to_string error
+  | Tool_schema_error error -> Tool_bridge.schema_error_to_string error
+
+let rec collect_rows = function
+  | [] -> Ok []
+  | row :: rest ->
+    Result.bind (Result.map_error (fun error -> Tool_schema_error error) row) (fun row ->
+      Result.map (fun rows -> row :: rows) (collect_rows rest))
+
 let client_kind (runtime : Runtime_instance.t) =
   match runtime.execution with
   | Runtime_execution.Agent_core _ -> "agent_core"
@@ -91,8 +107,8 @@ let descriptor_rows descriptors =
     (fun (descriptor : Keeper_tool_descriptor.t) ->
        List.map
          (fun name ->
-            ( { name; origin = Descriptor }
-            , descriptor_schema_tool descriptor name ))
+            Result.map (fun tool -> { name; origin = Descriptor }, tool)
+              (descriptor_schema_tool descriptor name))
          (Keeper_tool_descriptor.keeper_model_names descriptor))
     descriptors
 ;;
@@ -104,8 +120,7 @@ let composition_rows skill_catalog =
       composition.entry, composition.provenance)
   in
   Keeper_tool_composition_surface.schema_tool_rows ~skill_compositions ()
-  |> List.map (fun (origin, (schema_tool : Agent_core.Tool.t)) ->
-       let name = schema_tool.schema.name in
+  |> List.map (fun (origin, schema_tool) ->
        let origin =
          match origin with
          | Keeper_tool_composition_surface.Declared_composition provenance ->
@@ -114,7 +129,7 @@ let composition_rows skill_catalog =
          | Keeper_tool_composition_surface.Async_cancel
          | Keeper_tool_composition_surface.Transient_run -> Composition_control
        in
-       { name; origin }, schema_tool)
+       Result.map (fun (tool : Agent_core.Tool.t) -> { name = tool.schema.name; origin }, tool) schema_tool)
 ;;
 
 let project
@@ -157,7 +172,7 @@ let project
         ~snapshot:skill_snapshot task_skill_references
   in
   match bound with
-  | Error _ as error -> error
+  | Error error -> Error (Task_skill_error error)
   | Ok (task_selection, preparation) ->
     let global_skill_catalog = preparation.catalog in
     let projection_diagnostics = preparation.diagnostics in
@@ -201,11 +216,12 @@ let project
           Keeper_tool_composition_surface.instruction_skill_schema_tool
             ~instruction_skills:skills
         in
-        [ { name = schema_tool.schema.name; origin = Instruction_skill }, schema_tool ]
+        [ Result.map (fun (tool : Agent_core.Tool.t) ->
+            { name = tool.schema.name; origin = Instruction_skill }, tool) schema_tool ]
     in
     let composition_rows = composition_rows skill_catalog in
-    let rows =
-      descriptor_rows descriptors @ instruction_rows @ composition_rows
+    let* rows =
+      collect_rows (descriptor_rows descriptors @ instruction_rows @ composition_rows)
     in
     let instruction_skills, composition_skills, tools, schema_tools =
       match tool_delivery with
@@ -524,11 +540,13 @@ let resolve ~config ~keeper_name =
                      ~skill_snapshot
                  with
                  | Ok surface -> Available surface
-                 | Error error ->
-                   unavailable
-                     keeper_name
-                     ( Keeper_task_skill_turn.error_code error
-                     , Keeper_task_skill_turn.error_to_string error ))))))))
+                 | Error (Task_skill_error error) ->
+                   unavailable keeper_name
+                     (Keeper_task_skill_turn.error_code error,
+                      Keeper_task_skill_turn.error_to_string error)
+                 | Error (Tool_schema_error error) ->
+                   unavailable keeper_name
+                     ("tool_schema_invalid", Tool_bridge.schema_error_to_string error))))))))
 ;;
 
 let string_list values = `List (List.map (fun value -> `String value) values)

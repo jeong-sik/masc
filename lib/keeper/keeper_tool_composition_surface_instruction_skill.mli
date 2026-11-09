@@ -23,7 +23,7 @@ val instruction_skills_of_catalog : Keeper_skill_catalog.t -> instruction_skill 
 
 val instruction_skill_schema_tool :
   instruction_skills:instruction_skill list ->
-  Agent_core.Tool.t
+  (Agent_core.Tool.t, Tool_bridge.schema_error) result
 
 val activation_failure :
   ?reference:Skill_reference.t ->
@@ -40,4 +40,4 @@ val make_instruction_skill_tool :
      (Keeper_skill_activation_ledger.record_outcome, Keeper_skill_activation_recorder.error) result) ->
   ?assess_applicability:(reference:Skill_reference.t -> body:string -> Typesafeai_skill_applicability.t) ->
   ?on_result:(input:Yojson.Safe.t -> Tool_result.result -> unit) ->
-  instruction_skills:instruction_skill list -> unit -> Agent_core.Tool.t
+  instruction_skills:instruction_skill list -> unit -> (Agent_core.Tool.t, Tool_bridge.schema_error) result

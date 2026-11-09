@@ -921,7 +921,7 @@ let test_first_loss_retains_unproven_effects mode () =
         {provider=Masc.Keeper_publication_recovery_availability.non_runtime_provider;keeper_name=keeper} in
       let tools = Masc.Keeper_tool_composition_surface.make_tools ~capability_surface:(surface base_path)
           ~config ~meta ~publication_recovery ~ctx_snapshot:(Masc.Keeper_context_runtime.create ~eio:false ~system_prompt:"")
-          ~turn_ctx_cell:cell ~clock:(Eio.Stdenv.clock env) () in
+          ~turn_ctx_cell:cell ~clock:(Eio.Stdenv.clock env) () |> Result.get_ok in
       let tool = List.find_map (fun (tool,_,_) ->
         if tool.Agent_core.Tool.schema.name = Draft.run_tool_name then Some tool else None) tools |> Option.get in
       let invocation = Agent_core.Tool_contract.Invocation.create ~tool_use_id:"first-loss-manual-resume" ~turn:43

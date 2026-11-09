@@ -4491,6 +4491,7 @@ let make_dummy_agent_core_tool name =
          ; "required", `List []
          ])
     (fun _ -> Tool_result.make_ok ~tool_name:name ~start_time:(Tool_timing.start ()) ~data:(`String "") ())
+  |> Result.get_ok
 ;;
 
 let test_descriptor_route_miss_payload_is_typed_runtime_failure () =
@@ -10557,7 +10558,7 @@ let test_peer_delegate_schema_reaches_model_wires () =
     let plain = Masc.Tool_bridge.agent_core_tool_of_masc
         ~descriptor:(Agent_core.Tool.ordinary_descriptor Agent_core.Tool_contract.Serial)
         ~name:"masc_keeper_delegate" ~description:descriptor.description ~input_schema:expected
-        (fun input -> Tool_result.make_ok ~tool_name:"masc_keeper_delegate" ~start_time:(Tool_timing.start ()) ~data:input ()) in
+        (fun input -> Tool_result.make_ok ~tool_name:"masc_keeper_delegate" ~start_time:(Tool_timing.start ()) ~data:input ()) |> Result.get_ok in
     let erased = Agent_core.Tool.create ~name:plain.schema.name
         ~description:plain.schema.description ~parameters:plain.schema.parameters
         (fun _ -> Ok { Agent_core.Types.content = "unused"; content_blocks = None; _meta = None }) in

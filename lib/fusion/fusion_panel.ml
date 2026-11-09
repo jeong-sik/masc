@@ -142,7 +142,7 @@ let run_seat ~base_dir ~sw ~net ~prompt ~observe_tools (g : Fusion_policy.panel_
     ; route = Fusion_seat.unresolved_seat_route ~seat ~route
     }
   | Ok candidates ->
-    let tools = if g.web_tools then Fusion_agent_core.web_tool_bundle () else [] in
+    let tools = if g.web_tools then Fusion_agent_core.web_tool_bundle () else Ok [] in
     let traces = ref [] in
     let attempt_agent_core model =
       let observer =
@@ -162,11 +162,16 @@ let run_seat ~base_dir ~sw ~net ~prompt ~observe_tools (g : Fusion_policy.panel_
       in
       let result =
         match
-          Fusion_agent_core.build_agent ~sw ~net ~system_prompt:g.system_prompt
-            ?event_bus ~tools
-            ?max_tokens:g.max_output_tokens
-            ?timeout_s:g.timeout_s
-            ~name:panelist model
+          Result.bind
+            (Result.map_error
+               (fun error -> Fusion_types.Bridge_error (Tool_bridge.schema_error_to_string error))
+               tools)
+            (fun tools ->
+              Fusion_agent_core.build_agent ~sw ~net ~system_prompt:g.system_prompt
+                ?event_bus ~tools
+                ?max_tokens:g.max_output_tokens
+                ?timeout_s:g.timeout_s
+                ~name:panelist model)
         with
         | Error reason -> Error (reason, Fusion_types.zero_usage)
         | Ok agent ->

@@ -192,10 +192,8 @@ let legend =
     , "world line: not read yet or still being read; nothing is known, and it is not zero" )
   ; ( read_failed_word ~ko:false
     , "world line: the inventory could not be read just now; any count beside it is from \
-       an earlier read. The clause after it says why. workspace unconfirmed: reading is \
-       suspended until the workspace is confirmed again. Any other text: the failure as \
-       the client received it, cut with … to the width the row has left, or left out when \
-       too little is left" )
+       an earlier read. After it, why: workspace unconfirmed (reading is suspended), or \
+       the failure as received, cut with … or left out when the row is short" )
   ; ( no_ledger_word ~ko:false
     , "world line: the server found no curator ledger file when it looked; that is a \
        value, not an unknown" )

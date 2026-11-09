@@ -3,9 +3,6 @@
 val decision_id :
   meta:Keeper_meta_contract.keeper_meta -> ts:float -> suffix_seed:string -> string
 
-val tool_call_detail_to_json :
-  Keeper_agent_run.tool_call_detail -> Yojson.Safe.t
-
 val provider_context_json :
   meta:Keeper_meta_contract.keeper_meta ->
   ?executed_runtime_id:string ->

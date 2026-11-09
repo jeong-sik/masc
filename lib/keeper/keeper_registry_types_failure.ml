@@ -44,7 +44,7 @@ type failure_reason =
               runtime-exhausted construction path
               ([keeper_unified_turn_types.registry_failure_reason_of_raw_error]).
               Lets the supervisor decide retryability via
-              [Keeper_meta_contract.runtime_exhaustion_reason_retryable]
+              [Keeper_internal_error.runtime_exhaustion_reason_retryable]
               instead of reparsing [code]. [None] for non-exhaustion
               provider/runtime errors. *)
       ; fenced_empty_turn_runtime : string option

@@ -82,13 +82,6 @@ type runtime_exhaustion_reason = Keeper_internal_error.runtime_exhaustion_reason
           terminal for automatic retry and is never inferred from message text. *)
   | Other_detail of string
 
-val runtime_exhaustion_reason_retryable : runtime_exhaustion_reason -> bool
-(** Total typed retryability per reason variant. Transient/connectivity
-    reasons and candidate/capacity exhaustion are retryable;
-    [Session_conflict] and [Other_detail] (unknown free-text) are not. Replaces
-    a string-prefix reparse with a [_ -> false] catch-all that mis-biased
-    transient faults to terminal. *)
-
 (** {1 Runtime attempt provenance} *)
 
 type runtime_attempt_record = {

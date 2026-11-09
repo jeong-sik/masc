@@ -340,13 +340,37 @@ let test_the_guide_over_h2 () =
                 (get (Masc.Play_invite.agent_guide_path ^ "/x")).h2_status))))))
 
 let with_dos_worker ~env ~sw ~base_path f =
+  let config = Masc.Workspace.default_config base_path in
   Machine_worker_fixture.with_dos ~clock:(Eio.Stdenv.clock env) ~sw ~base_path
-    (fun ~invoke ~detach ->
+    (fun ~invoke:_ ~detach ->
+      (* The seat trails the worker by one observation: a call that may change
+         the controller is followed by a new observation, and scheduling that
+         follow-up is the host call path's job. Handing the test the worker RPC
+         directly bypassed it, so the seat kept reading the pre-load
+         observation and machine stayed false. Drive the exported tools through
+         the host boundary, controller included, like every production caller. *)
+      let export name =
+        let reading = Masc.Lane_addon_runtime.tool_export_snapshot ~config
+          ~access:Masc.Lane_addon_sources.Unauthenticated ~reserved:[] in
+        match List.find_opt (fun (candidate : Masc.Lane_addon_runtime.tool_export) ->
+          candidate.tool.name = name) reading.exports with
+        | Some export -> export
+        | None -> fail (name ^ " is not an exported tool") in
       let invoke ~holder name arguments =
         let controller = Some {Machine_controller_contract.observed_holder=holder;
           release=None;handoff_target=(if name="masc_dos_pass" then Some "minsu" else None)} in
-        match invoke ~principal:(Lane_addon_call_context.Host_actor "operator") ~controller ~name ~arguments with
-        | Error message -> fail message
+        let authority : Lane_addon_call_context.mediation =
+          fun ~release_controller:_ ~snapshot:_ ~invoke -> invoke controller in
+        match Masc.Lane_addon_runtime.call_exported_tool_with_authority
+          ~on_complete:(fun ()) ~on_result:(fun _ -> ()) ~authorize:(Some authority)
+          ~principal:(Some (Lane_addon_call_context.Host_actor "operator"))
+          ~config ~access:Masc.Lane_addon_sources.Unauthenticated ~reserved:[]
+          ~export:(export name) ~arguments with
+        | Error (Host_refusal (Rejected detail)) -> fail (name ^ ": " ^ detail)
+        | Error (Host_refusal (Unavailable detail)) -> fail (name ^ ": " ^ detail)
+        | Error (Host_refusal (Activity_disabled detail)) -> fail (name ^ ": " ^ detail)
+        | Error (Host_refusal (Activity_unobserved detail)) -> fail (name ^ ": " ^ detail)
+        | Error (Unavailable detail | Outcome_unknown detail) -> fail (name ^ ": " ^ detail)
         | Ok result -> check bool (name ^ " accepted by worker") false (result.is_error = Some true) in
       f ~invoke ~detach)
 
@@ -397,7 +421,19 @@ let test_the_seat () =
         check bool "the seat poll does not carry the roster" true (member "participants" answer = None);
         invoke ~holder:None "masc_dos_load" (`Assoc ["program",`String "game.com"]);
         invoke ~holder:(Some "operator") "masc_dos_pass" (`Assoc ["to",`String "minsu"]);
-        let answer = read () in
+        (* Each May_change call schedules a fresh observation and the seat
+           trails the worker by that one observation, so poll until the
+           refreshed row lands instead of asserting on the stale one; the
+           outer 30 s timeout bounds a stalled worker. *)
+        let rec settled () =
+          let response = seat (Some player) in
+          match status_of response with
+          | 200 ->
+            let answer = Yojson.Safe.from_string (snd (split_response response)) in
+            if member "machine" answer = Some (`Bool true) then answer
+            else (Eio.Time.sleep (Eio.Stdenv.clock env) 0.01; settled ())
+          | _ -> Eio.Time.sleep (Eio.Stdenv.clock env) 0.01; settled () in
+        let answer = settled () in
         check bool "a machine" true (member "machine" answer = Some (`Bool true));
         check bool "the invite holds the controller" true
           (member "controller" answer = Some (`String "minsu"));

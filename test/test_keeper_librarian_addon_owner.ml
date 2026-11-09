@@ -11,6 +11,7 @@ module Current = Keeper_memory_os_current
 module Types = Keeper_memory_os_types
 module Capture = Keeper_librarian_admission_capture
 module Parts = Keeper_librarian_admission_parts
+module Closure = Keeper_librarian_admission_closure
 module Gate = Keeper_librarian_admission_gate
 module Commit = Keeper_librarian_admission_commit
 module Owner = Lane_addon_tool_request_owner
@@ -331,6 +332,93 @@ let with_fixture ?(initial=["a","Durable A";"b","Durable B"]) f =
         set_enabled fixture false;
         Memory_lane.For_testing.reset ())))))))))))
 
+let closure_manifest fixture = io (fun () ->
+  let owner=original_owner fixture.base_path fixture.keepers_dir in
+  let inventory=Parts.discover ~store:fixture.store ~owner |> get in
+  let candidates=Parts.completion_candidates inventory
+    |> Option.to_result ~none:"fixture forest is not structurally complete" |> get in
+  let originals=List.concat_map (fun (kind,scope) ->
+    Owner.load_scope ~store:fixture.store ~scope |> owned
+    |> List.map (fun record -> kind,record))
+    [Closure.Part,Parts.scope owner;Closure.Partition,Parts.partition_scope owner;
+     Closure.Execution,Capture.scope owner;Closure.Gate,Gate.scope owner] in
+  let manifest=Closure.retain ~store:fixture.store ~owner
+    ~request_id:(Capture.fresh_request_id owner) ~candidates ~originals |> get in
+  owner,manifest)
+let closure_preflight fixture = io (fun () ->
+  Lane_addon_store_preflight.scan ~validate_tool_request:Keeper_librarian_store_preflight.validator
+    Lane_addon_store_preflight.Store.Tool_request_owners ~base_path:fixture.base_path |> get)
+let close_member fixture manifest member = io (fun () ->
+  Owner.settle ~store:fixture.store ~date:(Closure.date manifest) (Closure.member_record member)
+  |> Result.map_error Owner.settle_error_to_string |> get)
+let test_closure_projection_preserves_each_partial_move ()=with_fixture (fun ~sw:_ fixture ->
+  drive_until fixture settled |> assert_settled;
+  let owner,manifest=closure_manifest fixture in
+  let posts=F.post_count fixture.server in
+  let memory_path=Current.path_for_keepers_dir ~keepers_dir:fixture.keepers_dir ~keeper_id:keeper_name in
+  let queue_path=Queue.path ~keepers_dir:fixture.keepers_dir ~keeper_id:keeper_name in
+  let memory_before=io (fun () -> Fs_compat.load_file memory_path) in
+  let queue_before=io (fun () -> Fs_compat.load_file queue_path) in
+  let manifest=memory_action fixture (fun () -> io (fun () -> Closure.intend ~store:fixture.store manifest |> get)) in
+  (match Progress.phase (Closure.record manifest).progress with
+   | Progress.Committing _ -> ()
+   | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Commit_unknown _ | Finished _
+   | Conflicted _ | Rejected _ | Subdividing _ | Subdivided _ -> fail "closure observed completion before moving members");
+  List.iter (fun member ->
+    memory_action fixture (fun () -> close_member fixture manifest member);
+    let report=closure_preflight fixture in
+    check int "each interrupted movement remains compatible" 0 (List.length report.refusals);
+    let archived=io (fun () ->
+      let record=Closure.member_record member in
+      Owner.load_settled ~store:fixture.store ~scope:(Owner.Record.scope record)
+        ~date:(Closure.date manifest) ~request_id:(Owner.Record.request_id record) |> owned) in
+    check bool "a moved member has exact archived metadata" true
+      (match archived with None -> false | Some actual ->
+        Yojson.Safe.equal (Owner.record_to_json actual) (Owner.record_to_json (Closure.member_record member)));
+    let sweep=io (fun () -> Server_settled_archive_sweep.run ~store:fixture.store
+      |> Result.map_error Server_settled_archive_sweep.error_to_string |> get) in
+    check int "the live closure protects every required archive marker" 0 sweep.removed_records)
+    (Closure.members manifest);
+  let manifest=memory_action fixture (fun () -> io (fun () -> Closure.confirm ~store:fixture.store manifest |> get)) in
+  check int "the after-state remains readable before the anchor moves" 0
+    (List.length (closure_preflight fixture).refusals);
+  memory_action fixture (fun () -> io (fun () ->
+    Owner.settle ~store:fixture.store ~date:(Closure.date manifest) (Owner.listed (Closure.record manifest))
+    |> Result.map_error Owner.settle_error_to_string |> get));
+  check int "the closure leaves no active original" 0
+    (io (fun () -> Owner.discover_all ~store:fixture.store |> owned |> List.length));
+  check int "the finished forest is absent" 0
+    (io (fun () -> Parts.discover ~store:fixture.store ~owner |> get |> Parts.roots |> List.length));
+  check string "closing never rewrites Memory" memory_before (io (fun () -> Fs_compat.load_file memory_path));
+  check string "closing never acknowledges a queue row" queue_before (io (fun () -> Fs_compat.load_file queue_path));
+  check int "closing and preflight never dispatch" posts (F.post_count fixture.server))
+let test_captured_closure_cannot_explain_a_missing_member ()=with_fixture (fun ~sw:_ fixture ->
+  drive_until fixture settled |> assert_settled;
+  let _,manifest=closure_manifest fixture in
+  memory_action fixture (fun () -> close_member fixture manifest (List.hd (Closure.members manifest)));
+  check bool "retaining a manifest is not permission to omit a member" true
+    ((closure_preflight fixture).refusals<>[]))
+let test_closing_manifest_does_not_hide_changed_or_missing_evidence missing ()=with_fixture (fun ~sw:_ fixture ->
+  drive_until fixture settled |> assert_settled;
+  let _,manifest=closure_manifest fixture in
+  let manifest=memory_action fixture (fun () -> io (fun () -> Closure.intend ~store:fixture.store manifest |> get)) in
+  let member=List.hd (Closure.members manifest) in
+  let record=Closure.member_record member in
+  if missing then (
+    memory_action fixture (fun () -> close_member fixture manifest member);
+    io (fun () -> Sys.remove (Filename.concat (Store.root fixture.store)
+      (Store.tool_request_archive_record_path ~scope:(Owner.Record.scope record)
+        ~date:(Closure.date manifest) ~request_id:(Owner.Record.request_id record)))))
+  else io (fun () ->
+    let json=Owner.record_to_json record in
+    let json=match json with
+      | `Assoc fields -> `Assoc (List.map (fun (key,value) -> key,if key="tool" then `String "changed" else value) fields)
+      | _ -> fail "owner metadata is not an object" in
+    Store.save_tool_request_owner fixture.store ~scope:(Owner.Record.scope record)
+      ~request_id:(Owner.Record.request_id record) json |> get);
+  check bool "the closure cannot borrow missing or changed evidence" true
+    ((closure_preflight fixture).refusals<>[]))
+
 let test_actual_happy_path ()=with_fixture (fun ~sw:_ fixture ->
   let ids=io (fun () -> match pending fixture.keepers_dir with Some batch -> Queue.candidate_ids batch
     | None -> fail "fixture inputs are absent") in
@@ -618,18 +706,22 @@ let test_sparse_whole_candidate_partition_reads_fresh_memory ()=
        once for the scan. Before it kept the proof, every record read both
        scopes again, and a workspace with dozens of records per owner took
        minutes to scan. *)
-    let forest_reads=ref 0 and validated=ref 0 in
+    let forest_reads=ref 0 and closure_reads=ref 0 and validated=ref 0 in
     let counting ()=
       let validate=Keeper_librarian_store_preflight.validator () in
-      fun ~read ~read_scope ~read_body record ->
+      fun ~read ~read_scope ~read_body ~read_archive record ->
         incr validated;
-        validate ~read ~read_body record
-          ~read_scope:(fun ~scope -> incr forest_reads;read_scope ~scope) in
+        validate ~read ~read_body ~read_archive record
+          ~read_scope:(fun ~scope ->
+            if Keeper_librarian_admission_closure.is_scope scope then incr closure_reads
+            else incr forest_reads;
+            read_scope ~scope) in
     let report=io (fun () -> Lane_addon_store_preflight.scan ~validate_tool_request:counting
       Lane_addon_store_preflight.Store.Tool_request_owners ~base_path:fixture.base_path) |> get in
     check int "the preflight refuses none of the owner's real records" 0 (List.length report.refusals);
     check bool "the scan validated several records of the one owner" true (!validated>2);
-    check int "the owner's parts and partitions are read once for the whole scan" 2 !forest_reads)
+    check int "the owner's parts and partitions are read once for the whole scan" 2 !forest_reads;
+    check int "the empty closure scope is read once for the whole scan" 1 !closure_reads)
 
 let test_purge_cancels_waiting_memory_unit_without_consumption ()=with_fixture (fun ~sw fixture ->
   let arrived,signal=Eio.Promise.create () and release,unblock=Eio.Promise.create () in
@@ -1755,6 +1847,12 @@ let () =
   if Sys.getenv_opt "MASC_TEST_46252_WAKE" = Some "1" then (
     test_configuration_wake_completes_before_concurrent_settle (); exit 0);
   run "Actual Addon Librarian explicit-candidate owner" ["production",[
+  test_case "closure preflight and sweep preserve each partial movement" `Quick test_closure_projection_preserves_each_partial_move;
+  test_case "a Captured closure cannot explain a missing member" `Quick test_captured_closure_cannot_explain_a_missing_member;
+  test_case "a closing manifest cannot hide changed live metadata" `Quick
+    (test_closing_manifest_does_not_hide_changed_or_missing_evidence false);
+  test_case "a closing manifest cannot hide a missing archive marker" `Quick
+    (test_closing_manifest_does_not_hide_changed_or_missing_evidence true);
   test_case "captured admission and retirement policy survive override changes" `Quick test_admission_capture_keeps_original_policy;
   test_case "unused retirement policy cannot block capture or ACK" `Quick test_unused_retirement_policy_does_not_block_admission;
   test_case "retirement policy is required only for its actual suffix" `Quick test_retirement_policy_is_required_only_for_its_suffix;

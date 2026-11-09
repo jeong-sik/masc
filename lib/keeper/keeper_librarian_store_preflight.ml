@@ -1,11 +1,12 @@
 module Owner = Lane_addon_tool_request_owner
 module Admission = Keeper_librarian_admission_capture
 module Parts = Keeper_librarian_admission_parts
+module Closure = Keeper_librarian_admission_closure
 module History = Keeper_librarian_durable_request
 module Floor = Keeper_librarian_floor_step_request
 open Result.Syntax
 
-type purpose = Admission_execution | Admission_part | Admission_partition
+type purpose = Admission_execution | Admission_part | Admission_partition | Admission_closure
   | History_execution | Floor_execution | Admission_gate | History_gate | Floor_gate
 
 (* Producers own their Store protocol namespaces. Recognition grants no live
@@ -17,7 +18,7 @@ let purpose scope =
      Keeper_librarian_floor_step_gate.is_scope,Floor_gate;
      Admission.is_scope,Admission_execution;History.is_scope,History_execution;
      Floor.is_scope,Floor_execution;Parts.is_scope,Admission_part;
-     Parts.is_partition_scope,Admission_partition]
+     Parts.is_partition_scope,Admission_partition;Closure.is_scope,Admission_closure]
 
 let owner_json (record:Owner.retained) = match record.request with
   | `Assoc fields -> Option.to_result ~none:"Original Librarian payload has no captured owner"
@@ -55,7 +56,7 @@ let validator () =
   let admission_capture ~read ~read_scope ~owner record =
     let* ()=forest ~read_scope ~owner in
     Admission.restore ~owner ~load_parent:(Parts.load_parent_payload ~read ~owner) record in
-  fun ~read ~read_scope ~read_body (record:Owner.retained) ->
+  let validate ~read ~read_scope ~read_body (record:Owner.retained) =
   match purpose record.scope with
   | None -> Ok ()
   | Some Admission_execution ->
@@ -70,6 +71,9 @@ let validator () =
     let* owner=admission_owner record in
     let* ()=Parts.validate_partition_payload ~owner record in
     forest ~read_scope ~owner
+  | Some Admission_closure ->
+    let* owner=admission_owner record in
+    let+ _=Closure.restore ~owner record in ()
   | Some History_execution ->
     let* owner=history_owner record in
     let* capture=history_capture ~read ~owner record in
@@ -99,3 +103,39 @@ let validator () =
     let* parent=parent ~read ~scope:(Floor.scope owner) ~request_id in
     let* capture=floor_capture ~read ~owner parent in
     Gate.validate_payload ~read ~read_body ~owner ~capture ~parent ~record
+  in
+  (* Only an empty closure scope is shared for this read-only scan, just as
+     the immutable forest proof above is. Present transactions are read again
+     because their journal and members can advance during a live install. *)
+  let absent=Hashtbl.create 16 in
+  fun ~read ~read_scope ~read_body ~read_archive (record:Owner.retained) ->
+  match purpose record.scope with
+  | None | Some (History_execution | Floor_execution | History_gate | Floor_gate) ->
+    validate ~read ~read_scope ~read_body record
+  | Some (Admission_execution | Admission_part | Admission_partition | Admission_gate | Admission_closure) ->
+    let* owner=admission_owner record in
+    let key=Closure.scope owner in
+    if Hashtbl.mem absent key then validate ~read ~read_scope ~read_body record else
+    let* view=Closure.project ~owner ~read ~read_scope ~read_body ~read_archive in
+    match view.closure with
+    | None ->
+      Hashtbl.replace absent key ();
+      validate ~read ~read_scope ~read_body record
+    | Some closure ->
+      let* ()=if Closure.is_scope record.scope then
+        let current=Closure.record closure in
+        if Yojson.Safe.equal (Owner.record_to_json (Owner.listed current))
+             (Owner.record_to_json (Owner.listed record)) then Ok ()
+        else Error "Admission closure changed during preflight"
+        else
+          let* current=view.read ~scope:record.scope ~request_id:record.request_id in
+          match current with
+          | Some current when Yojson.Safe.equal (Owner.record_to_json (Owner.listed current))
+              (Owner.record_to_json (Owner.listed record)) -> Ok ()
+          | None | Some _ -> Error "Admission closure member changed during preflight" in
+      let check=validate ~read:view.read ~read_scope:view.read_scope ~read_body:view.read_body in
+      let* ()=check record in
+      if Closure.is_scope record.scope then
+        List.fold_left (fun result original -> let* ()=result in check original)
+          (Ok ()) view.live_members
+      else Ok ()

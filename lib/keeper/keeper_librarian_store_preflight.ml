@@ -115,13 +115,16 @@ let validator () =
   | Some (Admission_execution | Admission_part | Admission_partition | Admission_gate | Admission_closure) ->
     let* owner=admission_owner record in
     let key=Closure.scope owner in
-    if Hashtbl.mem absent key then validate ~read ~read_scope ~read_body record else
+    if Hashtbl.mem absent key && not (Closure.is_scope record.scope)
+    then validate ~read ~read_scope ~read_body record else
+    let ()=if Closure.is_scope record.scope then Hashtbl.remove absent key in
     let* view=Closure.project ~owner ~read ~read_scope ~read_body ~read_archive in
     match view.closure with
     | None ->
       Hashtbl.replace absent key ();
       validate ~read ~read_scope ~read_body record
     | Some closure ->
+      Hashtbl.remove absent key;
       let* ()=if Closure.is_scope record.scope then
         let current=Closure.record closure in
         if Yojson.Safe.equal (Owner.record_to_json (Owner.listed current))

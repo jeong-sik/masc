@@ -44,19 +44,9 @@ let list decode = function
   | `List values -> List.fold_right (fun json rest ->
       let* rest=rest in let+ value=decode json in value::rest) values (Ok [])
   | _ -> Error "Admission closure requires an array"
-let candidate_json (id:Current.explicit_candidate_id) = `Assoc [
-  "queue_generation",`String id.queue_generation;"request_id",`String id.request_id;
-  "sequence",`Int id.sequence;"input_sha256",`String id.input_sha256]
-let candidate_of_json json =
-  let* f=fields ["queue_generation";"request_id";"sequence";"input_sha256"] json in
-  let* queue_generation=text (value "queue_generation" f) in
-  let* request_id=text (value "request_id" f) in
-  let* input_sha256=text (value "input_sha256" f) in
-  let* sequence=match value "sequence" f with `Int n when n>0 -> Ok n
-    | _ -> Error "Admission closure candidate sequence is invalid" in
-  let+ ()=require (String_util.is_lowercase_sha256_hex input_sha256)
-    "Admission closure candidate digest is invalid" in
-  {Current.queue_generation;request_id;sequence;input_sha256}
+let candidate_json=Keeper_memory_os_current_range_codec.explicit_candidate_id_to_json
+let candidate_of_json json=Keeper_memory_os_current_range_codec.explicit_candidate_id_of_json json
+  |> Result.map_error Keeper_memory_os_types.wire_error_to_string
 let member_json member = `Assoc ["kind",kind_json member.kind;
   "record",Owner.record_to_json member.metadata;
   "request",Option.value ~default:`Null member.payload]
@@ -183,11 +173,18 @@ let date value=value.day
 let record value=value.original
 let named_ids value=List.map (fun member -> Record.request_id member.metadata) value.originals
 let retain ~store ~owner ~request_id ~candidates:ids ~originals =
+  let* source_scope=Capture.scope_of_request_id request_id in
+  let* ()=require (source_scope=Capture.scope owner) "Admission closure ID belongs to another owner" in
   let* day=Capture.minted_on request_id in
   let originals=List.map (fun (kind,(record:Owner.retained)) ->
     {kind;metadata=Owner.listed record;payload=(match kind with
       | Execution -> None | Part | Partition | Gate -> Some record.request)}) originals in
   let* ()=validate_members ~owner ~ids originals in
+  let* existing=Owner.discover ~store ~scope:(scope owner) |> owned in
+  let* ()=require (List.for_all (fun record -> Record.request_id record=request_id) existing)
+    "An admission closing transaction already exists" in
+  let* archived=Owner.load_settled ~store ~scope:(scope owner) ~date:day ~request_id |> owned in
+  let* ()=require (Option.is_none archived) "An admission closure ID was already settled" in
   let* first=List.find_opt (fun member -> member.kind=Part) originals
     |> Option.to_result ~none:"Cannot close an empty admission forest" in
   let request=manifest_json ~owner ~id:request_id ~day ~ids originals in
@@ -231,9 +228,8 @@ let project ~owner ~read ~read_scope ~read_body ~read_archive =
     let expected_scope scope=List.exists (fun kind -> scope=scope_for owner kind) [Part;Partition;Execution;Gate] in
     let member_at scope id=List.find_opt (fun member -> Record.scope member.metadata=scope
       && Record.request_id member.metadata=id) closure.originals in
-    let locate member =
+    let check_location member current =
       let scope=Record.scope member.metadata and request_id=Record.request_id member.metadata in
-      let* current=read ~scope ~request_id in
       match current with
       | Some current ->
         let* ()=require (closure.state<>Closed) "Closed admission manifest still has live members" in
@@ -243,24 +239,31 @@ let project ~owner ~read ~read_scope ~read_body ~read_archive =
         let* archived=read_archive ~scope ~date:closure.day ~request_id in
         let* archived=Option.to_result ~none:"Admission closure member is neither live nor archived" archived in
         let+ ()=same_record member archived in None in
+    let locate member =
+      let* current=read ~scope:(Record.scope member.metadata) ~request_id:(Record.request_id member.metadata) in
+      check_location member current in
     let projected_read ~scope ~request_id =
       if not (expected_scope scope) then read ~scope ~request_id else
       match member_at scope request_id with
       | None -> Error "Admission closure does not name this original"
       | Some member -> let* current=locate member in
         match current with Some _ -> Ok current | None -> materialize member in
-    let projected_scope ~scope =
-      if not (expected_scope scope) then read_scope ~scope else
-      let* current=read_scope ~scope in
+    let check_scope ~scope current =
       let* ()=List.fold_left (fun result (record:Owner.retained) -> let* ()=result in
         match member_at scope record.request_id with
         | None -> Error "A new original appeared while its admission forest was closing"
         | Some member -> same_record member (Owner.listed record)) (Ok ()) current in
-      List.fold_left (fun result member -> let* records=result in
-        if Record.scope member.metadata<>scope then Ok records else
-        let+ record=projected_read ~scope ~request_id:(Record.request_id member.metadata) in
-        Option.fold ~none:records ~some:(fun record -> record::records) record) (Ok []) closure.originals
-      |> Result.map List.rev in
+      List.fold_left (fun result member -> let* (records,live)=result in
+        if Record.scope member.metadata<>scope then Ok (records,live) else
+        let actual=List.find_opt (fun (record:Owner.retained) -> record.request_id=Record.request_id member.metadata) current in
+        let* actual=check_location member actual in
+        let+ record=match actual with Some _ -> Ok actual | None -> materialize member in
+        Option.fold ~none:records ~some:(fun record -> record::records) record,
+        Option.fold ~none:live ~some:(fun record -> record::live) actual) (Ok ([],[])) closure.originals
+      |> Result.map (fun (records,live) -> List.rev records,List.rev live) in
+    let projected_scope ~scope =
+      if not (expected_scope scope) then read_scope ~scope else
+      let* current=read_scope ~scope in let+ projected,_=check_scope ~scope current in projected in
     let projected_body ~scope ~request_digest =
       match List.find_opt (fun member -> Record.scope member.metadata=scope
         && Record.request_digest member.metadata=request_digest) closure.originals with
@@ -270,9 +273,11 @@ let project ~owner ~read ~read_scope ~read_body ~read_archive =
         match current,member.payload with
         | Some _,_ | None,None -> read_body ~scope ~request_digest
         | None,Some payload -> Ok payload in
-    let* live_members=List.fold_left (fun result member ->
-      let* records=result in let+ record=locate member in
-      Option.fold ~none:records ~some:(fun record -> record::records) record) (Ok []) closure.originals in
+    let* live_members=List.fold_left (fun result kind ->
+      let* records=result in
+      let scope=scope_for owner kind in
+      let* current=read_scope ~scope in
+      let+ _,live=check_scope ~scope current in records @ live) (Ok []) [Part;Partition;Execution;Gate] in
     let live_kind kind=List.exists (fun (record:Owner.retained) -> record.scope=scope_for owner kind) live_members in
     let absent_kind kind=List.exists (fun member -> member.kind=kind
       && not (List.exists (fun (record:Owner.retained) -> record.scope=Record.scope member.metadata
@@ -280,7 +285,5 @@ let project ~owner ~read ~read_scope ~read_body ~read_archive =
     let* ()=require (not (live_kind Gate && absent_kind Execution)
       && not ((absent_kind Part || absent_kind Partition) && (live_kind Gate || live_kind Execution)))
       "Admission closure violated gate/execution/source settlement order" in
-    let* ()=List.fold_left (fun result kind -> let* ()=result in
-      let+ _=projected_scope ~scope:(scope_for owner kind) in ()) (Ok ()) [Part;Partition;Execution;Gate] in
     Ok {closure=Some closure;read=projected_read;read_scope=projected_scope;
-        read_body=projected_body;live_members=List.rev live_members}
+        read_body=projected_body;live_members}

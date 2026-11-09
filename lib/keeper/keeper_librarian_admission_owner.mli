@@ -23,3 +23,10 @@ val run : base_path:string -> keeper_name:string -> outcome
     first. A conflicting export is [Unavailable], not off.
     [Settled] requires an actual receipt-backed commit, and [has_more] names
     only input appended beyond the original frontier. *)
+module For_testing : sig
+  val run : after_settle:(Lane_addon_tool_request_owner.Record.t -> (unit, string) result) ->
+    base_path:string -> keeper_name:string -> outcome
+  (** The production owner with a fault port after each successful closure
+      member settle. Caller holds the same Memory lane and purge fence.
+      Returning Error stops before further moves, completion or new work. *)
+end

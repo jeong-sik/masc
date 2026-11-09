@@ -1,5 +1,6 @@
 module Capture = Keeper_librarian_admission_capture
 module Parts = Keeper_librarian_admission_parts
+module Closure = Keeper_librarian_admission_closure
 module Dispatch = Keeper_librarian_admission_dispatch
 module Commit = Keeper_librarian_admission_commit
 module Gate_journal = Keeper_librarian_admission_gate
@@ -337,7 +338,116 @@ let retain_root ~store ~config ~reserved ~owner ?supersession batch =
     io (fun () -> Parts.retain_root ~store ~owner
       ?supersession ~part_id:(Capture.fresh_request_id owner) ~destination ~batch
       ~admit:(local_admit destination) ()))
-let run_queue ~base_path ~keeper_name =
+module Candidate_ids = Set.Make (struct
+  type t = Current.explicit_candidate_id
+  let compare=Stdlib.compare
+end)
+module Candidate_sequences = Set.Make (Int)
+module Candidate_requests = Set.Make (String)
+let committed_and_acknowledged ~owner ids =
+  let keepers_dir=Capture.keepers_dir owner and keeper_id=Capture.keeper_id owner in
+  let* actual=Capture.observe_owner ~base_path:(Capture.base_path owner) ~keepers_dir ~keeper_id in
+  let* ()=Capture.owner_matches_json actual (Capture.owner_to_json owner) in
+  let* generation=Queue.read_generation ~keepers_dir ~keeper_id in
+  match generation,ids with
+  | None,_ | Some _,[] -> Ok false
+  | Some generation,_::_ ->
+    let* ()=require (List.for_all (fun (id:Current.explicit_candidate_id) -> id.queue_generation=generation) ids)
+      "Admission closure queue generation changed" in
+    let* receipts=Current.committed_explicit_candidates ~keepers_dir ~keeper_id ~queue_generation:generation in
+    let receipts=Candidate_ids.of_list receipts in
+    let* pending=Queue.read_pending ~keepers_dir ~keeper_id in
+    let pending=Option.fold ~none:[] ~some:Queue.candidate_ids pending in
+    let sequences=Candidate_sequences.of_list (List.map (fun (id:Current.explicit_candidate_id) -> id.sequence) ids) in
+    let requests=Candidate_requests.of_list (List.map (fun (id:Current.explicit_candidate_id) -> id.request_id) ids) in
+    Ok (List.for_all (fun id -> Candidate_ids.mem id receipts) ids
+      && not (List.exists (fun (row:Current.explicit_candidate_id) ->
+        row.queue_generation=generation && (Candidate_sequences.mem row.sequence sequences
+          || Candidate_requests.mem row.request_id requests)) pending))
+let completed_forest ~store ~owner inventory =
+  match Parts.completion_candidates inventory.parts with
+  | None -> Ok None
+  | Some ids ->
+    let leaves=Parts.runnable inventory.parts in
+    let finished part=match for_part inventory part with
+      | None -> false
+      | Some original -> match Progress.phase original.record.progress with
+        | Progress.Finished _ -> true
+        | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _
+        | Conflicted _ | Rejected _ | Subdividing _ | Subdivided _ -> false in
+    if not (List.for_all finished leaves) then Ok None else
+    (* Superseded semantic gaps and actual partition-size refusals may be
+       historical ancestors. Unknown/cut or ordinary failed work never closes. *)
+    let* terminal=List.fold_left (fun result original ->
+      let* terminal=result in if not terminal then Ok false else
+      match Progress.phase original.record.progress with
+      | Progress.Finished _ -> Ok true
+      | Judged _ ->
+        let* proposal=original_answer ~store original in
+        let+ proposal=Capture.validate_proposal original.capture proposal in
+        (match proposal with Keeper_librarian_runtime.Deferred -> true | Accepted _ -> false)
+      | Rejected _ ->
+        let* parent=Parts.find inventory.parts ~part_id:(Capture.parent_part_id original.capture) in
+        Ok (Result.is_ok (Parts.execution_size_evidence ~store ~owner ~inventory:inventory.parts
+          ~parent ~execution_id:original.record.request_id))
+      | Captured | Admission_wait _ | Dispatch_pending _ | Committing _ | Commit_unknown _
+      | Conflicted _ | Subdividing _ | Subdivided _ -> Ok false) (Ok true) inventory.executions in
+    if not terminal then Ok None else
+    let+ complete=committed_and_acknowledged ~owner ids in if complete then Some ids else None
+let closure_ports ~store =
+  let read ~scope ~request_id=Owner.load ~store ~scope ~request_id |> owned in
+  let read_scope ~scope=Owner.load_scope ~store ~scope |> owned in
+  let reader=Owner.Published_reader.create ~read_body:(fun ~scope ~request_digest ->
+    Lane_addon_store.load_tool_request_body store ~scope ~request_digest) in
+  let read_body=Owner.Published_reader.request reader in
+  let read_archive ~scope ~date ~request_id=Owner.load_settled ~store ~scope ~date ~request_id |> owned in
+  read,read_scope,read_body,read_archive
+let recover_closure ~store ~owner ~after_settle =
+  let read,read_scope,read_body,read_archive=closure_ports ~store in
+  let* view=Closure.project ~owner ~read ~read_scope ~read_body ~read_archive in
+  match view.closure with
+  | None -> Ok ()
+  | Some closure ->
+    let* complete=committed_and_acknowledged ~owner (Closure.candidates closure) in
+    let* ()=require complete "Admission closure lacks complete current candidate receipts or queue ACK" in
+    let* ()=Keeper_librarian_store_preflight.validator () ~read ~read_scope ~read_body ~read_archive
+      (Closure.record closure) in
+    let* closure=match Closure.stage closure with
+      | Closure.Captured ->
+        let* inventory=discover ~store ~owner in
+        let* current=completed_forest ~store ~owner inventory in
+        let* ()=require (current=Some (Closure.candidates closure))
+          "Captured admission closure no longer has the same complete normal frontier" in
+        Closure.intend ~store closure
+      | Closing | Closed -> Ok closure in
+    (* Repeat even an already archived member: a record move can precede body
+       removal. The exact metadata was checked above; settle completes both
+       directory-sync and body-cleanup obligations before the anchor closes. *)
+    let* ()=List.fold_left (fun result member -> let* ()=result in
+      let record=Closure.member_record member in
+      let* ()=Owner.settle ~store ~date:(Closure.date closure) record
+        |> Result.map_error Owner.settle_error_to_string in
+      after_settle record) (Ok ()) (Closure.members closure) in
+    let* closure=Closure.confirm ~store closure in
+    let* _confirmed=Closure.project ~owner ~read ~read_scope ~read_body ~read_archive in
+    Owner.settle ~store ~date:(Closure.date closure) (Owner.listed (Closure.record closure))
+      |> Result.map_error Owner.settle_error_to_string
+let close_completed_forest ~store ~owner ~after_settle inventory =
+  let* eligible=completed_forest ~store ~owner inventory in
+  match eligible with
+  | None -> Ok false
+  | Some candidates ->
+    let* originals=List.fold_left (fun result (kind,scope) -> let* originals=result in
+      let+ records=match kind with
+        | Closure.Execution -> Ok (List.map (fun original -> original.record) inventory.executions)
+        | Part | Partition | Gate -> Owner.load_scope ~store ~scope |> owned in
+      originals @ List.map (fun record -> kind,record) records) (Ok [])
+      [Closure.Part,Parts.scope owner;Partition,Parts.partition_scope owner;
+       Execution,Capture.scope owner;Gate,Gate_journal.scope owner] in
+    let* _closure=Closure.retain ~store ~owner ~request_id:(Capture.fresh_request_id owner)
+      ~candidates ~originals in
+    let+ ()=recover_closure ~store ~owner ~after_settle in true
+let run_queue ~after_settle ~base_path ~keeper_name =
   let config=Workspace.default_config base_path in
   let reserved=reserved () in
   let keepers_dir=Config_dir_resolver.keepers_dir_for_base_path ~base_path in
@@ -345,6 +455,7 @@ let run_queue ~base_path ~keeper_name =
   let read ()=io (fun () -> Queue.read_pending ~keepers_dir ~keeper_id:keeper_name) in
   let* _anchor=io (fun () -> Current.capture_program_anchor ~keepers_dir ~keeper_id:keeper_name) in
   let* owner=io (fun () -> Capture.observe_owner ~base_path ~keepers_dir ~keeper_id:keeper_name) in
+  let* ()=io (fun () -> recover_closure ~store ~owner ~after_settle) in
   (* Complete discovery precedes every local repair or new publication. *)
   let* initial=io (fun () -> discover ~store ~owner) in
   let* ()=io (fun () -> Queue.acknowledge_committed ~keepers_dir ~keeper_id:keeper_name) in
@@ -360,6 +471,8 @@ let run_queue ~base_path ~keeper_name =
     let* ()=result in Gate_journal.recover_retries ~store ~owner ~capture:original.capture)
     (Ok ()) initial.executions) in
   let* inventory=io (fun () -> discover ~store ~owner) in
+  let* closed=io (fun () -> close_completed_forest ~store ~owner ~after_settle inventory) in
+  let* inventory=if closed then io (fun () -> discover ~store ~owner) else Ok inventory in
   (* A new root needs the live destination, so without the Add-on the
      pending candidates stay queued and the pass reports the Add-on off. *)
   let root ?supersession batch =
@@ -430,12 +543,16 @@ let run_queue ~base_path ~keeper_name =
           a cut of it reads as [Cut] and the part does not settle twice. *)
        | Ok Reprepared -> walk ~committed ~held:Written_since_read (part::rest)) in
   walk ~committed:false ~held parts
-let run_enabled ~base_path ~keeper_name =
+let run_enabled ~after_settle ~base_path ~keeper_name =
   let keepers_dir=Config_dir_resolver.keepers_dir_for_base_path ~base_path in
   let* generation=io (fun () -> Queue.read_generation ~keepers_dir ~keeper_id:keeper_name) in
-  match generation with None -> Ok Idle | Some _ -> run_queue ~base_path ~keeper_name
-let run ~base_path ~keeper_name =
+  match generation with None -> Ok Idle | Some _ -> run_queue ~after_settle ~base_path ~keeper_name
+let run_with ~after_settle ~base_path ~keeper_name =
   match Env_config.KeeperMemoryOs.librarian_config_state () with
   | Disabled | Invalid -> Disabled
-  | Enabled -> match run_enabled ~base_path ~keeper_name with
+  | Enabled -> match run_enabled ~after_settle ~base_path ~keeper_name with
     | Ok result -> result | Error detail -> Unavailable detail
+let run ~base_path ~keeper_name=run_with ~after_settle:(fun _ -> Ok ()) ~base_path ~keeper_name
+module For_testing = struct
+  let run=run_with
+end

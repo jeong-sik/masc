@@ -481,14 +481,14 @@ let verifying_next_step ~ko ~can_retry unreconciled =
   let text korean english = if ko then korean else english in
   if not can_retry then
     ( Unreadable
-    , (text "검증 결속 미확인 · 기존 검토가 진행 중일 수 있습니다. 연결·저장소·런타임을 확인하고 [r]로 재조회하세요. [x]:포기 요청" "verification binding unavailable - a prior review may still run; check connection, server storage and runtime, then [r] refresh; [x] requests drop") )
+    , (text "검증 결속 미확인 · 기존 검토가 진행 중일 수 있습니다. 연결·저장소·런타임을 확인하고 [r]로 재조회하세요. [x]:중단 요청" "verification binding unavailable - a prior review may still run; check connection, server storage and runtime, then [r] refresh; [x] requests drop") )
   else match unreconciled with
   | Some (_ : Tui_decode.verifier_unreconciled) ->
     ( Refused
-    , (text "검증 결과 반영 실패 · [c]:복구 요청 · [o]:재개 요청 · [x]:포기 요청" "the verifier could not settle it - [c] requests recovery; [o] takes it back, [x] drops it") )
+    , (text "검증 결과 반영 실패 · [c]:복구 요청 · [o]:다시 열기 요청 · [x]:중단 요청" "the verifier could not settle it - [c] requests recovery; [o] takes it back, [x] drops it") )
   | None ->
     ( Waiting
-    , (text "검증 미해결 · [c]:복구 요청 · [o]:재개 요청 · [x]:포기 요청" "verification unresolved - [c] requests recovery; [o] takes it back, [x] drops it") )
+    , (text "검증 미해결 · [c]:복구 요청 · [o]:다시 열기 요청 · [x]:중단 요청" "verification unresolved - [c] requests recovery; [o] takes it back, [x] drops it") )
 
 let unreconciled_lines ~ko ~width (blocked : Tui_decode.verifier_unreconciled) =
   verdict ~width:(max 1 width) Refused (unreconciled_heading ~ko blocked.vu_step)

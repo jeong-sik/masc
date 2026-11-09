@@ -103,7 +103,7 @@ let memory_category_text ~ko category =
     | Memory_category.Validated_approach -> "검증된 방법"
     | Memory_category.Lesson -> "교훈"
     | Memory_category.Blocker -> "막힘"
-    | Memory_category.Custom value -> value in
+    | Memory_category.Custom _ -> Memory_category.category_to_string category in
   Terminal_text.single_line label
 
 let memory_category_filter_text ~ko = function
@@ -566,7 +566,8 @@ let memory_context_lines ?(full = false) ~ko ~cols ~detail ~unit ~input (k : Mas
       @ [ facts_line ]
       @ ladder_rows
       @ [ source_line;
-          "  Recall block detail: open Keeper chat /context." ]
+          text "  불러온 기억: Keeper 대화의 /context에서 확인"
+            "  Recall block detail: open Keeper chat /context." ]
       @ clause_rows ~full ~cols librarian_clauses
       @ librarian_stalled_lines
       @ librarian_cause_lines @ context_lines
@@ -1556,12 +1557,16 @@ let render_memory_body ~cols ~budget (state : state)
       match
         empty_page_of ~snapshot:state.memory_health ~error:state.memory_health_error
       with
-      | Page_failed -> page_failed_note
-      | Page_unread -> page_unread_note_while ~reading:state.memory_health_inflight
+      | Page_failed -> if ko then "  (조회 실패 · 현재 기억 미확인)" else page_failed_note
+      | Page_unread -> if ko then
+          (if state.memory_health_inflight then "  (기억 조회 중)" else "  (기억 미조회)")
+          else page_unread_note_while ~reading:state.memory_health_inflight
       | Page_empty when query <> "" ->
-        Printf.sprintf "  (no keepers matching \"%s\" \xe2\x80\x94 Esc clears filter)"
+        Printf.sprintf (if ko then "  (\"%s\"에 맞는 Keeper 없음 · Esc:필터 해제)"
+          else "  (no keepers matching \"%s\" — Esc clears filter)")
           (Terminal_text.single_line query)
-      | Page_empty -> "  (no keepers with a memory config or snapshot)"
+      | Page_empty -> if ko then "  (기억 설정이나 스냅샷이 있는 Keeper 없음)"
+          else "  (no keepers with a memory config or snapshot)"
     in
     push_styled ~style:(Theme.recede ()) note
   else begin

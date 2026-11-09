@@ -13,10 +13,13 @@ type receipt =
   ; sha256 : string
   ; spans : span list
   }
-type system_observation = Active_goals of string
+type system_observation =
+  | Active_goals of string
+  | Goals_awaiting_proof of string
 
 let observation_block = function
   | Active_goals text -> Prompt_block_id.Active_goals, text
+  | Goals_awaiting_proof text -> Prompt_block_id.Goals_awaiting_proof, text
 
 type system_prompt =
   { base_text : string

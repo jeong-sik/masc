@@ -17,8 +17,11 @@ type receipt = private
   }
 type system_observation =
   | Active_goals of string
+  | Goals_awaiting_proof of string
 (** Only this renderer-issued observation can become a System suffix.
-    Completion Authority is a context block (RFC-0491 §3.1). *)
+    Agent Core keeps the current turn's proof state here so tool feedback
+    remains the newest message. Official clients receive proof state as
+    turn-scoped input instead. Completion Authority remains a context block. *)
 val observation_block : system_observation -> Prompt_block_id.t * string
 
 type system_prompt = private

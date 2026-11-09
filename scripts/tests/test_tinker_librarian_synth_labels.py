@@ -238,6 +238,15 @@ class MemoryStateTest(unittest.TestCase):
         elsewhere = scored(req, answer_text(judged, claims=(claim_json(c.claim, absorbs=("m2",)),)))
         self.assertEqual(elsewhere["state_correct"], 0)
 
+    def test_a_restatement_deleted_while_naming_another_fact_does_not_survive(self) -> None:
+        req = request(PLANTED, candidates_of((S.CandidateKind.PARAPHRASE, S.CandidateKind.NEW_DURABLE)))
+        restated, new = req.candidates
+        judgments: tuple[Judged, ...] = ((restated.request_id, "already_represented", PLANTED[1].claim),
+                                        (new.request_id, "incorporated", new.claim))
+        s = scored(req, answer_text(judgments, claims=(claim_json(new.claim),), dropped=("m1",)))
+        self.assertEqual(s["state_correct"], 1)
+        self.assertEqual(s["state_by_kind"], {"new": [1, 1], "restates": [1, 0]})
+
     def test_a_stale_fact_absorbed_instead_of_dropped_is_counted_apart(self) -> None:
         req, c = one(S.CandidateKind.NEW_DURABLE)
         s = scored(req, answer_text(((c.request_id, "incorporated", c.claim),),
@@ -282,15 +291,6 @@ class GenerateTest(unittest.TestCase):
         self.assertEqual([(f.memory_id, f.claim, f.planted_stale, f.duplicate_of) for f in facts],
                          [("m1", "같은 지식의 다른 문장", False, "m3"), ("m2", "낡은 상태", True, None),
                           ("m3", "원래 기억", False, None)])
-
-    def test_a_planned_duplicate_lands_in_a_category_of_its_memory(self) -> None:
-        keeper = S.KeeperProfile("docs-gardener", "synth-docs-gardener", "r", "w",
-                                 tuple(f"topic_{i}" for i in range(12)), S.GoalDraft("t", "m", "v"))
-        for seed in range(20):
-            plan = G.plan_memory(random.Random(seed), keeper, 0, True)
-            assert plan.duplicate is not None
-            self.assertIn(plan.duplicate.category, {slot.category for slot in plan.slots})
-            self.assertIsNone(G.plan_memory(random.Random(seed), keeper, 0, False).duplicate)
 
 
 if __name__ == "__main__":

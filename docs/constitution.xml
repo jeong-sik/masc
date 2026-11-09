@@ -58,7 +58,8 @@
             [parity B1: Goal_store.upsert_goal_with_events 는 새 Goal 생성 시 metric/target_value 두 값을 비어 있지 않게 요구한다.]</rule>
       <rule>성공조건은 구체적 내용을 포함하고, Verifier(내부 Standalone LLM Agent)가
             현실에 실재하고 도달 가능한지 체크한다.
-            [parity B2: 완료 증명 verifier 는 연결되어 있다. 생성 시 성공조건의 실재성·도달 가능성 심사는 별도로 구현해야 한다.]</rule>
+            [parity B2: Goal upsert 후 Goal_criterion_agent 가 성공조건 revision 별 실재성·도달 가능성을 비동기 심사한다.
+            판정은 Goal_criterion_review 원장과 criterion_review 에 남으며 완료 증명·사람 확인이나 실행 허가를 대신하지 않는다.]</rule>
       <rule>1개의 Goal 에 여러 Task 가 관련될 수 있다.</rule>
       <rule>삭제(취소) 가능. 사유는 전용 필드가 아니라 transition 공용 note 로 기록한다
             (workspace_goals.ml 의 last_review_note).</rule>

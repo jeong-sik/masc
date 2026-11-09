@@ -9865,6 +9865,7 @@ type state = {
      choice [tui-keepers.toml] stores. *)
   mutable keeper_list_heading: Masc_tui_keeper_list_model.heading_focus option;
   mutable keeper_list_folded: Masc_tui_keeper_list_model.group list;
+  mutable keeper_list_seen_groups: Masc_tui_keeper_list_model.group list;
   mutable keeper_story: Masc_tui_keeper_story.page option;
   (** The Story window below the Keepers list: [None] while it is closed,
       otherwise the page it shows. It follows the list cursor (RFC-0515
@@ -12656,7 +12657,7 @@ let keeper_list_reading (state : state) : keeper_list_reading =
          | Some step -> int_of_float (Float.floor (now /. step))
          | None -> 0) }
   in
-  match !last_roster_rows with
+  let reading = match !last_roster_rows with
   | Some (seen, reading) when same_roster_inputs seen inputs -> reading
   | Some _ | None ->
       let outside ~keeper_name = state.keeper_outside_reading state ~now ~keeper_name in
@@ -12666,11 +12667,17 @@ let keeper_list_reading (state : state) : keeper_list_reading =
         | keepers -> rows_of_keepers ~now ~outside inputs keepers
       in
       let groups =
-        List.map (Masc_tui_keeper_list_model.group_of_view ~outside inputs.ri_view) rows
+        List.map (Masc_tui_keeper_list_model.group_of_view ~now ~outside inputs.ri_view) rows
       in
       let reading = { klr_rows = rows; klr_groups = groups } in
       last_roster_rows := Some (inputs, reading);
       reading
+  in
+  let seen, folded = Masc_tui_keeper_list_model.first_folds
+      ~seen:state.keeper_list_seen_groups ~folded:state.keeper_list_folded reading.klr_groups in
+  state.keeper_list_seen_groups <- seen;
+  state.keeper_list_folded <- folded;
+  reading
 
 let keeper_list_rows (state : state) : Masc_tui_keeper_list_model.row list =
   (keeper_list_reading state).klr_rows
@@ -20106,6 +20113,7 @@ let create_state
   keeper_list_density = Masc_tui_keeper_list_model.Two_lines;
   keeper_list_heading = None;
   keeper_list_folded = [];
+  keeper_list_seen_groups = [];
   keeper_story = None;
   keeper_story_turns = Masc_tui_fetched.initial;
   keeper_story_turns_owed = Masc_tui_owed_read.settled;

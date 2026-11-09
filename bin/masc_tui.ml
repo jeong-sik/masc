@@ -17432,6 +17432,9 @@ let withdraw_currency_authority state =
    match reloads it, so a screen never shows rows from a workspace the server
    just stopped serving. *)
 let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigation ~draft =
+  state.keeper_list_heading <- None;
+  state.keeper_list_folded <- [];
+  state.keeper_list_seen_groups <- [];
   state.followed_from <- None;
   withdraw_usage_workspace state;
   withdraw_voice_capture state;

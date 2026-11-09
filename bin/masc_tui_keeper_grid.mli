@@ -43,22 +43,22 @@ val slot_label : string
 
 (** {1 Verdicts} (§2.4.2) *)
 
-type verdict =
+type verdict = Masc_tui_keeper_verdict.t =
   | Failing of { resting : bool }
       (** The health reading is failing. [resting] is a dispatch path that waits
           out a rest. *)
-  | Paused  (** A person paused the Keeper, and it is not failing. *)
+  | Paused  (** A person paused the Keeper; this takes precedence over failure. *)
   | Recovered
-      (** Neither failing nor paused, running or idle, and a half hour of the
+      (** Neither failing nor paused, and a half hour of the
           last twelve hours holds a failed or rested turn. *)
   | Sound  (** Neither failing nor paused, running or idle, no failed half hour. *)
-  | Other  (** Offline, or a Keeper the roster did not read. *)
+  | Other  (** Offline without recovery, or a Keeper the roster did not read. *)
 
 val recovery_slots : int
 (** How many half hours back a failure makes a Keeper recovered: 24. *)
 
 val verdict : now:float -> Masc.Tui_decode.keeper_runtime option -> verdict
-(** A failing health reading comes first, then the pause. A half hour counts
+(** The pause comes first, then a failing health reading. A half hour counts
     as failed when it holds a failed or a rested turn: the decision log writes
     a rest as a failure (§2.1). The last {!recovery_slots} half hours are the
     one that holds [now] and those before it; a slot stamped after [now] (the

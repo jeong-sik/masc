@@ -9,8 +9,8 @@ let failed = Trail.Trail_failed { ended_at = None; last = None; walk = Trail.Wal
 
 let shape_label = function
   | Axis_row.List_columns -> "list columns"
-  | Axis_row.Axis { before = Axis_row.Hour_pulse; current = Axis_row.Activity; next = Axis_row.Run_path_lag }
-    -> "pulse · activity · run, path, lag"
+  | Axis_row.Axis { before = Axis_row.Hour_pulse; current = Axis_row.Activity; next = Axis_row.Wait_run_path_lag }
+    -> "pulse · activity · wait, run, path, lag"
 
 let second_line_label = function
   | Axis_row.No_second_line -> "none"
@@ -24,7 +24,7 @@ let test_every_view_but_the_list_draws_the_axis_row () =
         match view with
         | Model.Plain -> "list columns"
         | Model.By_state | Model.By_cause | Model.By_time | Model.By_memory | Model.By_age
-        | Model.By_runtime | Model.Day_wall -> "pulse · activity · run, path, lag"
+        | Model.By_runtime | Model.Day_wall -> "pulse · activity · wait, run, path, lag"
       in
       Alcotest.(check string) (Model.view_label view) expected
         (shape_label (Axis_row.shape_of_view view)))

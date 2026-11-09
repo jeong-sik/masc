@@ -1,6 +1,6 @@
 type before = Hour_pulse
 type current = Activity
-type next = Run_path_lag
+type next = Wait_run_path_lag
 type axis = { before : before; current : current; next : next }
 
 type shape =
@@ -8,7 +8,7 @@ type shape =
   | Axis of axis
 
 (* The cells of the state, cause and time views (§2.4). *)
-let pulse_activity_next = { before = Hour_pulse; current = Activity; next = Run_path_lag }
+let pulse_activity_next = { before = Hour_pulse; current = Activity; next = Wait_run_path_lag }
 
 (* The memory, age, runtime and day views draw these cells until their own
    are drawn; each has its own arm, so giving a view its cells touches no

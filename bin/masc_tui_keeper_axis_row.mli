@@ -13,9 +13,10 @@ type current =
   | Activity  (** The activity mark and word the list draws under NOW. *)
 
 type next =
-  | Run_path_lag
-      (** The next scheduled run, the rest of the next dispatch path, and the
-          turns the librarian has not read. *)
+  | Wait_run_path_lag
+      (** What the Keeper waits on a person for, the next scheduled run, the
+          rest of the next dispatch path, and the turns the librarian has not
+          read. *)
 
 type axis = { before : before; current : current; next : next }
 

@@ -279,29 +279,25 @@ let keeper_waiting_detail (row : Keeper_list_model.row) =
   | Keeper_list_model.Waiting_observed { kwr_waiting_on = []; _ }
   | Keeper_list_model.Waiting_unobserved | Keeper_list_model.Waiting_unavailable -> None
 
-(* The resting path or next step the Keeper's next dispatch waits on.
-   Matches [Tui_decode.keeper_path_rest] with no wildcards.
+(* The rest of the path the Keeper's next dispatch takes, for a Keeper whose
+   phase runs turns. Matches [Tui_decode.keeper_path_rest] with no wildcards.
    [Stated_by_provider] vs [Bounded_by_masc] distinguishes whether the reset
    time came from the provider or is MASC's upper bound.
    Times are rendered as relative spans via [Message_layout.span_text]; if
-   already in the past, time is omitted.
-   [▹] is attached only when the previous turn failed ([Trail_failed]).
-   This piece sits at the very end of DETAIL to maintain right = next. *)
-let keeper_next_text ?now (row : Keeper_list_model.row) =
+   already in the past, time is omitted. *)
+type path_rest =
+  | Path_serving of string  (* The runtime the next dispatch goes to. *)
+  | Path_resting of string  (* The rest the next dispatch waits out. *)
+  | Path_unread of string  (* The rest did not read. *)
+
+let keeper_path_rest ?now (row : Keeper_list_model.row) =
   match row.reading.Keeper_control.liveness with
   | Keeper_control.Present runtime
     when Tui_decode.keeper_phase_executes_turns runtime.Tui_decode.kr_phase ->
-      let is_failed =
-        match Keeper_list_model.trail_of_row row with
-        | Keeper_trail.Trail_failed _ -> true
-        | Keeper_trail.Trail_sound -> false
-      in
-      let with_mark text = if is_failed then "▹ " ^ text else text in
       (match runtime.Tui_decode.kr_runtime_path_rest with
        | Ok None -> None
        | Ok (Some (Tui_decode.Path_rest_serving { runtime_id })) ->
-           if is_failed then Some ("▹ " ^ Terminal_text.single_line runtime_id)
-           else None
+           Some (Path_serving (Terminal_text.single_line runtime_id))
        | Ok (Some (Tui_decode.Path_rest_resting { runtime_id; release_at; release_basis })) ->
            let now_val = match now with Some t -> t | None -> Unix.gettimeofday () in
            let time_clause =
@@ -313,30 +309,47 @@ let keeper_next_text ?now (row : Keeper_list_model.row) =
              | Tui_decode.Stated_by_provider -> "제공자"
              | Tui_decode.Bounded_by_masc -> "상한"
            in
-           let text =
-             Printf.sprintf "쉬는 중%s (%s · %s)"
-               time_clause
-               (Terminal_text.single_line runtime_id)
-               basis_word
-           in
-           Some (with_mark text)
-       | Error detail -> Some ("쉼 읽기 실패: " ^ Terminal_text.single_line detail))
+           Some
+             (Path_resting
+                (Printf.sprintf "쉬는 중%s (%s · %s)"
+                   time_clause
+                   (Terminal_text.single_line runtime_id)
+                   basis_word))
+       | Error detail -> Some (Path_unread ("쉼 읽기 실패: " ^ Terminal_text.single_line detail)))
   | Keeper_control.Present _ | Keeper_control.Absent | Keeper_control.Unobserved
   | Keeper_control.Invalid _ -> None
 
+(* The last piece of DETAIL, so right reads as next. The runtime that serves
+   the next dispatch is named only after a failed turn ([Trail_failed]), and
+   then, like a rest, behind the next mark. *)
+let keeper_next_text ?now (row : Keeper_list_model.row) =
+  let after_failure () =
+    match Keeper_list_model.trail_of_row row with
+    | Keeper_trail.Trail_failed _ -> true
+    | Keeper_trail.Trail_sound -> false
+  in
+  let marked text = Masc_tui_keeper_mark.axis_next_glyph ^ " " ^ text in
+  match keeper_path_rest ?now row with
+  | None -> None
+  | Some (Path_serving runtime_id) -> if after_failure () then Some (marked runtime_id) else None
+  | Some (Path_resting text) -> Some (if after_failure () then marked text else text)
+  | Some (Path_unread text) -> Some text
+
+let detail_separator = " · "
+
+let keeper_approval_text (row : Keeper_list_model.row) =
+  Option.map
+    (fun (approval : Tui_decode.keeper_tool_approval) ->
+      "hold " ^ Terminal_text.single_line approval.kta_tool
+      ^ detail_separator ^ Terminal_text.single_line approval.kta_question)
+    row.approval
+
+let keeper_questions_text (row : Keeper_list_model.row) =
+  if row.open_questions > 0 then
+    Some (Masc_tui_message_layout.count_noun row.open_questions "question" ^ " awaiting you")
+  else None
+
 let keeper_detail_text ?now (row : Keeper_list_model.row) =
-  let approval =
-    Option.map
-      (fun (approval : Tui_decode.keeper_tool_approval) ->
-        "hold " ^ Terminal_text.single_line approval.kta_tool
-        ^ " · " ^ Terminal_text.single_line approval.kta_question)
-      row.approval
-  in
-  let questions =
-    if row.open_questions > 0 then
-      Some (Masc_tui_message_layout.count_noun row.open_questions "question" ^ " awaiting you")
-    else None
-  in
   let health =
     match keeper_health_deviation_word (Keeper_control.health row.reading) with
     | "" -> None
@@ -344,9 +357,25 @@ let keeper_detail_text ?now (row : Keeper_list_model.row) =
   in
   List.map keeper_badge_text (Keeper_list_model.badges_of_row row)
   @ List.filter_map Fun.id
-      [ approval; questions; keeper_waiting_detail row
+      [ keeper_approval_text row; keeper_questions_text row; keeper_waiting_detail row
       ; keeper_task_detail row; health; keeper_next_text ?now row ]
-  |> String.concat " · "
+  |> String.concat detail_separator
+
+(* What a Keeper that waits on a person waits for, in the words of DETAIL:
+   the held call, the open questions and the waiting item. [None] for a
+   Keeper whose activity waits on no person. *)
+let keeper_person_wait_text (row : Keeper_list_model.row) =
+  match Keeper_list_model.primary_activity_of_row row with
+  | Held_call | Question | Confirmation -> (
+      match
+        List.filter_map Fun.id
+          [ keeper_approval_text row; keeper_questions_text row; keeper_waiting_detail row ]
+      with
+      | [] -> None
+      | parts -> Some (String.concat detail_separator parts))
+  | Attempt_failed | Preparing | Streaming | Running | Async_working _ | Deferred
+  | Tool_waiting | Model_waiting | Delegate_result | Verifying | External_waiting | Idle
+  | Paused | Offline | Unknown -> None
 
 (* The DETAIL cell. When the RUNTIME column is not drawn, the sentence about
    the past leads this cell in the warning colour and the rest stays receded.
@@ -610,13 +639,13 @@ module Axis_row = Masc_tui_keeper_axis_row
 let axis_name_header = "keeper"
 let axis_cell_gap = "  "
 
-let axis_before_header = function
-  | Axis_row.Hour_pulse -> Printf.sprintf "◂ %dh" Masc_tui_keeper_mark.pulse_hours
-
+let axis_before_header = function Axis_row.Hour_pulse -> Masc_tui_keeper_mark.pulse_header
 let axis_before_width = function Axis_row.Hour_pulse -> Masc_tui_keeper_mark.pulse_hours
-let axis_current_header = function Axis_row.Activity -> "● now"
+let axis_current_header = function Axis_row.Activity -> Masc_tui_keeper_mark.axis_now_header
 let axis_current_width = function Axis_row.Activity -> Render_schedule.keeper_status_width
-let axis_next_header = function Axis_row.Run_path_lag -> "▹ next"
+
+let axis_next_header = function
+  | Axis_row.Wait_run_path_lag -> Masc_tui_keeper_mark.axis_next_header
 
 (* The widest name, held between the list's floor and ceiling for a name. *)
 let axis_name_width rows =
@@ -657,14 +686,29 @@ let keeper_axis_before_cell ~now (row : Keeper_list_model.row) before =
 let keeper_axis_current_cell ~frame row = function
   | Axis_row.Activity -> keeper_now_cell ~frame row
 
+(* The runtime of the next dispatch, or the rest it waits out. The cell's
+   column already says next, so no mark leads it. *)
+let keeper_path_rest_cell ~now row =
+  Option.map
+    (function
+      | Path_serving runtime_id ->
+          { Masc_tui_keeper_axis_cell.text = runtime_id; tone = Masc_tui_keeper_axis_cell.Quiet }
+      | Path_resting text ->
+          { Masc_tui_keeper_axis_cell.text; tone = Masc_tui_keeper_axis_cell.Attention }
+      | Path_unread text ->
+          { Masc_tui_keeper_axis_cell.text; tone = Masc_tui_keeper_axis_cell.Attention })
+    (keeper_path_rest ~now row)
+
+(* A person's answer comes first: nothing else moves until it does. *)
 let keeper_axis_next_cells state ~now (row : Keeper_list_model.row) = function
-  | Axis_row.Run_path_lag ->
+  | Axis_row.Wait_run_path_lag ->
       let keeper_name = row.keeper.Tui_decode.k_name in
       List.filter_map Fun.id
-        [ Masc_tui_keeper_axis.run_cell state ~now ~keeper_name
-        ; Option.map
-            (fun text -> { Masc_tui_keeper_axis_cell.text; tone = Masc_tui_keeper_axis_cell.Quiet })
-            (keeper_next_text ~now row)
+        [ Option.map
+            (fun text -> { Masc_tui_keeper_axis_cell.text; tone = Masc_tui_keeper_axis_cell.Attention })
+            (keeper_person_wait_text row)
+        ; Masc_tui_keeper_axis.run_cell state ~now ~keeper_name
+        ; keeper_path_rest_cell ~now row
         ; Masc_tui_keeper_axis.lag_cell state ~keeper_name
         ]
 

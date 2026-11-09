@@ -85,7 +85,8 @@ Definitions:
   `train_sft.py` saved for that branch under these pass lines.
 
 Output: <out>/calls.jsonl holds raw answers (E-real answers carry Keeper memory;
-keep them local), <out>/rows.jsonl numbers, IDs and verdicts, <out>/summary.json.
+keep them local), <out>/rows.jsonl numbers, IDs and verdicts, each row naming
+the call it scores by its key and send time, <out>/summary.json.
 """
 
 from __future__ import annotations
@@ -220,7 +221,8 @@ def run_item(caller: Caller, request: JsonObject, targets: list[tuple[str, str]]
                 score = M.score_real(item, result.answer)
             case M.SynthItem():
                 score = M.score_synth(item, result.answer)
-        rows.append({"set": kind, "item": item.item_id, "target": name, "status": call.status, "finish": call.finish,
+        rows.append({"set": kind, "item": item.item_id, "target": name, "call_key": call.key,
+                     "status": call.status, "finish": call.finish,
                      "sent_at": call.sent_at, "wall_s": call.wall_s, "prompt_tokens": call.prompt_tokens,
                      "cached_tokens": call.cached_tokens,
                      "completion_tokens": call.completion_tokens, "reasoning_chars": len(call.reasoning or ""),
@@ -463,10 +465,9 @@ def verdict(args: argparse.Namespace) -> int:
         }
         result[name] = {"pass": all(checks.values()), **checks, "paired": pair, "widest_gap_s": round(gap, 1)}
     result["e_synth_drops"] = judged.record(synth_rows)
-    merges = MD.for_run(synth_rows, Path(cast(str, args.merges)) if args.merges is not None else None,
-                        synth_render.TEMPLATE)
-    result["e_synth_merges"] = {**merges.record(),
-                                "by_target": {n: merges.numbers(synth_rows, scored, n) for n in [base, *names]}}
+    result["e_synth_merges"] = MD.report(synth_rows, scored,
+                                         Path(cast(str, args.merges)) if args.merges is not None else None,
+                                         synth_render.TEMPLATE, synth_dir, [base, *names])
     result["choice"] = choose(names, result, s_all, rows, cast(float, choice["prefer_later_when_ahead_by"]))
     print(json.dumps(result))
     (real_dir / "verdict.json").write_text(json.dumps(result, indent=1) + "\n", encoding="utf-8")

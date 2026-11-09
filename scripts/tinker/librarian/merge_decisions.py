@@ -9,16 +9,23 @@ config/prompts/librarian.md words in its `absorb_*` slots. Only `mergeable`
 lets the memory go. `merge_cases.py` puts the same question, in the same
 words, to a judge that sees no label, target or request.
 
-The judge gets no case for an absorbed planted stale fact: librarian.md 133-135
-has a stale state leave by `dropped`, so absorbing one is wrong whatever the
-claim says. Every other absorb stands in exactly one case, and every case gets
-one class.
+The judge gets no case for an absorbed planted stale fact. The label plants it
+as a transient state that no candidate continues: no candidate targets it
+(`synth_rows.holds`), and a new candidate is written as knowledge its memory
+lacks (`synth_prompts.TASK_NEW`). librarian.md 133-136 has such a state leave
+by `dropped`; 136-138 lets a record absorb an earlier state only when it tells
+how that event went on to now. So the label alone makes the absorb wrong.
+Every other absorb stands in exactly one case, and every case gets one class.
+
+A case shows the claims of one run's answers, so its class holds for that run
+only. `merge_cases.py` writes the sha256 of the run's call log and rows beside
+the key (RUN_FILES), and `for_run` reads no decision for other run files.
 
 From the classes the verdict reports, per target:
 - absorb precision: absorbs judged `mergeable` over every absorb its valid
   answers make, planted stale facts included (1.0 with no absorbs). It counts
-  every row: a class does not depend on the label, so a memory the drop judge
-  leaves out of scoring does not hide a wrong absorb.
+  the rows the drop judge leaves out of scoring too: a class does not depend
+  on the label, and a planted stale fact is stale by construction.
 - judged merge recall: merges the label expects (a complement target into the
   complement's claim, a duplicate pair left as one fact) that the answer made
   with every absorb judged `mergeable`, over the merges the labels expect, on
@@ -29,6 +36,7 @@ The judge's folder works as the drop judge's does (`audit_decisions`).
 
 from __future__ import annotations
 
+import json
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -43,6 +51,9 @@ type Consolidation = Literal["mergeable", "different_context", "loses_knowledge"
 CONSOLIDATIONS: tuple[Consolidation, ...] = ("mergeable", "different_context", "loses_knowledge", "uncertain")
 # (item, target, memory ID): a memory one target's answer absorbed on one request.
 type Absorb = tuple[str, str, str]
+RUN_FILES = "run-files.json"
+# The run files the cases come from: the answers, and the rows that name the call of each.
+RUN_LOGS = ("calls.jsonl", "rows.jsonl")
 
 
 def consolidation(text: object) -> Consolidation | None:
@@ -109,16 +120,38 @@ def adjudicate(keys: list[JsonObject], decisions: list[JsonObject], absorbs: fro
     return MergeAdjudication(MappingProxyType(judged))
 
 
-def for_run(rows: list[JsonObject], folder: Path | None, rules: Path) -> MergeAdjudication:
-    """The judge's classes for the absorbs of an E-synth run, from <folder>/key.jsonl, written by
-    `merge_cases.py`, and the judge's decisions (`audit_decisions.judge_decisions`). SystemExit when an
-    absorb needs a class and there is no folder."""
+def run_files(run: Path) -> dict[str, str | None]:
+    """The sha256 of each of RUN_LOGS in `run`."""
+    return {name: D.file_sha256(run / name) for name in RUN_LOGS}
+
+
+def record_run_files(folder: Path, run: Path) -> None:
+    """Write <folder>/RUN_FILES: the sha256 of the run files the cases in <folder> were made from."""
+    (folder / RUN_FILES).write_text(json.dumps(run_files(run), indent=1) + "\n", encoding="utf-8")
+
+
+def for_run(rows: list[JsonObject], folder: Path | None, rules: Path, run: Path) -> MergeAdjudication:
+    """The judge's classes for the absorbs of the E-synth run in `run`, whose rows are `rows`, from
+    <folder>/key.jsonl, written by `merge_cases.py`, and the judge's decisions
+    (`audit_decisions.judge_decisions`). SystemExit when an absorb needs a class and there is no folder,
+    or the cases were made from other run files."""
     absorbs = to_judge(rows)
     if not absorbs:
         return NO_MERGES
     if folder is None:
         raise SystemExit(f"{len(absorbs)} E-synth absorbs need the merge judge: "
                          "run merge_cases.py, then pass its --out as --merges")
+    if json.loads((folder / RUN_FILES).read_text(encoding="utf-8")) != run_files(run):
+        raise SystemExit(f"the merge cases in {folder} were made from other run files than {run}'s: "
+                         "run merge_cases.py on this run")
     files, decisions = D.judge_decisions(folder, rules)
     judged = adjudicate(D.read_jsonl(folder / "key.jsonl"), decisions, absorbs)
     return replace(judged, judge_files=tuple(sorted(files.items())))
+
+
+def report(rows: list[JsonObject], scored: list[JsonObject], folder: Path | None, rules: Path, run: Path,
+           targets: list[str]) -> JsonObject:
+    """The verdict's merge part: each absorb's class, the judge's files, and the numbers of each target,
+    with precision over `rows` and recall over `scored`."""
+    merges = for_run(rows, folder, rules, run)
+    return {**merges.record(), "by_target": {n: merges.numbers(rows, scored, n) for n in targets}}

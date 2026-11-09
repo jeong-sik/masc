@@ -77,7 +77,7 @@ let expected_source_path (snapshot : Skill_catalog_snapshot.t) ~skill_name ~sour
 
 let ghosts ~now ~snapshot ~activations =
   let is_present = present_names snapshot in
-  let latest : (string, string) Hashtbl.t = Hashtbl.create 16 in
+  let latest : (string, string * string) Hashtbl.t = Hashtbl.create 16 in
   List.iter
     (fun (identity, activated_at) ->
        let skill_name = Skill_reference.identity_package_id_to_string identity in
@@ -112,6 +112,39 @@ let scan_activations (config : Workspace.config) =
                (activation.identity, activation.activated_at))
             (Keeper_skill_activation_ledger.activations ledger)))
     .value
+;;
+
+let string_field fields name =
+  match List.assoc_opt name fields with
+  | Some (`String value) -> Some value
+  | Some _ | None -> None
+;;
+
+(* Ghosts already recorded by an earlier publication: deduplicated by the
+   evidence triple, so repeated publications do not duplicate audit rows,
+   WARN lines or events. A fresh activation timestamp re-records. *)
+let recorded_ghost_keys (config : Workspace.config) =
+  match
+    Audit_log.read_entries config
+    |> List.filter_map (fun (entry : Audit_log.audit_entry) ->
+           if entry.Audit_log.action = Audit_log.Custom event_type then
+             match entry.Audit_log.details with
+             | `Assoc fields ->
+               let open Option in
+               let* skill_name = string_field fields "skill_name" in
+               let* source_id = string_field fields "source_id" in
+               let+ last_activated_at =
+                 string_field fields "last_activated_at"
+               in
+               (skill_name, source_id, last_activated_at)
+             | _ -> None
+           else None)
+  with
+  | keys -> keys
+  | exception exn ->
+    Log.Server.warn "skill_missing_on_disk: reading prior rows failed: %s"
+      (Printexc.to_string exn);
+    []
 ;;
 
 let broadcast_event ~base_path ghost =
@@ -158,8 +191,28 @@ let detect_and_record ~base_path ~snapshot =
     let config = Workspace.default_config base_path in
     let activations = scan_activations config in
     let found = ghosts ~now:(Time_compat.now ()) ~snapshot ~activations in
-    List.iter (record_ghost ~base_path ~config) found;
-    found
+    let already_recorded = recorded_ghost_keys config in
+    let fresh =
+      List.filter
+        (fun ghost ->
+           not
+             (List.mem
+                (ghost.skill_name, ghost.source_id, ghost.last_activated_at)
+                already_recorded))
+        found
+    in
+    (* One ghost's recording failure must not drop the ghosts after it. *)
+    List.iter
+      (fun ghost ->
+         try record_ghost ~base_path ~config ghost
+         with
+         | (Eio.Cancel.Cancelled _ as exn) -> raise exn
+         | exn ->
+           Log.Server.warn
+             "skill_missing_on_disk: recording one ghost failed: %s"
+             (Printexc.to_string exn))
+      fresh;
+    fresh
   with
   | ghosts -> ghosts
   | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn

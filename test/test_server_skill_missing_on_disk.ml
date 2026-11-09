@@ -218,7 +218,17 @@ let test_detects_and_records_ghost_skill () =
        Printf.printf
          "skill_missing_on_disk measured audit row: %s\n%!"
          (Yojson.Safe.to_string entry.Audit_log.details))
-    rows
+    rows;
+  (* A repeated publication with the same evidence must not duplicate rows. *)
+  let second = Detection.detect_and_record ~base_path:root ~snapshot in
+  check int "second publication records no duplicate" 0 (List.length second);
+  let rows_after_second =
+    Audit_log.read_entries workspace_config
+    |> List.filter (fun (entry : Audit_log.audit_entry) ->
+           entry.Audit_log.action = Audit_log.Custom Detection.event_type)
+  in
+  check bool "audit still holds exactly one row" true
+    (List.length rows_after_second = 1)
 ;;
 
 let test_window_excludes_old_and_keeps_unparseable () =

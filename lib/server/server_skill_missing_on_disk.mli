@@ -36,8 +36,12 @@ val ghosts :
 
 (** Scan the workspace's retained activation ledgers against [snapshot] and
     record every ghost: one WARN log line, one [skill_missing_on_disk] audit
-    row and one runtime-observer event each. Never raises; a detection
-    failure is logged and leaves the publication that triggered it
-    untouched. Returns the ghosts that were recorded. *)
+    row and one runtime-observer event each. A ghost whose
+    (skill_name, source_id, last_activated_at) triple was already recorded
+    by an earlier publication is not recorded again — repeated publications
+    re-check but do not duplicate rows, and a fresh activation timestamp
+    re-records. Never raises; a detection failure is logged and leaves the
+    publication that triggered it untouched. Returns only the ghosts that
+    were recorded now. *)
 val detect_and_record :
   base_path:string -> snapshot:Skill_catalog_snapshot.t -> ghost list

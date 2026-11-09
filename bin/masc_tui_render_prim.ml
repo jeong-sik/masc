@@ -2282,6 +2282,14 @@ let lexed_span (text, kind) =
         Theme.Syntax.code_number
       else if String.equal kind Masc_tui_code_lexer.kind_type then
         Ansi.bold ^ Theme.Syntax.code_type
+      else if String.equal kind Masc_tui_code_lexer.kind_json_key then
+        Theme.Syntax.json_key
+      else if String.equal kind Masc_tui_code_lexer.kind_json_number then
+        Theme.Syntax.json_number
+      else if String.equal kind Masc_tui_code_lexer.kind_json_literal then
+        Theme.Syntax.json_literal
+      else if String.equal kind Masc_tui_code_lexer.kind_json_punctuation then
+        Theme.Syntax.json_punctuation
       else ""
     in
     if String.equal style "" then text else style ^ text ^ Ansi.reset

@@ -19,6 +19,17 @@ val kind_comment : string
 val kind_number : string
 val kind_type : string
 
+val kind_json_key : string
+(** The four kinds [lexer_of_language "json"] gives a served JSON payload, the
+    same four roles the chat's tool results and a Task note draw. A key is the
+    string before a colon; the literals are [true], [false] and [null]; the
+    punctuation is the six characters [{ } [ ] , :]. Everything else in the
+    body, strings included, keeps the generic kinds above. *)
+
+val kind_json_number : string
+val kind_json_literal : string
+val kind_json_punctuation : string
+
 val kind_diff_added : string
 (** A ["```diff"] line that adds. Whole-line rather than token-shaped: the
     first cell decides the line, and no run ends in the middle of one. *)

@@ -30,6 +30,10 @@ let tagged : Markdown.palette =
   ; code_type = ("<t>", "</t>")
   ; code_diff_added = ("<+>", "</+>")
   ; code_diff_removed = ("<->", "</->")
+  ; json_key = ("<jk>", "</jk>")
+  ; json_number = ("<jn>", "</jn>")
+  ; json_literal = ("<jl>", "</jl>")
+  ; json_punctuation = ("<jp>", "</jp>")
   }
 
 let render ?(width = 40) ?(palette = tagged) text =

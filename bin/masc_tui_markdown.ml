@@ -42,6 +42,10 @@ type palette = {
       (** A ["```diff"] fence's added line. Whole-line, not token-shaped. *)
   code_diff_removed : span;  (** The same fence's removed line. *)
   code_type : span;
+  json_key : span;
+  json_number : span;
+  json_literal : span;
+  json_punctuation : span;
 }
 
 let plain_palette =
@@ -70,6 +74,10 @@ let plain_palette =
   ; code_diff_added = ("", "")
   ; code_diff_removed = ("", "")
   ; code_type = ("", "")
+  ; json_key = ("", "")
+  ; json_number = ("", "")
+  ; json_literal = ("", "")
+  ; json_punctuation = ("", "")
   }
 
 type streaming_render = {
@@ -94,6 +102,10 @@ let kind_code_string = Masc_tui_code_lexer.kind_string
 let kind_code_comment = Masc_tui_code_lexer.kind_comment
 let kind_code_number = Masc_tui_code_lexer.kind_number
 let kind_code_type = Masc_tui_code_lexer.kind_type
+let kind_json_key = Masc_tui_code_lexer.kind_json_key
+let kind_json_number = Masc_tui_code_lexer.kind_json_number
+let kind_json_literal = Masc_tui_code_lexer.kind_json_literal
+let kind_json_punctuation = Masc_tui_code_lexer.kind_json_punctuation
 let kind_code_diff_added = Masc_tui_code_lexer.kind_diff_added
 let kind_code_diff_removed = Masc_tui_code_lexer.kind_diff_removed
 
@@ -278,6 +290,10 @@ let span_of_palette palette kind =
   else if String.equal kind kind_code_comment then palette.code_comment
   else if String.equal kind kind_code_number then palette.code_number
   else if String.equal kind kind_code_type then palette.code_type
+  else if String.equal kind kind_json_key then palette.json_key
+  else if String.equal kind kind_json_number then palette.json_number
+  else if String.equal kind kind_json_literal then palette.json_literal
+  else if String.equal kind kind_json_punctuation then palette.json_punctuation
   else if String.equal kind kind_code_diff_added then palette.code_diff_added
   else if String.equal kind kind_code_diff_removed then palette.code_diff_removed
   else ("", "")

@@ -16,6 +16,14 @@ let kind_comment = "code_comment"
 let kind_number = "code_number"
 let kind_type = "code_type"
 
+(* A served JSON payload has its own four roles, the ones the chat's tool
+   results and a Task note already draw (Theme.Syntax.json_*). Naming them here
+   keeps a fenced block, a Tools or Lanes pane and the chat on one palette. *)
+let kind_json_key = "json_key"
+let kind_json_number = "json_number"
+let kind_json_literal = "json_literal"
+let kind_json_punctuation = "json_punctuation"
+
 (* A diff's two answers. They are line-shaped rather than token-shaped, which
    is why they are their own kinds: no lexer run can end mid-line and mean
    something. *)
@@ -298,10 +306,16 @@ let bash_lexer text =
   advance 0;
   runs_segments runs
 
+(* The characters that only shape a document; the indentation already shows the
+   shape, so they recede. *)
+let is_json_punctuation = function
+  | '{' | '}' | '[' | ']' | ',' | ':' -> true
+  | _ -> false
+
 (* JSON: a string followed (after spaces) by a colon is an object key; the
-   others are values; numbers and the literals true/false/null read as
-   numbers. The colon test is lookahead only -- it never emits, so the
-   punctuation keeps the plain span. *)
+   others are values. Numbers, the literals true/false/null and the six
+   structural characters each have their own kind. The colon test is
+   lookahead only -- it never emits. *)
 let json_lexer text =
   let runs = new_runs kind_code in
   let limit = String.length text in
@@ -319,7 +333,7 @@ let json_lexer text =
         (* A key is a differently-coloured string. The string just read is
            still the run in progress -- retagging the run colours the whole
            literal without rewriting any segment list. *)
-        if peek stop then runs.kind <- kind_type;
+        if peek stop then runs.kind <- kind_json_key;
         advance stop
       end
       else if is_digit char || ((char = '-') && index + 1 < limit && is_digit text.[index + 1]) then begin
@@ -335,28 +349,32 @@ let json_lexer text =
         let digits_from =
           if char = '-'
           then begin
-            runs_add runs kind_number char;
+            runs_add runs kind_json_number char;
             index + 1
           end
           else index
         in
         let stop =
           take_while text digits_from (fun c -> is_digit c || c = '.')
-            kind_number runs
+            kind_json_number runs
         in
         advance stop
       end
       else if starts_at text index "true" then begin
-        String.iter (fun c -> runs_add runs kind_number c) "true";
+        String.iter (fun c -> runs_add runs kind_json_literal c) "true";
         advance (index + 4)
       end
       else if starts_at text index "false" then begin
-        String.iter (fun c -> runs_add runs kind_number c) "false";
+        String.iter (fun c -> runs_add runs kind_json_literal c) "false";
         advance (index + 5)
       end
       else if starts_at text index "null" then begin
-        String.iter (fun c -> runs_add runs kind_number c) "null";
+        String.iter (fun c -> runs_add runs kind_json_literal c) "null";
         advance (index + 4)
+      end
+      else if is_json_punctuation char then begin
+        runs_add runs kind_json_punctuation char;
+        advance (index + 1)
       end
       else begin
         runs_add runs kind_code char;

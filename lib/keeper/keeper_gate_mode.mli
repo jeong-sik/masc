@@ -54,17 +54,12 @@ val set :
 
 type 'mode override_row_t = {
   keeper_name : string;
-  mode : 'mode;
+  mode : 'mode;  (** what was asked for, before {!resolve} weighs it *)
   actor : string;
   changed_at : string;
 }
 
-type keeper_override = t override_row_t = {
-  keeper_name : string;
-  mode : t;  (** what was asked for, before {!resolve} weighs it *)
-  actor : string;
-  changed_at : string;
-}
+type keeper_override = t override_row_t
 
 val override_row_to_json :
   ('mode -> string) -> 'mode override_row_t -> Yojson.Safe.t

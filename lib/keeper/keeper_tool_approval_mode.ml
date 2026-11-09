@@ -61,12 +61,14 @@ let last_restore_error t = (Atomic.get t.state).restore_error
 (* One row per keeper an operator has moved off [Auto]. [actor] and
    [changed_at] share the [Keeper_gate_mode] override row codec: the file
    is small, so it doubles as the change record. *)
-type override_row = mode Keeper_gate_mode.override_row_t =
+type 'mode override_row_t = 'mode Keeper_gate_mode.override_row_t =
   { keeper_name : string
-  ; mode : mode
+  ; mode : 'mode
   ; actor : string
   ; changed_at : string
   }
+
+type override_row = mode override_row_t
 
 let override_row_json o = Keeper_gate_mode.override_row_to_json mode_to_string o
 

@@ -150,12 +150,7 @@ type 'mode override_row_t =
   ; changed_at : string
   }
 
-type keeper_override = t override_row_t =
-  { keeper_name : string
-  ; mode : t
-  ; actor : string
-  ; changed_at : string
-  }
+type keeper_override = t override_row_t
 
 let override_row_to_json mode_to_string o =
   `Assoc

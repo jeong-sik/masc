@@ -83,8 +83,7 @@ val create :
 
 (* ── Request API ───────────────────────────────────────────────── *)
 
-(** Typed HTTP response. Mirrors [Masc_http_client] response shape so
-    the migration shim is a one-line wrap. *)
+(** Typed HTTP response. {!Masc_http_client.response} is this type. *)
 type response = {
   status : int;
   headers : (string * string) list;

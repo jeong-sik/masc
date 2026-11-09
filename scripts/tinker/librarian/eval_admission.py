@@ -45,9 +45,9 @@ Definitions:
 - E-synth outcome accuracy: candidates whose outcome equals the label and whose
   `memory_claim` points where the label's kind needs it, over every candidate
   (an answer that is not valid is wrong). A new fact or a complement names a
-  claim the answer adds; a paraphrase names the existing claim it restates; a
-  correction names a claim that supersedes the label's target, and the target
-  is dropped.
+  claim the answer adds that is not another candidate's text; a paraphrase
+  names the existing claim it restates; a correction names such a claim that
+  supersedes the label's target, and the target is dropped.
 - E-synth drop precision: dropped IDs that are planted stale facts or label
   correction targets, over all dropped IDs of valid answers (1.0 with no drops).
   A dropped complement target or duplicate fact counts against it, since the
@@ -64,7 +64,9 @@ Definitions:
   and duplicate pairs left as one fact, over the merges the labels expect.
 - E-synth stale drop recall: planted stale facts dropped, over the planted stale
   facts the labels expect to leave. An absorbed stale fact is not dropped: its
-  text lives on in the new claim.
+  text lives on in the new claim. Labels expect merges and stale drops only on
+  requests with a candidate that can support a change; elsewhere a dropped
+  stale fact still counts as a right drop.
 - Growth: claims an answer adds minus the memory IDs it takes out, per item,
   beside the labels' (E-synth) or the live answers' (E-real).
 - latency p50 (G5): median wall time of E-real calls that returned HTTP 200.

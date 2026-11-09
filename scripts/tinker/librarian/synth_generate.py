@@ -440,8 +440,7 @@ def main() -> int:
                "memories": len({r.item_id.rsplit("-", 1)[0] for r in done}), **status,
                "candidates_by_kind": dict(sorted(kinds.items())),
                "memories_with_duplicate": sum(any(f.duplicate_of is not None for f in facts) for _, facts in built),
-               "requests_without_support": sum(
-                   not any(S.can_support(c.outcome) for c in S.label_of(r).candidates) for r in done),
+               "requests_without_support": sum(not S.label_of(r).supports_change for r in done),
                "spent_usd": round(caller.spent, 4), "budget_usd": budget, "stopped": caller.stopped}
     (out / "summary.json").write_text(json.dumps(summary, indent=2) + "\n")
     print("SUMMARY", json.dumps(summary))

@@ -65,3 +65,8 @@ val pulse_cell :
     turn, {!Masc_tui_keeper_axis_cell.Quiet} otherwise. [None] when the server
     holds every hour of the window and none holds a turn: there is nothing to
     draw, which is not the same as not knowing. *)
+
+val hours_cell :
+  now:float -> Masc.Keeper_turn_pulse.pulse option -> Masc_tui_keeper_axis_cell.t
+(** {!pulse_cell}'s marks and tone for every window, a quiet one too. The axis
+    row of the Keepers views keeps the column whether a turn ran or not. *)

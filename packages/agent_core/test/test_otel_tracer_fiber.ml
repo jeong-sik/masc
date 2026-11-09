@@ -92,58 +92,6 @@ let test_parallel_spans_do_not_cross_contaminate () =
         active.Agent_core.Otel_tracer.name))
 ;;
 
-let test_global_with_span_is_fiber_safe () =
-  Eio_main.run (fun _env ->
-    (* Ensure the global tracer is initialized inside the Eio runtime. *)
-    let (_ : Agent_core.Otel_tracer.span) =
-      Agent_core.Otel_tracer.start_span
-        { Agent_core.Tracing.kind = Agent_run
-        ; name = "warmup"
-        ; agent_name = "test"
-        ; turn = 1
-        ; extra = []
-        ; links = []
-        }
-    in
-    Agent_core.Otel_tracer.reset ();
-    let root_attrs =
-      { Agent_core.Tracing.kind = Agent_run
-      ; name = "global_root"
-      ; agent_name = "test"
-      ; turn = 1
-      ; extra = []
-      ; links = []
-      }
-    in
-    Agent_core.Otel_tracer.with_span root_attrs (fun () ->
-      let parent_span = Option.get (Agent_core.Otel_tracer.current_span ()) in
-      let parent_id = parent_span.Agent_core.Otel_tracer.span_id in
-      let child_ids =
-        Eio.Fiber.List.map
-          (fun i ->
-             let child_attrs =
-               { Agent_core.Tracing.kind = Tool_exec
-               ; name = Printf.sprintf "global_child_%d" i
-               ; agent_name = "test"
-               ; turn = 1
-               ; extra = []
-               ; links = []
-               }
-             in
-             Agent_core.Otel_tracer.with_span child_attrs (fun () ->
-               let child = Option.get (Agent_core.Otel_tracer.current_span ()) in
-               child.Agent_core.Otel_tracer.parent_span_id))
-          [ 0; 1; 2 ]
-      in
-      List.iteri
-        (fun i ppid ->
-           check
-             (Printf.sprintf "global_child_%d has correct parent" i)
-             (Some parent_id)
-             ppid)
-        child_ids))
-;;
-
 (* Unlike a callback that returns immediately, yielding keeps sibling spans
    alive together. A fiber-local binding must not share a mutable stack cell
    inherited from its parent. *)
@@ -187,24 +135,6 @@ let test_yielding_instance_siblings () =
     check "instance scope has no leaked active span" None
       (Option.map (fun (span : Agent_core.Otel_tracer.span) -> span.span_id)
         (Agent_core.Otel_tracer.inst_current_span inst)))
-;;
-
-let test_yielding_global_siblings () =
-  Eio_main.run (fun _ ->
-    Agent_core.Otel_tracer.reset ();
-    (* The global public scope and current-span API must share the same
-       isolation contract as an explicitly created Eio instance. *)
-    let tracer : (module Span_scope) =
-      (module struct
-        let with_span = Agent_core.Otel_tracer.with_span
-      end)
-    in
-    check_yielding_siblings tracer Agent_core.Otel_tracer.current_span ();
-    Alcotest.(check int) "four global completed spans" 4
-      (Agent_core.Otel_tracer.completed_count ());
-    check "global scope has no leaked active span" None
-      (Option.map (fun (span : Agent_core.Otel_tracer.span) -> span.span_id)
-        (Agent_core.Otel_tracer.current_span ())))
 ;;
 
 let test_nested_scope_preserves_explicit_parent_updates () =
@@ -253,14 +183,8 @@ let () =
             "parallel spans do not cross-contaminate"
             `Quick
             test_parallel_spans_do_not_cross_contaminate
-        ; Alcotest.test_case
-            "global with_span is fiber-safe"
-            `Quick
-            test_global_with_span_is_fiber_safe
         ; Alcotest.test_case "yielding instance siblings retain ownership"
             `Quick test_yielding_instance_siblings
-        ; Alcotest.test_case "yielding global siblings retain ownership"
-            `Quick test_yielding_global_siblings
         ; Alcotest.test_case "nested scopes preserve explicit parent updates"
             `Quick test_nested_scope_preserves_explicit_parent_updates
         ] )

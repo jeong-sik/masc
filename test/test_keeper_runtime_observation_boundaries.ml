@@ -106,7 +106,7 @@ let check_registry_observation terminal ~core_error ~expected ~expected_timeout_
     in
     let code, observed =
       match stored with
-      | R.Provider_runtime_error { code; detail; agent_core_timeout; _ } ->
+      | R.Provider_runtime_error { code; agent_core_timeout; _ } ->
         let expected_presence =
           match core_error, expected with
           | Some _, KPB.Provider_timeout _ -> true
@@ -116,7 +116,7 @@ let check_registry_observation terminal ~core_error ~expected ~expected_timeout_
           expected_presence (Option.is_some agent_core_timeout);
         code,
         KPB.classify_provider_runtime_error_record
-          ?agent_core_timeout ~code ~detail ()
+          ?agent_core_timeout ~code ()
       | _ -> Alcotest.fail "expected the actual provider error registry record"
     in
     Alcotest.(check bool) "registry retains the timeout source and phase"
@@ -538,8 +538,8 @@ let test_failed_ticks_preserve_current_runtime_cause () =
     refresh_failure_reason ~base_path ~keeper_name:meta.name;
     Alcotest.(check int) "both failures counted" 2 (R.get_turn_failures ~base_path meta.name);
     (match failure_reason ~base_path ~keeper_name:meta.name with
-     | R.Provider_runtime_error { reason = None; code; detail; agent_core_timeout; _ } ->
-       (match KPB.classify_provider_runtime_error_record ?agent_core_timeout ~code ~detail () with
+     | R.Provider_runtime_error { reason = None; code; agent_core_timeout; _ } ->
+       (match KPB.classify_provider_runtime_error_record ?agent_core_timeout ~code () with
         | KPB.Provider_timeout _ -> ()
         | KPB.No_timeout_observed -> Alcotest.fail "new cause is not a timeout")
      | reason -> Alcotest.failf "new timeout cause lost: %s" (R.failure_reason_to_string reason));

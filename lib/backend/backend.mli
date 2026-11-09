@@ -37,6 +37,7 @@ module FileSystem : sig
 
   (** Core operations *)
   val get : t -> string -> string result
+
   (** Payload writes through Unix-backed file capabilities run on a system
       thread, keeping the caller's Eio scheduler available during disk I/O.
       The write completes before the temporary file is closed and renamed. *)
@@ -44,6 +45,7 @@ module FileSystem : sig
   val exists : t -> string -> bool
   val delete : t -> string -> unit result
   val list_keys : t -> prefix:string -> string list result
+
   (** Uses the same payload-write boundary as [set]. *)
   val set_if_not_exists : t -> string -> string -> bool result
 
@@ -59,6 +61,7 @@ module FileSystem : sig
   val acquire_lock : t -> key:string -> owner:string -> ttl_seconds:int -> bool result
   val try_acquire_lock : t -> key:string -> owner:string -> ttl_seconds:int -> bool result
   (** One attempt at the fence and lease; [Ok false] means no lease was acquired. *)
+
   val release_lock : t -> key:string -> owner:string -> bool result
   val extend_lock : t -> key:string -> owner:string -> ttl_seconds:int -> bool result
   (** [acquire_lock], [release_lock], [extend_lock] and [commit_under_lease]

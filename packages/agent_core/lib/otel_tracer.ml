@@ -5,10 +5,8 @@
     Generates W3C trace/span IDs, maps to GenAI semantic conventions,
     and serializes completed spans to OTLP JSON for HTTP export.
 
-    v0.43.0: Instance-based state — each [create] call returns an
-    independent tracer with its own span stack. The global functions
-    ([start_span], [flush], etc.) delegate to a shared global instance
-    for backward compatibility.
+    v0.43.0: Instance-based state — each [create_instance] call returns an
+    independent state with its own span stack.
 
     v0.44.0: Fiber-safe Eio instances.  Per-instance [Eio.Fiber.key]
     stores a scope-owned stack spine so parallel fibers (e.g. tool batches)
@@ -386,24 +384,8 @@ let inst_flush inst =
   spans
 ;;
 
-let inst_reset inst =
-  (match get_fiber_stack inst with
-   | Some stack_ref -> stack_ref := []
-   | None -> ());
-  inst_with_lock inst
-  @@ fun () ->
-  inst.current_spans <- [];
-  inst.completed_spans <- []
-;;
-
 let inst_completed_count inst =
   inst_with_lock inst @@ fun () -> List.length inst.completed_spans
-;;
-
-let inst_active_count inst =
-  match get_fiber_stack inst with
-  | Some stack_ref -> List.length !stack_ref
-  | None -> inst_with_lock inst @@ fun () -> List.length inst.current_spans
 ;;
 
 let inst_current_span inst =
@@ -493,74 +475,6 @@ let inst_drain_metrics inst =
 
 let inst_clear_metrics inst = inst_with_lock inst @@ fun () -> inst.metrics <- []
 
-let metric_type_to_string = function
-  | Counter -> "counter"
-  | Gauge -> "gauge"
-  | Histogram -> "histogram"
-;;
-
-(* -- Global instance (backward compat) -------------------------------- *)
-
-(* The global tracer is initialized on first use so that environment-sensitive
-   configuration is not captured at module load, and so the fiber-local key is
-   only allocated when needed. First-use creation is protected by a stdlib
-   mutex because the global API can be reached by non-Eio callers. Using a
-   fiber-local key makes the global API safe for concurrent Eio fibers: each
-   fiber gets its own span stack instead of sharing the instance-wide
-   [current_spans].
-
-   NOTE: the endpoint is resolved once from [otel_endpoint_env_var] when the
-   global instance is created. Later env changes do not affect the
-   already-created shared instance; create a fresh instance with
-   [create_instance] for per-call env resolution. *)
-let make_global_instance () : instance =
-  { config = default_config_from_env ()
-  ; mu = Stdlib_mu (Mutex.create ())
-  ; fiber_key = Some (Eio.Fiber.create_key ())
-  ; current_spans = []
-  ; completed_spans = []
-  ; metrics = []
-  }
-;;
-
-let global_instance_mu = Mutex.create ()
-let global_instance_ref : instance option ref = ref None
-
-let global_instance () =
-  Mutex.lock global_instance_mu;
-  Fun.protect
-    (fun () ->
-       match !global_instance_ref with
-       | Some inst -> inst
-       | None ->
-         let inst = make_global_instance () in
-         global_instance_ref := Some inst;
-         inst)
-    ~finally:(fun () -> Mutex.unlock global_instance_mu)
-;;
-
-let start_span attrs = inst_start_span (global_instance ()) attrs
-let end_span s ~ok = inst_end_span (global_instance ()) s ~ok
-let add_event s msg = inst_add_event (global_instance ()) s msg
-let add_attrs s attrs = inst_add_attrs (global_instance ()) s attrs
-
-let add_link s ~trace_id ~span_id =
-  inst_add_link (global_instance ()) s ~trace_id ~span_id
-;;
-
-let flush () = inst_flush (global_instance ())
-let reset () = inst_reset (global_instance ())
-let completed_count () = inst_completed_count (global_instance ())
-let active_count () = inst_active_count (global_instance ())
-
-let record_metric ~name ~value ~metric_type =
-  inst_record_metric (global_instance ()) ~name ~value ~metric_type
-;;
-
-let get_metrics () = inst_get_metrics (global_instance ())
-let clear_metrics () = inst_clear_metrics (global_instance ())
-let current_span () = inst_current_span (global_instance ())
-
 (* -- JSON export ------------------------------------------------------ *)
 
 let attrs_to_json (attrs : (string * string) list) : Yojson.Safe.t =
@@ -649,57 +563,6 @@ let metric_entry_to_json (m : metric_entry) : Yojson.Safe.t =
   `Assoc (("name", `String m.m_name) :: metric_body)
 ;;
 
-let to_otlp_json (cfg : config) : Yojson.Safe.t =
-  let global = global_instance () in
-  let spans, metrics =
-    inst_with_lock global (fun () ->
-      List.rev global.completed_spans, List.rev global.metrics)
-  in
-  let resource =
-    `Assoc [ "attributes", attrs_to_json [ "service.name", cfg.service_name ] ]
-  in
-  let resource_spans =
-    `Assoc
-      [ "resource", resource
-      ; ( "scopeSpans"
-        , `List
-            [ `Assoc
-                [ ( "scope"
-                  , `Assoc
-                      [ "name", `String "agent_core.otel_tracer"
-                      ; "version", `String Version.version
-                      ] )
-                ; "spans", `List (List.map span_to_json spans)
-                ]
-            ] )
-      ]
-  in
-  let base = [ "resourceSpans", `List [ resource_spans ] ] in
-  let with_metrics =
-    if metrics = []
-    then base
-    else (
-      let resource_metrics =
-        `Assoc
-          [ "resource", resource
-          ; ( "scopeMetrics"
-            , `List
-                [ `Assoc
-                    [ ( "scope"
-                      , `Assoc
-                          [ "name", `String "agent_core.otel_tracer"
-                          ; "version", `String Version.version
-                          ] )
-                    ; "metrics", `List (List.map metric_entry_to_json metrics)
-                    ]
-                ] )
-          ]
-      in
-      base @ [ "resourceMetrics", `List [ resource_metrics ] ])
-  in
-  `Assoc with_metrics
-;;
-
 (* -- Instance creation ------------------------------------------------ *)
 
 let create_instance ?config ?getenv () : instance =
@@ -773,19 +636,4 @@ let tracer_of_instance inst : Tracing.t =
       | None -> run ()
     ;;
   end)
-;;
-
-let with_span attrs f =
-  let module T = (val tracer_of_instance (global_instance ())) in
-  T.with_span attrs f
-;;
-
-(* -- First-class module constructors ---------------------------------- *)
-
-let create ?config ?getenv () : Tracing.t =
-  tracer_of_instance (create_instance ?config ?getenv ())
-;;
-
-let create_eio ?config ?getenv () : Tracing.t =
-  tracer_of_instance (create_instance_eio ?config ?getenv ())
 ;;

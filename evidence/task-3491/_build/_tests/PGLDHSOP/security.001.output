@@ -1,0 +1,4 @@
+ASSERT prefix survives
+ASSERT suffix survives
+ASSERT sequence body survives
+ASSERT the escape replaces one byte with more than one

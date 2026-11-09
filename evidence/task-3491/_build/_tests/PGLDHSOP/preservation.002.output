@@ -1,0 +1,7 @@
+ASSERT no raw CR
+ASSERT LF still breaks the line
+ASSERT one line break preserved
+ASSERT CR is drawn
+ASSERT first line text survives
+ASSERT second line text survives
+ASSERT third line text survives

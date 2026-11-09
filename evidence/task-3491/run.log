@@ -1,5 +1,14 @@
+# 실행 명령 원문 (이 레인: dune 불가, ocamlfind 직접 컴파일)
+# 1) shim 컴파일
+ocamlfind ocamlopt -package alcotest,uucp,ptime -linkpkg -w -a \
+  string_util.ml time_codec.mli time_codec.ml \
+  tui_terminal_text.mli tui_terminal_text.ml masc.ml \
+  test_tui_terminal_text.ml -o probe.exe
+# 2) 실행
+./probe.exe
+--- 아래는 위 명령의 실제 출력 ---
 Testing `terminal text boundary'.
-This run has ID `PHE64WR5'.
+This run has ID `PGLDHSOP'.
 
   [OK]          security              0   a control byte never reaches the te...
   [OK]          security              1   visible text survives the escape.
@@ -10,5 +19,5 @@ This run has ID `PHE64WR5'.
   [OK]          preservation          2   lines keep LF and escape CR.
 
 Full test results in `/masc-work/rondo/repo/evidence/task-3491/_build/_tests/terminal text boundary'.
-Test Successful in 0.007s. 7 tests run.
+Test Successful in 0.002s. 7 tests run.
 probe_exit=0

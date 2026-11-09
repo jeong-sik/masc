@@ -26,5 +26,15 @@ let report_persistence_read_drop ~reason ~path ~detail =
     ~path
     ~detail
 
+let report_store_failure ~operation ~keeper_name ~what exn =
+  Otel_metric_store.inc_counter
+    Keeper_metrics.(to_string ChatStoreFailures)
+    ~labels:[ "operation", Keeper_chat_store_operation.to_label operation ]
+    ();
+  let detail = Printexc.to_string exn in
+  Log.Keeper.warn "keeper_chat_store: %s failed for %s: %s" what
+    (sanitize_name keeper_name) detail;
+  detail
+
 let ensure_dir_once ~base_dir =
   ignore (Keeper_fs.ensure_dir (chat_dir base_dir))

@@ -1793,12 +1793,14 @@ let goal_list_output_schema =
     ~required:[ "status"; "generated_at"; "count"; "goals"; "rollup" ]
 ;;
 
-(* Producer: Run_eio.list over run_record_to_json. [agent_name] serializes
-   as string-or-null and stays undeclared. *)
+(* Producer: Run_eio.run_listing_to_json. [agent_name] serializes as
+   string-or-null and stays undeclared. A row carries [plan_bytes], not the
+   plan: masc_run_get reads one run's plan. *)
 let run_list_output_schema =
   object_output_schema
     ~properties:
       [ "count", `Assoc [ "type", `String "integer" ]
+      ; "shown", `Assoc [ "type", `String "integer" ]
       ; ( "runs"
         , `Assoc
             [ "type", `String "array"
@@ -1808,7 +1810,7 @@ let run_list_output_schema =
                   ; ( "properties"
                     , `Assoc
                         [ "task_id", `Assoc [ "type", `String "string" ]
-                        ; "plan", `Assoc [ "type", `String "string" ]
+                        ; "plan_bytes", `Assoc [ "type", `String "integer" ]
                         ; "created_at", `Assoc [ "type", `String "string" ]
                         ; "updated_at", `Assoc [ "type", `String "string" ]
                         ] )
@@ -1816,12 +1818,12 @@ let run_list_output_schema =
                     , `List
                         (List.map
                            (fun name -> `String name)
-                           [ "task_id"; "plan"; "created_at"; "updated_at" ]) )
+                           [ "task_id"; "plan_bytes"; "created_at"; "updated_at" ]) )
                   ; "additionalProperties", `Bool true
                   ] )
             ] )
       ]
-    ~required:[ "count"; "runs" ]
+    ~required:[ "count"; "shown"; "runs" ]
 ;;
 
 (* Producer: Metrics_store_eio.agent_metrics_to_yojson. Absence is explicit. *)

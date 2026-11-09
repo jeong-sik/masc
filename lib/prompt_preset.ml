@@ -102,7 +102,6 @@ type restore_report =
 
 let schema_version = 1
 let manifest_file = "manifest.json"
-let overrides_file = "prompt_overrides.json"
 let runtime_file = "runtime.json"
 let instructions_dir = "instructions"
 let instructions_extension = ".txt"
@@ -634,7 +633,7 @@ let staging_dir ~base_path =
 let write_preset_files dir (s : snapshot) =
   let* () = mkdir_p (Filename.concat dir instructions_dir) in
   let* () =
-    Override.save ~path:(Filename.concat dir overrides_file) s.prompt_overrides
+    Override.save ~path:(Filename.concat dir Override.filename) s.prompt_overrides
     |> Result.map_error Override.error_to_string
   in
   let* () =
@@ -729,7 +728,7 @@ let preset_overrides_error_to_string = function
       "%s has schema_version %d and this build reads only schema_version %d, so \
        this preset cannot be restored; set its prompts again and save them as a \
        new preset"
-      overrides_file actual expected
+      Override.filename actual expected
   | (Override.Invalid_json _ | Override.Read_failed _ | Override.Write_failed _ | Override.Expected_object _ | Override.Expected_list _ | Override.Expected_integer _ | Override.Expected_string _ | Override.Duplicate_field _ | Override.Missing_field _ | Override.Unexpected_field _ | Override.Duplicate_override_key _) as error -> Override.error_to_string error
 ;;
 
@@ -755,7 +754,7 @@ let load ~base_path name =
                m.stored_name name)
       in
       let* prompt_overrides =
-        Override.load ~path:(Filename.concat dir overrides_file)
+        Override.load ~path:(Filename.concat dir Override.filename)
         |> Result.map_error preset_overrides_error_to_string
       in
       let* assignments, lanes =
@@ -1235,7 +1234,7 @@ let source_directory ~base_path snapshot = preset_dir ~base_path snapshot.name
 let matches_saved_settings ~base_path snapshot =
   guard (fun () ->
     let overrides_path =
-      Filename.concat (Config_dir_resolver.masc_root ~base_path) overrides_file
+      Filename.concat (Config_dir_resolver.masc_root ~base_path) Override.filename
     in
     let* prompt_overrides =
       if not (Sys.file_exists overrides_path) then Ok []

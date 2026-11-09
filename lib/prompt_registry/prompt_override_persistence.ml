@@ -34,6 +34,7 @@ type error =
 (* One envelope version is readable: the one this module writes. Any other
    is refused whole, and the operator saves each override once more. *)
 let schema_version = 2
+let filename = "prompt_overrides.json"
 
 let error_to_string = function
   | Invalid_json message -> "invalid JSON: " ^ message

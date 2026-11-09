@@ -223,6 +223,3 @@ val presets_dirname : string
 
 val staging_dirname : string
 (** The preset staging directory below [<base>/.masc]. *)
-
-val overrides_file : string
-(** The prompt override file below [<base>/.masc]. *)

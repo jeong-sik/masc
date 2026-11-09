@@ -441,195 +441,6 @@ let test_filtered_client_receives_matching_events () =
       Activity_graph.unregister "activity-test";
       check int "only matching frame delivered" 1 (List.length !received))
 
-let test_graph_json_summarizes_relationships () =
-  Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
-  with_config (fun config ->
-      ignore
-        (Activity_graph.emit config ~kind:"agent.joined"
-           ~actor:(Activity_graph.entity ~kind:"agent" "claude")
-           ~subject:(Activity_graph.entity ~kind:"agent" "claude")
-           ~tags:[ "agent"; "join" ]
-           ~payload:(`Assoc [ ("agent_name", `String "claude") ])
-           ());
-      ignore
-        (Activity_graph.emit config ~kind:"task.created"
-           ~actor:(Activity_graph.entity ~kind:"agent" "system")
-           ~subject:(Activity_graph.entity ~kind:"task" "task-003")
-           ~tags:[ "task"; "create" ]
-           ~payload:(`Assoc [ ("title", `String "Stabilize stream") ])
-           ());
-      ignore
-        (Activity_graph.emit config ~kind:"task.claimed"
-           ~actor:(Activity_graph.entity ~kind:"agent" "claude")
-           ~subject:(Activity_graph.entity ~kind:"task" "task-003")
-           ~tags:[ "task"; "claim" ]
-           ~payload:(`Assoc [ ("task_id", `String "task-003") ])
-           ());
-      let json =
-        Activity_graph.graph_json config ~limit:20
-          ~timeline_limit:10 ()
-      in
-      let open Yojson.Safe.Util in
-      check bool "graph has nodes" true
-        (List.length (json |> member "nodes" |> to_list) >= 3);
-      check bool "graph has edges" true
-        (List.length (json |> member "edges" |> to_list) >= 2);
-      check int "timeline contains all events" 3
-        (List.length (json |> member "timeline" |> to_list)))
-
-let test_graph_json_tracks_runtime_activity_kinds () =
-  Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
-  with_config (fun config ->
-      ignore
-        (Activity_graph.emit config ~kind:"task.started"
-           ~actor:(Activity_graph.entity ~kind:"agent" "claude")
-           ~subject:(Activity_graph.entity ~kind:"task" "task-777")
-           ~tags:[ "task"; "task.started" ]
-           ~payload:(`Assoc [ ("task_id", `String "task-777") ])
-           ());
-      ignore
-        (Activity_graph.emit config           ~kind:"board.posted"
-           ~actor:(Activity_graph.entity ~kind:"agent" "claude")
-           ~subject:(Activity_graph.entity ~kind:"post" "post-42")
-           ~tags:[ "board"; "board.posted" ]
-           ~payload:(`Assoc [ ("post_id", `String "post-42") ])
-           ());
-      ignore
-        (Activity_graph.emit config           ~kind:"board.voted"
-           ~actor:(Activity_graph.entity ~kind:"agent" "gemini")
-           ~subject:(Activity_graph.entity ~kind:"post" "post-42")
-           ~tags:[ "board"; "board.voted" ]
-           ~payload:(`Assoc [ ("target_id", `String "post-42") ])
-           ());
-      let json =
-        Activity_graph.graph_json config ~limit:20
-          ~timeline_limit:10 ()
-      in
-      let open Yojson.Safe.Util in
-      let nodes = json |> member "nodes" |> to_list in
-      let edges = json |> member "edges" |> to_list in
-      let has_node id status =
-        List.exists
-          (fun node ->
-            member "id" node = `String id
-            && member "status" node = `String status)
-          nodes
-      in
-      let has_edge kind =
-        List.exists
-          (fun edge -> member "kind" edge = `String kind)
-          edges
-      in
-      check bool "task node marked in progress" true
-        (has_node "task:task-777" "in_progress");
-      check bool "board post edge captured" true
-        (has_edge "posts");
-      check bool "board vote edge captured" true
-        (has_edge "votes_on"))
-
-let test_graph_json_reports_kind_counts_and_heatmap_totals () =
-  Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
-  with_config (fun config ->
-      ignore
-        (Activity_graph.emit config ~kind:"message.broadcast"
-           ~actor:(Activity_graph.entity ~kind:"agent" "claude")
-           ~tags:[ "message"; "broadcast" ]
-           ~payload:(`Assoc [ ("content", `String "hello") ])
-           ());
-      ignore
-        (Activity_graph.emit config ~kind:"message.broadcast"
-           ~actor:(Activity_graph.entity ~kind:"agent" "claude")
-           ~tags:[ "message"; "broadcast" ]
-           ~payload:(`Assoc [ ("content", `String "world") ])
-           ());
-      ignore
-        (Activity_graph.emit config ~kind:"task.started"
-           ~actor:(Activity_graph.entity ~kind:"agent" "claude")
-           ~subject:(Activity_graph.entity ~kind:"task" "task-900")
-           ~tags:[ "task"; "task.started" ]
-           ~payload:(`Assoc [ ("task_id", `String "task-900") ])
-           ());
-      let json =
-        Activity_graph.graph_json config ~limit:20
-          ~timeline_limit:10 ()
-      in
-      let open Yojson.Safe.Util in
-      let kind_counts = json |> member "kind_counts" in
-      let heatmap = json |> member "heatmap" in
-      let matrix = heatmap |> member "matrix" |> to_list in
-      check int "message.broadcast count" 2
-        (kind_counts |> member "message.broadcast" |> to_int);
-      check int "task.started count" 1
-        (kind_counts |> member "task.started" |> to_int);
-      check int "heatmap total matches filtered events" 3
-        (heatmap |> member "total" |> to_int);
-      check int "heatmap rows" 7 (List.length matrix);
-      check bool "heatmap rows expose 24 hours" true
-        (List.for_all (fun row -> List.length (to_list row) = 24) matrix))
-
-(* RFC-0323 G-3: approve-produced Done must complete the task in the graph
-   projection exactly like task.done — node status and the ASSIGNEE's works_on
-   edge (the event actor is the verifier). *)
-let test_task_approved_completes_graph () =
-  Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
-  with_config (fun config ->
-      ignore
-        (Activity_graph.emit config ~kind:"task.claimed"
-           ~actor:(Activity_graph.entity ~kind:"agent" "worker-a")
-           ~subject:(Activity_graph.entity ~kind:"task" "task-901")
-           ~tags:[ "task"; "claim" ]
-           ~payload:(`Assoc [ ("task_id", `String "task-901") ])
-           ());
-      ignore
-        (Activity_graph.emit config ~kind:"task.started"
-           ~actor:(Activity_graph.entity ~kind:"agent" "worker-a")
-           ~subject:(Activity_graph.entity ~kind:"task" "task-901")
-           ~tags:[ "task"; "start" ]
-           ~payload:(`Assoc [ ("task_id", `String "task-901") ])
-           ());
-      ignore
-        (Activity_graph.emit config ~kind:"task.approved"
-           ~actor:(Activity_graph.entity ~kind:"agent" "verifier-b")
-           ~subject:(Activity_graph.entity ~kind:"task" "task-901")
-           ~tags:[ "task"; "approve" ]
-           ~payload:
-             (`Assoc
-               [ ("task_id", `String "task-901");
-                 ("producer", `String "worker-a");
-               ])
-           ());
-      let json =
-        Activity_graph.graph_json config ~limit:20 ~timeline_limit:10 ()
-      in
-      let open Yojson.Safe.Util in
-      let nodes = json |> member "nodes" |> to_list in
-      (match
-         List.find_opt
-           (fun n -> String.equal (n |> member "id" |> to_string) "task:task-901")
-           nodes
-       with
-      | Some n ->
-          check string "task node completed" "done"
-            (n |> member "status" |> to_string)
-      | None -> Alcotest.fail "task node missing");
-      let edges = json |> member "edges" |> to_list in
-      (match
-         List.find_opt
-           (fun e ->
-             String.equal (e |> member "source" |> to_string) "agent:worker-a"
-             && String.equal (e |> member "target" |> to_string) "task:task-901"
-             && String.equal (e |> member "kind" |> to_string) "works_on")
-           edges
-       with
-      | Some e ->
-          check bool "assignee works_on deactivated" false
-            (e |> member "active" |> to_bool)
-      | None -> Alcotest.fail "assignee works_on edge missing"))
-
 (* ── P0-4 current-day incremental parse cache (masc perf root-cause
    report 2026-07-15, item (1)) ──────────────────────────────────── *)
 
@@ -966,15 +777,12 @@ let test_unfiltered_total_counts_the_whole_store () =
       Activity_graph.For_testing.reset_line_count_cache_for_testing ();
       ignore (write_dated_file config ~day:2 ~seq_from:1 ~lines:30);
       ignore (write_dated_file config ~day:3 ~seq_from:31 ~lines:30);
-      let graph = Activity_graph.graph_json config ~limit:5 ~timeline_limit:80 () in
+      let json = Activity_graph.json_response config ~after_seq:0 ~limit:5 () in
       let total =
-        graph
-        |> Yojson.Safe.Util.member "window"
-        |> Yojson.Safe.Util.member "events_store_total"
+        json |> Yojson.Safe.Util.member "total_matching_events"
       in
       check (option int) "total is every event in the store" (Some 60)
         (match total with `Int n -> Some n | _ -> None);
-      let json = Activity_graph.json_response config ~after_seq:0 ~limit:5 () in
       let filtered =
         Activity_graph.list_events config ~after_seq:0 ~limit:5
           ~keep:(fun _ -> true) ()
@@ -1000,7 +808,7 @@ let test_unfiltered_page_larger_than_the_store () =
 
 (* An unfiltered read covers only the files of its page and builds no
    aggregate of the whole retained store. A filtered read still builds it,
-   because a kind or a time bound can match an event of any age. This pins
+   because a kind or a keep predicate can match an event of any age. This pins
    both halves. *)
 let test_unfiltered_events_read_builds_no_aggregate () =
   with_config (fun config ->
@@ -1254,14 +1062,6 @@ let () =
             test_read_self_heals_historic_invalid_utf8_event_file;
           test_case "filtered client receives matching events" `Quick
             test_filtered_client_receives_matching_events;
-          test_case "graph summary builds nodes and edges" `Quick
-            test_graph_json_summarizes_relationships;
-          test_case "graph summary tracks runtime activity kinds" `Quick
-            test_graph_json_tracks_runtime_activity_kinds;
-          test_case "graph summary exposes kind counts and full heatmap totals"
-            `Quick test_graph_json_reports_kind_counts_and_heatmap_totals;
-          test_case "task.approved completes graph" `Quick
-            test_task_approved_completes_graph;
         ] );
       ( "current_day_cache",
         [

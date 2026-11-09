@@ -1,8 +1,8 @@
-(** Activity_graph — event log + live-graph projection facade.
+(** Activity_graph — event log facade.
 
-    Re-exports {!Activity_graph_types}, {!Activity_graph_registry},
-    and {!Activity_graph_reducer} so callers can reach the full
-    type / registry / reducer surface via [Activity_graph.X].
+    Re-exports {!Activity_graph_types} and {!Activity_graph_registry}
+    so callers can reach the full type / registry surface via
+    [Activity_graph.X].
     Type identity is preserved end-to-end across the runtime
     via the [include module type of struct include M end] form
     (cycle 187 [workspace_utils.mli] rationale): the [event],
@@ -10,10 +10,10 @@
     via {!Activity_graph} are the same nominal types as those
     reachable via the source modules.
 
-    On top of the runtime, five locally-defined helpers
+    On top of the runtime, four locally-defined helpers
     persist event JSONL files under [Workspace_utils.masc_dir]
-    and project the log into JSON views consumed by the SSE
-    activity stream and the dashboard graph endpoint:
+    and project the log into the JSON view consumed by the SSE
+    activity stream and the dashboard events endpoint:
 
     - [format_sse_event_data] — private single-event SSE wire encoding.
     - {!emit} — append + fan-out to every registered SSE
@@ -21,16 +21,13 @@
     - {!list_events} — page over the persisted log.
     - {!json_response} — paginated JSON for the polling
       dashboard.
-    - {!graph_json} — folded graph (nodes / edges / kind
-      counts / 7×24 heatmap) used by the live view.
 
     Internal helpers stay private at this boundary
     ([root_dir], [month_dir], [day_path], [seq_path],
     [lock_path], [ensure_dirs], [read_current_seq],
     [write_current_seq], [append_line], [parse_event_line],
     [collect_event_files], [read_all_events],
-    [matches_filters], [list_events_with_total],
-    [window_meta], [StringMap]). *)
+    [matches_filters]). *)
 
 include module type of struct
   include Activity_graph_types
@@ -38,10 +35,6 @@ end
 
 include module type of struct
   include Activity_graph_registry
-end
-
-include module type of struct
-  include Activity_graph_reducer
 end
 
 (** {1 SSE wire encoding} *)
@@ -119,22 +112,6 @@ val json_response :
     next poll.  [latest_seq] is the max of the persisted counter
     and JSONL rows so stale [_seq] files cannot make dashboard
     cursors move backward. *)
-
-val graph_json :
-  Workspace_utils.config ->
-  ?kinds:string list ->
-  ?limit:int ->
-  ?timeline_limit:int ->
-  ?since_ms:int ->
-  unit ->
-  Yojson.Safe.t
-(** Live-graph projection.  Folds the filtered event slice
-    (default [limit = 500]) through {!reduce_event}, then
-    emits an [`Assoc] with [nodes], [edges], [kind_counts]
-    (sorted), a 7×24 [heatmap], a recent-event timeline
-    capped at [timeline_limit] (default 80), and a [window]
-    metadata record (limit / events_shown / events_store_total
-    / has_more). *)
 
 type cache_stats = {
   past_day_files : int;  (** parsed day files held *)

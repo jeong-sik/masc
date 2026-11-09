@@ -15,7 +15,9 @@ let rec remove_tree path =
 
 let with_temp_base name f =
   let base_path = Filename.temp_dir name "" in
-  Fun.protect ~finally:(fun () -> remove_tree base_path) (fun () -> f base_path)
+  Fun.protect ~finally:(fun () -> remove_tree base_path) (fun () ->
+    Masc_test_deps.Board_attention_parent_fixture.with_source ~base_path
+      (fun () -> f base_path))
 ;;
 
 let ok label = function
@@ -35,6 +37,7 @@ let ledger_lines path =
 ;;
 
 let signal post_id : Masc.Board_dispatch.board_signal =
+  let post_id = Masc_test_deps.Board_attention_parent_fixture.post_id post_id in
   { kind = Masc.Board_dispatch.Board_post_created
   ; post_id
   ; author = "external-author"

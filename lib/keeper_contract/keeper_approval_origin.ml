@@ -163,7 +163,7 @@ let from_admission admission ~turn_ref =
         (fun state (selection : Keeper_event_queue_state.pending_selection) ->
            let* sources = state in
            let board_post_id = match selection.source.payload with
-             | Keeper_event_queue.Board_signal _ | Board_attention _ -> Some selection.source.post_id
+             | Keeper_event_queue.Board_routing_pending _ | Keeper_event_queue.Board_signal _ | Board_attention _ -> Some selection.source.post_id
              | Bootstrap | Fusion_completed _ | Schedule_due _ | Connector_attention _
              | Hitl_resolved _ | Ask_answered _ | Completion_authority_rejected _
              | Task_cancelled _ | Workspace_message _ | Delegate_completed _

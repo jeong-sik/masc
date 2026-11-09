@@ -566,7 +566,7 @@ let test_board_post_schedule_is_rejected_without_mutation () =
      check string "schedule failed" "failed"
        (Schedule_domain.schedule_status_to_string stored.status));
   check int "board remains unchanged" 0
-    (List.length (Board_dispatch.list_posts ~limit:10 ()))
+    (List.length (Board_dispatch.list_posts ~reader:Masc_board_handlers.Board_access.Operator ~limit:10 ()))
 ;;
 
 (* An absent owner rejects this occurrence without enqueueing it. The
@@ -808,7 +808,7 @@ let test_keeper_wake_consumer_records_wake_receipt () =
       | _ -> fail "expected Schedule_due payload"))
   ;
   check int "keeper wake does not create board posts" 0
-    (List.length (Board_dispatch.list_posts ~limit:10 ()));
+    (List.length (Board_dispatch.list_posts ~reader:Masc_board_handlers.Board_access.Operator ~limit:10 ()));
   let dashboard =
     Server_dashboard_schedule_projection.scheduled_automation_dashboard_json config
   in

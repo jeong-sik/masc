@@ -10,6 +10,7 @@ type tool_result = Tool_result.result
 type context = {
   config : Workspace.config;
   agent_name : string;
+  board_reader : Masc_board_handlers.Board_access.reader;
   registry : Session.registry;
   state : Mcp_server.server_state;
   sw : Eio.Switch.t;

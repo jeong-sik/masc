@@ -335,7 +335,64 @@ let () =
   Prompt_registry.set_markdown_dir prompt_dir;
   Prompt_registry.load_prompts_from_directory prompt_dir
 
+let test_board_routing_pending_wire_and_identity () =
+  let open Keeper_event_queue in
+  List.iter (fun kind ->
+    let board : board_stimulus =
+      { kind; author = "writer"; title = "captured title"; content = "captured body"
+      ; hearth = Some "captured hearth"; updated_at = Some 42.
+      ; audience = Audience_targets ["reader"] }
+    in
+    let pending =
+      { post_id = "parent"; urgency = Normal; arrived_at = 1.
+      ; payload = Board_routing_pending board }
+    in
+    let delivered = { pending with payload = Board_signal board; arrived_at = 2. } in
+    let replayed = { pending with arrived_at = 3. } in
+    Alcotest.(check bool) "pending and admitted forms name one immutable event" true
+      (stimulus_identity_equal pending delivered && stimulus_identity_equal pending replayed);
+    let unique = uniq_stimuli [pending; delivered; replayed] in
+    Alcotest.(check bool) "the first pending capture owns duplicate replay" true
+      (unique = [pending]);
+    Alcotest.(check bool) "an admitted capture is not replaced by a delayed retry" true
+      (uniq_stimuli [delivered; pending] = [delivered]);
+    let encoded = stimulus_to_yojson pending in
+    let payload = match json_field "payload" encoded with
+      | Some payload -> payload | None -> Alcotest.fail "pending wire has no payload" in
+    Alcotest.(check string) "pending has its own stable wire kind" "board_routing_pending"
+      (string_field "kind" payload);
+    (match queue_of_yojson (queue_to_yojson (enqueue empty pending)) with
+     | Ok restored -> Alcotest.(check bool) "restart preserves the complete original and audience" true
+         (to_list restored = [pending])
+     | Error detail -> Alcotest.fail detail);
+    List.iter (fun (label, change) ->
+      let malformed = rewrite_payload_fields ~kind:"board_routing_pending" ~label change encoded in
+      match stimulus_of_yojson malformed with
+      | Error _ -> ()
+      | Ok _ -> Alcotest.fail ("routing-pending accepted " ^ label))
+      [ "missing audience", List.remove_assoc "audience"
+      ; "missing content", List.remove_assoc "content"
+      ; "missing nullable hearth", List.remove_assoc "hearth"
+      ; "missing nullable timestamp", List.remove_assoc "updated_at_unix"
+      ; "an invented routing reason", (fun fields -> ("reason", `String "guessed") :: fields)
+      ; "duplicate content", (fun fields -> ("content", `String "replacement") :: fields)
+      ; "nonfinite timestamp", (fun fields ->
+          ("updated_at_unix", `Float Float.nan) :: List.remove_assoc "updated_at_unix" fields)
+      ])
+    [ Post_created
+    ; Post_updated { content_updated_at = 42. }
+    ; Comment_added { comment_id = "comment"; parent_id = Some "parent-comment" }
+    ; Reaction_changed
+        { target_type = Reaction_comment; target_id = "comment"; user_id = "reactor"
+        ; emoji = "👍"; reacted = true }
+    ; Vote_cast
+        { target = Vote_on_comment "comment"; target_author = "writer"
+        ; voter = "voter"; direction = Vote_up }
+    ]
+;;
+
 let () =
+  test_board_routing_pending_wire_and_identity ();
   let open Keeper_event_queue in
   let board_payload () =
     Board_signal

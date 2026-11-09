@@ -209,7 +209,7 @@ let test_scan_follows_the_recorded_audience () =
     ; post_id unrecorded, None
     ];
   let audience_of post =
-    KBA.of_post (get (Board_dispatch.get_post ~post_id:(post_id post)))
+    KBA.of_post (get (Board_dispatch.get_post ~reader:Masc_board_handlers.Board_access.Operator ~post_id:(post_id post)))
   in
   check
     bool
@@ -402,7 +402,7 @@ let test_scan_follows_the_recorded_comment_audience () =
     ; comment_id unrecorded_plain, None
     ];
   let audience_of comment =
-    match Board_dispatch.read_comments ~post_id:(post_id post) with
+    match Board_dispatch.read_comments ~reader:Masc_board_handlers.Board_access.Operator ~post_id:(post_id post) with
     | Ok comments ->
       (match
          List.find_opt (fun c -> String.equal (comment_id c) (comment_id comment)) comments

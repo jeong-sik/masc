@@ -26,12 +26,14 @@ val to_yojson : generated_at:string -> detail -> Yojson.Safe.t
 (** Serialize the detail contract with explicit [evidence.post] JSON or null. *)
 
 val list_response :
+  reader:Masc_board_handlers.Board_access.reader ->
   generated_at:string -> registry:Fusion_run_registry.t -> Yojson.Safe.t
 (** Shared HTTP/1 and HTTP/2 list payload. Startup replay diagnostics and
     historical Board references are separate from the retained run list;
     Board publication time is never used as a run completion timestamp. *)
 
 val detail_response :
+  reader:Masc_board_handlers.Board_access.reader ->
   generated_at:string ->
   registry:Fusion_run_registry.t ->
   path:string ->

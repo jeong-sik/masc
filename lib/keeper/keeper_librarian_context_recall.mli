@@ -14,6 +14,8 @@ val publish : base_path:string -> keepers_dir:string -> keeper_name:string ->
 val render : ?artifact_reader_available:bool -> base_path:string -> keepers_dir:string -> keeper_name:string -> unit -> (string option, string) result
 (** Reads the fixed-shape index and injects its artifact only when its exact
     generation and revision still match a nonempty authoritative snapshot.
+    A retained Board source must also pass current Named readership; unresolved
+    routing or unreadable authority withholds the artifact reference.
     An absent or empty authoritative snapshot emits a stable empty-state
     notice. A missing, corrupt or stale derived index is rebuilt from the
     current authoritative snapshot. An unavailable authority or failed repair

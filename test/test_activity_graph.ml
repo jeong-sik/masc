@@ -148,7 +148,7 @@ let test_events_json_derives_ide_context () =
                   ("pr_number", `Int 15035);
                 ])
            ());
-      let json = Activity_graph.json_response config ~after_seq:0 ~limit:10 () in
+      let json = Activity_graph.json_response config ~keep:(fun _ -> true) ~after_seq:0 ~limit:10 () in
       let open Yojson.Safe.Util in
       let event =
         match json |> member "events" |> to_list with
@@ -196,7 +196,7 @@ let test_events_json_normalizes_ide_context_file_paths () =
            ~tags:[ "file: lib\\tag.ml:27" ]
            ~payload:(`Assoc [])
            ());
-      let json = Activity_graph.json_response config ~after_seq:0 ~limit:10 () in
+      let json = Activity_graph.json_response config ~keep:(fun _ -> true) ~after_seq:0 ~limit:10 () in
       let open Yojson.Safe.Util in
       match json |> member "events" |> to_list with
       | [ payload_event; tag_event ] ->
@@ -250,7 +250,7 @@ let test_events_json_omits_unsafe_ide_context_file_paths () =
                   ("line", `Int 12);
                 ])
            ());
-      let json = Activity_graph.json_response config ~after_seq:0 ~limit:10 () in
+      let json = Activity_graph.json_response config ~keep:(fun _ -> true) ~after_seq:0 ~limit:10 () in
       let open Yojson.Safe.Util in
       match json |> member "events" |> to_list with
       | [ payload_event; drive_event; traversal_event; mismatch_event ] ->
@@ -285,7 +285,7 @@ let test_events_json_ignores_invalid_derived_pr_number () =
            ~tags:[]
            ~payload:(`Assoc [ ("pr_number", `Int 0) ])
            ());
-      let json = Activity_graph.json_response config ~after_seq:0 ~limit:10 () in
+      let json = Activity_graph.json_response config ~keep:(fun _ -> true) ~after_seq:0 ~limit:10 () in
       let open Yojson.Safe.Util in
       let event =
         match json |> member "events" |> to_list with
@@ -321,7 +321,7 @@ let test_events_json_exposes_provenance_and_non_stale_latest_seq () =
           "_seq"
       in
       Fs_compat.save_file seq_counter (string_of_int first.seq);
-      let json = Activity_graph.json_response config ~after_seq:0 ~limit:10 () in
+      let json = Activity_graph.json_response config ~keep:(fun _ -> true) ~after_seq:0 ~limit:10 () in
       let open Yojson.Safe.Util in
       check string "surface" "/api/v1/activity/events"
         (json |> member "dashboard_surface" |> to_string);
@@ -620,7 +620,7 @@ let test_readers_of_one_workspace_wait_for_each_other () =
           ; ( "unfiltered"
             , fun () ->
                 let json =
-                  Activity_graph.json_response config ~after_seq:0 ~limit:100 ()
+                  Activity_graph.json_response config ~keep:(fun _ -> true) ~after_seq:0 ~limit:100 ()
                 in
                 page_count := Yojson.Safe.Util.(member "count" json |> to_int) )
           ; "gauge", (fun () -> ignore (Activity_graph.cache_stats ()))
@@ -726,7 +726,7 @@ let test_unfiltered_and_trivially_filtered_pages_agree () =
           ~keep:(fun _ -> true) ()
       in
       let unfiltered =
-        Activity_graph.json_response config ~after_seq:0 ~limit:12 ()
+        Activity_graph.json_response config ~keep:(fun _ -> true) ~after_seq:0 ~limit:12 ()
         |> Yojson.Safe.Util.member "events"
         |> Yojson.Safe.Util.to_list
         |> List.filter_map (fun e ->
@@ -755,7 +755,7 @@ let test_unfiltered_read_parses_only_the_newest_files () =
       ignore (write_dated_file config ~day:3 ~seq_from:21 ~lines:20);
       ignore (write_dated_file config ~day:4 ~seq_from:41 ~lines:20);
       ignore (write_dated_file config ~day:5 ~seq_from:61 ~lines:20);
-      let json = Activity_graph.json_response config ~after_seq:0 ~limit:5 () in
+      let json = Activity_graph.recent_json_response config ~keep:(fun _ -> true) ~raw_limit:5 () in
       check (list int) "the page is the newest five" [ 76; 77; 78; 79; 80 ]
         (seqs_of_json json);
       let stats = Activity_graph.cache_stats () in
@@ -768,16 +768,16 @@ let test_unfiltered_read_parses_only_the_newest_files () =
         (stats.Activity_graph.past_day_files <= 2))
 ;;
 
-(* total counts the store, not the page, and it comes from line counts rather
-   than parsed rows. It has to agree with what a full parse would say. *)
-let test_unfiltered_total_counts_the_whole_store () =
+(* An explicit history query has exact filtered totals, unlike the bounded
+   recent candidate window. *)
+let test_explicit_history_total_counts_the_whole_store () =
   with_config (fun config ->
       Activity_graph.For_testing.reset_past_day_cache_for_testing ();
       Activity_graph.For_testing.reset_current_day_cache_for_testing ();
       Activity_graph.For_testing.reset_line_count_cache_for_testing ();
       ignore (write_dated_file config ~day:2 ~seq_from:1 ~lines:30);
       ignore (write_dated_file config ~day:3 ~seq_from:31 ~lines:30);
-      let json = Activity_graph.json_response config ~after_seq:0 ~limit:5 () in
+      let json = Activity_graph.json_response config ~keep:(fun _ -> true) ~after_seq:0 ~limit:5 () in
       let total =
         json |> Yojson.Safe.Util.member "total_matching_events"
       in
@@ -801,7 +801,7 @@ let test_unfiltered_page_larger_than_the_store () =
       Activity_graph.For_testing.reset_line_count_cache_for_testing ();
       ignore (write_dated_file config ~day:2 ~seq_from:1 ~lines:3);
       ignore (write_dated_file config ~day:3 ~seq_from:4 ~lines:3);
-      let json = Activity_graph.json_response config ~after_seq:0 ~limit:100 () in
+      let json = Activity_graph.recent_json_response config ~keep:(fun _ -> true) ~raw_limit:100 () in
       check (list int) "every event, ascending" [ 1; 2; 3; 4; 5; 6 ]
         (seqs_of_json json))
 ;;
@@ -814,7 +814,7 @@ let test_unfiltered_events_read_builds_no_aggregate () =
   with_config (fun config ->
       Activity_graph.For_testing.reset_current_day_cache_for_testing ();
       emit_n config 10;
-      ignore (Activity_graph.json_response config ~after_seq:0 ~limit:1000 ());
+      ignore (Activity_graph.recent_json_response config ~keep:(fun _ -> true) ~raw_limit:1000 ());
       check int "unfiltered projections build no aggregate" 0
         (Activity_graph.For_testing.all_events_rebuild_count ());
       ignore
@@ -933,19 +933,19 @@ let test_current_day_cache_matches_uncached_golden () =
   with_config (fun config ->
       Activity_graph.For_testing.reset_current_day_cache_for_testing ();
       emit_n config 4;
-      ignore (Activity_graph.json_response config ~after_seq:0 ~limit:100 ());
+      ignore (Activity_graph.json_response config ~keep:(fun _ -> true) ~after_seq:0 ~limit:100 ());
       (* Grow behind the now-warm cache so the next read exercises the
          incremental delta-fold path, not a cold full parse. *)
       emit_n config 3;
       let incremental =
-        Activity_graph.json_response config ~after_seq:0 ~limit:100 ()
+        Activity_graph.json_response config ~keep:(fun _ -> true) ~after_seq:0 ~limit:100 ()
         |> strip_generated_at_iso
       in
       (* Force the reference path: an empty cache means the very next
          read is a full, repair-aware [parse_events_from_file] call. *)
       Activity_graph.For_testing.reset_current_day_cache_for_testing ();
       let uncached =
-        Activity_graph.json_response config ~after_seq:0 ~limit:100 ()
+        Activity_graph.json_response config ~keep:(fun _ -> true) ~after_seq:0 ~limit:100 ()
         |> strip_generated_at_iso
       in
       check string "incremental path output matches full-reparse reference"
@@ -994,6 +994,47 @@ let test_past_day_cache_evicts_entries_for_deleted_files () =
       check int "cache entry evicted once the backing file is gone"
         baseline_count (Activity_graph.For_testing.past_day_cache_entry_count ()))
 
+let test_recent_public_window_stays_bounded_and_reports_unknown_totals () =
+  with_config (fun config ->
+    Activity_graph.For_testing.reset_current_day_cache_for_testing ();
+    Activity_graph.For_testing.reset_past_day_cache_for_testing ();
+    List.iteri (fun index day ->
+      ignore (write_dated_file config ~day ~seq_from:(index * 500 + 1) ~lines:500))
+      [ 2; 3; 4; 5 ];
+    let keep (event : Activity_graph.event) = event.seq mod 2 = 0 in
+    let projected = Activity_graph.recent_json_response config ~raw_limit:1000 ~keep () in
+    check int "only the public half of the newest raw 1000 is returned" 500
+      Yojson.Safe.Util.(projected |> member "count" |> to_int);
+    check (list int) "filter stays within the raw candidate window"
+      (List.init 500 (fun index -> 1002 + index * 2))
+      (seqs_of_json projected);
+    check string "bounded coverage is explicit" "recent_window"
+      Yojson.Safe.Util.(projected |> member "coverage" |> to_string);
+    check string "whole-history total is unknown" "null"
+      (Yojson.Safe.to_string (Yojson.Safe.Util.member "total_matching_events" projected));
+    check bool "latest matching metadata is unknown" true
+      Yojson.Safe.Util.(member "latest_matching_seq" projected = `Null);
+    check int "default did not build the full-history aggregate" 0
+      (Activity_graph.For_testing.all_events_rebuild_count ());
+    check bool "oldest file was not parsed" true
+      ((Activity_graph.cache_stats ()).past_day_files < 4);
+    let outside = Activity_graph.recent_json_response config ~raw_limit:1000
+      ~keep:(fun event -> event.Activity_graph.seq <= 20) () in
+    check int "authorized rows outside the candidate window are not promised" 0
+      Yojson.Safe.Util.(outside |> member "count" |> to_int))
+
+let test_explicit_history_keep_filters_totals_and_latest () =
+  with_config (fun config ->
+    emit_n config 10;
+    let json = Activity_graph.json_response config ~after_seq:0 ~limit:1
+      ~keep:(fun event -> event.Activity_graph.seq <= 2) () in
+    check (list int) "keep runs before tail paging" [2] (seqs_of_json json);
+    check int "exact total counts only allowed history" 2
+      Yojson.Safe.Util.(json |> member "total_matching_events" |> to_int);
+    check int "latest matching seq belongs only to allowed history" 2
+      Yojson.Safe.Util.(json |> member "latest_matching_seq" |> to_int))
+;;
+
 let () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -1031,12 +1072,18 @@ let () =
             test_append_reuses_the_past_day_merge;
           test_case "a new past file rebuilds the merge" `Quick
             test_a_new_past_file_rebuilds_the_merge;
+          test_case "recent public window stays bounded with unknown totals" `Quick
+            test_recent_public_window_stays_bounded_and_reports_unknown_totals;
+          test_case "explicit history keep filters totals and latest metadata" `Quick
+            test_explicit_history_keep_filters_totals_and_latest;
+          test_case "recent window builds no full-history aggregate" `Quick
+            test_unfiltered_events_read_builds_no_aggregate;
           test_case "unfiltered and trivially filtered pages agree" `Quick
             test_unfiltered_and_trivially_filtered_pages_agree;
           test_case "unfiltered read parses only the newest files" `Quick
             test_unfiltered_read_parses_only_the_newest_files;
-          test_case "unfiltered total counts the whole store" `Quick
-            test_unfiltered_total_counts_the_whole_store;
+          test_case "explicit history total counts the whole store" `Quick
+            test_explicit_history_total_counts_the_whole_store;
           test_case "unfiltered page larger than the store" `Quick
             test_unfiltered_page_larger_than_the_store;
           Alcotest.test_case "same-size rewrite invalidates cache" `Quick

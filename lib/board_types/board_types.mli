@@ -676,7 +676,7 @@ type store = {
   mutex : Eio.Mutex.t;
   persist_mutex : Eio.Mutex.t;
   origin_create_mutex : Eio.Mutex.t;
-  mutable karma_cache : (string * int) list option;
+  mutable karma_cache : ((string * int) list * (string * (string * int) list) list) option;
   (** [None] = stale. *)
   mutable hot_post_index : Hot_post_set.t;
   (** Incremental immutable Hot-ordered index ([net_vote DESC, created_at DESC, post_id ASC]). *)

@@ -409,7 +409,7 @@ let test_event_queue_pending_rows_carry_operator_visible_fields () =
   let row_of post_id =
     U.(keeper |> member "waiting_on" |> to_list)
     |> List.find_opt (fun row ->
-      String.equal post_id U.(row |> member "detail" |> member "post_id" |> to_string))
+      U.(row |> member "detail" |> member "post_id") = `String post_id)
     |> function
     | Some row -> row
     | None -> failf "queue row missing for %s" post_id
@@ -428,9 +428,10 @@ let test_event_queue_pending_rows_carry_operator_visible_fields () =
   check string "approval sentence names the task and verification"
     "작업 T-3 증거 승인됨 (verification-3)"
     (what_of approved.Keeper_event_queue.post_id);
-  check string "board sentence names the author, not the content"
-    "operator의 새 글"
-    (what_of board.Keeper_event_queue.post_id);
+  let board_row = U.(keeper |> member "waiting_on" |> to_list)
+    |> List.find (fun row -> U.member "waiting_on" row = `String "board_signal") in
+  check string "public Board sentence carries no author"
+    "Board 알림 대기" (json_string_member "what" board_row);
   let message_detail = detail_of message.Keeper_event_queue.post_id in
   check string "workspace message sender" "alpha"
     (json_string_member "message_from" message_detail);
@@ -456,9 +457,12 @@ let test_event_queue_pending_rows_carry_operator_visible_fields () =
     (json_string_member "outcome_verification_id" approved_detail);
   check bool "approval row does not serialize the authority payload" true
     (U.member "to_authority" approved_detail = `Null);
-  let board_detail = detail_of board.Keeper_event_queue.post_id in
-  check string "board row keeps only the typed payload label" "board_signal"
-    (json_string_member "payload_kind" board_detail);
+  let board_detail = U.member "detail" board_row in
+  check string "public Board control address is opaque"
+    (Keeper_event_queue_state.source_snapshot_ref board)
+    (json_string_member "source_ref" board_detail);
+  check bool "public Board detail carries no post identifier" true
+    (U.member "post_id" board_detail = `Null);
   check bool "board post content does not cross the inventory" false
     (String_util.contains_substring (Yojson.Safe.to_string json) sensitive_content)
 ;;
@@ -1345,6 +1349,63 @@ let test_queue_residence_of_an_empty_queue_is_empty () =
   check string "residence is empty" "empty" (json_string_member "status" residence)
 ;;
 
+let test_public_board_rows_withhold_unverified_identity () = with_workspace @@ fun config ->
+  let keeper_name = "public-board-inventory" in
+  ensure_keeper config keeper_name;
+  let private_marker = "PRIVATE_INVENTORY_" in
+  let private_value field = private_marker ^ field in
+  let kinds = Keeper_event_queue.
+    [Post_created; Post_updated {content_updated_at = 2.};
+     Comment_added {comment_id = private_value "COMMENT_ID"; parent_id = Some (private_value "PARENT_ID")};
+     Reaction_changed {target_type = Reaction_comment; target_id = private_value "REACTION_ID";
+       user_id = private_value "REACTOR"; emoji = private_value "EMOJI"; reacted = true};
+     Vote_cast {target = Vote_on_comment (private_value "VOTE_ID");
+       target_author = private_value "TARGET_AUTHOR"; voter = private_value "VOTER";
+       direction = Vote_up}] in
+  let stimuli = List.mapi (fun kind_index kind ->
+    let board : Keeper_event_queue.board_stimulus =
+      {kind; author = private_value "AUTHOR"; title = private_value "TITLE";
+       content = private_value "BODY"; hearth = Some (private_value "HEARTH");
+       updated_at = Some 2.; audience = Audience_targets [private_value "READER"]} in
+    let payloads = Keeper_event_queue.
+      [Board_signal board; Board_attention {candidate_id = private_value "CANDIDATE_ID"; signal = board};
+       Board_routing_pending board] in
+    List.mapi (fun variant_index payload ->
+      stimulus ~post_id:(Printf.sprintf "%sPOST_%d_%d" private_marker kind_index variant_index)
+        ~arrived_at:100. payload) payloads) kinds |> List.concat in
+  Keeper_event_queue_persistence.persist ~base_path:config.Workspace_utils_backend_setup.base_path
+    ~keeper_name (queue_of_list stimuli);
+  let json = Server_keeper_waiting_inventory.dashboard_json config in
+  let rows = U.(json |> member "rows" |> to_list) in
+  check int "all Board variants remain counted as waiting work" 15 (List.length rows);
+  List.iter (fun row ->
+    check string "public Board sentence carries no event actor" "Board 알림 대기"
+      (json_string_member "what" row);
+    let fields = U.(row |> member "detail" |> to_assoc) in
+    check (list string) "public Board details expose only opaque control addresses"
+      ["source_incarnation"; "source_ref"]
+      (List.map fst fields |> List.sort String.compare)) rows;
+  let rec strings = function
+    | `String value -> [value]
+    | `List values -> List.concat_map strings values
+    | `Assoc fields -> List.concat_map (fun (_, value) -> strings value) fields
+    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ -> [] in
+  check bool "flat and per-Keeper public DTOs contain no captured Board identifiers" false
+    (List.exists (Astring.String.is_infix ~affix:private_marker) (strings json));
+  let restored = match Keeper_event_queue_persistence.load_state_result
+      ~base_path:config.Workspace_utils_backend_setup.base_path ~keeper_name with
+    | Ok state -> state | Error detail -> fail detail in
+  check int "public redaction leaves private queue originals available to authorized controls" 15
+    (Keeper_event_queue_state.pending_selections restored |> List.length);
+  List.iter (fun row ->
+    let detail = U.member "detail" row in
+    match Keeper_event_queue_state.resolve_pending_selection
+      ~source_ref:(json_string_member "source_ref" detail)
+      ~source_incarnation:(Int64.of_string (json_string_member "source_incarnation" detail)) restored with
+    | Ok _ -> ()
+    | Error detail -> fail ("opaque Board address lost the exact authorized selection: " ^ detail)) rows
+;;
+
 let () =
   run "keeper_waiting_inventory"
     [ ( "queue_residence"
@@ -1356,7 +1417,9 @@ let () =
             test_queue_residence_of_an_empty_queue_is_empty
         ] )
     ; ( "dashboard_json"
-      , [ test_case "event queue pending is visible" `Quick
+      , [ test_case "public Board rows withhold unverified event identity" `Quick
+            test_public_board_rows_withhold_unverified_identity
+        ; test_case "event queue pending is visible" `Quick
             test_event_queue_pending_is_visible
         ; test_case "a settled composition row names what finished" `Quick
             test_settled_composition_row_names_what_finished

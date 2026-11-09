@@ -33,6 +33,10 @@ let with_workspace f () =
       try remove_tree base_path with Sys_error _ | Unix.Unix_error _ -> ())
     (fun () ->
        ignore (Workspace.init config ~agent_name:None : string);
+       Board_dispatch.reset_for_test ();
+       Board.reset_global_for_test ();
+       Result.get_ok (Board_dispatch.init_jsonl ~base_path
+         ~recipient_lookup:(Keeper_board_recipient_lookup.make ~config) ());
        f config)
 ;;
 
@@ -134,6 +138,10 @@ let post_signal : Board_dispatch.board_signal =
 (* Whether the Board router delivers a post recorded for [recipient] to the
    Keeper [keeper]: the question the recorded name has to answer yes to. *)
 let routed_to_meta (meta : Keeper_meta_contract.keeper_meta) recipient =
+  let post = match Board_dispatch.create_post ~author:"carol" ~content:"content"
+      ~visibility:Board.Public ~post_kind:Board.Human_post () with
+    | Ok post -> post | Error error -> fail (Board.Post_publication_failure.to_string error) in
+  let post_signal = {post_signal with post_id=Board.Post_id.to_string post.id} in
   match Keeper_identity.Keeper_id.of_string recipient with
   | None -> fail (Printf.sprintf "%S is not a Keeper id" recipient)
   | Some id ->

@@ -288,6 +288,10 @@ let test_capture_failures_and_corruption () = with_fixture (fun config ->
     |> require_error "Goal captured private source";
   Evidence.capture ~config ~authority:(Evidence.Task_producer "peer") ~references:[board_ref p]
     |> require_error "other producer captured private source";
+  let recipient_items =
+    capture config (Evidence.Task_producer "recipient") [board_ref p] |> restored in
+  check int "a recorded recipient may submit its Direct source" 1
+    (List.length recipient_items);
   Evidence.capture ~config ~authority:Evidence.Goal_workspace ~references:["fusion:absent"]
     |> require_error "missing source captured";
   let items = capture config (Evidence.Task_producer "producer") [board_ref p] |> restored in

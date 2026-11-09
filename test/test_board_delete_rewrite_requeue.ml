@@ -123,7 +123,7 @@ let row_has_post_id post_id rows =
     rows
 
 let check_post_deleted label post_id =
-  match Board_dispatch.get_post ~post_id with
+  match Board_dispatch.get_post ~reader:Masc_board_handlers.Board_access.Operator ~post_id with
   | Error (Board.Post_not_found _) -> ()
   | Error error -> Alcotest.fail (label ^ ": " ^ Board.show_board_error error)
   | Ok _ -> Alcotest.fail (label ^ ": the applied deletion was lost")
@@ -189,7 +189,7 @@ let test_individual_snapshot_failure path () =
   ignore (require_ok (Board_dispatch.vote ~post_id ~voter:"voter" ~direction:Board.Up));
   ignore
     (require_ok
-       (Board_dispatch.toggle_reaction ~target_type:Board.Reaction_post
+       (Board_dispatch.toggle_reaction ~reader:Masc_board_handlers.Board_access.Operator ~target_type:Board.Reaction_post
           ~target_id:post_id ~user_id:"reactor" ~emoji:"👍"));
   flush ();
   let active = store () in
@@ -240,7 +240,7 @@ let test_multiple_snapshot_failures_keep_healthy_writes_and_retry () =
   ignore (require_ok (Board_dispatch.vote ~post_id ~voter:"voter" ~direction:Board.Up));
   ignore
     (require_ok
-       (Board_dispatch.toggle_reaction ~target_type:Board.Reaction_post
+       (Board_dispatch.toggle_reaction ~reader:Masc_board_handlers.Board_access.Operator ~target_type:Board.Reaction_post
           ~target_id:post_id ~user_id:"reactor" ~emoji:"👍"));
   flush ();
   Alcotest.(check int) "comment is on disk before deletion" 1
@@ -386,7 +386,7 @@ let test_unreadable_snapshot_refuses_before_transition () =
    | Error error -> Alcotest.fail (Board.show_board_error error)
    | Ok _ -> Alcotest.fail "unreadable snapshot authorized a deletion");
   Alcotest.(check bool) "refused deletion keeps post" true
-    (Result.is_ok (Board_dispatch.get_post ~post_id));
+    (Result.is_ok (Board_dispatch.get_post ~reader:Masc_board_handlers.Board_access.Operator ~post_id));
   Alcotest.(check int) "refusal emits no applied transition" 0 !writes
 
 let with_blocked_reactions f =
@@ -430,7 +430,7 @@ let test_mcp_pending_delete_is_post_effect_failure () =
   flush ();
   with_blocked_reactions (fun () ->
     let result =
-      Board_tool.handle_tool ~result_boundary:Tool_output.Sent_to_client "masc_board_delete"
+      Board_tool.handle_tool ~reader:Masc_board_handlers.Board_access.Operator ~result_boundary:Tool_output.Sent_to_client "masc_board_delete"
         (`Assoc ["post_id", `String post_id; "author", `String "delete-rq-author"])
     in
     require_post_effect_failure_without_wait ~tool_name:"masc_board_delete" result;
@@ -454,7 +454,7 @@ let test_cleanup_counts_pending_separately () =
   flush ();
   with_blocked_reactions (fun () ->
     let result =
-      Board_tool.handle_tool ~result_boundary:Tool_output.Sent_to_client "masc_board_cleanup"
+      Board_tool.handle_tool ~reader:Masc_board_handlers.Board_access.Operator ~result_boundary:Tool_output.Sent_to_client "masc_board_cleanup"
         (`Assoc ["dry_run", `Bool false; "max_age_hours", `Int 1])
     in
     require_post_effect_failure_without_wait ~tool_name:"masc_board_cleanup" result;
@@ -479,14 +479,14 @@ let test_cleanup_refusal_is_pre_effect () =
   flush ();
   let _repair_source = refuse_posts_source () in
   let result =
-    Board_tool.handle_tool ~result_boundary:Tool_output.Sent_to_client "masc_board_cleanup"
+    Board_tool.handle_tool ~reader:Masc_board_handlers.Board_access.Operator ~result_boundary:Tool_output.Sent_to_client "masc_board_cleanup"
       (`Assoc ["dry_run", `Bool false; "max_age_hours", `Int 1])
   in
   let execution = Keeper_tool_execution.of_tool_result result in
   Alcotest.(check bool) "all refused deletions remain pre-effect" true
     (execution.failure_effect_disposition = Tool_result.Proven_pre_effect);
   Alcotest.(check bool) "storage refusal keeps the post" true
-    (Result.is_ok (Board_dispatch.get_post ~post_id));
+    (Result.is_ok (Board_dispatch.get_post ~reader:Masc_board_handlers.Board_access.Operator ~post_id));
   let open Yojson.Safe.Util in
   let data = Tool_result.data result in
   Alcotest.(check int) "cleanup counts refused deletion" 1
@@ -516,7 +516,7 @@ let test_cleanup_mixed_pending_and_refused_is_post_effect () =
         repair_source := Some (refuse_posts_source ())
       | _ -> ());
     let result =
-      Board_tool.handle_tool ~result_boundary:Tool_output.Sent_to_client "masc_board_cleanup"
+      Board_tool.handle_tool ~reader:Masc_board_handlers.Board_access.Operator ~result_boundary:Tool_output.Sent_to_client "masc_board_cleanup"
         (`Assoc ["dry_run", `Bool false; "max_age_hours", `Int 1])
     in
     require_post_effect_failure_without_wait ~tool_name:"masc_board_cleanup" result;
@@ -528,7 +528,7 @@ let test_cleanup_mixed_pending_and_refused_is_post_effect () =
       (data |> member "persistence_pending" |> to_list
        |> List.map (fun row -> row |> member "post_id" |> to_string));
     Alcotest.(check bool) "refused post remains readable" true
-      (Result.is_ok (Board_dispatch.get_post ~post_id:refused_id)));
+      (Result.is_ok (Board_dispatch.get_post ~reader:Masc_board_handlers.Board_access.Operator ~post_id:refused_id)));
   Board_dispatch.set_board_sse_hook (fun _ -> ());
   (match !repair_source with
    | Some repair -> repair ()

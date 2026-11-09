@@ -1189,6 +1189,49 @@ let authorize_optional_token_bound_permission_request
     |> Result.map Option.some
   else Ok None
 
+let board_access_for_request ~base_path request =
+  let credential = request_auth_credential_from_request request in
+  let* () = reject_malformed_request_credential credential in
+  let named = Masc_board_handlers.Board_access.named in
+  match token_of_request_auth_credential credential with
+  | None ->
+      let reader =
+        if http_auth_strict_enabled () then Masc_board_handlers.Board_access.Anonymous
+        else Masc_board_handlers.Board_access.Operator
+      in
+      Ok (reader, None)
+  | Some token when Auth.verify_internal_keeper_token base_path ~token ->
+      (match internal_keeper_agent_from_request request with
+       | Some name -> Ok (named name, Some name)
+       | None ->
+           Error
+             (Masc_domain.Auth
+                (Masc_domain.Auth_error.Unauthorized
+                   { reason = Missing_token
+                   ; message = "Internal Keeper requests require a verified Keeper identity."
+                   })))
+  | Some token ->
+      let* credential = Auth.find_credential_by_token base_path ~token in
+      if Masc_domain.has_permission credential.role Masc_domain.CanReadState then
+        let reader =
+          match credential.role with
+          | Masc_domain.Admin -> Masc_board_handlers.Board_access.Operator
+          | Masc_domain.Worker | Masc_domain.Player -> named credential.agent_name
+        in
+        Ok (reader, Some credential.agent_name)
+      else
+        Error
+          (Masc_domain.Auth
+             (Masc_domain.Auth_error.Forbidden
+                { agent = credential.agent_name
+                ; action = Masc_domain.show_permission Masc_domain.CanReadState
+                }))
+
+let with_board_access ~base_path request reqd handler =
+  match board_access_for_request ~base_path request with
+  | Ok (reader, actor) -> handler reader actor
+  | Error error -> respond_auth_error request reqd error
+
 let is_dashboard_bootstrap_path path =
   String.starts_with ~prefix:"/api/v1/dashboard/" path
 

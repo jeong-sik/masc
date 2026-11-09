@@ -199,7 +199,7 @@ let test_masc_board_post_schema_supports_judgment () =
 
 (* The Board is majority machine-authored (task verdict receipts, heartbeats).
    The handler reads exclude_system / exclude_automation straight from args and
-   Board_dispatch.list_posts implements both, but the Keeper projection is a
+   Board_dispatch.list_posts ~reader:Masc_board_handlers.Board_access.Operator implements both, but the Keeper projection is a
    closed schema: a knob it omits is not merely unadvertised, it is rejected. *)
 let test_keeper_board_list_can_exclude_machine_posts () =
   let schema = required_keeper_board_schema Tool_name.Board_name.Board_list in

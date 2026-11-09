@@ -36,14 +36,16 @@ val malformed_json : string -> error
 val catalog_json : unit -> Yojson.Safe.t
 
 val list_json :
+  reader:Masc_board_handlers.Board_access.reader ->
   actor:string -> target -> (Yojson.Safe.t, error) result
 
-val list_batch_json : actor:string -> target list -> Yojson.Safe.t
+val list_batch_json : reader:Masc_board_handlers.Board_access.reader -> actor:string -> target list -> Yojson.Safe.t
 (** Reaction state for every target asked about, keyed by [target_id]. A target
     the store has nothing for answers with an empty list rather than being
     left out. *)
 
 val toggle_json :
+  reader:Masc_board_handlers.Board_access.reader ->
   actor:string -> toggle_request -> (Yojson.Safe.t, error) result
 
 val error_status : error -> http_status

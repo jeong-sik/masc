@@ -2,7 +2,7 @@
 let relay ~author content =
   try
     let result =
-      Board_tool_dispatch.handle_tool ~result_boundary:Tool_output.Sent_to_client
+      Board_tool_dispatch.handle_tool ~reader:Masc_board_handlers.Board_access.Anonymous ~result_boundary:Tool_output.Sent_to_client
         (Tool_name.Board_name.to_string Tool_name.Board_name.Board_post)
         (`Assoc
           [ ("title", `String "DOS 아케이드")

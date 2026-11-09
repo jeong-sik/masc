@@ -48,8 +48,8 @@ let curation_answer_matches_arg args =
    [Tool_result.result]. Curation snapshots are passed as typed JSON
    [~data] directly. *)
 
-let handle_board_curation_read ~tool_name ~start_time _args : Tool_result.result =
-  match Board_dispatch.latest_curation_snapshot () with
+let handle_board_curation_read ~reader ~tool_name ~start_time _args : Tool_result.result =
+  match Board_dispatch.latest_curation_snapshot ~reader () with
   | None -> Tool_result.make_ok ~tool_name ~start_time ~data:`Null ()
   | Some snap ->
     let json = Board_curation.snapshot_to_yojson snap in

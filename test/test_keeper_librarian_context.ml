@@ -513,10 +513,138 @@ let test_unchanged_capture_needs_no_second_queue_pass () = with_store @@ fun kee
   check bool "another writer's version falls back to the stored references" true
     (needed {recaptured with previous = Some other})
 
+let test_capture_rechecks_direct_readers_and_retained_context () = with_store @@ fun base_path ->
+  let config = Workspace.default_config base_path in
+  ignore (Workspace.init config ~agent_name:None : string);
+  Board.reset_global_for_test ();
+  Board_dispatch.reset_for_test ();
+  Fun.protect ~finally:(fun () ->
+    Keeper_registry.For_testing.clear ();
+    Board_dispatch.reset_for_test ();
+    Board.reset_global_for_test ()) @@ fun () ->
+  let recipient_lookup = Recipient_lookup.make (fun candidate ->
+    Ok (Result.to_option (Board.Agent_id.parse
+      (Recipient_lookup.Candidate.to_string candidate)))) in
+  ignore (Result.get_ok (Board_dispatch.init_jsonl ~base_path ~recipient_lookup ()));
+  let author = "direct-author" and reader = "direct-reader" and outsider = "outsider" in
+  let create visibility title content =
+    match Board_dispatch.create_post ~author ~title ~content
+      ~post_kind:Board.Human_post ~visibility () with
+    | Ok post -> post
+    | Error error -> fail (Board.Post_publication_failure.to_string error) in
+  let direct_body = "@direct-reader DIRECT_BODY_ONLY" in
+  let direct = create Board.Direct "DIRECT_TITLE_ONLY" direct_body in
+  let direct_id = Board.Post_id.to_string direct.id in
+  let comment = match Board_dispatch.add_comment ~post_id:direct_id ~author
+      ~content:"DIRECT_COMMENT_ONLY" () with
+    | Ok comment -> comment | Error error -> fail (Board.show_board_error error) in
+  let public = create Board.Public "PUBLIC_TITLE_ONLY" "PUBLIC_BODY_ONLY" in
+  let mixed_public = create Board.Public "MIXED_PUBLIC_TITLE" "MIXED_PUBLIC_BODY" in
+  let pending_public = create Board.Public "PENDING_TITLE_ONLY" "PENDING_BODY_ONLY" in
+  let board (post : Board.post) kind content : Keeper_event_queue.board_stimulus =
+    {kind; author; title = post.title; content; hearth = None;
+     updated_at = Some post.created_at; audience = Audience_targets [reader]} in
+  let event (post : Board.post) payload : Keeper_event_queue.stimulus =
+    {post_id = Board.Post_id.to_string post.id; urgency = Normal;
+     arrived_at = post.created_at; payload} in
+  let direct_signal = event direct (Board_signal (board direct Post_created direct_body)) in
+  let comment_signal = event direct (Board_signal
+      (board direct (Comment_added {comment_id = Board.Comment_id.to_string comment.id;
+        parent_id = None}) "DIRECT_COMMENT_ONLY")) in
+  let attention = event direct (Board_attention {candidate_id = "retained-direct-candidate";
+      signal = board direct (Post_updated {content_updated_at = direct.created_at +. 1.})
+        "DIRECT_ATTENTION_BODY_ONLY"}) in
+  let raw_pending = event pending_public (Board_routing_pending
+      (board pending_public Post_created "PENDING_BODY_ONLY")) in
+  let public_signal = event public (Board_signal (board public Post_created "PUBLIC_BODY_ONLY")) in
+  let mixed_signal = event mixed_public
+      (Board_signal (board mixed_public Post_created "MIXED_PUBLIC_BODY")) in
+  let stimuli = [direct_signal; comment_signal; attention; raw_pending; public_signal; mixed_signal] in
+  let queue = List.fold_left Keeper_event_queue.enqueue Keeper_event_queue.empty stimuli in
+  let keepers_dir = Filename.concat base_path "retained-contexts" in
+  let config_keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
+  Fs_compat.mkdir_p config_keepers_dir;
+  let write_targets keeper_name targets =
+    Out_channel.with_open_text (Filename.concat config_keepers_dir (keeper_name ^ ".toml"))
+      (fun channel -> Printf.fprintf channel
+        "[keeper]\ninstructions = \"Read authorized Board evidence.\"\nsandbox_profile = \"docker\"\nsandbox_image = \"base\"\nmention_targets = [%s]\n"
+        (String.concat ", " (List.map (Printf.sprintf "%S") targets))) in
+  List.iter (fun keeper_name ->
+    let meta = Masc_test_deps.meta_of_json_fixture
+        (`Assoc ["name", `String keeper_name; "trace_id", `String ("trace-" ^ keeper_name)]) |> ok in
+    Keeper_meta_store.replace_snapshot config meta |> ok;
+    write_targets keeper_name [];
+    ignore (Keeper_registry.For_testing.register ~base_path keeper_name meta);
+    check bool "capture identity has a real effective metadata source" true
+      (Keeper_meta_store.read_effective_meta config keeper_name |> ok |> Option.is_some);
+    Keeper_event_queue_persistence.persist ~base_path ~keeper_name queue;
+    let selections = Keeper_registry_event_queue.pending_selections_result ~base_path keeper_name |> ok in
+    check int "all six original queue sources are durable" 6 (List.length selections);
+    let sources = List.map Context.source_of_event selections in
+    let source_for stimulus =
+      let selection = List.find (fun (selection : Keeper_event_queue_state.pending_selection) ->
+        Keeper_event_queue.stimulus_identity_equal stimulus selection.source) selections in
+      Context.source_of_event selection in
+    let direct_source = source_for direct_signal and comment_source = source_for comment_signal in
+    let attention_source = source_for attention and pending_source = source_for raw_pending in
+    let public_source = source_for public_signal and mixed_source = source_for mixed_signal in
+    let pockets =
+      [pocket [direct_source.reference; mixed_source.reference] "MIXED_CONTEXT_ONLY" ["MIXED_ADVICE_ONLY"];
+       pocket [comment_source.reference] "PRIVATE_COMMENT_CONTEXT_ONLY" ["PRIVATE_COMMENT_ADVICE_ONLY"];
+       pocket [attention_source.reference] "DIRECT_ATTENTION_CONTEXT_ONLY" [];
+       pocket [pending_source.reference] "PENDING_CONTEXT_ONLY" [];
+       pocket [public_source.reference] "PUBLIC_CONTEXT_ONLY" ["PUBLIC_ADVICE_ONLY"]] in
+    let stored = Context.commit ~keepers_dir ~keeper_id:keeper_name ~expected_version:None
+        ~sources pockets |> ok in
+    let path = Context.path ~keepers_dir ~keeper_id:keeper_name in
+    let before = Fs_compat.load_file path in
+    let capture () = Keeper_librarian_context_io.capture ~base_path ~keepers_dir ~keeper_name in
+    let captured = capture () in
+    let authorized = keeper_name <> outsider in
+    let expected_sources = if authorized then 4 else 2 in
+    check int "capture rechecks actual stored Direct readership" expected_sources
+      (List.length captured.sources);
+    let previous = Option.get captured.previous in
+    check int "retained raw sources use the same authorization guard" expected_sources
+      (List.length previous.sources);
+    check int "a mixed private context is withheld in full for an outsider"
+      (if authorized then 3 else 1) (List.length previous.pockets);
+    let rec strings = function
+      | `String value -> [value]
+      | `List values -> List.concat_map strings values
+      | `Assoc fields -> List.concat_map (fun (_, value) -> strings value) fields
+      | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ -> [] in
+    let prompt_strings = strings (Context.prompt_json captured) in
+    List.iter (fun value -> check bool "raw pending/discoverable Direct data never enters the prompt"
+      false (List.mem value prompt_strings))
+      ["PENDING_TITLE_ONLY"; "PENDING_BODY_ONLY"; "PENDING_CONTEXT_ONLY";
+       "DIRECT_ATTENTION_BODY_ONLY"; "DIRECT_ATTENTION_CONTEXT_ONLY"];
+    List.iter (fun value -> check bool "Direct source and mixed summary follow the actual reader"
+      authorized (List.mem value prompt_strings))
+      ["DIRECT_TITLE_ONLY"; direct_body; "DIRECT_COMMENT_ONLY";
+       "MIXED_CONTEXT_ONLY"; "MIXED_ADVICE_ONLY"; "PRIVATE_COMMENT_CONTEXT_ONLY"];
+    check bool "unrelated public history remains useful" true
+      (List.mem "PUBLIC_CONTEXT_ONLY" prompt_strings && List.mem "PUBLIC_BODY_ONLY" prompt_strings);
+    check string "capture does not delete or rewrite the retained snapshot" before (Fs_compat.load_file path);
+    check bool "stored private source/pocket data remains intact" true
+      ((Context.read ~keepers_dir ~keeper_id:keeper_name |> ok) = Some stored);
+    check int "capture does not acknowledge or remove original queue work" 6
+      (Keeper_registry_event_queue.pending_selections_result ~base_path keeper_name |> ok |> List.length);
+    if keeper_name = outsider then (
+      write_targets keeper_name [reader];
+      check int "a newly resolved reader alias permits the same Direct sources" 4
+        (List.length (capture ()).sources);
+      write_targets keeper_name [];
+      check int "alias removal immediately withdraws model-side Direct access" 2
+        (List.length (capture ()).sources);
+      check string "identity changes do not erase retained evidence" before (Fs_compat.load_file path)))
+    [author; reader; outsider]
+
 let () =
   Prompt_registry.set_markdown_dir (Masc_test_deps.source_path "config/prompts");
   run "Librarian working contexts"
   ["scenarios", [
+    test_case "capture rechecks Direct readership and retained mixed contexts" `Quick test_capture_rechecks_direct_readers_and_retained_context;
     test_case "source reassignment preserves distinct context identities" `Quick test_source_reassignment_does_not_collide_with_merged_identity;
     test_case "split source does not collide with an untouched context" `Quick test_split_source_does_not_collide_with_untouched_context;
     test_case "exact source retraction is atomic and preserves unaffected pockets" `Quick test_exact_source_retraction_preserves_and_reconsiders;

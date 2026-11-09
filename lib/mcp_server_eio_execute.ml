@@ -60,6 +60,30 @@ let browser_principal_for_caller ~config (caller:Mcp_server_eio_caller_identity.
                 Lane_addon_call_context.Authenticated_agent credential.agent_name
 ;;
 
+let board_reader_for_caller ~config (caller : Mcp_server_eio_caller_identity.t) =
+  let keeper_reader name =
+    match Keeper_meta_store.read_effective_meta_presence config name with
+    | Ok (Keeper_meta_store.Meta_present meta) -> Keeper_board_audience.reader_for_keeper meta
+    | Ok (Keeper_meta_store.Meta_absent | Keeper_meta_store.Meta_not_current _) | Error _ -> Masc_board_handlers.Board_access.Anonymous
+  in
+  if caller.verified_internal_keeper_runtime then keeper_reader caller.agent_name
+  else match caller.token with
+    | Some token ->
+      (match Auth.find_credential_by_token config.Workspace.base_path ~token with
+       | Ok credential ->
+         (match credential.Masc_domain.role with
+          | Masc_domain.Admin -> Masc_board_handlers.Board_access.Operator
+          | Masc_domain.Worker | Masc_domain.Player ->
+            (match caller.owner_keeper_identity with
+             | Some (name, _) -> keeper_reader name
+             | None -> Masc_board_handlers.Board_access.named credential.agent_name))
+       | Error _ -> Masc_board_handlers.Board_access.Anonymous)
+    | None ->
+      let auth = Auth.load_auth_config config.base_path in
+      if auth.Masc_domain.enabled && auth.require_token then Masc_board_handlers.Board_access.Anonymous
+      else Masc_board_handlers.Board_access.Operator
+;;
+
 let execute_tool_eio
       ~sw
       ~clock
@@ -582,6 +606,10 @@ let execute_tool_eio
                    let mcp_runtime_ctx : Mcp_tool_runtime.context =
                      { config
                      ; agent_name
+                     ; board_reader =
+                         (match Tool_name.Board_name.of_string name with
+                          | Some _ -> board_reader_for_caller ~config caller_identity
+                          | None -> Masc_board_handlers.Board_access.Anonymous)
                      ; registry
                      ; state
                      ; sw

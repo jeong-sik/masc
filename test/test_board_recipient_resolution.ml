@@ -124,7 +124,7 @@ let test_declared_names_are_targets_and_the_rest_are_reported =
       "the undeclared names come back as written"
       [ "check"; "Param" ]
       unresolved;
-    let stored = get (Board_dispatch.get_post ~post_id:(post_id post)) in
+    let stored = get (Board_dispatch.get_post ~reader:Masc_board_handlers.Board_access.Operator ~post_id:(post_id post)) in
     check
       (list string)
       "the stored record is what the write decided"
@@ -201,7 +201,7 @@ let test_a_lookup_failure_refuses_the_write_and_stores_nothing =
      | Board.Recipient_lookup_failed detail ->
        check bool "the error says what is broken" true (contains ~sub:"broken" detail)
      | error -> fail (Board.show_board_error error));
-    check int "nothing was stored" 0 (List.length (Board_dispatch.list_posts ()));
+    check int "nothing was stored" 0 (List.length (Board_dispatch.list_posts ~reader:Masc_board_handlers.Board_access.Operator ()));
     check bool "nothing reached the disk" false (persisted_text_contains "zzmarker-create");
     let { Board.post; _ } = creation (write "original text, no address") in
     (match
@@ -214,7 +214,7 @@ let test_a_lookup_failure_refuses_the_write_and_stores_nothing =
      | Error (Board.Recipient_lookup_failed _) -> ()
      | Ok _ -> fail "the edit must be refused"
      | Error error -> fail (Board.show_board_error error));
-    let unchanged = get (Board_dispatch.get_post ~post_id:(post_id post)) in
+    let unchanged = get (Board_dispatch.get_post ~reader:Masc_board_handlers.Board_access.Operator ~post_id:(post_id post)) in
     check string "the post is as it was" "original text, no address" unchanged.body;
     check bool "the edit reached no disk" false (persisted_text_contains "zzmarker-edit");
     (match
@@ -231,7 +231,7 @@ let test_a_lookup_failure_refuses_the_write_and_stores_nothing =
       int
       "no comment was stored"
       0
-      (List.length (get (Board_dispatch.get_comments ~post_id:(post_id post))));
+      (List.length (get (Board_dispatch.get_comments ~reader:Masc_board_handlers.Board_access.Operator ~post_id:(post_id post))));
     check bool "the comment reached no disk" false (persisted_text_contains "zzmarker-comment");
     (* The control: a stored post does show up in those files, so the checks
        above are able to see a write. *)
@@ -370,7 +370,7 @@ let would_wait operation =
    Raising here ends the write that holds the lock, so a lookup that runs under
    a lock fails the test instead of leaving it waiting on that lock. *)
 let require_no_lock_is_held () =
-  if would_wait (fun () -> ignore (Board_dispatch.list_posts ()))
+  if would_wait (fun () -> ignore (Board_dispatch.list_posts ~reader:Masc_board_handlers.Board_access.Operator ()))
   then fail "the lookup ran while the store lock was held";
   if would_wait (fun () -> ignore (write "lock probe"))
   then fail "the lookup ran while the persistence lock was held"
@@ -478,7 +478,7 @@ let test_an_edit_works_out_again_when_the_post_changed_during_the_lookup =
       "the edit records its own addresses"
       [ "alice"; "bob" ]
       (target_names edited.audience);
-    let stored = get (Board_dispatch.get_post ~post_id:(post_id post)) in
+    let stored = get (Board_dispatch.get_post ~reader:Masc_board_handlers.Board_access.Operator ~post_id:(post_id post)) in
     check string "the stored text is the edit's" "@alice @bob" stored.body)
 ;;
 
@@ -525,7 +525,7 @@ let test_an_edit_replans_after_repeated_changes_without_holding_a_lock =
     check int "each plan asked about the other name" 3 !missing_asked;
     check (list string) "the final audience" [ "alice" ] (target_names edited.audience);
     check (list string) "the final unresolved name" [ "missing" ] unresolved;
-    let stored = get (Board_dispatch.get_post ~post_id:(post_id post)) in
+    let stored = get (Board_dispatch.get_post ~reader:Masc_board_handlers.Board_access.Operator ~post_id:(post_id post)) in
     check string "the final text was stored" "@alice @missing" stored.body)
 ;;
 
@@ -568,7 +568,7 @@ let test_an_edit_can_be_cancelled_during_continuous_changes =
            `Cancel)
     in
     check bool "the caller cancelled repeated replanning" true (result = `Cancel);
-    let stored = get (Board_dispatch.get_post ~post_id:(post_id post)) in
+    let stored = get (Board_dispatch.get_post ~reader:Masc_board_handlers.Board_access.Operator ~post_id:(post_id post)) in
     check bool "the cancelled edit did not land" false
       (String.equal stored.body "@alice never stable");
     ignore (creation (write "a later write")))
@@ -610,7 +610,7 @@ let test_an_edit_refuses_if_the_owner_changes_during_lookup =
      | Ok _ -> fail "the previous owner must not write after the transfer"
      | Error error -> fail (Board.show_board_error error));
     check int "there was no lookup after the transfer" 1 !alice_asked;
-    let stored = get (Board_dispatch.get_post ~post_id:(post_id post)) in
+    let stored = get (Board_dispatch.get_post ~reader:Masc_board_handlers.Board_access.Operator ~post_id:(post_id post)) in
     check string "the transfer stayed stored" "other" (Board.Agent_id.to_string stored.author);
     check string "the stale edit was not stored" "ownership transferred" stored.body)
 ;;
@@ -652,7 +652,7 @@ let test_an_edit_keeps_the_concurrent_write_if_the_replan_fails =
      | Ok _ -> fail "a failed replan must not be written"
      | Error error -> fail (Board.show_board_error error));
     check int "the second lookup failed" 2 !alice_asked;
-    let stored = get (Board_dispatch.get_post ~post_id:(post_id post)) in
+    let stored = get (Board_dispatch.get_post ~reader:Masc_board_handlers.Board_access.Operator ~post_id:(post_id post)) in
     check string "the concurrent edit stayed stored" "concurrent edit zzmarker-peer" stored.body;
     check bool "the concurrent edit reached disk" true (persisted_text_contains "zzmarker-peer");
     check bool "the failed edit did not reach disk" false (persisted_text_contains "zzmarker-rejected"))
@@ -709,7 +709,7 @@ let test_an_unchanged_legacy_edit_resolves_its_missing_audience =
     Result.get_ok (Board_dispatch.init_jsonl
       ~base_path:(Env_config_core.base_path ())
       ~recipient_lookup:lookup ());
-    let legacy_post = get (Board_dispatch.get_post ~post_id:(post_id post)) in
+    let legacy_post = get (Board_dispatch.get_post ~reader:Masc_board_handlers.Board_access.Operator ~post_id:(post_id post)) in
     check bool "the old row has no audience" true (Option.is_none legacy_post.audience);
     let signals = ref 0 in
     Board_dispatch.set_board_signal_hook (fun _ -> incr signals);
@@ -723,7 +723,7 @@ let test_an_unchanged_legacy_edit_resolves_its_missing_audience =
      | Ok _ -> fail "the unchanged legacy edit must fail when lookup fails"
      | Error error -> fail (Board.show_board_error error));
     check int "the unchanged legacy edit asked the lookup" 1 !asked;
-    let after_failure = get (Board_dispatch.get_post ~post_id:(post_id post)) in
+    let after_failure = get (Board_dispatch.get_post ~reader:Masc_board_handlers.Board_access.Operator ~post_id:(post_id post)) in
     check bool "failure left the legacy audience absent" true (Option.is_none after_failure.audience);
     let after_failure_on_disk =
       Fs_compat.load_file (Board.persist_path (Board.global ())) |> Yojson.Safe.from_string
@@ -750,7 +750,7 @@ let test_an_unchanged_legacy_edit_resolves_its_missing_audience =
     Result.get_ok (Board_dispatch.init_jsonl
       ~base_path:(Env_config_core.base_path ())
       ~recipient_lookup:lookup ());
-    let reloaded = get (Board_dispatch.get_post ~post_id:(post_id post)) in
+    let reloaded = get (Board_dispatch.get_post ~reader:Masc_board_handlers.Board_access.Operator ~post_id:(post_id post)) in
     check (list string) "the new audience survives reload" [ "alice" ] (target_names reloaded.audience))
 ;;
 
@@ -810,7 +810,7 @@ let test_a_backend_started_by_a_read_refuses_addresses_until_a_lookup_is_install
   ignore (fresh_test_base_path ());
   Board.reset_global_for_test ();
   Board_dispatch.reset_for_test ();
-  ignore (Board_dispatch.list_posts ());
+  ignore (Board_dispatch.list_posts ~reader:Masc_board_handlers.Board_access.Operator ());
   (match refused_before_publication (write "@alice hello") with
    | Board.Recipient_lookup_failed _ -> ()
    | error -> fail (Board.show_board_error error));
@@ -834,7 +834,7 @@ let test_a_second_init_keeps_the_first_lookup =
 let test_the_post_tool_answers_with_the_unresolved_names =
   started ~lookup:(declaring table) (fun () ->
     let result =
-      Board_tool.handle_tool
+      Board_tool.handle_tool ~reader:Masc_board_handlers.Board_access.Operator
         ~result_boundary:Tool_output.Sent_to_client
         "masc_board_post"
         (`Assoc [ "author", `String "writer"; "content", `String "@alice look at @check" ])
@@ -857,7 +857,7 @@ let test_the_comment_and_edit_tools_answer_with_the_unresolved_names =
   started ~lookup:(declaring table) (fun () ->
     let { Board.post; _ } = creation (write "first") in
     let call name args =
-      Board_tool.handle_tool ~result_boundary:Tool_output.Sent_to_client name (`Assoc args)
+      Board_tool.handle_tool ~reader:Masc_board_handlers.Board_access.Operator ~result_boundary:Tool_output.Sent_to_client name (`Assoc args)
     in
     let unresolved_names result =
       Yojson.Safe.Util.(Tool_result.data result |> member "unresolved" |> to_list |> List.map to_string)

@@ -3,6 +3,16 @@
     SSE broadcast, decision-log append, and event JSON construction.
     Isolated to keep the handler skeleton focused on control flow. *)
 
+let is_board_tool tool_name = Option.is_some (Tool_name.Board_name.of_string tool_name)
+
+let public_board_occurrence_fields fields =
+  List.filter (fun (key, _) ->
+    match key with
+    | "tool_use_id" | "turn" | "planned_index" | "batch_index" | "batch_size"
+    | "execution_mode" -> true
+    | _ -> false) fields
+  @ [ "tool_io_redacted", `Bool true ]
+
 let keeper_tool_call_event_json
       ~keeper_name
       ~keeper_turn_id
@@ -14,6 +24,10 @@ let keeper_tool_call_event_json
       ~ts
       ()
   =
+  let error_text, extra_fields =
+    if is_board_tool tool_name then None, public_board_occurrence_fields extra_fields
+    else error_text, extra_fields
+  in
   let fields =
     [ "type", `String "keeper_tool_call"
     ; "name", `String keeper_name
@@ -43,6 +57,8 @@ let json_field key = function
 ;;
 
 let tool_io_preview_fields ~tool_name ~input ?output () =
+  if is_board_tool tool_name then [ "tool_io_redacted", `Bool true ]
+  else
   let input_preview = Observability_redact.redact_tool_input ~tool_name input in
   let output_preview =
     match output with

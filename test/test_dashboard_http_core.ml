@@ -3745,6 +3745,8 @@ beanie = 200
 
 let test_board_address_overlay_follows_effective_config_after_cache () =
   with_test_env @@ fun ~env:_ ~sw:_ ~config ->
+  Masc_test_deps.Board_attention_parent_fixture.with_source
+    ~base_path:config.Workspace.base_path @@ fun () ->
   let name = "board-address-beta" in
   let meta = match Masc_test_deps.meta_of_json_fixture
     (`Assoc [ "name", `String name; "trace_id", `String "board-address-trace" ]) with
@@ -3767,7 +3769,8 @@ let test_board_address_overlay_follows_effective_config_after_cache () =
   let ids json = Yojson.Safe.Util.(address json |> member "target_ids" |> to_list |> List.map to_string) in
   let routes target =
     let signal : Masc.Board_dispatch.board_signal =
-      { kind = Masc.Board_dispatch.Board_post_created; post_id = "post-effective-address"
+      { kind = Masc.Board_dispatch.Board_post_created
+      ; post_id = Masc_test_deps.Board_attention_parent_fixture.post_id "post-effective-address"
       ; author = "external-author"; title = "address fixture"; content = "@" ^ target
       ; hearth = None; updated_at = Some 123. } in
     (* This test pins which keeper a written name reaches, so the name must

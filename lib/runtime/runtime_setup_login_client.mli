@@ -2,7 +2,7 @@
     [observe] only after its successful exit; authentication and invocation are
     separate observations. No operation changes the host process environment. *)
 type client = Codex | Claude | Antigravity | Muse
-type native = Codex_home | Claude_home | Muse_home
+type native = Runtime_account_home_layout.client = Codex_home | Claude_home | Muse_home
 (** A client that signs in to an account home. *)
 type t
 type observation = Authenticated | Login_completed | Credential_captured
@@ -23,10 +23,13 @@ val argv : cli_path:string -> t -> string list
 val environment : t -> (string array, string) result
 val is_pty : t -> bool
 val observe : mgr:_ Eio.Process.mgr -> clock:_ Eio.Time.clock ->
-  cwd:Eio.Fs.dir_ty Eio.Path.t -> cli_path:string -> t -> (observation, string) result
-(** Claude/Codex query native authentication. Muse validates the captured native
-    auth document; Antigravity captures its selected keychain/file credential.
-    The latter two are not network authentication or model invocation proof. *)
+  cwd:Eio.Fs.dir_ty Eio.Path.t -> cli_path:string ->
+  account_request:Runtime_account_access.request -> t -> (observation, string) result
+(** Claude/Codex query native authentication, on the home only when
+    {!Runtime_account_access.authorize} allows [account_request] there. Muse
+    validates the captured native auth document; Antigravity captures its
+    selected keychain/file credential. The latter two are not network
+    authentication or model invocation proof, and start no CLI. *)
 val publish : workspace:string -> integration_id:string -> cli_path:string ->
   t -> (Runtime_setup_accounts.reference, string) result
 (** Native references may be published before login for recovery; they prove

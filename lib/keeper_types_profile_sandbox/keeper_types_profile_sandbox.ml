@@ -130,32 +130,6 @@ let observation_run_rejection profile run =
   | Remote_ssh, Guest_local -> None
 ;;
 
-(* ── how requests reach a microVM guest (RFC microvm-guest-agent-over-socket §3.9) ── *)
-
-type microvm_delivery =
-  | Exec_per_request
-  | Agent_socket
-
-let microvm_delivery_to_string = function
-  | Exec_per_request -> "exec_per_request"
-  | Agent_socket -> "agent_socket"
-;;
-
-let microvm_delivery_of_string raw =
-  match String.trim (String.lowercase_ascii raw) with
-  | "exec_per_request" -> Some Exec_per_request
-  | "agent_socket" -> Some Agent_socket
-  | _ -> None
-;;
-
-let all_microvm_deliveries = [ Exec_per_request; Agent_socket ]
-
-let valid_microvm_delivery_strings =
-  List.map microvm_delivery_to_string all_microvm_deliveries
-;;
-
-let default_microvm_delivery = Exec_per_request
-
 (* Which profile and network mode may be held together, and the refusal for
    the pair that may not. One function because the rule had two homes and only
    one of them ran before a write: the keeper TOML loader refused

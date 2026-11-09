@@ -114,9 +114,16 @@ let read_muse ~mgr ~clock ~cwd ~scope ~account (config : Runtime_muse_serve.conf
   | Error error -> Error (Runtime_muse_serve.error_to_string error)
 ;;
 
+(* HIGH-RISK-UNREVIEWED: the read starts the client on a credential of the
+   host, which a multi-account process shares with no person (plan D3b). A
+   refusal starts no process. *)
 let read_antigravity ~scope (antigravity : Runtime_execution.antigravity_cli) =
+  match Runtime_account_access.authorize_host Runtime_account_access.Antigravity with
+  | Error refusal -> Error (Runtime_account_access.refusal_to_string refusal)
+  | Ok host ->
   match
     Runtime_antigravity_usage.read
+      ~host
       ~cli_path:antigravity.cli_path
       ~oauth_source:antigravity.oauth_source
   with

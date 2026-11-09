@@ -96,14 +96,20 @@ let a_relative_named_value_without_a_cwd_is_unanchored () =
   check string "absolute flag needs no cwd" "explicit_cli"
     (source_label (Workspace_root.resolve (observation ~flag:"/ws" ())))
 
+(* Unlink symlinks instead of following them. [Sys.is_directory] stats through a
+   link, so a directory link would be walked into and its target emptied; a
+   dangling link reads false from [Sys.file_exists] and is then skipped, which
+   leaves the parent non-empty and [Unix.rmdir] fails with ENOTEMPTY. Both
+   shapes are reachable from this fixture's own links, so the cleanup decides
+   the tree's fate by link order alone (#26648). *)
 let rec rm_rf path =
-  if Sys.file_exists path then
-    if Sys.is_directory path then begin
-      Sys.readdir path
-      |> Array.iter (fun name -> rm_rf (Filename.concat path name));
-      Unix.rmdir path
-    end else
-      Sys.remove path
+  match Unix.lstat path with
+  | exception Unix.Unix_error ((Unix.ENOENT | Unix.ENOTDIR), _, _) -> ()
+  | { Unix.st_kind = Unix.S_DIR; _ } ->
+    Sys.readdir path
+    |> Array.iter (fun name -> rm_rf (Filename.concat path name));
+    Unix.rmdir path
+  | _ -> Sys.remove path
 
 let with_temp_dir prefix f =
   let dir = Filename.temp_file prefix "" in
@@ -177,6 +183,29 @@ let test_enter_refuses_a_missing_workspace () =
    | Ok () -> failf "entered the missing workspace %s" missing);
   check string "working directory unchanged" before (Sys.getcwd ())
 
+(* The cleanup meets the same two link shapes this fixture builds. A directory
+   link must lose only the link, and a dangling link must not be skipped; either
+   mistake leaves the parent behind or empties the target (#26648). *)
+let test_rm_rf_unlinks_symlinks () =
+  with_temp_dir "masc-rm-rf-link-" @@ fun dir ->
+  let outside = Filename.concat dir "outside" in
+  Unix.mkdir outside 0o755;
+  let kept = Filename.concat outside "kept" in
+  let oc = open_out kept in
+  output_string oc "kept";
+  close_out oc;
+  let root = Filename.concat dir "root" in
+  Unix.mkdir root 0o755;
+  Unix.symlink outside (Filename.concat root "live_link");
+  Unix.symlink (Filename.concat dir "gone") (Filename.concat root "dangling");
+  rm_rf root;
+  check bool "the tree is gone" false (Sys.file_exists root);
+  check bool "the link target survived" true (Sys.file_exists kept);
+  let ic = open_in kept in
+  let body = really_input_string ic (in_channel_length ic) in
+  close_in ic;
+  check string "the link target kept its contents" "kept" body
+
 let () =
   Alcotest.run "Server_base_path_guard"
     [ ( "workspace root order"
@@ -204,6 +233,10 @@ let () =
             test_canonicalize_existing_freezes_symlink_target
         ; test_case "canonicalization failure is retained" `Quick
             test_canonicalize_existing_retains_failure
+        ] )
+    ; ( "cleanup"
+      , [ test_case "temporary tree cleanup unlinks symlinks" `Quick
+            test_rm_rf_unlinks_symlinks
         ] )
     ; ( "working directory"
       , [ test_case "entering the workspace outlives a removed launch directory" `Quick

@@ -104,9 +104,47 @@ let relative_text ~now (row : Masc_tui_types.schedule_row) = function
        | Masc_tui_agenda.Unrecognised _ -> Masc_tui_theme.Glyph.no_value)
 ;;
 
+(* A held row, or a row whose delivered wake has not settled, is one
+   [Masc_tui_types.chat_schedule_entries] ranks first. The tab keeps every
+   row in time order, so the word in the status column says it instead of
+   the request status: a one-shot whose request succeeded can still hold a
+   wake that sat in the queue for days. The stages are those
+   [Tui_schedule_observation.needs_attention] names. *)
+let attention_word (row : Masc_tui_types.schedule_row) =
+  match row.sch_runner_hold with
+  | Some _ -> Some "held"
+  | None ->
+      let open Masc.Tui_schedule_observation in
+      (match row.sch_occurrence.stage with
+       | Dispatching -> Some "sending"
+       | Dispatch_failed _ -> Some "send fail"
+       | Queued | Queued_at _ -> Some "queued"
+       | Missing -> Some "missing"
+       | Turn_started -> Some "running"
+       | Turn_ended | Consumed | Settling _ -> Some "settling"
+       | Transferring _ -> Some "handoff"
+       | Unknown _ -> Some "unknown"
+       | No_occurrence | Completed | Cancelled _ -> None)
+;;
+
+(* One time line, oldest first, the way the Story page reads past to next. A
+   row with no time goes last. *)
+let by_time (_, left) (_, right) =
+  match left, right with
+  | Some left, Some right -> Float.compare left right
+  | Some _, None -> -1
+  | None, Some _ -> 1
+  | None, None -> 0
+;;
+
 let schedule_row_line ~now ((row : Masc_tui_types.schedule_row), due) =
-  let color = Masc_tui_render_work.schedule_status_color row.sch_status in
-  let status = Terminal_text.single_line row.sch_status in
+  let color, status =
+    match attention_word row with
+    | Some word -> Theme.warn (), word
+    | None ->
+        ( Masc_tui_render_work.schedule_status_color row.sch_status
+        , Terminal_text.single_line row.sch_status )
+  in
   let what =
     Terminal_text.single_line (Option.value ~default:row.sch_schedule_id row.sch_payload_summary)
   in
@@ -393,7 +431,9 @@ let schedule_lines (state : Masc_tui_types.state) ~now ~keeper_name =
         | Some counts -> " · " ^ Masc_tui_types.schedule_counts_line counts
         | None -> ""
       in
-      let entries = Masc_tui_types.chat_schedule_entries ~keeper_name snapshot in
+      let entries =
+        List.stable_sort by_time (Masc_tui_types.chat_schedule_entries ~keeper_name snapshot)
+      in
       let rows =
         match entries, snapshot.scs_rows with
         | [], [] ->

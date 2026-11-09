@@ -50,5 +50,7 @@ val read_comments :
 
 val get_comment :
   store -> comment_id:string -> (comment, board_error) result
+(** Complete-source point query; display rows remain available through
+    {!observe_comments} when the source is incomplete. *)
 
 val list_comments : store -> ?limit:int -> unit -> comment list

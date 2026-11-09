@@ -497,8 +497,9 @@ val read_comments : store -> post_id:string -> (comment list, board_read_error) 
     retained orphan comments remain readable by their post ID. *)
 
 
-(** Returns a retained comment by id. An absent row answers [Comment_not_found]
-    only when the source is complete, otherwise its source error. *)
+(** Returns one comment by id from a complete comments source. Source failures
+    precede lookup for both cached and absent rows, so checked target readers
+    cannot infer a hidden comment's existence from different source errors. *)
 val get_comment : store -> comment_id:string -> (comment, board_error) Result.t
 
 (** Returns up to [limit] (default 1000) most recent

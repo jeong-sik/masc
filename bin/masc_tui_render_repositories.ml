@@ -28,12 +28,6 @@ let repository_context_fields (repo : Masc.Tui_decode.repository) =
     | None -> [] | Some reason -> ["Error", reason] in
   failure @ ["Path", repo.rp_resolved_local_path] @ stored_path @ ["Keepers", keepers]
 
-let repository_context_lines ~width repo =
-  repository_context_fields repo
-  |> List.concat_map (fun (label, value) ->
-      Masc_tui_text_block.rows ~max_cells:(max 1 width)
-        (Printf.sprintf "  %s: %s" label value))
-
 let selected_repository_reading (state : state) =
   let selected = Option.bind state.repositories (fun snapshot ->
     List.nth_opt snapshot.rs_repositories state.repositories_cursor) in

@@ -5992,6 +5992,7 @@
   test_install_local_build.py
   ../scripts/install-local-build.sh
   ../scripts/check-runtime-deployment-preflight.sh)
+  ../scripts/lib/install-workspace-dashboard.sh
  (action
   (run python3 %{dep:test_install_local_build_guest_shim.py})))
 
@@ -6009,6 +6010,7 @@
   ../scripts/ci/runtime-install-artifact.py
   ../scripts/install-local-build.sh
   ../scripts/check-runtime-deployment-preflight.sh)
+  ../scripts/lib/install-workspace-dashboard.sh
  (action
   (run python3 %{dep:test_runtime_install_artifact.py})))
 

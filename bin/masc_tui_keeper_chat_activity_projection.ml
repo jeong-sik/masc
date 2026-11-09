@@ -1094,11 +1094,12 @@ let inventory_row ~outcomes activities =
    calls away, [Full] keeps both. Neither draws a header over a single call --
    a summary of one call is that call, said twice. *)
 let project_tool_block mode (block : tool_block) =
-  let full_activity_rows = render_activity_rows ~expanded:(mode=Full) block.activities in
   let header, activity_rows, hidden_activity_rows, summary_outcome =
     match mode, block.activities with
-    | (Full | Compact), ([] | [ _ ]) -> None, full_activity_rows, 0, None
+    | (Full | Compact), ([] | [ _ ]) ->
+        None, render_activity_rows ~expanded:(mode=Full) block.activities, 0, None
     | Full, activities ->
+        let full_activity_rows = render_activity_rows ~expanded:true activities in
         ( Some
             (inventory_row
                ~outcomes:(compact_outcome_parts activities)
@@ -1109,7 +1110,10 @@ let project_tool_block mode (block : tool_block) =
            colour to stand for. The header carries its own mark in the text. *)
         , None )
     | Compact, activities ->
-        let hidden_activity_rows = List.length full_activity_rows in
+        (* The hidden formatter emits exactly one row per activity. Folding
+           needs that count, not every subject/progress string it discards.
+           Keep formatting for the actual single-call and expanded views. *)
+        let hidden_activity_rows = List.length activities in
         (* What ran and what came of it are two questions, and one line
            answered both: a run of names and counts, then a run of outcomes
            and counts, five clauses deep with nowhere for the eye to land.

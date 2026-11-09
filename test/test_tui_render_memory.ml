@@ -427,6 +427,41 @@ let test_memory_keeper_search_accepts_display_words () =
           "degraded", ["failed"; "halted"]; "no-current", ["empty"];
           "ok", ["ready"]; "halted", ["halted"]; "not-present", [] ])
       [true; false])
+    [Types.Lang_ko; Types.Lang_en];
+  let module P = Masc.Keeper_librarian_pending in
+  let worker wait : P.worker =
+    { installation_id = "librarian"; request_id = "original-request"; wait } in
+  let pending =
+    [ "capacity", P.Worker (worker P.Capacity)
+    ; "processing", P.Worker (worker P.Processing)
+    ; "unknown", P.Worker (worker P.Outcome_unknown)
+    ; "missing", P.Worker (worker P.Missing_after_dispatch)
+    ; "offline", P.Worker (worker P.Unreachable)
+    ; "recheck", P.Worker (worker P.Journal_recheck)
+    ; "publication", P.Publication { request_id = "original-request"; detail = "saving" }
+    ; "basis", P.Basis_changed { request_id = "original-request" }
+    ; "parts", P.Message_floor { request_id = "original-request"; detail = "partial" }
+    ; "recovery", P.Local_failure "read failed"
+    ] in
+  let admission = { ready with mkh_keeper_id = "admission";
+    mkh_librarian = { ready.mkh_librarian with mlh_admission_wait = Some (worker P.Capacity) } } in
+  state.memory_health <- Some { (make_fleet_health ready) with
+    mhs_keepers = admission :: List.map (fun (id, pending) ->
+      with_pass id (H.Pass_pending pending)) pending };
+  List.iter (fun language ->
+    state.ui_language <- language;
+    List.iter (fun typing ->
+      List.iter (fun (query, wanted) -> verify ~typing query wanted)
+        [ "대기열 가득 참", ["admission"; "capacity"]; "queue full", ["admission"; "capacity"]
+        ; "처리 중", ["processing"]; "processing", ["processing"]
+        ; "결과 확인 필요", ["missing"; "unknown"]; "check outcome", ["missing"; "unknown"]
+        ; "작업자 연결 안 됨", ["offline"]; "worker offline", ["offline"]
+        ; "다시 확인 중", ["recheck"]; "rechecking", ["recheck"]
+        ; "저장 확정 중", ["publication"]; "settling", ["publication"]
+        ; "원문 변경됨", ["basis"]; "source changed", ["basis"]
+        ; "나누어 읽는 중", ["parts"]; "reading parts", ["parts"]
+        ; "복구 실패", ["recovery"]; "recovery failed", ["recovery"]
+        ]) [true; false])
     [Types.Lang_ko; Types.Lang_en]
 ;;
 

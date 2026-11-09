@@ -23,6 +23,12 @@ type t = pat Pat_map.t
 let empty = Pat_map.empty
 let find t pat_id = Pat_map.find_opt pat_id t
 
+let of_user t user_id =
+  List.filter
+    (fun ((_ : Pat_id.t), (pat : pat)) -> User_id.equal pat.user_id user_id)
+    (Pat_map.bindings t)
+;;
+
 type inactive =
   | Unknown
   | Ended
@@ -97,14 +103,18 @@ let issue t ~author ~at_ms ~is_active ~pat_id ~user_id ~secret_digest ~scope ~ex
          t)
 ;;
 
+(* The owner is checked before the status, so a principal learns nothing of
+   whether another's PAT is revoked. Either order refuses the same records. *)
 let revoke t ~author ~pat_id =
   match find t pat_id with
   | None -> Error (Not_issued pat_id)
-  | Some { status = Revoked; _ } -> Error (Already_revoked pat_id)
-  | Some ({ status = Open; user_id; _ } as pat) ->
-    if User_id.equal user_id author
-    then Ok (Pat_map.add pat_id { pat with status = Revoked } t)
-    else Error (Not_the_owner { pat_id; author })
+  | Some ({ user_id; status; _ } as pat) ->
+    if not (User_id.equal user_id author)
+    then Error (Not_the_owner { pat_id; author })
+    else (
+      match status with
+      | Revoked -> Error (Already_revoked pat_id)
+      | Open -> Ok (Pat_map.add pat_id { pat with status = Revoked } t))
 ;;
 
 (* The author is matched before the event, so a branch says what each author

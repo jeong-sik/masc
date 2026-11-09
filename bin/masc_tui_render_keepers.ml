@@ -740,8 +740,27 @@ let grid_half_hour_pulse (grid : Grid.t) ~now pulse =
          ^ Ansi.reset)
        (Masc_tui_keeper_pulse.half_hours ~now ~count:grid.side_cells pulse))
 
-let grid_quiet_strip (grid : Grid.t) =
-  Theme.recede () ^ grid_repeat (Grid.strip_cells grid) Keeper_mark.grid_dot_mark ^ Ansi.reset
+(* The strip of the activity columns (§2.4.4): the Keeper's scheduled wakes
+   per half hour, the now slot first. As the mock's [drawRuler], a wake is in
+   the info colour, receded for a paused Keeper, and bold in the now slot. *)
+let grid_wake_strip state (grid : Grid.t) ~now verdict ~keeper_name =
+  let wake_style =
+    match verdict with
+    | Grid.Paused -> Theme.recede ()
+    | Grid.Failing _ | Grid.Recovered | Grid.Sound | Grid.Other -> Theme.info ()
+  in
+  String.concat ""
+    (List.mapi
+       (fun index slot ->
+         let cell = Grid.strip_cell slot in
+         let style =
+           match cell with
+           | Grid.Strip_wake -> if index = 0 then Ansi.bold ^ wake_style else wake_style
+           | Grid.Strip_empty | Grid.Strip_unknown -> Theme.recede ()
+         in
+         style ^ Grid.strip_mark cell ^ Ansi.reset)
+       (Masc_tui_keeper_axis.wake_strip state ~now ~ahead:(Grid.strip_cells grid - 1)
+          ~keeper_name))
 
 let grid_due ~now verdict next_run =
   let style =
@@ -918,7 +937,7 @@ let grid_keeper_row state (grid : Grid.t) columns ~view ~peak_lag ~peak_facts ~n
          ; name
          ; pulse = pulse ()
          ; now_cell = keeper_now_cell ~frame row
-         ; strip = grid_quiet_strip grid
+         ; strip = grid_wake_strip state grid ~now verdict ~keeper_name
          ; due = grid_due ~now verdict (Masc_tui_keeper_axis.next_run state ~keeper_name)
          ; right = grid_lag_cell grid ~peak_lag memory
          }

@@ -152,6 +152,7 @@ let axis_now_header = axis_now_glyph ^ " now"
 let grid_gutter_glyph = "\xe2\x96\x8c" (* ▌ *)
 let grid_now_line = "\xe2\x94\x83" (* ┃ *)
 let grid_dot_mark = pulse_quiet_mark
+let grid_wake_mark = badge_glyph Badge_schedule
 let grid_failing_mark = health_glyph Reading.Health_failing
 let grid_paused_mark = paused_glyph
 let grid_recovered_mark = pulse_ok_mark
@@ -227,14 +228,16 @@ let column_legend =
         "every view but the list draws a keeper on the same columns, fixed from the right \
          edge so the %s lines stand in one column: the row mark (%s failing, %s paused, %s \
          recovered in the cause view, %s the rest), the name, the turn pulse, the NOW cell, \
-         the half hours ahead, the next scheduled run (its time within a day, %s, %s, %s%s \
-         from an earlier reading, %s unknown) and the librarian's unread turns with a level \
-         against the keeper furthest behind. The memory and age views pick their own \
+         the half hours ahead (%s a scheduled wake, %s none, %s unknown), the next \
+         scheduled run (its time within a day, %s, %s, %s%s from an earlier reading, %s \
+         unknown) and the librarian's unread turns with a level against the keeper \
+         furthest behind. The memory and age views pick their own \
          columns. With two lines a failing keeper of the state and cause views adds a line: \
          %s since when it fails, the attempts of the failed turn (%s%s%s) and the failure \
          word, and the runtime of the next dispatch (%s, or %s %s while the path rests)"
         grid_now_line grid_failing_mark grid_paused_mark grid_recovered_mark grid_ok_mark
-        grid_late_word grid_held_word grid_held_word unknown_mark unknown_mark axis_before_glyph
+        grid_wake_mark grid_dot_mark unknown_mark grid_late_word grid_held_word grid_held_word
+        unknown_mark unknown_mark axis_before_glyph
         attempt_glyph grid_chain_link attempt_glyph axis_next_glyph grid_wait_glyph grid_wait_word )
   ; ( String.concat " "
         [ axis_before_glyph ^ " " ^ grid_turns_word; grid_now_line; grid_librarian_header

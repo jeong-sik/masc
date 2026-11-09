@@ -47,29 +47,26 @@ val schedule_lines :
     and a read that failed say so. The window asks for the read while it is
     open. *)
 
-val last_wake_entry :
-  Masc_tui_types.state -> now:float -> keeper_name:string -> string option
-(** The line of the story page's past group that tells the Keeper's last wake,
-    from the same page of schedules. [None] when the page is whole and read and
-    no schedule on it has woken the Keeper. A page that is not read, not
-    readable or cut says so instead of saying nothing, and so does a reading
-    that is read again or whose re-read failed. A wake on a cut page is called
-    the latest on the first page, since a later page may hold a newer one, and a
-    wake whose time cannot be read leaves the last wake unknown. *)
+val body_rows : rows:int -> int
+(** The lines a window of [rows] rows holds: all but its rule and its title. *)
 
-val turns_entry :
+val feed_lines :
   Masc_tui_types.state ->
   now:float ->
   cells:int ->
+  max_lines:int ->
   keeper_name:string ->
-  string option
-(** The line of the story page's past group that tells the Keeper's newest
-    turns, newest first, each with the stop reason the receipt recorded and how
-    long ago the turn ended. A turn whose record holds no stop reason says so.
-    Turns that do not fit in [cells] are left out whole from the oldest. [None]
-    when the Keeper has no turn on record. A read that has not answered, or that
-    failed with nothing to show, says so instead of saying nothing. The window
-    asks for the read while the story page is open. *)
+  digest_at:float option ->
+  string list
+(** The past group of the story page told as one feed: the newest turns, the
+    newest wakes and the last digest of [keeper_name], oldest first, one line
+    each with how long ago it happened. [digest_at] is the librarian's last
+    digest, from the memory-health reading. A source that is not read, not
+    readable, cut, being read again or whose read failed says so in one line
+    after the events, since it has no event to put in its place; so does a wake
+    whose time cannot be read, which leaves the newest wakes unknown. At most
+    [max_lines] lines come back, and the oldest events give way before the note
+    line does. [cells] is the width the note line has. *)
 
 val memory_lines :
   Masc_tui_types.state -> now:float -> keeper_name:string -> string list

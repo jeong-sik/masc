@@ -1988,14 +1988,20 @@
   masc_tui_message_layout))
 
 (library
- (name masc_tui_keeper_last_wake)
+ (name masc_tui_keeper_wakes)
  (wrapped false)
- (modules masc_tui_keeper_last_wake)
+ (modules masc_tui_keeper_wakes)
  (libraries
   masc
   masc.masc_schedule
   masc.time_codec
   masc_tui_types))
+
+(library
+ (name masc_tui_keeper_feed)
+ (wrapped false)
+ (modules masc_tui_keeper_feed)
+ (libraries masc_tui_keeper_turns masc_tui_keeper_wakes))
 
 (library
  (name masc_tui_keeper_axis)
@@ -2821,7 +2827,8 @@
   masc_tui_keeper_memory_reading
   masc_tui_keeper_age_ladder
   masc_tui_keeper_story
-  masc_tui_keeper_last_wake
+  masc_tui_keeper_wakes
+  masc_tui_keeper_feed
   masc_tui_lane_standing
   masc_tui_async_protocol
   masc_tui_board_requests

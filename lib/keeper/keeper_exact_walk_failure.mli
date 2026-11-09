@@ -31,6 +31,13 @@ val of_input_refusal : Keeper_librarian_input_refusal.t -> t
 (** One named input refusal as a whole-walk observation: it shows the range was
     too large and keeps the cause. The same value an actual provider refusal
     with that cause produces in {!of_api_observation}. *)
+val held : t
+(** A slot not called because its provider stated a time it is not to be
+    called before (RFC-exact-lane-waits-for-a-stated-reset R5): the evidence
+    of its account's rest refusal without the call. It is size-independent and
+    says nothing about capacity, so another slot's size refusal does not prove
+    the input must be split; with no native run, nothing is unsettled. *)
+
 val with_invalid_output : t -> t
 val without_measured_cli_capacity : t -> t
 

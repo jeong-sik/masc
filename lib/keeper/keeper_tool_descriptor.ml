@@ -3316,6 +3316,13 @@ let descriptors_for_internal internal_name =
 let readonly_static_hint d = d.policy.readonly_hint
 let readonly_for_input d ~input = d.policy.readonly_of_input input
 
+(* Composition node set (#49177, RFC-0502 draft): [Tool_execute] and
+   [Tool_board_dispatch] (including masc_board_post) answer [Direct_only],
+   so a composition naming them fails in
+   [Keeper_composition_nested.validate_leaves] ([Unsupported_leaf]) and, for
+   async catalog entries, in [Keeper_tool_composition_catalog.parse_composition]
+   ([Async_leaf_not_admitted]). Admitting them needs the RFC-0502 decision;
+   this match only records the current boundary. *)
 let prepared_leaf_admission descriptor =
   match descriptor.execution with
   | Terminal -> Direct_only

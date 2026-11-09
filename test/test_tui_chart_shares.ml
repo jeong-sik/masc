@@ -63,6 +63,20 @@ let compact_number_boundaries () =
     (Chart.format_compact_num (-1_500));
   check "below a thousand is the plain integer" "999" (Chart.format_compact_num 999)
 
+let bar_filled_cells () =
+  let check name expected ~value ~max_value =
+    Alcotest.(check int) name expected (Chart.bar_filled_cells ~width:8 ~value ~max_value)
+  in
+  check "nothing fills no cell" 0 ~value:0 ~max_value:10;
+  check "a negative value fills no cell" 0 ~value:(-3) ~max_value:10;
+  check "no maximum fills no cell" 0 ~value:3 ~max_value:0;
+  check "a small value still fills one cell" 1 ~value:1 ~max_value:100;
+  check "half the maximum fills half the cells" 4 ~value:5 ~max_value:10;
+  check "the maximum fills every cell" 8 ~value:10 ~max_value:10;
+  check "past the maximum fills every cell" 8 ~value:500 ~max_value:10;
+  Alcotest.(check int) "a bar with no cells fills none" 0
+    (Chart.bar_filled_cells ~width:0 ~value:5 ~max_value:10)
+
 let () =
   Alcotest.run "Chart numeric decisions"
     [ "numeric decisions",
@@ -71,5 +85,6 @@ let () =
       ; Alcotest.test_case "empty and negative inputs" `Quick empty_and_negative_inputs
       ; Alcotest.test_case "sparkline scale and integer limits" `Quick sparkline_levels
       ; Alcotest.test_case "compact number boundaries" `Quick compact_number_boundaries
+      ; Alcotest.test_case "bar fill" `Quick bar_filled_cells
       ]
     ]

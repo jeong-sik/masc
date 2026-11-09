@@ -15,8 +15,9 @@ val run_cell :
   Masc_tui_types.state -> now:float -> keeper_name:string -> Masc_tui_keeper_axis_cell.t option
 (** The next scheduled run cell of {!segments}. *)
 
-val lag_cell : Masc_tui_types.state -> keeper_name:string -> Masc_tui_keeper_axis_cell.t option
-(** {!Masc_tui_keeper_memory_reading.lag_cell} of the state's memory health. *)
+val memory_index : Masc_tui_types.state -> Masc_tui_keeper_memory_reading.index
+(** The state's memory health as the index {!segments} reads, built once per
+    snapshot. *)
 
 (** {1 Readings for the Keepers views} (RFC-0515 §2.3)
 

@@ -627,17 +627,29 @@ let keeper_secondary_row_content ?now ?(cells = []) ~inner (row : Keeper_list_mo
    ◂ and ● keep their width, so the cells line up under the header; ▹ takes
    the rest of the row, and the frame cuts it before anything on its left. *)
 module Axis_row = Masc_tui_keeper_axis_row
+module Memory_reading = Masc_tui_keeper_memory_reading
 
 let axis_name_header = "keeper"
 let axis_cell_gap = "  "
 
-let axis_before_header = function Axis_row.Hour_pulse -> Masc_tui_keeper_mark.pulse_header
-let axis_before_width = function Axis_row.Hour_pulse -> Masc_tui_keeper_mark.pulse_hours
-let axis_current_header = function Axis_row.Activity -> Masc_tui_keeper_mark.axis_now_header
-let axis_current_width = function Axis_row.Activity -> Render_schedule.keeper_status_width
+(* ◂ is as wide as the pulse and ● as the NOW column in every view, so a
+   view change keeps ● in its column. *)
+let axis_before_cells = Masc_tui_keeper_mark.pulse_hours
+let axis_current_cells = Render_schedule.keeper_status_width
+
+let axis_before_header = function
+  | Axis_row.Hour_pulse -> Masc_tui_keeper_mark.pulse_header
+  | Axis_row.Fact_ages -> Masc_tui_keeper_mark.fact_age_header
+
+let axis_current_header = function
+  | Axis_row.Activity -> Masc_tui_keeper_mark.axis_now_header
+  | Axis_row.Librarian_pass -> Masc_tui_keeper_mark.librarian_header
+  | Axis_row.Update_age -> Masc_tui_keeper_mark.updated_header
 
 let axis_next_header = function
   | Axis_row.Wait_run_path_lag -> Masc_tui_keeper_mark.axis_next_header
+  | Axis_row.Lag_digest_gap -> Masc_tui_keeper_mark.lag_digest_gap_header
+  | Axis_row.Lag_stale_facts -> Masc_tui_keeper_mark.lag_stale_facts_header
 
 (* The widest name, held between the list's floor and ceiling for a name. *)
 let axis_name_width rows =
@@ -656,27 +668,34 @@ let keeper_axis_header ~name_width (axis : Axis_row.axis) =
     [ String.make Render_schedule.keeper_marker_width ' '
     ; Message_layout.fit_width axis_name_header name_width
     ; " "
-    ; Message_layout.fit_width (axis_before_header axis.before) (axis_before_width axis.before)
+    ; Message_layout.fit_width (axis_before_header axis.before) axis_before_cells
     ; axis_cell_gap
-    ; Message_layout.fit_width (axis_current_header axis.current)
-        (axis_current_width axis.current)
+    ; Message_layout.fit_width (axis_current_header axis.current) axis_current_cells
     ; axis_cell_gap
     ; axis_next_header axis.next
     ]
 
-let keeper_axis_before_cell ~now (row : Keeper_list_model.row) before =
-  let cell =
-    match before with
-    | Axis_row.Hour_pulse ->
-        Masc_tui_keeper_pulse.hours_cell ~now
-          (Option.bind (keeper_row_runtime row) (fun runtime -> runtime.Tui_decode.kr_recent_turns))
-  in
+let fitted_axis_cell cells (cell : Masc_tui_keeper_axis_cell.t) =
   style_axis_cell
-    { cell with Masc_tui_keeper_axis_cell.text =
-        Message_layout.fit_width cell.Masc_tui_keeper_axis_cell.text (axis_before_width before) }
+    { cell with
+      Masc_tui_keeper_axis_cell.text =
+        Message_layout.fit_width cell.Masc_tui_keeper_axis_cell.text cells
+    }
 
-let keeper_axis_current_cell ~frame row = function
+let keeper_axis_before_cell ~now ~memory (row : Keeper_list_model.row) = function
+  | Axis_row.Hour_pulse ->
+      fitted_axis_cell axis_before_cells
+        (Masc_tui_keeper_pulse.hours_cell ~now
+           (Option.bind (keeper_row_runtime row) (fun runtime -> runtime.Tui_decode.kr_recent_turns)))
+  | Axis_row.Fact_ages ->
+      fitted_axis_cell axis_before_cells (Memory_reading.fact_ages_cell memory)
+
+let keeper_axis_current_cell ~now ~frame ~memory row = function
   | Axis_row.Activity -> keeper_now_cell ~frame row
+  | Axis_row.Librarian_pass ->
+      fitted_axis_cell axis_current_cells (Memory_reading.pass_cell memory)
+  | Axis_row.Update_age ->
+      fitted_axis_cell axis_current_cells (Memory_reading.updated_cell ~now memory)
 
 (* The runtime of the next dispatch, or the rest it waits out. The cell's
    column already says next, so no mark leads it. *)
@@ -691,9 +710,9 @@ let keeper_path_rest_cell ~now row =
           { Masc_tui_keeper_axis_cell.text; tone = Masc_tui_keeper_axis_cell.Attention })
     (keeper_path_rest ~now row)
 
-(* A person's answer comes first: nothing else moves until it does. *)
-let keeper_axis_next_cells state ~now (row : Keeper_list_model.row) = function
+let keeper_axis_next_cells state ~now ~memory ~peak_lag (row : Keeper_list_model.row) = function
   | Axis_row.Wait_run_path_lag ->
+      (* A person's answer comes first: nothing else moves until it does. *)
       let keeper_name = row.keeper.Tui_decode.k_name in
       List.filter_map Fun.id
         [ Option.map
@@ -701,21 +720,34 @@ let keeper_axis_next_cells state ~now (row : Keeper_list_model.row) = function
             (keeper_person_wait_text row)
         ; Masc_tui_keeper_axis.run_cell state ~now ~keeper_name
         ; keeper_path_rest_cell ~now row
-        ; Masc_tui_keeper_axis.lag_cell state ~keeper_name
+        ; Memory_reading.lag_cell memory
         ]
+  | Axis_row.Lag_digest_gap -> Memory_reading.lag_digest_gap_cells ~now ~peak_lag memory
+  | Axis_row.Lag_stale_facts -> Memory_reading.lag_stale_facts_cells ~peak_lag memory
 
-let keeper_axis_row_content state ~(axis : Axis_row.axis) ~name_width ~now ~frame ~yolo
-    ~selected (row : Keeper_list_model.row) =
+let keeper_memory_reading state (row : Keeper_list_model.row) =
+  Memory_reading.find (Masc_tui_keeper_axis.memory_index state)
+    ~keeper_name:row.keeper.Tui_decode.k_name
+
+(* The lag bars are drawn against the listed Keeper furthest behind, so a
+   Keeper the snapshot still has a row for but the roster no longer lists
+   does not set the scale. *)
+let axis_peak_lag state rows = Memory_reading.peak_lag (List.map (keeper_memory_reading state) rows)
+
+let keeper_axis_row_content state ~(axis : Axis_row.axis) ~name_width ~peak_lag ~now ~frame
+    ~yolo ~selected (row : Keeper_list_model.row) =
+  let memory = keeper_memory_reading state row in
   String.concat ""
     [ keeper_row_marker ~selected
     ; keeper_row_name ~width:name_width ~yolo row
     ; " "
-    ; keeper_axis_before_cell ~now row axis.before
+    ; keeper_axis_before_cell ~now ~memory row axis.before
     ; axis_cell_gap
-    ; keeper_axis_current_cell ~frame row axis.current
+    ; keeper_axis_current_cell ~now ~frame ~memory row axis.current
     ; axis_cell_gap
     ; String.concat Masc_tui_keeper_axis_cell.separator
-        (List.map style_axis_cell (keeper_axis_next_cells state ~now row axis.next))
+        (List.map style_axis_cell
+           (keeper_axis_next_cells state ~now ~memory ~peak_lag row axis.next))
     ]
 
 (* The second line under a failing Keeper's axis row: the sentence about its
@@ -1368,6 +1400,7 @@ let render_keeper_list (state : state) =
   in
   let shape = Axis_row.shape_of_view state.keeper_list_view in
   let name_width = axis_name_width model_rows in
+  let peak_lag = axis_peak_lag state model_rows in
   box_line_styled buf cols ~style:(Theme.recede ())
     (match shape with
      | Axis_row.List_columns -> keeper_column_header columns
@@ -1519,7 +1552,7 @@ let render_keeper_list (state : state) =
                 keeper_row_content ~columns ~now:now_unix ~frame:state.activity_frame ~yolo
                   ~selected row
             | Axis_row.Axis axis ->
-                keeper_axis_row_content state ~axis ~name_width ~now:now_unix
+                keeper_axis_row_content state ~axis ~name_width ~peak_lag ~now:now_unix
                   ~frame:state.activity_frame ~yolo ~selected row
           in
           let press text =

@@ -2413,6 +2413,7 @@ let test_constitution_tools_dispatch_by_name () =
       let ledger =
         match
           Masc.World_constitution_store.load ~base_path:config.Workspace.base_path
+            ~resolve_subject:(fun _ -> true)
         with
         | Ok ledger -> ledger
         | Error error ->
@@ -2428,6 +2429,7 @@ let test_constitution_tools_dispatch_by_name () =
       let after =
         match
           Masc.World_constitution_store.load ~base_path:config.Workspace.base_path
+            ~resolve_subject:(fun _ -> true)
         with
         | Ok ledger -> ledger.Masc.World_constitution_store.articles
         | Error error ->
@@ -2491,6 +2493,8 @@ let test_constitution_remove_leaves_a_reasoned_digest () =
               "superseded by the board's new rule" why
           | None -> fail "the removal line carries no reason")
         | Ok (Masc.World_constitution_types.Added _) ->
+          fail "the last ledger line is not the removal"
+        | Ok (Masc.World_constitution_types.Replaced _) ->
           fail "the last ledger line is not the removal"
         | Error error ->
           fail (Masc.World_constitution_wire.decode_error_to_string error))))

@@ -111,11 +111,17 @@ type rejected_line = {
   detail : string;
 }
 
+type isolated_line = {
+  line_number : int;
+  subject : string;
+}
+
 type ledger = {
   end_offset : int;
   articles : World_constitution_types.t list;
   entries : World_constitution_types.entry list;
   rejected : rejected_line list;
+  isolated : isolated_line list;
 }
 
 type read_error =
@@ -134,25 +140,48 @@ let same_id id (article : World_constitution_types.t) =
 (* Folding keeps the order a world wrote its norms in. Re-adding an article
    that is still held replaces it in place, because that is an edit; re-adding
    one that was removed puts it at the end, because the world changed its mind
-   and that is when it did. *)
-let apply held = function
+   and that is when it did. A replacement retires its bundle first and then
+   follows the same add rule, so its article lands at the end under its own
+   id (RFC-0504). *)
+let rec apply held = function
   | World_constitution_types.Added article ->
     if List.exists (same_id article.id) held then
       List.map
         (fun existing -> if same_id article.id existing then article else existing)
         held
     else held @ [ article ]
+  | World_constitution_types.Replaced { superseded; article; _ } ->
+    let retired =
+      List.filter
+        (fun (existing : World_constitution_types.t) ->
+          not
+            (List.exists
+               (fun id ->
+                 World_constitution_types.Article_id.equal existing.id id)
+               superseded))
+        held
+    in
+    apply retired (World_constitution_types.Added article)
   | World_constitution_types.Removed { id; _ } ->
     List.filter (fun existing -> not (same_id id existing)) held
 
-let parse_with ~keep_history contents =
+(* The name the roster must resolve for the line to hold: who the norm is
+   claimed by. A line from outside the roster folds out of the live set and
+   is reported beside the rejected lines, never dropped quietly (RFC-0504
+   §2.4). *)
+let subject_of_entry = function
+  | World_constitution_types.Added article -> article.author
+  | World_constitution_types.Replaced { by; _ } -> by
+  | World_constitution_types.Removed { by; _ } -> by
+
+let parse_with ~keep_history ~resolve_subject contents =
   let end_offset = String.length contents in
-  let rec scan line_number held entries rejected = function
+  let rec scan line_number held entries rejected isolated = function
     | [] -> { end_offset; articles = held; entries = List.rev entries;
-              rejected = List.rev rejected }
+              rejected = List.rev rejected; isolated = List.rev isolated }
     | line :: rest ->
       if String.equal (String.trim line) "" then
-        scan (line_number + 1) held entries rejected rest
+        scan (line_number + 1) held entries rejected isolated rest
       else (
         (* [split_on_char] leaves the text after the last newline as the
            final element, so only that element can be unterminated. *)
@@ -163,7 +192,7 @@ let parse_with ~keep_history contents =
         in
         let reject detail =
           scan (line_number + 1) held entries
-            ({ line_number; line_end; detail } :: rejected) rest
+            ({ line_number; line_end; detail } :: rejected) isolated rest
         in
         match Yojson.Safe.from_string line with
         | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
@@ -174,11 +203,17 @@ let parse_with ~keep_history contents =
             reject (World_constitution_wire.decode_error_to_string error)
           | Ok entry ->
             let entries = if keep_history then entry :: entries else entries in
-            scan (line_number + 1) (apply held entry) entries rejected rest))
+            let subject = subject_of_entry entry in
+            if resolve_subject subject then
+              scan (line_number + 1) (apply held entry) entries rejected isolated rest
+            else
+              scan (line_number + 1) held entries rejected
+                ({ line_number; subject } :: isolated) rest))
   in
-  scan 1 [] [] [] (String.split_on_char '\n' contents)
+  scan 1 [] [] [] [] (String.split_on_char '\n' contents)
 
-let parse contents = parse_with ~keep_history:true contents
+let parse ~resolve_subject contents =
+  parse_with ~keep_history:true ~resolve_subject contents
 
 let read_contents ~base_path =
   let path = ledger_path ~base_path in
@@ -188,17 +223,17 @@ let read_contents ~base_path =
   | None -> Ok None
   | Some contents -> Ok (Some contents)
 
-let load ~base_path =
+let load ~base_path ~resolve_subject =
   match read_contents ~base_path with
   | Error _ as error -> error
-  | Ok None -> Ok { end_offset = 0; articles = []; entries = []; rejected = [] }
-  | Ok (Some contents) -> Ok (parse contents)
+  | Ok None -> Ok { end_offset = 0; articles = []; entries = []; rejected = []; isolated = [] }
+  | Ok (Some contents) -> Ok (parse ~resolve_subject contents)
 
-let load_articles ~base_path =
+let load_articles ~base_path ~resolve_subject =
   match read_contents ~base_path with
   | Error _ as error -> error
   | Ok None -> Ok []
-  | Ok (Some contents) -> Ok (parse_with ~keep_history:false contents).articles
+  | Ok (Some contents) -> Ok (parse_with ~keep_history:false ~resolve_subject contents).articles
 
 type position = {
   end_offset : int;
@@ -209,17 +244,17 @@ let position_of contents =
   { end_offset = String.length contents;
     digest = Agent_core_sha256.(digest_string contents |> to_hex) }
 
-let load_held ~base_path =
+let load_held ~base_path ~resolve_subject =
   match read_contents ~base_path with
   | Error _ as error -> error
   | Ok contents ->
     let contents = Option.value contents ~default:"" in
-    Ok ((parse_with ~keep_history:false contents).articles, position_of contents)
+    Ok ((parse_with ~keep_history:false ~resolve_subject contents).articles, position_of contents)
 
 (* Appends never rewrite a byte already written, so the first [end_offset]
    bytes of the ledger now are the ledger [position] read, exactly when they
    still hash to its digest. *)
-let load_articles_at ~base_path (position : position) =
+let load_articles_at ~base_path ~resolve_subject (position : position) =
   match read_contents ~base_path with
   | Error _ as error -> error
   | Ok contents ->
@@ -228,5 +263,5 @@ let load_articles_at ~base_path (position : position) =
     else
       let prefix = String.sub contents 0 position.end_offset in
       if String.equal (position_of prefix).digest position.digest
-      then Ok (Some (parse_with ~keep_history:false prefix).articles)
+      then Ok (Some (parse_with ~keep_history:false ~resolve_subject prefix).articles)
       else Ok None

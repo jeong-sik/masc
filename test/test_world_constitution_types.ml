@@ -131,10 +131,27 @@ let roundtrip name entry =
       Alcotest.(check string) (name ^ ": remover survives") before.by after.by;
       Alcotest.(check (option string))
         (name ^ ": reason survives") before.reason after.reason
-    | Added _, Removed _ | Removed _, Added _ ->
-      Alcotest.failf "%s: decoded as the other move" name)
+    | Replaced before, Replaced after ->
+      Alcotest.(check (list string))
+        (name ^ ": superseded survives")
+        (List.map Article_id.to_string before.superseded)
+        (List.map Article_id.to_string after.superseded);
+      Alcotest.(check string)
+        (name ^ ": article id survives")
+        (Article_id.to_string before.article.id)
+        (Article_id.to_string after.article.id);
+      Alcotest.(check string)
+        (name ^ ": article text survives")
+        before.article.text after.article.text;
+      Alcotest.(check string) (name ^ ": replacer survives") before.by after.by;
+      Alcotest.(check (option string))
+        (name ^ ": reason survives") before.reason after.reason
+    | Added _, (Removed _ | Replaced _)
+    | Removed _, (Added _ | Replaced _)
+    | Replaced _, (Added _ | Removed _) ->
+      Alcotest.failf "%s: decoded as another move" name)
 
-let test_wire_roundtrip_both_moves () =
+let test_wire_roundtrip_every_move () =
   roundtrip "added"
     (Added (article ~evidence:[ { uri = "p-1" } ] ()));
   roundtrip "removed"
@@ -146,7 +163,22 @@ let test_wire_roundtrip_both_moves () =
        });
   roundtrip "removed without a reason"
     (Removed
-       { id = Article_id.generate (); by = "critic"; at = 7.0; reason = None })
+       { id = Article_id.generate (); by = "critic"; at = 7.0; reason = None });
+  roundtrip "replaced"
+    (Replaced
+       { superseded = [ Article_id.generate (); Article_id.generate () ]
+       ; article = article ()
+       ; by = "critic"
+       ; at = 8.0
+       ; reason = Some "merged the overlapping norms"
+       });
+  roundtrip "replaced without a reason"
+    (Replaced
+       { superseded = [ Article_id.generate () ]
+       ; article = article ()
+       ; by = "critic"
+       ; at = 8.0
+       ; reason = None })
 
 let test_wire_field_names_are_fixed () =
   let keys json =
@@ -175,6 +207,29 @@ let test_wire_field_names_are_fixed () =
              { id = Article_id.generate ()
              ; by = "critic"
              ; at = 7.0
+             ; reason = Some "why"
+             })));
+  Alcotest.(check (list string))
+    "replaced entry" [ "kind"; "superseded"; "article"; "by"; "at" ]
+    (keys
+       (Wire.entry_to_json
+          (Replaced
+             { superseded = [ Article_id.generate () ]
+             ; article = article ()
+             ; by = "critic"
+             ; at = 8.0
+             ; reason = None
+             })));
+  Alcotest.(check (list string))
+    "replaced entry with a reason"
+    [ "kind"; "superseded"; "article"; "by"; "at"; "reason" ]
+    (keys
+       (Wire.entry_to_json
+          (Replaced
+             { superseded = [ Article_id.generate () ]
+             ; article = article ()
+             ; by = "critic"
+             ; at = 8.0
              ; reason = Some "why"
              })));
   match Wire.entry_to_json (Added (article ())) with
@@ -258,8 +313,8 @@ let () =
             test_a_norm_is_one_line;
         ] );
       ( "wire",
-        [ Alcotest.test_case "roundtrip both moves" `Quick
-            test_wire_roundtrip_both_moves;
+        [ Alcotest.test_case "roundtrip every move" `Quick
+            test_wire_roundtrip_every_move;
           Alcotest.test_case "field names are fixed" `Quick
             test_wire_field_names_are_fixed;
           Alcotest.test_case "a broken schema is refused" `Quick

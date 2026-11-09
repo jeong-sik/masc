@@ -712,7 +712,25 @@ let rec fit_body ?literal_prefix ?action_text ?position ~max_cells ~conflicts ~h
            []
        in
        let room = max_cells - Masc_tui_message_layout.display_width more_key in
+       let marker_room =
+         max_cells - Masc_tui_message_layout.display_width cut_marker
+       in
        if room <= 0 then Masc_tui_message_layout.fit_width rendered max_cells
+       else if
+         Masc_tui_message_layout.display_width rendered <= room
+         && not (String.ends_with ~suffix:cut_marker rendered)
+       then
+         (* The keys that cannot be dropped fit the row, and the row still has
+            to say that other keys were left out. Cell truncation is what puts
+            the ellipsis on a row, and it cuts nothing when the keys fit. A
+            bare [?] then followed the padding, or touched the last key as
+            [q:quit?] when the keys filled every cell but one. The marker ends
+            the row instead and the keys keep the cells it leaves: all of them
+            while they fit beside it, one cell short when they fill the row.
+            Planning's four pinned keys take 57 of 60 cells. *)
+         Masc_tui_message_layout.fit_width
+           (Masc_tui_message_layout.take_cells rendered marker_room) marker_room
+         ^ cut_marker
        else Masc_tui_message_layout.fit_width rendered room ^ more_key)
 
 (** What the caller would rather the notice slot said than [action_text],

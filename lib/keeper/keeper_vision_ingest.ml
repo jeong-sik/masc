@@ -77,6 +77,7 @@ let error_reasons =
   ; "eager_truncated"
   ; "eager_timeout"
   ; "eager_no_runtime"
+  ; "eager_runtimes_held"
   ; "eager_invalid_request"
   ; "eager_invalid_structured_response"
   ; "eager_provider_error"
@@ -90,6 +91,7 @@ let eager_read_eviction_reason_of_outcome = function
   | Keeper_vision_tool.Vo_truncated -> Some "eager_truncated"
   | Keeper_vision_tool.Vo_timeout -> Some "eager_timeout"
   | Keeper_vision_tool.Vo_no_runtime _ -> Some "eager_no_runtime"
+  | Keeper_vision_tool.Vo_runtimes_held _ -> Some "eager_runtimes_held"
   | Keeper_vision_tool.Vo_invalid_request _ -> Some "eager_invalid_request"
   | Keeper_vision_tool.Vo_invalid_structured_response _ ->
     Some "eager_invalid_structured_response"
@@ -141,7 +143,7 @@ let eager_read ~base_path ~exclude_runtime_ids ~media_type ~bytes
          ()
      with
      | Keeper_vision_tool.Vo_ok reading -> Some (Ok (truncate_read_text reading.text))
-     | (Keeper_vision_tool.Vo_timeout | Keeper_vision_tool.Vo_empty | Keeper_vision_tool.Vo_truncated | Keeper_vision_tool.Vo_invalid_request _ | Keeper_vision_tool.Vo_no_runtime _ | Keeper_vision_tool.Vo_invalid_structured_response _ | Keeper_vision_tool.Vo_provider _ | Keeper_vision_tool.Vo_official_failure _) as outcome -> (match eager_read_eviction_reason_of_outcome outcome with
+     | (Keeper_vision_tool.Vo_timeout | Keeper_vision_tool.Vo_empty | Keeper_vision_tool.Vo_truncated | Keeper_vision_tool.Vo_invalid_request _ | Keeper_vision_tool.Vo_no_runtime _ | Keeper_vision_tool.Vo_runtimes_held _ | Keeper_vision_tool.Vo_invalid_structured_response _ | Keeper_vision_tool.Vo_provider _ | Keeper_vision_tool.Vo_official_failure _) as outcome -> (match eager_read_eviction_reason_of_outcome outcome with
         | Some reason -> Some (Error reason)
         | None -> Some (Error "eager_read_failed")))
   | _ -> None

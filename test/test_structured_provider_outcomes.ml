@@ -28,7 +28,7 @@ let check_refusal (response : Types.api_response) =
    | Vt.Vo_provider { failure_class = Tool_result.Policy_rejection; _ } -> ()
    | Vt.Vo_provider { failure_class = (Tool_result.Workflow_rejection | Runtime_failure
        | Dependency_unavailable | Operator_cancelled); _ }
-   | Vt.Vo_ok _ | Vo_invalid_request _ | Vo_no_runtime _ | Vo_timeout
+   | Vt.Vo_ok _ | Vo_invalid_request _ | Vo_no_runtime _ | Vo_runtimes_held _ | Vo_timeout
    | Vo_invalid_structured_response _ | Vo_official_failure _ | Vo_empty | Vo_truncated ->
      Alcotest.fail "provider refusal did not reach vision policy rejection")
 
@@ -176,7 +176,7 @@ let check_token_limit response =
      Alcotest.fail "token cut lost its structured state");
   match Vt.outcome_of_response ~runtime_id:"fixture.vision" ~requested_model:"fixture" response with
   | Vt.Vo_truncated -> ()
-  | Vt.Vo_ok _ | Vo_invalid_request _ | Vo_no_runtime _ | Vo_timeout
+  | Vt.Vo_ok _ | Vo_invalid_request _ | Vo_no_runtime _ | Vo_runtimes_held _ | Vo_timeout
   | Vo_invalid_structured_response _ | Vo_official_failure _ | Vo_empty | Vo_provider _ ->
     Alcotest.fail "token cut lost its vision outcome"
 
@@ -228,7 +228,7 @@ let check_policy_or_truncation expected response =
            Tool_result.Policy_rejection else Tool_result.Runtime_failure in
        Alcotest.(check bool) "vision keeps policy versus repetition failure" true
          (failure.failure_class = expected_class)
-     | Vo_ok _ | Vo_invalid_request _ | Vo_no_runtime _ | Vo_timeout
+     | Vo_ok _ | Vo_invalid_request _ | Vo_no_runtime _ | Vo_runtimes_held _ | Vo_timeout
      | Vo_invalid_structured_response _ | Vo_official_failure _ | Vo_empty | Vo_truncated ->
        Alcotest.fail "vision lost policy/truncation failure")
   | EndTurn | StopToolUse | StopSequence | PauseTurn | Compaction
@@ -382,7 +382,7 @@ let test_actual_vision_walk_does_not_retry_wire_refusal () =
     | Vt.Vo_provider { failure_class = Tool_result.Policy_rejection; _ } -> ()
     | Vt.Vo_provider { failure_class = (Tool_result.Workflow_rejection | Runtime_failure
         | Dependency_unavailable | Operator_cancelled); _ }
-    | Vt.Vo_ok _ | Vo_invalid_request _ | Vo_no_runtime _ | Vo_timeout
+    | Vt.Vo_ok _ | Vo_invalid_request _ | Vo_no_runtime _ | Vo_runtimes_held _ | Vo_timeout
     | Vo_invalid_structured_response _ | Vo_official_failure _ | Vo_empty | Vo_truncated ->
       Alcotest.fail "actual vision walk accepted or retried refusal")
 
@@ -400,7 +400,7 @@ let test_actual_vision_walk_advances_after_empty_token_cut () =
     | Vt.Vo_ok reading ->
       Alcotest.(check string) "later candidate reading" "visible answer" reading.text;
       Alcotest.(check string) "later candidate identity" "p2.vision-b" reading.runtime_id
-    | Vt.Vo_provider _ | Vo_invalid_request _ | Vo_no_runtime _ | Vo_timeout
+    | Vt.Vo_provider _ | Vo_invalid_request _ | Vo_no_runtime _ | Vo_runtimes_held _ | Vo_timeout
     | Vo_invalid_structured_response _ | Vo_official_failure _ | Vo_empty | Vo_truncated ->
       Alcotest.fail "actual vision walk lost token-limit recovery")
 

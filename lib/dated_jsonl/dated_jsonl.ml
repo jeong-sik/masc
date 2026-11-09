@@ -1049,7 +1049,7 @@ let collect_matching_range ?offset t ~since ~until n ~f =
 let read_recent ?offset t n =
   filter_map_recent ?offset t n ~f:(fun json -> Some json)
 
-let read_recent_result ?(offset=0) t n =
+let read_recent_using_result ?(offset=0) t n ~decode =
   if offset < 0
   then Error (Invalid_offset { offset })
   else if n <= 0
@@ -1071,7 +1071,7 @@ let read_recent_result ?(offset=0) t n =
         let* entries_newest_first =
           off_fiber ~name:(job_name t) (fun () ->
             load_tail_lines_result_inline path ~max_lines:(requested_line_count ())
-            |> Result.map (List.rev_map (fun line -> recent_entry_of_line ~path line)))
+            |> Result.map (List.rev_map (fun line -> decode ~path line)))
         in
         List.iter
           (fun entry ->
@@ -1097,6 +1097,15 @@ let read_recent_result ?(offset=0) t n =
     let* months = list_month_dirs_result t.base_dir in
     let* () = visit_months months in
     Ok !collected
+;;
+
+let read_recent_result ?offset t n =
+  read_recent_using_result ?offset t n
+    ~decode:(fun ~path line -> recent_entry_of_line ~path line)
+;;
+
+let read_recent_lines_result ?offset t n =
+  read_recent_using_result ?offset t n ~decode:(fun ~path line -> path, line)
 ;;
 
 let find_latest_entry_result t f =

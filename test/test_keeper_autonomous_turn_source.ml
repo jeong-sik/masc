@@ -740,6 +740,54 @@ let test_failed_exact_run_never_caches_empty_history () =
   | Error error -> Alcotest.fail (Server_keeper_chat_history_read.error_to_string error)
 ;;
 
+let require_snapshot = function
+  | Ok snapshot -> snapshot
+  | Error detail -> Alcotest.fail detail
+;;
+
+let test_snapshot_revalidation_keeps_current_records () =
+  with_workspace @@ fun config ->
+  let module Source = Keeper_autonomous_turn_source in
+  write_turn_record config ~absolute_turn:1 ~turn_kind:Turn_record.Autonomous
+    ~raw_trace_run_ref:None;
+  let previous = Source.read_snapshot_result ~config ~keeper_name () |> require_snapshot in
+  let unchanged = Source.read_snapshot_result ~config ~keeper_name ~previous () |> require_snapshot in
+  Alcotest.(check string) "unchanged selected records retain their fingerprint"
+    (Source.snapshot_fingerprint previous) (Source.snapshot_fingerprint unchanged);
+  write_turn_record config ~absolute_turn:2 ~turn_kind:Turn_record.Autonomous
+    ~raw_trace_run_ref:None;
+  let changed = Source.read_snapshot_result ~config ~keeper_name ~previous () |> require_snapshot in
+  Alcotest.(check bool) "later committed record changes freshness" true
+    (not (String.equal (Source.snapshot_fingerprint previous) (Source.snapshot_fingerprint changed)));
+  let store = Dated_jsonl.open_store
+      (Dated_jsonl.Store.keeper (Workspace.dated_store_root config)
+         ~keeper:keeper_name Dated_jsonl.Store.Keeper.Turn_records) in
+  Dated_jsonl.append store (`Assoc ["invalid_turn_record", `Bool true]);
+  match Source.read_snapshot_result ~config ~keeper_name ~previous:changed () with
+  | Error _ -> ()
+  | Ok _ -> Alcotest.fail "previous valid snapshot hid a current invalid record"
+;;
+
+let test_snapshot_revalidation_keeps_storage_errors () =
+  with_workspace @@ fun config ->
+  let module Source = Keeper_autonomous_turn_source in
+  write_turn_record config ~absolute_turn:1 ~turn_kind:Turn_record.Autonomous
+    ~raw_trace_run_ref:None;
+  let previous = Source.read_snapshot_result ~config ~keeper_name () |> require_snapshot in
+  let location = Dated_jsonl.Store.keeper (Workspace.dated_store_root config)
+      ~keeper:keeper_name Dated_jsonl.Store.Keeper.Turn_records in
+  let root = Dated_jsonl.Store.dir location in
+  let retained = root ^ ".retained" in
+  Unix.rename root retained;
+  Unix.symlink retained root;
+  Fun.protect
+    ~finally:(fun () -> Unix.unlink root; Unix.rename retained root)
+    (fun () ->
+      match Source.read_snapshot_result ~config ~keeper_name ~previous () with
+      | Error _ -> ()
+      | Ok _ -> Alcotest.fail "previous snapshot hid a current symbolic-link store")
+;;
+
 let () =
   Alcotest.run "keeper_autonomous_turn_source"
     [ ( "load_recent"
@@ -785,6 +833,10 @@ let () =
             test_transcript_rows_keep_stream_contract
         ; Alcotest.test_case "failed exact run never caches empty history" `Quick
             test_failed_exact_run_never_caches_empty_history
+        ; Alcotest.test_case "snapshot revalidation keeps current records and errors" `Quick
+            test_snapshot_revalidation_keeps_current_records
+        ; Alcotest.test_case "snapshot revalidation keeps current storage errors" `Quick
+            test_snapshot_revalidation_keeps_storage_errors
         ] )
     ; ( "wake_prompt"
       , [ Alcotest.test_case "rejects blank and over-bound values" `Quick

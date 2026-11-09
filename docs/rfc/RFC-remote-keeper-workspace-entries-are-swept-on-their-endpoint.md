@@ -87,9 +87,11 @@ Keeper 루트 바로 아래 항목마다 아래를 모두 만족해야 지운다
 
 - `shutil.rmtree` 로 지운다.
 - 보고에는 항목마다 이름, 할당 바이트, 결과(`removed | skipped | failed`), 건너뛴 이유를 담는다. 끝에 정리 전후의 여유 KiB 를 적는다.
-- 지우거나 실패한 항목이 있으면 서버는 Keeper 마다 로그 한 줄을 남긴다: `Keeper workspace cleanup keeper= removed= skipped= failed= freed_kib= available_kib=`
+- 서버는 정리할 때마다 Keeper 마다 로그 한 줄을 남긴다. 지운 것이 없어도 남긴다: `Keeper workspace cleanup keeper= removed= skipped= failed= freed_kib= available_kib=`
   - `freed_kib` 는 정리 뒤 여유 공간에서 정리 전 여유 공간을 뺀 값이다. 볼륨을 같이 쓰는 다른 Keeper 가 그사이 쓰면 음수일 수 있다.
-  - payload 가 정리를 거절하거나(`skip`) 실패하면 경고 줄을 남긴다.
+  - payload 가 정리를 거절하거나(`skip`) 실패하면 경고 줄을 남긴다. 저장된 meta 가 없거나 저장된 profile 이 remote_ssh 가 아니어도 경고 줄을 남긴다.
+  - 정리 주기마다 한 줄을 더 남긴다: `Keeper cleanup pass owners= without_meta= switched_off= builds= workspaces= still_running=`. 단계가 아예 안 돈 것과, 돌았지만 지울 것이 없던 것을 이 두 줄로 가른다.
+  - 11-09 첫 주기 두 번(00:08Z, 03:25Z)은 아무 줄도 남기지 않았다. 리뷰 컨테이너의 shim 요청 기록에도 payload 요청이 없었다. 같은 날 04:05Z 에 같은 payload 를 손으로 `--apply` 로 돌려 13,581개를 지웠고, 사용률이 54% 에서 42% 로 내려갔다.
 
 커밋 안 한 변경과 untracked 파일은 보지 않는다. 운영자 결정이다.
 

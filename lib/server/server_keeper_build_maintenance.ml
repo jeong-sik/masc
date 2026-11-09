@@ -35,7 +35,8 @@ let rec release running keeper_name =
 
 (* Reserve before forking so a second pulse cannot schedule the same Keeper.
    Both cancellation paths release the pure reservation: a refused fork, or
-   an entered child whose callback must finish teardown before it leaves. *)
+   an entered child whose callback must finish teardown before it leaves.
+   [false] means an earlier attempt for this Keeper is still running. *)
 let schedule ~sw ~running ~keeper_name run =
   Eio.Switch.check sw;
   if reserve running keeper_name then (
@@ -44,10 +45,12 @@ let schedule ~sw ~running ~keeper_name run =
       Eio.Fiber.fork ~sw (fun () ->
         Fun.protect
           ~finally:(fun () -> release running keeper_name)
-          (fun () -> Eio.Fiber.yield (); run ()))
+          (fun () -> Eio.Fiber.yield (); run ()));
+      true
     with exn ->
       release running keeper_name;
       raise exn)
+  else false
 
 (* One cleanup per Keeper per pass, chosen by where its tree lives: an
    Apple microVM guest has stale _build directories, a Remote_ssh endpoint has
@@ -83,31 +86,39 @@ let run_step ~config ~meta = function
   | Remote_workspace ->
     Keeper_remote_workspace_cleanup.cleanup ~config ~meta
       ~retention_sec:(Runtime_params.get Runtime_settings.keeper_remote_workspace_cleanup_retention_sec) ()
-    |> Result.map (Option.map (fun report -> Workspace report))
+    |> Result.map (fun report -> Some (Workspace report))
 
 let log_report ~keeper_name = function
   | Builds { Keeper_turn_sandbox_runtime.cleaned; failed } ->
     if cleaned > 0 || failed > 0 then
       Log.Server.info "Keeper build cleanup keeper=%s cleaned=%d failed=%d"
         keeper_name cleaned failed
+  (* Every sweep leaves a line, removed=0 included: the passes at 00:08Z and
+     03:25Z on 2026-11-09 left none, and nothing showed whether the payload
+     had run. *)
   | Workspace { Keeper_remote_workspace_cleanup.removed; skipped; failed; freed_kib; available_kib } ->
-    if removed > 0 || failed > 0 then
-      Log.Server.info
-        "Keeper workspace cleanup keeper=%s removed=%d skipped=%d failed=%d freed_kib=%d available_kib=%d"
-        keeper_name removed skipped failed freed_kib available_kib
+    Log.Server.info
+      "Keeper workspace cleanup keeper=%s removed=%d skipped=%d failed=%d freed_kib=%d available_kib=%d"
+      keeper_name removed skipped failed freed_kib available_kib
 
+(* One line per pass says how many Keepers each step reached, so a step that
+   never ran is told apart from one that found nothing. *)
 let sweep ~sw ~running ~(config : Workspace.config) ~builds ~remote_workspace () =
   match Keeper_owner_registry.all_projections ~base_path:config.base_path with
-  | Error _ -> ()
+  | Error error ->
+    Log.Server.warn "Keeper cleanup pass: owner inventory unavailable: %s"
+      (Keeper_owner_registry.lookup_error_to_string error)
   | Ok projections ->
+    let without_meta = ref 0 and switched_off = ref 0 and still_running = ref 0
+    and guest_builds = ref 0 and workspaces = ref 0 in
     List.iter
       (fun (projection : Keeper_owner_reducer.projection) ->
         match projection.meta with
-        | None -> ()
+        | None -> incr without_meta
         | Some meta ->
           match step_for ~builds ~remote_workspace meta.sandbox_profile with
-          | None -> ()
-          | Some step -> schedule ~sw ~running ~keeper_name:meta.name (fun () ->
+          | None -> incr switched_off
+          | Some step ->
             let label = step_label step in
             let run () =
               match read_cleanup_meta ~config ~keeper_name:meta.name with
@@ -118,20 +129,33 @@ let sweep ~sw ~running ~(config : Workspace.config) ~builds ~remote_workspace ()
             let settle = function
               | Error detail -> Log.Server.warn "%s keeper=%s: %s" label meta.name detail
               | Ok (Some report) -> log_report ~keeper_name:meta.name report
-              | Ok None -> ()
+              | Ok None ->
+                (match step with
+                 | Guest_builds -> ()
+                 | Remote_workspace ->
+                   Log.Server.warn "%s keeper=%s: no stored Keeper meta" label meta.name)
             in
-            try match step with
-            | Guest_builds ->
-              (match Keeper_owner_registry.run_maintenance_if_idle ~defer_to_chat:true
-                       ~base_path:config.base_path ~keeper_name:meta.name run with
-               | Ok (`Ran result) -> settle result
-               | Error _ | Ok (`Busy _) -> ())
-            | Remote_workspace -> settle (run ())
-            with
-            | Eio.Cancel.Cancelled _ as exn -> raise exn
-            | exn -> Log.Server.warn "%s keeper=%s: %s"
-                       label meta.name (Printexc.to_string exn)))
-      projections
+            let attempt () =
+              try match step with
+              | Guest_builds ->
+                (match Keeper_owner_registry.run_maintenance_if_idle ~defer_to_chat:true
+                         ~base_path:config.base_path ~keeper_name:meta.name run with
+                 | Ok (`Ran result) -> settle result
+                 | Error _ | Ok (`Busy _) -> ())
+              | Remote_workspace -> settle (run ())
+              with
+              | Eio.Cancel.Cancelled _ as exn -> raise exn
+              | exn -> Log.Server.warn "%s keeper=%s: %s"
+                         label meta.name (Printexc.to_string exn)
+            in
+            if schedule ~sw ~running ~keeper_name:meta.name attempt
+            then incr (match step with Guest_builds -> guest_builds | Remote_workspace -> workspaces)
+            else incr still_running)
+      projections;
+    Log.Server.info
+      "Keeper cleanup pass owners=%d without_meta=%d switched_off=%d builds=%d workspaces=%d still_running=%d"
+      (List.length projections) !without_meta !switched_off !guest_builds !workspaces
+      !still_running
 
 let start ~sw ~clock ~config =
   let running = create_running () in

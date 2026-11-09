@@ -236,7 +236,7 @@ MASC_E2E_TESTS=true scripts/dune-local.sh build @test/runtest-test_sse_storm_e2e
 일반 스택 병합 대상 head는 소스 리뷰와 `merge-compile` 권고 기록을 확인하고,
 `.github/workflows/test.yml`은 일일(daily) 스케줄 및 수동 실행으로 전체 행동/단위 회귀
 (`@runtest`)를 검증한다. Release/Tag 후보 검증은 `.github/workflows/release-candidate.yml`이
-`config/release-behavior.json`에 선언된 통합 행동 스위트(bootstrap, TUI, viewer,
+`config/release-behavior.json`에 선언된 통합 행동 스위트(bootstrap, TUI,
 dashboard, lane add-on smoke)를 실행한다.
 
 ### 6.3 Contract Harness

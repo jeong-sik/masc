@@ -92,7 +92,6 @@ dashboard/bun.lock
 dashboard/bun.lockb
 dashboard/dist/
 assets/dashboard/
-viewer/dist-build/
 
 # TLC model checker artifacts
 specs/**/states/

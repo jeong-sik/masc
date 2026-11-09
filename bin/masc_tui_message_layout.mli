@@ -669,6 +669,9 @@ val input_viewport : max_cells:int -> string -> string
 val input_boundaries : string -> int list
 (** Byte offsets surrounding complete displayed graphemes, including 0 and
     the end. Input editing and display use the same Unicode segmentation. *)
+val input_boundary_index : string -> int array
+(** The same grapheme/ANSI byte boundaries, prepared without retaining display
+    pieces or a boundary list. The caller owns the array and reads it only. *)
 
 val input_window : max_cells:int -> cursor:int -> string -> string * int
 (** Horizontally fit a draft around its byte cursor. Return the visible text

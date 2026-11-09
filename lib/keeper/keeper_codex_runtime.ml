@@ -989,7 +989,7 @@ let native_cwd ~base_path ~keeper_name ~sandbox_profile =
 
 let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~official_task_reference ~composed_context ~accepts_image_input ~on_session_settled ~on_results_ready ~retained_results ~required_native_posture ~official_client_continuation ~runtime_id ~context_window ~configured_reasoning_effort ~turn_timeout_s ~quota_scope ~keeper_name
     ~pre_tool_rejects ~base_path ~goal ~goal_blocks
-    ~system_prompt ~tools ~loading_plan ~initial_messages ~capacity_bytes ~project_history
+    ~system_prompt ~tools ~loading_plan ~initial_messages ~project_history
     ~on_transmitted_model_input ~hooks
     ~context_injector ~context ~terminal_effect_state ~event_bus ~raw_trace ~on_event
     ~observe_effect_attempted ~observe_successful_tool_completion ~observe_transport_uncertain
@@ -2181,7 +2181,6 @@ let run ?(on_guidance_prepared = fun () -> Ok ()) ~input_source ~media_store ?ar
           ~tools
           ~loading_plan
           ~initial_messages
-          ~capacity_bytes
           (* A Resume still projects: the per-turn context it sends in front
              of the goal is placed by this projection. It reports no window
              and no carried front, though -- the range it measures is not

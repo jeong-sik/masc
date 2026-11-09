@@ -236,7 +236,6 @@ let prepare_agent_setup
       ~(dynamic_context : string)
       ~(history_messages : Agent_core.Types.message list)
       ~(shared_context : Agent_core.Context.t)
-      ~(context_injector : Agent_core.Hooks.context_injector)
       ~(start_turn_count : int)
       ~(keeper_turn_id : int)
       ~(approval_admission : Keeper_approval_origin.admission)

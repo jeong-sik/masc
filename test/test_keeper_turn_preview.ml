@@ -251,7 +251,7 @@ let test_late_execution_keeps_successor_preview_and_redactor () =
       let _, _, _, on_event =
         Keeper_agent_run_turn_helpers.turn_progress_callbacks
           ~preview ~observation_token:None ~config ~keeper_name
-          ~downstream:None ~turn_id:1
+          ~downstream:None
       in
       Option.get on_event
     in

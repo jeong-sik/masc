@@ -1499,7 +1499,6 @@ let test_keeper_tool_slot_callbacks_are_always_wired () =
       ~config
       ~keeper_name:"slot-lease-test"
       ~downstream:None
-      ~turn_id:1
   in
   on_yield ();
   on_resume ()

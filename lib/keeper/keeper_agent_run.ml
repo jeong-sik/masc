@@ -873,7 +873,6 @@ let run_turn
       ~dynamic_context
       ~history_messages
       ~shared_context
-      ~context_injector
       ~start_turn_count
       ~keeper_turn_id:manifest_keeper_turn_id
       ~turn_kind
@@ -1281,7 +1280,6 @@ let run_turn
         ~config
         ~keeper_name:meta.name
         ~downstream:on_event
-        ~turn_id:manifest_keeper_turn_id
     in
     ignore (Keeper_alerting_path.ensure_sandbox_bundle ~config ~meta);
     let keeper_visible_sandbox_root = ctx.workspace_root in

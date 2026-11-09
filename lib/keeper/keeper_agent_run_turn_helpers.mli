@@ -146,7 +146,6 @@ val turn_progress_callbacks :
   config:Workspace.config ->
   keeper_name:string ->
   downstream:(Agent_core.Types.sse_event -> unit) option ->
-  turn_id:int ->
   (string -> unit)
   * (unit -> unit)
   * (unit -> unit)

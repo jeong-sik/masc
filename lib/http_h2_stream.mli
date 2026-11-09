@@ -31,9 +31,10 @@ val report_failure : H2.Reqd.t -> exn -> unit
 (** [report_failure reqd exn] is {!report} for an exception the stream's own
     work raised. It also logs [exn] at error, unless the report reached the
     connection's error handler, which logs it itself. h2 calls that handler
-    only while the stream has no response and no error; a started response is
-    reset without it, and a stream that is closed, already answered or
-    already carries an error takes nothing. *)
+    only while the stream has no response and no error. A response h2 is
+    still sending is reset without it, a fixed body included. A stream that
+    is closed or already carries an error takes nothing, and neither does a
+    response h2 has marked complete. *)
 
 val reset : stream_sw:Eio.Switch.t -> H2.Reqd.t -> reset_cause -> unit
 (** [reset ~stream_sw reqd cause] ends the stream. It {!report}s [Stalled],
@@ -45,9 +46,9 @@ val reset : stream_sw:Eio.Switch.t -> H2.Reqd.t -> reset_cause -> unit
     report with the error handler's response, and that response owns the
     stream until its END_STREAM and the RST_STREAM h2 writes after it, which
     end the scope through the stream registry. [Stalled] fails the switch
-    even then. A response the handler had already completed keeps nothing:
-    h2 ignores the report on it, and the switch fails. [Raised] is reported
-    with {!report_failure}, so its exception is logged.
+    even then. A response that had already started keeps nothing, whatever
+    h2 does with the report, and the switch fails. [Raised] is reported with
+    {!report_failure}, so its exception is logged.
 
     The first end of a switch wins: a switch that already has an error, or
     has finished, is left as it is. [stream_sw] fails when the report is

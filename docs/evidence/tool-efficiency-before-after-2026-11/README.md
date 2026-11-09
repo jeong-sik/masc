@@ -349,7 +349,7 @@ python3 docs/evidence/tool-efficiency-before-after-2026-11/pr_read_needs.py \
 
 도구 호출이 실패한 뒤 같은 Keeper 가 같은 도구를 다시 부르는 모양을 세요. 실패는 원장 줄의 `disposition` 이 `failed` 인 호출이에요. 실패를 (도구, 오류 머리글)로 묶어요. 오류 머리글은 출력 앞 90자에서 숫자를 `N`, 12자 이상 16진수를 `H` 로 바꾼 글자예요. 재호출은 같은 Keeper 가 같은 도구를 300초 안에 다시 부른 첫 호출이에요. 재호출 입력이 첫 입력에서 더한 키(`+`), 뺀 키(`-`), 값이 바뀐 키(`~`)를 `+x -- ~-` 꼴로 적고, 재호출이 `completed` 로 끝났는지 세요.
 
-한 묶음의 재호출이 대부분 같은 키만 고치고 끝나면 도구 계약 함정이에요. Keeper 가 혼자 인자를 고쳤으니 계약을 배울 수 있었고, 첫 호출은 왕복 한 번을 썼어요. 재호출이 없거나 또 실패하는 묶음은 인자를 고쳐서 풀리는 오류가 아니에요.
+한 묶음의 재호출이 대부분 같은 키만 고치고 끝나면 도구 계약 함정 후보예요. Keeper 가 혼자 인자를 고쳤으니 계약을 배울 수 있었어요. 후보일 뿐이에요. 실패한 호출이 같은 계획(plan) 안에서 앞 호출의 결과를 기다리던 호출이면 재호출은 어차피 다음 라운드에 나가서 왕복이 늘지 않아요(아래 `keeper_artifact_read`). 재호출이 없거나 또 실패하는 묶음은 인자를 고쳐서 풀리는 오류가 아니에요.
 
 ```bash
 python3 docs/evidence/tool-efficiency-before-after-2026-11/retry_diff.py \
@@ -373,7 +373,8 @@ python3 docs/evidence/tool-efficiency-before-after-2026-11/retry_diff.py \
 | `BrowserTabs`: `Browser command was refused before any effect` | 5 | 1 | 재호출 없음 (3), 같은 입력 (1) |
 | `Read`: `microvm_remote_read_transport_failed` | 5 | 0 | 재호출 없음 (4), `limit` 값 바뀜 (1) |
 
-- 재호출이 대부분 끝난 묶음은 `keeper_artifact_read`, `BrowserInteract` x 누락, `masc_schedule_create` 예요. `keeper_artifact_read` 는 `sha256` 만 바꿔 다시 불렀고, x 누락 7건은 모두 `x` 를 더해 다시 불렀어요(PR #50513 이 이 거절을 다뤄요). `keeper_artifact_read` 가 첫 호출에 틀린 sha 를 넣는 까닭은 이 스크립트가 가르지 않아요.
+- 재호출이 대부분 끝난 묶음은 `keeper_artifact_read`, `BrowserInteract` x 누락, `masc_schedule_create` 예요. x 누락 7건은 모두 `x` 를 더해 다시 불렀어요(PR #50513 이 이 거절을 다뤄요).
+- `keeper_artifact_read` 는 계약 함정이 아니었어요. 재호출이 쓴 sha 21개는 모두 같은 Keeper 의 `Execute` 가 저장한 blob 이에요. 그중 17개는 실패한 읽기와 같은 `keeper_turn_id`·`turn` 에서 `planned_index` 가 앞선 `Execute` 가 만들었어요. Keeper 가 `Execute` 와 읽기를 한 계획에 같이 내서, 아직 모르는 sha 를 지어낸 거예요. 이 읽기는 다음 라운드에 나갈 호출이라 왕복이 늘지 않고, 짧은 오류가 붙은 호출 하나만 더 들어요. 나머지 4개는 다음 라운드에서 틀린 sha 를 넣은 3건(`Execute` 3.7 ~ 12.1초 뒤)과 `Execute` 가 읽기보다 뒤에 저장된 1건이에요. 실패 30건 중 27건의 sha 는 `tool_blobs` 에 파일이 없어요. 그 27개 중 24개는 가장 가까운 저장 blob 과 맞는 앞 글자 수가 4 ~ 6자라서 무작위 64자리 16진수와 같아요(저장 blob 약 258만 개일 때 무작위 중앙값이 5자예요). 이 문단의 값은 손으로 센 값이라 스크립트에 없어요.
 - `Execute` 디스크 부족 51건(끝점 셋)은 재호출 2건이 끝났고, `BrowserTabs` 브라우저 없음 20건은 1건이 끝났어요.
 - 묶음이 오류 머리글 90자라서 id 길이가 다르면 같은 오류가 둘로 갈려요. `masc_board_post_get` 의 `Post not found` 는 12자 이상 16진수 id 와 8자 id 로 7건씩 두 묶음이 됐고(재호출이 끝난 것 3건과 7건), 위 표에는 넣지 않았어요.
 - 재호출은 "같은 Keeper 가 부른 같은 도구의 다음 호출"이라서 목적이 다른 호출도 세요. 입력 차이는 묶음마다 상위 둘만 보여요. `completed` 는 도구가 오류 없이 끝났다는 뜻이고 원하는 결과를 얻었다는 뜻은 아니에요.

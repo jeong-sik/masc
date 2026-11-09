@@ -521,11 +521,19 @@ let test_measurement_requires_current_criterion_and_evidence () =
          (json_state goal_json [ "measurement"; "record"; "observed_value" ])
    | _ -> fail "expected one listed Goal");
   let cache_before = Goal_projection_generation.current () in
-  (match Goal_measurement.record config ~goal_id
-           ~criterion_revision:goal.criterion_revision ~observed_value:"1"
-           ~evidence:"artifact:updated-count" ~actor:"test" with
-   | Ok _ -> ()
-   | Error error -> fail (Goal_measurement.error_to_string error));
+  let notifications = ref 0 in
+  let previous_hook = Atomic.get Workspace_hooks.on_goal_projection_mutation_fn in
+  Fun.protect
+    ~finally:(fun () -> Atomic.set Workspace_hooks.on_goal_projection_mutation_fn previous_hook)
+    (fun () ->
+      Atomic.set Workspace_hooks.on_goal_projection_mutation_fn
+        (fun ~base_path:_ -> incr notifications);
+      match Goal_measurement.record config ~goal_id
+              ~criterion_revision:goal.criterion_revision ~observed_value:"1"
+              ~evidence:"artifact:updated-count" ~actor:"test" with
+      | Ok _ -> ()
+      | Error error -> fail (Goal_measurement.error_to_string error));
+  check int "one measurement sends one projection notification" 1 !notifications;
   check int "successful write changes dashboard cache key" (cache_before + 1)
     (Goal_projection_generation.current ());
   (match Goal_measurement.load config with

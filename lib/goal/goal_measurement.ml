@@ -236,8 +236,6 @@ let record config ~goal_id ~criterion_revision ~observed_value ~evidence ~actor 
                     List.filter (fun row -> not (String.equal row.goal_id goal_id)) previous
                   in
                   let* () = write config (item :: remaining) in
-                  Goal_projection_generation.advance ();
-                  Goal_store.notify_projection_change config;
                   Ok item
                 in
                 Ok (goal, Result.map_error (fun detail -> Store_error detail) recorded)))

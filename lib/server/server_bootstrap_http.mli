@@ -117,6 +117,7 @@ val h2_config : unit -> H2.Config.t
     {!H2_response_limits}. *)
 
 val serve_h2_connection :
+  clock:_ Eio.Time.clock ->
   ?streams:Server_h2_stream_registry.t ->
   ?resources:Http_h2_response_ledger.t ->
   sw:Eio.Switch.t ->
@@ -130,10 +131,17 @@ val serve_h2_connection :
     failure cancels pending requests and their children, including response
     producers, without waiting for an occupied CPU pool.
 
-    Each request stream runs under its own switch in [streams] (a fresh
-    registry when omitted), and [h2_request_handler] receives that stream
-    switch as [request_sw]. A peer RST_STREAM releases the stream's entry and
-    cancels its work and children at once; a finished response releases the
+    Each request stream runs under its own switch in [streams], and
+    [h2_request_handler] receives that stream switch as [request_sw]. When
+    [streams] is omitted, a fresh registry bounds response flushes by [clock]
+    and {!Server_mcp_transport_http_headers.sse_stalled_after_s}.
+
+    A stream's work and children are cancelled at once when a RST_STREAM goes
+    either way: one the peer sends, one h2 writes for an error masc reported
+    or found itself, or the RST_STREAM(NO_ERROR) h2 writes after a complete
+    response while the request is still open. A handler exception resets the
+    stream ([Raised]), and so does a response flush the peer leaves
+    unanswered past the bound ([Stalled]). A finished response releases the
     entry when its work returns. Siblings and the connection keep running.
 
     The finite peer-stream limit comes from {!H2_response_limits}.

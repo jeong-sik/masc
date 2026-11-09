@@ -47,6 +47,7 @@ let serve_socket ~sw ~clock ~socket server =
       (fun flow peer ->
         Eio.Switch.run (fun conn_sw ->
           Server_bootstrap_http.serve_h2_connection
+            ~clock
             ~sw:conn_sw
             ~h2_request_handler:(fun ~request_sw _peer reqd ->
               Grpc_eio.Server.request_handler ~sw:request_sw ~clock server reqd)

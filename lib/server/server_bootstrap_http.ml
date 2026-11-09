@@ -292,7 +292,11 @@ let h2_config () =
 ;;
 
 let serve_h2_connection
-      ?(streams = Server_h2_stream_registry.create ())
+      ~clock
+      ?(streams = Server_h2_stream_registry.create
+          ~clock
+          ~stalled_after_s:Server_mcp_transport_http_headers.sse_stalled_after_s
+          ())
       ?(resources = Http_h2_response_ledger.create
           ~max_pending_bytes:(H2_response_limits.max_pending_bytes ()))
       ~sw
@@ -357,6 +361,7 @@ let serve_h2 ~sw ~clock ~socket ~addr_label ~h2_request_handler ~h2_error_handle
     ~on_stop:mark_stopped
     (fun ~conn_sw client_addr flow ->
       serve_h2_connection
+        ~clock
         ~resources
         ~sw:conn_sw
         ~h2_request_handler
@@ -395,6 +400,7 @@ let serve_auto ~sw ~clock ~socket ~addr_label ~request_handler ~h2_request_handl
       | Ok (Http_protocol_detect.Http2, detected_flow) ->
         ignore (Atomic.fetch_and_add h2_count 1);
         serve_h2_connection
+          ~clock
           ~resources
           ~sw:conn_sw
           ~h2_request_handler
@@ -503,6 +509,7 @@ let serve_tls ~sw ~clock ~socket ~addr_label ~tls ~request_handler ~h2_request_h
             | Some protocol when String.equal protocol Server_tls_material.alpn_h2 ->
               Https_listener_metrics.record_negotiated Alpn_h2;
               serve_h2_connection
+                ~clock
                 ~resources
                 ~sw:conn_sw
                 ~h2_request_handler

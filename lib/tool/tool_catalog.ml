@@ -395,6 +395,7 @@ let explicit_metadata : (string * metadata) list =
     ("masc_keeper_msg", broadcast_tool);
     ("masc_keeper_delegate_cancel", broadcast_tool);
     ("masc_keeper_delegate_list", read_state_tool);
+    ("masc_keeper_delegate_targets", read_state_tool);
     ("masc_keeper_audit", read_state_tool);
     ("masc_keeper_waiting_inventory", read_state_tool);
     ("masc_keeper_up", admin_tool);

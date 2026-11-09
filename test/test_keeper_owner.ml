@@ -5601,6 +5601,24 @@ let test_agent_delegate_submits_owner_operation_without_waiting ?(with_artifact=
          (match Tool_result.data listed with
           | `List [ `Assoc fields ] -> List.mem_assoc "input" fields
           | _ -> false);
+       (* A caller that has not submitted yet reads the same queue first, and a
+          name the inventory does not hold answers with a reason, not facts. *)
+       let targets =
+         Keeper_delegate_targets.body
+           ~config
+           (`Assoc
+              [ "names", `List [ `String meta.name; `String "keeper-nobody-installed" ] ])
+       in
+       check bool "targets reads the queue" true (Tool_result.is_success targets);
+       (match Tool_result.data targets with
+        | `Assoc [ ("targets", `List [ `Assoc queued; `Assoc absent ]) ] ->
+          check int "the accepted operation is the one waiting" 1
+            Yojson.Safe.Util.(`Assoc queued |> member "queued_count" |> to_int);
+          check bool "the queue reports how long its oldest operation has waited" true
+            (List.mem_assoc "oldest_queued_age_s" queued);
+          check string "a name the inventory lacks says why" "unknown_keeper"
+            Yojson.Safe.Util.(`Assoc absent |> member "unavailable" |> to_string)
+        | other -> fail ("unexpected targets body: " ^ Yojson.Safe.to_string other));
        let operation =
          match
            Owner_registry.exact_operation

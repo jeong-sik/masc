@@ -3139,6 +3139,8 @@
 
 (include stanzas/test_keeper_delegate_target_turn.inc)
 
+(include stanzas/test_keeper_delegate_targets.inc)
+
 (include stanzas/test_keeper_runtime_manifest_completeness.inc)
 
 (include stanzas/test_keeper_runtime_manifest_clock_separation.inc)

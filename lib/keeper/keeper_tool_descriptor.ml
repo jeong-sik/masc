@@ -3162,6 +3162,11 @@ let internal_descriptors : t list =
       ~polling_read:true
   ; masc_keeper_descriptor ~keeper_model_projection:Internal_name "delegate_cancel" Keeper_tool_name.(to_string Keeper_delegate_cancel)
       ~readonly:false
+  ; masc_keeper_descriptor ~keeper_model_projection:Internal_name
+      ~ordinary_execution_mode:Concurrent "delegate_targets" Keeper_tool_name.(to_string Keeper_delegate_targets)
+      (* Concurrent: the owner's operation inventory is an immutable lock-free
+         projection and the registry read is a map lookup; pure render. *)
+      ~readonly:true
   ; masc_keeper_descriptor ~keeper_model_projection:Operator_only
       ~ordinary_execution_mode:Concurrent "delegate_list" Keeper_tool_name.(to_string Keeper_delegate_list)
       (* Concurrent: owner-registry reads behind its Eio.Mutex; pure render. *)

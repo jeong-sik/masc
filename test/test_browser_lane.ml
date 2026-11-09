@@ -211,7 +211,12 @@ let test_sources_and_live_policy () = with_clients (fun sw connect ->
       viewport={document_id="observed-page"; width=800.; height=600.; scroll_x=0.; scroll_y=0.}}} in
   let issued = Eio.Fiber.fork_promise ~sw (fun () -> Lane.issue_for_actor ~actor:None
     ~target:(target client.client_id) ~verb:tap ~timeout_sec:0.05) in
-  let _command = take client in
+  let command = take client in
+  (* The tap has to reach the connection as *this* verb, not merely as some
+     command: an admitted capability that arrived as the wrong operation
+     would leave the caller timing out for the same reason. *)
+  check bool "the tap reaches the connection as page.interact" true
+    (Yojson.Safe.Util.(member "verb" command.verb_json) = `String "page.interact");
   check bool "a served tap waits for its answer, then times out unexecuted" true
     (match Eio.Promise.await issued with Ok (Ok Lane.Timed_out) -> true | _ -> false))
 
@@ -376,14 +381,13 @@ let test_unsupported_message_names_the_serving_transport () =
   let client_id = (info Lane.Ego_lite).client_id in
   (* [live_transport] has one constructor and it serves every capability, so
      [live_transports_serving] is never empty: no issue path can build
-     [Transport_unsupported] any more, and the "no connection serves it"
-     branch is unreachable. What the message still has to say is which
-     connection does serve the capability named in the refusal. That wording
-     repeats the reported transport when it is itself the serving one -- a
-     follow-up, not a reason to keep the pre-#49295 premise. *)
-  check string "touch on ego names the ego connection as serving it"
+     [Transport_unsupported] any more. The message still has to read as one
+     sentence for a value the wire can carry: the refusal names the
+     connection that did not serve the capability, so the remedy names the
+     *other* connections that do -- never the reported one again. *)
+  check string "touch on ego leaves no other connection to name"
     "live_transport_unsupported: this browser is connected over ego_task_space, which does not serve \
-     touch_input; a ego_task_space connection does"
+     touch_input; no other connection serves it"
     (Lane.selection_error_message (Lane.Transport_unsupported
        {client_id; transport=Ego_task_space; capability=Touch_input}))
 

@@ -4,7 +4,7 @@ import { PublishedArtifactCard } from './published-artifact-card'
 import { ChatFailureCard } from './failure-message'
 import { NativeExecutionHistory } from './native-execution-history'
 import { html } from 'htm/preact'
-import type { ComponentChildren, VNode } from 'preact'
+import { Fragment, type ComponentChildren, type VNode } from 'preact'
 import { JsonViewerCard } from '../common/json-viewer'
 import { sanitizeHtml as purifyHtml } from '../../lib/dompurify'
 import { escapeHtml } from '../../lib/html-escape'
@@ -3760,10 +3760,10 @@ function ToolTraceCard(props: Parameters<typeof ProductTurnTraceCard>[0]) {
   const operation = nativeOperationId(props.assistant)
   if (keeper !== null && operation !== null) {
     const hasProductObservations = props.tools.length > 0 || (props.traceSteps?.length ?? 0) > 0
-    return html`<>
+    return html`<${Fragment}>
       ${hasProductObservations ? html`<${ProductTurnTraceCard} ...${props} label="대화·도구 관측" />` : null}
       <${NativeExecutionHistory} keeper=${keeper} operation=${operation} turnComplete=${props.turnComplete ?? false} />
-    </>`
+    </${Fragment}>`
   }
   return html`<${ProductTurnTraceCard} ...${props} />`
 }

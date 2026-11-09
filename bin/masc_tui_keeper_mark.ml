@@ -249,12 +249,15 @@ let column_legend =
         [ grid_facts_by_age_header; grid_now_line; grid_saved_header; grid_now_line
         ; grid_lag_bar_short_header; grid_stale_header; grid_facts_header ]
     , Printf.sprintf
-        "the age view: the keeper's facts in the server's age bins, oldest on the left, %s \
-         the time since its memory snapshot was saved (%s %s without one), the unread-turn \
-         bar, %sN invalidated sources and the fact count with a level against the keeper with \
-         the most facts; %s is a value the server did not measure"
-        grid_saved_mark Masc_tui_theme.Glyph.no_value grid_no_snapshot_word grid_stale_mark
-        Masc_tui_keeper_age_ladder.unmeasured_mark )
+        "the age view: the keeper's facts in the server's 24 age bins on a log axis, 30d on \
+         the left and under 1h on the right, two or four bins to a cell on a narrow list; a \
+         cell is a level against the row's largest one, %s when empty, in the info colour when \
+         its newest bin starts within a day and dim past seven days, and a group title adds \
+         up its keepers; %s the time since its memory snapshot was saved (%s %s without one), \
+         the unread-turn bar, %sN invalidated sources and the fact count with a level against \
+         the keeper with the most facts; %s is a value the server did not measure"
+        grid_dot_mark grid_saved_mark Masc_tui_theme.Glyph.no_value grid_no_snapshot_word
+        grid_stale_mark Masc_tui_keeper_age_ladder.unmeasured_mark )
   ; ( String.concat " " (List.map fst half_hour_marks)
     , Printf.sprintf
         "the views' turn pulse: autonomous turn results of the last half hours, one mark \

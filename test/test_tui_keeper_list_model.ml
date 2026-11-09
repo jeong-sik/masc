@@ -246,8 +246,8 @@ let test_day_wall_puts_the_most_failed_half_hours_first () =
   Alcotest.(check (list (option int))) "failed half-hours within the last day"
     [ None; Some 1; Some 0; Some 2 ]
     (List.map (Model.failed_half_hours ~now) rows);
-  Alcotest.(check (list string)) "most failed first, rows without a pulse last"
-    [ "two"; "one"; "older"; "no-pulse" ]
+  Alcotest.(check (list string)) "failed slots first, unread before known clean rows"
+    [ "two"; "one"; "no-pulse"; "older" ]
     (names (Model.order_rows ~outside:unread ~view:Model.Day_wall ~sort:Model.Name ~now rows));
   Alcotest.(check bool) "the day wall does not group" true
     (Model.group_of_view ~outside:unread Model.Day_wall (List.hd rows) = None);
@@ -255,6 +255,16 @@ let test_day_wall_puts_the_most_failed_half_hours_first () =
     (Model.order_clock_step Model.Day_wall = Some (float_of_int slot_seconds));
   Alcotest.(check bool) "the state view only reorders on new readings" true
     (Model.order_clock_step Model.By_state = None)
+
+let test_day_wall_counts_rested_and_clamps_future () =
+  let newest = Masc.Keeper_turn_pulse.slot_start now in
+  let slot starts_at rested failed : Masc.Keeper_turn_pulse.slot =
+    { starts_at; tally = { ok = 0; rested; failed } } in
+  let r = row ~health:(health "healthy")
+    ~edit:(with_pulse [slot newest 1 0; slot (newest + slot_seconds) 0 1;
+      slot (newest - Masc.Keeper_turn_pulse.window_seconds) 1 0]) "rested" in
+  Alcotest.(check (option int)) "rest and future share newest; 24h boundary excluded"
+    (Some 1) (Model.failed_half_hours ~now r)
 
 let reading_by_name readings ~keeper_name =
   match List.assoc_opt keeper_name readings with
@@ -748,6 +758,8 @@ let () =
             test_runtime_view_contains_only_failing_rows
         ; Alcotest.test_case "cause view puts failing rows first" `Quick
             test_cause_view_puts_failing_rows_first
+        ; Alcotest.test_case "day wall counts rest and clamps future" `Quick
+            test_day_wall_counts_rested_and_clamps_future
         ; Alcotest.test_case "day wall puts the most failed half-hours first" `Quick
             test_day_wall_puts_the_most_failed_half_hours_first
         ; Alcotest.test_case "time, memory and age views follow the outside reading" `Quick

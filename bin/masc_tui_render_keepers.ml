@@ -1995,8 +1995,12 @@ let render_keeper_list (state : state) =
   let peak_lag = axis_peak_lag state model_rows in
   let peak_facts = axis_peak_facts state model_rows in
   (match matrix, shape with
-   | Some matrix, (Axis_row.List_columns | Axis_row.Grid _) ->
+   | Some matrix, (Axis_row.List_columns | Axis_row.Wall_columns | Axis_row.Grid _) ->
        box_line_styled buf cols ~style:(Theme.recede ()) (matrix_header matrix)
+   | None, Axis_row.Wall_columns ->
+       box_line buf cols (Masc_tui_keeper_wall.header ~cols:inner ~now:now_unix);
+       box_line buf cols (Masc_tui_keeper_wall.fleet ~cols:inner ~now:now_unix
+         (List.map keeper_row_runtime model_rows))
    | None, Axis_row.List_columns ->
        box_line_styled buf cols ~style:(Theme.recede ()) (keeper_column_header columns)
    | None, Axis_row.Grid grid_columns -> box_line buf cols (grid_header grid grid_columns));
@@ -2054,10 +2058,17 @@ let render_keeper_list (state : state) =
       (Keeper_list_model.trail_of_row row)
   in
   (* A heading is one line whatever the density. *)
+  let wall_separator position =
+    match shape, List.nth_opt model_rows position, List.nth_opt model_rows (max 0 (position - 1)) with
+    | Axis_row.Wall_columns, Some row, Some previous when position > 0 ->
+        Masc_tui_keeper_wall.group ~now:now_unix (keeper_row_runtime row) <>
+        Masc_tui_keeper_wall.group ~now:now_unix (keeper_row_runtime previous)
+    | (Axis_row.Wall_columns | Axis_row.List_columns | Axis_row.Grid _), (Some _ | None), (Some _ | None) -> false in
   let entry_lines = function
     | Keeper_group_heading _ -> 1
-    | Keeper_display_row (_, row) -> (
-        match second_line row with
+    | Keeper_display_row (position, row) ->
+        (if wall_separator position then 1 else 0) +
+        (match second_line row with
         | Axis_row.No_second_line -> 1
         | Axis_row.List_detail | Axis_row.Failure_chain -> 2)
   in
@@ -2151,15 +2162,19 @@ let render_keeper_list (state : state) =
           if keeper_entry_selected stop entry then
             box_line_selected buf cols (Masc_tui_theme.strip_sgr text)
           else box_line buf cols text
-      | Keeper_display_row (_, row) as entry ->
+      | Keeper_display_row (position, row) as entry ->
+          if wall_separator position then box_line buf cols (Theme.recede () ^ draw_hline inner ^ Ansi.reset);
           let selected = keeper_entry_selected stop entry in
           let yolo =
             List.mem row.Keeper_list_model.keeper.Tui_decode.k_name state.keeper_yolo_names
           in
           let primary =
             match matrix, shape with
-            | Some matrix, (Axis_row.List_columns | Axis_row.Grid _) ->
+            | Some matrix, (Axis_row.List_columns | Axis_row.Wall_columns | Axis_row.Grid _) ->
                 matrix_keeper_row matrix ~now:now_unix row
+            | None, Axis_row.Wall_columns ->
+                Masc_tui_keeper_wall.row ~cols:inner ~now:now_unix
+                  ~name:row.Keeper_list_model.keeper.Tui_decode.k_name (keeper_row_runtime row)
             | None, Axis_row.List_columns ->
                 keeper_row_content ~columns ~now:now_unix ~frame:state.activity_frame ~yolo
                   ~selected row
@@ -2213,8 +2228,8 @@ let render_keeper_list (state : state) =
   in
   for _ = 1 to max 0 (entry_rows - drawn_rows) do
     match matrix, shape with
-    | Some _, (Axis_row.Grid _ | Axis_row.List_columns)
-    | None, Axis_row.List_columns -> box_empty buf cols
+    | Some _, (Axis_row.Grid _ | Axis_row.List_columns | Axis_row.Wall_columns)
+    | None, (Axis_row.List_columns | Axis_row.Wall_columns) -> box_empty buf cols
     | None, Axis_row.Grid _ -> box_line buf cols (grid_blank_line grid)
   done;
   List.iter (fun line -> box_line_styled buf cols ~style:(Theme.recede ()) line) legend;

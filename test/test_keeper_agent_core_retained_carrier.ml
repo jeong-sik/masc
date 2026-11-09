@@ -56,14 +56,32 @@ let record_turn_ended ~config messages =
   | Ok () -> ()
   | Error error -> fail (Keeper_turn_boundaries.append_error_to_string error)
 
+(* The Keeper's artifact reader, as a Keeper is offered it. With a reader the
+   ladder can demote tool results to markers the model reads back. *)
+let artifact_reader base_path =
+  let schema = Keeper_runtime_schemas_toml.artifact_read in
+  Tool_bridge.agent_core_tool_of_masc_with_execution_env ~base_path
+    ~descriptor:(Agent_core.Tool.ordinary_descriptor Agent_core.Tool_contract.Concurrent)
+    ~model_projection:(fun () -> Tool_output.bounded_inline_model_projection)
+    ~name:schema.name ~description:schema.description ~input_schema:schema.input_schema
+    (fun _ args ->
+      let execution = Keeper_artifact_read.handle ~base_path ~args in
+      match execution.disposition with
+      | Tool_result.Completed () -> Tool_result.make_ok ~tool_name:schema.name
+          ~start_time:(Tool_timing.start ()) ?data:execution.data ()
+      | Tool_result.Failed class_ -> Tool_result.make_err ~tool_name:schema.name ~class_
+          ~start_time:(Tool_timing.start ()) execution.raw_output
+      | Tool_result.Deferred () -> fail "the artifact reader cannot defer")
+
 (* One Keeper turn on an outbox holding six receipts that do not fit inline.
    The provider refuses any request body over [carrier_window_bytes] with
    HTTP 413 and answers the requests that fit with [fitting], in order. A
    seventh receipt arrives while the first request is refused, after the run
    loaded its snapshot. [history] is the turns that ended and a turn that
-   saved atoms and failed, both before this turn's input. *)
+   saved atoms and failed, both before this turn's input. [reader] offers
+   the Keeper's artifact reader. *)
 let with_carrier_run ?(accept = fun (_ : Agent_core.Types.api_response) -> true)
-    ?history ~fitting (inspect : carrier_run -> unit) =
+    ?history ?(reader = false) ~fitting (inspect : carrier_run -> unit) =
   Eio_main.run @@ fun env -> Eio.Switch.run @@ fun sw ->
   Masc_test_deps.init_eio_clock ~sw env;
   Fs_compat.set_fs env#fs;
@@ -154,7 +172,8 @@ streaming = false
     ~goal:"Continue from the retained results."
     ~input_source:(Keeper_request_source.Keeper_history {trace_id=session_id})
     ~system_prompt:"Use returned results as data. Do not repeat completed effects."
-    ~agent_core_tools:[] ~model_input_projection:project
+    ~agent_core_tools:(if reader then [artifact_reader base_path] else [])
+    ~model_input_projection:project
     ?initial_messages ?history_at_start ~accept
     ~checkpoint_progress:progress ~checkpoint_sink:sink
     ~raw_trace:None ~walk_owner:Keeper_turn_driver.One_shot_walk ~sw ~net:env#net ()));
@@ -231,24 +250,33 @@ let test_the_max_tokens_continuation_keeps_the_address_form () =
 
 let failed_answer_label = "FAILED-TURN-ANSWER-"
 
-(* Every rung of the agent core history recovery resends with the run's
-   carrier. The turn before this one saved a large answer and failed, so
-   the turn boundary is still before it. The address form alone does not
-   fit; the resend from where this turn began does, and it still goes by
-   address. *)
-let test_each_rung_of_the_history_recovery_keeps_the_address_form () =
-  let completed = [msg Agent_core.Types.User "ask 0"; msg Agent_core.Types.Assistant "answer 0"] in
+let completed_answer_label = "answer 0"
+
+let completed_turn =
+  [msg Agent_core.Types.User "ask 0"; msg Agent_core.Types.Assistant completed_answer_label]
+
+(* The history recovery resends that send keep the run's carrier: the resend
+   of the same range after the switch, and the resend from where this turn
+   began. The turn before this one saved a large answer and failed, so the
+   turn boundary is still before it. The address form alone does not fit;
+   the resend from where this turn began does, and it still goes by address.
+   The boundary resend answers a range that opened at the turn start at
+   once, and the failed turn holds no tool result to demote, so neither of
+   those rungs sends here. *)
+let test_the_history_recovery_resends_keep_the_address_form () =
   let failed =
     [ msg Agent_core.Types.User "ask 1"
     ; msg Agent_core.Types.Assistant (failed_answer_label ^ String.make 100_000 'h') ] in
-  with_carrier_run ~history:(completed, failed) ~fitting:[answered] @@ fun run ->
+  with_carrier_run ~history:(completed_turn, failed) ~fitting:[answered] @@ fun run ->
   match run.requests with
   | [refused; same_range; this_turn] ->
     check bool "the first request carried every receipt inline" true
       (carries_every_receipt refused);
     check_by_address run "the resend of the same range" same_range;
-    check bool "the resend of the same range still opens at the turn boundary" true
+    check bool "the resend of the same range still carries the failed turn" true
       (contains failed_answer_label same_range);
+    check bool "the resend of the same range opens at the turn boundary" false
+      (contains completed_answer_label same_range);
     check_by_address run "the resend from where this turn began" this_turn;
     check bool "the resend from where this turn began leaves the failed turn out" false
       (contains failed_answer_label this_turn);
@@ -257,11 +285,63 @@ let test_each_rung_of_the_history_recovery_keeps_the_address_form () =
     fail (Printf.sprintf "expected three requests on the history recovery ladder, saw %d"
       (List.length sent))
 
+let large_result_label = "LARGE-TOOL-RESULT-"
+
+let earlier_read = "earlier-read"
+
+(* The turn before this one ran a tool, got a large result and failed. The
+   label sits in the middle of the result, so a marker that keeps a few
+   characters of either end does not carry it. *)
+let failed_with_a_large_result =
+  let content = String.make 50_000 't' ^ large_result_label ^ String.make 50_000 't' in
+  let tool_call =
+    let open Agent_core.Types in
+    [ make_message ~role:Assistant [ToolUse {id=earlier_read;name="Read";input=`Assoc []}]
+    ; make_message ~role:Tool ~tool_call_id:earlier_read
+        [ToolResult {tool_use_id=earlier_read;content;outcome=Tool_succeeded;
+                     json=None;content_blocks=None}] ] in
+  msg Agent_core.Types.User "ask 1" :: tool_call
+
+(* The continuation keeps all that the run's refusals changed, not the
+   carrier alone. With a reader the ladder answers the second refusal by
+   demoting the failed turn's large result to a marker; that request fits
+   and is cut short, and the continuation carries the marker too. A
+   continuation that started its attempt state again would send the result
+   verbatim, at the size that was refused. *)
+let test_the_max_tokens_continuation_keeps_the_demoted_results () =
+  with_carrier_run ~reader:true ~history:(completed_turn, failed_with_a_large_result)
+    ~accept:Keeper_tooling.Response.accepts_response
+    ~fitting:[cut_short; answered] @@ fun run ->
+  match run.requests with
+  | [refused; same_range; demoted; continued] ->
+    check bool "the first request carried every receipt inline" true
+      (carries_every_receipt refused);
+    check bool "the first request carried the large result" true
+      (contains large_result_label refused);
+    check_by_address run "the resend of the same range" same_range;
+    check bool "the resend of the same range still carries the large result" true
+      (contains large_result_label same_range);
+    check_by_address run "the demoted request" demoted;
+    check bool "the demoted request carries no large result" false
+      (contains large_result_label demoted);
+    check_by_address run "the continuation" continued;
+    check bool "the continuation keeps the result demoted" false
+      (contains large_result_label continued);
+    check bool "the continuation starts from the checkpoint before the cut-short answer" false
+      (contains cut_short_label continued);
+    check_loaded_receipts_acknowledged run
+  | sent ->
+    fail (Printf.sprintf
+      "expected the refused, the same-range, the demoted and the continued request, saw %d"
+      (List.length sent))
+
 let () = run "Agent Core retained-results carrier"
   ["retained-results carrier",[
     test_case "retained receipts go by address after a size refusal" `Quick
       test_retained_receipts_go_by_address_after_a_size_refusal;
     test_case "the max-tokens continuation keeps the address form" `Quick
       test_the_max_tokens_continuation_keeps_the_address_form;
-    test_case "each rung of the history recovery keeps the address form" `Quick
-      test_each_rung_of_the_history_recovery_keeps_the_address_form]]
+    test_case "the history recovery resends keep the address form" `Quick
+      test_the_history_recovery_resends_keep_the_address_form;
+    test_case "the max-tokens continuation keeps the demoted results" `Quick
+      test_the_max_tokens_continuation_keeps_the_demoted_results]]

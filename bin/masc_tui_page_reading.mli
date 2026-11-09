@@ -25,10 +25,12 @@ val tone_style : Masc_tui_page_line.tone -> string
 (** The style a tone is drawn in. *)
 
 val widest_label_cells : Masc_tui_page_line.t list -> int
-(** The label column of a page: its longest label with the colon after it,
-    capped. A page drawn as several blocks under their own headings passes the
-    widest of its blocks to [rows], so the values of every block start at one
-    cell. *)
+(** The label column of a page: its longest label with the colon after it, among
+    the labels that fit the cap. A label wider than the column goes on a row of
+    its own with its value under it, so one long label does not widen the column
+    of every other row. A page drawn as several blocks under their own headings
+    passes the widest of its blocks to [rows], so the values of every block
+    start at one cell. *)
 
 val rows :
   ?label_cells:int ->

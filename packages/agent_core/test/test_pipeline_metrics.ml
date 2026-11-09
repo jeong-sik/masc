@@ -180,7 +180,7 @@ let test_stage_route_passes_trace_context_headers () =
   @@ fun env ->
   let net = Eio.Stdenv.net env in
   let observed_headers = ref [] in
-  let tracer = Otel_tracer.create () in
+  let tracer = Otel_tracer.tracer_of_instance (Otel_tracer.create_instance ()) in
   let transport = mk_header_capture_transport observed_headers in
   let provider =
     Some

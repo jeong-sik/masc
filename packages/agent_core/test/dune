@@ -143,7 +143,6 @@
   test_multimodal
   test_multivendor_events
   test_multivendor_live
-  test_otel
   test_otel_export
   test_otel_tracer
   test_pipeline
@@ -275,7 +274,6 @@
   test_multimodal
   test_multivendor_events
   test_multivendor_live
-  test_otel
   test_otel_export
   test_otel_tracer
   test_pipeline

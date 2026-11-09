@@ -34,6 +34,13 @@ module Names = struct
   let equal = List.equal String.equal
 end
 
+module Proactive_interval = struct
+  type t = int
+
+  let of_seconds seconds = if seconds >= 1 then Some seconds else None
+  let to_seconds interval = interval
+end
+
 type fleet =
   { fs_status : Keeper_fleet_grade.t
   ; fs_blocker : Keeper_fleet_blocker.t option
@@ -56,6 +63,7 @@ type fleet =
   ; fs_active_task_owner_without_fiber_count : int
   ; fs_completion_authority_pending_count : int
   ; fs_active_task_owner_scan_error_count : int
+  ; fs_proactive_interval : Proactive_interval.t
   }
 
 type degraded_reason =
@@ -169,6 +177,7 @@ module Key = struct
 
   let completion_authority_pending_count = "completion_authority_pending_count"
   let active_task_owner_scan_error_count = "active_task_owner_scan_error_count"
+  let proactive_interval_sec = "proactive_interval_sec"
 end
 
 module Event_name = struct
@@ -227,6 +236,8 @@ let fleet_to_json (fleet : fleet) : Yojson.Safe.t =
       , `Int fleet.fs_completion_authority_pending_count )
     ; ( Key.active_task_owner_scan_error_count
       , `Int fleet.fs_active_task_owner_scan_error_count )
+    ; ( Key.proactive_interval_sec
+      , `Int (Proactive_interval.to_seconds fleet.fs_proactive_interval) )
     ]
 ;;
 
@@ -357,6 +368,13 @@ module Fields = struct
     | None -> Error (Out_of_range { at = t.at; field })
   ;;
 
+  let proactive_interval t field =
+    let* seconds = int t field in
+    match Proactive_interval.of_seconds seconds with
+    | Some interval -> Ok interval
+    | None -> Error (Out_of_range { at = t.at; field })
+  ;;
+
   let word t field of_word =
     let* word = string t field in
     match of_word word with
@@ -459,6 +477,9 @@ let fleet_of_fields fields : (fleet, decode_error) result =
   let* fs_active_task_owner_scan_error_count =
     Fields.count o Key.active_task_owner_scan_error_count
   in
+  let* fs_proactive_interval =
+    Fields.proactive_interval o Key.proactive_interval_sec
+  in
   let* () = Fields.finish o in
   Ok
     { fs_status
@@ -482,6 +503,7 @@ let fleet_of_fields fields : (fleet, decode_error) result =
     ; fs_active_task_owner_without_fiber_count
     ; fs_completion_authority_pending_count
     ; fs_active_task_owner_scan_error_count
+    ; fs_proactive_interval
     }
 ;;
 

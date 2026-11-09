@@ -37,6 +37,12 @@ let burst_size = 16
 let stalled_events = 2000
 let events = 200
 
+let proactive_interval =
+  match F.Proactive_interval.of_seconds 300 with
+  | Some interval -> interval
+  | None -> failwith "300 seconds is a proactive interval"
+;;
+
 let fleet ~keepers ~running : F.fleet =
   let names =
     F.Names.of_list (List.init keepers (fun index -> Printf.sprintf "keeper-%04d" index))
@@ -62,6 +68,7 @@ let fleet ~keepers ~running : F.fleet =
   ; fs_active_task_owner_without_fiber_count = 0
   ; fs_completion_authority_pending_count = 0
   ; fs_active_task_owner_scan_error_count = 0
+  ; fs_proactive_interval = proactive_interval
   }
 ;;
 

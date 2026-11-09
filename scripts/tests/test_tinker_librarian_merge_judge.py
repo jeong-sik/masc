@@ -273,10 +273,10 @@ class NumbersTest(unittest.TestCase):
                          {"absorbs": 5, "absorbs_mergeable": 3, "absorb_precision": 0.6,
                           "merges": 2, "merges_mergeable": 1, "judged_merge_recall": 0.5})
 
-    def test_no_absorbs_is_full_precision_and_no_expected_merge_leaves_recall_unknown(self) -> None:
+    def test_no_absorb_and_no_expected_merge_leave_both_numbers_unknown(self) -> None:
         empty = merge_row("i1", {}, 0, [])
         got = MD.NO_MERGES.numbers([empty], [empty], "A")
-        self.assertEqual((got["absorb_precision"], got["judged_merge_recall"]), (1.0, None))
+        self.assertEqual((got["absorb_precision"], got["judged_merge_recall"]), (None, None))
 
 
 class FolderTest(unittest.TestCase):

@@ -34,10 +34,6 @@ val tuning_for_agent : string -> Voice_config.voice_tuning
     [style]); falls back to the [Voice_config] defaults when the
     config fails to load. *)
 
-val local_playback_enabled_for_agent : string -> bool
-(** [true] iff the loaded config enables local audio playback for
-    [agent_id]. *)
-
 val get_voice_for_agent : string -> string
 (** Resolve the [agent_id]'s voice via {!agent_voices}, defaulting
     to ["Sarah"] when no mapping is registered. *)

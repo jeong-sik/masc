@@ -8,7 +8,7 @@ let reqd_of_h2 ~sw h2_reqd =
 
 type dispatch = Inline_reader | Request_fibers
 
-let with_connection ?streams dispatch handler run =
+let with_connection ?streams ?resources dispatch handler run =
   Eio_main.run (fun env ->
     Eio.Time.with_timeout_exn (Eio.Stdenv.clock env) 10.0 (fun () ->
       Eio.Switch.run (fun sw ->
@@ -45,7 +45,7 @@ let with_connection ?streams dispatch handler run =
                       (fun () -> handler ~request_sw:conn_sw client_addr reqd))
                   ~error_handler addr server_flow
               | Request_fibers ->
-                Server_bootstrap_http.serve_h2_connection ?streams ~sw:conn_sw
+                Server_bootstrap_http.serve_h2_connection ?streams ?resources ~sw:conn_sw
                   ~h2_request_handler:handler ~h2_error_handler:error_handler addr server_flow)) in
           let closing = ref false in
           let client = H2_eio.Client.create_connection ~sw
@@ -75,9 +75,15 @@ let open_request ?(meth = `GET) client path =
       if not (Eio.Promise.is_resolved reply) then Eio.Promise.resolve resolve (Error ()))
     ~response_handler:(fun response reader ->
       let bytes = Buffer.create 256 in
+      (* h2 also ends the body of a stream the server reset, before it
+         calls [error_handler]; only [Complete] is a whole response. *)
       let rec read () = H2.Body.Reader.schedule_read reader
-        ~on_eof:(fun () -> Eio.Promise.resolve resolve
-          (Ok (H2.Status.to_code response.status, Buffer.contents bytes)))
+        ~on_eof:(fun () ->
+          match H2.Body.Reader.completion reader with
+          | H2.Body.Reader.Complete -> Eio.Promise.resolve resolve
+            (Ok (H2.Status.to_code response.status, Buffer.contents bytes))
+          | H2.Body.Reader.Aborted -> Eio.Promise.resolve resolve (Error ())
+          | H2.Body.Reader.Pending -> fail "response body ended while still pending")
         ~on_read:(fun chunk ~off ~len ->
           Buffer.add_string bytes (Bigstringaf.substring chunk ~off ~len);
           read ()) in
@@ -289,6 +295,52 @@ let test_reset_sent_ends_stream_scope () =
     check string "connection keeps serving after the reset" "alive"
       (snd (await_reply (request client "/fast"))))
 
+(* A handler that fails after its headers went out ends at the catch site in
+   [serve_h2_connection]. Its body producer, forked on the stream switch, is
+   cancelled with the handler's own exception; the bytes it reserved and never
+   flushed go back to the ledger; the client sees its stream reset. *)
+let test_failure_after_headers_releases_the_stream () =
+  let streams = Server_h2_stream_registry.create () in
+  let resources = Masc.Http_h2_response_ledger.create
+    ~max_pending_bytes:H2_response_limits.default_max_pending_bytes in
+  let partial = "partial" in
+  let reserved = ref 0 in
+  let ended, record_end = Eio.Promise.create () in
+  let handler ~request_sw _ h2_reqd =
+    let reqd = reqd_of_h2 ~sw:request_sw h2_reqd in
+    match (H2.Reqd.request h2_reqd).target with
+    | "/partial" ->
+      Eio.Fiber.fork ~sw:request_sw (fun () ->
+        try Eio.Fiber.await_cancel () with
+        | Eio.Cancel.Cancelled (Masc.Http_h2_stream.Stream_reset cause) as exn ->
+          Eio.Promise.resolve record_end cause;
+          raise exn);
+      let writer = Masc.Http_reqd.respond_with_streaming ~flush_headers_immediately:true
+        reqd (Httpun.Response.create `OK) in
+      Masc.Http_reqd.Body_writer.write_string writer partial;
+      reserved := Masc.Http_h2_response_ledger.pending_bytes resources;
+      failwith "fixture failure after the headers"
+    | "/fast" -> Response.json ~compress:false "alive" reqd
+    | path -> failf "unexpected path %s" path in
+  with_connection ~streams ~resources Request_fibers handler
+    (fun ~env:_ ~client ~client_flow:_ ~release:_ ~close_client:_ ~server:_ ->
+    let reply = request client "/partial" in
+    check bool "the scope ended with the handler's own exception" true
+      (match Eio.Promise.await ended with
+       | Masc.Http_h2_stream.Raised (Failure _) -> true
+       | _ -> false);
+    check bool "the client saw its stream reset" true
+      (Result.is_error (Eio.Promise.await reply));
+    check int "the handler failed while holding a reservation" (String.length partial)
+      !reserved;
+    ping client;
+    check int "the reservation went back to the ledger" 0
+      (Masc.Http_h2_response_ledger.pending_bytes resources);
+    check int "the stream left no scope behind" 0
+      (Server_h2_stream_registry.active_streams streams);
+    check string "connection keeps serving after the failure" "alive"
+      (snd (await_reply (request client "/fast"))))
+
 let test_connection_closes_pending_work () =
   let admitted, admit = Eio.Promise.create () in
   let cancelled, mark_cancelled = Eio.Promise.create () in
@@ -345,6 +397,7 @@ let () = run "H2 request fibers" ["connection progress", [
   test_case "RST_STREAM isolates delayed response" `Quick test_reset_does_not_break_siblings;
   test_case "RST_STREAM releases stream scopes and fibers" `Quick test_reset_releases_stream_scopes;
   test_case "RST_STREAM h2 writes ends the stream scope" `Quick test_reset_sent_ends_stream_scope;
+  test_case "failure after headers releases the stream" `Quick test_failure_after_headers_releases_the_stream;
   test_case "disconnect cancels requests and child fibers" `Quick test_connection_closes_pending_work;
   test_case "handler failure stays on its stream" `Quick test_handler_error_is_stream_local;
 ]]

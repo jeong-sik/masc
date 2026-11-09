@@ -417,8 +417,6 @@ let layout_with_search ~cols state (reading : t) =
     text, mark) in
   marked,pictures
 
-let rows_with_search ~cols state reading = fst (layout_with_search ~cols state reading)
-
 type within_block = Row of int | Diagram_progress of { row : int; extent : int }
 type location = Top | End | Block of origin * int * within_block
 type anchor = {

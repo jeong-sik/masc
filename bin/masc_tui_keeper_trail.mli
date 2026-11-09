@@ -90,3 +90,20 @@ val attempts_of_runtime :
     count reported in [Walk_ended] or [Walk_no_terminal]. The terminal attempt
     takes its cause from the terminal error and keeps the dispatch and the API
     fact of the candidate failure recorded for the same ordinal. *)
+
+(** The next-head fact is independent of a failure in the last walk. *)
+type matrix_head = Head_elsewhere | Head_serving | Head_resting | Head_unknown
+
+type matrix_failure = Matrix_failed | Matrix_clear | Matrix_unknown
+
+type matrix_cell = { failure : matrix_failure; head : matrix_head }
+
+val matrix_cell : runtime_id:string -> Masc.Tui_decode.keeper_runtime option -> matrix_cell
+(** Exact runtime identity membership in {!attempts_of_runtime}, alongside
+    the producer's typed next path. An unread path stays [Head_unknown]; the
+    current runtime id is never substituted for an unknown next head. A
+    missing/unread/not-applicable walk is [Matrix_unknown], never clear. *)
+
+val matrix_runtime_ids : Masc.Tui_decode.keeper_runtime option -> string list
+(** Distinct runtime identities in the last failed walk and the observed next
+    path. No identities are inferred from labels or from the current runtime. *)

@@ -15,7 +15,7 @@ import {
 
 function keeperMemoryHealthPayload(): KeeperMemoryHealthResponse {
   return {
-    schema: 'keeper.memory_os.current_health.v9',
+    schema: 'keeper.memory_os.current_health.v10',
     generated_at: 1_700_000_000,
     keepers: [{
       keeper_id: 'healthy',
@@ -29,12 +29,7 @@ function keeperMemoryHealthPayload(): KeeperMemoryHealthResponse {
       added: 1,
       removed: 2,
       snapshot_present: true,
-      age_bins: {
-        under_hour: 1,
-        under_day: 1,
-        under_week: 1,
-        older: 1,
-      },
+      age_bins: [1, 1, 1, 1, ...Array<number>(20).fill(0)],
       context_cycle: { saved: null, saved_read_error: null, read_position: null, read_position_read_error: null, rewriting_through: null, unread: { snapshot: { kind: 'available', messages: [] }, memory: { kind: 'available', messages: [] } }, prepared: null, synthesis: null },
       librarian: {
         state: 'drained',
@@ -135,7 +130,7 @@ function keeperMemoryHealthPayload(): KeeperMemoryHealthResponse {
 
 function starvingKeeperPayload(): KeeperMemoryHealthResponse {
   return {
-    schema: 'keeper.memory_os.current_health.v9',
+    schema: 'keeper.memory_os.current_health.v10',
     generated_at: 1_700_000_000,
     keepers: [{
       keeper_id: 'starving',
@@ -378,23 +373,34 @@ describe('fetchKeeperMemoryHealth', () => {
 
     const response = await fetchKeeperMemoryHealth()
 
-    expect(response.schema).toBe('keeper.memory_os.current_health.v9')
+    expect(response.schema).toBe('keeper.memory_os.current_health.v10')
     expect(response.keepers[0]).toMatchObject({
       keeper_id: 'healthy',
       revision: 7,
       updated_at: 1_699_999_900,
       facts: 4,
       snapshot_bytes: 512,
-      age_bins: {
-        under_hour: 1,
-        under_day: 1,
-        under_week: 1,
-        older: 1,
-      },
+      age_bins: [1, 1, 1, 1, ...Array<number>(20).fill(0)],
     })
     expect(response.keepers[1]?.read_error).toBe('invalid current snapshot')
     expect(response.keepers[1]?.updated_at).toBeNull()
     expect(response.alert_summary.snapshot_read_error_keepers).toBe(1)
+  })
+
+  it.each([
+    ['the four-key object', { under_hour: 1, under_day: 1, under_week: 1, older: 1 }],
+    ['23 counts', [1, 1, 1, 1, ...Array<number>(19).fill(0)]],
+    ['25 counts', [1, 1, 1, 1, ...Array<number>(21).fill(0)]],
+    ['24 counts that miss a fact', [1, 1, 1, ...Array<number>(21).fill(0)]],
+    ['a negative count', [5, -1, ...Array<number>(22).fill(0)]],
+  ])('rejects an age ladder that is not 24 counts adding up to the facts: %s', async (_label, age_bins) => {
+    const payload = keeperMemoryHealthPayload()
+    Object.assign(payload.keepers[0]!, { age_bins })
+    getMock.mockResolvedValue(payload)
+
+    await expect(fetchKeeperMemoryHealth()).rejects.toThrow(
+      '유효하지 않은 keeper memory health payload',
+    )
   })
 
   it.each([undefined, '1699999900', -1, NaN, Infinity, null])(

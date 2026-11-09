@@ -1658,10 +1658,28 @@ let retain_original_result producer ~invocation ~call_id ~tool_name ~input
    tool list waits in the queue for the next result. *)
 type arrival_source = unit -> Keeper_arrived_stimuli.claim option
 
-let arrival_source ~keeper_name ~read : arrival_source =
+let arrival_source ~keeper_name ~base_path ~read : arrival_source =
   let tracker = Keeper_arrived_stimuli.create_tracker ~run_started_at:(Time_compat.now ()) in
   fun () ->
+    (* One reader per claim: results run side by side, and a reader must not
+       be forced by two fibers. It loads the outbox only when a listed row
+       points at a receipt. *)
+    let receipt =
+      Option.map
+        (fun base_path ->
+           Keeper_client_tool_outbox.summary_reader
+             ~base_path
+             ~keeper_name
+             ~on_unavailable:(fun detail ->
+               Log.Keeper.warn
+                 ~keeper_name
+                 "tool outbox unavailable; this tool result lists arrived tool results \
+                  without their receipts: %s"
+                 detail))
+        base_path
+    in
     Keeper_arrived_stimuli.claim
+      ?receipt
       tracker
       ~now:(Time_compat.now ())
       ~read
@@ -2182,11 +2200,12 @@ let dynamic_tools ~result_scope ?base_path ?read_arrived ~content_transport ~acc
     let next_dynamic_invocation_index = Atomic.make 0 in
     let arrival =
       match read_arrived, base_path with
-      | Some read, _ -> Some (arrival_source ~keeper_name ~read)
+      | Some read, _ -> Some (arrival_source ~keeper_name ~base_path ~read)
       | None, Some base_path ->
         Some
           (arrival_source
              ~keeper_name
+             ~base_path:(Some base_path)
              ~read:(fun () ->
                Keeper_registry_event_queue.pending_selections_result ~base_path keeper_name))
       | None, None -> None

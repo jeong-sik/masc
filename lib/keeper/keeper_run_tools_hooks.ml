@@ -671,6 +671,14 @@ let assemble_hooks
     let arrived_stimuli_text () =
       let arrived =
         Keeper_arrived_stimuli.block
+          ~receipt:
+            (Keeper_client_tool_outbox.summary_reader
+               ~base_path:config.base_path
+               ~keeper_name:meta.name
+               ~on_unavailable:(fun detail ->
+                 Log.Keeper.warn ~keeper_name:meta.name
+                   "tool outbox unavailable; this round lists arrived tool results without \
+                    their receipts: %s" detail))
           arrived_tracker
           ~now:(Time_compat.now ())
           ~read:(fun () ->

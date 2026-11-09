@@ -21,6 +21,12 @@ let short_stalled_after_s = 0.3
 let patience_s = 10.0
 let poll_s = 0.002
 
+let proactive_interval =
+  match F.Proactive_interval.of_seconds 300 with
+  | Some interval -> interval
+  | None -> failwith "300 seconds is a proactive interval"
+;;
+
 let fleet ?(keepers = 0) ?(running = 1) () : F.fleet =
   let names =
     F.Names.of_list (List.init keepers (fun index -> Printf.sprintf "keeper-%04d" index))
@@ -46,6 +52,7 @@ let fleet ?(keepers = 0) ?(running = 1) () : F.fleet =
   ; fs_active_task_owner_without_fiber_count = 0
   ; fs_completion_authority_pending_count = 0
   ; fs_active_task_owner_scan_error_count = 0
+  ; fs_proactive_interval = proactive_interval
   }
 ;;
 

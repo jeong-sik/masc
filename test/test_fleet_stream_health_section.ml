@@ -6,6 +6,12 @@ module Blocker = Masc.Keeper_fleet_blocker
 
 let names words = F.Names.of_list words
 
+let proactive_interval seconds =
+  match F.Proactive_interval.of_seconds seconds with
+  | Some interval -> interval
+  | None -> failf "proactive interval %d" seconds
+;;
+
 (* Every field holds a value no other field holds, so a key read into the wrong
    field would give a different reading. *)
 let expected : F.fleet =
@@ -30,6 +36,7 @@ let expected : F.fleet =
   ; fs_active_task_owner_without_fiber_count = 21
   ; fs_completion_authority_pending_count = 22
   ; fs_active_task_owner_scan_error_count = 23
+  ; fs_proactive_interval = proactive_interval 24
   }
 ;;
 
@@ -60,6 +67,7 @@ let section_pairs : (string * Yojson.Safe.t) list =
   ; "active_task_owner_without_executable_fiber_count", `Int 21
   ; "completion_authority_pending_task_count", `Int 22
   ; "active_task_owner_scan_error_count", `Int 23
+  ; "proactive_interval_sec", `Int 24
   ]
 ;;
 
@@ -134,6 +142,18 @@ let test_a_negative_count_is_unreadable () =
     (is_unreadable
        (Section.fleet_of_health_fields
           (health ~pairs:(replacing "failing_keeper_fiber_count" (`Int (-1)) section_pairs) ())))
+;;
+
+let test_an_interval_below_one_second_is_unreadable () =
+  List.iter
+    (fun seconds ->
+       check bool (Printf.sprintf "%d seconds" seconds) true
+         (is_unreadable
+            (Section.fleet_of_health_fields
+               (health
+                  ~pairs:(replacing "proactive_interval_sec" (`Int seconds) section_pairs)
+                  ()))))
+    [ 0; -1 ]
 ;;
 
 let test_a_word_this_build_does_not_know_is_unreadable () =
@@ -239,6 +259,8 @@ let () =
         ; test_case "a field of the wrong type" `Quick
             test_a_field_of_the_wrong_type_is_unreadable
         ; test_case "a negative count" `Quick test_a_negative_count_is_unreadable
+        ; test_case "an interval below one second" `Quick
+            test_an_interval_below_one_second_is_unreadable
         ; test_case "a word this build does not know" `Quick
             test_a_word_this_build_does_not_know_is_unreadable
         ; test_case "a section that cannot be what it claims" `Quick

@@ -62,11 +62,14 @@ module Stream_end = struct
   ;;
 end
 
-(* One constructor per transport that carries requests. *)
+(* One constructor per transport that carries requests. [streaming] is the
+   body writer [respond_with_streaming] opened: neither library hands it back,
+   and [response_state] needs to know whether it is still open. *)
 type t =
   | Http1 of
       { reqd : Httpun.Reqd.t
       ; upgrade : upgrade option
+      ; mutable streaming : Httpun.Body.Writer.t option
       }
   | Http2 of
       { reqd : H2.Reqd.t
@@ -74,6 +77,7 @@ type t =
       ; ledger : Http_h2_response_ledger.request
       ; stream_sw : Eio.Switch.t
       ; stream_end : Stream_end.t
+      ; mutable streaming : H2.Body.Writer.t option
       }
 
 let of_gluten (gluten_reqd : Httpun.Reqd.t Gluten.Reqd.t) =
@@ -85,10 +89,11 @@ let of_gluten (gluten_reqd : Httpun.Reqd.t Gluten.Reqd.t) =
           { switch_protocols = Httpun.Reqd.respond_with_upgrade reqd
           ; drive = gluten_reqd.Gluten.Reqd.upgrade
           }
+    ; streaming = None
     }
 ;;
 
-let of_httpun reqd = Http1 { reqd; upgrade = None }
+let of_httpun reqd = Http1 { reqd; upgrade = None; streaming = None }
 
 let http2_version = { Httpun.Version.major = 2; minor = 0 }
 
@@ -119,6 +124,7 @@ let of_h2 ~stream_sw ~ledger reqd =
     ; ledger
     ; stream_sw
     ; stream_end = Stream_end.create ~stream_sw
+    ; streaming = None
     }
 ;;
 
@@ -261,6 +267,10 @@ let h2_stream_over ~stream_sw reqd =
   Option.is_some (Eio.Switch.get_error stream_sw) || Option.is_some (H2.Reqd.error_code reqd)
 ;;
 
+let h2_writer_closed ~stream_sw ~stream_end reqd writer =
+  H2.Body.Writer.is_closed writer || Stream_end.ended stream_end || h2_stream_over ~stream_sw reqd
+;;
+
 let try_respond_with_string t response body =
   Cancel_safe.protect
     ~on_exn:(fun exn ->
@@ -316,9 +326,7 @@ module Body_writer = struct
   let is_closed = function
     | H1 writer -> Httpun.Body.Writer.is_closed writer
     | H2 { reqd; writer; stream_sw; stream_end; _ } ->
-      H2.Body.Writer.is_closed writer
-      || Stream_end.ended stream_end
-      || h2_stream_over ~stream_sw reqd
+      h2_writer_closed ~stream_sw ~stream_end reqd writer
     | Ended -> true
   ;;
 
@@ -355,16 +363,46 @@ end
 
 let respond_with_streaming ?flush_headers_immediately t response =
   match t with
-  | Http1 { reqd; _ } ->
-    Body_writer.H1 (Httpun.Reqd.respond_with_streaming ?flush_headers_immediately reqd response)
-  | Http2 { reqd; ledger; stream_sw; stream_end; _ } ->
+  | Http1 http1 ->
+    let writer =
+      Httpun.Reqd.respond_with_streaming ?flush_headers_immediately http1.reqd response
+    in
+    http1.streaming <- Some writer;
+    Body_writer.H1 writer
+  | Http2 http2 ->
+    let reqd = http2.reqd
+    and stream_sw = http2.stream_sw in
     if h2_stream_over ~stream_sw reqd
     then Body_writer.Ended
     else (
       let writer =
         H2.Reqd.respond_with_streaming reqd ?flush_headers_immediately (h2_response_of response)
       in
-      Body_writer.H2 { reqd; writer; ledger; stream_sw; stream_end })
+      http2.streaming <- Some writer;
+      Body_writer.H2
+        { reqd; writer; ledger = http2.ledger; stream_sw; stream_end = http2.stream_end })
+;;
+
+type response_state =
+  | Not_started
+  | Streaming_open
+  | Answered
+
+let response_state = function
+  | Http1 { reqd; streaming; _ } ->
+    (match streaming, Httpun.Reqd.response reqd with
+     | Some writer, _ ->
+       if Httpun.Body.Writer.is_closed writer then Answered else Streaming_open
+     | None, Some _ -> Answered
+     | None, None -> Not_started)
+  | Http2 { reqd; stream_sw; stream_end; streaming; _ } ->
+    (match streaming, H2.Reqd.response reqd with
+     | Some writer, _ ->
+       if h2_writer_closed ~stream_sw ~stream_end reqd writer
+       then Answered
+       else Streaming_open
+     | None, Some _ -> Answered
+     | None, None -> Not_started)
 ;;
 
 type body_read_error =
@@ -494,8 +532,12 @@ let read_body t ~max_bytes ~on_body ~on_error =
     read_body_h2 reqd ~ledger ~stream_sw ~max_bytes ~on_body ~on_error
 ;;
 
+(* masc's HTTP/1.1 error handler writes the 500 without logging, and a cut
+   body calls no handler at all, so the HTTP/1.1 failure is logged here. *)
 let report_exn t exn =
   match t with
-  | Http1 { reqd; _ } -> Httpun.Reqd.report_exn reqd exn
+  | Http1 { reqd; _ } ->
+    Log.Http.error "[http] request failed: %s" (Printexc.to_string exn);
+    Httpun.Reqd.report_exn reqd exn
   | Http2 { reqd; stream_sw; _ } -> Http_h2_stream.reset ~stream_sw reqd (Http_h2_stream.Raised exn)
 ;;

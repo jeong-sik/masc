@@ -5,18 +5,15 @@
 module Ladder = Masc_tui_keeper_age_ladder
 module Bins = Masc.Keeper_memory_age_bins
 
-let all_bins = [ Bins.Under_hour; Bins.Under_day; Bins.Under_week; Bins.Older ]
-
-let bins ~hour ~day ~week ~older : Bins.t =
-  { under_hour = hour; under_day = day; under_week = week; older }
+(* A ladder from its 24 counts, newest bin first, as the server sends it. *)
+let ladder counts =
+  match Bins.of_json (`List (List.map (fun n -> `Int n) counts)) with
+  | Ok bins -> bins
+  | Error err -> Alcotest.fail err
 ;;
 
-let count_of (b : Bins.t) = function
-  | Bins.Under_hour -> b.under_hour
-  | Bins.Under_day -> b.under_day
-  | Bins.Under_week -> b.under_week
-  | Bins.Older -> b.older
-;;
+(* [newest] in the newest bin, [oldest] in the oldest, none between. *)
+let ends ~newest ~oldest = ladder ((newest :: List.init 22 (fun _ -> 0)) @ [ oldest ])
 
 let is_empty = function
   | Ladder.Empty -> true
@@ -73,50 +70,19 @@ let make_keeper ~keeper_id age_bins : Masc.Tui_decode_memory_health.memory_keepe
 
 let test_every_bin_is_drawn_once () =
   Alcotest.(check int)
-    "four bins are drawn" (List.length all_bins) (List.length Ladder.oldest_first);
-  Alcotest.(check bool)
-    "each bin appears exactly once"
-    true
-    (List.sort_uniq Stdlib.compare Ladder.oldest_first
-     = List.sort_uniq Stdlib.compare all_bins);
-  Alcotest.(check bool)
-    "the oldest bin is on the left"
-    true
-    (List.nth_opt Ladder.oldest_first 0 = Some Bins.Older);
-  Alcotest.(check bool)
-    "the newest bin is on the right"
-    true
-    (List.nth_opt Ladder.oldest_first 3 = Some Bins.Under_hour)
-;;
-
-let test_edges_are_the_edges_the_server_counts_with () =
-  let now = 1794050000.0 in
-  let check_edge below above =
-    match Ladder.edge_seconds below with
-    | None -> Alcotest.fail "a bin that ends must name its edge"
-    | Some edge ->
-      Alcotest.(check bool)
-        "one second younger than the edge is still in the bin"
-        true
-        (Bins.classify ~now (now -. edge +. 1.0) = below);
-      Alcotest.(check bool)
-        "exactly at the edge is in the next older bin"
-        true
-        (Bins.classify ~now (now -. edge) = above)
-  in
-  check_edge Bins.Under_hour Bins.Under_day;
-  check_edge Bins.Under_day Bins.Under_week;
-  check_edge Bins.Under_week Bins.Older;
-  Alcotest.(check bool)
-    "the oldest bin has no edge" true (Ladder.edge_seconds Bins.Older = None)
+    "24 bins are drawn" Bins.bin_count (List.length Ladder.oldest_first);
+  Alcotest.(check (list int))
+    "the oldest bin is on the left and the newest on the right"
+    (List.rev (List.init Bins.bin_count Fun.id))
+    (List.map Bins.index Ladder.oldest_first)
 ;;
 
 let test_an_empty_bin_never_draws_a_bar () =
   List.iter
     (fun (label, b) ->
-      let counts = List.map (count_of b) Ladder.oldest_first in
+      let counts = List.map (Bins.count b) Ladder.oldest_first in
       let marks = Ladder.marks b in
-      Alcotest.(check int) (label ^ ": one mark per bin") 4 (List.length marks);
+      Alcotest.(check int) (label ^ ": one mark per bin") Bins.bin_count (List.length marks);
       List.iter2
         (fun count mark ->
           Alcotest.(check bool)
@@ -126,22 +92,23 @@ let test_an_empty_bin_never_draws_a_bar () =
         counts
         marks)
     [ "no facts", Bins.zero
-    ; "one fact among many", bins ~hour:1 ~day:0 ~week:0 ~older:1000
-    ; "every bin", bins ~hour:3 ~day:5 ~week:8 ~older:13
-    ; "only the newest", bins ~hour:7 ~day:0 ~week:0 ~older:0
+    ; "one fact among many", ends ~newest:1 ~oldest:1000
+    ; "every bin", ladder (List.init Bins.bin_count (fun k -> k + 1))
+    ; "only the newest", ends ~newest:7 ~oldest:0
     ]
 ;;
 
 let test_the_oldest_is_drawn_first () =
-  let empties b = List.map is_empty (Ladder.marks b) in
+  let drawn b = List.map (fun mark -> not (is_empty mark)) (Ladder.marks b) in
+  let only k = List.init Bins.bin_count (fun i -> i = k) in
   Alcotest.(check (list bool))
-    "facts older than the last edge draw the leftmost mark"
-    [ false; true; true; true ]
-    (empties (bins ~hour:0 ~day:0 ~week:0 ~older:5));
+    "facts 30 days or older draw the leftmost mark"
+    (only 0)
+    (drawn (ends ~newest:0 ~oldest:5));
   Alcotest.(check (list bool))
     "facts first seen in the last hour draw the rightmost mark"
-    [ true; true; true; false ]
-    (empties (bins ~hour:5 ~day:0 ~week:0 ~older:0))
+    (only (Bins.bin_count - 1))
+    (drawn (ends ~newest:5 ~oldest:0))
 ;;
 
 let test_unmeasured_is_not_zero () =
@@ -165,12 +132,12 @@ let test_the_cell_carries_no_tone () =
         "the ladder is a count, not a state"
         true
         ((Ladder.cell b).Masc_tui_keeper_axis_cell.tone = Masc_tui_keeper_axis_cell.Quiet))
-    [ None; Some Bins.zero; Some (bins ~hour:0 ~day:0 ~week:0 ~older:40) ]
+    [ None; Some Bins.zero; Some (ends ~newest:0 ~oldest:40) ]
 ;;
 
 let test_the_fleet_adds_the_keepers_that_carry_a_ladder () =
-  let a = bins ~hour:1 ~day:2 ~week:3 ~older:4 in
-  let b = bins ~hour:10 ~day:20 ~week:30 ~older:40 in
+  let a = ends ~newest:1 ~oldest:4 in
+  let b = ends ~newest:10 ~oldest:40 in
   Alcotest.(check bool)
     "no rows at all is the zero ladder, measured"
     true
@@ -193,13 +160,13 @@ let test_the_fleet_adds_the_keepers_that_carry_a_ladder () =
        ; make_keeper ~keeper_id:"gamma" (Some b)
        ]
      = Ladder.Measured
-         { bins = bins ~hour:11 ~day:22 ~week:33 ~older:44; unmeasured_keepers = 1 })
+         { bins = ends ~newest:11 ~oldest:44; unmeasured_keepers = 1 })
 ;;
 
 (* The server's totals count a row this build refused, so a sum without it
    must say that a Keeper is missing. *)
 let test_a_refused_row_is_a_keeper_without_a_ladder () =
-  let a = bins ~hour:1 ~day:2 ~week:3 ~older:4 in
+  let a = ends ~newest:1 ~oldest:4 in
   Alcotest.(check bool)
     "rows that were all refused are not a zero ladder"
     true
@@ -221,10 +188,6 @@ let () =
     "tui_keeper_age_ladder"
     [ ( "age ladder"
       , [ Alcotest.test_case "every bin is drawn once" `Quick test_every_bin_is_drawn_once
-        ; Alcotest.test_case
-            "edges are the edges the server counts with"
-            `Quick
-            test_edges_are_the_edges_the_server_counts_with
         ; Alcotest.test_case
             "an empty bin never draws a bar"
             `Quick

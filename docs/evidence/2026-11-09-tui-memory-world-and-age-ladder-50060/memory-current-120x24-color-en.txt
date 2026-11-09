@@ -1,0 +1,24 @@
+ Dashboard  Work  ▸Keepers  Usage  Board  Workspace  System
+
+  MASC Memory · 8 keepers · 0 need memory · read 11/09 08:56  HTTP [partial] · operator quiz read failed +3
+ ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+   v:details · 19 unread turns
+   Sort [s]: Facts (Most)  ·  [u]: tokens  [/]: Filter
+ ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+   ST KEEPER                              UPDATED FACTS    STORED SOURCE                       Δ
+ ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+   +  epsilon-busy               2026-11-09 08:52  1204    ≈77.3k —                      +31 -12
+   +  delta-mixed                2026-11-09 08:47   340    ≈26.0k r7 i1 ≈604              +14 -6
+   +  theta-idle                 2026-11-09 08:31    61     ≈6.2k —                        +4 -2
+   +  zeta-unseeded              2026-11-09 08:21    27     ≈2.7k —                          +27
+   +  alpha-failing              2026-11-09 08:43    12     ≈1.2k —                        +2 -1
+   +  eta-quiet                  2026-11-01 06:29     8      ≈678 —
+   [keepers 1-6/8]
+ ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+   epsilon-busy · memory ok · Memory saved 2026-11-09 08:46
+   Stored ≈77.3k tok · estimated knowledge size
+   Input tok: Memory input: HTTP 404: fake server: no such route
+   Librarian · unread 2
+
+  j/k:move  PgUp/PgDn:page  Home/End:top/bottom  Enter:facts  v:health details  Esc:clear / back  q:quit  …?
+ › to alpha-failing   (i to write)

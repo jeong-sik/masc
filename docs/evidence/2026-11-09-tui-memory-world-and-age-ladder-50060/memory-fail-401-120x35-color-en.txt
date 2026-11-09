@@ -1,0 +1,35 @@
+ Dashboard  Work  ▸Keepers  Usage  Board  Workspace  System
+
+  MASC Memory · 8 keepers · 0 need memory · read 11/09 08:55  HTTP [partial] · operator quiz read failed +3
+ ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+   Total 1661 facts · 1657 ordinary + 4 source · stored ≈115.1k tok · 8 keepers · stored estimate, not turn input
+   Ordinary: 1497 observed / 160 derived · 5 support invalidations
+   Ordinary: since first seen █▄▃▂ · 7d or older: 840 · 1d to 7d: 413 · 1h to 1d: 257 · under 1h: 147
+             1 keeper not measured
+   Source: 1 invalidation
+   Librarian: 19 turns unread · 0 atoms behind in continuity (0 keepers not measured) · 0 failures since server start
+   World: ? · read failed
+   Sort [s]: Facts (Most)  ·  [u]: tokens  [/]: Filter
+ ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+   ST KEEPER                              UPDATED FACTS    STORED SOURCE                       Δ
+ ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+   +  epsilon-busy               2026-11-09 08:51  1204    ≈77.3k —                      +31 -12
+   +  delta-mixed                2026-11-09 08:46   340    ≈26.0k r7 i1 ≈604              +14 -6
+   +  theta-idle                 2026-11-09 08:30    61     ≈6.2k —                        +4 -2
+   +  zeta-unseeded              2026-11-09 08:20    27     ≈2.7k —                          +27
+   +  alpha-failing              2026-11-09 08:42    12     ≈1.2k —                        +2 -1
+   +  eta-quiet                  2026-11-01 06:28     8      ≈678 —
+   +  beta-unrecorded            2026-11-09 08:54     5      ≈453 —                           +1
+   -  gamma-skewed                              —     —         — —
+
+
+
+
+ ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+   epsilon-busy · memory ok · Memory saved 2026-11-09 08:45
+   Stored ≈77.3k tok · estimated knowledge size
+   Input tok: Memory input: HTTP 404: fake server: no such route
+   Librarian · unread 2
+
+  j/k:move  PgUp/PgDn:page  Home/End:top/bottom  Enter:facts  v:health details  Esc:clear / back  q:quit  …?
+ › to alpha-failing   (i to write)

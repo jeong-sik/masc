@@ -1,0 +1,24 @@
+ Dashboard  Work  ▸Keepers  Usage  Board  Workspace  System
+                                                                                                                                                │[Recent] Changes · 8 keepers · feed closed: MCP initial
+  MASC Memory · 8 keepers · 0 need memory · read 11/09 09:05  HTTP [partial] · operator quiz read failed +3                                     │                   state     tool        calls  new tok
+ ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── │! alpha-failing    no events
+   Total 1661 facts · 1657 ordinary + 4 source · stored ≈115.1k tok · 8 keepers · stored estimate, not turn input                               │! beta-unrecorded  no events
+   Ordinary: 1497 observed / 160 derived · 5 support invalidations                                                                              │● delta-mixed      no events
+   Ordinary: since first seen █▄▃▂ · 7d or older: 840 · 1d to 7d: 413 · 1h to 1d: 257 · under 1h: 147 · 1 keeper not measured                   │● epsilon-busy     no events
+   Source: 1 invalidation                                                                                                                       │● eta-quiet        no events
+   Librarian: 19 turns unread · 0 atoms behind in continuity (0 keepers not measured) · 0 failures since server start                           │! gamma-skewed     no events
+   World: 42 claims · 3 conflicts · briefing current                                                                                            │· theta-idle       no events
+   Sort [s]: Facts (Most)  ·  [u]: tokens  [/]: Filter                                                                                          │● zeta-unseeded    no events
+ ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── │───────────────────────────────────────────────────────
+   ST KEEPER                              UPDATED FACTS    STORED SOURCE                       Δ                                                │alpha-failing · no events on this feed yet
+ ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+   +  epsilon-busy               2026-11-09 09:01  1204    ≈77.3k —                      +31 -12
+   +  delta-mixed                2026-11-09 08:56   340    ≈26.0k r7 i1 ≈604              +14 -6
+   +  theta-idle                 2026-11-09 08:40    61     ≈6.2k —                        +4 -2
+   [keepers 1-3/8]
+ ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+   epsilon-busy · memory ok · Memory saved 2026-11-09 08:55
+   … 3 Keeper detail rows hidden · v:full reading
+
+  j/k:move  PgUp/PgDn:page  Home/End:top/bottom  Enter:facts  v:health details  a / A:all fleet  s:sort  u:units  Esc:clear / back  q:quit  …?
+ › to alpha-failing   (i to write)

@@ -1,0 +1,131 @@
+# 이번에 돌린 Memory 세션의 사다리 줄과 월드 줄이에요. 형식: <세트>/<크기>-<색>-<언어>/<화면 파일> | 사다리 | 월드
+# 높이가 모자라 머리가 접힌 세션은 두 줄 모두 '(안 그려졌어요)' 예요. 오른쪽 패널은 잘랐어요.
+
+world-building/120x35-color-en/memory | Ordinary: since first seen █▄▃▂ · 7d or older: 840 · 1d to 7d: 413 · 1h to 1d: 257 · under 1h: 147 / 1 keeper not measured | World: 42 claims · 3 conflicts · briefing pending · building, 17 of 40 left
+world-building/120x35-color-ko/memory | 일반: 처음 본 뒤 █▄▃▂ · 7일 이상 840개 · 1일~7일 413개 · 1시간~1일 257개 · 1시간 미만 147개 · 미측정 키퍼 1명 | 월드: 공유 주장 42건 · 충돌 3건 · 브리핑 pending · building, 40개 중 17개 남음
+world-building/120x35-nocolor-en/memory | Ordinary: since first seen █▄▃▂ · 7d or older: 840 · 1d to 7d: 413 · 1h to 1d: 257 · under 1h: 147 / 1 keeper not measured | World: 42 claims · 3 conflicts · briefing pending · building, 17 of 40 left
+world-building/120x35-nocolor-ko/memory | 일반: 처음 본 뒤 █▄▃▂ · 7일 이상 840개 · 1일~7일 413개 · 1시간~1일 257개 · 1시간 미만 147개 · 미측정 키퍼 1명 | 월드: 공유 주장 42건 · 충돌 3건 · 브리핑 pending · building, 40개 중 17개 남음
+world-building/200x45-color-en/memory | Ordinary: since first seen █▄▃▂ · 7d or older: 840 · 1d to 7d: 413 · 1h to 1d: 257 · under 1h: 147 · 1 keeper not measured | World: 42 claims · 3 conflicts · briefing pending · building, 17 of 40 left
+world-building/200x45-color-ko/memory | 일반: 처음 본 뒤 █▄▃▂ · 7일 이상 840개 · 1일~7일 413개 · 1시간~1일 257개 · 1시간 미만 147개 · 미측정 키퍼 1명 | 월드: 공유 주장 42건 · 충돌 3건 · 브리핑 pending · building, 40개 중 17개 남음
+world-building/200x45-nocolor-en/memory | Ordinary: since first seen █▄▃▂ · 7d or older: 840 · 1d to 7d: 413 · 1h to 1d: 257 · under 1h: 147 · 1 keeper not measured | World: 42 claims · 3 conflicts · briefing pending · building, 17 of 40 left
+world-building/200x45-nocolor-ko/memory | 일반: 처음 본 뒤 █▄▃▂ · 7일 이상 840개 · 1일~7일 413개 · 1시간~1일 257개 · 1시간 미만 147개 · 미측정 키퍼 1명 | 월드: 공유 주장 42건 · 충돌 3건 · 브리핑 pending · building, 40개 중 17개 남음
+world-building/80x24-color-en/memory | (안 그려졌어요) | (안 그려졌어요)
+world-building/80x24-color-ko/memory | (안 그려졌어요) | (안 그려졌어요)
+world-building/80x24-nocolor-en/memory | (안 그려졌어요) | (안 그려졌어요)
+world-building/80x24-nocolor-ko/memory | (안 그려졌어요) | (안 그려졌어요)
+world-building/80x35-color-en/memory | Ordinary: since first seen █▄▃▂ · 7d or older: 840 · 1d to 7d: 413 / 1h to 1d: 257 · under 1h: 147 · 1 keeper not measured | World: 42 claims · 3 conflicts · briefing pending · building, 17 of 40 left
+world-building/80x35-color-ko/memory | 일반: 처음 본 뒤 █▄▃▂ · 7일 이상 840개 · 1일~7일 413개 · 1시간~1일 257개 / 1시간 미만 147개 · 미측정 키퍼 1명 | 월드: 공유 주장 42건 · 충돌 3건 · 브리핑 pending / building, 40개 중 17개 남음
+world-current/120x24-color-en/memory | (안 그려졌어요) | (안 그려졌어요)
+world-current/120x24-color-ko/memory | 일반: 처음 본 뒤 █▄▃▂ · 7일 이상 840개 · 1일~7일 413개 · 1시간~1일 257개 · 1시간 미만 147개 · 미측정 키퍼 1명 | 월드: 공유 주장 42건 · 충돌 3건 · 브리핑 current
+world-current/120x35-color-en/memory | Ordinary: since first seen █▄▃▂ · 7d or older: 840 · 1d to 7d: 413 · 1h to 1d: 257 · under 1h: 147 / 1 keeper not measured | World: 42 claims · 3 conflicts · briefing current
+world-current/120x35-color-ko/memory | 일반: 처음 본 뒤 █▄▃▂ · 7일 이상 840개 · 1일~7일 413개 · 1시간~1일 257개 · 1시간 미만 147개 · 미측정 키퍼 1명 | 월드: 공유 주장 42건 · 충돌 3건 · 브리핑 current
+world-current/120x35-nocolor-en/memory | Ordinary: since first seen █▄▃▂ · 7d or older: 840 · 1d to 7d: 413 · 1h to 1d: 257 · under 1h: 147 / 1 keeper not measured | World: 42 claims · 3 conflicts · briefing current
+world-current/120x35-nocolor-ko/memory | 일반: 처음 본 뒤 █▄▃▂ · 7일 이상 840개 · 1일~7일 413개 · 1시간~1일 257개 · 1시간 미만 147개 · 미측정 키퍼 1명 | 월드: 공유 주장 42건 · 충돌 3건 · 브리핑 current
+world-current/200x24-color-en/memory | Ordinary: since first seen █▄▃▂ · 7d or older: 840 · 1d to 7d: 413 · 1h to 1d: 257 · under 1h: 147 · 1 keeper not measured | World: 42 claims · 3 conflicts · briefing current
+world-current/200x24-color-ko/memory | 일반: 처음 본 뒤 █▄▃▂ · 7일 이상 840개 · 1일~7일 413개 · 1시간~1일 257개 · 1시간 미만 147개 · 미측정 키퍼 1명 | 월드: 공유 주장 42건 · 충돌 3건 · 브리핑 current
+world-current/200x45-color-en/memory | Ordinary: since first seen █▄▃▂ · 7d or older: 840 · 1d to 7d: 413 · 1h to 1d: 257 · under 1h: 147 · 1 keeper not measured | World: 42 claims · 3 conflicts · briefing current
+world-current/200x45-color-ko/memory | 일반: 처음 본 뒤 █▄▃▂ · 7일 이상 840개 · 1일~7일 413개 · 1시간~1일 257개 · 1시간 미만 147개 · 미측정 키퍼 1명 | 월드: 공유 주장 42건 · 충돌 3건 · 브리핑 current
+world-current/200x45-nocolor-en/memory | Ordinary: since first seen █▄▃▂ · 7d or older: 840 · 1d to 7d: 413 · 1h to 1d: 257 · under 1h: 147 · 1 keeper not measured | World: 42 claims · 3 conflicts · briefing current
+world-current/200x45-nocolor-ko/memory | 일반: 처음 본 뒤 █▄▃▂ · 7일 이상 840개 · 1일~7일 413개 · 1시간~1일 257개 · 1시간 미만 147개 · 미측정 키퍼 1명 | 월드: 공유 주장 42건 · 충돌 3건 · 브리핑 current
+world-current/80x24-color-en/memory | (안 그려졌어요) | (안 그려졌어요)
+world-current/80x24-color-ko/memory | (안 그려졌어요) | (안 그려졌어요)
+world-current/80x24-nocolor-en/memory | (안 그려졌어요) | (안 그려졌어요)
+world-current/80x24-nocolor-ko/memory | (안 그려졌어요) | (안 그려졌어요)
+world-current/80x35-color-en/memory | Ordinary: since first seen █▄▃▂ · 7d or older: 840 · 1d to 7d: 413 / 1h to 1d: 257 · under 1h: 147 · 1 keeper not measured | World: 42 claims · 3 conflicts · briefing current
+world-current/80x35-color-ko/memory | 일반: 처음 본 뒤 █▄▃▂ · 7일 이상 840개 · 1일~7일 413개 · 1시간~1일 257개 / 1시간 미만 147개 · 미측정 키퍼 1명 | 월드: 공유 주장 42건 · 충돌 3건 · 브리핑 current
+world-fail-401/120x35-color-en/memory | Ordinary: since first seen █▄▃▂ · 7d or older: 840 · 1d to 7d: 413 · 1h to 1d: 257 · under 1h: 147 / 1 keeper not measured | World: ? · read failed
+world-fail-401/120x35-color-ko/memory | 일반: 처음 본 뒤 █▄▃▂ · 7일 이상 840개 · 1일~7일 413개 · 1시간~1일 257개 · 1시간 미만 147개 · 미측정 키퍼 1명 | 월드: ? · 읽기 실패
+world-fail-401/120x35-nocolor-en/memory | Ordinary: since first seen █▄▃▂ · 7d or older: 840 · 1d to 7d: 413 · 1h to 1d: 257 · under 1h: 147 / 1 keeper not measured | World: ? · read failed
+world-fail-401/120x35-nocolor-ko/memory | 일반: 처음 본 뒤 █▄▃▂ · 7일 이상 840개 · 1일~7일 413개 · 1시간~1일 257개 · 1시간 미만 147개 · 미측정 키퍼 1명 | 월드: ? · 읽기 실패
+world-fail-401/200x45-color-en/memory | Ordinary: since first seen █▄▃▂ · 7d or older: 840 · 1d to 7d: 413 · 1h to 1d: 257 · under 1h: 147 · 1 keeper not measured | World: ? · read failed
+world-fail-401/200x45-color-ko/memory | 일반: 처음 본 뒤 █▄▃▂ · 7일 이상 840개 · 1일~7일 413개 · 1시간~1일 257개 · 1시간 미만 147개 · 미측정 키퍼 1명 | 월드: ? · 읽기 실패
+world-fail-401/200x45-nocolor-en/memory | Ordinary: since first seen █▄▃▂ · 7d or older: 840 · 1d to 7d: 413 · 1h to 1d: 257 · under 1h: 147 · 1 keeper not measured | World: ? · read failed
+world-fail-401/200x45-nocolor-ko/memory | 일반: 처음 본 뒤 █▄▃▂ · 7일 이상 840개 · 1일~7일 413개 · 1시간~1일 257개 · 1시간 미만 147개 · 미측정 키퍼 1명 | 월드: ? · 읽기 실패
+world-fail-401/80x24-color-en/memory | (안 그려졌어요) | (안 그려졌어요)
+world-fail-401/80x24-color-ko/memory | (안 그려졌어요) | (안 그려졌어요)
+world-fail-401/80x24-nocolor-en/memory | (안 그려졌어요) | (안 그려졌어요)
+world-fail-401/80x24-nocolor-ko/memory | (안 그려졌어요) | (안 그려졌어요)
+world-fail-nohdr/120x35-color-en/memory | Ordinary: since first seen █▄▃▂ · 7d or older: 840 · 1d to 7d: 413 · 1h to 1d: 257 · under 1h: 147 / 1 keeper not measured | World: ? · read failed
+world-fail-nohdr/120x35-color-ko/memory | 일반: 처음 본 뒤 █▄▃▂ · 7일 이상 840개 · 1일~7일 413개 · 1시간~1일 257개 · 1시간 미만 147개 · 미측정 키퍼 1명 | 월드: ? · 읽기 실패
+world-fail-nohdr/120x35-nocolor-en/memory | Ordinary: since first seen █▄▃▂ · 7d or older: 840 · 1d to 7d: 413 · 1h to 1d: 257 · under 1h: 147 / 1 keeper not measured | World: ? · read failed
+world-fail-nohdr/120x35-nocolor-ko/memory | 일반: 처음 본 뒤 █▄▃▂ · 7일 이상 840개 · 1일~7일 413개 · 1시간~1일 257개 · 1시간 미만 147개 · 미측정 키퍼 1명 | 월드: ? · 읽기 실패
+world-no-ledger/120x35-color-en/memory | Ordinary: since first seen █▄▃▂ · 7d or older: 840 · 1d to 7d: 413 · 1h to 1d: 257 · under 1h: 147 / 1 keeper not measured | World: no ledger
+world-no-ledger/120x35-color-ko/memory | 일반: 처음 본 뒤 █▄▃▂ · 7일 이상 840개 · 1일~7일 413개 · 1시간~1일 257개 · 1시간 미만 147개 · 미측정 키퍼 1명 | 월드: 장부 없음
+world-no-ledger/120x35-nocolor-en/memory | Ordinary: since first seen █▄▃▂ · 7d or older: 840 · 1d to 7d: 413 · 1h to 1d: 257 · under 1h: 147 / 1 keeper not measured | World: no ledger
+world-no-ledger/120x35-nocolor-ko/memory | 일반: 처음 본 뒤 █▄▃▂ · 7일 이상 840개 · 1일~7일 413개 · 1시간~1일 257개 · 1시간 미만 147개 · 미측정 키퍼 1명 | 월드: 장부 없음
+world-no-ledger/200x45-color-en/memory | Ordinary: since first seen █▄▃▂ · 7d or older: 840 · 1d to 7d: 413 · 1h to 1d: 257 · under 1h: 147 · 1 keeper not measured | World: no ledger
+world-no-ledger/200x45-color-ko/memory | 일반: 처음 본 뒤 █▄▃▂ · 7일 이상 840개 · 1일~7일 413개 · 1시간~1일 257개 · 1시간 미만 147개 · 미측정 키퍼 1명 | 월드: 장부 없음
+world-no-ledger/200x45-nocolor-en/memory | Ordinary: since first seen █▄▃▂ · 7d or older: 840 · 1d to 7d: 413 · 1h to 1d: 257 · under 1h: 147 · 1 keeper not measured | World: no ledger
+world-no-ledger/200x45-nocolor-ko/memory | 일반: 처음 본 뒤 █▄▃▂ · 7일 이상 840개 · 1일~7일 413개 · 1시간~1일 257개 · 1시간 미만 147개 · 미측정 키퍼 1명 | 월드: 장부 없음
+world-no-ledger/80x24-color-en/memory | (안 그려졌어요) | (안 그려졌어요)
+world-no-ledger/80x24-color-ko/memory | (안 그려졌어요) | (안 그려졌어요)
+world-no-ledger/80x24-nocolor-en/memory | (안 그려졌어요) | (안 그려졌어요)
+world-no-ledger/80x24-nocolor-ko/memory | (안 그려졌어요) | (안 그려졌어요)
+world-pending/120x35-color-en/memory | Ordinary: since first seen █▄▃▂ · 7d or older: 840 · 1d to 7d: 413 · 1h to 1d: 257 · under 1h: 147 / 1 keeper not measured | World: 42 claims · 3 conflicts · briefing pending
+world-pending/120x35-color-ko/memory | 일반: 처음 본 뒤 █▄▃▂ · 7일 이상 840개 · 1일~7일 413개 · 1시간~1일 257개 · 1시간 미만 147개 · 미측정 키퍼 1명 | 월드: 공유 주장 42건 · 충돌 3건 · 브리핑 pending
+world-pending/120x35-nocolor-en/memory | Ordinary: since first seen █▄▃▂ · 7d or older: 840 · 1d to 7d: 413 · 1h to 1d: 257 · under 1h: 147 / 1 keeper not measured | World: 42 claims · 3 conflicts · briefing pending
+world-pending/120x35-nocolor-ko/memory | 일반: 처음 본 뒤 █▄▃▂ · 7일 이상 840개 · 1일~7일 413개 · 1시간~1일 257개 · 1시간 미만 147개 · 미측정 키퍼 1명 | 월드: 공유 주장 42건 · 충돌 3건 · 브리핑 pending
+world-pending/200x45-color-en/memory | Ordinary: since first seen █▄▃▂ · 7d or older: 840 · 1d to 7d: 413 · 1h to 1d: 257 · under 1h: 147 · 1 keeper not measured | World: 42 claims · 3 conflicts · briefing pending
+world-pending/200x45-color-ko/memory | 일반: 처음 본 뒤 █▄▃▂ · 7일 이상 840개 · 1일~7일 413개 · 1시간~1일 257개 · 1시간 미만 147개 · 미측정 키퍼 1명 | 월드: 공유 주장 42건 · 충돌 3건 · 브리핑 pending
+world-pending/200x45-nocolor-en/memory | Ordinary: since first seen █▄▃▂ · 7d or older: 840 · 1d to 7d: 413 · 1h to 1d: 257 · under 1h: 147 · 1 keeper not measured | World: 42 claims · 3 conflicts · briefing pending
+world-pending/200x45-nocolor-ko/memory | 일반: 처음 본 뒤 █▄▃▂ · 7일 이상 840개 · 1일~7일 413개 · 1시간~1일 257개 · 1시간 미만 147개 · 미측정 키퍼 1명 | 월드: 공유 주장 42건 · 충돌 3건 · 브리핑 pending
+world-pending/80x24-color-en/memory | (안 그려졌어요) | (안 그려졌어요)
+world-pending/80x24-color-ko/memory | (안 그려졌어요) | (안 그려졌어요)
+world-pending/80x24-nocolor-en/memory | (안 그려졌어요) | (안 그려졌어요)
+world-pending/80x24-nocolor-ko/memory | (안 그려졌어요) | (안 그려졌어요)
+world-slow/120x35-color-en/memory | Ordinary: since first seen █▄▃▂ · 7d or older: 840 · 1d to 7d: 413 · 1h to 1d: 257 · under 1h: 147 / 1 keeper not measured | World: ?
+world-slow/120x35-color-ko/memory | 일반: 처음 본 뒤 █▄▃▂ · 7일 이상 840개 · 1일~7일 413개 · 1시간~1일 257개 · 1시간 미만 147개 · 미측정 키퍼 1명 | 월드: ?
+world-slow/120x35-nocolor-en/memory | Ordinary: since first seen █▄▃▂ · 7d or older: 840 · 1d to 7d: 413 · 1h to 1d: 257 · under 1h: 147 / 1 keeper not measured | World: ?
+world-slow/120x35-nocolor-ko/memory | 일반: 처음 본 뒤 █▄▃▂ · 7일 이상 840개 · 1일~7일 413개 · 1시간~1일 257개 · 1시간 미만 147개 · 미측정 키퍼 1명 | 월드: ?
+world-slow/200x45-color-en/memory | Ordinary: since first seen █▄▃▂ · 7d or older: 840 · 1d to 7d: 413 · 1h to 1d: 257 · under 1h: 147 · 1 keeper not measured | World: ?
+world-slow/200x45-color-ko/memory | 일반: 처음 본 뒤 █▄▃▂ · 7일 이상 840개 · 1일~7일 413개 · 1시간~1일 257개 · 1시간 미만 147개 · 미측정 키퍼 1명 | 월드: ?
+world-slow/200x45-nocolor-en/memory | Ordinary: since first seen █▄▃▂ · 7d or older: 840 · 1d to 7d: 413 · 1h to 1d: 257 · under 1h: 147 · 1 keeper not measured | World: ?
+world-slow/200x45-nocolor-ko/memory | 일반: 처음 본 뒤 █▄▃▂ · 7일 이상 840개 · 1일~7일 413개 · 1시간~1일 257개 · 1시간 미만 147개 · 미측정 키퍼 1명 | 월드: ?
+world-slow/80x24-color-en/memory | (안 그려졌어요) | (안 그려졌어요)
+world-slow/80x24-color-ko/memory | (안 그려졌어요) | (안 그려졌어요)
+world-slow/80x24-nocolor-en/memory | (안 그려졌어요) | (안 그려졌어요)
+world-slow/80x24-nocolor-ko/memory | (안 그려졌어요) | (안 그려졌어요)
+world-stale/120x35-color-en/memory | Ordinary: since first seen █▄▃▂ · 7d or older: 840 · 1d to 7d: 413 · 1h to 1d: 257 · under 1h: 147 / 1 keeper not measured | World: 42 claims · 3 conflicts · briefing stale
+world-stale/120x35-color-ko/memory | 일반: 처음 본 뒤 █▄▃▂ · 7일 이상 840개 · 1일~7일 413개 · 1시간~1일 257개 · 1시간 미만 147개 · 미측정 키퍼 1명 | 월드: 공유 주장 42건 · 충돌 3건 · 브리핑 stale
+world-stale/120x35-nocolor-en/memory | Ordinary: since first seen █▄▃▂ · 7d or older: 840 · 1d to 7d: 413 · 1h to 1d: 257 · under 1h: 147 / 1 keeper not measured | World: 42 claims · 3 conflicts · briefing stale
+world-stale/120x35-nocolor-ko/memory | 일반: 처음 본 뒤 █▄▃▂ · 7일 이상 840개 · 1일~7일 413개 · 1시간~1일 257개 · 1시간 미만 147개 · 미측정 키퍼 1명 | 월드: 공유 주장 42건 · 충돌 3건 · 브리핑 stale
+world-stale/200x45-color-en/memory | Ordinary: since first seen █▄▃▂ · 7d or older: 840 · 1d to 7d: 413 · 1h to 1d: 257 · under 1h: 147 · 1 keeper not measured | World: 42 claims · 3 conflicts · briefing stale
+world-stale/200x45-color-ko/memory | 일반: 처음 본 뒤 █▄▃▂ · 7일 이상 840개 · 1일~7일 413개 · 1시간~1일 257개 · 1시간 미만 147개 · 미측정 키퍼 1명 | 월드: 공유 주장 42건 · 충돌 3건 · 브리핑 stale
+world-stale/200x45-nocolor-en/memory | Ordinary: since first seen █▄▃▂ · 7d or older: 840 · 1d to 7d: 413 · 1h to 1d: 257 · under 1h: 147 · 1 keeper not measured | World: 42 claims · 3 conflicts · briefing stale
+world-stale/200x45-nocolor-ko/memory | 일반: 처음 본 뒤 █▄▃▂ · 7일 이상 840개 · 1일~7일 413개 · 1시간~1일 257개 · 1시간 미만 147개 · 미측정 키퍼 1명 | 월드: 공유 주장 42건 · 충돌 3건 · 브리핑 stale
+world-stale/80x24-color-en/memory | (안 그려졌어요) | (안 그려졌어요)
+world-stale/80x24-color-ko/memory | (안 그려졌어요) | (안 그려졌어요)
+world-stale/80x24-nocolor-en/memory | (안 그려졌어요) | (안 그려졌어요)
+world-stale/80x24-nocolor-ko/memory | (안 그려졌어요) | (안 그려졌어요)
+world-unavailable/120x35-color-en/memory | Ordinary: since first seen █▄▃▂ · 7d or older: 840 · 1d to 7d: 413 · 1h to 1d: 257 · under 1h: 147 / 1 keeper not measured | World: 42 claims · 3 conflicts · briefing unavailable
+world-unavailable/120x35-color-ko/memory | 일반: 처음 본 뒤 █▄▃▂ · 7일 이상 840개 · 1일~7일 413개 · 1시간~1일 257개 · 1시간 미만 147개 · 미측정 키퍼 1명 | 월드: 공유 주장 42건 · 충돌 3건 · 브리핑 unavailable
+world-unavailable/120x35-nocolor-en/memory | Ordinary: since first seen █▄▃▂ · 7d or older: 840 · 1d to 7d: 413 · 1h to 1d: 257 · under 1h: 147 / 1 keeper not measured | World: 42 claims · 3 conflicts · briefing unavailable
+world-unavailable/120x35-nocolor-ko/memory | 일반: 처음 본 뒤 █▄▃▂ · 7일 이상 840개 · 1일~7일 413개 · 1시간~1일 257개 · 1시간 미만 147개 · 미측정 키퍼 1명 | 월드: 공유 주장 42건 · 충돌 3건 · 브리핑 unavailable
+world-unavailable/200x45-color-en/memory | Ordinary: since first seen █▄▃▂ · 7d or older: 840 · 1d to 7d: 413 · 1h to 1d: 257 · under 1h: 147 · 1 keeper not measured | World: 42 claims · 3 conflicts · briefing unavailable
+world-unavailable/200x45-color-ko/memory | 일반: 처음 본 뒤 █▄▃▂ · 7일 이상 840개 · 1일~7일 413개 · 1시간~1일 257개 · 1시간 미만 147개 · 미측정 키퍼 1명 | 월드: 공유 주장 42건 · 충돌 3건 · 브리핑 unavailable
+world-unavailable/200x45-nocolor-en/memory | Ordinary: since first seen █▄▃▂ · 7d or older: 840 · 1d to 7d: 413 · 1h to 1d: 257 · under 1h: 147 · 1 keeper not measured | World: 42 claims · 3 conflicts · briefing unavailable
+world-unavailable/200x45-nocolor-ko/memory | 일반: 처음 본 뒤 █▄▃▂ · 7일 이상 840개 · 1일~7일 413개 · 1시간~1일 257개 · 1시간 미만 147개 · 미측정 키퍼 1명 | 월드: 공유 주장 42건 · 충돌 3건 · 브리핑 unavailable
+world-unavailable/80x24-color-en/memory | (안 그려졌어요) | (안 그려졌어요)
+world-unavailable/80x24-color-ko/memory | (안 그려졌어요) | (안 그려졌어요)
+world-unavailable/80x24-nocolor-en/memory | (안 그려졌어요) | (안 그려졌어요)
+world-unavailable/80x24-nocolor-ko/memory | (안 그려졌어요) | (안 그려졌어요)
+world-value-then-fail/120x35-color-en/memory | Ordinary: since first seen █▄▃▂ · 7d or older: 840 · 1d to 7d: 413 · 1h to 1d: 257 · under 1h: 147 / 1 keeper not measured | World: 42 claims · 3 conflicts · briefing current · read failed
+world-value-then-fail/120x35-color-en/memory-before-failure | Ordinary: since first seen █▄▃▂ · 7d or older: 840 · 1d to 7d: 413 · 1h to 1d: 257 · under 1h: 147 / 1 keeper not measured | World: 42 claims · 3 conflicts · briefing current
+world-value-then-fail/120x35-color-ko/memory | 일반: 처음 본 뒤 █▄▃▂ · 7일 이상 840개 · 1일~7일 413개 · 1시간~1일 257개 · 1시간 미만 147개 · 미측정 키퍼 1명 | 월드: 공유 주장 42건 · 충돌 3건 · 브리핑 current · 읽기 실패
+world-value-then-fail/120x35-color-ko/memory-before-failure | 일반: 처음 본 뒤 █▄▃▂ · 7일 이상 840개 · 1일~7일 413개 · 1시간~1일 257개 · 1시간 미만 147개 · 미측정 키퍼 1명 | 월드: 공유 주장 42건 · 충돌 3건 · 브리핑 current
+world-value-then-fail/120x35-nocolor-en/memory | Ordinary: since first seen █▄▃▂ · 7d or older: 840 · 1d to 7d: 413 · 1h to 1d: 257 · under 1h: 147 / 1 keeper not measured | World: 42 claims · 3 conflicts · briefing current · read failed
+world-value-then-fail/120x35-nocolor-en/memory-before-failure | Ordinary: since first seen █▄▃▂ · 7d or older: 840 · 1d to 7d: 413 · 1h to 1d: 257 · under 1h: 147 / 1 keeper not measured | World: 42 claims · 3 conflicts · briefing current
+world-value-then-fail/120x35-nocolor-ko/memory | 일반: 처음 본 뒤 █▄▃▂ · 7일 이상 840개 · 1일~7일 413개 · 1시간~1일 257개 · 1시간 미만 147개 · 미측정 키퍼 1명 | 월드: 공유 주장 42건 · 충돌 3건 · 브리핑 current · 읽기 실패
+world-value-then-fail/120x35-nocolor-ko/memory-before-failure | 일반: 처음 본 뒤 █▄▃▂ · 7일 이상 840개 · 1일~7일 413개 · 1시간~1일 257개 · 1시간 미만 147개 · 미측정 키퍼 1명 | 월드: 공유 주장 42건 · 충돌 3건 · 브리핑 current
+world-value-then-fail/200x45-color-en/memory | Ordinary: since first seen █▄▃▂ · 7d or older: 840 · 1d to 7d: 413 · 1h to 1d: 257 · under 1h: 147 · 1 keeper not measured | World: 42 claims · 3 conflicts · briefing current · read failed
+world-value-then-fail/200x45-color-en/memory-before-failure | Ordinary: since first seen █▄▃▂ · 7d or older: 840 · 1d to 7d: 413 · 1h to 1d: 257 · under 1h: 147 · 1 keeper not measured | World: 42 claims · 3 conflicts · briefing current
+world-value-then-fail/200x45-color-ko/memory | 일반: 처음 본 뒤 █▄▃▂ · 7일 이상 840개 · 1일~7일 413개 · 1시간~1일 257개 · 1시간 미만 147개 · 미측정 키퍼 1명 | 월드: 공유 주장 42건 · 충돌 3건 · 브리핑 current · 읽기 실패
+world-value-then-fail/200x45-color-ko/memory-before-failure | 일반: 처음 본 뒤 █▄▃▂ · 7일 이상 840개 · 1일~7일 413개 · 1시간~1일 257개 · 1시간 미만 147개 · 미측정 키퍼 1명 | 월드: 공유 주장 42건 · 충돌 3건 · 브리핑 current
+world-value-then-fail/200x45-nocolor-en/memory | Ordinary: since first seen █▄▃▂ · 7d or older: 840 · 1d to 7d: 413 · 1h to 1d: 257 · under 1h: 147 · 1 keeper not measured | World: 42 claims · 3 conflicts · briefing current · read failed
+world-value-then-fail/200x45-nocolor-en/memory-before-failure | Ordinary: since first seen █▄▃▂ · 7d or older: 840 · 1d to 7d: 413 · 1h to 1d: 257 · under 1h: 147 · 1 keeper not measured | World: 42 claims · 3 conflicts · briefing current
+world-value-then-fail/200x45-nocolor-ko/memory | 일반: 처음 본 뒤 █▄▃▂ · 7일 이상 840개 · 1일~7일 413개 · 1시간~1일 257개 · 1시간 미만 147개 · 미측정 키퍼 1명 | 월드: 공유 주장 42건 · 충돌 3건 · 브리핑 current · 읽기 실패
+world-value-then-fail/200x45-nocolor-ko/memory-before-failure | 일반: 처음 본 뒤 █▄▃▂ · 7일 이상 840개 · 1일~7일 413개 · 1시간~1일 257개 · 1시간 미만 147개 · 미측정 키퍼 1명 | 월드: 공유 주장 42건 · 충돌 3건 · 브리핑 current
+world-zero/120x35-color-en/memory | Ordinary: since first seen █▄▃▂ · 7d or older: 840 · 1d to 7d: 413 · 1h to 1d: 257 · under 1h: 147 / 1 keeper not measured | World: 0 claims · 0 conflicts · briefing current
+world-zero/120x35-color-ko/memory | 일반: 처음 본 뒤 █▄▃▂ · 7일 이상 840개 · 1일~7일 413개 · 1시간~1일 257개 · 1시간 미만 147개 · 미측정 키퍼 1명 | 월드: 공유 주장 0건 · 충돌 0건 · 브리핑 current
+world-zero/120x35-nocolor-en/memory | Ordinary: since first seen █▄▃▂ · 7d or older: 840 · 1d to 7d: 413 · 1h to 1d: 257 · under 1h: 147 / 1 keeper not measured | World: 0 claims · 0 conflicts · briefing current
+world-zero/120x35-nocolor-ko/memory | 일반: 처음 본 뒤 █▄▃▂ · 7일 이상 840개 · 1일~7일 413개 · 1시간~1일 257개 · 1시간 미만 147개 · 미측정 키퍼 1명 | 월드: 공유 주장 0건 · 충돌 0건 · 브리핑 current

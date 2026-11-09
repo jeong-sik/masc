@@ -20,12 +20,15 @@ let format_context_tokens = Masc_tui_types.format_context_tokens
 (* A refusal is bad news about the key pressed; a pending write is a warning
    about what the screen shows, as is a list that may be stale
    ([Masc_tui_types.runtime_lane_stale_lines], drawn in warn). *)
-let runtime_lane_notice_style = function
-  | Masc_tui_types.Lane_write_refused _ -> Theme.bad ()
-  | Masc_tui_types.Lane_write_pending -> Theme.warn ()
+let runtime_lane_notice_tone = function
+  | Masc_tui_types.Lane_write_refused _ -> Page_line.Failure
+  | Masc_tui_types.Lane_write_pending -> Page_line.Attention
   | Masc_tui_types.Lane_write_committed receipt ->
-    if Masc_tui_runtime_config_receipt.lane_needs_attention receipt then Theme.warn ()
-    else Theme.info ()
+    if Masc_tui_runtime_config_receipt.lane_needs_attention receipt then Page_line.Attention
+    else Page_line.Info
+
+let runtime_lane_notice_style notice =
+  Page_reading.tone_style (runtime_lane_notice_tone notice)
 
 (* What a list of candidates reads when it has none. *)
 let no_candidates = "(없음)"

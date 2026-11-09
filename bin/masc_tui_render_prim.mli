@@ -772,6 +772,11 @@ val detail_section_heading : ?first:bool -> string -> (string * string) list
 (** Numbered/grouped section header [  [ Title ]] in [(style, text)] pairs for
     scrollable detail readers. *)
 
+val detail_page :
+  width:int -> (string * Masc_tui_page_line.t list) list -> (string * string) list
+(** A detail page of headed blocks: each block is its heading and the
+    [Masc_tui_page_line] lines under it. One label column serves every block. *)
+
 val detail_section_lines : ?first:bool -> string -> string list
 (** Numbered/grouped section header [  [ Title ]] as pre-styled strings. *)
 

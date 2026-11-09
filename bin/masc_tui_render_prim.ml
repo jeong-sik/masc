@@ -6104,6 +6104,23 @@ let detail_section_heading ?(first = false) title =
   let heading = [ Theme.info () ^ Ansi.bold, "  [ " ^ title ^ " ]" ] in
   if first then heading else (Ansi.dim, "") :: heading
 
+(* A detail page of headed blocks of [Page_line] lines. One label column
+   serves every block, so the values of the whole page start at one cell and
+   not at a different cell under each heading. *)
+let detail_page ~width blocks =
+  let label_cells =
+    Masc_tui_page_reading.widest_label_cells (List.concat_map snd blocks)
+  in
+  let max_cells =
+    max 1 (width - String.length Masc_tui_page_reading.detail_indent)
+  in
+  List.concat
+    (List.mapi
+       (fun index (title, lines) ->
+          detail_section_heading ~first:(index = 0) title
+          @ Masc_tui_page_reading.rows ~label_cells ~max_cells lines)
+       blocks)
+
 let detail_section_lines ?(first = false) title =
   let heading = [ "  " ^ Theme.info () ^ Ansi.bold ^ "[ " ^ title ^ " ]" ^ Ansi.reset ] in
   if first then heading else "" :: heading

@@ -43,7 +43,10 @@ class Setup(unittest.TestCase):
             client = Path(tmp) / 'muse'
             client.write_text('#!/bin/sh\nexit 97\n')
             client.chmod(0o700)
-            result = subprocess.run([BINARY, 'runtime-muse-models', '--account-home', str(home),
+            workspace = Path(tmp) / 'workspace'
+            workspace.mkdir()
+            result = subprocess.run([BINARY, 'runtime-muse-models', '--base-path', str(workspace),
+                                     '--account-home', str(home),
                                      '--cli-path', str(client)], capture_output=True, text=True, timeout=30)
             self.assertEqual(result.returncode, 3, result.stderr)
             self.assertFalse((home / '.config/muse/auth.json').exists())
@@ -85,7 +88,10 @@ for line in sys.stdin:
 """))
                 client.chmod(0o700)
                 env = {'PATH': '/usr/bin:/bin', 'HOME': str(home)}
-                result = subprocess.run([BINARY, 'runtime-muse-models', '--account-home', str(home),
+                workspace = home / 'workspace'
+                workspace.mkdir()
+                result = subprocess.run([BINARY, 'runtime-muse-models', '--base-path', str(workspace),
+                                         '--account-home', str(home),
                                          '--cli-path', 'muse'], env=env,
                                         capture_output=True, text=True, timeout=30)
                 self.assertEqual(result.returncode, 1 if config_exit else 0, result.stderr)

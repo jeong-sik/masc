@@ -24,7 +24,7 @@ type claude_code =
 
 type muse_serve =
   { cli_path : string
-  ; account_home : string
+  ; account_home : Runtime_account_access.muse_home
   ; model : string
   ; timeout_s : float
   }

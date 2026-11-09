@@ -220,7 +220,6 @@ let with_script steps f =
 ;;
 
 let config
-      ?account_home
       ?(native = Runtime_native_tools.Native_read)
       ?(admission_timeout_s = 10.)
       ?(timeout_s = 10.)
@@ -228,17 +227,22 @@ let config
   =
   { (Serve.default_config ()) with
     cli_path = "/bin/sh"
-  ; account_home
   ; native
   ; admission_timeout_s
   ; timeout_s = Some timeout_s
   }
 ;;
 
+(* The account of the caller's environment, which the scripted host runs on
+   unless a test declares a home. *)
+let environment_account () =
+  Masc_test_deps.authorized_muse Runtime_account_access.Process_environment
+;;
+
 let run_scripted ?model ?(workspace_root = "/w") ?storage ?session_mode ?account_home ?prepared_home ?mcp_servers ?on_session_ready ?on_prompt_sent ?on_stream_event ?native steps check_result =
   with_script steps (fun ~dir ~requests ->
     Eio_main.run (fun env ->
-      let result =
+      let run (type where) (account : where Runtime_account_access.muse_authorized) =
         Serve.run_turn
           ~storage:(Option.value storage ~default:(native_storage dir))
           ?session_mode
@@ -249,10 +253,19 @@ let run_scripted ?model ?(workspace_root = "/w") ?storage ?session_mode ?account
           ~mgr:(Eio.Stdenv.process_mgr env)
           ~clock:(Eio.Stdenv.clock env)
           ~cwd:Eio.Path.(Eio.Stdenv.fs env / dir)
-          {(config ?account_home ?native ()) with prepared_home; model}
+          ~account
+          {(config ?native ()) with prepared_home; model}
           ~workspace_root
           ~prompt:"say MASC_MUSE_OK"
           ~images:[]
+      in
+      let result =
+        match account_home with
+        | None -> run (environment_account ())
+        | Some home ->
+          run
+            (Masc_test_deps.authorized_muse
+               (Runtime_account_access.Declared_home (Masc_test_deps.muse_home home)))
       in
       check_result result (requests ())))
 ;;
@@ -407,6 +420,7 @@ let test_turn_start_receipt_is_the_line_the_host_read () =
             ~mgr:(Eio.Stdenv.process_mgr env)
             ~clock:(Eio.Stdenv.clock env)
             ~cwd:Eio.Path.(Eio.Stdenv.fs env / dir)
+            ~account:(environment_account ())
             (config ())
             ~workspace_root:"/w"
             ~prompt:"say \"MASC\"\nMUSE_OK"
@@ -651,14 +665,14 @@ let test_storage_that_cannot_hold_the_session_is_refused_before_spawn () =
       ])
 ;;
 
+(* A Muse process starts only on an authorized account, which is made from a
+   declared home, so a malformed home is refused before any process exists. *)
 let test_invalid_account_home_is_refused () =
-  List.iter (fun account_home -> run_scripted ~account_home []
-    (fun result requests ->
-       (match result with
-        | Error (Serve.Invalid_config _) -> ()
-        | Error error -> fail (Serve.error_to_string error)
-        | Ok _ -> fail "invalid account home reached the client");
-       check int "nothing dispatched" 0 (List.length requests)))
+  List.iter (fun account_home ->
+    match Runtime_account_access.declare_muse_home account_home with
+    | Error (_ : string) -> ()
+    | Ok (_ : Runtime_account_access.muse_home) ->
+      failf "the malformed account home %S was declared" account_home)
     [ "relative-account"; "/absolute/account "; " /absolute/account" ]
 ;;
 
@@ -1687,6 +1701,7 @@ let test_run_turn_returns_when_the_owner_is_cancelled_while_the_host_exits () =
                         ~mgr:(Eio.Stdenv.process_mgr env)
                         ~clock
                         ~cwd:Eio.Path.(Eio.Stdenv.fs env / dir)
+                        ~account:(environment_account ())
                         (config ())
                         ~workspace_root:"/w"
                         ~prompt:"say MASC_MUSE_OK"
@@ -1756,6 +1771,7 @@ let an_approval_write_that_times_out_reports_the_turn_as_accepted ~tool_item_ope
             ~mgr:(Eio.Stdenv.process_mgr env)
             ~clock:(Eio.Stdenv.clock env)
             ~cwd:Eio.Path.(Eio.Stdenv.fs env / dir)
+            ~account:(environment_account ())
             (config ~admission_timeout_s:0.3 ())
             ~workspace_root:"/w"
             ~prompt:"say MASC_MUSE_OK"
@@ -1787,6 +1803,7 @@ let test_a_session_start_write_that_times_out_reports_the_turn_as_not_accepted (
             ~mgr:(Eio.Stdenv.process_mgr env)
             ~clock:(Eio.Stdenv.clock env)
             ~cwd:Eio.Path.(Eio.Stdenv.fs env / dir)
+            ~account:(environment_account ())
             (config ~admission_timeout_s:0.3 ())
             ~workspace_root:long_workspace_root
             ~prompt:"say MASC_MUSE_OK"
@@ -1811,6 +1828,7 @@ let run_against_script steps ~config =
         ~mgr:(Eio.Stdenv.process_mgr env)
         ~clock:(Eio.Stdenv.clock env)
         ~cwd:Eio.Path.(Eio.Stdenv.fs env / dir)
+        ~account:(environment_account ())
         config
         ~workspace_root:"/w"
         ~prompt:"say MASC_MUSE_OK"
@@ -1866,6 +1884,7 @@ let test_a_host_that_exits_before_the_turn_reports_the_turn_as_not_accepted () =
 ;;
 
 let () =
+  Masc_test_deps.publish_single_user_access ();
   run
     "runtime_muse_serve"
     [ ( "turn"

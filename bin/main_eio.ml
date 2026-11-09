@@ -4264,16 +4264,16 @@ let runtime_muse_models_cmd =
   let timeout = Arg.(value & opt float runtime_probe_subscription_timeout_s
     & info ["timeout-s"] ~docv:"SECONDS"
       ~doc:"Finite positive deadline for the metadata exchange, including protocol notifications; blocking account preparation can delay it.") in
-  let run cli_path account_home timeout_s =
+  let run base_path cli_path account_home timeout_s =
     if not (Float.is_finite timeout_s) || timeout_s <= 0. then (
       prerr_endline "Muse discovery timeout must be finite and positive.";
       1)
-    else Masc_cli_muse_models.run
+    else Masc_cli_muse_models.run ~base_path
       ~cli_path:(Runtime_official_cli_install.spawn_path Muse ~command:cli_path)
       ~account_home ~timeout_s in
   Cmd.v (Cmd.info "runtime-muse-models"
-    ~doc:"List source-labelled Muse model metadata without a session or model turn; account availability is not verified.")
-    Term.(const run $ cli $ account_home $ timeout)
+    ~doc:"List source-labelled Muse model metadata without a session or model turn; account availability is not verified. The workspace decides whether the operator may start Muse on the account.")
+    Term.(const run $ base_path $ cli $ account_home $ timeout)
 
 let runtime_account_login_cmd =
   let client = Arg.(required & opt (some (enum

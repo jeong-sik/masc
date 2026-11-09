@@ -276,16 +276,27 @@ let account_request walk_owner ~runtime_id =
   | One_shot_walk -> Runtime_account_access.Operator_call
 
 (* HIGH-RISK-UNREVIEWED: an attempt starts an official CLI, Claude Code (plan
-   D2-5) or Codex (plan D2-6), only on an account the access authorized for
-   this walk. The refusal is masc's own,
+   D2-5), Codex (plan D2-6) or Muse (plan D3), only on an account the access
+   authorized for this walk. The refusal is masc's own,
    made before anything is sent, so it is the non-rotating local refusal of a
    provider_config_transform: no provider evidence names the candidate. *)
+let account_refused refusal =
+  Agent_core.Error.Config
+    (Agent_core.Error.InvalidConfig
+       { field = "account"; detail = Runtime_account_access.refusal_to_string refusal })
+;;
+
 let authorize_account walk_owner ~runtime_id account =
   Runtime_account_access.authorize (account_request walk_owner ~runtime_id) account
-  |> Result.map_error (fun refusal ->
-    Agent_core.Error.Config
-      (Agent_core.Error.InvalidConfig
-         { field = "account"; detail = Runtime_account_access.refusal_to_string refusal }))
+  |> Result.map_error account_refused
+;;
+
+let authorize_muse_account walk_owner ~runtime_id home =
+  Runtime_account_access.authorize_muse
+    (account_request walk_owner ~runtime_id)
+    (Runtime_account_access.Declared_home home)
+  |> Result.map_error account_refused
+;;
 
 (* How long a rate observation holds its path back: the provider's usable
    wait, or the throttle floor (RFC-provider-path-rest §3.3). The walk order
@@ -1838,7 +1849,6 @@ let muse_serve_client_config (execution : Runtime_execution.muse_serve)
   =
   { (Runtime_muse_serve.default_config ()) with
     cli_path = execution.cli_path
-  ; account_home = Some execution.account_home
   ; model = Some execution.model
   ; native = Runtime_native_tools.muse_default
   ; admission_timeout_s = execution.timeout_s
@@ -3236,6 +3246,16 @@ let run_named
           official_model_input_observation hooks
         in
         let run_muse ~initial_messages () =
+          match
+            authorize_muse_account walk_owner ~runtime_id:attempt_runtime_id
+              execution.account_home
+          with
+          | Error error ->
+            { Keeper_muse_runtime.result = Error error
+            ; pending_result_receipts = None
+            ; settled_session = None
+            ; effect_disposition = Keeper_provider_attempt_effect.No_effect_observed }
+          | Ok account ->
           reset_model_input_observation ();
           let on_transmitted_model_input transmitted =
             record_transmitted_model_input transmitted;
@@ -3245,7 +3265,8 @@ let run_named
               on_request_attribution
           in
           let workspace = muse_native_workspace ~base_path ~keeper_name
-              ~required_native_posture ~account_home:execution.account_home in
+              ~required_native_posture
+              ~account_home:(Runtime_account_access.declared_muse_home account) in
           match workspace with
           | Error error ->
             { Keeper_muse_runtime.result = Error error
@@ -3308,6 +3329,7 @@ let run_named
             ~event_bus
             ~raw_trace
             ~on_event
+            ~account
             ~config:(muse_serve_client_config execution)
             ()
         in

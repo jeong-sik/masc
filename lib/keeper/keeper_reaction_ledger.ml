@@ -20,7 +20,7 @@ let board_stimulus_id ~post_id = "board:" ^ post_id
 
 let stimulus_kind_of_event_queue (stimulus : Keeper_event_queue.stimulus) =
   match stimulus.payload with
-  | Keeper_event_queue.Board_signal _ | Keeper_event_queue.Board_attention _ ->
+  | Keeper_event_queue.Board_routing_pending _ | Keeper_event_queue.Board_signal _ | Keeper_event_queue.Board_attention _ ->
     Board_signal
   | Keeper_event_queue.Bootstrap -> Bootstrap
   | Keeper_event_queue.Fusion_completed _ -> Fusion_completed
@@ -43,12 +43,12 @@ let stimulus_id_of_event_queue (stimulus : Keeper_event_queue.stimulus) =
   match stimulus.payload, stimulus_kind_of_event_queue stimulus with
   | Keeper_event_queue.Board_attention attention, Board_signal ->
     "board-attention:" ^ attention.candidate_id
-  | Keeper_event_queue.Board_signal _, Board_signal ->
+  | (Keeper_event_queue.Board_routing_pending _ | Keeper_event_queue.Board_signal _), Board_signal ->
     board_stimulus_id ~post_id:stimulus.post_id
   | Keeper_event_queue.Schedule_due _, Schedule_due -> stimulus.post_id
   | Keeper_event_queue.Completion_authority_rejected _, Completion_authority_rejected ->
     stimulus.post_id
-  | ( ( Keeper_event_queue.Board_signal _
+  | ( ( Keeper_event_queue.Board_routing_pending _ | Keeper_event_queue.Board_signal _
       | Keeper_event_queue.Board_attention _
       | Keeper_event_queue.Bootstrap
       | Keeper_event_queue.Fusion_completed _
@@ -190,7 +190,7 @@ let save_schedule_occurrence_receipt ~base_path ~keeper_name
              Error (Printf.sprintf "schedule occurrence receipt write failed at %s: %s" path detail)
            | Fs_compat.After_rename ->
              Error (Printf.sprintf "schedule occurrence receipt may be written at %s; inspect before retry: %s" path detail))))
-  | Keeper_event_queue.Board_signal _
+  | Keeper_event_queue.Board_routing_pending _ | Keeper_event_queue.Board_signal _
   | Keeper_event_queue.Board_attention _
   | Keeper_event_queue.Bootstrap
   | Keeper_event_queue.Fusion_completed _
@@ -217,6 +217,7 @@ let base_fields ~record_kind ~event_id ~keeper_name ~recorded_at =
 
 let stimulus_payload_preview (payload : Keeper_event_queue.stimulus_payload) =
   match payload with
+  | Keeper_event_queue.Board_routing_pending _ -> "board_routing_pending"
   | Keeper_event_queue.Board_signal bs
   | Keeper_event_queue.Board_attention { signal = bs; _ } ->
     let limit = 256 in
@@ -326,6 +327,7 @@ let stimulus_json ~keeper_name (stimulus : Keeper_event_queue.stimulus) =
   let recorded_at = Time_compat.now () in
   let board_updated_at =
     match stimulus.payload with
+    | Keeper_event_queue.Board_routing_pending bs
     | Keeper_event_queue.Board_signal bs
     | Keeper_event_queue.Board_attention { signal = bs; _ } -> bs.updated_at
     | Keeper_event_queue.Bootstrap
@@ -1777,7 +1779,7 @@ let fleet_summary_json ~base_path ~keeper_names ~owner_lifecycle ~limit_per_keep
                       else ambiguous in
                     let ids = if valid then Event_id_set.add id ids else ids in
                     ids, Event_id_set.add id seen, ambiguous
-                  | Board_signal _ | Board_attention _ | Bootstrap
+                  | Board_routing_pending _ | Board_signal _ | Board_attention _ | Bootstrap
                   | Fusion_completed _ | Connector_attention _ | Hitl_resolved _
                   | Ask_answered _ | Completion_authority_rejected _ | Task_outcome _
                   | Task_cancelled _ | Workspace_message _ | Delegate_completed _

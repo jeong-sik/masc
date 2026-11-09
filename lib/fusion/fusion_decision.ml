@@ -23,7 +23,7 @@ let validate_source ~run_id (post : Board.post) =
   | _ -> Error (Rejected "source is not exact Fusion evidence")
 
 let source_in_workspace ~run_id =
-  match Board_dispatch.find_post_by_run_id ~run_id with
+  match Board_dispatch.find_post_by_run_id_unchecked ~run_id with
   | Some post -> validate_source ~run_id post
   | None -> Error (Rejected "Fusion run has no durable deliberation evidence")
 
@@ -33,7 +33,7 @@ let source_owned_by ~keeper (post : Board.post) =
   | Some {fusion_producer=None; _} | None -> false
 
 let source ~keeper ~run_id =
-  match Board_dispatch.find_post_by_run_id ~run_id with
+  match Board_dispatch.find_post_by_run_id_unchecked ~run_id with
   | Some post when source_owned_by ~keeper post ->
     validate_source ~run_id post
   (* A run owned by another Keeper and a run that does not exist answer with the

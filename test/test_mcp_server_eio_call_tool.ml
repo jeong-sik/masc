@@ -570,6 +570,26 @@ let test_activity_payload_sanitizes_invalid_utf8 () =
   check int "numeric field preserved" 15310
     (payload |> U.member "pr_number" |> U.to_int)
 
+let test_board_activity_has_no_private_request_preview () =
+  List.iter (fun board_name ->
+    let tool_name = Tool_name.Board_name.to_string board_name in
+    let payload = Masc.Mcp_server_eio_call_tool.For_testing.activity_tool_called_payload
+        ~tool_name ~success:false ~duration_ms:42 ~source:"external"
+        ~error_detail:"private-error" ~tool_args_preview:"private-preview"
+        (`Assoc ["title", `String "private-title"; "content", `String "private-body";
+          "post_id", `String "private-post-id"; "message", `String "private-message"])
+    in
+    check string "the operation remains observable" tool_name
+      (payload |> U.member "tool_name" |> U.to_string);
+    check bool "the outcome remains observable" false
+      (payload |> U.member "success" |> U.to_bool);
+    check bool "public projection can retain the redacted occurrence" true
+      (payload |> U.member "tool_io_redacted" |> U.to_bool);
+    List.iter (fun field -> check bool (tool_name ^ ": no " ^ field) true
+      (payload |> U.member field = `Null))
+      ["error"; "tool_args_preview"; "title"; "content"; "post_id"; "message"])
+    Tool_name.Board_name.all
+
 let test_failure_observation_uses_typed_failed_payload () =
   let failed : Tool_result.result =
     Tool_result.Failed
@@ -1030,6 +1050,8 @@ let () =
           test_case "media MCP cannot carry is named" `Quick test_media_mcp_cannot_carry_is_named;
           test_case "activity payload sanitizes invalid UTF-8" `Quick
             test_activity_payload_sanitizes_invalid_utf8;
+          test_case "Board activity exposes no private request preview" `Quick
+            test_board_activity_has_no_private_request_preview;
           test_case "failure observation follows typed failed payload" `Quick
             test_failure_observation_uses_typed_failed_payload;
           test_case "records MCP server operation duration metric" `Quick

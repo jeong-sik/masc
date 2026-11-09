@@ -261,7 +261,7 @@ let queued_workspace_messages ~base_path ~keeper_name =
       | Keeper_event_queue.Workspace_message message ->
         Some (stimulus.post_id, stimulus.urgency, message)
       | Keeper_event_queue.Board_signal _
-      | Keeper_event_queue.Board_attention _
+      | Keeper_event_queue.Board_routing_pending _ | Keeper_event_queue.Board_attention _
       | Keeper_event_queue.Bootstrap
       | Keeper_event_queue.Fusion_completed _
       | Keeper_event_queue.Schedule_due _

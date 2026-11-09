@@ -11,11 +11,6 @@ let backend_of_meta (meta : keeper_meta) =
   | Micro_vm -> "microvm"
   | Remote_ssh -> "remote_ssh"
 
-(* Closed set of claim-scope modes. Was a bare [string] (#20674): producers
-   and consumers matched on free string literals, so the compiler could not
-   force a consumer to handle a new mode, and a dropped producer left a dead
-   [empty_goal_scope_fallback_all_tasks] arm frozen in the consumer. A closed
-   variant makes every producer/consumer exhaustive at compile time. *)
 let string_opt_json = function
   | Some value when String.trim value <> "" -> `String value
   | _ -> `Null
@@ -27,19 +22,6 @@ let int_opt_json = function
 let nonempty_list = function
   | Some values -> values
   | None -> []
-
-let backend_detail_keys =
-  [ "sandbox_profile"; "network_mode"; "backend"; "sandbox_target" ]
-
-let is_backend_detail_key key = List.mem key backend_detail_keys
-
-let redact_backend_details = function
-  | `Assoc fields ->
-      `Assoc
-        (List.filter
-           (fun (key, _) -> not (is_backend_detail_key key))
-           fields)
-  | json -> json
 
 let path_resolution_contract_json =
   `Assoc
@@ -86,26 +68,6 @@ let runtime_observability_contract_json_from_fields ~keeper_name ?trace_id
       ("network_mode", string_opt_json network_mode);
       ("runtime_profile", string_opt_json runtime_profile);
     ]
-
-let runtime_contract_json_from_fields ~keeper_name ?trace_id
-    ?session_id ?keeper_turn_id ?task_id ?goal_ids
-    ?sandbox_profile ?sandbox_root ?sandbox_roots ?network_mode
-    ?runtime_profile () : Yojson.Safe.t =
-  runtime_observability_contract_json_from_fields
-    ~keeper_name
-    ?trace_id
-    ?session_id
-    ?keeper_turn_id
-    ?task_id
-    ?goal_ids
-    ?sandbox_profile
-    ?sandbox_root
-    ?sandbox_roots
-    ?network_mode
-    ?runtime_profile
-    ()
-  |> redact_backend_details
-
 
 let json_string_field name = function
   | `Assoc _ as json -> Json_util.get_string_nonempty json name

@@ -125,7 +125,7 @@ let wake_producer_to_string = function
 
 let wake_producer_of_payload : Keeper_event_queue.stimulus_payload -> wake_producer =
   function
-  | Board_signal _ -> Board_dispatch
+  | Board_routing_pending _ | Board_signal _ -> Board_dispatch
   | Board_attention _ -> Board_attention_judge
   | Bootstrap -> Keeper_supervisor
   | Fusion_completed _ -> Fusion_sink
@@ -195,7 +195,7 @@ let queue_payload_detail_fields : Keeper_event_queue.stimulus_payload -> (string
     [ "message_request_id", `String message.wmsg_request_id
     ; "message_from", `String message.wmsg_from
     ]
-  | Board_signal _
+  | Board_routing_pending _ | Board_signal _
   | Board_attention _
   | Bootstrap
   | Fusion_completed _
@@ -216,32 +216,11 @@ let queue_payload_detail_fields : Keeper_event_queue.stimulus_payload -> (string
     ]
 ;;
 
-let board_signal_what (signal : Keeper_event_queue.board_stimulus) =
-  match signal.kind with
-  | Post_created -> Printf.sprintf "%s의 새 글" signal.author
-  | Post_updated _ -> Printf.sprintf "%s의 글 수정" signal.author
-  | Comment_added _ -> Printf.sprintf "%s의 댓글" signal.author
-  | Reaction_changed change ->
-    Printf.sprintf
-      "%s의 반응 %s"
-      change.user_id
-      (if change.reacted then "추가" else "제거")
-  | Vote_cast change ->
-    Printf.sprintf
-      "%s의 %s 투표"
-      change.voter
-      (match change.direction with
-       | Vote_up -> "찬성"
-       | Vote_down -> "반대")
-;;
-
 (* One operator sentence per payload kind, from the payload's own typed
    fields. Every kind is enumerated: a new stimulus has to say what an
    operator should read it as before it can reach the queue view. *)
 let queue_payload_what : Keeper_event_queue.stimulus_payload -> string = function
-  | Board_signal signal -> board_signal_what signal
-  | Board_attention attention ->
-    Printf.sprintf "%s (관련성 판정 통과)" (board_signal_what attention.signal)
+  | Board_routing_pending _ | Board_signal _ | Board_attention _ -> "Board 알림 대기"
   | Bootstrap -> "기동 직후 첫 턴"
   | Fusion_completed completion ->
     (match completion.terminal with
@@ -330,7 +309,7 @@ let rows_for_queue_snapshot ~keeper_name ~source ~next_action selections =
       (fun (selection : Keeper_event_queue_state.pending_selection) ->
          match selection.source.payload with
          | Keeper_event_queue.Connector_attention _ -> Some selection
-         | Keeper_event_queue.Bootstrap | Keeper_event_queue.Board_signal _
+         | Keeper_event_queue.Bootstrap | Keeper_event_queue.Board_routing_pending _ | Keeper_event_queue.Board_signal _
          | Keeper_event_queue.Board_attention _ | Keeper_event_queue.Fusion_completed _
          | Keeper_event_queue.Schedule_due _ | Keeper_event_queue.Hitl_resolved _
          | Keeper_event_queue.Ask_answered _ | Keeper_event_queue.Completion_authority_rejected _
@@ -351,7 +330,7 @@ let rows_for_queue_snapshot ~keeper_name ~source ~next_action selections =
       (fun (selection : Keeper_event_queue_state.pending_selection) ->
          match selection.source.payload with
          | Keeper_event_queue.Connector_attention { event_id; _ } -> Some event_id
-         | Keeper_event_queue.Bootstrap | Keeper_event_queue.Board_signal _
+         | Keeper_event_queue.Bootstrap | Keeper_event_queue.Board_routing_pending _ | Keeper_event_queue.Board_signal _
          | Keeper_event_queue.Board_attention _ | Keeper_event_queue.Fusion_completed _
          | Keeper_event_queue.Schedule_due _ | Keeper_event_queue.Hitl_resolved _
          | Keeper_event_queue.Ask_answered _ | Keeper_event_queue.Completion_authority_rejected _
@@ -373,7 +352,7 @@ let rows_for_queue_snapshot ~keeper_name ~source ~next_action selections =
              Option.value (String_map.find_opt wake.schedule_id acc) ~default:[]
            in
            String_map.add wake.schedule_id ((wake, selection) :: existing) acc
-         | Board_signal _ | Board_attention _ | Bootstrap | Fusion_completed _
+         | Board_routing_pending _ | Board_signal _ | Board_attention _ | Bootstrap | Fusion_completed _
          | Connector_attention _ | Hitl_resolved _ | Ask_answered _
          | Completion_authority_rejected _ | Task_outcome _ | Task_cancelled _
          | Workspace_message _ | Delegate_completed _ | Composition_completed _ | Tool_result_ready _ | Owned_job_completed _ -> acc)
@@ -397,6 +376,18 @@ let rows_for_queue_snapshot ~keeper_name ~source ~next_action selections =
          without a second queue projection. Both are wire strings: the ref
          is a SHA-256 hex and the incarnation a decimal int64. *)
       let base_detail =
+        match stimulus.payload with
+        (* This inventory is public-read and has no authenticated Board
+           reader. Even actors and post IDs disclose a private event. Exact
+           source controls carry only opaque addresses; their effects remain
+           on the authorized operator boundary. *)
+        | Keeper_event_queue.Board_routing_pending _ | Board_signal _ | Board_attention _ ->
+          [ "source_ref", `String (Keeper_event_queue_state.source_snapshot_ref stimulus)
+          ; "source_incarnation", `String (Int64.to_string selection.admitted_revision) ]
+        | Bootstrap | Fusion_completed _ | Schedule_due _ | Connector_attention _
+        | Hitl_resolved _ | Ask_answered _ | Completion_authority_rejected _
+        | Task_outcome _ | Task_cancelled _ | Workspace_message _ | Delegate_completed _
+        | Composition_completed _ | Tool_result_ready _ | Owned_job_completed _ ->
         [ "queue_index", `Int queue_index
         ; "post_id", `String stimulus.post_id
         ; ( "source_ref"
@@ -426,7 +417,7 @@ let rows_for_queue_snapshot ~keeper_name ~source ~next_action selections =
         match stimulus.payload with
         | Keeper_event_queue.Schedule_due wake ->
           Option.map (fun members -> wake, members) (schedule_group wake.schedule_id)
-        | Keeper_event_queue.Bootstrap | Keeper_event_queue.Board_signal _
+        | Keeper_event_queue.Bootstrap | Keeper_event_queue.Board_routing_pending _ | Keeper_event_queue.Board_signal _
         | Keeper_event_queue.Board_attention _ | Keeper_event_queue.Fusion_completed _
         | Keeper_event_queue.Connector_attention _ | Keeper_event_queue.Hitl_resolved _
         | Keeper_event_queue.Ask_answered _ | Keeper_event_queue.Completion_authority_rejected _
@@ -520,7 +511,7 @@ let rows_for_queue_snapshot ~keeper_name ~source ~next_action selections =
        | Keeper_event_queue.Connector_attention _ when connector_count > 1 ->
          (* Already represented by the aggregate row above. *)
          go (queue_index + 1) acc rest
-       | Keeper_event_queue.Bootstrap | Keeper_event_queue.Board_signal _
+       | Keeper_event_queue.Bootstrap | Keeper_event_queue.Board_routing_pending _ | Keeper_event_queue.Board_signal _
        | Keeper_event_queue.Board_attention _ | Keeper_event_queue.Fusion_completed _
        | Keeper_event_queue.Schedule_due _ | Keeper_event_queue.Hitl_resolved _
        | Keeper_event_queue.Ask_answered _ | Keeper_event_queue.Completion_authority_rejected _

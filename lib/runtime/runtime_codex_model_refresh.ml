@@ -20,16 +20,14 @@ let cache_rows home =
       Ok (Some rows)
     | _ -> Error invalid
   with Sys_error _ | Unix.Unix_error _ | Yojson.Json_error _ -> Error invalid
-let run ~mgr ~clock ~cwd ~directory ~account_home ~cli_path ~timeout_s =
-  let* selected = Runtime_official_account.capture ~client:Codex ~declaration:account_home in
+let run ~mgr ~clock ~cwd ~directory ~account ~cli_path ~timeout_s =
   let* home = Runtime_verification_codex_home.prepare
-    ~source_home:(Runtime_official_account.home selected) ~directory ()
+    ~source_home:(Runtime_official_account.home (Runtime_account_access.account account)) ~directory ()
     |> Result.map_error (fun _ -> "The selected Codex connection could not be isolated for refresh.") in
   let config = { (Runtime_codex_app_server.default_config ()) with
-    cli_path; account_home = Runtime_official_account.Captured selected;
-    isolated_home = Some home; admission_timeout_s = timeout_s;
+    cli_path; isolated_home = Some home; admission_timeout_s = timeout_s;
     timeout_s = Some timeout_s } in
-  let* models = Runtime_codex_app_server.list_models ~mgr ~clock ~cwd config
+  let* models = Runtime_codex_app_server.list_models ~mgr ~clock ~cwd ~account config
     |> Result.map_error (fun _ -> "Codex model refresh failed. Sign in or check the selected connection, then refresh again.") in
   let* contexts = cache_rows home in
   let rows = List.map (fun (row : Runtime_codex_app_server.listed_model) ->

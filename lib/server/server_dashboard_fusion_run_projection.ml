@@ -32,12 +32,12 @@ let has_exact_fusion_origin ~run_id (post : Board.post) =
   | Some _ | None -> false
 ;;
 
-let find ~registry ~run_id =
+let find ~reader ~registry ~run_id =
   match Fusion_run_registry.get registry ~run_id with
   | None -> Run_not_found
   | Some run ->
     let post =
-      match Board_dispatch.find_post_by_run_id ~run_id with
+      match Board_dispatch.find_post_by_run_id ~reader ~run_id with
       | Some post when has_exact_fusion_origin ~run_id post -> Some post
       | Some _ | None -> None
     in
@@ -79,10 +79,10 @@ let historical_reference (post : Board.post) run_id =
 
 module Run_ids = Set.Make (String)
 
-let historical_evidence ~runs =
+let historical_evidence ~reader ~runs =
   let retained = Run_ids.of_list
       (List.map (fun (run : Fusion_run_registry.run) -> run.run_id) runs) in
-  Board_dispatch.list_posts_by_run_origin ()
+  Board_dispatch.list_posts_by_run_origin ~reader ()
   |> List.filter_map (fun (post : Board.post) ->
        match post.origin with
        | Some { source = Some "fusion"; fusion_run_id = Some run_id; _ }
@@ -103,18 +103,18 @@ let replay_to_yojson = function
         ]
 ;;
 
-let list_response ~generated_at ~registry =
+let list_response ~reader ~generated_at ~registry =
   let runs = Fusion_run_registry.list_runs registry in
   `Assoc
     [ "generated_at", `String generated_at
     ; "replay", replay_to_yojson (Fusion_run_registry.replay_status registry)
-    ; "historical_evidence", `List (historical_evidence ~runs)
+    ; "historical_evidence", `List (historical_evidence ~reader ~runs)
     ; "count", `Int (List.length runs)
     ; "runs", `List (List.map Fusion_run_registry.run_to_yojson runs)
     ]
 ;;
 
-let detail_response ~generated_at ~registry ~path =
+let detail_response ~reader ~generated_at ~registry ~path =
   match Server_utils.extract_path_param ~prefix:detail_prefix path with
   | None -> `Bad_request, `Assoc [ "error", `String "run_id is required" ]
   | Some encoded_run_id ->
@@ -122,13 +122,13 @@ let detail_response ~generated_at ~registry ~path =
     if String.equal (String.trim run_id) ""
     then `Bad_request, `Assoc [ "error", `String "run_id is required" ]
     else
-      match find ~registry ~run_id with
+      match find ~reader ~registry ~run_id with
       | Run_not_found ->
         ( `Not_found
         , `Assoc
             [ "error", `String ("no retained fusion run named " ^ run_id)
             ; "historical_evidence",
-                (match Board_dispatch.find_post_by_run_id ~run_id with
+                (match Board_dispatch.find_post_by_run_id ~reader ~run_id with
                  | Some post when has_exact_fusion_origin ~run_id post ->
                      historical_reference post run_id
                  | Some _ | None -> `Null)

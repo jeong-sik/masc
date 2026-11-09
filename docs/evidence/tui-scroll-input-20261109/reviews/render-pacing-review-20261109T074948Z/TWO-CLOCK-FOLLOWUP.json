@@ -1,0 +1,114 @@
+{
+  "at": "2026-11-09T07:53:17.476730+00:00",
+  "status": "source design review only; not implemented or executed by reviewer",
+  "source_reference": "16dd4aa47803259dc516a1c2acbc244d9985c0cd; relevant files equal to B bae45a3e",
+  "two_clocks": {
+    "take_Render": "consume pending, set Started=now, clear Completed",
+    "completed": "set Completed=now only; preserve Started and pending",
+    "Input_ready": "base=Completed if available, otherwise Started",
+    "Input_drained": "Render immediately",
+    "Background": "base=Started in both take and input_timeout_seconds",
+    "Force": "Render immediately",
+    "None": "Idle; input timeout remains maximum"
+  },
+  "verdict": "No P0/P1/P2 semantic counterexample identified in the proposed two-clock decision rules, under the existing single synchronous main-loop call order. Await implementation review and native measurements.",
+  "important_callsite": "Only after normal Render branch time_present returns. Includes Unchanged. Excludes image/MSX, owned deferral, Idle/Wait and exceptions.",
+  "existing_behavior_limit": "When pending is only Background but ready input arrives after this loop read, the next frame may still render by start cadence; this intentionally preserves existing behavior. The improvement begins after an Input request has been made.",
+  "state_invariant": "Completed belongs to the most recent Started; clearing it on every Render attempt prevents cross-frame reuse. A private closed variant Started/Completed(started,completed) or an outer option containing a mandatory Started plus optional Completed can express this without an impossible completed-only state.",
+  "tests_recommended": [
+    {
+      "case": "slow frame opens only Input-ready window",
+      "steps": [
+        "create interval16",
+        "take Force0 -> Render",
+        "completed64",
+        "request Input",
+        "take ready=true65 -> Wait80",
+        "input_timeout Input65 ->0",
+        "take ready=true66 -> Wait80"
+      ],
+      "purpose": "The busy input burst can drain without another heavy frame after one event; repeated invalidation does not extend the window."
+    },
+    {
+      "case": "Background retains original start cadence",
+      "steps": [
+        "fresh schedule start0/completed5, request Background",
+        "take ready=false6 -> Wait16; timeout10ms",
+        "fresh schedule start0/completed64, request Background",
+        "take ready=true65 -> Render; timeout before take0"
+      ],
+      "purpose": "completed never moves the Background deadline or its input wait; heavy background cadence does not become80ms."
+    },
+    {
+      "case": "last Input and Force bypass both clocks",
+      "steps": [
+        "start0/completed64, request Input",
+        "take ready=false65 -> Render",
+        "fresh start0/completed64, request Force",
+        "take ready=true65 -> Render"
+      ],
+      "purpose": "No extra delay for drained input; forced repair preserves priority even with queued bytes."
+    },
+    {
+      "case": "new attempt clears older completion",
+      "steps": [
+        "start0/completed64",
+        "request Force; take150 -> Render",
+        "no completed (simulate deferred or external frame)",
+        "request Input; take ready=true151 -> Wait166",
+        "separate same state with Background -> Wait166"
+      ],
+      "purpose": "A skipped Build uses the new attempt start fallback rather than an expired completion from an older frame."
+    },
+    {
+      "case": "completed preserves requests made inside render",
+      "steps": [
+        "take Render0",
+        "request Input before completed64",
+        "take ready=true65 -> Wait80; or ready=false65 -> Render",
+        "repeat fresh state for Background -> Render65 and Force -> Render65"
+      ],
+      "purpose": "Completion does not clear pending or overwrite priority; it also preserves the start clock."
+    },
+    {
+      "case": "completion creates no work",
+      "steps": [
+        "take Render0; completed64",
+        "take65 -> Idle",
+        "input_timeout65 ->maximum"
+      ],
+      "purpose": "No new timer wakeup or idle busy poll."
+    },
+    {
+      "case": "continuing ready input paints at its fixed due",
+      "steps": [
+        "start0/completed64; request Input",
+        "take ready=true65 ->Wait80",
+        "request Input at70; take70 ->Wait80",
+        "take ready=true80 ->Render"
+      ],
+      "purpose": "A continuous stream does not indefinitely defer the next frame."
+    },
+    {
+      "case": "normal Unchanged work records completion without authority change",
+      "steps": [
+        "normal Build returns Frame_presenter.Unchanged after64",
+        "completed64",
+        "Input-ready next request waits80",
+        "Background next request still uses start16 and can Render65",
+        "presented authority remains that of existing emitted frame"
+      ],
+      "purpose": "A costly unchanged Build receives burst pacing without minting a Presented result or changing background cadence."
+    }
+  ],
+  "not_proven": [
+    "queue stability",
+    "reduced GC",
+    "native latency improvement",
+    "unchanged background completion throughput",
+    "image/MSX responsiveness"
+  ],
+  "no_product_edits": true,
+  "no_build_or_CI": true,
+  "no_actual_UI": true
+}

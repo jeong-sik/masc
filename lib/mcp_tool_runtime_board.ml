@@ -208,14 +208,30 @@ let bind_caller_identity ~name ~agent_name arguments =
         arguments
         (Board_tool_registry.identity_fields_for_board_name board_name)
 
-let dispatch ~config ~agent_name ~arguments ~(state : Mcp_server.server_state) ~name =
+let public_post ~post_id =
+  match Board_dispatch.read_post_unchecked ~post_id with
+  | Ok post -> (match post.visibility with Board.Public -> true | Board.Unlisted | Board.Internal | Board.Direct -> false)
+  | Error _ -> false
+
+let public_comment ~comment_id =
+  let store = Board_dispatch.backend () in
+  match Board.get_comment store ~comment_id with
+  | Ok comment -> public_post ~post_id:(Board.Post_id.to_string comment.post_id)
+  | Error _ -> false
+
+let public_created_post result =
+  match Board_tool.post_of_write_data (Tool_result.data result) with
+  | Some post -> (match post.visibility with Board.Public -> true | Board.Unlisted | Board.Internal | Board.Direct -> false)
+  | None -> false
+
+let dispatch ~reader ~config ~agent_name ~arguments ~(state : Mcp_server.server_state) ~name =
   let arguments = bind_caller_identity ~name ~agent_name arguments in
   match Tool_name.Board_name.of_string name with
   | None -> None
   | Some Tool_name.Board_name.Board_post ->
-      let result_tr = Board_tool.handle_tool ~result_boundary:Tool_output.Sent_to_client name arguments in
+      let result_tr = Board_tool.handle_tool ~reader ~result_boundary:Tool_output.Sent_to_client name arguments in
       let result_tr =
-        if Tool_result.is_success result_tr then begin
+        if Tool_result.is_success result_tr && public_created_post result_tr then begin
         let author = Safe_ops.json_string ~default:"anonymous" "author" arguments in
         let content = Safe_ops.json_string ~default:"" "content" arguments in
         let post_id = created_post_id result_tr in
@@ -263,9 +279,9 @@ let dispatch ~config ~agent_name ~arguments ~(state : Mcp_server.server_state) ~
       Some result_tr
 
   | Some Tool_name.Board_name.Board_comment ->
-      let result_tr = Board_tool.handle_tool ~result_boundary:Tool_output.Sent_to_client name arguments in
+      let result_tr = Board_tool.handle_tool ~reader ~result_boundary:Tool_output.Sent_to_client name arguments in
       let result_tr =
-        if Tool_result.is_success result_tr then begin
+        if Tool_result.is_success result_tr && public_post ~post_id:(Safe_ops.json_string ~default:"" "post_id" arguments) then begin
         let author = Safe_ops.json_string ~default:"anonymous" "author" arguments in
         let content = Safe_ops.json_string ~default:"" "content" arguments in
         let post_id = Safe_ops.json_string ~default:"unknown" "post_id" arguments in
@@ -310,9 +326,9 @@ let dispatch ~config ~agent_name ~arguments ~(state : Mcp_server.server_state) ~
       Some result_tr
 
   | Some ((Tool_name.Board_name.Board_vote | Tool_name.Board_name.Board_comment_vote) as vote_name) ->
-      let result_tr = Board_tool.handle_tool ~result_boundary:Tool_output.Sent_to_client name arguments in
+      let result_tr = Board_tool.handle_tool ~reader ~result_boundary:Tool_output.Sent_to_client name arguments in
       let result_tr =
-        if Tool_result.is_success result_tr then begin
+        if Tool_result.is_success result_tr && (if vote_name = Tool_name.Board_name.Board_comment_vote then public_comment ~comment_id:(Safe_ops.json_string ~default:"" "comment_id" arguments) else public_post ~post_id:(Safe_ops.json_string ~default:"" "post_id" arguments)) then begin
         let voter = Safe_ops.json_string ~default:"anonymous" "voter" arguments in
         let target_field, subject_kind =
           match vote_name with
@@ -353,9 +369,10 @@ let dispatch ~config ~agent_name ~arguments ~(state : Mcp_server.server_state) ~
       Some result_tr
 
   | Some Tool_name.Board_name.Board_delete ->
-      let result_tr = Board_tool.handle_tool ~result_boundary:Tool_output.Sent_to_client name arguments in
+      let publish_public = public_post ~post_id:(Safe_ops.json_string ~default:"" "post_id" arguments) in
+      let result_tr = Board_tool.handle_tool ~reader ~result_boundary:Tool_output.Sent_to_client name arguments in
       let result_tr =
-        if Tool_result.is_success result_tr then begin
+        if Tool_result.is_success result_tr && publish_public then begin
         let post_id = Safe_ops.json_string ~default:"unknown" "post_id" arguments in
         let notification = `Assoc [
           ("type", `String "masc/board_delete");
@@ -381,14 +398,7 @@ let dispatch ~config ~agent_name ~arguments ~(state : Mcp_server.server_state) ~
       Some result_tr
 
   | Some Tool_name.Board_name.Board_post_get ->
-      (* The read carries the caller's own vote back as a "내 투표" marker.
-         The identity is the server's, through the same rewrite as vote's
-         [voter]: a model-supplied viewer is corrected, never trusted —
-         otherwise a read could impersonate another reader's vote state. *)
-      let arguments =
-        enforce_caller_identity ~tool:name ~field:"viewer" ~agent_name arguments
-      in
-      Some (Board_tool.handle_tool ~result_boundary:Tool_output.Sent_to_client name arguments)
+      Some (Board_tool.handle_tool ~reader ~result_boundary:Tool_output.Sent_to_client name arguments)
 
   | Some
       ( Tool_name.Board_name.Board_list
@@ -406,7 +416,7 @@ let dispatch ~config ~agent_name ~arguments ~(state : Mcp_server.server_state) ~
       | Tool_name.Board_name.Board_sub_board_delete
   (* masc_board_post_update runs through the same author-identity rewrite as
      masc_board_post above; masc_board_cleanup is the admin retention pass.
-     Both were routable by [Board_tool.handle_tool] all along but had no arm
+     Both were routable by [Board_tool.handle_tool ~reader] all along but had no arm
      here, so the MCP endpoint misreported them as
      "Unknown tool (registry inconsistency)". *)
       | Tool_name.Board_name.Board_post_update
@@ -417,4 +427,4 @@ let dispatch ~config ~agent_name ~arguments ~(state : Mcp_server.server_state) ~
          cleanup, not a deliberate omission of notification wiring. *)
       | Tool_name.Board_name.Board_close
       | Tool_name.Board_name.Board_reopen ) ->
-      Some (Board_tool.handle_tool ~result_boundary:Tool_output.Sent_to_client name arguments)
+      Some (Board_tool.handle_tool ~reader ~result_boundary:Tool_output.Sent_to_client name arguments)

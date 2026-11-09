@@ -102,9 +102,10 @@ let handle_board_name_with_outcome
       ~(args : Yojson.Safe.t)
   =
   let result_boundary = Tool_output.Projected_for_model result_projection in
+  let reader = Keeper_board_audience.reader_for_keeper meta in
   let dispatch tool_name tool_args =
     Keeper_tool_execution.of_tool_result
-      (Board_tool_dispatch.handle_tool ~result_boundary tool_name tool_args)
+      (Board_tool_dispatch.handle_tool ~reader ~result_boundary tool_name tool_args)
   in
   (* PR-S1: the board runtime speaks the domain name type [Board_name.t]
      directly rather than routing through the MASC god-enum. *)
@@ -160,7 +161,7 @@ let handle_board_name_with_outcome
     in
     Log.Keeper.debug "board_args: %s" (Yojson.Safe.pretty_to_string board_args);
     let result =
-      Board_tool_dispatch.handle_tool
+      Board_tool_dispatch.handle_tool ~reader
         ~result_boundary
         (Tool_name.Board_name.to_string Tool_name.Board_name.Board_post)
         board_args

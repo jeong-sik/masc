@@ -399,6 +399,7 @@ val board_comment_request_of_query :
     Invalid or out-of-bounds values return a JSON 400 body. *)
 
 val board_post_detail_json :
+  reader:Masc_board_handlers.Board_access.reader ->
   ?comment_request:Board.Comment_page.request ->
   ?focused_comment:string ->
   config:Workspace.config option ->
@@ -449,6 +450,7 @@ val board_sub_board_detail_prefix : string
     post handler. *)
 
 val board_sub_board_detail_json :
+  reader:Masc_board_handlers.Board_access.reader ->
   path:string -> [> `OK | `Bad_request | `Not_found ] * Yojson.Safe.t
 (** [board_sub_board_detail_json ~path] answers
     [GET /api/v1/board/sub-boards/<id_or_slug>] for both transports.

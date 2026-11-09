@@ -32,9 +32,10 @@ val cleanup :
   retention_sec:float ->
   unit ->
   (report, string) result
-(** An error names the stored profile when [meta] is not Remote_ssh: the
-    caller picked this step from a Remote_ssh projection, so a different
-    stored profile is a disagreement to show, not a Keeper to pass over.
+(** An error names the declared profile when [meta] is not Remote_ssh: the
+    caller picked this step from an earlier read that said Remote_ssh, so a
+    different profile now is a disagreement to show, not a Keeper to pass
+    over.
     It runs beside the Keeper's turns, not in its Maintenance slot: the
     payload leaves alone an entry a live process is inside or that was
     touched within the retention.

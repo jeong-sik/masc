@@ -674,7 +674,7 @@ let test_fusion_capture_retains_exact_state_across_terminal_change () =
              (Option.is_none (Masc.Board.Post_publication_failure.committed failure)));
         check string "missing producer preserves actual posts bytes" before (bytes ());
         check bool "missing producer creates no origin-index entry" true
-          (Option.is_none (Masc.Board_dispatch.find_post_by_run_id ~run_id:rejected_run)) ))
+          (Option.is_none (Masc.Board_dispatch.find_post_by_run_id ~reader:Masc_board_handlers.Board_access.Operator ~run_id:rejected_run)) ))
 
 let test_fusion_binding_targets_only_exact_run () =
   let source run_id = `Assoc ["source_id",`String "fusion";

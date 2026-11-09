@@ -32,4 +32,6 @@ val emit_tool_exec :
     [keeper_turn_id] is the absolute Keeper-lane turn and [agent_core_turn] is the
     model/tool-loop step inside it; task identity is carried separately and is
     never substituted for either turn id. Typed outcome JSON is preserved
-    without reconstructing a string category. *)
+    without reconstructing a string category, except Board tools omit that
+    payload on the public bus because error/resource text can contain private
+    Board data; their metadata carries [tool_io_redacted=true]. *)

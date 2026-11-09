@@ -5,16 +5,11 @@
 
 open Types
 
-let default_base_url = "https://api.anthropic.com"
 let api_version = "2023-06-01"
 
 (** Maximum HTTP response body size (10 MB).
     Used for LLM API responses, MCP HTTP, and agent registry. *)
 let max_response_body = 10 * 1024 * 1024
-
-(** Maximum stdio process buffer size (16 MB).
-    Larger than HTTP because stdio carries full JSON-RPC frames. *)
-let max_stdio_buffer = 16 * 1024 * 1024
 
 (** Process-scoped entropy for AGENT_CORE-allocated tool-use identities.
 
@@ -48,11 +43,6 @@ let text_blocks_to_string blocks =
     | RedactedThinking _ -> None
     | ToolUse _ | ToolResult _ | Image _ | Document _ | Audio _ -> None)
   |> String.concat "\n"
-;;
-
-let json_of_string_or_raw s =
-  try Yojson.Safe.from_string s with
-  | Yojson.Json_error _ -> `Assoc [ "raw", `String s ]
 ;;
 
 (* Provider error bodies come in two JSON shapes: a flat [{"error": "..."}]

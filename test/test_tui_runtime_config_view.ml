@@ -19,6 +19,9 @@ let fixture () = `Assoc [
       "requires_restart", `Bool false; "pending_keys", `List []; "preempted_keys", `List [];
       "applied_keys", `List [`String "keeper.foo"]; "applied_at", `Float 1.]]]
 let overlay f json = map_field "application" (map_field "keeper_overlay" f) json
+module Line = Masc_tui_page_line
+(* Every reading line of the status page, in order, without the block titles. *)
+let page_lines metadata = List.concat_map snd (detail_blocks ~lead:[] metadata)
 let issue severity = `Assoc ["key", `String "keeper.foo"; "kind", `String "type_mismatch";
   "severity", `String severity; "detail", `String "expected a boolean"]
 let test_atomic_read () =
@@ -32,15 +35,55 @@ let test_pending_and_preempted () =
     |> replace "pending_keys" (`List [`String "keeper.pending"])
     |> replace "preempted_keys" (`List [`String "keeper.environment"])) |> decode |> success in
   expect "restart remains explicit" read.metadata.keeper_requires_restart;
-  let lines = detail_lines read.metadata in
-  expect "every pending key visible" (List.mem (Warning, "Pending restart: keeper.pending") lines);
-  expect "environment precedence visible" (List.mem (Warning, "Preempted by environment: keeper.environment") lines)
+  let lines = page_lines read.metadata in
+  expect "every pending key visible"
+    (List.mem (Line.items ~tone:Line.Attention "Pending restart" [ "keeper.pending" ]) lines);
+  expect "environment precedence visible"
+    (List.mem (Line.items ~tone:Line.Attention "Preempted by environment" [ "keeper.environment" ]) lines)
 let test_invalid_source_is_readable () =
   let read = fixture () |> map_field "validation" (fun value -> value
     |> replace "valid" (`Bool false) |> replace "issues" (`List [issue "error"])) |> decode |> success in
   expect "source survives typed validation failure" (read.source_text <> "");
   expect "validation severity remains Bad" (match List.nth (summary_lines read.metadata) 1 with Bad, _ -> true | _ -> false);
-  expect "issue detail retained" (List.exists (fun (_, text) -> text = "keeper.foo · type mismatch: expected a boolean") (detail_lines read.metadata))
+  expect "issue detail retained"
+    (List.mem (Line.note ~tone:Line.Failure "keeper.foo · type mismatch: expected a boolean") (page_lines read.metadata))
+let test_status_page_carries_the_verdict () =
+  let clean = success (decode (fixture ())) in
+  expect "a clean read is a success" (List.mem (Line.fact ~tone:Line.Success "Validation" "valid") (page_lines clean.metadata));
+  expect "routing and keeper state are two facts"
+    (List.mem (Line.fact "Routing" "active") (page_lines clean.metadata)
+     && List.mem (Line.fact "Keeper" "applied") (page_lines clean.metadata));
+  expect "applied keys are one list" (List.mem (Line.items "Applied" [ "keeper.foo" ]) (page_lines clean.metadata));
+  expect "three blocks while keys exist" (List.length (detail_blocks ~lead:[] clean.metadata) = 3);
+  let keyless = fixture () |> overlay (replace "applied_keys" (`List [])) |> decode |> success in
+  expect "no key block without keys" (List.length (detail_blocks ~lead:[] keyless.metadata) = 2);
+  let failed = fixture () |> map_field "validation" (fun value -> value
+    |> replace "valid" (`Bool false) |> replace "issues" (`List [issue "error"])) |> decode |> success in
+  expect "an invalid read is a failure"
+    (List.mem (Line.fact ~tone:Line.Failure "Validation" "invalid · 1 error") (page_lines failed.metadata));
+  expect "the caller's lead opens the first block"
+    (match detail_blocks ~lead:[ Line.fact "Source" "/workspace/runtime.toml" ] clean.metadata with
+     | (_, first :: _) :: _ -> first = Line.fact "Source" "/workspace/runtime.toml"
+     | _ -> false)
+let test_summary_and_page_agree_on_warnings () =
+  let summary_tone metadata = match List.nth (summary_lines metadata) 2 with tone, _ -> tone in
+  let routing_pending = fixture ()
+    |> map_field "application" (map_field "routing" (replace "requires_restart" (`Bool true)))
+    |> decode |> success in
+  expect "a routing restart is a summary warning" (summary_tone routing_pending.metadata = Warning);
+  expect "the page puts the warning on the routing side only"
+    (List.mem (Line.fact ~tone:Line.Attention "Routing" "active, pending restart") (page_lines routing_pending.metadata)
+     && List.mem (Line.fact "Keeper" "applied") (page_lines routing_pending.metadata));
+  let preempted = fixture ()
+    |> overlay (fun value -> value
+      |> replace "status" (`String "preempted_by_env")
+      |> replace "preempted_keys" (`List [`String "keeper.environment"])) |> decode |> success in
+  expect "a preempted key is a summary warning" (summary_tone preempted.metadata = Warning);
+  expect "the page puts the warning on the keeper side only"
+    (List.mem (Line.fact ~tone:Line.Attention "Keeper" "preempted by environment") (page_lines preempted.metadata)
+     && List.mem (Line.fact "Routing" "active") (page_lines preempted.metadata));
+  expect "a clean read is no summary warning"
+    (summary_tone (success (decode (fixture ()))).metadata = Neutral)
 let test_parse_failure_shape () =
   let read = fixture ()
     |> replace "validation" (`Assoc ["valid", `Bool false; "parse_error", `String "line 2: invalid TOML"; "issues", `List []])
@@ -130,6 +173,8 @@ let () = List.iter (fun (name, test) -> test (); Printf.printf "PASS %s\n%!" nam
    "atomic GET source and metadata", test_atomic_read;
    "pending and preempted settings", test_pending_and_preempted;
    "invalid source remains readable", test_invalid_source_is_readable;
+   "status page carries the verdict", test_status_page_carries_the_verdict;
+   "summary and page agree on warnings", test_summary_and_page_agree_on_warnings;
    "TOML parse failure projection", test_parse_failure_shape;
    "unknown and inconsistent metadata", test_unknown_metadata_is_rejected;
    "restart status matches pending settings", test_restart_projection_consistency]

@@ -353,8 +353,8 @@ let reading_lines_carry_how_much_each_one_matters () =
   let module L = Masc_tui_page_line in
   let module S = Masc_tui_lane_standing in
   let tone = Alcotest.testable (fun f value -> Format.pp_print_string f (match value with
-    | L.Quiet -> "quiet" | L.Plain -> "plain" | L.Info -> "info" | L.Attention -> "attention"
-    | L.Failure -> "failure")) ( = ) in
+    | L.Quiet -> "quiet" | L.Plain -> "plain" | L.Info -> "info" | L.Success -> "success"
+    | L.Attention -> "attention" | L.Failure -> "failure")) ( = ) in
   let row_of selection state = { Decode.id = "row"; label = "row"; purpose = "fixture purpose"; ui_category = None;
     selection; state } in
   let toml = Decode.Declaration "/config/lane-addons/browser-work.toml" in

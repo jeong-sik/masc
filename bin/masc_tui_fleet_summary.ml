@@ -2,6 +2,7 @@ type reading =
   | Running
   | Turn_capacity
   | Blocker
+  | Proactive_interval
 
 let select ~cells ~lead_cells ~separator_cells readings =
   let rec fit used acc = function

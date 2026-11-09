@@ -593,11 +593,11 @@ let test_goal_transition_uses_authenticated_actor () =
 ;;
 
 let board_post_by_title title =
-  Masc.Board_dispatch.list_posts ~sort_by:Masc.Board_dispatch.Recent ~limit:20 ()
+  Masc.Board_dispatch.list_posts ~reader:Masc_board_handlers.Board_access.Operator ~sort_by:Masc.Board_dispatch.Recent ~limit:20 ()
   |> List.find_opt (fun (post : Masc.Board.post) -> String.equal post.title title)
 ;;
 
-let with_board_store ~base_path f =
+let with_board_store ?(recipient_lookup = Masc.Recipient_lookup.none_declared) ~base_path f =
   Fun.protect ~finally:Masc.Board.reset_global_for_test
   @@ fun () ->
   Masc_test_deps.with_process_env Env_config_core.base_path_env_key (Some base_path)
@@ -608,7 +608,7 @@ let with_board_store ~base_path f =
   Masc.Board_dispatch.reset_for_test ();
   Result.get_ok (Masc.Board_dispatch.init_jsonl
     ~base_path:(Env_config_core.base_path ())
-    ~recipient_lookup:Masc.Recipient_lookup.none_declared ());
+    ~recipient_lookup ());
   f ()
 ;;
 
@@ -657,7 +657,7 @@ let test_dashboard_delete_preserves_applied_pending_and_refused () =
         (receipt |> member "persistence" |> to_string);
       check int "applied pending deletion is announced" 1 !writes;
       check bool "post is absent from memory" true
-        (Result.is_error (Masc.Board_dispatch.get_post ~post_id));
+        (Result.is_error (Masc.Board_dispatch.get_post ~reader:Masc_board_handlers.Board_access.Operator ~post_id));
       let retry_status, _ = delete post_id in
       check int "repeating the applied deletion is a lookup miss" 404 retry_status;
       check int "refused retry is not announced again" 1 !writes);
@@ -678,7 +678,7 @@ let test_dashboard_delete_preserves_applied_pending_and_refused () =
   let status, _ = delete refused_id in
   check int "storage refusal is not a lookup miss" 503 status;
   check bool "refused deletion leaves the post readable" true
-    (Result.is_ok (Masc.Board_dispatch.get_post ~post_id:refused_id));
+    (Result.is_ok (Masc.Board_dispatch.get_post ~reader:Masc_board_handlers.Board_access.Operator ~post_id:refused_id));
   check int "storage refusal emits no transition" writes_before_refusal !writes
 ;;
 
@@ -703,7 +703,7 @@ let test_board_write_routes_reject_foreign_workspace () =
   let status, _ = post "/api/v1/tools/masc_board_comment" current
       [ "post_id", `String post_id; "content", `String "workspace seed comment" ] in
   check int "matching workspace creates comment" 201 status;
-  let comment_id = match Masc.Board_dispatch.get_comments ~post_id with
+  let comment_id = match Masc.Board_dispatch.get_comments ~reader:Masc_board_handlers.Board_access.Operator ~post_id with
     | Ok [comment] -> Masc.Board.Comment_id.to_string comment.id
     | Ok _ -> fail "expected one seed comment"
     | Error error -> fail (Masc.Board.show_board_error error) in
@@ -723,19 +723,19 @@ let test_board_write_routes_reject_foreign_workspace () =
       [expected (base_path ^ "/foreign-root"); `Null]) writes;
   check bool "refused post has no effect" true
     (Option.is_none (board_post_by_title "workspace guarded write"));
-  (match Masc.Board_dispatch.get_comments ~post_id with
+  (match Masc.Board_dispatch.get_comments ~reader:Masc_board_handlers.Board_access.Operator ~post_id with
    | Ok [comment] -> check string "refused comment has no effect" comment_id
        (Masc.Board.Comment_id.to_string comment.id)
    | Ok _ -> fail "refused comment changed the seed comment set"
    | Error error -> fail (Masc.Board.show_board_error error));
-  (match Masc.Board_dispatch.current_vote_for_comment ~voter:"workspace-writer" ~comment_id with
+  (match Masc.Board_dispatch.current_vote_for_comment ~reader:Masc_board_handlers.Board_access.Operator ~voter:"workspace-writer" ~comment_id with
    | Ok None -> ()
    | Ok (Some _) -> fail "refused workspace changed the comment vote"
    | Error error -> fail (Masc.Board.show_board_error error));
   List.iter (fun (path, status, fields) ->
     let actual, _ = post path current fields in
     check int (path ^ " accepts matching workspace") status actual) writes;
-  match Masc.Board_dispatch.current_vote_for_comment ~voter:"workspace-writer" ~comment_id with
+  match Masc.Board_dispatch.current_vote_for_comment ~reader:Masc_board_handlers.Board_access.Operator ~voter:"workspace-writer" ~comment_id with
   | Ok (Some Masc.Board.Up) -> ()
   | Ok (Some Masc.Board.Down) | Ok None -> fail "matching workspace did not store comment vote"
   | Error error -> fail (Masc.Board.show_board_error error)
@@ -784,7 +784,7 @@ let test_board_post_route_preserves_publication_evidence () =
     (failed_result |> member "effect_disposition" |> to_string);
   let committed_id =
     failed_result |> member "data" |> member "committed_post_id" |> to_string in
-  let committed = match Masc.Board_dispatch.get_post ~post_id:committed_id with
+  let committed = match Masc.Board_dispatch.get_post ~reader:Masc_board_handlers.Board_access.Operator ~post_id:committed_id with
     | Ok post -> post
     | Error error -> fail (Masc.Board.show_board_error error) in
   check string "the error receipt identifies the actual committed body"
@@ -807,7 +807,7 @@ let test_board_post_route_preserves_publication_evidence () =
     (String.equal committed_id later_id);
   check (list string) "success keeps the admitted unresolved names" []
     (data |> member "unresolved" |> to_list |> List.map to_string);
-  (match Masc.Board_dispatch.get_post ~post_id:later_id with
+  (match Masc.Board_dispatch.get_post ~reader:Masc_board_handlers.Board_access.Operator ~post_id:later_id with
    | Ok post ->
      check string "structured success data identifies the stored body" post.body
        (data |> member "body" |> to_string);
@@ -826,7 +826,7 @@ let test_board_post_route_preserves_publication_evidence () =
      | `Assoc fields -> not (List.mem_assoc "committed_post_id" fields)
      | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> true);
   check int "the refused request leaves exactly the two real posts" 2
-    (List.length (Masc.Board_dispatch.list_posts ()));
+    (List.length (Masc.Board_dispatch.list_posts ~reader:Masc_board_handlers.Board_access.Operator ()));
   check int "the refused request appends no additional WAL row" 2
     (List.length (Fs_compat.load_jsonl (Masc.Board.persist_path (Masc.Board.global ()))))
 ;;
@@ -868,7 +868,7 @@ let test_board_write_routes_use_authenticated_actor () =
   in
   check int "comment accepted" 201 status;
   let comment =
-    match Masc.Board_dispatch.get_comments ~post_id with
+    match Masc.Board_dispatch.get_comments ~reader:Masc_board_handlers.Board_access.Operator ~post_id with
     | Ok comments ->
       (match
          List.find_opt
@@ -900,19 +900,19 @@ let test_board_write_routes_use_authenticated_actor () =
   in
   check int "comment vote accepted" 200 status;
   (match
-     Masc.Board_dispatch.current_vote_for_post ~voter:"credential-owner" ~post_id
+     Masc.Board_dispatch.current_vote_for_post ~reader:Masc_board_handlers.Board_access.Operator ~voter:"credential-owner" ~post_id
    with
    | Ok (Some Masc.Board.Up) -> ()
    | Ok (Some Masc.Board.Down) | Ok None -> fail "canonical post vote was not stored"
    | Error error -> fail (Masc.Board.show_board_error error));
   (match
-     Masc.Board_dispatch.current_vote_for_post ~voter:"forged-header-actor" ~post_id
+     Masc.Board_dispatch.current_vote_for_post ~reader:Masc_board_handlers.Board_access.Operator ~voter:"forged-header-actor" ~post_id
    with
    | Ok None -> ()
    | Ok (Some _) -> fail "forged header actor owns the post vote"
    | Error error -> fail (Masc.Board.show_board_error error));
   (match
-     Masc.Board_dispatch.current_vote_for_comment
+     Masc.Board_dispatch.current_vote_for_comment ~reader:Masc_board_handlers.Board_access.Operator
        ~voter:"credential-owner"
        ~comment_id
    with
@@ -920,7 +920,7 @@ let test_board_write_routes_use_authenticated_actor () =
    | Ok (Some Masc.Board.Up) | Ok None -> fail "canonical comment vote was not stored"
    | Error error -> fail (Masc.Board.show_board_error error));
   (match
-     Masc.Board_dispatch.current_vote_for_comment
+     Masc.Board_dispatch.current_vote_for_comment ~reader:Masc_board_handlers.Board_access.Operator
        ~voter:"forged-header-actor"
        ~comment_id
    with
@@ -1006,7 +1006,7 @@ let test_board_list_route_and_projection_share_the_kept_page () =
   in
   let path = "/api/v1/board?sort_by=recent" in
   let page ?(reaction_actor = Some "list-reader") ?(target = path) () =
-    Server_board_list_http.payload ~config ~reaction_actor
+    Server_board_list_http.payload ~reader:Masc_board_handlers.Board_access.Operator ~config ~reaction_actor
       (Httpun.Request.create `GET target)
   in
   let route_titles () =
@@ -1039,7 +1039,7 @@ let test_board_list_route_and_projection_share_the_kept_page () =
   check bool "another reaction actor has its own entry" false
     (kept.Dashboard_cache.raw_json
      == (page ~reaction_actor:None ()).Dashboard_cache.raw_json);
-  check bool "another voter has its own entry" false
+  check bool "a query voter cannot replace the authenticated voter" true
     (kept.Dashboard_cache.raw_json
      == (page ~target:(path ^ "&voter=someone-else") ()).Dashboard_cache.raw_json);
   post "the second post";
@@ -1059,8 +1059,9 @@ let test_board_list_timeout_cannot_be_not_modified () =
      a key mismatch returns a normal Board page and fails the wire checks. *)
   let actor = "timeout-reader" in
   let key = Printf.sprintf
-    "board:list:%d:%s:-:recent:false:false:-:50:0:-:%d:%s"
+    "board:list:operator:%d:%s:-:recent:false:false:-:50:0:%d:%s:%d:%s"
     (String.length config.Masc.Workspace.base_path) config.base_path
+    (String.length actor) actor
     (String.length actor) actor in
   let read ?etag () =
     dispatch_response ~meth:"GET" ~router ~token
@@ -1083,7 +1084,7 @@ let test_board_list_timeout_cannot_be_not_modified () =
     check string "matching timeout still carries its evidence" payload.raw_json body)
     ["builder timeout"; String.make 9000 'x'];
   Dashboard_cache.invalidate_all ();
-  let payload = Server_board_list_http.payload ~config ~reaction_actor:(Some actor)
+  let payload = Server_board_list_http.payload ~reader:Masc_board_handlers.Board_access.Operator ~config ~reaction_actor:(Some actor)
     (Httpun.Request.create `GET "/api/v1/board?sort_by=recent") in
   let status, body = read ~etag:payload.etag () in
   check int "a successful unchanged Board page is still 304" 304 status;
@@ -1196,7 +1197,7 @@ let test_sub_board_routes_use_authenticated_owner () =
     (updated |> member "name" |> to_string);
   let foreign =
     match
-      Masc.Board_dispatch.create_sub_board
+      Masc.Board_dispatch.create_sub_board ~reader:Masc_board_handlers.Board_access.Operator
         ~slug:"forged-header-owned"
         ~name:"Foreign owner"
         ~description:"must remain foreign"
@@ -1212,7 +1213,7 @@ let test_sub_board_routes_use_authenticated_owner () =
     request ~meth:"DELETE" ("/api/v1/board/sub-boards/" ^ foreign_id) []
   in
   check int "forged owner cannot delete a foreign sub-board" 403 status;
-  (match Masc.Board_dispatch.get_sub_board ~sub_board_id:foreign_id with
+  (match Masc.Board_dispatch.get_sub_board ~reader:Masc_board_handlers.Board_access.Operator ~sub_board_id:foreign_id with
    | Ok _ -> ()
    | Error error -> fail (Board_tool.board_error_to_string error));
   let status, deleted =
@@ -1256,7 +1257,7 @@ let test_sub_board_routes_reject_unknown_access () =
   assert_error_names_value body "members_only";
   check bool "no sub-board was created" true
     (Result.is_error
-       (Masc.Board_dispatch.get_sub_board ~sub_board_id:"wrong-case"));
+       (Masc.Board_dispatch.get_sub_board ~reader:Masc_board_handlers.Board_access.Operator ~sub_board_id:"wrong-case"));
   let status, body =
     request "/api/v1/board/sub-boards"
       [ "slug", `String "numeric-access"
@@ -1283,7 +1284,7 @@ let test_sub_board_routes_reject_unknown_access () =
   in
   check int "unknown access on update is 400" 400 status;
   assert_error_names_value body "owner_only";
-  match Masc.Board_dispatch.get_sub_board ~sub_board_id with
+  match Masc.Board_dispatch.get_sub_board ~reader:Masc_board_handlers.Board_access.Operator ~sub_board_id with
   | Error error -> fail (Board_tool.board_error_to_string error)
   | Ok sub_board ->
     check string "update left access unchanged" "members_only"
@@ -1304,7 +1305,7 @@ let test_sub_board_reads_require_auth_in_strict_mode () =
     dispatch_json ~meth:"GET" ?token ~router ~path ~extra_headers:[] ~body:"" ()
   in
   (match
-     Masc.Board_dispatch.create_sub_board ~slug:"strict-read" ~name:"Strict"
+     Masc.Board_dispatch.create_sub_board ~reader:Masc_board_handlers.Board_access.Operator ~slug:"strict-read" ~name:"Strict"
        ~description:"" ~owner:"strict-reader" ~members:[] ()
    with
    | Ok _ -> ()
@@ -1565,7 +1566,7 @@ let test_board_reaction_batch_answers_every_id_asked_about () =
   Fs_compat.mkdir_p base_path;
   with_board_store ~base_path (fun () ->
   let json =
-    Server_board_reaction_http.list_batch_json
+    Server_board_reaction_http.list_batch_json ~reader:Masc_board_handlers.Board_access.Operator
       ~actor:"tester"
       (parsed_targets "p-one,p-two,p-three")
   in
@@ -1771,11 +1772,116 @@ let test_board_detail_defaults_to_latest_comments_with_older_pages () =
     [ "&comment_offset=26"; "&comment_offset=nope"; "&comment_limit=0" ]
 ;;
 
+let test_direct_board_http_readership_and_cache () =
+  let open Masc in
+  with_authenticated_activity_router
+    ~prefix:"board-direct-http-" ~agent_name:"direct-operator"
+  @@ fun ~base_path ~config:_ ~state:_ ~sw ~clock ~router ~token ->
+  let recipient_lookup = Recipient_lookup.make (fun candidate ->
+    Ok (Result.to_option
+      (Board.Agent_id.parse (Recipient_lookup.Candidate.to_string candidate)))) in
+  with_board_store ~recipient_lookup ~base_path @@ fun () ->
+  let router = Server_routes_http_routes_dashboard.add_routes ~sw ~clock router in
+  let worker name = match Auth.create_token base_path ~agent_name:name ~role:Masc_domain.Worker with
+    | Ok (token, _) -> token
+    | Error error -> fail (Masc_domain.masc_error_to_string error)
+  in
+  let recipient = worker "direct-reader" in
+  let outsider = worker "outside-reader" in
+  let create ~title ~body ~visibility =
+    match Board_dispatch.create_post ~author:"direct-operator" ~content:body
+        ~title ~body ~visibility ~hearth:title ~post_kind:Board.Human_post () with
+    | Ok post -> post
+    | Error error -> fail (Board.Post_publication_failure.to_string error)
+  in
+  let public = create ~title:"public older post" ~body:"public body" ~visibility:Board.Public in
+  let direct = create ~title:"private latest post" ~body:"@direct-reader private body" ~visibility:Board.Direct in
+  let public_id = Board.Post_id.to_string public.id in
+  let post_id = Board.Post_id.to_string direct.id in
+  let get token path =
+    dispatch_json ~meth:"GET" ~router ~token ~path ~extra_headers:[] ~body:"" ()
+  in
+  Dashboard_cache.invalidate_all ();
+  let _, operator_page = get token "/api/v1/board?sort_by=recent" in
+  check (list string) "operator primes a page with both posts"
+    ["private latest post"; "public older post"] (page_titles operator_page);
+  let _, outsider_page = get outsider "/api/v1/board?sort_by=recent&limit=1&voter=direct-reader" in
+  check (list string) "filter before the page limit and ignore forged voter"
+    ["public older post"] (page_titles outsider_page);
+  let _, recipient_page = get recipient "/api/v1/board?sort_by=recent" in
+  check (list string) "recipient reads the recorded Direct target"
+    ["private latest post"; "public older post"] (page_titles recipient_page);
+  let status, _ = get outsider ("/api/v1/board/" ^ post_id ^ "?voter=direct-reader") in
+  check int "non-reader detail is absent" 404 status;
+  let status, _ = get recipient ("/api/v1/board/" ^ post_id) in
+  check int "recipient detail exists" 200 status;
+  let _, operator_dashboard = get token "/api/v1/dashboard/board?sort_by=recent" in
+  check int "operator dashboard includes Direct" 2 (List.length (page_titles operator_dashboard));
+  let _, outsider_dashboard = get outsider "/api/v1/dashboard/board?sort_by=recent" in
+  check (list string) "dashboard cache is separated by reader"
+    ["public older post"] (page_titles outsider_dashboard);
+  let open Yojson.Safe.Util in
+  let hearth_names json = json |> member "hearths" |> to_list
+      |> List.map (fun row -> row |> member "name" |> to_string)
+      |> List.sort String.compare in
+  let _, operator_hearths = get token "/api/v1/board/hearths" in
+  check (list string) "operator primes hearths including the Direct-only name"
+    ["private latest post"; "public older post"] (hearth_names operator_hearths);
+  let _, outsider_hearths = get outsider "/api/v1/board/hearths" in
+  check (list string) "hearth cache does not expose another reader's private name"
+    ["public older post"] (hearth_names outsider_hearths);
+  let _, recipient_hearths = get recipient "/api/v1/board/hearths" in
+  check (list string) "recipient's hearth cache retains the Direct hearth"
+    ["private latest post"; "public older post"] (hearth_names recipient_hearths);
+  check int "dashboard total excludes unreadable posts" 1
+    (outsider_dashboard |> member "total" |> to_int);
+  let status, _ = dispatch_json ~router ~token:outsider
+      ~path:"/api/v1/tools/masc_board_comment" ~extra_headers:[]
+      ~body:(Yojson.Safe.to_string (`Assoc ["post_id", `String post_id;
+        "content", `String "a non-reader must not write through the private id"])) () in
+  check int "non-reader cannot use a write as an existence probe" 400 status;
+  (match Board_dispatch.get_comments ~reader:Masc_board_handlers.Board_access.Operator ~post_id with
+   | Ok comments -> check int "refused private comment has no effect" 0 (List.length comments)
+   | Error error -> fail (Board.show_board_error error));
+  (match Board_dispatch.toggle_reaction ~reader:Masc_board_handlers.Board_access.Operator
+      ~target_type:Board.Reaction_post ~target_id:post_id
+      ~user_id:"direct-reader" ~emoji:"🚀" with
+   | Ok _ -> ()
+   | Error error -> fail (Board.show_board_error error));
+  let _, recipient_reactions = get recipient
+      ("/api/v1/board/reactions/batch?target_type=post&target_ids=" ^ post_id) in
+  check bool "the recipient sees the stored Direct reaction" true
+    (recipient_reactions |> member "targets" |> to_list
+     |> List.exists (fun row -> row |> member "reactions" |> to_list <> []));
+  let status, reaction_page = get outsider
+      ("/api/v1/board/reactions/batch?target_type=post&target_ids=" ^ public_id ^ "," ^ post_id) in
+  check int "mixed reaction batch remains readable" 200 status;
+  check bool "unreadable target contributes no reaction details" true
+    (reaction_page |> member "targets" |> to_list
+     |> List.for_all (fun row ->
+          row |> member "target_id" |> to_string <> post_id
+          || row |> member "reactions" |> to_list = []));
+  let request = Httpun.Request.create
+      ~headers:(Httpun.Headers.of_list ["authorization", "Bearer " ^ outsider;
+        "x-masc-agent", "direct-reader"])
+      `GET "/api/v1/board?voter=direct-reader" in
+  (match Server_auth.board_access_for_request ~base_path request with
+   | Ok (Masc_board_handlers.Board_access.Named {name; _}, Some actor) ->
+       check string "credential owns readership" "outside-reader" name;
+       check string "same observation owns reactions" name actor
+   | Ok (Masc_board_handlers.Board_access.Anonymous, _) | Ok (Masc_board_handlers.Board_access.Operator, _)
+   | Ok (Masc_board_handlers.Board_access.Named _, None) -> fail "worker was not a named credential reader"
+   | Error error -> fail (Masc_domain.masc_error_to_string error));
+  Dashboard_cache.invalidate_all ()
+;;
+
 let () =
   run
     "board_rest_routes"
     [ ( "dashboard bridge"
-      , [ test_case
+      , [ test_case "Direct HTTP readership, pagination and cache isolation" `Quick
+            test_direct_board_http_readership_and_cache
+        ; test_case
             "Board detail defaults to latest 20 and pages older comments"
             `Quick
             test_board_detail_defaults_to_latest_comments_with_older_pages

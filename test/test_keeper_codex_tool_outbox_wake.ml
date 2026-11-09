@@ -75,7 +75,7 @@ let test_restart_discovers_and_deduplicates () =
       | [id] -> id | _ -> fail "expected one durable result" in
     (match selection.source.payload with
      | Keeper_event_queue.Tool_result_ready id -> check string "exact pointer" receipt_id id
-     | Board_signal _ | Board_attention _ | Bootstrap | Fusion_completed _
+     | Board_signal _ | Board_routing_pending _ | Board_attention _ | Bootstrap | Fusion_completed _
      | Schedule_due _ | Connector_attention _ | Hitl_resolved _ | Ask_answered _
      | Completion_authority_rejected _ | Task_cancelled _ | Workspace_message _
      | Delegate_completed _ | Composition_completed _ | Owned_job_completed _
@@ -178,7 +178,7 @@ let test_route_change_preserves_unrelated_work_and_receipt ?(corrupt=false) () =
     let original = only_selection config in
     let receipt_id = match original.source.payload with
       | Keeper_event_queue.Tool_result_ready id -> id
-      | Board_signal _ | Board_attention _ | Bootstrap | Fusion_completed _
+      | Board_signal _ | Board_routing_pending _ | Board_attention _ | Bootstrap | Fusion_completed _
       | Schedule_due _ | Connector_attention _ | Hitl_resolved _ | Ask_answered _
       | Completion_authority_rejected _ | Task_cancelled _ | Workspace_message _
       | Delegate_completed _ | Composition_completed _ | Owned_job_completed _

@@ -51,9 +51,11 @@ let dispatch t ~sw ~stream_id reqd work =
           | () -> ()
           | exception Http_h2_stream.Stream_reset _ -> ()
           | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
-          (* A fiber forked on the stream switch raised. The switch has
-             finished, so only the report is left. *)
-          | exception exn -> Http_h2_stream.report reqd exn));
+          (* A fiber forked on the stream switch raised, or a fiber turned
+             the stream's end into another exception ([Eio.Exn.Multiple]).
+             The switch has finished, so only the report and its log are
+             left. *)
+          | exception exn -> Http_h2_stream.report_failure reqd exn));
     `Stop_daemon)
 ;;
 

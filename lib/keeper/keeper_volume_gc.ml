@@ -1,13 +1,13 @@
-(** Reclamation of retired keepers' Apple volumes: report first, delete on
-    request. See the interface for the contract; the ordering of the checks
-    below is the safety story: containers first (the strongest live
-    evidence), then local registration and the claims marker. Only a
-    build-only volume with no observed reference becomes a candidate, and a
-    candidate is deleted only after a fresh listing confirms the build-only
-    shape at delete time. Past that confirmation the fence is the platform,
-    which refuses to delete a volume a container references, plus the
-    absence check after the delete. All effects run through the injected
-    [run]. *)
+(** Reclamation of retired keepers' Apple volumes: report first, then delete
+    only the keepers a request names. See the interface for the contract;
+    the ordering of the checks below is the safety story: containers first
+    (the strongest live evidence), then local registration and the claims
+    marker. Only a build-only volume with no observed reference becomes a
+    candidate, and a candidate is deleted only when the request names it and
+    a fresh listing confirms the build-only shape at delete time. Past that
+    confirmation the fence is the platform, which refuses to delete a volume
+    a container references, plus the absence check after the delete. All
+    effects run through the injected [run]. *)
 
 type volume_role =
   | Work_role
@@ -70,9 +70,14 @@ type keeper_verdict =
   ; outcome : keeper_outcome
   }
 
+type request =
+  | Report_only
+  | Reclaim_named of string list
+
 type report =
   { foreign_volumes : string list
   ; keepers : keeper_verdict list
+  ; unlisted_keepers : string list
   }
 
 (* One keeper's volumes as the listing showed them: at least one of the two,
@@ -265,7 +270,26 @@ let remove_listed_build_volume ~run ~timeout_sec ~volume_name =
          volume_name (Keeper_sandbox_exec_failure.status_label listing_status))
 ;;
 
-let apple_keeper_volume_gc ~run ~timeout_sec ~registered_keeper ~claims_image ~execute =
+let named request keeper_name =
+  match request with
+  | Report_only -> false
+  | Reclaim_named requested -> List.exists (String.equal keeper_name) requested
+;;
+
+let reclaim_listed_candidate ~run ~timeout_sec ~keeper_name ~work_volume ~build_volume =
+  match work_volume, build_volume with
+  | None, Some volume_name ->
+    (match confirm_build_only_shape ~run ~timeout_sec ~keeper_name ~volume_name with
+     | Error detail -> Kept (Unverified detail)
+     | Ok () ->
+       (match remove_listed_build_volume ~run ~timeout_sec ~volume_name with
+        | Ok () -> Reclaimed
+        | Error detail -> Reclaim_failed detail))
+  | Some _, _ | None, None ->
+    Reclaim_failed "reclaim candidate is not a listed build-only volume"
+;;
+
+let apple_keeper_volume_gc ~run ~timeout_sec ~registered_keeper ~claims_image ~request =
   match run ~timeout_sec (Keeper_sandbox_microvm.apple_volume_list_argv ()) with
   | Unix.WEXITED 0, stdout, _ ->
     (match Yojson.Safe.from_string stdout with
@@ -283,40 +307,37 @@ let apple_keeper_volume_gc ~run ~timeout_sec ~registered_keeper ~claims_image ~e
                  | Foreign_volume name -> Some name)
               volumes
           in
+          let grouped = group_keeper_volumes volumes in
           let keepers =
             List.map
               (fun (keeper_name, work_volume, build_volume) ->
                  let outcome =
-                   judge_keeper ~run ~timeout_sec ~registered_keeper ~claims_image
-                     ~keeper_name ~work_volume
-                 in
-                 let outcome =
-                   if execute
-                      && (match outcome with
-                          | Reclaim_candidate -> true
-                          | Kept _ | Reclaimed | Reclaim_failed _ -> false)
-                   then (
-                     match work_volume, build_volume with
-                     | None, Some volume_name ->
-                       (match
-                          confirm_build_only_shape ~run ~timeout_sec ~keeper_name
-                            ~volume_name
-                        with
-                        | Error detail -> Kept (Unverified detail)
-                        | Ok () ->
-                          (match
-                             remove_listed_build_volume ~run ~timeout_sec ~volume_name
-                           with
-                           | Ok () -> Reclaimed
-                           | Error detail -> Reclaim_failed detail))
-                     | Some _, _ | None, None ->
-                       Reclaim_failed "reclaim candidate is not a listed build-only volume")
-                   else outcome
+                   match
+                     judge_keeper ~run ~timeout_sec ~registered_keeper ~claims_image
+                       ~keeper_name ~work_volume
+                   with
+                   | Reclaim_candidate when named request keeper_name ->
+                     reclaim_listed_candidate ~run ~timeout_sec ~keeper_name ~work_volume
+                       ~build_volume
+                   | (Kept _ | Reclaim_candidate | Reclaimed | Reclaim_failed _) as judged ->
+                     judged
                  in
                  { keeper_name; work_volume; build_volume; outcome })
-              (group_keeper_volumes volumes)
+              grouped
           in
-          Ok { foreign_volumes = foreign; keepers }))
+          let unlisted_keepers =
+            match request with
+            | Report_only -> []
+            | Reclaim_named requested ->
+              List.filter
+                (fun name ->
+                   not
+                     (List.exists
+                        (fun (keeper_name, _, _) -> String.equal keeper_name name)
+                        grouped))
+                requested
+          in
+          Ok { foreign_volumes = foreign; keepers; unlisted_keepers }))
   | (Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _) as status, _, _ ->
     Error
       (Printf.sprintf

@@ -1,6 +1,8 @@
 (** Telemetry helpers for keeper tool AGENT_CORE handler execution. *)
 
-(** Build the JSON payload for a keeper tool-call SSE event. [keeper_turn_id]
+(** Build the JSON payload for a keeper tool-call SSE event. Board tools retain
+    occurrence/disposition metadata but omit error text and all I/O fields
+    because the shared SSE bus has no reader authorization. [keeper_turn_id]
     is the keeper turn the tool-call ledger files the call under; [None] is
     written as null. *)
 val keeper_tool_call_event_json
@@ -17,8 +19,7 @@ val keeper_tool_call_event_json
 
 (** Redacted, bounded live I/O fields for keeper tool-call SSE payloads.
     SSE carries structured [tool_args]/[tool_result] plus compatibility
-    previews. Secret-bearing tools omit I/O entirely and set
-    [tool_io_redacted]. *)
+    previews. Board tools omit I/O entirely and set [tool_io_redacted]. *)
 val tool_io_preview_fields
   :  tool_name:string
   -> input:Yojson.Safe.t

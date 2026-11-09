@@ -7,9 +7,7 @@
     - save_text / load_text: roundtrip
     - ensure_dir: nested creation, idempotency
     - save_session / load_session: JSON roundtrip with normalization
-    - append_event / read_events: JSONL append and seq filtering
-    - snapshot_path: path generation with label sanitization
-    - save_artifact_text: artifact file creation *)
+    - append_event / read_events: JSONL append and seq filtering *)
 
 open Agent_core
 
@@ -327,49 +325,6 @@ let test_select_run_windows_corrupt_session_is_single_partial_failure () =
           | _ -> Alcotest.fail "expected one failure")))
 ;;
 
-let test_read_window_events_dedupes_overlapping_windows () =
-  with_temp_dir (fun dir ->
-    let root = Filename.concat dir "store" in
-    match Runtime_store.create ~root () with
-    | Error e -> Alcotest.fail (Error.to_string e)
-    | Ok store ->
-      ignore (save_run store "run-a" 10.0);
-      ignore (save_run store "run-b" 20.0);
-      let append session_id seq =
-        match Runtime_store.append_event store session_id (mk_event seq) with
-        | Ok () -> ()
-        | Error e -> Alcotest.fail (Error.to_string e)
-      in
-      append "run-a" 1;
-      append "run-b" 1;
-      append "run-b" 2;
-      (match
-         Runtime_store.read_window_events
-           store
-           [ Runtime_store.Last_n_runs 2
-           ; Runtime_store.Session "run-b"
-           ; Runtime_store.Rolling_seconds 5.0
-           ]
-       with
-       | Error e -> Alcotest.fail (Error.to_string e)
-       | Ok window ->
-         let event_ids =
-           List.map
-             (fun (record : Runtime_store.run_event_record) -> record.event_id)
-             window.events
-         in
-         let unique_ids = List.sort_uniq String.compare event_ids in
-         Alcotest.(check (list string))
-           "event order"
-           [ "run-a#1"; "run-b#1"; "run-b#2" ]
-           event_ids;
-         Alcotest.(check int)
-           "0 duplicate event ids"
-           (List.length event_ids)
-           (List.length unique_ids);
-         Alcotest.(check int) "no failures" 0 (List.length window.failures)))
-;;
-
 (* ── append_event / read_events tests ────────────────────────── *)
 
 let test_append_and_read_events () =
@@ -428,99 +383,6 @@ let test_read_events_no_file () =
        | Error e -> Alcotest.fail (Error.to_string e)))
 ;;
 
-(* ── snapshot_path tests ─────────────────────────────────────── *)
-
-let test_snapshot_path_with_label () =
-  with_temp_dir (fun dir ->
-    let root = Filename.concat dir "store" in
-    match Runtime_store.create ~root () with
-    | Error e -> Alcotest.fail (Error.to_string e)
-    | Ok store ->
-      let path = Runtime_store.snapshot_path store "s1" ~seq:5 ~label:(Some "my label") in
-      (* Should contain sanitized label: spaces -> _ *)
-      Alcotest.(check bool) "has seq" true (String.length (Filename.basename path) > 0);
-      let base = Filename.basename path in
-      Alcotest.(check bool)
-        "contains 0005"
-        true
-        (String.length base >= 4 && String.sub base 0 4 = "0005");
-      Alcotest.(check bool) "no spaces" true (not (String.contains base ' ')))
-;;
-
-let test_snapshot_path_no_label () =
-  with_temp_dir (fun dir ->
-    let root = Filename.concat dir "store" in
-    match Runtime_store.create ~root () with
-    | Error e -> Alcotest.fail (Error.to_string e)
-    | Ok store ->
-      let path = Runtime_store.snapshot_path store "s1" ~seq:1 ~label:None in
-      let base = Filename.basename path in
-      Alcotest.(check string) "just seq" "0001.json" base)
-;;
-
-let test_snapshot_path_slash_in_label () =
-  with_temp_dir (fun dir ->
-    let root = Filename.concat dir "store" in
-    match Runtime_store.create ~root () with
-    | Error e -> Alcotest.fail (Error.to_string e)
-    | Ok store ->
-      let path = Runtime_store.snapshot_path store "s1" ~seq:2 ~label:(Some "a/b") in
-      let base = Filename.basename path in
-      (* Slash should be sanitized to _ *)
-      Alcotest.(check bool) "no slash in basename" true (not (String.contains base '/')))
-;;
-
-(* ── save_artifact_text tests ────────────────────────────────── *)
-
-let test_save_artifact_text () =
-  with_temp_dir (fun dir ->
-    let root = Filename.concat dir "store" in
-    match Runtime_store.create ~root () with
-    | Error e -> Alcotest.fail (Error.to_string e)
-    | Ok store ->
-      (match
-         Runtime_store.save_artifact_text
-           store
-           "art-sess"
-           ~name:"report"
-           ~kind:"markdown"
-           ~content:"# Title"
-       with
-       | Ok path ->
-         Alcotest.(check bool)
-           "path ends with .md"
-           true
-           (Filename.check_suffix path ".md");
-         (match Runtime_store.load_text path with
-          | Ok loaded -> Alcotest.(check string) "content" "# Title" loaded
-          | Error e -> Alcotest.fail (Error.to_string e))
-       | Error e -> Alcotest.fail (Error.to_string e)))
-;;
-
-let test_save_artifact_text_empty_name () =
-  with_temp_dir (fun dir ->
-    let root = Filename.concat dir "store" in
-    match Runtime_store.create ~root () with
-    | Error e -> Alcotest.fail (Error.to_string e)
-    | Ok store ->
-      (match
-         Runtime_store.save_artifact_text
-           store
-           "art-sess"
-           ~name:""
-           ~kind:"json"
-           ~content:"{}"
-       with
-       | Ok path ->
-         (* Empty name should default to "artifact" *)
-         let base = Filename.basename path in
-         Alcotest.(check bool)
-           "starts with artifact"
-           true
-           (String.length base >= 8 && String.sub base 0 8 = "artifact")
-       | Error e -> Alcotest.fail (Error.to_string e)))
-;;
-
 (* ── Runner ───────────────────────────────────────────────────── *)
 
 let () =
@@ -566,24 +428,11 @@ let () =
             "corrupt selected run is one partial failure"
             `Quick
             test_select_run_windows_corrupt_session_is_single_partial_failure
-        ; Alcotest.test_case
-            "overlapping windows dedupe events"
-            `Quick
-            test_read_window_events_dedupes_overlapping_windows
         ] )
     ; ( "events"
       , [ Alcotest.test_case "append and read" `Quick test_append_and_read_events
         ; Alcotest.test_case "filter by seq" `Quick test_read_events_with_filter
         ; Alcotest.test_case "no file" `Quick test_read_events_no_file
-        ] )
-    ; ( "snapshot_path"
-      , [ Alcotest.test_case "with label" `Quick test_snapshot_path_with_label
-        ; Alcotest.test_case "no label" `Quick test_snapshot_path_no_label
-        ; Alcotest.test_case "slash in label" `Quick test_snapshot_path_slash_in_label
-        ] )
-    ; ( "artifacts"
-      , [ Alcotest.test_case "save text" `Quick test_save_artifact_text
-        ; Alcotest.test_case "empty name" `Quick test_save_artifact_text_empty_name
         ] )
     ]
 ;;

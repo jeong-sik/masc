@@ -89,7 +89,7 @@ let test_down_scores_zero () =
 (** {1 Empty ledger} *)
 
 let test_empty_ledger () =
-  let events = Board_dispatch.get_karma_ledger () in
+  let events = Board_dispatch.get_karma_ledger ~reader:Masc_board_handlers.Board_access.Operator () in
   Alcotest.(check int) "empty store gives empty ledger" 0 (List.length events)
 
 (** {1 Single upvote produces one event} *)
@@ -98,7 +98,7 @@ let test_upvote_produces_one_event () =
   let post = create_post_exn ~author:"alice" ~content:"hello" in
   let pid = Board.Post_id.to_string post.id in
   vote_exn ~voter:"bob" ~post_id:pid ~direction:Board.Up;
-  let events = Board_dispatch.get_karma_ledger () in
+  let events = Board_dispatch.get_karma_ledger ~reader:Masc_board_handlers.Board_access.Operator () in
   Alcotest.(check int) "one upvote → one karma event" 1 (List.length events);
   let (ev : Board.karma_event) = List.hd events in
   Alcotest.(check string) "recipient is author" "alice" ev.recipient;
@@ -116,7 +116,7 @@ let test_downvote_no_event () =
   let post = create_post_exn ~author:"alice" ~content:"controversial" in
   let pid = Board.Post_id.to_string post.id in
   vote_exn ~voter:"bob" ~post_id:pid ~direction:Board.Down;
-  let events = Board_dispatch.get_karma_ledger () in
+  let events = Board_dispatch.get_karma_ledger ~reader:Masc_board_handlers.Board_access.Operator () in
   Alcotest.(check int) "downvote → no karma event" 0 (List.length events)
 
 (** {1 Self-upvotes do NOT produce karma} *)
@@ -125,13 +125,13 @@ let test_self_post_upvote_no_karma () =
   let post = create_post_exn ~author:"alice" ~content:"self vote" in
   let pid = Board.Post_id.to_string post.id in
   vote_exn ~voter:" alice " ~post_id:pid ~direction:Board.Up;
-  let events = Board_dispatch.get_karma_ledger () in
+  let events = Board_dispatch.get_karma_ledger ~reader:Masc_board_handlers.Board_access.Operator () in
   Alcotest.(check int) "self post upvote → no karma event" 0 (List.length events);
   Alcotest.(check int) "self post upvote excluded from agent karma" 0
-    (Board_dispatch.get_agent_karma ~agent_name:"alice");
+    (Board_dispatch.get_agent_karma ~reader:Masc_board_handlers.Board_access.Operator ~agent_name:"alice");
   Alcotest.(check (list (pair string int))) "self post upvote excluded from all karma"
-    [] (Board_dispatch.get_all_karma ());
-  match Board_dispatch.get_post ~post_id:pid with
+    [] (Board_dispatch.get_all_karma ~reader:Masc_board_handlers.Board_access.Operator ());
+  match Board_dispatch.get_post ~reader:Masc_board_handlers.Board_access.Operator ~post_id:pid with
   | Ok updated ->
       Alcotest.(check int) "self vote still affects board score" 1 updated.votes_up
   | Error e -> Alcotest.fail (Board.show_board_error e)
@@ -151,7 +151,7 @@ let test_comment_upvote_produces_event () =
   in
   let cid = Board.Comment_id.to_string comment.id in
   vote_comment_exn ~voter:"dave" ~comment_id:cid ~direction:Board.Up;
-  let events = Board_dispatch.get_karma_ledger () in
+  let events = Board_dispatch.get_karma_ledger ~reader:Masc_board_handlers.Board_access.Operator () in
   Alcotest.(check int) "comment upvote → one karma event" 1 (List.length events);
   let (ev : Board.karma_event) = List.hd events in
   Alcotest.(check string) "recipient is comment author" "charlie" ev.recipient;
@@ -176,10 +176,10 @@ let test_self_comment_upvote_no_karma () =
   in
   let cid = Board.Comment_id.to_string comment.id in
   vote_comment_exn ~voter:" charlie " ~comment_id:cid ~direction:Board.Up;
-  let events = Board_dispatch.get_karma_ledger () in
+  let events = Board_dispatch.get_karma_ledger ~reader:Masc_board_handlers.Board_access.Operator () in
   Alcotest.(check int) "self comment upvote → no karma event" 0 (List.length events);
   Alcotest.(check int) "self comment upvote excluded from agent karma" 0
-    (Board_dispatch.get_agent_karma ~agent_name:"charlie")
+    (Board_dispatch.get_agent_karma ~reader:Masc_board_handlers.Board_access.Operator ~agent_name:"charlie")
 
 (** {1 Multiple voters each produce distinct events} *)
 
@@ -189,7 +189,7 @@ let test_multiple_voters () =
   List.iter
     (fun voter -> vote_exn ~voter ~post_id:pid ~direction:Board.Up)
     [ "v1"; "v2"; "v3" ];
-  let events = Board_dispatch.get_karma_ledger () in
+  let events = Board_dispatch.get_karma_ledger ~reader:Masc_board_handlers.Board_access.Operator () in
   Alcotest.(check int) "3 upvotes → 3 events" 3 (List.length events);
   List.iter
     (fun (ev : Board.karma_event) ->
@@ -203,8 +203,8 @@ let test_agent_filter () =
   let post_b = create_post_exn ~author:"bob" ~content:"bob post" in
   vote_exn ~voter:"v" ~post_id:(Board.Post_id.to_string post_a.id) ~direction:Board.Up;
   vote_exn ~voter:"v" ~post_id:(Board.Post_id.to_string post_b.id) ~direction:Board.Up;
-  let alice_events = Board_dispatch.get_karma_ledger ~agent:"alice" () in
-  let bob_events = Board_dispatch.get_karma_ledger ~agent:"bob" () in
+  let alice_events = Board_dispatch.get_karma_ledger ~reader:Masc_board_handlers.Board_access.Operator ~agent:"alice" () in
+  let bob_events = Board_dispatch.get_karma_ledger ~reader:Masc_board_handlers.Board_access.Operator ~agent:"bob" () in
   Alcotest.(check int) "alice filter" 1 (List.length alice_events);
   Alcotest.(check int) "bob filter" 1 (List.length bob_events);
   Alcotest.(check string) "alice event recipient" "alice"
@@ -218,7 +218,7 @@ let test_limit () =
   List.iter
     (fun voter -> vote_exn ~voter ~post_id:pid ~direction:Board.Up)
     [ "u1"; "u2"; "u3"; "u4"; "u5" ];
-  let capped = Board_dispatch.get_karma_ledger ~limit:3 () in
+  let capped = Board_dispatch.get_karma_ledger ~reader:Masc_board_handlers.Board_access.Operator ~limit:3 () in
   Alcotest.(check int) "limit=3 caps result" 3 (List.length capped)
 
 (** {1 Rebuild / replay invariant}
@@ -235,12 +235,12 @@ let test_replay_invariant () =
   (* Mix in a downvote to make sure it does not shift totals *)
   ignore (Board_dispatch.vote ~voter:"s" ~post_id:pid ~direction:Board.Down);
   let ledger_totals =
-    Board_dispatch.get_karma_ledger ()
+    Board_dispatch.get_karma_ledger ~reader:Masc_board_handlers.Board_access.Operator ()
     |> Board.totals_of_karma_ledger
     |> List.sort (fun (a, _) (b, _) -> String.compare a b)
   in
   let direct_totals =
-    Board_dispatch.get_all_karma ()
+    Board_dispatch.get_all_karma ~reader:Masc_board_handlers.Board_access.Operator ()
     |> List.sort (fun (a, _) (b, _) -> String.compare a b)
   in
   Alcotest.(check (list (pair string int)))
@@ -279,13 +279,13 @@ let test_delete_post_rewrites_persisted_snapshots () =
   vote_exn ~voter:"carol" ~post_id:pid ~direction:Board.Up;
   vote_comment_exn ~voter:"erin" ~comment_id:cid ~direction:Board.Up;
   (match
-     Board_dispatch.toggle_reaction ~target_type:Board.Reaction_post
+     Board_dispatch.toggle_reaction ~reader:Masc_board_handlers.Board_access.Operator ~target_type:Board.Reaction_post
        ~target_id:pid ~user_id:"dave" ~emoji:"👍"
    with
    | Ok _ -> ()
    | Error e -> Alcotest.fail (Board.show_board_error e));
   (match
-     Board_dispatch.toggle_reaction ~target_type:Board.Reaction_comment
+     Board_dispatch.toggle_reaction ~reader:Masc_board_handlers.Board_access.Operator ~target_type:Board.Reaction_comment
        ~target_id:cid ~user_id:"frank" ~emoji:"👍"
    with
    | Ok _ -> ()
@@ -294,7 +294,7 @@ let test_delete_post_rewrites_persisted_snapshots () =
    | Ok Board.Durable_deletion -> ()
    | Ok (Board.Deletion_persistence_pending detail) -> Alcotest.fail detail
    | Error e -> Alcotest.fail (Board.show_board_error e));
-  (match Board_dispatch.get_post ~post_id:pid with
+  (match Board_dispatch.get_post ~reader:Masc_board_handlers.Board_access.Operator ~post_id:pid with
    | Ok _ -> Alcotest.fail "deleted post remained readable"
    | Error _ -> ());
   let check_absent label path needle =
@@ -334,7 +334,7 @@ let test_karma_event_json_fields () =
   let post = create_post_exn ~author:"alice" ~content:"json test" in
   let pid = Board.Post_id.to_string post.id in
   vote_exn ~voter:"bob" ~post_id:pid ~direction:Board.Up;
-  let ev = List.hd (Board_dispatch.get_karma_ledger ()) in
+  let ev = List.hd (Board_dispatch.get_karma_ledger ~reader:Masc_board_handlers.Board_access.Operator ()) in
   let json = Board.karma_event_to_yojson ev in
   let get_string key =
     match json with
@@ -371,7 +371,7 @@ let test_events_sorted_oldest_first () =
      decreasing because each uses the current wall clock. *)
   vote_exn ~voter:"w1" ~post_id:pid ~direction:Board.Up;
   vote_exn ~voter:"w2" ~post_id:pid ~direction:Board.Up;
-  let events = Board_dispatch.get_karma_ledger () in
+  let events = Board_dispatch.get_karma_ledger ~reader:Masc_board_handlers.Board_access.Operator () in
   (match events with
    | e1 :: e2 :: _ ->
        Alcotest.(check bool) "older event first" true
@@ -401,13 +401,13 @@ let test_invalidate_propagates_to_next_read () =
   let post1 = create_post_exn ~author:"alice" ~content:"first" in
   let pid1 = Board.Post_id.to_string post1.id in
   vote_exn ~voter:"bob" ~post_id:pid1 ~direction:Board.Up;
-  let karma1 = Board_dispatch.get_all_karma () in
+  let karma1 = Board_dispatch.get_all_karma ~reader:Masc_board_handlers.Board_access.Operator () in
   Alcotest.(check int) "alice has 1 karma after first upvote" 1
     (List.assoc_opt "alice" karma1 |> Option.value ~default:0);
   let post2 = create_post_exn ~author:"alice" ~content:"second" in
   let pid2 = Board.Post_id.to_string post2.id in
   vote_exn ~voter:"carol" ~post_id:pid2 ~direction:Board.Up;
-  let karma2 = Board_dispatch.get_all_karma () in
+  let karma2 = Board_dispatch.get_all_karma ~reader:Masc_board_handlers.Board_access.Operator () in
   Alcotest.(check int)
     "alice has 2 karma after invalidating vote (cache was rebuilt)" 2
     (List.assoc_opt "alice" karma2 |> Option.value ~default:0)
@@ -425,8 +425,8 @@ let test_concurrent_get_all_karma_returns_same_value env =
   (try
      Eio.Time.with_timeout_exn (Eio.Stdenv.clock env) 5.0 (fun () ->
        Eio.Fiber.both
-         (fun () -> r1 := Board_dispatch.get_all_karma ())
-         (fun () -> r2 := Board_dispatch.get_all_karma ()))
+         (fun () -> r1 := Board_dispatch.get_all_karma ~reader:Masc_board_handlers.Board_access.Operator ())
+         (fun () -> r2 := Board_dispatch.get_all_karma ~reader:Masc_board_handlers.Board_access.Operator ()))
    with Eio.Time.Timeout ->
      Alcotest.fail
        "concurrent get_all_karma timed out after 5s — likely deadlock \

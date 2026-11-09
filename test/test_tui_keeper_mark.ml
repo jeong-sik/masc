@@ -43,7 +43,7 @@ let test_the_column_legend_explains_every_letter_the_cell_draws () =
   List.iter
     (fun header -> check_bool ("the legend names " ^ header) true (contains keys header))
     [ Mark.now_header; Mark.age_header; "LIFECYCLE"; Mark.failing_glyph; "Mode"; "S "; Mark.(badge_glyph Badge_schedule); "mem"; Masc_tui_keeper_age_ladder.cell_label; "사람 몫"
-    ; Mark.pulse_header; Mark.axis_now_header; Mark.grid_now_line; Mark.grid_due_header
+    ; Mark.axis_now_header; Mark.grid_now_line; Mark.grid_due_header
     ; Mark.grid_lag_header; Mark.grid_librarian_header; Mark.grid_digest_header
     ; Mark.grid_gap_header; Mark.grid_facts_by_age_header; Mark.grid_saved_header
     ; Mark.grid_stale_header; Mark.grid_facts_header ]

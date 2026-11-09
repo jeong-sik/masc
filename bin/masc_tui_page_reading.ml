@@ -24,6 +24,7 @@ let tone_style = function
   | Page_line.Quiet -> Theme.recede ()
   | Page_line.Plain -> Ansi.reset
   | Page_line.Info -> Theme.info ()
+  | Page_line.Success -> Theme.ok ()
   | Page_line.Attention -> Theme.warn ()
   | Page_line.Failure -> Theme.bad ()
 
@@ -61,14 +62,18 @@ let fact_rows ~max_cells ~label_cells ~tone label value =
 
 (* A list is its label on a row of its own and one numbered row under it for
    each value, a further indent in, so a value that wraps stays under its own
-   number. *)
+   number. A list with no values draws nothing: a label with nothing under it
+   would read as a value that is missing. *)
 let items_rows ~max_cells ~tone label values =
-  wrap_indented_line ~max_cells (Theme.recede ()) (label ^ ":")
-  @ List.map
-      (fun row -> tone_style tone, detail_indent ^ detail_indent ^ row)
-      (Numbered_list.rows
-         ~max_cells:(max 1 (max_cells - String.length detail_indent))
-         (List.map Terminal_text.single_line values))
+  match values with
+  | [] -> []
+  | _ :: _ ->
+    wrap_indented_line ~max_cells (Theme.recede ()) (label ^ ":")
+    @ List.map
+        (fun row -> tone_style tone, detail_indent ^ detail_indent ^ row)
+        (Numbered_list.rows
+           ~max_cells:(max 1 (max_cells - String.length detail_indent))
+           (List.map Terminal_text.single_line values))
 
 let widest_label_cells lines =
   List.fold_left

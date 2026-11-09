@@ -435,16 +435,6 @@ let respond_board_reaction_result request reqd = function
       (Server_board_reaction_http.error_json error)
 ;;
 
-let with_optional_board_reaction_actor ~base_path request reqd f =
-  match
-    authorize_optional_token_bound_permission_request
-      ~base_path
-      ~permission:Masc_domain.CanReadState
-      request
-  with
-  | Ok actor -> f (Option.map String.trim actor)
-  | Error err -> respond_auth_error request reqd err
-
 let activity_http_deps : Server_activity_http.deps = { query_param; int_query_param }
 
 let activity_events_http_json ~state request =
@@ -509,14 +499,14 @@ let tool_result_answer ~success_status result =
 
 (* A Board write on behalf of the authorised caller: the caller replaces
    [actor_field] in the arguments, whatever the body says. *)
-let board_actor_write ~state ~agent_name ~tool_name ~actor_field ~success_status
+let board_actor_write ~reader ~state ~agent_name ~tool_name ~actor_field ~success_status
     args =
   let ( let* ) = Result.bind in
   let* args =
     validate_write_workspace ~config:(Mcp_server.workspace_config state) args
   in
   let* args = json_upsert_string_field actor_field (String.trim agent_name) args in
-  Board_tool.handle_tool ~result_boundary:Tool_output.Sent_to_client tool_name args
+  Board_tool.handle_tool ~reader ~result_boundary:Tool_output.Sent_to_client tool_name args
   |> tool_result_answer ~success_status
 
 let goal_transition_write ~state ~agent_name args =
@@ -542,25 +532,25 @@ let sub_board_owner_error ~owner ~sub_board_id (sb : Board.sub_board) =
              (Board.Agent_id.to_string sb.Board.owner)) )
     ]
 
-let board_curation_json () =
-  match Board_dispatch.latest_curation_snapshot () with
+let board_curation_json ~reader () =
+  match Board_dispatch.latest_curation_snapshot ~reader () with
   | None -> `Assoc [ ("snapshot", `Null) ]
   | Some snap -> `Assoc [ ("snapshot", Board_curation.snapshot_to_yojson snap) ]
 
-let board_sub_boards_json () =
-  let sub_boards = Board_dispatch.list_sub_boards () in
+let board_sub_boards_json ~reader () =
+  let sub_boards = Board_dispatch.list_sub_boards ~reader () in
   `Assoc
     [
       ( "sub_boards",
         `List (List.map Board.sub_board_to_yojson sub_boards) );
     ]
 
-let board_karma_ledger_json req =
+let board_karma_ledger_json ~reader req =
   let agent = query_param req "agent" in
   let limit = int_query_param req "limit" ~default:500 |> clamp ~min_v:1 ~max_v:5000 in
-  let events = Board_dispatch.get_karma_ledger ?agent ~limit () in
+  let events = Board_dispatch.get_karma_ledger ~reader ?agent ~limit () in
   let totals =
-    Board_dispatch.get_all_karma ()
+    Board_dispatch.get_all_karma ~reader ()
     |> List.sort (fun (_, a) (_, b) -> Int.compare b a)
   in
   `Assoc
@@ -671,9 +661,14 @@ let board_context_inference_message (post : Board.post) =
     (Board.Post_id.to_string post.id)
 
 let resolve_board_context_inference_target ~config (post : Board.post) target_keeper =
+  let admit source (resolved_name, meta) =
+    let reader = Keeper_board_audience.reader_for_keeper meta in
+    if Masc_board_handlers.Board_access.can_read ~reader post then Ok (resolved_name, source)
+    else Error (`Bad_request "target_keeper cannot read this Board post")
+  in
   let resolve source requested =
     match Keeper_meta_store.read_meta_resolved config requested with
-    | Ok (Some (resolved_name, _meta)) -> Ok (resolved_name, source)
+    | Ok (Some resolved) -> admit source resolved
     | Ok None ->
         Error
           (`Bad_request
@@ -693,7 +688,7 @@ let resolve_board_context_inference_target ~config (post : Board.post) target_ke
   | None ->
       let author = Board.Agent_id.to_string post.author in
       (match Keeper_meta_store.read_meta_resolved config author with
-       | Ok (Some (resolved_name, _meta)) -> Ok (resolved_name, Post_author)
+       | Ok (Some resolved) -> admit Post_author resolved
        | Ok None ->
            Error
              (`Bad_request
@@ -781,6 +776,7 @@ let respond_board_context_inference_error request reqd ~status ~message =
     (`Assoc [ ("ok", `Bool false); ("error", `String message) ])
 
 let handle_board_context_inference_request
+      ~reader
       ~state
       ~sw
       ~clock
@@ -799,7 +795,7 @@ let handle_board_context_inference_request
           respond_board_context_inference_error request reqd ~status:`Bad_request
             ~message
       | Ok { post_id; target_keeper } -> (
-          match Board_dispatch.get_post_and_comments ~post_id with
+          match Board_dispatch.get_post_and_comments ~reader ~post_id with
           | Error err ->
               respond_board_context_inference_error request reqd
                 ~status:`Bad_request
@@ -932,22 +928,21 @@ let add_routes ~sw ~clock router =
        )
 
   |> Server_route.get Server_route.Public_read "/api/v1/board" (fun state req reqd ->
+         Server_auth.with_board_access
+           ~base_path:(Mcp_server.workspace_config state).base_path
+           req reqd (fun reader board_reader_actor ->
          let config = Mcp_server.workspace_config state in
-         with_optional_board_reaction_actor
-           ~base_path:config.base_path
-           req
-           reqd
-           (fun reaction_actor ->
+         let reaction_actor = board_reader_actor in
               let payload =
-                Server_board_list_http.payload ~config ~reaction_actor req
+                Server_board_list_http.payload ~reader ~config ~reaction_actor req
               in
               let status =
                 if Dashboard_cache.is_timeout_envelope payload.json
                 then `Gateway_timeout else `OK
               in
               Http.Response.json_lazy ~status ~request:req ~etag:payload.etag
-                (fun () -> payload.raw_json) reqd)
-       )
+                (fun () -> payload.raw_json) reqd
+       ))
 
   |> Server_route.get Server_route.Public_read "/api/v1/board/reactions/catalog" (fun _state _request reqd ->
             Http.Response.json_value
@@ -957,28 +952,37 @@ let add_routes ~sw ~clock router =
   (* Registered before the single-target read so the longer path is matched
      first. One page of the board asks about its rows here instead of once per
      row. *)
-  |> Server_route.get (Server_route.Token_permission Masc_domain.CanReadState) "/api/v1/board/reactions/batch" (fun _state actor req reqd ->
+  |> Server_route.get (Server_route.Token_permission Masc_domain.CanReadState) "/api/v1/board/reactions/batch" (fun state actor req reqd ->
+         Server_auth.with_board_access
+           ~base_path:(Mcp_server.workspace_config state).base_path
+           req reqd (fun reader _board_reader_actor ->
             let request = req in let actor = String.trim actor in
             let result =
               Server_board_reaction_http.targets_of_strings
                 ~target_type:(query_param req "target_type")
                 ~target_ids:(query_param req "target_ids")
-              |> Result.map (Server_board_reaction_http.list_batch_json ~actor)
+              |> Result.map (Server_board_reaction_http.list_batch_json ~reader ~actor)
             in
-            respond_board_reaction_result request reqd result)
+            respond_board_reaction_result request reqd result))
 
-  |> Server_route.get (Server_route.Token_permission Masc_domain.CanReadState) "/api/v1/board/reactions" (fun _state actor req reqd ->
+  |> Server_route.get (Server_route.Token_permission Masc_domain.CanReadState) "/api/v1/board/reactions" (fun state actor req reqd ->
+         Server_auth.with_board_access
+           ~base_path:(Mcp_server.workspace_config state).base_path
+           req reqd (fun reader _board_reader_actor ->
             let request = req in let actor = String.trim actor in
             let result =
               Result.bind
                 (Server_board_reaction_http.target_of_strings
                    ~target_type:(query_param req "target_type")
                    ~target_id:(query_param req "target_id"))
-                (Server_board_reaction_http.list_json ~actor)
+                (Server_board_reaction_http.list_json ~reader ~actor)
             in
-            respond_board_reaction_result request reqd result)
+            respond_board_reaction_result request reqd result))
 
-  |> Server_route.post (Server_route.Token_permission Masc_domain.CanVote) "/api/v1/board/reactions" (fun _state actor request reqd ->
+  |> Server_route.post (Server_route.Token_permission Masc_domain.CanVote) "/api/v1/board/reactions" (fun state actor request reqd ->
+         Server_auth.with_board_access
+           ~base_path:(Mcp_server.workspace_config state).base_path
+           request reqd (fun reader _board_reader_actor ->
             let actor = String.trim actor in
             Http.Request.read_body_async reqd (fun body ->
               let parsed =
@@ -990,19 +994,24 @@ let add_routes ~sw ~clock router =
               let result =
                 Result.bind
                   parsed
-                  (Server_board_reaction_http.toggle_json ~actor)
+                  (Server_board_reaction_http.toggle_json ~reader ~actor)
               in
-              respond_board_reaction_result request reqd result))
+              respond_board_reaction_result request reqd result)))
 
   |> Server_route.get Server_route.Public_read "/api/v1/board/hearths" (fun state req reqd ->
+         Server_auth.with_board_access
+           ~base_path:(Mcp_server.workspace_config state).base_path
+           req reqd (fun reader _board_reader_actor ->
          let config = Mcp_server.workspace_config state in
          let exclude_system = bool_query_param req "exclude_system" ~default:false in
          let exclude_automation =
            bool_query_param req "exclude_automation" ~default:false
          in
          let cache_key =
-           Printf.sprintf "board:hearths:%s:exclude-system=%b:exclude-automation=%b"
+           Printf.sprintf "board:hearths:%s:reader=%s:exclude-system=%b:exclude-automation=%b"
              (Keeper_api_types.cache_key_string_segment config.base_path)
+             (Keeper_api_types.cache_key_string_segment
+                (Masc_board_handlers.Board_access.cache_key reader))
              exclude_system
              exclude_automation
          in
@@ -1012,7 +1021,7 @@ let add_routes ~sw ~clock router =
              ~ttl:Server_dashboard_http_core_cache.standard_cache_ttl_s
              (Pool_work.cpu ~name:__FUNCTION__ (fun () ->
                 let hearths =
-                  Board_dispatch.list_hearths
+                  Board_dispatch.list_hearths ~reader
                     ~exclude_system ~exclude_automation ()
                 in
                 `Assoc [
@@ -1022,27 +1031,39 @@ let add_routes ~sw ~clock router =
                 ]))
          in
          Server_cached_read_http.respond ~request:req reqd payload
-       )
+       ))
 
-  |> Server_route.get Server_route.Public_read "/api/v1/board/curation" (fun _state _req reqd ->
-         respond_board_json reqd (board_curation_json ())
-       )
+  |> Server_route.get Server_route.Public_read "/api/v1/board/curation" (fun state req reqd ->
+         Server_auth.with_board_access
+           ~base_path:(Mcp_server.workspace_config state).base_path
+           req reqd (fun reader _board_reader_actor ->
+         respond_board_json reqd (board_curation_json ~reader ())
+       ))
 
   |> Server_route.get Server_route.Always_public "/api/v1/board/flairs" (fun _request reqd ->
        let flairs = List.map Board.flair_to_yojson Board.available_flairs in
        let json = `Assoc [("flairs", `List flairs)] in
        Http.Response.json_value json reqd)
 
-  |> Server_route.get Server_route.Public_read "/api/v1/board/sub-boards" (fun _state _req reqd ->
-         respond_board_json reqd (board_sub_boards_json ())
-       )
+  |> Server_route.get Server_route.Public_read "/api/v1/board/sub-boards" (fun state req reqd ->
+         Server_auth.with_board_access
+           ~base_path:(Mcp_server.workspace_config state).base_path
+           req reqd (fun reader _board_reader_actor ->
+         respond_board_json reqd (board_sub_boards_json ~reader ())
+       ))
 
   |> Server_route.post (Server_route.Tool_actor { tool_name = Keeper_tool_name.(to_string Keeper_delegate) }) "/api/v1/board/context-inference" (fun state submitted_by request reqd ->
+         Server_auth.with_board_access
+           ~base_path:(Mcp_server.workspace_config state).base_path
+           request reqd (fun reader _board_reader_actor ->
          Http.Request.read_body_async reqd
-           (handle_board_context_inference_request ~state ~sw ~clock
-              ~submitted_by ~request reqd))
+           (handle_board_context_inference_request ~reader ~state ~sw ~clock
+              ~submitted_by ~request reqd)))
 
-  |> Server_route.post (Server_route.Tool_actor { tool_name = "masc_board_sub_board_create" }) "/api/v1/board/sub-boards" (fun _state agent_name _req reqd ->
+  |> Server_route.post (Server_route.Tool_actor { tool_name = "masc_board_sub_board_create" }) "/api/v1/board/sub-boards" (fun state agent_name req reqd ->
+         Server_auth.with_board_access
+           ~base_path:(Mcp_server.workspace_config state).base_path
+           req reqd (fun reader _board_reader_actor ->
          Http.Request.read_body_async reqd (fun body ->
            try
              let args = Yojson.Safe.from_string body in
@@ -1060,7 +1081,7 @@ let add_routes ~sw ~clock router =
              (match
                 Result.bind (Board.sub_board_access_field_of_yojson args)
                   (fun access ->
-                    Board_dispatch.create_sub_board ~slug ~name ~description
+                    Board_dispatch.create_sub_board ~reader ~slug ~name ~description
                       ~owner ~members ?access ())
               with
               | Ok sb ->
@@ -1072,16 +1093,22 @@ let add_routes ~sw ~clock router =
            with Yojson.Json_error msg ->
              Http.Response.json_value ~status:`Bad_request
                (`Assoc [("error", `String ("invalid JSON: " ^ msg))])
-               reqd))
+               reqd)))
 
-  |> Server_route.prefix_get Server_route.Public_read board_sub_board_detail_prefix (fun _state request reqd ->
+  |> Server_route.prefix_get Server_route.Public_read board_sub_board_detail_prefix (fun state request reqd ->
+         Server_auth.with_board_access
+           ~base_path:(Mcp_server.workspace_config state).base_path
+           request reqd (fun reader _board_reader_actor ->
          let status, json =
-           board_sub_board_detail_json ~path:(Http.Request.path request)
+           board_sub_board_detail_json ~reader ~path:(Http.Request.path request)
          in
          Http.Response.json_value ~status json reqd
-       )
+       ))
 
-  |> Server_route.prefix_delete (Server_route.Tool_actor { tool_name = "masc_board_sub_board_delete" }) "/api/v1/board/sub-boards/" (fun _state agent_name request reqd ->
+  |> Server_route.prefix_delete (Server_route.Tool_actor { tool_name = "masc_board_sub_board_delete" }) "/api/v1/board/sub-boards/" (fun state agent_name request reqd ->
+         Server_auth.with_board_access
+           ~base_path:(Mcp_server.workspace_config state).base_path
+           request reqd (fun reader _board_reader_actor ->
          let path = Http.Request.path request in
          (match extract_path_param ~prefix:"/api/v1/board/sub-boards/" path with
           | None ->
@@ -1090,7 +1117,7 @@ let add_routes ~sw ~clock router =
                 reqd
          | Some sub_board_id ->
               let owner = String.trim agent_name in
-              (match Board_dispatch.get_sub_board ~sub_board_id with
+              (match Board_dispatch.get_sub_board ~reader ~sub_board_id with
                | Error e ->
                    Http.Response.json_value ~status:`Not_found
                      (`Assoc [("error", `String (Board_tool.board_error_to_string e))])
@@ -1107,9 +1134,12 @@ let add_routes ~sw ~clock router =
                    Http.Response.json_value ~status:`Not_found
                      (`Assoc [("error", `String (Board_tool.board_error_to_string e))])
                      reqd)))
-         )
+         ))
 
-  |> Server_route.prefix_put (Server_route.Tool_actor { tool_name = "masc_board_sub_board_update" }) "/api/v1/board/sub-boards/" (fun _state agent_name request reqd ->
+  |> Server_route.prefix_put (Server_route.Tool_actor { tool_name = "masc_board_sub_board_update" }) "/api/v1/board/sub-boards/" (fun state agent_name request reqd ->
+         Server_auth.with_board_access
+           ~base_path:(Mcp_server.workspace_config state).base_path
+           request reqd (fun reader _board_reader_actor ->
          Http.Request.read_body_async reqd (fun body ->
            try
              let args = Yojson.Safe.from_string body in
@@ -1131,7 +1161,7 @@ let add_routes ~sw ~clock router =
                     reqd
               | Some sub_board_id ->
                   let owner = String.trim agent_name in
-                  (match Board_dispatch.get_sub_board ~sub_board_id with
+                  (match Board_dispatch.get_sub_board ~reader ~sub_board_id with
                    | Error e ->
                        Http.Response.json_value ~status:`Not_found
                          (`Assoc [("error", `String (Board_tool.board_error_to_string e))])
@@ -1141,7 +1171,7 @@ let add_routes ~sw ~clock router =
                          (sub_board_owner_error ~owner ~sub_board_id sb)
                          reqd
                    | Ok _ ->
-                  (match Board_dispatch.update_sub_board ~sub_board_id ?name ?description ?members:members_arg ?access () with
+                  (match Board_dispatch.update_sub_board ~reader ~sub_board_id ?name ?description ?members:members_arg ?access () with
                    | Ok sb ->
                        Http.Response.json_value (Board.sub_board_to_yojson sb) reqd
                    | Error e ->
@@ -1151,9 +1181,12 @@ let add_routes ~sw ~clock router =
            with Yojson.Json_error msg ->
              Http.Response.json_value ~status:`Bad_request
                (`Assoc [("error", `String ("invalid JSON: " ^ msg))])
-               reqd))
+               reqd)))
 
   |> Server_route.prefix_get Server_route.Public_read "/api/v1/board/" (fun state req reqd ->
+         Server_auth.with_board_access
+           ~base_path:(Mcp_server.workspace_config state).base_path
+           req reqd (fun reader board_reader_actor ->
          let request = req in let path = Http.Request.path request in
          (match extract_path_param ~prefix:"/api/v1/board/" path with
           | None ->
@@ -1161,18 +1194,14 @@ let add_routes ~sw ~clock router =
                 (`Assoc [("error", `String "post_id is required")])
                 ~status:`Bad_request reqd
           | Some "curation" ->
-              respond_board_json reqd (board_curation_json ())
+              respond_board_json reqd (board_curation_json ~reader ())
           | Some "sub-boards" ->
-              respond_board_json reqd (board_sub_boards_json ())
+              respond_board_json reqd (board_sub_boards_json ~reader ())
           | Some "karma/ledger" ->
-              respond_board_json reqd (board_karma_ledger_json req)
+              respond_board_json reqd (board_karma_ledger_json ~reader req)
           | Some post_id ->
               let config = Mcp_server.workspace_config state in
-              with_optional_board_reaction_actor
-                ~base_path:config.base_path
-                req
-                reqd
-                (fun reaction_actor ->
+              let reaction_actor = board_reader_actor in
                    match
                      Server_board_post_response_format.of_query
                        (query_param req "format")
@@ -1193,29 +1222,35 @@ let add_routes ~sw ~clock router =
                         respond_json_value_with_cors ~status:`Bad_request
                           request reqd error
                       | Ok comment_request ->
-                        let voter = board_voter_query req in
+                        let voter = match reaction_actor with Some _ -> reaction_actor | None -> board_voter_query req in
                         let status, body =
-                          board_post_detail_json ~comment_request
+                          board_post_detail_json ~reader ~comment_request
                             ?focused_comment:(query_param req "comment_focus")
                             ~voter ~reaction_actor ~config:(Some config)
                             ~response_format ~post_id ()
                         in
-                        respond_json_with_cors ~status request reqd body)))
-       )
+                        respond_json_with_cors ~status request reqd body))
+       ))
 
   (* The four Board post/comment/vote routes below consume the auth resolver's
      actor. An ordinary bearer credential resolves to its owner; an admitted
      token-less same-origin request keeps its supplied local attribution.
      These routes do not re-read the identity headers. *)
   |> Server_route.post (Server_route.Tool_actor { tool_name = "masc_board_vote" }) "/api/v1/tools/masc_board_vote" (fun state agent_name request reqd ->
+         Server_auth.with_board_access
+           ~base_path:(Mcp_server.workspace_config state).base_path
+           request reqd (fun reader _board_reader_actor ->
          Http.Request.read_body_async reqd (fun body_str ->
            respond_json_tool_request ~request reqd body_str
-             (board_actor_write ~state ~agent_name ~tool_name:"masc_board_vote"
+             (board_actor_write ~reader ~state ~agent_name ~tool_name:"masc_board_vote"
                 ~actor_field:"voter" ~success_status:`OK)
          )
-       )
+       ))
 
   |> Server_route.post (Server_route.Tool_actor { tool_name = (Tool_name.Board_name.to_string Tool_name.Board_name.Board_post) }) "/api/v1/tools/masc_board_post" (fun state agent_name request reqd ->
+         Server_auth.with_board_access
+           ~base_path:(Mcp_server.workspace_config state).base_path
+           request reqd (fun reader _board_reader_actor ->
          Http.Request.read_body_async reqd (fun body_str ->
            let tool_name = Tool_name.Board_name.to_string Tool_name.Board_name.Board_post in
            let start_time = Tool_timing.start () in
@@ -1246,7 +1281,7 @@ let add_routes ~sw ~clock router =
              let author = String.trim agent_name in
              let* args = json_upsert_string_field "author" author args in
              let* args = json_ensure_meta_source "dashboard_board_post" args in
-             let result = Board_tool.handle_tool ~result_boundary:Tool_output.Sent_to_client
+             let result = Board_tool.handle_tool ~reader ~result_boundary:Tool_output.Sent_to_client
                  tool_name args in
              let ok = Tool_result.is_success result in
              let status = if ok then `Created else `Bad_request in
@@ -1271,27 +1306,33 @@ let add_routes ~sw ~clock router =
              respond_json_value_with_cors ~status request reqd
                (activity_result_json_with_tool_result result)
          )
-       )
+       ))
 
   |> Server_route.post (Server_route.Tool_actor { tool_name = "masc_board_comment" }) "/api/v1/tools/masc_board_comment" (fun state agent_name request reqd ->
+         Server_auth.with_board_access
+           ~base_path:(Mcp_server.workspace_config state).base_path
+           request reqd (fun reader _board_reader_actor ->
          Http.Request.read_body_async reqd (fun body_str ->
            respond_json_tool_request ~request reqd body_str
-             (board_actor_write ~state ~agent_name ~tool_name:"masc_board_comment"
+             (board_actor_write ~reader ~state ~agent_name ~tool_name:"masc_board_comment"
                 ~actor_field:"author" ~success_status:`Created)
          )
-       )
+       ))
 
   (* Comment vote — mirrors masc_board_vote. [voter] comes from the auth
      resolver: the ordinary bearer credential's owner, or the attribution
      supplied by an admitted token-less same-origin request. *)
   |> Server_route.post (Server_route.Tool_actor { tool_name = "masc_board_comment_vote" }) "/api/v1/tools/masc_board_comment_vote" (fun state agent_name request reqd ->
+         Server_auth.with_board_access
+           ~base_path:(Mcp_server.workspace_config state).base_path
+           request reqd (fun reader _board_reader_actor ->
          Http.Request.read_body_async reqd (fun body_str ->
            respond_json_tool_request ~request reqd body_str
-             (board_actor_write ~state ~agent_name
+             (board_actor_write ~reader ~state ~agent_name
                 ~tool_name:"masc_board_comment_vote" ~actor_field:"voter"
                 ~success_status:`OK)
          )
-       )
+       ))
 
   (* Goal lifecycle from the terminal (#29684). The workspace tool already owns
      the transition rules ([Goal_phase.decide_transition] inside
@@ -1371,8 +1412,11 @@ let add_routes ~sw ~clock router =
          )
        )
 
-  |> Server_route.get Server_route.Public_read "/api/v1/karma" (fun _state _req reqd ->
-         let karma_list = Board_dispatch.get_all_karma () in
+  |> Server_route.get Server_route.Public_read "/api/v1/karma" (fun state req reqd ->
+         Server_auth.with_board_access
+           ~base_path:(Mcp_server.workspace_config state).base_path
+           req reqd (fun reader _board_reader_actor ->
+         let karma_list = Board_dispatch.get_all_karma ~reader () in
          let sorted = List.sort (fun (_, a) (_, b) -> Int.compare b a) karma_list in
          let json = `Assoc [
            ("karma", `List (List.map (fun (agent, k) ->
@@ -1380,11 +1424,14 @@ let add_routes ~sw ~clock router =
            ) sorted));
          ] in
          Http.Response.json_value json reqd
-       )
+       ))
 
-  |> Server_route.get Server_route.Public_read "/api/v1/board/karma/ledger" (fun _state req reqd ->
-         respond_board_json reqd (board_karma_ledger_json req)
-       )
+  |> Server_route.get Server_route.Public_read "/api/v1/board/karma/ledger" (fun state req reqd ->
+         Server_auth.with_board_access
+           ~base_path:(Mcp_server.workspace_config state).base_path
+           req reqd (fun reader _board_reader_actor ->
+         respond_board_json reqd (board_karma_ledger_json ~reader req)
+       ))
 
   (* Prompt Registry API *)
   |> Server_route.get Server_route.Public_read "/api/v1/prompts" (fun _state _req reqd ->

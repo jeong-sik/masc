@@ -943,7 +943,7 @@ type store = {
   persist_mutex: Eio.Mutex.t;
   origin_create_mutex: Eio.Mutex.t;
   (* Phase 2 caches *)
-  mutable karma_cache: (string * int) list option;       (** None = stale *)
+  mutable karma_cache: ((string * int) list * (string * (string * int) list) list) option;       (** None = stale *)
   mutable hot_post_index: Hot_post_set.t;                 (** Incremental immutable Hot index *)
   mutable recent_post_index: Recent_post_set.t;           (** Incremental immutable Recent index *)
   comments_by_post: (string, string list) Hashtbl.t;      (** post_id -> comment_id list *)

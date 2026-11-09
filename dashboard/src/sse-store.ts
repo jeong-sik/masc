@@ -261,6 +261,7 @@ const SIMPLE_ROUTES: Record<string, SimpleRoute> = {
   comment_voted:        { target: 'board' },
   reaction_changed:     { target: 'board' },
   post_changed:         { target: 'board' },
+  board_changed:        { target: 'board' },
   // Observatory activity telemetry
   activity:             { target: 'activity', debounceMs: SSE_ACTIVITY_DEBOUNCE_MS },
   // Fusion run registry — emitted by lib/fusion/fusion_sink.ml broadcast_run_status.
@@ -926,6 +927,12 @@ export function hydrateServerPushEvent(event: SSEEvent): boolean {
     // not the board could prepend, and the prepend path returns early.
     scheduleFusionBoardRefresh()
     if (handleBoardPostCreated(event)) return true
+  }
+
+  if (event.type === 'board_changed') {
+    // Non-public posts (including Unlisted fusion board-sink posts) emit
+    // board_changed instead of post_created; refresh the fusion surface too.
+    scheduleFusionBoardRefresh()
   }
 
   return false

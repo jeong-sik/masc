@@ -2059,8 +2059,8 @@ tools-support = true
         (String.concat "; " (List.map (fun e -> e.Runtime_toml.message) errors)) in
   let homes = List.map (fun binding ->
     match execution_for_binding config binding with
-    | Ok (Runtime_execution.Claude_code execution) -> Some (Runtime_official_account.home execution.account_home)
-    | Ok (Runtime_execution.Codex_app_server execution) -> Some (Runtime_official_account.home execution.account_home)
+    | Ok (Runtime_execution.Claude_code execution) -> Some (Runtime_account_access.home execution.account_home)
+    | Ok (Runtime_execution.Codex_app_server execution) -> Some (Runtime_account_access.home execution.account_home)
     | Ok _ -> Alcotest.fail "expected an official client"
     | Error detail -> Alcotest.fail detail) config.Runtime_schema.bindings in
   Alcotest.(check (list (option string))) "each binding keeps its login home"

@@ -24,8 +24,16 @@ val report : H2.Reqd.t -> exn -> unit
     after, it closes the body and sends RST_STREAM (INTERNAL_ERROR), which
     flow control does not hold back. A stream that already carries an error
     gets nothing more. An exception raised by the report itself is logged at
-    debug and not raised, except [Eio.Cancel.Cancelled]. Use {!reset} when the
+    warn and not raised, except [Eio.Cancel.Cancelled]. Use {!reset} when the
     stream has a switch; this is for a request that never got one. *)
+
+val report_failure : H2.Reqd.t -> exn -> unit
+(** [report_failure reqd exn] is {!report} for an exception the stream's own
+    work raised. It also logs [exn] at error, unless the report reached the
+    connection's error handler, which logs it itself. h2 calls that handler
+    only while the stream has no response and no error; a started response is
+    reset without it, and a stream that is closed, already answered or
+    already carries an error takes nothing. *)
 
 val reset : stream_sw:Eio.Switch.t -> H2.Reqd.t -> reset_cause -> unit
 (** [reset ~stream_sw reqd cause] ends the stream. It {!report}s [Stalled],
@@ -37,7 +45,9 @@ val reset : stream_sw:Eio.Switch.t -> H2.Reqd.t -> reset_cause -> unit
     report with the error handler's response, and that response owns the
     stream until its END_STREAM and the RST_STREAM h2 writes after it, which
     end the scope through the stream registry. [Stalled] fails the switch
-    even then.
+    even then. A response the handler had already completed keeps nothing:
+    h2 ignores the report on it, and the switch fails. [Raised] is reported
+    with {!report_failure}, so its exception is logged.
 
     The first end of a switch wins: a switch that already has an error, or
     has finished, is left as it is. [stream_sw] fails when the report is
@@ -54,7 +64,11 @@ val dispatch : sw:Eio.Switch.t -> H2.Reqd.t -> (unit -> unit) -> unit
     before any request computation, pool wait or response mutation starts
     (RFC-0350). The response ledger scope of the calling fiber is carried
     into [work]. An exception from [work] {!reset}s the stream with
-    [Raised]; cancellation propagates. *)
+    [Raised]; cancellation propagates.
+
+    [sw] must be the stream's own switch. The reset fails it, and with it
+    every fiber forked on it; a switch shared with other streams or with the
+    connection would end them too. *)
 
 val close_after_flush : H2.Body.Writer.t -> unit
 (** [close_after_flush writer] closes [writer] once every byte written to it

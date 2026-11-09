@@ -81,6 +81,8 @@ let keeper_registry_runtime_agents (config : Workspace_utils_backend_setup.confi
 
 let board_sse_event_params event =
   match event with
+  | Board_dispatch.Board_changed ->
+    `Assoc [ "type", `String "board_changed"; "event_type", `String "board.changed" ]
   | Board_dispatch.Post_created { post_id; author; title; content; post_kind; hearth } ->
     let preview =
       if String.length content > 200 then String.sub content 0 200 else content
@@ -1769,7 +1771,7 @@ let start_keeper_loops_owned
             ; "emoji", `String emoji
             ; "reacted", `Bool reacted
             ] )
-      | Board_dispatch.Post_changed _ -> None
+      | Board_dispatch.Board_changed | Board_dispatch.Post_changed _ -> None
     in
     (* P2 silent-failure fix: Activity_graph.emit failures (Discord
        webhook, audit trail writes, etc.) were previously ignored

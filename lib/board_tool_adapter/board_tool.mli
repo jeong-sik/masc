@@ -96,6 +96,7 @@ val tools : Masc_domain.tool_schema list
 (** {1 Board dispatcher} *)
 
 val handle_tool :
+  reader:Masc_board_handlers.Board_access.reader ->
   result_boundary:Tool_output.result_boundary -> string -> Yojson.Safe.t -> Tool_result.result
 (** Routes [name] to the matching internal handler.
     [masc_board_list] reads the store on every call, so a

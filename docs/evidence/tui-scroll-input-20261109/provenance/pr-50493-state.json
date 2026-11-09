@@ -1,0 +1,29 @@
+{
+  "number": 50493,
+  "head": "c63ecd3094eeda1fe5bc7d0e03a0057961a45a81",
+  "base": "65febea6ba9ce2d66b3510bb6fab9c4ff9eeec00",
+  "merged": true,
+  "merge_commit_sha": "a3f324e3dc960658402b62a03e017fd13c3f1621",
+  "stack": {
+    "base": {
+      "ref": "main",
+      "sha": null
+    },
+    "id": 3229797,
+    "number": 50503,
+    "position": 1,
+    "size": 2
+  },
+  "events": [
+    {
+      "event": "ready_for_review",
+      "at": "2026-11-09T07:37:53Z",
+      "actor": "jeong-sik"
+    },
+    {
+      "event": "merged",
+      "at": "2026-11-09T07:42:00Z",
+      "actor": "jeong-sik"
+    }
+  ]
+}

@@ -156,6 +156,29 @@ let try_auth_config_error_response reqd =
          (Printexc.to_string exn))
 ;;
 
+(* What a failed handler gets depends on what it already sent. A 500 fits
+   only a request with no response. Headers that went out cannot be taken
+   back, so an open streaming response is cut where it stands: HTTP/2 resets
+   the stream, HTTP/1.1 closes the connection after an unterminated body.
+   Either way the exception is logged once. *)
+let handler_failed reqd exn =
+  let late_or ~otherwise =
+    match Http_reqd.Late_response.classify_write_failure exn with
+    | Some failure_msg ->
+      log_late_response_failure ~context:"http ingress request handler" failure_msg
+    | None -> otherwise (Printexc.to_string exn)
+  in
+  match Http_reqd.response_state reqd with
+  | Http_reqd.Not_started ->
+    late_or ~otherwise:(fun msg ->
+      Log.Http.error "http ingress request handler raised: %s" msg;
+      try_internal_error_response reqd msg)
+  | Http_reqd.Streaming_open -> Http_reqd.report_exn reqd exn
+  | Http_reqd.Answered ->
+    late_or ~otherwise:(fun msg ->
+      Log.Http.error "http ingress request handler raised after its response: %s" msg)
+;;
+
 let respond_request_authority_bad_request ~error_code ~message reqd =
   Http.Response.json_value
     ~status:`Bad_request
@@ -188,12 +211,7 @@ let admitted ~routes ~client_addr ~request_authority request reqd =
          attempting a response from a cancelled handler. *)
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | Auth.Auth_config_error _ -> try_auth_config_error_response reqd
-      | exn ->
-        let msg = Printexc.to_string exn in
-        (match Http_reqd.Late_response.classify_write_failure exn with
-         | Some failure_msg ->
-           log_late_response_failure ~context:"http ingress request handler" failure_msg
-         | None -> try_internal_error_response reqd msg)))
+      | exn -> handler_failed reqd exn))
 ;;
 
 let serve ~routes ~client_addr classification reqd =

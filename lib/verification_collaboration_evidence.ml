@@ -34,13 +34,13 @@ let require_workspace config =
     Error (Access_denied "review workspace does not own the active Board store")
 
 let require_visible authority (post : Board.post) =
-  match post.visibility, authority with
-  | (Board.Public | Board.Unlisted | Board.Internal), _ -> Ok ()
-  | Board.Direct, Task_producer producer
-    when String.equal producer (Board.Agent_id.to_string post.author) -> Ok ()
-  | Board.Direct, (Task_producer _ | Goal_workspace) ->
+  let reader = match authority with
+    | Task_producer producer -> Masc_board_handlers.Board_access.named producer
+    | Goal_workspace -> Masc_board_handlers.Board_access.Anonymous in
+  if Masc_board_handlers.Board_access.can_read ~reader post then Ok ()
+  else
     Error (Access_denied
-      "Direct discussion is outside this review authority; immutable target readership is not available")
+      "Direct discussion is outside this review authority's recorded readership")
 
 (* The canonical Board and Fusion handlers trim the id before an exact lookup;
    an id this reader keeps untrimmed would miss the same source they find. *)
@@ -105,7 +105,7 @@ let board_error = function
 let capture_board ~config ~authority ~post_id =
   let* () = require_workspace config in
   let* () = Board_dispatch.require_persisted_sources_readable () |> Result.map_error board_error in
-  let* post, comments = Board_dispatch.get_post_and_comments ~post_id
+  let* post, comments = Board_dispatch.get_post_and_comments_unchecked ~post_id
     |> Result.map_error board_error in
   let* () = require_visible authority post in
   Ok (`Assoc ["source", `String "board"; "post", Board.post_to_yojson post;

@@ -1081,18 +1081,18 @@ let filter_comment_parent_visibility = function
 ;;
 
 let candidate_parent_visibility_filter (candidate : candidate) =
-  match candidate.signal.kind with
-  | Board_dispatch.Board_post_created
-  | Board_dispatch.Board_post_updated _
-  | Board_dispatch.Board_reaction_changed _
-  | Board_dispatch.Board_vote_cast _ ->
-    Ok Keep_discoverable_comment
-  | Board_dispatch.Board_comment_added _ ->
     (match Eio_guard.execution_context () with
-     | Eio_guard.Non_eio -> Error "Board comment parent requires an Eio fiber"
+     | Eio_guard.Non_eio -> Error "Board parent requires an Eio fiber"
      | Eio_guard.Eio_fiber ->
-       match Board_dispatch.read_post_for_evidence ~post_id:candidate.signal.post_id with
-       | Ok post -> Ok (filter_comment_parent_visibility post.visibility)
+       match Board_dispatch.read_post_for_evidence_unchecked ~post_id:candidate.signal.post_id with
+       | Ok post ->
+         (match post.visibility, candidate.signal.kind with
+          | Board.Direct, _ -> Ok Skip_non_discoverable_comment
+          | (Board.Public | Board.Internal | Board.Unlisted), Board_dispatch.Board_comment_added _ ->
+            Ok (filter_comment_parent_visibility post.visibility)
+          | (Board.Public | Board.Internal | Board.Unlisted),
+            (Board_dispatch.Board_post_created | Board_post_updated _ | Board_reaction_changed _ | Board_vote_cast _) ->
+            Ok Keep_discoverable_comment)
        | Error (Board.Read_post_not_found _ | Board.Read_invalid_id _
                | Board.Read_comment_not_found _) ->
          Ok Skip_non_discoverable_comment
@@ -1109,7 +1109,7 @@ let consume_judged ~base_path candidate (judged : judged_state) =
   | Keeper_board_attention_judgment.Relevant, Ok Skip_non_discoverable_comment ->
     mark_consumed ~base_path candidate judged.judgment Not_relevant
   | Keeper_board_attention_judgment.Relevant, Error detail ->
-    Error ("Board comment parent unavailable: " ^ detail)
+    Error ("Board parent unavailable: " ^ detail)
   | Keeper_board_attention_judgment.Relevant, Ok Keep_discoverable_comment ->
     let stimulus = board_attention_stimulus candidate in
     (match

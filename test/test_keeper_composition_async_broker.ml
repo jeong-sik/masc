@@ -38,7 +38,7 @@ let composition_results ~base_path =
       match stimulus.payload with
       | Event_queue.Composition_completed completion -> Some completion
       | Event_queue.Board_signal _
-      | Event_queue.Board_attention _
+      | Event_queue.Board_routing_pending _ | Event_queue.Board_attention _
       | Event_queue.Bootstrap
       | Event_queue.Fusion_completed _
       | Event_queue.Schedule_due _

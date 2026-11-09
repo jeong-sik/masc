@@ -1,0 +1,86 @@
+{
+  "review_head": "b7d717df36de2aa91b62b413df3cad67739c499d",
+  "recorded_base": "d4ae1ead0b2bc2a3763858dcde672bdcc4d3ecea",
+  "actual_first_parent": "d4ae1ead0b2bc2a3763858dcde672bdcc4d3ecea",
+  "base_matches_parent": true,
+  "reproducer": [
+    {
+      "label": "before",
+      "source_sha": "16dd4aa47803259dc516a1c2acbc244d9985c0cd",
+      "recorded_full_source_sha256": "a09123bf5672e97e1daa06b5b21d7eccf000a3bfcd5c3c32dbdef599a57aec4f",
+      "actual_full_source_sha256": "a09123bf5672e97e1daa06b5b21d7eccf000a3bfcd5c3c32dbdef599a57aec4f",
+      "full_hash_matches": true,
+      "extracted_prefix_matches_source_exactly": true,
+      "extracted_prefix_bytes": 2063,
+      "source_prefix_bytes": 2063,
+      "extracted_file_sha256": "b55e06b4a4a22028ce39467c31fff46590438a517cbc4610fb377763998b521a",
+      "recorded_decision": "render",
+      "harness": "let show = function Render -> \"render\" | Idle -> \"idle\" | Wait_until at -> \"wait:\" ^ Int64.to_string at\nlet ns x = Int64.mul (Int64.of_int x) 1000000L\nlet () =\n let schedule = create ~min_interval_ns:(ns 16) () in\n ignore (take ~input_pending:false schedule ~now_ns:0L);\n () ;\n request schedule Input;\n print_endline (show (take ~input_pending:true schedule ~now_ns:(ns 65)))\n"
+    },
+    {
+      "label": "after",
+      "source_sha": "b7d717df36de2aa91b62b413df3cad67739c499d",
+      "recorded_full_source_sha256": "8fb5349d996dd00756e94c6335b776f4dd463cee41c94ede6f58d15437ac7482",
+      "actual_full_source_sha256": "8fb5349d996dd00756e94c6335b776f4dd463cee41c94ede6f58d15437ac7482",
+      "full_hash_matches": true,
+      "extracted_prefix_matches_source_exactly": true,
+      "extracted_prefix_bytes": 2523,
+      "source_prefix_bytes": 2523,
+      "extracted_file_sha256": "e00e68adc30c30bf3a17f8bc017c436b008790bbfe68a8667c04eea66beb3e19",
+      "recorded_decision": "wait:80000000",
+      "harness": "let show = function Render -> \"render\" | Idle -> \"idle\" | Wait_until at -> \"wait:\" ^ Int64.to_string at\nlet ns x = Int64.mul (Int64.of_int x) 1000000L\nlet () =\n let schedule = create ~min_interval_ns:(ns 16) () in\n ignore (take ~input_pending:false schedule ~now_ns:0L);\n completed schedule ~now_ns:(ns 64);\n request schedule Input;\n print_endline (show (take ~input_pending:true schedule ~now_ns:(ns 65)))\n"
+    }
+  ],
+  "review_hash_checks": [
+    {
+      "path": "bin/masc_tui.ml",
+      "recorded": "446e0bf8472b73d67df50798ab08f7c45224caac1a329dc76b33dbeae4fe9903",
+      "actual": "446e0bf8472b73d67df50798ab08f7c45224caac1a329dc76b33dbeae4fe9903",
+      "match": true
+    },
+    {
+      "path": "bin/masc_tui_render_schedule.ml",
+      "recorded": "8fb5349d996dd00756e94c6335b776f4dd463cee41c94ede6f58d15437ac7482",
+      "actual": "8fb5349d996dd00756e94c6335b776f4dd463cee41c94ede6f58d15437ac7482",
+      "match": true
+    },
+    {
+      "path": "bin/masc_tui_render_schedule.mli",
+      "recorded": "f3dcb457ad98d81eb68813f31bbd20d6356ee867520d6e36b17be2cf3a5f56d3",
+      "actual": "f3dcb457ad98d81eb68813f31bbd20d6356ee867520d6e36b17be2cf3a5f56d3",
+      "match": true
+    },
+    {
+      "path": "changelog.d/50502.md",
+      "recorded": "f1f6bc57e1d5d60bf9ceed046cb6c287c48d4f3c0bcfb4900f9a2f3f4534f1bd",
+      "actual": "f1f6bc57e1d5d60bf9ceed046cb6c287c48d4f3c0bcfb4900f9a2f3f4534f1bd",
+      "match": true
+    },
+    {
+      "path": "test/test_tui_render_schedule.ml",
+      "recorded": "ddaca80aab01a4a50a32551503dd2e16296d4d5a76812d9ba2d69194587e01ff",
+      "actual": "ddaca80aab01a4a50a32551503dd2e16296d4d5a76812d9ba2d69194587e01ff",
+      "match": true
+    }
+  ],
+  "all_hashes_and_extractions_match": true,
+  "execution": "No binaries executed or recompiled; recorded decisions independently evaluated from extracted exact source and logical timestamps.",
+  "at": "2026-11-09T07:59:18.539492+00:00",
+  "before_full_file_equals_C_base": true,
+  "C_base_full_scheduler_sha256": "a09123bf5672e97e1daa06b5b21d7eccf000a3bfcd5c3c32dbdef599a57aec4f",
+  "production_take_lines": [
+    42671
+  ],
+  "production_completed_lines": [
+    42799
+  ],
+  "policy_matches_two_clock_design": true,
+  "independent_review_record_claims_match_source": true,
+  "P0_P1_P2_findings": [],
+  "recorded_decision_meaning": {
+    "before": "start0 + interval16 is already due at65, so Input+pending=true Render",
+    "after": "completed64 + interval16 gives80; at65 Input+pending=true waits until80",
+    "units": "result wait:80000000 is nanoseconds =80ms",
+    "scope": "logical scheduling state after an assumed64ms completed frame, not a measured64ms frame or key-to-output latency"
+  }
+}

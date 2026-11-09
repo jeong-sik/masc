@@ -17,6 +17,7 @@ type t =
   ; image_given : bool
   ; foreign_volumes : string list
   ; keepers : verdict list
+  ; unlisted_keepers : string list
   }
 
 type summary =
@@ -63,6 +64,7 @@ let of_report ~executed ~image_given (report : Keeper_volume_gc.report) =
   ; image_given
   ; foreign_volumes = report.foreign_volumes
   ; keepers = List.map verdict report.keepers
+  ; unlisted_keepers = report.unlisted_keepers
   }
 ;;
 
@@ -115,12 +117,16 @@ let to_json t =
     ; "image_given", `Bool t.image_given
     ; "foreign_volumes", `List (List.map (fun name -> `String name) t.foreign_volumes)
     ; "keepers", `List (List.map verdict_to_json t.keepers)
+    ; "unlisted_keepers", `List (List.map (fun name -> `String name) t.unlisted_keepers)
     ; "summary", summary_to_json (summary t)
     ]
 ;;
 
 let answer_surface = "masc_sandbox_volume_gc answer"
-let answer_fields = [ "executed"; "image_given"; "foreign_volumes"; "keepers"; "summary" ]
+
+let answer_fields =
+  [ "executed"; "image_given"; "foreign_volumes"; "keepers"; "unlisted_keepers"; "summary" ]
+;;
 
 let verdict_fields =
   [ "keeper_name"; "work_volume"; "build_volume"; "outcome_kind"; "outcome" ]
@@ -209,9 +215,19 @@ let of_json json =
       collect 0 [] items
     | _ -> Error (surface ^ ".keepers must be a list")
   in
+  let* unlisted_keepers =
+    Json_util.require_field_string_list ~surface "unlisted_keepers" fields
+  in
+  let* () =
+    if List.exists (fun name -> String.equal (String.trim name) "") unlisted_keepers
+    then Error (surface ^ ".unlisted_keepers holds a blank keeper name")
+    else if (not executed) && not (List.is_empty unlisted_keepers)
+    then Error (surface ^ ".unlisted_keepers is only written by an answer that executed")
+    else Ok ()
+  in
   let* summary_json = field ~surface "summary" fields in
   let* written = summary_of_json summary_json in
-  let t = { executed; image_given; foreign_volumes; keepers } in
+  let t = { executed; image_given; foreign_volumes; keepers; unlisted_keepers } in
   if summary_equal written (summary t)
   then Ok t
   else Error (surface ^ ".summary does not match its keepers")

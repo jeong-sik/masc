@@ -10,8 +10,8 @@
     validated and translated by the same descriptor that was advertised.
     Exact Board/Fusion/Task source reads are also available. Task authority uses
     the actual producer identity; Goal authority permits shared workspace
-    records. Direct posts are readable only by their author via Task review,
-    because immutable target readership is not available at this boundary.
+    records. Task review can capture Direct posts authored by its producer
+    or naming that producer in their immutable recorded readership.
     Explicit Task sources use a narrowed exact-single-Task keeper_tasks_list
     descriptor over immutable submitted bytes, never a live backlog listing.
     That descriptor is offered only when the submission contains a Task source;

@@ -1,5 +1,5 @@
 // Tool call series panel — hourly or daily totals of the retained tool calls,
-// drawn as calls, time spent and latency, with the tools that spent the most time.
+// drawn as calls, failure rate, time spent and latency, with the tools that spent the most time.
 
 import { html } from 'htm/preact'
 import { useEffect } from 'preact/hooks'
@@ -41,9 +41,13 @@ export function failureRatePercent(callCount: number, failureCount: number): num
   return callCount === 0 ? null : (failureCount / callCount) * PERCENT
 }
 
+function formatPercent(percent: number): string {
+  return `${percent.toFixed(1)}%`
+}
+
 function formatFailureRate(callCount: number, failureCount: number): string {
   const rate = failureRatePercent(callCount, failureCount)
-  return rate === null ? '-' : `${rate.toFixed(1)}%`
+  return rate === null ? '-' : formatPercent(rate)
 }
 
 export function callSeries(series: ToolMetricsSeriesResponse): MetricChartSeries[] {
@@ -54,6 +58,21 @@ export function callSeries(series: ToolMetricsSeriesResponse): MetricChartSeries
       color: 'var(--color-status-warn)',
       dashed: true,
       readings: bucketReadings(series, bucket => bucket.failure_count),
+    },
+  ]
+}
+
+/**
+ * Share of failed calls per bucket. Failures are a small part of the calls, so
+ * on the call chart's axis their line lies flat; on this one a bucket in which
+ * calls failed in bulk stands out. A bucket with no call is a gap, not 0%.
+ */
+export function failureRateSeries(series: ToolMetricsSeriesResponse): MetricChartSeries[] {
+  return [
+    {
+      name: '실패율',
+      color: 'var(--color-status-warn)',
+      readings: bucketReadings(series, bucket => failureRatePercent(bucket.call_count, bucket.failure_count)),
     },
   ]
 }
@@ -101,9 +120,12 @@ function ToolSeriesCharts({ series }: { series: ToolMetricsSeriesResponse }) {
       <${StatTile} label="지연 p50" value=${formatMsCompact(total.p50_ms, '-')} status="brass" />
       <${StatTile} label="지연 p95" value=${formatMsCompact(total.p95_ms, '-')} status="brass" />
     </div>
-    <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
       <${DetailCard}>
         <${ObservedMetricChart} label="구간별 호출 수" unit="회" formatValue=${formatCount} series=${callSeries(series)} />
+      <//>
+      <${DetailCard}>
+        <${ObservedMetricChart} label="구간별 실패율" unit="%" formatValue=${formatPercent} series=${failureRateSeries(series)} />
       <//>
       <${DetailCard}>
         <${ObservedMetricChart} label="구간별 실행 시간 합계" unit="ms" formatValue=${formatTotalTime} series=${timeSeries(series)} />

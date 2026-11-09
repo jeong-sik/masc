@@ -448,7 +448,7 @@ let discover ~binary ~sw:_ ~net ~base_path request =
     let* json = match choice with
     | Runtime_setup_spec.Codex ->
       let* command=text (value "command" template) in
-      let* json=native_json ~binary (["runtime-codex-models";"--cli-path";command] @ selected_home_args template) in
+      let* json=native_json ~binary (["runtime-codex-models";"--base-path";base_path;"--cli-path";command] @ selected_home_args template) in
       let* models = client_models ~catalog:false json in
       let* catalog = native_client_catalog ~binary "codex" in
       Ok (client_models_json ~source:"codex_isolated_account_model_list"

@@ -2174,7 +2174,7 @@
  (name masc_tui_runtime_config_view)
  (wrapped false)
  (modules masc_tui_runtime_config_view)
- (libraries masc.runtime masc_tui_message_layout masc_tui_account_login yojson))
+ (libraries masc.runtime masc_tui_message_layout masc_tui_account_login masc_tui_page_line yojson))
 
 (library
  (name masc_tui_runtime_config_snapshot)
@@ -2818,6 +2818,7 @@
   masc_tui_render_activity
   masc_tui_render_config
   masc_tui_render_keepers
+  masc_tui_keeper_wall
   masc_tui_render_keeper_story
   masc_tui_render_runtime
   masc_tui_render_overlays

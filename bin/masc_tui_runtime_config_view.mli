@@ -35,4 +35,12 @@ val decode_source : Yojson.Safe.t -> (reading, string) result
     do not decode unused model rows. Their [model_bindings] result is unavailable;
     only [decode] prepares model evidence for Config snapshots. *)
 val summary_lines : metadata -> (tone * string) list
-val detail_lines : metadata -> (tone * string) list
+val source_heading : string
+(** The title of the status page's first block, the one that names the source. *)
+val detail_blocks :
+  lead:Masc_tui_page_line.t list ->
+  metadata ->
+  (string * Masc_tui_page_line.t list) list
+(** The status page as headed blocks of reading lines. [lead] opens the first
+    block with what only the caller knows (the path of the file read). The block
+    of key lists is left out when no key is pending, preempted or applied. *)

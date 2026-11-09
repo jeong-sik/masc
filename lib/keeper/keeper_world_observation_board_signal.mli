@@ -32,6 +32,7 @@ type board_read_operation =
   | Get_comments
   | Parse_queued_comment_identity
   | Parse_queued_audience
+  | Record_attention_candidate
 
 (** A Board observation unavailable because an identifier is invalid, a row
     is absent, or the Board source cannot be read. *)
@@ -87,6 +88,15 @@ val board_stimulus_of_board_signal
   -> Keeper_event_queue.board_stimulus
 (** Preserve live signal identity, content, and event-time audience in the
     durable queue. *)
+
+val addressed_signal_of_observation : board_observation -> Board_dispatch.addressed_board_signal
+(** Reconstruct the exact producer signal after the durable queue has parsed
+    its identities and audience. No current post content is substituted. *)
+
+val board_routing_pending_stimulus
+  : arrived_at:float -> Board_dispatch.addressed_board_signal -> Keeper_event_queue.stimulus
+(** Retain an event whose routing evidence is temporarily unavailable. This
+    creates no wake or model input; intake must resolve its original audience. *)
 
 val queue_audience_of_board : Board.audience -> Keeper_event_queue.board_audience
 (** Mirror a Board audience into the queue leaf DTO. *)

@@ -1,9 +1,8 @@
 (** Agent Core contract Phase 1 unit tests.
 
     Minimal Phase 1 coverage: the new [Streaming_summary] variant
-    serialises round-trip, exposes the right [event_type_name], and the
-    [streaming_terminal] / [streaming_kind_breakdown] auxiliary types
-    round-trip too.
+    serialises round-trip, and the [streaming_terminal] /
+    [streaming_kind_breakdown] auxiliary types round-trip too.
 
     Full integration coverage (100-chunk synthetic completion, cancel
     mid-stream, provider error) is deferred to a follow-up PR — those
@@ -38,13 +37,6 @@ let sample_summary : T.t =
     ; inter_chunk_ms_max = Some 150.0
     ; terminal = T.Terminal_done
     }
-;;
-
-let test_event_type_name () =
-  Alcotest.(check string)
-    "Streaming_summary event_type_name"
-    "streaming_summary"
-    (T.event_type_name sample_summary)
 ;;
 
 let test_yojson_roundtrip_summary () =
@@ -112,104 +104,7 @@ let test_terminal_cancelled_roundtrip () =
 (* Agent Core contract TTFT helper tests *)
 
 module Streaming = Llm_provider.Streaming
-module Openai_wire = Llm_provider.Openai_wire
 module Types = Llm_provider.Types
-
-let make_openai_chunk
-      ?delta_content
-      ?delta_reasoning
-      ?delta_reasoning_details
-      ?(delta_tool_calls = [])
-      ()
-  : Openai_wire.openai_chunk
-  =
-  { chunk_id = "c1"
-  ; chunk_model = "m"
-  ; delta_content
-  ; delta_reasoning
-  ; delta_reasoning_details
-  ; delta_refusal = false
-  ; delta_tool_calls
-  ; finish_reason = None
-  ; chunk_usage = None
-  ; chunk_timings = None
-  }
-;;
-
-let test_chunk_has_non_empty_delta_content () =
-  let c = make_openai_chunk ~delta_content:"hello" () in
-  Alcotest.(check bool)
-    "non-empty content is a token signal"
-    true
-    (Openai_wire.chunk_has_non_empty_delta c)
-;;
-
-let test_chunk_empty_delta_is_not_token () =
-  let c = make_openai_chunk ~delta_content:"" () in
-  Alcotest.(check bool)
-    "empty string content is not a token"
-    false
-    (Openai_wire.chunk_has_non_empty_delta c)
-;;
-
-let test_chunk_only_reasoning_is_token () =
-  let c = make_openai_chunk ~delta_reasoning:"thinking..." () in
-  Alcotest.(check bool)
-    "reasoning-only chunk is a token"
-    true
-    (Openai_wire.chunk_has_non_empty_delta c)
-;;
-
-let test_chunk_reasoning_details_is_token () =
-  let detail : Types.reasoning_detail =
-    { raw = `Assoc [ "text", `String "thinking..." ]; text = Some "thinking..." }
-  in
-  let c =
-    make_openai_chunk
-      ~delta_reasoning_details:
-        { delta_reasoning_content = None; delta_details = [ detail ] }
-      ()
-  in
-  Alcotest.(check bool)
-    "reasoning_details chunk is a token"
-    true
-    (Openai_wire.chunk_has_non_empty_delta c)
-;;
-
-let test_chunk_empty_reasoning_details_is_not_token () =
-  let c =
-    make_openai_chunk
-      ~delta_reasoning_details:{ delta_reasoning_content = None; delta_details = [] }
-      ()
-  in
-  Alcotest.(check bool)
-    "empty reasoning_details chunk is not a token"
-    false
-    (Openai_wire.chunk_has_non_empty_delta c)
-;;
-
-let test_chunk_tool_call_is_token () =
-  let tc : Openai_wire.openai_tool_call_delta =
-    { tc_index = 0
-    ; tc_id = Some "call_1"
-    ; tc_name = Some "fetch"
-    ; tc_arguments = Some (Openai_wire.Args_complete "{}")
-    }
-  in
-  let c = make_openai_chunk ~delta_tool_calls:[ tc ] () in
-  Alcotest.(check bool)
-    "tool_call delta is a token"
-    true
-    (Openai_wire.chunk_has_non_empty_delta c)
-;;
-
-let test_chunk_finish_only_is_not_token () =
-  let c = make_openai_chunk () in
-  Alcotest.(check bool)
-    "finish-only / empty chunk is not a token"
-    false
-    (Openai_wire.chunk_has_non_empty_delta c)
-;;
 
 let test_sse_event_message_start_is_not_token () =
   let e = Types.MessageStart { id = "x"; model = "m"; usage = None } in
@@ -266,13 +161,7 @@ let test_sse_event_ping_is_not_token () =
 let () =
   Alcotest.run
     "Agent Core contract Streaming_summary"
-    [ ( "event_type_name"
-      , [ Alcotest.test_case
-            "Streaming_summary maps to streaming_summary"
-            `Quick
-            test_event_type_name
-        ] )
-    ; ( "yojson"
+    [ ( "yojson"
       , [ Alcotest.test_case
             "Streaming_summary round-trip (Terminal_done)"
             `Quick
@@ -292,34 +181,6 @@ let () =
         ] )
     ; ( "Agent Core contract token classification"
       , [ Alcotest.test_case
-            "chunk_has_non_empty_delta: content"
-            `Quick
-            test_chunk_has_non_empty_delta_content
-        ; Alcotest.test_case
-            "chunk_has_non_empty_delta: empty content rejected"
-            `Quick
-            test_chunk_empty_delta_is_not_token
-        ; Alcotest.test_case
-            "chunk_has_non_empty_delta: reasoning only"
-            `Quick
-            test_chunk_only_reasoning_is_token
-        ; Alcotest.test_case
-            "chunk_has_non_empty_delta: reasoning details"
-            `Quick
-            test_chunk_reasoning_details_is_token
-        ; Alcotest.test_case
-            "chunk_has_non_empty_delta: empty reasoning details rejected"
-            `Quick
-            test_chunk_empty_reasoning_details_is_not_token
-        ; Alcotest.test_case
-            "chunk_has_non_empty_delta: tool call"
-            `Quick
-            test_chunk_tool_call_is_token
-        ; Alcotest.test_case
-            "chunk_has_non_empty_delta: finish-only rejected"
-            `Quick
-            test_chunk_finish_only_is_not_token
-        ; Alcotest.test_case
             "sse_event_is_first_token_signal: MessageStart rejected"
             `Quick
             test_sse_event_message_start_is_not_token

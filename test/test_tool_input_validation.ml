@@ -2809,7 +2809,7 @@ let () =
         test_validate_args_tool_execute_rejects_cmd_string;
       Alcotest.test_case "tool_execute accepts command string" `Quick
         test_validate_args_tool_execute_accepts_command_string;
-      Alcotest.test_case "tool_execute rejects background flag" `Quick
+      Alcotest.test_case "tool_execute accepts background flag" `Quick
         test_validate_args_tool_execute_accepts_background_flag;
       Alcotest.test_case "tool_execute rejects async lifecycle fields" `Quick
         test_validate_args_tool_execute_rejects_async_lifecycle_fields;

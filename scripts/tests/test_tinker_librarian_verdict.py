@@ -13,9 +13,11 @@ from __future__ import annotations
 
 import copy
 import json
+import math
 import sys
 import tempfile
 import unittest
+from dataclasses import astuple
 from pathlib import Path
 from typing import cast
 
@@ -30,7 +32,7 @@ import synth_render
 import synth_rows as RW
 import synth_spec as S
 
-from tinker_librarian_fixtures import make_prompt
+from tinker_librarian_fixtures import make_prompt, make_template
 from tinker_librarian_synth_fixtures import PLANTED, candidates_of, request
 
 type Row = dict[str, object]
@@ -107,33 +109,157 @@ class WarmTest(unittest.TestCase):
         self.assertFalse(V.warm(row("A", "i1", prompt_tokens=0, cached_tokens=0)))
 
 
+GATES: dict[str, object] = {
+    "G1_e_real_valid_rate_min": 0.95, "G2_e_real_dropped_not_in_live_max": 2,
+    "G3_e_synth_memory_state_accuracy_min": 0.97, "G3_e_synth_drop_precision_min": 1.0,
+    "G3_e_synth_stale_drop_recall_min": 0.9, "G4_e_real_paired_lead_min": -0.06,
+    "G5_e_real_latency_p50_ratio_max": 1.16, "G6_e_synth_absorb_precision_min": 0.8,
+    "G6_e_synth_judged_merge_recall_min": 0.7}
+
+
+class GatesTest(unittest.TestCase):
+    def test_each_gate_reads_its_own_key(self) -> None:
+        # GATES lists its keys in the order of the Gates fields; distinct numbers show a swapped key.
+        raw: dict[str, object] = {key: (i + 1) / 100 for i, key in enumerate(GATES)}
+        self.assertEqual(astuple(V.gates_of(raw)), tuple((i + 1) / 100 for i in range(len(GATES))))
+
+    def test_a_gate_without_a_finite_number_stops_the_verdict(self) -> None:
+        unset = {k: v for k, v in GATES.items() if k != "G6_e_synth_judged_merge_recall_min"}
+        for raw in (unset, {**GATES, "G6_e_synth_absorb_precision_min": None},
+                    {**GATES, "G1_e_real_valid_rate_min": True}, {**GATES, "G1_e_real_valid_rate_min": "0.95"},
+                    {**GATES, "G6_e_synth_absorb_precision_min": -math.inf},
+                    {**GATES, "G5_e_real_latency_p50_ratio_max": math.inf},
+                    {**GATES, "G3_e_synth_stale_drop_recall_min": math.nan}):
+            with self.subTest(raw=raw), self.assertRaises(SystemExit):
+                V.gates_of(raw)
+
+    def test_a_gate_the_verdict_does_not_read_stops_it(self) -> None:
+        with self.assertRaises(SystemExit):
+            V.gates_of({**GATES, "G3_e_synth_outcome_accuracy_min": 0.95})
+
+
+class ChoiceTest(unittest.TestCase):
+    def test_the_order_is_read_alone(self) -> None:
+        self.assertEqual(V.choice_of({"order": ["A"]}), ["A"])
+        refused: tuple[dict[str, object], ...] = (
+            {"order": ["A"], "prefer_later_when_ahead_by": 0.03}, {"order": []}, {"order": "A"}, {"order": [1]}, {})
+        for raw in refused:
+            with self.subTest(raw=raw), self.assertRaises(SystemExit):
+                V.choice_of(raw)
+
+    def test_training_needs_every_gate_and_its_candidate_in_the_order(self) -> None:
+        lines: dict[str, object] = {"gates": GATES, "choice": {"order": ["A"]}}
+        self.assertEqual(V.ready_to_train(lines, "A"), V.gates_of(GATES))
+        unset = {k: v for k, v in GATES.items() if not k.startswith("G6")}
+        for bad, candidate in (({**lines, "gates": unset}, "A"), (lines, "B")):
+            with self.subTest(candidate=candidate), self.assertRaises(SystemExit):
+                V.ready_to_train(bad, candidate)
+
+
+class GateChecksTest(unittest.TestCase):
+    # Every number sits on its line in GATES; the outcome words are far below any line.
+    REAL: dict[str, object] = {"valid_rate": 0.95, "dropped_not_in_live": 2, "latency_p50_s": 10.0 * 1.16}
+    BASELINE: dict[str, object] = {"latency_p50_s": 10.0}
+    SYNTH: dict[str, object] = {"memory_state_accuracy": 0.97, "outcome_accuracy": 0.5, "drop_precision": 1.0,
+                                "stale_drop_recall": 0.9}
+    MERGES: dict[str, object] = {"absorb_precision": 0.8, "judged_merge_recall": 0.7}
+    PAIR: dict[str, object] = {"lead": -0.06}
+
+    def failed(self, synth: dict[str, object] | None = None, merges: dict[str, object] | None = None,
+               real: dict[str, object] | None = None, pair: dict[str, object] | None = None,
+               baseline: dict[str, object] | None = None) -> set[str]:
+        checks = V.gate_checks(V.gates_of(GATES), real or self.REAL, synth or self.SYNTH, merges or self.MERGES,
+                               pair or self.PAIR, baseline or self.BASELINE)
+        return {k for k, v in checks.items() if not v}
+
+    def test_a_candidate_on_every_line_passes(self) -> None:
+        checks = V.gate_checks(V.gates_of(GATES), self.REAL, self.SYNTH, self.MERGES, self.PAIR, self.BASELINE)
+        self.assertEqual(checks, dict.fromkeys(("G1", "G2", "G3", "G4", "G5", "G6"), True))
+
+    def test_each_e_real_gate_fails_just_past_its_line(self) -> None:
+        cases: tuple[tuple[str, dict[str, object], dict[str, object], dict[str, object]], ...] = (
+            ("G1", {**self.REAL, "valid_rate": 0.94}, self.PAIR, self.BASELINE),
+            ("G2", {**self.REAL, "dropped_not_in_live": 3}, self.PAIR, self.BASELINE),
+            ("G4", self.REAL, {"lead": -0.07}, self.BASELINE), ("G4", self.REAL, {"lead": None}, self.BASELINE),
+            ("G5", {**self.REAL, "latency_p50_s": 11.7}, self.PAIR, self.BASELINE),
+            ("G5", {**self.REAL, "latency_p50_s": None}, self.PAIR, self.BASELINE),
+            ("G5", self.REAL, self.PAIR, {"latency_p50_s": None}))
+        for gate, real, pair, baseline in cases:
+            with self.subTest(gate=gate, real=real, pair=pair, baseline=baseline):
+                self.assertEqual(self.failed(real=real, pair=pair, baseline=baseline), {gate})
+
+    def test_g3_reads_the_memory_state_and_not_the_outcome_words(self) -> None:
+        self.assertEqual(self.failed({**self.SYNTH, "memory_state_accuracy": 0.96, "outcome_accuracy": 1.0}), {"G3"})
+        for key, value in (("drop_precision", 0.99), ("drop_precision", None), ("stale_drop_recall", 0.89),
+                           ("stale_drop_recall", None)):
+            with self.subTest(key=key, value=value):
+                self.assertEqual(self.failed({**self.SYNTH, key: value}), {"G3"})
+
+    def test_g6_needs_both_merge_numbers_at_their_lines(self) -> None:
+        for key, value in (("absorb_precision", 0.79), ("absorb_precision", None), ("judged_merge_recall", 0.69),
+                           ("judged_merge_recall", None)):
+            with self.subTest(key=key, value=value):
+                self.assertEqual(self.failed(merges={**self.MERGES, key: value}), {"G6"})
+
+
+class JudgedCandidateTest(unittest.TestCase):
+    # The baseline's E-synth numbers fail G3 and G6, so a check that reads them in place of A's shows.
+    BAD_SYNTH: dict[str, object] = {**GateChecksTest.SYNTH, "memory_state_accuracy": 0.5}
+    BAD_MERGES: dict[str, object] = {**GateChecksTest.MERGES, "judged_merge_recall": 0.1}
+
+    def judged(self, synth: dict[str, dict[str, object]], merges: dict[str, dict[str, object]],
+               base_p50: float) -> dict[str, object]:
+        real = {"base": {**GateChecksTest.REAL, "latency_p50_s": base_p50}, "A": GateChecksTest.REAL}
+        return V.judged_candidate(V.gates_of(GATES), "A", "base", real, synth, merges, GateChecksTest.PAIR)
+
+    def test_a_candidate_is_judged_on_its_own_numbers(self) -> None:
+        good = self.judged({"base": self.BAD_SYNTH, "A": GateChecksTest.SYNTH},
+                           {"base": self.BAD_MERGES, "A": GateChecksTest.MERGES}, 10.0)
+        self.assertEqual((good["pass"], good["paired"]), (True, GateChecksTest.PAIR))
+        bad = self.judged({"base": GateChecksTest.SYNTH, "A": self.BAD_SYNTH},
+                          {"base": GateChecksTest.MERGES, "A": self.BAD_MERGES}, 10.0)
+        self.assertEqual({k for k in ("G1", "G2", "G3", "G4", "G5", "G6") if not bad[k]}, {"G3", "G6"})
+        self.assertFalse(bad["pass"])
+
+    def test_g5_compares_with_the_baselines_latency(self) -> None:
+        slower = self.judged({"base": GateChecksTest.SYNTH, "A": GateChecksTest.SYNTH},
+                             {"base": GateChecksTest.MERGES, "A": GateChecksTest.MERGES}, 9.0)
+        self.assertEqual((slower["pass"], slower["G5"]), (False, False))
+
+
+class MeasureSynthTest(unittest.TestCase):
+    def rows(self) -> list[Row]:
+        return [synth_row(target=t, item=f"eval-k1-m{m}-00{m}", dropped_off_label=[], absorbs={}, merges_absorbed=[])
+                for t in ("base", "A") for m in (1, 2)]
+
+    def measure(self, rows: list[Row]) -> V.SynthMeasure:
+        with tempfile.TemporaryDirectory() as tmp:
+            run = Path(tmp)
+            (run / "rows.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows), encoding="utf-8")
+            return V.measure_synth(run, 2, ["base", "A"], None, None)
+
+    def test_each_target_gets_the_numbers_of_its_own_rows(self) -> None:
+        rows = self.rows()
+        rows[2] = {**rows[2], "state_correct": 0}
+        got = self.measure(rows)
+        self.assertEqual((got.by_target["base"]["memory_state_accuracy"], got.by_target["A"]["memory_state_accuracy"]),
+                         (1.0, 0.5))
+        merges = cast(dict[str, dict[str, object]], got.merges["by_target"])
+        self.assertEqual((merges["A"]["absorb_precision"], merges["A"]["judged_merge_recall"]), (None, None))
+
+    def test_a_missing_answer_or_an_unjudged_drop_stops_it(self) -> None:
+        dropped = self.rows()
+        dropped[0] = {**dropped[0], "dropped_off_label": ["m9"]}
+        for rows in (self.rows()[:-1], dropped):
+            with self.subTest(rows=len(rows)), self.assertRaises(SystemExit):
+                self.measure(rows)
+
+
 class ChooseTest(unittest.TestCase):
-    @staticmethod
-    def result(a_pass: bool, b_pass: bool) -> dict[str, object]:
-        return {"A": {"pass": a_pass}, "B": {"pass": b_pass}}
-
-    @staticmethod
-    def rows(a_agree: int, b_agree: int) -> list[Row]:
-        return [row("A", "i1", agree=a_agree, candidates=100), row("B", "i1", agree=b_agree, candidates=100)]
-
-    def test_a_wins_unless_b_leads_it_on_both_by_the_margin(self) -> None:
-        synth: dict[str, dict[str, object]] = {"A": {"outcome_accuracy": 0.95}, "B": {"outcome_accuracy": 0.98}}
-        self.assertEqual(V.choose(["A", "B"], self.result(True, True), synth, self.rows(80, 83), 0.03), "B")
-        self.assertEqual(V.choose(["A", "B"], self.result(True, True), synth, self.rows(80, 82), 0.03), "A")
-        synth["B"] = {"outcome_accuracy": 0.97}
-        self.assertEqual(V.choose(["A", "B"], self.result(True, True), synth, self.rows(80, 90), 0.03), "A")
-
-    def test_the_two_are_compared_on_items_both_answered_validly(self) -> None:
-        # B's lead over the baseline could come from i2, which A did not answer validly.
-        synth: dict[str, dict[str, object]] = {"A": {"outcome_accuracy": 0.95}, "B": {"outcome_accuracy": 0.99}}
-        rows = [row("A", "i1", agree=50, candidates=100), row("B", "i1", agree=50, candidates=100),
-                row("A", "i2", valid=False, candidates=100), row("B", "i2", agree=100, candidates=100)]
-        self.assertEqual(V.choose(["A", "B"], self.result(True, True), synth, rows, 0.03), "A")
-
-    def test_only_passing_candidates_are_chosen(self) -> None:
-        synth: dict[str, dict[str, object]] = {"A": {"outcome_accuracy": 0.99}, "B": {"outcome_accuracy": 0.95}}
-        self.assertEqual(V.choose(["A", "B"], self.result(False, True), synth, self.rows(0, 0), 0.03), "B")
-        self.assertIsNone(V.choose(["A", "B"], self.result(False, False), synth, self.rows(0, 0), 0.03))
+    def test_the_first_passing_candidate_in_order_is_chosen(self) -> None:
+        result: dict[str, object] = {"A": {"pass": False}, "C": {"pass": True}, "D": {"pass": True}}
+        self.assertEqual(V.choose(["A", "C", "D"], result), "C")
+        self.assertIsNone(V.choose(["A"], result))
 
 
 class BindingTest(unittest.TestCase):
@@ -145,20 +271,23 @@ class BindingTest(unittest.TestCase):
 
     def test_a_candidate_is_the_checkpoint_its_training_run_saved(self) -> None:
         targets = {"base": self.BASE, "A": "tinker://run-a/sampler"}
-        saved: dict[str, object] = {"branch": "A", "pass_lines_sha256": self.PIN, "sampler_path": "tinker://run-a/sampler"}
+        saved: dict[str, object] = {"candidate": "A", "pass_lines_sha256": self.PIN, "sampler_path": "tinker://run-a/sampler"}
         self.assertIsNone(self.problem(targets, dict(targets), {"A": saved}))
         self.assertIsNotNone(self.problem(targets, dict(targets), {"A": {**saved, "sampler_path": "tinker://other"}}))
         self.assertIsNotNone(self.problem(targets, dict(targets), {"A": {**saved, "pass_lines_sha256": "q" * 64}}))
+        self.assertIsNotNone(self.problem(targets, dict(targets), {"A": {**saved, "candidate": "B"}}))
+        unnamed = {k: v for k, v in saved.items() if k != "candidate"}
+        self.assertIsNotNone(self.problem(targets, dict(targets), {"A": unnamed}))
         self.assertIsNotNone(self.problem(targets, dict(targets), {}))
 
     def test_a_target_the_pass_lines_do_not_name_is_refused(self) -> None:
         targets = {"base": self.BASE, "A": "tinker://run-a/sampler", "C": "tinker://run-c/sampler"}
-        saved: dict[str, object] = {"branch": "A", "pass_lines_sha256": self.PIN, "sampler_path": "tinker://run-a/sampler"}
+        saved: dict[str, object] = {"candidate": "A", "pass_lines_sha256": self.PIN, "sampler_path": "tinker://run-a/sampler"}
         self.assertIsNotNone(self.problem(targets, dict(targets), {"A": saved}))
 
     def test_both_runs_send_the_same_model_under_each_name(self) -> None:
         real = {"base": self.BASE, "A": "tinker://run-a/sampler"}
-        saved: dict[str, object] = {"branch": "A", "pass_lines_sha256": self.PIN, "sampler_path": "tinker://run-a/sampler"}
+        saved: dict[str, object] = {"candidate": "A", "pass_lines_sha256": self.PIN, "sampler_path": "tinker://run-a/sampler"}
         self.assertIsNotNone(self.problem(real, {**real, "A": "tinker://run-b/sampler"}, {"A": saved}))
         self.assertIsNotNone(self.problem({**real, "base": "other"}, {**real, "base": "other"}, {"A": saved}))
 
@@ -227,10 +356,10 @@ class ScoreTest(unittest.TestCase):
         part = part_of(V.summarize("synth", [synth_row(), synth_row(error="GLM 1305: busy", wall_s=9.0, valid=False)]))
         self.assertEqual((part["http_errors"], part["latency_p50_s"]), (1, 1.0))
 
-    def test_synth_without_drops_has_full_precision(self) -> None:
-        part = V.summarize("synth", [synth_row()])["A"]
-        assert isinstance(part, dict)
-        self.assertEqual((part["drop_precision"], part["stale_drop_recall"]), (1.0, 0.0))
+    def test_a_ratio_over_nothing_is_none(self) -> None:
+        part = part_of(V.summarize("synth", [synth_row()]))
+        self.assertEqual((part["drop_precision"], part["stale_drop_recall"]), (None, 0.0))
+        self.assertIsNone(part_of(V.summarize("synth", [synth_row(planted=0)]))["stale_drop_recall"])
 
     def test_synth_memory_counts_sum_over_rows(self) -> None:
         rows = [synth_row(candidates=4, correct=1, state_correct=3, state_by_kind={"new": [3, 2], "restates": [1, 1]},
@@ -290,7 +419,9 @@ class RetemplateTest(unittest.TestCase):
             [item] = V.synth_items(path)
             other_rules = Path(tmp) / "librarian.md"
             other_rules.write_text(rules[:first_slot] + "\n" + added + rules[first_slot:], encoding="utf-8")
-            other = V.retemplated(item, synth_render.template_at(other_rules))
+            path, [other] = V.drawn_with(other_rules, [item])
+        self.assertEqual(path, other_rules)
+        self.assertEqual(V.drawn_with(None, [item]), (synth_render.TEMPLATE, [item]))
         self.assertEqual(V.retemplated(item, synth_render.template()), item)
         self.assertNotIn(added, item.text)
         self.assertIn(added, other.text)
@@ -298,6 +429,18 @@ class RetemplateTest(unittest.TestCase):
                          (item.prompt.current_memory, item.prompt.candidates))
         data = item.text.index(R.CANDIDATE_HEADER)
         self.assertTrue(other.text.endswith(item.text[data:]))
+
+    def test_retirement_evidence_goes_out_under_the_new_templates_policy(self) -> None:
+        payload = '{"evidence_kind":"exact_identity_retirement_history","status":"unavailable","detail":"x"}'
+        old, new = "Old retirement policy.", "New retirement policy."
+        prompt = make_prompt(make_template(old), retirement=R.RetirementSection(old, payload))
+        item = M.RealItem("i1", prompt, R.render(prompt), answer((("r1", "deferred", None),)))
+        other = V.retemplated(item, make_template(new))
+        self.assertTrue(other.text.endswith("\n\n" + new + "\n" + payload))
+        self.assertNotIn(old, other.text)
+        self.assertEqual(R.parse(other.text, make_template(new)), other.prompt)
+        with self.assertRaises(SystemExit):
+            V.retemplated(item, make_template())
 
 
 if __name__ == "__main__":

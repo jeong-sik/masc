@@ -5359,13 +5359,7 @@ let test_decode_memory_health_keeps_ordinary_and_source_axes () =
       ; ("updated_at", if present then `Float 1700000000. else `Null)
       ; ( "age_bins"
         , if present
-          then
-            `Assoc
-              [ ("under_hour", `Int 3)
-              ; ("under_day", `Int 4)
-              ; ("under_week", `Int 3)
-              ; ("older", `Int 2)
-              ]
+          then `List ([ `Int 3; `Int 4; `Int 3; `Int 2 ] @ List.init 20 (fun _ -> `Int 0))
           else `Null )
       ; ("context_cycle", empty_memory_context_cycle)
       ; ( "librarian"
@@ -5415,7 +5409,7 @@ let test_decode_memory_health_keeps_ordinary_and_source_axes () =
   in
   let json =
     `Assoc
-      [ ("schema", `String "keeper.memory_os.current_health.v9")
+      [ ("schema", `String "keeper.memory_os.current_health.v10")
       ; ("execution", disabled_memory_execution)
       ; ("generated_at", `Float 1_775_000_000.0)
       ; ( "keepers"
@@ -5481,6 +5475,23 @@ let test_decode_memory_health_keeps_ordinary_and_source_axes () =
            fields)
     | json -> json
   in
+  (* The age ladder is 24 counts that add up to the facts (RFC-0515
+     §2.4.5). The four-key object of the earlier ladder is not read. *)
+  let healthy_age_bins bins = map_keeper 1 (replace_field "age_bins" bins) json in
+  let ints counts = `List (List.map (fun n -> `Int n) counts) in
+  Alcotest.(check bool) "24 counts that add up to the facts decode" false
+    (memory_health_rejects (healthy_age_bins (ints ([ 12 ] @ List.init 23 (fun _ -> 0)))));
+  List.iter
+    (fun (label, bins) ->
+      Alcotest.(check bool) label true (memory_health_rejects (healthy_age_bins bins)))
+    [ ( "the four-key age_bins object is refused"
+      , `Assoc
+          [ ("under_hour", `Int 3); ("under_day", `Int 4); ("under_week", `Int 3)
+          ; ("older", `Int 2) ] )
+    ; "23 counts are refused", ints ([ 12 ] @ List.init 22 (fun _ -> 0))
+    ; "25 counts are refused", ints ([ 12 ] @ List.init 24 (fun _ -> 0))
+    ; "24 counts that miss a fact are refused", ints ([ 11 ] @ List.init 23 (fun _ -> 0))
+    ];
   let frontier = `Assoc ["trace_id", `String "context-trace";
     "end_atom", `Int 3; "boundary_line", `Int 5] in
   let input = `Assoc ["kind", `String "summarized"; "frontier", frontier] in
@@ -5923,7 +5934,7 @@ let test_decode_memory_health_keeps_ordinary_and_source_axes () =
    that disagrees rather than trusting the string it was handed. *)
 let memory_alert_snapshot_with_extra extra_alert_fields ~code ~severity ~target =
   `Assoc
-    [ ("schema", `String "keeper.memory_os.current_health.v9")
+    [ ("schema", `String "keeper.memory_os.current_health.v10")
     ; ("execution", disabled_memory_execution)
     ; ("generated_at", `Float 1_775_000_000.0)
     ; ( "keepers"
@@ -6057,7 +6068,7 @@ let test_decode_memory_alert_keeps_the_code_contract () =
 let test_decode_memory_health_reads_the_librarian_position_beside_the_cut () =
   let snapshot_with context_cycle =
     `Assoc
-      [ ("schema", `String "keeper.memory_os.current_health.v9")
+      [ ("schema", `String "keeper.memory_os.current_health.v10")
       ; ("execution", disabled_memory_execution)
       ; ("generated_at", `Float 1_775_000_000.0)
       ; ( "keepers"
@@ -6074,13 +6085,7 @@ let test_decode_memory_health_reads_the_librarian_position_beside_the_cut () =
                 ; ("removed", `Int 0)
                 ; ("snapshot_present", `Bool true)
                 ; ("updated_at", `Float 1700000000.)
-                ; ( "age_bins"
-                  , `Assoc
-                      [ ("under_hour", `Int 0)
-                      ; ("under_day", `Int 0)
-                      ; ("under_week", `Int 0)
-                      ; ("older", `Int 0)
-                      ] )
+                ; ("age_bins", `List (List.init 24 (fun _ -> `Int 0)))
                 ; ("context_cycle", context_cycle)
                 ; ( "librarian"
                   , `Assoc

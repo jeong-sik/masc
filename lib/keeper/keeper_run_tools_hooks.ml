@@ -671,12 +671,26 @@ let assemble_hooks
     let arrived_stimuli_text () =
       let arrived =
         Keeper_arrived_stimuli.block
+          ~receipt:
+            (Keeper_client_tool_outbox.summary_reader
+               ~base_path:config.base_path
+               ~keeper_name:meta.name
+               ~on_unavailable:(fun detail ->
+                 Log.Keeper.warn ~keeper_name:meta.name
+                   "tool outbox unavailable; this round lists arrived tool results without \
+                    their receipts: %s" detail))
           arrived_tracker
           ~now:(Time_compat.now ())
           ~read:(fun () ->
-            Keeper_registry_event_queue.pending_selections_result
-              ~base_path:config.base_path
-              meta.name)
+            match Keeper_meta_store.read_effective_meta config meta.name with
+            | Error detail -> Error detail
+            | Ok None -> Error "Keeper readership metadata unavailable"
+            | Ok (Some current_meta) ->
+              Keeper_registry_event_queue.pending_selections_result
+                ~base_path:config.base_path
+                meta.name
+              |> Result.map (List.filter (fun (selection : Keeper_event_queue_state.pending_selection) ->
+                Keeper_board_audience.can_project_queued_stimulus ~meta:current_meta selection.source)))
           ~on_unavailable:(fun detail ->
             Log.Keeper.warn ~keeper_name:meta.name
               "arrived stimuli unavailable; this round carries none: %s" detail)

@@ -134,6 +134,40 @@ let signal ~post_id ~author ~title ~content : Board_dispatch.board_signal =
   }
 ;;
 
+let test_direct_readership_precedes_delivery_and_judgment () =
+  Eio_main.run @@ fun _env ->
+  with_temp_workspace @@ fun config ->
+  let reader = keeper_meta ~board_interests:["research"] ~mention_targets:["reader-alias"] config "reader" in
+  let outsider = keeper_meta ~board_interests:["research"] config "outsider" in
+  register config reader;
+  register config outsider;
+  let post = get_created (Board_dispatch.create_post ~author:"writer"
+    ~content:"@reader-alias research secret" ~visibility:Board.Direct ~post_kind:Board.Human_post ()) in
+  let signal = signal ~post_id:(Board.Post_id.to_string post.id) ~author:"writer"
+      ~title:post.title ~content:post.body in
+  List.iter (fun audience ->
+    check bool "a nonreader cannot receive or judge a private signal" true
+      (match Keeper_board_audience.route_for_keeper ~audience ~meta:outsider ~signal with
+       | Keeper_world_observation_board_signal.Available Keeper_board_audience.Ignore -> true
+       | Keeper_world_observation_board_signal.Available _
+       | Keeper_world_observation_board_signal.Unavailable _ -> false))
+    [Keeper_board_audience.Broadcast; Discoverable; Targets [Option.get (Keeper_identity.Keeper_id.of_string "outsider")]];
+  check bool "the recipient's declared alias still receives the post" true
+    (match Keeper_board_audience.route_for_keeper
+       ~audience:(Targets [Option.get (Keeper_identity.Keeper_id.of_string "reader-alias")]) ~meta:reader ~signal with
+     | Keeper_world_observation_board_signal.Available (Keeper_board_audience.Deliver _) -> true
+     | Keeper_world_observation_board_signal.Available _
+     | Keeper_world_observation_board_signal.Unavailable _ -> false);
+  let addressed : Board_dispatch.addressed_board_signal = {signal; audience=Board.Discoverable} in
+  KKS.wakeup_relevant_keeper_for_board_signal ~config addressed;
+  check int "a forced discoverable signal creates no nonreader candidate" 0 (attention_count config outsider.name);
+  let retained = KBAC.of_board_signal ~meta:outsider ~recorded_at:post.created_at addressed in
+  check bool "a retained Direct candidate never invokes semantic judgment" true
+    (match KBAC.candidate_parent_visibility_filter retained with
+     | Ok KBAC.Skip_non_discoverable_comment -> true
+     | Ok KBAC.Keep_discoverable_comment | Error _ -> false)
+;;
+
 let test_initialized_lane_uses_owner_cursor () =
   Eio_main.run @@ fun _env ->
   with_temp_workspace @@ fun config ->
@@ -288,7 +322,7 @@ let test_replayed_comment_discovery_respects_parent_visibility () =
              | Keeper_event_queue.Board_signal
                  { kind = Keeper_event_queue.Comment_added identity; _ } ->
                String.equal identity.comment_id (Board.Comment_id.to_string comment.id)
-             | Keeper_event_queue.Board_signal _ | Board_attention _ | Bootstrap
+             | Keeper_event_queue.Board_signal _ | Board_routing_pending _ | Board_attention _ | Bootstrap
              | Fusion_completed _ | Schedule_due _ | Connector_attention _
              | Hitl_resolved _ | Ask_answered _ | Completion_authority_rejected _
              | Task_cancelled _ | Workspace_message _ | Delegate_completed _
@@ -387,24 +421,47 @@ let test_queued_creation_keeps_content_and_audience_after_edit () =
     ~title:"Original title" ~body:original_body ~visibility:Board.Direct
     ~post_kind:Board.Human_post ()) in
   check int "creation is queued for alice" 1 (queue_length config alice.name);
-  let revised_body = "@bob revised private content" in
+  let post_id = Board.Post_id.to_string post.id in
+  let revised_body = "@alice revised private content" in
   (match Board_dispatch.update_post ~post_id:(Board.Post_id.to_string post.id)
     ~editor:"editor" ~title:"Revised title" ~body:revised_body ~content:revised_body () with
    | Ok _ -> ()
    | Error error -> fail (Board.show_board_error error));
-  check int "alice retains only her original notification" 1 (queue_length config alice.name);
-  check int "revision is queued for bob" 1 (queue_length config bob.name);
+  check int "the existing reader receives the revision" 2 (queue_length config alice.name);
+  check int "an edit does not grant readership to bob" 0 (queue_length config bob.name);
+  (match Board_dispatch.update_post ~post_id ~editor:"editor"
+      ~title:"Rejected title" ~body:"@bob changed readers" ~content:"@bob changed readers" () with
+   | Ok _ -> fail "Direct edit changed its stored readers"
+   | Error error ->
+     match error with
+     | Board.Validation_error _ -> ()
+     | Board.Invalid_id _ | Post_not_found _ | Comment_not_found _ | Io_error _
+     | Already_voted _ | Already_exists _ | Unauthorized _ | Recipient_lookup_failed _ ->
+       fail (Board.show_board_error error));
+  check int "refused reader change creates no extra notification" 2
+    (queue_length config alice.name);
+  check int "refused reader change does not notify bob" 0 (queue_length config bob.name);
+  (match Board_dispatch.get_post ~reader:Masc_board_handlers.Board_access.Operator ~post_id with
+   | Ok stored -> check string "refused reader change preserves the applied revision"
+       revised_body stored.body
+   | Error error -> fail (Board.show_board_error error));
   let queue = match Keeper_registry_event_queue.snapshot_result ~base_path:config.base_path alice.name with
     | Ok queue -> queue | Error detail -> fail detail in
   let event = match Keeper_event_queue.to_list queue with
-    | [ stimulus ] ->
+    | stimulus :: _ ->
+      (match Keeper_world_observation.pending_board_event_of_stimulus
+        ~base_path:config.base_path ~meta:bob stimulus with
+       | Ok None -> ()
+       | Ok (Some _) -> fail "an old Direct stimulus exposed content to a nonreader"
+       | Error unavailable ->
+         fail (Keeper_world_observation_board_signal.unavailable_to_string unavailable));
       (match Keeper_world_observation.pending_board_event_of_stimulus
         ~base_path:config.base_path ~meta:alice stimulus with
        | Ok (Some event) -> event
        | Ok None -> fail "queued creation disappeared from projection"
        | Error unavailable ->
          fail (Keeper_world_observation_board_signal.unavailable_to_string unavailable))
-    | _ -> fail "expected one queued creation for alice" in
+    | [] -> fail "expected the queued creation for alice" in
   check bool "projection remains a typed creation" true
     (event.Keeper_world_observation.event_kind = Keeper_world_observation.Board_post_created);
   check string "creation keeps its original title" post.title (Option.get event.title);
@@ -419,10 +476,15 @@ let test_thread_activity_does_not_project_unbound_parent_content () =
   Eio_main.run @@ fun _env ->
   with_temp_workspace @@ fun config ->
   let alice = keeper_meta config "alice" in
+  let bob = keeper_meta config "bob" in
+  let carol = keeper_meta config "carol" in
   register config alice;
+  register config bob;
+  register config carol;
   let get = function Ok value -> value | Error error -> fail (Board.show_board_error error) in
-  let post = get_created (Board_dispatch.create_post ~author:"editor" ~content:"@bob private original"
-    ~title:"Private parent" ~body:"@bob private original" ~visibility:Board.Direct
+  let original_body = "@alice @peer private original" in
+  let post = get_created (Board_dispatch.create_post ~author:"editor" ~content:original_body
+    ~title:"Private parent" ~body:original_body ~visibility:Board.Direct
     ~hearth:"private-hearth" ~post_kind:Board.Human_post ()) in
   let post_id = Board.Post_id.to_string post.id in
   let own_comment = get (Board_dispatch.add_comment ~post_id ~author:"alice" ~content:"Earlier comment" ()) in
@@ -430,14 +492,34 @@ let test_thread_activity_does_not_project_unbound_parent_content () =
   Board_dispatch.set_board_signal_hook (KKS.wakeup_relevant_keeper_for_board_signal ~config);
   let reply = get (Board_dispatch.add_comment ~post_id ~author:"peer" ~parent_id:own_comment_id
     ~content:"@alice a reply" ()) in
-  ignore (get (Board_dispatch.vote_comment ~voter:"voter" ~comment_id:own_comment_id ~direction:Board.Up));
-  ignore (get (Board_dispatch.toggle_reaction ~target_type:Board.Reaction_comment
-    ~target_id:own_comment_id ~user_id:"reactor" ~emoji:"👍"));
-  ignore (get (Board_dispatch.update_post ~post_id ~editor:"editor"
-    ~title:"Private revision" ~body:"@carol private revision" ~content:"@carol private revision" ()));
+  ignore (get (Board_dispatch.vote_comment ~voter:"peer" ~comment_id:own_comment_id ~direction:Board.Up));
+  ignore (get (Board_dispatch.toggle_reaction ~reader:(Masc_board_handlers.Board_access.named "peer")
+    ~target_type:Board.Reaction_comment ~target_id:own_comment_id ~user_id:"peer" ~emoji:"👍"));
+  (match Board_dispatch.update_post ~post_id ~editor:"editor"
+    ~title:"Private revision" ~body:"@carol private revision" ~content:"@carol private revision" () with
+   | Ok _ -> fail "a thread edit changed Direct readers"
+   | Error error ->
+     match error with
+     | Board.Validation_error _ -> ()
+     | Board.Invalid_id _ | Post_not_found _ | Comment_not_found _ | Io_error _
+     | Already_voted _ | Already_exists _ | Unauthorized _ | Recipient_lookup_failed _ ->
+       fail (Board.show_board_error error));
+  (match Board_dispatch.get_post ~reader:Masc_board_handlers.Board_access.Operator ~post_id with
+   | Ok stored -> check string "refused reader change preserves the original thread"
+       original_body stored.body
+   | Error error -> fail (Board.show_board_error error));
   let queue = match Keeper_registry_event_queue.snapshot_result ~base_path:config.base_path alice.name with
     | Ok queue -> queue | Error detail -> fail detail in
   check int "comment, vote and reaction remain queued for alice" 3 (Keeper_event_queue.length queue);
+  check int "a nonreader receives no thread activity" 0 (queue_length config bob.name);
+  check int "a refused new reader receives no revision" 0 (queue_length config carol.name);
+  List.iter (fun stimulus ->
+    match Keeper_world_observation.pending_board_event_of_stimulus
+        ~base_path:config.base_path ~meta:bob stimulus with
+    | Ok None -> ()
+    | Ok (Some _) -> fail "a retained Direct thread signal exposed a nonreader's activity"
+    | Error unavailable -> fail (Keeper_world_observation_board_signal.unavailable_to_string unavailable))
+    (Keeper_event_queue.to_list queue);
   let events = Keeper_event_queue.to_list queue |> List.map (fun stimulus ->
     match Keeper_world_observation.pending_board_event_of_stimulus ~base_path:config.base_path ~meta:alice stimulus with
     | Ok (Some event) -> event
@@ -749,19 +831,17 @@ let test_unavailable_posts_retain_a_judged_comment () =
   (match Masc_board_handlers.Board_votes_json.load_persisted_posts (Board.global ()) with
    | Error _ -> ()
    | Ok count -> failf "a vanished posts file was admitted with %d rows" count);
-  (match Board_dispatch.read_post_for_evidence ~post_id with
+  (match Board_dispatch.read_post_for_evidence ~reader:Masc_board_handlers.Board_access.Operator ~post_id with
    | Error (Board.Read_source_unavailable _) -> ()
    | Error error -> fail (Board.show_board_read_error error)
    | Ok _ -> fail "unavailable source authorized a parent post");
   (match Keeper_board_attention_partition.ensure_roots
       ~base_path:config.base_path ~keeper_name:meta.name [candidate; post_candidate] with
-   | Ok 1 -> () | Ok _ -> fail "only the independent post may acquire a root"
+   | Ok 0 -> () | Ok _ -> fail "unavailable parents cannot acquire a judgment root"
    | Error detail -> fail detail);
   (match KBAC.apply_judgment_and_deliver ~base_path:config.base_path
       ~keeper_name:meta.name ~candidate_id:post_candidate.candidate_id ~judgment with
-   | Ok (KBAC.Delivered { status = KBAC.Consumed { delivery = KBAC.Enqueued_to_keeper_lane; _ }; _ }) -> ()
-   | Ok _ -> fail "the independent post candidate was not delivered"
-   | Error detail -> fail detail);
+   | Error _ -> () | Ok _ -> fail "unavailable source consumed a post candidate");
   (match KBAC.apply_judgment_and_deliver ~base_path:config.base_path
       ~keeper_name:meta.name ~candidate_id:candidate.candidate_id ~judgment with
    | Error _ -> () | Ok _ -> fail "unavailable source consumed a judged candidate");
@@ -771,23 +851,26 @@ let test_unavailable_posts_retain_a_judged_comment () =
       | Some { status = KBAC.Judged _; _ } -> ()
       | Some _ | None -> fail "the original judgment was not retained")
    | Error detail -> fail detail);
-  check int "only the independent stimulus was enqueued" 1
+  check int "neither unavailable parent authorizes a stimulus" 0
     (queue_length config meta.name);
   Unix.rename held posts;
   restart ();
-  (match KBAC.apply_judgment_and_deliver ~base_path:config.base_path
-      ~keeper_name:meta.name ~candidate_id:candidate.candidate_id ~judgment with
-   | Ok (KBAC.Delivered { status = KBAC.Consumed { delivery = KBAC.Enqueued_to_keeper_lane; _ }; _ }) -> ()
-   | Ok _ -> fail "recovered source did not deliver the retained judgment"
-   | Error detail -> fail detail);
-  check int "recovery delivers exactly one more stimulus" 2 (queue_length config meta.name)
+  List.iter (fun candidate ->
+    match KBAC.apply_judgment_and_deliver ~base_path:config.base_path
+      ~keeper_name:meta.name ~candidate_id:candidate.KBAC.candidate_id ~judgment with
+    | Ok (KBAC.Delivered { status = KBAC.Consumed { delivery = KBAC.Enqueued_to_keeper_lane; _ }; _ }) -> ()
+    | Ok _ -> fail "recovered source did not deliver the retained judgment"
+    | Error detail -> fail detail) [candidate; post_candidate];
+  check int "recovery delivers both retained judgments" 2 (queue_length config meta.name)
 ;;
 
 let () =
   run
     "keeper Board discoverable cursor"
     [ ( "producer and owner boundary"
-      , [ test_case "live comment and catchup share identity after title edit" `Quick
+      , [ test_case "Direct readership precedes delivery and judgment" `Quick
+            test_direct_readership_precedes_delivery_and_judgment
+        ; test_case "live comment and catchup share identity after title edit" `Quick
             test_live_comment_and_catchup_share_identity_after_title_edit
         ; test_case "initialized cursor receives each discoverable edit" `Quick
             test_initialized_cursor_receives_each_discoverable_edit

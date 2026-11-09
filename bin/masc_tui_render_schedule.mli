@@ -18,6 +18,12 @@ val take : input_pending:bool -> t -> now_ns:int64 -> decision
     bytes, probe replay and terminal readiness; it coalesces a continuous burst
     until it drains or the deadline arrives. Background updates keep the
     minimum interval. No timer delays the last input of a burst. *)
+val completed : t -> now_ns:int64 -> unit
+(** Record completion after synchronous frame construction and presentation.
+    Pending requests survive. Continuous input gets its coalescing interval
+    after the work returns, even when the frame overran that interval. Drained
+    input and [Force] still render immediately. Background pacing and deferred
+    frames that did no work keep the start timestamp recorded by [take]. *)
 val input_timeout_seconds : t -> now_ns:int64 -> maximum:float -> float
 val normalize_keeper_detail_scroll :
   line_count:int -> content_height:int -> int -> int

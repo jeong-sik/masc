@@ -537,7 +537,6 @@ let store_addressed ~rewrite ~durability ~atomic_replace ~operation addressed =
   addressed.addressed_ref
 
 let address t ~bytes ~mime = address_with ~operation:"address" t ~bytes ~mime
-let addressed_bytes addressed = addressed.addressed_bytes
 
 let put_addressed addressed =
   Tool_output.Stored

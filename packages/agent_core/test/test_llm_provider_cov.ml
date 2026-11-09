@@ -136,23 +136,12 @@ let test_gemini_url_stream_no_key () =
    2. Api_common — constants, helpers, content block JSON
    ═══════════════════════════════════════════════════ *)
 
-let test_default_base_url () =
-  Alcotest.(check string)
-    "base url"
-    "https://api.anthropic.com"
-    Api_common.default_base_url
-;;
-
 let test_api_version () =
   Alcotest.(check string) "api version" "2023-06-01" Api_common.api_version
 ;;
 
 let test_max_response_body () =
   Alcotest.(check int) "10 MB" (10 * 1024 * 1024) Api_common.max_response_body
-;;
-
-let test_max_stdio_buffer () =
-  Alcotest.(check int) "16 MB" (16 * 1024 * 1024) Api_common.max_stdio_buffer
 ;;
 
 let test_fresh_tool_use_id () =
@@ -207,20 +196,6 @@ let test_text_blocks_to_string_redacted () =
   let blocks : Types.content_block list = [ Text "visible"; RedactedThinking "secret" ] in
   let result = Api_common.text_blocks_to_string blocks in
   Alcotest.(check string) "redacted excluded" "visible" result
-;;
-
-let test_json_of_string_or_raw_valid () =
-  let result = Api_common.json_of_string_or_raw {|{"key":"val"}|} in
-  match result with
-  | `Assoc [ ("key", `String "val") ] -> ()
-  | _ -> Alcotest.fail "expected valid JSON parse"
-;;
-
-let test_json_of_string_or_raw_invalid () =
-  let result = Api_common.json_of_string_or_raw "not json" in
-  match result with
-  | `Assoc [ ("raw", `String "not json") ] -> ()
-  | _ -> Alcotest.fail "expected raw fallback"
 ;;
 
 let test_base64_media_data_url () =
@@ -1734,10 +1709,8 @@ let () =
         ; Alcotest.test_case "stream no key" `Quick test_gemini_url_stream_no_key
         ] )
     ; ( "api_common.constants"
-      , [ Alcotest.test_case "default_base_url" `Quick test_default_base_url
-        ; Alcotest.test_case "api_version" `Quick test_api_version
+      , [ Alcotest.test_case "api_version" `Quick test_api_version
         ; Alcotest.test_case "max_response_body" `Quick test_max_response_body
-        ; Alcotest.test_case "max_stdio_buffer" `Quick test_max_stdio_buffer
         ] )
     ; ( "api_common.helpers"
       , [ Alcotest.test_case "fresh_tool_use_id" `Quick test_fresh_tool_use_id
@@ -1755,14 +1728,6 @@ let () =
             "text_blocks_to_string redacted"
             `Quick
             test_text_blocks_to_string_redacted
-        ; Alcotest.test_case
-            "json_of_string_or_raw valid"
-            `Quick
-            test_json_of_string_or_raw_valid
-        ; Alcotest.test_case
-            "json_of_string_or_raw invalid"
-            `Quick
-            test_json_of_string_or_raw_invalid
         ; Alcotest.test_case "base64_media_data_url" `Quick test_base64_media_data_url
         ; Alcotest.test_case "base64_media_payload" `Quick test_base64_media_payload
         ; Alcotest.test_case

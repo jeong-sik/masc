@@ -51,7 +51,7 @@ let restart () =
     ~recipient_lookup:Recipient_lookup.none_declared ())
 
 let get_post_exn post_id =
-  match Board_dispatch.get_post ~post_id with
+  match Board_dispatch.get_post ~reader:Masc_board_handlers.Board_access.Operator ~post_id with
   | Ok post -> post
   | Error e -> Alcotest.fail (Board.show_board_error e)
 
@@ -223,7 +223,7 @@ let test_closed_post_refuses_new_comments () =
    | Ok _ -> Alcotest.fail "a comment on a closed post must not succeed"
    | Error e ->
      Alcotest.fail ("expected Validation_error, got " ^ Board.show_board_error e));
-  (match Board_dispatch.get_comments ~post_id with
+  (match Board_dispatch.get_comments ~reader:Masc_board_handlers.Board_access.Operator ~post_id with
    | Ok [] -> ()
    | Ok comments ->
      Alcotest.failf "refused comment left %d row(s) behind"
@@ -352,7 +352,7 @@ let test_comment_past_the_cap_is_refused_with_successor_hint () =
    | Error e ->
      Alcotest.fail ("expected Validation_error, got " ^
                      Board.show_board_error e));
-  (match Board_dispatch.get_comments ~post_id with
+  (match Board_dispatch.get_comments ~reader:Masc_board_handlers.Board_access.Operator ~post_id with
    | Ok comments ->
      Alcotest.(check int) "no row landed past the cap" cap
        (List.length comments)

@@ -155,11 +155,6 @@ let content_shape_to_string = function
   | Has_deliverable_content -> "has_deliverable_content"
 ;;
 
-let ended_without_deliverable_content response =
-  let shape = summarize response in
-  response.Types.stop_reason = Types.EndTurn && not (has_deliverable_content shape)
-;;
-
 let stop_reason_diagnostic_string = function
   | Types.Unknown raw -> Printf.sprintf "unknown(%S)" raw
   | (Types.EndTurn | Types.StopToolUse | Types.MaxTokens | Types.StopSequence | Types.Refusal | Types.ContentFilter | Types.RepetitionTruncation | Types.PauseTurn | Types.Compaction | Types.ContextWindowExceeded | Types.UnmatchedToolCalls) as stop_reason -> Types.stop_reason_to_string stop_reason

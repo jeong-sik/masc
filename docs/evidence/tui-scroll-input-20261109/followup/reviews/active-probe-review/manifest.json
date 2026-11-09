@@ -1,0 +1,253 @@
+{
+  "source_commit": "ff1cc7700b081c6ce7f1abebea42ef352d518ed5",
+  "reviewed_utc": "2026-11-09T08:36:56.150688+00:00",
+  "execution": "read-only source inspection plus AST/fixture/arithmetic only; no TUI/build/CI/Git mutation",
+  "files": {
+    "mixed_probe.py": {
+      "sha256": "b43594f33f14edbe18d07eb98fac62e8a99c3803f74b0a04fd215ed0e0d30efd",
+      "bytes": 16121
+    },
+    "active_probe.py": {
+      "sha256": "6f4332edf51fad53d73ebbcb1908f1bcb07b322a952583b413c2a5749a6b1428",
+      "bytes": 16269
+    },
+    "paired_probe.py": {
+      "sha256": "2e8e71ec9f7d3055bfc992acd0cc635d8c3c0bfd54c6816ae432015e5d2644b0",
+      "bytes": 2065
+    },
+    "active_paired_probe.py": {
+      "sha256": "21aa79d9f5b4a1f0f72cba686c20a9f6030a62f87e7460e8bd27315902dc315e",
+      "bytes": 2128
+    }
+  },
+  "source_files": {
+    "bin/masc_tui.ml": {
+      "sha256": "2c988adf1506d3f0e7f671c837741885791b3a8a299ad16d3121b9eb7a5151a3",
+      "git_blob_oid": "10766b522a2a1cd7d4ab60c60c732eb8511c0d74",
+      "ranges": [
+        [
+          993,
+          1012
+        ],
+        [
+          1401,
+          1406
+        ],
+        [
+          1540,
+          1566
+        ],
+        [
+          11004,
+          11018
+        ],
+        [
+          27735,
+          27802
+        ],
+        [
+          27825,
+          27866
+        ],
+        [
+          14981,
+          15004
+        ],
+        [
+          33389,
+          33446
+        ]
+      ]
+    },
+    "bin/masc_tui_types.ml": {
+      "sha256": "389ac2d7ed10a7725a30fb80bd88061a83826b3997131a07fb5975b4c6e42bbd",
+      "git_blob_oid": "712b5c95af4f40cfe08da6e447d2374992f61e68",
+      "ranges": [
+        [
+          21151,
+          21163
+        ],
+        [
+          21594,
+          21637
+        ],
+        [
+          21654,
+          21695
+        ],
+        [
+          21700,
+          21710
+        ],
+        [
+          21929,
+          21937
+        ],
+        [
+          25239,
+          25245
+        ],
+        [
+          26212,
+          26307
+        ]
+      ]
+    },
+    "bin/masc_tui_message_layout.ml": {
+      "sha256": "c900b84a2207f850cd14dabd367f30ce13601400d59832ad59b00a2a2dedd1d1",
+      "git_blob_oid": "89d7f45b5c2efa8b728c5238a649c301a2faacbf",
+      "ranges": [
+        [
+          692,
+          699
+        ],
+        [
+          762,
+          765
+        ],
+        [
+          1966,
+          2014
+        ],
+        [
+          2100,
+          2138
+        ],
+        [
+          2240,
+          2307
+        ],
+        [
+          2346,
+          2357
+        ],
+        [
+          2521,
+          2577
+        ]
+      ]
+    },
+    "bin/masc_tui_render_chat.ml": {
+      "sha256": "a31655fc4e45e82dcae44b828b5becfc0e72d725f6add536842b842d1ec69a0d",
+      "git_blob_oid": "82422e8fecff1e000ef1d082fe06976e667c9b81",
+      "ranges": [
+        [
+          1380,
+          1417
+        ],
+        [
+          2104,
+          2111
+        ],
+        [
+          2687,
+          2713
+        ],
+        [
+          3795,
+          3820
+        ],
+        [
+          3821,
+          3902
+        ],
+        [
+          4531,
+          4550
+        ],
+        [
+          4665,
+          4691
+        ],
+        [
+          5258,
+          5267
+        ]
+      ]
+    },
+    "bin/masc_tui_keeper_chat_history.ml": {
+      "sha256": "4ead589a196ccfac32a759eb08adc66451c38f4c56c95751007c49e2795254f3",
+      "git_blob_oid": "f00e21fe4da2d3d85069e432c699547c37a7a4f2",
+      "ranges": [
+        [
+          1790,
+          1841
+        ],
+        [
+          1388,
+          1438
+        ],
+        [
+          1480,
+          1500
+        ],
+        [
+          1550,
+          1580
+        ]
+      ]
+    },
+    "bin/masc_tui_markdown.ml": {
+      "sha256": "11a7e1858c81c2d4829f6a4c97ec11b02fe386c6da1c2cc3936281d24e1db6e0",
+      "git_blob_oid": "9b2cdd1c1d3a8dd2c86aa5eba013513630b67f11",
+      "ranges": [
+        [
+          1246,
+          1304
+        ],
+        [
+          1645,
+          1672
+        ]
+      ]
+    },
+    "bin/masc_tui_render_prim.ml": {
+      "sha256": "5182884503b4e7b2e3a4e5e826994b18ee254d323aeb7ae2c1857e5e68768d0d",
+      "git_blob_oid": "4650ae667097c49331c7f6053cdadb8c84ceb8e6",
+      "ranges": [
+        [
+          260,
+          267
+        ]
+      ]
+    },
+    "bin/masc_tui_acting_pane.ml": {
+      "sha256": "b04da7ea54dcf9ad3634638e21d03130e64039c79bd91a495e29861dfee189a1",
+      "git_blob_oid": "7db4ee525b1eef0a4a6eb6ba3b8e4245044f5d2e",
+      "ranges": [
+        [
+          21,
+          42
+        ],
+        [
+          73,
+          78
+        ]
+      ]
+    },
+    "bin/masc_tui_render_schedule.ml": {
+      "sha256": "8fb5349d996dd00756e94c6335b776f4dd463cee41c94ede6f58d15437ac7482",
+      "git_blob_oid": "3bb5b6b45d682c6d1b05c51f20d937ef533deb3c",
+      "ranges": [
+        [
+          169,
+          171
+        ]
+      ]
+    },
+    "bin/masc_tui_render.ml": {
+      "sha256": "98cf17892f8fb453e84352a9536b13484b23fd6485fc4925c267b1ceede27bdb",
+      "git_blob_oid": "23a7b7b55a8e9de77ed752eef3dad558c6312779",
+      "ranges": [
+        [
+          75,
+          88
+        ],
+        [
+          116,
+          130
+        ]
+      ]
+    }
+  }
+}

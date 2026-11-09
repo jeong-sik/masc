@@ -62,6 +62,7 @@ type board_stimulus = {
 
 type stimulus_payload =
   | Board_signal of board_stimulus
+  | Board_routing_pending of board_stimulus
   | Board_attention of board_attention
   | Bootstrap
   | Tool_result_ready of string
@@ -318,6 +319,7 @@ let scheduled_wake (stimulus : stimulus) =
   match stimulus.payload with
   | Schedule_due wake -> Some wake
   | Board_signal _
+  | Board_routing_pending _
   | Board_attention _
   | Bootstrap
   | Fusion_completed _
@@ -355,6 +357,7 @@ let enqueue (queue : t) (s : stimulus) : t =
    Exhaustive on purpose: a new
    payload kind must decide its identity fields here at compile time. *)
 let identity_payload = function
+  | Board_routing_pending signal -> Board_signal signal
   | Task_cancelled cancellation ->
     (* The reason is operator-facing prose whose wording can vary between
        retries of the same cancellation; identity is the task and who ended
@@ -385,13 +388,16 @@ type stimulus_identity =
   }
 
 let payload_identity_of_payload = function
-  | Board_signal { kind = Post_created; _ } -> Identity_board_post_created
-  | Board_signal { kind = Comment_added comment; _ } ->
+  | Board_signal { kind = Post_created; _ }
+  | Board_routing_pending { kind = Post_created; _ } -> Identity_board_post_created
+  | Board_signal { kind = Comment_added comment; _ }
+  | Board_routing_pending { kind = Comment_added comment; _ } ->
     Identity_board_comment_added comment.comment_id
   | Board_attention
       { candidate_id; signal = { kind = Comment_added comment; _ } } ->
     Identity_board_attention_comment_added (candidate_id, comment.comment_id)
-  | Board_signal { kind = Post_updated update; _ } ->
+  | Board_signal { kind = Post_updated update; _ }
+  | Board_routing_pending { kind = Post_updated update; _ } ->
     Identity_board_post_updated update.content_updated_at
   | Board_attention
       { candidate_id; signal = { kind = Post_updated update; _ } } ->
@@ -417,6 +423,7 @@ let payload_identity_of_payload = function
        would turn that representation upgrade into a second execution. *)
     Identity_schedule_due
   | ( Board_signal { kind = Reaction_changed _ | Vote_cast _; _ }
+    | Board_routing_pending { kind = Reaction_changed _ | Vote_cast _; _ }
     | Board_attention
         { signal =
             { kind = Post_created | Reaction_changed _ | Vote_cast _; _ }
@@ -752,6 +759,7 @@ let compare_owned_job_source
 
 let stimulus_payload_rank = function
   | Board_signal _ -> 0
+  | Board_routing_pending _ -> 16
   | Board_attention _ -> 1
   | Bootstrap -> 2
   | Tool_result_ready _ -> 3
@@ -771,6 +779,7 @@ let stimulus_payload_rank = function
 let compare_stimulus_payload (left : stimulus_payload) (right : stimulus_payload) =
   match left, right with
   | Board_signal l, Board_signal r -> compare_board_stimulus l r
+  | Board_routing_pending l, Board_routing_pending r -> compare_board_stimulus l r
   | Board_attention l, Board_attention r ->
     compare_chain
       (String.compare l.candidate_id r.candidate_id)
@@ -885,6 +894,7 @@ let compare_stimulus_payload (left : stimulus_payload) (right : stimulus_payload
                 (fun () ->
                    compare_completion_authority l.to_authority r.to_authority)))
   | ( ( Board_signal _
+      | Board_routing_pending _
       | Board_attention _
       | Bootstrap
       | Tool_result_ready _
@@ -901,6 +911,7 @@ let compare_stimulus_payload (left : stimulus_payload) (right : stimulus_payload
       | Owned_job_completed _
       | Task_outcome _ )
     , ( Board_signal _
+      | Board_routing_pending _
       | Board_attention _
       | Bootstrap
       | Tool_result_ready _
@@ -1059,6 +1070,7 @@ let compare_selection_urgency ~last_non_immediate_served left right =
 
 let payload_kind_label = function
   | Board_signal _ -> "board_signal"
+  | Board_routing_pending _ -> "board_routing_pending"
   | Board_attention _ -> "board_attention"
   | Bootstrap -> "bootstrap"
   | Fusion_completed _ -> "fusion_completed"
@@ -1086,7 +1098,7 @@ let connector_attention_channel = function
      claimed the batch; an answer to a question this keeper asked is not
      ambient conversation traffic and must not wait behind one. *)
   | Ask_answered _
-  | Board_signal _ | Board_attention _ | Bootstrap | Fusion_completed _
+  | Board_signal _ | Board_routing_pending _ | Board_attention _ | Bootstrap | Fusion_completed _
   | Schedule_due _ | Hitl_resolved _
   | Completion_authority_rejected _ | Task_cancelled _ | Workspace_message _
   | Delegate_completed _ | Composition_completed _ | Tool_result_ready _ | Owned_job_completed _ | Task_outcome _ ->
@@ -1300,6 +1312,9 @@ let payload_to_yojson = function
   | Board_signal board ->
     `Assoc
       ([ "kind", `String "board_signal" ] @ board_stimulus_fields board)
+  | Board_routing_pending board ->
+    `Assoc
+      ([ "kind", `String "board_routing_pending" ] @ board_stimulus_fields board)
   | Board_attention attention ->
     `Assoc
       ([ "kind", `String "board_attention"
@@ -1528,6 +1543,16 @@ let payload_of_yojson json =
   | "board_signal" ->
     let* signal = parse_board_stimulus () in
     Ok (Board_signal signal)
+  | "board_routing_pending" ->
+    let* signal = parse_board_stimulus () in
+    let expected = "kind" :: List.map fst (board_stimulus_fields signal) in
+    let* () = exact_fields ~context ~expected fields in
+    let* () = match signal.updated_at with
+      | Some timestamp when not (Float.is_finite timestamp) ->
+        Error (context ^ ".updated_at_unix must be finite")
+      | None | Some _ -> Ok ()
+    in
+    Ok (Board_routing_pending signal)
   | "board_attention" ->
     let* candidate_id = string_field ~context "candidate_id" fields in
     if String.equal candidate_id ""
@@ -1970,6 +1995,7 @@ let continuation_channel_of_payload = function
   | Tool_result_ready _ -> None
   | Schedule_due wake -> wake.result_delivery
   | Board_signal _
+  | Board_routing_pending _
   | Board_attention _
   | Bootstrap
   | Completion_authority_rejected _

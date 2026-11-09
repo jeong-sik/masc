@@ -10,7 +10,6 @@ let codex_config (exec : Runtime_execution.codex_app_server) =
   let bound = Float.min read_timeout_s exec.timeout_s in
   { (Runtime_codex_app_server.default_config ()) with
     cli_path = exec.cli_path
-  ; account_home = Runtime_official_account.Captured exec.account_home
   ; model = exec.model
   ; admission_timeout_s = bound
   ; timeout_s = Some bound
@@ -74,9 +73,9 @@ let readable_scopes () =
 (* The windows reach the operator projection on every read, stamped with the
    time the answer arrived; whether the same answer also rests the scope is
    the caller's ([read_codex_after_spent_usage_refusal]). *)
-let read_codex_report ~mgr ~clock ~cwd ~scope codex =
+let read_codex_report ~mgr ~clock ~cwd ~scope ~account codex =
   match
-    Runtime_codex_app_server.read_rate_limits ~mgr ~clock ~cwd (codex_config codex)
+    Runtime_codex_app_server.read_rate_limits ~mgr ~clock ~cwd ~account (codex_config codex)
   with
   | Ok report ->
     let observed_at = Time_compat.now () in
@@ -85,10 +84,19 @@ let read_codex_report ~mgr ~clock ~cwd ~scope codex =
   | Error error -> Error (Runtime_codex_app_server.error_to_string error)
 ;;
 
-let read_codex ~mgr ~clock ~cwd ~scope codex =
-  Result.map
-    (fun ((_ : float), (_ : Runtime_provider_usage_window.report)) -> ())
-    (read_codex_report ~mgr ~clock ~cwd ~scope codex)
+(* HIGH-RISK-UNREVIEWED: the start read is a call of the operator, who reads
+   every declared account for the operator projection, so its CLI starts only
+   where the access allows one (plan D2-6). A refusal starts no process. *)
+let read_codex ~mgr ~clock ~cwd ~scope (codex : Runtime_execution.codex_app_server) =
+  match
+    Runtime_account_access.authorize Runtime_account_access.Operator_call
+      (Runtime_account_access.seal codex.account_home)
+  with
+  | Error refusal -> Error (Runtime_account_access.refusal_to_string refusal)
+  | Ok account ->
+    Result.map
+      (fun ((_ : float), (_ : Runtime_provider_usage_window.report)) -> ())
+      (read_codex_report ~mgr ~clock ~cwd ~scope ~account codex)
 ;;
 
 let read_muse ~mgr ~clock ~cwd ~scope (config : Runtime_muse_serve.config) =
@@ -604,14 +612,14 @@ let read_after_account_refusal ~fetch ~scope http =
    per-limit map identify observed buckets, not the bucket of that failed
    call. Even a single reported bucket cannot establish that attribution.
    Keep the turn's Observed evidence and refresh only the operator projection. *)
-let read_codex_after_spent_usage_refusal ~clock ~cwd ~scope codex =
+let read_codex_after_spent_usage_refusal ~clock ~cwd ~scope ~account codex =
   read_client_in_background ~clock ~cwd ~scope (fun ~mgr ~clock ~cwd ~scope ->
     Result.map
       (fun (_observed_at, _report) ->
         Log.Runtime_agent.info
           "Codex usage read for %s has no rejected limit_id attribution; keeping the refusal observation without a reset"
           (Runtime_quota_window.scope_to_string scope))
-      (read_codex_report ~mgr ~clock ~cwd ~scope codex))
+      (read_codex_report ~mgr ~clock ~cwd ~scope ~account codex))
 ;;
 
 let http_read_of_runtime (rt : Runtime_instance.t) =

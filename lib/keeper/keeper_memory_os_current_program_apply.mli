@@ -56,9 +56,7 @@ type program_commit =
 val apply_program_with_io :
   ?write_snapshot:(string ->
                    string ->
-                   (unit,
-                    Fs_compat_internal.Atomic_replace.atomic_replace_failure)
-                   result) ->
+                   (unit, Fs_compat.atomic_replace_failure) result) ->
   ?sync_snapshot:(string -> (unit, string) result) ->
   ?finalize_journal:(keepers_dir:string ->
                      keeper_id:string ->

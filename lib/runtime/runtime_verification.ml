@@ -999,18 +999,12 @@ let verify ~secure_random ~sw ~net ~mgr ~clock ~cwd ~cwd_path ~timeout_s ~accoun
               | Runtime_claude_code.Unhandled_exception _ ) as error) ->
            Error (Provider_rejected (Runtime_claude_code.error_to_string error))))
       | Runtime_execution.Codex_app_server execution ->
-        (* WORKAROUND: the Codex client still takes the account in its config,
-           so the authorized account goes there. Root fix: plan D2-6, where
-           every Codex function that starts the CLI takes the authorized
-           account. *)
-        (match
-           authorize ~account_request execution.account_home
-           |> Result.map Runtime_account_access.account
-         with
+        (match authorize ~account_request execution.account_home with
          | Error failure -> Error failure
-         | Ok account_home ->
+         | Ok account ->
         match Runtime_verification_codex_home.prepare
-          ~source_home:(Runtime_official_account.home account_home) ~directory:cwd_path () with
+          ~source_home:(Runtime_official_account.home (Runtime_account_access.account account))
+          ~directory:cwd_path () with
         | Error detail -> Error (Unavailable (Invalid_configuration detail))
         | Ok isolated_home ->
         (* Codex rejects Native_none. Native_read is its least supported
@@ -1019,7 +1013,6 @@ let verify ~secure_random ~sw ~net ~mgr ~clock ~cwd ~cwd_path ~timeout_s ~accoun
         let config =
           { (Runtime_codex_app_server.default_config ()) with
             cli_path = execution.cli_path
-          ; account_home = Runtime_official_account.Captured account_home
           ; isolated_home = Some isolated_home
           ; model = execution.model
           ; context_window = Some (Runtime_instance.max_context_of_runtime runtime)
@@ -1038,6 +1031,7 @@ let verify ~secure_random ~sw ~net ~mgr ~clock ~cwd ~cwd_path ~timeout_s ~accoun
              ~mgr
              ~clock
              ~cwd
+             ~account
              config
              ~prompt
              ~images:[]

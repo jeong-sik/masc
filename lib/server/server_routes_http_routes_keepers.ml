@@ -117,6 +117,14 @@ let add_routes ~sw ~clock router =
              Server_dashboard_http_keeper_native_tasks.handle_get state req reqd route)
            request reqd
        | None ->
+       match Server_dashboard_http_keeper_execution_history.route (Http.Request.path request) with
+       | Some route ->
+         with_token_permission_auth
+           ~permission:Server_dashboard_http_keeper_execution_history.permission
+           (fun state _agent_name req reqd ->
+             Server_dashboard_http_keeper_execution_history.handle_get state req reqd route)
+           request reqd
+       | None ->
        match Keeper_chat_operations.get_route (Http.Request.path request) with
        | Some route ->
          let handle state req reqd =

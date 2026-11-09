@@ -79,6 +79,22 @@ val inspect_pending_inputs : path:string -> (Operation.t list option, error) res
     Does not scan terminal history or run a whole-database integrity audit.
     [None] means no database, distinct from an empty validated snapshot. *)
 
+type native_history =
+  { execution_operation_id : Operation.Operation_id.t
+      (** The execution leader, including when a batch member was requested. *)
+  ; calls : Keeper_native_call.history_ref list
+  }
+
+val inspect_native_history : path:string -> operation_id:Operation.Operation_id.t ->
+  (native_history option, error) result
+(** Read one operation's immutable call associations in a read-only transaction,
+    resolving its stored batch leader and checking the admitted digest. Reads
+    settled records too, without installing an Owner, recovery or writes.
+    [None] means the database is absent; an absent operation is [Unknown_operation].
+    An existing operation with no native calls has an explicit empty list.
+    This loads one semantic record; a public transport must page its call list.
+    No input body, checkpoint payload or continuation authority is returned. *)
+
 type input_checkpoint_update =
   | Input_checkpoint_updated
   | Input_checkpoint_source_changed of input_checkpoint_observation

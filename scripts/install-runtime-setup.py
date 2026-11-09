@@ -1575,13 +1575,19 @@ def refresh_codex_models(binary, source, base_path=None):
         raise SetupError('Codex refresh returned invalid metadata; using cached or bundled metadata.')
 
 
-def muse_models(binary, source, timeout):
+def muse_models(binary, source, timeout, base_path=None):
     if not source.get('account_home'):
         raise SetupError('Select a Muse account before discovering models')
+    # The workspace decides whether the operator may start Muse on the
+    # account (masc runtime-muse-models publishes its access for it).
+    arguments = [str(binary), 'runtime-muse-models', '--cli-path', source.get('command') or 'muse']
+    if base_path is not None:
+        arguments += ['--base-path', str(base_path)]
+    arguments += ['--account-home', source['account_home'], '--timeout-s', str(timeout)]
     while True:
-        result = subprocess.run([str(binary), 'runtime-muse-models', '--cli-path', source.get('command') or 'muse',
-                                 '--account-home', source['account_home'], '--timeout-s', str(timeout)],
-                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        result = subprocess.run(arguments,
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                                env=workspace_child_env() if base_path is not None else None)
         # The native command reports typed credential failures as exit 3. A
         # fresh HOME needs sign-in before its model catalog can be discovered.
         if result.returncode != 3:
@@ -1659,7 +1665,7 @@ def source_models(binary, source, timeout, refresh=False, base_path=None):
     curated catalog rows lead, workspace bindings are matched onto the rest."""
     choice = source.get('choice')
     if choice == 'muse':
-        observed, origin = muse_models(binary, source, timeout)
+        observed, origin = muse_models(binary, source, timeout, base_path)
     elif refresh and choice == 'codex':
         try:
             observed, origin = refresh_codex_models(binary, source, base_path)

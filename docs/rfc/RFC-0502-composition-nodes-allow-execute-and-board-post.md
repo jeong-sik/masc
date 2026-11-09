@@ -1,7 +1,7 @@
 ---
 rfc: "0502"
 title: "Keeper가 쓰는 합성의 노드 집합을 Execute와 게시까지 넓힌다"
-status: Implemented
+status: Active
 created: 2026-11-06
 updated: 2026-11-09
 author: github-pr-checker
@@ -36,6 +36,7 @@ implementation_prs: ["#50328"]
 
 - 노드 집합 검증 코드의 위치는 구현 세션이 특정한다 — 이 RFC는 좌표를 특정하지 못했다.
 - `keeper-writes-own-compositions`의 staged 제안 경로(제안 → 사람 승인 → 카탈로그 반영)와 함께 가는 것을 권한다.
+- 2026-11-09 현재 상태: 노드 집합에 `Execute`·`masc_board_post`를 넣는 변경은 #50328 로 main 에 착지했다(병합 2026-11-09T03:19:55Z). §4 의 두 항목은 아직 관측이 없다 — (1) 뒷부분 "Keeper 가 만든 합성 1개 이상이 검증·실행에 성공" 의 런타임 관측, (2) 같은 입력의 반복 실패 N회 차단. (2)는 이 RFC 본문이 "별도 구현 RFC 로 갈라도 된다"고 밝힌 항목이다. 그래서 status 는 `Implemented` 가 아니라 `Active` 로 둔다.
 
 ## 4. 완료 판정
 

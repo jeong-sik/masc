@@ -4528,6 +4528,11 @@
   masc_tui_keeper_next_run))
 
 (test
+ (name test_tui_keeper_story)
+ (modules test_tui_keeper_story)
+ (libraries alcotest masc_tui_keeper_story))
+
+(test
  (name test_tui_keeper_age_ladder)
  (modules test_tui_keeper_age_ladder)
  (libraries

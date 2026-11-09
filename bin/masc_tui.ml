@@ -19072,6 +19072,23 @@ let open_keeper_detail state ~mailbox (keeper : keeper) =
   launch_detail_tab_reading state ~mailbox keeper
 ;;
 
+(* What a key does to the Story window under the Keepers list. A group heading
+   names no Keeper, so the window leaves Enter and Right to the list there. *)
+let keeper_story_action state key =
+  Masc_tui_keeper_story.action_of_key ~on_heading:(keeper_list_on_heading state)
+    state.keeper_story key
+;;
+
+(* What a key or a press does to the Story window. Only [Open_detail] leaves
+   the list, so it is the one that needs the mailbox. *)
+let apply_keeper_story_action state ~mailbox = function
+  | Masc_tui_keeper_story.Show page -> state.keeper_story <- Some page
+  | Masc_tui_keeper_story.Close -> state.keeper_story <- None
+  | Masc_tui_keeper_story.Open_detail ->
+      state.keeper_story <- None;
+      Option.iter (open_keeper_detail state ~mailbox) (selected_keeper state)
+;;
+
 (* The answer receipt of an installation's question leads to that
    installation's Results, where its reveal row appears (RFC operator-quiz K6).
    The live worker is found in a fresh inventory read, not in the last one:
@@ -19249,9 +19266,11 @@ let press_marked_target state ~mailbox (target : press_target) =
       | Some _ when state.view <> Keepers Keeper_list -> ()
       | None -> ()
       (* On a heading the cursor rests on its group's first row, and a press
-         there chooses that row rather than opening it. *)
+         there chooses that row rather than opening it. A press on the Keeper
+         the cursor is on is Enter on it. *)
       | Some index when index = state.keeper_cursor && not (keeper_list_on_heading state) ->
-          Option.iter (open_keeper_detail state ~mailbox) (selected_keeper state)
+          Option.iter (apply_keeper_story_action state ~mailbox)
+            (Masc_tui_keeper_story.action_of_key ~on_heading:false state.keeper_story "\r")
       | Some _ -> keeper_list_select_name state name)
   | Press_keeper_view view ->
       if state.view = Keepers Keeper_list && view <> state.keeper_list_view then begin
@@ -39080,6 +39099,14 @@ Use relative paths for resources already held in the package. -->
               state.keeper_sandbox_logs_error <- None;
               launch_keeper_sandbox_logs state ~mailbox:async_messages
                 keeper.k_name)
+       (* The Story window under the list takes its keys before the list and the
+          surface ring do: an open window owns Tab, Esc, [s] and [m] (RFC-0515
+          section 2.5, E15). A closed one takes Enter alone. *)
+       | Some key
+         when state.view = Keepers Keeper_list
+              && Option.is_some (keeper_story_action state key) ->
+           Option.iter (apply_keeper_story_action state ~mailbox:async_messages)
+             (keeper_story_action state key)
        | Some "v" when state.view = Keepers Keeper_list ->
            cycle_keeper_list_view state;
            let preference = keeper_view_preference state in

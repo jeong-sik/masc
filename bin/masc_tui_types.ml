@@ -9848,6 +9848,10 @@ type state = {
      choice [tui-keepers.toml] stores. *)
   mutable keeper_list_heading: Masc_tui_keeper_list_model.heading_focus option;
   mutable keeper_list_folded: Masc_tui_keeper_list_model.group list;
+  mutable keeper_story: Masc_tui_keeper_story.page option;
+  (** The Story window below the Keepers list: [None] while it is closed,
+      otherwise the page it shows. It follows the list cursor (RFC-0515
+      section 2.5) and closes when the view leaves or enters the list. *)
   mutable keeper_list_sort: Masc_tui_keeper_list_model.sort;
   mutable keeper_list_preference_notice: string option;
   mutable keeper_list_preference_startup_error: string option;
@@ -12856,6 +12860,9 @@ let select_activity_keeper state keeper_name =
 let transition_keeper_view state view =
   let resting = resting_keeper_name state in
   state.view <- view;
+  (* The Story window belongs to the list: it neither follows a Keeper into the
+     detail nor waits there for the list to come back. *)
+  state.keeper_story <- None;
   Option.iter (select_keeper_name state) resting
 
 (* A heading keeps the cursor on its group's first row, so the Keeper the
@@ -20048,6 +20055,7 @@ let create_state
   keeper_list_density = Masc_tui_keeper_list_model.Two_lines;
   keeper_list_heading = None;
   keeper_list_folded = [];
+  keeper_story = None;
   keeper_list_sort = Masc_tui_keeper_list_model.Priority;
   keeper_list_preference_notice = None;
   keeper_list_preference_startup_error = None;

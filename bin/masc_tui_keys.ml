@@ -594,7 +594,11 @@ let for_surface = function
       :: (b Navigate "o" "order" ~help:"cycle priority / recent / oldest / activity / name")
       :: (b Act "J" "jobs" ~help:"open the selected Keeper's schedules")
       :: (b Act "K" "relations" ~help:"browse Keeper-origin requests queued for the selected Keeper")
-      :: (b Act "Right / Enter" "detail" ~help:"keeper detail")
+      :: (b Act "Enter" "story"
+            ~help:"open the Story window below the list for the Keeper under the cursor; on its story page it closes the window")
+      :: (b Act "Right" "detail" ~help:"keeper detail")
+      :: (b Act "Tab / s / m" "pages"
+            ~help:"with the Story window open: next page / schedules / memory; Esc closes it")
       :: keeper_actions
       @ [ b Search "/" "search" ~help:"search names; Enter keeps the query"
         ; b Search "n / N" "next / previous match"

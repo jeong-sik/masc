@@ -3114,18 +3114,40 @@ let keeper_control_hints ?(offers_chat = true) ?(offers_back = true) ?(taken = [
      spell them. The roster wrote [right/enter] in lowercase, which
      [Masc_tui_footer.never_dropped_keys] does not pin, and gave no way back
      to the Dashboard at all. *)
+  let accent key = (Masc_tui_theme.tone Masc_tui_theme.Accent) ^ key ^ Ansi.reset in
+  (* The Story window belongs to the list. It takes Enter, Esc and Tab while it
+     is open, and [s] and [m] with them. *)
+  let story = if state.view = Keepers Keeper_list then state.keeper_story else None in
   let way =
     if offers_back then
       [ "Left / Esc", "Left / Esc:" ^ Ansi.dim ^ "back" ^ Ansi.reset ]
     else
+      let esc =
+        "Esc",
+        "Esc:" ^ Ansi.dim ^ (match story with None -> "dashboard" | Some _ -> "close") ^ Ansi.reset
+      in
       (* A heading opens no Keeper; its arrows fold the group under it. *)
-      (let key, word =
-         if keeper_list_on_heading state then "Left / Right", "fold"
-         else "Right / Enter", "detail"
-       in
-       key, (Masc_tui_theme.tone Masc_tui_theme.Accent) ^ key ^ Ansi.reset ^ ":" ^ word)
-      :: [ "Esc", "Esc:" ^ Ansi.dim ^ "dashboard" ^ Ansi.reset ]
+      if keeper_list_on_heading state then [ "Left / Right", accent "Left / Right" ^ ":fold"; esc ]
+      else
+        match story with
+        | None -> [ "Right", accent "Right" ^ ":detail"; "Enter", accent "Enter" ^ ":story"; esc ]
+        | Some page ->
+            [ "Right", accent "Right" ^ ":detail"
+            ; ( "Enter"
+              , accent "Enter"
+                ^ (match page with
+                   | Masc_tui_keeper_story.Story -> ":close"
+                   | Masc_tui_keeper_story.Schedule | Masc_tui_keeper_story.Memory -> ":story") )
+            ; esc
+            ]
   in
+  let story_hints =
+    match story with
+    | None -> []
+    | Some _ -> [ accent "Tab" ^ ":page"; accent "s" ^ ":schedules"; accent "m" ^ ":memory" ]
+  in
+  (* [s] shuts a Keeper down only while the window is closed. *)
+  let taken = match story with None -> taken | Some _ -> "s" :: taken in
   let items =
       view_and_order
       @ [ "j/k", Ansi.dim ^ "j/k:move" ^ Ansi.reset
@@ -3165,13 +3187,14 @@ let keeper_control_hints ?(offers_chat = true) ?(offers_back = true) ?(taken = [
         ; "q", "q:" ^ Ansi.dim ^ "quit" ^ Ansi.reset
         ]
   in
-  items
-  |> List.filter (fun (key, _) ->
-         not
-           (List.exists
-              (fun atom -> List.mem atom taken)
-              (Masc_tui_keys.key_atoms key)))
-  |> List.map snd
+  story_hints
+  @ (items
+     |> List.filter (fun (key, _) ->
+            not
+              (List.exists
+                 (fun atom -> List.mem atom taken)
+                 (Masc_tui_keys.key_atoms key)))
+     |> List.map snd)
   |> String.concat "  "
 
 

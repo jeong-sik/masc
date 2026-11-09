@@ -776,11 +776,12 @@ sequenceDiagram
 
 ### 15.5 HTTP Compression
 
-`Http_response_payload` 모듈이 zstd + dictionary 압축을 지원한다:
+`Http_response_payload` 모듈이 `Accept-Encoding` 을 보고 응답 본문을 압축한다:
 
-- `zstd`: 표준 zstd (256바이트 이상)
-- `zstd-dict`: MASC 전용 사전 기반 압축 (32-2048바이트에서 +70%p 향상)
-- `Accept-Encoding: zstd` 또는 `zstd-dict` 요청 시 적용
+- `zstd`: 클라이언트가 `zstd` 를 받아들이면 zstd 로 압축한다 (`Compression_codec`)
+- `gzip`: `zstd` 는 안 받고 `gzip` 은 받아들이면 gzip 으로 압축한다 (`Compression_gzip`)
+- 둘 다 안 받아들이면 압축하지 않는다. 32바이트 미만이거나 압축해도 줄지 않는 본문도 그대로 보낸다
+- 압축을 협상하는 응답에는 `Vary: Accept-Encoding` 을 항상 붙인다. 압축하지 않고 보내는 응답도 포함한다
 
 ---
 

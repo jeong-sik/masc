@@ -1,30 +1,14 @@
 (** Shared compression codec surface.
 
-    This module owns the raw zstd compression/decompression policy so transport
-    and backend layers depend on a neutral codec rather than backend-local
-    helpers. *)
-
-type encoding =
-  | Standard
-  | Dictionary
-
-type compressed = {
-  payload: string;
-  encoding: encoding;
-}
+    This module owns the raw zstd compression/decompression policy shared by
+    the HTTP response path and machine checkpoints. *)
 
 type compress_result =
   | Unchanged of string
-  | Compressed of compressed
+  | Compressed of string
 
 let min_size = 32
-let uses_dict = function
-  | Dictionary -> true
-  | Standard -> false
-
-let content_encoding = function
-  | Dictionary -> "zstd-dict"
-  | Standard -> "zstd"
+let content_encoding = "zstd"
 
 let compress ?(level = 3) (data : string) : compress_result =
   let orig_size = String.length data in
@@ -34,7 +18,7 @@ let compress ?(level = 3) (data : string) : compress_result =
     try
       let compressed = Zstd.compress ~level data in
       if String.length compressed < orig_size then
-        Compressed { payload = compressed; encoding = Standard }
+        Compressed compressed
       else
         Unchanged data
     with Failure msg | Zstd.Error msg ->

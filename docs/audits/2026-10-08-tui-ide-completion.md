@@ -44,7 +44,6 @@ interaction; it is not evidence of MASC runtime behavior.
 | What context did the model receive? | `/context`, `masc_tui_context_inspector.ml`, recent request records | Already richer than a token counter: stack/request/proof views. Retain measured bytes, usage and provenance distinctions. No need for another generic context panel. |
 | Is memory actually usable? | Memory health → fact browser; source-bound and ordinary stores | Existing drill-down is useful. Changes here must be coordinated with active memory work; no duplicate implementation in this stack. |
 | Can I navigate code? | Code search, blame, hover, definition/references, external editor | Existing capability is enough for inspection. Embedded editing/LSP expansion should wait for demonstrated workflows; absent language servers must remain explicit errors. |
-| Which roadmap entries are still unfinished? | `docs/design/tui/TUI-ROADMAP.md` | Its dated tables mix source-merged, historical assignments and unmeasured runtime completion. Use this audit as a current bounded ledger; an old “main” label does not prove the installed UI. |
 
 ## Implemented slices
 

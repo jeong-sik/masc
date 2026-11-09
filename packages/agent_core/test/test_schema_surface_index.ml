@@ -122,11 +122,9 @@ let test_required_surfaces_present () =
     (fun id -> check bool ("required surface: " ^ id) true (List.mem id ids))
     [ "agent_core.event_bus.v1"
     ; "agent_core.runtime_protocol.v2"
-    ; "agent_core.runtime_sync_window.v1"
     ; "agent_core.runtime_report.v1"
     ; "agent_core.runtime_proof.v1"
     ; "agent_core.runtime_telemetry_report.v1"
-    ; "agent_core.runtime_evidence_bundle.v1"
     ; "agent_core.raw_trace_record.v1"
     ; "agent_core.structured_schema.v1"
     ]

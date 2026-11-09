@@ -100,11 +100,6 @@ val address : t -> bytes:string -> mime:string -> addressed
     @raises Invalid_argument if [mime] is empty, as {!put} does, naming
     [address] rather than [put]. *)
 
-val addressed_bytes : addressed -> string
-(** The body {!put_addressed} writes. A caller that must put back what it did
-    not manage to store reads it here rather than keeping its own copy, so the
-    bytes written and the bytes restored cannot disagree. *)
-
 val put_addressed : addressed -> Tool_output.t
 (** Store an {!address}ed body. Same contract as {!put}, of which this is the
     writing half: idempotent, skips an address this process already wrote, and

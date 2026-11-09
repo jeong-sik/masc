@@ -11,9 +11,21 @@ type t = {
    The portrait yields before that navigation capacity is reduced. *)
 let minimum_roster_rows = Masc_tui_frame.chrome_rows + 4
 
+type figure = Face | Whole_body
+
 let band_size = Portrait.band_size
 
-let prepare cache ~display ~project ~name ~portrait ~rows ~cols =
+(* A whole body in a terminal mosaic uses the compact silhouette, the same
+   rule the Items preview follows; pixels get the full drawing. *)
+let figure_image cache ~display ~figure ~name ~equipment size =
+  match figure, display with
+  | Face, (View.Pixels _ | View.Mosaic | View.No_picture) ->
+      Portrait.icon_image cache ~name ~equipment size
+  | Whole_body, View.Mosaic -> Portrait.image ~compact:true cache ~name ~equipment size
+  | Whole_body, (View.Pixels _ | View.No_picture) ->
+      Portrait.image cache ~name ~equipment size
+
+let prepare cache ~display ~project ~figure ~name ~portrait ~rows ~cols =
   match portrait, band_size display with
   | Keeper_portrait_equipment.Unavailable _, _
   | Keeper_portrait_equipment.Ready _, None -> None
@@ -25,7 +37,7 @@ let prepare cache ~display ~project ~name ~portrait ~rows ~cols =
         |> Option.map (fun box ->
           let roster_rows = rows - box.View.rows - 2 in
           let padding = (inner - box.cols) / 2 in
-          let image = Portrait.icon_image cache ~name ~equipment box.size in
+          let image = figure_image cache ~display ~figure ~name ~equipment box.size in
           let picture_lines =
             View.lines ~project display box image
             |> List.map (fun line -> String.make padding ' ' ^ line) in
@@ -42,6 +54,6 @@ let prepare cache ~display ~project ~name ~portrait ~rows ~cols =
 
 let session_cache = Portrait.cache ()
 
-let shown ~name ~portrait ~rows ~cols =
+let shown ~figure ~name ~portrait ~rows ~cols =
   prepare session_cache ~display:(View.current_display ())
-    ~project:Masc_tui_terminal_palette.best_color ~name ~portrait ~rows ~cols
+    ~project:Masc_tui_terminal_palette.best_color ~figure ~name ~portrait ~rows ~cols

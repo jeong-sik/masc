@@ -6,6 +6,10 @@ type t = private {
   placement : Masc_tui_portrait_view.placement option;
 }
 
+type figure =
+  | Face  (** The face-centred identity thumbnail (conversation header). *)
+  | Whole_body  (** The whole figure with its outfit (Keepers list). *)
+
 val band_size : Masc_tui_portrait_view.display -> Masc_tui_keeper_portrait.band_size option
 (** Conversation icon budget shared with the Keeper Info header. *)
 
@@ -13,6 +17,7 @@ val prepare :
   Masc_tui_keeper_portrait.cache ->
   display:Masc_tui_portrait_view.display ->
   project:(Masc_tui_terminal_palette.rgb -> Masc_tui_terminal_palette.projected_color option) ->
+  figure:figure ->
   name:string -> portrait:Keeper_portrait_equipment.reading -> rows:int -> cols:int -> t option
 (** [rows] is the entire left pane, including its frames. [None] keeps the
     full roster when the portrait cannot fit, its equipment reading is unavailable,
@@ -23,5 +28,7 @@ val prepare :
     the renderer anchors it to the actual line immediately after the caption,
     including the shared tab strip, before requesting pixels. *)
 
-val shown : name:string -> portrait:Keeper_portrait_equipment.reading -> rows:int -> cols:int -> t option
+val shown :
+  figure:figure -> name:string -> portrait:Keeper_portrait_equipment.reading -> rows:int -> cols:int
+  -> t option
 (** Prepare against the negotiated terminal display and a session cache. *)

@@ -750,6 +750,9 @@ let rec fit_body ?literal_prefix ?action_text ?position ~max_cells ~conflicts ~h
 type preferred_action =
   | Outcome of string * (string -> string)
   | Pending_question of string * (string -> string)
+  | Menu_choices of string
+      (** Draw the choices together when they fit. Otherwise return them to
+          the ordinary key-item fitter, which preserves the way out. *)
 
 (** Where a [Pending_question] goes on the row, decided once from the widths:
     in front of the notices and the keys that can be dropped, on a row of its
@@ -804,16 +807,28 @@ let line ?literal_prefix ?action_text ?preferred_action ?position ?(status = [])
     <= max_cells
   in
   let alone text = Masc_tui_message_layout.display_width ("  " ^ text) <= max_cells in
+  let place_question text mark =
+    if beside_the_pinned_keys text then
+      Leads_the_row { text = mark text; retention = Armed_action; shorter = [] }
+    else if alone text then Alone (mark text)
+    else Not_drawn
+  in
   let place =
     match preferred_action with
-    | Some (Pending_question (text, mark)) ->
-      if beside_the_pinned_keys text then
-        Leads_the_row { text = mark text; retention = Armed_action; shorter = [] }
-      else if alone text then Alone (mark text)
-      else Not_drawn
+    | Some (Pending_question (text, mark)) -> place_question text mark
+    | Some (Menu_choices text) -> place_question text Fun.id
     | Some (Outcome _) | None -> Not_drawn
   in
   let fit_row question =
+    let hints =
+      match question with
+      | Some _ -> hints
+      | None ->
+          (match preferred_action with
+           | Some (Menu_choices text) ->
+               prepare_hints (text ^ "  " ^ hints.full_text)
+           | Some (Outcome _ | Pending_question _) | None -> hints)
+    in
     let conflicts =
       drawable_conflicts ?literal_prefix ~max_cells ~hints
         (ordered_conflicts (Option.to_list question @ conflicts))
@@ -836,7 +851,7 @@ let line ?literal_prefix ?action_text ?preferred_action ?position ?(status = [])
         if fits_beside conflicts || fits_beside (notices_in_their_shorter_text conflicts)
         then Some (mark text)
         else action_text
-      | None, (Some (Pending_question _) | None) -> action_text
+      | None, (Some (Pending_question _ | Menu_choices _) | None) -> action_text
     in
     let fitted =
       fit_body ?literal_prefix ?action_text ?position ~max_cells

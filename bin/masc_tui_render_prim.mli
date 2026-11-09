@@ -181,8 +181,9 @@ val footer_line :
     recover; kept with the keys that cannot be dropped. Use the footer when
     the detail has no spare content row; list panes with a window-reading row
     keep their position in the body. [choices] is an open menu's complete
-    decision, retained ahead of ambient notices. Quit and input-recovery
-    notices keep their existing priority. It does not authorize an action. *)
+    decision, retained ahead of ambient notices when it fits whole; otherwise
+    its keys use the ordinary item fitter. Quit and input-recovery notices
+    keep their existing priority. It does not authorize an action. *)
 
 val keeper_split_threshold_cols : int
 

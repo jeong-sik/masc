@@ -757,7 +757,7 @@ let footer_line ?help_door ?(status = []) ?position ?(recovery_in_slot = None) ?
             ~existing_action:(Option.is_some action_text)
             ~now:(Unix.gettimeofday ()) ~window:Masc_tui_types.last_action_window_s with
     | No_preferred ->
-        Option.map (fun text -> Masc_tui_footer.Pending_question (text, Fun.id)) choices
+        Option.map (fun text -> Masc_tui_footer.Menu_choices text) choices
     | Csi_recovery ->
         Some (Masc_tui_footer.Outcome (Masc_tui_action_notice.csi_recovery_text, Fun.id))
     | Rejection notice ->

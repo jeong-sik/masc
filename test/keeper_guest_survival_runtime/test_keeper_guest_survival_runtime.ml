@@ -2026,7 +2026,7 @@ let test_fresh_process_adopts_without_boot_effects () = with_fixture @@ fun root
   check string "provider guest creation is retained" original (read (Filename.concat root "guest.json"));
   check int "durable snapshot inode retained" inode (Unix.lstat (snapshot_path root)).st_ino;
   let after = calls root |> List.drop (List.length before) in
-  check bool "adoption performs only guest/image observation and exec" true
+  check bool "adoption performs only guest/image observation, exec and agent requests" true
     (List.for_all adoption_read after);
   check int "one cold run total" 1 (count_guest_runs root);
   check int "one first-handoff frame per process" 2 (List.length (entries root "requests"))
@@ -2549,9 +2549,11 @@ let test_wrapped_image_adopts_without_relabelling_or_boot_effects () = with_fixt
   check string "provider identifies the actual image argument" "fixture:image"
     (text (field "reference" (field "image" config)));
   let init = field "initProcess" config in
-  check string "the requested entrypoint overrides the image" "tail" (text (field "executable" init));
+  check string "the requested entrypoint overrides the image" Microvm.shim_guest_path
+    (text (field "executable" init));
   check (list string) "image Cmd is replaced by explicit Keeper argv"
-    ["-f"; "/dev/null"]
+    [Exec_ssh_protocol.Relay.serve_flag; Keeper_microvm_agent_socket.guest_path;
+     Printf.sprintf "%d:%d" (Unix.getuid ()) (Unix.getgid ())]
     (match field "arguments" init with `List values -> List.map text values | _ -> fail "missing init argv");
   let inode = (Unix.lstat (snapshot_path root)).st_ino in
   let before = List.length (calls root) in
@@ -2560,7 +2562,7 @@ let test_wrapped_image_adopts_without_relabelling_or_boot_effects () = with_fixt
     original (read (Filename.concat root "guest.json"));
   check int "same sealed credential snapshot" inode (Unix.lstat (snapshot_path root)).st_ino;
   let after = calls root |> List.drop before in
-  check bool "wrapped adoption performs only guest/image observations and exec" true
+  check bool "wrapped adoption performs only guest/image observations, exec and agent requests" true
     (List.for_all adoption_read after);
   check int "wrapped guest is never booted twice" 1 (count_guest_runs root);
   check int "each process still performs its first handoff" 2 (List.length (entries root "requests"))
@@ -2594,9 +2596,13 @@ let test_helper_uncertainty_preserves_guest_on_adopt_and_replace () =
       let after = calls root |> List.drop before in
       check bool "the real helper inventory was requested" true
         (List.mem ["list"; "--all"; "--format"; "json"] after);
+      (* A guest that matches its plan gets one agent probe before it is
+         adopted (RFC microvm-guest-agent-over-socket 3.6); the probe reads
+         the shim's answer and changes nothing. *)
       check bool "refusal only reads provider state" true
         (List.for_all (function ["list"; "--all"; "--format"; "json"] -> true
           | ["image"; "inspect"; "fixture:image"] -> true
+          | ["agent"; "probe"; _] -> true
           | "inspect" :: _ -> true | _ -> false) after);
       check string "existing guest remains unchanged" original (read (Filename.concat root "guest.json"));
       check int "existing credential snapshot remains" inode (Unix.lstat (snapshot_path root)).st_ino;

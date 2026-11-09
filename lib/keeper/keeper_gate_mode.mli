@@ -52,12 +52,41 @@ val set :
     state: the drains and boot recovery admit owners by {!resolve}, so its
     queue is swept like any other. *)
 
-type keeper_override = {
+type 'mode override_row_t = {
+  keeper_name : string;
+  mode : 'mode;
+  actor : string;
+  changed_at : string;
+}
+
+type keeper_override = t override_row_t = {
   keeper_name : string;
   mode : t;  (** what was asked for, before {!resolve} weighs it *)
   actor : string;
   changed_at : string;
 }
+
+val override_row_to_json :
+  ('mode -> string) -> 'mode override_row_t -> Yojson.Safe.t
+
+val override_row_of_json :
+  label:string ->
+  parse_mode:(Yojson.Safe.t -> ('mode, string) result) ->
+  Yojson.Safe.t ->
+  ('mode override_row_t, string) result
+
+val override_rows_of_json_list :
+  decode_row:(Yojson.Safe.t -> ('mode override_row_t, string) result) ->
+  Yojson.Safe.t list ->
+  ('mode override_row_t list, string) result
+
+val upsert_override_row :
+  keeper_name:string ->
+  actor:string ->
+  changed_at:string ->
+  'mode option ->
+  'mode override_row_t list ->
+  'mode override_row_t list
 
 type keeper_change = {
   keeper_previous : t option;

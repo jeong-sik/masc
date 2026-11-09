@@ -51,7 +51,7 @@ val resolve : t -> keeper_name:string -> mode
 val overrides : t -> (string * mode) list
 (** Every keeper currently moved off [Auto], in the order they were set. *)
 
-type override_row =
+type override_row = mode Keeper_gate_mode.override_row_t =
   { keeper_name : string
   ; mode : mode
   ; actor : string

@@ -46,17 +46,7 @@ let normalize_remote path =
    absolutizing. Leading [..] segments survive so escape detection below
    still sees them. *)
 let normalize_logical path =
-  let parts = String.split_on_char '/' path in
-  let stack =
-    List.fold_left
-      (fun stack part ->
-        match part, stack with
-        | ("" | "."), _ -> stack
-        | "..", top :: rest when top <> ".." -> rest
-        | part, _ -> part :: stack)
-      [] parts
-  in
-  String.concat "/" (List.rev stack)
+  Masc_exec.Path_scope.lexical_normalize_relative path
 ;;
 
 let safe_keeper keeper = Playground_paths.sanitize_keeper_name keeper

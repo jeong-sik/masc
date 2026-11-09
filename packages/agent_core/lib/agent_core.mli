@@ -110,7 +110,6 @@ module Tool_guidance_text = Tool_guidance_text
 module Otel_tracer = Otel_tracer
 module Otel_export = Otel_export
 module Runtime = Runtime
-module Artifact_service = Artifact_service
 module Sessions = Sessions
 module Sessions_store = Sessions_store
 module Harness = Harness

@@ -4509,6 +4509,7 @@
   masc_tui_types
   masc_tui_agenda
   masc_tui_keeper_axis_cell
+  masc_tui_keeper_mark
   masc_tui_keeper_next_run))
 
 (test

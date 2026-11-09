@@ -33,13 +33,7 @@ let schedule_form_row : schedule_row =
   ; sch_expires_at_iso = Some "2026-09-30T00:00:00Z"
   ; sch_recurrence_summary = "daily 09:30:05 Asia/Seoul"
   ; sch_recurrence =
-      `Assoc
-        [ "kind", `String "daily"
-        ; "hour", `Int 9
-        ; "minute", `Int 30
-        ; "second", `Int 5
-        ; "timezone", `String "Asia/Seoul"
-        ]
+      Ok (Schedule_domain.Daily { hour = 9; minute = 30; second = 5; timezone = "Asia/Seoul" })
   ; sch_payload_digest = "digest"
   ; sch_payload =
       `Assoc
@@ -210,12 +204,15 @@ let test_modify_leaves_an_unnamed_status_to_the_server () =
     true
     (refusal_for "paused" = None)
 
+(* The editor's starting text for [row]; a refusal fails the test. *)
+let modify_form row =
+  match Masc_tui_types.schedule_modify_form row with
+  | Ok stem -> Yojson.Safe.from_string stem
+  | Error reason -> Alcotest.fail ("the editor did not open: " ^ reason)
+
 let test_schedule_update_form_preserves_exact_editable_definition () =
   let open Yojson.Safe.Util in
-  let form =
-    Masc_tui_types.schedule_update_form_json schedule_form_row
-    |> Yojson.Safe.from_string
-  in
+  let form = modify_form schedule_form_row in
   check str "stable id" "daily-check" (form |> member "schedule_id" |> to_string);
   check str "keeper" "edgar.a.poe" (form |> member "keeper_name" |> to_string);
   check str "full message" "inspect the latest work"
@@ -231,6 +228,43 @@ let test_schedule_update_form_preserves_exact_editable_definition () =
     (form |> member "due_at_iso" |> to_string);
   check Alcotest.bool "expiry remains present" true
     (form |> member "expires_at_unix" <> `Null)
+
+(* The editor writes the whole definition back. A recurrence this build could
+   not read has no kind or fields to fill it with, so the editor stays shut
+   rather than open on values the schedule never held. *)
+let test_schedule_modify_refuses_a_recurrence_that_did_not_decode () =
+  let decoder_reason = "unknown recurrence kind: weekly" in
+  match
+    Masc_tui_types.schedule_modify_form
+      { schedule_form_row with sch_recurrence = Error decoder_reason }
+  with
+  | Ok _ -> Alcotest.fail "the editor opened on a recurrence it could not read"
+  | Error reason ->
+      check Alcotest.bool "the refusal carries the decoder's reason" true
+        (String.ends_with ~suffix:decoder_reason reason)
+
+(* The fields of the schedule's own kind come from its recurrence; the other
+   kinds' fields keep the create form's values, the start an operator who
+   switches kind gets. *)
+let test_schedule_update_form_fills_a_cron_from_its_recurrence () =
+  let open Yojson.Safe.Util in
+  let form =
+    modify_form
+      { schedule_form_row with
+        sch_recurrence =
+          Ok (Schedule_domain.Cron { expression = "*/30 * * * *"; timezone = "UTC" })
+      }
+  in
+  let created = Masc_tui_types.schedule_create_form_json () |> Yojson.Safe.from_string in
+  check str "cron kind" "cron" (form |> member "recurrence_kind" |> to_string);
+  check str "expression" "*/30 * * * *" (form |> member "recurrence_cron" |> to_string);
+  check str "timezone" "UTC" (form |> member "recurrence_timezone" |> to_string);
+  List.iter
+    (fun field ->
+      check Alcotest.int (field ^ " keeps the create form's value")
+        (created |> member field |> to_int)
+        (form |> member field |> to_int))
+    [ "recurrence_interval_sec"; "recurrence_hour"; "recurrence_minute"; "recurrence_second" ]
 
 (* The update replaces the whole definition, so a form that leaves the run
    watch out would remove it when the operator saves an edit of the message. *)
@@ -253,13 +287,11 @@ let test_schedule_update_form_keeps_the_run_watch () =
              @ fields) )
       ]
   in
-  let form row =
-    Masc_tui_types.schedule_update_form_json row |> Yojson.Safe.from_string
-  in
+  let form = modify_form in
   let watched =
     form
       { schedule_form_row with
-        sch_recurrence = `Assoc [ "kind", `String "one_shot" ]
+        sch_recurrence = Ok Schedule_domain.One_shot
       ; sch_payload =
           body_with
             [ ( Masc.Schedule_run_watch.watch_field
@@ -2257,6 +2289,10 @@ let () =
             test_schedule_update_form_preserves_exact_editable_definition
         ; Alcotest.test_case "schedule update form keeps the run watch" `Quick
             test_schedule_update_form_keeps_the_run_watch
+        ; Alcotest.test_case "modify refuses a recurrence that did not decode" `Quick
+            test_schedule_modify_refuses_a_recurrence_that_did_not_decode
+        ; Alcotest.test_case "update form fills a cron from its recurrence" `Quick
+            test_schedule_update_form_fills_a_cron_from_its_recurrence
         ; Alcotest.test_case "Memory fact rows follow the category filter"
             `Quick test_memory_fact_rows_follow_the_category_filter
         ; Alcotest.test_case "Memory category cycle returns to All" `Quick

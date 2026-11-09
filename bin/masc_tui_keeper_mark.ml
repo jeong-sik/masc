@@ -147,7 +147,13 @@ let axis_now_glyph = filled_dot
 let axis_next_glyph = "\xe2\x96\xb9" (* ▹ *)
 let pulse_header = Printf.sprintf "%s %dh" axis_before_glyph pulse_hours
 let axis_now_header = axis_now_glyph ^ " now"
-let axis_next_header = axis_next_glyph ^ " next"
+
+(* The strip ahead mirrors the pulse, so it takes the pulse's span and opens
+   the next cell with the next glyph; the cells after it need only the word. *)
+let schedule_strip_header = Printf.sprintf "%s %dh" axis_next_glyph pulse_hours
+let axis_next_header = "next"
+let schedule_strip_wake_mark = badge_glyph Masc_tui_keeper_list_model.Badge_schedule
+let schedule_strip_quiet_mark = pulse_quiet_mark
 
 (* The memory and age views put values of their own in the same three cells. *)
 let header_words words = String.concat " \xc2\xb7 " words (* · *)
@@ -175,12 +181,21 @@ let column_legend =
     , "time since it last moved: the open turn's latest update (its start before it \
        reports one), else the later of its last turn and the start of its wait" )
   ; "LIFECYCLE", "the keeper process"
-  ; ( String.concat " " [ pulse_header; axis_now_header; axis_next_header ]
+  ; ( String.concat " " [ pulse_header; axis_now_header; schedule_strip_header; axis_next_header ]
     , "every view but the list draws a keeper on one axis row. The memory and age views \
-       pick their own cells; the others draw its turn pulse, its NOW cell, then what \
-       comes next -- what it waits on a person for, the next scheduled run, the next \
-       dispatch path and the librarian lag. With two lines only a failing keeper adds a \
-       second line" )
+       pick their own cells; the others draw its turn pulse, its NOW cell, its scheduled \
+       wakes in the hours ahead, then what comes next -- what it waits on a person for, \
+       the next scheduled run, the next dispatch path and the librarian lag. With two \
+       lines only a failing keeper adds a second line" )
+  ; ( String.concat " " [ schedule_strip_wake_mark; schedule_strip_quiet_mark; unknown_mark ]
+    , Printf.sprintf
+        "scheduled wakes of the next %d clock hours, one mark per hour, the hour holding \
+         now first: %s a scheduled run wakes the keeper / %s none / %s the agenda cannot \
+         tell: not read, past the last row of a cut page, or after a run whose repeat \
+         this build cannot read. A held run is left out; the next cell says it is held \
+         (%s in the views)"
+        pulse_hours schedule_strip_wake_mark schedule_strip_quiet_mark unknown_mark
+        schedule_strip_header )
   ; ( String.concat " " [ pulse_header; librarian_header; lag_digest_gap_header ]
     , Printf.sprintf
         "the memory view: the turn pulse, how the librarian's last pass ended, then the \
@@ -217,15 +232,16 @@ let column_legend =
         "resting path: relative duration (제공자 stated / 상한 bounded); in DETAIL %s prefixes next candidate after turn failure"
         axis_next_glyph )
   ; ( badge_glyph Badge_schedule
-    , Printf.sprintf "next scheduled run or hold status (Detailed second row, and %s in the views)"
-        axis_next_header )
+    , Printf.sprintf
+        "next scheduled run or hold status (Detailed second row, and after %s in the views)"
+        schedule_strip_header )
   ; ( "mem · lag · stale"
     , Printf.sprintf
         "keeper memory health: unread gap/lag, update clock, invalidated sources (Detailed second \
-         row; its lag in %s in the views, and the memory and age views draw their own cells). \
+         row; its lag after %s in the views, and the memory and age views draw their own cells). \
          mem %s is memory health not read yet, or a refused row that may be this keeper's; mem \
          ! is this keeper's row, refused; %s is a keeper with no memory snapshot"
-        axis_next_header Masc_tui_keeper_age_ladder.unmeasured_mark
+        schedule_strip_header Masc_tui_keeper_age_ladder.unmeasured_mark
         Masc_tui_theme.Glyph.no_value )
   ; ( Masc_tui_keeper_age_ladder.cell_label
     , Printf.sprintf "%s (Detailed second row, and %s in the age view)"

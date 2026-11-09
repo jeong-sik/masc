@@ -97,9 +97,17 @@ val axis_next_glyph : string
 
 val pulse_header : string
 val axis_now_header : string
+val schedule_strip_header : string
 val axis_next_header : string
 (** The header words over the views' axis row (RFC-0515 §2.4): the turn pulse,
-    the NOW cell and the next cell. {!column_legend} names them. *)
+    the NOW cell, the strip of the clock hours ahead, and the next cells after
+    the strip. {!column_legend} names them. *)
+
+val schedule_strip_wake_mark : string
+val schedule_strip_quiet_mark : string
+(** The strip ahead's marks: an hour in which a scheduled run wakes the keeper,
+    and an hour in which none does. An hour the agenda cannot tell about draws
+    {!unknown_mark}. *)
 
 val fact_age_header : string
 val librarian_header : string

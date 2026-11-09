@@ -637,6 +637,10 @@ let axis_cell_gap = "  "
 let axis_before_cells = Masc_tui_keeper_mark.pulse_hours
 let axis_current_cells = Render_schedule.keeper_status_width
 
+(* The strip ahead mirrors the pulse at the head of ▹, as wide in every row
+   so its hours line up like the pulse's. *)
+let axis_strip_cells = Masc_tui_keeper_mark.pulse_hours
+
 let axis_before_header = function
   | Axis_row.Hour_pulse -> Masc_tui_keeper_mark.pulse_header
   | Axis_row.Fact_ages -> Masc_tui_keeper_mark.fact_age_header
@@ -647,7 +651,10 @@ let axis_current_header = function
   | Axis_row.Update_age -> Masc_tui_keeper_mark.updated_header
 
 let axis_next_header = function
-  | Axis_row.Wait_run_path_lag -> Masc_tui_keeper_mark.axis_next_header
+  | Axis_row.Wait_run_path_lag ->
+      Message_layout.fit_width Masc_tui_keeper_mark.schedule_strip_header axis_strip_cells
+      ^ axis_cell_gap
+      ^ Masc_tui_keeper_mark.axis_next_header
   | Axis_row.Lag_digest_gap -> Masc_tui_keeper_mark.lag_digest_gap_header
   | Axis_row.Lag_stale_facts -> Masc_tui_keeper_mark.lag_stale_facts_header
 
@@ -710,20 +717,34 @@ let keeper_path_rest_cell ~now row =
           { Masc_tui_keeper_axis_cell.text; tone = Masc_tui_keeper_axis_cell.Attention })
     (keeper_path_rest ~now row)
 
-let keeper_axis_next_cells state ~now ~memory ~peak_lag (row : Keeper_list_model.row) = function
+let joined_axis_cells cells =
+  String.concat Masc_tui_keeper_axis_cell.separator (List.map style_axis_cell cells)
+
+let keeper_axis_next state ~now ~memory ~peak_lag (row : Keeper_list_model.row) = function
   | Axis_row.Wait_run_path_lag ->
-      (* A person's answer comes first: nothing else moves until it does. *)
       let keeper_name = row.keeper.Tui_decode.k_name in
-      List.filter_map Fun.id
-        [ Option.map
-            (fun text -> { Masc_tui_keeper_axis_cell.text; tone = Masc_tui_keeper_axis_cell.Attention })
-            (keeper_person_wait_text row)
-        ; Masc_tui_keeper_axis.run_cell state ~now ~keeper_name
-        ; keeper_path_rest_cell ~now row
-        ; Memory_reading.lag_cell memory
-        ]
-  | Axis_row.Lag_digest_gap -> Memory_reading.lag_digest_gap_cells ~now ~peak_lag memory
-  | Axis_row.Lag_stale_facts -> Memory_reading.lag_stale_facts_cells ~peak_lag memory
+      (* A keeper with no schedule keeps the strip's width blank, so the cells
+         after it stay in one column. *)
+      let strip =
+        match Masc_tui_keeper_axis.schedule_strip_cell state ~now ~keeper_name with
+        | Some cell -> fitted_axis_cell axis_strip_cells cell
+        | None -> String.make axis_strip_cells ' '
+      in
+      (* A person's answer comes first: nothing else moves until it does. *)
+      let next_cells =
+        List.filter_map Fun.id
+          [ Option.map
+              (fun text -> { Masc_tui_keeper_axis_cell.text; tone = Masc_tui_keeper_axis_cell.Attention })
+              (keeper_person_wait_text row)
+          ; Masc_tui_keeper_axis.run_cell state ~now ~keeper_name
+          ; keeper_path_rest_cell ~now row
+          ; Memory_reading.lag_cell memory
+          ]
+      in
+      strip ^ axis_cell_gap ^ joined_axis_cells next_cells
+  | Axis_row.Lag_digest_gap ->
+      joined_axis_cells (Memory_reading.lag_digest_gap_cells ~now ~peak_lag memory)
+  | Axis_row.Lag_stale_facts -> joined_axis_cells (Memory_reading.lag_stale_facts_cells ~peak_lag memory)
 
 let keeper_memory_reading state (row : Keeper_list_model.row) =
   Memory_reading.find (Masc_tui_keeper_axis.memory_index state)
@@ -745,9 +766,7 @@ let keeper_axis_row_content state ~(axis : Axis_row.axis) ~name_width ~peak_lag 
     ; axis_cell_gap
     ; keeper_axis_current_cell ~now ~frame ~memory row axis.current
     ; axis_cell_gap
-    ; String.concat Masc_tui_keeper_axis_cell.separator
-        (List.map style_axis_cell
-           (keeper_axis_next_cells state ~now ~memory ~peak_lag row axis.next))
+    ; keeper_axis_next state ~now ~memory ~peak_lag row axis.next
     ]
 
 (* The second line under a failing Keeper's axis row: the sentence about its

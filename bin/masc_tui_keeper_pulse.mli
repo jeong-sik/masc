@@ -29,6 +29,14 @@ val failing_cell : now:float -> failing -> Masc_tui_keeper_axis_cell.t option
     {!Masc_tui_keeper_mark.unknown_mark}. Always {!Masc_tui_keeper_axis_cell.Failure};
     [None] for a keeper that is not failing. *)
 
+val seconds_per_hour : int
+(** The length of one pulse hour. *)
+
+val hour_start : int -> int
+(** The start of the clock hour that holds this Unix second. The pulse's hours
+    are these hours, and so are the hours of the strip ahead
+    ({!Masc_tui_keeper_next_run.hours_of_snapshot}). *)
+
 (** What the server says about one hour of the pulse window. *)
 type slot =
   | Slot_unknown

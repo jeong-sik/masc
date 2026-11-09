@@ -8,6 +8,8 @@ let make_row
     ?runner_hold
     ?(occurrence_stage = Masc.Tui_schedule_observation.No_occurrence)
     ?occurrence_due_at_iso
+    ?expires_at_iso
+    ?(recurrence = Ok Schedule_domain.One_shot)
     () : Masc_tui_types.schedule_row =
   { sch_schedule_id = id
   ; sch_schedule_instance_id = "inst-1"
@@ -18,9 +20,9 @@ let make_row
   ; sch_requested_at_iso = "2026-11-07T00:00:00Z"
   ; sch_due_at_iso = due_at_iso
   ; sch_next_due_at_iso = next_due_at_iso
-  ; sch_expires_at_iso = None
+  ; sch_expires_at_iso = expires_at_iso
   ; sch_recurrence_summary = ""
-  ; sch_recurrence = `Assoc []
+  ; sch_recurrence = recurrence
   ; sch_payload_digest = "digest"
   ; sch_payload = `Assoc []
   ; sch_payload_kind = None
@@ -406,6 +408,187 @@ let test_index_of_agenda () =
     true (Masc_tui_keeper_next_run.find empty_index ~keeper_name:"alpha" = Masc_tui_keeper_next_run.Unknown)
 ;;
 
+
+(* {1 The strip ahead} (RFC-0515 V7)
+
+   Every case reads the strip at 11:15 UTC, so its first hour is 11:00-12:00
+   and only what is still ahead of 11:15 counts in it. The last hour is
+   22:00-23:00. *)
+
+module Next_run = Masc_tui_keeper_next_run
+
+let strip_now = 1794050100.0 (* 2026-11-07T11:15:00Z *)
+
+let hour_text = function
+  | Next_run.Hour_quiet -> "quiet"
+  | Next_run.Hour_wakes n -> Printf.sprintf "wakes %d" n
+  | Next_run.Hour_wakes_at_least n -> Printf.sprintf "at least %d" n
+  | Next_run.Hour_unknown -> "unknown"
+;;
+
+let hour = Alcotest.testable (fun fmt h -> Format.pp_print_string fmt (hour_text h)) ( = )
+
+(* The strip, hour by hour, from one value per position. *)
+let strip_of hour_at = Some (List.init Masc_tui_keeper_mark.pulse_hours hour_at)
+
+let check_strip name expected ?(now = strip_now) ?(keeper_name = "alpha") snapshot =
+  Alcotest.(check (option (list hour)))
+    name expected
+    (Next_run.hours_of_snapshot ~now ~keeper_name snapshot)
+;;
+
+let scheduled_row ?(keeper_name = "alpha") ?id ?expires_at_iso ?runner_hold ~due ~recurrence () =
+  make_row ?id ~status:"scheduled" ~due_at_iso:due ~next_due_at_iso:due ~keeper_name
+    ?expires_at_iso ?runner_hold ~recurrence ()
+;;
+
+let test_strip_counts_each_recurrence () =
+  let strip recurrence due = Some (make_snapshot [ scheduled_row ~due ~recurrence () ]) in
+  check_strip "an interval of 600 s wakes six times an hour; 11:20 to 11:50 are still ahead"
+    (strip_of (function 0 -> Next_run.Hour_wakes 4 | _ -> Next_run.Hour_wakes 6))
+    (strip (Ok (Schedule_domain.Interval { interval_sec = 600 })) "2026-11-07T11:20:00Z");
+  check_strip "an interval of 25 min falls across hour edges: 11:20 11:45 | 12:10 12:35 | 13:00 ..."
+    (strip_of (function
+       | 0 | 1 | 3 | 5 | 6 | 8 | 10 | 11 -> Next_run.Hour_wakes 2
+       | _ -> Next_run.Hour_wakes 3))
+    (strip (Ok (Schedule_domain.Interval { interval_sec = 1500 })) "2026-11-07T11:20:00Z");
+  check_strip "a daily run wakes once, in its own hour"
+    (strip_of (function 4 -> Next_run.Hour_wakes 1 | _ -> Next_run.Hour_quiet))
+    (strip
+       (Ok (Schedule_domain.Daily { hour = 15; minute = 0; second = 0; timezone = "UTC" }))
+       "2026-11-07T15:00:00Z");
+  check_strip "a cron on every half hour wakes twice an hour; 11:30 is still ahead"
+    (strip_of (function 0 -> Next_run.Hour_wakes 1 | _ -> Next_run.Hour_wakes 2))
+    (strip
+       (Ok (Schedule_domain.Cron { expression = "*/30 * * * *"; timezone = "UTC" }))
+       "2026-11-07T11:30:00Z");
+  check_strip "a one-shot wakes once"
+    (strip_of (function 2 -> Next_run.Hour_wakes 1 | _ -> Next_run.Hour_quiet))
+    (strip (Ok Schedule_domain.One_shot) "2026-11-07T13:45:00Z")
+;;
+
+let test_strip_stops_at_the_expiry () =
+  check_strip "nothing wakes at or after 13:00"
+    (strip_of (function
+       | 0 -> Next_run.Hour_wakes 4
+       | 1 -> Next_run.Hour_wakes 6
+       | _ -> Next_run.Hour_quiet))
+    (Some
+       (make_snapshot
+          [ scheduled_row ~due:"2026-11-07T11:20:00Z" ~expires_at_iso:"2026-11-07T13:00:00Z"
+              ~recurrence:(Ok (Schedule_domain.Interval { interval_sec = 600 }))
+              ()
+          ]))
+;;
+
+let test_strip_leaves_out_a_held_row () =
+  let hold : Masc.Tui_decode.schedule_runner_hold =
+    { srh_occurrence_id = "occ-1"
+    ; srh_due_at_iso = "2026-11-07T11:00:00Z"
+    ; srh_reason = Masc.Tui_decode.Hold_previous_wake_untaken
+    ; srh_observed_at = strip_now
+    }
+  in
+  check_strip "a held interval draws no wake; the one-shot beside it still does"
+    (strip_of (function 2 -> Next_run.Hour_wakes 1 | _ -> Next_run.Hour_quiet))
+    (Some
+       (make_snapshot
+          [ scheduled_row ~id:"held" ~due:"2026-11-07T11:20:00Z" ~runner_hold:hold
+              ~recurrence:(Ok (Schedule_domain.Interval { interval_sec = 600 }))
+              ()
+          ; scheduled_row ~id:"once" ~due:"2026-11-07T13:45:00Z"
+              ~recurrence:(Ok Schedule_domain.One_shot) ()
+          ]))
+;;
+
+let test_strip_after_an_unread_recurrence_is_unknown () =
+  check_strip "the due time wakes; every hour from it on may hold more"
+    (strip_of (function
+       | 0 | 1 -> Next_run.Hour_quiet
+       | 2 -> Next_run.Hour_wakes_at_least 1
+       | _ -> Next_run.Hour_unknown))
+    (Some
+       (make_snapshot
+          [ scheduled_row ~due:"2026-11-07T13:45:00Z"
+              ~recurrence:(Error "unknown recurrence kind: weekly") ()
+          ]))
+;;
+
+let test_strip_of_an_unread_agenda_is_unknown () =
+  let unknown = strip_of (fun _ -> Next_run.Hour_unknown) in
+  check_strip "no agenda read yet" unknown None;
+  check_strip "an agenda read that failed" unknown
+    (Some (make_snapshot ~read_error:"store unreadable" []));
+  check_strip "a keeper with no schedule has no strip" None (Some (make_snapshot []))
+;;
+
+(* The page is cut after beta's 14:20 run. A row past the page is due no
+   earlier than that, so the hours before it are known and the hours from it
+   on are not, for every keeper. *)
+let test_strip_of_a_cut_page_ends_at_its_last_row () =
+  let snapshot =
+    Some
+      (make_snapshot ~truncated:true
+         [ scheduled_row ~id:"alpha-hourly" ~due:"2026-11-07T11:30:00Z"
+             ~recurrence:(Ok (Schedule_domain.Interval { interval_sec = 3600 }))
+             ()
+         ; scheduled_row ~keeper_name:"beta" ~id:"beta-once" ~due:"2026-11-07T14:20:00Z"
+             ~recurrence:(Ok Schedule_domain.One_shot) ()
+         ])
+  in
+  check_strip "alpha's hourly wakes are known; from 14:00 there may be more"
+    (strip_of (function
+       | 0 | 1 | 2 -> Next_run.Hour_wakes 1
+       | _ -> Next_run.Hour_wakes_at_least 1))
+    snapshot;
+  check_strip "beta's run is the cut; after it nothing is known" ~keeper_name:"beta"
+    (strip_of (function
+       | 0 | 1 | 2 -> Next_run.Hour_quiet
+       | 3 -> Next_run.Hour_wakes_at_least 1
+       | _ -> Next_run.Hour_unknown))
+    snapshot;
+  check_strip "a keeper with no row on the page is quiet until the cut" ~keeper_name:"gamma"
+    (strip_of (function 0 | 1 | 2 -> Next_run.Hour_quiet | _ -> Next_run.Hour_unknown))
+    snapshot
+;;
+
+(* The strip says whether an hour wakes the keeper, not how many times. *)
+let test_strip_marks_say_whether_an_hour_wakes () =
+  Alcotest.(check string) "a wake draws one mark however sure its count"
+    (Next_run.hour_mark (Next_run.Hour_wakes 2))
+    (Next_run.hour_mark (Next_run.Hour_wakes_at_least 1));
+  Alcotest.(check int) "quiet, wake and unknown hours draw three marks" 3
+    (List.length
+       (List.sort_uniq String.compare
+          (List.map Next_run.hour_mark
+             [ Next_run.Hour_quiet; Next_run.Hour_wakes 1; Next_run.Hour_unknown ])))
+;;
+
+(* The index keeps each keeper's wakes for the clock hour it was asked in.
+   Asked again later in that hour, or in the next one, it answers what the
+   snapshot answers at that time. *)
+let test_index_strip_follows_the_clock () =
+  let snapshot =
+    Some
+      (make_snapshot
+         [ scheduled_row ~due:"2026-11-07T11:20:00Z"
+             ~recurrence:(Ok (Schedule_domain.Cron { expression = "*/10 * * * *"; timezone = "UTC" }))
+             ()
+         ])
+  in
+  let index = Next_run.index_of_agenda ~freshness:Masc_tui_agenda.Last_read snapshot in
+  List.iter
+    (fun (name, now) ->
+      Alcotest.(check (option (list hour)))
+        name
+        (Next_run.hours_of_snapshot ~now ~keeper_name:"alpha" snapshot)
+        (Next_run.find_hours index ~now ~keeper_name:"alpha"))
+    [ "first asked at 11:15", strip_now
+    ; "11:35, the same hour", strip_now +. 1200.
+    ; "12:05, the next hour", strip_now +. 3000.
+    ]
+;;
+
 let () =
   Alcotest.run "tui_keeper_next_run"
     [ ( "next_run reduction"
@@ -414,5 +597,15 @@ let () =
         ; Alcotest.test_case "lane vs keeper separation" `Quick test_lane_vs_keeper_separation
         ; Alcotest.test_case "hold reading variations" `Quick test_hold_reading_variations
         ; Alcotest.test_case "index of agenda" `Quick test_index_of_agenda
+        ] )
+    ; ( "strip ahead"
+      , [ Alcotest.test_case "each recurrence" `Quick test_strip_counts_each_recurrence
+        ; Alcotest.test_case "expiry" `Quick test_strip_stops_at_the_expiry
+        ; Alcotest.test_case "held row" `Quick test_strip_leaves_out_a_held_row
+        ; Alcotest.test_case "unread recurrence" `Quick test_strip_after_an_unread_recurrence_is_unknown
+        ; Alcotest.test_case "unread agenda" `Quick test_strip_of_an_unread_agenda_is_unknown
+        ; Alcotest.test_case "cut page" `Quick test_strip_of_a_cut_page_ends_at_its_last_row
+        ; Alcotest.test_case "index follows the clock" `Quick test_index_strip_follows_the_clock
+        ; Alcotest.test_case "marks" `Quick test_strip_marks_say_whether_an_hour_wakes
         ] )
     ]

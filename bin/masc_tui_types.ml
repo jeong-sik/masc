@@ -2815,7 +2815,11 @@ type schedule_row = {
   sch_next_due_at_iso: string option;
   sch_expires_at_iso: string option;
   sch_recurrence_summary: string;
-  sch_recurrence: Yojson.Safe.t;
+  sch_recurrence: (Schedule_domain.recurrence, string) result;
+      (** The row's recurrence, read by the store's own decoder. A recurrence
+          this build cannot read keeps the row on the screen and carries the
+          decoder's reason: the row is still a schedule, only its repeat is
+          not known here. *)
   sch_payload_digest: string;
   sch_payload: Yojson.Safe.t;
   sch_payload_kind: string option;
@@ -2881,13 +2885,6 @@ let schedule_json_string field = function
        | Some (`String value) -> value
        | Some _ | None -> "")
   | _ -> ""
-
-let schedule_json_int field = function
-  | `Assoc fields ->
-      (match List.assoc_opt field fields with
-       | Some (`Int value) -> Some value
-       | Some _ | None -> None)
-  | _ -> None
 
 let schedule_payload_body = function
   | `Assoc fields ->
@@ -2960,26 +2957,56 @@ let schedule_modify_refusal (row : schedule_row) : string option =
               read; refresh if it has changed)"
              row.sch_status)
 
-let schedule_update_form_json (row : schedule_row) =
+(* The editor holds the fields of every recurrence kind, so the operator can
+   switch kind in place. The fields of a kind the schedule does not use start
+   from these, the create form's values. *)
+type schedule_form_recurrence = {
+  sfr_interval_sec: int;
+  sfr_hour: int;
+  sfr_minute: int;
+  sfr_second: int;
+  sfr_cron: string;
+  sfr_timezone: string;
+}
+
+let schedule_form_recurrence_start =
+  { sfr_interval_sec = 3600
+  ; sfr_hour = 9
+  ; sfr_minute = 0
+  ; sfr_second = 0
+  ; sfr_cron = "0 9 * * *"
+  ; sfr_timezone = "Asia/Seoul"
+  }
+
+let schedule_form_recurrence_of (recurrence : Schedule_domain.recurrence) =
+  let start = schedule_form_recurrence_start in
+  match recurrence with
+  | Schedule_domain.One_shot -> start
+  | Schedule_domain.Interval { interval_sec } -> { start with sfr_interval_sec = interval_sec }
+  | Schedule_domain.Daily { hour; minute; second; timezone } ->
+      { start with
+        sfr_hour = hour
+      ; sfr_minute = minute
+      ; sfr_second = second
+      ; sfr_timezone = timezone
+      }
+  | Schedule_domain.Cron { expression; timezone } ->
+      { start with sfr_cron = expression; sfr_timezone = timezone }
+
+let schedule_form_recurrence_fields form =
+  [ "recurrence_interval_sec", `Int form.sfr_interval_sec
+  ; "recurrence_hour", `Int form.sfr_hour
+  ; "recurrence_minute", `Int form.sfr_minute
+  ; "recurrence_second", `Int form.sfr_second
+  ; "recurrence_cron", `String form.sfr_cron
+  ; "recurrence_timezone", `String form.sfr_timezone
+  ]
+
+let schedule_update_form_json (row : schedule_row) (recurrence : Schedule_domain.recurrence) =
   let body = schedule_payload_body row.sch_payload in
-  let recurrence_kind = schedule_json_string "kind" row.sch_recurrence in
-  let int_or source fallback =
-    Option.value ~default:fallback
-      (schedule_json_int source row.sch_recurrence)
-  in
-  let string_or source fallback =
-    let value = schedule_json_string source row.sch_recurrence in
-    if String.trim value = "" then fallback else value
-  in
+  let recurrence_kind = Schedule_domain.recurrence_kind_to_string recurrence in
   let recurrence_fields =
-    [ "recurrence_interval_sec", `Int (int_or "interval_sec" 3600)
-    ; "recurrence_hour", `Int (int_or "hour" 9)
-    ; "recurrence_minute", `Int (int_or "minute" 0)
-    ; "recurrence_second", `Int (int_or "second" 0)
-    ; "recurrence_cron", `String (string_or "expression" "0 9 * * *")
-    ; "recurrence_timezone",
-      `String (string_or "timezone" "Asia/Seoul")
-    ]
+    schedule_form_recurrence_fields (schedule_form_recurrence_of recurrence)
   in
   let expires =
     Option.bind row.sch_expires_at_iso Time_codec.parse_rfc3339_opt
@@ -3015,23 +3042,33 @@ let schedule_update_form_json (row : schedule_row) =
      @ run_watch @ recurrence_fields @ expires)
   |> Yojson.Safe.pretty_to_string
 
+(** The modify editor's starting text, or why the editor does not open.
+
+    The status rule is {!schedule_modify_refusal}. A recurrence this build
+    could not read refuses too: the editor would have to show a kind and
+    fields the row never held, and saving them would replace the schedule's
+    real repeat. *)
+let schedule_modify_form (row : schedule_row) : (string, string) result =
+  match schedule_modify_refusal row with
+  | Some reason -> Error reason
+  | None ->
+      (match row.sch_recurrence with
+       | Ok recurrence -> Ok (schedule_update_form_json row recurrence)
+       | Error err -> Error ("the recurrence did not decode: " ^ err))
+
 let schedule_create_form_json () =
   `Assoc
-    [ "schedule_id", `String ""
+    ([ "schedule_id", `String ""
     ; "keeper_name", `String ""
     ; "message", `String ""
     ; "title", `String ""
     ; "urgency", `String "normal"
     ; "due_at_iso", `String ""
-    ; "recurrence_kind", `String "one_shot"
-    ; "recurrence_interval_sec", `Int 3600
-    ; "recurrence_hour", `Int 9
-    ; "recurrence_minute", `Int 0
-    ; "recurrence_second", `Int 0
-    ; "recurrence_cron", `String "0 9 * * *"
-    ; "recurrence_timezone", `String "Asia/Seoul"
-    ; "allow_unregistered_keeper", `Bool false
+    ; ( "recurrence_kind"
+      , `String (Schedule_domain.recurrence_kind_to_string Schedule_domain.One_shot) )
     ]
+    @ schedule_form_recurrence_fields schedule_form_recurrence_start
+    @ [ "allow_unregistered_keeper", `Bool false ])
   |> Yojson.Safe.pretty_to_string
 
 type schedule_paging =

@@ -43,7 +43,8 @@ let test_the_column_legend_explains_every_letter_the_cell_draws () =
   List.iter
     (fun header -> check_bool ("the legend names " ^ header) true (contains keys header))
     [ Mark.now_header; Mark.age_header; "LIFECYCLE"; Mark.failing_glyph; "Mode"; "S "; Mark.(badge_glyph Badge_schedule); "mem"; Masc_tui_keeper_age_ladder.cell_label; "사람 몫"
-    ; Mark.pulse_header; Mark.axis_now_header; Mark.axis_next_header; Mark.fact_age_header
+    ; Mark.pulse_header; Mark.axis_now_header; Mark.schedule_strip_header; Mark.axis_next_header
+    ; Mark.fact_age_header
     ; Mark.librarian_header; Mark.updated_header; Mark.lag_digest_gap_header
     ; Mark.lag_stale_facts_header ]
 
@@ -68,6 +69,22 @@ let test_the_column_legend_names_the_pulse_cell () =
   check_bool "one legend entry is keyed by all five pulse marks" true
     (List.exists
        (fun (key, _) -> List.for_all (fun mark -> contains key mark) pulse_marks)
+       Mark.column_legend)
+
+let test_the_column_legend_names_the_strip_marks () =
+  let contains haystack needle =
+    let n = String.length needle and h = String.length haystack in
+    let rec go i = i + n <= h && (String.sub haystack i n = needle || go (i + 1)) in
+    go 0
+  in
+  let strip_marks =
+    [ Mark.schedule_strip_wake_mark; Mark.schedule_strip_quiet_mark; Mark.unknown_mark ]
+  in
+  check_int "the strip ahead draws three different marks" 3
+    (List.length (List.sort_uniq String.compare strip_marks));
+  check_bool "one legend entry is keyed by the strip's marks" true
+    (List.exists
+       (fun (key, _) -> List.for_all (fun mark -> contains key mark) strip_marks)
        Mark.column_legend)
 
 let test_operator_disposition_words () =
@@ -136,6 +153,8 @@ let () =
             test_the_column_legend_names_the_failing_cell
         ; Alcotest.test_case "the column legend names the pulse cell" `Quick
             test_the_column_legend_names_the_pulse_cell
+        ; Alcotest.test_case "the column legend names the strip marks" `Quick
+            test_the_column_legend_names_the_strip_marks
         ; Alcotest.test_case "operator disposition words are declared" `Quick
             test_operator_disposition_words
         ; Alcotest.test_case "operator disposition activity filter" `Quick

@@ -15,6 +15,12 @@ val run_cell :
   Masc_tui_types.state -> now:float -> keeper_name:string -> Masc_tui_keeper_axis_cell.t option
 (** The next scheduled run cell of {!segments}. *)
 
+val schedule_strip_cell :
+  Masc_tui_types.state -> now:float -> keeper_name:string -> Masc_tui_keeper_axis_cell.t option
+(** The keeper's scheduled wakes over the hours ahead
+    ({!Masc_tui_keeper_next_run.find_hours}), from the same cached index as
+    {!run_cell}. [None] for a keeper with no schedule. *)
+
 val memory_index : Masc_tui_types.state -> Masc_tui_keeper_memory_reading.index
 (** The state's memory health as the index {!segments} reads, built once per
     snapshot. *)

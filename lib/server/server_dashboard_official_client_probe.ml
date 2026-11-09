@@ -140,7 +140,7 @@ let probe_codex ~mgr ~clock ~process_cwd ~runtime ~runtime_id ~model
      refused Claude Code probe gives. *)
   match
     Runtime_account_access.authorize Runtime_account_access.Operator_call
-      (Runtime_account_access.seal config.account_home)
+      config.account_home
   with
   | Error refusal ->
     response_json
@@ -227,7 +227,7 @@ let probe_claude ~mgr ~clock ~cwd ~process_cwd ~runtime_id ~model
      refusal as its detail. *)
   match
     Runtime_account_access.authorize Runtime_account_access.Operator_call
-      (Runtime_account_access.seal config.account_home)
+      config.account_home
   with
   | Error refusal ->
     response_json

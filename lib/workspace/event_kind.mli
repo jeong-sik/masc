@@ -2,7 +2,7 @@
 
     Event-kind strings such as task.claimed and board.voted flow
     between emitters (workspace, board, keeper) and consumers
-    (activity_graph_reducer, tool_agent_timeline, dashboard). Prior to
+    (tool_agent_timeline, dashboard). Prior to
     this module both sides used raw [string]; a typo on either side
     compiled clean and silently diverged at runtime.
 

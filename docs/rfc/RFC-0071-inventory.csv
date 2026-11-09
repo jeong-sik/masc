@@ -1,5 +1,4 @@
 file,line,rhs,triage_class_guess
-lib/activity_graph/activity_graph_reducer.ml,31,None,unclassified
 lib/activity_graph/activity_graph_types.ml,42,None,unclassified
 lib/activity_graph/activity_graph_types.ml,56,None,unclassified
 lib/activity_graph/activity_graph_types.ml,121,None,unclassified

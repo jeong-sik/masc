@@ -34,7 +34,9 @@ val read_codex :
   Runtime_execution.codex_app_server ->
   (unit, string) result
 (** Read one Codex account and record its windows under [scope]. The answer
-    rests nothing: this is the start read ({!watch_declared}). *)
+    rests nothing: this is the start read ({!watch_declared}). The read is a
+    call of the operator ({!Runtime_account_access.Operator_call}): a refused
+    read starts no CLI and answers the refusal as its error. *)
 
 val read_muse :
   mgr:_ Eio.Process.mgr ->
@@ -137,6 +139,9 @@ val read_codex_after_spent_usage_refusal :
   clock:_ Eio.Time.clock ->
   cwd:Eio.Fs.dir_ty Eio.Path.t ->
   scope:Runtime_quota_window.scope ->
+  account:Runtime_codex_app_server.authorized_account ->
+  (* The account the refused turn was authorized on. The read starts its CLI
+     on this account. *)
   Runtime_execution.codex_app_server ->
   background
 (** Refresh the operator projection after a spent-usage refusal. Neither the

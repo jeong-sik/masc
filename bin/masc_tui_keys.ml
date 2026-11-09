@@ -519,6 +519,34 @@ let tools_bracket_binding ~pane =
   b Navigate "[ / ]" label
     ~help:"in Available, older/newer retained original run; in other panes, previous/next Keeper"
 
+type metrics_key_scope =
+  | Metrics_all
+  | Metrics_usage
+  | Metrics_usage_sections of usage_section list
+  | Metrics_telemetry
+
+let metrics_bindings =
+  [ b ~ko:"스크롤" Navigate "j/k" "scroll", Metrics_all
+  ; b ~ko:"사용량 / 진단" Navigate "p" "Usage / Telemetry"
+      ~help:"switch between quota and Keeper usage, and engine telemetry", Metrics_all
+  ; b ~ko:"계정 선택" Navigate "f" "account"
+      ~help:"search quota accounts; selection follows Plan and Trend", Metrics_usage_sections [Usage_plan; Usage_trend]
+  ; b ~ko:"전체 계정" Navigate "a" "all accounts"
+      ~help:"clear the quota account selection", Metrics_usage_sections [Usage_plan; Usage_trend]
+  ; b ~ko:"한도 그룹 표시" Navigate "x" "toggle limit group"
+      ~help:"on Plan: show or hide the group for reports at limit or observed exhaustion", Metrics_usage_sections [Usage_plan]
+  ; b ~ko:"보기" Navigate "v / V" "view"
+      ~help:"cycle the Usage reading: Plan, Trend, Keepers, Calls; V goes back", Metrics_usage
+  ; b ~ko:"1 / 7 / 14일" Navigate "w" "1d / 7d / 14d"
+      ~help:"on Usage: cycle the exact UTC day window for provider report history and tool calls", Metrics_usage_sections [Usage_trend; Usage_calls]
+  ; b ~ko:"지표 선택" Navigate "1 / 2 / 3" "telemetry section"
+      ~help:"on Telemetry: Engine, Work, or Tools", Metrics_telemetry
+  ; b ~ko:"뒤로" Act "Esc" "Dashboard", Metrics_all
+  ; b ~ko:"새로 조회" Meta "r" "refresh", Metrics_all
+  ; b ~ko:"다음" Meta "Tab" "next", Metrics_all
+  ; b ~ko:"종료" Meta "q" "quit", Metrics_all
+  ]
+
 let for_surface = function
   | Overview ->
       [ b ~ko:"키퍼" Navigate "Left" "Keepers" ~help:"open the Keeper list; Enter opens a chat; Right or Esc returns"
@@ -564,24 +592,7 @@ let for_surface = function
       ; b Meta "q" "quit"
       ]
   | Metrics ->
-      [ b Navigate "j/k" "scroll"
-      ; b Navigate "p" "Usage / Telemetry"
-          ~help:"switch between quota and Keeper usage, and engine telemetry"
-      ; b Navigate "f" "account" ~help:"search quota accounts; selection follows Plan and Trend"
-      ; b Navigate "a" "all accounts" ~help:"clear the quota account selection"
-      ; b Navigate "x" "toggle limit group"
-          ~help:"on Plan: show or hide the group for reports at limit or observed exhaustion"
-      ; b Navigate "v / V" "view"
-          ~help:"cycle the Usage reading: Plan, Trend, Keepers, Calls; V goes back"
-      ; b Navigate "w" "1d / 7d / 14d"
-          ~help:"on Usage: cycle the exact UTC day window for provider report history and tool calls"
-      ; b Navigate "1 / 2 / 3" "telemetry section"
-          ~help:"on Telemetry: Engine, Work, or Tools"
-      ; b Act "Esc" "Dashboard"
-      ; b Meta "r" "refresh"
-      ; b Meta "Tab" "next"
-      ; b Meta "q" "quit"
-      ]
+      List.map fst metrics_bindings
   | Keepers Keeper_list ->
       (b Navigate "j/k" "move"
          ~help:"move the roster cursor; a grouping view also stops on each group heading")
@@ -1495,12 +1506,18 @@ let has_row_scoped_keys surface =
       | Needs_row | Needs_reading -> true)
     (for_surface surface)
 
-let footer_hints_metrics ~telemetry =
-  for_surface Metrics
-  |> List.filter (fun binding ->
-         if telemetry then not (List.mem binding.key [ "w"; "v / V"; "f"; "a"; "x" ])
-         else not (String.equal binding.key "1 / 2 / 3"))
-  |> hints_of_bindings
+let footer_hints_metrics ~lang ~section ~telemetry =
+  metrics_bindings
+  |> List.filter_map (fun (binding, scope) ->
+         let shown = match scope, telemetry with
+           | Metrics_all, _
+           | Metrics_usage, false | Metrics_telemetry, true -> true
+           | Metrics_usage, true | Metrics_telemetry, false
+           | Metrics_usage_sections _, true -> false
+           | Metrics_usage_sections sections, false -> List.mem section sections
+         in
+         if shown then Some binding else None)
+  |> hints_of_bindings ~lang
 
 (* The keys an open approval answers to. Its footer was written out in the
    renderer, which is how it came to spell the decision keys apart from the

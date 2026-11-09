@@ -169,7 +169,9 @@ val footer_hints :
 val footer_hints_tools : pane:Masc_tui_types.tools_pane -> string
 (** Tools' bracket keys select retained runs in Available and Keepers in other panes. *)
 
-val footer_hints_metrics : telemetry:bool -> string
+val footer_hints_metrics :
+  lang:Masc_tui_types.ui_language ->
+  section:Masc_tui_types.usage_section -> telemetry:bool -> string
 (** Usage footer, showing only the keys for the visible Usage or Telemetry
     reading. *)
 

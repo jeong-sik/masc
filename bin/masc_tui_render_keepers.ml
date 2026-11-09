@@ -2077,6 +2077,13 @@ let keeper_selected_summary (state : state) ~now (row : Keeper_list_model.row) =
   { text; motion = shift_motion
       ~prefix:(Terminal_text.single_line keeper_name ^ " ") now_cell.motion }
 
+let draw_keeper_selected_summary buf ~cols summary =
+  (match summary.motion with
+   | Masc_tui_answering.Still -> ()
+   | Moving through_cell -> Render_schedule.Activity_tick.note_motion_if_visible
+       ~text:summary.text ~width:(framed_inner_width cols) ~through_cell);
+  box_line buf cols summary.text
+
 let keeper_plain_fleet_lines (state : state) ~now ~inner =
   let text ko en = ui_text state ~ko ~en in
   let warning value = Theme.warn () ^ "  " ^ value ^ Ansi.reset in
@@ -2364,7 +2371,7 @@ let render_keeper_plain (state : state) =
            box_line buf cols (fit_width left projection.kpp_list_width ^ Theme.recede () ^ " │ " ^ Ansi.reset
                               ^ fit_width right detail_width))
          roster);
-  Option.iter (fun summary -> box_line buf cols summary.text) projection.kpp_selected_summary;
+  Option.iter (draw_keeper_selected_summary buf ~cols) projection.kpp_selected_summary;
   box_divider buf cols;
   Buffer.add_string buf
     (footer_line state ~status:(keeper_action_status state) ~max_cells:cols
@@ -2940,12 +2947,7 @@ let render_keeper_axes (state : state) =
       draw_keeper_story buf ~cols ~rows:story_rows ~now:now_unix ~inner state page selected_row)
     state.keeper_story;
 
-  Option.iter (fun summary ->
-    (match summary.motion with
-     | Masc_tui_answering.Still -> ()
-     | Moving through_cell -> Render_schedule.Activity_tick.note_motion_if_visible
-         ~text:summary.text ~width:inner ~through_cell);
-    box_line buf cols summary.text) selected_summary;
+  Option.iter (draw_keeper_selected_summary buf ~cols) selected_summary;
   box_divider buf cols;
   Buffer.add_string buf
     (footer_line state

@@ -7,7 +7,9 @@
 ## 관측과 한계
 
 한 실행의 도구 뒤 요청 37개에 같은 Goal 대기 안내가 들어갔고, assistant text 20개가
-그 Goal을 다시 언급했다. 안내는 매 요청 끝의 `role=user`, `origin=system_context`였다.
+그 Goal을 다시 언급했다. 이 안내를 조립하는 경로는 요청 끝에 `role=user`,
+`origin=system_context`를 붙인다. 같은 경로의 직전 완료 실행에서 보존된 provider
+메시지 blob도 이 역할과 안내 내용을 확인했다. 이 스냅샷은 현재 실행 37개의 wire 캡처가 아니다.
 OpenAI 호환 경로는 이 carrier를 대화 이력에 저장하지 않고 요청마다 다시 붙인다.
 따라서 이번에 확인한 것은 이력 복제보다 새 발화처럼 보이는 반복 전달이다.
 

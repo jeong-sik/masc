@@ -513,8 +513,8 @@ let test_completion_observation_survives_tool_reply approved () =
     | Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _ | ToolResult _
     | Image _ | Document _ | Audio _ -> ()) message.content) checkpoint.messages
 
-(* Proof state remains visible through the tool loop without making the
-   model answer a new User-role state notice after every tool result. *)
+(* Proof state remains visible through the tool loop without appending a
+   new User-role state notice after every tool result. *)
 let test_goal_under_proof_survives_tool_reply () =
   Eio_main.run @@ fun env -> Eio.Switch.run @@ fun sw ->
   Masc_test_deps.init_eio_clock ~sw env;

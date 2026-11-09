@@ -230,6 +230,11 @@ Dispatch에는 저장소 권한이 필요하며 fork 기여자는 maintainer에�
 
 ## 5. 리뷰하고 통합하기
 
+main으로 들어가는 일반 PR은 [운영자가 요청한 자동 병합](NATIVE-GITHUB-STACKS.md#operator-requested-automatic-merge)을 적용합니다.
+스택의 미병합 PR마다 서로 다른 계정 2명이 현재 커밋을 승인하면 스택 전체를 병합합니다.
+병합을 막아야 하는 지적은 CHANGES_REQUESTED로 남깁니다. COMMENTED 본문만으로는 자동 병합을 막지 않습니다.
+리뷰어는 승인 전에 소스와 남은 지적을 확인합니다. Release/Tag는 전체 검증 후 수동으로 병합합니다.
+
 작업 선택은 [리뷰 라우팅](../../config/prompts/pr-review-routing.md)을 따릅니다.
 MASC 리뷰 요청은 현재 코드 리뷰 전문 Keeper의 이름과 역할을 확인한 뒤 각 대상에게
 MASC 내부 Board·Broadcast 또는 호출자가 사용할 수 있는 직접 메시지로 전달합니다.

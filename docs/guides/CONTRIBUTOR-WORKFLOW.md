@@ -251,6 +251,12 @@ not add a Core build or full CI admission requirement to every ordinary PR.
 
 ## 5. Review and integrate
 
+Ordinary PRs targeting main have [operator-requested automatic merge](NATIVE-GITHUB-STACKS.md#operator-requested-automatic-merge)
+after two distinct accounts approve the current head of every unmerged stack
+member. Use CHANGES_REQUESTED for blocking findings; COMMENTED prose is not an
+automatic stop. Reviewers still inspect source before approving. Release/Tag
+integration remains manual and requires full verification.
+
 Choose work using [review routing](../../config/prompts/pr-review-routing.md).
 For MASC review requests, confirm the current code-review specialist Keepers and
 their roles, then deliver the request to each intended Keeper through MASC Board,

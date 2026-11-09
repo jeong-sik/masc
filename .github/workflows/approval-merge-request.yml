@@ -1,0 +1,35 @@
+name: Approval merge request
+
+# This stage has no write token and never checks out a PR. Reviews from forks
+# can therefore wake the trusted default-branch worker as well.
+on:
+  pull_request_review:
+    types: [submitted, edited, dismissed]
+  pull_request_target:
+    types: [opened, reopened, synchronize, ready_for_review, edited, closed]
+
+permissions: {}
+
+jobs:
+  request:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Record the PR number as data
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REQUEST_FILE: ${{ runner.temp }}/approval-merge-request/request.json
+        run: |
+          python3 - <<'PY'
+          import json, os, pathlib
+          number = int(os.environ['PR_NUMBER'])
+          assert number > 0
+          path = pathlib.Path(os.environ['REQUEST_FILE'])
+          path.parent.mkdir(parents=True, exist_ok=True)
+          path.write_text(json.dumps({'pr': number}))
+          PY
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: approval-merge-request
+          path: ${{ runner.temp }}/approval-merge-request/request.json
+          retention-days: 1
+          if-no-files-found: error

@@ -93,6 +93,41 @@ affected changes again. GitHub evaluates repository rules during the operation.
 
 ## Submit and verify the result
 
+### Operator-requested automatic merge
+
+Ordinary PRs targeting `main` merge automatically after **two distinct GitHub
+accounts** have submitted APPROVE for each unmerged member's current head.
+Repeated approvals from one account count once. Author approvals, old heads,
+dismissed reviews, outstanding change requests and ambiguous formal decisions
+do not satisfy admission. Reviewers still inspect source and outstanding findings
+before approving. Record a blocking FAIL/HOLD as **CHANGES_REQUESTED**: automation
+does not interpret COMMENTED review prose or establish Keeper-session independence.
+Release branches retain manual full-CI admission.
+
+[`approval-merge-request.yml`](../../.github/workflows/approval-merge-request.yml)
+records a PR number on review and PR lifecycle events without a write token or
+PR checkout. [`approval-auto-merge.yml`](../../.github/workflows/approval-auto-merge.yml)
+runs the worker from its trusted default-branch workflow commit. It reads current
+reviews and scope again and submits only the top PR of a native stack. GitHub
+must enforce at least two approvals and stale-approval dismissal on `main`;
+repository rules continue to apply during the actual merge. These metadata-only
+workflows run no builds or tests.
+
+When enabling the worker, or after a transient read/merge failure, recheck an
+existing PR (any stack member) explicitly:
+
+```bash
+gh workflow run approval-auto-merge.yml --ref main -f pr=NUMBER
+```
+
+Local preflight is read-only with `GITHUB_EVENT_NAME=workflow_dispatch`,
+`GITHUB_REPOSITORY=OWNER/REPO`, `DISPATCH_PR=NUMBER`, an authenticated `gh`, and
+`python3 scripts/review/approval-auto-merge.py --dry-run`. The worker checks an
+asynchronous receipt once and records member states; pending/enqueued does not
+mean merged. A failed API read never establishes an absent stack or an approval.
+
+### Manual integration
+
 For native stacks the API operation is:
 
 ```bash

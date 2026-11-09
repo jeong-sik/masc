@@ -1,0 +1,51 @@
+name: Approval auto-merge
+
+on:
+  workflow_run:
+    workflows: [Approval merge request]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      pr:
+        description: PR to recheck (any member of a native stack)
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: write
+  pull-requests: read
+
+# Do not use one repository-wide concurrency group: Actions replaces older
+# pending runs, which would lose a different PR's final approval event. GitHub
+# serializes asynchronous requests for a given stack and returns its receipt.
+
+jobs:
+  merge:
+    if: >-
+      github.ref == 'refs/heads/main' &&
+      (github.event_name == 'workflow_dispatch' ||
+       (github.event.workflow_run.conclusion == 'success' &&
+        (github.event.workflow_run.event == 'pull_request_review' ||
+         github.event.workflow_run.event == 'pull_request_target')))
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The worker and its imports always come from the trusted workflow
+          # commit, never the reviewed PR, merge ref, or downloaded artifact.
+          ref: ${{ github.workflow_sha }}
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        if: github.event_name == 'workflow_run'
+        with:
+          name: approval-merge-request
+          path: ${{ runner.temp }}/approval-merge-request
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ github.token }}
+      - name: Recheck approvals and submit the whole merge scope
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DISPATCH_PR: ${{ inputs.pr }}
+          REQUEST_FILE: ${{ runner.temp }}/approval-merge-request/request.json
+        run: python3 scripts/review/approval-auto-merge.py

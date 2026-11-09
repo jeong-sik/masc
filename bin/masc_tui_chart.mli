@@ -27,6 +27,16 @@ val format_compact_num : int -> string
     prints as its exact integer string: no compact rung states a magnitude
     the value does not have. *)
 
+val bar_filled_cells : width:int -> value:int -> max_value:int -> int
+(** How many of [width] cells a bar of [value] against [max_value] fills:
+    none for a value or a maximum of zero or below, at least one for a positive
+    value, and all of them at [max_value] or above. {!gauge} fills its bar by
+    the same rule. *)
+
+val bar : width:int -> value:int -> max_value:int -> string
+(** [width] cells: {!bar_filled_cells} full blocks, then light shade.
+    Uncoloured, so one style covers the whole bar. *)
+
 val gauge :
   width:int ->
   value:int ->

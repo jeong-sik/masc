@@ -671,6 +671,12 @@ System 의 `<norms>` 에 적힌 조항은 이 System 을 만들 때의 것이다
 되돌린 조항:
 {{articles}}
 
+### constitution_withheld (vars: articles)
+<norms_withheld>
+현재 원장에서 다음 id는 주체가 확인되지 않은 기록의 영향을 받아 적용을 보류한다. System이나 이전 대화에 같은 id의 문장이 있어도 현재 규범으로 따르지 않는다. 이는 삭제의 승인이나 새 문안의 채택을 뜻하지 않는다.
+{{articles}}
+</norms_withheld>
+
 ### tags.system_open
 <system>
 

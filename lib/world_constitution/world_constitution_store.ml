@@ -114,6 +114,7 @@ type rejected_line = {
 type isolated_line = {
   line_number : int;
   subject : string;
+  article_ids : World_constitution_types.Article_id.t list;
 }
 
 type ledger = {
@@ -137,6 +138,11 @@ let read_error_to_string = function
 let same_id id (article : World_constitution_types.t) =
   World_constitution_types.Article_id.equal article.id id
 
+let without_ids held ids =
+  List.filter
+    (fun article -> not (List.exists (fun id -> same_id id article) ids))
+    held
+
 (* Folding keeps the order a world wrote its norms in. Re-adding an article
    that is still held replaces it in place, because that is an edit; re-adding
    one that was removed puts it at the end, because the world changed its mind
@@ -151,28 +157,28 @@ let rec apply held = function
         held
     else held @ [ article ]
   | World_constitution_types.Replaced { superseded; article; _ } ->
-    let retired =
-      List.filter
-        (fun (existing : World_constitution_types.t) ->
-          not
-            (List.exists
-               (fun id ->
-                 World_constitution_types.Article_id.equal existing.id id)
-               superseded))
-        held
-    in
+    let retired = without_ids held superseded in
     apply retired (World_constitution_types.Added article)
   | World_constitution_types.Removed { id; _ } ->
-    List.filter (fun existing -> not (same_id id existing)) held
+    without_ids held [ id ]
 
-(* The name the roster must resolve for the line to hold: who the norm is
-   claimed by. A line from outside the roster folds out of the live set and
-   is reported beside the rejected lines, never dropped quietly (RFC-0504
-   §2.4). *)
-let subject_of_entry = function
-  | World_constitution_types.Added article -> article.author
-  | World_constitution_types.Replaced { by; _ } -> by
-  | World_constitution_types.Removed { by; _ } -> by
+(* An unresolved move is not admitted as a norm or a retirement. Its targets
+   are uncertain too: skipping a removal would resurrect an earlier norm,
+   and skipping an edit would silently keep the text it disputed. Withhold
+   those ids from the prompt while retaining the move and its targets in the
+   isolation report. A later resolved write can adopt an id again. *)
+let article_ids_of_entry = function
+  | World_constitution_types.Added article -> [ article.id ]
+  | World_constitution_types.Replaced { superseded; article; _ } ->
+    article.id :: superseded
+  | World_constitution_types.Removed { id; _ } -> [ id ]
+
+(* Both the mover and the author of any new text must resolve. The tool
+   writes them as the same keeper, but a decoded replacement need not. *)
+let subjects_of_entry = function
+  | World_constitution_types.Added article -> [ article.author ]
+  | World_constitution_types.Replaced { by; article; _ } -> [ by; article.author ]
+  | World_constitution_types.Removed { by; _ } -> [ by ]
 
 let parse_with ~keep_history ~resolve_subject contents =
   let end_offset = String.length contents in
@@ -203,17 +209,32 @@ let parse_with ~keep_history ~resolve_subject contents =
             reject (World_constitution_wire.decode_error_to_string error)
           | Ok entry ->
             let entries = if keep_history then entry :: entries else entries in
-            let subject = subject_of_entry entry in
-            if resolve_subject subject then
+            match List.find_opt (fun subject -> not (resolve_subject subject))
+                    (subjects_of_entry entry) with
+            | None ->
               scan (line_number + 1) (apply held entry) entries rejected isolated rest
-            else
-              scan (line_number + 1) held entries rejected
-                ({ line_number; subject } :: isolated) rest))
+            | Some subject ->
+              let article_ids = article_ids_of_entry entry in
+              scan (line_number + 1) (without_ids held article_ids) entries rejected
+                ({ line_number; subject; article_ids } :: isolated) rest))
   in
   scan 1 [] [] [] [] (String.split_on_char '\n' contents)
 
 let parse ~resolve_subject contents =
   parse_with ~keep_history:true ~resolve_subject contents
+
+let withheld_article_ids (ledger : ledger) =
+  List.fold_left
+    (fun ids (line : isolated_line) ->
+      List.fold_left
+        (fun ids id ->
+          if List.exists (same_id id) ledger.articles
+             || List.exists (World_constitution_types.Article_id.equal id) ids
+          then ids
+          else id :: ids)
+        ids line.article_ids)
+    [] ledger.isolated
+  |> List.rev
 
 let read_contents ~base_path =
   let path = ledger_path ~base_path in
@@ -240,6 +261,12 @@ type position = {
   digest : string;
 }
 
+type held_projection = {
+  articles : World_constitution_types.t list;
+  at : position;
+  withheld_ids : World_constitution_types.Article_id.t list;
+}
+
 let position_of contents =
   { end_offset = String.length contents;
     digest = Agent_core_sha256.(digest_string contents |> to_hex) }
@@ -249,7 +276,9 @@ let load_held ~base_path ~resolve_subject =
   | Error _ as error -> error
   | Ok contents ->
     let contents = Option.value contents ~default:"" in
-    Ok ((parse_with ~keep_history:false ~resolve_subject contents).articles, position_of contents)
+    let ledger = parse_with ~keep_history:false ~resolve_subject contents in
+    Ok { articles = ledger.articles; at = position_of contents;
+         withheld_ids = withheld_article_ids ledger }
 
 (* Appends never rewrite a byte already written, so the first [end_offset]
    bytes of the ledger now are the ledger [position] read, exactly when they

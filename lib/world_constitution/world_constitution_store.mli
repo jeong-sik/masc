@@ -67,8 +67,14 @@ type rejected_line = {
 type isolated_line = {
   line_number : int;  (** 1-based, counting every line including blanks. *)
   subject : string;
-      (** The name no roster resolved: the [author] of an [Added] line, the
-          [by] of a [Replaced] or [Removed] line. *)
+      (** The first name the roster did not resolve: [Added.author],
+          [Removed.by], or [Replaced.by] followed by its [article.author]. *)
+  article_ids : World_constitution_types.Article_id.t list;
+      (** The ids withheld by this unresolved move: the added or removed id,
+          or the replacement's id and every superseded id. This does not
+          admit the move or prove a retirement; it prevents an earlier norm
+          becoming current merely because the later move was isolated. A
+          later resolved write may adopt an id again. *)
 }
 
 type ledger = {
@@ -78,10 +84,11 @@ type ledger = {
   articles : World_constitution_types.t list;
       (** The norms the world currently holds, in the order they were first
           written. An article written, removed and written again returns at the
-          end, because that is when the world decided to keep it. Lines whose
-          subject [resolve_subject] refused are folded out: they keep no
-          article in force and move none, because a norm from outside the
-          roster is not the world's to render (RFC-0504 §2.4). *)
+          end, because that is when the world decided to keep it. A line whose
+          subject [resolve_subject] refused admits no norm and withholds the
+          ids it affects. Neither its new text nor the earlier text it
+          disputed is the world's to render without resolving that move
+          (RFC-0504 §2.4). *)
   entries : World_constitution_types.entry list;
       (** Every decoded move, in ledger order. Removed entries retain who,
           when and why; the preceding Added entry retains the removed text.
@@ -116,8 +123,10 @@ val load :
     {!load_articles} instead. A missing file is an empty ledger.
 
     [resolve_subject] names the roster: a decoded line whose subject it
-    refuses folds out of [articles] and lands in [isolated] instead
-    (RFC-0504 §2.4). Production callers pass their world's keeper
+    refuses is not admitted, and the article ids it affects are withheld
+    from [articles]. The line and its ids land in [isolated] instead
+    (RFC-0504 §2.4); skipping the line must not revive the earlier version
+    of a withdrawn or edited norm. Production callers pass their world's keeper
     registry; a test that owns no roster passes one that holds every
     subject it wrote. *)
 
@@ -130,7 +139,7 @@ val load_articles :
     stay small, so an ordinary load must not build it: the per-turn prompt
     build renders articles and would otherwise retain every past article and
     removal reason on every turn. A missing file is no articles.
-    [resolve_subject] folds lines out exactly as {!load} does; this read
+    [resolve_subject] withholds affected ids exactly as {!load} does; this read
     keeps no isolated-line report, so a roster change that newly isolates a
     line surfaces through the tool read, not here. *)
 
@@ -140,11 +149,23 @@ type position = {
   digest : string;
 }
 
+type held_projection = private {
+  articles : World_constitution_types.t list;
+  at : position;
+  withheld_ids : World_constitution_types.Article_id.t list;
+      (** Distinct ids named by isolated moves and absent from [articles].
+          They are currently withheld even when replaying an older prefix
+          would no longer show the text in a previously issued System. An
+          id explicitly readopted later is not withheld. *)
+}
+
 val load_held :
   base_path:string ->
   resolve_subject:(string -> bool) ->
-  (World_constitution_types.t list * position, read_error) result
-(** {!load_articles} and the position of the bytes it folded. The same
+  (held_projection, read_error) result
+(** {!load_articles}, its withheld ids and the position of the bytes it folded.
+    Withholding describes the current projection, not an approved removal.
+    The same
     [resolve_subject] must fold both this read and the later
     {!load_articles_at} at its position, or the basis and the turn disagree
     about what the world holds. *)

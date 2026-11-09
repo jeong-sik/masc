@@ -32,3 +32,8 @@ val constitution_amendments_block : World_constitution_render.amendments -> stri
     articles added since a System's [<norms>] were rendered, with their text,
     and the ids of the ones removed. Raises [Invalid_argument] when a slot is
     missing or cannot render, under the same contract as the System's slots. *)
+
+val constitution_withheld_block : World_constitution_types.Article_id.t list -> string
+(** Current ids withheld due to unresolved ledger moves, independently of a
+    System's basis. Says neither that a removal was approved nor that an
+    unverified replacement was adopted. Same rendering failure contract. *)

@@ -6,6 +6,7 @@ open Result.Syntax
 type t =
   { text : string
   ; amendments : string option
+  ; withheld : string option
   }
 
 type stored =
@@ -91,7 +92,7 @@ let issue ~held ~lane ~render ~current ~at ~articles_at =
   match lane with
   | Without_basis ->
     let text = render current in
-    Ok ({ text; amendments = None }, { issued = from_current text; by_runtime })
+    Ok ({ text; amendments = None; withheld = None }, { issued = from_current text; by_runtime })
   | Agent_core { runtime_id; front } ->
     let* basis =
       match front, Runtime_map.find_opt runtime_id by_runtime with
@@ -101,15 +102,15 @@ let issue ~held ~lane ~render ~current ~at ~articles_at =
     Ok
       (match decide ~front ~basis ~render ~current with
        | From_basis { text; amendments; basis } ->
-         { text; amendments = block amendments }, { issued = basis.stored; by_runtime }
+         { text; amendments = block amendments; withheld = None }, { issued = basis.stored; by_runtime }
        | From_current { text } ->
          let stored = from_current text in
-         ( { text; amendments = None }
+         ( { text; amendments = None; withheld = None }
          , { issued = stored; by_runtime = Runtime_map.add runtime_id stored by_runtime } ))
 ;;
 
 let resend ~held ~runtime_id ~current ~articles_at recorded =
-  let unknown = { text = recorded; amendments = None } in
+  let unknown = { text = recorded; amendments = None; withheld = None } in
   match held with
   | Some held when String.equal held.issued.system_digest (digest recorded) ->
     let* basis = resolve ~articles_at held.issued in
@@ -119,14 +120,24 @@ let resend ~held ~runtime_id ~current ~articles_at recorded =
          ( { text = recorded
            ; amendments =
                block (World_constitution_render.amendments ~built_with:basis.articles current)
+           ; withheld = None
            }
          , Some { held with by_runtime = Runtime_map.add runtime_id held.issued held.by_runtime } )
        | None -> unknown, Some held)
   | Some _ | None -> Ok (unknown, held)
 ;;
 
+let with_withheld ids issued =
+  let withheld = match ids with
+    | [] -> None
+    | _ :: _ -> Some (Keeper_prompt.constitution_withheld_block ids)
+  in
+  { issued with withheld }
+;;
+
 let with_bytes ~issued text =
-  if String.equal issued.text text then issued else { text; amendments = None }
+  if String.equal issued.text text then issued
+  else { issued with text; amendments = None }
 ;;
 
 (* Session checkpoint form. The schema is closed: a missing, unknown or

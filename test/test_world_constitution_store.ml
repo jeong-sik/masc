@@ -9,9 +9,9 @@ let with_world f =
   Unix.mkdir path 0o700;
   Fun.protect ~finally:(fun () -> Fs_compat.remove_tree path) (fun () -> f path)
 
-let article ?(author = "lane-smith") ?(at = 1.0) text =
+let article ?(id = Article_id.generate ()) ?(author = "lane-smith") ?(at = 1.0) text =
   match
-    make ~id:(Article_id.generate ()) ~text ~author ~at ~evidence:[]
+    make ~id ~text ~author ~at ~evidence:[]
   with
   | Ok article -> article
   | Error invalid ->
@@ -174,15 +174,50 @@ let test_articles_only_load_of_a_missing_ledger_is_empty () =
       Alcotest.(check int) "no ledger, no articles" 0
         (List.length (load_articles_or_fail ~base_path ())))
 
-let held_or_fail ~base_path =
-  match Store.load_held ~base_path ~resolve_subject:(fun _ -> true) with
+let held_or_fail ?(resolve_subject = fun _ -> true) ~base_path () : Store.held_projection =
+  match Store.load_held ~base_path ~resolve_subject with
   | Ok held -> held
   | Error error -> Alcotest.failf "%s" (Store.read_error_to_string error)
 
-let articles_at_or_fail ~base_path position =
-  match Store.load_articles_at ~base_path ~resolve_subject:(fun _ -> true) position with
+let articles_at_or_fail ?(resolve_subject = fun _ -> true) ~base_path position =
+  match Store.load_articles_at ~base_path ~resolve_subject position with
   | Ok articles -> articles
   | Error error -> Alcotest.failf "%s" (Store.read_error_to_string error)
+
+let article_values articles =
+  List.map (fun (article : t) -> Article_id.to_string article.id, article.text) articles
+
+let check_articles label expected actual =
+  Alcotest.(check (list (pair string string))) label
+    (article_values expected) (article_values actual)
+
+let check_loads ?(withheld_ids = []) ~base_path ~resolve_subject expected =
+  let ledger = load_or_fail ~base_path ~resolve_subject () in
+  check_articles "full replay holds the resolved articles" expected ledger.articles;
+  check_articles "articles-only replay agrees" expected
+    (load_articles_or_fail ~base_path ~resolve_subject ());
+  let held = held_or_fail ~base_path ~resolve_subject () in
+  check_articles "held replay agrees" expected held.Store.articles;
+  let ids = List.map Article_id.to_string in
+  Alcotest.(check (list string)) "withheld ids are complete and distinct"
+    (List.sort_uniq String.compare (ids withheld_ids))
+    (List.sort String.compare (ids held.withheld_ids));
+  (match articles_at_or_fail ~base_path ~resolve_subject held.at with
+   | Some articles -> check_articles "position replay agrees" expected articles
+   | None -> Alcotest.fail "the position just read no longer matches the ledger");
+  ledger, held.at
+
+let check_isolation ~line_number ~subject ~article_ids (ledger : Store.ledger) =
+  match ledger.isolated with
+  | [ isolated ] ->
+      Alcotest.(check int) "the unresolved line is identified" line_number isolated.line_number;
+      Alcotest.(check string) "the unresolved subject is identified" subject isolated.subject;
+      let ids = List.map Article_id.to_string in
+      Alcotest.(check (list string)) "all affected ids are identified"
+        (List.sort_uniq String.compare (ids article_ids))
+        (List.sort_uniq String.compare (ids isolated.article_ids))
+  | others ->
+      Alcotest.failf "expected one isolated line, got %d" (List.length others)
 
 (* RFC-0491 §3.2: a System's basis names the ledger position it was read at.
    Later writes only append, so that position reads back the same articles,
@@ -191,7 +226,8 @@ let test_a_position_reads_back_the_articles_held_then () =
   with_world (fun base_path ->
       let kept = article "a norm that stays" in
       add ~base_path kept;
-      let then_articles, position = held_or_fail ~base_path in
+      let held = held_or_fail ~base_path () in
+      let then_articles = held.Store.articles and position = held.at in
       add ~base_path (article "a norm written later");
       remove ~base_path kept;
       (match
@@ -203,14 +239,14 @@ let test_a_position_reads_back_the_articles_held_then () =
       Alcotest.(check (option (list string))) "the position folds what was held then"
         (Some (article_texts then_articles))
         (Option.map article_texts (articles_at_or_fail ~base_path position));
-      let (_ : t list), now = held_or_fail ~base_path in
+      let now = held_or_fail ~base_path () in
       Alcotest.(check bool) "the ledger grew past it" true
-        (now.Store.end_offset > position.Store.end_offset))
+        (now.Store.at.end_offset > position.Store.end_offset))
 
 let test_a_position_the_ledger_no_longer_begins_with_reads_nothing () =
   with_world (fun base_path ->
       add ~base_path (article "a norm that stays");
-      let (_ : t list), position = held_or_fail ~base_path in
+      let position = (held_or_fail ~base_path ()).Store.at in
       Alcotest.(check bool) "a longer position than the ledger" true
         (Option.is_none
            (articles_at_or_fail ~base_path
@@ -325,26 +361,115 @@ let test_a_line_from_outside_the_roster_is_isolated_not_dropped () =
       | others ->
         Alcotest.failf "expected one isolated line, got %d" (List.length others)))
 
-let test_an_isolated_removal_moves_nothing () =
+let test_an_unresolved_removal_withholds_without_erasing_history () =
   with_world (fun base_path ->
-      let held_norm = article "a norm that stays" in
-      add ~base_path held_norm;
-      (match
-         Store.append_at ~base_path
-           ~expected_end_offset:(end_offset ~base_path)
-           (Removed { id = held_norm.id; by = "codex-operator"; at = 9.0; reason = None })
-       with
-      | Ok () -> ()
-      | Error error -> Alcotest.failf "%s" (Store.append_error_to_string error));
-      let ledger =
-        load_or_fail ~base_path
-          ~resolve_subject:(String.equal "lane-smith") ()
-      in
-      Alcotest.(check (list string))
-        "a removal from outside the roster removes nothing" [ "a norm that stays" ]
-        (texts ledger);
-      Alcotest.(check int) "the removal is still reported" 1
-        (List.length ledger.isolated))
+      let withdrawn = article "a norm taken back by a former keeper" in
+      let unrelated = article "an unrelated norm" in
+      add ~base_path withdrawn;
+      add ~base_path unrelated;
+      let resolve_subject = String.equal "lane-smith" in
+      let _, before_removal =
+        check_loads ~base_path ~resolve_subject [ withdrawn; unrelated ] in
+      remove ~base_path withdrawn;
+      let ledger, isolated_position =
+        check_loads ~base_path ~resolve_subject ~withheld_ids:[ withdrawn.id ] [ unrelated ] in
+      let removal =
+        Removed { id = withdrawn.id; by = "critic"; at = 9.0; reason = None } in
+      Alcotest.(check bool) "the addition and unresolved removal remain in history" true
+        (ledger.entries = [ Added withdrawn; Added unrelated; removal ]);
+      Alcotest.(check int) "the decoded removal is not a rejection" 0
+        (List.length ledger.rejected);
+      check_isolation ~line_number:3 ~subject:"critic"
+        ~article_ids:[ withdrawn.id ] ledger;
+      add ~base_path withdrawn;
+      let readopted, _ =
+        check_loads ~base_path ~resolve_subject ~withheld_ids:[] [ unrelated; withdrawn ] in
+      Alcotest.(check bool) "readoption appends without erasing the unresolved history" true
+        (readopted.entries = ledger.entries @ [ Added withdrawn ]);
+      check_isolation ~line_number:3 ~subject:"critic"
+        ~article_ids:[ withdrawn.id ] readopted;
+      (match articles_at_or_fail ~base_path ~resolve_subject isolated_position with
+       | Some articles -> check_articles "readoption does not rewrite the isolated prefix"
+           [ unrelated ] articles
+       | None -> Alcotest.fail "readoption invalidated the earlier ledger prefix");
+      match articles_at_or_fail ~base_path ~resolve_subject before_removal with
+      | Some articles -> check_articles "the pre-removal prefix retains its historical articles"
+          [ withdrawn; unrelated ] articles
+      | None -> Alcotest.fail "the pre-removal ledger prefix was lost")
+
+let test_an_unresolved_replacement_withholds_every_affected_id () =
+  List.iter (fun collides ->
+    with_world (fun base_path ->
+      let first = article "the first superseded norm" in
+      let unrelated = article "an unrelated norm" in
+      let second = article "the second superseded norm" in
+      let collision = article "the old norm at the replacement id" in
+      let originals =
+        [ first; unrelated; second ] @ if collides then [ collision ] else [] in
+      List.iter (add ~base_path) originals;
+      let replacement =
+        article ~id:(if collides then collision.id else Article_id.generate ())
+          "an unresolved replacement" in
+      replace ~base_path ~by:"former-keeper" [ first; second ] replacement;
+      let ledger, _ =
+        check_loads ~base_path ~resolve_subject:(String.equal "lane-smith")
+          ~withheld_ids:[ first.id; second.id; replacement.id ] [ unrelated ] in
+      check_isolation ~line_number:(List.length originals + 1) ~subject:"former-keeper"
+        ~article_ids:[ first.id; second.id; replacement.id ] ledger;
+      Alcotest.(check bool) "the replacement keeps its complete decoded history" true
+        (ledger.entries =
+          List.map (fun article -> Added article) originals
+          @ [ Replaced { superseded = [ first.id; second.id ]; article = replacement;
+                         by = "former-keeper"; at = 9.0; reason = None } ])))
+    [ false; true ]
+
+let test_an_unresolved_edit_does_not_revive_the_previous_text () =
+  with_world (fun base_path ->
+      let original = article "the previous text" in
+      let unrelated = article "an unrelated norm" in
+      let edit = article ~id:original.id ~author:"unknown-author" "the disputed edit" in
+      add ~base_path original;
+      add ~base_path unrelated;
+      add ~base_path edit;
+      let ledger, _ =
+        check_loads ~base_path ~resolve_subject:(String.equal "lane-smith")
+          ~withheld_ids:[ original.id ] [ unrelated ] in
+      Alcotest.(check bool) "both versions remain in history" true
+        (ledger.entries = [ Added original; Added unrelated; Added edit ]);
+      check_isolation ~line_number:3 ~subject:"unknown-author"
+        ~article_ids:[ original.id ] ledger;
+      let repeated =
+        article ~id:original.id ~author:"another-unknown-author" "another disputed edit" in
+      add ~base_path repeated;
+      let repeated_ledger, _ =
+        check_loads ~base_path ~resolve_subject:(String.equal "lane-smith")
+          ~withheld_ids:[ original.id ] [ unrelated ] in
+      Alcotest.(check bool) "repeated isolation preserves every disputed edit" true
+        (repeated_ledger.entries = ledger.entries @ [ Added repeated ]);
+      Alcotest.(check (list (pair int string))) "both unresolved lines remain reported"
+        [ 3, "unknown-author"; 4, "another-unknown-author" ]
+        (List.map (fun (line : Store.isolated_line) -> line.line_number, line.subject)
+           repeated_ledger.isolated))
+
+let test_a_resolved_replacer_cannot_admit_an_unresolved_author () =
+  with_world (fun base_path ->
+      let original = article "the superseded norm" in
+      let unrelated = article "an unrelated norm" in
+      let replacement = article ~author:"unknown-author" "the disputed replacement" in
+      add ~base_path original;
+      add ~base_path unrelated;
+      replace ~base_path ~by:"critic" [ original ] replacement;
+      let resolve_subject subject = List.mem subject [ "lane-smith"; "critic" ] in
+      let ledger, _ =
+        check_loads ~base_path ~resolve_subject
+          ~withheld_ids:[ original.id; replacement.id ] [ unrelated ] in
+      check_isolation ~line_number:3 ~subject:"unknown-author"
+        ~article_ids:[ original.id; replacement.id ] ledger;
+      Alcotest.(check bool) "the resolved mover and unresolved author remain in history" true
+        (ledger.entries =
+          [ Added original; Added unrelated;
+            Replaced { superseded = [ original.id ]; article = replacement;
+                       by = "critic"; at = 9.0; reason = None } ]))
 
 let test_articles_only_load_folds_out_isolated_lines () =
   with_world (fun base_path ->
@@ -391,8 +516,14 @@ let () =
       ( "isolation",
         [ Alcotest.test_case "a line from outside the roster is isolated, not dropped"
             `Quick test_a_line_from_outside_the_roster_is_isolated_not_dropped;
-          Alcotest.test_case "an isolated removal moves nothing" `Quick
-            test_an_isolated_removal_moves_nothing;
+          Alcotest.test_case "an unresolved removal withholds without erasing history" `Quick
+            test_an_unresolved_removal_withholds_without_erasing_history;
+          Alcotest.test_case "an unresolved replacement withholds every affected id" `Quick
+            test_an_unresolved_replacement_withholds_every_affected_id;
+          Alcotest.test_case "an unresolved edit does not revive the previous text" `Quick
+            test_an_unresolved_edit_does_not_revive_the_previous_text;
+          Alcotest.test_case "a resolved replacer cannot admit an unresolved author" `Quick
+            test_a_resolved_replacer_cannot_admit_an_unresolved_author;
           Alcotest.test_case "articles-only load folds out isolated lines" `Quick
             test_articles_only_load_folds_out_isolated_lines;
         ] );

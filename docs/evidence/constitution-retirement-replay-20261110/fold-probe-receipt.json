@@ -1,0 +1,234 @@
+{
+  "compiler": "5.5.1",
+  "driver_sha256": "2b37605ab7516928043ac5db471b4db43b0775baec44462ffb4f46251c0e4418",
+  "boundary": "Exact production types/wire and extracted pure fold; unused ID minting stubbed. No Dune, filesystem append/read, Keeper prompt, provider, installation or runtime verification.",
+  "receipts": [
+    {
+      "label": "before",
+      "source_head": "4b75311e12ce4aeecf51c77fe96f88ec64096510",
+      "source_sha256": {
+        "lib/world_constitution/world_constitution_types.ml": "e021dbf482cbabc60eb6b47dccd99e04090a16abad376c43bb65ca86ba09c45f",
+        "lib/world_constitution/world_constitution_types.mli": "c8584576aaa32685757d48fe8fe08d4b884ce37a92eb06c0c5865b196d302f1f",
+        "lib/world_constitution/world_constitution_wire.ml": "cd3f54ab9fc9bc029ca0478f307b65b75cf354bc73234270257dae44b1bf175f",
+        "lib/world_constitution/world_constitution_wire.mli": "5976f664173d4d63d90600e3bc0936e59a34c448cdeabd77a08fa3ed353e9fe3",
+        "lib/world_constitution/world_constitution_store.ml": "8744a6fb20e144b800fc5b8bcc6ccde8405d66332d03e243880346469d3b32dd"
+      },
+      "fold_slice_sha256": "234123ecd7f55a1561936d63761b05a9031f6d12fcf6d87640630c0247bb353b",
+      "compile_command": [
+        "ocamlfind",
+        "ocamlc",
+        "-w",
+        "+4+8",
+        "-warn-error",
+        "+4+8",
+        "-package",
+        "yojson,re.pcre,eio",
+        "-linkpkg",
+        "random_id.ml",
+        "world_constitution_types.mli",
+        "world_constitution_types.ml",
+        "world_constitution_wire.mli",
+        "world_constitution_wire.ml",
+        "store_fold.ml",
+        "probe.ml",
+        "-o",
+        "probe.exe"
+      ],
+      "compile_exit": 0,
+      "run_exit": 1,
+      "result": {
+        "pass": false,
+        "cases": [
+          {
+            "name": "retired remover",
+            "pass": false,
+            "actual": [
+              "retired rule",
+              "unrelated rule"
+            ],
+            "expected": [
+              "unrelated rule"
+            ]
+          },
+          {
+            "name": "unknown replacement and colliding id",
+            "pass": false,
+            "actual": [
+              "retired rule",
+              "unrelated rule",
+              "old replacement id"
+            ],
+            "expected": [
+              "unrelated rule"
+            ]
+          },
+          {
+            "name": "unknown same-id edit",
+            "pass": false,
+            "actual": [
+              "retired rule",
+              "unrelated rule"
+            ],
+            "expected": [
+              "unrelated rule"
+            ]
+          },
+          {
+            "name": "known mover with unknown author",
+            "pass": false,
+            "actual": [
+              "unrelated rule",
+              "unverified replacement"
+            ],
+            "expected": [
+              "unrelated rule"
+            ]
+          },
+          {
+            "name": "later explicit readoption",
+            "pass": false,
+            "actual": [
+              "readopted rule",
+              "unrelated rule"
+            ],
+            "expected": [
+              "unrelated rule",
+              "readopted rule"
+            ]
+          },
+          {
+            "name": "unregistered new norm",
+            "pass": true,
+            "actual": [
+              "unrelated rule"
+            ],
+            "expected": [
+              "unrelated rule"
+            ]
+          },
+          {
+            "name": "resolved removal",
+            "pass": true,
+            "actual": [
+              "unrelated rule"
+            ],
+            "expected": [
+              "unrelated rule"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "label": "after",
+      "source_head": "worktree candidate",
+      "source_sha256": {
+        "lib/world_constitution/world_constitution_types.ml": "e021dbf482cbabc60eb6b47dccd99e04090a16abad376c43bb65ca86ba09c45f",
+        "lib/world_constitution/world_constitution_types.mli": "c8584576aaa32685757d48fe8fe08d4b884ce37a92eb06c0c5865b196d302f1f",
+        "lib/world_constitution/world_constitution_wire.ml": "cd3f54ab9fc9bc029ca0478f307b65b75cf354bc73234270257dae44b1bf175f",
+        "lib/world_constitution/world_constitution_wire.mli": "5976f664173d4d63d90600e3bc0936e59a34c448cdeabd77a08fa3ed353e9fe3",
+        "lib/world_constitution/world_constitution_store.ml": "f848ddafcc1aacabdae2a4999ba89cec3613b0f82bb63b04c2700ff86762141a"
+      },
+      "fold_slice_sha256": "f6eb28af37e359947ac91925c146f6438a77d9f11b1e0143d5aa146c48171171",
+      "compile_command": [
+        "ocamlfind",
+        "ocamlc",
+        "-w",
+        "+4+8",
+        "-warn-error",
+        "+4+8",
+        "-package",
+        "yojson,re.pcre,eio",
+        "-linkpkg",
+        "random_id.ml",
+        "world_constitution_types.mli",
+        "world_constitution_types.ml",
+        "world_constitution_wire.mli",
+        "world_constitution_wire.ml",
+        "store_fold.ml",
+        "probe.ml",
+        "-o",
+        "probe.exe"
+      ],
+      "compile_exit": 0,
+      "run_exit": 0,
+      "result": {
+        "pass": true,
+        "cases": [
+          {
+            "name": "retired remover",
+            "pass": true,
+            "actual": [
+              "unrelated rule"
+            ],
+            "expected": [
+              "unrelated rule"
+            ]
+          },
+          {
+            "name": "unknown replacement and colliding id",
+            "pass": true,
+            "actual": [
+              "unrelated rule"
+            ],
+            "expected": [
+              "unrelated rule"
+            ]
+          },
+          {
+            "name": "unknown same-id edit",
+            "pass": true,
+            "actual": [
+              "unrelated rule"
+            ],
+            "expected": [
+              "unrelated rule"
+            ]
+          },
+          {
+            "name": "known mover with unknown author",
+            "pass": true,
+            "actual": [
+              "unrelated rule"
+            ],
+            "expected": [
+              "unrelated rule"
+            ]
+          },
+          {
+            "name": "later explicit readoption",
+            "pass": true,
+            "actual": [
+              "unrelated rule",
+              "readopted rule"
+            ],
+            "expected": [
+              "unrelated rule",
+              "readopted rule"
+            ]
+          },
+          {
+            "name": "unregistered new norm",
+            "pass": true,
+            "actual": [
+              "unrelated rule"
+            ],
+            "expected": [
+              "unrelated rule"
+            ]
+          },
+          {
+            "name": "resolved removal",
+            "pass": true,
+            "actual": [
+              "unrelated rule"
+            ],
+            "expected": [
+              "unrelated rule"
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

@@ -38,6 +38,10 @@ type t = private
         (** The rendered {!Prompt_block_id.Constitution_amendments} block:
             [Some] only for a System rendered with articles the world has
             since changed. *)
+  ; withheld : string option
+        (** Current ids withheld due to unresolved ledger moves. Independent
+            of the recorded System's basis, including a native seed whose
+            original article projection cannot be reconstructed. *)
   }
 
 (** The articles a System was rendered with, the ledger position they were
@@ -142,10 +146,16 @@ val resend :
     changed since, and [runtime_id] now holds that basis. Otherwise which
     articles rendered the bytes is not known and they go with no block. *)
 
+val with_withheld : World_constitution_types.Article_id.t list -> t -> t
+(** Attach the current withheld ids returned by {!World_constitution_store.load_held}
+    without changing System bytes, its basis or ordinary amendments. This is
+    a statement of current withholding, not approval of the isolated move. *)
+
 val with_bytes : issued:t -> string -> t
 (** The System a request sends when a hook overrides the bytes {!issue}
     gave: [issued] when they are its own, otherwise those bytes with no
-    amendments, since which articles rendered them is not known. *)
+    ordinary amendments, since which articles rendered them is not known.
+    Current withholding remains true for any System and is preserved. *)
 
 val read : Agent_core.Context.t -> (held option, string) result
 (** What a session context holds. [Ok None] when nothing was written, as in

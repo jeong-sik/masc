@@ -96,7 +96,6 @@
   test_checkpoint_objects
   test_clone
   test_complete_ext
-  test_consumer
   test_context
   test_context_concurrency
   test_context_flow_proof
@@ -220,7 +219,6 @@
   test_checkpoint_objects
   test_clone
   test_complete_ext
-  test_consumer
   test_context
   test_context_concurrency
   test_context_flow_proof

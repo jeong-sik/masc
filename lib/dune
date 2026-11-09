@@ -79,6 +79,23 @@
   keeper_gate_auto_judge_queue
   keeper_gate_auto_judge_worker
   keeper_gate_auto_judge_recovery
+  keeper_turn_sandbox_runtime_registry
+  keeper_turn_sandbox_runtime_work_root
+  keeper_turn_sandbox_runtime_boot
+  keeper_turn_sandbox_runtime_record
+  keeper_turn_sandbox_runtime_run_argv
+  keeper_turn_sandbox_runtime_container
+  keeper_turn_sandbox_runtime_work_volume
+  keeper_turn_sandbox_runtime_start_failure
+  keeper_turn_sandbox_runtime_process_bound
+  keeper_turn_sandbox_runtime_remote_endpoint
+  keeper_turn_sandbox_runtime_apple
+  keeper_turn_sandbox_runtime_teardown
+  keeper_turn_sandbox_runtime_start
+  keeper_turn_sandbox_runtime_endpoint
+  keeper_turn_sandbox_runtime_identity_refresh
+  keeper_turn_sandbox_runtime_exec
+  keeper_turn_sandbox_runtime_maintenance
   keeper_approval_queue_registry
   keeper_approval_queue_persist
   keeper_approval_queue_load

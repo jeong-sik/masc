@@ -24,7 +24,7 @@ Synthetic Keepers, memories and candidates are invented by the model from
 
 | File | Role |
 | --- | --- |
-| `pass_lines.json` | Fixed request shape, evaluation sets, baseline, candidates, gates and the files whose bytes they assume: every module `eval_admission.py` and `e_synth_audit.py` import, and the prompt template |
+| `pass_lines.json` | Fixed request shape, evaluation sets, baseline, candidates, gates and the files whose bytes they assume: every module `eval_admission.py`, `e_synth_audit.py` and `merge_cases.py` import, and the prompt template |
 | `e_real_manifest.json` | E-real: the answered admission records, by digest and sha256 |
 | `exact_store.py` | Reads answered admission records from the store, read only |
 | `e_real_manifest.py` | Writes the manifest |
@@ -36,6 +36,8 @@ Synthetic Keepers, memories and candidates are invented by the model from
 | `synth_render.py` | Renders a synthetic request as the admission prompt MASC would send |
 | `e_synth_audit.py` | Picks requests for a blind judge and drops the ones whose labels the judge does not confirm; at verdict time, makes the judge's cases for facts an answer dropped off label |
 | `audit_decisions.py` | Checks the judge's decisions, and turns its classes for off-label drops into the memories the verdict leaves out |
+| `merge_cases.py` | At verdict time, asks a blind judge of every memory an answer absorbs what MASC's absorb gate asks, in the gate's words |
+| `merge_decisions.py` | Checks the judge's classes for absorbs, and counts absorb precision and judged merge recall from them |
 | `admission_request.py` | Reads an admission prompt into typed parts and writes it back byte for byte |
 | `admission_template.py` | Splits `config/prompts/librarian.md` at its variables |
 | `prompt_facts.py` | Reads and writes the prompt's current memory and candidates as MASC's JSON |
@@ -92,7 +94,14 @@ checkpoint's binding declares an output ceiling of 32,768, and the lane's
    Unless the judge keeps the fact, no target is scored on that memory. A drop
    the judge keeps or finds restating another fact stays wrong, also when its
    memory leaves scoring, and so does a dropped complement target or duplicate
-   fact. Then `verdict`.
+   fact.
+7. When a valid E-synth answer absorbs a memory, a judge that sees no label,
+   target or request answers the question MASC's absorb gate asks of it, in
+   the gate's words (`merge_cases.py`): can this memory retire into that claim?
+   An absorbed planted stale fact gets no case, since it is wrong either way.
+   Absorb precision is the share of absorbs judged mergeable; judged merge
+   recall counts a merge the label expects only when every absorb it made is
+   judged mergeable. Then `verdict`.
 
 ```sh
 MASC_BASE_PATH=<base> uv run scripts/tinker/librarian/e_real_manifest.py \
@@ -119,27 +128,33 @@ uv run scripts/tinker/librarian/eval_admission.py run --set synth \
 uv run scripts/tinker/librarian/e_synth_audit.py drops \
   --requests artifacts/tinker/librarian/e-synth/requests.jsonl \
   --run artifacts/tinker/librarian/verdict-synth --out artifacts/tinker/librarian/verdict-drops
+uv run scripts/tinker/librarian/merge_cases.py \
+  --requests artifacts/tinker/librarian/e-synth/requests.jsonl \
+  --run artifacts/tinker/librarian/verdict-synth --out artifacts/tinker/librarian/verdict-merges
 uv run scripts/tinker/librarian/eval_admission.py verdict \
   --real artifacts/tinker/librarian/verdict-real --synth artifacts/tinker/librarian/verdict-synth \
-  --drops artifacts/tinker/librarian/verdict-drops \
+  --drops artifacts/tinker/librarian/verdict-drops --merges artifacts/tinker/librarian/verdict-merges \
   --train A=artifacts/tinker/librarian/train-A --train B=artifacts/tinker/librarian/train-B
 ```
 
-`cases` and `drops` keep the key in `--out` and put the judge's material in
-`--out/judge/`. Give the judge that folder itself, not a copy, and nothing
-else: it reads `judge.md` and `cases.jsonl` there and writes `decisions.jsonl`
-next to them. `cases` and `drops` refuse an `--out` whose judge folder already
-holds `decisions.jsonl`. The check cannot tell decisions made under other
+`cases`, `drops` and `merge_cases.py` keep the key in `--out` and put the
+judge's material in `--out/judge/`. Give the judge that folder itself, not a
+copy, and nothing else: it reads `judge.md` and `cases.jsonl` there and writes
+`decisions.jsonl` next to them. They refuse an `--out` whose judge folder
+already holds `decisions.jsonl`. The check cannot tell decisions made under other
 rules: copy a `decisions.jsonl` into another `--out` only to re-check an audit
 under the same rules. `judge.md` names
 its rules as `config/prompts/librarian.md`, and the folder holds a copy at that
-path. The key holds the label's classes and the dropped facts.
+path; the merge judge's `judge.md` quotes the gate's slots from it. The key
+holds the label's classes and the dropped facts, or the absorbs each merge
+case stands for.
 `--out/judge-files.json` holds the sha256 of the three files the judge was
 given. `apply` and `verdict` read the decisions only while those files are
 unchanged and the rules copy equals this checkout's `config/prompts/librarian.md`.
-`verdict` refuses while an off-label drop has no decision, and records each
-drop, its class, the memories left out, each target's wrong drops on them and
-the judge's file sha256 values in `verdict.json`.
+`verdict` refuses while an off-label drop or an absorb has no decision. It
+records each drop, its class, the memories left out, each target's wrong drops
+on them, each absorb's class, each target's absorb numbers and the judges' file
+sha256 values in `verdict.json`.
 
 A rerun with the same `--out` reuses every answered call and pays only for the
 rest. A budget stop exits with status 2. `verdict` refuses a run where a

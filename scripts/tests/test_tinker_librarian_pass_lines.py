@@ -1,7 +1,7 @@
 # pyright: strict
 """Tests for the files scripts/tinker/librarian/pass_lines.json pins.
 
-A verdict runs eval_admission.py and e_synth_audit.py. The pin names every
+A verdict runs eval_admission.py, e_synth_audit.py and merge_cases.py. The pin names every
 module of the librarian directory they import, at any depth, and the prompt
 template the requests are rendered with. It names nothing else.
 """
@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import cast
 
 HERE = Path(__file__).resolve().parents[1] / "tinker" / "librarian"
-VERDICT_SCRIPTS = ("eval_admission", "e_synth_audit")
+VERDICT_SCRIPTS = ("eval_admission", "e_synth_audit", "merge_cases")
 TEMPLATE = "../../../config/prompts/librarian.md"
 
 

@@ -53,7 +53,39 @@ val status : owner:owner -> base_path:string ->
     [{"runtime_id":...,"record":"made"}], or ["existing"] on a later pass.
     When it fails, [runtime] is [null]. Nothing is written to runtime.toml.
 
-    One verification of an account runs at a time: a second request while one
-    runs is answered 409 (issue #50018). *)
+    One call of an account runs at a time ({!one_call_of}): a request while a
+    verification or a Keeper turn of the account runs is answered 409. *)
 val verify : person:person -> base_path:string -> body:string ->
   Httpun.Request.t -> Http_reqd.t -> unit
+
+(** The runtime of a person's own account. *)
+type prepared =
+  { provider_account_id : Authz_types.Provider_account_id.t
+  ; runtime_id : Authz_types.Runtime_id.t
+      (** The id of [runtime], which a Runtime record of the person names. *)
+  ; runtime : Runtime_instance.t
+  }
+
+(** The runtime of [binding] on the home of the person's account
+    [provider_account_id]: the workspace provider the login receipt of the
+    account names, with the account's home ({!Runtime_account_runtime}).
+    {!verify} chooses a model, and a turn of a Keeper the Runtime its owner
+    gave it (plan D2-8). An account the person does not own, or one with no
+    login receipt of theirs, is a 404 with the same sentence. *)
+val person_runtime
+  :  person
+  -> base_path:string
+  -> provider_account_id:Authz_types.Provider_account_id.t
+  -> binding:Runtime_account_runtime.binding
+  -> (prepared, [ `Bad_request | `Not_found | `Service_unavailable ] * string) result
+
+(** Runs [f] when no other call of the account runs, and gives [busy]
+    otherwise. A call starts the official client on the home of the account,
+    and no two clients refresh the credential of one home at once, so a
+    verification and a Keeper turn of one account take turns (issue #50018).
+    It holds within this process. *)
+val one_call_of
+  :  Authz_types.Provider_account_id.t
+  -> busy:'e
+  -> (unit -> ('a, 'e) result)
+  -> ('a, 'e) result

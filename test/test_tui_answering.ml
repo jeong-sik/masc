@@ -300,7 +300,7 @@ let () =
   Alcotest.run "tui_answering"
     [ ( "chat activity", [Alcotest.test_case "motion demand follows observation freshness" `Quick
           test_motion_demand_uses_only_a_fresh_running_observation
-      ; test_case "background work and missing observation" `Quick
+      ; Alcotest.test_case "background work and missing observation" `Quick
           test_chat_shows_background_work_and_uncertainty])
     ; ( "duration"
       , [] )

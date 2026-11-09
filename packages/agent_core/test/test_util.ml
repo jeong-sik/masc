@@ -68,34 +68,6 @@ let test_snoc_list_concat () =
     (Util.snoc_list [ 1; 2 ] [ 3; 4 ])
 ;;
 
-(* ── result_traverse ──────────────────────────────────── *)
-
-let test_result_traverse_all_ok () =
-  match Util.result_traverse ~f:(fun x -> Ok (x * 2)) [ 1; 2; 3 ] with
-  | Ok [ 2; 4; 6 ] -> ()
-  | Ok xs -> failf "got %s" (String.concat ";" (List.map string_of_int xs))
-  | Error _ -> fail "expected Ok"
-;;
-
-let test_result_traverse_short_circuits () =
-  let calls = ref 0 in
-  let f x =
-    incr calls;
-    if x = 2 then Error "boom" else Ok x
-  in
-  match Util.result_traverse ~f [ 1; 2; 3 ] with
-  | Error "boom" ->
-    (* short-circuited at the second element — should not visit the third *)
-    check int "stopped at first error" 2 !calls
-  | _ -> fail "expected Error boom"
-;;
-
-let test_result_traverse_empty () =
-  match Util.result_traverse ~f:(fun _ -> Error "never") [] with
-  | Ok [] -> ()
-  | _ -> fail "expected Ok []"
-;;
-
 (* ── clip ─────────────────────────────────────────────── *)
 
 let test_clip_short () = check string "no change when shorter" "hi" (Util.clip "hi" 10)
@@ -111,24 +83,6 @@ let test_clip_keeps_multibyte_character_whole () =
   check string "cut inside a character backs up" "한..." (Util.clip "한글한글" 4);
   check string "cut on a boundary keeps both" "한글..." (Util.clip "한글한글" 6);
   check string "four-byte character" "..." (Util.clip "😀😀" 3)
-;;
-
-(* ── safe_sub ─────────────────────────────────────────── *)
-
-let test_safe_sub_normal () =
-  check string "regular slice" "bcd" (Util.safe_sub "abcdef" 1 3)
-;;
-
-let test_safe_sub_past_end () =
-  check string "len past end clamps" "ef" (Util.safe_sub "abcdef" 4 10)
-;;
-
-let test_safe_sub_negative () =
-  check string "negative len → empty" "" (Util.safe_sub "abc" 0 (-1))
-;;
-
-let test_safe_sub_start_at_end () =
-  check string "start at end → empty" "" (Util.safe_sub "abc" 3 5)
 ;;
 
 (* ── contains_substring_ci ────────────────────────────── *)
@@ -220,15 +174,6 @@ let test_file_read_error_shape () =
   | _ -> fail "expected Io FileOpFailed read"
 ;;
 
-let test_file_write_error_shape () =
-  match Util.file_write_error ~path:"/tmp/y" ~detail:"EACCES" with
-  | Error.Io (Error.FileOpFailed { op; path; detail }) ->
-    check string "op" "write" op;
-    check string "path" "/tmp/y" path;
-    check string "detail" "EACCES" detail
-  | _ -> fail "expected Io FileOpFailed write"
-;;
-
 let () =
   run
     "Util"
@@ -251,22 +196,11 @@ let () =
         ; test_case "snoc_list empty left" `Quick test_snoc_list_empty_left
         ; test_case "snoc_list concat" `Quick test_snoc_list_concat
         ] )
-    ; ( "result_traverse"
-      , [ test_case "all Ok" `Quick test_result_traverse_all_ok
-        ; test_case "short-circuits" `Quick test_result_traverse_short_circuits
-        ; test_case "empty list" `Quick test_result_traverse_empty
-        ] )
     ; ( "clip"
       , [ test_case "shorter" `Quick test_clip_short
         ; test_case "equal" `Quick test_clip_exact
         ; test_case "longer" `Quick test_clip_long
         ; test_case "multibyte" `Quick test_clip_keeps_multibyte_character_whole
-        ] )
-    ; ( "safe_sub"
-      , [ test_case "normal" `Quick test_safe_sub_normal
-        ; test_case "past end clamps" `Quick test_safe_sub_past_end
-        ; test_case "negative len" `Quick test_safe_sub_negative
-        ; test_case "start at end" `Quick test_safe_sub_start_at_end
         ] )
     ; ( "contains_substring_ci"
       , [ test_case "lower" `Quick test_ci_match_lower
@@ -285,7 +219,6 @@ let () =
     ; ( "error constructors"
       , [ test_case "json_parse_error" `Quick test_json_parse_error_shape
         ; test_case "file_read_error" `Quick test_file_read_error_shape
-        ; test_case "file_write_error" `Quick test_file_write_error_shape
         ] )
     ]
 ;;

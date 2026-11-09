@@ -4,6 +4,7 @@ module Pulse = Masc_tui_keeper_pulse
 module Next = Masc_tui_keeper_next_run
 module Memory = Masc_tui_keeper_memory_reading
 module Layout = Masc_tui_message_layout
+module Terminal_text = Masc_tui_ansi.Terminal_text
 module Decode = Masc.Tui_decode
 module Theme = Masc_tui_ansi.Theme
 module Ansi = Masc_tui_ansi.Ansi

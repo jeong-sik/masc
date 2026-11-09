@@ -119,6 +119,14 @@ let test_a_window_of_uneven_rows_shows_the_cursor_whole () =
     (window_of ~heights:[ 1; 1; 1; 1; 1 ] ~cursor:4 ~rows:3 4);
   check window "a row above the window brings the window up to it" (1, 2)
     (window_of ~heights:[ 1; 1; 2; 1 ] ~cursor:1 ~rows:3 3);
+  check window "a cursor taller than the window starts it and draws nothing" (1, 0)
+    (window_of ~heights:[ 1; 3; 1 ] ~cursor:1 ~rows:2 0);
+  check window "a cursor past the end names the last row" (1, 2)
+    (window_of ~heights:[ 1; 1; 1 ] ~cursor:7 ~rows:2 0);
+  check window "a cursor before the start names the first row" (0, 2)
+    (window_of ~heights:[ 1; 1; 1 ] ~cursor:(-3) ~rows:2 1);
+  check window "a negative scroll is the top" (0, 2)
+    (window_of ~heights:[ 1; 1; 1; 1 ] ~cursor:1 ~rows:2 (-5));
   check window "an empty list" (0, 0) (window_of ~heights:[] ~cursor:0 ~rows:5 3);
   check window "a window of no lines" (0, 0) (window_of ~heights:[ 1; 1 ] ~cursor:1 ~rows:0 0)
 

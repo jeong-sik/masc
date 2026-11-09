@@ -113,8 +113,8 @@ let metadata_bool key value = [ (key, string_of_bool value) ]
    recorder to thread the persisted user line. *)
 let slack_conversation_id ~channel_id = Printf.sprintf "slack:channel:%s" channel_id
 
-let slack_delivery ~team_id ~channel_id ~channel_name ~thread_ts
-    ~reply_to_thread_ts ~user_id ~user_name:_ ~ts
+let slack_delivery ~team_id ~channel_id ~channel_name
+    ~reply_to_thread_ts ~user_id ~ts
   : (Gate_keeper_backend.connector_delivery, string) result
   =
   Result.map
@@ -391,7 +391,7 @@ let accept_inbound ~resolved_binding ~dispatch_for_delivery ~base_dir ~team_id ~
          | Ok Triggered_route ->
            match restore_original_source ~keeper_name ~team_id ~channel_id ~thread_ts ~ts ~user_id original with
            | Error (Gw.Retryable_refusal detail) -> Error (Channel_gate.Internal detail)
-           | Ok ((stored_team, stored_channel, stored_thread, stored_user, stored_message), stored_mentioned) ->
+           | Ok ((stored_team, stored_channel, _, stored_user, stored_message), stored_mentioned) ->
              let stored_name = original.actor.display_name in
              let stored_channel_name = match original.conversation.surface with
                | Surface_ref.Slack {channel_name;_} -> channel_name
@@ -409,8 +409,8 @@ let accept_inbound ~resolved_binding ~dispatch_for_delivery ~base_dir ~team_id ~
                  @ metadata_bool "slack.mentions_bot" stored_mentioned
                  @ metadata_bool "mentions_bound_keeper" stored_mentioned } in
              match slack_delivery ~team_id:stored_team ~channel_id:stored_channel
-               ~channel_name:stored_channel_name ~thread_ts:stored_thread ~reply_to_thread_ts
-               ~user_id:stored_user ~user_name:stored_name ~ts:stored_message with
+               ~channel_name:stored_channel_name ~reply_to_thread_ts
+               ~user_id:stored_user ~ts:stored_message with
              | Error detail -> Error (Channel_gate.Internal detail)
              | Ok delivery -> Channel_gate.handle_inbound ~dispatch:(dispatch_for_delivery delivery) msg)
     in
@@ -423,7 +423,7 @@ let accept_inbound ~resolved_binding ~dispatch_for_delivery ~base_dir ~team_id ~
       ; outcome
       }
 
-let deliver_inbound ~clock ~base_dir accepted =
+let deliver_inbound ~clock accepted =
   let { channel_id; reply_to_thread_ts; keeper_name; attention_event_id = _
       ; operation_id = _; outcome } = accepted
   in
@@ -650,7 +650,7 @@ let submit_event ?deliver ?team_id ?user_directory ingress ~dispatch_for_deliver
            let lane = Connector_ingress_lane.Keeper_lane accepted.keeper_name in
            let ingress_event_id = Connector_ingress_lane.{source="slack_triggered"; opaque_id=event_id} in
            let delivery = match deliver with Some deliver -> deliver
-             | None -> fun () -> deliver_inbound ~clock ~base_dir accepted in
+             | None -> fun () -> deliver_inbound ~clock accepted in
            (* The durable Keeper operation owns the actual reply. This lane
               only projects its status notice; failure is not lost ingress. *)
            match Connector_ingress_lane.submit ingress ~lane ~event_id:ingress_event_id delivery with

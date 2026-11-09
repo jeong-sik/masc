@@ -24115,6 +24115,24 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
             ~intent:Revalidate ~refresh_inflight:http_refresh_inflight
             ~scoped_refresh_inflight:http_scoped_refresh_inflight
             ~scoped_refresh_followup ~mailbox end
+        else begin
+          (* A Resumed replay proves event continuity, not that the reads
+             those events owed settled. A local refresh whose demanded
+             revision was never observed -- the read failed, and the order
+             does not re-register it, because immediate re-registration
+             would hot-loop a persistent failure (backoff retry is
+             RFC-0480 L1b) -- finds its retry point here: the reconnect,
+             whether the failure landed before or after this handshake. A
+             settled source keeps its value and reads nothing. Review, PR
+             #50679. *)
+          let local_demand_unmet source =
+            let order = local_source_order state source in
+            not (Local_read_order.covers order (Local_read_order.demanded_revision order)) in
+          if local_demand_unmet Local_keepers then
+            launch_local_keeper_read state ~mailbox ~intent:Snapshot_read.Refresh state.local_base_path;
+          if local_demand_unmet Local_work then
+            launch_local_work_read state ~mailbox ~intent:Snapshot_read.Refresh state.local_base_path
+        end
       end
   | Observer_msg (Observer_received (owner, (instance_id, decoded)))
     when Masc_tui_async_protocol.observer_stream_owned state owner ->

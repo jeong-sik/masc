@@ -184,8 +184,6 @@ let repository_git_observation (state : state) (repo : Tui_decode.repository) =
                branch (ui_text state ~ko:"변경" ~en:"changes") snapshot.rcs_total in
            Some (match state.repository_changes_error with
              | Some _ -> ui_text state ~ko:"이전 관측 · 갱신 실패 · " ~en:"Last read · refresh failed · " ^ reading
-             | None when state.repository_changes_inflight ->
-                 ui_text state ~ko:"이전 관측 · 다시 읽는 중 · " ~en:"Last read · refreshing · " ^ reading
              | None -> ui_text state ~ko:"마지막 조회 · " ~en:"Last read · " ^ reading)
        | Tui_decode.Repository_change_project
        | Tui_decode.Repository_change_repository _ -> None)

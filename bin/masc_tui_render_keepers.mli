@@ -9,7 +9,10 @@ val render_keeper_list :
     views and the explicitly opened Story keep their axis/window renderer.
     Selection and fleet width/health summaries read
     the same synchronous ordered row model as the visible list. That model is
-    not retained across draws or used by input handlers. *)
+    not retained across draws or used by input handlers. Story turn records,
+    including an empty successful read, are explicitly retained observations
+    here: Plain does not refresh that source. The current result stays unknown
+    and Enter opens Story's existing read path to observe it again. *)
 
 val keeper_plain_page_rows :
   Masc_tui_types.state -> terminal_rows:int -> cols:int -> int option

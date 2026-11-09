@@ -1827,6 +1827,13 @@ let keeper_plain_help (state : state) (row : Keeper_list_model.row) =
 
 let keeper_plain_turn_record (state : state) ~now ~keeper_name =
   let text ko en = ui_text state ~ko ~en in
+  (* The Story page owns this read. Ready only means its own last request
+     completed, not that Plain has kept observing later turns. Even an empty
+     successful page is retained here until the operator reopens Story. *)
+  let retained =
+    text "보존 관측 · 현재 결과 미확인 · Enter:Story 재조회 · "
+      "retained observation · current result unknown · Enter:Story to reread · "
+  in
   let observed turns =
     match List.rev turns with
     | [] -> text "조회된 턴 기록 없음" "no turn records in the reading"
@@ -1842,10 +1849,10 @@ let keeper_plain_turn_record (state : state) ~now ~keeper_name =
   match Masc_tui_fetched.view_for ~equal:String.equal state.keeper_story_turns ~key:keeper_name with
   | Masc_tui_fetched.Absent -> text "턴 종료 기록 미조회 · Enter:Story" "turn records not read · Enter:Story"
   | Masc_tui_fetched.Loading -> text "턴 종료 기록 조회 중" "reading turn records"
-  | Masc_tui_fetched.Ready turns -> observed turns
+  | Masc_tui_fetched.Ready turns -> retained ^ observed turns
   | Masc_tui_fetched.Stale (turns, reason) ->
-      text "마지막 관측 · " "last observed · " ^ observed turns
-      ^ text " · 갱신 실패: " " · refresh failed: " ^ Terminal_text.single_line reason
+      retained ^ text "갱신 실패: " "refresh failed: " ^ Terminal_text.single_line reason
+      ^ " · " ^ observed turns
   | Masc_tui_fetched.Failed reason ->
       text "턴 종료 기록 미확인: " "turn records unknown: " ^ Terminal_text.single_line reason
 
@@ -2130,7 +2137,9 @@ let keeper_plain_list_lines (state : state) ~now:_ projection =
   let stop = keeper_list_stop state in
   let entry_lines = function
     | Keeper_group_heading (group, count) as entry ->
-        let heading = keeper_group_lead ~folded:(List.mem group state.keeper_list_folded)
+        let heading =
+          (if List.mem group state.keeper_list_folded then Keeper_mark.grid_folded_mark
+           else Keeper_mark.grid_open_mark) ^ " "
           ^ keeper_group_heading_text ~available_cells:(width - 2) (keeper_list_rows state) group count in
         [if keeper_entry_selected stop entry then Ansi.reverse ^ fit_width heading width ^ Ansi.reset else heading]
     | Keeper_display_row (_, row) as entry ->

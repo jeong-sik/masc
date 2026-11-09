@@ -42674,6 +42674,7 @@ Use relative paths for resources already held in the package. -->
       let pending_row_live =
         Option.is_some (local_source_pending state Local_keepers)
         || Option.is_some (local_source_pending state Local_work)
+        || Option.is_some (Keeper_waiting_read.awaiting_age state.keeper_waiting_read)
       in
       if not anything_running && state.activity_frame >= 0 then begin
         state.activity_frame <- -1;

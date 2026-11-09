@@ -73,6 +73,8 @@ python3 docs/evidence/2026-11-09-keeper-proof-context-feedback/ollama-probe.py \
 다른 새 문맥이 없으면 실제 tool 결과가 마지막 메시지가 된다.
 official client는 기존 Start/Resume별 입력에 상태를 싣고 vendor System에 남기지 않는다.
 실행 주체가 바뀌는 fallback도 같은 관측을 알맞은 위치로 옮긴다.
+렌더러가 발행한 상태는 별도 타입으로 보존한다. 이름만 같은 일반 텍스트나 출처가
+맞지 않는 문맥은 여러 도구 왕복이나 실행 주체 전환 뒤에도 System 상태로 승격하지 않는다.
 
 Goal 표시가 바뀌는 새 턴에서는 Agent Core System 바이트가 바뀐다. 이 비용을 감수하며,
 이전 설계의 캐시 절감량을 수리 후 절감량으로 인용하지 않는다. Task 승인·거절 전달,

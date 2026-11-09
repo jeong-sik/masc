@@ -47,10 +47,9 @@ let assemble_extra_system_context = Keeper_context_assembly.assemble
    Only the Goal observation is a System suffix. A later round of the same
    turn carries this turn's authority block again because the post-tool
    assembly drops the [Dynamic_context] it came from (#45853). Proof state
-   remains visible too, but Agent Core carries it in the issued System: a
-   repeated tail User carrier made the model answer that state again after
-   tool feedback. Official clients retain their turn-scoped delivery, because
-   their System outlives this turn. *)
+   remains visible too, but Agent Core keeps this recurring state out of the
+   post-tool User tail by carrying it in the issued System. Official clients
+   retain their turn-scoped delivery, because their System outlives this turn. *)
 let assemble_request_context ~checkpoint_owner ~(system : Keeper_turn_system.t) ~post_tool_round ~previous_assembly
     ~dynamic_context_partition ~existing_extra_system_context ~blocks =
   let observations, blocks, dynamic_context_partition, proof_state =
@@ -60,25 +59,16 @@ let assemble_request_context ~checkpoint_owner ~(system : Keeper_turn_system.t) 
       | Some (previous : Keeper_context_assembly.t) ->
         let observations = match previous.system_prompt with
           | None -> [] | Some issued -> issued.observations in
+        let observations = match previous.proof_state with
+          | None -> observations
+          | Some _ -> List.filter (function
+              | Keeper_context_assembly.Goals_awaiting_proof _ -> false
+              | Keeper_context_assembly.Active_goals _ -> true) observations in
         let carried = List.filter (fun (id, _) ->
             Prompt_block_id.equal id Prompt_block_id.Completion_authority
-            || Prompt_block_id.equal id Prompt_block_id.Goals_awaiting_proof) previous.blocks in
-        let proof_observations = List.filter_map (function
-            | Keeper_context_assembly.Goals_awaiting_proof text -> Some text
-            | Keeper_context_assembly.Active_goals _ -> None) observations in
-        let proof_blocks = List.filter_map (fun (id, text) ->
-            if Prompt_block_id.equal id Prompt_block_id.Goals_awaiting_proof
-            then Some text else None) carried in
-        (match previous.system_prompt, proof_observations @ proof_blocks with
-         | Some _, [text] ->
-           let observations = List.filter (function
-               | Keeper_context_assembly.Goals_awaiting_proof _ -> false
-               | Keeper_context_assembly.Active_goals _ -> true) observations in
-           let carried = List.filter (fun (id, _) ->
-               not (Prompt_block_id.equal id Prompt_block_id.Goals_awaiting_proof)) carried in
-           observations, carried @ blocks, dynamic_context_partition, Some text
-         | None, _ | Some _, ([] | _ :: _ :: _) ->
-           observations, carried @ blocks, dynamic_context_partition, None)
+            || (Option.is_none previous.proof_state
+                && Prompt_block_id.equal id Prompt_block_id.Goals_awaiting_proof)) previous.blocks in
+        observations, carried @ blocks, dynamic_context_partition, previous.proof_state
     else
       match dynamic_context_partition,
         List.filter (fun (id, _) -> Prompt_block_id.equal id Prompt_block_id.Dynamic_context) blocks with
@@ -96,8 +86,7 @@ let assemble_request_context ~checkpoint_owner ~(system : Keeper_turn_system.t) 
             | "" -> [] | text -> [Keeper_context_assembly.Active_goals (Inference_utils.sanitize_text_utf8 text)] in
           let block id layer = match Keeper_context_layers.text layer with
             | "" -> [] | text -> [id, Inference_utils.sanitize_text_utf8 text] in
-          let proof_state = match Keeper_context_layers.text awaiting with
-            | "" -> None | text -> Some (Inference_utils.sanitize_text_utf8 text) in
+          let proof_state = Keeper_context_assembly.issue_proof_state awaiting in
           let split = block Prompt_block_id.Completion_authority authority in
           observations, split @ List.map (fun (id, text) ->
             if Prompt_block_id.equal id Prompt_block_id.Dynamic_context
@@ -108,7 +97,8 @@ let assemble_request_context ~checkpoint_owner ~(system : Keeper_turn_system.t) 
      [proof_state]. A raw caller block must not acquire System authority. *)
   let observations, blocks =
     match proof_state with
-    | Some text ->
+    | Some (proof : Keeper_context_assembly.proof_state) ->
+      let text = proof.proof_text in
       (match checkpoint_owner with
        | Runtime_execution.Masc_agent_core ->
          observations @ [Keeper_context_assembly.Goals_awaiting_proof text], blocks
@@ -126,6 +116,7 @@ let assemble_request_context ~checkpoint_owner ~(system : Keeper_turn_system.t) 
   assemble_extra_system_context ~dynamic_context_partition ~existing_extra_system_context ~blocks
   |> Keeper_context_assembly.with_system_observations
        ~base_text:(Inference_utils.sanitize_text_utf8 system.text) ~observations
+  |> Keeper_context_assembly.with_proof_state proof_state
 
 (* See the mli: a position question about the last message, deliberately not
    [Hooks.last_tool_results], which answers containment over the whole

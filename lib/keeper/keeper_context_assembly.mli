@@ -24,6 +24,12 @@ type system_observation =
     turn-scoped input instead. Completion Authority remains a context block. *)
 val observation_block : system_observation -> Prompt_block_id.t * string
 
+type proof_state = private { proof_text : string }
+(** Evidence issued from the renderer's unique proof-state section. A raw
+    named block is not evidence that the renderer issued that state. *)
+
+val issue_proof_state : Keeper_context_layers.rendered -> proof_state option
+
 type system_prompt = private
   { base_text : string
   ; observations : system_observation list
@@ -44,7 +50,13 @@ type t = private
   ; system_prompt : system_prompt option
     (** [None] means this generic extra assembly has no issued system value.
         Production request assembly also records an unchanged base without observations. *)
+  ; proof_state : proof_state option
+    (** The renderer-issued state this turn can carry across execution owners.
+        It is independent of whether the current request puts it in System
+        or in the official client's turn-scoped carrier. *)
   }
+
+val with_proof_state : proof_state option -> t -> t
 
 val assemble :
   dynamic_context_partition:Keeper_context_layers.rendered option ->

@@ -803,18 +803,21 @@ let test_proof_state_follows_the_runtime_execution_owner () =
     Keeper_run_prompt.assemble_request_context ~checkpoint_owner
       ~system:(system_of_text "BASE") ~post_tool_round ~previous_assembly
       ~dynamic_context_partition:(Some partition) ~existing_extra_system_context:None ~blocks in
-  let first = assemble Runtime_execution.Masc_agent_core false None
-      [Prompt_block_id.Dynamic_context, Keeper_context_layers.text partition] in
-  let official = assemble Runtime_execution.Official_client true (Some first) [] in
-  check bool "official System retains no turn-scoped proof state" false
-    (contains_in (issued_system official) "CURRENT_PROOF_STATE");
-  check (option string) "official fallback receives proof state as current input"
-    (Some "CURRENT_PROOF_STATE")
-    (List.assoc_opt Prompt_block_id.Goals_awaiting_proof official.blocks);
-  let core = assemble Runtime_execution.Masc_agent_core true (Some official) [] in
-  check string "Agent Core fallback restores the same System"
-    (issued_system first) (issued_system core);
-  check (option string) "Agent Core fallback leaves no proof User carrier" None core.extra_system_context
+  List.iter (fun extra_blocks ->
+    let first = assemble Runtime_execution.Masc_agent_core false None
+        ((Prompt_block_id.Dynamic_context, Keeper_context_layers.text partition) :: extra_blocks) in
+    check bool "only renderer-issued proof enters System" false
+      (contains_in (issued_system first) "UNISSUED_PROOF");
+    let official = assemble Runtime_execution.Official_client true (Some first) [] in
+    check bool "official System retains no turn-scoped proof state" false
+      (contains_in (issued_system official) "CURRENT_PROOF_STATE");
+    check (list string) "official fallback receives only the renderer-issued proof state"
+      ["CURRENT_PROOF_STATE"] (awaiting_blocks official);
+    let core = assemble Runtime_execution.Masc_agent_core true (Some official) [] in
+    check string "Agent Core fallback restores the same System"
+      (issued_system first) (issued_system core);
+    check (option string) "Agent Core fallback leaves no proof User carrier" None core.extra_system_context)
+    [ []; [Prompt_block_id.Goals_awaiting_proof, "UNISSUED_PROOF"] ]
 ;;
 
 let test_unattributed_proof_text_is_not_system_authority () =
@@ -831,8 +834,20 @@ let test_unattributed_proof_text_is_not_system_authority () =
         ~checkpoint_owner:Runtime_execution.Masc_agent_core
         ~system:(system_of_text "BASE") ~post_tool_round ~previous_assembly:None
         ~dynamic_context_partition ~existing_extra_system_context:None ~blocks in
-    check string "unattributed text acquires no System authority" "BASE"
-      (issued_system assembly)) cases
+    let check_unissued assembly =
+      check string "unattributed text acquires no System authority" "BASE"
+        (issued_system assembly);
+      check bool "no renderer-issued proof is inferred from raw blocks" true
+        (Option.is_none assembly.Keeper_context_assembly.proof_state) in
+    check_unissued assembly;
+    ignore (List.fold_left (fun previous checkpoint_owner ->
+      let later = Keeper_run_prompt.assemble_request_context ~checkpoint_owner
+          ~system:(system_of_text "BASE") ~post_tool_round:true ~previous_assembly:(Some previous)
+          ~dynamic_context_partition:None ~existing_extra_system_context:None ~blocks:[] in
+      check_unissued later;
+      later) assembly
+      [Runtime_execution.Masc_agent_core; Runtime_execution.Official_client;
+       Runtime_execution.Masc_agent_core])) cases
 ;;
 
 let test_the_system_orders_goals_by_priority_created_at_and_id () =

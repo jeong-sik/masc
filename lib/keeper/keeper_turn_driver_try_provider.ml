@@ -1085,7 +1085,12 @@ type sent_request =
 (* What one candidate carries between its requests and the retry policy
    around it: its working ledger, the range the last request composed, what
    the compositions do with the tool results the range carries, and how to
-   ask whether demoting them would shorten the last request. *)
+   ask whether demoting them would shorten the last request. One state serves
+   every request to the candidate, the max-tokens continuation among them
+   ([run_try_provider_with_truncation_recovery]). A continuation with a state
+   of its own would send verbatim the results a size refusal had demoted, and
+   the retained results inline after a refusal had switched them to the
+   address form. *)
 type attempt_state =
   { last_request : sent_request option ref
   ; request_range : Keeper_continuity_request.range option ref
@@ -1099,10 +1104,9 @@ type attempt_state =
            when demoting the tool results and bound arguments in those atoms
            would carry fewer bytes, [None] when it would change nothing. *)
   ; retained_results : Keeper_client_tool_outbox.run_carrier
-        (* The run's carrier ([run_carrier_for_candidate]), shared by every
-           attempt of the run: the first attempt loads the outbox, every
-           later attempt carries that snapshot in the form the
-           capacity-refusal hook left it, and acknowledges that snapshot (RFC
+        (* The run's first attempt loads the outbox; every later attempt
+           carries that snapshot in the form the capacity-refusal hook left
+           it, and acknowledges that snapshot (RFC
            retained-results-carrier-shrinks-to-an-address §5.1, §6.1). *)
   }
 
@@ -1115,28 +1119,10 @@ let ledger_session (ctx : try_provider_ctx) =
   | None -> "-"
 ;;
 
-(* One carrier for a run, all the provider attempts to one candidate (RFC
-   retained-results-carrier-shrinks-to-an-address §1), the max-tokens
-   continuation among them. A continuation with a carrier of its own would
-   load the outbox again and send it inline after a size refusal had
-   switched the run to the address form.
-
-   The reader is looked up in [ctx.tools], the tools the candidate's agent
-   starts with, as [reader_available] is for the model input references. A
-   request can offer less: one whose tool choice is [None_] lets the model
-   call no tool, and the address text then names a reader that request
-   cannot call. *)
-let run_carrier_for_candidate (ctx : try_provider_ctx) =
-  Keeper_client_tool_outbox.run_carrier ~base_path:ctx.base_path
-    ~keeper_name:ctx.keeper_name
-    ~artifact_reader_available:
-      (Result.is_ok (Keeper_recovery_transmission.require_reader ctx.tools))
-;;
-
 (* The candidate can narrow its requests without turning a refused range
    into the next turn's starting point. AfterTurn records responses in the
    table; its observation also replaces this candidate's working value. *)
-let new_attempt_state ~retained_results (ctx : try_provider_ctx) =
+let new_attempt_state (ctx : try_provider_ctx) =
   { last_request = ref None
   ; request_range = ref None
   ; ledger = ref (match ctx.request_input with
@@ -1146,7 +1132,16 @@ let new_attempt_state ~retained_results (ctx : try_provider_ctx) =
           ~session_id:(ledger_session ctx))
   ; current_turn_results = ref Current_turn_verbatim
   ; current_turn_demotion = ref None
-  ; retained_results
+  ; retained_results =
+      (* Read from [ctx.tools], the tools the candidate's agent starts with,
+         as [reader_available] is for the model input references. A request
+         can offer less: one whose tool choice is [None_] lets the model call
+         no tool, and the address text then names a reader that request
+         cannot call. *)
+      Keeper_client_tool_outbox.run_carrier ~base_path:ctx.base_path
+        ~keeper_name:ctx.keeper_name
+        ~artifact_reader_available:
+          (Result.is_ok (Keeper_recovery_transmission.require_reader ctx.tools))
   }
 ;;
 
@@ -1810,10 +1805,10 @@ let bounded_model_input_projection
      Keeper.  Building the memo inside the per-request closure threw that work
      away between requests.
 
-     Safe to share: [run_try_provider] builds one closure per provider
-     attempt, so no two Keepers share a memo; AGENT_CORE drives the turn loop
-     sequentially (no [Fiber.fork] around [prepare_turn_for_agent] in
-     pipeline_stage_prepare.ml); and [Domain_pool.submit_cpu] is
+     Safe to share: [run_try_provider_attempt] builds one closure per
+     provider attempt, so no two Keepers share a memo; AGENT_CORE drives the
+     turn loop sequentially (no [Fiber.fork] around [prepare_turn_for_agent]
+     in pipeline_stage_prepare.ml); and [Domain_pool.submit_cpu] is
      [Eio.Executor_pool.submit_exn], which blocks until the job finishes, so
      successive jobs are ordered even when they land on different domains.
 
@@ -3359,17 +3354,16 @@ let memory_capacity_retry_sequence ~same_run_retry_authorized
 ;;
 
 let run_try_provider_with_history_recovery
-      ~retained_results
+      ~(state : attempt_state)
       ?(on_memory_capacity_refusal = fun ~refusal:_ ->
         Ok Keeper_memory_delivery_reprojection.Unchanged)
       ?continuation_checkpoint
       (ctx : try_provider_ctx)
       candidate
   =
-  let state = new_attempt_state ~retained_results ctx in
   (* The carrier step answers a size refusal before memory and history do. *)
   let on_memory_capacity_refusal =
-    Keeper_client_tool_outbox.run_carrier_reprojection retained_results
+    Keeper_client_tool_outbox.run_carrier_reprojection state.retained_results
       ~then_:on_memory_capacity_refusal in
   match ctx.request_input with
   | Completion_review ->
@@ -3515,11 +3509,6 @@ let run_try_provider_with_history_recovery
       ()
   in
   result, !checkpoint_after, !success_sample
-;;
-
-let run_try_provider ~retained_results ?continuation_checkpoint ctx candidate =
-  run_try_provider_attempt ?continuation_checkpoint
-    ~state:(new_attempt_state ~retained_results ctx) ctx candidate
 ;;
 
 let checkpoint_before_incomplete_response (checkpoint : Agent_core.Checkpoint.t) =
@@ -3681,9 +3670,10 @@ let run_try_provider_with_truncation_recovery
       (ctx : try_provider_ctx)
       candidate
   =
-  let retained_results = run_carrier_for_candidate ctx in
+  (* One state for the run, the continuation below included ([attempt_state]). *)
+  let state = new_attempt_state ctx in
   let first_result, checkpoint_after, success_sample =
-    run_try_provider_with_history_recovery ~retained_results ?on_memory_capacity_refusal
+    run_try_provider_with_history_recovery ~state ?on_memory_capacity_refusal
       ?continuation_checkpoint ctx candidate
   in
   let thinking_can_be_disabled = retry_without_thinking_admitted candidate in
@@ -3713,7 +3703,7 @@ let run_try_provider_with_truncation_recovery
           ; "thinking", `String "disabled"
           ])
       Keeper_runtime_manifest.Provider_lane_resolved;
-    run_try_provider ~retained_results
+    run_try_provider_attempt ~state
       ~continuation_checkpoint
       { ctx with enable_thinking = Some false; preserve_thinking = Some false;
                  native_retired_history_cut }

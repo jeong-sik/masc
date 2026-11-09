@@ -779,11 +779,12 @@ val run_try_provider_with_truncation_recovery :
   (Runtime_agent.run_result, Agent_core.Error.t) result
   * Agent_core.Checkpoint.t option
   * (string * Obj.t) option
-(** One run: every provider attempt to this candidate. A completion review
-    runs once with its original evidence. A Keeper input retains memory
-    reprojection, verified boundary resend and current-tool demotion under the
-    existing checkpoint/effect retry authority; on a typed size refusal the
-    retained-result carrier is offered before [on_memory_capacity_refusal]
+(** One run: every provider attempt to this candidate. The history recovery
+    sends a completion review once with its original evidence; the
+    continuation below may follow it. A Keeper input retains memory
+    reprojection, verified boundary resend and current-tool demotion under
+    the existing checkpoint/effect retry authority; on a typed size refusal
+    the retained-result carrier is offered before [on_memory_capacity_refusal]
     ({!Keeper_client_tool_outbox.run_carrier_reprojection}).
 
     Run the carried-range eviction first. When the accepted
@@ -792,11 +793,12 @@ val run_try_provider_with_truncation_recovery :
     same candidate once with thinking disabled. No new User message is added,
     so already-recorded tool results remain the continuation authority.
 
-    The run makes one retained-result carrier and shares it with every attempt,
-    the continuation included: the first attempt loads the outbox, later
-    attempts carry that snapshot in the form a size refusal left it, and the
-    attempt that completes acknowledges it (RFC
-    retained-results-carrier-shrinks-to-an-address §1, §5.1, §6.1). *)
+    The continuation is the run's next attempt, not a fresh one. It carries
+    the tool results a size refusal demoted as markers, and the
+    retained-result carrier in the form a size refusal left it. The first
+    attempt loads the outbox, and the attempt that completes acknowledges that
+    snapshot (RFC retained-results-carrier-shrinks-to-an-address §1, §5.1,
+    §6.1). *)
 
 val accept_rejected_error :
   runtime_id:string ->

@@ -55,6 +55,29 @@ value = {}
 |} tool
 ;;
 
+(* Same single-node shape as [composition] but with caller-chosen prose, so
+   repeat-cache tests use bytes no other test in this process validates. *)
+let composition_about tool blurb =
+  Printf.sprintf
+    {|---
+name: proposed
+description: %s
+---
+```toml composition
+[[compositions]]
+name = "proposed"
+description = "%s"
+execution = "inline"
+[[compositions.nodes]]
+id = "lane"
+tool = %S
+[compositions.nodes.input]
+kind = "literal"
+value = {}
+```
+|} blurb blurb tool
+;;
+
 (* #37493: the Keeper model reads a tool result only after
    [Tool_bridge.to_agent_core_typed_result] projects it with the workspace
    base_path. Calling the runtime handler alone never reached that projection,
@@ -192,6 +215,15 @@ let args ?(package_id = "proposed") artifact =
 
 let string_field name data = Yojson.Safe.Util.(member name data |> to_string)
 
+(* Absent on a full parse (and on every verdict before the repeat cache);
+   [true] only when the verdict reused a previous parse of identical bytes. *)
+let cached_flag data =
+  match Yojson.Safe.Util.member "cached" data with
+  | `Bool cached -> cached
+  | `Null -> false
+  | _ -> fail "cached flag is not a bool"
+;;
+
 let failed code (result, data) =
   check bool "validation failed" true
     (match result.Keeper_tool_execution.disposition with Tool_result.Failed _ -> true | _ -> false);
@@ -278,6 +310,65 @@ let test_unreadable_artifact () = with_fixture ~damage_exports:true @@ fun artif
     ((fst damaged).Keeper_tool_execution.disposition = Tool_result.Failed Tool_result.Runtime_failure)
 ;;
 
+(* #49177: the same bytes validated three times parse once; the repeats
+   reuse the first verdict with identical fields. *)
+let test_repeated_success_cached () = with_fixture @@ fun artifact call ->
+  let source = composition_about "keeper_lane_status" "Inspect the lane status on repeat" in
+  let exported = artifact source in
+  let first = call (args exported) in
+  let second = call (args exported) in
+  let third = call (args exported) in
+  valid "composition" ~source exported first;
+  valid "composition" ~source exported second;
+  valid "composition" ~source exported third;
+  check bool "first validation parses" false (cached_flag (snd first));
+  check bool "second validation reuses the parse" true (cached_flag (snd second));
+  check bool "third validation reuses the parse" true (cached_flag (snd third))
+;;
+
+let test_repeated_failure_cached () = with_fixture @@ fun artifact call ->
+  let source = composition_about "nonexistent_tool" "Name a tool nothing owns, repeatedly" in
+  let exported = artifact source in
+  let first = call (args exported) in
+  let second = call (args exported) in
+  failed "composition_rejected" first;
+  failed "composition_rejected" second;
+  check string "cached failure repeats the message"
+    (string_field "message" (snd first)) (string_field "message" (snd second));
+  check bool "first failure parses" false (cached_flag (snd first));
+  check bool "second failure reuses the parse" true (cached_flag (snd second))
+;;
+
+(* Same bytes, different descriptor surfaces: the allowed surface and the
+   denying surface must not share a verdict. Each test below runs in its own
+   fixture; whichever runs first, its entries never satisfy the other
+   surface, so both first calls parse and both second calls hit their own. *)
+let shared_surface_source =
+  composition_about "keeper_lane_status" "Shared bytes across two surfaces"
+;;
+
+let test_cache_allows_on_default_surface () = with_fixture @@ fun artifact call ->
+  let exported = artifact shared_surface_source in
+  let first = call (args exported) in
+  let second = call (args exported) in
+  valid "composition" ~source:shared_surface_source exported first;
+  valid "composition" ~source:shared_surface_source exported second;
+  check bool "allowed surface parses first" false (cached_flag (snd first));
+  check bool "allowed surface reuses its parse" true (cached_flag (snd second))
+;;
+
+let test_cache_denies_on_deny_surface () =
+  with_fixture ~tool_deny:[ "keeper_lane_status" ] @@ fun artifact call ->
+  let exported = artifact shared_surface_source in
+  let first = call (args exported) in
+  let second = call (args exported) in
+  failed "composition_rejected" first;
+  failed "composition_rejected" second;
+  check bool "denied surface parses instead of reusing the success" false
+    (cached_flag (snd first));
+  check bool "denied surface reuses its own parse" true (cached_flag (snd second))
+;;
+
 let () =
   Mirage_crypto_rng_unix.use_default ();
   run "Keeper Skill validation"
@@ -290,4 +381,8 @@ let () =
       ; test_case "shared authoring size limit" `Quick test_size_limit
       ; test_case "artifact reference integrity" `Quick test_reference_integrity
       ; test_case "damaged artifact is a runtime failure" `Quick test_unreadable_artifact
+      ; test_case "repeated success reuses the parse" `Quick test_repeated_success_cached
+      ; test_case "repeated failure reuses the parse" `Quick test_repeated_failure_cached
+      ; test_case "repeat cache allows on the default surface" `Quick test_cache_allows_on_default_surface
+      ; test_case "repeat cache denies on the deny surface" `Quick test_cache_denies_on_deny_surface
       ] ]

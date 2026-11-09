@@ -439,7 +439,7 @@ let validate_registry_owner_exact ~config operation =
     else Ok ()
 ;;
 
-let prepare_cleanup ~config ~entry operation settled_task_ids =
+let prepare_cleanup ~config operation settled_task_ids =
   let meta_prepare_result =
     match operation.cleanup_intent.reason with
     | Dashboard_keeper_purge _ ->
@@ -708,7 +708,7 @@ let validate_exact_registry_generation ~base_path operation entry =
     else Ok ()
 ;;
 
-let unregister_retired_exact ~base_path operation entry =
+let unregister_retired_exact operation entry =
   match operation.lane_ownership, entry with
   | Dormant_meta, None -> Ok false
   | Dormant_meta, Some _ ->
@@ -977,7 +977,7 @@ let complete_cleanup
        block ~config operation Approval_summary_retirement detail
      | Ok () ->
        (match
-          unregister_retired_exact ~base_path:config.base_path operation entry
+          unregister_retired_exact operation entry
         with
         | Error detail -> block ~config operation Registry_unregister detail
         | Ok registry_unregistered ->
@@ -1083,7 +1083,7 @@ let run ~config ~entry ?successor_operation_id operation =
        (match settle_tasks ~config ~meta operation [] with
         | Error _ as error -> error
         | Ok (settled_operation, settled_task_ids) ->
-          (match prepare_cleanup ~config ~entry settled_operation settled_task_ids with
+          (match prepare_cleanup ~config settled_operation settled_task_ids with
            | Error _ as error -> error
            | Ok ready ->
              (match ready.phase with
@@ -1104,7 +1104,7 @@ let run ~config ~entry ?successor_operation_id operation =
        (match settle_tasks ~config ~meta operation settled_task_ids with
         | Error _ as error -> error
         | Ok (settled_operation, settled_task_ids) ->
-          (match prepare_cleanup ~config ~entry settled_operation settled_task_ids with
+          (match prepare_cleanup ~config settled_operation settled_task_ids with
            | Error _ as error -> error
            | Ok ready ->
              (match ready.phase with

@@ -531,7 +531,6 @@ let emit_relay_drop_log
 
 let broadcast_drop_marker
       ~(pending : pending_relay)
-      ~(stage_label : string)
       ~(attempts : int)
   =
   let marker =
@@ -735,7 +734,6 @@ let rec process_pending ?store_ref ~loss_target ~next_loss acc = function
            ~attempts:attempt;
          broadcast_drop_marker
            ~pending
-           ~stage_label:(relay_stage_to_string stage)
            ~attempts:attempt;
          (* The diagnostic marker is best effort and is not the observer's
             continuity contract. Queue the scoped loss notice ahead of later

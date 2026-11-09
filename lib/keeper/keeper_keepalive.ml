@@ -615,7 +615,7 @@ let fork_egress_proxy
 
 (* ── Lifecycle bootstrap / publish helpers ── *)
 
-let bootstrap_live_keeper_meta ?lifecycle_token ~(ctx : _ context) (m : keeper_meta)
+let bootstrap_live_keeper_meta ~(ctx : _ context) (m : keeper_meta)
   : keeper_meta
   =
   try
@@ -1241,7 +1241,7 @@ let rec start_keepalive
         let stop = reg.fiber_stop in
         let wakeup = reg.fiber_wakeup in
         let live_meta =
-          bootstrap_live_keeper_meta ~lifecycle_token:launch_token ~ctx m
+          bootstrap_live_keeper_meta ~ctx m
         in
         let live_meta_installed =
           match Keeper_registry.get ~base_path:ctx.config.base_path reg.name with

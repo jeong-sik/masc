@@ -2130,12 +2130,8 @@ let native_type t ~id ~label ~expected_url ~document_id ~text =
 
 let interact ?actor t args =
   let before result = Result.map_error (fun detail -> Live.Before_effect detail) result in
-  let unavailable_input reason = Error (Live.Before_effect (Browser_lane.Native_input.message reason)) in
   let* fields = before (match args with `Assoc fields -> Ok fields | _ -> Error "invalid interaction") in
   let* request = before (Browser_interaction.parse (obj (("lane",str Browser_lane.Lane_name.(to_wire Live)) :: fields))) in
-  let* () = match Browser_lane.Native_input.unavailable (Browser_lane.ego_input_contract request.action) with
-    | None -> Ok ()
-    | Some reason -> unavailable_input reason in
   let id = request.tab_id in
   let verb = Browser_lane.interaction_verb request.action in
   let* label = label_of t id in
@@ -2427,8 +2423,6 @@ let act ?actor t args =
 let workflow ?actor t args =
   let pre result = Result.map_error (fun detail -> Live.Before_effect detail) result in
   let* request = pre (Browser_lane.Native_workflow.of_json args) in
-  let* () = Browser_lane.Native_workflow.validate_input_contract request
-    |> Result.map_error (fun reason -> Live.Before_effect (Browser_lane.Native_workflow.unavailable_input_message reason)) in
   let* _ = pre (Browser_page_script.text_cap (Some request.max_chars)) in
   let* label = label_of t request.tab_id in
   let holds_input=List.exists (fun (step : Browser_lane.Native_workflow.step) ->

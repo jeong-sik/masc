@@ -181,8 +181,10 @@ let runtime_scope id =
 (* The loop the RFC measured (section 1.1): the lane's account had a stated
    reset, and every run called it again. A stated reset now holds every slot
    on that account until the reset; an observation without a reset still
-   only moves them back (R2); a success on the account ends the reset (R6).
-   Where a slot also has its own Retry-After, the later time wins. *)
+   only moves them back (R2). Where a slot also has its own Retry-After, the
+   later time wins. A success on the account does not lift the reset: the
+   success can belong to a call admitted before the statement (a Muse turn
+   states its reset mid-turn, then answers). *)
 let test_stated_account_reset_holds_every_slot_on_it () =
   with_lane @@ fun resolved ->
   with_quota_window @@ fun () ->
@@ -206,8 +208,10 @@ let test_stated_account_reset_holds_every_slot_on_it () =
     (held stated);
   Backpressure.note_candidate_success ~candidate:(candidate primary);
   Runtime_quota_window.note_succeeded ~scope;
-  check (list string) "a success on the account walks every slot again" declared
-    (walked (Lane.order_at ~now resolved))
+  check (list string) "a success leaves the stated reset holding every slot" declared
+    (held_ids (Lane.order_at ~now resolved));
+  check (list string) "once the stated times pass every slot is walked again" declared
+    (walked (Lane.order_at ~now:(noted_at +. 7200.0) resolved))
 
 let test_unchanged_save_shares_pressure_cell () =
   with_lane_config @@ fun ~path _resolved ->
@@ -349,7 +353,7 @@ let test_http_payment_records_account_and_provider_reset env () =
         check int "one actual HTTP generation refusal" 1 (Atomic.get server.posts)))
     [None;Some 3600.0]
 
-let test_http_answer_clears_account_rest_before_semantic_validation env () =
+let test_http_answer_clears_undated_account_before_semantic_validation env () =
   List.iter (fun (reject,stated_reset) ->
     with_http_observation_fixture env
       (Exact_output_fixture.Reply (Exact_output_fixture.openai_response (`Assoc ["ok",`Bool true])))
@@ -369,8 +373,11 @@ let test_http_answer_clears_account_rest_before_semantic_validation env () =
         let now = Unix.gettimeofday () in
         check bool "actual answer clears candidate rate and old Fleet mark" true
           (Option.is_none (Backpressure.candidate_backpressure ~now ~candidate:(candidate primary)));
-        check bool "an answer clears the account rest, a stated reset included (R6)" false
+        check bool "answer clears undated quota and preserves a stated window" stated_reset
           (Runtime_quota_window.is_exhausted ~scope ~now);
+        if stated_reset then
+          check (option (float 0.0)) "stated reset remains exact" (Some reset)
+            (Runtime_quota_window.active_until ~scope ~now);
         check int "semantic validation never dispatches another candidate" 1 (Atomic.get server.posts)))
     [false,false;true,false;false,true]
 
@@ -440,7 +447,7 @@ let () =
       "HTTP account observations", [
         test_case "actual payment refusal records account and provider reset" `Quick
           (test_http_payment_records_account_and_provider_reset env);
-        test_case "actual answer clears the account rest before semantic validation" `Quick
-          (test_http_answer_clears_account_rest_before_semantic_validation env);
+        test_case "actual answer clears undated quota before semantic validation" `Quick
+          (test_http_answer_clears_undated_account_before_semantic_validation env);
         test_case "typed quota port respects actual generation dispatch receipts" `Quick
           (test_typed_quota_uses_actual_generation_dispatch_receipt env) ] ]

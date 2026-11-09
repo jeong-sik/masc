@@ -59,8 +59,7 @@ val observe :
     [Rate_limited] notes a rate limit on its runtime with the provider's
     Retry-After when one was sent, and every candidate that returned a
     response -- accepted or semantically rejected -- clears candidate evidence
-    and the quota rest, a stated reset included, for the frozen runtime
-    observation captured in [resolved].
+    and undated quota for the frozen runtime observation captured in [resolved].
     A payment refusal or dispatched typed hard-quota failure records quota on
     that frozen scope. A failure before generation dispatch contributes no
     provider observation. No live ID lookup occurs at completion. *)

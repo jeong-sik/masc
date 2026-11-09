@@ -16,9 +16,12 @@ and the date, time and number each claim carries (`synth_spec.py`). The
 candidates of the whole split are planned before any call, with their marks
 and lengths dealt out per label kind (`synth_candidate_plan.py`). A planted
 stale fact is written in the same call as the durable facts of its category.
+DUPLICATE_PAIR_SHARE of the memories get a planted duplicate, dealt over the
+split: after the other facts, the model restates one durable fact of the
+planned category with the duplicate's own marks, near the length of that fact.
 The model writes only text: role material, a world sheet, category names, a
-goal, and claims; a claim whose marks differ from its plan, or a candidate
-whose length leaves its band, is not kept. Every model call is cached in
+goal, and claims; a claim whose marks differ from its plan, or a candidate or
+duplicate whose length leaves its band, is not kept. Every model call is cached in
 <out>/calls.jsonl under a key derived from the request, so a rerun resumes and
 pays only for calls that have no answer yet. Output: <out>/requests.jsonl (one
 request with its label per line) and <out>/summary.json.
@@ -60,8 +63,8 @@ FACTS_PER_CALL = 6
 LENGTH_ASK = 1.7
 # Share of a call's durable slots whose claims must come back with their marks.
 DURABLE_KEEP_SHARE = 0.7
-EFFORT = {"profile": "medium", "facts": "low", "candidate": "medium"}
-MAX_TOKENS = {"profile": 8192, "facts": 16384, "candidate": 4096}
+EFFORT = {"profile": "medium", "facts": "low", "duplicate": "medium", "candidate": "medium"}
+MAX_TOKENS = {"profile": 8192, "facts": 16384, "duplicate": 4096, "candidate": 4096}
 # Measured role material: p10 716, p50 1,144, p90 2,684 chars.
 ROLE_CHARS = ((0.0, 500.0), (0.1, 716.0), (0.5, 1144.0), (0.9, 2684.0), (1.0, 3400.0))
 EXISTING_HEAD = 90
@@ -116,16 +119,28 @@ class FactSlot:
 
 
 @dataclass(frozen=True, slots=True)
+class DuplicateSlot:
+    """A planted duplicate: the category of the durable fact it restates, the time it was seen and
+    the date, time and number its text carries."""
+
+    category: str
+    seen: dt.datetime
+    surface: S.Surface
+
+
+@dataclass(frozen=True, slots=True)
 class MemoryPlan:
     memory_key: str
     keeper: S.KeeperProfile
     slots: tuple[FactSlot, ...]  # grouped by category, in writing order
+    duplicate: DuplicateSlot | None
     seed: int
 
 
-def plan_memory(rng: random.Random, keeper: S.KeeperProfile, index: int) -> MemoryPlan:
+def plan_memory(rng: random.Random, keeper: S.KeeperProfile, index: int, duplicate: bool) -> MemoryPlan:
     """A planted stale fact lands in a category in proportion to its size, at a random place among
-    the durable facts there, and draws its length, time and surface as a durable fact does."""
+    the durable facts there, and draws its length, time and surface as a durable fact does. A
+    planted duplicate picks its category the same way and draws its own time and surface."""
     n_facts = round(S.sample_quantile(rng, S.FACTS_PER_MEMORY))
     n_cats = min(len(keeper.categories), round(S.sample_quantile(rng, S.CATEGORIES_PER_MEMORY)))
     names = rng.sample(keeper.categories, n_cats)
@@ -142,7 +157,11 @@ def plan_memory(rng: random.Random, keeper: S.KeeperProfile, index: int) -> Memo
             seen = between(rng, start, end)
             length = int(round(S.sample_quantile(rng, S.CLAIM_CHARS), -1))
             slots.append(FactSlot(name, length, stale, seen, S.plan_surface(rng, S.FACT_SURFACE, seen)))
-    return MemoryPlan(f"{keeper.key}-{index:02d}", keeper, tuple(slots), rng.randrange(2**31))
+    pair: DuplicateSlot | None = None
+    if duplicate:
+        category, seen = rng.choices(names, weights=counts)[0], between(rng, start, end)
+        pair = DuplicateSlot(category, seen, S.plan_surface(rng, S.FACT_SURFACE, seen))
+    return MemoryPlan(f"{keeper.key}-{index:02d}", keeper, tuple(slots), pair, rng.randrange(2**31))
 
 
 def iso(t: dt.datetime) -> str:
@@ -185,26 +204,83 @@ def claims_for(caller: Caller, plan: MemoryPlan, category: str, slots: tuple[Fac
     return None
 
 
+@dataclass(frozen=True, slots=True)
+class Written:
+    """A written fact before it gets its memory ID. `restates` is the claim a planted duplicate restates."""
+
+    seen: dt.datetime
+    category: str
+    stale: bool
+    claim: str
+    restates: str | None
+
+
+def facts_of(rng: random.Random, written: list[Written]) -> tuple[S.MemoryFact, ...]:
+    """The memory in the order its facts were seen, as m1, m2, …; a duplicate names its fact's ID."""
+    timed = sorted(written, key=lambda w: w.seen)
+    ids = {w.claim: f"m{i + 1}" for i, w in enumerate(timed)}
+    return tuple(
+        S.MemoryFact(ids[w.claim], w.claim, w.category,
+                     S.board_ref(rng) if rng.random() < S.BOARD_BASIS_SHARE else None, iso(w.seen), w.stale,
+                     ids[w.restates] if w.restates is not None else None)
+        for w in timed)
+
+
+def duplicate_for(caller: Caller, rng: random.Random, plan: MemoryPlan, slot: DuplicateSlot,
+                  written: list[Written]) -> Written | None:
+    """A restatement of one durable fact of the slot's category. It counts only when it carries the
+    slot's marks and stays within the candidate length band of that fact. None when the category
+    holds no durable fact or no attempt fits."""
+    originals = [w.claim for w in written if w.category == slot.category and not w.stale]
+    if not originals:
+        return None
+    original = rng.choice(originals)
+    texts = {w.claim.strip() for w in written}
+    prompt = P.DUPLICATE_PROMPT.format(role=plan.keeper.role_material, world=plan.keeper.world,
+                                       category=slot.category, target=original, length=len(original),
+                                       surface="표기: " + P.surface_line(slot.surface), marks=P.MARKS,
+                                       style=P.STYLE)
+    for attempt in range(CANDIDATE_ATTEMPTS):
+        answer = ask(caller, "duplicate", prompt, attempt)
+        if answer is None:
+            return None
+        claim = S.parse_single_claim(answer) if answer else None
+        if (claim is not None and claim.strip() not in texts and S.surface_holds(claim, slot.surface)
+                and C.length_holds(claim, len(original))):
+            return Written(slot.seen, slot.category, False, claim, original)
+    return None
+
+
 def build_memory(caller: Caller, plan: MemoryPlan) -> tuple[S.MemoryFact, ...] | None:
     rng = random.Random(plan.seed)
-    written: list[tuple[FactSlot, str]] = []
+    written: list[Written] = []
     for category, group in itertools.groupby(plan.slots, key=lambda slot: slot.category):
         slots = tuple(group)
         for start in range(0, len(slots), FACTS_PER_CALL):
-            got = claims_for(caller, plan, category, slots[start:start + FACTS_PER_CALL], [c for _, c in written])
+            got = claims_for(caller, plan, category, slots[start:start + FACTS_PER_CALL], [w.claim for w in written])
             if got is None:
                 return None
-            written.extend(got)
-    timed = sorted(written, key=lambda pair: pair[0].seen)
-    return tuple(
-        S.MemoryFact(f"m{i + 1}", claim, slot.category,
-                     S.board_ref(rng) if rng.random() < S.BOARD_BASIS_SHARE else None, iso(slot.seen), slot.stale)
-        for i, (slot, claim) in enumerate(timed))
+            written.extend(Written(slot.seen, slot.category, slot.stale, claim, None) for slot, claim in got)
+    if plan.duplicate is not None:
+        restated = duplicate_for(caller, rng, plan, plan.duplicate, written)
+        if restated is None:
+            return None
+        written.append(restated)
+    return facts_of(rng, written)
+
+
+def target_choices(facts: tuple[S.MemoryFact, ...]) -> list[S.MemoryFact]:
+    """The facts a candidate may correct, complement or restate: durable facts outside a planted
+    pair, so that a candidate never targets a fact the label also expects to merge."""
+    paired = {f.memory_id for f in facts if f.duplicate_of is not None} | {
+        f.duplicate_of for f in facts if f.duplicate_of is not None}
+    return [f for f in facts if not f.planted_stale and f.memory_id not in paired]
 
 
 def build_candidates(caller: Caller, rng: random.Random, keeper: S.KeeperProfile, facts: tuple[S.MemoryFact, ...],
                      plans: tuple[C.CandidatePlan, ...]) -> tuple[S.Candidate, ...] | None:
     durable = [f for f in facts if not f.planted_stale]
+    targets = target_choices(facts)
     categories = sorted({f.category for f in facts}, key=lambda s: s.encode())
     used: set[str] = set()
     out: list[S.Candidate] = []
@@ -215,15 +291,14 @@ def build_candidates(caller: Caller, rng: random.Random, keeper: S.KeeperProfile
         surface = C.candidate_surface(rng, plan, clock)
         target: S.MemoryFact | None = None
         match plan.kind:
-            case S.CandidateKind.CORRECTION | S.CandidateKind.PARAPHRASE:
-                choices = [f for f in durable if f.memory_id not in used]
+            case S.CandidateKind.CORRECTION | S.CandidateKind.COMPLEMENT | S.CandidateKind.PARAPHRASE:
+                choices = [f for f in targets if f.memory_id not in used]
                 if not choices:
                     return None
                 target = C.target_near(rng, choices, plan.length)
                 used.add(target.memory_id)
                 category = target.category
-                task = (P.TASK_CORRECTION if plan.kind is S.CandidateKind.CORRECTION else P.TASK_PARAPHRASE).format(
-                    target=target.claim)
+                task = P.targeted_task(plan.kind, target.claim)
             case S.CandidateKind.NEW_DURABLE:
                 category = rng.choice(categories)
                 same = [f.claim for f in durable if f.category == category]
@@ -280,7 +355,8 @@ def request_json(request: S.SynthRequest) -> str:
     del body["goal"]
     body["goal_context"] = S.goal_json(request.goal)
     return json.dumps({"request": body, "label": {
-        "candidates": [asdict(c) for c in label.candidates], "planted_stale": sorted(label.planted_stale)}},
+        "candidates": [asdict(c) for c in label.candidates], "planted_stale": sorted(label.planted_stale),
+        "duplicates": [list(pair) for pair in label.duplicates]}},
         ensure_ascii=False, default=enum_value)
 
 
@@ -313,7 +389,9 @@ def main() -> int:
         profiles = list(pool.map(profile_task, zip(keepers_seeds, profile_rngs, strict=True)))
         keepers = [p for p in profiles if p is not None]
         status["profiles_failed"] = len(profiles) - len(keepers)
-        plans = [plan_memory(rng, keeper, i) for keeper in keepers for i in range(memories_per_keeper)]
+        homes = [(keeper, i) for keeper in keepers for i in range(memories_per_keeper)]
+        paired = C.flags(rng, len(homes), S.DUPLICATE_PAIR_SHARE)
+        plans = [plan_memory(rng, keeper, i, pair) for (keeper, i), pair in zip(homes, paired, strict=True)]
         memories = list(pool.map(memory_task, plans))
         built = [(plan, facts) for plan, facts in zip(plans, memories, strict=True) if facts is not None]
         status["memories_failed"] = len(plans) - len(built)
@@ -340,8 +418,13 @@ def main() -> int:
     with (out / "requests.jsonl").open("w", encoding="utf-8") as fh:
         for request in sorted(done, key=lambda r: r.item_id):
             fh.write(request_json(request) + "\n")
+    kinds = Counter(c.kind.value for r in done for c in r.candidates)
     summary = {"split": split, "seed": seed, "model": MODEL, "requests": len(done),
                "memories": len({r.item_id.rsplit("-", 1)[0] for r in done}), **status,
+               "candidates_by_kind": dict(sorted(kinds.items())),
+               "memories_with_duplicate": sum(any(f.duplicate_of is not None for f in facts) for _, facts in built),
+               "requests_without_support": sum(
+                   not any(S.can_support(c.outcome) for c in S.label_of(r).candidates) for r in done),
                "spent_usd": round(caller.spent, 4), "budget_usd": budget, "stopped": caller.stopped}
     (out / "summary.json").write_text(json.dumps(summary, indent=2) + "\n")
     print("SUMMARY", json.dumps(summary))

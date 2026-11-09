@@ -410,12 +410,16 @@ def build_report(
         for source in sources:
             if not source.available:
                 continue
+            # An observed call beats a coverage declaration: if a source wrote
+            # rows for this tool, the tool was called no matter what the family
+            # declaration says. The declaration only decides whether a zero is
+            # evidence of absence.
+            count = source.counts.get(key, 0)
+            if count:
+                row.calls[source.name] = count
             declared = coverage.get(source.name, {}).get(family, "unknown")
             if declared == "recorded":
                 recording_sources += 1
-                count = source.counts.get(key, 0)
-                if count:
-                    row.calls[source.name] = count
             elif declared == "not_recorded":
                 silent_families.append(f"{source.name} does not record {family} (#38824)")
             else:

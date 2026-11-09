@@ -6077,13 +6077,22 @@ let lane_run_clock started_at =
   Printf.sprintf "%02d-%02d %02d:%02d:%02d" (tm.Unix.tm_mon + 1) tm.Unix.tm_mday
     tm.Unix.tm_hour tm.Unix.tm_min tm.Unix.tm_sec
 
-let detail_section_heading ?(first = false) title =
-  let heading = [ Theme.info () ^ Ansi.bold, "  [ " ^ title ^ " ]" ] in
+let detail_heading_rows ~first lines =
+  let heading =
+    List.map (fun line -> Theme.info () ^ Ansi.bold, "  " ^ line) lines
+  in
   if first then heading else (Ansi.dim, "") :: heading
+
+let detail_section_heading ?(first = false) title =
+  detail_heading_rows ~first [ "[ " ^ title ^ " ]" ]
 
 (* A detail page of headed blocks of [Page_line] lines. One label column
    serves every block, so the values of the whole page start at one cell and
-   not at a different cell under each heading. *)
+   not at a different cell under each heading.
+
+   A heading wraps like every other line of the page. Drawn as one row it is
+   cut at the pane's edge, and the English half of a long title is what the
+   cut takes: at 80 columns the configuration status page lost "Applied Keys)". *)
 let detail_page ~width blocks =
   let label_cells =
     Masc_tui_page_reading.widest_label_cells (List.concat_map snd blocks)
@@ -6094,7 +6103,8 @@ let detail_page ~width blocks =
   List.concat
     (List.mapi
        (fun index (title, lines) ->
-          detail_section_heading ~first:(index = 0) title
+          detail_heading_rows ~first:(index = 0)
+            (Message_layout.wrap_words ~max_cells ("[ " ^ title ^ " ]"))
           @ Masc_tui_page_reading.rows ~label_cells ~max_cells lines)
        blocks)
 

@@ -28,7 +28,7 @@
     pattern. So this does not classify.
 
     What it does hold is the vocabulary: the set of prefixes is closed. A new
-    tool arrives under [keeper_] or [masc_] — or under one of the four
+    tool arrives under [keeper_] or [masc_] — or under one of the five
     capitalised builtins and the [tool_] runtime handlers, which are named
     for other reasons documented below — and a fifth spelling has to be a
     decision someone makes here rather than a file someone adds. *)
@@ -130,6 +130,20 @@ let test_the_judge_allowance_still_names_a_tool () =
     (List.filter (fun n -> not (List.mem n names)) judge_lane_tools)
 ;;
 
+(* Every bare builtin is a pair, not a word. #50498: [Execute.toml] never
+   existed, so the audit registry read no [Execute] while the ledger
+   recorded it -- and the vocabulary test above stayed green, because it
+   only reads files that exist. A missing file is invisible to a rule
+   about present ones, so the pair's completeness is pinned here. *)
+let test_every_bare_builtin_names_a_tool () =
+  let names = tool_names () in
+  check
+    (list string)
+    "every bare builtin has a same-named TOML"
+    []
+    (List.filter (fun n -> not (List.mem n names)) bare_builtins)
+;;
+
 (* The guard has to fail on the thing it claims to catch. Without this a
    widened [allowed_prefixes], or a [classify] that answered [Some] for
    everything, would leave the test above passing on an empty promise. *)
@@ -192,6 +206,10 @@ let () =
             "the judge-lane allowance still names a tool"
             `Quick
             test_the_judge_allowance_still_names_a_tool
+        ; test_case
+            "every bare builtin has a same-named TOML"
+            `Quick
+            test_every_bare_builtin_names_a_tool
         ; test_case
             "the declared name matches the file"
             `Quick

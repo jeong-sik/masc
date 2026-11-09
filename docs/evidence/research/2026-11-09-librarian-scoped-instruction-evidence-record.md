@@ -47,6 +47,14 @@
 - 신뢰도: `High`
 - 제한조건: 스킬 2개와 라이브 지시문 9개는 같은 커밋 밖에서 바뀌었다.
 
+- 항목: [근거] 프롬프트는 서버마다 배포 기본값과 운영자 변경으로 정해진다. 라우팅 문서는 턴에 들어가는 경로가 없다.
+- 출처: `lib/managed_asset_sync.mli`(prompts·tools·mcp 동기화, `prompt_overrides.json`, Keeper manifest 는 동기화하지 않음),
+  `lib`·`bin` 의 `pr-review-routing` 검색 0건,
+  리뷰어 7명의 `raw-traces/turn-*.jsonl`(Keeper 당 200~202개, 가장 이른 파일 2026-11-06T14:57Z) 글 검색: 파일 이름이 나온 턴 19개, 그중 #50261·#50271·#50384 가 같이 나온 턴 14개, 나머지 5개는 diff·파일 목록·인용
+- 확인일시: `2026-11-09T14:45:00+09:00`
+- 신뢰도: `High` 동기화 동작과 코드 검색. `Medium` raw trace 집계(글 검색이고, 남은 턴만 셌다).
+- 제한조건: 14개 턴이 그 PR 을 리뷰한 턴인지는 번호가 같이 나온 것으로만 판단했다.
+
 - 항목: [근거] 기억 행에는 적용 범위 칸이 없고, Librarian 이 만든 행의 `origin.trace_id` 는 비어 있다.
   그 이유로 든 주석은 journal 이 정확한 trace 를 가진다고 하지만, 라이브 Keeper 35명의 Librarian journal 항목 51,836개는 Keeper 마다 trace 값이 하나뿐이다.
 - 출처: `lib/keeper/keeper_memory_os_types.mli:335`, `lib/keeper/keeper_librarian.ml:560-569`,

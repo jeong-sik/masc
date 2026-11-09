@@ -9,7 +9,7 @@ let verdict ?work ?build keeper_name kind outcome =
 ;;
 
 let report ?(executed = false) ?(image_given = true) ?(foreign = []) keepers =
-  { Answer.executed; image_given; foreign_volumes = foreign; keepers }
+  { Answer.executed; image_given; foreign_volumes = foreign; keepers; unlisted_keepers = [] }
 ;;
 
 let text_of report = Yojson.Safe.to_string (Answer.to_json report)
@@ -43,16 +43,30 @@ let sent label expected t =
   | Gc.Still_running, Some _ -> Alcotest.failf "%s: a press sent nothing" label
 ;;
 
-let test_the_call_asks_with_the_base_image () =
-  let image = List.assoc "image" (Gc.arguments ~execute:false) in
-  Alcotest.(check string) "the claims image is the catalog's base"
-    "base" (match image with `String name -> name | _ -> "not a string");
+(* The second press sends the names the report showed, so the server cannot
+   reclaim a Keeper the operator did not see. *)
+let test_the_call_asks_with_the_base_image_and_names_what_it_reclaims () =
+  let report = Gc.arguments Gc.Report_request in
+  let reclaim = Gc.arguments (Gc.Reclaim_request [ "retired" ]) in
   List.iter
-    (fun execute ->
-       match List.assoc "execute" (Gc.arguments ~execute) with
-       | `Bool sent -> Alcotest.(check bool) "execute is sent as asked" execute sent
-       | _ -> Alcotest.fail "execute is a boolean")
-    [ false; true ]
+    (fun arguments ->
+       Alcotest.(check string) "the claims image is the catalog's base"
+         "base" (match List.assoc "image" arguments with `String name -> name | _ -> "not a string"))
+    [ report; reclaim ];
+  let execute arguments =
+    match List.assoc "execute" arguments with
+    | `Bool sent -> sent
+    | _ -> Alcotest.fail "execute is a boolean"
+  in
+  Alcotest.(check bool) "a report does not execute" false (execute report);
+  Alcotest.(check bool) "a reclaim executes" true (execute reclaim);
+  Alcotest.(check bool) "a report names no keeper" false (List.mem_assoc "keepers" report);
+  Alcotest.(check (list string)) "a reclaim names the keepers it carries"
+    [ "retired" ]
+    (match List.assoc "keepers" reclaim with
+     | `List names ->
+       List.map (function `String name -> name | _ -> Alcotest.fail "a keeper name is a string") names
+     | _ -> Alcotest.fail "keepers is a list")
 ;;
 
 let test_only_an_armed_press_reclaims () =
@@ -119,8 +133,8 @@ let () =
   Alcotest.run
     "tui_volume_gc"
     [ ( "volume gc"
-      , [ Alcotest.test_case "the call asks with the base image" `Quick
-            test_the_call_asks_with_the_base_image
+      , [ Alcotest.test_case "the call asks with the base image and names what it reclaims" `Quick
+            test_the_call_asks_with_the_base_image_and_names_what_it_reclaims
         ; Alcotest.test_case "only an armed press reclaims" `Quick
             test_only_an_armed_press_reclaims
         ; Alcotest.test_case "only a report with candidates arms" `Quick

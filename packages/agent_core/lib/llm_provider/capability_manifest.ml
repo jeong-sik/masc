@@ -83,7 +83,6 @@ type entry =
 (** A parsed capability manifest. *)
 type t = entry list
 
-let empty = []
 let entries (manifest : t) = manifest
 
 (* Local result-syntax bindings so this file can use [let*] / [let+]

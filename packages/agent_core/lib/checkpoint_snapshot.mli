@@ -17,8 +17,6 @@ val create : stage:stage -> Checkpoint.t -> (t, error) result
     change this fact. *)
 val stage : t -> stage
 val agent_name : t -> string
-val turn : t -> int
-val timestamp : t -> float
 val checkpoint : t -> (Checkpoint.t, error) result
 (** Decode a fresh checkpoint/context for each reader. *)
 val equal : t -> t -> bool

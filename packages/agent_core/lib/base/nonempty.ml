@@ -9,5 +9,3 @@ let of_list = function
 ;;
 
 let to_list t = t.hd :: t.tl
-let hd t = t.hd
-let length t = 1 + List.length t.tl

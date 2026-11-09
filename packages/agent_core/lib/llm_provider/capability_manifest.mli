@@ -119,13 +119,10 @@ type entry =
         and blank, padded, or duplicate ids. *)
   }
 
-(** A validated immutable capability manifest. Only the strict parser and
-    {!empty} construct this value; raw entry lists cannot bypass admission.
+(** A validated immutable capability manifest. Only the strict parser
+    constructs this value; raw entry lists cannot bypass admission.
     Declaration order is retained for distinct model IDs; it does not affect lookup. *)
 type t
-
-val empty : t
-(** Explicit declaration of no manifest overrides. *)
 
 val entries : t -> entry list
 (** Read-only declaration-order view. Changing this list or a copied entry

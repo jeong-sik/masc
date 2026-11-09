@@ -24,13 +24,11 @@ type t =
   ; json : Yojson.Safe.t
   ; agent_name : string
   ; turn : int
-  ; timestamp : float
   }
 
 let freeze stage json =
   let+ checkpoint = Checkpoint.of_json json |> Result.map_error (fun e -> Invalid_checkpoint e) in
-  {stage;json;agent_name=checkpoint.agent_name;turn=checkpoint.turn_count;
-   timestamp=checkpoint.created_at}
+  {stage;json;agent_name=checkpoint.agent_name;turn=checkpoint.turn_count}
 
 let create ~stage checkpoint =
   let* json=Checkpoint.to_json_result checkpoint |> Result.map_error (fun e -> Invalid_checkpoint e) in
@@ -38,8 +36,6 @@ let create ~stage checkpoint =
 
 let stage value = value.stage
 let agent_name value = value.agent_name
-let turn value = value.turn
-let timestamp value = value.timestamp
 let checkpoint value = Checkpoint.of_json value.json |> Result.map_error (fun e -> Invalid_checkpoint e)
 let equal left right = left.stage=right.stage && Yojson.Safe.equal left.json right.json
 let pp ppf value = Format.fprintf ppf "checkpoint(%s, agent=%S, turn=%d)"

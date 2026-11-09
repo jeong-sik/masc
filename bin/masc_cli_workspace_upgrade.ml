@@ -39,7 +39,7 @@ let inspect base_path =
           | Upgrade_available plan -> "upgrade_available", Upgrade.plan_to_json plan) in
       `Assoc ["keeper_name", `String (Filename.remove_extension name);
               "status", `String status; "plan", plan]) in
-  let* backups = names (Filename.concat (root base_path) "upgrades") in
+  let* backups = names (Filename.concat (root base_path) Common.upgrades_dirname) in
   let backups = List.filter_map (fun backup_id ->
     match Upgrade.load_recovery ~base_path ~backup_id with
     | Error _ -> None

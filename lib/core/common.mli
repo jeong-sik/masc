@@ -37,6 +37,12 @@ val msx_dirname : string
 (** The MSX machine's directory under [.masc]: its BIOS and cartridges.
     Value is ["msx"]. *)
 
+val upgrades_dirname : string
+(** The directory under [.masc] that holds offline upgrade evidence: one
+    directory per configuration backup, and the [journals], [journal-inputs]
+    and [journal-installs] trees of keeper journal recovery. Value is
+    ["upgrades"]. *)
+
 val masc_dir_from_base_path : base_path:string -> string
 (** [masc_dir_from_base_path ~base_path] is
     [Filename.concat base_path masc_dirname]. Canonical way to spell

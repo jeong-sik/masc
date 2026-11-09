@@ -54,8 +54,14 @@ let error_message {bundle_id;failure} =
   match bundle_id with None -> detail | Some id -> detail ^ " Retain bundle " ^ id ^ " for inspection."
 
 let root base_path = Filename.concat base_path Common.masc_dirname
-let bundles base_path = Filename.concat (Filename.concat (root base_path) "upgrades") "journals"
+let upgrades base_path = Filename.concat (root base_path) Common.upgrades_dirname
+let bundles base_path = Filename.concat (upgrades base_path) "journals"
 let bundle_path base_path id = Filename.concat (bundles base_path) id
+let manifest_basename = "manifest.json"
+type bundle_part = Original_journal | Prepared_journal | Bundle_manifest
+let bundle_part_name = function Original_journal -> "original.sqlite3"
+  | Prepared_journal -> "prepared.sqlite3" | Bundle_manifest -> manifest_basename
+let bundle_part_path directory part = Filename.concat directory (bundle_part_name part)
 let source_path base_path keeper_name = Store.path_for_keeper
   ~keepers_runtime_dir:(Common.keepers_runtime_dir_of_base ~base_path) ~keeper_name
 let source_sha256 (plan : plan) = plan.source_hash
@@ -170,8 +176,8 @@ let prepare_using ~before_publication
         Unix.mkdir directory 0o700;
         active_bundle := Some id;
         sync_directory (bundles base_path);
-        let original_path = Filename.concat directory "original.sqlite3" in
-        let prepared_path = Filename.concat directory "prepared.sqlite3" in
+        let original_path = bundle_part_path directory Original_journal in
+        let prepared_path = bundle_part_path directory Prepared_journal in
         let* () = write original_path original.content |> written original_path in
         let fd = Unix.openfile prepared_path [Unix.O_WRONLY;Unix.O_CREAT;Unix.O_EXCL;Unix.O_CLOEXEC] 0o600 in
         Unix.close fd;
@@ -188,7 +194,7 @@ let prepare_using ~before_publication
           prepared_hash=digest prepared.content;copied} in
         before_publication ();
         let* _ = current_source plan in
-        let manifest_path = Filename.concat directory "manifest.json" in
+        let manifest_path = bundle_part_path directory Bundle_manifest in
         match write_manifest manifest_path (Yojson.Safe.to_string (receipt_to_json receipt)) with
         | Ok () -> Ok (Published receipt)
         | Error {Fs_compat.stage=After_rename;_} -> Ok (Publication_unconfirmed receipt)
@@ -204,9 +210,9 @@ let load_recovery ~base_path ~bundle_id:id = blocking (fun () -> boundary base_p
   if not (valid_id id) then error Invalid_bundle else
   let* base_path = workspace base_path in
   let directory = bundle_path base_path id in
-  let original_path = Filename.concat directory "original.sqlite3" in
-  let prepared_path = Filename.concat directory "prepared.sqlite3" in
-  let manifest_path = Filename.concat directory "manifest.json" in
+  let original_path = bundle_part_path directory Original_journal in
+  let prepared_path = bundle_part_path directory Prepared_journal in
+  let manifest_path = bundle_part_path directory Bundle_manifest in
   let* original = read_private ~base_path original_path in
   let* prepared = read_private ~base_path prepared_path in
   let* manifest = read_private ~base_path manifest_path in
@@ -258,8 +264,10 @@ type input_adoption =
   ; ia_records : Store.Offline.input_adoption_copy }
 type input_publication = Input_adopted of input_adoption | Input_adoption_unconfirmed of input_adoption
 
-let input_directories base_path = Filename.concat (Filename.concat (root base_path) "upgrades") "journal-inputs"
+let input_directories base_path = Filename.concat (upgrades base_path) "journal-inputs"
 let input_checkpoint_basename = "checkpoint.json"
+let input_metadata_basename = "metadata.json"
+let input_derivative_basename = "adopted.sqlite3"
 let input_directory base_path id = Filename.concat (input_directories base_path) id
 let session_root base_path = Keeper_fs.session_store_path_for_runtime_root (root base_path)
 let session_dir base_path trace_id = Filename.concat (session_root base_path) (Keeper_id.Trace_id.to_string trace_id)
@@ -333,13 +341,10 @@ let rec unchanged_files ~base_path = function
 let refresh_retained_witness ~path ~retained files =
   List.map (fun (captured,file) ->
     if captured=path then captured,retained else captured,file) files
-type bundle_part = Original_journal | Prepared_journal | Bundle_manifest
-let bundle_part_name = function Original_journal -> "original.sqlite3"
-  | Prepared_journal -> "prepared.sqlite3" | Bundle_manifest -> "manifest.json"
 let capture_bundle_files (receipt : receipt) =
   let rec capture acc = function
     | [] -> Ok (List.rev acc)
-    | part::rest -> let path = Filename.concat (bundle_path receipt.base_path receipt.id) (bundle_part_name part) in
+    | part::rest -> let path = bundle_part_path (bundle_path receipt.base_path receipt.id) part in
       let* file = read_private ~base_path:receipt.base_path path in
       let* () = match part with
         | Original_journal -> if digest file.content=receipt.source_hash then Ok () else error Invalid_bundle
@@ -352,7 +357,7 @@ let capture_bundle_files (receipt : receipt) =
 let continuation_evidence (bundle : receipt) snapshot =
   let reference = Checkpoint.exact_snapshot_reference snapshot in
   let selected = Checkpoint.exact_snapshot_checkpoint snapshot in
-  let path = Filename.concat (bundle_path bundle.base_path bundle.id) "prepared.sqlite3" in
+  let path = bundle_part_path (bundle_path bundle.base_path bundle.id) Prepared_journal in
   let* observed = Store.inspect_outstanding ~path
     |> Result.map_error (fun cause -> {bundle_id=None;failure=Store_failed cause}) in
   let* executions = match observed with
@@ -419,8 +424,8 @@ let assess_input ~base_path ~bundle_id ~trace_id = blocking (fun () -> boundary 
 
 let check_input_plan plan =
   let* _ = current_source plan.ip_original in
-  let* () = no_companions (Filename.concat (bundle_path plan.ip_bundle.base_path plan.ip_bundle.id) "original.sqlite3") in
-  let* () = no_companions (Filename.concat (bundle_path plan.ip_bundle.base_path plan.ip_bundle.id) "prepared.sqlite3") in
+  let* () = no_companions (bundle_part_path (bundle_path plan.ip_bundle.base_path plan.ip_bundle.id) Original_journal) in
+  let* () = no_companions (bundle_part_path (bundle_path plan.ip_bundle.base_path plan.ip_bundle.id) Prepared_journal) in
   unchanged_files ~base_path:plan.ip_bundle.base_path (plan.ip_metadata::plan.ip_canonical::plan.ip_related)
 
 let confirm_input_retention outcome =
@@ -457,7 +462,7 @@ let adopt_input_using ~before_publication
            assessed witnesses for the final freshness check. *)
         let plan = {plan with ip_related=refresh_retained_witness
           ~path:(retained_path base_path reference) ~retained plan.ip_related} in
-        let metadata_path = Filename.concat directory "metadata.json" in
+        let metadata_path = Filename.concat directory input_metadata_basename in
         let checkpoint_path = Filename.concat directory input_checkpoint_basename in
         let* () = write metadata_path (snd plan.ip_metadata).content |> written metadata_path in
         let* () = write checkpoint_path (snd plan.ip_canonical).content |> written checkpoint_path in
@@ -465,10 +470,10 @@ let adopt_input_using ~before_publication
         let* checkpoint = read_private ~base_path checkpoint_path in
         let* () = if metadata.content=(snd plan.ip_metadata).content
             && checkpoint.content=(snd plan.ip_canonical).content then Ok () else error Invalid_bundle in
-        let destination = Filename.concat directory "adopted.sqlite3" in
+        let destination = Filename.concat directory input_derivative_basename in
         let fd = Unix.openfile destination [Unix.O_WRONLY;Unix.O_CREAT;Unix.O_EXCL;Unix.O_CLOEXEC] 0o600 in
         Unix.close fd;
-        let source = Filename.concat (bundle_path base_path plan.ip_bundle.id) "prepared.sqlite3" in
+        let source = bundle_part_path (bundle_path base_path plan.ip_bundle.id) Prepared_journal in
         let* adopted = with_database ~mode:`READONLY source (fun source ->
           with_database ~mode:`NO_CREATE destination (fun destination ->
             Store.Offline.prepare_input_adoption_copy ~source ~destination
@@ -484,7 +489,7 @@ let adopt_input_using ~before_publication
         let* () = unchanged_files ~base_path
           [retained_path base_path reference,retained;metadata_path,metadata;checkpoint_path,checkpoint;destination,derivative] in
         let* () = no_companions destination in
-        let manifest_path = Filename.concat directory "manifest.json" in
+        let manifest_path = Filename.concat directory manifest_basename in
         match write_manifest manifest_path (Yojson.Safe.to_string (input_adoption_to_json receipt)) with
         | Ok () -> Ok (Input_adopted receipt)
         | Error {Fs_compat.stage=After_rename;_} -> Ok (Input_adoption_unconfirmed receipt)
@@ -505,7 +510,7 @@ let load_input_adoption ~base_path ~adoption_id:id = blocking (fun () -> boundar
   if not (valid_id id) then error Invalid_bundle else
   let* base_path = workspace base_path in
   let directory = input_directory base_path id in
-  let paths = List.map (Filename.concat directory) ["manifest.json";"metadata.json";input_checkpoint_basename;"adopted.sqlite3"] in
+  let paths = List.map (Filename.concat directory) [manifest_basename;input_metadata_basename;input_checkpoint_basename;input_derivative_basename] in
   let rec capture acc = function
     | [] -> Ok (List.rev acc)
     | path::rest -> let* file = read_private ~base_path path in capture ((path,file)::acc) rest in
@@ -525,7 +530,7 @@ let load_input_adoption ~base_path ~adoption_id:id = blocking (fun () -> boundar
     let reference = Checkpoint.exact_snapshot_reference snapshot in
     let* related = capture_bundle_files bundle in
     let* retained,_ = read_reference ~base_path ~path:(retained_path base_path reference) reference in
-    let source_path = Filename.concat (bundle_path base_path source_id) "prepared.sqlite3" in
+    let source_path = bundle_part_path (bundle_path base_path source_id) Prepared_journal in
     let* () = no_companions derivative_path in
     let* adopted = with_database ~mode:`READONLY source_path (fun source ->
       with_database ~mode:`READONLY derivative_path (fun destination ->
@@ -537,7 +542,7 @@ let load_input_adoption ~base_path ~adoption_id:id = blocking (fun () -> boundar
     let* () = if Yojson.Safe.equal json (input_adoption_to_json receipt) then Ok () else error Invalid_bundle in
     let* () = unchanged_files ~base_path ((retained_path base_path reference,retained)::files @ related) in
     let* () = no_companions source_path in
-    let* () = no_companions (Filename.concat (bundle_path base_path source_id) "original.sqlite3") in
+    let* () = no_companions (bundle_part_path (bundle_path base_path source_id) Original_journal) in
     let* () = no_companions derivative_path in
     Ok receipt
   | [] | [_] | [_;_] | [_;_;_] | _::_::_::_::_::_ -> error Invalid_bundle)
@@ -553,7 +558,7 @@ type replacement = Replaced of installation_record | Replacement_unconfirmed of 
 type installed_journal = Original_present | Adopted_present | Changed | Missing
 let installed_journal_to_string = function Original_present -> "original_present"
   | Adopted_present -> "adopted_present" | Changed -> "changed" | Missing -> "missing"
-let installation_directories base_path = Filename.concat (Filename.concat (root base_path) "upgrades") "journal-installs"
+let installation_directories base_path = Filename.concat (upgrades base_path) "journal-installs"
 let installation_directory base_path id = Filename.concat (installation_directories base_path) id
 let installation_id receipt = receipt.jr_id
 let installation_record_to_json receipt = `Assoc
@@ -570,21 +575,21 @@ let installation_plan_to_json plan = `Assoc
 let capture_adoption_files receipt =
   let base_path = receipt.ia_bundle.base_path in
   let directory = input_directory base_path receipt.ia_id in
-  let* metadata = read_private ~base_path (Filename.concat directory "metadata.json") in
+  let* metadata = read_private ~base_path (Filename.concat directory input_metadata_basename) in
   let* checkpoint = read_private ~base_path (Filename.concat directory input_checkpoint_basename) in
-  let* derivative = read_private ~base_path (Filename.concat directory "adopted.sqlite3") in
-  let* manifest = read_private ~base_path (Filename.concat directory "manifest.json") in
+  let* derivative = read_private ~base_path (Filename.concat directory input_derivative_basename) in
+  let* manifest = read_private ~base_path (Filename.concat directory manifest_basename) in
   let* json = decode_json manifest.content in
   if digest metadata.content<>receipt.ia_metadata_hash
       || not (names_reference ~base_path receipt.ia_reference checkpoint.content)
       || digest derivative.content<>receipt.ia_derivative_hash
       || not (Yojson.Safe.equal json (input_adoption_to_json receipt)) then error Invalid_bundle
   else Ok (derivative,List.map (fun (name,file) -> Filename.concat directory name,file)
-    ["metadata.json",metadata;input_checkpoint_basename,checkpoint;"adopted.sqlite3",derivative;"manifest.json",manifest])
+    [input_metadata_basename,metadata;input_checkpoint_basename,checkpoint;input_derivative_basename,derivative;manifest_basename,manifest])
 let check_installation_plan plan =
   let base_path = plan.ji_adoption.ia_bundle.base_path in
   let* () = check_input_plan plan.ji_input in
-  let* () = no_companions (Filename.concat (input_directory base_path plan.ji_adoption.ia_id) "adopted.sqlite3") in
+  let* () = no_companions (Filename.concat (input_directory base_path plan.ji_adoption.ia_id) input_derivative_basename) in
   unchanged_files ~base_path plan.ji_files
 let assess_installation ~base_path ~adoption_id = blocking (fun () -> boundary base_path (fun () ->
   let* adoption = load_input_adoption ~base_path ~adoption_id in
@@ -648,7 +653,7 @@ let install_using ~before_replacement
       let directory = installation_directory bundle.base_path id in
       Unix.mkdir directory 0o700; active_record := Some id; sync_directory (installation_directories bundle.base_path);
       let record = {jr_id=id;jr_adoption=plan.ji_adoption;jr_permissions=plan.ji_original.snapshot.permissions} in
-      let intent_path = Filename.concat directory "manifest.json" in
+      let intent_path = Filename.concat directory manifest_basename in
       let* () = match write_intent intent_path (Yojson.Safe.to_string (installation_record_to_json record)) with
         | Ok () -> Ok ()
         | Error ({Fs_compat.stage=After_rename;_} as cause) -> error (Installation_intent_unconfirmed cause)
@@ -670,7 +675,7 @@ let install ~run_dir ~expected_source_sha256 ~expected_adopted_sha256 plan =
 let load_installation ~base_path ~installation_id:id = blocking (fun () -> boundary base_path (fun () ->
   if not (valid_id id) then error Invalid_bundle else
   let* base_path = workspace base_path in
-  let path = Filename.concat (installation_directory base_path id) "manifest.json" in
+  let path = Filename.concat (installation_directory base_path id) manifest_basename in
   let* file = read_private ~base_path path in
   let* json = decode_json file.content in
   let* adoption_json = json_member "adoption" json in
@@ -735,14 +740,14 @@ let restore_installation_using ~before_replacement ~write_replacement ~run_dir r
       then Ok () else error Invalid_bundle in
     let* _derivative,input_files = live_input_evidence verified in
     let* source_files = capture_bundle_files bundle in
-    let original_path = Filename.concat (bundle_path bundle.base_path bundle.id) "original.sqlite3" in
+    let original_path = bundle_part_path (bundle_path bundle.base_path bundle.id) Original_journal in
     let* original = read_private ~base_path:bundle.base_path original_path in
     let* () = if digest original.content=bundle.source_hash then Ok () else error Invalid_bundle in
     let path = source_path bundle.base_path bundle.keeper_name in
     let* () = no_companions path in
     let* current = read ~base_path:bundle.base_path ~absent:Source_absent path in
     let* () = if digest current.content=record.jr_adoption.ia_derivative_hash then Ok () else error Source_changed in
-    let intent_path = Filename.concat (installation_directory bundle.base_path record.jr_id) "manifest.json" in
+    let intent_path = Filename.concat (installation_directory bundle.base_path record.jr_id) manifest_basename in
     let* intent = read_private ~base_path:bundle.base_path intent_path in
     let* intent_json = decode_json intent.content in
     let* () = if Yojson.Safe.equal intent_json (installation_record_to_json record) then Ok () else error Invalid_bundle in

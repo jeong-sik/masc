@@ -106,10 +106,11 @@ val fold_by_execution_ids :
   init:'a -> f:('a -> Yojson.Safe.t -> ('a, string) result) -> ('a, string) result
 (** Fold the same authoritative selection as {!by_execution_ids}, including
     ambiguous identities, without retaining full Tool bodies between callbacks.
-    Every selected row is still read and validated. The callback runs in the
-    blocking worker and may be replayed after a source/index failure: it must
-    only compute its accumulator, without Eio or external effects. A callback's
-    semantic error is returned without discarding or rebuilding the index. *)
+    Every selected row is still read and validated. Callbacks follow the index's
+    blocking policy, including its synchronous non-Eio fallback. They may be
+    replayed after a source/index failure or a rotated snapshot. Use an immutable,
+    restartable accumulator and only compute it, without Eio or external effects.
+    A callback's semantic error is returned without rebuilding the index. *)
 
 val addressed_rows :
   store:Dated_jsonl.t -> codebase:string -> ?keeper_name:string ->

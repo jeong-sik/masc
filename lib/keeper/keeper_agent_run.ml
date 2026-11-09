@@ -1246,11 +1246,12 @@ let run_turn
       (* [messages] is the current provider attempt's transmission view: the
          carried range [Keeper_turn_driver_try_provider.bounded_model_input_projection]
          composed, as the wire's reasoning projection leaves it.
-         The source projection appends only a bounded typed Gate replay
-         reference; exact replay bytes remain in the artifact store. The
-         provenance check below compares against the list as received, so its
-         projected-prefix precondition keeps holding. Durable state and
-         checkpoints receive the unwindowed history. *)
+         The closed source projection preserves retained messages and restores
+         typed Gate references in resolution order around surviving evidence.
+         Exact replay bytes remain in the artifact store. Since restoration
+         can insert before a surviving reference, measure the resulting view
+         by its typed carrier identity rather than assuming suffix-only edits.
+         Durable state and checkpoints receive the unwindowed history. *)
       match source_model_input_projection messages with
       | Error _ as error ->
         request_evidence_ref :=
@@ -1262,10 +1263,9 @@ let run_turn
           Option.is_some (Keeper_run_tools_hook_accumulator.extra_system_context_receipt acc)
         in
         let provider_content =
-          Keeper_agent_prompt_metrics.provider_content_messages
+          Keeper_agent_prompt_metrics.provider_content_of_transmitted
             ~prompt_context_present
-            ~projection_input:messages
-            ~projected_messages
+            ~messages:projected_messages
         in
         (* The failure is kept, not only logged. A warn line tells an operator
            reading logs; the record has to tell a reader of the metrics why

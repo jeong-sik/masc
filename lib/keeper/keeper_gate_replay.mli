@@ -136,6 +136,17 @@ val project_model_input :
     [keeper_artifact_read], so replay evidence cannot bypass provider-input
     windowing. *)
 
+val project_model_inputs :
+  base_path:string ->
+  model_evidence list ->
+  Agent_core.Types.message list ->
+  (Agent_core.Types.message list, Agent_core.Error.t) result
+(** Restore ordered evidence in a provider-only view. Intact surviving inputs
+    anchor missing predecessors immediately before them; missing successors
+    are appended after the retained view. Existing messages remain in place.
+    Duplicate or reversed surviving evidence is refused rather than silently
+    changing the causal order. Canonical history is never rewritten. *)
+
 val approved_resolution_message :
   approval_id:string ->
   tool_name:string ->

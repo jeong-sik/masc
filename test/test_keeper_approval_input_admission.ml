@@ -427,6 +427,35 @@ let batched_replay_admission () = with_directory (fun root ->
     (List.length projected);
   Alcotest.(check bool) "restored evidence belongs to the second approval" true
     (List.hd (List.rev projected) = second_message);
+  let without_first = List.filter (fun message ->
+    not (Admission.contains ~identity:first_identity ~message:first_message [ message ]))
+    restarted.messages in
+  let restored_first = Masc.Keeper_run_tools_hooks.project_model_input ~base_path:root
+    ~gate_replay_evidence:model.replay_evidence without_first |> unwrap in
+  let tagged_first, tagged_second = match initial.messages with
+    | [ _; first; second ] -> first, second
+    | _ -> Alcotest.fail "both canonical approval inputs must be admitted" in
+  Alcotest.(check bool) "missing first evidence is restored before the surviving second" true
+    (restored_first = [ original; first_message; tagged_second; later ]);
+  let content = Masc.Keeper_agent_prompt_metrics.provider_content_of_transmitted
+    ~prompt_context_present:false ~messages:restored_first |> unwrap in
+  Alcotest.(check bool) "input attribution retains ordered inserted evidence" true
+    (content = restored_first);
+  let unchanged = Masc.Keeper_run_tools_hooks.project_model_input ~base_path:root
+    ~gate_replay_evidence:model.replay_evidence restarted.messages |> unwrap in
+  Alcotest.(check bool) "intact evidence and newer messages remain unchanged" true
+    (unchanged = restarted.messages);
+  let restored_both = Masc.Keeper_run_tools_hooks.project_model_input ~base_path:root
+    ~gate_replay_evidence:model.replay_evidence [ original; later ] |> unwrap in
+  Alcotest.(check bool) "both missing inputs are appended in resolution order" true
+    (restored_both = [ original; later; first_message; second_message ]);
+  let rejected messages =
+    match Masc.Keeper_run_tools_hooks.project_model_input ~base_path:root
+      ~gate_replay_evidence:model.replay_evidence messages with
+    | Error _ -> ()
+    | Ok _ -> Alcotest.fail "corrupt surviving evidence order must be refused" in
+  rejected [ original; tagged_second; tagged_first; later ];
+  rejected [ original; tagged_first; tagged_first; tagged_second; later ];
   let disk = Masc.Keeper_checkpoint_store.load_agent_core
     ~session_dir ~session_id:initial.session_id |> unwrap in
   Alcotest.(check bool) "provider projection does not rewrite canonical history" true

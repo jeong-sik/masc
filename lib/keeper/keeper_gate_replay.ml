@@ -773,14 +773,49 @@ let append_model_evidence_block evidence blocks =
   @ [ Agent_core.Types.Text (canonical_replay_evidence_fragment evidence) ]
 ;;
 
-let project_model_input ~base_path:_ evidence messages =
-  match approval_input evidence with
-  | Error error -> Error (Agent_core.Error.Internal
-      (Keeper_approval_input_admission.error_to_string error))
-  | Ok (identity, message) ->
-    if Keeper_approval_input_admission.contains ~identity ~message messages
-    then Ok messages
-    else Ok (messages @ [message])
+let project_model_inputs ~base_path:_ evidence messages =
+  let module Approval_ids = Set.Make (String) in
+  let invalid detail = Error (Agent_core.Error.Internal detail) in
+  let rec prepare seen reversed = function
+    | [] -> Ok (List.rev reversed)
+    | evidence :: rest ->
+      if Approval_ids.mem evidence.approval_id seen
+      then invalid "duplicate approval in ordered Gate evidence"
+      else
+        match approval_input evidence with
+        | Error error -> invalid (Keeper_approval_input_admission.error_to_string error)
+        | Ok (identity, message) ->
+          prepare (Approval_ids.add evidence.approval_id seen)
+            ((evidence.approval_id, identity, message) :: reversed) rest
+  in
+  match prepare Approval_ids.empty [] evidence with
+  | Error _ as error -> error
+  | Ok inputs ->
+    let matches current (_, identity, message) =
+      Keeper_approval_input_admission.contains ~identity ~message [ current ] in
+    let rec before approval_id reversed = function
+      | [] -> invalid "duplicate or reversed surviving Gate evidence"
+      | (id, _, message) :: rest ->
+        if String.equal id approval_id then Ok (reversed, rest)
+        else before approval_id (message :: reversed) rest in
+    let rec restore remaining reversed = function
+      | [] ->
+        let suffix = List.map (fun (_, _, message) -> message) remaining in
+        Ok (List.rev_append reversed suffix)
+      | current :: rest ->
+        match List.find_opt (matches current) inputs with
+        | None -> restore remaining (current :: reversed) rest
+        | Some (approval_id, _, _) ->
+          (match before approval_id reversed remaining with
+           | Error _ as error -> error
+           | Ok (reversed, remaining) ->
+             restore remaining (current :: reversed) rest)
+    in
+    restore inputs [] messages
+;;
+
+let project_model_input ~base_path evidence messages =
+  project_model_inputs ~base_path [ evidence ] messages
 ;;
 
 let approved_resolution_message ~approval_id ~tool_name ~input ~user_message =

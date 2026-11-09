@@ -43,9 +43,11 @@ val prepare
 (** Compile ordinary nodes or exact frozen inline child Skill references,
     preflight every fixed argument/input, and durably store the original recipe,
     flattened plan, child provenance, owner, execution mode and contracts.
-    Inline leaves may also use the canonical owned-file Edit producer. Durable
-    async leaves carry a static read-only contract or the isolated owned-job
-    launch producer's durable Serial effect contract. Child definitions
+    Inline leaves may also use the canonical owned-file Edit producer, Execute,
+    and masc_board_post; each inline effect passes through the invoking
+    Keeper's own dispatch boundary (effect Gate approval, Board policy).
+    Durable async leaves carry a static read-only contract or the isolated
+    owned-job launch producer's durable Serial effect contract. Child definitions
     are inline; ordinary and nested drafts support both execution modes. Async
     runs persist original child activation authority before worker admission.
     Named nested publication remains a separate contract. *)

@@ -3,11 +3,11 @@ rfc: "exact-lane-walks-one-slot-list"
 title: "An exact lane walks one slot list in the order it is written"
 status: Draft
 created: 2026-09-28
-updated: 2026-09-28
+updated: 2026-11-10
 author: claude
 supersedes: []
 superseded_by: null
-related: ["cli-runtimes-as-lane-slots", "fusion-seat-routes", "every-lane-is-one-row-in-one-registry", "one-slot-fault-judgment-for-every-walk"]
+related: ["cli-runtimes-as-lane-slots", "fusion-seat-routes", "every-lane-is-one-row-in-one-registry", "one-slot-fault-judgment-for-every-walk", "exact-lane-waits-for-a-stated-reset"]
 ---
 
 # exact lane 은 슬롯 목록 하나를 적힌 순서대로 걷는다
@@ -180,6 +180,10 @@ scope 는 `Runtime.quota_scope_of_runtime`(`runtime.ml:2813`, 본문은 `quota_s
 
 LiteLLM 은 cooldown 중인 deployment 를 후보에서 잠시 뺀다. masc 는 빼지 않고 뒤로 보낸다. 시간이 지났다는 이유로 후보를 죽이지 않는다는 원칙(constitution `no_wall_clock_death`)을 따른다. 지금 두 규칙도 이미 이렇게 한다.
 
+> 2026-11-10 개정(RFC-exact-lane-waits-for-a-stated-reset): 4번과 이 문단은 masc 가 정한 쉼에만 맞는다.
+> provider 가 말한 시각(quota scope 의 리셋, 그 슬롯이 받은 Retry-After)이 있으면 그 시각 전에는 그 슬롯을 부르지 않는다.
+> 슬롯은 목록에 남고, 시각이 지나면 다시 부른다. 아무것도 죽이지 않으므로 `no_wall_clock_death` 와 부딪히지 않는다.
+
 **정렬한 뒤에 묶음을 나눈다.** 반대로 하면 뒤로 간 HTTP 슬롯이 CLI 슬롯을 건너뛰어 묶음 경계가 바뀐다. 묶음이나 CLI 슬롯 하나를 마칠 때마다 남은 슬롯을 다시 정렬한다.
 
 **섞인 목록에서 달라지는 것.** 적힌 순서가 `[h1, c1]` 이고 h1 이 쉬는 중이면 `[c1, h1]` 로 걷는다. 지금은 h1 을 먼저 불러 429 를 한 번 더 받고 c1 로 간다. 어느 쪽이든 c1 이 그 판단을 받는다. 달라지는 것은 이미 쉬는 줄 아는 h1 을 한 번 덜 부르는 것이다. 쉬지 않는 슬롯이 앞에 있으면 CLI 는 그 슬롯이 실패한 뒤에만 불린다.
@@ -191,6 +195,8 @@ LiteLLM 은 cooldown 중인 deployment 를 후보에서 잠시 뺀다. masc 는 
 - 호출 한 번에 run 기록 하나다 (지금과 같다). Stagehand 는 지금처럼 남기지 않는다.
 - `selected_slot` 은 답한 슬롯이다. 끝까지 답이 없으면 마지막으로 부른 슬롯이다. 종류는 따지지 않는다.
 - lane 이 "쉬는 중" 이라고 말하려면 걸은 슬롯이 모두 자기 계정 사정으로 거절했어야 한다 (`keeper_board_attention_worker.ml:1060-1091` 의 규칙을 walker 로 옮긴다).
+
+> 2026-11-10 개정(RFC-exact-lane-waits-for-a-stated-reset): provider 가 말한 시각 전이라 부르지 않은 슬롯도 자기 계정 사정으로 거절한 슬롯으로 센다.
 
 ### 3.7 Board partition 의 진행 기록
 
@@ -292,7 +298,7 @@ verifier 는 agent_core flow 가 아니라 도구 호출(`report_review_verdict`
 
 - **walker 단위 테스트** (가짜 HTTP 묶음 runner, 가짜 CLI runner):
   - 적힌 순서를 지킨다.
-  - 쉬는 슬롯은 안정 분할로 뒤에 가고 사라지지 않는다.
+  - 쉬는 슬롯은 안정 분할로 뒤에 가고 사라지지 않는다. provider 가 말한 시각까지 기다리는 슬롯은 걷지 않고 목록에 남는다(2026-11-10 개정).
   - 묶음 경계는 정렬 뒤에 정해진다.
   - masc 자기 기록 실패와 취소에서만 멈춘다. 결과를 모르는 전송 오류, 이상한 모양의 답은 다음 슬롯으로 넘어간다.
   - `cli_request = None` 이면 CLI 슬롯을 건너뛰고 사유를 남긴다.

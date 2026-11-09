@@ -3,11 +3,11 @@ rfc: "0433"
 title: "고갈은 말하고 끝나는 때는 안 말하는 provider — 그래서 하루 종일 죽은 곳으로 보낸다"
 status: Implemented
 created: 2026-09-06
-updated: 2026-11-06
+updated: 2026-11-10
 author: vincent
 supersedes: null
 superseded_by: null
-related: ["0370"]
+related: ["0370", "exact-lane-waits-for-a-stated-reset"]
 implemented_by: ["#33720"]
 ---
 
@@ -188,6 +188,11 @@ RFC 가 만든 두 상태의 차이이고, 운영자가 "언제 돌아오나"를
 
 네 번째가 이 RFC 의 안전선이다. 표시가 배제로 바뀌면 provider 하나의 일시적
 장애가 레인을 통째로 죽인다.
+
+> 2026-11-10 개정(RFC-exact-lane-waits-for-a-stated-reset): 6절의 「후보를 배제하지 않는다」와
+> 이 안전선은 끝나는 때를 말하지 않은 고갈의 표시에 대한 결정이다. provider 가 리셋 시각을
+> 말했으면 exact lane 은 그 시각 전에는 그 후보를 부르지 않는다. 그 쉼은 말한 시각에 끝나므로
+> 레인을 죽이지 않는다. 표시는 지금처럼 순서에만 작용한다.
 
 ## 8. 위험
 

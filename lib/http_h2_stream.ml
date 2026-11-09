@@ -90,10 +90,12 @@ let reset ~stream_sw reqd cause =
    cancels it. That end answers every flush still waiting with [`Closed].
 
    A peer that keeps the stream open with its window at 0 drains nothing
-   either, and nothing ends that stream. The watchdog gives every flush
-   [stalled_after_s] to be answered and resets the stream with [Stalled] when
-   one is not (RFC-0518 D2). The bound holds for each flush, so WINDOW_UPDATEs
-   of a byte or two do not stretch it (RFC-0518 §3.3). *)
+   either, and nothing ends that stream. The watchdog gives the oldest flush
+   still waiting [stalled_after_s] to be answered and resets the stream with
+   [Stalled] when it is not (RFC-0518 D2). A body is written with a flush at
+   every slice boundary (D3), so the bound holds for each slice: a reader
+   that drains slice after slice keeps its stream, and WINDOW_UPDATEs of a
+   byte or two do not stretch it (RFC-0518 §3.3). *)
 module Stream_end = struct
   type t =
     { stream_sw : Eio.Switch.t
@@ -102,8 +104,9 @@ module Stream_end = struct
     ; stalled_after_s : float
     ; mutable ended : bool
     ; waiting : (int, unit -> unit) Hashtbl.t
-    ; deadlines : (int * float) Queue.t
+    ; order : (int * float) Queue.t
     ; registered : Eio.Condition.t
+    ; mutable last_answer : float
     ; mutable next_id : int
     ; signal : unit Eio.Promise.t
     ; resolve_signal : unit Eio.Promise.u
@@ -126,26 +129,33 @@ module Stream_end = struct
     reset ~stream_sw:t.stream_sw t.reqd Stalled
   ;;
 
-  (* Flushes are registered in time order and their deadlines with them, so
-     the oldest flush still waiting is the first that can miss its deadline.
-     Answered flushes leave the front of the queue as they are answered. *)
+  (* [order] keeps the flushes as they were registered, with the time of
+     each registration. h2 answers a body's flushes as its bytes drain,
+     oldest first, so only the oldest flush still waiting can be late. Its
+     time counts from when it became the oldest: its registration, or the
+     answer before it, whichever came later. *)
+  let deadline t registered_at = Float.max registered_at t.last_answer +. t.stalled_after_s
+
   let rec watch t =
-    match Queue.peek_opt t.deadlines with
+    match Queue.peek_opt t.order with
     | None ->
       Eio.Condition.await_no_mutex t.registered;
       watch t
     | Some (id, _) when not (Hashtbl.mem t.waiting id) ->
-      ignore (Queue.pop t.deadlines);
+      ignore (Queue.pop t.order);
       watch t
-    | Some (id, deadline) ->
-      Eio.Time.sleep_until t.clock deadline;
-      if Hashtbl.mem t.waiting id then stall t else watch t
+    | Some (id, registered_at) ->
+      Eio.Time.sleep_until t.clock (deadline t registered_at);
+      if Hashtbl.mem t.waiting id
+         && Eio.Time.now t.clock >= deadline t registered_at
+      then stall t
+      else watch t
   ;;
 
   let rec drop_answered t =
-    match Queue.peek_opt t.deadlines with
+    match Queue.peek_opt t.order with
     | Some (id, _) when not (Hashtbl.mem t.waiting id) ->
-      ignore (Queue.pop t.deadlines);
+      ignore (Queue.pop t.order);
       drop_answered t
     | Some _ | None -> ()
   ;;
@@ -159,8 +169,9 @@ module Stream_end = struct
       ; stalled_after_s
       ; ended = false
       ; waiting = Hashtbl.create 2
-      ; deadlines = Queue.create ()
+      ; order = Queue.create ()
       ; registered = Eio.Condition.create ()
+      ; last_answer = Float.neg_infinity
       ; next_id = 0
       ; signal
       ; resolve_signal
@@ -196,13 +207,33 @@ module Stream_end = struct
         then (
           answered := true;
           Hashtbl.remove t.waiting id;
+          t.last_answer <- Eio.Time.now t.clock;
           drop_answered t;
           f outcome)
       in
       Hashtbl.replace t.waiting id (fun () -> once `Closed);
-      Queue.push (id, Eio.Time.now t.clock +. t.stalled_after_s) t.deadlines;
+      Queue.push (id, Eio.Time.now t.clock) t.order;
       Eio.Condition.broadcast t.registered;
       H2.Body.Writer.flush writer once)
+  ;;
+
+  (* One DATA frame of the default SETTINGS_MAX_FRAME_SIZE (RFC 9113 §6.5.2). *)
+  let slice_bytes = 16_384
+
+  (* RFC-0518 D3. A flush at every slice boundary inside [payload] lets the
+     watchdog see each slice drain. The end of [payload] is the caller's own
+     flush. *)
+  let write_slices t writer payload =
+    let length = String.length payload in
+    let rec from off =
+      let len = Int.min slice_bytes (length - off) in
+      H2.Body.Writer.write_string writer ~off ~len payload;
+      if off + len < length
+      then (
+        flush t writer ignore;
+        from (off + len))
+    in
+    from 0
   ;;
 end
 

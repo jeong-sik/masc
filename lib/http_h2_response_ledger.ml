@@ -58,11 +58,11 @@ let with_request budget ~sw f =
     Hashtbl.clear request.leases));
   with_current request f
 
-let write_reserved lease writer payload =
+let write_reserved lease ~write writer payload =
   if String.length payload <> lease.bytes then (
     release lease;
     invalid_arg "H2 response reservation does not match payload");
   try
-    H2.Body.Writer.write_string writer payload;
+    write writer payload;
     H2.Body.Writer.flush writer (function `Written | `Closed -> release lease)
   with exn -> release lease; raise exn

@@ -201,20 +201,26 @@ let h2_respond_with_string ~stream_end reqd ledger response body =
     h2_refuse_for_capacity ~stream_end reqd response;
     Rejected_by_writer
   | Ok lease ->
-    (try
-       let writer =
-         H2.Reqd.respond_with_streaming
-           reqd
-           ~flush_headers_immediately:true
-           (h2_response_of response)
-       in
-       Http_h2_response_ledger.write_reserved lease writer body;
-       close_after_flush ~stream_end writer;
-       Accepted_by_writer
+    (* With no headers out there is no response, so the reservation goes
+       back here. After the headers a failure is the stream's to handle,
+       and the end of its scope releases the reservation (RFC-0518 D3). *)
+    (match
+       H2.Reqd.respond_with_streaming
+         reqd
+         ~flush_headers_immediately:true
+         (h2_response_of response)
      with
-     | exn ->
+     | exception exn ->
        Http_h2_response_ledger.release lease;
-       raise exn)
+       raise exn
+     | writer ->
+       Http_h2_response_ledger.write_reserved
+         lease
+         ~write:(Stream_end.write_slices stream_end)
+         writer
+         body;
+       close_after_flush ~stream_end writer;
+       Accepted_by_writer)
 ;;
 
 (* A stream masc already ended, or one that already carries an error, takes no
@@ -272,9 +278,14 @@ module Body_writer = struct
   let write_string t s =
     match t with
     | H1 writer -> Httpun.Body.Writer.write_string writer s
-    | H2 { reqd; body = { writer; _ }; ledger; stream_sw; _ } ->
+    | H2 { reqd; body = { writer; _ }; ledger; stream_sw; stream_end } ->
       (match Http_h2_response_ledger.reserve ledger ~bytes:(String.length s) with
-       | Ok lease -> Http_h2_response_ledger.write_reserved lease writer s
+       | Ok lease ->
+         Http_h2_response_ledger.write_reserved
+           lease
+           ~write:(Stream_end.write_slices stream_end)
+           writer
+           s
        | Error refusal ->
          Http_h2_stream.reset ~stream_sw reqd (Http_h2_stream.Out_of_capacity refusal);
          (* h2 closed the body of a started response it reset. A stream that

@@ -60,8 +60,8 @@ val end_scope : Eio.Switch.t -> reset_cause -> unit
     error or has finished. It sends nothing to the peer. *)
 
 (** The end of one stream's scope and the bound on its flushes (RFC-0518
-    D2). The stream registry makes one for each stream it runs and binds it
-    to that stream's fibers. *)
+    D2, D3). The stream registry makes one for each stream it runs and
+    binds it to that stream's fibers. *)
 module Stream_end : sig
   type t
 
@@ -74,10 +74,12 @@ module Stream_end : sig
   (** [create ~stream_sw ~clock ~stalled_after_s reqd] ends with [stream_sw]:
       once the switch is released, {!ended} is true, {!signal} is resolved
       and every flush still waiting is answered with [`Closed]. It also forks
-      a daemon on [stream_sw] that watches the flushes. When one has waited
-      [stalled_after_s] by [clock] without an answer, the daemon logs the
-      request method and target at warn and {!reset}s the stream with
-      [Stalled]. *)
+      a daemon on [stream_sw] that watches the flushes. h2 answers them
+      oldest first. When the oldest flush still waiting goes
+      [stalled_after_s] by [clock] without an answer, counted from its
+      registration or from the answer before it, whichever came later, the
+      daemon logs the request method and target at warn and {!reset}s the
+      stream with [Stalled]. *)
 
   val switch : t -> Eio.Switch.t
   (** The stream's switch. *)
@@ -91,6 +93,16 @@ module Stream_end : sig
   val flush : t -> H2.Body.Writer.t -> ([ `Written | `Closed ] -> unit) -> unit
   (** [flush t writer f] calls [f] once: with h2's answer to the flush, or
       with [`Closed] when the stream's switch is released first. *)
+
+  val slice_bytes : int
+  (** 16 KiB: one DATA frame of the default SETTINGS_MAX_FRAME_SIZE. *)
+
+  val write_slices : t -> H2.Body.Writer.t -> string -> unit
+  (** [write_slices t writer payload] writes [payload] to [writer] in slices
+      of {!slice_bytes}, with a {!flush} at each slice boundary inside it. A reader that drains slice after slice therefore
+      gets the stall bound for each slice, not for the whole payload
+      (RFC-0518 D3). The end of [payload] gets no flush here: the caller's
+      own flush or close covers it. *)
 
   val with_current : t -> (unit -> 'a) -> 'a
   (** [with_current t f] runs [f] with [t] bound to the calling fiber and to

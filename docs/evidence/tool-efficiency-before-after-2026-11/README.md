@@ -310,15 +310,16 @@ PR 읽기가 붙든 시간은 하루 6.9 ~ 8.9 h 로 비슷해요. 나머지 Exe
 
 - 대상: `~/me/.masc/keeper_msg_requests/terminal/` 에서 `request_context.execute_background` 가 있는 기록 전부예요. 5건이고 11-08T09:26Z ~ 11-09T02:16Z 에 시작했어요(읽은 때 11-09T02:34Z).
 - 명령이 돈 시간: 기록의 `completed_at` 에서 `submitted_at` 을 뺀 값이에요. 시작 호출: 원장에서 같은 Keeper 의 `Execute` 줄 중 `ts` 가 `submitted_at` 에서 30초 안인 줄의 `duration_ms` 예요.
+- 런타임: 시작 호출 줄의 `runtime_contract.runtime_profile` 이에요. `muse_…muse-spark-1.3` 이 4건(Muse), `claude_code_…claude-sonnet-5-5` 가 1건(Claude Code)이에요.
 - 시작한 턴: 그 줄과 `keeper_turn_id` 가 같은 줄이에요. 끝난 뒤 호출 수는 그중 `ts` 가 `completed_at` 보다 늦은 줄이고, 마지막 호출은 그 줄들 중 가장 늦은 `ts` 예요. 다음 턴의 첫 호출은 같은 Keeper 가 `completed_at` 뒤에 처음 쓴 줄 중 `keeper_turn_id` 가 다른 줄이에요. 영수증은 그 턴의 첫 모델 요청에 실리므로 그 줄은 전달 시각의 상한이에요.
 
-| Keeper | 명령이 돈 시간 | 시작 호출 | 끝난 뒤 시작한 턴의 호출 | 그 턴의 마지막 호출 | 다음 턴의 첫 호출 |
-|---|---:|---:|---:|---:|---:|
-| sangsu | 4.3초 | 5.6 ms | 10 | +72초 | +155초 |
-| code-reviewer-father | 142.5초 | 42.1 ms | 12 | +356초 | +391초 |
-| glossary-maniac | 197.1초 | 25.7 ms | 12 | +74초 | +130초 |
-| ocaml-agent-ic | 15.8초 | 31.4 ms | 24 | +314초 | +472초 |
-| polisher | 5.5초 | 17.7 ms | 104 | +1,034초 | 읽은 때까지 없음 |
+| Keeper | 런타임 | 명령이 돈 시간 | 시작 호출 | 끝난 뒤 시작한 턴의 호출 | 그 턴의 마지막 호출 | 다음 턴의 첫 호출 |
+|---|---|---:|---:|---:|---:|---:|
+| sangsu | Muse | 4.3초 | 5.6 ms | 10 | +72초 | +155초 |
+| code-reviewer-father | Claude Code | 142.5초 | 42.1 ms | 12 | +356초 | +391초 |
+| glossary-maniac | Muse | 197.1초 | 25.7 ms | 12 | +74초 | +130초 |
+| ocaml-agent-ic | Muse | 15.8초 | 31.4 ms | 24 | +314초 | +472초 |
+| polisher | Muse | 5.5초 | 17.7 ms | 104 | +1,034초 | 읽은 때까지 없음 |
 
 - 시작 호출은 5건 모두 43 ms 이내에 결과를 돌려줬어요. 명령이 4.3초·5.5초·15.8초에 끝난 3건은 foreground 로 돌렸으면 그 시간에 결과를 받았어요. background 로는 시작한 턴이 끝난 뒤 다음 턴에서 받고, 그 턴의 첫 호출은 끝난 뒤 130~472초에 나왔어요(상한).
 - 영수증은 실행 중인 턴에 닿지 않아요. `Keeper_client_tool_outbox.run_carrier_load` 는 턴의 첫 호출에서 outbox 를 읽고 그 snapshot 을 턴 끝까지 돌려줘요(`keeper_client_tool_outbox.mli` 의 주석). 위 5건은 명령이 끝난 뒤에도 시작한 턴이 10~104번 도구를 더 불렀어요. 그 턴이 결과를 보는 길은 요청 ID 로 `keeper_composition_status` 를 묻는 것이고, 5건 중 `polisher` 한 건만 끝난 뒤 94초에 물어서 봤어요(11-09T02:18:16Z, 3 ms). 11-07~09 원장에서 이 도구의 호출은 그 한 번이에요.

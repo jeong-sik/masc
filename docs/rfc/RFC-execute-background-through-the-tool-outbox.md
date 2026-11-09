@@ -181,9 +181,13 @@ backend, and the receipt claims neither.
   197.1 s after the start. The run that started each one made 10 to 104 more
   tool calls after the end. The next run's first tool call came 130 to 472 s
   after the end in four cases, and the fifth had none when it was read. One of
-  the five Keepers asked `keeper_composition_status`, 94 s after the end. A
-  command that ends in 4 to 16 s returns in that time as a foreground call
-  (three of the five). Figures and definitions are in
+  the five Keepers asked `keeper_composition_status`, 94 s after the end. Four
+  of the five ran on the Muse lane and one on the Claude Code lane.
+  `keeper_turn_driver.ml` runs them through `Keeper_muse_runtime.run` and
+  `Keeper_claude_code_runtime.run`, and neither file references
+  `Keeper_run_tools`, the only user of the arrival block, so those runs show no
+  line for the receipt. A command that ends in 4 to 16 s returns in that time
+  as a foreground call (three of the five). Figures and definitions are in
   `docs/evidence/tool-efficiency-before-after-2026-11/README.md`, section
   「스크립트 밖에서 센 값」, entry 「background Execute 5건」. Carrying newer
   receipts inside a run would change

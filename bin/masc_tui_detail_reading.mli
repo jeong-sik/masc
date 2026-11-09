@@ -21,6 +21,8 @@ val replace_prepared : title:string -> hints:string -> width:int -> row list -> 
     The caller owns preparation/source identity and re-prepares on resize. *)
 val hints : t -> string option
 val rows : width:int -> t -> row list
+(** Reuses wrapping for the same immutable sections/kind or prepared source at
+    one width. Scroll and search changes do not replace the document. *)
 val rows_with_search : width:int -> t -> (row * search_mark) list
 (** The same complete rows, paired with this capture's literal search matches.
     [Current_match] is the last search landing at this exact width; ordinary

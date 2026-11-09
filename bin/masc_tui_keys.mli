@@ -309,8 +309,10 @@ val footer_hints_fusion_detail : string
     fitter gives up key items from the back, and a position is the one item
     on the row that [?] cannot recover. *)
 
-val footer_hints_lanes_run_list : string
-(** The Lanes run-list footer: the drill-down under a standalone lane row. *)
+val footer_hints_lanes_run_list : has_runs:bool -> has_older:bool -> string
+(** The Lanes run-list footer: the drill-down under a standalone lane row. A
+    key is drawn only while it can act: [j/k] and [Right / Enter] need a loaded
+    run, and [\]] needs the server to have named an older page. *)
 
 val footer_hints_lanes_run_detail : string
 val footer_hints_lanes_run_detail_for : preflight:bool -> string

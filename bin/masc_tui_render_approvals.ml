@@ -22,6 +22,27 @@ let approval_gate_phase state = function
   | Gate_human_required -> ui_text state ~ko:"사람 판단 필요" ~en:"human required", Theme.warn ()
   | Gate_blocked -> ui_text state ~ko:"자동 검토 중단" ~en:"auto judge blocked", Theme.bad ()
 
+let approval_source_notices state ~(reading : Masc_tui_approvals_model.approvals_reading) =
+  [ ui_text state ~ko:"운영자 승인" ~en:"Confirmations", reading.confirm_queue
+  ; ui_text state ~ko:"보류 도구" ~en:"Held calls", reading.held_calls
+  ; ui_text state ~ko:"도구 심사" ~en:"Gate queue", reading.gate_queue
+  ; ui_text state ~ko:"질문" ~en:"Questions", reading.questions ]
+  |> List.filter_map (fun (label, list_reading) ->
+    let open Masc_tui_approvals_model in
+    match list_reading with
+    | List_read -> None
+    | List_not_read Approval_unread ->
+        Some (Theme.recede (), label ^ ui_text state ~ko:" · 미조회" ~en:" · not read")
+    | List_not_read (Approval_failed cause) ->
+        Some (Theme.bad (), label ^ ui_text state ~ko:" · 조회 실패: " ~en:" · read failed: "
+          ^ Terminal_text.single_line cause)
+    | List_not_read (Approval_stale cause) ->
+        Some (Theme.warn (), label ^ ui_text state ~ko:" · 이전 조회 · 갱신 실패: " ~en:" · retained; refresh failed: "
+          ^ Terminal_text.single_line cause)
+    | List_not_read (Approval_unavailable detail) ->
+        Some (Theme.warn (), label ^ ui_text state ~ko:" · 조회 불가: " ~en:" · unavailable: "
+          ^ Terminal_text.single_line detail))
+
 (** Render the Approvals surface (pending confirmations). *)
 (* The ask, whole. The list row is one line through [single_line], which
    turns a newline into the six characters [\x0A] and then cuts; an [Edit]
@@ -121,6 +142,10 @@ let approval_detail_pane (state : state) ~value_hint ~clamped ~viewport ~rows ~c
          Approval_detail.of_gate_fields ~string_reading ~width fields
          |> List.map (fun line -> Gate_line line))
     @ List.map (fun line -> Field_line line) (Approval_detail.of_fields ~width identifiers)
+    @ List.map (fun line -> Field_line line)
+        (Approval_detail.of_fields ~width
+          (approval_source_notices state ~reading:(Masc_tui_approvals_model.approvals_reading state)
+           |> List.map (fun (_, text) -> "read status", text)))
   in
   let input_unreadable =
     List.exists
@@ -469,7 +494,6 @@ let draw_ask_question_preview buf cols ~rows text =
     box_line buf cols (Ansi.dim ^ "    … a opens the full ask and answers" ^ Ansi.reset)
 
 let draw_ask_questions buf cols (state : state) ~budget =
-  draw_ask_origin buf cols state;
   let now = Unix.gettimeofday () in
   (* Questions Keepers put to a human sit under the approval queue rather than
      in it. Nothing is held waiting on them -- the Keeper that asked kept
@@ -840,49 +864,26 @@ let render_approvals (state : state) =
 
   let count = Masc_tui_approvals_model.approvals_surface_pending state in
   let reading = Masc_tui_approvals_model.approvals_reading state in
+  let source_notices = approval_source_notices state ~reading in
   let count_text =
     if Masc_tui_approvals_model.approvals_reading_current state then string_of_int count
-    else Printf.sprintf (if state.ui_language = Lang_ko then "관측 %d" else "%d observed") count in
+    else Printf.sprintf (if state.ui_language = Lang_ko then
+        "관측 %d · 조회 미확인 %d곳" else "%d observed · %d sources not current")
+      count (List.length source_notices) in
+  let hidden_note = match state.approval_snapshot with
+    | Some snapshot when snapshot.aps_hidden_count > 0 ->
+        Printf.sprintf (if state.ui_language = Lang_ko then ", 승인 %d개 숨김 · 필터 %s"
+          else ", %d confirmations hidden · filter %s") snapshot.aps_hidden_count
+          (Terminal_text.single_line_or ~default:Masc_tui_theme.Glyph.no_value snapshot.aps_actor_filter)
+    | Some _ | None -> "" in
   let action_badge = if action_inflight then
       ui_text state ~ko:"  [제출 중]" ~en:"  [submitting]" else "" in
-  let header = Printf.sprintf "%s (%s)  %s%s"
+  let header = Printf.sprintf "%s (%s%s)  %s%s"
       (screen_title (ui_text state ~ko:" 작업 · 요청" ~en:" Work · Requests"))
-      count_text (connection_badge state) action_badge in
+      count_text hidden_note (connection_badge state) action_badge in
   box_top buf cols;
   box_line buf cols header;
-  (* A count qualified as observed cannot certify four independent sources.
-     Keep each missing or retained source in its own measured row, before the
-     policy controls, including when another source supplied queue entries. *)
-  List.iter (fun (label, list_reading) ->
-    let notice =
-      let open Masc_tui_approvals_model in
-      match list_reading with
-      | List_read -> None
-      | List_not_read Approval_unread ->
-          Some (Theme.recede (), label ^ ui_text state ~ko:" · 미조회" ~en:" · not read")
-      | List_not_read (Approval_failed cause) ->
-          Some (Theme.bad (), label ^ ui_text state ~ko:" · 조회 실패: " ~en:" · read failed: "
-            ^ Terminal_text.single_line cause)
-      | List_not_read (Approval_stale cause) ->
-          Some (Theme.warn (), label ^ ui_text state ~ko:" · 이전 조회 · 갱신 실패: " ~en:" · retained; refresh failed: "
-            ^ Terminal_text.single_line cause)
-      | List_not_read (Approval_unavailable detail) ->
-          Some (Theme.warn (), label ^ ui_text state ~ko:" · 조회 불가: " ~en:" · unavailable: "
-            ^ Terminal_text.single_line detail)
-    in
-    Option.iter (fun (style, text) -> box_line_styled buf cols ~style ("  " ^ text)) notice)
-    [ ui_text state ~ko:"운영자 승인" ~en:"Confirmations", reading.confirm_queue
-    ; ui_text state ~ko:"보류 도구" ~en:"Held calls", reading.held_calls
-    ; ui_text state ~ko:"도구 심사" ~en:"Gate queue", reading.gate_queue
-    ; ui_text state ~ko:"질문" ~en:"Questions", reading.questions ];
-  (match state.approval_snapshot with
-   | Some snapshot when snapshot.aps_hidden_count > 0 ->
-       box_line_styled buf cols ~style:(Theme.recede ())
-         (Printf.sprintf (if state.ui_language = Lang_ko then
-              "  운영자 승인 %d개 숨김 · 필터 %s" else "  %d confirmations hidden · filter %s")
-            snapshot.aps_hidden_count
-            (Terminal_text.single_line_or ~default:Masc_tui_theme.Glyph.no_value snapshot.aps_actor_filter))
-   | Some _ | None -> ());
+  let policy_buf = Buffer.create 512 in
   (* Both Gate lanes are always on screen here. The durable rows obey the
      external lane, and an operator deciding them needs to see which switch
      they are under. The [e] that cycles the external lane is a footer key
@@ -914,7 +915,7 @@ let render_approvals (state : state) =
        then [ together ]
        else [ "  " ^ workspace; "  " ^ external_lane ])
   in
-  List.iter (box_line buf cols)
+  List.iter (box_line policy_buf cols)
     (match state.gate_modes, Terminal_text.optional_single_line state.gate_error with
      | Some modes, _ -> lane_rows modes
      (* No prefix: [data_unreliable_row] already opens "(data unreliable: "
@@ -930,7 +931,7 @@ let render_approvals (state : state) =
      its call before the call can reach the queue, so an operator reading an
      empty queue is reading the rules' work without seeing them. One row: the
      count, and who the newest one covers. *)
-  box_line buf cols
+  box_line policy_buf cols
     (match state.gate_rules_unavailable, state.gate_rules with
      | Some detail, _ ->
          data_unreliable_row ~cols ("always-allow rules: " ^ detail)
@@ -947,44 +948,66 @@ let render_approvals (state : state) =
             | Some _ -> " (expires)"
             | None -> "")
            Ansi.reset);
-  box_divider buf cols;
+  box_divider policy_buf cols;
 
-  (* Every row the surface spends around the queue, read back off the buffers
-     they were drawn into. The Gate lanes take one row or two by the width, and
-     they are counted because they are in the buffer. [finish_surface] pads a
-     short surface under its last row, and the last row here is the footer. *)
-  let head_rows = count_frame_lines buf in
-  (* The rows under the queue: the frame's closing row, the selected row's
-     detail, the metadata rows, and the payload row beneath them. Drawn now so
-     their height is the same measured fact -- a metadata row that breaks into
-     two, or a held tool call whose detail takes two, is counted because it is
-     in the buffer, not because a reader remembered to add one. *)
-  let below_buf = Buffer.create 1024 in
-  box_bottom below_buf cols;
-  List.iter (fun line ->
-    if not (String.equal line "") then Buffer.add_string below_buf (line ^ "\n"))
-    [detail_line; metadata_line; payload_line];
-  (* The footer ends its own row, so the buffer holds exactly the row it
-     draws. *)
   let footer_buf = Buffer.create 256 in
   Buffer.add_string footer_buf
     (footer_line state ~max_cells:cols ~hints:(question_hints state));
-  let around_rows =
-    head_rows + count_frame_lines below_buf + count_frame_lines footer_buf
+  let footer_rows = count_frame_lines footer_buf in
+  let intro_buf = Buffer.create 1024 in
+  draw_ask_answer_feedback intro_buf cols state;
+  draw_ask_origin intro_buf cols state;
+  let intro_rows = count_frame_lines intro_buf in
+  (* Reserve the original selected question before optional source details or
+     approval context: divider/title plus the existing compact prompt allowance.
+     Receipt/origin rows retain their original complete rendering. *)
+  let question_rows = match Masc_tui_approvals_model.approvals_open_questions state with
+    | None -> 0
+    | Some [] -> 3
+    | Some (_ :: _) -> 2 + Ask_layout.min_expanded_rows in
+  let preview_minimum =
+    if Option.is_some state.pending_approval_action || action_inflight then 1 else 0 in
+  let base_head_rows = count_frame_lines buf + count_frame_lines policy_buf in
+  let primary_rows = 1 (* queue *) + 1 (* closing edge *) + footer_rows
+      + intro_rows + question_rows + preview_minimum in
+  let notice_room = max 0 (rows - base_head_rows - primary_rows) in
+  List.iteri (fun index (style, text) ->
+    if index < notice_room then box_line_styled buf cols ~style ("  " ^ text)) source_notices;
+  Buffer.add_buffer buf policy_buf;
+  let head_rows = count_frame_lines buf in
+  let preview = Buffer.create 1024 in
+  List.iter (fun line ->
+    if not (String.equal line "") then Buffer.add_string preview (line ^ "\n"))
+    [detail_line; metadata_line; payload_line];
+  let preview_room = max 0 (rows - head_rows - footer_rows - 1 - 1 - intro_rows - question_rows) in
+  let preview_count = count_frame_lines preview in
+  let preview_notice = preview_count > preview_room && preview_room > 1 in
+  let shown_preview = min preview_count (if preview_notice then preview_room - 1 else preview_room) in
+  let below_buf = Buffer.create 1024 in
+  box_bottom below_buf cols;
+  let text = Buffer.contents preview in
+  let rec copy_rows offset remaining =
+    if remaining > 0 && offset < String.length text then
+      match String.index_from_opt text offset '\n' with
+      | Some stop ->
+          Buffer.add_substring below_buf text offset (stop - offset + 1);
+          copy_rows (stop + 1) (remaining - 1)
+      | None ->
+          Buffer.add_substring below_buf text offset (String.length text - offset);
+          Buffer.add_char below_buf '\n'
   in
-  (* What the questions may spend. The block is drawn last, and a surface that
-     overruns loses its final rows, so an unbudgeted question list does not
-     push the approval queue off the screen -- it pushes itself off, cursor and
-     all. One row is held back for the queue, which is what the [max 1] below
-     was already trying to promise and could not keep. *)
-  let ask_budget = max 4 (rows - around_rows - 1) in
-  (* Drawn before the queue's own budget is settled so its height is a measured
-     fact rather than a second estimate that can disagree with the drawing. *)
+  copy_rows 0 shown_preview;
+  if preview_notice then
+    Buffer.add_string below_buf (Theme.recede ()
+      ^ fit_width (ui_text state ~ko:"  Enter: 요청 전체 읽기" ~en:"  Enter: read the complete request")
+          (max 1 (framed_inner_width cols)) ^ Ansi.reset ^ "\n");
+  let around_rows = head_rows + count_frame_lines below_buf + footer_rows in
+  let ask_budget = max 0 (rows - around_rows - 1) in
   let ask_buf = Buffer.create 1024 in
-  draw_ask_answer_feedback ask_buf cols state;
+  Buffer.add_buffer ask_buf intro_buf;
   draw_ask_questions ask_buf cols state ~budget:ask_budget;
   let ask_rows = count_frame_lines ask_buf in
-  let approval_body_rows = max 1 (rows - around_rows - ask_rows) in
+  let approval_body_rows = max 0 (rows - around_rows - ask_rows) in
 
   (* The queue's own population, not the surface's. [count] above is the
      approval rows plus the open questions -- the right reading for the title,
@@ -1021,6 +1044,7 @@ let render_approvals (state : state) =
                        (Terminal_text.single_line detail)))
             not_read
     in
+    let lines = List.take approval_body_rows lines in
     List.iter (fun line -> box_line buf cols line) lines;
     for _ = 1 to max 0 (approval_body_rows - List.length lines) do
       box_empty buf cols
@@ -1046,11 +1070,16 @@ let render_approvals (state : state) =
       | Masc_tui_approvals_model.Gate_row pending -> Terminal_text.single_line pending.gp_keeper in
     (* The request keeps at least as much room as its author at narrow widths.
        Both columns are display-only; selection still addresses the original row. *)
+    let phase_width = List.fold_left (fun widest -> function
+      | Masc_tui_approvals_model.Gate_row pending ->
+          max widest (Message_layout.display_width (fst (approval_gate_phase state pending.gp_phase)))
+      | Keeper_tool_row _ | Operator_row _ -> widest) 0 approvals in
     let name_width =
       List.fold_left (fun widest row ->
         max widest (Message_layout.display_width (approval_row_name row))) 16 approvals
       |> min 26
-      |> min (max 0 ((framed_inner_width cols - 6) / 2)) in
+      |> min (max 0 ((framed_inner_width cols - 6) / 2))
+      |> min (max 0 (framed_inner_width cols - 6 - phase_width)) in
     let subject_width = max 1 (framed_inner_width cols - name_width - 6) in
     let approvals_window = Rows.of_list ~first:scroll_offset ~height:content_height approvals in
     for i = 0 to content_height - 1 do
@@ -1108,10 +1137,28 @@ let render_approvals (state : state) =
   finish_surface state ~surface_key:"approvals" ~rows:terminal_rows
       ~cols buf
 
-let ask_question_page_size state = snd (ask_question_viewport state)
+(* Source diagnostics that cannot take space from the selected compact Ask
+   remain reachable in the same full reader and its actual scroll domain. *)
+let question_reader_viewport state =
+  let lines, room = ask_question_viewport state in
+  (* The editor follows the last question row while typing. Diagnostics must
+     not become the new end and scroll the active editor out of view. *)
+  let notices = match state.ask_text_entry with
+    | Some _ -> []
+    | None -> approval_source_notices state
+        ~reading:(Masc_tui_approvals_model.approvals_reading state) in
+  let buf = Buffer.create 512 in
+  let _, cols = get_terminal_size () in
+  if notices <> [] then box_divider buf cols;
+  List.iter (fun (style, text) -> box_wrapped_field buf cols ~head:"  " ~style text) notices;
+  let notice_lines = String.split_on_char '\n' (Buffer.contents buf)
+      |> List.filter (fun line -> line <> "") in
+  lines @ notice_lines, room
+
+let ask_question_page_size state = snd (question_reader_viewport state)
 
 let ask_question_scroll_limit state =
-  let lines, room = ask_question_viewport state in
+  let lines, room = question_reader_viewport state in
   max 0 (List.length lines - room)
 
 let render_question_reader (state : state) =
@@ -1158,7 +1205,7 @@ let render_question_reader (state : state) =
               | Resources | Tools | System_logs), _)
             | None -> "approvals"));
   box_divider buf cols;
-  let lines, room = ask_question_viewport state in
+  let lines, room = question_reader_viewport state in
   let limit = max 0 (List.length lines - room) in
   let scroll =
     if Option.is_some state.ask_text_entry then limit

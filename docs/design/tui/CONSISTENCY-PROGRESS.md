@@ -141,11 +141,16 @@ the original row order, Ask keys, draft, source and approval authority remain.
 The selected preview retains execution site, age, input and real expiry facts.
 Call/approval/trace IDs move to the full reader; the reader also retains the
 original reason and target ID. Missing, failed, retained and unavailable sources
-are separate measured rows, before policy controls. The header count is qualified
+are separate measured rows when they fit, before policy controls. The header
+qualifies the observed count and names the number of sources not current; full
+source details remain in the approval and question readers. The header count is qualified
 as observed unless all four readers are current. Normal title breakdown and the
 wall clock are removed, and an absent selected approval contributes no empty
 detail rows. Header, selected context, questions, footer and queue window still
-share the actual measured buffers.
+share the actual measured buffers. The selected question's compact allowance and
+any armed approval notice are reserved before optional source rows and selected
+context. Context is clipped only at complete prepared rows, with the full-reader
+hint when it has room. Question diagnostics do not follow the active editor.
 
 This is source work, not native or installed confirmation. Full question
 answering/follow-up readers, Verification/Harness, and the rest of the 23-surface

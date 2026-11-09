@@ -269,6 +269,15 @@ let test_multi_account () =
         refused "an inherited home" (own alice ()) inherited (function
           | Access.Not_a_declared_home -> true
           | _ -> false);
+        (* The spelling of a home is the identity of its account: the layout
+           spells every home from the real path of the runtime root, a
+           declaration keeps its spelling, and another spelling of the same
+           directory is another account. *)
+        let link = Filename.concat root "alice-home-link" in
+        Unix.symlink alice.home link;
+        refused "another spelling of her home" (own alice ()) (captured link) (function
+          | Access.Not_the_account_home _ -> true
+          | _ -> false);
         match
           Access.publish
             (Access.Multi_account { zone; base_path; now = (fun () -> 0.) })

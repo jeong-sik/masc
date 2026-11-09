@@ -1,12 +1,9 @@
-(** Tests for Telemetry_event JSON round-trip and Telemetry_bus
-    bounded-buffer behavior.
+(** Tests for Telemetry_event JSON round-trip.
 
     Every Telemetry_event.t variant is exercised through yojson
-    serialization to ensure the closed variant stays wire-compatible.
-    Telemetry_bus delivery is verified without a capacity policy. *)
+    serialization to ensure the closed variant stays wire-compatible. *)
 
 open Alcotest
-open Agent_core
 open Llm_provider
 
 (* ── Helpers ──────────────────────────────────────────────────────── *)
@@ -16,12 +13,6 @@ let roundtrip event =
   match Telemetry_event.of_yojson json with
   | Ok ev -> ev
   | Error e -> failwith e
-;;
-
-let require_decoded = function
-  | Ok event -> event
-  | Error (failure : Telemetry_bus.decode_failure) ->
-    fail ("unexpected telemetry decode failure: " ^ failure.detail)
 ;;
 
 let check_float msg expected actual = check (float 0.001) msg expected actual
@@ -219,68 +210,6 @@ let test_event_type_name () =
     cases
 ;;
 
-(* ── Telemetry_bus delivery ───────────────────────────────────────── *)
-
-let test_telemetry_bus_preserves_fifo () =
-  Eio_main.run
-  @@ fun _env ->
-  let bus = Telemetry_bus.create () in
-  let config =
-    Event_bus.subscription_config ~capacity:3 ~overflow:Event_bus.Drop_newest
-    |> Result.get_ok
-  in
-  let sub = Telemetry_bus.subscribe ~config bus in
-  Telemetry_bus.publish
-    bus
-    (Telemetry_event.Streaming_first_chunk
-       { provider = "p"; model = "m"; ttfrc_ms = Some 1.0; requested_at = 0.0 });
-  Telemetry_bus.publish
-    bus
-    (Telemetry_event.Streaming_first_chunk
-       { provider = "p"; model = "m"; ttfrc_ms = Some 2.0; requested_at = 0.0 });
-  Telemetry_bus.publish
-    bus
-    (Telemetry_event.Streaming_first_chunk
-       { provider = "p"; model = "m"; ttfrc_ms = Some 3.0; requested_at = 0.0 });
-  let events = Telemetry_bus.drain sub |> List.map require_decoded in
-  check int "drained every event" 3 (List.length events);
-  match events with
-  | [ e1; e2; e3 ] ->
-    (match e1 with
-     | Telemetry_event.Streaming_first_chunk r ->
-       check (option (float 0.001)) "first ttfrc" (Some 1.0) r.ttfrc_ms
-     | _ -> fail "expected Streaming_first_chunk");
-    (match e2 with
-     | Telemetry_event.Streaming_first_chunk r ->
-       check (option (float 0.001)) "second ttfrc" (Some 2.0) r.ttfrc_ms
-     | _ -> fail "expected Streaming_first_chunk");
-    (match e3 with
-     | Telemetry_event.Streaming_first_chunk r ->
-       check (option (float 0.001)) "third ttfrc" (Some 3.0) r.ttfrc_ms
-     | _ -> fail "expected Streaming_first_chunk")
-  | _ -> fail "expected exactly 3 events"
-;;
-
-let test_telemetry_bus_preserves_decode_failure () =
-  Eio_main.run
-  @@ fun _env ->
-  let event_bus = Event_bus.create () in
-  let bus = Telemetry_bus.of_event_bus event_bus in
-  let config =
-    Event_bus.subscription_config ~capacity:1 ~overflow:Event_bus.Drop_newest
-    |> Result.get_ok
-  in
-  let sub = Telemetry_bus.subscribe ~config bus in
-  let malformed = Event_bus.mk_event (Event_bus.Custom ("telemetry_event", `Null)) in
-  Event_bus.publish event_bus malformed;
-  match Telemetry_bus.drain sub with
-  | [ Error { event; detail } ] ->
-    check string "event id preserved" malformed.meta.run_id event.meta.run_id;
-    check bool "decode detail preserved" true (String.length detail > 0)
-  | [ Ok _ ] -> fail "malformed telemetry event must not decode"
-  | _ -> fail "expected one explicit decode failure"
-;;
-
 (* ── Suite ────────────────────────────────────────────────────────── *)
 
 let () =
@@ -296,15 +225,5 @@ let () =
         ; test_case "Wire_observer_failure roundtrip" `Quick test_wire_observer_failure
         ] )
     ; "event_type_name", [ test_case "all variants" `Quick test_event_type_name ]
-    ; ( "telemetry_bus"
-      , [ test_case
-            "preserves FIFO without subscriber drain"
-            `Quick
-            test_telemetry_bus_preserves_fifo
-        ; test_case
-            "preserves decode failure"
-            `Quick
-            test_telemetry_bus_preserves_decode_failure
-        ] )
     ]
 ;;

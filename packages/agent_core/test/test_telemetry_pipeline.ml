@@ -164,10 +164,13 @@ let messages_contain_tool_result ~tool_use_id ~content messages =
     messages
 ;;
 
-let require_decoded_telemetry = function
-  | Ok event -> event
-  | Error (failure : Telemetry_bus.decode_failure) ->
-    Alcotest.fail ("unexpected telemetry decode failure: " ^ failure.detail)
+let decode_telemetry (event : Event_bus.event) =
+  match event.Event_bus.payload with
+  | Event_bus.Custom ("telemetry_event", json) ->
+    (match Llm_provider.Telemetry_event.of_yojson json with
+     | Ok telemetry_event -> telemetry_event
+     | Error detail -> Alcotest.fail ("unexpected telemetry decode failure: " ^ detail))
+  | _ -> Alcotest.fail "expected a telemetry_event payload"
 ;;
 
 let test_run_stream_emits_telemetry_via_pipeline () =
@@ -178,16 +181,20 @@ let test_run_stream_emits_telemetry_via_pipeline () =
   let net = Eio.Stdenv.net env in
   let transport = make_mock_transport () in
   let agent, event_bus = make_agent ~net ~transport () in
-  let telemetry_bus = Telemetry_bus.of_event_bus event_bus in
   let config =
     Event_bus.subscription_config ~capacity:16 ~overflow:Event_bus.Drop_newest
     |> Result.get_ok
   in
-  let sub = Telemetry_bus.subscribe ~config telemetry_bus in
+  let sub =
+    Event_bus.subscribe
+      ~config
+      ~filter:(Event_bus.filter_topic "telemetry_event")
+      event_bus
+  in
   (match Agent.run_stream ~sw ~on_event:(fun _ -> ()) agent "trigger streaming turn" with
    | Ok _ -> ()
    | Error err -> Alcotest.fail ("expected stream success: " ^ Error.to_string err));
-  let events = Telemetry_bus.drain sub |> List.map require_decoded_telemetry in
+  let events = Event_bus.drain sub |> List.map decode_telemetry in
   Alcotest.(check int) "telemetry events received" 1 (List.length events);
   (match
      List.find_opt
@@ -200,7 +207,7 @@ let test_run_stream_emits_telemetry_via_pipeline () =
      Alcotest.(check string) "provider" "mock-provider" provider;
      Alcotest.(check string) "model" "mock-model" model
    | _ -> Alcotest.fail "expected Streaming_first_chunk event");
-  Telemetry_bus.unsubscribe telemetry_bus sub
+  Event_bus.unsubscribe event_bus sub
 ;;
 
 let test_run_stream_without_event_bus_skips_telemetry () =

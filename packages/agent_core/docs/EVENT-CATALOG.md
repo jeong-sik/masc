@@ -136,8 +136,8 @@ val subscribe :
 val drain : subscription -> event list
 ```
 
-Filters compose: `filter_any`, `filter_all`, `filter_agent`,
-`filter_tools_only`, `filter_topic`, `filter_correlation`, `filter_run`.
+Filters compose: `filter_all`, `filter_agent`, `filter_tools_only`,
+`filter_topic`.
 
 Each subscription owns an explicitly sized bounded FIFO and chooses
 `Drop_oldest` or `Drop_newest`. `publish` never waits for queue capacity to

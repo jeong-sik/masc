@@ -76,7 +76,8 @@ The command palette is `:`.
 | Keys | What it does |
 |---|---|
 | `j/k` | move the roster cursor |
-| `v` | cycle compact / detailed / grouped |
+| `v` | cycle list / state / cause / runtime / 24h |
+| `V` | one or two lines per Keeper |
 | `o` | cycle priority / recent / oldest / activity / name |
 | `J` | open the selected Keeper's schedules |
 | `K` | browse Keeper-origin requests queued for the selected Keeper |

@@ -362,6 +362,16 @@ let tools_refresh =
     ~help:"refresh the open original Task body/history, original request \
            detail, or Tools list"
 
+(* The views [v] walks, named from the walk itself so the sheet cannot list
+   one the key skips. *)
+let keeper_list_view_names =
+  let first = Masc_tui_keeper_list_model.Plain in
+  let rec walk view =
+    let next = Masc_tui_keeper_list_model.next_view view in
+    view :: (if next = first then [] else walk next)
+  in
+  String.concat " / " (List.map Masc_tui_keeper_list_model.view_label (walk first))
+
 let keeper_actions =
   [ b Act "c" "chat" ~help:"chat with the keeper"
   ; b Act "l" "logs"
@@ -550,7 +560,8 @@ let for_surface = function
       ]
   | Keepers Keeper_list ->
       (b Navigate "j/k" "move" ~help:"move the roster cursor")
-      :: (b Navigate "v" "view" ~help:"cycle compact / detailed / grouped")
+      :: (b Navigate "v" "view" ~help:("cycle " ^ keeper_list_view_names))
+      :: (b Navigate "V" "density" ~help:"one or two lines per Keeper")
       :: (b Navigate "o" "order" ~help:"cycle priority / recent / oldest / activity / name")
       :: (b Act "J" "jobs" ~help:"open the selected Keeper's schedules")
       :: (b Act "K" "relations" ~help:"browse Keeper-origin requests queued for the selected Keeper")

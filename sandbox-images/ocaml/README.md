@@ -16,20 +16,22 @@ file cut to 14,829 bytes started and one cut to 15,057 bytes did not (#39447).
 
 ## Base image and compiler
 
-`masc.opam` pins `"ocaml" {= "5.5.1"}`. An `ubuntu:24.04` image with
+`masc.opam` pins `"ocaml" {= "5.5.2"}`. An `ubuntu:24.04` image with
 `opam switch create ocaml-system` resolved to the distribution compiler (4.x),
 so `opam install --deps-only` for this repository could never succeed there.
 The upstream opam image ships a built compiler, which also saves a 20-40
 minute compiler build on every rebuild.
 
-The `ocaml-5.5` base tag ships 5.5.0 and pins `ocaml-base-compiler` to it, so
-`--deps-only` cannot solve against the 5.5.1 pin (#34143, for the 5.5.1
-security and runtime-leak fixes). With that pin in place the only route to
-5.5.1 is `ocaml-variants`, which wants libunwind-dev and autoconf that are not
-installed, and the build stops with "No solution found". Dropping the pin and
-moving the switch invariant keeps the compiler on `ocaml-base-compiler`, so no
-depext is needed and the switch keeps the name "5.5" that the
-`OPAM_SWITCH_PREFIX` paths spell out.
+The `ocaml-5.5` base tag names a minor release and may carry an older
+compiler pin. The recipe removes that pin, sets the switch invariant to
+`ocaml-base-compiler.5.5.2`, and installs it before MASC dependencies. This
+keeps the switch on `ocaml-base-compiler` and preserves the name "5.5" that
+`OPAM_SWITCH_PREFIX` uses.
+
+[OCaml 5.5.2](https://ocaml.org/releases/5.5.2) fixes compiler and runtime
+bugs, including atomic-load elimination, pattern matching, and runtime events,
+and hardens several standard-library entry points. Images must be rebuilt to
+include the new compiler; changing the recipe does not update existing images.
 
 `scripts/check-sandbox-ocaml-version.sh` reads the compiler version out of the
 Dockerfile and fails CI when `masc.opam` asks for a different one.

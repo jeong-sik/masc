@@ -5201,7 +5201,8 @@ let render_keeper_message (state : state) =
              | Keeper_control.Present runtime ->
                (match runtime.kr_portrait with
                 | Tui_decode.Ready equipment ->
-                  Masc_tui_chat_portrait.shown ~name:keeper_name
+                  Masc_tui_chat_portrait.shown ~figure:Masc_tui_chat_portrait.Face
+                    ~name:keeper_name
                     ~portrait:(Keeper_portrait_equipment.Ready equipment)
                     ~rows:pane_rows ~cols:keeper_roster_pane_cols
                 | Tui_decode.Unavailable _ -> None)

@@ -110,8 +110,8 @@ USER opam
 # scripts/check-sandbox-ocaml-version.sh reads the version out of the line below.
 RUN opam update --yes \
  && opam pin remove ocaml-base-compiler --yes \
- && opam switch set-invariant ocaml-base-compiler.5.5.1 --yes \
- && opam install ocaml-base-compiler.5.5.1 --yes \
+ && opam switch set-invariant ocaml-base-compiler.5.5.2 --yes \
+ && opam install ocaml-base-compiler.5.5.2 --yes \
  && opam clean -a -c -s --logs
 
 # Package metadata only; the lock's pins are replayed (README.md: Dependencies).

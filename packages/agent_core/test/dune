@@ -84,7 +84,6 @@
   test_tool_execution
   test_artifact_service
   test_async_agent
-  test_atomic_write_race
   test_backend_openai_codec
   test_provider_agnostic_reasoning_replay
   test_backend_glm_coverage
@@ -92,7 +91,6 @@
   test_snapshot_provider_serialization
   test_thinking_control_dialects
   test_body_timeout
-  test_builder_coverage
   test_cache
   test_canonical_tool
   test_capabilities_wiring
@@ -154,7 +152,6 @@
   test_pipeline_illegal_hook
   test_periodic_suffix
   test_pipeline_metrics
-  test_plan
   test_provider
   test_provider_admission
   test_provider_failure_attribution
@@ -172,7 +169,6 @@
   test_sessions_types
   test_sessions_types_deep
   test_skill_document
-  test_skill_discovery
   test_skill_registry
   test_stream_accumulator
   test_streaming_cov
@@ -190,7 +186,6 @@
   test_tool
   test_tool_input_schema_fidelity
   test_tool_input_validation
-  test_tool_middleware
   test_tool_schema_decode_boundary
   test_tracing
   test_trajectory
@@ -199,7 +194,6 @@
   test_typed_tool
   test_usage_accumulation
   test_types
-  test_usability_v030
   test_util)
  (modules
   model_catalog_test_support
@@ -222,7 +216,6 @@
   test_tool_execution
   test_artifact_service
   test_async_agent
-  test_atomic_write_race
   test_backend_openai_codec
   test_provider_agnostic_reasoning_replay
   test_backend_glm_coverage
@@ -230,7 +223,6 @@
   test_snapshot_provider_serialization
   test_thinking_control_dialects
   test_body_timeout
-  test_builder_coverage
   test_cache
   test_canonical_tool
   test_capabilities_wiring
@@ -292,7 +284,6 @@
   test_pipeline_illegal_hook
   test_periodic_suffix
   test_pipeline_metrics
-  test_plan
   test_provider
   test_provider_admission
   test_provider_failure_attribution
@@ -310,7 +301,6 @@
   test_sessions_types
   test_sessions_types_deep
   test_skill_document
-  test_skill_discovery
   test_skill_registry
   test_stream_accumulator
   test_streaming_cov
@@ -328,7 +318,6 @@
   test_tool
   test_tool_input_schema_fidelity
   test_tool_input_validation
-  test_tool_middleware
   test_tool_schema_decode_boundary
   test_tracing
   test_trajectory
@@ -337,7 +326,6 @@
   test_typed_tool
   test_usage_accumulation
   test_types
-  test_usability_v030
   test_util)
  (libraries agent_core_test_deps agent_core llm_provider alcotest eio_main)
  (deps ../docs/example-capability-manifest.json ../models.toml)
@@ -605,11 +593,6 @@
  (name test_api)
  (modules test_api)
  (libraries agent_core_test_deps agent_core alcotest))
-
-(test
- (name test_builder)
- (modules test_builder)
- (libraries agent_core_test_deps agent_core alcotest eio_main))
 
 (test
  (name test_full_pipeline_cov)

@@ -1,7 +1,7 @@
 (test
  (name test_keeper_antigravity_runtime)
  (modules test_keeper_antigravity_runtime)
- (deps (source_tree %{workspace_root}/config/prompts))
+ (deps masc-antigravity-path-hook (source_tree %{workspace_root}/config/prompts))
  (libraries masc masc_test_deps masc.prompt_registry))
 
 (rule

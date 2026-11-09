@@ -23,7 +23,9 @@
     {b Own provider accounts} (plan D1-3). A [Manage_own_provider] route is
     open to every active Human, an Admin and a Member alike, as the account
     they link is theirs. A PAT needs [Manage_own_provider] in its scope, and a
-    service is refused.
+    service is refused. A [Manage_own_keeper] route is open the same way, as
+    the Keeper a person makes is theirs (plan D1-5), with
+    [Manage_own_keeper] in the scope of a PAT.
 
     {b Kinds.} [Always_public] and [Public_read Open_when_strict] need no
     credential: multi-account mode is strict, and the A4d routes stay open
@@ -81,6 +83,12 @@ type reason =
   | Pat_scope_lacks_own_provider
       (** A [Manage_own_provider] route, and the scope of the PAT does not
           hold that effect (design 4.4). *)
+  | Service_owns_no_keeper of Authz_types.Service_id.t
+      (** A [Manage_own_keeper] route, and a service calls it: a person makes
+          their own Keeper (plan D1-5). *)
+  | Pat_scope_lacks_own_keeper
+      (** A [Manage_own_keeper] route, and the scope of the PAT does not hold
+          that effect (design 4.4). *)
 
 (** [true] for the reasons that a request without a working credential gets
     (401); [false] for those of an authenticated request that may not do this

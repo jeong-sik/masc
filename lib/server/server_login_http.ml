@@ -232,21 +232,25 @@ let whoami (t : R.t) request reqd =
          (gate_request ~request_authority request)))
 ;;
 
-(* The person a subscription route acts for, judged on one snapshot of the
-   zone; the connect handler checks the session of a login against them again
-   on every status and control request. *)
-let as_person (t : R.t) request reqd f =
+(* The one a route of a person acts for, judged by [gate] on one snapshot of
+   the zone. *)
+let as_gated (t : R.t) ~gate request reqd f =
   with_authority reqd (fun request_authority ->
     let state = (Authz_zone.snapshot t.zone).Authz_zone.state in
     match
-      Auth_preview.person
+      gate
         state
         ~now_ms:(int_of_float (Ptime.to_float_s (t.now ()) *. ms_per_second))
         (gate_request ~request_authority request)
     with
     | Error answer -> respond reqd answer
-    | Ok person -> f state person)
+    | Ok who -> f state who)
 ;;
+
+(* The person a subscription route acts for; the connect handler checks the
+   session of a login against them again on every status and control
+   request. *)
+let as_person t request reqd f = as_gated t ~gate:Auth_preview.person request reqd f
 
 let person_of (t : R.t) { Auth_preview.user_id; namespace } =
   { Server_setup_account_login.zone = t.zone; user_id; namespace }
@@ -281,6 +285,23 @@ let provider_accounts t request reqd =
   as_person t request reqd (fun state person -> respond reqd (Auth_preview.provider_accounts state person))
 ;;
 
+let as_keeper_owner t request reqd f = as_gated t ~gate:Auth_preview.keeper_owner request reqd f
+
+let keepers t request reqd =
+  as_keeper_owner t request reqd (fun state user_id ->
+    respond reqd (Auth_preview_keeper.list state user_id))
+;;
+
+let make_keeper (t : R.t) request reqd =
+  as_keeper_owner t request reqd (fun (_ : Authz_state.t) user_id ->
+    with_body reqd (fun body -> respond reqd (Auth_preview_keeper.make t.zone user_id ~body)))
+;;
+
+let assign_keeper (t : R.t) request reqd =
+  as_keeper_owner t request reqd (fun (_ : Authz_state.t) user_id ->
+    with_body reqd (fun body -> respond reqd (Auth_preview_keeper.assign t.zone user_id ~body)))
+;;
+
 let add_preview_routes t ~base_path router =
   router
   |> Server_route.get Server_route.Always_public "/" (page Auth_preview.home_page t)
@@ -289,6 +310,9 @@ let add_preview_routes t ~base_path router =
   |> Server_route.get access Auth_preview.provider_accounts_path (provider_accounts t)
   |> Server_route.post access Auth_preview.connect_path (connect t ~base_path)
   |> Server_route.post access Auth_preview.verify_path (verify t ~base_path)
+  |> Server_route.get access Auth_preview_keeper.keepers_path (keepers t)
+  |> Server_route.post access Auth_preview_keeper.keepers_path (make_keeper t)
+  |> Server_route.post access Auth_preview_keeper.assign_path (assign_keeper t)
   |> Server_route.prefix_get access Auth_preview.connect_prefix (login_status t ~base_path)
   |> Server_route.prefix_post access Auth_preview.connect_prefix (login_control t ~base_path)
 ;;

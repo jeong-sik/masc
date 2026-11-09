@@ -515,6 +515,59 @@ let the_preview_follows_a_login () =
       , {|{"provider_accounts":["account-1"],"runtimes":[{"runtime_id":"account-1.claude-sonnet-5-5","provider_account_id":"account-1"}]}|}
       )
       (owned.status, owned.body);
+    (* Plan D1-5: the person makes a Keeper and gives it their Runtime. *)
+    let csrf = csrf_of t admin in
+    let keeper_post ?(csrf = Some csrf) path body =
+      let reply =
+        send
+          admin
+          router
+          ~meth:"POST"
+          ~path
+          ~headers:(changing ?csrf () @ [ "Content-Type", "application/json" ])
+          ~body
+      in
+      reply.status, reply.body
+    in
+    let keepers () =
+      let reply = send admin router ~meth:"GET" ~path:Masc.Auth_preview_keeper.keepers_path in
+      reply.status, reply.body
+    in
+    let made = Masc.Auth_preview_keeper.keepers_path in
+    let assign = Masc.Auth_preview_keeper.assign_path in
+    let check_reply label expected actual = Alcotest.(check (pair int string)) label expected actual in
+    check_reply "owns no Keeper yet" (200, {|{"keepers":[]}|}) (keepers ());
+    Alcotest.(check int)
+      "a Keeper without the CSRF token stops at the gate"
+      403
+      (fst (keeper_post ~csrf:None made {|{"keeper_id":"keeper-1"}|}));
+    check_reply
+      "a name that is not a Keeper name"
+      ( 400
+      , {|{"error":"keeper_name must match [A-Za-z0-9._-]+ and must not be a reserved path component (. or ..)"}|}
+      )
+      (keeper_post made {|{"keeper_id":".."}|});
+    check_reply
+      "a Keeper"
+      (200, {|{"keeper_id":"keeper-1","record":"made"}|})
+      (keeper_post made {|{"keeper_id":"keeper-1"}|});
+    check_reply
+      "the same Keeper again"
+      (200, {|{"keeper_id":"keeper-1","record":"existing"}|})
+      (keeper_post made {|{"keeper_id":"keeper-1"}|});
+    check_reply
+      "a Runtime no one made"
+      (404, {|{"error":"No Runtime of yours has this id."}|})
+      (keeper_post assign {|{"keeper_id":"keeper-1","runtime_id":"account-2.claude-sonnet-5-5"}|});
+    check_reply
+      "its owner's Runtime"
+      ( 200
+      , {|{"keeper_id":"keeper-1","runtime_id":"account-1.claude-sonnet-5-5","record":"assigned"}|} )
+      (keeper_post assign {|{"keeper_id":"keeper-1","runtime_id":"account-1.claude-sonnet-5-5"}|});
+    check_reply
+      "the Keeper on its Runtime"
+      (200, {|{"keepers":[{"keeper_id":"keeper-1","runtime_id":"account-1.claude-sonnet-5-5"}]}|})
+      (keepers ());
     Alcotest.(check int)
       "a connect without the CSRF token stops at the gate"
       403
@@ -530,7 +583,6 @@ let the_preview_follows_a_login () =
       "a session and a bearer"
       ("401 " ^ Masc.Auth_gate.reason_to_string Masc.Auth_gate.Several_credentials)
       (whoami router admin ~headers:[ "Authorization", "Bearer " ^ String.make 64 'f' ] ());
-    let csrf = csrf_of t admin in
     let out = send admin router ~meth:"POST" ~path:"/auth/logout" ~headers:(changing ~csrf ()) in
     Alcotest.(check int) ("signed out: " ^ out.body) 204 out.status;
     Alcotest.(check string)

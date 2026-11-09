@@ -42,6 +42,8 @@ type reason =
   | Not_served_in_multi_account of Route_access.self_authenticated_reason
   | Service_owns_no_provider of Service_id.t
   | Pat_scope_lacks_own_provider
+  | Service_owns_no_keeper of Service_id.t
+  | Pat_scope_lacks_own_keeper
 
 let is_unauthenticated = function
   | Credential_required
@@ -59,7 +61,9 @@ let is_unauthenticated = function
   | Unregistered_tool _
   | Not_served_in_multi_account _
   | Service_owns_no_provider _
-  | Pat_scope_lacks_own_provider -> false
+  | Pat_scope_lacks_own_provider
+  | Service_owns_no_keeper _
+  | Pat_scope_lacks_own_keeper -> false
 ;;
 
 let served_reason_label = function
@@ -99,6 +103,12 @@ let reason_to_string = function
       (Service_id.to_string service_id)
   | Pat_scope_lacks_own_provider ->
     "the scope of the PAT does not allow " ^ Effect.to_string Effect.Manage_own_provider
+  | Service_owns_no_keeper service_id ->
+    Printf.sprintf
+      "the service %s manages no Keeper: a person makes their own"
+      (Service_id.to_string service_id)
+  | Pat_scope_lacks_own_keeper ->
+    "the scope of the PAT does not allow " ^ Effect.to_string Effect.Manage_own_keeper
 ;;
 
 type request =
@@ -115,6 +125,7 @@ type need =
   | Judged_by_its_route
   | Not_served of Route_access.self_authenticated_reason
   | Own_provider
+  | Own_keeper
 
 let tool_need tool_name =
   match Tool_catalog.registered_metadata tool_name with
@@ -135,6 +146,7 @@ let need_of : Route_access.t -> (need, reason) result = function
   | Route_access.Tool_observation { tool_name }
   | Route_access.Tool_actor { tool_name } -> tool_need tool_name
   | Route_access.Manage_own_provider -> Ok Own_provider
+  | Route_access.Manage_own_keeper -> Ok Own_keeper
   | Route_access.Self_authenticated Route_access.Browser_session -> Ok Judged_by_its_route
   | Route_access.Self_authenticated
       ((Route_access.Oauth_protocol | Route_access.Loopback_dev_token) as reason) ->
@@ -239,18 +251,32 @@ let holds (who : authenticated) permission =
          else Error (Pat_scope_lacks { permission; effect_ })))
 ;;
 
-(* Every active person manages their own provider accounts, whatever their
-   role (design 5.4-5): the account they link is theirs, and an Admin links
-   none for another (design 4.2). *)
-let owns_provider (who : authenticated) =
+(* Every active person manages what is their own, whatever their role: the
+   account they link (design 5.4-5) and the Keeper they make (design 4.3).
+   An Admin links none and makes none for another (design 4.2). *)
+let owns ~effect_ ~service_refused ~scope_lacks (who : authenticated) =
   match who.principal, who.pat_binding with
   | Principal.Service service_id, (Pat_binding.Not_pat | Pat_binding.Pat _) ->
-    Error (Service_owns_no_provider service_id)
+    Error (service_refused service_id)
   | Principal.Human _, Pat_binding.Not_pat -> Ok (Authenticated who)
   | Principal.Human _, Pat_binding.Pat { Pat_scope.scope; expires_at = _ } ->
-    if Effect_scope.mem Effect.Manage_own_provider scope.Authorization_scope.allowed_effects
+    if Effect_scope.mem effect_ scope.Authorization_scope.allowed_effects
     then Ok (Authenticated who)
-    else Error Pat_scope_lacks_own_provider
+    else Error scope_lacks
+;;
+
+let owns_provider =
+  owns
+    ~effect_:Effect.Manage_own_provider
+    ~service_refused:(fun service_id -> Service_owns_no_provider service_id)
+    ~scope_lacks:Pat_scope_lacks_own_provider
+;;
+
+let owns_keeper =
+  owns
+    ~effect_:Effect.Manage_own_keeper
+    ~service_refused:(fun service_id -> Service_owns_no_keeper service_id)
+    ~scope_lacks:Pat_scope_lacks_own_keeper
 ;;
 
 let decide state ~now_ms access request =
@@ -273,4 +299,9 @@ let decide state ~now_ms access request =
     (match who with
      | None -> Error Credential_required
      | Some who -> owns_provider who)
+  | Own_keeper ->
+    let* who = authenticate state ~now_ms request in
+    (match who with
+     | None -> Error Credential_required
+     | Some who -> owns_keeper who)
 ;;

@@ -101,6 +101,10 @@ const account = document.getElementById("account");
 const model = document.getElementById("model");
 const verdict = document.getElementById("verdict");
 const runtimes = document.getElementById("runtimes");
+const keepers = document.getElementById("keepers");
+const keeper = document.getElementById("keeper");
+const keeperRuntime = document.getElementById("keeper-runtime");
+const keeperVerdict = document.getElementById("keeper-verdict");
 let csrf = null;
 let loginId = null;
 async function read(path) {
@@ -135,6 +139,9 @@ async function listAccounts() {
     : "";
   if (answer.ok && json.provider_accounts.length > 0) {
     account.value = json.provider_accounts[json.provider_accounts.length - 1];
+  }
+  if (answer.ok && json.runtimes.length > 0) {
+    keeperRuntime.value = json.runtimes[json.runtimes.length - 1].runtime_id;
   }
 }
 function post(path, body) {
@@ -188,13 +195,34 @@ document.getElementById("verify").addEventListener("click", async () => {
   verdict.textContent = "verify (" + answer.status + "): " + await answer.text();
   await listAccounts();
 });
-show().then(listAccounts);|}
+async function listKeepers() {
+  const [answer, json] = await read("%s");
+  keepers.textContent = answer.ok
+    ? (json.keepers.length === 0 ? "none"
+       : json.keepers.map((k) =>
+           k.keeper_id + " on " + (k.runtime_id === null ? "no Runtime" : k.runtime_id)).join("\n"))
+    : "(" + answer.status + "): " + json.error;
+}
+document.getElementById("make-keeper").addEventListener("click", async () => {
+  const answer = await post("%s", { keeper_id: keeper.value });
+  keeperVerdict.textContent = "make (" + answer.status + "): " + await answer.text();
+  await listKeepers();
+});
+document.getElementById("assign").addEventListener("click", async () => {
+  const answer = await post("%s", { keeper_id: keeper.value, runtime_id: keeperRuntime.value });
+  keeperVerdict.textContent = "assign (" + answer.status + "): " + await answer.text();
+  await listKeepers();
+});
+show().then(listAccounts).then(listKeepers);|}
     Authz_browser_request.csrf_header
     provider_accounts_path
     Authz_browser_request.csrf_header
     connect_path
     connect_prefix
     verify_path
+    Auth_preview_keeper.keepers_path
+    Auth_preview_keeper.keepers_path
+    Auth_preview_keeper.assign_path
 ;;
 
 let home_page ~nonce =
@@ -221,6 +249,13 @@ let home_page ~nonce =
            ; "<pre id=\"verdict\"></pre>"
            ; "<h2>My Runtimes</h2>"
            ; "<pre id=\"runtimes\">reading</pre>"
+           ; "<h2>My Keepers</h2>"
+           ; "<pre id=\"keepers\">reading</pre>"
+           ; "<label>Keeper name <input id=\"keeper\"></label>"
+           ; "<button id=\"make-keeper\">Make</button>"
+           ; "<label>Runtime (one of My Runtimes) <input id=\"keeper-runtime\"></label>"
+           ; "<button id=\"assign\">Assign</button>"
+           ; "<pre id=\"keeper-verdict\"></pre>"
            ])
     ~script:home_script
 ;;
@@ -266,10 +301,31 @@ type person =
   ; namespace : Account_home_namespace.t
   }
 
-let person state ~now_ms request =
-  match Auth_gate.decide state ~now_ms Route_access.Manage_own_provider request with
+(* The human a [Manage_own_*] route lets through. *)
+let human state ~now_ms access ~service_refused request =
+  match Auth_gate.decide state ~now_ms access request with
   | Error reason -> Error (refused reason)
-  | Ok (Auth_gate.Authenticated { Auth_gate.principal = Principal.Human user_id; _ }) ->
+  | Ok (Auth_gate.Authenticated { Auth_gate.principal = Principal.Human user_id; _ }) -> Ok user_id
+  | Ok (Auth_gate.Authenticated { Auth_gate.principal = Principal.Service service_id; _ }) ->
+    (* [decide] refuses a service on these kinds; were it not to, it still
+       owns nothing. *)
+    Error (refused (service_refused service_id))
+  | Ok (Auth_gate.Anonymous | Auth_gate.Judged_by_route) ->
+    (* These kinds need a credential, so [decide] answers neither. *)
+    Error (refused Auth_gate.Credential_required)
+;;
+
+let person state ~now_ms request =
+  match
+    human
+      state
+      ~now_ms
+      Route_access.Manage_own_provider
+      ~service_refused:(fun service_id -> Auth_gate.Service_owns_no_provider service_id)
+      request
+  with
+  | Error _ as refused -> refused
+  | Ok user_id ->
     (match Authz_principal_state.find_membership state.Authz_state.principals user_id with
      | Some { Authz_principal_state.account_home_namespace = namespace; workspace_id = _ } ->
        Ok { user_id; namespace }
@@ -277,13 +333,15 @@ let person state ~now_ms request =
        (* The admission that made an active principal made its membership in
           the same record, so none is a log this build did not write. *)
        Error (R.json R.Internal_error_500 [ "error", `String "the principal has no membership" ]))
-  | Ok (Auth_gate.Authenticated { Auth_gate.principal = Principal.Service service_id; _ }) ->
-    (* [decide] refuses a service on this kind; were it not to, it still
-       links no account. *)
-    Error (refused (Auth_gate.Service_owns_no_provider service_id))
-  | Ok (Auth_gate.Anonymous | Auth_gate.Judged_by_route) ->
-    (* [Manage_own_provider] needs a credential, so [decide] answers neither. *)
-    Error (refused Auth_gate.Credential_required)
+;;
+
+let keeper_owner state ~now_ms request =
+  human
+    state
+    ~now_ms
+    Route_access.Manage_own_keeper
+    ~service_refused:(fun service_id -> Auth_gate.Service_owns_no_keeper service_id)
+    request
 ;;
 
 let provider_accounts state { user_id; namespace = _ } =

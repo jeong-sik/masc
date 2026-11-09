@@ -299,6 +299,23 @@ let each_kind_of_route_judges_the_request () =
         , Route_access.Manage_own_provider
         , request (Bearer c.service)
         , refused (G.Service_owns_no_provider (get (Service_id.of_string "keeper-runner"))) )
+      ; ( "own keeper, nothing"
+        , Route_access.Manage_own_keeper
+        , request Nothing
+        , refused G.Credential_required )
+      ; ( "own keeper, Member session"
+        , Route_access.Manage_own_keeper
+        , request (Cookie c.member_session)
+        , "worker by session-member" )
+      ; "own keeper, PAT", Route_access.Manage_own_keeper, request (Bearer c.admin_pat), "admin by pat-all"
+      ; ( "own keeper, read-only PAT"
+        , Route_access.Manage_own_keeper
+        , request (Bearer c.read_only_pat)
+        , refused G.Pat_scope_lacks_own_keeper )
+      ; ( "own keeper, service"
+        , Route_access.Manage_own_keeper
+        , request (Bearer c.service)
+        , refused (G.Service_owns_no_keeper (get (Service_id.of_string "keeper-runner"))) )
       ]
     in
     List.iter

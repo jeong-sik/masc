@@ -564,7 +564,7 @@ let test_strict_auth_opens_a_path_by_its_kind () =
        | Always_public | Public_read Open_when_strict -> true
        | Public_read Credential_when_strict | Read_auth | Permission _ | Token_permission _
        | Private_token_permission _ | Tool _ | Tool_observation _ | Tool_actor _
-       | Self_authenticated _ | Manage_own_provider -> false)
+       | Self_authenticated _ | Manage_own_provider | Manage_own_keeper -> false)
     | `Method_not_allowed | `Not_found -> false
   in
   let artifact = "artifact-" ^ String.make 32 'a' in

@@ -22,7 +22,8 @@ val invite_page : nonce:string -> Login_routes.answer
     form that starts a GitHub login, and a sign-out button. Below them, the
     subscriptions the person owns, a form that connects one through
     {!connect_path} and answers its login, and a form that calls one through
-    {!verify_path}. *)
+    {!verify_path}. Last, the person's Runtimes and Keepers, and a form that
+    makes a Keeper and gives it a Runtime through {!Auth_preview_keeper}. *)
 val home_page : nonce:string -> Login_routes.answer
 
 (** [GET /api/v1/auth/whoami], judged as [Read_auth] by {!Auth_gate.decide}.
@@ -55,6 +56,15 @@ type person =
     request that does not pass gets the answer to write: a JSON
     [{"error": ...}] with a 401 or a 403. *)
 val person : Authz_state.t -> now_ms:int -> Auth_gate.request -> (person, Login_routes.answer) result
+
+(** Judges the request as [Manage_own_keeper] by {!Auth_gate.decide}: the
+    person whose Keepers a Keeper route reads and writes (plan D1-5). A
+    request that does not pass gets the answer to write, as for {!person}. *)
+val keeper_owner
+  :  Authz_state.t
+  -> now_ms:int
+  -> Auth_gate.request
+  -> (Authz_types.User_id.t, Login_routes.answer) result
 
 (** A 200 JSON [{"provider_accounts": [...], "runtimes": [...]}]: the ids of
     the accounts the person owns ({!Authz_provider_account.owned}), and the

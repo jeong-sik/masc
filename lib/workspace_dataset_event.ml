@@ -40,31 +40,6 @@ type dataset =
   | Lane_addons of { instance_id : string }
   | Browser_observation of browser_observation
 
-let repositories_name = "repositories"
-let verification_requests_name = "verification_requests"
-let keeper_metrics_name = "keeper_metrics"
-let harness_verdicts_name = "harness_verdicts"
-let goals_name = "goals"
-let runtime_config_name = "runtime_config"
-let connectors_name = "connectors"
-let keeper_oauth_attempts_name = "keeper_oauth_attempts"
-let skill_activations_name = "skill_activations"
-let skill_catalog_name = "skill_catalog"
-let clients_name = "clients"
-let account_emails_name = "account_emails"
-let provider_usage_name = "provider_usage"
-let provider_standing_name = "provider_standing"
-let keeper_costs_name = "keeper_costs"
-let workspace_health_name = "workspace_health"
-let runtime_probe_name = "runtime_probe"
-let runtime_metrics_name = "runtime_metrics"
-let lanes_name = "lanes"
-let machine_live_name = "machine_live"
-let memory_health_name = "memory_health"
-let play_room_name = "play_room"
-let lane_addons_name = "lane_addons"
-let browser_observation_name = "browser_observation"
-
 module Kind = struct
   type t =
     | Repositories
@@ -91,59 +66,37 @@ module Kind = struct
     | Play_room
     | Lane_addons
     | Browser_observation
+  [@@deriving enumerate]
 
   let to_wire = function
-    | Repositories -> repositories_name
-    | Verification_requests -> verification_requests_name
-    | Keeper_metrics -> keeper_metrics_name
-    | Harness_verdicts -> harness_verdicts_name
-    | Goals -> goals_name
-    | Runtime_config -> runtime_config_name
-    | Connectors -> connectors_name
-    | Keeper_oauth_attempts -> keeper_oauth_attempts_name
-    | Skill_activations -> skill_activations_name
-    | Skill_catalog -> skill_catalog_name
-    | Clients -> clients_name
-    | Account_emails -> account_emails_name
-    | Provider_usage -> provider_usage_name
-    | Provider_standing -> provider_standing_name
-    | Keeper_costs -> keeper_costs_name
-    | Workspace_health -> workspace_health_name
-    | Runtime_probe -> runtime_probe_name
-    | Runtime_metrics -> runtime_metrics_name
-    | Lanes -> lanes_name
-    | Machine_live -> machine_live_name
-    | Memory_health -> memory_health_name
-    | Play_room -> play_room_name
-    | Lane_addons -> lane_addons_name
-    | Browser_observation -> browser_observation_name
+    | Repositories -> "repositories"
+    | Verification_requests -> "verification_requests"
+    | Keeper_metrics -> "keeper_metrics"
+    | Harness_verdicts -> "harness_verdicts"
+    | Goals -> "goals"
+    | Runtime_config -> "runtime_config"
+    | Connectors -> "connectors"
+    | Keeper_oauth_attempts -> "keeper_oauth_attempts"
+    | Skill_activations -> "skill_activations"
+    | Skill_catalog -> "skill_catalog"
+    | Clients -> "clients"
+    | Account_emails -> "account_emails"
+    | Provider_usage -> "provider_usage"
+    | Provider_standing -> "provider_standing"
+    | Keeper_costs -> "keeper_costs"
+    | Workspace_health -> "workspace_health"
+    | Runtime_probe -> "runtime_probe"
+    | Runtime_metrics -> "runtime_metrics"
+    | Lanes -> "lanes"
+    | Machine_live -> "machine_live"
+    | Memory_health -> "memory_health"
+    | Play_room -> "play_room"
+    | Lane_addons -> "lane_addons"
+    | Browser_observation -> "browser_observation"
 
-  let of_wire = function
-    | wire when String.equal wire repositories_name -> Some Repositories
-    | wire when String.equal wire verification_requests_name -> Some Verification_requests
-    | wire when String.equal wire keeper_metrics_name -> Some Keeper_metrics
-    | wire when String.equal wire harness_verdicts_name -> Some Harness_verdicts
-    | wire when String.equal wire goals_name -> Some Goals
-    | wire when String.equal wire runtime_config_name -> Some Runtime_config
-    | wire when String.equal wire connectors_name -> Some Connectors
-    | wire when String.equal wire keeper_oauth_attempts_name -> Some Keeper_oauth_attempts
-    | wire when String.equal wire skill_activations_name -> Some Skill_activations
-    | wire when String.equal wire skill_catalog_name -> Some Skill_catalog
-    | wire when String.equal wire clients_name -> Some Clients
-    | wire when String.equal wire account_emails_name -> Some Account_emails
-    | wire when String.equal wire provider_usage_name -> Some Provider_usage
-    | wire when String.equal wire provider_standing_name -> Some Provider_standing
-    | wire when String.equal wire keeper_costs_name -> Some Keeper_costs
-    | wire when String.equal wire workspace_health_name -> Some Workspace_health
-    | wire when String.equal wire runtime_probe_name -> Some Runtime_probe
-    | wire when String.equal wire runtime_metrics_name -> Some Runtime_metrics
-    | wire when String.equal wire lanes_name -> Some Lanes
-    | wire when String.equal wire machine_live_name -> Some Machine_live
-    | wire when String.equal wire memory_health_name -> Some Memory_health
-    | wire when String.equal wire play_room_name -> Some Play_room
-    | wire when String.equal wire lane_addons_name -> Some Lane_addons
-    | wire when String.equal wire browser_observation_name -> Some Browser_observation
-    | _ -> None
+  (* [to_wire] is the one place a dataset name is spelled; [of_wire] reads the
+     names back through [all]. *)
+  let of_wire wire = List.find_opt (fun kind -> String.equal (to_wire kind) wire) all
 end
 
 let kind = function
@@ -313,41 +266,42 @@ let machine_of_fields fields =
 
 let of_fields fields =
   match List.assoc_opt "dataset" fields with
-  | Some (`String name) when String.equal name repositories_name -> Ok Repositories
-  | Some (`String name) when String.equal name verification_requests_name ->
-    Ok Verification_requests
-  | Some (`String name) when String.equal name harness_verdicts_name -> Ok Harness_verdicts
-  | Some (`String name) when String.equal name goals_name -> Ok Goals
-  | Some (`String name) when String.equal name runtime_config_name -> Ok Runtime_config
-  | Some (`String name) when String.equal name connectors_name -> Ok Connectors
-  | Some (`String name) when String.equal name skill_catalog_name -> Ok Skill_catalog
-  | Some (`String name) when String.equal name clients_name -> Ok Clients
-  | Some (`String name) when String.equal name account_emails_name -> Ok Account_emails
-  | Some (`String name) when String.equal name provider_usage_name -> Ok Provider_usage
-  | Some (`String name) when String.equal name provider_standing_name -> Ok Provider_standing
-  | Some (`String name) when String.equal name keeper_costs_name -> Ok Keeper_costs
-  | Some (`String name) when String.equal name workspace_health_name -> Ok Workspace_health
-  | Some (`String name) when String.equal name runtime_probe_name -> Ok Runtime_probe
-  | Some (`String name) when String.equal name runtime_metrics_name -> Ok Runtime_metrics
-  | Some (`String name) when String.equal name lanes_name -> Ok Lanes
-  | Some (`String name) when String.equal name machine_live_name ->
-    Result.map (fun machine -> Machine_live { machine }) (machine_of_fields fields)
-  | Some (`String name) when String.equal name play_room_name ->
-    Result.map (fun machine -> Play_room { machine }) (machine_of_fields fields)
-  | Some (`String name) when String.equal name lane_addons_name ->
-    Result.map (fun instance_id -> Lane_addons { instance_id }) (instance_of_fields fields)
-  | Some (`String name) when String.equal name browser_observation_name ->
-    Result.map (fun observation -> Browser_observation observation)
-      (browser_observation_of_fields fields)
-  | Some (`String name) when String.equal name memory_health_name ->
-    Result.map (fun keeper -> Memory_health { keeper }) (keeper_of_fields name fields)
-  | Some (`String name) when String.equal name keeper_metrics_name ->
-    Result.map (fun keeper -> Keeper_metrics { keeper }) (keeper_of_fields name fields)
-  | Some (`String name) when String.equal name keeper_oauth_attempts_name ->
-    Result.map (fun keeper -> Keeper_oauth_attempts { keeper }) (keeper_of_fields name fields)
-  | Some (`String name) when String.equal name skill_activations_name ->
-    Result.map (fun keeper -> Skill_activations { keeper }) (keeper_of_fields name fields)
-  | Some (`String name) -> Error (event_type ^ " names an unknown dataset " ^ name)
+  | Some (`String name) ->
+    (match Kind.of_wire name with
+     | None -> Error (event_type ^ " names an unknown dataset " ^ name)
+     | Some Kind.Repositories -> Ok Repositories
+     | Some Kind.Verification_requests -> Ok Verification_requests
+     | Some Kind.Keeper_metrics ->
+       Result.map (fun keeper -> Keeper_metrics { keeper }) (keeper_of_fields name fields)
+     | Some Kind.Harness_verdicts -> Ok Harness_verdicts
+     | Some Kind.Goals -> Ok Goals
+     | Some Kind.Runtime_config -> Ok Runtime_config
+     | Some Kind.Connectors -> Ok Connectors
+     | Some Kind.Keeper_oauth_attempts ->
+       Result.map (fun keeper -> Keeper_oauth_attempts { keeper }) (keeper_of_fields name fields)
+     | Some Kind.Skill_activations ->
+       Result.map (fun keeper -> Skill_activations { keeper }) (keeper_of_fields name fields)
+     | Some Kind.Skill_catalog -> Ok Skill_catalog
+     | Some Kind.Clients -> Ok Clients
+     | Some Kind.Account_emails -> Ok Account_emails
+     | Some Kind.Provider_usage -> Ok Provider_usage
+     | Some Kind.Provider_standing -> Ok Provider_standing
+     | Some Kind.Keeper_costs -> Ok Keeper_costs
+     | Some Kind.Workspace_health -> Ok Workspace_health
+     | Some Kind.Runtime_probe -> Ok Runtime_probe
+     | Some Kind.Runtime_metrics -> Ok Runtime_metrics
+     | Some Kind.Lanes -> Ok Lanes
+     | Some Kind.Machine_live ->
+       Result.map (fun machine -> Machine_live { machine }) (machine_of_fields fields)
+     | Some Kind.Memory_health ->
+       Result.map (fun keeper -> Memory_health { keeper }) (keeper_of_fields name fields)
+     | Some Kind.Play_room ->
+       Result.map (fun machine -> Play_room { machine }) (machine_of_fields fields)
+     | Some Kind.Lane_addons ->
+       Result.map (fun instance_id -> Lane_addons { instance_id }) (instance_of_fields fields)
+     | Some Kind.Browser_observation ->
+       Result.map (fun observation -> Browser_observation observation)
+          (browser_observation_of_fields fields))
   | Some _ | None -> Error (event_type ^ " carries no dataset name")
 
 let announce_with_fields ~base_path fields dataset =

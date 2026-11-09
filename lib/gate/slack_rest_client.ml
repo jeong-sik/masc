@@ -386,38 +386,35 @@ let parse_conversations_history_response ~status ~body =
       else
         match Gate_rest_json.to_yojson json with
         | `Assoc fields ->
-          let parsed =
-            match List.assoc_opt "messages" fields with
-            | Some (`List items) ->
-              List.map
-                (fun item ->
-                  match yojson_string_field "ts" item with
-                  | Some ts ->
-                    Ok
-                      { ts
-                      ; user_id = yojson_string_field "user" item
-                      ; bot_id = yojson_string_field "bot_id" item
-                      ; subtype = yojson_string_field "subtype" item
-                      ; thread_ts = yojson_string_field "thread_ts" item
-                      ; text =
-                          (match yojson_string_field "text" item with
-                           | Some text -> text
-                           | None -> "")
-                      }
-                  | None -> Error "message without ts")
-                items
-            | _ -> [Error "messages must be an array"]
+          let parse_messages items =
+            let rec loop acc = function
+              | [] -> Ok (List.rev acc)
+              | item :: rest ->
+                (match yojson_string_field "ts" item with
+                 | Some ts ->
+                   let msg =
+                     { ts
+                     ; user_id = yojson_string_field "user" item
+                     ; bot_id = yojson_string_field "bot_id" item
+                     ; subtype = yojson_string_field "subtype" item
+                     ; thread_ts = yojson_string_field "thread_ts" item
+                     ; text =
+                         Option.value ~default:"" (yojson_string_field "text" item)
+                     }
+                   in
+                   loop (msg :: acc) rest
+                 | None -> Error (Other "message without ts"))
+            in
+            loop [] items
           in
-          (* [List.partition] is stable, so the first decode failure stays
-             first and names the error. With no failures there is nothing to
-             extract — no unreachable [Some (Ok _)] arm, no [Result.get_ok]
-             on values a sibling proved [Ok]. *)
-          (match List.partition Result.is_ok parsed with
-           | _, Error msg :: _ -> Error (Other msg)
-           (* [partition Result.is_ok] never puts an [Ok] in the second
-              list; the pattern keeps the match exhaustive without a
-              wildcard. *)
-           | oks, ([] | Ok _ :: _) ->
+          let messages_res =
+            match List.assoc_opt "messages" fields with
+            | Some (`List items) -> parse_messages items
+            | _ -> Error (Other "messages must be an array")
+          in
+          (match messages_res with
+           | Error _ as err -> err
+           | Ok messages ->
              let has_more =
                match List.assoc_opt "has_more" fields with
                | Some (`Bool b) -> Ok b
@@ -431,11 +428,9 @@ let parse_conversations_history_response ~status ~body =
                   | _ -> None)
                | _ -> None
              in
-             Result.map (fun has_more ->
-               { messages = List.filter_map Result.to_option oks
-               ; has_more
-               ; next_cursor
-               }) has_more)
+             Result.map
+               (fun has_more -> { messages; has_more; next_cursor })
+               has_more)
         | _ -> Error (Other "ok=true but response is not an object")
 
 let conversations_history ?clock ?(timeout_sec = default_http_timeout_sec) ~token

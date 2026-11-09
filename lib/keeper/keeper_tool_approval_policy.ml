@@ -37,11 +37,13 @@ let descriptor_for ?composition_plan_index tool_name =
    endpoint-owned sibling only admits that playground and refuses external
    paths. This hook cannot replace either producer's resolved authority.
    Execute likewise belongs to its execution Gate, which decides with the
-   call's resolved cwd, sandbox profile and grants. *)
+   call's resolved cwd, sandbox profile and grants, and WebSearch/WebFetch
+   run through [Keeper_gate.decide_external_service] in their producer. *)
 let producer_authorizes descriptor =
   match descriptor.Descriptor.runtime_handler with
   | Descriptor.Tool_execute
-  | Descriptor.Tool_write_file | Descriptor.Tool_edit_file -> true
+  | Descriptor.Tool_write_file | Descriptor.Tool_edit_file
+  | Descriptor.Tool_web_search | Descriptor.Tool_web_fetch -> true
   | Keeper_tool_descriptor.Tool_search_files | Keeper_tool_descriptor.Tool_read_file
   | Keeper_tool_descriptor.Tool_lane_status | Keeper_tool_descriptor.Tool_tools_list
   | Keeper_tool_descriptor.Tool_capability_search | Keeper_tool_descriptor.Tool_context_status
@@ -59,8 +61,8 @@ let producer_authorizes descriptor =
   | Keeper_tool_descriptor.Tool_masc_plan_dispatch | Keeper_tool_descriptor.Tool_masc_run_dispatch
   | Keeper_tool_descriptor.Tool_masc_agent_dispatch
   | Keeper_tool_descriptor.Tool_masc_workspace_dispatch
-  | Keeper_tool_descriptor.Tool_masc_misc_dispatch | Keeper_tool_descriptor.Tool_web_search
-  | Keeper_tool_descriptor.Tool_web_fetch | Keeper_tool_descriptor.Tool_browser_tabs
+  | Keeper_tool_descriptor.Tool_masc_misc_dispatch
+  | Keeper_tool_descriptor.Tool_browser_tabs
   | Keeper_tool_descriptor.Tool_browser_read | Keeper_tool_descriptor.Tool_browser_session
   | Keeper_tool_descriptor.Tool_browser_goto | Keeper_tool_descriptor.Tool_browser_act
   | Keeper_tool_descriptor.Tool_browser_interact

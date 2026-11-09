@@ -233,6 +233,57 @@ value = { title = "not admitted", content = "effectful async" }
   | Error _ | Ok _ -> fail "effectful async composition was admitted"
 ;;
 
+(* RFC-0502 (#49177): the catalog grammar admits Execute and masc_board_post
+   inline and refuses them for durable async plans. *)
+let one_node_effect_composition ~execution ~name ~tool ~value =
+  Printf.sprintf
+    {|[[compositions]]
+name = %S
+execution = %S
+[[compositions.nodes]]
+id = "effect"
+tool = %S
+[compositions.nodes.input]
+kind = "literal"
+value = %s
+|}
+    name execution tool value
+;;
+
+let test_catalog_admits_inline_effect_tools () =
+  let execute =
+    one_node_effect_composition ~execution:"inline" ~name:"run-inline"
+      ~tool:"Execute" ~value:{|{ command = "true" }|}
+  in
+  let board_post =
+    one_node_effect_composition ~execution:"inline" ~name:"post-inline"
+      ~tool:"masc_board_post" ~value:{|{ content = "fixture post" }|}
+  in
+  (match Catalog.parse execute with
+   | Ok _ -> ()
+   | Error error -> fail ("inline Execute composition rejected: " ^ Catalog.error_to_string error));
+  (match Catalog.parse board_post with
+   | Ok _ -> ()
+   | Error error -> fail ("inline masc_board_post composition rejected: " ^ Catalog.error_to_string error))
+;;
+
+let test_catalog_rejects_async_inline_effect_tools () =
+  let check_refused ~name ~tool document =
+    match Catalog.parse document with
+    | Error (Catalog.Async_leaf_not_admitted { name = refused; node_id; tool_name }) ->
+      check string "refused composition" name refused;
+      check string "refused tool" tool tool_name;
+      check string "refused node" "effect" (Plan.Node_id.to_string node_id)
+    | Error _ | Ok _ -> fail (name ^ " async composition was admitted")
+  in
+  check_refused ~name:"run-background" ~tool:"Execute"
+    (one_node_effect_composition ~execution:"async" ~name:"run-background"
+       ~tool:"Execute" ~value:{|{ command = "true" }|});
+  check_refused ~name:"post-background" ~tool:"masc_board_post"
+    (one_node_effect_composition ~execution:"async" ~name:"post-background"
+       ~tool:"masc_board_post" ~value:{|{ content = "fixture post" }|})
+;;
+
 let test_catalog_projects_stable_tool_name_and_path () =
   let catalog =
     match Catalog.parse (one_node_composition "lane-check") with
@@ -926,17 +977,32 @@ let test_draft_admits_inline_owned_file_write () =
   | Error error -> fail (Yojson.Safe.to_string (Draft.error_to_json error))
 ;;
 
-let test_draft_rejects_effects_and_bad_fixed_inputs () =
+(* RFC-0502 (#49177): inline drafts admit Execute and masc_board_post — each
+   node's effect passes through the invoking Keeper's own Gate approval or
+   Board policy. Durable async plans still refuse them: their effects are
+   neither replayable nor idempotent. *)
+let test_draft_inline_effect_admission_and_async_refusal () =
   Eio_main.run @@ fun _env ->
   with_draft_base @@ fun base_path ->
   let capability_surface = draft_surface () in
   let prepare ?(execution = Catalog.Inline) json = Draft.prepare ~base_path ~capability_surface ~keeper_name:"fixture" ~execution json in
+  let execute_request = draft_single_node_request ~input:(`Assoc [ "command", `String "true" ]) "Execute" in
+  let board_post_request = draft_single_node_request ~input:(`Assoc [ "content", `String "fixture post" ]) "masc_board_post" in
   (match prepare ~execution:Catalog.Async (draft_single_node_request ~input:draft_write_input "Write") with
    | Error (Draft.Unsupported_node { tool_name = "Write"; _ }) -> ()
    | Error _ | Ok _ -> fail "async draft admitted an owned file mutation");
-  (match prepare (draft_single_node_request ~input:(`Assoc [ "command", `String "true" ]) "Execute") with
+  (match prepare execute_request with
+   | Ok _ -> ()
+   | Error error -> fail ("inline draft refused Execute: " ^ Yojson.Safe.to_string (Draft.error_to_json error)));
+  (match prepare ~execution:Catalog.Async execute_request with
    | Error (Draft.Unsupported_node { tool_name = "Execute"; _ }) -> ()
-   | Error _ | Ok _ -> fail "transient draft admitted an effectful node");
+   | Error _ | Ok _ -> fail "async draft admitted Execute");
+  (match prepare board_post_request with
+   | Ok _ -> ()
+   | Error error -> fail ("inline draft refused masc_board_post: " ^ Yojson.Safe.to_string (Draft.error_to_json error)));
+  (match prepare ~execution:Catalog.Async board_post_request with
+   | Error (Draft.Unsupported_node { tool_name = "masc_board_post"; _ }) -> ()
+   | Error _ | Ok _ -> fail "async draft admitted masc_board_post");
   let invalid_read = `Assoc [ "nodes", `List [ `Assoc [ "id", `String "read"; "tool", `String "Read"
       ; "input", `Assoc [ "kind", `String "literal"; "value", `Assoc [ "file_path", `Int 3 ] ] ] ] ] in
   match prepare invalid_read with
@@ -1455,7 +1521,7 @@ let () =
         ; test_case "public draft run records its summary without optional turn context" `Quick
             (test_public_draft_run_preserves_one_execution_identity ~observe:false)
         ; test_case "draft admits inline owned file write" `Quick test_draft_admits_inline_owned_file_write
-        ; test_case "draft rejects effects and bad fixed inputs" `Quick test_draft_rejects_effects_and_bad_fixed_inputs
+        ; test_case "draft effect admission, async refusal, and bad fixed inputs" `Quick test_draft_inline_effect_admission_and_async_refusal
         ; test_case "export contract survives binding and durable encoding" `Quick test_export_contract_survives_public_authoring_and_binding
         ; test_case
             "builds executable typed plan"
@@ -1483,6 +1549,14 @@ let () =
             "rejects async effectful tool"
             `Quick
             test_catalog_rejects_async_effectful_tool
+        ; test_case
+            "admits inline effect tools"
+            `Quick
+            test_catalog_admits_inline_effect_tools
+        ; test_case
+            "rejects async inline effect tools"
+            `Quick
+            test_catalog_rejects_async_inline_effect_tools
         ; test_case
             "projects stable tool name and path"
             `Quick

@@ -63,7 +63,24 @@ let test_an_uncounted_surface_holds_at_the_top () =
   check int "a down move on an uncounted surface travels" 8
     (Masc_tui_scroll.step_uncounted ~delta:3 5);
   check int "an up move from the top stays at the top" 0
-    (Masc_tui_scroll.step_uncounted ~delta:(-1) 0)
+    (Masc_tui_scroll.step_uncounted ~delta:(-1) 0);
+  check int "a page up that overshoots the top stops at it" 0
+    (Masc_tui_scroll.step_uncounted ~delta:(-9) 4)
+
+(* End stores [max_int] on a reader the frame clamps, and the key that follows
+   before the frame has drawn adds a page to it. The sum wrapped negative and
+   the [max 0] threw the reader to the top. *)
+let test_a_step_forward_from_the_end_value_stays_there () =
+  check int "a row from the value End stores" max_int
+    (Masc_tui_scroll.step_uncounted ~delta:1 max_int);
+  check int "a page from the value End stores" max_int
+    (Masc_tui_scroll.step_uncounted ~delta:9 max_int);
+  check int "a page from just under it stops at it" max_int
+    (Masc_tui_scroll.step_uncounted ~delta:9 (max_int - 3));
+  check int "a page that just reaches it lands on it" max_int
+    (Masc_tui_scroll.step_uncounted ~delta:9 (max_int - 9));
+  check int "a page back from the value End stores leaves it" (max_int - 9)
+    (Masc_tui_scroll.step_uncounted ~delta:(-9) max_int)
 
 (* The window follows the row the reader is on, and only as far as it must: a
    surface that snapped the window back would drag a tall item out from under
@@ -188,6 +205,8 @@ let () =
     ; ( "moving"
       , [ Alcotest.test_case "an uncounted surface holds at the top" `Quick
             test_an_uncounted_surface_holds_at_the_top
+        ; Alcotest.test_case "a step forward from the End value stays there"
+            `Quick test_a_step_forward_from_the_end_value_stays_there
         ; Alcotest.test_case "the window follows the row that left it" `Quick
             test_the_window_follows_the_row_that_left_it
         ] )

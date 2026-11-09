@@ -192,7 +192,7 @@
 
 .composer {
   flex: none;
-  /* prototype styles/v2.css:912 — padding: 12px 24px 16px.
+  /* prototype — padding: 12px 24px 16px.
      24px horizontal must be a literal: under [data-skin=v2] the 2px-base
      --sp-* ladder tops at --sp-9 (24px), but vertical 12/16 are off-scale,
      so the whole shorthand is set in literal px to pixel-match. */
@@ -220,7 +220,7 @@
   gap: 10px;
   background: var(--color-bg-surface);
   border: 1px solid var(--color-border-default);
-  /* prototype styles/v2.css:927 — border-radius: var(--radius-md) (6px). */
+  /* prototype — border-radius: var(--radius-md) (6px). */
   border-radius: var(--radius-md);
   padding: 6px 6px 6px 14px;
   transition: border-color 0.15s, box-shadow 0.15s;
@@ -375,7 +375,7 @@
   outline: 0;
   background: transparent;
   color: var(--color-fg-primary);
-  /* prototype styles/v2.css:934 — font-size: 14.5px. */
+  /* prototype — font-size: 14.5px. */
   font-size: var(--fs-composer-input, 14.5px);
   line-height: 1.5;
   padding: 10px 0;
@@ -400,7 +400,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  /* prototype styles/v2.css:941 — border-radius: var(--radius-sm) (4px). */
+  /* prototype — border-radius: var(--radius-sm) (4px). */
   border-radius: var(--radius-sm);
   border: 1px solid var(--color-border-default);
   background: var(--color-bg-panel-alt);
@@ -423,13 +423,13 @@
 .send {
   height: 34px;
   padding: 0 16px;
-  /* prototype styles/v2.css:946 — border-radius: var(--radius-sm) (4px). */
+  /* prototype — border-radius: var(--radius-sm) (4px). */
   border-radius: var(--radius-sm);
   cursor: pointer;
   background: var(--color-accent-fg);
   color: var(--color-bg-surface);
   border: 1px solid var(--color-accent-fg);
-  /* prototype styles/v2.css:948 — font-size: 12.5px. */
+  /* prototype — font-size: 12.5px. */
   font-size: var(--fs-composer-send, 12.5px);
   font-weight: 600;
   letter-spacing: 0.04em;

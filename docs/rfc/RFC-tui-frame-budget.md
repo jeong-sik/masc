@@ -7,7 +7,7 @@ updated: 2026-09-03
 author: claude
 supersedes: []
 superseded_by: null
-related: ["tui-operator-ia"]
+related: []
 ---
 
 # RFC: TUI 프레임 예산 (tui-frame-budget)

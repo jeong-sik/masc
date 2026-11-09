@@ -1332,9 +1332,14 @@ type file_count_entry =
 let file_count_cache : (string, file_count_entry) Hashtbl.t = Hashtbl.create 64
 let file_count_cache_mu = Stdlib.Mutex.create ()
 
+let close t =
+  let dated = Store.dated_path_now t.location in
+  Fs_compat.invalidate_cached_writer dated.path
+;;
+
 let prepare_for_directory_removal t =
   let dated = Store.dated_path_now t.location in
-  Fs_compat.invalidate_cached_writer dated.path;
+  close t;
   Fs_compat.invalidate_mkdir_memo (Filename.dirname dated.path);
   Stdlib.Mutex.protect file_count_cache_mu (fun () ->
     Hashtbl.remove file_count_cache dated.path)

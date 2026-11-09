@@ -370,10 +370,11 @@ module Router : sig
       RFC-0281. *)
   type upgrade = Http_reqd.upgrade
 
-  (** A WebSocket-upgrade route handler.  Receives the per-request
-      {!upgrade} capability in addition to the request + descriptor. *)
+  (** A WebSocket route handler. [upgrade] is absent on transports that
+      cannot upgrade. The handler can still answer ordinary HTTP discovery;
+      an actual upgrade request without the capability must answer 426. *)
   type ws_handler =
-    upgrade:upgrade -> Httpun.Request.t -> Http_reqd.t -> unit
+    upgrade:upgrade option -> Httpun.Request.t -> Http_reqd.t -> unit
 
   (** A route either handles the request in-band ([Plain]) or upgrades
       the connection to WebSocket ([Ws]).  RFC-0281 S3.3. *)
@@ -578,10 +579,9 @@ module Router : sig
       handler, falling back to {!Response.not_found} /
       {!Response.method_not_allowed} based on the resolution.
 
-      A {!Ws} route runs with the upgrade capability of [reqd]
-      ({!Http_reqd.upgrade}).  When the handle carries none, responds
-      [`Upgrade_required] (426) — an explicit error, never a silent drop.
-      RFC-0281. *)
+      A {!Ws} route receives the optional upgrade capability of [reqd]
+      ({!Http_reqd.upgrade}). Its handler distinguishes ordinary discovery
+      from an upgrade request and refuses unsupported upgrades explicitly. *)
   val dispatch
     :  t
     -> Httpun.Request.t

@@ -722,9 +722,7 @@ let rebase_scroll_for_cards ~scroll ~previous_cards ~current_cards =
   | None -> scroll
   | Some previous_cards ->
       if scroll = 0 || scroll = clamped_scroll_end then scroll
-      else if current_cards >= previous_cards then
-        scroll_down_from scroll ~by:(current_cards - previous_cards)
-      else max 0 (scroll - (previous_cards - current_cards))
+      else Masc_tui_scroll.step_uncounted ~delta:(current_cards - previous_cards) scroll
 
 let render_metrics_body ~cols ~budget ~suffix_lines (state : state)
     ~(report_scroll : int -> int -> int -> unit)

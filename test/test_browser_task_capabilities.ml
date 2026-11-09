@@ -315,7 +315,7 @@ let test_native_input_admission_surface () =
   let invoke steps=Tools.handle ~config ~access:Masc.Lane_addon_sources.Operator_configuration
     ~principal:(Lane_addon_call_context.Host_actor "browser-input-contract-tester") ~reserved:[]
     ~keeper_name:None ~tool:Cap.Interact ~tool_name:"BrowserInteract" ~start_time:(Tool_timing.start ())
-    (`Assoc ["lane",`String "live";"clientId",`String "0c000000-0000-4000-8000-000000000001";
+    (`Assoc ["clientId",`String "0c000000-0000-4000-8000-000000000001";
       "action",`String "workflow";"tabId",`Int 1;"expectedUrl",`String "https://fixture.test/";
       "steps",`List steps]) in
   let fill=`Assoc ["method",`String "fill";"selector",`String "#editor";"text",`String "earlier effect"] in

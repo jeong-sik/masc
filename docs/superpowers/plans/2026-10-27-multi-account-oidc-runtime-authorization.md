@@ -575,6 +575,24 @@ Runtime 조회: rg -n --glob '*.ml' '\bRuntime\.(get_runtime_by_id|resolve_assig
   - 일반 Member가 Admin 없이 자기 구독을 연결한다.
 - 하지 않는 것: 실행 진입의 타입(D2·D3), 공유(Delegated·MachineShared, 2단계), lane별 account-home 격리 증거(D3), 부팅에 대조를 다는 일(S1).
 
+**D2 범위** (Keeper 턴 인가, 2026-11-09)
+
+- 사용자 결정(2026-11-09). 조건은 "휴리스틱 구현이나 SSOT 위반이 아니어야 하고, 명시적이고 선명해야 한다"이다.
+  - `run_turn`까지 타입으로 막는다. `Runtime.authorize`가 준 값이 있어야 Codex와 Claude Code의 `run_turn`이 돌고, account-home은 그 값에서만 나온다.
+  - 판정은 `Authz_decision.allowed`(A3) 위에 세운다. 새로 쓰는 것은 로그 상태를 `facts`로 옮기는 adapter뿐이다. 검사를 새로 쓰지 않는다.
+  - Keeper 턴의 initiator와 executor는 둘 다 Keeper 주인이다. Board 글을 쓴 사람은 턴의 입력이지 당사자가 아니다.
+  - 채널 정책은 Keeper `made` 기록에 둔다. 기록은 policy id와 범위(`turn_scope`)를 적고, adapter가 그것을 주인→주인 `Delegate_policy`로 넘긴다.
+  - Self grant의 효과는 Runtime `made` 기록에 둔다(`self_effects`). verify가 만드는 Runtime은 `read_state`, `invoke_model`, `use_tool`을 허용한다.
+  - Keeper 턴의 `auth_binding`은 그 Keeper 기록이다. 기록이 있고 그 주인이 initiator일 때만 `Active`다.
+  - verify는 Runtime 기록 전에 모델을 부르므로 `Stored_grant`가 없다. 설계 §6.1의 `Authorization_basis`에 "자기 구독 계정 확인" 근거를 하나 더한다.
+- 왜: A3 판정은 요청(세션, PAT)을 위해 설계됐다. 자율 턴, Board 턴, 예약 턴에는 정책, binding, Self 효과가 비어 있었다. 빈칸을 코드 기본값으로 채우면 휴리스틱이 된다. 그래서 빈칸을 모두 로그의 데이터로 채운다.
+- 층.
+  - D2-0 기록. Runtime 본문에 `self_effects`를, Keeper 본문에 `policy_id`와 `turn_scope`를 더한다. 두 본문은 미리보기에서만 쓰였으므로 hard cut이다. 미리보기 Keeper는 `autonomous`와 `direct` 채널을 허용하는 정책으로 만든다. Runtime과 효과는 배정과 Self grant가 제한한다.
+  - D2-1 adapter. 한 snapshot에서 Keeper 턴의 `facts`를 만든다. 배정이 없으면 `NoAuthorizedRuntime`이다. 1단계에는 Runtime과 ProviderAccount의 상태 기록이 없어서 둘 다 `Active`다. 회수는 구역의 게이트 값(`revocation_pending`)이다. 의존은 `Cleared`다. 1단계에는 복원 창이 없고(F2는 2단계), A2가 복원된 로그를 거절한다.
+  - D2-2 `Authorized_runtime.t`와 `Runtime.authorize`. 모드에 따라 근거를 달리 내는 함수 하나다. `Single_user`는 지금 동작을 그대로 둔다.
+  - D2-3 Codex와 Claude Code의 `run_turn`이 `Authorized_runtime.t`를 요구한다. Fusion, verifier, capability probe는 컴파일러가 모아 같이 바꾼다.
+  - D2-4 Keeper 턴 드라이버가 시도마다 인가를 받는다.
+
 **D6 범위**
 
 - 사람 initiator가 없는 dispatch(autonomous, system)가 만든 상태는 `Service(system)` 표시를 달고 `Read_state`가 허용된 initiator에게만 보인다(§3-11).

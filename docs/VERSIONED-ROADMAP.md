@@ -80,8 +80,7 @@ experiment removed and generic Lane Addons (`msx-machine`, `dos-machine`,
 `fusion-compute`), Workspace Wiki (`.masc/wiki`), Keeper-owned jobs (`keeper_job_*`),
 and turn preparation observability in place.
 
-Keep the full [Studio design](design/figma-studio-lane-addon.md) as a deferred
-idea tracked by [#42735](https://github.com/jeong-sik/masc/issues/42735), with no
+Keep the Figma Studio idea as a deferred item tracked by [#42735](https://github.com/jeong-sik/masc/issues/42735), with no
 assigned release. Reconsider a future 0.xx.0 minor after independent-service
 design, a consumer-only MASC adapter, an explicit capability matrix and real
 Figma creation/revision plus running-application evidence.

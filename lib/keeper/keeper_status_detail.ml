@@ -529,7 +529,6 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
                        if ts_unix > 0.0 then Some (max 0.0 (now_ts -. ts_unix))
                        else None
                      in
-                     let role_lc = String.lowercase_ascii role in
                      let history_source =
                        Keeper_types_support.history_source_of_string source
                      in
@@ -548,12 +547,15 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
                        | Some Keeper_types_support.World_state_prompt -> "internal_prompt"
                        | Some Keeper_types_support.Internal_assistant -> "internal_reply"
                        | None ->
-                           (match role_lc with
-                       | "assistant" -> "self_talk"
-                       | "user" -> "input"
-                       | "tool" -> "tool_result"
-                       | "system" -> "system"
-                       | _ -> "other")
+                           (match
+                              Keeper_context_core_message_json.role_of_string_opt
+                                (String.lowercase_ascii role)
+                            with
+                            | Some Agent_core.Types.Assistant -> "self_talk"
+                            | Some Agent_core.Types.User -> "input"
+                            | Some Agent_core.Types.Tool -> "tool_result"
+                            | Some Agent_core.Types.System -> "system"
+                            | None -> "other")
                      in
                      let preview =
                        if String.length content > 200 then

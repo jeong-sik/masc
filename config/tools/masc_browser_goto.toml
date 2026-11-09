@@ -11,12 +11,6 @@ required = true
 description = "Absolute HTTP(S) URL."
 
 [[params]]
-name = "lane"
-type = "string"
-enum = ["live"]
-description = "Leave it out; clientId alone selects the browser. lane=live without clientId turns off automatic selection."
-
-[[params]]
 name = "tabId"
 type = "integer"
 description = "Required: observed tab ID."

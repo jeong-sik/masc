@@ -3110,10 +3110,13 @@ let keeper_control_hints ?(offers_chat = true) ?(offers_back = true) ?(taken = [
     if offers_back then
       [ "Left / Esc", "Left / Esc:" ^ Ansi.dim ^ "back" ^ Ansi.reset ]
     else
-      [ "Right / Enter",
-        (Masc_tui_theme.tone Masc_tui_theme.Accent) ^ "Right / Enter" ^ Ansi.reset ^ ":detail"
-      ; "Esc", "Esc:" ^ Ansi.dim ^ "dashboard" ^ Ansi.reset
-      ]
+      (* A heading opens no Keeper; its arrows fold the group under it. *)
+      (let key, word =
+         if keeper_list_on_heading state then "Left / Right", "fold"
+         else "Right / Enter", "detail"
+       in
+       key, (Masc_tui_theme.tone Masc_tui_theme.Accent) ^ key ^ Ansi.reset ^ ":" ^ word)
+      :: [ "Esc", "Esc:" ^ Ansi.dim ^ "dashboard" ^ Ansi.reset ]
   in
   let items =
       view_and_order

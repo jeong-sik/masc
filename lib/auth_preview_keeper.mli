@@ -9,7 +9,11 @@
 
     A Keeper or a Runtime of another person is answered as one that is not
     there (404), so the answer does not say whose it is. A Keeper name is
-    taken for everyone once anyone made it, so that one is a 409. *)
+    taken for everyone once anyone made it, so that one is a 409.
+
+    A Keeper made here runs its turns under a policy of its owner that allows
+    the [autonomous] and [direct] channels; the Runtime it is given and that
+    Runtime's Self grant limit the rest. *)
 
 (** [/api/v1/auth/keepers]: [GET] is {!list}, [POST] is {!make}. *)
 val keepers_path : string

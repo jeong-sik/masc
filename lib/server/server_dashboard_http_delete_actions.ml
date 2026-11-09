@@ -1,9 +1,8 @@
-(** Dashboard delete action handlers — board, tasks, goals, agents.
+(** Dashboard delete action handlers — board, tasks, agents.
 
     Extracted from server_routes_http_routes_dashboard.ml.
     Contains POST handler logic for /api/v1/dashboard/board/delete,
-    /api/v1/dashboard/tasks/delete, /api/v1/dashboard/goals/delete,
-    /api/v1/dashboard/goals/sweep, /api/v1/dashboard/agents/purge.
+    /api/v1/dashboard/tasks/delete, /api/v1/dashboard/agents/purge.
     Keeper purge is durable and asynchronous; plain-agent purge remains an
     exact synchronous cleanup. *)
 
@@ -27,15 +26,6 @@ let invalid_request field =
 
 let respond_ok ~request reqd =
   Http.Response.json_value ~compress:true ~request (`Assoc [ ("ok", `Bool true) ]) reqd
-;;
-
-let respond_ok_with_warning ~request reqd warning =
-  Http.Response.json_value
-    ~compress:true
-    ~request
-    (`Assoc
-      [ ("ok", `Bool true); ("partial_cleanup", `Bool true); ("warning", `String warning) ])
-    reqd
 ;;
 
 let respond_error ?(status = `Bad_request) ~request reqd message =
@@ -1286,38 +1276,6 @@ let add_delete_action_routes router =
                  "errors", `List (List.rev errors);
                  "configuration_removals", `List configuration_removals;
                  "configuration_errors", `List (List.map (fun error -> `String error) configuration_errors)]) reqd)
-  |> Server_route.get (Server_route.Token_permission Masc_domain.CanReadState) "/api/v1/dashboard/keepers/purge-status" (fun state _agent_name req reqd ->
-           match Server_utils.query_param req "keeper_name",
-                 Server_utils.query_param req "operation_id" with
-           | Some keeper_name, Some raw_id ->
-             (match Keeper_shutdown_types.Operation_id.of_string raw_id with
-              | Error detail -> respond_error ~request:req reqd detail
-              | Ok operation_id ->
-                let config = Mcp_server.workspace_config state in
-                match Keeper_shutdown_store.load ~config ~keeper_name operation_id with
-                | Error error ->
-                  let status = match error with
-                    | Keeper_shutdown_store.Not_found _ -> `Not_found
-                    | Keeper_shutdown_store.Already_exists _ | Keeper_shutdown_store.Io_error _
-                    | Keeper_shutdown_store.Decode_error _
-                    | Keeper_shutdown_store.Invalid_operation _
-                    | Keeper_shutdown_store.Identity_mismatch _
-                    | Keeper_shutdown_store.Revision_conflict _
-                    | Keeper_shutdown_store.Supersession_phase_mismatch _
-                    | Keeper_shutdown_store.Supersession_intent_mismatch _
-                    | Keeper_shutdown_store.Invalid_supersession_actor _ -> `Internal_server_error in
-                  respond_error ~status ~request:req reqd
-                    (Keeper_shutdown_store.error_to_string error)
-                | Ok operation ->
-                  match operation.cleanup_intent.reason with
-                  | Keeper_shutdown_types.Dashboard_keeper_purge _ ->
-                    Http.Response.json_value ~request:req
-                      (keeper_purge_status_to_json operation) reqd
-                  | Operator_stop_retain_meta | Operator_stop_remove_meta | Supervisor_cleanup ->
-                    respond_error ~status:`Conflict ~request:req reqd
-                      "operation is not a Dashboard Keeper purge")
-           | _ -> respond_error ~request:req reqd
-                    "keeper_name and operation_id are required")
   |> Server_route.post (Server_route.Token_permission Masc_domain.CanAdmin) "/api/v1/dashboard/board/delete" (fun _state _agent_name req reqd ->
          Http.Request.read_body_async reqd (fun body_str ->
            try
@@ -1542,61 +1500,6 @@ let add_delete_action_routes router =
                   (Task.Goal_assignment.set_task_goal_error_to_string err))
            with Yojson.Json_error _ ->
              respond_error ~request:req reqd (invalid_request "task_id")
-         )
-       )
-
-  |> Server_route.post (Server_route.Token_permission Masc_domain.CanAdmin) "/api/v1/dashboard/goals/delete" (fun state _agent_name req reqd ->
-         Http.Request.read_body_async reqd (fun body_str ->
-           try
-             let json = Yojson.Safe.from_string body_str in
-             match Safe_ops.json_string_opt "goal_id" json with
-             | None ->
-                 respond_error ~request:req reqd (invalid_request "goal_id")
-             | Some goal_id ->
-             let config = (Mcp_server.workspace_config state) in
-             match Goal_store.delete_goal config ~goal_id with
-             | Ok outcome ->
-                 (* The Goal is gone, so no later measurement can name it;
-                    its observation row is dropped after the Goal lock is
-                    released. A failure is reported like an orphaned link:
-                    the Goal stays deleted and the response says what was
-                    left behind. *)
-                 let link_warning =
-                   match outcome with
-                   | Goal_store.Deleted -> None
-                   | Goal_store.Deleted_with_orphaned_links warning -> Some warning
-                 in
-                 let measurement_warning =
-                   match Goal_measurement.remove_goal config ~goal_id with
-                   | Ok () -> None
-                   | Error detail ->
-                       Log.Misc.warn
-                         "dashboard goal delete: goal %s removed but its measurement was not: %s"
-                         goal_id detail;
-                       Some
-                         (Printf.sprintf
-                            "goal deleted but failed to remove the measurement for %s: %s"
-                            goal_id detail)
-                 in
-                 (match List.filter_map Fun.id [ link_warning; measurement_warning ] with
-                  | [] -> respond_ok ~request:req reqd
-                  | warnings ->
-                      respond_ok_with_warning ~request:req reqd
-                        (String.concat "; " warnings))
-             | Error (Goal_store.Unknown_goal _ as err) ->
-                 respond_error ~status:`Not_found ~request:req reqd
-                  (Goal_store.delete_goal_error_to_string err)
-             | Error (Goal_store.Ambiguous_goal _ as err) ->
-                 respond_error ~status:`Conflict ~request:req reqd
-                  (Goal_store.delete_goal_error_to_string err)
-             | Error (Goal_store.Persistence_failed _ as err) ->
-                 respond_error ~status:`Internal_server_error ~request:req reqd
-                   (Goal_store.delete_goal_error_to_string err)
-             | Error (Goal_store.Store_unavailable unavailable) ->
-                 Http.Response.json_value ~status:`Service_unavailable ~request:req
-                   (Goal_unavailable_envelope.to_yojson unavailable) reqd
-           with Yojson.Json_error _ ->
-             respond_error ~request:req reqd (invalid_request "goal_id")
          )
        )
 

@@ -335,6 +335,26 @@ type goal_retry_binding = {
   grb_request_id : string option;
 }
 
+type goal_criterion_review_state =
+  | Criterion_pending
+  | Criterion_execution_pending
+  | Criterion_execution_unknown
+  | Criterion_judgment_pending
+  | Criterion_deferred
+  | Criterion_viable of string
+  | Criterion_needs_revision of string
+  | Criterion_superseded
+
+type goal_criterion_review =
+  | Criterion_unchecked
+  | Criterion_unavailable of string
+  | Criterion_observed of {
+      state : goal_criterion_review_state;
+      criterion_revision : string;
+      request_id : string;
+      detail : string option;
+    }
+
 type planning_goal = {
   pg_id : string;
   pg_criterion_revision : string option;
@@ -345,6 +365,7 @@ type planning_goal = {
   pg_metric : string option;
   pg_target_value : string option;
   pg_proof : goal_proof;
+  pg_criterion_review : goal_criterion_review;
   pg_retry_binding : goal_retry_binding option;
   pg_verifier_unreconciled : verifier_unreconciled option;
   pg_last_review_note : string option;
@@ -1392,6 +1413,49 @@ let decode_goal_retry_binding ~phase ~criterion_revision projection =
     Option.map (fun grb_request_id -> {grb_phase; grb_criterion_revision=revision; grb_request_id}) request
   | (Some _ | None), (Some _ | None) -> None
 
+let decode_goal_criterion_review ~criterion_revision json =
+  let unique_fields label = function
+    | `Assoc fields ->
+      let names = List.map fst fields in
+      if List.length names = List.length (List.sort_uniq String.compare names)
+      then Ok fields else Error (label ^ ": duplicate field")
+    | `Null | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `String _ ->
+      Error (label ^ ": expected object") in
+  let nonblank name =
+    let* value = required_string_field json name in
+    if String.trim value = "" then Error ("blank criterion review " ^ name) else Ok value in
+  let parse () =
+    let* fields = unique_fields "criterion review" json in
+    let* state = nonblank "state" in
+    match state with
+    | "unchecked" -> Ok Criterion_unchecked
+    | "unavailable" -> let* detail = nonblank "detail" in Ok (Criterion_unavailable detail)
+    | "pending" | "execution_pending" | "execution_unknown" | "judgment_pending"
+    | "deferred" | "viable" | "needs_revision" | "superseded" ->
+      let* revision = nonblank "criterion_revision" in
+      let* () = match criterion_revision with
+        | Some current when String.equal current revision -> Ok ()
+        | Some _ | None -> Error "criterion review does not bind the current revision" in
+      let* request_id = nonblank "request_id" in
+      let* () = if List.mem_assoc "reason" fields && List.mem_assoc "detail" fields then Ok ()
+        else Error "criterion review observation is incomplete" in
+      let* reason = optional_string_field json "reason" in
+      let* detail = optional_string_field json "detail" in
+      let* state = match state, reason with
+        | "viable", Some reason when String.trim reason <> "" -> Ok (Criterion_viable reason)
+        | "needs_revision", Some reason when String.trim reason <> "" -> Ok (Criterion_needs_revision reason)
+        | "pending", None -> Ok Criterion_pending
+        | "execution_pending", None -> Ok Criterion_execution_pending
+        | "execution_unknown", None -> Ok Criterion_execution_unknown
+        | "judgment_pending", None -> Ok Criterion_judgment_pending
+        | "deferred", None -> Ok Criterion_deferred
+        | "superseded", None -> Ok Criterion_superseded
+        | _ -> Error "criterion review has an unknown state or no valid judgment reason" in
+      Ok (Criterion_observed {state; criterion_revision=revision; request_id; detail})
+    | _ -> Error ("unknown criterion review state: " ^ state)
+  in
+  match parse () with Ok value -> value | Error detail -> Criterion_unavailable detail
+
 let decode_planning_goal json =
   let* pg_id = required_string_field json "id" in
   let* pg_criterion_revision = optional_string_field json "criterion_revision" in
@@ -1415,6 +1479,12 @@ let decode_planning_goal json =
       decode_goal_verification ~goal_id:pg_id ~criterion verification
     else Verification_unreadable (Some "Goal proof binding fields are missing or duplicated") in
   let pg_proof = goal_proof_of_projection projection in
+  let pg_criterion_review = match json with
+    | `Assoc fields when List.for_all (fun field ->
+        List.length (List.filter (fun (name, _) -> String.equal name field) fields) = 1)
+        ["id"; "criterion_revision"; "criterion_review"] ->
+      decode_goal_criterion_review ~criterion_revision:pg_criterion_revision (member "criterion_review" json)
+    | _ -> Criterion_unavailable "criterion review binding is missing or duplicated" in
   let pg_retry_binding = decode_goal_retry_binding ~phase:pg_phase
       ~criterion_revision:pg_criterion_revision projection in
   let* pg_verifier_unreconciled = decode_verifier_unreconciled json in
@@ -1429,6 +1499,7 @@ let decode_planning_goal json =
       pg_metric;
       pg_target_value;
       pg_proof;
+      pg_criterion_review;
       pg_retry_binding;
       pg_verifier_unreconciled;
       pg_last_review_note;
@@ -2940,7 +3011,8 @@ let decode_planning_snapshot json =
       (String_set.empty, String_set.empty) goals_json in
   let pl_goals = List.map (fun goal ->
       if String_set.mem goal.pg_id duplicate_ids then
-        {goal with pg_proof=Proof_unreadable (Some "Goal ID has multiple rows"); pg_retry_binding=None}
+        {goal with pg_proof=Proof_unreadable (Some "Goal ID has multiple rows");
+          pg_criterion_review=Criterion_unavailable "Goal ID has multiple rows"; pg_retry_binding=None}
       else goal) pl_goals in
   let* rollup_json = required_object_field json "rollup" in
   let* pl_rollup = decode_planning_rollup rollup_json in

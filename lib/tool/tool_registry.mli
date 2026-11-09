@@ -38,6 +38,9 @@ val record_call_if_known :
 
 (** {1 Queries} *)
 
+(** Return the retained immutable observation for a single tool, if recorded. *)
+val find_stats : string -> call_stats option
+
 (** Returns retained immutable per-tool observations. Later recording or reset
     does not change returned values. Different tools are sampled separately. *)
 val get_stats : unit -> (string * call_stats) list

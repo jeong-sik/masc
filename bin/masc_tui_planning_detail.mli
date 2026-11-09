@@ -142,3 +142,8 @@ val timeline :
     says what it is instead of rendering as an empty history. Refresh failures
     retain the last observed rows with their stale reason; they do not certify
     the goal's current work or turn a source-unavailable result into success. *)
+
+val criterion_review_lines :
+  width:int -> ko:bool -> Tui_decode.goal_criterion_review -> line list
+(** Creation-criterion review observation, including the exact request and
+    revision binding. It never changes completion proof or confirmation. *)

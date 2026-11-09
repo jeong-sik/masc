@@ -17,6 +17,7 @@ type write_result =
   | Refused of string
   | Unconfirmed of string
 open Result.Syntax
+module L = Masc_tui_page_line
 let same_owner a b = a.workspace = b.workspace && a.machine = b.machine
 let owner (t : t) = t.owner
 let request_owner (request : request) = request.owner
@@ -136,32 +137,37 @@ let finish_save request result t =
 let lines (t : t) =
   let flag value = if value then "On" else "Off" in
   let label = match t.owner.machine with Masc.Machine_lane.Msx -> "MSX" | Dos -> "DOS" in
-  let current = match t.current with
-    | None -> ["Current file: unverified"]
+  let current_enabled, current = match t.current with
+    | None -> None, [L.fact "Current file" "unverified"]
     | Some document ->
       (match activity t.owner.machine document with
-       | Error detail -> [detail]
-       | Ok enabled -> [document.path; "Current file: " ^ flag enabled]) in
+       | Error detail -> None, [L.note ~tone:L.Attention detail]
+       | Ok enabled -> Some enabled, [L.fact "File" document.path; L.fact "Current file" (flag enabled)]) in
   let draft = match t.draft with None -> [] | Some draft ->
-    ["Activity draft: " ^ flag draft.desired;
-     "Based on revision: " ^ draft.base.source_revision] in
+    (* A draft that differs from the file's activity has not been saved. *)
+    let unsaved = match current_enabled with
+      | Some enabled -> not (Bool.equal enabled draft.desired)
+      | None -> false in
+    [(if unsaved then L.fact ~tone:L.Attention "Activity draft" (flag draft.desired ^ " · not saved")
+      else L.fact "Activity draft" (flag draft.desired));
+     L.fact ~tone:L.Quiet "Based on revision" draft.base.source_revision] in
   let conflict = match t.draft,t.current with
     | Some draft,Some current when draft.base.source_revision<>current.source_revision ->
-      ["File changed. u reapplies only activity to current settings; x discards the draft."]
+      [L.note ~tone:L.Attention "File changed. u reapplies only activity to current settings; x discards the draft."]
     | Some _,Some _ | None,_ | _,None -> [] in
-  ["Machine activity · " ^ label;
-   "Off stops new execution and input; accepted work finishes.";
-   "Machine state and checkpoints remain. Inspection, saving and cleanup stay available."]
+  [L.Title ("Machine activity · " ^ label);
+   L.note ~tone:L.Quiet "Off stops new execution and input; accepted work finishes.";
+   L.note ~tone:L.Quiet "Machine state and checkpoints remain. Inspection, saving and cleanup stay available."]
   @ (match t.observed with
-    | None -> ["Server activity: not read"]
-    | Some (Error detail) -> ["Server activity read failed: " ^ detail]
-    | Some (Ok Machine_configuration.Enabled) -> ["Server activity: On (last read)"]
-    | Some (Ok Disabled) -> ["Server activity: Off (last read)"]
-    | Some (Ok Unobserved) -> ["Server activity: configuration unavailable (last read)"])
+    | None -> [L.fact "Server activity" "not read"]
+    | Some (Error detail) -> [L.note ~tone:L.Attention ("Server activity read failed: " ^ detail)]
+    | Some (Ok Machine_configuration.Enabled) -> [L.fact "Server activity" "On (last read)"]
+    | Some (Ok Disabled) -> [L.fact "Server activity" "Off (last read)"]
+    | Some (Ok Unobserved) -> [L.fact "Server activity" "configuration unavailable (last read)"])
   @ current @ draft @ conflict
-  @ (match t.phase with Idle -> [] | Reading _ -> ["Reading current configuration…"] | Writing _ -> ["Saving activity…"])
-  @ Option.to_list t.message
-  @ (match t.receipt with None -> [] | Some receipt -> [Masc_tui_runtime_config_receipt.lane_summary receipt])
-  @ ["Space change draft · s save · r read current · u reapply · x discard · Esc back";
-     "The file and server reading are separate observations; r reads both again.";
-     "On allows new work. It does not load or restore a machine."]
+  @ (match t.phase with Idle -> [] | Reading _ -> [L.note "Reading current configuration…"] | Writing _ -> [L.note "Saving activity…"])
+  @ Option.to_list (Option.map (fun message -> L.note message) t.message)
+  @ (match t.receipt with None -> [] | Some receipt -> [L.note (Masc_tui_runtime_config_receipt.lane_summary receipt)])
+  @ [L.note "Space change draft · s save · r read current · u reapply · x discard · Esc back";
+     L.note ~tone:L.Quiet "The file and server reading are separate observations; r reads both again.";
+     L.note ~tone:L.Quiet "On allows new work. It does not load or restore a machine."]

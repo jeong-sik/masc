@@ -38,7 +38,7 @@ documentId/nodeId는 TUI 관측을 이어가거나 좌표가 필요할 때 사�
 관측 범위·selector와 옵션 선택의 자세한 계약은 [읽기와 관측 복구](references/observation.md)를 따른다.
 
 이미 관측한 상태로 다음 동작들을 정할 수 있으면 `BrowserInteract action=workflow`로
-묶는다. `lane=live`, 관측한 `clientId`·`tabId`·`expectedUrl`, native `method`를 담은
+묶는다. 관측한 `clientId`·`tabId`·`expectedUrl`, native `method`를 담은
 `steps`를 전달하면 SDK가 순서대로 실행하고 마지막 snapshot을 돌려준다. 시작 URL만
 검사하므로 이동 뒤에는 `waitForURL`·`waitForSelector` 등으로 결과를 기다린다.
 중간 화면을 보고 새 판단을 해야 하면 거기서 나눠 호출한다. 실패 응답의 `completed`는
@@ -149,7 +149,7 @@ scene/regions 읽기에서도 유지한다. 탭이 사라졌을 때만 같은 �
 clientId/tabId 쌍을 유지한다. `complete=false`이면 `unavailableTabs`의 ID와 오류를
 확인한다. 목록의 다른 탭은 계속 사용할 수 있고, 읽지 못한 탭을 닫힌 탭으로 해석하지 않는다.
 ego 연결의 로그인을 써야 하면 BrowserAct `open_tab`(그 clientId)으로 탭을 열고,
-그 탭에서만 BrowserGoto(`lane=live`, clientId, tabId)로 URL을 옮긴다. 운영자가 연 탭은
+그 탭에서만 BrowserGoto(clientId, tabId)로 URL을 옮긴다. 운영자가 연 탭은
 URL로 옮기지 않는다.
 live 인증 화면을 연결 오류 때문에 별도 API·수집 버퍼로 대체하지 않는다.
 

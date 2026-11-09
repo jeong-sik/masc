@@ -3,7 +3,7 @@ description = """
 Act on an observed browser tab: pointer, keys, touch, viewport, or a workflow.
 Pass clientId and tabId from BrowserTabs/masc_browser_tabs; tab IDs belong to one connection. Only Pages the ego task space manages take input; adopt an operator tab first (BrowserAct/masc_browser_act adopt_tab). After a failure or unknown result, read the tab again before acting: page handlers may already have run, so never replay.
 Name an element with selector, target or documentId/nodeId; prefer refs from BrowserRead/masc_browser_read mode=snapshot. fill (action or workflow step) replaces the value or editor content and does not press Enter or submit. scroll moves the page; scroll_at scrolls the pane under the point. hover_at moves the pointer without clicking. tap_at is a touch press and release; swipe holds a touch from one point to another, and a swipe longer than the command window is refused before it starts.
-drag is always refused before input. drag_to works only selector to selector, without via and with durationMs 0; its receipt does not prove the page accepted the drop.
+drag_to drags one selector onto another; its receipt does not prove the page accepted the drop.
 set_viewport, tap_at and swipe invalidate snapshot refs: take a new snapshot and screenshot. A set viewport lasts while the SDK process runs; a later answer with another sdkProcessStartedAt means it is gone.
 follow_link opens an observed same-tab HTTP(S) anchor without running click handlers; it refuses downloads, new-window targets, noreferrer and referrerpolicy. destinationUrl is the intended URL, not proof of load.
 activate_tab restores the window only when minimized and reports active/window state, not OS focus; use it before hand_off. expectedUrl is compared before the SDK call, not atomically with it.
@@ -16,12 +16,6 @@ additional_properties = false
 # 가른다(masc #32062). 지연돼도 keeper_tool_search 목록에 이름이 남고,
 # 부르면 그 턴에 스키마가 붙는다. 한 줄 요약은 그 답에 한 번 나온다.
 defer_loading = true
-
-[[params]]
-name = "lane"
-type = "string"
-enum = ["live"]
-description = "Leave it out; clientId alone selects the browser. lane=live without clientId turns off automatic selection."
 
 [[params]]
 name = "tabId"
@@ -38,7 +32,7 @@ description = "The tab URL you observed. Required for workflow, target, set_view
 name = "action"
 type = "string"
 required = true
-enum = ["workflow", "set_viewport", "tap_at", "swipe", "activate_tab", "follow_link", "double_click", "double_click_at", "type_text", "press_key", "click", "fill", "select_option", "scroll", "click_at", "scroll_at", "hover", "drag_to", "hover_at", "drag"]
+enum = ["workflow", "set_viewport", "tap_at", "swipe", "activate_tab", "follow_link", "double_click", "double_click_at", "type_text", "press_key", "click", "fill", "select_option", "scroll", "click_at", "scroll_at", "hover", "drag_to", "hover_at"]
 
 [[params]]
 name = "selector"
@@ -227,14 +221,7 @@ additional_properties = false
 [[params.params]]
 name = "selector"
 type = "string"
-
-[[params.params]]
-name = "documentId"
-type = "string"
-
-[[params.params]]
-name = "nodeId"
-type = "string"
+required = true
 
 [[params]]
 name = "destination"
@@ -245,14 +232,7 @@ additional_properties = false
 [[params.params]]
 name = "selector"
 type = "string"
-
-[[params.params]]
-name = "documentId"
-type = "string"
-
-[[params.params]]
-name = "nodeId"
-type = "string"
+required = true
 
 [[params]]
 name = "via"
@@ -282,7 +262,7 @@ name = "durationMs"
 type = "integer"
 minimum = 0
 maximum = 9007199254740991
-description = "swipe: milliseconds per move segment, default 0. drag_to accepts only 0."
+description = "swipe: milliseconds per move segment, default 0."
 
 [[params]]
 name = "key"

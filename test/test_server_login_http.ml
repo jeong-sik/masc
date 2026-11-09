@@ -504,6 +504,7 @@ let the_preview_follows_a_login () =
          ~user_id
          ~provider_account_id:account
          ~runtime_id
+         ~self_effects:Effect.(Set.of_list [ Invoke_model; Use_tool ])
          ~draw:(fun () -> "grant-1")
      with
      | Ok grant -> Alcotest.(check string) "the Self grant" "grant-1" (Grant_id.to_string grant)

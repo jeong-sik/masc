@@ -43,15 +43,16 @@ Tool_capability.kind(디스패치 시점 질의, wire "read_only")는 같은 3�
 다른 어휘로 열거한다. 의존 방향(tool_capability → Tool_catalog.metadata)이 순환을
 막아 단일 축으로 합칠 수 없다 — tool_capability.mli 에 상호 언급 한 줄.
 
-## 항목 5 다이아몬드 include — 수리 2 + 유지 4
+## 항목 5 다이아몬드 include — 수리 3 + 유지 3
 
 | 좌표 | 판정 | 근거 |
 | --- | --- | --- |
-| keeper_types_profile.ml:93 include Keeper_config 2벌 | **수리** | :9 에 이미 include — 같은 모듈 이중 include 삭제 |
-| otel_metric_store.ml facade | **수리** | 이름 모듈 7개를 direct(:8,:10-15)와 Builtin(:9 경유) 이중 수신 + Otel_metric_names 별칭 let 4개가 include 와 중복. direct 7개·별칭 4개 삭제(이름은 Builtin 경로로 동일 제공) |
+| keeper_types_profile.ml:93 include Keeper_config 2벌 | **수리 (PR #49970)** | :9 에 이미 include — 같은 모듈 이중 include 삭제 |
+| otel_metric_store.ml facade | **수리 (PR #49970)** | 이름 모듈 7개를 direct(:8,:10-15)와 Builtin(:9 경유) 이중 수신 + Otel_metric_names 별칭 let 4개가 include 와 중복. direct 7개·별칭 4개 삭제(이름은 Builtin 경로로 동일 제공) |
+| dashboard_execution 3중 include | **수리 (PR #49970)** | `dashboard_execution.ml`에서 `Dashboard_execution_sessions`가 이미 재수출하는 중복 `include Dashboard_execution_helpers`를 제거하여 다이아몬드 중복 include 해소 |
 | workspace 14-include + 1줄 루트 | **유지** | godfile 분해의 repo 표준 패턴(각 모듈 1회 — 다이아몬드 아님), Workspace.X 소비처 전역 |
 | board 루트 shim 7개 | **유지** | wrapped lib 에 bare 이름을 노출하는 load-bearing 경로(Board_dispatch 9파일 등 전부 루트 이름 사용) |
-| dashboard_execution 3중 include | **유지** | 분해-재결합 패턴(합치면 godfile 부활) |
+| OTel 스택 2벌 (`packages/agent_core/lib/otel_tracer.ml`·`otel_export.ml` vs `lib/otel_spans/`·`lib/otel_metrics/`·`lib/otel_metric_store/`) | **유지(계층 경계·브리지 확인)** | `packages/agent_core`(`agent_core.opam`)는 상위 `masc`(`lib/`) 및 외부 `opentelemetry` protobuf SDK에 의존할 수 없는 독립 하위 라이브러리 패키지로 자체 인메모리 스팬 링·OTLP JSON 직렬화(`otel_tracer.ml`·`otel_export.ml`)를 제공한다. 반면 `lib/otel_spans/`(`Opentelemetry` SDK 래퍼)·`lib/otel_metrics/`·`lib/otel_metric_store/`는 상위 `masc` 서버 계층의 스팬·메트릭 집계기이며, `lib/server/server_bootstrap_maintenance.ml:673-688`에서 `Otel_metric_store.register_otel_source_once ()` 및 `Agent_core.Otel_tracer.create_instance_eio ()`를 통해 `agent_core` 트레이서 상태를 서버 메트릭/트레이스 파이프라인으로 브리지한다. 패키지 의존 역전 없이 통합 불가하므로 현행 2계층 구조를 유지한다 |
 
 ## 항목 6 9스토어 fan-in — 판정: 읽기 전용 뷰가 계약
 

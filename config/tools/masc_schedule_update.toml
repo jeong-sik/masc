@@ -79,7 +79,9 @@ A GitHub Actions run URL: https://github.com/<owner>/<repo>/actions/runs/<id>, \
 optionally followed by /attempts/<n>. The wake comes when that run completes, \
 whatever its conclusion, or at the due time, whichever is first. An update \
 that omits it leaves the schedule without a run to wait for. Works with \
-recurrence_kind one_shot only."""
+recurrence_kind one_shot only. If another call edits the schedule while this \
+call attaches the watch, this update is refused; reread the schedule before \
+retrying."""
 
 [[params]]
 name = "requested_at_unix"

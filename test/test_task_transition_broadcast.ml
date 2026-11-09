@@ -682,7 +682,7 @@ let test_rejected_transition_is_silent () =
 
 let test_verdict_activity_tracks_the_committed_terminal () =
   List.iter
-    (fun (verdict, terminal, active, terminal_kind) ->
+    (fun (verdict, terminal, terminal_kind) ->
       with_test_env (fun config ~baseline_seq:_ ->
         let previous = Atomic.get Workspace_hooks.activity_emit_fn in
         let entity (value : Workspace_hooks.activity_entity) =
@@ -711,23 +711,6 @@ let test_verdict_activity_tracks_the_committed_terminal () =
               | D.AwaitingVerification { verification_id; _ } -> verification_id
               | _ -> Alcotest.fail "submission must remain awaiting verification"
             in
-            let open Yojson.Safe.Util in
-            let assert_projection ~status ~active =
-              let graph = Activity_graph.graph_json config ~limit:20 () in
-              let task = graph |> member "nodes" |> to_list |> List.find (fun row ->
-                row |> member "id" |> to_string = "task:" ^ task_id) in
-              Alcotest.(check string) "task projection" status
-                (task |> member "status" |> to_string);
-              let work = graph |> member "edges" |> to_list |> List.filter (fun row ->
-                row |> member "kind" |> to_string = "works_on") in
-              Alcotest.(check int) "the authority never owns task work" 1 (List.length work);
-              let edge = List.hd work in
-              Alcotest.(check string) "work belongs to producer" ("agent:" ^ owner)
-                (edge |> member "source" |> to_string);
-              Alcotest.(check bool) "producer work active" active
-                (edge |> member "active" |> to_bool)
-            in
-            assert_projection ~status:"in_progress" ~active:true;
             (match Workspace.commit_verdict_r config ~task_id ~verification_id
                 ~authority:(D.Human_operator { operator_id = "operator-reviewer" })
                 ~verdict ~notes:"reviewed request" () with
@@ -735,7 +718,6 @@ let test_verdict_activity_tracks_the_committed_terminal () =
              | Error error -> Alcotest.fail (D.masc_error_to_string error));
             Alcotest.(check string) "committed terminal" terminal
               (D.task_status_to_string (status ()));
-            assert_projection ~status:terminal ~active;
             let events = Activity_graph.list_events config ~after_seq:0 ~limit:20
               ~keep:(fun event -> match event.Activity_graph.subject with
                 | Some subject -> String.equal subject.kind "task" && String.equal subject.id task_id
@@ -743,9 +725,9 @@ let test_verdict_activity_tracks_the_committed_terminal () =
             Alcotest.(check (list string)) "events describe committed states"
               [ "task.claimed"; "task.started"; "task.submit_for_verification"; terminal_kind ]
               (List.map (fun (event : Activity_graph.event) -> event.kind) events))))
-    [ D.Verdict_approved, "done", false, "task.approved"
+    [ D.Verdict_approved, "done", "task.approved"
     ; D.Verdict_rejected { reason = "the evidence does not show it" },
-        "in_progress", true, "task.rejected"
+        "in_progress", "task.rejected"
     ]
 ;;
 

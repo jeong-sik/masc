@@ -988,8 +988,8 @@ describe('Overview prototype surface', () => {
     expect(order).toEqual(['overview-primary-grid', 'overview-domains'])
   })
 
-  // Gap 1: KPI grid uses 6-column layout (surfaces.css:88 `repeat(6, 1fr)`)
-  it('KPI grid declares 6-column repeat matching prototype surfaces.css:88', () => {
+  // Gap 1: KPI grid uses 6-column layout (prototype `repeat(6, 1fr)`)
+  it('KPI grid declares 6-column repeat matching the prototype', () => {
     const { container } = render(h(Overview, null))
     const grid = container.querySelector('[data-testid="overview-kpis"]') as HTMLElement | null
     expect(grid).not.toBeNull()

@@ -113,9 +113,11 @@ or `0` on the second.
 ## What stays as it was
 
 gRPC (8936) and the standalone WebSocket listener (8937) are cleartext. On
-the TLS port a WebSocket upgrade works over an HTTP/1.1 connection; over an
-HTTP/2 connection `/ws` answers 426, because h2 has no RFC 8441 extended
-CONNECT.
+the TLS port a WebSocket upgrade works over an HTTP/1.1 connection. An ordinary
+HTTP/2 `GET /ws` returns discovery JSON, so an HTTPS dashboard can discover its
+`wss://` endpoint before opening the HTTP/1.1 WebSocket connection. An actual
+upgrade without an upgrade-capable transport still answers 426; h2 has no
+RFC 8441 extended CONNECT.
 
 The dashboard decodes `transport-health` strictly: a bundle built before
 this change rejects the `https_listener` field with a schema drift error on

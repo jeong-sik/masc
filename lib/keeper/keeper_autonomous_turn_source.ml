@@ -564,30 +564,47 @@ let read_store config keeper_name =
   Dated_jsonl.open_store ~cross_context_mutex:(Cross_context_mutex.create ()) location
 ;;
 
-type snapshot = { records : Turn_record.t list; fingerprint : string }
+type snapshot =
+  { keeper_name : string
+  ; source_root : string
+  ; source_rows : (string * string) list
+  ; records : Turn_record.t list
+  ; fingerprint : string
+  }
 
 let snapshot_has_records snapshot = match snapshot.records with [] -> false | _ :: _ -> true
 let snapshot_fingerprint snapshot = snapshot.fingerprint
 
-let read_snapshot_result ~config ~keeper_name ?(limit = default_limit) () =
+let read_snapshot_result ~config ~keeper_name ?previous ?(limit = default_limit) () =
   let open Result.Syntax in
-  let* entries = Dated_jsonl.read_recent_result (read_store config keeper_name) (max 1 limit)
+  let store = read_store config keeper_name in
+  let source_root = Dated_jsonl.base_dir store in
+  let* source_rows = Dated_jsonl.read_recent_lines_result
+      store (max 1 limit)
     |> Result.map_error Dated_jsonl.read_error_to_string in
-  let* records_rev, json_rev = List.fold_left (fun state entry ->
+  let same_row (left_path, left_line) (right_path, right_line) =
+    String.equal left_path right_path && String.equal left_line right_line in
+  match previous with
+  | Some previous when String.equal previous.keeper_name keeper_name
+      && String.equal previous.source_root source_root
+      && List.equal same_row previous.source_rows source_rows -> Ok previous
+  | Some _ | None ->
+  let* records_rev, json_rev = List.fold_left (fun state (path, line) ->
     let* records, rows = state in
-    match entry with
-    | Dated_jsonl.Malformed_json { path; line_number; detail } ->
+    match Dated_jsonl.entry_of_physical_line ~path line with
+    | None -> Ok (records, rows)
+    | Some (Dated_jsonl.Malformed_json { path; line_number; detail }) ->
       Error (Printf.sprintf "unreadable TurnRecord at %s:%s: %s" path
         (Option.fold ~none:"unknown" ~some:string_of_int line_number) detail)
-    | Dated_jsonl.Parsed json ->
+    | Some (Dated_jsonl.Parsed json) ->
       let* record = Turn_record.of_json json in
       if not (String.equal record.keeper keeper_name)
       then Error (Printf.sprintf "TurnRecord belongs to %s instead of %s" record.keeper keeper_name)
       else Ok (record :: records, json :: rows))
-    (Ok ([], [])) entries in
+    (Ok ([], [])) source_rows in
   let fingerprint = `List (List.rev json_rev) |> Yojson.Safe.to_string
     |> Digest.string |> Digest.to_hex in
-  Ok { records = List.rev records_rev; fingerprint }
+  Ok { keeper_name; source_root; source_rows; records = List.rev records_rev; fingerprint }
 ;;
 
 let project_snapshot_result ~config ~keeper_name snapshot =

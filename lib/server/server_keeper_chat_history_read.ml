@@ -39,7 +39,7 @@ let directory_stamp path =
     else Error (History_unavailable
         (Printf.sprintf "%s(%s): %s" operation argument (Unix.error_message cause)))
 
-let inspect ~config ~keeper_name =
+let inspect ~previous ~config ~keeper_name =
   let open Result.Syntax in
   let physical path = Physical.inspect_source ~path
       |> Result.map_error (fun error -> History_unavailable (Physical.error_to_string error)) in
@@ -51,7 +51,7 @@ let inspect ~config ~keeper_name =
   let meta_path = Filename.concat (Workspace.keepers_runtime_dir config)
       (Keeper_runtime_root_entry.keeper_basename ~keeper_name Keeper_runtime_root_entry.Metadata) in
   let meta = metadata_evidence ~config meta_path in
-  let* autonomous = Autonomous.read_snapshot_result ~config ~keeper_name ()
+  let* autonomous = Autonomous.read_snapshot_result ~config ~keeper_name ?previous ()
       |> Result.map_error (fun detail -> History_unavailable detail) in
   let retained_elsewhere =
     Keeper_registry.is_registered ~base_path:config.Workspace.base_path keeper_name
@@ -88,7 +88,7 @@ let read_source_json ~config ~keeper_name ~render source =
 let read_json ~config ~keeper_name ~render =
   Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
     let open Result.Syntax in
-    let* source = inspect ~config ~keeper_name in
+    let* source = inspect ~previous:None ~config ~keeper_name in
     read_source_json ~config ~keeper_name ~render source)
 
 (* Dashboard_cache publishes JSON values and uses exceptions to reject a
@@ -104,12 +104,14 @@ let cached_json ~config ~keeper_name ~ttl ~render =
      let the next request read that newer source instead of rejecting this one.
      A failed later inspection also prevents retention; it cannot retroactively
      make the already-read body an unreadable or empty successful transcript. *)
-  let retire_if_changed fingerprint =
-    match Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () -> inspect ~config ~keeper_name) with
+  let retire_if_changed ~previous fingerprint =
+    match Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
+      inspect ~previous:(Some previous) ~config ~keeper_name) with
     | Ok after when String.equal fingerprint after.fingerprint -> ()
     | Ok _ | Error (Unknown_keeper | History_unavailable _) -> Dashboard_cache.invalidate key
   in
-  match Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () -> inspect ~config ~keeper_name) with
+  match Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
+    inspect ~previous:None ~config ~keeper_name) with
   | Error error -> refuse error
   | Ok source ->
     (match Dashboard_cache.peek key with
@@ -124,7 +126,7 @@ let cached_json ~config ~keeper_name ~ttl ~render =
          match Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
              read_source_json ~config ~keeper_name ~render source) with
          | Ok body ->
-           retire_if_changed source.fingerprint;
+           retire_if_changed ~previous:source.autonomous source.fingerprint;
            `Assoc [ "freshness", `String source.fingerprint; "body", body ]
          | Error error ->
            (* Also retire a stale slot before the cache's background-refresh
@@ -137,7 +139,7 @@ let cached_json ~config ~keeper_name ~ttl ~render =
          | `Assoc fields ->
            (match List.assoc_opt "freshness" fields, List.assoc_opt "body" fields with
             | Some (`String stamp), Some body ->
-              retire_if_changed stamp;
+              retire_if_changed ~previous:source.autonomous stamp;
               Ok body
             | Some _, Some _ | Some _, None | None, _ ->
               refuse (History_unavailable "invalid cached history response"))

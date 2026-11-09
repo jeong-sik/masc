@@ -22,8 +22,12 @@ type snapshot
     A read handle does not register an append mutex or a Keeper store cache. *)
 
 val read_snapshot_result :
-  config:Workspace.config -> keeper_name:string -> ?limit:int -> unit ->
+  config:Workspace.config -> keeper_name:string -> ?previous:snapshot -> ?limit:int -> unit ->
   (snapshot, string) result
+(** Reread the current bounded physical rows and all storage boundaries.
+    [previous] reuses only an already strictly decoded snapshot for this Keeper
+    when every selected source path and raw row is byte-identical. It does not
+    skip a current read, weaken errors or authorize another Keeper's data. *)
 val snapshot_has_records : snapshot -> bool
 val snapshot_fingerprint : snapshot -> string
 val project_snapshot_result :

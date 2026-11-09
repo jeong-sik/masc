@@ -325,6 +325,20 @@ let test_read_recent_result_counts_malformed_physical_row () =
     failf "expected malformed + parsed physical tail, got %d entries" (List.length entries)
 ;;
 
+let test_read_recent_lines_result_preserves_physical_source () =
+  let location = temp_store "dated_jsonl_recent_raw_source" in
+  let dir = Dated_jsonl.Store.dir location in
+  write_dated_file dir "2026-01" "31" [ {|{"i":1}|} ];
+  write_dated_file dir "2026-02" "01"
+    [ {|  {"i":2}  |}; " \t "; "not-json"; {|{"i":3}|} ];
+  let path = Filename.concat (Filename.concat dir "2026-02") "01.jsonl" in
+  let store = Dated_jsonl.open_store location in
+  let rows = Dated_jsonl.read_recent_lines_result ~offset:1 store 2
+    |> require_recent_result "strict raw physical read" in
+  check (list (pair string string)) "raw rows preserve source, whitespace and malformed rows"
+    [path, {|  {"i":2}  |}; path, "not-json"] rows
+;;
+
 let test_read_recent_result_offset_counts_malformed_physical_row () =
   let location = temp_store "dated_jsonl_recent_result_offset" in
   let dir = Dated_jsonl.Store.dir location in
@@ -1694,6 +1708,8 @@ let () =
             test_read_recent_skips_malformed_lines;
           test_case "strict read counts malformed physical row" `Quick
             test_read_recent_result_counts_malformed_physical_row;
+          test_case "strict raw rows preserve physical source" `Quick
+            test_read_recent_lines_result_preserves_physical_source;
           test_case "strict offset counts malformed physical row" `Quick
             test_read_recent_result_offset_counts_malformed_physical_row;
           test_case "strict read rejects negative offset" `Quick

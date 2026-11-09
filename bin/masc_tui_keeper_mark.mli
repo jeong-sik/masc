@@ -148,10 +148,10 @@ val grid_open_mark : string
 val grid_folded_mark : string
 (** [−] an open group title, [+] a folded one. *)
 
-val grid_renewed_mark : string
+val grid_saved_mark : string
 val grid_stale_mark : string
-(** [+] before the age view's time since the memory changed, and [×] before
-    its count of invalidated sources. *)
+(** [+] before the age view's time since the memory snapshot was saved, and
+    [×] before its count of invalidated sources. *)
 
 val grid_since_word : string
 val grid_ago_word : string
@@ -167,11 +167,12 @@ val grid_lag_bar_header : string
 val grid_digest_header : string
 val grid_gap_header : string
 val grid_facts_by_age_header : string
-val grid_renewed_header : string
+val grid_saved_header : string
 val grid_stale_header : string
 val grid_facts_header : string
 (** The column headers of the memory and age views. The lag bar's header is
-    [lag ▹], or [lag · unread turns ▹] over a bar wide enough for it. *)
+    [lag ▹], or [lag · unread turns ▹] over a bar wide enough for it. [saved]
+    is the snapshot's saved time, not a source-revalidation result. *)
 
 val column_legend : (string * string) list
 (** The Keepers header words, the sentence about a failing keeper's past and

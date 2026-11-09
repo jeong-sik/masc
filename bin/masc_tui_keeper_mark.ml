@@ -172,7 +172,7 @@ let grid_chain_link = "\xe2\x94\x81" (* ━ *)
 let grid_more_mark = "\xe2\x80\xa6" (* … *)
 let grid_open_mark = "\xe2\x88\x92" (* − *)
 let grid_folded_mark = "+"
-let grid_renewed_mark = "+"
+let grid_saved_mark = "+"
 let grid_stale_mark = "\xc3\x97" (* × *)
 let grid_since_word = "since"
 let grid_ago_word = "ago"
@@ -186,7 +186,7 @@ let grid_lag_bar_header = "lag \xc2\xb7 unread turns " ^ axis_next_glyph (* · *
 let grid_digest_header = "digest"
 let grid_gap_header = "gap"
 let grid_facts_by_age_header = "facts by age \xe2\x96\xb8" (* ▸ *)
-let grid_renewed_header = "renewed"
+let grid_saved_header = "saved"
 let grid_stale_header = "stale"
 let grid_facts_header = "facts"
 
@@ -232,14 +232,14 @@ let column_legend =
          is a value the server did not measure, a pass this server has not seen yet too"
         grid_no_data_word Masc_tui_theme.Glyph.no_value Masc_tui_keeper_age_ladder.unmeasured_mark )
   ; ( String.concat " "
-        [ grid_facts_by_age_header; grid_now_line; grid_renewed_header; grid_now_line
+        [ grid_facts_by_age_header; grid_now_line; grid_saved_header; grid_now_line
         ; grid_lag_bar_short_header; grid_stale_header; grid_facts_header ]
     , Printf.sprintf
         "the age view: the keeper's facts in the server's age bins, oldest on the left, %s \
-         the time since its memory last changed (%s %s without one), the unread-turn bar, %sN \
-         invalidated sources and the fact count with a level against the keeper with the \
-         most facts; %s is a value the server did not measure"
-        grid_renewed_mark Masc_tui_theme.Glyph.no_value grid_no_snapshot_word grid_stale_mark
+         the time since its memory snapshot was saved (%s %s without one), the unread-turn \
+         bar, %sN invalidated sources and the fact count with a level against the keeper with \
+         the most facts; %s is a value the server did not measure"
+        grid_saved_mark Masc_tui_theme.Glyph.no_value grid_no_snapshot_word grid_stale_mark
         Masc_tui_keeper_age_ladder.unmeasured_mark )
   ; ( failing_glyph
     , "a failing keeper's last failure: how long ago · cause · the runtime that ended it \

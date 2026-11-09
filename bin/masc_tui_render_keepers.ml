@@ -859,11 +859,11 @@ let grid_fact_ages (grid : Grid.t) memory =
       let cell = Memory_reading.fact_ages_cell memory in
       style_axis_cell { cell with text = Message_layout.pad_left cell.text grid.side_cells }
 
-(* The age view's ● cell: how long ago the memory last changed. *)
-let grid_renewed ~now memory =
+(* The age view's ● cell: how long ago the memory snapshot was saved. *)
+let grid_saved ~now memory =
   match Memory_reading.updated_at memory with
   | Memory_reading.Measured at ->
-      fit_width (Keeper_mark.grid_renewed_mark ^ " " ^ Grid.short_span (now -. at)) Grid.now_cells
+      fit_width (Keeper_mark.grid_saved_mark ^ " " ^ Grid.short_span (now -. at)) Grid.now_cells
   | Memory_reading.No_snapshot | Memory_reading.Row_absent ->
       grid_fitted Grid.now_cells
         (grid_quiet (Masc_tui_theme.Glyph.no_value ^ " " ^ Keeper_mark.grid_no_snapshot_word))
@@ -932,7 +932,7 @@ let grid_keeper_row state (grid : Grid.t) columns ~view ~peak_lag ~peak_facts ~n
          { gutter
          ; name
          ; pulse = grid_fact_ages grid memory
-         ; now_cell = grid_renewed ~now memory
+         ; now_cell = grid_saved ~now memory
          ; strip = grid_lag_bar grid ~peak_lag memory
          ; due = grid_stale memory
          ; right = grid_facts grid ~peak_facts memory
@@ -1116,7 +1116,7 @@ let grid_header (grid : Grid.t) (columns : Axis_row.columns) =
              ^ Keeper_mark.grid_facts_by_age_header
            else Keeper_mark.grid_keeper_header)
         , None
-        , Keeper_mark.grid_renewed_header
+        , Keeper_mark.grid_saved_header
         , lag_bar
         , Keeper_mark.grid_stale_header
         , Message_layout.pad_left Keeper_mark.grid_facts_header grid.mem_cells )

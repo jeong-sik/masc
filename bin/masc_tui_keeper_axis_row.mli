@@ -15,8 +15,8 @@ type columns =
       (** The pulse, how the librarian's last pass ended, the unread turns as a
           bar, the time since the last digest and the atoms requests skip. *)
   | Age_columns
-      (** The facts by age, the time since the memory last changed, the unread
-          turns as a bar, the invalidated sources and the fact count. *)
+      (** The facts by age, the time since the memory snapshot was saved, the
+          unread turns as a bar, the invalidated sources and the fact count. *)
 
 type shape =
   | List_columns  (** The list's columns: NOW, Mode S, AGE, LIFECYCLE / RUNTIME, DETAIL. *)

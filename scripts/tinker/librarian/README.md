@@ -56,7 +56,7 @@ Synthetic Keepers, memories and candidates are invented by the model from
 | `glm_chat.py` | Capped calls to Z.AI's GLM coding endpoint in the request MASC's GLM slot sends, cached for resume |
 | `eval_admission.py` | Measures targets on E-real and E-synth, then applies the gates |
 | `memory_scores.py` | Scores one answer: E-real against the live answer, E-synth by the memory it leaves |
-| `teacher_sample.py` | Keeps teacher answers that match the training labels |
+| `teacher_sample.py` | Keeps teacher answers that leave the memory their training labels ask for, and those that absorb a memory once the merge judge finds each absorb mergeable |
 | `train_sft.py` | Trains branch A (answer only) or B (teacher thinking and answer) |
 
 The tests are `scripts/tests/test_tinker_librarian_*.py`. They read only
@@ -92,7 +92,12 @@ carries none, and the endpoint applies its default.
 2. Run the base model on E-synth, audit the labels with a judge that sees
    neither the labels nor the answers, and keep the requests it confirms.
 3. Fix `pass_lines.json` and commit it before any training.
-4. Generate the training split, sample the teacher, train branch A and branch B.
+4. Generate the training split and sample the teacher (`teacher_sample.py
+   sample`). An answer that absorbs a memory waits for the merge judge, also
+   when its label expects the merge: `teacher_sample.py cases` gives the judge
+   the absorb gate's question as `merge_cases.py` does, and `apply` keeps the
+   answer only when every absorb is judged mergeable. Train branch A and
+   branch B on the `accepted.jsonl` that `apply` writes.
 5. Measure the base model, A and B in one run per set, from an empty `--out`.
 6. When a valid E-synth answer dropped a fact its label does not name (not
    planted stale, not a correction or complement target, not a fact of a

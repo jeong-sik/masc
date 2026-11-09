@@ -944,6 +944,10 @@ MASC does not ask the running turn to stop. The turn finishes on its own, and
 the Owner then starts the waiting message. Use the interrupt controls to stop
 the running turn sooner.
 
+An autonomous turn can yield its Owner slot to runnable chat at a completed
+MASC tool boundary. It retains unfinished work for resumption. This does not
+interrupt a shell command or a vendor built-in tool that is still running.
+
 A direct operation can also end at a checkpoint instead of an answer, for
 example when a tool result arrives later. The retained continuation survives
 restart while queued or claimed before resume admission. A crash after resume
@@ -1167,6 +1171,13 @@ not reset its pending deadline or create work by themselves.
 
 A due Keeper wake waits in the queue until the running turn ends; the next
 turn's intake admits it.
+
+Ready schedules without result delivery can share a turn with other work
+that has no reply route. Schedules with result delivery share only with
+schedules for the same exact reply route, including its thread and reply
+message. A checkpoint keeps unfinished requests pending; completion
+acknowledges the requests admitted to that turn. An arrival preview alone
+does not acknowledge a request.
 
 To investigate a delayed Job, inspect the exact schedule lookup at
 `/api/v1/dashboard/scheduled-automation?schedule_id=<id>`:

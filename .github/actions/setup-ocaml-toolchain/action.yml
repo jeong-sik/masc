@@ -24,7 +24,7 @@ runs:
           exit 1
         fi
 
-    # One key, computed once, for the two cache steps below.
+    # Compute the switch key and the pinned opam binary identity once.
     #
     # runner.arch is in the key because an arm64 runner restoring an x86_64
     # ~/.opam gets a switch whose ocamlc does not run (run 32332266041).
@@ -40,12 +40,24 @@ runs:
       env:
         CACHE_DEPENDENCY_HASH: ${{ hashFiles('*.opam', 'masc.opam.locked', 'dune-project', 'scripts/opam-pin-external-deps.sh') }}
         CACHE_PREFIX: opam-${{ runner.os == 'Linux' && 'linux' || 'macos' }}-${{ runner.arch }}-${{ inputs.cache-prefix }}-${{ inputs.ocaml-compiler }}-
+        OPAM_VERSION: "2.5.0"
+        DEFAULT_BRANCH_PUSH: ${{ github.event_name == 'push' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch) }}
       run: |
         : "${ImageOS:?GitHub-hosted ImageOS is required for cache isolation}"
         : "${ImageVersion:?GitHub-hosted ImageVersion is required for cache isolation}"
+        # Dispatches on main may compile a PR checkout. Only a default-branch
+        # push checked out at its event SHA may save executable cache contents.
+        binary_cache_save=false
+        if [[ "${DEFAULT_BRANCH_PUSH}" == "true" ]] && [[ "$(git rev-parse HEAD)" == "${GITHUB_SHA}" ]]; then
+          binary_cache_save=true
+        fi
         {
           echo "key=${CACHE_PREFIX}${ImageOS}-${ImageVersion}-${CACHE_DEPENDENCY_HASH}-v4"
           echo "prefix=${CACHE_PREFIX}${ImageOS}-${ImageVersion}-"
+          echo "opam-version=${OPAM_VERSION}"
+          echo "opam-binary-key=opam-binary-${RUNNER_OS}-${RUNNER_ARCH}-${OPAM_VERSION}-v1"
+          echo "opam-binary-path=${RUNNER_TOOL_CACHE:?GitHub-hosted tool cache is required}/masc-opam-bin"
+          echo "opam-binary-save=${binary_cache_save}"
         } >> "${GITHUB_OUTPUT}"
 
     # The switch is cached after the whole job, so the pins and the opam
@@ -80,6 +92,23 @@ runs:
         restore-keys: |
           ${{ steps.opam-toolchain-key.outputs.prefix }}
 
+    # Keep the small release binary separate from dependency-sensitive switch
+    # caches. Adding its path to those caches would invalidate their versions.
+    # Only verified default-branch push source may save this executable cache.
+    - name: Restore opam binary (restore only)
+      if: steps.opam-toolchain-key.outputs.opam-binary-save != 'true'
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ steps.opam-toolchain-key.outputs.opam-binary-path }}
+        key: ${{ steps.opam-toolchain-key.outputs.opam-binary-key }}
+
+    - name: Restore and save opam binary (verified default-branch push only)
+      if: steps.opam-toolchain-key.outputs.opam-binary-save == 'true'
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ steps.opam-toolchain-key.outputs.opam-binary-path }}
+        key: ${{ steps.opam-toolchain-key.outputs.opam-binary-key }}
+
     # One bootstrap for both runner kinds: the opam release binary for this
     # OS and architecture, a bare root, one switch. macOS used to go through
     # ocaml/setup-ocaml instead, which builds the compiler into a switch that
@@ -89,6 +118,8 @@ runs:
       shell: bash
       env:
         OCAML_COMPILER_INPUT: ${{ inputs.ocaml-compiler }}
+        OPAM_VERSION: ${{ steps.opam-toolchain-key.outputs.opam-version }}
+        OPAM_BINARY_CACHE_DIR: ${{ steps.opam-toolchain-key.outputs.opam-binary-path }}
         OPAM_CACHE_EXACT_HIT: ${{ steps.opam-toolchain-cache.outputs.cache-hit }}
         OPAM_CACHE_EXACT_HIT_STORE: ${{ steps.opam-toolchain-store.outputs.cache-hit }}
         GH_TOKEN: ${{ github.token }}
@@ -122,7 +153,7 @@ runs:
           echo "OPAMYES=1"
         } >> "${GITHUB_ENV}"
 
-        # Download opam binary first — it's small (~10MB) and always needed
+        # Select the release asset for this runner before using a cached binary.
         case "$(uname -m)" in
           x86_64|amd64)
             opam_arch="x86_64"
@@ -148,20 +179,39 @@ runs:
             ;;
         esac
 
-        opam_version="2.5.0"
+        opam_version="${OPAM_VERSION:?Pinned opam version is required}"
         opam_dir="${RUNNER_TEMP}/opam-bin"
-        opam_url="https://github.com/ocaml/opam/releases/download/${opam_version}/opam-${opam_version}-${opam_arch}-${opam_os}"
+        opam_asset="opam-${opam_version}-${opam_arch}-${opam_os}"
+        opam_url="https://github.com/ocaml/opam/releases/download/${opam_version}/${opam_asset}"
+        cached_opam="${OPAM_BINARY_CACHE_DIR}/${opam_asset}"
 
-        mkdir -p "${opam_dir}"
-        if ! curl -L --fail --retry 2 --retry-delay 3 --retry-all-errors "${opam_url}" -o "${opam_dir}/opam"; then
-          echo "curl download failed for ${opam_url}, falling back to gh release download..." >&2
-          gh release download "${opam_version}" \
-            --repo ocaml/opam \
-            --pattern "opam-${opam_version}-${opam_arch}-${opam_os}" \
-            --dir "${opam_dir}" \
-            --clobber
-          mv -f "${opam_dir}/opam-${opam_version}-${opam_arch}-${opam_os}" "${opam_dir}/opam"
+        # A cache-hit flag alone does not establish a runnable, matching binary.
+        if [[ -f "${cached_opam}" && -x "${cached_opam}" ]] && cached_version="$("${cached_opam}" --version 2>/dev/null)" && [[ "${cached_version}" == "${opam_version}" ]]; then
+          echo "::notice::Reusing opam ${opam_version} from the binary cache"
+        else
+          echo "::notice::Installing ${opam_asset}"
+          mkdir -p "${OPAM_BINARY_CACHE_DIR}"
+          opam_download_dir="$(mktemp -d "${OPAM_BINARY_CACHE_DIR}/.download.XXXXXX")"
+          trap 'rm -rf -- "${opam_download_dir}"' EXIT
+          if ! curl -L --fail --retry 2 --retry-delay 3 --retry-all-errors "${opam_url}" -o "${opam_download_dir}/opam"; then
+            echo "curl download failed for ${opam_url}, falling back to gh release download..." >&2
+            gh release download "${opam_version}" \
+              --repo ocaml/opam \
+              --pattern "${opam_asset}" \
+              --dir "${opam_download_dir}" \
+              --clobber
+            mv -f "${opam_download_dir}/${opam_asset}" "${opam_download_dir}/opam"
+          fi
+          chmod +x "${opam_download_dir}/opam"
+          downloaded_version="$("${opam_download_dir}/opam" --version)"
+          if [[ "${downloaded_version}" != "${opam_version}" ]]; then
+            echo "Downloaded opam reports ${downloaded_version}; expected ${opam_version}" >&2
+            exit 1
+          fi
+          mv -f "${opam_download_dir}/opam" "${cached_opam}"
         fi
+        mkdir -p "${opam_dir}"
+        cp -f "${cached_opam}" "${opam_dir}/opam"
         chmod +x "${opam_dir}/opam"
         export PATH="${opam_dir}:${PATH}"
         echo "${opam_dir}" >> "${GITHUB_PATH}"

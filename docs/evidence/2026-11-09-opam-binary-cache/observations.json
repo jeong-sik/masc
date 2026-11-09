@@ -1,0 +1,286 @@
+{
+  "baseline_commit": "82a9756e2e6b15ea77b9bb0c85cb548360cb5751",
+  "tested_head": "82a9756e2e6b15ea77b9bb0c85cb548360cb5751",
+  "action_sha256": "9c22f84cf799fb950034c77bf30c267de3a5b60779e540a59bf8faefd5bff4d4",
+  "shell_fixture_count": 22,
+  "save_policy_fixture_count": 5,
+  "results": [
+    {
+      "name": "warm-exact",
+      "passed": true,
+      "exit_code": 0,
+      "binary_key": "opam-binary-Linux-X64-2.5.0-v1",
+      "downloads": 0,
+      "fallbacks": 0,
+      "refreshes": 0,
+      "inits": 0,
+      "creates": 0
+    },
+    {
+      "name": "warm-prefix-refreshes-root",
+      "passed": true,
+      "exit_code": 0,
+      "binary_key": "opam-binary-Linux-X64-2.5.0-v1",
+      "downloads": 0,
+      "fallbacks": 0,
+      "refreshes": 1,
+      "inits": 0,
+      "creates": 0
+    },
+    {
+      "name": "warm-default-output",
+      "passed": true,
+      "exit_code": 0,
+      "binary_key": "opam-binary-Linux-X64-2.5.0-v1",
+      "downloads": 0,
+      "fallbacks": 0,
+      "refreshes": 0,
+      "inits": 0,
+      "creates": 0
+    },
+    {
+      "name": "warm-linux-arm64",
+      "passed": true,
+      "exit_code": 0,
+      "binary_key": "opam-binary-Linux-ARM64-2.5.0-v1",
+      "downloads": 0,
+      "fallbacks": 0,
+      "refreshes": 0,
+      "inits": 0,
+      "creates": 0
+    },
+    {
+      "name": "warm-macos-arm64",
+      "passed": true,
+      "exit_code": 0,
+      "binary_key": "opam-binary-macOS-ARM64-2.5.0-v1",
+      "downloads": 0,
+      "fallbacks": 0,
+      "refreshes": 0,
+      "inits": 0,
+      "creates": 0
+    },
+    {
+      "name": "warm-macos-x64",
+      "passed": true,
+      "exit_code": 0,
+      "binary_key": "opam-binary-macOS-X64-2.5.0-v1",
+      "downloads": 0,
+      "fallbacks": 0,
+      "refreshes": 0,
+      "inits": 0,
+      "creates": 0
+    },
+    {
+      "name": "warm-binary-cold-switch",
+      "passed": true,
+      "exit_code": 0,
+      "binary_key": "opam-binary-Linux-X64-2.5.0-v1",
+      "downloads": 0,
+      "fallbacks": 0,
+      "refreshes": 0,
+      "inits": 1,
+      "creates": 1
+    },
+    {
+      "name": "cold-curl-success",
+      "passed": true,
+      "exit_code": 0,
+      "binary_key": "opam-binary-Linux-X64-2.5.0-v1",
+      "downloads": 1,
+      "fallbacks": 0,
+      "refreshes": 0,
+      "inits": 0,
+      "creates": 0
+    },
+    {
+      "name": "cold-fallback-success",
+      "passed": true,
+      "exit_code": 0,
+      "binary_key": "opam-binary-Linux-X64-2.5.0-v1",
+      "downloads": 1,
+      "fallbacks": 1,
+      "refreshes": 0,
+      "inits": 0,
+      "creates": 0
+    },
+    {
+      "name": "cold-both-downloads-fail",
+      "passed": true,
+      "exit_code": 1,
+      "binary_key": "opam-binary-Linux-X64-2.5.0-v1",
+      "downloads": 1,
+      "fallbacks": 1,
+      "refreshes": 0,
+      "inits": 0,
+      "creates": 0
+    },
+    {
+      "name": "wrong-cache-version",
+      "passed": true,
+      "exit_code": 0,
+      "binary_key": "opam-binary-Linux-X64-2.5.0-v1",
+      "downloads": 1,
+      "fallbacks": 0,
+      "refreshes": 0,
+      "inits": 0,
+      "creates": 0
+    },
+    {
+      "name": "wrong-cache-downloads-fail",
+      "passed": true,
+      "exit_code": 1,
+      "binary_key": "opam-binary-Linux-X64-2.5.0-v1",
+      "downloads": 1,
+      "fallbacks": 1,
+      "refreshes": 0,
+      "inits": 0,
+      "creates": 0
+    },
+    {
+      "name": "unrunnable-cache",
+      "passed": true,
+      "exit_code": 0,
+      "binary_key": "opam-binary-Linux-X64-2.5.0-v1",
+      "downloads": 1,
+      "fallbacks": 0,
+      "refreshes": 0,
+      "inits": 0,
+      "creates": 0
+    },
+    {
+      "name": "failed-cache-probe-with-matching-output",
+      "passed": true,
+      "exit_code": 0,
+      "binary_key": "opam-binary-Linux-X64-2.5.0-v1",
+      "downloads": 1,
+      "fallbacks": 0,
+      "refreshes": 0,
+      "inits": 0,
+      "creates": 0
+    },
+    {
+      "name": "failed-cache-probe-and-downloads",
+      "passed": true,
+      "exit_code": 1,
+      "binary_key": "opam-binary-Linux-X64-2.5.0-v1",
+      "downloads": 1,
+      "fallbacks": 1,
+      "refreshes": 0,
+      "inits": 0,
+      "creates": 0
+    },
+    {
+      "name": "other-platform-cache",
+      "passed": true,
+      "exit_code": 0,
+      "binary_key": "opam-binary-Linux-X64-2.5.0-v1",
+      "downloads": 1,
+      "fallbacks": 0,
+      "refreshes": 0,
+      "inits": 0,
+      "creates": 0
+    },
+    {
+      "name": "downloaded-version-mismatch",
+      "passed": true,
+      "exit_code": 1,
+      "binary_key": "opam-binary-Linux-X64-2.5.0-v1",
+      "downloads": 1,
+      "fallbacks": 0,
+      "refreshes": 0,
+      "inits": 0,
+      "creates": 0
+    },
+    {
+      "name": "downloaded-unrunnable",
+      "passed": true,
+      "exit_code": 126,
+      "binary_key": "opam-binary-Linux-X64-2.5.0-v1",
+      "downloads": 1,
+      "fallbacks": 0,
+      "refreshes": 0,
+      "inits": 0,
+      "creates": 0
+    },
+    {
+      "name": "unsupported-arch",
+      "passed": true,
+      "exit_code": 1,
+      "binary_key": "opam-binary-Linux-X64-2.5.0-v1",
+      "downloads": 0,
+      "fallbacks": 0,
+      "refreshes": 0,
+      "inits": 0,
+      "creates": 0
+    },
+    {
+      "name": "unsupported-os",
+      "passed": true,
+      "exit_code": 1,
+      "binary_key": "opam-binary-Linux-X64-2.5.0-v1",
+      "downloads": 0,
+      "fallbacks": 0,
+      "refreshes": 0,
+      "inits": 0,
+      "creates": 0
+    },
+    {
+      "name": "unsupported-compiler",
+      "passed": true,
+      "exit_code": 1,
+      "binary_key": null,
+      "downloads": 0,
+      "fallbacks": 0,
+      "refreshes": 0,
+      "inits": 0,
+      "creates": 0
+    },
+    {
+      "name": "missing-pinned-version",
+      "passed": true,
+      "exit_code": 1,
+      "binary_key": "opam-binary-Linux-X64-2.5.0-v1",
+      "downloads": 0,
+      "fallbacks": 0,
+      "refreshes": 0,
+      "inits": 0,
+      "creates": 0
+    }
+  ],
+  "save_policy": [
+    {
+      "name": "default-push-matching-checkout",
+      "passed": true,
+      "save_allowed": true
+    },
+    {
+      "name": "default-push-candidate-checkout",
+      "passed": true,
+      "save_allowed": false
+    },
+    {
+      "name": "main-dispatch-candidate",
+      "passed": true,
+      "save_allowed": false
+    },
+    {
+      "name": "main-dispatch-matching-checkout",
+      "passed": true,
+      "save_allowed": false
+    },
+    {
+      "name": "pull-request-or-feature-ref",
+      "passed": true,
+      "save_allowed": false
+    }
+  ],
+  "provenance": {
+    "kind": "direct",
+    "stage": "local_shell_fixtures",
+    "network": "stubbed",
+    "native_platform_execution": false,
+    "retained_fixture_sha256": "bb6a7310e40e17a92b5f72a1e983cbff1378e4e4e9862a07bab98f34fe215f65",
+    "changes_from_initial_fixture": "Portable arguments and ignored output; two failed-version-probe cases and five source/save policy cases added after independent review."
+  }
+}

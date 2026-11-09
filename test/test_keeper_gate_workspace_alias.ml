@@ -103,6 +103,47 @@ let test_alias_consumes_one_exact_grant () =
     Alcotest.(check int) "one canonical authorization audit" 1 (event_count "gate_allowed"))
 ;;
 
+let test_execute_network_change_does_not_spend_approval () =
+  with_workspace (fun config keeper_name _alias ->
+    let base_path = config.Masc.Workspace.base_path in
+    ignore (Mode.set config ~actor:"operator" Mode.Manual |> get Fun.id);
+    let make_input network_mode args =
+      Masc.Keeper_tool_execute_runtime.execute_gate_input
+        ~input:args ~cwd:"/repo" ~sandbox_profile:"docker"
+        ~sandbox_target:"docker:fixture" ~network_mode
+    in
+    let module Network = Keeper_types_profile_sandbox in
+    let approved_input =
+      make_input Network.Network_none
+        (`Assoc [ "argv", `List [ `String "touch"; `String "mounted-file" ] ])
+    in
+    let req = { (request ~base_path ~keeper_name) with
+      operation = "tool_execute"; input = approved_input } in
+    let id = manual_approval req (Gate.decide ~keeper_always_allow:false) in
+    ignore (AQ.resolve_with_policy ~base_path ~id ~decision:Rule_types.Decision.Approve
+      ~source:Rule_types.Human_operator () |> get AQ.resolve_error_to_string);
+    let queue = Masc.Keeper_registry_event_queue.snapshot_result ~base_path keeper_name |> get Fun.id in
+    let resolution = Keeper_event_queue.to_list queue |> List.find_map (fun (stimulus : Keeper_event_queue.stimulus) ->
+      match stimulus.payload with
+      | Keeper_event_queue.Hitl_resolved value when String.equal value.approval_id id -> Some value
+      | _ -> None) |> Option.get in
+    let grant = Gate.cycle_grant_of_resolution resolution |> Option.get in
+    let args = Masc.Keeper_tool_execute_runtime.replay_args_of_gate_input approved_input |> get Fun.id in
+    let changed = { req with input = make_input Network.Network_inherit args } in
+    (match Gate.decide ~cycle_grant:grant ~keeper_always_allow:false changed with
+     | Gate.Deferred { reason = Gate.Human_requested; _ } -> ()
+     | Gate.Allow _ | Gate.Deferred _ | Gate.Unavailable _ ->
+       Alcotest.fail "changed network condition used the old approval");
+    (match AQ.approved_resolution_state ~base_path ~id |> get Masc.Keeper_approval_queue_result.grant_error_to_string with
+     | Masc.Keeper_approval_queue_result.Resolution_unconsumed -> ()
+     | Masc.Keeper_approval_queue_result.Resolution_consumed -> Alcotest.fail "mismatched grant was consumed");
+    let replayed = { req with input = make_input Network.Network_none args } in
+    (match Gate.decide ~cycle_grant:grant ~keeper_always_allow:false replayed with
+     | Gate.Allow { source = Gate.One_shot_resolution actual; _ } ->
+       Alcotest.(check string) "unchanged network spends its own grant" id actual
+     | Gate.Allow _ | Gate.Deferred _ | Gate.Unavailable _ -> Alcotest.fail "unchanged grant was lost"))
+;;
+
 let test_alias_reads_the_canonical_exact_rule () =
   with_workspace (fun config keeper_name alias ->
     let base_path = config.Masc.Workspace.base_path in
@@ -158,6 +199,7 @@ let () = Alcotest.run "Gate workspace aliases"
     ; Alcotest.test_case "external request and audit" `Quick (test_manual_alias_and_audit true)
     ; Alcotest.test_case "canonical owner control" `Quick (test_manual_alias_and_audit ~alias_input:false false)
     ; Alcotest.test_case "exact grant consumption" `Quick test_alias_consumes_one_exact_grant
+    ; Alcotest.test_case "execute network drift preserves grant" `Quick test_execute_network_change_does_not_spend_approval
     ; Alcotest.test_case "persisted exact rule" `Quick test_alias_reads_the_canonical_exact_rule
     ; Alcotest.test_case "persisted owner restart recovery" `Quick test_alias_restart_recovery_selects_canonical_pending
     ; Alcotest.test_case "operator retry owner" `Quick test_alias_retry_reads_the_canonical_owner

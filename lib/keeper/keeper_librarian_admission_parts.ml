@@ -210,6 +210,13 @@ let runnable inventory =
     | Some p when acknowledged p -> walk p.left @ walk p.right
     | Some _ -> [] in
   List.concat_map walk (roots inventory)
+let completion_candidates inventory =
+  let roots=roots inventory and leaves=runnable inventory in
+  let ids parts=List.concat_map (fun (part:part) -> Queue.candidate_ids part.original_batch) parts in
+  let ordered=List.sort Stdlib.compare in
+  if roots=[] || leaves=[] || not (List.for_all acknowledged inventory.partitions)
+     || ordered (ids roots)<>ordered (ids leaves) then None
+  else Some (List.sort_uniq Stdlib.compare (ids inventory.parts))
 let declaration_id (destination:Capture.destination) =
   let* installation=Owner.installation_of_id destination.installation_id in
   match installation with Owner.Configuration id -> Ok id | Owner.Manual _ -> Error "Original size proof has manual destination"

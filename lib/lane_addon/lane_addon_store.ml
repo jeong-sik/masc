@@ -661,13 +661,13 @@ let load_exact_request = load_exact_request_with ~sync_file:Unix.fsync ~sync_par
 let owned_result value = Result.map_error Fs_compat.owned_regular_file_read_error_to_string value
 (* One scope directory of [namespace] (records or request bodies). The caller
    holds the per-scope serializer that publication uses. *)
-let read_tool_request_scope ~namespace ~sync_parent t ~scope fn =
+let read_tool_request_directory ~relative ~sync_parent t fn =
   let* result = Fs_compat.with_owned_inventory_root (Filename.dirname t.root) (fun anchor ->
     let result =
       let owner_uid = Unix.geteuid () in
       let parent = Fs_compat.owned_inventory_root_path anchor in
       let root = Filename.concat parent (Filename.basename t.root) in
-      let directory = Filename.concat root (Filename.concat namespace (digest scope)) in
+      let directory = Filename.concat root relative in
       let* observed = Fs_compat.with_owned_directory_inventory_if_present ~owner_uid
         ~inventory_root:anchor ~sync_directory:sync_parent directory (fun held names ->
           let* value = fn ~owner_uid held names in
@@ -680,6 +680,9 @@ let read_tool_request_scope ~namespace ~sync_parent t ~scope fn =
       | Some result -> Result.map Option.some result in
     Ok result) |> owned_result in
   result
+let read_tool_request_scope ~namespace ~sync_parent t ~scope fn =
+  read_tool_request_directory ~relative:(Filename.concat namespace (digest scope))
+    ~sync_parent t fn
 (* Run [work] under the scope serializer, on a system thread for an Eio
    caller. The thread is the system-thread host's ([Systhread_host]): [work]
    decodes, hashes and re-serializes whole records, and the Librarian calls
@@ -861,6 +864,25 @@ let tool_request_settled t ~scope ~date ~request_id =
     Ok true
   | _ -> Error ("a settled original request record is not a regular file this process owns: " ^ path)
   | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok false)
+
+let load_settled_tool_request_owner t ~scope ~date ~request_id =
+  let* () = settled_day date in
+  serialized_tool_request_read t ~scope (fun () ->
+    let relative = tool_request_archive_record_path ~scope ~date ~request_id in
+    let name=Filename.basename relative in
+    let* record = read_tool_request_directory ~relative:(Filename.dirname relative)
+      ~sync_parent:Unix.fsync t (fun ~owner_uid held names ->
+        if not (List.mem name names) then Ok None
+        else read_owned_tool_request ~sync_file:Unix.fsync ~sync_parent:Unix.fsync
+          ~owner_uid held name |> Result.map Option.some) in
+    let record=Option.join record in
+    match record with
+    | None -> Ok None
+    | Some _ -> protect (fun () ->
+      sync_settlement_directories
+        ~source:(Filename.concat t.root (tool_request_owner_path ~scope ~request_id))
+        ~target:(Filename.concat t.root relative);
+      Ok record))
 
 type namespace_entry = Record_entry | Staged_entry | Unknown_entry
 let tool_request_owner_entry name =

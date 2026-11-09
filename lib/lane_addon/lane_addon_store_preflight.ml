@@ -39,7 +39,10 @@ type tool_request_reader = scope:string -> request_id:string ->
 type request_body_reader = scope:string -> request_digest:string -> (Yojson.Safe.t, string) result
 type tool_request_scope_reader = scope:string ->
   (Lane_addon_tool_request_owner.retained list, string) result
+type tool_request_archive_reader = scope:string -> date:string -> request_id:string ->
+  (Lane_addon_tool_request_owner.Record.t option, string) result
 type payload_validator = read:tool_request_reader -> read_scope:tool_request_scope_reader -> read_body:request_body_reader ->
+  read_archive:tool_request_archive_reader ->
   Lane_addon_tool_request_owner.retained -> (unit, string) result
 
 type refusal =
@@ -271,7 +274,7 @@ let scan_native_claims root =
        empty
        names)
 
-let scan_with ?(validate_tool_request=(fun () ~read:_ ~read_scope:_ ~read_body:_ _ -> Ok ())) ~after_read store ~base_path =
+let scan_with ?(validate_tool_request=(fun () ~read:_ ~read_scope:_ ~read_body:_ ~read_archive:_ _ -> Ok ())) ~after_read store ~base_path =
   let root = Lane_addon_store.directory ~masc_dir:(Common.masc_dir_from_base_path ~base_path) in
   let report =
     match store with
@@ -290,6 +293,10 @@ let scan_with ?(validate_tool_request=(fun () ~read:_ ~read_scope:_ ~read_body:_
       (* One validator serves the whole scan, so it can keep what it already
          proved about an owner whose records it meets again. *)
       let validate_tool_request = validate_tool_request () in
+      let archive_store=Lane_addon_store.create ~root in
+      let read_archive ~scope ~date ~request_id =
+        Lane_addon_tool_request_owner.load_settled ~store:archive_store ~scope ~date ~request_id
+        |> Result.map_error Lane_addon_tool_request_owner.error_to_string in
       (* A record is checked with the body it names: present, named by its
          digest, canonical JSON. Like records, the body is read by path; the
          owner, mode and link checks stay with the runtime reader. *)
@@ -353,7 +360,7 @@ let scan_with ?(validate_tool_request=(fun () ~read:_ ~read_scope:_ ~read_body:_
           fun ~name ~path:_ json ->
             let* record=Reader.read reader ~directory_name:group ~file_name:name json
               |> decoded Tool_request_owner in
-            validate_tool_request ~read ~read_scope ~read_body record |> Result.map_error (fun detail ->
+            validate_tool_request ~read ~read_scope ~read_body ~read_archive record |> Result.map_error (fun detail ->
               Tool_request_payload, Printf.sprintf "scope=%S request_id=%S request_digest=%s: %s"
                 record.scope record.request_id record.request_digest detail))
   in

@@ -35,6 +35,7 @@ let gate_input ?(profile = "docker") ?(target = "docker:masc-keeper-sandbox:loca
     ~cwd:"/home/keeper/playground"
     ~sandbox_profile:profile
     ~sandbox_target:target
+    ~network_mode:Keeper_types_profile_sandbox.Network_none
 ;;
 
 let command_gate_input ?(profile = "docker") ?(target = "docker:masc-keeper-sandbox:local") script =
@@ -43,6 +44,22 @@ let command_gate_input ?(profile = "docker") ?(target = "docker:masc-keeper-sand
     ~cwd:"/home/keeper/playground"
     ~sandbox_profile:profile
     ~sandbox_target:target
+    ~network_mode:Keeper_types_profile_sandbox.Network_none
+;;
+
+let test_network_none_does_not_allow_mounted_writes () =
+  let input network_mode =
+    Keeper_tool_execute_runtime.execute_gate_input
+      ~input:(`Assoc [ "argv", `List [ `String "touch"; `String "mounted-file" ] ])
+      ~cwd:"/home/keeper/playground"
+      ~sandbox_profile:"docker" ~sandbox_target:"docker:fixture" ~network_mode
+  in
+  List.iter (fun mode ->
+    match Readonly.classify_request ~operation:"tool_execute"
+      ~sandbox_profile:(Some Keeper_types_profile_sandbox.Docker) ~input:(input mode) with
+    | Readonly.Static_observation -> fail "network mode must not authorize a mounted write"
+    | Readonly.Needs_observation _ | Readonly.Needs_judgment _ -> ())
+    [ Keeper_types_profile_sandbox.Network_none; Network_inherit; Network_policy ]
 ;;
 
 let passes label argv = check bool label true (Readonly.classify_argv argv |> is_static)
@@ -1150,6 +1167,7 @@ let () =
         ; test_case "Git reasons survive request projection" `Quick test_git_reasons_survive_the_request_projection
         ; test_case "Git classification omits raw arguments" `Quick test_git_classification_projection_contains_no_arguments
         ; test_case "gate shape gates" `Quick test_gate_shape_gates
+        ; test_case "network none does not authorize mounted writes" `Quick test_network_none_does_not_allow_mounted_writes
         ; test_case
             "network observation capabilities"
             `Quick

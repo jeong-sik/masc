@@ -1,4 +1,4 @@
-type purpose = Admission_execution | Admission_part | Admission_partition
+type purpose = Admission_execution | Admission_part | Admission_partition | Admission_closure
   | History_execution | Floor_execution | Admission_gate | History_gate | Floor_gate
 val purpose : string -> purpose option
 (** The Librarian record kind a scope belongs to, asked of each producer's
@@ -21,4 +21,6 @@ val validator : unit ->
   read:(scope:string -> request_id:string -> (Lane_addon_tool_request_owner.retained option, string) result) ->
   read_scope:(scope:string -> (Lane_addon_tool_request_owner.retained list, string) result) ->
   read_body:(scope:string -> request_digest:string -> (Yojson.Safe.t, string) result) ->
+  read_archive:(scope:string -> date:string -> request_id:string ->
+    (Lane_addon_tool_request_owner.Record.t option, string) result) ->
   Lane_addon_tool_request_owner.retained -> (unit, string) result

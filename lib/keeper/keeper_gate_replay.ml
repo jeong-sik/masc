@@ -1140,6 +1140,7 @@ let replay_approved_effect_with_receipt
            ?continuation_channel
            ?gate_context
            ~gate_grant:grant
+           ~replay_gate_input:request.input
            (* The host replays; there is no turn here, so no descriptor can be
               looked up and no tool dispatched. The line is refused rather
               than run as a host program of that name (#32730). *)

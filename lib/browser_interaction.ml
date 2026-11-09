@@ -48,7 +48,7 @@ let parse = function
         | Some (`String "press_key") -> keys
         | _ -> "key" :: "modifiers" :: keys) in
       let keys = match List.assoc_opt "action" fields with
-        | Some (`String "drag_to") -> keys
+        | Some (`String "drag_to") -> "via" :: "durationMs" :: keys
         | Some (`String "swipe") -> "source" :: "destination" :: keys
         | _ -> "source" :: "destination" :: "via" :: "durationMs" :: keys in
       let keys = match List.assoc_opt "action" fields with
@@ -79,7 +79,7 @@ let parse = function
     let geometry parser key =
       let* value = required key in
       parser value in
-    let drag_options () =
+    let swipe_options () =
       let* via = match List.assoc_opt "via" fields with
         | None -> Ok []
         | Some (`List points) ->
@@ -151,12 +151,11 @@ let parse = function
       | Some (`String "drag_to") ->
         let* () = excludes ["selector";"documentId";"nodeId";"text";"x";"y";"point";"from";"to";"viewport"] in
         let* () = match expected_url with Some _ -> Ok () | None -> Error "drag_to requires expectedUrl" in
-        let target key = match List.assoc_opt key fields with
-          | Some (`Assoc fields) -> pointer_target fields
-          | _ -> Error ("drag_to requires " ^ key ^ " target") in
-        let* source = target "source" in let* destination = target "destination" in
-        let* via,duration_ms = drag_options () in
-        Ok (Browser_lane.Drag_to {source;destination;via;duration_ms})
+        let selector key = match List.assoc_opt key fields with
+          | Some (`Assoc ["selector", `String selector]) when String.trim selector <> "" -> Ok selector
+          | _ -> Error ("drag_to requires " ^ key ^ " as {selector}") in
+        let* source = selector "source" in let* destination = selector "destination" in
+        Ok (Browser_lane.Drag_to {source;destination})
       | Some (`String "follow_link") ->
         let* () = excludes ["selector";"text";"x";"y";"point";"from";"to";"viewport"] in
         let* () = match expected_url with Some _ -> Ok () | None -> Error "follow_link requires expectedUrl" in
@@ -226,7 +225,7 @@ let parse = function
         let* viewport = geometry Browser_lane.Pointer.viewport_of_json "viewport" in
         let* from = geometry Browser_lane.Pointer.point_of_json "from" in
         let* to_ = geometry Browser_lane.Pointer.point_of_json "to" in
-        let* via,duration_ms = drag_options () in
+        let* via,duration_ms = swipe_options () in
         Ok (Browser_lane.Swipe {from;to_;viewport;via;duration_ms})
       | Some (`String ("hover_at" | "double_click_at" as action)) ->
         let* () = excludes ["selector";"text";"documentId";"nodeId";"x";"y";"from";"to"] in

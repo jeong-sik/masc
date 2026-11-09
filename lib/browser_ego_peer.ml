@@ -2141,16 +2141,6 @@ let interact ?actor t args =
   let* label = label_of t id in
   let deadline = command_deadline t (Browser_lane.Page_interact {tab_id = id; expected_url = request.expected_url; action = request.action}) in
   let input ~expected_url action = Browser_lane.interaction_args ~tab_id:id ~expected_url action in
-  let* () = match request.action with
-    | Browser_lane.Drag_to {duration_ms;_} when duration_ms <> 0 ->
-        Error (Live.Before_effect "ego drag requires durationMs=0; movement timing is not exposed by its mouse API")
-    | Browser_lane.Drag_to _
-    | Browser_lane.Activate_tab | Browser_lane.Fill _ | Browser_lane.Select_option _
-    | Browser_lane.Set_viewport _ | Browser_lane.Double_click_at _ | Browser_lane.Type_text _ | Browser_lane.Press_key _
-    | Browser_lane.Scroll _ | Browser_lane.Hover_at _ | Browser_lane.Tap_at _ | Browser_lane.Swipe _
-    | Browser_lane.Click_at _ | Browser_lane.Scroll_at _ | Browser_lane.Follow_link _
-    | Browser_lane.Fill_node _ | Browser_lane.Click _ | Browser_lane.Click_node _ | Browser_lane.Hover _
-    | Browser_lane.Double_click _ | Browser_lane.Click_target _ | Browser_lane.Fill_target _ | Browser_lane.Hover_target _ | Browser_lane.Double_click_target _ -> Ok () in
   let* expected_url, action =
     let needs_resolution = match request.action with
       | Browser_lane.Click _ -> false
@@ -2237,16 +2227,10 @@ let interact ?actor t args =
   | Browser_lane.Select_option {selector;selection} -> on_selector selector (Target_select selection)
   | Browser_lane.Hover (Browser_lane.Selector selector) -> on_selector selector Target_hover
   | Browser_lane.Double_click (Browser_lane.Selector selector) -> on_selector selector Target_double_click
-  | Browser_lane.Drag_to {source;destination;via;_} ->
-    (match source,destination with
-     | Browser_lane.Selector source, Browser_lane.Selector destination ->
-       (match via with
-        | [] -> native_input t ~id ~label ~cursor:cursor_text ~expected_url ~locator:source
-            ~reference:["source",obj ["selector",str source];"destination",obj ["selector",str destination]]
-            ~operation:(Target_drag destination)
-        | _::_ -> unavailable_input Browser_lane.Native_input.Raw_pointer_drag_void)
-     | Browser_lane.Scene_node _, (Browser_lane.Selector _ | Browser_lane.Scene_node _)
-     | Browser_lane.Selector _, Browser_lane.Scene_node _ -> unavailable_input Browser_lane.Native_input.Raw_pointer_drag_void)
+  | Browser_lane.Drag_to {source;destination} ->
+    native_input t ~id ~label ~cursor:cursor_text ~expected_url ~locator:source
+      ~reference:["source",obj ["selector",str source];"destination",obj ["selector",str destination]]
+      ~operation:(Target_drag destination)
   | Browser_lane.Click_at {point; viewport; button} -> pointer viewport point (Press {button; count = 1})
   | Browser_lane.Double_click_at {point; viewport} -> pointer viewport point (Press {button = Browser_lane.Pointer.Primary; count = 2})
   | Browser_lane.Hover_at {point; viewport} -> pointer viewport point Move

@@ -149,14 +149,13 @@ let support backend operation = match backend with
       | Connected Browser_lane.Ego_task_space -> ego_input_availability Browser_lane.Native_input.Drag_and_drop
           (conditional ~action:"drag_to" Interact
             [observed;ego_agent_pages;
-             "Only selector-to-selector drag_to without via and with durationMs=0, using native dragAndDrop. The SDK receipt does not establish application drop acceptance.";
-             Browser_lane.Native_input.message Browser_lane.Native_input.Raw_pointer_drag_void])
+             "drag_to from one selector onto another, using native dragAndDrop. The SDK receipt does not establish application drop acceptance."])
       | Safari_unavailable -> missing)
     | Html5_drop -> (match backend with
       | Connected Browser_lane.Ego_task_space -> ego_input_availability Browser_lane.Native_input.Drag_and_drop
           (conditional ~action:"drag_to" Interact
             [observed;ego_agent_pages;
-             "Only selector-to-selector drag_to without via and with durationMs=0, using native dragAndDrop. Native HTML5 DataTransfer/drop passed a fixture; target behavior must be observed afterward. Not a universal drop guarantee."])
+             "drag_to from one selector onto another, using native dragAndDrop. Native HTML5 DataTransfer/drop passed a fixture; target behavior must be observed afterward. Not a universal drop guarantee."])
       | Safari_unavailable -> missing)
     | Right_click | Middle_click -> (match backend with
       | Connected Browser_lane.Ego_task_space -> conditional ~action:"click_at" Interact

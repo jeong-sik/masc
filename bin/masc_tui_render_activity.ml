@@ -72,7 +72,7 @@ let system_log_detail_lines (state : state) ~seq ~width =
         ]
       in
       let metadata_facts =
-        [ system_log_fact "Keeper" (Option.value ~default:"system" entry.sl_keeper)
+        [ system_log_optional_fact "Keeper" entry.sl_keeper
         ; system_log_optional_fact "Turn" (Option.map string_of_int entry.sl_turn)
         ; system_log_fact "Module" entry.sl_module
         ; system_log_fact "Source"

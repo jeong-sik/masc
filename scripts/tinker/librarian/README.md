@@ -88,10 +88,11 @@ checkpoint's binding declares an output ceiling of 32,768, and the lane's
    duplicate pair), a judge that sees neither the labels nor the answers
    classifies that fact among others of the same memory (`e_synth_audit.py
    drops`). Every case of one memory shows the same facts: the ones the label
-   audit picks on any request of that memory, the dropped ones and a fill. If
-   the judge takes the fact out as well, no target is scored on that memory. A
-   drop the judge keeps stays wrong, also when its memory leaves scoring. Then
-   `verdict`.
+   audit picks on any request of that memory, the dropped ones and a fill.
+   Unless the judge keeps the fact, no target is scored on that memory. A drop
+   the judge keeps or finds restating another fact stays wrong, also when its
+   memory leaves scoring, and so does a dropped complement target or duplicate
+   fact. Then `verdict`.
 
 ```sh
 MASC_BASE_PATH=<base> uv run scripts/tinker/librarian/e_real_manifest.py \
@@ -137,8 +138,8 @@ path. The key holds the label's classes and the dropped facts.
 given. `apply` and `verdict` read the decisions only while those files are
 unchanged and the rules copy equals this checkout's `config/prompts/librarian.md`.
 `verdict` refuses while an off-label drop has no decision, and records each
-drop, its class, the memories left out, the kept drops on them and the judge's
-file sha256 values in `verdict.json`.
+drop, its class, the memories left out, each target's wrong drops on them and
+the judge's file sha256 values in `verdict.json`.
 
 A rerun with the same `--out` reuses every answered call and pays only for the
 rest. A budget stop exits with status 2. `verdict` refuses a run where a

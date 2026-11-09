@@ -1,0 +1,59 @@
+name = "keeper_pull_requests_list"
+description = """
+List the open pull requests of the registered GitHub repositories from the \
+server's last reading, refreshed every 60 s. GitHub is not called. Each \
+repository carries state, age_sec, open, counts per placement and rows. A row \
+has number, placement, title, draft, checks, review, mergeable, head_review \
+(whether some account's last review is on the head commit), head_oid, author \
+(git author of the newest single-parent commit), keeper (that author when it \
+is a Keeper name) and reviews (last review per account, with on_head). \
+Placement is the first match of: draft, checks_failing, changes_requested, \
+conflicting, checks_running; then by head_review: unreviewed_on_head, \
+review_history_incomplete, reviewed_on_head, head_review_unknown. Rows are the \
+four placements that need work (checks_failing, changes_requested, \
+conflicting, unreviewed_on_head) unless placement says otherwise; the rest \
+are counted. Order: placement, the caller's own first, head_review, number. \
+A repository the server could not read returns its failure. One GitHub \
+account is shared by several Keepers, so a review does not name a Keeper."""
+additional_properties = false
+defer_loading = true
+[help]
+short_description = "List open pull requests from the server's GitHub snapshot."
+when_to_use = "Finding open pull requests by checks, review decision, conflicts or whether a review sits on the head commit."
+key_constraints = [
+  "Reads the server snapshot only; it is up to 60 s old and age_sec says how old.",
+  "placement=needs lists four placements; the other placements appear in counts and are listed with placement=all or one name.",
+  "matched is the rows that fit the filter and shown is the rows returned; limit cuts the rest.",
+  "mine needs the server's Keeper list; without it the call fails.",
+]
+details_markdown = "Rows are grouped under their repository. head_review compares each account's last review commit with head_oid; comments are not read."
+examples = ["placement='unreviewed_on_head' limit=10", "repository='jeong-sik/masc' placement='checks_failing'", "mine=true placement='all'"]
+
+[[params]]
+name = "repository"
+type = "string"
+description = "One repository as owner/repo. Omit for every registered repository; a name the server does not read fails and lists the ones it does."
+
+[[params]]
+name = "placement"
+type = "string"
+# Kept identical to Tool_pull_requests.selection_names, which is built from
+# Repository_pulls_placement.all. test_tool_pull_requests compares the two, so
+# a new placement fails the suite here instead of publishing a schema that
+# does not name it.
+enum = ["needs", "all", "checks_failing", "changes_requested", "conflicting", "unreviewed_on_head", "draft", "checks_running", "reviewed_on_head", "review_history_incomplete", "head_review_unknown"]
+default = "needs"
+description = "needs: the four placements that need work. all: every pull request. Or one placement."
+
+[[params]]
+name = "mine"
+type = "boolean"
+description = "Only pull requests whose newest single-parent commit was written by the calling Keeper."
+
+[[params]]
+name = "limit"
+type = "integer"
+minimum = 1
+maximum = 100
+default = 20
+description = "Most rows per repository (default: 20)."

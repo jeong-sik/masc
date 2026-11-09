@@ -405,7 +405,8 @@ let retain_runtime_mcp_observation ~keeper_entry ~tool_name ~arguments ~start_ti
           | Misc_candle_purchase | Misc_candle_equip | Misc_candle_gift | Misc_dos_load
           | Misc_dos_meta | Misc_dos_inventory | Misc_dos_eject | Misc_dos_screen
           | Misc_dos_step | Misc_dos_press | Misc_dos_click | Misc_dos_type | Misc_dos_peek
-          | Misc_play_room | Misc_dos_pass | Misc_dos_save | Misc_dos_restore ) ) ->
+          | Misc_play_room | Misc_dos_pass | Misc_dos_save | Misc_dos_restore
+          | Misc_pull_requests ) ) ->
     result
 ;;
 

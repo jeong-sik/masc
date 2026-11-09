@@ -160,6 +160,17 @@ scope remain open. Existing answer-receipt/origin blocks can themselves exceed a
 short viewport; bounding those blocks remains a separate input-surface repair.
 No wording, layout or row-order tests are added.
 
+The subsequent Requests repair reserves the selected question, armed/in-flight
+decision notice and footer before drawing bounded last-answer/source summaries.
+The oversized block affected the compact question list; the active answer
+editor already excludes those diagnostics. Browsing `v` captures the complete
+last-answer receipt and retained typed follow-up in the existing scrollable,
+searchable reader, with the original Ask/asker/turn and unflattened error text.
+The captured document does not follow a changed question cursor or issue a
+request. Gate-detail byte reading and answer-input ownership remain separate.
+This is a source repair: native execution and installed GUI confirmation of
+this follow-up are pending, and the full 23-surface scope remains open.
+
 The [second four-surface source review](../../reports/2026-11-10-four-surface-reading-review.md)
 keeps Memory health queries aligned with the displayed canonical/KO/EN state
 and carries refused health rows into fleet fact coverage, including anonymous

@@ -407,6 +407,13 @@ Docker 안의 작업 디렉토리는 `/home/keeper/playground/<이름>/`이고 �
 remote_ssh는 엔드포인트의 작업 루트를 사용한다. microVM 볼륨 이름에는 작업 공간이
 없으므로 같은 런타임 저장소의 동명 Keeper는 서로의 트리를 공유할 수 있다.
 
+remote_ssh Keeper 폴더(`remote_root/<keeper>`)에는 엔드포인트 사용자만 들어갈 수
+있어야 한다. bootstrap 이 그 폴더를 `0700` 으로 만든다. 그룹이나 다른 사용자가
+들어올 수 있는 권한이면 매시간 도는 작업 폴더 정리가 그 Keeper 는 아무것도 지우지
+않는다. 이때 서버 로그에 폴더 권한과 고치는 방법이 남는다. 컨테이너 entrypoint 가
+폴더를 직접 만들 때도 같은 권한으로 둔다. 자세한 내용은
+[SSH endpoint runbook](operations/ssh-endpoints-runbook.md#keeper-directory-mode)에 있다.
+
 microVM에서 `observation_run = "guest_local"`을 설정해도 관측 단계는 볼륨의
 독점 소유권을 확인할 수 없어 이 상자를 실행하지 않고 judge로 넘긴다. 다른 허가
 경로나 승인된 실행에서 공유 볼륨에 쓰는 것은 이 제한만으로 막지 못한다. 현재

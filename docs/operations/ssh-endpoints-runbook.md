@@ -157,6 +157,26 @@ too. When it does not, bootstrap stops before it authorizes its key there. For a
 planned host-key rotation, verify the new fingerprint out of band and rerun
 with `--replace-host-key`. Never use that flag merely to clear a mismatch.
 
+### Keeper directory mode
+
+Step 6 makes `remote_root/<keeper>` mode `0700`, owned by the endpoint user.
+The server's hourly workspace cleanup
+(`keeper_remote_workspace_cleanup_enabled`) depends on that mode. It runs as
+the endpoint user and reads `/proc` to find processes inside an entry. In a
+directory only that user can enter, it passes over the processes it cannot
+read, such as root's. When group or others can enter the directory, such a
+process could be inside, so the cleanup removes nothing for that Keeper and
+logs the reason:
+
+```text
+Keeper workspace cleanup keeper=<name>: Keeper workspace cleanup skipped: process 1: [Errno 13] Permission denied: '/proc/1/cwd'; <root> has mode 0755, so another user's process can be inside it; rerun masc-exec-ssh-bootstrap for this Keeper or chmod go-rwx it
+```
+
+Rerun bootstrap with that `--keeper`; it resets the mode of an existing
+directory. Or run `chmod go-rwx <root>` as the endpoint user. A container
+entrypoint or bind mount that creates the Keeper directory itself must leave
+it at the same mode.
+
 ### Tools and environment the host declares
 
 A keeper's command does not run in a login shell. The shim builds its

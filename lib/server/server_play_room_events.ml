@@ -10,18 +10,6 @@ let renew = Play_room_presence.renew
 let disconnect = Play_room_presence.disconnect
 let perform_http = Play_room_presence.perform_http
 
-let machine_name = function
-  | Machine_lane.Msx -> "msx"
-  | Machine_lane.Dos -> "dos"
-
-let presence_action operation (scope : room_scope) =
-  let action = match operation with Play_room.Join -> "join" | Play_room.Leave -> "leave" in
-  Play_room.parse_action (`Assoc [
-    "action", `String action;
-    "client_id", `String scope.play_client;
-    "machine", `String (machine_name scope.machine);
-  ])
-
 let room_scope_of_request_target target =
   let query = Uri.of_string target in
   let values name =
@@ -38,7 +26,7 @@ let room_scope_of_request_target target =
      | Ok None -> Error "play_machine must be msx or dos"
      | Ok (Some machine) ->
        let scope = { play_client; machine } in
-       (match presence_action Play_room.Join scope with
+       (match Play_room_presence.presence_action Play_room.Join scope with
         | Ok _ -> Ok (Some scope)
         | Error error -> Error (Play_room.error_message error)))
   | [], _ | _, [] -> Error "play_client_id and play_machine must be provided together"

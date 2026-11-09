@@ -18,10 +18,10 @@ let history_page_size = 100
 let presence_seconds = 60.
 let error_message = function Invalid_request s | Conflict s | Unavailable s -> s
 let speaker_name = function Keeper -> "keeper" | Participant -> "participant"
-let machine_name = function Machine_lane.Msx -> "msx" | Dos -> "dos"
-let machine_of_string = function
-  | "msx" -> Ok Machine_lane.Msx | "dos" -> Ok Machine_lane.Dos
-  | _ -> Error (Invalid_request "machine must be msx or dos")
+let machine_of_string value =
+  match Machine_lane.of_wire value with
+  | Some machine -> Ok machine
+  | None -> Error (Invalid_request "machine must be msx or dos")
 let speaker_of_string = function
   | "keeper" -> Ok Keeper | "participant" -> Ok Participant
   | _ -> Error (Unavailable "invalid stored speaker")
@@ -208,17 +208,17 @@ let perform_with_change ~base_path ~who ~speaker ~now action = with_db ~base_pat
          | [] ->
              let* () = update db
                  "INSERT INTO messages(at,who,speaker,machine,text,client_id,message_id) VALUES (?,?,?,?,?,?,?)"
-                 [FLOAT now; text who; text (speaker_name speaker); text (machine_name action.machine);
+                 [FLOAT now; text who; text (speaker_name speaker); text (Machine_lane.to_wire action.machine);
                   text body; text action.client_id; text message_id] in
              Ok true
-         | [(machine, previous)] when machine = machine_name action.machine && previous = body -> Ok false
+         | [(machine, previous)] when machine = Machine_lane.to_wire action.machine && previous = body -> Ok false
          | _ -> Error (Conflict "message_id already names a different message; keep the original id only for an identical retry"))
       | Join | Read _ | Leave -> Ok false in
     let* () = match action.operation with
       | Leave -> update db "DELETE FROM members WHERE who=? AND client_id=?" [text who; text action.client_id]
       | Join -> update db
           "INSERT INTO members(who,client_id,speaker,machine,seen_at) VALUES (?,?,?,?,?) ON CONFLICT(who,client_id) DO UPDATE SET speaker=excluded.speaker,machine=excluded.machine,seen_at=excluded.seen_at"
-          [text who; text action.client_id; text (speaker_name speaker); text (machine_name action.machine); FLOAT now]
+          [text who; text action.client_id; text (speaker_name speaker); text (Machine_lane.to_wire action.machine); FLOAT now]
       | Read _ | Say _ -> Ok () in
     let* () = update db "DELETE FROM members WHERE seen_at <= ?" [FLOAT (now -. presence_seconds)] in
     let* after = snapshot db ~now ~before:(match action.operation with Read before -> before | Join | Say _ | Leave -> None) in
@@ -245,11 +245,11 @@ let snapshot_json ?viewer snapshot = `Assoc ((match viewer with
   | None -> [] | Some name -> ["viewer", `String name]) @ [
   "messages", `List (List.map (fun (m : message) -> `Assoc [
     "id", `Int m.id; "at", `Float m.at; "who", `String m.who;
-    "speaker", `String (speaker_name m.speaker); "machine", `String (machine_name m.machine);
+    "speaker", `String (speaker_name m.speaker); "machine", `String (Machine_lane.to_wire m.machine);
     "text", `String m.text]) snapshot.messages);
   "members", `List (List.map (fun (m : member) -> `Assoc [
     "name", `String m.name; "speaker", `String (speaker_name m.speaker);
-    "machine", `String (machine_name m.machine); "seen_at", `Float m.seen_at]) snapshot.members);
+    "machine", `String (Machine_lane.to_wire m.machine); "seen_at", `Float m.seen_at]) snapshot.members);
   "has_more", `Bool snapshot.has_more;
   "presence_seconds", `Float presence_seconds;
 ])

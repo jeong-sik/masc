@@ -10,4 +10,10 @@ type t =
 [@@deriving enumerate]
 
 val to_wire : t -> string
-(** The machine's name in a Lane id, after [machine/]. *)
+(** The machine's name in a Lane id, after [machine/]. The play room, the
+    machine spectator and the workspace dataset events carry the same name in
+    their [machine] fields. *)
+
+val of_wire : string -> t option
+(** Inverse of {!to_wire}, derived from it over [all]: [None] for a name no
+    machine has. A new constructor needs no second spelling here. *)

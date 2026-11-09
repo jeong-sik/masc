@@ -49,6 +49,22 @@ let test_unknown_wire_ids_read_as_no_lane () =
     ; "exact/librarian_exact/"; "browser/Live"; "exact/workspace_curator_exact" ]
 ;;
 
+(* The play room, the machine spectator and the workspace dataset events read a
+   machine name through [Machine_lane.of_wire]: the inverse of [to_wire], with no
+   other spelling. *)
+let test_machine_wire_names_read_back () =
+  List.iter
+    (fun machine ->
+       check bool (Machine_lane.to_wire machine ^ " reads back") true
+         (Machine_lane.of_wire (Machine_lane.to_wire machine) = Some machine))
+    Machine_lane.all;
+  List.iter
+    (fun raw ->
+       check bool (Printf.sprintf "%S is no machine" raw) true
+         (Option.is_none (Machine_lane.of_wire raw)))
+    [ ""; "MSX"; " dos"; "msx/"; "machine/msx"; "other" ]
+;;
+
 let test_curator_observation_has_no_builtin_route () =
   check bool "Curator cannot select a builtin configuration route" true
     (Option.is_none (Standalone_lane.of_id "workspace_curator_exact"));
@@ -172,6 +188,7 @@ let () =
         ; test_case "built-in wire ids are distinct" `Quick test_builtin_wire_ids_are_distinct
         ; test_case "built-ins are the three families" `Quick test_builtins_are_the_three_families
         ; test_case "unknown wire ids read as no lane" `Quick test_unknown_wire_ids_read_as_no_lane
+        ; test_case "machine wire names read back" `Quick test_machine_wire_names_read_back
         ; test_case "Curator history is not a builtin route" `Quick test_curator_observation_has_no_builtin_route
         ; test_case "a package id reads back" `Quick test_a_package_id_reads_back
         ; test_case "declaration file names" `Quick test_declaration_file_names

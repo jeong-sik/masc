@@ -5,6 +5,11 @@ type scope = {
 
 type connection_outcome = Connected | Stale
 
+val presence_action :
+  Play_room.presence_operation -> scope -> (Play_room.action, Play_room.error) result
+(** The Join or Leave action a scope stands for, parsed like any request: an
+    invalid [play_client] is refused here. *)
+
 val connect :
   base_path:string -> agent_name:string -> role:Masc_domain.agent_role ->
   scope:scope -> sse_client_id:int -> (connection_outcome, Play_room.error) result

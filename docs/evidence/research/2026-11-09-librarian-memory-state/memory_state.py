@@ -15,8 +15,8 @@ outcome is incorporated and its claim is one the answer adds. Its memory is
 right when:
 - new: it adds.
 - corrects: it adds, and the label's target leaves memory (dropped or absorbed).
-- restates: it adds nothing, or it adds a claim that absorbs the fact the label
-  says it restates, so one fact is left.
+- restates: it adds nothing and the original fact survives, or the final claim
+  it names absorbs that original fact, so one fact is left.
 - transient: it adds nothing.
 The outcome word is right when the outcome is the label's and
 `eval_admission.claim_matches` holds, as G3 scores it. A planted stale fact is
@@ -74,10 +74,11 @@ def score(name: str, answered: list[S.Answered]) -> None:
                     corrections[f"{'adds' if adds else 'adds_nothing'}/target_{fate}"] += 1
                     right = adds and target in removed
                 case "restates":
-                    rewrite = adds and rewrite_absorbs_target(item, label, claim, answer)
+                    rewrite = claim in answer.added_claims and rewrite_absorbs_target(item, label, claim, answer)
                     rewrites["adds"] += adds
-                    rewrites["absorbs_target"] += rewrite
-                    right = not adds or rewrite
+                    rewrites["absorbs_target"] += adds and rewrite
+                    kept = bool(S.ids_of(item, label.get("already_claim")) - removed)
+                    right = (not adds and kept) or rewrite
                 case "transient":
                     right = not adds
             n[k] += 1

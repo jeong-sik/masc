@@ -91,7 +91,7 @@ related: ["librarian-absorb-gate", "0463", "keeper-recall-reaches-the-turn", "05
 | 새 사실 | `incorporated` 이고, 가리킨 claim 이 새로 들어간다 |
 | 교정 | 새 사실과 같고, 대상 fact 가 빠진다(지우기나 흡수) |
 | 보완(COMPLEMENT) | 새 사실과 같고, 대상 fact 가 그 claim 에 흡수된다 |
-| 바꿔 말하기 | `already_represented` 이거나, 새 claim 이 다시 말한 그 fact 를 흡수한다 |
+| 바꿔 말하기 | 새 claim 을 더하지 않고 원래 fact 가 남거나, 판정이 가리킨 최종 claim 이 원래 fact 를 흡수한다 |
 | 일시 상태 | 아무것도 들어가지 않는다 |
 | 심은 중복 쌍 | fact 하나만 남는다 |
 | 심은 낡은 상태 | `dropped` 로 빠진다. 흡수로 빠지면 안 지운 것으로 센다(librarian.md 133-135행) |

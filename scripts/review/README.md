@@ -75,7 +75,6 @@ python3 scripts/review/review-worklist.py --repo OWNER/REPO \
 
 An assignment is not an active or completed review. Preserve existing requests,
 read the entire history and distinguish an unreadable snapshot from no work.
-Select the intended Keepers using [review routing](../../config/prompts/pr-review-routing.md).
 Repository prompt changes do not themselves update a running Keeper's instructions.
 
 Inspect REST `stack` metadata and ordered stack membership before selecting merge

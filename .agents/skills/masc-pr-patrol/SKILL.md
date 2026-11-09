@@ -10,7 +10,8 @@ description: "MASC 스택 PR의 현재 head를 읽고 기능·논리·코드 청
 
 ## 현재 변경 읽기
 
-작업 선택은 `config/prompts/pr-review-routing.md`를 따른다. 닫힌 PR의 오래된 메시지에서 계속 머물지 않는다.
+직접 요청과 맡은 Task의 PR을 먼저 보고, 그다음 인증된 계정이 `requested_reviewers`에 있는 열린 Ready PR,
+그다음 나머지 열린 PR을 오래된 순으로 본다. 병합되거나 닫힌 PR은 끝난 것으로 두고 다음 PR로 간다.
 GitHub 사용자·팀의 기존 리뷰 요청을 보존하고, 요청·실행·리뷰·승인을 별개로 기록한다.
 전체 미리뷰 PR 배분은 `python3 scripts/review/review-worklist.py --repo OWNER/REPO --reviewer LOGIN`으로 계획한다.
 `--reviewer`를 반복해 독립 계정 풀을 지정하며, 누락된 요청 게시에는 `--request`를 명시한다.
@@ -25,6 +26,8 @@ gh pr diff <N> --repo jeong-sik/masc
 목록 명령은 모든 페이지의 PR 을 JSON 객체 스트림으로 출력한다. 조회가 실패하면 전체 목록을 확인한 것으로 판단하지 않는다.
 
 현재 head와 base, 원래 작업 계약, 전체 diff를 직접 확인한다. 이전 리뷰·과거 녹색 CI·요약은 현재 변경의 증거가 아니다.
+부분 복제 저장소에서 옛 head에 넓은 `git grep`을 돌리면 빠진 blob을 하나씩 내려받느라 오래 걸린다.
+경로를 먼저 좁히고, 나머지는 그 head의 GitHub 원문으로 읽는다. 검색 실패나 시간 초과는 일치 항목이 없다는 뜻이 아니다.
 Draft는 작업 중이라는 뜻이다. CI가 없다는 이유로 일반 PR을 Draft로 되돌리거나 승인 대기시키지 않는다.
 
 ## 여러 관점에서 리뷰

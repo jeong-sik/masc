@@ -174,6 +174,17 @@ let () =
   in
   Server_runtime_bootstrap.bootstrap_base_path_config_root ~base_path:base_dir;
   Server_runtime_bootstrap.bootstrap_prompt_registry_from_binary ~base_path:base_dir;
+  (* HIGH-RISK-UNREVIEWED: a slot is a call of the operator. This host tool
+     publishes its account access after its judgment of the base path, or the
+     slot is refused before its CLI starts (plan D2-5). *)
+  (match
+     Runtime_account_access.publish_host_tool ~base_path:base_dir
+       ~config_dir:(Env_config_core.masc_config_dir_opt ())
+   with
+   | Ok () -> ()
+   | Error (first, rest) ->
+     prerr_endline (String.concat "; " (first :: rest));
+     exit 2);
   let config_path = Masc.Fusion_config_loader.runtime_toml_path ~base_path:base_dir in
   let case =
     match List.assoc_opt !lane cases with

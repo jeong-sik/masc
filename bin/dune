@@ -3080,6 +3080,7 @@
   masc.crypto_rng
   masc.fusion_core
   masc.runtime
+  masc.config
   masc.config_dir_resolver
   masc.masc_process
   unix

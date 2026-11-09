@@ -472,6 +472,14 @@ let run_production_comparison options =
     | Ok () -> Ok ()
     | Error Masc.Exact_lane_run_registry.Already_installed ->
       Error "Production comparison requires its own isolated run registry" in
+  (* HIGH-RISK-UNREVIEWED: a librarian slot is a call of the operator. This
+     host tool publishes its account access after its judgment of the
+     isolated base path, or every official-client slot is refused before its
+     CLI starts (plan D2-5). *)
+  let* () =
+    Runtime_account_access.publish_host_tool ~base_path
+      ~config_dir:(Env_config_core.masc_config_dir_opt ())
+    |> Result.map_error (fun (first, rest) -> String.concat "; " (first :: rest)) in
   Prompt_registry.set_markdown_dir prompt_dir;
   let infer ~previous_state ~unread_messages (input : Masc.Keeper_librarian.input) =
     Masc.Keeper_librarian_runtime.infer_working_state ~base_path ~keepers_dir

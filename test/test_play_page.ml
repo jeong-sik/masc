@@ -362,7 +362,7 @@ let with_dos_worker ~env ~sw ~base_path f =
         let authority : Lane_addon_call_context.mediation =
           fun ~release_controller:_ ~snapshot:_ ~invoke -> invoke controller in
         match Masc.Lane_addon_runtime.call_exported_tool_with_authority
-          ~on_complete:(fun ()) ~on_result:(fun _ -> ()) ~authorize:(Some authority)
+          ~on_complete:(fun () -> ()) ~on_result:(fun _ -> ()) ~authorize:(Some authority)
           ~principal:(Some (Lane_addon_call_context.Host_actor "operator"))
           ~config ~access:Masc.Lane_addon_sources.Unauthenticated ~reserved:[]
           ~export:(export name) ~arguments with

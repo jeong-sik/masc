@@ -136,9 +136,13 @@ gh workflow run approval-auto-merge.yml --ref main -f pr=NUMBER
 
 Local preflight is read-only with `GITHUB_EVENT_NAME=workflow_dispatch`,
 `GITHUB_REPOSITORY=OWNER/REPO`, `DISPATCH_PR=NUMBER`, an authenticated `gh`, and
-`python3 scripts/review/approval-auto-merge.py --dry-run`. The worker checks an
-asynchronous receipt once and records member states; pending/enqueued does not
-mean merged. A failed API read never establishes an absent stack or an approval.
+`python3 scripts/review/approval-auto-merge.py --dry-run`. After a merge request
+is accepted, the worker follows its UUID and records member states;
+pending/enqueued does not mean merged. A member read failure keeps that request
+unsettled: the worker retries and hands off the same receipt if its wait ends.
+Only a 404/410 from the UUID result endpoint ends tracking as `request_not_found`;
+a terminal request failure retains its reason without requiring member reads.
+A failed API read never establishes an absent stack or an approval.
 
 ### Manual integration
 

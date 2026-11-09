@@ -211,6 +211,8 @@ def follow(repo, result_endpoint, receipt, scope):
     same endpoint is read again. Success needs every scope member to be merged
     with a merge commit. A `pending` answer is still undecided; `merged` and
     `enqueued` are final answers about the request, so the members decide.
+    Only the request endpoint can establish that its receipt is gone; member
+    read failures leave that request unsettled.
     """
     deadline = time.monotonic() + WAIT_SECONDS
     observation = states = None
@@ -218,25 +220,29 @@ def follow(repo, result_endpoint, receipt, scope):
     while True:
         try:
             observation = read(result_endpoint)
-            states = member_states(repo, scope)
-            error = None
+            status = observation['status']
         except (ValueError, KeyError, TypeError, OSError) as failure:
             error = str(failure)
             if any(marker in error for marker in GONE):
                 return dict(receipt, status='request_not_found', error=error)
         else:
-            status = observation['status']
-            abandoned = [n for n, row in states.items()
-                         if row.get('state') == 'closed' and not row['merged']]
-            if abandoned:
-                return dict(receipt, status='member_closed_unmerged', members_closed=abandoned,
-                            observation=observation, member_states=states)
-            if status in ACCEPTED and all_landed(states):
-                return dict(receipt, status='merged', observation=observation,
-                            member_states=states)
             if status not in IN_FLIGHT and status not in ACCEPTED:
                 return dict(receipt, status=status, observation=observation,
                             member_states=states, reason=observation.get('details'))
+            try:
+                states = member_states(repo, scope)
+            except (ValueError, KeyError, TypeError, OSError) as failure:
+                error = str(failure)
+            else:
+                error = None
+                abandoned = [n for n, row in states.items()
+                             if row.get('state') == 'closed' and not row['merged']]
+                if abandoned:
+                    return dict(receipt, status='member_closed_unmerged', members_closed=abandoned,
+                                observation=observation, member_states=states)
+                if status in ACCEPTED and all_landed(states):
+                    return dict(receipt, status='merged', observation=observation,
+                                member_states=states)
         if time.monotonic() >= deadline:
             break
         time.sleep(POLL_SECONDS)

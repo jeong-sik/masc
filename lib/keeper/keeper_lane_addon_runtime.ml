@@ -22,9 +22,11 @@ let content_block (content : Mcp_protocol.Mcp_types.tool_content) =
    result's [content_blocks], which is what a model reads. The whole reply
    becomes [data], which the ledger and the inline-size limit read. With the
    PNG in both, a DOS screen read put its base64 into [data] too, past the
-   64 KiB inline limit, so every read wrote the same PNG to the blob store
-   again. [data] keeps each media block's type, MIME type and size and drops
-   its bytes. *)
+   lane's inline limit (64 KiB for agent_core, 32 KiB for Claude Code, 16 KiB
+   for the others), so every read wrote the same PNG to the blob store again.
+   [data] keeps each media block's type, MIME type and size and drops its
+   bytes. A failed result has no [content_blocks]; the DOS and MSX workers
+   attach images to successful replies only. *)
 let data_of_worker_result (result : Mcp_protocol.Mcp_types.tool_result) =
   let media ~type_ ~mime_type ~data =
     `Assoc [ "type", `String type_; "mimeType", `String mime_type

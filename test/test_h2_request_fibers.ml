@@ -687,7 +687,8 @@ let test_steady_reader_gets_a_long_body source () =
     check int "no stall line at all" 0 (logged stall_line))
 
 (* A client that reads none of a long body: one slice fits its window, the
-   next slice's flush waits, and at the bound the stream is reset. *)
+   next slice's flush waits, and at the bound the stream is reset. The stall
+   line names the path without the query, which can carry a token. *)
 let test_idle_reader_of_a_long_body_is_cut () =
   let clock = Eio_mock.Clock.make () in
   let streams = registry ~clock () in
@@ -696,7 +697,7 @@ let test_idle_reader_of_a_long_body_is_cut () =
   with_connection ~streams ~resources ~client_window:slice_window
     Request_fibers (long_body_handler `Whole)
     (fun ~env:_ ~client ~client_flow:_ ~release:_ ~close_client:_ ~server:_ ->
-    let status, reset, response_body = open_stream client "/long" in
+    let status, reset, response_body = open_stream client "/long?token=fixture" in
     check int "the response started" 200 (Eio.Promise.await status);
     ping client;
     check bool "the body holds its reservation" true
@@ -715,7 +716,8 @@ let test_idle_reader_of_a_long_body_is_cut () =
       (read_to_end (Eio.Promise.await response_body) (Buffer.create 16) = Error ());
     check int "the reservation went back to the ledger" 0
       (Masc.Http_h2_response_ledger.pending_bytes resources);
-    check int "one warn line names the long body" 1 (logged (stall_line_for "/long")))
+    check int "one warn line names the long body" 1 (logged (stall_line_for "/long"));
+    check int "the query stays out of the log" 0 (logged "token="))
 
 let () = run "H2 request fibers" ["connection progress", [
   test_case "direct reader reproduces occupied CPU stall" `Quick test_reader_control;

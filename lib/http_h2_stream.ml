@@ -93,13 +93,17 @@ let reset ~stream_sw reqd cause =
    either, and nothing ends that stream. The watchdog gives the oldest flush
    still waiting [stalled_after_s] to be answered and resets the stream with
    [Stalled] when it is not (RFC-0518 D2). A body is written with a flush at
-   every slice boundary (D3), so the bound holds for each slice: a reader
-   that drains slice after slice keeps its stream, and WINDOW_UPDATEs of a
-   byte or two do not stretch it (RFC-0518 §3.3). *)
+   every slice boundary (D3), so the bound is on the time between two slices
+   leaving for the connection, not on the whole body, and WINDOW_UPDATEs of
+   a byte or two do not stretch it (RFC-0518 §3.3). A client that opens its
+   window again only after reading a large batch has to read the batch
+   within the bound. *)
 module Stream_end = struct
   type t =
     { stream_sw : Eio.Switch.t
     ; reqd : H2.Reqd.t
+    ; meth : H2.Method.t
+    ; path : string
     ; clock : float Eio.Time.clock_ty Eio.Resource.t
     ; stalled_after_s : float
     ; mutable ended : bool
@@ -120,11 +124,10 @@ module Stream_end = struct
   let signal t = t.signal
 
   let stall t =
-    let request = H2.Reqd.request t.reqd in
     Log.Http.warn
       "[h2] %s %s took no response bytes for %.0fs; resetting the stream"
-      (H2.Method.to_string request.meth)
-      request.target
+      (H2.Method.to_string t.meth)
+      t.path
       t.stalled_after_s;
     reset ~stream_sw:t.stream_sw t.reqd Stalled
   ;;
@@ -160,11 +163,23 @@ module Stream_end = struct
     | Some _ | None -> ()
   ;;
 
+  (* The stall line names the request from what [create] read. h2 has no
+     request to give for a stream it closed itself (reqd.ml [request]), and a
+     query can carry a token. *)
+  let path_of_target target =
+    match String.index_opt target '?' with
+    | Some query -> String.sub target 0 query
+    | None -> target
+  ;;
+
   let create ~stream_sw ~clock ~stalled_after_s reqd =
+    let request = H2.Reqd.request reqd in
     let signal, resolve_signal = Eio.Promise.create () in
     let t =
       { stream_sw
       ; reqd
+      ; meth = request.meth
+      ; path = path_of_target request.target
       ; clock = (clock :> float Eio.Time.clock_ty Eio.Resource.t)
       ; stalled_after_s
       ; ended = false
@@ -215,6 +230,12 @@ module Stream_end = struct
       Queue.push (id, Eio.Time.now t.clock) t.order;
       Eio.Condition.broadcast t.registered;
       H2.Body.Writer.flush writer once)
+  ;;
+
+  (* h2#278: see the WORKAROUND at [close_after_flush] below. *)
+  let close_after_flush t writer =
+    flush t writer (function
+      | `Written | `Closed -> H2.Body.Writer.close writer)
   ;;
 
   (* One DATA frame of the default SETTINGS_MAX_FRAME_SIZE (RFC 9113 §6.5.2). *)
@@ -274,15 +295,17 @@ let dispatch stream_end work =
    when the stream does. Measured on a peer RST_STREAM, on a connection kept
    alive for 30 pings afterwards, and on transport close.
 
-   In a stream fiber the flush goes through the stream's [Stream_end], so a
-   peer that never drains the body is reset after the stall bound and the
-   writer closes then. h2 opens its own error answers on the connection
-   reader, which has no stream fiber; those wait as before (RFC-0518 D2). *)
+   Http_reqd closes its writers through [Stream_end.close_after_flush], and a
+   fiber with a bound [Stream_end] closes through it here, so a peer that
+   never drains the body is reset after the stall bound and the writer
+   closes then. h2 opens its own error answers on the connection reader,
+   which has no stream fiber, and the registry reports a failure that ended
+   a stream's scope after that scope; those answers wait as before
+   (RFC-0518 D2, §5). *)
 let close_after_flush writer =
-  let close = function
-    | `Written | `Closed -> H2.Body.Writer.close writer
-  in
   match Stream_end.current () with
-  | Some stream_end -> Stream_end.flush stream_end writer close
-  | None -> H2.Body.Writer.flush writer close
+  | Some stream_end -> Stream_end.close_after_flush stream_end writer
+  | None ->
+    H2.Body.Writer.flush writer (function
+      | `Written | `Closed -> H2.Body.Writer.close writer)
 ;;

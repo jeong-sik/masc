@@ -12,8 +12,8 @@ module Stream_end = Http_h2_stream.Stream_end
 (* The body writer [respond_with_streaming] opened on an HTTP/2 stream.
    [closed_by_route] is set by [Body_writer.close]. masc closes the h2 writer
    only once the bytes written before the close have drained
-   (close_after_flush, h2#278), so until then the writer looks open although
-   the route finished it. *)
+   ([Stream_end.close_after_flush], h2#278), so until then the writer looks
+   open although the route finished it. *)
 type h2_body =
   { writer : H2.Body.Writer.t
   ; mutable closed_by_route : bool
@@ -165,14 +165,6 @@ let payload_description_fields =
   [ "content-encoding"; "content-length"; "content-type"; "etag"; "last-modified"; "cache-control" ]
 ;;
 
-(* h2#278: close only once the pending bytes are flushed. A reset stream
-   never answers that flush, so the stream's end answers it (Stream_end) and
-   the writer is closed either way. *)
-let close_after_flush ~stream_end writer =
-  Stream_end.flush stream_end writer (function
-    | `Written | `Closed -> H2.Body.Writer.close writer)
-;;
-
 let h2_refuse_for_capacity ~stream_end reqd (response : Httpun.Response.t) =
   let retained =
     List.filter
@@ -188,7 +180,7 @@ let h2_refuse_for_capacity ~stream_end reqd (response : Httpun.Response.t) =
       ~flush_headers_immediately:true
       (H2.Response.create ~headers `Service_unavailable)
   in
-  close_after_flush ~stream_end writer
+  Stream_end.close_after_flush stream_end writer
 ;;
 
 let h2_respond_with_string ~stream_end reqd ledger response body =
@@ -219,7 +211,7 @@ let h2_respond_with_string ~stream_end reqd ledger response body =
          ~write:(Stream_end.write_slices stream_end)
          writer
          body;
-       close_after_flush ~stream_end writer;
+       Stream_end.close_after_flush stream_end writer;
        Accepted_by_writer)
 ;;
 
@@ -329,7 +321,7 @@ module Body_writer = struct
     | H1 writer -> Httpun.Body.Writer.close writer
     | H2 { body; stream_end; _ } ->
       body.closed_by_route <- true;
-      close_after_flush ~stream_end body.writer
+      Stream_end.close_after_flush stream_end body.writer
     | Ended -> ()
   ;;
 end

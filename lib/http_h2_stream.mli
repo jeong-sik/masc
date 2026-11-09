@@ -78,8 +78,9 @@ module Stream_end : sig
       oldest first. When the oldest flush still waiting goes
       [stalled_after_s] by [clock] without an answer, counted from its
       registration or from the answer before it, whichever came later, the
-      daemon logs the request method and target at warn and {!reset}s the
-      stream with [Stalled]. *)
+      daemon logs the request method and path at warn and {!reset}s the
+      stream with [Stalled]. Both are read from [reqd] here, the path without
+      its query. [stream_sw] is the stream's own switch: a stall fails it. *)
 
   val switch : t -> Eio.Switch.t
   (** The stream's switch. *)
@@ -94,19 +95,31 @@ module Stream_end : sig
   (** [flush t writer f] calls [f] once: with h2's answer to the flush, or
       with [`Closed] when the stream's switch is released first. *)
 
+  val close_after_flush : t -> H2.Body.Writer.t -> unit
+  (** [close_after_flush t writer] is the top-level [close_after_flush]
+      through [t]: [writer] closes once the bytes written so far have drained,
+      or when the stream ends or stalls first. *)
+
   val slice_bytes : int
   (** 16 KiB: one DATA frame of the default SETTINGS_MAX_FRAME_SIZE. *)
 
   val write_slices : t -> H2.Body.Writer.t -> string -> unit
   (** [write_slices t writer payload] writes [payload] to [writer] in slices
-      of {!slice_bytes}, with a {!flush} at each slice boundary inside it. A reader that drains slice after slice therefore
-      gets the stall bound for each slice, not for the whole payload
-      (RFC-0518 D3). The end of [payload] gets no flush here: the caller's
-      own flush or close covers it. *)
+      of {!slice_bytes}, with a {!flush} at each slice boundary inside it.
+      The stall bound then limits the time between two slices leaving for the
+      connection, not the whole payload (RFC-0518 D3). A client that opens
+      its window again only after reading a batch has to read the batch
+      within the bound. The end of [payload] gets no flush here: the bytes
+      after the last boundary are watched once the caller flushes or
+      closes. *)
 
   val with_current : t -> (unit -> 'a) -> 'a
   (** [with_current t f] runs [f] with [t] bound to the calling fiber and to
-      the fibers it forks. *)
+      the fibers it forks, those on switches that outlive the stream too.
+      Such a fiber finds [t] ended once the stream is over, and the
+      top-level [close_after_flush] then closes at once. A fiber started
+      inside [f] that later answers other streams would close their error
+      answers through [t]. *)
 end
 
 val dispatch : Stream_end.t -> (unit -> unit) -> unit

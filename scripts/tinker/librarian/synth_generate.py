@@ -20,8 +20,9 @@ DUPLICATE_PAIR_SHARE of the memories get a planted duplicate, dealt over the
 split: after the other facts, the model restates one durable fact of the
 planned category with the duplicate's own marks, near the length of that fact.
 The model writes only text: role material, a world sheet, category names, a
-goal, and claims; a claim whose marks differ from its plan, or a candidate or
-duplicate whose length leaves its band, is not kept. Every model call is cached in
+goal, and claims; a claim whose marks differ from its plan, a claim that copies
+a fact of its memory or an earlier candidate, or a candidate or duplicate whose
+length leaves its band, is not kept. Every model call is cached in
 <out>/calls.jsonl under a key derived from the request, so a rerun resumes and
 pays only for calls that have no answer yet. Output: <out>/requests.jsonl (one
 request per line; `synth_rows.label_of_row` reads its label) and <out>/summary.json.
@@ -304,6 +305,8 @@ def build_candidates(caller: Asks, rng: random.Random, keeper: S.KeeperProfile, 
     durable = [f for f in facts if not f.planted_stale]
     targets = target_choices(facts)
     used: set[str] = set()
+    # A candidate that copies a fact or an earlier candidate would make its claim name both.
+    texts = {f.claim.strip() for f in facts}
     out: list[S.Candidate] = []
     clock = between(rng, CANDIDATE_TIME_START, CANDIDATE_TIME_START + dt.timedelta(days=1))
     first_sequence = rng.randrange(1, 150)
@@ -341,11 +344,13 @@ def build_candidates(caller: Asks, rng: random.Random, keeper: S.KeeperProfile, 
             if answer is None:
                 return None
             parsed = S.parse_single_claim(answer) if answer else None
-            if parsed is not None and S.surface_holds(parsed, surface) and C.length_holds(parsed, plan.length):
+            if (parsed is not None and parsed.strip() not in texts and S.surface_holds(parsed, surface)
+                    and C.length_holds(parsed, plan.length)):
                 claim = parsed
                 break
         if claim is None:
             return None
+        texts.add(claim.strip())
         seen = round(clock.timestamp(), 6)
         board = S.board_ref(rng) if plan.board else None
         out.append(S.Candidate(S.candidate_request_id(rng), sequence, claim, category, seen, board,

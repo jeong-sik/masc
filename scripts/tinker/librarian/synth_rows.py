@@ -6,12 +6,15 @@ a row's facts and candidates back into `synth_spec` types, and `label_of_row`
 gives the row's label: `synth_spec.labeled` over those parts. A row stores no
 label of its own, so its label cannot disagree with its request.
 
-`parts_of` reads only rows the generator can write. Memory IDs, claims and
-request IDs are unique. A correction, complement or paraphrase targets one fact
-that is neither planted stale nor one of a duplicate pair, and no two candidates
-share a target; the other kinds target nothing. A planted duplicate restates
-another durable fact that is not a duplicate itself, and no other duplicate
-restates that fact.
+`parts_of` reads only rows the generator can write. The fact at place i has
+the memory ID the prompt shows for it (`prompt_facts.surrogate_id`). A request
+holds at least one candidate, and request IDs are unique. Every fact and
+candidate of a request has its own text, so a claim copied word for word names
+one of them. A correction, complement or paraphrase targets one fact that is
+neither planted stale nor one of a duplicate pair, and no two candidates share
+a target; the other kinds target nothing. A planted duplicate restates another
+durable fact that is not a duplicate itself, and no other duplicate restates
+that fact.
 """
 
 from __future__ import annotations
@@ -19,6 +22,7 @@ from __future__ import annotations
 from dataclasses import asdict
 from typing import cast
 
+import prompt_facts as PF
 import synth_spec as S
 
 type JsonObject = dict[str, object]
@@ -102,12 +106,14 @@ def holds(facts: tuple[S.MemoryFact, ...], candidates: tuple[S.Candidate, ...]) 
     restated = [f.duplicate_of for f in facts if f.duplicate_of is not None]
     paired = set(restated) | {f.memory_id for f in facts if f.duplicate_of is not None}
     targets = [c.target_memory_id for c in candidates if c.target_memory_id is not None]
+    claims = [f.claim for f in facts] + [c.claim for c in candidates]
 
     def restates_durable(fact: S.MemoryFact, original: str) -> bool:
         source = by_id.get(original)
         return (source is not None and not fact.planted_stale
                 and not source.planted_stale and source.duplicate_of is None)
-    return (len(by_id) == len(facts) and len({f.claim for f in facts}) == len(facts)
+    return (all(f.memory_id == PF.surrogate_id(i) for i, f in enumerate(facts))
+            and bool(candidates) and len(set(claims)) == len(claims)
             and len({c.request_id for c in candidates}) == len(candidates)
             and len(set(restated)) == len(restated)
             and all(restates_durable(f, f.duplicate_of) for f in facts if f.duplicate_of is not None)

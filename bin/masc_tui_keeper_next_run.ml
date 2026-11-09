@@ -149,7 +149,7 @@ type row_wakes =
 
 let unknown_row = { known = []; unknown_after = Some Float.neg_infinity; stops_at = None }
 
-let row_wakes ~now window (row : Masc_tui_types.schedule_row) =
+let row_wakes window (row : Masc_tui_types.schedule_row) =
   let expiry =
     match row.sch_expires_at_iso with
     | None -> Ok None
@@ -165,9 +165,13 @@ let row_wakes ~now window (row : Masc_tui_types.schedule_row) =
         && slot_index window at < window.slots
       in
       let first_known = if on_strip first then [ first ] else [] in
-      (* The runner fires a missed due once and moves on to the first
-         occurrence after it fires, so the walk past [first] starts at now. A
-         step that does not move forward leaves the rest unknown. *)
+      (* Every occurrence inside the now slot counts there, before or after
+         now, so a strip depends on its window and not on the second it was
+         read in. A [first] before the now slot is a missed due the runner
+         fires once, so the walk skips to the slot start instead of counting
+         the occurrences in between: [Float.pred] keeps an occurrence that
+         falls on the slot start. A step that does not move forward leaves
+         the rest unknown. *)
       let repeat step =
         let rec walk cursor known =
           match step cursor with
@@ -176,7 +180,7 @@ let row_wakes ~now window (row : Masc_tui_types.schedule_row) =
               else { known; unknown_after = None; stops_at }
           | Some _ | None -> { known; unknown_after = Some cursor; stops_at }
         in
-        walk (Float.max first now) first_known
+        walk (Float.max first (Float.pred window.first_slot)) first_known
       in
       (match row.sch_recurrence with
        | Error _ -> { known = first_known; unknown_after = Some first; stops_at }
@@ -244,7 +248,7 @@ let truncation_wakes (snapshot : Masc_tui_types.schedule_snapshot) =
            | Some (Error _) | None -> Some unknown_row)
 ;;
 
-let wake_strip_of_snapshot ~now window ~keeper_name
+let wake_strip_of_snapshot window ~keeper_name
     (snapshot : Masc_tui_types.schedule_snapshot) =
   match snapshot.scs_read_error with
   | Some _ -> strip_of_row_wakes window unknown_row
@@ -256,7 +260,7 @@ let wake_strip_of_snapshot ~now window ~keeper_name
           snapshot.scs_rows
       in
       let readings =
-        List.map (row_wakes ~now window) rows @ Option.to_list (truncation_wakes snapshot)
+        List.map (row_wakes window) rows @ Option.to_list (truncation_wakes snapshot)
       in
       sum_wake_strips
         (List.init window.slots (fun _ -> Wakes 0)
@@ -328,7 +332,7 @@ let wake_strip index ~now ~ahead ~keeper_name =
       let strip =
         match index.ind_snapshot with
         | None -> strip_of_row_wakes window unknown_row
-        | Some snapshot -> wake_strip_of_snapshot ~now window ~keeper_name snapshot
+        | Some snapshot -> wake_strip_of_snapshot window ~keeper_name snapshot
       in
       Hashtbl.replace index.ind_strips (keeper_name, ahead) strip;
       strip

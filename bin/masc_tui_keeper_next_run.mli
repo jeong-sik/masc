@@ -41,8 +41,12 @@ val wake_strip :
     the first is {!Masc_tui_types.schedule_row_due_time}, an [Interval] adds
     its period, and [Daily] and [Cron] repeat
     [Schedule_domain.first_due_after]. A wake at or after the row's expiry is
-    not counted. A wake that came due and is not yet late counts in the first
-    slot. A late row or one the runner holds adds nothing.
+    not counted. Every occurrence inside the now slot counts in it, whether
+    it lies before or after [now], so the strip is the same for every [now]
+    in one slot. A first due before the now slot that is not yet late counts
+    once in the now slot, and the occurrences between it and the slot start
+    are not counted: the runner fires a missed due once. A late row or one
+    the runner holds adds nothing.
 
     [Wakes_unknown] fills every slot when the agenda is missing or its read
     failed, the slots after the first wake of a row whose recurrence did not

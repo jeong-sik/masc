@@ -456,15 +456,37 @@ let test_interval_wakes_every_period () =
 ;;
 
 let test_missed_interval_counts_once_in_the_now_slot () =
-  (* Due three periods ago and not late: the runner fires it once and goes on
-     to the first occurrence after now, 01:00. *)
+  (* Due at 21:00 the day before and not late: the runner fires it once, so
+     22:00 and 23:00 are not counted. 00:00 lies on the now slot's start and
+     counts there beside the missed due. *)
   let row =
     make_row ~keeper_name:"alpha" ~due_at_iso:"2026-11-06T21:00:00Z"
       ~recurrence:(interval 3600) ()
   in
-  Alcotest.check strip "the missed ones collapse into the now slot"
-    (once_in [ 0; 2; 4; 6; 8; 10; 12; 14; 16; 18; 20; 22; 24 ])
+  Alcotest.check strip "the missed due and 00:00 in the now slot, then every hour"
+    (List.init (ahead + 1) (fun index ->
+       Masc_tui_keeper_next_run.Wakes
+         (if index = 0 then 2 else if index mod 2 = 0 then 1 else 0)))
     (strip_of [ row ])
+;;
+
+let test_strip_is_the_same_for_every_now_in_one_slot () =
+  (* At 00:25 the occurrences at 00:10 and 00:20 have passed. They are in the
+     now slot all the same, so the strip read at 00:01 and at 00:25 agree. *)
+  let index =
+    agenda_index (Some (make_snapshot [ scheduled ~h:0 ~m:0 ~recurrence:(interval 600) () ]))
+  in
+  let read now = Masc_tui_keeper_next_run.wake_strip index ~now ~ahead ~keeper_name:"alpha" in
+  let early = read (day +. 60.) in
+  let late = read (day +. 1500.) in
+  Alcotest.check strip "00:01 reads three wakes a slot"
+    (every (Masc_tui_keeper_next_run.Wakes 3)) early;
+  Alcotest.check strip "00:25 reads the same strip" early late;
+  Alcotest.check strip "a fresh index at 00:25 agrees"
+    early
+    (Masc_tui_keeper_next_run.wake_strip
+       (agenda_index (Some (make_snapshot [ scheduled ~h:0 ~m:0 ~recurrence:(interval 600) () ])))
+       ~now:(day +. 1500.) ~ahead ~keeper_name:"alpha")
 ;;
 
 let test_daily_wakes_once () =
@@ -597,6 +619,8 @@ let () =
       , [ Alcotest.test_case "interval" `Quick test_interval_wakes_every_period
         ; Alcotest.test_case "missed interval" `Quick
             test_missed_interval_counts_once_in_the_now_slot
+        ; Alcotest.test_case "same strip within one slot" `Quick
+            test_strip_is_the_same_for_every_now_in_one_slot
         ; Alcotest.test_case "daily" `Quick test_daily_wakes_once
         ; Alcotest.test_case "cron" `Quick test_cron_every_half_hour
         ; Alcotest.test_case "one-shot" `Quick test_one_shot_wakes_once

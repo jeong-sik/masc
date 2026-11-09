@@ -50,11 +50,9 @@ claiming that observation setup had no effects. Typing consumes the native Page
 event buffer for its completion check; a later `events` result is not a full
 history.
 
-A `drag` between observed points, and a `drag_to` with waypoints or scene nodes,
-use raw mouse calls with no release receipt. MASC refuses them before input.
-A `drag_to` between two selectors without waypoints, with `durationMs = 0`, uses
-the SDK's `dragAndDrop`, which returns a receipt. Its no-dialog receipt settles
-the command, while application drop acceptance still requires observation.
+A `drag_to` from one selector onto another uses the SDK's `dragAndDrop`, which
+returns a receipt. Its no-dialog receipt settles the command, while
+application drop acceptance still requires observation.
 
 Uploads use `BrowserAct` `action = "upload"` on the live ego connection
 (`lane = "live"` with its observed `clientId`) and the observed `tabId`. The

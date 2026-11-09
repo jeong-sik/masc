@@ -14,6 +14,9 @@ for output-dependent arguments. Supply only one of args or input. \
 Omit optional after or pass an array such as []; never null. \
 Inline recipes may use original file Write through its Serial handler, Gate and \
 publication recovery. Write has no resource-scoped admission or durable async replay. \
+Inline recipes may also use Execute and masc_board_post; each node effect passes \
+through the same Gate approval or Board policy as a direct call, and async scopes \
+still refuse both. \
 Skill nodes use exact skill_reference, not the Skill's callable tool name in tool. \
 Their args or resolved tagged input must match the child's parameter object schema. \
 Copy the exact admitted reference and declared exports from Skill inventory. A child \

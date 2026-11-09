@@ -4,25 +4,28 @@ agent_core (OCaml Agent SDK) modules are classified into three stability tiers.
 Public facade modules carry a `@stability` annotation in their top-level doc
 comment; unannotated modules are Internal by default.
 
+agent_core has no consumer outside this repository. No tier promises
+compatibility: a change to any tier updates every caller in the same pull
+request, with no deprecation window, version bump or migration guide.
+
 ## Tiers
 
-| Tier | Promise | Breaking change policy |
-|------|---------|----------------------|
-| **Stable** | Backward-compatible within a major version. | Requires major version bump + migration guide. |
-| **Evolving** | May change with deprecation notice. | One minor-version deprecation window before removal. |
-| **Internal** | Implementation detail. No stability promise. | May change in any release without notice. |
+| Tier | Meaning |
+|------|---------|
+| **Stable** | Core abstractions that most of the repository imports directly. |
+| **Evolving** | Modules still being shaped. |
+| **Internal** | Implementation detail. |
 
 ## Classification criteria
 
 ### Stable
 
-- Types and functions that downstream consumers (external coordinators, embedding agents) import directly.
+- Types and functions that most callers in the repository import directly.
 - Core abstractions: `Types`, `Error`, `Agent`, `Builder`, `Tool`, `Llm_provider`, `Hooks`.
-- Breaking a Stable module breaks all consumers.
 
 ### Evolving
 
-- Modules under active development with external consumers.
+- Modules under active development.
 - New features (runtime evidence, structured output, harness) that have not yet settled.
 - Runtime orchestration helpers whose API is still being refined.
 
@@ -48,8 +51,7 @@ Rules:
 - At most one `@stability` tag per `.mli` file, at the top-level module doc comment.
 - `@since` indicates the version when the stability tier was assigned (not when the module was created).
 - Modules without `@stability` are treated as **Internal** by default.
-- Promotion (Internal -> Evolving -> Stable) does not require deprecation.
-- Demotion (Stable -> Evolving) requires one minor version of deprecation.
+- A module changes tier by editing its `@stability` tag.
 
 ## Current classification
 
@@ -57,7 +59,7 @@ The public facade modules classified below carry an explicit stability tier.
 
 ### Stable modules
 
-Core types and interfaces that downstream consumers depend on.
+Core types and interfaces that most of the repository depends on.
 
 | Module | File |
 |--------|------|
@@ -74,8 +76,8 @@ Core types and interfaces that downstream consumers depend on.
 
 ### Evolving modules
 
-Public modules with downstream consumers that are still settling. This tier
-includes most top-level SDK surfaces outside the stable core.
+Public modules that are still settling. This tier includes most top-level SDK
+surfaces outside the stable core.
 
 Representative modules:
 
@@ -93,10 +95,9 @@ public OCaml modules in this stability table.
 
 ### Internal modules
 
-Implementation-detail modules with no compatibility promise. Most entries in
-this tier live under internal subdirectories such as `lib/agent/`,
-`lib/protocol/`, and `lib/llm_provider/`, plus parser/transport helpers that
-external consumers should not depend on directly.
+Implementation-detail modules. Most entries in this tier live under internal
+subdirectories such as `lib/agent/`, `lib/protocol/`, and `lib/llm_provider/`,
+plus parser/transport helpers.
 
 #### Execution-journal interface boundary
 

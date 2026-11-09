@@ -13,7 +13,8 @@ type t = {
   stored : Masc.Tui_preference.settings;
   settings_unread : string option;
   keeper_list_sort : string option;
-  keeper_list_layout : string option;
+  keeper_list_view : string option;
+  keeper_list_density : string option;
   keeper_list_error : string option;
 }
 
@@ -76,7 +77,8 @@ let of_settings ~base_path reading =
     | Ok None | Error _ -> None, None
   in
   let keeper_list_sort, sort_error = keeper_read "sort" in
-  let keeper_list_layout, layout_error = keeper_read "layout" in
+  let keeper_list_view, view_error = keeper_read "view" in
+  let keeper_list_density, density_error = keeper_read "density" in
   let container_error =
     match keeper_preferences with
     | Ok (Some doc) when Option.is_some (List.assoc_opt "keepers" doc) ->
@@ -84,11 +86,13 @@ let of_settings ~base_path reading =
     | Ok (Some _) | Ok None | Error _ -> None in
   let keeper_list_errors =
     (match keeper_preferences with Ok _ -> [] | Error reason -> [reason])
-    @ Option.to_list container_error @ Option.to_list sort_error @ Option.to_list layout_error in
+    @ Option.to_list container_error @ Option.to_list sort_error
+    @ Option.to_list view_error @ Option.to_list density_error in
   { stored = settings;
     settings_unread;
     keeper_list_sort;
-    keeper_list_layout;
+    keeper_list_view;
+    keeper_list_density;
     keeper_list_error = (match keeper_list_errors with [] -> None | errors -> Some (String.concat "; " errors));
   }
 
@@ -147,7 +151,11 @@ let prepare_startup_read ~sw ~base_path ~read_settings =
   in
   { started_ns; result }
 
-let set_keeper_list_preference ~base_path ~key value =
+let keeper_preference_keys = [ "sort"; "view"; "density" ]
+
+(* [choices] are written together under one lock; every other choice of the
+   file must read the same after the edit. *)
+let set_keeper_list_preference ~base_path choices =
   let path = keeper_preferences_path ~base_path in
   try
     Fs_compat.mkdir_p (Filename.dirname path);
@@ -156,12 +164,20 @@ let set_keeper_list_preference ~base_path ~key value =
       let* existing = read_keeper_preferences path in
       let content = Option.value existing ~default:"" in
       let* original = Keeper_toml_loader.parse_toml content in
-      let edited = Toml_line_editor.edit_table_scalar content ~path:"keepers" ~key ~value:(Some value) in
+      let edited =
+        List.fold_left
+          (fun text (key, value) ->
+            Toml_line_editor.edit_table_scalar text ~path:"keepers" ~key ~value:(Some value))
+          content choices
+      in
       let* updated = Keeper_toml_loader.parse_toml edited in
-      let other = if String.equal key "sort" then "keepers.layout" else "keepers.sort" in
+      let written (key, value) =
+        Keeper_toml_loader.toml_string_opt updated ("keepers." ^ key) = Some value in
+      let kept key =
+        List.mem_assoc key choices
+        || List.assoc_opt ("keepers." ^ key) original = List.assoc_opt ("keepers." ^ key) updated in
       let* () =
-        if Keeper_toml_loader.toml_string_opt updated ("keepers." ^ key) = Some value
-           && List.assoc_opt other original = List.assoc_opt other updated then Ok ()
+        if List.for_all written choices && List.for_all kept keeper_preference_keys then Ok ()
         else Error "preference edit did not preserve the other choice" in
       Fs_compat.save_file_atomic_strict_staged path edited
       |> Result.map_error Fs_compat.atomic_replace_failure_to_string) with
@@ -176,10 +192,14 @@ let set_keeper_list_preference ~base_path ~key value =
   | Sys_error reason -> Error reason
   | Unix.Unix_error (error, operation, _) -> Error (operation ^ ": " ^ Unix.error_message error)
 
-let set_keeper_list_sort ~base_path sort = set_keeper_list_preference ~base_path ~key:"sort" sort
-let set_keeper_list_layout ~base_path layout = set_keeper_list_preference ~base_path ~key:"layout" layout
+let set_keeper_list_sort ~base_path sort = set_keeper_list_preference ~base_path [ "sort", sort ]
 
-type keeper_preference = Keeper_order of string | Keeper_view of string
+let set_keeper_list_view ~base_path ~view ~density =
+  set_keeper_list_preference ~base_path [ "view", view; "density", density ]
+
+type keeper_preference =
+  | Keeper_order of string
+  | Keeper_view of { view : string; density : string }
 type keeper_preference_outcome =
   | Preference_saved
   | Preference_unconfirmed of string
@@ -223,7 +243,8 @@ let rec run_keeper_preference_writer writer =
           let result = Eio.Cancel.protect (fun () -> Eio_unix.run_in_systhread (fun () ->
             match request.preference with
             | Keeper_order value -> set_keeper_list_sort ~base_path:request.base_path value
-            | Keeper_view value -> set_keeper_list_layout ~base_path:request.base_path value)) in
+            | Keeper_view { view; density } ->
+                set_keeper_list_view ~base_path:request.base_path ~view ~density)) in
           (match result with Ok () -> Preference_saved | Error reason -> Preference_unconfirmed reason)
         with
         | Eio.Cancel.Cancelled _ as exn ->

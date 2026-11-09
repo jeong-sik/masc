@@ -133,3 +133,8 @@ val redeeming_client :
   (string * string option, redeem_error) result
 (** The client id and secret that redeem a token this binding's login was
     issued. *)
+
+val write_whole : string -> string -> (unit, string) result
+(** Atomically write [contents] to [path] via a unique 0600 temporary file in
+    [Filename.dirname path], creating missing parent directories with mode
+    0700. *)

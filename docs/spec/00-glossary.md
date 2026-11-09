@@ -2115,7 +2115,7 @@ status: reference
   `Seats_unknown`으로 거절한다. 이름을 스스로 적을 수 있는 환경에는 목록이 없어
   넘김이 그대로 통과한다.
   - **단일 자격증명 트랜잭션 직렬화 (Credential Admission Serialization)**: 인계 대상
-    적격성 확인(`Play_seat.hand_to`), 이탈한 조종자 해제(`Keeper_machine_controller_authority.holder_left`), 적격성 확인(`Play_seat.hand_to`), 이탈한 조종자 해제(`Keeper_dos_controller.set_participation`),
+    적격성 확인(`Play_seat.hand_to`), 이탈한 조종자 해제(`Keeper_machine_controller_authority.holder_left`),
     실제 제어권 변경(`Dos_lane.pass`)은 단일 Auth 자격증명 트랜잭션(`with_credential_transaction`)
     안에서 원자적으로 직렬화된다(#40577). 대상 회수가 먼저 완료되면 목록에서 제외되어 거절되고,
     인계가 먼저 권한을 얻으면 회수는 인계가 끝날 때까지 대기한 뒤 새 조종자의 권한을 해제한다.
@@ -2274,8 +2274,8 @@ status: reference
 : MASC 실시간 브라우저 연결(`live client`)이 브라우저와 통신하는 물리적·프로토콜 전송 수단(#41795, #41839).
   닫힌 값은 `Ego_task_space`(`"ego_task_space"`) 하나다(`Browser_lane.live_transport`).
   각 전송 방식이 제공할 수 있는 작업 역량(`Browser_lane.live_capability`)은 타입 표(`live_transport_serves`)로 엄격히 고정된다.
-  - **역량 32종**: `Tab_listing`·`Text_read`·`Document_source`·`Element_inventory`·`Viewport_capture`·`Scene_read`·`Accessibility_snapshot`·`Snapshot_target_input`·`Native_workflow`·`Page_recovery`·`Dom_interaction`·`Point_click`·`Point_scroll`·`Trusted_hover`·`Trusted_drag`·`Trusted_double_click`·`Trusted_button_click`·`Touch_input`·`Trusted_keyboard`·`Viewport_resize`·`Tab_activation`·`Tab_history`·`Tab_navigation`·`Tab_closing`·`Tab_creation`·`Dialog_read`·`Dialog_answer`·`Operator_handoff`·`Page_management`·`Download_listing`·`File_upload`·`Environment_emulation`.
-  - **`ego_task_space`**: ego lite 작업 공간 하나를 browser Lane Addon worker 가 `ego-browser nodejs` 로 다룬다(RFC-browser-live-ego). 읽기 다섯 종(`Tab_listing`·`Text_read`·`Element_inventory`·`Viewport_capture`·`Scene_read`)과 접근성 snapshot(`Accessibility_snapshot`), 탭 열기·이동·닫기·히스토리(`Tab_creation`·`Tab_navigation`·`Tab_closing`·`Tab_history`), 입력(`Dom_interaction`·`Point_click`·`Point_scroll`·`Trusted_hover`·`Trusted_drag`·`Trusted_double_click`·`Trusted_button_click`·`Trusted_keyboard`·`Snapshot_target_input`), 대화상자 응답(`Dialog_answer`), 사람에게 넘기기(`Operator_handoff`), 다운로드 목록(`Download_listing`), 업로드(`File_upload`)를 제공한다. 탭 번호는 ego 가 붙인 페이지 라벨(`p1`, `p2`)을 따른다. 이동·닫기·입력은 그 공간에서 에이전트가 연 페이지에만 한다. 프레임은 snapshot 의 ref 와 role·글 대상으로 읽고 다룬다. 운영자가 그 공간에 연 탭은 목록에만 나오고 읽기·이동·입력은 효과 없이 거절된다. 입력의 대상 찾기·화면 확인·DOM 편집은 masc 페이지 스크립트가 하고, 마우스와 키는 ego 가 보낸다.
+  - **역량 37종**: `Tab_listing`·`Text_read`·`Document_source`·`Element_inventory`·`Viewport_capture`·`Scene_read`·`Accessibility_snapshot`·`Snapshot_target_input`·`Native_workflow`·`Page_recovery`·`Dom_interaction`·`Point_click`·`Point_scroll`·`Trusted_hover`·`Trusted_drag`·`Trusted_double_click`·`Trusted_button_click`·`Touch_input`·`Trusted_keyboard`·`Viewport_resize`·`Tab_activation`·`Tab_history`·`Tab_navigation`·`Tab_closing`·`Tab_creation`·`Dialog_read`·`Dialog_answer`·`Operator_handoff`·`Page_management`·`Download_listing`·`File_upload`·`Environment_emulation`·`Request_blocking`·`Storage_listing`·`Request_listing`·`Console_reading`·`Cookie_writing`.
+  - **`ego_task_space`**: ego lite 작업 공간 하나를 browser Lane Addon worker 가 `ego-browser nodejs` 로 다룬다(RFC-browser-live-ego). 읽기 다섯 종(`Tab_listing`·`Text_read`·`Element_inventory`·`Viewport_capture`·`Scene_read`)과 접근성 snapshot(`Accessibility_snapshot`), 탭 열기·이동·닫기·히스토리(`Tab_creation`·`Tab_navigation`·`Tab_closing`·`Tab_history`), 입력(`Dom_interaction`·`Point_click`·`Point_scroll`·`Trusted_hover`·`Trusted_drag`·`Trusted_double_click`·`Trusted_button_click`·`Trusted_keyboard`·`Snapshot_target_input`), 대화상자 응답(`Dialog_answer`), 사람에게 넘기기(`Operator_handoff`), 다운로드 목록(`Download_listing`), 업로드(`File_upload`), 요청 차단·목록 읽기·쿠키 쓰기(`Request_blocking`·`Storage_listing`·`Request_listing`·`Console_reading`·`Cookie_writing`)를 제공한다. 탭 번호는 ego 가 붙인 페이지 라벨(`p1`, `p2`)을 따른다. 이동·닫기·입력은 그 공간에서 에이전트가 연 페이지에만 한다. 프레임은 snapshot 의 ref 와 role·글 대상으로 읽고 다룬다. 운영자가 그 공간에 연 탭은 목록에만 나오고 읽기·이동·입력은 효과 없이 거절된다. 입력의 대상 찾기·화면 확인·DOM 편집은 masc 페이지 스크립트가 하고, 마우스와 키는 ego 가 보낸다.
   - 전송 방식의 제공·비제공 조합은 코드가 전부 나열해 고정한다(`Browser_lane.live_transport_serves`).
   선택된 연결의 전송 방식이 요청된 역량을 제공하지 못하면 브라우저 Add-on 은 명령을 큐에 넣기 전에 `live_transport_unsupported` 거절 코드로 차단하고, 거절된 연결(`clientId`)과 그 전송 방식(`transport`), 요청된 역량(`capability`)을 함께 돌려준다. 어느 경우에도 브라우저 명령은 발송되지 않는다. 선택한 연결에서 성공한 실시간 브라우저 응답(`BrowserRead` 등)과 탭·연결 목록(`BrowserTabs`)의 각 항목은 `clientId`와 함께 `transport` 필드를 노출하며, 연결 선택 이전의 오류 응답(`No_live_client` 등)과는 구분된다(#41839).
   - **이름 경계**: `transport`는 이 문서에서 여러 축으로 쓰인다. 이 항목은 연결된 브라우저와
@@ -3334,7 +3334,7 @@ status: reference
   `Self_owned`/`Held_by_other` 를 가르고, lifecycle 의 다른 전이는 같은 함수를
   `~same_agent` 라는 인자 이름으로 받는다. 이름표는 셋이지만 비교는 하나이므로,
   한쪽만 바꾸면 도구가 받아들일 전이를 lifecycle 이 거절한다.
-  **다른 뜻과 구별한다**: 기계를 쥔 조종자(`Keeper_machine_controller_authority.holder_left`, **다른 뜻과 구별한다**: 기계를 쥔 조종자(`Machine_addon_host.release_shared_controller` 의 `~holder`,
+  **다른 뜻과 구별한다**: 기계를 쥔 조종자(`Machine_addon_host.release_shared_controller` 의 `~holder`,
   → 조종권 (Controller))도 홀더라고 부르지만, 그쪽은 기계 조종권을 쥔 이름이고
   Task 와 무관하다. Task 문맥의 홀더는 언제나 Assignee 다.
   → [Types_core](../../lib/types/types_core.mli),

@@ -394,10 +394,10 @@ let test_malformed_arguments_reach_no_browser () =
    with expectedUrl. *)
 let test_a_snapshot_target_is_checked_before_any_browser () =
   let module Cap = Masc.Browser_capabilities in
-  let interact lane fields = addon_tool Cap.Interact (("lane",`String lane) :: ("tabId",`Int 1) :: fields) in
+  let interact fields = addon_tool Cap.Interact (("tabId",`Int 1) :: fields) in
   let click = ["action",`String "click";"target",`Assoc ["ref",`Int 12]] in
   let url = ["expectedUrl",`String "https://example.org/"] in
-  let live fields = interact "live" (("clientId",`String "0c000000-0000-4000-8000-000000000001") :: fields) in
+  let live fields = interact (("clientId",`String "0c000000-0000-4000-8000-000000000001") :: fields) in
   List.iter (fun (name, result) -> check bool name true (refused_as_input result))
     [ "a target without expectedUrl", live click ];
   check bool "a target click on a live connection goes on to find the browser Add-on" true

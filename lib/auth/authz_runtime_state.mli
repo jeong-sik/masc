@@ -19,6 +19,7 @@ type runtime =
   { owner : Authz_types.User_id.t
   ; provider_account_id : Authz_types.Provider_account_id.t
   ; self_grant : Authz_types.Grant_id.t
+  ; self_effects : Authz_types.Effect.Set.t  (** What the Self grant allows. *)
   }
 
 type t

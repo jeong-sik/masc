@@ -826,6 +826,43 @@ let firmlink_alias path =
 (* The runtime root stands where a Keeper's is: [<base>/.masc]. A root that
    holds it, or an extra root inside it, would grant reads over every
    Keeper's credentials, so each posture refuses it before any write. *)
+let test_published_read_hook_preserves_permissions_and_scopes_reads () =
+  with_temp_root @@ fun runtime_root ->
+  let oauth_source = Filename.concat runtime_root "oauth" in
+  write_file ~mode:0o600 oauth_source (Masc_test_deps.antigravity_oauth_fixture "fixture");
+  let home = Runtime_antigravity_home.prepare ~runtime_root ~owner_leaf:"read-hook" ~oauth_source
+    |> require_ok in
+  let workspace = Filename.concat runtime_root "workspace" in
+  Unix.mkdir workspace 0o700;
+  let inside = Filename.concat workspace "inside.txt" in
+  write_file ~mode:0o600 inside "inside";
+  let cwd = Runtime_antigravity_home.prepare_native_tools home
+    ~posture:Runtime_native_tools.Native_read
+    ~workspace:(Runtime_antigravity_home.Shared_workspace workspace) ~additional_workspaces:[] |> require_ok in
+  let paths = Runtime_antigravity_home.For_testing.paths home in
+  let permissions = Fs_compat.load_file paths.settings_path in
+  Runtime_antigravity_home.prepare_read_hook home ~cwd ~additional_workspaces:[] |> require_ok;
+  check string "publishing the read guard does not change permissions" permissions
+    (Fs_compat.load_file paths.settings_path);
+  let hooks_path = Filename.concat (Filename.dirname paths.mcp_config_path) "hooks.json" in
+  check int "hook config stays private" 0o600 (permission hooks_path);
+  let open Yojson.Safe.Util in
+  let handler = Yojson.Safe.from_file hooks_path |> member "masc-native-read"
+    |> member "PreToolUse" |> to_list |> List.hd in
+  let command = handler |> member "hooks" |> to_list |> List.hd |> member "command" |> to_string in
+  let input = Filename.concat runtime_root "hook-input.json" in
+  let output = Filename.concat runtime_root "hook-output.json" in
+  let invoke path =
+    write_file ~mode:0o600 input (Yojson.Safe.to_string (`Assoc [
+      "toolCall", `Assoc ["name", `String "read_file"; "args", `Assoc ["Path", `String path]];
+      "conversationId", `String "fixture"]));
+    check int "published hook exits with a decision" 0
+      (Sys.command (command ^ " < " ^ Filename.quote input ^ " > " ^ Filename.quote output));
+    Yojson.Safe.from_file output |> member "decision" |> to_string in
+  check string "workspace read delegates" "allow" (invoke inside);
+  check string "account credential read is denied" "deny" (invoke paths.oauth_path)
+;;
+
 let test_native_roots_never_overlap_the_runtime_root () =
   with_temp_root @@ fun base ->
   let runtime_root = Filename.concat base ".masc" in
@@ -1673,6 +1710,8 @@ let () =
             test_prepares_private_home_with_oauth_seed
         ; test_case "native permission and workspace boundaries" `Quick
             test_native_permissions_match_posture_and_workspace
+        ; test_case "published read hook preserves policy and scopes reads" `Quick
+            test_published_read_hook_preserves_permissions_and_scopes_reads
         ; test_case "native roots never overlap the runtime root" `Quick
             test_native_roots_never_overlap_the_runtime_root
         ; test_case "pattern syntax in the managed HOME is refused" `Quick

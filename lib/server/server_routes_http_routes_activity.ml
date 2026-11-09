@@ -450,9 +450,6 @@ let activity_http_deps : Server_activity_http.deps = { query_param; int_query_pa
 let activity_events_http_json ~state request =
   Server_activity_http.events_http_json ~deps:activity_http_deps ~state request
 
-let activity_graph_http_json ~state request =
-  Server_activity_http.graph_http_json ~deps:activity_http_deps ~state request
-
 let json_upsert_string_field name value = function
   | `Assoc fields ->
       let fields = List.filter (fun (k, _) -> k <> name) fields in
@@ -842,10 +839,6 @@ let add_routes ~sw ~clock router =
   router
   |> Server_route.get Server_route.Public_read "/api/v1/activity/events" (fun state req reqd ->
          let json = activity_events_http_json ~state req in
-         Http.Response.json_value json reqd
-       )
-  |> Server_route.get Server_route.Public_read "/api/v1/activity/graph" (fun state req reqd ->
-         let json = activity_graph_http_json ~state req in
          Http.Response.json_value json reqd
        )
   |> Server_route.get Server_route.Public_read "/api/v1/runtime/params" (fun _state _req reqd ->

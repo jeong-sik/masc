@@ -500,11 +500,12 @@ module Router = struct
      httpun-eio connection boundary ([Http_reqd.of_gluten]) carries it;
      plain HTTP routes never need it; WebSocket-upgrade routes ([ws_get])
      require it to hand the post-101 socket to the ws-direct runtime.
-     [dispatch] reads it from the handle.  See RFC-0281. *)
+     A discovery GET still runs when the transport carries no capability.
+     [dispatch] reads it from the handle. See RFC-0281. *)
   type upgrade = Http_reqd.upgrade
 
   type ws_handler =
-    upgrade:upgrade -> Httpun.Request.t -> Http_reqd.t -> unit
+    upgrade:upgrade option -> Httpun.Request.t -> Http_reqd.t -> unit
 
   (* A route either handles the request in-band ([Plain], the common
      case) or upgrades the connection to WebSocket ([Ws]).  Encoding
@@ -890,18 +891,7 @@ module Router = struct
     | `Matched route -> (
         match route.handler with
         | Plain handler -> handler request reqd
-        | Ws handler -> (
-            match Http_reqd.upgrade reqd with
-            | Some upgrade -> handler ~upgrade request reqd
-            | None ->
-                (* A WebSocket-upgrade route was matched on a handle that
-                   carries no upgrade capability: a transport that cannot
-                   upgrade, or a fixture.  Respond 426 explicitly rather
-                   than silently dropping the request.  RFC-0281 S3.3. *)
-                Response.text ~status:`Upgrade_required
-                  "426 Upgrade Required: WebSocket upgrade unavailable on \
-                   this transport"
-                  reqd))
+        | Ws handler -> handler ~upgrade:(Http_reqd.upgrade reqd) request reqd)
     | `Not_found -> Response.not_found reqd
     | `Method_not_allowed -> Response.method_not_allowed reqd
 end

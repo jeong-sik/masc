@@ -413,6 +413,11 @@ let make_tool_bundle_for_descriptors_with_policy
                  ?(call_source_context = source_context)
                  ?(call_gate_context = gate_context_provider)
                  ?(call_record_gate_result = record_gate_result) () =
+               let prepared_file =
+                 Option.map
+                   (fun edit -> Keeper_prepared_inline_files.Edit edit)
+                   prepared_edit
+               in
                match capability_surface with
                | Some capability_surface ->
                  Keeper_tools_agent_core_handler.make_keeper_tool_handler
@@ -428,7 +433,7 @@ let make_tool_bundle_for_descriptors_with_policy
                    ~keeper_turn_id
                    ~artifact_draft_scope
                    ~source_context:call_source_context
-                   ?prepared_edit
+                   ?prepared_file
                    ?turn_sandbox_factory
                    ?clock
                    ?continuation_channel
@@ -451,7 +456,7 @@ let make_tool_bundle_for_descriptors_with_policy
                    ~keeper_turn_id
                    ~artifact_draft_scope
                    ~source_context:call_source_context
-                   ?prepared_edit
+                   ?prepared_file
                    ?turn_sandbox_factory
                    ?clock
                    ?continuation_channel

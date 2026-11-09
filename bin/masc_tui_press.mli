@@ -32,6 +32,8 @@ type press_target =
   | Press_usage_calls  (** The Dashboard's tool call line: Usage on its Calls section. *)
   | Press_context_tab of Masc_tui_context_inspector.tab
   | Press_keeper_row of string  (** a Keepers list row, by Keeper name *)
+  | Press_keeper_view of Masc_tui_keeper_list_model.view
+      (** a name on the Keepers list's view strip, the place [v] steps to *)
   | Press_chat_call of Masc_tui_types.workspace_authority * unit ref * string * string
   | Press_lane_row of Masc_tui_lane_inventory.identity
       (** The frame's original row ID and typed installation/incarnation target. *)

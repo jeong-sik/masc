@@ -7671,8 +7671,10 @@ let row_list (state : state) : row_list option =
   else
   match state.view with
   | Keepers Keeper_list ->
+      (* Search, Home/End and the page keys choose a row, which a folded
+         group opens to show. *)
       windowed ~count:(List.length state.keepers) ~cursor:state.keeper_cursor
-        (fun index -> state.keeper_cursor <- index)
+        (choose_keeper_row state)
   | Lanes ->
       (match state.lanes_mode with
        (* The run list moves [lane_runs_cursor] for j/k and the page keys, so
@@ -14756,11 +14758,8 @@ let draw_browser_viewport state (shot : Browser_lane_view.screenshot) bytes =
   in
   let pointer_hint = match !image_cell_pixels with
     | Some (width, height) when width > 0 && height > 0 ->
-        let click = "click: link" in
-        (* A view that holds no clients answers "not listed" for a live shot. *)
-        let view = Option.value state.browser_lane ~default:(Browser_lane_view.create ()) in
-        click ^ "   " ^ Browser_lane_view.screenshot_drag_hint view shot
-    | _ -> "click/drag unavailable: terminal cell geometry unknown" in
+        "click: link"
+    | _ -> "click unavailable: terminal cell geometry unknown" in
   let wheel_hint = match !image_cell_pixels with
     | Some (width,height) when width > 0 && height > 0 -> "wheel:pane"
     | _ -> "wheel:center" in
@@ -19073,11 +19072,6 @@ let open_keeper_detail state ~mailbox (keeper : keeper) =
   launch_detail_tab_reading state ~mailbox keeper
 ;;
 
-(* Selection changes are reconciled by the render owner; moving the cursor
-   never performs the live-context store read in the input handler. *)
-let choose_keeper_row state index = state.keeper_cursor <- index
-;;
-
 (* The answer receipt of an installation's question leads to that
    installation's Results, where its reveal row appears (RFC operator-quiz K6).
    The live worker is found in a fresh inventory read, not in the last one:
@@ -19172,6 +19166,14 @@ let apply_ui_language state lang =
        ~en:("UI language: " ^ ui_language_label lang));
   store_preference state (Masc.Tui_preference.Language_chosen lang)
 
+(* The view and its density are saved together, the way [v] and [V] save
+   them. *)
+let save_keeper_view_preference state =
+  let preference = keeper_view_preference state in
+  ignore (Masc_tui_config.submit_keeper_preference state.keeper_preference_writer
+    ~on_request_id:(fun request_id -> note_keeper_preference_submission state ~request_id preference)
+    ~sw:(Eio_context.get_switch_opt ()) ~base_path:state.local_base_path preference)
+
 let press_marked_target state ~mailbox (target : press_target) =
   match target with
   | Press_input_rejection _ | Press_quit_confirmation _ | Press_notice_fragment _ -> ()
@@ -19246,9 +19248,16 @@ let press_marked_target state ~mailbox (target : press_target) =
          left the list (Enter opened a Keeper) is not the list's any more. *)
       | Some _ when state.view <> Keepers Keeper_list -> ()
       | None -> ()
-      | Some index when index = state.keeper_cursor ->
+      (* On a heading the cursor rests on its group's first row, and a press
+         there chooses that row rather than opening it. *)
+      | Some index when index = state.keeper_cursor && not (keeper_list_on_heading state) ->
           Option.iter (open_keeper_detail state ~mailbox) (selected_keeper state)
       | Some _ -> keeper_list_select_name state name)
+  | Press_keeper_view view ->
+      if state.view = Keepers Keeper_list && view <> state.keeper_list_view then begin
+        set_keeper_list_view state view;
+        save_keeper_view_preference state
+      end
 ;;
 
 (* A failed Fusion read is retried with the streams' reconnect backoff; a
@@ -20577,16 +20586,10 @@ let open_board_post state ~mailbox ~focus (post : board_post) =
   open_board_post_id state ~mailbox ~focus post.bp_id
 
 let move_board_read_scroll state ~by =
-  let current =
-    if state.board_comments_focused then state.board_comment_scroll
-    else state.board_scroll
-  in
-  let next =
-    if by > 0 then Masc_tui_types.scroll_down_from current ~by
-    else max 0 (current + by)
-  in
-  if state.board_comments_focused then state.board_comment_scroll <- next
-  else state.board_scroll <- next
+  if state.board_comments_focused then
+    state.board_comment_scroll <-
+      Masc_tui_scroll.step_uncounted ~delta:by state.board_comment_scroll
+  else state.board_scroll <- Masc_tui_scroll.step_uncounted ~delta:by state.board_scroll
 
 (* The open post's comment ids in drawn order and the comment its read
    landed on, while its thread is on screen. *)
@@ -29366,12 +29369,18 @@ let apply_startup_settings state (tui_settings : Masc_tui_config.t) =
        (match Masc_tui_keeper_list_model.sort_of_string value with
         | Some sort -> state.keeper_list_sort <- sort
         | None -> note_keeper_preference_error ("Unknown saved Keeper order: " ^ value)));
-  (match tui_settings.keeper_list_layout with
+  (match tui_settings.keeper_list_view with
    | None -> ()
    | Some value ->
-       (match Masc_tui_keeper_list_model.layout_of_string value with
-        | Some layout -> state.keeper_list_layout <- layout
+       (match Masc_tui_keeper_list_model.view_of_string value with
+        | Some view -> state.keeper_list_view <- view
         | None -> note_keeper_preference_error ("Unknown saved Keeper view: " ^ value)));
+  (match tui_settings.keeper_list_density with
+   | None -> ()
+   | Some value ->
+       (match Masc_tui_keeper_list_model.density_of_string value with
+        | Some density -> state.keeper_list_density <- density
+        | None -> note_keeper_preference_error ("Unknown saved Keeper density: " ^ value)));
   Option.iter (fun reason -> note_keeper_preference_error ("Keeper view preferences unavailable: " ^ reason))
     tui_settings.keeper_list_error
 
@@ -29436,6 +29445,7 @@ let main
       ~local_base_path:base_path ~preference_send ~preference_read:read_settings ~port ()
   in
   state.observation_store <- Result.to_option observation_store;
+  state.keeper_outside_reading <- Masc_tui_keeper_axis.outside;
   state.view <- Overview;
 
   (* Bind the bearer to the workspace actually opened, before any request is
@@ -32737,17 +32747,14 @@ Use relative paths for resources already held in the package. -->
                 (match pressed, !browser_image_region with
                  | Some (start_row,start_column,from), Some region ->
                      (match Masc_tui_graphics.image_point region ~row ~column with
-                      | Some (x,y) ->
-                          pointer
-                            (if row=start_row && column=start_column then
-                               Browser_lane.Click_at {point=from;viewport=shot.viewport;
-                                 button=Browser_lane.Pointer.Primary}
-                             else Browser_lane.Drag {from;to_={x;y};viewport=shot.viewport;
-                               via=[];duration_ms=0})
-                      | None -> ())
+                      | Some _ when row=start_row && column=start_column ->
+                          pointer (Browser_lane.Click_at {point=from;viewport=shot.viewport;
+                            button=Browser_lane.Pointer.Primary})
+                      | Some _ | None -> ())
                  | _ -> ())
-            (* Its own press and release say click or drag; the motion
-               between them moves nothing on the page. *)
+            (* A press and release on one cell is a click. A release on
+               another cell sends nothing: no connection takes a drag from
+               point to point. *)
             | Mouse_left_drag _ -> ()
             | Key ("esc" | "q") -> close ()
             | Key "r" -> launch_browser_lane state ~mailbox:async_messages (Viewport_refresh {tab_id=shot.tab_id; expected_url=shot.url})
@@ -35506,9 +35513,9 @@ Use relative paths for resources already held in the package. -->
                    Masc_tui_types.runtime_params_viewport state ~terminal_rows in
                  let page = max 1 (detail_height - 1) in
                  state.config_scroll <-
-                   (if String.equal k "pagedown" then
-                      Masc_tui_types.scroll_down_from state.config_scroll ~by:page
-                    else max 0 (state.config_scroll - page))
+                   Masc_tui_scroll.step_uncounted
+                     ~delta:(if String.equal k "pagedown" then page else -page)
+                     state.config_scroll
                | "\r" | "\n" | "enter" -> handle_runtime_param_edit_apply ()
                | "\127" | "\b" | "backspace" ->
                  set (Masc_tui_types.runtime_param_edit_backspace edit);
@@ -36075,8 +36082,7 @@ Use relative paths for resources already held in the package. -->
              | "g" | "home" -> state.client_detail_scroll <- 0
              | "G" | "end" -> state.client_detail_scroll <- max_int
              | _ -> state.client_detail_scroll <-
-                 (if delta > 0 then scroll_down_from state.client_detail_scroll ~by:delta
-                  else max 0 (state.client_detail_scroll + delta)))
+                 Masc_tui_scroll.step_uncounted ~delta state.client_detail_scroll)
        | Some ("\r" | "\n" | "enter")
          when state.view = Clients && not (modal_owns_keys state)
               && not state.palette_open && not state.answering_open
@@ -36542,9 +36548,7 @@ Use relative paths for resources already held in the package. -->
               (match state.repository_changes_diff_path with
                | Some _ ->
                    state.repository_changes_diff_scroll <-
-                     (if direction > 0 then
-                        Masc_tui_types.scroll_down_from state.repository_changes_diff_scroll ~by:page
-                      else max 0 (state.repository_changes_diff_scroll + (direction * page)))
+                     Masc_tui_scroll.step_uncounted ~delta:(direction * page) state.repository_changes_diff_scroll
                | None ->
                    let cursor, scroll =
                      move_row_cursor state ~delta:(direction * page)
@@ -36661,7 +36665,6 @@ Use relative paths for resources already held in the package. -->
                         | Masc_tui_palette.Palette_addon_results _
                         | Masc_tui_palette.Palette_lane_history _
                         | Masc_tui_palette.Palette_goto _
-                        | Masc_tui_palette.Palette_goal_payouts
                         | Masc_tui_palette.Palette_usage_scope _
                         | Masc_tui_palette.Palette_config _
                         | Masc_tui_palette.Palette_ui_language _
@@ -36720,12 +36723,6 @@ Use relative paths for resources already held in the package. -->
                  | Some (_, Masc_tui_palette.Palette_lane_addons) ->
                      launch_lane_addons state ~mailbox:async_messages
                        Masc_tui_lane_addons.Inspect
-                 | Some (_, Masc_tui_palette.Palette_goal_payouts) ->
-                     goto_surface state ~mailbox:async_messages Planning;
-                     state.planning_filter <- Planning_filter_all;
-                     state.planning_mode <- Planning_list;
-                     state.planning_cursor <- 0;
-                     state.planning_scroll <- Planning_scroll_offset 0
                  | Some (_, Masc_tui_palette.Palette_addon_results declaration_id) ->
                      open_installation_results state ~mailbox:async_messages declaration_id
                  | Some (_, Masc_tui_palette.Palette_lane_history lane) ->
@@ -36782,9 +36779,7 @@ Use relative paths for resources already held in the package. -->
                        report_action state "error"
                          "Original Task creation is unavailable for this Keeper and confirmed workspace"
                  | Some (_, Masc_tui_palette.Palette_task task_id) ->
-                     (* The palette lands where Enter on the task list would:
-                        Overview with the task's detail open and the cursor
-                        on its row. *)
+                     (* Open the exact Task in Work, as the task list does. *)
                      goto_surface state ~mailbox:async_messages Planning;
                      state.planning_mode <- Planning_list;
                      state.task_detail_id <- Some task_id;
@@ -38169,14 +38164,14 @@ Use relative paths for resources already held in the package. -->
                   | "j" | "down" -> 1 | "k" | "up" -> -1
                   | "pageup" -> -page | _ -> page in
                 state.memory_fact_detail_scroll <-
-                  (if delta > 0 then
-                     Masc_tui_types.scroll_down_from state.memory_fact_detail_scroll
-                       ~by:delta
-                   else max 0 (state.memory_fact_detail_scroll + delta)))
+                  Masc_tui_scroll.step_uncounted ~delta state.memory_fact_detail_scroll)
        | Some ("\r" | "\n" | "enter")
          when state.view = Memory && Option.is_some state.memory_facts_keeper ->
-           state.memory_fact_detail_open <- true;
-           state.memory_fact_detail_scroll <- 0
+           (* A browser with no fact has no reading to open. *)
+           if not (List.is_empty (Masc_tui_types.memory_fact_rows state)) then begin
+             state.memory_fact_detail_open <- true;
+             state.memory_fact_detail_scroll <- 0
+           end
        | Some ("esc" | "left")
          when state.view = Acting && Option.is_some state.acting_detail ->
            state.acting_detail <- None;
@@ -38198,10 +38193,7 @@ Use relative paths for resources already held in the package. -->
                    evidence pane reports no clamp to replace it, so a step
                    down in between would carry it into [+]. *)
                 state.acting_detail_scroll <-
-                  (if delta > 0 then
-                     Masc_tui_types.scroll_down_from state.acting_detail_scroll
-                       ~by:delta
-                   else max 0 (state.acting_detail_scroll + delta)))
+                  Masc_tui_scroll.step_uncounted ~delta state.acting_detail_scroll)
        | Some ("j" | "down" | "k" | "up" | "pageup" | "pagedown" as move)
          when state.view = Acting && state.acting_filter <> Masc_tui_acting.Turns ->
            let terminal_rows, _ = get_terminal_size () in
@@ -39089,12 +39081,30 @@ Use relative paths for resources already held in the package. -->
               launch_keeper_sandbox_logs state ~mailbox:async_messages
                 keeper.k_name)
        | Some "v" when state.view = Keepers Keeper_list ->
-           cycle_keeper_list_layout state;
-           let preference =
-             Masc_tui_config.Keeper_view (Masc_tui_keeper_list_model.layout_label state.keeper_list_layout) in
+           cycle_keeper_list_view state;
+           let preference = keeper_view_preference state in
            ignore (Masc_tui_config.submit_keeper_preference state.keeper_preference_writer
              ~on_request_id:(fun request_id -> note_keeper_preference_submission state ~request_id preference)
              ~sw:(Eio_context.get_switch_opt ()) ~base_path preference)
+       | Some "V" when state.view = Keepers Keeper_list ->
+           cycle_keeper_list_density state;
+           let preference = keeper_view_preference state in
+           ignore (Masc_tui_config.submit_keeper_preference state.keeper_preference_writer
+             ~on_request_id:(fun request_id -> note_keeper_preference_submission state ~request_id preference)
+             ~sw:(Eio_context.get_switch_opt ()) ~base_path preference)
+       | Some (("[" | "]") as bracket)
+         when state.view = Keepers Keeper_list && Option.is_none (current_detail_reading state) ->
+           jump_keeper_list_group state
+             (if bracket = "]" then Masc_tui_keeper_list_model.Next_group
+              else Masc_tui_keeper_list_model.Previous_group)
+       (* On a heading Left folds and Right unfolds, before Left's back and
+          Right's detail; on a row both keep those meanings (RFC-0515 E12). *)
+       | Some (("left" | "right") as arrow)
+         when state.view = Keepers Keeper_list && Option.is_none (current_detail_reading state)
+              && keeper_list_on_heading state ->
+           refold_keeper_list_heading state
+             (if arrow = "left" then Masc_tui_keeper_list_model.Fold
+              else Masc_tui_keeper_list_model.Unfold)
        | Some "o" when state.view = Keepers Keeper_list ->
            cycle_keeper_list_sort state;
            let preference =
@@ -39238,7 +39248,7 @@ Use relative paths for resources already held in the package. -->
                              String.equal keeper.k_name keeper_name)
                           (keepers_for_selection state)
                       with
-                      | Some index -> state.keeper_cursor <- index
+                      | Some index -> choose_keeper_row state index
                       | None -> ())
                  | (Link.Board_post | Link.Goal | Link.Schedule | Link.Task
                    | Link.Fusion_run | Link.Keeper),
@@ -39517,9 +39527,7 @@ Use relative paths for resources already held in the package. -->
                          (min (count - 1) (state.fusion_cursor + (direction * page)))
                  | Fusion_detail _ | Fusion_historical_detail _ ->
                      state.fusion_scroll <-
-                       (if direction > 0 then
-                     Masc_tui_types.scroll_down_from state.fusion_scroll ~by:page
-                   else max 0 (state.fusion_scroll + (direction * page))))
+                       Masc_tui_scroll.step_uncounted ~delta:(direction * page) state.fusion_scroll)
             | Schedules ->
                 if Option.is_some (schedule_detail_on_screen state) then
                   let count, height = Masc_tui_render.schedule_detail_viewport state in
@@ -39539,9 +39547,7 @@ Use relative paths for resources already held in the package. -->
             | Verification ->
                 if Option.is_some state.verification_detail_request_id then
                   state.verification_detail_scroll <-
-                    (if direction > 0 then
-                     Masc_tui_types.scroll_down_from state.verification_detail_scroll ~by:page
-                   else max 0 (state.verification_detail_scroll + (direction * page)))
+                    Masc_tui_scroll.step_uncounted ~delta:(direction * page) state.verification_detail_scroll
                 else
                   let cursor, scroll =
                     move_row_cursor state ~delta:(direction * page)
@@ -39553,9 +39559,7 @@ Use relative paths for resources already held in the package. -->
             | Harness ->
                 if Option.is_some state.harness_detail then
                   state.harness_detail_scroll <-
-                    (if direction > 0 then
-                     Masc_tui_types.scroll_down_from state.harness_detail_scroll ~by:page
-                   else max 0 (state.harness_detail_scroll + (direction * page)))
+                    Masc_tui_scroll.step_uncounted ~delta:(direction * page) state.harness_detail_scroll
                 else
                   let cursor, scroll =
                     move_row_cursor state ~delta:(direction * page)
@@ -39571,9 +39575,6 @@ Use relative paths for resources already held in the package. -->
                 let count, height = Masc_tui_render.presets_viewport state in
                 let move = if direction > 0 then Masc_tui_scroll.page_down else Masc_tui_scroll.page_up in
                 state.config_scroll <- move ~count ~height state.config_scroll
-            | Config when state.config_pane = Config_prompts ->
-                state.config_scroll <-
-                  max 0 (state.config_scroll + (direction * page))
             | Config when state.config_pane = Config_params ->
                 let terminal_rows, _ = get_terminal_size () in
                 let _, detail_height =
@@ -39582,27 +39583,19 @@ Use relative paths for resources already held in the package. -->
                    the same detail height as the renderer, including forms. *)
                 let page = max 1 (detail_height - 1) in
                 state.config_scroll <-
-                  (if direction > 0 then
-                     Masc_tui_types.scroll_down_from state.config_scroll ~by:page
-                   else max 0 (state.config_scroll + (direction * page)))
+                  Masc_tui_scroll.step_uncounted ~delta:(direction * page) state.config_scroll
             | Config when state.config_pane = Config_voice ->
                 state.config_scroll <-
-                  (if direction > 0 then
-                     Masc_tui_types.scroll_down_from state.config_scroll ~by:page
-                   else max 0 (state.config_scroll + (direction * page)))
+                  Masc_tui_scroll.step_uncounted ~delta:(direction * page) state.config_scroll
             | Config when state.config_pane = Config_runtime ->
                 set_runtime_config_cursor_near state ~direction
                   ~target:(state.runtime_config_cursor + (direction * page))
             | Runtime when Option.is_some state.runtime_detail_target ->
                 state.runtime_detail_scroll <-
-                  (if direction > 0 then
-                     Masc_tui_types.scroll_down_from state.runtime_detail_scroll ~by:page
-                   else max 0 (state.runtime_detail_scroll + (direction * page)))
+                  Masc_tui_scroll.step_uncounted ~delta:(direction * page) state.runtime_detail_scroll
             | System_logs when Option.is_some (system_logs_page state).lp_detail_seq ->
                 edit_system_logs_page state (fun logs -> {logs with lp_detail_scroll=
-                  (if direction > 0 then
-                     Masc_tui_types.scroll_down_from logs.lp_detail_scroll ~by:page
-                   else max 0 (logs.lp_detail_scroll + (direction * page)))})
+                  Masc_tui_scroll.step_uncounted ~delta:(direction * page) logs.lp_detail_scroll})
             (* The Runs tab is read by a cursor, so its page key names a run
                the way Home and End do. Scrolling it instead wrote a value the
                drawing pulled straight back to the selected run, which is the
@@ -39617,16 +39610,9 @@ Use relative paths for resources already held in the package. -->
                 move_identity_cursor state ~delta:(direction * page)
             | Keepers Keeper_detail when state.detail_tab = Detail_terminal ->
                 Masc_tui_types.move_keeper_terminal state ~by:(-direction * page)
-            | Keepers Keeper_detail when state.detail_tab = Detail_channels ->
-                state.detail_scroll <-
-                  (if direction > 0 then
-                     Masc_tui_types.scroll_down_from state.detail_scroll ~by:page
-                   else max 0 (state.detail_scroll + (direction * page)))
             | Keepers Keeper_detail ->
                 state.detail_scroll <-
-                  (if direction > 0 then
-                     Masc_tui_types.scroll_down_from state.detail_scroll ~by:page
-                   else max 0 (state.detail_scroll + (direction * page)))
+                  Masc_tui_scroll.step_uncounted ~delta:(direction * page) state.detail_scroll
             (* The log pane owns its own height, so it pages by that rather
                than by [page]: the generic surface size counts chrome this
                pane does not have, and a page that overshoots the window skips
@@ -39658,9 +39644,7 @@ Use relative paths for resources already held in the package. -->
                          ~height:state.lane_run_detail_content_height
                      in
                      state.lane_run_detail_scroll <-
-                       (if direction > 0 then
-                     Masc_tui_types.scroll_down_from state.lane_run_detail_scroll ~by:page
-                   else max 0 (state.lane_run_detail_scroll + (direction * page)))
+                       Masc_tui_scroll.step_uncounted ~delta:(direction * page) state.lane_run_detail_scroll
                  | Lanes_run_list _ ->
                      let count =
                        match state.lane_runs with
@@ -39689,15 +39673,9 @@ Use relative paths for resources already held in the package. -->
                  | Lanes_overview ->
                      move_list_by_rows state ~delta:(direction * page))
              | Metrics ->
-                 (* Saturating, like every other clamped scroll: the frame
-                    reports the row it drew and until it has, the stored value
-                    may be a row past the end. *)
                  let page = Masc_tui_scroll.page_step ~height:state.metrics_content_height in
                  state.metrics_scroll <-
-                   (if direction > 0 then
-                      Masc_tui_types.scroll_down_from state.metrics_scroll
-                        ~by:page
-                    else max 0 (state.metrics_scroll + (direction * page)))
+                   Masc_tui_scroll.step_uncounted ~delta:(direction * page) state.metrics_scroll
              | Approvals when state.approval_detail_open ->
                  Option.iter (fun viewport ->
                    ignore (Masc_tui_approvals_model.page_detail state
@@ -40371,9 +40349,7 @@ Use relative paths for resources already held in the package. -->
                     Masc_tui_scroll.cursor_down
                       ~count:(List.length (code_entries state))
                       state.code_cursor
-            | Keepers Keeper_list ->
-                if state.keeper_cursor < List.length state.keepers - 1 then
-                  choose_keeper_row state (state.keeper_cursor + 1)
+            | Keepers Keeper_list -> step_keeper_list_stop state ~delta:1
             | Keepers Keeper_detail ->
                 if
                   Masc_tui_roster_pane.arrows_go_left
@@ -40719,9 +40695,7 @@ Use relative paths for resources already held in the package. -->
                     Masc_tui_scroll.cursor_up
                       ~count:(List.length (code_entries state))
                       state.code_cursor
-            | Keepers Keeper_list ->
-                if state.keeper_cursor > 0 then
-                  choose_keeper_row state (state.keeper_cursor - 1)
+            | Keepers Keeper_list -> step_keeper_list_stop state ~delta:(-1)
             | Keepers Keeper_detail ->
                 if
                   Masc_tui_roster_pane.arrows_go_left
@@ -41511,13 +41485,7 @@ Use relative paths for resources already held in the package. -->
        | Some "v" | Some "V"
          when state.view = Planning || state.view = Verification
               || state.view = Harness ->
-           (* Planning is the parent workspace; [v] walks its child modes
-              without putting any of them back on the top-level ring. The
-              order is the life of one piece of work: the goals it hangs
-              off, the queue waiting for a ruling, and the rulings the judge
-              recorded. Wakes and fusion runs left this walk when they became
-              tabs of the selected Keeper (RFC-tui-operator-ia section 3.1): they
-              belong to one Keeper, not to the fleet's planning workspace. *)
+           (* Work cycles from Goals through pending review to recorded verdicts. *)
            goto_surface state ~mailbox:async_messages
              (match state.view with
               | Planning -> Verification

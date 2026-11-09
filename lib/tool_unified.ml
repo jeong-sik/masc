@@ -18,10 +18,7 @@ type tool_info = {
 
 let tool_info name : tool_info =
   let meta = Tool_catalog.metadata name in
-  let stats =
-    let all = Tool_registry.get_stats () in
-    List.assoc_opt name all
-  in
+  let stats = Tool_registry.find_stats name in
   {
     name;
     visibility = meta.visibility;
@@ -106,12 +103,7 @@ let summary_report
       metrics
   in
   let distinct = List.length metrics in
-  let rec take count = function
-    | [] -> []
-    | _ when count <= 0 -> []
-    | item :: rest -> item :: take (count - 1) rest
-  in
-  let top_20 = take 20 metrics in
+  let top_20 = List.take 20 metrics in
   let all_names = Config.all_tool_names () in
   let allowed_names =
     List.filter (fun name -> Tool_catalog.is_visible name) all_names

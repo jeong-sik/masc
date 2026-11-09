@@ -144,13 +144,13 @@ du -sh ~/.cache/dune   # after the first fire, well under the budget
 
 `__OPAM_SWITCH_BIN__` is the `bin/` of the opam switch that owns the
 builds whose cache you are trimming, e.g.
-`/Users/<you>/.opam/5.5.1/bin`. Launch agents run with a minimal
+`/Users/<you>/.opam/5.5.2/bin`. Launch agents run with a minimal
 environment, so spell the absolute path rather than relying on PATH.
 
 On Linux, the equivalent is one line in the operator's crontab:
 
 ```cron
-47 3 * * * /home/<you>/.opam/5.5.1/bin/dune cache trim --size=50GB >> /var/log/dune-cache-trim.log 2>&1
+47 3 * * * /home/<you>/.opam/5.5.2/bin/dune cache trim --size=50GB >> /var/log/dune-cache-trim.log 2>&1
 ```
 
 ## Verify the budget holds

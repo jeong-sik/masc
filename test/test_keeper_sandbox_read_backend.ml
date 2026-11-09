@@ -1670,6 +1670,51 @@ let test_read_of_a_declared_path_asks_the_endpoint_for_that_path () =
   check_prefix "a relative path under a declared cwd" "/app/data/reference_embeddings.npy"
     (read ~cwd:"/app" ~path:"data/reference_embeddings.npy" ())
 
+(* Check the public Grep translation, the real remote request, and rg's
+   interpretation of that request. Only its final endpoint path is replaced
+   with a local fixture so the command can run without a remote host. *)
+let test_grep_preserves_regex_bytes_through_remote_dispatch () =
+  let base, config, meta = remote_reader_with_allowed_paths ~allowed_paths:(fun _ -> [ "/app" ]) in
+  Fun.protect ~finally:(fun () -> cleanup_fixture_dir base) @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED" "false" @@ fun () ->
+  let descriptor = match Masc.Keeper_tool_descriptor.find_id "agent.search_files" with
+    | Some descriptor -> descriptor
+    | None -> Alcotest.fail "Grep descriptor is missing" in
+  let source = Filename.concat base "grep.txt" in
+  write_file source "needleX\nneedle \n needle\n   \nNEEDLE \n";
+  List.iteri (fun index (pattern, insensitive, expected_pattern, expected_status, expected_output) ->
+    let args = Masc.Keeper_tool_descriptor.translate_input_for_descriptor descriptor
+        (`Assoc [ "path", `String "/app/grep.txt"; "pattern", `String pattern;
+                  "-i", `Bool insensitive ]) in
+    let frame_path = Filename.concat base (Printf.sprintf "grep-frame-%d" index) in
+    with_fake_ssh (fake_ssh_recording_script ~frame_path) @@ fun () ->
+    let execution = Masc.Keeper_workspace_ops.handle_tool_search_files_with_outcome
+        ~turn_sandbox_factory:None ~config ~meta ~args in
+    Alcotest.(check bool) "the remote search was dispatched" true
+      (execution.disposition = Tool_result.Completed ());
+    let argv = match Exec_ssh_protocol.decode_request (read_file frame_path) with
+      | Error detail -> Alcotest.fail detail
+      | Ok (request, _) -> request.argv in
+    (match argv with
+     | [ "rg"; "-n"; "-m"; _limit; "-e"; actual_pattern; "/app/grep.txt" ] ->
+       Alcotest.(check string) "only the declared case flag transforms the regex"
+         expected_pattern actual_pattern
+     | _ -> Alcotest.failf "unexpected Grep command: %s" (String.concat " " argv));
+    let local_argv = match List.rev argv with
+      | _endpoint_path :: rest -> List.rev rest @ [ source ]
+      | [] -> Alcotest.fail "remote search lost its command" in
+    let status, output = Process_eio.run_argv_with_status ~cwd:base ~timeout_sec:5.0 local_argv in
+    Alcotest.(check bool) "rg decides the original regex validity" true
+      (status = Unix.WEXITED expected_status);
+    match expected_output with
+    | Some expected -> Alcotest.(check string) "rg matches the requested text" expected output
+    | None -> ())
+    [ "needle ", false, "needle ", 0, Some "2:needle \n";
+      " needle", false, " needle", 0, Some "3: needle\n";
+      "   ", false, "   ", 0, Some "4:   \n";
+      "needle ", true, "(?i)needle ", 0, Some "2:needle \n5:NEEDLE \n";
+      "\nneedle", false, "\nneedle", 2, None ]
+
 (* analyze_image reads a generated image through this prefix. The endpoint's
    bytes come back as they are, even when they spell the keeper's remote
    root: the text reads map that root to the host's, which is right for
@@ -3447,6 +3492,8 @@ let run_tests ~clock ~fs () =
             (test_read_and_grep_report_the_endpoint_profile ~fs);
           Alcotest.test_case "read of a declared path asks the endpoint for that path"
             `Quick test_read_of_a_declared_path_asks_the_endpoint_for_that_path;
+          Alcotest.test_case "Grep preserves regex bytes through remote dispatch"
+            `Quick test_grep_preserves_regex_bytes_through_remote_dispatch;
           Alcotest.test_case "raw prefix keeps remote bytes that spell the workspace root"
             `Quick test_raw_prefix_keeps_remote_bytes_that_spell_the_workspace_root;
         ] );

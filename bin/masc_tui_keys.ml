@@ -386,6 +386,12 @@ let tools_refresh =
     ~help:"refresh the open original Task body/history, original request \
            detail, or Tools list"
 
+(* The views [v] walks, named from the walk itself so the sheet cannot list
+   one the key skips. *)
+let keeper_list_view_names =
+  String.concat " / "
+    (List.map Masc_tui_keeper_list_model.view_label Masc_tui_keeper_list_model.views)
+
 let keeper_actions =
   [ b Act "c" "chat" ~help:"chat with the keeper"
   ; b Act "l" "logs"
@@ -577,8 +583,14 @@ let for_surface = function
       ; b Meta "q" "quit"
       ]
   | Keepers Keeper_list ->
-      (b Navigate "j/k" "move" ~help:"move the roster cursor")
-      :: (b Navigate "v" "view" ~help:"cycle compact / detailed / grouped")
+      (b Navigate "j/k" "move"
+         ~help:"move the roster cursor; a grouping view also stops on each group heading")
+      :: (b Navigate "v" "view"
+            ~help:("cycle " ^ keeper_list_view_names ^ "; a press on a name opens that view"))
+      :: (b Navigate "V" "density" ~help:"one or two lines per Keeper")
+      :: (b Navigate "[ / ]" "group"
+            ~help:"jump to the previous or next group heading in a grouping view")
+      :: (b Navigate "Left / Right" "fold" ~help:"on a group heading, fold or unfold its rows")
       :: (b Navigate "o" "order" ~help:"cycle priority / recent / oldest / activity / name")
       :: (b Act "J" "jobs" ~help:"open the selected Keeper's schedules")
       :: (b Act "K" "relations" ~help:"browse Keeper-origin requests queued for the selected Keeper")
@@ -2147,25 +2159,29 @@ let footer_hints_git_diff =
    instead of pausing a keeper -- so a reader who has not pressed them learns
    them only from [?], which is what [?] answers. *)
 let bindings_memory_facts =
-  [ b Navigate "j/k" "move"
-  ; b Act "Enter" "detail"
+  [ b Navigate "j/k" "move" ~rows:Needs_row
+  ; b Act "Enter" "detail" ~rows:Needs_row
       ~help:"read the whole fact in a wide overlay that owns the terminal"
   ; b Act "c / C" "category" ~help:"cycle category filter (forward / backward)"
   ; b Act "d" "Category pane" ~help:"show or hide the Category rail on wide screens; facts use the full width by default"
   ; b Act "s" "sort" ~help:"cycle sort (recency, last retrieved, retrieved count, category, claim)"
   ; b Act "a / A" "all fleet" ~help:"switch to consolidated memory across entire fleet"
   ; b Search "/" "filter" ~help:"live text filter / search"
-  ; b Search "n / N" "next / previous match"
+  ; b Search "n / N" "next / previous match" ~rows:Needs_row
   ; b Act "Esc" "close / clear" ~help:"clear filter or exit to health table"
   ]
   @ row_list_edges @ listing_meta
 
-let footer_hints_memory_facts ~cols =
+(* [has_rows] is whether the browser holds a fact. A keeper with none, or a
+   filter that left none, has nothing for [j/k], [Enter] and [n / N] to act on.
+   [c / C], [s], [a / A] and [/] stay: a filter that left no fact is undone
+   with them. *)
+let footer_hints_memory_facts ~cols ~has_rows =
   let bindings =
     if cols >= Masc_tui_roster_pane.threshold_cols then bindings_memory_facts
     else List.filter (fun (binding : binding) -> binding.key <> "d") bindings_memory_facts
   in
-  hints_of_bindings bindings
+  hints_of_bindings (List.filter (answers_in_state ~has_rows) bindings)
 
 (* The reading the browser's Enter opens. One fact scrolls under the cursor
    instead of the cursor moving rows, so it owns page and edge keys the

@@ -1,0 +1,51 @@
+{
+  "kind": "focused-typecheck-against-cached-interfaces",
+  "checked_source_head": "b2a356bc88277ad044e522436b644b61dd632c01",
+  "compiler": "OCaml 5.5.1",
+  "tests_executed": false,
+  "dune_executed": false,
+  "results": [
+    {
+      "file": "bin/masc_tui_palette.mli",
+      "source_sha256": "c36e62a6b47503bf5ee9794f3612e9f6d03b069684763d60261a78a4c4182bfd",
+      "warning_flags": "+4+32+69",
+      "warning_errors": "+a",
+      "exit_code": 0
+    },
+    {
+      "file": "bin/masc_tui_palette.ml",
+      "source_sha256": "65f88d16d5e790358d397d83ee88e7f80a9305128c4ecbf5710c97eeb35bd4e6",
+      "warning_flags": "+4+32+69",
+      "warning_errors": "+a",
+      "exit_code": 0
+    },
+    {
+      "file": "bin/masc_tui_render_overlays.mli",
+      "source_sha256": "8a39e7b43a047b74c6ef8137c78aeb66cdb95cd77e487088f36dc26d29ea4d2a",
+      "warning_flags": "+4+32+69",
+      "warning_errors": "+a",
+      "exit_code": 0
+    },
+    {
+      "file": "bin/masc_tui_render_overlays.ml",
+      "source_sha256": "39a9fe8c0d8f84fc69e7ae2e436745c13ae102d1702284e2e3b26d0cea5e2988",
+      "warning_flags": "+4+32+69",
+      "warning_errors": "+a",
+      "exit_code": 0
+    },
+    {
+      "file": "test/test_tui_palette_matching.ml",
+      "source_sha256": "62149f340b78e92b6c9f3dcbf3cca2f3c849d11a4be3fd377c1d7109b9c00548",
+      "warning_flags": "+32+69-4",
+      "warning_errors": "+a",
+      "exit_code": 0
+    },
+    {
+      "file": "bin/masc_tui.ml",
+      "source_sha256": "b01fc82f07d6dd3aac02cf087a69af44d87865970cb73073d3e645918810c393",
+      "warning_flags": "+4+32+69",
+      "warning_errors": "+a",
+      "exit_code": 0
+    }
+  ]
+}

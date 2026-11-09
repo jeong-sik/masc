@@ -80,6 +80,11 @@ val open_store :
 val base_dir : t -> string
 (** Return the base directory of this store. *)
 
+val close : t -> unit
+(** Close the current append writer handle for [t] without invalidating
+    directory or row-count caches. Use when releasing a store handle whose
+    directory remains on disk. *)
+
 val prepare_for_directory_removal : t -> unit
 (** Close the current append writer and forget its memoized month directory
     and row count before application-owned code removes [base_dir t]. A later

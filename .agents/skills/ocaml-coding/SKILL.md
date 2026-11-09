@@ -5,7 +5,7 @@ description: "masc 저장소에서 OCaml 5.5 + Eio 코드를 쓰기 전에 보�
 
 # masc OCaml 점검표
 
-이 저장소는 OCaml 5.5 에 고정돼 있다(`dune-project` 의 `(ocaml (= 5.5.1))`).
+이 저장소는 OCaml 5.5 에 고정돼 있다(`dune-project` 의 `(ocaml (= 5.5.2))`).
 표준 라이브러리와 Eio 의 사실은 공식 인터페이스로 확인한다.
 
 - OCaml 매뉴얼: https://ocaml.org/manual/5.5/index.html

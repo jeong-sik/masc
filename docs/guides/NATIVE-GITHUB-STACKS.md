@@ -93,6 +93,55 @@ affected changes again. GitHub evaluates repository rules during the operation.
 
 ## Submit and verify the result
 
+### Operator-requested automatic merge
+
+Non-native Ready PRs targeting `main` have GitHub **Auto-merge enabled by
+default** on creation/Ready transitions and subsequent review/lifecycle events.
+The UI reservation waits for GitHub's two-approval rule; no one needs to click
+the button. Drafts arm when marked Ready. Release branches stay manual.
+Before extending an auto-merge-enabled standalone PR into a native stack or
+retargeting its base, disable that reservation first. Native stack members use the whole-scope
+worker instead of per-layer reservations; the worker clears existing reservations
+when it observes native membership, Draft status, a non-main base or a release head.
+
+For standalone reservations, GitHub determines which **two distinct account**
+approvals remain valid, including dismissal after new reviewable changes.
+An unchanged-diff rebase may retain approvals; the worker does not assert that
+every retained standalone review has the new commit ID.
+
+Native stacks merge after **two distinct GitHub accounts** have submitted APPROVE
+with the exact current head as commit_id for every unmerged member. Repeated
+approvals from one account count once. Author approvals, old heads, dismissed
+reviews, outstanding change requests and ambiguous formal decisions do not
+satisfy that worker admission. Reviewers still inspect source and outstanding findings
+before approving. Record a blocking FAIL/HOLD as **CHANGES_REQUESTED**: automation
+does not interpret COMMENTED review prose or establish Keeper-session independence.
+Release branches retain manual full-CI admission.
+
+[`approval-merge-request.yml`](../../.github/workflows/approval-merge-request.yml)
+records a PR number on review and PR lifecycle events without a write token or
+PR checkout. [`approval-auto-merge.yml`](../../.github/workflows/approval-auto-merge.yml)
+runs the worker from its trusted default-branch workflow commit. It reads current
+reviews and scope again and submits only the top PR of a native stack. GitHub
+must enforce at least two approvals and stale-approval dismissal on `main`;
+repository rules continue to apply during the actual merge. These metadata-only
+workflows run no builds or tests.
+
+When enabling the worker, or after a transient read/merge failure, recheck an
+existing PR (any stack member) explicitly:
+
+```bash
+gh workflow run approval-auto-merge.yml --ref main -f pr=NUMBER
+```
+
+Local preflight is read-only with `GITHUB_EVENT_NAME=workflow_dispatch`,
+`GITHUB_REPOSITORY=OWNER/REPO`, `DISPATCH_PR=NUMBER`, an authenticated `gh`, and
+`python3 scripts/review/approval-auto-merge.py --dry-run`. The worker checks an
+asynchronous receipt once and records member states; pending/enqueued does not
+mean merged. A failed API read never establishes an absent stack or an approval.
+
+### Manual integration
+
 For native stacks the API operation is:
 
 ```bash

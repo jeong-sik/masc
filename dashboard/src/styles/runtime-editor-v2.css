@@ -326,7 +326,7 @@ html[data-skin="v2"] .rt-cap.on {
   border-color: color-mix(in oklab, var(--status-ok) 32%, transparent);
 }
 
-/* models — runtime.css:68 */
+/* models */
 html[data-skin="v2"] .rt-search {
   width: 100%;
   box-sizing: border-box;
@@ -338,31 +338,28 @@ html[data-skin="v2"] .rt-search {
   font-size: var(--fs-12);
   margin-bottom: 12px;
 }
-html[data-skin="v2"] .rt-search:focus { outline: none; border-color: var(--volt-dim); } /* runtime.css:69 */
-html[data-skin="v2"] .rt-models { display: flex; flex-direction: column; gap: 9px; } /* runtime.css:70 */
+html[data-skin="v2"] .rt-search:focus { outline: none; border-color: var(--volt-dim); }
+html[data-skin="v2"] .rt-models { display: flex; flex-direction: column; gap: 9px; }
 html[data-skin="v2"] .rt-model {
-  /* runtime.css:71 */
   border: 1px solid var(--border-soft);
   border-radius: var(--radius-sm);
   background: var(--bg-card);
   padding: 11px 13px;
 }
 html[data-skin="v2"] .rt-model-h {
-  /* runtime.css:72 */
   display: flex;
   align-items: baseline;
   gap: 10px;
   flex-wrap: wrap;
   margin-bottom: 9px;
 }
-html[data-skin="v2"] .rt-model-id { font-size: 12.5px; color: var(--text-bright); } /* runtime.css:73 */
-html[data-skin="v2"] .rt-model-api { font-size: var(--fs-11); color: var(--text-dim); } /* runtime.css:74 */
-html[data-skin="v2"] .rt-model-ctx { margin-left: auto; font-size: 10.5px; color: var(--text-mid); } /* runtime.css:75 */
+html[data-skin="v2"] .rt-model-id { font-size: 12.5px; color: var(--text-bright); }
+html[data-skin="v2"] .rt-model-api { font-size: var(--fs-11); color: var(--text-dim); }
+html[data-skin="v2"] .rt-model-ctx { margin-left: auto; font-size: 10.5px; color: var(--text-mid); }
 
-/* bindings — runtime.css:78 */
+/* bindings */
 html[data-skin="v2"] .rt-binds { display: flex; flex-direction: column; gap: 9px; }
 html[data-skin="v2"] .rt-bind {
-  /* runtime.css:79 */
   display: flex;
   align-items: center;
   gap: 12px;
@@ -371,9 +368,8 @@ html[data-skin="v2"] .rt-bind {
   background: var(--bg-card);
   padding: 10px 13px;
 }
-html[data-skin="v2"] .rt-bind.is-default { border-color: var(--volt-dim); background: var(--volt-wash); } /* runtime.css:80 */
+html[data-skin="v2"] .rt-bind.is-default { border-color: var(--volt-dim); background: var(--volt-wash); }
 html[data-skin="v2"] .rt-radio {
-  /* runtime.css:81 */
   flex: none;
   background: none;
   border: 0;
@@ -382,10 +378,9 @@ html[data-skin="v2"] .rt-radio {
   cursor: pointer;
   padding: 0;
 }
-html[data-skin="v2"] .rt-radio.on { color: var(--volt); } /* runtime.css:82 */
-html[data-skin="v2"] .rt-bind-main { flex: 1; min-width: 0; } /* runtime.css:83 */
+html[data-skin="v2"] .rt-radio.on { color: var(--volt); }
+html[data-skin="v2"] .rt-bind-main { flex: 1; min-width: 0; }
 html[data-skin="v2"] .rt-bind-key {
-  /* runtime.css:84 */
   font-size: 12.5px;
   color: var(--text-bright);
   display: flex;
@@ -393,7 +388,6 @@ html[data-skin="v2"] .rt-bind-key {
   gap: 8px;
 }
 html[data-skin="v2"] .rt-default-tag {
-  /* runtime.css:85 */
   font-family: var(--font-ui);
   font-size: var(--fs-9);
   letter-spacing: 0.08em;
@@ -403,7 +397,7 @@ html[data-skin="v2"] .rt-default-tag {
   padding: 1px 6px;
   border-radius: var(--radius-pill);
 }
-html[data-skin="v2"] .rt-bind-sub { font-size: 10.5px; color: var(--text-dim); margin-top: 3px; } /* runtime.css:86 */
+html[data-skin="v2"] .rt-bind-sub { font-size: 10.5px; color: var(--text-dim); margin-top: 3px; }
 html[data-skin="v2"] .rt-bind-catalog {
   margin-top: 8px;
   display: flex;
@@ -423,9 +417,8 @@ html[data-skin="v2"] .rt-bind-catalog-row {
 html[data-skin="v2"] .rt-bind-catalog-k { color: var(--text-mid); }
 html[data-skin="v2"] .rt-bind-catalog-v { color: var(--text-dim); overflow-wrap: anywhere; }
 html[data-skin="v2"] .rt-bind-catalog-state { color: var(--text-mid); overflow-wrap: anywhere; }
-html[data-skin="v2"] .rt-bind-fields { display: flex; gap: 10px; flex: none; } /* runtime.css:87 */
+html[data-skin="v2"] .rt-bind-fields { display: flex; gap: 10px; flex: none; }
 html[data-skin="v2"] .rt-mini {
-  /* runtime.css:88 */
   display: flex;
   flex-direction: column;
   gap: 3px;
@@ -436,7 +429,6 @@ html[data-skin="v2"] .rt-mini {
   color: var(--text-dim);
 }
 html[data-skin="v2"] .rt-input-sm {
-  /* runtime.css:89 */
   width: 58px;
   background: var(--bg-sunken);
   border: 1px solid var(--border-main);
@@ -445,21 +437,19 @@ html[data-skin="v2"] .rt-input-sm {
   color: var(--text-bright);
   font-size: 11.5px;
 }
-html[data-skin="v2"] .rt-input-sm:focus { outline: none; border-color: var(--volt-dim); } /* runtime.css:90 */
+html[data-skin="v2"] .rt-input-sm:focus { outline: none; border-color: var(--volt-dim); }
 
-/* assignments — runtime.css:93 */
+/* assignments */
 html[data-skin="v2"] .rt-assigns { display: flex; flex-direction: column; }
 html[data-skin="v2"] .rt-assign {
-  /* runtime.css:94 */
   display: flex;
   align-items: center;
   gap: 14px;
   padding: 9px 0;
   border-top: 1px solid var(--border-soft);
 }
-html[data-skin="v2"] .rt-assign:first-of-type { border-top: 0; } /* runtime.css:95 */
+html[data-skin="v2"] .rt-assign:first-of-type { border-top: 0; }
 html[data-skin="v2"] .rt-assign-k {
-  /* runtime.css:96 */
   display: inline-flex;
   align-items: center;
   gap: 8px;
@@ -468,12 +458,12 @@ html[data-skin="v2"] .rt-assign-k {
   font-size: 12.5px;
   color: var(--text-bright);
 }
-html[data-skin="v2"] .rt-assign-tag { font-size: 10.5px; color: var(--text-dim); } /* runtime.css:97 */
-html[data-skin="v2"] .rt-assign-tag.pin { color: var(--volt-strong); } /* runtime.css:98 */
+html[data-skin="v2"] .rt-assign-tag { font-size: 10.5px; color: var(--text-dim); }
+html[data-skin="v2"] .rt-assign-tag.pin { color: var(--volt-strong); }
 
-/* toml — runtime.css:101 */
+/* toml */
 html[data-skin="v2"] .rt-toml-wrap {
-  /* runtime.css:101 — --bg-well (#06070a) is defined by the v2 foundation
+  /* --bg-well (#06070a) is defined by the v2 foundation
      (skin-v2.css), so use it verbatim instead of the nearer --bg-sunken to
      keep the prototype's deepest code-well depth. */
   border: 1px solid var(--border-main);
@@ -482,7 +472,6 @@ html[data-skin="v2"] .rt-toml-wrap {
   background: var(--bg-well);
 }
 html[data-skin="v2"] .rt-toml-bar {
-  /* runtime.css:102 */
   display: flex;
   align-items: center;
   gap: 10px;
@@ -492,10 +481,9 @@ html[data-skin="v2"] .rt-toml-bar {
   font-size: var(--fs-11);
   color: var(--text-dim);
 }
-html[data-skin="v2"] .rt-toml-bar .mono { color: var(--text-mid); } /* runtime.css:103 */
-html[data-skin="v2"] .rt-toml-ro { font-size: var(--fs-10); } /* runtime.css:104 */
+html[data-skin="v2"] .rt-toml-bar .mono { color: var(--text-mid); }
+html[data-skin="v2"] .rt-toml-ro { font-size: var(--fs-10); }
 html[data-skin="v2"] .rt-copy {
-  /* runtime.css:105 */
   margin-left: auto;
   background: none;
   border: 1px solid var(--border-main);
@@ -505,14 +493,14 @@ html[data-skin="v2"] .rt-copy {
   padding: 4px 11px;
   cursor: pointer;
 }
-html[data-skin="v2"] .rt-copy:hover { border-color: var(--volt-dim); color: var(--volt); } /* runtime.css:106 */
+html[data-skin="v2"] .rt-copy:hover { border-color: var(--volt-dim); color: var(--volt); }
 
 /* shared mono helper — the prototype relies on a global .mono utility
    (colors_and_type.css). Re-state it scoped so rt-* mono labels render in
    the canonical mono face inside this surface. */
 html[data-skin="v2"] .rt-shell .mono { font-family: var(--font-mono); }
 
-/* toml code well — runtime.css:107-108 */
+/* toml code well */
 html[data-skin="v2"] .rt-toml {
   margin: 0;
   padding: 14px 16px;
@@ -534,7 +522,7 @@ html[data-skin="v2"] .set-card-b-wide .rt-shell {
   border-radius: var(--radius-md);
 }
 
-/* responsive — runtime.css:137 */
+/* responsive */
 @media (max-width: 720px) {
   html[data-skin="v2"] .rt-shell { grid-template-columns: 1fr; }
   html[data-skin="v2"] .rt-nav { flex-direction: row; overflow-x: auto; }

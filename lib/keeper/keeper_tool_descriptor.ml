@@ -52,6 +52,7 @@ type prepared_leaf_admission =
   | Owned_job_launch_leaf
   | Owned_ask_leaf
   | Owned_file_mutation_leaf
+  | Inline_effect_leaf
   | Direct_only
 
 let tool_kind_to_string = function
@@ -3335,8 +3336,12 @@ let prepared_leaf_admission descriptor =
         | Tool_masc_misc_dispatch
           when String.equal descriptor.internal_name "masc_ask" ->
           Owned_ask_leaf
+        | Tool_execute -> Inline_effect_leaf
+        | Tool_board_dispatch
+          when String.equal descriptor.internal_name
+            (Tool_name.Board_name.to_string Tool_name.Board_name.Board_post) ->
+          Inline_effect_leaf
         | Tool_lane_addon _
-        | Tool_execute
         | Tool_search_files
         | Tool_read_file
         | Tool_edit_file

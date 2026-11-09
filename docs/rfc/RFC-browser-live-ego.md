@@ -93,9 +93,9 @@ ego 를 live 레인의 세 번째 연결 방식 `ego` 로 둔다. 그 연결은 
 | `accessibility_snapshot` | `page.snapshot()`(viewport), `{scope: "full_page"}`, `{scope: "subtree", root: "@12"}`. 글을 `maxChars` 에서 자르되 서로게이트 쌍은 쪼개지 않는다 | 한다(BrowserRead `mode=snapshot`). ego 연결만 한다. 프레임 읽기(`read_frames`)도 이 길이다: viewport snapshot 이 iframe 내용을 담고, 그 iframe 의 ref 를 root 로 한 subtree 가 한 프레임을 읽는다. 읽기의 `framePath` 와 `mode=frames` 는 peer 에 오기 전 live 전송 역량 검사에서 `live_transport_unsupported` 로 거절된다. snapshot 을 쓰는 길은 도구 설명과 가이드가 알려 준다 |
 | `dom_interaction` | selector click·fill·hover·double_click·select_option은 Ego의 `page.click/fill/hover/dblclick/selectOption`에 그대로 보낸다. Ego가 locator·actionability·자동 스크롤·iframe/shadow 탐색을 맡는다 | selector는 Ego SDK 문법이다. selectOption은 `{value}` 또는 그 배열로 정확한 값을 전달하며 native programmatic selection을 따른다(비활성 option도 선택 가능). scene node, 문서 전체 scroll, 직접 href 이동만 공통 DOM 어댑터를 쓴다 |
 | `snapshot_target_input` | snapshot ref·role·text를 Ego locator로 바꾸어 `page.click/fill/hover/dblclick`에 보낸다. 별도 `waitForSelector`를 덧붙이지 않는다 | 소유·대화상자·관측 URL 검사는 native 메서드 진입 전에 한다. native 메서드가 실패하면 이미 입력됐을 수 있어 결과 모름이며 재실행하지 않는다. popup·dialog 영수증과 탭의 위치를 돌려준다 |
-| `native_workflow` | BrowserInteract `action=workflow`가 native Page 입력·이동·wait와 마지막 snapshot을 한 broker 명령으로 실행한다. selector와 대기는 Ego가 처리한다 | 최초 expectedUrl과 순서가 정해진 steps를 받으며 메서드별 native `options`를 SDK에 전달한다. `selectionJson`은 string/object/array/null 선택을 보존한다. 호스트의 누적 명령 타이머를 더하지 않는다. 실패·dialog·제어권 상실에서 멈추고 completed 진행을 보존한다. 드래그 실패 뒤 해제를 합성하지 않는다. 좌표 기반 `page.drag`는 입력 전에 거절하고, 기존 해제 미확인 상태는 그대로 둔다. 해제 미확인은 추가 입력을 막는다. 입력 결과 불확실 시 전체 재실행하지 않는다. 임의 host JavaScript는 노출하지 않는다 |
+| `native_workflow` | BrowserInteract `action=workflow`가 native Page 입력·이동·wait와 마지막 snapshot을 한 broker 명령으로 실행한다. selector와 대기는 Ego가 처리한다 | 최초 expectedUrl과 순서가 정해진 steps를 받으며 메서드별 native `options`를 SDK에 전달한다. `selectionJson`은 string/object/array/null 선택을 보존한다. 호스트의 누적 명령 타이머를 더하지 않는다. 실패·dialog·제어권 상실에서 멈추고 completed 진행을 보존한다. 드래그 실패 뒤 해제를 합성하지 않는다. 좌표 기반 `page.drag`는 workflow 메서드에 없다. 해제 미확인은 추가 입력을 막는다. 입력 결과 불확실 시 전체 재실행하지 않는다. 임의 host JavaScript는 노출하지 않는다 |
 | `trusted_hover`, `trusted_keyboard` | `page.mouse.move`, `page.keyboard.type`·`press` | 한다. 입력 전에 `pointer_guard_script`·`keyboard_guard_script` 가 관측한 문서·URL·화면을 확인한다 |
-| `point_click`, `trusted_button_click`, `trusted_double_click`, `point_scroll` | `page.mouse.click`(`button`, `clickCount`), `page.mouse.wheel` | 한다. 마우스 단계(`move`·`click`·`wheel`, 드래그의 `move`)마다 `label` 에 `MASC · <actor 또는 agent> · <동작>` 을 넣는다. ego 가 그 글을 자기 커서 강조 옆에 보여 줘서, 운영자가 누가 무엇을 하는지 본다. BiDi 연결의 표시(`Browser_pointer_feedback`)와 같은 조각이다 |
+| `point_click`, `trusted_button_click`, `trusted_double_click`, `point_scroll` | `page.mouse.click`(`button`, `clickCount`), `page.mouse.wheel` | 한다. 마우스 단계(`move`·`click`·`wheel`)마다 `label` 에 `MASC · <actor 또는 agent> · <동작>` 을 넣는다. ego 가 그 글을 자기 커서 강조 옆에 보여 줘서, 운영자가 누가 무엇을 하는지 본다. BiDi 연결의 표시(`Browser_pointer_feedback`)와 같은 조각이다 |
 | `tab_creation` | `task.newPage()` 뒤 `goto` | 한다 |
 | `tab_navigation` | `page.goto` (agent 페이지만) | 한다 |
 | `tab_closing` | `page.close()` (agent 페이지만) | 한다 |
@@ -104,7 +104,7 @@ ego 를 live 레인의 세 번째 연결 방식 `ego` 로 둔다. 그 연결은 
 | `download_listing` | agent 페이지를 건드리는 단계가 그 페이지에 `page.waitForEvent("download")` 대기를 하나 걸어 둔다. 잡힌 다운로드는 `saveAs` 로 worker 의 다운로드 폴더 아래 `ego/<id>` 에 저장하고, ego 의 임시 파일은 `delete()` 로 지운다. 대기는 다운로드마다 다시 걸린다. 대기가 실패하면(페이지가 닫힌 경우 포함) 멈추고, 그 페이지의 다음 단계가 다시 건다 | 한다(BrowserRead `mode=downloads`, 탭 하나). 행은 Gecko 와 같은 모양(대기 중·끝남·중단)이고, 끝난 파일은 Gecko 와 같은 broker 로 publish 해 `artifact` 로 돌려준다. 목록은 ego 프로세스 안에 있어서, 멈춘 명령 뒤 새 프로세스는 그때부터 본 것만 안다. `watchingSince` 가 그 시점이다. 운영자의 다운로드 폴더에는 남는 것이 없다. ego 의 브라우저가 다운로드하는 동안 그 폴더를 건드리기는 한다 |
 | `file_upload` | `page.setInputFiles(selector, paths)`에 native locator/ref와 worker 사본을 그대로 전달한다. label·container·shadow 해소는 SDK가 맡는다 | 영수증 `chosen`은 SDK에 넘긴 staged 파일 메타데이터이며 페이지의 파일 목록을 다시 관측한 값이 아니다. 파일 확인·sandbox 전달·공간 종료까지 lease는 MASC가 맡는다. `opener`는 native locator로 클릭하고 `waitForFileChooser()`의 SDK 대기를 쓴다. 파일 전달 전에 포기한 chooser만 `setFiles([])`로 닫는다. `setFiles(paths)`에 진입한 뒤에는 실패하더라도 SDK가 정리를 맡으며 MASC가 두 번째 호출을 하지 않는다 |
 | `tab_activation` | CDP `Target.activateTarget` | 다음 단계 |
-| 드래그 | waypoint 없는 selector 간 `drag_to`는 `page.dragAndDrop`. scene node·좌표·명시적 waypoint는 관측한 pointer 경로를 유지한다 | 한다. SDK에 없는 waypoint-list·scene identity 의미를 보존한다 |
+| 드래그 | selector 간 `drag_to`는 `page.dragAndDrop` | 한다. 좌표·scene node·waypoint 드래그는 받지 않는다 |
 | 터치, 줌, 뷰포트 | 이 연결에서 아직 지원하지 않는다 | 다음 단계 |
 
 ego 만의 읽기는 연결 방식 표의 기능 `accessibility_snapshot` 으로 둔다. BrowserRead `mode=snapshot` 이 ego 스냅샷을 그대로 돌려주고, 줄마다 붙은 ref(`ref=12`)는 그 순간의 페이지를 가리킨다. BrowserInteract 의 click·fill·hover·double_click은 그 ref 나 role·글을 `target` 으로 받는다(`snapshot_target_input`). Ego 연결의 `selector`와 `target`은 Ego 자신의 locator 뜻을 따른다. `target`은 다른 연결에서 효과 전에 거절한다. 페이지가 바뀌거나 입력한 뒤, 또는 ego 가 Stale/Unknown ref 를 거절하면 새 snapshot 을 읽는다. ref 수명과 문서 식별은 ego 의 고유 registry 가 맡고 MASC 가 다시 구현하지 않는다. URL 검사는 native 메서드를 호출하기 전 관측이며, 메서드 내부 대기·입력과 원자적인 검사는 아니다.
@@ -179,9 +179,8 @@ Goal별 Space 자동 생성·저장·재개 관리와는 구분한다. `--ego-sp
 
 ### Native input adapter audit
 
-- selector-to-selector `drag_to` without `via` delegates to `page.dragAndDrop`.
-  Scene identity, explicit coordinates and custom waypoint drags retain the
-  observed MASC pointer adapter because the SDK has no waypoint-list parameter.
+- selector-to-selector `drag_to` delegates to `page.dragAndDrop`. `drag_to`
+  takes no coordinates, scene nodes or waypoints.
 - Upload selectors and chooser openers use native Ego locator/ref syntax. MASC
   does not resolve them with top-document CSS before or after the SDK call.
   `chosen` describes staged files handed to the SDK; reread the application to

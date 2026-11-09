@@ -1,6 +1,21 @@
 (** Pure activity, grouping, and ordering decisions for the Keepers list. *)
 
-type layout = Compact | Detailed | Grouped
+type view =
+  | Plain
+  | By_state
+  | By_cause
+  | By_time
+  | By_memory
+  | By_age
+  | By_runtime
+  | Day_wall
+(** How the Keepers list groups its rows (RFC-0515 §2.3). [Plain] and
+    [Day_wall] do not group; [Day_wall] puts the rows with the most failed
+    half-hours of the last day first. *)
+
+type density = One_line | Two_lines
+(** Whether each row also draws its second line (RFC-0515 §2.6). *)
+
 type sort = Priority | Recent | Oldest | Activity | Name
 type attention = Attention | Failing | Active | Waiting | Inactive | Unobserved
 (** [Attention] holds what a person has to answer. [Failing] holds the other
@@ -110,11 +125,25 @@ type waiting_summary = {
 }
 (** Primary waiting reasons and actual background async running in that group. *)
 
-val next_layout : layout -> layout
+val next_view : view -> view
+val views : view list
+(** Every view in the order {!next_view} walks them from [Plain]. *)
+val view_label : view -> string
+val view_of_string : string -> view option
+(** The labels are the values [tui-keepers.toml] stores under [view]. *)
+
+val next_density : density -> density
+val density_label : density -> string
+val density_of_string : string -> density option
+(** The labels are the values [tui-keepers.toml] stores under [density]. *)
+
+val shows_portrait : view -> density -> bool
+(** Whether the list draws the selected Keeper's portrait above its rows:
+    only the [Plain] view in [Two_lines]. The axis views spend those rows on
+    Keepers (RFC-0515 E20). *)
+
 val next_sort : sort -> sort
-val layout_label : layout -> string
 val sort_label : sort -> string
-val layout_of_string : string -> layout option
 val sort_of_string : string -> sort option
 type verification_holders
 (** The assignees of tasks that await their verdict, read once from a task
@@ -135,9 +164,120 @@ val trail_of_row : row -> Masc_tui_keeper_trail.trail
     is failing. A row without a human decision is in the [Failing] group when
     its trail is failed, and also when its activity is [Attempt_failed]; that
     second kind has no failure sentence unless its health is failing too. *)
-val order_rows : layout:layout -> sort:sort -> row list -> row list
-(** Grouped layout orders groups first and applies [sort] within each group.
-    The same order is used for drawing, navigation, and search. *)
+type cause_bucket =
+  | Cause_named of Masc_tui_keeper_trail.cause_group
+      (** The trail is failed and its last receipt names the cause. *)
+  | Cause_unnamed  (** The trail is failed and no receipt names a cause. *)
+  | Not_failing
+
+type runtime_bucket =
+  | Runtime_named of string  (** The roster row's current runtime id. *)
+  | Runtime_unread  (** The roster did not read this Keeper. *)
+
+type due =
+  | Due_late  (** A due run has not started. *)
+  | Due_held  (** The schedule runner holds the next run. *)
+  | Due_within_hour
+  | Due_within_half_day
+  | Due_later
+  | Due_none  (** No active schedule. *)
+  | Due_unknown  (** The schedules were not read, or the next time is unknown. *)
+
+type memory_follow =
+  | Memory_refused  (** The memory reading refused this Keeper. *)
+  | Memory_gap  (** The librarian stalled on a gap. *)
+  | Memory_lagging  (** Turns the librarian has not read yet. *)
+  | Memory_following
+  | Memory_unread  (** No memory reading for this Keeper. *)
+
+type memory_age =
+  | Age_within_3h
+  | Age_within_day
+  | Age_within_3d
+  | Age_older
+  | Age_unknown  (** No snapshot update time. *)
+
+type outside = { due : due; follow : memory_follow; age : memory_age }
+(** The readings a row does not carry: the next scheduled run and the memory
+    snapshot. A caller that sees the schedules and memory health reduces them
+    to these closed values. *)
+
+val outside_unread : outside
+(** Every value unknown, for a caller that has not read them. *)
+
+type group =
+  | Group_state of attention
+  | Group_cause of cause_bucket
+  | Group_due of due
+  | Group_memory of memory_follow
+  | Group_age of memory_age
+  | Group_runtime of runtime_bucket
+
+val group_of_view : outside:(keeper_name:string -> outside) -> view -> row -> group option
+(** The heading [row] sits under in [view]; [None] for a view that does not
+    group. {!order_rows} keeps the rows of one group next to each other. *)
+
+val failed_half_hours : now:float -> row -> int option
+(** The half-hour slots that started within the last day and hold a failed
+    turn. [None] when the roster carries no pulse for the row. *)
+
+val order_clock_step : view -> float option
+(** How often, in seconds, the clock alone can change the order of [view];
+    [None] when only the readings change it. *)
+
+val order_rows :
+  view:view -> sort:sort -> now:float -> outside:(keeper_name:string -> outside) ->
+  row list -> row list
+(** The groups of [view] in a fixed order, and [sort] within each group.
+    [Day_wall] orders by {!failed_half_hours}, most first, rows without a
+    pulse last. The same order is used for drawing, navigation, and search. *)
+
+(** {1 Stops} (RFC-0515 §2.6, E12)
+
+    The places [j] and [k] land on. [groups] is the group of each row
+    {!order_rows} returned, in that order; a stop names a row by its
+    position there. *)
+
+type stop =
+  | Stop_heading of group
+  | Stop_row of int
+
+type heading_focus = { heading : group; cursor_at : int }
+(** The heading the cursor stands on, and the row cursor it was placed with.
+    The cursor rests on the group's first row, so a cursor moved by any
+    other path leaves the heading. *)
+
+type group_direction = Previous_group | Next_group
+type fold_change = Fold | Unfold
+
+val stops : folded:group list -> group option list -> stop list
+(** The stops in drawing order: a heading for each group, then its rows
+    unless the group is [folded]. A row of a view that does not group is a
+    stop of its own. *)
+
+val current_stop :
+  folded:group list -> focus:heading_focus option -> cursor:int -> group option list ->
+  stop option
+(** The stop the cursor is on: the focused heading while the cursor still
+    rests where the focus placed it inside that group; else the row at
+    [cursor], clamped to the list, or its group's heading when that group is
+    folded. [None] for an empty list. *)
+
+val placement : group option list -> stop -> (heading_focus option * int) option
+(** The focus and row cursor a stop is placed with. A heading rests the
+    cursor on its group's first row; [None] for a heading no row is under. *)
+
+val step_stop : delta:int -> stop list -> stop -> stop option
+(** The stop [delta] places from [current], held at either end. [None] when
+    [current] is not one of [stops]. *)
+
+val group_jump : group_direction -> stop list -> stop -> stop option
+(** The nearest heading before or after [current]; [None] past the first or
+    last one, and in a view without headings. *)
+
+val refold : fold_change -> group -> group list -> group list
+(** The folded groups after folding or unfolding [group]. *)
+
 type group_counts = {
   attention_rows : int;
   failing_rows : int;

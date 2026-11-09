@@ -42,10 +42,12 @@ let channels_shape = function
   | Channel_scope.Only set -> Labels (List.map Channel.to_string (Channel.Set.elements set))
 ;;
 
+let effect_labels set = List.map Effect.to_string (Effect.Set.elements set)
+
 let effects_shape = function
   | Effect_scope.All -> All_of
   | Effect_scope.Empty -> Labels []
-  | Effect_scope.Only set -> Labels (List.map Effect.to_string (Effect.Set.elements set))
+  | Effect_scope.Only set -> Labels (effect_labels set)
 ;;
 
 let to_body (scope : Authorization_scope.t) =
@@ -140,15 +142,20 @@ let channels_of = function
     Ok (Channel_scope.only (Channel.Set.of_list channels))
 ;;
 
+let effect_set_of_labels labels =
+  let* effects =
+    map_in_order
+      (fun label -> Option.to_result ~none:(Unknown_effect label) (Effect.of_string label))
+      labels
+  in
+  Ok (Effect.Set.of_list effects)
+;;
+
 let effects_of = function
   | All_of -> Ok Effect_scope.all
   | Labels labels ->
-    let* effects =
-      map_in_order
-        (fun label -> Option.to_result ~none:(Unknown_effect label) (Effect.of_string label))
-        labels
-    in
-    Ok (Effect_scope.only (Effect.Set.of_list effects))
+    let* effects = effect_set_of_labels labels in
+    Ok (Effect_scope.only effects)
 ;;
 
 let of_body (body : Authz_body.t) =
@@ -165,4 +172,13 @@ let of_body (body : Authz_body.t) =
   | Authz_body.Int _
   | Authz_body.String _
   | Authz_body.List _ -> Error Not_an_object
+;;
+
+let effect_set_to_body set = shape_to_body (Labels (effect_labels set))
+
+let effect_set_of_body body =
+  let* shape = shape_of Allowed_effects body in
+  match shape with
+  | All_of -> Error (Not_a_scope Allowed_effects)
+  | Labels labels -> effect_set_of_labels labels
 ;;

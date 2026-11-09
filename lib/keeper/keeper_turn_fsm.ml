@@ -16,7 +16,7 @@ include Turn_fsm
 
 let guard_transition ?ctx ~keeper_name ~turn_id ~from_state ~to_state () =
   match assert_transition_allowed ?ctx ~from_state ~to_state () with
-  | Ok _ -> ()
+  | Ok action -> action
   | Error violation ->
       let from_symbol = any_state_tla_symbol violation.from_state in
       let to_symbol = any_state_tla_symbol violation.to_state in
@@ -62,7 +62,8 @@ let guard_transition ?ctx ~keeper_name ~turn_id ~from_state ~to_state () =
       Keeper_fsm_guard_runtime.wrap_unit
         ~action:"KeeperTurnFSM.Next"
         ~stage
-        (fun () -> invalid_arg detail)
+        (fun () -> invalid_arg detail);
+      invalid_arg detail
 
 (* Per-keeper last-transition wallclock, used to record the dwell time
    spent in [prev] state when a transition fires. Kept as an immutable
@@ -99,29 +100,19 @@ let emit_transition ?ctx ~keeper_name ~turn_id ?prev state =
    | None -> ());
   Lockfree_atomic.update last_transition_at (fun m ->
     StringMap.add keeper_name now m);
-  let classified =
+  let state_label = turn_state_label state in
+  (* [guard_transition] calls [assert_transition_allowed], which classifies the
+     transition once and raises on any unpermitted (from, to) pair. Returning
+     the classified [transition_action] directly avoids a second
+     [classify_transition] pass and the unreachable [None, Some _] fallback. *)
+  let action_label =
     match prev with
     | Some from_state ->
-        classify_transition ?ctx ~from_state ~to_state:state ()
-    | None -> None
-  in
-  (match prev with
-   | Some from_state ->
-       guard_transition ?ctx ~keeper_name ~turn_id ~from_state ~to_state:state ()
-   | None -> ());
-  let state_label = turn_state_label state in
-  (* [assert_transition_allowed] IS [classify_transition] (lib/turn_fsm/
-     turn_fsm.ml: it wraps the same call and turns [None] into a
-     violation), so by the time this match runs, [guard_transition] has
-     already raised for any (from, to) pair without a classify arm.
-     [None, Some _] cannot occur here; the arm exists only to keep the
-     match total. The emit above used to WARN inside it, describing a
-     "classifier gap" path that could never run. *)
-  let action_label =
-    match classified, prev with
-    | Some action, _ -> transition_action_label action
-    | None, None -> "initial"
-    | None, Some _ -> "unclassified"
+        let action =
+          guard_transition ?ctx ~keeper_name ~turn_id ~from_state ~to_state:state ()
+        in
+        transition_action_label action
+    | None -> "initial"
   in
   let stop_signaled_before, stop_signaled_after, stop_label =
     match ctx with

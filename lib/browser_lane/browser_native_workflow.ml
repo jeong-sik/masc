@@ -369,7 +369,7 @@ let input_contract = function
   | Url|Title|Info|Snapshot|Events|Wait_for_timeout _ -> Input_contract.No_hold
 let holds_input action = match input_contract action with
   | Input_contract.No_hold -> false
-  | Input_contract.Observed_receipt | Input_contract.Observed_native_window | Input_contract.Unattestable_raw_hold _ -> true
+  | Input_contract.Observed_receipt | Input_contract.Observed_native_window -> true
 let method_name = function
   | Click_and_wait_for_popup _ -> "clickAndWaitForPopup"
   | Click _ -> "click" | Double_click _ -> "dblclick" | Hover _ -> "hover" | Fill _ -> "fill"
@@ -384,19 +384,6 @@ let method_name = function
   | Url -> "url" | Title -> "title" | Info -> "info" | Snapshot -> "snapshot" | Events -> "events"
   | Wait_for_timeout _ -> "waitForTimeout"
   | Cancel_download _ -> "download.cancel"
-type unavailable_input = { index : int; action : action; reason : Input_contract.unavailable }
-let validate_input_contract request =
-  let rec check index = function
-    | [] -> Ok ()
-    | (step : step) :: rest ->
-      match Input_contract.unavailable (input_contract step.action) with
-      | None -> check (index + 1) rest
-      | Some reason -> Error {index;action=step.action;reason}
-  in
-  check 0 request.steps
-let unavailable_input_message {index;action;reason} =
-  validation_message {context=Step {index;method_=Some (method_name action)};
-    message=Input_contract.message reason}
 let string value = `String value
 let code_fields = function
   | Expression source -> ["source",string source]

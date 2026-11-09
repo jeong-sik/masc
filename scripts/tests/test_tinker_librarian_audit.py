@@ -143,7 +143,7 @@ class CaseTest(unittest.TestCase):
         self.assertIn(f"`{D.RULES.as_posix()}`", A.JUDGE)
         with tempfile.TemporaryDirectory() as tmp:
             out = Path(tmp)
-            A.write_cases(out, [{"case": "d001"}], [{"case": "d001", "item": "eval-k-0"}])
+            A.write_cases(out, [{"case": "d001"}], [{"case": "d001", "item": "eval-k-0"}], A.JUDGE)
             judge = out / D.JUDGE_DIR
             given = sorted(["cases.jsonl", "judge.md", D.RULES.as_posix()])
             self.assertEqual((judge / D.RULES).read_bytes(), synth_render.TEMPLATE.read_bytes())
@@ -155,16 +155,16 @@ class CaseTest(unittest.TestCase):
         # Decisions left there were made on the cases and rules written before.
         with tempfile.TemporaryDirectory() as tmp:
             out = Path(tmp)
-            A.write_cases(out, [{"case": "d001"}], [{"case": "d001", "item": "eval-k-0"}])
-            A.write_cases(out, [{"case": "d001"}], [{"case": "d001", "item": "eval-k-0"}])
+            A.write_cases(out, [{"case": "d001"}], [{"case": "d001", "item": "eval-k-0"}], A.JUDGE)
+            A.write_cases(out, [{"case": "d001"}], [{"case": "d001", "item": "eval-k-0"}], A.JUDGE)
             (out / D.JUDGE_DIR / D.DECISIONS).write_text('{"case": "d001"}\n', encoding="utf-8")
             with self.assertRaisesRegex(SystemExit, "already holds"):
-                A.write_cases(out, [{"case": "d001"}], [{"case": "d001", "item": "eval-k-0"}])
+                A.write_cases(out, [{"case": "d001"}], [{"case": "d001", "item": "eval-k-0"}], A.JUDGE)
 
     def test_a_record_that_leaves_out_a_given_file_stops_the_reading(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             out = Path(tmp)
-            A.write_cases(out, [{"case": "d001"}], [{"case": "d001", "item": "eval-k-0"}])
+            A.write_cases(out, [{"case": "d001"}], [{"case": "d001", "item": "eval-k-0"}], A.JUDGE)
             (out / D.JUDGE_DIR / D.DECISIONS).write_text('{"case": "d001"}\n', encoding="utf-8")
             record = out / D.JUDGE_FILES
             files = cast(dict[str, str], json.loads(record.read_text(encoding="utf-8")))
@@ -175,7 +175,7 @@ class CaseTest(unittest.TestCase):
     def test_decisions_are_read_only_beside_the_files_the_judge_was_given(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             out = Path(tmp)
-            A.write_cases(out, [{"case": "d001"}], [{"case": "d001", "item": "eval-k-0"}])
+            A.write_cases(out, [{"case": "d001"}], [{"case": "d001", "item": "eval-k-0"}], A.JUDGE)
             (out / D.JUDGE_DIR / D.DECISIONS).write_text('{"case": "d001"}\n', encoding="utf-8")
             self.assertEqual(D.judge_decisions(out, synth_render.TEMPLATE)[1], [{"case": "d001"}])
             with self.assertRaisesRegex(SystemExit, "is not"):

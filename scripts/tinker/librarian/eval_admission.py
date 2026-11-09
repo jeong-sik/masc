@@ -10,7 +10,7 @@
         --out artifacts/tinker/librarian/eval-<name>-real --budget 6
     uv run scripts/tinker/librarian/eval_admission.py run --set synth --requests <requests.jsonl> ...
     uv run scripts/tinker/librarian/eval_admission.py verdict --real <dir> --synth <dir> \
-        --drops <e_synth_audit.py drops --out> \
+        --drops <e_synth_audit.py drops --out> --merges <merge_cases.py --out> \
         --train A=artifacts/tinker/librarian/train-A --train B=artifacts/tinker/librarian/train-B
 
 `pass_lines.json` fixes the request, the sets, the baseline, the candidates and
@@ -58,10 +58,15 @@ Definitions:
   another fact stays wrong, also when its memory leaves scoring, and so does a
   dropped complement target or duplicate fact.
 - E-synth absorbed: memory IDs valid answers absorb, each with what the label
-  says of that fact. Reported, not gated: MASC's absorb gate checks each absorb
-  at commit, while nothing checks a drop.
+  says of that fact.
 - E-synth merge recall: complement targets absorbed into the complement's claim
   and duplicate pairs left as one fact, over the merges the labels expect.
+- E-synth absorb precision and judged merge recall: `verdict` asks a blind
+  judge what MASC's absorb gate asks of every absorb, in the gate's words
+  (`merge_cases.py`, `merge_decisions`). Absorb precision is absorbs judged
+  mergeable over all absorbs; judged merge recall counts a merge the label
+  expects only when every absorb it made is judged mergeable. Reported; G6
+  gates them once the gates are fixed again.
 - E-synth stale drop recall: planted stale facts dropped, over the planted stale
   facts the labels expect to leave. An absorbed stale fact is not dropped: its
   text lives on in the new claim. Labels expect merges and stale drops only on
@@ -80,7 +85,8 @@ Definitions:
   `train_sft.py` saved for that branch under these pass lines.
 
 Output: <out>/calls.jsonl holds raw answers (E-real answers carry Keeper memory;
-keep them local), <out>/rows.jsonl numbers, IDs and verdicts, <out>/summary.json.
+keep them local), <out>/rows.jsonl numbers, IDs and verdicts, each row naming
+the call it scores by its key and send time, <out>/summary.json.
 """
 
 from __future__ import annotations
@@ -100,6 +106,7 @@ import admission_validator as AV
 import audit_decisions as D
 import exact_store as E
 import memory_scores as M
+import merge_decisions as MD
 import synth_render
 import synth_rows as RW
 import yojson_wire as Y
@@ -214,7 +221,8 @@ def run_item(caller: Caller, request: JsonObject, targets: list[tuple[str, str]]
                 score = M.score_real(item, result.answer)
             case M.SynthItem():
                 score = M.score_synth(item, result.answer)
-        rows.append({"set": kind, "item": item.item_id, "target": name, "status": call.status, "finish": call.finish,
+        rows.append({"set": kind, "item": item.item_id, "target": name, "call_key": call.key,
+                     "status": call.status, "finish": call.finish,
                      "sent_at": call.sent_at, "wall_s": call.wall_s, "prompt_tokens": call.prompt_tokens,
                      "cached_tokens": call.cached_tokens,
                      "completion_tokens": call.completion_tokens, "reasoning_chars": len(call.reasoning or ""),
@@ -457,6 +465,9 @@ def verdict(args: argparse.Namespace) -> int:
         }
         result[name] = {"pass": all(checks.values()), **checks, "paired": pair, "widest_gap_s": round(gap, 1)}
     result["e_synth_drops"] = judged.record(synth_rows)
+    result["e_synth_merges"] = MD.report(synth_rows, scored,
+                                         Path(cast(str, args.merges)) if args.merges is not None else None,
+                                         synth_render.TEMPLATE, synth_dir, [base, *names])
     result["choice"] = choose(names, result, s_all, rows, cast(float, choice["prefer_later_when_ahead_by"]))
     print(json.dumps(result))
     (real_dir / "verdict.json").write_text(json.dumps(result, indent=1) + "\n", encoding="utf-8")
@@ -479,6 +490,9 @@ def main() -> int:
     v.add_argument("--drops", default=None,
                    help="e_synth_audit.py drops --out, with the judge's judge/decisions.jsonl; needed when an "
                         "answer dropped a fact off label")
+    v.add_argument("--merges", default=None,
+                   help="merge_cases.py --out, with the judge's judge/decisions.jsonl; needed when an answer "
+                        "absorbed a memory")
     v.add_argument("--train", action="append", required=True, help="name=<train_sft --out>, one per candidate")
     args = ap.parse_args()
     return run(args) if args.command == "run" else verdict(args)

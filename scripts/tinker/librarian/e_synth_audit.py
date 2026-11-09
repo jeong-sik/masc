@@ -293,16 +293,16 @@ def drop_full_sets(drops: D.OffLabel, requests: dict[str, Request], seed: int) -
     return out
 
 
-def write_cases(out: Path, case_rows: list[JsonObject], key_rows: list[JsonObject]) -> None:
-    """The key and the sha256 of the judge's files in <out>; the cases, JUDGE and a copy of the rules
-    JUDGE names (synth_render.TEMPLATE) in the judge's folder, which the key never enters. SystemExit
-    when that folder already holds decisions: they were made on the cases written there before."""
+def write_cases(out: Path, case_rows: list[JsonObject], key_rows: list[JsonObject], judging: str) -> None:
+    """The key and the sha256 of the judge's files in <out>; the cases, the judging text and a copy of
+    the rules it names (synth_render.TEMPLATE) in the judge's folder, which the key never enters.
+    SystemExit when that folder already holds decisions: they were made on the cases written there before."""
     judge = out / D.JUDGE_DIR
     if (judge / D.DECISIONS).exists():
         raise SystemExit(f"{judge} already holds a judge's {D.DECISIONS}: write the cases to a new --out")
     write_jsonl(out / "key.jsonl", key_rows)
     write_jsonl(judge / "cases.jsonl", case_rows)
-    (judge / "judge.md").write_text(JUDGE, encoding="utf-8")
+    (judge / "judge.md").write_text(judging, encoding="utf-8")
     (judge / D.RULES).parent.mkdir(parents=True, exist_ok=True)
     (judge / D.RULES).write_bytes(synth_render.TEMPLATE.read_bytes())
     D.record_judge_files(out)
@@ -338,7 +338,7 @@ def cases(args: argparse.Namespace) -> int:
         case, key = case_of(f"c{n + 1:03d}", by_id[item_id], answer_refs(by_id[item_id], parsed.get(item_id)), rng)
         case_rows.append(case)
         key_rows.append({**key, "picked": why})
-    write_cases(out, case_rows, key_rows)
+    write_cases(out, case_rows, key_rows, JUDGE)
     summary = {"requests": len(items), "baseline_invalid": len(invalid), "agree": len(agree),
                "disagree": len(disagree), "sample": len(sample), "cases": len(case_rows)}
     (out / "cases-summary.json").write_text(json.dumps(summary, indent=1) + "\n", encoding="utf-8")
@@ -380,15 +380,21 @@ def apply(args: argparse.Namespace) -> int:
     return 0
 
 
-def drops(args: argparse.Namespace) -> int:
-    lines = V.load_pass_lines()
-    e_synth = cast(JsonObject, lines["e_synth"])
-    path, run = Path(cast(str, args.requests)), Path(cast(str, args.run))
+def pinned_run(path: Path, run: Path) -> JsonObject:
+    """The pass lines' E-synth part. SystemExit unless `path` holds the pinned E-synth requests and `run`
+    is an E-synth run under these pass lines."""
+    e_synth = cast(JsonObject, V.load_pass_lines()["e_synth"])
     if V.sha256_file(path) != e_synth["requests_sha256"]:
         raise SystemExit("the E-synth requests differ from pass_lines.json")
     run_summary = cast(JsonObject, json.loads((run / "summary.json").read_text(encoding="utf-8")))
     if (run_summary["set"], run_summary["pass_lines_sha256"]) != ("synth", V.sha256_file(V.PASS_LINES)):
         raise SystemExit("--run is not an E-synth run under these pass lines")
+    return e_synth
+
+
+def drops(args: argparse.Namespace) -> int:
+    path, run = Path(cast(str, args.requests)), Path(cast(str, args.run))
+    e_synth = pinned_run(path, run)
     by_id = requests_of(path)
     off = D.off_label(V.read_rows(run))
     full = drop_full_sets(off, by_id, cast(int, e_synth["audit_seed"]))
@@ -399,7 +405,7 @@ def drops(args: argparse.Namespace) -> int:
         case_rows.append(case)
         key_rows.append({**key, "off_label": mids})
     out = Path(cast(str, args.out))
-    write_cases(out, case_rows, key_rows)
+    write_cases(out, case_rows, key_rows, JUDGE)
     summary = {"items": len(off), "off_label_drops": sum(len(m) for m in off.values()), "cases": len(case_rows)}
     (out / "cases-summary.json").write_text(json.dumps(summary, indent=1) + "\n", encoding="utf-8")
     print(json.dumps(summary))

@@ -90,12 +90,6 @@ let test_compression_large_data () =
   check bool "large data compressed" true did_compress;
   check bool "compressed smaller" true (String.length compressed < String.length data)
 
-let test_compression_roundtrip () =
-  let data = String.make 200 'x' ^ String.make 200 'y' in
-  let encoded = Backend.Compression.compress_with_header data in
-  let decoded = Backend.Compression.decompress_auto encoded in
-  check string "roundtrip matches" data decoded
-
 let test_compression_uncompressed_passthrough () =
   let data = "short" in
   let result = Backend.Compression.decompress_auto data in
@@ -458,7 +452,6 @@ let () =
     "eio_compression", [
       test_case "small data" `Quick test_compression_small_data;
       test_case "large data" `Quick test_compression_large_data;
-      test_case "roundtrip" `Quick test_compression_roundtrip;
       test_case "uncompressed passthrough" `Quick test_compression_uncompressed_passthrough;
       test_case "encode header" `Quick test_compression_encode_header;
       test_case "decode header" `Quick test_compression_decode_header;

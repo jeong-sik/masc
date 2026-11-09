@@ -74,8 +74,8 @@ later Goal or System layers. Manual PTY observations used the existing e2c38ca
 server without installing the candidate, and are not same-version integration
 or GUI screenshot proof. Raw captures stay private under `artifacts/` because
 they contain workspace requests and settings. The Task list, narrow Task detail
-entry and return were observed; detail still places identity fields before the
-request body and needs the same reading-first treatment.
+entry and return were observed. The a00f8aab Task detail's identity-first order
+motivated the subsequent #50698 request-first implementation.
 
 ## RFC-0519: four reading surfaces
 
@@ -91,3 +91,9 @@ Independent source reviews covered the three ownership areas. The partial
 fleet count and retained-scope defects found in review were repaired. This
 records implementation and source review, not current-head CI, native
 rendering, installation or completion of the broader 23-surface request.
+
+[#50695](https://github.com/jeong-sik/masc/pull/50695) follows that implementation
+with the narrow Feature summary finding from the a00f8aab PTY: current fields
+precede secondary action hints. Labels, typed standing, failures, full detail
+and existing key actions are preserved. Task detail uses #50698's implementation.
+Native execution of this follow-up is still pending.

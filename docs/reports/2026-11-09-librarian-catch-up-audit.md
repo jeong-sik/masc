@@ -128,6 +128,8 @@ Add-on이 해제돼도 원본이 남아 있으면 원본의 실제 대기를 보
 검사가 통과했다. 당시 변경한 OCaml 50개 파일은 문법 검사만 통과했다.
 v12 수정 후에는 이전 schema 거절을 포함한 dashboard 테스트 105개,
 추가로 수정한 OCaml 4개와 Python fixture 2개의 문법 검사가 통과했다.
+v12의 대시보드 TypeScript 검사도 통과했다. 근거 JSON의 이전 후보 메타데이터와
+#50641 이후 통합 메타데이터는 [bundle 설명](../evidence/librarian-catch-up-20261109/README.md)에서 구분한다.
 host/OCaml 회귀 테스트는 작성했으나 이 세션에서 실행하지 않았다.
 저장소 실행 규약에 따라 로컬 Dune 빌드와 CI 대기 루프는 실행하지 않는다.
 OCaml 문법 검사와 소스 리뷰는 타입 검사·실행 검증을 대신하지 않는다.

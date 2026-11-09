@@ -134,9 +134,16 @@
     "method": "Read-only docker inspect and docker cp; no container restart, exec, or persistent store changes."
   },
   "candidate_integration": {
+    "scope": "Historical candidate before #50641; values below describe the recorded_at snapshot, not the latest candidate.",
     "recorded_at": "2026-11-09T11:21:12.961563+00:00",
     "base": "6d0d6dcb4dae3d7353e50aadb9dd8510f05b6a54",
     "health_schema": "keeper.memory_os.current_health.v11",
     "note": "The initial investigation used v9. Current main uses v10 for changed age ranges; candidate waits require v11. This does not change the observed installed runtime."
+  },
+  "candidate_integration_after_50641": {
+    "base": "e2c38ca5ad1d850f2890b4e17d0ace08f7eea6b0",
+    "health_schema": "keeper.memory_os.current_health.v12",
+    "scope": "Source integration metadata only; not an observation of installed runtime behavior.",
+    "note": "Main uses v11 for the age-bin contract merged in #50641. Required pending/admission_wait fields use v12. Both clients reject v11 envelopes. Historical runtime observations and worker hashes above are unchanged."
   }
 }

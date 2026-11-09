@@ -1396,7 +1396,7 @@ let test_projection_failure_keeps_execution_and_wire_outcomes_separate () =
          (row |> member "failure_class" = `Null))
 ;;
 
-let rejected_rows_for ?on_tool_result_ready ~stage () =
+let rejected_rows_for ?on_tool_result_ready ?(tool_name = "keeper_broadcast") ~stage () =
   with_temp_base_path @@ fun base_path ->
   Fun.protect
     ~finally:(fun () ->
@@ -1434,7 +1434,7 @@ let rejected_rows_for ?on_tool_result_ready ~stage () =
          hook
            (Agent_core.Hooks.PostToolUseFailure
               { invocation
-              ; tool_name = "keeper_broadcast"
+              ; tool_name
               ; input = `Assoc []
               ; stage
               ; duration_ms = 1.0
@@ -1447,6 +1447,23 @@ let rejected_rows_for ?on_tool_result_ready ~stage () =
        with
        | Ok rows -> rows
        | Error (Masc.Keeper_tool_call_log.Index_unavailable detail) -> fail detail)
+;;
+
+(* The typed results the dispatch observers receive while one failure hook
+   runs. The dashboard series is written by an observer, so what reaches the
+   observers is what the series counts. *)
+let dispatch_results_for ?tool_name ~stage () =
+  let seen = ref [] in
+  Tool_dispatch.clear_hooks ();
+  Fun.protect
+    ~finally:Tool_dispatch.clear_hooks
+    (fun () ->
+       Tool_dispatch.register_dispatch_observer (fun outcome result ->
+         match outcome, result with
+         | Dispatch_outcome.Handled, Some handled -> seen := handled :: !seen
+         | (Dispatch_outcome.Handled, None) | (Dispatch_outcome.No_handler, _) -> ());
+       ignore (rejected_rows_for ?tool_name ~stage ());
+       List.rev !seen)
 ;;
 
 (* Proves audit F397: a tool-call read index the reader cannot open is
@@ -1536,6 +1553,51 @@ let test_a_rejected_call_leaves_a_row () =
 let test_an_executed_failure_is_not_written_twice () =
   let rows = rejected_rows_for ~stage:Agent_core.Hooks.Execution () in
   check int "post_tool_use owns that row, this hook adds none" 0 (List.length rows)
+;;
+
+let test_a_refused_call_reaches_the_dispatch_observers_once () =
+  match
+    dispatch_results_for
+      ~tool_name:"Read"
+      ~stage:Agent_core.Hooks.Validation_before_execution
+      ()
+  with
+  | [ observed ] ->
+    check string "the internal name the guarded path reports" "tool_read_file"
+      (Tool_result.tool_name observed);
+    check bool "counted as a failure" true (Tool_result.is_failed observed);
+    check bool "a rejected request, not a runtime fault" true
+      (Tool_result.failure_class observed = Some Tool_result.Policy_rejection);
+    check bool "the refusal text is the message" true
+      (Tool_result.message observed = {|"message": MISSING (required: string)|})
+  | observed ->
+    failf "expected one observed result for the refused call, got %d"
+      (List.length observed)
+;;
+
+let test_an_unknown_tool_name_reaches_the_observers_unchanged () =
+  match
+    dispatch_results_for
+      ~stage:Agent_core.Hooks.Validation_before_execution
+      ()
+  with
+  | [ observed ] ->
+    check string "a name with no descriptor is kept" "keeper_broadcast"
+      (Tool_result.tool_name observed)
+  | observed ->
+    failf "expected one observed result for the refused call, got %d"
+      (List.length observed)
+;;
+
+let test_only_a_refusal_before_execution_reaches_the_observers () =
+  List.iter
+    (fun (label, stage) ->
+       check int label 0 (List.length (dispatch_results_for ~stage ())))
+    [ ( "an executed failure was observed by its own dispatch"
+      , Agent_core.Hooks.Execution )
+    ; ( "a cancelled call has no result to observe"
+      , Agent_core.Hooks.Cancelled_during_execution )
+    ]
 ;;
 
 let test_a_cancelled_call_leaves_an_unsettled_row () =
@@ -2460,6 +2522,18 @@ let () =
             "a call refused before execution leaves a row"
             `Quick
             test_a_rejected_call_leaves_a_row
+        ; test_case
+            "a call refused before execution reaches the dispatch observers once"
+            `Quick
+            test_a_refused_call_reaches_the_dispatch_observers_once
+        ; test_case
+            "a refused call with no descriptor keeps its name"
+            `Quick
+            test_an_unknown_tool_name_reaches_the_observers_unchanged
+        ; test_case
+            "only a refusal before execution reaches the observers"
+            `Quick
+            test_only_a_refusal_before_execution_reaches_the_observers
         ; test_case
             "an executed failure is not written twice"
             `Quick

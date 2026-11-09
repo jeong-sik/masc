@@ -4,11 +4,6 @@ let single_line = Masc.Tui_terminal_text.sanitize_terminal_text
 let tool = "masc_sandbox_volume_gc"
 let key = "V"
 let claims_image = "base"
-
-let arguments ~execute =
-  [ "image", `String claims_image; "execute", `Bool execute ]
-;;
-
 let timeout_sec = 60.0
 
 type answer =
@@ -35,6 +30,15 @@ type request =
 let execute = function
   | Report_request -> false
   | Reclaim_request _ -> true
+;;
+
+let arguments = function
+  | Report_request -> [ "image", `String claims_image; "execute", `Bool false ]
+  | Reclaim_request names ->
+    [ "image", `String claims_image
+    ; "execute", `Bool true
+    ; "keepers", `List (List.map (fun name -> `String name) names)
+    ]
 ;;
 
 type phase =
@@ -136,7 +140,7 @@ let keeper_line (verdict : Answer.verdict) =
 let report_lines (report : Answer.t) =
   let state =
     if report.executed
-    then "회수를 요청한 답입니다. 서버가 다시 판정한 뒤 지웠습니다."
+    then "회수를 요청한 답입니다. 보낸 이름 가운데 지금도 후보인 Keeper 만 지웠습니다."
     else if report.image_given
     then "보고만 받았습니다. 지운 볼륨은 없습니다."
     else "보고만 받았습니다. claims 이미지가 없어 주인을 확인하지 못한 Keeper 는 그대로 둡니다."
@@ -146,12 +150,17 @@ let report_lines (report : Answer.t) =
     | [] -> [ Dim, "  은퇴한 Keeper 의 볼륨이 없습니다." ]
     | verdicts -> List.map keeper_line verdicts
   in
+  let unlisted =
+    match report.unlisted_keepers with
+    | [] -> []
+    | names -> [ Dim, "  볼륨 목록에 없어 지우지 않은 이름: " ^ names_text names ]
+  in
   let foreign =
     match report.foreign_volumes with
     | [] -> []
     | names -> [ Dim, "  Keeper 볼륨이 아닌 것: " ^ names_text names ]
   in
-  [ Plain, state; Plain, summary_line report ] @ keepers @ foreign
+  [ Plain, state; Plain, summary_line report ] @ keepers @ unlisted @ foreign
 ;;
 
 let shown_lines = function
@@ -176,7 +185,7 @@ let phase_line = function
         "%s 를 한 번 더 누르면 %s 의 build 볼륨을 회수합니다. 다른 키는 취소입니다."
         key
         (names_text names) )
-  | Reclaiming -> Dim, "회수를 요청했습니다. 서버가 다시 판정한 뒤 지웁니다."
+  | Reclaiming -> Dim, "회수를 요청했습니다. 보낸 이름 가운데 지금도 후보인 Keeper 만 지웁니다."
 ;;
 
 let lines t =

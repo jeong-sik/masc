@@ -7,10 +7,13 @@
 
     The first press asks for a report, and nothing is deleted. The report
     names each retired Keeper's volumes and why they stay or can go. When it
-    lists reclaim candidates, the next press asks the server to reclaim; any
-    other key first takes that back. The server judges again at that moment
-    and confirms each build-only volume right before it deletes it, so the
-    answer to the second press, not the report, says what was reclaimed.
+    lists reclaim candidates, the next press asks the server to reclaim
+    those Keepers by name; any other key first takes that back. The server
+    judges again at that moment, deletes only the named Keepers it still
+    judges candidates, and confirms each build-only volume right before it
+    deletes it. A candidate that appeared after the report is not named and
+    stays. The answer to the second press, not the report, says what was
+    reclaimed.
 
     The pane draws the answer in place rather than in a reading: a reading
     owns every key, and closing it would take the second press back. *)
@@ -26,8 +29,6 @@ val key : string
     helper only reads a marker file from the mounted work volume. Without an
     image the server reads no marker and reclaims nothing. *)
 val claims_image : string
-
-val arguments : execute:bool -> (string * Yojson.Safe.t) list
 
 (** 60 s. A report lists the volumes once, reads the container inventory once
     per Keeper with a volume, and starts one [container run --rm] helper per
@@ -48,15 +49,21 @@ val answer_of_text : is_error:bool -> string -> answer
 type request =
   | Report_request
   | Reclaim_request of string list
-      (** The candidates the report listed; the server judges them again. *)
+      (** The candidates the report listed, sent by name. The server judges
+          them again and reclaims no other Keeper. *)
 
 val execute : request -> bool
+
+(** The tool arguments. Both send the claims image and [execute]. A reclaim
+    also sends its names as [keepers]. *)
+val arguments : request -> (string * Yojson.Safe.t) list
 
 type phase =
   | Idle
   | Reporting
   | Armed of string list
-      (** The last report listed these candidates; the next press reclaims. *)
+      (** The last report listed these candidates; the next press reclaims
+          them and no other Keeper. *)
   | Reclaiming
 
 type shown =

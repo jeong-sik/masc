@@ -1,5 +1,5 @@
-(** Reclamation of retired keepers' Apple volumes: report first, delete on
-    request.
+(** Reclamation of retired keepers' Apple volumes: report first, then delete
+    only the keepers a request names.
 
     The claims marker ({!Keeper_sandbox_microvm}) records participating
     workspaces, but cannot exclude unrecorded owners. This module turns one
@@ -45,9 +45,9 @@ type keeper_outcome =
   | Kept of keep_reason
   | Reclaim_candidate
   | Reclaimed
-        (** Only after [~execute:true], a delete-time confirmation that the
-            keeper is still build-only, and an absence check for the listed
-            build volume. *)
+        (** Only for a keeper [Reclaim_named] names, after a delete-time
+            confirmation that the keeper is still build-only, and an absence
+            check for the listed build volume. *)
   | Reclaim_failed of string
 
 type keeper_verdict = private
@@ -57,10 +57,23 @@ type keeper_verdict = private
   ; outcome : keeper_outcome
   }
 
+(** What a call does after it judges the keepers. *)
+type request =
+  | Report_only
+  | Reclaim_named of string list
+      (** Keeper names, the unit a report's verdicts carry. A keeper is
+          reclaimed only when this list names it and this call judges it a
+          candidate again. A candidate the list does not name stays
+          [Reclaim_candidate], and a named keeper that is no longer a
+          candidate carries its new verdict. *)
+
 type report =
   { foreign_volumes : string list
         (** Listed names that are not this product's keeper volumes. *)
   ; keepers : keeper_verdict list
+  ; unlisted_keepers : string list
+        (** Names [Reclaim_named] gave that no listed keeper volume belongs
+            to. Nothing is deleted for them. Empty for [Report_only]. *)
   }
 
 val apple_keeper_volume_gc :
@@ -72,26 +85,27 @@ val apple_keeper_volume_gc :
             marker read and keeps the unowned-and-unregistered keepers as
             [Unverified]: without a marker read there is no claim evidence
             either way. *)
-  -> execute:bool
+  -> request:request
   -> (report, string) result
 (** List the Apple volumes, group them by keeper, and judge each keeper:
     a container still referencing it keeps it; so do remaining claimants on
     the work volume's marker and a registration in this workspace. A work
     volume with a missing or empty marker is kept as [Unverified]. Unprotected
     build-only volumes without an observed reference are reclaim candidates.
+    [Report_only] touches no volume. [Reclaim_named] deletes the build volume
+    of a candidate it names and of no other keeper.
     A candidate is judged from one listing, which a concurrent boot in
-    another workspace can already have outrun, so with [~execute:true] the
-    build-only shape is confirmed by a fresh listing immediately before the
-    delete: a keeper whose work volume has since appeared, whose listed
-    build volume is gone, or whose confirmation listing cannot be read is
-    kept as [Unverified] and nothing is deleted for it. Past that
-    confirmation the fence is the platform, which refuses to delete a volume
-    a container (running or stopped) references, and the absence check after
-    the delete: a volume that remains is [Reclaim_failed], never [Reclaimed].
+    another workspace can already have outrun, so before a named candidate's
+    delete the build-only shape is confirmed by a fresh listing: a keeper
+    whose work volume has since appeared, whose listed build volume is gone,
+    or whose confirmation listing cannot be read is kept as [Unverified] and
+    nothing is deleted for it. Past that confirmation the fence is the
+    platform, which refuses to delete a volume a container (running or
+    stopped) references, and the absence check after the delete: a volume
+    that remains is [Reclaim_failed], never [Reclaimed].
     A boot that lands between the confirmation and the delete can still fail
     loudly at container creation; it cannot lose a held volume silently.
-    Without [execute] no volume is touched. A failed initial volume listing
-    is [Error] and nothing runs. *)
+    A failed initial volume listing is [Error] and nothing runs. *)
 
 val keep_reason_to_string : keep_reason -> string
 val keeper_outcome_to_string : keeper_outcome -> string

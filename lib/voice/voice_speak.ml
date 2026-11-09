@@ -58,8 +58,7 @@ let available_tts_endpoints ?provider (tts : Voice_config.tts_config) =
     This is used as a parallel fallback when the active transport is
     [Voice_mcp], which produces audio through a local/MCP path but does not
     write a browser-fetchable file. *)
-let try_http_tts_for_dashboard ~(tts : Voice_config.tts_config) ~agent_id ~message ~voice
-      ~audio_device () =
+let try_http_tts_for_dashboard ~(tts : Voice_config.tts_config) ~agent_id ~message () =
   (* The dashboard's own attempt, which only knows the HTTP endpoints. Each is
      asked for its own model; one that has none is passed over rather than
      asked with a blank name. *)
@@ -275,14 +274,9 @@ let mcp_spoke_detail ~voice =
     has an audio clip even though the MCP server owns local playback.
     Returns [None] when no HTTP endpoint is configured or all fail. *)
 let try_http_tts_for_browser_audio
-      ~sw
-      ~clock
-      ~net
       ~(tts : Voice_config.tts_config)
       ~agent_id
       ~message
-      ~priority
-      ?audio_device
       endpoints
   =
   let http_endpoints =
@@ -634,8 +628,6 @@ let attempt_tts_endpoint
                  ~tts
                  ~agent_id
                  ~message
-                 ~voice
-                 ~audio_device
                  ()
              with
              | Some (audio_file, file_size) ->
@@ -761,14 +753,9 @@ let agent_speak_json
              still stands and the dashboard simply shows no audio player. *)
           (match
              try_http_tts_for_browser_audio
-               ~sw
-               ~clock
-               ~net
                ~tts
                ~agent_id
                ~message
-               ~priority
-               ?audio_device
                endpoints
            with
            | Some (audio_file, file_size) ->

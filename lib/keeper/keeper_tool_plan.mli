@@ -318,6 +318,12 @@ val create
   -> ?exports:export list
   -> node list
   -> (t, error) result
+(** A descriptor whose id is registered resolves to the registry copy:
+    identity, names, execution and input schema stay registry-owned. The one
+    plan-owned field is a declared [Json_output] composable_output override,
+    which reaches the executor and governs typed dataflow, output validation
+    and exports; [Opaque_output] is the default and means no declared
+    contract, so the registry contract survives it. *)
 
 type async_child
 (** A native compiler operand retaining the exact Skill, argument template,

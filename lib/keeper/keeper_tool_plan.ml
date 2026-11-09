@@ -1163,7 +1163,22 @@ let canonicalize_descriptors descriptors =
                 ({ descriptor
                  ; model_names = Keeper_tool_descriptor.keeper_model_names descriptor
                  } :: resolved) rest)
-       | Some registered -> canonicalize (registered :: resolved) rest)
+       | Some registered ->
+         (* Identity, names, execution and input schema stay registry-owned,
+            but a declared [Json_output] composable_output override travels
+            with the plan and governs typed dataflow, output validation and
+            exports. [Opaque_output] is the descriptor default and means "no
+            declared contract", so an unmarked descriptor keeps the catalog
+            contract. Write evidence stays identity-gated in
+            Board_tool_evidence, so an output override cannot turn a non-board
+            write into board evidence (task-3483). *)
+         let descriptor =
+           match descriptor.composable_output with
+           | Keeper_tool_descriptor.Opaque_output -> registered.descriptor
+           | Keeper_tool_descriptor.Json_output _ as override ->
+             { registered.descriptor with composable_output = override }
+         in
+         canonicalize ({ descriptor; model_names = registered.model_names } :: resolved) rest)
   in
   canonicalize [] descriptors
 ;;

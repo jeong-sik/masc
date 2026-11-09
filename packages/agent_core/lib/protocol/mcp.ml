@@ -181,30 +181,6 @@ type skipped_tool =
   ; detail : string
   }
 
-(** Convert MCP tools to agent-core [Tool.t] values, one tool at a time.
-    A tool whose schema fails conversion disables only that tool: it is
-    returned in the skipped list (and logged) instead of failing the whole
-    server's tool list. Input order is preserved in both lists. *)
-let convert_tools ~server_name ~call_fn_for (tools : mcp_tool list) =
-  let converted_rev, skipped_rev =
-    List.fold_left
-      (fun (converted, skipped) (mt : mcp_tool) ->
-         match mcp_tool_to_agent_core_tool_result ~call_fn:(call_fn_for mt) mt with
-         | Ok tool_ -> tool_ :: converted, skipped
-         | Error detail ->
-           Llm_provider.Diag.warn
-             "mcp"
-             "server %s: skipping tool %s with unconvertible input schema: %s"
-             server_name
-             mt.name
-             detail;
-           converted, { tool_name = mt.name; detail } :: skipped)
-      ([], [])
-      tools
-  in
-  List.rev converted_rev, List.rev skipped_rev
-;;
-
 (** Close the MCP client and terminate the subprocess. *)
 let close_with_release ~close_client ~release ~report_release_failure =
   match close_client () with

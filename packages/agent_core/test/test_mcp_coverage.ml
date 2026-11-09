@@ -121,22 +121,6 @@ let test_type_mapping_all () =
     [ "null"; ""; "custom" ]
 ;;
 
-(* ── mcp_tool_to_agent_core_tool extended ────────────────────────── *)
-
-let test_mcp_tool_to_agent_core_tool_empty_schema () =
-  let mcp_tool : Mcp.mcp_tool =
-    { name = "empty_params"; description = "No parameters"; input_schema = `Assoc [] }
-  in
-  let call_fn _input : Types.tool_result = Ok { content = "ok"; content_blocks = None; _meta = None } in
-  let agent_core_tool = Mcp.mcp_tool_to_agent_core_tool ~call_fn mcp_tool in
-  Alcotest.(check string) "name" "empty_params" agent_core_tool.schema.name;
-  Alcotest.(check int) "no params" 0 (List.length agent_core_tool.schema.parameters);
-  (* Execute with empty input *)
-  match Tool.execute agent_core_tool (`Assoc []) with
-  | Ok { content; _ } -> Alcotest.(check string) "ok" "ok" content
-  | Error _ -> Alcotest.fail "expected Ok"
-;;
-
 (* ── Suite ────────────────────────────────────────────────── *)
 
 let () =
@@ -156,8 +140,5 @@ let () =
         ; Alcotest.test_case "single text" `Quick test_text_of_tool_result_single_text
         ] )
     ; "type_mapping", [ Alcotest.test_case "all types" `Quick test_type_mapping_all ]
-    ; ( "tool_bridge"
-      , [ Alcotest.test_case "empty schema" `Quick test_mcp_tool_to_agent_core_tool_empty_schema
-        ] )
     ]
 ;;

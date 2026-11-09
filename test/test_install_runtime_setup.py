@@ -849,11 +849,15 @@ class CodexExplicitRefresh(unittest.TestCase):
                                     default_reasoning_effort='future-effort')])
         with patch.object(SETUP.subprocess, 'run', return_value=subprocess.CompletedProcess([], 0, json.dumps(receipt), '')) as run, \
                 patch.object(SETUP, 'catalog_models', return_value=[]):
-            rows, origin = SETUP.source_models('/owned/masc', source, 10, refresh=True)
+            rows, origin = SETUP.source_models('/owned/masc', source, 10, refresh=True, base_path='/workspace')
         self.assertEqual(rows[0]['context'], 272000)
         self.assertEqual(rows[0]['supported_reasoning_efforts'], ['low', 'ultra', 'future-effort'])
         self.assertEqual(rows[0]['default_reasoning_effort'], 'future-effort')
-        self.assertEqual(run.call_args.args[0], ['/owned/masc', 'runtime-codex-models', '--cli-path', '/owned/codex'])
+        # The workspace decides whether the operator may start Codex on the
+        # account, so the refresh names it and drops the terminal's overrides.
+        self.assertEqual(run.call_args.args[0], ['/owned/masc', 'runtime-codex-models', '--cli-path', '/owned/codex',
+                                                 '--base-path', '/workspace'])
+        self.assertNotIn('MASC_BASE_PATH', run.call_args.kwargs['env'])
         self.assertIn('refreshed', origin)
 
     def test_private_inventory_account_reaches_terminal_refresh(self):
@@ -946,7 +950,10 @@ for line in sys.stdin:
 ''')
             client.chmod(0o700)
             assert BINARY is not None
-            result = subprocess.run([BINARY, 'runtime-codex-models', '--cli-path', str(client), '--account-home', str(original)],
+            workspace = home / 'workspace'
+            workspace.mkdir()
+            result = subprocess.run([BINARY, 'runtime-codex-models', '--base-path', str(workspace),
+                                     '--cli-path', str(client), '--account-home', str(original)],
                 env=dict(os.environ, HOME=str(home), CODEX_HOME=str(ambient)), capture_output=True, text=True, timeout=30)
             self.assertEqual(result.returncode, 0, result.stderr)
             receipt = json.loads(result.stdout)

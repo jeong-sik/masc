@@ -1540,12 +1540,17 @@ def native_serving_context(binary, source, model, timeout, load=False):
     return observation
 
 
-def refresh_codex_models(binary, source):
+def refresh_codex_models(binary, source, base_path=None):
+    # The workspace decides whether the operator may start Codex on the
+    # account (masc runtime-codex-models publishes its access for it).
     arguments = [str(binary), 'runtime-codex-models', '--cli-path', source.get('command') or 'codex']
+    if base_path is not None:
+        arguments += ['--base-path', str(base_path)]
     if source.get('account_home'):
         arguments += ['--account-home', source['account_home']]
     result = subprocess.run(arguments,
-                            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                            env=workspace_child_env() if base_path is not None else None)
     if result.returncode:
         raise SetupError('Codex online model refresh unavailable; using cached or bundled metadata.')
     try:
@@ -1649,7 +1654,7 @@ def model_choice_label(model):
     return label + ' — ' + kind + ' ' + released + suffix
 
 
-def source_models(binary, source, timeout, refresh=False):
+def source_models(binary, source, timeout, refresh=False, base_path=None):
     """One source's model list: discovery belongs to the native runtime;
     curated catalog rows lead, workspace bindings are matched onto the rest."""
     choice = source.get('choice')
@@ -1657,7 +1662,7 @@ def source_models(binary, source, timeout, refresh=False):
         observed, origin = muse_models(binary, source, timeout)
     elif refresh and choice == 'codex':
         try:
-            observed, origin = refresh_codex_models(binary, source)
+            observed, origin = refresh_codex_models(binary, source, base_path)
         except SetupError as error:
             observed = catalog_models(binary, choice)
             fallback = ('Installed MASC model catalog (suggestions; model response is not yet verified)' if observed
@@ -1890,7 +1895,7 @@ def select_connections(binary, inventory, timeout, credentials=None, base_path=N
         source = prepare_connection(binary, source, credentials)
         refresh_models = False
         while True:
-            models, origin = source_models(binary, source, timeout, refresh=refresh_models)
+            models, origin = source_models(binary, source, timeout, refresh=refresh_models, base_path=base_path)
             refresh_models = False
             print(terminal_text(origin) + '\nListed models are checked with a real response and tool call before saving.', file=sys.stderr)
             options = [model_choice_label(item) for item in models]

@@ -172,8 +172,17 @@ val footer_hints_metrics : telemetry:bool -> string
 (** Usage footer, showing only the keys for the visible Usage or Telemetry
     reading. *)
 
+(** What the ask list offers under the cursor. *)
+type ask_supply =
+  | No_asks  (** no question is waiting *)
+  | Asks_unselected  (** questions wait and the cursor is on none of them *)
+  | Ask_selected  (** the cursor is on a question *)
+
+(** The browsing footer follows three facts: [approvals] says the queue has a
+    row, [asks] what the ask list offers, and [source] that a question source
+    is on hand to read, the last answer's included. *)
 type approvals_footer =
-  | Approval_browsing
+  | Approval_browsing of { approvals : bool; asks : ask_supply; source : bool }
   | Approval_writing
   | Approval_armed
   | Approval_answering of { has_choices : bool; takes_text : bool }
@@ -181,6 +190,11 @@ type approvals_footer =
 val footer_hints_approvals : approvals_footer -> string
 (** Project the Approvals queue and question reader's modal footers from the
     same binding records as the Help sheet. *)
+
+val approval_answer_hint : string
+(** The footer's words for the key that opens the selected question. The
+    Questions heading prints this one string, so the two cannot name the key
+    differently. *)
 
 val has_detail_scoped_keys : Masc_tui_types.surface -> bool
 (** Whether this surface's table scopes any binding to one of the two states,

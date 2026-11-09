@@ -2329,19 +2329,6 @@ let box_wrapped_field buf cols ~head ~style body =
         rest
 
 
-(* The question the ask cursor is on, or none when nothing is waiting. The
-   footer asks for it to decide which keys it can honestly name: a question
-   with no choices makes [1-9] a promise the surface cannot keep. *)
-let selected_ask_question (state : state) =
-  match state.asks_snapshot with
-  | None -> None
-  | Some snapshot -> (
-      match Ask_projection.selected_row (Ask_projection.open_rows snapshot) state.ask_cursor with
-      | None -> None
-      | Some (row : Masc.Tui_decode_asks.ask_row) ->
-          List.nth_opt row.Masc.Tui_decode_asks.ar_questions state.ask_question_cursor)
-
-
 let draw_ask_text_entry buf cols ~draft ~question (entry : ask_text_entry) =
   box_wrapped_field buf cols
     ~head:(Printf.sprintf "      %swrite: " Ansi.bold)
@@ -2506,7 +2493,21 @@ let ask_block f =
 let question_hints (state : state) =
   let open Masc_tui_keys in
   match state.ask_answer_mode with
-  | Ask_browsing -> footer_hints_approvals Approval_browsing
+  | Ask_browsing ->
+      let asks =
+        match open_ask_rows state with
+        | [] -> No_asks
+        | _ :: _ ->
+            (match selected_ask_row state with
+             | Some _ -> Ask_selected
+             | None -> Asks_unselected)
+      in
+      footer_hints_approvals
+        (Approval_browsing
+           { approvals = not (List.is_empty (Masc_tui_approvals_model.approval_items state))
+           ; asks
+           ; source = Option.is_some (selected_ask_origin state)
+           })
   | Ask_answering _ ->
       (match state.ask_text_entry with
        | Some _ -> footer_hints_approvals Approval_writing
@@ -2524,11 +2525,6 @@ let question_hints (state : state) =
              let takes_text = Option.is_some question in
              footer_hints_approvals
                (Approval_answering { has_choices; takes_text }))
-let question_asks (state : state) =
-  match state.asks_snapshot with
-  | None -> []
-  | Some snapshot -> Ask_projection.open_rows snapshot
-
 
 let draw_ask_origin buf cols (state : state) =
   Option.iter (fun (origin : Ask_projection.origin) ->
@@ -2551,7 +2547,7 @@ let ask_question_viewport (state : state) =
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   let text_entry = state.ask_text_entry in
   let lines =
-    let asks = question_asks state in
+    let asks = Masc_tui_types.open_ask_rows state in
     match Ask_projection.selected_row asks state.ask_cursor with
     | None when asks <> [] -> ["  Nothing selected -- [ or ] chooses a question"]
     | None -> ["  No questions waiting"]

@@ -428,9 +428,15 @@ let approval_read =
 let approval_value_bytes =
   b Navigate "v" "string bytes" ~detail:Detail_only
     ~help:"read decoded top-level Gate string values as bytes, not JSON wire; v or Esc returns"
+(* One spelling of "key:label". The queue footer and the Questions heading both
+   name the answer key, and two hand-written spellings of it had drifted
+   ([a:open answers] over [a:answer a question]). *)
+let key_hint ?label (binding : binding) =
+  binding.key ^ ":" ^ (match label with Some word -> word | None -> binding.label)
 let approval_answer =
   b Act "a" "answer a question"
     ~help:"open the selected question, from a Keeper or a Lane Add-on installation, in its own mode; Esc leaves it"
+let approval_answer_hint = key_hint approval_answer
 let approval_installation_results =
   b Act "g" "installation Results"
     ~help:"after answering an installation's question, open that installation's Results in Plugins, where the reveal appears"
@@ -988,7 +994,11 @@ let for_surface = function
           ~help:"copy a link to the task in Work"
       ; b Search "/" "find" ~detail:List_only
           ~help:"jump the cursor to a matching task id or title"
+      (* [/] opens its prompt on a read list with no row, so it stays; the
+         jump has no match to step to and ends in [()] -- the same split
+         Task Review draws. *)
       ; b Search "n / N" "next / previous match" ~detail:List_only
+          ~rows:Needs_row
       ]
       @ row_list_edges @ listing_meta
   | Fusion ->
@@ -1376,8 +1386,13 @@ let footer_hints_tools ~pane =
        if String.equal binding.key bracket.key then bracket else binding)
        (for_surface Tools))
 
+type ask_supply =
+  | No_asks
+  | Asks_unselected
+  | Ask_selected
+
 type approvals_footer =
-  | Approval_browsing
+  | Approval_browsing of { approvals : bool; asks : ask_supply; source : bool }
   | Approval_writing
   | Approval_armed
   | Approval_answering of { has_choices : bool; takes_text : bool }
@@ -1386,20 +1401,29 @@ type approvals_footer =
    Help. Their modes need a deliberate order and, for Enter, a mode-specific
    verb; the dispatcher gives that key a different action in each mode. *)
 let footer_hints_approvals mode =
-  let hint ?label (binding : binding) =
-    binding.key ^ ":" ^ (match label with Some word -> word | None -> binding.label)
-  in
+  let hint = key_hint in
   let row items = String.concat "  " items in
   match mode with
-  | Approval_browsing ->
+  | Approval_browsing { approvals; asks; source } ->
+      (* Three things a key can need. [j/k] and [y / n] act on an approval
+         row; with none the decision answers with a notice. [ / ] selects a
+         waiting question and [a] opens the selected one, so a cursor on none
+         of them keeps [ / ] and drops [a]. [o / O] read the source of a
+         question, the last answer's included. [w] and [e] open a palette and
+         act on an empty queue. *)
       row
-        [ hint approval_move; hint approval_decide; hint approval_workspace
-        ; hint approval_outside; hint approval_walk; hint approval_answer; hint approval_origin
-        ; hint listing_refresh; hint listing_next
-          (* The way out: the two keys a cut row keeps
-             ([Masc_tui_footer.never_dropped_keys]). *)
-        ; hint approval_back; hint listing_quit
-        ]
+        ((if approvals then [ hint approval_move; hint approval_decide ] else [])
+         @ [ hint approval_workspace; hint approval_outside ]
+         @ (match asks with
+            | No_asks -> []
+            | Asks_unselected -> [ hint approval_walk ]
+            | Ask_selected -> [ hint approval_walk; hint approval_answer ])
+         @ (if source then [ hint approval_origin ] else [])
+         @ [ hint listing_refresh; hint listing_next
+             (* The way out: the two keys a cut row keeps
+                ([Masc_tui_footer.never_dropped_keys]). *)
+           ; hint approval_back; hint listing_quit
+           ])
   | Approval_writing ->
       row [ hint ~label:"save" approval_read; hint ~label:"cancel" approval_back ]
   | Approval_armed ->

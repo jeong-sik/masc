@@ -39,7 +39,7 @@ let surfaces =
       [ "n"; "< / >"; "Esc"; "r"; "q" ] )
   ; ( "Harness",
       T.Harness,
-      [ "j/k"; "PgUp/PgDn"; "Right / Enter"; "y / x"; "Y"; "Home/End" ],
+      [ "j/k"; "PgUp/PgDn"; "Right / Enter"; "y / x"; "Y"; "n / N"; "Home/End" ],
       [ "v"; "/"; "Esc"; "r"; "q" ] )
   ; ( "Task Review",
       T.Verification,
@@ -170,6 +170,68 @@ let test_a_goal_list_with_a_row_names_every_key () =
         (names_item full key))
     (goal_list_needing @ goal_list_answering)
 
+(* The approval queue draws from a builder of its own, and its keys need three
+   different things. [j/k] and [y / n] act on an approval row and answer with a
+   notice without one. [ / ] selects a waiting question and [a] opens the
+   selected one. [o / O] read a question's source, the last answer's included.
+   [w] and [e] open a palette, so they act on an empty queue too. *)
+let approvals_footer ?(approvals = false) ?(asks = Keys.No_asks)
+    ?(source = false) () =
+  Keys.footer_hints_approvals (Keys.Approval_browsing { approvals; asks; source })
+
+let approvals_always = [ "w"; "e"; "r"; "Tab"; "Esc"; "q" ]
+
+let check_keys label hints ~named ~absent =
+  List.iter
+    (fun key ->
+      check bool (label ^ " names " ^ key) true (names_item hints key))
+    named;
+  List.iter
+    (fun key ->
+      check bool (label ^ " does not name " ^ key) false (names_item hints key))
+    absent
+
+let test_an_empty_approvals_queue_names_only_the_keys_that_act () =
+  check_keys "Approvals with nothing waiting" (approvals_footer ())
+    ~named:approvals_always
+    ~absent:[ "j/k"; "y / n"; "[ / ]"; "a"; "o / O" ]
+
+let test_an_approval_row_brings_the_keys_that_decide () =
+  check_keys "Approvals with a row" (approvals_footer ~approvals:true ())
+    ~named:("j/k" :: "y / n" :: approvals_always)
+    ~absent:[ "[ / ]"; "a"; "o / O" ]
+
+(* Waiting questions bring [ / ] and nothing else: [a] says "Choose a question
+   with [ or ] first" until the cursor is on one. *)
+let test_a_question_brings_the_walk_and_a_selected_one_brings_answer () =
+  check_keys "Approvals with unselected questions"
+    (approvals_footer ~asks:Keys.Asks_unselected ())
+    ~named:("[ / ]" :: approvals_always)
+    ~absent:[ "j/k"; "y / n"; "a"; "o / O" ];
+  check_keys "Approvals with a selected question"
+    (approvals_footer ~asks:Keys.Ask_selected ())
+    ~named:("[ / ]" :: "a" :: approvals_always)
+    ~absent:[ "j/k"; "y / n"; "o / O" ]
+
+(* The Questions heading prints [approval_answer_hint]. The footer names the
+   key in the same words, or the two lines say different things about [a]. *)
+let test_the_selected_question_footer_uses_the_headings_words_for_answer () =
+  check bool "the selected-question footer holds the heading's hint" true
+    (contains
+       ("  " ^ approvals_footer ~asks:Keys.Ask_selected ())
+       ("  " ^ Keys.approval_answer_hint))
+
+let test_a_source_brings_the_source_keys_without_a_question () =
+  check_keys "Approvals with only a source" (approvals_footer ~source:true ())
+    ~named:("o / O" :: approvals_always)
+    ~absent:[ "j/k"; "y / n"; "[ / ]"; "a" ]
+
+let test_an_approvals_footer_with_everything_names_every_key () =
+  check_keys "Approvals with everything"
+    (approvals_footer ~approvals:true ~asks:Keys.Ask_selected ~source:true ())
+    ~named:("j/k" :: "y / n" :: "[ / ]" :: "a" :: "o / O" :: approvals_always)
+    ~absent:[]
+
 let () =
   run "tui footer row need"
     [ ( "table",
@@ -189,5 +251,19 @@ let () =
             test_an_empty_goal_list_names_no_key_that_needs_a_row
         ; test_case "a goal list with a row names every key" `Quick
             test_a_goal_list_with_a_row_names_every_key
+        ; test_case "an empty approvals queue names only the keys that act"
+            `Quick test_an_empty_approvals_queue_names_only_the_keys_that_act
+        ; test_case "an approval row brings the keys that decide" `Quick
+            test_an_approval_row_brings_the_keys_that_decide
+        ; test_case "a question brings the walk, a selected one the answer"
+            `Quick
+            test_a_question_brings_the_walk_and_a_selected_one_brings_answer
+        ; test_case "the selected question footer uses the heading's words"
+            `Quick
+            test_the_selected_question_footer_uses_the_headings_words_for_answer
+        ; test_case "a source brings the source keys without a question"
+            `Quick test_a_source_brings_the_source_keys_without_a_question
+        ; test_case "an approvals footer with everything names every key"
+            `Quick test_an_approvals_footer_with_everything_names_every_key
         ] )
     ]

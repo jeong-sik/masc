@@ -20884,30 +20884,6 @@ let handle_approval_decision state approval decision ~mailbox =
            (approval_decision_key decision)
            approval.ap_summary)
 
-(* The asks an operator can act on: the open ones, in the order the server
-   sent them. The pane draws the same list through the same function, so this
-   cursor and those rows cannot drift apart. *)
-let open_ask_rows state =
-  match state.asks_snapshot with
-  | None -> []
-  | Some snapshot ->
-      Ask.open_rows snapshot
-
-let selected_ask_row state =
-  match state.ask_answer_mode with
-  | Ask_browsing -> Ask.selected_row (open_ask_rows state) state.ask_cursor
-  | Ask_answering { aam_ask } ->
-      List.find_opt (fun row -> Masc.Tui_decode_asks.(equal_ask_key aam_ask (ask_key row)))
-        (open_ask_rows state)
-
-let selected_ask_origin state =
-  match current_ask_origin state with
-  | Some origin -> Some origin
-  | None ->
-      (match selected_ask_row state with
-       | Some row -> Ask.origin_of_row row
-       | None -> Option.bind (current_ask_answer_feedback state) Ask.origin_of_feedback)
-
 let toggle_selected_ask_origin state =
   match current_ask_origin state with
   | Some _ -> state.ask_origin <- None
@@ -20940,12 +20916,6 @@ let inspect_selected_ask_origin state ~mailbox =
              (Yojson.Safe.to_string (`Assoc
                [ "requested_ns", `String (Int64.to_string (Mtime_clock.elapsed_ns ()))
                ; "origin", Ask.origin_to_json origin ])))
-
-let selected_ask_question state =
-  match selected_ask_row state with
-  | None -> None
-  | Some (row : Masc.Tui_decode_asks.ask_row) ->
-      List.nth_opt row.Masc.Tui_decode_asks.ar_questions state.ask_question_cursor
 
 (* Leaving the mode drops the draft. An answer half-written against a question
    the operator walked away from is not a thing to restore later; the Keeper

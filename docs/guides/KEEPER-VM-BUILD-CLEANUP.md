@@ -12,6 +12,9 @@ when `keeper_remote_workspace_cleanup_enabled` (default true) is on, with
 `keeper_remote_workspace_cleanup_retention_sec` (two days). The payload is
 `config/scripts/keeper-remote-workspace-cleanup.py`; its keep rules are in
 `docs/rfc/RFC-remote-keeper-workspace-entries-are-swept-on-their-endpoint.md`.
+This step does not take the Maintenance admission below: it runs beside the
+Keeper's turns, and the payload leaves alone entries a live process is inside
+or that were touched within the retention.
 
 The binary embeds `config/scripts/keeper-build-cleanup.py` and passes both the
 Keeper work root and the canonical build-volume root to its framed exec-shim

@@ -1,8 +1,9 @@
-(* Root-switch-owned maintenance. The Owner mailbox, not a process snapshot,
-   admits each attempt. The guest payload supplies the separate build locks.
-   Scheduling is isolated across Keepers; an admitted cleanup still owns its
-   Keeper's atomic Maintenance slot until it returns. Host CLI cancellation
-   alone does not prove that a guest payload has terminated. *)
+(* Root-switch-owned maintenance. Scheduling is isolated across Keepers. A
+   guest build cleanup is admitted by the Owner mailbox, not a process
+   snapshot, and owns its Keeper's atomic Maintenance slot until it returns;
+   the guest payload supplies the separate build locks. The Remote_ssh
+   workspace step runs beside the Keeper's turns (see [step]). Host CLI
+   cancellation alone does not prove that a guest payload has terminated. *)
 let read_cleanup_meta ~(config : Workspace.config) ~keeper_name =
   match Keeper_meta_store.read_effective_meta_resolved config keeper_name with
   | Error _ as error -> error
@@ -51,7 +52,15 @@ let schedule ~sw ~running ~keeper_name run =
 (* One cleanup per Keeper per pass, chosen by where its tree lives: an
    Apple microVM guest has stale _build directories, a Remote_ssh endpoint has
    stale workspace entries (RFC-remote-keeper-workspace-entries-are-swept-on-
-   their-endpoint). Each step's own switch decides whether it runs. *)
+   their-endpoint). Each step's own switch decides whether it runs.
+
+   Only [Guest_builds] waits for an idle Keeper: its turns and the payload
+   share the guest build locks. A workspace entry carries its own keep rules
+   on the endpoint (untouched within the retention, no live process inside,
+   no unpushed commit or stash), and review Keepers run turns back to back.
+   At the first pass on 2026-11-09 (00:08Z) at least five of the seven
+   running reviewers were mid-turn, so an idle-only sweep removed nothing
+   while a report run found 13,525 stale entries. *)
 type step = Guest_builds | Remote_workspace
 
 let step_for ~builds ~remote_workspace = function
@@ -106,12 +115,18 @@ let sweep ~sw ~running ~(config : Workspace.config) ~builds ~remote_workspace ()
               | Ok None -> Ok None
               | Ok (Some current) -> run_step ~config ~meta:current step
             in
-            try match Keeper_owner_registry.run_maintenance_if_idle ~defer_to_chat:true
-                    ~base_path:config.base_path ~keeper_name:meta.name run with
-            | Ok (`Ran (Error detail)) ->
-              Log.Server.warn "%s keeper=%s: %s" label meta.name detail
-            | Ok (`Ran (Ok (Some report))) -> log_report ~keeper_name:meta.name report
-            | Error _ | Ok (`Busy _) | Ok (`Ran (Ok None)) -> ()
+            let settle = function
+              | Error detail -> Log.Server.warn "%s keeper=%s: %s" label meta.name detail
+              | Ok (Some report) -> log_report ~keeper_name:meta.name report
+              | Ok None -> ()
+            in
+            try match step with
+            | Guest_builds ->
+              (match Keeper_owner_registry.run_maintenance_if_idle ~defer_to_chat:true
+                       ~base_path:config.base_path ~keeper_name:meta.name run with
+               | Ok (`Ran result) -> settle result
+               | Error _ | Ok (`Busy _) -> ())
+            | Remote_workspace -> settle (run ())
             with
             | Eio.Cancel.Cancelled _ as exn -> raise exn
             | exn -> Log.Server.warn "%s keeper=%s: %s"

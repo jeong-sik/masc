@@ -3,7 +3,7 @@ rfc: "remote-keeper-workspace-entries-are-swept-on-their-endpoint"
 title: "remote_ssh Keeper 가 남긴 작업 폴더는 그 endpoint 에서 치운다"
 status: Draft
 created: 2026-11-08
-updated: 2026-11-08
+updated: 2026-11-09
 author: claude
 related: ["idle-keeper-worktrees-are-swept-where-they-live"]
 ---
@@ -39,10 +39,15 @@ related: ["idle-keeper-worktrees-are-swept-where-they-live"]
 
 ## 2. 결정: `_build` 정리 옆에 원격 작업 폴더 단계를 둔다
 
-서버의 같은 정리 주기에서, 같은 Owner idle 승인 아래 단계를 하나 더 부른다.
+서버의 같은 정리 주기에서 단계를 하나 더 부른다. 이 단계는 Keeper 가 쉬기를 기다리지 않는다.
 
 - 정리 주기는 `lib/server/server_keeper_build_maintenance.ml` 이 돌린다.
-- 승인은 `Keeper_owner_registry.run_maintenance_if_idle ~defer_to_chat:true` 가 한다. 그 Keeper 의 턴과 직렬이다.
+- `_build` 정리만 `Keeper_owner_registry.run_maintenance_if_idle ~defer_to_chat:true` 로 Owner 승인을 받는다. 그 Keeper 의 턴과 빌드 잠금을 같이 쓰기 때문이다.
+- 작업 폴더 단계는 Keeper 의 턴 옆에서 돈다. 턴이 쓰는 폴더는 아래 규칙 2(최근에 건드림)와 3(살아 있는 프로세스)이 남긴다.
+  - 11-09 첫 주기(00:08Z)에 idle 승인을 거쳤을 때는 하나도 못 지웠다. 켜진 리뷰어 7명 중 최소 5명이 그 순간 턴 중이었다. 리뷰어는 턴을 거의 쉬지 않고 잇는다.
+  - 같은 날 손으로 돌린 report 는 리뷰어 9명 모두에서 지울 후보를 찾았다(합계 13,525개). 사용률은 40% 였다.
+  - 한 Keeper 에 두 정리가 겹치지 않게 막는 것은 서버의 Keeper 별 예약이다.
+  - 남는 위험: 턴이 48시간 안 건드린 폴더를 명령 두 번 사이에 다시 쓰면, 그 사이에 지워질 수 있다. 다음 명령이 실패하고 Keeper 가 다시 받는다. 커밋과 stash 는 규칙 4가 지킨다.
 - 대상은 `sandbox_profile = remote_ssh` 인 Keeper 다.
 
 payload 는 `config/scripts/keeper-remote-workspace-cleanup.py` 다. 동작:
@@ -50,7 +55,7 @@ payload 는 `config/scripts/keeper-remote-workspace-cleanup.py` 다. 동작:
 - 바이너리에 넣고(`Embedded_config`), stdin 으로 넘겨 `python3 -` 로 돌린다. `Keeper_sandbox_remote.runner` 를 거치고, 실행 위치는 Keeper 루트 `remote_root/<keeper>` 다.
 - endpoint 는 `Keeper_sandbox_ssh.resolve_endpoint` + `Keeper_sandbox_ssh.create` 로 만든다. `attached_guest_endpoint` 는 `ready` 에서 디스크 preflight 를 돌리기 때문에, 이 단계가 꼭 필요할 때 거절당한다.
 - 서버는 늘 `--apply` 로 부른다. `--apply` 가 없으면 지우지 않고 보고만 한다. 운영자는 같은 파일을 ssh 로 손으로 돌려 후보를 본다.
-- payload 시간 제한은 5분이다. 그동안 그 Keeper 에게 온 대화는 기다린다. 11-08 report 실행은 가장 큰 루트 셋(항목 700~2,400개)에서 1~2초 걸렸다.
+- payload 시간 제한은 5분이다. 끝날 때까지 그 Keeper 는 다음 주기에서 건너뛴다. 11-08 report 실행은 가장 큰 루트 셋(항목 700~2,400개)에서 1~2초 걸렸다.
 
 Keeper 루트 바로 아래 항목마다 아래를 모두 만족해야 지운다. 하나라도 읽지 못하면 건너뛰고 이유를 보고한다.
 

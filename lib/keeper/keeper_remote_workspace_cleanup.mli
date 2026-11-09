@@ -32,7 +32,8 @@ val cleanup :
   retention_sec:float ->
   unit ->
   (report option, string) result
-(** [Ok None] for a Keeper that is not Remote_ssh. The caller holds the
-    Keeper's exclusive maintenance slot. The endpoint is built without the
-    disk preflight: that preflight refuses a full disk, which is when this
-    sweep matters most. *)
+(** [Ok None] for a Keeper that is not Remote_ssh. It runs beside the
+    Keeper's turns, not in its Maintenance slot: the payload leaves alone an
+    entry a live process is inside or that was touched within the retention.
+    The endpoint is built without the disk preflight: that preflight refuses
+    a full disk, which is when this sweep matters most. *)

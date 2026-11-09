@@ -10,8 +10,9 @@ type report = {
 
 let payload_path = "scripts/keeper-remote-workspace-cleanup.py"
 
-(* A chat that reaches the Keeper waits behind this maintenance, so the
-   budget stays in minutes. On 2026-11-08 a report run over each of the
+(* The sweep keeps this Keeper's cleanup reservation until it returns, and a
+   later pass skips a reserved Keeper, so the budget stays in minutes. On
+   2026-11-08 a report run over each of the
    three largest review roots (700 to 2,400 entries) took 1 to 2 s; each
    git repository it inspects can add a 20 s ls-remote. *)
 let payload_timeout_sec = 5. *. Masc_time_constants.minute

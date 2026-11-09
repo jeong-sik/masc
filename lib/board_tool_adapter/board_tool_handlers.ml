@@ -355,13 +355,15 @@ let handle_reaction ~reader ~tool_name ~start_time args : Tool_result.result =
         "user_id required"
     else (
       match Board_dispatch.toggle_reaction ~reader ~target_type ~target_id ~user_id ~emoji with
-      | Ok result ->
+      | Ok (receipt : Board_dispatch.reaction_write) ->
         (* Pass structured [data] directly (no prose label here), instead of a
            `String holding stringified JSON that consumers would double-encode. *)
         Tool_result.make_ok
           ~tool_name
           ~start_time
-          ~data:(Board.reaction_toggle_result_to_yojson result)
+          ~data:(Board.reaction_toggle_result_to_yojson receipt.reaction)
+          ~metadata:(Board_tool_evidence.metadata
+            (Board_tool_evidence.reaction ~post_id:receipt.post_id receipt.reaction))
           ()
       | Error e ->
         Board_tool_format.error_of_board_error ~tool_name ~start_time e)

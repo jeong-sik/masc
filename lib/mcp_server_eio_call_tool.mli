@@ -168,6 +168,16 @@ val handle_call_tool_eio :
     {!record_runtime_mcp_keeper_tool_trace} into the
     success / failure branches.
 
+    A valid reserved Board comment/reaction fact owned by a resolved Keeper
+    also receives [board_action_recording] under the existing vendor [_meta].
+    Its [execution_id] is the same identity minted for that call's trace row.
+    A normal trace return reports [status="confirmed"]. A caught non-cancellation
+    recording exception reports [status="unconfirmed"] with the fixed reason
+    [recording_confirmation_unavailable]; it does not assert that the row is
+    absent, because a failure can follow its durable append. Original content,
+    Board fact and [isError] are preserved. Retained-artifact receipt failures
+    and Eio cancellation keep their existing propagation policy.
+
     [sw] / [clock] type variables stay polymorphic so the
     protocol layer can call this function with whatever
     handle subset it has in scope (cycle 205 lesson —

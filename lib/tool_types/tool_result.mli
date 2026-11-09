@@ -122,7 +122,8 @@ val recorded_call_outcome_of_string : string -> (recorded_call_outcome, string) 
     {!disposition}, never recover semantics by inspecting it. The keyed
     entries owned by a typed codec with a total decoder are the exception:
     the artifact manifest (Tool_bridge), the handler's
-    {!Tool_outcome_declaration}, and the position of a comment page a thread
+    {!Tool_outcome_declaration}, the Board writer's small committed fact
+    (Board_tool_evidence), and the position of a comment page a thread
     read returned (Board_types.Comment_page.Position), which a caller
     continuing the read decodes instead of parsing the page's text. Each is
     read back through its own decoder, never by matching keys here. *)

@@ -71,6 +71,7 @@
   keeper_memory_os_current_range_codec
   keeper_memory_os_current_receipt_store
   keeper_memory_os_current_journal
+  keeper_memory_os_current_retraction_plan
   keeper_memory_os_receipt_selection
   keeper_memory_os_support_core
   keeper_memory_os_disposition_core

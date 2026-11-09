@@ -178,7 +178,8 @@ let check_timeout_phase ~label ~expected ~budget_s (outcome, elapsed) =
        budget_s);
   (* Six decimals, not two: a failure here has read as "ended at 0.50s; the
      0.5s budget should have ended it inside [0.5, 3.0)", which looks like the
-     message contradicting itself because [%.2f] rounds 0.4950 up to "0.50".
+     message contradicting itself because [%.2f] printed "0.50" for a value
+     just under the budget (0.4950 itself prints as "0.49").
      The exact value decides whether the timer fired early, whether the budget
      the client used differed from [budget_s], or whether the measurement
      started later than [started]. *)

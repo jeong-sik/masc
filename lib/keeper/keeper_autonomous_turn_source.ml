@@ -204,7 +204,7 @@ let execution_of_invocation ~executions = function
          (invocation.invocation_turn, invocation.invocation_planned_index)
          executions
      with
-     | Some [ occurrence ]
+     | Some [ (occurrence : execution_occurrence) ]
        when occurrence.tool_use_id = invocation.raw_tool_use_id
             && occurrence.tool_name = invocation.raw_tool_name ->
        Some occurrence.execution_id

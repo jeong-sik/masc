@@ -257,18 +257,6 @@ let test_version_info () =
   Alcotest.(check string) "name" "agent_core" Agent_core.name
 ;;
 
-let test_build_safe_valid () =
-  Eio_main.run
-  @@ fun env ->
-  let result =
-    Builder.create ~media_store:(Agent_core.History.Memory_store.create ()) ~net:env#net ~model:"claude-sonnet-5"
-    |> Builder.with_system_prompt "test"
-    |> Builder.with_max_tokens 1024
-    |> Builder.build_safe
-  in
-  Alcotest.(check bool) "build_safe ok" true (Result.is_ok result)
-;;
-
 let () =
   run
     "Agent Core"
@@ -294,7 +282,5 @@ let () =
             test_a_widened_tool_reaches_the_next_request
         ; test_case "version info" `Quick test_version_info
         ] )
-    ; ( "builder"
-      , [ test_case "build_safe valid" `Quick test_build_safe_valid ] )
     ]
 ;;

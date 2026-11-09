@@ -130,13 +130,12 @@ let recorded_ghost_keys (config : Workspace.config) =
            if entry.Audit_log.action = Audit_log.Custom event_type then
              match entry.Audit_log.details with
              | `Assoc fields ->
-               let open Option in
-               let* skill_name = string_field fields "skill_name" in
-               let* source_id = string_field fields "source_id" in
-               let+ last_activated_at =
-                 string_field fields "last_activated_at"
-               in
-               (skill_name, source_id, last_activated_at)
+               Option.bind (string_field fields "skill_name") (fun skill_name ->
+                   Option.bind (string_field fields "source_id") (fun source_id ->
+                       Option.map
+                         (fun last_activated_at ->
+                            (skill_name, source_id, last_activated_at))
+                         (string_field fields "last_activated_at")))
              | _ -> None
            else None)
   with

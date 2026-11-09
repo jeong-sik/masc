@@ -41,17 +41,24 @@ def gh_api(repo: str, path: str) -> str:
 
 
 def ancestor_nightly(repo: str, cut_sha: str) -> dict | None:
-    """The newest scheduled nightly on main whose head sits under the cut."""
+    """The newest scheduled nightly on main whose head sits under the cut.
+
+    A nightly whose head equals the cut head counts: the same commit is
+    its own ancestor, and that run is exactly the verdict this cut sits on.
+    """
     payload = json.loads(gh_api(
         repo, f"repos/{repo}/{RUN_PAGE}?branch=main&event=schedule&per_page=15"))
     for run in payload.get("workflow_runs", []):  # newest first, as the API returns
         if run.get("event") != "schedule":
             continue
         # The compare response is a full document; read its status field
-        # instead of string-matching the body.
+        # instead of string-matching the body. "ahead" puts the nightly
+        # head under the cut; "identical" is the cut head itself — the same
+        # commit is its own ancestor. Skipping it would let an older green
+        # ancestor speak for a red nightly the cut rides on directly.
         comparison = json.loads(gh_api(
             repo, f"repos/{repo}/compare/{run['head_sha']}...{cut_sha}"))
-        if comparison.get("status") == "ahead":  # the nightly head is under the cut
+        if comparison.get("status") in ("ahead", "identical"):
             return run
     return None
 

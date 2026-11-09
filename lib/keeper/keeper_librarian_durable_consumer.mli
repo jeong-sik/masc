@@ -18,7 +18,7 @@
 
 type commit_result =
   | Memory_committed
-  | Memory_pending
+  | Memory_pending of Keeper_librarian_pending.t
       (** The selected input remains owned by an unfinished original publication.
           Memory may already have its matching durable receipt while external
           acknowledgement, source positions or Finished settlement is pending.
@@ -33,7 +33,7 @@ type commit_result =
 
 type outcome =
   | Nothing_to_read
-  | Pending
+  | Pending of Keeper_librarian_pending.t
       (** Original publication is unfinished. This consumer performs no external
           acknowledgement or progress advance on this result. The original
           owner may have durable partial settlement; it must recover its exact

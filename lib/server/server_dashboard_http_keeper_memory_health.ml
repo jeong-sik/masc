@@ -9,6 +9,9 @@ type librarian_health =
   { state : Keeper_librarian_queue_refresh.pass_end option
       (** [None] until this process has observed the keeper's durable drain.
           This does not describe a later working-Context organization pass. *)
+  ; admission_wait : Keeper_librarian_pending.worker option
+      (** Explicit-admission wait, independent of the durable measurement.
+          [None] is no observed wait, not a completed durable pass. *)
   ; measured_at : float option
   ; unread_atom_turns : int option
   ; unread_official_turns : int option
@@ -229,6 +232,7 @@ let librarian_health ~config ~keepers_dir keeper_id ~continuity_saved =
     Option.map Keeper_memory_os_journal_codec.librarian_failure_kind_to_string last_failure
   in
   { state = Option.map (fun (m : Keeper_librarian_queue_refresh.measurement) -> m.last_pass) measurement
+  ; admission_wait = Keeper_librarian_queue_refresh.last_admission_wait ~config ~keeper_name:keeper_id
   ; measured_at =
       Option.map (fun (m : Keeper_librarian_queue_refresh.measurement) -> m.measured_at) measurement
   ; unread_atom_turns =
@@ -267,7 +271,7 @@ let librarian_state_to_string = function
   | Lane_unconfigured -> "lane_unconfigured"
   | Drained -> "drained"
   | Yielded_to_waiting_unit -> "yielded_to_waiting_unit"
-  | Pending -> "pending"
+  | Pending _ -> "pending"
   | Not_committed -> "not_committed"
   | Stopped _ -> "stopped"
   | Raised _ -> "raised"
@@ -277,7 +281,7 @@ let librarian_state_detail = function
   | Keeper_librarian_queue_refresh.Stopped error ->
     Some (Keeper_librarian_durable_consumer.error_to_string error)
   | Raised detail -> Some detail
-  | Off | Lane_unconfigured | Drained | Yielded_to_waiting_unit | Pending | Not_committed -> None
+  | Off | Lane_unconfigured | Drained | Yielded_to_waiting_unit | Pending _ | Not_committed -> None
 ;;
 
 (* The label the counter increments in [Keeper_librarian_runtime] carry. *)
@@ -591,7 +595,7 @@ let alerts (h : keeper_health) =
      Librarian is off. Off is not an alert. *)
   let stopped_alert =
     match h.librarian.state with
-    | None | Some (Keeper_librarian_queue_refresh.Off | Drained | Yielded_to_waiting_unit | Pending) -> []
+    | None | Some (Keeper_librarian_queue_refresh.Off | Drained | Yielded_to_waiting_unit | Pending _) -> []
     | Some ((Lane_unconfigured | Not_committed | Stopped _ | Raised _) as state) ->
       let behind =
         match h.librarian.unread_atom_turns, h.librarian.unread_official_turns with
@@ -698,6 +702,16 @@ let keeper_health_entry_to_json ~now (h : keeper_health) =
             , match Option.bind h.librarian.state librarian_state_detail with
               | Some detail -> `String detail
               | None -> `Null )
+          ; ( "pending"
+            , match h.librarian.state with
+              | Some (Keeper_librarian_queue_refresh.Pending pending) ->
+                Keeper_librarian_pending.to_json pending
+              | Some (Off | Lane_unconfigured | Drained | Yielded_to_waiting_unit
+                     | Not_committed | Stopped _ | Raised _) | None -> `Null )
+          ; ( "admission_wait"
+            , match h.librarian.admission_wait with
+              | Some worker -> Keeper_librarian_pending.to_json (Worker worker)
+              | None -> `Null )
           ; ( "measured_at"
             , match h.librarian.measured_at with
               | Some ts -> `Float ts
@@ -769,7 +783,7 @@ let keeper_health_entry_to_json ~now (h : keeper_health) =
     ]
 ;;
 
-let schema = "keeper.memory_os.current_health.v11"
+let schema = "keeper.memory_os.current_health.v12"
 
 let fleet_cache_key ~base_path = "keeper_memory_health:" ^ base_path
 
@@ -797,7 +811,7 @@ let totals_row (h : keeper_health) : Keeper_memory_health_totals.Row.t =
       (match h.librarian.state with
        | Some (Keeper_librarian_queue_refresh.Lane_unconfigured | Not_committed | Stopped _ | Raised _) ->
          true
-       | Some (Off | Drained | Yielded_to_waiting_unit | Pending) | None -> false)
+       | Some (Off | Drained | Yielded_to_waiting_unit | Pending _) | None -> false)
   ; alerts = List.map fst (alerts h)
   }
 ;;

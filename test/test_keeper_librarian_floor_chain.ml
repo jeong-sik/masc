@@ -8,6 +8,7 @@ open Alcotest
 open Masc
 open Librarian_floor_fixture
 module Chain = Keeper_librarian_floor_chain
+module Pending = Keeper_librarian_pending
 module Exact = Lane_addon_exact
 module Program = Keeper_memory_os_program
 module Types = Keeper_memory_os_types
@@ -49,7 +50,7 @@ let drive fixture ~owner ~range ?messages ?fresh ?current () =
 let rec run_through_workers ?(attempts = 12) fixture ~owner ~range ?fresh () =
   let before = !(fixture.deliveries) in
   match run_once fixture ~owner ~range ?fresh () with
-  | Ok (Chain.Pending detail) when attempts > 0 && contains detail "waiting on its worker" ->
+  | Ok (Chain.Pending (Pending.Worker _)) when attempts > 0 ->
     await_delivery fixture ~after:before;
     run_through_workers ~attempts:(attempts - 1) fixture ~owner ~range ?fresh ()
   | result -> result
@@ -69,7 +70,7 @@ let claims (program : Program.t) =
 
 let finished = function
   | Ok (Chain.Finished finished) -> finished
-  | Ok (Chain.Pending detail) -> failf "the chain was still pending: %s" detail
+  | Ok (Chain.Pending pending) -> failf "the chain was still pending: %s" (Pending.description pending)
   | Ok (Chain.Stopped { position; report }) -> failf "the chain stopped at %d: %s" position report.detail
   | Ok Chain.Superseded -> fail "the chain's initial facts were superseded"
   | Error detail -> failf "the chain refused: %s" detail
@@ -432,8 +433,15 @@ let test_a_pass_with_no_answered_step_does_not_read_the_gate_scope () = with_fix
    | Ok _ -> fail "the spoiled gate scope still reads");
   let before = !(fixture.deliveries) in
   (match run_once fixture ~owner ~range () with
-   | Ok (Chain.Pending detail) ->
-     check bool "the first step waits on its worker" true (contains detail "waiting on its worker")
+   | Ok (Chain.Pending (Pending.Worker waiting)) ->
+     let record = match steps_of fixture ~owner with
+       | [record, _] -> record
+       | [] | _ :: _ :: _ -> fail "the first pending step must retain exactly one original" in
+     check string "the leaf worker installation survives the floor"
+       record.installation_id waiting.installation_id;
+     check string "the leaf worker request survives the floor" record.request_id waiting.request_id;
+     check bool "the actual worker is processing" true (waiting.wait = Pending.Processing)
+   | Ok (Chain.Pending _) -> fail "the pending worker was replaced by a floor diagnostic"
    | Ok (Chain.Finished _ | Chain.Stopped _ | Chain.Superseded) -> fail "the chain went past a step nothing had answered"
    | Error detail -> failf "a pass with no answered step read the gate scope: %s" detail);
   await_delivery fixture ~after:before;
@@ -461,8 +469,8 @@ let test_a_failed_gate_is_not_a_decision_and_a_retried_one_is_judged_from_the_in
     (* The gate is declared on and its lane is off: nothing may be absorbed. *)
     Runtime_typesafeai_policy.publish { original with absorb_gate = true; lane_enabled = false };
     (match run_through_workers fixture ~owner ~range ~fresh:starting () with
-     | Ok (Chain.Pending detail) ->
-       check bool "the chain waits on the gate, not on a worker" false (contains detail "waiting on its worker")
+     | Ok (Chain.Pending (Pending.Message_floor _)) -> ()
+     | Ok (Chain.Pending _) -> fail "the absorption gate wait was presented as a worker wait"
      | Ok (Chain.Finished _ | Chain.Stopped _ | Chain.Superseded) -> fail "a gate that failed was taken for a decision"
      | Error detail -> failf "the chain refused: %s" detail);
     let failed = Gate.Inventory.read ~store:fixture.store ~owner |> get in

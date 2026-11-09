@@ -143,13 +143,13 @@ let await_delivery fixture ~after=Eio.Time.with_timeout_exn fixture.clock F.fixt
     if !(fixture.deliveries)>after then Some () else None))
 let advanced = function
   | Ok (Consumer.Progress_advanced _ | Official_advanced _) -> true
-  | Ok (Nothing_to_read | Baseline_advanced _ | Memory_not_committed _ | Pending) -> false
+  | Ok (Nothing_to_read | Baseline_advanced _ | Memory_not_committed _ | Pending _) -> false
   | Error error -> fail (Consumer.error_to_string error)
 let drive_advanced fixture =
   let before= !(fixture.deliveries) in
   match run_worker fixture with
   | Ok (Consumer.Progress_advanced _ | Official_advanced _) -> ()
-  | Ok Consumer.Pending ->
+  | Ok (Consumer.Pending _) ->
     await_delivery fixture ~after:before;
     check bool "original delivered answer completes local publication" true (advanced (run_worker fixture))
   | Ok (Nothing_to_read | Baseline_advanced _ | Memory_not_committed _) ->
@@ -240,7 +240,7 @@ let prepare_history config kind =
        ~history_at_start:(Boundary.history_at_start_of_messages first_messages) first_messages);
      (match Consumer.consume_one ~config ~keeper_name ~commit:(fun _ -> fail "baseline unexpectedly proposed Memory") with
       | Ok (Consumer.Baseline_advanced _) -> ()
-      | Ok (Consumer.Nothing_to_read | Progress_advanced _ | Official_advanced _ | Memory_not_committed _ | Pending) ->
+      | Ok (Consumer.Nothing_to_read | Progress_advanced _ | Official_advanced _ | Memory_not_committed _ | Pending _) ->
         fail "actual baseline was not established"
       | Error error -> fail (Consumer.error_to_string error)));
   (match kind with
@@ -378,7 +378,7 @@ let with_fixture ?(history_kind=Atoms) f =
         Memory_lane.For_testing.reset ())))))))))))
 
 let assert_pending = function
-  | Ok Consumer.Pending -> ()
+  | Ok (Consumer.Pending _) -> ()
   | Ok (Consumer.Nothing_to_read | Baseline_advanced _ | Progress_advanced _ | Official_advanced _ | Memory_not_committed _) ->
     fail "actual original request must remain Pending"
   | Error error -> fail (Consumer.error_to_string error)
@@ -529,7 +529,7 @@ let test_retained_source_root_alias () = with_fixture ~history_kind:Official (fu
     (match memory_action fixture (fun () -> Consumer.consume_one ~config ~keeper_name
       ~commit:(fun captured -> source:=Some captured;Consumer.Memory_refused [])) with
      | Ok (Consumer.Memory_not_committed _) -> ()
-     | Ok (Nothing_to_read | Baseline_advanced _ | Progress_advanced _ | Official_advanced _ | Pending) ->
+     | Ok (Nothing_to_read | Baseline_advanced _ | Progress_advanced _ | Official_advanced _ | Pending _) ->
        fail "the aliased source was not captured"
      | Error error -> fail (Consumer.error_to_string error));
     let source=Option.to_result ~none:"the consumer retained no aliased source" !source |> get in
@@ -575,14 +575,14 @@ let test_unattached_reports_without_consuming () = with_fixture (fun ~sw:_ fixtu
   no_memory fixture;
   check bool "production queue starts without a measurement" true
     (Option.is_none (Refresh.last_measurement ~config:fixture.config ~keeper_name));
-  Refresh.submit_durable ~base_path:fixture.base_path ~keeper_name;
+  ignore (Refresh.submit_durable ~base_path:fixture.base_path ~keeper_name);
   Memory_lane.For_testing.await_idle ~base_path:fixture.base_path ~keeper_name;
   (match Refresh.last_measurement ~config:fixture.config ~keeper_name with
    | Some {last_pass=Refresh.Stopped error;_} ->
      check bool "production queue retains blocked publication" true
        (Consumer.publication_unfinished error)
    | Some {last_pass=(Off | Lane_unconfigured | Drained | Yielded_to_waiting_unit
-                    | Not_committed | Pending | Raised _);_}
+                    | Not_committed | Pending _ | Raised _);_}
    | None -> fail "production queue must retain the attachment failure");
   check int "unattached production queue creates no original" 0 (List.length (observed_originals fixture));
   check int "unattached production queue calls no provider" 0 (F.post_count fixture.server);
@@ -607,7 +607,7 @@ let test_terminal_refusal_allows_fresh_original () = with_fixture (fun ~sw:_ fix
      check bool "refusal invents no capacity evidence" true
        (report.input_capacity_evidence=No_input_capacity_refusal && report.provider_input_refusals=[])
    | Error error -> fail (Consumer.error_to_string error)
-   | Ok (Consumer.Memory_not_committed ([] | _::_::_) | Nothing_to_read | Pending
+   | Ok (Consumer.Memory_not_committed ([] | _::_::_) | Nothing_to_read | Pending _
          | Baseline_advanced _ | Progress_advanced _ | Official_advanced _) ->
      fail "terminal refusal must retain a nonempty diagnostic report");
   let rejected,_=only_original fixture in
@@ -640,7 +640,7 @@ let test_retained_body_refusal_shows_descent_from_its_receipt () = with_fixture 
      check bool "the report names the provider's cause" true
        (report.provider_input_refusals=[Keeper_librarian_input_refusal.Request_body_refused])
    | Error error -> fail (Consumer.error_to_string error)
-   | Ok (Consumer.Memory_not_committed ([] | _::_::_) | Nothing_to_read | Pending
+   | Ok (Consumer.Memory_not_committed ([] | _::_::_) | Nothing_to_read | Pending _
          | Baseline_advanced _ | Progress_advanced _ | Official_advanced _) ->
      fail "a retained body refusal must give one report");
   check int "the provider refused once and no later pass called it again" 1 (F.post_count fixture.server))
@@ -687,7 +687,7 @@ let test_worker_body_refusal_ends_the_original () = with_fixture (fun ~sw:_ fixt
        (report.provider_input_refusals=[Keeper_librarian_input_refusal.Request_body_refused]
         && not report.smaller_range_meets_same_failure)
    | Error error -> fail (Consumer.error_to_string error)
-   | Ok (Consumer.Memory_not_committed ([] | _::_::_) | Nothing_to_read | Pending
+   | Ok (Consumer.Memory_not_committed ([] | _::_::_) | Nothing_to_read | Pending _
          | Baseline_advanced _ | Progress_advanced _ | Official_advanced _) ->
      fail "an unlistable request must end as one refusal");
   let refused,_=only_original fixture in
@@ -853,7 +853,7 @@ let test_stopped_settle_leaves_gates_for_the_next_original () = with_fixture (fu
   settle_only fixture ~date record;
   (match run_worker fixture with
    | Ok Consumer.Nothing_to_read -> ()
-   | Ok (Baseline_advanced _ | Progress_advanced _ | Official_advanced _ | Memory_not_committed _ | Pending) ->
+   | Ok (Baseline_advanced _ | Progress_advanced _ | Official_advanced _ | Memory_not_committed _ | Pending _) ->
      fail "a consumed source has nothing to read"
    | Error error -> fail (Consumer.error_to_string error));
   check int "a pass without an original leaves the stopped gates" (List.length gates)
@@ -1293,12 +1293,15 @@ let test_production_queue_pending_retains_all_sources () = with_fixture (fun ~sw
     `OK,F.openai_response (answer capture));
   let before=progress fixture in
   Fun.protect ~finally:(fun () -> ignore (Eio.Promise.try_resolve unblock ())) (fun () ->
-    Refresh.submit_durable ~base_path:fixture.base_path ~keeper_name;
+    ignore (Refresh.submit_durable ~base_path:fixture.base_path ~keeper_name);
     Eio.Promise.await arrived;
     Memory_lane.For_testing.await_idle ~base_path:fixture.base_path ~keeper_name;
     (match Refresh.last_measurement ~config:fixture.config ~keeper_name with
      | Some measurement -> check bool "production queue observed actual durable Pending" true
-         (measurement.Refresh.last_pass=Refresh.Pending)
+         (match measurement.Refresh.last_pass with
+          | Refresh.Pending _ -> true
+          | Off | Lane_unconfigured | Drained | Yielded_to_waiting_unit
+          | Not_committed | Stopped _ | Raised _ -> false)
      | None -> fail "actual production queue did not observe its durable Pending result");
     check bool "Pending preserves original source progress" true (progress fixture=before);
     no_memory fixture;
@@ -1325,7 +1328,7 @@ let test_actual_result_bridge_uses_production_queue () = with_fixture (fun ~sw:_
        chooses the Keeper and the public production queue runs every effect. *)
     Keeper_librarian_queue_signal.install (fun ~base_path ~keeper_name ->
       selected:=(base_path,keeper_name):: !selected;
-      Refresh.submit_durable ~base_path ~keeper_name;
+      ignore (Refresh.submit_durable ~base_path ~keeper_name);
       ignore (Eio.Promise.try_resolve scheduled ()));
     Eio.Switch.run (fun bridge_switch ->
       Server_librarian_addon_wake.install ~sw:bridge_switch ~config:fixture.config;
@@ -1885,11 +1888,14 @@ let test_purge_joins_unknown_then_worker_restart_does_not_resubmit history_kind 
       check int "unknown never authorizes another provider call" posts (F.post_count fixture.server);
       no_memory fixture in
     let ordinary_wake ()=
-      Refresh.submit_durable ~base_path:fixture.base_path ~keeper_name;
+      ignore (Refresh.submit_durable ~base_path:fixture.base_path ~keeper_name);
       Memory_lane.For_testing.await_idle ~base_path:fixture.base_path ~keeper_name;
       (match Refresh.last_measurement ~config:fixture.config ~keeper_name with
        | Some measurement -> check bool "production wake retains terminal unknown as Pending" true
-           (measurement.Refresh.last_pass=Refresh.Pending)
+           (match measurement.Refresh.last_pass with
+          | Refresh.Pending _ -> true
+          | Off | Lane_unconfigured | Drained | Yielded_to_waiting_unit
+          | Not_committed | Stopped _ | Raised _ -> false)
        | None -> fail "production wake did not report its durable result");
       assert_preserved () in
     assert_preserved ();
@@ -2146,13 +2152,13 @@ let narrow_next_read fixture =
   match memory_action fixture (fun () ->
     Consumer.consume_one ~config:fixture.config ~keeper_name ~commit:(fun _ -> Consumer.Memory_refused [])) with
   | Ok (Consumer.Memory_not_committed _) -> ()
-  | Ok (Nothing_to_read | Baseline_advanced _ | Progress_advanced _ | Official_advanced _ | Pending) ->
+  | Ok (Nothing_to_read | Baseline_advanced _ | Progress_advanced _ | Official_advanced _ | Pending _) ->
     fail "the failed read did not stop at the unread turn"
   | Error error -> fail (Consumer.error_to_string error)
 let ended_by_one_refusal = function
   | Ok (Consumer.Memory_not_committed [_]) -> ()
   | Error error -> fail (Consumer.error_to_string error)
-  | Ok (Consumer.Memory_not_committed ([] | _::_::_) | Nothing_to_read | Pending | Baseline_advanced _
+  | Ok (Consumer.Memory_not_committed ([] | _::_::_) | Nothing_to_read | Pending _ | Baseline_advanced _
         | Progress_advanced _ | Official_advanced _) -> fail "the pass must end in one refusal report"
 (* The provider refuses the one-turn read, and the host keeps the refusal. *)
 let provider_refuses_one_turn fixture response =
@@ -2217,7 +2223,8 @@ let descend fixture candidate =
   go 12
 let finished = function
   | Ok (Chain.Finished finished) -> finished
-  | Ok (Chain.Pending detail) -> failf "the chain was still pending: %s" detail
+  | Ok (Chain.Pending pending) ->
+    failf "the chain was still pending: %s" (Keeper_librarian_pending.description pending)
   | Ok (Chain.Stopped {position;report}) -> failf "the chain stopped at %d: %s" position report.detail
   | Ok Chain.Superseded -> fail "the chain's initial facts were superseded"
   | Error detail -> failf "the chain refused: %s" detail
@@ -2487,7 +2494,7 @@ let consumer_tail fixture =
     Consumer.consume_one ~config:fixture.config ~keeper_name
       ~commit:(fun _ -> fail "a range Memory already holds must not be read again")) with
   | Ok (Consumer.Progress_advanced _ | Official_advanced _) -> ()
-  | Ok (Nothing_to_read | Baseline_advanced _ | Memory_not_committed _ | Pending) ->
+  | Ok (Nothing_to_read | Baseline_advanced _ | Memory_not_committed _ | Pending _) ->
     fail "the consumer did not move the position of a committed range"
   | Error error -> fail (Consumer.error_to_string error)
 let test_a_finished_chain_commits_its_program_and_the_consumer_moves_the_position () = with_fixture (fun ~sw:_ fixture ->
@@ -2708,7 +2715,7 @@ let test_the_consumers_tail_runs_in_the_pass_that_published () = with_fixture (f
        | Ok Publish.Superseded -> fail "the Memory was still the one the program judged"
        | Error detail -> failf "the publication refused: %s" detail)) with
    | Ok (Consumer.Progress_advanced _) -> ()
-   | Ok (Nothing_to_read | Baseline_advanced _ | Official_advanced _ | Memory_not_committed _ | Pending) ->
+   | Ok (Nothing_to_read | Baseline_advanced _ | Official_advanced _ | Memory_not_committed _ | Pending _) ->
      fail "the pass that published must move the position"
    | Error error -> fail (Consumer.error_to_string error));
   check bool "the position moved" true (progress fixture<>position);
@@ -2743,7 +2750,7 @@ let run_until_done ?(wakes=ref 0) fixture =
   let rec go attempts =
     let before= !(fixture.deliveries) and woken= !wakes in
     match run_worker_waking fixture wakes with
-    | Ok Consumer.Pending when attempts>0 ->
+    | Ok (Consumer.Pending _) when attempts>0 ->
       if !wakes=woken then await_delivery fixture ~after:before;
       go (attempts-1)
     | result -> result in
@@ -2829,7 +2836,7 @@ let test_the_pass_reads_a_refused_turn_message_by_message kind tags () = with_fi
   check bool "the published range is no candidate" true (Option.is_none (candidate_of fixture));
   (match run_worker fixture with
    | Ok Consumer.Nothing_to_read -> ()
-   | Ok (Baseline_advanced _ | Progress_advanced _ | Official_advanced _ | Memory_not_committed _ | Pending) ->
+   | Ok (Baseline_advanced _ | Progress_advanced _ | Official_advanced _ | Memory_not_committed _ | Pending _) ->
      fail "the published range was read again"
    | Error error -> fail (Consumer.error_to_string error));
   nothing_left fixture request)
@@ -2859,8 +2866,8 @@ let next_selected_range fixture =
   let selected=ref None in
   (match memory_action fixture (fun () ->
      Consumer.consume_one ~config:fixture.config ~keeper_name ~commit:(fun source ->
-       selected:=Some source;Consumer.Memory_pending)) with
-   | Ok Consumer.Pending -> ()
+       selected:=Some source;Consumer.Memory_pending (Masc.Keeper_librarian_pending.Publication { request_id = "fixture-original"; detail = "publication is unfinished" }))) with
+   | Ok (Consumer.Pending _) -> ()
    | Ok (Nothing_to_read | Baseline_advanced _ | Progress_advanced _ | Official_advanced _ | Memory_not_committed _) ->
      fail "the pass must stop at the commit that asked to wait"
    | Error error -> fail (Consumer.error_to_string error));
@@ -2924,7 +2931,7 @@ let test_a_message_the_frame_refused_is_published_as_a_hole () = with_fixture (f
    | [] | _::_::_ -> fail "the refused message is the one unread hole");
   (match run_worker fixture with
    | Ok Consumer.Nothing_to_read -> ()
-   | Ok (Baseline_advanced _ | Progress_advanced _ | Official_advanced _ | Memory_not_committed _ | Pending) ->
+   | Ok (Baseline_advanced _ | Progress_advanced _ | Official_advanced _ | Memory_not_committed _ | Pending _) ->
      fail "the published range was read again"
    | Error error -> fail (Consumer.error_to_string error));
   nothing_left fixture request)
@@ -2951,7 +2958,7 @@ let test_a_step_the_host_refused_is_asked_again_under_a_new_id () = with_fixture
   let posts=F.post_count fixture.server in
   (match run_until_done fixture with
    | Ok (Consumer.Memory_not_committed [_]) -> ()
-   | Ok (Nothing_to_read | Baseline_advanced _ | Progress_advanced _ | Official_advanced _ | Pending
+   | Ok (Nothing_to_read | Baseline_advanced _ | Progress_advanced _ | Official_advanced _ | Pending _
         | Memory_not_committed ([] | _::_::_)) -> fail "the refused step must end the pass in one refusal report"
    | Error error -> fail (Consumer.error_to_string error));
   check (list int) "the step before it stays" [0] (positions_of (steps_of fixture request));
@@ -2962,7 +2969,7 @@ let test_a_step_the_host_refused_is_asked_again_under_a_new_id () = with_fixture
     (io (fun () -> claims fixture.keepers_dir));
   (match run_worker fixture with
    | Ok Consumer.Nothing_to_read -> ()
-   | Ok (Baseline_advanced _ | Progress_advanced _ | Official_advanced _ | Memory_not_committed _ | Pending) ->
+   | Ok (Baseline_advanced _ | Progress_advanced _ | Official_advanced _ | Memory_not_committed _ | Pending _) ->
      fail "the published range was read again"
    | Error error -> fail (Consumer.error_to_string error));
   nothing_left fixture request)
@@ -2987,7 +2994,7 @@ let test_a_pass_starts_the_chain_again_when_memory_changed_under_it () = with_fi
     ["Independent explicit write";"claim number 1";"claim number 2"] (io (fun () -> claims fixture.keepers_dir));
   (match run_worker fixture with
    | Ok Consumer.Nothing_to_read -> ()
-   | Ok (Baseline_advanced _ | Progress_advanced _ | Official_advanced _ | Memory_not_committed _ | Pending) ->
+   | Ok (Baseline_advanced _ | Progress_advanced _ | Official_advanced _ | Memory_not_committed _ | Pending _) ->
      fail "the published range was read again"
    | Error error -> fail (Consumer.error_to_string error));
   nothing_left fixture request)
@@ -3126,7 +3133,7 @@ let with_legacy_omitted_original fixture f =
     | Some value -> Prompt_registry.set_override Prompt_names.librarian value |> get) (fun () ->
     let captured=ref None in
     assert_pending (memory_action fixture (fun () -> Consumer.consume_one ~config:fixture.config ~keeper_name
-      ~commit:(fun source -> captured:=Some source;Consumer.Memory_pending)));
+      ~commit:(fun source -> captured:=Some source;Consumer.Memory_pending (Masc.Keeper_librarian_pending.Publication { request_id = "fixture-original"; detail = "publication is unfinished" }))));
     let source=Option.get !captured in
     let input=Source.input source in
     check bool "legacy original has observations the old question could omit" true

@@ -1,11 +1,13 @@
 let make_librarian
     ?state
+    ?admission_wait
     ?unread_atom_turns
     ?unread_official_turns
     ?stalled
     ?last_success_at
     () : Masc.Tui_decode_memory_health.memory_librarian_health =
   { mlh_state = state
+  ; mlh_admission_wait = admission_wait
   ; mlh_measured_at = None
   ; mlh_unread_atom_turns = unread_atom_turns
   ; mlh_unread_official_turns = unread_official_turns
@@ -239,12 +241,12 @@ let reading_of keepers ?(refusals = []) keeper_name =
 let test_a_reading_gives_its_value_or_why_it_has_none () =
   let measured =
     make_keeper_health ~keeper_id:"alpha" ~updated_at:1794040000.0 ~age_bins:bins
-      (make_librarian ~state:Health.Pass_pending ~last_success_at:1794030000.0 ())
+      (make_librarian ~state:(Health.Pass_pending (Masc.Keeper_librarian_pending.Publication { request_id = "fixture-original"; detail = "publication is unfinished" })) ~last_success_at:1794030000.0 ())
   in
   let unmeasured = make_keeper_health ~keeper_id:"beta" (make_librarian ()) in
   let alpha = reading_of [ measured; unmeasured ] "alpha" in
   let beta = reading_of [ measured; unmeasured ] "beta" in
-  check_field "the pass end comes from the row's librarian" (Reading.Measured Health.Pass_pending)
+  check_field "the pass end comes from the row's librarian" (Reading.Measured (Health.Pass_pending (Masc.Keeper_librarian_pending.Publication { request_id = "fixture-original"; detail = "publication is unfinished" })))
     (Reading.pass_end alpha);
   check_field "the digest time comes from the row's librarian" (Reading.Measured 1794030000.0)
     (Reading.digest_at alpha);
@@ -293,7 +295,20 @@ let test_the_pass_cell_tone_follows_how_the_pass_ended () =
   check "a librarian with no lane asks for attention" Cell.Attention
     (Some Health.Pass_lane_unconfigured);
   check "a caught-up pass is quiet" Cell.Quiet (Some Health.Pass_drained);
-  check "a pending pass is quiet" Cell.Quiet (Some Health.Pass_pending);
+  check "a pending pass is quiet" Cell.Quiet (Some (Health.Pass_pending (Masc.Keeper_librarian_pending.Publication { request_id = "fixture-original"; detail = "publication is unfinished" })));
+  List.iter (fun (wait, tone) ->
+    let pending = Masc.Keeper_librarian_pending.Worker {
+      installation_id = "librarian"; request_id = "original"; wait } in
+    let state = Health.Pass_pending pending in
+    check "worker wait attention follows its execution evidence" tone (Some state))
+    Masc.Keeper_librarian_pending.[
+      Capacity, Cell.Quiet;
+      Processing, Cell.Quiet;
+      Outcome_unknown, Cell.Attention;
+      Unreachable, Cell.Quiet;
+      Missing_after_dispatch, Cell.Attention;
+      Journal_recheck, Cell.Quiet;
+    ];
   check "a pass that yielded to waiting work is quiet" Cell.Quiet
     (Some Health.Pass_yielded_to_waiting_unit);
   check "a librarian switched off is quiet" Cell.Quiet (Some Health.Pass_off);
@@ -322,6 +337,25 @@ let test_the_peak_lag_is_the_drawn_keeper_furthest_behind () =
     (peak [ "alpha"; "ghost" ]);
   Alcotest.(check int) "no measured lag has no peak" 0 (peak [ "gamma"; "delta" ])
 
+let test_admission_wait_is_independent_of_a_drained_durable_pass () =
+  List.iter (fun (wait, tone) ->
+    let admission_wait : Masc.Keeper_librarian_pending.worker =
+      {installation_id = "librarian"; request_id = "admission-original"; wait} in
+    let reading = reading_of [make_keeper_health
+      (make_librarian ~state:Health.Pass_drained ~admission_wait ())] "alpha" in
+    check_field "durable observation stays drained"
+      (Reading.Measured Health.Pass_drained) (Reading.pass_end reading);
+    (match reading with
+     | Reading.Row {admission_wait = Some observed; _} ->
+       Alcotest.(check bool) "original admission wait survives" true (observed = admission_wait)
+     | Row {admission_wait = None; _} | Unknown | No_row | Refused _ ->
+       Alcotest.fail "the admission wait disappeared");
+    let cell = Reading.pass_cell reading in
+    Alcotest.(check bool) "execution uncertainty requests attention" true (cell.tone = tone))
+    Masc.Keeper_librarian_pending.[
+      Capacity, Cell.Quiet;
+      Missing_after_dispatch, Cell.Attention]
+
 let () =
   Alcotest.run "tui_keeper_memory_reading"
     [ ( "memory reading"
@@ -339,5 +373,7 @@ let () =
             test_the_pass_cell_tone_follows_how_the_pass_ended
         ; Alcotest.test_case "the peak lag is the drawn keeper furthest behind" `Quick
             test_the_peak_lag_is_the_drawn_keeper_furthest_behind
+        ; Alcotest.test_case "admission wait is independent of a drained durable pass" `Quick
+            test_admission_wait_is_independent_of_a_drained_durable_pass
         ] )
     ]

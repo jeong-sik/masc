@@ -3,7 +3,9 @@
     retains input, absorption, locked disposition and receipt-backed ACK. *)
 type outcome =
   | Disabled | Idle | Recheck_new_input | Settled of { has_more : bool }
-  | Pending of string | Addon_unattached of { pending : int } | Unavailable of string
+  | Pending of string
+  | Awaiting_worker of Keeper_librarian_pending.worker
+  | Addon_unattached of { pending : int } | Unavailable of string
 val run : base_path:string -> keeper_name:string -> outcome
 (** Strictly discover the complete original forest/executions/gates before new
     work. Resume original IDs without resubmitting unknown work. Fresh Memory
@@ -12,7 +14,9 @@ val run : base_path:string -> keeper_name:string -> outcome
     untouched siblings run; ordinary failures stop this pass. Only typed whole
     host execution evidence permits disjoint two-child partition. Addon Off
     prevents new calls while completed original proof/commit/ACK can recover.
-    Pending returns promptly; existing server owner events wake the same lane.
+    Pending retains a non-worker evidence or publication wait. Awaiting_worker
+    retains the actual original's installation, request and submit-once wait,
+    including after earlier siblings committed. Existing owner events wake the lane.
     [Addon_unattached] means no keeper-librarian Add-on serves admit_memory:
     explicit admission is off and [pending] candidates stay queued. Work
     that needs no worker (retained judgments, commits, ACKs) still runs

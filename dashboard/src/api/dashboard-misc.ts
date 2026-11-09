@@ -68,9 +68,22 @@ export type KeeperMemoryHealthLibrarianState =
   | 'stopped'
   | 'raised'
 
+export type KeeperLibrarianWorkerPending = {
+  kind: 'worker'; installation_id: string; request_id: string;
+  wait: 'capacity' | 'processing' | 'outcome_unknown' | 'unreachable' | 'missing_after_dispatch' | 'journal_recheck'
+}
+
+export type KeeperLibrarianPending =
+  | KeeperLibrarianWorkerPending
+  | { kind: 'publication' | 'message_floor'; request_id: string; detail: string }
+  | { kind: 'basis_changed'; request_id: string }
+  | { kind: 'local_failure'; detail: string }
+
 export interface KeeperMemoryHealthLibrarian {
   state: KeeperMemoryHealthLibrarianState | null
   detail: string | null
+  pending: KeeperLibrarianPending | null
+  admission_wait: KeeperLibrarianWorkerPending | null
   measured_at: number | null
   unread_atom_turns: number | null
   unread_official_turns: number | null
@@ -195,7 +208,7 @@ export interface KeeperMemoryHealthKeeperEntry {
 }
 
 export interface KeeperMemoryHealthResponse {
-  schema: 'keeper.memory_os.current_health.v11'
+  schema: 'keeper.memory_os.current_health.v12'
   generated_at: number
   keepers: KeeperMemoryHealthKeeperEntry[]
   totals: {
@@ -311,10 +324,46 @@ const KEEPER_MEMORY_HEALTH_LIBRARIAN_STATES: readonly KeeperMemoryHealthLibraria
   'raised',
 ]
 
+function decodeKeeperLibrarianPending(raw: unknown): KeeperLibrarianPending | null {
+  if (!isRecord(raw)) return null
+  switch (raw.kind) {
+    case 'worker': {
+      if (!exactKeys(raw, ['kind', 'installation_id', 'request_id', 'wait'])) return null
+      const installation_id = nonEmptyString(raw.installation_id)
+      const request_id = nonEmptyString(raw.request_id)
+      const wait = raw.wait
+      if (!installation_id || !request_id) return null
+      switch (wait) {
+        case 'capacity': case 'processing': case 'outcome_unknown': case 'unreachable':
+        case 'missing_after_dispatch': case 'journal_recheck':
+          return { kind: 'worker', installation_id, request_id, wait }
+        default: return null
+      }
+    }
+    case 'publication': case 'message_floor': {
+      if (!exactKeys(raw, ['kind', 'request_id', 'detail'])) return null
+      const request_id = nonEmptyString(raw.request_id)
+      return request_id && typeof raw.detail === 'string'
+        ? { kind: raw.kind, request_id, detail: raw.detail } : null
+    }
+    case 'basis_changed': {
+      if (!exactKeys(raw, ['kind', 'request_id'])) return null
+      const request_id = nonEmptyString(raw.request_id)
+      return request_id ? { kind: 'basis_changed', request_id } : null
+    }
+    case 'local_failure':
+      return exactKeys(raw, ['kind', 'detail']) && typeof raw.detail === 'string'
+        ? { kind: 'local_failure', detail: raw.detail } : null
+    default: return null
+  }
+}
+
 function decodeKeeperMemoryHealthLibrarian(raw: unknown): KeeperMemoryHealthLibrarian | null {
   if (!isRecord(raw) || !exactKeys(raw, [
     'state',
     'detail',
+    'pending',
+    'admission_wait',
     'measured_at',
     'unread_atom_turns',
     'unread_official_turns',
@@ -327,6 +376,11 @@ function decodeKeeperMemoryHealthLibrarian(raw: unknown): KeeperMemoryHealthLibr
     ? null
     : KEEPER_MEMORY_HEALTH_LIBRARIAN_STATES.find(known => known === raw.state) ?? null
   if (raw.state !== null && state === null) return null
+  const pending = raw.pending === null ? null : decodeKeeperLibrarianPending(raw.pending)
+  if ((state === 'pending') !== (pending !== null) || (raw.pending !== null && pending === null)) return null
+  const admission = raw.admission_wait === null ? null : decodeKeeperLibrarianPending(raw.admission_wait)
+  if (raw.admission_wait !== null && admission?.kind !== 'worker') return null
+  const admission_wait = admission?.kind === 'worker' ? admission : null
   const detail = raw.detail === null ? null : nonEmptyString(raw.detail)
   if (raw.detail !== null && detail === null) return null
   const measured_at = raw.measured_at === null ? null : finiteNumber(raw.measured_at)
@@ -364,6 +418,8 @@ function decodeKeeperMemoryHealthLibrarian(raw: unknown): KeeperMemoryHealthLibr
   return {
     state,
     detail,
+    pending,
+    admission_wait,
     measured_at,
     unread_atom_turns,
     unread_official_turns,
@@ -684,7 +740,7 @@ function decodeKeeperMemoryHealth(raw: unknown): KeeperMemoryHealthResponse | nu
     ? ['schema', 'generated_at', 'keepers', 'totals', 'alert_summary', 'execution']
     : ['schema', 'generated_at', 'keepers', 'totals', 'alert_summary']
   if (!exactKeys(raw, expectedKeys)) return null
-  if (raw.schema !== 'keeper.memory_os.current_health.v11') return null
+  if (raw.schema !== 'keeper.memory_os.current_health.v12') return null
   const generated_at = finiteNumber(raw.generated_at)
   const keepers = Array.isArray(raw.keepers)
     ? raw.keepers.map(decodeKeeperMemoryHealthEntry)

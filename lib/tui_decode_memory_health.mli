@@ -36,7 +36,7 @@ type memory_librarian_pass_end =
   | Pass_lane_unconfigured
   | Pass_drained
   | Pass_yielded_to_waiting_unit
-  | Pass_pending
+  | Pass_pending of Keeper_librarian_pending.t
       (** Original work is suspended; unread input is neither consumed nor failed. *)
   | Pass_not_committed
   | Pass_stopped of string
@@ -57,8 +57,8 @@ type memory_librarian_failure_kind =
   | Failure_lane_cancelled
   | Failure_unhandled_exception
 
-(** The server's account of why a pass stopped or crashed; [None] for the
-    endings that carry none. *)
+(** The server's account of why a pass waits, stopped or crashed; [None] for
+    endings without a recorded cause. *)
 val memory_librarian_pass_end_cause : memory_librarian_pass_end -> string option
 
 (** RFC librarian-lifecycle §4.10: the atoms the Keeper's requests skip
@@ -88,6 +88,10 @@ type memory_librarian_stalled =
    "not measured", which the header prints as such; it is not zero. *)
 type memory_librarian_health = {
   mlh_state : memory_librarian_pass_end option;
+  mlh_admission_wait : Keeper_librarian_pending.worker option;
+      (** The explicit-admission lane's latest worker wait, independent of
+          the durable pass and its measurement time. [None] means the latest
+          admission pass had no worker wait or was not observed here. *)
   mlh_measured_at : float option;
   mlh_unread_atom_turns : int option;
   mlh_unread_official_turns : int option;

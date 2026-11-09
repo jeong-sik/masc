@@ -35,6 +35,14 @@ let resume ~store ~config ~reserved ~wake (original,request) =
         ~fresh_authority:(fresh_authority ~config ~reserved request)
       |> Result.map_error (fun detail -> Owner.Rejected detail))
   |> Result.map_error Owner.error_to_string
+let pending_worker wait (record : Retained.retained) =
+  Keeper_librarian_pending.Worker
+    (Keeper_librarian_pending.of_worker_wait ~installation_id:record.installation_id
+       ~request_id:record.request_id wait)
+let pending_publication request detail =
+  Keeper_librarian_pending.Publication { request_id = Request.request_id request; detail }
+let pending_basis request =
+  Keeper_librarian_pending.Basis_changed { request_id = Request.request_id request }
 let advance_original ~store record event =
   io (fun () -> match Retained.advance ~store ~expected:record ~event with
     | Ok (Retained.Stored record | Already_stored record) -> Ok record
@@ -305,7 +313,11 @@ let rec consume_one ~config ~keeper_name ~wake =
     match resume ~store ~config ~reserved ~wake original with
     | Error detail -> error detail
     | Ok (Owner.Finished _) -> Ok (completed_outcome request)
-    | Ok (Pending _ | Publication_waiting _ | Basis_superseded _) -> Ok Consumer.Pending
+    | Ok (Pending (wait, record)) ->
+      Ok (Consumer.Pending (pending_worker wait record))
+    | Ok (Publication_waiting detail) ->
+      Ok (Consumer.Pending (pending_publication request detail))
+    | Ok (Basis_superseded _) -> Ok (Consumer.Pending (pending_basis request))
     | Ok (Refused (final,_)) ->
       (* Only a non-counterpart refusal marks a smaller next read. A capacity-
          only counterpart original has no message-floor coordinate; narrowing
@@ -473,7 +485,9 @@ let rec consume_one ~config ~keeper_name ~wake =
       | Ok (Some _) ->
         let failure=ref None in
         let capacity_stop=ref None in
-        let stop detail=failure:=Some detail;Consumer.Memory_pending in
+        let stop detail =
+          failure := Some detail;
+          Consumer.Memory_pending (Keeper_librarian_pending.Local_failure detail) in
         let before_retain destination=match Refusal.blocks_destination stops destination with
           | None -> Ok ()
           | Some refusal -> capacity_stop:=Some refusal;Error (Consumer.error_to_string refusal) in
@@ -484,7 +498,11 @@ let rec consume_one ~config ~keeper_name ~wake =
             match resume ~store ~config ~reserved ~wake original with
             | Error detail -> stop detail
             | Ok (Owner.Finished _) -> Consumer.Memory_committed
-            | Ok (Pending _ | Publication_waiting _ | Basis_superseded _) -> Consumer.Memory_pending
+            | Ok (Pending (wait, record)) ->
+              Consumer.Memory_pending (pending_worker wait record)
+            | Ok (Publication_waiting detail) ->
+              Consumer.Memory_pending (pending_publication (snd original) detail)
+            | Ok (Basis_superseded _) -> Consumer.Memory_pending (pending_basis (snd original))
             | Ok (Refused (final,_)) -> Consumer.Memory_refused [Refusal.report ~store (snd original) final] in
         (* A refused one-turn original covers the range this pass selected. The
            pass reads that range message by message under the original, not as
@@ -497,12 +515,13 @@ let rec consume_one ~config ~keeper_name ~wake =
             | Ok moved ->
               Log.Keeper.info ~keeper_name
                 "durable Librarian message floor dropped its chain after Memory changed: records=%d" moved;
-              wake ();Consumer.Memory_pending in
+              wake (); Consumer.Memory_pending (pending_basis (Descent.request candidate)) in
           match Descent.descend ~store ~config ~reserved candidate with
           | Error detail -> stop detail
-          | Ok (Floor_chain.Pending detail) ->
-            Log.Keeper.info ~keeper_name "durable Librarian message floor waits: %s" detail;
-            Consumer.Memory_pending
+          | Ok (Floor_chain.Pending pending) ->
+            Log.Keeper.info ~keeper_name "durable Librarian message floor waits: %s"
+              (Keeper_librarian_pending.description pending);
+            Consumer.Memory_pending pending
           | Ok Floor_chain.Superseded -> superseded ()
           | Ok (Floor_chain.Stopped {position;report}) ->
             (* The host ended this step's ID. The steps before it stay, and the

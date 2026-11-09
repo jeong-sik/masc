@@ -27,6 +27,7 @@ type t =
       ; source_invalidations : int
       ; age_bins : Masc.Keeper_memory_age_bins.t option
       ; pass_end : Tui_decode_memory_health.memory_librarian_pass_end option
+      ; admission_wait : Masc.Keeper_librarian_pending.worker option
       }
 
 type index =
@@ -92,6 +93,7 @@ let index_of_snapshot (snap_opt : Tui_decode_memory_health.memory_health_snapsho
               ; source_invalidations = k.mkh_source_invalidations
               ; age_bins = k.mkh_age_bins
               ; pass_end = k.mkh_librarian.mlh_state
+              ; admission_wait = k.mkh_librarian.mlh_admission_wait
               }
           in
           Hashtbl.replace table k.mkh_keeper_id row)
@@ -249,7 +251,17 @@ let pass_word = function
   | Tui_decode_memory_health.Pass_lane_unconfigured -> "no lane set"
   | Tui_decode_memory_health.Pass_drained -> "caught up"
   | Tui_decode_memory_health.Pass_yielded_to_waiting_unit -> "yielded"
-  | Tui_decode_memory_health.Pass_pending -> "pending"
+  | Tui_decode_memory_health.Pass_pending pending ->
+    (match pending with
+     | Masc.Keeper_librarian_pending.Worker { wait = Capacity; _ } -> "queue full"
+     | Worker { wait = Processing; _ } -> "processing"
+     | Worker { wait = (Outcome_unknown | Missing_after_dispatch); _ } -> "check outcome"
+     | Worker { wait = Unreachable; _ } -> "worker offline"
+     | Worker { wait = Journal_recheck; _ } -> "rechecking"
+     | Publication _ -> "settling"
+     | Basis_changed _ -> "source changed"
+     | Message_floor _ -> "reading parts"
+     | Local_failure _ -> "recovery failed")
   | Tui_decode_memory_health.Pass_not_committed -> "saved none"
   | Tui_decode_memory_health.Pass_stopped _ -> "stopped"
   | Tui_decode_memory_health.Pass_raised _ -> "crashed"
@@ -262,15 +274,26 @@ let pass_tone = function
       Masc_tui_keeper_axis_cell.Failure
   | Tui_decode_memory_health.Pass_not_committed
   | Tui_decode_memory_health.Pass_lane_unconfigured -> Masc_tui_keeper_axis_cell.Attention
+  | Tui_decode_memory_health.Pass_pending pending ->
+    if Masc.Keeper_librarian_pending.needs_attention pending
+    then Masc_tui_keeper_axis_cell.Attention else Masc_tui_keeper_axis_cell.Quiet
   | Tui_decode_memory_health.Pass_off | Tui_decode_memory_health.Pass_drained
-  | Tui_decode_memory_health.Pass_yielded_to_waiting_unit
-  | Tui_decode_memory_health.Pass_pending -> Masc_tui_keeper_axis_cell.Quiet
+  | Tui_decode_memory_health.Pass_yielded_to_waiting_unit -> Masc_tui_keeper_axis_cell.Quiet
 ;;
 
 let pass_cell reading =
-  field_cell ~unmeasured:Masc_tui_keeper_age_ladder.unmeasured_mark
+  let durable = field_cell ~unmeasured:Masc_tui_keeper_age_ladder.unmeasured_mark
     ~measured:(fun ending -> { Masc_tui_keeper_axis_cell.text = pass_word ending; tone = pass_tone ending })
-    (pass_end reading)
+    (pass_end reading) in
+  match reading with
+  | Row { admission_wait = Some worker; _ } ->
+    let pending = Tui_decode_memory_health.Pass_pending (Masc.Keeper_librarian_pending.Worker worker) in
+    (match durable.tone with
+     | Failure -> durable
+     | Attention when pass_tone pending = Masc_tui_keeper_axis_cell.Quiet -> durable
+     | Quiet | Attention ->
+       { Masc_tui_keeper_axis_cell.text = pass_word pending ^ " (admit)"; tone = pass_tone pending })
+  | Row { admission_wait = None; _ } | Unknown | No_row | Refused _ -> durable
 ;;
 
 let updated_cell ~now reading =

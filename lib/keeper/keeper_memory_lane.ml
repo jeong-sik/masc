@@ -58,6 +58,7 @@ let init ~sw =
 ;;
 
 let current_sw () = Stdlib.Mutex.protect registry_mu (fun () -> !executor_sw)
+let initialized () = Option.is_some (current_sw ())
 
 let entry_key ~base_path ~keeper_name =
   Keeper_registry_types.registry_key ~base_path keeper_name ^ "#" ^ lane_label

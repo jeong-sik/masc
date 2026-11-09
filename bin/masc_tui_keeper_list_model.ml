@@ -1,4 +1,14 @@
-type layout = Compact | Detailed | Grouped
+type view =
+  | Plain
+  | By_state
+  | By_cause
+  | By_time
+  | By_memory
+  | By_age
+  | By_runtime
+  | Day_wall
+
+type density = One_line | Two_lines
 type sort = Priority | Recent | Oldest | Activity | Name
 type attention = Attention | Failing | Active | Waiting | Inactive | Unobserved
 
@@ -90,10 +100,49 @@ type row = {
   last_activity_at : float option;
 }
 
-let next_layout = function
-  | Compact -> Detailed
-  | Detailed -> Grouped
-  | Grouped -> Compact
+let next_view = function
+  | Plain -> By_state
+  | By_state -> By_cause
+  | By_cause -> By_time
+  | By_time -> By_memory
+  | By_memory -> By_age
+  | By_age -> By_runtime
+  | By_runtime -> Day_wall
+  | Day_wall -> Plain
+
+let view_label = function
+  | Plain -> "list"
+  | By_state -> "state"
+  | By_cause -> "cause"
+  | By_time -> "time"
+  | By_memory -> "memory"
+  | By_age -> "age"
+  | By_runtime -> "runtime"
+  | Day_wall -> "24h"
+
+let view_of_string = function
+  | "list" -> Some Plain
+  | "state" -> Some By_state
+  | "cause" -> Some By_cause
+  | "time" -> Some By_time
+  | "memory" -> Some By_memory
+  | "age" -> Some By_age
+  | "runtime" -> Some By_runtime
+  | "24h" -> Some Day_wall
+  | _ -> None
+
+let next_density = function
+  | One_line -> Two_lines
+  | Two_lines -> One_line
+
+let density_label = function
+  | One_line -> "compact"
+  | Two_lines -> "detailed"
+
+let density_of_string = function
+  | "compact" -> Some One_line
+  | "detailed" -> Some Two_lines
+  | _ -> None
 
 let next_sort = function
   | Priority -> Recent
@@ -102,23 +151,12 @@ let next_sort = function
   | Activity -> Name
   | Name -> Priority
 
-let layout_label = function
-  | Compact -> "compact"
-  | Detailed -> "detailed"
-  | Grouped -> "grouped"
-
 let sort_label = function
   | Priority -> "priority"
   | Recent -> "recent"
   | Oldest -> "oldest"
   | Activity -> "activity"
   | Name -> "name"
-
-let layout_of_string = function
-  | "compact" -> Some Compact
-  | "detailed" -> Some Detailed
-  | "grouped" -> Some Grouped
-  | _ -> None
 
 let sort_of_string = function
   | "priority" -> Some Priority
@@ -324,27 +362,181 @@ let rank row =
   let activity = primary_activity_of_row row in
   { row; activity; group = group_of ~failing:(trail_is_failed row) activity }
 
-let order_rows ~layout ~sort rows =
-  List.map rank rows
-  |> List.stable_sort
-    (fun left right ->
-      let group_order =
-        match layout with
-        | Grouped -> Int.compare (attention_rank left.group) (attention_rank right.group)
-        | Compact | Detailed -> 0
-      in
-      if group_order <> 0 then group_order
-      else match sort with
-        | Name -> compare_name left.row right.row
-        | Recent -> compare_recent left.row right.row
-        | Oldest -> compare_oldest left.row right.row
-        | Activity ->
-            let order = Int.compare (activity_rank left.activity) (activity_rank right.activity) in
-            if order = 0 then compare_recent left.row right.row else order
-        | Priority ->
-            let order = Int.compare (attention_rank left.group) (attention_rank right.group) in
-            if order = 0 then compare_recent left.row right.row else order)
-  |> List.map (fun ranked -> ranked.row)
+type cause_bucket =
+  | Cause_named of Masc_tui_keeper_trail.cause_group
+  | Cause_unnamed
+  | Not_failing
+
+type runtime_bucket =
+  | Runtime_named of string
+  | Runtime_unread
+
+type due =
+  | Due_late
+  | Due_held
+  | Due_within_hour
+  | Due_within_half_day
+  | Due_later
+  | Due_none
+  | Due_unknown
+
+type memory_follow =
+  | Memory_refused
+  | Memory_gap
+  | Memory_lagging
+  | Memory_following
+  | Memory_unread
+
+type memory_age =
+  | Age_within_3h
+  | Age_within_day
+  | Age_within_3d
+  | Age_older
+  | Age_unknown
+
+type outside = { due : due; follow : memory_follow; age : memory_age }
+
+let outside_unread = { due = Due_unknown; follow = Memory_unread; age = Age_unknown }
+
+type group =
+  | Group_state of attention
+  | Group_cause of cause_bucket
+  | Group_due of due
+  | Group_memory of memory_follow
+  | Group_age of memory_age
+  | Group_runtime of runtime_bucket
+
+let cause_bucket_of_row row =
+  match trail_of_row row with
+  | Masc_tui_keeper_trail.Trail_sound -> Not_failing
+  | Masc_tui_keeper_trail.Trail_failed
+      { walk = Masc_tui_keeper_trail.Walk_ended { cause; _ }; _ } -> Cause_named cause
+  | Masc_tui_keeper_trail.Trail_failed
+      { walk =
+          Masc_tui_keeper_trail.(
+            Walk_no_terminal _ | Walk_no_candidate_failure | Walk_not_captured
+            | Walk_unreadable | Walk_absent | Walk_not_applicable)
+      ; _ } -> Cause_unnamed
+
+let runtime_bucket_of_row row =
+  match runtime_of_row row with
+  | Some runtime -> Runtime_named runtime.Masc.Tui_decode.kr_runtime_id
+  | None -> Runtime_unread
+
+let keeper_name_of_row row = row.keeper.Masc.Tui_decode.k_name
+
+let group_of_view ~outside view row =
+  match view with
+  | Plain | Day_wall -> None
+  | By_state -> Some (Group_state (group_of_row row))
+  | By_cause -> Some (Group_cause (cause_bucket_of_row row))
+  | By_time -> Some (Group_due (outside ~keeper_name:(keeper_name_of_row row)).due)
+  | By_memory -> Some (Group_memory (outside ~keeper_name:(keeper_name_of_row row)).follow)
+  | By_age -> Some (Group_age (outside ~keeper_name:(keeper_name_of_row row)).age)
+  | By_runtime -> Some (Group_runtime (runtime_bucket_of_row row))
+
+let failed_half_hours ~now row =
+  match runtime_of_row row with
+  | None -> None
+  | Some runtime ->
+      Option.map
+        (fun (pulse : Masc.Keeper_turn_pulse.pulse) ->
+          let since = now -. float_of_int Masc.Keeper_turn_pulse.window_seconds in
+          List.length
+            (List.filter
+               (fun (slot : Masc.Keeper_turn_pulse.slot) ->
+                 slot.tally.failed > 0 && float_of_int slot.starts_at >= since)
+               pulse.slots))
+        runtime.Masc.Tui_decode.kr_recent_turns
+
+(* A slot leaves the last day once every half hour; a due time and a
+   snapshot age cross their bounds by the minute. *)
+let order_clock_step = function
+  | Plain | By_state | By_cause | By_memory | By_runtime -> None
+  | By_time | By_age -> Some 60.
+  | Day_wall -> Some (float_of_int Masc.Keeper_turn_pulse.slot_seconds)
+
+let cause_rank = function
+  | Cause_named cause ->
+      (match cause with
+       | Masc_tui_keeper_trail.Rate_limited -> 0
+       | Masc_tui_keeper_trail.Connection -> 1
+       | Masc_tui_keeper_trail.Provider -> 2
+       | Masc_tui_keeper_trail.Configuration -> 3
+       | Masc_tui_keeper_trail.Input -> 4
+       | Masc_tui_keeper_trail.Unusable_reply -> 5
+       | Masc_tui_keeper_trail.Effect_fenced -> 6
+       | Masc_tui_keeper_trail.Recovery -> 7
+       | Masc_tui_keeper_trail.Stopped -> 8
+       | Masc_tui_keeper_trail.Server -> 9
+       | Masc_tui_keeper_trail.Internal -> 10)
+  | Cause_unnamed -> 11
+  | Not_failing -> 12
+
+let due_rank = function
+  | Due_late -> 0
+  | Due_held -> 1
+  | Due_within_hour -> 2
+  | Due_within_half_day -> 3
+  | Due_later -> 4
+  | Due_none -> 5
+  | Due_unknown -> 6
+
+let follow_rank = function
+  | Memory_refused -> 0
+  | Memory_gap -> 1
+  | Memory_lagging -> 2
+  | Memory_following -> 3
+  | Memory_unread -> 4
+
+let age_rank = function
+  | Age_within_3h -> 0
+  | Age_within_day -> 1
+  | Age_within_3d -> 2
+  | Age_older -> 3
+  | Age_unknown -> 4
+
+(* What a view orders by before [sort]: a rank, then a name for the groups
+   that are named by the reading itself. *)
+let view_key ~now ~outside view ranked =
+  match view with
+  | Plain -> 0, ""
+  | By_state -> attention_rank ranked.group, ""
+  | By_cause -> cause_rank (cause_bucket_of_row ranked.row), ""
+  | By_time -> due_rank (outside ~keeper_name:(keeper_name_of_row ranked.row)).due, ""
+  | By_memory -> follow_rank (outside ~keeper_name:(keeper_name_of_row ranked.row)).follow, ""
+  | By_age -> age_rank (outside ~keeper_name:(keeper_name_of_row ranked.row)).age, ""
+  | By_runtime ->
+      (match runtime_bucket_of_row ranked.row with
+       | Runtime_named runtime_id -> 0, runtime_id
+       | Runtime_unread -> 1, "")
+  | Day_wall ->
+      (match failed_half_hours ~now ranked.row with
+       | Some failed -> -failed, ""
+       | None -> 1, "")
+
+let compare_view_key (left_rank, left_name) (right_rank, right_name) =
+  let order = Int.compare left_rank right_rank in
+  if order <> 0 then order else String.compare left_name right_name
+
+let compare_sorted sort left right =
+  match sort with
+  | Name -> compare_name left.row right.row
+  | Recent -> compare_recent left.row right.row
+  | Oldest -> compare_oldest left.row right.row
+  | Activity ->
+      let order = Int.compare (activity_rank left.activity) (activity_rank right.activity) in
+      if order = 0 then compare_recent left.row right.row else order
+  | Priority ->
+      let order = Int.compare (attention_rank left.group) (attention_rank right.group) in
+      if order = 0 then compare_recent left.row right.row else order
+
+let order_rows ~view ~sort ~now ~outside rows =
+  List.map (fun row -> let ranked = rank row in ranked, view_key ~now ~outside view ranked) rows
+  |> List.stable_sort (fun (left, left_key) (right, right_key) ->
+    let order = compare_view_key left_key right_key in
+    if order <> 0 then order else compare_sorted sort left right)
+  |> List.map (fun (ranked, _) -> ranked.row)
 
 type group_counts = {
   attention_rows : int;

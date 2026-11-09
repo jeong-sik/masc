@@ -29366,12 +29366,18 @@ let apply_startup_settings state (tui_settings : Masc_tui_config.t) =
        (match Masc_tui_keeper_list_model.sort_of_string value with
         | Some sort -> state.keeper_list_sort <- sort
         | None -> note_keeper_preference_error ("Unknown saved Keeper order: " ^ value)));
-  (match tui_settings.keeper_list_layout with
+  (match tui_settings.keeper_list_view with
    | None -> ()
    | Some value ->
-       (match Masc_tui_keeper_list_model.layout_of_string value with
-        | Some layout -> state.keeper_list_layout <- layout
+       (match Masc_tui_keeper_list_model.view_of_string value with
+        | Some view -> state.keeper_list_view <- view
         | None -> note_keeper_preference_error ("Unknown saved Keeper view: " ^ value)));
+  (match tui_settings.keeper_list_density with
+   | None -> ()
+   | Some value ->
+       (match Masc_tui_keeper_list_model.density_of_string value with
+        | Some density -> state.keeper_list_density <- density
+        | None -> note_keeper_preference_error ("Unknown saved Keeper density: " ^ value)));
   Option.iter (fun reason -> note_keeper_preference_error ("Keeper view preferences unavailable: " ^ reason))
     tui_settings.keeper_list_error
 
@@ -29436,6 +29442,7 @@ let main
       ~local_base_path:base_path ~preference_send ~preference_read:read_settings ~port ()
   in
   state.observation_store <- Result.to_option observation_store;
+  state.keeper_outside_reading <- Masc_tui_keeper_axis.outside;
   state.view <- Overview;
 
   (* Bind the bearer to the workspace actually opened, before any request is
@@ -39089,9 +39096,14 @@ Use relative paths for resources already held in the package. -->
               launch_keeper_sandbox_logs state ~mailbox:async_messages
                 keeper.k_name)
        | Some "v" when state.view = Keepers Keeper_list ->
-           cycle_keeper_list_layout state;
-           let preference =
-             Masc_tui_config.Keeper_view (Masc_tui_keeper_list_model.layout_label state.keeper_list_layout) in
+           cycle_keeper_list_view state;
+           let preference = keeper_view_preference state in
+           ignore (Masc_tui_config.submit_keeper_preference state.keeper_preference_writer
+             ~on_request_id:(fun request_id -> note_keeper_preference_submission state ~request_id preference)
+             ~sw:(Eio_context.get_switch_opt ()) ~base_path preference)
+       | Some "V" when state.view = Keepers Keeper_list ->
+           cycle_keeper_list_density state;
+           let preference = keeper_view_preference state in
            ignore (Masc_tui_config.submit_keeper_preference state.keeper_preference_writer
              ~on_request_id:(fun request_id -> note_keeper_preference_submission state ~request_id preference)
              ~sw:(Eio_context.get_switch_opt ()) ~base_path preference)

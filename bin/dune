@@ -784,7 +784,8 @@
  ; rows, masc_tui_file_icon the marks the Code tree draws beside a file and
  ; masc_tui_config_mark the marks the prompt registry and the params list
  ; draw in their first column; the sheet this module builds is where a
- ; reader looks up what one means. masc_tui_fetched answers whether a Code
+ ; reader looks up what one means. masc_tui_keeper_list_model names the
+ ; Keepers views the v key walks. masc_tui_fetched answers whether a Code
  ; file read is current, which decides if the footer names h and l.
  (libraries
   masc
@@ -799,6 +800,7 @@
   masc_tui_memory_mark
   masc_tui_planning_proof_mark
   masc_tui_keeper_chat_transcript
+  masc_tui_keeper_list_model
   masc_tui_roster_pane))
 
 (library
@@ -1973,6 +1975,7 @@
  (libraries
   masc
   masc_tui_types
+  masc_tui_keeper_list_model
   masc_tui_agenda
   masc_tui_keeper_age_ladder
   masc_tui_keeper_axis_cell

@@ -9854,7 +9854,13 @@ type state = {
      screen showing it would be state nobody can see. *)
   mutable followed_from: (surface * string option) option;
   mutable keeper_cursor: int;
-  mutable keeper_list_layout: Masc_tui_keeper_list_model.layout;
+  mutable keeper_list_view: Masc_tui_keeper_list_model.view;
+  mutable keeper_outside_reading:
+    state -> now:float -> keeper_name:string -> Masc_tui_keeper_list_model.outside;
+  (** Reduces the schedules and memory health of [state] for the time, memory
+      and age views. Those readings are decoded by modules built on this one,
+      so the TUI installs the reduction after it creates the state. *)
+  mutable keeper_list_density: Masc_tui_keeper_list_model.density;
   mutable keeper_list_sort: Masc_tui_keeper_list_model.sort;
   mutable keeper_list_preference_notice: string option;
   mutable keeper_list_preference_startup_error: string option;
@@ -12482,11 +12488,17 @@ type roster_inputs = {
   ri_async : Tui_decode.async_request_observation option;
   ri_asks : Masc.Tui_decode_asks.asks_snapshot option;
   ri_roster : Masc_tui_keeper_control.roster;
-  ri_layout : Masc_tui_keeper_list_model.layout;
+  ri_view : Masc_tui_keeper_list_model.view;
   ri_sort : Masc_tui_keeper_list_model.sort;
+  ri_schedules : schedule_snapshot option;
+  ri_schedule_freshness : Masc_tui_agenda.schedule_freshness;
+  ri_memory : Masc.Tui_decode_memory_health.memory_health_snapshot option;
+  ri_clock : int;
+      (** The step of {!Masc_tui_keeper_list_model.order_clock_step} the clock
+          is in; 0 for a view the clock cannot reorder. *)
 }
 
-let rows_of_keepers (inputs : roster_inputs) keepers : Masc_tui_keeper_list_model.row list =
+let rows_of_keepers ~now ~outside (inputs : roster_inputs) keepers : Masc_tui_keeper_list_model.row list =
   let turns =
     first_row_by_name inputs.ri_turns
       ~name:(fun (row : Tui_decode.keeper_turn_row) -> row.ktr_keeper_name)
@@ -12577,48 +12589,75 @@ let rows_of_keepers (inputs : roster_inputs) keepers : Masc_tui_keeper_list_mode
       ; last_activity_at = keeper_activity_at ~turn ~waiting:activity_waiting keeper
       })
     keepers
-  |> Masc_tui_keeper_list_model.order_rows ~layout:inputs.ri_layout
-       ~sort:inputs.ri_sort
+  |> Masc_tui_keeper_list_model.order_rows ~view:inputs.ri_view
+       ~sort:inputs.ri_sort ~now ~outside
 
 (* The full pattern makes a new input field a build error here until it is
    both named (warning 9) and compared (warning 27). The project leaves both
    warnings off, so they are turned on for this function alone. *)
 let[@warning "+9+27"] same_roster_inputs
     { ri_keepers; ri_turns; ri_waiting; ri_waiting_unverified; ri_waiting_failure;
-      ri_approvals; ri_tasks; ri_async; ri_asks; ri_roster; ri_layout; ri_sort } b =
+      ri_approvals; ri_tasks; ri_async; ri_asks; ri_roster; ri_view; ri_sort;
+      ri_schedules; ri_schedule_freshness; ri_memory; ri_clock } b =
   ri_keepers == b.ri_keepers && ri_turns == b.ri_turns
   && ri_waiting == b.ri_waiting && ri_waiting_unverified == b.ri_waiting_unverified
   && ri_waiting_failure == b.ri_waiting_failure && ri_approvals == b.ri_approvals
   && ri_tasks == b.ri_tasks && ri_async == b.ri_async && ri_asks == b.ri_asks
-  && ri_roster == b.ri_roster && ri_layout = b.ri_layout && ri_sort = b.ri_sort
+  && ri_roster == b.ri_roster && ri_view = b.ri_view && ri_sort = b.ri_sort
+  && ri_schedules == b.ri_schedules && ri_schedule_freshness = b.ri_schedule_freshness
+  && ri_memory == b.ri_memory && ri_clock = b.ri_clock
 
 (* The list, the terminal title, the Activity pane and the footer each ask for
    the rows in one frame. Every input is an immutable value the state swaps
    whole, so while each one is still the same value the last answer is the
    answer. *)
-let last_roster_rows : (roster_inputs * Masc_tui_keeper_list_model.row list) option ref =
+(* The rows in order, and the group of each one under the view. Both are
+   read at one instant, so a row that crosses a due or age bound between two
+   reads cannot sit in one group and under another's heading. *)
+type keeper_list_reading = {
+  klr_rows : Masc_tui_keeper_list_model.row list;
+  klr_groups : Masc_tui_keeper_list_model.group option list;
+}
+
+let last_roster_rows : (roster_inputs * keeper_list_reading) option ref =
   ref None
 
-let keeper_list_rows (state : state) : Masc_tui_keeper_list_model.row list =
+let keeper_list_reading (state : state) : keeper_list_reading =
+  let now = Unix.gettimeofday () in
   let inputs =
     { ri_keepers = state.keepers; ri_turns = state.keeper_turns
     ; ri_waiting = state.keeper_waiting; ri_waiting_unverified = state.keeper_waiting_unverified
     ; ri_waiting_failure = state.keeper_waiting_failure
     ; ri_approvals = state.keeper_tool_approvals; ri_tasks = state.tasks
     ; ri_async = state.tools_async_observation; ri_asks = state.asks_snapshot
-    ; ri_roster = state.keeper_roster; ri_layout = state.keeper_list_layout
-    ; ri_sort = state.keeper_list_sort }
+    ; ri_roster = state.keeper_roster; ri_view = state.keeper_list_view
+    ; ri_sort = state.keeper_list_sort
+    ; ri_schedules = state.schedules_agenda
+    ; ri_schedule_freshness = state.schedules_agenda_freshness
+    ; ri_memory = state.memory_health
+    ; ri_clock =
+        (match Masc_tui_keeper_list_model.order_clock_step state.keeper_list_view with
+         | Some step -> int_of_float (Float.floor (now /. step))
+         | None -> 0) }
   in
   match !last_roster_rows with
-  | Some (seen, rows) when same_roster_inputs seen inputs -> rows
+  | Some (seen, reading) when same_roster_inputs seen inputs -> reading
   | Some _ | None ->
+      let outside ~keeper_name = state.keeper_outside_reading state ~now ~keeper_name in
       let rows =
         match inputs.ri_keepers with
         | [] -> []
-        | keepers -> rows_of_keepers inputs keepers
+        | keepers -> rows_of_keepers ~now ~outside inputs keepers
       in
-      last_roster_rows := Some (inputs, rows);
-      rows
+      let groups =
+        List.map (Masc_tui_keeper_list_model.group_of_view ~outside inputs.ri_view) rows
+      in
+      let reading = { klr_rows = rows; klr_groups = groups } in
+      last_roster_rows := Some (inputs, reading);
+      reading
+
+let keeper_list_rows (state : state) : Masc_tui_keeper_list_model.row list =
+  (keeper_list_reading state).klr_rows
 
 let ordered_keepers state =
   List.map (fun row -> row.Masc_tui_keeper_list_model.keeper) (keeper_list_rows state)
@@ -12697,7 +12736,7 @@ let apply_keeper_preference_completion (state : state)
   let error =
     let choice = match completion.preference with
       | Keeper_order value -> "order " ^ value
-      | Keeper_view value -> "view " ^ value in
+      | Keeper_view { view; density } -> "view " ^ view ^ " · " ^ density in
     match completion.outcome with
     | Preference_saved -> None
     | Preference_unconfirmed reason -> Some ("Keeper " ^ choice ^ " save unconfirmed: " ^ reason)
@@ -12735,10 +12774,20 @@ let transition_keeper_view state view =
   state.view <- view;
   Option.iter (select_keeper_name state) selected
 
-let cycle_keeper_list_layout state =
+let cycle_keeper_list_view state =
   let selected = Option.map (fun (keeper : keeper) -> keeper.k_name) (selected_keeper state) in
-  state.keeper_list_layout <- Masc_tui_keeper_list_model.next_layout state.keeper_list_layout;
+  state.keeper_list_view <- Masc_tui_keeper_list_model.next_view state.keeper_list_view;
   Option.iter (keeper_list_select_name state) selected
+
+(* Density changes how tall a row is, not the order, so the cursor stays on
+   the same Keeper without a lookup. *)
+let cycle_keeper_list_density state =
+  state.keeper_list_density <- Masc_tui_keeper_list_model.next_density state.keeper_list_density
+
+let keeper_view_preference state =
+  Masc_tui_config.Keeper_view
+    { view = Masc_tui_keeper_list_model.view_label state.keeper_list_view
+    ; density = Masc_tui_keeper_list_model.density_label state.keeper_list_density }
 
 let cycle_keeper_list_sort state =
   let selected = Option.map (fun (keeper : keeper) -> keeper.k_name) (selected_keeper state) in
@@ -19911,7 +19960,9 @@ let create_state
   opening_notice = None;
   followed_from = None;
   keeper_cursor = 0;
-  keeper_list_layout = Masc_tui_keeper_list_model.Compact;
+  keeper_list_view = Masc_tui_keeper_list_model.By_state;
+  keeper_outside_reading = (fun _ ~now:_ ~keeper_name:_ -> Masc_tui_keeper_list_model.outside_unread);
+  keeper_list_density = Masc_tui_keeper_list_model.Two_lines;
   keeper_list_sort = Masc_tui_keeper_list_model.Priority;
   keeper_list_preference_notice = None;
   keeper_list_preference_startup_error = None;

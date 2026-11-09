@@ -73,6 +73,7 @@
   keeper_memory_os_current_journal
   keeper_memory_os_current_retraction_plan
   keeper_memory_os_current_publication
+  keeper_memory_os_current_read_anchor
   keeper_memory_os_receipt_selection
   keeper_memory_os_support_core
   keeper_memory_os_disposition_core

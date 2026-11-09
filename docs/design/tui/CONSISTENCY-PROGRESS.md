@@ -130,6 +130,36 @@ it with a parallel repair. Two local source reviews covered its full
 and direct interfaces. Parsing and source reviews remain separate from fixed
 toolchain compilation, native execution and formal current-head approvals.
 
+## 2026-11-10: request reading
+
+[#50740](https://github.com/jeong-sik/masc/pull/50740) leads each approval row with its original request/summary,
+then its actor. Gate rows retain the actual automatic/human phase even when a
+long tool name must shorten. Folded Asks show the first original question with
+the asker, age and additional-question count. These are display projections;
+the original row order, Ask keys, draft, source and approval authority remain.
+
+The selected preview retains execution site, age, input and real expiry facts.
+Call/approval/trace IDs move to the full reader; the reader also retains the
+original reason and target ID. Missing, failed, retained and unavailable sources
+are separate measured rows when they fit, before policy controls. The header
+qualifies the observed count and names the number of sources not current; full
+source details remain in the approval and question readers. The header count is qualified
+as observed unless all four readers are current. Normal title breakdown and the
+wall clock are removed, and an absent selected approval contributes no empty
+detail rows. Header, selected context, questions, footer and queue window still
+share the actual measured buffers. The selected question's compact allowance and
+any armed approval notice are reserved before optional source rows and selected
+context. When both need space, the question uses its existing shorter preview
+before an armed/in-flight approval loses its decision notice. Context is clipped
+only at complete prepared rows, with the full-reader hint when it has room.
+Question diagnostics do not follow the active editor.
+
+This is source work, not native or installed confirmation. Full question
+answering/follow-up readers, Verification/Harness, and the rest of the 23-surface
+scope remain open. Existing answer-receipt/origin blocks can themselves exceed a
+short viewport; bounding those blocks remains a separate input-surface repair.
+No wording, layout or row-order tests are added.
+
 The [second four-surface source review](../../reports/2026-11-10-four-surface-reading-review.md)
 keeps Memory health queries aligned with the displayed canonical/KO/EN state
 and carries refused health rows into fleet fact coverage, including anonymous
@@ -140,3 +170,24 @@ keeps both failed runs and the later decoder-fixture repair. Memory's 13 cases
 passed on b5655270; the decoder's 407 cases passed on f35a50b9. Only the decoder
 test changed between those sources. This does not cover the later Usage layer
 or establish a native capture of this follow-up.
+
+## 2026-11-10: stack integration and next readings
+
+The 14-layer native stack was rebased together onto main f7f30f94. It preserves
+the Memory author's decoder repair and selected validation records. The parallel
+local fixture repair was omitted because the same semantic repair was already
+present. Usage's self-citation fix is in #50730 itself; the later documentation
+layer no longer has to supply it. Captured source/run identities above remain
+historical observations, not execution results for the rebased heads.
+
+The Requests source passed independent rereview before restacking, and the three
+product-source blobs are identical after restacking; review of the new base is
+separate. Local OCaml 5.5.1 parsing and fragment checks differ from the pinned 5.5.2 build,
+formal GitHub approval, native screen, installation and restart. No local Dune
+build was run for this slice.
+
+Verification and Harness are next. Source inspection found that Harness cursor
+movement and rendering use different list heights, and both detail readers omit
+the failed-refresh warning while retaining an earlier snapshot. Those repairs,
+the oversized Ask receipt/origin case, and all remaining child/input readings
+stay in the full 23-surface scope.

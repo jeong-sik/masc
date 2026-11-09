@@ -5,8 +5,6 @@
     - {!Keeper_turn_up_create}: new keeper creation
     - {!Keeper_turn_up_update}: existing keeper reconfiguration *)
 
-open Keeper_types
-open Keeper_meta_contract
 open Keeper_meta_store
 open Keeper_types_profile
 

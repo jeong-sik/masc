@@ -4,8 +4,6 @@
     initial keeper meta construction, checkpoint creation,
     keepalive start, and response JSON generation. *)
 
-open Keeper_types
-open Keeper_meta_contract
 open Keeper_types_profile
 
 val create_response_json :

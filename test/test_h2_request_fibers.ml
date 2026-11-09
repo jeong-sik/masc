@@ -432,11 +432,10 @@ let stall_line = "took no response bytes"
 let stall_line_for path =
   Printf.sprintf "GET %s %s for %.0fs" path stall_line stalled_after_s
 
-(* A request whose response the client holds unread. [status] resolves when
-   the headers arrive, [reset] with the error h2 reports for the stream, and
-   [read_all] drains the body afterwards: [Ok body] when the stream ended with
-   END_STREAM, [Error ()] when it was reset. *)
-let open_unread ?(meth = `GET) ?(body = "") client path =
+(* A request whose response the client reads only when the test asks.
+   [status] resolves when the headers arrive, [reset] with the error h2
+   reports for the stream, and [body] with the response body reader. *)
+let open_stream ?(meth = `GET) ?(body = "") client path =
   let status, resolve_status = Eio.Promise.create () in
   let reset, resolve_reset = Eio.Promise.create () in
   let response_body, resolve_body = Eio.Promise.create () in
@@ -449,21 +448,28 @@ let open_unread ?(meth = `GET) ?(body = "") client path =
       Eio.Promise.resolve resolve_body reader;
       Eio.Promise.resolve resolve_status (H2.Status.to_code response.status)) in
   send_body writer body;
-  let read_all () =
-    let reader = Eio.Promise.await response_body in
-    let bytes = Buffer.create 256 in
-    let ended, resolve_end = Eio.Promise.create () in
-    let rec read () = H2.Body.Reader.schedule_read reader
-      ~on_eof:(fun () ->
-        Eio.Promise.resolve resolve_end
-          (match H2.Body.Reader.completion reader with
-           | H2.Body.Reader.Complete -> Ok (Buffer.contents bytes)
-           | H2.Body.Reader.Aborted | H2.Body.Reader.Pending -> Error ()))
-      ~on_read:(fun chunk ~off ~len ->
-        Buffer.add_string bytes (Bigstringaf.substring chunk ~off ~len);
-        read ()) in
-    read ();
-    Eio.Promise.await ended in
+  status, reset, response_body
+
+(* Reads the rest of [reader] into [bytes]: [Ok body] when the stream ended
+   with END_STREAM, [Error ()] when it was reset. *)
+let read_to_end reader bytes =
+  let ended, resolve_end = Eio.Promise.create () in
+  let rec read () = H2.Body.Reader.schedule_read reader
+    ~on_eof:(fun () ->
+      Eio.Promise.resolve resolve_end
+        (match H2.Body.Reader.completion reader with
+         | H2.Body.Reader.Complete -> Ok (Buffer.contents bytes)
+         | H2.Body.Reader.Aborted | H2.Body.Reader.Pending -> Error ()))
+    ~on_read:(fun chunk ~off ~len ->
+      Buffer.add_string bytes (Bigstringaf.substring chunk ~off ~len);
+      read ()) in
+  read ();
+  Eio.Promise.await ended
+
+(* [open_stream] whose body the test drains at once with [read_all]. *)
+let open_unread ?meth ?body client path =
+  let status, reset, response_body = open_stream ?meth ?body client path in
+  let read_all () = read_to_end (Eio.Promise.await response_body) (Buffer.create 256) in
   status, reset, read_all
 
 (* Each PING round trip gives the server a turn; [ready] is a server-side
@@ -621,6 +627,96 @@ let test_stalled_error_answer_ends source () =
       (logged (Printf.sprintf "%s /fail %s"
          (match source with `Handler -> "GET" | `Body_callback -> "POST") stall_line)))
 
+(* RFC-0518 D3. A body longer than one slice has a flush at each slice
+   boundary, and the bound counts from when a flush became the oldest one
+   waiting. The client's window holds one slice and the client reads one
+   slice a minute, so the body takes three minutes: past the bound, but
+   never more than a minute on one slice. *)
+let long_body = String.init (4 * Masc.Http_h2_stream.Stream_end.slice_bytes)
+    (fun n -> Char.chr (97 + n mod 26))
+
+(* Reads [n] more bytes of [reader] into [into]. The client opens the
+   stream's window again for the bytes it read. *)
+let read_exactly reader into n =
+  let target = Buffer.length into + n in
+  let read, resolve = Eio.Promise.create () in
+  let rec go () =
+    if Buffer.length into >= target then Eio.Promise.resolve resolve (Ok ())
+    else H2.Body.Reader.schedule_read reader
+      ~on_eof:(fun () -> Eio.Promise.resolve resolve (Error "the body ended early"))
+      ~on_read:(fun chunk ~off ~len ->
+        Buffer.add_string into (Bigstringaf.substring chunk ~off ~len);
+        go ()) in
+  go ();
+  match Eio.Promise.await read with Ok () -> () | Error reason -> fail reason
+
+let long_body_handler source ~stream_end _ h2_reqd =
+  let reqd = reqd_of_h2 ~stream_end h2_reqd in
+  let response = Httpun.Response.create `OK in
+  match source with
+  | `Whole -> Masc.Http_reqd.respond_with_string reqd response long_body
+  | `Streamed ->
+    let writer = Masc.Http_reqd.respond_with_streaming reqd response in
+    Masc.Http_reqd.Body_writer.write_string writer long_body;
+    Masc.Http_reqd.Body_writer.close writer
+
+let slice_window = Int32.of_int Masc.Http_h2_stream.Stream_end.slice_bytes
+
+let test_steady_reader_gets_a_long_body source () =
+  let clock = Eio_mock.Clock.make () in
+  let streams = registry ~clock () in
+  with_log_capture @@ fun logged ->
+  with_connection ~streams ~resources:(stalled_ledger ()) ~client_window:slice_window
+    Request_fibers (long_body_handler source)
+    (fun ~env:_ ~client ~client_flow:_ ~release:_ ~close_client:_ ~server:_ ->
+    let status, reset, response_body = open_stream client "/long" in
+    check int "the response started" 200 (Eio.Promise.await status);
+    let reader = Eio.Promise.await response_body in
+    let received = Buffer.create (String.length long_body) in
+    List.iter (fun minute ->
+      Eio_mock.Clock.set_time clock (60.0 *. float_of_int minute);
+      ping client;
+      check int (Printf.sprintf "nothing stalled by minute %d" minute) 0 (logged stall_line);
+      check bool (Printf.sprintf "the stream is open at minute %d" minute) false
+        (Eio.Promise.is_resolved reset);
+      read_exactly reader received Masc.Http_h2_stream.Stream_end.slice_bytes;
+      ping client)
+      [1; 2; 3];
+    check bool "the client got the whole body" true
+      (read_to_end reader received = Ok long_body);
+    check int "no stall line at all" 0 (logged stall_line))
+
+(* A client that reads none of a long body: one slice fits its window, the
+   next slice's flush waits, and at the bound the stream is reset. *)
+let test_idle_reader_of_a_long_body_is_cut () =
+  let clock = Eio_mock.Clock.make () in
+  let streams = registry ~clock () in
+  let resources = stalled_ledger () in
+  with_log_capture @@ fun logged ->
+  with_connection ~streams ~resources ~client_window:slice_window
+    Request_fibers (long_body_handler `Whole)
+    (fun ~env:_ ~client ~client_flow:_ ~release:_ ~close_client:_ ~server:_ ->
+    let status, reset, response_body = open_stream client "/long" in
+    check int "the response started" 200 (Eio.Promise.await status);
+    ping client;
+    check bool "the body holds its reservation" true
+      (Masc.Http_h2_response_ledger.pending_bytes resources > 0);
+    Eio_mock.Clock.set_time clock (stalled_after_s -. 1.0);
+    ping client;
+    check int "one second short of the bound the stream is open" 1
+      (Server_h2_stream_registry.active_streams streams);
+    Eio_mock.Clock.set_time clock stalled_after_s;
+    ping_until client (fun () -> Server_h2_stream_registry.active_streams streams = 0);
+    check bool "the client got RST_STREAM(INTERNAL_ERROR)" true
+      (match Eio.Promise.await reset with
+       | `Protocol_error (H2.Error_code.InternalError, _) -> true
+       | _ -> false);
+    check bool "the body did not end whole" true
+      (read_to_end (Eio.Promise.await response_body) (Buffer.create 16) = Error ());
+    check int "the reservation went back to the ledger" 0
+      (Masc.Http_h2_response_ledger.pending_bytes resources);
+    check int "one warn line names the long body" 1 (logged (stall_line_for "/long")))
+
 let () = run "H2 request fibers" ["connection progress", [
   test_case "direct reader reproduces occupied CPU stall" `Quick test_reader_control;
   test_case "GET preserves PING and WINDOW_UPDATE" `Quick (fun () -> test_multiplexed_progress `GET);
@@ -640,4 +736,10 @@ let () = run "H2 request fibers" ["connection progress", [
     (test_stalled_error_answer_ends `Handler);
   test_case "a stalled error answer from a body callback ends at the bound" `Quick
     (test_stalled_error_answer_ends `Body_callback);
+  test_case "a steady reader gets a whole body past the bound" `Quick
+    (test_steady_reader_gets_a_long_body `Whole);
+  test_case "a steady reader gets a streamed body past the bound" `Quick
+    (test_steady_reader_gets_a_long_body `Streamed);
+  test_case "an idle reader of a long body is cut at the bound" `Quick
+    test_idle_reader_of_a_long_body_is_cut;
 ]]

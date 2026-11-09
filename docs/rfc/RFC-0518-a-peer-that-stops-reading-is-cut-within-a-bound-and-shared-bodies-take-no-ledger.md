@@ -26,7 +26,7 @@ related: ["0512", "0493", "0350"]
 
 1. 멈춘 HTTP/2 스트림은 닫지 않고 RST_STREAM 으로 끊는다. 누가 보낸 RST_STREAM 이든 그 스트림의 switch 를 끝낸다(D1).
 2. HTTP/2 스트림 안의 flush 는 90초 안에 답을 받는다. 못 받으면 D1 으로 끊는다(D2).
-3. 소유한 통째 본문은 16 KiB 조각으로 쓰고 조각마다 flush 를 기다린다(D3).
+3. 긴 본문에는 16 KiB 조각마다 flush 지점을 둔다. 꾸준히 읽는 클라이언트는 조각마다 90초를 받는다(D3).
 4. accept 한 소켓의 쓰기 조각마다 기한을 둔다. 넘기면 연결을 닫는다(D4).
 5. 바뀌지 않는 본문은 bigstring 하나를 모든 응답이 참조하고 원장을 쓰지 않는다. 대시보드 정적 asset 이 첫 사용처다(D5).
 6. 연결 준비(TLS handshake, 프로토콜 판별, 첫 읽기)는 30초 안에 끝나야 한다(D6).
@@ -85,14 +85,16 @@ related: ["0512", "0493", "0350"]
 
 ### D2. HTTP/2 스트림 안의 flush 는 정체 상한 안에 답을 받는다
 
-- **상한은 90초다.** 스트림의 flush 하나가 90초 안에 답을 받지 못하면 D1 으로 끊는다(`Stalled`). 요청 경로를 warn 한 줄로 남긴다.
+- **상한은 90초다.** 기다리는 flush 중 가장 오래된 것이 맨 앞에 선 뒤 90초 안에 답을 받지 못하면 D1 으로 끊는다(`Stalled`). 요청 경로를 warn 한 줄로 남긴다.
+  - 맨 앞에 선 때는 그 flush 의 등록과 바로 앞 flush 의 답 가운데 늦은 쪽이다. h2 는 한 본문의 flush 에 오래된 것부터 답한다.
+  - flush 하나만 기다리면 등록부터 잰다. D3 의 조각 경계 flush 와 합쳐지면 조각마다 90초가 된다.
 - **`Stream_end` 는 레지스트리가 스트림마다 만든다.** 지금은 `Http_reqd.of_h2` 가 만든다(`http_reqd.ml` 121줄). 레지스트리가 스트림 switch 를 열 때 만들고, 감시 daemon 하나를 그 switch 에 둔다. daemon 은 switch 를 붙잡지 않는다.
 - **`Stream_end` 를 fiber-local 로 묶는다.** `Eio.Fiber.with_binding` 은 fork 한 fiber 에도 이어진다(eio 1.3 `eio__core.mli` 387~394줄). 그래서 스트림 fiber 에서 건 flush 가 모두 여기 걸린다.
   - `Http_reqd` 의 writer flush
   - masc 가 스트림 fiber 에서 보고해 연 오류 응답의 `Http_h2_stream.close_after_flush`(gateway error handler, `server_h2_gateway.ml` 25줄)
   - 요청 본문 콜백을 스트림 switch 로 미루는 `Http_h2_stream.dispatch`(`http_reqd.ml` 421줄). 이 fork 는 연결 reader fiber 에서 일어나므로 원장처럼 명시적으로 다시 묶는다.
 - **H2 request handler 와 `Http_reqd.of_h2` 는 레지스트리가 만든 `Stream_end` 를 인자로 받는다.** handler 의 타입이 `stream_end:Http_h2_stream.Stream_end.t -> ...` 라서 `Stream_end` 없이 부를 수 없다. 묶이지 않았을 때 쓸 기본값을 만들지 않는다.
-  - 레지스트리 없이 gateway 나 `of_h2` 를 부르는 시험은 `Stream_end.create` 로 요청마다 하나 만든다(예: `test_dashboard_http_core.ml` 의 `stream_end_of`). 이 시험들은 연결 없이 h2 를 메모리 안에서 돌려서 frame tap 과 레지스트리가 없다. 레지스트리를 거치게 하려면 L2c 의 하네스 수정이 먼저 있어야 한다.
+  - 레지스트리 없이 gateway 나 `of_h2` 를 부르는 시험은 `Stream_end.create` 로 요청마다 하나 만든다(예: `test_dashboard_http_core.ml` 의 `stream_end_of`). 이 시험들은 연결 없이 h2 를 메모리 안에서 돌려서 frame tap 과 레지스트리가 없다.
   - 정체를 보지 않는 시험은 아무도 움직이지 않는 mock 시계나, 시험이 90초 안에 끝나는 실제 시계를 쓴다.
 - **원장의 flush 는 `Stream_end` 를 거치지 않는다.** 원장은 h2 의 flush 를 바로 건다(`http_h2_response_ledger.ml` 69줄). 그 예약은 범위가 끝날 때 `with_request` 의 release hook 이 푼다(52~60줄). 그래서 D1 이 범위를 끝내면 예약도 풀린다.
 - **gRPC 응답의 flush 도 `Stream_end` 를 거치지 않는다.** gRPC 리스너의 응답은 `Grpc_eio` 가 h2 에 바로 쓴다. 그 flush 는 D2 상한을 받지 않는다. 스트림 switch 는 레지스트리가 주므로, D1 으로 스트림이 끝나면 그 fiber 도 끝난다.
@@ -100,13 +102,18 @@ related: ["0512", "0493", "0350"]
 - **SSE `send` 의 자체 타이머는 HTTP/1.1 에서만 돈다.** HTTP/2 에서 같은 상한의 타이머 둘이 겨루지 않는다. 로그 스트림의 자체 send 와 정체 판정은 지우고 `Server_sse_response` 를 쓴다.
 - **상한은 lib/ 의 상수 하나다.** 값은 지금과 같은 90초다. `sse_stalled_after_s`(`server_mcp_transport_http_headers.ml` 294줄), `observer_idle_timeout_ms`(299줄), 로그 스트림의 `stalled_after_s` 가 이 상수를 쓴다. `server_mcp_transport_http_agui.ml` 16줄의 따로 적은 `30.0` 은 `sse_ping_interval_s` 로 바꾼다. 핑 간격(30초)은 상한보다 짧아서 읽는 클라이언트는 상한 안에 늘 프레임을 받는다.
 
-### D3. 소유한 통째 본문은 16 KiB 조각으로 쓴다
+### D3. 긴 본문에는 16 KiB 조각마다 flush 지점을 둔다
 
 - **조각 크기는 16 KiB 다.** 기본 `SETTINGS_MAX_FRAME_SIZE` 의 DATA 프레임 하나다. 선 위에서는 프레임 헤더 9 B 를 더해 16,393 B 라 TLS 레코드(평문 최대 16,384 B) 둘에 걸친다.
-- **원장 예약은 지금처럼 본문 전체다.** 원본 문자열이 응답이 끝날 때까지 메모리에 있기 때문이다. h2 에 들어가는 사본은 16 KiB 이하가 된다.
-- **헤더를 보낸 뒤 스트림 switch 의 fiber 가 조각을 쓴다.** 조각마다 flush 를 기다린다(D2 상한). 마지막 조각 뒤 본문을 닫고 예약을 푼다. 조각 하나에 들어가는 본문은 지금처럼 바로 쓴다.
-- **MCP POST 결과도 같은 길로 간다.** `safe_respond_chunked`(`server_mcp_transport_http.ml` 58~62줄)의 HTTP/2 쪽이다. 지금은 큰 결과를 flush 하나로 기다린다. D2 를 그대로 걸면 천천히 읽는 정상 클라이언트가 90초에 끊긴다.
-- **큰 SSE 프레임도 조각으로 쓴다.** `stream_post_sse_json` 은 tools/call 결과 전체를 프레임 하나로 보낸다(`server_mcp_transport_http.ml` 175~177줄). 지금 HTTP/2 의 `Stalled` 는 `close_after_flush` 만 불러서(`server_sse_response.ml` 87~95줄) 느린 클라이언트도 프레임 전체를 받는다. D2 를 그대로 걸면 50 KB/s 로 읽는 클라이언트가 5 MB 결과를 90초에 잃는다. 그래서 `Server_sse_response.send` 의 HTTP/2 쪽도 16 KiB 조각마다 flush 를 기다린다.
+- **D2 만 걸면 긴 본문을 천천히 읽는 정상 클라이언트가 끊긴다.** 본문 전체를 flush 하나로 기다리기 때문이다. 링크 속도 × 90초보다 큰 본문은 다 나가기 전에 상한에 닿는다. 그래서 D2 와 D3 을 한 PR 로 낸다.
+- **원장을 거치는 쓰기는 모두 조각으로 쓴다.** `Stream_end.write_slices` 가 본문을 16 KiB 씩 h2 에 넣고, 본문 안의 조각 경계마다 `Stream_end` flush 를 건다. 본문 끝은 호출한 쪽의 flush 나 close 가 맡는다. 원장을 거치는 쓰기는 `Http_h2_response_ledger.write_reserved` 하나라서, 이 한 곳이 아래 셋을 덮는다.
+  - 통째 본문(`h2_respond_with_string`)
+  - MCP POST 결과. `safe_respond_chunked`(`server_mcp_transport_http.ml` 58~62줄)는 스트리밍 writer 에 결과를 한 번 쓰고 닫는다.
+  - SSE 프레임. `stream_post_sse_json` 은 tools/call 결과 전체를 프레임 하나로 보낸다(`server_mcp_transport_http.ml` 175~177줄).
+- **조각 경계 flush 와 D2 의 "맨 앞에 선 때"가 합쳐져 조각마다 90초가 된다.** 꾸준히 읽는 클라이언트는 본문 전체가 90초보다 오래 걸려도 끝까지 받는다. 아무것도 읽지 않는 클라이언트는 첫 창 뒤의 조각에서 90초에 끊긴다. 맨 앞 flush 는 조각 하나가 다 나가야 바뀌므로 1바이트 WINDOW_UPDATE 로는 늘어나지 않는다(§3.3).
+- **조각은 한꺼번에 h2 에 넣는다.** 조각마다 쓰기를 기다리는 fiber 를 두지 않는다. 그래서 여러 fiber 가 한 응답에 쓰는 SSE 프레임도 순서와 경계가 그대로이고, 메모리 안 시험 펌프도 그대로 돈다. 대가로 h2 에 들어가는 사본은 지금처럼 본문 전체다. assets 의 사본은 D5 가 없앤다.
+- **원장 예약은 지금처럼 본문 전체다.** 원본 문자열이 응답이 끝날 때까지 메모리에 있기 때문이다.
+- **SSE `send` 의 자체 타이머는 L2b2 전까지 HTTP/2 에서도 돈다.** 그동안 큰 프레임을 천천히 읽는 HTTP/2 클라이언트에는 `send` 가 90초에 `Stalled` 로 답하고 응답을 닫는다. 닫기는 남은 조각이 다 나간 뒤라서 클라이언트는 그 프레임을 끝까지 받는다. 지금도 그렇다(`server_sse_response.ml` 87~95줄).
 - **헤더를 보내기 전의 예외는 지금처럼 예약을 풀고 다시 낸다.** `http_reqd.ml` 231~249줄은 예약한 뒤 `H2.Reqd.respond_with_streaming` 을 부른다. `error_code` 가 이미 있으면 h2 는 헤더를 쓰기 전에 `currently handling error` 를 낸다(reqd.ml 280~285줄). 그때 예약을 풀지 않으면 최대 32 MiB(`tool_blob_store.ml` 343줄)가 응답 없이 남는다.
 - **헤더를 보낸 뒤의 예외는 D1 reset 으로 끝낸다.** 그 자리의 `release; raise` 만 지운다.
 
@@ -241,20 +248,20 @@ upstream tls-eio main 도 같은 4 KiB 경로다(조사 §1.8). 릴리스를 기
 ## 6. 확인 방법
 
 - 로컬 dune 빌드는 하지 않는다. 타입 검사와 시험 실행은 cmi 스냅샷과 실제 링크 도구로 한다. 전체 빌드와 시험은 CI 가 한다.
-- 시험 하네스는 층마다 그 층이 고친다. L2a·L2b 의 시험은 `serve_h2_connection` 을 거치는 하네스(`test_h2_request_fibers.ml`, `test_h2_response_resources.ml`)를 쓴다. L2c 는 `test/test_h2_response_window.ml` 의 메모리 안 h2 펌프를 고친다. 그 펌프는 root switch 를 스트림 switch 로 넘기고, 조각 writer 가 돌 틈을 주지 않는다. 스트림마다 `Switch.run` 을 두고 `Fiber.yield` 나 mock clock 진행을 넣는다.
+- 시험 하네스는 층마다 그 층이 고친다. L2a·L2b 의 시험은 `serve_h2_connection` 을 거치는 하네스(`test_h2_request_fibers.ml`, `test_h2_response_resources.ml`)를 쓴다. D3 은 조각을 기다리는 fiber 를 두지 않아서 메모리 안 h2 펌프(`test/test_h2_response_window.ml` 등)를 고치지 않는다.
 - 새 시험은 프로토콜·자원 경계만 본다. clock 은 `Eio_mock` 이다.
   - 창 0 SSE 스트림: 상한 뒤 RST_STREAM 이 오고 원장 사용량이 0 이 된다.
   - 응답을 시작한 handler 가 예외를 내면 조각 writer 와 예약이 바로 풀린다.
   - 응답 전에 handler 가 예외를 내면 오류 응답이 끝까지 나가고, 그 뒤 범위가 끝난다.
   - 이미 보고한 스트림을 다시 reset 해도 예외가 나지 않는다.
   - h2 가 스스로 RST_STREAM 을 쓰면 그 스트림 범위가 `Reset_by_us` 로 끝나고, 연결은 다음 요청에 답한다.
-  - 창보다 큰 통째 본문: 창을 안 여는 클라이언트는 상한 뒤 RST_STREAM 을 받고, 창을 여는 클라이언트는 본문 전체를 받는다.
-  - 큰 MCP POST 결과를 천천히 읽는 클라이언트도 끝까지 받는다.
+  - 창이 조각 하나인 클라이언트가 1분에 한 조각씩 읽으면 3분 걸리는 본문을 끝까지 받는다. 통째 본문과 스트리밍 writer 둘 다다. 큰 MCP POST 결과는 스트리밍 writer 에 한 번 쓰고 닫으므로 스트리밍 경우가 덮는다.
+  - 같은 본문을 하나도 읽지 않는 클라이언트는 상한 뒤 RST_STREAM 을 받고, 예약이 원장으로 돌아간다.
   - 창 0 에서 연 오류 응답은 상한 뒤 RST_STREAM 으로 끝난다.
   - 공유 본문 응답 둘을 보내는 동안 원장 사용량이 0 이다.
   - 이벤트를 기다리는 생산자는 스트림 reset 과 close 에 바로 취소된다.
   - 소켓 감싸개: `copy` 가 모든 바이트를 순서대로 쓴다. 상대가 안 받는 쓰기는 상한 뒤 `End_of_file` 이고, 뒤 쓰기도 같고, 읽기도 EOF 다(socketpair). 아무것도 안 보내는 연결은 준비 상한 뒤 닫힌다.
-  - 음성 대조: reset 함수, 내보낸 RST_STREAM 규칙, 감시 daemon, 조각 기다림을 각각 뺀 변이에서 해당 시험이 실패한다. 내보낸 RST_STREAM 규칙의 시험은 `serve_h2_connection` 을 거친다. h2 가 스스로 스트림을 끊을 때(반쯤 닫힌 스트림의 DATA → STREAM_CLOSED, server_connection.ml 758~764줄) masc fiber 가 기다리고 있어야 한다. 메모리 안 하네스는 frame tap 과 레지스트리를 거치지 않는다(`test_h2_response_window.ml` 99~123줄).
+  - 음성 대조: reset 함수, 내보낸 RST_STREAM 규칙, 감시 daemon, 조각 경계 flush, 맨 앞에 선 때부터 재기를 각각 뺀 변이에서 해당 시험이 실패한다. 내보낸 RST_STREAM 규칙의 시험은 `serve_h2_connection` 을 거친다. h2 가 스스로 스트림을 끊을 때(반쯤 닫힌 스트림의 DATA → STREAM_CLOSED, server_connection.ml 758~764줄) masc fiber 가 기다리고 있어야 한다. 메모리 안 하네스는 frame tap 과 레지스트리를 거치지 않는다(`test_h2_response_window.ml` 99~123줄).
 - 설치 뒤 실측. 사용자가 층별 빌드를 설치하고 재시작하면 evidence 묶음의 탐침을 같은 호스트에서 다시 돌린다.
   - `h2_stall_probe.py`: 창을 열기 전(105초 안)에 RST_STREAM 3개가 온다. 지금 탐침은 로그 스트림의 정체 줄("accepted no frame")을 세고 프레임 도착 시각을 적지 않는다. D2 가 그 줄을 지우므로, 탐침이 RST_STREAM 을 도착 시각과 함께 세게 고친다.
   - `ledger_starvation_probe.py`: 번들 90개를 쥔 클라이언트가 있어도 정상 클라이언트의 번들이 200 이다.
@@ -286,8 +293,7 @@ worktree `.worktrees/h2-backpressure` 에서 gh stack 으로 쌓는다. 맨 아�
 | L1 | `rfc/0518-stalled-peer-bounds` | 이 RFC | #50428 |
 | L2a | `http/h2-stream-reset` | D1: `Http_h2_stream` 의 reset 함수, 내보낸 RST_STREAM 규칙 | |
 | L2a2 | `http/h2-ended-writer` | D1 의 나머지: `http_reqd.ml` 의 보고 두 곳(295·474줄), `Ended` writer | |
-| L2b | `http/h2-flush-bound` | D2 | |
-| L2c | `http/h2-body-slices` | D3, 시험 하네스 | |
+| L2b | `http/h2-flush-bound` | D2, D3(한 PR) | |
 | L3 | `deps/tls-2.1.5` | D9 | |
 | L4 | `http/connection-socket-bounds` | D4, D6, D8 | |
 | L5 | `http/sse-producer-scope` | D7 | |

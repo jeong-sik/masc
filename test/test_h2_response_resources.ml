@@ -136,7 +136,9 @@ let test_whole_response_and_scope_release () =
     lease_seen:=Some lease;
     let writer=H2.Reqd.respond_with_streaming ~flush_headers_immediately:true reqd
       (H2.Response.create `OK) in
-    Resources.write_reserved lease writer whole_payload;
+    Resources.write_reserved lease
+      ~write:(fun writer payload -> H2.Body.Writer.write_string writer payload)
+      writer whole_payload;
     H2.Body.Writer.flush writer (function `Written | `Closed -> H2.Body.Writer.close writer) in
   with_session ~capacity:(String.length whole_payload) handler (fun resources session ->
     request session 1;

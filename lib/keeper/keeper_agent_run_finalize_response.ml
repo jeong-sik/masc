@@ -146,9 +146,6 @@ let finalize
     ~task_context
     ~config
     ~meta
-    ~publication_recovery
-    ~ctx_snapshot
-    ~(profile_defaults : Keeper_types_profile.keeper_profile_defaults)
     ~manifest_keeper_turn_id
     ~session
     ~(append_manifest : Keeper_agent_run_turn_helpers.append_manifest_fn)
@@ -174,9 +171,7 @@ let finalize
     ~raw_response_text
     ~turn_outcome
     ~terminal_effect_receipt
-    ~capture_replay_response
-    ?continuation_channel
-    () =
+    ~capture_replay_response =
   let completion_contract_result = acc.receipt_completion_contract_result in
   let control_checkpoint =
     Keeper_agent_run_response_text.stop_reason_suppresses_visible_response

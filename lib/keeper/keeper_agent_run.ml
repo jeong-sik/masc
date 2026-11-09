@@ -1891,9 +1891,7 @@ let run_turn
                          | Ok (turn_outcome, terminal_effect_receipt) ->
                            Keeper_agent_run_finalize_response.finalize
                              ~task_context:ctx.task_context
-                             ~config ~meta ~publication_recovery
-                             ~ctx_snapshot:ctx_work
-                             ~profile_defaults
+                             ~config ~meta
                              ~manifest_keeper_turn_id
                              ~session ~append_manifest
                              ~model:manifest_model_label
@@ -1917,7 +1915,6 @@ let run_turn
                              ~raw_response_text:response_text
                              ~turn_outcome
                              ~terminal_effect_receipt
-                             ?continuation_channel
                              ~capture_replay_response:
                                (fun ~response_text ->
                                  (* Phase O observability: capture the exact
@@ -1934,7 +1931,7 @@ let run_turn
                                    ~trace_id:meta.runtime.trace_id
                                    ~response_text
                                    ())
-                             ())))
+                             )))
                in
        (* [finalize] writes the end line of a turn that settles. An
           official-client turn that fails never reaches it, and without that

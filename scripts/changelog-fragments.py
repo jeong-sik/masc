@@ -18,7 +18,12 @@ Modes:
                                        list PRs merged since B whose changes
                                        carry no fragment — reported once, at
                                        the fold, so the release author can
-                                       write the entries; never a refusal
+                                       write the entries; with --strict the
+                                       same report also refuses the fold
+                                       (exit 3, exemptions aside). When HEAD
+                                       has not moved past the release cut the
+                                       range is empty and the report passes —
+                                       that is a genuinely empty window.
   pr-guard --base B [--head H]         refuse a PR that adds a bullet under
                                        [Unreleased] in CHANGELOG.md instead of
                                        writing a fragment (a release PR, which
@@ -338,6 +343,12 @@ def _exempt_numbers() -> set[int]:
         head = line.split("#", 1)[0].strip()
         if head.isdigit():
             out.add(int(head))
+        elif head:
+            print(
+                f"warning: changelog-fragments-exempt.txt: ignoring"
+                f" unrecognized line: {line!r}",
+                file=sys.stderr,
+            )
     return out
 
 

@@ -84,8 +84,8 @@ if [ -n "$base_ref" ]; then
   if [ "$missing_status" -eq 3 ]; then
     # Exit 3 is the strict gate's "findings" verdict: the report listed
     # non-exempt pull requests without fragments. Refuse the bump — write
-    # or backfill the fragments first. (Exempt-only output exits 0 and the
-    # report still prints, so the operator sees every omission.)
+    # or backfill the fragments first. (Exempt-only output exits 0 and is
+    # echoed below, so the operator still sees every omission.)
     cat "$missing_out" >&2
     echo "error: merged pull requests above lack changelog fragments; refusing to bump" >&2
     rm -f "$missing_err" "$missing_out"
@@ -95,6 +95,11 @@ if [ -n "$base_ref" ]; then
     # An empty list means "nothing missing"; a crash must not look like one.
     echo "warning: missing-fragment list failed (exit $missing_status)" >&2
     sed 's/^/  /' "$missing_err" >&2
+  fi
+  if [ "$missing_status" -eq 0 ] && [ -s "$missing_out" ]; then
+    # Exempt-only findings still exit 0; echo them so the operator sees
+    # every omission, not just the blocking ones.
+    cat "$missing_out" >&2
   fi
   rm -f "$missing_err" "$missing_out"
 fi

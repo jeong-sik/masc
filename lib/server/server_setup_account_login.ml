@@ -297,7 +297,7 @@ let control ~owner ~base_path ~body request reqd =
   | Ok () -> Http.Response.json_value ~status:`Accepted ~request (`Assoc ["accepted", `Bool true]) reqd
   | Error error -> respond ~status:(session_status error) ~request reqd (Session.error_message error)
 
-(* ---- a person's account, called once (plan D1-6a) ---- *)
+(* ---- a person's account, called once (plan D1-6a), and its Runtime (plan D1) ---- *)
 
 let verification_timeout_s = 120.0
 
@@ -316,6 +316,23 @@ let verify_request body =
   | _ -> Error expected
 
 let unknown_account = "No account of yours has this id."
+
+type prepared =
+  { provider_account_id : Authz_types.Provider_account_id.t
+  ; runtime_id : Authz_types.Runtime_id.t
+  ; runtime : Runtime_instance.t
+  }
+
+(* The diagnostic of a runtime that does not load can name a path of the
+   server, so it goes to the server log (issue #50018). The other errors name
+   only the provider and the model the person chose. *)
+let template_error (error : Runtime_account_runtime.error) =
+  match error with
+  | Runtime_account_runtime.Not_materialized _ ->
+    Log.Server.warn "Account runtime did not load: %s" (Runtime_account_runtime.error_to_string error);
+    `Bad_request, "The runtime of this account does not load."
+  | Runtime_account_runtime.Template_not_declared _ | Runtime_account_runtime.Model_not_bound _ ->
+    `Bad_request, Runtime_account_runtime.error_to_string error
 
 (* The account of the person, its integration as the login receipt names it,
    and the runtime of [model] on its home. An account of another person is
@@ -342,28 +359,92 @@ let person_runtime person ~base_path ~provider_account_id ~model =
       ~client:target.Server_runtime_setup_actions.client
     |> Result.map_error (fun message -> `Service_unavailable, message) in
   let* config = Server_runtime_setup_actions.config ~base_path |> Result.map_error setup_error in
-  Runtime_account_runtime.of_template config ~template:receipt.integration_id
-    ~provider_id:provider_account_id ~account_home ~model
-  |> Result.map_error (fun error -> `Bad_request, Runtime_account_runtime.error_to_string error)
+  let* runtime = Runtime_account_runtime.of_template config ~template:receipt.integration_id
+      ~provider_id:provider_account_id ~account_home ~model
+    |> Result.map_error template_error in
+  (* Checked before the call, so a model that makes no Runtime id is not
+     called for two minutes first. *)
+  let* runtime_id = Authz_types.Runtime_id.of_string runtime.Runtime_instance.id
+    |> Result.map_error (fun _ -> `Bad_request, "This model makes no valid Runtime id.") in
+  Ok { provider_account_id = id; runtime_id; runtime }
+
+(* One verification of an account at a time: each starts the official client
+   for up to [verification_timeout_s], so a second one while the first runs
+   is answered 409 (issue #50018). An account has one owner, so its id is the
+   key. *)
+let verifying = Hashtbl.create 8
+let verifying_mutex = Mutex.create ()
+let verify_running = "A verification of this account is running."
+
+let while_verifying provider_account_id f =
+  let key = Authz_types.Provider_account_id.to_string provider_account_id in
+  let claimed = Mutex.protect verifying_mutex (fun () ->
+    if Hashtbl.mem verifying key then false else (Hashtbl.replace verifying key (); true)) in
+  if not claimed then Error (`Conflict, verify_running)
+  else Fun.protect f ~finally:(fun () ->
+    Mutex.protect verifying_mutex (fun () -> Hashtbl.remove verifying key))
+
+type recorded = Made | Existing
+
+let recorded_label = function Made -> "made" | Existing -> "existing"
+
+let runtime_failure = "The Runtime of this account could not be recorded."
+
+(* A model of the person's account answered and called a tool, so its binding
+   is a Runtime of theirs, with its Self grant (plan D1). Another call finds
+   the Runtime the first one made. *)
+let record_runtime person { provider_account_id; runtime_id; runtime = _ } =
+  let state = (Authz_zone.snapshot person.zone).Authz_zone.state in
+  match Authz_runtime_state.find state.Authz_state.runtimes runtime_id with
+  | Some { Authz_runtime_state.owner; provider_account_id = account; self_grant = _ }
+    when Authz_types.User_id.equal owner person.user_id
+         && Authz_types.Provider_account_id.equal account provider_account_id -> Ok Existing
+  | Some _ -> Error (`Conflict, "Another account has a Runtime of this id.")
+  | None ->
+    (match Authz_runtime.make person.zone ~user_id:person.user_id ~provider_account_id ~runtime_id
+             ~draw:Auth.generate_token with
+     | Ok (_ : Authz_types.Grant_id.t) -> Ok Made
+     | Error error ->
+       Log.Server.warn "Runtime %s was not recorded: %s"
+         (Authz_types.Runtime_id.to_string runtime_id) (Authz_runtime.error_to_string error);
+       Error (`Service_unavailable, runtime_failure))
+
+(* The detail of a failure can name a path of the server, so it goes to the
+   server log and the person gets the code and the message (issue #50018). *)
+let log_detail (result : Runtime_verification.result) =
+  match Option.bind result.Runtime_verification.failure Runtime_verification.failure_detail with
+  | Some detail -> Log.Server.warn "Account verification %s failed: %s" result.runtime_id detail
+  | None -> ()
+
+let call ~env prepared =
+  (* macOS TMPDIR sits under the /var -> /private/var symlink, and a runtime
+     root must be its own realpath, as the runtime-verify command has it. *)
+  match Filename.temp_dir "masc-account-verify-" "" |> Unix.realpath with
+  | exception (Unix.Unix_error _ | Sys_error _) ->
+    Error (`Service_unavailable, "The private verification directory could not be made.")
+  | private_dir ->
+    Ok (Eio.Switch.run (fun sw ->
+      Eio.Switch.on_release sw (fun () -> Fs_compat.remove_tree private_dir);
+      Runtime_verification.verify_as_command ~env ~sw ~private_dir
+        ~timeout_s:verification_timeout_s prepared.runtime))
 
 let verify ~person ~base_path ~body request reqd =
-  let prepared =
+  let answer =
     let* provider_account_id, model = verify_request body
       |> Result.map_error (fun message -> `Bad_request, message) in
-    person_runtime person ~base_path ~provider_account_id ~model in
-  match prepared, Eio_context.get_env_opt () with
-  | Error (status, message), _ -> respond ~status ~request reqd message
-  | Ok _, None -> respond ~status:`Service_unavailable ~request reqd "Verification requires the server process environment."
-  | Ok runtime, Some env ->
-    (* macOS TMPDIR sits under the /var -> /private/var symlink, and a runtime
-       root must be its own realpath, as the runtime-verify command has it. *)
-    match Filename.temp_dir "masc-account-verify-" "" |> Unix.realpath with
-    | exception (Unix.Unix_error _ | Sys_error _) ->
-      respond ~status:`Service_unavailable ~request reqd "The private verification directory could not be made."
-    | private_dir ->
-      let result = Eio.Switch.run (fun sw ->
-        Eio.Switch.on_release sw (fun () -> Fs_compat.remove_tree private_dir);
-        Runtime_verification.verify_as_command ~env ~sw ~private_dir
-          ~timeout_s:verification_timeout_s runtime) in
-      Http.Response.json_value ~request ~extra_headers:["cache-control", "no-store"]
-        (Runtime_verification.to_json result) reqd
+    let* prepared = person_runtime person ~base_path ~provider_account_id ~model in
+    let* env = Option.to_result (Eio_context.get_env_opt ())
+      ~none:(`Service_unavailable, "Verification requires the server process environment.") in
+    while_verifying prepared.provider_account_id (fun () ->
+      let* result = call ~env prepared in
+      log_detail result;
+      let* runtime = match result.Runtime_verification.failure with
+        | Some _ -> Ok `Null
+        | None ->
+          let* recorded = record_runtime person prepared in
+          Ok (`Assoc [ "runtime_id", `String (Authz_types.Runtime_id.to_string prepared.runtime_id);
+                       "record", `String (recorded_label recorded) ]) in
+      Ok (`Assoc [ "verification", Runtime_verification.to_member_json result; "runtime", runtime ])) in
+  match answer with
+  | Error (status, message) -> respond ~status ~request reqd message
+  | Ok json -> Http.Response.json_value ~request ~extra_headers:["cache-control", "no-store"] json reqd

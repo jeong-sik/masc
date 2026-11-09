@@ -100,6 +100,7 @@ const reply = document.getElementById("reply");
 const account = document.getElementById("account");
 const model = document.getElementById("model");
 const verdict = document.getElementById("verdict");
+const runtimes = document.getElementById("runtimes");
 let csrf = null;
 let loginId = null;
 async function read(path) {
@@ -128,6 +129,10 @@ async function listAccounts() {
   accounts.textContent = answer.ok
     ? (json.provider_accounts.length === 0 ? "none" : json.provider_accounts.join("\n"))
     : "(" + answer.status + "): " + json.error;
+  runtimes.textContent = answer.ok
+    ? (json.runtimes.length === 0 ? "none"
+       : json.runtimes.map((r) => r.runtime_id + " on " + r.provider_account_id).join("\n"))
+    : "";
   if (answer.ok && json.provider_accounts.length > 0) {
     account.value = json.provider_accounts[json.provider_accounts.length - 1];
   }
@@ -181,6 +186,7 @@ document.getElementById("verify").addEventListener("click", async () => {
   verdict.textContent = "calling the account";
   const answer = await post("%s", { provider_account_id: account.value, model: model.value });
   verdict.textContent = "verify (" + answer.status + "): " + await answer.text();
+  await listAccounts();
 });
 show().then(listAccounts);|}
     Authz_browser_request.csrf_header
@@ -213,6 +219,8 @@ let home_page ~nonce =
            ; "<label>Model (bound to the integration in runtime.toml) <input id=\"model\"></label>"
            ; "<button id=\"verify\">Verify</button>"
            ; "<pre id=\"verdict\"></pre>"
+           ; "<h2>My Runtimes</h2>"
+           ; "<pre id=\"runtimes\">reading</pre>"
            ])
     ~script:home_script
 ;;
@@ -286,5 +294,15 @@ let provider_accounts state { user_id; namespace = _ } =
           (List.map
              (fun id -> `String (Provider_account_id.to_string id))
              (Authz_provider_account.owned state user_id)) )
+    ; ( "runtimes"
+      , `List
+          (List.map
+             (fun (id, (runtime : Authz_runtime_state.runtime)) ->
+               `Assoc
+                 [ "runtime_id", `String (Runtime_id.to_string id)
+                 ; ( "provider_account_id"
+                   , `String (Provider_account_id.to_string runtime.provider_account_id) )
+                 ])
+             (Authz_runtime.owned state user_id)) )
     ]
 ;;

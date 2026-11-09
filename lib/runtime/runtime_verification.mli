@@ -71,6 +71,12 @@ type result =
   }
 
 val to_json : result -> Yojson.Safe.t
+
+(** {!to_json} with a [null] [failure.detail]. The detail of a failure can name
+    a path of the server, such as that of the official client or of an account
+    home, so a person who calls their own account gets the code and the message
+    only (issue #50018). *)
+val to_member_json : result -> Yojson.Safe.t
 val failure_code : failure -> string
 val failure_message : failure -> string
 val failure_detail : failure -> string option

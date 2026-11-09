@@ -374,6 +374,13 @@ let csrf_of t browser =
   | _ -> Alcotest.failf "no csrf_token in %S" reply.body
 ;;
 
+let user_of t browser =
+  let reply = send browser t.router ~meth:"GET" ~path:"/auth/session" in
+  match member "user_id" reply with
+  | Some (`String id) -> get_ok (User_id.of_string id)
+  | _ -> Alcotest.failf "no user_id in %S" reply.body
+;;
+
 let registration_of reply =
   Alcotest.(check int) ("registered: " ^ reply.body) 200 reply.status;
   match member "registration_id" reply with
@@ -481,7 +488,32 @@ let the_preview_follows_a_login () =
     let owned = send admin router ~meth:"GET" ~path:Masc.Auth_preview.provider_accounts_path in
     Alcotest.(check (pair int string))
       "owns no subscription yet"
-      (200, {|{"provider_accounts":[]}|})
+      (200, {|{"provider_accounts":[],"runtimes":[]}|})
+      (owned.status, owned.body);
+    (* Plan D1: what the subscription routes write once a login and a call
+       of the account pass, the list shows. *)
+    let user_id = user_of t admin in
+    let account = get_ok (Provider_account_id.of_string "account-1") in
+    (match Authz_provider_account.link t.routes.R.zone ~user_id ~provider_account_id:account with
+     | Ok () -> ()
+     | Error error -> Alcotest.fail (Authz_provider_account.error_to_string error));
+    let runtime_id = get_ok (Runtime_id.of_string "account-1.claude-sonnet-5-5") in
+    (match
+       Authz_runtime.make
+         t.routes.R.zone
+         ~user_id
+         ~provider_account_id:account
+         ~runtime_id
+         ~draw:(fun () -> "grant-1")
+     with
+     | Ok grant -> Alcotest.(check string) "the Self grant" "grant-1" (Grant_id.to_string grant)
+     | Error error -> Alcotest.fail (Authz_runtime.error_to_string error));
+    let owned = send admin router ~meth:"GET" ~path:Masc.Auth_preview.provider_accounts_path in
+    Alcotest.(check (pair int string))
+      "owns the subscription and its Runtime"
+      ( 200
+      , {|{"provider_accounts":["account-1"],"runtimes":[{"runtime_id":"account-1.claude-sonnet-5-5","provider_account_id":"account-1"}]}|}
+      )
       (owned.status, owned.body);
     Alcotest.(check int)
       "a connect without the CSRF token stops at the gate"

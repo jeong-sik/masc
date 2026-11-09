@@ -36,7 +36,7 @@ were judged from a 90-char head. A case shows neither the label nor the answer.
 
 `apply` keeps a request only when every classification matches its label. A
 `restates` must name the label's memory: the harness scores an
-already_represented answer by that claim (eval_admission.claim_matches), so a
+already_represented answer by that claim (memory_scores.claim_matches), so a
 candidate that restates another memory as well is ambiguous and goes. A
 non-planted fact judged `drop`, or a planted stale fact judged `keep`, means the
 memory itself is wrong, so every request on that memory goes. Labels are never
@@ -75,6 +75,7 @@ from typing import cast
 import admission_validator as AV
 import audit_decisions as D
 import eval_admission as V
+import memory_scores as M
 import synth_render
 from tinker_oai import HTTP_OK, Call, call_from_row
 
@@ -131,8 +132,8 @@ def answers(run: Path, baseline: str) -> dict[str, Call]:
     return out
 
 
-def agrees(item: V.SynthItem, answer: AV.AdmissionAnswer) -> bool:
-    score = V.score_synth(item, answer)
+def agrees(item: M.SynthItem, answer: AV.AdmissionAnswer) -> bool:
+    score = M.score_synth(item, answer)
     return (score["correct"] == score["candidates"] and score["planted_dropped"] == score["planted"]
             and score["dropped"] == score["dropped_expected"])
 

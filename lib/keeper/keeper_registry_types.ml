@@ -54,12 +54,6 @@ type wake_reason =
   | Woken of Keeper_event_queue.stimulus_payload list
   | Chat_request
 
-let wake_reason_label = function
-  | Proactive_tick -> "proactive_tick"
-  | Woken _ -> "woken"
-  | Chat_request -> "chat_request"
-;;
-
 type turn_measurement =
   { tm_captured_at : float
   ; tm_context_actions : Keeper_state_machine.context_actions

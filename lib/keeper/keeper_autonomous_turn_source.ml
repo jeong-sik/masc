@@ -93,25 +93,47 @@ let is_top_level_execution = function
   | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> false
 ;;
 
+type execution_row =
+  { record_kind : string option
+  ; top_level : bool
+  ; keeper : string option
+  ; trace_id : string option
+  ; session_id : string option
+  ; turn_kind : string option
+  ; keeper_turn_id : int option
+  ; turn : int option
+  ; planned_index : int option
+  ; tool_use_id : string option
+  ; tool_name : string option
+  }
+
+let execution_row_of_json row : execution_row =
+  let str key = Json_util.get_string row key in
+  let int key = Json_util.get_int row key in
+  { record_kind = str "record_kind"; top_level = is_top_level_execution row
+  ; keeper = str "keeper"
+  ; trace_id = str "trace_id"; session_id = str "session_id"
+  ; turn_kind = str "turn_kind"; keeper_turn_id = int "keeper_turn_id"
+  ; turn = int "turn"; planned_index = int "planned_index"
+  ; tool_use_id = str "tool_use_id"; tool_name = str "tool"
+  }
+
 let executions_for_turn (record : Turn_record.t) execution_rows =
   List.fold_left (fun index id ->
     match Execution_map.find_opt (Ids.Execution_id.to_string id) execution_rows with
-    | Some [ row ] ->
-      let str key = Json_util.get_string row key in
-      let int key = Json_util.get_int row key in
-      (match int "turn", int "planned_index" with
+    | Some [ (row : execution_row) ] ->
+      (match row.turn, row.planned_index with
        | Some turn, Some planned_index when turn >= 0 && planned_index >= 0
-           && str "record_kind" = Some "tool_call"
-           (* Child schedules restart at slot zero inside their parent turn.
-              Their explicit node marker keeps those separate from raw starts. *)
-           && is_top_level_execution row
-           && str "keeper" = Some record.keeper
-           && str "trace_id" = Some record.trace_id
-           && str "session_id" = Some record.trace_id
-           && str "turn_kind" = Some (Turn_record.turn_kind_to_string Turn_record.Autonomous)
-           && int "keeper_turn_id" = Some record.absolute_turn ->
+           && row.record_kind = Some "tool_call"
+           (* A child marker of any JSON type excludes the row. *)
+           && row.top_level
+           && row.keeper = Some record.keeper
+           && row.trace_id = Some record.trace_id
+           && row.session_id = Some record.trace_id
+           && row.turn_kind = Some (Turn_record.turn_kind_to_string Turn_record.Autonomous)
+           && row.keeper_turn_id = Some record.absolute_turn ->
          let occurrence = { execution_id = id;
-           tool_use_id = str "tool_use_id"; tool_name = str "tool" } in
+           tool_use_id = row.tool_use_id; tool_name = row.tool_name } in
          Invocation_map.update (turn, planned_index)
            (function None -> Some [ occurrence ] | Some rows -> Some (occurrence :: rows)) index
        | _ -> index)
@@ -513,7 +535,7 @@ let project_records ~config ~keeper_name ?since records =
     in
     let execution_rows =
       match execution_ids with
-      | [] -> []
+      | [] -> Execution_map.empty
       | _ ->
         let ledger =
           Dated_jsonl.open_store
@@ -521,19 +543,20 @@ let project_records ~config ~keeper_name ?since records =
                (Workspace.dated_store_root config)
                Dated_jsonl.Store.Root.Tool_calls)
         in
-        (match Keeper_tool_call_index.by_execution_ids
-           ~store:ledger ~keeper_name ~execution_ids with
+        (match Keeper_tool_call_index.fold_by_execution_ids
+           ~store:ledger ~keeper_name ~execution_ids ~init:Execution_map.empty
+           ~f:(fun index row ->
+             match Json_util.get_string_nonempty row "execution_id" with
+             | None -> Ok index
+             | Some id ->
+               let projected = execution_row_of_json row in
+               Ok (Execution_map.update id
+                 (function None -> Some [ projected ]
+                   | Some rows -> Some (projected :: rows)) index)) with
          | Ok rows -> rows
          | Error error ->
            Log.Keeper.warn ~keeper_name "autonomous execution evidence unavailable: %s" error;
-           [])
-    in
-    let execution_rows = List.fold_left (fun index row ->
-      match Json_util.get_string_nonempty row "execution_id" with
-      | None -> index
-      | Some id -> Execution_map.update id
-          (function None -> Some [ row ] | Some rows -> Some (row :: rows)) index)
-      Execution_map.empty execution_rows
+           Execution_map.empty)
     in
     let dir = Keeper_types_support.keeper_raw_trace_dir config keeper_name in
     let previous = with_run_tables (fun () -> Hashtbl.find_opt run_readings dir) in

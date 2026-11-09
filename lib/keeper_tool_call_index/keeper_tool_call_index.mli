@@ -101,6 +101,16 @@ val by_execution_ids :
     keeper, timestamp, and execution ID against its indexed identity. Uses the
     same rebuild and read-failure handling as {!recent_rows}. *)
 
+val fold_by_execution_ids :
+  store:Dated_jsonl.t -> keeper_name:string -> execution_ids:string list ->
+  init:'a -> f:('a -> Yojson.Safe.t -> ('a, string) result) -> ('a, string) result
+(** Fold the same authoritative selection as {!by_execution_ids}, including
+    ambiguous identities, without retaining full Tool bodies between callbacks.
+    Every selected row is still read and validated. The callback runs in the
+    blocking worker and may be replayed after a source/index failure: it must
+    only compute its accumulator, without Eio or external effects. A callback's
+    semantic error is returned without discarding or rebuilding the index. *)
+
 val addressed_rows :
   store:Dated_jsonl.t -> codebase:string -> ?keeper_name:string ->
   limit:int -> offset:int -> unit -> (Yojson.Safe.t list, string) result

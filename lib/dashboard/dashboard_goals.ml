@@ -103,15 +103,14 @@ let build_forest_with_trust_reader
       goal_task_index;
     }
   in
-  Ok (goals |> List.map (build_tree context goals))
+  Ok (goals |> List.map (build_tree context))
 
 let build_forest =
   build_forest_with_trust_reader ~read_trust:keeper_runtime_trust_snapshot_json
 
 
 
-let build_goal_events_projection ~(config : Workspace.config) goals =
-  ignore goals;
+let build_goal_events_projection ~(config : Workspace.config) =
   let goal_events =
     let path = Goal_store.goal_events_path config in
     if Workspace.path_exists config path then
@@ -453,7 +452,7 @@ let goal_detail_json_ready ~(config : Workspace.config)
   | Error detail -> Ok (Goal_unavailable_envelope.to_yojson detail)
   | Ok goals ->
   let tasks = Workspace.get_tasks_safe config in
-  let events_for_goal = build_goal_events_projection ~config goals in
+  let events_for_goal = build_goal_events_projection ~config in
   let verification_for_goal = verification_projection ~config in
   let measurement_for_goal = measurement_projection ~config in
   match build_forest ~config ~goals ~tasks ~pending_approvals with
@@ -563,7 +562,7 @@ let dashboard_goals_tree_json_ready ~(config : Workspace.config)
   | Error detail -> Goal_unavailable_envelope.to_yojson detail
   | Ok goals ->
   let tasks = Workspace.get_tasks_safe config in
-  let events_for_goal = build_goal_events_projection ~config goals in
+  let events_for_goal = build_goal_events_projection ~config in
   let verification_for_goal = verification_projection ~config in
   let measurement_for_goal = measurement_projection ~config in
   match build_forest ~config ~goals ~tasks ~pending_approvals with

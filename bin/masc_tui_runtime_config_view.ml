@@ -169,7 +169,6 @@ let keeper_label = function
 let issue_kind_label = function
   | Invalid_schema_version -> "invalid schema" | Unknown_key -> "unknown key"
   | Type_mismatch -> "type mismatch" | Out_of_range -> "out of range"
-let restart metadata = metadata.routing_requires_restart || metadata.keeper_requires_restart
 (* Twelve characters of the source revision. It is there to be compared -- this
    read against the last one -- and the full sixty-four spent two thirds of the
    row on characters nobody reads to the end. The footer cuts the build commit
@@ -210,10 +209,26 @@ let validation_line validation =
    detail screen has the room for the revision a reader pastes into [git show]. *)
 let revision_row revision = Neutral, "Source revision: " ^ revision
 
+(* The tone of the routing and of the keeper state. The compact summary prints
+   both in one row and takes the worse of the two; the status page prints each
+   as a fact with its own tone. Both read these two functions, so the summary and
+   the page cannot disagree about which state is a warning. *)
+let routing_tone metadata = if metadata.routing_requires_restart then Warning else Neutral
+
+let keeper_tone metadata =
+  if metadata.keeper = Invalid_configuration then Bad
+  else if metadata.keeper_requires_restart || metadata.preempted_keys <> [] then Warning
+  else Neutral
+
 let verdict_rows metadata =
-  let attention = restart metadata || metadata.preempted_keys <> [] in
+  let tone =
+    match routing_tone metadata, keeper_tone metadata with
+    | Bad, _ | _, Bad -> Bad
+    | Warning, _ | _, Warning -> Warning
+    | (Neutral | Good), (Neutral | Good) -> Neutral
+  in
   [ validation_line metadata.validation;
-    (if metadata.keeper = Invalid_configuration then Bad else if attention then Warning else Neutral),
+    tone,
       Printf.sprintf "Routing %s · Keeper %s"
         (routing_label metadata.routing
            ~requires_restart:metadata.routing_requires_restart)
@@ -222,22 +237,13 @@ let verdict_rows metadata =
 let summary_lines metadata =
   revision_row (short_revision metadata.source_revision) :: verdict_rows metadata
 
-(* The same facts the compact summary prints, as the reading lines of the status
-   page. The tone of each fact is decided here, in this module's own tones, and
-   only then mapped to a reading tone, so the summary and the page cannot
-   disagree about which state is a warning. *)
+(* The summary's facts as the reading lines of the status page. A tone is
+   decided in this module's own tones and only then mapped to a reading tone. *)
 let page_tone = function
   | Neutral -> Masc_tui_page_line.Plain
   | Good -> Masc_tui_page_line.Success
   | Warning -> Masc_tui_page_line.Attention
   | Bad -> Masc_tui_page_line.Failure
-
-let routing_tone metadata = if metadata.routing_requires_restart then Warning else Neutral
-
-let keeper_tone metadata =
-  if metadata.keeper = Invalid_configuration then Bad
-  else if metadata.keeper_requires_restart || metadata.preempted_keys <> [] then Warning
-  else Neutral
 
 let source_heading = "1. 설정 출처 · 유효성 및 스키마 검증 (Source & Schema Validation)"
 

@@ -65,6 +65,25 @@ let test_status_page_carries_the_verdict () =
     (match detail_blocks ~lead:[ Line.fact "Source" "/workspace/runtime.toml" ] clean.metadata with
      | (_, first :: _) :: _ -> first = Line.fact "Source" "/workspace/runtime.toml"
      | _ -> false)
+let test_summary_and_page_agree_on_warnings () =
+  let summary_tone metadata = match List.nth (summary_lines metadata) 2 with tone, _ -> tone in
+  let routing_pending = fixture ()
+    |> map_field "application" (map_field "routing" (replace "requires_restart" (`Bool true)))
+    |> decode |> success in
+  expect "a routing restart is a summary warning" (summary_tone routing_pending.metadata = Warning);
+  expect "the page puts the warning on the routing side only"
+    (List.mem (Line.fact ~tone:Line.Attention "Routing" "active, pending restart") (page_lines routing_pending.metadata)
+     && List.mem (Line.fact "Keeper" "applied") (page_lines routing_pending.metadata));
+  let preempted = fixture ()
+    |> overlay (fun value -> value
+      |> replace "status" (`String "preempted_by_env")
+      |> replace "preempted_keys" (`List [`String "keeper.environment"])) |> decode |> success in
+  expect "a preempted key is a summary warning" (summary_tone preempted.metadata = Warning);
+  expect "the page puts the warning on the keeper side only"
+    (List.mem (Line.fact ~tone:Line.Attention "Keeper" "preempted by environment") (page_lines preempted.metadata)
+     && List.mem (Line.fact "Routing" "active") (page_lines preempted.metadata));
+  expect "a clean read is no summary warning"
+    (summary_tone (success (decode (fixture ()))).metadata = Neutral)
 let test_parse_failure_shape () =
   let read = fixture ()
     |> replace "validation" (`Assoc ["valid", `Bool false; "parse_error", `String "line 2: invalid TOML"; "issues", `List []])
@@ -155,6 +174,7 @@ let () = List.iter (fun (name, test) -> test (); Printf.printf "PASS %s\n%!" nam
    "pending and preempted settings", test_pending_and_preempted;
    "invalid source remains readable", test_invalid_source_is_readable;
    "status page carries the verdict", test_status_page_carries_the_verdict;
+   "summary and page agree on warnings", test_summary_and_page_agree_on_warnings;
    "TOML parse failure projection", test_parse_failure_shape;
    "unknown and inconsistent metadata", test_unknown_metadata_is_rejected;
    "restart status matches pending settings", test_restart_projection_consistency]

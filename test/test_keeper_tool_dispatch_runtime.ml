@@ -8288,7 +8288,7 @@ name = "content"
        source ~trace_id ~keeper_turn_id:absolute_turn;
        let bundle = Masc.Keeper_tools_agent_core_bundle.make_tool_bundle_for_capability_surface
            ~config ~meta ~publication_recovery ~ctx_snapshot:ctx_work ~capability_surface
-           ~skill_activation_context ~turn_ctx_cell ~on_inline_receipt_committed () in
+           ~skill_activation_context ~turn_ctx_cell ~on_inline_receipt_committed () |> Result.get_ok in
        Fun.protect ~finally:bundle.cleanup @@ fun () ->
        let tool = match find_tool_by_name bundle.tools "keeper_compose_board-turn-proof" with
          | Some tool -> tool | None -> fail "the named inline Board Skill is missing" in

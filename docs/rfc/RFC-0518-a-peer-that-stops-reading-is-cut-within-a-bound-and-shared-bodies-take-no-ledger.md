@@ -242,17 +242,17 @@ upstream tls-eio main 도 같은 4 KiB 경로다(조사 §1.8). 릴리스를 기
 
 ## 7. 하지 않는 것
 
-아래는 `gh issue create` 로 따로 남긴다.
+아래는 이슈로 따로 남겼다. 8번은 #48907 이 다룬다.
 
-1. 사전 압축 JSON 스냅샷(`Http_response_payload.prepared` 사용처)을 공유 본문으로 옮긴다.
-2. artifact 바이트를 범위 읽기로 바꾼다. 지금은 32 MiB blob 을 요청마다 통째로 올린다.
-3. h2 포크 정리: `on_close_stream` 의 본문 drain, `Reqd.stream_id`·`Reqd.is_closed` 공개(D1), #278 조건 고침으로 `close_after_flush` 와 frame tap 을 지움, #278 을 고칠 때 정체한 오류 응답을 끊을 길(§5), upstream h2#265 이식.
-4. 연결 수, idle, 헤더 시간 상한. TLS 뒤 h2 preface 대기, 여러 연결이 같이 읽지 않을 때의 소유 본문과 descriptor 고갈도 여기 든다. h2 가 reader fiber 에서 연 오류 응답과 그 뒤에 남는 범위(§5)도 여기 든다.
-5. 들어오는 창 2^27(연결당 128 MiB)을 줄인다. Go 는 1 MiB, Envoy edge 권장은 스트림 64 KiB 다.
-6. HTTP/2 DoS 완화: rapid reset(양방향 reset 세기), CONTINUATION, 헤더 개수.
-7. keep-alive HTTP/1.1 스트리밍 중 이탈 감지.
+1. 사전 압축 JSON 스냅샷(`Http_response_payload.prepared` 사용처)을 공유 본문으로 옮긴다(#50480).
+2. artifact 바이트를 범위 읽기로 바꾼다. 지금은 32 MiB blob 을 요청마다 통째로 올린다(#50481).
+3. h2 포크 정리: `on_close_stream` 의 본문 drain, `Reqd.stream_id`·`Reqd.is_closed` 공개(D1), #278 조건 고침으로 `close_after_flush` 와 frame tap 을 지움, #278 을 고칠 때 정체한 오류 응답을 끊을 길(§5), upstream h2#265 이식(#50482).
+4. 연결 수, idle, 헤더 시간 상한. TLS 뒤 h2 preface 대기, 여러 연결이 같이 읽지 않을 때의 소유 본문과 descriptor 고갈도 여기 든다. h2 가 reader fiber 에서 연 오류 응답과 그 뒤에 남는 범위(§5)도 여기 든다(#50483).
+5. 들어오는 창 2^27(연결당 128 MiB)을 줄인다. Go 는 1 MiB, Envoy edge 권장은 스트림 64 KiB 다(#50484).
+6. HTTP/2 DoS 완화: rapid reset(양방향 reset 세기), CONTINUATION, 헤더 개수(#50485).
+7. keep-alive HTTP/1.1 스트리밍 중 이탈 감지(#50486).
 8. pump 와 HTTP/1.1 생산자의 domain 문제(#48907 의 나머지).
-9. gRPC 리스너의 연결 쓰기·준비 상한(D4·D6 밖).
+9. gRPC 리스너의 연결 쓰기·준비 상한(D4·D6 밖, #50487).
 
 ## 8. 층
 

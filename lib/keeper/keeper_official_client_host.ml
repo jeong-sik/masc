@@ -1652,7 +1652,10 @@ let retain_original_result producer ~invocation ~call_id ~tool_name ~input
    loop and asks MASC for nothing between rounds, so a tool result is the one
    place a MASC-written line reaches it. [arrival_source] gives the claim for
    the next result: the rows that arrived since this projection was built and
-   that no earlier result of the run listed. *)
+   that no earlier result of the run listed. The run starts when the tool list
+   is built, the same reference the provider path's tracker takes in
+   keeper_run_tools_hooks.ml. A row that arrives between the prompt and the
+   tool list waits in the queue for the next result. *)
 type arrival_source = unit -> Keeper_arrived_stimuli.claim option
 
 let arrival_source ~keeper_name ~read : arrival_source =
@@ -1674,7 +1677,9 @@ let arrival_source ~keeper_name ~read : arrival_source =
    measurement reads the run's own trace to count the rows an official-client
    run was shown and how long each had waited when it was first shown: the
    record's [ts] minus the row's [arrived_at]. The append is recorded, not the
-   write: an observer that runs at the write must not perform I/O. *)
+   write: an observer that runs at the write must not perform I/O. This record
+   is the one I/O on the result path. [observe_raw_trace] counts and logs a
+   failed write and the result goes out unchanged. *)
 let record_arrival_projection ~keeper_name ~raw_trace_run ~invocation ~tool_name
       (claim : Keeper_arrived_stimuli.claim) =
   match raw_trace_run with

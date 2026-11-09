@@ -44,7 +44,10 @@ val render : now:float -> round -> string option
 
 (** What one run has already listed. A row counts as listed only once the model
     has answered the request that carried it, so a request that failed before
-    the model saw the block lists its rows again on the next round. *)
+    the model saw the block lists its rows again on the next round. The tracker
+    lives in memory: a restart ends the run it belongs to, and the next run's
+    first request already carries what the queue holds, so a lost tracker
+    repeats nothing. *)
 type tracker
 
 val create_tracker : run_started_at:float -> tracker
@@ -90,4 +93,6 @@ val claim :
   claim option
 (** Like {!block}, with the confirmation held by the claim. [None] when nothing
     new is listed or the queue cannot be read ([on_unavailable] is called for
-    the second). The tracker's own {!confirm} does not count a claim's rows. *)
+    the second). The tracker's own {!confirm} does not count a claim's rows.
+    Two claims asked for before either confirms list the same rows. The rows
+    stay queued, so that is a repeated line and no row is lost. *)

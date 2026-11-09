@@ -245,6 +245,49 @@ let test_read_only_install () = with_fixture (fun _ root binary _ ->
       List.iter (fun dir -> Unix.chmod dir 0o555) dirs;
       check (result string error) "read-only installed release serves" (Ok "<p>exact release</p>")
         (Installed.load (bound binary) "index.html")))
+(* Read the executable list actually checked by the offline install smoke.  A
+   new smoke companion must be accepted by the real receipt parser, not merely
+   by a second hard-coded fixture list. *)
+let smoke_companions () =
+  let input = open_in "../scripts/install-smoke.sh" in
+  Fun.protect ~finally:(fun () -> close_in input) (fun () ->
+    let prefix = "for a in masc " in
+    let rec find () =
+      match input_line input with
+      | line when String.starts_with ~prefix line ->
+        (match String.index_opt line ';' with
+         | None -> fail "install smoke executable loop has no terminator"
+         | Some stop ->
+           let start = String.length "for a in " in
+           let names = String.sub line start (stop - start)
+             |> String.split_on_char ' '
+             |> List.filter (fun name -> name <> "") in
+           check bool "smoke includes primary executable" true (List.mem "masc" names);
+           check int "smoke executable names are unique" (List.length names)
+             (List.length (List.sort_uniq String.compare names));
+           let companions = List.filter (fun name -> name <> "masc") names in
+           check bool "smoke names companions" true (companions <> []);
+           companions)
+      | _ -> find ()
+      | exception End_of_file -> fail "install smoke executable loop not found"
+    in
+    find ())
+
+let test_smoke_companions_accepted () =
+  let names = smoke_companions () in
+  let companions = List.map (fun name -> name, "fixture " ^ name) names in
+  with_fixture ~companions (fun _ _ binary _ ->
+    check (result string error) "all smoke companions have valid receipts"
+      (Ok "<p>exact release</p>") (Installed.load (bound binary) "index.html"));
+  check bool "negative-control name is not in smoke" false
+    (List.mem "masc-test-companion" names);
+  with_fixture ~change_receipt:(function
+    | `Assoc fields -> `Assoc (("companions", `Assoc ["masc-test-companion", `String (sha "x")]) ::
+        List.remove_assoc "companions" fields)
+    | json -> json) (fun _ _ binary _ ->
+      check bool "unknown companion rejected" true (match inspect binary with
+        | Installed.Unavailable Installed.Invalid_receipt -> true | _ -> false))
+
 let companion_fixture = ["masc-tui", "fixture tui";
   "masc-deployment-preflight-helper", "fixture preflight";
   "masc-check-runtime-deployment-preflight", "fixture gate";
@@ -349,7 +392,8 @@ let test_worker_and_raw_domain () =
     Domain.join (Domain.spawn test_exact_release))
 
 let () = run "Installed dashboard authority" ["distribution", List.map (fun (name, test) -> test_case name `Quick test)
-  ["v2 payload contract", test_v2_payload_contract;
+  ["smoke companions accepted and unknown rejected", test_smoke_companions_accepted;
+   "v2 payload contract", test_v2_payload_contract;
    "invalid v2 payload metadata", test_invalid_v2_payload_metadata;
    "v2 payload corruption", test_v2_payload_corruption;
    "CPU pool preserves integrity checks", test_pool_integrity;

@@ -47,22 +47,22 @@ let ordered_decision_rows rows =
    reachable through their source reading, never offered as current requests. *)
 let decision_rows_of_state (state : state) =
   let reading = approvals_reading state in
+  let text ko en = ui_text state ~ko ~en in
   let clean = Masc_tui_ansi.Terminal_text.single_line in
   let approval_rows =
     approval_items state
     |> List.filter_map (fun row ->
-      let current, who, why, kind, request_id = match row with
+      let current, who, why, kind = match row with
         | Keeper_tool_row held ->
-            list_is_read reading.held_calls, held.kta_keeper, held.kta_question, "Held call", held.kta_tool_call_id
+            list_is_read reading.held_calls, held.kta_keeper, held.kta_question, text "도구 승인" "Held call"
         | Gate_row pending ->
-            list_is_read reading.gate_queue, pending.gp_keeper, pending.gp_display_tool, "Gate approval", pending.gp_id
+            list_is_read reading.gate_queue, pending.gp_keeper, pending.gp_display_tool, text "실행 승인" "Gate approval"
         | Operator_row item ->
-            list_is_read reading.confirm_queue, item.ap_actor, item.ap_summary, "Confirm", item.ap_token
+            list_is_read reading.confirm_queue, item.ap_actor, item.ap_summary, text "확인" "Confirm"
       in
       if current && approval_item_needs_person row then
         Some (Home_request (home_request_of_approval row),
-              Printf.sprintf "%s · %s [%s] · %s" kind (clean who)
-                (Masc_tui_message_layout.truncate_middle 12 (clean request_id)) (clean why))
+              Printf.sprintf "%s · %s · %s" kind (clean who) (clean why))
       else None)
   in
   let questions =
@@ -72,11 +72,11 @@ let decision_rows_of_state (state : state) =
           let why = match row.ar_questions, row.ar_context with
             | question :: _, _ -> question.aq_prompt
             | [], Some reason -> reason
-            | [], None -> "open question"
+            | [], None -> text "답변 대기" "open question"
           in
           Home_request (Home_question (Masc.Tui_decode_asks.ask_key row)),
-          Printf.sprintf "Question · %s [%s] · %s" (clean (Masc.Tui_decode_asks.ask_asker_label row.ar_asker))
-            (Masc_tui_message_layout.truncate_middle 12 (clean row.ar_id)) (clean why))
+          Printf.sprintf "%s · %s · %s" (text "질문" "Question")
+            (clean (Masc.Tui_decode_asks.ask_asker_label row.ar_asker)) (clean why))
     else []
   in
   let source_notes =
@@ -90,18 +90,19 @@ let decision_rows_of_state (state : state) =
        them waits for a read that matches again. *)
     let identity = match state.workspace_identity with
       | Workspace_identity_match_unconfirmed _ ->
-          ["workspace identity unconfirmed · decisions wait"]
+          [text "워크스페이스 식별 미확인 · 응답 보류" "workspace identity unconfirmed · decisions wait"]
       | Workspace_identity_unread | Workspace_identity_match
       | Workspace_identity_mismatch _ -> []
     in
     let unread = identity @ match source_notes with
       | [] -> []
-      | names -> ["not fully read · " ^ String.concat ", " names]
+      | names -> [text "일부 조회 미완료 · " "not fully read · " ^ String.concat ", " names]
     in
     let notes =
       match state.approval_snapshot with
       | Some snapshot when snapshot.aps_hidden_count > 0 ->
-          unread @ [Printf.sprintf "%d requests outside current filter" snapshot.aps_hidden_count]
+          unread @ [Printf.sprintf (if state.ui_language = Lang_ko then
+              "현재 필터 밖 요청 %d건" else "%d requests outside current filter") snapshot.aps_hidden_count]
       | Some _ | None -> unread
     in
     match notes with
@@ -110,16 +111,18 @@ let decision_rows_of_state (state : state) =
           List.map fst (approval_rows @ questions) |> List.sort_uniq compare |> List.length
         in
         if count = 0 then []
-        else [Home_approvals, Printf.sprintf "Approvals and questions: %d need you · all requests" count]
-    | _ :: _ -> [Home_approvals, "Approvals and questions: " ^ String.concat "; " notes]
+        else [Home_approvals, Printf.sprintf (if state.ui_language = Lang_ko then
+            "승인·질문 %d건 · 전체 보기"
+          else "Approvals and questions: %d need you · all requests") count]
+    | _ :: _ -> [Home_approvals, text "승인·질문: " "Approvals and questions: " ^ String.concat "; " notes]
   in
   let goals = match state.goals_to_confirm with
     | Masc_tui_agenda.Read rows ->
         List.map (fun (row : Masc_tui_agenda.goal_to_confirm) ->
           Home_request (Home_goal_confirmation row.goal_id),
-          Printf.sprintf "Confirm Goal · %s · %s" (clean row.goal_id) (clean row.title)) rows
-    | Not_read -> [Home_agenda, "Goal confirmations not read · inspect sources"]
-    | Read_failed _ -> [Home_agenda, "Goal confirmations unavailable · inspect sources"]
+          Printf.sprintf "%s · %s" (text "목표 완료 확인" "Confirm Goal") (clean row.title)) rows
+    | Not_read -> [Home_agenda, text "목표 완료 확인 미조회 · 상세 보기" "Goal confirmations not read · inspect sources"]
+    | Read_failed _ -> [Home_agenda, text "목표 완료 확인 조회 불가 · 상세 보기" "Goal confirmations unavailable · inspect sources"]
   in
   (* Equality is kind plus authoritative request ID, never a Keeper/task
      grouping key. Distinct calls belonging to one Keeper remain distinct. *)
@@ -195,17 +198,18 @@ let reconcile_home_request_detail state =
                          ~sort:state.planning_sort planning.pl_goals)))
 
 let continue_rows_of_state (state : state) =
+  let text ko en = ui_text state ~ko ~en in
   let last =
     match state.home_last_chat, state.opening_mode with
     | Recorded_chat name, _ -> Some (Keeper_id.Keeper_name.to_string name, "")
     | Saving_chat name, _ ->
-        Some (Keeper_id.Keeper_name.to_string name, " · save pending")
+        Some (Keeper_id.Keeper_name.to_string name, text " · 저장 중" " · save pending")
     | Unobserved_chat { keeper; _ }, _ ->
-        Some (Keeper_id.Keeper_name.to_string keeper, " · save outcome unknown")
+        Some (Keeper_id.Keeper_name.to_string keeper, text " · 저장 결과 미확인" " · save outcome unknown")
     | Session_chat { keeper; _ }, _ ->
-        Some (Keeper_id.Keeper_name.to_string keeper, " · this session only")
+        Some (Keeper_id.Keeper_name.to_string keeper, text " · 이번 세션에서만" " · this session only")
     | Unconfirmed_chat { keeper; _ }, _ ->
-        Some (Keeper_id.Keeper_name.to_string keeper, " · save durability unconfirmed")
+        Some (Keeper_id.Keeper_name.to_string keeper, text " · 저장 유지 여부 미확인" " · save durability unconfirmed")
     | No_chat_receipt, Masc_tui_config.Last (Some name) ->
         Some (Keeper_id.Keeper_name.to_string name, "")
     | Unreadable_chat_receipt _, _
@@ -217,14 +221,14 @@ let continue_rows_of_state (state : state) =
     | Some (name, save_notice) when state.workspace_identity = Workspace_identity_match
                    && keeper_available_for_new_message state name ->
         [ Home_resume name,
-          "Continue with " ^ Masc_tui_ansi.Terminal_text.single_line name
+          text "이어가기 · " "Continue with " ^ Masc_tui_ansi.Terminal_text.single_line name
           ^ save_notice ]
     | Some (name, save_notice) when state.workspace_identity = Workspace_identity_match
                          && Option.is_some state.keepers_error ->
         [ Home_read_last name,
-          "Last conversation with " ^ Masc_tui_ansi.Terminal_text.single_line name
+          text "최근 대화 · " "Last conversation with " ^ Masc_tui_ansi.Terminal_text.single_line name
           ^ save_notice
-          ^ " · roster unavailable; read history" ]
+          ^ text " · 키퍼 목록 조회 불가, 이력 보기" " · roster unavailable; read history" ]
     | Some _ | None -> []
   in
   let choose =
@@ -233,14 +237,14 @@ let continue_rows_of_state (state : state) =
         [ Home_create_keeper,
           (match state.home_last_chat, last with
            | Unreadable_chat_receipt _, _ ->
-               "Create a Keeper · conversation history unavailable"
+               text "키퍼 만들기 · 대화 이력 조회 불가" "Create a Keeper · conversation history unavailable"
            | (No_chat_receipt | Recorded_chat _ | Session_chat _ | Unconfirmed_chat _
               | Saving_chat _ | Unobserved_chat _), Some (name, _) ->
-               "Create a Keeper · last conversation "
-               ^ Masc_tui_ansi.Terminal_text.single_line name ^ " unavailable"
+               text "키퍼 만들기 · 최근 대화 " "Create a Keeper · last conversation "
+               ^ Masc_tui_ansi.Terminal_text.single_line name ^ text " 이용 불가" " unavailable"
            | (No_chat_receipt | Recorded_chat _ | Session_chat _ | Unconfirmed_chat _
               | Saving_chat _ | Unobserved_chat _), None ->
-               "Create a Keeper  · choose who will take the work") ]
+               text "키퍼 만들기 · 대화 시작" "Create a Keeper · start a conversation") ]
     | (Workspace_identity_match, Local_workspace_read, None, _::_)
     | (Workspace_identity_match, Local_workspace_read, Some _, _)
     | (Workspace_identity_match, (Local_workspace_unread | Local_workspace_failed _), _, _)
@@ -249,21 +253,23 @@ let continue_rows_of_state (state : state) =
            | [] ->
                (match state.home_last_chat, last with
                 | Unreadable_chat_receipt _, _ ->
-                    "Conversation history unavailable · choose a Keeper"
+                    text "대화 이력 조회 불가 · 키퍼 선택" "Conversation history unavailable · choose a Keeper"
                 | (No_chat_receipt | Recorded_chat _ | Session_chat _ | Unconfirmed_chat _
                    | Saving_chat _ | Unobserved_chat _), Some (name, _) ->
-                    "Last conversation " ^ Masc_tui_ansi.Terminal_text.single_line name
+                    text "최근 대화 " "Last conversation " ^ Masc_tui_ansi.Terminal_text.single_line name
                     ^ (match state.workspace_identity with
                        | Workspace_identity_unread ->
-                           " unavailable · workspace identity not read · choose a Keeper"
+                           text " 이용 불가 · 워크스페이스 식별 미조회 · 키퍼 선택"
+                             " unavailable · workspace identity not read · choose a Keeper"
                        | Workspace_identity_match_unconfirmed _ ->
-                           " unavailable · workspace identity unconfirmed · choose a Keeper"
+                           text " 이용 불가 · 워크스페이스 식별 미확인 · 키퍼 선택"
+                             " unavailable · workspace identity unconfirmed · choose a Keeper"
                        | Workspace_identity_match | Workspace_identity_mismatch _ ->
-                           " unavailable · choose a Keeper")
+                           text " 이용 불가 · 키퍼 선택" " unavailable · choose a Keeper")
                 | (No_chat_receipt | Recorded_chat _ | Session_chat _ | Unconfirmed_chat _
                    | Saving_chat _ | Unobserved_chat _), None ->
-                    "Choose a Keeper  · start a conversation")
-           | _ :: _ -> "New work  · choose a Keeper") ]
+                    text "키퍼 선택 · 대화 시작" "Choose a Keeper · start a conversation")
+           | _ :: _ -> text "다른 키퍼와 대화" "Talk to another Keeper") ]
   in
   resume @ choose
 
@@ -282,17 +288,18 @@ let initial_reading_ready state selected =
   | Some Home_agenda | None -> false
 
 let notice_lines_of_state state =
+  let text ko en = ui_text state ~ko ~en in
   let clean = Masc_tui_ansi.Terminal_text.single_line in
   (match Masc_tui_credential_preparation.status state.credential_preparation with
    | Not_requested | Settled -> []
-   | Preparing _ -> [" Preparing workspace access…"]
-   | Awaiting_ui _ -> [" Workspace access result awaiting application…"])
+   | Preparing _ -> [text " 워크스페이스 접근 준비 중…" " Preparing workspace access…"]
+   | Awaiting_ui _ -> [text " 워크스페이스 접근 준비 결과 반영 대기…" " Workspace access result awaiting application…"])
   @ (match state.opening_notice with
    | None -> []
    | Some notice -> [" " ^ clean notice])
   @ (match state.home_decision_receipt with
      | None -> []
-     | Some (_, receipt) -> [" Last decision receipt · " ^ clean receipt])
+     | Some (_, receipt) -> [text " 최근 응답 · " " Last decision receipt · " ^ clean receipt])
 
 type prepared = {
   decisions : (home_action * string) list;

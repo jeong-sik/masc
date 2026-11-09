@@ -521,14 +521,14 @@ let tools_bracket_binding ~pane =
 
 let for_surface = function
   | Overview ->
-      [ b Navigate "Left" "Keepers" ~help:"open the Keeper list; Enter opens a chat; Right or Esc returns"
-      ; b Navigate "j/k" "choose" ~help:"move between decision links and conversations"
-      ; b Navigate "Enter" "open" ~help:"open the selected destination; never approve"
-      ; b Navigate "p" "requests" ~help:"approvals and questions"
-      ; b Navigate "g" "quiz" ~help:"the operator quiz's Results: scorecard windows and wrong-answer notes"
-      ; b Navigate ";" "agenda" ~help:"held calls, questions, Goal confirmations and task owner routes"
-      ; b Navigate "m" "Usage" ~help:"account windows and Keeper usage"
-      ; b Navigate "s" "music" ~help:"phrases, arrangements and recorded takes; no Keeper or score required"
+      [ b ~ko:"키퍼" Navigate "Left" "Keepers" ~help:"open the Keeper list; Enter opens a chat; Right or Esc returns"
+      ; b ~ko:"선택" Navigate "j/k" "choose" ~help:"move between decision links and conversations"
+      ; b ~ko:"열기" Navigate "Enter" "open" ~help:"open the selected destination; never approve"
+      ; b ~ko:"승인·질문" Navigate "p" "requests" ~help:"approvals and questions"
+      ; b ~ko:"퀴즈" Navigate "g" "quiz" ~help:"the operator quiz's Results: scorecard windows and wrong-answer notes"
+      ; b ~ko:"일정·요청" Navigate ";" "agenda" ~help:"held calls, questions, Goal confirmations and task owner routes"
+      ; b ~ko:"사용량" Navigate "m" "Usage" ~help:"account windows and Keeper usage"
+      ; b ~ko:"음악" Navigate "s" "music" ~help:"phrases, arrangements and recorded takes; no Keeper or score required"
       ]
       @ listing_meta
   | Acting ->

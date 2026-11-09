@@ -156,8 +156,8 @@ let overview_capacity_lines (state : state) =
         || state.workspace_identity <> Workspace_identity_match in
       let scope =
         if retained then
-          warning (text "보존 관측 · 현재 여력 미확인" "Retained reading · current capacity unknown")
-        else text "현재 관측 · fleet 스트림" "Current reading · fleet stream"
+          [warning (text "이전 관측 · 현재 여력 미확인" "Retained reading · current capacity unknown")]
+        else []
       in
       let grade = Masc_tui_fleet_line.status_text fleet.fs_status in
       let grade_style =
@@ -165,9 +165,11 @@ let overview_capacity_lines (state : state) =
         else if fleet.fs_operator_action_required then Theme.bad ()
         else if not (Masc_tui_fleet_line.status_is_ok fleet.fs_status)
         then Theme.warn () else Theme.ok () in
-      [scope
-      ; grade_style ^ grade ^ Ansi.reset
-      ; text
+      scope
+      @ (if not retained && Masc_tui_fleet_line.status_is_ok fleet.fs_status
+            && not fleet.fs_operator_action_required then []
+         else [grade_style ^ grade ^ Ansi.reset])
+      @ [text
           (Printf.sprintf "실행 중 %d · 기동 가능 %d" fleet.fs_running_count fleet.fs_bootable_count)
           (Printf.sprintf "Running %d · bootable %d" fleet.fs_running_count fleet.fs_bootable_count)
       ; text
@@ -187,7 +189,7 @@ let overview_capacity_lines (state : state) =
 
 let overview_header (state : state) ~cols =
   badge_row ~cols
-    ~lead:(screen_title (ui_text state ~ko:" 운영 · 지금 내 결정이 필요한 일" ~en:" Operations · What needs my decision?"))
+    ~lead:(screen_title (ui_text state ~ko:" 운영" ~en:" Operations"))
     ~label:(Terminal_text.single_line state.workspace)
     ~badge:(connection_badge state)
 
@@ -224,7 +226,7 @@ let render_overview (state : state) home =
     ~title:(overview_header state ~cols)
     ~status:[]
     ~hints:(if state.keeper_navigation_open then Masc_tui_keys.keeper_navigation_hints
-            else Masc_tui_keys.footer_hints Overview)
+            else Masc_tui_keys.footer_hints ~lang:state.ui_language Overview)
     ~body:(fun ~budget:chrome_budget c ->
       let rows_started = Masc_tui_frame_timing.start_stage () in
       (* The one-time door line: the first screen a reader meets names the
@@ -234,7 +236,8 @@ let render_overview (state : state) home =
       if not state.help_hint_shown then
         c.push
           (" " ^ Ansi.dim
-           ^ Masc_tui_footer.help_hint_item ^ " — every screen's keys"
+           ^ Masc_tui_footer.help_hint_item
+           ^ ui_text state ~ko:" — 화면별 조작" ~en:" — every screen's keys"
            ^ Ansi.reset);
       c.push
         (" " ^ pressable (Press_surface Approvals)
@@ -249,9 +252,11 @@ let render_overview (state : state) home =
         if Option.equal equal_home_action (Some action) selected then c.push_selected line else c.push line
       in
       let operator_actions = Masc_tui_types.operator_actions state in
+      let empty_decisions = ui_text state
+          ~ko:"대기 중인 요청이 없습니다." ~en:"No decision is waiting on you." in
       let titles : Masc_tui_overview_cards.titles =
-        { decisions = ui_text state ~ko:"지금 필요한 결정" ~en:"Needs your decision"
-        ; continuation = ui_text state ~ko:"이어가기" ~en:"Continue"
+        { decisions = ui_text state ~ko:"확인할 일" ~en:"Needs your decision"
+        ; continuation = ui_text state ~ko:"대화" ~en:"Conversations"
         ; capacity = ui_text state ~ko:"실행 여력" ~en:"Execution capacity"
         ; actions = ui_text state ~ko:"조치가 필요한 이유" ~en:"Why action is needed"
         }
@@ -281,7 +286,7 @@ let render_overview (state : state) home =
               (Message_layout.wrap_styled_words ~max_cells:(max 1 cells))
               capacity_lines
           in
-          Masc_tui_overview_cards.draw ~titles ~inner:(framed_inner_width cols)
+          Masc_tui_overview_cards.draw ~titles ~empty_decisions ~inner:(framed_inner_width cols)
             ~rows:(budget - warning_rows)
             ~is_selected:(fun action -> Some action = selected)
             ~decisions
@@ -304,7 +309,7 @@ let render_overview (state : state) home =
            and passive health/history context follows it. Both use only spare
            rows, so opening Home starts with a decision or a place to resume. *)
         let reasons =
-          Masc_tui_overview_cards.plain_reasons ~indent:row_indent
+          Masc_tui_overview_cards.plain_reasons ~title:titles.actions ~indent:row_indent
             ~inner:(framed_inner_width cols) ~rows:(budget - essential_rows)
             operator_actions
         in
@@ -327,8 +332,8 @@ let render_overview (state : state) home =
         in
         (match decisions with
          | [] -> c.push_styled ~style:(Theme.recede ())
-             (if all_decisions = [] then " No decision is waiting on you."
-              else " Decision rows above · j/k to choose")
+             (if all_decisions = [] then " " ^ empty_decisions
+              else ui_text state ~ko:" 다른 요청 · j/k:선택" ~en:" Decision rows above · j/k to choose")
          | _ :: _ ->
              c.push_styled ~style:Ansi.bold
                (if List.length decisions = List.length all_decisions then " " ^ titles.decisions
@@ -360,12 +365,16 @@ let render_overview (state : state) home =
         let window = List.drop first actions |> List.take height in
         if show_position then
           c.push_styled ~style:(Theme.recede ())
-            (Printf.sprintf " Home destinations · %d-%d/%d · j/k to choose"
+            (Printf.sprintf (if state.ui_language = Lang_ko then
+                " 바로가기 · %d-%d/%d · j/k:선택"
+              else " Home destinations · %d-%d/%d · j/k to choose")
                (first + 1) (first + List.length window) count);
         List.iter draw_row window
       end;
       (if selection_changed then
-         c.push_styled ~style:(Theme.warn ()) " Selection changed · j/k to choose again");
+         c.push_styled ~style:(Theme.warn ())
+           (ui_text state ~ko:" 선택한 항목이 바뀌었습니다 · j/k:다시 선택"
+              ~en:" Selection changed · j/k to choose again"));
       Masc_tui_frame_timing.finish_stage ~name:"overview.rows" rows_started)
 
 

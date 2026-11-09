@@ -10,6 +10,8 @@
 
 `pr_state_reads.py` 는 `gh` 로 PR 을 읽는 Execute 호출을 세고, 턴을 붙든 시간과 모양(반복문, 기다림, 한 번 읽기)을 UTC 날짜별로 나눠요.
 
+`pr_read_needs.py` 는 그 PR 읽기 가운데 명령 글자에 서버 PR 스냅숏에 없는 사실이 안 보이는 호출을 세요. 스냅숏이 답할 수 있는 시간의 어림이에요.
+
 ## 왜 재나요
 
 도구를 고치고 배포한 뒤 "좋아졌다"고 말하려면 같은 정의로 앞뒤를 세야 해요. 정의를 쓸 때마다 바꾸면 값이 달라져도 이유를 알 수 없어요. 이 스크립트는 정의를 한 곳에 고정해요. 배포가 끝나면 부팅 시각만 넣어서 다시 돌려요.
@@ -272,8 +274,41 @@ PR 읽기가 붙든 시간은 하루 6.9 ~ 8.9 h 로 비슷해요. 나머지 Exe
 
 - 이 시간은 Keeper 턴을 붙든 시간이에요. 서버가 PR 을 한 번 읽어 두고 Keeper 가 그 값을 읽게 되면 이만큼 준다는 뜻은 아니에요. `gh` 를 띄우는 시간과 GitHub 응답 시간이 섞여 있어요.
 - 글자 맞춤이라 오차가 양쪽으로 있어요. 명령을 인용만 한 호출, PR 본문이나 댓글을 읽는 호출이 들어가요. `gh pr diff` 와 `curl`·MCP 로 GitHub 를 읽는 호출은 빠져요.
-- `RFC-keeper-world-state-shows-open-work` 가 이 읽기를 서버 PR 스냅숏(RFC-0465)과 Keeper 도구(`keeper_pull_requests_list`)로 바꾸자고 적었어요. 그 구현은 main 에 없어요(2026-11-09). `Repository_pulls`·`Pull_requests`·`keeper_pull_requests_list`·`watch_repositories` 를 `lib`·`bin`·`config` 에서 `rg` 로 찾으면 0건이고, 스냅숏 쿼리는 `title`·`headRefOid`·리뷰 목록을 읽지 않아요.
+- `RFC-keeper-world-state-shows-open-work` 가 이 읽기를 서버 PR 스냅숏(RFC-0465)과 Keeper 도구(`keeper_pull_requests_list`)로 바꾸자고 적었어요. 위 표는 Keeper 가 `gh` 로 PR 을 직접 읽던 측정 창의 값이에요. 서버 스냅숏의 공용 타입·JSON 투영은 #50213 으로 main 의 `Repository_pulls` 에 옮겨졌고, Keeper 도구 `keeper_pull_requests_list` 는 #50259 에서 검토 중이에요(2026-11-09 확인).
 - 그 RFC 의 M6 은 `gh pr view`·`gh pr list`·`gh pr checks` 의 하루 수예요. 위 표는 `gh pr status` 와 `/pulls` 를 부르는 `gh api` 도 세므로 M6 보다 넓어요. 같은 정의로 앞뒤를 견줄 때는 이 스크립트를 다시 돌려요.
+
+## 스냅숏이 답할 수 있는 PR 읽기 (`pr_read_needs.py`)
+
+위 PR 읽기 가운데 명령 글자에 서버 PR 스냅숏에 없는 사실이 안 보이는 호출을 세요. 스냅숏은 열린 PR 마다 번호, 제목, draft 여부, checks 상태, 리뷰 결정, 병합 가능 여부, head 커밋, 계정별 마지막 리뷰(계정, 판정, 커밋), 가장 새 커밋의 git 작성자를 가져요. 명령이 이 밖의 사실이나 쓰기를 가리키면 그 "필요"를 불렀다고 세요. 필요는 열한 가지고, 글자 패턴은 스크립트의 `NEEDS` 에 있어요.
+
+```bash
+python3 docs/evidence/tool-efficiency-before-after-2026-11/pr_read_needs.py \
+  --base-path ~/me --since 2026-11-06T00:00:00 --end 2026-11-09T00:00:00 \
+  --json-out docs/evidence/tool-efficiency-before-after-2026-11/result-pr-read-needs-2026-11-06_11-08.json
+```
+
+창(UTC 11-06 00:00 ~ 11-09 00:00), Execute 21,699호출 50.807 h, PR 읽기 10,609호출 24.387 h 는 위 표의 합계와 같아요. 필요를 하나도 안 부른 호출은 683호출 3.057 h 예요. PR 읽기 시간의 12.5%, Execute 시간의 6.0% 예요. 모양별로는 반복문 201호출 2.421 h, 기다림 1호출 0.017 h, 한 번 읽기 481호출 0.619 h 이고, Keeper 별로는 `code-reviewer` 375호출 2.567 h, `context-reviewer` 87호출 0.174 h, `code-reviewer-mother` 42호출 0.074 h 순이에요.
+
+필요마다 센 값이에요. 한 호출이 여러 필요를 불러서 둘째 열은 더할 수 없어요. 셋째 열은 그 필요 하나만 부른 호출이에요.
+
+| 필요 | 그 필요를 부른 호출 | 그 필요만 부른 호출 |
+|---|---|---|
+| `times` (`updated_at`·`created_at`·`submitted_at`·`sort=updated`) | 4,118호출, 5.513 h | 2,793호출, 2.984 h |
+| `check_detail` (`statusCheckRollup`·`gh pr checks`·`check-runs`) | 1,101호출, 4.643 h | 167호출, 1.455 h |
+| `files_or_diff` (`/files`·`gh pr diff`·diff 헤더·`compare`) | 2,314호출, 3.849 h | 609호출, 0.803 h |
+| `refs_or_author_login` (브랜치 이름, PR 작성자) | 3,320호출, 7.153 h | 357호출, 0.801 h |
+| `writes` (`POST`·`PUT`·`PATCH`·`DELETE`, `-f`·`-F` 필드, `gh pr merge` 등, GraphQL mutation) | 1,495호출, 3.060 h | 671호출, 0.631 h |
+| `ci_run_or_main_tip` (`actions/runs`·`gh run`·`commits/main`·`git fetch`) | 1,117호출, 5.862 h | 97호출, 0.631 h |
+| `closed_or_merged` (`.merged`·`mergedAt`·`--state closed`) | 1,968호출, 6.036 h | 268호출, 0.344 h |
+| `merge_state_detail` (`mergeable_state`·`mergeStateStatus`) | 944호출, 3.582 h | 51호출, 0.341 h |
+| `search` | 429호출, 0.897 h | 71호출, 0.139 h |
+| `body_or_comments` | 1,117호출, 1.966 h | 88호출, 0.078 h |
+| `labels_or_requests` | 500호출, 2.022 h | 5호출, 0.013 h |
+
+- 칸을 하나 더해서 줄일 수 있는 필요는 `times`, `check_detail`, `refs_or_author_login`, `merge_state_detail`, `labels_or_requests` 예요. `writes` 는 읽기 도구가 대신할 수 없어요. `ci_run_or_main_tip` 은 CI run 과 main 끝을 보는 호출이고, 시간의 60.6% 가 `sleep N` 이 든 기다림이라 일정 감시(RFC-0379 §6.6)의 몫이에요(「스크립트 밖에서 센 값」). `closed_or_merged` 는 스냅숏이 열린 PR 만 가져서 칸으로 풀리지 않아요.
+- 글자 맞춤이라 오차가 양쪽으로 있어요. 명령을 인용만 한 호출은 필요를 부른 것으로 세서 값이 낮아지고, 패턴이 모르는 사실을 묻는 호출은 "필요 없음"에 들어와 값이 높아져요.
+- 3.057 h 는 스냅숏이 답할 수 있는 시간의 어림이에요. Keeper 가 도구를 부르게 된다는 뜻은 아니에요. 도구를 안 부르면 줄지 않으므로, 병합과 재시작 뒤에는 원장에서 `keeper_pull_requests_list` 호출 수를 보고, 같은 명령으로 "필요 없음" 호출이 줄었는지 견줘요.
+- 위 절의 PR 읽기 10,609호출 중 1,495호출 3.060 h 는 `writes` 도 불러요. 대부분 리뷰를 게시하는 호출이고, 게시 전에 head 를 한 번 읽어요. `pr_state_reads.py` 가 `/pulls` 를 부르는 `gh api` 를 읽기와 쓰기 구분 없이 세서 그래요.
 
 ## 스크립트 밖에서 센 값
 
@@ -292,6 +327,17 @@ PR 읽기가 붙든 시간은 하루 6.9 ~ 8.9 h 로 비슷해요. 나머지 Exe
   앞 230자가 같은 세 모양이 18호출 0.58 h(중앙값 116.3초), 23호출 0.58 h(89.1초), 26호출 0.52 h(70.4초)예요.
 - 한 번 훑을 때 PR 마다 `gh pr view` 한 번과 `gh api repos/jeong-sik/masc/pulls/$n/reviews` 두 번을 불러요. 열린 PR 이 N개면 `gh` 를 1 + 3N번 불러요. 출력에 `total=` 이 있는 44호출에서 열린 PR 수는 39 ~ 67개라서 118 ~ 202번이에요.
 - 서버는 열린 PR 의 draft·checks·review·mergeable 을 60초마다 GraphQL 한 번으로 읽어 둬요. `RFC-keeper-world-state-shows-open-work` §3.2 가 2026-09-27 에 열린 PR 89개 한 페이지로 잰 그 쿼리의 cost 는 2 예요.
+
+**`times` 만 부르는 호출**(「스냅숏이 답할 수 있는 PR 읽기」)
+
+- 구간: 위와 같아요. 호출: `pr_read_needs.needs_of(명령)` 이 `("times",)` 인 PR 읽기 2,793호출 2.984 h 예요. 모양은 `pr_state_reads` 정의로 반복문 1,998호출 2.491 h, 한 번 읽기 795호출 0.494 h 예요.
+- Keeper 별로 `context-reviewer` 가 2,634호출 2.815 h(94.3%)이고, 다음은 `code-reviewer` 49호출 0.080 h 예요.
+- 3자리 이상 숫자를 지우고 앞 150자가 같은 명령으로 묶으면 가장 큰 묶음은 `gh api "repos/jeong-sik/masc/pulls?state=open&sort=updated&direction=desc&per_page=12" --jq '.[]|select(.updated_at>"시각")|"번호 draft head 시각 제목"'` 모양이에요. 1,990호출 2.452 h 이고, `per_page=6` 인 같은 모양이 488호출 0.197 h 예요.
+- 앞의 `per_page=12` 모양은 `context-reviewer` 가 11-07 418호출, 11-08 1,574호출이고 중앙값 3.2초, p90 5.8초예요(1,992호출, 2.453 h. 묶음 기준이 앞 150자라서 1,990호출과 2건 차이가 나요).
+
+**`ci_run_or_main_tip` 을 부른 호출의 모양**(「스냅숏이 답할 수 있는 PR 읽기」)
+
+- 구간: 위와 같아요. 호출: `pr_read_needs.needs_of(명령)` 에 `ci_run_or_main_tip` 이 든 PR 읽기 1,117호출 5.862 h 예요. `pr_state_reads` 의 모양으로 나누면 기다림 106호출 3.550 h(60.6%), 한 번 읽기 833호출 1.446 h, 반복문 178호출 0.867 h 예요.
 
 **#50012 첫 측정**(「결과 2」)
 
@@ -338,7 +384,7 @@ PR 읽기가 붙든 시간은 하루 6.9 ~ 8.9 h 로 비슷해요. 나머지 Exe
 python3 -m unittest discover -s docs/evidence/tool-efficiency-before-after-2026-11
 ```
 
-합성 원장으로 세는 법을 확인하는 시험 157개예요. 창과 부팅 직후 제외, 크기 중앙값과 상한, `sleep` 폴링의 정의, 백그라운드 호출, 오버헤드(샌드박스별과 그 안의 의도별 포함), 디스크 바닥 거절의 의도별 구분, 회전 파일 읽기, 점검 재생의 읽기·쓰기 구분과 시작 시각, 간격별 오버헤드, 겹친 구간 합치기와 자르기, 60초 문턱(포함), 시작하지 않은 작업 제외, 읽지 못한 저장소 알림을 봐요. 되풀이 쪽은 같은 결과의 정의(`execution_time_ms` 제외, 키 순서 무시, JSON 이 아니면 글자 비교), 30분 간격(포함, 마지막 실행부터 잼), 연속 횟수와 10회 문턱, Keeper별로 따로 세기, 모델 요청 읽기(창 끝 제외, 다른 이벤트 제외), UTC 시 나누기, 시계 읽기로 세는 명령과 세지 않는 명령(`;`·파이프·치환·`argv` 변형), 같은 턴(직전 실행과 비교, 턴 번호가 없는 줄은 제외, Keeper별과 전체 합)과 원장 줄의 턴 읽기(추적 번호와 턴 번호 한 쌍, 정수가 아닌 값 제외, Execute 만), 되풀이 간격(끝에서 끝까지, 마지막 실행부터 잼)과 p50·p90 위치 규칙, 명령 머리별 실행 수(되풀이가 아닌 실행 포함, Keeper별)를 봐요. PR 읽기 쪽(37개)은 명령 글자 읽기(`command`, `argv`, `sh -c`, JSON 이 아닌 입력), PR 읽기로 세는 명령과 세지 않는 명령(`gh pr diff`, 단어 경계, 파이프), 모양 셋과 우선순위(반복문의 세 가지 목록 만들기, 목록 없는 반복문, `sleep` 에 숫자 없음), UTC 날짜 경계, 날짜별 몫과 합계, 순위와 이름순 동률, 여섯 명 제한, 반복문 중앙값, 창 거절을 봐요.
+합성 원장으로 세는 법을 확인하는 시험 182개예요. 창과 부팅 직후 제외, 크기 중앙값과 상한, `sleep` 폴링의 정의, 백그라운드 호출, 오버헤드(샌드박스별과 그 안의 의도별 포함), 디스크 바닥 거절의 의도별 구분, 회전 파일 읽기, 점검 재생의 읽기·쓰기 구분과 시작 시각, 간격별 오버헤드, 겹친 구간 합치기와 자르기, 60초 문턱(포함), 시작하지 않은 작업 제외, 읽지 못한 저장소 알림을 봐요. 되풀이 쪽은 같은 결과의 정의(`execution_time_ms` 제외, 키 순서 무시, JSON 이 아니면 글자 비교), 30분 간격(포함, 마지막 실행부터 잼), 연속 횟수와 10회 문턱, Keeper별로 따로 세기, 모델 요청 읽기(창 끝 제외, 다른 이벤트 제외), UTC 시 나누기, 시계 읽기로 세는 명령과 세지 않는 명령(`;`·파이프·치환·`argv` 변형), 같은 턴(직전 실행과 비교, 턴 번호가 없는 줄은 제외, Keeper별과 전체 합)과 원장 줄의 턴 읽기(추적 번호와 턴 번호 한 쌍, 정수가 아닌 값 제외, Execute 만), 되풀이 간격(끝에서 끝까지, 마지막 실행부터 잼)과 p50·p90 위치 규칙, 명령 머리별 실행 수(되풀이가 아닌 실행 포함, Keeper별)를 봐요. PR 읽기 쪽(37개)은 명령 글자 읽기(`command`, `argv`, `sh -c`, JSON 이 아닌 입력), PR 읽기로 세는 명령과 세지 않는 명령(`gh pr diff`, 단어 경계, 파이프), 모양 셋과 우선순위(반복문의 세 가지 목록 만들기, 목록 없는 반복문, `sleep` 에 숫자 없음), UTC 날짜 경계, 날짜별 몫과 합계, 순위와 이름순 동률, 여섯 명 제한, 반복문 중앙값, 창 거절을 봐요. 필요 쪽(25개)은 열한 가지 필요마다 명령 예시, 필요 없는 명령, 여러 필요의 표 순서, `--state open`, 이름에 필요 단어만 든 필드(`bodyHTML`), `-f` 필드가 쓰기인 경우와 GET·GraphQL 이라 아닌 경우, `mutation`, `-f` 가 아닌 플래그, 호출 모양과 Keeper 담기, 필요 없는 호출의 몫과 모양, 필요별 호출 수(부른 호출과 그것만 부른 호출), 몫의 0 나누기, 순위와 여섯 명 제한, 창 거절을 봐요.
 
 ## 못 잰 것
 

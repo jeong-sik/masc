@@ -513,6 +513,31 @@ let body ~width proof last_review_note =
        | [] -> [ { tone = Quiet; text = "no verdict on the ledger" } ]
        | rows -> { tone = Quiet; text = "no verdict on the ledger" } :: rows)
 
+let criterion_review_lines ~width ~ko review =
+  let text korean english = if ko then korean else english in
+  let scope = wrapped ~width Note
+    (text "성공 기준의 실재성과 도달 가능성에 대한 검토입니다. 완료 증명과 사람의 최종 확인은 별도입니다."
+      "Criterion feasibility review; completion proof and human confirmation remain separate.") in
+  let rows = match (review : Tui_decode.goal_criterion_review) with
+    | Tui_decode.Criterion_unchecked ->
+      verdict ~width Quiet (text "성공 기준 검토 미기록" "Criterion review not recorded") None
+    | Tui_decode.Criterion_unavailable detail ->
+      verdict ~width Unreadable (text "성공 기준 검토 확인 불가" "Criterion review unavailable") (Some detail)
+    | Tui_decode.Criterion_observed observed ->
+      let tone, headline, reason = match observed.state with
+        | Tui_decode.Criterion_pending -> Waiting, text "성공 기준 검토 대기" "Criterion review pending", observed.detail
+        | Tui_decode.Criterion_execution_pending -> Waiting, text "성공 기준 검토 실행 중" "Criterion review executing", observed.detail
+        | Tui_decode.Criterion_execution_unknown -> Unreadable, text "기준 검토 실행 결과 불확실" "Criterion review execution unknown", observed.detail
+        | Tui_decode.Criterion_judgment_pending -> Waiting, text "기준 판정 반영 대기" "Criterion judgment pending publication", observed.detail
+        | Tui_decode.Criterion_deferred -> Waiting, text "성공 기준 검토 보류" "Criterion review deferred", observed.detail
+        | Tui_decode.Criterion_viable reason -> Note, text "도달 가능한 성공 기준" "Criterion is viable", Some reason
+        | Tui_decode.Criterion_needs_revision reason -> Refused, text "성공 기준 수정 필요" "Criterion needs revision", Some reason
+        | Tui_decode.Criterion_superseded -> Quiet, text "기준 검토 대체됨" "Criterion review superseded", observed.detail in
+      verdict ~width tone headline reason
+      @ wrapped ~width Quiet (text "기준 revision: " "Criterion revision: " ^ observed.criterion_revision)
+      @ wrapped ~width Quiet (text "검토 요청: " "Review request: " ^ observed.request_id) in
+  rows @ scope
+
 (* Shared with Task history; Goal activity uses the full source timestamp. *)
 let short_ts ts =
   if String.length ts >= 16 then

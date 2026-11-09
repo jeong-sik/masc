@@ -126,16 +126,20 @@ module For_testing : sig
     channel:string -> thread_ts:string -> status:string -> string
   (** Pure [assistant.threads.setStatus] JSON builder. *)
 
+  type streaming_transport =
+    { post_stream : content:string -> (string, error) result
+    ; edit_stream : message_id:string -> content:string -> (unit, error) result
+    ; edit_blocks :
+        message_id:string ->
+        content:string ->
+        blocks:Yojson.Safe.t list ->
+        (unit, error) result
+    ; delete_stream : message_id:string -> (unit, error) result
+    }
+
   val adapter_loop :
     events:Keeper_chat_events.t ->
-    ?post_stream:(content:string -> (string, error) result) ->
-    ?edit_stream:(message_id:string -> content:string -> (unit, error) result) ->
-    ?edit_blocks:
-      (message_id:string ->
-       content:string ->
-       blocks:Yojson.Safe.t list ->
-       (unit, error) result) ->
-    ?delete_stream:(message_id:string -> (unit, error) result) ->
+    ?streaming_transport:streaming_transport ->
     ?now:(unit -> float) ->
     ?sleep:(float -> unit) ->
     send_plain:(content:string -> (unit, error) result) ->
@@ -145,8 +149,9 @@ module For_testing : sig
     ?on_send_result:((unit, error) result -> unit) ->
     unit ->
     unit
-  (** Test seam for the outbound transport. [post_stream], [edit_stream],
-      [edit_blocks], and [delete_stream] are supplied together to exercise
-      incremental delivery. [now] and [sleep] make update pacing deterministic.
+  (** Test seam for the outbound transport. [streaming_transport] bundles
+      [post_stream], [edit_stream], [edit_blocks], and [delete_stream] as a
+      closed record to exercise incremental delivery without partial transport
+      states. [now] and [sleep] make update pacing deterministic.
       Activity failures never settle terminal delivery. *)
 end

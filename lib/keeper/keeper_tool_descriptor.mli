@@ -71,12 +71,19 @@ type prepared_leaf_admission =
   | Owned_job_launch_leaf
   | Owned_ask_leaf
   | Owned_file_mutation_leaf
+  | Inline_effect_leaf
   | Direct_only
 (** Prepared leaves retain their original producer's ownership. File Edit and
     Write are available to inline drafts; durable async plans require read-only
     leaves, the owned-job producer's replayable launch contract, or [masc_ask].
     File mutations and job launch retain their Serial effectful descriptor
-    contracts. A file mutation admission is not a prepared resource claim. *)
+    contracts. A file mutation admission is not a prepared resource claim.
+    [Inline_effect_leaf] admits Execute and masc_board_post to inline drafts
+    only (RFC-0502): each node's effect passes through the invoking Keeper's
+    own dispatch boundary — Execute through effect Gate approval, a board post
+    through Board policy — exactly as a direct call does. Durable async plans
+    refuse them: their effects are neither replayable nor idempotent, so an
+    interrupted run could not re-prove them. *)
 
 (** Descriptor-owned output contract for typed composition. [Opaque_output]
     cannot be referenced by another plan node. [Json_output] carries a schema

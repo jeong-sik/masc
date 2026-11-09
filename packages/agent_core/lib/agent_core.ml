@@ -59,7 +59,6 @@ module Types = Agent_core_base.Types
 module History = Agent_core_base.History
 module Util = Agent_core_base.Util
 module Fs_result = Fs_result
-module Fs_atomic_eio = Fs_atomic_eio
 module Context = Agent_core_base.Context
 module Provider_runtime_binding = Provider_runtime_binding
 module Exact_output = Llm_provider.Exact_output
@@ -123,13 +122,11 @@ module Sessions_store = Sessions_store
 module Harness = Harness
 module Eval = Eval
 module Trajectory = Trajectory
-module Tool_middleware = Tool_middleware
 module Metrics = Metrics
 module Async_agent = Async_agent
 module Consumer = Consumer
 module Eval_stats = Eval_stats
 module Runtime_store = Runtime_store
-module Plan = Plan
 module Tool_input_validation = Tool_input_validation
 
 (* runtime_query/query removed — CLI Runtime purge *)

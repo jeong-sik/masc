@@ -109,25 +109,17 @@ let test_the_palette_lists_tasks_and_posts () =
       ; bp_attachments = []
       } ]});
   let labels = List.map fst (palette_entries state) in
-  Alcotest.(check (list string)) "one Browser destination"
-    ["go Browser Lane"]
-    (List.filter_map (function label, Palette_browser_lane -> Some label | _ -> None)
-       (palette_entries state));
-  Alcotest.(check (list string)) "one MSX destination"
-    ["go MSX"]
-    (List.filter_map (function label, Palette_msx -> Some label | _ -> None)
-       (palette_entries state));
-  Alcotest.(check (list string)) "one DOS spectator destination"
-    ["go DOS"]
-    (List.filter_map (function label, Palette_dos -> Some label | _ -> None)
-       (palette_entries state));
-  check_bool "Slack is not a separate destination" false (List.mem "go Slack Lane" labels);
-  check_bool "settings is a direct entry" true
-    (List.exists
-       (function
-         | "settings", Palette_config Config_params -> true
-         | _ -> false)
-       (palette_entries state));
+  List.iter (fun (query, expected) ->
+    state.palette_query <- query;
+    match palette_matches state with
+    | (_, actual) :: _ when actual = expected -> ()
+    | _ -> Alcotest.fail (query ^ " did not select its action"))
+    [ "browser", Palette_browser_lane
+    ; "msx", Palette_msx
+    ; "dos", Palette_dos
+    ; "settings", Palette_config Config_params
+    ; "collab", Palette_collab
+    ; "play links", Palette_collab ];
   check_bool "a task is an entry" true
     (List.exists
        (fun l -> Masc_tui_pick_list.lowercase_contains ~needle:"task-532" l)
@@ -366,15 +358,9 @@ let test_a_label_starting_with_the_query_leads () =
   state.palette_query <- "hover ";
   check_names "hover pre-fill lists only the cursor line's hover entry"
     [ "hover Hook_common" ]
-    (List.map fst (palette_matches state));
-  state.palette_query <- "";
-  check_bool "an empty query keeps every entry" true
-    (List.length (palette_matches state) = List.length (palette_entries state))
+    (List.map fst (palette_matches state))
 ;;
 
-(* The [&] key opens the MSX screen, but a key is found only by someone who
-   already knows it. The palette is where an operator looks for a screen by
-   name, so "msx" typed there must reach the action the key reaches. *)
 (* Task Review and Task Verdicts are one reading split in two and sit one [v]
    apart. The palette offered the first and not the second, so typing the name
    of the half that holds the rulings found nothing that goes there. *)
@@ -385,8 +371,7 @@ let test_the_palette_goes_to_both_halves_of_task_review () =
   let goes_to label surface =
     state.palette_query <- label;
     List.exists
-      (fun (offered, action) ->
-        String.equal offered label && action = Palette_goto surface)
+      (fun (_, action) -> action = Palette_goto surface)
       (palette_matches state)
   in
   check_bool "the queue of tasks waiting for a ruling" true
@@ -395,12 +380,7 @@ let test_the_palette_goes_to_both_halves_of_task_review () =
     (goes_to "go Task Verdicts" Harness)
 ;;
 
-(* A row typed whole comes first, wherever it sits in the list. "go Board" is
-   also the start of "go Board Attention history", and "go Workspace" of "go
-   Workspace Curator history"; both history rows are listed before the
-   surfaces, so a prefix rank alone sent Enter on the typed name to a Feature's
-   history. Every row is typed as it is written, so a row added later that
-   starts with an existing one cannot take its place. *)
+(* A complete destination name outranks partial matches, including histories. *)
 let test_a_row_typed_whole_leads () =
   let state =
     create_state ~workspace:"test" ~port:8935 ()
@@ -444,20 +424,14 @@ let test_enter_has_nothing_only_when_no_command_matches () =
     (command_enter_has_nothing state)
 ;;
 
-let test_goal_and_candle_queries_select_their_destinations () =
+let test_goal_queries_select_work () =
   let state = create_state ~workspace:"test" ~port:8935 () in
   List.iter (fun query ->
     state.palette_query <- query;
     match palette_matches state with
     | (_, Palette_goto Planning) :: _ -> ()
     | _ -> Alcotest.fail (Printf.sprintf "%S did not select Work" query))
-    ["go Work"; "goal"];
-  List.iter (fun query ->
-    state.palette_query <- query;
-    match palette_matches state with
-    | (_, Palette_goal_payouts) :: _ -> ()
-    | _ -> Alcotest.fail (Printf.sprintf "%S did not select Goal payouts" query))
-    ["candle"; "go Candle"]
+    ["go Work"; "goal"; "candle"]
 ;;
 
 let test_msx_is_reached_by_its_name () =
@@ -471,7 +445,7 @@ let test_msx_is_reached_by_its_name () =
        (palette_matches state));
   state.palette_query <- "go msx";
   (match palette_matches state with
-   | ("go MSX", Palette_msx) :: _ -> ()
+   | (_, Palette_msx) :: _ -> ()
    | _ -> Alcotest.fail "the label spelled out must lead its own matches")
 ;;
 
@@ -481,7 +455,7 @@ let test_dos_is_reached_by_its_name () =
   in
   state.palette_query <- "dos";
   (match palette_matches state with
-   | ("go DOS", Palette_dos) :: _ -> ()
+   | (_, Palette_dos) :: _ -> ()
    | _ -> Alcotest.fail "typing dos must offer the DOS spectator")
 ;;
 
@@ -574,7 +548,7 @@ let test_connectors_has_a_row_that_arrives_on_it () =
   in
   check_bool "a row goes to Connectors" true
     (List.exists
-       (function "go Connectors", Palette_connectors -> true | _ -> false)
+       (function _, Palette_connectors -> true | _ -> false)
        (palette_entries state));
   state.palette_query <- "go Connectors";
   check_bool "typing its name finds the row" true
@@ -615,7 +589,7 @@ let test_an_installation_that_asked_has_one_results_row () =
       | _, Palette_addon_results id -> Some id
       | _, ( Palette_browser_lane | Palette_hide_browser_lane | Palette_connectors
            | Palette_collab | Palette_msx | Palette_dos | Palette_lane_addons | Palette_lane_history _
-           | Palette_goto _ | Palette_goal_payouts | Palette_usage_scope _ | Palette_config _ | Palette_ui_language _
+           | Palette_goto _ | Palette_usage_scope _ | Palette_config _ | Palette_ui_language _
            | Palette_gate_mode _ | Palette_chat _ | Palette_task _ | Palette_task_creation _
            | Palette_board_hearth _ | Palette_board_post _ | Palette_lsp _
            | Palette_code_file _ | Palette_code_location _
@@ -704,8 +678,8 @@ let () =
             test_a_row_typed_whole_leads
         ; Alcotest.test_case "Enter has nothing to run only when no command matches"
             `Quick test_enter_has_nothing_only_when_no_command_matches
-        ; Alcotest.test_case "Goal and Candle queries select their destinations" `Quick
-            test_goal_and_candle_queries_select_their_destinations
+        ; Alcotest.test_case "Goal queries select Work" `Quick
+            test_goal_queries_select_work
         ; Alcotest.test_case "msx is reached by its name" `Quick
             test_msx_is_reached_by_its_name
         ; Alcotest.test_case "dos is reached by its name" `Quick

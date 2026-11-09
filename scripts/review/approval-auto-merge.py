@@ -1,0 +1,402 @@
+#!/usr/bin/env python3
+"""Merge ordinary main-targeted scopes with two current-head account approvals.
+
+Only trusted default-branch Actions code executes this worker. The downloaded
+request is an untrusted PR number, never executable code or merge evidence.
+"""
+from __future__ import annotations
+
+import argparse
+import importlib.util
+import json
+import os
+from pathlib import Path
+import re
+import subprocess
+import sys
+import time
+
+
+def sibling(name):
+    spec = importlib.util.spec_from_file_location(name, Path(__file__).with_name(name + '.py'))
+    if spec is None or spec.loader is None:
+        raise ImportError(f'cannot load review helper {name}')
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+REVIEWS = sibling('github-reviews')
+STACKS = sibling('stack-scope')
+REQUIRED_APPROVALS = 2  # Operator-requested distinct GitHub accounts.
+# One worker run follows its own receipt for at most this long. A longer
+# queue is reported as still_pending with the receipt; a rerun observes the
+# same request (HTTP 409) instead of submitting another.
+WAIT_SECONDS = 600
+POLL_SECONDS = 10
+# A run that outlives its wait hands the receipt to a fresh run of the same
+# workflow instead of ending the follow-up. There is no elapsed-time cutoff:
+# the chain ends only on a terminal answer (landed, failed, request gone, a
+# member closed without merging) or an explicit dispatch failure, all visible.
+# Only `pending` is still being decided. `enqueued` and `merged` are final
+# answers about the request; whether the pull requests landed is read from the
+# members themselves, because the receipt never changes afterwards.
+IN_FLIGHT = frozenset({'pending'})
+ACCEPTED = frozenset({'merged', 'enqueued'})
+SUCCESS = frozenset({'merged', 'eligible_dry_run', 'resume_dispatched'})
+GONE = ('HTTP 404', 'HTTP 410', 'Not Found')
+UNSETTLED = frozenset({'still_pending', 'observation_unavailable'})
+UUID = re.compile(r'[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}')
+SHA = re.compile(r'[0-9a-f]{40}')
+
+
+class Hold(ValueError):
+    """Known unmet merge condition; another review/event can recheck it."""
+
+
+def read(path):
+    return REVIEWS.gh_json('gh', path)
+
+
+def pages(path):
+    result = REVIEWS.gh_json('gh', '--paginate', '--slurp', path)
+    if not isinstance(result, list) or not all(isinstance(page, list) for page in result):
+        raise ValueError('expected paginated arrays')
+    return [row for page in result for row in page]
+
+
+def pull(repo, number):
+    return read(f'repos/{repo}/pulls/{number}')
+
+
+def top_pull(repo, number):
+    seed = pull(repo, number)
+    stack = seed.get('stack')
+    if stack is None:
+        return seed
+    live = read(f'repos/{repo}/stacks/{stack["number"]}')
+    # Include a closed, unmerged top as a blocker. Never silently merge just
+    # the lower open portion of a stack whose top was closed.
+    for member in reversed(live['pull_requests']):
+        current = pull(repo, member['number'])
+        if current['merged'] is not True:
+            return current
+    raise Hold('the stack has already merged')
+
+
+def require_server_reviews(repo):
+    rules = read(f'repos/{repo}/rules/branches/main')
+    if not any(rule['type'] == 'pull_request' and
+               rule['parameters']['required_approving_review_count'] >= REQUIRED_APPROVALS and
+               rule['parameters']['dismiss_stale_reviews_on_push'] is True
+               for rule in rules):
+        raise Hold('main must enforce two reviews and dismiss stale approvals on GitHub')
+
+
+def disable_reservation(repo, current):
+    if current['state'] == 'open' and current.get('auto_merge') is not None:
+        subprocess.run(['gh', 'pr', 'merge', str(current['number']), '--repo', repo,
+                        '--disable-auto'], check=True)
+
+
+def auto_merge_default(repo, number):
+    """Arm ordinary Ready PRs; native stacks use the whole-scope worker."""
+    current = pull(repo, number)
+    stack = current.get('stack')
+    if stack is not None:
+        live = read(f'repos/{repo}/stacks/{stack["number"]}')
+        for member in live['pull_requests']:
+            row = pull(repo, member['number'])
+            # A reservation on a lower PR could land only part of this
+            # stack. The worker submits the current whole scope instead.
+            disable_reservation(repo, row)
+        return None
+    if (current['state'] != 'open' or current['draft'] is not False or
+            current['base']['ref'] != 'main' or current['head']['ref'].startswith('release/')):
+        disable_reservation(repo, current)
+        return None
+    require_server_reviews(repo)
+    selected, _, head = REVIEWS.pr_identity(current)
+    before = STACKS.snapshot(repo, selected, head)
+    if before['stack'] is not None or before['scope'][0]['identity']['base']['ref'] != 'main':
+        raise Hold('merge scope changed before enabling auto-merge')
+    if STACKS.snapshot(repo, selected, head) != before:
+        raise Hold('PR identity changed before enabling auto-merge')
+    attempt = None
+    if current.get('auto_merge') is None:
+        emit({'status': 'enabling_auto_merge', 'pr': selected, 'head': head})
+        attempt = subprocess.run(['gh', 'pr', 'merge', str(selected), '--repo', repo,
+                                  '--auto', '--squash', '--match-head-commit', head],
+                                 capture_output=True, text=True, check=False)
+    after = pull(repo, selected)
+    if after['merged'] is True:
+        return {'status': 'merged', 'pr': selected, 'merge_commit_sha': after['merge_commit_sha']}
+    if after.get('auto_merge') is None:
+        if attempt is not None and attempt.returncode:
+            raise ValueError(attempt.stderr.strip() or 'gh could not enable auto-merge')
+        raise ValueError('GitHub has not confirmed auto-merge is enabled')
+    return {'status': 'auto_merge_enabled', 'pr': selected, 'head': after['head']['sha'],
+            'auto_merge': after['auto_merge']}
+
+
+def review_evidence(repo, current):
+    number, _, head = REVIEWS.pr_identity(current)
+    history = pages(f'repos/{repo}/pulls/{number}/reviews?per_page=100')
+    verdict = REVIEWS.evaluate(current, history, head=head)
+    approved_ids = set(verdict['approval_ids'])
+    accounts = {review['user']['id'] for review in history if review['id'] in approved_ids}
+    if verdict['change_requests'] or verdict['ambiguous_review_ids']:
+        raise Hold(f'#{number} has a change request or ambiguous review history')
+    if len(accounts) < REQUIRED_APPROVALS:
+        raise Hold(f'#{number} has {len(accounts)}/{REQUIRED_APPROVALS} current-head account approvals')
+    return history
+
+
+def prepare(repo, number):
+    require_server_reviews(repo)
+    top = top_pull(repo, number)
+    selected, _, head = REVIEWS.pr_identity(top)
+    if top['state'] != 'open' or top['draft'] is not False or top['merged'] is not False:
+        raise Hold(f'#{selected} is not open and ready')
+    before = STACKS.snapshot(repo, selected, head)
+    selected_identity = next(member['identity'] for member in before['scope']
+                             if member['number'] == selected)
+    destination = (before['stack']['base']['ref'] if before['stack'] else
+                   selected_identity['base']['ref'])
+    if destination != 'main':
+        raise Hold('only scopes targeting main are automatic; land a non-native parent first')
+    histories = {}
+    for member in before['scope']:
+        identity = member['identity']
+        if identity['merged'] is True:
+            continue
+        if identity['head']['ref'].startswith('release/'):
+            raise Hold('Release/Tag candidates retain manual full-CI admission')
+        if identity['state'] != 'open' or identity['draft'] is not False:
+            raise Hold(f'#{member["number"]} is not open and ready')
+        current = pull(repo, member['number'])
+        if current['head']['sha'] != identity['head']['sha']:
+            raise Hold(f'#{member["number"]} head changed')
+        histories[member['number']] = review_evidence(repo, current)
+    # Membership, all head/base identities and review histories must still
+    # match. GitHub independently enforces the two-review rule during merge.
+    for pr, history in histories.items():
+        if pages(f'repos/{repo}/pulls/{pr}/reviews?per_page=100') != history:
+            raise Hold(f'#{pr} reviews changed during admission')
+    if STACKS.snapshot(repo, selected, head) != before:
+        raise Hold('stack membership, head or base changed during admission')
+    return selected, head, before
+
+
+def member_states(repo, scope):
+    """Read every scope member; merge evidence is per member, not per receipt."""
+    states = {}
+    for member in scope['scope']:
+        row = pull(repo, member['number'])
+        states[member['number']] = {'merged': row['merged'] is True,
+                                    'state': row.get('state'),
+                                    'merge_commit_sha': row.get('merge_commit_sha')}
+    return states
+
+
+def all_landed(states):
+    return bool(states) and all(row['merged'] and row['merge_commit_sha']
+                                for row in states.values())
+
+
+def follow(repo, result_endpoint, receipt, scope):
+    """Follow one accepted request until it lands, fails, or the wait ends.
+
+    Read failures never resubmit: the receipt already names the effect, so the
+    same endpoint is read again. Success needs every scope member to be merged
+    with a merge commit. A `pending` answer is still undecided; `merged` and
+    `enqueued` are final answers about the request, so the members decide.
+    """
+    deadline = time.monotonic() + WAIT_SECONDS
+    observation = states = None
+    error = None
+    while True:
+        try:
+            observation = read(result_endpoint)
+            states = member_states(repo, scope)
+            error = None
+        except (ValueError, KeyError, TypeError, OSError) as failure:
+            error = str(failure)
+            if any(marker in error for marker in GONE):
+                return dict(receipt, status='request_not_found', error=error)
+        else:
+            status = observation['status']
+            abandoned = [n for n, row in states.items()
+                         if row.get('state') == 'closed' and not row['merged']]
+            if abandoned:
+                return dict(receipt, status='member_closed_unmerged', members_closed=abandoned,
+                            observation=observation, member_states=states)
+            if status in ACCEPTED and all_landed(states):
+                return dict(receipt, status='merged', observation=observation,
+                            member_states=states)
+            if status not in IN_FLIGHT and status not in ACCEPTED:
+                return dict(receipt, status=status, observation=observation,
+                            member_states=states, reason=observation.get('details'))
+        if time.monotonic() >= deadline:
+            break
+        time.sleep(POLL_SECONDS)
+    if error is not None:
+        return dict(receipt, status='observation_unavailable', error=error,
+                    observation=observation, member_states=states)
+    return dict(receipt, status='still_pending', observation=observation, member_states=states)
+
+
+def hand_off(repo, outcome):
+    """Continue an unsettled receipt in a new run; never submit a merge again."""
+    receipt = {key: outcome[key] for key in ('uuid', 'pr', 'head', 'members', 'since')}
+    command = ['gh', 'workflow', 'run', 'approval-auto-merge.yml', '--repo', repo,
+               '--ref', 'main', '-f', f'pr={receipt["pr"]}',
+               '-f', f'receipt={json.dumps(receipt, separators=(",", ":"))}']
+    try:
+        subprocess.run(command, check=True, capture_output=True, text=True)
+    except (subprocess.CalledProcessError, OSError) as error:
+        return dict(outcome, resume=f'dispatch_failed: {error}')
+    return dict(outcome, status='resume_dispatched', previous=outcome['status'],
+                resume='dispatched')
+
+
+def parse_receipt(raw):
+    """Untrusted dispatch input: shape-checked data that is only ever read."""
+    try:
+        receipt = json.loads(raw)
+    except ValueError as error:
+        raise ValueError(f'invalid receipt: {error}') from error
+    if (not isinstance(receipt, dict) or
+            set(receipt) != {'uuid', 'pr', 'head', 'members', 'since'} or
+            not isinstance(receipt['uuid'], str) or UUID.fullmatch(receipt['uuid']) is None or
+            not isinstance(receipt['head'], str) or SHA.fullmatch(receipt['head']) is None or
+            isinstance(receipt['pr'], bool) or not isinstance(receipt['pr'], int) or
+            receipt['pr'] <= 0 or not isinstance(receipt['members'], list) or
+            not receipt['members'] or len(receipt['members']) > 100 or
+            not all(isinstance(n, int) and not isinstance(n, bool) and n > 0
+                    for n in receipt['members']) or receipt['pr'] not in receipt['members'] or
+            isinstance(receipt['since'], bool) or not isinstance(receipt['since'], (int, float))):
+        raise ValueError('invalid receipt shape')
+    return receipt
+
+
+def resume(repo, receipt, dispatch=True):
+    """Read the original request again; no admission and no new merge request."""
+    endpoint = f'repos/{repo}/pulls/{receipt["pr"]}/merge-async/{receipt["uuid"]}'
+    scope = {'scope': [{'number': n} for n in receipt['members']]}
+    outcome = follow(repo, endpoint, dict(receipt, status='resumed', result_endpoint=endpoint),
+                     scope)
+    if outcome['status'] in UNSETTLED and dispatch:
+        outcome = hand_off(repo, outcome)
+    return outcome
+
+
+def submit(repo, selected, head, scope):
+    endpoint = f'repos/{repo}/pulls/{selected}'
+    if scope['stack'] is None:
+        subprocess.run(['gh', 'pr', 'merge', str(selected), '--repo', repo,
+                        '--squash', '--match-head-commit', head], check=True)
+        current = pull(repo, selected)
+        if current['merged'] is not True:
+            raise ValueError('GitHub has not confirmed the pull request merged')
+        return {'status': 'merged', 'merge_commit_sha': current['merge_commit_sha']}
+    operation = subprocess.run(
+        ['gh', 'api', '--method', 'PUT', f'{endpoint}/merge-async',
+         '-f', 'merge_method=squash', '-f', f'sha={head}', '-F', 'bypass_rules=false'],
+        capture_output=True, text=True, check=False)
+    try:
+        response = json.loads(operation.stdout)
+        uuid = response.get('details', {}).get('uuid')
+    except (ValueError, AttributeError):
+        response, uuid = None, None
+    if uuid is None:
+        # A lost or unreadable answer does not prove nothing was accepted.
+        # Check the real state and never send the request a second time.
+        request = {'pr': selected, 'head': head,
+                   'members': [member['number'] for member in scope['scope']]}
+        try:
+            states = member_states(repo, scope)
+        except (ValueError, KeyError, TypeError, OSError) as error:
+            return {'status': 'submission_unknown', 'request': request, 'error': str(error),
+                    'exit_code': operation.returncode}
+        status = 'merged' if all_landed(states) else 'submission_unknown'
+        return {'status': status, 'request': request, 'member_states': states,
+                'exit_code': operation.returncode, 'stderr': operation.stderr.strip()[:500],
+                'response': response}
+    # HTTP 409 returns the existing pending request. Observe that receipt;
+    # never cancel or blindly resubmit an operation whose effect is unknown.
+    if operation.returncode and not (response.get('status') == 'pending' and uuid):
+        raise ValueError(f'GitHub refused the merge: {response}')
+    result_endpoint = f'{endpoint}/merge-async/{uuid}'
+    receipt = {'status': 'submitted' if operation.returncode == 0 else 'existing_request',
+               'request': response, 'uuid': uuid, 'pr': selected, 'head': head,
+               'members': [member['number'] for member in scope['scope']],
+               'since': time.time(), 'result_endpoint': result_endpoint}
+    emit(receipt)  # Preserve the external effect before any fallible readback.
+    outcome = follow(repo, result_endpoint, receipt, scope)
+    return hand_off(repo, outcome) if outcome['status'] in UNSETTLED else outcome
+
+
+def requested_pr():
+    if os.environ['GITHUB_EVENT_NAME'] == 'workflow_dispatch':
+        raw = os.environ['DISPATCH_PR']
+        if not raw.isascii() or not raw.isdecimal():
+            raise ValueError('pr must be a positive integer')
+        return REVIEWS.positive_id(int(raw), 'PR number')
+    with open(os.environ['REQUEST_FILE']) as source:
+        request = json.load(source)
+    if not isinstance(request, dict) or set(request) != {'pr'}:
+        raise ValueError('invalid merge request data')
+    return REVIEWS.positive_id(request['pr'], 'PR number')
+
+
+def emit(result):
+    output = json.dumps(result, ensure_ascii=False, indent=2)
+    print(output, flush=True)
+    if os.environ.get('GITHUB_STEP_SUMMARY'):
+        with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as summary:
+            summary.write('```json\n' + output + '\n```\n')
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--dry-run', action='store_true', help='read admission without merging')
+    args = parser.parse_args()
+    exit_code = 0
+    try:
+        repo = os.environ['GITHUB_REPOSITORY']
+        if REVIEWS.REPO.fullmatch(repo) is None:
+            raise ValueError('invalid repository')
+        number = requested_pr()
+        raw_receipt = os.environ.get('DISPATCH_RECEIPT', '')
+        if raw_receipt and os.environ['GITHUB_EVENT_NAME'] == 'workflow_dispatch':
+            receipt = parse_receipt(raw_receipt)
+            if receipt['pr'] != number:
+                raise ValueError('receipt does not belong to the requested pull request')
+            outcome = resume(repo, receipt, dispatch=not args.dry_run)
+            emit({'pr': number, 'result': outcome})
+            return 0 if outcome.get('status') in SUCCESS else 1
+        if not args.dry_run:
+            automatic = auto_merge_default(repo, number)
+            if automatic is not None:
+                emit(automatic)
+                return 0
+        selected, head, scope = prepare(repo, number)
+        if not args.dry_run:
+            emit({'status': 'admitted', 'pr': selected, 'head': head, 'scope': scope})
+        outcome = ({'status': 'eligible_dry_run'} if args.dry_run else
+                   submit(repo, selected, head, scope))
+        result = {'pr': selected, 'head': head, 'scope': scope, 'result': outcome}
+        if outcome.get('status') not in SUCCESS:
+            exit_code = 1  # merged is the only success; everything else is visible red
+    except Hold as error:
+        result = {'status': 'held', 'reason': str(error)}
+    except (ValueError, KeyError, TypeError, OSError, subprocess.CalledProcessError) as error:
+        print(f'approval-auto-merge: cannot establish or submit merge: {error}', file=sys.stderr)
+        return 1
+    emit(result)
+    return exit_code
+
+
+if __name__ == '__main__':
+    raise SystemExit(main())

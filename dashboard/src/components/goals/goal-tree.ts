@@ -1,3 +1,4 @@
+import { GoalCriterionReviewDetail, GoalCriterionReviewStatus } from './goal-criterion-review'
 import { GOAL_TRANSITION_LABELS, goalLifecycleActions, type GoalTransitionAction } from '../../api/goal-lifecycle'
 import { GoalProofDetail } from './goal-proof'
 import { GoalCandlePanel } from './goal-candle'
@@ -1310,6 +1311,7 @@ function TreeNode({ node, depth }: { node: GoalTreeNode; depth: number }) {
               </span>
             ` : null}
             <${GoalMeasurementBadge} node=${node} />
+            <${GoalCriterionReviewStatus} review=${node.criterion_review} />
             ${(() => {
               const awaiting = countAwaitingVerificationTasks(node.tasks)
               return awaiting > 0 ? html`
@@ -1816,6 +1818,7 @@ function GoalDetailPanel({
 
       <${GoalTaskRelationStrip} node=${selectedNode} />
       <${GoalMeasurementDetail} node=${selectedNode} />
+      <${GoalCriterionReviewDetail} review=${identitySafe ? selectedNode.criterion_review : undefined} />
       <${GoalProofDetail} proof=${identitySafe ? selectedNode.verification : undefined} />
       ${candleOwner && identitySafe ? html`<${GoalCandlePanel} key=${candleOwner.key} owner=${candleOwner}
         isCurrent=${candleIsCurrent} refreshKey=${selectedNode.phase} />` : null}

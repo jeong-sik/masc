@@ -7409,7 +7409,7 @@ id = "navigate"
 tool = "BrowserGoto"
 [compositions.nodes.input]
 kind = "literal"
-value = {lane="live", clientId="|} ^ browser_fixture_client_id ^ {|", tabId=7, url="https://example.org/next"}
+value = {clientId="|} ^ browser_fixture_client_id ^ {|", tabId=7, url="https://example.org/next"}
 [[compositions.nodes]]
 id = "read"
 tool = "BrowserRead"
@@ -7525,7 +7525,7 @@ let test_composition_failure_after_navigation_follows_the_failed_node ~second ()
 after = ["navigate"]
 [compositions.nodes.input]
 kind = "literal"
-value = {lane="live", clientId="|} ^ browser_fixture_client_id ^ {|", tabId=7, action="scroll", x=0, y=100, expectedUrl="https://example.org/next"}
+value = {clientId="|} ^ browser_fixture_client_id ^ {|", tabId=7, action="scroll", x=0, y=100, expectedUrl="https://example.org/next"}
 |} )
         | `Act ->
           ( "navigate-then-act"
@@ -7545,7 +7545,7 @@ id = "navigate"
 tool = "BrowserGoto"
 [compositions.nodes.input]
 kind = "literal"
-value = {lane="live", clientId="%s", tabId=7, url="https://example.org/next"}
+value = {clientId="%s", tabId=7, url="https://example.org/next"}
 [[compositions.nodes]]
 id = "second"
 %s|} name browser_fixture_client_id second_node
@@ -9092,9 +9092,9 @@ let probe ?(needs_sandbox = false) tool_name args =
 
 let composable_output_probes =
   [ probe "BrowserRead" (`Assoc ["lane",`String "live";"clientId",`String browser_fixture_client_id;"tabId",`Int 1])
-  ; probe "BrowserGoto" (`Assoc ["lane",`String "live";"clientId",`String browser_fixture_client_id;"tabId",`Int 1;
+  ; probe "BrowserGoto" (`Assoc ["clientId",`String browser_fixture_client_id;"tabId",`Int 1;
       "url", `String "https://example.org/probe"])
-  ; probe "BrowserInteract" (`Assoc ["lane",`String "live";"clientId",`String browser_fixture_client_id;"tabId",`Int 1;
+  ; probe "BrowserInteract" (`Assoc ["clientId",`String browser_fixture_client_id;"tabId",`Int 1;
       "action",`String "scroll";"x",`Int 0;"y",`Int 100;
       "expectedUrl",`String "https://example.org/probe"])
   ; probe

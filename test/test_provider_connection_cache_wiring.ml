@@ -132,6 +132,25 @@ let test_two_runs_share_one_connection () =
     (Health.provider_connection_cache_json () = `Null)
 ;;
 
+let test_reconnect_uses_fresh_transport_and_restores_reuse () =
+  Eio_main.run @@ fun env ->
+  with_provider_and_cache env (fun ~sw ~net provider ->
+    Masc_test_deps.init_eio_clock ~sw env;
+    let cfg = provider_cfg provider in
+    run_once ~sw ~net cfg;
+    Provider_connection_cache_ref.with_fresh_connections (fun () ->
+      Alcotest.(check bool) "recovery has no connection cache" true
+        (Option.is_none (Provider_connection_cache_ref.for_this_domain ()));
+      run_once ~sw ~net cfg);
+    run_once ~sw ~net cfg;
+    Alcotest.(check int) "all three requests reached the provider" 3 (Fixture.post_count provider);
+    let cache = Health.provider_connection_cache_json () in
+    Alcotest.(check int) "the fresh transport did not borrow a cache lease" 1
+      (count "created_total" cache);
+    Alcotest.(check int) "the surrounding transport resumes cache reuse" 1
+      (count "reused_total" cache))
+;;
+
 let test_a_run_on_another_domain_opens_its_own_connection () =
   Eio_main.run
   @@ fun env ->
@@ -267,6 +286,8 @@ let () =
             test_two_runs_share_one_connection
         ; Alcotest.test_case "a run on another domain opens its own connection" `Quick
             test_a_run_on_another_domain_opens_its_own_connection
+        ; Alcotest.test_case "reconnect uses a fresh transport and restores reuse" `Quick
+            test_reconnect_uses_fresh_transport_and_restores_reuse
         ; Alcotest.test_case "two streamed runs share one connection" `Quick
             test_two_streamed_runs_share_one_connection
         ; Alcotest.test_case "health tells a reused connection's closes from a new one's"

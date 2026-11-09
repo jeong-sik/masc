@@ -1325,7 +1325,7 @@ function GateStatusStrip({
   const healthy = gate !== null && connectors.some(c => c.gate_healthy === true)
   // Prototype gate-strip dot is <StatusDot status pulse/> → window.KV.Dot → `.dot2`
   // (messages.jsx:8 maps run→ok, pause→warn, off→idle). The vendored CSS styles
-  // `.dot2` / `.dot2.ok` / `.dot2.warn` (v2.css:395); there is no `.status-dot`
+  // `.dot2` / `.dot2.ok` / `.dot2.warn`; there is no `.status-dot`
   // rule, so emit the prototype's `.dot2` vocabulary instead.
   function statusDotClass(): string {
     if (healthy) return 'dot2 ok pulse'

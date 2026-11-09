@@ -6,7 +6,7 @@
 .ti-overlay {
   position: fixed;
   inset: 0;
-  /* prototype .turn-overlay (keeper-v2/styles/v2.css:687): rgba(4,5,8,0.42) — a
+  /* prototype .turn-overlay: rgba(4,5,8,0.42) — a
      light dark scrim. --backdrop-modal is a near-opaque blue (rgba(10,18,34,
      0.95)) that would over-darken; pin the prototype literal. z-index keeps the
      dashboard keeper stacking token (drawer above shell). */
@@ -26,7 +26,7 @@
   width: min(720px, 96vw);
   height: 100%;
   background: var(--color-bg-surface);
-  /* prototype .turn-drawer (v2.css:688-690): border-left --border-main,
+  /* prototype .turn-drawer: border-left --border-main,
      box-shadow -8px 0 30px rgba(0,0,0,0.5). --color-border-strong maps to
      --border-highlight (brighter) and --shadow-drawer-left is -8px 0 24px/.4;
      pin the prototype values. */
@@ -40,14 +40,14 @@
 .ti-head {
   display: flex;
   align-items: center;
-  /* prototype .turn-hd (keeper-v2/styles/v2.css:694): gap 10px. --sp-3 is 8px
+  /* prototype .turn-hd: gap 10px. --sp-3 is 8px
      under [data-skin=v2]; pin the literal. */
   gap: 10px;
-  /* prototype .turn-hd (keeper-v2/styles/v2.css:694): literal 14px 16px.
+  /* prototype .turn-hd: literal 14px 16px.
      --sp-* is a 2px base under [data-skin=v2] (--sp-3 8px / --sp-4 10px),
      which would shrink the header; pin the prototype literals. */
   padding: 14px 16px;
-  /* prototype .turn-hd (v2.css:694): border-bottom --border-main, no background
+  /* prototype .turn-hd: border-bottom --border-main, no background
      (the drawer's --bg-panel shows through). --color-border-strong maps to the
      brighter --border-highlight; pin --color-border-default (= --border-main)
      and drop the elevated fill. */
@@ -57,7 +57,7 @@
 
 .ti-head h3 {
   margin: 0;
-  /* prototype .turn-hd h3 (keeper-v2/styles/v2.css:695): display, uppercase,
+  /* prototype .turn-hd h3: display, uppercase,
      letter-spacing 0.14em, 13px. var(--type-title) is sentence-case 14px, so
      match the prototype heading explicitly. */
   font-family: var(--font-display);
@@ -73,7 +73,7 @@
 
 .ti-head .tid {
   font-family: var(--font-mono);
-  /* prototype .turn-hd .tid (keeper-v2/styles/v2.css:696): 11px. */
+  /* prototype .turn-hd .tid: 11px. */
   font-size: var(--fs-11);
   color: var(--color-fg-muted);
   white-space: nowrap;
@@ -94,7 +94,7 @@
 
 .ti-close {
   background: transparent;
-  /* prototype .turn-close (v2.css:699): border --border-main, color --text-mid,
+  /* prototype .turn-close: border --border-main, color --text-mid,
      26x26, --radius-sm (4px), font-size 12px. */
   border: 1px solid var(--color-border-default);
   color: var(--color-fg-muted);
@@ -104,11 +104,11 @@
   cursor: pointer;
   font-size: var(--fs-12);
   line-height: 1;
-  transition: 0.14s; /* prototype .turn-close (v2.css:699) */
+  transition: 0.14s; /* prototype .turn-close */
 }
 
 .ti-close:hover {
-  /* prototype .turn-close:hover (v2.css:700): border-color --volt-dim, color
+  /* prototype .turn-close:hover: border-color --volt-dim, color
      --volt (no background). --color-accent-fg/-dim map to --volt/--volt-dim. */
   border-color: var(--color-accent-fg-dim);
   color: var(--color-accent-fg);
@@ -295,10 +295,10 @@
   font-weight: 600;
 }
 
-/* ── Tabs — pill rail (prototype .turn-tabs / .turn-tab, keeper-v2/styles/v2.css:701-704) ── */
+/* ── Tabs — pill rail (prototype .turn-tabs / .turn-tab) ── */
 .ti-tabs {
   display: flex;
-  /* prototype .turn-tabs (v2.css:701): gap 5px; padding 9px 14px;
+  /* prototype .turn-tabs: gap 5px; padding 9px 14px;
      border-bottom 1px var(--border-soft). --sp-* would shrink the rail. */
   gap: 5px;
   background: var(--color-bg-surface);
@@ -310,14 +310,14 @@
 }
 
 .ti-tab {
-  /* prototype .turn-tab (v2.css:702): outlined pill, not an underline. */
+  /* prototype .turn-tab: outlined pill, not an underline. */
   background: none;
   border: 1px solid transparent;
   border-radius: var(--radius-sm); /* 4px under v2 (skin-v2.css:80) */
   padding: 6px 12px;
   color: var(--color-fg-disabled);
   font-family: var(--font-ui);
-  /* prototype .turn-tab (v2.css:702): 11px. */
+  /* prototype .turn-tab: 11px. */
   font-size: var(--fs-11);
   text-transform: uppercase;
   letter-spacing: 0.08em;
@@ -326,12 +326,12 @@
 }
 
 .ti-tab:hover {
-  /* prototype .turn-tab:hover (v2.css:703): color only */
+  /* prototype .turn-tab:hover: color only */
   color: var(--color-fg-muted);
 }
 
 .ti-tab.on {
-  /* prototype .turn-tab.on (v2.css:704): volt text + dim border + wash fill.
+  /* prototype .turn-tab.on: volt text + dim border + wash fill.
      --color-accent-fg/-dim resolve to brass #e0b057 / #8a6a28 under v2,
      matching the prototype --volt/--volt-dim; --volt-wash is the brass
      rgba(224,176,87,0.10) wash. */
@@ -345,8 +345,8 @@
   flex: 1;
   min-height: 0;
   overflow: auto;
-  /* prototype .turn-body (v2.css:705): padding 16px, inter-section gap 16px,
-     inherited font-size 14px (.v2-app, v2.css:178). --sp-3/--sp-4 are 8px/10px
+  /* prototype .turn-body: padding 16px, inter-section gap 16px,
+     inherited font-size 14px (.v2-app). --sp-3/--sp-4 are 8px/10px
      under v2; the inter-section 16px is carried by .ti-sec margin-bottom
      below. Pin the literal. */
   padding: 16px;
@@ -354,7 +354,7 @@
 }
 
 .ti-sec {
-  /* prototype .turn-body gap 16px (v2.css:705) between sibling .turn-sec. */
+  /* prototype .turn-body gap 16px between sibling .turn-sec. */
   margin-bottom: 16px;
 }
 
@@ -372,7 +372,7 @@
 }
 
 .ti-sec-h h4 {
-  /* prototype section header is .turn-sec h4 (v2.css:706): font-ui, uppercase,
+  /* prototype section header is .turn-sec h4: font-ui, uppercase,
      letter-spacing 0.1em, 10px, color --text-dim (NOT the sentence-case 14px
      bright --type-title). .ti-sec-h h4 (inspector.css:116) only adds margin:0.
      This surface uses .ti-sec, so replicate the .turn-sec h4 rule in full. */
@@ -789,7 +789,7 @@
   margin-left: 6px;
 }
 
-/* prototype .turn-kv (v2.css:716-718): a plain two-column mono list —
+/* prototype .turn-kv: a plain two-column mono list —
    grid-template-columns 130px 1fr, gap 8px 12px, mono 12px; .k --text-dim,
    .v --text-bright. NOT a bordered-cell grid; keep the prototype's flat look
    (no cell borders/backgrounds/padding, no uppercase). (variables.css:723); pin the 12px literal. */

@@ -52,8 +52,8 @@ type claim_resolution =
   | Held_terminal of Masc_domain.task_status
   | Held_pending_verdict of { verification_id : string }
 
-let resolve_claim ~same_actor ~agent_name ~now (task : Masc_domain.task) =
-  match Masc_domain.task_claim_decision_for_status task.task_status with
+let resolve_claim_status ~same_actor ~agent_name ~now task_status =
+  match Masc_domain.task_claim_decision_for_status task_status with
   | Masc_domain.Claim_available ->
     Worker_claim (Masc_domain.Claimed { assignee = agent_name; claimed_at = now })
   | Masc_domain.Claim_unavailable
@@ -73,6 +73,10 @@ let resolve_claim ~same_actor ~agent_name ~now (task : Masc_domain.task) =
        Held_terminal task_status)
 ;;
 
+let resolve_claim ~same_actor ~agent_name ~now (task : Masc_domain.task) =
+  resolve_claim_status ~same_actor ~agent_name ~now task.task_status
+;;
+
 let decide
       ~new_verification_id
       ~same_agent
@@ -86,25 +90,29 @@ let decide
   =
   match action, task_status with
   | Masc_domain.Claim, task_status ->
-    (match Masc_domain.task_claim_decision_for_status task_status with
-     | Masc_domain.Claim_available ->
-       ok
-         ~set_current:task_id
-         (Masc_domain.Claimed { assignee = agent_name; claimed_at = now })
-     | Masc_domain.Claim_unavailable
-         (Masc_domain.Claim_block_pending_verdict _) ->
-       Error Verification_pending_verdict
-     | Masc_domain.Claim_unavailable
-         (Masc_domain.Claim_block_not_todo status) ->
-       (match status with
-        | Masc_domain.Claimed { assignee; _ }
-        | Masc_domain.InProgress { assignee; _ } ->
-          if same_agent assignee then ok status
-          else Error (Current_owner_required { current_assignee = assignee })
-        | Masc_domain.Done _ -> ok status
+    (match
+       resolve_claim_status ~same_actor:same_agent ~agent_name ~now task_status
+     with
+     | Worker_claim claimed_status -> ok ~set_current:task_id claimed_status
+     | Self_owned -> ok task_status
+     | Held_terminal (Masc_domain.Done _ as done_status) -> ok done_status
+     | Held_pending_verdict _ -> Error Verification_pending_verdict
+     | Held_by_other current_assignee ->
+       (match task_status with
         | Masc_domain.Cancelled _ -> Error Invalid_transition
-        | Masc_domain.Todo | Masc_domain.AwaitingVerification _ ->
-          Error Invalid_transition))
+        | Masc_domain.Todo
+        | Masc_domain.Claimed _
+        | Masc_domain.InProgress _
+        | Masc_domain.AwaitingVerification _
+        | Masc_domain.Done _ ->
+          Error (Current_owner_required { current_assignee }))
+     | Held_terminal
+         ( Masc_domain.Todo
+         | Masc_domain.Claimed _
+         | Masc_domain.InProgress _
+         | Masc_domain.AwaitingVerification _
+         | Masc_domain.Cancelled _ ) ->
+       Error Invalid_transition)
   | Masc_domain.Start, Masc_domain.Claimed { assignee; _ } ->
     if same_agent assignee
     then

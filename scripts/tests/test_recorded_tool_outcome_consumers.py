@@ -60,28 +60,6 @@ class OutcomeConsumers(unittest.TestCase):
                                              **(extra_env or {})},
                                   text=True, capture_output=True, check=True).stdout
 
-    def run_harness_functions(self, rows, keeper="fixture"):
-        """Run the harness's two log readers on a fixture log.
-
-        The script runs its own main on source, so the two functions are cut
-        out by name and evaluated alone.
-        """
-        script = (SCRIPTS / "harness_tool_call_quality.sh").read_text()
-        functions = "".join(
-            re.search(rf"^{name}\(\) \{{.*?^\}}\n", script, re.S | re.M).group(0)
-            for name in ("read_tool_log_entries", "tool_calls_for_evidence"))
-        with tempfile.TemporaryDirectory(prefix="masc-harness-outcome-") as directory:
-            root = Path(directory)
-            file = root / ".masc/tool_calls/2026-10/19.jsonl"
-            file.parent.mkdir(parents=True)
-            file.write_text("".join(json.dumps(row) + "\n" for row in rows))
-            program = functions + f'tool_calls_for_evidence "$(read_tool_log_entries {keeper})"\n'
-            output = subprocess.run(
-                ["bash", "-c", program],
-                env={**os.environ, "TARGET_DIR": str(root), "ROOT_DIR": str(SCRIPTS.parent)},
-                text=True, capture_output=True, check=True).stdout
-            return json.loads(output)
-
     def test_quality_counts_calls_and_all_five_outcomes(self):
         output = self.run_script("analyze-tool-call-quality.sh", [
             call(disposition="completed", wire_outcome="error", success=False),
@@ -230,20 +208,6 @@ class OutcomeConsumers(unittest.TestCase):
         output = subprocess.run(["node", "--input-type=module", "-e", program],
                                 text=True, capture_output=True, check=True).stdout
         self.assertEqual(json.loads(output), [recorded_call_outcome(row).value for row in rows])
-
-    def test_quality_harness_marks_only_a_settled_success_as_success(self):
-        rows = [call(keeper="fixture", tool="tool_execute", disposition="completed", wire_outcome="error"),
-                call(keeper="fixture", tool="tool_execute", disposition="failed", wire_outcome="ok"),
-                call(keeper="fixture", tool="tool_execute", disposition="deferred"),
-                call(keeper="fixture", tool="tool_execute", wire_outcome="unknown"),
-                call(keeper="fixture", tool="tool_execute", success=True),
-                call(keeper="fixture", tool="tool_execute", record_kind="composition_run",
-                     disposition="completed"),
-                call(keeper="fixture", tool="tool_execute", record_kind="lifecycle_event",
-                     disposition="completed"),
-                call(keeper="other", tool="tool_execute", disposition="completed")]
-        calls = self.run_harness_functions(rows)
-        self.assertEqual([c["success"] for c in calls], [True, False, False, False, False])
 
 
 if __name__ == "__main__":

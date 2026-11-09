@@ -771,6 +771,17 @@ val memory_capacity_retry_sequence :
     retry. Receipt failure calls [on_projection_failure] so enclosing history
     recovery cannot bypass it. Unchanged memory returns the original refusal. *)
 
+val connection_recovery_sequence :
+  same_run_retry_authorized:(unit -> bool) ->
+  on_reconnect:(Llm_provider.Http_client.network_error_kind -> unit) ->
+  reconnect:(unit -> (('ok, Agent_core.Error.t) result * 'checkpoint * 'sample)) ->
+  attempt:(unit -> (('ok, Agent_core.Error.t) result * 'checkpoint * 'sample)) ->
+  unit -> (('ok, Agent_core.Error.t) result * 'checkpoint * 'sample)
+(** A typed peer reset/EOF before checkpoint or effect progress may be answered
+    by rebuilding the same HTTP attempt with fresh connections. The reconnect
+    result is returned directly, including its checkpoint and failure; it does
+    not enter another reconnect loop. Other failures remain unchanged. *)
+
 val run_try_provider_with_truncation_recovery :
   ?on_memory_capacity_refusal:Keeper_memory_delivery_reprojection.t ->
   ?continuation_checkpoint:Agent_core.Checkpoint.t ->
@@ -787,6 +798,11 @@ val run_try_provider_with_truncation_recovery :
     retry authority; on a typed size refusal
     the retained-result carrier is offered before [on_memory_capacity_refusal]
     ({!Keeper_client_tool_outbox.run_carrier_reprojection}).
+
+    A materialized Agent Core HTTP lane whose connection closes before any
+    stream event or checkpoint/effect progress reconnects with an uncached
+    transport. Official clients retain their own recovery. HTTP itself never
+    replays a POST.
 
     Run the carried-range eviction first. When the accepted
     boundary instead reports a typed [MaxTokens] truncation, remove only that

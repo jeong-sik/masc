@@ -93,16 +93,6 @@ val input_contract : action -> Browser_native_input_contract.t
     invokes native Input.insertText without key-down/up. It never provides a
     released-input proof. *)
 
-type unavailable_input = {
-  index : int;
-  action : action;
-  reason : Browser_native_input_contract.unavailable;
-}
-val validate_input_contract : t -> (unit, unavailable_input) result
-(** Check the whole workflow before executing any step. Decoding native SDK
-    data does not make an unattestable raw holding method executable. *)
-val unavailable_input_message : unavailable_input -> string
-
 (** May leave a pointer button or key held when the SDK result is lost or
     interrupted by a dialog. Paste uses the SDK's ControlOrMeta+V sequence. *)
 val holds_input : action -> bool

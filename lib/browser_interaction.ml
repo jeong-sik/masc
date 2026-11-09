@@ -2,11 +2,13 @@
 type request = { route : Browser_selection.preference; tab_id : int;
   expected_url : string option; action : Browser_lane.interaction }
 open Result.Syntax
-let route_names = ["lane"; "clientId"]
+let route_names = ["clientId"]
 let wire_fields = ["tabId"; "expectedUrl"; "action"; "selector"; "text"; "x"; "y"; "documentId"; "nodeId"; "point"; "from"; "to"; "viewport"; "button"; "source"; "destination"; "via"; "durationMs"; "key"; "modifiers"; "width"; "height"; "value"; "values"; "target"]
 let parse = function
   | `Assoc fields ->
-    let allowed = route_names @ wire_fields in
+    (* The Add-on wire, the HTTP view and the ego worker also name the live
+       lane; a Keeper names only the client (see [route_names]). *)
+    let allowed = "lane" :: route_names @ wire_fields in
     let* () = if List.for_all (fun (key, _) -> List.mem key allowed) fields
       && List.length fields = List.length (List.sort_uniq String.compare (List.map fst fields))
       then Ok () else Error "unknown or duplicate browser interaction argument" in
@@ -46,8 +48,8 @@ let parse = function
         | Some (`String "press_key") -> keys
         | _ -> "key" :: "modifiers" :: keys) in
       let keys = match List.assoc_opt "action" fields with
-        | Some (`String "drag_to") -> keys
-        | Some (`String ("drag" | "swipe")) -> "source" :: "destination" :: keys
+        | Some (`String "drag_to") -> "via" :: "durationMs" :: keys
+        | Some (`String "swipe") -> "source" :: "destination" :: keys
         | _ -> "source" :: "destination" :: "via" :: "durationMs" :: keys in
       let keys = match List.assoc_opt "action" fields with
         | Some (`String "click_at") -> keys
@@ -77,7 +79,7 @@ let parse = function
     let geometry parser key =
       let* value = required key in
       parser value in
-    let drag_options () =
+    let swipe_options () =
       let* via = match List.assoc_opt "via" fields with
         | None -> Ok []
         | Some (`List points) ->
@@ -149,12 +151,11 @@ let parse = function
       | Some (`String "drag_to") ->
         let* () = excludes ["selector";"documentId";"nodeId";"text";"x";"y";"point";"from";"to";"viewport"] in
         let* () = match expected_url with Some _ -> Ok () | None -> Error "drag_to requires expectedUrl" in
-        let target key = match List.assoc_opt key fields with
-          | Some (`Assoc fields) -> pointer_target fields
-          | _ -> Error ("drag_to requires " ^ key ^ " target") in
-        let* source = target "source" in let* destination = target "destination" in
-        let* via,duration_ms = drag_options () in
-        Ok (Browser_lane.Drag_to {source;destination;via;duration_ms})
+        let selector key = match List.assoc_opt key fields with
+          | Some (`Assoc ["selector", `String selector]) when String.trim selector <> "" -> Ok selector
+          | _ -> Error ("drag_to requires " ^ key ^ " as {selector}") in
+        let* source = selector "source" in let* destination = selector "destination" in
+        Ok (Browser_lane.Drag_to {source;destination})
       | Some (`String "follow_link") ->
         let* () = excludes ["selector";"text";"x";"y";"point";"from";"to";"viewport"] in
         let* () = match expected_url with Some _ -> Ok () | None -> Error "follow_link requires expectedUrl" in
@@ -167,7 +168,7 @@ let parse = function
         let* () = match base.route with
           | Browser_selection.Exact (Browser_lane.Live_route _) -> Ok ()
           | Browser_selection.Automatic ->
-              Error "activate_tab requires an observed live clientId or lane" in
+              Error "activate_tab requires the observed clientId" in
         Ok Browser_lane.Activate_tab
       | Some (`String "click") ->
         let* () = excludes ["text"; "x"; "y"; "point"; "from"; "to"; "viewport"] in
@@ -224,7 +225,7 @@ let parse = function
         let* viewport = geometry Browser_lane.Pointer.viewport_of_json "viewport" in
         let* from = geometry Browser_lane.Pointer.point_of_json "from" in
         let* to_ = geometry Browser_lane.Pointer.point_of_json "to" in
-        let* via,duration_ms = drag_options () in
+        let* via,duration_ms = swipe_options () in
         Ok (Browser_lane.Swipe {from;to_;viewport;via;duration_ms})
       | Some (`String ("hover_at" | "double_click_at" as action)) ->
         let* () = excludes ["selector";"text";"documentId";"nodeId";"x";"y";"from";"to"] in
@@ -233,27 +234,20 @@ let parse = function
         let* point = geometry Browser_lane.Pointer.point_of_json "point" in
         Ok (if action = "double_click_at" then Browser_lane.Double_click_at {point;viewport}
           else Browser_lane.Hover_at {point;viewport})
-      | Some (`String ("click_at" | "drag" as action)) ->
-        let* () = excludes (["selector"; "text"; "documentId"; "nodeId"; "x"; "y"] @
-          if action = "click_at" then ["from"; "to"] else ["point"]) in
+      | Some (`String "click_at") ->
+        let* () = excludes ["selector"; "text"; "documentId"; "nodeId"; "x"; "y"; "from"; "to"] in
         let* () = match expected_url with Some _ -> Ok () | None -> Error "pointer actions require expectedUrl" in
         let* viewport = geometry Browser_lane.Pointer.viewport_of_json "viewport" in
-        if action = "click_at" then
-          let* point = geometry Browser_lane.Pointer.point_of_json "point" in
-          let* button = match List.assoc_opt "button" fields with
-            | None -> Ok Browser_lane.Pointer.Primary
-            | Some (`String raw) ->
-              (match Browser_lane.Pointer.button_of_string raw with
-               | Some button -> Ok button
-               | None -> Error "button must be primary, middle or secondary")
-            | Some _ -> Error "button must be primary, middle or secondary" in
-          Ok (Browser_lane.Click_at {point;viewport;button})
-        else
-          let* from = geometry Browser_lane.Pointer.point_of_json "from" in
-          let* to_ = geometry Browser_lane.Pointer.point_of_json "to" in
-          let* via,duration_ms = drag_options () in
-          Ok (Browser_lane.Drag {from;to_;viewport;via;duration_ms})
-      | _ -> Error "action must be set_viewport, activate_tab, tap_at, swipe, click, double_click, double_click_at, type_text, press_key, follow_link, fill, scroll, click_at, scroll_at, hover, hover_at, drag or drag_to" in
+        let* point = geometry Browser_lane.Pointer.point_of_json "point" in
+        let* button = match List.assoc_opt "button" fields with
+          | None -> Ok Browser_lane.Pointer.Primary
+          | Some (`String raw) ->
+            (match Browser_lane.Pointer.button_of_string raw with
+             | Some button -> Ok button
+             | None -> Error "button must be primary, middle or secondary")
+          | Some _ -> Error "button must be primary, middle or secondary" in
+        Ok (Browser_lane.Click_at {point;viewport;button})
+      | _ -> Error "action must be set_viewport, activate_tab, tap_at, swipe, click, double_click, double_click_at, type_text, press_key, follow_link, fill, scroll, click_at, scroll_at, hover, hover_at or drag_to" in
     Ok { route = base.route; tab_id; expected_url; action }
   | _ -> Error "browser interaction arguments must be an object"
 
@@ -558,7 +552,7 @@ let pointer_target_script = {js|
 const args = arguments[0];
 try {
   if (args.expectedUrl !== undefined && args.expectedUrl !== location.href) throw new Error('page_url_changed');
-  const target = (spec, withArrival = false) => {
+  const target = spec => {
     let element;
     if (spec.selector !== undefined) {
       let found;
@@ -617,41 +611,24 @@ try {
       if (right <= left || bottom <= top) continue;
       const x = Math.floor((left+right)/2), y = Math.floor((top+bottom)/2);
       if (!containsPointer(x,y)) continue;
-      const resolved = {point:point(x,y)};
-      if (withArrival) {
-        // Enter the observed drop rectangle before its center, so a later
-        // native move can deliver dragover after dragenter on this target.
-        const candidates = [[Math.floor((left+x)/2),y],[Math.floor((x+right)/2),y],
-          [x,Math.floor((top+y)/2)],[x,Math.floor((y+bottom)/2)]];
-        const arrival = candidates.find(([ax,ay]) => (ax !== x || ay !== y)
-          && ax >= left && ax < right && ay >= top && ay < bottom && containsPointer(ax,ay));
-        if (arrival) resolved.arrival = point(...arrival);
-      }
-      return resolved;
+      return {point:point(x,y)};
     }
     if (!rects.some(rect =>
       rect.right > 0 && rect.bottom > 0 && rect.left < innerWidth && rect.top < innerHeight))
       throw new Error('element_outside_viewport');
     throw new Error('element_pointer_obstructed');
   };
-  let geometry;
-  if (args.action === 'hover' || (args.action === 'click' || args.action === 'double_click')) geometry = {point:target(args).point};
-  else {
-    const source = target(args.source), destination = target(args.destination,true);
-    geometry = {from:source.point,to:destination.point,
-      ...(destination.arrival ? {arrival:destination.arrival} : {})};
-  }
-  return {...geometry,url:location.href,viewport:browserScene({mode:'viewport'})};
+  return {point:target(args).point,url:location.href,viewport:browserScene({mode:'viewport'})};
 } catch (error) {
   return {interactionFailure:{message:String(error?.message ?? error),effectStarted:false}};
 }
 |js}
 
 let needs_pointer_resolution = function
-  | Browser_lane.Click _ | Click_node _ | Double_click _ | Hover _ | Drag_to _ -> true
-  | Browser_lane.Activate_tab | Fill _ | Select_option _ | Set_viewport _
+  | Browser_lane.Click _ | Click_node _ | Double_click _ | Hover _ -> true
+  | Browser_lane.Activate_tab | Fill _ | Select_option _ | Set_viewport _ | Drag_to _
   | Double_click_at _ | Type_text _ | Press_key _ | Scroll _ | Hover_at _ | Tap_at _
-  | Swipe _ | Click_at _ | Scroll_at _ | Drag _ | Follow_link _ | Fill_node _
+  | Swipe _ | Click_at _ | Scroll_at _ | Follow_link _ | Fill_node _
   | Click_target _ | Fill_target _ | Hover_target _ | Double_click_target _ -> false
 
 let resolve_pointer_input action = function
@@ -671,13 +648,11 @@ let resolve_pointer_input action = function
      | Browser_lane.Click _ | Browser_lane.Click_node _ ->
        let* point = point "point" in
        Ok (Browser_lane.Click_at {point;viewport;button=Browser_lane.Pointer.Primary})
-     | Browser_lane.Drag_to {via;duration_ms;_} -> let* from = point "from" in let* to_ = point "to" in
-       Ok (Browser_lane.Drag {from;to_;viewport;via;duration_ms})
-     | Browser_lane.Activate_tab | Browser_lane.Fill _ | Browser_lane.Select_option _
+     | Browser_lane.Activate_tab | Browser_lane.Fill _ | Browser_lane.Select_option _ | Browser_lane.Drag_to _
      | Browser_lane.Set_viewport _ | Browser_lane.Double_click_at _ | Browser_lane.Type_text _ | Browser_lane.Press_key _
      | Browser_lane.Scroll _ | Browser_lane.Hover_at _ | Browser_lane.Click_at _
      | Browser_lane.Tap_at _ | Browser_lane.Swipe _
-     | Browser_lane.Scroll_at _ | Browser_lane.Drag _ | Browser_lane.Follow_link _
+     | Browser_lane.Scroll_at _ | Browser_lane.Follow_link _
      | Browser_lane.Fill_node _ | Browser_lane.Click_target _ | Browser_lane.Fill_target _
      | Browser_lane.Hover_target _ | Browser_lane.Double_click_target _ ->
        Error "semantic pointer action required" in

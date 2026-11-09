@@ -14,13 +14,14 @@ related: ["0511", "0503", "0481", "0418"]
 
 - Status: **Draft.** 운영자가 2026-11-09 에 착수를 지시했다("1,2,3 전체 진행해줘"). §7 의 기본값은 이 RFC 를 병합하면서 받아들인다.
 - 2026-11-09 정정: 리뷰와 시안 대조에서 나온 것을 고쳤다. §2.1 의 `known_since` 규칙을 구현(#50190)과 맞추고, 키 사실(§1.3), 기본 보기(E8), 시안과 다르게 정한 것(§2.7)과 층(§3)을 더했다.
+- 2026-11-09 두 번째 정정: 운영자가 V1 을 깔고 시안과 견줬다. 시안의 보기별 칸(기억별 · 나이별 · 앞 12시간 일정 띠)과 머리 띠가 어느 층에도 없었다. §2.4 를 보기가 칸 값을 고르는 줄로 고치고 §2.8, 층 V6 · V7 · V8, E16–E19 를 더했다.
 - 시안: `docs/research/2026-11-06-keepers-list-past-now-next-preview.html` (Artifact `Keeper Pulse` 3판).
 - 앞 RFC: RFC-0511 §4 가 보기 6개 · Story 창 · `s` `m` `w` 키를 "값이 main 에 오른 뒤 별도 RFC" 로 미뤘다. 이 RFC 가 그 별도 RFC 다.
 
 ## 0. 요약
 
 - RFC-0511 이 행 안의 값(실패 지속 시간 · 맥박 · lag · 갱신 시계 · 나이 사다리 · 일정 칸 · 사람 몫 표지)을 main 에 올렸다. 화면 틀은 그대로라서 운영자 눈에는 옛 화면이다.
-- 이 RFC 는 화면 틀 넷을 올린다. 보기 탭, 한 축 줄(◂ 직전 · ● 지금 · ▹ 다음), Story 창, 그리고 이 셋을 부르는 키다.
+- 이 RFC 는 화면 틀 넷을 올린다. 보기 탭, 한 축 줄(◂ 직전 · ● 지금 · ▹ 다음), Story 창, 그리고 이 셋을 부르는 키다. 한 축 줄의 세 칸에 무엇을 넣을지는 보기가 고른다. 목록 위에는 묶음 수와 함대 실패 띠를 그린다.
 - 그 앞에 맥박 저장을 고친다. 서버는 Keeper 마다 최근 턴 24개만 들고 있어서 바쁜 Keeper 의 12시간 칸이 `?` 로 찬다. 30분 칸으로 24시간을 저장한다. 이것이 24h 벽 보기의 재료이기도 하다.
 
 ## 1. 지금
@@ -130,16 +131,26 @@ type pulse = { known_since : float; slots : slot list }   (* 새 칸이 앞 *)
 
 ### 2.4 한 축 줄
 
-목록 외의 보기는 Keeper 한 줄을 시간 축으로 그린다.
+목록 외의 보기는 Keeper 한 줄을 ◂ 직전 · ● 지금 · ▹ 다음 세 칸으로 그린다. 세 칸의 틀은 모든 보기가 같고, 칸에 넣는 값은 보기가 고른다(E16).
 
 ```
- 표지 이름        ◂ 맥박 12칸     ● 지금 한 단어    ▹ 다음: ◷ 일정 · runtime · lag
+ 표지 이름        ◂ 직전          ● 지금            ▹ 다음
 ```
 
-- ◂ 직전: §2.1 의 맥박. 24h 보기에서는 48칸.
-- ● 지금: `Keeper_list_model.primary_activity_of_row` 의 낱말 하나. 도는 턴은 기존 running 표지(`◐◓◑◒`, 150ms 걸음)를 그대로 쓴다. 새 움직임은 만들지 않는다.
-- ▹ 다음: 일정 칸(`◷`), 다음 dispatch 경로(`kr_runtime_path_rest`), lag.
+| 보기 | ◂ 직전 | ● 지금 | ▹ 다음 | 층 |
+| --- | --- | --- | --- | --- |
+| 상태별 · 원인별 · 시간별 | 맥박 12칸(§2.1) | 지금 낱말 | 다음 깰 시각 · 다음 dispatch 경로(`kr_runtime_path_rest`) · lag. V7 이 앞 12시간 일정 띠를 더한다 | V3 · V7 |
+| 기억별 | 맥박 12칸 | Librarian 패스 끝(`mlh_state`: pending · drained 등) | 안 읽은 턴(lag) 막대 · 마지막 digest 나이 · gap | V6 |
+| 나이별 | 사실 나이 4칸(`age_bins`, E17) | 마지막 갱신 나이(`updated_at`) | lag 막대 · stale 수(`source_invalidations`) · facts 수 | V6 |
+| runtime | §2.7 의 교차표 | | | V5 |
+| 24h | 48칸 맥박 | | 실패한 칸 수 `n/48` | V4 |
+| 목록 | 지금 열 그대로 | | | — |
+
+- 지금 낱말은 `Keeper_list_model.primary_activity_of_row` 의 낱말 하나다. 도는 턴은 기존 running 표지(`◐◓◑◒`, 150ms 걸음)를 그대로 쓴다. 새 움직임은 만들지 않는다.
+- 기억별 · 나이별 칸의 값은 TUI 가 이미 받는 Memory 스냅숏(`memory_keeper_health`)에 있다. 새 서버 값은 없다. lag · gap · digest 시각 · `age_bins` · `updated_at` 은 `Masc_tui_keeper_memory_reading.t` 의 `Row` 가 들고 있다. Librarian 패스 끝(`mkh_librarian.mlh_state`)은 V6 이 `Row` 에 더한다.
+- 앞 12시간 일정 띠(V7)는 일정의 반복(`Schedule_domain.recurrence`)으로 12시간 안의 깰 시각을 모두 구해 `◷` 로 찍는다. 지금 TUI 는 반복을 JSON(`sch_recurrence`)과 요약 문자열로만 받는다. 요약 문자열은 가르지 않는다. `Schedule_domain` 의 반복 디코더를 열어 닫힌 값으로 읽는다(E19). 행 JSON 의 반복 모양이 그 디코더와 맞는지는 V7 에서 확인한다.
 - Mode · S · AGE · LIFECYCLE 은 Story 창으로 옮긴다. 실패한 Keeper 는 둘째 줄에 사슬과 원인을 그린다.
+- 고른 Keeper 의 초상은 목록 보기의 두 줄에서만 그리고, 전신으로 그린다. 한 축 줄 보기는 그 줄들을 Keeper 행에 쓴다(E20).
 
 ### 2.5 Story 창
 
@@ -180,6 +191,18 @@ type pulse = { known_since : float; slots : slot list }   (* 새 칸이 앞 *)
 | runtime 교차표(실패 Keeper × runtime) | V1 은 runtime id 로 묶고, V5 가 교차표로 바꾼다 | 묶기는 V1 의 묶는 함수로 바로 된다. 교차표는 `Masc_tui_keeper_trail.attempts_of_runtime` 을 읽는 새 그리기다 |
 | 24h 벽의 세 묶음(실패 · 그 밖 · 정상)과 시간 눈금자 | V4 에 넣는다 | 48칸 맥박과 같은 층의 그리기다 |
 | 월드 행을 골라 월드 창(Keeper 기억 → 원장 → 브리핑) | W1 | 월드 줄(RFC-0511 D2c)이 고를 수 있는 행이 되어야 한다 |
+| 나이별 ◂ 의 촘촘한 나이 막대(30d · 7d · 1d · 6h · 1h) | `age_bins` 4칸(1시간 · 하루 · 1주 · 그 뒤) | 서버가 주는 칸이 넷이다(E17) |
+| 나이별 머리 띠의 `stale events/day` · `changed` · `gone` | 그리지 않는다 | 무효화 시각은 약 3MB 인 `workspace-memory-context` 응답에만 있다(E18) |
+
+### 2.8 머리 띠와 묶음 제목 줄
+
+시안은 목록 위에 두 줄 띠를 두고, 묶음 제목 줄에도 세 칸을 그린다. V8 이 이 둘을 올린다.
+
+- 띠 첫 줄은 지금 보기의 묶음마다 표지 · 수 · 수만큼의 막대를 그린다. 예: `! 2 failing ▫▫  ✓ 20 recovered ■■■■  ○ 14 paused ····`
+- 띠 둘째 줄의 왼쪽은 함대 실패 띠다. 지난 12시간의 30분 칸마다 모든 행의 `recent_turns` 실패 수를 더한다. 오른쪽은 지금 선 뒤의 앞 12시간 깰 시각 수 띠다. 오른쪽은 V7 의 값을 쓴다.
+- 묶음 제목 줄의 세 칸은 묶음의 합이다. ◂ 는 맥박 합, ● 는 묶음의 수, ▹ 는 깰 시각 띠 합이다. 기억별에서 ▹ 는 `Σ lag` 다.
+- 맨 아래의 고른 Keeper 줄은 지금의 `selected ·` 줄을 세 칸 요약으로 바꾼다. 예: `ocaml-agent-ic ○ idle 77m · since 11-05 18:51 · ◷ 13:33 every 10m · lag 1`. 반복 표기(`every 10m`)는 V7 의 닫힌 값으로 쓴다.
+- 고른 Keeper 줄은 Story 창이 닫혀 있을 때만 그린다. 창 story 쪽의 ● 지금 · ▹ 다음이 같은 값이라서다(시안도 창이 열리면 이 줄 대신 창을 그린다). 창과 이 줄은 목록 끝과 푸터 구분선 사이 같은 자리를 쓴다.
 
 ## 3. 층
 
@@ -192,14 +215,18 @@ type pulse = { known_since : float; slots : slot list }   (* 새 칸이 앞 *)
 | P2 | Detailed 첫 줄이 DETAIL 을 빼고 둘째 줄만 문장을 쓴다 | `bin/masc_tui_render_keepers.ml`, `bin/masc_tui_render_schedule.ml` |
 | V1 | 보기 타입 · 묶는 함수 · `v` `V` · 설정 hard cut · 기본값(E8) | `bin/masc_tui_keeper_list_model.ml(i)`, `bin/masc_tui_config.ml(i)`(`layout` 을 읽는 갈래와 그 오류, 다른 선택을 지키는 검사의 `layout` 을 함께 지운다), `bin/masc_tui.ml` 키 두 곳, `bin/masc_tui_render_keepers.ml` 묶음 제목 |
 | V2 | 보기 탭 줄과 누르기, `[` `]` 묶음 이동, 제목 줄 `←` `→` 접기 | `bin/masc_tui_render_keepers.ml`, `bin/masc_tui.ml` |
-| V3 | 한 축 줄 | `bin/masc_tui_render_keepers.ml`, `bin/masc_tui_keeper_axis.ml` |
+| V3 | 한 축 줄의 세 칸 틀과 상태별 · 원인별 · 시간별 칸(§2.4) | `bin/masc_tui_render_keepers.ml`, `bin/masc_tui_keeper_axis.ml` |
 | V4 | 24h 보기의 48칸 맥박, 세 묶음, 시간 눈금자 | `bin/masc_tui_keeper_pulse.ml`, `bin/masc_tui_render_keepers.ml` |
 | V5 | runtime 보기의 교차표 | `bin/masc_tui_render_keepers.ml`, `bin/masc_tui_keeper_trail.ml` |
+| V6 | 기억별 · 나이별 칸(§2.4) | `bin/masc_tui_render_keepers.ml`, `bin/masc_tui_keeper_memory_reading.ml(i)` |
+| V7 | 앞 12시간 일정 띠와 고른 줄의 반복 표기 | `lib/schedule/schedule_domain.mli`(반복 디코더를 연다), `bin/masc_tui_keeper_next_run.ml(i)`, `bin/masc_tui_render_keepers.ml`, 시험 |
+| V8 | 머리 띠 두 줄, 묶음 제목 줄의 세 칸 합, 고른 Keeper 줄(§2.8) | `bin/masc_tui_render_keepers.ml`, `bin/masc_tui_keeper_axis.ml` |
 | S1 | Story 창(A 단계 값만): story · 일정 · 기억 세 쪽 | 새 모듈 `bin/masc_tui_keeper_story.ml(i)`, 키 처리 |
 | S2 | Story 창의 마지막 wake 줄(B 단계) | Story 모듈, 일정 읽기 |
 | S3 | Story 창의 시간순 피드 | Story 모듈, 값 출처는 확인 필요 |
 | W1 | 월드 줄 고르기와 월드 창 | `bin/masc_tui_render_keepers.ml`, 월드 줄 모듈 |
 
+- V 층은 V2 → V3 → V6 → V7 → V8 → V4 → V5 → W1 순서로 올린다. V3 이 세 칸 틀을 한 번 만들고, 뒤 층은 칸 값만 더한다(E16). S 층은 V 층과 따로 main 위에 올린다.
 - P1 · P2 는 보기와 무관하게 지금 화면을 고친다. 그래서 R0 · P1 · P2 를 한 스택으로 먼저 착지하고, V1 부터는 그 뒤에 새로 쌓는다(E14). 어느 스택이든 맨 위 PR 로 한 번에 병합한다(`docs/guides/NATIVE-GITHUB-STACKS.md`).
 - P1 은 서버 저장 · 행 JSON · 디코더 · TUI 칸이 hard cut 으로 함께 바뀌어야 해서 300줄 기준을 넘었다(+707 · −577).
 - `docs/guides/TUI-KEYS.md` 는 생성 문서다. 키나 범례를 바꾼 층이 생성기 출력과 맞춘다.
@@ -217,7 +244,7 @@ type pulse = { known_since : float; slots : slot list }   (* 새 칸이 앞 *)
 ## 5. 확인 방법
 
 1. **타입.** 로컬 dune 빌드를 하지 않는다. PR 의 `type-check` 가 판정한다. 실행을 인용할 때 workflow 이름, run id, head SHA, 결과를 같이 적는다.
-2. **동작 시험.** P1 은 서버 저장(칸 경계 · 24시간 지우기 · `known_since`)과 디코더의 닫힌 갈래를 본다. V1 은 보기마다 묶는 함수가 닫힌 값만 쓰는지 본다. 화면 글과 배치는 보지 않는다.
+2. **동작 시험.** P1 은 서버 저장(칸 경계 · 24시간 지우기 · `known_since`)과 디코더의 닫힌 갈래를 본다. V1 은 보기마다 묶는 함수가 닫힌 값만 쓰는지 본다. V7 은 반복(`Interval` · `Daily` · `Cron` · `One_shot`)마다 12시간 안의 깰 시각을 고르는 함수를 본다. 화면 글과 배치는 보지 않는다.
 3. **실측.** P1 은 §1.2 표를 같은 로그로 다시 센다. 바쁜 Keeper 의 12칸 중 `?` 는 서버 기록 범위(`known_since`) 앞에서만 나와야 한다.
 4. **캡처.** TUI 층은 120x35 와 80x24 전 · 후 tmux 캡처를 남긴다. 절대 경로 · 토큰 · 계정 이름을 가린다.
 5. **적대적 리뷰.** 층을 올리기 전에 새 맥락의 읽기 전용 에이전트가 diff 를 읽는다. 독립 승인은 따로 받는다.
@@ -247,6 +274,11 @@ type pulse = { known_since : float; slots : slot list }   (* 새 칸이 앞 *)
 | E13 | 옛 `layout` 줄 | 오류 없이 읽고 쓰지 않는다, changelog 로 알린다 | hard cut 이다. 호환 코드도 화면 안내도 만들지 않는다 |
 | E14 | 착지 순서 | R0 · P1 · P2 스택을 먼저, V1 부터 새 스택 | P1 · P2 는 보기 없이도 지금 화면을 고친다. 정할 사람은 운영자다 |
 | E15 | 열린 창과 겹치는 키 | 열린 창(Story · `K`)이 먼저 받는다 | Story 창의 `Tab` 과 전역 `Tab`(다음 화면), `K` 창의 `[` `]` 와 묶음 이동이 겹친다. E9 와 같은 규칙이다 |
+| E16 | 보기마다 다른 칸 | V3 이 세 칸 틀을 만들고, 보기가 칸 값을 고른다 | V3 이 칸 값이 하나로 굳은 줄을 만들면 V6 · V7 이 그 줄을 다시 짠다 |
+| E17 | 나이별 ◂ 칸 수 | `age_bins` 4칸 | 시안은 더 촘촘하다. 서버 칸을 늘리는 일은 이 RFC 밖이다 |
+| E18 | 나이별 머리 띠 둘째 줄 | 그리지 않는다 | 무효화 시각은 약 3MB 응답에만 있다. 서버가 하루 무효화 수를 주면 다시 본다 |
+| E19 | 앞 12시간 일정 띠의 재료 | `Schedule_domain` 의 반복 디코더를 열고, TUI 가 같은 `lib/schedule` 함수로 깰 시각을 구한다 | 대안은 서버가 앞 12시간 깰 시각을 행에 실어 주는 것이다. 서버와 TUI 가 같은 계산 함수를 링크하니 행 JSON 을 늘리지 않는다 |
+| E20 | 초상 | 목록 보기 · 두 줄에서만, 전신(픽셀은 `Keeper_portrait_draw.render` 를 얼굴 초상과 같은 상자에, 모자이크는 Items 미리보기와 같은 24칸) | 2026-11-09 실측: 두 줄 보기 120x35 에서 초상이 약 9줄을 써서 Keeper 36명 중 4~6명만 보였다. 시안에는 초상이 없다. 운영자가 목록 보기에만 남기고 얼굴 대신 전신을 그리라고 골랐다. 모자이크 16칸에서는 관찰된 장비가 몸 색으로 뭉개져서 전신은 Items 의 24칸을 쓴다. 대화 머리의 얼굴 초상은 그대로다 |
 
 ## 8. 참고
 

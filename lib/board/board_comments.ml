@@ -13,20 +13,6 @@ let compare_comments_oldest_first (a : comment) (b : comment) =
   | order -> order
 ;;
 
-(* task-1758/#39356 completion criterion 2: the closed-post comment
-   rejection must name the successor when one was recorded, so an agent
-   whose comment is refused sees where the conversation continues instead
-   of a dead end. *)
-let closed_post_rejection_message ~post_id (closed : post_close_state) =
-  match closed.successor_id with
-  | Some sid ->
-    Printf.sprintf
-      "Post %s is closed; see successor %s"
-      post_id
-      (Post_id.to_string sid)
-  | None -> Printf.sprintf "Post %s is closed" post_id
-;;
-
 (* task-1758/#39356 scope extension: a post holding Limits.comment_count_cap
    live comments refuses the next one, with the same "open a successor post"
    guidance a closed thread gives. The count is the live per-post comment
@@ -64,26 +50,9 @@ let comment_count_cap_error_unlocked store pid =
     else None
 ;;
 
-(* Run with the parent captured under the Board lock, both before the append
-   and at commit. A comment cannot enlarge a Direct thread's readership. *)
-let validate_comment_readership (post : post) audience =
-  match post.visibility, audience with
-  | (Public | Unlisted | Internal), _ -> Ok ()
-  | Direct, Thread_participants -> Ok ()
-  | Direct, (Broadcast | Discoverable) ->
-    Error (Validation_error "Direct Board comments cannot broadcast")
-  | Direct, Targets targets ->
-    let readers = post.author :: (match post.audience with
-      | Some (Targets targets) -> targets
-      | Some (Broadcast | Thread_participants | Discoverable) | None -> []) in
-    if List.for_all (fun target ->
-        List.exists (fun reader -> String.equal (Agent_id.to_string target)
-          (Agent_id.to_string reader)) readers) targets
-    then Ok ()
-    else Error (Validation_error "Direct Board comments can address only the parent post's readers")
-
 let add_comment_with_audience
       store
+      ~reader
       ~lookup
       ~post_id
       ~author
@@ -123,13 +92,8 @@ let add_comment_with_audience
       with_lock store (fun () ->
         match Hashtbl.find_opt store.posts (Post_id.to_string pid) with
         | None -> Error (Post_not_found post_id)
-        | Some { closed = Some closed; _ } ->
-          (* task-1758/#39356: a closed thread does not grow. Checked here
-             (before any durable write) and again at commit, because the
-             post can close while this append is in flight. *)
-          Error (Validation_error (closed_post_rejection_message ~post_id closed))
         | Some post ->
-          let* () = validate_comment_readership post audience in
+          let* () = Board_comment_admission.validate_parent ~reader ~post_id ~audience post in
           (match comment_count_cap_error_unlocked store pid with
            | Some msg -> Error (Validation_error msg)
            | None ->
@@ -169,22 +133,17 @@ let add_comment_with_audience
              later participant routing. Check before the append while holding
              the same lock that serializes the posts source. *)
           let* () = require_posts_source_readable store in
-          let* receipt = append_comment store comment in
+          let* receipt = append_comment store ~reader comment in
           let committed = with_lock store (fun () ->
               (* Commit from a fresh read: the post can change or vanish
                  while the append is in flight; bumping the stale staged
                  copy would clobber a concurrent unrelated mutation. The
-                 policy is re-checked for the same reason — it can flip
-                 while the append is in flight, and commit is the
-                 authoritative gate. *)
+                 source read-set already authorized the durable append.
+                 Recheck the model before publishing its counters/routing. *)
               match Hashtbl.find_opt store.posts (Post_id.to_string pid) with
               | None -> Error (Post_not_found post_id)
-              | Some { closed = Some closed; _ } ->
-                Error
-                  (Validation_error
-                     (closed_post_rejection_message ~post_id closed))
               | Some post ->
-                let* () = validate_comment_readership post audience in
+                let* () = Board_comment_admission.validate_parent ~reader ~post_id ~audience post in
                 (match comment_count_cap_error_unlocked store pid with
                  | Some msg -> Error (Validation_error msg)
                  | None ->
@@ -242,9 +201,10 @@ let add_comment_with_audience
              error)))
 ;;
 
-let add_comment store ~lookup ~post_id ~author ~content ?parent_id ?ttl_hours () =
+let add_comment store ~reader ~lookup ~post_id ~author ~content ?parent_id ?ttl_hours () =
   add_comment_with_audience
     store
+    ~reader
     ~lookup
     ~post_id
     ~author

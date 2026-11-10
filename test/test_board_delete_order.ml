@@ -19,7 +19,7 @@ let post store content = match Board.create_post store
   | Ok value -> value
   | Error error -> Alcotest.fail (Board.Post_publication_failure.to_string error)
 
-let comment store (parent : Board.post) content = require (Board.add_comment store
+let comment store (parent : Board.post) content = require (Board.add_comment ~reader:Masc_board_handlers.Board_access.Operator store
     ~lookup:Recipient_lookup.none_declared ~post_id:(Board.Post_id.to_string parent.id)
     ~author:"delete-reader" ~content ~ttl_hours:0 ())
 

@@ -798,11 +798,11 @@ let log_board_error ~op ~ids (e : Board_types.board_error) =
 let log_signal_skip ~op ~read ~id detail =
   Log.BoardLog.warn "board %s skipped: %s failed for %s: %s" op read id detail
 
-let add_comment_with_unresolved ~post_id ~author ~content ?parent_id
+let add_comment_with_unresolved ~reader ~post_id ~author ~content ?parent_id
     ?(ttl_hours = Board.Limits.default_ttl_hours) () =
   let store = backend () in
       (match
-         Board.add_comment_with_audience store ~lookup:(recipient_lookup ())
+         Board.add_comment_with_audience store ~reader ~lookup:(recipient_lookup ())
            ~post_id ~author ~content ?parent_id ~ttl_hours ()
        with
       | Ok creation ->
@@ -833,8 +833,8 @@ let add_comment_with_unresolved ~post_id ~author ~content ?parent_id
           Ok (comment, creation.unresolved)
       | Error _ as err -> err)
 
-let add_comment ~post_id ~author ~content ?parent_id ?ttl_hours () =
-  add_comment_with_unresolved ~post_id ~author ~content ?parent_id ?ttl_hours ()
+let add_comment ~reader ~post_id ~author ~content ?parent_id ?ttl_hours () =
+  add_comment_with_unresolved ~reader ~post_id ~author ~content ?parent_id ?ttl_hours ()
   |> Result.map fst
 
 let current_vote_for_post ~reader ~voter ~post_id =

@@ -31,7 +31,7 @@ let seed base_path =
   store, post
 
 let append store (post : Board.post) content =
-  Board.add_comment store ~lookup:Recipient_lookup.none_declared
+  Board.add_comment ~reader:Masc_board_handlers.Board_access.Operator store ~lookup:Recipient_lookup.none_declared
     ~post_id:(Board.Post_id.to_string post.id) ~author:"comments-source-reader"
     ~content ~ttl_hours:0 ()
 
@@ -292,7 +292,7 @@ let test_unfinished_publication_cannot_adopt_foreign_rows base_path =
   let store, post = seed base_path in
   let original = require (append store post "existing published row") in
   let uncommitted = { original with id = Board.Comment_id.generate (); content = "unpublished append" } in
-  let receipt = Board.with_persist_lock store (fun () -> require (Board.append_comment store uncommitted)) in
+  let receipt = Board.with_persist_lock store (fun () -> require (Board.append_comment ~reader:Masc_board_handlers.Board_access.Operator store uncommitted)) in
   require_io_error (readable store);
   Alcotest.(check bool) "reload cannot erase unfinished model publication" true
     (Result.is_error (Rows.load_persisted_comments store));

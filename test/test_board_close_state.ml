@@ -214,7 +214,7 @@ let test_closed_post_refuses_new_comments () =
    | Error e -> Alcotest.fail (Board.show_board_error e));
   restart ();
   (match
-     Board_dispatch.add_comment ~post_id ~author:"latecomer"
+     Board_dispatch.add_comment ~reader:Masc_board_handlers.Board_access.Operator ~post_id ~author:"latecomer"
        ~content:"can I still reply?" ()
    with
    | Error (Board.Validation_error msg) ->
@@ -236,7 +236,7 @@ let test_closed_post_refuses_new_comments () =
    | Ok () -> ()
    | Error e -> Alcotest.fail (Board.show_board_error e));
   match
-    Board_dispatch.add_comment ~post_id ~author:"latecomer"
+    Board_dispatch.add_comment ~reader:Masc_board_handlers.Board_access.Operator ~post_id ~author:"latecomer"
       ~content:"now I can reply" ()
   with
   | Ok _ -> ()
@@ -266,7 +266,7 @@ let test_closed_post_rejection_names_the_successor () =
    | Error e -> Alcotest.fail (Board.show_board_error e));
   restart ();
   match
-    Board_dispatch.add_comment ~post_id ~author:"latecomer"
+    Board_dispatch.add_comment ~reader:Masc_board_handlers.Board_access.Operator ~post_id ~author:"latecomer"
       ~content:"can I still reply?" ()
   with
   | Error (Board.Validation_error msg) ->
@@ -325,7 +325,7 @@ let fill_to_the_cap ~post_id =
     then ()
     else (
       match
-        Board_dispatch.add_comment ~post_id ~author:"cap-filler"
+        Board_dispatch.add_comment ~reader:Masc_board_handlers.Board_access.Operator ~post_id ~author:"cap-filler"
           ~content:(Printf.sprintf "filler %d" n) ()
       with
       | Ok _ -> fill (n - 1)
@@ -343,7 +343,7 @@ let test_comment_past_the_cap_is_refused_with_successor_hint () =
   let cap = Board.Limits.comment_count_cap in
   fill_to_the_cap ~post_id;
   (match
-     Board_dispatch.add_comment ~post_id ~author:"latecomer"
+     Board_dispatch.add_comment ~reader:Masc_board_handlers.Board_access.Operator ~post_id ~author:"latecomer"
        ~content:"one past the cap" ()
    with
    | Error (Board.Validation_error msg) ->

@@ -23,6 +23,7 @@ type snapshot = {
 
 let reserved_diagnostics = List.find_map (function
   | Comments_file_diagnostic error -> Board_posts_source.reserved_transaction error
+  | Comments_guard_diagnostic failure -> Board_posts_source.reserved_transaction failure.guard_error
   | Comments_workspace_diagnostic rejection ->
     Option.bind (Board_workspace_binding.raised rejection) Board_posts_source.reserved_exception
   | Comments_display_diagnostic error ->
@@ -42,6 +43,8 @@ let stage_name = function
 
 let diagnostic_to_string = function
   | Comments_file_diagnostic error -> Fs_compat.private_jsonl_transaction_error_to_string error
+  | Comments_guard_diagnostic failure -> failure.guard_path ^ ": " ^
+    Fs_compat.private_jsonl_transaction_error_to_string failure.guard_error
   | Comments_workspace_diagnostic rejection -> Board_workspace_binding.rejection_to_string rejection
   | Comments_display_diagnostic error -> Fs_compat.Private_jsonl_unique_fold.error_to_string error
   | Comments_display_cleanup_diagnostic failure -> Fs_compat.private_jsonl_operation_failure_to_string failure
@@ -307,15 +310,21 @@ let rec contradicts_observation = function
 
 let not_written failure diagnostics = Not_written { failure; diagnostics }
 
+type file_result = (Fs_compat.Private_jsonl_cursor.t, Fs_compat.private_jsonl_transaction_error) result
+type write_io =
+  | Direct_io of file_result
+  | Parent_io of file_result Fs_compat.private_jsonl_guard_result
+  | Parent_policy_io of file_result Fs_compat.private_jsonl_guard_result Fs_compat.private_jsonl_guard_result
+
 let write store ~(before : comments_source_observation) ~kind ~bytes perform =
   let pending = { expected = before; kind; intended_bytes = bytes } in
   let unknown failure diagnostics =
     store.comments_source <- Comments_unsettled { pending; failure; diagnostics };
     Unknown { failure; diagnostics } in
-  try
-    match Fs_compat.private_jsonl_cursor_success_receipt (perform ()) with
+  let classify result guard_diagnostics =
+    match Fs_compat.private_jsonl_cursor_success_receipt result with
     | Ok receipt ->
-      let diagnostics = receipt_diagnostics receipt.settlement_error in
+      let diagnostics = receipt_diagnostics receipt.settlement_error @ guard_diagnostics in
       let observation : comments_source_observation = { before with
         snapshot = { Fs_compat.bytes = bytes; cursor = receipt.value } } in
       let publication = { observation; diagnostics } in
@@ -324,12 +333,37 @@ let write store ~(before : comments_source_observation) ~kind ~bytes perform =
         | Comments_rewrite -> Comments_readable publication);
       Written { value = publication; diagnostics }
     | Error error ->
-      let diagnostics = [Comments_file_diagnostic error] in
+      let diagnostics = Comments_file_diagnostic error :: guard_diagnostics in
       let failure = Comments_transaction_failed error in
       if Board_posts_source.definitely_not_written error then (
         if contradicts_observation error then refuse store failure diagnostics;
         not_written failure diagnostics)
-      else unknown failure diagnostics
+      else unknown failure diagnostics in
+  let guard_refused failure cleanup =
+    let diagnostics = List.map (fun failure -> Comments_guard_diagnostic failure)
+        (failure :: cleanup) in
+    (* No append ran. Keep the comments expectation, and retain guard cleanup
+       evidence before finishing can propagate a reserved cause. *)
+    (match store.comments_source with
+     | Comments_readable receipt -> store.comments_source <- Comments_readable {
+         receipt with diagnostics = receipt.diagnostics @ diagnostics }
+     | Comments_unobserved | Comments_publishing _ | Comments_recovered _
+     | Comments_refused _ | Comments_unsettled _ -> ());
+    not_written (Comments_transaction_failed failure.guard_error) diagnostics in
+  let cleanup failures = List.map (fun failure -> Comments_guard_diagnostic failure) failures in
+  try match perform () with
+    | Direct_io result -> classify result []
+    | Parent_io (Fs_compat.Guard_refused failure)
+    | Parent_policy_io (Fs_compat.Guard_refused failure) -> guard_refused failure []
+    | Parent_io (Fs_compat.Guard_executed { value; cleanup_failures }) ->
+      classify value (cleanup cleanup_failures)
+    | Parent_policy_io (Fs_compat.Guard_executed {
+        value = Fs_compat.Guard_refused failure; cleanup_failures }) ->
+      guard_refused failure cleanup_failures
+    | Parent_policy_io (Fs_compat.Guard_executed {
+        value = Fs_compat.Guard_executed { value; cleanup_failures = policy_cleanup };
+        cleanup_failures = parent_cleanup }) ->
+      classify value (cleanup (policy_cleanup @ parent_cleanup))
   with exception_ ->
     let backtrace = Printexc.get_raw_backtrace () in
     let diagnostics = [Comments_raised_diagnostic { stage = Write_comments; exception_; backtrace }] in
@@ -341,12 +375,28 @@ let workspace_failure store rejection =
   refuse store failure diagnostics;
   not_written failure diagnostics
 
-let append store (comment : comment) = match expected store with
+let guard_with_io io path ~expected ~f = match io with
+  | None -> Fs_compat.with_private_jsonl_snapshot_guard_result path ~expected ~f
+  | Some io -> Fs_compat.with_private_jsonl_snapshot_guard_with_io_for_testing ~io path ~expected ~f
+
+let append store ~(admission : Board_comment_admission.t) (comment : comment) = match expected store with
   | Error failure -> not_written failure []
   | Ok before ->
     match revalidate store before with
     | Error rejection -> workspace_failure store rejection
     | Ok () ->
+      let workspace = try
+        let open Result.Syntax in
+        let* () = Board_workspace_binding.revalidate store.workspace_binding
+            admission.parent.workspace_observation in
+        match admission.policy with
+        | None -> Ok ()
+        | Some policy -> Board_workspace_binding.revalidate store.workspace_binding policy.policy_workspace
+        with exception_ -> Error (Board_workspace_binding.Raised {
+          exception_; backtrace = Printexc.get_raw_backtrace () }) in
+      match workspace with
+      | Error rejection -> workspace_failure store rejection
+      | Ok () ->
       let encoded = try Ok (Yojson.Safe.to_string (Board_content_json.comment_to_yojson comment) ^ "\n")
         with exception_ -> Error (exception_, Printexc.get_raw_backtrace ()) in
       match encoded with
@@ -354,12 +404,24 @@ let append store (comment : comment) = match expected store with
         not_written (Comments_raised { exception_; backtrace })
           [Comments_raised_diagnostic { stage = Encode_comments; exception_; backtrace }]
       | Ok suffix ->
+        let comments_io = store.comments_source_io in
+        let parent_io = store.posts_source_io.posts in
+        let policy_io = store.sub_boards_source_io in
         write store ~before ~kind:Comments_append ~bytes:(before.snapshot.bytes ^ suffix)
-          (fun () -> match store.comments_source_io with
-           | None -> Fs_compat.append_private_jsonl_durable_locked_at_snapshot_result
-               before.source_path ~expected:before.snapshot suffix
-           | Some io -> Fs_compat.append_private_jsonl_durable_locked_at_snapshot_with_io_for_testing
-               ~io before.source_path ~expected:before.snapshot suffix)
+          (fun () ->
+            (* Nested callbacks execute in the filesystem worker. Capture every
+               IO/source value above; publish source/model state only on return. *)
+            let append () = match comments_io with
+              | None -> Fs_compat.append_private_jsonl_durable_locked_at_snapshot_result
+                  before.source_path ~expected:before.snapshot suffix
+              | Some io -> Fs_compat.append_private_jsonl_durable_locked_at_snapshot_with_io_for_testing
+                  ~io before.source_path ~expected:before.snapshot suffix in
+            match admission.policy with
+            | None -> Parent_io (guard_with_io parent_io admission.parent.source_path
+                ~expected:admission.parent.snapshot ~f:append)
+            | Some policy -> Parent_policy_io (guard_with_io parent_io admission.parent.source_path
+                ~expected:admission.parent.snapshot ~f:(fun () ->
+                  guard_with_io policy_io policy.policy_path ~expected:policy.policy_snapshot ~f:append)))
 
 let publish_append store receipt = match store.comments_source with
   | Comments_publishing current when current == receipt ->
@@ -388,7 +450,7 @@ let rewrite store snapshot =
       else match revalidate store before with
         | Error rejection -> workspace_failure store rejection
         | Ok () -> write store ~before ~kind:Comments_rewrite ~bytes:snapshot.bytes
-            (fun () -> rewrite_file store before.source_path ~expected:before.snapshot snapshot.bytes) in
+            (fun () -> Direct_io (rewrite_file store before.source_path ~expected:before.snapshot snapshot.bytes)) in
   match result with
   | Written { diagnostics; _ } -> Written { value = (); diagnostics }
   | Not_written { failure; diagnostics } -> Not_written { failure; diagnostics }

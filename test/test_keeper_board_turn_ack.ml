@@ -318,7 +318,7 @@ data: [DONE]
   (* A later batch contains four distinct sources on the same post. Replay
      contributes one identical comment, which must not hide the other three. *)
   let comment_body = "@" ^ keeper_name ^ " identical follow-up" in
-  let add_comment () = Board_dispatch.add_comment ~post_id ~author:"synthetic-user"
+  let add_comment () = Board_dispatch.add_comment ~reader:Masc_board_handlers.Board_access.Operator ~post_id ~author:"synthetic-user"
       ~content:comment_body () |> get Board.show_board_error in
   let first_comment = add_comment () in
   let second_comment = add_comment () in

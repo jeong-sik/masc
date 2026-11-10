@@ -157,7 +157,7 @@ val put_post : store -> post -> unit
 val rebuild_hot_post_index : store -> unit
 
 type comment_append_receipt = Board_core_persist.comment_append_receipt
-val append_comment : store -> comment -> (comment_append_receipt, board_error) result
+val append_comment : store -> reader:Board_access.reader -> comment -> (comment_append_receipt, board_error) result
 val publish_comment_append : store -> comment_append_receipt -> (unit, board_error) result
 (** Append against the exact loaded comments observation while holding
     persistence. Retain the receipt through a normal model publication; typed
@@ -479,6 +479,7 @@ val search_posts : store -> predicate:(post -> bool) -> limit:int -> post list
 
 val add_comment
   :  store
+  -> reader:Board_access.reader
   -> lookup:Recipient_lookup.t
   -> post_id:string
   -> author:string
@@ -490,6 +491,7 @@ val add_comment
 
 val add_comment_with_audience
   :  store
+  -> reader:Board_access.reader
   -> lookup:Recipient_lookup.t
   -> post_id:string
   -> author:string

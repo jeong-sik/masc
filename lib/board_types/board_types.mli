@@ -698,6 +698,7 @@ type comments_source_stage =
 
 type comments_source_diagnostic =
   | Comments_file_diagnostic of Fs_compat.private_jsonl_transaction_error
+  | Comments_guard_diagnostic of Fs_compat.private_jsonl_guard_failure
   | Comments_workspace_diagnostic of Board_workspace_binding.rejection
   | Comments_display_diagnostic of Fs_compat.Private_jsonl_unique_fold.error
   | Comments_display_cleanup_diagnostic of Fs_compat.private_jsonl_operation_failure

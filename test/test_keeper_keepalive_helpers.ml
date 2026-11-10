@@ -1036,7 +1036,7 @@ let create_thread_fixture config ~keeper_name =
   in
   let post_id = Board.Post_id.to_string post.id in
   let add_comment ?parent_id ~author ~content () =
-    match Board_dispatch.add_comment ~post_id ~author ~content ?parent_id () with
+    match Board_dispatch.add_comment ~reader:Masc_board_handlers.Board_access.Operator ~post_id ~author ~content ?parent_id () with
     | Error error -> fail (Board.show_board_error error)
     | Ok comment -> comment
   in
@@ -1114,7 +1114,7 @@ let create_self_post_fixture config ~keeper_name =
   let post_id = Board.Post_id.to_string post.id in
   let comment =
     match
-      Board_dispatch.add_comment
+      Board_dispatch.add_comment ~reader:Masc_board_handlers.Board_access.Operator
         ~post_id
         ~author:"external-author"
         ~content:"it is empty because the loader skips it"
@@ -1274,7 +1274,7 @@ let test_vote_on_own_comment_wakes_the_commenter_not_the_poster () =
        in
        let comment_id =
          match
-           Board_dispatch.add_comment
+           Board_dispatch.add_comment ~reader:Masc_board_handlers.Board_access.Operator
              ~post_id
              ~author:commenter.Keeper_meta_contract.name
              ~content:"the loader skips it"
@@ -1400,10 +1400,10 @@ let test_comment_discovery_respects_parent_visibility () =
               | Ok post -> post
               | Error error -> fail (Board.Post_publication_failure.to_string error) in
             let post_id = Board.Post_id.to_string post.id in
-            let parent = get (Board_dispatch.add_comment ~post_id ~author:parent_author.name
+            let parent = get (Board_dispatch.add_comment ~reader:Masc_board_handlers.Board_access.Operator ~post_id ~author:parent_author.name
               ~content:"keeper was here" ()) in
             Board_dispatch.set_board_signal_hook (KKS.wakeup_relevant_keeper_for_board_signal ~config);
-            ignore (get (Board_dispatch.add_comment ~post_id ~author:"external-author"
+            ignore (get (Board_dispatch.add_comment ~reader:Masc_board_handlers.Board_access.Operator ~post_id ~author:"external-author"
               ~parent_id:(Board.Comment_id.to_string parent.id) ~content:"follow up" ()));
             check int (label ^ ": direct parent receives its reply") 1
               (board_queue_length config parent_author.name);
@@ -1452,11 +1452,11 @@ let test_unresolved_comment_name_cannot_become_a_recipient () =
               | Ok post -> post
               | Error error -> fail (Board.Post_publication_failure.to_string error) in
             let post_id = Board.Post_id.to_string post.id in
-            let parent = get (Board_dispatch.add_comment ~post_id ~author:parent_author.name
+            let parent = get (Board_dispatch.add_comment ~reader:Masc_board_handlers.Board_access.Operator ~post_id ~author:parent_author.name
               ~content:"keeper was here" ()) in
             let last_signal = ref None in
             Board_dispatch.set_board_signal_hook (fun addressed -> last_signal := Some addressed);
-            let comment = get (Board_dispatch.add_comment ~post_id ~author:"external-author"
+            let comment = get (Board_dispatch.add_comment ~reader:Masc_board_handlers.Board_access.Operator ~post_id ~author:"external-author"
               ~parent_id:(Board.Comment_id.to_string parent.id)
               ~content:"@latealias research" ()) in
             check bool (label ^ ": unresolved name was stored as thread audience") true
@@ -1500,7 +1500,7 @@ let test_unresolved_comment_name_cannot_become_a_recipient () =
                    | Error unavailable ->
                      fail (KWOBS.unavailable_to_string unavailable))
                 | _ -> fail "expected exactly one queued stimulus for post author"));
-            ignore (get (Board_dispatch.add_comment ~post_id ~author:"external-author"
+            ignore (get (Board_dispatch.add_comment ~reader:Masc_board_handlers.Board_access.Operator ~post_id ~author:"external-author"
               ~content:"@latealias explicit target" ()));
             let addressed_target = Option.get !last_signal in
             check bool (label ^ ": newly resolved name is a stored target") true
@@ -1641,7 +1641,7 @@ let test_comments_address_post_and_direct_parent_only () =
         | Ok post -> post | Error error -> fail (Board.Post_publication_failure.to_string error) in
       let post_id = Board.Post_id.to_string post.id in
       let add ?parent_id author =
-        match Board_dispatch.add_comment ~post_id ~author ~content:"same text" ?parent_id () with
+        match Board_dispatch.add_comment ~reader:Masc_board_handlers.Board_access.Operator ~post_id ~author ~content:"same text" ?parent_id () with
         | Ok comment -> comment | Error error -> fail (Board.show_board_error error) in
       let parent = add parent_author.name in
       ignore (add participant.name);

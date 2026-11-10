@@ -273,7 +273,7 @@ let test_board_dashboard_json_embeds_reaction_summaries () =
    | Error e -> Alcotest.fail (Board.show_board_error e));
   let comment =
     match
-      Board_dispatch.add_comment ~post_id ~author:"commenter"
+      Board_dispatch.add_comment ~reader:Masc_board_handlers.Board_access.Operator ~post_id ~author:"commenter"
         ~content:"reactable comment" ()
     with
     | Ok comment -> comment
@@ -2168,7 +2168,7 @@ let test_post_get_continued_read_shows_closed_state () =
   let post_id = Board.Post_id.to_string post.id in
   for i = 1 to 3 do
     match
-      Board_dispatch.add_comment ~post_id ~author:"commenter"
+      Board_dispatch.add_comment ~reader:Masc_board_handlers.Board_access.Operator ~post_id ~author:"commenter"
         ~content:(Printf.sprintf "comment %d" i) ()
     with
     | Ok _ -> ()

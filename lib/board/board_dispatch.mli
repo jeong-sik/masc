@@ -385,6 +385,7 @@ val post_to_yojson_with_karma :
 (** {1 Comments} *)
 
 val add_comment :
+  reader:Board_access.reader ->
   post_id:string ->
   author:string ->
   content:string ->
@@ -394,6 +395,7 @@ val add_comment :
   (Board.comment, Board.board_error) Result.t
 
 val add_comment_with_unresolved :
+  reader:Board_access.reader ->
   post_id:string ->
   author:string ->
   content:string ->

@@ -143,7 +143,7 @@ let test_comment_upvote_produces_event () =
   let pid = Board.Post_id.to_string post.id in
   let comment =
     match
-      Board_dispatch.add_comment ~post_id:pid ~author:"charlie"
+      Board_dispatch.add_comment ~reader:Masc_board_handlers.Board_access.Operator ~post_id:pid ~author:"charlie"
         ~content:"nice post" ()
     with
     | Ok c -> c
@@ -168,7 +168,7 @@ let test_self_comment_upvote_no_karma () =
   let pid = Board.Post_id.to_string post.id in
   let comment =
     match
-      Board_dispatch.add_comment ~post_id:pid ~author:"charlie"
+      Board_dispatch.add_comment ~reader:Masc_board_handlers.Board_access.Operator ~post_id:pid ~author:"charlie"
         ~content:"self-voted comment" ()
     with
     | Ok c -> c
@@ -269,7 +269,7 @@ let test_delete_post_rewrites_persisted_snapshots () =
   let pid = Board.Post_id.to_string post.id in
   let comment =
     match
-      Board_dispatch.add_comment ~post_id:pid ~author:"bob"
+      Board_dispatch.add_comment ~reader:Masc_board_handlers.Board_access.Operator ~post_id:pid ~author:"bob"
         ~content:"also delete" ()
     with
     | Ok c -> c

@@ -2814,9 +2814,10 @@ let test_sub_board_delete () =
   | Error e -> Alcotest.fail (Board.show_board_error e)
   | Ok sb ->
       let id = Board.Sub_board_id.to_string sb.Board.id in
-      (match Board_dispatch.delete_sub_board ~sub_board_id:id with
+      (match Board_dispatch.delete_sub_board ~authorization:Board.Operator_sub_board_deletion ~sub_board_id:id with
        | Error e -> Alcotest.fail (Board.show_board_error e)
-       | Ok () ->
+       | Ok (Board.Deletion_decision_pending detail | Board.Deletion_persistence_pending detail) -> Alcotest.fail detail
+       | Ok Board.Durable_deletion ->
            (match Board_dispatch.get_sub_board ~reader:Masc_board_handlers.Board_access.Operator ~sub_board_id:id with
             | Error (Board.Invalid_id _) -> ()  (* expected after delete *)
             | Ok _ -> Alcotest.fail "expected not found after delete"
@@ -2844,9 +2845,10 @@ let test_sub_board_create_delete_persisted_snapshot () =
   in
   Alcotest.(check bool) "created slug persisted" true
     (List.exists (String.equal "persisted-team") (sub_board_slugs_from_disk ()));
-  (match Board_dispatch.delete_sub_board ~sub_board_id:id with
+  (match Board_dispatch.delete_sub_board ~authorization:Board.Operator_sub_board_deletion ~sub_board_id:id with
    | Error e -> Alcotest.fail (Board.show_board_error e)
-   | Ok () -> ());
+   | Ok (Board.Deletion_decision_pending detail | Board.Deletion_persistence_pending detail) -> Alcotest.fail detail
+       | Ok Board.Durable_deletion -> ());
   Alcotest.(check bool) "deleted slug removed from persisted snapshot" false
     (List.exists (String.equal "persisted-team") (sub_board_slugs_from_disk ()))
 
@@ -3053,9 +3055,10 @@ let test_sub_board_delete_clears_orphan_hearth () =
    | Ok post ->
        Alcotest.(check (option string)) "post has hearth before delete"
          (Some "orphan-hearth") post.Board.hearth);
-  (match Board_dispatch.delete_sub_board ~sub_board_id:sb_id with
+  (match Board_dispatch.delete_sub_board ~authorization:Board.Operator_sub_board_deletion ~sub_board_id:sb_id with
    | Error e -> Alcotest.fail (Board.show_board_error e)
-   | Ok () -> ());
+   | Ok (Board.Deletion_decision_pending detail | Board.Deletion_persistence_pending detail) -> Alcotest.fail detail
+       | Ok Board.Durable_deletion -> ());
   (match Board_dispatch.get_post ~reader:Masc_board_handlers.Board_access.Operator ~post_id with
    | Error e -> Alcotest.fail (Board.show_board_error e)
    | Ok post ->

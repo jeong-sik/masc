@@ -1376,8 +1376,27 @@ export function createSubBoard(
   return post('/api/v1/board/sub-boards', body)
 }
 
-export function deleteSubBoard(subBoardId: string): Promise<unknown> {
-  return del(`/api/v1/board/sub-boards/${encodeURIComponent(subBoardId)}`)
+export type SubBoardDeletionResult =
+  | { persistence: 'durable'; applied: true; deleted: true }
+  | { persistence: 'pending'; applied: true; deleted: true; detail: string }
+  | { persistence: 'decision_pending'; applied: false; deleted: false; detail: string }
+
+export async function deleteSubBoard(subBoardId: string): Promise<SubBoardDeletionResult> {
+  const result = await del<unknown>(`/api/v1/board/sub-boards/${encodeURIComponent(subBoardId)}`)
+  if (isRecord(result)) {
+    if (result.persistence === 'durable' && result.applied === true && result.deleted === true) {
+      return { persistence: 'durable', applied: true, deleted: true }
+    }
+    if (result.persistence === 'pending' && result.applied === true && result.deleted === true
+      && typeof result.detail === 'string') {
+      return { persistence: 'pending', applied: true, deleted: true, detail: result.detail }
+    }
+    if (result.persistence === 'decision_pending' && result.applied === false && result.deleted === false
+      && typeof result.detail === 'string') {
+      return { persistence: 'decision_pending', applied: false, deleted: false, detail: result.detail }
+    }
+  }
+  throw new Error('Malformed sub-board deletion result')
 }
 
 export function updateSubBoard(

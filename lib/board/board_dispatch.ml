@@ -1244,8 +1244,14 @@ let list_sub_boards ~reader () =
     List.map (fun (board : Board.sub_board) ->
       { board with post_count = (match List.assoc_opt board.slug counts with None -> 0 | Some count -> count) }) boards)
 
-let delete_sub_board ~sub_board_id =
-  let store = backend () in Board.delete_sub_board store ~sub_board_id
+let delete_sub_board ~authorization ~sub_board_id =
+  let store = backend () in
+  match Board.delete_sub_board store ~authorization ~sub_board_id with
+  | Ok ((Board.Durable_deletion | Board.Deletion_persistence_pending _) as outcome) ->
+    emit_board_sse_event ~visibility:None Board_changed;
+    Ok outcome
+  | Ok (Board.Deletion_decision_pending _) as pending -> pending
+  | Error _ as refused -> refused
 
 let update_sub_board ~reader ~sub_board_id ?name ?description ?members ?access () =
   let store = backend () in Board.update_sub_board store ~sub_board_id ?name ?description ?members ?access ()

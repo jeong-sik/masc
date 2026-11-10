@@ -896,12 +896,35 @@ type reactions_source_state =
     publication require a fresh store; an ordinary reload cannot clear them. *)
 
 
+type deletion_outcome =
+  | Durable_deletion
+  | Deletion_decision_pending of string
+  | Deletion_persistence_pending of string
+(** Decision_pending does not establish model application. Persistence_pending
+    does; neither authorizes replay or claims durable completion. *)
+
+type sub_board_deletion_authorization =
+  | Operator_sub_board_deletion
+  | Owner_sub_board_deletion of Agent_id.t
+(** Authority supplied by the calling boundary, never decoded from a marker. *)
+
+type deletion_operation =
+  | Delete_post of {
+      deleted_post : Post_id.t;
+      deleted_comments : Comment_id.t list;
+    }
+  | Delete_sub_board of {
+      deleted_sub_board : Sub_board_id.t;
+      deleted_slug : string;
+      unlinked_posts : Post_id.t list;
+    }
+
 type deletion_plan = {
   decision_id : Deletion_id.t;
-  deleted_post : Post_id.t;
-  deleted_comments : Comment_id.t list;
+  operation : deletion_operation;
 }
-(** Fixed original identities. Recovery never adds newly observed children. *)
+(** Fixed original identities. Recovery never expands the selected children or
+    posts by looking up a slug again. Later boards and posts remain outside it. *)
 
 type deletion_observation = {
   decision_path : string;
@@ -933,7 +956,15 @@ type deletion_receipt = {
 }
 (** Known durable marker publication, retained before any model change. *)
 
-type deletion_progress = Decision_recorded | Model_applied | Sources_written
+type deletion_progress =
+  | Decision_recorded
+  | Model_applied
+  | Sources_uncertain
+  | Sources_written
+(** Sources_uncertain retains an unknown source effect and requires fresh-store
+    recovery even if a public source-only settlement later makes a file readable.
+    Sources_written means all sources selected by the recorded operation have
+    known durable receipts: four for a post, Posts and Policy for a sub-board. *)
 
 type deletion_work = {
   decision_receipt : deletion_receipt;
@@ -974,7 +1005,7 @@ type deletion_state =
 (** Sole deletion owner under persist_mutex. Ordinary flush/reload cannot settle
     an unknown record/retirement or an exceptional model publication. A fresh
     initializer durably fences an observed decision before applying its fixed
-    IDs to fresh complete models. Four known source writes precede retirement. *)
+    IDs to fresh complete models. All selected known writes precede retirement. *)
 
 type votes_source_observation = {
   vote_path : string;

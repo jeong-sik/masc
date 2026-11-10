@@ -167,7 +167,7 @@ let test_failed_delete_keeps_policy_and_post_link () =
   in
   let post_id = Board.Post_id.to_string post.id in
   with_blocked_board_masc_dir (fun () ->
-    expect_io_error "blocked delete" (Board_dispatch.delete_sub_board ~sub_board_id:slug);
+    expect_io_error "blocked delete" (Board_dispatch.delete_sub_board ~authorization:Board.Operator_sub_board_deletion ~sub_board_id:slug);
     Alcotest.(check bool) "failed delete keeps the policy" true
       (Option.is_some (find_by_slug slug));
     match Board_dispatch.get_post
@@ -176,7 +176,7 @@ let test_failed_delete_keeps_policy_and_post_link () =
     | Ok retained ->
       Alcotest.(check (option string)) "failed delete keeps the post's topic"
         (Some slug) retained.hearth);
-  ignore (Result.get_ok (Board_dispatch.delete_sub_board ~sub_board_id:slug));
+  ignore (Result.get_ok (Board_dispatch.delete_sub_board ~authorization:Board.Operator_sub_board_deletion ~sub_board_id:slug));
   Board.reset_global_for_test ();
   Board_dispatch.reset_for_test ();
   Result.get_ok (Board_dispatch.init_jsonl

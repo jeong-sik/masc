@@ -1,16 +1,20 @@
 (** Immutable Board snapshot selection, captured work and write outcomes.
     Callers retain ownership of the store, locks and persistence effects. *)
 
-type kind = Posts | Comments | Votes | Reactions
+type kind = Posts | Comments | Votes | Reactions | Policy
 
 type selection
 (** Selected kinds, each appearing once in Posts, Comments, Votes, Reactions
-    order, with their deletion or independent-flush purpose. *)
+    order for post deletion/flush, or Posts then Policy for sub-board deletion. *)
 
 val for_delete : selection
 (** Select every kind for ordered deletion work. The first returned write error
     stops later sources. Retried deletions use this selection again, including
     unreadable sources whose writers must refuse rather than omit their work. *)
+val for_sub_board_delete : selection
+(** Posts then Policy only; comments, votes and reactions remain unselected. *)
+val includes : selection -> kind -> bool
+(** Acknowledge dirty state only for a source actually selected for capture. *)
 
 val for_flush :
   dirty_posts:bool ->
@@ -28,6 +32,7 @@ type payload =
   | Comments_payload of Board_core_persist.comments_snapshot
   | Votes_payload of string
   | Reactions_payload of string
+  | Policy_payload of string
 val kind_of_payload : payload -> kind
 
 type t
@@ -37,7 +42,8 @@ type t
 val capture : selection ->
   posts:(unit -> Board_core_persist.posts_snapshot) ->
   comments:(unit -> Board_core_persist.comments_snapshot) ->
-  votes:(unit -> string) -> reactions:(unit -> string) -> t
+  votes:(unit -> string) -> reactions:(unit -> string) ->
+  policy:(unit -> string) -> t
 (** Invoke the selected producer once for each selected kind, in selection order. The caller
     holds the state lock while the producer observes the store and updates row caches. *)
 

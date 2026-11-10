@@ -1,4 +1,4 @@
-type kind = Posts | Comments | Votes | Reactions
+type kind = Posts | Comments | Votes | Reactions | Policy
 
 type purpose = Delete | Flush
 type selection = { purpose : purpose; kinds : kind list }
@@ -8,12 +8,14 @@ type payload =
   | Comments_payload of Board_core_persist.comments_snapshot
   | Votes_payload of string
   | Reactions_payload of string
+  | Policy_payload of string
 
 type t = { selection : selection; contents : payload list }
 
 let kind_of_payload = function
   | Posts_payload _ -> Posts | Comments_payload _ -> Comments
   | Votes_payload _ -> Votes | Reactions_payload _ -> Reactions
+  | Policy_payload _ -> Policy
 
 type write_outcome =
   | Attempted of (unit, Board_types.board_error) result
@@ -28,6 +30,8 @@ type retry = Retry_posts | Retry_comments
 
 let all_kinds = [ Posts; Comments; Votes; Reactions ]
 let for_delete = { purpose = Delete; kinds = all_kinds }
+let for_sub_board_delete = { purpose = Delete; kinds = [ Posts; Policy ] }
+let includes selection kind = List.mem kind selection.kinds
 
 let for_flush ~dirty_posts ~dirty_comments ~votes_readable ~reactions_readable =
   let had_dirty = dirty_posts || dirty_comments in
@@ -36,18 +40,20 @@ let for_flush ~dirty_posts ~dirty_comments ~votes_readable ~reactions_readable =
       | Posts -> dirty_posts
       | Comments -> dirty_comments
       | Votes -> had_dirty && votes_readable
-      | Reactions -> had_dirty && reactions_readable)
+      | Reactions -> had_dirty && reactions_readable
+      | Policy -> false)
     all_kinds in
   { purpose = Flush; kinds }
 
-let capture selection ~posts ~comments ~votes ~reactions =
+let capture selection ~posts ~comments ~votes ~reactions ~policy =
   let contents = List.fold_left
     (fun reversed kind ->
        let content = match kind with
          | Posts -> Posts_payload (posts ())
          | Comments -> Comments_payload (comments ())
          | Votes -> Votes_payload (votes ())
-         | Reactions -> Reactions_payload (reactions ()) in
+         | Reactions -> Reactions_payload (reactions ())
+         | Policy -> Policy_payload (policy ()) in
        content :: reversed)
     []
     selection.kinds
@@ -82,7 +88,7 @@ let finish_settlement outcome = match outcome.settlement with
   | Some deferred -> raise (Board_posts_source.Reserved_settlement deferred)
 
 let retry_for_kind = function
-  | Posts | Votes | Reactions -> Retry_posts
+  | Posts | Votes | Reactions | Policy -> Retry_posts
   | Comments -> Retry_comments
 
 let retries outcome =

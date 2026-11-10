@@ -929,7 +929,9 @@ let test_queued_update_does_not_resurrect_a_deleted_policy () =
               (Eio.Promise.is_resolved updated)
           end) }
       (fun () ->
-        board_result_exn (Board_dispatch.delete_sub_board ~sub_board_id:"deleted-policy");
+        (match board_result_exn (Board_dispatch.delete_sub_board ~authorization:Board.Operator_sub_board_deletion ~sub_board_id:"deleted-policy") with
+         | Board.Durable_deletion -> ()
+         | Board.Deletion_decision_pending detail | Board.Deletion_persistence_pending detail -> Alcotest.fail detail);
         Eio.Promise.await updated))
   in
   (match updated with

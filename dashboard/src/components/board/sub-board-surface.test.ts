@@ -3,16 +3,21 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/pr
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import '@testing-library/jest-dom'
 import { SubBoardSurface } from './sub-board-surface'
-import { createSubBoard, fetchSubBoards } from '../../api/board'
+import { createSubBoard, deleteSubBoard, fetchSubBoards } from '../../api/board'
+import { showToast } from '../common/toast'
+import { requestConfirm } from '../common/confirm-dialog'
 
 vi.mock('../../api/board', () => ({
   fetchSubBoards: vi.fn(),
   createSubBoard: vi.fn(),
+  deleteSubBoard: vi.fn(),
 }))
 
 vi.mock('../common/toast', () => ({
   showToast: vi.fn(),
 }))
+
+vi.mock('../common/confirm-dialog', () => ({ requestConfirm: vi.fn() }))
 
 const fetchSubBoardsMock = vi.mocked(fetchSubBoards)
 const createSubBoardMock = vi.mocked(createSubBoard)
@@ -33,6 +38,7 @@ describe('SubBoardSurface', () => {
       },
     ])
     createSubBoardMock.mockResolvedValue({})
+    vi.mocked(requestConfirm).mockResolvedValue(true)
   })
 
   afterEach(() => {
@@ -90,4 +96,35 @@ describe('SubBoardSurface', () => {
     expect(await screen.findByText('Review Lane')).toBeTruthy()
     expect(screen.getByText('/review-lane')).toBeTruthy()
   })
+
+  it.each([
+    { persistence: 'decision_pending', applied: false, deleted: false, detail: 'decision recording is pending' },
+    { persistence: 'pending', applied: true, deleted: true, detail: 'source persistence is pending' },
+  ] as const)('keeps $persistence visible without reporting success or repeating deletion', async result => {
+    vi.mocked(deleteSubBoard).mockResolvedValue(result)
+    render(h(SubBoardSurface, null))
+    await screen.findByText('Operations')
+    fireEvent.click(screen.getByRole('button', { name: 'Delete sub-board' }))
+    await waitFor(() => expect(deleteSubBoard).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(showToast).toHaveBeenCalledWith(expect.any(String), 'warning'))
+    expect(showToast).not.toHaveBeenCalledWith('Sub-board deleted', 'success')
+    const button = await screen.findByRole('button', { name: 'Delete sub-board' })
+    expect(button).toBeDisabled()
+    expect(screen.getByRole('status')).toHaveTextContent('Deletion is pending')
+    fireEvent.click(button)
+    expect(deleteSubBoard).toHaveBeenCalledTimes(1)
+    expect(requestConfirm).toHaveBeenCalledTimes(1)
+  })
+
+  it('reports success only after durable removal', async () => {
+    vi.mocked(deleteSubBoard).mockResolvedValue({ persistence: 'durable', applied: true, deleted: true })
+    render(h(SubBoardSurface, null))
+    await screen.findByText('Operations')
+    fetchSubBoardsMock.mockResolvedValue([])
+    fireEvent.click(screen.getByRole('button', { name: 'Delete sub-board' }))
+    await waitFor(() => expect(showToast).toHaveBeenCalledWith('Sub-board deleted', 'success'))
+    await waitFor(() => expect(screen.queryByText('Operations')).toBeNull())
+    expect(deleteSubBoard).toHaveBeenCalledTimes(1)
+  })
+
 })

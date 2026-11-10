@@ -489,8 +489,10 @@ let test_cross_writer_projection base_path _workspace =
   ignore (require_board (Board.vote_comment store ~voter:"comment-voter"
     ~comment_id:(Board.Comment_id.to_string comment.id) ~direction:Board.Up));
   Board.flush_dirty store;
-  require_board (Board.delete_sub_board store
-    ~sub_board_id:(Board.Sub_board_id.to_string topic.id));
+  (match require_board (Board.delete_sub_board ~authorization:Board.Operator_sub_board_deletion store
+    ~sub_board_id:(Board.Sub_board_id.to_string topic.id)) with
+   | Board.Durable_deletion -> ()
+   | Board.Deletion_decision_pending detail | Board.Deletion_persistence_pending detail -> Alcotest.fail detail);
   Board.flush_dirty store;
   let order store = Board.list_posts store ()
     |> List.map (fun (post : Board.post) -> Board.Post_id.to_string post.id) in

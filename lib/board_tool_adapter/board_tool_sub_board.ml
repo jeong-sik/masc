@@ -165,13 +165,30 @@ let handle_sub_board_delete ~reader ~tool_name ~start_time args : Tool_result.re
   match require_sub_board_owner ~reader ~sub_board_id ~owner with
   | Error e -> Board_tool_format.error_of_board_error ~tool_name ~start_time e
   | Ok () ->
-  match Board_dispatch.delete_sub_board ~sub_board_id with
-  | Ok () ->
+  match Board_dispatch.delete_sub_board
+    ~authorization:(Board.Owner_sub_board_deletion owner) ~sub_board_id with
+  | Ok Board.Durable_deletion ->
     Tool_result.make_ok
       ~tool_name
       ~start_time
       ~data:(`String (Printf.sprintf "SubBoard deleted: %s" sub_board_id))
       ()
+  | Ok (Board.Deletion_decision_pending detail) ->
+    Tool_result.make_err ~tool_name ~start_time
+      ~class_:Tool_result.Runtime_failure
+      ~effect_disposition:Tool_result.Effect_outcome_unknown
+      ~data:(`Assoc ["sub_board_id", `String sub_board_id;
+        "applied", `Bool false; "persistence", `String "decision_pending";
+        "detail", `String detail])
+      "Sub-board deletion decision is pending. Do not repeat the deletion."
+  | Ok (Board.Deletion_persistence_pending detail) ->
+    Tool_result.make_err ~tool_name ~start_time
+      ~class_:Tool_result.Runtime_failure
+      ~effect_disposition:Tool_result.Proven_post_effect
+      ~data:(`Assoc ["sub_board_id", `String sub_board_id;
+        "applied", `Bool true; "persistence", `String "pending";
+        "detail", `String detail])
+      "Sub-board removed in memory; persistence is pending. Do not repeat the deletion."
   | Error e ->
     Board_tool_format.error_of_board_error ~tool_name ~start_time e
 ;;

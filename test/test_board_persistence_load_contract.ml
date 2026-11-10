@@ -543,7 +543,7 @@ let test_all_persistence_stays_in_captured_workspace () =
         [Board.Reaction_post, pid; Board.Reaction_comment, cid];
       let room = board_ok (Board_dispatch.get_sub_board ~reader:Masc_board_handlers.Board_access.Operator ~sub_board_id:room_id) in
       Alcotest.(check bool) "updated policy reloaded" true (room.access = Board.Members_only);
-      ignore (board_ok (Board_dispatch.delete_sub_board ~sub_board_id:room_id));
+      ignore (board_ok (Board_dispatch.delete_sub_board ~authorization:Board.Operator_sub_board_deletion ~sub_board_id:room_id));
       (match board_ok (Board_dispatch.delete_post ~authorization:Board.Operator_deletion ~post_id:pid) with
        | Board.Durable_deletion -> ()
        | Board.Deletion_decision_pending detail -> Alcotest.fail detail

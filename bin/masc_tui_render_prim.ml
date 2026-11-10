@@ -1941,6 +1941,18 @@ let usage_connection_badge (state : state) =
     | Workspace_identity_mismatch _), _
   | Workspace_identity_unread, (Connecting | Booting | Disconnected) -> badge
 
+let reading_connection_notice (state : state) =
+  let exceptional =
+    state.observer_source_loss
+    || match compact_connection_state state with
+       | Compact_http Connected | Compact_reading -> false
+       | Compact_workspace_mismatch | Compact_workspace_unconfirmed
+       | Compact_workspace_unread | Compact_read_failed | Compact_read_partial
+       | Compact_read_interrupted | Compact_read_unfinished
+       | Compact_http (Degraded | Connecting | Booting | Disconnected) -> true
+  in
+  if exceptional then Some (usage_connection_badge state) else None
+
 (* A narrow Usage title keeps a textual state visible while its longer
    workspace and refresh details remain available in the scrolled body. *)
 let compact_connection_badge (state : state) ~width =

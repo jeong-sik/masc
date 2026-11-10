@@ -367,7 +367,11 @@ assertion tests were added.
 The Board list leads with each post's title and author. Compact technical IDs
 no longer occupy a list column; the existing exact-reference copy action keeps
 the selected post identity. The list, composer and reader use the same short
-Board heading, without a repeating wall clock or connection badge. Sort,
+Board heading, without a repeating wall clock or healthy connection badge.
+Exceptional transport, workspace, partial/interrupted/failed reads and event
+loss retain the shared typed notice. The existing header fitter reserves its
+width before the title, including in the composer and reader. Ordinary pending
+reads keep the Board's own indications. Sort,
 hearth, observed counts, retained/failed reads, original timestamps, publication
 receipts and the one-row cursor budget keep their existing owners.
 

@@ -20,6 +20,11 @@ module Board_attachments = Masc_tui_board_attachments
 
 let words state ko en = ui_text state ~ko ~en
 
+let board_title ~cols state title =
+  match reading_connection_notice state with
+  | None -> title
+  | Some badge -> badge_row ~cols ~lead:" " ~label:title ~badge
+
 let board_sort_text state sort =
   if state.ui_language <> Lang_ko then board_sort_explanation sort
   else match sort with
@@ -136,13 +141,13 @@ let render_board_compose (state : state) =
             ~max_cells:(framed_inner_width cols) addressing
         ]
   in
-  let header = Printf.sprintf "%s  %s[%s]%s"
+  let header = board_title ~cols state (Printf.sprintf "%s  %s[%s]%s"
     (screen_title (words state " 게시판" " Board"))
     (Masc_tui_theme.tone Masc_tui_theme.Accent)
     (match state.board_compose_reply_to with
      | Some _ -> words state "댓글" "reply"
      | None -> words state "새 글" "new post")
-    Ansi.reset
+    Ansi.reset)
   in
   (* Staged files ride the post being written; a comment has no attachment
      wire, so like the hearth they are not named on a reply's pane. *)
@@ -461,13 +466,13 @@ let render_board_list (state : state) =
      already on screen stays when a later refresh fails: those posts are
      still the last reading. *)
   let holding = board_census_holding state ~hearth:query.bq_hearth in
-  let header = Printf.sprintf "%s %s%s"
+  let header = board_title ~cols state (Printf.sprintf "%s %s%s"
     (screen_title (words state " 게시판" " Board"))
     (match Masc_tui_fetched.value observation with
      | Some _ ->
          list_count_text ~loaded:count ~holding
      | None -> if pending then (words state "(글 조회 중)" "(reading posts)") else words state (if Option.is_some list_error then "(조회 실패)" else "(미조회)") (title_missing_reading ~error:list_error))
-    hearth in
+    hearth) in
 
   let layout = board_layout ~cols in
   (* The frame, its fill and the footer are the contract's: this surface
@@ -736,9 +741,9 @@ let board_read_pane ~focus (state : state) (list_post : board_post) ~rows ~cols 
         list_post
   in
 
-  let header = screen_title (words state " 게시판" " Board")
+  let header = board_title ~cols state (screen_title (words state " 게시판" " Board")
     ^ (match Terminal_text.optional_single_line post.bp_hearth with
-       | None -> "" | Some hearth -> " · #" ^ hearth) in
+       | None -> "" | Some hearth -> " · #" ^ hearth)) in
 
   box_top buf cols;
   box_line buf cols header;

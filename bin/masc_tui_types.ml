@@ -6528,6 +6528,8 @@ type code_file_document = {
   cfd_body : code_file_body;
   cfd_revision : string;
   cfd_rows : (string * string) list array;
+  cfd_max_width : int;
+  cfd_memos : Masc_tui_memo.found list;
 }
 
 (* Prepared without reading UI state, before the owned async reply is delivered.
@@ -6536,8 +6538,6 @@ type code_file_document = {
 type code_prepared_file = {
   cpf_source : Tui_decode.workspace_file_source;
   cpf_document : code_file_document;
-  cpf_max_width : int;
-  cpf_memos : Masc_tui_memo.found list;
 }
 
 type code_navigation_reading = {

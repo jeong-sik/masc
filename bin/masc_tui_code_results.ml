@@ -262,9 +262,16 @@ let prepare_file ~path (source : Masc.Tui_decode.workspace_file_source) =
     in
     { cpf_source = source;
       cpf_document = { cfd_body = body; cfd_revision = source.wfs_revision;
-                       cfd_rows = Array.of_list rows };
-      cpf_max_width = max_width;
-      cpf_memos = Masc_tui_memo.of_file ~path rows })
+                       cfd_rows = Array.of_list rows; cfd_max_width = max_width;
+                       cfd_memos = Masc_tui_memo.of_file ~path rows } })
+
+let reuse_file ~path (previous_path, document) (source : Masc.Tui_decode.workspace_file_source) =
+  match document.cfd_body with
+  | Code_text text
+      when String.equal path previous_path && text == source.wfs_content
+        && String.equal document.cfd_revision source.wfs_revision ->
+      Some { cpf_source = source; cpf_document = document }
+  | Code_text _ | Code_binary _ -> None
 
 let apply_open_file ~preserve_view (state : state) request result = (
   (* An answer for a file the operator has moved past describes bytes
@@ -322,10 +329,10 @@ let apply_open_file ~preserve_view (state : state) request result = (
         state.code_target_line <- None;
         state.code_file_hscroll <- 0
       end;
-      state.code_file_max_width <- prepared.cpf_max_width;
+      state.code_file_max_width <- prepared.cpf_document.cfd_max_width;
       state.code_file_hscroll <- min state.code_file_hscroll
         (max 0 (state.code_file_max_width - 1));
-      state.code_memos <- prepared.cpf_memos;
+      state.code_memos <- prepared.cpf_document.cfd_memos;
       if not preserve_view then begin
       state.code_focus_file <- Right_pane;
       (* A new file starts on its content; the old file's history or

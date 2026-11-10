@@ -65,7 +65,11 @@ val launch_file_load
   -> unit
 (** Capture the path and workspace before launching the read. Prepare the whole
     file on the shared CPU worker before delivering the original request; the UI
-    only admits that request and installs its prepared document. *)
+    only admits that request and installs its prepared document. After HTTP
+    returns, the caller checks original workspace/read epoch and request ownership
+    before submitting preparation. A same-scope retained immutable document can
+    be reused for the same source object/revision returned by a validated 304.
+    This neither cancels already submitted work nor replaces final admission. *)
 
 (** Capture the workspace scope and activity address, then combine stable git and
     Keeper history. A failed source leaves the other source visible, with its

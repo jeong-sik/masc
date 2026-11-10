@@ -582,7 +582,8 @@ let check_known_settlement store =
       | Board.File_diagnostic { file = Posts_file;
           error = Fs_compat.Transaction_settlement_failed {
             primary = Fs_compat.Transaction_succeeded _; _ } } -> true
-      | File_diagnostic _ | Workspace_diagnostic _ | Raised_diagnostic _ -> false)
+      | File_diagnostic _ | Workspace_diagnostic _ | Posts_guard_diagnostic _
+      | Raised_diagnostic _ -> false)
       diagnostics -> ()
   | Board.Posts_readable _ | Posts_unobserved
   | Posts_refused _ | Posts_unsettled _ ->
@@ -603,7 +604,8 @@ let test_missing_read_preserves_reserved_cleanup base_path _workspace =
        (List.exists (function
           | Board.File_diagnostic { file = Posts_file;
               error = Fs_compat.Transaction_settlement_failed _ } -> true
-          | File_diagnostic _ | Workspace_diagnostic _ | Raised_diagnostic _ -> false)
+          | File_diagnostic _ | Workspace_diagnostic _ | Posts_guard_diagnostic _
+          | Raised_diagnostic _ -> false)
           diagnostics)
    | Posts_unobserved | Posts_readable _ | Posts_refused _ | Posts_unsettled _ ->
      Alcotest.fail "Missing refusal lost the actual read cleanup diagnostic");

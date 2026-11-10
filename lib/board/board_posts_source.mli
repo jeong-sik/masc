@@ -14,6 +14,20 @@ exception Reserved_settlement of reserved_settlement
 type snapshot
 val capture : ?replacement:post -> store -> snapshot
 val append : store -> post -> posts_write_outcome
+type creation_append =
+  | Creation_append_outcome of posts_write_outcome
+  | Creation_policy_refused of {
+      failure : Fs_compat.private_jsonl_guard_failure;
+      outcome : posts_write_outcome;
+    }
+val append_creation_with_policy : store ->
+  policy:sub_boards_source_observation -> post -> creation_append
+(** The create caller holds persistence and has validated this exact policy
+    snapshot against the post author/hearth. Retain Posts -> Policy scopes
+    through append, without reacquiring Posts. Only actual inner refusal is
+    [Creation_policy_refused]; the caller notifies that Policy source owner
+    before finishing reserved diagnostics. Pin/close/reopen keep plain append.
+    Filesystem workers receive captured values and never mutate source state. *)
 val rewrite : store -> snapshot -> posts_write_outcome
 val read : store -> posts_source_read
 val publish_read : store -> posts_source_read -> unit

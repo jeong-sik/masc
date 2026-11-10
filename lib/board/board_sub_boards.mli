@@ -2,9 +2,9 @@
 
     Runtime policy mutations take the store's persistence mutex before its
     state mutex. Policy writes compare the exact loaded file under the existing
-    stable file lock before publication. Stale writers refuse. This does not
-    validate another writer's policy changes atomically with post creation.
-    Deletion uses the shared durable decision owner for Policy and Posts. *)
+    stable file lock before publication. Stale writers refuse. Scoped post
+    creation separately guards its canonical Policy snapshot through the Posts
+    append. Deletion uses the shared durable decision owner for Policy and Posts. *)
 
 open Board_types
 

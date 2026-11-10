@@ -2090,7 +2090,7 @@ let test_board_partition_preflight_uses_production_replay ~keeper_name () =
          ~recipient_lookup:Recipient_lookup.none_declared ()
      with
      | Ok () -> ()
-     | Error error -> fail (Board.Post_publication_failure.to_string error));
+     | Error _ -> fail "fixture must initialize the Board backend");
     let post =
       match
         Board_dispatch.create_post ~author:"external"

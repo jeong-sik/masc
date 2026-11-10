@@ -2932,10 +2932,22 @@ let runtime_token_sample_cmd =
     Arg.(required & opt (some file) None & info [ "scenario" ] ~docv:"JSON"
            ~doc:"JSON with system_prompt and a nonempty prompts array. Makes live model calls.")
   in
+  (* HIGH-RISK-UNREVIEWED: the sample calls the API providers of the runtime
+     table with the credentials their operator declared. As a host tool it
+     publishes its access first, so a provider is called only as the single
+     user of a base path never set up for accounts (plan D4). *)
   let run base_path scenario_path runtime_ids =
-    Masc_cli_runtime_sample.run
-      ~config_path:(runtime_config_path_for_base_path base_path)
-      ~scenario_path ~runtime_ids
+    match
+      Runtime_account_access.publish_host_tool ~base_path
+        ~config_dir:(Env_config_core.masc_config_dir_opt ())
+    with
+    | Error (first, rest) ->
+      Printf.eprintf "runtime-token-sample: %s\n" (String.concat "; " (first :: rest));
+      1
+    | Ok () ->
+      Masc_cli_runtime_sample.run
+        ~config_path:(runtime_config_path_for_base_path base_path)
+        ~scenario_path ~runtime_ids
   in
   Cmd.v (Cmd.info "runtime-token-sample"
            ~doc:"Record configured Agent Core conversation usage as JSONL.")

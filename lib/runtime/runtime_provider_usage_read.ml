@@ -42,11 +42,14 @@ type readable =
    Muse Code is read only after a failed turn, via its selected account. *)
 let how_of_runtime (rt : Runtime_instance.t) =
   match rt.execution with
-  | Runtime_execution.Agent_core config ->
-    Option.map
-      (fun usage_read ->
-        Http { credential = config.credential_source, config.api_key; usage_read })
-      rt.provider.usage_read
+  | Runtime_execution.Agent_core sealed ->
+    (* The read sends the key the operator declared; a process that does not
+       share it reads nothing (plan D4). *)
+    (match rt.provider.usage_read, Runtime_account_access.authorize_api sealed with
+     | Some usage_read, Ok config ->
+       Some (Http { credential = config.credential_source, config.api_key; usage_read })
+     | None, (Ok (_ : Llm_provider.Provider_config.t) | Error (_ : Runtime_account_access.refusal))
+     | Some (_ : Runtime_schema.usage_read), Error (_ : Runtime_account_access.refusal) -> None)
   | Runtime_execution.Codex_app_server codex -> Some (Codex codex)
   | Runtime_execution.Antigravity_cli antigravity -> Some (Antigravity antigravity)
   | Runtime_execution.Claude_code _ | Runtime_execution.Muse_serve _

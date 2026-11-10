@@ -142,27 +142,29 @@ let with_gateway capacity run =
               let escaped = ref [] in
               let login_closed, close_login = Eio.Promise.create () in
               let sibling_closed, close_sibling = Eio.Promise.create () in
-              let handler ~request_sw addr reqd =
+              let handler ~stream_end addr reqd =
+                let request_sw = Masc.Http_h2_stream.Stream_end.switch stream_end in
                 if String.equal (H2.Reqd.request reqd).target "/sibling" then (
                   Eio.Switch.on_release request_sw (fun () ->
                     Eio.Promise.resolve close_sibling ());
                   Masc.Http_server_eio.Response.text "alive"
-                    (Masc.Http_reqd.of_h2 ~stream_sw:request_sw ~ledger:(Resources.current_exn ()) reqd)
+                    (Masc.Http_reqd.of_h2 ~stream_end ~ledger:(Resources.current_exn ()) reqd)
                 ) else (
                   Eio.Switch.on_release request_sw (fun () ->
                     Eio.Promise.resolve close_login ());
-                  try gateway ~request_sw addr reqd with
+                  try gateway ~stream_end addr reqd with
                   | Eio.Cancel.Cancelled _ as exn -> escaped := exn :: !escaped; raise exn
                   | exn -> escaped := exn :: !escaped; raise exn
                 )
               in
-              let streams = Registry.create () in
+              let streams = Registry.create ~clock:(Eio.Stdenv.clock env)
+                ~stalled_after_s:Server_mcp_transport_http_headers.sse_stalled_after_s () in
               let server_flow, client_flow = Eio_unix.Net.socketpair_stream ~sw () in
               let closing = ref false in
               let connection_errors = ref 0 in
               let server = Eio.Fiber.fork_promise ~sw (fun () ->
                 Eio.Switch.run (fun conn_sw ->
-                  Server_bootstrap_http.serve_h2_connection ~streams ~resources
+                  Server_bootstrap_http.serve_h2_connection ~clock:(Eio.Stdenv.clock env) ~streams ~resources
                     ~sw:conn_sw ~h2_request_handler:handler
                     ~h2_error_handler:(Server_h2_gateway.make_error_handler ())
                     (`Tcp (Eio.Net.Ipaddr.V4.loopback, 54321)) server_flow)) in

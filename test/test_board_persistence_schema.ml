@@ -647,6 +647,7 @@ let test_index_pruned_on_sweep () =
   let store = Board_core.create_store
       ~base_path:(Env_config_core.base_path ()) () in
   load_sources store;
+  ignore (Result.get_ok (Board.reload_votes store));
   let tr = Ids.Turn_ref.make ~trace_id:"sweep-trace" ~absolute_turn:5 in
   let origin = make_origin ~fusion_producer:"origin-test" ~turn_ref:tr ~fusion_run_id:"sweep-run" () in
   let post = create store ~origin ~content:"to be swept" in

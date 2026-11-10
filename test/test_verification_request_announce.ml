@@ -49,9 +49,9 @@ let test_typed_commit_refreshes_cached_reader () =
   Fun.protect ~finally:(fun () -> Fs_compat.remove_tree base_path) (fun () ->
     let changes = ref [] in
     let unsubscribe = Dashboard_observation_commit.subscribe (function
-      | Workspace { base_path; payload } when payload.topic = Sse_event.Types.Verification_requests ->
+      | Dashboard_observation_commit.Workspace { base_path; payload } when payload.topic = `Verification_requests ->
         changes := (base_path, payload.scope) :: !changes
-      | Workspace _ | Process _ -> ()) in
+      | Dashboard_observation_commit.Workspace _ | Dashboard_observation_commit.Process _ -> ()) in
     Fun.protect ~finally:unsubscribe (fun () ->
       let create output = Verification.create_request ~base_path ~request_id:"typed-cache-request"
           ~task_id:"task-observed" ~output:(`String output) ~criteria:[] ~worker:"producer" () |> ok_or_fail in
@@ -68,7 +68,7 @@ let test_typed_commit_refreshes_cached_reader () =
       ok_or_fail (Verification.delete_request base_path request.id);
       check int "an absent request is no write notification" 3 (List.length !changes);
       check bool "notification retains workspace authority" true
-        (List.for_all (fun (source, scope) -> String.equal source base_path && scope = Sse_event.Types.Workspace) !changes)))
+        (List.for_all (fun (source, scope) -> String.equal source base_path && scope = `Workspace) !changes)))
 ;;
 
 let () =

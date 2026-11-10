@@ -201,7 +201,7 @@ let test_check_notifications_preserve_uncertainty () = with_base (fun base_path 
   let artifact, revision = publish ~base_path "observable check" in
   let changes = ref [] in
   let unsubscribe = Commit.subscribe (function
-    | Commit.Workspace { base_path; payload } when payload.topic = Sse_event.Types.Artifact_checks ->
+    | Commit.Workspace { base_path; payload } when payload.topic = `Artifact_checks ->
       changes := (base_path, payload.scope) :: !changes
     | Commit.Workspace _ | Commit.Process _ -> ()) in
   Fun.protect ~finally:unsubscribe (fun () ->
@@ -219,7 +219,7 @@ let test_check_notifications_preserve_uncertainty () = with_base (fun base_path 
     Alcotest.(check string) "notified reader sees the uncertain write without replay"
       uncertain.change_id (List.hd observed.checks).change_id;
     Alcotest.(check bool) "metadata keeps the original workspace" true
-      (List.for_all (fun (source, scope) -> String.equal source base_path && scope = Sse_event.Types.Workspace) !changes)))
+      (List.for_all (fun (source, scope) -> String.equal source base_path && scope = `Workspace) !changes)))
 
 let () = Eio_main.run (fun _ ->
   Alcotest.run "shared artifact revision checks"

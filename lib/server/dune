@@ -45,6 +45,7 @@
   masc.fs_compat
   masc.masc_process
   masc.sse_wire
+  masc.sse_event
   masc.agent_observation
   masc.machine_configuration
   masc.browser_lane
@@ -89,6 +90,7 @@
   masc.operator
   masc.voice_bridge_core
   yojson
+  atdgen-runtime
   otoml
   base64
   ws-direct-core

@@ -249,6 +249,7 @@ let issue ~base_path ~public_base_url ~keeper_names ~name ~hours =
          (Masc_domain.System
             (Masc_domain.System_error.IoError "the invite credential was saved without an expiry")))
   | Ok (raw_token, { Masc_domain.expires_at = Some expires_at; _ }) ->
+    Workspace_dataset_event.announce ~base_path Workspace_dataset_event.Play_seats;
     Ok { name; expires_at; link = base ^ play_path ^ "#" ^ raw_token }
 
 type invite =
@@ -345,3 +346,6 @@ let revoke ~base_path ~name ~after_revoke =
          Error (Not_an_invite role)))
   |> Result.map_error (fun error -> Credential_not_deleted error)
   |> Result.join
+  |> Result.map (fun value ->
+    Workspace_dataset_event.announce ~base_path Workspace_dataset_event.Play_seats;
+    value)

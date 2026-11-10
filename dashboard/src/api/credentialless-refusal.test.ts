@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { clearStoredToken, get, setStoredToken } from './core'
 import { ensureDevToken } from './dev-token'
+import { credentiallessRequest, noteRefusal, replayedRefusal } from './credentialless-refusal'
 
 const missingToken = () => new Response(
   '{"error":"Authentication required","auth_error_code":"missing_token"}',
@@ -27,6 +28,19 @@ afterEach(() => {
 // Each test uses its own route: the table lives for the page, as it does in
 // the dashboard, so routes keep tests apart.
 describe('a request without a credential that the server refused', () => {
+  it('does not memoize a refusal whose delayed body finished after cancellation', async () => {
+    const request = credentiallessRequest('GET', '/cancelled-credentialless-read', 0)
+    const response = missingToken()
+    let finish!: (value: string) => void
+    vi.spyOn(response, 'text').mockImplementation(() => new Promise(resolve => { finish = resolve }))
+    const caller = new AbortController()
+    const pending = noteRefusal(request, response, caller.signal)
+    caller.abort()
+    finish('{"auth_error_code":"missing_token"}')
+    await pending
+    expect(replayedRefusal(request)).toBeNull()
+  })
+
   it('is answered with the same refusal without being sent again', async () => {
     const fetchMock = vi.fn().mockImplementation(async () => missingToken())
     vi.stubGlobal('fetch', fetchMock)

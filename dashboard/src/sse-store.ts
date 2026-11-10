@@ -26,6 +26,7 @@ import {
   invalidateDashboardCache,
   invalidateExecutionSnapshotGeneration,
   hydrateExecutionSnapshot,
+  hydrateShellRootSnapshot,
   resetExecutionSnapshotGeneration,
   refreshDashboard,
   refreshExecution,
@@ -34,7 +35,6 @@ import {
   recoverExecutionReadDebt,
   recoverShellReadDebt,
   disposeExecutionReadRecovery,
-  serverStatus,
   boardPosts,
   boardSortMode,
   boardExcludeSystem,
@@ -49,7 +49,6 @@ import {
   namespaceTruthError,
   normalizeNamespaceTruth,
 } from './namespace-truth-store'
-import { mergeServerStatus } from './store-normalizers'
 import { normalizeOperatorSnapshot, normalizeOperatorDigest } from './operator-normalizers'
 import { operatorError, operatorSnapshot, operatorWorkspaceDigest } from './operator-signals'
 import { compositeTick } from './composite-signals'
@@ -373,10 +372,7 @@ function handleNamespaceTruthSnapshot(payload: unknown): void {
     namespaceTruthLoading.value = false
     namespaceTruthReadRecovery.succeeded()
     recoverShellReadDebt()
-    serverStatus.value = mergeServerStatus(
-      serverStatus.value,
-      normalized.root.status ?? null,
-    )
+    hydrateShellRootSnapshot(normalized.root, true)
   } catch (err) {
     const detail = err instanceof Error ? err.message : 'invalid project snapshot'
     namespaceTruth.value = null

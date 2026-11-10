@@ -247,7 +247,9 @@ let test_poison_durable_source_is_retired_during_intake () =
    that a full Keeper turn completed. *)
 let with_intake_sources ~max_events f =
   Masc_test_deps.with_file_owned_values
-    [ "MASC_KEEPER_ADMISSION_MAX_EVENTS", string_of_int max_events ]
+    [ ( Env_config_keeper.KeeperAdmissionBounds.max_events_env_key
+      , string_of_int max_events )
+    ]
   @@ fun () ->
   Eio_main.run
   @@ fun env ->

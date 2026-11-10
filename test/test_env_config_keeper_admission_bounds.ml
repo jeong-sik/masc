@@ -12,7 +12,7 @@
     1. Without a file value the documented default applies (32 events).
     2. The file value wins over the default.
     3. A value in the process environment does not reach the reader.
-    4. The reader stays inside [1, 256] whatever the store holds.
+    4. The reader stays inside [1, 256] for any integer the store holds.
 
     The loader's side of the same setting, the [turn.admission_max_events] key
     and the load that refuses a value outside the range, is in
@@ -70,7 +70,7 @@ let test_process_env_does_not_reach_max_events () =
 
 (* The loader refuses 0 and 100000 before they reach the store, so a server
    never holds them. These cases put them there directly: the reader's own
-   result stays inside the range whatever the store holds. *)
+   result stays inside the range for any integer the store holds. *)
 
 let test_max_events_floor_clamp () =
   with_file_value (Some "0") (fun () ->

@@ -259,19 +259,36 @@ let test_the_turn_admission_bound_comes_from_the_file () =
 ;;
 
 (* The row's range is the reader's own floor and ceiling, so one step past
-   either end is a value the load refuses instead of one the reader clamps. *)
+   either end is a value the load refuses instead of one the reader clamps.
+   The validation report gives the reason as a value: the key is this row's
+   and the value is out of its range. A key the registry does not know also
+   fails the load, with another reason, so the load's failure alone would not
+   tell a row that left the file from a value past the range. *)
 let test_the_load_refuses_a_turn_admission_bound_outside_its_range () =
   List.iter
     (fun value ->
        Config_boot_overrides.reset_for_tests ();
-       with_runtime_toml (admission_runtime_toml value) (fun base_path ->
+       let source = admission_runtime_toml value in
+       (match Keeper_runtime_config.validate_source_text source with
+        | Error detail -> failf "%s = %d did not parse: %s" admission_key value detail
+        | Ok report ->
+          (match report.Keeper_runtime_config.issues with
+           | [ issue ] ->
+             check string "the issue is the admission key's" admission_key
+               issue.Keeper_runtime_config.key;
+             check bool "the value is out of the row's range" true
+               (issue.Keeper_runtime_config.kind = Keeper_runtime_config.Out_of_range);
+             check bool "the issue refuses the load" true
+               (issue.Keeper_runtime_config.severity = Keeper_runtime_config.Error)
+           | issues ->
+             failf "%s = %d gave %d issues, not one" admission_key value
+               (List.length issues)));
+       with_runtime_toml source (fun base_path ->
          match Keeper_runtime_config.load_and_apply ~base_path with
          | Ok _ -> failf "%s = %d was applied" admission_key value
          | Error failure ->
            check bool "the load fails in validation" true
-             (failure.Keeper_runtime_config.kind = Keeper_runtime_config.Validate);
-           check bool "the message names the runtime.toml key" true
-             (mentions ~affix:admission_key failure.Keeper_runtime_config.message)))
+             (failure.Keeper_runtime_config.kind = Keeper_runtime_config.Validate)))
     [ Admission.max_events_floor - 1; Admission.max_events_ceiling + 1 ];
   Config_boot_overrides.reset_for_tests ()
 ;;

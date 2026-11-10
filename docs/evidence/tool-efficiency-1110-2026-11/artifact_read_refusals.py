@@ -6,8 +6,9 @@ Read-only.
 Usage:
     python3 -I docs/evidence/tool-efficiency-1110-2026-11/artifact_read_refusals.py SINCE_ISO END_ISO [BASE_PATH]
 
-The window is [SINCE, END) in UTC. BASE_PATH defaults to ~/me. The ledger rows are read from
-BASE_PATH/.masc/tool_calls/YYYY-MM/*.jsonl.
+The window is [SINCE, END) in UTC by the time a row was built (ledger_window.py). BASE_PATH defaults to ~/me. The
+ledger rows are read from BASE_PATH/.masc/tool_calls/YYYY-MM/*.jsonl. Every count is over the window; rows up to 300 s
+after END are read only as follow-up reads, so a refusal just before END is not counted as "none" for lack of rows.
 
 Prints one JSON object:
   calls             keeper_artifact_read rows in the window
@@ -52,13 +53,15 @@ HEAD_CHARS = 400
 class Read:
     ts: float
     sha256: str | None
+    in_window: bool
     missing: bool
     malformed: bool
     succeeded: bool
 
 
 def measure(rows: Iterable[ledger.Row], since: float, end: float) -> dict[str, object]:
-    """`rows` are the tool_call rows of every tool from `since - LOOKBACK_S` up to `end`."""
+    """`rows` are the tool_call rows of every tool from `since - LOOKBACK_S` up to `end + AFTER_WINDOW_S`. Reads at or
+    after `end` are follow-up candidates only and are not counted."""
     first_fingerprint: dict[tuple[str, str], float] = {}
     reads: dict[str, list[Read]] = collections.defaultdict(list)
     for row in rows:
@@ -69,13 +72,13 @@ def measure(rows: Iterable[ledger.Row], since: float, end: float) -> dict[str, o
             key = (keeper, fingerprint)
             previous = first_fingerprint.get(key)
             first_fingerprint[key] = ts if previous is None else min(previous, ts)
-        if row.get("tool") != "keeper_artifact_read" or ts < since or ts >= end:
+        if row.get("tool") != "keeper_artifact_read" or ts < since:
             continue
         sha = ledger.input_of(row).get("sha256")
         head = ledger.text_of(row.get("output"))[:HEAD_CHARS]
         missing, malformed = MISSING in head, MALFORMED in head
         succeeded = row.get("disposition") == "completed" and not missing and not malformed
-        reads[keeper].append(Read(ts, sha if isinstance(sha, str) else None, missing, malformed, succeeded))
+        reads[keeper].append(Read(ts, sha if isinstance(sha, str) else None, ts < end, missing, malformed, succeeded))
 
     calls = refused = malformed_count = 0
     cause: collections.Counter[str] = collections.Counter()
@@ -84,6 +87,8 @@ def measure(rows: Iterable[ledger.Row], since: float, end: float) -> dict[str, o
     for keeper, keeper_reads in reads.items():
         keeper_reads.sort(key=lambda read: read.ts)
         for index, read in enumerate(keeper_reads):
+            if not read.in_window:
+                continue
             calls += 1
             malformed_count += read.malformed
             if not read.missing:
@@ -121,7 +126,7 @@ def main() -> None:
     since, end = ledger.parse_utc(sys.argv[1]), ledger.parse_utc(sys.argv[2])
     base = pathlib.Path(sys.argv[3] if len(sys.argv) > 3 else "~/me").expanduser()
     window = {"since": sys.argv[1], "end": sys.argv[2], "hours": round((end - since) / 3600, 2)}
-    result = measure(ledger.read_rows(base, since - LOOKBACK_S, end), since, end)
+    result = measure(ledger.read_rows(base, since - LOOKBACK_S, end + AFTER_WINDOW_S), since, end)
     print(json.dumps({"window": window, **result}, ensure_ascii=False, indent=2))
 
 

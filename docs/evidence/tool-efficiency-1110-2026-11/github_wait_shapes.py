@@ -70,7 +70,8 @@ URL_RUN_ID = re.compile(r"actions/runs/(\d+)")
 
 @dataclasses.dataclass(frozen=True, slots=True)
 class Create:
-    ts: float
+    began: float
+    ended: float
     keeper: str
     run_id: str | None
     has_until: bool
@@ -109,8 +110,10 @@ def read_create(row: ledger.Row) -> Create:
     until = inp.get("until_github_run")
     found = URL_RUN_ID.search(until) if isinstance(until, str) else None
     head = ledger.text_of(row.get("output"))[:HEAD_CHARS]
+    ended = ledger.number_of(row, "ts")
     return Create(
-        ts=ledger.number_of(row, "ts"),
+        began=ended - ledger.number_of(row, "duration_ms") / 1000,
+        ended=ended,
         keeper=ledger.keeper_of(row),
         run_id=None if found is None else found.group(1),
         has_until="until_github_run" in inp,
@@ -130,7 +133,7 @@ def measure(execute_rows: Iterable[ledger.Row], schedule_rows: Iterable[ledger.R
     watched_at: dict[tuple[str, str], list[float]] = collections.defaultdict(list)
     for create in creates:
         if create.has_until and create.completed and create.run_id is not None:
-            watched_at[(create.keeper, create.run_id)].append(create.ts)
+            watched_at[(create.keeper, create.run_id)].append(create.ended)
 
     execute = collections.Counter[str]()
     shape_calls = collections.Counter[str]()
@@ -187,7 +190,7 @@ def measure(execute_rows: Iterable[ledger.Row], schedule_rows: Iterable[ledger.R
         before = [
             create
             for create in creates
-            if create.keeper == poll.keeper and poll.began - PRIOR_ATTEMPT_S <= create.ts <= poll.began
+            if create.keeper == poll.keeper and poll.began - PRIOR_ATTEMPT_S <= create.began <= poll.began
         ]
         if before:
             prior["any"] += 1

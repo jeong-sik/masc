@@ -6,8 +6,9 @@ Read-only.
 Usage:
     python3 -I docs/evidence/tool-efficiency-1110-2026-11/schedule_until_run.py SINCE_ISO END_ISO [BASE_PATH]
 
-The window is [SINCE, END) in UTC. BASE_PATH defaults to ~/me. The ledger rows are read from
-BASE_PATH/.masc/tool_calls/YYYY-MM/*.jsonl.
+The window is [SINCE, END) in UTC by the time a row was built (ledger_window.py). BASE_PATH defaults to ~/me. The
+ledger rows are read from BASE_PATH/.masc/tool_calls/YYYY-MM/*.jsonl. Every count is over the window; rows up to 180 s
+after END are read only as follow-up calls, so a refusal just before END is not counted as "none" for lack of rows.
 
 Prints one JSON object:
   with_until              masc_schedule_create rows whose input has until_github_run
@@ -41,23 +42,27 @@ NEXT_WINDOW_S = 180.0
 @dataclasses.dataclass(frozen=True, slots=True)
 class Create:
     ts: float
+    in_window: bool
     has_until: bool
     has_due_field: bool
     refused_missing_due: bool
     completed: bool
 
 
-def measure(rows: Iterable[ledger.Row]) -> dict[str, object]:
-    """`rows` are the tool_call rows of the window; rows of other tools are ignored."""
+def measure(rows: Iterable[ledger.Row], since: float, end: float) -> dict[str, object]:
+    """`rows` are the tool_call rows from `since` up to `end + NEXT_WINDOW_S`; rows of other tools are ignored.
+    Rows at or after `end` are follow-up candidates only and are not counted."""
     by_keeper: dict[str, list[Create]] = collections.defaultdict(list)
     for row in rows:
         if row.get("tool") != "masc_schedule_create":
             continue
         inp = ledger.input_of(row)
         head = ledger.text_of(row.get("output"))[:HEAD_CHARS]
+        ts = ledger.number_of(row, "ts")
         by_keeper[ledger.keeper_of(row)].append(
             Create(
-                ts=ledger.number_of(row, "ts"),
+                ts=ts,
+                in_window=since <= ts < end,
                 has_until="until_github_run" in inp,
                 has_due_field=any(field in inp for field in DUE_FIELDS),
                 refused_missing_due=row.get("disposition") == "failed" and NEED_DUE in head,
@@ -69,7 +74,7 @@ def measure(rows: Iterable[ledger.Row]) -> dict[str, object]:
     for creates in by_keeper.values():
         creates.sort(key=lambda create: create.ts)
         for index, create in enumerate(creates):
-            if not create.has_until:
+            if not create.in_window or not create.has_until:
                 continue
             count["with_until"] += 1
             count["with_until_completed"] += create.completed
@@ -94,7 +99,8 @@ def main() -> None:
     since, end = ledger.parse_utc(sys.argv[1]), ledger.parse_utc(sys.argv[2])
     base = pathlib.Path(sys.argv[3] if len(sys.argv) > 3 else "~/me").expanduser()
     window = {"since": sys.argv[1], "end": sys.argv[2], "hours": round((end - since) / 3600, 2)}
-    result = measure(ledger.read_rows(base, since, end, ('"tool":"masc_schedule_create"',)))
+    rows = ledger.read_rows(base, since, end + NEXT_WINDOW_S, ('"tool":"masc_schedule_create"',))
+    result = measure(rows, since, end)
     print(json.dumps({"window": window, **result}, ensure_ascii=False, indent=2))
 
 

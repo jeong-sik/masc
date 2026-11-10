@@ -1,8 +1,9 @@
 """Read-only reader of the Keeper tool-call ledger, shared by the scripts in this folder.
 
-The ledger is `<base>/.masc/tool_calls/<YYYY-MM>/*.jsonl`, one JSON object per line. A row's `ts` is the time the
-call ended (the row is written then), so the window [since, end) holds the calls that ended inside it, and a call
-began at `ts - duration_ms / 1000`.
+The ledger is `<base>/.masc/tool_calls/<YYYY-MM>/*.jsonl`, one JSON object per line. A row's `ts` is the clock when
+the row is built after the result has arrived (`Time_compat.now ()` in `lib/keeper_tool_call_log.ml`, with
+`duration_ms` already known), so it equals the end of the call or comes a little later. The window [since, end) holds
+the calls whose row was built inside it, and a call began at about `ts - duration_ms / 1000`.
 """
 
 from __future__ import annotations

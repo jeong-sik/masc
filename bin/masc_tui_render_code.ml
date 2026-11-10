@@ -556,7 +556,7 @@ let render_code (state : state) =
                    | None -> state.code_lsp_note) in
             match (if hover_showing then None else note) with
             | Some note ->
-                base ^ "  " ^ (Masc_tui_theme.tone Masc_tui_theme.Accent)
+                base ^ "  " ^ (Theme.accent ())
                 ^ Terminal_text.single_line note ^ Ansi.reset
             | None -> base
           in
@@ -589,7 +589,7 @@ let render_code (state : state) =
                     | Some word -> " (" ^ word ^ ")"
                   in
                   with_note ^ "  "
-                  ^ (Masc_tui_theme.tone Masc_tui_theme.Accent)
+                  ^ (Theme.accent ())
                   ^ "memo "
                   ^ Terminal_text.single_line memo.Ide_memo.author
                   ^ kind ^ Ansi.reset ^ " "
@@ -963,7 +963,7 @@ let render_code (state : state) =
                  let mark =
                    let line = row_index + 1 in
                    if covers line note_spans then
-                     (Masc_tui_theme.tone Masc_tui_theme.Accent)
+                     (Theme.accent ())
                      ^ "\xe2\x97\x8f" ^ Ansi.reset
                    else if covers line keeper_spans then Ansi.dim ^ "\xc2\xb7" ^ Ansi.reset
                    else " "

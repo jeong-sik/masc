@@ -96,8 +96,12 @@ let index_messages_by_lowered_agent (messages : Masc_domain.message list) =
     (String_map.empty, String_map.empty)
     messages
 
-let build_agent_briefs config attention_queue (_keepers : Yojson.Safe.t list) =
-  let now_ts = Time_compat.now () in
+type agent_briefs_observation = {
+  json : Yojson.Safe.t list;
+  next_deadline_unix : float option;
+}
+
+let build_agent_briefs_observation ~now_ts config attention_queue (_keepers : Yojson.Safe.t list) =
   let task_lookup = build_task_lookup config in
   let messages =
     if Workspace.is_initialized config then
@@ -144,7 +148,8 @@ let build_agent_briefs config attention_queue (_keepers : Yojson.Safe.t list) =
   let latest_out_by_lower, latest_in_by_lower =
     index_messages_by_lowered_agent messages
   in
-  agent_names
+  let next_deadline_unix = ref None in
+  let json = agent_names
   |> List.map (fun agent_name ->
          let agent = String_map.find_opt agent_name workspace_agent_by_name in
          let related_attention_count =
@@ -194,6 +199,15 @@ let build_agent_briefs config attention_queue (_keepers : Yojson.Safe.t list) =
            | Some _, Some _ -> "stale"
            | Some _, None -> "unknown"
          in
+         (match last_activity_age_sec with
+          | Some age when age <= 300 ->
+              (* The existing truth compares the integer age to 300. Its
+                 first different row is at 301, not just above 300. *)
+              let deadline = last_seen_ts +. 301.0 in
+              if Float.is_finite deadline then
+                next_deadline_unix := Some (match !next_deadline_unix with
+                  | None -> deadline | Some old -> Float.min old deadline)
+          | Some _ | None -> ());
          let evidence_source =
            if Option.is_some latest_out || Option.is_some latest_in then
              "message"
@@ -234,4 +248,8 @@ let build_agent_briefs config attention_queue (_keepers : Yojson.Safe.t list) =
            let by_status = Int.compare right.status_rank left.status_rank in
            if by_status <> 0 then by_status
            else Float.compare right.last_seen_ts left.last_seen_ts)
-  |> List.map (fun (row : agent_context) -> row.json)
+  |> List.map (fun (row : agent_context) -> row.json) in
+  {json; next_deadline_unix = !next_deadline_unix}
+
+let build_agent_briefs config attention_queue keepers =
+  (build_agent_briefs_observation ~now_ts:(Time_compat.now ()) config attention_queue keepers).json

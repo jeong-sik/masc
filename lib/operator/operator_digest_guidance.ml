@@ -10,9 +10,10 @@ type projection = {
   fields : (string * Yojson.Safe.t) list;
   recommended_actions : Yojson.Safe.t list;
   recommendation_summary : Yojson.Safe.t;
+  next_deadline_unix : float option;
 }
 
-let fresh_operator_judgment config ~target_type ~target_id =
+let fresh_operator_judgment ~now config ~target_type ~target_id =
   match Operator_judgment.target_type_of_string target_type with
   | None -> None
   | Some target_type ->
@@ -21,8 +22,7 @@ let fresh_operator_judgment config ~target_type ~target_id =
         ~target_type ~target_id
     in
     (match latest with
-    | Some value when Operator_judgment.is_fresh value ->
-        Some (Operator_judgment.to_yojson value)
+    | Some value when Operator_judgment.is_fresh ~now value -> Some value
     | _ -> None)
 
 let judgment_summary_json judgment_json =
@@ -56,10 +56,11 @@ let judgment_recommendation_summary_json actions =
    OCaml (action_type="keeper_probe", reason="Inspect pending external
    attention") and hand it to the model as though a decision had been made;
    the summary below states the observed condition instead. *)
-let active_guidance ~config ~target_type ~target_id ~fallback_observation_summary
+let active_guidance ~now ~config ~target_type ~target_id ~fallback_observation_summary
     ~empty_recommendation_summary =
-  match fresh_operator_judgment config ~target_type ~target_id with
-  | Some judgment_json ->
+  match fresh_operator_judgment ~now config ~target_type ~target_id with
+  | Some judgment ->
+      let judgment_json = Operator_judgment.to_yojson judgment in
       let recommended_actions =
         match Json_util.get_object judgment_json "recommended_action" with
         | Some value -> [ value ]
@@ -81,6 +82,7 @@ let active_guidance ~config ~target_type ~target_id ~fallback_observation_summar
           ];
         recommended_actions;
         recommendation_summary;
+        next_deadline_unix = Some judgment.fresh_until_unix;
       }
   | None ->
       {
@@ -96,4 +98,5 @@ let active_guidance ~config ~target_type ~target_id ~fallback_observation_summar
           ];
         recommended_actions = [];
         recommendation_summary = empty_recommendation_summary;
+        next_deadline_unix = None;
       }

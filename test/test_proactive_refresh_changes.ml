@@ -143,6 +143,24 @@ let test_cancellation_retires_work_without_publishing () =
   check bool "switch cancellation retires the pending read" true !retired
 ;;
 
+let test_quiet_worker_allows_normal_switch_release () =
+  Eio_mock.Backend.run (fun () ->
+    let clock = Eio_mock.Clock.make () in
+    let changes = Eio.Stream.create 1 and results = Eio.Stream.create 1 in
+    let released = ref false in
+    Eio.Switch.run (fun sw ->
+      Eio.Switch.on_release sw (fun () -> released := true);
+      Refresh.start_on_change ~sw
+        ~clock:(clock :> float Eio.Time.clock_ty Eio.Resource.t) ~changes
+        ~config:(Refresh.default_config ~label:"normal-scope-release" ~interval_s)
+        ~compute:(fun () -> ()) ~on_result:(Eio.Stream.add results);
+      Eio.Stream.take results;
+      assert_settled clock);
+    check bool "normal scope return retires the idle daemon before release" true !released;
+    check bool "normal release leaves no worker timer" false
+      (Eio_mock.Clock.try_advance clock))
+;;
+
 let () =
   run "change-driven refresh"
     [ "read debt",
@@ -152,4 +170,5 @@ let () =
       ; test_case "initial timeout retains its retry" `Quick test_initial_timeout_retains_retry
       ; test_case "input brings initial read forward" `Quick test_change_can_admit_the_initial_read
       ; test_case "cancellation retires pending work" `Quick test_cancellation_retires_work_without_publishing
+      ; test_case "quiet worker permits normal switch release" `Quick test_quiet_worker_allows_normal_switch_release
       ] ]

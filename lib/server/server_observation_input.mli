@@ -26,6 +26,7 @@ type store_change =
   | Runtime_config
   | Skill_catalog
   | Lane_addon_exports
+  | Tools
 
 type gate_change =
   | Approvals
@@ -43,7 +44,6 @@ type agent_core_change =
   | Tool_called
   | Tool_completed
   | Turn_completed
-  | Telemetry
 
 type t =
   | Dataset of Workspace_dataset_event.dataset
@@ -56,12 +56,20 @@ type t =
   | Board
   | Execution_invalidated
   | Agent_core of { keeper : string option; change : agent_core_change }
+  | Telemetry_sample
+      (** A committed [Dashboard_agent_core_bridge] sample. The published
+          entry, shared timestamp and matching provider/model identity are
+          checked; metric rows and provider/model labels are not retained. *)
 
 val of_event : Sse.external_event -> t option
 (** Validate exact wire names and input identities. Unknown or malformed
     input, whole snapshot output and [Dashboard_observation] are ignored.
     [Execution_invalidated] is the explicit compact invalidation, never an
-    [execution_snapshot] containing a computed snapshot. No rows or tool/chat
+    [execution_snapshot] containing a computed snapshot. Only exact JSON-RPC
+    2.0 [notifications/board] and [notifications/tools/list_changed]
+    notification envelopes are unwrapped; protocol replies, requests with an
+    id and unrelated notification methods are not observation inputs.
+    No rows or tool/chat
     content are retained in [t]. *)
 
 val subscribe :

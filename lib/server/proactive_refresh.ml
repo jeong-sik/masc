@@ -127,7 +127,7 @@ let coalesce_changes ~clock ~config stream =
 ;;
 
 let start_on_change ~sw ~clock ~changes ~config ~compute ~on_result =
-  Eio.Fiber.fork ~sw (fun () ->
+  Eio.Fiber.fork_daemon ~sw (fun () ->
     Eio.Switch.run ~name:(config.label ^ " observation") (fun _ ->
       let consecutive_failures = ref 0 in
       let current_interval = ref config.interval_s in

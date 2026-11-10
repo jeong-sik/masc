@@ -38,37 +38,13 @@ val read : store -> posts_source_read
 val publish_read : store -> posts_source_read -> unit
 val require_readable : store -> (unit, board_error) result
 (** Pure: unobserved, refused and unsettled phases never authorize posts.
-    An unsettled store stays unauthorized until [settle] proves the unknown
-    write's outcome; plain [read] never settles. *)
+    An unsettled store retains its unknown-write evidence and rejects further
+    reads and writes. A fresh store loads the actual source instead. *)
 val failure_to_board_error : posts_source_failure -> board_error
 val finish_write : posts_write_outcome -> (unit, board_error) result
 val finish_read : posts_source_read -> unit
 val read_diagnostics : posts_source_read -> posts_source_diagnostic list
 val write_diagnostics : posts_write_outcome -> posts_source_diagnostic list
-val settle_diagnostics : posts_settle_outcome -> posts_source_diagnostic list
-type settle_direction =
-  | Direction_landed
-  | Direction_absent
-  | Direction_diverged
-val settle_direction_for_testing :
-  pending:posts_unsettled_write -> Fs_compat.private_jsonl_snapshot -> settle_direction
-(** Pure settlement direction of one observation against retained
-    unknown-write evidence. Test and diagnostic entry only: production
-    verdicts run inside [settle] under persistence with a fresh locked
-    read, workspace revalidation and a durability proof. This function
-    grants no authority. *)
-val settle : store -> posts_settle_outcome
-(** Settle the retained unknown write of an unsettled store. Caller owns
-    persistence; this function revalidates the workspace of the pre-write
-    observation, performs one locked posts read and at most one durable proof
-    rewrite, and never touches the in-memory post tables.
-
-    The verdict jointly consults the recorded transaction failure, the
-    pre-write observation and the intended bytes: a nonwrite verdict restores
-    the pre-write observation so a caller retry stays fenced by its cursor,
-    and a written verdict is issued only after the observed bytes are proven
-    durable. A store that is not unsettled yields
-    [Posts_settle_nothing_to_settle] with no IO. *)
 val diagnostic_to_string : posts_source_diagnostic -> string
 val reserved_diagnostics : posts_source_diagnostic list ->
   (exn * Printexc.raw_backtrace) option

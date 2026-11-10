@@ -137,7 +137,7 @@ let finish_workspace store before =
     Error (Board_workspace_binding.Raised { exception_; backtrace = Printexc.get_raw_backtrace () })
 
 (* The store's binding still names the workspace an earlier observation saw.
-   Writes and settlement revalidate against the observation they act on. *)
+   Writes revalidate against the observation they act on. *)
 let revalidate_observation store (observation : posts_source_observation) =
   try Board_workspace_binding.revalidate store.workspace_binding observation.workspace_observation
   with exception_ ->
@@ -179,7 +179,7 @@ let finish_write outcome =
     | Posts_not_written { failure; _ } | Posts_write_unknown { failure; _ } ->
       Error (failure_to_board_error failure) in
   (* Reserved causes travel as [Reserved_settlement] so the enclosing persist
-     lock releases cleanly; an unknown outcome stays settleable and never
+     lock releases cleanly; an unknown outcome keeps its evidence and never
      poisons the caller's persistence mutex. Only an explicit non-reserved
      exception crossing [use_rw] poisons it. *)
   carry_reserved result (reserved_diagnostics (write_diagnostics outcome));
@@ -468,175 +468,3 @@ let rewrite store snapshot = match snapshot.expected, expected store with
           | Some io -> Fs_compat.rewrite_private_jsonl_durable_locked_at_snapshot_with_io_for_testing
               ~io ~before_sync_rewrite_parent:io.before_sync_parent
               captured.source_path ~expected:captured.snapshot snapshot.bytes)
-
-let settle_diagnostics = function
-  | Posts_settled_written { diagnostics; _ } | Posts_settled_not_written { diagnostics; _ }
-  | Posts_settle_superseded { diagnostics; _ } | Posts_settle_inconclusive { diagnostics; _ } ->
-    diagnostics
-  | Posts_settle_nothing_to_settle -> []
-
-type settle_direction =
-  | Direction_landed
-  | Direction_absent
-  | Direction_diverged
-
-(* Joint verdict over the retained write evidence and one fresh locked
-   observation. There is no bytes-only shortcut: the pending kind,
-   pre-write bytes and intended bytes all participate, and the caller
-   re-verifies path, workspace and cursor around this decision. A late
-   completion landing after an [Direction_absent] verdict cannot silently
-   duplicate: the restored pre-write cursor fences the retry, which then
-   fails closed on cursor mismatch. *)
-let settle_direction ~(pending : posts_unsettled_write) (observed : Fs_compat.private_jsonl_snapshot) =
-  let original = pending.expected.snapshot.bytes in
-  let intended = pending.intended_bytes in
-  let current = observed.bytes in
-  if String.equal current original then Direction_absent
-  else
-    let landed =
-      String.equal current intended
-      || (match pending.kind with
-          | Append_write -> String.starts_with ~prefix:intended current
-          | Rewrite_write -> false)
-    in
-    if landed then Direction_landed else Direction_diverged
-
-let settle_direction_for_testing ~pending observed = settle_direction ~pending observed
-
-let settle_locked_read store path =
-  match store.posts_source_io.posts with
-  | None -> Fs_compat.read_private_jsonl_durable_locked_result path ~after:None
-  | Some io -> Fs_compat.read_private_jsonl_durable_locked_with_io_for_testing ~io path ~after:None
-
-let settle_proof_rewrite store path ~expected bytes =
-  match store.posts_source_io.posts with
-  | None -> Fs_compat.rewrite_private_jsonl_durable_locked_at_snapshot_result path ~expected bytes
-  | Some io -> Fs_compat.rewrite_private_jsonl_durable_locked_at_snapshot_with_io_for_testing
-      ~io ~before_sync_rewrite_parent:io.before_sync_parent path ~expected bytes
-
-type settle_proof =
-  | Proof_written of posts_settle_outcome
-  | Proof_reserved
-  | Proof_failed of posts_source_diagnostic list
-
-(* Prove durability of landed bytes with one durable rewrite of the exact
-   observed content at the exact observed snapshot. The rewrite either
-   returns a fresh durable cursor or fails closed (including on a
-   concurrent third-party write); it never truncates or repairs tails. *)
-let settle_prove store path ~failure ~workspace_observation ~diagnostics observed =
-  let prove_result = settle_proof_rewrite store path ~expected:observed observed.bytes in
-  match Fs_compat.private_jsonl_cursor_success_receipt prove_result with
-  | Ok receipt ->
-    let diagnostics = diagnostics @ (match receipt.settlement_error with None -> []
-      | Some error -> [File_diagnostic { file = Posts_file; error }]) in
-    (match reserved_diagnostics diagnostics with
-     | Some (exception_, backtrace) ->
-       carry_reserved (Error (failure_to_board_error failure)) (Some (exception_, backtrace));
-       Proof_reserved
-     | None ->
-       let observation : posts_source_observation = { source_path = path;
-         snapshot = { Fs_compat.bytes = observed.bytes; cursor = receipt.value };
-         workspace_observation } in
-       store.posts_source <- Posts_readable { observation; diagnostics };
-       Proof_written (Posts_settled_written { observation; diagnostics }))
-  | Error error ->
-    let diagnostics = diagnostics @ [File_diagnostic { file = Posts_file; error }] in
-    (match reserved_diagnostics diagnostics with
-     | Some (exception_, backtrace) ->
-       carry_reserved (Error (failure_to_board_error failure)) (Some (exception_, backtrace));
-       Proof_reserved
-     | None -> Proof_failed diagnostics)
-
-let settle_inner store ~failure ~(pending : posts_unsettled_write) ~last_observed =
-  let inconclusive diagnostics =
-    store.posts_source <- Posts_unsettled { last_observed; failure; pending; diagnostics };
-    Posts_settle_inconclusive { failure; diagnostics } in
-  (match revalidate_observation store pending.expected with
-   | Error rejection ->
-     let diagnostics = [Workspace_diagnostic rejection] in
-     (match reserved_diagnostics diagnostics with
-      | Some (exception_, backtrace) ->
-        carry_reserved (Error (failure_to_board_error failure)) (Some (exception_, backtrace));
-        inconclusive diagnostics
-      | None ->
-        let failure = Posts_workspace_binding_refused rejection in
-        store.posts_source <- Posts_refused { last_observed; failure; diagnostics };
-        Posts_settle_superseded { failure; diagnostics })
-   | Ok () ->
-       let workspace_observation = pending.expected.workspace_observation in
-       let path = Board_paths.persist_path store in
-       if not (String.equal path pending.expected.source_path) then (
-         let failure = Posts_source_binding_mismatch in
-         let diagnostics = [] in
-         store.posts_source <- Posts_refused { last_observed; failure; diagnostics };
-         Posts_settle_superseded { failure; diagnostics })
-       else
-         let stage = ref Read_posts in
-         (match settle_locked_read store path with
-          | exception exception_ ->
-            let backtrace = Printexc.get_raw_backtrace () in
-            (match reserved_exception (exception_, backtrace) with
-             | Some _ ->
-               carry_reserved (Error (failure_to_board_error failure)) (Some (exception_, backtrace));
-               inconclusive []
-             | None ->
-               let diagnostics = [Raised_diagnostic { stage = !stage; exception_; backtrace }] in
-               inconclusive diagnostics)
-          | result ->
-            (match Fs_compat.private_jsonl_snapshot_success_receipt result with
-             | Error error ->
-               let diagnostics = [File_diagnostic { file = Posts_file; error }] in
-               (match reserved_diagnostics diagnostics with
-                | Some (exception_, backtrace) ->
-                  carry_reserved (Error (failure_to_board_error failure)) (Some (exception_, backtrace));
-                  inconclusive diagnostics
-                | None -> inconclusive diagnostics)
-             | Ok receipt ->
-               let diagnostics = (match receipt.settlement_error with None -> []
-                 | Some error -> [File_diagnostic { file = Posts_file; error }]) in
-               (match reserved_diagnostics diagnostics with
-                | Some (exception_, backtrace) ->
-                  carry_reserved (Error (failure_to_board_error failure)) (Some (exception_, backtrace));
-                  inconclusive diagnostics
-                | None ->
-                  let observed = receipt.value in
-                  if Fs_compat.Private_jsonl_cursor.is_missing observed.cursor then (
-                    let failure = Posts_missing in
-                    store.posts_source <- Posts_refused { last_observed; failure; diagnostics };
-                    Posts_settle_superseded { failure; diagnostics })
-                  else
-                    (match settle_direction ~pending observed with
-                     | Direction_absent ->
-                       let observation = pending.expected in
-                       store.posts_source <- Posts_readable { observation; diagnostics };
-                       Posts_settled_not_written { observation; diagnostics }
-                     | Direction_diverged ->
-                       let failure = Posts_snapshot_stale in
-                       let fresh : posts_source_observation =
-                         { source_path = path; snapshot = observed; workspace_observation } in
-                       store.posts_source <- Posts_refused {
-                         last_observed = Posts_observed fresh; failure; diagnostics };
-                       Posts_settle_superseded { failure; diagnostics }
-                     | Direction_landed ->
-                       (match settle_prove store path ~failure ~workspace_observation ~diagnostics observed with
-                        | Proof_written outcome -> outcome
-                        | Proof_reserved -> inconclusive diagnostics
-                        | Proof_failed proof_diagnostics -> inconclusive proof_diagnostics))))))
-
-let settle store = match store.posts_source with
-  | Posts_unobserved | Posts_readable _ | Posts_refused _ ->
-    Posts_settle_nothing_to_settle
-  | Posts_unsettled { last_observed; failure; pending; _ } ->
-    (try settle_inner store ~failure ~pending ~last_observed
-     with exception_ ->
-       let backtrace = Printexc.get_raw_backtrace () in
-       (match reserved_exception (exception_, backtrace) with
-        | Some _ ->
-          carry_reserved (Error (failure_to_board_error failure)) (Some (exception_, backtrace));
-          let diagnostics = [] in
-          store.posts_source <- Posts_unsettled { last_observed; failure; pending; diagnostics };
-          Posts_settle_inconclusive { failure; diagnostics }
-        | None ->
-          let diagnostics = [Raised_diagnostic { stage = Report_source; exception_; backtrace }] in
-          store.posts_source <- Posts_unsettled { last_observed; failure; pending; diagnostics };
-          Posts_settle_inconclusive { failure; diagnostics }))

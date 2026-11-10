@@ -50,6 +50,7 @@ let require_ok = function
 ;;
 
 let drop value reason = { Types.memory_id = id value; reason }
+let absorb from into = { Types.absorbed = id from; into = id into }
 let revision from into = { Types.superseded = id from; superseded_by = id into }
 
 let changes ~pass =
@@ -92,17 +93,25 @@ let check_commit ~commit ~pass ~expected write =
   snapshot
 ;;
 
-(* One program of two ordered stages over [current]: the first adds [staged],
-   the second revises it into [restated]. Built like the ordered recall
-   programs of test_keeper_memory_os_current. *)
-let publish_program ~keepers_dir ~pass ~current ~staged ~restated =
+(* One stage of an ordered program: the exact facts it starts from and its
+   decision. *)
+let stage ~input ?(dropped = []) ?(absorbed = []) ?(revisions = []) new_claims =
+  input, new_claims, dropped, absorbed, revisions
+;;
+
+(* Build an ordered program over [current], one message per stage, like the
+   ordered recall programs of test_keeper_memory_os_current, and commit it
+   with [apply]. *)
+let publish_program ~keepers_dir ~transaction_id ~current ~apply stages =
   let anchor = Current.capture_program_anchor ~keepers_dir ~keeper_id |> require_ok in
   let program_keeper = Masc_test_deps.keeper_id_fixture keeper_id in
-  let turn_ref = Ids.Turn_ref.make ~trace_id:"change-metrics-program" ~absolute_turn:3 in
+  let turn_ref = Ids.Turn_ref.make ~trace_id:transaction_id ~absolute_turn:3 in
   let messages =
-    List.map
-      (fun text -> Agent_core.Types.make_message ~role:Agent_core.Types.User [ Agent_core.Types.Text text ])
-      [ "The first ordered observation."; "The second ordered observation." ]
+    List.mapi
+      (fun index _ ->
+         Agent_core.Types.make_message ~role:Agent_core.Types.User
+           [ Agent_core.Types.Text (Printf.sprintf "Ordered observation %d." index) ])
+      stages
   in
   let sources =
     List.mapi
@@ -111,40 +120,38 @@ let publish_program ~keepers_dir ~pass ~current ~staged ~restated =
            { turn_ref; boundary_line = 1; message_in_turn; message_sha256 = Unread.message_digest message })
       messages
   in
-  let decision index ~input_current ~new_claims ~dropped ~revisions : Program.decision =
-    { run_id = Printf.sprintf "change-metrics-%d" index
-    ; keeper_id = program_keeper
-    ; turn_ref
-    ; input_current = Some input_current
-    ; sources = [ List.nth sources index ]
-    ; input_evidence = `Null
-    ; gate_evidence = `Null
-    ; working_state = "Accepted ordered continuation."
-    ; new_claims
-    ; dropped
-    ; absorbed = []
-    ; revisions
-    }
+  let decisions =
+    List.mapi
+      (fun index (input, new_claims, dropped, absorbed, revisions) : Program.decision ->
+         { run_id = Printf.sprintf "%s-%d" transaction_id index
+         ; keeper_id = program_keeper
+         ; turn_ref
+         ; input_current = Some input
+         ; sources = [ List.nth sources index ]
+         ; input_evidence = `Null
+         ; gate_evidence = `Null
+         ; working_state = "Accepted ordered continuation."
+         ; new_claims
+         ; dropped
+         ; absorbed
+         ; revisions
+         })
+      stages
   in
   let program =
-    Program.create ~transaction_id:"change-metrics-program" ~keeper_id:program_keeper ~turn_ref ~sources
-      ~unread:[] ~initial_current:(Some current)
-      ~decisions:
-        [ decision 0 ~input_current:current ~new_claims:[ staged ] ~dropped:[] ~revisions:[]
-        ; decision 1 ~input_current:(current @ [ staged ]) ~new_claims:[ restated ]
-            ~dropped:[ drop staged "the next stage restates it" ]
-            ~revisions:[ revision staged restated ]
-        ]
+    Program.create ~transaction_id ~keeper_id:program_keeper ~turn_ref ~sources ~unread:[]
+      ~initial_current:(Some current) ~decisions
     |> require_ok
   in
   let range : Current.official_range_id =
-    { receipt_scope = "change-metrics-program"; after_boundary_line = 0; turns = [ 1, turn_ref ]; unread_messages = [] }
+    { receipt_scope = transaction_id; after_boundary_line = 0; turns = [ 1, turn_ref ]; unread_messages = [] }
   in
-  let source = Current.Official_program_source { range; selected_turns = [ 1, turn_ref, messages ] } in
-  (Current.apply_program ~pass ~keepers_dir ~keeper_id ~now:300.0 ~anchor ~source
-     ~validate_source:(fun () -> Ok ()) program
-   |> require_ok)
-    .snapshot
+  apply ~anchor ~source:(Current.Official_program_source { range; selected_turns = [ 1, turn_ref, messages ] })
+    program
+;;
+
+let claims (snapshot : Current.t) =
+  List.sort String.compare (List.map (fun (value : Types.fact) -> value.claim) snapshot.facts)
 ;;
 
 let test_a_commit_counts_its_changes_under_its_pass () =
@@ -153,9 +160,10 @@ let test_a_commit_counts_its_changes_under_its_pass () =
   let absorbed_source = fact "absorbed source"
   and revised = fact "revised claim"
   and retired = fact "retired claim"
-  and kept = fact "kept claim" in
+  and kept = fact "kept claim"
+  and spare = fact "spare claim" in
   Current.replace ~keepers_dir ~keeper_id ~expected_revision:None ~now:200.0 ~source:(source Current.Librarian)
-    ~facts:[ absorbed_source; revised; retired; kept ] ()
+    ~facts:[ absorbed_source; revised; retired; kept; spare ] ()
   |> require_ok
   |> ignore;
   (* A Keeper re-observes a held fact: the same ID with a later [last_seen]. *)
@@ -175,30 +183,80 @@ let test_a_commit_counts_its_changes_under_its_pass () =
     @@ fun () ->
     (Current.apply_disposition ~pass:Pass.Durable
        ~dropped_statements:[ drop revised "the successor restates it"; drop retired "no longer true" ]
-       ~absorbed:[ { Types.absorbed = id absorbed_source; into = id merged } ]
+       ~absorbed:[ absorb absorbed_source merged ]
        ~revisions:[ revision revised successor ]
        ~keepers_dir ~keeper_id ~now:260.0 ~source:(source Current.Librarian) ~new_claims:[ merged; successor ] ()
      |> require_ok)
       .snapshot
   in
-  (* A program adds a fact in one stage and revises it in the next. It
-     commits once, so only the fact it leaves is new to Memory. *)
-  let staged = fact "staged claim"
-  and restated = fact "restated claim" in
+  (* A program of two stages, counted once from its first facts to its last.
+     The first stage absorbs [successor] into [combined], [spare] into
+     [folded], revises [merged] into [refined] and adds [staged]. The second
+     drops [refined] and [folded] and revises [staged] and [kept]. So
+     [successor] was absorbed and [kept] superseded, [merged] and [spare] went
+     into claims that did not last and were dropped, and [staged] never
+     reached a committed snapshot. *)
+  let refined = fact "refined claim"
+  and combined = fact "combined claim"
+  and folded = fact "folded claim"
+  and staged = fact "staged claim"
+  and restated = fact "restated claim"
+  and clarified = fact "clarified claim" in
+  let held = List.filter (fun (value : Types.fact) -> String.equal (id value) (id kept)) disposed.facts in
   let published =
-    check_commit ~commit:"a two-stage program" ~pass:"continuity" ~expected:[ 1; 0; 0; 0 ]
-    @@ fun () -> publish_program ~keepers_dir ~pass:Pass.Continuity ~current:disposed.facts ~staged ~restated
+    check_commit ~commit:"a two-stage program" ~pass:"continuity" ~expected:[ 3; 1; 1; 2 ]
+    @@ fun () ->
+    (publish_program ~keepers_dir ~transaction_id:"change-metrics-program" ~current:disposed.facts
+       ~apply:(fun ~anchor ~source program ->
+         Current.apply_program ~pass:Pass.Continuity ~keepers_dir ~keeper_id ~now:300.0 ~anchor ~source
+           ~validate_source:(fun () -> Ok ()) program)
+       [ stage ~input:disposed.facts ~dropped:[ drop merged "the refinement restates it" ]
+           ~absorbed:[ absorb successor combined; absorb spare folded ] ~revisions:[ revision merged refined ]
+           [ refined; combined; folded; staged ]
+       ; stage ~input:(held @ [ refined; combined; folded; staged ])
+           ~dropped:
+             [ drop refined "no longer true"; drop folded "no longer true"
+             ; drop staged "the restatement replaces it"; drop kept "the clarification replaces it"
+             ]
+           ~revisions:[ revision staged restated; revision kept clarified ]
+           [ restated; clarified ]
+       ]
+     |> require_ok)
+      .snapshot
   in
-  check (list string) "the program leaves only its last stage's fact"
-    [ kept.claim; merged.claim; successor.claim; restated.claim ]
-    (List.map (fun (value : Types.fact) -> value.claim) published.facts);
+  check (list string) "the program leaves only the claims its last stage kept"
+    (List.sort String.compare [ combined.claim; restated.claim; clarified.claim ])
+    (claims published);
+  (* The rename of this program's snapshot returns, but the directory sync
+     fails. The commit returns an error, yet its snapshot is the store's state
+     and the next reader finalizes it, so it is counted. *)
+  ignore
+    (check_commit ~commit:"a program renamed but not synced" ~pass:"durable" ~expected:[ 1; 0; 0; 0 ]
+     @@ fun () ->
+     (match
+        publish_program ~keepers_dir ~transaction_id:"change-metrics-unsynced" ~current:published.facts
+          ~apply:(fun ~anchor ~source program ->
+            Current.For_testing.apply_program_with_publication_io ~pass:Pass.Durable ~keepers_dir ~keeper_id
+              ~now:305.0 ~anchor ~source ~validate_source:(fun () -> Ok ())
+              ~write_snapshot:
+                (Fs_compat.Atomic_replace_for_testing.save_file_atomic_strict_staged ~sync_file:ignore
+                   ~sync_parent:(fun _ -> failwith "directory sync failed"))
+              ~sync_snapshot:(fun _ -> Error "directory sync failed")
+              ~before_journal:ignore ~on_committed:ignore program)
+          [ stage ~input:published.facts [ fact "unsynced claim" ] ]
+      with
+      | Ok _ -> fail "a snapshot whose directory sync failed reports no commit"
+      | Error _ -> ());
+     match Current.read_for_keepers_dir ~keepers_dir ~keeper_id with
+     | Ok (Some snapshot) -> snapshot
+     | Ok None | Error _ -> fail "the renamed snapshot is readable");
   (* A Keeper replaces one fact with another and retracts a second. *)
   ignore
     (check_commit ~commit:"a supersession" ~pass:"keeper_write" ~expected:[ 1; 0; 1; 0 ]
      @@ fun () ->
      match
        Current.supersede_fact ~pass:Pass.Keeper_write ~keepers_dir ~keeper_id ~now:310.0
-         ~source:(source Current.Explicit_write) ~superseded_memory_id:(id merged) (fact "replacement claim")
+         ~source:(source Current.Explicit_write) ~superseded_memory_id:(id combined) (fact "replacement claim")
      with
      | Ok (snapshot, _) -> snapshot
      | Error _ -> fail "the supersession failed");
@@ -207,7 +265,7 @@ let test_a_commit_counts_its_changes_under_its_pass () =
      @@ fun () ->
      match
        Current.retract_fact ~pass:Pass.Keeper_delete ~keepers_dir ~keeper_id ~now:320.0
-         ~source:(source Current.Explicit_retract) ~memory_id:(id successor) ~reason:"the Keeper withdrew it" ()
+         ~source:(source Current.Explicit_retract) ~memory_id:(id clarified) ~reason:"the Keeper withdrew it" ()
      with
      | Ok snapshot -> snapshot
      | Error _ -> fail "the retraction failed");

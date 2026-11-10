@@ -190,6 +190,19 @@ let test_refused_policy_parent_cleanup base = with_parent_cleanup base (fun firs
        [Board.sub_boards_path first; Board.persist_path first] paths
    | _ -> Alcotest.fail "guard refusal invented an unsettled comments write"))
 
+(* Source-confirmed blocker: delete_sub_board currently acknowledges only the
+   policy file and leaves the hearth unlink dirty in memory. This normal
+   accepted transition must become durable before this candidate is Ready. *)
+let test_deleted_sub_board_keeps_comment_available base =
+  let first = fresh base in
+  let board, parent = scoped first in
+  require (Board.delete_sub_board first ~sub_board_id:(Board.Sub_board_id.to_string board.id));
+  let comment = require (append first parent "comment immediately after accepted sub-board deletion") in
+  let restarted = fresh base in
+  let restored = require (Board.get_post restarted ~post_id:(Board.Post_id.to_string parent.id)) in
+  Alcotest.(check (option string)) "accepted hearth unlink survives restart" None restored.hearth;
+  ignore (require (Board.get_comment restarted ~comment_id:(Board.Comment_id.to_string comment.id)))
+
 let with_fixture f () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -213,4 +226,5 @@ let () = match Array.to_list Sys.argv with
        "boundary reader is not author", test_boundary_reader_is_not_author;
        "live parent and policy locks", test_live_readset_locks;
        "known append before parent cleanup", test_known_append_parent_cleanup;
-       "policy refusal plus parent cleanup", test_refused_policy_parent_cleanup]]
+       "policy refusal plus parent cleanup", test_refused_policy_parent_cleanup;
+       "accepted sub-board deletion keeps comments available", test_deleted_sub_board_keeps_comment_available]]

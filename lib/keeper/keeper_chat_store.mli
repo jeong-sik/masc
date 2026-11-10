@@ -573,6 +573,16 @@ val transcript_provenance_readable : string -> (unit, string) result
     can be replaced independently of its normal append writer. *)
 val chat_path : base_dir:string -> keeper_name:string -> string
 
+(** [purge_transcript path ~remove] runs [remove path] for the transcript at
+    [path] while no append-once delivery to it is in flight, and forgets what
+    this process keeps from reading that file, whatever [remove] answers or
+    raises: the [load_all] cache and the provenance index of the append-once
+    writers. Both read only the rows after the ones they have read while the
+    file keeps its device and inode and is at least as long, so a transcript
+    removed any other way leaves them behind, and a new file at the same path
+    can match them by its inode number. *)
+val purge_transcript : string -> remove:(string -> 'a) -> 'a
+
 (** [load ~base_dir ~keeper_name] returns the most recent messages in
     chronological order: the last 100 user/assistant messages plus the
     newest 300 tool lines and receipts among them, so the window never

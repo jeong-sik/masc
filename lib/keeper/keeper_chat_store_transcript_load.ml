@@ -5,6 +5,11 @@ open Keeper_chat_store_line_decode
 open Keeper_chat_store_history_window
 open Keeper_chat_store_transcript_rows
 
+let purge_transcript path ~remove =
+  Keeper_chat_store_transcript_index.purge_indexed_transcript path ~remove:(fun path ->
+    Fun.protect ~finally:(fun () -> forget_transcript path) (fun () -> remove path))
+;;
+
 let load_transcript_fully ~path ~redaction =
   let before = transcript_identity path in
   match Fs_compat.read_private_jsonl_rows_locked_result path with

@@ -844,6 +844,8 @@ let purge_keeper_artifacts config ~keeper_name ~remove_configuration context =
                  ~runtime_config_path:(Config_dir_resolver.runtime_toml_path_for_base_path
                    ~base_path:config.Workspace.base_path)
                  (fun () -> remove_path_strict path)
+             | Keeper_chat_store_artifact ->
+               Keeper_chat_store.purge_transcript path ~remove:remove_path_strict
              | Keeper_metrics_store_artifact | Keeper_root_logs_artifact
              | Keeper_runtime_directory_artifact | Keeper_memory_current_artifact
              | Keeper_librarian_range_receipt_artifact | Keeper_memory_admission_queue_artifact
@@ -856,7 +858,7 @@ let purge_keeper_artifacts config ~keeper_name ~remove_configuration context =
              | Keeper_memory_events_artifact | Keeper_turn_boundaries_artifact
              | Keeper_librarian_progress_artifact | Keeper_external_read_cursor_artifact
              | Keeper_librarian_official_progress_artifact | Keeper_playground_bundles_artifact
-             | Keeper_runtime_configuration_artifact | Keeper_chat_store_artifact
+             | Keeper_runtime_configuration_artifact
              | Keeper_board_attention_candidates_artifact
              | Keeper_board_attention_partitions_artifact | Agent_artifact_bundle _
              | Keeper_antigravity_home_artifact _ | Keeper_antigravity_prepare_lock_artifact _

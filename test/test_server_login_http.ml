@@ -694,7 +694,13 @@ let a_stopped_zone_answers_no_person () =
          ~provider_account_id:(get_ok (Provider_account_id.of_string "account-1"))
      with
      | Ok () -> Alcotest.fail "the zone wrote over a log another writer moved"
-     | Error (_ : Authz_provider_account.error) -> ());
+     | Error error ->
+       (* The route of the subscription connection gives this text to the
+          person (Server_setup_account_login). *)
+       Alcotest.(check bool)
+         "the failure of the link names no path of the server"
+         false
+         (contains ~sub:(Filename.dirname t.base) (Authz_provider_account.error_to_string error)));
     let root = Filename.dirname t.base in
     let unavailable label (reply : reply) =
       Alcotest.(check int) (label ^ ": " ^ reply.body) 503 reply.status;
@@ -727,6 +733,49 @@ let a_stopped_zone_answers_no_person () =
       [ Q.session_cookie ]
       (List.map fst admin.cookies);
     unavailable "a new sign-in" (sign_in t (fresh_browser ()) ~user_id:583231))
+;;
+
+(* The request whose commit finds the end of the log moved is the one that
+   stops the log. Its answer is one fixed sentence too, and names no path of
+   the server: the reason is in the log of the server. *)
+let the_request_that_meets_a_moved_log_names_no_path () =
+  let signed_in_admin t =
+    let admin = fresh_browser () in
+    let back = sign_in t admin ~user_id:583231 ~fields:[ "invite", admin_token; "return_to", "/" ] in
+    Alcotest.(check int) ("signed in: " ^ back.body) 200 back.status;
+    let csrf = csrf_of t admin in
+    Out_channel.with_open_gen
+      [ Open_append; Open_binary ]
+      0o600
+      (Authz_log.path_of_base_path ~base_path:t.base)
+      (fun channel -> Out_channel.output_string channel "{}\n");
+    admin, csrf
+  in
+  let not_recorded label t (reply : reply) =
+    Alcotest.(check int) (label ^ ": " ^ reply.body) 503 reply.status;
+    Alcotest.(check (option string))
+      (label ^ ": what the person is told")
+      (Some "The server could not finish recording this. Try again later.")
+      (match member "error" reply with
+       | Some (`String text) -> Some text
+       | Some _ | None -> None);
+    Alcotest.(check bool)
+      (label ^ " names no path of the server")
+      false
+      (contains ~sub:(Filename.dirname t.base) reply.body)
+  in
+  with_installation (fun t ->
+    let admin, csrf = signed_in_admin t in
+    not_recorded
+      "the sign-out"
+      t
+      (send admin t.router ~meth:"POST" ~path:"/auth/logout" ~headers:(changing ~csrf ())));
+  with_installation (fun t ->
+    let admin, csrf = signed_in_admin t in
+    not_recorded
+      "an allowlist registration"
+      t
+      (register t admin ~csrf {|{"provider":"github","user_id":7}|}))
 ;;
 
 let what_the_server_reads () =
@@ -839,6 +888,10 @@ let () =
         ; Alcotest.test_case "the preview follows a login" `Quick the_preview_follows_a_login
         ; Alcotest.test_case "a PAT acts until it is revoked" `Quick a_pat_acts_until_it_is_revoked
         ; Alcotest.test_case "a stopped zone" `Quick a_stopped_zone_answers_no_person
+        ; Alcotest.test_case
+            "the request that meets a moved log"
+            `Quick
+            the_request_that_meets_a_moved_log_names_no_path
         ; Alcotest.test_case "what the server reads" `Quick what_the_server_reads
         ; Alcotest.test_case "the route table" `Quick the_route_table
         ; Alcotest.test_case "the query credential" `Quick the_query_credential

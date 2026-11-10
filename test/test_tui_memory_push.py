@@ -30,7 +30,7 @@ def health_payload() -> dict:
         "state": "drained",
         "detail": None,
         "pending": None,
-        "admission_wait": None,
+        "admission_wait": None, "operator_action_required": False,
         "measured_at": 1.0,
         "unread_atom_turns": 0,
         "unread_official_turns": 0,
@@ -67,7 +67,7 @@ def health_payload() -> dict:
         "alerts": [],
     }
     return {
-        "schema": "keeper.memory_os.current_health.v12",
+        "schema": "keeper.memory_os.current_health.v13",
         "generated_at": 1.0,
         "execution": {
             "schema": "keeper.memory_execution_availability.v1",
@@ -105,7 +105,7 @@ def health_payload() -> dict:
             "keepers_with_alerts": 0,
             "snapshot_read_error_keepers": 0,
             "source_snapshot_read_error_keepers": 0,
-            "librarian_stopped_keepers": 0,
+            "librarian_stopped_keepers": 0, "librarian_attention_required_keepers": 0,
             "librarian_starving_keepers": 0,
         },
     }

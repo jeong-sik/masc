@@ -439,15 +439,13 @@ module Syntax = struct
   let json_punctuation = Sgr.dim
 
   (* The rest of what a fenced block and a chat row hold. Content, not state:
-     a slanted comment says it is a comment, not that anything is unwell. Named
-     here for the same reason the keyword is -- a renderer that picks the code
-     itself is one the readability lift cannot reach. *)
-  let code_comment = Sgr.italic ^ Sgr.gray
+     a number or a type name says what it is, not that anything is unwell.
+     Named here for the same reason the keyword is -- a renderer that picks the
+     code itself is one the readability lift cannot reach. *)
   let code_number = Sgr.bright_magenta
   let code_type = Sgr.bright_blue
   let code_span = Sgr.bright_cyan
   let link = Sgr.bright_blue
-  let rule = Sgr.gray
 
   (* Diff rows are content, like a keyword or a literal: "this line is green"
      says the file gained it, not that anything is healthy. Named here so the

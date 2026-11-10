@@ -1148,6 +1148,19 @@ let () = test "handle_transition_expected_version_mismatch_does_not_retry_withou
          ])
   in
   assert (not (Tool_result.is_success result));
+  assert (Tool_result.failure_class result = Some Tool_result.Workflow_rejection);
+  let data = Tool_result.data result in
+  assert (Json_util.get_string data "failure_class" = Some "workflow_rejection");
+  assert (Json_util.get_string data "error_class" = Some "deterministic");
+  assert (Json_util.get_bool data "recoverable" = Some false);
+  assert (Json_util.get_string data "task_id" = Some "task-001");
+  assert (Json_util.get_string data "action" = Some "claim");
+  assert (Json_util.get_string data "requested_agent" = Some ctx.Task.Tool.agent_name);
+  assert (
+    match Json_util.assoc_member_opt "diagnosis" data with
+    | Some diagnosis ->
+      Json_util.get_string diagnosis "rule_id" = Some "task_transition_invalid_state"
+    | None -> false);
   match Workspace.get_tasks_raw ctx.Task.Tool.config with
   | [ { Masc_domain.task_status = Masc_domain.Todo; _ } ] -> ()
   | [ task ] ->

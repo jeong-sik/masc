@@ -125,6 +125,9 @@ let same_inode left right =
 let test_live_readset_locks base =
   let initial = fresh base in
   let _, parent = scoped initial in
+  (* The append seam closes an injected data FD for an existing source. The
+     first Missing-file publication uses the replacement writer instead. *)
+  ignore (require (append initial parent ~author:"owner" "existing comments source"));
   let comments = Board.comments_path initial in
   let targets = [Board.persist_path initial; Board.sub_boards_path initial] in
   let armed = ref false in
@@ -211,7 +214,9 @@ let test_deleted_sub_board_keeps_comment_available base =
   require (Board.delete_sub_board first ~sub_board_id:(Board.Sub_board_id.to_string board.id));
   let comment = require (append first parent "comment immediately after accepted sub-board deletion") in
   let restarted = fresh base in
-  let restored = require (Board.get_post restarted ~post_id:(Board.Post_id.to_string parent.id)) in
+  let restored = match Board.read_post restarted ~post_id:(Board.Post_id.to_string parent.id) with
+    | Ok post -> post
+    | Error error -> Alcotest.fail (Board.show_board_read_error error) in
   Alcotest.(check (option string)) "accepted hearth unlink survives restart" None restored.hearth;
   ignore (require (Board.get_comment restarted ~comment_id:(Board.Comment_id.to_string comment.id)))
 

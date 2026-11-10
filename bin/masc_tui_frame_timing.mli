@@ -40,8 +40,10 @@ type chat_page_application = {
 val note_chat_page_application : chat_page_application -> unit
 (** Observe a successfully admitted older page, with the next Build ordinal.
     UI-domain use only. Callers capture metadata only when {!enabled}.
-    Preservation compares state immediately before and after admission, not
-    the later viewport or physical paint. Contains no message/draft contents or
+    [draft_preserved] compares the input revision token, [scroll_preserved]
+    the integer scroll, and [pin_preserved] the pin option's physical identity
+    immediately before and after admission. These do not establish attachment,
+    cursor, later viewport or physical-paint preservation. Contains no draft contents or
     cursor bytes. Retains the first {!max_frames_per_phase} events and reports
     omissions. This diagnostic never grants request or workspace authority. *)
 

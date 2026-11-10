@@ -289,27 +289,11 @@ let an_invite_needs_an_active_installation () =
 ;;
 
 (* The local operator commits Off through the zone, as masc auth off does. *)
-let turn_off dirs workspace_id =
-  let zone =
-    match Authz_zone.open_at_start ~now_ms ~log_path:(log_path dirs) ~store_path:dirs.store with
-    | Ok zone -> zone
-    | Error error -> Alcotest.failf "the zone did not open: %s" (Authz_zone.open_error_to_string error)
-  in
-  let body =
-    match Authz_mode_event.to_body { Authz_mode_event.event = Authz_mode_event.Off; workspace_id } with
-    | Ok body -> body
-    | Error error -> Alcotest.failf "fixture body refused: %s" (Authz_body.error_to_string error)
-  in
-  match
-    Authz_zone.commit
-      zone
-      { Authz_zone.author = Authz_records.Author.Local_operator
-      ; kind = Authz_record.Kind.Mode_event
-      ; body
-      }
-  with
-  | Ok (_ : Authz_zone.committed) -> ()
-  | Error error -> Alcotest.failf "Off was refused: %s" (Authz_zone.error_to_string error)
+(* masc auth off. *)
+let turn_off dirs =
+  match Authz_off.turn_off ~base_path:dirs.base ~config_dir:(Some dirs.config) ~now_ms with
+  | Ok (_ : Authz_types.Workspace_id.t) -> ()
+  | Error error -> Alcotest.failf "Off was refused: %s" (Authz_off.error_to_string error)
 ;;
 
 (* Design 10.5: after Off a boot starts a single user, and neither a bootstrap
@@ -317,8 +301,8 @@ let turn_off dirs workspace_id =
 let nothing_is_written_after_off () =
   with_dirs (fun dirs ->
     ask_for_multi_account dirs;
-    let { A.workspace_id; invitation = (_ : A.invitation) } = activated_exn dirs in
-    turn_off dirs workspace_id;
+    let (_ : A.activated) = activated_exn dirs in
+    turn_off dirs;
     write_file (Auth.auth_config_file dirs.base) {|{"enabled":true,"require_token":true}|};
     let log = read_file (log_path dirs) in
     let store = read_file dirs.store in

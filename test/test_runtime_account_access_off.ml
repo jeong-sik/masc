@@ -1,8 +1,8 @@
 (* Whether a CLI may start on an account after the accounts of the
    installation were turned off (design 5.1 row 4, 10.5). The installation is
    made by the real bootstrap and holds one person whose account, Runtime and
-   Keeper the real writers recorded. The local operator then commits Off
-   through the zone, as masc auth off does. The boot reads the base path as a
+   Keeper the real writers recorded. The accounts are then turned off as
+   masc auth off turns them off. The boot reads the base path as a
    server boot does, and the access published is the one a server publishes.
    The access is published once per process, so the executable has one case
    and it runs in order. *)
@@ -177,11 +177,9 @@ let test_turned_off () =
           | Error error -> Alcotest.failf "zone not opened: %s" (Z.open_error_to_string error)
         in
         let alice = person zone ~base_path ~name:"alice" ~hex:'a' in
-        commit
-          zone
-          ~author:Authz_records.Author.Local_operator
-          ~kind:Authz_record.Kind.Mode_event
-          (get (Authz_mode_event.to_body { Authz_mode_event.event = Authz_mode_event.Off; workspace_id = workspace }));
+        (match Authz_off.turn_off ~base_path ~config_dir ~now_ms with
+         | Ok (_ : Workspace_id.t) -> ()
+         | Error error -> Alcotest.failf "Off was refused: %s" (Authz_off.error_to_string error));
         (* No config.json asks for nothing, so the boot reads row 4. *)
         let single_user =
           match Authz_boot_mode_read.boot ~base_path ~config_dir ~anonymous_mutations:false with

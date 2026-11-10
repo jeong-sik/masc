@@ -1,0 +1,121 @@
+{
+  "scope": "Actual Chromium and source components, synthetic HTTP only; no live backend writes",
+  "before": {
+    "buttons": [
+      {
+        "label": "추천",
+        "disabled": true,
+        "pressed": null
+      },
+      {
+        "label": "비추천",
+        "disabled": true,
+        "pressed": null
+      },
+      {
+        "label": "▲ 추천",
+        "disabled": true,
+        "pressed": null
+      },
+      {
+        "label": "▼ 비추천",
+        "disabled": true,
+        "pressed": null
+      },
+      {
+        "label": "댓글 추천",
+        "disabled": true,
+        "pressed": null
+      },
+      {
+        "label": "댓글 비추천",
+        "disabled": true,
+        "pressed": null
+      }
+    ],
+    "point": {
+      "x": 364.421875,
+      "y": 245.81640625
+    },
+    "calls": [
+      {
+        "method": "GET",
+        "path": "/api/v1/board"
+      },
+      {
+        "method": "GET",
+        "path": "/api/v1/board/p-vote-source"
+      },
+      {
+        "method": "GET",
+        "path": "/api/v1/board/reactions/batch"
+      },
+      {
+        "method": "GET",
+        "path": "/api/v1/board/hearths"
+      },
+      {
+        "method": "GET",
+        "path": "/api/v1/board/flairs"
+      },
+      {
+        "method": "GET",
+        "path": "/api/v1/board/reactions"
+      },
+      {
+        "method": "GET",
+        "path": "/api/v1/board/reactions"
+      },
+      {
+        "method": "GET",
+        "path": "/api/v1/board/p-vote-source"
+      },
+      {
+        "method": "GET",
+        "path": "/api/v1/board/reactions"
+      }
+    ],
+    "failures": []
+  },
+  "after": {
+    "calls": [
+      {
+        "method": "GET",
+        "path": "/api/v1/board"
+      },
+      {
+        "method": "GET",
+        "path": "/api/v1/board/p-vote-source"
+      },
+      {
+        "method": "GET",
+        "path": "/api/v1/board/reactions/batch"
+      },
+      {
+        "method": "GET",
+        "path": "/api/v1/board/hearths"
+      },
+      {
+        "method": "GET",
+        "path": "/api/v1/board/flairs"
+      },
+      {
+        "method": "GET",
+        "path": "/api/v1/board/reactions"
+      },
+      {
+        "method": "GET",
+        "path": "/api/v1/board/reactions"
+      },
+      {
+        "method": "GET",
+        "path": "/api/v1/board/p-vote-source"
+      },
+      {
+        "method": "GET",
+        "path": "/api/v1/board/reactions"
+      }
+    ],
+    "failures": []
+  }
+}

@@ -22,11 +22,14 @@ let next = function
 
 type selection = Keeper_selected | World_selected | No_selection
 
+type memory_destination = Memory_recent | Memory_frequent | Memory_changes | Memory_storage
+
 type action =
   | Show of page
   | Close
   | Open_detail
   | Open_world
+  | Open_memory of memory_destination
 
 (* Enter closes the window on the story page and returns to the story page from
    another. [s] and [m] belong to the window only while it is open: the list
@@ -53,9 +56,14 @@ let action_of_key ~selection window key =
   | Some ((Story | Schedule | Memory) as page), ("\t" | "tab") -> Some (Show (next page))
   | Some (Story | Schedule | Memory), ("s" | "S") -> Some (Show Schedule)
   | Some (Story | Schedule | Memory), ("m" | "M") -> Some (Show Memory)
+  | Some Memory, "1" when on_keeper -> Some (Open_memory Memory_recent)
+  | Some Memory, "2" when on_keeper -> Some (Open_memory Memory_frequent)
+  | Some Memory, "3" when on_keeper -> Some (Open_memory Memory_changes)
+  | Some Memory, "4" when on_keeper -> Some (Open_memory Memory_storage)
   | Some (Story | Schedule | Memory), ("\r" | "\n" | "enter" | "right") when not on_keeper -> None
   | Some Story, ("\r" | "\n" | "enter") -> Some Close
-  | Some (Schedule | Memory), ("\r" | "\n" | "enter") -> Some (Show Story)
+  | Some Memory, ("\r" | "\n" | "enter") -> Some (Open_memory Memory_recent)
+  | Some Schedule, ("\r" | "\n" | "enter") -> Some (Show Story)
   | Some (Story | Schedule | Memory), "esc" -> Some Close
   | Some (Story | Schedule | Memory), "right" -> Some Open_detail
   | Some (Story | Schedule | Memory | World), _ -> None

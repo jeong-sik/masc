@@ -34,7 +34,10 @@ jobs:
   syntax:
     name: Source and config syntax
     runs-on: ubuntu-24.04
-    timeout-minutes: 2
+    # Checkout and the full tracked-tree credential scan share this limit.
+    # A two-minute job limit canceled the scan in run 42753587408; this is a
+    # stalled-run backstop, not the expected duration of a minimal check.
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

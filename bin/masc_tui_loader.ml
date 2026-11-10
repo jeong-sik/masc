@@ -1612,14 +1612,26 @@ let load_memory_world ~(host : string) ~(port : int) :
 
 let memo_memory_facts = json_memo ()
 
-(** Load one keeper's remembered facts, both stores. *)
+(** One shared reading for the browser and its Story preview. *)
 let load_memory_facts ~(host : string) ~(port : int) ~(keeper_name : string) :
     (Masc.Tui_decode_memory_facts.memory_fact_snapshot, string) result =
   match fetch_keeper_memory_facts ~host ~port ~keeper_name with
-  | Error err -> Error ("memory facts load failed: " ^ err)
+  | Error reason -> Error ("memory facts load failed: " ^ reason)
   | Ok json ->
-      decode_offloaded memo_memory_facts ~name:"memory.facts.decode_wait"
-        Masc.Tui_decode_memory_facts.decode_memory_fact_snapshot json
+    match decode_offloaded memo_memory_facts ~name:"memory.facts.decode_wait"
+        Masc.Tui_decode_memory_facts.decode_memory_fact_snapshot json with
+    | Error reason -> Error reason
+    | Ok facts when facts.mfs_keeper <> keeper_name -> Error "memory facts Keeper mismatch"
+    | Ok facts ->
+      let partial = match Json_util.require_int json "events_unreadable_lines" with
+        | Ok 0 -> None
+        | Ok count -> Some (Printf.sprintf "%d unreadable retrieval event lines" count)
+        | Error reason -> Some reason in
+      let mfs_events_read_error = match facts.mfs_events_read_error, partial with
+        | None, partial -> partial
+        | Some reason, None -> Some reason
+        | Some reason, Some partial -> Some (reason ^ "; " ^ partial) in
+      Ok { facts with mfs_events_read_error }
 
 let memo_project_changes = json_memo ()
 

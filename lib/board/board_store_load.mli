@@ -1,10 +1,16 @@
-(** Quiescent startup loaders. Counts describe accepted physical rows,
-    including duplicate identities. These are not live reload/admission APIs. *)
+(** Persistence loaders. Posts, comments and reactions require quiescent
+    startup; the vote loader owns its persistence/state interval and also
+    serves explicit reload. All four refuse model replacement while deletion
+    work is pending. Counts describe accepted physical rows, including
+    duplicate identities. *)
 val load_persisted_posts : Board_types.store -> (int, string * exn) result
 val load_persisted_comments : Board_types.store -> (int, string * exn) result
 val load_persisted_votes : Board_types.store -> (int, string * exn) result
+(** Owns persistence and publishes the vote model under the state lock.
+    A complete source replaces the ledger and recalculates counts; valid
+    orphan votes remain stored. Partial rows are display-only. Neither load
+    nor a normal write settles unknown effects or unfinished publication. *)
 val load_persisted_reactions : Board_types.store -> (int, string * exn) result
-val load_persisted_sub_boards : Board_types.store -> (int, string * exn) result
 
 (** Rebuild current reply counts and timestamp high-water marks after loading
     comments, before votes. Quiescent startup only; emits the existing log. *)

@@ -776,8 +776,11 @@ let derived ~claim ~category ~now ~origin ~derivations =
       }
 ;;
 
-let memory_id (f : fact) =
-  memory_id_prefix ^ Agent_core_sha256.(digest_string f.claim |> to_hex)
+let memory_id_of_claim claim =
+  memory_id_prefix ^ Agent_core_sha256.(digest_string claim |> to_hex)
+;;
+
+let memory_id (f : fact) = memory_id_of_claim f.claim
 ;;
 
 let fact_to_json (f : fact) =

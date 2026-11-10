@@ -215,6 +215,7 @@ export interface BoardPost {
   tags: string[]
   votes: number
   vote_balance?: number
+  /** Omitted without a voter or readable vote state; null is observed absence. */
   current_vote?: BoardVoteDirection | null
   has_voted?: boolean
   comment_count: number
@@ -245,6 +246,7 @@ export interface BoardComment {
   vote_balance?: number
   votes_up?: number
   votes_down?: number
+  /** Omitted without a voter or readable vote state; null is observed absence. */
   current_vote?: BoardVoteDirection | null
   has_voted?: boolean
   reactions?: BoardReactionSummary[]

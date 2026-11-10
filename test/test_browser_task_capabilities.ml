@@ -81,8 +81,12 @@ let unsupported = function
     | Required_actions_unavailable _) -> false
 
 let test_task_choice () = with_browsers (fun ~ego ->
-  check bool "no connection touches the page, so none is chosen" true
-    (none_serves (automatic ["touch"]));
+  (* #49295 gave the ego connection tap_at/swipe, so Cap.support says Touch is
+     served there (lib/browser_capabilities.ml:266-271) and this file's own
+     test_touch_table asserts the same at "ego sends touch". A touch-only
+     request therefore chooses that connection instead of finding none. *)
+  check bool "touch chooses the ego connection" true
+    (chosen (automatic ["touch"]) = live ego);
   check bool "hover and typing choose the ego connection" true
     (chosen (automatic ["hover";"type_text"]) = live ego);
   check bool "no browser zooms the page, so none is chosen" true
@@ -95,8 +99,11 @@ let test_impossible_and_explicit () = with_browsers (fun ~ego ->
      check int "it lists every connected browser as a candidate" 1 (List.length candidates)
    | Ok _ | Error (Selection.Binding_required | No_available_browser | Ambiguous_browsers _
      | Unsupported_required_actions _) -> fail "no browser zooms and types, so none is chosen");
-  check bool "an explicit ego connection that cannot touch is refused, not replaced" true
-    (unsupported (admitted ["touch"] (Lane.Live_route (Some ego.client_id)))))
+  (* Same reason as the selection above: the ego connection serves touch
+     (lib/browser_capabilities.ml:266-271), so an explicit request naming it
+     for touch is admitted rather than refused. *)
+  check bool "an explicit ego connection that serves touch is admitted" true
+    (admitted ["touch"] (Lane.Live_route (Some ego.client_id)) = Ok ()))
 
 (* Required actions are parsed before any browser is chosen. A refused list
    fails as the caller's input, before the tool looks for a browser Add-on;

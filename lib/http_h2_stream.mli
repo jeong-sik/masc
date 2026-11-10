@@ -1,18 +1,22 @@
 (** Habits of one HTTP/2 response stream that the h2 library does not
-    provide itself. {!Http_reqd} uses them for its HTTP/2 arm, the stream
-    registry ends stream scopes with them, and the connection-level error
-    handler uses {!close_after_flush}. *)
+    provide itself. {!Http_reqd} writes its HTTP/2 responses through
+    {!Response_body}, the stream registry ends stream scopes with {!reset}
+    and {!Stream_end}, and the connection-level error handler uses
+    {!close_after_flush}. *)
 
 (** Why a stream's scope ended before its response did (RFC-0518 D1). *)
 type reset_cause =
   | Reset_by_peer  (** The peer sent RST_STREAM. *)
   | Reset_by_us  (** h2 wrote RST_STREAM for this stream. *)
-  | Stalled  (** The peer took no response bytes within the stall bound. *)
+  | Stalled
+      (** Response bytes waited for the peer past the stall bound
+          ({!Stream_end}). *)
   | Out_of_capacity of Http_h2_response_ledger.refusal
       (** The response ledger refused the next payload. *)
   | Raised of exn
       (** The stream's own work raised: the request handler, a deferred body
-          callback, or a fiber forked on the stream switch. *)
+          callback, a fiber forked on the stream switch, or the answer to a
+          flush. *)
 
 exception Stream_reset of reset_cause
 (** The error a stream switch fails with. Every fiber of the stream sees it
@@ -59,17 +63,161 @@ val end_scope : Eio.Switch.t -> reset_cause -> unit
     [stream_sw] with [Stream_reset cause] unless the switch already has an
     error or has finished. It sends nothing to the peer. *)
 
-val dispatch : sw:Eio.Switch.t -> H2.Reqd.t -> (unit -> unit) -> unit
-(** [dispatch ~sw reqd work] runs [work] in a daemon fiber of [sw], the
-    stream's switch, after yielding once, so the h2 parser gets its turn
-    before any request computation, pool wait or response mutation starts
-    (RFC-0350). The response ledger scope of the calling fiber is carried
-    into [work]. An exception from [work] {!reset}s the stream with
-    [Raised]; cancellation propagates.
+(** The end of one stream's scope and the bound on its flushes (RFC-0518
+    D2). The stream registry makes one for each stream it runs and binds it
+    to that stream's fibers.
 
-    [sw] must be the stream's own switch. The reset fails it, and with it
-    every fiber forked on it; a switch shared with other streams or with the
-    connection would end them too. *)
+    h2 answers a flush once its bytes were written to the socket. So the
+    bound ends the scope of a stream whose peer keeps the flow-control
+    window shut, and of one whose peer stopped reading the socket. Only the
+    first peer is told: behind a socket that does not drain, the RST_STREAM
+    waits in the connection's writer with the bytes already queued there,
+    until the socket moves or the connection ends (RFC-0518 D4).
+
+    Every function here is called from the connection's domain, as h2's
+    body writer has to be. Nothing takes a lock. *)
+module Stream_end : sig
+  type t
+
+  val create
+    :  stream_sw:Eio.Switch.t
+    -> clock:_ Eio.Time.clock
+    -> stalled_after_s:float
+    -> request:H2.Request.t
+    -> H2.Reqd.t
+    -> t
+  (** [create ~stream_sw ~clock ~stalled_after_s ~request reqd] ends with
+      [stream_sw]: once the switch is released, {!ended} is true, {!signal}
+      is resolved and every flush still waiting is answered with [`Closed],
+      each one whatever another's answer raised. It also forks a daemon on
+      [stream_sw] that watches the flushes. h2 answers those that have to
+      wait oldest first. When the oldest flush still waiting goes
+      [stalled_after_s] by [clock] without an answer, counted from its
+      registration or from the answer before it, whichever came later, the
+      daemon logs the method and the path of [request] at warn, the path
+      without its query, and {!reset}s the stream with [Stalled], which
+      fails [stream_sw].
+
+      [request] is what h2 gave the request handler for [reqd]. Read it
+      there, with [H2.Reqd.request], before the fiber yields: h2 has no
+      request to give once it closed the stream. *)
+
+  val switch : t -> Eio.Switch.t
+  (** The stream's switch. *)
+
+  val request : t -> H2.Request.t
+  (** The request {!create} was given. The stream's work reads it here, not
+      from h2. *)
+
+  val request_line : t -> string
+  (** The method and the path of the request, as log lines name it. The
+      query is left out: it can carry a token. *)
+
+  val ended : t -> bool
+  (** True once the stream's switch was released. *)
+
+  val signal : t -> unit Eio.Promise.t
+  (** Resolved once the stream's switch was released. *)
+
+  val flush : t -> H2.Body.Writer.t -> ([ `Written | `Closed ] -> unit) -> unit
+  (** [flush t writer f] calls [f] once: with h2's answer to the flush, or
+      with [`Closed] when the stream's switch is released first. h2 answers
+      from the connection's write loop, which an exception would end for
+      every stream of the connection. So what [f] raises on h2's answer
+      {!reset}s this stream with [Raised]; cancellation propagates. *)
+
+  val close_after_flush : t -> H2.Body.Writer.t -> unit
+  (** [close_after_flush t writer] is the top-level [close_after_flush]
+      through [t]: [writer] closes once the bytes written so far have drained,
+      or when the stream ends or stalls first. *)
+
+  val with_current : t -> (unit -> 'a) -> 'a
+  (** [with_current t f] runs [f] with [t] bound to the calling fiber and to
+      the fibers it forks, those on switches that outlive the stream too.
+      Such a fiber finds [t] ended once the stream is over, and the
+      top-level [close_after_flush] then closes at once. A fiber started
+      inside [f] that later answers other streams would close their error
+      answers through [t]. *)
+end
+
+(** The body of one HTTP/2 response (RFC-0518 D3). h2 holds two slices of it
+    at most. h2 gives the connection whatever the peer's windows allow in one
+    piece and answers a flush once the socket took all of it, so a body it
+    held whole would have to cross the socket within one stall bound, and
+    the other streams of the connection would wait behind it. Here a slice
+    is written when the flush of an earlier one is answered, and what is
+    written meanwhile waits in order. The stall bound runs from one answer
+    to the next ({!Stream_end}), and a slice is answered when the socket
+    write that carries its last byte is through. So a stream keeps going
+    while its peer takes within the bound what one write carries, however
+    long the whole body takes: one slice when the peer's window holds the
+    body back, both when the socket does.
+
+    h2 holds two slices and not one, because it fills a DATA frame from the
+    bytes it holds. With one slice a frame ended where the slice did,
+    whatever the peer's window allowed, and a peer that returns its credit
+    frame by frame got ever smaller frames.
+
+    h2 gives the socket one stream's bytes at a time and picks the stream by
+    a fair queue over the bytes each got (scheduler.ml [flush], after
+    nghttp2). One write carries what h2 holds of a body, so the bodies of a
+    connection share its link up to two slices at a time: a write waits for
+    the one in progress and for up to two slices of each other body in
+    flight, and so does the first write of a new response (RFC-0518 §5).
+
+    Like {!Stream_end}, a body is used from the connection's domain only.
+    {!Response_body.write} and {!Response_body.flush} are for a body that
+    {!Response_body.is_closed} does not report closed: [Http_reqd.Body_writer]
+    asks first, before it reserves in the response ledger, and drops the
+    write or answers the flush [`Closed] itself. *)
+module Response_body : sig
+  type t
+
+  val create : Stream_end.t -> H2.Body.Writer.t -> t
+  (** The body behind the writer h2 returned for the stream's response.
+      Nothing else writes to that writer or closes it. *)
+
+  val slice_bytes : int
+  (** 16 KiB: one DATA frame of the default SETTINGS_MAX_FRAME_SIZE. *)
+
+  val slices_in_h2 : int
+  (** 2: how many slices of a body h2 holds at most. *)
+
+  val write : t -> sent:(unit -> unit) -> string -> unit
+  (** [write t ~sent payload] puts [payload] behind everything written
+      before it. The call does not suspend, so payloads written by different
+      fibers stay whole and in the order of the calls. [sent] runs once:
+      when the socket took the last byte of [payload], or when the body can
+      take no more of it, because the stream or its connection ended or h2
+      closed the body. A payload written after {!close} would wait behind
+      the close, and go out after the end of the body or be cut. *)
+
+  val flush : t -> ([ `Written | `Closed ] -> unit) -> unit
+  (** [flush t f] calls [f] once: with [`Written] when the socket took every
+      byte written before the call, with [`Closed] when the body ended
+      before that. The answer comes when the socket write that carries the
+      last of those bytes is through, and that write can carry up to two
+      slices of what was written after the call. What [f] raises ends the
+      stream ({!Stream_end.flush}). *)
+
+  val close : t -> unit
+  (** Ends the body after the bytes written so far: {!is_closed} is true
+      from then on. Closing twice is the same as closing once. *)
+
+  val is_closed : t -> bool
+  (** True once {!close} was called, the stream ended, or h2 takes no more
+      of the body: it closed the body, or answered one of its slices
+      [`Closed], as it does once the connection's writer is closed. Bytes
+      written before a {!close} may still be on their way. *)
+end
+
+val dispatch : Stream_end.t -> (unit -> unit) -> unit
+(** [dispatch stream_end work] runs [work] in a daemon fiber of the stream's
+    switch, after yielding once, so the h2 parser gets its turn before any
+    request computation, pool wait or response mutation starts (RFC-0350).
+    [work] runs with [stream_end] bound ({!Stream_end.with_current}) and in
+    the response ledger scope of the calling fiber. An exception from [work]
+    {!reset}s the stream with [Raised]; cancellation propagates. *)
 
 val close_after_flush : H2.Body.Writer.t -> unit
 (** [close_after_flush writer] closes [writer] once every byte written to it
@@ -79,4 +227,10 @@ val close_after_flush : H2.Body.Writer.t -> unit
     (anmonteiro/ocaml-h2#278).
 
     Write the whole body first. Bytes written after this call are cut the
-    same way, because the flush only covers the bytes already written. *)
+    same way, because the flush only covers the bytes already written. It is
+    for a short answer written at once; a response body closes with
+    {!Response_body.close}.
+
+    A fiber with a bound {!Stream_end} flushes through it, so the writer
+    also closes when the stream ends or stalls. Elsewhere, as for the error
+    answers h2 opens on the connection reader, the close waits for h2. *)

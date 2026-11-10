@@ -2237,7 +2237,7 @@ let render_clients (state : state) =
   Buffer.add_string buf
     (footer_line state ~max_cells:cols ?position
        ~hints:
-         (Masc_tui_keys.footer_hints ~has_rows:(shown > 0)
+         (Masc_tui_keys.footer_hints ~lang:state.ui_language ~has_rows:(shown > 0)
             Masc_tui_types.Clients));
   finish_surface state ~surface_key:"clients" ~rows:terminal_rows ~cols buf
 ;;

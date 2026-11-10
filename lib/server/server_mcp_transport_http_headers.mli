@@ -193,7 +193,8 @@ val sse_stalled_after_s : float
     ({!Server_bootstrap_http.serve_h2_connection}). RFC-0518 D2 keeps one
     stall bound for the server, so an SSE stream is cut at the same age on
     either transport. A change here moves the smallest drain rate of every
-    HTTP/2 response with it: one 16 KiB slice within the bound. *)
+    HTTP/2 response with it: one 16 KiB slice within the bound, or two where
+    the socket is what holds the body back ({!Http_h2_stream.Response_body}). *)
 
 val observer_idle_timeout_header : string
 val observer_idle_timeout_ms : int

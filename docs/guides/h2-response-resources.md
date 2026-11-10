@@ -51,13 +51,13 @@ the streams in turn, so a long body does not keep the other streams of its
 connection waiting until all of it is through. With several bodies in flight
 on one connection, a write also waits for up to two slices of each of the
 others, and a link that is the bottleneck has to take all of that within the
-bound: two slices, about 364 B/s, for each body. An exception raised by the answer to a
-flush resets its own stream; it does not reach the connection's write loop.
-Frames written behind bytes that wait, such as SSE keepalives, wait in order
-and do not extend the bound. A client that opens its window again only after
-reading a batch of bytes has to read each batch within 90 seconds: at 32 KiB
-per batch that is about 364 B/s. The reset releases the stream's fibers and
-reservations.
+bound: two slices, about 364 B/s, for each body. An exception raised by the
+answer to a flush resets its own stream; it does not reach the connection's
+write loop. Frames written behind bytes that wait, such as SSE keepalives,
+wait in order and do not extend the bound. A client that opens its window
+again only after reading a batch of bytes has to read each batch within 90
+seconds: at 32 KiB per batch that is about 364 B/s. The reset releases the
+stream's fibers and reservations.
 
 h2 answers a flush once its bytes were written to the socket. The bound
 therefore ends the scope of a stream whose peer keeps its window shut, and

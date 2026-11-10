@@ -11,6 +11,7 @@ import { LogViewer } from './logs'
 import { Overview } from './overview/overview'
 import { subscribeToolsAutoRefresh } from './tools/tool-state'
 import { subscribeToolSeriesRefresh } from './tools/tool-series-state'
+import { ToolMonitorOperationsBoard } from './tool-monitor/tool-monitor-operations'
 
 const disposers: Array<() => void> = []
 
@@ -37,6 +38,33 @@ afterEach(() => {
 })
 
 describe('observation consumer HTTP failure identity', () => {
+  it('does not resend a refused full Shell read after successful ToolMonitor quality reads', async () => {
+    const fetch = vi.fn(async (input: RequestInfo | URL) => {
+      const path = String(input)
+      if (path.includes('/tool-quality')) return Response.json({
+        total: 1, success: 1, failure: 0, deferred: 0, success_rate: 100,
+        by_tool: [], by_keeper: [], failure_categories: [], hourly_trend: [],
+      })
+      return Response.json({ error: 'refused' }, { status: 403 })
+    })
+    const fullShellCallCount = () => fetch.mock.calls.filter(([input]) =>
+      String(input) === '/api/v1/dashboard/shell').length
+    vi.stubGlobal('fetch', fetch)
+    render(html`<${ToolMonitorOperationsBoard} />`)
+    await settle()
+    expect(fetch).toHaveBeenCalledTimes(2)
+    expect(fullShellCallCount()).toBe(1)
+    publishDashboardObservationChange({ topic: 'health' })
+    publishDashboardObservationChange({ topic: 'tool_metrics' })
+    await act(async () => { await vi.advanceTimersByTimeAsync(TRANSPORT_RETRY_MAX_MS * 4) })
+    expect(fetch).toHaveBeenCalledTimes(2)
+    expect(fullShellCallCount()).toBe(1)
+    await act(async () => { setStoredToken('consumer-http-b', { source: 'manual' }) })
+    await settle()
+    expect(fetch).toHaveBeenCalledTimes(4)
+    expect(fullShellCallCount()).toBe(2)
+  })
+
   it.each([
     { name: 'tool inventory', topic: 'tools' as const, subscribe: subscribeToolsAutoRefresh },
     { name: 'tool metrics', topic: 'tool_metrics' as const, subscribe: subscribeToolSeriesRefresh },

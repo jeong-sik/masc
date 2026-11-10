@@ -132,7 +132,13 @@ val respond_with_streaming
   -> t
   -> Httpun.Response.t
   -> Body_writer.t
-(** Starts a streaming response. An HTTP/2 stream that is already over gets
+(** Starts a streaming response. [flush_headers_immediately] is httpun's and
+    applies to HTTP/1.1: the head is written before the body's first bytes
+    instead of with them. On HTTP/2 the HEADERS frame always goes to the
+    connection at once: headers that wait for body bytes do not reach a
+    client whose stream window is zero.
+
+    An HTTP/2 stream that is already over gets
     a closed writer and h2 is not called: its switch failed or ended, or an
     error was reported on it. That writer drops writes, {!Body_writer.flush}
     answers [`Closed] and {!Body_writer.stream_end} is resolved. Otherwise

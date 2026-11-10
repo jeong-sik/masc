@@ -561,6 +561,36 @@ let reset_with_internal_error reset =
   | `Protocol_error (H2.Error_code.InternalError, _) -> true
   | _ -> false
 
+(* A streaming response to a client whose stream window is zero. No body
+   byte can move, and after its request the client sends nothing that would
+   give the connection's writer a turn, so the HEADERS frame has to leave on
+   its own. The handler answers once the request has ended, and the clock
+   never moves: no keepalive and no stall reset carries the frame out. *)
+let test_zero_window_client_gets_the_headers () =
+  let streams = registry () in
+  let resources = stalled_ledger () in
+  let held = "data: held by the window\n\n" in
+  let handler ~stream_end _ h2_reqd =
+    let request_ended, record_request_end = Eio.Promise.create () in
+    H2.Body.Reader.schedule_read (H2.Reqd.request_body h2_reqd)
+      ~on_eof:(Eio.Promise.resolve record_request_end)
+      ~on_read:(fun _ ~off:_ ~len:_ -> ());
+    Eio.Promise.await request_ended;
+    let writer = Masc.Http_reqd.respond_with_streaming
+      (reqd_of_h2 ~stream_end h2_reqd) (Httpun.Response.create `OK) in
+    Masc.Http_reqd.Body_writer.write_string writer held;
+    Eio.Fiber.await_cancel () in
+  with_connection ~streams ~resources ~client_window:0l Request_fibers handler
+    (fun ~env:_ ~client ~client_flow:_ ~release:_ ~close_client:_ ~server:_ ->
+    (* The SETTINGS exchange is over before the request goes out: none of
+       its frames gives the server's writer a turn once the response has
+       started. *)
+    ping client;
+    let status, _, _ = open_stream client "/held" in
+    check int "the headers arrived" 200 (Eio.Promise.await status);
+    check int "the window still holds the body" (String.length held)
+      (Masc.Http_h2_response_ledger.pending_bytes resources))
+
 (* A streaming response whose client does not read it. At the bound the
    stream is reset, its flush is answered [`Closed], its reservation goes back
    to the ledger, and one warn line names the request. One second earlier
@@ -1155,6 +1185,8 @@ let () = run "H2 request fibers" ["connection progress", [
   test_case "failure after headers releases the stream" `Quick test_failure_after_headers_releases_the_stream;
   test_case "disconnect cancels requests and child fibers" `Quick test_connection_closes_pending_work;
   test_case "handler failure stays on its stream" `Quick test_handler_error_is_stream_local;
+  test_case "a zero-window client gets the response headers" `Quick
+    test_zero_window_client_gets_the_headers;
 ]; "flush bound", [
   test_case "an unanswered flush resets its stream at the bound" `Quick
     test_stalled_flush_resets_the_stream;

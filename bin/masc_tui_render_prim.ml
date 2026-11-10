@@ -1872,7 +1872,10 @@ let refresh_progress_badge (state : state) =
            notices ^ " · " ^ pending)
   | Some _ | None -> foreground
 
-let connection_badge (state : state) =
+(* The connection badge in the three parts a short title row gives up: the
+   events-lost notice, the core (the HTTP state with the workspace notice) and
+   what the refresh in flight says. *)
+let connection_badge_parts (state : state) =
   let text = ui_text state in
   let connection = connection_status_badge ~ko:(state.ui_language = Lang_ko) state.connection_status in
   let connection = match state.workspace_identity with
@@ -1886,23 +1889,47 @@ let connection_badge (state : state) =
     if state.observer_source_loss then Theme.warn () ^ text ~ko:"[이벤트 유실] " ~en:"[events lost] " ^ Ansi.reset
     else ""
   in
-  source_loss ^ connection ^ refresh_progress_badge state
+  source_loss, connection, refresh_progress_badge state
+
+let connection_badge (state : state) =
+  let source_loss, connection, refresh = connection_badge_parts state in
+  source_loss ^ connection ^ refresh
+
+(* The form of the connection badge a title row can hold, given [room] cells
+   beside its lead and the [readings] cells the readings about the screen would
+   take. The refresh detail goes first, then the readings, then the events-lost
+   notice. The core is drawn whole whatever is left: it says whether the
+   reading is live and whether the server shares this workspace. A core wider
+   than the row by itself is cut at its end by the frame (#51131). *)
+let connection_badge_within (state : state) ~room ~readings =
+  let source_loss, connection, refresh = connection_badge_parts state in
+  let cells text = Masc_tui_message_layout.display_width (Masc_tui_theme.strip_sgr text) in
+  let whole = source_loss ^ connection ^ refresh in
+  let without_refresh = source_loss ^ connection in
+  if cells whole + readings <= room then whole
+  else if cells without_refresh <= room then without_refresh
+  else connection
 
 (* The title row of a surface that names itself: [lead], the [readings] about
    it (a count, a clock, each carrying its own leading gap), and the
    connection badge last. The badge says whether the reading is live and
-   whether the server shares this workspace, so it is drawn whole. When the
-   row is short the readings are left out whole from the end, and the lead is
-   cut last.
+   whether the server shares this workspace, so its core is drawn whole. When
+   the row is short, what gives way, first to last: the refresh detail of the
+   badge, the readings from the end (whole), the events-lost notice of the
+   badge, and the lead, cut at its end.
 
    A row put together with [Printf.sprintf] and drawn by [box_line] lost the
    badge first: Memory at eighty columns read "HTTP…", and Tools, Schedules,
    Code and Resources lost it at forty-four. [detail_heading] keeps the first
    piece it is given and cuts it at its end, which leaves a clock as "1…", so
-   an empty piece goes first and every real reading is whole or left out. *)
+   an empty piece goes first and every real reading is whole or left out.
+   Left whole, a badge with a long refresh detail pushed the lead out of a
+   sixty-column row, so the badge is chosen by the room the lead leaves. *)
 let surface_title_row ~cols (state : state) ~lead ~readings =
-  detail_heading ~cols ~lead:(Lead_text lead) ~id:"" ~after:("" :: readings)
-    ~tail:(connection_badge state)
+  let cells text = Masc_tui_message_layout.display_width (Masc_tui_theme.strip_sgr text) in
+  let room = framed_inner_width cols - cells heading_tail_gap - cells lead in
+  let tail = connection_badge_within state ~room ~readings:(cells (String.concat "" readings)) in
+  detail_heading ~cols ~lead:(Lead_text lead) ~id:"" ~after:("" :: readings) ~tail
 
 type compact_connection_state =
   | Compact_workspace_mismatch

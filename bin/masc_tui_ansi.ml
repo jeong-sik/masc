@@ -1017,6 +1017,9 @@ type heading_lead =
    family. An id no longer than this is drawn whole. *)
 let heading_id_floor = 12
 
+(* The gap [detail_heading] puts before its tail. *)
+let heading_tail_gap = "  "
+
 (* A heading that names one record: [lead], the record's id, [after], and
    [tail] last -- the connection badge, with the clock before it where the
    screen draws one. The tail says whether the reading is live and whether the
@@ -1033,7 +1036,10 @@ let heading_id_floor = 12
    - the lead, cut at its end. A lead and a tail that do not fit side by side
      are the one case where the lead is cut: the badge carries the workspace
      mismatch, which nothing else on the screen says.
-   The frame then never has to cut the row, so it never cuts the badge.
+   The frame then never has to cut the row, so it never cuts the badge. The
+   one exception is a badge wider than the row by itself: the lead is gone
+   and the frame cuts the badge at its end. A caller that can give up parts
+   of the badge passes the form that fits ([Masc_tui_render_prim.connection_badge_within]).
    Room the id and [after] leave goes to a [Lead_strip], which draws more of
    its entries in it.
 
@@ -1051,7 +1057,7 @@ let detail_heading ~cols ~lead ~id ~after ~tail =
     Masc_tui_message_layout.display_width (Masc_tui_theme.strip_sgr text)
   in
   let styled text = String.contains text '\027' in
-  let tail = "  " ^ tail in
+  let tail = heading_tail_gap ^ tail in
   let id = Terminal_text.single_line id in
   let id_cells = cells id in
   let after_whole = String.concat "" after in

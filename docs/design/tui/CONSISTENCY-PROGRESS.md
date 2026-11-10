@@ -258,7 +258,8 @@ TUI regression and do not execute the later Verification/Harness changes.
 
 ## Feature route configuration is not runtime availability
 
-An exact model route with admitted candidates now has the shared `Configured`
+The [feature state repair](https://github.com/jeong-sik/masc/pull/50811) gives
+an exact model route with admitted candidates the shared `Configured`
 standing. Configuration alone no longer produces `Ready` in the feature list,
 its counts or the selected reading. The selected fields name model
 configuration, and the full reading no longer calls an unobserved run history

@@ -2,6 +2,8 @@ import { readCandleRosterObservation, type CandleReading } from './lib/candle-ob
 import { acceptedExecutionWorkspace, executionWorkspaceAuthority } from './execution-workspace-authority'
 export { executionWorkspaceAuthority, type ExecutionWorkspaceAuthority } from './execution-workspace-authority'
 import { isObserverInstance } from './lib/observer-protocol'
+import { acceptedExecutionWorkspace } from './execution-workspace-authority'
+export { executionWorkspaceAuthority, type ExecutionWorkspaceAuthority } from './execution-workspace-authority'
 import { decodeGoalProof } from './api/goal-proof'
 import { decodeGoalResumePhase } from './api/goal-lifecycle'
 import { fetchKeeperDeletions, type KeeperDeletionInventory } from './api/keeper-lifecycle'

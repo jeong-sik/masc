@@ -39,12 +39,20 @@ let test_digest_workspace_prefers_fresh_operator_judgment () =
       | None ->
           Alcotest.failf "expected workspace judgment in %s"
             (Operator_judgment.judgments_path config));
+      let broken = Keeper_types_profile.keeper_meta_path config "unread-metadata" in
+      (match Fs_compat.save_file_atomic broken "{" with
+       | Ok () -> () | Error detail -> Alcotest.fail detail);
       let ctx = operator_ctx env sw config "operator" in
-      let digest =
-        match Operator_control.digest_json ~actor:"operator" ctx with
-        | Ok json -> json
+      let read () =
+        match Operator_control.observe ~actor:"operator" ctx with
+        | Ok observation -> observation
         | Error err -> Alcotest.fail err
       in
+      let observation = read () in
+      (match observation.completeness with
+       | Dashboard_projection_read.Partial _ -> ()
+       | Complete -> Alcotest.fail "Digest settled its actual failed metadata read");
+      let digest = observation.json in
       Alcotest.(check string) "judgment owner" "operator_keeper"
         Yojson.Safe.Util.(digest |> member "judgment_owner" |> to_string);
       Alcotest.(check bool) "authoritative judgment available" true
@@ -73,7 +81,11 @@ let test_digest_workspace_prefers_fresh_operator_judgment () =
           (digest |> member "recommendation_summary" |> member "authoritative"
           |> to_bool);
       Alcotest.(check bool) "judgment present" true
-        (Yojson.Safe.Util.member "judgment" digest <> `Null))
+        (Yojson.Safe.Util.member "judgment" digest <> `Null);
+      Sys.remove broken;
+      match (read ()).completeness with
+      | Dashboard_projection_read.Complete -> ()
+      | Partial detail -> Alcotest.fail ("Digest stayed partial after raw repair: " ^ detail))
 
 let test_digest_workspace_ignores_stale_operator_judgment () =
   Eio_main.run @@ fun env ->

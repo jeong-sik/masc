@@ -163,7 +163,11 @@ let connector_attention_pending_selections ~base_path ~keeper_name =
     Keeper_event_queue_persistence.load_selections_with_errors ~base_path
       ~keeper_name
   in
-  snapshot.Keeper_event_queue_persistence.pending
+  let completeness = List.fold_left (fun outcome (error : Keeper_event_queue_persistence.snapshot_read_error) ->
+    Dashboard_projection_read.combine_completeness outcome
+      (Partial (Printf.sprintf "Keeper %s queue: %s" keeper_name error.message)))
+      Dashboard_projection_read.Complete snapshot.read_errors in
+  let selections = snapshot.Keeper_event_queue_persistence.pending
   |> List.filter (fun (selection : Keeper_event_queue_state.pending_selection) ->
     match selection.Keeper_event_queue_state.source.payload with
     | Keeper_event_queue.Connector_attention _ -> true
@@ -173,7 +177,8 @@ let connector_attention_pending_selections ~base_path ~keeper_name =
     | Keeper_event_queue.Ask_answered _ | Keeper_event_queue.Completion_authority_rejected _
     | Keeper_event_queue.Task_cancelled _ | Keeper_event_queue.Workspace_message _
     | Keeper_event_queue.Delegate_completed _ | Keeper_event_queue.Composition_completed _ | Keeper_event_queue.Tool_result_ready _ | Keeper_event_queue.Owned_job_completed _
-    | Keeper_event_queue.Task_outcome _ -> false)
+    | Keeper_event_queue.Task_outcome _ -> false) in
+  selections, completeness
 
 let connector_attention_evidence ~keeper_name selections =
   let event_ids =
@@ -206,7 +211,8 @@ let connector_attention_evidence ~keeper_name selections =
     ]
 
 let connector_attention_projection ~base_path ~keeper_name =
-  match connector_attention_pending_selections ~base_path ~keeper_name with
+  let selections, completeness = connector_attention_pending_selections ~base_path ~keeper_name in
+  let attention = match selections with
   | [] -> None
   | _ :: _ as selections ->
     let count = List.length selections in
@@ -227,15 +233,19 @@ let connector_attention_projection ~base_path ~keeper_name =
         target_id = Some keeper_name;
         actor = Some keeper_name;
         evidence = connector_attention_evidence ~keeper_name selections
-      }
+      } in
+  attention, completeness
 
 let keeper_attention_projection config (meta : Keeper_meta_contract.keeper_meta) =
   let runtime_blocker = Keeper_status_bridge.runtime_blocker_surface_opt config meta in
   let approval_queue = Keeper_status_bridge.read_approval_queue_attention config meta in
+  let completeness = match approval_queue with
+    | Keeper_status_bridge.Approval_queue_ready _ -> Dashboard_projection_read.Complete
+    | Approval_queue_unavailable error -> Partial (Keeper_approval_queue_result.storage_error_to_string error) in
   let attention =
     Keeper_status_bridge.attention_of_surface config meta runtime_blocker approval_queue
   in
-  match attention with
+  let item = match attention with
   | None -> None
   | Some reason ->
     let blocker_fields =
@@ -276,29 +286,37 @@ let keeper_attention_projection config (meta : Keeper_meta_contract.keeper_meta)
         evidence;
       }
     in
-    Some attention_item
+    Some attention_item in
+  item, completeness
 
-let keeper_attention_projection_items config =
-  let keeper_names =
+let keeper_attention_observation config =
+  let keeper_names, listing_completeness =
     (match Keeper_meta_store.keeper_names_result config with
-     | Ok names -> names
+     | Ok names -> names, Dashboard_projection_read.Complete
      | Error detail ->
        Log.Keeper.warn "keeper_attention_projection_items: keeper names unread: %s" detail;
-       [])
+       [], Partial ("Keeper roster: " ^ detail))
   in
-  let status_attention =
-    keeper_names
-    |> List.filter_map (fun name ->
+  let status_attention, completeness =
+    List.fold_left (fun (items, completeness) name ->
       match Keeper_meta_store.read_meta config name with
-      | Ok (Some meta) -> keeper_attention_projection config meta
-      | Ok None | Error _ -> None)
+      | Ok (Some meta) ->
+          let item, outcome = keeper_attention_projection config meta in
+          (match item with None -> items | Some item -> item :: items),
+          Dashboard_projection_read.combine_completeness completeness outcome
+      | Ok None -> items, completeness
+      | Error detail -> items, Dashboard_projection_read.combine_completeness completeness
+          (Partial (Printf.sprintf "Keeper %s metadata: %s" name detail)))
+      ([], listing_completeness) keeper_names
   in
-  let connector_attention =
-    keeper_names
-    |> List.filter_map (fun keeper_name ->
-      connector_attention_projection ~base_path:config.base_path ~keeper_name)
+  let connector_attention, completeness =
+    List.fold_left (fun (items, completeness) keeper_name ->
+      let item, outcome = connector_attention_projection ~base_path:config.base_path ~keeper_name in
+      (match item with None -> items | Some item -> item :: items),
+      Dashboard_projection_read.combine_completeness completeness outcome)
+      ([], completeness) keeper_names
   in
-  status_attention @ connector_attention
+  List.rev status_attention @ List.rev connector_attention, completeness
 
 let workspace_state_json config =
   if not (Workspace.is_initialized config) then
@@ -339,7 +357,7 @@ let observe ?actor ?target_type ?target_id:_target_id ?include_workers:_include_
           ("active_summary", summary_of_recommendations ~actor:"dashboard" []);
           ("active_recommended_actions", `List []);
           ("active_recommendation_summary", summary_of_recommendations ~actor:"dashboard" []);
-        ]; next_deadline_unix = None}
+        ]; next_deadline_unix = None; completeness = Dashboard_projection_read.Complete}
   else
     let actor_name = normalized_actor ~context_actor:ctx.agent_name actor in
     let* target_type = normalize_digest_target_type target_type in
@@ -347,8 +365,8 @@ let observe ?actor ?target_type ?target_id:_target_id ?include_workers:_include_
     match Operator_action_constants.target_type_of_string target_type with
     | Some Operator_action_constants.Workspace ->
         let confirm_scope = pending_confirm_scope ?actor config in
-        let keeper_attention =
-          keeper_attention_projection_items config
+        let keeper_attention, completeness =
+          keeper_attention_observation config
         in
         let workspace_attention, attention_deadline = build_workspace_attention_observation ~now config in
         let attention_items =
@@ -387,7 +405,8 @@ let observe ?actor ?target_type ?target_id:_target_id ?include_workers:_include_
               ("workspace", workspace_state_json);
             ]
             @ active_guidance.fields);
-           next_deadline_unix = earlier_deadline attention_deadline active_guidance.next_deadline_unix}
+           next_deadline_unix = earlier_deadline attention_deadline active_guidance.next_deadline_unix;
+           completeness}
     | Some Operator_action_constants.Keeper
     | Some Operator_action_constants.Goal
     | None -> Error "unsupported target_type"

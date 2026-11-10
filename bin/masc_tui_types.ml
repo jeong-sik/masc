@@ -9019,6 +9019,9 @@ type sent_image_read =
   ; sir_name : string
   ; sir_owner : image_read_owner
   ; sir_resource : (Masc_tui_resource_catalog.key * Masc_tui_mcp.resource_content list) option
+  ; sir_memory_activity : Masc.Keeper_memory_activity.t option
+      (** Immutable activity used by a Memory chart. A later read must match
+          this full observation, not merely name the same Keeper. *)
   ; sir_skill_reference : Skill_reference.t option
   ; sir_purpose : image_read_purpose
   }
@@ -19317,10 +19320,21 @@ let image_cell_source_unconfirmed (state : state) (origin : sent_image_read) =
         Effective_surface_unavailable _);_}) -> true in
   skill_unconfirmed || tools_skill_may_be_unread state origin || match origin.sir_owner with
   | Local_file_image_read _ | Remote_url_image_read _ | Draft_image_read _ -> false
-  | Peer_image_read _ ->
+  | Peer_image_read reading ->
       workspace_unconfirmed ||
       (if origin.sir_view = Resources then
          Option.is_none state.resource_content || Option.is_some state.resource_content_error
+       else if origin.sir_view = Memory then
+         state.view <> Memory || reading != state.workspace_read_authority
+         || not (image_request_keeper_is_current state origin)
+         || Masc_tui_fetched.in_flight state.memory_activity
+         || (match origin.sir_keeper, origin.sir_memory_activity with
+             | Some keeper, Some captured ->
+                 (match Masc_tui_fetched.view_for ~equal:String.equal state.memory_activity ~key:keeper with
+                  | Ready current ->
+                      not (current == captured || current = captured) || current.notes <> []
+                  | Absent | Loading | Stale _ | Failed _ -> true)
+             | None, (Some _ | None) | Some _, None -> true)
        else if origin.sir_view = Tools && Option.is_some origin.sir_skill_reference then
          not (tools_keeper_observation_confirmed state)
          || Option.map (fun (keeper : keeper) -> keeper.k_name) (selected_keeper state) <> origin.sir_keeper

@@ -14165,7 +14165,7 @@ let launch_image_render state ~mailbox ~notice:_ ~title ~caption ~page_url image
   let request = {sir_generation=state.image_request_generation; sir_view=view;
     sir_keeper=(if view = Resources then None else state.msg_target_keeper_name);
     sir_name=title; sir_owner=Remote_url_image_read state.workspace_authority;
-    sir_resource=None; sir_skill_reference=None;
+    sir_resource=None; sir_memory_activity=None; sir_skill_reference=None;
     sir_purpose=Open_image} in
   state.sent_image_read <- Some request;
   (* Classify already-buffered input and signals before starting a download.
@@ -14434,6 +14434,9 @@ let open_preview_image ?skill_reference ?board_subject state ~mailbox ~notice ~n
     let request = {sir_generation=generation; sir_view=view;
       sir_keeper=keeper_name; sir_name=name; sir_owner=owner;
       sir_resource=(if view = Resources then state.resource_content else None);
+      sir_memory_activity=(if view = Memory then Option.bind keeper_name (fun keeper ->
+        Masc_tui_fetched.value
+          (Masc_tui_fetched.view_for ~equal:String.equal state.memory_activity ~key:keeper)) else None);
       sir_skill_reference=skill_reference;
       sir_purpose=Open_image} in
     state.sent_image_read <- Some request;

@@ -1,6 +1,7 @@
 import { h } from 'preact'
 import { cleanup, render, waitFor } from '@testing-library/preact'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { acceptedExecutionWorkspace } from '../execution-workspace-authority'
 import '@testing-library/jest-dom'
 
 const { fetchKeeperRuntimeTrace, fetchKeeperComposite } = vi.hoisted(() => ({
@@ -19,7 +20,13 @@ function Probe({ name }: { name: string }): null {
 
 afterEach(() => {
   cleanup()
+  acceptedExecutionWorkspace.value = null
   vi.clearAllMocks()
+})
+
+beforeEach(() => {
+  acceptedExecutionWorkspace.value = { epoch: 'trace-fixture', workspaceRoot: '/workspace',
+    connectionGeneration: 0, observerInstanceId: 'trace-fixture' }
 })
 
 describe('useKeeperRuntimeTraceEvidence refresh nonce', () => {

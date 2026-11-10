@@ -4,9 +4,11 @@
 
 화면 맨 위 제목 줄은 제목, 읽을거리(개수, 시계), 연결 칩(`HTTP [연결됨]`) 순서예요. 연결 칩은 서버에 연결됐는지와 이 서버가 이 작업 공간을 같이 쓰는지(`[작업 공간 불일치]`)를 알려요.
 
-Memory, Connectors, Schedules, Tools, Fusion, Code, Resources 일곱 화면은 이 줄을 `Printf.sprintf` 로 이어 붙여 `box_line` 에 넘겼어요. `box_line` 은 칸을 넘는 꼬리부터 자르니까, 창이 좁으면 칩이 먼저 `HTTP…`, `HTTP [ …` 로 잘리거나 사라졌어요.
+초기 수정 대상인 Memory, Connectors, Schedules, Tools, Fusion, Code, Resources 일곱 화면은 이 줄을 `Printf.sprintf` 로 이어 붙여 `box_line` 에 넘겼어요. `box_line` 은 칸을 넘는 꼬리부터 자르니까, 창이 좁으면 칩이 먼저 `HTTP…`, `HTTP [ …` 로 잘리거나 사라졌어요.
 
-이 PR 은 `masc_tui_render_prim.ml` 에 `surface_title_row ~cols state ~lead ~readings` 를 만들고, 일곱 화면이 이걸로 제목 줄을 짜요. 안쪽은 다른 화면이 이미 쓰는 `detail_heading` 이에요.
+이 PR 은 `masc_tui_render_prim.ml` 에 `surface_title_row ~cols state ~lead ~readings` 를 만들어요. 현재 main 위에 다시 올린 후보에서는 Memory, Schedules, Fusion, Code 네 화면이 이걸로 제목 줄을 짜요. 안쪽은 다른 화면이 이미 쓰는 `detail_heading` 이에요.
+
+Channels(기존 Connectors), Tools & Skills, Resources는 main의 #51023에서 이미 `feature_child_heading`으로 바뀌었어요. 정상 HTTP·시계를 덜어내고 예외 상태만 표시하는 그 제목 체계를 그대로 보존해요. 이 PR의 예전 제목·시계를 되살리지 않아요. 아래 일곱 화면의 캡처는 그 main 변경 전의 초기 증거예요.
 
 - 칩이 들어갈 때는 통째로 그려요.
 - 칩 자체가 너무 길면 작업 공간·조회 상태를 먼저 남기고, 이벤트 유실과 HTTP 상태는 들어가는 만큼 남겨요. 생략한 내용은 `…`로 표시해요.

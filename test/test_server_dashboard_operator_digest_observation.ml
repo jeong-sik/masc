@@ -363,6 +363,107 @@ let test_actual_partial_retry_after_quiet_repair surface =
     check bool "after repair and actual expiry no healthy timer remains" false
       (Eio_mock.Clock.try_advance clock))
 
+let test_execution_partial_read_retries_after_quiet_repair () =
+  with_runtime (fun ~env ~sw ~clock ~state ~scope ->
+    let module Execution = Server_dashboard_http_execution_surfaces in
+    let module Attempt = Execution.For_testing in
+    let owner = Attempt.owner_for_state ~state in
+    let declarations = Config_dir_resolver.keepers_dir_for_base_path ~base_path:scope.config.base_path in
+    Workspace_utils.mkdir_p declarations;
+    (match Fs_compat.save_file_atomic (Filename.concat declarations "readable-declaration.toml")
+        "[keeper]\nactivation_mode = \"manual\"\nsandbox_profile = \"docker\"\nsandbox_image = \"base\"\ninstructions = \"Help the operator.\"\n" with
+     | Ok () -> () | Error detail -> fail detail);
+    let broken = Keeper_types_profile.keeper_meta_path scope.config "unread-metadata" in
+    (match Fs_compat.save_file_atomic broken "{" with
+     | Ok () -> () | Error detail -> fail detail);
+    let read suffix = Execution.dashboard_execution_http_json ~state ~sw ~clock
+        (Httpun.Request.create `GET ("/api/v1/dashboard/execution" ^ suffix)) in
+    let diagnostic json field = Yojson.Safe.Util.(json |> member "projection_diagnostics" |> member field) in
+    let assert_partial json =
+      check bool "Execution carries actual partial read diagnostics" true
+        (diagnostic json "read_completeness" = `String "partial");
+      check bool "Execution retains its independently readable row" true
+        Yojson.Safe.Util.(json |> member "keepers" |> to_list |> List.exists (fun row ->
+          row |> member "name" = `String "readable-declaration"));
+      match Keeper_snapshot_unread.list_of_json Yojson.Safe.Util.(json |> member "keepers_unread") with
+      | Ok [{name = "unread-metadata"; reason = Meta_read_failed _}] -> ()
+      | Ok _ | Error _ -> fail "Execution lost the actual unread metadata" in
+    assert_partial (read "?agent_name=partial-reader");
+    assert_partial (read "");
+    (match Server_dashboard_http_namespace_truth.namespace_truth_snapshot_from_caches state with
+     | Some json -> check bool "first partial Execution also reaches cached Namespace" true
+         (diagnostic json "read_completeness" = `String "partial")
+     | None -> fail "Namespace dropped the first partial observation for lacking full success");
+    check (option (float 0.0)) "Execution partial cold fill is not a complete success" None
+      (Cache.snapshot (Attempt.cache owner)).last_success_unix;
+    let before = Cache.snapshot (Attempt.cache owner) in
+    assert_partial (read "");
+    check bool "another partial GET cannot bypass source retry" true
+      (before == Cache.snapshot (Attempt.cache owner));
+    assert_partial (read "?force=true");
+    let source_failed, mark_source_failed = Eio.Promise.create () in
+    let marked = ref false in
+    let unsubscribe = Attempt.subscribe_completion ~owner (function
+      | Attempt.Cache_failed Observation_read ->
+          if not !marked then (marked := true; Eio.Promise.resolve mark_source_failed ())
+      | Cache_failed Request_read | Cache_installed (Observation_read | Request_read)
+      | Cache_patched | Shell_installed -> ()) in
+    Eio.Switch.on_release sw unsubscribe;
+    let frames = Eio.Stream.create 16 and namespace_frames = Eio.Stream.create 8 in
+    let id = "actual-execution-partial-retry" in
+    Sse.subscribe_external ~id
+      ~runtime_authority:(Sse.runtime_authority_exn ~base_path:scope.config.base_path)
+      ~observer_instance_id:(Server_observer_scope.instance_id scope)
+      ~callback:(fun event ->
+        match Yojson.Safe.Util.member "type" event.Sse.ext_payload with
+        | `String "execution_snapshot" ->
+            Eio.Stream.add frames (Yojson.Safe.Util.member "payload" event.ext_payload)
+        | `String "project_snapshot" ->
+            Eio.Stream.add namespace_frames (Yojson.Safe.Util.member "payload" event.ext_payload)
+        | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ | `Assoc _ -> ()) ();
+    Eio.Switch.on_release sw (fun () -> Sse.unsubscribe_external id);
+    Execution.start_execution_refresh_loop ~state ~sw ~clock ~net:(Eio.Stdenv.net env)
+      ~mono_clock:(Eio.Stdenv.mono_clock env);
+    Eio.Promise.await source_failed;
+    let partial_namespace = Eio.Stream.take namespace_frames in
+    check bool "actual canonical Namespace reports the partial source" true
+      (diagnostic partial_namespace "read_completeness" = `String "partial");
+    (* The actual source read has now installed a partial body. Repair emits
+       no metadata input or event; only its failure retry can recover. *)
+    let failed_at = Eio.Time.now clock in
+    Sys.remove broken;
+    let rec advance_when_registered () =
+      Eio.Fiber.yield ();
+      if not (Eio_mock.Clock.try_advance clock) then advance_when_registered () in
+    advance_when_registered ();
+    let rec complete_frame () =
+      let payload = Eio.Stream.take frames in
+      match diagnostic payload "read_completeness" with
+      | `String "complete" -> payload
+      | `String "partial" -> complete_frame ()
+      | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ | `Assoc _ ->
+          fail "Execution canonical frame lost its typed read diagnostics" in
+    let recovered = complete_frame () in
+    let rec complete_namespace () =
+      let payload = Eio.Stream.take namespace_frames in
+      match diagnostic payload "read_completeness" with
+      | `String "complete" -> ()
+      | `String "partial" -> complete_namespace ()
+      | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ | `Assoc _ ->
+          fail "Namespace lost its original typed source completeness" in
+    complete_namespace ();
+    check (float 0.) "Execution recovers at its existing failure interval" (failed_at +. 60.0)
+      (Eio.Time.now clock);
+    check bool "the successful actual reread clears read_error" true
+      (diagnostic recovered "read_error" = `Null);
+    check bool "the repaired source no longer reports unread rows" true
+      Yojson.Safe.Util.(recovered |> member "keepers_unread" = `List []);
+    check string "canonical completion retains the original observer instance"
+      (Server_observer_scope.instance_id scope)
+      Yojson.Safe.Util.(recovered |> member "observer_instance_id" |> to_string);
+    Eio.Fiber.yield ();
+    check bool "quiet recovered Execution has no healthy timer" false (Eio_mock.Clock.try_advance clock))
+
 let () = run "Operator Digest observation owner" ["publication", [
   test_case "request and source admission" `Quick test_request_and_source_admission;
     test_case "partial rows retain failure debt without success" `Quick test_partial_read_retains_body_without_success;
@@ -374,4 +475,6 @@ let () = run "Operator Digest observation owner" ["publication", [
   test_case "Mission actual partial read recovers after quiet raw repair" `Quick
     (fun () -> test_actual_partial_retry_after_quiet_repair Mission);
   test_case "Digest actual partial read recovers after quiet raw repair" `Quick
-    (fun () -> test_actual_partial_retry_after_quiet_repair Digest)]]
+    (fun () -> test_actual_partial_retry_after_quiet_repair Digest);
+  test_case "Execution actual partial read recovers after quiet raw repair" `Quick
+    test_execution_partial_read_retries_after_quiet_repair]]

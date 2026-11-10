@@ -1,0 +1,265 @@
+{
+  "at": "2026-11-10T07:18:11.345937+00:00",
+  "source_base": "fdde0336dd0166103aef3e470f0cacc85ee85c26",
+  "source_upper": "aa9e06339e79a2d6e51af2564b0e7245885f786d",
+  "source_lower": "039c2fdb5f034133bde3af2d53cfd2ccf925be76",
+  "compiler": "OCaml 5.5.1 parsing only; repository target 5.5.2",
+  "checks": [
+    {
+      "path": "lib/board/board_core.mli",
+      "sha256": "e566bdf2a8b815b5c54caa70c92593d844489afac9a522660ecffa49b2a16670",
+      "exit": 0,
+      "output": ""
+    },
+    {
+      "path": "lib/board/board_core_persist.ml",
+      "sha256": "6a417eaf62ba7f617aa3b63dd71d4d9aabe5e894286265994c2512fa54617d88",
+      "exit": 0,
+      "output": ""
+    },
+    {
+      "path": "lib/board/board_core_persist.mli",
+      "sha256": "b72b37504ae30e82dac7f58a2c5f739786e8db4aeab1cadf1d83033d12204a72",
+      "exit": 0,
+      "output": ""
+    },
+    {
+      "path": "lib/board/board_dispatch.ml",
+      "sha256": "55befd49fda9b8c4a74f07b4365333d83d911420b1a2b6db8df70dbb68725ccb",
+      "exit": 0,
+      "output": ""
+    },
+    {
+      "path": "lib/board/board_dispatch.mli",
+      "sha256": "cff7d21ab5d1ac9b38169d7d7dca93f1fc6171964b91329e92debe96a21419c0",
+      "exit": 0,
+      "output": ""
+    },
+    {
+      "path": "lib/board/board_reactions.ml",
+      "sha256": "7921293a9e12f0a6b097ec1176fd478dc0a4c6cf1412abb24f20d432780adc80",
+      "exit": 0,
+      "output": ""
+    },
+    {
+      "path": "lib/board/board_reactions.mli",
+      "sha256": "55a19d6b972095cfdfd4d326e9d4082b0b01a1996b826589eecd2c68c59e886c",
+      "exit": 0,
+      "output": ""
+    },
+    {
+      "path": "lib/board/board_reactions_source.ml",
+      "sha256": "455f57089c6daf1d5d6ba06caa2dc2baf4e08422625a8fd79d331801634e89b0",
+      "exit": 0,
+      "output": ""
+    },
+    {
+      "path": "lib/board/board_reactions_source.mli",
+      "sha256": "8ae2590aeacbe7b63d4f34b7736a505c26d216b7681a05ca26908a7f6865cdf5",
+      "exit": 0,
+      "output": ""
+    },
+    {
+      "path": "lib/board/board_store_load.ml",
+      "sha256": "bb773714316d19424fe09847d77c8d7cd28626437d2ab494bb05cab97d89d3f4",
+      "exit": 0,
+      "output": ""
+    },
+    {
+      "path": "lib/board/board_store_load.mli",
+      "sha256": "9fb5c14e4e75789f7168dd578fe75357b8931b18ec6c278b5a7a7bc1952dba95",
+      "exit": 0,
+      "output": ""
+    },
+    {
+      "path": "lib/board/board_votes.ml",
+      "sha256": "5908eec4810ecca1c11b037c15dcf5aeead88939e92fa0a06a7d6f8d3c417a53",
+      "exit": 0,
+      "output": ""
+    },
+    {
+      "path": "lib/board/board_votes.mli",
+      "sha256": "8cefb0862b561b3d33fe77144ed54cbf12e2b3904a9bef598424fd2c250611d7",
+      "exit": 0,
+      "output": ""
+    },
+    {
+      "path": "lib/board_types/board_types.ml",
+      "sha256": "fee4c4adf907ad586c81dacdf9fe17764a5fed32b913cbf84985797aa4d1e8fa",
+      "exit": 0,
+      "output": ""
+    },
+    {
+      "path": "lib/board_types/board_types.mli",
+      "sha256": "24188dcae4baa8ea5b00f5bba79d83262e6311258fb673b26e2f56acb1e6a0ac",
+      "exit": 0,
+      "output": ""
+    },
+    {
+      "path": "lib/server/server_board_list_http.ml",
+      "sha256": "8e601a262d83848c0d69445e17f0845696e55a3e08587ca8d4722a5a5a45e709",
+      "exit": 0,
+      "output": ""
+    },
+    {
+      "path": "lib/server/server_board_reaction_http.ml",
+      "sha256": "a0ffc49ac2981d99be45e04cd7e76516c0c1eb607c7650da109c8725af333424",
+      "exit": 0,
+      "output": ""
+    },
+    {
+      "path": "lib/server/server_board_reaction_http.mli",
+      "sha256": "d5206ce03f32a3bb8dd92377ab00784672c40a1c89719218dd2e83e6c40988e9",
+      "exit": 0,
+      "output": ""
+    },
+    {
+      "path": "lib/server/server_routes_http_routes_activity.ml",
+      "sha256": "6bf43b35b40a1a1d77e16bba0a2fc069ff61599664c8b2c5d89e11319fb81586",
+      "exit": 0,
+      "output": ""
+    },
+    {
+      "path": "lib/server/server_routes_http_runtime.ml",
+      "sha256": "5b1f926ce2ec816b107e135953b687af97efeb1427b94dd632ab606db88c8752",
+      "exit": 0,
+      "output": ""
+    },
+    {
+      "path": "lib/server_utils.ml",
+      "sha256": "dffb514086c714cd5499107388d524493e6e4cd5456de2e0439289d06b97970b",
+      "exit": 0,
+      "output": ""
+    },
+    {
+      "path": "lib/server_utils.mli",
+      "sha256": "345211760e8db5d0f8c9b957da7c04e617537daa76fc37a2d32ed1200bfc37a5",
+      "exit": 0,
+      "output": ""
+    },
+    {
+      "path": "test/test_board_comments_source.ml",
+      "sha256": "b4de5eb41e3225ef8ec54525bf7d15b3c00e2e662d8dc0a648c3a2cd689c80ef",
+      "exit": 0,
+      "output": ""
+    },
+    {
+      "path": "test/test_board_delete_order.ml",
+      "sha256": "c78f02fe6c54e1598dd19cc0cc4d8e6208bf6c3b52cf02e45e7cbfa40ffbc1bc",
+      "exit": 0,
+      "output": ""
+    },
+    {
+      "path": "test/test_board_dispatch.ml",
+      "sha256": "5f4496b5efad94df468d165f6324d013ee53061af09cdb44448f1cf76da85a82",
+      "exit": 0,
+      "output": ""
+    },
+    {
+      "path": "test/test_board_persistence_load_contract.ml",
+      "sha256": "a74fe2a42970badcbf170420ac13edf7b107633ed7656c73d5c3a5718a65c2ef",
+      "exit": 0,
+      "output": ""
+    },
+    {
+      "path": "test/test_board_persistence_schema.ml",
+      "sha256": "a16db6fbb875395247bc0eaabefae7193f99b31e536666662c7f4d4418caf40a",
+      "exit": 0,
+      "output": ""
+    },
+    {
+      "path": "test/test_board_posts_source_authority.ml",
+      "sha256": "dfa0c9da02cc9ea4e12e153a5eceaa65238c5982ceb233f939a096f1189f653e",
+      "exit": 0,
+      "output": ""
+    },
+    {
+      "path": "test/test_board_reactions_source.ml",
+      "sha256": "51fa51881f513cc0371540455cb5a38e843dbc9a31c32885a2314c0cc4f690fb",
+      "exit": 0,
+      "output": ""
+    },
+    {
+      "path": "test/test_board_rest_routes.ml",
+      "sha256": "25b3e0b9e6cacf61a2bfe3a06583b687c0b77fb93dd86a0fb6ecee9ae0881b29",
+      "exit": 0,
+      "output": ""
+    },
+    {
+      "path": "test/test_board_ttl.ml",
+      "sha256": "4bcb6b60864fd6e627fec09701e4059507ff2f9ba79475086c8c6a465d948f4c",
+      "exit": 0,
+      "output": ""
+    },
+    {
+      "path": "test/test_board_vote_persistence.ml",
+      "sha256": "b5c5255a00ed639afb864c6d3f6f8ecf32e67bdcc7a94d6845fe3490dcb166cb",
+      "exit": 0,
+      "output": ""
+    },
+    {
+      "path": "test/test_board_votes_source.ml",
+      "sha256": "6a27a11757a8849921776a513b06195e5ca580ee55cfed01429a3f99f2ba01e6",
+      "exit": 0,
+      "output": ""
+    },
+    {
+      "path": "test/test_tool_board_coverage.ml",
+      "sha256": "79345e17c1d24f56d55cba18987ab42542096a69f19dcde15e14f0ef329022c0",
+      "exit": 0,
+      "output": ""
+    }
+  ],
+  "store_fields_match": true,
+  "store_fields": [
+    "posts_source",
+    "posts_source_io",
+    "comments_source",
+    "comments_source_io",
+    "sub_boards_source",
+    "sub_boards_source_io",
+    "votes_source",
+    "votes_source_io",
+    "reactions_source",
+    "reactions_source_io",
+    "workspace_binding",
+    "posts",
+    "comments",
+    "vote_log",
+    "post_count",
+    "last_sweep",
+    "mutex",
+    "persist_mutex",
+    "origin_create_mutex",
+    "karma_cache",
+    "hot_post_index",
+    "recent_post_index",
+    "comments_by_post",
+    "reactions",
+    "dirty_posts",
+    "dirty_comments",
+    "snapshot_retry",
+    "dirty_post_ids",
+    "dirty_comment_ids",
+    "post_rows",
+    "comment_rows",
+    "last_flush",
+    "flusher_inbox",
+    "sub_boards",
+    "sub_boards_by_slug",
+    "posts_by_turn_ref",
+    "posts_by_run_id"
+  ],
+  "source_io_slots": 5,
+  "whitespace_exit": 0,
+  "backend_reaction_cases_authored": 7,
+  "backend_reaction_cases_executed": 0,
+  "not_executed": [
+    "OCaml typing/warning checks",
+    "Dune",
+    "backend cases",
+    "CI",
+    "installation",
+    "deployment"
+  ]
+}

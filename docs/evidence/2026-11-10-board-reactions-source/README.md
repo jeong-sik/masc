@@ -18,3 +18,5 @@ The root opened all three final PNGs and visually checked them. The earlier capt
 Seven backend scenarios are authored and unexecuted: stale toggle, stale ordinary compaction, orphan-preserving real compaction, canonical public target spelling after restart, partial source through Dashboard/shared HTTP results, post-rename unknown without replay, and known rewrite before reserved stable-lock cleanup. They use real-file/public-store fixtures; no backend pass is claimed.
 
 This bundle does not establish an OCaml type/warning check, a backend build or run, durable multi-source deletion recovery, CI, installation, or deployment. Issue #26378 remains open for the remaining product work.
+
+The [integrated follow-up run](integrated/README.md) records the later vote-source merge, both-source integration, 218 focused tests, and fresh Chromium captures. The original capture manifest above remains historical.

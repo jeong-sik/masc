@@ -336,19 +336,46 @@ let test_multi_account () =
           | Access.No_operator -> true
           | _ -> false);
         (* A host client starts on an account of the host, which a
-           multi-account process shares with no person (plan D3b). *)
+           multi-account process shares with no person (plan D3b). An API
+           provider of the runtime table sends with the credential its
+           operator declared, an account of the host too (plan D4). *)
         List.iter
           (fun client ->
             match client, Access.authorize_host client with
-            | (Access.Antigravity | Access.Vibe), Ok (_ : Access.host_account) ->
+            | (Access.Antigravity | Access.Vibe | Access.Api_provider), Ok (_ : Access.host_account) ->
               Alcotest.fail "a host client was allowed"
             | Access.Antigravity, Error (Access.Host_account Access.Antigravity)
-            | Access.Vibe, Error (Access.Host_account Access.Vibe) -> ()
-            | (Access.Antigravity | Access.Vibe), Error refusal ->
+            | Access.Vibe, Error (Access.Host_account Access.Vibe)
+            | Access.Api_provider, Error (Access.Host_account Access.Api_provider) -> ()
+            | (Access.Antigravity | Access.Vibe | Access.Api_provider), Error refusal ->
               Alcotest.failf
                 "a host client was refused for another reason: %s"
                 (Access.refusal_to_string refusal))
-          [ Access.Antigravity; Access.Vibe ];
+          [ Access.Antigravity; Access.Vibe; Access.Api_provider ];
+        (* A sender takes the sealed config of an API provider only through
+           the access, and a reader sees the declaration without the
+           credential. *)
+        let provider =
+          Access.seal_api
+            (Llm_provider.Provider_config.make
+               ~kind:Llm_provider.Provider_config.OpenAI_compat
+               ~model_id:"model-a"
+               ~base_url:"https://provider.example"
+               ~api_key:"operator-key"
+               ())
+        in
+        (match Access.authorize_api provider with
+         | Error (Access.Host_account Access.Api_provider) -> ()
+         | Error refusal ->
+           Alcotest.failf
+             "an API provider was refused for another reason: %s"
+             (Access.refusal_to_string refusal)
+         | Ok (_ : Llm_provider.Provider_config.t) ->
+           Alcotest.fail "an API provider was allowed");
+        Alcotest.(check string)
+          "a reader of the declaration sees no credential"
+          ""
+          ((Access.api_declaration provider).Llm_provider.Provider_config.api_key :> string);
         (* A native tool runs as the user of the server process and reaches
            the account homes of other people, so a model turn runs here only
            without native tools (plan D3c). *)

@@ -25,10 +25,10 @@ val of_change :
 val of_publication : Keeper_memory_os_program_types.publication -> counts
 (** An ordered program, once, from its initial to its final facts. Only an ID
     of the initial facts can be absorbed, superseded or dropped. One that left
-    through an absorption or a revision is followed through each later
-    stage's absorption or revision of the ID carrying it. It counts by the
-    kind of its first exit when that chain ends in the final facts, and as
-    dropped otherwise. *)
+    through an absorption or a revision follows all its applied successor
+    branches through later stages. A branch is lost when its carrier leaves
+    without a successor. The initial ID counts once by the kind of its first
+    exit when any branch reaches the final facts, and as dropped otherwise. *)
 
 (** How a commit is counted: under the pass that called it, from the committed
     snapshot and the commit's own output. [replace] seeds a whole snapshot and

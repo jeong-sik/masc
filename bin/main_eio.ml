@@ -85,9 +85,7 @@ let run_server ~sw ~runtime_sw ~env ~address ~port ~base_path ~input_base_path ~
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn ->
-    Log.Server.error
-      "[main] keeper bootstrap failed; refusing to continue without keepers: %s"
-      (Printexc.to_string exn);
+    Log.Server.error "[main] the server stopped with an exception: %s" (Printexc.to_string exn);
     raise exn
 
 (** CLI options *)
@@ -1180,11 +1178,12 @@ let auth_cmd =
            it out of the request URL. Only a digest of the token is written. \
            The invitation works once and expires after 24 hours."
       ; `P
-          ("This build does not serve multi-account yet: once the command \
-            succeeds, a server stops at boot on the workspace. "
+          ("Once the command succeeds, a server boots the workspace as a \
+            multi-account installation: the account server, which answers \
+            GET /health and none of the routes of a single-user server. It \
+            does not serve the login routes yet; masc auth preview serves \
+            them on 127.0.0.1 while no server runs. "
            ^ String.capitalize_ascii Authz_boot_mode_read.turn_off_line
-           ^ ". "
-           ^ String.capitalize_ascii Authz_boot_mode_read.single_user_again
            ^ ".")
       ]
     in

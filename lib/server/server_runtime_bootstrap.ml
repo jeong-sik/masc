@@ -2096,7 +2096,7 @@ let run_single_user ~sw ~runtime_sw ~env ~address ~port ~base_path ~single_user 
         ; execution_trust_refresh = (fun () ->
             Server_dashboard_http.start_execution_trust_refresh_loop ~state ~sw ~clock)
         ; mission_refresh = (fun () ->
-            Server_dashboard_http.start_mission_refresh_loop ~state ~sw ~clock)
+            Server_dashboard_http.start_mission_refresh_loop ~state ~sw ~clock ~mono_clock)
         ; operator_snapshot_refresh = (fun () ->
             Server_dashboard_http.start_operator_snapshot_refresh_loop ~state ~sw ~clock
               ~broadcast_snapshot:Server_dashboard_http_execution_surfaces.broadcast_refreshed_operator_snapshot)

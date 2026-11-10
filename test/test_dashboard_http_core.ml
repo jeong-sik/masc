@@ -161,9 +161,9 @@ let with_cached_surface_success
       Server_dashboard_http_cache.mark_cached_surface_success surface json;
       f ())
 
-let with_mission_cache_success json f =
+let with_mission_cache_success ~state json f =
   let module Core = Server_dashboard_http_core in
-  let surface = Core.mission_cache in
+  let surface = Core.mission_cache ~state in
   let saved = Core.snapshot surface in
   Fun.protect
     ~finally:(fun () ->
@@ -3650,14 +3650,14 @@ beanie = 200
   Eio_guard.protect ~finally:Surface.invalidate_execution_cache @@ fun () ->
   let state = Lib.Mcp_server_eio.For_testing.create_state ~base_path () in
   with_cached_surface_success (Surface.execution_cache ~state) execution_seed @@ fun () ->
-  with_mission_cache_success mission_seed @@ fun () ->
+  with_mission_cache_success ~state mission_seed @@ fun () ->
   let clock = Eio.Stdenv.clock env in
   let req = request_with_headers "/api/v1/dashboard/execution"
       ["accept-encoding", "identity"] in
   let context () = Surface.execution_http_request ~state req in
   let read_execution () = Surface.dashboard_execution_http_json ~state ~sw ~clock req in
-  let read_mission () = Server_dashboard_http_core.dashboard_briefing_http_json
-      ~state ~sw ~clock (request "/api/v1/dashboard/briefing") in
+  let read_mission () = Server_dashboard_http_core.dashboard_briefing_for_request
+      ~sw ~clock (Server_dashboard_http_core.mission_http_request ~state (request "/api/v1/dashboard/briefing")) in
   let observations path json =
     let rows = List.fold_left (fun json key -> Yojson.Safe.Util.member key json) json path
       |> Yojson.Safe.Util.to_list in
@@ -3737,7 +3737,7 @@ beanie = 200
   check bool "equipment refresh does not rebuild cached execution metadata" true
     ((Server_dashboard_http_cache.snapshot (Surface.execution_cache ~state)).json = execution_seed);
   check bool "equipment refresh does not rebuild cached mission metadata" true
-    ((Server_dashboard_http_core.snapshot Server_dashboard_http_core.mission_cache).json = mission_seed);
+    ((Server_dashboard_http_core.snapshot (Server_dashboard_http_core.mission_cache ~state)).json = mission_seed);
   let ledger = Candle_ledger.path ~base_path in
   Fs_compat.append_file ledger "{partial";
   let corrupt = Fs_compat.load_file ledger in

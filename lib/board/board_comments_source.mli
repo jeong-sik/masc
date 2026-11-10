@@ -70,6 +70,10 @@ val rewrite : store -> snapshot -> unit write_outcome
     rewrite authority. Proven transient nonwrites retain the prior expectation. *)
 
 val require_readable : store -> (unit, board_error) result
+val observe_guard_refusal : store -> comments_source_observation ->
+  Fs_compat.private_jsonl_guard_failure -> unit
+(** Notify only this exact current observation after a parent guard refusal.
+    Publication/recovery/unknown ownership is preserved. No filesystem IO. *)
 val failure_to_board_error : comments_source_failure -> board_error
 val diagnostic_to_string : comments_source_diagnostic -> string
 val reserved_diagnostics : comments_source_diagnostic list ->

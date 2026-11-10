@@ -484,9 +484,9 @@ let test_cross_writer_projection base_path _workspace =
   let comment = require_board (Board.add_comment ~reader:Masc_board_handlers.Board_access.Operator store
     ~lookup:Recipient_lookup.none_declared ~post_id:first_id ~author:"source-reader"
     ~content:"persisted comment" ~ttl_hours:0 ()) in
-  ignore (require_board (Board.vote store ~voter:"source-voter" ~post_id:first_id
+  ignore (require_board (Board.vote store ~reader:Masc_board_handlers.Board_access.Operator ~voter:"source-voter" ~post_id:first_id
     ~direction:Board.Up));
-  ignore (require_board (Board.vote_comment store ~voter:"comment-voter"
+  ignore (require_board (Board.vote_comment store ~reader:Masc_board_handlers.Board_access.Operator ~voter:"comment-voter"
     ~comment_id:(Board.Comment_id.to_string comment.id) ~direction:Board.Up));
   Board.flush_dirty store;
   (match require_board (Board.delete_sub_board ~authorization:Board.Operator_sub_board_deletion store
@@ -710,8 +710,8 @@ let test_flush_cleanup_preserves_later_work base_path _workspace =
     ~content:"comment awaiting its counter snapshot" ~ttl_hours:0 ()) in
   let comment_id = Board.Comment_id.to_string comment.id in
   List.iter (fun direction ->
-    ignore (require_board (Board.vote store ~voter:"batch-voter" ~post_id ~direction));
-    ignore (require_board (Board.vote_comment store ~voter:"batch-comment-voter"
+    ignore (require_board (Board.vote store ~reader:Masc_board_handlers.Board_access.Operator ~voter:"batch-voter" ~post_id ~direction));
+    ignore (require_board (Board.vote_comment store ~reader:Masc_board_handlers.Board_access.Operator ~voter:"batch-comment-voter"
       ~comment_id ~direction))) [Board.Up; Board.Down; Board.Up];
   require_board (Board.set_thread_id store ~post_id ~thread_id:"flush-batch-thread");
   let before = reloaded base_path 1 in
@@ -768,13 +768,13 @@ let test_delete_cleanup_preserves_dependents base_path _workspace =
     ~lookup:Recipient_lookup.none_declared ~post_id ~author:"delete-reader"
     ~content:"dependent comment on disk" ~ttl_hours:0 ()) in
   let comment_id = Board.Comment_id.to_string comment.id in
-  ignore (require_board (Board.vote store ~voter:"delete-voter" ~post_id
+  ignore (require_board (Board.vote store ~reader:Masc_board_handlers.Board_access.Operator ~voter:"delete-voter" ~post_id
     ~direction:Board.Up));
-  ignore (require_board (Board.vote_comment store ~voter:"delete-comment-voter"
+  ignore (require_board (Board.vote_comment store ~reader:Masc_board_handlers.Board_access.Operator ~voter:"delete-comment-voter"
     ~comment_id ~direction:Board.Up));
-  ignore (require_board (Board.toggle_reaction store ~target_type:Board.Reaction_post
+  ignore (require_board (Board.toggle_reaction store ~reader:Masc_board_handlers.Board_access.Operator ~target_type:Board.Reaction_post
     ~target_id:post_id ~user_id:"delete-reactor" ~emoji:"👍"));
-  ignore (require_board (Board.toggle_reaction store ~target_type:Board.Reaction_comment
+  ignore (require_board (Board.toggle_reaction store ~reader:Masc_board_handlers.Board_access.Operator ~target_type:Board.Reaction_comment
     ~target_id:comment_id ~user_id:"delete-comment-reactor" ~emoji:"👍"));
   Board.flush_dirty store;
   let dependents =
@@ -900,7 +900,7 @@ let test_fresh_workspace_accepts_every_writer base_path _workspace =
   let post_id = Board.Post_id.to_string post.id in
   ignore (require_board (Board.add_comment ~reader:Masc_board_handlers.Board_access.Operator store ~lookup:Recipient_lookup.none_declared
     ~post_id ~author:"fresh-reader" ~content:"first comment" ~ttl_hours:0 ()));
-  ignore (require_board (Board.vote store ~voter:"fresh-voter" ~post_id ~direction:Board.Up));
+  ignore (require_board (Board.vote store ~reader:Masc_board_handlers.Board_access.Operator ~voter:"fresh-voter" ~post_id ~direction:Board.Up));
   load_policy store;
   ignore (require_board (Board.create_sub_board store ~slug:"fresh" ~name:"fresh"
     ~description:"first topic in a fresh workspace" ~owner:"source-writer" ()));
@@ -1139,7 +1139,7 @@ let test_settle_preserves_memory_tables base_path _workspace =
   let post = require_post (create store "memory canary post") in
   let post_id = Board.Post_id.to_string post.id in
   require_board (Board.set_thread_id store ~post_id ~thread_id:"canary-thread");
-  ignore (require_board (Board.vote store ~voter:"canary-voter" ~post_id ~direction:Board.Up));
+  ignore (require_board (Board.vote store ~reader:Masc_board_handlers.Board_access.Operator ~voter:"canary-voter" ~post_id ~direction:Board.Up));
   let rows = Hashtbl.length store.Board.posts in
   armed := true;
   require_io_refusal (edit store post "memory survives unknown rewrite");

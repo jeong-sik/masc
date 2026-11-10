@@ -492,7 +492,7 @@ let test_thread_activity_does_not_project_unbound_parent_content () =
   Board_dispatch.set_board_signal_hook (KKS.wakeup_relevant_keeper_for_board_signal ~config);
   let reply = get (Board_dispatch.add_comment ~reader:Masc_board_handlers.Board_access.Operator ~post_id ~author:"peer" ~parent_id:own_comment_id
     ~content:"@alice a reply" ()) in
-  ignore (get (Board_dispatch.vote_comment ~voter:"peer" ~comment_id:own_comment_id ~direction:Board.Up));
+  ignore (get (Board_dispatch.vote_comment ~reader:Masc_board_handlers.Board_access.Operator ~voter:"peer" ~comment_id:own_comment_id ~direction:Board.Up));
   ignore (get (Board_dispatch.toggle_reaction ~reader:(Masc_board_handlers.Board_access.named "peer")
     ~target_type:Board.Reaction_comment ~target_id:own_comment_id ~user_id:"peer" ~emoji:"👍"));
   (match Board_dispatch.update_post ~post_id ~editor:"editor"

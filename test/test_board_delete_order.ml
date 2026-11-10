@@ -97,8 +97,8 @@ let test_stale_comments_refuse_before_decision base_path =
   let other = fresh_store base_path in
   let reply = comment other parent "another writer's accepted reply" in
   let comment_id = Board.Comment_id.to_string reply.id in
-  ignore (require (Board.vote_comment other ~comment_id ~voter:"foreign-voter" ~direction:Board.Up));
-  ignore (require (Board.toggle_reaction other ~target_type:Board.Reaction_comment
+  ignore (require (Board.vote_comment other ~reader:Masc_board_handlers.Board_access.Operator ~comment_id ~voter:"foreign-voter" ~direction:Board.Up));
+  ignore (require (Board.toggle_reaction other ~reader:Masc_board_handlers.Board_access.Operator ~target_type:Board.Reaction_comment
     ~target_id:comment_id ~user_id:"foreign-reactor" ~emoji:"👍"));
   let comments_path = Board.comments_path stale in
   let votes_path = Board.vote_log_path stale and reactions_path = Board.reactions_path stale in

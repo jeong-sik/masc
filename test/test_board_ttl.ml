@@ -119,12 +119,12 @@ let test_sweep_removes_the_rows_of_an_expired_target () =
     | Error e -> Alcotest.fail (Post_publication_failure.to_string e)
   in
   (match
-     toggle_reaction store ~target_type:Reaction_post ~target_id:post_id
+     toggle_reaction store ~reader:Masc_board_handlers.Board_access.Operator ~target_type:Reaction_post ~target_id:post_id
        ~user_id:"reactor-agent" ~emoji:"👍"
    with
    | Ok _ -> ()
    | Error e -> Alcotest.fail (show_board_error e));
-  (match vote store ~voter:"voter-agent" ~post_id ~direction:Up with
+  (match vote store ~reader:Masc_board_handlers.Board_access.Operator ~voter:"voter-agent" ~post_id ~direction:Up with
    | Ok _ -> ()
    | Error e -> Alcotest.fail (show_board_error e));
   let post = Hashtbl.find store.posts post_id in
@@ -152,12 +152,12 @@ let test_sweep_keeps_rows_whose_target_is_not_loaded () =
     | Error e -> Alcotest.fail (Post_publication_failure.to_string e)
   in
   (match
-     toggle_reaction store ~target_type:Reaction_post ~target_id:post_id
+     toggle_reaction store ~reader:Masc_board_handlers.Board_access.Operator ~target_type:Reaction_post ~target_id:post_id
        ~user_id:"reactor-agent" ~emoji:"👍"
    with
    | Ok _ -> ()
    | Error e -> Alcotest.fail (show_board_error e));
-  (match vote store ~voter:"voter-agent" ~post_id ~direction:Up with
+  (match vote store ~reader:Masc_board_handlers.Board_access.Operator ~voter:"voter-agent" ~post_id ~direction:Up with
    | Ok _ -> ()
    | Error e -> Alcotest.fail (show_board_error e));
   Hashtbl.remove store.posts post_id;
@@ -226,7 +226,7 @@ let test_sweep_cascades_an_expired_post_to_its_comments () =
     | Error e -> Alcotest.fail (show_board_error e)
   in
   (match
-     toggle_reaction store ~target_type:Reaction_comment
+     toggle_reaction store ~reader:Masc_board_handlers.Board_access.Operator ~target_type:Reaction_comment
        ~target_id:comment_id ~user_id:"reactor-agent" ~emoji:"👍"
    with
    | Ok _ -> ()
@@ -304,15 +304,15 @@ let test_sweep_drains_a_post_larger_than_two_comment_batches () =
   let comment_ids =
     List.init comment_count (fun _ ->
       let comment_id = insert_filler_comment () in
-      ignore (unwrap (toggle_reaction store ~target_type:Reaction_comment
+      ignore (unwrap (toggle_reaction store ~reader:Masc_board_handlers.Board_access.Operator ~target_type:Reaction_comment
         ~target_id:comment_id ~user_id:"reactor-agent" ~emoji:"👍"));
-      ignore (unwrap (vote_comment store ~voter:"voter-agent" ~comment_id
+      ignore (unwrap (vote_comment store ~reader:Masc_board_handlers.Board_access.Operator ~voter:"voter-agent" ~comment_id
         ~direction:Up));
       comment_id)
   in
-  ignore (unwrap (toggle_reaction store ~target_type:Reaction_post
+  ignore (unwrap (toggle_reaction store ~reader:Masc_board_handlers.Board_access.Operator ~target_type:Reaction_post
     ~target_id:post_id ~user_id:"reactor-agent" ~emoji:"👍"));
-  ignore (unwrap (vote store ~voter:"voter-agent" ~post_id ~direction:Up));
+  ignore (unwrap (vote store ~reader:Masc_board_handlers.Board_access.Operator ~voter:"voter-agent" ~post_id ~direction:Up));
   let current = Hashtbl.find store.posts post_id in
   Hashtbl.replace store.posts post_id { current with expires_at = 1.0 };
   (* Only removals below may dirty these rows. *)

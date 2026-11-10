@@ -2,6 +2,11 @@
     owned by the caller; this module never recursively acquires them. *)
 open Board_types
 
+val observe_guard_refusal : store -> posts_source_observation ->
+  Fs_compat.private_jsonl_guard_failure -> unit
+(** Retain a contradictory external guard observation only for this exact
+    current source. No filesystem IO or model publication is performed. *)
+
 type reserved_settlement = {
   result : (unit, board_error) result;
   exception_ : exn;

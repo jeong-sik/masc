@@ -26,3 +26,18 @@ let decode ~line text =
         error = Board_types.Invalid_posts_json { line; detail };
         diagnostics = [];
       }
+
+let latest ~post_id (snapshot : Fs_compat.private_jsonl_snapshot) =
+  let rec rows line parent = function
+    | [] -> (match parent with
+        | Some post -> Ok post
+        | None -> Error (Board_types.Post_not_found post_id))
+    | text :: remaining ->
+      match decode ~line text with
+      | Blank -> rows (line + 1) parent remaining
+      | Rejected _ -> Error (Board_types.Io_error "Board data is unavailable.")
+      | Accepted { post; _ } ->
+        let parent = if String.equal post_id (Board_types.Post_id.to_string post.id)
+          then Some post else parent in
+        rows (line + 1) parent remaining in
+  rows 1 None (String.split_on_char '\n' snapshot.bytes)

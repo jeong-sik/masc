@@ -66,13 +66,13 @@ let create_post_exn ~author ~content =
 
 (** Cast a vote and fail the test on error *)
 let vote_exn ~voter ~post_id ~direction =
-  match Board_dispatch.vote ~voter ~post_id ~direction with
+  match Board_dispatch.vote ~reader:Masc_board_handlers.Board_access.Operator ~voter ~post_id ~direction with
   | Ok _ -> ()
   | Error e -> Alcotest.fail (Board.show_board_error e)
 
 (** Cast a comment vote and fail the test on error *)
 let vote_comment_exn ~voter ~comment_id ~direction =
-  match Board_dispatch.vote_comment ~voter ~comment_id ~direction with
+  match Board_dispatch.vote_comment ~reader:Masc_board_handlers.Board_access.Operator ~voter ~comment_id ~direction with
   | Ok _ -> ()
   | Error e -> Alcotest.fail (Board.show_board_error e)
 
@@ -233,7 +233,7 @@ let test_replay_invariant () =
     (fun voter -> vote_exn ~voter ~post_id:pid ~direction:Board.Up)
     [ "p"; "q"; "r" ];
   (* Mix in a downvote to make sure it does not shift totals *)
-  ignore (Board_dispatch.vote ~voter:"s" ~post_id:pid ~direction:Board.Down);
+  ignore (Board_dispatch.vote ~reader:Masc_board_handlers.Board_access.Operator ~voter:"s" ~post_id:pid ~direction:Board.Down);
   let ledger_totals =
     Board_dispatch.get_karma_ledger ~reader:Masc_board_handlers.Board_access.Operator ()
     |> Board.totals_of_karma_ledger

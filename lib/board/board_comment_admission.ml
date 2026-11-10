@@ -32,25 +32,13 @@ let validate_parent ~reader ~post_id ~audience (post : post) =
       then Ok ()
       else Error (Validation_error "Direct Board comments can address only the parent post's readers")
 
-let parent_in_snapshot ~post_id (snapshot : Fs_compat.private_jsonl_snapshot) =
-  let rec rows line parent = function
-    | [] -> (match parent with Some post -> Ok post | None -> Error (Post_not_found post_id))
-    | text :: remaining ->
-      match Board_posts_rows.decode ~line text with
-      | Board_posts_rows.Blank -> rows (line + 1) parent remaining
-      | Board_posts_rows.Rejected _ -> unavailable ()
-      | Board_posts_rows.Accepted { post; _ } ->
-        let parent = if String.equal post_id (Post_id.to_string post.id) then Some post else parent in
-        rows (line + 1) parent remaining in
-  rows 1 None (String.split_on_char '\n' snapshot.bytes)
-
 let capture store ~reader (comment : comment) =
   let* parent = match store.posts_source with
     | Posts_readable { observation; _ } when
         String.equal observation.source_path (Board_paths.persist_path store) -> Ok observation
     | Posts_readable _ | Posts_unobserved | Posts_refused _ | Posts_unsettled _ -> unavailable () in
   let post_id = Post_id.to_string comment.post_id in
-  let* post = parent_in_snapshot ~post_id parent.snapshot in
+  let* post = Board_posts_rows.latest ~post_id parent.snapshot in
   let* audience = match comment.audience with
     | Some audience -> Ok audience
     | None -> Error (Validation_error "Comment audience is unavailable.") in

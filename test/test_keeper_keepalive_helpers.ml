@@ -1212,7 +1212,7 @@ let test_vote_on_own_post_wakes_the_author_once () =
            ~title:"keeper finding"
            ~content:"the loader skips empty fixtures"
        in
-       (match Board_dispatch.vote ~voter:"external-voter" ~post_id ~direction:Board.Up with
+       (match Board_dispatch.vote ~reader:Masc_board_handlers.Board_access.Operator ~voter:"external-voter" ~post_id ~direction:Board.Up with
         | Error error -> fail (Board.show_board_error error)
         | Ok _ -> ());
        check int "one vote is one stimulus for the author" 1
@@ -1234,14 +1234,14 @@ let test_vote_on_own_post_wakes_the_author_once () =
           check bool "author woken by the vote" true (Atomic.get entry.fiber_wakeup)
         | None -> fail "voterlane registry entry missing");
        (* Same voter, same direction: Already_voted, nothing new to act on. *)
-       (match Board_dispatch.vote ~voter:"external-voter" ~post_id ~direction:Board.Up with
+       (match Board_dispatch.vote ~reader:Masc_board_handlers.Board_access.Operator ~voter:"external-voter" ~post_id ~direction:Board.Up with
         | Error (Board.Already_voted _) -> ()
         | Ok _ -> fail "expected Already_voted"
         | Error error -> fail (Board.show_board_error error));
        check int "duplicate vote adds no stimulus" 1 (board_queue_length config meta.name);
        (* The keeper voting on its own post addresses no lane. *)
        (match
-          Board_dispatch.vote
+          Board_dispatch.vote ~reader:Masc_board_handlers.Board_access.Operator
             ~voter:meta.Keeper_meta_contract.name
             ~post_id
             ~direction:Board.Up
@@ -1287,7 +1287,7 @@ let test_vote_on_own_comment_wakes_the_commenter_not_the_poster () =
        let poster_before = board_queue_length config poster.name in
        let commenter_before = board_queue_length config commenter.name in
        (match
-          Board_dispatch.vote_comment
+          Board_dispatch.vote_comment ~reader:Masc_board_handlers.Board_access.Operator
             ~voter:"external-voter"
             ~comment_id
             ~direction:Board.Down
@@ -1701,7 +1701,7 @@ let test_committed_board_action_retains_unavailable_routing action () =
      | Error _ -> () | Ok _ -> fail "missing primary was admitted");
     KKS.wakeup_relevant_keeper_for_board_signal ~config addressed);
   (match action with
-   | `Vote -> ignore (Result.get_ok (Board_dispatch.vote
+   | `Vote -> ignore (Result.get_ok (Board_dispatch.vote ~reader:Masc_board_handlers.Board_access.Operator
        ~voter:"external-voter" ~post_id ~direction:Board.Up))
    | `Reaction -> ignore (Result.get_ok (Board_dispatch.toggle_reaction
        ~reader:Masc_board_handlers.Board_access.Operator ~target_type:Board.Reaction_post

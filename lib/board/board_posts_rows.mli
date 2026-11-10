@@ -13,3 +13,8 @@ type row =
     }
 
 val decode : line:int -> string -> row
+
+val latest : post_id:string -> Fs_compat.private_jsonl_snapshot ->
+  (Board_types.post, Board_types.board_error) result
+(** Pure physical-order lookup. Every row must decode, and the last matching
+    row wins as on reload. No parser diagnostics or other effects are emitted. *)

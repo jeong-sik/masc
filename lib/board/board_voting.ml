@@ -75,10 +75,10 @@ let save_vote_log_jsonl store content : (unit, board_error) Result.t =
 
 (* The caller retains persistence through its fresh state publication, so a
    snapshot cannot remove this row between append and memory commit. *)
-let append_admitted_vote store ~vote ~direction ~ts publish =
+let append_admitted_vote store ~admission ~vote ~direction ~ts publish =
   let* () = Board_votes_source.require_readable store in
   let* () = require_posts_source_readable store in
-  publish_vote_write store (Board_votes_source.append store (vote, direction, ts)) publish
+  publish_vote_write store (Board_votes_source.append store ~admission (vote, direction, ts)) publish
 
 let current_vote_for_post store ~voter ~post_id
     : (vote_direction option, board_error) Result.t =
@@ -99,12 +99,14 @@ let current_vote_for_post store ~voter ~post_id
           in
           Ok (Option.map fst (Hashtbl.find_opt store.vote_log vote_key)))
 
+type staged_cast = Duplicate_cast of board_error | Cast_at of float
+
 (* Write-ahead under one persistence interval: stage under the state lock,
    append outside it, then publish under a fresh state lock. Snapshot writers
    and other casts cannot pass the durable row before its memory publication.
    A fresh read preserves unrelated state-only edits. Rejection or an append
    failure occurs before any vote mutation, so nothing needs rollback. *)
-let vote store ~voter ~post_id ~direction : (int, board_error) Result.t =
+let vote store ~reader ~voter ~post_id ~direction : (int, board_error) Result.t =
   match Agent_id.of_string voter with
   | Error e -> Error e
   | Ok agent ->
@@ -117,22 +119,27 @@ let vote store ~voter ~post_id ~direction : (int, board_error) Result.t =
       let post_key = Post_id.to_string pid in
       let vote_id = Board_vote_key.post ~post_id:pid ~voter:agent in
       let vote_key = Board_vote_key.to_string vote_id in
-      let staged : (float, board_error) Result.t =
+      let staged =
         with_lock store (fun () ->
+          let* admission = Board_target_admission.capture store ~reader
+              ~target_type:Reaction_post ~target_id:post_id in
           match Hashtbl.find_opt store.posts post_key with
           | None -> Error (Post_not_found post_id)
           | Some _post ->
               let previous = Option.map fst (Hashtbl.find_opt store.vote_log vote_key) in
               match Board_vote_transition.decide ~previous ~direction with
               | Board_vote_transition.Already_cast ->
-                  Error (Already_voted (Printf.sprintf "%s already voted %s on %s"
-                    voter (vote_direction_to_string direction) post_id))
-              | Board_vote_transition.Cast _ -> Ok (Time_compat.now ()))
+                  Ok (admission, Duplicate_cast (Already_voted (Printf.sprintf "%s already voted %s on %s"
+                    voter (vote_direction_to_string direction) post_id)))
+              | Board_vote_transition.Cast _ -> Ok (admission, Cast_at (Time_compat.now ())))
       in
       (match staged with
        | Error _ as e -> e
-       | Ok ts ->
-         append_admitted_vote store ~vote:vote_id ~direction ~ts (fun () ->
+       | Ok (admission, Duplicate_cast failure) ->
+         Board_votes_source.finish_check
+           (Board_votes_source.check_admission store ~admission) (Error failure)
+       | Ok (admission, Cast_at ts) ->
+         append_admitted_vote store ~admission ~vote:vote_id ~direction ~ts (fun () ->
               with_lock store (fun () ->
                 match Hashtbl.find_opt store.posts post_key with
                 | None -> Error (Post_not_found post_id)
@@ -188,7 +195,7 @@ let current_vote_for_comment store ~voter ~comment_id
           Ok (Option.map fst (Hashtbl.find_opt store.vote_log vote_key)))
 
 (** Vote on a comment. Same write-ahead shape as {!vote}. *)
-let vote_comment store ~voter ~comment_id ~direction : (int, board_error) Result.t =
+let vote_comment store ~reader ~voter ~comment_id ~direction : (int, board_error) Result.t =
   match Agent_id.of_string voter with
   | Error e -> Error e
   | Ok agent ->
@@ -201,22 +208,27 @@ let vote_comment store ~voter ~comment_id ~direction : (int, board_error) Result
       let comment_key = Comment_id.to_string cid in
       let vote_id = Board_vote_key.comment ~comment_id:cid ~voter:agent in
       let vote_key = Board_vote_key.to_string vote_id in
-      let staged : (float, board_error) Result.t =
+      let staged =
         with_lock store (fun () ->
+          let* admission = Board_target_admission.capture store ~reader
+              ~target_type:Reaction_comment ~target_id:comment_id in
           match Hashtbl.find_opt store.comments comment_key with
           | None -> Error (Comment_not_found comment_id)
           | Some _cmt ->
               let previous = Option.map fst (Hashtbl.find_opt store.vote_log vote_key) in
               match Board_vote_transition.decide ~previous ~direction with
               | Board_vote_transition.Already_cast ->
-                  Error (Already_voted (Printf.sprintf "%s already voted %s on comment %s"
-                    voter (vote_direction_to_string direction) comment_id))
-              | Board_vote_transition.Cast _ -> Ok (Time_compat.now ()))
+                  Ok (admission, Duplicate_cast (Already_voted (Printf.sprintf "%s already voted %s on comment %s"
+                    voter (vote_direction_to_string direction) comment_id)))
+              | Board_vote_transition.Cast _ -> Ok (admission, Cast_at (Time_compat.now ())))
       in
       (match staged with
        | Error _ as e -> e
-       | Ok ts ->
-         append_admitted_vote store ~vote:vote_id ~direction ~ts (fun () ->
+       | Ok (admission, Duplicate_cast failure) ->
+         Board_votes_source.finish_check
+           (Board_votes_source.check_admission store ~admission) (Error failure)
+       | Ok (admission, Cast_at ts) ->
+         append_admitted_vote store ~admission ~vote:vote_id ~direction ~ts (fun () ->
               with_lock store (fun () ->
                 match Hashtbl.find_opt store.comments comment_key with
                 | None -> Error (Comment_not_found comment_id)

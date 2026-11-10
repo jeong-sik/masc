@@ -150,7 +150,7 @@ let test_individual_snapshot_failure path () =
     (require_ok
        (Board_dispatch.add_comment ~reader:Masc_board_handlers.Board_access.Operator ~post_id ~author:"comment-author"
           ~content:"dependent reply" ()));
-  ignore (require_ok (Board_dispatch.vote ~post_id ~voter:"voter" ~direction:Board.Up));
+  ignore (require_ok (Board_dispatch.vote ~reader:Masc_board_handlers.Board_access.Operator ~post_id ~voter:"voter" ~direction:Board.Up));
   ignore
     (require_ok
        (Board_dispatch.toggle_reaction ~reader:Masc_board_handlers.Board_access.Operator ~target_type:Board.Reaction_post
@@ -221,8 +221,8 @@ let test_failed_comments_write_preserves_later_sources () =
   let post_id = Board.Post_id.to_string doomed.id in
   ignore (require_ok (Board.add_comment ~reader:Masc_board_handlers.Board_access.Operator active ~lookup:Recipient_lookup.none_declared
     ~post_id ~author:"comment-author" ~content:"original dependent reply" ()));
-  ignore (require_ok (Board.vote active ~post_id ~voter:"voter" ~direction:Board.Up));
-  ignore (require_ok (Board.toggle_reaction active ~target_type:Board.Reaction_post
+  ignore (require_ok (Board.vote active ~reader:Masc_board_handlers.Board_access.Operator ~post_id ~voter:"voter" ~direction:Board.Up));
+  ignore (require_ok (Board.toggle_reaction active ~reader:Masc_board_handlers.Board_access.Operator ~target_type:Board.Reaction_post
     ~target_id:post_id ~user_id:"reactor" ~emoji:"👍"));
   Board.flush_dirty active;
   let later = List.map (fun path -> path, Fs_compat.load_file path)

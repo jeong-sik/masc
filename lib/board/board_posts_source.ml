@@ -329,6 +329,14 @@ let write store ~pre_write ~kind ~workspace_observation ~bytes ~diagnostics perf
     write_raised store ~pre_write ~kind ~bytes ~diagnostics
       exception_ (Printexc.get_raw_backtrace ())
 
+let observe_guard_refusal store observation failure =
+  match store.posts_source with
+  | Posts_readable current when current.observation == observation
+      && String.equal failure.Fs_compat.guard_path observation.source_path
+      && contradicts_observation failure.guard_error ->
+    refused store (Posts_transaction_failed failure.guard_error) [Posts_guard_diagnostic failure]
+  | Posts_readable _ | Posts_unobserved | Posts_refused _ | Posts_unsettled _ -> ()
+
 let not_written failure diagnostics = Posts_not_written { failure; diagnostics }
 
 (* A refused workspace marks the store refused; a reserved cause in the

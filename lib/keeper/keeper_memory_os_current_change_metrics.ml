@@ -44,18 +44,26 @@ let of_change ~absorbed ~revisions (change : Keeper_memory_os_current_types.chan
 
 (* A program commits once, so it is counted once: from the facts it started
    from to the facts it left, with the absorptions and revisions of all its
-   stages. A fact one stage added and a later stage removed was never in a
-   committed snapshot, so it counts nowhere. *)
+   stages. Like a disposition, which needs the replacing claim in the
+   snapshot it commits, an absorption or revision counts only when the claim
+   it went into is in the final facts; a later stage that dropped that claim
+   leaves the initial fact dropped. A fact one stage added and a later stage
+   removed was never in a committed snapshot, so it counts nowhere. *)
 let of_publication (publication : Keeper_memory_os_program_types.publication) =
   let execution = publication.execution in
+  let final = ids execution.final_facts in
   let applied select = List.concat_map select execution.stages in
   classify
     ~before:execution.initial_facts
     ~after:execution.final_facts
     ~absorbed:
-      (applied (fun (stage : Keeper_memory_os_program_types.stage) -> stage.absorbed_applied))
+      (applied (fun (stage : Keeper_memory_os_program_types.stage) -> stage.absorbed_applied)
+       |> List.filter (fun (statement : Keeper_memory_os_types.absorbed_statement) ->
+         Ids.mem statement.into final))
     ~revisions:
-      (applied (fun (stage : Keeper_memory_os_program_types.stage) -> stage.revisions_applied))
+      (applied (fun (stage : Keeper_memory_os_program_types.stage) -> stage.revisions_applied)
+       |> List.filter (fun (revision : Keeper_memory_os_types.revision) ->
+         Ids.mem revision.superseded_by final))
 ;;
 
 type 'a change_count =

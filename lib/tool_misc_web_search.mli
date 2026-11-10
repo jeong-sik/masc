@@ -96,11 +96,14 @@ type provider_error =
   | Server of string     (** endpoint returned a non-200 status or no status *)
   | Config of string     (** missing credentials / invalid configuration *)
   | Parse of string      (** payload could not be parsed into hits *)
+  | Account_refused of Runtime_account_access.refusal
+      (** the provider needs a key, and the process does not send with the
+          keys of its host (plan D4d) *)
 
 val provider_error_to_string : provider_error -> string
 (** [provider_error_to_string err] renders a typed per-provider
     failure as a human-readable, query-safe string with a
-    [transport:] / [server:] / [config:] / [parse:] prefix.
+    [transport:] / [server:] / [config:] / [parse:] / [account:] prefix.
     Used by {!search_impl}'s aggregate boundary so the fallback
     chain preserves the per-provider failure class instead of
     collapsing it into an opaque string. *)
@@ -212,7 +215,11 @@ val handle : tool_name:string -> start_time:Tool_timing.started -> Yojson.Safe.t
     - [Workflow_rejection]: empty query input.
     - [Dependency_unavailable]: no configured provider.
     - [Runtime_failure]: every provider failed. A valid empty result is
-      successful and keeps any failed providers in [provider_errors]. *)
+      successful and keeps any failed providers in [provider_errors].
+    - [Policy_rejection]: a multi-account process sends nothing with the keys
+      of its host, and no provider of the order needs none. SearXNG needs
+      none, so it still searches there; a provider with a key fails in the
+      chain with an [account:] error. *)
 
 val addon_search_runner :
   query:string -> limit:int option -> (Lane_addon_search_result.result, string) result

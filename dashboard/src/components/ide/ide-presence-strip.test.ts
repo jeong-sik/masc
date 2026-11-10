@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { acceptedExecutionWorkspace } from '../../execution-workspace-authority'
 import { h, render } from 'preact'
 import { waitFor } from '@testing-library/preact'
-import { globalPresenceSnapshot, LOADING_SNAPSHOT } from './keeper-presence-store'
+import { globalPresenceSnapshot, resetGlobalPresenceSnapshot } from './keeper-presence-store'
 import { IdePresenceStrip, prLabel } from './ide-presence-strip'
 
 describe('prLabel', () => {
@@ -38,7 +38,7 @@ describe('IdePresenceStrip', () => {
   afterEach(() => {
     vi.useRealTimers()
     vi.unstubAllGlobals()
-    globalPresenceSnapshot.value = LOADING_SNAPSHOT
+    resetGlobalPresenceSnapshot()
     acceptedExecutionWorkspace.value = null
   })
 

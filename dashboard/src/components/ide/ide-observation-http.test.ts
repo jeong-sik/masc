@@ -8,7 +8,7 @@ import { keepers } from '../../store'
 import { IdePresenceStrip } from './ide-presence-strip'
 import { IdeActivityPanel } from './ide-activity-panel'
 import { IdePersistencePanel } from './ide-persistence-panel'
-import { globalPresenceSnapshot, LOADING_SNAPSHOT } from './keeper-presence-store'
+import { globalPresenceSnapshot, LOADING_SNAPSHOT, resetGlobalPresenceSnapshot } from './keeper-presence-store'
 import { clearTraces } from './keeper-trace-store'
 
 const keeperName = 'same-keeper'
@@ -53,7 +53,7 @@ beforeEach(() => {
   setStoredToken('ide-observation-credential', { source: 'manual' })
   workspace('A')
   keepers.value = []
-  globalPresenceSnapshot.value = LOADING_SNAPSHOT
+  resetGlobalPresenceSnapshot()
   clearTraces()
   vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible')
   vi.spyOn(console, 'warn').mockImplementation(() => {})
@@ -62,7 +62,7 @@ afterEach(() => {
   cleanup()
   acceptedExecutionWorkspace.value = null
   clearStoredToken()
-  globalPresenceSnapshot.value = LOADING_SNAPSHOT
+  resetGlobalPresenceSnapshot()
   clearTraces()
   vi.restoreAllMocks()
   vi.unstubAllGlobals()
@@ -133,4 +133,21 @@ it('does not let a transient graph failure hide the bridge HTTP refusal', async 
   publishDashboardObservationRecovery()
   await act(async () => { await vi.advanceTimersByTimeAsync(300_000) })
   expect(fetch.mock.calls.map(([path]) => pathname(path))).toEqual(['/api/v1/activity/events', '/api/v1/ide/events'])
+})
+
+it.each(['workspace', 'credential'] as const)('does not expose cached presence to another consumer after an unmounted %s change', async changed => {
+  const fetch = vi.fn(async (path: string) => pathname(path) === '/api/v1/ide/presence'
+    ? answer(path) : Response.json({ error: 'access refused' }, { status: 403 }))
+  vi.stubGlobal('fetch', fetch)
+  const header = render(html`<${Presence} />`)
+  await settle()
+  expect(globalPresenceSnapshot.value.kind).toBe('live')
+  header.unmount()
+  if (changed === 'workspace') workspace('B')
+  else setStoredToken('new-owner-credential', { source: 'manual' })
+  render(html`<${IdePersistencePanel} keeperName="A-keeper" />`)
+  await settle()
+  expect(globalPresenceSnapshot.value).toEqual(LOADING_SNAPSHOT)
+  expect(screen.queryByLabelText('Keeper status: ACTIVE')).toBeNull()
+  expect(fetch.mock.calls.filter(([path]) => pathname(path) === '/api/v1/ide/presence')).toHaveLength(1)
 })

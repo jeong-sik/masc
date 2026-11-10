@@ -1,5 +1,11 @@
-import { signal } from '@preact/signals'
+import { computed, signal } from '@preact/signals'
 import { hasNonEmptyStringField, isRecord } from '../common/normalize'
+import {
+  dashboardObservationOwnerHasWorkspace,
+  dashboardObservationOwnerIsCurrent,
+  readDashboardObservationOwner,
+  type DashboardObservationOwner,
+} from '../../lib/observation-read-owner'
 
 export type KeeperPresenceStatus = 'active' | 'idle' | 'blocked'
 
@@ -28,7 +34,30 @@ export function disconnectedSnapshot(reason: string): KeeperPresenceSnapshot {
   return { kind: 'disconnected', reason }
 }
 
-export const globalPresenceSnapshot = signal<KeeperPresenceSnapshot>(LOADING_SNAPSHOT)
+const loadedGlobalPresence = signal<{
+  readonly owner: DashboardObservationOwner
+  readonly snapshot: KeeperPresenceSnapshot
+} | null>(null)
+
+/** Readers recheck the original owner even when no header was mounted to
+ * observe an authority change. No request or retry timer runs here; reactive
+ * dependency tracking follows the consumers. */
+export const globalPresenceSnapshot = computed<KeeperPresenceSnapshot>(() => {
+  void readDashboardObservationOwner()
+  const loaded = loadedGlobalPresence.value
+  return loaded !== null && dashboardObservationOwnerIsCurrent(loaded.owner)
+    ? loaded.snapshot : LOADING_SNAPSHOT
+})
+
+export function publishGlobalPresenceSnapshot(owner: DashboardObservationOwner, snapshot: KeeperPresenceSnapshot): boolean {
+  if (!dashboardObservationOwnerHasWorkspace(owner) || !dashboardObservationOwnerIsCurrent(owner)) return false
+  loadedGlobalPresence.value = { owner, snapshot }
+  return true
+}
+
+export function resetGlobalPresenceSnapshot(): void {
+  loadedGlobalPresence.value = null
+}
 
 export interface KeeperPresenceStore {
   readonly seed: (snapshot: unknown) => boolean

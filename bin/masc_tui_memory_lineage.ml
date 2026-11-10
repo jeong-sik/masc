@@ -149,8 +149,7 @@ let transition_svg ~ko ~palette (chart : t) =
       let height = card_height (List.length facts) in
       add "<rect x=\"%d\" y=\"%d\" width=\"384\" height=\"%d\" rx=\"14\" fill=\"%s\" stroke=\"%s\" stroke-width=\"1.5\"/>\n" x y height panel accent;
       add "<rect x=\"%d\" y=\"%d\" width=\"3\" height=\"26\" rx=\"1.5\" fill=\"%s\"/>\n" (x + 1) (y + 20) accent;
-      line ~x:(x + 18) ~y:(y + 26) ~size:12
-        (Printf.sprintf "%02d  ·  %s" (i + 1) (Layout.truncate_middle 24 fact.memory_id));
+      line ~x:(x + 18) ~y:(y + 26) ~size:12 (Printf.sprintf "%02d" (i + 1));
       List.iteri (fun row value -> line ~x:(x + 18) ~y:(y + 57 + row * 24) ~size:16 value)
         (excerpt ~max_lines:((height - 68) / 24) (body fact))) facts in
   cards ~x:32 ~accent:before_accent event.before;

@@ -19,7 +19,9 @@ val set : base_path:string -> actor:string -> Published_artifact_check.request -
 (** Verifies the exact published revision and digest before an atomic replacement
     at the exact stable-lock file cursor. A published rename whose durability or
     settlement is uncertain returns [Commit_uncertain]; reread before retrying.
-    Unchecking persists a new change ID rather than deleting state. *)
+    Unchecking persists a new change ID rather than deleting state.
+    A rewrite attempt notifies the typed Dashboard commit hook after its
+    settlement, preserving successful and uncertain operation results. *)
 
 module For_testing : sig
   val set_with_rewrite_io : io:Fs_compat.private_jsonl_transaction_io_for_testing ->

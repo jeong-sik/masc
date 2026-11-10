@@ -135,6 +135,21 @@ let dashboard_query_cache_key config prefix fields =
   dashboard_cache_key config prefix (dashboard_query_cache_suffix fields)
 ;;
 
+let tool_metrics_series_cache_prefix ~base_path =
+  partition_cache_key
+    ~partition:(cache_partition_of_base_path ~base_path)
+    "tool_metrics_series" ""
+;;
+
+let tool_metrics_series_cache_key (config : Workspace.config) fields =
+  tool_metrics_series_cache_prefix ~base_path:config.base_path
+  ^ dashboard_query_cache_suffix fields
+;;
+
+let invalidate_tool_metrics_series ~base_path =
+  Dashboard_cache.invalidate_prefix (tool_metrics_series_cache_prefix ~base_path)
+;;
+
 (* Keyed by base path rather than config: the schedule store's change observer
    is handed only the base path of the workspace it wrote. *)
 let scheduled_automation_cache_key ~base_path =

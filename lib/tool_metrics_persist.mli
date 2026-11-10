@@ -6,12 +6,14 @@
 
     @since 2.108.0 — Issue #3280 *)
 
-val enqueue : masc_root:string -> Tool_result.result -> unit
+val enqueue : base_path:string -> Tool_result.result -> unit
 (** Persist one completed tool invocation. This call writes directly to
     SQLite before returning; there is no process-local write queue. Storage
     failures are logged and counted, but do not raise into tool dispatch.
     WAL with [synchronous=NORMAL] preserves committed rows across process
-    crashes; host power-loss durability is outside this contract. *)
+    crashes; host power-loss durability is outside this contract.
+    [base_path] is the workspace owner, retained unchanged in its after-write
+    observation. The SQLite path is resolved from that owner here. *)
 
 type hydrate_report = {
   loaded_records : int;
@@ -19,7 +21,7 @@ type hydrate_report = {
 }
 
 val hydrate :
-  masc_root:string ->
+  base_path:string ->
   retention_days:int ->
   (hydrate_report, string) result
 (** Delete rows older than [retention_days], then replace the in-memory

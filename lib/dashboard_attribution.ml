@@ -28,7 +28,9 @@ let record_with_time ~now (attr : Attribution.t) =
         ignore (Queue.pop q)
       done)
 
-let record attr = record_with_time ~now:(Unix.gettimeofday ()) attr
+let record attr =
+  record_with_time ~now:(Unix.gettimeofday ()) attr;
+  Dashboard_observation_commit.process_written `Attribution
 
 (* Snapshot newest-first: fold accumulates as (new :: acc) reversed by
    Queue.fold's left-fold over FIFO order, so a second reverse after take. *)

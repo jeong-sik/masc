@@ -667,8 +667,11 @@ let scenario mode =
         let tapped = answered (issue (B.Page_interact {tab_id=1;expected_url=Some "https://fixture.test/";action=B.Tap_at {point={x=0.5;y=0.5};viewport={document_id="d1";width=800.;height=600.;scroll_x=0.;scroll_y=0.}}})) in
         check string "a tap reaches ego as its touch step" "page.touch"
           (read (Filename.concat root "touched"));
+        (* The peer adds refsInvalidated to the touch receipt
+           (lib/browser_ego_peer.ml:2200-2202), and the receipt becomes the
+           answer's data, so it is read there and not at the top level. *)
         check bool "the tap answer reports snapshot refs invalidated" true
-          Yojson.Safe.Util.(member "refsInvalidated" tapped = `Bool true);
+          Yojson.Safe.Util.(tapped |> member "data" |> member "refsInvalidated" = `Bool true);
         ignore (answered (issue (B.Page_act (B.Action.Control B.Action.Space_status))));
         check string "explicit refresh reaches ordinary connection observations" "Renamed native Space"
           Yojson.Safe.Util.(published_space_observation () |> member "spaceName" |> to_string);

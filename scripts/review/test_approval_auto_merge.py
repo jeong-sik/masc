@@ -618,15 +618,20 @@ class FollowingAcceptedMerges(unittest.TestCase):
         environment = {'GITHUB_REPOSITORY': REPO, 'GITHUB_EVENT_NAME': 'workflow_dispatch',
                        'DISPATCH_PR': '102', 'DISPATCH_RECEIPT': json.dumps(receipt),
                        'GITHUB_STEP_SUMMARY': ''}
+        # This case watches re-submission. A merged verdict now also asks the
+        # main build to wake, which reaches the same `subprocess.run` mock, so
+        # separate that call here and keep `run` for the re-submit question.
         with patch.dict(os.environ, environment), patch.object(sys, 'argv', ['auto-merge']), \
              patch.object(MERGE, 'auto_merge_default') as arm, patch.object(MERGE, 'prepare') as admit, \
              patch.object(MERGE.subprocess, 'run') as run, \
+             patch.object(MERGE, 'wake_main_build', return_value={'dispatched': True}) as wake, \
              patch.object(MERGE, 'read', return_value={'status': 'enqueued'}) as read, \
              patch.object(MERGE, 'pull', side_effect=lambda r, n: self.landed(n)), \
              redirect_stdout(io.StringIO()) as output:
             code = MERGE.main()
         self.assertEqual(code, 0)
         arm.assert_not_called(); admit.assert_not_called(); run.assert_not_called()
+        wake.assert_called_once_with(REPO)
         read.assert_called_once_with(PREFIX + f'/pulls/102/merge-async/{UUID}')
         self.assertIn('"status": "merged"', output.getvalue())
 

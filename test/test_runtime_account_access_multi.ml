@@ -219,6 +219,31 @@ streaming = true
      | [] | _ :: _ :: _ -> Alcotest.fail "the API runtime fixture declares one binding")
 ;;
 
+(* The runtime.toml of the base path with one setup connection: an
+   OpenAI-compatible endpoint on [port] whose key its operator declared in
+   [key_variable]. *)
+let setup_runtime_toml ~port ~key_variable =
+  Printf.sprintf
+    {|
+[providers.operator]
+display-name = "Operator endpoint"
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:%d/v1"
+[providers.operator.credentials]
+type = "env"
+key = "%s"
+|}
+    port
+    key_variable
+;;
+
+let rec make_dirs path =
+  if not (Sys.file_exists path)
+  then (
+    make_dirs (Filename.dirname path);
+    Unix.mkdir path 0o700)
+;;
+
 let test_multi_account () =
   Eio_main.run (fun env ->
     let root = Filename.temp_dir "runtime-account-access-multi-" "" in
@@ -373,20 +398,37 @@ let test_multi_account () =
         (* A host client starts on an account of the host, which a
            multi-account process shares with no person (plan D3b). An API
            provider of the runtime table sends with the credential its
-           operator declared, an account of the host too (plan D4). *)
+           operator declared, an account of the host too (plan D4), and so
+           do the requests outside the table (plan D4b). *)
         List.iter
           (fun client ->
             match client, Access.authorize_host client with
-            | (Access.Antigravity | Access.Vibe | Access.Api_provider), Ok (_ : Access.host_account) ->
-              Alcotest.fail "a host client was allowed"
+            | ( ( Access.Antigravity
+                | Access.Vibe
+                | Access.Api_provider
+                | Access.Model_list
+                | Access.Files_api
+                | Access.Replacement_catalog )
+              , Ok (_ : Access.host_account) ) -> Alcotest.fail "a host client was allowed"
             | Access.Antigravity, Error (Access.Host_account Access.Antigravity)
             | Access.Vibe, Error (Access.Host_account Access.Vibe)
-            | Access.Api_provider, Error (Access.Host_account Access.Api_provider) -> ()
-            | (Access.Antigravity | Access.Vibe | Access.Api_provider), Error refusal ->
+            | Access.Api_provider, Error (Access.Host_account Access.Api_provider)
+            | Access.Model_list, Error (Access.Host_account Access.Model_list)
+            | Access.Files_api, Error (Access.Host_account Access.Files_api)
+            | Access.Replacement_catalog, Error (Access.Host_account Access.Replacement_catalog)
+              -> ()
+            | ( ( Access.Antigravity
+                | Access.Vibe
+                | Access.Api_provider
+                | Access.Model_list
+                | Access.Files_api
+                | Access.Replacement_catalog )
+              , Error refusal ) ->
               Alcotest.failf
                 "a host client was refused for another reason: %s"
                 (Access.refusal_to_string refusal))
-          [ Access.Antigravity; Access.Vibe; Access.Api_provider ];
+          Access.
+            [ Antigravity; Vibe; Api_provider; Model_list; Files_api; Replacement_catalog ];
         (* An API runtime of the table is sealed. A sender takes its config
            only through the access, which refuses it here; a reader sees the
            declaration without the credential; and a verification, a real
@@ -449,6 +491,73 @@ let test_multi_account () =
                "account_not_authorized"
                (Runtime_verification.failure_code failure)
            | None -> Alcotest.fail "the verification of an API runtime ran");
+          (* Outside the table (plan D4b). A model-list request of a setup
+             connection sends with the credential its operator declared, so
+             the setup route is refused before it sends, though the key is
+             set. *)
+          let key_variable = "MASC_TEST_D4B_OPERATOR_KEY" in
+          Unix.putenv key_variable "operator-key";
+          let config_dir = Filename.concat (Common.masc_dir_from_base_path ~base_path) "config" in
+          make_dirs config_dir;
+          Out_channel.with_open_bin (Filename.concat config_dir "runtime.toml") (fun channel ->
+            Out_channel.output_string channel (setup_runtime_toml ~port ~key_variable));
+          (match
+             Server_runtime_setup_actions.discover
+               ~binary:Sys.executable_name
+               ~sw
+               ~net:env#net
+               ~base_path
+               (`Assoc [ "integration_id", `String "operator" ])
+           with
+           | Error
+               (Server_runtime_setup_actions.Account_refused
+                  (Access.Host_account Access.Model_list)) -> ()
+           | Error error ->
+             Alcotest.failf
+               "the model list was refused for another reason: %s"
+               (Server_runtime_setup_actions.error_message error)
+           | Ok (_ : Yojson.Safe.t) -> Alcotest.fail "the model list of a setup connection was read");
+          (* The Files API of masc_file_* is called with DEEPSEEK_API_KEY. The
+             tool is refused before it reads the key, so the refusal comes
+             though no key is set here. *)
+          Unix.putenv "DEEPSEEK_API_KEY" "";
+          let files =
+            Eio_context.with_test_env
+              ~net:env#net
+              ~clock:env#clock
+              ~mono_clock:env#mono_clock
+              ~sw
+              (fun () ->
+                Masc.Keeper_tool_in_process_runtime.handle_masc_file_with_outcome
+                  ~name:"masc_file_list"
+                  ~args:(`Assoc [])
+                  ())
+          in
+          (match Yojson.Safe.from_string files.Masc.Keeper_tool_execution.raw_output with
+           | `Assoc fields ->
+             Alcotest.(check (option string))
+               "the Files API is refused for the account"
+               (Some (Access.refusal_to_string (Access.Host_account Access.Files_api)))
+               (match List.assoc_opt "error" fields with
+                | Some (`String error) -> Some error
+                | Some _ | None -> None)
+           | _ -> Alcotest.fail "the Files API answered no JSON object");
+          (* A full replacement catalog carries its own providers and their
+             credentials, so its registry build is refused before the file is
+             read. *)
+          Unix.putenv
+            Runtime.agent_core_model_catalog_env_var_name
+            (Filename.concat root "replacement-catalog.json");
+          let replacement = Runtime.exact_output_resolver_catalog ~exact_output_lane_decls:[] [] in
+          Unix.putenv Runtime.agent_core_model_catalog_env_var_name "";
+          (match replacement with
+           | Error (Access.Host_account Access.Replacement_catalog) -> ()
+           | Error refusal ->
+             Alcotest.failf
+               "the replacement catalog was refused for another reason: %s"
+               (Access.refusal_to_string refusal)
+           | Ok (_ : Runtime.exact_output_catalog) ->
+             Alcotest.fail "the replacement catalog was allowed");
           Alcotest.(check int) "the endpoint saw no connection" 0 (Atomic.get connections));
         (* A native tool runs as the user of the server process and reaches
            the account homes of other people, so a model turn runs here only

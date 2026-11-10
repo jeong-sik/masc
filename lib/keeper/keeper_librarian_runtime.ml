@@ -261,16 +261,37 @@ type inference =
       ; observe_failure : Keeper_librarian_input_refusal.t list option -> unit
       }
 
-(* A best-effort run commits an accepted Memory answer under the pass that
-   called it. An inference returns its answer and never commits. *)
+(* A scope that writes Memory names the pass its commit is counted under. A
+   context-only run commits no Memory, so it names none. *)
+type write_scope =
+  | Context_only
+  | Context_and_memory of Keeper_memory_commit_pass.t
+  | Memory_maintenance of Keeper_memory_commit_pass.t
+
+(* How an accepted Memory answer of a best-effort run commits: under the pass
+   its scope names, organizing the working contexts too unless the run is a
+   standalone Memory maintenance run. Only a scope that writes Memory makes
+   one, so an inference or a context-only run has nothing to commit with. *)
+type memory_commit =
+  | Commit_with_contexts of Keeper_memory_commit_pass.t
+  | Commit_maintenance of Keeper_memory_commit_pass.t
+
+let memory_commit_pass = function
+  | Commit_with_contexts pass | Commit_maintenance pass -> pass
+;;
+
+(* A best-effort run commits an accepted Memory answer under its write scope.
+   An inference returns its answer and never commits. *)
 type run_kind =
-  | Best_effort of Keeper_memory_commit_pass.t
+  | Best_effort of write_scope
   | Inference of inference
 
 (* Memory inference asks the same Memory question without publishing. Context
-   passes ask only for continuation or queue organization, never Memory. *)
-type pass =
-  | Memory_pass of Keeper_librarian_continuity.prepared option
+   passes ask only for continuation or queue organization, never Memory. A
+   Memory pass carries what its accepted answer commits with; a prompt measured
+   outside a run carries [()]. *)
+type 'commit pass =
+  | Memory_pass of Keeper_librarian_continuity.prepared option * 'commit
   | Continuity_state_pass of Keeper_librarian_continuity.prepared
   | Volatile_state_pass of string option * Keeper_librarian_unread.t list
   | Volatile_memory_pass of string option * Keeper_librarian_unread.t list
@@ -287,15 +308,15 @@ let prompt_key_of_pass = function
    live queue; its source is the exact prepared checkpoint interval. *)
 let input_for_pass pass (input : Keeper_librarian.input) =
   match pass with
-  | Memory_pass None | Working_context_pass -> input
-  | Memory_pass (Some _) | Continuity_state_pass _ | Volatile_state_pass _
+  | Memory_pass (None, _) | Working_context_pass -> input
+  | Memory_pass (Some _, _) | Continuity_state_pass _ | Volatile_state_pass _
   | Volatile_memory_pass _ ->
     { input with working_context = Keeper_librarian_context.empty }
 
 let prompt_variables_of_pass pass input =
   match pass with
-  | Memory_pass None -> Keeper_librarian.prompt_variables input
-  | Memory_pass (Some prepared) ->
+  | Memory_pass (None, _) -> Keeper_librarian.prompt_variables input
+  | Memory_pass (Some prepared, _) ->
     ("continuity", Yojson.Safe.to_string (Keeper_librarian_continuity.prompt_json prepared))
     :: List.remove_assoc "continuity" (Keeper_librarian.prompt_variables input)
   | Continuity_state_pass prepared ->
@@ -316,7 +337,7 @@ let prompt_variables_of_pass pass input =
 ;;
 
 let librarian_prompt_variables ?continuity input =
-  let pass = Memory_pass continuity in
+  let pass = Memory_pass (continuity, ()) in
   with_working_contexts_rule (prompt_variables_of_pass pass (input_for_pass pass input))
 ;;
 
@@ -608,8 +629,8 @@ let flow_candidates selected_slots =
 
 let output_requirement_of_pass pass =
   let schema = match pass with
-    | Memory_pass None -> Keeper_structured_output_schema.librarian_current_output_schema
-    | Memory_pass (Some _) | Volatile_memory_pass _ ->
+    | Memory_pass (None, _) -> Keeper_structured_output_schema.librarian_current_output_schema
+    | Memory_pass (Some _, _) | Volatile_memory_pass _ ->
       Keeper_structured_output_schema.librarian_continuity_output_schema
     | Continuity_state_pass _ | Volatile_state_pass _ ->
       Keeper_structured_output_schema.librarian_continuity_state_output_schema
@@ -823,7 +844,7 @@ let fit_continuity ~capacity ~base_path ~keeper_id ~input_for prepared =
       let* actual_chars = Runtime_codex_app_server.prompt_char_count prompt in
       Ok (actual_chars <= capacity.capacity.max_chars)
     in
-    let* memory_fits = pass_fits (Memory_pass (Some continuity)) in
+    let* memory_fits = pass_fits (Memory_pass (Some continuity, ())) in
     if memory_fits then pass_fits (Continuity_state_pass continuity) else Ok false)
 ;;
 
@@ -1007,10 +1028,10 @@ let durable_memory_step ~run_id (step : durable_step_preparation) (proposal : du
 (* The accepted answer of each pass. A context-only answer carries no
    selection, so nothing downstream can reach a Memory field it never asked
    for. *)
-type memory_target = Commit_memory | Infer_memory_state of string
+type 'commit memory_target = Commit_memory of 'commit | Infer_memory_state of string
 
-type answer =
-  | Memory_answer of accepted * memory_target
+type 'commit answer =
+  | Memory_answer of accepted * 'commit memory_target
   | Admission_deferred_answer
   | Continuity_state_answer of
       { prepared : Keeper_librarian_continuity.prepared
@@ -1021,9 +1042,9 @@ type answer =
 
 let validate_answer pass selected_input output =
   match pass with
-  | Memory_pass continuity ->
+  | Memory_pass (continuity, commit) ->
     validate_selection ?continuity selected_input output
-    |> Result.map (fun accepted -> Memory_answer (accepted, Commit_memory))
+    |> Result.map (fun accepted -> Memory_answer (accepted, Commit_memory commit))
   | Volatile_memory_pass _ ->
     let open Result.Syntax in
     let* accepted = validate_selection selected_input output in
@@ -1089,10 +1110,10 @@ let validate_admission_proposal ~now ~batch ~input:selected_input output =
     Ok (Accepted {accepted with required_memory_ids; explicit_candidate_ids;
       admission_support = change_support; admission_recall_bindings = List.rev admission_recall_bindings})
 ;;
-let validate_admission_answer ~now batch input output =
+let validate_admission_answer ~commit ~now batch input output =
   validate_admission_proposal ~now ~batch ~input output |> Result.map (function
     | Deferred -> Admission_deferred_answer
-    | Accepted accepted -> Memory_answer (accepted,Commit_memory))
+    | Accepted accepted -> Memory_answer (accepted,Commit_memory commit))
 ;;
 
 let try_cli_slots
@@ -1307,7 +1328,7 @@ let execute_exact_output_classified
   let open Result.Syntax in
   let* selected_slots, cli_slots = resolve_librarian_slots ~base_path ~keeper_id in
   execute_answer ~selected_slots ~cli_slots
-    ~requirement:(output_requirement_of_pass (Memory_pass continuity))
+    ~requirement:(output_requirement_of_pass (Memory_pass (continuity, ())))
     ~validate:(validate_selection ?continuity selected_input)
     ?cli_runner ~clock ~net ~base_path ~keeper_id ~messages ()
 ;;
@@ -1514,8 +1535,6 @@ let context_write_json = function
   | Write_failed detail -> `Assoc ["status", `String "failed"; "detail", `String detail]
 ;;
 
-type write_scope = Context_only | Context_and_memory | Memory_maintenance
-
 (* How one continuity publication ended. The caller that owns nothing else
    decides its run's outcome from it. *)
 type continuity_publication =
@@ -1538,26 +1557,24 @@ let commit_continuity ~commit ~observe =
   observed
 ;;
 
-(* The judgment run_best_effort applies to its optional admission arguments.
-   The wildcard-expansion codemod folded the accepting arm
-   [Some _, Memory_maintenance, None, None, None -> true] into the rejecting
-   one, so a standalone Memory maintenance pass carrying an explicit admission
-   batch was refused. Restored here as a named function so tests can pin the
-   accepted and rejected shapes. *)
-let admission_mode_valid ~has_admission ~write_scope ~has_continuity
-      ~has_durable_range_id ~has_official_range_id
+(* The only run an explicit admission batch rides: a standalone Memory
+   maintenance run with no continuity or range binding. Its batch commits
+   under the pass of that scope. The wildcard-expansion codemod once folded
+   the accepting arm into the rejecting one, so a standalone Memory
+   maintenance pass carrying an explicit admission batch was refused. A named
+   function lets tests pin the accepted and rejected shapes. *)
+let admission_commit ~write_scope ~has_continuity ~has_durable_range_id
+      ~has_official_range_id
   =
-  (not has_admission)
-  ||
   match write_scope with
-  | Memory_maintenance ->
-    not (has_continuity || has_durable_range_id || has_official_range_id)
-  | Context_only | Context_and_memory -> false
+  | Memory_maintenance commit_pass
+    when not (has_continuity || has_durable_range_id || has_official_range_id) ->
+    Some (Commit_maintenance commit_pass)
+  | Memory_maintenance _ | Context_only | Context_and_memory _ -> None
 ;;
 
 let run_pass
       ~run_kind
-      ?(write_scope = Context_and_memory)
       ?admission
       ?continuity
       ?(on_memory_committed = fun () -> ())
@@ -1601,22 +1618,29 @@ let run_pass
     Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
       record_pass_failure_io ~keepers_dir ~keeper_id ~trace_id ~kind ~detail)
   in
-  let admission_mode_valid =
-    (match inference with
-     | None -> true
-     | Some (Infer_state _) | Some (Infer_memory _) ->
-       not (Option.is_some admission || Option.is_some continuity
-         || Option.is_some durable_range_id || Option.is_some official_range_id))
-    && admission_mode_valid
-      ~has_admission:(Option.is_some admission)
-      ~write_scope
-      ~has_continuity:(Option.is_some continuity)
-      ~has_durable_range_id:(Option.is_some durable_range_id)
-      ~has_official_range_id:(Option.is_some official_range_id) in
-  if not admission_mode_valid then
+  (* An inference takes no admission, continuity or range. An explicit
+     admission batch rides only a standalone Memory maintenance run and
+     commits under its pass. *)
+  let admission =
+    let has_continuity = Option.is_some continuity
+    and has_durable_range_id = Option.is_some durable_range_id
+    and has_official_range_id = Option.is_some official_range_id in
+    match run_kind, admission with
+    | Inference _, None
+      when not (has_continuity || has_durable_range_id || has_official_range_id) -> Ok None
+    | Inference _, (None | Some _) -> Error ()
+    | Best_effort _, None -> Ok None
+    | Best_effort write_scope, Some batch ->
+      (match admission_commit ~write_scope ~has_continuity ~has_durable_range_id
+               ~has_official_range_id with
+       | Some commit -> Ok (Some (batch, commit))
+       | None -> Error ())
+  in
+  match admission with
+  | Error () ->
     on_not_committed {detail = "explicit admission requires a standalone Memory maintenance pass";
                       walk_shows_size = false; message_descent = No_descent_evidence; input_capacity_evidence = No_input_capacity_refusal; input_capacity_only = false; provider_input_refusals = []; smaller_range_meets_same_failure = false}
-  else
+  | Ok admission ->
     try
       match Eio_context.get_net_opt (), Eio_context.get_clock_opt () with
       | Some net, Some clock ->
@@ -1654,22 +1678,25 @@ let run_pass
           | Some current -> List.length current.facts
         in
         let pass =
-          match inference, write_scope, continuity with
-          | Some (Infer_state {previous_state;unread_messages;_}), _, _ ->
+          match run_kind, continuity with
+          | Inference (Infer_state {previous_state;unread_messages;_}), _ ->
             Volatile_state_pass (previous_state, unread_messages)
-          | Some (Infer_memory {previous_state;unread_messages;_}), _, _ ->
+          | Inference (Infer_memory {previous_state;unread_messages;_}), _ ->
             Volatile_memory_pass (previous_state, unread_messages)
-          | None, Context_and_memory, continuity -> Memory_pass continuity
-          | None, Memory_maintenance, _ -> Memory_pass None
-          | None, Context_only, Some prepared -> Continuity_state_pass prepared
-          | None, Context_only, None -> Working_context_pass
+          | Best_effort (Context_and_memory commit_pass), continuity ->
+            Memory_pass (continuity, Commit_with_contexts commit_pass)
+          | Best_effort (Memory_maintenance commit_pass), _ ->
+            Memory_pass (None, Commit_maintenance commit_pass)
+          | Best_effort Context_only, Some prepared -> Continuity_state_pass prepared
+          | Best_effort Context_only, None -> Working_context_pass
         in
         let prompt_input = input_for_pass pass inp in
         let durable_preparation = match admission with
           | Some _ -> None
           | None -> match pass with
-            | Memory_pass None -> Some (prepare_durable ~now:(Time_compat.now ()) prompt_input)
-            | Memory_pass (Some _) | Continuity_state_pass _ | Volatile_state_pass _
+            | Memory_pass (None, commit) ->
+              Some (commit, prepare_durable ~now:(Time_compat.now ()) prompt_input)
+            | Memory_pass (Some _, _) | Continuity_state_pass _ | Volatile_state_pass _
             | Volatile_memory_pass _ | Working_context_pass -> None in
         let prompt_variables, prompt_material = match admission with
           | None ->
@@ -1677,18 +1704,18 @@ let run_pass
              | None ->
                let variables, material = resolve_librarian_prompt pass prompt_input in
                let material = match pass with
-                 | Memory_pass (Some _) | Volatile_memory_pass _ ->
+                 | Memory_pass (Some _, _) | Volatile_memory_pass _ ->
                    Result.bind material (fun (material : librarian_prompt_material) ->
                      Result.map (fun () -> material)
                        (require_counterpart_source ~source_input:prompt_input
                           ~prompt:material.resolution))
-                 | Memory_pass None | Continuity_state_pass _ | Volatile_state_pass _
+                 | Memory_pass (None, _) | Continuity_state_pass _ | Volatile_state_pass _
                  | Working_context_pass -> material in
                variables, material
-             | Some (Ok prepared) -> prepared.variables,
+             | Some (_, Ok prepared) -> prepared.variables,
                Ok {resolution=prepared.prompt;rendered=prepared.rendered_prompt}
-             | Some (Error detail) -> [],Error detail)
-          | Some batch ->
+             | Some (_, Error detail) -> [],Error detail)
+          | Some (batch, _) ->
             let prepared =
               let open Result.Syntax in
               let* retirement = match Keeper_memory_os_current.read_retirement_context ~keepers_dir ~keeper_id
@@ -1704,22 +1731,23 @@ let run_pass
              | Ok prepared -> prepared.variables,Ok {resolution=prepared.prompt;rendered=prepared.rendered_prompt}
              | Error detail -> [],Error detail) in
         let parsing_now=match durable_preparation with
-          | Some (Ok prepared) -> prepared.parsing_now
-          | None | Some (Error _) -> Time_compat.now () in
+          | Some (_, Ok prepared) -> prepared.parsing_now
+          | None | Some (_, Error _) -> Time_compat.now () in
         let validate = match admission with
           | None ->
             (match durable_preparation with
-             | Some (Ok prepared) -> (fun output ->
+             | Some (commit, Ok prepared) -> (fun output ->
                parse_durable_proposal prepared output
-               |> Result.map (fun proposal -> Memory_answer (proposal.accepted,Commit_memory)))
-             | None | Some (Error _) -> validate_answer pass prompt_input)
-          | Some batch -> validate_admission_answer ~now:parsing_now batch prompt_input in
+               |> Result.map (fun proposal -> Memory_answer (proposal.accepted,Commit_memory commit)))
+             | None | Some (_, Error _) -> validate_answer pass prompt_input)
+          | Some (batch, commit) ->
+            validate_admission_answer ~commit ~now:parsing_now batch prompt_input in
         let requirement = match admission with
           | None ->
             (match durable_preparation with
-             | Some (Ok prepared) -> Exact_output.make_output_requirement ~schema:prepared.output_schema
+             | Some (_, Ok prepared) -> Exact_output.make_output_requirement ~schema:prepared.output_schema
                ~minimum_guarantee:Exact_output.Json_syntax
-             | None | Some (Error _) -> output_requirement_of_pass pass)
+             | None | Some (_, Error _) -> output_requirement_of_pass pass)
           | Some _ -> Exact_output.make_output_requirement ~schema:(admission_schema ())
               ~minimum_guarantee:Exact_output.Json_syntax in
         (match inference with
@@ -1935,15 +1963,14 @@ let run_pass
                (* Maintenance is already a request to review excess memory.
                   A no-change shortcut must not stand in for that review:
                   cleanup remembers a committed input as reviewed. *)
-               let eligible () = match write_scope, pass with
-                 | Context_and_memory, Memory_pass None ->
+               let eligible () = match pass with
+                 | Memory_pass (None, Commit_with_contexts _) ->
                    Keeper_librarian_context.shows_no_working_context
                      prompt_input.working_context
                    && current_memory_within_budget ~keepers_dir ~keeper_id prompt_input
-                 | (Memory_maintenance | Context_only), _
-                 | Context_and_memory,
-                   (Memory_pass (Some _) | Working_context_pass | Continuity_state_pass _
-                    | Volatile_state_pass _ | Volatile_memory_pass _) -> false in
+                 | Memory_pass (None, Commit_maintenance _) | Memory_pass (Some _, _)
+                 | Working_context_pass | Continuity_state_pass _ | Volatile_state_pass _
+                 | Volatile_memory_pass _ -> false in
                let observation = Typesafeai_librarian_preflight.assess
                  ~observe:(fun observation -> observed_preflight := Some observation)
                  ~clock ~keeper_id ~eligible ~prompt () in
@@ -2087,12 +2114,12 @@ let run_pass
                 it retires consumed contexts exactly as a generated one does. *)
              (match memory_target with
               | Infer_memory_state _ -> ()
-              | Commit_memory ->
+              | Commit_memory commit ->
              match selection.working_contexts, continuity_answer with
               | Keeper_librarian.Working_contexts_organized pockets, Memory_only ->
-               (match write_scope with
-                | Memory_maintenance -> ()
-                | Context_only | Context_and_memory -> organize_working_context pockets)
+               (match commit with
+                | Commit_maintenance _ -> ()
+                | Commit_with_contexts _ -> organize_working_context pockets)
               | Keeper_librarian.Working_contexts_organized _, Continuity _ -> ()
               | Keeper_librarian.Working_contexts_missing, (Memory_only | Continuity _) ->
                 context_write := Answer_missing;
@@ -2183,13 +2210,10 @@ let run_pass
                     ; working_state
                     } in
                   Ok (`Memory_inferred (step, served_by, exact_output, selected_slot)))
-             | Commit_memory ->
-             let* commit_pass = match run_kind with
-               | Best_effort commit_pass -> Ok commit_pass
-               | Inference _ -> Error (Domain_output_invalid "a Memory inference does not commit Memory") in
+             | Commit_memory commit ->
              let+ disposition =
                Keeper_memory_os_current.apply_disposition
-                 ~pass:commit_pass
+                 ~pass:(memory_commit_pass commit)
                  ~on_committed:(fun disposition ->
                    committed_memory := Some (disposition, exact_output, selected_slot, absorb_gate);
                    on_memory_committed ())
@@ -2484,7 +2508,7 @@ let run_pass
              (Printexc.to_string exn))
 ;;
 
-let run_best_effort ~pass = run_pass ~run_kind:(Best_effort pass)
+let run_best_effort ~write_scope = run_pass ~run_kind:(Best_effort write_scope)
 
 type inference_failure =
   { reports : not_committed list
@@ -2504,7 +2528,7 @@ let infer_working_state ?cli_runner ~base_path ~keepers_dir ~keeper_id
     ~previous_state ~unread_messages input =
   let inferred = ref None and reports = ref [] and exhausted_input_refusals = ref None in
   let preparation = ref Not_prepared in
-  run_pass ~write_scope:Context_only
+  run_pass
     ~run_kind:(Inference (Infer_state {previous_state; unread_messages; preparation;
       observe=(fun ~served_by working_state -> inferred := Some (working_state, served_by));
       observe_failure=(fun exhausted -> exhausted_input_refusals := exhausted)}))
@@ -2524,7 +2548,7 @@ type memory_inference =
 let infer_memory_step ?cli_runner ~base_path ~keepers_dir ~keeper_id
     ~previous_state ~unread_messages input =
   let inferred = ref None and reports = ref [] and exhausted_input_refusals = ref None in
-  run_pass ~write_scope:Context_and_memory
+  run_pass
     ~run_kind:(Inference (Infer_memory {previous_state; unread_messages;
       observe=(fun ~served_by step -> inferred := Some (step, served_by));
       observe_failure=(fun exhausted -> exhausted_input_refusals := exhausted)}))

@@ -23,53 +23,22 @@ val dashboard_namespace_truth_http_json :
   clock:float Eio.Time.clock_ty Eio.Resource.t ->
   'b ->
   Yojson.Safe.t
-(** [dashboard_namespace_truth_http_json ~state ~sw ~clock request]
-    serves the namespace-truth read model.
+(** Capture the workspace scope before any yielding read and retain its
+    [observer_instance_id] in the response. While the execution owner has no
+    successful observation, the initial bounded warm window returns the
+    canonical initializing envelope. Clients retain read debt until canonical
+    completion, rather than polling this envelope.
 
-    All responses, including cold-start, carry top-level
-    [dashboard_surface], [dashboard_aliases], [source], [retention],
-    and [generated_at_iso] fields tied to the canonical namespace-truth
-    read model.
+    A successful cached Shell answers immediately and starts the existing
+    bounded asynchronous refresh. Without a Shell seed, one bounded request
+    attempts it and falls back to this scope's last-good/bootstrap data.
+    Successful warm, cold and asynchronous fills install through
+    [publish_shell_cache_success], after updating the read cache, so they also
+    announce canonical namespace completion. Retired fills cannot seed another
+    scope. All responses retain the canonical surface/source/retention fields.
 
-    Cold-start fast-path: when the proactive
-    {!Server_dashboard_http_execution_surfaces.execution_cache} has
-    not produced a successful first cycle and the warm-escape window
-    (default 90s = 75s refresh timeout + 15s slack, capped via
-    [MASC_DASHBOARD_EXECUTION_REFRESH_TIMEOUT_S]) has not elapsed,
-    returns:
-
-    {[
-      \{"status": "initializing", "generated_at": ..., "message": ...\}
-    ]}
-
-    Warm path: once {!Server_dashboard_http_core.last_good_shell}
-    exists, composes the HTTP response from cached shell + proactive
-    execution state immediately and forks a bounded shell refresh in
-    the request switch (stale-while-revalidate).  The refresh timeout
-    is 5.0s (module-level constant [namespace_truth_shell_refresh_timeout_s]
-    in the .ml).
-
-    First seed: when no last-good shell exists yet, does one bounded
-    synchronous shell attempt before composing shell + execution +
-    command summaries with per-fiber timeouts.  The four timeout
-    constants (warm 8.0s, cold 15.0s, shell-fiber cap 12.0s, cold
-    safety margin 4.0s) were previously tunable via
-    [MASC_NAMESPACE_TRUTH_*_TIMEOUT_S] env vars; RFC-0138 Phase 3
-    Step 4 (#16752) retired those knobs because Step 3 (#16738)
-    wired /project-snapshot through {!Dashboard_snapshot}, so this
-    fallback path is taken at most once per process lifetime
-    (cold-start before the refresh fiber's first publish) and no
-    longer carries steady-state load worth tuning.  See the
-    module-level [namespace_truth_*_timeout_s] bindings in the .ml
-    for the current values.
-
-    Shell timeout (cold) = max(cold_timeout, shell_fiber + safety) —
-    must exceed the inner cache timeout to avoid the double-timeout
-    race that discards stale data (#5090).
-
-    First-seed graceful degradation: shell falls back to
-    {!Server_dashboard_http_core.last_good_shell} on timeout (61x/day
-    zero-out under I/O contention before the fix). *)
+    These request recovery paths do not own source-triggered Shell recompute;
+    the atomic Shell controller publishes through the same installation API. *)
 
 val namespace_truth_snapshot_from_caches :
   Mcp_server.server_state -> Yojson.Safe.t option
@@ -77,8 +46,10 @@ val namespace_truth_snapshot_from_caches :
     lightweight namespace-truth snapshot from cached refs only —
     no PG I/O.
 
-    Returns [None] iff the execution cache has not produced its
-    first successful result (cold start).  Otherwise reads the
+    Returns [None] while execution warms or its scope was replaced during
+    assembly. A read retains one immutable successful cache observation;
+    the canonical publisher additionally revalidates it before fanout.
+    Otherwise reads the
     proactive execution cache + last-good shell (or bootstrap shell
     when no last-good shell exists yet) + empty command summary and
     composes via
@@ -89,16 +60,18 @@ val namespace_truth_snapshot_from_caches :
 val broadcast_namespace_truth_snapshot :
   Mcp_server.server_state -> unit
 (** [broadcast_namespace_truth_snapshot state] dedup-broadcasts the
-    current snapshot to all Observer SSE sessions.
+    current snapshot to the captured workspace and instance Observer sessions.
 
     One SSE channel per broadcast, [type] = ["project_snapshot"]. It used to
     emit a second, ["namespace_truth_snapshot"], carrying the identical
     payload; every consumer handled both names in the same branch, so the
     fanout said one thing twice (#27664).
 
-    Dedup: SHA-256 of the serialized snapshot (with [generated_at]
-    stripped recursively before hashing).  When the hash matches the
-    previous broadcast, skips with a debug log.
+    Dedup compares the captured scope, structural snapshot hash (excluding
+    generation timestamps) and cache-completion revision. Equal-valued Shell
+    completion is still published so an initializing reader can settle.
+    Only a committed replay receipt advances this state; a failed insertion
+    remains retryable. [observer_instance_id] comes from the captured scope.
 
     Log demotion: "pushed via SSE" log goes to DEBUG when no Observer
     is connected (avoids per-minute housekeeping noise; was log-flood

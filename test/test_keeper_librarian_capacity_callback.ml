@@ -66,7 +66,7 @@ let test_callback ?(cli_errors = []) ?expected_limit ?shows_size ?same_failure ~
   let refused = ref 0 and committed = ref false and observed_limit = ref None in
   let verdict = ref None and same = ref None and provider_refusals = ref [] in
   let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
-  Runtime.run_best_effort ~pass:Keeper_memory_commit_pass.Durable ~cli_runner
+  Runtime.run_best_effort ~write_scope:(Runtime.Context_and_memory Keeper_memory_commit_pass.Durable) ~cli_runner
     ~on_cli_input_limit:(fun limit ->
       incr refused;
       observed_limit := Some (limit.Keeper_lane_cli_oneshot.runtime_id, limit.capacity.max_chars))
@@ -172,7 +172,7 @@ let test_a_large_pass_is_judged_with_the_turn_its_claim_cites ~base_path () =
      messages=List.init 1000 (fun _ -> observation);
      tool_observations=[]; counterpart_observations=[]} in
   let size = ref None and commits = ref 0 in
-  let run input = Runtime.run_best_effort ~pass:Keeper_memory_commit_pass.Durable
+  let run input = Runtime.run_best_effort ~write_scope:(Runtime.Context_and_memory Keeper_memory_commit_pass.Durable)
     ~on_not_committed:(fun outcome -> size := Some outcome.Runtime.walk_shows_size)
     ~on_memory_committed:(fun () -> incr commits)
     ~base_path ~keepers_dir ~keeper_id ~expected_revision:(Some seeded.revision) input in
@@ -300,7 +300,7 @@ let test_prefit_real_continuity ~base_path () =
       (if runtime_id = Fixture.cli_primary_runtime then null_state else missing_state)) in
   let invalid_committed = ref false in
   let invalid_size_verdict = ref None in
-  Runtime.run_best_effort ~pass:Keeper_memory_commit_pass.Continuity ~continuity:half
+  Runtime.run_best_effort ~write_scope:(Runtime.Context_and_memory Keeper_memory_commit_pass.Continuity) ~continuity:half
     ~durable_range_id:(P.memory_range_id ~config ~keeper_name:keeper_id half |> get)
     ~cli_runner:invalid_runner ~on_memory_committed:(fun () -> invalid_committed := true)
     ~on_not_committed:(fun reason -> invalid_size_verdict := Some reason.Runtime.walk_shows_size)
@@ -389,7 +389,7 @@ let test_prefit_real_continuity ~base_path () =
     let committed = ref false and memory_committed = ref false in
     let served_by = ref None in
     let current = Current.read_for_keepers_dir ~keepers_dir ~keeper_id |> get in
-    Runtime.run_best_effort ~pass:Keeper_memory_commit_pass.Continuity ~continuity:prepared
+    Runtime.run_best_effort ~write_scope:(Runtime.Context_and_memory Keeper_memory_commit_pass.Continuity) ~continuity:prepared
       ~durable_range_id:(P.memory_range_id ~config ~keeper_name:keeper_id prepared |> get)
       ~cli_runner:runner
       ~on_continuity_committed:(fun ~served_by:slot _ ->
@@ -731,7 +731,7 @@ let test_continuity_only_run_fails_when_the_snapshot_is_refused ~base_path ~regi
     Ok (Yojson.Safe.to_string
           (`Assoc ["working_state", `String "State the refused snapshot must not keep."])) in
   let committed = ref false and refusals = ref [] in
-  Runtime.run_best_effort ~pass:Keeper_memory_commit_pass.Continuity ~write_scope:Runtime.Context_only ~continuity:prepared
+  Runtime.run_best_effort ~write_scope:Runtime.Context_only ~continuity:prepared
     ~cli_runner:runner
     ~on_continuity_committed:(fun ~served_by:_ _ -> committed := true)
     ~on_not_committed:(fun refused -> refusals := refused.Runtime.detail :: !refusals)

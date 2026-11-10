@@ -52,7 +52,7 @@ let drawing values =
 let commit zone author kind body =
   match Z.commit zone { Z.author; kind; body } with
   | Ok (_ : Z.committed) -> ()
-  | Error error -> Alcotest.failf "record refused: %s" (Z.error_to_string error)
+  | Error error -> Alcotest.failf "record refused: %s" (Z.error_detail error)
 ;;
 
 let invite zone author ~id ~token role =

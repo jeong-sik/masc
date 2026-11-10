@@ -2031,7 +2031,7 @@ let feature_child_heading (state : state) ~cols ~title =
    Reuse the prioritized workspace/read observation, then keep observer loss
    and HTTP when they fit. The ellipsis says that full context was omitted. *)
 let surface_connection_badge (state : state) ~width =
-  let cells text = Message_layout.display_width (Theme.strip_sgr text) in
+  let cells text = Message_layout.display_width (Masc_tui_theme.strip_sgr text) in
   let full = connection_badge state in
   if cells full <= width then full
   else if width < 1 then ""

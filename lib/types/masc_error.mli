@@ -4,8 +4,6 @@ include module type of Rate_limit_types
 
 val default_rate_limit : rate_limit_config
 val limit_for_category : rate_limit_config -> rate_limit_category -> int
-val category_for_tool : string -> rate_limit_category
-val category_for_tool_opt : string -> rate_limit_category option
 
 module Task_error : sig
   type transition_rejection =

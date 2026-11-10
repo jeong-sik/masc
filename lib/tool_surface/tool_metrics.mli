@@ -35,6 +35,14 @@ type sample = {
     {!Tool_result.result}. *)
 val record : Tool_result.result -> unit
 
+val subscribe_written : (unit -> unit) -> (unit -> unit)
+(** Observe committed replacements of the in-process snapshot, including
+    {!record}, successful {!replace_samples}, and {!clear}. The callback
+    runs synchronously after the metrics lock is released and may read the
+    new snapshot. It must only record non-blocking metadata; it must not
+    yield or perform I/O. Callback failures, including cancellation, cannot
+    change the writer's result. The returned unsubscribe is idempotent. *)
+
 val replace_samples : ((sample -> unit) -> ('a, 'error) result) -> ('a, 'error) result
 (** [replace_samples produce] builds a new metrics snapshot from streamed
     samples and publishes it only when [produce] returns [Ok]. It leaves the

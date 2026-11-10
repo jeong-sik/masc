@@ -212,9 +212,8 @@ exception Tool_series_failed of string
    A failed read raises, and the cache keeps nothing of it. *)
 let tool_series_http_json ~(config : Workspace.config) request : Yojson.Safe.t =
   let cache_key =
-    Server_dashboard_http_core_cache.dashboard_query_cache_key
+    Server_dashboard_http_core_cache.tool_metrics_series_cache_key
       config
-      "tool_metrics_series"
       [ "since_hours", Some (string_of_float request.since_hours)
       ; "bucket", Some (Tool_metrics_series.string_of_width request.width)
       ; "utc_offset_min", Some (string_of_int request.utc_offset_min)

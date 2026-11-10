@@ -175,17 +175,11 @@ let run ~sw ~env ~address ~port ?on_ready multi_account =
       (fun reason -> Https_listener_refused reason)
       (Server_bootstrap_http.https_listener_of_env ~base_path ~bind_host:config.host)
   in
-  (* The port is bound here and accepted on in [serve], below. The backends
-     of Eio raise the Unix error of a TCP bind as it is (a port in use is
-     EADDRINUSE). *)
-  let not_bound reason =
-    Error (Listener_not_bound { host = config.host; port = config.port; reason })
-  in
+  (* The port is bound here and accepted on in [serve], below. *)
   let* socket =
-    match Server_bootstrap_http.listen_socket ~sw ~net ~address config with
-    | socket -> Ok socket
-    | exception Unix.Unix_error (error, call, (_ : string)) ->
-      not_bound (Printf.sprintf "%s: %s" call (Unix.error_message error))
+    Result.map_error
+      (fun reason -> Listener_not_bound { host = config.host; port = config.port; reason })
+      (Server_bootstrap_http.listen_socket_result ~sw ~net ~address config)
   in
   let* () =
     Result.map_error

@@ -1583,12 +1583,13 @@ let start_execution_refresh_loop ~state ~sw ~clock ~net ~mono_clock =
           ~publish:(fun () -> publish_current ()) in
       enqueue_completion := (fun () -> enqueue ());
       let unsubscribe = subscribe_execution_completion ~owner (fun completion ->
-        (* Only an actual request's cache installation/failure can change the
-           source worker's deadline or retry debt. Its own output never wakes
-           another source computation. All outcomes notify the publisher. *)
+        (* Request completions and lifecycle patches can supersede a source
+           attempt. A patch retains a trailing read even if the original
+           lifecycle hint was already consumed by that attempt. The source
+           worker's own output never wakes another source computation. *)
         (match completion with
-         | Cache_installed Request_read | Cache_failed Request_read -> changed ()
-         | Cache_installed Observation_read | Cache_failed Observation_read | Cache_patched | Shell_installed -> ());
+         | Cache_installed Request_read | Cache_failed Request_read | Cache_patched -> changed ()
+         | Cache_installed Observation_read | Cache_failed Observation_read | Shell_installed -> ());
         enqueue ()) in
       Eio.Switch.on_release sw unsubscribe;
       (* An HTTP fill may have won before this subscription was installed. *)

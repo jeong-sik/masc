@@ -85,7 +85,8 @@ let is_unauthenticated = function
       | Bs.Expired
       | Bs.Secret_differs
       | Bs.Revocation_pending
-      | Bs.Principal_inactive (_ : Authz_types.User_id.t) ) -> true
+      | Bs.Principal_inactive (_ : Authz_types.User_id.t)
+      | Bs.Principal_revocation_pending (_ : Authz_types.User_id.t) ) -> true
   | Cross_origin | Origin_missing | Csrf_missing | Csrf_differs -> false
 ;;
 
@@ -109,7 +110,7 @@ let unsafe_needs cookie request =
   | (Safe | Unsafe), Other_origin, (None | Some _) -> Error Cross_origin
 ;;
 
-let check state ~now_ms request =
+let check (trusted : Authz_zone.trusted) ~now_ms request =
   if request.query_credential
   then Error Query_credential
   else (
@@ -120,7 +121,7 @@ let check state ~now_ms request =
       let* cookie = Option.to_result ~none:Not_a_session_cookie (Bs.Cookie.of_value value) in
       let* () = unsafe_needs cookie request in
       let* signed_in =
-        Result.map_error (fun refusal -> Session_refused refusal) (Bs.authenticate state ~now_ms cookie)
+        Result.map_error (fun refusal -> Session_refused refusal) (Bs.authenticate trusted ~now_ms cookie)
       in
       Ok (Session { cookie; signed_in }))
 ;;

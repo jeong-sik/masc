@@ -168,6 +168,8 @@ val choose_lsp_location : Masc_tui_types.state ->
 val apply_diff : Masc_tui_types.state ->
   Masc_tui_types.code_diff_target Masc_tui_fetched.request ->
   (Masc.Tui_decode.git_diff, string) result -> unit
+(** An admitted diff's horizontal extent uses the body's tab expansion and
+    single-line sanitation, matching the text rendered in the Code pane. *)
 val apply_history : Masc_tui_types.state ->
   (Masc_tui_types.code_workspace_scope * string) Masc_tui_fetched.request ->
   (Masc_tui_types.code_history_listing, string) result -> unit

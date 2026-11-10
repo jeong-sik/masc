@@ -716,8 +716,11 @@ let apply_diff (state : state) request result =
       | Error _ -> 0
       | Ok diff ->
           List.fold_left (fun widest (row : Masc.Tui_decode.git_diff_row) ->
-            max widest (Message_layout.display_width
-              (Masc.Tui_terminal_text.sanitize_terminal_text row.gdr_text))) 0 diff.gd_rows
+            let text =
+              Masc.Tui_terminal_text.single_line
+                (fst (Message_layout.expand_tabs ~column:0 row.gdr_text))
+            in
+            max widest (Message_layout.display_width text)) 0 diff.gd_rows
   end
 
 ;;

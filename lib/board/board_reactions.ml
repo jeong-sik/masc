@@ -284,11 +284,9 @@ let commit_staged_reaction_unlocked store staged =
     let current = Hashtbl.find_opt store.reactions staged.key in
     if not (same_reaction_state current staged.previous)
     then
-      (* The reaction table moved under this toggle (an expiry sweep or a post
-         delete removed the row), and the caller's request was fine. [toggle_reaction]
-         then rewrites the durable file from the current table. That is a store
-         conflict, the same kind as a stale posts snapshot, so it is an
-         [Io_error] and not a refusal of the request. *)
+      (* The caller's request was valid, but the model changed after the file
+         write. The source retains that known receipt without acknowledging it
+         or rolling it back. Report the storage/model conflict as [Io_error]. *)
       Error
         (Io_error
            (Printf.sprintf

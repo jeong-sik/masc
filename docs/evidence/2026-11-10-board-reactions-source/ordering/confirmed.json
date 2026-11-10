@@ -1,0 +1,106 @@
+{
+  "source": {
+    "lower": "68d96c32a0fb3182f7436afb181a62c7257c947d",
+    "upper": "269438e6e3158087a8ded0587bec03466d0f6190"
+  },
+  "scope": "Real Chromium and BoardSurface with controlled synthetic HTTP; no live Board mutation.",
+  "url": "http://127.0.0.1:5173/?case=ordering",
+  "buttons": [
+    {
+      "label": "👍 리액션 1개",
+      "pressed": "true",
+      "disabled": false,
+      "text": "👍1"
+    },
+    {
+      "label": "🔥 리액션 0개",
+      "pressed": "false",
+      "disabled": false,
+      "text": "🔥"
+    }
+  ],
+  "reactionText": "👍1🔥",
+  "votes": [
+    {
+      "label": "추천",
+      "disabled": true,
+      "pressed": null
+    },
+    {
+      "label": "비추천",
+      "disabled": true,
+      "pressed": null
+    }
+  ],
+  "control": {
+    "count": 1,
+    "reacted": true,
+    "pendingBatchCount": 1,
+    "pendingWriteCount": 0
+  },
+  "calls": [
+    {
+      "method": "GET",
+      "path": "/api/v1/board",
+      "query": "?voter=dashboard&limit=100"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/board/reactions/batch",
+      "query": "?target_type=post&target_ids=p-reaction-source%2Cp-other-source"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/board/hearths",
+      "query": ""
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/board/flairs",
+      "query": ""
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/board/reactions",
+      "query": "",
+      "body": {
+        "target_type": "post",
+        "target_id": "p-reaction-source",
+        "emoji": "👍"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/board/reactions/batch",
+      "query": "?target_type=post&target_ids=p-reaction-source"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/board/reactions",
+      "query": "?target_type=post&target_id=p-reaction-source"
+    }
+  ],
+  "deliveries": [
+    {
+      "kind": "write",
+      "payload": {
+        "target_type": "post",
+        "target_id": "p-reaction-source",
+        "user_id": "fixture-reactor",
+        "emoji": "👍",
+        "reacted": true,
+        "summary": [
+          {
+            "emoji": "👍",
+            "count": 1,
+            "reacted": true,
+            "recent_user_ids": [
+              "fixture-reactor"
+            ]
+          }
+        ]
+      }
+    }
+  ],
+  "failures": []
+}

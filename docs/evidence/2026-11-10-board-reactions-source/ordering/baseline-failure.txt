@@ -1,0 +1,43 @@
+Selected excerpt of the baseline failure; full local log SHA-256: 8a51339fe71ed35fb309c134cb630248662a1daa338187fb400eabe30a45374f
+
+
+ RUN  v5.0.2 <dashboard checkout>
+
+ ❯ src/components/board/board-surface.test.ts (71 tests | 1 failed | 70 skipped) 580ms
+   ❯ BoardSurface Component (64)
+     × keeps a settled toggle when an earlier feed batch arrives afterward 574ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/components/board/board-surface.test.ts > BoardSurface Component > keeps a settled toggle when an earlier feed batch arrives afterward
+TestingLibraryElementError: Unable to find an accessible element with the role "button" and name "🔥 리액션 1개"
+
+...
+                [33mvalue[39m=[32m"hot"[39m
+              [36m>[39m
+                [0m인기순[0m
+              [36m</opti...
+ ❯ Object.getElementError ../../masc/dashboard/node_modules/.pnpm/@testing-library+dom@8.20.1/node_modules/@testing-library/dom/dist/config.js:37:19
+ ❯ ../../masc/dashboard/node_modules/.pnpm/@testing-library+dom@8.20.1/node_modules/@testing-library/dom/dist/query-helpers.js:76:38
+ ❯ ../../masc/dashboard/node_modules/.pnpm/@testing-library+dom@8.20.1/node_modules/@testing-library/dom/dist/query-helpers.js:52:17
+ ❯ ../../masc/dashboard/node_modules/.pnpm/@testing-library+dom@8.20.1/node_modules/@testing-library/dom/dist/query-helpers.js:95:19
+ ❯ src/components/board/board-surface.test.ts:678:19
+    676|     })
+    677|
+    678|     expect(screen.getByRole('button', { name: '🔥 리액션 1개' })).toHaveAt…
+       |                   ^
+    679|     expect(toggleReaction).toHaveBeenCalledTimes(1)
+    680|   })
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 70 skipped (71)
+   Start at  17:14:08
+   Duration  18.99s (transform 56%, import 27%, environment 7%, setup 6%, tests 3%, worker 1%)
+
+  Transform  transforming modules took 9.84s · 56% of tracked time, re-done on every run
+             persist transforms across runs with fsModuleCache: true
+             learn more: https://vitest.dev/guide/improving-performance#caching-between-reruns
+

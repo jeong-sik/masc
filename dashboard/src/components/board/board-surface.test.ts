@@ -1,5 +1,5 @@
 import { h } from 'preact'
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/preact'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/preact'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import {
   BOARD_DETAIL_WIDTH_DEFAULT,
@@ -640,6 +640,43 @@ describe('BoardSurface Component', () => {
     render(h(BoardSurface, null))
 
     expect(await screen.findByRole('button', { name: '🔥 리액션 2개' })).toHaveAttribute('aria-pressed', 'true')
+  })
+
+  it('keeps a settled toggle when an earlier feed batch arrives afterward', async () => {
+    const { fetchBoardReactionsBatch, fetchBoardReactionState, toggleReaction } = await import('../../api/board')
+    let finishBatch!: (value: Awaited<ReturnType<typeof fetchBoardReactionsBatch>>) => void
+    let finishToggle!: (value: Awaited<ReturnType<typeof toggleReaction>>) => void
+    const summary = [{ emoji: '🔥', count: 1, reacted: true, recent_user_ids: ['viewer'] }]
+    vi.mocked(fetchBoardReactionsBatch)
+      .mockResolvedValueOnce({ byTargetId: new Map([['post-toggled', []], ['post-other', []]]), supportedEmojis: ['🔥'] })
+      .mockImplementationOnce(() => new Promise(resolve => { finishBatch = resolve }))
+    vi.mocked(toggleReaction).mockImplementationOnce(() => new Promise(resolve => { finishToggle = resolve }))
+    vi.mocked(fetchBoardReactionState).mockResolvedValueOnce({ summaries: summary, supportedEmojis: ['🔥'] })
+    const target = makePost({ id: 'post-toggled', title: 'Toggled row', author: 'keeper' })
+    boardPosts.value = [target, makePost({ id: 'post-other', title: 'Other row', author: 'keeper' })]
+    render(h(BoardSurface, null))
+    const row = within(screen.getByTestId(`bd-post-${target.id}`))
+    await waitFor(() => expect(row.getByRole('button', { name: '🔥 리액션 0개' })).not.toBeDisabled())
+    fireEvent.click(row.getByRole('button', { name: '🔥 리액션 0개' }))
+    expect(toggleReaction).toHaveBeenCalledTimes(1)
+
+    // Changing the drawn rows starts a batch that reads the pre-toggle state.
+    await act(async () => { boardPosts.value = [target] })
+    await waitFor(() => expect(fetchBoardReactionsBatch).toHaveBeenCalledTimes(2))
+    await act(async () => {
+      finishToggle({
+        target_type: 'post', target_id: target.id, user_id: 'viewer', emoji: '🔥', reacted: true, summary,
+      })
+    })
+    await waitFor(() => expect(screen.getByRole('button', { name: '🔥 리액션 1개' })).toHaveAttribute('aria-pressed', 'true'))
+    await act(async () => {
+      finishBatch({
+        byTargetId: new Map([[target.id, []]]), supportedEmojis: ['🔥'],
+      })
+    })
+
+    expect(screen.getByRole('button', { name: '🔥 리액션 1개' })).toHaveAttribute('aria-pressed', 'true')
+    expect(toggleReaction).toHaveBeenCalledTimes(1)
   })
 
   it('preserves unavailable reaction rows when only the emoji catalog is known', async () => {

@@ -25,7 +25,8 @@ let affects_trust = function
   | Telemetry_gap { source = Some (Keeper_metric | Agent_event | Tool_call_io
       | Trajectory_tool_call | Tool_usage | Agent_core_event | Goal_event | Tool_metric); _ }
   | Chat_operation _ | Agent_core _ | Board | Execution_invalidated | Telemetry_sample
-  | Workspace_agent_signal _ | Workspace_messages _ | Transport_state -> false
+  | Workspace_agent_signal _ | Workspace_messages _ | Transport_state
+  | Operator_judgment _ | Tool_host_attention -> false
 ;;
 
 let affects_execution input =
@@ -50,7 +51,7 @@ let affects_execution input =
   | Telemetry_gap {source = None; _}
   | Telemetry_gap {source = Some (Keeper_metric | Agent_event | Tool_call_io
       | Trajectory_tool_call | Tool_usage | Agent_core_event | Goal_event | Tool_metric); _}
-  | Agent_core _ | Telemetry_sample | Transport_state -> false
+  | Agent_core _ | Telemetry_sample | Transport_state | Operator_judgment _ | Tool_host_attention -> false
 ;;
 
 let affects_transport_health = function
@@ -64,7 +65,7 @@ let affects_transport_health = function
   | Keeper _ | Every_keeper_row | Chat_operation _ | Gate _ | Connector _ | Store _
   | Board | Execution_invalidated | Agent_core _ | Telemetry_sample | Transport_state
   | Telemetry_gap _ | Keeper_tool_call _ | Keeper_approval_audit _
-  | Workspace_agent_signal _ | Workspace_messages _ -> true
+  | Workspace_agent_signal _ | Workspace_messages _ | Operator_judgment _ | Tool_host_attention -> true
 ;;
 
 let affects surface input = match surface with

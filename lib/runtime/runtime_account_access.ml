@@ -42,6 +42,9 @@ type host_client =
   | Antigravity
   | Vibe
   | Api_provider
+  | Model_list
+  | Files_api
+  | Replacement_catalog
 
 (* The proof carries nothing: a single-user process shares every account of
    its host, so one start of a host client is as allowed as another. *)
@@ -51,6 +54,9 @@ let host_client_name = function
   | Antigravity -> "Antigravity"
   | Vibe -> "Vibe"
   | Api_provider -> "An API provider of the runtime table"
+  | Model_list -> "A model-list request of a setup connection"
+  | Files_api -> "The Files API of masc_file_*"
+  | Replacement_catalog -> "A target of the replacement catalog AGENT_CORE_MODEL_CATALOG names"
 ;;
 
 type t =
@@ -142,11 +148,11 @@ let refusal_to_string = function
     Printf.sprintf
       "the account was captured from another home than the one of %s"
       (Authz_types.Provider_account_id.to_string provider_account_id)
-  | Host_account Api_provider ->
+  | Host_account ((Api_provider | Model_list | Files_api | Replacement_catalog) as client) ->
     Printf.sprintf
       "%s sends with the credential its operator declared, which is an account of the \
        host, and a multi-account process shares no account of its host"
-      (host_client_name Api_provider)
+      (host_client_name client)
   | Host_account ((Antigravity | Vibe) as client) ->
     Printf.sprintf
       "%s starts on an account of the host, and a multi-account process shares no \

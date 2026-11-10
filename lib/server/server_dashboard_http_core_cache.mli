@@ -43,6 +43,12 @@ val invalidate_tool_metrics_series : base_path:string -> unit
     family. Invalidation drops every filter/window for the owning workspace,
     including an in-flight old computation, before publishing a change. *)
 
+val ide_file_activity_cache_key :
+  base_path:string -> (string * string option) list -> string
+val invalidate_ide_file_activity : base_path:string -> unit
+(** The scoped IDE file reader and tool-ledger commit notifications share
+    this cache family. No unrelated workspace or query family is dropped. *)
+
 val scheduled_automation_cache_key : base_path:string -> string
 (** The key the fleet schedule list ([GET /api/v1/dashboard/scheduled-automation]
     without a selector) is cached under, for the workspace at [base_path]. *)

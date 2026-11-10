@@ -196,10 +196,9 @@ let file_activity_cache_ttl_sec = 10.0
 
 let cached_file_activity_json ~base_path ~codebase ~repo_id ~file_path ~window_hours =
   let cache_key =
-    "ide:file-activity:" ^ Yojson.Safe.to_string (`List [
-      `String base_path; `String codebase; `String repo_id; `String file_path;
-      `String (Printf.sprintf "%h" window_hours);
-    ])
+    Server_dashboard_http_core_cache.ide_file_activity_cache_key ~base_path
+      [ "codebase", Some codebase; "repo_id", Some repo_id
+      ; "file_path", Some file_path; "window_hours", Some (Printf.sprintf "%h" window_hours) ]
   in
   Dashboard_cache.get_or_compute cache_key ~ttl:file_activity_cache_ttl_sec
     (Pool_work.cpu ~name:__FUNCTION__ (fun () ->

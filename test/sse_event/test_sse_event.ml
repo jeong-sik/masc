@@ -59,12 +59,51 @@ let test_agent_failed_payload_byte_equal () =
   Alcotest.(check string) "agent_failed typed == baseline" baseline typed
 ;;
 
+let test_dashboard_observation_roundtrip () =
+  let scopes : Sse_event.Types.dashboard_observation_scope list =
+    [ `Workspace; `Keeper "piano"
+    ; `Operation { keeper_name = "piano"; operation_id = "original-operation" }
+    ]
+  in
+  List.iter (fun scope ->
+    let payload : Sse_event.Types.dashboard_observation_changed_payload =
+      { topic = `Chat_operation; scope }
+    in
+    let wire = Sse_event.dashboard_observation_changed_payload_to_json payload in
+    match Sse_event.dashboard_observation_changed_payload_of_json wire with
+    | Ok decoded -> Alcotest.(check bool) "scope and original operation survive" true
+        (decoded = payload)
+    | Error detail -> Alcotest.fail detail) scopes
+;;
+
+let test_dashboard_observation_rejects_invalid_authority () =
+  let invalid =
+    [ {|{"topic":"future_topic","scope":"workspace"}|}
+    ; {|{"topic":"chat_operation","scope":["keeper",""]}|}
+    ; {|{"topic":"chat_operation","scope":["operation",{"keeper_name":"piano","operation_id":" "}]}|}
+    ; {|{"topic":"chat_operation","scope":["operation",{"operation_id":"original-operation"}]}|}
+    ; {|{"topic":"chat_operation","scope":"future_scope"}|}
+    ]
+  in
+  List.iter (fun wire ->
+    let decoded = Sse_event.dashboard_observation_changed_payload_of_json
+      (Yojson.Safe.from_string wire) in
+    Alcotest.(check bool) "invalid authority cannot become an invalidation" true
+      (Result.is_error decoded)) invalid
+;;
+
 let () =
   Alcotest.run
     "sse_event"
     [ ( "agent_failed"
       , [ Alcotest.test_case "payload field order" `Quick
             test_agent_failed_payload_byte_equal
+        ] )
+    ; ( "dashboard observation"
+      , [ Alcotest.test_case "scope roundtrip" `Quick
+            test_dashboard_observation_roundtrip
+        ; Alcotest.test_case "reject invalid authority" `Quick
+            test_dashboard_observation_rejects_invalid_authority
         ] )
     ]
 ;;

@@ -290,9 +290,12 @@ let load ~directory = io (fun () ->
     of_json json)
 let save ~directory t = io (fun () ->
   Fs_compat.mkdir_p directory;
+  Fun.protect
+    ~finally:(fun () -> Workspace_memory_changed.written ~directory)
+    (fun () ->
   match Fs_compat.save_file_atomic_strict_staged (path ~directory) (Yojson.Safe.to_string (to_json t)) with
   | Ok () -> Ok ()
   | Error failure ->
     match failure.exception_ with
     | Eio.Cancel.Cancelled _ as exn -> Printexc.raise_with_backtrace exn failure.backtrace
-    | _ -> Error (Fs_compat.atomic_replace_failure_to_string failure))
+    | _ -> Error (Fs_compat.atomic_replace_failure_to_string failure)))

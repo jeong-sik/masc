@@ -111,6 +111,12 @@ val registration_error_to_string : registration_error -> string
 
 (** {1 Session Management} *)
 
+val fresh_client_id : unit -> int
+(** Reserve a process-global connection generation. Dedicated SSE adapters
+    share this allocator with registered MCP observers so presence replacement
+    and disconnect compare generations from the same sequence. Reserving an
+    id alone neither registers a client nor admits a credential. *)
+
 val register :
   ?kind:session_kind -> ?on_disconnect:(unit -> unit) -> ?observer_instance_id:string ->
   auth:registration_auth -> string -> last_event_id:int ->

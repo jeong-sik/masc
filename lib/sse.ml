@@ -255,6 +255,8 @@ let mark_seen (client : client) =
 (** Monotonic client id for safe replacement/unregister *)
 let client_id_counter = Atomic.make 0
 
+let fresh_client_id () = Atomic.fetch_and_add client_id_counter 1 + 1
+
 (** Global event counter for resumability *)
 let event_counter = Atomic.make 0
 
@@ -582,7 +584,7 @@ let register_validated_client ~kind ?on_disconnect ?observer_instance_id
   let runtime_authority = runtime_authority_exn ~base_path in
   let observer_scope = Option.map
       (fun instance_id -> observer_scope ~runtime_authority ~instance_id) observer_instance_id in
-  let client_id = Atomic.fetch_and_add client_id_counter 1 + 1 in
+  let client_id = fresh_client_id () in
   (* Ids only grow within one process, so a cursor above the last id handed
      out came from an earlier one: MCP sessions outlive a restart, the counter
      does not. As a floor it would hold back every event until the new counter

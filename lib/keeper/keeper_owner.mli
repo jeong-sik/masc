@@ -18,6 +18,20 @@ val install_state_change_observer : (unit -> unit) -> unit
     fiber itself propagates; if a persistence exception is already unwinding,
     that original exception takes precedence over an observer exception. *)
 
+val install_journal_terminal_gate :
+  (base_path:string ->
+    keeper_name:string ->
+    session_root:string ->
+    operation_id:Keeper_chat_operation.Operation_id.t ->
+    (Agent_core.Agent.execution_terminal_disposition option, string) result)
+  -> unit
+(** Install the read-only journal gate the boot settlement consults. The
+    bootstrap layer owns the wiring because the native continuation adapter
+    sits above the Owner in the module graph. Unset keeps the pre-gate
+    behavior: running rows requeue at restart and terminate the same way on
+    their next dispatch. The gate never mutates the Owner receipt or the
+    journal. *)
+
 type store =
   { replace : Keeper_meta_contract.keeper_meta -> (unit, string) result
   ; remove : Keeper_meta_contract.keeper_meta -> (unit, string) result

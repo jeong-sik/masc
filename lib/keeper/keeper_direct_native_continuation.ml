@@ -177,7 +177,9 @@ let journal_terminal ~base_path ~keeper_name ~session_root ~operation_id =
       ; session_dir = Filename.concat session_root session_id
       ; session_id } in
     let* terminal = inspect_terminal binding call in
-    Ok (Option.map (fun terminal -> terminal.disposition) terminal)
+    (match terminal with
+     | Some terminal -> Ok (Some terminal.disposition)
+     | None -> Ok None)
   | Native.No_native_call | Native.Terminal_unacknowledged _ -> Ok None
 
 (* Core records the terminal disposition under cancellation protection, but a

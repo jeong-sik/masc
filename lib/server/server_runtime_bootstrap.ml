@@ -527,6 +527,11 @@ let create_server_state ~sw ~base_path ?input_base_path ~clock ~mono_clock ~net
     Server_routes_http_runtime.invalidate_full_health_snapshot_for_workspace;
   Keeper_owner.install_state_change_observer
     Server_routes_http_runtime.invalidate_full_health_snapshot;
+  (* The journal gate lives above the Owner in the module graph, so the
+     bootstrap layer wires it in before any Owner boots and settles a
+     restart. *)
+  Keeper_owner.install_journal_terminal_gate
+    Keeper_direct_native_continuation.journal_terminal;
   Server_keeper_event_queue_broadcast.install ~sw;
   Skill_catalog_snapshot_service.install_publication_observer
     (Server_skill_catalog_broadcast.publication_observer ~base_path

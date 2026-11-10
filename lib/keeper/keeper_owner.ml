@@ -36,6 +36,27 @@ module Chat_operation = Keeper_chat_operation
 module Chat_operation_store = Keeper_chat_operation_store
 module Operation_id = Chat_operation.Operation_id
 
+(* The boot settlement asks one read-only question the store cannot answer and
+   the Owner must not reach for itself: does the Core journal already hold a
+   terminal for a call whose Owner receipt still reads active? The reader lives
+   in the native continuation adapter, which sits above the Owner in the
+   module graph — the journal producer already depends back on the Owner — so
+   the bootstrap layer installs it here. An unset slot keeps the pre-gate
+   behavior: the row requeues and terminates the same way on its next
+   dispatch. *)
+let journal_terminal_gate
+  : (base_path:string ->
+      keeper_name:string ->
+      session_root:string ->
+      operation_id:Operation_id.t ->
+      (Agent_core.Agent.execution_terminal_disposition option, string) result)
+    option
+    Atomic.t
+  = Atomic.make None
+
+let install_journal_terminal_gate gate =
+  Atomic.set journal_terminal_gate (Some gate)
+
 type runtime_retry_revalidation =
   | Keep_retry_wait
   | Update_retry_wait of
@@ -1378,22 +1399,25 @@ let start
   (match operation_store_result with
    | Error _ as error -> error
    | Ok operation_store ->
-  (* The store cannot read the Core journal, so this gate answers for it. It
-     reports the terminal the journal already holds for a call whose Owner
-     receipt is still active: the store records that disposition on the
-     receipt and interrupts the row at boot instead of requeueing it into a
-     dispatch that fails with a bare string error later. *)
+  (* The store cannot read the Core journal, so this gate answers for it when
+     the bootstrap layer has installed the reader. It reports the terminal the
+     journal already holds for a call whose Owner receipt is still active, and
+     the store records that disposition on the receipt and interrupts the row
+     at boot instead of requeueing it into a dispatch that fails with a bare
+     string error later. Without an installed reader the row requeues and
+     terminates the same way on its next dispatch. *)
   let journal_terminal operation_id =
-    let read =
-      Keeper_direct_native_continuation.journal_terminal
-        ~base_path ~keeper_name ~session_root ~operation_id in
-    (match read with
-     | Error detail ->
-       Log.Keeper.warn ~keeper_name
-         "restart journal gate could not read the journal operation=%s: %s"
-         (Chat_operation.Operation_id.to_string operation_id) detail
-     | Ok _ -> ());
-    read
+    match Atomic.get journal_terminal_gate with
+    | Some gate ->
+      let read = gate ~base_path ~keeper_name ~session_root ~operation_id in
+      (match read with
+       | Error detail ->
+         Log.Keeper.warn ~keeper_name
+           "restart journal gate could not read the journal operation=%s: %s"
+           (Chat_operation.Operation_id.to_string operation_id) detail
+       | Ok _ -> ());
+      read
+    | None -> Ok None
   in
   let startup_result =
     let startup_now = now () in

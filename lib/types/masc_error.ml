@@ -49,6 +49,7 @@ module Task_error = struct
     | NotFound of string
     | AlreadyClaimed of { task_id: string; by: string }
     | InvalidState of string
+    | BacklogVersionConflict of { expected : int; actual : int }
     | InvalidId of string
     | TransitionRejected of transition_rejected
     | VerificationSuperseded of { task_id: string; requested: string; current: string }
@@ -92,6 +93,10 @@ module Task_error = struct
           "[TaskError] Task %s is currently owned by %s."
           task_id by
     | InvalidState msg -> Printf.sprintf "[TaskError] Invalid task state: %s" msg
+    | BacklogVersionConflict { expected; actual } ->
+        Printf.sprintf
+          "[TaskError] Invalid task state: Version mismatch (expected %d, got %d)"
+          expected actual
     | InvalidId reason -> Printf.sprintf "[TaskError] Invalid task ID: %s" reason
     | TransitionRejected rejection ->
         "[TaskError] " ^ transition_rejection_message rejection
@@ -187,6 +192,7 @@ let code = function
   | Agent (Agent_error.NotFound _) -> 404
   | Task (Task_error.AlreadyClaimed _
          | Task_error.InvalidState _
+         | Task_error.BacklogVersionConflict _
          | Task_error.TransitionRejected _
          | Task_error.InvalidId _) -> 400
   | Task (Task_error.VerificationSuperseded _) -> 409
@@ -204,6 +210,7 @@ let is_task_not_found = function
   | Task (Task_error.NotFound _) -> true
   | Task ( Task_error.AlreadyClaimed _
          | Task_error.InvalidState _
+         | Task_error.BacklogVersionConflict _
          | Task_error.InvalidId _
          | Task_error.TransitionRejected _
          | Task_error.VerificationSuperseded _ ) -> false

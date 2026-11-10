@@ -28,6 +28,7 @@ module Row = struct
     ; source_read_error : bool
     ; snapshot_present : bool
     ; librarian_stopped : bool
+    ; librarian_attention_required : bool
     ; alerts : alert_severity list
     }
 end
@@ -57,6 +58,7 @@ type t =
   ; snapshot_read_error_keepers : int
   ; source_snapshot_read_error_keepers : int
   ; librarian_stopped_keepers : int
+  ; librarian_attention_required_keepers : int
   ; librarian_starving_keepers : int
   }
 
@@ -109,6 +111,7 @@ let of_rows (rows : Row.t list) =
   ; snapshot_read_error_keepers = count (fun row -> row.Row.read_error)
   ; source_snapshot_read_error_keepers = count (fun row -> row.Row.source_read_error)
   ; librarian_stopped_keepers = count (fun row -> row.Row.librarian_stopped)
+  ; librarian_attention_required_keepers = count (fun row -> row.Row.librarian_attention_required)
   ; librarian_starving_keepers =
       count (fun row -> row.Row.librarian_failures > 0 && not row.Row.snapshot_present)
   }
@@ -148,6 +151,7 @@ let alert_summary_to_json (t : t) =
     ; "snapshot_read_error_keepers", `Int t.snapshot_read_error_keepers
     ; "source_snapshot_read_error_keepers", `Int t.source_snapshot_read_error_keepers
     ; "librarian_stopped_keepers", `Int t.librarian_stopped_keepers
+    ; "librarian_attention_required_keepers", `Int t.librarian_attention_required_keepers
     ; "librarian_starving_keepers", `Int t.librarian_starving_keepers
     ]
 ;;

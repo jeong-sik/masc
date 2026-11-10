@@ -802,9 +802,3 @@ let closed_by (record : R.t) =
   | K.Runtime
   | K.Keeper -> record.R.closes
 ;;
-
-let step state record =
-  match apply state record with
-  | Ok { state; high_water = _ } -> Ok state
-  | Error refusal -> Error refusal
-;;

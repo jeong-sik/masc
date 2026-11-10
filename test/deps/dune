@@ -10,6 +10,16 @@
  (modules masc_test_runtime)
  (libraries unix))
 
+; The single-user access a test process publishes when it starts
+; (masc_test_host_access.ml). Nothing names the module, so -linkall keeps it,
+; and its publication, in every executable that links this library.
+(library
+ (name masc_test_host_access)
+ (modules masc_test_host_access)
+ (library_flags
+  (:standard -linkall))
+ (libraries eio_main masc.runtime unix))
+
 (library
  (name masc_test_deps)
  (modules masc_test_deps server_grpc_tool_dispatch)
@@ -17,6 +27,8 @@
   (language c)
   (names test_env_stubs))
  (libraries
+  ; Linked, not re-exported: every test executable publishes the access.
+  masc_test_host_access
   (re_export masc.agent_core)
   (re_export masc.agent_core.base)
   (re_export masc.agent_core.llm_provider)

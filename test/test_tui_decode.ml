@@ -296,32 +296,6 @@ let test_schedule_hold_reads_as_of_its_time_unless_the_runner_is_ok () =
   Alcotest.(check bool) "a list kept after a failed reload: as of, even from an ok runner" true
     (reading Tui_decode.List_kept ok = Tui_decode.Hold_as_of 275.5)
 
-let test_decode_agent_success () =
-  let json =
-    `Assoc [
-      ("name", `String "alice");
-      ("status", `String "live");
-      ("current_task", `String "task-1");
-      ("last_seen", `String "2026-03-31T12:00:00Z");
-    ]
-  in
-  match Tui_decode.decode_agent json with
-  | Ok agent ->
-      Alcotest.(check string) "name" "alice" agent.name;
-      Alcotest.(check string) "status" "live" agent.status;
-      Alcotest.(check (option string)) "task" (Some "task-1") agent.current_task
-  | Error err -> Alcotest.fail err
-
-let test_decode_agent_missing_status_fails () =
-  let json =
-    `Assoc [
-      ("name", `String "alice");
-      ("last_seen", `String "2026-03-31T12:00:00Z");
-    ]
-  in
-  Alcotest.(check bool) "missing status rejected" true
-    (Result.is_error (Tui_decode.decode_agent json))
-
 let test_decode_task_missing_priority_defaults () =
   let json =
     `Assoc [
@@ -2687,86 +2661,6 @@ let test_context_observation_rejects_hybrids_and_prior_trace () =
     ; "ratio mismatch rejected", ratio_mismatch
     ]
 
-let test_parse_keeper_chat_response_sse_delta () =
-  let response =
-    "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n\r\n\
-     data: {\"type\":\"content_delta\",\"delta\":\"hello\"}\n\n\
-     data: {\"type\":\"delta\",\"delta\":\" world\"}\n\n"
-  in
-  match Tui_decode.parse_keeper_chat_response response with
-  | Ok text -> Alcotest.(check string) "delta text" "hello world" text
-  | Error err -> Alcotest.fail err
-
-let test_parse_keeper_chat_response_sse_framing () =
-  List.iter (fun newline ->
-    let response = "\239\187\191" ^ String.concat newline
-      [ ": comment"; "id: 42"; "event: message";
-        "data:{\"type\":\"delta\","; "data:\"delta\":\"hello\"}"; "";
-        "data"; "";
-        "data: {\"type\":\"delta\",\"delta\":\" world\"}"; "";
-        "data: [DONE]"; ""; "" ] in
-    match Tui_decode.parse_keeper_chat_response response with
-    | Ok text -> Alcotest.(check string) "multiline framed text" "hello world" text
-    | Error err -> Alcotest.fail err) [ "\n"; "\r\n"; "\r" ];
-  (match Tui_decode.parse_keeper_chat_response "data:[DONE]\n\n" with
-   | Ok text -> Alcotest.(check string) "empty terminal" "" text
-   | Error err -> Alcotest.fail err);
-  List.iter (fun response ->
-    match Tui_decode.parse_keeper_chat_response response with
-    | Error _ -> () | Ok _ -> Alcotest.fail "invalid or incomplete frame was dispatched")
-    [ "data:{\"type\":\"delta\",\"delta\":\"unfinished\"}\n";
-      " data:{\"type\":\"delta\",\"delta\":\"indented\"}\n\n";
-      "data:{invalid-json}\n\n" ];
-  match Tui_decode.parse_keeper_chat_response
-      "data:{\"type\":\"RUN_ERROR\",\"message\":\"boom\"}\r\r" with
-  | Error error -> Alcotest.(check string) "framed terminal error" "boom" error
-  | Ok _ -> Alcotest.fail "terminal error was lost"
-
-let test_parse_keeper_chat_response_ag_ui_sse () =
-  let response =
-    "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n\r\n\
-     data: {\"type\":\"RUN_STARTED\",\"threadId\":\"default\",\"runId\":\"run-1\"}\n\n\
-     data: {\"type\":\"TEXT_MESSAGE_CONTENT\",\"threadId\":\"default\",\"runId\":\"run-1\",\"delta\":\"hello\"}\n\n\
-     data: {\"type\":\"TEXT_MESSAGE_CONTENT\",\"threadId\":\"default\",\"runId\":\"run-1\",\"delta\":\" world\"}\n\n\
-     data: {\"type\":\"RUN_FINISHED\",\"threadId\":\"default\",\"runId\":\"run-1\"}\n\n"
-  in
-  match Tui_decode.parse_keeper_chat_response response with
-  | Ok text -> Alcotest.(check string) "AG-UI delta text" "hello world" text
-  | Error err -> Alcotest.fail err
-
-let test_parse_keeper_chat_response_ag_ui_error () =
-  let response =
-    "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n\r\n\
-     data: {\"type\":\"RUN_ERROR\",\"threadId\":\"default\",\"runId\":\"run-1\",\"message\":\"boom\"}\n\n"
-  in
-  match Tui_decode.parse_keeper_chat_response response with
-  | Ok text -> Alcotest.failf "expected RUN_ERROR failure, got %S" text
-  | Error err -> Alcotest.(check string) "AG-UI error message" "boom" err
-
-let test_parse_keeper_chat_response_ag_ui_empty_terminal () =
-  let response =
-    "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n\r\n\
-     data: {\"type\":\"RUN_FINISHED\",\"threadId\":\"default\",\"runId\":\"run-1\"}\n\n"
-  in
-  match Tui_decode.parse_keeper_chat_response response with
-  | Ok text -> Alcotest.(check string) "empty terminal response" "" text
-  | Error err -> Alcotest.fail err
-
-let test_parse_keeper_chat_response_body_json () =
-  let response = "{\"result\":{\"text\":\"hello body\"}}" in
-  match Tui_decode.parse_keeper_chat_response response with
-  | Ok text -> Alcotest.(check string) "body text" "hello body" text
-  | Error err -> Alcotest.fail err
-
-let test_parse_keeper_chat_response_json_error () =
-  let response =
-    "HTTP/1.1 500 Internal Server Error\r\nContent-Type: application/json\r\n\r\n\
-     {\"error\":{\"message\":\"boom\"}}"
-  in
-  match Tui_decode.parse_keeper_chat_response response with
-  | Ok _ -> Alcotest.fail "expected parse failure"
-  | Error err -> Alcotest.(check string) "error message" "boom" err
-
 let test_decode_json_response_body_rejects_error_status () =
   match
     Tui_decode.decode_json_response_body ~allow_empty:true ~status_code:400
@@ -3132,22 +3026,6 @@ let test_sgr_left_press_ignores_releases_chords_and_wheel () =
            Alcotest.failf "report %S should stay unclaimed, got %d;%d" params
              row column)
     cases
-
-type parent_node = {
-  node_id : string;
-  parent_id : string option;
-}
-
-let test_bounded_parent_depth_stops_on_cycle () =
-  let a = { node_id = "a"; parent_id = Some "b" } in
-  let b = { node_id = "b"; parent_id = Some "a" } in
-  let depth =
-    Tui_decode.bounded_parent_depth
-      ~id_of:(fun n -> n.node_id)
-      ~parent_id_of:(fun n -> n.parent_id)
-      [ a; b ] a
-  in
-  Alcotest.(check int) "cycle stops at first repeated parent" 1 depth
 
 let system_log_entry_json ?(seq = 774272) ?(level = "INFO")
     ?(source = "structured")
@@ -15075,12 +14953,6 @@ let () =
         Alcotest.test_case "message is required" `Quick
           test_decode_system_log_requires_the_message;
       ] );
-    ( "decode_agent",
-      [
-        Alcotest.test_case "success" `Quick test_decode_agent_success;
-        Alcotest.test_case "missing status fails" `Quick
-          test_decode_agent_missing_status_fails;
-      ] );
     ( "decode_task",
       [
         Alcotest.test_case "missing priority defaults" `Quick
@@ -15228,23 +15100,6 @@ let () =
         Alcotest.test_case "hybrid and prior trace fail closed" `Quick
           test_context_observation_rejects_hybrids_and_prior_trace;
       ] );
-    ( "parse_keeper_chat_response",
-      [
-        Alcotest.test_case "sse delta" `Quick
-          test_parse_keeper_chat_response_sse_delta;
-        Alcotest.test_case "keeper SSE framing" `Quick
-          test_parse_keeper_chat_response_sse_framing;
-        Alcotest.test_case "AG-UI SSE" `Quick
-          test_parse_keeper_chat_response_ag_ui_sse;
-        Alcotest.test_case "AG-UI error" `Quick
-          test_parse_keeper_chat_response_ag_ui_error;
-        Alcotest.test_case "AG-UI empty terminal" `Quick
-          test_parse_keeper_chat_response_ag_ui_empty_terminal;
-        Alcotest.test_case "body json" `Quick
-          test_parse_keeper_chat_response_body_json;
-        Alcotest.test_case "json error" `Quick
-          test_parse_keeper_chat_response_json_error;
-      ] );
     ( "structured_http_response",
       [
         Alcotest.test_case "body rejects error status" `Quick
@@ -15383,11 +15238,6 @@ let () =
           test_decode_server_identity_reads_the_startup_readiness;
         Alcotest.test_case "reads telemetry" `Quick
           test_decode_server_identity_reads_telemetry;
-      ] );
-    ( "bounded_parent_depth",
-      [
-        Alcotest.test_case "stops on cycle" `Quick
-          test_bounded_parent_depth_stops_on_cycle;
       ] );
     ( "runtime_params",
       [

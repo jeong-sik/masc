@@ -46,72 +46,86 @@ type exit_kind =
   | Absorbed
   | Superseded
 
-(* How [id] left [stage], if an applied absorption or revision took it. An
-   absorption comes first, as in [classify]. *)
+(* How [id] left [stage], with every applied destination. An absorption
+   comes first, as in [classify]. *)
 let exit_of (stage : Keeper_memory_os_program_types.stage) id =
-  match
-    List.find_opt
-      (fun (statement : Keeper_memory_os_types.absorbed_statement) -> String.equal statement.absorbed id)
-      stage.absorbed_applied
-  with
-  | Some statement -> Some (Absorbed, statement.into)
-  | None ->
-    List.find_opt
-      (fun (revision : Keeper_memory_os_types.revision) -> String.equal revision.superseded id)
-      stage.revisions_applied
-    |> Option.map (fun (revision : Keeper_memory_os_types.revision) -> Superseded, revision.superseded_by)
+  let absorbed =
+    List.fold_left
+      (fun into (statement : Keeper_memory_os_types.absorbed_statement) ->
+         if String.equal statement.absorbed id then Ids.add statement.into into else into)
+      Ids.empty stage.absorbed_applied
+  in
+  if not (Ids.is_empty absorbed) then Some (Absorbed, absorbed)
+  else
+    let revised =
+      List.fold_left
+        (fun into (revision : Keeper_memory_os_types.revision) ->
+           if String.equal revision.superseded id then Ids.add revision.superseded_by into else into)
+        Ids.empty stage.revisions_applied
+    in
+    if Ids.is_empty revised then None else Some (Superseded, revised)
 ;;
 
-(* Each initial fact that left through an absorption or a revision, with the
-   kind of that first exit and the ID that carries it after the last stage.
-   In each later stage the carrier follows its own absorption or revision.
-   The fold visits every stage once and moves a carrier at most one step per
-   stage, so even a malformed proof cannot make it loop. *)
+type carrier =
+  { first_exit : exit_kind option
+  ; live : Ids.t
+  }
+
+(* Every initial fact starts with its own carrier. Each stage moves every
+   live branch once and removes carriers absent from that stage's result.
+   An empty set stays empty, so reintroducing an ID cannot revive a dead
+   branch. Splits retain all successors and convergence deduplicates them.
+   The bounded stage fold does not recursively chase links within a stage. *)
 let carriers (execution : Keeper_memory_os_program_types.execution) =
+  let initial =
+    List.fold_left
+      (fun carried fact ->
+         let id = Keeper_memory_os_types.memory_id fact in
+         Set_util.StringMap.add id { first_exit = None; live = Ids.singleton id } carried)
+      Set_util.StringMap.empty execution.initial_facts
+  in
   List.fold_left
-    (fun carried stage ->
-       let moved =
-         Set_util.StringMap.map
-           (fun (first, carrier) ->
-              match exit_of stage carrier with
-              | Some (_, next) -> first, next
-              | None -> first, carrier)
-           carried
-       in
-       List.fold_left
-         (fun carried fact ->
-            let id = Keeper_memory_os_types.memory_id fact in
-            if Set_util.StringMap.mem id carried
-            then carried
-            else (
-              match exit_of stage id with
-              | Some first_exit -> Set_util.StringMap.add id first_exit carried
-              | None -> carried))
-         moved
-         execution.initial_facts)
-    Set_util.StringMap.empty
-    execution.stages
+    (fun carried (stage : Keeper_memory_os_program_types.stage) ->
+       let after = ids stage.after in
+       Set_util.StringMap.map
+         (fun (carrier : carrier) ->
+            let first_exit, live =
+              Ids.fold
+                (fun id (first, live) ->
+                   match exit_of stage id with
+                   | None -> first, Ids.add id live
+                   | Some (kind, next) ->
+                     let first = match first with None -> Some kind | Some _ -> first in
+                     first, Ids.union live next)
+                carrier.live (carrier.first_exit, Ids.empty)
+            in
+            { first_exit; live = Ids.inter live after })
+         carried)
+    initial execution.stages
 ;;
 
 (* A program commits once, so it is counted as the one disposition it
    amounts to, from the facts it started from to the facts it left. An
-   initial fact whose chain of absorptions and revisions ends in the final
-   facts counts by the kind of its first exit; a chain that ends at a
-   dropped claim leaves it dropped, as a disposition needs its replacing
-   claim in the snapshot it commits. A fact one stage added and a later
-   stage removed was never in a committed snapshot, so it counts nowhere. *)
+   initial fact with a surviving absorption or revision branch counts once
+   by its first exit. If every branch dies, it is dropped. A fact one stage
+   added and a later stage removed was never in a committed snapshot, so it
+   counts nowhere. *)
 let of_publication (publication : Keeper_memory_os_program_types.publication) =
   let execution = publication.execution in
   let final = ids execution.final_facts in
   let absorbed, revisions =
     Set_util.StringMap.fold
-      (fun id (first, carrier) (absorbed, revisions) ->
-         match Ids.mem carrier final, first with
-         | false, (Absorbed | Superseded) -> absorbed, revisions
-         | true, Absorbed ->
-           { Keeper_memory_os_types.absorbed = id; into = carrier } :: absorbed, revisions
-         | true, Superseded ->
-           absorbed, { Keeper_memory_os_types.superseded = id; superseded_by = carrier } :: revisions)
+      (fun id (carried : carrier) (absorbed, revisions) ->
+         (* Counts are per original ID, so one final witness is sufficient. *)
+         match Ids.choose_opt (Ids.inter carried.live final) with
+         | None -> absorbed, revisions
+         | Some carrier ->
+           (match carried.first_exit with
+            | None -> absorbed, revisions
+            | Some Absorbed ->
+              { Keeper_memory_os_types.absorbed = id; into = carrier } :: absorbed, revisions
+            | Some Superseded ->
+              absorbed, { Keeper_memory_os_types.superseded = id; superseded_by = carrier } :: revisions))
       (carriers execution)
       ([], [])
   in

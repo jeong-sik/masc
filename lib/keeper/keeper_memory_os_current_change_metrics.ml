@@ -1,6 +1,6 @@
 module Ids = Set_util.StringSet
 
-type counts =
+type counts = Keeper_memory_commit_change.counts =
   { added : int
   ; absorbed : int
   ; superseded : int
@@ -156,19 +156,5 @@ let set_gauges ~keeper_id change_count (snapshot : Keeper_memory_os_current_type
 let count_changes ~keeper_id change_count (snapshot : Keeper_memory_os_current_types.t) output =
   match change_count with
   | Not_counted -> ()
-  | Counted { pass; count } ->
-    let counts = count snapshot output in
-    let pass = Keeper_memory_commit_pass.to_label pass in
-    List.iter
-      (fun (change, value) ->
-         Otel_metric_store.inc_counter
-           Keeper_metrics.(to_string MemoryChanges)
-           ~labels:[ "keeper", keeper_id; "pass", pass; "change", change ]
-           ~delta:(float_of_int value)
-           ())
-      [ "added", counts.added
-      ; "absorbed", counts.absorbed
-      ; "superseded", counts.superseded
-      ; "dropped", counts.dropped
-      ]
+  | Counted { pass; count } -> Keeper_memory_commit_change.count ~keeper_id ~pass (count snapshot output)
 ;;

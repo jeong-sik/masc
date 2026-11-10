@@ -28,5 +28,5 @@ val tools_display_lines : ?cols:int -> ?terminal_rows:int -> state -> (string * 
     pass the viewport width for usage cards, complete metadata wrapping and
     matching physical-row scroll geometry. Rows that already fit retain their
     alignment and card borders; revisions and timestamps remain literal.
-    The catalog starts with its process-wide scope/count and tool rows; its
-    column legend is in the Tools section's Help binding. *)
+    Each pane starts with its observed content and read notices. Static
+    scope and column legends are in the Tools section's Help binding. *)

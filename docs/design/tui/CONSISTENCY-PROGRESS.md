@@ -336,12 +336,14 @@ wording, layout or row-order tests were added. The full screen scope remains
 open.
 
 [#50996](https://github.com/jeong-sik/masc/pull/50996) follows the volume
-separation with the catalog's remaining fixed explanation. A matching be3302c2
+separation with the five panes' remaining fixed explanations. A matching be3302c2
 server/TUI at 36x20 showed eight wrapped explanation rows, then the count and
-part of the table header, with no tool name on the first page. The catalog now
-starts with its process-wide registered count and original tool rows. The
-existing section key's Help carries the scope, DIRECT/SURFACES legend and the
-distinction from a Keeper's callable surface and observed calls. Missing
+part of the table header, with no tool name on the first page. The other four
+panes similarly put their fixed paragraphs before the observed reading. All
+five now start with their original readings; the catalog keeps its process-wide
+registered count. The existing section key's Help carries the scopes, recorded
+evidence meanings and column legends, including the distinction from a Keeper's
+callable surface and observed calls. Missing
 inventory remains a missing reading, and independent pending/failure/retained
 notices, Skill drafts and the volume child keep their existing owners.
 Candidate execution and the actual generated key reference remain pending;

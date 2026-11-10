@@ -125,7 +125,7 @@ val for_surface : Masc_tui_types.surface -> binding list
 (** The surface's own bindings, in declaration order within each group.
     Feeds both projections; a surface whose footer is not yet converted is
     still read by the help overlay. Tools' section binding also explains the
-    registered catalog's scope and columns in Help and the key reference. *)
+    panes' scope and evidence/column terms in Help and the key reference. *)
 
 val goal_candle_refresh_key : string
 (** Open or reread the selected Goal's Candle record without a Goal action. *)

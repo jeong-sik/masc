@@ -2118,31 +2118,6 @@ let tools_display_lines ?(cols = 80) ?terminal_rows (state : state) =
      the other four started past row 120 of a list a terminal shows twenty of.
      They were not missing; they were behind a section that never ends, with
      nothing saying so. *)
-  let explanation =
-    match state.tools_pane with
-    | Masc_tui_types.Tools_surface ->
-        [ Theme.info (), " 선택 Keeper의 도구·Skill 노출 범위입니다."
-        ; Ansi.dim, "   ORIGIN=도구 출처 · 전달 지원과 실제 호출은 별도입니다."
-        ; Ansi.dim, "   사용 증거: Skill 기록 · Tool 호출별 입출력: Acting"
-        ]
-    | Masc_tui_types.Tools_async ->
-        [ Theme.info (), " 워크스페이스의 비동기 요청·복구 상태입니다."
-        ; Theme.info (), "   J/K:요청 선택 · Enter:상세 · t:원본 Task · o:원본 ID · r:재조회 · Esc:뒤로"
-        ; Ansi.dim, "   active=활성 원장 요청 수 · runtime-owned=현재 런타임 소유"
-        ; Ansi.dim, "   ownership-unknown=소유 확인 안 됨 · 성공 여부는 개별 상태 확인"
-        ]
-    | Masc_tui_types.Tools_activations ->
-        [ Theme.info (), " 선택 Keeper의 현재 세션에 보존된 Skill 증거입니다."
-        ; Ansi.dim, "   triggered=호출 · delivered/handed off=전달 · actions=이후 Tool 행동"
-        ; Ansi.dim, "   호출·전달·이후 행동은 별도 증거이며, 기록 없음은 미사용 확정이 아닙니다."
-        ]
-    | Masc_tui_types.Tools_usage ->
-        [ Theme.info (), " 현재 Keeper 세션들에서 읽힌 Skill revision별 사용 집계입니다."
-        ; Ansi.dim, "   TRIGGERED/DELIVERED/ACTIONS=호출/전달/이후 행동 · 마지막 사용은 원장에 기록된 시각"
-        ; Ansi.dim, "   호출 기록이 있는 행만 표시합니다. 읽지 못한 원장은 아래에 표시합니다."
-        ]
-    | Masc_tui_types.Tools_catalog (Tools_catalog_list | Tools_catalog_volumes _) -> []
-  in
   let pane_lines =
     match state.tools_pane with
     | Masc_tui_types.Tools_surface -> Lazy.force effective_lines
@@ -2219,7 +2194,7 @@ let tools_display_lines ?(cols = 80) ?terminal_rows (state : state) =
     (Printf.sprintf " Unpublished %s draft retained for %s · %s:resume in editor"
       (if draft.scd_composition then "Composition" else "Instruction") draft.scd_source_id
       (if draft.scd_composition then "C" else "c"))) (skill_create_drafts_for_current_workspace state) in
-  let prefix=tools_selection_document ~cols state @ drafts @ reading_lines @ error_lines @ explanation in
+  let prefix=tools_selection_document ~cols state @ drafts @ reading_lines @ error_lines in
   if Option.is_some (tools_volume_gc_parent_scroll state.tools_pane) then
     wrap (pane_lines @ reading_lines @ error_lines)
   else if state.tools_pane=Tools_async && state.tools_async_detail_open && Option.is_some state.tools_async_task_source then

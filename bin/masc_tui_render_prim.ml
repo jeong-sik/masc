@@ -100,9 +100,6 @@ let runtime_assignment_label (assignment : runtime_assignment) =
       source
 ;;
 
-let runtime_assignment_targets = Masc_tui_types.runtime_assignment_targets
-;;
-
 let acting_pane_reserved_cols = ref 0
 
 

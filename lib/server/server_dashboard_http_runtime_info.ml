@@ -2188,6 +2188,10 @@ let dashboard_tools_cache_ttl_sec = 30.0
    the workspace alone. *)
 let dashboard_tools_cache_key ~base_path = Printf.sprintf "tools:%s" base_path
 
+let invalidate_dashboard_tools ~base_path =
+  Dashboard_cache.invalidate (dashboard_tools_cache_key ~base_path)
+;;
+
 let dashboard_tools_warming_json () =
   `Assoc
     [ "generated_at", `String (Masc_domain.now_iso ())
@@ -2282,7 +2286,7 @@ let dashboard_tools_http_result ?(read_policy = Dashboard_projection_read.Reuse)
          @ [ "effective_keeper_surface", effective_keeper_surface
            ; "keeper_waiting_inventory", keeper_waiting_inventory
            ; ( Keeper_volume_gc_periodic.envelope_field
-             , Server_sandbox_volume_gc_report.envelope_json () )
+             , Server_sandbox_volume_gc_report.envelope_json ~base_path:config.base_path () )
            ])
     | other -> other
   in

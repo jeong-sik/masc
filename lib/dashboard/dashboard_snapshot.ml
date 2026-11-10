@@ -12,7 +12,7 @@ type tools_result =
   | Tools_ready of Yojson.Safe.t
   | Tools_error of Yojson.Safe.t
 
-let prepare_tools ~(config : Workspace.config) json =
+let make_tools_projection ~(config : Workspace.config) json =
   let raw = Yojson.Safe.to_string json in
   { base_path = config.base_path; workspace_path = config.workspace_path;
     masc_root = Workspace.masc_dir config; json;
@@ -38,11 +38,17 @@ type partial = {
   latest : t option;
 }
 
-type publisher = { config : Workspace.config; masc_root : string; state : partial Atomic.t }
+type publisher = {
+  config : Workspace.config;
+  masc_root : string;
+  is_current : unit -> bool;
+  state : partial Atomic.t;
+}
+type tools_update = { publisher : publisher; projection : tools_projection }
 let active : publisher option Atomic.t = Atomic.make None
 
-let activate ~config =
-  let publisher = { config; masc_root = Workspace.masc_dir config;
+let activate ~config ~is_current =
+  let publisher = { config; masc_root = Workspace.masc_dir config; is_current;
     state = Atomic.make { shell = None; tools = None; telemetry = None; latest = None } } in
   Atomic.set active (Some publisher);
   publisher
@@ -57,15 +63,30 @@ let rec retire publisher =
       then retire publisher
 ;;
 
-let current () = Option.bind (Atomic.get active) (fun publisher -> (Atomic.get publisher.state).latest)
+let read_publisher publisher select =
+  let value = select (Atomic.get publisher.state) in
+  if publisher.is_current () then value else None
+;;
 
-let current_for_config (config : Workspace.config) =
-  match current () with
-  | Some snapshot when String.equal snapshot.base_path config.base_path
-      && String.equal snapshot.workspace_path config.workspace_path
-      && String.equal snapshot.masc_root (Workspace.masc_dir config) -> Some snapshot
+let current () = Option.bind (Atomic.get active)
+    (fun publisher -> read_publisher publisher (fun state -> state.latest))
+
+let publisher_for_config (config : Workspace.config) =
+  match Atomic.get active with
+  | Some publisher when String.equal publisher.config.base_path config.base_path
+      && String.equal publisher.config.workspace_path config.workspace_path
+      && String.equal publisher.masc_root (Workspace.masc_dir config) -> Some publisher
   | Some _ | None -> None
 ;;
+
+let current_for_config config =
+  Option.bind (publisher_for_config config) (fun publisher -> read_publisher publisher (fun state -> state.latest))
+let shell_for_config config =
+  Option.bind (publisher_for_config config) (fun publisher -> read_publisher publisher (fun state -> state.shell))
+let tools_for_config config =
+  Option.bind (publisher_for_config config) (fun publisher -> read_publisher publisher (fun state -> state.tools))
+let telemetry_for_config config =
+  Option.bind (publisher_for_config config) (fun publisher -> read_publisher publisher (fun state -> state.telemetry))
 
 let update publisher change =
   let generated_at = Unix.gettimeofday () in
@@ -83,8 +104,11 @@ let publish_shell publisher ~shell ~shell_light =
   update publisher (fun state -> {state with shell = Some (shell, shell_light)})
 ;;
 
-let publish_tools publisher json =
-  let tools = prepare_tools ~config:publisher.config json in
+let prepare_tools publisher json =
+  {publisher; projection = make_tools_projection ~config:publisher.config json}
+;;
+
+let publish_tools {publisher; projection = tools} =
   update publisher (fun state -> {state with tools = Some tools})
 ;;
 
@@ -160,13 +184,13 @@ let invalidate_public_activity_events ~base_path =
 let make_for_test ~config ~shell ?(shell_light = `Null) ~tools ~telemetry_summary () =
   {generated_at = Unix.gettimeofday (); base_path = config.Workspace.base_path;
    workspace_path = config.workspace_path; masc_root = Workspace.masc_dir config;
-   shell; shell_light; tools = prepare_tools ~config tools; telemetry_summary}
+   shell; shell_light; tools = make_tools_projection ~config tools; telemetry_summary}
 ;;
 
 let publish_for_test (snapshot : t) =
   let config = { (Workspace.default_config snapshot.base_path) with
     workspace_path = snapshot.workspace_path } in
-  let publisher = activate ~config in
+  let publisher = activate ~config ~is_current:(fun () -> true) in
   Atomic.set publisher.state {shell = Some (snapshot.shell, snapshot.shell_light);
     tools = Some snapshot.tools; telemetry = Some snapshot.telemetry_summary;
     latest = Some snapshot}

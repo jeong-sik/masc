@@ -807,8 +807,8 @@ or completion.
 
 | Keys | What it does |
 |---|---|
-| `o` | switch between server logs and this TUI's own observations |
 | `e` | Events |
+| `o` | switch between server logs and this TUI's own observations |
 | `j/k` | move / scroll |
 | `PgUp/PgDn` | page |
 | `[ / ]` | while detail is open, inspect the adjacent visible log entry |

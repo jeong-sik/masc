@@ -217,7 +217,12 @@ val relay : t -> sw:Eio.Switch.t -> post:((unit -> unit) -> unit) -> (t -> unit)
     [handler] is posted with a handle that sends each thing it asks of the
     request to a fiber forked on [sw], which applies them to [t] in the order
     they were sent. Call this on the connection's domain with [sw] from
-    {!relay_scope}.
+    {!relay_scope}. When [sw] is already cancelled no fiber starts on it, so
+    nothing is posted: the connection is ending.
+
+    What [handler] raises is reported with {!report_exn}, and what a
+    {!read_body} [on_body] raises reaches that read's [on_error] as
+    [Internal], as both do on the connection's fiber.
 
     Through that handle {!try_respond_with_string}, {!respond_with_streaming}
     and {!response_state} wait for the connection's fiber to answer.
@@ -230,7 +235,8 @@ val relay : t -> sw:Eio.Switch.t -> post:((unit -> unit) -> unit) -> (t -> unit)
     client that left. {!upgrade} is [None].
 
     The fiber ends when the response is whole and its flushes are answered,
-    or when [sw] ends. After that the handle answers as a request that is
+    or when [sw] ends. A response the transport rejects does not end it: a
+    streaming body that was open stays the handler's to close. After that the handle answers as a request that is
     over does: a response is rejected, a streaming response gets a closed
     writer, a flush answers [`Closed], a body read delivers nothing. A flush
     the transport had not answered when [sw] ended is answered [`Closed]

@@ -30,9 +30,13 @@ type 'a exchange =
   ; owner_domain : Domain.id
   }
 
+let relay_under_its_scope ~scope ~post reqd handler = Http_reqd.relay reqd ~sw:scope ~post handler
+
 (* [handler] gets the relayed request on the owner domain. [client flow]
-   runs on the connection's domain and its result comes back. *)
-let exchange ~handler client =
+   runs on the connection's domain and its result comes back. [relay] hands
+   the request over, under the request's own scope unless a case says
+   otherwise. *)
+let exchange ?(relay = relay_under_its_scope) ~handler client =
   Eio_main.run
   @@ fun env ->
   let clock = Eio.Stdenv.clock env in
@@ -65,7 +69,7 @@ let exchange ~handler client =
               ~request_handler:(fun _client_addr gluten_reqd ->
                 let reqd = Http_reqd.of_gluten gluten_reqd in
                 match Http_reqd.relay_scope reqd with
-                | Some scope -> Http_reqd.relay reqd ~sw:scope ~post handler
+                | Some scope -> relay ~scope ~post reqd handler
                 | None -> Alcotest.fail "an HTTP/1.1 request has no scope to relay under")
               ~error_handler
               (`Tcp (Eio.Net.Ipaddr.V4.loopback, 54321))
@@ -293,6 +297,115 @@ let test_report_exn () =
     (contains exchange.result "HTTP/1.1 500" && contains exchange.result "reported")
 ;;
 
+(* The transport rejects a second response while a streaming one is open.
+   The body is still the handler's: what it writes after the rejection
+   arrives, and its close ends the response. *)
+let test_rejected_response_leaves_the_stream_open () =
+  let rejected = Atomic.make [] in
+  let handler reqd =
+    let body =
+      Http_reqd.respond_with_streaming
+        ~flush_headers_immediately:true
+        reqd
+        (response ~headers:[ "transfer-encoding", "chunked"; "connection", "close" ] `OK)
+    in
+    Http_reqd.Body_writer.write_string body "first";
+    record rejected (Http_reqd.try_respond_with_string reqd (text_response "late") "late");
+    Http_reqd.Body_writer.write_string body "second";
+    Http_reqd.Body_writer.close body
+  in
+  let exchange =
+    exchange ~handler (fun flow ->
+      send flow "GET /stream HTTP/1.1\r\nhost: t\r\n\r\n";
+      read_to_end flow)
+  in
+  Alcotest.(check bool)
+    "the second response was rejected"
+    true
+    (Atomic.get rejected = [ Http_reqd.Rejected_by_writer ]);
+  Alcotest.(check bool)
+    "the body went on and ended"
+    true
+    (contains exchange.result "5\r\nfirst\r\n6\r\nsecond\r\n0\r\n\r\n")
+;;
+
+let post_request body =
+  Printf.sprintf
+    "POST /body HTTP/1.1\r\nhost: t\r\ncontent-length: %d\r\nconnection: close\r\n\r\n%s"
+    (String.length body)
+    body
+;;
+
+(* What the body callback raises reaches the error callback of the same
+   read, which answers. *)
+let test_body_callback_failure_reaches_on_error () =
+  let handler reqd =
+    Http_reqd.read_body
+      reqd
+      ~max_bytes:64
+      ~on_body:(fun _body -> failwith "the body callback gave up")
+      ~on_error:(fun error ->
+        let answer =
+          match error with
+          | Http_reqd.Internal (Failure reason) -> "internal: " ^ reason
+          | Http_reqd.Internal _ -> "internal"
+          | Http_reqd.Too_large limit -> Printf.sprintf "over %d" limit
+        in
+        Http_reqd.respond_with_string reqd (text_response answer) answer)
+  in
+  let exchange =
+    exchange ~handler (fun flow ->
+      send flow (post_request "hello");
+      read_sized_response (Eio.Buf_read.of_flow flow ~max_size:(1 lsl 20)))
+  in
+  Alcotest.(check string)
+    "the error callback answered with the failure"
+    "internal: the body callback gave up"
+    (snd exchange.result)
+;;
+
+(* A handler that raises before it answers: the transport reports it. *)
+let test_handler_failure_is_reported () =
+  let handler _reqd = failwith "the handler gave up" in
+  let exchange =
+    exchange ~handler (fun flow ->
+      send flow "GET /fails HTTP/1.1\r\nhost: t\r\n\r\n";
+      read_to_end flow)
+  in
+  Alcotest.(check bool)
+    "the transport's error response reaches the client"
+    true
+    (contains exchange.result "HTTP/1.1 500" && contains exchange.result "reported")
+;;
+
+(* The scope is cancelled before the request is handed over, as a connection
+   that is ending is. No fiber starts on it, so no handler is posted: one
+   that ran would wait for an answer nobody gives, and the exchange would
+   not end. *)
+let test_cancelled_scope_posts_no_handler () =
+  let ran = Atomic.make [] in
+  let handed_over, mark_handed_over = Eio.Promise.create () in
+  let relay ~scope:_ ~post reqd handler =
+    (try
+       Eio.Switch.run (fun cancelled ->
+         Eio.Switch.fail cancelled Exit;
+         Http_reqd.relay reqd ~sw:cancelled ~post handler)
+     with
+     | Exit -> ());
+    Eio.Promise.resolve mark_handed_over ()
+  in
+  let handler reqd =
+    record ran (Domain.self ());
+    Http_reqd.respond_with_string reqd (text_response "late") "late"
+  in
+  let _ : unit exchange =
+    exchange ~relay ~handler (fun flow ->
+      send flow "GET /ending HTTP/1.1\r\nhost: t\r\n\r\n";
+      Eio.Promise.await handed_over)
+  in
+  Alcotest.(check int) "no handler ran" 0 (List.length (Atomic.get ran))
+;;
+
 let () =
   Alcotest.run
     "http_reqd_relay"
@@ -303,6 +416,13 @@ let () =
         ; Alcotest.test_case "reads the request body" `Quick test_read_body
         ; Alcotest.test_case "learns that the client left" `Quick test_client_leaves_mid_stream
         ; Alcotest.test_case "reports a failure" `Quick test_report_exn
+        ; Alcotest.test_case "keeps a stream open after a rejected response" `Quick
+            test_rejected_response_leaves_the_stream_open
+        ; Alcotest.test_case "hears a body callback's failure in the error callback" `Quick
+            test_body_callback_failure_reaches_on_error
+        ; Alcotest.test_case "has its own failure reported" `Quick test_handler_failure_is_reported
+        ; Alcotest.test_case "is not posted under a cancelled scope" `Quick
+            test_cancelled_scope_posts_no_handler
         ] )
     ]
 ;;

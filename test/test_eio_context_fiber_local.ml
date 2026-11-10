@@ -258,6 +258,35 @@ let test_set_switch_clears_on_release () =
   Alcotest.(check bool) "root switch cleared after switch released" true
     (Option.is_none (Eio_context.get_root_switch_opt ()))
 
+(* Another domain posts three tasks while the owner domain does not pass
+   through its run queue, so its dispatcher starts none of them before the
+   root switch ends. The release hook cannot be cancelled and runs after
+   every fiber under the switch has ended, so a posted task still queued
+   there is dropped. The poster is a bare domain: an Eio one would need the
+   owner's run queue to hand back its result. *)
+let test_posted_tasks_left_at_release_are_dropped () =
+  Eio_main.run @@ fun _env ->
+  let ran = Atomic.make 0 in
+  let posted = Atomic.make false in
+  let poster = ref None in
+  Eio.Switch.run (fun root_sw ->
+    Eio_context.set_switch root_sw;
+    poster :=
+      Some
+        (Domain.spawn (fun () ->
+           (match Eio_context.owner_post () with
+            | Some post ->
+              for _ = 1 to 3 do
+                post (fun () -> Atomic.incr ran)
+              done
+            | None -> ());
+           Atomic.set posted true));
+    while not (Atomic.get posted) do
+      Domain.cpu_relax ()
+    done);
+  Option.iter Domain.join !poster;
+  Alcotest.(check int) "no posted task ran in the release hook" 0 (Atomic.get ran)
+
 let test_with_turn_switch_does_not_mutate_root_switch () =
   Eio_main.run @@ fun _env ->
   Eio_context.For_testing.clear_root_switch ();
@@ -339,6 +368,9 @@ let () =
           Alcotest.test_case "set_switch clears on release"
             `Quick
             test_set_switch_clears_on_release;
+          Alcotest.test_case "posted tasks left at release are dropped"
+            `Quick
+            test_posted_tasks_left_at_release_are_dropped;
           Alcotest.test_case "For_testing.clear_root_switch resets to None"
             `Quick
             test_for_testing_clear_root_switch;

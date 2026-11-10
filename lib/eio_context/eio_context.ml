@@ -8,10 +8,17 @@
 
 type eio_net = [`Generic | `Unix] Eio.Net.ty Eio.Resource.t
 
+(* What another domain queues for the owner domain. A caller of
+   [run_on_owner_domain] waits for an [Awaited] task's promise; nobody waits
+   for a [Posted] one. *)
+type owner_task =
+  | Awaited of (unit -> unit)
+  | Posted of (unit -> unit)
+
 type root_switch_binding =
   { switch : Eio.Switch.t
   ; owner_domain : Domain.id
-  ; dispatch_stream : (unit -> unit) Eio.Stream.t
+  ; dispatch_stream : owner_task Eio.Stream.t
   }
 
 type state_snapshot = {
@@ -100,17 +107,23 @@ let set_switch sw =
   Atomic.set current_sw some_binding;
   Eio.Switch.on_release sw (fun () ->
     let _ = Atomic.compare_and_set current_sw some_binding None in
+    (* Every fiber under the switch has ended by now. An awaited task still
+       runs, here, so its caller on another domain gets an answer. A posted
+       one is dropped: it would start a request's handler, or answer a fiber
+       that no longer exists, inside this release hook, which cannot be
+       cancelled. *)
     let rec drain () =
       match Eio.Stream.take_nonblocking dispatch_stream with
-      | Some task ->
+      | Some (Awaited task) ->
         (try task () with _ -> ());  (* cancel-guard-ok: release-time drain; Cancelled is the expected teardown signal here and must not abort the drain. @observe-allowed: the switch is already releasing, so no caller is left to hand a task's failure to *)
         drain ()
+      | Some (Posted _) -> drain ()
       | None -> ()
     in
     drain ());
   Eio.Fiber.fork_daemon ~sw (fun () ->
     while true do
-      let task = Eio.Stream.take dispatch_stream in
+      let (Awaited task | Posted task) = Eio.Stream.take dispatch_stream in
       Eio.Fiber.fork ~sw (fun () ->
         try task () with _ -> ());  (* cancel-guard-ok: daemon safety net; a task's own catch resolves its promise first, so this arm only sees fork-teardown noise the daemon must survive. @observe-allowed: same reason -- what reaches here was already reported by the task, or is teardown *)
       (* One task starts per pass of this domain's run queue. Without the
@@ -159,7 +172,7 @@ let owner_post () =
   match Atomic.get current_sw with
   | None -> None
   | Some binding when binding.owner_domain = Domain.self () -> None
-  | Some binding -> Some (fun task -> Eio.Stream.add binding.dispatch_stream task)
+  | Some binding -> Some (fun task -> Eio.Stream.add binding.dispatch_stream (Posted task))
 
 let run_on_owner_domain (type a) (f : unit -> a) : a =
   match Atomic.get current_sw with
@@ -175,7 +188,7 @@ let run_on_owner_domain (type a) (f : unit -> a) : a =
         let bt = Printexc.get_raw_backtrace () in
         Eio.Promise.resolve_error r (exn, bt)
     in
-    Eio.Stream.add binding.dispatch_stream task;
+    Eio.Stream.add binding.dispatch_stream (Awaited task);
     match Eio.Promise.await p with
     | Ok res -> res
     | Error (exn, bt) -> Printexc.raise_with_backtrace exn bt

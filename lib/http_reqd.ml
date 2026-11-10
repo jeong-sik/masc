@@ -717,11 +717,13 @@ let serve_relay t relay ~post =
     | Not_started | Streaming_open -> `Continue
   in
   let handle = function
+    (* A rejected response leaves the request as it was: a streaming body
+       that was open is still the handler's to close. *)
     | Relay_respond (response, body, answer) ->
       let acceptance = try_respond_with_string t response body in
-      Atomic.set relay.last_state Answered;
+      let next = look () in
       Eio.Promise.resolve answer acceptance;
-      `Finished
+      next
     | Relay_start { flush_headers_immediately; response; started } ->
       (match respond_with_streaming ?flush_headers_immediately t response with
        | body ->
@@ -749,7 +751,7 @@ let serve_relay t relay ~post =
       read_body
         t
         ~max_bytes
-        ~on_body:(fun body -> post (fun () -> on_body body))
+        ~on_body:(fun body -> post (fun () -> deliver_body ~on_body ~on_error body))
         ~on_error:(fun error -> post (fun () -> on_error error));
       `Continue
     | Relay_state answer ->
@@ -787,8 +789,21 @@ let relay t ~sw ~post handler =
     ; last_state = Atomic.make Not_started
     }
   in
+  let serving = ref false in
   Eio.Fiber.fork_daemon ~sw (fun () ->
+    serving := true;
     serve_relay t relay ~post;
     `Stop_daemon);
-  post (fun () -> handler (Relayed relay))
+  (* A cancelled switch starts no fiber and raises nothing, so nobody would
+     apply this request's operations and its handler would wait for the
+     first answer for good. The connection is ending: the handler does not
+     run, as on that connection's fiber it would have been cancelled at its
+     first wait. *)
+  if !serving
+  then
+    post (fun () ->
+      let relayed = Relayed relay in
+      try handler relayed with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn -> report_exn relayed exn)
 ;;

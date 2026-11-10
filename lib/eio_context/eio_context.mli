@@ -52,8 +52,8 @@ val owner_post : unit -> ((unit -> unit) -> unit) option
     waiting. Each task runs in a fiber of its own under the root switch.
     Tasks start in the order posted, one for each pass of the owner domain's
     run queue. What a task raises is dropped, so a task reports its own
-    failure. A task posted after the root switch was cancelled may never
-    run. *)
+    failure. A task the owner has not started when the root switch ends is
+    dropped. *)
 
 val run_on_owner_domain : (unit -> 'a) -> 'a
 (** [run_on_owner_domain f] executes [f ()] on the domain that installed the

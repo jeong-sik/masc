@@ -615,6 +615,8 @@ let for_surface = function
       :: (b Act "Right" "detail" ~help:"keeper detail")
       :: (b Act "Tab / s / m" "pages"
             ~help:"with a Keeper Story open: next page / schedules / memory; World keeps its own page; Esc closes either window")
+      :: (b Act "0 / 1 / 2 / 3 / 4 / [ / ]" "memory"
+            ~help:"with Keeper Memory open: overview / recent records / retrievals / committed changes / storage; brackets scroll the table")
       :: keeper_actions
       @ [ b Search "/" "search" ~help:"search names; Enter keeps the query"
         ; b Search "n / N" "next / previous match"

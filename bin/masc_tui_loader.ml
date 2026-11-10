@@ -1621,6 +1621,23 @@ let load_memory_facts ~(host : string) ~(port : int) ~(keeper_name : string) :
       decode_offloaded memo_memory_facts ~name:"memory.facts.decode_wait"
         Masc.Tui_decode_memory_facts.decode_memory_fact_snapshot json
 
+(** Keep readable claims when their retrieval sidecar is partial. *)
+let load_keeper_story_memory_facts ~host ~port ~keeper_name =
+  match fetch_keeper_memory_facts ~host ~port ~keeper_name with
+  | Error reason -> Error reason
+  | Ok json ->
+    let usage_error =
+      match Json_util.require_int json "events_unreadable_lines" with
+      | Ok 0 -> None
+      | Ok count -> Some (Printf.sprintf "%d unreadable retrieval event lines" count)
+      | Error reason -> Some reason in
+    match decode_offloaded memo_memory_facts ~name:"memory.story.decode_wait"
+        Masc.Tui_decode_memory_facts.decode_memory_fact_snapshot json with
+    | Error reason -> Error reason
+    | Ok facts when facts.mfs_keeper <> keeper_name -> Error "memory facts Keeper mismatch"
+    | Ok facts -> Ok (facts, match facts.mfs_events_read_error with
+        | Some reason -> Some reason | None -> usage_error)
+
 let memo_project_changes = json_memo ()
 
 (** Load the current project's Git working-tree changes. *)

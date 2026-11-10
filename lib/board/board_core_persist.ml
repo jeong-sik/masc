@@ -99,6 +99,12 @@ let require_persisted_snapshot_readable = function
   | Error detail -> Error (Io_error detail)
 ;;
 
+let require_model_reload_allowed store ~path = match store.snapshot_retry with
+  | Independent_snapshots -> Ok ()
+  | Deletion_pending -> Error (path, Failure
+      "Pending Board deletion requires a fresh store before model reload.")
+;;
+
 (* RFC-0233 §7: maintain the origin secondary indexes. Shared by the create
    path (create_fresh) and the load path (load_persisted_posts) so the two
    stay in lockstep — a single maintenance site, not an N-of-M copy. *)

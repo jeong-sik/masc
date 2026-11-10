@@ -230,8 +230,8 @@ let test_individual_snapshot_failure path () =
   Alcotest.(check int) "restart has no deleted votes" 0 (Hashtbl.length restored.vote_log);
   Alcotest.(check int) "restart has no deleted reactions" 0 (Hashtbl.length restored.reactions)
 
-let test_multiple_snapshot_failures_keep_healthy_writes_and_retry () =
-  let doomed = create_post_exn ~content:"delete despite independent snapshot failures" in
+let test_failed_prerequisite_preserves_dependents_until_retry () =
+  let doomed = create_post_exn ~content:"delete with ordered snapshot retries" in
   let post_id = Board.Post_id.to_string doomed.id in
   ignore
     (require_ok
@@ -248,6 +248,8 @@ let test_multiple_snapshot_failures_keep_healthy_writes_and_retry () =
   Alcotest.(check int) "reaction is on disk before deletion" 1
     (List.length (Fs_compat.load_jsonl (Board.reactions_path (Board.global ()))));
   let active = store () in
+  let comments_before = Fs_compat.load_file (Board.comments_path active) in
+  let reactions_before = Fs_compat.load_file (Board.reactions_path active) in
   let with_blocked_path path f =
     let backup = path ^ ".before-delete" in
     Unix.rename path backup;
@@ -264,11 +266,11 @@ let test_multiple_snapshot_failures_keep_healthy_writes_and_retry () =
        | Error error -> Alcotest.fail (Board.show_board_error error)
        | Ok Board.Durable_deletion ->
          Alcotest.fail "failed snapshots must leave deletion persistence pending");
-      Alcotest.(check int) "both failed writes are counted" 2
+      Alcotest.(check int) "only the blocked parent write is attempted" 1
         (Board.persist_error_count () - errors_before);
-      Alcotest.(check string) "comments are removed before repair" ""
+      Alcotest.(check string) "comments remain while parent deletion is blocked" comments_before
         (Fs_compat.load_file (Board.comments_path (Board.global ())));
-      Alcotest.(check string) "reactions are removed before repair" ""
+      Alcotest.(check string) "reactions remain while parent deletion is blocked" reactions_before
         (Fs_compat.load_file (Board.reactions_path (Board.global ())))));
   Alcotest.(check bool) "multiple failures retain the original store" true
     (active == store ());
@@ -550,8 +552,8 @@ let () =
             (with_eio (test_individual_snapshot_failure Board.vote_log_path))
         ; Alcotest.test_case "reactions rewrite remains pending and retries" `Quick
             (with_eio (test_individual_snapshot_failure Board.reactions_path))
-        ; Alcotest.test_case "multiple failed snapshots preserve healthy writes and retry" `Quick
-            (with_eio test_multiple_snapshot_failures_keep_healthy_writes_and_retry)
+        ; Alcotest.test_case "failed prerequisite preserves dependents until retry" `Quick
+            (with_eio test_failed_prerequisite_preserves_dependents_until_retry)
         ; Alcotest.test_case "obstructed delete retry refuses changed same-cursor bytes" `Quick
             (with_eio test_obstructed_delete_retry_refuses_changed_same_cursor_bytes)
         ; Alcotest.test_case "unreadable snapshot refuses without a transition" `Quick

@@ -60,6 +60,10 @@ let test_refused_parent_preserves_comments_after_flush base_path =
   let posts_path = Board.persist_path stale and comments_path = Board.comments_path stale in
   let posts_before = Fs_compat.load_file posts_path and comments_before = Fs_compat.load_file comments_path in
   require_pending (Board.delete_post stale ~post_id:(Board.Post_id.to_string parent.id));
+  List.iter (fun load -> Alcotest.(check bool) "pending deletion refuses partial model reload" true
+    (Result.is_error (load stale)))
+    [Masc_board_handlers.Board_votes_json.load_persisted_posts;
+     Masc_board_handlers.Board_votes_json.load_persisted_comments];
   Alcotest.(check string) "refused parent deletion preserves comments" comments_before
     (Fs_compat.load_file comments_path);
   Board.flush_dirty stale;

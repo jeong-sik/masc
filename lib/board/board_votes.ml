@@ -276,8 +276,12 @@ let capture_snapshot_batch store selection =
 let write_snapshot store = function
   | Snapshot_batch.Posts_payload snapshot -> finish_posts_write (save_posts_snapshot store snapshot)
   | Snapshot_batch.Comments_payload content -> save_comments_snapshot store content
-  | Snapshot_batch.Votes_payload content -> save_vote_log_jsonl store content
-  | Snapshot_batch.Reactions_payload content -> Board_core_persist.save_reactions_jsonl_result store content
+  | Snapshot_batch.Votes_payload content ->
+    let* () = require_persisted_snapshot_readable store.votes_load_result in
+    save_vote_log_jsonl store content
+  | Snapshot_batch.Reactions_payload content ->
+    let* () = require_persisted_snapshot_readable store.reactions_load_result in
+    Board_core_persist.save_reactions_jsonl_result store content
 ;;
 
 (* Re-mark everything dirty after a failed snapshot write, so the next flush

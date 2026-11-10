@@ -220,7 +220,8 @@ val reset_global_for_test : unit -> unit
     from test setup before concurrent fibers exist. *)
 
 val flush_dirty : store -> unit
-(** Atomically replaces each dirty post/comment snapshot independently.
+(** Atomically replaces each dirty post/comment snapshot independently, or
+    retries all sources in deletion order while deletion work remains pending.
     Captures data under the state lock and serializes snapshot writers with
     the persistence lock. If either table is dirty, also compacts readable
     vote/reaction ledgers. Failed writes remain scheduled for a later flush.

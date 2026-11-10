@@ -545,6 +545,7 @@ let create_server_state ~sw ~base_path ?input_base_path ~clock ~mono_clock ~net
     startup_config_resolution ~base_path |> Config_dir_resolver.to_json
   in
   let config = Mcp_server.workspace_config state in
+  Server_dashboard_observation_broadcast.install ~state ~sw ~mono_clock;
   Server_provider_rest_broadcast.install ~sw ~clock ~config;
   Server_keeper_cost_broadcast.install ~sw ~clock ~config;
   Server_runtime_metrics.install ~sw ~clock ~config;

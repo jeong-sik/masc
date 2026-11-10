@@ -137,9 +137,7 @@ let attempt_rejected_should_try_next error =
   | None -> false
 ;;
 
-(* Lives here rather than reusing [Keeper_error_classify.is_context_overflow]:
-   that module depends on [Keeper_turn_driver], so the walk predicate cannot
-   reach it without a module cycle. The predicate reads the one closed
+(* The predicate reads the one closed
    [Candidate_fault] judgment: a typed [ContextOverflow] is a per-candidate
    window fact ([Binding Window]), so a later candidate with a larger window
    can serve the same turn. A new [Retry.api_error] constructor stops

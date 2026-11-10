@@ -14,7 +14,7 @@ import type {
   ToolMetricsSeriesResponse,
 } from '../../api/schemas/tool-metrics-series'
 import { createManagedAsyncResource } from '../../lib/async-state'
-import { setupVisibleAutoRefresh } from '../../lib/auto-refresh'
+import { setupObservationRefresh } from '../../lib/observation-refresh'
 import type { MetricReading } from '../../lib/metric-series'
 
 export const SERIES_WINDOWS = {
@@ -29,8 +29,6 @@ export type SeriesWindowKey = keyof typeof SERIES_WINDOWS
 export const SERIES_WINDOW_ORDER: readonly SeriesWindowKey[] = ['day', 'week', 'month']
 
 /** The server keeps 30 days of tool calls; a series answer is cached for 30 s. */
-export const TOOL_SERIES_REFRESH_MS = 60_000
-
 export const selectedWindow = signal<SeriesWindowKey>('day')
 export const selectedTool = signal<string | null>(null)
 
@@ -94,12 +92,9 @@ export function selectTool(tool: string | null): void {
   void loadToolSeries()
 }
 
-/** Load once, then again every [TOOL_SERIES_REFRESH_MS] while the page is visible. */
+/** Read the current selection when observed tool metrics change. */
 export function subscribeToolSeriesRefresh(): () => void {
-  void loadToolSeries()
-  return setupVisibleAutoRefresh(() => {
-    void loadToolSeries()
-  }, TOOL_SERIES_REFRESH_MS)
+  return setupObservationRefresh(loadToolSeries, { topics: ['tool_metrics'] })
 }
 
 /**

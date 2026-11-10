@@ -16,8 +16,8 @@ import {
   type KeeperMemoryHealthLibrarianStalled,
   type KeeperMemoryHealthResponse,
 } from '../../api/dashboard'
-import { DEFAULT_PANEL_REFRESH_MS, formatAutoRefreshLabel, setupVisibleAutoRefresh } from '../../lib/auto-refresh'
 import { createManagedAsyncResource } from '../../lib/async-state'
+import { setupObservationRefresh } from '../../lib/observation-refresh'
 
 const SNAPSHOT_READ_ERROR_TARGET: KeeperMemoryHealthAlertTarget = 'snapshot_read_error'
 const SOURCE_SNAPSHOT_READ_ERROR_TARGET: KeeperMemoryHealthAlertTarget = 'source_snapshot_read_error'
@@ -180,11 +180,12 @@ export function KeeperMemoryHealth() {
 
   useEffect(() => {
     // useEffect is appropriate here: this is external-system synchronization
-    // (periodic HTTP fetch from the MASC API), not derived state or event response.
+    // (committed memory changes over the observation stream), not derived state.
     // The shared resource admits only the latest load and retires it on cleanup.
-    const refresh = () => { void resource.load(() => fetchKeeperMemoryHealth()) }
-    refresh()
-    const cleanup = setupVisibleAutoRefresh(refresh, DEFAULT_PANEL_REFRESH_MS)
+    const refresh = (_signal: AbortSignal) => {
+      void resource.load(() => fetchKeeperMemoryHealth())
+    }
+    const cleanup = setupObservationRefresh(refresh, { topics: ['keeper_memory_health'] })
 
     return () => {
       resource.cancel()
@@ -350,7 +351,7 @@ export function KeeperMemoryHealth() {
           </div>
         </div>
         <div class="kmh-refresh-label">
-          ${formatAutoRefreshLabel(DEFAULT_PANEL_REFRESH_MS)} — 마지막 관측 ${generatedAt}
+          ${'실시간 변경 반영'} — 마지막 관측 ${generatedAt}
           ${loading ? ' · 갱신 중' : ''}
         </div>
       </div>

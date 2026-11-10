@@ -1,4 +1,4 @@
-// Shared poller for /api/v1/keepers/turns — the roster's "answering now"
+// Shared observation for /api/v1/keepers/turns — the roster's "answering now"
 // badge. Same shape as dashboard-full-health-state: one visibility-aware
 // interval shared by every subscriber, cancelled when the last one leaves.
 // 5s, not the health poll's 60s: a turn that starts and ends inside a
@@ -11,7 +11,7 @@ import {
   type KeeperTurnsResponse,
 } from '../api/dashboard-keeper-turns'
 import { createManagedAsyncResource } from '../lib/async-state'
-import { setupVisibleAutoRefresh } from '../lib/auto-refresh'
+import { setupObservationRefresh } from '../lib/observation-refresh'
 
 export const keeperTurnsResource = createManagedAsyncResource<KeeperTurnsResponse>()
 
@@ -26,7 +26,7 @@ export function loadKeeperTurns(): Promise<void> {
     .load(signal => fetchKeeperTurns({ signal }))
     .then(() => {
       const currentRows = keeperTurnsResource.state.value.data?.keepers
-      // A failed poll leaves data unchanged; advancing on it would fabricate
+      // A failed read leaves data unchanged; advancing on it would fabricate
       // finishes out of the same snapshot compared with itself.
       if (currentRows && currentRows !== previousRows) {
         keeperFinishes.value = advanceFinishes(
@@ -36,18 +36,13 @@ export function loadKeeperTurns(): Promise<void> {
     })
 }
 
-export const KEEPER_TURNS_REFRESH_MS = 5_000
-
 let subscriberCount = 0
 let stopRefresh: (() => void) | null = null
 
 export function subscribeKeeperTurnsRefresh(): () => void {
   subscriberCount += 1
   if (subscriberCount === 1) {
-    void loadKeeperTurns()
-    stopRefresh = setupVisibleAutoRefresh(() => {
-      void loadKeeperTurns()
-    }, KEEPER_TURNS_REFRESH_MS)
+    stopRefresh = setupObservationRefresh(loadKeeperTurns, { topics: ['keeper_turns'] })
   }
   return () => {
     subscriberCount -= 1
@@ -60,7 +55,7 @@ export function subscribeKeeperTurnsRefresh(): () => void {
 }
 
 /** The running turn for [keeperName], or null when it is idle, unavailable,
- *  or absent from the poll — the badge never guesses. */
+ *  or absent from the snapshot — the badge never guesses. */
 export function runningTurnFor(
   rows: readonly KeeperTurnRow[],
   keeperName: string,

@@ -1,3 +1,4 @@
+import { setupObservationRefresh } from '../../lib/observation-refresh'
 // MASC Dashboard — Overview (operations home)
 //
 // One screen of fleet state, top to bottom:
@@ -1311,10 +1312,7 @@ function OverviewDomainSection({
 export function Overview() {
   useNowSecondsTicker()
   useEffect(() => {
-    void loadOverviewTelemetry()
-    const interval = window.setInterval(() => {
-      void loadOverviewTelemetry()
-    }, 60_000)
+    const dispose = setupObservationRefresh(() => loadOverviewTelemetry(), { topics: ['telemetry'] })
     // Overview and the shell consume one shared full-health resource. The
     // subscriber owns ref-counted refresh lifetime, so mounting both surfaces
     // never creates a second backend poller.
@@ -1324,7 +1322,7 @@ export function Overview() {
     // surface fetched the whole tool registry.
     const stopScheduleRefresh = subscribeScheduledAutomationRefresh()
     return () => {
-      window.clearInterval(interval)
+      dispose()
       stopFullHealthRefresh()
       stopScheduleRefresh()
     }

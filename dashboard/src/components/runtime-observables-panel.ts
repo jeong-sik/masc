@@ -14,9 +14,8 @@ import {
   type RuntimeObservablesSnapshot,
 } from '../api/runtime-observables'
 import {
-  DEFAULT_PANEL_REFRESH_MS,
-  setupVisibleAutoRefresh,
-} from '../lib/auto-refresh'
+  setupObservationRefresh,
+} from '../lib/observation-refresh'
 
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`
@@ -131,7 +130,7 @@ export function RuntimeObservablesPanel() {
 
   useEffect(() => {
     // useEffect is appropriate here: external-system synchronization
-    // (periodic HTTP fetch from the MASC API), not derived state.
+    // (committed runtime changes), not derived state.
     const controller = new AbortController()
 
     const refresh = async () => {
@@ -149,8 +148,7 @@ export function RuntimeObservablesPanel() {
     }
 
     setLoading(true)
-    void refresh()
-    const cleanup = setupVisibleAutoRefresh(() => { void refresh() }, DEFAULT_PANEL_REFRESH_MS)
+    const cleanup = setupObservationRefresh(refresh, { topics: ['runtime_observables'] })
 
     return () => {
       controller.abort()

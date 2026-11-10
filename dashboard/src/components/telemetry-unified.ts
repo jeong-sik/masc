@@ -21,10 +21,9 @@ import {
   sharedTelemetrySummaryError,
 } from './fleet-data-core'
 import { replaceRoute, route } from '../router'
-import { TELEMETRY_AUTO_REFRESH_MS } from '../config/constants'
 import { TELEMETRY_SOURCE_META, telemetrySourceMeta } from '../config/telemetry-sources'
 import { formatElapsedCompact, unixSecondsToDate } from '../lib/format-time'
-import { formatAutoRefreshLabel, setupVisibleAutoRefresh } from '../lib/auto-refresh'
+import { setupObservationRefresh } from '../lib/observation-refresh'
 import { isAbortError } from '../lib/async-state'
 import { errorToString } from '../lib/format-string'
 import { Btn } from './btn'
@@ -1261,7 +1260,9 @@ export function TelemetryUnified() {
   ])
 
   useEffect(() => {
-    const disposeAutoRefresh = setupVisibleAutoRefresh(() => autoRefreshLoadRef.current(), TELEMETRY_AUTO_REFRESH_MS)
+    const disposeAutoRefresh = setupObservationRefresh(() => autoRefreshLoadRef.current(), {
+      topics: ['telemetry', 'tool_metrics', 'tools', 'health'],
+    })
     return () => {
       disposeAutoRefresh()
       activeController.current?.abort()
@@ -1419,7 +1420,7 @@ export function TelemetryUnified() {
         <${Btn} onClick=${() => void load()}>
           Refresh
         <//>
-        <span class="text-xs text-[var(--color-fg-muted)]">${formatAutoRefreshLabel(TELEMETRY_AUTO_REFRESH_MS)}</span>
+        <span class="text-xs text-[var(--color-fg-muted)]">${'실시간 변경 반영'}</span>
         ${loading ? html`<span class="text-xs text-[var(--color-fg-muted)]" role="status">로딩 중...</span>` : null}
       </div>
 

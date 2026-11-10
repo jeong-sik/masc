@@ -9,7 +9,7 @@ import { ExternalShareOutcomes } from './external-share-outcomes'
 import { PublicationOutcomes } from './publication-outcomes'
 import { artifactPublicationOutcomes, type ArtifactPublicationOwner } from '../../lib/artifact-publication-outcomes'
 import { fetchArtifactChecks, resolveArtifactCheck, type ArtifactCheckList, type ArtifactCheckState } from '../../api/published-artifact-checks'
-import { DEFAULT_PANEL_REFRESH_MS, setupVisibleAutoRefresh } from '../../lib/auto-refresh'
+import { setupObservationRefresh } from '../../lib/observation-refresh'
 import { ArtifactReader, type ArtifactShareSelection } from './artifact-reader'
 import { ArtifactPreview } from './artifact-preview'
 import { ArtifactCheckControl, type ArtifactCheckOutcome } from './artifact-check-control'
@@ -240,7 +240,9 @@ function ArtifactsObservation({ authRevision, workspaceRoot, draftRetention, all
     && selectedId !== undefined && selectedArtifact(selectedId, revision)
   useEffect(() => () => { active.current = false }, [])
 
-  useEffect(() => setupVisibleAutoRefresh(() => setRefresh(n => n + 1), DEFAULT_PANEL_REFRESH_MS), [])
+  useEffect(() => setupObservationRefresh(() => setRefresh(n => n + 1), {
+    topics: ['published_artifacts', 'artifact_checks'], initial: false,
+  }), [])
   useEffect(() => {
     const controller = new AbortController()
     void fetchPublishedArtifacts(controller.signal).then(data => {

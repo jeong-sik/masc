@@ -1,7 +1,9 @@
 module H = Keeper_librarian_unread
 open Result.Syntax
+let suffix = ".librarian-unread.json"
+
 let path ~keepers_dir ~keeper_id =
-  Filename.concat keepers_dir (keeper_id ^ ".librarian-unread.json")
+  Filename.concat keepers_dir (keeper_id ^ suffix)
 
 let decode = function
   | `Assoc fields when List.sort String.compare (List.map fst fields) = ["schema_version";"unread_messages"] ->

@@ -12,6 +12,10 @@ open Keeper_memory_os_current_types
 
 val suffix : string
 
+val journal_suffix : string
+
+val epoch_suffix : string
+
 val upsert_error_to_string : upsert_error -> string
 
 val merge_basis :

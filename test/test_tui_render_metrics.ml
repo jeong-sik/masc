@@ -102,6 +102,8 @@ let make_keeper_health ~keeper_id ~facts ~snapshot_bytes : Masc.Tui_decode_memor
   ; mkh_removed = 0
   ; mkh_snapshot_present = true
   ; mkh_age_bins = Some Masc.Keeper_memory_age_bins.zero
+  ; mkh_facts_by_hour = []
+  ; mkh_changes_since_start = []
   ; mkh_context_cycle =
       { mcc_saved = None; mcc_saved_unreadable = false; mcc_read_position = None;
         mcc_read_position_unreadable = false; mcc_rewriting_through = None;

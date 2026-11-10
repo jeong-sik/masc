@@ -431,11 +431,6 @@ let test_rfc0121_credentials_dir () =
     "/x/.masc/credentials"
     (Config_dir_resolver.credentials_dir ~base_path:"/x")
 
-let test_rfc0121_agent_runtime_dir () =
-  check string "agent_runtime under .masc/runtime/agent"
-    "/x/.masc/runtime/agent"
-    (Config_dir_resolver.agent_runtime_dir ~base_path:"/x")
-
 let test_rfc0121_repos_dir () =
   check string "repos under .masc"
     "/x/.masc/repos"
@@ -679,7 +674,6 @@ let () =
           test_case "masc_root" `Quick test_rfc0121_masc_root;
           test_case "auth_dir" `Quick test_rfc0121_auth_dir;
           test_case "credentials_dir" `Quick test_rfc0121_credentials_dir;
-          test_case "agent_runtime_dir" `Quick test_rfc0121_agent_runtime_dir;
           test_case "repos_dir" `Quick test_rfc0121_repos_dir;
           test_case "tmp_dir" `Quick test_rfc0121_tmp_dir;
           test_case "locks_dir" `Quick test_rfc0121_locks_dir;

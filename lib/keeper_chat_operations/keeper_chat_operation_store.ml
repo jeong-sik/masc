@@ -3368,7 +3368,10 @@ let settle_running_without_executor_with_journal_terminal
         | Some ({ native_call = Keeper_native_call.Active call; revision; _ } : Semantic.t)
           when Int64.equal revision observed.execution_revision
                && Keeper_native_call.equal call observed.call -> Ok ()
-        | Some _ | None -> Error (Integrity_error "restart journal native call changed after observation") in
+        | Some ({ native_call = Keeper_native_call.Active _; _ } : Semantic.t)
+        | Some ({ native_call = Keeper_native_call.Terminal_unacknowledged _; _ } : Semantic.t)
+        | Some ({ native_call = Keeper_native_call.No_native_call; _ } : Semantic.t)
+        | None -> Error (Integrity_error "restart journal native call changed after observation") in
       Ok (id :: seen)) (Ok []) observations in
     (* A running operation with a durable continuation goes back to Queued and
        resumes; one without is a request whose executor ended without

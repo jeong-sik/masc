@@ -1,0 +1,12 @@
+Source-only response review
+
+Production: 77b32c9e7a5660f4060862a0c9599f7cd27a5cef
+Test source: 93981bc1cf8fc6617d31fc8638f825ed2c25aa40
+
+issue_disposition_review read the canonical decoder, Comments state/caller, existing stable lock implementation, nested result classification and final four scenarios. No additional P0-P2 in this response. The later-child operation runs after the marker-known call returned; the exec competitor uses a fresh registry and only actual Stable_lock_contended yields exit0.
+
+history_redaction_response agreed the prior formal P2 was real and identified the earlier test's incorrect before/after boundary. It read both final source/tests, including the actual comments rewrite parent-sync Unknown stage and known-marker cleanup. No additional P0-P2 in this response. Final test file SHA-256: 9268758b26aed13b4d4e867b10049a9f9f938d6f08ed7d07378d0f5099e01ce8.
+
+The test directory explicitly disables warning4 in test/dune; the earlier warning4 observation about targeted test fallbacks was withdrawn after reading that actual scope. Production closed matches remain explicit. This is not a warning/type-check result.
+
+Neither review executed builds, backend tests or CI, edited source, or submitted formal approval. Their previous no-additional-P2 statements were insufficient for the omitted comments read set and are corrected by this response.

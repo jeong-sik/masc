@@ -555,7 +555,7 @@ let test_cleanup_mixed_pending_and_refused_is_post_effect () =
     ~recipient_lookup:Recipient_lookup.none_declared ());
   check_post_deleted "fresh store retains the applied parent deletion" pending_id;
   Alcotest.(check bool) "fresh store retains the refused post" true
-    (Result.is_ok (Board_dispatch.get_post ~reader:Masc_board_handlers.Board_access.Operator ~post_id:refused_id))
+    (Result.is_ok (Board_dispatch.get_post ~reader:Masc_board_handlers.Board_access.Operator ~post_id:refused_id));
   flush ()
 
 let () =

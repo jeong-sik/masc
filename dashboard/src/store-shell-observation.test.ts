@@ -114,7 +114,6 @@ describe('App-owned Shell observation', () => {
     const fetch = vi.fn().mockImplementationOnce(() => held.promise).mockResolvedValue(json(current))
     vi.stubGlobal('fetch', fetch)
     const { store } = await surface()
-    store.hydrateShellSnapshot(shell('previous'), { sentToken: null })
     const pending = kind === 'shell' ? store.refreshShell({ force: true }) : store.refreshDashboard({ force: true })
     const { hydrateServerPushEvent } = await import('./sse-store')
     hydrateServerPushEvent({ type: 'project_snapshot', payload: { root: current } })

@@ -1533,9 +1533,8 @@ let render_collab state view =
     ~surface_key:"collab" ~title:(screen_title " MASC Collab")
     ~hints:(Masc_tui_collab.hints view)
     ~body:(fun ~budget c ->
-      Masc_tui_collab.lines ~height:budget view
-      |> List.iter (fun line -> c.push (fit_width
-          (Masc.Tui_terminal_text.sanitize_terminal_text line) (framed_inner_width cols))))
+      Masc_tui_collab.lines ~height:budget ~width:(framed_inner_width cols) view
+      |> List.iter (fun line -> c.push (fit_width line (framed_inner_width cols))))
 
 let render_lane_addons state (view : Masc_tui_lane_addons.t) =
   let terminal_rows, cols = get_terminal_size () in

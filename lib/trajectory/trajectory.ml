@@ -523,10 +523,11 @@ let reset_round_counters_for_testing () =
 
 let append_withheld_thinking ~(masc_root : string) ~(keeper_name : string)
     ~(trace_id : string) (entry : withheld_thinking_entry) : unit =
+  Fun.protect ~finally:(fun () -> Trajectory_write_observation.attempted {masc_root; keeper_name}) (fun () ->
   let dir = trajectories_dir masc_root keeper_name in
   Fs_compat.mkdir_p dir;
   let path = trajectory_path masc_root keeper_name trace_id in
-  Fs_compat.append_jsonl path (withheld_thinking_entry_to_json entry)
+  Fs_compat.append_jsonl path (withheld_thinking_entry_to_json entry))
 ;;
 
 let summary_to_json (traj : trajectory) =
@@ -546,11 +547,12 @@ let summary_to_json (traj : trajectory) =
 let append_entry ?runtime_contract ?action_radius ~(masc_root : string)
     ~(keeper_name : string) ~(trace_id : string) (entry : tool_call_entry) :
     unit =
+  Fun.protect ~finally:(fun () -> Trajectory_write_observation.attempted {masc_root; keeper_name}) (fun () ->
   let dir = trajectories_dir masc_root keeper_name in
   Fs_compat.mkdir_p dir;
   let path = trajectory_path masc_root keeper_name trace_id in
   let json = entry_to_json ?runtime_contract ?action_radius entry in
-  Fs_compat.append_jsonl path json
+  Fs_compat.append_jsonl path json)
 
 (* ================================================================ *)
 (* Trajectory accumulator (mutable, per-session)                    *)
@@ -600,7 +602,8 @@ let unregister_accumulator (acc : accumulator) =
     active_accumulators := List.filter (fun current -> current != acc) !active_accumulators)
 
 let create_accumulator_with_writer ~acquire ?on_flush_error ~masc_root ~keeper_name ~trace_id () : accumulator =
-  let writer = acquire ~path:(trajectory_path masc_root keeper_name trace_id) in
+  let writer = acquire ~owner:Trajectory_write_observation.{masc_root; keeper_name}
+      ~path:(trajectory_path masc_root keeper_name trace_id) in
   let acc = {
     entries = [];
     total_calls = 0;

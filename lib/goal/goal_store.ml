@@ -702,6 +702,8 @@ let upsert_event_intents ~actor ~revision (goal : goal) action =
    writers already holding the Goal lock. This function never takes that lock
    or calls back into the Goal store. *)
 let append_audit_event config json =
+  Fun.protect ~finally:(fun () -> Goal_event_observation.attempted ~base_path:config.Workspace_utils.base_path)
+    (fun () ->
   let path = goal_events_path config in
   try
     let expected = try (Unix.stat path).Unix.st_size with
@@ -736,7 +738,7 @@ let append_audit_event config json =
                ^ Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure)
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
-  | exn -> Error (Printexc.to_string exn)
+  | exn -> Error (Printexc.to_string exn))
 
 (* The Goal lock orders the outbox against every mutation and acknowledgement.
    Delivery uses the existing durable JSONL transaction, never a caller callback.

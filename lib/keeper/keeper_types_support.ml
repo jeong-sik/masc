@@ -46,7 +46,9 @@ let keeper_metrics_store config name : Dated_jsonl.t =
   Keeper_metrics_storage.read_store (keeper_metrics_storage config name)
 
 let append_keeper_metrics (config : Workspace.config) name json =
-  Keeper_metrics_storage.append (keeper_metrics_storage config name) json;
+  Fun.protect ~finally:(fun () ->
+    Dashboard_observation_commit.written ~base_path:config.base_path ~scope:`Workspace `Telemetry)
+    (fun () -> Keeper_metrics_storage.append (keeper_metrics_storage config name) json);
   Workspace_dataset_event.announce ~base_path:config.base_path
     (Workspace_dataset_event.Keeper_metrics { keeper = name });
   (* The cost window counts every row but a heartbeat: a turn, or a row of a

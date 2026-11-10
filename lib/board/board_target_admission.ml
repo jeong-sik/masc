@@ -61,7 +61,8 @@ let capture store ~reader ~target_type ~target_id =
   let* post = match Board_posts_rows.latest ~post_id:key parent.snapshot with
     | Error (Post_not_found _) -> missing ()
     | Ok _ | Error (Invalid_id _ | Comment_not_found _ | Io_error _
-        | Validation_error _ | Already_voted _ | Already_exists _ | Unauthorized _) as result -> result in
+        | Validation_error _ | Already_voted _ | Already_exists _ | Unauthorized _
+        | Recipient_lookup_failed _) as result -> result in
   if not (Board_access.can_read ~reader post) then missing ()
   else
     (* Counters and updated_at can be legitimately dirty. Authority/routing

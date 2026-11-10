@@ -6,6 +6,11 @@ import { subscribeDashboardObservation, type DashboardObservationTopic } from '.
 
 export type QueryStreamReset = 'initial' | 'authority' | 'recovery'
 
+export interface QueryStreamSubscription {
+  (): void
+  refresh(): void
+}
+
 export interface QueryStreamReader<Frame, Failure extends Error> {
   readonly onFrame: (frame: Frame) => void
   readonly onError: (error: Failure) => void
@@ -26,12 +31,13 @@ interface QueryStreamAdapter<Request, Frame, Failure extends Error> {
  * wire projection; this owner fences credentials, authority and late frames. */
 export function createQueryObservationStream<Request, Frame, Failure extends Error>(
   adapter: QueryStreamAdapter<Request, Frame, Failure>,
-): (request: Request, reader: QueryStreamReader<Frame, Failure>) => () => void {
+): (request: Request, reader: QueryStreamReader<Frame, Failure>) => QueryStreamSubscription {
   type Reader = QueryStreamReader<Frame, Failure>
   interface Shared {
     readonly readers: Set<Reader>
     readonly close: () => void
     readonly replay: (reader: Reader) => void
+    readonly refresh: () => void
   }
   const streams = new Map<string, Shared>()
   const open = (request: Request, readers: Set<Reader>): Shared => {
@@ -55,11 +61,13 @@ export function createQueryObservationStream<Request, Frame, Failure extends Err
       const readController = new AbortController()
       controller = readController
       const current = () => active && generation === owner && !readController.signal.aborted
-      const activity = () => { if (current()) retryDelay = TRANSPORT_RETRY_BASE_MS }
+      let hasFrame = false
+      const activity = () => { if (current() && hasFrame) retryDelay = TRANSPORT_RETRY_BASE_MS }
       try {
         await adapter.read(request, snapshot, readController.signal, frame => {
           if (!current()) return
           snapshot = adapter.merge(snapshot, frame)
+          hasFrame = true
           error = null
           activity()
           for (const reader of [...readers]) reader.onFrame(frame)
@@ -117,6 +125,7 @@ export function createQueryObservationStream<Request, Frame, Failure extends Err
     })
     return {
       readers,
+      refresh: recover,
       close: () => {
         active = false
         generation += 1
@@ -147,7 +156,7 @@ export function createQueryObservationStream<Request, Frame, Failure extends Err
     }
     const owner = stream
     let released = false
-    return () => {
+    const release = () => {
       if (released) return
       released = true
       owner.readers.delete(reader)
@@ -156,5 +165,6 @@ export function createQueryObservationStream<Request, Frame, Failure extends Err
         if (streams.get(key) === owner) streams.delete(key)
       }
     }
+    return Object.assign(release, { refresh: () => { if (!released) owner.refresh() } })
   }
 }

@@ -105,7 +105,7 @@ related: ["0512", "0493", "0350"]
 - **gRPC 응답의 flush 도 `Stream_end` 를 거치지 않는다.** gRPC 리스너의 응답은 `Grpc_eio` 가 h2 에 바로 쓴다. 그 flush 는 D2 상한을 받지 않는다. 스트림 switch 는 레지스트리가 주므로, D1 으로 스트림이 끝나면 그 fiber 도 끝난다.
 - **h2 가 연결 reader fiber 에서 여는 오류 응답은 masc 범위 밖이다.** 프레임 해석 중 오류에 h2 는 reader fiber 에서 error handler 를 부른다(server_connection.ml 157~160줄). 그 `close_after_flush` 에는 `Stream_end` 가 묶이지 않는다. 본문은 고정 진단 문구 하나다(`server_h2_gateway.ml` 17~24줄). 창을 열지 않는 상대가 쥐는 이 응답은 연결 단위 상한(§7.4)에 맡긴다.
 - **SSE `send` 의 자체 타이머는 HTTP/1.1 에서만 돈다(L2b2).** HTTP/2 에서 같은 상한의 타이머 둘이 겨루지 않는다. 로그 스트림의 자체 send 와 정체 판정은 지우고 `Server_sse_response` 를 쓴다.
-- **상한은 lib/ 의 상수 하나다.** 값은 지금과 같은 90초다. `sse_stalled_after_s`(`server_mcp_transport_http_headers.ml` 294줄)다. HTTP/2 리스너의 레지스트리가 이 값을 기본으로 쓰고, `observer_idle_timeout_ms`(299줄)와 SSE 응답, 로그 스트림의 `stalled_after_s` 도 이 값을 쓴다. 이름은 SSE 에서 왔다. 이 값을 바꾸면 HTTP/2 응답 전체의 최소 배출 속도(조각 하나를 상한으로 나눈 값)도 같이 바뀐다. `server_mcp_transport_http_agui.ml` 16줄의 따로 적은 `30.0` 은 `sse_ping_interval_s` 로 바꾼다. 핑 간격(30초)은 상한보다 짧아서 읽는 클라이언트는 상한 안에 늘 프레임을 받는다.
+- **상한은 lib/ 의 상수 하나다.** 값은 지금과 같은 90초다. `sse_stalled_after_s`(`server_mcp_transport_http_headers.ml` 294줄)다. HTTP/2 리스너의 레지스트리가 이 값을 기본으로 쓰고, `observer_idle_timeout_ms`(299줄)와 SSE 응답, 로그 스트림의 `stalled_after_s` 도 이 값을 쓴다. 이름은 SSE 에서 왔다. 이 값을 바꾸면 HTTP/2 응답 전체의 최소 배출 속도(§5)도 같이 바뀐다. `server_mcp_transport_http_agui.ml` 16줄의 따로 적은 `30.0` 은 `sse_ping_interval_s` 로 바꾼다. 핑 간격(30초)은 상한보다 짧아서 읽는 클라이언트는 상한 안에 늘 프레임을 받는다.
 
 ### D3. 응답 본문은 h2 에 16 KiB 조각 둘까지 넣는다
 

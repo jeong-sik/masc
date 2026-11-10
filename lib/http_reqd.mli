@@ -72,7 +72,7 @@ val try_respond_with_string : t -> Httpun.Response.t -> string -> acceptance
     logged once (debug for the late-response shapes {!Late_response} knows,
     warn with a backtrace for anything else) and reported as
     [Rejected_by_writer]. On HTTP/2 the body is reserved in the ledger first
-    and then goes to h2 one 16 KiB slice at a time
+    and then goes to h2 in 16 KiB slices, two at most at a time
     ({!Http_h2_stream.Response_body}); the call does not wait for it. When
     the capacity is exhausted, the client gets an empty 503 [no-store] that
     keeps the response's other headers, the refusal is logged at warn, and
@@ -90,7 +90,7 @@ module Body_writer : sig
 
   val write_string : t -> string -> unit
   (** On HTTP/2 the bytes are reserved in the ledger first and wait behind
-      those written before them: h2 gets one 16 KiB slice at a time
+      those written before them: h2 holds two 16 KiB slices of a body at most
       ({!Http_h2_stream.Response_body}), and the call does not wait for it.
       When the ledger has no room, the refusal is logged at warn, the stream
       is reset ({!Http_h2_stream.reset} with [Out_of_capacity]) and the

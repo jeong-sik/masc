@@ -1,6 +1,8 @@
 import { pushTrace } from './keeper-trace-store'
 import { normalizeIdeContextFilePath, normalizeIdeContextLine } from './ide-state'
 import type { RunActivityEvent } from './run-activity-store'
+import { dashboardObservationOwnerHasWorkspace, dashboardObservationOwnerIsCurrent,
+  type DashboardObservationOwner } from '../../lib/observation-read-owner'
 
 /**
  * Bridge normalized run activity into the keeper-trace store so activity
@@ -12,7 +14,9 @@ import type { RunActivityEvent } from './run-activity-store'
 export function bridgeRunActivityEventsToTrace(
   events: ReadonlyArray<RunActivityEvent>,
   alreadyEmitted: ReadonlySet<string>,
+  owner: DashboardObservationOwner,
 ): ReadonlySet<string> {
+  if (!dashboardObservationOwnerHasWorkspace(owner) || !dashboardObservationOwnerIsCurrent(owner)) return alreadyEmitted
   if (events.length === 0) return alreadyEmitted
   const next = new Set(alreadyEmitted)
   for (const event of events) {
@@ -43,7 +47,7 @@ export function bridgeRunActivityEventsToTrace(
       sessionId: event.context?.session_id,
       operationId: event.context?.operation_id,
       workerRunId: event.context?.worker_run_id,
-    })
+    }, owner)
     next.add(key)
   }
   return next

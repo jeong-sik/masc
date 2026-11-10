@@ -1,3 +1,5 @@
+import { acceptedExecutionWorkspace } from '../../execution-workspace-authority'
+import { captureDashboardObservationOwner } from '../../lib/observation-read-owner'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { render } from 'preact'
 import { html } from 'htm/preact'
@@ -14,6 +16,11 @@ import {
 } from './keeper-trace-store'
 import { ideReplayUntilMs, setIdeReplayUntilMs } from './ide-replay-state'
 import { ideContextFocus } from './ide-state'
+beforeEach(() => {
+  acceptedExecutionWorkspace.value = { epoch: 'trace-test', workspaceRoot: '/fixture/trace',
+    connectionGeneration: 1, observerInstanceId: 'trace-test-instance' }
+})
+
 
 const mountedContainers: HTMLElement[] = []
 
@@ -39,7 +46,7 @@ function pushAnchored(
     threadId,
     filePath,
     line,
-  })
+  }, captureDashboardObservationOwner())
 }
 
 function pushRuntime(id: string, keeperName: string, tsMs: number): void {
@@ -50,7 +57,7 @@ function pushRuntime(id: string, keeperName: string, tsMs: number): void {
     source: 'runtime-hop',
     hopId: `hop-${id}`,
     provider: 'weighted_score',
-  })
+  }, captureDashboardObservationOwner())
 }
 
 function pushDecision(id: string, keeperName: string, tsMs: number): void {
@@ -61,7 +68,7 @@ function pushDecision(id: string, keeperName: string, tsMs: number): void {
     source: 'decision-log',
     decisionId: `dec-${id}`,
     semanticOutcome: 'success',
-  })
+  }, captureDashboardObservationOwner())
 }
 
 function pushActivity(
@@ -82,7 +89,7 @@ function pushActivity(
     line,
     surface: 'Goal',
     ...refs,
-  })
+  }, captureDashboardObservationOwner())
 }
 
 type KeeperTraceEventForTest = Parameters<typeof pushTrace>[0]
@@ -148,7 +155,7 @@ describe('bucketTraceEvents — RFC-0028 §5 grouping', () => {
       provider: 'weighted_score',
       filePath: 'runtime.ts',
       line: 12,
-    })
+    }, captureDashboardObservationOwner())
     pushTrace({
       id: 'decision-context',
       tsMs: 1100,
@@ -158,7 +165,7 @@ describe('bucketTraceEvents — RFC-0028 §5 grouping', () => {
       semanticOutcome: 'success',
       filePath: 'runtime.ts',
       line: 12,
-    })
+    }, captureDashboardObservationOwner())
     pushTrace({
       id: 'runtime-context',
       tsMs: 1200,
@@ -168,7 +175,7 @@ describe('bucketTraceEvents — RFC-0028 §5 grouping', () => {
       provider: 'weighted_score',
       filePath: 'router.ts',
       line: 44,
-    })
+    }, captureDashboardObservationOwner())
 
     const buckets = bucketTraceEvents(keeperTraceState.value.events)
     const runtimeBucket = buckets.find(b => b.filePath === 'runtime.ts' && b.line === 12)
@@ -433,7 +440,7 @@ describe('OverlayKeeperTrace — bucket render (RFC-0028 §5)', () => {
       sessionId: 'sess-decision',
       operationId: 'op-decision',
       workerRunId: 'worker-decision',
-    })
+    }, captureDashboardObservationOwner())
 
     const container = createContainer()
     render(html`<${OverlayKeeperTrace} active=${true} />`, container)

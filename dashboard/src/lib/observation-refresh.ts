@@ -103,6 +103,9 @@ export interface ObservationRefreshOptions extends DashboardObservationSelection
   /** Withdraw a previous owner's rows, including a cache retained while the
    * surface was unmounted. Called before the first read and on owner change. */
   readonly resetRead?: () => void
+  /** Existing source-specific push callbacks can share this read's owner,
+   * refusal and coalescing boundary without inventing another wire topic. */
+  readonly subscribeChanges?: (invalidate: () => void, recover: () => void) => (() => void)
 }
 
 /** Subscribe before the first read. Invalidation during a read retains one
@@ -206,6 +209,7 @@ export function setupObservationRefresh(
   }
   const refreshWhenVisible = () => { if (visible()) recover() }
   const unsubscribe = subscribeDashboardObservation(options, invalidate, recover)
+  const unsubscribeChanges = options.subscribeChanges?.(invalidate, recover)
   const unsubscribeOwner = subscribeDashboardObservationOwnerChanges(next => {
     owner = next
     clearRetry()
@@ -226,6 +230,7 @@ export function setupObservationRefresh(
     clearRetry()
     retire()
     unsubscribe()
+    unsubscribeChanges?.()
     unsubscribeOwner()
     window.removeEventListener('focus', refreshWhenVisible)
     document.removeEventListener('visibilitychange', refreshWhenVisible)

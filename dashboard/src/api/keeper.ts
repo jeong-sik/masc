@@ -735,13 +735,7 @@ export async function fetchKeeperChatOperation(
   opts: { signal?: AbortSignal } = {},
 ): Promise<KeeperChatOperation> {
   const path = `/api/v1/keepers/${encodeURIComponent(keeperName)}/chat/operations/${encodeURIComponent(operationId)}`
-  const response = await fetchWithTimeout(
-    path,
-    { headers: jsonHeaders(), signal: opts.signal },
-    DEFAULT_GET_TIMEOUT_MS,
-  )
-  if (!response.ok) throw await apiRequestErrorFromResponse('GET', path, response)
-  const operation = parseKeeperChatOperation(await response.json())
+  const operation = parseKeeperChatOperation(await get<unknown>(path, { signal: opts.signal }))
   if (operation.operationId !== operationId) {
     throw new Error('Keeper chat operation response identity mismatch')
   }

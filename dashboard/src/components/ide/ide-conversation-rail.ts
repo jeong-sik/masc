@@ -2,7 +2,9 @@ import { html } from 'htm/preact'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { useSignalValue } from './use-signal-value'
 import { fetchBoard } from '../../api/board'
-import { storedTokenRevision } from '../../api/token-revision'
+import { setupObservationRefresh } from '../../lib/observation-refresh'
+import { captureDashboardObservationOwner, dashboardObservationOwnerIsCurrent, readDashboardObservationOwner,
+  type DashboardObservationOwner } from '../../lib/observation-read-owner'
 import type { BoardPost } from '../../types/core'
 import { bridgePostsToTrace } from './anchored-thread-trace-bridge'
 import { unixishToMs } from '../../lib/format-time'
@@ -87,48 +89,47 @@ type SourceState<T> =
   | { readonly kind: 'ready'; readonly snapshot: SourceSnapshot<T> }
   | { readonly kind: 'error'; readonly snapshot: SourceSnapshot<T> | null; readonly error: string }
 
-// A snapshot belongs to the credential that read it. Under another credential
-// the source has no last successful data, so a failed read there cannot show
-// what the previous credential read.
-type CredentialSourceState<T> = { readonly credentialRevision: number; readonly state: SourceState<T> }
+type OwnedSourceState<T> = { readonly owner: DashboardObservationOwner; readonly state: SourceState<T> }
 
-function snapshotUnder<T>(scoped: CredentialSourceState<T>, credentialRevision: number): SourceSnapshot<T> | null {
-  return scoped.credentialRevision === credentialRevision ? scoped.state.snapshot : null
+function snapshotUnder<T>(scoped: OwnedSourceState<T> | null): SourceSnapshot<T> | null {
+  return scoped !== null && dashboardObservationOwnerIsCurrent(scoped.owner) ? scoped.state.snapshot : null
 }
 
 function useConversationSource<T>(source: IdeConversationSource, fetchItems: (signal: AbortSignal) => Promise<ReadonlyArray<T>>) {
-  const credentialRevision = storedTokenRevision.value
-  const [scoped, setScoped] = useState<CredentialSourceState<T>>({
-    credentialRevision, state: { kind: 'loading', snapshot: null },
-  })
-  const state: SourceState<T> = scoped.credentialRevision === credentialRevision
+  void readDashboardObservationOwner()
+  const [scoped, setScoped] = useState<OwnedSourceState<T> | null>(null)
+  const state: SourceState<T> = scoped !== null && dashboardObservationOwnerIsCurrent(scoped.owner)
     ? scoped.state : { kind: 'loading', snapshot: null }
-  const [revision, setRevision] = useState(0)
-  const refresh = useCallback(() => setRevision(value => value + 1), [])
-  useEffect(() => registerIdeConversationRefresh(changed => {
-    if (changed === source) refresh()
-  }), [source, refresh])
-  useEffect(() => {
-    const controller = new AbortController()
+  const requestRefresh = useRef<(() => void) | null>(null)
+  const refresh = useCallback(() => requestRefresh.current?.(), [])
+  useEffect(() => setupObservationRefresh(async signal => {
+    const owner = captureDashboardObservationOwner()
+    const current = () => !signal.aborted && dashboardObservationOwnerIsCurrent(owner)
     setScoped(previous => ({
-      credentialRevision, state: { kind: 'loading', snapshot: snapshotUnder(previous, credentialRevision) },
+      owner, state: { kind: 'loading', snapshot: snapshotUnder(previous) },
     }))
-    void fetchItems(controller.signal).then(items => {
-      if (!controller.signal.aborted) setScoped({
-        credentialRevision, state: { kind: 'ready', snapshot: { items, at: Date.now() } },
+    try {
+      const items = await fetchItems(signal)
+      if (current()) setScoped({
+        owner, state: { kind: 'ready', snapshot: { items, at: Date.now() } },
       })
-    }, error => {
-      if (!controller.signal.aborted) setScoped(previous => ({
-        credentialRevision,
+    } catch (error) {
+      if (!current()) return
+      setScoped(previous => ({
+        owner,
         state: {
-          kind: 'error', snapshot: snapshotUnder(previous, credentialRevision),
+          kind: 'error', snapshot: snapshotUnder(previous),
           error: error instanceof Error ? error.message : String(error),
         },
       }))
-    })
-    return () => controller.abort()
-  }, [revision, fetchItems, credentialRevision])
-  return { state, refresh }
+      throw error
+    }
+  }, { topics: [], resetRead: () => setScoped(null), subscribeChanges: (invalidate, recover) => {
+    requestRefresh.current = recover
+    const unsubscribe = registerIdeConversationRefresh(changed => { if (changed === source) invalidate() })
+    return () => { if (requestRefresh.current === recover) requestRefresh.current = null; unsubscribe() }
+  } }), [source, fetchItems])
+  return { state, refresh, snapshotOwner: state.snapshot === null ? null : scoped?.owner ?? null }
 }
 
 function ConversationSourceStatus<T>({ label, state, refresh }: {
@@ -224,19 +225,27 @@ export function IdeConversationRail() {
   // keeper-trace event the first time it is observed, deduplicated by id
   // across renders. The ref carries the cumulative known-id set so a
   // re-render with the same posts is a no-op.
-  const knownPostIds = useRef<ReadonlySet<string>>(new Set())
+  const knownPostIds = useRef<{ owner: DashboardObservationOwner; ids: ReadonlySet<string> } | null>(null)
   useEffect(() => {
-    knownPostIds.current = bridgePostsToTrace(posts.map(postToTraceInput), knownPostIds.current)
-  }, [posts])
+    const owner = boardSource.snapshotOwner
+    if (owner === null || !dashboardObservationOwnerIsCurrent(owner)) return
+    const previous = knownPostIds.current
+    const ids = previous !== null && dashboardObservationOwnerIsCurrent(previous.owner) ? previous.ids : new Set<string>()
+    knownPostIds.current = { owner, ids: bridgePostsToTrace(posts.map(postToTraceInput), ids, owner) }
+  }, [posts, boardSource.snapshotOwner])
 
   // RFC-0028 PR-δ-3 decision-log producer: each KeeperDecision becomes a
   // keeper-trace event the first time it is observed. Dedup key is
   // `decision:${keeper_name}:${ts_unix}:${event_type}` since the
   // KeeperDecision payload has no native id field.
-  const knownDecisionKeys = useRef<ReadonlySet<string>>(new Set())
+  const knownDecisionKeys = useRef<{ owner: DashboardObservationOwner; ids: ReadonlySet<string> } | null>(null)
   useEffect(() => {
-    knownDecisionKeys.current = bridgeDecisionsToTrace(decisions, knownDecisionKeys.current)
-  }, [decisions])
+    const owner = decisionSource.snapshotOwner
+    if (owner === null || !dashboardObservationOwnerIsCurrent(owner)) return
+    const previous = knownDecisionKeys.current
+    const ids = previous !== null && dashboardObservationOwnerIsCurrent(previous.owner) ? previous.ids : new Set<string>()
+    knownDecisionKeys.current = { owner, ids: bridgeDecisionsToTrace(decisions, ids, owner) }
+  }, [decisions, decisionSource.snapshotOwner])
   const replayItems = replayRailItems(posts, decisions)
   const replayEvents = replayEventsForItems(replayItems)
   const visibleItemIds = new Set(filterReplayEvents(replayEvents, replayUntilMs).map(event => event.id))

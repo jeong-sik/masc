@@ -36,6 +36,8 @@ import {
   type RunActivityVerb,
 } from './run-activity-store'
 import { bridgeRunActivityEventsToTrace } from './run-activity-trace-bridge'
+import { captureDashboardObservationOwner, dashboardObservationOwnerIsCurrent,
+  type DashboardObservationOwner } from '../../lib/observation-read-owner'
 import { activityFileContext } from './ide-activity-file-context'
 import { isRecord } from '../../lib/type-guards'
 import { isUnambiguousGoalId, nonblankGoalId, type GoalIdentityObservation } from '../../lib/goal-identity'
@@ -468,6 +470,7 @@ export function IdeActivityPanel(props: IdeActivityPanelProps = {}) {
   const [historyWindow, setHistoryWindow] = useState<ActivityHistoryWindow | null>(null)
   const [compactInsightsOpen, setCompactInsightsOpen] = useState(false)
   const emittedTraceIds = useRef<ReadonlySet<string>>(new Set())
+  const traceOwner = useRef<DashboardObservationOwner | null>(null)
 
   useEffect(() => {
     if (loadedScopeKeyRef.current !== requestedScopeKey) {
@@ -476,6 +479,7 @@ export function IdeActivityPanel(props: IdeActivityPanelProps = {}) {
   }, [requestedScopeKey])
 
   useEffect(() => setupObservationRefresh(async signal => {
+    const owner = captureDashboardObservationOwner()
     const attemptMs = Date.now()
     setRefreshState(prev => ({
       ...prev,
@@ -483,8 +487,9 @@ export function IdeActivityPanel(props: IdeActivityPanelProps = {}) {
       tone: prev.lastOkMs === null && prev.failedCount === 0 ? 'loading' : prev.tone,
     }))
     const { events, workspaceId, read, history } = await fetchActivityEvents(codebase, signal)
-    if (signal.aborted) return
+    if (signal.aborted || !dashboardObservationOwnerIsCurrent(owner)) return
     if (read.kind === 'ready') {
+      traceOwner.current = owner
       store.reset(workspaceId)
       store.seed(events)
       setHistoryWindow(history)
@@ -513,6 +518,7 @@ export function IdeActivityPanel(props: IdeActivityPanelProps = {}) {
     setLoadedScopeKey(null)
     setRefreshState(INITIAL_REFRESH_STATE)
     emittedTraceIds.current = new Set()
+    traceOwner.current = null
   } }), [store, codebase, requestedScopeKey])
 
   useStoreSubscription(store.subscribe)
@@ -533,8 +539,9 @@ export function IdeActivityPanel(props: IdeActivityPanelProps = {}) {
   const progress = deriveIdeRunProgressSummary(events, activeFile, goals.value, tasks.value, codebase, goalIdentityObservation.value)
 
   useEffect(() => {
+    if (traceOwner.current === null) return
     emittedTraceIds.current = bridgeRunActivityEventsToTrace(
-      events.filter(event => activityFileContext(event, codebase) !== null), emittedTraceIds.current,
+      events.filter(event => activityFileContext(event, codebase) !== null), emittedTraceIds.current, traceOwner.current,
     )
   }, [events, codebase])
 

@@ -75,7 +75,7 @@ val open_store :
     (useful for testing). When [?max_bytes] is positive, [append] prunes
     oldest completed day-files until the store is at or below the cap, while
     preserving the current day-file. Day files are removed by age only by
-    {!prune_listed_stores}. *)
+    {!prune_listed_stores_bound}. *)
 
 val base_dir : t -> string
 (** Return the base directory of this store. *)
@@ -438,19 +438,16 @@ val prune : t -> days:int -> int
 (** [prune t ~days] deletes day-files older than [days] days ago.
     Returns the number of files deleted.  Removes empty month directories. *)
 
-val prune_listed_stores : Store.root -> operator_window_days:int -> int
-(** Prune every store in {!Store.all} by its {!Store.retention}, through
-    descriptor-owned traversal of the declared geometry. [operator_window_days] is
-    the workspace's window for [Operator_window] stores. Returns the number
-    of day files deleted. *)
-
 val prune_listed_stores_bound :
   Store.root -> Fs_compat.Retention_directory.t -> operator_window_days:int ->
   on_pruned:(Store.location -> unit) -> int
-(** Same declared stores/windows through the caller's already bound runtime
-    root, so a shared flat/dated pass never reopens its root by pathname.
-    [on_pruned] is called once for each store directory the pass deleted a day
-    file from, after its lock is released. *)
+(** Prune every store in {!Store.all} by its {!Store.retention}, through
+    descriptor-owned traversal of the declared geometry and the caller's
+    already bound runtime root, so a shared flat/dated pass never reopens its
+    root by pathname. [operator_window_days] is the workspace's window for
+    [Operator_window] stores. [on_pruned] is called once for each store
+    directory the pass deleted a day file from, after its lock is released.
+    Returns the number of day files deleted. *)
 
 (* OCaml 5.3 emits warning 32 on this exported signature item under
    [warn-error=+a] even though the implementation and internal call sites are

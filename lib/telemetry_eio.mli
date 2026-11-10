@@ -20,7 +20,7 @@
     [MASC_TELEMETRY_MAX_BYTES] defaults to 52428800. A positive value
     overrides; a non-positive value disables the cap. The cap prunes oldest
     completed day-files while preserving the current day-file. The server's
-    prune pass removes day files by age ({!Dated_jsonl.prune_listed_stores}). *)
+    prune pass removes day files by age ({!Dated_jsonl.prune_listed_stores_bound}). *)
 
 type config = Workspace_utils.config
 

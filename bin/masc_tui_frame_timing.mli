@@ -42,8 +42,10 @@ val note_chat_page_application : chat_page_application -> unit
     UI-domain use only. Callers capture metadata only when {!enabled}.
     [draft_preserved] compares the input revision token, [scroll_preserved]
     the integer scroll, and [pin_preserved] the pin option's physical identity
-    immediately before and after admission. These do not establish attachment,
-    cursor, later viewport or physical-paint preservation. Contains no draft contents or
+    immediately before and after admission. The revision follows the editor's
+    invalidation contract, including attachment/reference mutations; this
+    observation does not copy those values or inspect the logical cursor,
+    later viewport or physical paint. Contains no draft contents or
     cursor bytes. Retains the first {!max_frames_per_phase} events and reports
     omissions. This diagnostic never grants request or workspace authority. *)
 

@@ -99,17 +99,6 @@ let source (observation : observation) =
   | Error (Inspect_refused _ | Inspect_unparsed _) -> None
 ;;
 
-let damaged (observation : observation) =
-  match observation.result with
-  | Ok { state = Fs.Errors_recorded _; _ } -> true
-  | Ok { state = Fs.Clean; _ }
-  | Error (Inspect_refused _ | Inspect_unparsed _ | Image_unreadable _) -> false
-;;
-
-let damage_appeared ~previous current =
-  damaged current && not (Option.fold ~none:false ~some:damaged previous)
-;;
-
 let failure_to_string = function
   | Inspect_refused detail -> "volume inspect refused: " ^ detail
   | Inspect_unparsed failure -> Fs.inspect_failure_to_string failure

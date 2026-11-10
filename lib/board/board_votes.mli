@@ -186,8 +186,8 @@ val reopen :
 type deletion_outcome =
   | Durable_deletion
   | Deletion_persistence_pending of string
-      (** The deletion is applied in memory and failed snapshot rewrites are
-          scheduled for [flush_dirty]. The detail names the write failures. *)
+      (** The deletion is applied in memory. Failed and unattempted rewrites
+          remain ordered work for [flush_dirty]. The detail names actual write failures. *)
 
 val delete_post :
   store -> post_id:string -> (deletion_outcome, board_error) Result.t
@@ -201,7 +201,13 @@ val delete_post :
     succeeded; [Ok (Deletion_persistence_pending detail)] keeps the applied
     transition distinct from a refused write. Retrying deletion is not a
     persistence retry: the post is already absent; [flush_dirty] retries the
-    failed snapshots. *)
+    failed and unattempted snapshots in deletion order, stopping on the first
+    error again. A temporary nonwrite that retains source authority can retry
+    after repair. A conflicting/refused source requires a fresh store: partial
+    reload cannot safely reconstruct the pending deletion's models. The fresh
+    store keeps completed file writes but does not replay the memory-only
+    intent, so an unwritten parent deletion can reappear. Pending is not durable
+    completion. #26378 retains deletion-decision and multi-source recovery work. *)
 
 (** {1 Global store + lifecycle} *)
 
@@ -218,10 +224,15 @@ val reset_global_for_test : unit -> unit
     from test setup before concurrent fibers exist. *)
 
 val flush_dirty : store -> unit
-(** Atomically replaces each dirty post/comment snapshot independently.
+(** Atomically replaces each dirty post/comment snapshot independently, or
+    retries all sources in deletion order while deletion work remains pending.
     Captures data under the state lock and serializes snapshot writers with
-    the persistence lock. If either table is dirty, also compacts readable
-    vote/reaction ledgers. Failed writes remain scheduled for a later flush.
+    the persistence lock. Independent flushes compact readable vote/reaction
+    ledgers when either table is dirty. Deletion retries retain all four
+    obligations, leaving later compaction pending after a failed prerequisite.
+    This does not pause every other writer. Source refusals remain refused;
+    retrying does not refresh their authority. Posts write failures, including
+    retained refusals, are recorded by the source writer's persist-error path.
     Stamps [last_flush] with the wall clock. *)
 
 (** {1 Karma} *)

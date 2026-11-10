@@ -19,11 +19,14 @@ const SEOUL_OFFSET_MIN = 540
 // 2026-11-06T13:30:00Z. A cut-short bucket sits at each end of an hourly window on purpose.
 const NOW = 1_793_971_800
 
+// `longShare` of a tool's calls ran at least LONG_CALL_MS, and such a call took about `longMs`. Only Execute
+// waits on a command that long, so the other tools never have a long call.
+const LONG_CALL_MS = 60_000
 const TOOLS = [
-  { name: 'tool_execute', publicNames: ['Execute'], perHour: 140, failShare: 0.04, p50: 380, p95: 5200, maxMs: 41_000 },
-  { name: 'keeper_broadcast', publicNames: ['keeper_broadcast'], perHour: 36, failShare: 0.01, p50: 40, p95: 190, maxMs: 900 },
-  { name: 'keeper_artifact_read', publicNames: ['keeper_artifact_read'], perHour: 9, failShare: 0.07, p50: 14, p95: 55, maxMs: 210 },
-  { name: 'masc_board_list', publicNames: ['masc_board_list'], perHour: 22, failShare: 0, p50: 85, p95: 410, maxMs: 1_300 },
+  { name: 'tool_execute', publicNames: ['Execute'], perHour: 140, failShare: 0.04, p50: 380, p95: 5200, maxMs: 41_000, longShare: 0.015, longMs: 140_000 },
+  { name: 'keeper_broadcast', publicNames: ['keeper_broadcast'], perHour: 36, failShare: 0.01, p50: 40, p95: 190, maxMs: 900, longShare: 0, longMs: 0 },
+  { name: 'keeper_artifact_read', publicNames: ['keeper_artifact_read'], perHour: 9, failShare: 0.07, p50: 14, p95: 55, maxMs: 210, longShare: 0, longMs: 0 },
+  { name: 'masc_board_list', publicNames: ['masc_board_list'], perHour: 22, failShare: 0, p50: 85, p95: 410, maxMs: 1_300, longShare: 0, longMs: 0 },
 ]
 const QUIET_BUCKET_FROM_END = 7
 
@@ -47,19 +50,30 @@ function bucketStarts(sinceHours, bucket, utcOffsetMin) {
 }
 
 function statOf(tool, index, factor, quiet) {
-  if (quiet) return { call_count: 0, failure_count: 0, deferred_count: 0, total_ms: 0, p50_ms: null, p95_ms: null, max_ms: null }
+  if (quiet) {
+    return {
+      call_count: 0, failure_count: 0, deferred_count: 0, total_ms: 0, p50_ms: null, p95_ms: null, max_ms: null,
+      long_count: 0, long_total_ms: 0,
+    }
+  }
   const calls = Math.round(tool.perHour * factor * (0.45 + 1.1 * wobble(index, tool.perHour)))
   const failures = Math.round(calls * tool.failShare * (0.5 + wobble(index, tool.p50)))
   const p50 = Math.round(tool.p50 * (0.7 + 0.7 * wobble(index, 3)))
   const p95 = Math.round(tool.p95 * (0.6 + 0.9 * wobble(index, 5)))
+  const longCalls = Math.round(calls * tool.longShare * (0.3 + 1.4 * wobble(index, tool.maxMs)))
+  const longTime = Math.round(longCalls * tool.longMs * (0.8 + 0.4 * wobble(index, 11)))
   return {
     call_count: calls,
     failure_count: failures,
     deferred_count: 0,
-    total_ms: Math.round(calls * p50 * 1.6),
+    total_ms: Math.round(calls * p50 * 1.6) + longTime,
     p50_ms: p50,
     p95_ms: p95,
-    max_ms: Math.round(tool.maxMs * (0.5 + wobble(index, 9))),
+    max_ms: longCalls > 0
+      ? Math.round(tool.longMs * (1 + wobble(index, 9)))
+      : Math.round(tool.maxMs * (0.5 + wobble(index, 9))),
+    long_count: longCalls,
+    long_total_ms: longTime,
   }
 }
 
@@ -75,6 +89,8 @@ function sumStats(rows) {
     p50_ms: mean('p50_ms'),
     p95_ms: mean('p95_ms'),
     max_ms: observed.length === 0 ? null : Math.max(...observed.map(row => row.max_ms)),
+    long_count: rows.reduce((sum, row) => sum + row.long_count, 0),
+    long_total_ms: rows.reduce((sum, row) => sum + row.long_total_ms, 0),
   }
 }
 
@@ -96,6 +112,7 @@ function synthesize(query) {
     generated_at: NOW,
     window: { since, until: NOW, bucket, bucket_seconds: length, utc_offset_min: utcOffsetMin },
     tool,
+    long_call_ms: LONG_CALL_MS,
     total: sumStats(buckets),
     buckets,
     top_by_time: perTool
@@ -139,7 +156,7 @@ try {
 
   // textContent: the tiles upper-case their label with CSS, which innerText would return.
   const labels = await page.locator('.kpi-label').allTextContents()
-  for (const label of ['호출', '실패', '실패율', '실행 시간 합계', '지연 p50', '지연 p95']) {
+  for (const label of ['호출', '실패', '실패율', '실행 시간 합계', '1분 이상 걸린 호출', '1분 이상 걸린 시간', '지연 p50', '지연 p95']) {
     check(labels.includes(label), `stat tile "${label}" is missing, tiles: ${labels.join(' | ')}`)
   }
   for (const label of ['구간별 호출 수', '구간별 실패율', '구간별 실행 시간 합계', '구간별 지연 p50 / p95']) {
@@ -169,6 +186,24 @@ try {
     check((await page.locator('table caption', { hasText: '시간을 가장 많이 쓴 도구' }).count()) === 1, 'the top-by-time table is missing')
     const rows = await page.locator('table:has(caption:text("시간을 가장 많이 쓴 도구")) tbody tr').count()
     check(rows === TOOLS.length, `expected ${TOOLS.length} tool rows, found ${rows}`)
+    // The time chart draws the time inside long calls as a second line. No bucket is a gap there:
+    // a quiet hour spent no time in a long call, which is zero.
+    const spent = await page.locator('figure[aria-label="구간별 실행 시간 합계"] figcaption').innerText()
+    check(spent.includes('1분 이상 걸린 시간') && spent.split('관측 23/23 · 미관측 0').length === 3,
+      `the time chart does not hold the long-call line over 23 observed buckets: ${spent.replace(/\s+/g, ' ')}`)
+    const spentLines = await page.locator('figure[aria-label="구간별 실행 시간 합계"] polyline').count()
+    check(spentLines === 2, `the time chart must draw two unbroken lines, found ${spentLines} polylines`)
+    // The long calls of each tool: Execute has some, the others show a dash.
+    const tableOf = 'table:has(caption:text("시간을 가장 많이 쓴 도구"))'
+    const header = await page.locator(`${tableOf} thead th`).allTextContents()
+    check(header[4] === '1분 이상 걸린 호출', `the table has no long-call column, header: ${header.join(' | ')}`)
+    const longCells = await page.locator(`${tableOf} tbody tr`).evaluateAll(trs => trs.map(tr => [
+      tr.querySelector('button')?.textContent, tr.querySelectorAll('td')[4]?.textContent,
+    ]))
+    for (const [name, cell] of longCells) {
+      const expectsLong = TOOLS.find(entry => entry.name === name)?.longShare > 0
+      check(expectsLong ? /^\d[\d,]*회 · /.test(cell ?? '') : cell === '-', `long-call cell of ${name} was ${JSON.stringify(cell)}`)
+    }
   }
 
   // The window chips ask the server for their own length and bucket, then draw the answer.

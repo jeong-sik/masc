@@ -78,7 +78,7 @@ let create ~slug =
     ~owner:"subboard-wa-owner" ()
 
 let find_by_slug slug =
-  Board_dispatch.list_sub_boards ~reader:Masc_board_handlers.Board_access.Operator ()
+  (Result.get_ok (Board_dispatch.list_sub_boards ~reader:Masc_board_handlers.Board_access.Operator ()))
   |> List.find_opt (fun (sb : Board.sub_board) -> String.equal sb.slug slug)
 
 let test_failed_append_commits_nothing () =

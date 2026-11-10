@@ -71,7 +71,7 @@ val storage_size : int -> string
 
 val memory_fact_age_label : float -> string
 val memory_category_filter_text : ko:bool -> memory_category_filter -> string
-val memory_fact_row_line : ko:bool -> ?is_fleet:bool -> cols:int -> memory_fact_row -> string
+val memory_fact_row_line : ko:bool -> ?is_fleet:bool -> ?sort:memory_sort_order -> cols:int -> memory_fact_row -> string
 val memory_fact_detail_lines : ko:bool -> cols:int -> memory_fact_row -> string list
 (** Full claim and provenance rows, wrapped to the frame of a [cols]-column
     terminal. Each returned row occupies one scrollable display row. *)

@@ -97,6 +97,8 @@ let merge_loaded_posts store posts =
 let load_persisted_posts store =
   with_persist_lock store (fun () ->
     let path = Board_paths.persist_path store in
+    let open Result.Syntax in
+    let* () = Board_core_persist.require_model_reload_allowed store ~path in
     let t0 = Time_compat.now () in
     let error failure = Error (path,
       Failure (show_board_error (posts_source_failure_to_board_error failure))) in
@@ -144,6 +146,8 @@ let load_persisted_comments store =
   let module Source = Board_comments_source in
   with_persist_lock store (fun () ->
     let path = Board_paths.comments_path store in
+    let open Result.Syntax in
+    let* () = Board_core_persist.require_model_reload_allowed store ~path in
     let t0 = Time_compat.now () in
     let error failure = Error (path, Failure (show_board_error (Source.failure_to_board_error failure))) in
     let outcome = Source.read store in

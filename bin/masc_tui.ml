@@ -437,7 +437,7 @@ let surface_body_height_at (state : state) ~cursor scrolled =
     let _, cols = get_terminal_size () in
     Masc_tui_render.repository_studio_content_height state ~cols
       ~budget:(max 1 (surface_rows state - Masc_tui_frame.chrome_rows)) ~cursor
-  else if state.view = Memory && Option.is_some state.memory_facts_keeper then
+  else if state.view = Memory && state.memory_page = Memory_facts && Option.is_some state.memory_facts_keeper then
     let _, cols = get_terminal_size () in
     Masc_tui_render_memory.memory_facts_content_height ~cols
       ~budget:(max 1 (surface_rows state - Masc_tui_frame.chrome_rows))
@@ -5948,6 +5948,12 @@ let launch_volume_gc state ~mailbox request =
       Masc_tui_volume_gc.answer_of_text ~is_error:outcome.Masc_tui_mcp.is_error
         outcome.Masc_tui_mcp.text)
 
+let press_tools_volume_gc state ~mailbox =
+  match Masc_tui_volume_gc.press state.volume_gc with
+  | Masc_tui_volume_gc.Still_running ->
+      report_action state "info" "volume GC: the previous request is still running"
+  | Masc_tui_volume_gc.Send request -> launch_volume_gc state ~mailbox request
+
 (* The pane draws the answer; the footer says it once. A failure without an
    answer is an error line, since after a reclaim it may hide a deletion. *)
 let settle_volume_gc state request result =
@@ -5955,6 +5961,11 @@ let settle_volume_gc state request result =
     (match result with
      | Ok answer -> Masc_tui_volume_gc.answered answer
      | Error detail -> Masc_tui_volume_gc.unanswered request detail);
+  (* A newly answered report can arm a reclaim. Show its first line before
+     the retained report position; periodic inventory reads do not move it. *)
+  if state.view = Tools
+     && Option.is_some (tools_volume_gc_parent_scroll state.tools_pane) then
+    tools_task_user_scroll state 0;
   let kind =
     match result with
     | Ok (Masc_tui_volume_gc.Report _) -> "system"
@@ -6608,6 +6619,19 @@ let launch_keeper_story_turns_load state ~mailbox ~keeper_name ~refresh =
             (fun () -> Masc_tui_http.fetch_keeper_story_turns ~host ~port ~keeper_name)
   end
 
+(* Independent Memory dock sources deliver without waiting for one another. *)
+let launch_memory_activity_read state ~mailbox ~keeper_name ~refresh
+    source owed ~set_source ~set_owed ~deliver read =
+  if server_authority_ready state
+     && (refresh || Masc_tui_fetched.current_key source <> Some keeper_name) then
+    match Masc_tui_fetched.start ~equal:String.equal source ~key:keeper_name with
+    | Masc_tui_fetched.Already_loading -> ()
+    | Masc_tui_fetched.Started (next, request) ->
+      set_source next;
+      set_owed (Masc_tui_owed_read.started owed);
+      launch_workspace_json_read state ~mailbox
+        ~deliver:(fun result -> Keeper_msg (deliver request result)) read
+
 let launch_memory_health_load state ~mailbox =
   if server_authority_ready state then begin
   if state.memory_health_inflight
@@ -6662,11 +6686,9 @@ let launch_memory_facts_read state ~mailbox ~key read =
          with it this request; an unscoped delivery would let workspace A's
          held facts land in workspace B's browser because the request key
          names a Keeper, not a workspace (#41163). *)
-      let enqueue_scoped = workspace_enqueue state in
-      Masc_tui_async_read.launch
-        ~deliver:(fun result ->
-          enqueue_scoped mailbox (Memory_msg (Memory_facts_loaded (request, result))))
-        read
+      state.memory_facts_owed <- Masc_tui_owed_read.started state.memory_facts_owed;
+      launch_workspace_json_read state ~mailbox
+        ~deliver:(fun result -> Memory_msg (Memory_facts_loaded (request, result))) read
   end
 
 let launch_memory_facts_load state ~mailbox ~keeper_name =
@@ -6704,6 +6726,7 @@ let launch_all_memory_facts_load state ~mailbox =
         ~refused:health.mhs_refused_keepers loads))
 
 let open_all_fleet_memory state ~mailbox =
+  state.memory_page <- Memory_facts;
   state.memory_facts_keeper <- Some "*";
   state.memory_facts <- Masc_tui_fetched.clear state.memory_facts;
   state.memory_facts_cursor <- 0;
@@ -8484,6 +8507,8 @@ let owe_machine_live_read state machine =
 (* The fleet memory health reads on arrival, on a revalidation, when a row
    read cannot be merged, and again after a failed read (RFC-0487). *)
 let owe_memory_health_read state =
+  state.memory_facts_owed <- Masc_tui_owed_read.changed state.memory_facts_owed;
+  state.memory_activity_owed <- Masc_tui_owed_read.changed state.memory_activity_owed;
   state.memory_health_owed <- Masc_tui_owed_read.changed state.memory_health_owed
 
 (* The input pane shows the selected Keeper's turn records. A memory health
@@ -8495,6 +8520,10 @@ let owe_memory_input_read state =
    Keeper's row is read on its own and merged into the fleet answer, so a
    Keeper that writes often costs one row per push (RFC-0487). *)
 let owe_memory_health_row state keeper =
+  if Masc_tui_fetched.current_key state.memory_facts = Some keeper then
+    state.memory_facts_owed <- Masc_tui_owed_read.changed state.memory_facts_owed;
+  if Masc_tui_fetched.current_key state.memory_activity = Some keeper then
+    state.memory_activity_owed <- Masc_tui_owed_read.changed state.memory_activity_owed;
   if not (List.exists (String.equal keeper) state.memory_health_rows_owed) then
     state.memory_health_rows_owed <- state.memory_health_rows_owed @ [ keeper ]
 
@@ -8693,6 +8722,11 @@ let leave_browser_lane state ~mailbox =
   launch_surface_reads state ~mailbox state.view
 
 let goto_surface ?(from_reference = false) state ~mailbox (destination : surface) =
+  if state.view <> Memory || destination <> Memory then state.memory_return <- None;
+  if state.view = Memory && destination <> Memory then begin
+    state.memory_fact_detail_open <- false;
+    state.memory_fact_detail_scroll <- 0
+  end;
   state.code_hover <- None;
   state.runtime_config_jump_section <- None;
   if destination <> Tools && state.tools_async_detail_open then close_tools_async_detail state;
@@ -8806,6 +8840,7 @@ let cycle_surface state ~mailbox ~backwards =
 
 let launch_keeper_older_page state ~mailbox ~keeper_name ~cursor =
   if server_authority_ready state then begin
+  Masc_tui_frame_timing.time_stage ~name:"chat.older.requested" (fun () -> ());
   (* Explicit/resumed paging owns the cursor from here. A still-running cold
      first page must not later rewind it, even if both requested [None]. *)
   (match state.msg_history_inflight with
@@ -9942,7 +9977,8 @@ let launch_owed_tools state ~mailbox =
                   (fun owed -> state.tools_activations_owed <- owed)
              then [ Tools_activations_read ]
              else [])
-      | Tools_surface | Tools_catalog -> inventory_parts ()
+      | Tools_surface
+      | Tools_catalog (Tools_catalog_list | Tools_catalog_volumes _) -> inventory_parts ()
       | Tools_async -> []
     in
     match parts with
@@ -10183,6 +10219,51 @@ let launch_owed_keeper_story_turns state ~mailbox =
       if not other_keeper_reading then
         launch_keeper_story_turns_load state ~mailbox ~keeper_name
           ~refresh:(Masc_tui_owed_read.due ~now:(monotonic_now_s ()) read)
+
+(* One visible demand owns each shared source. A hidden preview cannot
+   replace the canonical browser's fleet or Keeper target. *)
+let launch_owed_memory state ~mailbox =
+  let preview =
+    if state.view = Keepers Keeper_list && state.keeper_story = Some Masc_tui_keeper_story.Memory
+    then Option.map (fun (keeper : keeper) -> keeper.k_name) (selected_keeper state)
+    else None in
+  let facts_key = match state.view, state.memory_page with
+    | Memory, Memory_facts -> state.memory_facts_keeper
+    | Memory, Memory_changes -> None
+    | (Overview | Acting | Metrics | Keepers _ | Lanes | Clients | Board | Approvals | Planning
+      | Schedules | Verification | Harness | Fusion | Repositories | Code | Changes | Connectors
+      | Runtime | Config | Resources | Tools | System_logs), (Memory_facts | Memory_changes) -> preview in
+  (match facts_key with
+   | None -> state.memory_facts_owed <- Masc_tui_owed_read.changed Masc_tui_owed_read.settled
+   | Some key ->
+     let reading = Masc_tui_fetched.in_flight state.memory_facts in
+     let owed = if reading then state.memory_facts_owed else Masc_tui_owed_read.abandoned state.memory_facts_owed in
+     state.memory_facts_owed <- owed;
+     if not (reading && Masc_tui_fetched.current_key state.memory_facts <> Some key)
+        && (Masc_tui_fetched.current_key state.memory_facts <> Some key
+            || Masc_tui_owed_read.due ~now:(monotonic_now_s ()) owed) then
+       if String.equal key "*" then launch_all_memory_facts_load state ~mailbox
+       else launch_memory_facts_load state ~mailbox ~keeper_name:key);
+  let activity_key = match state.view, state.memory_page, state.memory_facts_keeper with
+    | Memory, Memory_changes, Some keeper when not (String.equal keeper "*") -> Some keeper
+    | Memory, (Memory_facts | Memory_changes), (Some _ | None) -> None
+    | (Overview | Acting | Metrics | Keepers _ | Lanes | Clients | Board | Approvals | Planning
+      | Schedules | Verification | Harness | Fusion | Repositories | Code | Changes | Connectors
+      | Runtime | Config | Resources | Tools | System_logs), (Memory_facts | Memory_changes), (Some _ | None) -> preview in
+  match activity_key with
+  | None -> state.memory_activity_owed <- Masc_tui_owed_read.changed Masc_tui_owed_read.settled
+  | Some keeper_name ->
+    let reading = Masc_tui_fetched.in_flight state.memory_activity in
+    let owed = if reading then state.memory_activity_owed else Masc_tui_owed_read.abandoned state.memory_activity_owed in
+    state.memory_activity_owed <- owed;
+    if not (reading && Masc_tui_fetched.current_key state.memory_activity <> Some keeper_name) then
+      launch_memory_activity_read state ~mailbox ~keeper_name
+        ~refresh:(Masc_tui_owed_read.due ~now:(monotonic_now_s ()) owed)
+        state.memory_activity owed
+        ~set_source:(fun source -> state.memory_activity <- source)
+        ~set_owed:(fun owed -> state.memory_activity_owed <- owed)
+        ~deliver:(fun request result -> Keeper_memory_activity_loaded (request, result))
+        (fun () -> Masc_tui_http.fetch_keeper_memory_activity ~host:server_peer_host ~port:state.port ~keeper_name)
 
 (* The Keeper whose chat pane is open; its native tasks and child content are
    drawn beside the transcript. *)
@@ -17518,6 +17599,12 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
   state.memory_input <- Masc_tui_fetched.clear state.memory_input;
   state.memory_input_owed <- Masc_tui_owed_read.settled;
   state.keeper_story_turns <- Masc_tui_fetched.clear state.keeper_story_turns;
+  state.memory_activity <- Masc_tui_fetched.clear state.memory_activity;
+  state.memory_facts_owed <- Masc_tui_owed_read.settled;
+  state.memory_activity_owed <- Masc_tui_owed_read.settled;
+  state.memory_changes_cursor <- 0;
+  state.memory_return <- None;
+  state.memory_page <- Memory_facts;
   state.keeper_story_turns_owed <- Masc_tui_owed_read.settled;
   state.memory_health <- None;
   state.memory_health_error <- None;
@@ -19170,7 +19257,8 @@ let enter_tools_pane state pane =
       owe_tools_catalog_read state;
       owe_every_skill_usage_read state
   | Tools_activations -> owe_tools_activations_read state
-  | Tools_surface | Tools_catalog | Tools_async -> ()
+  | Tools_surface | Tools_async
+  | Tools_catalog (Tools_catalog_list | Tools_catalog_volumes _) -> ()
 ;;
 
 (* The cursor restarts because the row under it belongs to the listing being
@@ -19250,6 +19338,39 @@ let keeper_story_action state key =
    that was under the cursor. Only [Open_detail] leaves the list. *)
 let apply_keeper_story_action state ~mailbox = function
   | Masc_tui_keeper_story.Show page -> state.keeper_story <- Some page
+  | Masc_tui_keeper_story.Open_memory destination ->
+      (match selected_keeper state with
+       | None -> ()
+       | Some keeper ->
+         let origin = {mr_keeper=keeper.k_name; mr_search=state.search; mr_search_last=state.search_last} in
+         state.memory_fact_detail_open <- false;
+         state.memory_fact_detail_scroll <- 0;
+         state.memory_fact_claim_wrap <- None;
+         goto_surface state ~mailbox Memory;
+         state.memory_return <- Some origin;
+         state.search <- None;
+         state.search_last <- "";
+         state.memory_facts_keeper <- Some keeper.k_name;
+         state.memory_facts_category <- Category_all;
+         state.memory_facts_cursor <- 0;
+         state.memory_facts_scroll <- 0;
+         state.memory_changes_cursor <- 0;
+         (match destination with
+          | Masc_tui_keeper_story.Memory_recent ->
+              state.memory_page <- Memory_facts; state.memory_facts_sort <- Sort_recency
+          | Masc_tui_keeper_story.Memory_frequent ->
+              state.memory_page <- Memory_facts; state.memory_facts_sort <- Sort_retrieved_count
+          | Masc_tui_keeper_story.Memory_changes -> state.memory_page <- Memory_changes
+          | Masc_tui_keeper_story.Memory_storage ->
+              state.memory_page <- Memory_facts;
+              state.memory_facts_keeper <- None;
+              let rec index i = function
+                | [] -> None
+                | (row : Masc.Tui_decode_memory_health.memory_keeper_health) :: rest ->
+                    if String.equal row.mkh_keeper_id keeper.k_name then Some i else index (i + 1) rest in
+              (match index 0 (visible_memory_keepers state) with
+               | Some cursor -> state.memory_health_cursor <- cursor
+               | None -> report_action state "info" (keeper.k_name ^ ": memory health not observed; showing the fleet storage view")) ))
   | Masc_tui_keeper_story.Close -> state.keeper_story <- None
   | Masc_tui_keeper_story.Open_world -> open_keeper_world state
   | Masc_tui_keeper_story.Open_detail ->
@@ -23322,7 +23443,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
         | Keeper_action_done (_, _, _, _) | Keeper_memory_catch_up_done _)
         | (Board_msg (Board_publication_done _ | Board_comment_done _)) | (Board_msg (Board_vote_done _) | Artifact_msg (Artifact_check_changed _)) | Goal_msg (Goal_transition_done _
         | Goal_confirmation_submitted _ | Goal_confirmation_loaded (_, _)) | Schedule_msg (Schedules_loaded (_, _)
-        | Schedule_wake_history_loaded (_, _)) | Keeper_msg (Keeper_schedules_loaded (_, _) | Keeper_story_turns_loaded (_, _))
+        | Schedule_wake_history_loaded (_, _)) | Keeper_msg (Keeper_schedules_loaded (_, _) | Keeper_story_turns_loaded (_, _) | Keeper_memory_activity_loaded (_, _))
         | System_log_streamed _ | Schedule_msg (Schedule_cancel_done (_, _)) | Verification_msg (Verification_verdict_done _)
         | Harness_msg (Harness_label_done _) | Board_msg (Board_attachment_loaded _ | Board_attachment_prepared _ | Board_attachment_saved _) | Chat_msg (Chat_call_loaded _) | Keeper_msg (Keeper_calls_loaded (_, _, _)) | Goal_msg (Goal_timeline_loaded (_, _) | Goal_candle_loaded (_, _))
         | Task_msg (Task_history_loaded (_, _) | Task_cancel_done (_, _, _))
@@ -26543,6 +26664,13 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
            | Error _ -> failed_read state.keeper_story_turns_owed);
       state.keeper_story_turns <-
         Masc_tui_fetched.complete ~equal:String.equal state.keeper_story_turns request result
+  | Keeper_msg (Keeper_memory_activity_loaded (request, result)) ->
+      if Masc_tui_fetched.is_current ~equal:String.equal state.memory_activity request then
+        state.memory_activity_owed <-
+          (match result with Ok _ -> Masc_tui_owed_read.succeeded state.memory_activity_owed
+           | Error _ -> failed_read state.memory_activity_owed);
+      state.memory_activity <-
+        Masc_tui_fetched.complete ~equal:String.equal state.memory_activity request result
   | Schedule_msg (Schedule_cancel_done (schedule_id, result)) -> (
       match result with
       | Ok message ->
@@ -28651,6 +28779,10 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       (* A late answer for a browser that closed, or for the keeper the reader
          already left, is dropped whole by [complete]. A failed refresh keeps
          the facts on screen and marks them stale. *)
+      if Masc_tui_fetched.is_current ~equal:String.equal state.memory_facts request then
+        state.memory_facts_owed <-
+          (match result with Ok _ -> Masc_tui_owed_read.succeeded state.memory_facts_owed
+           | Error _ -> failed_read state.memory_facts_owed);
       state.memory_facts <-
         Masc_tui_fetched.complete ~equal:String.equal state.memory_facts request result
   | Repository_msg (Repository_changes_loaded (scope, result)) ->
@@ -29135,6 +29267,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
         ~outcome:(if not admitted then "discarded" else
           match result with Ok _ -> "received" | Error _ -> "failed")
   | Keeper_msg (Keeper_chat_older_loaded (generation, keeper_name, cursor, result)) ->
+      Masc_tui_frame_timing.time_stage ~name:"chat.older.apply" (fun () ->
       (* A page that arrived for a keeper the pane has since left, or after a
          reload moved the cursor, is dropped: prepending it would put rows
          above a transcript they do not belong to. *)
@@ -29149,6 +29282,13 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
         state.msg_older_loading <- false;
         match result with
         | Ok page ->
+            let observation =
+              if Masc_tui_frame_timing.enabled then
+                Some (Masc_tui_message_input.revision state.msg_input,
+                  state.msg_scroll, state.msg_scroll_pin,
+                  List.length (keeper_chat_history_rows state.msg_loaded_sources.kcs_history))
+              else None
+            in
             let journal_targets =
               if state.msg_journal_reads_refused then []
               else journal_source_fetch_targets ~keeper_name
@@ -29160,21 +29300,24 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                 |> List.map (fun (source, at) -> source, at,
                     journal_resume_position state ~keeper_name source)
             in
-            let rows =
+            let rows = Masc_tui_frame_timing.time_stage ~name:"chat.older.rows" (fun () ->
               msg_entries_of_history_rows state keeper_name
                 page.Keeper_chat_history.decoded.Keeper_chat_history.rows
+              )
             in
             (* The paging cursor owns the raw storage window, so an older page
                is prepended here. [chat_timeline] then recomputes the one
                displayed-time projection across that complete window; scroll
                pins retain row identity rather than this cache position. *)
             let held = keeper_chat_history_rows state.msg_loaded_sources.kcs_history in
-            let history = prepend_older_history_page ~older:rows ~held in
+            let history = Masc_tui_frame_timing.time_stage ~name:"chat.older.merge" (fun () ->
+              prepend_older_history_page ~older:rows ~held) in
             set_keeper_chat_sources state {state.msg_loaded_sources with kcs_history=Chat_history_received history};
             (* Loaded rows arrive here too: a held turn whose rows only an
                older page carries gets its calls' outcome and duration the
                same way a refreshed page gives them. *)
-            enrich_held_logs_from_rows state ~keeper_name rows;
+            Masc_tui_frame_timing.time_stage ~name:"chat.older.enrich" (fun () ->
+              enrich_held_logs_from_rows state ~keeper_name rows);
             state.msg_loaded_dropped <-
               state.msg_loaded_dropped
               + page.Keeper_chat_history.decoded.Keeper_chat_history.dropped;
@@ -29186,6 +29329,13 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
               page.Keeper_chat_history.has_more
               && Option.is_some page.Keeper_chat_history.next_cursor;
             state.msg_older_error <- None;
+            Option.iter (fun (revision, scroll, pin, before_rows) ->
+              Masc_tui_frame_timing.note_chat_page_application
+                { keeper=keeper_name; generation; page_rows=List.length rows;
+                  before_rows; after_rows=List.length history;
+                  draft_preserved=Masc_tui_message_input.has_revision state.msg_input revision;
+                  scroll_preserved=state.msg_scroll = scroll;
+                  pin_preserved=state.msg_scroll_pin == pin }) observation;
             launch_keeper_chat_journal_loads state ~mailbox ~keeper_name journal_targets;
             launch_unavailable_journal_operations state ~mailbox ~keeper_name
         | Error Keeper_chat_history.Page_stale ->
@@ -29195,7 +29345,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
             state.msg_older_error <- Some (Keeper_chat_history.page_error_to_string Keeper_chat_history.Page_stale)
         | Error (Keeper_chat_history.Page_read_failed detail) ->
             (* A failed read retains its exact cursor for retry. *)
-            state.msg_older_error <- Some detail)
+            state.msg_older_error <- Some detail))
 (* How long one pass of the loop applies queued results before it goes back
    to read a key. Results arrive in bursts (a history page, then a journal
    read for each turn on it), and applying all of them in one pass held a
@@ -34178,6 +34328,7 @@ Use relative paths for resources already held in the package. -->
       launch_owed_schedules state ~mailbox:async_messages;
       launch_owed_keeper_schedules state ~mailbox:async_messages;
       launch_owed_keeper_story_turns state ~mailbox:async_messages;
+      launch_owed_memory state ~mailbox:async_messages;
       launch_owed_chat_journals state ~mailbox:async_messages;
       launch_owed_board_list state ~refresh_inflight:http_scoped_refresh_inflight
         ~full_refresh_inflight:http_refresh_inflight ~scoped_refresh_followup
@@ -36364,10 +36515,13 @@ Use relative paths for resources already held in the package. -->
               && not (modal_owns_keys state) && not state.palette_open
               && not state.answering_open && not state.patch_modal_open && not state.link_modal_open
               && Option.is_none (text_input_target state ~compact_viewport)
-              && ((state.view=Repositories && Option.is_none state.workspace_activity_repo)
+              && ((state.view=Overview && not state.keeper_navigation_open)
+                  || (state.view=Repositories && Option.is_none state.workspace_activity_repo)
                   || (state.view=Config && state.config_pane=Config_models)
                   || (state.view=Memory && Option.is_none state.memory_facts_keeper)) ->
-           let reading = if state.view=Repositories then
+           let reading = if state.view=Overview then
+               Some (Masc_tui_render.operator_actions_reading state)
+             else if state.view=Repositories then
                Masc_tui_render_repositories.selected_repository_reading state
              else if state.view=Memory then
                Some (Masc_tui_render_memory.memory_overview_reading ~cols:terminal_columns state)
@@ -37254,6 +37408,22 @@ Use relative paths for resources already held in the package. -->
            if not compact_viewport then handle_skill_source_key k
            else if String.equal k "esc" then state.tools_skill_source_picker <- None
        | Some k
+         when state.view = Tools
+              && Option.is_some (tools_volume_gc_parent_scroll state.tools_pane)
+              && not (List.mem k
+                [ "?"; ":"; "q"; "\t"; "shift-tab"; "p"; "P"; "r"; "R"
+                ; "j"; "k"; "up"; "down"; "wheel-up"; "wheel-down"
+                ; "pageup"; "pagedown"; "home"; "end" ]) ->
+           (* This reading owns its action keys. Skill edits and Keeper
+              selection belong to the catalog, not the volume report. *)
+           if String.equal k Masc_tui_volume_gc.key then
+             press_tools_volume_gc state ~mailbox:async_messages
+           else if String.equal k "esc" then
+             Option.iter (fun catalog_scroll ->
+               enter_tools_pane state (Tools_catalog Tools_catalog_list);
+               tools_task_user_scroll state catalog_scroll)
+               (tools_volume_gc_parent_scroll state.tools_pane)
+       | Some k
          when state.view = Keepers Keeper_runtime_pick
               && (Option.is_some (keeper_runtime_picker_action state.runtime_pick_list k)
                   || text_input_target state ~compact_viewport
@@ -37959,6 +38129,55 @@ Use relative paths for resources already held in the package. -->
                      let delta = if List.mem key ["k"; "up"; "pageup"] then -step else step in
                      state.runtime_config_status_scroll <-
                        max 0 (min limit (min limit state.runtime_config_status_scroll + delta))))
+       | Some ("1" | "2" | "3" | "4" as page)
+         when state.view = Memory && not state.memory_fact_detail_open
+              && not state.composer_focused && not (modal_owns_keys state) ->
+           let target = match state.memory_facts_keeper with
+             | Some keeper -> Some keeper
+             | None -> Option.map (fun (keeper : Masc.Tui_decode_memory_health.memory_keeper_health) ->
+                 keeper.mkh_keeper_id) (selected_memory_keeper state) in
+           if String.equal page "4" then begin
+             state.memory_page <- Memory_facts;
+             state.memory_facts_keeper <- None;
+             state.search <- None; state.search_last <- ""
+           end else
+             (match target with
+              | None -> report_action state "info" "Select a Keeper to browse its memory"
+              | Some "*" when String.equal page "3" ->
+                  report_action state "info" "Changes require an individual Keeper; select one from storage"
+              | Some keeper ->
+                if Option.is_none state.memory_facts_keeper then begin
+                  state.search <- None; state.search_last <- ""
+                end;
+                state.memory_facts_keeper <- Some keeper;
+                state.memory_facts_cursor <- 0; state.memory_facts_scroll <- 0;
+                state.memory_changes_cursor <- 0;
+                if String.equal page "3" then state.memory_page <- Memory_changes
+                else begin
+                  state.memory_page <- Memory_facts;
+                  state.memory_facts_sort <- if String.equal page "2" then Sort_retrieved_count else Sort_recency
+                end)
+       | Some ("j" | "k" | "up" | "down" | "wheel-up" | "wheel-down" | "pageup" | "pagedown"
+              | "g" | "G" | "home" | "end" | "[" | "]" | "\r" | "\n" | "enter" as key)
+         when state.view = Memory && state.memory_page = Memory_changes
+              && not state.composer_focused && not (modal_owns_keys state) ->
+           (match state.memory_facts_keeper with
+            | None -> ()
+            | Some keeper_name ->
+              let count = Masc_tui_render_keeper_memory.change_count state ~keeper_name in
+              let maximum = max 0 (count - 1) in
+              match key with
+              | "\r" | "\n" | "enter" ->
+                  Option.iter (open_detail_reading state)
+                    (Masc_tui_render_keeper_memory.change_reading state ~keeper_name)
+              | "g" | "home" -> state.memory_changes_cursor <- 0
+              | "G" | "end" -> state.memory_changes_cursor <- maximum
+              | _ ->
+                  let page = max 1 (surface_body_rows state ~terminal_rows:(fst (get_terminal_size ())) - 6) in
+                  let delta = match key with
+                    | "k" | "up" | "wheel-up" | "[" -> -1
+                    | "pageup" -> -page | "pagedown" -> page | _ -> 1 in
+                  state.memory_changes_cursor <- max 0 (min maximum (min maximum state.memory_changes_cursor + delta)))
        | Some "/"
          when Option.is_some (Masc_tui_surface_search.surface_row_texts ~cols:(snd (get_terminal_size ())) state state.view) ->
            state.search <- Some ""
@@ -38373,14 +38592,14 @@ Use relative paths for resources already held in the package. -->
                 handle_skill_evidence ())
        | Some k
          when String.equal k Masc_tui_volume_gc.key
-              && state.view = Tools && state.tools_pane = Tools_catalog ->
-           (* The catalog lists every registered tool; this one is the
-              operator's own reclamation of retired Keepers' volumes. *)
-           (match Masc_tui_volume_gc.press state.volume_gc with
-            | Masc_tui_volume_gc.Still_running ->
-                report_action state "info" "volume GC: the previous request is still running"
-            | Masc_tui_volume_gc.Send request ->
-                launch_volume_gc state ~mailbox:async_messages request)
+              && state.view = Tools && state.tools_pane = Tools_catalog Tools_catalog_list ->
+           let catalog_scroll = tools_task_render_scroll state in
+           (* Opening cannot reuse an arm retained from a different view.
+              Disarming leaves an actual in-flight request alone. *)
+           state.volume_gc <- Masc_tui_volume_gc.disarm state.volume_gc;
+           enter_tools_pane state
+             (Tools_catalog (Tools_catalog_volumes {catalog_scroll}));
+           press_tools_volume_gc state ~mailbox:async_messages
        | Some "J" when state.view = Tools -> move_tools_skill_cursor state 1
        | Some "K" when state.view = Tools -> move_tools_skill_cursor state (-1)
        | Some "d" when state.view = Tools && state.tools_pane <> Tools_async ->
@@ -38427,7 +38646,7 @@ Use relative paths for resources already held in the package. -->
        | Some "c" when state.view = Tools -> handle_skill_create ~composition:false ()
        | Some "C" when state.view = Tools -> handle_skill_create ~composition:true ()
        | Some "c"
-         when state.view = Memory
+         when state.view = Memory && state.memory_page = Memory_facts
               && Option.is_some state.memory_facts_keeper ->
            (* Cycle the category filter: All, then each category the loaded
               store holds, in sorted order. *)
@@ -38435,13 +38654,13 @@ Use relative paths for resources already held in the package. -->
              (Masc_tui_types.next_memory_category state.memory_facts_category
                 (Masc_tui_types.memory_fact_categories state))
        | Some "C"
-         when state.view = Memory
+         when state.view = Memory && state.memory_page = Memory_facts
               && Option.is_some state.memory_facts_keeper ->
            enter_memory_category state
              (Masc_tui_types.prev_memory_category state.memory_facts_category
                 (Masc_tui_types.memory_fact_categories state))
        | Some ("s" | "S")
-         when state.view = Memory
+         when state.view = Memory && state.memory_page = Memory_facts
               && Option.is_some state.memory_facts_keeper ->
            state.memory_facts_sort <-
              Masc_tui_types.next_memory_sort state.memory_facts_sort;
@@ -38458,7 +38677,7 @@ Use relative paths for resources already held in the package. -->
          when state.view = Memory && Option.is_none state.memory_facts_keeper ->
            state.memory_unit <- Masc_tui_memory_usage.next_unit state.memory_unit
        | Some ("d" | "D")
-         when state.view = Memory && Option.is_some state.memory_facts_keeper ->
+         when state.view = Memory && state.memory_page = Memory_facts && Option.is_some state.memory_facts_keeper ->
            toggle_memory_facts_categories ~cols:terminal_columns state
        | Some ("d" | "D")
          when state.view = Lanes && (match state.lanes_mode, state.lane_run_detail with
@@ -38511,7 +38730,7 @@ Use relative paths for resources already held in the package. -->
                 state.memory_fact_detail_scroll <-
                   Masc_tui_scroll.step_uncounted ~delta state.memory_fact_detail_scroll)
        | Some ("\r" | "\n" | "enter")
-         when state.view = Memory && Option.is_some state.memory_facts_keeper ->
+         when state.view = Memory && state.memory_page = Memory_facts && Option.is_some state.memory_facts_keeper ->
            (* A browser with no fact has no reading to open. *)
            if not (List.is_empty (Masc_tui_types.memory_fact_rows state)) then begin
              state.memory_fact_detail_open <- true;
@@ -40478,13 +40697,11 @@ Use relative paths for resources already held in the package. -->
                 if state.resource_focus = Right_pane then
                   state.resource_focus <- Left_pane
                 else
-                  (* Off-ring child: the way out of the list is the ring
-                     parent, loaded, same as Connectors and Code. *)
-                  goto_surface state ~mailbox:async_messages Config
+                  goto_surface state ~mailbox:async_messages
+                    (Masc_tui_surface_navigation.surface_ring_family state.view)
              | Clients ->
-                 (* Off-ring child: the way out is the ring parent, loaded,
-                    the same exit Resources takes to Config. *)
-                 goto_surface state ~mailbox:async_messages Runtime
+                 goto_surface state ~mailbox:async_messages
+                   (Masc_tui_surface_navigation.surface_ring_family state.view)
              | Lanes ->
                 state.lanes_action_error <- None;
                 (match state.lanes_mode with
@@ -40570,13 +40787,26 @@ Use relative paths for resources already held in the package. -->
                   (* Off-ring child: the way out of the list is Activity,
                      the ring parent, same as the other hang-offs. *)
                   goto_surface state ~mailbox:async_messages Acting
-            | Connectors -> state.view <- Keepers Keeper_detail
+            | Connectors ->
+                goto_surface state ~mailbox:async_messages
+                  (Masc_tui_surface_navigation.surface_ring_family state.view)
             | Memory ->
                 (match memory_back state with
                  | Memory_stays -> ()
-                 | Memory_leaves -> state.view <- Overview)
+                 | Memory_leaves ->
+                   match state.memory_return with
+                   | None -> state.view <- Overview
+                   | Some origin ->
+                     state.memory_return <- None;
+                     goto_surface state ~mailbox:async_messages (Keepers Keeper_list);
+                     state.search <- origin.mr_search;
+                     state.search_last <- origin.mr_search_last;
+                     select_keeper_name state origin.mr_keeper;
+                     (match selected_keeper state with
+                      | Some keeper when String.equal keeper.k_name origin.mr_keeper ->
+                          state.keeper_story <- Some Masc_tui_keeper_story.Memory
+                      | Some _ | None -> ()))
             | Tools ->
-                (* Off-ring child: back to the parent that opened it. *)
                 if Option.is_some state.tools_async_task_source then begin
                   close_tools_async_task state;
                   launch_tools_async_detail state ~mailbox:async_messages
@@ -40584,7 +40814,8 @@ Use relative paths for resources already held in the package. -->
                   (* Back on the request list, which reads on its own pushes
                      ([launch_owed_async_requests]). *)
                   close_tools_async_detail state
-                else goto_surface state ~mailbox:async_messages Config
+                else goto_surface state ~mailbox:async_messages
+                  (Masc_tui_surface_navigation.surface_ring_family state.view)
             | Config ->
                 state.runtime_model_jump <- None;
                 state.runtime_config_jump_section <- None;
@@ -42251,7 +42482,8 @@ Use relative paths for resources already held in the package. -->
             | Masc_tui_types.Runtime_all ->
                 enter_standalone_lanes state ~mailbox:async_messages)
        | Some "p" | Some "P" when state.view = Clients ->
-           goto_surface state ~mailbox:async_messages Runtime
+           goto_surface state ~mailbox:async_messages
+             (Masc_tui_surface_navigation.surface_ring_family state.view)
        | Some "p" | Some "P"
          when state.view = Lanes && state.lanes_mode = Lanes_overview ->
            goto_surface state ~mailbox:async_messages Runtime
@@ -42265,8 +42497,8 @@ Use relative paths for resources already held in the package. -->
               | Tools_surface -> Tools_async
               | Tools_async -> Tools_activations
               | Tools_activations -> Tools_usage
-              | Tools_usage -> Tools_catalog
-              | Tools_catalog -> Tools_surface)
+              | Tools_usage -> Tools_catalog Tools_catalog_list
+              | Tools_catalog (Tools_catalog_list | Tools_catalog_volumes _) -> Tools_surface)
        | Some "p" | Some "P" when state.view = Config ->
            (* One surface, two files the server reads: runtime.toml and the
               prompt registry. [p] moves between them and loads the list the

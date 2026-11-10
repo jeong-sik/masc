@@ -56,7 +56,7 @@ owns that rule; this table records the remaining scope.
 | Work | Planning, Approvals, Verification, Harness, Board; Goal, Task, request, proof and discussion details | #50671 simplifies the Task list; #50688 wraps the goal and declared success criterion, retaining exceptional proof/binding notices and keeping identifiers in detail. Linked Task details qualify partial or retained observations rather than claiming absence or a complete count. Goal/Task entry, detail and return were observed with native TUI 8ebbe020 against the older server | Matching-server observations; other Work readings, installation and input/confirmation ownership |
 | Keepers | Keepers, Memory, Schedules, Fusion, Changes; all six Keeper modes and detail tabs | Coordinate with existing Keeper Pulse and memory work (#50669, #50643) rather than duplicate it. #50708 aligns typed state/pass search and preserves refused fleet rows and retained observation scope; its b5655270 source was independently reread | Review those changes together in execution; chat, schedule, result and error states |
 | Features and plugins | Lanes, Clients, Connectors, Resources, Tools; plugins, browser, tools, skills and result details | #50677 simplifies feature overview around purpose, standing, errors and existing actions. #50695 repairs the narrow summary priority found in a00f8aab; native TUI 8ebbe020 observations at 150×40 and 80×24 showed current fields before secondary action hints, against the older server | Matching-server observations; the other feature surfaces, input overlays and installation |
-| Workspace | Repositories, Code; checkout, Git changes, files, history, diff and navigation overlays | #50704 leads repository selection with its scoped last Git observation and assigned Keepers, before registered defaults and the path. The normal explanatory question and repeated inner heading are removed; retained/failed reads remain visible. Rendering and cursor paging share the revised row budget. Two local agent source reviews found no P0–P2; their footer-language finding was repaired. These are local review results, not formal GitHub approvals | Candidate execution and navigation/return behavior; Code, history, diff and overlays |
+| Workspace | Repositories, Code; checkout, Git changes, files, history, diff and navigation overlays | #50704 leads repository selection with its scoped last Git observation and assigned Keepers, before registered defaults and the path. The normal explanatory question and repeated inner heading are removed; retained/failed reads remain visible. Rendering and cursor paging share the revised row budget. Two local agent source reviews found no P0–P2; their footer-language finding was repaired. These are local review results, not formal GitHub approvals. #50969 makes Code diff use each returned row instead of replacing its body with the independently read open file, and measures the displayed tab expansion for horizontal navigation. A matching 3a0737e3 native baseline showed a historical 1-to-2 change as 1-to-999, a changed server file as the earlier open contents, and a tabbed removal whose end was unreachable; those observations do not execute the repair | Candidate execution and navigation/return behavior; Code, history, diff and overlays |
 | System | Config, Runtime, Acting, System_logs; all settings tabs, account/model forms and diagnostic details | #50690 puts validation and application before full source identifiers and key lists, retaining failed-refresh notices before previous status facts; two independent source reviews found no P0–P2. Native TUI 8ebbe020 showed application facts before source identifiers at wide and narrow sizes, against the older server | Matching-server observations, other System readings and save/uncertain-result behavior |
 
 For each row, inspect wide and narrow native views, loading/empty/error and
@@ -270,5 +270,94 @@ keep their existing states. These standings do not authorize execution.
 The matching b9d9b809 native pair showed Librarian as ready in the 80x24 and
 36x20 feature readings while the same isolated workspace reported an unattached
 Memory execution Add-on. Those observations demonstrate the configuration and
-execution distinction; they do not execute this repair. Candidate native and
-installed GUI verification are pending, and the full 23-surface goal is open.
+execution distinction; that baseline does not execute this repair. The later
+candidate observation below executes it separately. Installed verification
+remains pending, and the full 23-surface goal is open.
+
+## Feature child navigation
+
+[#50855](https://github.com/jeong-sik/masc/pull/50855) makes the outermost return
+from Clients, Resources, Channels and Tools use their existing typed surface
+family, Features & plugins. Resources still closes its text before leaving;
+Tools still closes an original Task, then its request, then its list. Browser
+readings, input owners and explicit followed-reference returns keep their
+earlier dispatch priority. The Help registry and committed key reference name
+the same destination. The screen map also records the actual six empty-palette
+destinations.
+
+Local OCaml 5.5.1 syntax parsing and diff checks passed for the initial code
+slice. They are not project type checking, tests or native execution of this
+navigation repair. The earlier f89b3e6f matching native server/TUI observation
+does execute #50811's configured-state repair, separately from this navigation
+change. All 23 surfaces, their child/input readings, and installed verification
+remain the goal.
+
+## Matching feature-state candidate observation
+
+`Manual probe artifacts` [run 42732829605](https://github.com/jeong-sik/masc/actions/runs/42732829605)
+completed with conclusion `success`, workflow ref `main` at
+4d532df1cecf3459959c423f80a8fb68c472cefb, selected source
+f89b3e6fe22732f7b1ef0a8989317366b6b7b0cc. The GitHub artifact digest,
+payload hashes, trusted Git source tree, embedded commits and bundled runtime
+were checked before running the candidate. This was a native probe build,
+not Full CI or Release verification.
+
+The matching native server/TUI pair showed four exact routes as configured.
+A 36x20 terminal viewport in a real Ghostty window showed Verifier as
+`설정됨`, beside an unconfigured Candle Appraiser. The physical window was
+larger than that viewport; it was not a 36-column desktop window. A separate
+GUI capture showed the exact activity editor. Blank compositor captures are
+retained as unsuccessful captures and do not prove screen behavior. Raw
+observations stay private in `artifacts/native-tui-proof-42732829605/`.
+This confirms those observed candidate views only, without proving production
+installation, the new navigation repair, or the remaining child/input states.
+
+## Tools catalog and volume reading (#50872)
+
+The catalog's long periodic volume report moves to an explicit child reading.
+The five Tools tabs remain unchanged. Catalog `V` captures its scroll position,
+opens the volume reading and requests a report, unless a request is already
+running. It never reuses an old reclaim arm. The child uses the existing
+report/reclaim protocol, exact candidate names, workspace request owner and
+uncertain-result messages. Esc returns to the captured catalog position.
+Skill and Keeper action keys do not act on the volume report; its footer names
+volume, scroll, refresh and return controls. Periodic inventory refresh does
+not reset the reading. A newly answered operator request starts at the first
+line, where an armed reclaim names its targets.
+
+The f89b3e6f native baseline was reobserved at 36x20 and 80x24. The narrower
+view contained no actual tool row; the wider view put a missing-image error
+before the catalog. These are baseline observations, not execution of this
+repair. Two independent source reviews covered the nine-file implementation
+and its three-file follow-up. Their refresh-key and inflight-documentation
+findings were repaired. Syntax parsing uses local OCaml 5.5.1; project type
+checking, candidate execution and installation remain separate. No new screen
+wording, layout or row-order tests were added. The full screen scope remains
+open.
+
+## Operations action-reason reading (#50913)
+
+The f89b3e6f baseline was observed at 120x36 and 36x20 with two actual server
+reasons. The narrow Operations view showed the first and `+1 more`; Home
+selection did not include those reasons. The global footer repeated an internal
+code. This observation does not execute the following repair.
+
+Operations `v` opens every reason from the last server rollup in the existing
+immutable detail reader. Its original order and complete text are retained;
+scrolling, search and resize use that reader, and Esc returns without an
+approval, setting change or new request. Missing server/rollup observations do
+not become an empty list. The common footer names the observed action count in
+the selected UI language and points to Operations instead of repeating a raw
+diagnostic. Its existing press target opens that destination.
+
+The new key is in the canonical binding source and screen map. The committed
+key reference is the byte-for-byte output of the actual generator built from
+source `3a0737e3`, including previously stale rows from that registry.
+`Minimal manual checks` run `42758272437` completed successfully on workflow
+ref `main`, workflow head `4f1ac0e8`, selected source `3a0737e3`. It built the
+matching server, TUI and generator and passed the three selected workspace-file
+suites; this is not Full CI. The generated output's SHA-256 is
+`f87a7e316dd705c9818cc4d1f892ac80f07cd1430e1250bdbf87618e75b68ca5`.
+Operations interaction, installation, remaining Operations states and the full
+23-surface scope remain open. No new screen wording, layout, row-order or PTY
+assertion tests were added.

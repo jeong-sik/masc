@@ -557,6 +557,7 @@ type posts_source_diagnostic =
       error : Fs_compat.private_jsonl_transaction_error;
     }
   | Workspace_diagnostic of Board_workspace_binding.rejection
+  | Posts_guard_diagnostic of Fs_compat.private_jsonl_guard_failure
   | Raised_diagnostic of {
       stage : posts_source_stage;
       exception_ : exn;

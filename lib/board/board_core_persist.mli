@@ -234,10 +234,10 @@ val validate_sub_board_post_policy_unlocked :
   store -> author_id:Agent_id.t -> hearth:string option -> (unit, board_error) result
 (** Call while holding the state lock. A specified hearth requires a fully
     readable sub-board source; an unscoped post needs no sub-board policy.
-    Both comment policy checks and final post admission use this guard.
-    Post creation checks again under the same store's persistence lock before
-    append, serialized with runtime sub-board policy mutations. This does not
-    change the comment append ordering or establish durable receipt authority. *)
+    Staging uses this cached precheck. Final post/comment admission separately
+    decodes the exact canonical Policy snapshot under persistence and retains
+    it as an actual read dependency through append. This precheck alone does
+    not establish durable authority. *)
 
 module Post_publication_failure = Board_post_publication_failure
 

@@ -454,13 +454,14 @@ type private_jsonl_append_precondition =
   | Append_at_cursor of Private_jsonl_cursor.t
   | Append_at_snapshot of private_jsonl_snapshot
 
-let append_private_jsonl_durable_stable_with_io
-      ?(observe=ignore) ~io path ~precondition suffix =
+let append_private_jsonl_locked_with_io
+      ?(observe=ignore) ~io ~dir path ~precondition suffix =
   if String.equal suffix ""
      || not (Char.equal suffix.[String.length suffix - 1] '\n')
   then Error Invalid_transaction_suffix
   else
     let open Result.Syntax in
+    let success cursor = Cursor_succeeded cursor in
     let check_cursor actual =
       let expected = match precondition with
         | Append_without_precondition -> None
@@ -471,8 +472,6 @@ let append_private_jsonl_durable_stable_with_io
         Error (Cursor_mismatch { expected; actual })
       | None | Some _ -> Ok ()
     in
-    let success cursor = Cursor_succeeded cursor in
-    with_private_jsonl_stable_lock ~io ~success path @@ fun ~dir ~path ->
     let* existing =
       private_jsonl_open_existing
         ~close_fd:io.close_fd path [ Unix.O_RDWR; Unix.O_APPEND ]
@@ -545,6 +544,22 @@ let append_private_jsonl_durable_stable_with_io
            let* cursor = private_jsonl_cursor_of_stats committed_stats in
            observe {before=stats;after=committed_stats;suffix};
            Ok cursor)
+;;
+
+let append_private_jsonl_durable_stable_with_io
+      ?(observe=ignore) ~io path ~precondition suffix =
+  if String.equal suffix ""
+     || not (Char.equal suffix.[String.length suffix - 1] '\n')
+  then Error Invalid_transaction_suffix
+  else
+    with_private_jsonl_stable_lock ~io ~success:(fun cursor -> Cursor_succeeded cursor)
+      path (fun ~dir ~path ->
+        append_private_jsonl_locked_with_io ~observe ~io ~dir path ~precondition suffix)
+;;
+
+let append_private_jsonl_snapshot_locked ~io ~dir path ~expected suffix =
+  append_private_jsonl_locked_with_io ~io ~dir path
+    ~precondition:(Append_at_snapshot expected) suffix
 ;;
 
 let append_private_jsonl_durable_stable_result path suffix =

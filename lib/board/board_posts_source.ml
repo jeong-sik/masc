@@ -39,6 +39,7 @@ let rec reserved_transaction = function
 let reserved_diagnostics diagnostics =
   List.find_map (function
     | File_diagnostic { error; _ } -> reserved_transaction error
+    | Posts_guard_diagnostic failure -> reserved_transaction failure.guard_error
     | Workspace_diagnostic rejection ->
       Option.bind (Board_workspace_binding.raised rejection) reserved_exception
     | Raised_diagnostic { exception_; backtrace; _ } ->
@@ -64,6 +65,9 @@ let stage_name = function
 let diagnostic_to_string = function
   | File_diagnostic { file = Posts_file; error } ->
     "posts: " ^ Fs_compat.private_jsonl_transaction_error_to_string error
+  | Posts_guard_diagnostic failure ->
+    failure.guard_path ^ ": " ^
+      Fs_compat.private_jsonl_transaction_error_to_string failure.guard_error
   | Workspace_diagnostic rejection -> Board_workspace_binding.rejection_to_string rejection
   | Raised_diagnostic { stage; exception_; _ } ->
     stage_name stage ^ ": " ^ Printexc.to_string exception_
@@ -294,14 +298,14 @@ let rec contradicts_observation = function
 let classify_write store ~pre_write ~kind ~workspace_observation ~bytes ~diagnostics result =
   match Fs_compat.private_jsonl_cursor_success_receipt result with
   | Ok receipt ->
-    let diagnostics = diagnostics @ (match receipt.settlement_error with None -> []
-      | Some error -> [File_diagnostic { file = Posts_file; error }]) in
+    let diagnostics = (match receipt.settlement_error with None -> []
+      | Some error -> [File_diagnostic { file = Posts_file; error }]) @ diagnostics in
     let observation : posts_source_observation = { source_path = Board_paths.persist_path store;
       snapshot = { Fs_compat.bytes = bytes; cursor = receipt.value }; workspace_observation } in
     store.posts_source <- Posts_readable { observation; diagnostics };
     Posts_written { diagnostics }
   | Error error ->
-    let diagnostics = diagnostics @ [File_diagnostic { file = Posts_file; error }] in
+    let diagnostics = File_diagnostic { file = Posts_file; error } :: diagnostics in
     let failure = Posts_transaction_failed error in
     if definitely_not_written error then (
       if contradicts_observation error then refused store failure diagnostics
@@ -312,15 +316,18 @@ let classify_write store ~pre_write ~kind ~workspace_observation ~bytes ~diagnos
         { expected = pre_write; kind; intended_bytes = bytes } in
       (unsettled store ~pending failure diagnostics; Posts_write_unknown { failure; diagnostics })
 
+let write_raised store ~pre_write ~kind ~bytes ~diagnostics exception_ backtrace =
+  let diagnostics = diagnostics @ [Raised_diagnostic { stage = Write_posts; exception_; backtrace }] in
+  let failure = Posts_raised { exception_; backtrace } in
+  let pending : posts_unsettled_write =
+    { expected = pre_write; kind; intended_bytes = bytes } in
+  unsettled store ~pending failure diagnostics; Posts_write_unknown { failure; diagnostics }
+
 let write store ~pre_write ~kind ~workspace_observation ~bytes ~diagnostics perform =
   try classify_write store ~pre_write ~kind ~workspace_observation ~bytes ~diagnostics (perform ())
   with exception_ ->
-    let backtrace = Printexc.get_raw_backtrace () in
-    let diagnostics = diagnostics @ [Raised_diagnostic { stage = Write_posts; exception_; backtrace }] in
-    let failure = Posts_raised { exception_; backtrace } in
-    let pending : posts_unsettled_write =
-      { expected = pre_write; kind; intended_bytes = bytes } in
-    unsettled store ~pending failure diagnostics; Posts_write_unknown { failure; diagnostics }
+    write_raised store ~pre_write ~kind ~bytes ~diagnostics
+      exception_ (Printexc.get_raw_backtrace ())
 
 let not_written failure diagnostics = Posts_not_written { failure; diagnostics }
 
@@ -331,11 +338,11 @@ let workspace_not_written store rejection =
   let diagnostics = [Workspace_diagnostic rejection] in
   refused store failure diagnostics; not_written failure diagnostics
 
-let append store post = match expected store with
-  | Error failure -> not_written failure []
+let prepare_append store post = match expected store with
+  | Error failure -> Error (not_written failure [])
   | Ok observation ->
     match revalidate_observation store observation with
-    | Error rejection -> workspace_not_written store rejection
+    | Error rejection -> Error (workspace_not_written store rejection)
     | Ok () ->
       let encoded = try Ok (Yojson.Safe.to_string (Board_content_json.post_to_yojson post) ^ "\n")
         with exception_ -> Error (exception_, Printexc.get_raw_backtrace ()) in
@@ -343,8 +350,12 @@ let append store post = match expected store with
       | Error (exception_, backtrace) ->
         let diagnostics = [Raised_diagnostic { stage = Encode_posts; exception_; backtrace }] in
         retain_trace store diagnostics;
-        not_written (Posts_raised { exception_; backtrace }) diagnostics
-      | Ok suffix ->
+        Error (not_written (Posts_raised { exception_; backtrace }) diagnostics)
+      | Ok suffix -> Ok (observation, suffix)
+
+let append store post = match prepare_append store post with
+  | Error outcome -> outcome
+  | Ok (observation, suffix) ->
         let bytes = observation.snapshot.bytes ^ suffix in
         write store ~pre_write:observation ~kind:Append_write
           ~workspace_observation:observation.workspace_observation ~bytes ~diagnostics:[]
@@ -353,6 +364,63 @@ let append store post = match expected store with
               observation.source_path ~expected:observation.snapshot suffix
           | Some io -> Fs_compat.append_private_jsonl_durable_locked_at_snapshot_with_io_for_testing
               ~io observation.source_path ~expected:observation.snapshot suffix)
+
+type creation_append =
+  | Creation_append_outcome of posts_write_outcome
+  | Creation_policy_refused of {
+      failure : Fs_compat.private_jsonl_guard_failure;
+      outcome : posts_write_outcome;
+    }
+
+let append_creation_with_policy store ~(policy : sub_boards_source_observation) post =
+  let ordinary outcome = Creation_append_outcome outcome in
+  if not (String.equal policy.policy_path (Board_paths.sub_boards_path store)) then
+    ordinary (not_written Posts_source_binding_mismatch [])
+  else match prepare_append store post with
+  | Error outcome -> ordinary outcome
+  | Ok (observation, suffix) ->
+    let workspace = try Board_workspace_binding.revalidate store.workspace_binding
+        policy.policy_workspace
+      with exception_ -> Error (Board_workspace_binding.Raised {
+        exception_; backtrace = Printexc.get_raw_backtrace () }) in
+    match workspace with
+    | Error rejection -> ordinary (workspace_not_written store rejection)
+    | Ok () ->
+      let bytes = observation.snapshot.bytes ^ suffix in
+      let posts_io = store.posts_source_io.posts in
+      let policy_io = store.sub_boards_source_io in
+      let diagnostics failures = List.map (fun failure -> Posts_guard_diagnostic failure) failures in
+      let guard_refused ~target failure cleanup =
+        let trace = diagnostics (failure :: cleanup) in
+        let cause = Posts_transaction_failed failure.Fs_compat.guard_error in
+        if target && contradicts_observation failure.guard_error then refused store cause trace
+        else retain_trace store trace;
+        not_written cause trace in
+      try
+        let result = match posts_io, policy_io with
+          | None, None -> Fs_compat.append_private_jsonl_durable_locked_at_snapshot_with_dependency_result
+              observation.source_path ~expected:observation.snapshot
+              ~dependency_path:policy.policy_path ~dependency:policy.policy_snapshot suffix
+          | Some _, None | None, Some _ | Some _, Some _ ->
+            Fs_compat.append_private_jsonl_durable_locked_at_snapshot_with_dependency_with_io_for_testing
+              ?io:posts_io ?dependency_io:policy_io
+              observation.source_path ~expected:observation.snapshot
+              ~dependency_path:policy.policy_path ~dependency:policy.policy_snapshot suffix in
+        match result with
+        | Fs_compat.Guard_refused failure -> ordinary (guard_refused ~target:true failure [])
+        | Fs_compat.Guard_executed {
+            value = Fs_compat.Guard_refused failure; cleanup_failures } ->
+          Creation_policy_refused { failure;
+            outcome = guard_refused ~target:false failure cleanup_failures }
+        | Fs_compat.Guard_executed {
+            value = Fs_compat.Guard_executed { value; cleanup_failures = policy_cleanup };
+            cleanup_failures = posts_cleanup } ->
+          ordinary (classify_write store ~pre_write:observation ~kind:Append_write
+            ~workspace_observation:observation.workspace_observation ~bytes
+            ~diagnostics:(diagnostics (policy_cleanup @ posts_cleanup)) value)
+      with exception_ ->
+        ordinary (write_raised store ~pre_write:observation ~kind:Append_write ~bytes
+          ~diagnostics:[] exception_ (Printexc.get_raw_backtrace ()))
 
 type snapshot = { expected : (posts_source_observation, posts_source_failure) result; bytes : string }
 

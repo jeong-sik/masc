@@ -985,17 +985,26 @@ let create_post_with_audience_internal
       | Ok post ->
         let creation = { post; audience; unresolved } in
         with_persist_lock_internal ~defer_settlement store (fun () ->
-          (* Runtime sub-board mutations share this persistence lock. Check
-             their current policy before append; no policy rejection follows
-             a successful append. The state lock is released for I/O. *)
+          (* Capture canonical policy authority before IO. Scoped creation
+             retains Posts -> Policy locks through the append; same-store
+             persistence alone cannot serialize another store's policy write. *)
           match
             with_lock store (fun () ->
-              validate_sub_board_post_policy_unlocked store ~author_id ~hearth)
+              Board_policy_admission.capture store ~author_id ~hearth)
           with
           | Error _ as error -> error
-          | Ok () ->
+          | Ok policy ->
             phase := Append_started;
-            match append_post store post with
+            let outcome = match policy with
+              | None -> append_post store post
+              | Some policy ->
+                (match Board_posts_source.append_creation_with_policy store ~policy post with
+                 | Board_posts_source.Creation_append_outcome outcome -> outcome
+                 | Board_posts_source.Creation_policy_refused { failure; outcome } ->
+                   phase := Before_append;
+                   Board_sub_boards_source.observe_guard_refusal store policy failure;
+                   outcome) in
+            match outcome with
             | (Posts_not_written _ as outcome) ->
               phase := Before_append;
               finish_posts_write outcome |> Result.map (fun () -> creation)

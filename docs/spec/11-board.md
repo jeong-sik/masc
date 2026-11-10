@@ -356,6 +356,14 @@ POST 요청은 `with_tool_auth` (`tool_name: "board_sub_board_create"`)로 인�
 
 게시글의 `hearth`가 SubBoard slug와 일치하면 SubBoard 게시로 간주하고 위 접근 정책을 적용한다. 일치하는 SubBoard가 없는 hearth는 기존 topic hearth로 동작한다.
 
+게시글 생성은 캐시의 사전 검사 뒤 정확한 Policy 원본 snapshot에서 작성자 권한을
+다시 확인한다. 미등록 slug도 그 부재를 확인한 snapshot이 필요하다. Posts → Policy
+순서로 잠금을 잡고 실제 append가 끝날 때까지 유지하며, Posts 잠금을 다시 잡지 않는다.
+Policy guard가 거절하면 글과 모델을 바꾸지 않고 해당 정책 원본의 권위를 갱신한다.
+저장 성공 뒤 정리 실패는 실제 저장 영수증과 모델 반영을 보존한 뒤 전달한다.
+hearth가 없는 글은 Policy 원본에 의존하지 않는다. 기존 글의 pin·close·reopen은
+게시글 생성 정책과 별개의 작업이다. 댓글의 부모·정책 검사는 2.3절을 따른다.
+
 ### 11.4 영속성 (Persistence)
 
 JSONL 백엔드: `.masc/board_sub_boards.jsonl`. 각 줄은 `sub_board_to_yojson`의 현재 필드를 정확히 모두 포함하며, unknown/duplicate/missing field와 타입 불일치는 거부한다. `members`는 owner를 첫 원소로 정확히 한 번 포함하며 모든 원소가 canonical agent ID여야 한다. 저장 레코드의 `post_count`는 `0`이고, API view의 count는 현재 post store에서 slug/hearth 매칭으로 파생한다. 생성은 정책 원본에 추가하고 수정은 재기록한다. 삭제는 4.2절의 durable 결정과 게시글·정책 저장을 함께 소유한다.

@@ -1681,17 +1681,16 @@ let test_operator_snapshot_default_route_exposes_provenance () =
 
 let test_operator_digest_default_route_exposes_provenance () =
   with_test_env @@ fun ~env ~sw ~config ->
+  let module Owner = Server_dashboard_operator_digest_observation in
+  ignore (Workspace.init config ~agent_name:None);
   let state =
     Lib.Mcp_server_eio.For_testing.create_state ~base_path:config.base_path ()
   in
-  let seed =
-    `Assoc
-      [ "health", `String "ok"
-      ; "generated_at", `String "2026-05-15T00:00:01Z"
-      ]
-  in
-  with_cached_surface_success (Server_dashboard_http_core_operator.operator_digest_cache ~state) seed
-  @@ fun () ->
+  let owner = Owner.owner_for_scope ~state (Lib.Mcp_server.workspace_scope state) in
+  check bool "cold Digest has no terminal source answer" false (Owner.has_terminal_answer owner);
+  let completions = ref 0 in
+  let unsubscribe = Owner.subscribe_completed owner (fun _ -> incr completions) in
+  Fun.protect ~finally:unsubscribe @@ fun () ->
   match
     Server_dashboard_http_core.operator_digest_http_json
       ~state
@@ -1701,12 +1700,17 @@ let test_operator_digest_default_route_exposes_provenance () =
   with
   | Error _ -> Alcotest.fail "operator digest default route returned error"
   | Ok json ->
+    let publication = Owner.publication owner in
     let open Yojson.Safe.Util in
+    check bool "actual default read installed its source answer" true
+      (Owner.has_terminal_answer owner);
+    check int "cold HTTP completes one actual source read" 1 !completions;
     check string "surface" "/api/v1/operator/digest"
       (json |> member "dashboard_surface" |> to_string);
     check string "source" "operator_digest_read_model"
       (json |> member "source" |> to_string);
-    check string "generated_at_iso" "2026-05-15T00:00:01Z"
+    check string "generated_at_iso follows the admitted source observation"
+      (publication.source.json |> member "projection_diagnostics" |> member "generated_at" |> to_string)
       (json |> member "generated_at_iso" |> to_string);
     check string "retention scope" "operator_digest"
       (json |> member "retention" |> member "scope" |> to_string);
@@ -1717,7 +1721,17 @@ let test_operator_digest_default_route_exposes_provenance () =
     check bool "query default namespace" true
       (json |> member "query" |> member "default_namespace_request" |> to_bool);
     check string "cache state" "fresh"
-      (json |> member "projection_diagnostics" |> member "cache_state" |> to_string)
+      (json |> member "projection_diagnostics" |> member "cache_state" |> to_string);
+    (match Server_dashboard_http_core.operator_digest_http_json ~state ~sw
+        ~clock:(Eio.Stdenv.clock env) (request "/api/v1/operator/digest") with
+     | Error _ -> fail "retained default Digest returned error"
+     | Ok next ->
+         check int "retained HTTP does not reread the source" 1 !completions;
+         check bool "repeat retains the original source observation" true
+           ((Owner.publication owner).source == publication.source);
+         check string "repeat retains the admitted source timestamp"
+           (json |> member "generated_at_iso" |> to_string)
+           (next |> member "generated_at_iso" |> to_string))
 
 let test_dashboard_shell_timeout_fallback_reports_timing_context () =
   with_test_env @@ fun ~env:_ ~sw:_ ~config ->
@@ -4852,14 +4866,40 @@ let test_cached_dashboard_reads_send_the_kept_bytes () =
       [ "/api/v1/dashboard/planning"
       ; "/api/v1/dashboard/goals"
       ; "/api/v1/dashboard/goals/detail?goal_id=goal-absent"
-      ; "/api/v1/dashboard/briefing"
       ; "/api/v1/dashboard/briefing/sections"
       ; "/api/v1/dashboard/tool-quality?window_hours=1"
       ; "/api/v1/dashboard/eval-feed"
       ; "/api/v1/keepers/fixture-keeper/tool-stats"
       ; "/api/v1/workspace/tree"
       ; "/api/v1/workspace/children?path=fixture-dir"
-      ])
+      ];
+    (* Mission's captured owner/private query cache retains JSON rather than
+       a second encoded route page. Its actual authenticated HTTP reads must
+       still retain the observed body and validator without installing their
+       actor-local rows into the default workspace publication. *)
+    let module Mission = Server_dashboard_mission_observation in
+    let owner = Mission.owner_for_scope ~state (Lib.Mcp_server.workspace_scope state) in
+    let original = Mission.publication owner in
+    let prepared = ref 0 in
+    let (first_status, first_headers, first_body),
+        (second_status, second_headers, second_body) =
+      Dashboard_cache.For_testing.with_payload_prepared_hook
+        (fun _ -> incr prepared)
+        (fun () ->
+          let read () = tools_h1_wire_response ~router ~headers:authorized
+              "/api/v1/dashboard/briefing" in
+          let first = read () in first, read ()) in
+    check int "Mission answers" 200 first_status;
+    check int "Mission answers again" 200 second_status;
+    check int "Mission reads do not construct another encoded route cache" 0 !prepared;
+    check string "Mission retains its observed response bytes" first_body second_body;
+    check (option string) "Mission retains its validator"
+      (List.assoc_opt "etag" first_headers) (List.assoc_opt "etag" second_headers);
+    check string "Mission HTTP retains its captured workspace instance"
+      (Server_observer_scope.instance_id (Lib.Mcp_server.workspace_scope state))
+      Yojson.Safe.Util.(Yojson.Safe.from_string first_body |> member "observer_instance_id" |> to_string);
+    check bool "actor-local reads leave canonical source rows untouched" true
+      ((Mission.publication owner).source == original.source))
 
 (* Exact parsed queries must own distinct cached responses. Exercise the real
    router and response cache, including the echoed query and retained rows. *)

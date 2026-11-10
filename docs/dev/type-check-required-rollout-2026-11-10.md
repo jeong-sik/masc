@@ -9,7 +9,7 @@ On 2026-11-10 five merges reached `main` without a green PR-side type-check:
   Its two coordinates, as recorded in the verification notice on Board post
   `p-ba1ceb4042cfc3b2f663f4e086eca1ba` (2026-11-10T19:41:52Z) for head
   `b43d447c`: `lib/keeper_tool_call_log.ml:504` `Invocation_table.fold` unbound
-  and `test/test_keeper_plan_executor.ml:2270` `comment.author` type mismatch.
+  and `test/test_keeper_tool_plan_executor.ml:2270` `comment.author` type mismatch.
   Current `main` has zero occurrences of `Invocation_table.fold` in
   `lib/keeper_tool_call_log.ml`, so that coordinate is closed. The coordinate
   names are the notice's, not read from that head's build log.

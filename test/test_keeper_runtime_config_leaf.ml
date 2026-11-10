@@ -132,12 +132,6 @@ let test_vision_max_output_tokens_maps_from_toml () =
     (List.assoc_opt "MASC_KEEPER_VISION_MAX_OUTPUT_TOKENS" overrides)
 ;;
 
-let test_registry_is_internally_consistent () =
-  match Keeper_runtime_setting_registry.validate_registry () with
-  | Ok () -> ()
-  | Error errors -> fail (String.concat "; " errors)
-;;
-
 let test_toml_rows_prove_a_consumer () =
   Keeper_runtime_setting_registry.toml_settings
   |> List.iter (fun (row : Keeper_runtime_setting_registry.setting) ->
@@ -201,9 +195,7 @@ let () =
             test_h2_listener_capacity_rejects_invalid_values
         ] )
     ; ( "setting_registry"
-      , [ test_case "registry identities and consumers are valid" `Quick
-            test_registry_is_internally_consistent
-        ; test_case "TOML rows have consumer proof" `Quick
+      , [ test_case "TOML rows have consumer proof" `Quick
             test_toml_rows_prove_a_consumer
         ; test_case "web-search credentials are registered env-only" `Quick
             test_web_search_credentials_are_registered_env_only

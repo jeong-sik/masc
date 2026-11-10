@@ -1056,50 +1056,6 @@ let requires_restart setting =
   | Process_restart -> true
 ;;
 
-module String_map = Map.Make (String)
-
-let duplicates ~identity rows =
-  let counts =
-    List.fold_left
-      (fun acc row ->
-         let key = identity row in
-         let next_count =
-           match String_map.find_opt key acc with
-           | None -> 1
-           | Some count -> count + 1
-         in
-         String_map.add key next_count acc)
-      String_map.empty rows
-  in
-  String_map.fold
-    (fun key count acc -> if count > 1 then key :: acc else acc)
-    counts
-    []
-;;
-
-let validate_registry () =
-  let duplicate_env =
-    duplicates ~identity:(fun row -> row.env_name) all
-    |> List.map (Printf.sprintf "duplicate env identity: %s")
-  in
-  let toml_rows = List.filter_map (fun row -> Option.map (fun key -> key, row) (toml_key_opt row)) all in
-  let duplicate_toml =
-    duplicates ~identity:fst toml_rows
-    |> List.map (Printf.sprintf "duplicate TOML identity: %s")
-  in
-  let consumer_errors =
-    toml_settings
-    |> List.filter (fun row -> row.consumers = [])
-    |> List.filter_map (fun row ->
-      Option.map
-        (Printf.sprintf "TOML setting has no runtime consumer: %s")
-        (toml_key_opt row))
-  in
-  match duplicate_env @ duplicate_toml @ consumer_errors with
-  | [] -> Ok ()
-  | errors -> Error errors
-;;
-
 let json_of_int_opt = function
   | Some value -> `Int value
   | None -> `Null

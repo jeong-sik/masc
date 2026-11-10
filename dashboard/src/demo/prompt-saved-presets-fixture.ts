@@ -11,6 +11,7 @@ import '../styles/tokens.css'
 // The isolated preset adapter has no execution endpoint. This explicit fixture
 // authority is only a client ownership scope, not live workspace verification.
 hydrateExecutionSnapshot({ execution_publication_epoch: 'copied-presets-fixture', execution_publication_generation: 1,
+  projection_diagnostics: { read_completeness: 'complete', read_error: null },
   status: { workspace_root: '/fixture/copied-presets' } })
 render(html`<main class="mx-auto max-w-4xl p-6">
   <h1 class="mb-2 text-lg font-semibold">저장 프리셋 · 후보 API 실측</h1>

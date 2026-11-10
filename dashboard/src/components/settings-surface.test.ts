@@ -14,7 +14,7 @@ let settingsEpoch = 0
 function workspace(name: string | null) {
   const epoch = `settings-owner-${++settingsEpoch}`
   invalidateExecutionSnapshotGeneration(epoch, 0)
-  if (name !== null) hydrateExecutionSnapshot({ execution_publication_epoch: epoch, execution_publication_generation: 1,
+  if (name !== null) hydrateExecutionSnapshot({ projection_diagnostics: { read_completeness: 'complete', read_error: null }, execution_publication_epoch: epoch, execution_publication_generation: 1,
     status: { project: name, workspace_root: `/fixture/${name}` },
   } as Parameters<typeof hydrateExecutionSnapshot>[0])
   return executionWorkspaceAuthority.peek()
@@ -535,7 +535,7 @@ describe('SettingsSurface', () => {
   beforeEach(() => {
     const epoch = `settings-snapshot-${++settingsSnapshotEpoch}`
     invalidateExecutionSnapshotGeneration(epoch, 0)
-    hydrateExecutionSnapshot({ execution_publication_epoch: epoch, execution_publication_generation: 1,
+    hydrateExecutionSnapshot({ projection_diagnostics: { read_completeness: 'complete', read_error: null }, execution_publication_epoch: epoch, execution_publication_generation: 1,
       status: { project: 'fixture', workspace_root: '/settings/fixture' },
     } as Parameters<typeof hydrateExecutionSnapshot>[0])
     modelSetupResumeState.value = { kind: 'idle' }
@@ -2477,7 +2477,7 @@ describe('SettingsSurface', () => {
     function accept(name: string) {
       const epoch = `settings-refresh-${name}`
       invalidateExecutionSnapshotGeneration(epoch, 0)
-      hydrateExecutionSnapshot({ execution_publication_epoch: epoch, execution_publication_generation: 1,
+      hydrateExecutionSnapshot({ projection_diagnostics: { read_completeness: 'complete', read_error: null }, execution_publication_epoch: epoch, execution_publication_generation: 1,
         status: { project: name, workspace_root: `/settings/${name}` },
       } as Parameters<typeof hydrateExecutionSnapshot>[0])
     }
@@ -2537,7 +2537,7 @@ describe('SettingsSurface', () => {
     resetExactLaneActivitySessionsForTesting()
     resetRuntimeTomlSessionsForTesting()
     invalidateExecutionSnapshotGeneration(epoch, 0)
-    hydrateExecutionSnapshot({ execution_publication_epoch: epoch,
+    hydrateExecutionSnapshot({ projection_diagnostics: { read_completeness: 'complete', read_error: null }, execution_publication_epoch: epoch,
       execution_publication_generation: 1, status: { project: 'test', workspace_root: '/settings-late-save' },
     } as Parameters<typeof hydrateExecutionSnapshot>[0])
     const lanes = vi.spyOn(dashboardApi, 'fetchStandaloneLanes').mockResolvedValue(
@@ -2618,7 +2618,7 @@ describe('SettingsSurface', () => {
   it('opens the live runtime.toml editor from runtime management', async () => {
     resetRuntimeTomlSessionsForTesting()
     invalidateExecutionSnapshotGeneration('settings-open-editor', 0)
-    hydrateExecutionSnapshot({ execution_publication_epoch: 'settings-open-editor',
+    hydrateExecutionSnapshot({ projection_diagnostics: { read_completeness: 'complete', read_error: null }, execution_publication_epoch: 'settings-open-editor',
       execution_publication_generation: 1, status: { project: 'test', workspace_root: '/settings-open-editor' },
     } as Parameters<typeof hydrateExecutionSnapshot>[0])
     const lanes = vi.spyOn(dashboardApi, 'fetchStandaloneLanes').mockResolvedValue(

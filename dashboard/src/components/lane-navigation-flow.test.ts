@@ -41,7 +41,7 @@ function serveExactRuns(runs: ExactLaneRunSummary[], pageSize = Number.POSITIVE_
 beforeEach(() => {
   resetLaneDeclarationSessionsForTesting(); resetLanePackageActivitiesForTesting()
   invalidateExecutionSnapshotGeneration('f7-filter-audit', 0)
-  hydrateExecutionSnapshot({ execution_publication_epoch: 'f7-filter-audit', execution_publication_generation: 1,
+  hydrateExecutionSnapshot({ projection_diagnostics: { read_completeness: 'complete', read_error: null }, execution_publication_epoch: 'f7-filter-audit', execution_publication_generation: 1,
     status: { project: 'fixture', workspace_root: '/fixture/navigation' } } as Parameters<typeof hydrateExecutionSnapshot>[0])
   serveExactRuns([
     { runId: 'curator-run', runKind: 'exact_output', lane: 'workspace_curator_exact', subjectId: null,

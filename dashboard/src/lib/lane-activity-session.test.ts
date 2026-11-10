@@ -45,7 +45,7 @@ type SaveOptions = { beforeDispatch?: () => void; expectedSourcePath: string }
 
 let stored = base, epoch = 0, generation = 0
 function workspace(root: string): ExecutionWorkspaceAuthority {
-  hydrateExecutionSnapshot({ execution_publication_epoch: `lane-activity-${epoch}`, execution_publication_generation: ++generation,
+  hydrateExecutionSnapshot({ projection_diagnostics: { read_completeness: 'complete', read_error: null }, execution_publication_epoch: `lane-activity-${epoch}`, execution_publication_generation: ++generation,
     status: { project: 'fixture', workspace_root: root } } as Parameters<typeof hydrateExecutionSnapshot>[0])
   return executionWorkspaceAuthority.peek()!
 }

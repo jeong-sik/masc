@@ -40,6 +40,7 @@ let fixtureWorkspaceRoot: string | null = '/fixture/keeper-items'
 window.updateKeeperItemsWorkspaceFixture = (workspaceRoot = fixtureWorkspaceRoot) => {
   fixtureWorkspaceRoot = workspaceRoot
   const snapshot = {
+    projection_diagnostics: { read_completeness: 'complete', read_error: null },
     execution_publication_epoch: 'keeper-items-browser-fixture',
     execution_publication_generation: ++fixturePublicationGeneration,
     status: { ...(workspaceRoot === null ? {} : { workspace_root: workspaceRoot }), project: 'keeper-items-fixture' },

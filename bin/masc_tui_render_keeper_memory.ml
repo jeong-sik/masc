@@ -179,7 +179,7 @@ let changes_lines (state : Masc_tui_types.state) ~cols ~max_lines ~now ~keeper_n
             (event_cells ~selected:(i = 0) ~ko ~now ~cols:cells event) in
           if i = 0 then Theme.selection ^ row ^ Ansi.reset else row) shown
       @ [quiet (Printf.sprintf "%d–%d / %d · Enter %s" (offset + 1) (offset + List.length shown) total
-          (text "전문  ·  … [.] 형성 트리" "full reading  ·  … [.] formation tree"))] in
+          (text "전문  ·  [.] 변화 카드 · Ctrl-O 연결 트리" "full text  ·  [.] change cards · Ctrl-O connected tree"))] in
   let height = max 0 (min (total + 4) (max_lines - 1 - List.length notes - List.length scope)) in
   let style : Card.style = {edge=Theme.recede ();title_style=Theme.info ();reset=Ansi.reset} in
   let body = Card.render ~rounded:true ~style ~width:(max 1 (cols - 4)) ~height
@@ -213,15 +213,28 @@ let change_reading (state : Masc_tui_types.state) ~keeper_name =
     Some (Masc_tui_detail_reading.create ~ko
       ~title:(text "기억 변화 · " "Memory change · " ^ kind_word ~ko event.kind) sections)
 
-let change_diagram (state : Masc_tui_types.state) ~keeper_name =
+let change_chart (state : Masc_tui_types.state) ~keeper_name =
   match selected_event state keeper_name, activity_view state keeper_name with
   | Some event, (Fetched.Ready activity | Fetched.Stale (activity, _)) ->
       let notes = match activity_view state keeper_name with
         | Fetched.Stale (_, reason) -> ("Last observation: " ^ reason) :: activity.notes
         | Fetched.Ready _ | Fetched.Absent | Fetched.Loading | Fetched.Failed _ -> activity.notes in
       Masc_tui_memory_lineage.select ~event_id:event.identity {activity with notes}
-      |> Option.map (fun chart -> Masc_tui_image_preview.mermaid
-          ~name:((if state.ui_language = Masc_tui_types.Lang_ko then "기억 형성 · " else "Memory formation · ") ^ keeper_name)
-          (Masc_tui_memory_lineage.mermaid ~ko:(state.ui_language = Masc_tui_types.Lang_ko) chart))
   | (Some _ | None), (Fetched.Absent | Fetched.Loading | Fetched.Failed _)
   | None, (Fetched.Ready _ | Fetched.Stale _) -> None
+
+let change_diagram (state : Masc_tui_types.state) ~keeper_name =
+  let ko = state.ui_language = Masc_tui_types.Lang_ko in
+  change_chart state ~keeper_name |> Option.map (fun chart ->
+    Masc_tui_image_preview.mermaid
+      ~name:((if ko then "기억 형성 · " else "Memory formation · ") ^ keeper_name)
+      (Masc_tui_memory_lineage.mermaid ~ko chart))
+
+let change_focus_diagram (state : Masc_tui_types.state) ~keeper_name =
+  let ko = state.ui_language = Masc_tui_types.Lang_ko in
+  change_chart state ~keeper_name |> Option.map (fun chart ->
+    let name = (if ko then "기억의 변화 · " else "Memory change · ") ^ keeper_name in
+    match Masc_tui_terminal_palette.snapshot_palette (Masc_tui_terminal_palette.snapshot ()) with
+    | Some palette -> Masc_tui_image_preview.inline_svg ~name
+        (Masc_tui_memory_lineage.transition_svg ~ko ~palette chart)
+    | None -> Masc_tui_image_preview.mermaid ~name (Masc_tui_memory_lineage.transition_mermaid ~ko chart))

@@ -2,7 +2,6 @@ module Message_layout = Masc_tui_message_layout
 module Tui_decode = Masc.Tui_decode
 module Terminal_text = Masc_tui_ansi.Terminal_text
 module Text_block = Masc_tui_text_block
-module Tool_detail = Masc_tui_tool_detail
 
 (* The field is one wider than the longest label ("reviewed:") so every value
    keeps one gap after its colon. *)
@@ -48,28 +47,33 @@ let wrapped ~width tone text = wrapped_indent ~width ~indent:0 tone text
 
 (* A summary sometimes carries a whole JSON value -- a keeper's failed turn
    names its cause that way. Kept inside the sentence it is one long line the
-   terminal wraps mid-token; laid out as the structure it is -- one member
-   per line, nesting indented -- the reader sees the fields instead of the
-   punctuation. Yojson is the arbiter of what is JSON: the value must parse
-   either to the end of the summary or from the first brace to the last when
-   prose follows it. A cause the server previews to a byte prefix does not
-   parse and stays the sentence it arrived in, rather than a half-tree that
-   reads as decided. Answers (text before the value, the rendered document,
-   text after it). *)
+   terminal wraps mid-token; laid out by Yojson's own pretty printer the
+   reader sees the fields instead of the punctuation. The value is evidence,
+   so it is re-laid-out, never re-read: the pretty printer serialises the
+   parsed value, which keeps a string that holds JSON-looking text a string
+   and a string's inner newlines escaped -- unlike the chat document
+   renderer, which unfolds such strings into the tree above them. Yojson is
+   also the arbiter of what is JSON: the value must parse either to the end
+   of the summary or from the first brace to the last when prose follows it.
+   A cause the server previews to a byte prefix does not parse and stays the
+   sentence it arrived in, rather than a half-tree that reads as decided.
+   Answers (text before the value, the pretty-printed value, text after
+   it). *)
 let split_embedded_json (text : string) : (string * string * string) option =
   match String.index_opt text '{' with
   | None -> None
   | Some start ->
       let attempt stop =
         match
-          Tool_detail.document (String.sub text start (stop - start))
+          Yojson.Safe.from_string (String.sub text start (stop - start))
         with
-        | Some document ->
+        | exception Yojson.Json_error _ -> None
+        | (`Assoc _ | `List _) as value ->
             Some
               ( String.sub text 0 start
-              , document
+              , Yojson.Safe.pretty_to_string value
               , String.sub text stop (String.length text - stop) )
-        | None -> None
+        | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Null -> None
       in
       (match attempt (String.length text) with
        | Some split -> Some split
@@ -703,10 +707,9 @@ let timeline ~ko ~width ~goal_id
                   | Some (sentence, document, after) ->
                       wrapped_indent ~width ~indent:4 tone
                         (headline ~subject ~title sentence)
-                      (* The document's own nesting is indentation, so it
-                         keeps it: [preformatted_rows] wraps a long member
-                         without flattening the levels above it, the way the
-                         task history draws the same documents. *)
+                      (* The value's own nesting is indentation, so it keeps
+                         it: [preformatted_rows] wraps a long member without
+                         flattening the levels above it. *)
                       @ (Text_block.preformatted_rows
                            ~max_cells:(max 1 (width - 6)) document
                          |> List.map (fun row ->

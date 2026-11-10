@@ -30,7 +30,7 @@ let test_original_writers_notify_their_store () = fixture (fun config ->
     Masc.Telemetry_eio.track_agent_session_bound config ~agent_id:"source-fixture" ();
     Masc.Tool_usage_log.init ~base_path:config.base_path ();
     Masc.Tool_usage_log.log_call ~on_io_failure:(fun ~site:_ exn -> raise exn)
-      ~tool_name:"source-fixture" ~disposition:Masc.Tool_result.Completed ~caller:None;
+      ~tool_name:"source-fixture" ~disposition:(Masc.Tool_result.Completed ()) ~caller:None;
     let result = Goal_store.append_audit_event config
         (`Assoc ["ts", `Float (Time_compat.now ()); "event", `String "verified"]) in
     check bool "original goal transaction succeeds" true (Result.is_ok result);

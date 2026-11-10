@@ -401,6 +401,8 @@ type contract = private
   ; execution : Keeper_tool_descriptor.execution
   }
 val contract : t -> Node_id.t -> contract option
+(** Registered descriptor targets retain their process-owned canonical object;
+    the plan's declared output override lives in [composable_output] only. *)
 val readonly_for_input : t -> node_id:Node_id.t -> input:Yojson.Safe.t -> bool option
 (** Resolve the exact per-node contract, including distinct export schemas for
     different children. Reuses this plan's original resolved contract without

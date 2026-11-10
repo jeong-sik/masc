@@ -498,6 +498,13 @@ let pending_file_change_evidence_count_for_testing () =
     Invocation_table.length pending_file_change_evidence)
 ;;
 
+let pending_board_action_evidence_for_testing () =
+  with_pending_board_action_lock (fun () ->
+    Invocation_table.clean pending_board_action_evidence;
+    Invocation_table.fold (fun invocation evidence values -> (invocation,evidence)::values)
+      pending_board_action_evidence [])
+;;
+
 let store () = (Atomic.get store_state).store
 
 let store_dir () = Option.map Dated_jsonl.base_dir (store ())

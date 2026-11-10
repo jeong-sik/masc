@@ -1247,7 +1247,13 @@ let contract_for_node descriptors children arguments (node : node) =
        execution=Keeper_tool_descriptor.Ordinary Keeper_tool_descriptor.Concurrent}
   | Some (Descriptor_target _) -> invalid_arg "compiled target cannot own an ordinary descriptor"
   | None -> Option.map (fun (descriptor : Keeper_tool_descriptor.t) ->
-      {target=Descriptor_target descriptor;input_schema=descriptor.input_schema;
+      (* Runtime authority is the original registry object. The copied
+         plan-owned output contract must not cross the handler's physical
+         descriptor check; validation below still uses that declared output. *)
+      let target=match Descriptor_id_map.find_opt descriptor.id registered_by_id with
+        | Some registered -> registered.descriptor
+        | None -> descriptor in
+      {target=Descriptor_target target;input_schema=descriptor.input_schema;
        composable_output=descriptor.composable_output;execution=descriptor.execution})
       (descriptor_for_name descriptors node.tool_name)
 

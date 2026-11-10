@@ -1,19 +1,10 @@
-import { isAbortError } from './lib/async-state'
 import { errorMessageOr } from './lib/format-string'
 import {
   missionSnapshot,
   missionLoading,
   missionError,
-  missionBriefing,
-  missionBriefingLoading,
-  missionBriefingError,
-  clearMissionBriefingPoll,
-  scheduleMissionBriefingPoll,
 } from './mission-signals'
-import {
-  normalizeMission,
-  normalizeMissionBriefing,
-} from './mission-normalizers'
+import { normalizeMission } from './mission-normalizers'
 import type { DashboardMissionResponse } from './types'
 
 let inflightMissionSnapshotRefresh: Promise<void> | null = null
@@ -63,32 +54,4 @@ export async function refreshMissionSnapshot(
     }
   })()
   return inflightMissionSnapshotRefresh
-}
-
-export async function refreshMissionBriefing(
-  force = false,
-  opts?: { signal?: AbortSignal },
-): Promise<void> {
-  missionBriefingLoading.value = true
-  missionBriefingError.value = null
-  try {
-    const { fetchDashboardMissionBriefing } = await import('./api/dashboard-mission')
-    const raw = await fetchDashboardMissionBriefing(force, { signal: opts?.signal })
-    if (opts?.signal?.aborted) return
-    const normalized = normalizeMissionBriefing(raw)
-    missionBriefing.value = normalized
-    if (normalized.refreshing || normalized.status === 'pending') {
-      scheduleMissionBriefingPoll(refreshMissionBriefing)
-    } else {
-      clearMissionBriefingPoll()
-    }
-  } catch (err) {
-    if (isAbortError(err)) return
-    missionBriefingError.value = errorMessageOr(err, 'Failed to load mission briefing')
-    clearMissionBriefingPoll()
-  } finally {
-    if (!opts?.signal?.aborted) {
-      missionBriefingLoading.value = false
-    }
-  }
 }

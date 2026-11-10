@@ -203,8 +203,10 @@ let landed ~path rows =
     let source = rows
       |> List.map (fun segments -> String.concat "" (List.map fst segments))
       |> String.concat "\n" in
+    let prepared = Masc_tui_code_results.prepare_file ~path
+      { Masc.Tui_decode.wfs_content = source; wfs_revision = String.make 64 'a' } in
     Masc_tui_fetched.complete ~equal:String.equal t request
-      (Ok { cfd_body = Code_text source; cfd_revision = String.make 64 'a'; cfd_rows = Array.of_list rows })
+      (Ok { prepared.cpf_document with cfd_rows = Array.of_list rows })
 ;;
 
 let check_names = Alcotest.(check (list string))

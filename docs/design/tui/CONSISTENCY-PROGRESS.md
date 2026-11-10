@@ -335,6 +335,39 @@ checking, candidate execution and installation remain separate. No new screen
 wording, layout or row-order tests were added. The full screen scope remains
 open.
 
+[#50996](https://github.com/jeong-sik/masc/pull/50996) follows the volume
+separation with the five panes' remaining fixed explanations. A matching be3302c2
+server/TUI at 36x20 showed eight wrapped explanation rows, then the count and
+part of the table header, with no tool name on the first page. The other four
+panes similarly put their fixed paragraphs before the observed reading. All
+five now start with their original readings; the catalog keeps its process-wide
+registered count. The existing section key's Help carries the scopes, recorded
+evidence meanings and column legends, including the distinction from a Keeper's
+callable surface and observed calls. Missing
+inventory remains a missing reading, and independent pending/failure/retained
+notices, Skill drafts and the volume child keep their existing owners.
+The committed key reference is the actual generator's complete output from
+source `072796b2`, SHA-256
+`40fe09893eca59360482bdb88e60bfeba7f967f734a4ee66bc47f7a8a85b3a16`.
+`Minimal manual checks` [run 42773110048](https://github.com/jeong-sik/masc/actions/runs/42773110048)
+completed successfully on workflow ref `main`, workflow head
+`fdde0336dd0166103aef3e470f0cacc85ee85c26`, selected source
+`072796b22fe3c289f6c5f476e238d55ecaff6fb8`. The receipt records matching
+server/TUI builds and the three workspace-file suites with zero suite/log exit
+codes; this is not Full CI. Manual native PTY observations of that matching
+server/TUI at 120x36 and 36x20 show all five panes leading with their actual
+readings. The narrow catalog exposes tool names on its first page, and Help
+search finds the relocated legends through its last page. A read-only volume
+report exposes the server's missing-base-image refusal; returning preserves
+catalog rows 10-19/451. Escape returns to Features with its selection intact.
+The observation ledger is
+`artifacts/native-tui-proof-42773110048/manual-coverage-tools.json`; it retains
+startup/key-batching miscues separately from the observations above. Subsequent
+changes add only generated/reference and progress/changelog documentation, not
+executable source. Nonempty Keeper/async/Skill states, induced failure/retained
+recovery, successful volume reclamation, installation and GUI display remain
+unverified. The full 23-surface scope stays open.
+
 ## Operations action-reason reading (#50913)
 
 The f89b3e6f baseline was observed at 120x36 and 36x20 with two actual server
@@ -361,3 +394,26 @@ suites; this is not Full CI. The generated output's SHA-256 is
 Operations interaction, installation, remaining Operations states and the full
 23-surface scope remain open. No new screen wording, layout, row-order or PTY
 assertion tests were added.
+
+## Board title-first reading (#50883)
+
+The Board list leads with each post's title and author. Compact technical IDs
+no longer occupy a list column; the existing exact-reference copy action keeps
+the selected post identity. The list, composer and reader use the same short
+Board heading, without a repeating wall clock or healthy connection badge.
+Exceptional transport, workspace, partial/interrupted/failed reads and event
+loss retain the shared typed notice. The existing header fitter reserves its
+width before the title, including in the composer and reader. Ordinary pending
+reads keep the Board's own indications. When the complete warning cannot fit,
+the existing typed compact state leads instead of clipping a failure word at
+the end of a healthy HTTP prefix. Event loss remains a separate label. Sort,
+hearth, observed counts, retained/failed reads, original timestamps, publication
+receipts and the one-row cursor budget keep their existing owners.
+
+The matching f89b3e6f baseline was observed with stored fixture posts, a comment
+and a multiline draft at 120x36 and 36x20. The draft survived resizing, and its
+explicit publication returned to the list with a published receipt. This
+baseline exposed the ID-first wide list and the clock/HTTP heading in a narrow
+list and composer; it does not execute this source change. Candidate execution
+and installation, remaining Board input states and the full 23-surface scope
+remain open.

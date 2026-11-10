@@ -1,11 +1,11 @@
-type t = Ready | Waiting | Changing | Failing | Off | Not_set_up | Unobserved
+type t = Ready | Configured | Waiting | Changing | Failing | Off | Not_set_up | Unobserved
 
-let all = [ Ready; Waiting; Changing; Failing; Off; Not_set_up; Unobserved ]
+let all = [ Ready; Configured; Waiting; Changing; Failing; Off; Not_set_up; Unobserved ]
 
 (* The marks the rest of the TUI already draws: ● done, ◌ pending, ✗ failed,
    ○ empty. *)
 let mark = function
-  | Ready -> "●"
+  | Ready | Configured -> "●"
   | Waiting -> "◌"
   | Changing -> "◐"
   | Failing -> "✗"
@@ -15,6 +15,7 @@ let mark = function
 let word ?(korean = false) standing =
   match standing with
   | Ready -> if korean then "사용 가능" else "ready"
+  | Configured -> if korean then "설정됨" else "configured"
   | Waiting -> if korean then "대기" else "waiting"
   | Changing -> if korean then "전환 중" else "changing"
   | Failing -> if korean then "실패" else "failing"
@@ -25,7 +26,7 @@ let word ?(korean = false) standing =
 let status : t -> Masc_tui_theme.status = function
   | Ready -> Ok
   | Waiting -> Warn
-  | Changing -> Info
+  | Configured | Changing -> Info
   | Failing -> Bad
   | Off | Not_set_up | Unobserved -> Muted
 
@@ -36,7 +37,7 @@ let colour standing =
 
 let recedes = function
   | Off | Not_set_up | Unobserved -> true
-  | Ready | Waiting | Changing | Failing -> false
+  | Ready | Configured | Waiting | Changing | Failing -> false
 
 let count_items ?(korean = false) standings =
   List.filter_map (fun standing ->

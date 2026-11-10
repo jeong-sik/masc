@@ -49,8 +49,11 @@ val resume : store:Lane_addon_store.t -> label:string ->
     ('final, error) Stdlib.result) ->
   ('final result, error) Stdlib.result
 (** Existing judgments, refusals and commit progress need no live worker.
-    Dispatch_pending first observes the original host Exact record by its
-    configured installation, so a retained terminal can finish while Off.
+    Dispatch_pending first restores a proven terminal publication in the
+    original host Exact record by its configured installation. Confirmed
+    latest-attempt proof can finish the original even when the worker lost
+    its listing or is Off. This recovery invokes no provider or worker RPC;
+    absent/unproven execution remains unresolved and never authorizes submit.
 
     Captured and Admission_wait read the worker first. Only authoritative
     absence leads to admission, and [prepare] runs every pre-send check

@@ -5,12 +5,13 @@ open Tui_decode_fields
 open Result.Syntax
 
 (* The fleet response and the one-Keeper row carry the same schema. *)
-let current_health_schema = "keeper.memory_os.current_health.v12"
+let current_health_schema = "keeper.memory_os.current_health.v13"
 
 type memory_alert_code =
   | Snapshot_read_error
   | Source_snapshot_read_error
   | Librarian_stopped
+  | Librarian_attention_required
   | Librarian_failures
   | Librarian_starvation
   | Vision_ingest_errors
@@ -78,6 +79,7 @@ type memory_librarian_stalled =
 type memory_librarian_health = {
   mlh_state : memory_librarian_pass_end option;
   mlh_admission_wait : Keeper_librarian_pending.worker option;
+  mlh_operator_action_required : bool;
   mlh_measured_at : float option;
   mlh_unread_atom_turns : int option;
   mlh_unread_official_turns : int option;
@@ -189,17 +191,19 @@ type memory_health_snapshot = {
   mhs_warn_alerts : int;
   mhs_error_alerts : int;
   mhs_starving_keepers : int;
+  mhs_librarian_attention_required_keepers : int;
 }
 
 let memory_alert_is_history = function
   | Librarian_failures | Librarian_starvation -> true
-  | Snapshot_read_error | Source_snapshot_read_error | Librarian_stopped
+  | Snapshot_read_error | Source_snapshot_read_error | Librarian_stopped | Librarian_attention_required
   | Vision_ingest_errors -> false
 
 let memory_alert_severity = function
   | Snapshot_read_error
   | Source_snapshot_read_error
   | Librarian_stopped
+  | Librarian_attention_required
   | Librarian_failures
   | Vision_ingest_errors -> `Warn
   | Librarian_starvation -> `Error
@@ -208,6 +212,7 @@ let memory_alert_code_of_wire = function
   | "snapshot_read_error" -> Some Snapshot_read_error
   | "source_snapshot_read_error" -> Some Source_snapshot_read_error
   | "librarian_stopped" -> Some Librarian_stopped
+  | "librarian_attention_required" -> Some Librarian_attention_required
   | "librarian_failures" -> Some Librarian_failures
   | "librarian_starvation" -> Some Librarian_starvation
   | "vision_ingest_errors" -> Some Vision_ingest_errors
@@ -275,6 +280,7 @@ let decode_memory_librarian_health keeper_json =
       ; "detail"
       ; "pending"
       ; "admission_wait"
+      ; "operator_action_required"
       ; "measured_at"
       ; "unread_atom_turns"
       ; "unread_official_turns"
@@ -298,6 +304,16 @@ let decode_memory_librarian_health keeper_json =
        | Keeper_librarian_pending.Worker worker -> Ok (Some worker)
        | Publication _ | Basis_changed _ | Message_floor _ | Local_failure _ ->
          Error "Librarian admission wait must name an original worker request")
+  in
+  let* mlh_operator_action_required = required_bool_field json "operator_action_required" in
+  let durable = Option.bind mlh_state (function
+    | Pass_pending pending -> Some pending
+    | Pass_off | Pass_lane_unconfigured | Pass_drained | Pass_yielded_to_waiting_unit
+    | Pass_not_committed | Pass_stopped _ | Pass_raised _ -> None) in
+  let* () =
+    if mlh_operator_action_required = Keeper_librarian_pending.attention_required
+        ~durable ~admission:mlh_admission_wait then Ok ()
+    else Error "Librarian operator action requirement disagrees with pending observations"
   in
   let* mlh_measured_at = required_nullable_float_field json "measured_at" in
   let* mlh_unread_atom_turns = required_nullable_int_field json "unread_atom_turns" in
@@ -369,6 +385,7 @@ let decode_memory_librarian_health keeper_json =
   Ok
     { mlh_state
     ; mlh_admission_wait
+    ; mlh_operator_action_required
     ; mlh_measured_at
     ; mlh_unread_atom_turns
     ; mlh_unread_official_turns
@@ -629,6 +646,13 @@ let decode_memory_keeper_health json =
   let* alerts_json = required_list_field json "alerts" in
   let* mkh_alerts = decode_list "alerts" decode_memory_alert alerts_json in
   let* () =
+    let attention_alerts = List.fold_left (fun count alert ->
+      if alert.ma_code = Librarian_attention_required then count + 1 else count) 0 mkh_alerts in
+    if attention_alerts = (if mkh_librarian.mlh_operator_action_required then 1 else 0)
+    then Ok ()
+    else Error "Librarian attention alert disagrees with pending observations"
+  in
+  let* () =
     if
       not (String.equal mkh_keeper_id "")
       && Option.fold ~none:true ~some:(fun value -> not (String.equal value "")) mkh_read_error
@@ -709,6 +733,7 @@ let memory_keeper_totals_row (keeper : memory_keeper_health) : Keeper_memory_hea
       (match keeper.mkh_librarian.mlh_state with
        | Some (Pass_lane_unconfigured | Pass_not_committed | Pass_stopped _ | Pass_raised _) -> true
        | Some (Pass_off | Pass_drained | Pass_yielded_to_waiting_unit | Pass_pending _) | None -> false)
+  ; librarian_attention_required = keeper.mkh_librarian.mlh_operator_action_required
   ; alerts =
       List.map
         (fun alert ->
@@ -862,6 +887,7 @@ let decode_memory_health_snapshot json =
       ; "snapshot_read_error_keepers"
       ; "source_snapshot_read_error_keepers"
       ; "librarian_stopped_keepers"
+      ; "librarian_attention_required_keepers"
       ; "librarian_starving_keepers"
       ]
       summary_json
@@ -883,6 +909,9 @@ let decode_memory_health_snapshot json =
   in
   let* librarian_stopped_keepers =
     required_int_field summary_json "librarian_stopped_keepers"
+  in
+  let* mhs_librarian_attention_required_keepers =
+    required_int_field summary_json "librarian_attention_required_keepers"
   in
   let all_totals =
     [ mhs_total_facts
@@ -906,6 +935,7 @@ let decode_memory_health_snapshot json =
     ; snapshot_read_error_keepers
     ; source_snapshot_read_error_keepers
     ; librarian_stopped_keepers
+    ; mhs_librarian_attention_required_keepers
     ; mhs_starving_keepers
     ]
   in
@@ -944,6 +974,7 @@ let decode_memory_health_snapshot json =
     ; snapshot_read_error_keepers
     ; source_snapshot_read_error_keepers
     ; librarian_stopped_keepers
+    ; librarian_attention_required_keepers = mhs_librarian_attention_required_keepers
     ; librarian_starving_keepers = mhs_starving_keepers
     }
   in
@@ -976,6 +1007,7 @@ let decode_memory_health_snapshot json =
     ; mhs_warn_alerts
     ; mhs_error_alerts
     ; mhs_starving_keepers
+    ; mhs_librarian_attention_required_keepers
     }
 
 (* One Keeper's row as [?keeper=] answers it (RFC-0487): the row, a refusal
@@ -1034,6 +1066,8 @@ let fleet_row_order (left : memory_keeper_health) (right : memory_keeper_health)
   | order -> order
 
 let with_keeper_row snapshot ~generated_at ~keeper_id row =
+  if generated_at < snapshot.mhs_generated_at then None
+  else
   let others =
     List.filter
       (fun (keeper : memory_keeper_health) -> not (String.equal keeper.mkh_keeper_id keeper_id))
@@ -1076,4 +1110,5 @@ let with_keeper_row snapshot ~generated_at ~keeper_id row =
       ; mhs_warn_alerts = totals.Keeper_memory_health_totals.warn_alerts
       ; mhs_error_alerts = totals.Keeper_memory_health_totals.error_alerts
       ; mhs_starving_keepers = totals.Keeper_memory_health_totals.librarian_starving_keepers
+      ; mhs_librarian_attention_required_keepers = totals.Keeper_memory_health_totals.librarian_attention_required_keepers
       }

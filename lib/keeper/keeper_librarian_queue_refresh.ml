@@ -130,6 +130,51 @@ let last_admission_wait ~config ~keeper_name =
   Stdlib.Mutex.protect measurements_mu (fun () -> Hashtbl.find_opt admission_waits key)
 ;;
 
+let attention_health_json ~config =
+  let root = Workspace.keepers_runtime_dir config in
+  let durable_count, admission_count, observations =
+    Stdlib.Mutex.protect measurements_mu (fun () ->
+      let durable_names = Hashtbl.fold (fun (directory, keeper) _ names ->
+        if String.equal directory root then keeper :: names else names) measurements [] in
+      let admission_names = Hashtbl.fold (fun (directory, keeper) _ names ->
+        if String.equal directory root then keeper :: names else names) admission_waits [] in
+      let names = List.sort_uniq String.compare (durable_names @ admission_names) in
+      let observations = List.filter_map (fun keeper ->
+        let measured = Hashtbl.find_opt measurements (root, keeper) in
+        let durable = match measured with
+          | Some {last_pass=Pending pending;_} -> Some pending
+          | Some {last_pass=(Off | Lane_unconfigured | Drained | Yielded_to_waiting_unit
+              | Not_committed | Stopped _ | Raised _);_} | None -> None in
+        let admission = Hashtbl.find_opt admission_waits (root, keeper) in
+        if Keeper_librarian_pending.attention_required ~durable ~admission then
+          Some (keeper, measured, durable, admission)
+        else None) names in
+      List.length durable_names, List.length admission_names, observations)
+  in
+  let required = observations <> [] in
+  let reasons = List.map (fun (keeper, _, _, _) ->
+    `String (keeper ^ ":librarian_attention_required")) observations in
+  let rows = List.map (fun (keeper, measured, durable, admission) ->
+    `Assoc ["keeper_id", `String keeper;
+      "durable_measured_at", (match measured with
+        | Some value -> `Float value.measured_at | None -> `Null);
+      "durable_pending", (match durable with
+        | Some pending -> Keeper_librarian_pending.to_json pending | None -> `Null);
+      "admission_wait", (match admission with
+        | Some waiting -> Keeper_librarian_pending.to_json (Keeper_librarian_pending.Worker waiting)
+        | None -> `Null)]) observations in
+  `Assoc ["schema", `String "masc.keeper_memory_attention.v1";
+    "scope", `String "last_completed_pass_observations_in_this_process";
+    "status", `String (if required then "degraded"
+      else if durable_count = 0 && admission_count = 0 then "snapshot_not_ready" else "ok");
+    "operator_action_required", `Bool required;
+    "status_reasons", `List reasons; "operator_action_reasons", `List reasons;
+    "observed_durable_keepers", `Int durable_count;
+    "observed_admission_wait_keepers", `Int admission_count;
+    "attention_required_keepers", `Int (List.length observations);
+    "keepers", `List rows]
+;;
+
 let forget_measurement ~config ~keeper_name =
   Keeper_memory_cleanup.forget ~base_path:config.Workspace.base_path ~keeper_name;
   let key = measurement_key ~config ~keeper_name in

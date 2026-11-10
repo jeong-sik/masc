@@ -152,6 +152,12 @@ val keepalive_keeper_names : Workspace.config -> string list
     rather than the keepalive fiber. *)
 val persistent_agent_names : Workspace.config -> string list
 
+val persistent_agent_names_with_unread :
+  Workspace.config -> string list * Keeper_snapshot_unread.t list
+(** The same persistence scan with its actual metadata read failures. The
+    readable, eligible names keep their original order; missing metadata is
+    absent, while an unread row remains a partial-read obligation. *)
+
 (** Read the keeper meta for [name]. The name is the canonical keeper
     filename component; agent-name aliases are not retried here. Callers
     that accept aliases must normalize explicitly before reading. *)

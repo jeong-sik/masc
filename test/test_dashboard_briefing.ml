@@ -8,7 +8,7 @@ open Alcotest
 
 let () =
   Dashboard_projection_cache.register_operator_snapshot_json
-    { Dashboard_projection_cache.snapshot = Operator_control.snapshot_json };
+    { Dashboard_projection_cache.snapshot = Operator_control.snapshot_read };
   Dashboard_projection_cache.register_operator_digest_observer
     { Dashboard_projection_cache.observe_digest = Operator_control.observe }
 
@@ -806,9 +806,31 @@ let test_current_partial_rows_recover_after_actual_metadata_repair () =
       ignore (Workspace.init config ~agent_name:None);
       ignore (Workspace.bind_session config ~agent_name:"readable-agent" ~capabilities:[] ());
       declare_unbooted_keeper config "readable-declaration";
+      declare_unbooted_keeper config "unread-metadata";
       let broken = Lib.Keeper_types_profile.keeper_meta_path config "unread-metadata" in
       (match Fs_compat.save_file_atomic broken "{" with
        | Ok () -> () | Error detail -> fail detail);
+      let names, unread = Lib.Keeper_meta_store.persistent_agent_names_with_unread config in
+      check (list string) "failed persistent metadata is not an eligible name" [] names;
+      (match unread with
+       | [row] ->
+           check string "persistence scan retains its actual unread Keeper" "unread-metadata" row.name;
+           (match row.reason with
+            | Meta_read_failed _ -> ()
+            | Row_raised detail -> failf "unexpected persistence scan failure: %s" detail)
+       | [] | _ :: _ :: _ -> fail "the actual persistence scan lost its unread metadata");
+      let now = Time_compat.now () in
+      let expires = now +. 60.0 in
+      let confirmation : Operator_pending_confirm.pending_confirm = {
+        confirm_token = "same-read-confirmation"; trace_id = "same-read-trace";
+        actor = "another-operator"; action_type = "keeper_message"; target_type = "keeper";
+        target_id = Some "readable-declaration"; payload = `Assoc [];
+        delegated_tool = "masc_keeper_delegate"; created_at = Masc_domain.iso8601_of_unix_seconds now;
+        expires_at = Some (Masc_domain.iso8601_of_unix_seconds expires)} in
+      (match Operator_pending_confirm.write_pending_confirms config [confirmation] with
+       | Ok () -> () | Error detail -> fail detail);
+      let expires = match Option.bind confirmation.expires_at Masc_domain.parse_iso8601_opt with
+        | Some at -> at | None -> fail "invalid fixture expiry" in
       let mission () = Dashboard_briefing.observe_current ~config ~sw ~clock ~proc_mgr:None () in
       let execution () = Dashboard_execution.observe_current ~config ~sw ~clock ~proc_mgr:None () in
       let assert_partial label (observation : Dashboard_projection_read.observation) =
@@ -821,6 +843,10 @@ let test_current_partial_rows_recover_after_actual_metadata_repair () =
       let partial_mission = mission () and partial_execution = execution () in
       assert_partial "Mission" partial_mission;
       assert_partial "Execution" partial_execution;
+      check (option (float 0.0)) "Mission retains the same actual pending-confirm deadline"
+        (Some expires) partial_mission.next_deadline_unix;
+      check (option (float 0.0)) "Execution retains the same actual pending-confirm deadline"
+        (Some expires) partial_execution.next_deadline_unix;
       check bool "Mission retains its independently readable agent" true
         Yojson.Safe.Util.(partial_mission.json |> member "agent_briefs" |> to_list
           |> List.exists (fun row -> row |> member "agent_name" = `String "readable-agent"));

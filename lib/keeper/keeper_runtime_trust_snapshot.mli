@@ -4,6 +4,13 @@ val snapshot_json :
 val summary_json :
   config:Workspace.config -> meta:Keeper_meta_contract.keeper_meta -> Yojson.Safe.t
 
+val summary_observation :
+  config:Workspace.config -> meta:Keeper_meta_contract.keeper_meta ->
+  Dashboard_projection_read.observation
+(** One actual uncached summary read. Pending approval storage unavailability
+    remains typed [Partial] beside the readable trust fields; other read
+    exceptions propagate. Display-only causal ages create no timer. *)
+
 (** Trust fields for a row built without reading the Keeper, such as the
     dashboard row shown when a Keeper's row could not be built. The row needs
     attention. No receipt was read, so [operator_disposition] and

@@ -22,7 +22,6 @@ val to_string : t -> string
 val equal : t -> t -> bool
 val pp : Format.formatter -> t -> unit
 val rank : t -> int
-val rank_string : string -> int
 val max : t -> t -> t
 val max_string : string -> string -> string
 val requires_operator_action : t -> bool

@@ -1,17 +1,17 @@
 open Alcotest
 
 let test_rank_contract () =
-  check int "blocked" 3 (Health_status.rank_string "blocked");
-  check int "error" 3 (Health_status.rank_string "error");
-  check int "timeout" 3 (Health_status.rank_string "timeout");
-  check int "degraded" 2 (Health_status.rank_string "degraded");
-  check int "stale" 2 (Health_status.rank_string "stale");
-  check int "warning" 2 (Health_status.rank_string "warning");
-  check int "unavailable" 2 (Health_status.rank_string "unavailable");
-  check int "unknown" 2 (Health_status.rank_string "unknown");
-  check int "warming" 1 (Health_status.rank_string "warming");
-  check int "snapshot_not_ready" 1 (Health_status.rank_string "snapshot_not_ready");
-  check int "ok" 0 (Health_status.rank_string "ok")
+  check int "blocked" 3 Health_status.(rank (of_string "blocked"));
+  check int "error" 3 Health_status.(rank (of_string "error"));
+  check int "timeout" 3 Health_status.(rank (of_string "timeout"));
+  check int "degraded" 2 Health_status.(rank (of_string "degraded"));
+  check int "stale" 2 Health_status.(rank (of_string "stale"));
+  check int "warning" 2 Health_status.(rank (of_string "warning"));
+  check int "unavailable" 2 Health_status.(rank (of_string "unavailable"));
+  check int "unknown" 2 Health_status.(rank (of_string "unknown"));
+  check int "warming" 1 Health_status.(rank (of_string "warming"));
+  check int "snapshot_not_ready" 1 Health_status.(rank (of_string "snapshot_not_ready"));
+  check int "ok" 0 Health_status.(rank (of_string "ok"))
 
 let test_dashboard_compat_uses_health_status_ssot () =
   let blocked = Dashboard_utils.health_level_of_string "blocked" in

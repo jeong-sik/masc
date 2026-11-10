@@ -343,6 +343,8 @@ val retain_checkpoint_batch_result :
   ((Keeper_event_queue_state.pending_selection * string) list, string) result
 (** Retain the exact checkpoint batch and rotate it in one snapshot
     transaction. Connector conversations move with their unadmitted pending
-    suffix in FIFO order. Publish only after durable confirmation; per-source
-    failures remain explicit while independent valid work still progresses. *)
+    suffix in FIFO order. Withdrawn selections are skipped under the owner
+    lock without restoring their sources. Publish only after durable
+    confirmation; changed selections remain explicit failures while
+    independent valid work still progresses. *)
 

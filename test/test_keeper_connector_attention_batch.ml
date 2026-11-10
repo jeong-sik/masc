@@ -500,6 +500,8 @@ let test_scheduled_continuation_withdrawal_and_reinsertion () =
       ~base_path keeper_name ~applied_at:20. ~schedule_ids:["schedule-batch"]
       ~reason:"owned fixture cancellation" |> require in
     check int "cancellation withdraws the retained occurrence" 1 cancelled;
+    Keeper_heartbeat_loop.For_testing.retain_checkpoint_continuations
+      ~base_path ~keeper_name (Batch.selections captured) |> require;
     Keeper_event_queue_persistence.For_testing.reset_snapshot_cache_for_testing ();
     check int "cold intake does not resurrect cancelled work" 0
       (Batch.count (intake ()).source_batch);
@@ -520,6 +522,10 @@ let test_scheduled_continuation_withdrawal_and_reinsertion () =
        check string "replacement strictly rejects old incarnation authority"
          "event queue pending selection incarnation changed" detail
      | Ok _ -> fail "reinserted source accepted old incarnation authority");
+    (match Keeper_heartbeat_loop.For_testing.retain_checkpoint_continuations
+        ~base_path ~keeper_name (Batch.selections captured) with
+     | Error _ -> ()
+     | Ok () -> fail "checkpoint retention accepted the replaced incarnation");
     Keeper_event_queue_persistence.For_testing.reset_snapshot_cache_for_testing ();
     let current = Keeper_registry_event_queue.pending_selections_result
       ~base_path keeper_name |> require in
@@ -531,6 +537,47 @@ let test_scheduled_continuation_withdrawal_and_reinsertion () =
     let admitted, withdrawn = validate replacement |> require in
     check bool "current replacement retains dispatch authority" true
       (Batch.selections admitted = current && withdrawn = []))
+;;
+
+let test_checkpoint_after_schedule_supersession_preserves_live_sources () =
+  with_ctx "schedule-superseded-checkpoint" (fun ~base_path ~keeper_name ~meta ~ctx ->
+    let module Batch = Keeper_heartbeat_source_batch in
+    let module Persistence = Keeper_event_queue_persistence in
+    let require = function Ok value -> value | Error detail -> fail detail in
+    let original = scheduled_wake_stimulus ~occurrence:1 ~arrived_at:1. in
+    let result : Q.stimulus =
+      { post_id = "live-result"; urgency = Q.Immediate; arrived_at = 2.
+      ; payload = Q.Delegate_completed
+          { dc_operation_id = "live-result"; dc_keeper = "delegate"
+          ; dc_terminal = Q.Delegate_replied "uncompleted result" } } in
+    List.iter (enqueue_exn ~base_path keeper_name) [original; result];
+    let captured = Keeper_heartbeat_stimulus_intake.heartbeat_event_intake
+      ~ctx ~meta_after_triage:meta ~pending_board_events:[] in
+    let admitted = Batch.selections captured.source_batch in
+    check int "the running turn admitted the old schedule and live result" 2
+      (List.length admitted);
+    let cancelled = Keeper_registry_event_queue.cancel_scheduled_wakes_result
+      ~base_path keeper_name ~applied_at:3. ~schedule_ids:["schedule-batch"]
+      ~reason:"superseded by the next occurrence" |> require in
+    check int "the next occurrence withdraws the running schedule source" 1 cancelled;
+    let successor = scheduled_wake_stimulus ~occurrence:2 ~arrived_at:4. in
+    enqueue_exn ~base_path keeper_name successor;
+    Keeper_heartbeat_loop.For_testing.retain_checkpoint_continuations
+      ~base_path ~keeper_name admitted |> require;
+    Persistence.For_testing.reset_snapshot_cache_for_testing ();
+    let pending = Persistence.pending_selections_result ~base_path ~keeper_name |> require in
+    check (list string) "the successor runs before the retained live result"
+      [successor.post_id; result.post_id]
+      (List.map (fun (s : Keeper_event_queue_state.pending_selection) -> s.source.post_id) pending);
+    List.iter (fun (s : Keeper_event_queue_state.pending_selection) ->
+      let expected = if s.source.post_id = result.post_id then 1 else 0 in
+      check int "only the exact live admitted source counts the checkpoint"
+        expected s.checkpoint_retentions) pending;
+    let next = Keeper_heartbeat_stimulus_intake.heartbeat_event_intake
+      ~ctx ~meta_after_triage:meta ~pending_board_events:[] in
+    check (list string) "next intake retains both obligations without reviving the old schedule"
+      [successor.post_id; result.post_id]
+      (List.map (fun (s : Q.stimulus) -> s.post_id) (Batch.stimuli next.source_batch)))
 ;;
 
 let test_unread_connector_sources_survive_other_completed_work ~failure () =
@@ -1968,6 +2015,8 @@ let () =
     [ ( "all-ready Event Queue intake"
       , [ test_case "scheduled continuation cancellation and reinsertion remain exact" `Quick
             test_scheduled_continuation_withdrawal_and_reinsertion
+        ; test_case "checkpoint survives schedule supersession and preserves live sources" `Quick
+            test_checkpoint_after_schedule_supersession_preserves_live_sources
         ; test_case "checkpoint yields preserve requests until exact settlement" `Quick
             test_checkpoint_retention_preserves_unsettled_sources
         ; test_case "checkpoint retains the entire old conversation in FIFO order" `Quick

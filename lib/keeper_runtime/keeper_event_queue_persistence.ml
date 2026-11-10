@@ -1361,9 +1361,13 @@ let retain_checkpoint_batch_result
     ~base_path ~keeper_name ~after_commit (fun state ->
       let state, retained, failures = List.fold_left
         (fun (current, retained, failures) selection ->
-          match State.note_checkpoint_retention ~selection current with
-          | Ok (updated, (selection, _)) -> updated, selection::retained, failures
-          | Error detail -> current, retained, (selection, detail)::failures)
+          match State.admitted_selection_standing ~selection current with
+          | Ok State.Admitted_selection_withdrawn -> current, retained, failures
+          | Error detail -> current, retained, (selection, detail)::failures
+          | Ok State.Admitted_selection_pending ->
+            (match State.note_checkpoint_retention ~selection current with
+             | Ok (updated, (selection, _)) -> updated, selection::retained, failures
+             | Error detail -> current, retained, (selection, detail)::failures))
         (state, [], []) selections in
       let failed_channels = List.filter_map (fun (selection, _) ->
         Keeper_event_queue.connector_attention_channel

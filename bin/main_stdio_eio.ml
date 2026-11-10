@@ -152,6 +152,7 @@ let run_cmd cli_base_path =
       Server_runtime_bootstrap.activate_owner_state
        ~sw
        ~clock
+        ~mono_clock
        ~net
        ~proc_mgr
        initialized

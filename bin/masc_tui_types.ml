@@ -24054,30 +24054,32 @@ let runtime_picker_choice_height = function
   | Pick_route_default | Pick_conversation_lane _ | Pick_new_lane _
   | Pick_media_failover -> 1
 
-(* These observations remain alongside an open picker. The normal table and
-   its probe/default-route chrome do not own the picker's body. Both the page
-   calculation and drawing count the same wrapped diagnostic rows. *)
-let runtime_picker_notice_rows ~cols (state : state) =
-  let catalogue =
-    match state.runtime_catalog_reading with
-    | Runtime_catalog_read -> []
-    | (Runtime_catalog_unread | Runtime_catalog_loading
-      | Runtime_catalog_refreshing _ | Runtime_catalog_stale _
-      | Runtime_catalog_failed _) as reading ->
-        [ runtime_catalog_reading_suffix reading ]
-  in
-  let notices =
-    catalogue
-    @ Option.to_list (Option.map runtime_lane_notice_text state.runtime_lane_notice)
-    @ runtime_lane_stale_lines state
-    @ Option.to_list state.runtime_surface_error
-  in
+(* The picker and the existing routes reader retain the same catalogue
+   observation, including an error after the last good catalogue. *)
+let runtime_picker_catalogue_notices (state : state) =
+  match state.runtime_catalog_reading with
+  | Runtime_catalog_read -> []
+  | (Runtime_catalog_unread | Runtime_catalog_loading
+    | Runtime_catalog_refreshing _ | Runtime_catalog_stale _
+    | Runtime_catalog_failed _) as reading ->
+      [ runtime_catalog_reading_suffix reading ]
+
+(* Count source notices before wrapping: a long first notice must not make
+   the following refusal or read error disappear from the title's count. *)
+let runtime_picker_notices (state : state) =
+  runtime_picker_catalogue_notices state
+  @ Option.to_list (Option.map runtime_lane_notice_text state.runtime_lane_notice)
+  @ runtime_lane_stale_lines state
+  @ Option.to_list state.runtime_surface_error
+
+(* Both the page calculation and drawing count these same wrapped rows. *)
+let runtime_picker_notice_rows ~cols state =
   List.concat_map
     (fun text ->
       Masc_tui_message_layout.boxed_rows
         ~inner:(Masc_tui_frame.inner_width ~cols)
         (Masc.Tui_terminal_text.sanitize_terminal_text ~newlines:Preserve text))
-    notices
+    (runtime_picker_notices state)
 
 let runtime_exact_picker_page (state : state) ~terminal_rows ~cols =
   match state.view, state.slot_editor with

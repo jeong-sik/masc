@@ -11,9 +11,11 @@ picker the surface body. The ordinary probe summary, resolved default route and
 candidate table resume when the picker closes. Its count/filter, candidate page
 and wrapped catalogue/write/read-back diagnostics use the available body rows;
 the frame and page keys share the same page calculation. At the smallest height
-the selected candidate takes the single body row. Diagnostics that exceed the
-remaining rows retain an ellipsis. Their state is preserved and a taller window
-provides additional rows.
+the selected candidate takes the single body row. The title retains the number
+of source notices even when no body row remains for them, and points to the
+existing complete routes/status reading after closing the picker. That reading
+also includes the catalogue observation, so a long first notice cannot hide a
+later failure. Partially displayed body diagnostics carry a leading ellipsis.
 The footer names Enter's actual create, append or replace action and respects
 the filter's ownership of printable keys.
 

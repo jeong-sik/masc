@@ -231,7 +231,9 @@ let runtime_routes_detail_lines state ~width =
     | Some value -> fact ~tone:Page_line.Attention label value
   in
   let notice_and_stale =
-    (match state.runtime_lane_notice with
+    runtime_items ~tone:Page_line.Attention (text "후보 목록 조회" "Catalogue reading")
+      (Masc_tui_types.runtime_picker_catalogue_notices state)
+    @ (match state.runtime_lane_notice with
      | None -> []
      | Some notice ->
          fact ~tone:(runtime_lane_notice_tone notice) (text "작업 결과" "Action result")
@@ -621,7 +623,7 @@ let runtime_picker_choice_rows picker =
            | Pick_new_lane _ -> ())) picker.rlp_choices;
   List.rev !rows
 
-let runtime_picker_title ~ko pick =
+let runtime_picker_title ~ko ~notices pick =
   let lane = Terminal_text.single_line (runtime_lane_pick_name pick) in
   let purpose = match pick with
     | Pick_route_default -> if ko then "기본 경로 선택" else "Choose default route"
@@ -633,7 +635,14 @@ let runtime_picker_title ~ko pick =
     | Pick_exact_lane_replacement _ ->
         Printf.sprintf (if ko then "%s 런타임 교체" else "Replace runtime in %s") lane
   in
-  screen_title (" MASC Runtime / " ^ purpose)
+  let heading = match notices with
+    | [] -> " MASC Runtime / "
+    | _ :: _ ->
+        Printf.sprintf
+          (if ko then "안내 %d개 · 닫고 v · Runtime / " else "%d notices · close, v · Runtime / ")
+          (List.length notices)
+  in
+  screen_title (heading ^ purpose)
 
 let render_runtime_reading (state : state) =
   let terminal_rows, cols = get_terminal_size () in
@@ -1065,13 +1074,14 @@ let render_runtime (state : state) =
   | None -> render_runtime_reading state
   | Some picker ->
       let ko = state.ui_language = Lang_ko in
+      let notices = runtime_picker_notices state in
       let notes = runtime_picker_notice_rows ~cols state in
       let hints =
         Masc_tui_keys.footer_hints_runtime ~mode:state.runtime_mode
           ~picker:(Some picker)
       in
       surface_chrome ~overflow:Fits state ~terminal_rows ~cols
-        ~surface_key:"runtime" ~title:(runtime_picker_title ~ko picker.rlp_pick)
+        ~surface_key:"runtime" ~title:(runtime_picker_title ~ko ~notices picker.rlp_pick)
         ~hints ~body:(fun ~budget c ->
           let choices = runtime_picker_choice_rows picker in
           (* With just one body row the selected candidate takes it. With
@@ -1089,8 +1099,7 @@ let render_runtime (state : state) =
             (fun index row ->
               let row =
                 if count > remaining && index = remaining - 1 then
-                  Message_layout.fit_width row
-                    (max 0 (Masc_tui_frame.inner_width ~cols - 2)) ^ " …"
+                  "… " ^ row
                 else row
               in
               c.push_styled ~style:(Theme.warn ()) row)

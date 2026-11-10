@@ -40,6 +40,17 @@ let max_stage_samples = 4096
    reaches this cap only by changing surface this many times. *)
 let max_surface_runs = 4096
 
+type chat_page_application = {
+  keeper : string;
+  generation : int;
+  page_rows : int;
+  before_rows : int;
+  after_rows : int;
+  draft_preserved : bool;
+  scroll_preserved : bool;
+  pin_preserved : bool;
+}
+
 type ask_owner = Keeper of string | Installation of string
 type ask_identity = {
   owner : ask_owner;
@@ -545,6 +556,31 @@ let active_build_frame = ref None
 let active_home_questions = ref None
 let asks_samples = ref Ask_samples.empty
 let surface_runs = ref Surface_runs.empty
+let chat_page_samples = ref []
+let chat_page_count = ref 0
+
+let note_chat_page_application application =
+  if enabled then begin
+    incr chat_page_count;
+    if !chat_page_count <= max_frames_per_phase then
+      chat_page_samples :=
+        (Mtime_clock.elapsed_ns (), (!samples).Samples.build_count + 1, application)
+        :: !chat_page_samples
+  end
+
+let chat_page_lines () =
+  let rows = List.rev_map (fun (at_ns, before_build, page) ->
+    json_line ["schema",`String "masc.tui.chat_page_application.v1";
+      "at_ns",ns at_ns;"before_build",`Int before_build;
+      "keeper",`String page.keeper;"generation",`Int page.generation;
+      "page_rows",`Int page.page_rows;"before_rows",`Int page.before_rows;
+      "after_rows",`Int page.after_rows;
+      "draft_preserved",`Bool page.draft_preserved;
+      "scroll_preserved",`Bool page.scroll_preserved;
+      "pin_preserved",`Bool page.pin_preserved]) !chat_page_samples in
+  if !chat_page_count <= max_frames_per_phase then rows
+  else rows @ [json_line ["schema",`String "masc.tui.chat_page_omissions.v1";
+    "omitted",`Int (!chat_page_count - max_frames_per_phase)]]
 
 let note_presented ~surface =
   if enabled then surface_runs := Surface_runs.add !surface_runs ~surface
@@ -696,6 +732,7 @@ let report () =
               @ Stage_samples.summary_lines !stage_samples
               @ Stage_samples.residual_lines !stage_samples !samples
               @ Ask_samples.raw_lines !asks_samples
+              @ chat_page_lines ()
               @ Samples.raw_lines ~asks:!asks_samples !samples
               @ Stage_samples.raw_lines !stage_samples
               @ Surface_runs.raw_lines !surface_runs)))

@@ -43,9 +43,6 @@
     HTTP/1 only; the H2 gateway serves only the raw-bytes
     [GET /api/v1/artifact-bytes/<sha256>]. *)
 
-val is_valid_sha256 : string -> bool
-(** Shared exact lowercase SHA-256 validation used by the route guard. *)
-
 val blob_response :
   base_path:string -> sha256:string -> Yojson.Safe.t * Httpun.Status.t
 (** Look up [sha256] in the on-disk blob store

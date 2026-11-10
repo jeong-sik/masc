@@ -1,5 +1,5 @@
 (** The operator's reclamation of retired Keepers' Apple volumes, on the
-    Tools surface's catalog pane.
+    Tools surface's volume reading, opened from the catalog with [V].
 
     [masc_sandbox_volume_gc] needs [CanAdmin]. The TUI calls it with the
     operator's own credential. Neither a Claude session (a worker token) nor a
@@ -19,8 +19,11 @@
     periodic report: when it ran and the candidates it listed. The server
     only reports; deleting stays these two presses.
 
-    The pane draws the answer in place rather than in a reading: a reading
-    owns every key, and closing it would take the second press back. *)
+    This child view retains the two-press protocol rather than using the
+    generic text reader. Esc cancels an armed reclaim and returns to the
+    catalog's captured scroll position. The answer remains available when
+    the volume view is opened again. Opening requests a report unless a
+    request is already in flight; it never reuses a retained armed reclaim. *)
 
 (** ["masc_sandbox_volume_gc"]. *)
 val tool : string

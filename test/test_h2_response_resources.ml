@@ -1,6 +1,7 @@
 open Alcotest
 module Resources = Masc.Http_h2_response_ledger
 module Registry = Server_h2_stream_registry
+module Stream_end = Masc.Http_h2_stream.Stream_end
 
 type lane = {mutable pending:string}
 type response = {status:int; reader:H2.Body.Reader.t; mutable waiting:bool;
@@ -58,15 +59,18 @@ let with_session ~capacity handler test =
     Eio.Time.with_timeout_exn (Eio.Stdenv.clock env) 10.0 (fun () ->
       Eio.Switch.run (fun sw ->
         let resources=Resources.create ~max_pending_bytes:capacity in
-        let registry=Registry.create () in
+        (* The tests end within 10 s, so no flush reaches the 90 s bound. *)
+        let registry=Registry.create ~clock:(Eio.Stdenv.clock env)
+          ~stalled_after_s:Server_mcp_transport_http_headers.sse_stalled_after_s () in
         let responses=Hashtbl.create 4 and errors=ref 0 and resets=ref 0 in
         let server=H2.Server_connection.create
           ~error_handler:(fun ?request:_ _ respond -> H2.Body.Writer.close (respond H2.Headers.empty))
           (fun reqd ->
             let id=int_of_string (H2.Reqd.request reqd).target in
             Registry.dispatch registry ~sw ~stream_id:(id*2-1) reqd
-              (fun stream_sw -> Resources.with_request resources ~sw:stream_sw
-                (fun () -> handler id ~stream_sw reqd))) in
+              (fun stream_end ->
+                Resources.with_request resources ~sw:(Stream_end.switch stream_end)
+                  (fun () -> handler id ~stream_end reqd))) in
         let client=H2.Client_connection.create
           ~config:{H2.Config.default with initial_window_size=65535l}
           ~error_handler:(fun _ -> fail "connection error") () in
@@ -126,7 +130,7 @@ let whole_payload=String.init 131070 (fun n -> Char.chr (97+n mod 26))
 
 let test_whole_response_and_scope_release () =
   let lease_seen=ref None in
-  let handler _ ~stream_sw:_ reqd =
+  let handler _ ~stream_end:_ reqd =
     let lease=Resources.reserve (Resources.current_exn ()) ~bytes:(String.length whole_payload)
       |> Result.get_ok in
     lease_seen:=Some lease;
@@ -173,8 +177,8 @@ module Writer = Masc.Http_reqd.Body_writer
 let test_stream_overflow_resets_and_sibling_progresses () =
   let streams=Hashtbl.create 2 in
   let frame=String.make 8192 'e' in
-  let handler id ~stream_sw reqd =
-    let handle=Masc.Http_reqd.of_h2 ~stream_sw ~ledger:(Resources.current_exn ()) reqd in
+  let handler id ~stream_end reqd =
+    let handle=Masc.Http_reqd.of_h2 ~stream_end ~ledger:(Resources.current_exn ()) reqd in
     let writer=Masc.Http_reqd.respond_with_streaming ~flush_headers_immediately:true handle
       (Httpun.Response.create `OK) in
     Hashtbl.add streams id writer;
@@ -223,10 +227,10 @@ let wait_for_stream_end ended () =
 
 let test_handler_failure_after_headers_ends_the_scope () =
   let ended=ref None in
-  let handler _ ~stream_sw reqd =
+  let handler _ ~stream_end reqd =
     ignore (H2.Reqd.respond_with_streaming ~flush_headers_immediately:true reqd
       (H2.Response.create `OK) : H2.Body.Writer.t);
-    Eio.Fiber.fork ~sw:stream_sw (wait_for_stream_end ended);
+    Eio.Fiber.fork ~sw:(Stream_end.switch stream_end) (wait_for_stream_end ended);
     raise Handler_failed in
   with_session ~capacity:1024 handler (fun _ session ->
     request session 1;
@@ -242,8 +246,8 @@ let test_handler_failure_after_headers_ends_the_scope () =
    the RST_STREAM h2 writes after an answer it opened for an error. *)
 let test_handler_failure_before_headers_keeps_the_error_answer () =
   let ended=ref None in
-  let handler _ ~stream_sw _ =
-    Eio.Fiber.fork ~sw:stream_sw (wait_for_stream_end ended);
+  let handler _ ~stream_end _ =
+    Eio.Fiber.fork ~sw:(Stream_end.switch stream_end) (wait_for_stream_end ended);
     raise Handler_failed in
   with_session ~capacity:1024 handler (fun _ session ->
     request session 1;
@@ -255,9 +259,9 @@ let test_handler_failure_before_headers_keeps_the_error_answer () =
 
 let test_second_report_raises_nothing () =
   let second=ref None in
-  let handler _ ~stream_sw reqd =
+  let handler _ ~stream_end reqd =
     H2.Reqd.report_exn reqd First_report;
-    second:=Some (match Stream.reset ~stream_sw reqd (Stream.Raised Second_report) with
+    second:=Some (match Stream.reset ~stream_sw:(Stream_end.switch stream_end) reqd (Stream.Raised Second_report) with
       | () -> Ok () | exception exn -> Error (Printexc.to_string exn)) in
   with_session ~capacity:1024 handler (fun _ session ->
     request session 1;
@@ -267,16 +271,16 @@ let test_second_report_raises_nothing () =
 
 module Http_reqd = Masc.Http_reqd
 
-let reqd_of ~stream_sw h2_reqd =
-  Http_reqd.of_h2 ~stream_sw ~ledger:(Resources.current_exn ()) h2_reqd
+let reqd_of ~stream_end h2_reqd =
+  Http_reqd.of_h2 ~stream_end ~ledger:(Resources.current_exn ()) h2_reqd
 
 (* h2 answers an error reported before any response, and the stream then
    takes no response of its own. *)
 let test_response_after_a_report_gets_a_closed_writer () =
   let ran=ref false and closed=ref None and ended=ref None in
-  let handler _ ~stream_sw h2_reqd =
+  let handler _ ~stream_end h2_reqd =
     ran:=true;
-    let reqd=reqd_of ~stream_sw h2_reqd in
+    let reqd=reqd_of ~stream_end h2_reqd in
     Http_reqd.report_exn reqd First_report;
     let writer=Http_reqd.respond_with_streaming reqd (Httpun.Response.create `OK) in
     Http_reqd.Body_writer.write_string writer "dropped";
@@ -306,8 +310,8 @@ let test_string_response_after_a_report_is_refused_without_h2 () =
   Console_sink.For_testing.set_writer (Some (fun line -> lines:=line :: !lines));
   Fun.protect ~finally:Console_sink.For_testing.reset (fun () ->
     let accepted=ref None in
-    let handler _ ~stream_sw h2_reqd =
-      let reqd=reqd_of ~stream_sw h2_reqd in
+    let handler _ ~stream_end h2_reqd =
+      let reqd=reqd_of ~stream_end h2_reqd in
       Http_reqd.report_exn reqd First_report;
       accepted:=Some (Http_reqd.try_respond_with_string reqd
         (Httpun.Response.create `OK) "late") in
@@ -327,10 +331,10 @@ let test_string_response_after_a_report_is_refused_without_h2 () =
    the report cut it with RST_STREAM. *)
 let test_response_after_the_scope_failed_gets_a_closed_writer () =
   let ran=ref false and closed=ref None in
-  let handler _ ~stream_sw h2_reqd =
+  let handler _ ~stream_end h2_reqd =
     ran:=true;
-    let reqd=reqd_of ~stream_sw h2_reqd in
-    Eio.Fiber.fork ~sw:stream_sw (fun () -> raise Handler_failed);
+    let reqd=reqd_of ~stream_end h2_reqd in
+    Eio.Fiber.fork ~sw:(Stream_end.switch stream_end) (fun () -> raise Handler_failed);
     let writer=Http_reqd.respond_with_streaming reqd (Httpun.Response.create `OK) in
     closed:=Some (Http_reqd.Body_writer.is_closed writer) in
   with_session ~capacity:1024 handler (fun _ session ->
@@ -344,10 +348,10 @@ let test_response_after_the_scope_failed_gets_a_closed_writer () =
 
 let test_refused_write_ends_the_scope_with_the_refusal () =
   let ended=ref None in
-  let handler _ ~stream_sw h2_reqd =
-    let reqd=reqd_of ~stream_sw h2_reqd in
+  let handler _ ~stream_end h2_reqd =
+    let reqd=reqd_of ~stream_end h2_reqd in
     let writer=Http_reqd.respond_with_streaming reqd (Httpun.Response.create `OK) in
-    Eio.Fiber.fork ~sw:stream_sw (wait_for_stream_end ended);
+    Eio.Fiber.fork ~sw:(Stream_end.switch stream_end) (wait_for_stream_end ended);
     Http_reqd.Body_writer.write_string writer (String.make 64 'x') in
   with_session ~capacity:16 handler (fun _ session ->
     request session 1;

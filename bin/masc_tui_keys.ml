@@ -386,6 +386,12 @@ let tools_refresh =
     ~help:"refresh the open original Task body/history, original request \
            detail, or Tools list"
 
+let tools_volume_gc_binding =
+  b ~ko:"볼륨" Act Masc_tui_volume_gc.key "volumes"
+    ~help:"in All tools, open retired Keeper volumes and request a report; \
+           in that reading, an armed V reclaims only the reported names, \
+           other input disarms, and Esc returns to the catalog position"
+
 (* The views [v] walks, named from the walk itself so the sheet cannot list
    one the key skips. *)
 let keeper_list_view_names =
@@ -517,7 +523,8 @@ let keeper_navigation_hints = "Up/Down:move  Enter:open  Right/Esc:back"
 let tools_bracket_binding ~pane =
   let label = match pane with
     | Tools_surface -> "run"
-    | Tools_async | Tools_activations | Tools_usage | Tools_catalog -> "Keeper"
+    | Tools_async | Tools_activations | Tools_usage
+    | Tools_catalog (Tools_catalog_list | Tools_catalog_volumes _) -> "Keeper"
   in
   b Navigate "[ / ]" label
     ~help:"in Available, older/newer retained original run; in other panes, previous/next Keeper"
@@ -550,9 +557,15 @@ let metrics_bindings =
   ; b ~ko:"종료" Meta "q" "quit", Metrics_all
   ]
 
+let memory_browser_pages =
+  [ b ~ko:"최근 / 조회 / 변화 / 저장" Act "1 / 2 / 3 / 4" "recent / retrievals / changes / storage"
+      ~help:"one Memory browser; changes require an individual Keeper, while storage opens the fleet health view" ]
+
 let for_surface = function
   | Overview ->
-      [ b ~ko:"키퍼" Navigate "Left" "Keepers" ~help:"open the Keeper list; Enter opens a chat; Right or Esc returns"
+      [ b ~ko:"조치 원인" Navigate "v" "action reasons"
+          ~help:"read every reason in the last server rollup; scroll and search the captured reading; Esc returns without changing a decision or setting"
+      ; b ~ko:"키퍼" Navigate "Left" "Keepers" ~help:"open the Keeper list; Enter opens a chat; Right or Esc returns"
       ; b ~ko:"선택" Navigate "j/k" "choose" ~help:"move between decision links and conversations"
       ; b ~ko:"열기" Navigate "Enter" "open" ~help:"open the selected destination; never approve"
       ; b ~ko:"승인·질문" Navigate "p" "requests" ~help:"approvals and questions"
@@ -615,6 +628,8 @@ let for_surface = function
       :: (b Act "Right" "detail" ~help:"keeper detail")
       :: (b Act "Tab / s / m" "pages"
             ~help:"with a Keeper Story open: next page / schedules / memory; World keeps its own page; Esc closes either window")
+      :: (b Act "1 / 2 / 3 / 4" "memory"
+            ~help:"with Keeper Memory preview open: browse recent records / retrievals / committed changes / storage in the shared Memory browser; Enter also opens recent records")
       :: keeper_actions
       @ [ b Search "/" "search" ~help:"search names; Enter keeps the query"
         ; b Search "n / N" "next / previous match"
@@ -1061,6 +1076,7 @@ let for_surface = function
       ]
       @ row_list_edges @ listing_meta
   | Memory ->
+      memory_browser_pages @
       [ b ~ko:"선택" Navigate "j/k" "move" ~help:"move the keeper row"
       ; b ~ko:"기억 항목" Act "Enter" "facts"
           ~help:"browse what the selected keeper actually remembers"
@@ -1296,7 +1312,22 @@ let for_surface = function
       ; b Navigate "PgUp/PgDn" "page"
       ; b Navigate "Home/End" "top/bottom"
       ; b Navigate "p" "section"
-          ~help:"available / async runs / receipts / usage / all tools"
+          ~help:"available / async runs / receipts / usage / all tools. \
+                 Available shows the selected Keeper's exposed tools and Skills; \
+                 ORIGIN names the tool source. Async runs shows workspace requests \
+                 and recovery: active counts active ledger requests, runtime-owned \
+                 means a current runtime owner, ownership-unknown is unconfirmed. \
+                 Receipts keeps current-session Skill evidence: triggered=invoked, \
+                 delivered/handed off=delivered, actions=later tool actions. \
+                 These are separate events; no record does not prove no use. \
+                 Usage aggregates recorded calls by exact Skill revision across \
+                 current Keeper sessions; last use is the ledger's recorded time, \
+                 and unread ledgers stay qualified. \
+                 All tools lists process-wide registrations, separately from \
+                 a Keeper's callable surface and observed calls. \
+                 DIRECT=direct calls allowed; SURFACES=exposure paths; \
+                 none=no exposure path. Use Skill receipts for usage evidence \
+                 and Activity for tool input/output."
       ; b Navigate "J/K" "Skill"
           ~help:"in async runs, select an original request; otherwise select \
                  a published Skill"
@@ -1307,7 +1338,7 @@ let for_surface = function
          "\r" arm) is named on the sheet's Enter row only. The footer table
          cannot carry Enter -- the fitter never drops it -- so advertising it
          here squeezed the action diagnosis out of the 98-cell row and broke
-         the sheet-only contract (test_tui_keys, tools_async_bindings). *)
+         the sheet-only contract (test_tui_keys, tools_detail_bindings). *)
       ; tools_bracket_binding ~pane:Tools_surface
       ; b Act "c / C" "new Skill"
           ~help:"open $EDITOR on a template for a new Skill; c starts an \
@@ -1323,8 +1354,13 @@ let for_surface = function
       ]
       @ [ tools_refresh; listing_next; listing_quit ]
   | System_logs ->
-      [ b Navigate "o" "log origin" ~help:"switch between server logs and this TUI's own observations"
-      ; b Navigate "e" "Events"
+      (* [e] leads, as [e / l] leads on Events. The title row draws the
+         Events / Logs strip only where its readings leave room, and at 80
+         columns it does not on either reading, so this row is the one place
+         that names the other. With [o] first, 80 and 84 columns under an
+         ACTION NEEDED notice kept [o:log origin] and dropped [e:Events]. *)
+      [ b Navigate "e" "Events"
+      ; b Navigate "o" "log origin" ~help:"switch between server logs and this TUI's own observations"
       ; b Navigate "j/k" "move / scroll" ~rows:Needs_row
       ; row_list_page
       ; b Navigate "[ / ]" "previous / next" ~detail:Detail_only
@@ -1413,7 +1449,11 @@ let footer_hints ?(lang = Lang_en) ?detail_open ?has_rows ?has_reading surface =
 let planning_goal_hints ~lang ~detail_open ~has_rows =
   let bindings = for_surface Planning
     |> List.filter (answers_in_state ~detail_open ?has_rows)
-    |> List.filter (fun binding -> not detail_open || not (String.equal binding.key "r")) in
+    |> List.filter (fun binding -> not detail_open || not (String.equal binding.key "r"))
+    |> List.map (fun binding ->
+      if detail_open && String.equal binding.key "j/k" then
+        {binding with label = "scroll"; label_ko = Some "스크롤"}
+      else binding) in
   let read, others = List.partition (fun binding -> String.equal binding.key goal_candle_refresh_key) bindings in
   hints_in_order ~lang (read @ List.stable_sort (fun a b -> compare (group_rank a.group) (group_rank b.group)) others)
 
@@ -1425,10 +1465,26 @@ let footer_hints_planning_goal_detail ~lang =
 
 let footer_hints_tools ~lang ~pane =
   let bracket = tools_bracket_binding ~pane in
-  hints_of_bindings ~lang
-    (List.map (fun (binding : binding) ->
+  let bindings =
+    List.map (fun (binding : binding) ->
        if String.equal binding.key bracket.key then bracket else binding)
-       (for_surface Tools))
+       (for_surface Tools) in
+  match pane with
+  | Tools_catalog (Tools_catalog_volumes _) ->
+      hints_in_order ~lang
+        [ tools_volume_gc_binding
+        ; b ~ko:"스크롤" Navigate "j/k" "scroll"
+        ; b ~ko:"페이지" Navigate "PgUp/PgDn" "page"
+        ; b ~ko:"처음/끝" Navigate "Home/End" "top/bottom"
+        ; b ~ko:"다음 탭" Navigate "p" "section"
+        ; b ~ko:"목록" Act "Esc" "catalog"
+        ; tools_refresh; listing_next; listing_quit ]
+  | Tools_catalog Tools_catalog_list ->
+      hints_in_order ~lang
+        (tools_volume_gc_binding :: List.stable_sort
+          (fun a b -> compare (group_rank a.group) (group_rank b.group)) bindings)
+  | Tools_surface | Tools_async | Tools_activations | Tools_usage ->
+      hints_of_bindings ~lang bindings
 
 type ask_supply =
   | No_asks
@@ -2200,7 +2256,23 @@ let footer_hints_git_diff =
    health row's under these names -- Enter opens the reading, s reorders
    instead of pausing a keeper -- so a reader who has not pressed them learns
    them only from [?], which is what [?] answers. *)
+let bindings_memory_changes =
+  memory_browser_pages @
+  [ b ~ko:"이동" Navigate "j/k" "move"
+  ; b ~ko:"전문" Act "Enter" "full reading"
+      ~help:"read all original and successor claims of the selected committed change"
+  ; b ~ko:"… 변화 카드" Act "." "… change cards"
+      ~help:"open only the selected change as before/change/after cards with wrapped claim excerpts; full text remains on Enter"
+  ; b ~ko:"연결 트리" Act "Ctrl-O" "connected tree"
+      ~help:"open the selected change's complete connected observed memory lineage with the offline Pele Mermaid preview"
+  ; b ~ko:"페이지" Navigate "PgUp/PgDn" "page"
+  ; b ~ko:"뒤로" Act "Esc" "back to facts" ]
+  @ row_list_edges @ listing_meta
+
+let footer_hints_memory_changes ~lang = hints_of_bindings ~lang bindings_memory_changes
+
 let bindings_memory_facts =
+  memory_browser_pages @
   [ b ~ko:"이동 / 스크롤" Navigate "j/k" "move" ~rows:Needs_row
   ; b ~ko:"상세" Act "Enter" "detail" ~rows:Needs_row
       ~help:"read the whole fact in a wide overlay that owns the terminal"
@@ -2636,13 +2708,11 @@ let sheet_bindings surface =
     (fun binding -> not (List.mem binding listing_meta))
     (for_surface surface)
 
-(* Keys Tools answers only in its async runs pane, and Work only with a Task
-   detail open. The Tools footer is one row for all five panes and the Goals
-   footer never has a Task detail under it, so listing these in
-   [for_surface] would advertise them where they do nothing. The sheet
-   carries them, each sentence naming where the key answers. *)
-let tools_async_bindings =
-  [ b Act "Enter" "read request / Skill evidence"
+(* Additional reading keys stay on the sheet, each naming its owner. The
+   volume binding is also used by its catalog and child footers. *)
+let tools_detail_bindings =
+  [ tools_volume_gc_binding
+  ; b Act "Enter" "read request / Skill evidence"
       ~help:"in async runs, read the selected original request; \
              otherwise load retained evidence for the selected Skill"
   ; b Navigate "t / T" "source Task"
@@ -2693,12 +2763,14 @@ let located_sections ?current () =
                List.map
                  (fun (key, help) -> (key, "in the facts browser: " ^ help))
                  (entries bindings_memory_facts)
+               @ List.map (fun (key, help) -> (key, "in the changes browser: " ^ help))
+                   (entries bindings_memory_changes)
                @ List.map
                    (fun (key, help) -> (key, "in the fact detail: " ^ help))
                    (entries bindings_memory_fact_detail)
            | Lanes -> entries [preflight_detail_binding]
            | Planning -> entries work_task_detail_bindings
-           | Tools -> entries tools_async_bindings
+           | Tools -> entries tools_detail_bindings
            | Keepers (Keeper_list | (Keeper_logs | (Keeper_calls | (Keeper_message | Keeper_runtime_pick))))
            | Overview | Acting | Metrics | Clients | Board | Approvals | Schedules
            | Verification | Harness | Fusion | Repositories | Code | Changes | Connectors | Runtime

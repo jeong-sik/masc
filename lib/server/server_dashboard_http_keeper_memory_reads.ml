@@ -338,15 +338,21 @@ let handle_journal_get state req reqd name =
              | `String _ -> false)
            entries)
     in
+    let activity =
+      if Server_utils.query_param req "activity" = Some "1" then
+        [ "activity", Keeper_memory_activity.to_json
+            (Keeper_memory_activity.read ~keepers_dir ~keeper_id:name ~limit) ]
+      else []
+    in
     Http.Response.json_value ~compress:true ~request:req
       (`Assoc
-         [ "keeper", `String name
+         ([ "keeper", `String name
          ; "dashboard_surface", `String "/api/v1/keepers/:name/memory-journal"
          ; "returned", `Int (List.length entries)
          ; (* Reported rather than hidden: a journal this build cannot fully
               read is a different observation from a shorter one. *)
            "undecodable_lines", `Int undecodable
          ; "entries", `List entries
-         ])
+         ] @ activity))
       reqd)
 ;;

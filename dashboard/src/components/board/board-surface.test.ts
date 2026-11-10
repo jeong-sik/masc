@@ -12,7 +12,7 @@ import {
 import { boardPosts, boardLoading, boardSortMode, boardExcludeSystem, boardExcludeAutomation, boardHiddenCategories, boardAuthorFilter, boardHearthFilter, boardHasMore, boardLoadingMore, messages, shellAuthSummary, keepers } from '../../store'
 import { route } from '../../router'
 import { createPost, fetchBoardPost } from '../../api'
-import { requestBoardContextInference, voteComment } from '../../api/board'
+import { requestBoardContextInference, voteComment, votePost } from '../../api/board'
 import { deleteBoardPost } from '../../api/actions'
 import { showToast } from '../common/toast'
 import { dispatchOperatorAction, operatorSnapshot } from '../../operator-store'
@@ -74,6 +74,7 @@ vi.mock('../common/toast', () => ({
 
 vi.mock('../../api/board', () => ({
   requestBoardContextInference: vi.fn(),
+  votePost: vi.fn().mockResolvedValue(undefined),
   voteComment: vi.fn().mockResolvedValue(undefined),
   fetchBoardReactionState: vi.fn().mockResolvedValue({
     summaries: [],
@@ -132,6 +133,8 @@ function makePost(overrides: Partial<BoardPost> & { id: string; title: string; a
     tags: [],
     votes: 0,
     vote_balance: 0,
+    current_vote: null,
+    has_voted: false,
     comment_count: 0,
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
@@ -781,9 +784,30 @@ describe('BoardSurface Component', () => {
     expect(fetchBoardPost).toHaveBeenCalledExactlyOnceWith(post.id, undefined, undefined, 'deleted-reply')
   })
 
+  it('does not cast from an unreadable vote state in the feed', async () => {
+    boardPosts.value = [
+      makePost({ id: 'unknown-vote', title: 'Unknown vote', author: 'writer',
+        current_vote: undefined, has_voted: undefined }),
+      makePost({ id: 'known-no-vote', title: 'Known absence', author: 'writer' }),
+    ]
+    render(h(BoardSurface, null))
+
+    const unreadable = within(screen.getByTestId('bd-post-unknown-vote'))
+    const upvote = unreadable.getByRole('button', { name: '추천', exact: true })
+    expect(upvote).toBeDisabled()
+    expect(upvote).not.toHaveAttribute('aria-pressed')
+    expect(unreadable.getByRole('button', { name: '비추천', exact: true })).toBeDisabled()
+    fireEvent.click(upvote)
+    expect(votePost).not.toHaveBeenCalled()
+
+    fireEvent.click(within(screen.getByTestId('bd-post-known-no-vote'))
+      .getByRole('button', { name: '추천', exact: true }))
+    await waitFor(() => expect(votePost).toHaveBeenCalledWith('known-no-vote', 'up'))
+  })
+
   it('clears focused-route ancestry when returning to a retained compact thread', async () => {
     const post = makePost({ id: 'retained-thread', title: 'Retained thread', author: 'keeper', post_kind: 'direct' })
-    const reply = { id: 'retained-reply', post_id: post.id, parent_id: 'older-parent', author: 'keeper', content: 'Current reply', created_at: post.created_at }
+    const reply = { id: 'retained-reply', post_id: post.id, parent_id: 'older-parent', author: 'keeper', content: 'Current reply', created_at: post.created_at, current_vote: null, has_voted: false }
     const parent = { ...reply, id: 'older-parent', parent_id: null, content: 'Older parent' }
     boardPosts.value = [post]
     selectedBoardPostId.value = post.id

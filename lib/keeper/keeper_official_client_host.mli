@@ -823,18 +823,19 @@ val dynamic_tools :
     [base_path].
 
     [read_arrived] reads the Keeper's pending queue rows; it defaults to
-    {!Keeper_registry_event_queue.pending_selections_result} of [base_path] and
-    [keeper_name], and without either no rows are read. The official client
-    runs its own model loop and asks MASC for nothing between rounds, so the
-    rows that reached the queue after this projection was built
+    {!Keeper_arrived_stimuli_reader.read} of [base_path] and [keeper_name], the
+    reader the Agent Core post-tool round uses, so both previews withhold the
+    Board rows the Keeper cannot read now. Without either no rows are read. The
+    official client runs its own model loop and asks MASC for nothing between
+    rounds, so the rows that reached the queue after this projection was built
     ({!Keeper_arrived_stimuli}) go out after the text of the next tool result,
     once each, and stay queued. The block is the last step on a settled result:
     a result that ends the turn, and one that the block would take past the
     tool's [Bounded_bytes] ceiling, go out without it and the rows wait for the
     next result. A block that is appended is also recorded as the RAW trace
     hook [arrived_stimuli_projection], naming each listed row by its queue
-    entry number and arrival time. A queue that cannot be read costs the
-    result nothing: it goes out as it was.
+    entry number and arrival time. A queue or readership metadata that cannot
+    be read costs the result nothing: it goes out as it was.
 
     [tool_approval] settles a [pre_tool_use] hook that answers
     [ElicitToolApproval], exactly as it does on AGENT_CORE's own tool loop --

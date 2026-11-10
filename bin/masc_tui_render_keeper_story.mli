@@ -67,8 +67,9 @@ val feed_lines :
     a window too short for every note keeps the cautions. *)
 
 val memory_lines :
-  Masc_tui_types.state -> now:float -> keeper_name:string -> string list
-(** Five separate observations for [keeper_name]: fact age, snapshot save,
-    source invalidation, Librarian continuity and the shared-World entry
-    path. An age or save time does not establish source validity; retained
-    Librarian state does not establish that a model is running now. *)
+  Masc_tui_types.state -> cols:int -> max_lines:int -> now:float -> keeper_name:string -> string list
+(** Compact preview of recently recorded claims, recorded retrievals and
+    committed changes. Its shortcuts open the shared Memory browser. Reads are independently
+    keyed to the selected Keeper/workspace. Retained values, loading,
+    failures and partial history remain explicit. Retrieval means a search
+    returned the fact, not that an answer benefited from it. *)

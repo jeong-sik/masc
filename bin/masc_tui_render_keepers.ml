@@ -1771,7 +1771,8 @@ let draw_keeper_story buf ~cols ~rows ~now ~inner (state : state) page
            | Masc_tui_keeper_story.Schedule ->
                Masc_tui_render_keeper_story.schedule_lines state ~now ~keeper_name
            | Masc_tui_keeper_story.Memory ->
-               Masc_tui_render_keeper_story.memory_lines state ~now ~keeper_name) )
+               Masc_tui_render_keeper_story.memory_lines state ~cols:inner
+                 ~max_lines:(Masc_tui_render_keeper_story.body_rows ~rows) ~now ~keeper_name) )
   in
   Masc_tui_render_keeper_story.draw buf ~cols ~rows ~lead ~current:page lines
 

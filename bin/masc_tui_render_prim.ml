@@ -774,8 +774,18 @@ let footer_line ?help_door ?(status = []) ?position ?(recovery_in_slot = None) ?
         @
         (* The server's rollup, from the probe it serves on every refresh. *)
         (match Masc_tui_types.operator_actions state with
-         | first :: rest ->
-           [ Masc_tui_footer.Operator_action { first; count = 1 + List.length rest } ]
+         | _ :: rest ->
+           let count = 1 + List.length rest in
+           let notice =
+             ui_text state
+               ~ko:(Printf.sprintf "조치 필요 %d" count)
+               ~en:(Printf.sprintf "Action needed %d" count)
+             |> pressable (Press_surface Overview)
+           in
+           [ Masc_tui_footer.Operator_action
+               { notice
+               ; detail = ui_text state ~ko:"운영에서 확인" ~en:"Open Operations"
+               } ]
          | [] -> [])
         @
         (* This TUI's own embedded commit against the server's: the pair
@@ -1931,6 +1941,18 @@ let usage_connection_badge (state : state) =
     | Workspace_identity_mismatch _), _
   | Workspace_identity_unread, (Connecting | Booting | Disconnected) -> badge
 
+let reading_connection_notice (state : state) =
+  let exceptional =
+    state.observer_source_loss
+    || match compact_connection_state state with
+       | Compact_http Connected | Compact_reading -> false
+       | Compact_workspace_mismatch | Compact_workspace_unconfirmed
+       | Compact_workspace_unread | Compact_read_failed | Compact_read_partial
+       | Compact_read_interrupted | Compact_read_unfinished
+       | Compact_http (Degraded | Connecting | Booting | Disconnected) -> true
+  in
+  if exceptional then Some (usage_connection_badge state) else None
+
 (* A narrow Usage title keeps a textual state visible while its longer
    workspace and refresh details remain available in the scrolled body. *)
 let compact_connection_badge (state : state) ~width =
@@ -2364,21 +2386,21 @@ let lexed_span (text, kind) =
   else
     let style =
       if String.equal kind Masc_tui_code_lexer.kind_keyword then
-        Theme.Syntax.keyword
+        Theme.Syntax.keyword ()
       else if String.equal kind Masc_tui_code_lexer.kind_string then
-        Theme.Syntax.string
+        Theme.Syntax.string ()
       else if String.equal kind Masc_tui_code_lexer.kind_comment then
         Theme.Syntax.code_comment ()
       else if String.equal kind Masc_tui_code_lexer.kind_number then
-        Theme.Syntax.code_number
+        Theme.Syntax.code_number ()
       else if String.equal kind Masc_tui_code_lexer.kind_type then
-        Ansi.bold ^ Theme.Syntax.code_type
+        Ansi.bold ^ Theme.Syntax.code_type ()
       else if String.equal kind Masc_tui_code_lexer.kind_json_key then
-        Theme.Syntax.json_key
+        Theme.Syntax.json_key ()
       else if String.equal kind Masc_tui_code_lexer.kind_json_number then
-        Theme.Syntax.json_number
+        Theme.Syntax.json_number ()
       else if String.equal kind Masc_tui_code_lexer.kind_json_literal then
-        Theme.Syntax.json_literal
+        Theme.Syntax.json_literal ()
       else if String.equal kind Masc_tui_code_lexer.kind_json_punctuation then
         Theme.Syntax.json_punctuation
       else ""
@@ -2703,7 +2725,7 @@ let bracketed ~max_cells text =
   "[" ^ Message_layout.truncate_middle max_cells text ^ "]"
 
 (* The Board reader's title row: the screen, which post, its hearth, its score
-   and its replies. The id is folded at the list's ID column. Replies read "💬3"
+   and its replies. The id uses the compact reference width. Replies read "💬3"
    and then "c0" at zero -- a second spelling for the same count -- and are one
    spelling now, receding at zero. *)
 let board_read_title ~screen ~id ~hearth ~votes ~replies =
@@ -3232,7 +3254,8 @@ let keeper_control_hints ?(offers_chat = true) ?(offers_back = true) ?(taken = [
           match story with
           | None -> "story"
           | Some (Masc_tui_keeper_story.Story | Masc_tui_keeper_story.World) -> "close"
-          | Some (Masc_tui_keeper_story.Schedule | Masc_tui_keeper_story.Memory) -> "story"
+          | Some Masc_tui_keeper_story.Schedule -> "story"
+          | Some Masc_tui_keeper_story.Memory -> "browse"
         in
         [ "Enter / Right", accent "Enter / Right" ^ ":" ^ enter ^ " / detail"; esc ]
   in

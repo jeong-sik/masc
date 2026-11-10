@@ -13,7 +13,7 @@ Tab 순환과 상단 선택 표시는 `surface_ring`과 `surface_ring_family`가
 
 | 소속 | 화면 / 생성자 | 하는 일과 상세 | 진입 경로 |
 |---|---|---|---|
-| 운영 | Operations / `Overview` | 운영자 결정과 대화 진입 | 첫 화면, Tab |
+| 운영 | Operations / `Overview` | 운영자 결정·대화 진입, 조치 원인 전체 읽기 | 첫 화면, Tab, `v`로 조치 원인 |
 | Work | Goals·Tasks / `Planning` | 목표·측정·Task, 완료 조건·증거·Candle 지급, 생성·전이 | Tab, `t`로 Goals/Tasks |
 | Work | Requests / `Approvals` | 보류한 도구, Gate, 운영자 승인, Keeper 질문·답변 | Work `p`, 팔레트 |
 | Work | Task Review / `Verification` | 제출한 증거, 자동 검증 진행, 운영자 승인·반려 | Work `v`, 팔레트 |
@@ -33,7 +33,7 @@ Tab 순환과 상단 선택 표시는 `surface_ring`과 `surface_ring_family`가
 | 기능·플러그인 | Features / `Lanes` | 제공 기능·관측 상태·설정 적용·실행 이력·측정 상세 | Tab, Runtime `p`, 팔레트 |
 | 기능·플러그인 | Clients / `Clients` | 접속한 Keeper·MCP client·fiber, 선택 상세 | Runtime `c`, 팔레트 |
 | 기능·플러그인 | Resources / `Resources` | MCP 리소스·산출물 목록과 원문 | System `s`, 팔레트 |
-| 기능·플러그인 | Tools & Skills / `Tools` | 아래 도구 탭 5개, 비동기 요청·연결 Task 상세 | System `t`, 팔레트 |
+| 기능·플러그인 | Tools & Skills / `Tools` | 아래 도구 탭 5개, 비동기 요청·연결 Task·볼륨 정리 읽기 | System `t`, 팔레트 |
 | System | Activity / `Acting` | Keeper 턴·호출 사건과 증거 | System `A`, 팔레트 |
 | System | Logs / `System_logs` | 서버 로그·분류·수준·원문 | System `L`, Activity `l`, 팔레트 |
 
@@ -49,10 +49,12 @@ Keeper 상세의 Automation과 Channels는 해당 Keeper의 별도 읽기 탭이
 
 | 소속 | 목록 |
 |---|---|
+| 운영 | `v`: 열 때의 서버 조치 원인 전체를 보관한 읽기. 스크롤·검색, Esc로 복귀. 미관측과 정상 빈 목록 구분 |
 | Keeper 모드 | 목록, 상세, 대화, 로그, 호출, runtime 선택 |
 | Keeper 상세 탭 11개 | Info, Items, Sandbox, Settings, Secrets, GitHub, Identity, Channels, Automation, Runs, Terminal |
 | System 설정 탭 7개 | runtime.toml, models, params, prompts, presets, themes, voice |
 | Tools 탭 5개 | 유효 도구, 비동기 요청, Skill 활성화, Skill 사용, 전체 카탈로그 |
+| Tools 하위 읽기 | 전체 카탈로그의 `V`: 은퇴 Keeper 볼륨 보고·회수 결과, Esc로 원래 목록 위치 복귀 |
 | Runtime | lane 후보, 전체 runtime, 선택 runtime 상세·후보 선택·모델 편집 |
 | Features | 기능 목록, inventory 상세, lane 실행 목록·원문, 측정 상세 |
 | Usage | Plan, Keepers, Calls, Trend, 계정 범위 선택·telemetry |

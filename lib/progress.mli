@@ -20,7 +20,6 @@ type validation_error =
 
 (** {1 Validation} *)
 
-val validate_task_id : string -> (string, validation_error) result
 val validate_progress : float -> (float, validation_error) result
 val validation_error_to_string : validation_error -> string
 

@@ -8,24 +8,6 @@ let validate_agent_name name =
   let+ _ = Validation.Id_shape.validate name in
   name
 
-let validate_task_id id =
-  let+ _ = Validation.Task_id.validate id in
-  id
-
-let validate_file_path path =
-  (* Delegate to Validation module for consistent security checks *)
-  (* Additional length check for file paths *)
-  let* () =
-    if String.length path > 500 then Error "File path too long (max 500 chars)"
-    else Ok ()
-  in
-  let* () =
-    if String_util.contains_substring path "<" || String_util.contains_substring path ">" then
-      Error "Invalid characters in path (security)"
-    else Ok ()
-  in
-  Validation.Safe_path.validate_relative path
-
 (* ============================================ *)
 (* Sanitization helpers                         *)
 (* ============================================ *)

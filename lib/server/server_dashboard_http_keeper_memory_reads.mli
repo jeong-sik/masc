@@ -23,4 +23,7 @@ val handle_journal_get :
   Mcp_server.server_state -> Httpun.Request.t -> Http_reqd.t -> string -> unit
 (** Answer [GET /api/v1/keepers/<name>/memory-journal] with the last [limit]
     journal entries (default 50, from 1 to 500) and the count of lines this build
-    cannot decode. An invalid keeper name answers 400. *)
+    cannot decode. With [activity=1], also return a bounded, read-only change
+    projection, including committed absorption/revision endpoints. Ordinary
+    journal reads do not read the absorption archive. An invalid keeper name
+    answers 400. *)

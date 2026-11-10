@@ -15,6 +15,13 @@ let with_store f =
   Fun.protect ~finally:(fun () -> Fs_compat.remove_tree base_dir) (fun () -> f base_dir)
 ;;
 
+let with_eio_fs f =
+  Eio_main.run
+  @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Fun.protect ~finally:Fs_compat.clear_fs f
+;;
+
 let path ~base_dir = K.chat_path ~base_dir ~keeper_name
 let bytes ~base_dir = In_channel.with_open_bin (path ~base_dir) In_channel.input_all
 let unwrap = function Ok value -> value | Error detail -> fail detail
@@ -75,6 +82,17 @@ let question name ~base_dir =
     ~keeper_name
     ~delivery_key:(key name)
     ~content:("question " ^ name)
+    ()
+  |> answer
+;;
+
+(* A question whose one row is longer than everything [warm] writes. *)
+let long_question name ~base_dir =
+  K.append_user_message_once
+    ~base_dir
+    ~keeper_name
+    ~delivery_key:(key name)
+    ~content:(String.make 4096 'q')
     ()
   |> answer
 ;;
@@ -237,6 +255,51 @@ let test_a_purged_transcript_is_read_again () =
       (question "warm" ~base_dir))
 ;;
 
+let test_a_transcript_rewritten_across_the_kept_place_is_read_again () =
+  with_store (fun base_dir ->
+    warm ~base_dir;
+    let read_end = String.length (bytes ~base_dir) in
+    let other = rows_of (long_question "other") in
+    check bool "the new row ends after the place the reading ended" true
+      (String.length other > read_end);
+    (* Written through the path: the same inode, and longer than what was
+       read. The place the reading ended lies inside the one new row. *)
+    write (path ~base_dir) other;
+    check answer_testable "a delivery only the old rows held" Appended (question "warm" ~base_dir);
+    check_present "the delivery the new row holds" (long_question "other" ~base_dir))
+;;
+
+(* Fibers that deliver at the same time take turns at the transcript. Each
+   reads the rows the one before it wrote, and no row goes into the index
+   twice. *)
+let test_fibers_take_turns_at_a_transcript () =
+  with_eio_fs (fun () ->
+    with_store (fun base_dir ->
+      warm ~base_dir;
+      let names = List.init 6 (Printf.sprintf "fiber-%d") in
+      (* Every delivery twice, each from a fiber of its own. *)
+      let answers =
+        Eio.Fiber.List.map (fun name -> name, question name ~base_dir) (names @ names)
+      in
+      List.iter
+        (fun name ->
+           let of_name =
+             List.filter_map
+               (fun (asked, answer) -> if String.equal asked name then Some answer else None)
+               answers
+           in
+           match of_name with
+           | [ Appended; Present _ ] | [ Present _; Appended ] -> ()
+           | [] | [ _ ] | [ _; _ ] | _ :: _ :: _ :: _ ->
+             failf
+               "%s: %a"
+               name
+               (Format.pp_print_list ~pp_sep:Format.pp_print_space pp_answer)
+               of_name)
+        names;
+      check_present "a delivery from before the fibers" (reply "warm" ~base_dir)))
+;;
+
 let test_an_unreadable_row_refuses_every_delivery () =
   with_store (fun base_dir ->
     warm ~base_dir;
@@ -262,6 +325,30 @@ let test_a_torn_tail_is_refused_until_it_is_cut () =
     K.append_assistant_message ~base_dir ~keeper_name ~content:"a row without provenance" ();
     check answer_testable "after the fragment was cut" Appended (question "next" ~base_dir);
     check_present "a delivery from before the fragment" (reply "warm" ~base_dir))
+;;
+
+(* A delivery that was refused is asked of the whole file the next time. Both
+   rewrites here keep the inode, the length and a row start where the reading
+   ended, so nothing about the file tells the old rows from the new ones. *)
+let test_a_refused_delivery_is_asked_of_the_whole_file_again () =
+  with_store (fun base_dir ->
+    warm ~base_dir;
+    let read_end = String.length (bytes ~base_dir) in
+    let other = rows_of (question "other") in
+    check bool "one row is shorter than the two that were read" true
+      (String.length other < read_end);
+    (* Empty lines are not rows. They bring the next row to the place the
+       reading ended. *)
+    let up_to_read_end = other ^ String.make (read_end - String.length other) '\n' in
+    write (path ~base_dir) (up_to_read_end ^ "not a row\n");
+    (match question "warm" ~base_dir with
+     | Refused _ -> ()
+     | (Appended | Present _) as answered ->
+       failf "a delivery behind an unreadable row: %a" pp_answer answered);
+    write (path ~base_dir) (up_to_read_end ^ rows_of (question "repaired"));
+    check answer_testable "a delivery only the first rows held" Appended (question "warm" ~base_dir);
+    check_present "a delivery the repaired transcript holds" (question "repaired" ~base_dir);
+    check_present "another one it holds" (question "other" ~base_dir))
 ;;
 
 let test_tool_rows_wait_for_their_binding_row () =
@@ -373,6 +460,10 @@ let () =
             `Quick
             test_a_shortened_transcript_is_read_again
         ; test_case "a purged transcript is read again" `Quick test_a_purged_transcript_is_read_again
+        ; test_case
+            "a transcript rewritten across the kept place is read again"
+            `Quick
+            test_a_transcript_rewritten_across_the_kept_place_is_read_again
         ] )
     ; ( "rows that cannot be read"
       , [ test_case
@@ -383,6 +474,12 @@ let () =
             "a torn tail is refused until it is cut"
             `Quick
             test_a_torn_tail_is_refused_until_it_is_cut
+        ; test_case
+            "a refused delivery is asked of the whole file again"
+            `Quick
+            test_a_refused_delivery_is_asked_of_the_whole_file_again
         ] )
+    ; ( "deliveries at the same time"
+      , [ test_case "fibers take turns at a transcript" `Quick test_fibers_take_turns_at_a_transcript ] )
     ]
 ;;

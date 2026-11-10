@@ -7,10 +7,17 @@
     this process appended, and the rows any other writer appended.
 
     The index is rebuilt from the first row when the file at the path is not
-    the file that was read (another device or inode) or is shorter than what
-    was read. It is not rebuilt when bytes before that place change while the
-    device, the inode and at least the length stay: a transcript is appended
-    to only while a server runs, and it is repaired with the server stopped. *)
+    the file that was read (another device or inode), is shorter than what was
+    read, or has no row starting at the place the reading ended; and after an
+    update that met a row it could not read, so a transcript that refuses
+    deliveries is read whole each time, and whole once more after its repair.
+
+    It is not rebuilt when bytes before that place change while the device,
+    the inode, at least the length and a row start at that place all stay. The
+    writers of the chat store never make such a change: they append, take back
+    an append that failed, and cut an incomplete last row before a plain
+    append, all after that place. A transcript that accepts deliveries is
+    edited by hand only with the server stopped. *)
 
 val update_indexed_transcript :
   string ->
@@ -21,9 +28,17 @@ val update_indexed_transcript :
     {!Fs_compat.update_private_file_durable_locked_result}, except that
     [decide] receives the index of every row in the file in place of its
     bytes: [Error] when a row cannot be read, with the line it is on. The rows
-    [decide] appends are read by the next update. [decide] runs under the file
-    lock in the blocking worker and must not perform Eio effects or append to
-    the same transcript. *)
+    [decide] appends are read by the next update.
+
+    Updates of one path take turns in this process, as do its purges. A fiber
+    cancelled while it waits for its turn writes nothing and raises; one
+    cancelled before its file work starts does the same, as the Fs update
+    does.
+
+    [decide] runs under the file lock in the blocking worker and must not
+    perform Eio effects. It must not update or purge the same transcript
+    either: that call would wait for the turn its caller holds, and never
+    return. *)
 
 val purge_indexed_transcript : string -> remove:(string -> 'a) -> 'a
 (** [purge_indexed_transcript path ~remove] runs [remove path] while no

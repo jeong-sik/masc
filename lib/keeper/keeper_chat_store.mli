@@ -561,10 +561,11 @@ val append_user_message_once :
     keeper. *)
 val chat_dir : string -> string
 
-(** [transcript_provenance_readable contents] runs the read that every
-    append-once delivery makes over a transcript before it writes. [Error]
-    names the first line that read refuses; a transcript with such a line
-    rejects every later delivery to its keeper. Reads only. *)
+(** [transcript_provenance_readable contents] runs, over a whole transcript,
+    the read that an append-once delivery makes over the rows it has not read
+    yet before it writes. [Error] names the first line that read refuses; a
+    transcript with such a line rejects every later delivery to its keeper.
+    Reads only. *)
 val transcript_provenance_readable : string -> (unit, string) result
 
 (** [chat_path ~base_dir ~keeper_name] is the on-disk JSONL path backing
@@ -578,9 +579,10 @@ val chat_path : base_dir:string -> keeper_name:string -> string
     this process keeps from reading that file, whatever [remove] answers or
     raises: the [load_all] cache and the provenance index of the append-once
     writers. Both read only the rows after the ones they have read while the
-    file keeps its device and inode and is at least as long, so a transcript
-    removed any other way leaves them behind, and a new file at the same path
-    can match them by its inode number. *)
+    file keeps its device and inode, is at least as long, and starts a row
+    where their reading ended, so a transcript removed any other way leaves
+    them behind, and a new file at the same path can match them by its inode
+    number. *)
 val purge_transcript : string -> remove:(string -> 'a) -> 'a
 
 (** [load ~base_dir ~keeper_name] returns the most recent messages in

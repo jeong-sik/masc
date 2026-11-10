@@ -59,9 +59,9 @@ val wake_strip :
     again at a time they do not say, so each is unknown up to its expiry.
 
     The rows add up as in {!sum_wake_strips}. A slot where one row knows a
-    wake therefore shows that count even when another row there is unknown:
-    RFC-0515 §2.4.4 counts only the known wakes once the sum is 1 or more,
-    the rule the group rows (§2.4.7) and the header strip (§2.8) draw.
+    wake and another row is unknown retains [Wakes_with_unknown]: the known
+    count and the unknown remainder both survive into group and header
+    summaries. A zero known count beside an unknown is [Wakes_unknown].
 
     A strip is remembered per Keeper and [ahead] until the now slot changes
     or the index is rebuilt. *)
@@ -70,8 +70,9 @@ val unknown_strip : ahead:int -> wake_slot list
 (** A strip of {!wake_strip}'s length with every slot [Wakes_unknown]. *)
 
 val sum_wake_strips : wake_slot list list -> wake_slot list
-(** Slot by slot: the known wakes added up, or [Wakes_unknown] when that sum
-    is 0 and some strip did not know the slot. It adds strips built for one
-    window, which all have the same length. *)
+(** Slot by slot: known wakes add up; an unknown beside a positive sum stays
+    explicit in [Wakes_with_unknown]. A sum of 0 with an unknown is
+    [Wakes_unknown]. It adds strips built for one window, which all have the
+    same length. *)
 
 val cell : now:float -> t -> Masc_tui_keeper_axis_cell.t option

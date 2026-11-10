@@ -588,9 +588,9 @@ let test_held_and_late_rows_are_unknown () =
   let unknown = every Masc_tui_keeper_next_run.Wakes_unknown in
   Alcotest.check strip "a held row is unknown" unknown (strip_of [ held ]);
   Alcotest.check strip "a late row is unknown" unknown (strip_of [ late ]);
-  Alcotest.check strip "another row's known wake shows through"
+  Alcotest.check strip "another row's known wake keeps the unknown remainder"
     (List.init (ahead + 1) (fun index ->
-       if index = 2 then Masc_tui_keeper_next_run.Wakes 1
+       if index = 2 then Masc_tui_keeper_next_run.Wakes_with_unknown 1
        else Masc_tui_keeper_next_run.Wakes_unknown))
     (strip_of [ held; late; make_row ~id:"sch-known" ~keeper_name:"alpha"
                               ~due_at_iso:(iso ~h:1 ~m:0) () ]);
@@ -614,7 +614,7 @@ let test_unread_recurrence_knows_only_the_first_wake () =
   Alcotest.check strip "after 01:00 the slots are unknown"
     (List.init (ahead + 1) (fun index ->
        if index < 2 then Masc_tui_keeper_next_run.Wakes 0
-       else if index = 2 then Masc_tui_keeper_next_run.Wakes 1
+       else if index = 2 then Masc_tui_keeper_next_run.Wakes_with_unknown 1
        else Masc_tui_keeper_next_run.Wakes_unknown))
     (strip_of [ scheduled ~h:1 ~m:0 ~recurrence:(Error "unknown recurrence kind") () ])
 ;;
@@ -674,7 +674,7 @@ let test_decode_keeps_a_row_whose_recurrence_it_cannot_read () =
   Alcotest.check strip "the kept row wakes at 01:00, then is unknown"
     (List.init (ahead + 1) (fun index ->
        if index < 2 then Masc_tui_keeper_next_run.Wakes 0
-       else if index = 2 then Masc_tui_keeper_next_run.Wakes 1
+       else if index = 2 then Masc_tui_keeper_next_run.Wakes_with_unknown 1
        else Masc_tui_keeper_next_run.Wakes_unknown))
     (Masc_tui_keeper_next_run.wake_strip (agenda_index (Some unread))
        ~now ~ahead ~keeper_name:"alpha");
@@ -735,8 +735,8 @@ let test_strip_follows_the_now_slot_and_length () =
 
 let test_sum_rule () =
   let open Masc_tui_keeper_next_run in
-  Alcotest.check strip "known wakes add; a zero with an unknown is unknown"
-    [ Wakes_unknown; Wakes_unknown; Wakes 3; Wakes 1; Wakes 0 ]
+  Alcotest.check strip "known wakes add beside unknowns; a zero with an unknown is unknown"
+    [ Wakes_unknown; Wakes_unknown; Wakes_with_unknown 3; Wakes_with_unknown 1; Wakes 0 ]
     (sum_wake_strips
        [ [ Wakes 0; Wakes_unknown; Wakes 2; Wakes_unknown; Wakes 0 ]
        ; [ Wakes_unknown; Wakes_unknown; Wakes_unknown; Wakes 1; Wakes 0 ]

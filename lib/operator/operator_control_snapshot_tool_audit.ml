@@ -29,16 +29,17 @@ let keeper_tool_audit_fields config (meta : Keeper_meta_contract.keeper_meta) =
   , snapshot.tool_audit_at )
 ;;
 
-let cached_tool_audit_json
+let tool_audit_json
+      ~read_policy
       (config : Workspace.config)
       (meta : Keeper_meta_contract.keeper_meta)
   =
   let base_hash = Digest.to_hex (Digest.string config.base_path) in
   let cache_key = "kta:" ^ base_hash ^ ":" ^ meta.name in
-  (* 10.0s TTL keeps tool audit projection fresh while reliably reusing
-     cache across 5-7s dashboard refresh cycles, avoiding dated jsonl disk scans. *)
+  (* Only ordinary reads reuse this projection. Current source observations
+     must see commits inside the existing ten-second request cache window. *)
   let ttl = 10.0 in
-  Dashboard_cache.get_or_compute cache_key ~ttl @@ Pool_work.cpu ~name:__FUNCTION__ (fun () ->
+  let read () =
     let ( recent_tool_names
         , latest_tool_names
         , latest_tool_call_count
@@ -54,7 +55,11 @@ let cached_tool_audit_json
       ; "latest_action_source", Json_util.string_opt_to_json latest_action_source
       ; "tool_audit_source", Json_util.string_opt_to_json tool_audit_source
       ; "tool_audit_at", Json_util.string_opt_to_json tool_audit_at
-      ])
+      ]
+  in
+  match read_policy with
+  | Dashboard_projection_read.Current -> read ()
+  | Reuse -> Dashboard_cache.get_or_compute cache_key ~ttl (Pool_work.cpu ~name:__FUNCTION__ read)
 ;;
 
 (* Concurrency cap for parallel keeper snapshot fibers.

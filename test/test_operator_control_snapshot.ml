@@ -755,10 +755,51 @@ let test_recent_tool_names_ignore_blank_rows () =
        [ ""; turn_row [ "only" ]; "   " ])
 ;;
 
+let test_current_nested_reads_observe_actual_commits_inside_the_request_ttl () =
+  Eio_main.run (fun env ->
+    ensure_fs env;
+    let previous_clock = Eio_context.get_clock_opt () in
+    let mock_clock = Eio_mock.Clock.make () in
+    Eio_mock.Clock.set_time mock_clock (Unix.gettimeofday ());
+    let clock = (mock_clock :> float Eio.Time.clock_ty Eio.Resource.t) in
+    Time_compat.set_clock clock;
+    let dir = temp_dir () in
+    let config = Workspace.default_config dir in
+    let meta = health_projection_meta ~total_turns:1 in
+    let entry = Keeper_registry.register_offline ~base_path:dir meta.name meta in
+    Fun.protect ~finally:(fun () ->
+      ignore (Keeper_registry.unregister_exact entry);
+      (match previous_clock with Some clock -> Time_compat.set_clock clock | None -> Time_compat.clear_clock ());
+      cleanup_dir dir) (fun () ->
+      ignore (Workspace.init config ~agent_name:None);
+      let audit read_policy = Operator_control_snapshot_tool_audit.tool_audit_json ~read_policy config meta in
+      let tools json = Yojson.Safe.Util.(json |> member "recent_tool_names" |> to_list) in
+      let initial = audit Dashboard_projection_read.Reuse in
+      Alcotest.(check bool) "the original source has no recorded tools" true (tools initial = []);
+      Keeper_types_support.append_keeper_metrics config meta.name
+        (Yojson.Safe.from_string (turn_row ["actual-committed-tool"]));
+      Alcotest.(check bool) "Reuse still holds the earlier request observation" true
+        (tools (audit Reuse) = []);
+      Alcotest.(check bool) "Current reads the actual metrics commit inside the unchanged TTL" true
+        (tools (audit Current) = [`String "actual-committed-tool"]);
+      let trust read_policy = Operator_control_snapshot_trust.compact_keeper_runtime_trust_json
+          ~read_policy ~config ~meta in
+      let initial_trust = trust Reuse in
+      Keeper_registry.set_failure_reason ~base_path:dir meta.name (Some (Keeper_registry.Exception "actual registry failure"));
+      Alcotest.(check bool) "ordinary compact trust read still holds its prior observation" true
+        (trust Reuse = initial_trust);
+      let current = trust Current in
+      Alcotest.(check string) "Current observes the exact registry failure cause" "runtime_blocker"
+        Yojson.Safe.Util.(current |> member "latest_causal_event" |> member "kind" |> to_string)))
+;;
+
 let () =
   Alcotest.run
     "operator_control_snapshot"
     [
+      ( "Current source reads"
+      , [Alcotest.test_case "nested reads observe actual commits inside request TTL" `Quick
+           test_current_nested_reads_observe_actual_commits_inside_the_request_ttl] );
       ( "runtime status"
       , [
           Alcotest.test_case

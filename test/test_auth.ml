@@ -713,19 +713,19 @@ let test_load_credential_exact_wins_over_fallback () =
 
 let test_extract_agent_type_prefix_keeper_aliases () =
   check (option string) "keeper simple alias" (Some "alpha")
-    (Auth.extract_agent_type_prefix "keeper-alpha-agent");
+    (Auth_nickname.extract_agent_type_prefix "keeper-alpha-agent");
   check (option string) "keeper hyphenated alias" (Some "omicron-improver")
-    (Auth.extract_agent_type_prefix "keeper-omicron-improver-agent");
+    (Auth_nickname.extract_agent_type_prefix "keeper-omicron-improver-agent");
   check (option string) "generated nickname" (Some "lambda")
-    (Auth.extract_agent_type_prefix "lambda-fair-tapir");
+    (Auth_nickname.extract_agent_type_prefix "lambda-fair-tapir");
   check (option string) "hyphenated generated nickname" (Some "mu-king")
-    (Auth.extract_agent_type_prefix "mu-king-warm-heron");
+    (Auth_nickname.extract_agent_type_prefix "mu-king-warm-heron");
   check (option string) "hyphenated generated nickname unique" (Some "mu-king")
-    (Auth.extract_agent_type_prefix "mu-king-warm-heron-a3b2");
+    (Auth_nickname.extract_agent_type_prefix "mu-king-warm-heron-a3b2");
   check (option string) "plain name stays plain" (Some "alpha")
-    (Auth.extract_agent_type_prefix "alpha");
+    (Auth_nickname.extract_agent_type_prefix "alpha");
   check (option string) "two segment keeper fallback unchanged" (Some "keeper")
-    (Auth.extract_agent_type_prefix "keeper-alpha")
+    (Auth_nickname.extract_agent_type_prefix "keeper-alpha")
 
 let test_verify_token_keeper_exact_match () =
   (* UUID-based storage removes nickname-prefix collapse.  Keeper

@@ -17,6 +17,24 @@ let dos_ok = function
 let read path = In_channel.with_open_bin path In_channel.input_all
 let controller () = (dos_ok (Dos_lane.screen ())).Dos_lane.controller
 
+(* The seat reads the served worker's last completed observation, and a call
+   that may change the controller is followed by a new one (#46451). A fixture
+   that changes the controller in-process therefore has to wait for that
+   observation, or the seat keeps reporting the previous holder. *)
+let fixture_clock : float Eio.Time.clock_ty Eio.Resource.t option ref = ref None
+
+let wait_for_seat ~what predicate =
+  match !fixture_clock with
+  | None -> fail "fixture clock is not installed"
+  | Some clock ->
+    let deadline = Eio.Time.now clock +. 5.0 in
+    let rec poll () =
+      if predicate () then ()
+      else if Eio.Time.now clock > deadline then fail ("timed out waiting for " ^ what)
+      else (Eio.Time.sleep clock 0.005; poll ())
+    in
+    poll ()
+
 let with_workspace f =
   let base_path = Filename.temp_dir "play-current-authority-" "" in
   Eio_main.run @@ fun env ->
@@ -26,7 +44,9 @@ let with_workspace f =
   Eio_mock.Clock.set_time clock 1893455900.;
   Time_compat.set_clock (clock :> float Eio.Time.clock_ty Eio.Resource.t);
   Eio.Switch.run @@ fun sw ->
+  (fixture_clock := Some (Eio.Stdenv.clock env));
   Eio.Switch.on_release sw (fun () ->
+    fixture_clock := None;
     Dos_lane.install_activity_observer None;
     (match Dos_lane.screen () with
      | Ok { controller; _ } ->
@@ -124,6 +144,21 @@ let json response =
 let member field = function
   | `Assoc fields -> List.assoc_opt field fields
   | _ -> None
+
+let seat_json ~state ~operator =
+  dispatch ~state ~token:operator ~meth:"GET"
+    ~target:Server_routes_http_routes_play_page.seat_path ~body:"" |> json
+
+(* Hand the controller over the way a player does — through the served worker —
+   and wait until the seat's own observation reports it. A pass made directly
+   on the lane reaches the worker only on its next observation, so a seat read
+   straight afterwards still names the previous holder (#46451). *)
+let pass_and_await_seat ~state ~operator target =
+  let response = dispatch ~state ~token:operator ~meth:"POST" ~target:"/api/v1/dos/pass"
+      ~body:(Yojson.Safe.to_string (`Assoc [ "to", `String target ])) in
+  check int "the served worker hands the controller over" 200 (status response);
+  wait_for_seat ~what:("the seat to observe " ^ target) (fun () ->
+    member "controller" (seat_json ~state ~operator) = Some (`String target))
 
 let seed_guest base_path role =
   let token, initial = auth_ok (Auth.ensure_keeper_credential base_path ~agent_name:"guest") in
@@ -329,7 +364,7 @@ type controller_holder = Live_holder | Expired_holder | Removed_holder | Stopped
 let test_seat_reports_controller_recovery holder =
   with_workspace @@ fun base_path state operator ->
   let _, guest, _ = seed_guest base_path D.Player in
-  ignore (dos_ok (Dos_lane.pass ~who:"operator" ~to_:(Some "guest") ~announce:ignore));
+  pass_and_await_seat ~state ~operator "guest";
   (match holder with
    | Live_holder -> ()
    | Expired_holder ->
@@ -362,7 +397,7 @@ let test_seat_reports_controller_recovery holder =
 let test_recovery_eligibility_is_rechecked_before_move () =
   with_workspace @@ fun base_path state operator ->
   let _, guest, _ = seed_guest base_path D.Player in
-  ignore (dos_ok (Dos_lane.pass ~who:"operator" ~to_:(Some "guest") ~announce:ignore));
+  pass_and_await_seat ~state ~operator "guest";
   Auth.save_credential base_path { guest with expires_at = Some "2000-01-01T00:00:00Z" };
   let answer = dispatch ~state ~token:operator ~meth:"GET"
     ~target:Server_routes_http_routes_play_page.seat_path ~body:"" in

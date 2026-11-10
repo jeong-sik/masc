@@ -204,3 +204,4 @@ let prepare t step =
 ;;
 
 let await_first_bytes t = Eio_unix.Fd.use_exn "await_readable" t.fd Eio_unix.await_readable
+let send_side_closed = await_peer_close

@@ -1,0 +1,34 @@
+{
+  "measured_at": "2026-11-10T06:47:05.539904+00:00",
+  "measured_source_lower": "47d6aa799dd19248e9a2d99c3c81674770f51024",
+  "checks": [
+    {
+      "stage": "tests",
+      "exit": 0,
+      "tests": 81,
+      "passed": 81,
+      "failed": 0
+    },
+    {
+      "stage": "tsc",
+      "exit": 0
+    },
+    {
+      "stage": "eslint",
+      "exit": 0
+    }
+  ],
+  "focused_files": [
+    "src/components/board/reaction-bar.test.ts",
+    "src/components/board/reaction-bar.a11y.test.ts",
+    "src/components/board/board-surface.test.ts"
+  ],
+  "types_scope": "whole Dashboard tsc --noEmit",
+  "lint_scope": [
+    "src/components/board/reaction-bar.ts",
+    "src/components/board/reaction-bar.test.ts",
+    "src/components/board/board-surface.ts",
+    "src/components/board/board-surface.test.ts"
+  ],
+  "later_change": "Only board-v2.css in existing frontend check input directories changed after measurement; final CSS exercised in Chromium. New fixtures are outside tsconfig include."
+}

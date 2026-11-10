@@ -1,0 +1,24 @@
+ Operations  ▸Work  Keepers  Features & plugins  Workspace  System
+
+  MASC Board
+ > 해결한 논의와 다음 글
+   @fixture-operator [Author] · 2026-11-09 23:18:08 · closed · replies 0
+ ──────────────────────────────────────────────────────────────────────────────
+   목록에서는 핵심을 읽고, 상세에서는 종결 기록과 후속 글을 확인합니다.
+     Resolution
+     Closed by fixture-operator
+     Closed at 2026-11-09T14:18:08Z
+     Successor · S:open · masc://board/p-surface-open
+   요청과 근거를 읽는 순서를 정했습니다. Continued in the successor post.
+
+
+     Post reference · masc://board/p-surface-closed
+
+
+
+
+
+
+  ACTION NEEDED 1  j/k:body  v / V:up / down  Left / Esc:back  …?
+ Schedule may be out of date
+ › to quietreader   (i to write)

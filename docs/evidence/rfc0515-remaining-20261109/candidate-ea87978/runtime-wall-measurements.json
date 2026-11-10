@@ -1,0 +1,418 @@
+[
+  {
+    "file": "after-120x35-runtime-compact.txt",
+    "terminal_columns": 120,
+    "list_columns_from_frame_contract": 118,
+    "actual": {
+      "observed_header": "     keeper                    last ◂ 6h",
+      "frame_inset_cells": 1,
+      "visible_keeper_rows": 0,
+      "observed_pulse_run_lengths": [],
+      "header_ticks": [],
+      "header_tick_count": 0,
+      "runtime_letter_columns": []
+    },
+    "normalized_mock_file": "matrix-118x35.txt",
+    "normalized_mock_sha256": "46645794fe59149db867025913cbef84d20b58914c01a36bb7d86ba836850de5",
+    "mock": {
+      "observed_header": "    keeper                   A   last ◂ 6h",
+      "frame_inset_cells": 0,
+      "visible_keeper_rows": 2,
+      "observed_pulse_run_lengths": [
+        12
+      ],
+      "header_ticks": [],
+      "header_tick_count": 0,
+      "runtime_letter_columns": [
+        {
+          "label": "A",
+          "terminal_column": 29,
+          "list_column": 29
+        }
+      ]
+    },
+    "interpretation": "measurement only; missing header/rows is unmeasured, not success. Visible row counts depend on live data and chrome."
+  },
+  {
+    "file": "after-120x35-runtime-detailed.txt",
+    "terminal_columns": 120,
+    "list_columns_from_frame_contract": 118,
+    "actual": {
+      "observed_header": "     keeper                    last ◂ 6h",
+      "frame_inset_cells": 1,
+      "visible_keeper_rows": 0,
+      "observed_pulse_run_lengths": [],
+      "header_ticks": [],
+      "header_tick_count": 0,
+      "runtime_letter_columns": []
+    },
+    "normalized_mock_file": "matrix-118x35.txt",
+    "normalized_mock_sha256": "46645794fe59149db867025913cbef84d20b58914c01a36bb7d86ba836850de5",
+    "mock": {
+      "observed_header": "    keeper                   A   last ◂ 6h",
+      "frame_inset_cells": 0,
+      "visible_keeper_rows": 2,
+      "observed_pulse_run_lengths": [
+        12
+      ],
+      "header_ticks": [],
+      "header_tick_count": 0,
+      "runtime_letter_columns": [
+        {
+          "label": "A",
+          "terminal_column": 29,
+          "list_column": 29
+        }
+      ]
+    },
+    "interpretation": "measurement only; missing header/rows is unmeasured, not success. Visible row counts depend on live data and chrome."
+  },
+  {
+    "file": "after-120x35-24h-compact.txt",
+    "terminal_columns": 120,
+    "list_columns_from_frame_contract": 118,
+    "actual": {
+      "observed_header": " ▌   keeper                            22:00       04:00       10:00       16:00   now┃ fail",
+      "frame_inset_cells": 1,
+      "visible_keeper_rows": 3,
+      "observed_pulse_run_lengths": [
+        48
+      ],
+      "header_ticks": [
+        {
+          "label": "22:00",
+          "terminal_column": 39,
+          "list_column": 38
+        },
+        {
+          "label": "04:00",
+          "terminal_column": 51,
+          "list_column": 50
+        },
+        {
+          "label": "10:00",
+          "terminal_column": 63,
+          "list_column": 62
+        },
+        {
+          "label": "16:00",
+          "terminal_column": 75,
+          "list_column": 74
+        }
+      ],
+      "header_tick_count": 4
+    },
+    "normalized_mock_file": "wall-118x35.txt",
+    "normalized_mock_sha256": "9325811a51ec7cce52f1bab3b956d33b5dfd702fc9e833a954b01b3af309500e",
+    "mock": {
+      "observed_header": "    keeper                           14:00       20:00       02:00       08:00    now  fail",
+      "frame_inset_cells": 0,
+      "visible_keeper_rows": 22,
+      "observed_pulse_run_lengths": [
+        48
+      ],
+      "header_ticks": [
+        {
+          "label": "14:00",
+          "terminal_column": 37,
+          "list_column": 37
+        },
+        {
+          "label": "20:00",
+          "terminal_column": 49,
+          "list_column": 49
+        },
+        {
+          "label": "02:00",
+          "terminal_column": 61,
+          "list_column": 61
+        },
+        {
+          "label": "08:00",
+          "terminal_column": 73,
+          "list_column": 73
+        }
+      ],
+      "header_tick_count": 4
+    },
+    "interpretation": "measurement only; missing header/rows is unmeasured, not success. Visible row counts depend on live data and chrome."
+  },
+  {
+    "file": "after-120x35-24h-detailed.txt",
+    "terminal_columns": 120,
+    "list_columns_from_frame_contract": 118,
+    "actual": {
+      "observed_header": " ▌   keeper                            22:00       04:00       10:00       16:00   now┃ fail",
+      "frame_inset_cells": 1,
+      "visible_keeper_rows": 3,
+      "observed_pulse_run_lengths": [
+        48
+      ],
+      "header_ticks": [
+        {
+          "label": "22:00",
+          "terminal_column": 39,
+          "list_column": 38
+        },
+        {
+          "label": "04:00",
+          "terminal_column": 51,
+          "list_column": 50
+        },
+        {
+          "label": "10:00",
+          "terminal_column": 63,
+          "list_column": 62
+        },
+        {
+          "label": "16:00",
+          "terminal_column": 75,
+          "list_column": 74
+        }
+      ],
+      "header_tick_count": 4
+    },
+    "normalized_mock_file": "wall-118x35.txt",
+    "normalized_mock_sha256": "9325811a51ec7cce52f1bab3b956d33b5dfd702fc9e833a954b01b3af309500e",
+    "mock": {
+      "observed_header": "    keeper                           14:00       20:00       02:00       08:00    now  fail",
+      "frame_inset_cells": 0,
+      "visible_keeper_rows": 22,
+      "observed_pulse_run_lengths": [
+        48
+      ],
+      "header_ticks": [
+        {
+          "label": "14:00",
+          "terminal_column": 37,
+          "list_column": 37
+        },
+        {
+          "label": "20:00",
+          "terminal_column": 49,
+          "list_column": 49
+        },
+        {
+          "label": "02:00",
+          "terminal_column": 61,
+          "list_column": 61
+        },
+        {
+          "label": "08:00",
+          "terminal_column": 73,
+          "list_column": 73
+        }
+      ],
+      "header_tick_count": 4
+    },
+    "interpretation": "measurement only; missing header/rows is unmeasured, not success. Visible row counts depend on live data and chrome."
+  },
+  {
+    "file": "after-80x24-runtime-compact.txt",
+    "terminal_columns": 80,
+    "list_columns_from_frame_contract": 78,
+    "actual": {
+      "observed_header": "     keeper                    last ◂ 4h",
+      "frame_inset_cells": 1,
+      "visible_keeper_rows": 0,
+      "observed_pulse_run_lengths": [],
+      "header_ticks": [],
+      "header_tick_count": 0,
+      "runtime_letter_columns": []
+    },
+    "normalized_mock_file": "matrix-78x24.txt",
+    "normalized_mock_sha256": "bb4670aba999eda1ca4fc7ac97608c35ca0fc2c3757ba25f5fdd81949a550c6a",
+    "mock": {
+      "observed_header": "    keeper                   A  last ◂ 4h",
+      "frame_inset_cells": 0,
+      "visible_keeper_rows": 2,
+      "observed_pulse_run_lengths": [
+        8
+      ],
+      "header_ticks": [],
+      "header_tick_count": 0,
+      "runtime_letter_columns": [
+        {
+          "label": "A",
+          "terminal_column": 29,
+          "list_column": 29
+        }
+      ]
+    },
+    "interpretation": "measurement only; missing header/rows is unmeasured, not success. Visible row counts depend on live data and chrome."
+  },
+  {
+    "file": "after-80x24-runtime-detailed.txt",
+    "terminal_columns": 80,
+    "list_columns_from_frame_contract": 78,
+    "actual": {
+      "observed_header": "     keeper                    last ◂ 4h",
+      "frame_inset_cells": 1,
+      "visible_keeper_rows": 0,
+      "observed_pulse_run_lengths": [],
+      "header_ticks": [],
+      "header_tick_count": 0,
+      "runtime_letter_columns": []
+    },
+    "normalized_mock_file": "matrix-78x24.txt",
+    "normalized_mock_sha256": "bb4670aba999eda1ca4fc7ac97608c35ca0fc2c3757ba25f5fdd81949a550c6a",
+    "mock": {
+      "observed_header": "    keeper                   A  last ◂ 4h",
+      "frame_inset_cells": 0,
+      "visible_keeper_rows": 2,
+      "observed_pulse_run_lengths": [
+        8
+      ],
+      "header_ticks": [],
+      "header_tick_count": 0,
+      "runtime_letter_columns": [
+        {
+          "label": "A",
+          "terminal_column": 29,
+          "list_column": 29
+        }
+      ]
+    },
+    "interpretation": "measurement only; missing header/rows is unmeasured, not success. Visible row counts depend on live data and chrome."
+  },
+  {
+    "file": "after-80x24-24h-compact.txt",
+    "terminal_columns": 80,
+    "list_columns_from_frame_contract": 78,
+    "actual": {
+      "observed_header": " ▌   keeper             23:00       05:00       11:00       17:00 now┃ fail",
+      "frame_inset_cells": 1,
+      "visible_keeper_rows": 3,
+      "observed_pulse_run_lengths": [
+        45
+      ],
+      "header_ticks": [
+        {
+          "label": "23:00",
+          "terminal_column": 24,
+          "list_column": 23
+        },
+        {
+          "label": "05:00",
+          "terminal_column": 36,
+          "list_column": 35
+        },
+        {
+          "label": "11:00",
+          "terminal_column": 48,
+          "list_column": 47
+        },
+        {
+          "label": "17:00",
+          "terminal_column": 60,
+          "list_column": 59
+        }
+      ],
+      "header_tick_count": 4
+    },
+    "normalized_mock_file": "wall-78x24.txt",
+    "normalized_mock_sha256": "4623e1bca570443b4cf54c7008854d748804fea9e3659b70637a2e6f3bbdc4a9",
+    "mock": {
+      "observed_header": "    keeper             15:30       21:30       03:30       09:30 now  fail",
+      "frame_inset_cells": 0,
+      "visible_keeper_rows": 14,
+      "observed_pulse_run_lengths": [
+        45
+      ],
+      "header_ticks": [
+        {
+          "label": "15:30",
+          "terminal_column": 23,
+          "list_column": 23
+        },
+        {
+          "label": "21:30",
+          "terminal_column": 35,
+          "list_column": 35
+        },
+        {
+          "label": "03:30",
+          "terminal_column": 47,
+          "list_column": 47
+        },
+        {
+          "label": "09:30",
+          "terminal_column": 59,
+          "list_column": 59
+        }
+      ],
+      "header_tick_count": 4
+    },
+    "interpretation": "measurement only; missing header/rows is unmeasured, not success. Visible row counts depend on live data and chrome."
+  },
+  {
+    "file": "after-80x24-24h-detailed.txt",
+    "terminal_columns": 80,
+    "list_columns_from_frame_contract": 78,
+    "actual": {
+      "observed_header": " ▌   keeper             23:00       05:00       11:00       17:00 now┃ fail",
+      "frame_inset_cells": 1,
+      "visible_keeper_rows": 3,
+      "observed_pulse_run_lengths": [
+        45
+      ],
+      "header_ticks": [
+        {
+          "label": "23:00",
+          "terminal_column": 24,
+          "list_column": 23
+        },
+        {
+          "label": "05:00",
+          "terminal_column": 36,
+          "list_column": 35
+        },
+        {
+          "label": "11:00",
+          "terminal_column": 48,
+          "list_column": 47
+        },
+        {
+          "label": "17:00",
+          "terminal_column": 60,
+          "list_column": 59
+        }
+      ],
+      "header_tick_count": 4
+    },
+    "normalized_mock_file": "wall-78x24.txt",
+    "normalized_mock_sha256": "4623e1bca570443b4cf54c7008854d748804fea9e3659b70637a2e6f3bbdc4a9",
+    "mock": {
+      "observed_header": "    keeper             15:30       21:30       03:30       09:30 now  fail",
+      "frame_inset_cells": 0,
+      "visible_keeper_rows": 14,
+      "observed_pulse_run_lengths": [
+        45
+      ],
+      "header_ticks": [
+        {
+          "label": "15:30",
+          "terminal_column": 23,
+          "list_column": 23
+        },
+        {
+          "label": "21:30",
+          "terminal_column": 35,
+          "list_column": 35
+        },
+        {
+          "label": "03:30",
+          "terminal_column": 47,
+          "list_column": 47
+        },
+        {
+          "label": "09:30",
+          "terminal_column": 59,
+          "list_column": 59
+        }
+      ],
+      "header_tick_count": 4
+    },
+    "interpretation": "measurement only; missing header/rows is unmeasured, not success. Visible row counts depend on live data and chrome."
+  }
+]

@@ -1,0 +1,35 @@
+ Operations  Work  ▸Keepers  Features & plugins  Workspace  System
+
+  MASC Memory ▸ sourcereader (3 listed facts · All)  23:56:48  HTTP [connected]
+ ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+   Listed: 2 ordinary · 1 source · 0 dropped · Sort [s]: Recency (Newest)
+   c/C:category  ▸All 3  fact 2  source 1  d:show categories
+ ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+   Category · content
+ ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+   [source] 원본 파일은 요청과 현재 관측을 구분한다고 기록합니다. · /User…ontract.md · 38m
+   [fact] 기억은 조회 시각과 실제 실패를 구분해서 읽습니다. · 1h
+   [fact] Original English memory remains unchanged by the chrome language. · 2d
+
+
+
+
+
+
+
+
+
+
+
+
+ ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+   Source-Bound Fact Detail
+     원본 파일은 요청과 현재 관측을 구분한다고 기록합니다.
+     Keeper:      sourcereader
+     Bound Path:  <user>/me/workspace/yousleepwhen/masc/artifacts/surface-minimalism-20261109/private-surfaces-
+                  9ddyyq3m/workspace/fixture-sources/reading-contract.md
+     File SHA:    sha256:0044f31f4296ad91eafd570b1527e7b3f9bcd4114ed3a51e8f0164bae35b1df7 · First Seen: 38m
+
+  ACTION NEEDED 1 · keeper_memory_execution:addon_unattached  j/k:move  Enter:detail  Esc:close / clear  q:quit  …?
+ Schedule may be out of date
+ › to quietreader   (i to write)

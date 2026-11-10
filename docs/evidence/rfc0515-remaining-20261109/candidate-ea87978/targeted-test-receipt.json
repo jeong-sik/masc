@@ -1,0 +1,299 @@
+{
+  "schema": "rfc0515.targeted-test-receipt.v1",
+  "run_id": 42607816130,
+  "run_url": "https://github.com/jeong-sik/masc/actions/runs/42607816130",
+  "workflow": ".github/workflows/test.yml",
+  "event": "workflow_dispatch",
+  "run_attempt": 1,
+  "status": "completed",
+  "conclusion": "success",
+  "head_sha": "ea87978b18e3fc6c4a143cf8e74de8cbc495d67e",
+  "head_branch": "feat/keepers-world-row-w1",
+  "expected_head_sha": "ea87978b18e3fc6c4a143cf8e74de8cbc495d67e",
+  "expected_branch": "feat/keepers-world-row-w1",
+  "head_matches": true,
+  "branch_matches": true,
+  "created_at": "2026-11-09T11:17:18Z",
+  "completed_by": "2026-11-09T11:23:04Z",
+  "job": {
+    "id": 129128162609,
+    "name": "test suite",
+    "run_id": 42607816130,
+    "status": "completed",
+    "conclusion": "success",
+    "steps": [
+      {
+        "name": "Set up job",
+        "status": "completed",
+        "conclusion": "success",
+        "number": 1
+      },
+      {
+        "name": "Require explicit minimal suites",
+        "status": "completed",
+        "conclusion": "success",
+        "number": 2
+      },
+      {
+        "name": "Free disk space",
+        "status": "completed",
+        "conclusion": "skipped",
+        "number": 3
+      },
+      {
+        "name": "Checkout",
+        "status": "completed",
+        "conclusion": "success",
+        "number": 4
+      },
+      {
+        "name": "Setup OCaml toolchain",
+        "status": "completed",
+        "conclusion": "success",
+        "number": 5
+      },
+      {
+        "name": "Pin minimal OCaml dependencies",
+        "status": "completed",
+        "conclusion": "success",
+        "number": 6
+      },
+      {
+        "name": "Pin external OCaml dependencies",
+        "status": "completed",
+        "conclusion": "skipped",
+        "number": 7
+      },
+      {
+        "name": "Install system and OCaml dependencies",
+        "status": "completed",
+        "conclusion": "success",
+        "number": 8
+      },
+      {
+        "name": "Install native media verification tools",
+        "status": "completed",
+        "conclusion": "skipped",
+        "number": 9
+      },
+      {
+        "name": "Install native media tools for selected minimal verifier checks",
+        "status": "completed",
+        "conclusion": "success",
+        "number": 10
+      },
+      {
+        "name": "Prepare managed presentation verification inputs",
+        "status": "completed",
+        "conclusion": "skipped",
+        "number": 11
+      },
+      {
+        "name": "Make pnpm available to the suites that read a dashboard PATH",
+        "status": "completed",
+        "conclusion": "skipped",
+        "number": 12
+      },
+      {
+        "name": "Prepare static shim compiler outside the test workers",
+        "status": "completed",
+        "conclusion": "skipped",
+        "number": 13
+      },
+      {
+        "name": "Set up image cache for targeted suites",
+        "status": "completed",
+        "conclusion": "skipped",
+        "number": 14
+      },
+      {
+        "name": "Prepare Keeper sandbox image",
+        "status": "completed",
+        "conclusion": "skipped",
+        "number": 15
+      },
+      {
+        "name": "Drop the image build cache the suite never reads",
+        "status": "completed",
+        "conclusion": "skipped",
+        "number": 16
+      },
+      {
+        "name": "Test",
+        "status": "completed",
+        "conclusion": "success",
+        "number": 17
+      },
+      {
+        "name": "Upload equipped portrait HTTP evidence",
+        "status": "completed",
+        "conclusion": "success",
+        "number": 18
+      },
+      {
+        "name": "Upload the full Dune suite log",
+        "status": "completed",
+        "conclusion": "success",
+        "number": 19
+      },
+      {
+        "name": "Upload the Dune suite timing",
+        "status": "completed",
+        "conclusion": "success",
+        "number": 20
+      },
+      {
+        "name": "Exercise creative artifacts in the built Keeper image",
+        "status": "completed",
+        "conclusion": "skipped",
+        "number": 21
+      },
+      {
+        "name": "Upload creative artifact proof",
+        "status": "completed",
+        "conclusion": "skipped",
+        "number": 22
+      },
+      {
+        "name": "Upload the suite runner log",
+        "status": "completed",
+        "conclusion": "success",
+        "number": 23
+      },
+      {
+        "name": "File the scheduled failure as an issue",
+        "status": "completed",
+        "conclusion": "skipped",
+        "number": 24
+      },
+      {
+        "name": "Post Setup OCaml toolchain",
+        "status": "completed",
+        "conclusion": "success",
+        "number": 47
+      },
+      {
+        "name": "Post Checkout",
+        "status": "completed",
+        "conclusion": "success",
+        "number": 48
+      },
+      {
+        "name": "Complete job",
+        "status": "completed",
+        "conclusion": "success",
+        "number": 49
+      }
+    ],
+    "step_totals": {
+      "success": 15,
+      "skipped": 12
+    }
+  },
+  "requested_suites": [
+    "test_tui_keeper_list_model",
+    "test_tui_keeper_axis",
+    "test_tui_keeper_axis_row",
+    "test_tui_keeper_trail",
+    "test_tui_keeper_story",
+    "test_tui_keeper_pulse",
+    "test_tui_keys"
+  ],
+  "observed_suites": [
+    {
+      "suite": "test_tui_keeper_list_model",
+      "ok": 33,
+      "failed": 0,
+      "skipped": 0,
+      "reported_cases": 33,
+      "result": "OK"
+    },
+    {
+      "suite": "test_tui_keeper_axis",
+      "ok": 5,
+      "failed": 0,
+      "skipped": 0,
+      "reported_cases": 5,
+      "result": "OK"
+    },
+    {
+      "suite": "test_tui_keeper_axis_row",
+      "ok": 4,
+      "failed": 0,
+      "skipped": 0,
+      "reported_cases": 4,
+      "result": "OK"
+    },
+    {
+      "suite": "test_tui_keeper_trail",
+      "ok": 16,
+      "failed": 0,
+      "skipped": 0,
+      "reported_cases": 16,
+      "result": "OK"
+    },
+    {
+      "suite": "test_tui_keeper_story",
+      "ok": 8,
+      "failed": 0,
+      "skipped": 0,
+      "reported_cases": 8,
+      "result": "OK"
+    },
+    {
+      "suite": "test_tui_keeper_pulse",
+      "ok": 16,
+      "failed": 0,
+      "skipped": 0,
+      "reported_cases": 16,
+      "result": "OK"
+    },
+    {
+      "suite": "test_tui_keys",
+      "ok": 73,
+      "failed": 0,
+      "skipped": 0,
+      "reported_cases": 73,
+      "result": "OK"
+    }
+  ],
+  "requested_observed_match": true,
+  "suite_totals": {
+    "passed": 7,
+    "failed": 0,
+    "skipped": 0
+  },
+  "case_totals": {
+    "passed": 155,
+    "failed": 0,
+    "skipped": 0
+  },
+  "artifact": {
+    "id": 13669296545,
+    "name": "suite-runner-log",
+    "size_in_bytes": 13888,
+    "digest": "sha256:8773d2e66c6f360971ef28ad3bdbdd08aa1e5b530d59bce0b773e7a939748840",
+    "expired": false,
+    "workflow_run": {
+      "id": 42607816130,
+      "repository_id": 1136640865,
+      "head_repository_id": 1136640865,
+      "head_branch": "feat/keepers-world-row-w1",
+      "head_sha": "ea87978b18e3fc6c4a143cf8e74de8cbc495d67e"
+    }
+  },
+  "artifact_verified_digest": true,
+  "artifact_members": [
+    {
+      "name": "ci-run-tests.log",
+      "bytes": 66441
+    }
+  ],
+  "missing_optional_artifacts": [
+    "test-suite-log",
+    "test-suite-timing"
+  ],
+  "evidence_scope": "Seven explicitly selected minimal suites ran as actual test executables. This is not full regression, TUI runtime/capture, installed binary, or real-server evidence.",
+  "retention": "Allowlisted execution/case/summary lines only; signed artifact URL, environment dump and generic setup logs omitted. Archive digest cross-checked with GitHub artifact metadata.",
+  "reads": "Workflow status fetched once through GitHub plugin; terminal job/log/artifact reads followed. No dispatch, rerun, or polling loop."
+}

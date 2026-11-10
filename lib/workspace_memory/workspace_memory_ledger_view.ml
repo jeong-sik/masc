@@ -144,17 +144,36 @@ let briefing_fields = function
 
 let schema = "workspace.memory.inventory.v1"
 
+let ordinary_absence_json ~base_path ledger =
+  match Context.collect ~base_path with
+  | Error detail -> `Assoc ["status", `String "unavailable"; "detail", `String detail]
+  | Ok context ->
+    let status, (counts : Ledger.ordinary_absence_counts), extra =
+      match Ledger.ordinary_absence ledger (Context.keepers context) with
+      | Ledger.Complete counts -> "complete", counts, []
+      | Ledger.Partial { counts; unavailable_stores } ->
+        "partial", counts, ["unavailable_stores", `Int unavailable_stores] in
+    `Assoc (["status", `String status; "facts", `Int counts.facts;
+             "absent", `Int counts.absent; "available_stores", `Int counts.available_stores;
+             "missing_stores", `Int counts.missing_stores] @ extra)
+
 let observation ?(now = Unix.gettimeofday ()) ~include_briefing ~base_path () =
   match Ledger.observe ~base_path with
   | Ledger.Missing ->
+    let* absence = if include_briefing then Ok [] else
+      let* ledger = load_observed ~load:Ledger.load ~base_path ~ledger_sha256:(Ledger.sha256 Ledger.empty) in
+      Ok ["ordinary_absence", ordinary_absence_json ~base_path ledger] in
     Ok
       (`Assoc
-        [ "schema", `String schema
+        ([ "schema", `String schema
         ; "generated_at", `Float now
         ; "status", `String "missing"
-        ])
+        ] @ absence))
   | Ledger.Unavailable detail -> Error detail
   | Ledger.Available descriptor ->
+    let* absence = if include_briefing then Ok [] else
+      let* ledger = load_observed ~load:Ledger.load ~base_path ~ledger_sha256:descriptor.ledger_sha256 in
+      Ok ["ordinary_absence", ordinary_absence_json ~base_path ledger] in
     let briefing_base = briefing_fields descriptor.briefing in
     let briefing =
       if include_briefing
@@ -174,7 +193,7 @@ let observation ?(now = Unix.gettimeofday ()) ~include_briefing ~base_path () =
     in
     Ok
       (`Assoc
-        [ "schema", `String schema
+        ([ "schema", `String schema
         ; "generated_at", `Float now
         ; "status", `String "available"
         ; "semantic_verification", `String "not_performed"
@@ -184,7 +203,7 @@ let observation ?(now = Unix.gettimeofday ()) ~include_briefing ~base_path () =
         ; "excluded_count", `Int descriptor.excluded_count
         ; "classified_count", `Int descriptor.classified_count
         ; "briefing", `Assoc briefing
-        ])
+        ] @ absence))
 ;;
 
 let inventory ?now ~base_path () = observation ?now ~include_briefing:false ~base_path ()

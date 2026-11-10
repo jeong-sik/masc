@@ -1,0 +1,172 @@
+{
+  "schema": "masc.evidence.current-locations.v1",
+  "purpose": "Locate sanitized baseline captures. The path/digest index is derived from baseline/manifest.json files; the original manifest bytes are unchanged.",
+  "paths_relative_to": "repository_root",
+  "recorded_manifest": {
+    "path": "baseline-path-digests.json",
+    "sha256": "f6a21389d200920c4ee0e7979a00ac8090fac42108602e3ec05b8d3034b8250a"
+  },
+  "files": {
+    "docs/evidence/rfc0515-remaining-20261109/baseline/before-80x24-cause-detailed.txt": {
+      "recorded_path": "artifacts/rfc0515-remaining-20261109/retained-baseline/before-80x24-cause-detailed.txt",
+      "recorded_sha256": "7a0c487c5c3866ec5f607d8ae9b3f817970f4639e63af7bc6bedcdf23df4cc1c",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/rfc0515-remaining-20261109/baseline/before-120x35-list-compact.txt": {
+      "recorded_path": "artifacts/rfc0515-remaining-20261109/retained-baseline/before-120x35-list-compact.txt",
+      "recorded_sha256": "a56f26d53967c5d025cc48426f37d1f2d9d2f0b9d0066475095c893ee5eba896",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/rfc0515-remaining-20261109/baseline/before-80x24-memory-detailed.txt": {
+      "recorded_path": "artifacts/rfc0515-remaining-20261109/retained-baseline/before-80x24-memory-detailed.txt",
+      "recorded_sha256": "b6dca9c5d44529abdfc115d8f04f9309c361ef6fc49e58db7535c40124693415",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/rfc0515-remaining-20261109/baseline/before-80x24-24h-compact.txt": {
+      "recorded_path": "artifacts/rfc0515-remaining-20261109/retained-baseline/before-80x24-24h-compact.txt",
+      "recorded_sha256": "ba3ef68033301cbfff0365e16c12b4b192e451e5efce802bdad848d458e633e0",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/rfc0515-remaining-20261109/baseline/before-80x24-cause-compact.txt": {
+      "recorded_path": "artifacts/rfc0515-remaining-20261109/retained-baseline/before-80x24-cause-compact.txt",
+      "recorded_sha256": "123854cad3939c54891fa5a5f8bdc947187a3ea5f1a30d27a98c4ceca9581b59",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/rfc0515-remaining-20261109/baseline/before-80x24-time-compact.txt": {
+      "recorded_path": "artifacts/rfc0515-remaining-20261109/retained-baseline/before-80x24-time-compact.txt",
+      "recorded_sha256": "f8cfdc0d5040de0b5b89c978721630dd30d51459504ba330044ac1191a08a177",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/rfc0515-remaining-20261109/baseline/before-120x35-state-detailed.txt": {
+      "recorded_path": "artifacts/rfc0515-remaining-20261109/retained-baseline/before-120x35-state-detailed.txt",
+      "recorded_sha256": "d58a000fdd26153dec2e1112919607ce2b343b85b3f48d2a40ed4f9b372db4fd",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/rfc0515-remaining-20261109/baseline/before-120x35-age-compact.txt": {
+      "recorded_path": "artifacts/rfc0515-remaining-20261109/retained-baseline/before-120x35-age-compact.txt",
+      "recorded_sha256": "8f5c6126abeaeb0cd3803bf5333133ecec7eefcd978d2a83b57ad1c8081e59ee",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/rfc0515-remaining-20261109/baseline/before-120x35-time-detailed.txt": {
+      "recorded_path": "artifacts/rfc0515-remaining-20261109/retained-baseline/before-120x35-time-detailed.txt",
+      "recorded_sha256": "353e9fd808c6c5a6c2a42e07900da3f5aebf6420692f32dcd05883f698b207b2",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/rfc0515-remaining-20261109/baseline/before-120x35-runtime-detailed.txt": {
+      "recorded_path": "artifacts/rfc0515-remaining-20261109/retained-baseline/before-120x35-runtime-detailed.txt",
+      "recorded_sha256": "23d4190f763091ac7943ecdd757e8bbcf766613103ee8a5830b200ef77be6348",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/rfc0515-remaining-20261109/baseline/before-80x24-memory-compact.txt": {
+      "recorded_path": "artifacts/rfc0515-remaining-20261109/retained-baseline/before-80x24-memory-compact.txt",
+      "recorded_sha256": "e2261639359e6bde08e5170304eb075e751f0b91596408a6dd72e10162b210c0",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/rfc0515-remaining-20261109/baseline/before-80x24-list-detailed.txt": {
+      "recorded_path": "artifacts/rfc0515-remaining-20261109/retained-baseline/before-80x24-list-detailed.txt",
+      "recorded_sha256": "d6b6f4d28c50f2e681683bb914fba2661ef7e6f1c2b1d9afb57f011453433731",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/rfc0515-remaining-20261109/baseline/before-120x35-memory-detailed.txt": {
+      "recorded_path": "artifacts/rfc0515-remaining-20261109/retained-baseline/before-120x35-memory-detailed.txt",
+      "recorded_sha256": "2664eef59092aa4702b57c1dd2a409ce8240351f7974def62ca1223a1610f400",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/rfc0515-remaining-20261109/baseline/before-80x24-list-compact.txt": {
+      "recorded_path": "artifacts/rfc0515-remaining-20261109/retained-baseline/before-80x24-list-compact.txt",
+      "recorded_sha256": "933d9bf43c15a6525426b3c2f4f07b903399f3f91c6a1802eef3348cc1ecbd94",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/rfc0515-remaining-20261109/baseline/before-120x35-time-compact.txt": {
+      "recorded_path": "artifacts/rfc0515-remaining-20261109/retained-baseline/before-120x35-time-compact.txt",
+      "recorded_sha256": "9c6e16672a73f6bf3dce6adca73528be002cf4c06edd11ad51d42e6103951250",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/rfc0515-remaining-20261109/baseline/before-120x35-state-compact.txt": {
+      "recorded_path": "artifacts/rfc0515-remaining-20261109/retained-baseline/before-120x35-state-compact.txt",
+      "recorded_sha256": "f19af88ff38cdcbc5d5160d346c7fde274aeee3c2dfd3563ac1c4ad27b1a3b51",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/rfc0515-remaining-20261109/baseline/before-80x24-age-detailed.txt": {
+      "recorded_path": "artifacts/rfc0515-remaining-20261109/retained-baseline/before-80x24-age-detailed.txt",
+      "recorded_sha256": "73f833e7cd04c1c41b2e19bbf299e70f1b43bab2fc5a43b6e8bf198f0acfae03",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/rfc0515-remaining-20261109/baseline/before-80x24-time-detailed.txt": {
+      "recorded_path": "artifacts/rfc0515-remaining-20261109/retained-baseline/before-80x24-time-detailed.txt",
+      "recorded_sha256": "ea413f2ed2960c20d7a553c4257c94966e6beac1b9d90a365930f95ec0b3f771",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/rfc0515-remaining-20261109/baseline/before-120x35-24h-compact.txt": {
+      "recorded_path": "artifacts/rfc0515-remaining-20261109/retained-baseline/before-120x35-24h-compact.txt",
+      "recorded_sha256": "9865248c82034ee0d3576209d4c34521a70581ab7d7ce9e0f2bc6754b9ecadba",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/rfc0515-remaining-20261109/baseline/before-80x24-24h-detailed.txt": {
+      "recorded_path": "artifacts/rfc0515-remaining-20261109/retained-baseline/before-80x24-24h-detailed.txt",
+      "recorded_sha256": "2d534e052d0acc2fc61b6f37f631bf9d7b8d1b449381a22169a40469c3975fb9",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/rfc0515-remaining-20261109/baseline/before-120x35-memory-compact.txt": {
+      "recorded_path": "artifacts/rfc0515-remaining-20261109/retained-baseline/before-120x35-memory-compact.txt",
+      "recorded_sha256": "c05b75725299d986825dffd24ff9f5ebfc0fcfaf48b2be6b335c6849012c7ead",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/rfc0515-remaining-20261109/baseline/before-120x35-runtime-compact.txt": {
+      "recorded_path": "artifacts/rfc0515-remaining-20261109/retained-baseline/before-120x35-runtime-compact.txt",
+      "recorded_sha256": "34eea60d659f742b0d0f9ebfc0fe431db73cef875cf4af6276ae6737f23549e7",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/rfc0515-remaining-20261109/baseline/before-120x35-cause-compact.txt": {
+      "recorded_path": "artifacts/rfc0515-remaining-20261109/retained-baseline/before-120x35-cause-compact.txt",
+      "recorded_sha256": "46dd6f3552940ad299961a22f696b735431a74440e760b4395dd63eb8c168389",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/rfc0515-remaining-20261109/baseline/before-80x24-age-compact.txt": {
+      "recorded_path": "artifacts/rfc0515-remaining-20261109/retained-baseline/before-80x24-age-compact.txt",
+      "recorded_sha256": "a211bb180ce4648c6b563e88cad786d540631f5119a1c4689f97f297c51c6e74",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/rfc0515-remaining-20261109/baseline/before-120x35-list-detailed.txt": {
+      "recorded_path": "artifacts/rfc0515-remaining-20261109/retained-baseline/before-120x35-list-detailed.txt",
+      "recorded_sha256": "27bb7b96139c2b9381289c9d3fecb35ef554bb76e1930372f4cb5aae45f56161",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/rfc0515-remaining-20261109/baseline/before-80x24-runtime-compact.txt": {
+      "recorded_path": "artifacts/rfc0515-remaining-20261109/retained-baseline/before-80x24-runtime-compact.txt",
+      "recorded_sha256": "9b62c26d9cde0c3227257c10db3162f611c7f839414c4f35b07f647481da899e",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/rfc0515-remaining-20261109/baseline/before-120x35-cause-detailed.txt": {
+      "recorded_path": "artifacts/rfc0515-remaining-20261109/retained-baseline/before-120x35-cause-detailed.txt",
+      "recorded_sha256": "04d6444d34b4925443a308bc34db4e297ea84d5aed3f49e5e98f84744ac67eb6",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/rfc0515-remaining-20261109/baseline/before-80x24-state-compact.txt": {
+      "recorded_path": "artifacts/rfc0515-remaining-20261109/retained-baseline/before-80x24-state-compact.txt",
+      "recorded_sha256": "b571a3a2633c896f47ba588bacc046a5cf22073678bbdb7fc799f005414851e8",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/rfc0515-remaining-20261109/baseline/before-120x35-age-detailed.txt": {
+      "recorded_path": "artifacts/rfc0515-remaining-20261109/retained-baseline/before-120x35-age-detailed.txt",
+      "recorded_sha256": "994010ffe17f0d1fcb995ef8b37cb8ae3c8b594910d1af709c191763539dcc1a",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/rfc0515-remaining-20261109/baseline/before-80x24-runtime-detailed.txt": {
+      "recorded_path": "artifacts/rfc0515-remaining-20261109/retained-baseline/before-80x24-runtime-detailed.txt",
+      "recorded_sha256": "78f56dd79db70aa186570837d5f0cc39c95f0bc5276f939cdb05af22c2dca954",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/rfc0515-remaining-20261109/baseline/before-120x35-24h-detailed.txt": {
+      "recorded_path": "artifacts/rfc0515-remaining-20261109/retained-baseline/before-120x35-24h-detailed.txt",
+      "recorded_sha256": "a79f57278859084db327fdcf5425c2083e2e1792caba4f5c19e5ecc8395e38d4",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/rfc0515-remaining-20261109/baseline/before-80x24-state-detailed.txt": {
+      "recorded_path": "artifacts/rfc0515-remaining-20261109/retained-baseline/before-80x24-state-detailed.txt",
+      "recorded_sha256": "1064c3c348b5af20b94546229967c36e1f0f008124c2f89f20573690120d7c44",
+      "content_kind": "retained_capture"
+    }
+  },
+  "historical_records": []
+}

@@ -35,14 +35,19 @@ val owner_for_scope :
 
 val cache : owner -> Server_dashboard_http_cache.cached_surface
 val is_current : owner -> bool
+val has_observation : owner -> bool
+(** A complete or partial source body has been retained. First partial results
+    can be served without turning each GET into a retry ahead of backoff. *)
 val begin_attempt : owner -> origin:origin -> attempt
-val publish_success : attempt -> Dashboard_briefing.observation -> bool
+val publish_observation : attempt -> Dashboard_briefing.observation -> bool
 val publish_failure_message : attempt -> string -> bool
 (** Completion admits only the captured scope and ordered attempt.
     A successful attempt cannot later degrade its own result when the outer
     timeout window also closes. A source notification during an actual read
     preserves trailing read debt, but does not discard that read's completed
-    observation. Generation fences prepared publications; it does not claim
+    observation. A partial read replaces the body with its actual readable
+    rows in [error] state and retains failure-only retry; it never stamps a
+    full success. Generation fences prepared publications; it does not claim
     an atomic read of every source. Callback failures cannot change admission. *)
 
 val invalidate : owner -> unit

@@ -1,5 +1,4 @@
 module Owner = Server_dashboard_mission_observation
-module Cache = Server_dashboard_http_cache
 module Runtime = Server_dashboard_http_core_runtime
 module Core_cache = Server_dashboard_http_core_cache
 
@@ -92,12 +91,14 @@ let start ~state ~sw ~clock ~mono_clock =
           let observation = compute ~state ~scope ~sw ~clock () in
           (* Install before returning: the reusable worker reads next_deadline
              before on_result. Own-success admission wins a closing window. *)
-          ignore (Owner.publish_success attempt observation);
-          ()
+          ignore (Owner.publish_observation attempt observation);
+          observation
         with
         | Eio.Cancel.Cancelled _ as exn -> raise exn
         | exn -> ignore (Owner.publish_failure_message attempt (Printexc.to_string exn)); raise exn)
-      ~on_result:(fun () -> ()) ~next_deadline:(fun () -> Owner.next_deadline_unix owner))
+      ~on_result:(fun observation -> match observation.Dashboard_projection_read.completeness with
+        | Complete -> () | Partial detail -> raise (Dashboard_projection_read.Incomplete_read detail))
+      ~next_deadline:(fun _ -> Owner.next_deadline_unix owner))
 
 let attest_instance context = function
   | `Assoc fields -> `Assoc (("observer_instance_id", `String (Server_observer_scope.instance_id context.scope))
@@ -107,7 +108,7 @@ let attest_instance context = function
 let default_json ~sw ~clock context =
   let owner = context.owner in
   let cached () =
-    if Cache.cached_surface_has_success (Owner.cache owner)
+    if Owner.has_observation owner
     then Some (Owner.publication owner).json else None in
   match cached () with
   | Some json -> json
@@ -121,8 +122,8 @@ let default_json ~sw ~clock context =
         attempted := Some attempt;
         try
           let observation = compute ~state:context.state ~scope:context.scope ~sw ~clock () in
-          ignore (Owner.publish_success attempt observation);
-          observation.json
+          ignore (Owner.publish_observation attempt observation);
+          Dashboard_projection_read.json_with_read_diagnostics observation
         with
         | Eio.Cancel.Cancelled _ as exn -> raise exn
         | exn -> fail exn; raise exn) in
@@ -146,7 +147,8 @@ let json ~sw ~clock context =
           ~ttl:Core_cache.deep_surface_cache_ttl_s ~clock
           ~timeout_sec:Core_cache.dashboard_briefing_timeout_s
           (Pool_work.cpu ~name:__FUNCTION__ (fun () ->
-            (compute ~state:context.state ~scope:context.scope ~sw ~clock ~actor ()).json)) in
+            compute ~state:context.state ~scope:context.scope ~sw ~clock ~actor ()
+            |> Dashboard_projection_read.json_with_read_diagnostics)) in
   result |> Dashboard_projection_cache.with_current_keeper_observations ~config:context.scope.config
   |> attest_instance context
 

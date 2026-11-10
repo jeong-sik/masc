@@ -22,7 +22,7 @@ let with_owner f = Eio_main.run (fun env ->
 
 let observation marker next_deadline_unix : Dashboard_briefing.observation =
   {json = `Assoc ["marker", `String marker; "summary", `Assoc ["workspace_health", `String "ok"]];
-   next_deadline_unix}
+   next_deadline_unix; completeness = Dashboard_projection_read.Complete}
 
 let test_own_success_and_newer_attempt_order () = with_owner (fun _state _scope owner ->
   let older = Owner.begin_attempt owner ~origin:Source_read in

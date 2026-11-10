@@ -2007,8 +2007,10 @@ let feature_child_heading (state : state) ~cols ~title =
       let width = framed_inner_width cols in
       if Message_layout.display_width heading <= width then heading
       else
+        (* The summary pads a table cell; the heading owns this free space. *)
         let tail = reading_connection_summary
-          ~width:(max 0 (width - Message_layout.display_width "  ")) state in
+          ~width:(max 0 (width - Message_layout.display_width "  ")) state
+          |> String.trim in
         detail_heading ~cols ~lead ~id:"" ~after:[] ~tail
 
 (* A header row of [lead], a bracketed [label] and [badge]. The badge says

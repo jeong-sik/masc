@@ -6,6 +6,7 @@ type t =
   | Keeper_write
   | Keeper_delete
   | Operator_delete
+[@@deriving enumerate]
 
 let to_label = function
   | Admission -> "admission"

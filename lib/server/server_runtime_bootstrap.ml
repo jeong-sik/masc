@@ -2106,8 +2106,7 @@ let run ~sw ~runtime_sw ~env ~address ~port ~base_path ?input_base_path ?on_read
             Server_dashboard_http.start_operator_snapshot_refresh_loop ~state ~sw ~clock
               ~broadcast_snapshot:Server_dashboard_http_execution_surfaces.broadcast_refreshed_operator_snapshot)
         ; operator_digest_refresh = (fun () ->
-            Server_dashboard_http.start_operator_digest_refresh_loop ~state ~sw ~clock
-              ~broadcast_digest:Server_dashboard_http_execution_surfaces.broadcast_operator_digest)
+            Server_dashboard_http.start_operator_digest_refresh_loop ~state ~sw ~clock ~mono_clock)
         ; shell_prewarm = (fun () ->
             Atomic.set Server_dashboard_http.shell_warming true;
             Eio.Fiber.fork ~sw (fun () ->

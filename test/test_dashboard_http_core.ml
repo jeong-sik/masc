@@ -1985,7 +1985,7 @@ let test_operator_digest_default_route_exposes_provenance () =
       ; "generated_at", `String "2026-05-15T00:00:01Z"
       ]
   in
-  with_cached_surface_success Server_dashboard_http_core_operator.operator_digest_cache seed
+  with_cached_surface_success (Server_dashboard_http_core_operator.operator_digest_cache ~state) seed
   @@ fun () ->
   match
     Server_dashboard_http_core.operator_digest_http_json

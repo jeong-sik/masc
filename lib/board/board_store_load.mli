@@ -1,4 +1,6 @@
-(** Quiescent startup loaders. Counts describe accepted physical rows,
+(** Quiescent startup loaders. Posts, comments, votes and reactions refuse
+    model replacement while deletion work is pending.
+    Counts describe accepted physical rows,
     including duplicate identities. These are not live reload/admission APIs. *)
 val load_persisted_posts : Board_types.store -> (int, string * exn) result
 val load_persisted_comments : Board_types.store -> (int, string * exn) result

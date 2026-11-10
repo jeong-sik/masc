@@ -87,7 +87,9 @@ val start_on_change :
     window. Failure retains a retry, using [interval_s] and the existing
     exponential backoff; a new input can bring that retry forward. Every
     attempt keeps [timeout_s], and switch cancellation ends both reads and
-    waits. [config.wakeup] is unused: [changes] is the sole input mailbox.
+    waits. The worker is a daemon, so a normal [Switch.run] return also retires
+    its idle wait before release callbacks unsubscribe the inputs.
+    [config.wakeup] is unused: [changes] is the sole input mailbox.
 
     Install the input subscription before starting this worker. Its publisher
     must retain a signal without blocking the authoritative writer. *)

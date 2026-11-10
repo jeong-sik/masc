@@ -6,13 +6,13 @@ type keeper_change =
   | Waiting_inventory of Keeper_waiting_inventory_broadcast.source
 
 type store_change =
-  | Schedule | Pending_confirms | Goals | Runtime_config | Skill_catalog | Lane_addon_exports
+  | Schedule | Pending_confirms | Goals | Runtime_config | Skill_catalog | Lane_addon_exports | Tools
 
 type gate_change = Approvals | Rules | Mode | External_mode | Installation_asks of string
 
 type agent_core_change =
   | Started | Completed | Failed | Yielded | Input_required | Tool_called
-  | Tool_completed | Turn_completed | Telemetry
+  | Tool_completed | Turn_completed
 
 type t =
   | Dataset of Workspace_dataset_event.dataset
@@ -25,6 +25,7 @@ type t =
   | Board
   | Execution_invalidated
   | Agent_core of { keeper : string option; change : agent_core_change }
+  | Telemetry_sample
 
 let ( let* ) = Option.bind
 let field fields name = List.assoc_opt name fields
@@ -38,6 +39,20 @@ let finite = function
 let timestamp fields = Option.exists finite (field fields "ts_unix")
 let timestamp_if_present fields = match field fields "ts_unix" with
   | None -> true | Some value -> finite value
+let object_ fields name = match field fields name with
+  | Some (`Assoc value) -> Some value | Some _ | None -> None
+let number fields name = match field fields name with
+  | Some (`Float value) when Float.is_finite value -> Some value
+  | Some (`Int value) -> Some (Float.of_int value)
+  | Some _ | None -> None
+let integer = function `Int _ -> true | _ -> false
+let boolean = function `Bool _ -> true | _ -> false
+let nullable predicate = function `Null -> true | value -> predicate value
+let has fields name predicate = Option.exists predicate (field fields name)
+let unique_fields fields =
+  let keys = List.map fst fields in
+  List.length keys = List.length (List.sort_uniq String.compare keys)
+;;
 let named ?(key = "name") fields change =
   let* keeper = text fields key in
   if timestamp_if_present fields then Some (Keeper { keeper; change }) else None
@@ -67,12 +82,40 @@ let agent_core fields wire change valid =
   if not (String.equal actual wire && timestamp fields && valid payload) then None
   else
     let keeper = text fields "agent_name" in
-    match change, keeper with
-    | Telemetry, (None | Some _) -> Some (Agent_core { keeper; change })
-    | (Started | Completed | Failed | Yielded | Input_required | Tool_called
-      | Tool_completed | Turn_completed), Some _ -> Some (Agent_core { keeper; change })
-    | (Started | Completed | Failed | Yielded | Input_required | Tool_called
-      | Tool_completed | Turn_completed), None -> None
+    match keeper with
+    | Some _ -> Some (Agent_core { keeper; change })
+    | None -> None
+;;
+
+let telemetry_sample fields =
+  let* provider = text fields "provider_id" in
+  let* model = text fields "model_id" in
+  let* at = number fields "ts_unix" in
+  let* entry = object_ fields "payload" in
+  let* recorded_at = number entry "recorded_at" in
+  let* sample = object_ entry "sample" in
+  let* provider_in_sample = text sample "provider_id" in
+  let* model_in_sample = text sample "model_id" in
+  let status_valid = match object_ sample "status" with
+    | None -> false
+    | Some status ->
+      unique_fields status && (match text status "kind" with
+       | Some "success" -> true
+       | Some "error" -> has status "transient" boolean
+       | Some "cancelled" -> has status "reason" (function `String _ -> true | _ -> false)
+       | Some _ | None -> false) in
+  if unique_fields entry && unique_fields sample && Float.equal at recorded_at
+     && String.equal provider provider_in_sample && String.equal model model_in_sample
+     && List.for_all (fun name -> has sample name finite)
+          ["ttfb_ms"; "total_duration_ms"; "serialization_ms"]
+     && has sample "usage_reported" boolean
+     && has sample "input_tokens" (nullable integer)
+     && has sample "output_tokens" (nullable integer)
+     && has sample "throughput_tokens_per_s" (nullable finite)
+     && has sample "cost_usd" (nullable finite)
+     && has sample "cache_hit" (nullable boolean)
+     && has sample "retry_count" integer && status_valid
+  then Some Telemetry_sample else None
 ;;
 
 let of_fields fields =
@@ -149,17 +192,28 @@ let of_fields fields =
       agent_core fields "tool_completed" Tool_completed (valid_payload Sse_event.Json.tool_completed_payload_of_string)
   | "agent_core:turn_completed" ->
       agent_core fields "turn_completed" Turn_completed (valid_payload Sse_event.Json.turn_completed_payload_of_string)
-  | "agent_core:telemetry_event" ->
-      agent_core fields "telemetry_event" Telemetry (fun _ -> true)
+  | "agent_core_telemetry_sample" -> telemetry_sample fields
   | _ -> None
+;;
+
+let of_notification fields =
+  if List.exists (fun (key, _) -> not (List.mem key ["jsonrpc"; "method"; "params"])) fields
+  then None
+  else match field fields "jsonrpc", text fields "method", field fields "params" with
+    | Some (`String "2.0"), Some "notifications/board", Some (`Assoc params)
+      when unique_fields params ->
+        let decoded = of_fields params in
+        if decoded = Some Board then decoded else None
+    | Some (`String "2.0"), Some "notifications/tools/list_changed", None -> Some (Store Tools)
+    | _, _, _ -> None
 ;;
 
 let of_event (event : Sse.external_event) =
   match event.ext_payload with
   | `Assoc fields ->
-      let keys = List.map fst fields in
-      if List.length keys <> List.length (List.sort_uniq String.compare keys)
-      then None else of_fields fields
+      if not (unique_fields fields) then None
+      else if List.mem_assoc "jsonrpc" fields then of_notification fields
+      else of_fields fields
   | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> None
 ;;
 

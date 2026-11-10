@@ -153,6 +153,16 @@ let board_sse_event_params event =
       ]
 ;;
 
+let publish_board_sse_event event =
+  let params = board_sse_event_params event in
+  Server_dashboard_http_core_cache.invalidate_board_projections ();
+  Sse.broadcast
+    (`Assoc
+       [ "jsonrpc", `String "2.0"
+       ; "method", `String "notifications/board"
+       ; "params", params ])
+;;
+
 let broadcast_mention_wakeup_action = function
   | Some target when String.trim target <> "" -> `Wake_keeper target
   | Some _ | None -> `Suppress_no_target
@@ -503,6 +513,7 @@ let project_workspace_message_to_fleet
 module Projection_for_testing = struct
   let autoboot_proactive_warmup_sec = autoboot_proactive_warmup_sec
   let board_sse_event_params = board_sse_event_params
+  let publish_board_sse_event = publish_board_sse_event
   let broadcast_mention_wakeup_action = broadcast_mention_wakeup_action
   let deliver_broadcast_mention = deliver_broadcast_mention
   let project_workspace_message_to_fleet = project_workspace_message_to_fleet
@@ -1692,14 +1703,7 @@ let start_keeper_loops_owned
       ~config
       signal);
   Board_dispatch.set_board_sse_hook (fun event ->
-    let params = board_sse_event_params event in
-    Server_dashboard_http_core_cache.invalidate_board_projections ();
-    Sse.broadcast
-      (`Assoc
-          [ "jsonrpc", `String "2.0"
-          ; "method", `String "notifications/board"
-          ; "params", params
-          ]);
+    publish_board_sse_event event;
     (* Emit activity event so Discord/external connectors can detect board
        posts. A change to an existing post is not activity. *)
     let activity =

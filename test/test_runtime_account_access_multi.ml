@@ -577,33 +577,35 @@ let test_multi_account () =
              and its gates give no destination, and the readings an operator
              sees name the reason. *)
           let jev_key_variable = "MASC_TEST_D4C_JEV_KEY" in
-          Unix.putenv jev_key_variable "jev-key";
           let found_policy = Runtime_typesafeai_policy.current () in
-          Runtime_typesafeai_policy.publish
-            { Runtime_schema.default_typesafeai with
-              destinations =
-                ( { Runtime_schema.typesafe_destination with
-                    endpoint = Printf.sprintf "http://127.0.0.1:%d/v1/systemone" port
-                  ; api_key_env = jev_key_variable
-                  }
-                , [] )
-            ; absorb_gate = true
-            ; memory_recall = Runtime_schema.Memory_recall_on Runtime_schema.All_keepers
-            };
-          let lane = Masc.Typesafeai_config.lane_destinations () in
-          let gates =
-            [ "Board attention", Masc.Typesafeai_config.board_attention_destinations ~keeper_id:"reader"
-            ; "the absorb gate", Masc.Typesafeai_config.absorb_gate_destinations ~keeper_id:"reader"
-            ; "memory recall", Masc.Typesafeai_config.memory_recall_destinations ~keeper_id:"reader"
-            ]
+          let lane, gates, health, standing =
+            with_env jev_key_variable "jev-key" (fun () ->
+              Runtime_typesafeai_policy.publish
+                { Runtime_schema.default_typesafeai with
+                  destinations =
+                    ( { Runtime_schema.typesafe_destination with
+                        endpoint = Printf.sprintf "http://127.0.0.1:%d/v1/systemone" port
+                      ; api_key_env = jev_key_variable
+                      }
+                    , [] )
+                ; absorb_gate = true
+                ; memory_recall = Runtime_schema.Memory_recall_on Runtime_schema.All_keepers
+                };
+              Fun.protect
+                ~finally:(fun () -> Runtime_typesafeai_policy.publish found_policy)
+                (fun () ->
+                  ( Masc.Typesafeai_config.lane_destinations ()
+                  , [ ( "Board attention"
+                      , Masc.Typesafeai_config.board_attention_destinations ~keeper_id:"reader" )
+                    ; ( "the absorb gate"
+                      , Masc.Typesafeai_config.absorb_gate_destinations ~keeper_id:"reader" )
+                    ; ( "memory recall"
+                      , Masc.Typesafeai_config.memory_recall_destinations ~keeper_id:"reader" )
+                    ]
+                  , Server_typesafeai_health.health_json ()
+                  , Server_memory_recall_standing.read
+                      ~keepers_dir:(Filename.temp_dir ~temp_dir:root "keepers-" "") )))
           in
-          let health = Server_typesafeai_health.health_json () in
-          let standing =
-            Server_memory_recall_standing.read
-              ~keepers_dir:(Filename.temp_dir ~temp_dir:root "keepers-" "")
-          in
-          Runtime_typesafeai_policy.publish found_policy;
-          Unix.putenv jev_key_variable "";
           List.iter
             (fun (label, destinations) ->
               match destinations with

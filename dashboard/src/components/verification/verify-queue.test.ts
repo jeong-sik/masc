@@ -19,8 +19,10 @@ const mockLoad = vi.fn()
 vi.mock('../../lib/async-state', () => ({
   createManagedAsyncResource: () => ({
     state: mockState,
+    readError: () => null,
     load: mockLoad,
     cancel: vi.fn(),
+    reset: vi.fn(),
   }),
 }))
 

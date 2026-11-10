@@ -2,6 +2,7 @@
 import { html } from 'htm/preact'
 import { act, cleanup, render, screen, waitFor } from '@testing-library/preact'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { acceptedExecutionWorkspace } from '../../execution-workspace-authority'
 
 import type {
   KeeperMemoryHealthKeeperEntry,
@@ -11,7 +12,9 @@ import type {
 const mockFetch = vi.fn<() => Promise<KeeperMemoryHealthResponse>>()
 const mockGet = vi.hoisted(() => vi.fn())
 
-vi.mock('../../api/core', () => ({ get: mockGet }))
+vi.mock('../../api/core', async importOriginal => ({
+  ...await importOriginal<typeof import('../../api/core')>(), get: mockGet,
+}))
 
 vi.mock('../../api/dashboard', () => ({
   fetchKeeperMemoryHealth: () => mockFetch(),
@@ -136,11 +139,14 @@ function deferred<T>() {
 
 describe('KeeperMemoryHealth', () => {
   beforeEach(() => {
+    acceptedExecutionWorkspace.value = Object.freeze({ epoch: 'fixture', workspaceRoot: '/fixture',
+      connectionGeneration: 0, observerInstanceId: 'fixture-instance' })
     mockFetch.mockReset()
     mockGet.mockReset()
   })
   afterEach(() => {
     cleanup()
+    acceptedExecutionWorkspace.value = null
     vi.restoreAllMocks()
   })
 
@@ -510,6 +516,7 @@ describe('KeeperMemoryHealth', () => {
     mockFetch.mockReturnValueOnce(new Promise<KeeperMemoryHealthResponse>(() => {}))
     const loading = render(html`<${KeeperMemoryHealth} />`)
     expect(screen.getByText('로딩중...')).not.toBeNull()
+    await waitFor(() => expect(mockFetch).toHaveBeenCalledTimes(1))
     loading.unmount()
 
     mockFetch.mockRejectedValueOnce(new Error('boom'))

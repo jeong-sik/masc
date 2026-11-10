@@ -5229,6 +5229,15 @@ let empty_memory_context_cycle =
     "read_position_read_error", `Null; "rewriting_through", `Null;
     "prepared", `Null; "synthesis", `Null; "unread", empty_memory_unread_evidence]
 
+(* Every pass and change the server counts, none moved since it started. *)
+let no_memory_changes =
+  let changes = [ "added"; "absorbed"; "superseded"; "dropped" ] in
+  `Assoc
+    (List.map
+       (fun pass -> pass, `Assoc (List.map (fun change -> change, `Int 0) changes))
+       [ "admission"; "durable"; "continuity"; "cleanup"; "keeper_write"; "keeper_delete"
+       ; "operator_delete" ])
+
 let disabled_memory_execution =
   let module Execution = Masc.Keeper_memory_execution_availability in
   Masc.Keeper_librarian_addon.all
@@ -5244,7 +5253,7 @@ let disabled_memory_execution =
    that disagrees rather than trusting the string it was handed. *)
 let memory_alert_snapshot_with_extra extra_alert_fields ~code ~severity ~target =
   `Assoc
-    [ ("schema", `String "keeper.memory_os.current_health.v13")
+    [ ("schema", `String "keeper.memory_os.current_health.v14")
     ; ("execution", disabled_memory_execution)
     ; ("generated_at", `Float 1_775_000_000.0)
     ; ( "keepers"
@@ -5262,6 +5271,8 @@ let memory_alert_snapshot_with_extra extra_alert_fields ~code ~severity ~target 
               ; ("snapshot_present", `Bool false)
               ; ("updated_at", `Null)
               ; ("age_bins", `Null)
+              ; ("facts_by_hour", `List [])
+              ; ("changes_since_start", no_memory_changes)
               ; ("context_cycle", empty_memory_context_cycle)
               ; ( "librarian"
                 , `Assoc
@@ -5334,6 +5345,75 @@ let memory_alert_snapshot_with_extra extra_alert_fields ~code ~severity ~target 
     ]
 
 let memory_alert_snapshot = memory_alert_snapshot_with_extra []
+
+let test_decode_memory_health_reads_change_history () =
+  let json =
+    memory_alert_snapshot ~code:"librarian_starvation" ~severity:"error"
+      ~target:"librarian_starvation"
+  in
+  let replace_field name value = function
+    | `Assoc fields ->
+      `Assoc
+        (List.map
+           (fun (field, current) ->
+              if String.equal field name then field, value else field, current)
+           fields)
+    | json -> json
+  in
+  let map_keeper update = function
+    | `Assoc fields ->
+      `Assoc
+        (List.map
+           (fun (field, value) ->
+              if String.equal field "keepers"
+              then
+                match value with
+                | `List [ keeper ] -> field, `List [ update keeper ]
+                | _ -> field, value
+              else field, value)
+           fields)
+    | json -> json
+  in
+  Alcotest.(check bool) "the unchanged current fixture decodes" false
+    (memory_health_rejects json);
+  (* Keep the v14 checks on the retained fixture after the large older
+     memory-health matrix moved to the server response tests. *)
+  let healthy_field name value = map_keeper (replace_field name value) json in
+  let point recorded_at facts =
+    `Assoc [ ("recorded_at", `Float recorded_at); ("facts", `Int facts) ]
+  in
+  Alcotest.(check bool) "a point in each later hour decodes" false
+    (memory_health_rejects
+       (healthy_field "facts_by_hour"
+          (`List [ point 1_699_996_400. 11; point 1_699_999_900. 12 ])));
+  let changes_without_first_pass =
+    match no_memory_changes with
+    | `Assoc (_ :: passes) -> `Assoc passes
+    | other -> other
+  in
+  let changes_with_another_pass =
+    match no_memory_changes with
+    | `Assoc ((_, counts) :: _ as passes) ->
+      `Assoc (passes @ [ ("later_pass", counts) ])
+    | other -> other
+  in
+  let changes_with_negative_count =
+    match no_memory_changes with
+    | `Assoc ((pass, counts) :: passes) ->
+      `Assoc ((pass, replace_field "dropped" (`Int (-1)) counts) :: passes)
+    | other -> other
+  in
+  List.iter
+    (fun (label, name, value) ->
+       Alcotest.(check bool) label true
+         (memory_health_rejects (healthy_field name value)))
+    [ ( "two points in one hour are refused"
+      , "facts_by_hour"
+      , `List [ point 1_699_999_200. 11; point 1_699_999_900. 12 ] )
+    ; "a change table without a pass is refused", "changes_since_start", changes_without_first_pass
+    ; "a change table with another pass is refused", "changes_since_start", changes_with_another_pass
+    ; "a negative change count is refused", "changes_since_start", changes_with_negative_count
+    ]
 
 let test_decode_memory_alert_keeps_the_code_contract () =
   (match
@@ -13915,6 +13995,8 @@ let () =
           test_decode_repository_changes_keeps_git_axes;
         Alcotest.test_case "memory health rejects stale schema" `Quick
           test_decode_memory_health_rejects_stale_schema;
+        Alcotest.test_case "memory health reads change history" `Quick
+          test_decode_memory_health_reads_change_history;
         Alcotest.test_case "memory alert keeps the code contract" `Quick
           test_decode_memory_alert_keeps_the_code_contract;
         Alcotest.test_case "standalone lane configuration is a closed set" `Quick

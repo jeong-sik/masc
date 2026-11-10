@@ -34,6 +34,8 @@ let make_keeper ~keeper_id age_bins : Masc.Tui_decode_memory_health.memory_keepe
   ; mkh_removed = 0
   ; mkh_snapshot_present = true
   ; mkh_age_bins = age_bins
+  ; mkh_facts_by_hour = []
+  ; mkh_changes_since_start = []
   ; mkh_context_cycle =
       { mcc_saved = None
       ; mcc_saved_unreadable = false

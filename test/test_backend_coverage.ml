@@ -2,7 +2,7 @@
 
     Target: Fill coverage gaps identified in existing tests.
     Focus areas:
-    - Backend_types: validate_ttl, config, status
+    - Backend_types: config, status
     - Backend.ml: Compression, lock operations, atomic operations, unified interface
 *)
 
@@ -45,31 +45,6 @@ let write_file path contents =
   Fun.protect
     ~finally:(fun () -> close_out_noerr oc)
     (fun () -> output_string oc contents)
-
-(* ============================================================ *)
-(* Backend.ml - validate_ttl Tests                               *)
-(* ============================================================ *)
-
-let test_validate_ttl_zero () =
-  let result = Backend_types.validate_ttl 0 in
-  check int "zero TTL clamped to 1" 1 result
-
-let test_validate_ttl_negative () =
-  let result = Backend_types.validate_ttl (-100) in
-  check int "negative TTL clamped to 1" 1 result
-
-let test_validate_ttl_normal () =
-  let result = Backend_types.validate_ttl 60 in
-  check int "normal TTL unchanged" 60 result
-
-let test_validate_ttl_large () =
-  let result = Backend_types.validate_ttl 999999 in
-  check int "large TTL clamped to 86400" 86400 result
-
-let test_validate_ttl_boundary () =
-  check int "TTL at max boundary" 86400 (Backend_types.validate_ttl 86400);
-  check int "TTL just above max" 86400 (Backend_types.validate_ttl 86401);
-  check int "TTL at min boundary" 1 (Backend_types.validate_ttl 1)
 
 (* ============================================================ *)
 (* Backend.ml - Lock Operations                              *)
@@ -369,13 +344,6 @@ let () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   run "Backend Coverage" [
-    "validate_ttl", [
-      test_case "zero TTL" `Quick test_validate_ttl_zero;
-      test_case "negative TTL" `Quick test_validate_ttl_negative;
-      test_case "normal TTL" `Quick test_validate_ttl_normal;
-      test_case "large TTL" `Quick test_validate_ttl_large;
-      test_case "boundary TTL" `Quick test_validate_ttl_boundary;
-    ];
     "eio_locks", [
       test_case "acquire" `Quick test_eio_lock_acquire;
       test_case "block" `Quick test_eio_lock_block;

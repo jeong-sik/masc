@@ -69,7 +69,6 @@ val internal_keeper_token : unit -> string option
     in-process value. [None] before {!ensure_internal_keeper_token} has
     run. In-process consumers use this; the env var remains only as the
     cross-process surface. *)
-val extract_agent_type_prefix : string -> string option
 
 (** {1 Auth Config} *)
 

@@ -317,6 +317,7 @@ function PostCard({ post, reactions, supportedEmojis, reactionsArriving = false 
   const authorLabel = boardActorDisplayName(post.author, post.author_identity)
   const authorSigilLabel = boardActorSigilLabel(post.author, post.author_identity)
   const authorTitle = boardActorTitle(post.author, post.author_identity)
+  const voteKnown = post.current_vote !== undefined
   const upvoteActive = post.current_vote === 'up'
   const downvoteActive = post.current_vote === 'down'
   const voteScoreLabel = String(post.votes)
@@ -327,6 +328,7 @@ function PostCard({ post, reactions, supportedEmojis, reactionsArriving = false 
 
   const handleVote = async (dir: 'up' | 'down', event: Event) => {
     event.stopPropagation()
+    if (!voteKnown) return
     try {
       await votePost(post.id, dir)
       refreshBoard()
@@ -453,18 +455,21 @@ function PostCard({ post, reactions, supportedEmojis, reactionsArriving = false 
         <span class="karma" aria-label=${voteScoreAria} title=${voteScoreLabel}>karma <b>${voteScoreLabel}</b></span>
         <button type="button"
           aria-label="추천"
-          aria-pressed=${upvoteActive ? 'true' : 'false'}
-          disabled=${upvoteActive}
+          aria-pressed=${voteKnown ? String(upvoteActive) : undefined}
+          disabled=${!voteKnown || upvoteActive}
+          title=${voteKnown ? undefined : '내 투표 상태를 확인할 수 없습니다.'}
           class="bd-react ${upvoteActive ? 'mine' : ''}"
           onClick=${(event: Event) => handleVote('up', event)}
         >▲</button>
         <button type="button"
           aria-label="비추천"
-          aria-pressed=${downvoteActive ? 'true' : 'false'}
-          disabled=${downvoteActive}
+          aria-pressed=${voteKnown ? String(downvoteActive) : undefined}
+          disabled=${!voteKnown || downvoteActive}
+          title=${voteKnown ? undefined : '내 투표 상태를 확인할 수 없습니다.'}
           class="bd-react ${downvoteActive ? 'mine' : ''}"
           onClick=${(event: Event) => handleVote('down', event)}
         >▼</button>
+        ${!voteKnown ? html`<span class="text-2xs text-[var(--color-fg-muted)]">내 투표 확인 불가</span>` : null}
         <span class="replies">답글 ${post.comment_count}</span>
         <${PostShareActions} post=${post} compact />
         <span class="ml-auto hidden group-hover:inline-flex items-center gap-1">

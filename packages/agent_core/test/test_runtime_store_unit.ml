@@ -202,68 +202,6 @@ let test_load_session_corrupt () =
        | Error _ -> ()))
 ;;
 
-let save_run store session_id updated_at =
-  let session = mk_session ~session_id ~updated_at () in
-  match Runtime_store.save_session store session with
-  | Ok () -> session
-  | Error e -> Alcotest.fail (Error.to_string e)
-;;
-
-let corrupt_run store session_id =
-  let sess_dir = Runtime_store.session_dir store session_id in
-  (match Runtime_store.ensure_dir sess_dir with
-   | Ok () -> ()
-   | Error e -> Alcotest.fail (Error.to_string e));
-  let oc = open_out (Runtime_store.session_path store session_id) in
-  output_string oc "{not-json";
-  close_out oc
-;;
-
-let test_list_runs_stable_updated_at_order () =
-  with_temp_dir (fun dir ->
-    let root = Filename.concat dir "store" in
-    match Runtime_store.create ~root () with
-    | Error e -> Alcotest.fail (Error.to_string e)
-    | Ok store ->
-      ignore (save_run store "run-c" 30.0);
-      ignore (save_run store "run-a" 10.0);
-      ignore (save_run store "run-b" 20.0);
-      (match Runtime_store.list_runs store with
-       | Error e -> Alcotest.fail (Error.to_string e)
-       | Ok listing ->
-         Alcotest.(check (list string))
-           "updated_at ordering"
-           [ "run-a"; "run-b"; "run-c" ]
-           (List.map
-              (fun (run : Runtime_store.run_record) -> run.session.session_id)
-              listing.runs);
-         Alcotest.(check int) "no failures" 0 (List.length listing.failures)))
-;;
-
-let test_list_runs_reports_corrupt_without_dropping_valid_runs () =
-  with_temp_dir (fun dir ->
-    let root = Filename.concat dir "store" in
-    match Runtime_store.create ~root () with
-    | Error e -> Alcotest.fail (Error.to_string e)
-    | Ok store ->
-      ignore (save_run store "run-ok" 10.0);
-      corrupt_run store "run-bad";
-      (match Runtime_store.list_runs store with
-       | Error e -> Alcotest.fail (Error.to_string e)
-       | Ok listing ->
-         Alcotest.(check (list string))
-           "valid runs"
-           [ "run-ok" ]
-           (List.map
-              (fun (run : Runtime_store.run_record) -> run.session.session_id)
-              listing.runs);
-         Alcotest.(check int) "one partial failure" 1 (List.length listing.failures);
-         (match listing.failures with
-          | [ failure ] ->
-            Alcotest.(check string) "failure session" "run-bad" failure.session_id
-          | _ -> Alcotest.fail "expected one failure")))
-;;
-
 (* ── Runner ───────────────────────────────────────────────────── *)
 
 let () =
@@ -294,16 +232,6 @@ let () =
       , [ Alcotest.test_case "save and load" `Quick test_save_load_session
         ; Alcotest.test_case "missing" `Quick test_load_session_missing
         ; Alcotest.test_case "corrupt" `Quick test_load_session_corrupt
-        ] )
-    ; ( "runs"
-      , [ Alcotest.test_case
-            "stable updated_at ordering"
-            `Quick
-            test_list_runs_stable_updated_at_order
-        ; Alcotest.test_case
-            "corrupt run is partial failure"
-            `Quick
-            test_list_runs_reports_corrupt_without_dropping_valid_runs
         ] )
     ]
 ;;

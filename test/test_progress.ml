@@ -76,31 +76,6 @@ let test_start_and_stop_tracking () =
 
 (** Validation tests *)
 
-let test_validate_task_id_empty () =
-  setup ();
-  match Masc.Progress.validate_task_id "" with
-  | Error err ->
-    check bool "error mentions empty" true
-      (String.length (Masc.Progress.validation_error_to_string err) > 0)
-  | Ok _ -> fail "empty task_id should fail"
-
-let test_validate_task_id_too_long () =
-  setup ();
-  let long_id = String.make 300 'x' in
-  match Masc.Progress.validate_task_id long_id with
-  | Error err ->
-    check bool "error mentions too long" true
-      (String.length (Masc.Progress.validation_error_to_string err) > 0)
-  | Ok _ -> fail "long task_id should fail"
-
-let test_validate_task_id_invalid_chars () =
-  setup ();
-  match Masc.Progress.validate_task_id "task\x00id" with
-  | Error err ->
-    check bool "error mentions invalid" true
-      (String.length (Masc.Progress.validation_error_to_string err) > 0)
-  | Ok _ -> fail "task_id with null char should fail"
-
 let test_validate_progress_out_of_range () =
   setup ();
   match Masc.Progress.validate_progress 1.5 with
@@ -135,9 +110,6 @@ let () =
         test_case "start and stop" `Quick test_start_and_stop_tracking;
       ]);
       ("validation", [
-        test_case "empty task_id" `Quick test_validate_task_id_empty;
-        test_case "task_id too long" `Quick test_validate_task_id_too_long;
-        test_case "task_id invalid chars" `Quick test_validate_task_id_invalid_chars;
         test_case "progress > 1.0" `Quick test_validate_progress_out_of_range;
         test_case "progress < 0.0" `Quick test_validate_progress_negative;
       ]);

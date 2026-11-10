@@ -87,6 +87,15 @@ module Theme = struct
     ; quiet : string
     ; probe : string
     ; message : string
+    (* The hues a code fence, a JSON payload and a link draw through, lifted
+       like the colours above: a green string on a light scheme is a word the
+       reader still has to read. Named by hue because several roles share
+       one -- a keyword, a number and a JSON literal are all magenta. *)
+    ; hue_magenta : string
+    ; hue_green : string
+    ; hue_blue : string
+    ; hue_cyan : string
+    ; hue_yellow : string
     (* Six slots for an axis whose members are kinds, not degrees. A file
        type, a goal phase, a sandbox: nothing in such a set outranks its
        siblings and the reader's only job is to tell them apart, which is
@@ -175,6 +184,11 @@ module Theme = struct
         ; quiet = of_colour Masc_tui_theme.Bright_black
         ; probe = of_colour Masc_tui_theme.Bright_cyan
         ; message = of_colour Masc_tui_theme.Bright_magenta
+        ; hue_magenta = of_colour Masc_tui_theme.Bright_magenta
+        ; hue_green = of_colour Masc_tui_theme.Bright_green
+        ; hue_blue = of_colour Masc_tui_theme.Bright_blue
+        ; hue_cyan = of_colour Masc_tui_theme.Bright_cyan
+        ; hue_yellow = of_colour Masc_tui_theme.Bright_yellow
         (* See [category_colour]: the hues no status token draws. *)
         ; slot_1 = of_colour (category_colour Slot_1)
         ; slot_2 = of_colour (category_colour Slot_2)
@@ -289,8 +303,13 @@ module Theme = struct
   ;;
 
   module Syntax = struct
-    let keyword = Masc_tui_theme.Syntax.keyword
-    let string = Masc_tui_theme.Syntax.string_
+    (* Content, not state: "this word is green" says what a token is, not that
+       anything is healthy, so these stay out of the status names. They draw
+       through the same lift, because a keyword the scheme leaves under 3:1 is
+       one the reader cannot find. A renderer asks for the role and never picks
+       the colour, which is what lets one remap reach all of them. *)
+    let keyword () = (resolved ()).hue_magenta
+    let string () = (resolved ()).hue_green
 
     (* A comment says it is a comment by its slant, and it sits behind the code
        around it. Its colour is the lifted bright black the tool trail already
@@ -299,19 +318,24 @@ module Theme = struct
        plain code. *)
     let code_comment () = Masc_tui_theme.Sgr.italic ^ quiet_origin ()
 
-    let code_number = Masc_tui_theme.Syntax.code_number
-    let code_type = Masc_tui_theme.Syntax.code_type
-    let code_span = Masc_tui_theme.Syntax.code_span
-    let link = Masc_tui_theme.Syntax.link
+    let code_number () = (resolved ()).hue_magenta
+    let code_type () = (resolved ()).hue_blue
+    let code_span () = (resolved ()).hue_cyan
+    let link () = (resolved ()).hue_blue
 
     (* The rule between sections and the border of a fence divide a document
        the way a panel border divides a screen, so they take the panel
        border's colour. *)
     let rule () = recede ()
 
-    let json_key = Masc_tui_theme.Syntax.json_key
-    let json_number = Masc_tui_theme.Syntax.json_number
-    let json_literal = Masc_tui_theme.Syntax.json_literal
+    (* A served JSON payload has one role per thing a reader distinguishes,
+       because a payload drawn in one colour is the wall of text the tool tree
+       was built to stop being. Keys lead: a reader scanning a nested result is
+       looking for a name. Punctuation recedes -- the braces and commas are the
+       structure the indentation already shows. *)
+    let json_key () = (resolved ()).hue_cyan
+    let json_number () = (resolved ()).hue_yellow
+    let json_literal () = (resolved ()).hue_magenta
     let json_punctuation = Masc_tui_theme.Syntax.json_punctuation
     let diff_added = Masc_tui_theme.Syntax.diff_added
     let diff_removed = Masc_tui_theme.Syntax.diff_removed

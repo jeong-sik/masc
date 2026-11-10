@@ -69,6 +69,7 @@ let create_store_with_source_io ~base_path posts_source_io comments_source_io su
   ; reactions = Hashtbl.create 4096
   ; dirty_posts = false
   ; dirty_comments = false
+  ; snapshot_retry = Independent_snapshots
   ; dirty_post_ids = Hashtbl.create 256
   ; dirty_comment_ids = Hashtbl.create 512
   ; post_rows = Hashtbl.create 1024
@@ -96,6 +97,12 @@ let require_comments_source_readable = Board_comments_source.require_readable
 let require_persisted_snapshot_readable = function
   | Ok () -> Ok ()
   | Error detail -> Error (Io_error detail)
+;;
+
+let require_model_reload_allowed store ~path = match store.snapshot_retry with
+  | Independent_snapshots -> Ok ()
+  | Deletion_pending -> Error (path, Failure
+      "Pending Board deletion requires a fresh store before model reload.")
 ;;
 
 (* RFC-0233 §7: maintain the origin secondary indexes. Shared by the create

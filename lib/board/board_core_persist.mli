@@ -59,6 +59,11 @@ val require_persisted_snapshot_readable :
 (** Reject a mutation whose full-snapshot source did not load completely.
     The stored detail includes the authoritative path and malformed row. *)
 
+val require_model_reload_allowed : store -> path:string -> (unit, string * exn) result
+(** Pure loader precondition under persistence or quiescent startup. A pending
+    deletion retains its applied model until its snapshots finish or a fresh
+    store is opened; replacing one model would lose that deletion's meaning. *)
+
 val invalidate_post_caches : store -> unit
 val invalidate_comment_caches : store -> unit
 val mark_dirty_post : store -> string -> unit

@@ -471,6 +471,26 @@ let test_log_without_mode_event () =
     | other -> Alcotest.failf "expected an unreadable log, got %s" (decision_label other))
 ;;
 
+(* A record that the local operator appends to the log by hand, in the chain
+   and with no word to the external store: what a process other than masc
+   leaves. *)
+let append_by_hand dirs ~at_ms ~kind ~body =
+  let path = L.path_of_base_path ~base_path:dirs.base in
+  match L.open_at_start ~path ~init:() ~step:(fun () _record -> (Ok () : (unit, unit) result)) with
+  | Error _ -> Alcotest.fail "the log did not open"
+  | Ok (log, (), _recovered) ->
+    let appended =
+      L.with_writer log (fun writer head ->
+        match R.make ~head ~at_ms ~author:Authz_records.Author.Local_operator ~kind ~body with
+        | Error _ -> Alcotest.fail "fixture record refused"
+        | Ok record -> L.append writer [ record ])
+    in
+    (match appended with
+     | Ok (Ok _) -> ()
+     | Ok (Error error) -> Alcotest.failf "the record was not appended: %s" (L.append_error_to_string error)
+     | Error _ -> Alcotest.fail "the log stopped")
+;;
+
 (* A record in the chain after the bootstrap, of a kind that no layer reads. The
    store matches the log, so the fold of the log is what refuses it, at its
    line, for its kind. *)
@@ -484,26 +504,7 @@ let test_record_after_the_bootstrap () =
       | Error error -> Alcotest.failf "fixture body refused: %s" (Authz_body.error_to_string error)
     in
     let path = L.path_of_base_path ~base_path:dirs.base in
-    (match L.open_at_start ~path ~init:() ~step:(fun () _record -> (Ok () : (unit, unit) result)) with
-     | Error _ -> Alcotest.fail "the log of the bootstrap did not open"
-     | Ok (log, (), _recovered) ->
-       let appended =
-         L.with_writer log (fun writer head ->
-           match
-             R.make
-               ~head
-               ~at_ms:(at_ms + 1)
-               ~author:Authz_records.Author.Local_operator
-               ~kind:R.Kind.Local_recovery
-               ~body
-           with
-           | Error _ -> Alcotest.fail "fixture record refused"
-           | Ok record -> L.append writer [ record ])
-       in
-       (match appended with
-        | Ok (Ok _) -> ()
-        | Ok (Error error) -> Alcotest.failf "the record was not appended: %s" (L.append_error_to_string error)
-        | Error _ -> Alcotest.fail "the log stopped"));
+    append_by_hand dirs ~at_ms:(at_ms + 1) ~kind:R.Kind.Local_recovery ~body;
     let expected =
       L.open_error_to_string
         Authz_state.refusal_to_string
@@ -514,6 +515,53 @@ let test_record_after_the_bootstrap () =
      | B.No_mode_event | B.Made_multi_account | B.Made_off (_ : Authz_state.t) ->
        Alcotest.fail "expected an unreadable log");
     check_refused_by "a record that no layer reads" log_unreadable dirs)
+;;
+
+(* A mode event that someone appended to the log without masc. The store
+   answered the events before it and not this one, so the two files hold
+   different epochs (design 5.1) and the boot does not take the mode the log
+   ends in: a [Reactivate] does not bring back the accounts that were turned
+   off, and an [Off] does not make a multi-account installation a single
+   user. *)
+let append_mode_event dirs ~at_ms event =
+  match Authz_mode_event.to_body { Authz_mode_event.event; workspace_id = workspace } with
+  | Error error -> Alcotest.failf "fixture body refused: %s" (Authz_body.error_to_string error)
+  | Ok body -> append_by_hand dirs ~at_ms ~kind:R.Kind.Mode_event ~body
+;;
+
+let asks_multi_account = {|{"enabled":true,"require_token":true,"account_mode":"Multi_account"}|}
+let asks_nothing = {|{"enabled":true,"require_token":true}|}
+
+let test_mode_event_appended_by_hand () =
+  with_dirs (fun dirs ->
+    bootstrap dirs;
+    turn_off dirs;
+    append_mode_event dirs ~at_ms:(at_ms + 2) Authz_mode_event.Reactivate;
+    (match (input dirs).B.log_mode with
+     | B.Made_multi_account -> ()
+     | B.Log_unreadable _ | B.No_mode_event | B.Made_off (_ : Authz_state.t) ->
+       Alcotest.fail "the log does not end in Multi_account");
+    write_config dirs asks_multi_account;
+    check_decision
+      "a Reactivate that the store did not answer"
+      (Read.Stop (Read.Multi_account_not_served B.Multi_account_uncertain))
+      dirs;
+    write_config dirs asks_nothing;
+    check_decision
+      "the same, for a config that asks for a single user"
+      (Read.Stop (Read.Refuse (B.Downgraded_from_multi_account, [])))
+      dirs);
+  with_dirs (fun dirs ->
+    bootstrap dirs;
+    append_mode_event dirs ~at_ms:(at_ms + 1) Authz_mode_event.Off;
+    List.iter
+      (fun config ->
+         write_config dirs config;
+         check_decision
+           "an Off that the store did not answer"
+           (Read.Stop (Read.Refuse (B.Rewound_after_off, [])))
+           dirs)
+      [ asks_nothing; asks_multi_account ])
 ;;
 
 (* ---- whether a file is there ---- *)
@@ -662,6 +710,7 @@ let () =
         ; Alcotest.test_case "config dir others can write" `Quick test_unreadable_config_dir
         ; Alcotest.test_case "log without a mode event" `Quick test_log_without_mode_event
         ; Alcotest.test_case "record after the bootstrap" `Quick test_record_after_the_bootstrap
+        ; Alcotest.test_case "mode event appended by hand" `Quick test_mode_event_appended_by_hand
         ; Alcotest.test_case "a single user boot writes nothing" `Quick test_boot_writes_nothing
         ; Alcotest.test_case "corrupt log" `Quick test_corrupt_log
         ; Alcotest.test_case "corrupt store" `Quick test_corrupt_store

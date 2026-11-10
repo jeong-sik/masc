@@ -1259,7 +1259,9 @@ let mark_turn_started ~observation_token ~base_path ~wake name =
         current_turn_observation = Some obs
         }, true)
   in
-  if changed then broadcast_composite_changed ~base_path ~name ~ts_unix:now
+  if changed then (
+    Dashboard_observation_commit.written ~base_path ~scope:`Workspace `Telemetry;
+    broadcast_composite_changed ~base_path ~name ~ts_unix:now)
 ;;
 
 let record_turn_progress ~observation_token ~base_path name ~event_kind =

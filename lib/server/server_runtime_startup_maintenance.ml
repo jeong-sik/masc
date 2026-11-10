@@ -108,7 +108,14 @@ let prune_jsonl_at_resolved_window ~base_path =
   let days, source, diagnostics =
     Server_maintenance_toml_config.resolve_retention_days ~config_path
   in
-  { pruned = prune_shared_jsonl_stores ~days ~masc_root;
+  let invalidate = ref true in
+  let pruned = Fun.protect ~finally:(fun () ->
+    if !invalidate then Dashboard_observation_commit.written ~base_path ~scope:`Workspace `Telemetry)
+    (fun () ->
+      let removed = prune_shared_jsonl_stores ~days ~masc_root in
+      invalidate := removed > 0;
+      removed) in
+  { pruned;
     days;
     source;
     diagnostics }

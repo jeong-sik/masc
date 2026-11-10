@@ -660,11 +660,13 @@ let deliver_pending ?store_ref ~loss_target (pending : pending_relay) =
     | None -> fun _json -> ()
     | Some store_ref ->
       fun json ->
-        let location, store = !store_ref in
-        (try Dated_jsonl.append store json with
+        let base_path, location, store = !store_ref in
+        (try Fun.protect ~finally:(fun () ->
+            Dashboard_observation_commit.written ~base_path ~scope:`Workspace `Telemetry)
+            (fun () -> Dated_jsonl.append store json) with
          | Eio.Cancel.Cancelled _ as e -> raise e
          | exn ->
-           store_ref := location, Dated_jsonl.open_store location;
+           store_ref := base_path, location, Dated_jsonl.open_store location;
            raise exn)
   in
   let target = match pending.relay_class with
@@ -764,7 +766,7 @@ let agent_core_event_store ~config =
       (Workspace.dated_store_root config)
       Dated_jsonl.Store.Root.Agent_core_events
   in
-  location, Dated_jsonl.open_store location
+  config.base_path, location, Dated_jsonl.open_store location
 ;;
 
 let start_impl ~before_prepare ~interval_s ~sw ~clock ~(config : Workspace.config) ~bus =

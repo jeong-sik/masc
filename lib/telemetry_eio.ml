@@ -187,7 +187,10 @@ let event_to_json event =
     Thread-safe via Dated_jsonl internal mutex. *)
 let track ?fs:_ config event : unit =
   let store = get_telemetry_store config in
-  Dated_jsonl.append store (event_to_json event)
+  Fun.protect ~finally:(fun () ->
+    Dashboard_observation_commit.written ~base_path:config.Workspace_utils.base_path
+      ~scope:`Workspace `Telemetry)
+    (fun () -> Dated_jsonl.append store (event_to_json event))
 
 (** Read all current date-split events. *)
 let read_all_events ?fs:_ config : event_record list =

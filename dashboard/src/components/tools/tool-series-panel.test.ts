@@ -8,6 +8,8 @@ import {
   failureRatePercent,
   failureRateSeries,
   latencySeries,
+  longCallLine,
+  timeSeries,
   type ToolSeriesViewProps,
 } from './tool-series-panel'
 import { SERIES_WINDOW_ORDER } from './tool-series-state'
@@ -18,14 +20,17 @@ beforeAll(() => document.body.append(container))
 afterAll(() => container.remove())
 afterEach(() => render(null, container))
 
+// One of the ten calls ran 200 s, so 200 s of the 300 s spent were inside a long call.
 const busy = {
   call_count: 10,
   failure_count: 2,
   deferred_count: 0,
-  total_ms: 5000,
+  total_ms: 300_000,
   p50_ms: 300,
   p95_ms: 900,
-  max_ms: 1200,
+  max_ms: 200_000,
+  long_count: 1,
+  long_total_ms: 200_000,
 }
 const idle = {
   call_count: 0,
@@ -35,12 +40,15 @@ const idle = {
   p50_ms: null,
   p95_ms: null,
   max_ms: null,
+  long_count: 0,
+  long_total_ms: 0,
 }
 
 const series: ToolMetricsSeriesResponse = {
   generated_at: 7200,
   window: { since: 0, until: 7200, bucket: 'hour', bucket_seconds: 3600, utc_offset_min: 0 },
   tool: null,
+  long_call_ms: 60_000,
   total: busy,
   buckets: [
     { start: 0, ...idle },
@@ -48,7 +56,16 @@ const series: ToolMetricsSeriesResponse = {
   ],
   top_by_time: [
     { name: 'tool_execute', public_names: ['Execute'], ...busy },
-    { name: 'tool_read_file', public_names: ['Read'], ...busy, call_count: 3 },
+    {
+      name: 'tool_read_file',
+      public_names: ['Read'],
+      ...busy,
+      call_count: 3,
+      total_ms: 900,
+      max_ms: 500,
+      long_count: 0,
+      long_total_ms: 0,
+    },
   ],
 }
 
@@ -71,6 +88,23 @@ function mount(props: ToolSeriesViewProps): void {
 
 function toolButtons(): HTMLButtonElement[] {
   return Array.from(container.querySelectorAll<HTMLButtonElement>('tbody button'))
+}
+
+/** Each stat tile's value under its label. */
+function tileValues(): Record<string, string | null> {
+  return Object.fromEntries(
+    Array.from(container.querySelectorAll('.kpi-cell')).map(tile => [
+      tile.querySelector('.kpi-label')?.textContent ?? '',
+      tile.querySelector('.kpi-value')?.textContent ?? null,
+    ]),
+  )
+}
+
+/** The text of one column of the table of tools, one entry per row. */
+function tableColumn(index: number): Array<string | undefined> {
+  return Array.from(container.querySelectorAll('tbody tr')).map(
+    row => row.querySelectorAll('td')[index]?.textContent ?? undefined,
+  )
 }
 
 describe('picking a tool', () => {
@@ -136,6 +170,25 @@ describe('chart series', () => {
   it('places each reading at the start of its bucket', () => {
     expect(callSeries(series)[0]?.readings.map(reading => reading.ts)).toEqual([0, 3600])
   })
+
+  it('draws the time inside long calls beside the time spent, on the same axis', () => {
+    const [spent, inLongCalls] = timeSeries(series)
+    expect(spent?.readings.map(reading => reading.value)).toEqual([0, 300_000])
+    expect(inLongCalls?.name).toBe('1분 이상 걸린 시간')
+    expect(inLongCalls?.readings.map(reading => reading.value)).toEqual([0, 200_000])
+  })
+
+  it('names the long-call line from the answer, not from a constant of the page', () => {
+    expect(timeSeries({ ...series, long_call_ms: 90_000 })[1]?.name).toBe('90초 이상 걸린 시간')
+  })
+})
+
+describe('longCallLine', () => {
+  it('says whole minutes as minutes and any other line as seconds', () => {
+    expect(longCallLine(60_000)).toBe('1분')
+    expect(longCallLine(120_000)).toBe('2분')
+    expect(longCallLine(90_000)).toBe('90초')
+  })
 })
 
 describe('failureRatePercent', () => {
@@ -165,6 +218,27 @@ describe('ToolSeriesView', () => {
   it('lists the tools that spent the most time, one row each', () => {
     mount(view())
     expect(toolButtons().map(button => button.textContent)).toEqual(['tool_execute', 'tool_read_file'])
+  })
+
+  it('shows how many calls ran a minute or more, and the time they took', () => {
+    mount(view())
+    const tiles = tileValues()
+    expect(tiles['1분 이상 걸린 호출']).toBe('1회')
+    expect(tiles['1분 이상 걸린 시간']).toBe('3.3m')
+  })
+
+  it('shows no long call as zero calls and no time', () => {
+    mount(view({ series: { ...series, total: { ...series.total, long_count: 0, long_total_ms: 0 } } }))
+    const tiles = tileValues()
+    expect(tiles['1분 이상 걸린 호출']).toBe('0회')
+    expect(tiles['1분 이상 걸린 시간']).toBe('0ms')
+  })
+
+  it('puts the long calls of each tool in the table, and a dash where it had none', () => {
+    mount(view())
+    const header = Array.from(container.querySelectorAll('thead th')).map(cell => cell.textContent)
+    expect(header[4]).toBe('1분 이상 걸린 호출')
+    expect(tableColumn(4)).toEqual(['1회 · 3.3m', '-'])
   })
 
   it('picks a tool when its name is pressed', () => {

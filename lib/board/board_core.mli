@@ -29,8 +29,7 @@ val record_persist_error : where:string -> string -> unit
 val require_persisted_snapshot_readable :
   (unit, string) result -> (unit, board_error) result
 (** Reject a mutation whose full-snapshot source did not load completely.
-    Board_votes uses this same persistence guard so vote and reaction rewrites
-    cannot diverge from post and sub-board rewrites. *)
+    The stored result carries the source path and load failure. *)
 
 (** {1 Configuration} *)
 
@@ -65,6 +64,10 @@ val create_store_with_sub_boards_io_for_testing :
   base_path:string -> io:Fs_compat.private_jsonl_transaction_io_for_testing ->
   unit -> store
 (** One immutable sub-board transaction IO seam; creates/adopts nothing. *)
+val create_store_with_votes_io_for_testing :
+  base_path:string -> io:Fs_compat.private_jsonl_transaction_io_for_testing ->
+  unit -> store
+(** One immutable vote-file transaction IO seam; creates/adopts nothing. *)
 
 (** {1 Locking + cache invalidation} *)
 

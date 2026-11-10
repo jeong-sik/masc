@@ -145,7 +145,7 @@ let row_standing (row : row) = match row.state with
   | Exact_state (Configured c) ->
       if c.admitted_slots=[] && c.cli_slots=[] then Standing.Failing
       else if Option.is_some c.admission_error then Standing.Failing
-      else Standing.Ready
+      else Standing.Configured
   | Browser_clients (Browser_observed connected) ->
       if connected > 0 then Standing.Ready else Standing.Waiting
   (* With no observation, a lane no browser Add-on serves needs one set up;
@@ -184,7 +184,7 @@ let exact_standing (admission : Standing.t) (lane : Masc.Tui_decode.standalone_l
   | Masc.Tui_decode.Standalone_unavailable ->
       (match admission with
        | Standing.(Failing | Not_set_up | Off) -> admission
-       | Standing.(Ready | Waiting | Changing | Unobserved) -> Standing.Unobserved)
+       | Standing.(Ready | Configured | Waiting | Changing | Unobserved) -> Standing.Unobserved)
   | Masc.Tui_decode.(Standalone_running | Standalone_idle | Standalone_no_retained_observation) -> admission
 let row_standing_in (snapshot : snapshot) (row : row) =
   let admission = row_standing row in
@@ -204,6 +204,7 @@ let standing_tone : Standing.t -> L.tone = function
   | Standing.(Waiting | Changing | Not_set_up) -> L.Attention
   | Standing.(Off | Unobserved) -> L.Quiet
   | Standing.Ready -> L.Plain
+  | Standing.Configured -> L.Info
 
 let worker_tone (item : instance) = match item.phase with
   | Failed _ -> L.Failure

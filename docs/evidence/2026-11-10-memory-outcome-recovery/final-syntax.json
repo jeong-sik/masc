@@ -1,0 +1,130 @@
+{
+  "compiler": "5.5.1",
+  "scope": "parsing only; no typecheck, build or native fixture execution",
+  "ocaml": [
+    {
+      "file": "lib/keeper/keeper_librarian_pending.ml",
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "file": "lib/keeper/keeper_librarian_pending.mli",
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "file": "lib/keeper/keeper_librarian_queue_refresh.ml",
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "file": "lib/keeper/keeper_librarian_queue_refresh.mli",
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "file": "lib/keeper/keeper_memory_health_totals.ml",
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "file": "lib/keeper/keeper_memory_health_totals.mli",
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "file": "lib/server/server_dashboard_http_keeper_memory_health.ml",
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "file": "lib/server/server_health_rollup.ml",
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "file": "lib/server/server_routes_http_runtime.ml",
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "file": "lib/tui_decode_memory_health.ml",
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "file": "lib/tui_decode_memory_health.mli",
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "file": "test/test_keeper_librarian_durable_consumer.ml",
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "file": "test/test_server_dashboard_http_keeper_memory_health.ml",
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "file": "test/test_server_health_rollup.ml",
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "file": "test/test_tui_decode.ml",
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "file": "test/test_tui_keeper_age_ladder.ml",
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "file": "test/test_tui_keeper_axis.ml",
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "file": "test/test_tui_keeper_memory_reading.ml",
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "file": "test/test_tui_render_memory.ml",
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "file": "test/test_tui_render_metrics.ml",
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    }
+  ],
+  "python_ast": [
+    "test/test_tui_memory_health_signal.py",
+    "test/test_tui_memory_push.py"
+  ]
+}

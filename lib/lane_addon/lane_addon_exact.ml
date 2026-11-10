@@ -808,6 +808,51 @@ let claim key =
 
 let release key = Mutex.protect in_flight_lock (fun () -> Hashtbl.remove in_flight key)
 
+let finish_record prior = function
+  | Call_ended final ->
+      {prior with attempts=prior.attempts @ [Completed_call final];
+        final=Some (Call_final final)}
+  | Call_refused refusal ->
+      {prior with attempts=prior.attempts @ [Deferred (Provider_refused refusal)]}
+
+let recover_retained ~store ~declaration_id ~schema request =
+  let* schema = original_schema ~declaration_id ~schema request in
+  let key = Lane_addon_store.root store, declaration_id, request.request_id in
+  if not (claim key) then observe_retained ~store ~declaration_id ~schema request
+  else Fun.protect ~finally:(fun () -> release key) (fun () ->
+    let* wire = Lane_addon_store.load_exact_request store ~declaration_id
+      ~request_id:request.request_id in
+    match wire with
+    | None ->
+        let* proofs = load_proofs ~store ~declaration_id request in
+        if proofs = [] then Ok Retained_absent
+        else Error "original execution proof has no original Exact request"
+    | Some wire ->
+        let* record = bound_record ~declaration_id request wire in
+        let* observed = validate_record ~request ~schema:(Some schema) record in
+        let* proofs = bound_proofs ~store ~declaration_id request record in
+        match record.final, List.rev record.attempts with
+        | None, Started _ :: earlier ->
+            (match selected_proof ~attempt_ordinal:(List.length record.attempts) proofs with
+             | None -> Ok observed
+             | Some (retained_schema, execution) ->
+                 if not (Yojson.Safe.equal schema retained_schema) then
+                   Error "original execution proof differs from the supplied original schema"
+                 else
+                   (match execution.outcome with
+                    | Call_refused _ -> Ok observed
+                    | Call_ended _ ->
+                        let finished = finish_record
+                          {record with attempts=List.rev earlier} execution.outcome in
+                        let* () = Lane_addon_store.save_exact_request store ~declaration_id
+                          ~request_id:request.request_id
+                          (record_to_json ~declaration_id ~request_id:request.request_id finished) in
+                        observe_retained ~store ~declaration_id ~schema request))
+        | None, ([] | (Deferred _ | Completed_call _ | Unknown_interrupted | Unknown_cut
+            | Unknown_raised _ | Delivery_refused _ | Reused) :: _)
+        | Some (Call_final _ | Outcome_unknown | Not_allowed _ | Request_id_reused), _ ->
+            Ok observed)
+
 (* Created once before the first started marker, shared by all roots and
    domains in this process. The lock guards only this short initialization;
    no Eio operation or caller-supplied function runs under it. *)
@@ -867,13 +912,7 @@ let run ~store ~declaration_id ~(package : Lane_addon_types.package) ~runner ~au
         | None -> {digest; request = request_to_json request; attempts = []; final = None} in
       let* proofs=Eio_unix.run_in_systhread (fun () ->
         bound_proofs ~store ~declaration_id request previous) in
-      let finish prior outcome =
-        match outcome with
-        | Call_ended final ->
-            {prior with attempts=prior.attempts @ [Completed_call final];
-              final=Some (Call_final final)}
-        | Call_refused refusal ->
-            {prior with attempts=prior.attempts @ [Deferred (Provider_refused refusal)]} in
+      let finish = finish_record in
       let* previous, recovered = match previous.final with
         | None ->
             (match List.rev previous.attempts with

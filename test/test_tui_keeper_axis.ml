@@ -8,6 +8,7 @@ let make_librarian
     () : Tui_decode_memory_health.memory_librarian_health =
   { mlh_state = None
   ; mlh_admission_wait = None
+  ; mlh_operator_action_required = false
   ; mlh_measured_at = None
   ; mlh_unread_atom_turns = unread_atom_turns
   ; mlh_unread_official_turns = unread_official_turns
@@ -86,6 +87,7 @@ let make_snapshot ?(refusals = []) keepers : Tui_decode_memory_health.memory_hea
   ; mhs_warn_alerts = 0
   ; mhs_error_alerts = 0
   ; mhs_starving_keepers = 0
+  ; mhs_librarian_attention_required_keepers = 0
   }
 ;;
 

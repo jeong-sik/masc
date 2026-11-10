@@ -15,7 +15,7 @@ import {
 
 function keeperMemoryHealthPayload(): KeeperMemoryHealthResponse {
   return {
-    schema: 'keeper.memory_os.current_health.v12',
+    schema: 'keeper.memory_os.current_health.v13',
     generated_at: 1_700_000_000,
     keepers: [{
       keeper_id: 'healthy',
@@ -34,7 +34,7 @@ function keeperMemoryHealthPayload(): KeeperMemoryHealthResponse {
       librarian: {
         state: 'drained',
         detail: null,
-        pending: null, admission_wait: null,
+        pending: null, admission_wait: null, operator_action_required: false,
         measured_at: 1_699_999_950,
         unread_atom_turns: 0,
         unread_official_turns: 0,
@@ -71,7 +71,7 @@ function keeperMemoryHealthPayload(): KeeperMemoryHealthResponse {
       librarian: {
         state: 'drained',
         detail: null,
-        pending: null, admission_wait: null,
+        pending: null, admission_wait: null, operator_action_required: false,
         measured_at: 1_699_999_950,
         unread_atom_turns: 0,
         unread_official_turns: 0,
@@ -125,14 +125,26 @@ function keeperMemoryHealthPayload(): KeeperMemoryHealthResponse {
       snapshot_read_error_keepers: 1,
       source_snapshot_read_error_keepers: 0,
       librarian_stopped_keepers: 0,
+      librarian_attention_required_keepers: 0,
       librarian_starving_keepers: 0,
     },
   }
 }
 
+function addLibrarianAttention(payload: KeeperMemoryHealthResponse) {
+  const keeper = payload.keepers[0]!
+  keeper.librarian.operator_action_required = true
+  keeper.alerts.push({ code: 'librarian_attention_required', severity: 'warn',
+    target: 'librarian_attention_required', label: 'Librarian', message: 'Inspect the original outcome' })
+  payload.alert_summary.total_alerts++
+  payload.alert_summary.warn_alerts++
+  payload.alert_summary.keepers_with_alerts++
+  payload.alert_summary.librarian_attention_required_keepers++
+}
+
 function starvingKeeperPayload(): KeeperMemoryHealthResponse {
   return {
-    schema: 'keeper.memory_os.current_health.v12',
+    schema: 'keeper.memory_os.current_health.v13',
     generated_at: 1_700_000_000,
     keepers: [{
       keeper_id: 'starving',
@@ -151,7 +163,7 @@ function starvingKeeperPayload(): KeeperMemoryHealthResponse {
       librarian: {
         state: 'drained',
         detail: null,
-        pending: null, admission_wait: null,
+        pending: null, admission_wait: null, operator_action_required: false,
         measured_at: 1_699_999_950,
         unread_atom_turns: 0,
         unread_official_turns: 0,
@@ -205,6 +217,7 @@ function starvingKeeperPayload(): KeeperMemoryHealthResponse {
       snapshot_read_error_keepers: 0,
       source_snapshot_read_error_keepers: 0,
       librarian_stopped_keepers: 0,
+      librarian_attention_required_keepers: 0,
       librarian_starving_keepers: 1,
     },
   }
@@ -252,10 +265,58 @@ describe('fetchKeeperMemoryHealth', () => {
     const pending = { kind: 'worker' as const, installation_id: 'original-installation',
       request_id: 'original-request', wait }
     Object.assign(payload.keepers[0]!.librarian, { state: 'pending', pending })
+    if (wait === 'outcome_unknown' || wait === 'missing_after_dispatch') addLibrarianAttention(payload)
     getMock.mockResolvedValue(payload)
     const health = await fetchKeeperMemoryHealth()
     expect(health.keepers[0]!.librarian.pending).toEqual(pending)
     expect(health.alert_summary.librarian_stopped_keepers).toBe(0)
+    expect(health.keepers[0]!.librarian.operator_action_required)
+      .toBe(wait === 'outcome_unknown' || wait === 'missing_after_dispatch')
+  })
+
+  it.each(['durable', 'admission', 'both'] as const)('counts %s attention once and retains both original identities', async source => {
+    const payload = keeperMemoryHealthPayload()
+    const librarian = payload.keepers[0]!.librarian
+    const worker = { kind: 'worker' as const, installation_id: 'original-installation',
+      request_id: 'durable-original', wait: 'missing_after_dispatch' as const }
+    if (source !== 'admission') Object.assign(librarian, { state: 'pending', pending: worker })
+    if (source !== 'durable') librarian.admission_wait = { ...worker, request_id: 'admission-original' }
+    addLibrarianAttention(payload)
+    getMock.mockResolvedValue(payload)
+    const health = await fetchKeeperMemoryHealth()
+    expect(health.keepers[0]!.librarian).toEqual(librarian)
+    expect(health.alert_summary.librarian_attention_required_keepers).toBe(1)
+    expect(health.alert_summary.librarian_stopped_keepers).toBe(0)
+  })
+
+  it('treats a typed local recovery failure as attention without a stopped pass', async () => {
+    const payload = keeperMemoryHealthPayload()
+    Object.assign(payload.keepers[0]!.librarian, {
+      state: 'pending', pending: { kind: 'local_failure', detail: 'publication read failed' },
+    })
+    addLibrarianAttention(payload)
+    getMock.mockResolvedValue(payload)
+    expect((await fetchKeeperMemoryHealth()).keepers[0]!.librarian.operator_action_required).toBe(true)
+  })
+
+  it('refuses contradictory attention flags, missing or duplicate alerts, and fleet counts', async () => {
+    const mutations: Array<(payload: KeeperMemoryHealthResponse) => void> = [
+      payload => { payload.keepers[0]!.librarian.operator_action_required = false },
+      payload => { payload.keepers[0]!.alerts = [] },
+      payload => { payload.keepers[0]!.alerts.push(payload.keepers[0]!.alerts[0]!) },
+      payload => { payload.alert_summary.librarian_attention_required_keepers = 2 },
+      payload => { payload.keepers[0]!.librarian.pending = null; payload.keepers[0]!.librarian.state = 'drained' },
+    ]
+    for (const mutate of mutations) {
+      const payload = keeperMemoryHealthPayload()
+      Object.assign(payload.keepers[0]!.librarian, { state: 'pending', pending: {
+        kind: 'worker', installation_id: 'installation', request_id: 'original', wait: 'outcome_unknown',
+      } })
+      addLibrarianAttention(payload)
+      mutate(payload)
+      getMock.mockResolvedValue(payload)
+      await expect(fetchKeeperMemoryHealth()).rejects.toThrow('유효하지 않은 keeper memory health payload')
+    }
   })
 
   it.each([
@@ -429,6 +490,7 @@ describe('fetchKeeperMemoryHealth', () => {
   it.each([
     'keeper.memory_os.current_health.v10',
     'keeper.memory_os.current_health.v11',
+    'keeper.memory_os.current_health.v12',
   ])('rejects an older memory-health envelope: %s', async schema => {
     getMock.mockResolvedValue({ ...keeperMemoryHealthPayload(), schema })
 
@@ -442,7 +504,7 @@ describe('fetchKeeperMemoryHealth', () => {
 
     const response = await fetchKeeperMemoryHealth()
 
-    expect(response.schema).toBe('keeper.memory_os.current_health.v12')
+    expect(response.schema).toBe('keeper.memory_os.current_health.v13')
     expect(response.keepers[0]).toMatchObject({
       keeper_id: 'healthy',
       revision: 7,
@@ -563,7 +625,7 @@ describe('fetchKeeperMemoryHealth', () => {
     payload.keepers[0]!.librarian = {
       state: null,
       detail: null,
-      pending: null, admission_wait: null,
+      pending: null, admission_wait: null, operator_action_required: false,
       measured_at: null,
       unread_atom_turns: null,
       unread_official_turns: null,

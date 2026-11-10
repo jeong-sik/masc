@@ -443,6 +443,9 @@ let approval_read =
 let approval_value_bytes =
   b Navigate "v" "string bytes" ~detail:Detail_only
     ~help:"read decoded top-level Gate string values as bytes, not JSON wire; v or Esc returns"
+let approval_answer_receipt =
+  b ~ko:"마지막 답변" Navigate "v" "last answer" ~detail:List_only
+    ~help:"while browsing, capture the last answer receipt, original question identity and retained follow-up; scroll or search the complete text; v or Esc returns"
 let approval_answer =
   b Act "a" "answer a question"
     ~help:"open the selected question, from a Keeper or a Lane Add-on installation, in its own mode; Esc leaves it"
@@ -864,6 +867,7 @@ let for_surface = function
            argument is readable before y answers it. *)
       ; approval_read
       ; approval_value_bytes
+      ; approval_answer_receipt
       ; approval_decide
       ; approval_retry
         (* The footer names this key and the sheet did not, so an operator who
@@ -1438,7 +1442,9 @@ type ask_supply =
   | Ask_selected
 
 type approvals_footer =
-  | Approval_browsing of { approvals : bool; asks : ask_supply; source : bool }
+  | Approval_browsing of {
+      approvals : bool; asks : ask_supply; source : bool; last_answer : bool;
+    }
   | Approval_writing
   | Approval_armed
   | Approval_answering of { has_choices : bool; takes_text : bool }
@@ -1450,8 +1456,8 @@ let footer_hints_approvals mode =
   let hint = key_hint in
   let row items = String.concat "  " items in
   match mode with
-  | Approval_browsing { approvals; asks; source } ->
-      (* Three things a key can need. [j/k] and [y / n] act on an approval
+  | Approval_browsing { approvals; asks; source; last_answer } ->
+      (* Each key follows its own source. [j/k] and [y / n] act on an approval
          row; with none the decision answers with a notice. [ / ] selects a
          waiting question and [a] opens the selected one, so a cursor on none
          of them keeps [ / ] and drops [a]. [o / O] read the source of a
@@ -1465,6 +1471,7 @@ let footer_hints_approvals mode =
             | Asks_unselected -> [ hint approval_walk ]
             | Ask_selected -> [ hint approval_walk; hint approval_answer ])
          @ (if source then [ hint approval_origin ] else [])
+         @ (if last_answer then [ hint approval_answer_receipt ] else [])
          @ [ hint listing_refresh; hint listing_next
              (* The way out: the two keys a cut row keeps
                 ([Masc_tui_footer.never_dropped_keys]). *)

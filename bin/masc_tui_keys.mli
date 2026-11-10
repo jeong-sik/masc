@@ -166,7 +166,8 @@ val footer_hints :
     the keys that need one, [Needs_reading] in the table. A failed read leaves
     no row and still has this, so the two answers differ there. *)
 
-val footer_hints_tools : pane:Masc_tui_types.tools_pane -> string
+val footer_hints_tools :
+  lang:Masc_tui_types.ui_language -> pane:Masc_tui_types.tools_pane -> string
 (** Tools' bracket keys select retained runs in Available and Keepers in other panes. *)
 
 val footer_hints_metrics :

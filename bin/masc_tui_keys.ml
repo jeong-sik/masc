@@ -83,9 +83,9 @@ let config_bindings =
   ; b ~ko:"런타임" Navigate "9" "Runtime"
       ~help:"runtime status, lane routing, probes and connected clients", None
   ; b ~ko:"리소스" Navigate "s" "resources"
-      ~help:"the MCP resource catalog, off the ring under System", None
+      ~help:"the MCP resource catalog under Features & plugins", None
   ; b ~ko:"도구" Navigate "t" "tools"
-      ~help:"the tool catalog, receipts, and usage, off the ring under System", None
+      ~help:"the tool catalog, receipts, and usage under Features & plugins", None
   ; b ~ko:"편집" Act "e" "edit"
       ~help:"runtime.toml previews; models open fields; prompts save an override; voice opens the setup wizard",
       Some [ Config_runtime; Config_models; Config_prompts; Config_voice ]
@@ -615,6 +615,8 @@ let for_surface = function
       :: (b Act "Right" "detail" ~help:"keeper detail")
       :: (b Act "Tab / s / m" "pages"
             ~help:"with a Keeper Story open: next page / schedules / memory; World keeps its own page; Esc closes either window")
+      :: (b Act "0 / 1 / 2 / 3 / 4 / [ / ]" "memory"
+            ~help:"with Keeper Memory open: overview / recent records / retrievals / committed changes / storage; brackets scroll the table")
       :: keeper_actions
       @ [ b Search "/" "search" ~help:"search names; Enter keeps the query"
         ; b Search "n / N" "next / previous match"
@@ -798,14 +800,8 @@ let for_surface = function
       [ b Navigate "j/k" "move" ~rows:Needs_row ~help:"move the roster cursor"
       ; b Act "Enter" "detail" ~rows:Needs_row
           ~help:"read the client's full identity and observation"
-        (* Two doors, one action: both call [goto_surface Runtime]. As two
-           bindings the sheet printed the answer twice, one row under the
-           other, and the second row's help differed from the first by a
-           pronoun. The compound spelling is the one the table already uses
-           for [Left / Esc] and [o / A], and [key_atoms] splits the slash, so
-           the footer keeps its Esc pin and both keys stay counted. *)
-      ; b Act "p / Esc" "runtime"
-          ~help:"back to the Runtime surface this hangs off"
+      ; b ~ko:"기능" Act "p / Esc" "features"
+          ~help:"back to Features & plugins"
       ; b Search "/" "find" ~rows:Needs_row
           ~help:"jump the cursor to a matching attached name"
       ; b Search "n / N" "next / previous match" ~rows:Needs_row
@@ -1148,7 +1144,7 @@ let for_surface = function
           ~help:"inside Browser Lane: preview the selected tab; any key returns"
       ; b Navigate "j/k" "scroll"
       ; b Act "b / u" "bind / unbind" ~help:"bind / unbind a channel"
-      ; b Act "Esc" "keeper" ~help:"back to the selected Keeper"
+      ; b ~ko:"기능" Act "Esc" "features" ~help:"back to Features & plugins"
       ; b Search "/" "find" ~help:"jump the cursor to a matching transport"
       ; b Search "n / N" "next / previous match"
       ]
@@ -1212,7 +1208,7 @@ let for_surface = function
       ; b Act "y" "copy source" ~detail:Detail_only
           ~help:"send the selected text part's original bytes via OSC 52; terminal support is unconfirmed"
       ; b Act "Esc" "back"
-          ~help:"the text hands back to the list; the list leaves for System"
+          ~help:"the text hands back to the list; the list returns to Features & plugins"
       ; b Search "/" "find"
           ~help:"find a resource name in the list, or text in the loaded detail"
       ; b Search "n / N" "next / previous match"
@@ -1323,14 +1319,19 @@ let for_surface = function
       ; b Act "d" "delete Skill"
           ~help:"remove the selected published package; press d again on the \
                  same row to confirm"
-      ; b Act "Esc" "system"
+      ; b ~ko:"기능" Act "Esc" "features"
           ~help:"return from original Task to request, then request to list; \
-                 otherwise back to the System surface it hangs off"
+                 otherwise back to Features & plugins"
       ]
       @ [ tools_refresh; listing_next; listing_quit ]
   | System_logs ->
-      [ b Navigate "o" "log origin" ~help:"switch between server logs and this TUI's own observations"
-      ; b Navigate "e" "Events"
+      (* [e] leads, as [e / l] leads on Events. The title row draws the
+         Events / Logs strip only where its readings leave room, and at 80
+         columns it does not on either reading, so this row is the one place
+         that names the other. With [o] first, 80 and 84 columns under an
+         ACTION NEEDED notice kept [o:log origin] and dropped [e:Events]. *)
+      [ b Navigate "e" "Events"
+      ; b Navigate "o" "log origin" ~help:"switch between server logs and this TUI's own observations"
       ; b Navigate "j/k" "move / scroll" ~rows:Needs_row
       ; row_list_page
       ; b Navigate "[ / ]" "previous / next" ~detail:Detail_only
@@ -1429,9 +1430,9 @@ let footer_hints_planning_goal_list ~lang ~has_rows =
 let footer_hints_planning_goal_detail ~lang =
   planning_goal_hints ~lang ~detail_open:true ~has_rows:None
 
-let footer_hints_tools ~pane =
+let footer_hints_tools ~lang ~pane =
   let bracket = tools_bracket_binding ~pane in
-  hints_of_bindings
+  hints_of_bindings ~lang
     (List.map (fun (binding : binding) ->
        if String.equal binding.key bracket.key then bracket else binding)
        (for_surface Tools))

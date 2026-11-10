@@ -2086,6 +2086,12 @@ let board_post_detail_json ~reader ?(comment_request = default_board_comment_req
 
 let board_sub_board_detail_prefix = "/api/v1/board/sub-boards/"
 
+let board_sub_board_error_status ~fallback = function
+  | Board.Io_error _ -> `Service_unavailable
+  | Board.Invalid_id _ | Board.Post_not_found _ | Board.Comment_not_found _
+  | Board.Validation_error _ | Board.Already_voted _ | Board.Already_exists _
+  | Board.Unauthorized _ | Board.Recipient_lookup_failed _ -> fallback
+
 let board_sub_board_detail_json ~reader ~path =
   match extract_path_param ~prefix:board_sub_board_detail_prefix path with
   | None ->
@@ -2094,7 +2100,7 @@ let board_sub_board_detail_json ~reader ~path =
     (match Board_dispatch.get_sub_board ~reader ~sub_board_id with
      | Ok sb -> (`OK, Board.sub_board_to_yojson sb)
      | Error e ->
-       ( `Not_found,
+       ( board_sub_board_error_status ~fallback:`Not_found e,
          `Assoc [ ("error", `String (Board_tool.board_error_to_string e)) ] ))
 
 (** CORS preflight handler *)

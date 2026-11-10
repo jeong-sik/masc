@@ -87,6 +87,7 @@ The command palette is `:`.
 | `W` | select shared World and open its dock; outside memory/age, switch to age; lowercase w still wakes a Keeper |
 | `Right` | keeper detail |
 | `Tab / s / m` | with a Keeper Story open: next page / schedules / memory; World keeps its own page; Esc closes either window |
+| `0 / 1 / 2 / 3 / 4 / [ / ]` | with Keeper Memory open: overview / recent records / retrievals / committed changes / storage; brackets scroll the table |
 | `c` | chat with the keeper |
 | `l` | logs |
 | `t` | tool calls |
@@ -270,8 +271,8 @@ data and paint. A missing finish record remains an unfinished observation.
 | `Home/End` | first or last wrapped detail row of a selected preset, or of a prompt registry or asset document |
 | `v` | runtime.toml: source revision, validation issues, and application/restart details |
 | `9` | runtime status, lane routing, probes and connected clients |
-| `s` | the MCP resource catalog, off the ring under System |
-| `t` | the tool catalog, receipts, and usage, off the ring under System |
+| `s` | the MCP resource catalog under Features & plugins |
+| `t` | the tool catalog, receipts, and usage under Features & plugins |
 | `e` | runtime.toml previews; models open fields; prompts save an override; voice opens the setup wizard |
 | `c` | same account/API model, independent variant settings |
 | `v` | read complete account/model settings without editing |
@@ -509,7 +510,7 @@ and UI admission decision; these are not painted-frame or key-latency evidence.
 |---|---|
 | `j/k` | move the roster cursor |
 | `Enter` | read the client's full identity and observation |
-| `p / Esc` | back to the Runtime surface this hangs off |
+| `p / Esc` | back to Features & plugins |
 | `/` | jump the cursor to a matching attached name |
 | `n / N` | next / previous match |
 | `PgUp/PgDn` | page |
@@ -761,7 +762,7 @@ count is drawn beyond the available space.
 | `Y` | copy the selected revision's link when external sharing is enabled |
 | `R` | reread the exact open resource, including an older report revision |
 | `y` | send the selected text part's original bytes via OSC 52; terminal support is unconfirmed |
-| `Esc` | the text hands back to the list; the list leaves for System |
+| `Esc` | the text hands back to the list; the list returns to Features & plugins |
 | `/` | find a resource name in the list, or text in the loaded detail |
 | `n / N` | next / previous match |
 | `r` | reload |
@@ -781,7 +782,7 @@ count is drawn beyond the available space.
 | `c / C` | open $EDITOR on a template for a new Skill; c starts an instruction Skill, C starts a composition Skill |
 | `e` | open the selected SKILL.md in $EDITOR, validate, CAS-save, and publish |
 | `d` | remove the selected published package; press d again on the same row to confirm |
-| `Esc` | return from original Task to request, then request to list; otherwise back to the System surface it hangs off |
+| `Esc` | return from original Task to request, then request to list; otherwise back to Features & plugins |
 | `r` | refresh the open original Task body/history, original request detail, or Tools list |
 | `Enter` | in async runs, read the selected original request; otherwise load retained evidence for the selected Skill |
 | `t / T` | from async request detail, read its original source Task and history |
@@ -806,8 +807,8 @@ or completion.
 
 | Keys | What it does |
 |---|---|
-| `o` | switch between server logs and this TUI's own observations |
 | `e` | Events |
+| `o` | switch between server logs and this TUI's own observations |
 | `j/k` | move / scroll |
 | `PgUp/PgDn` | page |
 | `[ / ]` | while detail is open, inspect the adjacent visible log entry |
@@ -829,7 +830,7 @@ or completion.
 | `Ctrl-O` | inside Browser Lane: preview the selected tab; any key returns |
 | `j/k` | scroll |
 | `b / u` | bind / unbind a channel |
-| `Esc` | back to the selected Keeper |
+| `Esc` | back to Features & plugins |
 | `/` | jump the cursor to a matching transport |
 | `n / N` | next / previous match |
 | `PgUp/PgDn` | page |

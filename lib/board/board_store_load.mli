@@ -4,7 +4,6 @@ val load_persisted_posts : Board_types.store -> (int, string * exn) result
 val load_persisted_comments : Board_types.store -> (int, string * exn) result
 val load_persisted_votes : Board_types.store -> (int, string * exn) result
 val load_persisted_reactions : Board_types.store -> (int, string * exn) result
-val load_persisted_sub_boards : Board_types.store -> (int, string * exn) result
 
 (** Rebuild current reply counts and timestamp high-water marks after loading
     comments, before votes. Quiescent startup only; emits the existing log. *)

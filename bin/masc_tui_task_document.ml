@@ -25,10 +25,10 @@ let history_heading_rows ~ko ~width = section_rows ~width (if ko then "상태 �
    Body's headings. *)
 let document_palette () : Masc_tui_tool_detail.palette =
   { Masc_tui_tool_detail.plain with
-    key = Theme.Syntax.json_key
-  ; string_ = Theme.Syntax.string
-  ; number = Theme.Syntax.json_number
-  ; literal = Theme.Syntax.json_literal
+    key = Theme.Syntax.json_key ()
+  ; string_ = Theme.Syntax.string ()
+  ; number = Theme.Syntax.json_number ()
+  ; literal = Theme.Syntax.json_literal ()
   ; punctuation = Theme.Syntax.json_punctuation
   ; reset = Ansi.reset
   }

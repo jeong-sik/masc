@@ -1355,7 +1355,7 @@ let test_attention_retains_originals_and_clears_on_observation () =
   let module Queue = Masc.Keeper_librarian_queue_refresh in
   let module Worker = Masc.Keeper_memory_admission_worker in
   let base = fresh_dir "masc-memory-health-attention" in
-  let config = Workspace.default_config base in
+  let config = Masc.Workspace.default_config base in
   let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path:base in
   let keeper_name = "attention-original" in
   ignore (write_snapshot ~keepers_dir ~keeper_id:keeper_name [fact "retained"]);

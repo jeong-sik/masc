@@ -452,7 +452,7 @@ val board_sub_board_detail_prefix : string
 
 val board_sub_board_detail_json :
   reader:Masc_board_handlers.Board_access.reader ->
-  path:string -> [> `OK | `Bad_request | `Not_found ] * Yojson.Safe.t
+  path:string -> [> `OK | `Bad_request | `Not_found | `Service_unavailable ] * Yojson.Safe.t
 (** [board_sub_board_detail_json ~path] answers
     [GET /api/v1/board/sub-boards/<id_or_slug>] for both transports.
 
@@ -460,8 +460,14 @@ val board_sub_board_detail_json :
     |---|---|---|
     | Empty id after the prefix | [400 Bad Request] | [{"error":"sub_board_id is required"}] |
     | Unknown id or slug | [404 Not Found] | [{"error": <board error>}] |
+    | Source unavailable | [503 Service Unavailable] | [{"error": <board error>}] |
     | Found | [200 OK] | {!Board.sub_board_to_yojson} |
     *)
+
+val board_sub_board_error_status :
+  fallback:([> `Service_unavailable ] as 'a) ->
+  Masc_board_handlers.Board.board_error -> 'a
+(** Preserve existing input-error statuses and return 503 for policy IO failure. *)
 
 (** {1 OPTIONS} *)
 

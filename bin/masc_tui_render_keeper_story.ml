@@ -502,7 +502,7 @@ let gap_text ~ko = function
   | Memory_reading.Gap_unmeasured -> if ko then "연속성 공백 미측정" else "continuity gap not measured"
 ;;
 
-let memory_lines (state : Masc_tui_types.state) ~now ~keeper_name =
+let memory_storage_lines (state : Masc_tui_types.state) ~now ~keeper_name =
   let text ko en = Masc_tui_types.ui_text state ~ko ~en in
   let ko = state.ui_language = Masc_tui_types.Lang_ko in
   let read_failure = match state.memory_health_error with
@@ -568,19 +568,18 @@ let memory_lines (state : Masc_tui_types.state) ~now ~keeper_name =
            ^ Masc_tui_types.memory_state_label memory
            ^ Ansi.reset)
       ; labelled (text "사실 나이" "fact age")
-          (ages ^ dim (text " · 오래됐다고 무효는 아닙니다" " · age does not invalidate a fact"))
+          ages
       ; labelled (text "저장 갱신" "saved")
-          (updated ^ dim (text " · 출처 재검증 시각과 다릅니다" " · not a source revalidation time"))
+          updated
       ; labelled (text "출처 무효화" "source") source
       ; labelled "Librarian" (lag_text ~ko lag ^ dim (" · " ^ pass ^ " · " ^ digest))
       ; labelled (text "연속성" "continuity")
           (match gap with
            | Memory_reading.No_gap -> dim (gap_text ~ko gap)
            | Memory_reading.Gap _ | Memory_reading.Gap_unmeasured -> warn (gap_text ~ko gap))
-      ; labelled (text "공유 World" "shared World")
-          (text ":go Memory 에서 별도 조회 · Keeper 사실 수와 합산하지 않습니다"
-             "read separately in :go Memory · not added to Keeper facts")
-      ; dim (text "  최근 처리 결과는 현재 모델 실행 상태가 아닙니다"
-               "  a last pass is not the model's current execution state")
       ]
 ;;
+
+let memory_lines state ~cols ~max_lines ~now ~keeper_name =
+  Masc_tui_render_keeper_memory.lines state ~cols ~max_lines ~now ~keeper_name
+    ~storage:(fun () -> memory_storage_lines state ~now ~keeper_name)

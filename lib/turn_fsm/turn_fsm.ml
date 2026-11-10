@@ -210,7 +210,6 @@ let default_transition_context =
 
 type any_state = Any : _ turn_state -> any_state
 
-let any_state_label (Any s) = turn_state_label s
 let any_state_tla_symbol (Any s) = to_tla_symbol s
 
 type transition_violation = {

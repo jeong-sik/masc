@@ -855,7 +855,9 @@ let test_partial_policy_source_refuses_only_hearth_posts () =
   Fs_compat.append_file (Board.sub_boards_path (Board.global ())) "{broken-policy-row\n";
   restart_board ();
   Alcotest.(check int) "best-effort reads retain the valid policy row" 1
-    (List.length (Board_dispatch.list_sub_boards ~reader:Masc_board_handlers.Board_access.Operator ()));
+    (List.length (Board.list_sub_boards (Board.global ())));
+  Alcotest.(check bool) "complete policy list refuses partial data" true
+    (Result.is_error (Board_dispatch.list_sub_boards ~reader:Masc_board_handlers.Board_access.Operator ()));
   let observations = fanout_counts () in
   List.iter (fun hearth ->
     let failure = post_refusal_exn (policy_post hearth) in
@@ -938,7 +940,7 @@ let test_queued_update_does_not_resurrect_a_deleted_policy () =
     (List.length (sub_board_rows ()));
   restart_board ();
   Alcotest.(check int) "a stale queued update does not revive the policy" 0
-    (List.length (Board_dispatch.list_sub_boards ~reader:Masc_board_handlers.Board_access.Operator ()))
+    (List.length ((Result.get_ok (Board_dispatch.list_sub_boards ~reader:Masc_board_handlers.Board_access.Operator ()))))
 
 let () =
   Alcotest.run "board_comment_post_write_ahead"

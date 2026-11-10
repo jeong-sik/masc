@@ -1334,7 +1334,10 @@ let acting_pane_input (state : state) =
           ~metadata_failed:(Option.is_some state.keepers_error)
           ~task_id:(Option.bind keeper.k_activity (fun activity -> activity.k_current_task_id)) in
         Some Pane.{ keeper_name = keeper.k_name; task;
-          waiting; waiting_stale = Option.is_some state.keeper_turns_error }
+          waiting; waiting_stale = Option.is_some state.keeper_turns_error;
+          waiting_revalidating = List.mem keeper.k_name state.keeper_waiting_unverified;
+          waiting_failed = Option.is_some state.keeper_waiting_failure
+                           || Option.is_some state.keeper_waiting_error }
     | (Keepers Keeper_list | Keepers (Keeper_detail | Keeper_logs | Keeper_calls
         | Keeper_message | Keeper_runtime_pick) | Overview | Acting | Metrics | Memory
       | Lanes | Clients | Board | Approvals | Planning | Schedules | Verification

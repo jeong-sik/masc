@@ -314,18 +314,30 @@ let board_heading_with_tail ~cols head tail =
    with, so the two cannot drift apart. *)
 let census_separator = "  \xc2\xb7  "
 
+(* "Refreshing" on this surface is the pane's own poll in flight -- its
+   resting state between answers. Drawing the word for every poll made the
+   title and the census row flicker at read cadence; the word now waits out
+   the pending display bar the Keeper header rows share, so it names a read
+   that is actually slow. First reads keep their plain words: the pane has
+   nothing else to say. *)
+let board_dataset_refresh_slow state dataset =
+  match Surface_read_order.pending_dataset_age state.http_surface_reads dataset with
+  | Some age when past_pending_display_bar age -> true
+  | Some _ | None -> false
+
 (* Retained values stay readable here, with their availability. The title and
    reader index only borrow totals from a received, non-pending census. *)
 let board_hearth_census_line ~cols (state : state) =
   let words ko en = words state ko en in
   let observation,pending=board_census_reading state in
+  let slow=board_dataset_refresh_slow state Surface_read_order.Board_hearths in
   let status=match observation with
     | Masc_tui_fetched.Absent -> Some (if pending then (words "게시판 집계 조회 중" "reading census") else (words "게시판 집계 미조회" "census not read"))
     | Loading -> Some (words "게시판 집계 조회 중" "reading census")
-    | Ready _ -> if pending then Some (words "갱신 중 · 이전 관측" "refreshing; last observed") else None
-    | Stale (_,detail) -> Some ((if pending then (words "갱신 중 · " "refreshing; ") else "")
+    | Ready _ -> if slow then Some (words "갱신 중 · 이전 관측" "refreshing; last observed") else None
+    | Stale (_,detail) -> Some ((if slow then (words "갱신 중 · " "refreshing; ") else "")
         ^ (words "이전 관측 · 조회 실패: " "last observed; unavailable: ") ^ Terminal_text.single_line detail)
-    | Failed detail -> Some ((if pending then (words "재조회 중 · " "retrying; ") else "")
+    | Failed detail -> Some ((if slow then (words "재조회 중 · " "retrying; ") else "")
         ^ (words "조회 실패: " "unavailable: ") ^ Terminal_text.single_line detail) in
   let tone=match observation with
     | Masc_tui_fetched.Stale _ | Failed _ -> Theme.bad ()
@@ -433,13 +445,14 @@ let board_hearth_census_line ~cols (state : state) =
 
 let board_posts_status state =
   let words ko en = words state ko en in
-  let observation,pending=board_posts_reading state in
+  let observation,_=board_posts_reading state in
+  let slow=board_dataset_refresh_slow state Surface_read_order.Board_posts in
   let status=match observation with
     | Masc_tui_fetched.Absent -> Some (words "글 미조회" "posts not read")
     | Loading -> Some (words "글 조회 중" "reading posts")
-    | Ready _ -> if pending then Some (words "글 갱신 중 · 이전 관측" "refreshing posts; last observed") else None
-    | Stale _ -> Some (if pending then (words "글 갱신 중 · 이전 실패" "refreshing posts; last failure retained") else (words "이전 글 목록 · 조회 실패" "last observed posts; unavailable"))
-    | Failed _ -> Some (if pending then (words "글 재조회 중 · 조회 실패" "retrying posts; unavailable") else (words "글 조회 실패" "posts unavailable")) in
+    | Ready _ -> if slow then Some (words "글 갱신 중 · 이전 관측" "refreshing posts; last observed") else None
+    | Stale _ -> Some (if slow then (words "글 갱신 중 · 이전 실패" "refreshing posts; last failure retained") else (words "이전 글 목록 · 조회 실패" "last observed posts; unavailable"))
+    | Failed _ -> Some (if slow then (words "글 재조회 중 · 조회 실패" "retrying posts; unavailable") else (words "글 조회 실패" "posts unavailable")) in
   match board_posts_snapshot state with
   | Some snapshot when not (board_listing_matches_requested state) ->
       let origin=Printf.sprintf (if state.ui_language = Lang_ko then "이전 관측: %s · 요청: %s" else "last observed: %s; requested: %s")

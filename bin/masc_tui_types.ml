@@ -4825,6 +4825,10 @@ module Surface_read_order : sig
       the enclosing collector. A superseded dataset leaves the state intact. *)
   val owns_dataset : t -> request -> dataset -> bool
   val pending_dataset : t -> dataset -> bool
+  val pending_dataset_age : t -> dataset -> int64 option
+  (** How long the read owning this dataset has been running, monotonic ns.
+      [None] when the dataset is not pending. The pending flag alone cannot
+      tell a pane's ordinary poll from a stalled one; the age can. *)
   val finish : t -> request -> t
   val invalidate : t -> t
   val pending : needs:surface_needs -> t -> source list
@@ -4911,6 +4915,10 @@ end = struct
   let take current request = release_datasets current request, owned current request
   let owns_dataset current request dataset = List.mem dataset (owned current request)
   let pending_dataset current dataset = List.mem_assoc dataset current.owners
+  let pending_dataset_age current dataset =
+    Option.map
+      (fun (request : request) -> Int64.sub (Mtime_clock.elapsed_ns ()) request.started_ns)
+      (List.assoc_opt dataset current.owners)
   let take_dataset current request dataset =
     if owns_dataset current request dataset then
       {current with owners=List.filter (fun (candidate, _) -> candidate <> dataset) current.owners}, true
@@ -12185,9 +12193,29 @@ let board_census_values (state : state) =
   match Masc_tui_fetched.value state.board_census with
   | Some census -> census | None -> []
 
+(* A display bar, not a gate on the read. A pending read younger than this is
+   expected to settle before a person could read a line about it, so drawing
+   its phase only makes the header grow and shrink on every poll. Past the
+   bar the same line is a readable symptom: the phase word is stable at that
+   age and the elapsed seconds say how long it has been stuck. *)
+let pending_display_bar_ns = 1_000_000_000L
+
+let past_pending_display_bar age = Int64.compare age pending_display_bar_ns >= 0
+
+(* Totals stay borrowable while an ordinary poll is in flight -- the census
+   on screen is the last reading until a newer one lands, and dropping the
+   totals for every poll made the title's count flip "(N of M)"↔"(N)" at
+   read cadence. A read running past the pending display bar lets go of
+   them: totals gone stale are worth retiring, a poll is not. *)
 let board_census_holding (state : state) ~hearth =
   match board_census_reading state with
-  | Masc_tui_fetched.Ready census,false ->
+  | Masc_tui_fetched.Ready census, pending
+    when not pending
+         || (match
+              Surface_read_order.pending_dataset_age state.http_surface_reads
+                Surface_read_order.Board_hearths with
+             | Some age -> not (past_pending_display_bar age)
+             | None -> false) ->
       (match hearth with
        | Some hearth -> List.assoc_opt hearth census
        | None -> Some (List.fold_left (fun total (_,count) -> total+count) 0 census))
@@ -12296,15 +12324,6 @@ let local_source_pending state source =
   if Local_read_order.in_flight (local_source_order state source) then
     Option.map Local_read_observation.pending (local_source_observation state source)
   else None
-
-(* A display bar, not a gate on the read. A pending read younger than this is
-   expected to settle before a person could read a line about it, so drawing
-   its phase only makes the header grow and shrink on every poll. Past the
-   bar the same line is a readable symptom: the phase word is stable at that
-   age and the elapsed seconds say how long it has been stuck. *)
-let pending_display_bar_ns = 1_000_000_000L
-
-let past_pending_display_bar age = Int64.compare age pending_display_bar_ns >= 0
 
 let local_source_slow_pending state source =
   if Local_read_order.in_flight (local_source_order state source) then

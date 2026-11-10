@@ -19,7 +19,8 @@
     process, and the HTTP configuration of the environment (the HTTP mode,
     the HTTPS port, the base URL).
 
-    {b The table.} {!register} is everything the server answers. A route is
+    {b The table.} The routes this module registers are everything the
+    server answers. A route is
     [Always_public], or it authenticates the request in its own code against
     the authorization zone ([Self_authenticated Browser_session]).
     {!run} makes the table with {!Server_account_table.checked} before it
@@ -29,8 +30,9 @@
     This layer registers the three health probes. The login routes and the
     routes of a person come with the layers after it.
 
-    {b The probes.} They are answered to anyone who reaches the listener and
-    say nothing of the host or of the process.
+    {b The probes.} They are answered with no credential, to a request whose
+    Host is an identity of the server ({!Server_http_ingress.serve_table}),
+    and say nothing of the host or of the process.
     - [GET /health]: the server name, the release version and the account
       mode.
     - [GET /health/live]: [{"live": true}] once the listener answers.
@@ -44,7 +46,10 @@
     path and the external store that the boot judgment read, and reads it
     once more: a file that changed between the judgment and the opening
     leaves a zone that cannot be trusted or a log in another mode, and the
-    boot stops ({!Zone_not_trusted}, {!Zone_not_multi_account}). It publishes
+    boot stops ({!Zone_not_trusted}, {!Zone_not_multi_account}). A store that
+    is gone is not opened ({!Zone_not_opened}). The install record and
+    [config.json] are not read again: the zone is opened over the store path
+    the judgment read, and the mode is the mode of the log. It publishes
     the access of the process ({!Runtime_account_access.Multi_account}) before
     it accepts a connection, so no CLI starts on an account without the
     decision of the log. *)
@@ -74,9 +79,6 @@ type refusal =
 
 val refusal_to_string : refusal -> string
 
-(** Registers the routes of the account server over [zone]. *)
-val register : Authz_zone.t -> Http_server_eio.Router.t -> Http_server_eio.Router.t
-
 (** Reads the HTTP mode, opens the zone and reads it again, makes the table,
     binds [address]:[port], publishes the access, binds the HTTPS listener of
     the environment, records the port for the CLI of the workspace
@@ -87,7 +89,18 @@ val register : Authz_zone.t -> Http_server_eio.Router.t -> Http_server_eio.Route
     An [Error] comes before a connection is accepted and before the port is
     recorded, and the refusals come in the order of the constructors of
     {!refusal}. {!Access_not_published} and {!Trust_policy_refused} come with
-    the port bound: the trust policy names the HTTPS port that bound. *)
+    the port bound: the trust policy names the HTTPS port that bound. Two
+    steps after the table check leave something behind whatever refusal
+    follows them. {!Server_bootstrap_http.make_http_config} writes the host,
+    the port and the URLs of the listener to the environment of the process.
+    {!Server_bootstrap_http.https_listener_of_env} makes a self-signed
+    certificate under the base path ([.masc/tls]) when the HTTPS listener is
+    on, no certificate file is configured, and the pair there is missing or
+    due for renewal.
+
+    The accept loop and the record of the port are the steps of the
+    single-user boot ([run_serving] in [Server_runtime_bootstrap]), written a
+    second time here. *)
 val run
   :  sw:Eio.Switch.t
   -> env:Eio_unix.Stdenv.base

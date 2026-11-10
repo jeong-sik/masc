@@ -327,8 +327,16 @@ let serve_preview ~base_path ~store ~port github =
       in
       let address = `Tcp (Eio.Net.Ipaddr.V4.loopback, port) in
       match Eio.Net.listen (Eio.Stdenv.net env) ~sw ~reuse_addr:true ~backlog:preview_backlog address with
-      | exception (Eio.Io _ as exn) ->
-        Error (Printf.sprintf "%s:%d is not listened on: %s" preview_host port (Printexc.to_string exn))
+      (* The backends of Eio raise the Unix error of a TCP bind as it is (a
+         port in use is EADDRINUSE). *)
+      | exception Unix.Unix_error (error, call, (_ : string)) ->
+        Error
+          (Printf.sprintf
+             "%s:%d is not listened on: %s: %s"
+             preview_host
+             port
+             call
+             (Unix.error_message error))
       | socket ->
         let base_url = Printf.sprintf "http://%s:%d" preview_host port in
         Printf.printf

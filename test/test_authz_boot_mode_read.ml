@@ -411,11 +411,12 @@ let test_log_of_another_bootstrap () =
     (match Read.boot ~base_path:dirs.base ~config_dir:(Some dirs.config) ~anonymous_mutations:false with
      | Ok (Read.Single_user (_ : Read.single_user) | Read.Multi_account (_ : Read.multi_account)) ->
        Alcotest.fail "row 8 booted"
-     | Error (first, (_ : string list)) ->
-       Alcotest.(check string)
-         "the entry of the boot stops for the same reason"
-         (fst (Read.messages i stop))
-         first);
+     | Error (first, rest) ->
+       Alcotest.(check (list string))
+         "the entry of the boot stops with every line of the judgment"
+         (let expected_first, expected_rest = Read.messages i stop in
+          expected_first :: expected_rest)
+         (first :: rest));
     match i.B.high_water with
     | B.Judged (Authz_high_water.Mismatch (first, rest)) ->
       Alcotest.(check (list string))

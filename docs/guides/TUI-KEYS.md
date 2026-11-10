@@ -87,6 +87,7 @@ The command palette is `:`.
 | `Enter` | open the selected Keeper Story or shared World window; Enter closes its story/world page |
 | `W` | select shared World and open its dock; outside memory/age, switch to age; lowercase w still wakes a Keeper |
 | `Right` | keeper detail |
+| `!` | read every current Keeper-list observation error and its complete reason; Esc returns |
 | `Tab / s / m` | with a Keeper Story open: next page / schedules / memory; World keeps its own page; Esc closes either window |
 | `1 / 2 / 3 / 4` | with Keeper Memory preview open: browse recent records / retrievals / committed changes / storage in the shared Memory browser; Enter also opens recent records |
 | `c` | chat with the keeper |

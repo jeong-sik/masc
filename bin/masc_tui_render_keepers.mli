@@ -22,6 +22,12 @@ val keeper_plain_page_rows :
     window too short for a row. [None] for other views or an open Story,
     whose existing page handling remains in charge. *)
 
+val keeper_observation_reading :
+  Masc_tui_types.state -> Masc_tui_detail_reading.t option
+(** Capture every current Keeper-list read error with its complete reason.
+    [None] when no read error is present. Uses the existing workspace/surface
+    owned detail reader; reopening captures current observations again. *)
+
 val render_keeper_detail :
   Masc_tui_types.state ->
   Masc_tui_frame_presenter.frame * Masc_tui_types.clamped_scroll option

@@ -626,6 +626,8 @@ let for_surface = function
       :: (b Act "W" "world"
             ~help:"select shared World and open its dock; outside memory/age, switch to age; lowercase w still wakes a Keeper")
       :: (b Act "Right" "detail" ~help:"keeper detail")
+      :: (b ~ko:"관측 오류" Act "!" "read errors"
+            ~help:"read every current Keeper-list observation error and its complete reason; Esc returns")
       :: (b Act "Tab / s / m" "pages"
             ~help:"with a Keeper Story open: next page / schedules / memory; World keeps its own page; Esc closes either window")
       :: (b Act "1 / 2 / 3 / 4" "memory"

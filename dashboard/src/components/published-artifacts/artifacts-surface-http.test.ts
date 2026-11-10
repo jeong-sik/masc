@@ -93,11 +93,15 @@ describe('selected published document HTTP ownership', () => {
     expect(vi.getTimerCount()).toBe(0)
   })
 
-  it('retains retry debt when unbound viewing succeeds but workspace-bound HTTP fails', async () => {
+  it.each(['503', 'network'] as const)('retains retry debt when unbound viewing succeeds but workspace-bound HTTP fails with %s', async failure => {
     let unavailable = true
-    readBody = async request => unavailable && request.url.searchParams.has('expected_base_path')
-      ? Response.json({ error: 'bound read unavailable' }, { status: 503 })
-      : jsonDocument(request, unavailable ? 'body-unbound' : 'body-attested')
+    readBody = async request => {
+      if (unavailable && request.url.searchParams.has('expected_base_path')) {
+        if (failure === 'network') throw new TypeError('bound connection lost')
+        return Response.json({ error: 'bound read unavailable' }, { status: 503 })
+      }
+      return jsonDocument(request, unavailable ? 'body-unbound' : 'body-attested')
+    }
     const view = mount()
     await settle()
     expect(view.getByText(/body-unbound/)).toBeTruthy()
@@ -119,6 +123,44 @@ describe('selected published document HTTP ownership', () => {
     await advance(TRANSPORT_RETRY_MAX_MS * 4)
     expect(bodies).toHaveLength(2)
     expect(vi.getTimerCount()).toBe(0)
+  })
+
+  describe.each(['unattested', 'attested'] as const)('%s workspace-bound body success', proof => {
+    it.each([
+      { failure: '503', first: 'unbound' }, { failure: '503', first: 'bound' },
+      { failure: 'network', first: 'unbound' }, { failure: 'network', first: 'bound' },
+    ] as const)('supersedes unbound $failure with $first completing first', async ({ failure, first }) => {
+      let finishBound!: () => void
+      let failUnbound!: () => void
+      readBody = request => new Promise((resolve, reject) => {
+        if (request.url.searchParams.has('expected_base_path')) {
+          finishBound = () => resolve(proof === 'attested' ? jsonDocument(request, 'body-mixed-success')
+            : Response.json(documentPayload(firstId, 'body-mixed-success')))
+        } else {
+          failUnbound = () => failure === 'network' ? reject(new TypeError('unbound connection lost'))
+            : resolve(Response.json({ error: 'unbound unavailable' }, { status: 503 }))
+        }
+      })
+      const view = mount()
+      await settle()
+      expect(bodies).toHaveLength(2)
+      await act(async () => { if (first === 'bound') finishBound(); else failUnbound() })
+      await settle()
+      if (first === 'bound') {
+        expect(view.getByText(/body-mixed-success/)).toBeTruthy()
+        expect(view.queryAllByRole('alert')).toHaveLength(0)
+      }
+      await act(async () => { if (first === 'bound') failUnbound(); else finishBound() })
+      await settle()
+      expect(view.getByText(/body-mixed-success/)).toBeTruthy()
+      expect(view.queryAllByRole('alert')).toHaveLength(0)
+      if (proof === 'unattested') expect(view.queryByRole('button', { name: '문서 편집' })).toBeNull()
+      await advance(TRANSPORT_RETRY_MAX_MS * 4)
+      expect(view.getByText(/body-mixed-success/)).toBeTruthy()
+      expect(view.queryAllByRole('alert')).toHaveLength(0)
+      expect(bodies).toHaveLength(2)
+      expect(vi.getTimerCount()).toBe(0)
+    })
   })
 
   it.each([401, 403])('keeps HTTP%s terminal through public fallback until the actual credential changes', async status => {
@@ -144,6 +186,29 @@ describe('selected published document HTTP ownership', () => {
     await advance(TRANSPORT_RETRY_MAX_MS * 4)
     expect(bodies).toHaveLength(5)
     expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it.each([401, 403])('retains raw HTTP%s refusal even when the workspace response permits read-only viewing', async status => {
+    readBody = async request => {
+      if (new Headers(request.init.headers).get('Authorization') === 'Bearer artifact-http-owner-b') return jsonDocument(request, 'body-owner-b')
+      if (request.init.credentials === 'omit') return jsonDocument(request, 'body-public')
+      if (request.url.searchParams.has('expected_base_path')) return Response.json(documentPayload(firstId, 'body-readonly'))
+      return Response.json({ error: 'access refused' }, { status })
+    }
+    const view = mount()
+    await settle()
+    expect(view.getByText(/body-readonly/)).toBeTruthy()
+    expect(bodies).toHaveLength(3)
+    publishDashboardObservationChange({ topic: 'published_artifacts' })
+    publishDashboardObservationRecovery()
+    window.dispatchEvent(new Event('focus'))
+    await advance(TRANSPORT_RETRY_MAX_MS * 4)
+    expect(bodies).toHaveLength(3)
+    expect(vi.getTimerCount()).toBe(0)
+    await act(async () => { setStoredToken('artifact-http-owner-b', { source: 'manual' }) })
+    await settle()
+    expect(view.getByText(/body-owner-b/)).toBeTruthy()
+    expect(bodies).toHaveLength(5)
   })
 
   it.each(['selection', 'credential', 'workspace', 'unmount'] as const)('aborts actual %s reads and rejects noncooperative late response bodies', async replacement => {

@@ -2149,7 +2149,7 @@ let test_board_write_survives_composition_output_schema_failure () =
       ~schedule:{ planned_index = 0; batch_index = 0; batch_size = 1
                 ; execution_mode = Agent_core.Tool_contract.Serial }
       ~completion:Agent_core.Tool_contract.Continue_after_success in
-  let observed = ref None and producer_fact = ref None in
+  let observed = ref None and producer_fact = ref None and dispatched_tool_use_id = ref None in
   let record = Masc.Keeper_tool_composition_surface_observation.observe_node_result
       ~composition_tool:"keeper_compose_board-schema-fixture"
       ~composition_execution:Masc.Keeper_tool_composition_catalog.Inline
@@ -2157,10 +2157,20 @@ let test_board_write_survives_composition_output_schema_failure () =
       ~composition_run_id:(Plan.Composition_run_id.fresh ()) ~parent_invocation ~meta
       ~turn_context:Masc.Keeper_tool_call_log_context.empty_turn_context in
   let observe_node_result result = observed := Some result; record result in
-  let dispatch ?launch_replay:_ ~tool_use_id:_ ~node ~descriptor:_ ~schedule:_ ~input () =
+  (* Seam scope: this case drives the Board producer directly to isolate
+     output-validation ordering (the stricter consumer contract refuses the
+     committed write) and failed-node row roots. Carrier propagation from
+     the production execute_keeper dispatch through the invocation carrier
+     is not re-proved here; it has no dedicated regression yet and is
+     tracked as review follow-up on this PR. *)
+  let dispatch ?launch_replay:_ ~tool_use_id ~node ~descriptor:_ ~schedule:_ ~input () =
+    dispatched_tool_use_id := Some tool_use_id;
     let args = match input with
       | `Assoc fields -> `Assoc (("author", `String "schema-board-keeper") :: fields)
       | _ -> fail "comment node input is not an object" in
+    check string "producer invocation carries the intended author"
+      "schema-board-keeper"
+      Yojson.Safe.Util.(args |> member "author" |> to_string);
     let result = write node.Plan.tool_name args in
     check bool "actual Board producer completed" true (Tool_result.is_success result);
     producer_fact := Board_tool_evidence.of_metadata (Tool_result.metadata result);
@@ -2188,6 +2198,17 @@ let test_board_write_survives_composition_output_schema_failure () =
     (row |> member "board_action_evidence" |> Yojson.Safe.to_string);
   check string "evidence belongs to the original node execution"
     (Ids.Execution_id.to_string node.execution_id) (row |> member "execution_id" |> to_string);
+  check string "the row attributes the comment node"
+    "masc_board_comment" (row |> member "tool" |> to_string);
+  check string "the row keeps the node post_id"
+    post_id (row |> member "input" |> member "post_id" |> to_string);
+  check string "the row keeps the node content"
+    "committed before schema refusal" (row |> member "input" |> member "content" |> to_string);
+  (match (!dispatched_tool_use_id, row |> member "tool_use_id") with
+   | (Some dispatched, `String recorded) ->
+     check string "the row shares the dispatch identity" dispatched recorded
+   | (None, _) -> fail "dispatch never recorded its tool_use_id"
+   | (_, _) -> fail "comment-node row lacks tool_use_id");
   match Board_dispatch.get_comments ~reader:Masc_board_handlers.Board_access.Operator ~post_id with
   | Ok [ comment ] -> check string "the failed consumer did not replay or undo the comment"
       "committed before schema refusal" comment.content

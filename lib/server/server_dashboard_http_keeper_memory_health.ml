@@ -565,6 +565,14 @@ let install () =
   register (Keeper_librarian_queue_refresh.install_change_observer refresh)
 ;;
 
+let librarian_attention_required (librarian : librarian_health) =
+  let durable = Option.bind librarian.state (function
+    | Keeper_librarian_queue_refresh.Pending pending -> Some pending
+    | Off | Lane_unconfigured | Drained | Yielded_to_waiting_unit
+    | Not_committed | Stopped _ | Raised _ -> None) in
+  Keeper_librarian_pending.attention_required ~durable ~admission:librarian.admission_wait
+;;
+
 let alerts (h : keeper_health) =
   let read_error_alert =
     match h.read_error with
@@ -618,6 +626,15 @@ let alerts (h : keeper_health) =
                 | None -> ""))
       ]
   in
+  let attention_alert =
+    if librarian_attention_required h.librarian then
+      [ alert ~code:"librarian_attention_required"
+          ~severity:Keeper_memory_health_totals.Alert_warn
+          ~target:"librarian_attention_required" ~label:"Librarian"
+          ~message:"Librarian processing or observation needs attention. Inspect the reported cause and retained recovery evidence before any replay; a wake does not confirm completion."
+      ]
+    else []
+  in
   let failure_alert =
     if h.librarian_failures <= 0
     then []
@@ -665,7 +682,7 @@ let alerts (h : keeper_health) =
                      h.vision_ingest_error_reasons)))
       ]
   in
-  read_error_alert @ source_read_error_alert @ stopped_alert @ failure_alert
+  read_error_alert @ source_read_error_alert @ stopped_alert @ attention_alert @ failure_alert
   @ vision_ingest_alert
 ;;
 
@@ -712,6 +729,7 @@ let keeper_health_entry_to_json ~now (h : keeper_health) =
             , match h.librarian.admission_wait with
               | Some worker -> Keeper_librarian_pending.to_json (Worker worker)
               | None -> `Null )
+          ; "operator_action_required", `Bool (librarian_attention_required h.librarian)
           ; ( "measured_at"
             , match h.librarian.measured_at with
               | Some ts -> `Float ts
@@ -783,7 +801,7 @@ let keeper_health_entry_to_json ~now (h : keeper_health) =
     ]
 ;;
 
-let schema = "keeper.memory_os.current_health.v12"
+let schema = "keeper.memory_os.current_health.v13"
 
 let fleet_cache_key ~base_path = "keeper_memory_health:" ^ base_path
 
@@ -812,6 +830,7 @@ let totals_row (h : keeper_health) : Keeper_memory_health_totals.Row.t =
        | Some (Keeper_librarian_queue_refresh.Lane_unconfigured | Not_committed | Stopped _ | Raised _) ->
          true
        | Some (Off | Drained | Yielded_to_waiting_unit | Pending _) | None -> false)
+  ; librarian_attention_required = librarian_attention_required h.librarian
   ; alerts = List.map fst (alerts h)
   }
 ;;

@@ -30,6 +30,9 @@ let test_task_errors_non_retryable () =
                { task_id = "id"; by = "alice" }))));
   assert (
     not (E.is_retryable (E.Task (E.Task_error.InvalidState "x"))));
+  assert (
+    not (E.is_retryable
+      (E.Task (E.Task_error.BacklogVersionConflict { expected = 1; actual = 2 }))));
   assert (not (E.is_retryable (E.Task (E.Task_error.InvalidId "y"))))
 
 let test_agent_errors_non_retryable () =
@@ -37,6 +40,12 @@ let test_agent_errors_non_retryable () =
     not (E.is_retryable (E.Agent (E.Agent_error.NotFound "n"))));
   assert (
     not (E.is_retryable (E.Agent (E.Agent_error.InvalidName "x"))))
+
+let test_task_version_conflict_contract () =
+  let conflict = E.Task (E.Task_error.BacklogVersionConflict { expected = 1; actual = 2 }) in
+  let original = E.Task (E.Task_error.InvalidState "Version mismatch (expected 1, got 2)") in
+  assert (E.code conflict = E.code original);
+  assert (E.to_string conflict = E.to_string original)
 
 (* ── (2) Auth: only TokenExpired retryable ─────────────── *)
 
@@ -83,6 +92,7 @@ let test_system_caller_invariants_non_retryable () =
 let () =
   test_task_errors_non_retryable ();
   test_agent_errors_non_retryable ();
+  test_task_version_conflict_contract ();
   test_auth_token_expired_retryable ();
   test_auth_other_non_retryable ();
   test_system_io_retryable ();

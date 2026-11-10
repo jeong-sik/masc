@@ -1474,6 +1474,61 @@ let log_copy_checks ~keeper_id checks =
       checks
 ;;
 
+(* The two counters of a finished judgment (RFC-0517 §2.2), by Keeper. Each
+   source the answer absorbed counts once under its forward outcome, with the
+   choice it got, or [none] when it was never asked. Each copy check counts
+   once under its reverse verdict. *)
+type source_outcome =
+  | Conveyed
+  | Left
+  | Unjudged
+  | Unjudgeable
+
+let source_outcome_label = function
+  | Conveyed -> "conveyed"
+  | Left -> "left"
+  | Unjudged -> "unjudged"
+  | Unjudgeable -> "unjudgeable"
+;;
+
+let copy_verdict_label = function
+  | Copy _ -> "copy"
+  | Carries_new_statement _ -> "carries_new_statement"
+  | Not_judged _ -> "not_judged"
+;;
+
+let count_evaluation ~keeper_id outcome copy_checks =
+  let source outcome decision =
+    Otel_metric_store.inc_counter
+      Keeper_metrics.(to_string LibrarianAbsorbSources)
+      ~labels:[ "keeper", keeper_id; "outcome", source_outcome_label outcome; "decision", decision ]
+      ()
+  in
+  let asked outcome =
+    List.iter (fun (verdict : source_verdict) -> source outcome (consolidation_label verdict.decision))
+  in
+  let not_asked outcome =
+    List.iter (fun (_ : Keeper_memory_os_types.absorbed_statement) -> source outcome "none")
+  in
+  let conveyed, left, unjudged, unjudgeable =
+    match outcome with
+    | Judged { conveyed; left; unjudged; unjudgeable; absorbed = _; requests = _ }
+    | Failed { conveyed; left; unjudged; unjudgeable; absorbed = _; reason = _ } ->
+      conveyed, left, unjudged, unjudgeable
+  in
+  asked Conveyed conveyed;
+  asked Left left;
+  not_asked Unjudged unjudged;
+  not_asked Unjudgeable unjudgeable;
+  List.iter
+    (fun check ->
+       Otel_metric_store.inc_counter
+         Keeper_metrics.(to_string LibrarianAbsorbCopyChecks)
+         ~labels:[ "keeper", keeper_id; "verdict", copy_verdict_label check.verdict ]
+         ())
+    copy_checks
+;;
+
 let run_resolved
     ?observe
     ?before_evaluate
@@ -1494,11 +1549,13 @@ let run_resolved
   | _ :: _ ->
     let authority : live_authority = resolve_authority () in
     let keeper_id = authority.keeper_id in
-    let guidance_failed reason = complete (Evaluated {
-         outcome=Failed {reason;absorbed=[];left=[];conveyed=[];
-           unjudged=absorbed;unjudgeable=[]};
-         copy_checks=not_judged_checks (copy_candidates ~new_claims ~absorbed ~applied:[]) Gate_judgment_failed;
-         evaluations=[]}) in
+    let evaluated outcome copy_checks evaluations =
+      count_evaluation ~keeper_id outcome copy_checks;
+      complete (Evaluated { outcome; copy_checks; evaluations }) in
+    let guidance_failed reason = evaluated
+        (Failed {reason;absorbed=[];left=[];conveyed=[];unjudged=absorbed;unjudgeable=[]})
+        (not_judged_checks (copy_candidates ~new_claims ~absorbed ~applied:[]) Gate_judgment_failed)
+        [] in
     (match authority.armed_destinations with
      | Error
          ((Typesafeai_config.Absorb_gate_disabled | Typesafeai_config.Keeper_excluded) as reason)
@@ -1614,7 +1671,7 @@ let run_resolved
             judged.requests
             (shas ()));
        log_copy_checks ~keeper_id copy_checks;
-       complete (Evaluated { outcome; copy_checks; evaluations })))
+       evaluated outcome copy_checks evaluations))
 ;;
 
 (* Keep the existing no-absorption path before configuration resolution. Both
@@ -1679,7 +1736,15 @@ let continue_captured ~(request_clock : request_clock) ~guidance ~keeper_id ~aut
     Eio.Cancel.protect (fun () -> after_evaluate ~evaluation_id evaluation);
     Eio.Fiber.check ();
     evaluation in
-  restore_with ~missing ~guidance ~authority ~cited_observations ~facts ~new_claims ~superseding ~absorbed ~evaluations
+  let result =
+    restore_with ~missing ~guidance ~authority ~cited_observations ~facts ~new_claims ~superseding ~absorbed ~evaluations
+  in
+  (* The captured paths finish a judgment here. [restore] replays the same
+     transcript on every read of the retained record, so it counts nothing. *)
+  (match result with
+   | Ok (Evaluated { outcome; copy_checks; evaluations = _ }) -> count_evaluation ~keeper_id outcome copy_checks
+   | Ok (Skipped _) | Error _ -> ());
+  result
 ;;
 
 let run

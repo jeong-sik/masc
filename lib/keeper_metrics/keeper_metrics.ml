@@ -180,6 +180,8 @@ type t =
   | MemoryChanges               (* counter: memory IDs a store commit added, absorbed, superseded or dropped, by keeper, pass and change *)
   | MemoryFacts                 (* gauge: facts in a keeper's Memory after its last rewriting commit *)
   | MemorySnapshotBytes         (* gauge: rendered fact bytes of a keeper's Memory after its last rewriting commit *)
+  | LibrarianAbsorbSources      (* counter: sources of a finished absorb-gate judgment, by keeper, forward outcome and the choice they got *)
+  | LibrarianAbsorbCopyChecks   (* counter: reverse copy checks of a finished absorb-gate judgment, by keeper and verdict *)
 [@@deriving enumerate]
 
 (** String conversion
@@ -371,6 +373,8 @@ let to_string = function
   | MemoryChanges -> "masc_keeper_memory_changes_total"
   | MemoryFacts -> "masc_keeper_memory_facts"
   | MemorySnapshotBytes -> "masc_keeper_memory_snapshot_bytes"
+  | LibrarianAbsorbSources -> "masc_keeper_librarian_absorb_sources_total"
+  | LibrarianAbsorbCopyChecks -> "masc_keeper_librarian_absorb_copy_checks_total"
 ;;
 
 type collection =
@@ -426,7 +430,7 @@ let collection = function
   | WorkspaceMemoryLedgerClaims | MemoryRecallRequests | MemoryRecallInputBytes
   | MemoryRecallRequestSeconds | MemoryRecallTotal | MemoryRecallSelected
   | MemoryRecallJudgmentSeconds | MemoryRecallPreparationFailures | MemoryChanges | MemoryFacts
-  | MemorySnapshotBytes -> Metric_store
+  | MemorySnapshotBytes | LibrarianAbsorbSources | LibrarianAbsorbCopyChecks -> Metric_store
 ;;
 
 (* Zero-fill: register the unlabeled 0-cell of every counter at module

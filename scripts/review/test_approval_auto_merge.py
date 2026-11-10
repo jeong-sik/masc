@@ -898,6 +898,77 @@ class QuotaGetIntegration(unittest.TestCase):
         with self.assertRaises(ValueError):
             MERGE.parse_receipt(json.dumps(dict(deferred, extra=True)))
 
+class WakingTheMainBuild(unittest.TestCase):
+    """Every path that reaches a merged verdict wakes the main build once.
+
+    A bot merge emits no push event, so `Main minimal build` never starts by
+    itself. Three paths reach a merged verdict and each one must dispatch; a
+    dry run and an unsettled receipt must not.
+    """
+
+    def setUp(self):
+        self.addCleanup(MERGE._WAKE.update, {'repo': None, 'enabled': False})
+        self.dispatched = []
+        patcher = patch.object(
+            MERGE, 'wake_main_build',
+            side_effect=lambda repo: self.dispatched.append(repo) or {'dispatched': True})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_the_auto_merge_arming_readback_wakes_the_main_build(self):
+        """`gh pr merge --auto` followed by a merged readback returns at 468."""
+        environment = {'GITHUB_REPOSITORY': REPO, 'GITHUB_EVENT_NAME': 'workflow_run',
+                       'DISPATCH_PR': '102', 'GITHUB_STEP_SUMMARY': ''}
+        automatic = {'status': 'merged', 'pr': 102, 'merge_commit_sha': sha(102)}
+        with patch.dict(os.environ, environment), patch.object(sys, 'argv', ['auto-merge']), \
+             patch.object(MERGE, 'auto_merge_default', return_value=automatic), \
+             redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+            code = MERGE.main()
+        self.assertEqual(code, 0)
+        self.assertEqual(self.dispatched, [REPO])
+
+    def test_a_resumed_receipt_that_reports_a_merge_wakes_the_main_build(self):
+        """follow() reaches merged without ever calling submit(), then returns."""
+        receipt = {'uuid': UUID, 'pr': 102, 'head': sha(102),
+                   'members': [101, 102], 'since': T1}
+        environment = {'GITHUB_REPOSITORY': REPO, 'GITHUB_EVENT_NAME': 'workflow_dispatch',
+                       'DISPATCH_PR': '102', 'GITHUB_STEP_SUMMARY': '',
+                       'DISPATCH_RECEIPT': json.dumps(receipt)}
+        with patch.dict(os.environ, environment), patch.object(sys, 'argv', ['auto-merge']), \
+             patch.object(MERGE, 'resume', return_value={'status': 'merged'}), \
+             redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+            code = MERGE.main()
+        self.assertEqual(code, 0)
+        self.assertEqual(self.dispatched, [REPO])
+
+    def test_an_unsettled_receipt_does_not_wake_the_build(self):
+        """Nothing merged yet, so no build request and a visible red exit."""
+        receipt = {'uuid': UUID, 'pr': 102, 'head': sha(102),
+                   'members': [101, 102], 'since': T1}
+        environment = {'GITHUB_REPOSITORY': REPO, 'GITHUB_EVENT_NAME': 'workflow_dispatch',
+                       'DISPATCH_PR': '102', 'GITHUB_STEP_SUMMARY': '',
+                       'DISPATCH_RECEIPT': json.dumps(receipt)}
+        with patch.dict(os.environ, environment), patch.object(sys, 'argv', ['auto-merge']), \
+             patch.object(MERGE, 'resume', return_value={'status': 'still_pending'}), \
+             redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+            code = MERGE.main()
+        self.assertNotEqual(code, 0)
+        self.assertEqual(self.dispatched, [])
+
+    def test_a_dry_run_reports_the_merge_without_waking_the_build(self):
+        """--dry-run reads admission; it must never dispatch anything."""
+        receipt = {'uuid': UUID, 'pr': 102, 'head': sha(102),
+                   'members': [101, 102], 'since': T1}
+        environment = {'GITHUB_REPOSITORY': REPO, 'GITHUB_EVENT_NAME': 'workflow_dispatch',
+                       'DISPATCH_PR': '102', 'GITHUB_STEP_SUMMARY': '',
+                       'DISPATCH_RECEIPT': json.dumps(receipt)}
+        with patch.dict(os.environ, environment), \
+             patch.object(sys, 'argv', ['auto-merge', '--dry-run']), \
+             patch.object(MERGE, 'resume', return_value={'status': 'merged'}), \
+             redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+            MERGE.main()
+        self.assertEqual(self.dispatched, [])
+
 
 if __name__ == '__main__':
     unittest.main()

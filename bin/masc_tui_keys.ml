@@ -1434,7 +1434,11 @@ let footer_hints ?(lang = Lang_en) ?detail_open ?has_rows ?has_reading surface =
 let planning_goal_hints ~lang ~detail_open ~has_rows =
   let bindings = for_surface Planning
     |> List.filter (answers_in_state ~detail_open ?has_rows)
-    |> List.filter (fun binding -> not detail_open || not (String.equal binding.key "r")) in
+    |> List.filter (fun binding -> not detail_open || not (String.equal binding.key "r"))
+    |> List.map (fun binding ->
+      if detail_open && String.equal binding.key "j/k" then
+        {binding with label = "scroll"; label_ko = Some "스크롤"}
+      else binding) in
   let read, others = List.partition (fun binding -> String.equal binding.key goal_candle_refresh_key) bindings in
   hints_in_order ~lang (read @ List.stable_sort (fun a b -> compare (group_rank a.group) (group_rank b.group)) others)
 

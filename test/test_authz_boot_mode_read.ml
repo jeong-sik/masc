@@ -89,15 +89,17 @@ let decision_label = function
   | Read.Boot_after_off (_ : Authz_state.t) -> "boot single user after Off"
   | Read.Stop (Read.Refuse (first, rest)) ->
     "refuse: " ^ String.concat "; " (List.map B.refusal_to_string (first :: rest))
+  | Read.Boot_multi_account -> "boot multi-account"
   | Read.Stop Read.Activation_requested -> "activation requested"
-  | Read.Stop (Read.Multi_account_not_served mode) -> "not served: " ^ B.mode_to_string mode
+  | Read.Stop Read.Authorization_uncertain -> "authorization uncertain"
 ;;
 
 let refused = function
   | Read.Stop (Read.Refuse (first, rest)) -> Some (first, rest)
   | Read.Boot_single_user
   | Read.Boot_after_off (_ : Authz_state.t)
-  | Read.Stop (Read.Activation_requested | Read.Multi_account_not_served _) -> None
+  | Read.Boot_multi_account
+  | Read.Stop (Read.Activation_requested | Read.Authorization_uncertain) -> None
 ;;
 
 (* The first reason of a refusal, for the cases that care which check stopped
@@ -219,7 +221,7 @@ let test_bootstrapped () =
     bootstrap dirs;
     write_config dirs {|{"enabled":true,"require_token":true,"account_mode":"Multi_account"}|};
     (* Row 7: the log, the record and the store agree. *)
-    check_decision "row 7" (Read.Stop (Read.Multi_account_not_served B.Multi_account)) dirs;
+    check_decision "row 7" Read.Boot_multi_account dirs;
     (* Row 3: a config cut while it was written does not lower the mode. *)
     write_config dirs {|{"enabled":true,"acc|};
     check_decision "row 3" (Read.Stop (Read.Refuse (B.Downgraded_from_multi_account, []))) dirs)
@@ -256,7 +258,9 @@ let test_turned_off () =
          write_config dirs config;
          match Read.boot ~base_path:dirs.base ~config_dir:(Some dirs.config) ~anonymous_mutations:false with
          | Error (first, _) -> Alcotest.failf "%s: refused: %s" name first
-         | Ok single_user ->
+         | Ok (Read.Multi_account (_ : Read.multi_account)) ->
+           Alcotest.failf "%s: booted as a multi-account installation" name
+         | Ok (Read.Single_user single_user) ->
            (match Read.turned_off single_user with
             | None -> Alcotest.failf "%s: booted as a base path never set up" name
             | Some state ->
@@ -291,12 +295,13 @@ let test_install_record_lost () =
     write_config dirs {|{"enabled":true,"require_token":true,"account_mode":"Multi_account"}|};
     Sys.remove (install_record_file dirs);
     (* Row 8: the log made Multi_account and the high-water mark is absent. *)
-    check_decision "row 8" (Read.Stop (Read.Multi_account_not_served B.Multi_account_uncertain)) dirs)
+    check_decision "row 8" (Read.Stop Read.Authorization_uncertain) dirs)
 ;;
 
-(* The way back that Read.single_user_again gives. The lock file of the log
-   stays: a boot makes it anyway. *)
-let test_single_user_again () =
+(* Row 1 again once the log, the store and the install record are deleted and
+   the config asks for nothing. The lock file of the log stays: a boot makes
+   it anyway. *)
+let test_everything_deleted () =
   with_dirs (fun dirs ->
     bootstrap dirs;
     write_config dirs {|{"enabled":true,"require_token":true,"account_mode":"Multi_account"}|};
@@ -377,7 +382,7 @@ let test_store_gone () =
     (* The store, its lock file, and the directory that held them. *)
     remove_tree store_dir;
     (* Row 8 with an absent mark: the record points where no store is. *)
-    check_decision "row 8" (Read.Stop (Read.Multi_account_not_served B.Multi_account_uncertain)) dirs;
+    check_decision "row 8" (Read.Stop Read.Authorization_uncertain) dirs;
     Alcotest.(check bool) "no store directory made" false (Sys.file_exists store_dir))
 ;;
 
@@ -405,12 +410,9 @@ let test_log_of_another_bootstrap () =
      | B.Judged (Authz_high_water.Mismatch _) -> ()
      | B.Judged (Authz_high_water.Absent | Authz_high_water.Matches) | B.Store_unreadable _ ->
        Alcotest.fail "expected a mismatch");
-    let stop = Read.Multi_account_not_served B.Multi_account_uncertain in
+    let stop = Read.Authorization_uncertain in
     Alcotest.check decision "row 8" (Read.Stop stop) (Read.decide i);
-    Alcotest.(check bool)
-      "the mismatch is in the message"
-      true
-      (snd (Read.messages i stop) <> [ Read.single_user_again ]))
+    Alcotest.(check bool) "the mismatch is in the message" true (snd (Read.messages i stop) <> []))
 ;;
 
 let test_boot_entry () =
@@ -419,11 +421,34 @@ let test_boot_entry () =
     Alcotest.(check bool) "single user" true (Result.is_ok (boot ()));
     write_config dirs {|{"enabled":true,"require_token":true,"account_mode":"Multi_account"}|};
     (match boot () with
-     | Ok (_ : Read.single_user) -> Alcotest.fail "a Multi_account request booted"
+     | Ok (Read.Single_user (_ : Read.single_user) | Read.Multi_account (_ : Read.multi_account)) ->
+       Alcotest.fail "a Multi_account request booted before the bootstrap"
      | Error (first, _) -> Alcotest.(check bool) "a reason" true (first <> ""));
     write_config dirs {|{"enabled":true,"require_token":true}|};
     Alcotest.(check bool) "anonymous mutations do not matter to a single user" true
       (Result.is_ok (Read.boot ~base_path:dirs.base ~config_dir:(Some dirs.config) ~anonymous_mutations:true)))
+;;
+
+(* Row 7 through the entry of the boot: the installation, and the store that
+   the judgment read. *)
+let test_boot_multi_account () =
+  with_dirs (fun dirs ->
+    bootstrap dirs;
+    write_config dirs {|{"enabled":true,"require_token":true,"account_mode":"Multi_account"}|};
+    (match Read.boot ~base_path:dirs.base ~config_dir:(Some dirs.config) ~anonymous_mutations:false with
+     | Error (first, _) -> Alcotest.failf "refused: %s" first
+     | Ok (Read.Single_user (_ : Read.single_user)) -> Alcotest.fail "booted a single user"
+     | Ok (Read.Multi_account multi_account) ->
+       Alcotest.(check string) "the base path" dirs.base (Read.multi_account_base_path multi_account);
+       Alcotest.(check string)
+         "the external store of the install record"
+         (Unix.realpath dirs.store)
+         (Unix.realpath (Read.multi_account_external_store multi_account)));
+    (* The table refuses a multi-account boot with anonymous mutations on. *)
+    match Read.boot ~base_path:dirs.base ~config_dir:(Some dirs.config) ~anonymous_mutations:true with
+    | Ok (Read.Single_user (_ : Read.single_user) | Read.Multi_account (_ : Read.multi_account)) ->
+      Alcotest.fail "booted with anonymous mutations on"
+    | Error (first, _) -> Alcotest.(check bool) "a reason" true (first <> ""))
 ;;
 
 (* Plan D2-2: a host tool judges from presence alone and writes nothing. *)
@@ -544,7 +569,7 @@ let test_mode_event_appended_by_hand () =
     write_config dirs asks_multi_account;
     check_decision
       "a Reactivate that the store did not answer"
-      (Read.Stop (Read.Multi_account_not_served B.Multi_account_uncertain))
+      (Read.Stop Read.Authorization_uncertain)
       dirs;
     write_config dirs asks_nothing;
     check_decision
@@ -705,7 +730,7 @@ let () =
         ; Alcotest.test_case "bootstrapped" `Quick test_bootstrapped
         ; Alcotest.test_case "restored before bootstrap" `Quick test_restored_before_bootstrap
         ; Alcotest.test_case "install record lost" `Quick test_install_record_lost
-        ; Alcotest.test_case "single user again" `Quick test_single_user_again
+        ; Alcotest.test_case "everything deleted" `Quick test_everything_deleted
         ; Alcotest.test_case "turned off" `Quick test_turned_off
         ; Alcotest.test_case "config dir others can write" `Quick test_unreadable_config_dir
         ; Alcotest.test_case "log without a mode event" `Quick test_log_without_mode_event
@@ -717,6 +742,7 @@ let () =
         ; Alcotest.test_case "store gone" `Quick test_store_gone
         ; Alcotest.test_case "log of another bootstrap" `Quick test_log_of_another_bootstrap
         ; Alcotest.test_case "boot entry" `Quick test_boot_entry
+        ; Alcotest.test_case "boot entry, multi-account" `Quick test_boot_multi_account
         ; Alcotest.test_case "host tool" `Quick test_tool
         ; Alcotest.test_case "same, with no record" `Quick test_config_dir_others_can_write_without_record
         ; Alcotest.test_case "store behind a dangling link" `Quick test_store_behind_a_dangling_link

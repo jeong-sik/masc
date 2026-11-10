@@ -183,7 +183,9 @@ let test_turned_off () =
         (* No config.json asks for nothing, so the boot reads row 4. *)
         let single_user =
           match Authz_boot_mode_read.boot ~base_path ~config_dir ~anonymous_mutations:false with
-          | Ok single_user -> single_user
+          | Ok (Authz_boot_mode_read.Single_user single_user) -> single_user
+          | Ok (Authz_boot_mode_read.Multi_account (_ : Authz_boot_mode_read.multi_account)) ->
+            Alcotest.fail "the boot found a multi-account installation after the Off"
           | Error (first, rest) ->
             Alcotest.failf "the boot refused: %s" (String.concat "; " (first :: rest))
         in

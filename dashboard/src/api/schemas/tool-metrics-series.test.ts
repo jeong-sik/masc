@@ -11,14 +11,16 @@ const busy = {
   call_count: 2,
   failure_count: 1,
   deferred_count: 0,
-  total_ms: 30,
+  total_ms: 90_030,
   p50_ms: 10,
   p95_ms: 20,
-  max_ms: 20,
+  max_ms: 90_000,
+  long_count: 1,
+  long_total_ms: 90_000,
 }
 
 // A bucket in which no call ran: the server sends null, never zero, for the
-// three latency values.
+// three latency values, and zero for the long calls.
 const idle = {
   call_count: 0,
   failure_count: 0,
@@ -27,6 +29,8 @@ const idle = {
   p50_ms: null,
   p95_ms: null,
   max_ms: null,
+  long_count: 0,
+  long_total_ms: 0,
 }
 
 function validResponse(overrides: Record<string, unknown> = {}): Record<string, unknown> {
@@ -41,6 +45,7 @@ function validResponse(overrides: Record<string, unknown> = {}): Record<string, 
       utc_offset_min: 540,
     },
     tool: null,
+    long_call_ms: 60_000,
     total: busy,
     buckets: [
       { start: 1_793_804_400, ...idle },
@@ -63,6 +68,31 @@ describe('parseToolMetricsSeriesResponse', () => {
     const out = parseToolMetricsSeriesResponse(validResponse())
     expect(out.buckets[0]?.p95_ms).toBeNull()
     expect(out.buckets[1]?.p95_ms).toBe(20)
+  })
+
+  it('keeps the line a long call starts at, and the long calls of every row', () => {
+    const out = parseToolMetricsSeriesResponse(validResponse())
+    expect(out.long_call_ms).toBe(60_000)
+    expect([out.total, out.buckets[1], out.top_by_time[0]].map(row => row?.long_count)).toEqual([1, 1, 1])
+    expect(out.buckets[1]?.long_total_ms).toBe(90_000)
+  })
+
+  it('keeps zero long calls for a bucket in which no call ran', () => {
+    const idleBucket = parseToolMetricsSeriesResponse(validResponse()).buckets[0]
+    expect([idleBucket?.long_count, idleBucket?.long_total_ms]).toEqual([0, 0])
+  })
+
+  it('rejects a bucket that lost its long calls, or an answer without the line', () => {
+    const { long_count: _count, ...withoutLongCount } = busy
+    expect(() =>
+      parseToolMetricsSeriesResponse(validResponse({ buckets: [{ start: 1, ...withoutLongCount }] })),
+    ).toThrow(/long_count/)
+    const { long_total_ms: _time, ...withoutLongTime } = busy
+    expect(() => parseToolMetricsSeriesResponse(validResponse({ total: withoutLongTime }))).toThrow(
+      /long_total_ms/,
+    )
+    const { long_call_ms: _line, ...withoutLine } = validResponse()
+    expect(() => parseToolMetricsSeriesResponse(withoutLine)).toThrow(/long_call_ms/)
   })
 
   it('keeps the tool filter the server echoed', () => {

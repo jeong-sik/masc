@@ -2202,12 +2202,18 @@ let dynamic_tools ~result_scope ?base_path ?read_arrived ~content_transport ~acc
       match read_arrived, base_path with
       | Some read, _ -> Some (arrival_source ~keeper_name ~base_path ~read)
       | None, Some base_path ->
+        (* The workspace config is resolved inside the reader call: a failure
+           there is one unlisted round, handled where [with_arrived_rows]
+           handles every other reader failure. *)
         Some
           (arrival_source
              ~keeper_name
              ~base_path:(Some base_path)
              ~read:(fun () ->
-               Keeper_registry_event_queue.pending_selections_result ~base_path keeper_name))
+               Keeper_arrived_stimuli_reader.read
+                 ~config:(Workspace.default_config base_path)
+                 ~keeper_name
+                 ()))
       | None, None -> None
     in
     Ok

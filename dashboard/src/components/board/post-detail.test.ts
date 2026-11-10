@@ -141,6 +141,19 @@ afterEach(() => {
 })
 
 describe('CommentThread', () => {
+  it('does not cast from an unreadable vote state on a comment', () => {
+    const comments: BoardComment[] = [{ id: 'unknown-vote', post_id: 'post-1',
+      author: 'reader', content: 'Readable comment', created_at: '2026-04-02T00:00:00Z' }]
+    render(h(CommentThread, { comments, postId: 'post-1' }))
+
+    const upvote = screen.getByRole('button', { name: '댓글 추천' })
+    expect(upvote).toBeDisabled()
+    expect(upvote).not.toHaveAttribute('aria-pressed')
+    expect(screen.getByRole('button', { name: '댓글 비추천' })).toBeDisabled()
+    fireEvent.click(upvote)
+    expect(voteComment).not.toHaveBeenCalled()
+  })
+
   it('shows the total and loads older server pages', () => {
     const onLoadOlder = vi.fn()
     const comments = [
@@ -303,6 +316,8 @@ describe('CommentThread', () => {
         content: 'vote on me',
         created_at: '2026-04-02T00:00:00Z',
         vote_balance: 4,
+        current_vote: null,
+        has_voted: false,
       },
     ] as any
 
@@ -651,6 +666,20 @@ describe('PostDetail', () => {
     render(h(PostDetail, { post }))
 
     expect(screen.queryByText('🔒 닫힘')).not.toBeInTheDocument()
+  })
+
+  it('does not cast from an unreadable vote state on the full post', () => {
+    const post: BoardPost = { id: 'unknown-vote', author: 'writer', title: 'Readable post',
+      body: 'Body', tags: [], votes: 7, comment_count: 0,
+      created_at: '2026-04-02T00:00:00Z', updated_at: '2026-04-02T00:00:00Z' }
+    render(h(PostDetail, { post }))
+
+    const upvote = screen.getByRole('button', { name: '▲ 추천' })
+    expect(upvote).toBeDisabled()
+    expect(upvote).not.toHaveAttribute('aria-pressed')
+    expect(screen.getByRole('button', { name: '▼ 비추천' })).toBeDisabled()
+    fireEvent.click(upvote)
+    expect(votePost).not.toHaveBeenCalled()
   })
 
   it('marks the current post vote as pressed', async () => {

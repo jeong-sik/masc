@@ -31,9 +31,7 @@ val extract
   -> string
   -> ('a, Error.t) result
 
-(** {1 Extractors} *)
-
-type 'a extractor = api_response -> ('a, string) result
+(** {1 Response inspection} *)
 
 (** Shape requirement for extracting a provider-native structured-output JSON
     payload from an API response. *)
@@ -57,13 +55,6 @@ type 'a response_outcome =
 val inspect_response_json :
   ?shape:response_json_shape -> api_response -> Yojson.Safe.t response_outcome
 
-(** Result projection of {!inspect_response_json}. Nonterminal/refused/truncated
-    states become {!Error.StructuredOutputStateError}, not parse errors. *)
-val extract_response_json
-  :  ?shape:response_json_shape
-  -> api_response
-  -> (Yojson.Safe.t, Error.t) result
-
 (** Parse an already received response with a typed schema. Post-response JSON
     and schema failures retain bounded private model-output evidence in
     {!Error.StructuredOutputParseError}. No public text projection includes it. *)
@@ -71,6 +62,3 @@ val extract_response
   :  schema:'a schema
   -> api_response
   -> ('a, Error.t) result
-
-val json_extractor : (Yojson.Safe.t -> 'a) -> 'a extractor
-val text_extractor : (string -> 'a option) -> 'a extractor

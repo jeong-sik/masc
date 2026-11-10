@@ -108,15 +108,6 @@ val get_clock : unit -> (float Eio.Time.clock_ty Eio.Resource.t, string) result
 (** Get the Eio clock.
     Returns Error if not initialized. *)
 
-val get_https_connector_result :
-  unit ->
-  ((Uri.t ->
-    [ `Generic ] Eio.Net.stream_socket_ty Eio.Resource.t ->
-    [ `Close | `Flow | `R | `Shutdown | `Tls | `W ] Eio.Resource.t),
-   string)
-  result
-(** Non-raising HTTPS connector lookup. *)
-
 module For_testing : sig
   val clear_root_switch : unit -> unit
   (** Clear the root switch binding. Test scopes that install a temporary

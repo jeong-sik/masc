@@ -49,11 +49,25 @@ val create_store_with_comments_io_for_testing :
   base_path:string -> io:Fs_compat.private_jsonl_transaction_io_for_testing ->
   unit -> store
 (** Same store with one immutable comments transaction IO seam. *)
+val create_store_with_sub_boards_io_for_testing :
+  base_path:string -> io:Fs_compat.private_jsonl_transaction_io_for_testing ->
+  unit -> store
+(** Immutable IO seam using the real sub-board file transaction. *)
+val create_store_with_votes_io_for_testing :
+  base_path:string -> io:Fs_compat.private_jsonl_transaction_io_for_testing ->
+  unit -> store
+(** Immutable IO seam using the real vote-file transaction. The constructor
+    leaves the vote source unobserved until an explicit load. *)
 
 val require_persisted_snapshot_readable :
   (unit, string) result -> (unit, board_error) result
 (** Reject a mutation whose full-snapshot source did not load completely.
     The stored detail includes the authoritative path and malformed row. *)
+
+val require_model_reload_allowed : store -> path:string -> (unit, string * exn) result
+(** Pure loader precondition under persistence or quiescent startup. A pending
+    deletion retains its applied model until its snapshots finish or a fresh
+    store is opened; replacing one model would lose that deletion's meaning. *)
 
 val invalidate_post_caches : store -> unit
 val invalidate_comment_caches : store -> unit

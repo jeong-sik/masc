@@ -1,16 +1,20 @@
 (** Sub-board policy and CRUD for one Board store.
 
     Runtime policy mutations take the store's persistence mutex before its
-    state mutex. Post creation uses the same boundary for its final policy
-    check and append. This does not serialize different stores or processes;
-    startup loaders run before the store is published. Snapshot-save failures
-    return a typed error before policy memory is changed. This does not turn
-    an unknown filesystem publication into proof of a nonwrite. *)
+    state mutex. Policy writes compare the exact loaded file under the existing
+    stable file lock before publication. Stale writers refuse. This does not
+    validate another writer's policy changes atomically with post creation,
+    nor make policy deletion and post hearth unlinking one transaction. *)
 
 open Board_types
 
 val sub_board_to_yojson : sub_board -> Yojson.Safe.t
 val sub_board_of_yojson : Yojson.Safe.t -> sub_board option
+
+val reload_sub_boards : store -> (int, string * exn) result
+(** Explicit source load/reload. Replace both indexes on complete reads;
+    partial rows grant no query or mutation authority. Unknown writes and
+    interrupted publication require a fresh store. Count physical rows. *)
 
 val create_sub_board :
   store ->
@@ -29,6 +33,9 @@ val get_sub_board :
   store -> sub_board_id:string -> (sub_board, board_error) result
 
 val list_sub_boards : store -> sub_board list
+(** Best-effort display only; cannot establish policy completeness. *)
+
+val read_sub_boards : store -> (sub_board list, board_error) result
 
 val update_sub_board :
   store ->

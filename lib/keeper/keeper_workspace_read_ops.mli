@@ -14,3 +14,13 @@ val try_handle_with_outcome :
   op:string ->
   raw_path:string ->
   Keeper_tool_execution.t option
+
+(** The program and arguments Grep runs inside the backend to learn whether
+    anything can be found at [path]: one [sh] script, [ -e ], with the path as
+    a positional argument. It exits 0 when something is there and
+    {!path_missing_exit} when nothing can be found; any other status is a probe
+    that did not run and proves nothing. A failed rg search is called a missing
+    path by that code, never by rg's stderr. *)
+val path_probe_argv : string -> string list
+
+val path_missing_exit : int

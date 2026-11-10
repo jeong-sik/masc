@@ -256,7 +256,8 @@ let displayed_report_inventory_evidence () =
   let origin : Types.sent_image_read = {
     sir_generation=state.image_request_generation; sir_view=Resources; sir_keeper=None;
     sir_name="report"; sir_owner=Peer_image_read state.workspace_read_authority;
-    sir_resource=state.resource_content; sir_skill_reference=None; sir_purpose=Open_image } in
+    sir_resource=state.resource_content; sir_memory_activity=None;
+    sir_skill_reference=None; sir_purpose=Open_image } in
   let retained () = Option.is_some (Types.image_cell_origin_for_redraw state ~workspace origin) in
   listed state (Ok {Catalog.entries=[];notes=["reports could not be read"];reports_complete=false});
   check bool "partial report inventory retains the captured image" true (retained ());

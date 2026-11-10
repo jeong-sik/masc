@@ -91,7 +91,6 @@ type transition_context = {
     [stop_signaled] in [specs/keeper-turn-fsm/KeeperTurnFSM.tla]. *)
 
 type any_state = Any : _ turn_state -> any_state
-val any_state_label : any_state -> string
 val any_state_tla_symbol : any_state -> string
 
 type transition_violation = {

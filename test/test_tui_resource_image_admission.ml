@@ -3,6 +3,7 @@ module Mcp = Masc_tui_mcp
 module Images = Masc_tui_resource_images
 module Updates = Masc_tui_resources_updates
 module Types = Masc_tui_types
+module Fetched = Masc_tui_fetched
 
 module Catalog = Masc_tui_resource_catalog
 let key = testable (fun fmt _ -> Format.pp_print_string fmt "resource key") Catalog.equal_key
@@ -90,6 +91,7 @@ let pending state owner =
   { Types.sir_generation = state.Types.image_request_generation;
     sir_view = state.view; sir_keeper = state.msg_target_keeper_name;
     sir_name = "local.png"; sir_owner = owner; sir_resource = None;
+    sir_memory_activity = None;
     sir_skill_reference = None;
     sir_purpose = Types.Open_image }
 
@@ -591,6 +593,144 @@ let test_displayed_chat_cell_is_captured () =
     (Option.is_some (Types.image_cell_origin_for_redraw state ~workspace:state.workspace_authority origin));
   check bool "chat image without a source anchor is marked unconfirmed" true
     (Types.image_cell_source_unconfirmed state origin)
+
+let test_memory_image_keeper_owner () =
+  let state=state () in
+  state.view <- Types.Memory;
+  state.memory_page <- Types.Memory_changes;
+  state.memory_facts_keeper <- Some "memory-keeper";
+  state.msg_target_keeper_name <- Some "unrelated-chat";
+  let origin={ (pending state (Types.Peer_image_read state.workspace_read_authority)) with
+    sir_keeper=Some "memory-keeper" } in
+  let current () = Types.image_request_keeper_is_current state origin in
+  check bool "memory request is independent of the chat target" true (current ());
+  state.memory_facts_keeper <- Some "another-keeper";
+  check bool "another memory keeper refuses completion" false (current ());
+  state.memory_facts_keeper <- Some "memory-keeper";
+  state.memory_page <- Types.Memory_facts;
+  check bool "leaving changes refuses diagram completion" false (current ())
+
+let begin_memory_activity state keeper =
+  match Fetched.refresh ~equal:String.equal state.Types.memory_activity ~key:keeper with
+  | Fetched.Started (source, request) -> state.memory_activity <- source; request
+  | Fetched.Already_loading -> fail "expected a new Memory activity read"
+
+let memory_image_capture () =
+  let state=state () in
+  state.view <- Types.Memory;
+  state.memory_page <- Types.Memory_changes;
+  state.memory_facts_keeper <- Some "memory-keeper";
+  state.workspace_identity <- Types.Workspace_identity_match;
+  let activity : Masc.Keeper_memory_activity.t =
+    {limit=30; journal_lines=1; events=[]; notes=[]} in
+  let request=begin_memory_activity state "memory-keeper" in
+  state.memory_activity <- Fetched.complete ~equal:String.equal state.memory_activity request (Ok activity);
+  let origin={ (pending state (Types.Peer_image_read state.workspace_read_authority)) with
+    sir_keeper=Some "memory-keeper"; sir_memory_activity=Some activity } in
+  state, activity, origin
+
+let test_memory_image_source_freshness () =
+  let state, activity, origin=memory_image_capture () in
+  let retained origin = Option.is_some
+    (Types.image_cell_origin_for_redraw state ~workspace:state.workspace_authority origin) in
+  check bool "exact fresh Memory activity is confirmed" false
+    (Types.image_cell_source_unconfirmed state origin);
+  let identical = match Masc.Keeper_memory_activity.of_json
+      (Masc.Keeper_memory_activity.to_json activity) with
+    | Ok decoded -> decoded
+    | Error error -> fail ("activity roundtrip failed: " ^ error) in
+  check bool "successful reread decodes a different activity object" false (identical == activity);
+  let request=begin_memory_activity state "memory-keeper" in
+  state.memory_activity <- Fetched.complete ~equal:String.equal state.memory_activity request (Ok identical);
+  check bool "identical successful reread confirms the captured activity" false
+    (Types.image_cell_source_unconfirmed state origin);
+  let request=begin_memory_activity state "memory-keeper" in
+  check bool "in-flight reread retains the captured image" true (retained origin);
+  check bool "retained Ready value during reread is unconfirmed" true
+    (Types.image_cell_source_unconfirmed state origin);
+  state.memory_activity <- Fetched.complete ~equal:String.equal state.memory_activity request
+    (Error "activity read failed");
+  check bool "failed reread retains the captured image" true (retained origin);
+  check bool "failed reread is unconfirmed" true (Types.image_cell_source_unconfirmed state origin);
+  let replacement={activity with journal_lines=2} in
+  let request=begin_memory_activity state "memory-keeper" in
+  state.memory_activity <- Fetched.complete ~equal:String.equal state.memory_activity request (Ok replacement);
+  check bool "new activity does not replace the captured image" true (retained origin);
+  check bool "another Ready activity cannot confirm the old capture" true
+    (Types.image_cell_source_unconfirmed state origin);
+  let reopened={origin with sir_memory_activity=Some replacement} in
+  check bool "reopening captures the current fresh activity" false
+    (Types.image_cell_source_unconfirmed state reopened);
+  state.memory_facts_keeper <- Some "another-keeper";
+  check bool "another selected Keeper cannot confirm the capture" true
+    (Types.image_cell_source_unconfirmed state reopened);
+  state.memory_facts_keeper <- Some "memory-keeper";
+  state.memory_page <- Types.Memory_facts;
+  check bool "another Memory page cannot confirm the capture" true
+    (Types.image_cell_source_unconfirmed state reopened);
+  state.memory_page <- Types.Memory_changes;
+  state.workspace_identity <- Types.Workspace_identity_unread;
+  check bool "unconfirmed workspace retains the captured image" true (retained reopened);
+  check bool "unconfirmed workspace cannot confirm the capture" true
+    (Types.image_cell_source_unconfirmed state reopened);
+  state.workspace_identity <- Types.Workspace_identity_match;
+  state.workspace_read_authority <- ref ();
+  check bool "another workspace read epoch cannot confirm the capture" true
+    (Types.image_cell_source_unconfirmed state reopened)
+
+let test_memory_image_source_unavailable () =
+  let state, activity, origin=memory_image_capture () in
+  check bool "unanchored Memory image stays unconfirmed" true
+    (Types.image_cell_source_unconfirmed state {origin with sir_memory_activity=None});
+  let partial={activity with notes=["unreadable journal row"]} in
+  let request=begin_memory_activity state "memory-keeper" in
+  state.memory_activity <- Fetched.complete ~equal:String.equal state.memory_activity request (Ok partial);
+  check bool "partial Ready history stays unconfirmed" true
+    (Types.image_cell_source_unconfirmed state {origin with sir_memory_activity=Some partial});
+  state.memory_activity <- Fetched.initial;
+  check bool "absent activity stays unconfirmed" true (Types.image_cell_source_unconfirmed state origin);
+  let request=begin_memory_activity state "memory-keeper" in
+  check bool "initial loading stays unconfirmed" true (Types.image_cell_source_unconfirmed state origin);
+  state.memory_activity <- Fetched.complete ~equal:String.equal state.memory_activity request
+    (Error "activity unavailable");
+  check bool "failed activity stays unconfirmed" true (Types.image_cell_source_unconfirmed state origin);
+  let request=begin_memory_activity state "another-keeper" in
+  state.memory_activity <- Fetched.complete ~equal:String.equal state.memory_activity request (Ok activity);
+  check bool "another fetched Keeper cannot confirm the capture" true
+    (Types.image_cell_source_unconfirmed state origin)
+
+let test_memory_pixel_source_retention () =
+  let state, activity, origin=memory_image_capture () in
+  let source : Types.image_pixel_source =
+    {ips_workspace=state.workspace_authority;ips_origin=origin;
+     ips_unconfirmed=true;ips_footer=""} in
+  let current () = match Types.image_pixel_source_for_redraw state source with
+    | Some current -> current
+    | None -> fail "expected the captured Memory pixel source" in
+  check bool "fresh pixel source is confirmed" false (current ()).ips_unconfirmed;
+  let request=begin_memory_activity state "memory-keeper" in
+  check bool "pixel source becomes unconfirmed during refresh" true (current ()).ips_unconfirmed;
+  state.memory_activity <- Fetched.complete ~equal:String.equal state.memory_activity request
+    (Error "activity unavailable");
+  let retained=current () in
+  check bool "failed refresh retains the exact pixel origin" true (retained.ips_origin == origin);
+  check bool "failed refresh keeps the pixel source unconfirmed" true retained.ips_unconfirmed;
+  let request=begin_memory_activity state "memory-keeper" in
+  state.memory_activity <- Fetched.complete ~equal:String.equal state.memory_activity request
+    (Ok {activity with journal_lines=2});
+  check bool "changed activity retains the captured pixel origin" true
+    ((current ()).ips_origin == origin);
+  check bool "changed activity keeps the pixel source unconfirmed" true (current ()).ips_unconfirmed;
+  let request=begin_memory_activity state "memory-keeper" in
+  state.memory_activity <- Fetched.complete ~equal:String.equal state.memory_activity request (Ok activity);
+  check bool "matching successful activity reconfirms the pixel source" false (current ()).ips_unconfirmed;
+  state.memory_facts_keeper <- Some "another-keeper";
+  check bool "another selected Keeper withdraws the pixel source" true
+    (Option.is_none (Types.image_pixel_source_for_redraw state source));
+  state.memory_facts_keeper <- Some "memory-keeper";
+  state.workspace_authority <- Types.Workspace_authority 1;
+  check bool "another workspace withdraws the pixel source" true
+    (Option.is_none (Types.image_pixel_source_for_redraw state source))
 
 let test_tools_image_keeper_owner () =
   let state=state () in
@@ -1252,6 +1392,10 @@ let () =
   test_case "displayed cell Board source survives failed rereads" `Quick test_displayed_cell_board_owner;
   test_case "displayed cell attachment treats malformed absence as unconfirmed" `Quick test_displayed_cell_attachment_uncertain;
   test_case "displayed chat cell names its unconfirmed source" `Quick test_displayed_chat_cell_is_captured;
+  test_case "Memory diagram owns its keeper" `Quick test_memory_image_keeper_owner;
+  test_case "Memory image freshness belongs to its captured activity" `Quick test_memory_image_source_freshness;
+  test_case "Memory image keeps missing and partial observations unconfirmed" `Quick test_memory_image_source_unavailable;
+  test_case "Memory pixel source retains its captured reading" `Quick test_memory_pixel_source_retention;
   test_case "Tools image owns the selected keeper" `Quick test_tools_image_keeper_owner;
   test_case "roster navigation retires a pending image worker" `Quick test_roster_view_change_retires_pending_worker;
   test_case "image completions wait for input" `Quick test_image_preview_input_barrier;

@@ -445,10 +445,6 @@ let classify_review_verdict_json (args : Yojson.Safe.t)
       (Unreadable_verdict, sprintf "review verdict JSON parse error: %s" (Printexc.to_string exn))
 ;;
 
-let parse_review_verdict_from_json args =
-  Result.map_error snd (classify_review_verdict_json args)
-;;
-
 (* One [report_review_verdict] call against what the review already holds.
    The verifier may resend a verdict after a parse refusal, and that resend is
    the verdict only when it carries the decision the refused call named: the

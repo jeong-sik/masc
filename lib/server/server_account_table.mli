@@ -20,13 +20,15 @@
 
     A router is one shared table that a registration changes in place
     ({!Http_server_eio.Router.routes}), and the registration function can
-    keep the router it was given. {!checked} judges the routes it finds, and
-    {!dispatch} judges the route of each request again, so a route of another
-    kind that is added after the check is not served.
+    keep the router it was given. {!checked} judges the routes it finds and
+    keeps a copy of the router ({!Http_server_eio.Router.copy}). Nothing
+    outside this module holds the copy, so a route that is registered after
+    the check is not in the table, whatever its kind, and it replaces no
+    route of the table.
 
     The kind is what the registration says. A handler of a served kind that
-    dispatches on another router serves the routes of that router, and
-    neither judgment sees them. *)
+    dispatches on another router serves the routes of that router, and the
+    judgment does not see them. *)
 
 type t
 
@@ -39,9 +41,10 @@ type refusal =
 val refusal_to_string : refusal -> string
 
 (** The table that [register] fills, when every route of it is of a served
-    kind. [register] gets a new router and returns it with its routes. The
-    judgment names every constructor of {!Route_access.t}, so a kind that is
-    added later has to be judged here before it compiles. *)
+    kind. [register] gets a new router and returns it with its routes, and
+    the table is a copy of the router it returns. The judgment names every
+    constructor of {!Route_access.t}, so a kind that is added later has to be
+    judged here before it compiles. *)
 val checked
   :  (Http_server_eio.Router.t -> Http_server_eio.Router.t)
   -> (t, refusal) result
@@ -49,12 +52,10 @@ val checked
 val route_count : t -> int
 
 val is_websocket : t -> Httpun.Request.t -> bool
-(** Whether the matching served route takes ownership of the connection. This read
+(** Whether the matching route takes ownership of the connection. This read
     lets the ingress keep an upgrade on its connection domain without
-    exposing the checked table's mutable router. *)
+    exposing the checked table's router. *)
 
-(** Answers the request from the table: the handler of its route when the
-    route is of a served kind, or the 404 or the 405 of the router. A route of
-    another kind, which a registration can only have added after {!checked},
-    is the 404. *)
+(** Answers the request from the table: the handler of its route, or the
+    404 or the 405 of the router. *)
 val dispatch : t -> Httpun.Request.t -> Http_reqd.t -> unit

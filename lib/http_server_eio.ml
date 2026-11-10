@@ -574,6 +574,25 @@ module Router = struct
 
   let routes router = List.rev router.log.entries
 
+  let copy_method_routes routes =
+    {
+      exact_by_path = Hashtbl.copy routes.exact_by_path;
+      prefix_routes = routes.prefix_routes;
+    }
+
+  (* The route records and the prefix lists are immutable, so the copy shares
+     them and owns the tables and the log that a registration changes. *)
+  let copy router =
+    {
+      get = copy_method_routes router.get;
+      post = copy_method_routes router.post;
+      put = copy_method_routes router.put;
+      delete = copy_method_routes router.delete;
+      options = copy_method_routes router.options;
+      exact_paths = Hashtbl.copy router.exact_paths;
+      log = { entries = router.log.entries; count = router.log.count };
+    }
+
   let insert_prefix_route route routes =
     let route_len = String.length route.path in
     let rec loop acc = function

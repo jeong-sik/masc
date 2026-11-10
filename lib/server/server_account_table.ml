@@ -41,6 +41,10 @@ let served : Route_access.t -> bool = function
       | Route_access.Subpath_dispatch ) -> false
 ;;
 
+(* A router is one shared table that a registration changes in place, and
+   the registration function can keep the router it was given. The table is a
+   copy made after the routes are judged: nothing outside this module holds
+   it, so no route is added to it and none of its routes is replaced. *)
 let checked register =
   let router = register (Http.Router.create ()) in
   match
@@ -49,33 +53,16 @@ let checked register =
       (Http.Router.routes router)
   with
   | Some (route : Http.Router.route) -> Error { path = route.path; access = route.access }
-  | None -> Ok router
+  | None -> Ok (Http.Router.copy router)
 ;;
 
 let route_count = Http.Router.route_count
 let is_websocket table request =
   match Http.Router.resolve table request with
-  | `Matched (route : Http.Router.route) ->
-    (match served route.access, route.handler with
-     | true, Http.Router.Ws _ -> true
-     | false, (Http.Router.Plain _ | Http.Router.Ws _)
-     | true, Http.Router.Plain _ -> false)
+  | `Matched { Http.Router.handler = Http.Router.Ws _; _ } -> true
+  | `Matched { Http.Router.handler = Http.Router.Plain _; _ }
   | `Method_not_allowed
   | `Not_found -> false
 ;;
 
-(* The router is one shared table that a registration changes in place, and
-   the registration function can keep the router it was given, so a route
-   that is added after [checked] is in it. The route of each request is
-   judged again: one of another kind is not found, as on a table that never
-   held it. *)
-let dispatch table request reqd =
-  match Http.Router.resolve table request with
-  | `Not_found -> Http.Response.not_found reqd
-  | `Method_not_allowed -> Http.Response.method_not_allowed reqd
-  | `Matched (route : Http.Router.route) ->
-    (match served route.access, route.handler with
-     | false, (Http.Router.Plain _ | Http.Router.Ws _) -> Http.Response.not_found reqd
-     | true, Http.Router.Plain handler -> handler request reqd
-     | true, Http.Router.Ws handler -> handler ~upgrade:(Http_reqd.upgrade reqd) request reqd)
-;;
+let dispatch = Http.Router.dispatch

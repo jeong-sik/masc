@@ -771,6 +771,16 @@ Runtime 조회: rg -n --glob '*.ml' '\bRuntime\.(get_runtime_by_id|resolve_assig
 - 1단계의 끄기다(§6 결정 10). bootstrap처럼 서버가 없을 때 BasePath lease를 쥐고 `off` 사건을 쓴다. 서버가 멈추면 진행 중이던 Keeper 턴도 끝나므로, 끄는 순간 진행 중인 다계정 실행이 없다. 그래서 §9-5의 lease 종결은 이 층에 없다. 1단계에는 lease 저장소가 없다(E1).
 - `off` 뒤 설정이 `Single_user`이면 multi-owned record를 읽기 전용으로 둔 `Single_user`로 부팅한다(4행). legacy 공유 token·admin으로 multi-owned record를 실행하지 않는다. 남은 account-home 점유는 `Release_pending`으로 바꾸고 unmount를 확인한 뒤에만 Released로 한다. 설정이 `Multi_account`이면 `reactivate` 요청이고, F3b 전에는 `Reactivation_not_ready`로 거부한다(9행).
 - 시험은 `off`가 있는 4·10행과, F3b 전의 9행 거부를 본다.
+- F3a는 두 층으로 나눈다. F3a-1은 끈 설치의 부팅과 실행 판정이고, F3a-2는 `masc auth off` 명령이다. 부팅부터 하는 까닭은 명령의 성공 문구가 끈 뒤의 부팅을 한 번에 말하게 하려는 것이다. 두 층은 따로 들어가도 안전하다. F3a-1만 있으면 `off`를 쓰는 길이 없다.
+- F3a-1(2026-11-10).
+  - 4행 판정은 로그를 다시 읽은 상태(`Authz_state.t`)를 싣고 온다(`Made_off`, `Single_user_after_off`). 그래서 끈 설치인데 기록이 없는 단일 사용자 값은 만들 수 없다. `Off_mode_not_supported`는 지운다.
+  - 부팅은 그 상태를 `Authz_boot_mode_read.single_user`에 싣는다(`turned_off`). 서버와 stdio는 그 값으로 접근을 게시한다.
+  - `Runtime_account_access`가 끈 상태의 시작을 판정한다. 로그의 Keeper 턴(`Off_keeper`), 로그의 Runtime으로 도는 턴(`Off_runtime`), 사람 본인 계정(`Off_own_account`)을 거절한다. 사람 runtime root(`.masc/accounts`) 아래 홈 위의 시작도 거절한다(`Off_person_home`). 운영자 홈과 상속 홈은 운영자 것이다.
+  - 운영자 호출(probe, verification, Fusion)은 Runtime id를 싣지 않는다. 그래서 사람 Runtime은 홈으로 막는다. 1단계의 사람 계정은 공식 클라이언트 로그인(`server_setup_account_login`의 `Person`)으로만 생기고, 그 홈은 늘 `.masc/accounts/<namespace>` 아래다.
+  - 홈은 적힌 철자와 실제 경로를 둘 다 본다(`Runtime_account_home_layout.under_persons`). 실제 경로는 있는 가장 깊은 조상을 풀고 그 아래를 적힌 대로 붙인다. 링크, 대소문자만 다른 철자, 아직 없는 홈도 사람 쪽으로 읽힌다.
+  - `masc auth bootstrap`(`Turned_off`)과 `masc auth invite`(`Accounts_turned_off`)는 끈 설치에 아무것도 쓰지 않는다.
+  - account-home 점유: 1단계 코드에는 점유 기록이 없다(lease 저장소는 E1). `Release_pending`으로 바꿀 대상이 없다.
+  - 남은 질문: 끈 뒤 단일 사용자 Keeper의 native 도구는 `.masc/accounts`를 읽을 수 있다. D3c가 다계정에서 막은 경로와 같고, 지워서 되돌리는 길(B3d-3)도 같은 상태다. 사람 홈은 S1 전에는 `masc auth preview`의 로그인으로만 생긴다.
 
 **F3b 범위**
 

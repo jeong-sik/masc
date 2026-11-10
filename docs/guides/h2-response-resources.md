@@ -41,15 +41,23 @@ SSE uses a sequential, reserved write-and-flush path outside publisher locks.
 A stream whose oldest response flush goes 90 seconds without an answer is
 reset with RST_STREAM(INTERNAL_ERROR), and one warn line names the request
 method and path, without the query (RFC-0518 D2). A response body written
-through `Http_reqd` reaches h2 one 16 KiB slice at a time: the next slice is
-written when the socket took the one before (D3). The 90 seconds are
-therefore for one slice to cross the socket, not for the whole body, and one
-socket write carries one slice of each stream at most, so a long body does
-not keep the other streams of its connection waiting. Frames written behind
-a slice that waits, such as SSE keepalives, wait in order and do not extend
-the bound. A client that opens its window again only after reading a batch
-of bytes has to read each batch within 90 seconds: at 32 KiB per batch that
-is about 364 B/s. The reset releases the stream's fibers and reservations.
+through `Http_reqd` reaches h2 in 16 KiB slices, two at most at a time: a
+slice is written when the socket took an earlier one (D3). The 90 seconds run
+from one slice's leaving to the next's, not for the whole body. h2 holds two
+slices and not one so that a DATA frame can go on past the end of a slice:
+with one, a client that returns its window frame by frame got ever smaller
+frames. One socket write carries up to two slices of one stream, and h2 takes
+the streams in turn, so a long body does not keep the other streams of its
+connection waiting until all of it is through. With several bodies in flight
+on one connection, a write also waits for up to two slices of each of the
+others, and a link that is the bottleneck has to take all of that within the
+bound: two slices, about 364 B/s, for each body. An exception raised by the answer to a
+flush resets its own stream; it does not reach the connection's write loop.
+Frames written behind bytes that wait, such as SSE keepalives, wait in order
+and do not extend the bound. A client that opens its window again only after
+reading a batch of bytes has to read each batch within 90 seconds: at 32 KiB
+per batch that is about 364 B/s. The reset releases the stream's fibers and
+reservations.
 
 h2 answers a flush once its bytes were written to the socket. The bound
 therefore ends the scope of a stream whose peer keeps its window shut, and

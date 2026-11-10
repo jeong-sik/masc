@@ -13,6 +13,11 @@ let fresh_store base_path =
     ~recipient_lookup:Recipient_lookup.none_declared ());
   Board.global ()
 
+let read_post store (parent : Board.post) =
+  match Board.read_post store ~post_id:(Board.Post_id.to_string parent.id) with
+  | Ok value -> value
+  | Error error -> Alcotest.fail (Board.show_board_read_error error)
+
 let post store content =
   match Board.create_post store ~lookup:Recipient_lookup.none_declared
       ~author:"vote-source-owner" ~content ~post_kind:Board.Human_post
@@ -65,8 +70,7 @@ let test_stale_snapshot_preserves_accepted_vote base_path =
   Alcotest.(check string) "stale full ledger cannot remove the foreign vote" accepted
     (Fs_compat.load_file path);
   let restarted = fresh_store base_path in
-  let loaded = require (Board.get_post restarted
-      ~post_id:(Board.Post_id.to_string parent.id)) in
+  let loaded = read_post restarted parent in
   Alcotest.(check int) "fresh counts include both accepted votes" 2 loaded.votes_up;
   List.iter (fun voter ->
     match require (Board.current_vote_for_post restarted ~voter
@@ -86,10 +90,10 @@ let test_stale_append_cannot_adopt_a_foreign_ledger base_path =
   Alcotest.(check string) "refused append leaves the accepted ledger unchanged" accepted
     (Fs_compat.load_file path);
   Alcotest.(check int) "refused append does not publish a new model vote" 0
-    (require (Board.get_post stale ~post_id:(Board.Post_id.to_string parent.id))).votes_up;
+    (read_post stale parent).votes_up;
   let restarted = fresh_store base_path in
   Alcotest.(check int) "fresh counts retain the one accepted vote" 1
-    (require (Board.get_post restarted ~post_id:(Board.Post_id.to_string parent.id))).votes_up;
+    (read_post restarted parent).votes_up;
   (match require (Board.current_vote_for_post restarted ~voter:"stale-voter"
       ~post_id:(Board.Post_id.to_string parent.id)) with
    | None -> ()

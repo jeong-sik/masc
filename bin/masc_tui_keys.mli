@@ -353,6 +353,15 @@ val footer_hints_runtime :
     Enter's create, append or replace action; while filtering, letters belong
     to the query and only the picker's navigation and confirmation are shown. *)
 
+val footer_hints_runtime_parent :
+  ko:bool -> parent:Masc_tui_types.runtime_parent -> string
+(** The active media-order editor or lane prompt replaces the Runtime listing.
+    Name fields own printable keys; their footer does not advertise listing
+    actions or [v]. Their [PgUp] opens the full draft/context reader; its Esc
+    returns to the unchanged field. Media [v] reads complete routes/results
+    above the preserved editor. The removal arm retains its existing
+    second-[D] confirmation. *)
+
 val footer_hints_resources : detail_focus:bool -> string
 (** The Resources footer, with [j/k] relabelled for the focused pane. All
     other keys still project from {!for_surface}. *)

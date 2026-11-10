@@ -208,7 +208,8 @@ let runtime_reading_walk_help =
 
 let runtime_keys =
   [ Every_reading (b Navigate "j/k" "move / scroll")
-  ; Every_reading (b Navigate "PgUp/PgDn" "detail page")
+  ; Every_reading (b Navigate "PgUp/PgDn" "detail page"
+      ~help:"page an open detail; in the media editor page declared slots; while typing a lane name, PgUp opens the complete draft/context reader and Esc returns to the unchanged field")
   ; Every_reading
       (b Act "Right / Enter" "detail"
          ~help:"show the full runtime, lane, dispatch, and probe fields")
@@ -237,8 +238,7 @@ let runtime_keys =
          ~help:"replace [runtime].default, what a keeper with no assignment walks")
   ; Keeper_lanes_only
       (b Act "m" "vision runtimes"
-         ~help:"edit [runtime].media_failover in the slot editor; refused while \
-                boot dropped one of its entries")
+         ~help:"edit [runtime].media_failover: j/k, PgUp/PgDn and Home/End select declared slots; a appends, x drops, J/K reorder, 1 makes first, v reads all IDs/results without closing the editor. Admission and write refusals remain in the reading")
   ; Keeper_lanes_only
       (b Act "R" "rename lane"
          ~help:"give the lane under the cursor another name; the assignments \
@@ -2046,6 +2046,39 @@ let footer_hints_code ~pane =
 (* The ordinary reading and its picker answer different Enter keys. The
    footer reads the same pick/filter state the dispatcher owns; printable
    letters only belong to the surface while no filter is being typed. *)
+let runtime_parent_bindings ~ko parent =
+  let text korean english = if ko then korean else english in
+  let name_bindings enter =
+    [ b Act "Enter" enter
+    ; b Navigate "PgUp" (text "초안·안내 전체" "read draft/context")
+    ; b Act "Backspace" (text "지우기" "erase")
+    ; b Act "Esc" (text "취소" "cancel") ] in
+  match parent with
+  | Runtime_media_parent ->
+      [ b Act "v" (text "전체 읽기" "read all")
+          ~help:"read full IDs, admission and results without closing the editor; ! marks a declared slot not admitted in the last observation"
+      ; b Act "a" (text "추가" "add")
+      ; b Navigate "j/k" (text "선택" "select")
+      ; b Navigate "PgUp/PgDn" (text "페이지" "page")
+      ; b Navigate "Home/End" (text "처음/끝" "edges")
+      ; b Act "x" (text "제거" "drop")
+      ; b Act "J/K" (text "순서 변경" "reorder")
+      ; b Act "1" (text "맨 앞으로" "make first")
+      ; b Act "Esc" (text "닫기" "close")
+      ; b Meta "r" (text "새로고침" "refresh")
+      ; b Meta "?" (text "도움말" "help") ]
+  | Runtime_prompt_parent (Lane_name_prompt _) ->
+      name_bindings (text "첫 런타임 선택" "choose first runtime")
+  | Runtime_prompt_parent (Lane_rename_prompt _) ->
+      name_bindings (text "이름·참조 변경" "rename and rewrite references")
+  | Runtime_prompt_parent (Lane_remove_prompt _) ->
+      [ b Act "D" (text "제거 확인" "confirm removal")
+      ; b Act "v" (text "확인 해제·전체 읽기" "disarm and read all")
+      ; b Act "Esc" (text "뒤로" "back") ]
+
+let footer_hints_runtime_parent ~ko ~parent =
+  runtime_parent_bindings ~ko parent |> hints_of_bindings
+
 let footer_hints_runtime ~(mode : runtime_mode) ~picker =
   match picker with
   | None ->
@@ -3009,6 +3042,10 @@ let help_sections_for_state ~cols (state : state) =
     else if state.view = Runtime && Option.is_some state.runtime_detail_target then
       let routes = state.runtime_detail_target = Some Runtime_routes in
       Some ("Runtime detail", runtime_detail_bindings_for ~ko:(state.ui_language = Lang_ko) ~routes)
+    else if state.view = Runtime && Option.is_some (runtime_parent state) then
+      Option.map (fun parent ->
+        "Runtime editor", runtime_parent_bindings ~ko:(state.ui_language = Lang_ko) parent)
+        (runtime_parent state)
     else if state.view = Acting && Option.is_some state.acting_detail then
       Some ("Event evidence", bindings_acting_evidence)
     else if state.view = Code && state.code_focus_file = Right_pane

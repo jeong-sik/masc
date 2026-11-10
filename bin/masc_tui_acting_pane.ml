@@ -218,6 +218,12 @@ type keeper_context = {
   task : keeper_task;
   waiting : Masc_tui_keeper_list_model.waiting_reading;
   waiting_stale : bool;
+  waiting_revalidating : bool;
+      (** A change named this Keeper and the read that answers it has not
+          landed; the row shown is the last observed one. *)
+  waiting_failed : bool;
+      (** The waiting read itself failed; the row shown is the last observed
+          one and no correction has arrived since. *)
 }
 
 type keeper_waiting_summary =
@@ -1773,8 +1779,12 @@ let keeper_context_lines ~cols input =
           (* Partial inventory refreshes can retain a row from an older read. *)
           (* The decision comes first so it survives the narrow pane; these
              qualifiers remain after it without claiming current knowledge. *)
-          let suffix = (if context.waiting_stale then " · stale · read err" else " · last seen")
-            ^ (if read_error then " · partial" else "") in
+          let qualifier =
+            if context.waiting_failed then " · read failed · last seen"
+            else if context.waiting_stale then " · stale · read err"
+            else if context.waiting_revalidating then " · revalidating"
+            else " · last seen" in
+          let suffix = qualifier ^ (if read_error then " · partial" else "") in
           let schedule, detail = match schedules with
             | [] -> (one Dim ("◷ schedule unseen" ^ suffix), one Dim "  —")
             | item :: _ ->

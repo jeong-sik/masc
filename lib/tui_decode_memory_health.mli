@@ -5,6 +5,7 @@ type memory_alert_code =
   | Snapshot_read_error
   | Source_snapshot_read_error
   | Librarian_stopped
+  | Librarian_attention_required
   | Librarian_failures
   | Librarian_starvation
   | Vision_ingest_errors
@@ -92,6 +93,9 @@ type memory_librarian_health = {
       (** The explicit-admission lane's latest worker wait, independent of
           the durable pass and its measurement time. [None] means the latest
           admission pass had no worker wait or was not observed here. *)
+  mlh_operator_action_required : bool;
+      (** Derived from the durable and admission observations. This flag
+          grants no replay or source-consumption authority. *)
   mlh_measured_at : float option;
   mlh_unread_atom_turns : int option;
   mlh_unread_official_turns : int option;
@@ -217,6 +221,7 @@ type memory_health_snapshot = {
   mhs_warn_alerts : int;
   mhs_error_alerts : int;
   mhs_starving_keepers : int;
+  mhs_librarian_attention_required_keepers : int;
 }
 
 val memory_keeper_totals_row : memory_keeper_health -> Keeper_memory_health_totals.Row.t
@@ -252,10 +257,11 @@ val with_keeper_row :
 (** The fleet answer with [keeper_id]'s row replaced by the one given, or
     removed when none is given (the Keeper left), in the fleet's row order,
     with its totals and alert summary counted again through
-    {!Keeper_memory_health_totals.of_rows}. Observed at the later of the two
-    readings.
+    {!Keeper_memory_health_totals.of_rows}. A row observed before the held
+    snapshot is refused without replacing or retiring its Keeper: a delayed
+    command read cannot clear a later attention observation.
 
-    [None] while another Keeper's row stands refused: the server counted that
+    [None] for an older row, or while another Keeper's row stands refused: the server counted that
     row and this build cannot, so the totals cannot be counted again here and
     the fleet answer has to be read. *)
 

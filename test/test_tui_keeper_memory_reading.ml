@@ -8,6 +8,12 @@ let make_librarian
     () : Masc.Tui_decode_memory_health.memory_librarian_health =
   { mlh_state = state
   ; mlh_admission_wait = admission_wait
+  ; mlh_operator_action_required = Masc.Keeper_librarian_pending.attention_required
+      ~durable:(Option.bind state (function
+        | Masc.Tui_decode_memory_health.Pass_pending pending -> Some pending
+        | Pass_off | Pass_lane_unconfigured | Pass_drained | Pass_yielded_to_waiting_unit
+        | Pass_not_committed | Pass_stopped _ | Pass_raised _ -> None))
+      ~admission:admission_wait
   ; mlh_measured_at = None
   ; mlh_unread_atom_turns = unread_atom_turns
   ; mlh_unread_official_turns = unread_official_turns
@@ -86,6 +92,7 @@ let make_snapshot ?(refusals = []) keepers : Masc.Tui_decode_memory_health.memor
   ; mhs_warn_alerts = 0
   ; mhs_error_alerts = 0
   ; mhs_starving_keepers = 0
+  ; mhs_librarian_attention_required_keepers = 0
   }
 ;;
 

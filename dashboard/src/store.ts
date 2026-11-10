@@ -1,6 +1,4 @@
 import { readCandleRosterObservation, type CandleReading } from './lib/candle-observation'
-import { acceptedExecutionWorkspace, executionWorkspaceAuthority } from './execution-workspace-authority'
-export { executionWorkspaceAuthority, type ExecutionWorkspaceAuthority } from './execution-workspace-authority'
 import { isObserverInstance } from './lib/observer-protocol'
 import { acceptedExecutionWorkspace, executionWorkspaceAuthority, type ExecutionWorkspaceAuthority } from './execution-workspace-authority'
 export { executionWorkspaceAuthority, type ExecutionWorkspaceAuthority } from './execution-workspace-authority'

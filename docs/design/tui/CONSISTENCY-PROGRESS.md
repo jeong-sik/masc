@@ -335,6 +335,19 @@ checking, candidate execution and installation remain separate. No new screen
 wording, layout or row-order tests were added. The full screen scope remains
 open.
 
+[#50996](https://github.com/jeong-sik/masc/pull/50996) follows the volume
+separation with the catalog's remaining fixed explanation. A matching be3302c2
+server/TUI at 36x20 showed eight wrapped explanation rows, then the count and
+part of the table header, with no tool name on the first page. The catalog now
+starts with its process-wide registered count and original tool rows. The
+existing section key's Help carries the scope, DIRECT/SURFACES legend and the
+distinction from a Keeper's callable surface and observed calls. Missing
+inventory remains a missing reading, and independent pending/failure/retained
+notices, Skill drafts and the volume child keep their existing owners.
+Candidate execution and the actual generated key reference remain pending;
+the baseline does not execute this follow-up. The full 23-surface and installed
+scope stays open.
+
 ## Operations action-reason reading (#50913)
 
 The f89b3e6f baseline was observed at 120x36 and 36x20 with two actual server

@@ -656,6 +656,7 @@ count is drawn beyond the available space.
 | `1 / 2 / 3 / 4` | in the changes browser: one Memory browser; changes require an individual Keeper, while storage opens the fleet health view |
 | `j/k` | in the changes browser: move |
 | `Enter` | in the changes browser: read all original and successor claims of the selected committed change |
+| `. / Ctrl-O` | in the changes browser: open the selected change's connected observed memory lineage with the offline Pele Mermaid preview; full claims remain on Enter |
 | `PgUp/PgDn` | in the changes browser: page |
 | `Esc` | in the changes browser: back to facts |
 | `Home/End` | in the changes browser: top/bottom |

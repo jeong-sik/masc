@@ -14424,8 +14424,9 @@ let open_preview_image ?skill_reference ?board_subject state ~mailbox ~notice ~n
     let keeper_name = match state.view, skill_reference with
       | Tools, Some _ -> Option.map (fun (keeper : keeper) -> keeper.k_name) (selected_keeper state)
       | (Resources | Board), (Some _ | None) -> None
+      | Memory, (Some _ | None) -> state.memory_facts_keeper
       | Tools, None
-      | (Overview | Acting | Metrics | Keepers _ | Memory | Lanes | Clients | Approvals
+      | (Overview | Acting | Metrics | Keepers _ | Lanes | Clients | Approvals
         | Planning | Schedules | Verification | Harness | Fusion | Repositories | Code | Changes
         | Connectors | Runtime | Config | System_logs), (Some _ | None) -> state.msg_target_keeper_name in
     let generation = state.image_request_generation in
@@ -14730,7 +14731,9 @@ let open_resource_image (state : state) ~mailbox =
   | None -> notice ~kind:Notice_failure "No image in the current resource reading"
 
 let open_selected_image state ~mailbox preview =
-  let notice = chat_notice state ~keeper_name:state.msg_target_keeper_name in
+  let notice = if state.view = Memory then
+      image_notice state ~view:Memory ~keeper_name:state.memory_facts_keeper
+    else chat_notice state ~keeper_name:state.msg_target_keeper_name in
   match preview with
   | Masc_tui_image_preview.Named_path path -> open_image state ~mailbox ~notice path
   | Masc_tui_image_preview.Staged attachment ->
@@ -38129,6 +38132,15 @@ Use relative paths for resources already held in the package. -->
                      let delta = if List.mem key ["k"; "up"; "pageup"] then -step else step in
                      state.runtime_config_status_scroll <-
                        max 0 (min limit (min limit state.runtime_config_status_scroll + delta))))
+       | Some ("." | "…" | "\015")
+         when state.view = Memory && state.memory_page = Memory_changes
+              && not state.composer_focused && not (modal_owns_keys state) ->
+           (match state.memory_facts_keeper with
+            | None -> ()
+            | Some keeper_name ->
+                Option.iter
+                  (fun preview -> open_selected_image state ~mailbox:async_messages preview)
+                  (Masc_tui_render_keeper_memory.change_diagram state ~keeper_name))
        | Some ("1" | "2" | "3" | "4" as page)
          when state.view = Memory && not state.memory_fact_detail_open
               && not state.composer_focused && not (modal_owns_keys state) ->
@@ -38173,7 +38185,9 @@ Use relative paths for resources already held in the package. -->
               | "g" | "home" -> state.memory_changes_cursor <- 0
               | "G" | "end" -> state.memory_changes_cursor <- maximum
               | _ ->
-                  let page = max 1 (surface_body_rows state ~terminal_rows:(fst (get_terminal_size ())) - 6) in
+                  let page = max 1 (Masc_tui_render_keeper_memory.changes_page_size state
+                    ~max_lines:(Masc_tui_render_prim.surface_chrome_budget state
+                      ~terminal_rows:(fst (get_terminal_size ()))) ~keeper_name) in
                   let delta = match key with
                     | "k" | "up" | "wheel-up" | "[" -> -1
                     | "pageup" -> -page | "pagedown" -> page | _ -> 1 in

@@ -24,7 +24,18 @@ let missing () =
   Alcotest.(check bool) "absent selection has no chart" true
     (Option.is_none (Lineage.select ~event_id:"missing" (activity [event "a" [] ["A"]])))
 
+let observed_body () =
+  let unknown : Activity.event = { (event "unknown" ["A"] []) with
+    kind=Activity.Relation_unavailable; after=[{memory_id="C";claim=None}]} in
+  let chart = Lineage.select ~event_id:"unknown"
+    (activity [unknown;event "known" ["C"] ["D"]]) |> Option.get in
+  let resolved = List.find (fun (fact : Activity.fact) -> fact.memory_id="C") chart.facts in
+  Alcotest.(check (option string)) "retain observed body for the same identity" (Some "C") resolved.claim;
+  Alcotest.(check bool) "unknown relation is not upgraded" true
+    (chart.selected.kind=Activity.Relation_unavailable)
+
 let () = Alcotest.run "Memory lineage selection" ["observed identities",[
   Alcotest.test_case "connected component" `Quick connected;
   Alcotest.test_case "cycle" `Quick cycle;
+  Alcotest.test_case "observed body with unknown relation" `Quick observed_body;
   Alcotest.test_case "missing selected event" `Quick missing]]

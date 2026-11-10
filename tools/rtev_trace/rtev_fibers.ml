@@ -147,18 +147,20 @@ let () =
      [Get] on a fiber's id when its [Fiber.fork_promise] result is awaited,
      and on a cancellation context's id when its switch is awaited; the trace
      saw those ids created as a fiber or a context. And an older stream or
-     promise reports [Get] again with no [Put] between, which a mutex cannot:
-     [not_locks] holds the ids that did. None of these ever reports the [Put]
-     that would end a hold, so as locks they stayed held until the trace
-     ended, each added again at every [Get].
+     promise reports [Get] again with no [Put] between and never a [Put]:
+     [not_locks] holds the ids that did the first and have not done the
+     second. As locks they stayed held until the trace ended, each added
+     again at every [Get].
 
-     An older semaphore with more than one unit looks the same at its second
-     overlapping [Get] (Get A, Get B, Put A, Put B), but it does report a
-     [Put]. The first [Put] seen on an id in [not_locks] takes it out again,
-     so the semaphore is tracked from its next [Get]; the overlapped window
-     itself has no hold. *)
+     An older semaphore of more than one unit also reports [Get] twice with
+     no [Put] between, and then a [Put]. [released] holds every id a [Put]
+     named: such an id is a lock, so a [Put] takes it out of [not_locks], and
+     from then on a second [Get] follows the latest holder as it does for a
+     semaphore the trace saw created. Its holds before that first [Put] are
+     not in the report. *)
   let obj_kind : (int, string) Hashtbl.t = Hashtbl.create 4096 in
   let not_locks : (int, unit) Hashtbl.t = Hashtbl.create 64 in
+  let released : (int, unit) Hashtbl.t = Hashtbl.create 1024 in
   let lock_like id =
     match Hashtbl.find_opt obj_kind id with
     | None ->
@@ -291,8 +293,9 @@ let () =
          let unreleased = end_hold lock in
          Hashtbl.remove held_waits lock;
          (match unreleased, Hashtbl.find_opt obj_kind lock with
-          | Some _, None -> Hashtbl.replace not_locks lock ()
-          | Some _, Some _ (* a semaphore with more than one unit: follow its latest holder *)
+          | Some _, None when not (Hashtbl.mem released lock) ->
+            Hashtbl.replace not_locks lock ()
+          | Some _, (Some _ | None) (* a semaphore with more than one unit: follow its latest holder *)
           | None, (Some _ | None) ->
             Hashtbl.replace held lock (fiber, ts, span_label fiber);
             Hashtbl.replace taken_after lock
@@ -302,6 +305,7 @@ let () =
        | None -> ())
     | `Get _ -> ()
     | `Put lock ->
+      Hashtbl.replace released lock ();
       Hashtbl.remove not_locks lock;
       (match end_hold lock with
        | Some (holder, since, label) ->

@@ -18,6 +18,10 @@ val keeper_quiet_reason_to_string : keeper_quiet_reason -> string
     [KeeperQuietReason] union must list exactly these strings; an unlisted one
     is dropped when the diagnostic is normalised. *)
 
+val keeper_quiet_reason_of_string_opt : string -> keeper_quiet_reason option
+(** Strict inverse of the diagnostic vocabulary. Unknown input has no
+    invented quiet state or clock deadline. *)
+
 type keeper_next_action_path =
   | Recover
   | Probe

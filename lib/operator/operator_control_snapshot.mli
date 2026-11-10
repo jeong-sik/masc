@@ -133,6 +133,7 @@ end
 (** {1 Snapshot + recent actions JSON} *)
 
 val snapshot_json :
+  ?read_policy:Dashboard_projection_read.t ->
   ?actor:string ->
   ?view:string ->
   ?include_messages:bool ->
@@ -146,7 +147,8 @@ val snapshot_json :
     {!_snapshot_table} keyed by the context config +
     actor + view + include flags.  Pinned because
     {!Operator_control} re-exposes it via the
-    runtime-include of this module. *)
+    runtime-include of this module. [Current] bypasses this metadata cache and
+    its nested Board-quarantine cache; ordinary reads default to [Reuse]. *)
 
 val recent_actions_json : Workspace.config -> Yojson.Safe.t
 (** Returns the most recent operator-action log entries

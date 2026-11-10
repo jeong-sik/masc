@@ -84,6 +84,52 @@ let test_notification_envelopes_are_exact () =
       = Some (Input.Store Input.Tools))
 ;;
 
+let test_message_input_is_typed () =
+  let decode request_id mention_delivery = Input.of_event (event (`Assoc
+      ["type", `String "workspace_message_delivery_changed";
+       "request_id", `String request_id; "mention_delivery", `String mention_delivery])) in
+  check bool "the original message identity and exact delivery state survive" true
+    (decode "original-request" "accepted" = Some (Input.Workspace_messages {
+       request_id = "original-request"; mention_delivery = Masc_domain.Mention_accepted }));
+  check bool "unknown delivery states cannot invent a source transition" true
+    (Option.is_none (decode "original-request" "future"));
+  check bool "an empty request is not an input identity" true
+    (Option.is_none (decode " " "accepted"))
+;;
+
+let test_agent_heartbeat_reaches_only_its_workspace () =
+  Eio_main.run (fun env ->
+    let previous_fs = Fs_compat.get_fs_opt () in
+    Fs_compat.set_fs (Eio.Stdenv.fs env);
+    let base_path = Masc_test_deps.setup_test_workspace () in
+    Fun.protect ~finally:(fun () ->
+      Masc_test_deps.cleanup_test_workspace base_path;
+      match previous_fs with Some fs -> Fs_compat.set_fs fs | None -> Fs_compat.clear_fs ())
+      (fun () ->
+        let config = Masc.Workspace.default_config base_path in
+        ignore (Masc.Workspace.init config ~agent_name:None);
+        let original : Masc_domain.agent = {
+          id = None; name = "source-agent"; agent_type = "review";
+          status = Masc_domain.Active; capabilities = []; current_task = None;
+          session_bound_at = "2026-11-05T00:00:00Z";
+          last_seen = "2026-11-05T01:00:00Z"; meta = None } in
+        let path = Filename.concat (Masc.Workspace.agents_dir config) "source-agent.json" in
+        Workspace_agent_record.write config path ~previous:None original;
+        let seen = ref [] and foreign = ref [] in
+        Eio.Switch.run (fun sw ->
+          Input.subscribe ~sw ~base_path (fun input -> seen := input :: !seen);
+          Input.subscribe ~sw ~base_path:(base_path ^ "-other")
+            (fun input -> foreign := input :: !foreign);
+          Workspace_agent_record.write config path ~previous:(Some original)
+            {original with last_seen = "2026-11-05T01:05:00Z"};
+          check bool "actual source-dated write reaches the direct consumer" true
+            (!seen = [Input.Workspace_agent_signal {agent = original.name}]);
+          check int "foreign workspace is not woken" 0 (List.length !foreign));
+        Workspace_agent_record.write config path ~previous:(Some original)
+          {original with last_seen = "2026-11-05T01:10:00Z"};
+        check int "quiet release unsubscribes the source hook" 1 (List.length !seen)))
+;;
+
 let test_real_board_writer_to_observation_worker () =
   let base_path = Masc_test_deps.setup_test_workspace () in
   let previous_fs = Fs_compat.get_fs_opt () in
@@ -300,6 +346,8 @@ let () =
     [ "wire", [ test_case "exact scoped identities" `Quick test_exact_input_identities
               ; test_case "outputs are excluded" `Quick test_outputs_are_not_inputs
               ; test_case "notification envelopes are exact" `Quick test_notification_envelopes_are_exact ]
+    ; "execution sources", [ test_case "message identity and delivery are typed" `Quick test_message_input_is_typed
+                            ; test_case "actual heartbeat scope and release" `Quick test_agent_heartbeat_reaches_only_its_workspace ]
     ; "publication", [ test_case "non-external source and release" `Quick test_nonexternal_scope_and_release
                      ; test_case "instance and presence boundaries" `Quick test_internal_scope_and_presence_bypass
                      ; test_case "listener failure keeps receipt" `Quick test_listener_failure_cannot_replace_publication

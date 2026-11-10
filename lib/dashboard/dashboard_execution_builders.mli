@@ -73,3 +73,13 @@ val build_continuity_briefs :
     so one unreadable row neither removes the others nor fails the list. Both
     the full execution render and live keeper-row reconciliation build their
     briefs here. *)
+
+val next_policy_change_unix :
+  now_ts:float -> agents:Masc_domain.agent list ->
+  messages:Masc_domain.message list -> keepers:Yojson.Safe.t list ->
+  float option
+(** The next signal/continuity/startup policy transition in these exact rows.
+    [agents] must contain only source-dated records, not registry rows whose
+    [last_seen] was fabricated at read time. Display-only age growth is not a
+    reason to reread. A still-published [Starting_up] keeps its deadline owed
+    even when rendering the other rows crossed it. *)

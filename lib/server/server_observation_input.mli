@@ -70,6 +70,14 @@ type t =
       (** An actual canonical tool-call ledger append, including async flush. *)
   | Keeper_approval_audit of { keeper : string; event : Keeper_approval.Audit.event }
       (** An actual approval audit row; no tool arguments or decision text. *)
+  | Workspace_agent_signal of { agent : string }
+      (** An original source-dated agent record changed; heartbeat-only writes
+          affect execution signal policy without changing the Clients roster. *)
+  | Workspace_messages of {
+      request_id : string;
+      mention_delivery : Masc_domain.message_mention_delivery;
+    }
+      (** The existing committed message/delivery notification, without text. *)
 
 val of_event : Sse.external_event -> t option
 (** Validate exact wire names and input identities. Unknown or malformed

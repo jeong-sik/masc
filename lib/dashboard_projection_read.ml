@@ -21,4 +21,20 @@ let keeper_completeness ~listing ~unread =
     combine_completeness outcome (Partial (Printf.sprintf "Keeper %s: %s" row.name detail)))
     listing unread
 
+let json_with_read_diagnostics observation =
+  let completeness, error = match observation.completeness with
+    | Complete -> "complete", `Null
+    | Partial detail -> "partial", `String detail in
+  match observation.json with
+  | `Assoc fields ->
+      let diagnostics = match List.assoc_opt "projection_diagnostics" fields with
+        | Some (`Assoc entries) -> entries
+        | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _) | None -> [] in
+      let diagnostics = ["read_completeness", `String completeness; "read_error", error]
+        @ List.remove_assoc "read_error" (List.remove_assoc "read_completeness" diagnostics) in
+      `Assoc (("projection_diagnostics", `Assoc diagnostics)
+        :: List.remove_assoc "projection_diagnostics" fields)
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ ->
+      invalid_arg "Dashboard read must retain an object body"
+
 exception Incomplete_read of string

@@ -54,7 +54,7 @@ let host_client_name = function
   | Antigravity -> "Antigravity"
   | Vibe -> "Vibe"
   | Api_provider -> "An API provider of the runtime table"
-  | Model_list -> "A model-list request of a setup connection"
+  | Model_list -> "A model-list or serving-window request of a setup connection"
   | Files_api -> "The Files API of masc_file_*"
   | Replacement_catalog -> "A target of the replacement catalog AGENT_CORE_MODEL_CATALOG names"
 ;;

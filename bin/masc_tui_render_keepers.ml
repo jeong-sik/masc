@@ -705,7 +705,7 @@ let grid_tail_cells (grid : Grid.t) =
   + if grid.mem_cells > 0 then 1 + grid.mem_cells else 0
 
 (* The mock's [okd]: the ok colour, receded. *)
-let grid_receded_ok () = Masc_tui_theme.tone Masc_tui_theme.Dim ^ Theme.ok ()
+let grid_receded_ok () = Ansi.dim ^ Theme.ok ()
 
 let grid_gutter_style = function
   | Grid.Failing { resting = false } -> Theme.warn ()

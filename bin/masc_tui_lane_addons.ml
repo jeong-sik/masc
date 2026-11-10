@@ -1442,7 +1442,7 @@ module Span = Masc_tui_span
 (* Labels use the reader's foreground with bold weight: the raw Accent hue
    can be unreadable on a light palette. Keys, bullets and stamps stay dim;
    values keep their plain style. *)
-let muted_style () = Span.fg (Masc_tui_theme.tone Masc_tui_theme.Dim)
+let muted_style () = Span.fg Masc_tui_theme.Sgr.dim
 let bold_style () = Span.weight Masc_tui_theme.Sgr.bold
 let label_style () = bold_style ()
 

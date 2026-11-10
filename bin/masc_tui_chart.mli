@@ -50,7 +50,7 @@ val gauge :
 type bar_item = {
   name : string;
   count : int;
-  style : Masc_tui_theme.status option;
+  style : Masc_tui_theme.status;
 }
 
 type distribution_share = { percentage : int; filled_cells : int }

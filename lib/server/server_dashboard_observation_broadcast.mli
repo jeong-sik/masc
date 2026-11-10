@@ -5,7 +5,9 @@ val observations :
   Server_observation_input.t ->
   Sse_event.Types.dashboard_observation_changed_payload list
 (** Closed dependencies of mounted Dashboard reads on canonical committed
-    input. Keeper and chat-operation identities remain exact. A computed
+    input. Source-dated agent changes refresh IDE presence; committed message
+    delivery keeps its existing canonical client route. Keeper and
+    chat-operation identities remain exact. A computed
     Dashboard observation is never reclassified as a new input. Native Logs
     and mounted series receive their own frames rather than polling here. *)
 

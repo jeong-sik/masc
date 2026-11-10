@@ -29,6 +29,8 @@ val with_operator_digest_metadata :
   query:Yojson.Safe.t ->
   Yojson.Safe.t ->
   Yojson.Safe.t
+(** Digest retention reports source/deadline observation, with no healthy
+    [background_refresh_interval_s]. This does not change Snapshot retention. *)
 
 val operator_snapshot_default_query : unit -> Yojson.Safe.t
 

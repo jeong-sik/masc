@@ -63,6 +63,7 @@ class FakeModel:
         self.facts = tuple(facts)
         self.written: list[str] = []
         self.candidate_calls = 0
+        self.prompts: list[tuple[str, str]] = []
 
     def fresh(self) -> str:
         self.written.append(text(1000 + len(self.written)))
@@ -71,6 +72,7 @@ class FakeModel:
     def ask(self, *, model: str, label: str, messages: Sequence[str], effort: str, max_tokens: int,
             attempt: int = 0) -> Call | None:
         body: dict[str, object]
+        self.prompts.append((label, messages[-1]))
         match label:
             case "facts":
                 asked = ASKED.search(messages[-1])
@@ -244,21 +246,39 @@ class MemoryTest(unittest.TestCase):
         # durable facts of three, and only one with every stale fact.
         plan = memory_plan(0)
         for reply in (second_copies_first, second_dated):
-            kept = G.claims_for(FakeModel(facts=(reply,)), plan, "topic_0", plan.slots, [])
+            kept = G.claims_for(FakeModel(facts=(reply,)), plan, "topic_0", plan.slots, [], [])
             assert kept is not None
             self.assertEqual([plan.slots.index(slot) for slot, _ in kept], [0, 2, 3, 4, 5], reply.__name__)
         existing = text(999)
-        kept = G.claims_for(FakeModel(facts=(lambda m, n: [existing, *fresh_facts(m, n - 1)],)), plan, "topic_0",
-                            plan.slots, [existing])
-        assert kept is not None
-        self.assertEqual([plan.slots.index(slot) for slot, _ in kept], [1, 2, 3, 4, 5])
+        for same, others in (([existing], []), ([], [existing])):
+            kept = G.claims_for(FakeModel(facts=(lambda m, n: [existing, *fresh_facts(m, n - 1)],)), plan,
+                                "topic_0", plan.slots, same, others)
+            assert kept is not None
+            self.assertEqual([plan.slots.index(slot) for slot, _ in kept], [1, 2, 3, 4, 5])
 
     def test_an_attempt_that_keeps_too_few_facts_is_asked_again(self) -> None:
         for lost in (two_copy_first, stale_copies_first):
             model = FakeModel(facts=(lost, fresh_facts))
-            kept = G.claims_for(model, memory_plan(0), "topic_0", memory_plan(0).slots, [])
+            kept = G.claims_for(model, memory_plan(0), "topic_0", memory_plan(0).slots, [], [])
             assert kept is not None
             self.assertEqual([claim for _, claim in kept], model.written[-6:], lost.__name__)
+
+    def test_a_later_call_sees_its_categorys_facts_whole_and_others_by_their_head(self) -> None:
+        # One topic_1 fact, then eight topic_0 facts: topic_0 takes two calls of FACTS_PER_CALL.
+        slots = tuple(G.FactSlot(category, LENGTH, False, SEEN + dt.timedelta(hours=i), BLANK)
+                      for i, category in enumerate(["topic_1"] + ["topic_0"] * 8))
+        model = FakeModel()
+        facts = G.build_memory(model, G.MemoryPlan("docs-gardener-00", KEEPER, slots, None, 0))
+        assert facts is not None
+        prompts = [prompt for label, prompt in model.prompts if label == "facts"]
+        self.assertEqual(len(prompts), 3)
+        other, *first_topic_0 = model.written[:1 + G.FACTS_PER_CALL]
+        self.assertGreater(len(other), G.EXISTING_HEAD)
+        last = prompts[-1]
+        for claim in first_topic_0:
+            self.assertIn(claim, last)
+        self.assertIn(other[:G.EXISTING_HEAD], last)
+        self.assertNotIn(other, last)
 
 
 class CandidatesTest(unittest.TestCase):
@@ -285,6 +305,19 @@ class CandidatesTest(unittest.TestCase):
                 landed[built[0].category] += 1
             # A target is topic_0 with 0.8; a category drawn evenly would be 0.5.
             self.assertGreater(landed["topic_0"] / runs, 0.7, kind)
+
+    def test_a_new_candidate_sees_its_categorys_durable_facts_whole(self) -> None:
+        model = FakeModel()
+        built = G.build_candidates(model, random.Random(1), KEEPER, PLANTED,
+                                   (plan_of(S.CandidateKind.NEW_DURABLE),))
+        assert built is not None
+        (prompt,) = [prompt for label, prompt in model.prompts if label == "candidate"]
+        self.assertTrue(all(len(f.claim) > G.EXISTING_HEAD for f in PLANTED))
+        for f in PLANTED:
+            if f.planted_stale:
+                self.assertNotIn(f.claim, prompt)
+            else:
+                self.assertIn(f.claim, prompt)
 
     def test_a_candidate_that_copies_a_fact_or_misses_its_marks_or_length_is_not_kept(self) -> None:
         plans = (plan_of(S.CandidateKind.NEW_DURABLE),)

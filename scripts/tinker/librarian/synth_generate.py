@@ -39,7 +39,7 @@ import json
 import random
 import sys
 from collections import Counter
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
@@ -101,6 +101,15 @@ def ask(caller: Asks, stage: str, prompt: str, attempt: int) -> str | None:
 
 def head(claim: str) -> str:
     return claim[:EXISTING_HEAD].replace("\n", " ")
+
+
+def whole(claim: str) -> str:
+    """A claim on one line of a prompt's list, all of it."""
+    return claim.replace("\n", " ")
+
+
+def listed(claims: Sequence[str], show: Callable[[str], str]) -> str:
+    return "\n".join(f"- {show(c)}" for c in claims) or "(없음)"
 
 
 def profile_of(caller: Asks, seed: S.KeeperSeed, rng: random.Random) -> S.KeeperProfile | None:
@@ -188,16 +197,19 @@ def between(rng: random.Random, start: dt.datetime, end: dt.datetime) -> dt.date
 
 
 def claims_for(caller: Asks, plan: MemoryPlan, category: str, slots: tuple[FactSlot, ...],
-               existing: list[str]) -> list[tuple[FactSlot, str]] | None:
-    """Claims for `slots`, matched by position. A claim counts only when its text carries exactly
-    its slot's surface. An attempt is kept when every stale slot and DURABLE_KEEP_SHARE of the
-    durable ones came back: a stale fact that failed its marks would leave the kept stale facts
-    with other marks than the kept durable ones."""
+               same: Sequence[str], others: Sequence[str]) -> list[tuple[FactSlot, str]] | None:
+    """Claims for `slots`, matched by position. The prompt shows the facts already written in
+    `category` whole and those of other categories by their first EXISTING_HEAD chars: a category
+    takes several calls, and a later call that saw only the head of a long fact wrote its lesson
+    again as a short fact (27 of the 29 unplanted repeats the 11-10 dev label audit found).
+    A claim counts only when its text carries exactly its slot's surface. An attempt is kept when
+    every stale slot and DURABLE_KEEP_SHARE of the durable ones came back: a stale fact that
+    failed its marks would leave the kept stale facts with other marks than the kept durable ones."""
     items = "\n".join(P.fact_item(i + 1, slot.stale, int(round(slot.length * LENGTH_ASK, -1)), slot.surface)
                       for i, slot in enumerate(slots))
     prompt = P.FACTS_PROMPT.format(role=plan.keeper.role_material, world=plan.keeper.world, category=category,
-                                   n=len(slots), marks=P.MARKS, items=items,
-                                   existing="\n".join(f"- {head(c)}" for c in existing) or "(없음)", style=P.STYLE)
+                                   n=len(slots), marks=P.MARKS, items=items, same=listed(same, whole),
+                                   others=listed(others, head), style=P.STYLE)
     durable = sum(not s.stale for s in slots)
     stale = len(slots) - durable
     for attempt in range(ATTEMPTS):
@@ -207,7 +219,7 @@ def claims_for(caller: Asks, plan: MemoryPlan, category: str, slots: tuple[FactS
         claims = S.parse_claims(answer) if answer else None
         if claims is None:
             continue
-        texts = {c.strip() for c in existing}
+        texts = {c.strip() for c in (*same, *others)}
         kept: list[tuple[FactSlot, str]] = []
         for slot, claim in zip(slots, claims):
             if claim.strip() not in texts and S.surface_holds(claim, slot.surface):
@@ -272,7 +284,9 @@ def build_memory(caller: Asks, plan: MemoryPlan) -> tuple[S.MemoryFact, ...] | N
     for category, group in itertools.groupby(plan.slots, key=lambda slot: slot.category):
         slots = tuple(group)
         for start in range(0, len(slots), FACTS_PER_CALL):
-            got = claims_for(caller, plan, category, slots[start:start + FACTS_PER_CALL], [w.claim for w in written])
+            got = claims_for(caller, plan, category, slots[start:start + FACTS_PER_CALL],
+                             [w.claim for w in written if w.category == category],
+                             [w.claim for w in written if w.category != category])
             if got is None:
                 return None
             written.extend(Written(slot.seen, slot.category, slot.stale, claim, None) for slot, claim in got)
@@ -328,8 +342,7 @@ def build_candidates(caller: Asks, rng: random.Random, keeper: S.KeeperProfile, 
                 if category is None:
                     return None
                 same = [f.claim for f in durable if f.category == category]
-                task = P.TASK_NEW.format(category=category,
-                                       existing="\n".join(f"- {head(c)}" for c in same) or "(없음)")
+                task = P.TASK_NEW.format(category=category, existing=listed(same, whole))
             case S.CandidateKind.TRANSIENT:
                 category = untargeted_category(rng, targets, plan.length)
                 if category is None:

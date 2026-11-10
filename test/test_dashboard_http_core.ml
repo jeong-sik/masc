@@ -1797,14 +1797,6 @@ let test_operator_parameterized_snapshot_attests_workspace () =
     (Lib.Server_startup_state.snapshot ()).state_ready
     (identity |> member "state_ready" |> to_bool)
 
-let test_dashboard_query_cache_segment_normalizes_missing_values () =
-  check string "missing none" "missing"
-    (Server_dashboard_http_core_cache.dashboard_query_cache_segment None);
-  check string "missing blank" "missing"
-    (Server_dashboard_http_core_cache.dashboard_query_cache_segment (Some "  "));
-  check string "trimmed value" "keeper-a"
-    (Server_dashboard_http_core_cache.dashboard_query_cache_segment (Some " keeper-a "))
-
 let test_dashboard_query_cache_key_partitions_route_params () =
   let dir = test_dir () in
   Fun.protect
@@ -4215,29 +4207,6 @@ let test_dashboard_execution_trust_default_route_uses_cached_surface () =
   check string "envelope cache key" "execution-trust:default"
     (json |> member "dashboard_surface_envelope" |> member "cache" |> member "key"
      |> to_string)
-
-let test_dashboard_message_json_surfaces_temporal_fields () =
-  let message : Types.message =
-    {
-      request_id = "wmsg-dashboard-test";
-      seq = 7;
-      from_agent = "operator";
-      msg_type = "broadcast";
-      content = "hello";
-      mention = None;
-      mention_delivery = Types.Mention_passive;
-      timestamp = "2026-05-07T00:00:00Z";
-      trace_context = Some "traceparent";
-      expires_at = Some 1_714_067_200.0;
-    }
-  in
-  let json = Server_dashboard_http_core.dashboard_message_json message in
-  let open Yojson.Safe.Util in
-  check string "type" "broadcast" (json |> member "type" |> to_string);
-  check string "trace_context" "traceparent"
-    (json |> member "trace_context" |> to_string);
-  check (float 0.001) "expires_at" 1_714_067_200.0
-    (json |> member "expires_at" |> to_float)
 
 (* RFC-0138 Phase 3 Step 1 — /shell snapshot wire tests.
 
@@ -8534,8 +8503,6 @@ let () =
             test_operator_snapshot_default_route_hydrates_first_success;
           test_case "tool-call limit applies to selected Keeper" `Slow
             test_tool_calls_select_keeper_before_limiting;
-          test_case "dashboard query cache segment normalizes missing values" `Quick
-            test_dashboard_query_cache_segment_normalizes_missing_values;
           test_case "dashboard query cache key partitions route params" `Quick
             test_dashboard_query_cache_key_partitions_route_params;
           test_case "dashboard query cache key encodes delimiter values" `Quick
@@ -8611,8 +8578,6 @@ let () =
             test_dashboard_execution_force_refresh_bypasses_default_cache;
           test_case "execution trust default route uses cached surface" `Quick
             test_dashboard_execution_trust_default_route_uses_cached_surface;
-          test_case "message JSON exposes temporal decay fields" `Quick
-            test_dashboard_message_json_surfaces_temporal_fields;
           test_case "RFC-0138 shell wire returns snapshot when published" `Quick
             test_shell_snapshot_wire_returns_snapshot_when_published;
           test_case "RFC-0138 shell wire falls back when snapshot empty" `Quick

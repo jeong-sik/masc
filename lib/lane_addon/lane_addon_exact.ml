@@ -345,10 +345,18 @@ let not_final_of_json json =
   | Some (`String "lane_registry_unavailable") when only ["reason"; "detail"] ->
     let* detail = detail () in Ok (Lane_unavailable (Lane_registry_unavailable { detail }))
   | Some (`String "every_slot_held") when only ["reason"; "until"] ->
-    (match List.assoc_opt "until" fields with
-     | Some (`Float until) when Float.is_finite until && Float.compare until 0.0 > 0 ->
+    (* The store writes a whole number as an integer
+       (Lane_addon_action.canonical), and a reset a provider states in whole
+       seconds, as Claude Code does, is one. *)
+    let seconds = match List.assoc_opt "until" fields with
+      | Some (`Float until) -> Some until
+      | Some (`Int until) -> Some (float_of_int until)
+      | Some (`Intlit digits) -> float_of_string_opt digits
+      | Some _ | None -> None in
+    (match seconds with
+     | Some until when Float.is_finite until && Float.compare until 0.0 > 0 ->
        Ok (Lane_unavailable (Every_slot_held { until }))
-     | Some _ | None -> Error "every_slot_held needs until as a positive finite float")
+     | Some _ | None -> Error "every_slot_held needs until as a positive finite number of seconds")
   | Some (`String "provider_unavailable") when only ["reason"; "detail"] ->
     let* detail = detail () in Ok (Provider_refused (Provider_unavailable { detail }))
   | Some (`String "provider_auth_refused") when only ["reason"; "detail"] ->

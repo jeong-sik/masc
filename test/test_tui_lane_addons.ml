@@ -148,19 +148,24 @@ let host_request_cycle_decodes_and_fails_alone () =
       E.Provider_refused (E.Provider_unavailable { detail = "d" });
       E.Provider_refused (E.Provider_auth_refused { detail = "d" });
       E.Provider_refused (E.Provider_configuration_refused { detail = "d" }); E.Attempt_in_progress ];
-  (* The host stores a held time as JSON text; a whole second must not come
-     back as an integer that the strict reader then refuses. *)
+  (* The host stores a held time through Lane_addon_action.canonical, which
+     writes a whole second as an integer. Claude Code states its resets in
+     whole seconds, so both forms must read back. *)
   List.iter (fun until ->
     let held = E.Lane_unavailable (E.Every_slot_held { until }) in
-    check bool "a held time survives the stored text" true
-      (E.not_final_of_json (Yojson.Safe.from_string (Yojson.Safe.to_string (E.not_final_to_json held)))
-       = Ok held))
+    let stored =
+      match Masc.Lane_addon_action.canonical (E.not_final_to_json held) with
+      | Ok stored -> stored
+      | Error detail -> fail detail
+    in
+    check bool "a held time survives the stored form" true
+      (E.not_final_of_json (Yojson.Safe.from_string (Yojson.Safe.to_string stored)) = Ok held))
     [ 1_762_732_800.0; 1_762_732_800.125 ];
   List.iter (fun until ->
     check bool "a held time that cannot be a stated reset is refused" true
       (Result.is_error
          (E.not_final_of_json (`Assoc [ "reason", `String "every_slot_held"; "until", until ]))))
-    [ `Int 1_762_732_800; `Float 0.0; `Float Float.nan; `String "2026-11-10T00:00:00Z" ]
+    [ `Int 0; `Int (-1); `Float 0.0; `Float Float.nan; `String "2026-11-10T00:00:00Z" ]
 
 (* Every issue the host writes reads back as its own kind, a blank detail
    included: the detail is the failure's text, not a name. *)

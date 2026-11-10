@@ -21,7 +21,9 @@
     measurement, semantic and CLI visits; diagnostic summaries are not used to
     reconstruct that proof. The common owner confirms the receipt durably
     before publishing the outcome. Resolution sends nothing. A lane that is unconfigured, off, without
-    slots, or a registry that is not published, is reported before any call. *)
+    slots, or a registry that is not published, is reported before any call.
+    So is a lane whose every slot waits for a time its provider stated
+    ([every_slot_held], RFC-exact-lane-waits-for-a-stated-reset). *)
 
 val runner : base_path:string -> Lane_addon_exact.runner
 val authorize_request : base_path:string -> Lane_addon_exact.execution_authority

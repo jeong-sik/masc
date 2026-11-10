@@ -162,15 +162,6 @@ let with_cached_surface_success
       Server_dashboard_http_cache.mark_cached_surface_success surface json;
       f ())
 
-let with_mission_cache_success ~state json f =
-  let module Core = Server_dashboard_http_core in
-  let surface = Core.mission_cache ~state in
-  let saved = Core.snapshot surface in
-  Fun.protect
-    ~finally:(fun () ->
-      Core.update_cached_surface surface (fun _ -> saved))
-    (fun () -> Core.mark_cached_surface_success surface json; f ())
-
 let with_env key value f =
   let old = Sys.getenv_opt key in
   Unix.putenv key value;
@@ -3294,6 +3285,7 @@ let test_warm_dashboard_responses_follow_equipment_authority () =
   Masc_test_deps.with_process_env "MASC_DASHBOARD_FIXTURE" None @@ fun () ->
   with_test_env @@ fun ~env ~sw ~config ->
   let module Surface = Server_dashboard_http_execution_surfaces in
+  let module Mission = Server_dashboard_mission_observation in
   let module Portrait = Keeper_portrait_equipment in
   let ok show = function Ok value -> value | Error error -> fail (show error) in
   let base_path = config.Workspace.base_path in
@@ -3369,7 +3361,12 @@ beanie = 200
   Eio_guard.protect ~finally:Surface.invalidate_execution_cache @@ fun () ->
   let state = Lib.Mcp_server_eio.For_testing.create_state ~base_path () in
   with_cached_surface_success (Surface.execution_cache ~state) execution_seed @@ fun () ->
-  with_mission_cache_success ~state mission_seed @@ fun () ->
+  let mission_owner = Mission.owner_for_scope ~state (Lib.Mcp_server.workspace_scope state) in
+  let mission_attempt = Mission.begin_attempt mission_owner ~origin:Default_request in
+  check bool "the fixture admits its retained Mission source observation" true
+    (Mission.publish_observation mission_attempt
+       {Dashboard_projection_read.json = mission_seed; next_deadline_unix = None; completeness = Complete});
+  let mission_source = (Server_dashboard_http_cache.snapshot (Mission.cache mission_owner)).json in
   let clock = Eio.Stdenv.clock env in
   let req = request_with_headers "/api/v1/dashboard/execution"
       ["accept-encoding", "identity"] in
@@ -3456,7 +3453,7 @@ beanie = 200
   check bool "equipment refresh does not rebuild cached execution metadata" true
     ((Server_dashboard_http_cache.snapshot (Surface.execution_cache ~state)).json = execution_seed);
   check bool "equipment refresh does not rebuild cached mission metadata" true
-    ((Server_dashboard_http_core.snapshot (Server_dashboard_http_core.mission_cache ~state)).json = mission_seed);
+    ((Server_dashboard_http_core.snapshot (Server_dashboard_http_core.mission_cache ~state)).json = mission_source);
   let ledger = Candle_ledger.path ~base_path in
   Fs_compat.append_file ledger "{partial";
   let corrupt = Fs_compat.load_file ledger in

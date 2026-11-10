@@ -110,7 +110,7 @@ let back_keys_of_surface name surface =
 let approvals_list_footer =
   Keys.footer_hints_approvals
     (Keys.Approval_browsing
-       { approvals = true; asks = Keys.Ask_selected; source = true })
+       { approvals = true; asks = Keys.Ask_selected; source = true; last_answer = false })
 
 let scoped_keys =
   [ ( "Planning",

@@ -323,6 +323,23 @@ val observe_retained : store:Lane_addon_store.t -> declaration_id:string ->
     the full domain answer and rechecks authority before its separate effects.
     Run the complete blocking read/validation scope on a system thread in Eio. *)
 
+val recover_retained : store:Lane_addon_store.t -> declaration_id:string ->
+  schema:Yojson.Safe.t -> request -> (retained_observation, string) result
+(** Restore a lost terminal publication from the latest started attempt's
+    confirmed original host execution proof. The caller holds the workspace
+    process lease. This operation claims the original request, rereads and
+    validates its complete record and sparse proofs, checks the original
+    schema, publishes only a proven [Call_ended] result and rereads it before
+    returning. No runner, route, worker RPC or provider is invoked.
+
+    An active claim is observed without writing. Missing proof and a proven
+    provider refusal remain open without changing the started marker or
+    synthesizing an unknown outcome. An absent record with an orphaned proof
+    is an error. This grants no new execution, Memory write or source ACK;
+    the immutable original consumer still validates its answer and authority.
+    In Eio, protect the complete system-thread call from cancellation so
+    publication and confirmation finish before returning its observation. *)
+
 val run :
   store:Lane_addon_store.t ->
   declaration_id:string ->

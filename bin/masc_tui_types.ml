@@ -12255,7 +12255,7 @@ let board_census_holding (state : state) ~hearth =
          || (match
               Surface_read_order.pending_dataset_age state.http_surface_reads
                 Surface_read_order.Board_hearths with
-             | Some age -> past_pending_display_bar age
+             | Some age -> not (past_pending_display_bar age)
              | None -> false) ->
       (match hearth with
        | Some hearth -> List.assoc_opt hearth census

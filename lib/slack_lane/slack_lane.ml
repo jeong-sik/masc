@@ -62,10 +62,6 @@ let push ~channel_id (msg : lane_message) ~capacity =
       ())
 ;;
 
-let push_many ~channel_id (msgs : lane_message list) ~capacity =
-  List.iter (fun msg -> push ~channel_id msg ~capacity) msgs
-;;
-
 (* Newest first — a viewer reads the tail of the conversation. *)
 let recent ~channel_id ~limit =
   with_lock (fun () ->

@@ -4,10 +4,14 @@
 
     The install preflight and the startup pass over the settled archive each
     decide per consumer, and both match this type without a wildcard. A scope
-    the preflight accepts is therefore a scope the pass can classify. A
-    consumer that is missing here is refused by the preflight once it has a
-    live record, and one that is added here has to be answered in both before
-    the tree compiles. *)
+    the preflight accepts is therefore a scope the pass can classify, and a
+    consumer that is added here has to be answered in both before the tree
+    compiles.
+
+    [Lane_addon_tool_request_owner.retain] takes its scope as a string, so
+    nothing ties a consumer to this type when it starts keeping originals.
+    One that is missing here stops the pass at every boot from its first live
+    record, and the next install preflight refuses that record. *)
 
 (** A consumer that keeps every original under one scope. *)
 type one_scope =

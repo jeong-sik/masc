@@ -134,20 +134,21 @@ RFC-0500 1층(#49002)이 넷째 호출처를 더한다. admission `evaluate` 가
 
 | package / tool | scope | 기록 | 항목 |
 |---|---|---|---|
-| `keeper-librarian` / `admit_memory` | 60 | 282 | `Librarian_admission` |
-| `keeper-librarian` / `derive_memory` | 23 | 23 | `Librarian_history`, `Librarian_floor` |
-| `workspace-curator` / `curate` | 1 | 8 | `Workspace_curator` |
-| `masc.completion-authority.review` / `verifier_review` | 1 | 101 | `Completion_review` |
-| `masc.goal-verification.review` / `goal_proof_review` | 1 | 8 | `Goal_proof_review` |
+| `keeper-librarian` / `admit_memory` | 60 | 282 | `Librarian` (admission 종류) |
+| `keeper-librarian` / `derive_memory` | 23 | 23 | `Librarian` (history·floor 종류) |
+| `workspace-curator` / `curate` | 1 | 8 | `One_scope Workspace_curator` |
+| `masc.completion-authority.review` / `verifier_review` | 1 | 101 | `One_scope Completion_review` |
+| `masc.goal-verification.review` / `goal_proof_review` | 1 | 8 | `One_scope Goal_proof_review` |
 
 ```ocaml
-type owner_family =
-  | Librarian_admission | Librarian_history | Librarian_floor | Workspace_curator
-  | Completion_review | Goal_proof_review
+(* Server_tool_request_consumer *)
+type one_scope = Workspace_curator | Completion_review | Goal_proof_review | Candle_appraisal
+type t = Librarian of Keeper_librarian_store_preflight.purpose | One_scope of one_scope
 ```
 
-- 이 타입은 `Server_tool_request_consumer` 에 있다. 시작 pass 와 설치 전 검사(`deployment_preflight_helper` 의 `validate_tool_request`)가 같은 타입을 와일드카드 없이 match 한다. 그래서 설치 전 검사가 받는 scope 는 pass 도 분류한다.
-  - 타입에 없는 owner 가 살아 있는 기록을 남기면 설치 전 검사가 배포를 멈춘다. 타입에 항목을 더하면 두 match 가 그 항목의 답을 적어야 컴파일된다.
+- 시작 pass 와 배포 전 검사(`deployment_preflight_helper` 의 `validate_tool_request`)가 이 타입을 와일드카드 없이 match 한다. 그래서 배포 전 검사가 받는 scope 는 pass 도 분류한다.
+  - 타입에 항목을 더하면 두 match 가 그 항목의 답을 적어야 컴파일된다.
+  - 타입에 없는 owner 가 원본을 두기 시작하는 것은 컴파일러가 막지 못한다. `Lane_addon_tool_request_owner.retain` 이 scope 를 문자열로 받기 때문이다. 그런 owner 의 살아 있는 기록이 생기면 pass 는 기동마다 아무것도 지우지 않고, 다음 배포 전 검사가 그 기록을 거절해 배포를 멈춘다.
   - scope 하나에 기록을 다 두는 owner 는 넷이다. Curator, 두 review, Candle appraiser(`candle-appraisals`)다. Librarian 기록의 종류는 아래처럼 `purpose` 가 정한다.
   - settle 을 부르는 owner 는 Librarian 과 Curator 다. Candle appraiser 는 settle 하지 않고 보관 위치도 읽지 않는다. 그래서 두 review 처럼 progress 이벤트의 ID 만 답한다.
 - 두 review 항목은 settle 하지 않는다. 그래서 보관 위치에 그 owner 의 기록이 없고, 답은 빈 집합이다. 구현 층은 그 기록이 다른 owner 의 요청 ID 를 담지 않는지 확인한다(§7).
@@ -165,7 +166,7 @@ type owner_family =
   | Curator | 9 | 585개, 3,119MB |
   | 완료 검토·Goal 증명 검토 | 101, 8 | 0 |
 
-  그래서 기록을 항목에 넣는 일은 (package, tool) 이 아니라 기록 종류로 한다. Librarian 기록의 종류는 배포 전 검사가 이미 쓰는 `Keeper_librarian_store_preflight.purpose` 가 정한다. Curator 와 두 review 는 종류가 하나라서 (package, tool) 로 정한다. 종류를 정하지 못한 기록이 하나라도 있으면 pass 는 아무것도 지우지 않는다. 배포 전 검사는 이런 기록을 `Ok ()` 로 넘기지만, 이 pass 는 오류로 본다.
+  그래서 기록을 항목에 넣는 일은 (package, tool) 이 아니라 기록 종류로 한다. Librarian 기록의 종류는 배포 전 검사가 이미 쓰는 `Keeper_librarian_store_preflight.purpose` 가 정한다. Curator, 두 review, Candle appraiser 는 scope 가 하나라서 scope 로 정한다. 종류를 정하지 못한 기록이 하나라도 있으면 pass 는 아무것도 지우지 않는다. 배포 전 검사는 그런 기록을 거절한다.
 - 종류마다의 답은 두 집합의 합이다. 하나는 그 기록의 progress 이벤트가 담은 요청 ID 전부다. 다른 하나는 gate 기록의 부모 실행 ID 다. 가리키는 기록이 살아 있는지는 묻지 않는다.
   - 부모 실행 ID 는 gate inventory 가 실행 ID 를 모으는 함수(`parent_execution_id`, `keeper_librarian_original_gate.ml:69`)로 꺼낸다. 세 gate 가 이 함수를 같이 쓴다.
   - 다른 구조 ID 는 넣지 않는다. gate 의 `predecessor`, history 실행의 `predecessor`, admission 실행의 `parent_part_id`, part 의 `predecessor` 는 살아 있는 목록에서만 찾고 `settled` 에 넘기지 않는다. 이것까지 꺼내려면 종류마다 capture 를 복원해야 한다. 그러면 복원 하나하나가 pass 를 멈출 수 있는 실패 지점이 된다.
@@ -194,7 +195,7 @@ type owner_family =
 
 ### 4.4 Exact 요청 기록과 원본 실행 증명
 
-`owner_family` 의 settle 하는 항목은 자기 declaration 을 안다. Librarian 세 항목은 `keeper-librarian`, Curator 는 `workspace-curator` 다. 두 review 항목은 이 절의 대상이 아니다.
+§4.2 의 타입에서 settle 하는 owner 는 자기 declaration 을 안다. Librarian 은 `keeper-librarian`, Curator 는 `workspace-curator` 다. 두 review 와 Candle appraiser 는 이 절의 대상이 아니다.
 
 대상 여부는 declaration 이름이 아니라 권한 검사와 같은 결정으로 정한다. Curator 의 `authorize` 는 그 declaration 에 묶인 package 가 Curator package 일 때만 원본 없는 요청을 `Unowned` 로 거절한다. 다른 package 면 원본 없이 허가한다. 그래서 두 validation 모듈(`server_librarian_addon_validation`, `server_workspace_memory_addon_validation`)이 "이 declaration·package 의 요청은 원본이 있어야 허가된다"를 답하는 함수 하나씩을 내놓는다. `authorize` 와 이 pass 가 그 함수를 같이 쓴다. 지금 그 declaration 에 묶인 package 를 알 수 없으면 그 declaration 의 기록은 건드리지 않는다.
 
@@ -265,4 +266,4 @@ barrier 는 2·3 동안만 잡는다. 1 은 실행 증명을 통째로 읽어서
   - P3: `Undecided` 를 못 읽음 규칙에 묶었다. Exact 기록은 파일 이름만 맞댄다. 거절이 다시 쓰는 작은 기록의 반복을 L1 에서 센다(§7).
 - 2026-11-06 둘째 자체 확인: 1층을 짜려고 기록을 종류별로 다시 셌다. `admit_memory` 한 (package, tool) 에 실행·gate·part 세 종류가 있다. 보관 위치의 절반(6,053개)은 history gate 다. 그래서 항목을 기록 종류로 정하고, 답을 종류마다의 decoder 로 꺼내게 §4.2 를 고쳤다. 배포 전 검사의 validator 는 고아 gate 에서 오류가 나서 쓰지 않는다.
 - 2026-11-06 자체 확인: §4.2 의 닫힌 타입이 settle 호출처 셋만 적어서, "어느 항목에도 속하지 않는 scope 면 지우지 않는다" 규칙대로라면 pass 가 매번 멈췄다. 살아 있는 scope 에 admission·두 review owner 가 있기 때문이다. 타입을 살아 있는 owner 다섯 종류로 넓혔다. RFC-0500 1층이 admission 을 넷째 settle 호출처로 더하는 것도 같이 적었다.
-- 2026-11-10 운영 확인: 11-09 09:57Z 기동부터 열한 번, pass 가 "a live record is in a scope no owner claims" 로 아무것도 지우지 않았다. 살아 있는 `candle-appraisals` 기록 13개가 pass 의 분류표에 없었다. 설치 전 검사는 같은 일을 하는 표를 따로 두었고 그 표에는 Candle 이 있었다(#49635). 두 표를 `Server_tool_request_consumer` 하나로 합치고 §4.2 를 그렇게 고쳤다(#48946).
+- 2026-11-10 운영 확인: 11-09 09:57Z 기동부터 열한 번, pass 가 "a live record is in a scope no owner claims" 로 아무것도 지우지 않았다. 살아 있는 `candle-appraisals` 기록 13개가 pass 의 분류표에 없었다. 배포 전 검사는 같은 일을 하는 표를 따로 두었고 그 표에는 Candle 이 있었다(#49635). 두 표를 `Server_tool_request_consumer` 하나로 합치고 §4.2 를 그렇게 고쳤다(#48946).

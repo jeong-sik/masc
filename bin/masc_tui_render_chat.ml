@@ -90,6 +90,15 @@ let chat_markdown_streaming ~context ~width body =
    fetching retain the existing link-preview cache policy. *)
 module Entry_cache = Ephemeron.K1.Make (struct
   type t = Message_layout.entry
+  let equal = ( == )
+  let hash (entry : t) = Hashtbl.hash (entry.Message_layout.style,
+    entry.markdown_source, entry.body_presentation)
+end)
+
+(* Only URL discovery and entry-local source coordinates use this equality.
+   Full-entry copies, such as [railed_entries], keep physical keys above. *)
+module Source_entry_cache = Ephemeron.K1.Make (struct
+  type t = Message_layout.entry
   let equal (left : t) (right : t) =
     left == right ||
     match left.markdown_source, right.markdown_source with
@@ -118,18 +127,18 @@ end)
    and streaming entries retain physical-key semantics. Keys are refreshed
    before replacing the old layout, so only currently retained entries keep
    their observations alive through the ephemeron table. *)
-let entry_urls = Entry_cache.create 64
+let entry_urls = Source_entry_cache.create 64
 let source_url_discoveries = ref 0
 
 let bare_urls_for_entry entry =
-  match Entry_cache.find_opt entry_urls entry with
+  match Source_entry_cache.find_opt entry_urls entry with
   | Some urls -> urls
   | None ->
       incr source_url_discoveries;
       let seen = Hashtbl.create 4 in
       let urls = Message_layout.bare_urls entry.Message_layout.body |> List.filter (fun url ->
         if Hashtbl.mem seen url then false else (Hashtbl.add seen url (); true)) in
-      Entry_cache.replace entry_urls entry urls;
+      Source_entry_cache.replace entry_urls entry urls;
       urls
 
 let chat_body_with_previews_internal ?on_field ~preview ~mode ~(entry : Message_layout.entry) ~width () =
@@ -2154,15 +2163,15 @@ type source_body_key = {
 
 type source_body_memo = { key : source_body_key; index : source_body_index option }
 
-let source_body_indexes = Entry_cache.create 64
+let source_body_indexes = Source_entry_cache.create 64
 
 let rebind_entry_observations entry =
   let rebind table =
     Option.iter (fun value ->
       (* [replace] need not replace an equal key's representative. Install the
          current entry itself before the old layout loses its strong root. *)
-      Entry_cache.remove table entry;
-      Entry_cache.add table entry value) (Entry_cache.find_opt table entry)
+      Source_entry_cache.remove table entry;
+      Source_entry_cache.add table entry value) (Source_entry_cache.find_opt table entry)
   in
   rebind entry_urls;
   rebind source_body_indexes
@@ -3740,7 +3749,7 @@ let source_body_lookup state ~keeper_name projection ~inner_width ~theme ~previe
           let owner, polled_input = source_mapping_owner state ~keeper_name projection entry_index in
           let key = source_body_key state ~width ~theme ~preview ~polled_input
             ~unavailable:(owner = Unknown_polled_source) entry in
-          match Entry_cache.find_opt source_body_indexes entry with
+          match Source_entry_cache.find_opt source_body_indexes entry with
           | Some memo when same_source_body_key memo.key key -> memo.index
           | Some _ | None ->
           incr source_index_builds;
@@ -3795,7 +3804,7 @@ let source_body_lookup state ~keeper_name projection ~inner_width ~theme ~previe
                       (Option.bind run.positions.(byte) convert)
                   done) ranges) run.visible_rows) body.runs;
           Some {source_rows;row_sources;row_end_sources} in
-          Entry_cache.replace source_body_indexes entry {key;index};
+          Source_entry_cache.replace source_body_indexes entry {key;index};
           index in
         Hashtbl.add mapped entry_index value;
         value

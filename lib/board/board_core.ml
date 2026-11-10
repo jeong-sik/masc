@@ -64,32 +64,29 @@ let list_posts_by_run_origin store =
        | order -> order)
 ;;
 
-(* Reads post + comments under a single critical section. The previous
-   two-call sequence (read_post then read_comments) acquired
-   [store.mutex] twice with [maybe_sweep] dispatching to the flusher
-   actor between releases. That race window surfaces as
-   [Mutex.lock: Resource deadlock avoided] under contended
-   repeated agent board-read traffic. Coalescing
-   keeps the read atomic, removes one [maybe_sweep] dispatch, and
-   eliminates the inter-call lock churn. *)
-let read_post_and_comments store ~post_id
-  : (post * comment list, board_read_error) Result.t =
+let observe_post_and_comments store ~post_id
+  : (post * comments_observation, board_read_error) Result.t =
   maybe_sweep store;
   match Post_id.of_string_for_read post_id with
   | Error e -> Error e
   | Ok pid ->
-    with_lock store (fun () ->
-      let post_key = Post_id.to_string pid in
-      match Hashtbl.find_opt store.posts post_key with
-      | None -> Error (Read_post_not_found post_id)
-      | Some post ->
-        let comment_ids =
-          Hashtbl.find_opt store.comments_by_post post_key |> Option.value ~default:[]
-        in
-        let comments =
-          List.filter_map (fun cid -> Hashtbl.find_opt store.comments cid) comment_ids
-        in
-        Ok (post, List.sort Board_comments.compare_comments_oldest_first comments))
+    with_persist_lock store (fun () ->
+      match require_posts_source_readable store with
+      | Error error -> Error (Read_source_unavailable error)
+      | Ok () ->
+        with_lock store (fun () ->
+          match Hashtbl.find_opt store.posts (Post_id.to_string pid) with
+          | None -> Error (Read_post_not_found post_id)
+          | Some post -> Ok (post, Board_comments.observe_comments_unlocked store pid)))
+;;
+
+let read_post_and_comments store ~post_id
+  : (post * comment list, board_read_error) Result.t =
+  match observe_post_and_comments store ~post_id with
+  | Error _ as error -> error
+  | Ok (post, { comments; completeness = Source_complete }) -> Ok (post, comments)
+  | Ok (_, { completeness = Source_incomplete error; comments = _ }) ->
+    Error (Read_source_unavailable error)
 ;;
 
 let list_posts store ?(visibility_filter = None) ?hearth ?(limit = 50) () : post list =

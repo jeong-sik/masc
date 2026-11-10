@@ -65,6 +65,7 @@ let classify : Masc_domain.t -> t = function
       | Masc_domain.Task_error.AlreadyClaimed _
       | Masc_domain.Task_error.TransitionRejected _
       | Masc_domain.Task_error.InvalidState _
+      | Masc_domain.Task_error.BacklogVersionConflict _
       | Masc_domain.Task_error.InvalidId _
       | Masc_domain.Task_error.VerificationSuperseded _ ) ->
     Other

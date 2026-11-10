@@ -35,6 +35,9 @@ let hosts =
   ; "A model-list request", Access.Model_list
   ; "The Files API", Access.Files_api
   ; "The replacement catalog", Access.Replacement_catalog
+  ; "A web search provider", Access.Web_search
+  ; "The cloud backend of SystemOne", Access.Systemone_cloud
+  ; "A voice endpoint", Access.Voice_endpoint
   ]
 ;;
 

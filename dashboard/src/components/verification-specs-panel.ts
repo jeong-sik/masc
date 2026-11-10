@@ -1,3 +1,4 @@
+import { setupObservationRefresh } from '../lib/observation-refresh'
 // VerificationSpecsPanel — enumerates TLA+ specs with cfg coverage + mtime.
 //
 // Consumes:
@@ -11,7 +12,6 @@
 import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
 import { useEffect } from 'preact/hooks'
-import { TLA_POLL_INTERVAL_MS } from '../config/constants'
 import {
   fetchTlaSpecs,
   type TlaSpecCategory,
@@ -116,9 +116,8 @@ export function VerificationSpecsPanel() {
   const resource = useManagedAsyncResource<TlaSpecsResponse>()
 
   useEffect(() => {
-    void loadSpecs(resource)
-    const id = setInterval(() => void loadSpecs(resource), TLA_POLL_INTERVAL_MS)
-    return () => { clearInterval(id); resource.cancel() }
+    const dispose = setupObservationRefresh(() => loadSpecs(resource), { topics: ['verification_specs'] })
+    return () => { dispose(); resource.cancel() }
   }, [resource])
 
   const current = resource.state.value

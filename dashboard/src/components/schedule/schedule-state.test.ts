@@ -10,7 +10,6 @@ vi.mock('../../api/dashboard-scheduled-automation', () => ({
 }))
 
 import {
-  SCHEDULED_AUTOMATION_REFRESH_MS,
   subscribeScheduledAutomationRefresh,
 } from './schedule-state'
 
@@ -42,6 +41,8 @@ function emptyProjection(): DashboardScheduledAutomationProjection {
   }
 }
 
+import { publishDashboardObservationChange } from '../../lib/observation-refresh'
+
 describe('scheduled automation refresh', () => {
   beforeEach(() => {
     vi.useFakeTimers()
@@ -53,36 +54,30 @@ describe('scheduled automation refresh', () => {
     vi.useRealTimers()
   })
 
-  it('keeps a 35s request alive across 15s polling ticks and starts the next request later', async () => {
+  it('keeps a pending read alive and retains a trailing read for committed schedule changes', async () => {
     let resolveFirst!: (projection: DashboardScheduledAutomationProjection) => void
     let firstSignal: AbortSignal | undefined
     mocks.fetchDashboardScheduledAutomation
       .mockImplementationOnce(({ signal }: { signal?: AbortSignal }) => {
         firstSignal = signal
-        return new Promise<DashboardScheduledAutomationProjection>((resolve) => {
-          resolveFirst = resolve
-        })
+        return new Promise<DashboardScheduledAutomationProjection>(resolve => { resolveFirst = resolve })
       })
       .mockResolvedValue(emptyProjection())
-
     const stop = subscribeScheduledAutomationRefresh()
     try {
+      await Promise.resolve()
       expect(mocks.fetchDashboardScheduledAutomation).toHaveBeenCalledTimes(1)
-
-      await vi.advanceTimersByTimeAsync(SCHEDULED_AUTOMATION_REFRESH_MS * 2)
+      await vi.advanceTimersByTimeAsync(35_000)
       expect(mocks.fetchDashboardScheduledAutomation).toHaveBeenCalledTimes(1)
       expect(firstSignal?.aborted).toBe(false)
-
-      await vi.advanceTimersByTimeAsync(5_000)
+      publishDashboardObservationChange({ topic: 'scheduled_automation' })
+      publishDashboardObservationChange({ topic: 'scheduled_automation' })
+      expect(mocks.fetchDashboardScheduledAutomation).toHaveBeenCalledTimes(1)
       resolveFirst(emptyProjection())
-      await Promise.resolve()
-      await Promise.resolve()
-
-      await vi.advanceTimersByTimeAsync(10_000)
-      expect(mocks.fetchDashboardScheduledAutomation).toHaveBeenCalledTimes(2)
+      await vi.waitFor(() => expect(mocks.fetchDashboardScheduledAutomation).toHaveBeenCalledTimes(2))
       expect(firstSignal?.aborted).toBe(false)
-    } finally {
-      stop()
-    }
+      await vi.advanceTimersByTimeAsync(60_000)
+      expect(mocks.fetchDashboardScheduledAutomation).toHaveBeenCalledTimes(2)
+    } finally { stop() }
   })
 })

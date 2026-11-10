@@ -10,7 +10,6 @@ import {
   toolsLoading,
   toolsError,
   subscribeToolsAutoRefresh,
-  KEEPER_WAITING_INVENTORY_REFRESH_MS,
 } from './tool-state'
 import { FullInventoryView } from './tool-full-inventory'
 import { ConfigResolutionPanel } from './config-resolution-panel'
@@ -30,7 +29,7 @@ import {
   type DashboardSkillActivationProjection,
   type DashboardToolsResponse,
 } from '../../api'
-import { setupVisibleAutoRefresh } from '../../lib/auto-refresh'
+import { setupObservationRefresh } from '../../lib/observation-refresh'
 import {
   scheduledAutomationProjection,
   subscribeScheduledAutomationRefresh,
@@ -92,7 +91,7 @@ export function Tools() {
 
   useEffect(() => {
     // subscribeToolsAutoRefresh performs the first load itself and shares one
-    // visibility-aware poller across the surfaces that read this resource.
+    // observation across the surfaces that read this resource.
     // Loading once by hand left a cold read's warming envelope on screen for
     // the whole visit: nothing fetched the finished projection until the
     // operator refreshed the inventory by hand.
@@ -120,7 +119,7 @@ export function Tools() {
       const current = controller
       setKeeperReceiptLoading(true)
       setKeeperReceiptError(null)
-      void Promise.all([
+      return Promise.all([
         fetchDashboardTools({ keeperName: selectedKeeper, signal: current.signal }),
         fetchKeeperSkillActivations(selectedKeeper, { signal: current.signal }),
       ])
@@ -143,11 +142,9 @@ export function Tools() {
           if (!current.signal.aborted) setKeeperReceiptLoading(false)
         })
     }
-    refresh()
-    const stopRefresh = setupVisibleAutoRefresh(
-      refresh,
-      KEEPER_WAITING_INVENTORY_REFRESH_MS,
-    )
+    const stopRefresh = setupObservationRefresh(refresh, {
+      topics: ['tools', 'skill_activations'], keeperName: selectedKeeper,
+    })
     return () => {
       stopRefresh()
       controller?.abort()

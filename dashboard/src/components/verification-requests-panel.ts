@@ -1,3 +1,4 @@
+import { setupObservationRefresh } from '../lib/observation-refresh'
 // VerificationRequestsPanel — Mission detail surface for cross-agent
 // verification requests.
 //
@@ -32,7 +33,6 @@ function ThLeft({ children }: { children: unknown }) {
   return html`<th scope="col" class="text-left py-1 pr-2">${children}</th>`
 }
 
-const AUTO_REFRESH_MS = 15_000
 const DEFAULT_LIMIT = 100
 
 /**
@@ -237,10 +237,9 @@ export function VerificationRequestsPanel() {
   const resource = useManagedAsyncResource<VerificationRequestsResponse>()
 
   useEffect(() => {
-    void loadData(resource)
-    const id = setInterval(() => void loadData(resource), AUTO_REFRESH_MS)
+    const dispose = setupObservationRefresh(() => loadData(resource), { topics: ['verification_requests'] })
     return () => {
-      clearInterval(id)
+      dispose()
       resource.cancel()
     }
   }, [resource])

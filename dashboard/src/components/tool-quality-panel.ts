@@ -2,8 +2,7 @@ import { html } from 'htm/preact'
 import { computed, signal } from '@preact/signals'
 import { useEffect, useState } from 'preact/hooks'
 import { type ToolQualityResponse } from '../api/dashboard'
-import { TELEMETRY_AUTO_REFRESH_MS } from '../config/constants'
-import { formatAutoRefreshLabel, setupVisibleAutoRefresh } from '../lib/auto-refresh'
+import { setupObservationRefresh } from '../lib/observation-refresh'
 import { ErrorState, LoadingState } from './common/feedback-state'
 import { TextInput } from './common/input'
 import { Eyebrow } from './common/eyebrow'
@@ -376,11 +375,10 @@ export function ToolQualityPanel() {
         windowHours: TOOL_QUALITY_WINDOW_HOURS,
       })
 
-    void runRefresh()
-    const disposeAutoRefresh = setupVisibleAutoRefresh(() => {
+    const disposeAutoRefresh = setupObservationRefresh(() => {
       if (lifecycleController.signal.aborted) return
-      void runRefresh()
-    }, TELEMETRY_AUTO_REFRESH_MS)
+      return runRefresh()
+    }, { topics: ['tool_metrics'] })
 
     return () => {
       lifecycleController.abort()
@@ -422,7 +420,7 @@ export function ToolQualityPanel() {
             onClick=${handleRefreshToolQualityClick}
             aria-label="도구 품질 새로고침"
           >새로고침</button>
-          <span class="text-3xs text-[var(--color-fg-disabled)]">${formatAutoRefreshLabel(TELEMETRY_AUTO_REFRESH_MS)}</span>
+          <span class="text-3xs text-[var(--color-fg-disabled)]">${'실시간 변경 반영'}</span>
         </div>
       </div>
 

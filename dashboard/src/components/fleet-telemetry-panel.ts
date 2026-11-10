@@ -16,9 +16,8 @@ import {
   type ToolQualityResponse,
 } from '../api/dashboard'
 import { resetKeeper } from '../api/keeper'
-import { TELEMETRY_AUTO_REFRESH_MS } from '../config/constants'
 import { telemetrySourceLabel } from '../config/telemetry-sources'
-import { formatAutoRefreshLabel, setupVisibleAutoRefresh } from '../lib/auto-refresh'
+import { setupObservationRefresh } from '../lib/observation-refresh'
 import { useSavedSignal } from '../lib/saved-signal'
 import { normalizeKeepers } from '../keeper-store-normalize'
 import { normalizeNamespaceTruth } from '../namespace-truth-normalizers'
@@ -727,8 +726,9 @@ export function FleetTelemetryPanel() {
   }
 
   useEffect(() => {
-    void loadFleetTelemetry()
-    const disposeAutoRefresh = setupVisibleAutoRefresh(loadFleetTelemetry, TELEMETRY_AUTO_REFRESH_MS)
+    const disposeAutoRefresh = setupObservationRefresh(loadFleetTelemetry, {
+      topics: ['keeper_composite', 'keeper_turns', 'telemetry', 'tool_metrics', 'health'],
+    })
     return () => {
       disposeAutoRefresh()
       activeController.current?.abort()
@@ -797,7 +797,7 @@ export function FleetTelemetryPanel() {
             onClick=${() => { void loadFleetTelemetry() }}
             aria-label="Keeper 텔레메트리 새로고침"
           >새로고침</button>
-          <span class="text-3xs text-[var(--color-fg-disabled)]">${formatAutoRefreshLabel(TELEMETRY_AUTO_REFRESH_MS)}</span>
+          <span class="text-3xs text-[var(--color-fg-disabled)]">${'실시간 변경 반영'}</span>
         </div>
       </div>
 

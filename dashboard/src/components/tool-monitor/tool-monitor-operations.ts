@@ -15,9 +15,8 @@
 import { html } from 'htm/preact'
 import { useEffect } from 'preact/hooks'
 import { navigate } from '../../router'
-import { TELEMETRY_AUTO_REFRESH_MS } from '../../config/constants'
 import { MISSING_DATA_DASH } from '../../lib/format-string'
-import { formatAutoRefreshLabel, setupVisibleAutoRefresh } from '../../lib/auto-refresh'
+import { setupObservationRefresh } from '../../lib/observation-refresh'
 import { formatMsCompact, formatNumber } from '../../lib/format-number'
 import { refreshShell, shellRuntimeResolution } from '../../store'
 import {
@@ -198,17 +197,16 @@ export function ToolMonitorOperationsBoard() {
   useEffect(() => {
     const controller = new AbortController()
     const runRefresh = () => {
-      void refreshSharedToolQuality({
-        signal: controller.signal,
-        windowHours: TOOL_MONITOR_WINDOW_HOURS,
-      })
-      void refreshShell({ force: true })
+      return Promise.all([
+        refreshSharedToolQuality({ signal: controller.signal, windowHours: TOOL_MONITOR_WINDOW_HOURS }),
+        refreshShell({ force: true }),
+      ])
     }
 
-    runRefresh()
-    const disposeAutoRefresh = setupVisibleAutoRefresh(() => {
-      if (!controller.signal.aborted) runRefresh()
-    }, TELEMETRY_AUTO_REFRESH_MS)
+    const disposeAutoRefresh = setupObservationRefresh(() => {
+      if (controller.signal.aborted) return
+      return runRefresh()
+    }, { topics: ['tool_metrics', 'health'] })
 
     return () => {
       controller.abort()
@@ -236,7 +234,7 @@ export function ToolMonitorOperationsBoard() {
         <span class="mono dim">
           ${quality ? freshnessText(quality) : 'no sample'}${quality?.entry_count != null ? ` · ${formatNumber(quality.entry_count)} durable rows` : ''}
         </span>
-        <span class="mono dim">최근 ${TOOL_MONITOR_WINDOW_HOURS}h · ${formatAutoRefreshLabel(TELEMETRY_AUTO_REFRESH_MS)}</span>
+        <span class="mono dim">최근 ${TOOL_MONITOR_WINDOW_HOURS}h · ${'실시간 변경 반영'}</span>
         ${sharedToolQualityLoading.value ? html`<span class="mono dim" role="status">refreshing</span>` : null}
       </div>
       ${sharedToolQualityError.value ? html`

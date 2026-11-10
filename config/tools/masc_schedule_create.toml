@@ -81,7 +81,9 @@ type = "string"
 description = """
 A GitHub Actions run URL: https://github.com/<owner>/<repo>/actions/runs/<id>, \
 optionally followed by /attempts/<n>. The wake comes when that run completes, \
-whatever its conclusion, or at the due time, whichever is first. The wake \
+whatever its conclusion, or at the due time, whichever is first. The due time \
+is still required: give due_in_sec as the deadline for a run that never \
+completes. The wake \
 message then starts with the run's outcome and URL. The server reads the run \
 with its GitHub reader account; when that account cannot see the run, the \
 wake comes early and says so. Works with recurrence_kind one_shot only."""

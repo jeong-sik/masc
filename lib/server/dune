@@ -146,6 +146,7 @@
   masc.host_config
   masc.dashboard_eval_feed
   masc.telemetry_coverage_gap
+  masc.telemetry_unified_source
   masc.telemetry_unified
   masc.discovery_cache
   masc.keeper_contract

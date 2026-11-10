@@ -26,6 +26,12 @@ type t =
   | Execution_invalidated
   | Agent_core of { keeper : string option; change : agent_core_change }
   | Telemetry_sample
+  | Telemetry_gap of {
+      source : Telemetry_unified_source.source option;
+      keeper : string option;
+    }
+  | Keeper_tool_call of { keeper : string }
+  | Keeper_approval_audit of { keeper : string; event : Keeper_approval.Audit.event }
 
 let ( let* ) = Option.bind
 let field fields name = List.assoc_opt name fields
@@ -219,7 +225,21 @@ let of_event (event : Sse.external_event) =
 
 let subscribe ~sw ~base_path ?observer_instance_id notify =
   let runtime_authority = Sse.runtime_authority_exn ~base_path in
+  let canonical_masc_root =
+    Fs_compat.realpath_lenient (Common.masc_dir_from_base_path ~base_path) in
   let unsubscribe = Sse.subscribe_publication_inputs ~runtime_authority
       ?observer_instance_id (fun event -> Option.iter notify (of_event event)) in
-  Eio.Switch.on_release sw unsubscribe
+  let unsubscribe_gaps = Telemetry_coverage_gap.subscribe_changed (fun change ->
+    if String.equal canonical_masc_root change.canonical_masc_root then
+      notify (Telemetry_gap {
+        source = Telemetry_unified_source.source_of_string change.source;
+        keeper = change.keeper_name })) in
+  let unsubscribe_tools = Keeper_tool_call_log.subscribe_written (fun change ->
+    if String.equal canonical_masc_root change.canonical_masc_root then
+      notify (Keeper_tool_call {keeper = change.keeper_name})) in
+  let unsubscribe_audits = Keeper_approval.Audit.subscribe_written (fun change ->
+    if String.equal canonical_masc_root change.canonical_masc_root then
+      notify (Keeper_approval_audit {keeper = change.keeper_name; event = change.event_type})) in
+  Eio.Switch.on_release sw (fun () ->
+    unsubscribe (); unsubscribe_gaps (); unsubscribe_tools (); unsubscribe_audits ())
 ;;

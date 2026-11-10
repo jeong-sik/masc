@@ -306,7 +306,7 @@ let lookup_receipt ~base_path ~id ~state ~operation_id =
 let observed_save save ~ownership_root path json =
   Fun.protect ~finally:(fun () ->
     Dashboard_observation_commit.written ~base_path:ownership_root
-      ~scope:Sse_event.Types.Workspace Sse_event.Types.Published_artifacts)
+      ~scope:`Workspace `Published_artifacts)
     (fun () -> save ~ownership_root path json)
 
 let durable_metadata_save ~ownership_root path json =

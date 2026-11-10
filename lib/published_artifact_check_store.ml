@@ -129,7 +129,7 @@ let set_with_rewrite ~rewrite ~base_path ~actor (request : Check.request) = prot
         Error (Unavailable (Fs_compat.private_jsonl_transaction_error_to_string error)) in
     let outcome = Fun.protect ~finally:(fun () ->
       Dashboard_observation_commit.written ~base_path
-        ~scope:Sse_event.Types.Workspace Sse_event.Types.Artifact_checks)
+        ~scope:`Workspace `Artifact_checks)
       (fun () -> rewrite file ~expected:snapshot.cursor (Yojson.Safe.to_string (Check.to_json check) ^ "\n")) in
     match outcome with
     | Ok _ -> Ok check

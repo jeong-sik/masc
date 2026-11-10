@@ -7,7 +7,7 @@ let with_publication_changes f =
   let changes = ref [] in
   let unsubscribe = Commit.subscribe (function
     | Commit.Workspace { base_path; payload }
-      when payload.topic = Sse_event.Types.Published_artifacts ->
+      when payload.topic = `Published_artifacts ->
         changes := (base_path, payload.scope) :: !changes
     | Commit.Workspace _ | Commit.Process _ -> ()) in
   Fun.protect ~finally:unsubscribe (fun () -> f changes)
@@ -846,7 +846,7 @@ let test_publication_and_sharing_notify () = with_base (fun base_path ->
     Alcotest.(check bool) "sharing metadata is observable" true (List.length !changes > before);
     Alcotest.(check bool) "reader sees committed sharing" true (S.read_share ~base_path ~id:artifact.id |> share_ok).shared;
     Alcotest.(check bool) "notification retains the writer's workspace scope" true
-      (List.for_all (fun (source, scope) -> String.equal source base_path && scope = Sse_event.Types.Workspace) !changes)))
+      (List.for_all (fun (source, scope) -> String.equal source base_path && scope = `Workspace) !changes)))
 
 let () = Eio_main.run (fun _ ->
   Alcotest.run "published reports"

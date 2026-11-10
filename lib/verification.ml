@@ -202,7 +202,7 @@ let forgetting_after ~base_path path write =
   Fun.protect ~finally:(fun () ->
     forget_listed path;
     Dashboard_observation_commit.written ~base_path
-      ~scope:Sse_event.Types.Workspace Sse_event.Types.Verification_requests) write
+      ~scope:`Workspace `Verification_requests) write
 
 let save_request base_path req =
   try

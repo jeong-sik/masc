@@ -19,6 +19,8 @@ const busy = {
   p50_ms: 80,
   p95_ms: 150,
   max_ms: 150,
+  long_count: 0,
+  long_total_ms: 0,
 }
 const idle = {
   call_count: 0,
@@ -28,6 +30,8 @@ const idle = {
   p50_ms: null,
   p95_ms: null,
   max_ms: null,
+  long_count: 0,
+  long_total_ms: 0,
 }
 
 function series(overrides: Partial<ToolMetricsSeriesResponse> = {}): ToolMetricsSeriesResponse {
@@ -35,6 +39,7 @@ function series(overrides: Partial<ToolMetricsSeriesResponse> = {}): ToolMetrics
     generated_at: 100,
     window: { since: 0, until: 7200, bucket: 'hour', bucket_seconds: 3600, utc_offset_min: 0 },
     tool: null,
+    long_call_ms: 60_000,
     total: busy,
     buckets: [
       { start: 0, ...idle },

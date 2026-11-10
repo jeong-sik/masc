@@ -4842,6 +4842,14 @@ let test_asks_list_publishes_written_alternative_capability () =
               Ask.Free_text_allowed {hint = Some "Explain the constraint"}])
       | _ -> fail "stored open question metadata changed")
 
+(* A request driven straight through the gateway or [Http_reqd.of_h2] gets
+   its stream's flush bound from a Stream_end of its own. Every answer here
+   comes at once, far inside the 90 s bound. *)
+let stream_end_of ~sw ~clock h2_reqd =
+  Masc.Http_h2_stream.Stream_end.create ~stream_sw:sw ~clock
+    ~stalled_after_s:Server_mcp_transport_http_headers.sse_stalled_after_s
+    ~request:(H2.Reqd.request h2_reqd) h2_reqd
+
 let tools_h2_wire_response ~handler ~headers target =
   let response = ref None in
   let body = Buffer.create 4096 in
@@ -4900,7 +4908,7 @@ let tools_h2_wire_response ~handler ~headers target =
    produced it: the cache (origin [Timeout]) or a builder whose envelope the
    cache keeps as a computed page. *)
 let test_h2_cached_payload_timeout_is_504 () =
-  with_test_env @@ fun ~env:_ ~sw ~config:_ ->
+  with_test_env @@ fun ~env ~sw ~config:_ ->
   let resources=Masc.Http_h2_response_ledger.create
     ~max_pending_bytes:H2_response_limits.default_max_pending_bytes in
   let payload origin json =
@@ -4915,7 +4923,8 @@ let test_h2_cached_payload_timeout_is_504 () =
     Masc.Http_h2_response_ledger.with_request resources ~sw (fun () ->
     tools_h2_wire_response
       ~handler:(fun h2_reqd ->
-        let reqd = Masc.Http_reqd.of_h2 ~stream_sw:sw
+        let reqd = Masc.Http_reqd.of_h2
+          ~stream_end:(stream_end_of ~sw ~clock:(Eio.Stdenv.clock env) h2_reqd)
           ~ledger:(Masc.Http_h2_response_ledger.current_exn ()) h2_reqd in
         Server_cached_read_http.respond ~request:(Masc.Http_reqd.request reqd) reqd payload)
       ~headers:[] "/cached")
@@ -4984,10 +4993,12 @@ let test_tools_routes_serve_prepared_http_representations () =
       ~bind_host:"localhost" ~bind_port:8935 ~https_port:None ~explicit_base_url:None with
       | Ok policy -> policy
       | Error error -> fail (Server_request_authority.trust_policy_error_to_string error) in
-    let h2_handler = Server_h2_gateway.make_request_handler ~routes:(Server_routes_http.make_routes ~port:0 ~host:"127.0.0.1" ~sw ~clock:(Eio.Stdenv.clock env)) ~trust_policy ~request_sw:sw
+    let h2_gateway = Server_h2_gateway.make_request_handler ~routes:(Server_routes_http.make_routes ~port:0 ~host:"127.0.0.1" ~sw ~clock:(Eio.Stdenv.clock env)) ~trust_policy in
+    let h2_handler h2_reqd = h2_gateway
+      ~stream_end:(stream_end_of ~sw ~clock:(Eio.Stdenv.clock env) h2_reqd)
       (* A real client address: the shared ingress charges the per-client-IP
          bucket with it on HTTP/2 as on HTTP/1.1. *)
-      (`Tcp (Eio.Net.Ipaddr.V4.loopback, 54321)) in
+      (`Tcp (Eio.Net.Ipaddr.V4.loopback, 54321)) h2_reqd in
     let request_headers = [ "origin", "http://localhost:8935";
       "authorization", "Bearer " ^ token ] in
     let path = "/api/v1/dashboard/tools" in
@@ -5051,7 +5062,9 @@ let test_tools_routes_serve_prepared_http_representations () =
        the request, so comparing consecutive reads of it is timing-dependent. *)
     let check_first_h2_charge label headers target expected_status =
       let client_addr = `Unix (Filename.basename config.base_path ^ "-" ^ label) in
-      let handler = Server_h2_gateway.make_request_handler ~routes:(Server_routes_http.make_routes ~port:0 ~host:"127.0.0.1" ~sw ~clock:(Eio.Stdenv.clock env)) ~trust_policy ~request_sw:sw client_addr in
+      let gateway = Server_h2_gateway.make_request_handler ~routes:(Server_routes_http.make_routes ~port:0 ~host:"127.0.0.1" ~sw ~clock:(Eio.Stdenv.clock env)) ~trust_policy in
+      let handler h2_reqd = gateway
+        ~stream_end:(stream_end_of ~sw ~clock:(Eio.Stdenv.clock env) h2_reqd) client_addr h2_reqd in
       let rl_key = Masc.Rate_limit.key_of_sockaddr client_addr in
       let before = Masc.Rate_limit.remaining_global ~key:rl_key in
       let status, _, _ = tools_h2_wire_response ~handler ~headers target in
@@ -5489,8 +5502,9 @@ let test_execution_routes_serve_prepared_http_representations () =
     ~bind_host:"localhost" ~bind_port:8935 ~https_port:None ~explicit_base_url:None with
     | Ok policy -> policy
     | Error error -> fail (Server_request_authority.trust_policy_error_to_string error) in
-  let handler = Server_h2_gateway.make_request_handler ~routes:(Server_routes_http.make_routes ~port:0 ~host:"127.0.0.1" ~sw ~clock:clock) ~trust_policy ~request_sw:sw
-    (`Tcp (Eio.Net.Ipaddr.V4.loopback, 54321)) in
+  let gateway = Server_h2_gateway.make_request_handler ~routes:(Server_routes_http.make_routes ~port:0 ~host:"127.0.0.1" ~sw ~clock:clock) ~trust_policy in
+  let handler h2_reqd = gateway ~stream_end:(stream_end_of ~sw ~clock h2_reqd)
+    (`Tcp (Eio.Net.Ipaddr.V4.loopback, 54321)) h2_reqd in
   List.iter (fun (protocol, send) ->
     List.iter (fun encoding ->
       let headers = ("accept-encoding", encoding) :: request_headers in

@@ -56,6 +56,13 @@ val acting_pane_suppressed : Masc_tui_types.state -> bool
     Lane already fill their own. The pane's key reads this too, so a press
     cannot move a choice the reader has no way to see. *)
 
+val operator_actions_reading :
+  Masc_tui_types.state -> Masc_tui_detail_reading.t
+(** Capture every reason in the last server rollup, in its original order.
+    Missing server/rollup observations remain distinct from a known empty
+    list. Opening this read-only document neither refreshes nor acknowledges
+    a reason; the existing workspace-owned reader owns its lifetime. *)
+
 (** What a press on this terminal row opens in the chat history the last frame
     drew, and {!Masc_tui_message_layout.Action_none} for any row outside it.
 

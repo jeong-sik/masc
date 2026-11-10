@@ -2159,8 +2159,10 @@ let test_code_search_count_tracks_fetched_source () =
         let source = Array.to_list rows
           |> List.map (fun segments -> String.concat "" (List.map fst segments))
           |> String.concat "\n" in
+        let prepared = Masc_tui_code_results.prepare_file ~path
+          { Masc.Tui_decode.wfs_content = source; wfs_revision = String.make 64 'a' } in
         state.code_file <- Masc_tui_fetched.complete ~equal:String.equal next request
-          (Ok { cfd_body = Code_text source; cfd_revision = String.make 64 'a'; cfd_rows = rows })
+          (Ok { prepared.cpf_document with cfd_rows = rows })
   in
   let count query = Masc_tui_surface_search.surface_search_count ~cols:120 state Code ~query in
   load "large.ml" (Array.init 20_000 (fun index ->

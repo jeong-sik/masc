@@ -22,4 +22,6 @@ val reserve : request -> bytes:int -> (lease, refusal) result
 val release : lease -> unit
 val write_reserved : lease -> H2.Body.Writer.t -> string -> unit
 (** Copy the reserved payload, then release at flush. Switch cleanup is the
-    alternate release path. A payload size mismatch is an invalid argument. *)
+    alternate release path. A payload size mismatch is an invalid argument.
+    No stall bound watches this flush: the caller closes the writer through
+    the stream's bound ([Http_h2_stream.close_after_flush]). *)

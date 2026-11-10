@@ -44,6 +44,11 @@ let max_timestamp_s = 1e12
 let top_tool_limit = 20
 let median = 0.50
 let tail = 0.95
+let milliseconds_per_second = 1000.0
+
+(* A call that ran this long or longer is a long call. One minute is the line
+   of the Execute wait census (docs/evidence/execute-waits-2026-11). *)
+let long_call_threshold_ms = Masc_time_constants.minute *. milliseconds_per_second
 
 type window =
   { since : float
@@ -181,6 +186,8 @@ type stat =
   ; p50_ms : float option
   ; p95_ms : float option
   ; max_ms : float option
+  ; long_count : int
+  ; long_total_ms : float
   }
 
 type accumulator =
@@ -189,6 +196,8 @@ type accumulator =
   ; mutable deferred : int
   ; mutable sum_ms : float
   ; mutable peak_ms : float
+  ; mutable long_calls : int
+  ; mutable long_sum_ms : float
   ; durations : Durations.t
   }
 
@@ -198,6 +207,8 @@ let new_accumulator () =
   ; deferred = 0
   ; sum_ms = 0.0
   ; peak_ms = 0.0
+  ; long_calls = 0
+  ; long_sum_ms = 0.0
   ; durations = Durations.create ()
   }
 ;;
@@ -211,6 +222,10 @@ let record accumulator (sample : sample) =
   accumulator.sum_ms <- accumulator.sum_ms +. sample.duration_ms;
   if sample.duration_ms > accumulator.peak_ms
   then accumulator.peak_ms <- sample.duration_ms;
+  if sample.duration_ms >= long_call_threshold_ms
+  then (
+    accumulator.long_calls <- accumulator.long_calls + 1;
+    accumulator.long_sum_ms <- accumulator.long_sum_ms +. sample.duration_ms);
   Durations.add accumulator.durations sample.duration_ms
 ;;
 
@@ -222,6 +237,8 @@ let empty_stat =
   ; p50_ms = None
   ; p95_ms = None
   ; max_ms = None
+  ; long_count = 0
+  ; long_total_ms = 0.0
   }
 ;;
 
@@ -237,6 +254,8 @@ let stat_of_accumulator accumulator =
     ; p50_ms = percentile sorted median
     ; p95_ms = percentile sorted tail
     ; max_ms = Some accumulator.peak_ms
+    ; long_count = accumulator.long_calls
+    ; long_total_ms = accumulator.long_sum_ms
     })
 ;;
 
@@ -350,6 +369,8 @@ let stat_fields stat : (string * Yojson.Safe.t) list =
   ; "p50_ms", float_or_null stat.p50_ms
   ; "p95_ms", float_or_null stat.p95_ms
   ; "max_ms", float_or_null stat.max_ms
+  ; "long_count", `Int stat.long_count
+  ; "long_total_ms", `Float stat.long_total_ms
   ]
 ;;
 
@@ -383,6 +404,7 @@ let to_json ~generated_at ?tool_name ?(public_names = fun _ -> []) series
       , match tool_name with
         | None -> `Null
         | Some name -> `String name )
+    ; "long_call_ms", `Float long_call_threshold_ms
     ; "total", `Assoc (stat_fields series.total)
     ; "buckets", `List (List.map bucket_json series.buckets)
     ; "top_by_time", `List (List.map tool_json series.top_by_time)

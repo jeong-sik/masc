@@ -165,10 +165,10 @@ let test_h2 encoding () = with_assets @@ fun () ->
   with_occupied_pool @@ fun ~sw ~release ->
   let started, start = Eio.Promise.create () in
   let finished, finish = Eio.Promise.create () in
-  let handler ~request_sw _ h2_reqd =
+  let handler ~stream_end _ h2_reqd =
     let path = (H2.Reqd.request h2_reqd).target in
     if String.equal path slow_path then Eio.Promise.resolve start ();
-    let reqd = Masc.Http_reqd.of_h2 ~stream_sw:request_sw
+    let reqd = Masc.Http_reqd.of_h2 ~stream_end
       ~ledger:(Masc.Http_h2_response_ledger.current_exn ()) h2_reqd in
     Server_routes_http_pages.serve_dashboard_static
       ("assets/" ^ Filename.basename path) (Masc.Http_reqd.request reqd) reqd;
@@ -176,7 +176,8 @@ let test_h2 encoding () = with_assets @@ fun () ->
   let server_flow, client_flow = Eio_unix.Net.socketpair_stream ~sw () in
   let server = Eio.Fiber.fork_promise ~sw (fun () ->
     Eio.Switch.run @@ fun conn_sw ->
-    Server_bootstrap_http.serve_h2_connection ~sw:conn_sw
+    (* A clock nobody moves: no response flush stalls in this test. *)
+    Server_bootstrap_http.serve_h2_connection ~clock:(Eio_mock.Clock.make ()) ~sw:conn_sw
       ~h2_request_handler:handler ~h2_error_handler:(Server_h2_gateway.make_error_handler ())
       (`Tcp (Eio.Net.Ipaddr.V4.loopback, 54321)) server_flow) in
   let closing = ref false in

@@ -91,6 +91,7 @@ let surface_row_texts ~cols (state : state) : surface -> string list option =
                 r.Tui_decode.rp_name ^ " " ^ r.Tui_decode.rp_default_branch)
               s.Tui_decode.rs_repositories)
           state.repositories
+  | Memory when state.memory_page = Memory_changes -> None
   | Memory ->
       if Option.is_some state.memory_facts_keeper then
         Option.map

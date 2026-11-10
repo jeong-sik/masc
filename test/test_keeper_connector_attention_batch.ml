@@ -873,7 +873,7 @@ let test_unavailable_ask_survives_other_completed_work ~failure () =
 ;;
 
 let test_missing_prefix_does_not_starve_readable_connector ~cross_conversation () =
-  Masc_test_deps.with_process_env "MASC_KEEPER_ADMISSION_MAX_EVENTS" (Some "2")
+  Masc_test_deps.with_file_owned_values [ "MASC_KEEPER_ADMISSION_MAX_EVENTS", "2" ]
   @@ fun () ->
   with_ctx "connector-missing-prefix" (fun ~base_path ~keeper_name ~meta ~ctx ->
     let messages = List.init 3 (fun index ->
@@ -957,7 +957,7 @@ let test_missing_prefix_does_not_starve_readable_connector ~cross_conversation (
 (* A shared store failure needs one diagnostic, regardless of backlog size.
    The independent source behind that backlog must still reach the next turn. *)
 let test_failed_connector_batch_skips_shared_store_without_starving_other_work () =
-  Masc_test_deps.with_process_env "MASC_KEEPER_ADMISSION_MAX_EVENTS" (Some "2")
+  Masc_test_deps.with_file_owned_values [ "MASC_KEEPER_ADMISSION_MAX_EVENTS", "2" ]
   @@ fun () ->
   with_ctx "connector-failed-backlog" (fun ~base_path ~keeper_name ~meta ~ctx ->
     let messages = List.init 5 (fun index ->
@@ -1513,7 +1513,7 @@ let test_checkpoint_retention_preserves_unsettled_sources () =
 ;;
 
 let test_checkpoint_rotates_whole_connector_conversation_after_boundary () =
-  Masc_test_deps.with_process_env "MASC_KEEPER_ADMISSION_MAX_EVENTS" (Some "2")
+  Masc_test_deps.with_file_owned_values [ "MASC_KEEPER_ADMISSION_MAX_EVENTS", "2" ]
   @@ fun () ->
   with_ctx "checkpoint-conversation-rotation" (fun ~base_path ~keeper_name ~meta ~ctx ->
     (match Keeper_owner_registry.install_from_store

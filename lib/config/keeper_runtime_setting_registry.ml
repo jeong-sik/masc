@@ -735,14 +735,20 @@ let all =
       ~consumers:[ "Keeper gRPC heartbeat client" ]
       ~category:Transport
       "Backoff between keeper gRPC reconnect attempts"
-  ; setting
-      ~range:(int_range ~min:1 ~max:256 ())
+  ; (* The intake reads this at every turn, from a file that is read once at
+       server start: a change takes a restart, so the row leaves the reload
+       class at its default. *)
+    setting
+      ~range:
+        (int_range
+           ~min:Env_config_keeper.KeeperAdmissionBounds.max_events_floor
+           ~max:Env_config_keeper.KeeperAdmissionBounds.max_events_ceiling
+           ())
       ~effective:(Reader (fun () -> display_int (Env_config_keeper.KeeperAdmissionBounds.max_events ())))
       ~env_name:"MASC_KEEPER_ADMISSION_MAX_EVENTS"
-      ~exposure:Env_only
+      ~exposure:(Toml_only "turn.admission_max_events")
       ~value_kind:Integer
-      ~default:"32"
-      ~reload_class:Next_turn
+      ~default:(display_int Env_config_keeper.KeeperAdmissionBounds.max_events_default)
       ~consumers:
         [ "Env_config_keeper.KeeperAdmissionBounds"
         ; "Keeper_heartbeat_stimulus_intake ready_batch"

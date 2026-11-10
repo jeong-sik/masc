@@ -208,9 +208,17 @@ end
 (** {1 Keeper turn admission bounds} *)
 
 module KeeperAdmissionBounds : sig
+  (** The default, and the range the runtime file's
+      [turn.admission_max_events] is accepted in. The registry row reads
+      them, so the loader and {!max_events} cannot disagree on the range. *)
+  val max_events_default : int
+
+  val max_events_floor : int
+  val max_events_ceiling : int
+
   (** Maximum durable queue selections admitted into one turn, clamped to
       [1, 256]. Default 32. Selections past this bound stay pending for a later
-      turn (#29365). *)
+      turn (#29365). The runtime file is its only input. *)
   val max_events : unit -> int
 end
 

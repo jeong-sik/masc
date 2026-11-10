@@ -497,6 +497,7 @@ module KeeperAdmissionBounds = struct
   ;;
 
   let max_events_default = 32
+  let max_events_floor = 1
   let max_events_ceiling = 256
 
   (** Maximum number of durable queue selections admitted into one turn.
@@ -508,7 +509,7 @@ module KeeperAdmissionBounds = struct
       @category Limits @ops_class operator *)
   let max_events () =
     get_int_nonneg ~default:max_events_default "MASC_KEEPER_ADMISSION_MAX_EVENTS"
-    |> clamp_int ~min_value:1 ~max_value:max_events_ceiling
+    |> clamp_int ~min_value:max_events_floor ~max_value:max_events_ceiling
   ;;
 end
 

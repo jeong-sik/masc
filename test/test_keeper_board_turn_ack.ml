@@ -334,8 +334,8 @@ data: [DONE]
       ~meta:second.meta (List.hd pending) |> get
         Keeper_world_observation_board_signal.unavailable_to_string in
   let replay = match replay with Some event -> event | None -> failwith "comment replay missing" in
-  let intake = Masc_test_deps.with_process_env "MASC_KEEPER_ADMISSION_MAX_EVENTS"
-      (Some (string_of_int (List.length pending))) (fun () ->
+  let intake = Masc_test_deps.with_file_owned_values
+      [ "MASC_KEEPER_ADMISSION_MAX_EVENTS", string_of_int (List.length pending) ] (fun () ->
         Keeper_heartbeat_stimulus_intake.heartbeat_event_intake
           ~ctx ~meta_after_triage:second.meta ~pending_board_events:[replay]) in
   require (Keeper_heartbeat_source_batch.count intake.source_batch = 4)

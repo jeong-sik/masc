@@ -99,10 +99,103 @@ let test_stale_append_cannot_adopt_a_foreign_ledger base_path =
    | None -> ()
    | Some _ -> Alcotest.fail "a refused append was replayed")
 
+let vote_fault_store base_path io =
+  let store = Board.create_store_with_votes_io_for_testing ~base_path ~io () in
+  List.iter (fun load -> match load store with
+    | Ok _ -> ()
+    | Error (path, error) ->
+      Alcotest.failf "load %s: %s" path (Printexc.to_string error))
+    [Masc_board_handlers.Board_votes_json.load_persisted_posts;
+     Masc_board_handlers.Board_votes_json.load_persisted_comments];
+  ignore (require (Board.reload_votes store));
+  store
+
+let test_unknown_rewrite_retains_exact_deletion_bytes base_path =
+  let seeded = fresh_store base_path in
+  let parent = post seeded "delete a post with an accepted vote" in
+  let armed = ref false and calls = ref 0 in
+  let io : Fs_compat.private_jsonl_transaction_io_for_testing =
+    { before_sync_parent = (fun _ ->
+        incr calls;
+        if !armed then (armed := false; raise (Failure "votes parent sync")))
+    ; close_fd = (fun fd -> incr calls; Unix.close fd) } in
+  let store = vote_fault_store base_path io in
+  ignore (require (cast store parent "accepted-before-deletion"));
+  armed := true;
+  (match require (Board.delete_post store
+      ~post_id:(Board.Post_id.to_string parent.id)) with
+   | Board.Deletion_persistence_pending _ -> ()
+   | Board.Durable_deletion -> Alcotest.fail "an uncertain vote rewrite reported durable deletion");
+  Alcotest.(check bool) "the real post-rename fault was reached" false !armed;
+  let visible = Fs_compat.load_file (Board.vote_log_path store) in
+  Alcotest.(check string) "rename published the empty ledger, without a durability proof" "" visible;
+  let check_retained () = match store.Board.votes_source with
+    | Board.Votes_unsettled { vote_pending; _ } ->
+      Alcotest.(check string) "the exact interrupted deletion bytes remain owned"
+        visible vote_pending.vote_intended_bytes
+    | Votes_unobserved | Votes_readable _ | Votes_publishing _ | Votes_refused _ ->
+      Alcotest.fail "the uncertain rewrite lost its pending source evidence" in
+  check_retained ();
+  let before = !calls in
+  require_io_error (Board.reload_votes store);
+  require_io_error (cast store parent "not-replayed");
+  Board.flush_dirty store;
+  Alcotest.(check int) "reload, cast and retry do not replay uncertain votes IO" before !calls;
+  check_retained ();
+  let restarted = fresh_store base_path in
+  Alcotest.(check int) "a fresh store can observe the current empty ledger" 0
+    (require (Board.reload_votes restarted));
+  Alcotest.(check bool) "the completed parent deletion is visible to a fresh store" true
+    (Result.is_error (Board.get_post restarted ~post_id:(Board.Post_id.to_string parent.id)));
+  check_retained ()
+
+let test_known_append_publishes_before_reserved_cleanup base_path =
+  let seeded = fresh_store base_path in
+  let parent = post seeded "accepted votes survive reserved cleanup" in
+  let armed = ref false and lock_path = ref None in
+  let io : Fs_compat.private_jsonl_transaction_io_for_testing =
+    { before_sync_parent = (fun _ -> ())
+    ; close_fd = (fun fd ->
+        let stat = Unix.fstat fd in
+        let target = Option.map Unix.lstat !lock_path in
+        Unix.close fd;
+        match !armed, target with
+        | true, Some lock when stat.Unix.st_dev = lock.Unix.st_dev
+                               && stat.Unix.st_ino = lock.Unix.st_ino ->
+          armed := false;
+          raise Eio.Time.Timeout
+        | false, (None | Some _) | true, None | true, Some _ -> ()) } in
+  let store = vote_fault_store base_path io in
+  lock_path := Some (Fs_compat.private_jsonl_lock_path (Board.vote_log_path store));
+  armed := true;
+  (match cast store parent "cleanup-voter" with
+   | _ -> Alcotest.fail "the original reserved cleanup cause was swallowed"
+   | exception Eio.Time.Timeout -> ());
+  Alcotest.(check bool) "the actual stable-lock descriptor close failed" false !armed;
+  (match store.Board.votes_source with
+   | Board.Votes_readable _ -> ()
+   | Votes_unobserved | Votes_publishing _ | Votes_refused _ | Votes_unsettled _ ->
+     Alcotest.fail "a known append did not acknowledge its successful model publication");
+  (match require (Board.current_vote_for_post store ~voter:"cleanup-voter"
+      ~post_id:(Board.Post_id.to_string parent.id)) with
+   | Some Board.Up -> ()
+   | Some Board.Down | None -> Alcotest.fail "known append was not published before cleanup escaped");
+  Alcotest.(check int) "the accepted vote changed the model exactly once" 1
+    (require (Board.get_post store ~post_id:(Board.Post_id.to_string parent.id))).votes_up;
+  ignore (require (cast store parent "next-voter"));
+  let restarted = fresh_store base_path in
+  Alcotest.(check int) "the known append and a subsequent cast both survive a fresh store" 2
+    (require (Board.get_post restarted ~post_id:(Board.Post_id.to_string parent.id))).votes_up
+
 let () =
   Alcotest.run "board_votes_source"
     ["actual writers and fresh loads",
       [Alcotest.test_case "stale snapshot retains another writer's vote" `Quick
          (with_fixture test_stale_snapshot_preserves_accepted_vote);
        Alcotest.test_case "stale append cannot adopt a newer ledger" `Quick
-         (with_fixture test_stale_append_cannot_adopt_a_foreign_ledger)]]
+         (with_fixture test_stale_append_cannot_adopt_a_foreign_ledger)];
+     "actual transaction settlement",
+      [Alcotest.test_case "unknown deletion rewrite retains bytes without replay" `Quick
+         (with_fixture test_unknown_rewrite_retains_exact_deletion_bytes);
+       Alcotest.test_case "known append publishes before reserved cleanup escapes" `Quick
+         (with_fixture test_known_append_publishes_before_reserved_cleanup)]]

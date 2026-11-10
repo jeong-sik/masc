@@ -75,3 +75,22 @@ val list_tlc_results : unit -> tlc_result_entry list
 
 val tlc_results_json : unit -> Yojson.Safe.t
 (** JSON bundle suitable for [/api/v1/verification/tlc-results]. *)
+
+type source_inventory = {
+  specs_directory : string;
+  results_directory : string;
+  spec_directories : string list;
+  spec_files : string list;
+  cfg_files : string list;
+  expected_log_files : string list;
+}
+
+type scan_error = { path : string; error : Unix.error }
+
+val observation_source_inventory : unit -> (source_inventory, scan_error) result
+(** The kernel observer's path inventory, using the same source-directory,
+    companion-cfg and expected-log rules as the HTTP readers. Includes empty
+    immediate spec directories, dangling directory-symlink candidates, companion
+    cfg paths and log paths that do not exist yet. Missing
+    roots are valid empty inventories; other filesystem failures are explicit.
+    Does not run TLC or publish notifications. *)

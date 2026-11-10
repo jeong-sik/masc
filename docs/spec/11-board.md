@@ -82,6 +82,14 @@ type comment = {
 
 ### 2.4 에러 타입
 
+댓글 작성은 호출 경계의 `reader`를 저장 경로까지 전달한다. `author`는 작성자와
+소게시판 쓰기 정책의 입력이며 읽기 권한을 대신하지 않는다. 저장 전에 원본의
+최신 부모 글에서 읽기 권한·닫힘·댓글 audience를 검사하고, hearth가 있으면
+소게시판 정책 원본도 확인한다. 미등록 hearth는 허용하되 그 부재를 확인한 정책
+snapshot을 함께 잠근다. 잠금 순서는 Posts → Policy → Comments이며 append가
+끝날 때까지 유지한다. 원본이 바뀌어 guard가 거절하면 댓글은 쓰지 않는다.
+실제 append 뒤 정리 실패는 저장 영수증과 함께 보존하고 모델 반영·ACK 뒤 전달한다.
+
 ```ocaml
 type board_error =
   | Invalid_id of string

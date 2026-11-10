@@ -542,8 +542,18 @@ let invalidate_after_write ~keepers_dir ~keeper_id =
     Hashtbl.find_opt health_base_paths keepers_dir) in
   match base_path with
   | None -> ()
-  | Some _ ->
-      let entry = cache_entry ~keepers_dir keeper_id in
+  | Some base_path ->
+      (* A writer reports the root it wrote under. The Librarian keeps its
+         progress under the runtime root while the fleet row is cached under
+         the config root, so the reported root can name the same base path
+         without being the key the row is cached under. Resolve to the row's
+         own root before emptying it, or a position write leaves the row
+         answering the position it had. *)
+      let cached_dir =
+        health_directory_identity
+          (Config_dir_resolver.keepers_dir_for_base_path ~base_path)
+      in
+      let entry = cache_entry ~keepers_dir:cached_dir keeper_id in
       Stdlib.Mutex.protect entry.mutex (fun () ->
         entry.generation <- entry.generation + 1;
         entry.value <- None)
@@ -823,7 +833,14 @@ let keeper_memory_health_http_json ~base_path =
     Config_dir_resolver.keepers_dir_for_base_path ~base_path
   in
   Stdlib.Mutex.protect health_cache_mutex (fun () ->
-    Hashtbl.replace health_base_paths (health_directory_identity keepers_dir) base_path);
+    Hashtbl.replace health_base_paths (health_directory_identity keepers_dir) base_path;
+    (* Writers report the root they wrote under. The Librarian keeps its
+       progress and turn records under the runtime root, which is not the root
+       this row is cached under, so both name the same base path here or a
+       position write finds no entry to empty. *)
+    Hashtbl.replace health_base_paths
+      (health_directory_identity (Workspace.keepers_runtime_dir config))
+      base_path);
   let entries =
     health_keeper_ids ~keepers_dir
     |> List.map (cached_keeper_health ~config ~keepers_dir)

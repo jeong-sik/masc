@@ -42,6 +42,8 @@ let observations = function
   | Store (Tools | Lane_addon_exports) -> workspace [`Tools; `Tool_metrics]
   | Store Goals -> workspace [`Telemetry]
   | Execution_invalidated -> workspace [`Verification_requests; `Ide_presence]
+  | Workspace_agent_signal _ -> workspace [`Ide_presence]
+  | Workspace_messages _ -> []
   | Board -> []
   | Agent_core { keeper = name; change =
       Started | Completed | Failed | Yielded | Input_required | Tool_called

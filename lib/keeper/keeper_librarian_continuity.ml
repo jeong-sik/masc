@@ -523,7 +523,7 @@ let apply_memory_program ?on_memory_committed ~config ~keeper_name ~prepared ~an
   with_original_source ~config ~keeper_name ~prepared (fun () ->
     File_lock_eio.with_lock file (fun () ->
       let* () = unchanged_snapshot ~config ~keeper_name ~prepared in
-      let* _ = Current.apply_program ~pass:Keeper_memory_commit_pass.Program_publish
+      let* _ = Current.apply_program ~pass:Keeper_memory_commit_pass.Continuity
         ~keepers_dir ~keeper_id:keeper_name ~now:(Time_compat.now ())
         ~anchor ~source ~validate_source:(fun () -> Ok ())
         ?on_committed:(Option.map (fun observe (_ : Current.program_commit) -> observe ()) on_memory_committed)

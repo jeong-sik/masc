@@ -1,0 +1,50 @@
+
+ RUN  v5.0.2 <candidate>/dashboard
+
+ ❯ src/components/board/sub-board-surface.test.ts (5 tests | 2 failed | 3 skipped) 152ms
+   ❯ SubBoardSurface (5)
+     × keeps decision_pending visible without reporting success or repeating deletion 84ms
+     × keeps pending visible without reporting success or repeating deletion 67ms
+
+ Test Files  1 failed (1)
+      Tests  2 failed | 3 skipped (5)
+   Start at  00:04:58
+   Duration  6.57s (import 41%, transform 28%, environment 15%, setup 13%, tests 3%)
+
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/components/board/sub-board-surface.test.ts > SubBoardSurface > keeps decision_pending visible without reporting success or repeating deletion
+Error: expect(element).toHaveTextContent()
+
+Expected element to have text content:
+  /ops:
+Received:
+  Deletion is pending. Check the Board before trying again.
+ ❯ src/components/board/sub-board-surface.test.ts:113:40
+    111|     expect(showToast).not.toHaveBeenCalledWith('Sub-board deleted', 's…
+    112|     await waitFor(() => expect(fetchSubBoardsMock).toHaveBeenCalledTim…
+    113|     expect(screen.getByRole('status')).toHaveTextContent('/ops:')
+       |                                        ^
+    114|     expect(screen.getByRole('status')).toHaveTextContent('pending')
+    115|     if (result.applied) {
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  src/components/board/sub-board-surface.test.ts > SubBoardSurface > keeps pending visible without reporting success or repeating deletion
+Error: expect(element).toHaveTextContent()
+
+Expected element to have text content:
+  /ops:
+Received:
+  No sub-boards yet. Create one above when a board category needs owner, member, or access policy. Plain board categories stay as hearth tags until a Sub-board is explicitly created.
+ ❯ src/components/board/sub-board-surface.test.ts:113:40
+    111|     expect(showToast).not.toHaveBeenCalledWith('Sub-board deleted', 's…
+    112|     await waitFor(() => expect(fetchSubBoardsMock).toHaveBeenCalledTim…
+    113|     expect(screen.getByRole('status')).toHaveTextContent('/ops:')
+       |                                        ^
+    114|     expect(screen.getByRole('status')).toHaveTextContent('pending')
+    115|     if (result.applied) {
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+

@@ -2727,6 +2727,10 @@
 (include stanzas/test_board_delete_order.inc)
 (include stanzas/test_board_deletion_recovery.inc)
 (include stanzas/test_board_comments_source.inc)
+(include stanzas/test_board_comment_admission.inc)
+
+(include stanzas/test_board_sub_board_deletion_recovery.inc)
+(include stanzas/test_fs_compat_snapshot_guard.inc)
 (include stanzas/test_board_sub_boards_source.inc)
 (include stanzas/test_board_votes_source.inc)
 (include stanzas/test_board_reactions_source.inc)
@@ -3044,7 +3048,6 @@
 (include stanzas/test_fs_compat_durable_append.inc)
 (include stanzas/test_fs_compat_unique_fold.inc)
 (include stanzas/test_fs_compat_missing_binding.inc)
-(include stanzas/test_fs_compat_snapshot_guard.inc)
 
 (include stanzas/test_fs_compat_home_guard.inc)
 (include stanzas/test_retention_directory.inc)

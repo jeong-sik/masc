@@ -1,0 +1,158 @@
+
+ RUN  v5.0.2 <candidate>/dashboard
+
+ ❯ src/components/board/sub-board-surface.test.ts (5 tests | 2 failed | 3 skipped) 10068ms
+   ❯ SubBoardSurface (5)
+     × keeps decision_pending visible without reporting success or repeating deletion 5053ms
+     × keeps pending visible without reporting success or repeating deletion 5014ms
+
+ Test Files  1 failed (1)
+      Tests  2 failed | 3 skipped (5)
+   Start at  23:49:24
+   Duration  16.15s (tests 63%, import 14%, transform 13%, environment 7%, setup 3%)
+
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/components/board/sub-board-surface.test.ts > SubBoardSurface > keeps decision_pending visible without reporting success or repeating deletion
+ FAIL  src/components/board/sub-board-surface.test.ts > SubBoardSurface > keeps pending visible without reporting success or repeating deletion
+AssertionError: expected "vi.fn()" to be called with arguments: [ Any<String>, 'warning' ]
+
+Received:
+
+  1st vi.fn() call:
+
+  [
+-   Any<String>,
+-   "warning",
++   "Sub-board deleted",
++   "success",
+  ]
+
+
+Number of calls: 1
+
+
+Ignored nodes: comments, script, style
+[36m<html>[39m
+  [36m<head />[39m
+  [36m<body>[39m
+    [36m<div>[39m
+      [36m<section[39m
+        [33maria-label[39m=[32m"Sub-boards"[39m
+        [33mclass[39m=[32m"v2-workspace-surface flex min-w-0 flex-col gap-4"[39m
+      [36m>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"min-w-0"[39m
+          [36m>[39m
+            [36m<h2[39m
+              [33mclass[39m=[32m"text-base font-semibold text-[var(--color-fg-primary)]"[39m
+            [36m>[39m
+              [0mSub-Boards[0m
+            [36m</h2>[39m
+            [36m<p[39m
+              [33mclass[39m=[32m"mt-1 text-xs text-[var(--color-fg-muted)]"[39m
+            [36m>[39m
+              [0mNamed board spaces with owner, member, access, and post-count state.[0m
+            [36m</p>[39m
+          [36m</div>[39m
+          [36m<button[39m
+            [33maria-label[39m=[32m"Refresh sub-boards"[39m
+            [33mclass[39m=[32m"cursor-pointer transition-[background-color,border-color,box-shadow,opacity] duration-150 font-medium focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 py-1 px-2 text-[14px] font-medium rounded-md border border-solid border-border bg-transparent text-text-primary hover:bg-surface-subtle v2-workspace-action"[39m
+            [33mdata-action-button[39m=[32m"true"[39m
+            [33mdata-action-button-aria-label-length[39m=[32m"18"[39m
+            [33mdata-action-button-block[39m=[32m"false"[39m
+            [33mdata-action-button-busy[39m=[32m"false"[39m
+            [33mdata-action-button-class-length[39m=[32m"19"[39m
+            [33mdata-action-button-disabled[39m=[32m"false"[39m
+            [33mdata-action-button-has-aria-label[39m=[32m"true"[39m
+            [33mdata-action-button-has-children[39m=[32m"true"[39m
+            [33mdata-action-button-has-click-handler[39m=[32m"true"[39m
+            [33mdata-action-button-has-custom-class[39m=[32m"true"[39m
+            [33mdata-action-button-has-id[39m=[32m"false"[39m
+            [33mdata-action-button-has-test-id[39m=[32m"false"[39m
+            [33mdata-action-button-has-title[39m=[32m"false"[39m
+            [33mdata-action-button-id-length[39m=[32m"0"[39m
+            [33mdata-action-button-pressed-state[39m=[32m"unset"[39m
+            [33mdata-action-button-size[39m=[32m"sm"[39m
+            [33mdata-action-button-test-id-length[39m=[32m"0"[39m
+            [33mdata-action-button-title-length[39m=[32m"0"[39m
+            [33mdata-action-button-type[39m=[32m"button"[39m
+            [33mdata-action-button-variant[39m=[32m"ghost"[39m
+            [33mtype[39m=[32m"button"[39m
+          [36m>[39m
+            [36m<span[39m
+              [33mclass[39m=[32m"inline-flex items-center gap-1.5"[39m
+            [36m>[39m
+              [36m<span[39m
+                [33maria-hidden[39m=[32m"true"[39m
+                [33mdata-icon[39m=[32m"RefreshCw"[39m
+                [33mheight[39m=[32m"14"[39m
+                [33mwidth[39m=[32m"14"[39m
+              [36m/>[39m
+              [0mRefresh[0m
+            [36m</span>[39m
+          [36m</button>[39m
+        [36m</div>[39m
+        [36m<form[39m
+          [33mclass[39m=[32m"v2-workspace-panel grid gap-3 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"grid gap-3 lg:grid-cols-[1fr_0.8fr_0.8fr]"[39m
+          [36m>[39m
+            [36m<label[39m
+              [33mclass[39m=[32m"grid gap-1 text-2xs font-medium uppercase text-[var(--color-fg-muted)]"[39m
+            [36m>[39m
+              [0mName[0m
+              [36m<input[39m
+                [33maria-label[39m=[32m"Sub-board name"[39m
+                [33mclass[39m=[32m"w-full rounded-[var(--r-1)] bg-[var(--input-bg)] border border-[var(--input-border)] text-[var(--input-fg)] placeholder:text-[var(--input-placeholder)] font-medium transition-colors hover:bg-[var(--input-bg-hover)] focus-visible:bg-[var(--input-bg-focus)] focus-visible:border-[var(--info-border)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-45)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-bg-surface)] px-3 py-2 text-sm font-medium "[39m
+                [33mdata-testid[39m=[32m"sub-board-name"[39m
+                [33mdata-text-input[39m=[32m"true"[39m
+                [33mdata-text-input-autofocus[39m=[32m"false"[39m
+                [33mdata-text-input-class-length[39m=[32m"0"[39m
+                [33mdata-text-input-disabled[39m=[32m"false"[39m
+                [33mdata-text-input-has-aria-label[39m=[32m"true"[39m
+                [33mdata-text-input-has-autocomplete[39m=[32m"false"[39m
+                [33mdata-text-input-has-custom-class[39m=[32m"false"[39m
+                [33mdata-text-input-has-id[39m=[32m"false"[39m
+                [33mdata-text-input-has-name[39m=[32m"false"[39m
+                [33mdata-text-input-has-placeholder[39m=[32m"true"[39m
+                [33mdata-text-input-has-test-id[39m=[32m"true"[39m
+                [33mdata-text-input-has-value[39m=[32m"false"[39m
+                [33mdata-text-input-kind[39m=[32m"text-input"[39m
+                [33mdata-text-input-placeholder-length[39m=[32m"10"[39m
+                [33mdata-text-input-required[39m=[32m"true"[39m
+                [33mdata-text-input-type[39m=[32m"text"[39m
+                [33mdata-text-input-value-length[39m=[32m"0"[39m
+                [33mplaceholder[39m=[32m"Operations"[39m
+                [33mrequired[39m=[32m""[39m
+                [33mtype[39m=[32m"text"[39m
+              [36m/>[39m
+            [36m</label>[39m
+            [36m<label[39m
+              [33mclass[39m=[32m"grid gap-1 text-2xs font-medium uppercase text-[var(--color-fg-muted)]"[39m
+            [36m>[39m
+              [0mSlug[0m
+              [36m<input[39m
+                [33maria-label[39m=[32m"Sub-board slug"[39m
+                [33mclass[39m=[32m"w-full rounded-[var(--r-1)] bg-[var(--input-bg)] border border-[var(--input-border)] text-[var(--input-fg)] placeholder:text-[var(--input-placeholder)] font-medium transition-colors hover:bg-[var(--input-bg-hover)] focus-visible:bg-[var(--input-bg-focus)] focus-visible:border-[var(--info-border)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-45)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-bg-surface)] px-3 py-2 text-sm font-medium "[39m
+                [33mdata-testid[39m=[32m"sub-board-slug"[39m
+                [33mdata-text-input[39m=[32m"true"[39m
+                ...
+ ❯ src/components/board/sub-board-surface.test.ts:109:43
+    107|     fireEvent.click(screen.getByRole('button', { name: 'Delete sub-boa…
+    108|     await waitFor(() => expect(deleteSubBoard).toHaveBeenCalledTimes(1…
+    109|     await waitFor(() => expect(showToast).toHaveBeenCalledWith(expect.…
+       |                                           ^
+    110|     expect(showToast).not.toHaveBeenCalledWith('Sub-board deleted', 's…
+    111|     const button = await screen.findByRole('button', { name: 'Delete s…
+ ❯ runWithExpensiveErrorDiagnosticsDisabled ../../masc/dashboard/node_modules/.pnpm/@testing-library+dom@8.20.1/node_modules/@testing-library/dom/dist/config.js:47:12
+ ❯ checkCallback ../../masc/dashboard/node_modules/.pnpm/@testing-library+dom@8.20.1/node_modules/@testing-library/dom/dist/wait-for.js:127:77
+ ❯ Timeout.checkRealTimersCallback ../../masc/dashboard/node_modules/.pnpm/@testing-library+dom@8.20.1/node_modules/@testing-library/dom/dist/wait-for.js:121:16
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+

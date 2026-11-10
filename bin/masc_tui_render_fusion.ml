@@ -84,9 +84,8 @@ let render_fusion_list (state : state) =
           | None -> title_missing_reading ~error:None
           | Some _ -> ""
         in
-        Printf.sprintf "%s  %s  %s  %s"
-          (screen_title fusion_title) reading_note timestamp
-          (connection_badge state)
+        surface_title_row ~cols state ~lead:(screen_title fusion_title)
+          ~readings:[ "  " ^ reading_note; "  " ^ timestamp ]
     | Some _ ->
         let completed_count =
           List.fold_left
@@ -118,11 +117,11 @@ let render_fusion_list (state : state) =
              else "")
             (if failed_count > 0 then Printf.sprintf " · %s%d fail%s" (Theme.bad ()) failed_count Ansi.reset else "")
         in
-        Printf.sprintf "%s%s  %s  %s"
-          (screen_title fusion_title)
-          (stats_note ^ (if history_count = 0 then "" else
-             Printf.sprintf " · %d Board evidence" history_count)) timestamp
-          (connection_badge state)
+        surface_title_row ~cols state ~lead:(screen_title fusion_title)
+          ~readings:
+            [ stats_note ^ (if history_count = 0 then "" else
+                Printf.sprintf " · %d Board evidence" history_count)
+            ; "  " ^ timestamp ]
   in
   (* Measured from the rows, the way the Approvals table measures its own
      name column. Eighteen of twenty-eight keepers were cut at sixteen while

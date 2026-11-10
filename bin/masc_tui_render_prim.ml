@@ -1872,6 +1872,11 @@ let refresh_progress_badge (state : state) =
            notices ^ " · " ^ pending)
   | Some _ | None -> foreground
 
+let observer_loss_badge (state : state) =
+  if state.observer_source_loss then
+    Some (Theme.warn () ^ ui_text state ~ko:"[이벤트 유실]" ~en:"[events lost]" ^ Ansi.reset)
+  else None
+
 let connection_badge (state : state) =
   let text = ui_text state in
   let connection = connection_status_badge ~ko:(state.ui_language = Lang_ko) state.connection_status in
@@ -1882,9 +1887,9 @@ let connection_badge (state : state) =
       connection ^ " " ^ Theme.text_status Masc_tui_theme.Warn ^ text ~ko:"[작업 공간 확인 대기]" ~en:"[workspace unconfirmed]" ^ Ansi.reset
   | Masc_tui_types.Workspace_identity_unread
   | Masc_tui_types.Workspace_identity_match -> connection in
-  let source_loss =
-    if state.observer_source_loss then Theme.warn () ^ text ~ko:"[이벤트 유실] " ~en:"[events lost] " ^ Ansi.reset
-    else ""
+  let source_loss = match observer_loss_badge state with
+    | Some badge -> badge ^ " "
+    | None -> ""
   in
   source_loss ^ connection ^ refresh_progress_badge state
 
@@ -2020,6 +2025,45 @@ let feature_child_heading (state : state) ~cols ~title =
           ~width:(max 0 (width - Message_layout.display_width "  ")) state
           |> String.trim in
         detail_heading ~cols ~lead ~id:"" ~after:[] ~tail
+
+(* The full badge can itself exceed the title's width: at forty-four columns
+   HTTP, workspace mismatch and refresh details cannot all be kept whole.
+   Reuse the prioritized workspace/read observation, then keep observer loss
+   and HTTP when they fit. The ellipsis says that full context was omitted. *)
+let surface_connection_badge (state : state) ~width =
+  let cells text = Message_layout.display_width (Theme.strip_sgr text) in
+  let full = connection_badge state in
+  if cells full <= width then full
+  else if width < 1 then ""
+  else
+    let omitted = " …" in
+    let room = width - cells omitted in
+    let primary, _ = compact_connection_badge state ~width:room in
+    let loss = Option.to_list (observer_loss_badge state) in
+    let notices = match compact_connection_state state with
+      | Compact_http _ -> loss @ [primary]
+      | Compact_workspace_mismatch | Compact_workspace_unconfirmed
+      | Compact_workspace_unread | Compact_read_failed | Compact_read_partial
+      | Compact_read_interrupted | Compact_read_unfinished | Compact_reading ->
+          primary :: loss @ [connection_status_badge ~ko:(state.ui_language = Lang_ko)
+                             state.connection_status]
+    in
+    let warning = Theme.warn () ^ "!" ^ Ansi.reset in
+    if room < 1 then warning
+    else
+      let compact = match notices with
+        | first :: _ when cells first > room -> warning
+        | _ -> Message_layout.join_fitting ~sep:" " ~cells:room notices
+      in
+      compact ^ omitted
+
+(* Reserve the two-cell gap added by [detail_heading] before sizing the
+   status. Readings give way whole, then the title; an empty first reading
+   prevents the first real count or clock from being cut to a fragment. *)
+let surface_title_row ~cols (state : state) ~lead ~readings =
+  let width = max 0 (framed_inner_width cols - Message_layout.display_width "  ") in
+  detail_heading ~cols ~lead:(Lead_text lead) ~id:"" ~after:("" :: readings)
+    ~tail:(surface_connection_badge state ~width)
 
 (* A header row of [lead], a bracketed [label] and [badge]. The badge says
    whether the screen can be trusted, so it is drawn whole and the label gives
@@ -6135,12 +6179,11 @@ let answering_preview_rows = 3
    sits above both panes, so each pane gives up one row to it. *)
 let pane_surface_title_rows = 1
 
-let pane_surface_title (state : state) ~name =
+let pane_surface_title (state : state) ~cols ~name =
   let now = Unix.localtime (Unix.gettimeofday ()) in
-  Printf.sprintf "%s  %02d:%02d:%02d  %s"
-    (screen_title (" MASC " ^ name))
-    now.Unix.tm_hour now.Unix.tm_min now.Unix.tm_sec
-    (connection_badge state)
+  surface_title_row ~cols state ~lead:(screen_title (" MASC " ^ name))
+    ~readings:
+      [ Printf.sprintf "  %02d:%02d:%02d" now.Unix.tm_hour now.Unix.tm_min now.Unix.tm_sec ]
 
 (* The row between the strip and the title, then the title. Every other
    surface draws that row first -- a gap on its own, the box's top edge beside
@@ -6152,7 +6195,7 @@ let pane_surface_title (state : state) ~name =
    so a split frame keeps it there. The row count is the same either way. *)
 let pane_surface_header buf cols (state : state) ~name ~split =
   if not split then box_top buf cols;
-  box_line buf cols (pane_surface_title state ~name)
+  box_line buf cols (pane_surface_title state ~cols ~name)
 
 let pane_surface_content_height ~rows =
   max 1 (framed_content_height ~rows - pane_surface_title_rows)

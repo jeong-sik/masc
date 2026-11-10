@@ -23,7 +23,7 @@ type msg =
       * (Masc.Tui_decode.workspace_search, string) result
   | Code_finder_file_loaded of
       (Masc_tui_types.code_workspace_scope * string) Masc_tui_fetched.request
-      * (Masc.Tui_decode.workspace_file_source, string) result
+      * (Masc_tui_types.code_prepared_file, string) result
   | Code_entries_loaded of
       (Masc_tui_types.code_workspace_scope * string) Masc_tui_fetched.request
       * (Masc.Tui_decode.workspace_tree_node list, string) result
@@ -31,7 +31,7 @@ type msg =
   | Code_file_loaded of
       Masc_tui_types.code_file_load_intent
       * string Masc_tui_fetched.request
-      * (Masc.Tui_decode.workspace_file_source, string) result
+      * (Masc_tui_types.code_prepared_file, string) result
   | Code_history_loaded of
       (Masc_tui_types.code_workspace_scope * string) Masc_tui_fetched.request
       * (Masc_tui_types.code_history_listing, string) result
@@ -229,8 +229,51 @@ let is_binary content =
   in
   has_nul 0
 
+let prepare_file ~path (source : Masc.Tui_decode.workspace_file_source) =
+  Message_layout.with_isolated_pieces_cache (fun () ->
+    let content = source.wfs_content in
+    (* Comment and string state crosses rows, so lex the whole text once.
+       Keep the existing binary probe and large-file language policy. *)
+    let body, rows =
+      if is_binary content
+      then Code_binary { bytes = String.length content }, []
+      else
+        let language =
+          if String.length content > 500_000 then None
+          else Masc_tui_code_lexer.language_of_path path
+        in
+        let rows =
+          Masc_tui_code_lexer.rows_of_source ~language content
+          |> List.map expand_row_tabs
+          |> List.map
+               (List.map (fun (text, kind) ->
+                    Masc.Tui_terminal_text.sanitize_terminal_text text, kind))
+        in
+        Code_text content, rows
+    in
+    let max_width =
+      List.fold_left
+        (fun widest segments ->
+          let row_width = List.fold_left
+              (fun acc (text, _) -> acc + Message_layout.display_width text)
+              0 segments in
+          max widest row_width)
+        0 rows
+    in
+    { cpf_source = source;
+      cpf_document = { cfd_body = body; cfd_revision = source.wfs_revision;
+                       cfd_rows = Array.of_list rows; cfd_max_width = max_width;
+                       cfd_memos = Masc_tui_memo.of_file ~path rows } })
+
+let reuse_file ~path (previous_path, document) (source : Masc.Tui_decode.workspace_file_source) =
+  match document.cfd_body with
+  | Code_text text
+      when String.equal path previous_path && text == source.wfs_content
+        && String.equal document.cfd_revision source.wfs_revision ->
+      Some { cpf_source = source; cpf_document = document }
+  | Code_text _ | Code_binary _ -> None
+
 let apply_open_file ~preserve_view (state : state) request result = (
-  let path = Masc_tui_fetched.request_key request in
   (* An answer for a file the operator has moved past describes bytes
      that are no longer on screen, and everything below resets the
      scroll, the cursor and the sibling panes to match it. The sibling
@@ -239,41 +282,17 @@ let apply_open_file ~preserve_view (state : state) request result = (
   then ()
   else
   match result with
-  | Ok (source : Masc.Tui_decode.workspace_file_source) ->
+  | Ok prepared ->
+      let source = prepared.cpf_source in
       let content = source.wfs_content in
       if not preserve_view then state.code_draft_open <- false;
       state.code_file_resume_intent <- Refresh_code_file;
       (* Recovery retains the selected file even if its first read did not
          finish. Its sibling reads restart independently; this completion
          must preserve their owners and any answers that arrived first. *)
-      (* Lex once at load: comment and string state crosses rows, so a
-         window could not answer. Past the budget the file draws plain
-         rather than slowly. A binary file has no rows to lex: its bytes
-         would draw as hundreds of lines of escapes. *)
-      let body, rows =
-        if is_binary content
-        then (Code_binary { bytes = String.length content }, [])
-        else begin
-          let language =
-            if String.length content > 500_000 then None
-            else Masc_tui_code_lexer.language_of_path path
-          in
-          let rows =
-            Masc_tui_code_lexer.rows_of_source ~language content
-            |> List.map expand_row_tabs
-            |> List.map
-                 (List.map (fun (text, kind) ->
-                      (Masc.Tui_terminal_text.sanitize_terminal_text text, kind)))
-          in
-          Code_text content, rows
-        end
-      in
-      (* [rows] stays a list for the memo scan and the width fold just
-         below, both of which read it once front to back. The pane keeps
-         the array. *)
       state.code_file <-
         Masc_tui_fetched.complete ~equal:String.equal state.code_file request
-          (Ok { cfd_body = body; cfd_revision = source.wfs_revision; cfd_rows = Array.of_list rows });
+          (Ok prepared.cpf_document);
       Option.iter (fun draft ->
         let review_owned = match state.code_draft_review with
           | Some (owner, reading) -> reading == request
@@ -290,7 +309,7 @@ let apply_open_file ~preserve_view (state : state) request result = (
          reset and the jump live together so neither overwrites the
          other. Consumed once -- the next plain open starts at the top. *)
       if preserve_view then begin
-        let last_line = max 0 (List.length rows - 1) in
+        let last_line = max 0 (Array.length prepared.cpf_document.cfd_rows - 1) in
         (match state.code_target_line with
          | Some line ->
              let target = max 0 (min (line - 1) last_line) in
@@ -310,22 +329,10 @@ let apply_open_file ~preserve_view (state : state) request result = (
         state.code_target_line <- None;
         state.code_file_hscroll <- 0
       end;
-      (* The widest row is the horizontal clamp; measured here, once,
-         not on every l press over ten thousand rows. *)
-      state.code_file_max_width <-
-        List.fold_left
-          (fun widest segments ->
-            let row_width =
-              List.fold_left
-                (fun acc (text, _) ->
-                  acc + Message_layout.display_width text)
-                0 segments
-            in
-            max widest row_width)
-          0 rows;
+      state.code_file_max_width <- prepared.cpf_document.cfd_max_width;
       state.code_file_hscroll <- min state.code_file_hscroll
         (max 0 (state.code_file_max_width - 1));
-      state.code_memos <- Masc_tui_memo.of_file ~path rows;
+      state.code_memos <- prepared.cpf_document.cfd_memos;
       if not preserve_view then begin
       state.code_focus_file <- Right_pane;
       (* A new file starts on its content; the old file's history or
@@ -716,8 +723,11 @@ let apply_diff (state : state) request result =
       | Error _ -> 0
       | Ok diff ->
           List.fold_left (fun widest (row : Masc.Tui_decode.git_diff_row) ->
-            max widest (Message_layout.display_width
-              (Masc.Tui_terminal_text.sanitize_terminal_text row.gdr_text))) 0 diff.gd_rows
+            let text =
+              Masc.Tui_terminal_text.sanitize_terminal_text
+                (fst (Message_layout.expand_tabs ~column:0 row.gdr_text))
+            in
+            max widest (Message_layout.display_width text)) 0 diff.gd_rows
   end
 
 ;;

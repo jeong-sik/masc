@@ -756,12 +756,10 @@ val planning_row :
     now. *)
 
 val board_id_width : int
-(** Cells the ID column holds. The reader names a post by the same id and folds
-    it at the same width. *)
+(** Width of compact post references in reader headings. *)
 
 type board_row_values = {
   brow_mark : string;
-  brow_id : string;
   brow_hearth : string;
   brow_author : string;
   brow_title : string;
@@ -771,7 +769,6 @@ type board_row_values = {
 }
 
 type board_row_styles = {
-  bstyle_id : string;
   bstyle_hearth : string;
   bstyle_author : string;
   bstyle_age : string;
@@ -794,7 +791,6 @@ val board_age_text : now:float -> float option -> string
 (** The list's columns, named so a narrow list can say which it spares. *)
 type board_column =
   | Board_mark
-  | Board_id
   | Board_hearth
   | Board_author
   | Board_title
@@ -803,12 +799,10 @@ type board_column =
   | Board_replies
 
 val board_layout : inner_width:int -> board_column Masc_tui_table.layout
-(** The columns the list draws in [inner_width] and the title's share of it.
-    [inner_width] is what the row has left of the frame, the four cells of
-    lead ahead of the mark already taken off. When the row is narrow the id
-    goes first, then the hearth, the replies, the score and the author; the
-    mark, the title and the age stay, and the title takes what the others
-    leave, never below its floor. *)
+(** The columns the list draws inside its frame, with the title immediately
+    after the kind mark. A narrow row drops the hearth, replies, score and
+    author in that order. Exact post references remain available through the
+    existing copy action; they do not take a list column. *)
 
 val board_header_row :
   ko:bool -> age_header:string -> layout:board_column Masc_tui_table.layout -> string

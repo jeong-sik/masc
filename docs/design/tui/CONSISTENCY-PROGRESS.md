@@ -418,7 +418,7 @@ list and composer; it does not execute this source change. Candidate execution
 and installation, remaining Board input states and the full 23-surface scope
 remain open.
 
-## Account input and Voice configuration source
+## Account input and Voice configuration source (#51121)
 
 The matching 6157b06b native fixture exposed two System defects. At 36x20,
 Config > runtime.toml > account addition > Tab twice kept the Location field

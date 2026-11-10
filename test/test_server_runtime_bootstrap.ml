@@ -998,7 +998,7 @@ let test_config_bootstrap_mode_parses_env () =
     with_env "MASC_CONFIG_BOOTSTRAP" value @@ fun () ->
     Alcotest.(check string) (Printf.sprintf "mode for %s" (Option.value ~default:"<unset>" value))
       expected
-      (match Server_runtime_bootstrap.config_bootstrap_mode () with
+      (match Server_runtime_config_root_bootstrap.config_bootstrap_mode () with
        | `Auto -> "auto" | `Empty -> "empty" | `Skip -> "skip")
   in
   check "auto" None;

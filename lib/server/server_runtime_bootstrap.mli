@@ -6,7 +6,6 @@
 
 (** {1 Environment} *)
 
-val config_bootstrap_mode : unit -> [ `Auto | `Empty | `Skip ]
 val bootstrap_base_path_config_root : base_path:string -> unit
 
 val apply_runtime_toml : base_path:string -> unit

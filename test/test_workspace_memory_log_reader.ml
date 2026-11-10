@@ -362,7 +362,7 @@ let test_reader_cursor_progression_and_sticky_retry () =
     "pending digest_sha256 is identical across retry"
     pending1.digest_sha256
     pending_retry.digest_sha256;
-  (* B4: If committed entries are tampered with, plan_delivery returns Error Digest_mismatch, and recover_corrupted_pending recovers *)
+  (* B4: If committed entries are tampered with, plan_delivery returns Error Digest_mismatch *)
   let committed_tampered =
     [ make_change ~seq:1 ~batch_id:"b1" ~fact_id:"f1" ~summary:"tampered!"
     ; make_change ~seq:2 ~batch_id:"b1" ~fact_id:"f2" ~summary:"claim 2"
@@ -371,11 +371,6 @@ let test_reader_cursor_progression_and_sticky_retry () =
   (match Reader.plan_delivery s_retry ~committed:committed_tampered () with
    | Error (Reader.Digest_mismatch _) -> ()
    | Ok _ -> Alcotest.fail "expected Digest_mismatch on tampered slice"
-   | Error err -> Alcotest.fail (Reader.error_to_string err));
-  (match Reader.recover_corrupted_pending s_retry ~committed:committed_initial () with
-   | Ok (s_rec, slice_rec) ->
-     Alcotest.(check int) "recovered state keeps acknowledged_seq = 0" 0 s_rec.acknowledged_seq;
-     Alcotest.(check int) "recovered slice has 2 entries" 2 (List.length slice_rec)
    | Error err -> Alcotest.fail (Reader.error_to_string err));
   (* Turn succeeds -> acknowledged_seq advances to 2 and pending clears *)
   let s_ack =

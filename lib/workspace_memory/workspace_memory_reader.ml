@@ -156,16 +156,6 @@ let plan_delivery
   | None ->
     plan_unseen state ~committed ?max_entries ()
 
-let recover_corrupted_pending
-    (state : reader_state)
-    ~(committed : Workspace_memory_log.change_entry list)
-    ?max_entries
-    () =
-  match state.pending with
-  | None -> Error No_pending_delivery
-  | Some _ ->
-    plan_unseen { state with pending = None } ~committed ?max_entries ()
-
 let apply_turn_outcome
     (state : reader_state)
     ~(committed : Workspace_memory_log.change_entry list)

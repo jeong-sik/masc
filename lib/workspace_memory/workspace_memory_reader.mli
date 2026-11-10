@@ -75,18 +75,6 @@ val plan_delivery
     slice, so a crash mid-turn re-delivers the same [pending] identity rather
     than duplicating or dropping entries. *)
 
-val recover_corrupted_pending
-  :  reader_state
-  -> committed:Workspace_memory_log.change_entry list
-  -> ?max_entries:int
-  -> unit
-  -> (reader_state * Workspace_memory_log.change_entry list, error) result
-(** Explicit recovery transition when {!plan_delivery} fails verification on an
-    existing [pending] ([Missing_committed_entries] or [Digest_mismatch]):
-    drops the unverifiable [pending] while preserving [acknowledged_seq], and
-    re-plans delivery from [acknowledged_seq]. Returns
-    [Error No_pending_delivery] if [state.pending] is [None]. *)
-
 val apply_turn_outcome
   :  reader_state
   -> committed:Workspace_memory_log.change_entry list

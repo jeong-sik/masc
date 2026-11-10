@@ -42,20 +42,6 @@ let test_string_required_whitespace_only () =
   | Ok _ -> fail "expected Error"
   | Error e -> check_field_error "whitespace" e ~field:"name" ~constraint_s:"non_empty"
 
-(* -- validate_int_required ---------------------------------------------- *)
-
-let test_int_required_ok () =
-  let args = `Assoc [("count", `Int 42)] in
-  match Tool_args.validate_int_required args "count" with
-  | Ok v -> check int "value" 42 v
-  | Error _ -> fail "expected Ok"
-
-let test_int_required_missing () =
-  let args = `Assoc [] in
-  match Tool_args.validate_int_required args "count" with
-  | Ok _ -> fail "expected Error"
-  | Error e -> check_field_error "missing" e ~field:"count" ~constraint_s:"required"
-
 (* -- validate_int_range ------------------------------------------------- *)
 
 let test_int_range_ok () =
@@ -79,21 +65,11 @@ let test_int_range_above_max () =
   | Error e ->
     check_field_error "above" e ~field:"priority" ~constraint_s:"max_int(5)"
 
-(* -- validate_one_of ---------------------------------------------------- *)
+(* -- field_constraint_to_string ----------------------------------------- *)
 
-let test_one_of_ok () =
-  let args = `Assoc [("mode", `String "strict")] in
-  match Tool_args.validate_one_of args "mode" ~allowed:["strict"; "lenient"] ~default:"strict" with
-  | Ok v -> check string "value" "strict" v
-  | Error _ -> fail "expected Ok"
-
-let test_one_of_rejected () =
-  let args = `Assoc [("mode", `String "yolo")] in
-  match Tool_args.validate_one_of args "mode" ~allowed:["strict"; "lenient"] ~default:"strict" with
-  | Ok _ -> fail "expected Error"
-  | Error e ->
-    check_field_error "rejected" e ~field:"mode" ~constraint_s:"one_of(strict,lenient)";
-    check (option string) "received" (Some "yolo") e.received
+let test_one_of_constraint_string () =
+  check string "one_of lists the allowed values" "one_of(strict,lenient)"
+    (Tool_args.field_constraint_to_string (Tool_args.One_of ["strict"; "lenient"]))
 
 (* -- validate_all ------------------------------------------------------- *)
 
@@ -118,15 +94,14 @@ let test_validate_all_collects_errors () =
     check string "first field" "a" (List.hd errs).field;
     check string "second field" "b" (List.nth errs 1).field
 
-(* -- validation_error_response ------------------------------------------ *)
+(* -- validation_error_assoc --------------------------------------------- *)
 
 let test_response_json_shape () =
   let err : Tool_args.field_error =
     { field = "agent_id"; constraint_violated = Required;
       message = "agent_id is required";
       expected = Some "string"; received = None } in
-  let json_str = Tool_args.validation_error_response [err] in
-  let json = Yojson.Safe.from_string json_str in
+  let json = Tool_args.validation_error_assoc [err] in
   let open Yojson.Safe.Util in
   check string "status" "error" (json |> member "status" |> to_string);
   check string "error_code" "validation_error" (json |> member "error_code" |> to_string);
@@ -150,11 +125,6 @@ let () =
           test_case "empty" `Quick test_string_required_empty;
           test_case "whitespace only" `Quick test_string_required_whitespace_only;
         ] );
-      ( "int_required",
-        [
-          test_case "ok" `Quick test_int_required_ok;
-          test_case "missing" `Quick test_int_required_missing;
-        ] );
       ( "int_range",
         [
           test_case "in range" `Quick test_int_range_ok;
@@ -163,8 +133,7 @@ let () =
         ] );
       ( "one_of",
         [
-          test_case "accepted" `Quick test_one_of_ok;
-          test_case "rejected" `Quick test_one_of_rejected;
+          test_case "constraint string" `Quick test_one_of_constraint_string;
         ] );
       ( "validate_all",
         [

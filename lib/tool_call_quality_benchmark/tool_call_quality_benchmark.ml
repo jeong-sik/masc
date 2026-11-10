@@ -4,7 +4,6 @@ let default_case_set_path = Tool_call_quality_benchmark_loader.default_case_set_
 let default_evidence_path = Tool_call_quality_benchmark_loader.default_evidence_path
 let load_cases_from_file = Tool_call_quality_benchmark_loader.load_cases_from_file
 let load_runs_from_file = Tool_call_quality_benchmark_loader.load_runs_from_file
-let score_run = Tool_call_quality_benchmark_scoring.score_run
 let route_evidence_issues =
   Tool_call_quality_benchmark_evidence_quality.route_evidence_issues
 

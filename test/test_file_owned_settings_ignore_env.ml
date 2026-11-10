@@ -226,6 +226,73 @@ let test_a_value_its_reader_accepts_stays_applied () =
   Config_boot_overrides.reset_for_tests ()
 ;;
 
+module Admission = Env_config_keeper.KeeperAdmissionBounds
+
+let admission_key = "turn.admission_max_events"
+
+let admission_runtime_toml value =
+  Printf.sprintf "[turn]\nadmission_max_events = %d\n" value
+;;
+
+(* One row followed end to end, the turn admission bound. The registry names it
+   under [turn], the file's value reaches the intake's reader past another
+   value in the environment, and a change takes a restart. A row moved back to
+   the environment, a renamed key, or a turn-boundary reload class fails here;
+   the probe above skips a row that leaves the file-owned set. *)
+let test_the_turn_admission_bound_comes_from_the_file () =
+  Config_boot_overrides.reset_for_tests ();
+  (match R.find_by_toml_key admission_key with
+   | None -> failf "the registry has no row for %s" admission_key
+   | Some row ->
+     check string "the row is the admission bound's" Admission.max_events_env_key
+       row.env_name;
+     check bool "the file alone feeds the row" false (R.reads_process_env row);
+     check bool "a change takes a restart" true (R.requires_restart row));
+  with_env Admission.max_events_env_key (Some "9") (fun () ->
+    with_runtime_toml (admission_runtime_toml 7) (fun base_path ->
+      (match Keeper_runtime_config.load_and_apply ~base_path with
+       | Ok count -> check int "the key is applied" 1 count
+       | Error failure -> fail (Keeper_runtime_config.load_failure_to_string failure));
+      check int "the reader returns the file's 7, not the environment's 9" 7
+        (Admission.max_events ())));
+  Config_boot_overrides.reset_for_tests ()
+;;
+
+(* The row's range is the reader's own floor and ceiling, so one step past
+   either end is a value the load refuses instead of one the reader clamps.
+   The validation report gives the reason as a value: the key is this row's
+   and the value is out of its range. A key the registry does not know also
+   fails the load, with another reason, so the load's failure alone would not
+   tell a row that left the file from a value past the range. *)
+let test_the_load_refuses_a_turn_admission_bound_outside_its_range () =
+  List.iter
+    (fun value ->
+       Config_boot_overrides.reset_for_tests ();
+       let source = admission_runtime_toml value in
+       (match Keeper_runtime_config.validate_source_text source with
+        | Error detail -> failf "%s = %d did not parse: %s" admission_key value detail
+        | Ok report ->
+          (match report.Keeper_runtime_config.issues with
+           | [ issue ] ->
+             check string "the issue is the admission key's" admission_key
+               issue.Keeper_runtime_config.key;
+             check bool "the value is out of the row's range" true
+               (issue.Keeper_runtime_config.kind = Keeper_runtime_config.Out_of_range);
+             check bool "the issue refuses the load" true
+               (issue.Keeper_runtime_config.severity = Keeper_runtime_config.Error)
+           | issues ->
+             failf "%s = %d gave %d issues, not one" admission_key value
+               (List.length issues)));
+       with_runtime_toml source (fun base_path ->
+         match Keeper_runtime_config.load_and_apply ~base_path with
+         | Ok _ -> failf "%s = %d was applied" admission_key value
+         | Error failure ->
+           check bool "the load fails in validation" true
+             (failure.Keeper_runtime_config.kind = Keeper_runtime_config.Validate)))
+    [ Admission.max_events_floor - 1; Admission.max_events_ceiling + 1 ];
+  Config_boot_overrides.reset_for_tests ()
+;;
+
 let test_a_declared_name_answers_from_the_file_only () =
   match file_owned_rows with
   | [] -> fail "the registry has no file-owned row"
@@ -271,6 +338,10 @@ let () =
             test_a_rejected_load_restores_what_the_store_held
         ; test_case "a value its reader accepts stays applied" `Quick
             test_a_value_its_reader_accepts_stays_applied
+        ; test_case "the turn admission bound comes from the file" `Quick
+            test_the_turn_admission_bound_comes_from_the_file
+        ; test_case "the load refuses a turn admission bound outside its range" `Quick
+            test_the_load_refuses_a_turn_admission_bound_outside_its_range
         ; test_case "a declared name answers from the file only" `Quick
             test_a_declared_name_answers_from_the_file_only
         ; test_case "a name that is not declared still reads the environment" `Quick

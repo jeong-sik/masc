@@ -260,14 +260,6 @@ val dashboard_manifest_identity : unit -> dashboard_assets_provenance option
     This remains inspectable after source/snapshot replacement; callers must
     pair it with [resolve_dashboard_asset] for current serving validity. *)
 
-
-val resolve_commit :
-  embedded:string option ->
-  probe:(unit -> string option) ->
-  string option
-(** Resolve commit hash: build-time embedded stamp first, then the probe
-    function. Exposed for testing. *)
-
 type commit_resolution = {
   commit : string option;
   commit_source : string option;

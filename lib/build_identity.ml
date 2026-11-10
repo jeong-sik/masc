@@ -288,12 +288,6 @@ let probe_commit_unix_ts commit =
     commit
 ;;
 
-let resolve_commit ~embedded ~probe =
-  match Option.bind embedded String_util.trim_nonempty with
-  | Some commit -> Some commit
-  | None -> probe ()
-;;
-
 type commit_resolution =
   { commit : string option
   ; commit_source : string option

@@ -41,12 +41,6 @@ let button_to_string = function
 
 let button_of_string s = List.find_opt (fun v -> String.equal (button_to_string v) s) all_of_button
 
-(* The WebDriver pointer button numbers: 0 left, 1 middle, 2 right. *)
-let button_number = function
-  | Primary -> 0
-  | Middle -> 1
-  | Secondary -> 2
-
 type gesture =
   | Hover
   | Click of button
@@ -59,45 +53,3 @@ type gesture =
 let drag_waypoints ~start ~destination = function
   | [] -> [{x=(start.x +. destination.x) /. 2.; y=(start.y +. destination.y) /. 2.}]
   | first :: rest -> first :: rest
-
-let input_sources ~pointer_id ~wheel_id ~viewport ~start gesture =
-  let coords (point : point) =
-    let x, y = viewport_pixels viewport point in
-    [ "x", `Int x; "y", `Int y ] in
-  let move ~duration_ms point = `Assoc
-    ([ "type", `String "pointerMove"; "origin", `String "viewport"
-     ; "duration", `Int duration_ms ] @ coords point) in
-  let button ?(which = Primary) kind =
-    `Assoc ["type", `String kind; "button", `Int (button_number which)] in
-  (* A WebDriver input source keeps its pointer type for as long as the browser holds its state, and a hover
-     sends no releaseActions. A touch gesture that reused the mouse source's id after a hover would be
-     sent as a mouse, so touch has an id of its own. *)
-  let pointer ?(pointer_type = "mouse") actions = `Assoc
-    [ "type", `String "pointer"
-    ; "id", `String (if String.equal pointer_type "mouse" then pointer_id else pointer_id ^ "-" ^ pointer_type)
-    ; "parameters", `Assoc ["pointerType", `String pointer_type]
-    ; "actions", `List actions ] in
-  (* A press, the moves while it is held, and the release. A drag and a swipe are the same sequence; only
-     the pointer that makes it differs. *)
-  let held ?pointer_type ~start ~via ~destination ~duration_ms () =
-    let via = drag_waypoints ~start ~destination via in
-    pointer ?pointer_type
-      ([move ~duration_ms:0 start; button "pointerDown"]
-       @ List.map (move ~duration_ms) (via @ [destination])
-       @ [move ~duration_ms:0 destination; button "pointerUp"]) in
-  let source = match gesture with
-    | Hover -> pointer [move ~duration_ms:0 start]
-    | Click which ->
-        pointer [move ~duration_ms:0 start; button ~which "pointerDown"; button ~which "pointerUp"]
-    | Double_click -> pointer [move ~duration_ms:0 start; button "pointerDown"; button "pointerUp";
-        button "pointerDown"; button "pointerUp"]
-    | Drag {via;destination;duration_ms} -> held ~start ~via ~destination ~duration_ms ()
-    | Swipe {via;destination;duration_ms} -> held ~pointer_type:"touch" ~start ~via ~destination ~duration_ms ()
-    | Tap -> pointer ~pointer_type:"touch" [move ~duration_ms:0 start; button "pointerDown"; button "pointerUp"]
-    | Wheel {x;y} -> `Assoc
-        [ "type", `String "wheel"; "id", `String wheel_id
-        ; "actions", `List [`Assoc
-            ([ "type", `String "scroll"; "duration", `Int 0
-             ; "origin", `String "viewport"; "deltaX", `Int x; "deltaY", `Int y ]
-             @ coords start)] ] in
-  `List [source]

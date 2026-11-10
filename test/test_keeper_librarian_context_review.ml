@@ -175,8 +175,9 @@ let test_case ~base_path ~registry scenario () =
   let receipt_before = Fs_compat.load_file_opt receipt_path in
   let journal_before = Fs_compat.load_file_opt journal_path in
   let context_commits = ref [] in
-  let run () = Runtime.run_best_effort ~pass:Keeper_memory_commit_pass.Durable
-      ~write_scope:(if scenario = Context_only then Runtime.Context_only else Runtime.Context_and_memory)
+  let run () = Runtime.run_best_effort
+      ~write_scope:(if scenario = Context_only then Runtime.Context_only
+                    else Runtime.Context_and_memory Keeper_memory_commit_pass.Durable)
       ~on_context_committed:(fun version -> context_commits := version :: !context_commits)
       ~base_path ~keepers_dir ~keeper_id ~expected_revision:(Some seeded.revision) input in
   if scenario = Cancel_absorb || scenario = Cancel_review then (

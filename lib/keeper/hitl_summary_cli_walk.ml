@@ -43,10 +43,13 @@ let cli_prompt ~context_bundle =
 ;;
 
 (* ── Slots whose provider stated a time (RFC-exact-lane-waits-for-a-stated-reset)
-   A held slot is not called. Called, it would have been refused for its
-   account, and the entry quarantined as an execution failure under the last
-   identity the walk bound (R5). [settle_held_slot] and the end of the walk
-   reach that state without the call. *)
+   A held slot is a slot refused for its account's rest, minus the call (R5).
+   Here a call starts by binding the slot's identity, so a held slot binds
+   nothing, and the walk settles as it does after its last call: under the
+   last identity it bound, with that slot's failure. When it bound none, a
+   quarantine still needs an identity; [settle_held_slot] binds a held slot's
+   for that and settles it as the execution failure its refusal would have
+   been. *)
 
 let earliest_held = function
   | [] -> None

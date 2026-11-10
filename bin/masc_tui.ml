@@ -36486,7 +36486,7 @@ Use relative paths for resources already held in the package. -->
               && not (modal_owns_keys state) && not state.palette_open
               && not state.answering_open && not state.patch_modal_open && not state.link_modal_open
               && Option.is_none (text_input_target state ~compact_viewport)
-              && (state.view=Overview
+              && ((state.view=Overview && not state.keeper_navigation_open)
                   || (state.view=Repositories && Option.is_none state.workspace_activity_repo)
                   || (state.view=Config && state.config_pane=Config_models)
                   || (state.view=Memory && Option.is_none state.memory_facts_keeper)) ->

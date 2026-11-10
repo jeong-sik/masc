@@ -335,7 +335,7 @@ checking, candidate execution and installation remain separate. No new screen
 wording, layout or row-order tests were added. The full screen scope remains
 open.
 
-## Operations action-reason reading
+## Operations action-reason reading (#50913)
 
 The f89b3e6f baseline was observed at 120x36 and 36x20 with two actual server
 reasons. The narrow Operations view showed the first and `+1 more`; Home

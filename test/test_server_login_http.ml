@@ -610,6 +610,70 @@ let the_preview_follows_a_login () =
       (send admin router ~meth:"GET" ~path:Masc.Auth_preview.provider_accounts_path).status)
 ;;
 
+(* Bytes another writer added to the log: the next commit finds the end moved
+   and stops the log. From then on no route decides on the state the zone
+   holds. A person who signed in before gets a 503 where they read or change
+   anything of theirs, the answer names no path of the server, and the browser
+   keeps its cookie for when the files are read again. *)
+let a_stopped_zone_answers_no_person () =
+  with_installation (fun t ->
+    let router = Server_login_http.add_preview_routes t.routes ~env:t.env ~base_path:t.base t.router in
+    let admin = fresh_browser () in
+    let back = sign_in t admin ~user_id:583231 ~fields:[ "invite", admin_token; "return_to", "/" ] in
+    Alcotest.(check int) ("signed in: " ^ back.body) 200 back.status;
+    Alcotest.(check string)
+      "the Admin, while the zone can be trusted"
+      "200 admin human by session"
+      (whoami router admin ());
+    let csrf = csrf_of t admin in
+    let user_id = user_of t admin in
+    Out_channel.with_open_gen
+      [ Open_append; Open_binary ]
+      0o600
+      (Authz_log.path_of_base_path ~base_path:t.base)
+      (fun channel -> Out_channel.output_string channel "{}\n");
+    (match
+       Authz_provider_account.link
+         t.routes.R.zone
+         ~user_id
+         ~provider_account_id:(get_ok (Provider_account_id.of_string "account-1"))
+     with
+     | Ok () -> Alcotest.fail "the zone wrote over a log another writer moved"
+     | Error (_ : Authz_provider_account.error) -> ());
+    let root = Filename.dirname t.base in
+    let unavailable label (reply : reply) =
+      Alcotest.(check int) (label ^ ": " ^ reply.body) 503 reply.status;
+      Alcotest.(check bool) (label ^ " names no path of the server") false (contains ~sub:root reply.body)
+    in
+    List.iter
+      (fun path -> unavailable path (send admin router ~meth:"GET" ~path))
+      [ "/api/v1/auth/whoami"
+      ; "/auth/session"
+      ; Masc.Auth_preview.provider_accounts_path
+      ; Masc.Auth_preview_keeper.keepers_path
+      ];
+    unavailable
+      "who-am-I with no credential"
+      (send (fresh_browser ()) router ~meth:"GET" ~path:"/api/v1/auth/whoami");
+    unavailable
+      "a Keeper"
+      (send
+         admin
+         router
+         ~meth:"POST"
+         ~path:Masc.Auth_preview_keeper.keepers_path
+         ~headers:(changing ~csrf () @ [ "Content-Type", "application/json" ])
+         ~body:{|{"keeper_id":"sangsu"}|});
+    unavailable
+      "the sign-out"
+      (send admin router ~meth:"POST" ~path:"/auth/logout" ~headers:(changing ~csrf ()));
+    Alcotest.(check (list string))
+      "the browser keeps the session"
+      [ Q.session_cookie ]
+      (List.map fst admin.cookies);
+    unavailable "a new sign-in" (sign_in t (fresh_browser ()) ~user_id:583231))
+;;
+
 let what_the_server_reads () =
   with_installation (fun t ->
     let check label expected (reply : reply) = Alcotest.(check int) (label ^ ": " ^ reply.body) expected reply.status in
@@ -715,6 +779,7 @@ let () =
     [ ( "login"
       , [ Alcotest.test_case "a browser signs in, acts and signs out" `Quick a_browser_signs_in_acts_and_signs_out
         ; Alcotest.test_case "the preview follows a login" `Quick the_preview_follows_a_login
+        ; Alcotest.test_case "a stopped zone" `Quick a_stopped_zone_answers_no_person
         ; Alcotest.test_case "what the server reads" `Quick what_the_server_reads
         ; Alcotest.test_case "the route table" `Quick the_route_table
         ; Alcotest.test_case "the query credential" `Quick the_query_credential

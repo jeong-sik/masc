@@ -452,7 +452,7 @@ let render_memory (state : state) =
 
 let render_memory_changes (state : state) keeper_name =
   let terminal_rows, cols = get_terminal_size () in
-  surface_chrome state ~terminal_rows ~cols ~surface_key:"memory-changes"
+  surface_chrome ~overflow:Paged_by_cursor state ~terminal_rows ~cols ~surface_key:"memory-changes"
     ~title:(screen_title (ui_text state ~ko:" MASC 기억 · 변화 · " ~en:" MASC Memory · changes · "
       ^ Terminal_text.single_line keeper_name))
     ~hints:(Masc_tui_keys.footer_hints_memory_changes ~lang:state.ui_language)

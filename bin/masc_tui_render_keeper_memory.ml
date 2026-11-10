@@ -187,11 +187,12 @@ let change_reading (state : Masc_tui_types.state) ~keeper_name =
           (text "이전 관측 · " "last observation · " ^ reason) :: activity.notes
       | Fetched.Failed reason -> [reason]
       | Fetched.Absent | Fetched.Loading -> [] in
-    let sections : Masc_tui_detail_reading.section list =
-      [{heading=keeper_name; body=String.concat "\n" notes};
-       {heading=text "이전" "Before"; body=body event.before};
-       {heading=text "이후" "After"; body=body event.after}]
+    let section heading body : Masc_tui_detail_reading.section = {heading; body} in
+    let sections =
+      [section keeper_name (String.concat "\n" notes);
+       section (text "이전" "Before") (body event.before);
+       section (text "이후" "After") (body event.after)]
       @ (match event.reason with None -> [] | Some reason ->
-          [{heading=text "사유" "Reason"; body=reason}]) in
+          [section (text "사유" "Reason") reason]) in
     Some (Masc_tui_detail_reading.create ~ko
       ~title:(text "기억 변화 · " "Memory change · " ^ kind_word ~ko event.kind) sections)

@@ -42,23 +42,20 @@ let of_change ~absorbed ~revisions (change : Keeper_memory_os_current_types.chan
   classify ~before:change.removed ~after:change.added ~absorbed ~revisions
 ;;
 
+(* A program commits once, so it is counted once: from the facts it started
+   from to the facts it left, with the absorptions and revisions of all its
+   stages. A fact one stage added and a later stage removed was never in a
+   committed snapshot, so it counts nowhere. *)
 let of_publication (publication : Keeper_memory_os_program_types.publication) =
-  List.fold_left
-    (fun total (stage : Keeper_memory_os_program_types.stage) ->
-       let stage =
-         classify
-           ~before:stage.before
-           ~after:stage.after
-           ~absorbed:stage.absorbed_applied
-           ~revisions:stage.revisions_applied
-       in
-       { added = total.added + stage.added
-       ; absorbed = total.absorbed + stage.absorbed
-       ; superseded = total.superseded + stage.superseded
-       ; dropped = total.dropped + stage.dropped
-       })
-    { added = 0; absorbed = 0; superseded = 0; dropped = 0 }
-    publication.execution.stages
+  let execution = publication.execution in
+  let applied select = List.concat_map select execution.stages in
+  classify
+    ~before:execution.initial_facts
+    ~after:execution.final_facts
+    ~absorbed:
+      (applied (fun (stage : Keeper_memory_os_program_types.stage) -> stage.absorbed_applied))
+    ~revisions:
+      (applied (fun (stage : Keeper_memory_os_program_types.stage) -> stage.revisions_applied))
 ;;
 
 type 'a change_count =
@@ -68,7 +65,21 @@ type 'a change_count =
       }
   | Not_counted
 
-let record ~keeper_id change_count (snapshot : Keeper_memory_os_current_types.t) output =
+let set_gauges ~keeper_id change_count (snapshot : Keeper_memory_os_current_types.t) =
+  match change_count with
+  | Not_counted -> ()
+  | Counted _ ->
+    Otel_metric_store.set_gauge
+      Keeper_metrics.(to_string MemoryFacts)
+      ~labels:[ "keeper", keeper_id ]
+      (float_of_int (List.length snapshot.facts));
+    Otel_metric_store.set_gauge
+      Keeper_metrics.(to_string MemorySnapshotBytes)
+      ~labels:[ "keeper", keeper_id ]
+      (float_of_int (String.length (Keeper_memory_os_render.render_facts snapshot.facts)))
+;;
+
+let count_changes ~keeper_id change_count (snapshot : Keeper_memory_os_current_types.t) output =
   match change_count with
   | Not_counted -> ()
   | Counted { pass; count } ->
@@ -85,13 +96,5 @@ let record ~keeper_id change_count (snapshot : Keeper_memory_os_current_types.t)
       ; "absorbed", counts.absorbed
       ; "superseded", counts.superseded
       ; "dropped", counts.dropped
-      ];
-    Otel_metric_store.set_gauge
-      Keeper_metrics.(to_string MemoryFacts)
-      ~labels:[ "keeper", keeper_id ]
-      (float_of_int (List.length snapshot.facts));
-    Otel_metric_store.set_gauge
-      Keeper_metrics.(to_string MemorySnapshotBytes)
-      ~labels:[ "keeper", keeper_id ]
-      (float_of_int (String.length (Keeper_memory_os_render.render_facts snapshot.facts)))
+      ]
 ;;

@@ -189,6 +189,16 @@ let rec contradicts_observation = function
 
 let not_written failure diagnostics = Not_written { failure; diagnostics }
 
+let observe_guard_refusal store observation failure =
+  match store.sub_boards_source with
+  | Policy_readable current when current == observation
+      && String.equal failure.Fs_compat.guard_path current.policy_path
+      && contradicts_observation failure.guard_error ->
+    refuse store (Policy_transaction_failed failure.guard_error)
+      [Policy_file_diagnostic failure.guard_error]
+  | Policy_unobserved | Policy_readable _ | Policy_publishing _
+  | Policy_refused _ | Policy_unsettled _ -> ()
+
 let write store ~before ~kind ~bytes perform =
   let pending = { policy_before = before; policy_kind = kind; policy_intended_bytes = bytes } in
   let unknown failure diagnostics =

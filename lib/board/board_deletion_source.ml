@@ -203,9 +203,10 @@ let purge store before = match store.deletion_source_io with
       ~io before.decision_path ~expected:before.decision_snapshot
 
 type file_result = (Fs_compat.Private_jsonl_cursor.t, Fs_compat.private_jsonl_transaction_error) result
+type dependency = Comments_dependency | Policy_dependency of sub_boards_source_observation
 type io_result =
   | Direct_io of file_result
-  | Deletion_readset_io of
+  | Deletion_readset_io of dependency *
       file_result Fs_compat.private_jsonl_guard_result Fs_compat.private_jsonl_guard_result
 
 let retain_guard_diagnostics store diagnostics = match store.deletion_state with
@@ -257,17 +258,21 @@ let perform store ~before ~attempt ~bytes operation =
       | Ok () ->
         match operation () with
         | Direct_io result -> classify result []
-        | Deletion_readset_io (Fs_compat.Guard_refused failure) ->
+        | Deletion_readset_io (_, Fs_compat.Guard_refused failure) ->
           let diagnostics = [Deletion_guard_diagnostic failure] in
           retain_guard_diagnostics store diagnostics;
           Not_written diagnostics
-        | Deletion_readset_io (Fs_compat.Guard_executed {
+        | Deletion_readset_io (dependency, Fs_compat.Guard_executed {
             value = Fs_compat.Guard_refused failure; cleanup_failures }) ->
+          (match dependency with
+           | Comments_dependency -> ()
+           | Policy_dependency observation ->
+             Board_sub_boards_source.observe_guard_refusal store observation failure);
           let diagnostics = List.map (fun failure -> Deletion_guard_diagnostic failure)
               (failure :: cleanup_failures) in
           retain_guard_diagnostics store diagnostics;
           Not_written diagnostics
-        | Deletion_readset_io (Fs_compat.Guard_executed {
+        | Deletion_readset_io (_, Fs_compat.Guard_executed {
             value = Fs_compat.Guard_executed { value; cleanup_failures = comments_cleanup };
             cleanup_failures = parent_cleanup }) ->
           classify value (List.map (fun failure -> Deletion_guard_diagnostic failure)
@@ -286,19 +291,21 @@ let record store ~readset plan = match store.deletion_state with
       | Delete_post _, Post_readset { parent; comments } ->
         if String.equal parent.source_path (Board_paths.persist_path store)
            && String.equal comments.source_path (Board_paths.comments_path store) then
-          Some ((parent.source_path, parent.snapshot, parent.workspace_observation, store.posts_source_io.posts),
+          Some (Comments_dependency,
+            (parent.source_path, parent.snapshot, parent.workspace_observation, store.posts_source_io.posts),
             (comments.source_path, comments.snapshot, comments.workspace_observation, store.comments_source_io))
         else None
       | Delete_sub_board _, Sub_board_readset { posts; policy } ->
         if String.equal posts.source_path (Board_paths.persist_path store)
            && String.equal policy.policy_path (Board_paths.sub_boards_path store) then
-          Some ((posts.source_path, posts.snapshot, posts.workspace_observation, store.posts_source_io.posts),
+          Some (Policy_dependency policy,
+            (posts.source_path, posts.snapshot, posts.workspace_observation, store.posts_source_io.posts),
             (policy.policy_path, policy.policy_snapshot, policy.policy_workspace, store.sub_boards_source_io))
         else None
       | Delete_post _, Sub_board_readset _ | Delete_sub_board _, Post_readset _ -> None in
     (match sources with
      | None -> Not_written []
-     | Some ((parent_path, parent_snapshot, parent_workspace, parent_io),
+     | Some (dependency, (parent_path, parent_snapshot, parent_workspace, parent_io),
              (dependency_path, dependency_snapshot, dependency_workspace, dependency_io)) ->
        let workspace =
          try
@@ -319,7 +326,7 @@ let record store ~readset plan = match store.deletion_state with
              let record () = rewrite_with_io deletion_io observation bytes in
              let guard_dependency () = guard_with_io dependency_io dependency_path
                ~expected:dependency_snapshot ~f:record in
-             Deletion_readset_io (guard_with_io parent_io parent_path
+             Deletion_readset_io (dependency, guard_with_io parent_io parent_path
                ~expected:parent_snapshot ~f:guard_dependency)))
   | Deletion_unobserved | Deletion_readable { plan = Some _; _ }
   | Deletion_pending _ | Deletion_unsettled _ | Deletion_refused _ | Deletion_projection_failed _ -> Not_written []

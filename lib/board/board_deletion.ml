@@ -221,9 +221,13 @@ let stage_sub_board store ~authorization ~sub_board_id =
       | None -> false | Some cached -> String.equal cached id) slugs in
   if not (coherent_posts && coherent_policy) then unavailable ()
   else
-    let unlinked_posts = String_map.fold (fun _ (post : post) ids ->
-      if Option.equal String.equal post.hearth (Some board.slug) then post.id :: ids else ids)
-      source_posts [] |> List.rev in
+    let owns_slug = Option.equal String.equal (String_map.find_opt board.slug slugs)
+      (Some (Sub_board_id.to_string board.id)) in
+    let unlinked_posts = if owns_slug then
+      String_map.fold (fun _ (post : post) ids ->
+        if Option.equal String.equal post.hearth (Some board.slug) then post.id :: ids else ids)
+        source_posts [] |> List.rev
+      else [] in
     Ok ({ decision_id = Deletion_id.generate (); operation = Delete_sub_board {
       deleted_sub_board = board.id; deleted_slug = board.slug; unlinked_posts } }, posts, policy)
 

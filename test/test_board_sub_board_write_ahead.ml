@@ -176,16 +176,26 @@ let test_failed_delete_keeps_policy_and_post_link () =
     | Ok retained ->
       Alcotest.(check (option string)) "failed delete keeps the post's topic"
         (Some slug) retained.hearth);
-  ignore (Result.get_ok (Board_dispatch.delete_sub_board ~authorization:Board.Operator_sub_board_deletion ~sub_board_id:slug));
+  (* A refused marker remains owned by the original store. Recover through a
+     fresh initializer before making a new request after the disk is restored. *)
   Board.reset_global_for_test ();
   Board_dispatch.reset_for_test ();
   Result.get_ok (Board_dispatch.init_jsonl
     ~base_path:(Env_config_core.base_path ())
     ~recipient_lookup:Recipient_lookup.none_declared ());
-  (* This checks the policy source only. Cross-source durable hearth unlink
-     remains a separate transaction boundary tracked by #26378. *)
+  (match Result.get_ok (Board_dispatch.delete_sub_board ~authorization:Board.Operator_sub_board_deletion ~sub_board_id:slug) with
+   | Board.Durable_deletion -> ()
+   | Board.Deletion_decision_pending detail | Board.Deletion_persistence_pending detail -> Alcotest.fail detail);
+  Board.reset_global_for_test ();
+  Board_dispatch.reset_for_test ();
+  Result.get_ok (Board_dispatch.init_jsonl
+    ~base_path:(Env_config_core.base_path ())
+    ~recipient_lookup:Recipient_lookup.none_declared ());
   Alcotest.(check bool) "successful policy removal survives restart" false
-    (Option.is_some (find_by_slug slug))
+    (Option.is_some (find_by_slug slug));
+  (match Board_dispatch.get_post ~reader:Masc_board_handlers.Board_access.Operator ~post_id with
+   | Ok retained -> Alcotest.(check (option string)) "durable deletion unlinks the post" None retained.hearth
+   | Error error -> Alcotest.fail (Board.show_board_error error))
 
 let () =
   Alcotest.run "board_sub_board_write_ahead"

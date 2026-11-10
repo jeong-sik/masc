@@ -2,6 +2,7 @@ import { html } from 'htm/preact'
 import { useCallback, useEffect, useMemo, useState } from 'preact/hooks'
 import { Hash, Pencil, Plus, RefreshCw, Trash2, Users } from 'lucide-preact'
 import { createSubBoard, deleteSubBoard, fetchSubBoards, updateSubBoard } from '../../api/board'
+import type { SubBoardDeletionResult } from '../../api/board'
 import { boardHearthFilter } from '../../store'
 import type { SubBoard, SubBoardAccess } from '../../types'
 import { ActionButton } from '../common/button'
@@ -49,6 +50,11 @@ interface SubBoardRowProps {
   onDelete: (board: SubBoard) => void
   deleting: boolean
   deletionPending: boolean
+}
+
+type PendingDeletion = {
+  board: Pick<SubBoard, 'id' | 'slug'>
+  outcome: Exclude<SubBoardDeletionResult, { persistence: 'durable' }>
 }
 
 function SubBoardRow({ board, onEdit, onDelete, deleting, deletionPending }: SubBoardRowProps) {
@@ -110,7 +116,6 @@ function SubBoardRow({ board, onEdit, onDelete, deleting, deletionPending }: Sub
               <${Trash2} size=${12} aria-hidden="true" />
             <//>
           </div>
-          ${deletionPending ? html`<p role="status">Deletion is pending. Check the Board before trying again.</p>` : null}
         </div>
       </div>
     <//>
@@ -136,7 +141,7 @@ export function SubBoardSurface() {
   const [editSubmitting, setEditSubmitting] = useState(false)
 
   const [deletingId, setDeletingId] = useState<string | null>(null)
-  const [pendingDeletions, setPendingDeletions] = useState<Set<string>>(() => new Set())
+  const [pendingDeletions, setPendingDeletions] = useState<Map<string, PendingDeletion>>(() => new Map())
 
   const effectiveSlug = useMemo(() => slug.trim() || slugFromName(name), [name, slug])
   const memberList = useMemo(() => parseMembers(members), [members])
@@ -240,11 +245,15 @@ export function SubBoardSurface() {
           showToast('Sub-board deleted', 'success')
           break
         case 'pending':
-          setPendingDeletions(current => new Set(current).add(board.id))
+          setPendingDeletions(current => new Map(current).set(board.id, {
+            board: { id: board.id, slug: board.slug }, outcome: result,
+          }))
           showToast('Sub-board removed; saving is still pending. Check the Board before trying again.', 'warning')
           break
         case 'decision_pending':
-          setPendingDeletions(current => new Set(current).add(board.id))
+          setPendingDeletions(current => new Map(current).set(board.id, {
+            board: { id: board.id, slug: board.slug }, outcome: result,
+          }))
           showToast('Deletion is pending and has not been applied. Check the Board before trying again.', 'warning')
           break
       }
@@ -278,6 +287,15 @@ export function SubBoardSurface() {
           </span>
         <//>
       </div>
+
+      ${Array.from(pendingDeletions.values()).map(({ board, outcome }) => html`
+        <p key=${board.id} role="status" aria-label=${`Deletion progress for /${board.slug}`}
+          class="text-xs text-[var(--color-fg-secondary)]">
+          /${board.slug}: ${outcome.applied
+            ? 'Removed; saving is pending. Check the Board before trying again.'
+            : 'Deletion is pending and has not been applied. Check the Board before trying again.'}
+        </p>
+      `)}
 
       ${!editingBoard ? html`
         <form class="v2-workspace-panel grid gap-3 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3" onSubmit=${submit}>

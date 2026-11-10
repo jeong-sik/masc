@@ -1,7 +1,7 @@
 open Server_auth
 
 let path = "/api/v1/play/events"
-type change = Snapshot | Machine | Seats | Room
+type change = Snapshot | Machine | Seats | Room | Keeper of string
 
 let change_of_payload ~machine = function
   | `Assoc fields ->
@@ -22,11 +22,11 @@ let change_of_payload ~machine = function
           else List.assoc_opt kind Workspace_dataset_event.Kind.
             [ Machine_live, Machine; Play_room, Room; Play_seats, Seats
             ; Lanes, Snapshot; Clients, Seats ])
-     | Some "keeper_composite_changed" when named && timestamp -> Some Seats
+     | Some "keeper_composite_changed" when named && timestamp -> Option.map (fun name -> Keeper name) (string "name")
      | Some "keeper_phase_changed" when named && timestamp ->
        (match Option.bind (string "prev_phase") Keeper_state_machine.phase_of_string,
               Option.bind (string "new_phase") Keeper_state_machine.phase_of_string with
-        | Some _, Some _ -> Some Seats | _ -> None)
+        | Some _, Some _ -> Option.map (fun name -> Keeper name) (string "name") | _ -> None)
      | Some _ | None -> None)
   | `List _ | `String _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null -> None
 
@@ -46,8 +46,13 @@ let next_seat_expiry ~now credentials =
           | Some _ | None -> next) (credential_expiry credential))) (Ok None) credentials
 
 let frame change =
-  let kind = match change with Snapshot -> "snapshot" | Machine -> "machine" | Seats -> "seats" | Room -> "room" in
-  "event: play\ndata: " ^ Yojson.Safe.to_string (`Assoc ["change", `String kind]) ^ "\n\n"
+  let fields = match change with
+    | Snapshot -> ["change", `String "snapshot"]
+    | Machine -> ["change", `String "machine"]
+    | Seats -> ["change", `String "seats"]
+    | Room -> ["change", `String "room"]
+    | Keeper name -> ["change", `String "keeper"; "keeper", `String name] in
+  "event: play\ndata: " ^ Yojson.Safe.to_string (`Assoc fields) ^ "\n\n"
 
 let unavailable = "event: unavailable\ndata: {}\n\n"
 
@@ -139,7 +144,7 @@ let serve ~state ~name ~request ~reqd ~sw ~clock ~machine ~presence (credential 
         ~is_alive:(fun () -> not (Server_sse_response.is_closed response))
         ~callback:(fun event -> Option.iter (fun change ->
           Server_sse_pump.Queue.push queue change;
-          match change with Seats | Snapshot -> wake_expiry () | Machine | Room -> ())
+          match change with Seats | Snapshot -> wake_expiry () | Machine | Room | Keeper _ -> ())
           (change_of_payload ~machine event.Sse.ext_payload)) ();
       (* The subscription exists before the client is told to read. A commit
          during its initial GET queues another invalidation. *)
@@ -159,9 +164,11 @@ let serve ~state ~name ~request ~reqd ~sw ~clock ~machine ~presence (credential 
             Eio.Time.sleep clock Server_mcp_transport_http_headers.sse_ping_interval_s;
             if guard () then
               (match Server_sse_response.send response ": keepalive\n\n" with
-               | Written -> keepalive () | Closed | Stalled -> ())
-            else ignore (Server_sse_response.send response unavailable);
-            Server_sse_response.close response in
+               | Written -> keepalive ()
+               | Closed | Stalled -> Server_sse_response.close response)
+            else (
+              ignore (Server_sse_response.send response unavailable);
+              Server_sse_response.close response) in
           keepalive (); `Stop_daemon);
         Eio.Fiber.fork_daemon ~sw:connection (fun () ->
           let rec deadlines () =

@@ -244,6 +244,7 @@ val activate_owner_state
   :  ?boot_stage:(string -> unit)
   -> sw:Eio.Switch.t
   -> clock:float Eio.Time.clock_ty Eio.Resource.t
+  -> mono_clock:Eio.Time.Mono.ty Eio.Resource.t
   -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
   -> proc_mgr:Eio_unix.Process.mgr_ty Eio.Resource.t
   -> initialized_owner_state

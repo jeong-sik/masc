@@ -95,7 +95,7 @@ let seed_current env (meta : Masc.Keeper_meta_contract.keeper_meta) claim =
   let now = Unix.gettimeofday () in
   let fact = Types.observed ~claim ~category:Types.Fact ~now
     ~origin:{kind=Types.Authored; trace_id="fixture"} in
-  match Current.upsert_fact ~keepers_dir:env.keepers_dir ~keeper_id:meta.name ~now
+  match Current.upsert_fact ~pass:Masc.Keeper_memory_commit_pass.Keeper_write ~keepers_dir:env.keepers_dir ~keeper_id:meta.name ~now
       ~source:{Current.kind=Current.Explicit_write; trace_id="fixture"} fact with
   | Ok _ -> Types.memory_id fact
   | Error _ -> Alcotest.fail "current fixture admission failed"
@@ -619,7 +619,7 @@ let test_latest_explicit_retraction_overrules_an_older_librarian_drop () =
   let keeper_id = meta.name in
   let memory_id = drop_authored_target env meta in
   ignore (seed_current env meta "the earlier authored claim");
-  (match Current.retract_fact ~keepers_dir:env.keepers_dir ~keeper_id
+  (match Current.retract_fact ~pass:Masc.Keeper_memory_commit_pass.Keeper_delete ~keepers_dir:env.keepers_dir ~keeper_id
       ~now:(Unix.gettimeofday ())
       ~source:{ Current.kind = Current.Explicit_retract; trace_id = "operator-cleanup" }
       ~memory_id ~reason:"operator removed the restored claim" () with

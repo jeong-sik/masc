@@ -39,7 +39,7 @@ let prepare_all config = P.prepare ~config ~keeper_name ~trace_id () |> get
 let prepare config = Option.map P.oldest_completed_turn (prepare_all config)
 let record_prepared_memory config prepared =
   let range_id = P.memory_range_id ~config ~keeper_name prepared |> get in
-  ignore (Masc.Keeper_memory_os_current.apply_disposition ~revisions:[] ~durable_range_id:range_id
+  ignore (Masc.Keeper_memory_os_current.apply_disposition ~pass:Masc.Keeper_memory_commit_pass.Durable ~revisions:[] ~durable_range_id:range_id
     ~keepers_dir:(Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.Masc.Workspace.base_path)
     ~keeper_id:keeper_name ~now:1000. ~source:{kind=Masc.Keeper_memory_os_current.Librarian;trace_id}
     ~absorbed:[] ~new_claims:[] () |> get)
@@ -253,7 +253,7 @@ let record_ordinary config prepared ~start_atom =
   let own=P.memory_range_id ~config ~keeper_name prepared |> get in
   let range_id={own with Masc.Keeper_memory_os_current.receipt_scope=Masc.Workspace.keepers_runtime_dir config;
     start_atom} in
-  ignore (Masc.Keeper_memory_os_current.apply_disposition ~revisions:[] ~durable_range_id:range_id
+  ignore (Masc.Keeper_memory_os_current.apply_disposition ~pass:Masc.Keeper_memory_commit_pass.Durable ~revisions:[] ~durable_range_id:range_id
     ~keepers_dir:(Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.Masc.Workspace.base_path)
     ~keeper_id:keeper_name ~now:1000. ~source:{kind=Masc.Keeper_memory_os_current.Librarian;trace_id}
     ~absorbed:[] ~new_claims:[] () |> get)
@@ -540,7 +540,7 @@ let test_queue_reuses_capacity_without_gating_alternatives () =
   let source = List.map message [String.make 1000 'a'; String.make 1000 'b';
     String.make 1000 'c'; String.make 6000 'd'] in
   save source; boundary ~fresh:true 1 source;
-  let current = Current.apply_disposition ~revisions:[] ~keepers_dir ~keeper_id:keeper_name ~now:1000.
+  let current = Current.apply_disposition ~pass:Masc.Keeper_memory_commit_pass.Durable ~revisions:[] ~keepers_dir ~keeper_id:keeper_name ~now:1000.
     ~source:{kind=Current.Librarian;trace_id} ~absorbed:[] ~new_claims:[] () |> get
     |> fun (d : Current.disposition) -> d.snapshot in
   let half = prepare config |> some |> P.narrow |> some in
@@ -875,7 +875,7 @@ let narrowing_fixture ?(cli_slot_ids = []) ?cli_runner ?has_waiting ?completed_t
     append (B.Turn_ended {turn_ref=Ids.Turn_ref.make ~trace_id ~absolute_turn:(index+1);
       task_context;history_at_start=(if index=0 then B.Fresh_history else B.Continued_history);
       position=B.position_of_messages selected |> get})) turn_ends;
-  ignore (Current.apply_disposition ~revisions:[] ~keepers_dir ~keeper_id:keeper_name ~now:1000.
+  ignore (Current.apply_disposition ~pass:Masc.Keeper_memory_commit_pass.Durable ~revisions:[] ~keepers_dir ~keeper_id:keeper_name ~now:1000.
     ~source:{ kind = Current.Librarian; trace_id } ~absorbed:[] ~new_claims:[] () |> get);
   (* No forget_measurement between passes: that is what a server restart does,
      and the width these cases are about lives in the same memory. *)
@@ -1103,7 +1103,7 @@ let test_a_turn_too_large_with_its_counterparts_is_left_to_the_durable_pass () =
       let input = Original.input original in
        received := List.map (fun (o : Masc.Keeper_counterpart_observation.t) -> o.content)
            input.counterpart_observations;
-       match Current.apply_disposition ~revisions:[] ?durable_range_id:range_id
+       match Current.apply_disposition ~pass:Masc.Keeper_memory_commit_pass.Durable ~revisions:[] ?durable_range_id:range_id
                ?official_range_id ~absorbed:[] ~keepers_dir ~keeper_id:keeper_name ~now:1001.
                ~source:{kind = Current.Librarian; trace_id} ~new_claims:[] () with
        | Ok _ -> Masc.Keeper_librarian_durable_consumer.Memory_committed

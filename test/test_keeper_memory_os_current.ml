@@ -81,7 +81,7 @@ let apply_disposition
       ?(new_claims = [])
       ()
   =
-  Current.apply_disposition
+  Current.apply_disposition ~pass:Masc.Keeper_memory_commit_pass.Durable
     ?expected_basis
     ?dropped_statements
     ?durable_range_id
@@ -100,7 +100,7 @@ let apply_disposition
 let apply_disposition_guarded
       ~keepers_dir ~expected_basis ?dropped_statements ?durable_range_id
       ?official_range_id ?(absorbed = []) ?(revisions = []) ?(new_claims = []) () =
-  Current.apply_disposition_guarded
+  Current.apply_disposition_guarded ~pass:Masc.Keeper_memory_commit_pass.Durable
     ~expected_basis ?dropped_statements ?durable_range_id ?official_range_id
     ~absorbed ~revisions ~keepers_dir ~keeper_id:"keeper" ~now:200.0
     ~source:(source Current.Librarian) ~new_claims ()
@@ -496,7 +496,7 @@ let test_batch_retraction_is_exact_atomic_and_cas_guarded () =
   in
   let committed =
     match
-      Current.retract_facts
+      Current.retract_facts ~pass:Masc.Keeper_memory_commit_pass.Operator_delete
         ~keepers_dir
         ~keeper_id:"keeper"
         ~expected_revision:seeded.revision
@@ -550,7 +550,7 @@ let test_batch_retraction_is_exact_atomic_and_cas_guarded () =
     committed_snapshot_sha256
     (Current.snapshot_sha256 committed);
   (match
-     Current.retract_facts
+     Current.retract_facts ~pass:Masc.Keeper_memory_commit_pass.Operator_delete
        ~keepers_dir
        ~keeper_id:"keeper"
        ~expected_revision:seeded.revision
@@ -566,7 +566,7 @@ let test_batch_retraction_is_exact_atomic_and_cas_guarded () =
    | Error _ | Ok _ -> fail "stale batch did not report a revision conflict");
   check int "stale batch changes nothing" committed.revision (unchanged_revision ());
   (match
-     Current.retract_facts
+     Current.retract_facts ~pass:Masc.Keeper_memory_commit_pass.Operator_delete
        ~keepers_dir
        ~keeper_id:"keeper"
        ~expected_revision:committed.revision
@@ -586,7 +586,7 @@ let test_batch_retraction_is_exact_atomic_and_cas_guarded () =
    | Error _ | Ok _ -> fail "wrong snapshot hash did not fail closed");
   check int "wrong hash changes nothing" committed.revision (unchanged_revision ());
   (match
-     Current.retract_facts
+     Current.retract_facts ~pass:Masc.Keeper_memory_commit_pass.Operator_delete
        ~keepers_dir
        ~keeper_id:"keeper"
        ~expected_revision:committed.revision
@@ -602,7 +602,7 @@ let test_batch_retraction_is_exact_atomic_and_cas_guarded () =
    | Error _ | Ok _ -> fail "missing target did not fail the whole batch");
   check int "missing target changes nothing" committed.revision (unchanged_revision ());
   (match
-     Current.retract_facts
+     Current.retract_facts ~pass:Masc.Keeper_memory_commit_pass.Operator_delete
        ~keepers_dir
        ~keeper_id:"keeper"
        ~expected_revision:committed.revision
@@ -652,7 +652,7 @@ let check_batch_retraction_recovers_exact_reason_evidence ~torn_tail () =
   let plan_id = "cleanup-plan-interrupted-finalize" in
   let reason = "operator verified this exact claim is obsolete" in
   let request () =
-    Current.retract_facts
+    Current.retract_facts ~pass:Masc.Keeper_memory_commit_pass.Operator_delete
       ~keepers_dir
       ~keeper_id:"keeper"
       ~expected_revision:seeded.revision
@@ -734,7 +734,7 @@ let test_retirement_context_rejects_stale_current () =
   with_temp_keepers @@ fun keepers_dir ->
   let target = fact ~claim:"retired policy" () in
   let original = replace ~keepers_dir ~facts:[target] () |> require_ok in
-  (match Current.retract_fact ~keepers_dir ~keeper_id:"keeper" ~now:300.
+  (match Current.retract_fact ~pass:Masc.Keeper_memory_commit_pass.Keeper_delete ~keepers_dir ~keeper_id:"keeper" ~now:300.
       ~source:(source Current.Explicit_retract) ~memory_id:(Types.memory_id target)
       ~reason:"operator retired this policy before prompt construction" () with
    | Ok _ -> () | Error _ -> fail "fixture retraction failed");
@@ -772,7 +772,7 @@ let check_ordinary_removals_preserve_archive_until_journal_recovery ~torn_tail (
     ; ( "explicit retraction"
       , "keeper withdrew this claim"
       , fun ~keepers_dir ~target ~reason ->
-          match Current.retract_fact ~keepers_dir ~keeper_id:"keeper" ~now:300.
+          match Current.retract_fact ~pass:Masc.Keeper_memory_commit_pass.Keeper_delete ~keepers_dir ~keeper_id:"keeper" ~now:300.
               ~source:(source Current.Explicit_retract)
               ~memory_id:(Types.memory_id target) ~reason () with
           | Ok snapshot -> snapshot
@@ -780,7 +780,7 @@ let check_ordinary_removals_preserve_archive_until_journal_recovery ~torn_tail (
     ; ( "supersession"
       , "superseded_by " ^ Types.memory_id successor
       , fun ~keepers_dir ~target ~reason:_ ->
-          match Current.supersede_fact ~keepers_dir ~keeper_id:"keeper" ~now:300.
+          match Current.supersede_fact ~pass:Masc.Keeper_memory_commit_pass.Keeper_write ~keepers_dir ~keeper_id:"keeper" ~now:300.
               ~source:(source Current.Explicit_write)
               ~superseded_memory_id:(Types.memory_id target) successor with
           | Ok (snapshot, _) -> snapshot
@@ -816,7 +816,7 @@ let check_ordinary_removals_preserve_archive_until_journal_recovery ~torn_tail (
     check string "pending receipt preserves exact reason" reason
       (receipt |> member "dropped" |> to_list |> List.hd |> member "reason" |> to_string);
     let next_write () =
-      Current.upsert_fact ~keepers_dir ~keeper_id:"keeper" ~now:400.
+      Current.upsert_fact ~pass:Masc.Keeper_memory_commit_pass.Keeper_write ~keepers_dir ~keeper_id:"keeper" ~now:400.
         ~source:(source Current.Explicit_write) (fact ~claim:"unrelated later memory" ())
     in
     (match next_write () with
@@ -871,7 +871,7 @@ let test_removal_receipt_write_failure_preserves_current_fact () =
   let target = fact ~claim:"must remain if archive preparation fails" () in
   let seeded = replace ~keepers_dir ~facts:[ target ] () |> require_ok in
   with_denied_mode keepers_dir 0o500 (fun () ->
-    match Current.retract_fact ~keepers_dir ~keeper_id:"keeper" ~now:300.
+    match Current.retract_fact ~pass:Masc.Keeper_memory_commit_pass.Keeper_delete ~keepers_dir ~keeper_id:"keeper" ~now:300.
         ~source:(source Current.Explicit_retract)
         ~memory_id:(Types.memory_id target) ~reason:"obsolete" () with
     | Error (Current.Retract_persistence_failed detail) ->
@@ -917,7 +917,7 @@ let test_alternate_support_path_keeps_derived_fact_current () =
   in
   ignore (replace ~keepers_dir ~facts:[ primary; emergency ] () |> require_ok);
   ignore
-    (Current.upsert_fact
+    (Current.upsert_fact ~pass:Masc.Keeper_memory_commit_pass.Keeper_write
        ~keepers_dir
        ~keeper_id:"keeper"
        ~now:300.0
@@ -925,7 +925,7 @@ let test_alternate_support_path_keeps_derived_fact_current () =
        primary_rollout
      |> require_upsert_ok);
   let joined =
-    Current.upsert_fact
+    Current.upsert_fact ~pass:Masc.Keeper_memory_commit_pass.Keeper_write
       ~keepers_dir
       ~keeper_id:"keeper"
       ~now:400.0
@@ -998,7 +998,7 @@ let test_same_rule_replaces_its_premise_set () =
   in
   ignore (replace ~keepers_dir ~facts:[ first; second ] () |> require_ok);
   ignore
-    (Current.upsert_fact
+    (Current.upsert_fact ~pass:Masc.Keeper_memory_commit_pass.Keeper_write
        ~keepers_dir
        ~keeper_id:"keeper"
        ~now:300.0
@@ -1006,7 +1006,7 @@ let test_same_rule_replaces_its_premise_set () =
        initial_rule
      |> require_upsert_ok);
   let strengthened =
-    Current.upsert_fact
+    Current.upsert_fact ~pass:Masc.Keeper_memory_commit_pass.Keeper_write
       ~keepers_dir
       ~keeper_id:"keeper"
       ~now:400.0
@@ -1042,7 +1042,7 @@ let test_unsupported_derived_upsert_has_no_effect () =
       [ { rule_id = "requires_missing_fact"; premise_ids = [ missing_memory_id 'a' ] } ]
   in
   (match
-     Current.upsert_fact
+     Current.upsert_fact ~pass:Masc.Keeper_memory_commit_pass.Keeper_write
        ~keepers_dir
        ~keeper_id:"keeper"
        ~now:200.0
@@ -1073,7 +1073,7 @@ let test_unsupported_derived_upsert_has_no_effect () =
   in
   let seeded = replace ~keepers_dir ~facts:[ premise; supported ] () |> require_ok in
   (match
-     Current.upsert_fact
+     Current.upsert_fact ~pass:Masc.Keeper_memory_commit_pass.Keeper_write
        ~keepers_dir
        ~keeper_id:"keeper"
        ~now:300.0
@@ -1489,7 +1489,7 @@ let test_explicit_upsert_preserves_snapshot_and_records_delta () =
        ()
      |> require_ok);
   let snapshot =
-    Current.upsert_fact
+    Current.upsert_fact ~pass:Masc.Keeper_memory_commit_pass.Keeper_write
       ~keepers_dir
       ~keeper_id:"keeper"
       ~now:300.0
@@ -1512,7 +1512,7 @@ let test_explicit_upsert_preserves_first_seen_for_same_claim () =
     { initial with category = Types.Lesson; first_seen = 500.0 }
   in
   let snapshot =
-    Current.upsert_fact
+    Current.upsert_fact ~pass:Masc.Keeper_memory_commit_pass.Keeper_write
       ~keepers_dir
       ~keeper_id:"keeper"
       ~now:600.0
@@ -1568,7 +1568,7 @@ let test_every_commit_appends_one_journal_entry () =
        ()
      |> require_ok);
   ignore
-    (Current.upsert_fact
+    (Current.upsert_fact ~pass:Masc.Keeper_memory_commit_pass.Keeper_write
        ~keepers_dir
        ~keeper_id:"keeper"
        ~now:300.0
@@ -1649,7 +1649,7 @@ let test_journal_recreated_after_purge_sequence () =
   Fs_compat.invalidate_cached_writer journal_path;
   Sys.remove journal_path;
   ignore
-    (Current.upsert_fact
+    (Current.upsert_fact ~pass:Masc.Keeper_memory_commit_pass.Keeper_write
        ~keepers_dir
        ~keeper_id:"keeper"
        ~now:300.0
@@ -1762,7 +1762,7 @@ let test_disposition_basis_refuses_effects change () = with_temp_keepers @@ fun 
   let basis=basis_of_snapshot captured in
   let basis,actual=match change with
     | Stale_revision ->
-      let changed=Current.upsert_fact ~keepers_dir ~keeper_id:"keeper" ~now:250.
+      let changed=Current.upsert_fact ~pass:Masc.Keeper_memory_commit_pass.Keeper_write ~keepers_dir ~keeper_id:"keeper" ~now:250.
         ~source:(source Current.Explicit_write) (fact ~claim:"Independent explicit writer" ()) |> require_upsert_ok in
       basis,changed
     | Different_fact_at_same_revision ->
@@ -1845,7 +1845,7 @@ let test_disposition_missing_destination_is_a_typed_refusal () =
     |> require_ok in
   let before=disposition_store_bytes ~keepers_dir in
   let destination_id=Types.memory_id destination in
-  (match Current.apply_disposition_guarded ~required_memory_ids:[destination_id]
+  (match Current.apply_disposition_guarded ~pass:Masc.Keeper_memory_commit_pass.Admission ~required_memory_ids:[destination_id]
       ~absorbed:[] ~revisions:[] ~keepers_dir ~keeper_id:"keeper" ~now:200.0
       ~source:(source Current.Librarian) ~new_claims:[] () with
    | Error (Current.Destination_absent {memory_id;current=observed}) ->
@@ -2384,7 +2384,7 @@ let test_committed_range_receipt_survives_retract_and_replace () =
        ()
      |> require_ok);
   (match
-     Current.retract_fact
+     Current.retract_fact ~pass:Masc.Keeper_memory_commit_pass.Keeper_delete
        ~keepers_dir
        ~keeper_id:"keeper"
        ~now:201.0
@@ -2459,7 +2459,7 @@ let test_unchanged_pass_keeps_snapshot_and_commits_range () =
   in
   Fun.protect ~finally:stop (fun () ->
     let pass ?durable_range_id ?on_committed ~now ~new_claims () =
-      Current.apply_disposition ?on_committed ?durable_range_id ~absorbed:[] ~revisions:[]
+      Current.apply_disposition ~pass:Masc.Keeper_memory_commit_pass.Durable ?on_committed ?durable_range_id ~absorbed:[] ~revisions:[]
         ~keepers_dir ~keeper_id:"keeper" ~now
         ~source:{ Current.kind = Current.Librarian; trace_id = Printf.sprintf "pass-%.0f" now }
         ~new_claims ()
@@ -2527,7 +2527,7 @@ let candidate_receipt sequence request_id payload : Current.explicit_candidate_i
 ;;
 
 let commit_candidates ~keepers_dir ids claims =
-  Current.apply_disposition ~explicit_candidate_ids:ids ~absorbed:[] ~revisions:[]
+  Current.apply_disposition ~pass:Masc.Keeper_memory_commit_pass.Admission ~explicit_candidate_ids:ids ~absorbed:[] ~revisions:[]
     ~keepers_dir ~keeper_id:"keeper" ~now:200. ~source:(source Current.Librarian)
     ~new_claims:claims ()
 ;;
@@ -2557,7 +2557,7 @@ let test_sparse_candidate_receipts_survive_retirement () =
   let all = read_candidates ~keepers_dir b.queue_generation in
   check bool "no-change A receipt preserves B and C" true
     (List.length all=3 && List.for_all (fun id -> List.mem id all) [a;b;c]);
-  (match Current.retract_fact ~keepers_dir ~keeper_id:"keeper" ~now:300.
+  (match Current.retract_fact ~pass:Masc.Keeper_memory_commit_pass.Keeper_delete ~keepers_dir ~keeper_id:"keeper" ~now:300.
       ~source:(source Current.Explicit_retract) ~memory_id:(Types.memory_id target)
       ~reason:"policy retired after consumption" () with
    | Ok _ -> () | Error _ -> fail "target retirement failed");
@@ -2786,7 +2786,7 @@ let commit_recall ?decided_at_revision ~keepers_dir binding claims =
   let decided_at_revision = match decided_at_revision with
     | Some revision -> revision
     | None -> current_revision ~keepers_dir in
-  Current.apply_disposition ~explicit_candidate_ids:[binding.Current.candidate_id]
+  Current.apply_disposition ~pass:Masc.Keeper_memory_commit_pass.Admission ~explicit_candidate_ids:[binding.Current.candidate_id]
     ~admission_recall:{decided_at_revision; bindings=[binding]} ~absorbed:[] ~revisions:[]
     ~keepers_dir ~keeper_id:"keeper" ~now:200. ~source:(source Current.Librarian)
     ~new_claims:claims ()
@@ -2815,13 +2815,13 @@ let test_admission_recall_commits_recovers_and_expires_on_retirement () =
   let _, recovered = read_recall ~keepers_dir |> require_ok in
   check bool "both source bindings recover against the exact kept snapshot" true
     (List.length recovered=2 && List.mem binding recovered && List.mem second recovered);
-  (match Current.retract_fact ~keepers_dir ~keeper_id:"keeper" ~now:300.
+  (match Current.retract_fact ~pass:Masc.Keeper_memory_commit_pass.Keeper_delete ~keepers_dir ~keeper_id:"keeper" ~now:300.
     ~source:(source Current.Explicit_retract) ~memory_id:(Types.memory_id target)
     ~reason:"policy retired" () with
    | Ok _ -> () | Error _ -> fail "target retirement failed");
   check int "retired target has no search binding" 0
     (List.length (snd (read_recall ~keepers_dir |> require_ok)));
-  ignore (Current.upsert_fact ~keepers_dir ~keeper_id:"keeper" ~now:400.
+  ignore (Current.upsert_fact ~pass:Masc.Keeper_memory_commit_pass.Keeper_write ~keepers_dir ~keeper_id:"keeper" ~now:400.
     ~source:(source Current.Explicit_write) target |> require_upsert_ok);
   check int "readding identical bytes never revives old source bindings" 0
     (List.length (snd (read_recall ~keepers_dir |> require_ok)));
@@ -2837,11 +2837,11 @@ let test_admission_recall_refuses_a_target_retired_after_the_decision () =
   let decided = current_revision ~keepers_dir in
   (* While the model runs, the keeper retracts the target and adds the same
      claim back: the same memory_id, a new incarnation. *)
-  (match Current.retract_fact ~keepers_dir ~keeper_id:"keeper" ~now:300.
+  (match Current.retract_fact ~pass:Masc.Keeper_memory_commit_pass.Keeper_delete ~keepers_dir ~keeper_id:"keeper" ~now:300.
     ~source:(source Current.Explicit_retract) ~memory_id:(Types.memory_id target)
     ~reason:"policy retired" () with
    | Ok _ -> () | Error _ -> fail "target retirement failed");
-  ignore (Current.upsert_fact ~keepers_dir ~keeper_id:"keeper" ~now:400.
+  ignore (Current.upsert_fact ~pass:Masc.Keeper_memory_commit_pass.Keeper_write ~keepers_dir ~keeper_id:"keeper" ~now:400.
     ~source:(source Current.Explicit_write) target |> require_upsert_ok);
   let snapshot_path = Current.path_for_keepers_dir ~keepers_dir ~keeper_id:"keeper" in
   let before = Fs_compat.load_file snapshot_path in
@@ -2876,7 +2876,7 @@ let test_admission_recall_refuses_a_decision_across_missing_journal_revisions ()
      | `Lost_line -> Fs_compat.save_file journal decision_journal
      | `Lost_prefix -> Fs_compat.save_file journal ""
      | `Lost_file -> ());
-    ignore (Current.upsert_fact ~keepers_dir ~keeper_id:"keeper" ~now:400.
+    ignore (Current.upsert_fact ~pass:Masc.Keeper_memory_commit_pass.Keeper_write ~keepers_dir ~keeper_id:"keeper" ~now:400.
       ~source:(source Current.Explicit_write) target |> require_upsert_ok);
     (match damage with
      | `Lost_line | `Lost_prefix -> ()
@@ -2907,7 +2907,7 @@ let test_admission_recall_refuses_unbound_or_mistargeted_payloads () =
   let snapshot_path = Current.path_for_keepers_dir ~keepers_dir ~keeper_id:"keeper" in
   let before = Fs_compat.load_file snapshot_path in
   List.iter (fun (ids, binding) ->
-    (match Current.apply_disposition ~explicit_candidate_ids:ids
+    (match Current.apply_disposition ~pass:Masc.Keeper_memory_commit_pass.Admission ~explicit_candidate_ids:ids
        ~admission_recall:{decided_at_revision=current_revision ~keepers_dir; bindings=[binding]}
        ~absorbed:[] ~revisions:[] ~keepers_dir ~keeper_id:"keeper" ~now:250.
        ~source:(source Current.Librarian) ~new_claims:[] () with
@@ -2926,7 +2926,7 @@ let test_admission_recall_requires_complete_later_history_only_for_bindings () =
   let binding = recall_binding 1 (fact ~claim:"R002 evidence" ()) target in
   ignore (commit_recall ~keepers_dir binding [target] |> require_ok);
   let other = fact ~claim:"unrelated current fact" () in
-  ignore (Current.upsert_fact ~keepers_dir ~keeper_id:"keeper" ~now:300.
+  ignore (Current.upsert_fact ~pass:Masc.Keeper_memory_commit_pass.Keeper_write ~keepers_dir ~keeper_id:"keeper" ~now:300.
     ~source:(source Current.Explicit_write) other |> require_upsert_ok);
   check bool "unrelated later revision preserves live binding" true
     (snd (read_recall ~keepers_dir |> require_ok)=[binding]);
@@ -2978,7 +2978,7 @@ let test_admission_recall_no_change_cannot_hide_missing_retirement_transition ()
   Fs_compat.invalidate_cached_writer journal;
   Fs_compat.save_file journal birth_journal;
   ignore (apply_disposition ~keepers_dir () |> require_ok);
-  ignore (Current.upsert_fact ~keepers_dir ~keeper_id:"keeper" ~now:400.
+  ignore (Current.upsert_fact ~pass:Masc.Keeper_memory_commit_pass.Keeper_write ~keepers_dir ~keeper_id:"keeper" ~now:400.
     ~source:(source Current.Explicit_write) target |> require_upsert_ok);
   let rows = Fs_compat.load_jsonl journal in
   check bool "same-revision observation is explicitly unchanged" true
@@ -3009,7 +3009,7 @@ let test_declared_revision_links_survive_journal_failure () =
     Sys.remove journal;
     Unix.mkdir journal 0o700;
     let committed = if explicit then (
-      match Current.supersede_fact ~keepers_dir ~keeper_id:"keeper" ~now:300.
+      match Current.supersede_fact ~pass:Masc.Keeper_memory_commit_pass.Keeper_write ~keepers_dir ~keeper_id:"keeper" ~now:300.
         ~source:(source Current.Explicit_write) ~superseded_memory_id:link.superseded successor with
       | Ok (snapshot, _) -> snapshot | Error _ -> fail "explicit supersession failed")
       else apply_disposition ~keepers_dir ~revisions:links
@@ -3047,7 +3047,7 @@ let test_revision_evidence_never_invents_links () =
   let original = fact ~claim:"withdrawn exact identity" () in
   let seeded = replace ~keepers_dir ~facts:[original] () |> require_ok in
   ignore (replace ~keepers_dir ~expected_revision:(Some seeded.revision) ~facts:[] () |> require_ok);
-  ignore (Current.upsert_fact ~keepers_dir ~keeper_id:"keeper" ~now:400.
+  ignore (Current.upsert_fact ~pass:Masc.Keeper_memory_commit_pass.Keeper_write ~keepers_dir ~keeper_id:"keeper" ~now:400.
     ~source:(source Current.Explicit_write) original |> require_upsert_ok);
   let _, records = revision_evidence ~keepers_dir seeded.revision |> require_ok in
   check bool "retire and re-add do not create an inferred successor" true
@@ -3137,7 +3137,7 @@ let prepare_recall_program ~keepers_dir ~transaction_id ~initial recipes =
 
 let publish_recall_program ~keepers_dir ~transaction_id ~initial recipes =
   let anchor,source,program=prepare_recall_program ~keepers_dir ~transaction_id ~initial recipes in
-  Current.apply_program ~keepers_dir ~keeper_id:"keeper" ~now:400. ~anchor ~source
+  Current.apply_program ~pass:Masc.Keeper_memory_commit_pass.Program_publish ~keepers_dir ~keeper_id:"keeper" ~now:400. ~anchor ~source
     ~validate_source:(fun () -> Ok ()) program |> require_ok
 
 let recall_program_step ?(program_revision=2) ~transaction_id stage_index relation from_fact into_fact : Current.successor_program_step =
@@ -3310,7 +3310,7 @@ let test_successor_recall_program_pending_journal_recovers () =
      recall_program_recipe [b] ~claims:[c] ~dropped:[recall_program_drop b] ~revisions:[recall_program_revision b c]] in
   let journal=Current.journal_path_for_keepers_dir ~keepers_dir ~keeper_id:"keeper" in
   let birth=Fs_compat.load_file journal and callbacks=ref 0 in
-  let committed=Current.For_testing.apply_program_with_publication_io ~keepers_dir ~keeper_id:"keeper" ~now:400.
+  let committed=Current.For_testing.apply_program_with_publication_io ~pass:Masc.Keeper_memory_commit_pass.Program_publish ~keepers_dir ~keeper_id:"keeper" ~now:400.
     ~anchor ~source ~validate_source:(fun () -> Ok ())
     ~write_snapshot:Fs_compat.save_file_atomic_strict_staged ~sync_snapshot:(fun _ -> Error "fixture sync remains unconfirmed")
     ~before_journal:(fun () -> Fs_compat.invalidate_cached_writer journal;Sys.remove journal;Unix.mkdir journal 0o700)
@@ -3419,7 +3419,7 @@ let test_successor_recall_tracks_multistep_split_incarnations () =
   done;
   let current = Option.get view.snapshot in
   ignore (replace ~keepers_dir ~expected_revision:(Some current.revision) ~facts:[c] () |> require_ok);
-  ignore (Current.upsert_fact ~keepers_dir ~keeper_id:"keeper" ~now:500.
+  ignore (Current.upsert_fact ~pass:Masc.Keeper_memory_commit_pass.Keeper_write ~keepers_dir ~keeper_id:"keeper" ~now:500.
     ~source:(source Current.Explicit_write) d |> require_upsert_ok);
   let after = successor_recall ~keepers_dir in
   check (list string) "re-added terminal cannot revive dead branch" [Types.memory_id c]
@@ -3471,7 +3471,7 @@ let test_successor_recall_rejects_phantom_target_added_later () =
   let binding = recall_binding 1 (fact ~claim:"source A" ()) a in
   ignore (commit_recall ~keepers_dir binding [a] |> require_ok);
   ignore (revise_into ~keepers_dir a [c]);
-  ignore (Current.upsert_fact ~keepers_dir ~keeper_id:"keeper" ~now:400.
+  ignore (Current.upsert_fact ~pass:Masc.Keeper_memory_commit_pass.Keeper_write ~keepers_dir ~keeper_id:"keeper" ~now:400.
     ~source:(source Current.Explicit_write) b |> require_upsert_ok);
   let journal = Current.journal_path_for_keepers_dir ~keepers_dir ~keeper_id:"keeper" in
   let rows = Fs_compat.load_jsonl journal |> List.map (fun json ->
@@ -3595,7 +3595,7 @@ let test_admission_recall_cache_invalidates_external_prefix_edit_and_growth () =
     let target = fact ~claim:"retained recall target" () in
     let binding = recall_binding 1 (fact ~claim:"source observation" ()) target in
     ignore (commit_recall ~keepers_dir binding [target] |> require_ok);
-    ignore (Current.upsert_fact ~keepers_dir ~keeper_id:"keeper" ~now:300.
+    ignore (Current.upsert_fact ~pass:Masc.Keeper_memory_commit_pass.Keeper_write ~keepers_dir ~keeper_id:"keeper" ~now:300.
       ~source:(source Current.Explicit_write) (fact ~claim:"another current fact" ())
       |> require_upsert_ok);
     check bool "cold verification retains live binding" true
@@ -3659,7 +3659,7 @@ let test_receipt_cache_skips_decoding_an_unchanged_sidecar () =
       (recall_bindings ~keepers_dir = [binding])
   done;
   check int "searches over an unchanged sidecar decode nothing" decoded (receipt_decodes ());
-  ignore (Current.upsert_fact ~keepers_dir ~keeper_id:"keeper" ~now:300.
+  ignore (Current.upsert_fact ~pass:Masc.Keeper_memory_commit_pass.Keeper_write ~keepers_dir ~keeper_id:"keeper" ~now:300.
     ~source:(source Current.Explicit_write) (fact ~claim:"unrelated later fact" ())
     |> require_upsert_ok);
   check bool "a later snapshot revision keeps the binding" true
@@ -3732,7 +3732,7 @@ let test_stale_replace_rejects_concurrent_explicit_write () =
   let explicit = fact ~claim:"explicit" () in
   ignore (replace ~keepers_dir ~facts:[ initial ] () |> require_ok);
   ignore
-    (Current.upsert_fact
+    (Current.upsert_fact ~pass:Masc.Keeper_memory_commit_pass.Keeper_write
        ~keepers_dir
        ~keeper_id:"keeper"
        ~now:250.0
@@ -3785,7 +3785,7 @@ let test_reobservation_refreshes_instead_of_duplicating () =
     }
   in
   let snapshot =
-    Current.upsert_fact
+    Current.upsert_fact ~pass:Masc.Keeper_memory_commit_pass.Keeper_write
       ~keepers_dir
       ~keeper_id:"keeper"
       ~now:600.0
@@ -4037,7 +4037,7 @@ let test_undecodable_snapshot_is_quarantined_and_the_write_proceeds () =
     true
     (Result.is_error (Current.read_for_keepers_dir ~keepers_dir ~keeper_id:"keeper"));
   let recovered =
-    Current.upsert_fact
+    Current.upsert_fact ~pass:Masc.Keeper_memory_commit_pass.Keeper_write
       ~keepers_dir
       ~keeper_id:"keeper"
       ~now:600.0
@@ -4129,7 +4129,7 @@ let test_torn_json_is_quarantined_too () =
     (Current.path_for_keepers_dir ~keepers_dir ~keeper_id:"keeper")
     "{\"revision\": 1, \"facts\": [";
   let recovered =
-    Current.upsert_fact
+    Current.upsert_fact ~pass:Masc.Keeper_memory_commit_pass.Keeper_write
       ~keepers_dir
       ~keeper_id:"keeper"
       ~now:700.0
@@ -4151,7 +4151,7 @@ let test_two_quarantines_at_the_same_time_keep_both_files () =
      quarantines are handed the same [now], which is the collision. *)
   let write ~now ~claim =
     ignore
-      (Current.upsert_fact
+      (Current.upsert_fact ~pass:Masc.Keeper_memory_commit_pass.Keeper_write
          ~keepers_dir
          ~keeper_id:"keeper"
          ~now
@@ -4308,7 +4308,7 @@ let test_a_keeper_write_during_a_librarian_pass_keeps_both () =
     (* The keeper records something of its own meanwhile. *)
     let authored = fact ~claim:"the keeper wrote this meanwhile" () in
     let after_keeper =
-      Current.upsert_fact
+      Current.upsert_fact ~pass:Masc.Keeper_memory_commit_pass.Keeper_write
         ~keepers_dir
         ~keeper_id:"keeper"
         ~now:250.0
@@ -4376,9 +4376,9 @@ let test_commit_notifications_follow_all_writers_outside_locks () =
     (match replace ~keepers_dir ~expected_revision:(Some 0) () with
      | Error _ -> () | Ok _ -> fail "revision conflict should fail");
     ignore (apply_disposition ~keepers_dir ~new_claims:[ second ] () |> require_ok);
-    ignore (Current.upsert_fact ~keepers_dir ~keeper_id:"keeper" ~now:300.
+    ignore (Current.upsert_fact ~pass:Masc.Keeper_memory_commit_pass.Keeper_write ~keepers_dir ~keeper_id:"keeper" ~now:300.
       ~source:(source Current.Explicit_write) first |> require_upsert_ok);
-    (match Current.retract_fact ~keepers_dir ~keeper_id:"keeper" ~now:400.
+    (match Current.retract_fact ~pass:Masc.Keeper_memory_commit_pass.Keeper_delete ~keepers_dir ~keeper_id:"keeper" ~now:400.
       ~source:(source Current.Explicit_retract) ~memory_id:(Types.memory_id first)
       ~reason:"explicitly withdrawn" () with
      | Ok _ -> () | Error _ -> fail "retraction should commit");
@@ -4416,7 +4416,7 @@ let test_commit_notifications_resume_after_journal_finalization () =
     let blocked = Current.path_for_keepers_dir ~keepers_dir ~keeper_id:"blocked" in
     Unix.mkdir blocked 0o700;
     (try
-       match Current.upsert_fact ~keepers_dir ~keeper_id:"blocked" ~now:200.
+       match Current.upsert_fact ~pass:Masc.Keeper_memory_commit_pass.Keeper_write ~keepers_dir ~keeper_id:"blocked" ~now:200.
          ~source:(source Current.Explicit_write) (fact ()) with
        | Error _ -> () | Ok _ -> fail "unreadable store unexpectedly committed"
      with Sys_error _ | Unix.Unix_error _ -> ());
@@ -4434,7 +4434,7 @@ let test_commit_notification_directory_is_physical () =
       directories := event.keepers_dir :: !directories)
   in
   Fun.protect ~finally:(fun () -> stop (); Sys.remove alias) (fun () ->
-    ignore (Current.upsert_fact ~keepers_dir:alias ~keeper_id:"alias-keeper" ~now:200.
+    ignore (Current.upsert_fact ~pass:Masc.Keeper_memory_commit_pass.Keeper_write ~keepers_dir:alias ~keeper_id:"alias-keeper" ~now:200.
       ~source:(source Current.Explicit_write) (fact ()) |> require_upsert_ok);
     check (list string) "directory alias resolves before notification"
       [ Unix.realpath keepers_dir ] !directories)
@@ -4655,7 +4655,7 @@ let test_an_absorbed_fact_no_longer_current_writes_no_row () =
 ;;
 
 let supported_disposition ~keepers_dir ?(dropped=[]) ?(absorbed=[]) ?(revisions=[]) ?(new_claims=[]) () =
-  Current.apply_disposition ~keepers_dir ~keeper_id:"keeper" ~now:200.
+  Current.apply_disposition ~pass:Masc.Keeper_memory_commit_pass.Durable ~keepers_dir ~keeper_id:"keeper" ~now:200.
     ~source:(source Current.Librarian) ~dropped_statements:dropped
     ~absorbed ~revisions ~new_claims () |> require_ok
 

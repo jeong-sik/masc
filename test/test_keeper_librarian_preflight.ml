@@ -177,6 +177,7 @@ let run_case ~base_path ~registry ?(enabled = true) ?(excluded = false)
       else if context_only then {|{"working_contexts":[]}|} else generated) in
   let committed = ref false in
   let run_pass () = Keeper_librarian_runtime.run_best_effort
+    ~pass:(if maintenance then Keeper_memory_commit_pass.Cleanup else Keeper_memory_commit_pass.Durable)
     ~write_scope:(if maintenance then Keeper_librarian_runtime.Memory_maintenance
       else if context_only then Context_only else Context_and_memory)
     ?durable_range_id:(if context_only || maintenance then None else Some range)

@@ -68,13 +68,13 @@ let author ~scenario ~config ~meta ~keepers_dir ~keeper_id ~trace_id =
     {Current.candidate_id;source_fact=candidate.Queue.fact;target_memory_id=Memory.memory_id target})
     (List.combine candidates ids) initial in
   let source={Current.kind=Current.Librarian;trace_id} in
-  ignore(Current.apply_disposition ~keepers_dir ~keeper_id ~now ~source
+  ignore(Current.apply_disposition ~pass:Masc.Keeper_memory_commit_pass.Admission ~keepers_dir ~keeper_id ~now ~source
     ~explicit_candidate_ids:ids
     ~admission_recall:{Current.decided_at_revision=None; bindings}
     ~absorbed:[] ~revisions:[] ~new_claims:initial () |> require : Current.disposition);
   Queue.acknowledge_committed ~keepers_dir ~keeper_id |> require;
   let revise old target reason =
-    ignore(Current.apply_disposition ~keepers_dir ~keeper_id ~now:(Time_compat.now ()) ~source
+    ignore(Current.apply_disposition ~pass:Masc.Keeper_memory_commit_pass.Durable ~keepers_dir ~keeper_id ~now:(Time_compat.now ()) ~source
       ~dropped_statements:[{Memory.memory_id=Memory.memory_id old;reason}]
       ~absorbed:[] ~revisions:[{Memory.superseded=Memory.memory_id old;superseded_by=Memory.memory_id target}]
       ~new_claims:[target] () |> require : Current.disposition) in

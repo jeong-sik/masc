@@ -160,11 +160,12 @@ Prometheus 지표는 기존 recall 지표처럼 `Otel_metric_store` 에 `keeper`
 - 서버가 뜬 뒤의 셈을 Keeper 마다 `pass` × `change` 로 싣는다. 위 counter 와 같은 값이다.
 - 크기 추이를 싣는다. journal 의 커밋마다 `retained + added` 가 그 커밋 뒤의 fact 수다.
   - 건강 행이 이미 쓰는 `Keeper_memory_journal_outcome` 의 접기에서 같이 모은다.
-  - `unchanged` 행은 남긴 snapshot 의 `change` 를 되풀이한다. 그 행의 fact 수는 맞지만, `added` 를 새 claim 으로 더하지 않는다.
+  - `unchanged` 행의 `change` 는 같은 fact 끼리 견준 것이다. `added`·`removed` 는 비어 있고, `retained` 가 그 커밋 뒤의 fact 수다.
   - 한 시간마다 그 시간 마지막 커밋 뒤의 fact 수를 기록 시각과 같이 싣는다. 최근 168시간(7일)만 싣는다. 롤아웃 앞뒤 24시간을 넉넉히 덮는 길이다.
   - journal 에는 F1 이전 커밋도 있다. 그래서 롤아웃 전 기준선을 따로 모으지 않는다.
 - 지금 칸(fact 수, 바이트, 마지막 커밋의 `added`·`removed`)은 그대로 둔다.
-- schema 를 올리면 서버와 TUI 디코더(`lib/tui_decode_memory_health.ml`), 대시보드(`dashboard/src/api/dashboard-misc.ts`), 그 시험들이 같이 바뀐다. 이 층은 9개 파일이다.
+- schema 를 올리면 서버와 TUI 디코더(`lib/tui_decode_memory_health.ml`), 대시보드(`dashboard/src/api/dashboard-misc.ts`), 그 시험들이 같이 바뀐다.
+  - counter 이름과 `change` 라벨은 `Keeper_memory_commit_change` 한 곳에 둔다. store 가 올린 셈을 건강 행이 같은 이름으로 읽는다.
 
 지키는 것:
 

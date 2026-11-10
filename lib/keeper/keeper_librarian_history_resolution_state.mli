@@ -29,6 +29,9 @@ val create : request:Keeper_librarian_durable_request.t ->
   actor:string -> reason:string -> now:float -> (t, string) result
 val read : store:Lane_addon_store.t -> scope:string -> request_id:string ->
   (t option, string) result
+val confirm_binding : request:Keeper_librarian_durable_request.t ->
+  original:Lane_addon_tool_request_owner.retained -> t -> (unit, string) result
+(** Immutable identity/source binding only; never grants the old effect. *)
 val check_unfenced : store:Lane_addon_store.t ->
   request:Keeper_librarian_durable_request.t ->
   original:Lane_addon_tool_request_owner.retained -> (unit, string) result

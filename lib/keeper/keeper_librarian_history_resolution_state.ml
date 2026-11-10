@@ -109,16 +109,19 @@ let read ~store ~scope ~request_id =
     let+ () = require (fence.scope = scope && fence.request_id = request_id)
       "History fence is stored under another original" in
     Some fence
+let confirm_binding ~request ~(original:Owner.retained) fence =
+  let* source_sha256 = digest (Source.to_json (Request.source request)) in
+  require (fence.scope=original.scope && fence.request_id=original.request_id
+    && fence.request_digest = original.request_digest
+    && fence.source_sha256 = source_sha256
+    && fence.physical_owner = Request.owner_to_json (Request.physical_owner request))
+    "History fence immutable binding differs; publication remains blocked"
 let check_unfenced ~store ~request ~(original:Owner.retained) =
   let* fence = read ~store ~scope:original.scope ~request_id:original.request_id in
   match fence with
   | None -> Ok ()
   | Some fence ->
-    let* source_sha256 = digest (Source.to_json (Request.source request)) in
-    let* () = require (fence.request_digest = original.request_digest
-      && fence.source_sha256 = source_sha256
-      && fence.physical_owner = Request.owner_to_json (Request.physical_owner request))
-      "History fence immutable binding differs; publication remains blocked" in
+    let* () = confirm_binding ~request ~original fence in
     Error "This original history result is durably fenced by an operator"
 let publish ~store fence =
   Store.publish_history_fence store ~scope:fence.scope ~request_id:fence.request_id

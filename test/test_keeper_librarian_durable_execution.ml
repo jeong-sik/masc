@@ -323,6 +323,7 @@ let with_fixture ?(history_kind=Atoms) f =
         Memory_lane.For_testing.await_idle ~base_path ~keeper_name;
         let captures=originals base_path keepers_dir store in
         let matches=List.filter (fun ((record:Owner.retained),capture) ->
+          let unfenced=io (fun () -> Fence.read ~store ~scope:record.scope ~request_id:record.request_id |> get)=None in
           let original=Capture.request capture |> get in
           let schema=match original.Lane_addon_exact.schema with
             | Some schema -> schema | None -> fail "the captured admission schema is absent" in
@@ -336,7 +337,7 @@ let with_fixture ?(history_kind=Atoms) f =
             @ [message "user" (Agent_core.Exact_output.schema_instruction_text requirement)] in
           (* A new original may retry identical unread bytes after a terminal
              refusal; the provider is serving the live original, not that old ID. *)
-          (match Progress.phase record.progress with Rejected _ -> false
+          unfenced && (match Progress.phase record.progress with Rejected _ -> false
            | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _
            | Finished _ | Conflicted _ | Subdividing _ | Subdivided _ -> true)
           && Yojson.Safe.equal (`List sent) messages) captures in
@@ -2000,6 +2001,28 @@ let test_history_fence_retains_unknown_and_blocks_late_observations () = with_fi
     (Store.history_fence_path ~scope:original.scope ~request_id:original.request_id) in
   io (fun () -> write path "{unreadable fence");
   refuse_fenced_resume fixture changed request)
+let test_history_fence_allows_the_next_history_pass () = with_fixture (fun ~sw:_ fixture ->
+  let original,request=retain_absent_history_original fixture in
+  let preview=fence_preview fixture request in
+  ignore (memory_action fixture (fun () -> io (fun () ->
+    Resolution.fence_serialized ~config:fixture.config ~keeper_name ~request_id:original.request_id
+      ~expected:preview.expected ~actor:"operator" ~reason:"rejudge the unread history"
+      ~now:(Time_compat.now ()) |> Result.map_error Resolution.error_to_string |> get)));
+  refuse_fenced_resume fixture original request;
+  no_memory fixture;
+  drive_advanced fixture;
+  check int "only the newly captured original reaches the provider" 1 (F.post_count fixture.server);
+  check bool "the next history pass actually commits Memory" true
+    (io (fun () -> claims fixture.keepers_dir)<>[]);
+  let retained=io (fun () -> Owner.load ~store:fixture.store ~scope:original.scope
+    ~request_id:original.request_id |> owned) in
+  check bool "the fenced unknown record stays live without a claimed completion" true
+    (Option.map Owner.to_json retained=Some (Owner.to_json original));
+  refuse_fenced_resume fixture original request;
+  let path=Filename.concat (Store.root fixture.store)
+    (Store.history_fence_path ~scope:original.scope ~request_id:original.request_id) in
+  io (fun () -> write path "{unreadable fence");
+  check bool "an unreadable fence still stops inventory" true (Result.is_error (run_worker fixture)))
 let test_history_fence_refuses_a_real_range_commit () = with_fixture (fun ~sw:_ fixture ->
   let original, request = retain_absent_history_original fixture in
   let source = Capture.source request in
@@ -3423,6 +3446,8 @@ let () = Alcotest.run "keeper_librarian_durable_execution" ["actual configured c
   test_case "destructive Memory epoch reset refuses retained old owner" `Quick test_epoch_reset_refuses_old_original;
   test_case "an explicit history fence blocks late observations and unreadable fence state" `Quick
     test_history_fence_retains_unknown_and_blocks_late_observations;
+  test_case "a fenced unknown original does not block the next history pass" `Quick
+    test_history_fence_allows_the_next_history_pass;
   test_case "an actual original range commit refuses a later fence" `Quick
     test_history_fence_refuses_a_real_range_commit;
   test_case "uncertain visible fence publication still blocks the original" `Quick

@@ -213,7 +213,7 @@ let has_post_votes ~post_id (snapshot : Fs_compat.private_jsonl_snapshot) =
       | exception Yojson.Json_error _ -> Error (Io_error "Board data is unavailable.") in
   rows false (String.split_on_char '\n' snapshot.bytes)
 
-let cleanup_admission store ~authorization ~post ~children = match authorization with
+let cleanup_admission store ~authorization ~(post : post) ~children = match authorization with
   | Operator_deletion | Author_deletion _ -> Ok None
   | Cleanup_deletion { reader = _; conditions } ->
     let* votes, has_votes =

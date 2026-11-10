@@ -475,7 +475,7 @@ val list_reactions_batch : reader:Board_access.reader ->
   targets:(Board.reaction_target_type * string) list ->
   ?user_id:string ->
   unit ->
-  ((Board.reaction_target_type * string) * Board.reaction_summary list) list
+  (((Board.reaction_target_type * string) * Board.reaction_summary list) list, Board.board_error) Result.t
 
 (** {1 Karma} *)
 

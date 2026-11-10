@@ -38,9 +38,10 @@ let load_sources store =
       Alcotest.failf "board fixture load failed: %s (%s)" path (Printexc.to_string cause))
     [Masc_board_handlers.Board_votes_json.load_persisted_posts;
      Masc_board_handlers.Board_votes_json.load_persisted_comments];
-  match reload_votes store with
-  | Ok _ -> ()
-  | Error error -> Alcotest.fail (show_board_error error)
+  List.iter (fun reload -> match reload store with
+    | Ok _ -> ()
+    | Error error -> Alcotest.fail (show_board_error error))
+    [reload_votes; reload_reactions]
 ;;
 
 let test_default_ttl () =

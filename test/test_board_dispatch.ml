@@ -1644,13 +1644,15 @@ let test_reaction_summary_batch () =
           (Board.Reaction_comment, comment_id, "reactor-b", "👏");
         ];
       let rows =
-        Board_dispatch.list_reactions_batch ~reader:Masc_board_handlers.Board_access.Operator
+        match Board_dispatch.list_reactions_batch ~reader:Masc_board_handlers.Board_access.Operator
           ~targets:
             [
               (Board.Reaction_post, post_id);
               (Board.Reaction_comment, comment_id);
             ]
-          ~user_id:"reactor-b" ()
+          ~user_id:"reactor-b" () with
+        | Ok rows -> rows
+        | Error error -> Alcotest.fail (Board.show_board_error error)
       in
       let summaries_for target =
         List.assoc_opt target rows |> Option.value ~default:[]
@@ -3372,8 +3374,10 @@ let test_direct_reads_and_aggregates () =
     (cached == store.Board.karma_cache);
   Alcotest.(check int) "target sees both votes" 2
     (Board_dispatch.get_agent_karma ~reader:target ~agent_name:owner);
-  let reactions = Board_dispatch.list_reactions_batch ~reader:stranger
-    ~targets:[Board.Reaction_post, private_id; Board.Reaction_post, public_id] () in
+  let reactions = match Board_dispatch.list_reactions_batch ~reader:stranger
+    ~targets:[Board.Reaction_post, private_id; Board.Reaction_post, public_id] () with
+    | Ok rows -> rows
+    | Error error -> Alcotest.fail (Board.show_board_error error) in
   Alcotest.(check bool) "reaction batch contains no private target" false
     (List.exists (fun ((_, id), _) -> String.equal id private_id) reactions);
   (match Board_dispatch.update_post ~post_id:private_id ~editor:owner

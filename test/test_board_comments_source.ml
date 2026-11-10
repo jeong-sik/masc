@@ -13,7 +13,8 @@ let load_sources store =
     | Ok _ -> ()
     | Error (path, error) -> Alcotest.failf "load %s: %s" path (Printexc.to_string error))
     [Rows.load_persisted_posts; Rows.load_persisted_comments];
-  ignore (require (Board.reload_votes store))
+  ignore (require (Board.reload_votes store));
+  ignore (require (Board.reload_reactions store))
 
 let new_store base_path =
   let store = Board.create_store ~base_path () in

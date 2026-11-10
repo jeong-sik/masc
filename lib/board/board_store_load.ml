@@ -126,43 +126,39 @@ let load_persisted_votes store =
       finish outcome)
 
 let load_persisted_reactions store =
+  let module Source = Board_reactions_source in
   let path = Board_paths.store_file_path store Board_paths.Reactions in
-  let open Result.Syntax in
-  let* () = Board_core_persist.require_model_reload_allowed store ~path in
-  let workspace_check = Board_paths.check_workspace store in
-  let result = match workspace_check with
-    | Error rejection -> Error (path, Failure (Board_workspace_binding.rejection_to_string rejection))
-    | Ok () ->
-    if not (Fs_compat.file_exists path) then Ok 0
-    else begin
-      try
-      let t0 = Time_compat.now () in
-      let loaded = ref 0 in
-      let parsed =
-        Board_votes_json.load_source_rows
-          path
-          ~decode:reaction_of_yojson
-          ~accept:(fun reaction ->
-            let user_id = Agent_id.to_string reaction.user_id in
-            let key =
-              reaction_key
-                ~target_type:reaction.target_type
-                ~target_id:reaction.target_id
-                ~user_id
-                ~emoji:reaction.emoji
-            in
-            Hashtbl.replace store.reactions key reaction;
-            Stdlib.incr loaded)
-      in
-      let elapsed = Time_compat.now () -. t0 in
-      Board_votes_json.log_loaded ~noun:"reactions" ~loaded:!loaded ~path ~elapsed parsed;
-      Result.map (fun () -> !loaded) parsed
-      with
-      | Eio.Cancel.Cancelled _ as e -> raise e
-      | e -> Error (path, e)
-    end
-  in
-  let result = Board_votes_json.record_load_result
-    (fun result -> store.reactions_load_result <- result) result in
-  Board_votes_json.propagate_workspace_check workspace_check;
-  result
+  Board_core_persist.with_persist_lock store (fun () ->
+    let open Result.Syntax in
+    let* () = Board_core_persist.require_model_reload_allowed store ~path in
+    let t0 = Time_compat.now () in
+    let outcome = Source.read store in
+    let add_rows rows = List.iter (fun (reaction : reaction) ->
+      let key = reaction_key ~target_type:reaction.target_type
+        ~target_id:reaction.target_id ~user_id:(Agent_id.to_string reaction.user_id)
+        ~emoji:reaction.emoji in
+      Hashtbl.replace store.reactions key reaction) rows in
+    let outcome =
+      try Board_core_persist.with_lock store (fun () ->
+        (match outcome with
+         | Source.Complete { rows; _ } -> Hashtbl.clear store.reactions; add_rows rows
+         | Source.Partial { rows; _ } -> add_rows rows
+         | Source.Unavailable _ -> ());
+        Source.publish_read store outcome;
+        outcome)
+      with exception_ -> Source.fail_read store outcome exception_ (Printexc.get_raw_backtrace ()) in
+    let finish outcome = Source.finish_read outcome
+      |> Result.map_error (fun error -> path, Failure (show_board_error error)) in
+    try
+      let result = finish outcome in
+      let loaded = match outcome with
+        | Source.Complete { rows; _ } | Source.Partial { rows; _ } -> List.length rows
+        | Source.Unavailable _ -> 0 in
+      Board_votes_json.log_loaded ~noun:"reactions" ~loaded ~path
+        ~elapsed:(Time_compat.now () -. t0) (Result.map (fun _ -> ()) result);
+      result
+    with
+    | Board_posts_source.Reserved_settlement _ as carrier -> raise carrier
+    | exception_ ->
+      let outcome = Source.fail_read store outcome exception_ (Printexc.get_raw_backtrace ()) in
+      finish outcome)

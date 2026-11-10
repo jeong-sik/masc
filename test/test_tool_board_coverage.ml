@@ -290,7 +290,7 @@ let test_board_dashboard_json_embeds_reaction_summaries () =
     Server_utils.board_reactions_for_post ~reader:Masc_board_handlers.Board_access.Operator ~voter:(Some "reactor") ~post_id
   in
   let post_json =
-    Server_utils.board_post_dashboard_json ~reactions:post_reactions
+    Server_utils.board_post_dashboard_json ?reactions:post_reactions
       ~author_karma:0 post
   in
   let post_summary =
@@ -310,7 +310,7 @@ let test_board_dashboard_json_embeds_reaction_summaries () =
     Server_utils.board_reactions_for_comment ~reader:Masc_board_handlers.Board_access.Operator ~voter:(Some "reactor") ~comment_id
   in
   let comment_json =
-    Server_utils.board_comment_dashboard_json ~reactions:comment_reactions comment
+    Server_utils.board_comment_dashboard_json ?reactions:comment_reactions comment
   in
   let comment_summary =
     match json_member_list comment_json "reactions" with

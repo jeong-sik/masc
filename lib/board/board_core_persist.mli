@@ -59,6 +59,11 @@ val create_store_with_votes_io_for_testing :
 (** Immutable IO seam using the real vote-file transaction. The constructor
     leaves the vote source unobserved until an explicit load. *)
 
+val create_store_with_reactions_io_for_testing :
+  base_path:string -> io:Fs_compat.private_jsonl_transaction_io_for_testing ->
+  unit -> store
+(** One immutable reaction-file transaction IO seam; creates/adopts nothing. *)
+
 val require_persisted_snapshot_readable :
   (unit, string) result -> (unit, board_error) result
 (** Reject a mutation whose full-snapshot source did not load completely.
@@ -199,6 +204,10 @@ val rewrite_comments_under_persistence : store -> unit
     persistence through an append's typed publication rejection. *)
 val reactions_jsonl_unlocked : store -> string
 val save_reactions_jsonl_result : store -> string -> (unit, board_error) result
+(** Caller owns persistence; these bytes capture an already-installed deletion
+    or flush model. Known file success acknowledges its exact source receipt.
+    Unknown effects remain owned and cannot be retried as a new ordinary write.
+    Normal toggles publish their staged model before acknowledging instead. *)
 val append_post : store -> post -> posts_write_outcome
 
 val sub_board_access_to_string : sub_board_access -> string

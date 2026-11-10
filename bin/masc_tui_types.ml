@@ -2540,18 +2540,6 @@ let chat_live_insertion_index ?(member_ids = []) ~request_id ~timeline_at positi
     positioned_messages
 ;;
 
-(* A settled block holds the turn's progress, tools and words; the request's
-   output rows that stay committed -- a failure the strict decode wrote, a
-   local line -- came after all of that, so the block goes after the request's
-   last row of any earlier phase and before its output rows. Bounding on every
-   row put a failed turn's words under its own error and under whatever turns
-   ran in between. *)
-let chat_settled_insertion_index ?(member_ids = []) ~request_id ~timeline_at positioned_messages =
-  chat_block_insertion_index ~member_ids
-    ~bounds:(fun row -> row.me_turn_phase <> Turn_output)
-    ~request_id ~timeline_at positioned_messages
-;;
-
 let msg_anchor entry =
   { ma_identity = entry.me_identity
   ; ma_session_user_slot =
@@ -11789,35 +11777,6 @@ let drain_http_progress (state : state) =
   List.iter (accept_http_progress state)
     (List.rev (Atomic.exchange state.http_refresh_progress_events []));
   before != state.http_refresh_progress
-
-(* One passive line for the operator quiz: the three window scores and the
-   count of open wrong answers. [None] while nothing has been read, which
-   is not an error. *)
-let quiz_scorecard_reading (state : state) =
-  match state.quiz_scorecard, state.quiz_scorecard_error with
-  | Some { quiz_scorecards = []; _ }, None ->
-      (* No scorecard rows at all means no live quiz installation was in the
-         inventory: no line, which is not the same as zero misses. *)
-      None
-  | Some quiz, None ->
-      let fraction subject =
-        List.find_opt (fun (row : Masc.Lane_addon_types.row) ->
-            String.ends_with row.lane_id ~suffix:"/quiz/scorecard" && row.subject_id = subject)
-          quiz.quiz_scorecards
-        |> Option.map (fun (row : Masc.Lane_addon_types.row) ->
-               match List.assoc_opt "score" row.fields with
-               | Some (`Assoc [ "n", `Int n; "d", `Int d ]) -> Printf.sprintf "%d/%d" n d
-               | _ -> "-")
-      in
-      let window label subject = match fraction subject with
-        | Some shown -> " · " ^ label ^ " " ^ shown
-        | None -> ""
-      in
-      Some (Printf.sprintf " Quiz:%s%s%s · unrecovered misses %d · g opens the notes"
-              (window "1일" "day") (window "7일" "7d") (window "30일" "30d")
-              (List.length quiz.quiz_reviews))
-  | Some _, Some _ | None, Some _ -> Some " Quiz: reading unavailable · g opens the lane"
-  | None, None -> None
 
 let finish_http_refresh_state ?finished_ns (state : state) =
   ignore (drain_http_progress state);

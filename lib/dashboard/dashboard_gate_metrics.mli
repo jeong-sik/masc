@@ -8,8 +8,7 @@
 
     The ring buffer, rejection event record, and supporting helpers
     (snapshot, percentile, JSON projection) are intentionally hidden:
-    callers consume the top-level [gate_tool_events_json] payload
-    and the {!approval_summary} record only. *)
+    callers consume the top-level [gate_tool_events_json] payload only. *)
 
 (** Approval queue snapshot computed from the live pending set.
     [depth] is the count of pending approvals; the percentile fields
@@ -20,14 +19,6 @@ type approval_summary = {
   p95_wait_sec : float option;
   oldest_pending_sec : float option;
 }
-
-val approval_queue_summary :
-  now_ts:float ->
-  base_path:string ->
-  unit ->
-  (approval_summary, Keeper_approval_queue_result.storage_error) result
-(** Read the current approval queue and produce depth + wait-time
-    percentiles. Durable store unavailability remains explicit. *)
 
 val gate_tool_events_json :
   base_path:string ->

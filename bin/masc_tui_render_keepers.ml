@@ -3535,7 +3535,22 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
         | Keeper_control.Present runtime -> (
             match runtime.kr_runtime_blocker_summary with
             | Some summary ->
-                wrap ~tone:(Theme.bad ()) summary;
+                (* The cause rides whole now, and the JSON error bodies among
+                   them read as punctuation when the terminal wraps them.
+                   The goal timeline unfolds the same wire value the same
+                   way; here the sentence keeps the bad colour and the value
+                   dims one step further in, the volume the goal detail
+                   gives its JSON blocks. *)
+                (match Masc_tui_planning_detail.split_embedded_json summary with
+                 | None -> wrap ~tone:(Theme.bad ()) summary
+                 | Some (sentence, value, after) ->
+                     wrap ~tone:(Theme.bad ()) sentence;
+                     Masc_tui_text_block.preformatted_rows
+                       ~max_cells:(max 1 (inner - 4)) value
+                     |> List.iter (fun row ->
+                            add_line ("    " ^ Ansi.dim ^ row ^ Ansi.reset));
+                     if not (String.equal (String.trim after) "") then
+                       wrap ~tone:Ansi.dim after);
                 (match runtime.kr_runtime_blocker_signature with
                 | Some signature -> wrap ~tone:Ansi.dim signature
                 | None -> ())

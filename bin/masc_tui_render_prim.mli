@@ -326,9 +326,13 @@ val connection_badge : Masc_tui_types.state -> string
 val surface_title_row :
   cols:int -> Masc_tui_types.state -> lead:string -> readings:string list -> string
 (** The title row of a surface drawn in [cols] columns: [lead], the [readings]
-    (each carrying its own leading gap) and {!connection_badge} last. The badge
-    is drawn whole. A reading that does not fit is left out whole, from the
-    end, and the lead is cut last. *)
+    (each carrying its own leading gap) and the connection badge last. A
+    reading is drawn whole or left out whole, from the end, so a clock is never
+    cut to "1…". The badge keeps its HTTP state and its workspace notice whole.
+    When the row is short, what gives way first to last is the refresh detail of
+    the badge, the readings, the lead, which is cut at its end, and the
+    events-lost notice once it does not fit the row by itself. A badge core
+    wider than the row by itself is cut by the frame at the row's end. *)
 
 type compact_connection_state =
   | Compact_workspace_mismatch

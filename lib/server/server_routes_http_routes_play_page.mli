@@ -27,6 +27,8 @@
     DOS writes keep their exact authority/operation receipts. A pending seat
     disables moves. Repeated seat/roster invalidations preserve a healthy read
     and retain one fresh follow-up; the older seat cannot re-enable moves.
+    Keeper lifecycle hints carry their public roster identity; unrelated fleet
+    activity does not retire an otherwise current holder observation.
     Machine identity changes and transport replacement cancel obsolete reads. Unknown
     writes remain unsettled; observation cannot acknowledge or replay them.
     Pad failures are retried by observation/reconnection, with the original

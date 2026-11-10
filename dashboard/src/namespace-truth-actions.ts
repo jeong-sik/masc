@@ -1,14 +1,12 @@
 import { fetchDashboardNamespaceTruth } from './api/dashboard-hot'
-import { asString, isRecord } from './components/common/normalize'
 import { hydrateShellRootSnapshot } from './store'
 import {
   namespaceTruth,
   namespaceTruthLoading,
   namespaceTruthError,
-  namespaceTruthInitializing,
   namespaceTruthReadRecovery,
 } from './namespace-truth-signals'
-import { normalizeNamespaceTruth } from './namespace-truth-normalizers'
+import { hydrateNamespaceTruthObservation } from './namespace-truth-observation'
 import { FetchScheduler } from './lib/fetch-scheduler'
 import { ApiRequestError, captureDashboardCredentialOwner, dashboardCredentialOwnerIsCurrent } from './api/core'
 
@@ -26,19 +24,8 @@ async function doFetchNamespaceTruth(): Promise<void> {
   try {
     const raw = await fetchDashboardNamespaceTruth()
     if (!current()) return
-    const isInitializing =
-      isRecord(raw)
-      && asString((raw as Record<string, unknown>).status) === 'initializing'
-    if (isInitializing) {
-      namespaceTruthInitializing.value = true
-      namespaceTruthReadRecovery.waiting(() => { void namespaceTruthScheduler.requestNow() })
-      return
-    }
-    namespaceTruthInitializing.value = false
-    const normalized = normalizeNamespaceTruth(raw)
-    namespaceTruth.value = normalized
-    hydrateShellRootSnapshot(normalized.root, true)
-    namespaceTruthReadRecovery.succeeded()
+    const normalized = hydrateNamespaceTruthObservation(raw, 'http')
+    if (normalized !== null) hydrateShellRootSnapshot(normalized.root, true)
   } catch (err) {
     if (!current()) return
     const detail = err instanceof Error ? err.message : 'Failed to load project snapshot'

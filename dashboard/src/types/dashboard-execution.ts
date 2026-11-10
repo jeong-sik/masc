@@ -455,6 +455,9 @@ export interface DashboardExecutionContinuityBrief {
 
 export interface DashboardExecutionResponse {
   observer_instance_id?: string
+  /** Untrusted wire metadata; an initializing envelope has no read outcome. */
+  projection_diagnostics?: unknown
+  query?: unknown
   candle?: unknown
   execution_publication_epoch?: string
   execution_publication_generation?: number

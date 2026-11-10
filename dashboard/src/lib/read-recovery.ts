@@ -18,6 +18,9 @@ export function createReadRecovery() {
     succeeded() { revision += 1; clear(); phase = 'settled'; delayStep = 0; retry = null },
     failed(read: () => void, retryable = true) {
       if (!active) return
+      // A terminal failure also fences older read completions, while its
+      // retry step keeps advancing until a complete/canonical observation.
+      revision += 1
       clear()
       retry = read
       phase = retryable ? 'failed' : 'refused'

@@ -268,7 +268,10 @@ val start_full_health_snapshot_refresh_loop :
     diagnostics.  The loop keeps heavy durable scans out of the HTTP request
     path and stores stale/error metadata when refreshes fail or time out.  Its
     projection context comes from the bootstrap trust policy, never a second
-    read of listener environment. *)
+    read of listener environment. After the initial read, only an explicit
+    invalidation/demand or an owed failed refresh wakes a scan. Successful
+    idle has no periodic scan. Cache installation and failure observations
+    notify mounted Health readers through the existing typed observer bus. *)
 
 module For_testing : sig
   val make_cached_full_health_json_after_selection :

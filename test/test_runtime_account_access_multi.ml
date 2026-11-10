@@ -244,6 +244,14 @@ let rec make_dirs path =
     Unix.mkdir path 0o700)
 ;;
 
+(* Sets [name] to [value] while [f] runs. OCaml has no unsetenv, so a variable
+   that was not set goes back to the empty value. *)
+let with_env name value f =
+  let previous = Option.value (Sys.getenv_opt name) ~default:"" in
+  Unix.putenv name value;
+  Fun.protect ~finally:(fun () -> Unix.putenv name previous) f
+;;
+
 let test_multi_account () =
   Eio_main.run (fun env ->
     let root = Filename.temp_dir "runtime-account-access-multi-" "" in
@@ -496,18 +504,18 @@ let test_multi_account () =
              the setup route is refused before it sends, though the key is
              set. *)
           let key_variable = "MASC_TEST_D4B_OPERATOR_KEY" in
-          Unix.putenv key_variable "operator-key";
           let config_dir = Filename.concat (Common.masc_dir_from_base_path ~base_path) "config" in
           make_dirs config_dir;
           Out_channel.with_open_bin (Filename.concat config_dir "runtime.toml") (fun channel ->
             Out_channel.output_string channel (setup_runtime_toml ~port ~key_variable));
           (match
-             Server_runtime_setup_actions.discover
-               ~binary:Sys.executable_name
-               ~sw
-               ~net:env#net
-               ~base_path
-               (`Assoc [ "integration_id", `String "operator" ])
+             with_env key_variable "operator-key" (fun () ->
+               Server_runtime_setup_actions.discover
+                 ~binary:Sys.executable_name
+                 ~sw
+                 ~net:env#net
+                 ~base_path
+                 (`Assoc [ "integration_id", `String "operator" ]))
            with
            | Error
                (Server_runtime_setup_actions.Account_refused
@@ -520,18 +528,18 @@ let test_multi_account () =
           (* The Files API of masc_file_* is called with DEEPSEEK_API_KEY. The
              tool is refused before it reads the key, so the refusal comes
              though no key is set here. *)
-          Unix.putenv "DEEPSEEK_API_KEY" "";
           let files =
-            Eio_context.with_test_env
-              ~net:env#net
-              ~clock:env#clock
-              ~mono_clock:env#mono_clock
-              ~sw
-              (fun () ->
-                Masc.Keeper_tool_in_process_runtime.handle_masc_file_with_outcome
-                  ~name:"masc_file_list"
-                  ~args:(`Assoc [])
-                  ())
+            with_env "DEEPSEEK_API_KEY" "" (fun () ->
+              Eio_context.with_test_env
+                ~net:env#net
+                ~clock:env#clock
+                ~mono_clock:env#mono_clock
+                ~sw
+                (fun () ->
+                  Masc.Keeper_tool_in_process_runtime.handle_masc_file_with_outcome
+                    ~name:"masc_file_list"
+                    ~args:(`Assoc [])
+                    ()))
           in
           (match Yojson.Safe.from_string files.Masc.Keeper_tool_execution.raw_output with
            | `Assoc fields ->
@@ -545,11 +553,12 @@ let test_multi_account () =
           (* A full replacement catalog carries its own providers and their
              credentials, so its registry build is refused before the file is
              read. *)
-          Unix.putenv
-            Runtime.agent_core_model_catalog_env_var_name
-            (Filename.concat root "replacement-catalog.json");
-          let replacement = Runtime.exact_output_resolver_catalog ~exact_output_lane_decls:[] [] in
-          Unix.putenv Runtime.agent_core_model_catalog_env_var_name "";
+          let replacement =
+            with_env
+              Runtime.agent_core_model_catalog_env_var_name
+              (Filename.concat root "replacement-catalog.json")
+              (fun () -> Runtime.exact_output_resolver_catalog ~exact_output_lane_decls:[] [])
+          in
           (match replacement with
            | Error (Access.Host_account Access.Replacement_catalog) -> ()
            | Error refusal ->

@@ -1459,7 +1459,8 @@ let led_rows ~width ~lead ~text_style text =
    a long value hangs under itself. Text is a sentence and keeps its own
    indent. A label column wider than half the width leaves the values a
    sliver, so every label then takes its own row and its value hangs two
-   cells under it. *)
+   cells under it, fewer where a two-cell character would not fit beside the
+   hang. *)
 type fact_row =
   | Fact_heading of string
   | Fact_fields of { indent : int; fields : (string * string) list }
@@ -1474,7 +1475,7 @@ let fact_spans ~width rows =
   let beside = List.for_all (function
     | Fact_fields { indent; _ } -> 2 * (indent + label_cells indent) <= width
     | Fact_heading _ | Fact_text _ -> true) rows in
-  let spaces cells = Span.text Span.plain (String.make (max 0 (min cells (width - 1))) ' ') in
+  let spaces cells = Span.text Span.plain (String.make (max 0 (min cells (width - 2))) ' ') in
   let spans = function
     | Fact_heading text -> led_rows ~width ~lead:Span.empty ~text_style:(label_style ()) text
     | Fact_text text -> led_rows ~width ~lead:Span.empty ~text_style:Span.plain text

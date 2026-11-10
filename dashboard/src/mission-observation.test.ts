@@ -7,6 +7,7 @@ const json = (body: unknown, status = 200) => new Response(JSON.stringify(body),
 const authority = (instance = 'mission-A') => Object.freeze({ epoch: 'process', workspaceRoot: `/${instance}`,
   connectionGeneration: 1, observerInstanceId: instance })
 const body = (project = 'current', instance = 'mission-A') => ({ observer_instance_id: instance,
+  projection_diagnostics: { read_completeness: 'complete', read_error: null },
   summary: { workspace_health: project === 'initializing' ? 'initializing' : 'ok', project },
   agent_briefs: [{ agent_name: project }], keeper_briefs: [], attention_queue: [], internal_signals: [],
 })
@@ -40,6 +41,73 @@ async function surface(admit = true) {
 }
 
 describe('canonical Mission observation and its actual HTTP reader', () => {
+  it.each([
+    {}, { read_completeness: 'unknown', read_error: null },
+    { read_completeness: 'complete', read_error: 'contradictory error' },
+  ])('retains read failure instead of accepting invalid private completeness %o', async diagnostics => {
+    const fetch = vi.fn().mockResolvedValue(json({ ...body(), projection_diagnostics: diagnostics }))
+    vi.stubGlobal('fetch', fetch)
+    const s = await surface()
+    stop = s.setupMissionObservation()
+    await flush()
+    expect(s.missionSnapshot.value).toBeNull()
+    expect(s.missionError.value).toBeTruthy()
+    expect(fetch).toHaveBeenCalledTimes(1)
+  })
+
+  it('retains private partial rows and retries the actual failed read after quiet repair', async () => {
+    const partial = { ...body('readable partial'), projection_diagnostics: {
+      read_completeness: 'partial', read_error: 'actual Keeper metadata read failed' } }
+    const fetch = vi.fn().mockResolvedValueOnce(json(partial)).mockResolvedValue(json(body('repaired')))
+    vi.stubGlobal('fetch', fetch)
+    const s = await surface()
+    stop = s.setupMissionObservation()
+    await flush()
+    expect(s.missionSnapshot.value?.summary.project).toBe('readable partial')
+    expect(s.missionError.value).toBe('actual Keeper metadata read failed')
+    expect(s.missionInitializing.value).toBe(false)
+    expect(fetch).toHaveBeenCalledTimes(1)
+    await vi.advanceTimersByTimeAsync(3_000)
+    expect(fetch).toHaveBeenCalledTimes(2)
+    expect(s.missionSnapshot.value?.summary.project).toBe('repaired')
+    expect(s.missionError.value).toBeNull()
+    await vi.advanceTimersByTimeAsync(600_000)
+    expect(fetch).toHaveBeenCalledTimes(2)
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it('lets canonical partial and complete bodies own recovery without a status GET', async () => {
+    const fetch = vi.fn()
+    vi.stubGlobal('fetch', fetch)
+    const s = await surface()
+    s.hydrateMissionSnapshot({ ...publication('partial canonical', 4, 9, 'error'),
+      projection_diagnostics: { read_completeness: 'partial', read_error: 'original source error' } })
+    stop = s.setupMissionObservation()
+    expect(s.missionSnapshot.value?.summary.project).toBe('partial canonical')
+    expect(s.missionError.value).toBe('original source error')
+    await vi.advanceTimersByTimeAsync(600_000)
+    expect(fetch).not.toHaveBeenCalled()
+    s.hydrateMissionSnapshot(publication('complete canonical', 4, 10))
+    expect(s.missionError.value).toBeNull()
+    expect(s.missionSnapshot.value?.summary.project).toBe('complete canonical')
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it('cancels a private partial retry when its canonical producer completes', async () => {
+    const fetch = vi.fn().mockResolvedValue(json({ ...body('partial'), projection_diagnostics: {
+      read_completeness: 'partial', read_error: 'original private read failure' } }))
+    vi.stubGlobal('fetch', fetch)
+    const s = await surface()
+    stop = s.setupMissionObservation()
+    await flush()
+    expect(s.missionError.value).toBe('original private read failure')
+    s.hydrateMissionSnapshot(publication('canonical repair'))
+    await vi.advanceTimersByTimeAsync(600_000)
+    expect(fetch).toHaveBeenCalledTimes(1)
+    expect(s.missionError.value).toBeNull()
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
   it('waits without GET or rows until the original execution workspace is admitted', async () => {
     const fetch = vi.fn().mockResolvedValue(json(body()))
     vi.stubGlobal('fetch', fetch)

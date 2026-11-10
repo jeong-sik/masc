@@ -391,6 +391,9 @@ is-default = true
           then Eio.Promise.resolve resolve_settled (Ok ()))} in
     Registry.install_from_store ~sw:owner_sw ~operation_runner:(Some runner)
       ~on_turn_slot_released:None config |> require "install owner" |> ignore;
+    Keeper_direct_native_continuation.complete_restart_settlements
+      ~runtime:(Runtime_agent_execution_runtime.get () |> Option.get) ~base_path
+      |> require "complete startup native journal settlement" |> ignore;
     if not resume then Registry.submit_operation ~base_path ~keeper_name ~operation_id ~source ~input
       |> require "submit original operation" |> ignore;
     (match Eio.Promise.await settled with Ok () -> () | Error detail -> fail detail);
@@ -688,6 +691,9 @@ is-default = true
           Eio.Promise.resolve resolve_settled (Ok ()))} in
     Registry.install_from_store ~sw:owner_sw ~operation_runner:(Some runner)
       ~on_turn_slot_released:None config |> require "install owner" |> ignore;
+    Keeper_direct_native_continuation.complete_restart_settlements
+      ~runtime:(Runtime_agent_execution_runtime.get () |> Option.get) ~base_path
+      |> require "complete startup native journal settlement" |> ignore;
     if not resume then Registry.submit_operation ~base_path ~keeper_name ~operation_id ~source ~input
       |> require "submit original operation" |> ignore;
     (match Eio.Promise.await settled with Ok () -> () | Error detail -> fail detail);

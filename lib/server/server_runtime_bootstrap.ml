@@ -634,6 +634,7 @@ let startup_failure_disposition ~state_ready =
 type owner_initialization_error =
   | Runtime_config_read_failed of string
   | Native_execution_runtime_failed of Runtime_agent_execution_runtime.initialization_error
+  | Native_execution_runtime_unavailable
   | Domain_budget_exceeded of Domain_budget.error
   | Keeper_config_recovery_failed of Keeper_config_journal.report
   | Admin_credential_bootstrap_failed of Masc_domain.masc_error
@@ -674,6 +675,8 @@ let owner_initialization_error_to_string = function
   | Native_execution_runtime_failed error ->
     "native execution runtime initialization failed: "
     ^ Runtime_agent_execution_runtime.initialization_error_to_string error
+  | Native_execution_runtime_unavailable ->
+    "initialized native execution runtime is unavailable"
   | Domain_budget_exceeded error ->
     "executor domain budget refused: " ^ Domain_budget.error_to_string error
   | Keeper_config_recovery_failed report ->
@@ -1176,6 +1179,16 @@ let initialize_owner_state_blocking
    | Ok () -> ()
    | Error error ->
      raise (Owner_initialization_failed (Native_execution_runtime_failed error)));
+  (* Owners are registered and shutdown fences restored, but no Keeper loop
+     has been claimed or started. Canonical journal projection now has its
+     application-owned runtime; its Eio reads run outside registry locks and
+     operation Store transactions. *)
+  let runtime = match Runtime_agent_execution_runtime.get () with
+    | Some runtime -> runtime
+    | None -> raise (Owner_initialization_failed Native_execution_runtime_unavailable) in
+  (match Keeper_direct_native_continuation.complete_restart_settlements ~runtime ~base_path with
+   | Ok count -> Log.Keeper.info "keeper_owner: completed startup journal settlement for %d owner(s)" count
+   | Error error -> raise (Keeper_owner_registry.Install_failed error));
   let log = if Domain_budget.within_limit budget then Log.Server.info else Log.Server.warn in
   log
     "Executor domains: %d shared pool + %d read pool + %d execution codec + %d fixed = %d (limit %d = recommended %d - 1)"

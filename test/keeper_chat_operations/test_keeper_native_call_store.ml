@@ -52,6 +52,107 @@ let disposition recovery = {Agent.outcome=Agent.Terminal_failed; recovery}
 let terminal store operation recovery =
   commit store operation (Native.Terminal {call_id; disposition=disposition recovery})
 
+let test_startup_defers_active_until_journal_observed () = with_store @@ fun _path store operation ->
+  let call = make_call operation in
+  bind store operation call;
+  let original = Store.get store operation_id |> ok in
+  let initial = Store.running_native_calls store |> ok in
+  let defer () = Store.settle_running_without_executor_with_journal_terminal
+    ~observations:[] ~cause:Store.After_process_restart store ~now:4. |> ok in
+  check int "first stage does not interrupt the active request" 0 (List.length (defer ()));
+  check int "repeating the first stage still preserves it" 0 (List.length (defer ()));
+  check bool "all original request fields survive before runtime readiness" true
+    (original = (Store.get store operation_id |> ok));
+  check bool "the exact active call survives" true (Native.equal_state (Native.Active call) (read store));
+  check bool "deferred work cannot be claimed" true (Option.is_none (Store.claim_next store ~now:5. |> ok));
+  check int "deferred work is absent from failed projections" 0 (List.length (Store.list_failed store |> ok));
+  let after = Store.running_native_calls store |> ok in
+  check bool "deferral does not change semantic revision" true
+    (List.map (fun (snapshot : Store.restart_native_call) -> snapshot.execution_revision) initial
+     = List.map (fun (snapshot : Store.restart_native_call) -> snapshot.execution_revision) after);
+  ignore (Store.settle_running_without_executor_with_journal_terminal
+    ~observations:(List.map (fun snapshot -> snapshot, Ok None) initial)
+    ~cause:Store.After_process_restart store ~now:6. |> ok);
+  check bool "actual nonterminal observation releases the original resume" true
+    (Option.is_some (Store.claim_next store ~now:7. |> ok))
+
+let test_restart_observation_rejects_changed_call () = with_store @@ fun _path store operation ->
+  bind store operation (make_call operation);
+  let observed = Store.running_native_calls store |> ok in
+  commit store operation (Native.Checkpoint {call_id; observed=checkpoint 1; checkpoint=checkpoint 2});
+  let current = read store in
+  let original = Store.get store operation_id |> ok in
+  Store.settle_running_without_executor_with_journal_terminal
+    ~observations:(List.map (fun snapshot -> snapshot, Ok (Some (disposition Agent.Retire))) observed)
+    ~cause:Store.After_process_restart store ~now:4.
+  |> rejected "a stale native checkpoint/revision was accepted";
+  check bool "rejection preserves the current call" true (Native.equal_state current (read store));
+  check bool "rejection preserves the still-running input" true (original = (Store.get store operation_id |> ok))
+
+let test_restart_observation_cannot_cross_store_handles () = with_store @@ fun path store operation ->
+  bind store operation (make_call operation);
+  let observed = Store.running_native_calls store |> ok in
+  with_reopened path store @@ fun reopened ->
+  let original = Store.get reopened operation_id |> ok in
+  Store.settle_running_without_executor_with_journal_terminal
+    ~observations:(List.map (fun snapshot -> snapshot, Ok (Some (disposition Agent.Retire))) observed)
+    ~cause:Store.After_process_restart reopened ~now:4.
+  |> rejected "a journal observation from a different Store handle was accepted";
+  check bool "another handle cannot terminalize the matching original row" true
+    (original = (Store.get reopened operation_id |> ok))
+
+let test_restart_observation_rejects_duplicate_identity () = with_store @@ fun _path store operation ->
+  bind store operation (make_call operation);
+  let observed = Store.running_native_calls store |> ok in
+  let observations = List.map (fun snapshot -> snapshot, Ok (Some (disposition Agent.Retire))) observed in
+  let original = Store.get store operation_id |> ok in
+  Store.settle_running_without_executor_with_journal_terminal
+    ~observations:(observations @ observations) ~cause:Store.After_process_restart store ~now:4.
+  |> rejected "duplicate restart observations were accepted";
+  check bool "duplicate identity cannot change the original request" true
+    (original = (Store.get store operation_id |> ok))
+
+let test_journal_terminal_gates_active_restart () = with_store @@ fun path store operation ->
+  bind store operation (make_call operation);
+  with_reopened path store @@ fun reopened ->
+  let gated = Store.settle_running_without_executor_with_journal_terminal
+    ~observations:(List.map (fun observed -> observed, Ok (Some (disposition Agent.Retire)))
+      (Store.running_native_calls reopened |> ok))
+    ~cause:Store.After_process_restart reopened ~now:4. |> ok in
+  check int "a journal terminal is interrupted at boot" 1 (List.length gated);
+  check bool "the journal disposition is recorded on the receipt" true
+    (match read reopened with
+     | Native.Terminal_unacknowledged (_, {Agent.outcome=Agent.Terminal_failed; recovery=Agent.Retire; _}) -> true
+     | Native.No_native_call | Native.Active _ | Native.Terminal_unacknowledged _ -> false);
+  check bool "a gated call is never dispatched" true (Option.is_none (Store.claim_next reopened ~now:5. |> ok));
+  (match Store.get reopened operation_id |> ok with
+   | Some {Operation.state=Operation.Failed {failure={kind=Operation.Interrupted_by_restart; _}; _}; _} -> ()
+   | _ -> fail "a gated journal terminal settled differently")
+
+let test_journal_gate_keeps_a_resumable_active_restart () = with_store @@ fun path store operation ->
+  bind store operation (make_call operation);
+  with_reopened path store @@ fun reopened ->
+  let settled = Store.settle_running_without_executor_with_journal_terminal
+    ~observations:(List.map (fun observed -> observed, Ok None) (Store.running_native_calls reopened |> ok))
+    ~cause:Store.After_process_restart reopened ~now:4. |> ok in
+  check int "a call without a journal terminal resumes" 0 (List.length settled);
+  (match Store.claim_next reopened ~now:5. |> ok with
+   | Some resumed -> check bool "the same operation resumed" true
+       (Operation.Operation_id.equal resumed.operation_id operation.operation_id)
+   | None -> fail "the resumable call was interrupted")
+
+let test_journal_gate_read_failure_keeps_resume () = with_store @@ fun path store operation ->
+  bind store operation (make_call operation);
+  with_reopened path store @@ fun reopened ->
+  let settled = Store.settle_running_without_executor_with_journal_terminal
+    ~observations:(List.map (fun observed -> observed, Error "journal unreadable") (Store.running_native_calls reopened |> ok))
+    ~cause:Store.After_process_restart reopened ~now:4. |> ok in
+  check int "an unreadable journal keeps the resumable call" 0 (List.length settled);
+  (match Store.claim_next reopened ~now:5. |> ok with
+   | Some resumed -> check bool "the same operation resumed" true
+       (Operation.Operation_id.equal resumed.operation_id operation.operation_id)
+   | None -> fail "a read failure interrupted the call")
+
 let test_active_restart_preserves_seed_and_exact_identity () = with_store @@ fun path store operation ->
   let call = make_call operation in
   bind store operation call;
@@ -895,6 +996,13 @@ let () = run "native-call-owner-store" ["input ownership", [
   test_case "history shares native Bind commit and rejects retired reactivation" `Quick test_history_uses_the_native_bind_transaction;
   test_case "active restart preserves exact admission" `Quick test_active_restart_preserves_seed_and_exact_identity;
   test_case "terminal restart keeps its receipt without dispatch" `Quick test_terminal_restart_never_dispatches;
+  test_case "a journal terminal is interrupted at boot instead of requeued" `Quick test_journal_terminal_gates_active_restart;
+  test_case "startup preserves Active Running until the journal is observed" `Quick test_startup_defers_active_until_journal_observed;
+  test_case "restart observation refuses a changed call and revision" `Quick test_restart_observation_rejects_changed_call;
+  test_case "restart observation cannot cross Store handles" `Quick test_restart_observation_cannot_cross_store_handles;
+  test_case "restart observation refuses duplicate operation identity" `Quick test_restart_observation_rejects_duplicate_identity;
+  test_case "a call without a journal terminal keeps resuming" `Quick test_journal_gate_keeps_a_resumable_active_restart;
+  test_case "an unreadable journal keeps the resumable call" `Quick test_journal_gate_read_failure_keeps_resume;
   test_case "unknown effect survives settlement and rejects retry" `Quick test_unknown_effect_survives_failure_and_rejects_retry;
   test_case "settling an active call is a precondition, not corruption" `Quick test_settling_an_active_call_is_a_precondition_not_corruption;
   test_case "unknown-effect receipt lets the operation fail but not complete" `Quick test_unknown_effect_receipt_lets_the_operation_fail_but_not_complete;

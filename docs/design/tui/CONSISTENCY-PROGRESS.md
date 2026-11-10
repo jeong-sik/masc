@@ -255,3 +255,19 @@ c2fa4c88, `minimal=true`. The actual retained runner log records
 `test_tui_approval_authority` (15 cases) and `test_tui_ask_projection` (65 cases).
 Those 80 cases check approval/Ask identity and decisions; they are not the whole
 TUI regression and do not execute the later Verification/Harness changes.
+
+## Feature route configuration is not runtime availability
+
+An exact model route with admitted candidates now has the shared `Configured`
+standing. Configuration alone no longer produces `Ready` in the feature list,
+its counts or the selected reading. The selected fields name model
+configuration, and the full reading no longer calls an unobserved run history
+normal readiness. Browser, machine and Add-on worker observations retain their
+own readiness meanings; failures, disabled routes and missing observations
+keep their existing states. These standings do not authorize execution.
+
+The matching b9d9b809 native pair showed Librarian as ready in the 80x24 and
+36x20 feature readings while the same isolated workspace reported an unattached
+Memory execution Add-on. Those observations demonstrate the configuration and
+execution distinction; they do not execute this repair. Candidate native and
+installed GUI verification are pending, and the full 23-surface goal is open.

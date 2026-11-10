@@ -724,6 +724,8 @@ function hydrateDashboardBootstrap(
   shellRootRevision: number,
   namespaceRevision: number,
 ): void {
+  if (executionRequestGeneration !== executionSnapshotRequestGeneration()
+    || !dashboardCredentialOwnerIsCurrent(authOwner)) return
   if (!data.shell || bootstrapSliceError(data.shell)) {
     throw new Error('dashboard bootstrap shell slice unavailable')
   }
@@ -797,15 +799,20 @@ export async function refreshDashboard(opts?: RefreshOptions): Promise<void> {
   inflightDashboardRefresh = (async () => {
     const executionRequestGeneration = executionSnapshotRequestGeneration()
     const goalOwnerAtStart = goalObservationOwner
+    const authOwner = captureDashboardCredentialOwner()
+    const workspaceOwner = executionWorkspaceAuthority.peek()
+    const current = () => executionRequestGeneration === executionSnapshotRequestGeneration()
+      && dashboardCredentialOwnerIsCurrent(authOwner) && executionWorkspaceAuthority.peek() === workspaceOwner
     try {
       executionLoading.value = true
       executionError.value = null
       try {
-        const authOwner = captureDashboardCredentialOwner()
         const shellRootRevision = shellRootCompletionRevision
         const namespaceRevision = namespaceTruthReadRecovery.revision
+        const data = await fetchDashboardBootstrap()
+        if (!current()) return
         hydrateDashboardBootstrap(
-          await fetchDashboardBootstrap(),
+          data,
           executionRequestGeneration,
           goalOwnerAtStart,
           authOwner,
@@ -813,6 +820,7 @@ export async function refreshDashboard(opts?: RefreshOptions): Promise<void> {
           namespaceRevision,
         )
       } catch (bootstrapErr) {
+        if (!current()) return
         console.warn('[Dashboard] bootstrap refresh failed, falling back:', bootstrapErr)
         await refreshDashboardFallback(opts)
       } finally {
@@ -961,6 +969,8 @@ export function hydrateShellSnapshot(
   opts: { light?: boolean; preserveAuth?: boolean; sentToken: string | null; authOwner?: DashboardCredentialOwner; recoverAuth?: boolean; rootRevision?: number },
 ): boolean {
   const wantsLight = opts.light === true
+  const staleOwner = opts.authOwner !== undefined && !dashboardCredentialOwnerIsCurrent(opts.authOwner)
+  if (staleOwner) return false
   const rootSuperseded = opts.rootRevision !== undefined && opts.rootRevision !== shellRootCompletionRevision
   const status: unknown = data.status
   const initializing = status === 'initializing' || (isRecord(status) && status.project === 'initializing')
@@ -973,8 +983,7 @@ export function hydrateShellSnapshot(
     queueMicrotask(() => { if (shellReadRecovery.revision === revision) shellReadRecovery.recover() })
     return false
   }
-  const staleOwner = opts.authOwner !== undefined && !dashboardCredentialOwnerIsCurrent(opts.authOwner)
-  const preserveAuth = opts.preserveAuth === true || staleOwner
+  const preserveAuth = opts.preserveAuth === true
   let applyAuth = !preserveAuth
   const normalizedAuth = normalizeShellAuthSummary(data.auth)
   if (applyAuth) {

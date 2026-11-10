@@ -37,6 +37,11 @@ val invite : base_path:string -> int
     with the reason on standard error. *)
 val off : base_path:string -> int
 
+(** What a server does with an activated workspace, as a clause that follows
+    "From now on" or "Once the command succeeds,": the success of {!bootstrap}
+    and its help say the same sentence. *)
+val account_server_line : string
+
 (** The environment variable that holds the client secret of the GitHub OAuth
     App of {!preview}: [MASC_GITHUB_CLIENT_SECRET]. *)
 val github_client_secret_env : string

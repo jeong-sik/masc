@@ -1178,11 +1178,9 @@ let auth_cmd =
            it out of the request URL. Only a digest of the token is written. \
            The invitation works once and expires after 24 hours."
       ; `P
-          ("Once the command succeeds, a server boots the workspace as a \
-            multi-account installation: the account server, which answers \
-            GET /health and none of the routes of a single-user server. It \
-            does not serve the login routes yet; masc auth preview serves \
-            them on 127.0.0.1 while no server runs. "
+          ("Once the command succeeds, "
+           ^ Masc_cli_auth.account_server_line
+           ^ ". "
            ^ String.capitalize_ascii Authz_boot_mode_read.turn_off_line
            ^ ".")
       ]

@@ -97,21 +97,22 @@ let reset ~stream_sw reqd cause =
    leaving for the connection, not on the whole body, and WINDOW_UPDATEs of
    a byte or two do not stretch it (RFC-0518 §3.3). A client that opens its
    window again only after reading a large batch has to read the batch
-   within the bound. *)
+   within the bound.
+
+   All of it runs on the connection's domain, where h2's own body writer has
+   to be called: the table and the condition take no lock. *)
 module Stream_end = struct
   type t =
     { stream_sw : Eio.Switch.t
     ; reqd : H2.Reqd.t
-    ; meth : H2.Method.t
-    ; path : string
+    ; request : H2.Request.t
     ; clock : float Eio.Time.clock_ty Eio.Resource.t
     ; stalled_after_s : float
     ; mutable ended : bool
     ; waiting : (int, unit -> unit) Hashtbl.t
-    ; order : (int * float) Queue.t
-    ; registered : Eio.Condition.t
-    ; mutable last_answer : float
     ; mutable next_id : int
+    ; mutable quiet_since : float
+    ; registered : Eio.Condition.t
     ; signal : unit Eio.Promise.t
     ; resolve_signal : unit Eio.Promise.u
     }
@@ -120,86 +121,101 @@ module Stream_end = struct
   let with_current t f = Eio.Fiber.with_binding key t f
   let current () = Eio.Fiber.get key
   let switch t = t.stream_sw
+  let request t = t.request
   let ended t = t.ended
   let signal t = t.signal
 
-  let stall t =
-    Log.Http.warn
-      "[h2] %s %s took no response bytes for %.0fs; resetting the stream"
-      (H2.Method.to_string t.meth)
-      t.path
-      t.stalled_after_s;
-    reset ~stream_sw:t.stream_sw t.reqd Stalled
-  ;;
-
-  (* [order] keeps the flushes as they were registered, with the time of
-     each registration. h2 answers a body's flushes as its bytes drain,
-     oldest first, so only the oldest flush still waiting can be late. Its
-     time counts from when it became the oldest: its registration, or the
-     answer before it, whichever came later. *)
-  let deadline t registered_at = Float.max registered_at t.last_answer +. t.stalled_after_s
-
-  let rec watch t =
-    match Queue.peek_opt t.order with
-    | None ->
-      Eio.Condition.await_no_mutex t.registered;
-      watch t
-    | Some (id, _) when not (Hashtbl.mem t.waiting id) ->
-      ignore (Queue.pop t.order);
-      watch t
-    | Some (id, registered_at) ->
-      Eio.Time.sleep_until t.clock (deadline t registered_at);
-      if Hashtbl.mem t.waiting id
-         && Eio.Time.now t.clock >= deadline t registered_at
-      then stall t
-      else watch t
-  ;;
-
-  let rec drop_answered t =
-    match Queue.peek_opt t.order with
-    | Some (id, _) when not (Hashtbl.mem t.waiting id) ->
-      ignore (Queue.pop t.order);
-      drop_answered t
-    | Some _ | None -> ()
-  ;;
-
-  (* The stall line names the request from what [create] read. h2 has no
-     request to give for a stream it closed itself (reqd.ml [request]), and a
-     query can carry a token. *)
+  (* A query can carry a token, so the stall line leaves it out. *)
   let path_of_target target =
     match String.index_opt target '?' with
     | Some query -> String.sub target 0 query
     | None -> target
   ;;
 
-  let create ~stream_sw ~clock ~stalled_after_s reqd =
-    let request = H2.Reqd.request reqd in
+  let stall t =
+    Log.Http.warn
+      "[h2] %s %s: response bytes waited %.0fs for the peer; resetting the stream"
+      (H2.Method.to_string t.request.meth)
+      (path_of_target t.request.target)
+      t.stalled_after_s;
+    reset ~stream_sw:t.stream_sw t.reqd Stalled
+  ;;
+
+  (* [quiet_since] is when the flushes now waiting last made progress: the
+     registration that found none waiting, or the latest answer. h2 answers a
+     body's flushes as its bytes drain, oldest first, so that is also when
+     the oldest flush still waiting became the oldest. A flush registered
+     behind others does not move it. The time is read again after the sleep:
+     an answer that came meanwhile moved it. *)
+  let rec watch t =
+    if Hashtbl.length t.waiting = 0
+    then (
+      Eio.Condition.await_no_mutex t.registered;
+      watch t)
+    else (
+      Eio.Time.sleep_until t.clock (t.quiet_since +. t.stalled_after_s);
+      if Hashtbl.length t.waiting > 0
+         && Eio.Time.now t.clock >= t.quiet_since +. t.stalled_after_s
+      then stall t
+      else watch t)
+  ;;
+
+  (* The answers are the callers' own callbacks. Each flush still waiting
+     gets its answer whatever an earlier one raised, oldest first as h2
+     would have answered them, and what they raised is raised once all have
+     run, so the end of the scope reports it. *)
+  let answer_all t =
+    let answers =
+      Hashtbl.fold (fun id answer answers -> (id, answer) :: answers) t.waiting []
+      |> List.sort (fun (older, _) (newer, _) -> Int.compare older newer)
+    in
+    Hashtbl.reset t.waiting;
+    let failure =
+      List.fold_left
+        (fun failure (_, answer) ->
+           match answer () with
+           | () -> failure
+           | exception exn ->
+             let raised = exn, Printexc.get_raw_backtrace () in
+             Some
+               (match failure with
+                | None -> raised
+                | Some earlier -> Eio.Exn.combine earlier raised))
+        None
+        answers
+    in
+    Option.iter
+      (fun (exn, backtrace) -> Printexc.raise_with_backtrace exn backtrace)
+      failure
+  ;;
+
+  let create ~stream_sw ~clock ~stalled_after_s ~request reqd =
+    let clock = (clock :> float Eio.Time.clock_ty Eio.Resource.t) in
     let signal, resolve_signal = Eio.Promise.create () in
     let t =
       { stream_sw
       ; reqd
-      ; meth = request.meth
-      ; path = path_of_target request.target
-      ; clock = (clock :> float Eio.Time.clock_ty Eio.Resource.t)
+      ; request
+      ; clock
       ; stalled_after_s
       ; ended = false
       ; waiting = Hashtbl.create 2
-      ; order = Queue.create ()
-      ; registered = Eio.Condition.create ()
-      ; last_answer = Float.neg_infinity
       ; next_id = 0
+      ; quiet_since = Eio.Time.now clock
+      ; registered = Eio.Condition.create ()
       ; signal
       ; resolve_signal
       }
     in
+    (* Eio runs the hooks of a switch newest first, so this one runs after
+       those the stream's work registered later. A flush such a hook
+       registers is still in the table when the answers go out. *)
     Eio.Switch.on_release stream_sw (fun () ->
       t.ended <- true;
-      (* The signal goes first: a flush answer that raised would otherwise
-         leave the stream's end unreported to a waiting producer. *)
+      (* The signal goes before the answers: producers on other switches
+         wait on it, whatever an answer raises. *)
       Eio.Promise.resolve t.resolve_signal ();
-      let answers = Hashtbl.fold (fun _ answer answers -> answer :: answers) t.waiting [] in
-      Hashtbl.reset t.waiting;
-      List.iter (fun answer -> answer ()) answers);
+      answer_all t);
     (* A daemon: the stream's scope ends with its response, not with this
        fiber. *)
     Eio.Fiber.fork_daemon ~sw:stream_sw (fun () ->
@@ -222,13 +238,14 @@ module Stream_end = struct
         then (
           answered := true;
           Hashtbl.remove t.waiting id;
-          t.last_answer <- Eio.Time.now t.clock;
-          drop_answered t;
+          t.quiet_since <- Eio.Time.now t.clock;
           f outcome)
       in
+      if Hashtbl.length t.waiting = 0
+      then (
+        t.quiet_since <- Eio.Time.now t.clock;
+        Eio.Condition.broadcast t.registered);
       Hashtbl.replace t.waiting id (fun () -> once `Closed);
-      Queue.push (id, Eio.Time.now t.clock) t.order;
-      Eio.Condition.broadcast t.registered;
       H2.Body.Writer.flush writer once)
   ;;
 
@@ -243,7 +260,9 @@ module Stream_end = struct
 
   (* RFC-0518 D3. A flush at every slice boundary inside [payload] lets the
      watchdog see each slice drain. The end of [payload] is the caller's own
-     flush. *)
+     flush. Neither h2's write nor its flush registration suspends
+     (body.ml [Writer]), so no other fiber's bytes land between two slices
+     of one payload. *)
   let write_slices t writer payload =
     let length = String.length payload in
     let rec from off =

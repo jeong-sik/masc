@@ -7,7 +7,9 @@
 type reset_cause =
   | Reset_by_peer  (** The peer sent RST_STREAM. *)
   | Reset_by_us  (** h2 wrote RST_STREAM for this stream. *)
-  | Stalled  (** The peer took no response bytes within the stall bound. *)
+  | Stalled
+      (** Response bytes waited for the peer past the stall bound
+          ({!Stream_end}). *)
   | Out_of_capacity of Http_h2_response_ledger.refusal
       (** The response ledger refused the next payload. *)
   | Raised of exn
@@ -61,7 +63,17 @@ val end_scope : Eio.Switch.t -> reset_cause -> unit
 
 (** The end of one stream's scope and the bound on its flushes (RFC-0518
     D2, D3). The stream registry makes one for each stream it runs and
-    binds it to that stream's fibers. *)
+    binds it to that stream's fibers.
+
+    h2 answers a flush once its bytes were written to the socket. So the
+    bound ends the scope of a stream whose peer keeps the flow-control
+    window shut, and of one whose peer stopped reading the socket. Only the
+    first peer is told: behind a socket that does not drain, the RST_STREAM
+    waits in the connection's writer with the bytes already queued there,
+    until the socket moves or the connection ends (RFC-0518 D4).
+
+    Every function here is called from the connection's domain, as h2's
+    body writer has to be. Nothing takes a lock. *)
 module Stream_end : sig
   type t
 
@@ -69,21 +81,30 @@ module Stream_end : sig
     :  stream_sw:Eio.Switch.t
     -> clock:_ Eio.Time.clock
     -> stalled_after_s:float
+    -> request:H2.Request.t
     -> H2.Reqd.t
     -> t
-  (** [create ~stream_sw ~clock ~stalled_after_s reqd] ends with [stream_sw]:
-      once the switch is released, {!ended} is true, {!signal} is resolved
-      and every flush still waiting is answered with [`Closed]. It also forks
-      a daemon on [stream_sw] that watches the flushes. h2 answers them
-      oldest first. When the oldest flush still waiting goes
-      [stalled_after_s] by [clock] without an answer, counted from its
-      registration or from the answer before it, whichever came later, the
-      daemon logs the request method and path at warn and {!reset}s the
-      stream with [Stalled]. Both are read from [reqd] here, the path without
-      its query. [stream_sw] is the stream's own switch: a stall fails it. *)
+  (** [create ~stream_sw ~clock ~stalled_after_s ~request reqd] ends with
+      [stream_sw]: once the switch is released, {!ended} is true, {!signal}
+      is resolved and every flush still waiting is answered with [`Closed],
+      each one whatever another's answer raised. It also forks a daemon on
+      [stream_sw] that watches the flushes. h2 answers them oldest first.
+      When the oldest flush still waiting goes [stalled_after_s] by [clock]
+      without an answer, counted from its registration or from the answer
+      before it, whichever came later, the daemon logs the method and the
+      path of [request] at warn, the path without its query, and {!reset}s
+      the stream with [Stalled], which fails [stream_sw].
+
+      [request] is what h2 gave the request handler for [reqd]. Read it
+      there, with [H2.Reqd.request], before the fiber yields: h2 has no
+      request to give once it closed the stream. *)
 
   val switch : t -> Eio.Switch.t
   (** The stream's switch. *)
+
+  val request : t -> H2.Request.t
+  (** The request {!create} was given. The stream's work reads it here, not
+      from h2. *)
 
   val ended : t -> bool
   (** True once the stream's switch was released. *)
@@ -111,7 +132,8 @@ module Stream_end : sig
       its window again only after reading a batch has to read the batch
       within the bound. The end of [payload] gets no flush here: the bytes
       after the last boundary are watched once the caller flushes or
-      closes. *)
+      closes. The call does not suspend, so the slices of two payloads
+      written by different fibers do not interleave. *)
 
   val with_current : t -> (unit -> 'a) -> 'a
   (** [with_current t f] runs [f] with [t] bound to the calling fiber and to

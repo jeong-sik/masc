@@ -26,8 +26,10 @@ val dispatch :
   H2.Reqd.t ->
   (Http_h2_stream.Stream_end.t -> unit) ->
   unit
-(** Register [stream_id] and run the work in a daemon on [sw]. The work
-    receives the stream's {!Http_h2_stream.Stream_end}. Its switch stays open
+(** Register [stream_id] and run the work in a daemon on [sw]. Call it from
+    h2's request handler: the request of [reqd] is read here, where h2 still
+    has one to give, and the work finds it in the stream's
+    {!Http_h2_stream.Stream_end}, which it receives. Its switch stays open
     until the response ends, so deferred body callbacks and response
     producers may fork on it, and every response flush made through it gets
     the registry's stall bound. The work also runs with it bound

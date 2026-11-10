@@ -34,7 +34,6 @@ type t =
       { reqd : H2.Reqd.t
       ; request : Httpun.Request.t
       ; ledger : Http_h2_response_ledger.request
-      ; stream_sw : Eio.Switch.t
       ; stream_end : Stream_end.t
       ; mutable streaming : h2_body option
       }
@@ -80,9 +79,8 @@ let request_of_h2 (h2_request : H2.Request.t) =
 let of_h2 ~stream_end ~ledger reqd =
   Http2
     { reqd
-    ; request = request_of_h2 (H2.Reqd.request reqd)
+    ; request = request_of_h2 (Stream_end.request stream_end)
     ; ledger
-    ; stream_sw = Stream_end.switch stream_end
     ; stream_end
     ; streaming = None
     }
@@ -221,12 +219,13 @@ let h2_respond_with_string ~stream_end reqd ledger response body =
    (reqd.ml 276·283~285). Two closed streams are not seen here while masc's
    scope is still open: one h2 reset on its own, until its RST_STREAM leaves
    the socket (RFC-0518 D1), and one whose response already ended. *)
-let h2_stream_over ~stream_sw reqd =
-  Option.is_some (Eio.Switch.get_error stream_sw) || Option.is_some (H2.Reqd.error_code reqd)
+let h2_stream_over ~stream_end reqd =
+  Option.is_some (Eio.Switch.get_error (Stream_end.switch stream_end))
+  || Option.is_some (H2.Reqd.error_code reqd)
 ;;
 
-let h2_writer_closed ~stream_sw ~stream_end reqd writer =
-  H2.Body.Writer.is_closed writer || Stream_end.ended stream_end || h2_stream_over ~stream_sw reqd
+let h2_writer_closed ~stream_end reqd writer =
+  H2.Body.Writer.is_closed writer || Stream_end.ended stream_end || h2_stream_over ~stream_end reqd
 ;;
 
 let try_respond_with_string t response body =
@@ -239,8 +238,8 @@ let try_respond_with_string t response body =
        | Http1 { reqd; _ } ->
          Httpun.Reqd.respond_with_string reqd response body;
          Accepted_by_writer
-       | Http2 { reqd; ledger; stream_sw; stream_end; _ } ->
-         if h2_stream_over ~stream_sw reqd
+       | Http2 { reqd; ledger; stream_end; _ } ->
+         if h2_stream_over ~stream_end reqd
          then (
            Log.Http.debug "[http] response skipped, the HTTP/2 stream is already over";
            Rejected_by_writer)
@@ -259,7 +258,6 @@ module Body_writer = struct
         { reqd : H2.Reqd.t
         ; body : h2_body
         ; ledger : Http_h2_response_ledger.request
-        ; stream_sw : Eio.Switch.t
         ; stream_end : Stream_end.t
         }
     (* An HTTP/2 stream that was over before the response opened. *)
@@ -270,7 +268,7 @@ module Body_writer = struct
   let write_string t s =
     match t with
     | H1 writer -> Httpun.Body.Writer.write_string writer s
-    | H2 { reqd; body = { writer; _ }; ledger; stream_sw; stream_end } ->
+    | H2 { reqd; body = { writer; _ }; ledger; stream_end } ->
       (match Http_h2_response_ledger.reserve ledger ~bytes:(String.length s) with
        | Ok lease ->
          Http_h2_response_ledger.write_reserved
@@ -279,7 +277,10 @@ module Body_writer = struct
            writer
            s
        | Error refusal ->
-         Http_h2_stream.reset ~stream_sw reqd (Http_h2_stream.Out_of_capacity refusal);
+         Http_h2_stream.reset
+           ~stream_sw:(Stream_end.switch stream_end)
+           reqd
+           (Http_h2_stream.Out_of_capacity refusal);
          (* h2 closed the body of a started response it reset. A stream that
             was already closed is not reset again, so close it here too. *)
          H2.Body.Writer.close writer)
@@ -288,8 +289,8 @@ module Body_writer = struct
 
   let is_closed = function
     | H1 writer -> Httpun.Body.Writer.is_closed writer
-    | H2 { reqd; body = { writer; _ }; stream_sw; stream_end; _ } ->
-      h2_writer_closed ~stream_sw ~stream_end reqd writer
+    | H2 { reqd; body = { writer; _ }; stream_end; _ } ->
+      h2_writer_closed ~stream_end reqd writer
     | Ended -> true
   ;;
 
@@ -336,8 +337,8 @@ let respond_with_streaming ?flush_headers_immediately t response =
     Body_writer.H1 writer
   | Http2 http2 ->
     let reqd = http2.reqd
-    and stream_sw = http2.stream_sw in
-    if h2_stream_over ~stream_sw reqd
+    and stream_end = http2.stream_end in
+    if h2_stream_over ~stream_end reqd
     then Body_writer.Ended
     else (
       let writer =
@@ -345,8 +346,7 @@ let respond_with_streaming ?flush_headers_immediately t response =
       in
       let body = { writer; closed_by_route = false } in
       http2.streaming <- Some body;
-      Body_writer.H2
-        { reqd; body; ledger = http2.ledger; stream_sw; stream_end = http2.stream_end })
+      Body_writer.H2 { reqd; body; ledger = http2.ledger; stream_end })
 ;;
 
 type response_state =
@@ -361,11 +361,11 @@ let response_state = function
        if Httpun.Body.Writer.is_closed writer then Answered else Streaming_open
      | None, Some _ -> Answered
      | None, None -> Not_started)
-  | Http2 { reqd; stream_sw; stream_end; streaming; _ } ->
+  | Http2 { reqd; stream_end; streaming; _ } ->
     (match streaming, H2.Reqd.response reqd with
      | Some body, _ ->
        if body.closed_by_route
-          || h2_writer_closed ~stream_sw ~stream_end reqd body.writer
+          || h2_writer_closed ~stream_end reqd body.writer
        then Answered
        else Streaming_open
      | None, Some _ -> Answered
@@ -474,7 +474,7 @@ let read_body_h2 reqd ~ledger ~stream_end ~max_bytes ~on_body ~on_error =
     H2.Body.Reader.discard body;
     dispatch (fun () -> on_error error)
   in
-  match H2.Request.body_length (H2.Reqd.request reqd) with
+  match H2.Request.body_length (Stream_end.request stream_end) with
   | `Error `Bad_request ->
     (* h2 answers 400 to an unparsable length before it calls the request
        handler (Server_connection, Message.body_length), so no stream reaches
@@ -531,5 +531,9 @@ let report_exn t exn =
     Log.Http.error "[http] request failed: %s" (Printexc.to_string exn);
     http1.reported <- true;
     Httpun.Reqd.report_exn http1.reqd exn
-  | Http2 { reqd; stream_sw; _ } -> Http_h2_stream.reset ~stream_sw reqd (Http_h2_stream.Raised exn)
+  | Http2 { reqd; stream_end; _ } ->
+    Http_h2_stream.reset
+      ~stream_sw:(Stream_end.switch stream_end)
+      reqd
+      (Http_h2_stream.Raised exn)
 ;;

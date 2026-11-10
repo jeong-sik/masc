@@ -40,7 +40,7 @@ let release t stream_id entry =
    The work gets the stream's end and also runs with it bound: h2 calls the
    connection's error handler inside the call that reports a failure, and that
    handler has no other way to reach the stream's flush bound. *)
-let run_scope t entry reqd work =
+let run_scope t entry ~request reqd work =
   Eio.Switch.run (fun stream_sw ->
     entry.scope <- Running stream_sw;
     let stream_end =
@@ -48,6 +48,7 @@ let run_scope t entry reqd work =
         ~stream_sw
         ~clock:t.clock
         ~stalled_after_s:t.stalled_after_s
+        ~request
         reqd
     in
     Http_h2_stream.Stream_end.with_current stream_end (fun () ->
@@ -58,6 +59,10 @@ let run_scope t entry reqd work =
 ;;
 
 let dispatch t ~sw ~stream_id reqd work =
+  (* h2 is inside its request handler here, the one place where it promises
+     a request for [reqd]: a stream it closed has none (reqd.ml [request]).
+     The stream's fiber runs later and reads this one. *)
+  let request = H2.Reqd.request reqd in
   let response_ended, end_response = Eio.Promise.create () in
   let entry = { scope = Admitted; response_ended; end_response } in
   Hashtbl.replace t.entries stream_id entry;
@@ -70,7 +75,7 @@ let dispatch t ~sw ~stream_id reqd work =
       (fun () ->
         if owns t stream_id entry
         then (
-          match run_scope t entry reqd work with
+          match run_scope t entry ~request reqd work with
           | () -> ()
           | exception Http_h2_stream.Stream_reset _ -> ()
           | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn

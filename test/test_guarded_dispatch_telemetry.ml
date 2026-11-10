@@ -9,7 +9,6 @@ open Alcotest
       [None] when OTel is disabled, [Some _] when active)
     - The [outcome] string returned from the callback propagates back to
       the caller
-    - [register_metrics] is idempotent across repeated calls
     - [guarded_dispatch] for an unregistered tool returns [None] (the
       [No_handler] arm — PR-10 will narrow the outcome to a typed variant) *)
 
@@ -42,17 +41,6 @@ let test_trace_id_thunk_is_callable () =
   (check bool) "trace_id_thunk callable inside the span" true !thunk_called
 ;;
 
-let test_register_metrics_idempotent () =
-  (* Concurrent and repeated calls must not raise (Otel_metric_store would
-     otherwise reject duplicate counter registration). *)
-  List.init 4 (fun _ ->
-    Domain.spawn Masc.Tool_telemetry.register_metrics)
-  |> List.iter Domain.join;
-  Masc.Tool_telemetry.register_metrics ();
-  Masc.Tool_telemetry.register_metrics ();
-  (check bool) "register_metrics idempotent across repeated calls" true true
-;;
-
 let test_with_span_result_propagates () =
   let result, _outcome =
     Masc.Tool_telemetry.with_span ~tool_name:"test_result_propagate" (fun _trace_id ->
@@ -68,7 +56,6 @@ let () =
       , [ test_case "with-span-invokes-callback-once" `Quick test_with_span_invokes_callback_once
         ; test_case "with-span-returns-outcome-label" `Quick test_with_span_returns_outcome_label
         ; test_case "trace-id-thunk-is-callable" `Quick test_trace_id_thunk_is_callable
-        ; test_case "register-metrics-idempotent" `Quick test_register_metrics_idempotent
         ; test_case "with-span-result-propagates" `Quick test_with_span_result_propagates
         ] )
     ]

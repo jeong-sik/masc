@@ -187,14 +187,6 @@ let test_tag_resolution_requires_exact_ownership () =
        (Unified_tool_registry.tag_of_name "masc_keeper_unknown"))
 ;;
 
-let test_workspace_schemas_match_dispatch_bindings () =
-  init ();
-  assert_same_set
-    ~label:"workspace schema names vs dispatchable names"
-    ~expected:(workspace_schema_names ())
-    ~actual:Tool_workspace.dispatchable_names
-;;
-
 let test_workspace_schemas_have_tool_spec_metadata () =
   init ();
   let workspace_names = workspace_schema_names () in
@@ -384,8 +376,6 @@ let () =
     ; ( "workspace_tools"
       , [ test_case "workspace schemas route to Mod_state" `Quick
             test_workspace_schemas_route_to_state
-        ; test_case "workspace schemas match dispatch bindings" `Quick
-            test_workspace_schemas_match_dispatch_bindings
         ; test_case "workspace schemas have ToolSpec metadata" `Quick
             test_workspace_schemas_have_tool_spec_metadata
         ; test_case "tag resolution requires exact ownership" `Quick

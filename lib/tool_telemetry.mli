@@ -44,8 +44,3 @@ val with_span
   -> tool_name:string
   -> ((unit -> (trace_id * trace_id) option) -> 'a * string)
   -> 'a * string
-
-(** Register the [tool_dispatch_total] Otel_metric_store counter with labels
-    [tool], [outcome], [surface], and [tool_type]. Call once at server
-    startup. Subsequent calls are idempotent (no-op). *)
-val register_metrics : unit -> unit

@@ -2,6 +2,7 @@ open Alcotest
 module Response = Masc.Http_server_eio.Response
 module Request = Masc.Http_server_eio.Request
 module Stream_end = Masc.Http_h2_stream.Stream_end
+module Response_body = Masc.Http_h2_stream.Response_body
 
 let reqd_of_h2 ~stream_end h2_reqd =
   Masc.Http_reqd.of_h2 ~stream_end
@@ -16,7 +17,73 @@ let registry ?(clock = Eio_mock.Clock.make ()) () =
 
 type dispatch = Inline_reader | Request_fibers
 
-let with_connection ?streams ?resources ?(client_window = 65535l) dispatch handler run =
+(* The server's end of the connection. With a [pace] the peer takes [chunk]
+   bytes at once and [chunk] more every [interval] seconds of [clock]: a
+   slow link. A write the allowance does not cover waits for the clock.
+   Reads pass through. *)
+module Server_socket = struct
+  type pace =
+    { clock : float Eio.Time.clock_ty Eio.Resource.t
+    ; chunk : int
+    ; interval : float
+    }
+
+  type tag = [ `Generic ]
+
+  type t =
+    { flow : [ `Generic ] Eio.Net.stream_socket_ty Eio.Resource.t
+    ; pace : pace option
+    ; mutable allowance : int
+    ; mutable refill_at : float
+    }
+
+  let read_methods = []
+  let single_read t dst = Eio.Flow.single_read t.flow dst
+
+  let rec first_bytes n = function
+    | [] -> []
+    | buf :: rest ->
+      if Cstruct.length buf >= n
+      then [ Cstruct.sub buf 0 n ]
+      else buf :: first_bytes (n - Cstruct.length buf) rest
+
+  let rec single_write t bufs =
+    match t.pace with
+    | None -> Eio.Flow.single_write t.flow bufs
+    | Some pace ->
+      if t.allowance = 0
+      then (
+        Eio.Time.sleep_until pace.clock t.refill_at;
+        t.allowance <- pace.chunk;
+        t.refill_at <- t.refill_at +. pace.interval;
+        single_write t bufs)
+      else (
+        let written = Eio.Flow.single_write t.flow (first_bytes t.allowance bufs) in
+        t.allowance <- t.allowance - written;
+        written)
+
+  let copy t ~src = Eio.Flow.Pi.simple_copy ~single_write t ~src
+  let shutdown t command = Eio.Flow.shutdown t.flow command
+  let close t = Eio.Flow.close t.flow
+end
+
+let server_socket_handler = Eio.Net.Pi.stream_socket (module Server_socket)
+
+let server_socket ?pace (flow : _ Eio.Net.stream_socket) =
+  let chunk, refill_at =
+    match pace with
+    | None -> 0, 0.0
+    | Some (pace : Server_socket.pace) ->
+      pace.chunk, Eio.Time.now pace.clock +. pace.interval in
+  Eio.Resource.T
+    ( { Server_socket.flow = (flow :> [ `Generic ] Eio.Net.stream_socket_ty Eio.Resource.t)
+      ; pace
+      ; allowance = chunk
+      ; refill_at
+      }
+    , server_socket_handler )
+
+let with_connection ?streams ?resources ?(client_window = 65535l) ?pace dispatch handler run =
   Eio_main.run (fun env ->
     let clock = Eio.Stdenv.clock env in
     Eio.Time.with_timeout_exn (Eio.Stdenv.clock env) 10.0 (fun () ->
@@ -40,6 +107,7 @@ let with_connection ?streams ?resources ?(client_window = 65535l) dispatch handl
               Eio.Promise.await released));
           Eio.Promise.await occupied;
           let server_flow, client_flow = Eio_unix.Net.socketpair_stream ~sw () in
+          let server_flow = server_socket ?pace server_flow in
           let server = Eio.Fiber.fork_promise ~sw (fun () ->
             Eio.Switch.run (fun conn_sw ->
               let addr = `Tcp (Eio.Net.Ipaddr.V4.loopback, 54321) in
@@ -632,12 +700,11 @@ let test_stalled_error_answer_ends source () =
       (logged (stall_line_of "/fail"
          ~meth:(match source with `Handler -> "GET" | `Body_callback -> "POST"))))
 
-(* RFC-0518 D3. A body longer than one slice has a flush at each slice
-   boundary, and the bound counts from when a flush became the oldest one
-   waiting. The client's window holds one slice and the client reads one
-   slice a minute, so the body takes three minutes: past the bound, but
-   never more than a minute on one slice. *)
-let long_body = String.init (4 * Masc.Http_h2_stream.Stream_end.slice_bytes)
+(* RFC-0518 D3. A body reaches h2 one slice at a time, and the bound counts
+   for each slice from when it was written. The client's window holds one
+   slice and the client reads one slice a minute, so the body takes three
+   minutes: past the bound, but never more than a minute on one slice. *)
+let long_body = String.init (4 * Response_body.slice_bytes)
     (fun n -> Char.chr (97 + n mod 26))
 
 (* Reads [n] more bytes of [reader] into [into]. The client opens the
@@ -665,7 +732,7 @@ let long_body_handler source ~stream_end _ h2_reqd =
     Masc.Http_reqd.Body_writer.write_string writer long_body;
     Masc.Http_reqd.Body_writer.close writer
 
-let slice_window = Int32.of_int Masc.Http_h2_stream.Stream_end.slice_bytes
+let slice_window = Int32.of_int Response_body.slice_bytes
 
 let test_steady_reader_gets_a_long_body source () =
   let clock = Eio_mock.Clock.make () in
@@ -685,15 +752,49 @@ let test_steady_reader_gets_a_long_body source () =
         (logged (stall_line_of "/long"));
       check bool (Printf.sprintf "the stream is open at minute %d" minute) false
         (Eio.Promise.is_resolved reset);
-      read_exactly reader received Masc.Http_h2_stream.Stream_end.slice_bytes;
+      read_exactly reader received Response_body.slice_bytes;
       ping client)
       [1; 2; 3];
     check bool "the client got the whole body" true
       (read_to_end reader received = Ok long_body);
     check int "no stall line at all" 0 (logged (stall_line_of "/long")))
 
+(* RFC-0518 D3 on a slow link. The client's window holds the whole body, so
+   only the socket holds it back: it takes a slice and a little more each
+   minute. h2 hands a socket everything the window allows as one write and
+   answers the flushes inside it when all of it is through, here after three
+   minutes. With one slice in h2 at a time, each slice crosses within a
+   minute and the client that keeps reading gets the whole body. *)
+let test_steady_reader_on_a_slow_socket_gets_a_long_body () =
+  let clock = Eio_mock.Clock.make () in
+  let streams = registry ~clock () in
+  let pace =
+    { Server_socket.clock = (clock :> float Eio.Time.clock_ty Eio.Resource.t)
+    ; chunk = Response_body.slice_bytes + 2048
+    ; interval = 60.0
+    } in
+  with_log_capture @@ fun logged ->
+  with_connection ~streams ~resources:(stalled_ledger ()) ~pace
+    ~client_window:(Int32.of_int (16 * Response_body.slice_bytes))
+    Request_fibers (long_body_handler `Whole)
+    (fun ~env:_ ~client ~client_flow:_ ~release:_ ~close_client:_ ~server:_ ->
+    let status, reset, response_body = open_stream client "/long" in
+    check int "the response started" 200 (Eio.Promise.await status);
+    let reader = Eio.Promise.await response_body in
+    let received = Buffer.create (String.length long_body) in
+    read_exactly reader received Response_body.slice_bytes;
+    List.iter (fun minute ->
+      Eio_mock.Clock.set_time clock (60.0 *. float_of_int minute);
+      read_exactly reader received Response_body.slice_bytes;
+      check bool (Printf.sprintf "the stream is open at minute %d" minute) false
+        (Eio.Promise.is_resolved reset))
+      [1; 2; 3];
+    check bool "the client got the whole body" true
+      (read_to_end reader received = Ok long_body);
+    check int "no stall line" 0 (logged (stall_line_of "/long")))
+
 (* A client that reads none of a long body: one slice fits its window, the
-   next slice's flush waits, and at the bound the stream is reset. The stall
+   next slice waits in h2, and at the bound the stream is reset. The stall
    line names the path without the query, which can carry a token. *)
 let test_idle_reader_of_a_long_body_is_cut () =
   let clock = Eio_mock.Clock.make () in
@@ -723,9 +824,8 @@ let test_idle_reader_of_a_long_body_is_cut () =
     check int "one warn line names the long body" 1 (logged (stall_line_of "/long"));
     check int "the query stays out of the log" 0 (logged "token="))
 
-(* A whole body shorter than one slice has no slice boundary. Its only
-   watched flush is the one its close waits for, and a client that leaves
-   it unread is cut at the bound all the same. *)
+(* A whole body shorter than one slice is a single slice, and a client
+   that leaves it unread is cut at the bound all the same. *)
 let test_idle_reader_of_a_short_body_is_cut () =
   let clock = Eio_mock.Clock.make () in
   let streams = registry ~clock () in
@@ -752,8 +852,8 @@ let test_idle_reader_of_a_short_body_is_cut () =
     check int "one warn line names the short body" 1 (logged (stall_line_of "/short")))
 
 (* A stream whose peer takes nothing keeps getting frames, as an SSE stream
-   gets its keepalives. A flush registered behind one still waiting starts
-   no count of its own: the stream is cut one bound after the first. *)
+   gets its keepalives. They wait behind the slice h2 holds and start no
+   count of their own: the stream is cut one bound after the first frame. *)
 let test_later_flushes_do_not_extend_the_bound () =
   let clock = Eio_mock.Clock.make () in
   let streams = registry ~clock () in
@@ -788,9 +888,9 @@ let test_later_flushes_do_not_extend_the_bound () =
     check bool "the client got RST_STREAM(INTERNAL_ERROR)" true
       (reset_with_internal_error reset))
 
-(* A stream ends with two flushes waiting, and the answer of the older one
-   raises. The newer one is answered all the same, and the failure is
-   reported once the scope is over. *)
+(* A stream ends with two flushes waiting behind its slice, and the answer
+   of the older one raises. The newer one is answered all the same, and the
+   failure is reported once the scope is over. *)
 let test_every_waiting_flush_is_answered () =
   let clock = Eio_mock.Clock.make () in
   let streams = registry ~clock () in
@@ -826,11 +926,11 @@ let test_every_waiting_flush_is_answered () =
     check string "the connection keeps serving" "alive"
       (snd (await_reply (request client "/fast"))))
 
-(* Two fibers write a long payload each to one body. A payload goes to h2
-   whole, slice flushes included, before another fiber runs, so each arrives
-   in one piece: the frames of two SSE producers do not mix. *)
+(* Two fibers write a long payload each to one body. A payload waits whole
+   behind the one written before it, so each arrives in one piece: the
+   frames of two SSE producers do not mix. *)
 let test_two_producers_do_not_interleave () =
-  let payload fill = String.make (3 * Masc.Http_h2_stream.Stream_end.slice_bytes) fill in
+  let payload fill = String.make (3 * Response_body.slice_bytes) fill in
   let handler ~stream_end _ h2_reqd =
     let writer = Masc.Http_reqd.respond_with_streaming
       (reqd_of_h2 ~stream_end h2_reqd) (Httpun.Response.create `OK) in
@@ -842,6 +942,59 @@ let test_two_producers_do_not_interleave () =
     (fun ~env:_ ~client ~client_flow:_ ~release:_ ~close_client:_ ~server:_ ->
     check bool "each payload arrives in one piece" true
       (String.equal (payload 'a' ^ payload 'b') (snd (await_reply (request client "/two")))))
+
+(* A route closes its body while the client still holds bytes back. The
+   body is closed from then on, and what the route writes afterwards is
+   dropped: the client gets exactly what was written before the close. *)
+let test_write_after_close_is_dropped () =
+  let closed, record_closed = Eio.Promise.create () in
+  let handler ~stream_end _ h2_reqd =
+    let writer = Masc.Http_reqd.respond_with_streaming
+      (reqd_of_h2 ~stream_end h2_reqd) (Httpun.Response.create `OK) in
+    Masc.Http_reqd.Body_writer.write_string writer stalled_body;
+    Masc.Http_reqd.Body_writer.close writer;
+    Eio.Promise.resolve record_closed (Masc.Http_reqd.Body_writer.is_closed writer);
+    Masc.Http_reqd.Body_writer.write_string writer "late" in
+  with_connection ~streams:(registry ()) ~client_window:(Int32.of_int stalled_window)
+    Request_fibers handler
+    (fun ~env:_ ~client ~client_flow:_ ~release:_ ~close_client:_ ~server:_ ->
+    let reply = request client "/closed" in
+    check bool "the body is closed once the route closed it" true
+      (Eio.Promise.await closed);
+    check string "the client gets what was written before the close" stalled_body
+      (snd (await_reply reply)))
+
+(* A flush answers for everything written before it. The frame is four
+   slices and the client's window holds one, so the flush is answered when
+   the last slice went and not before: a producer that waits for its flush
+   is held back by the client for the whole frame. *)
+let test_flush_waits_for_the_bytes_before_it () =
+  let flushed, record_flush = Eio.Promise.create () in
+  let handler ~stream_end _ h2_reqd =
+    let writer = Masc.Http_reqd.respond_with_streaming
+      (reqd_of_h2 ~stream_end h2_reqd) (Httpun.Response.create `OK) in
+    Masc.Http_reqd.Body_writer.write_string writer long_body;
+    Masc.Http_reqd.Body_writer.flush writer (fun outcome ->
+      Eio.Promise.resolve record_flush outcome;
+      Masc.Http_reqd.Body_writer.close writer) in
+  with_connection ~streams:(registry ()) ~client_window:slice_window
+    Request_fibers handler
+    (fun ~env:_ ~client ~client_flow:_ ~release:_ ~close_client:_ ~server:_ ->
+    let status, _, response_body = open_stream client "/frame" in
+    check int "the response started" 200 (Eio.Promise.await status);
+    let reader = Eio.Promise.await response_body in
+    let received = Buffer.create (String.length long_body) in
+    List.iter (fun slices ->
+      read_exactly reader received Response_body.slice_bytes;
+      ping client;
+      check bool (Printf.sprintf "the flush waits with %d slices read" slices) false
+        (Eio.Promise.is_resolved flushed))
+      [1; 2];
+    read_exactly reader received Response_body.slice_bytes;
+    check bool "the flush is answered once the last slice went" true
+      (match Eio.Promise.await flushed with `Written -> true | `Closed -> false);
+    check bool "the client got the whole frame" true
+      (read_to_end reader received = Ok long_body))
 
 let () = run "H2 request fibers" ["connection progress", [
   test_case "direct reader reproduces occupied CPU stall" `Quick test_reader_control;
@@ -876,4 +1029,10 @@ let () = run "H2 request fibers" ["connection progress", [
     test_every_waiting_flush_is_answered;
   test_case "two producers on one body do not interleave" `Quick
     test_two_producers_do_not_interleave;
+  test_case "a steady reader on a slow socket gets a whole body" `Quick
+    test_steady_reader_on_a_slow_socket_gets_a_long_body;
+  test_case "a write after close is dropped" `Quick
+    test_write_after_close_is_dropped;
+  test_case "a flush waits for the bytes written before it" `Quick
+    test_flush_waits_for_the_bytes_before_it;
 ]]

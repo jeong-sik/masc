@@ -1,4 +1,8 @@
-type observation = { json : Yojson.Safe.t; next_deadline_unix : float option }
+type observation = Dashboard_projection_read.observation = {
+  json : Yojson.Safe.t;
+  next_deadline_unix : float option;
+  completeness : Dashboard_projection_read.completeness;
+}
 
 val observe_current :
   ?actor:string ->
@@ -7,7 +11,9 @@ val observe_current :
 (** Bypass actor snapshot/digest and nested operator metadata TTLs. The
     returned deadline belongs to the same source observation: source-dated
     agent truth, selected tool-host failure attention and active judgment.
-    The caller owns timeout/failure retry. This API alone does not start or
+    Typed Keeper roster/row and digest storage failures retain the readable
+    rows with [Partial] completeness. The caller owns timeout/failure retry.
+    This API alone does not start or
     remove a server worker. *)
 
 val json :

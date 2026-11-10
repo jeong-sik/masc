@@ -308,9 +308,10 @@ type operator_snapshot_fn = {
     Yojson.Safe.t;
 }
 
-type digest_observation = {
+type digest_observation = Dashboard_projection_read.observation = {
   json : Yojson.Safe.t;
   next_deadline_unix : float option;
+  completeness : Dashboard_projection_read.completeness;
 }
 
 type operator_digest_observer = {

@@ -181,9 +181,13 @@ let decode ~scope ~request_id json =
   let* ()=require (List.length ids=List.length (List.sort_uniq String.compare ids)) "Duplicate resolution intent" in
   let rec history = function
     | [] | [_] -> Ok ()
-    | {phase=Refused _;expected;_}::({expected=next;_}::_ as rest) ->
-      let* ()=require (expected<>next) "A refused resolution needs a new observation" in history rest
-    | _::_::_ -> Error "History resolution has multiple active intents" in
+    | first::(next::_ as rest) ->
+      (match first.phase with
+       | Refused _ ->
+         let* ()=require (first.expected<>next.expected) "A refused resolution needs a new observation" in
+         history rest
+       | Requested | Fenced | Child_intended _ | Child_confirmed _ ->
+         Error "History resolution has multiple active intents") in
   let+ ()=history values in values
 let decode_published = decode
 let load ~store ~scope ~request_id =
@@ -222,8 +226,11 @@ let submit ~config ~keeper_name ~request_id ~expected ~actor ~reason ~now =
   | None ->
     let* ()=match List.rev values with
       | [] -> Ok ()
-      | {phase=Refused _;expected=prior;_}::_ when prior<>expected -> Ok ()
-      | _::_ -> Error (Conflict "Original already owns an active resolution or needs a new observation") in
+      | latest::_ ->
+        (match latest.phase with
+         | Refused _ when latest.expected<>expected -> Ok ()
+         | Refused _ | Requested | Fenced | Child_intended _ | Child_confirmed _ ->
+           Error (Conflict "Original already owns an active resolution or needs a new observation")) in
     let* fence=Fence.read ~store ~scope ~request_id |> unavailable in
     let* ()=match fence with None -> Ok () | Some _ -> Error (Conflict "Original is already fenced") in
     let+ ()=persist ~store ~scope ~request_id ~previous (values@[candidate]) in candidate,false
@@ -241,8 +248,14 @@ let active_for_keeper ~config ~keeper_name =
     let* ()=if name=Store.digest request_id ^ ".json" then Ok () else Error (Unavailable "Resolution inventory filename differs") in
     let* intents=decode ~scope ~request_id json |> unavailable in
     match List.rev intents with
-    | [] | {phase=Refused _;_}::_ | {memory_commit=Some _;_}::_ -> Ok values
-    | intent::_ -> Ok (intent::values)) (Ok []) rows
+    | [] -> Ok values
+    | intent::_ ->
+      (match intent.memory_commit with
+       | Some _ -> Ok values
+       | None ->
+         (match intent.phase with
+          | Refused _ -> Ok values
+          | Requested | Fenced | Child_intended _ | Child_confirmed _ -> Ok (intent::values)))) (Ok []) rows
 let reload ~store expected =
   let* _,values=load ~store ~scope:expected.scope ~request_id:expected.original_request_id in
   Option.to_result ~none:(Unavailable "Resolution intent disappeared")

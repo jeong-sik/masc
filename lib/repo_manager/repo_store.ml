@@ -462,9 +462,7 @@ let discover_repositories_with_budget_impl
         else abs_base_path ^ "/"
       in
       let prefix_len = String.length base_prefix in
-      if
-        String.length path < prefix_len
-        || not (String.equal (String.sub path 0 prefix_len) base_prefix)
+      if not (String.starts_with ~prefix:base_prefix path)
       then false
       else
         let rel =

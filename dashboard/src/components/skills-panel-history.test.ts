@@ -4,13 +4,14 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { clearStoredToken, setStoredToken } from '../api/core'
 import { decodeSkillEvidenceResponse, type SkillSurfaceProfile, type SkillsResponse } from '../api/dashboard-skills'
 import { SkillsPanel } from './skills-panel'
+import { acceptedExecutionWorkspace } from '../execution-workspace-authority'
 
 const api = vi.hoisted(() => ({ fetchSkills: vi.fn(), fetchSkillEvidence: vi.fn(),
   fetchAsyncRequestObservation: vi.fn(), readSkillSource: vi.fn() }))
 vi.mock('../api/dashboard-skills', async original => ({ ...await original<typeof import('../api/dashboard-skills')>(), ...api }))
 vi.mock('../store', async () => {
   const { signal } = await import('@preact/signals')
-  return { executionWorkspaceAuthority: signal({ epoch: 'fixture', workspaceRoot: '/workspace', connectionGeneration: 1 }), keepers: signal([]), executionLoaded: signal(false) }
+  return { executionWorkspaceAuthority: (await import('../execution-workspace-authority')).acceptedExecutionWorkspace, keepers: signal([]), executionLoaded: signal(false) }
 })
 const reference = { identity: { source_id: 'workspace', package_id: 'proof', name: 'proof' }, content_revision: 'a'.repeat(64) }
 const profile: SkillSurfaceProfile = {
@@ -62,6 +63,8 @@ async function load() {
   await screen.findByRole('button', { name: older.composition_run_id })
 }
 beforeEach(() => {
+  acceptedExecutionWorkspace.value = Object.freeze({ epoch: 'fixture', workspaceRoot: '/workspace',
+    connectionGeneration: 1, observerInstanceId: 'fixture-instance' })
   for (const mock of Object.values(api)) mock.mockReset()
   setStoredToken('fixture')
   api.fetchSkills.mockResolvedValue(catalog)

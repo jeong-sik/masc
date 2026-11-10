@@ -23,7 +23,7 @@ const editorApiMocks = vi.hoisted(() => ({
 const workspace = vi.hoisted(() => ({ current: null as unknown as Signal<ExecutionWorkspaceAuthority | null> }))
 vi.mock('../store', async () => {
   const { signal } = await import('@preact/signals')
-  workspace.current = signal<ExecutionWorkspaceAuthority | null>(null)
+  workspace.current = (await import('../execution-workspace-authority')).acceptedExecutionWorkspace
   return { executionWorkspaceAuthority: workspace.current, keepers: signal([]), executionLoaded: signal(false) }
 })
 
@@ -58,7 +58,7 @@ import {
 
 beforeEach(() => {
   expect(executionWorkspaceAuthority).toBe(workspace.current)
-  workspace.current.value = { epoch: 'fixture', workspaceRoot: '/workspace', connectionGeneration: 1, observerInstanceId: null }
+  workspace.current.value = { epoch: 'fixture', workspaceRoot: '/workspace', connectionGeneration: 1, observerInstanceId: 'fixture-instance' }
   setStoredToken('fixture-token')
 })
 afterEach(() => {

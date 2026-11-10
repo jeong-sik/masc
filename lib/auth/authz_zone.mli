@@ -176,7 +176,9 @@ val open_error_to_string : open_error -> string
     store at [store_path] are there. If both are, opens the store, then the
     log, folded with {!Replay} from the state of the store. Opening a file
     makes its directory and its lock file, so a file that is not there is
-    refused before either is opened. [now_ms] is the wall clock in
+    refused before either is opened. A store that goes away between the
+    question and the open is opened as an empty one, with its directory and
+    its lock file made. [now_ms] is the wall clock in
     milliseconds. A {!commit} that
     gets past the judgment of the entry reads it once, for the time of its
     record. *)

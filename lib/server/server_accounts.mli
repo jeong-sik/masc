@@ -89,14 +89,18 @@ val refusal_to_string : refusal -> string
     An [Error] comes before a connection is accepted and before the port is
     recorded, and the refusals come in the order of the constructors of
     {!refusal}. {!Access_not_published} and {!Trust_policy_refused} come with
-    the port bound: the trust policy names the HTTPS port that bound. Two
-    steps after the table check leave something behind whatever refusal
-    follows them. {!Server_bootstrap_http.make_http_config} writes the host,
-    the port and the URLs of the listener to the environment of the process.
-    {!Server_bootstrap_http.https_listener_of_env} makes a self-signed
-    certificate under the base path ([.masc/tls]) when the HTTPS listener is
-    on, no certificate file is configured, and the pair there is missing or
-    due for renewal.
+    the port bound: the trust policy names the HTTPS port that bound.
+
+    On disk a refused boot leaves one thing, and only when the refusal comes
+    after the table check: {!Server_bootstrap_http.https_listener_of_env}
+    makes a self-signed certificate under the base path ([.masc/tls]) when
+    the HTTPS listener is on, no certificate file is configured, and the pair
+    there is missing, unreadable or due for renewal. In the process it leaves
+    the host, the port and the URLs that
+    {!Server_bootstrap_http.make_http_config} writes to the environment, the
+    metrics of the HTTPS listener, the sockets that bound until [sw] ends,
+    and, at {!Trust_policy_refused}, the access that was published. The
+    caller ends the process on a refusal.
 
     The accept loop and the record of the port are the steps of the
     single-user boot ([run_serving] in [Server_runtime_bootstrap]), written a

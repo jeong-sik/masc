@@ -83,6 +83,7 @@
 ;; GET /api/v1/tool-metrics/series reads the series from the store directly;
   ;; dune does not re-export it through the masc dep.
   masc.tool_metrics_store
+  masc.sse_event
   masc.masc_tool_surface
   masc.operator
   masc.voice_bridge_core

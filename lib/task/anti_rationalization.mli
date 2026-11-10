@@ -307,8 +307,6 @@ val run_retained :
     Task request, producer, second runner or prompt-registry read is needed.
     The caller owns retention, actual read authority and domain commitment. *)
 
-val parse_review_verdict_from_json : Yojson.Safe.t -> (verdict, string) result
-
 (** Which decision a refused [report_review_verdict] call named. *)
 type verdict_refusal =
   | Reject_without_reason

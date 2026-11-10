@@ -185,7 +185,9 @@ type cause_bucket =
   | Cause_named of Masc_tui_keeper_trail.cause_group
       (** The trail is failed and its last receipt names the cause. *)
   | Cause_unnamed  (** The trail is failed and no receipt names a cause. *)
-  | Not_failing
+  | Cause_recovered (** Non-failing/non-paused, with a failed half hour in 12h. *)
+  | Not_failing (** No current failure; unread rows make no claim of healthy status. *)
+  | Cause_paused (** Pause wins even when the health reading is failing. *)
 
 type due =
   | Due_late  (** A due run has not started. *)
@@ -225,7 +227,7 @@ type group =
   | Group_memory of memory_follow
   | Group_age of memory_age
 
-val group_of_view : outside:(keeper_name:string -> outside) -> view -> row -> group option
+val group_of_view : now:float -> outside:(keeper_name:string -> outside) -> view -> row -> group option
 (** The heading [row] sits under in [view]; [None] for a view that does not
     group. {!order_rows} keeps the rows of one group next to each other. *)
 
@@ -252,6 +254,7 @@ val order_rows :
     position there. *)
 
 type stop =
+  | Stop_world
   | Stop_heading of group
   | Stop_row of int
 
@@ -260,23 +263,29 @@ type heading_focus = { heading : group; cursor_at : int }
     The cursor rests on the group's first row, so a cursor moved by any
     other path leaves the heading. *)
 
+type focus = Focus_heading of heading_focus | Focus_world
+
+val has_world : view -> bool
+val keeper_position : stop option -> int option
+(** Only a real Keeper stop has an actionable row position. *)
+
 type group_direction = Previous_group | Next_group
 type fold_change = Fold | Unfold
 
-val stops : folded:group list -> group option list -> stop list
+val stops : view:view -> folded:group list -> group option list -> stop list
 (** The stops in drawing order: a heading for each group, then its rows
     unless the group is [folded]. A row of a view that does not group is a
-    stop of its own. *)
+    stop of its own. Memory and age views begin with [Stop_world]. *)
 
 val current_stop :
-  folded:group list -> focus:heading_focus option -> cursor:int -> group option list ->
+  view:view -> folded:group list -> focus:focus option -> cursor:int -> group option list ->
   stop option
 (** The stop the cursor is on: the focused heading while the cursor still
     rests where the focus placed it inside that group; else the row at
     [cursor], clamped to the list, or its group's heading when that group is
-    folded. [None] for an empty list. *)
+    folded. An empty memory/age view still selects [Stop_world]. *)
 
-val placement : group option list -> stop -> (heading_focus option * int) option
+val placement : view:view -> group option list -> stop -> (focus option * int) option
 (** The focus and row cursor a stop is placed with. A heading rests the
     cursor on its group's first row; [None] for a heading no row is under. *)
 
@@ -290,6 +299,12 @@ val group_jump : group_direction -> stop list -> stop -> stop option
 
 val refold : fold_change -> group -> group list -> group list
 (** The folded groups after folding or unfolding [group]. *)
+
+val first_folds :
+  seen:group list -> folded:group list -> group option list -> group list * group list
+(** Apply E26 defaults only when a group is first observed in this session.
+    Returns the seen groups and folded groups. Later refreshes retain the
+    reader's explicit fold/unfold choices, including newly arriving groups. *)
 
 type group_counts = {
   attention_rows : int;

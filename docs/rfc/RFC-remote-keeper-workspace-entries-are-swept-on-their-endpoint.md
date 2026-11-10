@@ -3,7 +3,7 @@ rfc: "remote-keeper-workspace-entries-are-swept-on-their-endpoint"
 title: "remote_ssh Keeper 가 남긴 작업 폴더는 그 endpoint 에서 치운다"
 status: Draft
 created: 2026-11-08
-updated: 2026-11-09
+updated: 2026-11-10
 author: claude
 related: ["idle-keeper-worktrees-are-swept-where-they-live"]
 ---
@@ -15,6 +15,7 @@ related: ["idle-keeper-worktrees-are-swept-where-they-live"]
 - 운영자 결정(2026-11-08):
   - 처음부터 켜 두고 바로 지운다(`apply`).
   - git 은 커밋만 지킨다.
+- 운영자 결정(2026-11-10): 새것인 항목 안으로 들어가 오래된 하위 폴더도 지운다. `.git`·`dune-project` 가 있는 폴더는 한 덩어리로 본다(규칙 5).
 
 ## 1. 문제
 
@@ -85,6 +86,26 @@ Keeper 루트 바로 아래 항목마다 아래를 모두 만족해야 지운다
      - `git ls-remote origin` 이 그 sha 를 광고한다. PR 사본이 여기에 해당한다. ls-remote 가 실패하면 건너뛴다.
    - 본 저장소(`.git` 이 폴더)이면, 그 저장소에 묶인 worktree 가 이 항목 밖에 없다. 연결된 worktree(`.git` 이 파일)는 지워도 커밋을 잃지 않는다. 커밋은 본 저장소에 있다.
    - git 명령마다 5초 제한을 둔다. 실패하거나 시간이 넘으면 건너뛴다.
+5. **새것인 항목 안의 오래된 폴더도 같은 규칙으로 본다.** 11-10 에 더했다.
+   - 항목이 규칙 2에 걸리면(48시간 안에 건드림) 그 안의 하위 폴더마다 규칙 0~4를 다시 적용한다. 하위 폴더도 새것이면 다시 그 안으로 들어간다.
+   - 한 덩어리는 안으로 들어가지 않는다. 통째로 오래됐을 때만 지운다.
+     - 한 덩어리: `.git` 이 있는 폴더(working tree, linked worktree), Git 디렉터리(`HEAD` 와 `objects` 또는 `commondir`), `dune-project` 가 있는 폴더.
+     - 이유: 쓰는 중인 소스 트리에서 안 건드린 부분(`docs/`, 안 바뀐 pack)만 지우면 나머지가 깨진다.
+   - 안에서는 폴더만 지운다. 파일, 점 폴더, symlink 는 남긴다. 디스크를 채우는 것은 사본 폴더다. 메모 같은 작은 파일은 아니다.
+   - 보고에는 오래된 하위 폴더만 `memory/t05` 처럼 루트에서 본 경로로 적는다. 새것이라 지나간 폴더는 적지 않는다.
+   - 치르는 값: `.git`·`dune-project` 가 없는 소스 트리(다른 언어 프로젝트를 압축만 푼 것)를 쓰는 중이면, 그 안에서 48시간 넘게 안 건드린 폴더가 지워질 수 있다. 리뷰 컨테이너의 사본은 모두 masc 소스라 `dune-project` 가 있다.
+   - 시간: 가장 큰 루트(`code-reviewer-uncle`, 21 GB)의 report 실행이 21초에서 35초가 됐다(11-10). 제한은 5분이다.
+
+규칙 5의 계기(11-10 00:2x KST 측정, 컨테이너 시각은 UTC):
+
+- 11-09 손 apply 와 매시간 정리로 48시간 넘은 최상위 항목은 다 지워졌다. 그래도 사용률은 11-09 20:32 KST 50% 에서 11-10 00:22 KST 56% 로 올랐다. 시간당 약 1.8 GiB 다.
+- 큰 사본은 Keeper 가 계속 메모를 쓰는 폴더 안에 있다.
+  - `code-reviewer-uncle/memory` 는 17.6 GB 다. 리뷰 메모가 계속 새로 들어와 통째로는 늘 새것이다.
+  - 그 안 `t05`(12.3 GB)에는 폴더 46개가 있고, 그중 15개가 masc 소스 사본이다.
+  - 규칙 0~4만으로는 `memory` 가 새것인 한 이 사본들이 영영 남는다.
+- 같은 날 이 규칙으로 report 를 돌렸다.
+  - 48시간 기준으로는 안쪽 후보가 0.1 GiB 다. 사본들이 아직 48시간이 안 됐다.
+  - 24시간 기준으로는 `code-reviewer-uncle` 안쪽 32개 6.2 GiB(`memory/tb` 3.4 GiB), `code-reviewer-brother` 안쪽 17개 6.25 GiB(`w/p113` 등 각 약 1 GiB)다.
 
 지우는 방식과 보고:
 
@@ -102,7 +123,7 @@ Keeper 루트 바로 아래 항목마다 아래를 모두 만족해야 지운다
 커밋 안 한 변경과 untracked 파일은 보지 않는다. 운영자 결정이다.
 
 - 치르는 값: 48시간 넘게 아무 파일도 안 건드린 미커밋 작업은 사라진다.
-- 막는 것: 커밋, stash, 원격에 없는 브랜치는 남는다. 2번 조건 때문에 48시간 안에 건드린 파일이 하나라도 있으면 항목 전체가 남는다.
+- 막는 것: 커밋, stash, 원격에 없는 브랜치는 남는다. 2번 조건 때문에 48시간 안에 건드린 파일이 하나라도 있으면 그 폴더는 남는다. 한 덩어리가 아니면 그 안의 오래된 하위 폴더는 규칙 5로 지운다.
 - 이유: 반대로 정하면 위 `kej` 같은 리뷰 메모 사본이 영영 남는다. 측정한 11개 중 4개가 그렇다.
 
 설정은 `Runtime_settings` 에 셋을 더한다.
@@ -128,7 +149,8 @@ payload(Python, `test/test_keeper_remote_workspace_cleanup.py`, `test/test_keepe
 - 지워지는 것: 오래되고 깨끗한 clone, 오래된 dirty·untracked clone, 원격이 광고하는 detached PR head, 오래된 비-git 폴더.
 - 남는 것: 점 항목(`.config/gh`), 원격에 없는 로컬 커밋, ls-remote 실패, stash, 최근 ctime, 안쪽 저장소의 로컬 커밋, symlink 항목, 밖에 묶인 worktree, 살아 있는 프로세스 cwd, 읽을 수 없는 `/proc`.
 - report 모드는 아무것도 지우지 않는다.
-- 보호 조건 하나를 빼면 해당 시험이 실패해야 한다.
+- 규칙 5: 새것인 폴더 안의 오래된 폴더는 지운다(두 단계 아래까지). 안쪽의 파일·점 폴더·symlink 는 남긴다. `.git`·`dune-project`·Git 디렉터리 폴더는 새것이면 안으로 들어가지 않고, 통째로 오래되면 지운다. 안쪽에서도 로컬 커밋과 살아 있는 프로세스는 지킨다.
+- 보호 조건 하나를 빼면 해당 시험이 실패해야 한다. 규칙 5의 조건 9개를 하나씩 빼 보면 모두 시험이 실패한다(11-10).
 
 OCaml:
 
@@ -149,3 +171,4 @@ OCaml:
 - L0: 이 문서.
 - L1: payload 와 Python 시험.
 - L2: OCaml 모듈, 설정 둘, 서버 호출, changelog.
+- L3(11-10): 규칙 5. payload 와 Python 시험, 설정 설명.

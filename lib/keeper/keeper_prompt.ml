@@ -45,6 +45,12 @@ let constitution_amendments_block (amendments : World_constitution_render.amendm
        [ "changes", String.concat "\n" (added @ removed) ])
 ;;
 
+let constitution_current_block articles =
+  String.trim
+    (render_instruction Prompt_names.keeper_constitution_current
+       [ "articles", World_constitution_render.articles articles ])
+;;
+
 let build_keeper_system_prompt
     ~instructions ?(keeper_name = "") ?(workspace_root = "")
     ?(constitution = "") () =

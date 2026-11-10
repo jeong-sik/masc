@@ -6700,7 +6700,8 @@ let launch_all_memory_facts_load state ~mailbox =
       (* One answer: the merged facts and the keepers missing from them
          travel together, so the handler never has to keep one answer across
          another. *)
-      Ok (Masc.Tui_decode_memory_facts.merge_keeper_memory_facts loads))
+      Ok (Masc.Tui_decode_memory_facts.merge_keeper_memory_facts
+        ~refused:health.mhs_refused_keepers loads))
 
 let open_all_fleet_memory state ~mailbox =
   state.memory_facts_keeper <- Some "*";
@@ -9221,7 +9222,7 @@ let owe_keeper_calls_read state ~mailbox ~keeper_name =
   update_calls_owed state ~keeper_name Masc_tui_owed_read.changed;
   launch_owed_keeper_calls state ~mailbox
 
-(* The open Board post reads when it opens or [r] asks, when
+(* The Board post being read or replied to reads when it opens or [r] asks, when
    [notifications/board] names it or names no post, after the operator's own
    comment or vote, on a revalidation or a resumed authority, and again after
    a failed read (RFC-0480 §3.1). *)
@@ -9229,7 +9230,8 @@ let board_post_on_screen state =
   if state.view = Board then
     match state.board_mode with
     | Board_read post_id -> Some post_id
-    | Board_list | Board_compose -> None
+    | Board_compose -> state.board_compose_reply_to
+    | Board_list -> None
   else None
 
 let settle_board_post_owed state ~post_id transition =
@@ -9604,17 +9606,18 @@ let launch_owed_memory_health state ~mailbox =
    than that (RFC-0511 D11). *)
 let memory_world_read_interval_s = Server_dashboard_http_core_cache.standard_cache_ttl_s
 
-(* Runs on every loop iteration. Only the Memory overview draws the world line,
-   so only the Memory overview reads the world: the facts browser, Metrics and
-   the Keepers list have no use for it. Each answer sets the time before which
+(* Runs on every loop iteration. The Memory overview and the Keepers memory/age
+   views draw the same world reading. Each answer sets the time before which
    no read starts, so an open screen asks once per interval, a failed read
    waits the same interval, and a screen entered again within it draws the
    inventory already held. The read carries the expected workspace and needs
    the server's receipt for it, so an answer from another workspace is an
    error and not a count. *)
 let launch_owed_memory_world state ~mailbox =
-  if state.view = Memory && Option.is_none state.memory_facts_keeper
-     && server_authority_ready state then
+  let visible = (state.view = Memory && Option.is_none state.memory_facts_keeper)
+    || (state.view = Keepers Keeper_list
+        && Masc_tui_keeper_list_model.has_world state.keeper_list_view) in
+  if visible && server_authority_ready state then
     match Masc_tui_memory_world.start ~now:(monotonic_now_s ()) state.memory_world with
     | None -> ()
     | Some (next, request) ->
@@ -10028,7 +10031,8 @@ let keeper_story_turns_on_screen state =
   | Some
       ( Masc_tui_keeper_story.Story
       | Masc_tui_keeper_story.Schedule
-      | Masc_tui_keeper_story.Memory )
+      | Masc_tui_keeper_story.Memory
+      | Masc_tui_keeper_story.World )
   | None -> None
 
 (* One Keeper's schedules read again under the same rules as the fleet list,
@@ -17484,6 +17488,9 @@ let withdraw_currency_authority state =
    match reloads it, so a screen never shows rows from a workspace the server
    just stopped serving. *)
 let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigation ~draft =
+  state.keeper_list_focus <- None;
+  state.keeper_list_folded <- [];
+  state.keeper_list_seen_groups <- [];
   state.followed_from <- None;
   withdraw_usage_workspace state;
   withdraw_voice_capture state;
@@ -19232,15 +19239,19 @@ let keeper_story_action state key =
   if String.equal key "esc" && Option.is_some state.keeper_settings_intent then None
   else
     Masc_tui_keeper_story.action_of_key
-      ~on_keeper:(Option.is_some (selected_keeper state))
+      ~selection:(match keeper_list_stop state with
+        | Some Masc_tui_keeper_list_model.Stop_world -> Masc_tui_keeper_story.World_selected
+        | Some (Masc_tui_keeper_list_model.Stop_row _) -> Masc_tui_keeper_story.Keeper_selected
+        | Some (Masc_tui_keeper_list_model.Stop_heading _) | None -> Masc_tui_keeper_story.No_selection)
       state.keeper_story key
 ;;
 
-(* What a key or a press does to the Story window. Only [Open_detail] leaves
-   the list, so it is the one that needs the mailbox. *)
+(* World selects its own row before opening; it never borrows the Keeper
+   that was under the cursor. Only [Open_detail] leaves the list. *)
 let apply_keeper_story_action state ~mailbox = function
   | Masc_tui_keeper_story.Show page -> state.keeper_story <- Some page
   | Masc_tui_keeper_story.Close -> state.keeper_story <- None
+  | Masc_tui_keeper_story.Open_world -> open_keeper_world state
   | Masc_tui_keeper_story.Open_detail ->
       state.keeper_story <- None;
       Option.iter (open_keeper_detail state ~mailbox) (selected_keeper state)
@@ -19416,6 +19427,14 @@ let press_marked_target state ~mailbox (target : press_target) =
                Masc_tui_lane_inventory.find_identity target [row])) ->
              open_lane_inventory_selection state ~mailbox
          | Some index -> Option.iter (fun list -> list.rl_place index) (row_list state))
+  | Press_keeper_world ->
+      if state.view = Keepers Keeper_list
+         && Masc_tui_keeper_list_model.has_world state.keeper_list_view then
+        if keeper_list_stop state = Some Masc_tui_keeper_list_model.Stop_world then
+          Option.iter (apply_keeper_story_action state ~mailbox)
+            (Masc_tui_keeper_story.action_of_key ~selection:Masc_tui_keeper_story.World_selected
+               state.keeper_story "\r")
+        else place_keeper_list_stop state Masc_tui_keeper_list_model.Stop_world
   | Press_keeper_row name -> (
       match keeper_index state name with
       (* A press read against a list frame after a key in the same burst
@@ -19427,10 +19446,10 @@ let press_marked_target state ~mailbox (target : press_target) =
          the cursor is on is Enter on it, which opens the window, and on an
          open window it is Right, which opens the detail: a press is the
          pointer's only way to either. *)
-      | Some index when index = state.keeper_cursor && not (keeper_list_on_heading state) ->
+      | Some index when keeper_list_stop state = Some (Masc_tui_keeper_list_model.Stop_row index) ->
           let key = if Option.is_some state.keeper_story then "right" else "\r" in
           Option.iter (apply_keeper_story_action state ~mailbox)
-            (Masc_tui_keeper_story.action_of_key ~on_keeper:true state.keeper_story key)
+            (Masc_tui_keeper_story.action_of_key ~selection:Masc_tui_keeper_story.Keeper_selected state.keeper_story key)
       | Some _ -> keeper_list_select_name state name)
   | Press_keeper_view view ->
       if state.view = Keepers Keeper_list && view <> state.keeper_list_view then begin
@@ -20364,9 +20383,8 @@ let resume_reads_after_authority_change state ~mailbox ~refresh_inflight
               launch_fusion_launch_options_load state ~mailbox
           | Some (Fusion_launch_open _ | Fusion_launch_started _) | None -> ())
      | Board ->
-         (match state.board_mode with
-          | Board_read post_id -> owe_board_post_read state ~mailbox ~post_id
-          | Board_list | Board_compose -> ())
+         Option.iter (fun post_id -> owe_board_post_read state ~mailbox ~post_id)
+           (board_post_on_screen state)
      | Keepers Keeper_message ->
          Option.iter (fun keeper_name ->
            launch_keeper_chat_file_changes_load ~force:true state ~mailbox ~keeper_name;
@@ -39399,7 +39417,7 @@ Use relative paths for resources already held in the package. -->
                 keeper.k_name)
        (* The Story window under the list takes its keys before the list and the
           surface ring do: an open window owns Tab, Esc, [s] and [m] (RFC-0515
-          section 2.5, E15). A closed one takes Enter alone. *)
+          section 2.5, E15). W explicitly selects the World dock. *)
        | Some key
          when state.view = Keepers Keeper_list
               && Option.is_some (keeper_story_action state key) ->
@@ -39427,7 +39445,7 @@ Use relative paths for resources already held in the package. -->
        | Some (("left" | "right") as arrow)
          when state.view = Keepers Keeper_list && Option.is_none (current_detail_reading state)
               && keeper_list_on_heading state ->
-           refold_keeper_list_heading state
+           refold_keeper_list_focus state
              (if arrow = "left" then Masc_tui_keeper_list_model.Fold
               else Masc_tui_keeper_list_model.Unfold)
        | Some "o" when state.view = Keepers Keeper_list ->
@@ -39514,8 +39532,7 @@ Use relative paths for resources already held in the package. -->
             | Connectors | Runtime | Config | Code | Tools
             | System_logs -> ())
        | Some k when Masc_tui_keys.opens_keepers ~message_mode k ->
-           state.detail_focus_recovery <- None;
-           transition_keeper_view state (Keepers Keeper_list)
+           goto_surface state ~mailbox:async_messages (Keepers Keeper_list)
        (* Following preserves the source surface; Esc returns to it. *)
        | Some "\x1d" ->
            (match
@@ -39787,6 +39804,14 @@ Use relative paths for resources already held in the package. -->
                let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
                let projection = Masc_tui_types.lanes_overview_projection state ~rows ~cols in
                Masc_tui_scroll.page_step ~height:projection.lop_list_height
+             else if (state.view = Verification
+                       && Option.is_none state.verification_detail_request_id)
+                     || (state.view = Harness && Option.is_none state.harness_detail) then
+               (match scrolled_surface state state.view with
+                | None -> surface_page_rows state
+                | Some scrolled ->
+                    Masc_tui_scroll.page_step
+                      ~height:(surface_body_height ~rows:(surface_rows state) scrolled))
              else surface_page_rows state
            in
            let direction = if key = Some "pagedown" then 1 else -1 in
@@ -41939,7 +41964,11 @@ Use relative paths for resources already held in the package. -->
                 state.board_compose_reply_to <- Some post_id;
                 state.board_compose_hearth <- None;
                 state.board_compose_attach_input <- None;
-                state.board_post_error <- None
+                state.board_post_error <- None;
+                (match Board_detail.view_for state.board_detail ~post_id with
+                 | Absent ->
+                     owe_board_post_read state ~mailbox:async_messages ~post_id
+                 | Loading | Ready _ | Failed _ -> ())
             | Board_list | Board_compose -> ())
        | Some "v" | Some "V" when state.view = Board ->
            (* Lowercase votes up, uppercase votes down -- the shift is the

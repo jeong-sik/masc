@@ -1,4 +1,0 @@
-ASSERT no raw control byte
-ASSERT first syllable intact
-ASSERT second syllable intact
-ASSERT the NUL itself is drawn

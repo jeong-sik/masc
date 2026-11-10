@@ -207,7 +207,7 @@ let test_runtime_view_contains_only_failing_rows () =
     [ "a"; "b" ]
     (names (Model.order_rows ~outside:unread ~view:Model.By_runtime ~sort:Model.Name ~now:0. rows));
   Alcotest.(check bool) "the matrix uses the same cause grouping as failures" true
-    (Model.group_of_view ~outside:unread Model.By_runtime (List.nth rows 2)
+    (Model.group_of_view ~now:0. ~outside:unread Model.By_runtime (List.nth rows 2)
      = Some (Model.Group_cause Model.Cause_unnamed))
 
 let test_cause_view_puts_failing_rows_first () =
@@ -216,10 +216,10 @@ let test_cause_view_puts_failing_rows_first () =
     [ "failing"; "sound" ]
     (names (Model.order_rows ~outside:unread ~view:Model.By_cause ~sort:Model.Name ~now:0. rows));
   Alcotest.(check bool) "a failure with no receipt names no cause" true
-    (Model.group_of_view ~outside:unread Model.By_cause (List.nth rows 1)
+    (Model.group_of_view ~now:0. ~outside:unread Model.By_cause (List.nth rows 1)
      = Some (Model.Group_cause Model.Cause_unnamed));
   Alcotest.(check bool) "a sound row is not failing" true
-    (Model.group_of_view ~outside:unread Model.By_cause (List.hd rows) = Some (Model.Group_cause Model.Not_failing))
+    (Model.group_of_view ~now:0. ~outside:unread Model.By_cause (List.hd rows) = Some (Model.Group_cause Model.Not_failing))
 
 let day = float_of_int Masc.Keeper_turn_pulse.window_seconds
 let slot_seconds = Masc.Keeper_turn_pulse.slot_seconds
@@ -250,7 +250,7 @@ let test_day_wall_puts_the_most_failed_half_hours_first () =
     [ "two"; "one"; "no-pulse"; "older" ]
     (names (Model.order_rows ~outside:unread ~view:Model.Day_wall ~sort:Model.Name ~now rows));
   Alcotest.(check bool) "the day wall does not group" true
-    (Model.group_of_view ~outside:unread Model.Day_wall (List.hd rows) = None);
+    (Model.group_of_view ~now:0. ~outside:unread Model.Day_wall (List.hd rows) = None);
   Alcotest.(check bool) "the day wall can reorder every half hour" true
     (Model.order_clock_step Model.Day_wall = Some (float_of_int slot_seconds));
   Alcotest.(check bool) "the state view only reorders on new readings" true
@@ -265,6 +265,29 @@ let test_day_wall_counts_rested_and_clamps_future () =
       slot (newest - Masc.Keeper_turn_pulse.window_seconds) 1 0]) "rested" in
   Alcotest.(check (option int)) "rest and future share newest; 24h boundary excluded"
     (Some 1) (Model.failed_half_hours ~now r)
+
+let test_cause_verdict_and_first_folds () =
+  let healthy = health "healthy" in
+  let rows =
+    [ row ~health:(health "failing") ~edit:(fun r -> { r with kr_paused = true }) "paused"
+    ; row ~health:healthy ~edit:(with_pulse [ failed_slot ~ago:600. ]) "recovered"
+    ; row ~health:(health "offline") ~edit:(with_pulse [ failed_slot ~ago:600. ]) "offline-recovered"
+    ; row ~health:healthy "sound" ] in
+  let group row = Model.group_of_view ~now ~outside:unread Model.By_cause row in
+  Alcotest.(check bool) "paused takes precedence and offline can recover" true
+    (List.map group rows = List.map (fun cause -> Some (Model.Group_cause cause))
+      [ Model.Cause_paused; Model.Cause_recovered; Model.Cause_recovered; Model.Not_failing ]);
+  Alcotest.(check (list string)) "runtime matrix omits paused failing Keeper" []
+    (names (Model.order_rows ~outside:unread ~view:Model.By_runtime ~sort:Model.Name ~now rows));
+  let recovered = Model.Group_cause Model.Cause_recovered in
+  let sound = Model.Group_cause Model.Not_failing in
+  let groups = Some recovered :: List.init 5 (fun _ -> Some sound) in
+  let seen, folded = Model.first_folds ~seen:[] ~folded:[] groups in
+  Alcotest.(check bool) "recovery and more than four sound Keepers initially fold" true
+    (List.mem recovered folded && List.mem sound folded);
+  let folded = Model.refold Model.Unfold recovered folded in
+  let _, refreshed = Model.first_folds ~seen ~folded groups in
+  Alcotest.(check bool) "refresh preserves explicit unfold" false (List.mem recovered refreshed)
 
 let reading_by_name readings ~keeper_name =
   match List.assoc_opt keeper_name readings with
@@ -284,7 +307,7 @@ let test_time_memory_and_age_views_follow_the_outside_reading () =
     [ "e"; "d"; "c"; "b"; "a" ]
     (names (Model.order_rows ~outside:due ~view:Model.By_time ~sort:Model.Name ~now rows));
   Alcotest.(check bool) "a late row heads the late group" true
-    (Model.group_of_view ~outside:due Model.By_time (List.nth rows 4)
+    (Model.group_of_view ~now:0. ~outside:due Model.By_time (List.nth rows 4)
      = Some (Model.Group_due Model.Due_late));
   let follow =
     read (fun follow -> { Model.outside_unread with Model.follow })
@@ -366,6 +389,7 @@ let group_label = function
   | Model.Group_age _ -> "age"
 
 let stop_label = function
+  | Model.Stop_world -> "world"
   | Model.Stop_heading group -> "heading " ^ group_label group
   | Model.Stop_row position -> "row " ^ string_of_int position
 
@@ -375,16 +399,16 @@ let test_stops_open_each_group_with_its_heading () =
   Alcotest.(check (list string)) "a heading before each group's rows"
     [ "heading attention"; "row 0"; "row 1"; "heading failing"; "row 2"
     ; "heading active"; "row 3"; "row 4" ]
-    (stop_labels (Model.stops ~folded:[] grouped));
+    (stop_labels (Model.stops ~view:Model.By_state ~folded:[] grouped));
   Alcotest.(check (list string)) "a folded group keeps its heading and hides its rows"
     [ "heading attention"; "row 0"; "row 1"; "heading failing"; "heading active"; "row 3"; "row 4" ]
-    (stop_labels (Model.stops ~folded:[ failing_group ] grouped));
+    (stop_labels (Model.stops ~view:Model.By_state ~folded:[ failing_group ] grouped));
   Alcotest.(check (list string)) "a view that does not group has only rows"
     [ "row 0"; "row 1" ]
-    (stop_labels (Model.stops ~folded:[ failing_group ] [ None; None ]))
+    (stop_labels (Model.stops ~view:Model.By_state ~folded:[ failing_group ] [ None; None ]))
 
 let test_steps_stop_on_headings_and_hold_at_the_ends () =
-  let stops = Model.stops ~folded:[] grouped in
+  let stops = Model.stops ~view:Model.By_state ~folded:[] grouped in
   let step delta stop = Option.map stop_label (Model.step_stop ~delta stops stop) in
   Alcotest.(check (option string)) "down from a heading reaches its first row" (Some "row 0")
     (step 1 (Model.Stop_heading attention_group));
@@ -398,10 +422,10 @@ let test_steps_stop_on_headings_and_hold_at_the_ends () =
     (step 1 (Model.Stop_row 4));
   Alcotest.(check (option string)) "a folded group's row is not a stop" None
     (Option.map stop_label
-       (Model.step_stop ~delta:1 (Model.stops ~folded:[ failing_group ] grouped) (Model.Stop_row 2)))
+       (Model.step_stop ~delta:1 (Model.stops ~view:Model.By_state ~folded:[ failing_group ] grouped) (Model.Stop_row 2)))
 
 let test_group_jumps_reach_the_nearest_heading () =
-  let stops = Model.stops ~folded:[] grouped in
+  let stops = Model.stops ~view:Model.By_state ~folded:[] grouped in
   let jump direction stop = Option.map stop_label (Model.group_jump direction stops stop) in
   Alcotest.(check (option string)) "] from a row reaches the next group" (Some "heading failing")
     (jump Model.Next_group (Model.Stop_row 0));
@@ -415,11 +439,12 @@ let test_group_jumps_reach_the_nearest_heading () =
     (jump Model.Previous_group (Model.Stop_heading attention_group));
   Alcotest.(check (option string)) "a view without headings has no group to reach" None
     (Option.map stop_label
-       (Model.group_jump Model.Next_group (Model.stops ~folded:[] [ None; None ]) (Model.Stop_row 0)))
+       (Model.group_jump Model.Next_group (Model.stops ~view:Model.By_state ~folded:[] [ None; None ]) (Model.Stop_row 0)))
 
 let test_current_stop_follows_focus_folds_and_the_cursor () =
   let current ?(folded = []) ?focus cursor groups =
-    Option.map stop_label (Model.current_stop ~folded ~focus ~cursor groups)
+    Option.map stop_label (Model.current_stop ~view:Model.By_state ~folded
+      ~focus:(Option.map (fun focus -> Model.Focus_heading focus) focus) ~cursor groups)
   in
   let failing_focus = { Model.heading = failing_group; cursor_at = 2 } in
   Alcotest.(check (option string)) "no focus is the cursor's row" (Some "row 2") (current 2 grouped);
@@ -442,10 +467,11 @@ let test_a_heading_rests_the_cursor_on_its_first_row () =
       (fun (focus, cursor) ->
         (match focus with
          | None -> "no focus"
-         | Some { Model.heading; cursor_at } ->
+         | Some Model.Focus_world -> "world focus"
+         | Some (Model.Focus_heading { Model.heading; cursor_at }) ->
              "focus " ^ group_label heading ^ " at " ^ string_of_int cursor_at)
         ^ ", cursor " ^ string_of_int cursor)
-      (Model.placement grouped stop)
+      (Model.placement ~view:Model.By_state grouped stop)
   in
   Alcotest.(check (option string)) "a heading" (Some "focus active at 3, cursor 3")
     (placed (Model.Stop_heading active_group));
@@ -727,10 +753,27 @@ let test_portrait_shows_only_in_the_two_line_list () =
           [ Model.One_line; Model.Two_lines ])
     Model.views
 
+let test_world_is_a_distinct_non_keeper_stop () =
+  List.iter (fun view ->
+    let stops = Model.stops ~view ~folded:[] grouped in
+    Alcotest.(check bool) "world leads memory and age" true (List.hd stops = Model.Stop_world);
+    Alcotest.(check bool) "world survives empty roster" true
+      (Model.current_stop ~view ~folded:[] ~focus:None ~cursor:0 [] = Some Model.Stop_world);
+    Alcotest.(check bool) "world has no actionable Keeper index" true
+      (Model.keeper_position (Some Model.Stop_world) = None);
+    Alcotest.(check bool) "world placement cannot become row zero" true
+      (Model.placement ~view grouped Model.Stop_world = Some (Some Model.Focus_world, 0));
+    Alcotest.(check bool) "down from world reaches first heading" true
+      (Model.step_stop ~delta:1 stops Model.Stop_world = Some (Model.Stop_heading attention_group)))
+    [Model.By_memory; Model.By_age];
+  Alcotest.(check bool) "other views reject world placement" true
+    (Model.placement ~view:Model.By_state grouped Model.Stop_world = None)
+
 let () =
   Alcotest.run "tui_keeper_list_model"
     [ ( "decisions"
-      , [ Alcotest.test_case "view, density and sort cycles" `Quick test_cycles
+      , [ Alcotest.test_case "world is a distinct non-Keeper stop" `Quick test_world_is_a_distinct_non_keeper_stop
+        ; Alcotest.test_case "view, density and sort cycles" `Quick test_cycles
         ; Alcotest.test_case "priority order" `Quick test_priority_orders_attention_activity_waiting_then_inactive
         ; Alcotest.test_case "recent and name ordering" `Quick test_recent_and_name_have_deterministic_ties
         ; Alcotest.test_case "streaming keeps async and schedule badges" `Quick test_streaming_keeps_async_and_schedule_badges
@@ -758,6 +801,7 @@ let () =
             test_runtime_view_contains_only_failing_rows
         ; Alcotest.test_case "cause view puts failing rows first" `Quick
             test_cause_view_puts_failing_rows_first
+        ; Alcotest.test_case "cause verdict and first folds" `Quick test_cause_verdict_and_first_folds
         ; Alcotest.test_case "day wall counts rest and clamps future" `Quick
             test_day_wall_counts_rested_and_clamps_future
         ; Alcotest.test_case "day wall puts the most failed half-hours first" `Quick

@@ -78,6 +78,12 @@ let with_line_diagnostics (ledger : World_constitution_store.ledger) fields =
                  `Assoc
                    [ "line", `Int line.World_constitution_store.line_number
                    ; "subject", `String line.World_constitution_store.subject
+                   ; ( "article_ids"
+                     , `List
+                         (List.map
+                            (fun id ->
+                              `String (World_constitution_types.Article_id.to_string id))
+                            line.World_constitution_store.article_ids) )
                    ])
                isolated) )
       ]

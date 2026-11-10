@@ -14,9 +14,9 @@ val rows : Masc.Tui_decode.task list -> Masc.Tui_decode.task list
     use: a poll that drops a finished task shifts every index below it. *)
 
 val work_rows : Masc.Tui_decode.task list -> Masc.Tui_decode.task list
-(** Held tasks in {!rows} order followed by Todo rows, so Work first selects
-    submitted work awaiting a ruling and can inspect the whole open backlog.
-    Terminal tasks remain available through direct references. *)
+(** Open tasks in the caller's backlog order, without promoting verification
+    submissions to operator requests. Terminal tasks remain available through
+    direct references. *)
 
 val work_selected_index :
   Masc.Tui_decode.task list -> selected:string option -> int option

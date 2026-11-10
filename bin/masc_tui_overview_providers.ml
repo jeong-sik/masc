@@ -6,7 +6,6 @@ module Types = Masc_tui_types
 open Masc_tui_ansi
 
 type section = {
-  title : string;
   lines : string list;
 }
 
@@ -1235,8 +1234,6 @@ let counts ~runtimes (accounts : Masc.Tui_decode_usage.provider_usage_account li
        | Types.Quota_unread | Types.Quota_failed _ -> Exhausted_unknown)
   }
 
-let title_text () = Printf.sprintf " %sPlan usage%s" Ansi.bold Ansi.reset
-
 (* Find the formerly visible prefix without segmenting a potentially huge
    error tail. Grow the UTF-8 sample only until the next grapheme establishes
    the cut; a single long grapheme may itself need the whole sample. *)
@@ -1273,8 +1270,7 @@ let section_with ~draw ~bound ~(providers : Types.overview_providers_reading) ~r
   | Types.Providers_unread -> None
   | Types.Providers_failed reason ->
       Some
-        { title = title_text ()
-        ; lines =
+        { lines =
             [ Printf.sprintf " %susage data unavailable: %s%s" (Theme.text_status Masc_tui_theme.Warn)
                 (detail reason) Ansi.reset
             ]
@@ -1331,13 +1327,11 @@ let section_with ~draw ~bound ~(providers : Types.overview_providers_reading) ~r
       match rows with
       | [] ->
           Some
-            { title = title_text ()
-            ; lines = summary @ [ " no usage data" ] @ notes
+            { lines = summary @ [ " no usage data" ] @ notes
             }
       | _ :: _ ->
           Some
-            { title = title_text ()
-            ; lines = summary @ ("" :: rows) @ notes
+            { lines = summary @ ("" :: rows) @ notes
             }
 
 let bound_groups ~width ~rows groups =

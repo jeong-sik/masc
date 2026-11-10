@@ -24,8 +24,9 @@ let announce_if_appended ~keeper_name ~(route : Row_route.t Lazy.t) result =
    | Ok (Already_present _) | Error _ -> ());
   result
 
-(* [line] is encoded under the file lock only when its slot is absent, so a
-   lazy route is never read for a row that is already present. Stdlib.Lazy:
+(* Ordinary delivery lines are encoded under the file lock only when their
+   slot is absent. Autonomous candidates are also decoded for owner/binding
+   validation before writing; their wrapper uses a fixed route. Stdlib.Lazy:
    the lock body runs in a systhread where Eio.Lazy cannot run, and each lazy
    belongs to one append call, so nothing forces it concurrently. *)
 type append_once_line =
@@ -44,7 +45,8 @@ let transcript_slot_ordinal = function
   | Keeper_chat_delivery_identity.Approval_resolution
   | Keeper_chat_delivery_identity.Approval_replay
   | Keeper_chat_delivery_identity.Approval_replay_correction
-  | Keeper_chat_delivery_identity.Approval_continuation -> None
+  | Keeper_chat_delivery_identity.Approval_continuation
+  | Keeper_chat_delivery_identity.Autonomous_input_binding _ -> None
 ;;
 
 let validate_append_once_lines lines =
@@ -79,7 +81,8 @@ let validate_append_once_lines lines =
         | Keeper_chat_delivery_identity.Approval_resolution
         | Keeper_chat_delivery_identity.Approval_replay
         | Keeper_chat_delivery_identity.Approval_replay_correction
-        | Keeper_chat_delivery_identity.Approval_continuation -> None
+        | Keeper_chat_delivery_identity.Approval_continuation
+        | Keeper_chat_delivery_identity.Autonomous_input_binding _ -> None
       in
       let* () =
         match execution_id with
@@ -107,7 +110,47 @@ let validate_append_once_lines lines =
   loop [] [] [] lines
 ;;
 
-let append_lines_once ?(reject_partial_after_result = false) path ~delivery_key
+let validate_autonomous_candidates index ~delivery_key lines =
+  let open Result.Syntax in
+  let bindings = List.filter_map (fun candidate ->
+    match candidate.transcript_slot with
+    | Keeper_chat_delivery_identity.Autonomous_input_binding inputs -> Some inputs
+    | Keeper_chat_delivery_identity.Accepted_user | Terminal_result | Settled_failure
+    | Tool_call _ | Tool_delivery _ | Approval_request | Approval_resolution | Approval_replay
+    | Approval_replay_correction | Approval_continuation -> None) lines in
+  match delivery_key with
+  | Keeper_chat_delivery_identity.Autonomous_turn _ ->
+    let* inputs = match bindings with
+      | [ inputs ] -> Ok inputs
+      | [] -> Error "autonomous append requires its prepared input binding"
+      | _ :: _ :: _ -> Error "autonomous append contains multiple input bindings" in
+    let* () = validate_indexed_autonomous_inputs index ~delivery_key inputs in
+    List.fold_left (fun result candidate ->
+      let* () = result in
+      try
+        match Yojson.Safe.from_string (Lazy.force candidate.line) with
+        | `Assoc fields ->
+          let* () = validate_row_fields fields in
+          let* () = match List.assoc_opt "id" fields with
+            | Some (`String id) when String.equal id candidate.row_id -> Ok ()
+            | Some _ | None -> Error "autonomous append row conflicts with its proposed row id" in
+          let* actual = Keeper_chat_delivery_identity.delivery_provenance_of_fields fields in
+          let expected = { Keeper_chat_delivery_identity.delivery_key
+                         ; transcript_slot = candidate.transcript_slot } in
+          let* () = match actual with
+            | Some actual when Keeper_chat_delivery_identity.delivery_provenance_equal expected actual -> Ok ()
+            | Some _ | None -> Error "autonomous append row conflicts with its proposed provenance" in
+          Keeper_chat_store_delivery_rules.validate_delivery_fields ~provenance:expected fields
+        | _ -> Error "autonomous append row must be an object"
+      with Yojson.Json_error _ -> Error "autonomous append row is not valid JSON") (Ok ()) lines
+  | Keeper_chat_delivery_identity.Operation _ | Operation_checkpoint _ | Operation_native _
+  | Fusion_run _ | Workspace_message _ | Connector_message _ | Approval_lifecycle _ ->
+    match bindings with
+    | [] -> Ok ()
+    | _ :: _ -> Error "autonomous input binding cannot be appended under another owner"
+;;
+
+let append_lines_once_with_added_slots ?(reject_partial_after_result = false) path ~delivery_key
       ~result_slot lines =
   match validate_append_once_lines lines with
   | Error detail -> Error detail
@@ -115,6 +158,8 @@ let append_lines_once ?(reject_partial_after_result = false) path ~delivery_key
     (match
        Fs_compat.update_private_file_durable_locked_result path (fun existing ->
       let inspect index =
+        let open Result.Syntax in
+        let* () = validate_autonomous_candidates index ~delivery_key lines in
         let rec loop found additions = function
           | [] -> Ok (found, List.rev additions)
           | ({ transcript_slot; row_id; line = _ } as candidate) :: rest ->
@@ -172,7 +217,8 @@ let append_lines_once ?(reject_partial_after_result = false) path ~delivery_key
              |> List.map (fun candidate -> Lazy.force candidate.line ^ "\n")
              |> String.concat ""
            in
-           (if additions = [] then None else Some payload), Ok result))
+           (if additions = [] then None else Some payload),
+           Ok (result, List.map (fun candidate -> candidate.transcript_slot) additions)))
      with
      | Private_file_succeeded result -> result
      | Private_file_succeeded_with_cleanup_failure
@@ -190,6 +236,11 @@ let append_lines_once ?(reject_partial_after_result = false) path ~delivery_key
             "%s; descriptor settlement failed: %s"
             (Fs_compat.durable_append_error_to_string error)
             (Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure)))
+;;
+
+let append_lines_once ?reject_partial_after_result path ~delivery_key ~result_slot lines =
+  append_lines_once_with_added_slots ?reject_partial_after_result path ~delivery_key ~result_slot lines
+  |> Result.map fst
 ;;
 
 let tool_call_append_lines ~ts ~route ~turn_ref ~delivery_key tool_calls =
@@ -253,4 +304,40 @@ let append_tool_calls_once
            ~keeper_name
            ~what:"tool-call append-once"
            exn)
+;;
+
+let append_autonomous_tool_calls_once ~base_dir ~keeper_name ~turn_ref
+    ~input_binding ~(tool_calls : tool_call list) () =
+  let open Result.Syntax in
+  let* () = Keeper_chat_delivery_identity.validate_approval_input_bindings input_binding in
+  try
+    ensure_dir_once ~base_dir;
+    let redaction = redaction_for ~base_dir ~keeper_name in
+    let tool_calls = List.map (redact_tool_call redaction) tool_calls in
+    let path = chat_path ~base_dir ~keeper_name in
+    let ts = Time_compat.now () in
+    let route = Lazy.from_val Row_route.none in
+    let delivery_key = Keeper_chat_delivery_identity.Autonomous_turn turn_ref in
+    let transcript_slot = Keeper_chat_delivery_identity.Autonomous_input_binding input_binding in
+    let row_id = mint_message_id ~ts in
+    let binding = { transcript_slot; row_id; line = lazy (encode_line
+      ~role:Role.System ~content:"" ~ts ~message_id:row_id ~turn_ref
+      ~provenance:{ Keeper_chat_delivery_identity.delivery_key; transcript_slot } ()) } in
+    let tools = tool_call_append_lines ~ts ~route ~turn_ref:(Some turn_ref) ~delivery_key tool_calls in
+    let* result, added_slots = append_lines_once_with_added_slots path ~delivery_key
+      ~result_slot:transcript_slot (binding :: tools) in
+    let committed_ownerships = List.filter_map (function
+      | Keeper_chat_delivery_identity.Tool_call { execution_id; ordinal } ->
+        Some { execution_id; ordinal }
+      | Keeper_chat_delivery_identity.Accepted_user | Terminal_result | Settled_failure
+      | Tool_delivery _ | Approval_request | Approval_resolution | Approval_replay
+      | Approval_replay_correction | Approval_continuation | Autonomous_input_binding _ -> None)
+      added_slots in
+    let+ result = if tool_calls = [] then Ok result
+      else announce_if_appended ~keeper_name ~route (Ok result) in
+    result, committed_ownerships
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn -> Error (report_store_failure ~operation:Keeper_chat_store_operation.Append
+      ~keeper_name ~what:"autonomous tool-call append-once" exn)
 ;;

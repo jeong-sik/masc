@@ -1,0 +1,2655 @@
+{
+  "kind": "exact-source-candidate-through-read-only-header-preserving-proxy",
+  "binary_build_commit": "ea87978b18e3fc6c4a143cf8e74de8cbc495d67e",
+  "expected_build_commit": "ea87978b18e3fc6c4a143cf8e74de8cbc495d67e",
+  "binary_sha256": "f0e09dfd1df96f5a477f9e2f434b2bacaad2cac93dad57009ae4aefe2f2ab9b5",
+  "capture_mode": "full-view-capture",
+  "explicit_memory_refresh_before_capture": true,
+  "native_memory_health_receipts": [
+    {
+      "file": "native-memory-health-read-0001.json",
+      "wire_sha256": "8d6203edda64d411a8984b3f7eb26611f15b9d6c0df3bc5c43fefd377880d596",
+      "sanitized_sha256": "8d6203edda64d411a8984b3f7eb26611f15b9d6c0df3bc5c43fefd377880d596",
+      "status": 200,
+      "completed_at_utc": "2026-11-09T12:18:01.444511+00:00"
+    },
+    {
+      "file": "native-memory-health-read-0002.json",
+      "wire_sha256": "153fee13a312e9883537af4f3c8fa92e8aab12337eeae4388fd05820e2c5f21f",
+      "sanitized_sha256": "153fee13a312e9883537af4f3c8fa92e8aab12337eeae4388fd05820e2c5f21f",
+      "status": 200,
+      "completed_at_utc": "2026-11-09T12:18:47.136735+00:00"
+    }
+  ],
+  "runner_source_sha256": "36e729d13a35a2093ace11d0d44fd8dfcf15f4ee1a06a66cdd96e53638634be0",
+  "capture_started_at_utc": "2026-11-09T12:17:54.174200+00:00",
+  "capture_finished_at_utc": "2026-11-09T12:19:25.111032+00:00",
+  "live_preferences_unchanged": true,
+  "live_preferences_start_sha256": "f89270f2a5e4e0aa14b365cbd6bfd4289e64bc2d5a51d57125cbf44251ebb23c",
+  "live_preferences_finish_sha256": "f89270f2a5e4e0aa14b365cbd6bfd4289e64bc2d5a51d57125cbf44251ebb23c",
+  "selected_base_preferences_unchanged": true,
+  "selected_base_preferences_start_sha256": null,
+  "selected_base_preferences_finish_sha256": null,
+  "child_config_observations": [
+    {
+      "size": "120x35",
+      "MASC_CONFIG_DIR": "<user>/me/workspace/yousleepwhen/masc/.worktrees/keepers-rfc0515/artifacts/rfc0515-remaining-20261109/candidate-ea87978-run42607821655/capture-refreshed-private-pair-restart2/private-config",
+      "matches_expected_private_config": true,
+      "private_preferences_before_sha256": "7a30366e8a87b88f911bd1ca8ff70c4ce9d0dc7335cb5de64822fb6a2feb7a25",
+      "private_preferences_after_sha256": "7a30366e8a87b88f911bd1ca8ff70c4ce9d0dc7335cb5de64822fb6a2feb7a25"
+    },
+    {
+      "size": "80x24",
+      "MASC_CONFIG_DIR": "<user>/me/workspace/yousleepwhen/masc/.worktrees/keepers-rfc0515/artifacts/rfc0515-remaining-20261109/candidate-ea87978-run42607821655/capture-refreshed-private-pair-restart2/private-config",
+      "matches_expected_private_config": true,
+      "private_preferences_before_sha256": "7a30366e8a87b88f911bd1ca8ff70c4ce9d0dc7335cb5de64822fb6a2feb7a25",
+      "private_preferences_after_sha256": "7a30366e8a87b88f911bd1ca8ff70c4ce9d0dc7335cb5de64822fb6a2feb7a25"
+    }
+  ],
+  "candidate_source_capture": true,
+  "candidate_identity_verified": true,
+  "capture_failure": null,
+  "post_put_patch_delete_forwarded": false,
+  "navigation_actions": [
+    {
+      "keys": [
+        "3"
+      ],
+      "at_utc": "2026-11-09T12:17:56.712409+00:00"
+    },
+    {
+      "keys": [
+        "R"
+      ],
+      "at_utc": "2026-11-09T12:18:01.424694+00:00"
+    },
+    {
+      "observation": "child health GET 200 body completed; two-second UI delivery interval after explicit R",
+      "size": "120x35",
+      "receipt": "native-memory-health-read-0001.json",
+      "at_utc": "2026-11-09T12:18:04.137853+00:00"
+    },
+    {
+      "keys": [
+        "V"
+      ],
+      "at_utc": "2026-11-09T12:18:04.162918+00:00"
+    },
+    {
+      "keys": [
+        "V"
+      ],
+      "at_utc": "2026-11-09T12:18:04.893293+00:00"
+    },
+    {
+      "keys": [
+        "v"
+      ],
+      "at_utc": "2026-11-09T12:18:05.600816+00:00"
+    },
+    {
+      "keys": [
+        "V"
+      ],
+      "at_utc": "2026-11-09T12:18:06.336293+00:00"
+    },
+    {
+      "keys": [
+        "V"
+      ],
+      "at_utc": "2026-11-09T12:18:07.067653+00:00"
+    },
+    {
+      "keys": [
+        "v"
+      ],
+      "at_utc": "2026-11-09T12:18:07.776429+00:00"
+    },
+    {
+      "keys": [
+        "V"
+      ],
+      "at_utc": "2026-11-09T12:18:08.505968+00:00"
+    },
+    {
+      "keys": [
+        "V"
+      ],
+      "at_utc": "2026-11-09T12:18:09.238612+00:00"
+    },
+    {
+      "keys": [
+        "v"
+      ],
+      "at_utc": "2026-11-09T12:18:09.952986+00:00"
+    },
+    {
+      "keys": [
+        "V"
+      ],
+      "at_utc": "2026-11-09T12:18:10.681924+00:00"
+    },
+    {
+      "keys": [
+        "V"
+      ],
+      "at_utc": "2026-11-09T12:18:11.416578+00:00"
+    },
+    {
+      "keys": [
+        "v"
+      ],
+      "at_utc": "2026-11-09T12:18:12.131088+00:00"
+    },
+    {
+      "keys": [
+        "Home",
+        "Up",
+        "Up"
+      ],
+      "at_utc": "2026-11-09T12:18:12.860404+00:00"
+    },
+    {
+      "keys": [
+        "Enter"
+      ],
+      "at_utc": "2026-11-09T12:18:13.621908+00:00"
+    },
+    {
+      "keys": [
+        "Escape"
+      ],
+      "at_utc": "2026-11-09T12:18:16.365646+00:00"
+    },
+    {
+      "keys": [
+        "V"
+      ],
+      "at_utc": "2026-11-09T12:18:17.077785+00:00"
+    },
+    {
+      "keys": [
+        "Home",
+        "Up",
+        "Up"
+      ],
+      "at_utc": "2026-11-09T12:18:17.811002+00:00"
+    },
+    {
+      "keys": [
+        "Enter"
+      ],
+      "at_utc": "2026-11-09T12:18:18.546660+00:00"
+    },
+    {
+      "keys": [
+        "Escape"
+      ],
+      "at_utc": "2026-11-09T12:18:21.283859+00:00"
+    },
+    {
+      "keys": [
+        "V"
+      ],
+      "at_utc": "2026-11-09T12:18:21.993629+00:00"
+    },
+    {
+      "keys": [
+        "v"
+      ],
+      "at_utc": "2026-11-09T12:18:22.707154+00:00"
+    },
+    {
+      "keys": [
+        "Home",
+        "Up",
+        "Up"
+      ],
+      "at_utc": "2026-11-09T12:18:23.435523+00:00"
+    },
+    {
+      "keys": [
+        "Enter"
+      ],
+      "at_utc": "2026-11-09T12:18:24.164224+00:00"
+    },
+    {
+      "keys": [
+        "Escape"
+      ],
+      "at_utc": "2026-11-09T12:18:26.895230+00:00"
+    },
+    {
+      "keys": [
+        "V"
+      ],
+      "at_utc": "2026-11-09T12:18:27.604949+00:00"
+    },
+    {
+      "keys": [
+        "Home",
+        "Up",
+        "Up"
+      ],
+      "at_utc": "2026-11-09T12:18:28.333892+00:00"
+    },
+    {
+      "keys": [
+        "Enter"
+      ],
+      "at_utc": "2026-11-09T12:18:29.063399+00:00"
+    },
+    {
+      "keys": [
+        "Escape"
+      ],
+      "at_utc": "2026-11-09T12:18:31.793527+00:00"
+    },
+    {
+      "keys": [
+        "V"
+      ],
+      "at_utc": "2026-11-09T12:18:32.507689+00:00"
+    },
+    {
+      "keys": [
+        "v"
+      ],
+      "at_utc": "2026-11-09T12:18:33.223922+00:00"
+    },
+    {
+      "keys": [
+        "V"
+      ],
+      "at_utc": "2026-11-09T12:18:34.102519+00:00"
+    },
+    {
+      "keys": [
+        "V"
+      ],
+      "at_utc": "2026-11-09T12:18:34.882091+00:00"
+    },
+    {
+      "keys": [
+        "v"
+      ],
+      "at_utc": "2026-11-09T12:18:35.597607+00:00"
+    },
+    {
+      "keys": [
+        "V"
+      ],
+      "at_utc": "2026-11-09T12:18:36.330044+00:00"
+    },
+    {
+      "keys": [
+        "V"
+      ],
+      "at_utc": "2026-11-09T12:18:37.056744+00:00"
+    },
+    {
+      "keys": [
+        "v"
+      ],
+      "at_utc": "2026-11-09T12:18:37.770387+00:00"
+    },
+    {
+      "keys": [
+        "q"
+      ],
+      "at_utc": "2026-11-09T12:18:38.483169+00:00"
+    },
+    {
+      "keys": [
+        "3"
+      ],
+      "at_utc": "2026-11-09T12:18:42.399598+00:00"
+    },
+    {
+      "keys": [
+        "R"
+      ],
+      "at_utc": "2026-11-09T12:18:47.113442+00:00"
+    },
+    {
+      "observation": "child health GET 200 body completed; two-second UI delivery interval after explicit R",
+      "size": "80x24",
+      "receipt": "native-memory-health-read-0002.json",
+      "at_utc": "2026-11-09T12:18:49.828194+00:00"
+    },
+    {
+      "keys": [
+        "V"
+      ],
+      "at_utc": "2026-11-09T12:18:49.844019+00:00"
+    },
+    {
+      "keys": [
+        "V"
+      ],
+      "at_utc": "2026-11-09T12:18:50.568267+00:00"
+    },
+    {
+      "keys": [
+        "v"
+      ],
+      "at_utc": "2026-11-09T12:18:51.280050+00:00"
+    },
+    {
+      "keys": [
+        "V"
+      ],
+      "at_utc": "2026-11-09T12:18:52.007803+00:00"
+    },
+    {
+      "keys": [
+        "V"
+      ],
+      "at_utc": "2026-11-09T12:18:52.731090+00:00"
+    },
+    {
+      "keys": [
+        "v"
+      ],
+      "at_utc": "2026-11-09T12:18:53.437554+00:00"
+    },
+    {
+      "keys": [
+        "V"
+      ],
+      "at_utc": "2026-11-09T12:18:54.166907+00:00"
+    },
+    {
+      "keys": [
+        "V"
+      ],
+      "at_utc": "2026-11-09T12:18:54.896370+00:00"
+    },
+    {
+      "keys": [
+        "v"
+      ],
+      "at_utc": "2026-11-09T12:18:55.605969+00:00"
+    },
+    {
+      "keys": [
+        "V"
+      ],
+      "at_utc": "2026-11-09T12:18:56.334310+00:00"
+    },
+    {
+      "keys": [
+        "V"
+      ],
+      "at_utc": "2026-11-09T12:18:57.061517+00:00"
+    },
+    {
+      "keys": [
+        "v"
+      ],
+      "at_utc": "2026-11-09T12:18:57.769586+00:00"
+    },
+    {
+      "keys": [
+        "Home",
+        "Up",
+        "Up"
+      ],
+      "at_utc": "2026-11-09T12:18:58.494744+00:00"
+    },
+    {
+      "keys": [
+        "Enter"
+      ],
+      "at_utc": "2026-11-09T12:18:59.222299+00:00"
+    },
+    {
+      "keys": [
+        "Escape"
+      ],
+      "at_utc": "2026-11-09T12:19:01.954587+00:00"
+    },
+    {
+      "keys": [
+        "V"
+      ],
+      "at_utc": "2026-11-09T12:19:02.666163+00:00"
+    },
+    {
+      "keys": [
+        "Home",
+        "Up",
+        "Up"
+      ],
+      "at_utc": "2026-11-09T12:19:03.394658+00:00"
+    },
+    {
+      "keys": [
+        "Enter"
+      ],
+      "at_utc": "2026-11-09T12:19:04.125221+00:00"
+    },
+    {
+      "keys": [
+        "Escape"
+      ],
+      "at_utc": "2026-11-09T12:19:06.854917+00:00"
+    },
+    {
+      "keys": [
+        "V"
+      ],
+      "at_utc": "2026-11-09T12:19:07.567920+00:00"
+    },
+    {
+      "keys": [
+        "v"
+      ],
+      "at_utc": "2026-11-09T12:19:08.275425+00:00"
+    },
+    {
+      "keys": [
+        "Home",
+        "Up",
+        "Up"
+      ],
+      "at_utc": "2026-11-09T12:19:09.007066+00:00"
+    },
+    {
+      "keys": [
+        "Enter"
+      ],
+      "at_utc": "2026-11-09T12:19:09.734316+00:00"
+    },
+    {
+      "keys": [
+        "Escape"
+      ],
+      "at_utc": "2026-11-09T12:19:12.466605+00:00"
+    },
+    {
+      "keys": [
+        "V"
+      ],
+      "at_utc": "2026-11-09T12:19:13.179385+00:00"
+    },
+    {
+      "keys": [
+        "Home",
+        "Up",
+        "Up"
+      ],
+      "at_utc": "2026-11-09T12:19:13.902306+00:00"
+    },
+    {
+      "keys": [
+        "Enter"
+      ],
+      "at_utc": "2026-11-09T12:19:14.629950+00:00"
+    },
+    {
+      "keys": [
+        "Escape"
+      ],
+      "at_utc": "2026-11-09T12:19:17.356508+00:00"
+    },
+    {
+      "keys": [
+        "V"
+      ],
+      "at_utc": "2026-11-09T12:19:18.066455+00:00"
+    },
+    {
+      "keys": [
+        "v"
+      ],
+      "at_utc": "2026-11-09T12:19:18.779681+00:00"
+    },
+    {
+      "keys": [
+        "V"
+      ],
+      "at_utc": "2026-11-09T12:19:19.506971+00:00"
+    },
+    {
+      "keys": [
+        "V"
+      ],
+      "at_utc": "2026-11-09T12:19:20.231771+00:00"
+    },
+    {
+      "keys": [
+        "v"
+      ],
+      "at_utc": "2026-11-09T12:19:20.943278+00:00"
+    },
+    {
+      "keys": [
+        "V"
+      ],
+      "at_utc": "2026-11-09T12:19:21.667549+00:00"
+    },
+    {
+      "keys": [
+        "V"
+      ],
+      "at_utc": "2026-11-09T12:19:22.395116+00:00"
+    },
+    {
+      "keys": [
+        "v"
+      ],
+      "at_utc": "2026-11-09T12:19:23.109012+00:00"
+    },
+    {
+      "keys": [
+        "q"
+      ],
+      "at_utc": "2026-11-09T12:19:23.822386+00:00"
+    }
+  ],
+  "captures": [
+    {
+      "file": "after-120x35-list-compact.txt",
+      "size": "120x35",
+      "requested_view": "list",
+      "requested_density": "compact",
+      "requested_role": "list",
+      "at_utc": "2026-11-09T12:18:04.162872+00:00",
+      "navigation_action_count": 3,
+      "observed_text_hints": {
+        "keepers_title_present": true,
+        "world_row_text_present": false,
+        "world_dock_title_present": false,
+        "requested_view_marker_present": true
+      },
+      "panel_review": "not_yet_reviewed; requested_role alone does not prove panel owner"
+    },
+    {
+      "file": "after-120x35-list-detailed.txt",
+      "size": "120x35",
+      "requested_view": "list",
+      "requested_density": "detailed",
+      "requested_role": "list",
+      "at_utc": "2026-11-09T12:18:04.893267+00:00",
+      "navigation_action_count": 4,
+      "observed_text_hints": {
+        "keepers_title_present": true,
+        "world_row_text_present": false,
+        "world_dock_title_present": false,
+        "requested_view_marker_present": true
+      },
+      "panel_review": "not_yet_reviewed; requested_role alone does not prove panel owner"
+    },
+    {
+      "file": "after-120x35-state-compact.txt",
+      "size": "120x35",
+      "requested_view": "state",
+      "requested_density": "compact",
+      "requested_role": "list",
+      "at_utc": "2026-11-09T12:18:06.336261+00:00",
+      "navigation_action_count": 6,
+      "observed_text_hints": {
+        "keepers_title_present": true,
+        "world_row_text_present": false,
+        "world_dock_title_present": false,
+        "requested_view_marker_present": true
+      },
+      "panel_review": "not_yet_reviewed; requested_role alone does not prove panel owner"
+    },
+    {
+      "file": "after-120x35-state-detailed.txt",
+      "size": "120x35",
+      "requested_view": "state",
+      "requested_density": "detailed",
+      "requested_role": "list",
+      "at_utc": "2026-11-09T12:18:07.067629+00:00",
+      "navigation_action_count": 7,
+      "observed_text_hints": {
+        "keepers_title_present": true,
+        "world_row_text_present": false,
+        "world_dock_title_present": false,
+        "requested_view_marker_present": true
+      },
+      "panel_review": "not_yet_reviewed; requested_role alone does not prove panel owner"
+    },
+    {
+      "file": "after-120x35-cause-compact.txt",
+      "size": "120x35",
+      "requested_view": "cause",
+      "requested_density": "compact",
+      "requested_role": "list",
+      "at_utc": "2026-11-09T12:18:08.505933+00:00",
+      "navigation_action_count": 9,
+      "observed_text_hints": {
+        "keepers_title_present": true,
+        "world_row_text_present": false,
+        "world_dock_title_present": false,
+        "requested_view_marker_present": true
+      },
+      "panel_review": "not_yet_reviewed; requested_role alone does not prove panel owner"
+    },
+    {
+      "file": "after-120x35-cause-detailed.txt",
+      "size": "120x35",
+      "requested_view": "cause",
+      "requested_density": "detailed",
+      "requested_role": "list",
+      "at_utc": "2026-11-09T12:18:09.238589+00:00",
+      "navigation_action_count": 10,
+      "observed_text_hints": {
+        "keepers_title_present": true,
+        "world_row_text_present": false,
+        "world_dock_title_present": false,
+        "requested_view_marker_present": true
+      },
+      "panel_review": "not_yet_reviewed; requested_role alone does not prove panel owner"
+    },
+    {
+      "file": "after-120x35-time-compact.txt",
+      "size": "120x35",
+      "requested_view": "time",
+      "requested_density": "compact",
+      "requested_role": "list",
+      "at_utc": "2026-11-09T12:18:10.681898+00:00",
+      "navigation_action_count": 12,
+      "observed_text_hints": {
+        "keepers_title_present": true,
+        "world_row_text_present": false,
+        "world_dock_title_present": false,
+        "requested_view_marker_present": true
+      },
+      "panel_review": "not_yet_reviewed; requested_role alone does not prove panel owner"
+    },
+    {
+      "file": "after-120x35-time-detailed.txt",
+      "size": "120x35",
+      "requested_view": "time",
+      "requested_density": "detailed",
+      "requested_role": "list",
+      "at_utc": "2026-11-09T12:18:11.416551+00:00",
+      "navigation_action_count": 13,
+      "observed_text_hints": {
+        "keepers_title_present": true,
+        "world_row_text_present": false,
+        "world_dock_title_present": false,
+        "requested_view_marker_present": true
+      },
+      "panel_review": "not_yet_reviewed; requested_role alone does not prove panel owner"
+    },
+    {
+      "file": "after-120x35-memory-compact.txt",
+      "size": "120x35",
+      "requested_view": "memory",
+      "requested_density": "compact",
+      "requested_role": "list",
+      "at_utc": "2026-11-09T12:18:12.860376+00:00",
+      "navigation_action_count": 15,
+      "observed_text_hints": {
+        "keepers_title_present": true,
+        "world_row_text_present": true,
+        "world_dock_title_present": false,
+        "requested_view_marker_present": true
+      },
+      "panel_review": "not_yet_reviewed; requested_role alone does not prove panel owner"
+    },
+    {
+      "file": "after-120x35-memory-compact-world-selected.txt",
+      "size": "120x35",
+      "requested_view": "memory",
+      "requested_density": "compact",
+      "requested_role": "world-selected",
+      "at_utc": "2026-11-09T12:18:13.621878+00:00",
+      "navigation_action_count": 16,
+      "observed_text_hints": {
+        "keepers_title_present": true,
+        "world_row_text_present": true,
+        "world_dock_title_present": false,
+        "requested_view_marker_present": true
+      },
+      "panel_review": "not_yet_reviewed; requested_role alone does not prove panel owner"
+    },
+    {
+      "file": "after-120x35-memory-compact-world-dock.txt",
+      "size": "120x35",
+      "requested_view": "memory",
+      "requested_density": "compact",
+      "requested_role": "world-dock",
+      "at_utc": "2026-11-09T12:18:16.365618+00:00",
+      "navigation_action_count": 17,
+      "observed_text_hints": {
+        "keepers_title_present": true,
+        "world_row_text_present": true,
+        "world_dock_title_present": true,
+        "requested_view_marker_present": true
+      },
+      "panel_review": "not_yet_reviewed; requested_role alone does not prove panel owner"
+    },
+    {
+      "file": "after-120x35-memory-detailed.txt",
+      "size": "120x35",
+      "requested_view": "memory",
+      "requested_density": "detailed",
+      "requested_role": "list",
+      "at_utc": "2026-11-09T12:18:17.810971+00:00",
+      "navigation_action_count": 19,
+      "observed_text_hints": {
+        "keepers_title_present": true,
+        "world_row_text_present": true,
+        "world_dock_title_present": false,
+        "requested_view_marker_present": true
+      },
+      "panel_review": "not_yet_reviewed; requested_role alone does not prove panel owner"
+    },
+    {
+      "file": "after-120x35-memory-detailed-world-selected.txt",
+      "size": "120x35",
+      "requested_view": "memory",
+      "requested_density": "detailed",
+      "requested_role": "world-selected",
+      "at_utc": "2026-11-09T12:18:18.546637+00:00",
+      "navigation_action_count": 20,
+      "observed_text_hints": {
+        "keepers_title_present": true,
+        "world_row_text_present": true,
+        "world_dock_title_present": false,
+        "requested_view_marker_present": true
+      },
+      "panel_review": "not_yet_reviewed; requested_role alone does not prove panel owner"
+    },
+    {
+      "file": "after-120x35-memory-detailed-world-dock.txt",
+      "size": "120x35",
+      "requested_view": "memory",
+      "requested_density": "detailed",
+      "requested_role": "world-dock",
+      "at_utc": "2026-11-09T12:18:21.283823+00:00",
+      "navigation_action_count": 21,
+      "observed_text_hints": {
+        "keepers_title_present": true,
+        "world_row_text_present": true,
+        "world_dock_title_present": true,
+        "requested_view_marker_present": true
+      },
+      "panel_review": "not_yet_reviewed; requested_role alone does not prove panel owner"
+    },
+    {
+      "file": "after-120x35-age-compact.txt",
+      "size": "120x35",
+      "requested_view": "age",
+      "requested_density": "compact",
+      "requested_role": "list",
+      "at_utc": "2026-11-09T12:18:23.435498+00:00",
+      "navigation_action_count": 24,
+      "observed_text_hints": {
+        "keepers_title_present": true,
+        "world_row_text_present": true,
+        "world_dock_title_present": false,
+        "requested_view_marker_present": true
+      },
+      "panel_review": "not_yet_reviewed; requested_role alone does not prove panel owner"
+    },
+    {
+      "file": "after-120x35-age-compact-world-selected.txt",
+      "size": "120x35",
+      "requested_view": "age",
+      "requested_density": "compact",
+      "requested_role": "world-selected",
+      "at_utc": "2026-11-09T12:18:24.164195+00:00",
+      "navigation_action_count": 25,
+      "observed_text_hints": {
+        "keepers_title_present": true,
+        "world_row_text_present": true,
+        "world_dock_title_present": false,
+        "requested_view_marker_present": true
+      },
+      "panel_review": "not_yet_reviewed; requested_role alone does not prove panel owner"
+    },
+    {
+      "file": "after-120x35-age-compact-world-dock.txt",
+      "size": "120x35",
+      "requested_view": "age",
+      "requested_density": "compact",
+      "requested_role": "world-dock",
+      "at_utc": "2026-11-09T12:18:26.895210+00:00",
+      "navigation_action_count": 26,
+      "observed_text_hints": {
+        "keepers_title_present": true,
+        "world_row_text_present": true,
+        "world_dock_title_present": true,
+        "requested_view_marker_present": true
+      },
+      "panel_review": "not_yet_reviewed; requested_role alone does not prove panel owner"
+    },
+    {
+      "file": "after-120x35-age-detailed.txt",
+      "size": "120x35",
+      "requested_view": "age",
+      "requested_density": "detailed",
+      "requested_role": "list",
+      "at_utc": "2026-11-09T12:18:28.333873+00:00",
+      "navigation_action_count": 28,
+      "observed_text_hints": {
+        "keepers_title_present": true,
+        "world_row_text_present": true,
+        "world_dock_title_present": false,
+        "requested_view_marker_present": true
+      },
+      "panel_review": "not_yet_reviewed; requested_role alone does not prove panel owner"
+    },
+    {
+      "file": "after-120x35-age-detailed-world-selected.txt",
+      "size": "120x35",
+      "requested_view": "age",
+      "requested_density": "detailed",
+      "requested_role": "world-selected",
+      "at_utc": "2026-11-09T12:18:29.063377+00:00",
+      "navigation_action_count": 29,
+      "observed_text_hints": {
+        "keepers_title_present": true,
+        "world_row_text_present": true,
+        "world_dock_title_present": false,
+        "requested_view_marker_present": true
+      },
+      "panel_review": "not_yet_reviewed; requested_role alone does not prove panel owner"
+    },
+    {
+      "file": "after-120x35-age-detailed-world-dock.txt",
+      "size": "120x35",
+      "requested_view": "age",
+      "requested_density": "detailed",
+      "requested_role": "world-dock",
+      "at_utc": "2026-11-09T12:18:31.793481+00:00",
+      "navigation_action_count": 30,
+      "observed_text_hints": {
+        "keepers_title_present": true,
+        "world_row_text_present": true,
+        "world_dock_title_present": true,
+        "requested_view_marker_present": true
+      },
+      "panel_review": "not_yet_reviewed; requested_role alone does not prove panel owner"
+    },
+    {
+      "file": "after-120x35-runtime-compact.txt",
+      "size": "120x35",
+      "requested_view": "runtime",
+      "requested_density": "compact",
+      "requested_role": "list",
+      "at_utc": "2026-11-09T12:18:34.102494+00:00",
+      "navigation_action_count": 33,
+      "observed_text_hints": {
+        "keepers_title_present": true,
+        "world_row_text_present": false,
+        "world_dock_title_present": false,
+        "requested_view_marker_present": true
+      },
+      "panel_review": "not_yet_reviewed; requested_role alone does not prove panel owner"
+    },
+    {
+      "file": "after-120x35-runtime-detailed.txt",
+      "size": "120x35",
+      "requested_view": "runtime",
+      "requested_density": "detailed",
+      "requested_role": "list",
+      "at_utc": "2026-11-09T12:18:34.882064+00:00",
+      "navigation_action_count": 34,
+      "observed_text_hints": {
+        "keepers_title_present": true,
+        "world_row_text_present": false,
+        "world_dock_title_present": false,
+        "requested_view_marker_present": true
+      },
+      "panel_review": "not_yet_reviewed; requested_role alone does not prove panel owner"
+    },
+    {
+      "file": "after-120x35-24h-compact.txt",
+      "size": "120x35",
+      "requested_view": "24h",
+      "requested_density": "compact",
+      "requested_role": "list",
+      "at_utc": "2026-11-09T12:18:36.330014+00:00",
+      "navigation_action_count": 36,
+      "observed_text_hints": {
+        "keepers_title_present": true,
+        "world_row_text_present": false,
+        "world_dock_title_present": false,
+        "requested_view_marker_present": true
+      },
+      "panel_review": "not_yet_reviewed; requested_role alone does not prove panel owner"
+    },
+    {
+      "file": "after-120x35-24h-detailed.txt",
+      "size": "120x35",
+      "requested_view": "24h",
+      "requested_density": "detailed",
+      "requested_role": "list",
+      "at_utc": "2026-11-09T12:18:37.056720+00:00",
+      "navigation_action_count": 37,
+      "observed_text_hints": {
+        "keepers_title_present": true,
+        "world_row_text_present": false,
+        "world_dock_title_present": false,
+        "requested_view_marker_present": true
+      },
+      "panel_review": "not_yet_reviewed; requested_role alone does not prove panel owner"
+    },
+    {
+      "file": "after-80x24-list-compact.txt",
+      "size": "80x24",
+      "requested_view": "list",
+      "requested_density": "compact",
+      "requested_role": "list",
+      "at_utc": "2026-11-09T12:18:49.843994+00:00",
+      "navigation_action_count": 43,
+      "observed_text_hints": {
+        "keepers_title_present": true,
+        "world_row_text_present": false,
+        "world_dock_title_present": false,
+        "requested_view_marker_present": true
+      },
+      "panel_review": "not_yet_reviewed; requested_role alone does not prove panel owner"
+    },
+    {
+      "file": "after-80x24-list-detailed.txt",
+      "size": "80x24",
+      "requested_view": "list",
+      "requested_density": "detailed",
+      "requested_role": "list",
+      "at_utc": "2026-11-09T12:18:50.568248+00:00",
+      "navigation_action_count": 44,
+      "observed_text_hints": {
+        "keepers_title_present": true,
+        "world_row_text_present": false,
+        "world_dock_title_present": false,
+        "requested_view_marker_present": true
+      },
+      "panel_review": "not_yet_reviewed; requested_role alone does not prove panel owner"
+    },
+    {
+      "file": "after-80x24-state-compact.txt",
+      "size": "80x24",
+      "requested_view": "state",
+      "requested_density": "compact",
+      "requested_role": "list",
+      "at_utc": "2026-11-09T12:18:52.007783+00:00",
+      "navigation_action_count": 46,
+      "observed_text_hints": {
+        "keepers_title_present": true,
+        "world_row_text_present": false,
+        "world_dock_title_present": false,
+        "requested_view_marker_present": true
+      },
+      "panel_review": "not_yet_reviewed; requested_role alone does not prove panel owner"
+    },
+    {
+      "file": "after-80x24-state-detailed.txt",
+      "size": "80x24",
+      "requested_view": "state",
+      "requested_density": "detailed",
+      "requested_role": "list",
+      "at_utc": "2026-11-09T12:18:52.731071+00:00",
+      "navigation_action_count": 47,
+      "observed_text_hints": {
+        "keepers_title_present": true,
+        "world_row_text_present": false,
+        "world_dock_title_present": false,
+        "requested_view_marker_present": true
+      },
+      "panel_review": "not_yet_reviewed; requested_role alone does not prove panel owner"
+    },
+    {
+      "file": "after-80x24-cause-compact.txt",
+      "size": "80x24",
+      "requested_view": "cause",
+      "requested_density": "compact",
+      "requested_role": "list",
+      "at_utc": "2026-11-09T12:18:54.166882+00:00",
+      "navigation_action_count": 49,
+      "observed_text_hints": {
+        "keepers_title_present": true,
+        "world_row_text_present": false,
+        "world_dock_title_present": false,
+        "requested_view_marker_present": true
+      },
+      "panel_review": "not_yet_reviewed; requested_role alone does not prove panel owner"
+    },
+    {
+      "file": "after-80x24-cause-detailed.txt",
+      "size": "80x24",
+      "requested_view": "cause",
+      "requested_density": "detailed",
+      "requested_role": "list",
+      "at_utc": "2026-11-09T12:18:54.896349+00:00",
+      "navigation_action_count": 50,
+      "observed_text_hints": {
+        "keepers_title_present": true,
+        "world_row_text_present": false,
+        "world_dock_title_present": false,
+        "requested_view_marker_present": true
+      },
+      "panel_review": "not_yet_reviewed; requested_role alone does not prove panel owner"
+    },
+    {
+      "file": "after-80x24-time-compact.txt",
+      "size": "80x24",
+      "requested_view": "time",
+      "requested_density": "compact",
+      "requested_role": "list",
+      "at_utc": "2026-11-09T12:18:56.334281+00:00",
+      "navigation_action_count": 52,
+      "observed_text_hints": {
+        "keepers_title_present": true,
+        "world_row_text_present": false,
+        "world_dock_title_present": false,
+        "requested_view_marker_present": true
+      },
+      "panel_review": "not_yet_reviewed; requested_role alone does not prove panel owner"
+    },
+    {
+      "file": "after-80x24-time-detailed.txt",
+      "size": "80x24",
+      "requested_view": "time",
+      "requested_density": "detailed",
+      "requested_role": "list",
+      "at_utc": "2026-11-09T12:18:57.061499+00:00",
+      "navigation_action_count": 53,
+      "observed_text_hints": {
+        "keepers_title_present": true,
+        "world_row_text_present": false,
+        "world_dock_title_present": false,
+        "requested_view_marker_present": true
+      },
+      "panel_review": "not_yet_reviewed; requested_role alone does not prove panel owner"
+    },
+    {
+      "file": "after-80x24-memory-compact.txt",
+      "size": "80x24",
+      "requested_view": "memory",
+      "requested_density": "compact",
+      "requested_role": "list",
+      "at_utc": "2026-11-09T12:18:58.494722+00:00",
+      "navigation_action_count": 55,
+      "observed_text_hints": {
+        "keepers_title_present": true,
+        "world_row_text_present": true,
+        "world_dock_title_present": false,
+        "requested_view_marker_present": true
+      },
+      "panel_review": "not_yet_reviewed; requested_role alone does not prove panel owner"
+    },
+    {
+      "file": "after-80x24-memory-compact-world-selected.txt",
+      "size": "80x24",
+      "requested_view": "memory",
+      "requested_density": "compact",
+      "requested_role": "world-selected",
+      "at_utc": "2026-11-09T12:18:59.222277+00:00",
+      "navigation_action_count": 56,
+      "observed_text_hints": {
+        "keepers_title_present": true,
+        "world_row_text_present": true,
+        "world_dock_title_present": false,
+        "requested_view_marker_present": true
+      },
+      "panel_review": "not_yet_reviewed; requested_role alone does not prove panel owner"
+    },
+    {
+      "file": "after-80x24-memory-compact-world-dock.txt",
+      "size": "80x24",
+      "requested_view": "memory",
+      "requested_density": "compact",
+      "requested_role": "world-dock",
+      "at_utc": "2026-11-09T12:19:01.954558+00:00",
+      "navigation_action_count": 57,
+      "observed_text_hints": {
+        "keepers_title_present": true,
+        "world_row_text_present": true,
+        "world_dock_title_present": true,
+        "requested_view_marker_present": true
+      },
+      "panel_review": "not_yet_reviewed; requested_role alone does not prove panel owner"
+    },
+    {
+      "file": "after-80x24-memory-detailed.txt",
+      "size": "80x24",
+      "requested_view": "memory",
+      "requested_density": "detailed",
+      "requested_role": "list",
+      "at_utc": "2026-11-09T12:19:03.394631+00:00",
+      "navigation_action_count": 59,
+      "observed_text_hints": {
+        "keepers_title_present": true,
+        "world_row_text_present": true,
+        "world_dock_title_present": false,
+        "requested_view_marker_present": true
+      },
+      "panel_review": "not_yet_reviewed; requested_role alone does not prove panel owner"
+    },
+    {
+      "file": "after-80x24-memory-detailed-world-selected.txt",
+      "size": "80x24",
+      "requested_view": "memory",
+      "requested_density": "detailed",
+      "requested_role": "world-selected",
+      "at_utc": "2026-11-09T12:19:04.125186+00:00",
+      "navigation_action_count": 60,
+      "observed_text_hints": {
+        "keepers_title_present": true,
+        "world_row_text_present": true,
+        "world_dock_title_present": false,
+        "requested_view_marker_present": true
+      },
+      "panel_review": "not_yet_reviewed; requested_role alone does not prove panel owner"
+    },
+    {
+      "file": "after-80x24-memory-detailed-world-dock.txt",
+      "size": "80x24",
+      "requested_view": "memory",
+      "requested_density": "detailed",
+      "requested_role": "world-dock",
+      "at_utc": "2026-11-09T12:19:06.854881+00:00",
+      "navigation_action_count": 61,
+      "observed_text_hints": {
+        "keepers_title_present": true,
+        "world_row_text_present": true,
+        "world_dock_title_present": true,
+        "requested_view_marker_present": true
+      },
+      "panel_review": "not_yet_reviewed; requested_role alone does not prove panel owner"
+    },
+    {
+      "file": "after-80x24-age-compact.txt",
+      "size": "80x24",
+      "requested_view": "age",
+      "requested_density": "compact",
+      "requested_role": "list",
+      "at_utc": "2026-11-09T12:19:09.007000+00:00",
+      "navigation_action_count": 64,
+      "observed_text_hints": {
+        "keepers_title_present": true,
+        "world_row_text_present": true,
+        "world_dock_title_present": false,
+        "requested_view_marker_present": true
+      },
+      "panel_review": "not_yet_reviewed; requested_role alone does not prove panel owner"
+    },
+    {
+      "file": "after-80x24-age-compact-world-selected.txt",
+      "size": "80x24",
+      "requested_view": "age",
+      "requested_density": "compact",
+      "requested_role": "world-selected",
+      "at_utc": "2026-11-09T12:19:09.734296+00:00",
+      "navigation_action_count": 65,
+      "observed_text_hints": {
+        "keepers_title_present": true,
+        "world_row_text_present": true,
+        "world_dock_title_present": false,
+        "requested_view_marker_present": true
+      },
+      "panel_review": "not_yet_reviewed; requested_role alone does not prove panel owner"
+    },
+    {
+      "file": "after-80x24-age-compact-world-dock.txt",
+      "size": "80x24",
+      "requested_view": "age",
+      "requested_density": "compact",
+      "requested_role": "world-dock",
+      "at_utc": "2026-11-09T12:19:12.466575+00:00",
+      "navigation_action_count": 66,
+      "observed_text_hints": {
+        "keepers_title_present": true,
+        "world_row_text_present": true,
+        "world_dock_title_present": true,
+        "requested_view_marker_present": true
+      },
+      "panel_review": "not_yet_reviewed; requested_role alone does not prove panel owner"
+    },
+    {
+      "file": "after-80x24-age-detailed.txt",
+      "size": "80x24",
+      "requested_view": "age",
+      "requested_density": "detailed",
+      "requested_role": "list",
+      "at_utc": "2026-11-09T12:19:13.902283+00:00",
+      "navigation_action_count": 68,
+      "observed_text_hints": {
+        "keepers_title_present": true,
+        "world_row_text_present": true,
+        "world_dock_title_present": false,
+        "requested_view_marker_present": true
+      },
+      "panel_review": "not_yet_reviewed; requested_role alone does not prove panel owner"
+    },
+    {
+      "file": "after-80x24-age-detailed-world-selected.txt",
+      "size": "80x24",
+      "requested_view": "age",
+      "requested_density": "detailed",
+      "requested_role": "world-selected",
+      "at_utc": "2026-11-09T12:19:14.629927+00:00",
+      "navigation_action_count": 69,
+      "observed_text_hints": {
+        "keepers_title_present": true,
+        "world_row_text_present": true,
+        "world_dock_title_present": false,
+        "requested_view_marker_present": true
+      },
+      "panel_review": "not_yet_reviewed; requested_role alone does not prove panel owner"
+    },
+    {
+      "file": "after-80x24-age-detailed-world-dock.txt",
+      "size": "80x24",
+      "requested_view": "age",
+      "requested_density": "detailed",
+      "requested_role": "world-dock",
+      "at_utc": "2026-11-09T12:19:17.356488+00:00",
+      "navigation_action_count": 70,
+      "observed_text_hints": {
+        "keepers_title_present": true,
+        "world_row_text_present": true,
+        "world_dock_title_present": true,
+        "requested_view_marker_present": true
+      },
+      "panel_review": "not_yet_reviewed; requested_role alone does not prove panel owner"
+    },
+    {
+      "file": "after-80x24-runtime-compact.txt",
+      "size": "80x24",
+      "requested_view": "runtime",
+      "requested_density": "compact",
+      "requested_role": "list",
+      "at_utc": "2026-11-09T12:19:19.506943+00:00",
+      "navigation_action_count": 73,
+      "observed_text_hints": {
+        "keepers_title_present": true,
+        "world_row_text_present": false,
+        "world_dock_title_present": false,
+        "requested_view_marker_present": true
+      },
+      "panel_review": "not_yet_reviewed; requested_role alone does not prove panel owner"
+    },
+    {
+      "file": "after-80x24-runtime-detailed.txt",
+      "size": "80x24",
+      "requested_view": "runtime",
+      "requested_density": "detailed",
+      "requested_role": "list",
+      "at_utc": "2026-11-09T12:19:20.231744+00:00",
+      "navigation_action_count": 74,
+      "observed_text_hints": {
+        "keepers_title_present": true,
+        "world_row_text_present": false,
+        "world_dock_title_present": false,
+        "requested_view_marker_present": true
+      },
+      "panel_review": "not_yet_reviewed; requested_role alone does not prove panel owner"
+    },
+    {
+      "file": "after-80x24-24h-compact.txt",
+      "size": "80x24",
+      "requested_view": "24h",
+      "requested_density": "compact",
+      "requested_role": "list",
+      "at_utc": "2026-11-09T12:19:21.667527+00:00",
+      "navigation_action_count": 76,
+      "observed_text_hints": {
+        "keepers_title_present": true,
+        "world_row_text_present": false,
+        "world_dock_title_present": false,
+        "requested_view_marker_present": true
+      },
+      "panel_review": "not_yet_reviewed; requested_role alone does not prove panel owner"
+    },
+    {
+      "file": "after-80x24-24h-detailed.txt",
+      "size": "80x24",
+      "requested_view": "24h",
+      "requested_density": "detailed",
+      "requested_role": "list",
+      "at_utc": "2026-11-09T12:19:22.395089+00:00",
+      "navigation_action_count": 77,
+      "observed_text_hints": {
+        "keepers_title_present": true,
+        "world_row_text_present": false,
+        "world_dock_title_present": false,
+        "requested_view_marker_present": true
+      },
+      "panel_review": "not_yet_reviewed; requested_role alone does not prove panel owner"
+    }
+  ],
+  "scope": "Exact binary source identity only; no compile, behavioral PASS, panel-role verdict or per-layer regression verdict is inferred.",
+  "sanitization": "Text derivatives redact the host root and replace opaque account runtime IDs with consistent hash aliases of the same character length. Manifest hashes identify sanitized bytes.",
+  "files": {
+    "after-120x35-list-compact.txt": "6110c01c696bac820c372e6d1d81f5225093529bdc5f2ee92699b7c85afec681",
+    "after-120x35-list-detailed.txt": "7223a8945c5ae7b7272296b6b97fe1bf105f9dfe47bbe8065970d33f638fb56c",
+    "after-120x35-state-compact.txt": "ffa6d80778ec4faacaeee6b04a7df45920760924d447b22f27cb9ab09875c1b2",
+    "after-120x35-state-detailed.txt": "ffa6d80778ec4faacaeee6b04a7df45920760924d447b22f27cb9ab09875c1b2",
+    "after-120x35-cause-compact.txt": "92d82d71dd5dbe973c394d6f6df53a0ed3f5c41ccd1def3468a344c6e3d1cf91",
+    "after-120x35-cause-detailed.txt": "92d82d71dd5dbe973c394d6f6df53a0ed3f5c41ccd1def3468a344c6e3d1cf91",
+    "after-120x35-time-compact.txt": "33fe08005cab45980479427bd655123adeac8d455c59ac585d6e13e885c10bc0",
+    "after-120x35-time-detailed.txt": "33fe08005cab45980479427bd655123adeac8d455c59ac585d6e13e885c10bc0",
+    "after-120x35-memory-compact.txt": "7506131f3ece263ed1f2005467fc522b5f2d92cc3b3bbfb9ae3212ef97047516",
+    "after-120x35-memory-compact-world-selected.txt": "ef42e551997b8c3da42bc8ee01850a7e3970bd5e08a463bdd0ebe118bcf159c5",
+    "after-120x35-memory-compact-world-dock.txt": "11efd7f008fbd3e985553540a3a8c7e4c6ee1c1080ff13187d99913c6274dfbd",
+    "after-120x35-memory-detailed.txt": "ef42e551997b8c3da42bc8ee01850a7e3970bd5e08a463bdd0ebe118bcf159c5",
+    "after-120x35-memory-detailed-world-selected.txt": "ef42e551997b8c3da42bc8ee01850a7e3970bd5e08a463bdd0ebe118bcf159c5",
+    "after-120x35-memory-detailed-world-dock.txt": "11efd7f008fbd3e985553540a3a8c7e4c6ee1c1080ff13187d99913c6274dfbd",
+    "after-120x35-age-compact.txt": "639bcde009ba41f11e7ce770872384fc984dedc974fce2cce7af7fb6097cad65",
+    "after-120x35-age-compact-world-selected.txt": "13e424f6463935c5a29fc0a8acfaed0f3cf2e9e9184a954c4368e7deb573b4e6",
+    "after-120x35-age-compact-world-dock.txt": "4fc8ac1bdd0364de2a7ed4cfad691da3daebff2129d7778d717ff6d3157e3c5a",
+    "after-120x35-age-detailed.txt": "13e424f6463935c5a29fc0a8acfaed0f3cf2e9e9184a954c4368e7deb573b4e6",
+    "after-120x35-age-detailed-world-selected.txt": "13e424f6463935c5a29fc0a8acfaed0f3cf2e9e9184a954c4368e7deb573b4e6",
+    "after-120x35-age-detailed-world-dock.txt": "4fc8ac1bdd0364de2a7ed4cfad691da3daebff2129d7778d717ff6d3157e3c5a",
+    "after-120x35-runtime-compact.txt": "2b573bf1d43c38800f86281c7bf91614e260b4d0ce8bcba3aa678e1638346038",
+    "after-120x35-runtime-detailed.txt": "2b573bf1d43c38800f86281c7bf91614e260b4d0ce8bcba3aa678e1638346038",
+    "after-120x35-24h-compact.txt": "ea2eb7b25239d5c90bd4519a9557198d693e3d1aa2c2eed7f1bc21a286a5752e",
+    "after-120x35-24h-detailed.txt": "ea2eb7b25239d5c90bd4519a9557198d693e3d1aa2c2eed7f1bc21a286a5752e",
+    "after-80x24-list-compact.txt": "ec043a7375e433fa27f18372fac6309f0bef8b44c0e572350dff8806ec10cd4c",
+    "after-80x24-list-detailed.txt": "d3054e91ee747066c655a0e6384aa4c4d7665dd0811827d7e24788953ff416a3",
+    "after-80x24-state-compact.txt": "fd4489f095826f29f164b30a7fc6f7fb0fad42bc988bc2c388e019f2fc8fc75b",
+    "after-80x24-state-detailed.txt": "fd4489f095826f29f164b30a7fc6f7fb0fad42bc988bc2c388e019f2fc8fc75b",
+    "after-80x24-cause-compact.txt": "9cd7a1499bd7fda945ba04a383251f6606d0c97ae912ca0138ac4cec36332476",
+    "after-80x24-cause-detailed.txt": "9cd7a1499bd7fda945ba04a383251f6606d0c97ae912ca0138ac4cec36332476",
+    "after-80x24-time-compact.txt": "0bb363e4753379700ba324db3b30d728e2487453feaf6cbd89c4b7eebe0845b0",
+    "after-80x24-time-detailed.txt": "0bb363e4753379700ba324db3b30d728e2487453feaf6cbd89c4b7eebe0845b0",
+    "after-80x24-memory-compact.txt": "31103868cae3c18ce385972883ff07ad93fe8b8c7d480bdf50dd867bc0442c27",
+    "after-80x24-memory-compact-world-selected.txt": "0db0bcbdb792e2cac5f0bb2bb749f29d9db8437ffd77f67d91c3b84f4778b824",
+    "after-80x24-memory-compact-world-dock.txt": "9a5a10ff7bca3f431f9981ef043dab97b7b46116c8ef57342e7d87d26d1c77b2",
+    "after-80x24-memory-detailed.txt": "0db0bcbdb792e2cac5f0bb2bb749f29d9db8437ffd77f67d91c3b84f4778b824",
+    "after-80x24-memory-detailed-world-selected.txt": "0db0bcbdb792e2cac5f0bb2bb749f29d9db8437ffd77f67d91c3b84f4778b824",
+    "after-80x24-memory-detailed-world-dock.txt": "9a5a10ff7bca3f431f9981ef043dab97b7b46116c8ef57342e7d87d26d1c77b2",
+    "after-80x24-age-compact.txt": "6f17f2f0994ff610336cdb6651e5d31c741bb64bf62040dec4ad5ece55bf5c1d",
+    "after-80x24-age-compact-world-selected.txt": "b6d30dc5eb7572a992f01694bd3d24f5fca4411cdc88035228c92d4eb1511d21",
+    "after-80x24-age-compact-world-dock.txt": "5c89573a9bb22c81732471c0f262f539aec49e61dd5b2326530c98c9fa1ab6ee",
+    "after-80x24-age-detailed.txt": "b6d30dc5eb7572a992f01694bd3d24f5fca4411cdc88035228c92d4eb1511d21",
+    "after-80x24-age-detailed-world-selected.txt": "b6d30dc5eb7572a992f01694bd3d24f5fca4411cdc88035228c92d4eb1511d21",
+    "after-80x24-age-detailed-world-dock.txt": "5c89573a9bb22c81732471c0f262f539aec49e61dd5b2326530c98c9fa1ab6ee",
+    "after-80x24-runtime-compact.txt": "7ecad7b685e927a6740d053de3c62d1feb6e44960d094171ccf953ccddcf500c",
+    "after-80x24-runtime-detailed.txt": "7ecad7b685e927a6740d053de3c62d1feb6e44960d094171ccf953ccddcf500c",
+    "after-80x24-24h-compact.txt": "942f4ae6ee6badd9d09949685d918234a9fdee402adb1ad824583f63a0c8ab04",
+    "after-80x24-24h-detailed.txt": "942f4ae6ee6badd9d09949685d918234a9fdee402adb1ad824583f63a0c8ab04"
+  },
+  "proxy_requests": [
+    {
+      "method": "GET",
+      "status": 200,
+      "at_utc": "2026-11-09T12:17:54.365727+00:00",
+      "path_without_query": "/api/v1/tui/preferences"
+    },
+    {
+      "method": "GET",
+      "status": 200,
+      "at_utc": "2026-11-09T12:17:54.369978+00:00",
+      "path_without_query": "/health"
+    },
+    {
+      "method": "GET",
+      "status": 200,
+      "at_utc": "2026-11-09T12:17:54.394012+00:00",
+      "path_without_query": "/api/v1/keepers/asks"
+    },
+    {
+      "method": "GET",
+      "status": 200,
+      "at_utc": "2026-11-09T12:17:54.394181+00:00",
+      "path_without_query": "/api/v1/tool-metrics/series"
+    },
+    {
+      "method": "GET",
+      "status": 200,
+      "at_utc": "2026-11-09T12:17:54.394677+00:00",
+      "path_without_query": "/api/v1/lane-addons"
+    },
+    {
+      "method": "GET",
+      "status": 200,
+      "at_utc": "2026-11-09T12:17:54.395050+00:00",
+      "path_without_query": "/api/v1/operator"
+    },
+    {
+      "method": "GET",
+      "status": 200,
+      "at_utc": "2026-11-09T12:17:54.395946+00:00",
+      "path_without_query": "/api/v1/gate/keepers"
+    },
+    {
+      "method": "GET",
+      "status": 200,
+      "at_utc": "2026-11-09T12:17:54.396984+00:00",
+      "path_without_query": "/api/v1/lane-addons/asks"
+    },
+    {
+      "method": "GET",
+      "status": 200,
+      "at_utc": "2026-11-09T12:17:54.399650+00:00",
+      "path_without_query": "/health"
+    },
+    {
+      "method": "POST",
+      "blocked": true,
+      "at_utc": "2026-11-09T12:17:54.408126+00:00",
+      "denied_mcp_names_only": [
+        {
+          "method": "initialize"
+        }
+      ],
+      "path_without_query": "/mcp"
+    },
+    {
+      "method": "GET",
+      "status": 200,
+      "at_utc": "2026-11-09T12:17:54.408408+00:00",
+      "path_without_query": "/health"
+    },
+    {
+      "method": "GET",
+      "status": 200,
+      "at_utc": "2026-11-09T12:17:54.408892+00:00",
+      "path_without_query": "/health"
+    },
+    {
+      "method": "GET",
+      "status": 200,
+      "at_utc": "2026-11-09T12:17:54.411013+00:00",
+      "path_without_query": "/health"
+    },
+    {
+      "method": "GET",
+      "status": 200,
+      "at_utc": "2026-11-09T12:17:54.413187+00:00",
+      "path_without_query": "/api/v1/dashboard/health-line"
+    },
+    {
+      "method": "GET",
+      "status": 200,
+      "at_utc": "2026-11-09T12:17:54.414218+00:00",
+      "path_without_query": "/api/v1/stream/fleet"
+    },
+    {
+      "method": "GET",
+      "status": 304,
+      "at_utc": "2026-11-09T12:17:54.414855+00:00",
+      "path_without_query": "/api/v1/operator"
+    },
+    {
+      "method": "GET",
+      "status": 200,
+      "at_utc": "2026-11-09T12:17:54.415142+00:00",
+      "path_without_query": "/api/v1/dashboard/gate"
+    },
+    {
+      "method": "GET",
+      "status": 200,
+      "at_utc": "2026-11-09T12:17:54.415313+00:00",
+      "path_without_query": "/api/v1/keepers/tool-approvals"
+    },
+    {
+      "method": "GET",
+      "status": 200,
+      "at_utc": "2026-11-09T12:17:54.415467+00:00",
+      "path_without_query": "/api/v1/keepers/turns"
+    },
+    {
+      "method": "GET",
+      "status": 200,
+      "at_utc": "2026-11-09T12:17:54.415610+00:00",
+      "path_without_query": "/api/v1/dashboard/scheduled-automation"
+    },
+    {
+      "method": "GET",
+      "status": 200,
+      "at_utc": "2026-11-09T12:17:54.418758+00:00",
+      "path_without_query": "/api/v1/keepers/asks"
+    },
+    {
+      "method": "GET",
+      "status": 304,
+      "at_utc": "2026-11-09T12:17:54.418900+00:00",
+      "path_without_query": "/api/v1/tool-metrics/series"
+    },
+    {
+      "method": "GET",
+      "status": 200,
+      "at_utc": "2026-11-09T12:17:54.420093+00:00",
+      "path_without_query": "/health"
+    },
+    {
+      "method": "GET",
+      "status": 200,
+      "at_utc": "2026-11-09T12:17:54.420366+00:00",
+      "path_without_query": "/api/v1/gate/keepers"
+    },
+    {
+      "method": "GET",
+      "status": 304,
+      "at_utc": "2026-11-09T12:17:54.420640+00:00",
+      "path_without_query": "/api/v1/operator"
+    },
+    {
+      "method": "GET",
+      "status": 200,
+      "at_utc": "2026-11-09T12:17:54.420718+00:00",
+      "path_without_query": "/health"
+    },
+    {
+      "method": "GET",
+      "status": 200,
+      "at_utc": "2026-11-09T12:17:54.420936+00:00",
+      "path_without_query": "/api/v1/lane-addons"
+    },
+    {
+      "method": "GET",
+      "status": 200,
+      "at_utc": "2026-11-09T12:17:54.422082+00:00",
+      "path_without_query": "/api/v1/lane-addons/asks"
+    },
+    {
+      "method": "GET",
+      "status": 200,
+      "at_utc": "2026-11-09T12:17:54.424319+00:00",
+      "path_without_query": "/health"
+    },
+    {
+      "method": "GET",
+      "status": 304,
+      "at_utc": "2026-11-09T12:17:54.440145+00:00",
+      "path_without_query": "/api/v1/dashboard/scheduled-automation"
+    },
+    {
+      "method": "GET",
+      "status": 304,
+      "at_utc": "2026-11-09T12:17:54.440819+00:00",
+      "path_without_query": "/api/v1/dashboard/health-line"
+    },
+    {
+      "method": "GET",
+      "status": 304,
+      "at_utc": "2026-11-09T12:17:54.441283+00:00",
+      "path_without_query": "/api/v1/keepers/turns"
+    },
+    {
+      "method": "GET",
+      "status": 200,
+      "at_utc": "2026-11-09T12:17:54.459333+00:00",
+      "path_without_query": "/health"
+    },
+    {
+      "method": "GET",
+      "status": 200,
+      "at_utc": "2026-11-09T12:17:54.459897+00:00",
+      "path_without_query": "/health"
+    },
+    {
+      "method": "GET",
+      "status": 200,
+      "at_utc": "2026-11-09T12:17:54.460843+00:00",
+      "path_without_query": "/api/v1/keepers/asks"
+    },
+    {
+      "method": "GET",
+      "status": 200,
+      "at_utc": "2026-11-09T12:17:54.462272+00:00",
+      "path_without_query": "/api/v1/gate/keepers"
+    },
+    {
+      "method": "GET",
+      "status": 304,
+      "at_utc": "2026-11-09T12:17:54.462426+00:00",
+      "path_without_query": "/api/v1/keepers/tool-approvals"
+    },
+    {
+      "method": "GET",
+      "status": 200,
+      "at_utc": "2026-11-09T12:17:54.462799+00:00",
+      "path_without_query": "/api/v1/dashboard/gate"
+    },
+    {
+      "method": "GET",
+      "status": 200,
+      "at_utc": "2026-11-09T12:17:54.463657+00:00",
+      "path_without_query": "/api/v1/lane-addons/asks"
+    },
+    {
+      "method": "GET",
+      "status": 200,
+      "at_utc": "2026-11-09T12:17:54.465298+00:00",
+      "path_without_query": "/health"
+    },
+    {
+      "method": "GET",
+      "status": 200,
+      "at_utc": "2026-11-09T12:17:54.465768+00:00",
+      "path_without_query": "/health"
+    },
+    {
+      "method": "POST",
+      "blocked": true,
+      "at_utc": "2026-11-09T12:17:56.430235+00:00",
+      "denied_mcp_names_only": [
+        {
+          "method": "initialize"
+        }
+      ],
+      "path_without_query": "/mcp"
+    },
+    {
+      "method": "POST",
+      "blocked": true,
+      "at_utc": "2026-11-09T12:17:56.720259+00:00",
+      "path_without_query": "/api/v1/tui/preferences"
+    },
+    {
+      "method": "POST",
+      "blocked": true,
+      "at_utc": "2026-11-09T12:17:58.448884+00:00",
+      "denied_mcp_names_only": [
+        {
+          "method": "initialize"
+        }
+      ],
+      "path_without_query": "/mcp"
+    },
+    {
+      "method": "POST",
+      "blocked": true,
+      "at_utc": "2026-11-09T12:18:00.483985+00:00",
+      "denied_mcp_names_only": [
+        {
+          "method": "initialize"
+        }
+      ],
+      "path_without_query": "/mcp"
+    },
+    {
+      "method": "GET",
+      "status": 200,
+      "at_utc": "2026-11-09T12:18:01.435633+00:00",
+      "path_without_query": "/health"
+    },
+    {
+      "method": "GET",
+      "status": 200,
+      "at_utc": "2026-11-09T12:18:01.437696+00:00",
+      "path_without_query": "/health"
+    },
+    {
+      "method": "GET",
+      "status": 200,
+      "at_utc": "2026-11-09T12:18:01.437823+00:00",
+      "path_without_query": "/health"
+    },
+    {
+      "method": "GET",
+      "status": 200,
+      "at_utc": "2026-11-09T12:18:01.437949+00:00",
+      "path_without_query": "/api/v1/dashboard/scheduled-automation"
+    },
+    {
+      "method": "GET",
+      "status": 200,
+      "at_utc": "2026-11-09T12:18:01.438089+00:00",
+      "path_without_query": "/health"
+    },
+    {
+      "method": "GET",
+      "status": 304,
+      "at_utc": "2026-11-09T12:18:01.438589+00:00",
+      "path_without_query": "/api/v1/dashboard/gate"
+    },
+    {
+      "method": "GET",
+      "status": 200,
+      "at_utc": "2026-11-09T12:18:01.440727+00:00",
+      "path_without_query": "/health"
+    },
+    {
+      "method": "GET",
+      "status": 304,
+      "at_utc": "2026-11-09T12:18:01.442817+00:00",
+      "path_without_query": "/api/v1/keepers/tool-approvals"
+    },
+    {
+      "method": "GET",
+      "status": 200,
+      "at_utc": "2026-11-09T12:18:01.443578+00:00",
+      "body_observation": {
+        "file": "native-memory-health-read-0001.json",
+        "wire_sha256": "8d6203edda64d411a8984b3f7eb26611f15b9d6c0df3bc5c43fefd377880d596",
+        "sanitized_sha256": "8d6203edda64d411a8984b3f7eb26611f15b9d6c0df3bc5c43fefd377880d596",
+        "status": 200,
+        "completed_at_utc": "2026-11-09T12:18:01.444511+00:00"
+      },
+      "path_without_query": "/api/v1/dashboard/keeper-memory-health"
+    },
+    {
+      "method": "GET",
+      "status": 200,
+      "at_utc": "2026-11-09T12:18:01.443978+00:00",
+      "path_without_query": "/api/v1/keepers/asks"
+    },
+    {
+      "method": "GET",
+      "status": 200,
+      "at_utc": "2026-11-09T12:18:01.444226+00:00",
+      "path_without_query": "/api/v1/operator"
+    },
+    {
+      "method": "GET",
+      "status": 200,
+      "at_utc": "2026-11-09T12:18:01.445367+00:00",
+      "path_without_query": "/health"
+    },
+    {
+      "method": "GET",
+      "status": 200,
+      "at_utc": "2026-11-09T12:18:01.445450+00:00",
+      "path_without_query": "/api/v1/gate/keepers"
+    },
+    {
+      "method": "GET",
+      "status": 200,
+      "at_utc": "2026-11-09T12:18:01.446110+00:00",
+      "path_without_query": "/api/v1/lane-addons/asks"
+    },
+    {
+      "method": "GET",
+      "status": 200,
+      "at_utc": "2026-11-09T12:18:01.448131+00:00",
+      "path_without_query": "/health"
+    },
+    {
+      "method": "GET",
+      "status": 200,
+      "at_utc": "2026-11-09T12:18:01.451145+00:00",
+      "path_without_query": "/api/v1/async-requests"
+    },
+    {
+      "method": "GET",
+      "status": 200,
+      "at_utc": "2026-11-09T12:18:01.451956+00:00",
+      "path_without_query": "/api/v1/keepers/tool-approval-mode"
+    },
+    {
+      "method": "GET",
+      "status": 304,
+      "at_utc": "2026-11-09T12:18:01.452380+00:00",
+      "path_without_query": "/api/v1/dashboard/health-line"
+    },
+    {
+      "method": "GET",
+      "status": 304,
+      "at_utc": "2026-11-09T12:18:01.452561+00:00",
+      "path_without_query": "/api/v1/keepers/turns"
+    },
+    {
+      "method": "GET",
+      "status": 200,
+      "at_utc": "2026-11-09T12:18:01.453637+00:00",
+      "path_without_query": "/api/v1/dashboard/gate/keeper-settings"
+    },
+    {
+      "method": "POST",
+      "blocked": true,
+      "at_utc": "2026-11-09T12:18:02.503818+00:00",
+      "denied_mcp_names_only": [
+        {
+          "method": "initialize"
+        }
+      ],
+      "path_without_query": "/mcp"
+    },
+    {
+      "method": "POST",
+      "blocked": true,
+      "at_utc": "2026-11-09T12:18:04.533218+00:00",
+      "denied_mcp_names_only": [
+        {
+          "method": "initialize"
+        }
+      ],
+      "path_without_query": "/mcp"
+    },
+    {
+      "method": "POST",
+      "blocked": true,
+      "at_utc": "2026-11-09T12:18:06.552445+00:00",
+      "denied_mcp_names_only": [
+        {
+          "method": "initialize"
+        }
+      ],
+      "path_without_query": "/mcp"
+    },
+    {
+      "method": "POST",
+      "blocked": true,
+      "at_utc": "2026-11-09T12:18:08.583898+00:00",
+      "denied_mcp_names_only": [
+        {
+          "method": "initialize"
+        }
+      ],
+      "path_without_query": "/mcp"
+    },
+    {
+      "method": "POST",
+      "blocked": true,
+      "at_utc": "2026-11-09T12:18:10.606952+00:00",
+      "denied_mcp_names_only": [
+        {
+          "method": "initialize"
+        }
+      ],
+      "path_without_query": "/mcp"
+    },
+    {
+      "method": "GET",
+      "status": 200,
+      "at_utc": "2026-11-09T12:18:12.163704+00:00",
+      "path_without_query": "/api/v1/dashboard/workspace-memory-inventory"
+    },
+    {
+      "method": "POST",
+      "blocked": true,
+      "at_utc": "2026-11-09T12:18:12.636555+00:00",
+      "denied_mcp_names_only": [
+        {
+          "method": "initialize"
+        }
+      ],
+      "path_without_query": "/mcp"
+    },
+    {
+      "method": "POST",
+      "blocked": true,
+      "at_utc": "2026-11-09T12:18:14.672438+00:00",
+      "denied_mcp_names_only": [
+        {
+          "method": "initialize"
+        }
+      ],
+      "path_without_query": "/mcp"
+    },
+    {
+      "method": "POST",
+      "blocked": true,
+      "at_utc": "2026-11-09T12:18:16.692067+00:00",
+      "denied_mcp_names_only": [
+        {
+          "method": "initialize"
+        }
+      ],
+      "path_without_query": "/mcp"
+    },
+    {
+      "method": "POST",
+      "blocked": true,
+      "at_utc": "2026-11-09T12:18:18.709360+00:00",
+      "denied_mcp_names_only": [
+        {
+          "method": "initialize"
+        }
+      ],
+      "path_without_query": "/mcp"
+    },
+    {
+      "method": "POST",
+      "blocked": true,
+      "at_utc": "2026-11-09T12:18:20.728419+00:00",
+      "denied_mcp_names_only": [
+        {
+          "method": "initialize"
+        }
+      ],
+      "path_without_query": "/mcp"
+    },
+    {
+      "method": "POST",
+      "blocked": true,
+      "at_utc": "2026-11-09T12:18:22.754680+00:00",
+      "denied_mcp_names_only": [
+        {
+          "method": "initialize"
+        }
+      ],
+      "path_without_query": "/mcp"
+    },
+    {
+      "method": "POST",
+      "blocked": true,
+      "at_utc": "2026-11-09T12:18:24.788117+00:00",
+      "denied_mcp_names_only": [
+        {
+          "method": "initialize"
+        }
+      ],
+      "path_without_query": "/mcp"
+    },
+    {
+      "method": "GET",
+      "status": 200,
+      "at_utc": "2026-11-09T12:18:26.419992+00:00",
+      "path_without_query": "/api/v1/stream/fleet"
+    },
+    {
+      "method": "POST",
+      "blocked": true,
+      "at_utc": "2026-11-09T12:18:26.817660+00:00",
+      "denied_mcp_names_only": [
+        {
+          "method": "initialize"
+        }
+      ],
+      "path_without_query": "/mcp"
+    },
+    {
+      "method": "POST",
+      "blocked": true,
+      "at_utc": "2026-11-09T12:18:28.851846+00:00",
+      "denied_mcp_names_only": [
+        {
+          "method": "initialize"
+        }
+      ],
+      "path_without_query": "/mcp"
+    },
+    {
+      "method": "POST",
+      "blocked": true,
+      "at_utc": "2026-11-09T12:18:30.875749+00:00",
+      "denied_mcp_names_only": [
+        {
+          "method": "initialize"
+        }
+      ],
+      "path_without_query": "/mcp"
+    },
+    {
+      "method": "POST",
+      "blocked": true,
+      "at_utc": "2026-11-09T12:18:32.900742+00:00",
+      "denied_mcp_names_only": [
+        {
+          "method": "initialize"
+        }
+      ],
+      "path_without_query": "/mcp"
+    },
+    {
+      "method": "POST",
+      "blocked": true,
+      "at_utc": "2026-11-09T12:18:34.929603+00:00",
+      "denied_mcp_names_only": [
+        {
+          "method": "initialize"
+        }
+      ],
+      "path_without_query": "/mcp"
+    },
+    {
+      "method": "POST",
+      "blocked": true,
+      "at_utc": "2026-11-09T12:18:36.954335+00:00",
+      "denied_mcp_names_only": [
+        {
+          "method": "initialize"
+        }
+      ],
+      "path_without_query": "/mcp"
+    },
+    {
+      "method": "POST",
+      "blocked": true,
+      "at_utc": "2026-11-09T12:18:38.985164+00:00",
+      "denied_mcp_names_only": [
+        {
+          "method": "initialize"
+        }
+      ],
+      "path_without_query": "/mcp"
+    },
+    {
+      "method": "GET",
+      "status": 200,
+      "at_utc": "2026-11-09T12:18:39.919293+00:00",
+      "path_without_query": "/api/v1/tui/preferences"
+    },
+    {
+      "method": "GET",
+      "status": 200,
+      "at_utc": "2026-11-09T12:18:39.924002+00:00",
+      "path_without_query": "/health"
+    },
+    {
+      "method": "GET",
+      "status": 200,
+      "at_utc": "2026-11-09T12:18:39.951104+00:00",
+      "path_without_query": "/api/v1/keepers/asks"
+    },
+    {
+      "method": "GET",
+      "status": 200,
+      "at_utc": "2026-11-09T12:18:39.952030+00:00",
+      "path_without_query": "/api/v1/operator"
+    },
+    {
+      "method": "GET",
+      "status": 200,
+      "at_utc": "2026-11-09T12:18:39.952325+00:00",
+      "path_without_query": "/api/v1/tool-metrics/series"
+    },
+    {
+      "method": "GET",
+      "status": 200,
+      "at_utc": "2026-11-09T12:18:39.952872+00:00",
+      "path_without_query": "/api/v1/lane-addons"
+    },
+    {
+      "method": "GET",
+      "status": 200,
+      "at_utc": "2026-11-09T12:18:39.953109+00:00",
+      "path_without_query": "/api/v1/gate/keepers"
+    },
+    {
+      "method": "GET",
+      "status": 200,
+      "at_utc": "2026-11-09T12:18:39.955075+00:00",
+      "path_without_query": "/api/v1/lane-addons/asks"
+    },
+    {
+      "method": "GET",
+      "status": 200,
+      "at_utc": "2026-11-09T12:18:39.959209+00:00",
+      "path_without_query": "/health"
+    },
+    {
+      "method": "GET",
+      "status": 200,
+      "at_utc": "2026-11-09T12:18:39.961910+00:00",
+      "path_without_query": "/health"
+    },
+    {
+      "method": "GET",
+      "status": 200,
+      "at_utc": "2026-11-09T12:18:39.963726+00:00",
+      "path_without_query": "/health"
+    },
+    {
+      "method": "GET",
+      "status": 200,
+      "at_utc": "2026-11-09T12:18:39.967937+00:00",
+      "path_without_query": "/api/v1/dashboard/scheduled-automation"
+    },
+    {
+      "method": "GET",
+      "status": 200,
+      "at_utc": "2026-11-09T12:18:39.968483+00:00",
+      "path_without_query": "/api/v1/dashboard/health-line"
+    },
+    {
+      "method": "GET",
+      "status": 200,
+      "at_utc": "2026-11-09T12:18:39.968849+00:00",
+      "path_without_query": "/api/v1/operator"
+    },
+    {
+      "method": "GET",
+      "status": 200,
+      "at_utc": "2026-11-09T12:18:39.969057+00:00",
+      "path_without_query": "/api/v1/keepers/turns"
+    },
+    {
+      "method": "GET",
+      "status": 200,
+      "at_utc": "2026-11-09T12:18:39.969178+00:00",
+      "path_without_query": "/api/v1/dashboard/gate"
+    },
+    {
+      "method": "GET",
+      "status": 200,
+      "at_utc": "2026-11-09T12:18:39.970041+00:00",
+      "path_without_query": "/api/v1/keepers/tool-approvals"
+    },
+    {
+      "method": "GET",
+      "status": 200,
+      "at_utc": "2026-11-09T12:18:39.974282+00:00",
+      "path_without_query": "/health"
+    },
+    {
+      "method": "GET",
+      "status": 200,
+      "at_utc": "2026-11-09T12:18:39.974857+00:00",
+      "path_without_query": "/health"
+    },
+    {
+      "method": "POST",
+      "blocked": true,
+      "at_utc": "2026-11-09T12:18:39.976608+00:00",
+      "denied_mcp_names_only": [
+        {
+          "method": "initialize"
+        }
+      ],
+      "path_without_query": "/mcp"
+    },
+    {
+      "method": "GET",
+      "status": 200,
+      "at_utc": "2026-11-09T12:18:39.979278+00:00",
+      "path_without_query": "/api/v1/keepers/asks"
+    },
+    {
+      "method": "GET",
+      "status": 200,
+      "at_utc": "2026-11-09T12:18:39.979879+00:00",
+      "path_without_query": "/health"
+    },
+    {
+      "method": "GET",
+      "status": 200,
+      "at_utc": "2026-11-09T12:18:39.980926+00:00",
+      "path_without_query": "/api/v1/stream/fleet"
+    },
+    {
+      "method": "GET",
+      "status": 200,
+      "at_utc": "2026-11-09T12:18:39.982138+00:00",
+      "path_without_query": "/api/v1/gate/keepers"
+    },
+    {
+      "method": "GET",
+      "status": 200,
+      "at_utc": "2026-11-09T12:18:39.983104+00:00",
+      "path_without_query": "/api/v1/lane-addons/asks"
+    },
+    {
+      "method": "GET",
+      "status": 200,
+      "at_utc": "2026-11-09T12:18:39.988387+00:00",
+      "path_without_query": "/api/v1/tool-metrics/series"
+    },
+    {
+      "method": "GET",
+      "status": 200,
+      "at_utc": "2026-11-09T12:18:39.988725+00:00",
+      "path_without_query": "/api/v1/keepers/asks"
+    },
+    {
+      "method": "GET",
+      "status": 304,
+      "at_utc": "2026-11-09T12:18:39.990112+00:00",
+      "path_without_query": "/api/v1/operator"
+    },
+    {
+      "method": "GET",
+      "status": 200,
+      "at_utc": "2026-11-09T12:18:39.990605+00:00",
+      "path_without_query": "/api/v1/lane-addons"
+    },
+    {
+      "method": "GET",
+      "status": 200,
+      "at_utc": "2026-11-09T12:18:39.991165+00:00",
+      "path_without_query": "/api/v1/gate/keepers"
+    },
+    {
+      "method": "GET",
+      "status": 200,
+      "at_utc": "2026-11-09T12:18:39.992955+00:00",
+      "path_without_query": "/api/v1/lane-addons/asks"
+    },
+    {
+      "method": "GET",
+      "status": 304,
+      "at_utc": "2026-11-09T12:18:39.995111+00:00",
+      "path_without_query": "/api/v1/dashboard/scheduled-automation"
+    },
+    {
+      "method": "GET",
+      "status": 304,
+      "at_utc": "2026-11-09T12:18:39.995278+00:00",
+      "path_without_query": "/api/v1/dashboard/health-line"
+    },
+    {
+      "method": "GET",
+      "status": 200,
+      "at_utc": "2026-11-09T12:18:39.997428+00:00",
+      "path_without_query": "/health"
+    },
+    {
+      "method": "GET",
+      "status": 304,
+      "at_utc": "2026-11-09T12:18:39.997586+00:00",
+      "path_without_query": "/api/v1/keepers/turns"
+    },
+    {
+      "method": "GET",
+      "status": 200,
+      "at_utc": "2026-11-09T12:18:40.015593+00:00",
+      "path_without_query": "/health"
+    },
+    {
+      "method": "GET",
+      "status": 200,
+      "at_utc": "2026-11-09T12:18:40.015955+00:00",
+      "path_without_query": "/health"
+    },
+    {
+      "method": "GET",
+      "status": 304,
+      "at_utc": "2026-11-09T12:18:40.021449+00:00",
+      "path_without_query": "/api/v1/dashboard/gate"
+    },
+    {
+      "method": "GET",
+      "status": 304,
+      "at_utc": "2026-11-09T12:18:40.021636+00:00",
+      "path_without_query": "/api/v1/keepers/tool-approvals"
+    },
+    {
+      "method": "GET",
+      "status": 200,
+      "at_utc": "2026-11-09T12:18:40.027138+00:00",
+      "path_without_query": "/health"
+    },
+    {
+      "method": "GET",
+      "status": 200,
+      "at_utc": "2026-11-09T12:18:40.027675+00:00",
+      "path_without_query": "/health"
+    },
+    {
+      "method": "GET",
+      "status": 200,
+      "at_utc": "2026-11-09T12:18:40.034029+00:00",
+      "path_without_query": "/api/v1/gate/keepers"
+    },
+    {
+      "method": "POST",
+      "blocked": true,
+      "at_utc": "2026-11-09T12:18:41.997723+00:00",
+      "denied_mcp_names_only": [
+        {
+          "method": "initialize"
+        }
+      ],
+      "path_without_query": "/mcp"
+    },
+    {
+      "method": "POST",
+      "blocked": true,
+      "at_utc": "2026-11-09T12:18:42.407597+00:00",
+      "path_without_query": "/api/v1/tui/preferences"
+    },
+    {
+      "method": "POST",
+      "blocked": true,
+      "at_utc": "2026-11-09T12:18:44.030326+00:00",
+      "denied_mcp_names_only": [
+        {
+          "method": "initialize"
+        }
+      ],
+      "path_without_query": "/mcp"
+    },
+    {
+      "method": "POST",
+      "blocked": true,
+      "at_utc": "2026-11-09T12:18:46.053367+00:00",
+      "denied_mcp_names_only": [
+        {
+          "method": "initialize"
+        }
+      ],
+      "path_without_query": "/mcp"
+    },
+    {
+      "method": "GET",
+      "status": 200,
+      "at_utc": "2026-11-09T12:18:47.127677+00:00",
+      "path_without_query": "/health"
+    },
+    {
+      "method": "GET",
+      "status": 200,
+      "at_utc": "2026-11-09T12:18:47.127908+00:00",
+      "path_without_query": "/health"
+    },
+    {
+      "method": "GET",
+      "status": 200,
+      "at_utc": "2026-11-09T12:18:47.128986+00:00",
+      "path_without_query": "/health"
+    },
+    {
+      "method": "GET",
+      "status": 200,
+      "at_utc": "2026-11-09T12:18:47.129657+00:00",
+      "path_without_query": "/health"
+    },
+    {
+      "method": "GET",
+      "status": 200,
+      "at_utc": "2026-11-09T12:18:47.130839+00:00",
+      "path_without_query": "/api/v1/dashboard/scheduled-automation"
+    },
+    {
+      "method": "GET",
+      "status": 304,
+      "at_utc": "2026-11-09T12:18:47.132045+00:00",
+      "path_without_query": "/api/v1/keepers/tool-approvals"
+    },
+    {
+      "method": "GET",
+      "status": 200,
+      "at_utc": "2026-11-09T12:18:47.134607+00:00",
+      "path_without_query": "/api/v1/keepers/asks"
+    },
+    {
+      "method": "GET",
+      "status": 200,
+      "at_utc": "2026-11-09T12:18:47.135358+00:00",
+      "path_without_query": "/health"
+    },
+    {
+      "method": "GET",
+      "status": 304,
+      "at_utc": "2026-11-09T12:18:47.135732+00:00",
+      "path_without_query": "/api/v1/dashboard/gate"
+    },
+    {
+      "method": "GET",
+      "status": 200,
+      "at_utc": "2026-11-09T12:18:47.135835+00:00",
+      "body_observation": {
+        "file": "native-memory-health-read-0002.json",
+        "wire_sha256": "153fee13a312e9883537af4f3c8fa92e8aab12337eeae4388fd05820e2c5f21f",
+        "sanitized_sha256": "153fee13a312e9883537af4f3c8fa92e8aab12337eeae4388fd05820e2c5f21f",
+        "status": 200,
+        "completed_at_utc": "2026-11-09T12:18:47.136735+00:00"
+      },
+      "path_without_query": "/api/v1/dashboard/keeper-memory-health"
+    },
+    {
+      "method": "GET",
+      "status": 200,
+      "at_utc": "2026-11-09T12:18:47.135912+00:00",
+      "path_without_query": "/api/v1/operator"
+    },
+    {
+      "method": "GET",
+      "status": 200,
+      "at_utc": "2026-11-09T12:18:47.136932+00:00",
+      "path_without_query": "/api/v1/gate/keepers"
+    },
+    {
+      "method": "GET",
+      "status": 200,
+      "at_utc": "2026-11-09T12:18:47.137772+00:00",
+      "path_without_query": "/api/v1/lane-addons/asks"
+    },
+    {
+      "method": "GET",
+      "status": 200,
+      "at_utc": "2026-11-09T12:18:47.138152+00:00",
+      "path_without_query": "/health"
+    },
+    {
+      "method": "GET",
+      "status": 200,
+      "at_utc": "2026-11-09T12:18:47.141234+00:00",
+      "path_without_query": "/health"
+    },
+    {
+      "method": "GET",
+      "status": 200,
+      "at_utc": "2026-11-09T12:18:47.141857+00:00",
+      "path_without_query": "/api/v1/async-requests"
+    },
+    {
+      "method": "GET",
+      "status": 200,
+      "at_utc": "2026-11-09T12:18:47.142178+00:00",
+      "path_without_query": "/api/v1/keepers/tool-approval-mode"
+    },
+    {
+      "method": "GET",
+      "status": 304,
+      "at_utc": "2026-11-09T12:18:47.143056+00:00",
+      "path_without_query": "/api/v1/dashboard/health-line"
+    },
+    {
+      "method": "GET",
+      "status": 304,
+      "at_utc": "2026-11-09T12:18:47.143493+00:00",
+      "path_without_query": "/api/v1/keepers/turns"
+    },
+    {
+      "method": "GET",
+      "status": 200,
+      "at_utc": "2026-11-09T12:18:47.144301+00:00",
+      "path_without_query": "/api/v1/dashboard/gate/keeper-settings"
+    },
+    {
+      "method": "POST",
+      "blocked": true,
+      "at_utc": "2026-11-09T12:18:48.074647+00:00",
+      "denied_mcp_names_only": [
+        {
+          "method": "initialize"
+        }
+      ],
+      "path_without_query": "/mcp"
+    },
+    {
+      "method": "POST",
+      "blocked": true,
+      "at_utc": "2026-11-09T12:18:50.094296+00:00",
+      "denied_mcp_names_only": [
+        {
+          "method": "initialize"
+        }
+      ],
+      "path_without_query": "/mcp"
+    },
+    {
+      "method": "POST",
+      "blocked": true,
+      "at_utc": "2026-11-09T12:18:52.118285+00:00",
+      "denied_mcp_names_only": [
+        {
+          "method": "initialize"
+        }
+      ],
+      "path_without_query": "/mcp"
+    },
+    {
+      "method": "POST",
+      "blocked": true,
+      "at_utc": "2026-11-09T12:18:54.143435+00:00",
+      "denied_mcp_names_only": [
+        {
+          "method": "initialize"
+        }
+      ],
+      "path_without_query": "/mcp"
+    },
+    {
+      "method": "POST",
+      "blocked": true,
+      "at_utc": "2026-11-09T12:18:56.163964+00:00",
+      "denied_mcp_names_only": [
+        {
+          "method": "initialize"
+        }
+      ],
+      "path_without_query": "/mcp"
+    },
+    {
+      "method": "GET",
+      "status": 200,
+      "at_utc": "2026-11-09T12:18:57.798775+00:00",
+      "path_without_query": "/api/v1/dashboard/workspace-memory-inventory"
+    },
+    {
+      "method": "POST",
+      "blocked": true,
+      "at_utc": "2026-11-09T12:18:58.187257+00:00",
+      "denied_mcp_names_only": [
+        {
+          "method": "initialize"
+        }
+      ],
+      "path_without_query": "/mcp"
+    },
+    {
+      "method": "POST",
+      "blocked": true,
+      "at_utc": "2026-11-09T12:19:00.219245+00:00",
+      "denied_mcp_names_only": [
+        {
+          "method": "initialize"
+        }
+      ],
+      "path_without_query": "/mcp"
+    },
+    {
+      "method": "POST",
+      "blocked": true,
+      "at_utc": "2026-11-09T12:19:02.239106+00:00",
+      "denied_mcp_names_only": [
+        {
+          "method": "initialize"
+        }
+      ],
+      "path_without_query": "/mcp"
+    },
+    {
+      "method": "POST",
+      "blocked": true,
+      "at_utc": "2026-11-09T12:19:04.273390+00:00",
+      "denied_mcp_names_only": [
+        {
+          "method": "initialize"
+        }
+      ],
+      "path_without_query": "/mcp"
+    },
+    {
+      "method": "POST",
+      "blocked": true,
+      "at_utc": "2026-11-09T12:19:06.307240+00:00",
+      "denied_mcp_names_only": [
+        {
+          "method": "initialize"
+        }
+      ],
+      "path_without_query": "/mcp"
+    },
+    {
+      "method": "POST",
+      "blocked": true,
+      "at_utc": "2026-11-09T12:19:08.337171+00:00",
+      "denied_mcp_names_only": [
+        {
+          "method": "initialize"
+        }
+      ],
+      "path_without_query": "/mcp"
+    },
+    {
+      "method": "POST",
+      "blocked": true,
+      "at_utc": "2026-11-09T12:19:10.368454+00:00",
+      "denied_mcp_names_only": [
+        {
+          "method": "initialize"
+        }
+      ],
+      "path_without_query": "/mcp"
+    },
+    {
+      "method": "POST",
+      "blocked": true,
+      "at_utc": "2026-11-09T12:19:12.402843+00:00",
+      "denied_mcp_names_only": [
+        {
+          "method": "initialize"
+        }
+      ],
+      "path_without_query": "/mcp"
+    },
+    {
+      "method": "POST",
+      "blocked": true,
+      "at_utc": "2026-11-09T12:19:14.438627+00:00",
+      "denied_mcp_names_only": [
+        {
+          "method": "initialize"
+        }
+      ],
+      "path_without_query": "/mcp"
+    },
+    {
+      "method": "POST",
+      "blocked": true,
+      "at_utc": "2026-11-09T12:19:16.456805+00:00",
+      "denied_mcp_names_only": [
+        {
+          "method": "initialize"
+        }
+      ],
+      "path_without_query": "/mcp"
+    },
+    {
+      "method": "POST",
+      "blocked": true,
+      "at_utc": "2026-11-09T12:19:18.479639+00:00",
+      "denied_mcp_names_only": [
+        {
+          "method": "initialize"
+        }
+      ],
+      "path_without_query": "/mcp"
+    },
+    {
+      "method": "POST",
+      "blocked": true,
+      "at_utc": "2026-11-09T12:19:20.496529+00:00",
+      "denied_mcp_names_only": [
+        {
+          "method": "initialize"
+        }
+      ],
+      "path_without_query": "/mcp"
+    },
+    {
+      "method": "POST",
+      "blocked": true,
+      "at_utc": "2026-11-09T12:19:22.524113+00:00",
+      "denied_mcp_names_only": [
+        {
+          "method": "initialize"
+        }
+      ],
+      "path_without_query": "/mcp"
+    }
+  ],
+  "derivative_provenance": {
+    "source_manifest_sha256": "4ab17837e1827735e532b3013901a6af8203fe158fdd7d33d9c039c3f55cf4fc",
+    "changes": "Host paths masked; request queries removed; original file map reduced to the 48 retained text frames. Additional 8 World-selection ANSI frame digests were computed at retention, separately from the original capture-time text digests. Original manifest remains in the working artifact run. This derivative does not share the original manifest digest.",
+    "retained_frame_root": "captures/"
+  },
+  "additional_retained_ansi_sha256": {
+    "after-120x35-age-compact-world-selected.ansi": "e069ec0e402d13f73c32d3f9cf2c2db1c926dac67ea685d36d123993b9244b4c",
+    "after-120x35-memory-detailed-world-selected.ansi": "fb654639eadc89603c4ef01ecabd1d75278abc84e55b11f75d9abb63ff929f21",
+    "after-120x35-memory-compact-world-selected.ansi": "fb654639eadc89603c4ef01ecabd1d75278abc84e55b11f75d9abb63ff929f21",
+    "after-80x24-memory-compact-world-selected.ansi": "def87f9aa275fc81711291fe4907e8dcbbeaf38bbf19349ebe090165904e204a",
+    "after-80x24-memory-detailed-world-selected.ansi": "def87f9aa275fc81711291fe4907e8dcbbeaf38bbf19349ebe090165904e204a",
+    "after-120x35-age-detailed-world-selected.ansi": "e069ec0e402d13f73c32d3f9cf2c2db1c926dac67ea685d36d123993b9244b4c",
+    "after-80x24-age-detailed-world-selected.ansi": "16485f380fbd717cd39e2fc43c1a9a8cfb9b0a80f762342a695f85cb72f3b3c0",
+    "after-80x24-age-compact-world-selected.ansi": "16485f380fbd717cd39e2fc43c1a9a8cfb9b0a80f762342a695f85cb72f3b3c0"
+  }
+}

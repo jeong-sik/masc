@@ -290,37 +290,16 @@ let parse_line_decoded ~file_path (line : string) : parsed_line =
     let delivery_execution_identity_valid =
       match delivery_provenance with
       | Some provenance ->
-        (match validate_delivery_role ~role_label provenance with
+        let validated = match json with
+          | `Assoc fields -> validate_delivery_fields ~provenance fields
+          | _ -> Error "delivery row must be an object" in
+        (match validated with
+         | Ok () -> true
          | Error detail ->
            report_persistence_read_drop
-             ~reason:Read_drop_reason.Invalid_payload
-             ~path:file_path
-             ~detail:(Printf.sprintf "invalid delivery row role: %s" detail);
-           false
-         | Ok () ->
-           (match execution_id_result with
-            | Error detail ->
-              report_persistence_read_drop
-                ~reason:Read_drop_reason.Invalid_payload
-                ~path:file_path
-                ~detail:(Printf.sprintf "invalid execution identity: %s" detail);
-              false
-            | Ok execution_id ->
-              (match
-                 validate_delivery_execution_identity
-                   ~execution_id
-                   delivery_provenance
-               with
-               | Ok () -> true
-               | Error detail ->
-                 report_persistence_read_drop
-                   ~reason:Read_drop_reason.Invalid_payload
-                   ~path:file_path
-                   ~detail:
-                     (Printf.sprintf
-                        "invalid delivery execution identity: %s"
-                        detail);
-                 false)))
+             ~reason:Read_drop_reason.Invalid_payload ~path:file_path
+             ~detail:(Printf.sprintf "invalid delivery row identity: %s" detail);
+           false)
       | None ->
         (match execution_id_result with
          | Ok _ -> true
@@ -341,6 +320,9 @@ let parse_line_decoded ~file_path (line : string) : parsed_line =
          and dropping it would delete the durable record of an external
          effect on read. *)
       || Option.is_some approval_lifecycle
+      || Option.exists (fun provenance ->
+           Keeper_chat_delivery_identity.transcript_slot_is_internal
+             provenance.Keeper_chat_delivery_identity.transcript_slot) delivery_provenance
     in
     let message =
       if Option.is_some surface_error then None

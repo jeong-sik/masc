@@ -83,6 +83,21 @@ type memory_fact_snapshot = {
   mfs_events_read_error : string option;
 }
 
+type memory_fact_count_scope =
+  | All_facts
+  | Ordinary_facts of Keeper_memory_os_types.category option
+  | Source_facts
+  | Dropped_facts
+
+val memory_fact_count : complete:bool -> memory_fact_snapshot -> memory_fact_count_scope -> int option
+(** Count an observed store, or [None] when a required store could not be
+    read. Missing stores are known empty. [All_facts] includes ordinary,
+    source and dropped rows and is unknown if either store is unreadable.
+    Incomplete fleet coverage ([complete=false]) makes every total unknown,
+    including a merged snapshot carrying readable rows. [Ordinary_facts
+    None] counts every ordinary category. Event-sidecar
+    availability does not change stored fact counts. *)
+
 val decode_memory_fact_snapshot :
   Yojson.Safe.t -> (memory_fact_snapshot, string) result
 (** Decode one keeper's fact listing served at
@@ -93,14 +108,18 @@ val decode_memory_fact_snapshot :
     event history. *)
 
 val merge_keeper_memory_facts :
+  refused:Tui_decode_memory_health.memory_keeper_refusal list ->
   (string * (memory_fact_snapshot, string) result) list ->
   memory_fact_snapshot * string option
 (** Merge per-keeper fact listings into the "all keepers" view ([mfs_keeper =
     "*"]). Each row keeps the server's origin and path text and names its
     keeper in its own field, set from the list's keeper name. The merged
     stores carry no revision or update time, because they are not one store.
-    The second value names every
-    keeper that could not be read -- a failed load, or a store answering
-    [Memory_store_read_error] -- as ["N of M keepers not read: ..."]; [None]
-    when all were read. [Memory_store_absent] is a keeper with no memory yet,
-    not a failure. *)
+    [refused] carries health rows that could not supply a keeper to load;
+    their optional identities and reasons remain part of fleet coverage.
+    The second value names every keeper that could not be read -- a health
+    refusal, a failed load, or a store answering [Memory_store_read_error] --
+    as ["N of M keepers not read: ..."]; [None] when all were read. Each
+    unidentified refusal counts separately, without inventing a keeper ID.
+    [M] includes loaded and refused health rows. [Memory_store_absent] is a
+    keeper with no memory yet, not a failure. *)

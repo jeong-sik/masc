@@ -530,7 +530,8 @@ let run_turn
       ?event_bus
       ?trace_link
       ?continuation_channel
-      ?hitl_resolution
+      ?hitl_resolutions
+      ?on_gate_inputs_prepared
       ?on_gate_deferred
       ?on_checkpoint_stage
       ()
@@ -819,9 +820,10 @@ let run_turn
      and user message append — Keeper_run_prompt. *)
   let prompt_user_turn_record =
     if Option.is_some native_resume then Keeper_run_prompt.Skip_already_checkpointed_user_turn
-    else match direct_resume, hitl_resolution with
-    | Some _, _ | None, Some _ -> Keeper_run_prompt.Skip_already_checkpointed_user_turn
-    | None, None -> user_turn_record
+    else match direct_resume,
+      Option.fold ~none:[] ~some:Keeper_hitl_resolution_batch.resolutions hitl_resolutions with
+    | Some _, _ | None, _ :: _ -> Keeper_run_prompt.Skip_already_checkpointed_user_turn
+    | None, [] -> user_turn_record
   in
   let range_turn_start =
     Keeper_run_prompt.range_turn_start prompt_user_turn_record ~history_at_start
@@ -910,7 +912,7 @@ let run_turn
       ?on_tool_stream_observation
       ?on_tool_result_ready
       ?tool_result_commit_policy
-      ?hitl_resolution
+      ?hitl_resolutions
       ?on_gate_deferred
       ?composition_plan_index
       ~turn_ctx_cell
@@ -956,14 +958,24 @@ let run_turn
       approval_gate in
     let original_gate_message = user_message in
     let prepared_gate_input = s.Keeper_run_tools.model_message in
+    Option.iter (fun observe ->
+      try observe ~turn_ref prepared_gate_input with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn -> Log.Keeper.warn ~keeper_name:meta.name
+          "prepared Gate input observation failed turn_ref=%s: %s"
+          (Ids.Turn_ref.to_string turn_ref) (Printexc.to_string exn))
+      on_gate_inputs_prepared;
     let user_message = prepared_gate_input.text in
     let user_blocks =
       match user_blocks, prepared_gate_input.replay_evidence with
       | Some blocks, _ when Option.is_some official_client_continuation ->
         Some (blocks @ [Agent_core.Types.Text prepared_gate_input.text])
-      | Some blocks, Some evidence ->
-        Some (Keeper_gate_replay.append_model_evidence_block evidence blocks)
-      | (Some _ as blocks), None -> blocks
+      | Some blocks, evidence ->
+        Some
+          (List.fold_left
+             (fun blocks evidence ->
+                Keeper_gate_replay.append_model_evidence_block evidence blocks)
+             blocks evidence)
       | None, _ -> None
     in
     let admission =
@@ -971,8 +983,8 @@ let run_turn
          the stored resolution. Preserve their existing input path until those
          blocks have their own durable admission identity. *)
       if Option.is_some official_client_continuation then Ok None else
-      match hitl_resolution, prepared_gate_input.replay_evidence, user_blocks with
-      | Some _, Some evidence, blocks
+      match prepared_gate_input.resolutions, prepared_gate_input.replay_evidence, user_blocks with
+      | _ :: _, evidence :: remaining_evidence, blocks
         when Option.is_none blocks || (match direct_resume with
           | Some (Gate_continuation _) -> true
           | Some (Checkpoint_continuation _ | Runtime_continuation _) | None -> false) ->
@@ -985,6 +997,16 @@ let run_turn
               answerer as the speaker. Stamped before admission so the admitted
               copy already carries it; the admission digest leaves the speaker
               out, so stamping does not change what was admitted. *)
+           let co_inputs =
+             List.fold_left
+               (fun result evidence ->
+                  Result.bind result (fun inputs_rev ->
+                    Keeper_gate_replay.approval_input evidence
+                    |> Result.map_error Keeper_approval_input_admission.error_to_string
+                    |> Result.map (fun input -> input :: inputs_rev)))
+               (Ok []) remaining_evidence
+             |> Result.map List.rev
+           in
            let co_inputs =
              List.fold_left
                (fun result
@@ -1007,7 +1029,7 @@ let run_turn
                      ~evidence_fingerprint
                    |> Result.map_error Keeper_approval_input_admission.error_to_string
                    |> Result.map (fun identity -> inputs @ [ identity, message ])))
-               (Ok [])
+               co_inputs
                answered_ask_inputs
            in
            Result.bind co_inputs (fun co_inputs ->
@@ -1052,9 +1074,9 @@ let run_turn
         , user_blocks )
       | None ->
         let ctx_work =
-          match hitl_resolution with
-          | None -> ctx_work
-          | Some _ ->
+          match prepared_gate_input.resolutions with
+          | [] -> ctx_work
+          | _ :: _ ->
             Keeper_context_runtime.append ctx_work
               (Agent_core.Types.make_message ~metadata:input_metadata
                  ~role:Agent_core.Types.User [ Agent_core.Types.Text user_message ])
@@ -1233,11 +1255,12 @@ let run_turn
       (* [messages] is the current provider attempt's transmission view: the
          carried range [Keeper_turn_driver_try_provider.bounded_model_input_projection]
          composed, as the wire's reasoning projection leaves it.
-         The source projection appends only a bounded typed Gate replay
-         reference; exact replay bytes remain in the artifact store. The
-         provenance check below compares against the list as received, so its
-         projected-prefix precondition keeps holding. Durable state and
-         checkpoints receive the unwindowed history. *)
+         The closed source projection preserves retained messages and restores
+         typed Gate references in resolution order around surviving evidence.
+         Exact replay bytes remain in the artifact store. Since restoration
+         can insert before a surviving reference, measure the resulting view
+         by its typed carrier identity rather than assuming suffix-only edits.
+         Durable state and checkpoints receive the unwindowed history. *)
       match source_model_input_projection messages with
       | Error _ as error ->
         request_evidence_ref :=
@@ -1249,10 +1272,9 @@ let run_turn
           Option.is_some (Keeper_run_tools_hook_accumulator.extra_system_context_receipt acc)
         in
         let provider_content =
-          Keeper_agent_prompt_metrics.provider_content_messages
+          Keeper_agent_prompt_metrics.provider_content_of_transmitted
             ~prompt_context_present
-            ~projection_input:messages
-            ~projected_messages
+            ~messages:projected_messages
         in
         (* The failure is kept, not only logged. A warn line tells an operator
            reading logs; the record has to tell a reader of the metrics why

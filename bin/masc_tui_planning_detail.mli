@@ -128,6 +128,16 @@ val short_ts : string -> string
 (** "2026-07-28T03:57:38Z" -> "07-28 03:57"; anything shorter is shown as-is
     rather than guessed at. Shared with the task-history rows. *)
 
+val split_embedded_json : string -> (string * string * string) option
+(** A whole JSON value hiding inside a prose summary, split out: answers
+    (text before the value, the value laid out one member per line, text
+    after it), or [None] when no brace-to-brace substring parses. Yojson
+    decides what is JSON; the layout inserts whitespace into the validated
+    original and copies every other byte verbatim, so number literals keep
+    their spelling ([1E400] stays [1E400], not "Infinity") and a string
+    holding JSON-looking text stays a quoted string. Shared with the keeper
+    detail's current-failure block, which reads the same wire summaries. *)
+
 val timeline_unavailability_detail : Tui_decode.goal_timeline_unavailability -> string
 (** Preserve the typed source failure's cause at the history read boundary. *)
 

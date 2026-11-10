@@ -335,6 +335,70 @@ let test_confirmation_read_suspension_withdraws_ready_proof () =
        | Started (refreshing, _) ->
            check_bool "the replacement remains in flight" true (Read.in_flight refreshing))
 
+(* A JSON value embedded in a wire summary, split out and laid out verbatim.
+   These checks pin what the value's bytes become -- number spellings, string
+   quoting, layout -- which the goal timeline and the keeper detail read.
+   Nothing here draws a screen row. *)
+let split_exn text =
+  match Detail.split_embedded_json text with
+  | Some (before, value, after) -> before, value, after
+  | None -> Alcotest.fail "a parseable embedded value must split"
+
+let test_embedded_number_literals_keep_their_spelling () =
+  let _, value, _ =
+    split_exn
+      {|cause: {"n":1E400,"m":1.50,"i":123456789012345678901234567890,"neg":-2e-3}|}
+  in
+  List.iter
+    (fun (label, literal) -> check_bool label true (contains literal value))
+    [ "exponent literal", "1E400"
+    ; "trailing zero", "1.50"
+    ; "big int literal", "123456789012345678901234567890"
+    ; "negative exponent", "-2e-3" ];
+  check_bool "infinity never appears" false (contains "Infinity" value)
+
+let test_embedded_layout_is_one_member_per_line () =
+  let _, value, _ =
+    split_exn
+      {|x {"kind":"terminal_effect_failed","detail":{"tool":"tool_execute"},"empty":{},"list":[1,2]} y|}
+  in
+  Alcotest.(check string)
+    "nested members each on their own line, empty pairs inline" value
+    {|{
+  "kind": "terminal_effect_failed",
+  "detail": {
+    "tool": "tool_execute"
+  },
+  "empty": {},
+  "list": [
+    1,
+    2
+  ]
+}|}
+
+let test_embedded_strings_stay_strings () =
+  let _, value, _ = split_exn {|{"payload":"{\"ok\":true}","output":"a\n"}|} in
+  check_bool "a string holding JSON-looking text stays quoted" true
+    (contains {|"payload": "{\"ok\":true}"|} value);
+  check_bool "a string's escaped newline stays visible" true
+    (contains {|"output": "a\n"|} value)
+
+let test_embedded_prose_before_and_after_the_value () =
+  let before, value, after =
+    split_exn {|failed with kind: {"k":1} then it stopped|}
+  in
+  Alcotest.(check string) "prose before" {|failed with kind: |} before;
+  Alcotest.(check string) "prose after" {| then it stopped|} after;
+  check_bool "the value is the object alone" true (contains {|"k": 1|} value)
+
+let test_embedded_unparseable_value_stays_whole () =
+  check_bool "a value the server previews to a prefix does not split" true
+    (Option.is_none
+       (Detail.split_embedded_json
+          {|cut: {"kind":"terminal_effect_failed","detail":{"tool":"tool_ex…|}));
+  check_bool "text with no brace does not split" true
+    (Option.is_none (Detail.split_embedded_json "no json here"))
+
 let () =
   Alcotest.run "tui_planning_detail"
     [ ( "confirmation boundaries"
@@ -354,5 +418,17 @@ let () =
             test_confirmation_read_cannot_rearm_after_cancel
         ; Alcotest.test_case "suspension withdraws ready confirmation" `Quick
             test_confirmation_read_suspension_withdraws_ready_proof
+        ] )
+    ; ( "embedded JSON verbatim layout"
+      , [ Alcotest.test_case "number literals keep their spelling" `Quick
+            test_embedded_number_literals_keep_their_spelling
+        ; Alcotest.test_case "layout is one member per line" `Quick
+            test_embedded_layout_is_one_member_per_line
+        ; Alcotest.test_case "strings stay strings" `Quick
+            test_embedded_strings_stay_strings
+        ; Alcotest.test_case "prose before and after the value" `Quick
+            test_embedded_prose_before_and_after_the_value
+        ; Alcotest.test_case "unparseable value stays whole" `Quick
+            test_embedded_unparseable_value_stays_whole
         ] )
     ]

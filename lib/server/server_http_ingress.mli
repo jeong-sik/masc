@@ -26,6 +26,25 @@ val serve
     knows are logged at warn and get no second response. Cancellation
     propagates. *)
 
+val serve_table
+  :  router:Http_server_eio.Router.t
+  -> client_addr:Eio.Net.Sockaddr.stream
+  -> Server_request_authority.classification
+  -> Http_reqd.t
+  -> unit
+(** The entry of a server whose whole surface is its route table: the account
+    server of a multi-account installation ({!Server_accounts}). The authority
+    and the origin are admitted as {!serve} admits them, then the client
+    address limit, then {!Http_server_eio.Router.dispatch}. It charges no agent
+    bucket, runs no MCP check and no workspace precondition, and has no arm
+    outside the router: a method or a path that the table does not hold is the
+    405 or the 404 of the router, [OPTIONS] included.
+
+    A handler exception is answered as by {!serve}, except that the 500 says
+    ["internal error"] and not the text of the exception, which can name a
+    file of the server. The log has the text. Both entries use the same
+    request-owner relay when the connection runs on the HTTP serving domain. *)
+
 val respond_request_authority_bad_request
   :  error_code:string
   -> message:string
@@ -43,3 +62,11 @@ val http1_handler
 (** The httpun-eio connection handler: wraps the descriptor with its upgrade
     capability ({!Http_reqd.of_gluten}), classifies the [Host] field set and
     runs {!serve}. *)
+
+val http1_table_handler
+  :  trust_policy:Server_request_authority.trust_policy
+  -> Http_server_eio.Router.t
+  -> Eio.Net.Sockaddr.stream
+  -> Httpun.Reqd.t Gluten.Reqd.t
+  -> unit
+(** {!http1_handler} over {!serve_table}. *)

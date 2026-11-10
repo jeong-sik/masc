@@ -37,38 +37,46 @@ let respond_rate_limited reqd ~body ~rl_headers ~scope =
     ~scope
 ;;
 
-(* True when the request was refused with a 429 on [reqd]. *)
-let try_rate_limit_block ~path ~client_addr ~request reqd =
+(* True when the client address is over its limit and the request was refused
+   with a 429 on [reqd]. *)
+let try_client_rate_limit_block ~path ~client_addr reqd =
   if is_rate_limit_exempt path
   then false
   else (
     let rl_key = Rate_limit.key_of_sockaddr client_addr in
-    if not (Rate_limit.check_global ~key:rl_key)
-    then (
+    if Rate_limit.check_global ~key:rl_key
+    then false
+    else (
       respond_rate_limited
         reqd
         ~body:(Rate_limit.too_many_requests_body ())
         ~rl_headers:(Rate_limit.headers_global ~key:rl_key)
         ~scope:Transport_metrics.Client_ip;
-      true)
-    else if not (charges_agent_bucket request)
-    then false
-    else (
-      match Server_auth.auth_token_from_request request with
-      | None -> false
-      | Some token ->
-        (match Rate_limit.agent_key_of_token_or_name ~token () with
-         | None -> false
-         | Some agent_key ->
-           if Rate_limit.check_agent_global ~key:agent_key
-           then false
-           else (
-             respond_rate_limited
-               reqd
-               ~body:(Rate_limit.too_many_agent_requests_body ())
-               ~rl_headers:(Rate_limit.headers_agent_global ~key:agent_key)
-               ~scope:Transport_metrics.Agent;
-             true))))
+      true))
+;;
+
+(* True when the request was refused with a 429 on [reqd]. *)
+let try_rate_limit_block ~path ~client_addr ~request reqd =
+  if try_client_rate_limit_block ~path ~client_addr reqd
+  then true
+  else if is_rate_limit_exempt path || not (charges_agent_bucket request)
+  then false
+  else (
+    match Server_auth.auth_token_from_request request with
+    | None -> false
+    | Some token ->
+      (match Rate_limit.agent_key_of_token_or_name ~token () with
+       | None -> false
+       | Some agent_key ->
+         if Rate_limit.check_agent_global ~key:agent_key
+         then false
+         else (
+           respond_rate_limited
+             reqd
+             ~body:(Rate_limit.too_many_agent_requests_body ())
+             ~rl_headers:(Rate_limit.headers_agent_global ~key:agent_key)
+             ~scope:Transport_metrics.Agent;
+           true)))
 ;;
 
 (* True when the request failed the MCP origin or protocol-version check and
@@ -183,6 +191,21 @@ let respond_request_authority_bad_request ~error_code ~message reqd =
     reqd
 ;;
 
+(* Runs the steps of an admitted request and answers what they raise.
+   [internal_error] is the body of the 500 for the exception text [msg]. *)
+let answering_failures reqd ~internal_error steps =
+  try steps () with
+  (* Cancellation propagates through the connection switch without
+     attempting a response from a cancelled handler. *)
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | Auth.Auth_config_error _ as exn ->
+    handler_failed reqd exn ~answer:(fun _ -> try_auth_config_error_response reqd)
+  | exn ->
+    handler_failed reqd exn ~answer:(fun msg ->
+      Log.Http.error "http ingress request handler raised: %s" msg;
+      try_internal_error_response reqd (internal_error msg))
+;;
+
 (* Authority admission precedes rate limiting, auth, and routing so no
    credential I/O or URL projection can observe an untrusted Host or an
    ambiguous/malformed Origin field set. *)
@@ -191,8 +214,8 @@ let admitted ~routes ~client_addr ~request_authority request reqd =
     let path = Http.Request.path request in
     if try_rate_limit_block ~path ~client_addr ~request reqd
     then ()
-    else (
-      try
+    else
+      answering_failures reqd ~internal_error:Fun.id (fun () ->
         let session_id_for_version = Transport.get_session_id_any request in
         let protocol_version =
           Transport.get_protocol_version_for_session ?session_id:session_id_for_version request
@@ -202,20 +225,28 @@ let admitted ~routes ~client_addr ~request_authority request reqd =
         then ()
         else
           Server_workspace_precondition.guard ~path request reqd ~admitted:(fun () ->
-            dispatch_route ~router:routes ~request ~path reqd)
-      with
-      (* Cancellation propagates through the connection switch without
-         attempting a response from a cancelled handler. *)
-      | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | Auth.Auth_config_error _ as exn ->
-        handler_failed reqd exn ~answer:(fun _ -> try_auth_config_error_response reqd)
-      | exn ->
-        handler_failed reqd exn ~answer:(fun msg ->
-          Log.Http.error "http ingress request handler raised: %s" msg;
-          try_internal_error_response reqd msg)))
+            dispatch_route ~router:routes ~request ~path reqd)))
 ;;
 
-let serve_here ~routes ~client_addr classification reqd =
+let table_internal_error = "internal error"
+
+(* The whole surface is the table: no agent bucket, no MCP check, no
+   workspace precondition, and no arm outside the router. The 500 of a handler
+   that raised says nothing of the exception, whose text can name a file of
+   the server; the log has it. *)
+let admitted_to_table ~router ~client_addr ~request_authority request reqd =
+  Server_request_authority.with_current request_authority (fun () ->
+    let path = Http.Request.path request in
+    if try_client_rate_limit_block ~path ~client_addr reqd
+    then ()
+    else
+      answering_failures
+        reqd
+        ~internal_error:(fun (_ : string) -> table_internal_error)
+        (fun () -> Http.Router.dispatch router request reqd))
+;;
+
+let serve_admitted ~admitted classification reqd =
   let request = Http_reqd.request reqd in
   match classification with
   | Server_request_authority.Missing ->
@@ -251,7 +282,7 @@ let serve_here ~routes ~client_addr classification reqd =
          ~message:"request Origin is not one complete HTTP(S) serialized origin"
          reqd
      | Server_auth.Missing_origin | Server_auth.Single_origin _ ->
-       admitted ~routes ~client_addr ~request_authority request reqd)
+       admitted ~request_authority request reqd)
 ;;
 
 (* Where a request is handled when its connection runs on another domain
@@ -275,7 +306,7 @@ let owner_relay ~routes reqd =
        Option.map (fun sw -> sw, post) (Http_reqd.relay_scope reqd))
 ;;
 
-(* The owner's queue drops what a task raises. [serve_here] answers its own
+(* The owner's queue drops what a task raises. [serve_admitted] answers its own
    failures; this is for the body and flush callbacks of a handler, which on
    the connection's domain would have raised into its fiber. *)
 let reporting task () =
@@ -289,25 +320,41 @@ let reporting task () =
 
 (* The read mark of the request ([Pool_lane]) is bound to the connection's
    fiber and does not cross domains, so the handler's fiber takes it again. *)
-let serve ~routes ~client_addr classification reqd =
+let serve_owned ~routes ~admitted classification reqd =
   match owner_relay ~routes reqd with
-  | None -> serve_here ~routes ~client_addr classification reqd
+  | None -> serve_admitted ~admitted classification reqd
   | Some (sw, post) ->
     let lane = Pool_lane.current () in
     let post task = post (reporting task) in
     Http_reqd.relay reqd ~sw ~post (fun relayed ->
-      let handle () = serve_here ~routes ~client_addr classification relayed in
+      let handle () = serve_admitted ~admitted classification relayed in
       match lane with
       | Pool_lane.Read -> Pool_lane.with_read handle
       | Pool_lane.Background -> handle ())
 ;;
 
-let http1_handler ~trust_policy routes client_addr gluten_reqd =
+let serve ~routes ~client_addr classification reqd =
+  serve_owned ~routes ~admitted:(admitted ~routes ~client_addr) classification reqd
+;;
+
+let serve_table ~router ~client_addr classification reqd =
+  serve_owned ~routes:router ~admitted:(admitted_to_table ~router ~client_addr)
+    classification reqd
+;;
+
+let http1 ~trust_policy ~serve client_addr gluten_reqd =
   let reqd = Http_reqd.of_gluten gluten_reqd in
   let request = Http_reqd.request reqd in
   serve
-    ~routes
     ~client_addr
     (Server_request_authority.classify_http1_request ~trust_policy request)
     reqd
+;;
+
+let http1_handler ~trust_policy routes client_addr gluten_reqd =
+  http1 ~trust_policy ~serve:(serve ~routes) client_addr gluten_reqd
+;;
+
+let http1_table_handler ~trust_policy router client_addr gluten_reqd =
+  http1 ~trust_policy ~serve:(serve_table ~router) client_addr gluten_reqd
 ;;

@@ -237,7 +237,7 @@ export function VerificationRequestsPanel() {
   const resource = useManagedAsyncResource<VerificationRequestsResponse>()
 
   useEffect(() => {
-    const dispose = setupObservationRefresh(() => loadData(resource), { topics: ['verification_requests'], readError: () => resource.state.peek().error, cancelRead: () => resource.cancel() })
+    const dispose = setupObservationRefresh(() => loadData(resource), { topics: ['verification_requests'], readError: () => resource.readError(), cancelRead: () => resource.cancel(), resetRead: () => resource.reset() })
     return () => {
       dispose()
       resource.cancel()

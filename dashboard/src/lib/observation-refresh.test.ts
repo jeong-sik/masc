@@ -1,4 +1,5 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { acceptedExecutionWorkspace } from '../execution-workspace-authority'
 import {
   publishDashboardObservationChange,
   publishDashboardObservationRecovery,
@@ -10,8 +11,14 @@ import {
 const disposers: Array<() => void> = []
 const flush = async () => { await Promise.resolve(); await Promise.resolve() }
 
+beforeEach(() => {
+  acceptedExecutionWorkspace.value = Object.freeze({ epoch: 'fixture', workspaceRoot: '/fixture',
+    connectionGeneration: 0, observerInstanceId: 'fixture-instance' })
+})
+
 afterEach(() => {
   for (const dispose of disposers.splice(0)) dispose()
+  acceptedExecutionWorkspace.value = null
   vi.restoreAllMocks()
   vi.useRealTimers()
 })

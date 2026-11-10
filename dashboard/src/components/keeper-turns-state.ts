@@ -40,7 +40,7 @@ let stopRefresh: (() => void) | null = null
 export function subscribeKeeperTurnsRefresh(): () => void {
   subscriberCount += 1
   if (subscriberCount === 1) {
-    stopRefresh = setupObservationRefresh(loadKeeperTurns, { topics: ['keeper_turns'], readError: () => keeperTurnsResource.state.peek().error, cancelRead: () => keeperTurnsResource.cancel() })
+    stopRefresh = setupObservationRefresh(loadKeeperTurns, { topics: ['keeper_turns'], readError: () => keeperTurnsResource.readError(), cancelRead: () => keeperTurnsResource.cancel(), resetRead: () => keeperTurnsResource.reset() })
   }
   return () => {
     subscriberCount -= 1

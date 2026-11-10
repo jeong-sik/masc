@@ -79,7 +79,7 @@ let stopRefresh: (() => void) | null = null
 export function subscribeScheduledAutomationRefresh(): () => void {
   subscriberCount += 1
   if (subscriberCount === 1) {
-    stopRefresh = setupObservationRefresh(() => loadScheduledAutomation(), { topics: ['scheduled_automation'], readError: () => scheduledAutomationResource.state.peek().error, cancelRead: () => scheduledAutomationResource.cancel() })
+    stopRefresh = setupObservationRefresh(() => loadScheduledAutomation(), { topics: ['scheduled_automation'], readError: () => scheduledAutomationResource.readError(), cancelRead: () => scheduledAutomationResource.cancel(), resetRead: () => scheduledAutomationResource.reset() })
   }
   return () => {
     subscriberCount -= 1

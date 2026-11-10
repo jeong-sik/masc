@@ -1313,7 +1313,7 @@ function OverviewDomainSection({
 export function Overview() {
   useNowSecondsTicker()
   useEffect(() => {
-    const dispose = setupObservationRefresh(signal => loadOverviewTelemetry(Date.now(), signal), { topics: ['telemetry'], cancelRead: () => overviewTelemetryResource.reset(), readError: () => { const s = overviewTelemetryResource.state.peek(); return s.status === 'error' ? s.message : null } })
+    const dispose = setupObservationRefresh(signal => loadOverviewTelemetry(Date.now(), signal), { topics: ['telemetry'], cancelRead: () => overviewTelemetryResource.reset(), resetRead: () => overviewTelemetryResource.reset(), readError: () => overviewTelemetryResource.readError() })
     // Overview and the shell consume one shared full-health resource. The
     // subscriber owns ref-counted refresh lifetime, so mounting both surfaces
     // never creates a second backend poller.

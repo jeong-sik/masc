@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { DashboardScheduledAutomationProjection } from '../../api'
+import { acceptedExecutionWorkspace } from '../../execution-workspace-authority'
 
 const mocks = vi.hoisted(() => ({
   fetchDashboardScheduledAutomation: vi.fn(),
@@ -45,11 +46,14 @@ import { publishDashboardObservationChange } from '../../lib/observation-refresh
 
 describe('scheduled automation refresh', () => {
   beforeEach(() => {
+    acceptedExecutionWorkspace.value = Object.freeze({ epoch: 'fixture', workspaceRoot: '/fixture',
+      connectionGeneration: 0, observerInstanceId: 'fixture-instance' })
     vi.useFakeTimers()
     mocks.fetchDashboardScheduledAutomation.mockReset()
   })
 
   afterEach(() => {
+    acceptedExecutionWorkspace.value = null
     vi.clearAllTimers()
     vi.useRealTimers()
   })

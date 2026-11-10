@@ -1089,7 +1089,7 @@ function ApAside({
 
 export function ApprovalsSurface() {
   useEffect(() => {
-    const disposeAutoRefresh = setupObservationRefresh(() => refreshGate(), { topics: ['gate'], cancelRead: () => gateResource.cancel(), readError: () => gateError.peek() || null })
+    const disposeAutoRefresh = setupObservationRefresh(() => refreshGate(), { topics: ['gate'], cancelRead: () => gateResource.cancel(), readError: () => gateResource.readError(), resetRead: () => gateResource.reset() })
     return () => {
       disposeAutoRefresh()
     }

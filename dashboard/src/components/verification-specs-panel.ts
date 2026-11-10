@@ -116,7 +116,7 @@ export function VerificationSpecsPanel() {
   const resource = useManagedAsyncResource<TlaSpecsResponse>()
 
   useEffect(() => {
-    const dispose = setupObservationRefresh(() => loadSpecs(resource), { topics: ['verification_specs'], readError: () => resource.state.peek().error, cancelRead: () => resource.cancel() })
+    const dispose = setupObservationRefresh(() => loadSpecs(resource), { topics: ['verification_specs'], readError: () => resource.readError(), cancelRead: () => resource.cancel(), resetRead: () => resource.reset() })
     return () => { dispose(); resource.cancel() }
   }, [resource])
 

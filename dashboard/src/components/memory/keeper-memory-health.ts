@@ -185,7 +185,8 @@ export function KeeperMemoryHealth() {
     const refresh = (signal: AbortSignal) => resource.load(() => fetchKeeperMemoryHealth({ signal }))
     const cleanup = setupObservationRefresh(refresh, {
       topics: ['keeper_memory_health'],
-      readError: () => resource.state.peek().error,
+      readError: () => resource.readError(),
+      resetRead: () => resource.reset(),
       cancelRead: () => resource.cancel(),
     })
 

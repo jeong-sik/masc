@@ -23,7 +23,7 @@ let stopRefresh: (() => void) | null = null
 export function subscribeDashboardFullHealthRefresh(): () => void {
   subscriberCount += 1
   if (subscriberCount === 1) {
-    stopRefresh = setupObservationRefresh(loadDashboardFullHealth, { topics: ['health'], readError: () => dashboardFullHealthResource.state.peek().error, cancelRead: () => dashboardFullHealthResource.cancel() })
+    stopRefresh = setupObservationRefresh(loadDashboardFullHealth, { topics: ['health'], readError: () => dashboardFullHealthResource.readError(), cancelRead: () => dashboardFullHealthResource.cancel(), resetRead: () => dashboardFullHealthResource.reset() })
   }
   return () => {
     subscriberCount -= 1

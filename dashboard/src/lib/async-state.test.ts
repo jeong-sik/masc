@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest'
 import {
   idle, loading, loaded, failed,
   isLoaded, isLoading, isFailed,
-  getData, isAbortError,
+  getData, isAbortError, createManagedAsyncResource,
 } from './async-state'
 
 describe('async-state constructors', () => {
@@ -48,4 +48,30 @@ describe('isAbortError', () => {
   it('returns false for regular Error', () => { expect(isAbortError(new Error('x'))).toBe(false) })
   it('returns false for non-Error', () => { expect(isAbortError('str')).toBe(false) })
   it('returns false for null', () => { expect(isAbortError(null)).toBe(false) })
+})
+
+describe('managed read failure', () => {
+  it('keeps the original typed failure separately from its display message', async () => {
+    const resource = createManagedAsyncResource<string>()
+    const failure = Object.assign(new Error('denied'), { status: 403 })
+    await resource.load(async () => { throw failure })
+    expect(resource.state.peek().error).toBe('denied')
+    expect(resource.readError()).toBe(failure)
+    resource.reset()
+    expect(resource.readError()).toBeNull()
+    await resource.load(async () => 'new owner')
+    expect(resource.readError()).toBeNull()
+  })
+
+  it('does not publish a late non-AbortError from a retired read', async () => {
+    const resource = createManagedAsyncResource<string>()
+    let reject!: (error: Error) => void
+    const pending = resource.load(() => new Promise<string>((_resolve, fail) => { reject = fail }))
+    resource.reset()
+    await resource.load(async () => 'current')
+    reject(new Error('late refusal'))
+    await pending
+    expect(resource.state.peek()).toEqual({ data: 'current', loading: false, error: null })
+    expect(resource.readError()).toBeNull()
+  })
 })

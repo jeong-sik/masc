@@ -3242,7 +3242,8 @@ let keeper_control_hints ?(offers_chat = true) ?(offers_back = true) ?(taken = [
           match story with
           | None -> "story"
           | Some (Masc_tui_keeper_story.Story | Masc_tui_keeper_story.World) -> "close"
-          | Some (Masc_tui_keeper_story.Schedule | Masc_tui_keeper_story.Memory) -> "story"
+          | Some Masc_tui_keeper_story.Schedule -> "story"
+          | Some Masc_tui_keeper_story.Memory -> "browse"
         in
         [ "Enter / Right", accent "Enter / Right" ^ ":" ^ enter ^ " / detail"; esc ]
   in

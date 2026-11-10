@@ -6272,6 +6272,14 @@ let runtime_param_edit_value edit =
        if String.equal value "" then Error "Choose a value" else Ok (`String value)
      | _ -> parse_json ())
 
+type memory_page = Memory_facts | Memory_changes
+
+type memory_return = {
+  mr_keeper : string;
+  mr_search : string option;
+  mr_search_last : string;
+}
+
 type memory_sort_order =
   | Sort_recency
   | Sort_last_retrieved
@@ -10055,15 +10063,10 @@ type state = {
   (* The read those turns owe: drawing them, a push about the Keeper's turns, a
      revalidation and a failed read each owe it. *)
   mutable keeper_story_turns_owed: Masc_tui_owed_read.t;
-  (* Independently delivered, Keeper-keyed reads for the Memory dock. *)
-  mutable keeper_story_memory_facts:
-    (string, Masc.Tui_decode_memory_facts.memory_fact_snapshot * string option) Masc_tui_fetched.t;
-  mutable keeper_story_memory_activity: (string, Masc.Keeper_memory_activity.t) Masc_tui_fetched.t;
-  mutable keeper_story_memory_facts_owed: Masc_tui_owed_read.t;
-  mutable keeper_story_memory_activity_owed: Masc_tui_owed_read.t;
-  mutable keeper_story_memory_view: Masc_tui_keeper_story.memory_view;
-  mutable keeper_story_memory_offset: int;
-  mutable keeper_story_memory_owner: string option;
+  (* Shared Keeper-keyed observations for the Memory preview and browser. *)
+  mutable memory_activity: (string, Masc.Keeper_memory_activity.t) Masc_tui_fetched.t;
+  mutable memory_facts_owed: Masc_tui_owed_read.t;
+  mutable memory_activity_owed: Masc_tui_owed_read.t;
   mutable keeper_list_sort: Masc_tui_keeper_list_model.sort;
   mutable keeper_list_preference_notice: string option;
   mutable keeper_list_preference_startup_error: string option;
@@ -10761,7 +10764,11 @@ type state = {
      it -- filtering is equality against the loaded rows, never a
      classification this side invents. *)
   mutable memory_facts_keeper: string option;
-  (* Keyed by [memory_facts_keeper] ("*" for every keeper). The answer
+  mutable memory_page: memory_page;
+  mutable memory_changes_cursor: int;
+  mutable memory_return: memory_return option;
+  (* One foreground source: keyed by the browser target ("*" for the fleet),
+     or the selected Keeper while Story draws its preview. The answer
      carries the keepers the fleet merge could not read beside the facts it
      could; a single keeper's answer has none. *)
   mutable memory_facts:
@@ -15060,10 +15067,9 @@ let suspend_workspace_readings state =
   state.schedules_page_owed <- Masc_tui_owed_read.settled;
   state.keeper_schedules_owed <- None;
   state.keeper_story_turns <- Masc_tui_fetched.suspend state.keeper_story_turns;
-  state.keeper_story_memory_facts <- Masc_tui_fetched.suspend state.keeper_story_memory_facts;
-  state.keeper_story_memory_activity <- Masc_tui_fetched.suspend state.keeper_story_memory_activity;
-  state.keeper_story_memory_facts_owed <- Masc_tui_owed_read.settled;
-  state.keeper_story_memory_activity_owed <- Masc_tui_owed_read.settled;
+  state.memory_activity <- Masc_tui_fetched.suspend state.memory_activity;
+  state.memory_facts_owed <- Masc_tui_owed_read.settled;
+  state.memory_activity_owed <- Masc_tui_owed_read.settled;
   state.keeper_story_turns_owed <- Masc_tui_owed_read.settled;
   state.chat_native_tasks_owed <- None;
   state.chat_child_content_owed <- None;
@@ -20356,13 +20362,9 @@ let create_state
   keeper_story = None;
   keeper_story_turns = Masc_tui_fetched.initial;
   keeper_story_turns_owed = Masc_tui_owed_read.settled;
-  keeper_story_memory_facts = Masc_tui_fetched.initial;
-  keeper_story_memory_activity = Masc_tui_fetched.initial;
-  keeper_story_memory_facts_owed = Masc_tui_owed_read.settled;
-  keeper_story_memory_activity_owed = Masc_tui_owed_read.settled;
-  keeper_story_memory_view = Masc_tui_keeper_story.Memory_summary;
-  keeper_story_memory_offset = 0;
-  keeper_story_memory_owner = None;
+  memory_activity = Masc_tui_fetched.initial;
+  memory_facts_owed = Masc_tui_owed_read.settled;
+  memory_activity_owed = Masc_tui_owed_read.settled;
   keeper_list_sort = Masc_tui_keeper_list_model.Priority;
   keeper_list_preference_notice = None;
   keeper_list_preference_startup_error = None;
@@ -20757,6 +20759,9 @@ let create_state
   memory_input = Masc_tui_fetched.initial;
   memory_input_owed = Masc_tui_owed_read.settled;
   memory_facts_keeper = None;
+  memory_page = Memory_facts;
+  memory_changes_cursor = 0;
+  memory_return = None;
   memory_facts = Masc_tui_fetched.initial;
   memory_facts_cursor = 0;
   memory_facts_scroll = 0;
@@ -23297,7 +23302,10 @@ let memory_overview_query (state : state) =
 type memory_back = Memory_stays | Memory_leaves
 
 let memory_back (state : state) =
-  if Option.is_some state.search || state.search_last <> "" then begin
+  if state.memory_page = Memory_changes then begin
+    state.memory_page <- Memory_facts;
+    Memory_stays
+  end else if Option.is_some state.search || state.search_last <> "" then begin
     state.search <- None;
     state.search_last <- "";
     (match state.memory_facts_keeper with
@@ -25527,6 +25535,7 @@ let scrolled_surface_rows (state : state) ~cols : surface -> scrolled option =
           (match state.repositories with
            | None -> 0
            | Some s -> List.length s.Tui_decode.rs_repositories)
+  | Memory when state.memory_page = Memory_changes -> None
   | Memory ->
       if Option.is_some state.memory_facts_keeper then
         listing ~error:(memory_facts_failure state)

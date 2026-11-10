@@ -456,11 +456,11 @@ let render_memory (state : state) =
           | Some _ -> ""
         in
         Printf.sprintf "%s  %s  %s  %s"
-          (screen_title (if ko then " MASC 기억" else " MASC Memory")) reading_note timestamp
+          (screen_title (if ko then " MASC 기억 · 전체 저장 상태" else " MASC Memory · fleet storage")) reading_note timestamp
           (connection_badge state)
     | Some s ->
         Printf.sprintf "%s · %s · %s · %s  %s"
-          (screen_title (if ko then " MASC 기억" else " MASC Memory"))
+          (screen_title (if ko then " MASC 기억 · 전체 저장 상태" else " MASC Memory · fleet storage"))
           (if ko then Printf.sprintf "키퍼 %d명" shown else Masc_tui_message_layout.count_noun shown "keeper")
           (match current_memory_starving_count s with
            | Some count -> Printf.sprintf (if ko then "기억 필요 %d" else "%d need memory") count
@@ -477,6 +477,16 @@ let render_memory (state : state) =
       Render_memory.render_memory_body ~cols ~budget state
         ~push:c.push ~push_styled:c.push_styled ~push_selected:c.push_selected
         ~push_divider:c.push_divider ~push_empty:c.push_empty)
+
+let render_memory_changes (state : state) keeper_name =
+  let terminal_rows, cols = get_terminal_size () in
+  surface_chrome ~overflow:Paged_by_cursor state ~terminal_rows ~cols ~surface_key:"memory-changes"
+    ~title:(screen_title (ui_text state ~ko:" MASC 기억 · 변화 · " ~en:" MASC Memory · changes · "
+      ^ Terminal_text.single_line keeper_name))
+    ~hints:(Masc_tui_keys.footer_hints_memory_changes ~lang:state.ui_language)
+    ~body:(fun ~budget c ->
+      Masc_tui_render_keeper_memory.changes_lines state ~cols ~max_lines:budget
+        ~now:(Unix.gettimeofday ()) ~keeper_name |> List.iter c.push)
 
 (* The Memory facts list's [Enter] reading: the whole fact wrapped to this
    overlay's own width and windowed, instead of the narrow block the list
@@ -676,9 +686,10 @@ let render_surface ~home (state : state) =
        | (Some (Fusion_launch_started _) | None), Fusion_historical_detail reference ->
            Masc_tui_render_fusion.render_fusion_detail state reference.fhe_run_id)
   | Memory ->
-      if Option.is_some state.memory_facts_keeper then
-        render_memory_facts state
-      else render_memory state
+      (match state.memory_facts_keeper, state.memory_page with
+       | Some keeper_name, Memory_changes -> render_memory_changes state keeper_name
+       | Some _, Memory_facts -> render_memory_facts state
+       | None, (Memory_facts | Memory_changes) -> render_memory state)
   | Repositories ->
       (match state.workspace_activity_repo with
        | Some repo_id -> Masc_tui_render_repositories.render_workspace_activity state repo_id

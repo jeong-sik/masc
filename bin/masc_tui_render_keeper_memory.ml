@@ -1,5 +1,4 @@
 open Masc_tui_ansi
-module View = Masc_tui_keeper_story
 module Fetched = Masc_tui_fetched
 module Facts = Masc.Tui_decode_memory_facts
 module Activity = Masc.Keeper_memory_activity
@@ -13,39 +12,34 @@ let fit width text = Layout.fit_width (clean text) (max 0 width)
 let age ~now at = Option.value (Layout.age_text ~now ~since:at) ~default:"—"
 
 let facts_view (state : Masc_tui_types.state) keeper_name =
-  Fetched.view_for ~equal:String.equal state.keeper_story_memory_facts ~key:keeper_name
+  Fetched.view_for ~equal:String.equal state.memory_facts ~key:keeper_name
 let activity_view (state : Masc_tui_types.state) keeper_name =
-  Fetched.view_for ~equal:String.equal state.keeper_story_memory_activity ~key:keeper_name
+  Fetched.view_for ~equal:String.equal state.memory_activity ~key:keeper_name
 let facts state keeper_name =
   match Fetched.value (facts_view state keeper_name) with
   | Some ({mfs_ordinary = Facts.Memory_store_present store; _}, _) -> store.mos_facts
   | Some ({mfs_ordinary = Facts.Memory_store_absent | Facts.Memory_store_read_error _; _}, _)
   | None -> []
-let recent state keeper_name =
-  List.sort (fun (a : Facts.memory_fact) b ->
-    let clock = Float.compare b.mf_last_seen a.mf_last_seen in
-    if clock = 0 then String.compare a.mf_memory_id b.mf_memory_id else clock)
-    (facts state keeper_name)
+let ordered_facts sort state keeper_name =
+  match Fetched.value (facts_view state keeper_name) with
+  | None -> []
+  | Some (snapshot, _) ->
+    Masc_tui_types.project_memory_facts ~category:Masc_tui_types.Category_all
+      ~sort ~query:"" ~fleet:false snapshot
+    |> List.filter_map (function
+      | Masc_tui_types.Memory_row_fact fact -> Some fact
+      | Masc_tui_types.Memory_row_source_fact _ | Masc_tui_types.Memory_row_invalidation _ -> None)
+let recent = ordered_facts Masc_tui_types.Sort_recency
 let frequent state keeper_name =
-  List.filter_map (fun (fact : Facts.memory_fact) -> match fact.mf_events.mfe_retrieval with
+  ordered_facts Masc_tui_types.Sort_retrieved_count state keeper_name
+  |> List.filter_map (fun (fact : Facts.memory_fact) -> match fact.mf_events.mfe_retrieval with
     | Facts.Never_retrieved -> None
     | Facts.Retrieved {count; last_at; distinct_days = _} -> Some (fact, count, last_at))
-    (facts state keeper_name)
-  |> List.sort (fun ((a : Facts.memory_fact), ac, at) ((b : Facts.memory_fact), bc, bt) ->
-    let count = Int.compare bc ac in
-    if count <> 0 then count else let clock = Float.compare bt at in
-    if clock <> 0 then clock else String.compare a.mf_memory_id b.mf_memory_id)
 let events state keeper_name =
   match Fetched.value (activity_view state keeper_name) with
   | None -> []
   | Some activity -> List.rev activity.events
-
-let row_count state ~keeper_name =
-  match state.Masc_tui_types.keeper_story_memory_view with
-  | View.Memory_recent -> List.length (recent state keeper_name)
-  | View.Memory_frequent -> List.length (frequent state keeper_name)
-  | View.Memory_changes -> List.length (events state keeper_name)
-  | View.Memory_summary | View.Memory_storage -> 0
+let change_count state ~keeper_name = List.length (events state keeper_name)
 
 let observation_notes ~ko label = function
   | Fetched.Absent -> [quiet (label ^ if ko then " · 미조회" else " · not read")]
@@ -60,11 +54,13 @@ let fact_notes ~ko state keeper_name =
   observation_notes ~ko label (facts_view state keeper_name)
   @ match Fetched.value (facts_view state keeper_name) with
     | None -> []
-    | Some (snapshot, usage_error) ->
+    | Some (snapshot, coverage_error) ->
       (match snapshot.mfs_ordinary with
        | Facts.Memory_store_read_error reason -> [warning (label ^ " · " ^ clean reason)]
        | Facts.Memory_store_absent | Facts.Memory_store_present _ -> [])
-      @ (match usage_error with None -> [] | Some reason ->
+      @ (match coverage_error with None -> [] | Some reason ->
+          [warning ((if ko then "일부 관측 · " else "partial observation · ") ^ clean reason)])
+      @ (match snapshot.mfs_events_read_error with None -> [] | Some reason ->
           [warning ((if ko then "조회 기록 일부 · " else "partial retrieval record · ") ^ clean reason)])
 
 let activity_notes ~ko state keeper_name =
@@ -109,89 +105,94 @@ let event_cells ~ko ~now ~cols (event : Activity.event) =
      cell ~header:(if ko then "이전" else "before") ~width:room (endpoints event.before);
      cell ~header:(if ko then "이후 / 사유" else "after / reason") ~width:room after]
 
-let lines (state : Masc_tui_types.state) ~cols ~max_lines ~now ~keeper_name ~storage =
+let summary_lines (state : Masc_tui_types.state) ~cols ~max_lines ~now ~keeper_name =
   let ko = state.ui_language = Masc_tui_types.Lang_ko in
   let text ko_text en = if ko then ko_text else en in
   let width = max 1 (cols - 4) in
-  let mode = state.keeper_story_memory_view in
-  let nav = quiet (text "0 요약  1 최근  2 조회  3 변화  4 저장  [ ] 이동"
-      "0 overview  1 recent  2 retrievals  3 changes  4 storage  [ ] scroll") in
-  let offset = if state.keeper_story_memory_owner = Some keeper_name
-    then min (max 0 (row_count state ~keeper_name - 1)) state.keeper_story_memory_offset else 0 in
-  let notes = match mode with
-    | View.Memory_summary | View.Memory_storage ->
-        fact_notes ~ko state keeper_name @ activity_notes ~ko state keeper_name
-    | View.Memory_recent | View.Memory_frequent -> fact_notes ~ko state keeper_name
-    | View.Memory_changes -> activity_notes ~ko state keeper_name in
+  let notes = fact_notes ~ko state keeper_name @ activity_notes ~ko state keeper_name in
+  let nav = quiet (text "Enter 전문  1 최근  2 조회  3 변화  4 저장"
+      "Enter browse  1 recent  2 retrievals  3 changes  4 storage") in
   let notes = List.take (max 0 (max_lines - 1)) notes in
   let budget = max 0 (max_lines - 1 - List.length notes) in
-  let table ?(intro = 0) ~empty make rows =
-    let total = List.length rows in
-    match rows with
-    | [] -> [quiet empty]
+  let left = recent state keeper_name |> List.take 2 |> List.map (fun fact ->
+    age ~now fact.Facts.mf_last_seen ^ "  " ^ clean fact.mf_claim) in
+  let right = frequent state keeper_name |> List.take 2 |> List.map (fun (fact, count, at) ->
+    Printf.sprintf "%d×  %s  %s" count (age ~now at) (clean fact.Facts.mf_claim)) in
+  let half = max 1 ((width - 3) / 2) in
+  let at rows i = Option.value (List.nth_opt rows i) ~default:"—" in
+  let claims = if width >= 90 then
+      quiet (fit half (text "최근 갱신" "recently recorded") ^ "   " ^ text "자주 조회" "frequently retrieved")
+      :: List.init 2 (fun i -> fit half (at left i) ^ "   " ^ fit half (at right i))
+    else
+      [quiet (text "최근 갱신" "recently recorded"); at left 0;
+       quiet (text "자주 조회" "frequently retrieved"); at right 0] in
+  let changes = match events state keeper_name |> List.take 2 with
+    | [] -> if Option.is_some (Fetched.value (activity_view state keeper_name))
+        then [quiet (text "확인된 변경 없음" "no observed changes")] else []
+    | first :: rest ->
+      quiet (Table.header_row (event_cells ~ko ~now ~cols:width first))
+      :: List.map (fun event -> Table.row (event_cells ~ko ~now ~cols:width event)) (first :: rest) in
+  let usage = match Fetched.value (facts_view state keeper_name) with
+    | Some ({mfs_ordinary = Facts.Memory_store_present _ | Facts.Memory_store_absent; _}, _) ->
+      let total = List.length (facts state keeper_name) in
+      [quiet (text (Printf.sprintf "현재 기억 %d · 조회 기록 %d / %d" total (List.length (frequent state keeper_name)) total)
+        (Printf.sprintf "%d current memories · %d / %d with recorded retrievals" total (List.length (frequent state keeper_name)) total))]
+    | Some ({mfs_ordinary = Facts.Memory_store_read_error _; _}, _) | None -> [] in
+  List.take max_lines (List.map (fun line -> "  " ^ line)
+    (notes @ List.take budget (usage @ claims @ changes) @ [nav]))
+
+let changes_lines (state : Masc_tui_types.state) ~cols ~max_lines ~now ~keeper_name =
+  let ko = state.ui_language = Masc_tui_types.Lang_ko in
+  let text ko_text en = if ko then ko_text else en in
+  let notes = activity_notes ~ko state keeper_name in
+  let rows = events state keeper_name in
+  let total = List.length rows in
+  let offset = max 0 (min (max 0 (total - 1)) state.memory_changes_cursor) in
+  let header = quiet (text "1 최근  2 조회  3 변화  4 저장" "1 recent  2 retrievals  3 changes  4 storage") in
+  let scope = match Fetched.value (activity_view state keeper_name) with
+    | None -> []
+    | Some activity -> [quiet (text
+        (Printf.sprintf "최근 처리 기록 %d / 최대 %d회" activity.journal_lines activity.limit)
+        (Printf.sprintf "latest %d / up to %d journal entries" activity.journal_lines activity.limit))] in
+  let budget = max 0 (max_lines - List.length notes - List.length scope - 3) in
+  let body = match rows with
+    | [] -> if Option.is_some (Fetched.value (activity_view state keeper_name))
+        then [quiet (text "확인된 변경 없음" "no observed changes")] else []
     | first :: _ ->
-      let shown = List.drop offset rows |> List.take (max 0 (budget - 2 - intro)) in
-      quiet (Table.header_row (make first)) :: List.map (fun row -> Table.row (make row)) shown
-      @ [quiet (Printf.sprintf "%d–%d / %d" (min total (offset + 1))
-          (min total (offset + List.length shown)) total)] in
-  let flow rows = table ~intro:1 ~empty:(text "확인된 변경 없음" "no observed changes")
-      (event_cells ~ko ~now ~cols:width) rows in
-  let recent_cell (fact : Facts.memory_fact) =
-    [Table.cell ~header:(text "갱신" "recorded") ~width:9 (age ~now fact.mf_last_seen);
-     Table.cell ~fold:Table.Fold_tail ~header:(text "기억" "memory") ~width:(max 1 (width - 10))
-       (clean fact.mf_claim)] in
-  let frequent_cell ((fact : Facts.memory_fact), count, at) =
-    [Table.cell ~align:Table.Right ~header:(text "조회" "returns") ~width:6 (string_of_int count);
-     Table.cell ~header:(text "마지막 조회" "last return") ~width:12 (age ~now at);
-     Table.cell ~fold:Table.Fold_tail ~header:(text "기억" "memory") ~width:(max 1 (width - 20))
-       (clean fact.mf_claim)] in
-  let facts_available = match Fetched.value (facts_view state keeper_name) with
-    | Some ({mfs_ordinary = Facts.Memory_store_present _ | Facts.Memory_store_absent; _}, _) -> true
-    | Some ({mfs_ordinary = Facts.Memory_store_read_error _; _}, _) | None -> false in
-  let activity_available = Option.is_some (Fetched.value (activity_view state keeper_name)) in
-  let body = match mode with
-    | View.Memory_storage -> storage ()
-    | View.Memory_recent ->
-        if facts_available then
-          table ~empty:(text "기록된 기억 없음" "no recorded claims") recent_cell (recent state keeper_name)
-        else []
-    | View.Memory_frequent ->
-        if facts_available then
-          quiet (text "기록상 조회순 · 검색 결과로 반환된 횟수" "recorded retrievals · search returns")
-          :: table ~intro:1 ~empty:(text "기록된 조회 없음" "no recorded retrievals") frequent_cell (frequent state keeper_name)
-        else []
-    | View.Memory_changes ->
-        let scope = match Fetched.value (activity_view state keeper_name) with
-          | None -> [] | Some activity -> [quiet (text
-              (Printf.sprintf "최근 처리 기록 %d / 최대 %d회" activity.journal_lines activity.limit)
-              (Printf.sprintf "latest %d / up to %d journal entries" activity.journal_lines activity.limit))] in
-        if activity_available then scope @ flow (events state keeper_name) else []
-    | View.Memory_summary ->
-        let left = recent state keeper_name |> List.take 2 |> List.map (fun fact ->
-          age ~now fact.Facts.mf_last_seen ^ "  " ^ clean fact.mf_claim) in
-        let right = frequent state keeper_name |> List.take 2 |> List.map (fun (fact, count, at) ->
-          Printf.sprintf "%d×  %s  %s" count (age ~now at) (clean fact.Facts.mf_claim)) in
-        let half = max 1 ((width - 3) / 2) in
-        let at rows i empty = Option.value (List.nth_opt rows i) ~default:empty in
-        let claims =
-          if width >= 90 then
-            quiet (fit half (text "최근 갱신" "recently recorded") ^ "   " ^ text "자주 조회" "frequently retrieved")
-            :: List.init 2 (fun i ->
-              fit half (at left i "—") ^ "   " ^ fit half (at right i "—"))
-          else
-            [quiet (text "최근 갱신" "recently recorded"); at left 0 "—";
-             quiet (text "자주 조회" "frequently retrieved"); at right 0 "—"] in
-        let changes = events state keeper_name |> List.take 2 in
-        let change_rows = match changes with
-          | [] -> if activity_available then [quiet (text "확인된 변경 없음" "no observed changes")] else []
-          | rows -> quiet (Table.header_row (event_cells ~ko ~now ~cols:width (List.hd rows)))
-            :: List.map (fun event -> Table.row (event_cells ~ko ~now ~cols:width event)) rows in
-        let usage = if not facts_available then [] else
-          let total = List.length (facts state keeper_name) in
-          let used = List.length (frequent state keeper_name) in
-          [quiet (text
-            (Printf.sprintf "현재 기억 %d · 조회 기록 %d / %d" total used total)
-            (Printf.sprintf "%d current memories · %d / %d with recorded retrievals" total used total))] in
-        usage @ claims @ change_rows in
-  let body = List.take budget body in
-  List.take max_lines (List.map (fun line -> "  " ^ line) (notes @ body @ [nav]))
+      let shown = List.drop offset rows |> List.take budget in
+      quiet (Table.header_row (event_cells ~ko ~now ~cols:(max 1 (cols - 4)) first))
+      :: List.mapi (fun i event ->
+          let row = Table.row (event_cells ~ko ~now ~cols:(max 1 (cols - 4)) event) in
+          if i = 0 then Theme.selection ^ row ^ Ansi.reset else row) shown
+      @ [quiet (Printf.sprintf "%d–%d / %d · Enter %s" (offset + 1) (offset + List.length shown) total
+          (text "전문" "full reading"))] in
+  List.take max_lines (List.map (fun line -> "  " ^ line) ([header] @ notes @ scope @ body))
+
+let change_reading (state : Masc_tui_types.state) ~keeper_name =
+  let ko = state.ui_language = Masc_tui_types.Lang_ko in
+  let text ko_text en = if ko then ko_text else en in
+  let rows = events state keeper_name in
+  let cursor = max 0 (min (max 0 (List.length rows - 1)) state.memory_changes_cursor) in
+  match List.nth_opt rows cursor with
+  | None -> None
+  | Some event ->
+    let body facts = match facts with
+      | [] -> "—"
+      | facts -> String.concat "\n\n" (List.map (fun (fact : Activity.fact) ->
+          match fact.claim with Some claim -> claim
+          | None -> text "본문 미확인 · " "claim not observed · " ^ fact.memory_id) facts) in
+    let notes = match activity_view state keeper_name with
+      | Fetched.Ready activity -> activity.notes
+      | Fetched.Stale (activity, reason) ->
+          (text "이전 관측 · " "last observation · " ^ reason) :: activity.notes
+      | Fetched.Failed reason -> [reason]
+      | Fetched.Absent | Fetched.Loading -> [] in
+    let section heading body : Masc_tui_detail_reading.section = {heading; body} in
+    let sections =
+      [section keeper_name (String.concat "\n" notes);
+       section (text "이전" "Before") (body event.before);
+       section (text "이후" "After") (body event.after)]
+      @ (match event.reason with None -> [] | Some reason ->
+          [section (text "사유" "Reason") reason]) in
+    Some (Masc_tui_detail_reading.create ~ko
+      ~title:(text "기억 변화 · " "Memory change · " ^ kind_word ~ko event.kind) sections)

@@ -88,7 +88,7 @@ The command palette is `:`.
 | `W` | select shared World and open its dock; outside memory/age, switch to age; lowercase w still wakes a Keeper |
 | `Right` | keeper detail |
 | `Tab / s / m` | with a Keeper Story open: next page / schedules / memory; World keeps its own page; Esc closes either window |
-| `0 / 1 / 2 / 3 / 4 / [ / ]` | with Keeper Memory open: overview / recent records / retrievals / committed changes / storage; brackets scroll the table |
+| `1 / 2 / 3 / 4` | with Keeper Memory preview open: browse recent records / retrievals / committed changes / storage in the shared Memory browser; Enter also opens recent records |
 | `c` | chat with the keeper |
 | `l` | logs |
 | `t` | tool calls |
@@ -626,6 +626,7 @@ count is drawn beyond the available space.
 
 | Keys | What it does |
 |---|---|
+| `1 / 2 / 3 / 4` | one Memory browser; changes require an individual Keeper, while storage opens the fleet health view |
 | `j/k` | move the keeper row |
 | `Enter` | browse what the selected keeper actually remembers |
 | `v` | read the complete fleet summary and selected keeper health in a scrollable capture |
@@ -638,6 +639,7 @@ count is drawn beyond the available space.
 | `n / N` | next / previous match |
 | `PgUp/PgDn` | page |
 | `Home/End` | top/bottom |
+| `1 / 2 / 3 / 4` | in the facts browser: one Memory browser; changes require an individual Keeper, while storage opens the fleet health view |
 | `j/k` | in the facts browser: move |
 | `Enter` | in the facts browser: read the whole fact in a wide overlay that owns the terminal |
 | `c / C` | in the facts browser: cycle category filter (forward / backward) |
@@ -651,6 +653,15 @@ count is drawn beyond the available space.
 | `r` | in the facts browser: refresh |
 | `Tab` | in the facts browser: next |
 | `q` | in the facts browser: quit |
+| `1 / 2 / 3 / 4` | in the changes browser: one Memory browser; changes require an individual Keeper, while storage opens the fleet health view |
+| `j/k` | in the changes browser: move |
+| `Enter` | in the changes browser: read all original and successor claims of the selected committed change |
+| `PgUp/PgDn` | in the changes browser: page |
+| `Esc` | in the changes browser: back to facts |
+| `Home/End` | in the changes browser: top/bottom |
+| `r` | in the changes browser: refresh |
+| `Tab` | in the changes browser: next |
+| `q` | in the changes browser: quit |
 | `j/k` | in the fact detail: scroll |
 | `PgUp/PgDn` | in the fact detail: page |
 | `g / G` | in the fact detail: jump to the first or last line of the fact |

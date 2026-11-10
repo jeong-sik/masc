@@ -1,7 +1,8 @@
+import { acceptedExecutionWorkspace } from '../execution-workspace-authority'
 import { publishDashboardObservationChange } from '../lib/observation-refresh'
 import { html } from 'htm/preact'
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/preact'
-import { afterEach, describe, it, expect, vi } from 'vitest'
+import { afterEach, beforeEach, describe, it, expect, vi } from 'vitest'
 
 const { fetchKeepersCompositeMock, dispatchOperatorActionMock, showToastMock } = vi.hoisted(() => ({
   fetchKeepersCompositeMock: vi.fn(),
@@ -37,7 +38,6 @@ import {
   type KeeperFleetHistory,
   FleetFsmMatrix,
 } from './fleet-fsm-matrix'
-import { fleetCompositeSnapshot } from '../composite-signals'
 import type {
   FleetCompositeSnapshot,
   KeeperCompositeExecution,
@@ -135,13 +135,18 @@ function fleetSnapshot(
   }
 }
 
+beforeEach(() => {
+  acceptedExecutionWorkspace.value = { epoch: 'matrix-fixture', workspaceRoot: '/workspace',
+    connectionGeneration: 0, observerInstanceId: 'matrix-fixture' }
+})
+
 afterEach(() => {
   cleanup()
+  acceptedExecutionWorkspace.value = null
   vi.useRealTimers()
   fetchKeepersCompositeMock.mockReset()
   dispatchOperatorActionMock.mockReset()
   showToastMock.mockReset()
-  fleetCompositeSnapshot.value = null
 })
 
 describe('chipClassFor', () => {

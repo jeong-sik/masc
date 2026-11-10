@@ -29,11 +29,7 @@ vi.mock('./registry-deregister', () => ({
     h('div', { 'data-testid': 'registry-deregister' }, keeper.name),
   deregisterNeedsDrain: () => false,
 }))
-vi.mock('../../composite-signals', async importActual => {
-  const actual = await importActual<typeof import('../../composite-signals')>()
-  const { signal } = await import('@preact/signals')
-  return { ...actual, fleetCompositeSnapshot: signal(null) }
-})
+
 
 const { RegistrySurface, groupRegistryKeepers, keeperGroup } = await import('./registry-surface')
 

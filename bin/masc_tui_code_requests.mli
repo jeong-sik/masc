@@ -39,8 +39,9 @@ val launch_search :
 val open_found_file :
   Masc_tui_types.state -> host:string ->
   deliver:(Masc_tui_code_results.msg -> unit) -> path:string -> unit
-(** Read a selected file without replacing the original file or cursor. Only
-    an admitted successful reply commits navigation through Code results. *)
+(** Read and prepare a selected file without replacing the original file or
+    cursor. Whole-file preparation runs in the shared CPU worker before delivery.
+    Only an admitted successful reply commits navigation through Code results. *)
 
 val return_to_reading :
   Masc_tui_types.state -> host:string ->
@@ -52,7 +53,8 @@ val launch_navigation_read :
   Masc_tui_types.state -> host:string ->
   deliver:(Masc_tui_code_results.msg -> unit) ->
   Masc_tui_types.code_navigation_owner -> string Masc_tui_fetched.request -> unit
-(** Send an already-owned return/location read under its destination scope. *)
+(** Send an already-owned return/location read under its destination scope and
+    prepare the immutable document on the shared CPU worker before delivery. *)
 
 val launch_file_load
   :  ?intent:Masc_tui_types.code_file_load_intent
@@ -61,6 +63,9 @@ val launch_file_load
   -> deliver:(Masc_tui_code_results.msg -> unit)
   -> path:string
   -> unit
+(** Capture the path and workspace before launching the read. Prepare the whole
+    file on the shared CPU worker before delivering the original request; the UI
+    only admits that request and installs its prepared document. *)
 
 (** Capture the workspace scope and activity address, then combine stable git and
     Keeper history. A failed source leaves the other source visible, with its

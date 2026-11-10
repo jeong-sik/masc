@@ -16,6 +16,13 @@ let code_scope_axes_of = function
 
 let code_scope_axes state = code_scope_axes_of state.code_scope
 
+let fetch_prepared_file ?keeper ?repo ~expected_workspace ~host ~port ~path () =
+  Masc_tui_http.fetch_workspace_file ?keeper ?repo
+    ~expected_workspace ~host ~port ~path ()
+  |> Result.map (fun source ->
+       Masc_tui_response_decode.run ~name:"code.file.prepare_wait" (fun () ->
+         Masc_tui_code_results.prepare_file ~path source))
+
 let launch_file_finder state ~host ~deliver =
   if not (server_authority_ready state) then
     Masc_tui_loader.report_action state "error" "File finder needs a confirmed workspace"
@@ -147,7 +154,7 @@ let open_found_file state ~host ~deliver ~path =
            let keeper, repo = code_scope_axes_of origin.cfo_scope in
            Masc_tui_async_read.launch
              ~deliver:(fun result -> deliver (Masc_tui_code_results.Code_finder_file_loaded (request, result)))
-             (fun () -> Masc_tui_http.fetch_workspace_file ?keeper ?repo
+             (fun () -> fetch_prepared_file ?keeper ?repo
                  ~expected_workspace ~host ~port ~path ()))
   | (Palette_files _ | Palette_branches _ | Palette_worktrees _ | Palette_search _ | Palette_locations _ | Palette_jump
     | Palette_choice _),
@@ -193,7 +200,7 @@ let launch_navigation_read state ~host ~deliver owner request =
     (fun () -> match expected_workspace with
        | None -> Error "Navigation has no workspace identity"
        | Some expected_workspace ->
-           Masc_tui_http.fetch_workspace_file ?keeper ?repo
+           fetch_prepared_file ?keeper ?repo
              ~expected_workspace ~host ~port ~path ())
 
 let return_to_reading state ~host ~deliver =
@@ -226,7 +233,7 @@ let launch_file_load ?(intent = Open_code_file) state ~host ~deliver ~path =
          let keeper, repo = code_scope_axes_of scope in
          match expected_workspace with
          | None -> Error "Code has no confirmed workspace identity"
-         | Some expected_workspace -> Masc_tui_http.fetch_workspace_file ?keeper ?repo
+         | Some expected_workspace -> fetch_prepared_file ?keeper ?repo
              ~expected_workspace ~host ~port ~path ())
   end
 

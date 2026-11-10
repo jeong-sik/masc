@@ -6511,11 +6511,6 @@ type code_navigation_owner = {
   cno_action : code_navigation_action;
 }
 
-type code_navigation_reading = {
-  cnr_owner : code_navigation_owner;
-  cnr_file : (string, Tui_decode.workspace_file_source) Masc_tui_fetched.t;
-}
-
 type code_file_load_intent =
   | Open_code_file
   | Refresh_code_file
@@ -6533,6 +6528,21 @@ type code_file_document = {
   cfd_body : code_file_body;
   cfd_revision : string;
   cfd_rows : (string * string) list array;
+}
+
+(* Prepared without reading UI state, before the owned async reply is delivered.
+   The original response is retained for exact draft/revision observation; the
+   UI installs the document and its derived values without scanning the file. *)
+type code_prepared_file = {
+  cpf_source : Tui_decode.workspace_file_source;
+  cpf_document : code_file_document;
+  cpf_max_width : int;
+  cpf_memos : Masc_tui_memo.found list;
+}
+
+type code_navigation_reading = {
+  cnr_owner : code_navigation_owner;
+  cnr_file : (string, code_prepared_file) Masc_tui_fetched.t;
 }
 
 type code_save_request = {
@@ -10833,7 +10843,7 @@ type state = {
   mutable code_catalog:
     (code_workspace_scope * string, Tui_decode.workspace_file_catalog) Masc_tui_fetched.t;
   mutable code_finder_file:
-    (code_workspace_scope * string, Tui_decode.workspace_file_source) Masc_tui_fetched.t;
+    (code_workspace_scope * string, code_prepared_file) Masc_tui_fetched.t;
   (* The branch list of the checkout that owns the key's directory. *)
   mutable code_branches:
     (code_workspace_scope * string, Tui_decode.git_branches) Masc_tui_fetched.t;

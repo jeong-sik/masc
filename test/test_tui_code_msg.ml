@@ -135,7 +135,8 @@ let test_a_committed_save_rereads_its_file () =
   state.code_file <- reading;
   let source = { Masc.Tui_decode.wfs_content = "a\n"; wfs_revision = String.make 64 'a' } in
   Alcotest.(check bool) "the file read asks the loop for nothing" true
-    (match Code.apply state (Code.Code_file_loaded (Types.Refresh_code_file, read, Ok source)) with
+    (match Code.apply state (Code.Code_file_loaded (Types.Refresh_code_file, read,
+      Ok (Code.prepare_file ~path:(Fetched.request_key read) source))) with
      | Code.No_answer_followup -> true
      | Code.Reload_saved_file _ -> false);
   state.code_focus_file <- Types.Right_pane;
@@ -164,7 +165,8 @@ let test_a_binary_file_has_no_text_to_edit_or_copy () =
     in
     state.code_file <- reading;
     let source = { Masc.Tui_decode.wfs_content = content; wfs_revision = String.make 64 'a' } in
-    ignore (Code.apply state (Code.Code_file_loaded (Types.Open_code_file, read, Ok source)));
+    ignore (Code.apply state (Code.Code_file_loaded (Types.Open_code_file, read,
+      Ok (Code.prepare_file ~path source))));
     state.code_focus_file <- Types.Right_pane
   in
   let document () =

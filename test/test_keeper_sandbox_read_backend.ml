@@ -1778,11 +1778,11 @@ let test_grep_preserves_regex_bytes_through_remote_dispatch () =
       "needle ", true, "(?i)needle ", 0, Some "2:needle \n5:NEEDLE \n";
       "\nneedle", false, "\nneedle", 2, None ]
 
-(* The first dispatch after a probe is rg, which exits 2 with its own message.
-   The second is the existence probe that asks the endpoint about the path, and
-   it exits [test_exit]. Dispatch N keeps the request the endpoint received as
-   [frame_path].N, read by its own length as in [fake_ssh_recording_script]. *)
-let fake_ssh_rg_then_probe_script ~frame_path ~test_exit =
+(* Dispatch N keeps the request the endpoint received as [frame_path].N, read by
+   its own length as in [fake_ssh_recording_script], and answers with step N: the
+   text on stdout, then the exit status in the trailer. [frame_path].count says
+   how many dispatches there were. *)
+let fake_ssh_scripted_script ~frame_path ~steps =
   let trailer code =
     Exec_ssh_protocol.render_trailer
       { v = Exec_ssh_protocol.newest
@@ -1792,6 +1792,10 @@ let fake_ssh_rg_then_probe_script ~frame_path ~test_exit =
       ; shim_error = None
       ; observed_syscalls = []
       }
+  in
+  let arm index (code, stdout) =
+    Printf.sprintf "  %d) printf '%%s' %s; printf '%%s' '%s' >&2 ;;" index
+      (Filename.quote stdout) (trailer code)
   in
   Printf.sprintf
     {|#!/bin/sh
@@ -1807,18 +1811,15 @@ for byte in $(od -An -tu1 "$base.$count.len"); do len=$((len * 256 + byte)); don
 dd bs=1 count="$len" of="$base.$count.body" 2>/dev/null
 cat "$base.$count.len" "$base.$count.body" > "$base.$count"
 cat >/dev/null 2>/dev/null &
-if [ "$count" = 0 ]; then
-  printf 'rg: missing: No such file or directory (os error 2)\n'
-  printf '%%s' '%s' >&2
-else
-  printf '%%s' '%s' >&2
-fi
+case "$count" in
+%s
+  *) ;;
+esac
 exit 0
 |}
     fake_shim_probe
     (Filename.quote frame_path)
-    (trailer 2)
-    (trailer test_exit)
+    (String.concat "\n" (List.mapi arm steps))
 
 (* rg exits 2 for a missing path, a bad pattern and a half-readable tree
    alike, and the endpoint owns the tree, so this host cannot look at the path.
@@ -1840,7 +1841,10 @@ let test_grep_of_a_missing_endpoint_path_is_a_path_error () =
   let grep ~path ~test_exit =
     incr searches;
     let frame_path = Filename.concat base (Printf.sprintf "grep-frame-%d" !searches) in
-    with_fake_ssh (fake_ssh_rg_then_probe_script ~frame_path ~test_exit) @@ fun () ->
+    (* rg fails, the endpoint answers the path probe with [test_exit], and a path
+       that is there goes on to the pattern probe, where rg accepts the pattern. *)
+    let steps = [ 2, "rg: missing: No such file or directory (os error 2)\n"; test_exit, ""; 1, "" ] in
+    with_fake_ssh (fake_ssh_scripted_script ~frame_path ~steps) @@ fun () ->
     match
       Masc.Keeper_workspace_read_ops.try_handle_with_outcome
         ~turn_sandbox_factory:None ~config ~meta ~op:"rg" ~raw_path:path
@@ -1883,6 +1887,106 @@ let test_grep_of_a_missing_endpoint_path_is_a_path_error () =
   Alcotest.(check bool) "the failure shows the endpoint's name" true
     (own.disposition = Tool_result.Failed Tool_result.Policy_rejection
      && String_util.contains_substring own.raw_output ("path_not_found: " ^ searched))
+
+(* rg exits 2 for a pattern it cannot compile, and for a missing path, an unknown
+   type and a half-readable tree alike. The backend that ran rg is asked to
+   compile the pattern alone, and only its exit status makes the failure the
+   caller's. Any other answer leaves it a runtime failure, as before. *)
+let test_grep_of_a_pattern_rg_cannot_compile_is_the_callers () =
+  let base, config, meta =
+    remote_reader_with_allowed_paths ~allowed_paths:(fun _ -> [ "/app" ])
+  in
+  Fun.protect ~finally:(fun () -> cleanup_fixture_dir base) @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED" "false" @@ fun () ->
+  let searches = ref 0 in
+  let argv_of frame_path index =
+    match Exec_ssh_protocol.decode_request (read_file (Printf.sprintf "%s.%d" frame_path index)) with
+    | Ok (request, _) -> request.argv
+    | Error detail -> Alcotest.fail detail
+  in
+  let rg_message = "rg: regex parse error: unopened group\n" in
+  (* The failure, and the argv of every dispatch in the order they happened. *)
+  let grep ?(file_type = "") ~pattern ~steps () =
+    incr searches;
+    let frame_path = Filename.concat base (Printf.sprintf "pattern-frame-%d" !searches) in
+    with_fake_ssh (fake_ssh_scripted_script ~frame_path ~steps) @@ fun () ->
+    let type_field = if file_type = "" then [] else [ "type", `String file_type ] in
+    match
+      Masc.Keeper_workspace_read_ops.try_handle_with_outcome
+        ~turn_sandbox_factory:None ~config ~meta ~op:"rg" ~raw_path:"/app/src"
+        ~args:(`Assoc ([ "path", `String "/app/src"; "pattern", `String pattern ] @ type_field))
+    with
+    | None -> Alcotest.fail "Grep was not dispatched"
+    | Some execution ->
+      let dispatched = int_of_string (String.trim (read_file (frame_path ^ ".count"))) in
+      execution, List.init dispatched (argv_of frame_path)
+  in
+  let is_class class_ (execution : Masc.Keeper_tool_execution.t) =
+    execution.disposition = Tool_result.Failed class_
+  in
+  (* rg fails, the path is there, and the backend's rg cannot compile it. *)
+  let bad, dispatched =
+    grep ~pattern:"(" ~steps:[ 2, rg_message; 0, ""; 2, "" ] ()
+  in
+  Alcotest.(check bool) "a pattern the backend cannot compile is the caller's" true
+    (is_class Tool_result.Policy_rejection bad);
+  Alcotest.(check bool) "rg's own message survives" true
+    (String_util.contains_substring bad.raw_output "regex parse error");
+  Alcotest.(check int) "rg, the path probe, the pattern probe" 3 (List.length dispatched);
+  Alcotest.(check (list string)) "the last dispatch compiles the pattern alone"
+    (Masc.Keeper_workspace_read_ops.pattern_probe_argv "(") (List.nth dispatched 2);
+  (* A pattern that starts with a dash is still the argument of -e. *)
+  let dashed, dispatched =
+    grep ~pattern:"-foo(" ~steps:[ 2, rg_message; 0, ""; 2, "" ] ()
+  in
+  Alcotest.(check bool) "a leading dash makes no difference" true
+    (is_class Tool_result.Policy_rejection dashed);
+  Alcotest.(check (list string)) "the pattern follows -e"
+    [ "rg"; "-e"; "-foo("; "/dev/null" ] (List.nth dispatched 2);
+  (* Exit 1 is rg accepting the pattern: the cause is something else. *)
+  let accepted, _ = grep ~pattern:"needle" ~steps:[ 2, rg_message; 0, ""; 1, "" ] () in
+  Alcotest.(check bool) "a pattern the backend accepts leaves exit 2 a runtime failure" true
+    (is_class Tool_result.Runtime_failure accepted);
+  (* A probe that ended some other way proves nothing. *)
+  let unproven, _ = grep ~pattern:"needle" ~steps:[ 2, rg_message; 0, ""; 3, "" ] () in
+  Alcotest.(check bool) "an answer that is neither yes nor no proves nothing" true
+    (is_class Tool_result.Runtime_failure unproven);
+  (* A missing path is judged first, and ends the questions. *)
+  let missing, dispatched = grep ~pattern:"(" ~steps:[ 2, rg_message; 1, "" ] () in
+  Alcotest.(check bool) "a missing path is still a path error" true
+    (is_class Tool_result.Policy_rejection missing
+     && String_util.contains_substring missing.raw_output "path_not_found: /app/src");
+  Alcotest.(check int) "the pattern is not asked about" 2 (List.length dispatched);
+  (* A type the backend knows leaves the pattern as the remaining suspect. *)
+  let typed, dispatched =
+    grep ~file_type:"ocaml" ~pattern:"(" ~steps:[ 2, rg_message; 0, ""; 0, "ocaml: *.ml\n"; 2, "" ] ()
+  in
+  Alcotest.(check bool) "a known type and an uncompilable pattern" true
+    (is_class Tool_result.Policy_rejection typed);
+  Alcotest.(check (list string)) "the type inventory comes before the pattern probe"
+    [ "rg"; "--type-list" ] (List.nth dispatched 2);
+  Alcotest.(check (list string)) "and the pattern probe is last"
+    (Masc.Keeper_workspace_read_ops.pattern_probe_argv "(") (List.nth dispatched 3);
+  (* A type the backend does not know is proof enough: the pattern is not asked. *)
+  let unknown, dispatched =
+    grep ~file_type:"mli" ~pattern:"needle" ~steps:[ 2, rg_message; 0, ""; 0, "ocaml: *.ml\n" ] ()
+  in
+  Alcotest.(check bool) "a type the backend does not know is the caller's" true
+    (is_class Tool_result.Policy_rejection unknown);
+  Alcotest.(check int) "rg, the path probe, the type inventory" 3 (List.length dispatched);
+  (* An inventory that could not be read proves nothing about the type. *)
+  let unread, dispatched =
+    grep ~file_type:"mli" ~pattern:"needle" ~steps:[ 2, rg_message; 0, ""; 3, ""; 1, "" ] ()
+  in
+  Alcotest.(check bool) "an unreadable inventory leaves exit 2 a runtime failure" true
+    (is_class Tool_result.Runtime_failure unread);
+  Alcotest.(check int) "and the pattern is still asked about" 4 (List.length dispatched);
+  (* So does an inventory with no type names in it. *)
+  let unlisted, _ =
+    grep ~file_type:"mli" ~pattern:"needle" ~steps:[ 2, rg_message; 0, ""; 0, "\n"; 1, "" ] ()
+  in
+  Alcotest.(check bool) "an inventory with no types in it proves nothing" true
+    (is_class Tool_result.Runtime_failure unlisted)
 
 (* analyze_image reads a generated image through this prefix. The endpoint's
    bytes come back as they are, even when they spell the keeper's remote
@@ -3703,6 +3807,8 @@ let run_tests ~clock ~fs ~net () =
             `Quick test_grep_preserves_regex_bytes_through_remote_dispatch;
           Alcotest.test_case "Grep of a missing endpoint path is a path error"
             `Quick test_grep_of_a_missing_endpoint_path_is_a_path_error;
+          Alcotest.test_case "Grep of a pattern rg cannot compile is the caller's"
+            `Quick test_grep_of_a_pattern_rg_cannot_compile_is_the_callers;
           Alcotest.test_case "raw prefix keeps remote bytes that spell the workspace root"
             `Quick test_raw_prefix_keeps_remote_bytes_that_spell_the_workspace_root;
         ] );

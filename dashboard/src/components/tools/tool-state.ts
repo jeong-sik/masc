@@ -51,7 +51,7 @@ let stopToolsRefresh: (() => void) | null = null
 export function subscribeToolsAutoRefresh(): () => void {
   toolsRefreshSubscriberCount += 1
   if (toolsRefreshSubscriberCount === 1) {
-    stopToolsRefresh = setupObservationRefresh(loadTools, { topics: ['tools'], readError: () => toolsError.peek(), cancelRead: () => toolsResource.cancel(), resetRead: () => toolsResource.reset() })
+    stopToolsRefresh = setupObservationRefresh(loadTools, { topics: ['tools'], readError: () => toolsResource.readError(), cancelRead: () => toolsResource.cancel(), resetRead: () => toolsResource.reset() })
   }
   return () => {
     toolsRefreshSubscriberCount = Math.max(0, toolsRefreshSubscriberCount - 1)

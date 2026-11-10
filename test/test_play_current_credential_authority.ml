@@ -330,6 +330,7 @@ let test_seat_reports_controller_recovery holder =
   with_workspace @@ fun base_path state operator ->
   let _, guest, _ = seed_guest base_path D.Player in
   ignore (dos_ok (Dos_lane.pass ~who:"operator" ~to_:(Some "guest") ~announce:ignore));
+  prerr_endline ("PROBE after-pass controller=" ^ Option.value (controller ()) ~default:"<none>");
   (match holder with
    | Live_holder -> ()
    | Expired_holder ->

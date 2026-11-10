@@ -67,10 +67,6 @@ val source : observation -> string option
 (** The image path the observation read or failed to read; [None] when the
     volume inspect itself failed. *)
 
-val damage_appeared : previous:observation option -> observation -> bool
-(** The read records errors and the previous one did not, or there was none
-    since this server started. *)
-
 val observation_fields : observation -> (string * Yojson.Safe.t) list
 val observation_to_yojson : observation -> Yojson.Safe.t
 val failure_to_string : failure -> string

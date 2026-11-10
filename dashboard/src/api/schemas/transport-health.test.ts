@@ -132,6 +132,15 @@ function parseReady(value: unknown): TransportHealthData {
 }
 
 describe('decodeTransportHealthData', () => {
+  it('decodes a fresh explicit HTTP read without requiring a published cache', () => {
+    const result = parseReady({
+      ...currentWire,
+      projection_diagnostics: { ...currentWire.projection_diagnostics, source: 'live_read' },
+    })
+    expect(result.projection_diagnostics.source).toBe('live_read')
+    expect(result.projection_diagnostics.cache_state).toBe('fresh')
+  })
+
   it('decodes the complete current wire contract', () => {
     const result = parseReady(currentWire)
     expect(result.summary.primary_path).toBe('streamable_http')

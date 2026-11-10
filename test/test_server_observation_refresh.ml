@@ -60,6 +60,7 @@ let test_exact_dependency_matrix () =
     ; Input.Dataset Workspace_dataset_event.Play_seats
     ; Input.Dataset (Workspace_dataset_event.Dashboard_observation {topic = `Telemetry; scope = `Workspace})
     ; Input.Telemetry_sample
+    ; Input.Transport_state
     ; Input.Keeper {keeper = "piano"; change = Input.Turn_preview}
     ; Input.Agent_core {keeper = Some "piano"; change = Input.Tool_called}
     ; Input.Telemetry_gap {source = Some Telemetry_unified_source.Goal_event; keeper = None}

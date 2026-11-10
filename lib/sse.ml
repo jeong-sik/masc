@@ -667,6 +667,10 @@ let register_validated_client ~kind ?on_disconnect ?observer_instance_id
   match registration with
   | None -> Error (Registration_stale { session_id })
   | Some (evicted, client, previous) ->
+    (* The registry and its transport observation commit precede disconnect
+       callbacks, which may suspend or re-enter another registration. *)
+    sync_transport_snapshot ();
+    Transport_metrics.record_sse_lifecycle_change ();
     (match evicted with
      | Some (sid, client) ->
          Transport_metrics.inc_sse_client_evicted ();
@@ -677,7 +681,6 @@ let register_validated_client ~kind ?on_disconnect ?observer_instance_id
          invoke_disconnect_hook_for sid client
      | None ->
          ());
-    sync_transport_snapshot ();
     Ok (client, previous, Option.map fst evicted)
 
 let register_with_client ?(kind = Agent_stream) ?on_disconnect ?observer_instance_id
@@ -736,10 +739,11 @@ let unregister session_id =
   in
   match removed with
   | Some client ->
-    (* Wake the removed connection before recording the transport snapshot.
-       Its close may re-enter [unregister_if_current], which is now a no-op. *)
-    invoke_disconnect_hook_for session_id client;
-    sync_transport_snapshot ()
+    sync_transport_snapshot ();
+    Transport_metrics.record_sse_lifecycle_change ();
+    (* The removed logical inventory is observable before a disconnect hook
+       can suspend. Its close may re-enter [unregister_if_current], a no-op. *)
+    invoke_disconnect_hook_for session_id client
   | None -> ()
 
 (** Unregister only if the current client matches the given client_id.
@@ -770,9 +774,10 @@ let unregister_if_current session_id client_id =
   in
   match removed with
   | Some client ->
+    sync_transport_snapshot ();
+    Transport_metrics.record_sse_lifecycle_change ();
     (* See [unregister] for the hook ordering rationale. *)
-    invoke_disconnect_hook_for session_id client;
-    sync_transport_snapshot ()
+    invoke_disconnect_hook_for session_id client
   | None -> ()
 
 (** Check if client exists *)
@@ -1411,6 +1416,7 @@ let close_all_clients () =
       })
   in
   sync_transport_snapshot ();
+  if sessions <> [] then Transport_metrics.record_sse_lifecycle_change ();
   List.length sessions
 
 (** Remove clients idle longer than max_age_s (default 30 min).

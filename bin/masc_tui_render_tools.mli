@@ -10,7 +10,7 @@ open Masc_tui_types
 
 val tools_pane_strip : cols:int -> state -> string
 (** The pane selector drawn in the surface header, with the active pane
-    marked. *)
+    marked. The volume reading is a child of the catalog, not another tab. *)
 
 val tools_selection_line : cols:int -> state -> string
 (** Pinned action target, sharing the exact selection used by Enter/edit.

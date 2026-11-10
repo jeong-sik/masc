@@ -15,7 +15,8 @@ type reset_cause =
       (** The response ledger refused the next payload. *)
   | Raised of exn
       (** The stream's own work raised: the request handler, a deferred body
-          callback, or a fiber forked on the stream switch. *)
+          callback, a fiber forked on the stream switch, or the answer to a
+          flush. *)
 
 exception Stream_reset of reset_cause
 (** The error a stream switch fails with. Every fiber of the stream sees it
@@ -119,7 +120,10 @@ module Stream_end : sig
 
   val flush : t -> H2.Body.Writer.t -> ([ `Written | `Closed ] -> unit) -> unit
   (** [flush t writer f] calls [f] once: with h2's answer to the flush, or
-      with [`Closed] when the stream's switch is released first. *)
+      with [`Closed] when the stream's switch is released first. h2 answers
+      from the connection's write loop, which an exception would end for
+      every stream of the connection. So what [f] raises on h2's answer
+      {!reset}s this stream with [Raised]; cancellation propagates. *)
 
   val close_after_flush : t -> H2.Body.Writer.t -> unit
   (** [close_after_flush t writer] is the top-level [close_after_flush]
@@ -142,9 +146,13 @@ end
     the other streams of the connection would wait behind it. Here the next
     slice is written when the flush of the one before is answered, and what
     is written meanwhile waits in order. Each slice has the stream's stall
-    bound to cross the socket: a peer that keeps reading keeps its stream,
-    however long the whole body takes, and bodies share the connection's
-    writer a slice at a time.
+    bound to cross the socket, so a stream keeps going while its peer takes
+    a slice within the bound, however long the whole body takes.
+
+    h2 gives the socket one stream's bytes at a time and takes the streams
+    in turn (scheduler.ml [flush]). The bodies of a connection therefore
+    share its link a slice at a time: with [k] bodies in flight, a slice
+    also waits for a slice of each of the others (RFC-0518 §5).
 
     Like {!Stream_end}, a body is used from the connection's domain only. *)
 module Response_body : sig
@@ -168,7 +176,11 @@ module Response_body : sig
   val flush : t -> ([ `Written | `Closed ] -> unit) -> unit
   (** [flush t f] calls [f] once: with [`Written] when the socket took every
       byte written before the call, with [`Closed] when the body ended
-      before that or was closed already. *)
+      before that or was closed already. The answer comes with the slice
+      that carries the last of those bytes. That slice is filled up with
+      what was written after the call, so the answer can wait for up to one
+      slice of later bytes too. What [f] raises ends the stream
+      ({!Stream_end.flush}). *)
 
   val close : t -> unit
   (** Ends the body after the bytes written so far. Later writes are dropped

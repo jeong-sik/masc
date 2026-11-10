@@ -944,23 +944,28 @@ let test_two_producers_do_not_interleave () =
       (String.equal (payload 'a' ^ payload 'b') (snd (await_reply (request client "/two")))))
 
 (* A route closes its body while the client still holds bytes back. The
-   body is closed from then on, and what the route writes afterwards is
-   dropped: the client gets exactly what was written before the close. *)
+   body is closed from then on: what the route writes afterwards is dropped,
+   and a flush it asks for then is answered as closed at once. The client
+   gets exactly what was written before the close. *)
 let test_write_after_close_is_dropped () =
   let closed, record_closed = Eio.Promise.create () in
+  let late_flush, record_late_flush = Eio.Promise.create () in
   let handler ~stream_end _ h2_reqd =
     let writer = Masc.Http_reqd.respond_with_streaming
       (reqd_of_h2 ~stream_end h2_reqd) (Httpun.Response.create `OK) in
     Masc.Http_reqd.Body_writer.write_string writer stalled_body;
     Masc.Http_reqd.Body_writer.close writer;
     Eio.Promise.resolve record_closed (Masc.Http_reqd.Body_writer.is_closed writer);
-    Masc.Http_reqd.Body_writer.write_string writer "late" in
+    Masc.Http_reqd.Body_writer.write_string writer "late";
+    Masc.Http_reqd.Body_writer.flush writer (Eio.Promise.resolve record_late_flush) in
   with_connection ~streams:(registry ()) ~client_window:(Int32.of_int stalled_window)
     Request_fibers handler
     (fun ~env:_ ~client ~client_flow:_ ~release:_ ~close_client:_ ~server:_ ->
     let reply = request client "/closed" in
     check bool "the body is closed once the route closed it" true
       (Eio.Promise.await closed);
+    check bool "a flush after the close is answered as closed" true
+      (match Eio.Promise.await late_flush with `Closed -> true | `Written -> false);
     check string "the client gets what was written before the close" stalled_body
       (snd (await_reply reply)))
 
@@ -995,6 +1000,32 @@ let test_flush_waits_for_the_bytes_before_it () =
       (match Eio.Promise.await flushed with `Written -> true | `Closed -> false);
     check bool "the client got the whole frame" true
       (read_to_end reader received = Ok long_body))
+
+(* h2 calls the answer to a flush from the connection's write loop, and an
+   exception there would end the loop for every stream of the connection.
+   The client takes the bytes, the answer raises: its stream is reset, the
+   failure is logged once, and the connection keeps serving. *)
+let test_raising_answer_ends_its_stream_only () =
+  let failure = "fixture written answer failure" in
+  let handler ~stream_end _ h2_reqd =
+    let reqd = reqd_of_h2 ~stream_end h2_reqd in
+    match (H2.Reqd.request h2_reqd).target with
+    | "/raising" ->
+      let writer = Masc.Http_reqd.respond_with_streaming reqd (Httpun.Response.create `OK) in
+      Masc.Http_reqd.Body_writer.write_string writer stalled_body;
+      Masc.Http_reqd.Body_writer.flush writer (fun _ -> failwith failure);
+      Eio.Fiber.await_cancel ()
+    | "/fast" -> Response.json ~compress:false "alive" reqd
+    | path -> failf "unexpected path %s" path in
+  with_log_capture @@ fun logged ->
+  with_connection ~streams:(registry ()) Request_fibers handler
+    (fun ~env:_ ~client ~client_flow:_ ~release:_ ~close_client:_ ~server:_ ->
+    let _status, reset, _ = open_unread client "/raising" in
+    check bool "the stream got RST_STREAM(INTERNAL_ERROR)" true
+      (reset_with_internal_error reset);
+    check int "the failed answer is reported once" 1 (logged failure);
+    check string "the connection keeps serving" "alive"
+      (snd (await_reply (request client "/fast"))))
 
 let () = run "H2 request fibers" ["connection progress", [
   test_case "direct reader reproduces occupied CPU stall" `Quick test_reader_control;
@@ -1031,8 +1062,10 @@ let () = run "H2 request fibers" ["connection progress", [
     test_two_producers_do_not_interleave;
   test_case "a steady reader on a slow socket gets a whole body" `Quick
     test_steady_reader_on_a_slow_socket_gets_a_long_body;
-  test_case "a write after close is dropped" `Quick
+  test_case "after close a write is dropped and a flush is closed" `Quick
     test_write_after_close_is_dropped;
   test_case "a flush waits for the bytes written before it" `Quick
     test_flush_waits_for_the_bytes_before_it;
+  test_case "an answer that raises ends its stream only" `Quick
+    test_raising_answer_ends_its_stream_only;
 ]]

@@ -233,7 +233,8 @@ module Stream_end = struct
   ;;
 
   (* [f] runs once: when h2 drains the body, or when the stream's end comes
-     first. *)
+     first. At the stream's end the scope reports what [f] raises
+     ([answer_all]). *)
   let flush t writer f =
     if t.ended
     then f `Closed
@@ -254,7 +255,14 @@ module Stream_end = struct
         t.quiet_since <- Eio.Time.now t.clock;
         Eio.Condition.broadcast t.registered);
       Hashtbl.replace t.waiting id (fun () -> once `Closed);
-      H2.Body.Writer.flush writer once)
+      (* h2 answers from the connection's write loop, and an exception there
+         ends the loop for every stream of the connection (gluten-eio
+         [write_loop]). What an answer raises is its own stream's failure,
+         as what the stream's handler raises is. *)
+      H2.Body.Writer.flush writer (fun outcome ->
+        try once outcome with
+        | Eio.Cancel.Cancelled _ as cancelled -> raise cancelled
+        | exn -> reset ~stream_sw:t.stream_sw t.reqd (Raised exn)))
   ;;
 
   (* h2#278: see the WORKAROUND at [close_after_flush] below. *)
@@ -377,8 +385,10 @@ module Response_body = struct
         send_slice t;
         [])
 
-  (* The next slice starts before the answers run: whatever one of them
-     raises, the queue keeps moving. *)
+  (* The next slice starts before the answers run, so an answer that writes,
+     flushes or closes finds the queue in order. Each answer runs whatever
+     another raised, and what they raise ends the stream
+     ([Stream_end.flush]). *)
   and send_slice t =
     let settled = write_slice t in
     t.in_flight <- true;
@@ -401,8 +411,7 @@ module Response_body = struct
       if not t.in_flight then send_slice t)
   ;;
 
-  (* With nothing of the body in h2, h2 answers at once and writes the
-     headers if they are still waiting. *)
+  (* With nothing of the body in h2, h2 answers at once. *)
   let flush t answer =
     if is_closed t
     then answer `Closed

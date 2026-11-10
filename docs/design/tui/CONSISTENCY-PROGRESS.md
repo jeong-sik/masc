@@ -362,7 +362,7 @@ Operations interaction, installation, remaining Operations states and the full
 23-surface scope remain open. No new screen wording, layout, row-order or PTY
 assertion tests were added.
 
-## Board title-first reading
+## Board title-first reading (#50883)
 
 The Board list leads with each post's title and author. Compact technical IDs
 no longer occupy a list column; the existing exact-reference copy action keeps

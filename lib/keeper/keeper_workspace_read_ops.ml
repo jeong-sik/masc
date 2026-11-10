@@ -300,7 +300,7 @@ let try_handle_with_authority
                       (sandbox_read_error
                          ~target:shown_path
                          (path_not_found_message
-                            ~where:"nothing could be found at that path on the sandbox backend"
+                            ~where:"nothing could be found or reached at that path on the sandbox backend"
                             shown_path))
                   else
                     (* Preserve rg's own error payload. A missing --type can

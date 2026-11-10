@@ -36,7 +36,7 @@ val make_request_handler
 
 val make_table_request_handler
   :  trust_policy:Server_request_authority.trust_policy
-  -> router:Http_server_eio.Router.t
+  -> table:Server_account_table.t
   -> stream_end:Http_h2_stream.Stream_end.t
   -> Eio.Net.Sockaddr.stream
   -> H2.Reqd.t

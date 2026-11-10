@@ -234,7 +234,7 @@ let table_internal_error = "internal error"
    workspace precondition, and no arm outside the router. The 500 of a handler
    that raised says nothing of the exception, whose text can name a file of
    the server; the log has it. *)
-let admitted_to_table ~router ~client_addr ~request_authority request reqd =
+let admitted_to_table ~table ~client_addr ~request_authority request reqd =
   Server_request_authority.with_current request_authority (fun () ->
     let path = Http.Request.path request in
     if try_client_rate_limit_block ~path ~client_addr reqd
@@ -243,7 +243,7 @@ let admitted_to_table ~router ~client_addr ~request_authority request reqd =
       answering_failures
         reqd
         ~internal_error:(fun (_ : string) -> table_internal_error)
-        (fun () -> Http.Router.dispatch router request reqd))
+        (fun () -> Server_account_table.dispatch table request reqd))
 ;;
 
 let serve_admitted ~admitted classification reqd =
@@ -291,16 +291,12 @@ let serve_admitted ~admitted classification reqd =
    scope its response is written under. A WebSocket route stays with its
    connection: the upgrade hands the socket to the handler. [None] on the
    owner domain, which is every request while the serving domain is off. *)
-let owner_relay ~routes reqd =
+let owner_relay ~is_websocket reqd =
   match Eio_context.owner_post () with
   | None -> None
   | Some post ->
-    (match Http.Router.resolve routes (Http_reqd.request reqd) with
-     | `Matched { Http.Router.handler = Http.Router.Ws _; _ } -> None
-     | `Matched { Http.Router.handler = Http.Router.Plain _; _ }
-      | `Method_not_allowed
-     | `Not_found ->
-       Option.map (fun sw -> sw, post) (Http_reqd.relay_scope reqd))
+    if is_websocket () then None
+    else Option.map (fun sw -> sw, post) (Http_reqd.relay_scope reqd)
 ;;
 
 (* The owner's queue drops what a task raises. [serve_admitted] answers its own
@@ -317,8 +313,8 @@ let reporting task () =
 
 (* The read mark of the request ([Pool_lane]) is bound to the connection's
    fiber and does not cross domains, so the handler's fiber takes it again. *)
-let serve_owned ~routes ~admitted classification reqd =
-  match owner_relay ~routes reqd with
+let serve_owned ~is_websocket ~admitted classification reqd =
+  match owner_relay ~is_websocket reqd with
   | None -> serve_admitted ~admitted classification reqd
   | Some (sw, post) ->
     let lane = Pool_lane.current () in
@@ -331,11 +327,19 @@ let serve_owned ~routes ~admitted classification reqd =
 ;;
 
 let serve ~routes ~client_addr classification reqd =
-  serve_owned ~routes ~admitted:(admitted ~routes ~client_addr) classification reqd
+  let is_websocket () =
+    match Http.Router.resolve routes (Http_reqd.request reqd) with
+    | `Matched { Http.Router.handler = Http.Router.Ws _; _ } -> true
+    | `Matched { Http.Router.handler = Http.Router.Plain _; _ }
+    | `Method_not_allowed
+    | `Not_found -> false
+  in
+  serve_owned ~is_websocket ~admitted:(admitted ~routes ~client_addr) classification reqd
 ;;
 
-let serve_table ~router ~client_addr classification reqd =
-  serve_owned ~routes:router ~admitted:(admitted_to_table ~router ~client_addr)
+let serve_table ~table ~client_addr classification reqd =
+  let is_websocket () = Server_account_table.is_websocket table (Http_reqd.request reqd) in
+  serve_owned ~is_websocket ~admitted:(admitted_to_table ~table ~client_addr)
     classification reqd
 ;;
 
@@ -352,6 +356,6 @@ let http1_handler ~trust_policy routes client_addr gluten_reqd =
   http1 ~trust_policy ~serve:(serve ~routes) client_addr gluten_reqd
 ;;
 
-let http1_table_handler ~trust_policy router client_addr gluten_reqd =
-  http1 ~trust_policy ~serve:(serve_table ~router) client_addr gluten_reqd
+let http1_table_handler ~trust_policy table client_addr gluten_reqd =
+  http1 ~trust_policy ~serve:(serve_table ~table) client_addr gluten_reqd
 ;;

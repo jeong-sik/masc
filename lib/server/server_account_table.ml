@@ -53,4 +53,12 @@ let checked register =
 ;;
 
 let route_count = Http.Router.route_count
+let is_websocket table request =
+  match Http.Router.resolve table request with
+  | `Matched { Http.Router.handler = Http.Router.Ws _; _ } -> true
+  | `Matched { Http.Router.handler = Http.Router.Plain _; _ }
+  | `Method_not_allowed
+  | `Not_found -> false
+;;
+
 let dispatch = Http.Router.dispatch

@@ -62,6 +62,6 @@ let make_request_handler ~trust_policy ~routes =
   request_handler ~trust_policy ~serve:(Server_http_ingress.serve ~routes)
 ;;
 
-let make_table_request_handler ~trust_policy ~router =
-  request_handler ~trust_policy ~serve:(Server_http_ingress.serve_table ~router)
+let make_table_request_handler ~trust_policy ~table =
+  request_handler ~trust_policy ~serve:(Server_http_ingress.serve_table ~table)
 ;;

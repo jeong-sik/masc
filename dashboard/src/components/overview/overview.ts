@@ -1,4 +1,4 @@
-import { setupObservationRefresh } from '../../lib/observation-refresh'
+import { selectObservationReadFailure, setupObservationRefresh } from '../../lib/observation-refresh'
 // MASC Dashboard — Overview (operations home)
 //
 // One screen of fleet state, top to bottom:
@@ -673,7 +673,7 @@ const overviewTelemetryResource: AsyncResource<OverviewTelemetrySnapshot> = crea
 function loadOverviewTelemetry(nowMs = Date.now(), signal?: AbortSignal): Promise<void> {
   return overviewTelemetryResource.load(async () => {
     const sinceMs = nowMs - OVERVIEW_TELEMETRY_WINDOW_MINUTES * 60 * 1000
-    const [telemetry, summary] = await Promise.all([
+    const [telemetryRead, summaryRead] = await Promise.allSettled([
       fetchTelemetry({
         source: 'agent_core_event',
         signal,
@@ -682,6 +682,14 @@ function loadOverviewTelemetry(nowMs = Date.now(), signal?: AbortSignal): Promis
       }),
       fetchTelemetrySummary({ signal }),
     ])
+    if (telemetryRead.status === 'rejected' || summaryRead.status === 'rejected') {
+      throw selectObservationReadFailure([
+        telemetryRead.status === 'rejected' ? telemetryRead.reason : null,
+        summaryRead.status === 'rejected' ? summaryRead.reason : null,
+      ])
+    }
+    const telemetry = telemetryRead.value
+    const summary = summaryRead.value
     return buildOverviewTelemetrySnapshot({
       entries: telemetry.entries,
       sources: summary.sources,

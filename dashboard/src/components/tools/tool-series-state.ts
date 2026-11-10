@@ -94,7 +94,7 @@ export function selectTool(tool: string | null): void {
 
 /** Read the current selection when observed tool metrics change. */
 export function subscribeToolSeriesRefresh(): () => void {
-  return setupObservationRefresh(loadToolSeries, { topics: ['tool_metrics'], readError: () => seriesError.peek(), cancelRead: () => seriesResource.cancel(), resetRead: () => seriesResource.reset() })
+  return setupObservationRefresh(loadToolSeries, { topics: ['tool_metrics'], readError: () => seriesResource.readError(), cancelRead: () => seriesResource.cancel(), resetRead: () => seriesResource.reset() })
 }
 
 /**

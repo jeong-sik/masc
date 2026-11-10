@@ -25,21 +25,22 @@ type frame =
    takes: the client then holds the newest page, as a fresh read would give.
    [after] is the cursor for the next frame, whether or not any entry matched. *)
 let next_frame (query : Server_logs_query.t) ~after =
-  let upto = (Log.Ring.bounds ()).total in
-  let evicted =
+  let ring_bounds = Log.Ring.bounds () in
+  let upto = ring_bounds.total in
+  let reset_cursor =
     match after with
     | None -> true
-    | Some seq -> seq + 1 < (Log.Ring.bounds ()).start_seq
+    | Some seq -> seq < ring_bounds.start_seq - 1 || seq >= upto
   in
-  let since_seq = if evicted then None else after in
+  let since_seq = if reset_cursor then None else after in
   let entries =
     Server_logs_query.read
       { query with limit = query.limit + 1; since_seq; before_seq = Some upto }
   in
   let overflow = List.length entries > query.limit in
   let entries = if overflow then List.take query.limit entries else entries in
-  let reset = evicted || overflow in
-  { reset; entries; ring_bounds = Log.Ring.bounds (); after = upto - 1 }
+  let reset = reset_cursor || overflow in
+  { reset; entries; ring_bounds; after = upto - 1 }
 ;;
 
 let frame_json ~config (query : Server_logs_query.t) frame =

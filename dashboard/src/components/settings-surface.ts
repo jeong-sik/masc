@@ -1,4 +1,5 @@
-import { setupObservationRefresh } from '../lib/observation-refresh'
+import { subscribeDashboardLogsStream } from '../dashboard-logs-stream'
+import type { LogsStreamError } from '../api/dashboard-logs-stream'
 import { isImeComposing } from '../lib/keyboard'
 // MASC Dashboard — Settings surface
 // Operator-facing settings only: runtime management, resolved paths, MCP server
@@ -6,7 +7,7 @@ import { isImeComposing } from '../lib/keyboard'
 
 import { html } from 'htm/preact'
 import { useEffect, useLayoutEffect, useMemo, useState } from 'preact/hooks'
-import { Effect, Option } from 'effect'
+import { Option } from 'effect'
 import {
   SETTINGS_ROUTE_SECTION_IDS,
   type SettingsRouteSectionId,
@@ -25,11 +26,9 @@ import {
   type DashboardConfigError,
 } from '../api/dashboard-config'
 import {
-  fetchLogs,
   type LogEntry,
-  type LogsError,
 } from '../api/dashboard-logs'
-import { dashboardRuntime, DashboardTransportError, type DashboardHttp } from '../api/effect-http'
+import { dashboardRuntime, type DashboardHttp } from '../api/effect-http'
 import {
   patchRuntimeLane,
   patchRuntimeMediaFailover,
@@ -86,7 +85,7 @@ import {
 import type { ComponentChildren } from 'preact'
 import { errorToString } from '../lib/format-string'
 import { createEffectResource } from '../lib/effect-resource'
-import { remotePrevious } from '../lib/remote-data'
+import { remoteFailure, remoteInitial, remotePrevious, remoteSuccess, type RemoteData } from '../lib/remote-data'
 import {
   runtimeCatalogDeclaredSpec,
   runtimeCatalogEffectiveCapabilities,
@@ -386,11 +385,6 @@ export function logEntryToSysRow(entry: LogEntry): SysLogRow {
   return [logRowClock(entry.timestamp), level, identity, entry.message, logRowStatus(entry.level), isTool]
 }
 
-const settingsLogsResource = createEffectResource<
-  DashboardHttp,
-  LogsError,
-  readonly SysLogRow[]
->(dashboardRuntime)
 
 function SetSeg({
   value,
@@ -1397,29 +1391,24 @@ function LogFilter({
 function LogViewer() {
   const [filter, setFilter] = useState<LogFilter>('all')
 
+  const [resourceState, setResourceState] = useState<RemoteData<LogsStreamError, readonly SysLogRow[]>>(remoteInitial)
   useEffect(() => {
-    const tick = () => {
-      if (settingsLogsResource.state.value._tag === 'Loading') return
-      return settingsLogsResource.load(
-        fetchLogs({ limit: SETTINGS_LOG_LIMIT }).pipe(
-          Effect.map(resp => [...resp.entries]
-            .sort((a, b) => b.seq - a.seq)
-            .map(logEntryToSysRow)),
-        ),
-      )
-    }
-
-    settingsLogsResource.reset()
-    const dispose = setupObservationRefresh(tick, { topics: ['logs'], cancelRead: () => settingsLogsResource.cancel(), resetRead: () => settingsLogsResource.reset(), readError: () => { const s = settingsLogsResource.state.peek(); return s._tag === 'Failure' ? (s.error instanceof DashboardTransportError ? s.error.cause : s.error) : null } })
-
-    return () => {
-      dispose()
-      settingsLogsResource.cancel()
-      settingsLogsResource.reset()
-    }
+    const entries = new Map<number, LogEntry>()
+    return subscribeDashboardLogsStream({ limit: SETTINGS_LOG_LIMIT }, {
+      onReset: () => { entries.clear(); setResourceState(remoteInitial()) },
+      onError: error => setResourceState(previous => remoteFailure(error, remotePrevious(previous))),
+      onFrame: frame => {
+        if (frame.reset) entries.clear()
+        for (const entry of frame.data.entries) entries.set(entry.seq, entry)
+        const latest = [...entries.values()].filter(entry => entry.seq >= frame.data.ring.startSeq)
+          .sort((a, b) => b.seq - a.seq).slice(0, frame.limit)
+        entries.clear()
+        for (const entry of latest) entries.set(entry.seq, entry)
+        setResourceState(remoteSuccess(latest.map(logEntryToSysRow)))
+      },
+    })
   }, [])
 
-  const resourceState = settingsLogsResource.state.value
   const allRows = Option.getOrElse(
     remotePrevious(resourceState),
     () => [] as readonly SysLogRow[],
@@ -1454,8 +1443,9 @@ function LogViewer() {
             onClick=${() => setFilter(f)}
           />
         `)}
-        <span class="log-live"><span class="tps-dot"></span>tail -f</span>
+        <span class="log-live"><span class="tps-dot"></span>${status === 'ready' ? 'tail -f' : status === 'error' ? '연결 확인 필요' : '연결 중'}</span>
       </div>
+      ${resourceState._tag === 'Failure' ? html`<div role="alert">${resourceState.error.message}</div>` : null}
       <div class="log-stream mono" data-testid="log-stream">
         ${rows.length === 0
           ? html`<div class="log-empty" data-testid="log-empty">${emptyLabel}</div>`

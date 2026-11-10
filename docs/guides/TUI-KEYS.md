@@ -270,8 +270,8 @@ data and paint. A missing finish record remains an unfinished observation.
 | `Home/End` | first or last wrapped detail row of a selected preset, or of a prompt registry or asset document |
 | `v` | runtime.toml: source revision, validation issues, and application/restart details |
 | `9` | runtime status, lane routing, probes and connected clients |
-| `s` | the MCP resource catalog, off the ring under System |
-| `t` | the tool catalog, receipts, and usage, off the ring under System |
+| `s` | the MCP resource catalog under Features & plugins |
+| `t` | the tool catalog, receipts, and usage under Features & plugins |
 | `e` | runtime.toml previews; models open fields; prompts save an override; voice opens the setup wizard |
 | `c` | same account/API model, independent variant settings |
 | `v` | read complete account/model settings without editing |

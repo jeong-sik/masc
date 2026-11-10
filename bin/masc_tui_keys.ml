@@ -83,9 +83,9 @@ let config_bindings =
   ; b ~ko:"런타임" Navigate "9" "Runtime"
       ~help:"runtime status, lane routing, probes and connected clients", None
   ; b ~ko:"리소스" Navigate "s" "resources"
-      ~help:"the MCP resource catalog, off the ring under System", None
+      ~help:"the MCP resource catalog under Features & plugins", None
   ; b ~ko:"도구" Navigate "t" "tools"
-      ~help:"the tool catalog, receipts, and usage, off the ring under System", None
+      ~help:"the tool catalog, receipts, and usage under Features & plugins", None
   ; b ~ko:"편집" Act "e" "edit"
       ~help:"runtime.toml previews; models open fields; prompts save an override; voice opens the setup wizard",
       Some [ Config_runtime; Config_models; Config_prompts; Config_voice ]
@@ -1423,9 +1423,9 @@ let footer_hints_planning_goal_list ~lang ~has_rows =
 let footer_hints_planning_goal_detail ~lang =
   planning_goal_hints ~lang ~detail_open:true ~has_rows:None
 
-let footer_hints_tools ~pane =
+let footer_hints_tools ~lang ~pane =
   let bracket = tools_bracket_binding ~pane in
-  hints_of_bindings
+  hints_of_bindings ~lang
     (List.map (fun (binding : binding) ->
        if String.equal binding.key bracket.key then bracket else binding)
        (for_surface Tools))

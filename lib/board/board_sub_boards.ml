@@ -8,6 +8,33 @@ let sub_board_to_yojson = Board_sub_board_json.sub_board_to_yojson
 let parse_sub_board_members = Board_sub_board_json.parse_sub_board_members
 let sub_board_of_yojson = Board_sub_board_json.sub_board_of_yojson
 
+let reload_sub_boards store =
+  with_persist_lock store (fun () ->
+    let outcome = Board_sub_boards_source.read store in
+    let outcome = try
+      with_lock store (fun () ->
+        (match outcome with
+         | Board_sub_boards_source.Complete { rows; _ }
+         | Partial { rows; _ } ->
+           Hashtbl.clear store.sub_boards;
+           Hashtbl.clear store.sub_boards_by_slug;
+           List.iter (fun (sb : sub_board) ->
+             let id = Sub_board_id.to_string sb.id in
+             Hashtbl.replace store.sub_boards id sb;
+             Hashtbl.replace store.sub_boards_by_slug sb.slug id) rows
+         | Unavailable _ -> ());
+        Board_sub_boards_source.publish_read store outcome);
+      outcome
+    with exception_ ->
+      Board_sub_boards_source.fail_read store outcome exception_ (Printexc.get_raw_backtrace ()) in
+    match Board_sub_boards_source.finish_read outcome with
+    | Ok () ->
+      let count = match outcome with
+        | Complete { rows; _ } | Partial { rows; _ } -> List.length rows
+        | Unavailable _ -> 0 in
+      Ok count
+    | Error error -> Error (Board_paths.sub_boards_path store, Failure (error_to_string error)))
+
 type snapshot_change =
   | Replace_sub_board of sub_board
   | Remove_sub_board of Sub_board_id.t
@@ -29,25 +56,19 @@ let changed_sub_boards_jsonl_unlocked store change =
   Buffer.contents buf
 ;;
 
-let save_sub_boards_jsonl store content =
-  try
-    let* () = ensure_masc_dir ~where:"rewrite_sub_boards" store in
-    let path = sub_boards_path store in
-    match Fs_compat.save_file_atomic path content with
-    | Ok () -> Ok ()
-    | Error msg -> persist_io_error ~where:"rewrite_sub_boards" msg
-  with
-  | Sys_error msg -> persist_io_error ~where:"rewrite_sub_boards" msg
-;;
-
-let append_sub_board store (sb : sub_board) =
-  try
-    let* () = ensure_masc_dir ~where:"append_sub_board" store in
-    let path = sub_boards_path store in
-    Fs_compat.append_file path (Yojson.Safe.to_string (sub_board_to_yojson sb) ^ "\n");
-    Ok ()
-  with
-  | Sys_error msg -> persist_io_error ~where:"append_sub_board" msg
+let publish_policy store outcome publish =
+  let result = match outcome with
+    | Board_sub_boards_source.Written { publication; _ } ->
+      let value = try publish () with exception_ ->
+        Board_sub_boards_source.fail_publication store publication exception_
+          (Printexc.get_raw_backtrace ()) in
+      Board_sub_boards_source.acknowledge_publication store publication
+      |> Result.map (fun () -> value)
+    | Not_written _ | Unknown _ -> Error (Io_error "Board data is unavailable.") in
+  (match result with
+   | Ok _ -> ()
+   | Error error -> record_persist_error ~where:"sub_board_policy" (error_to_string error));
+  Board_sub_boards_source.finish_write outcome result
 ;;
 
 let valid_slug_pattern = Re.Pcre.re {|^[a-z0-9][a-z0-9_-]*$|} |> Re.compile
@@ -63,7 +84,6 @@ let create_sub_board
       ()
   : (sub_board, board_error) Result.t
   =
-  let* () = require_persisted_snapshot_readable store.sub_boards_load_result in
   let slug = String.lowercase_ascii (String.trim slug) in
   if
     String.length slug < 1
@@ -108,6 +128,7 @@ let create_sub_board
          | Error _ as error -> error
          | Ok sb ->
            with_persist_lock store (fun () ->
+             let* () = Board_sub_boards_source.require_readable store in
              let* () =
                with_lock store (fun () ->
                  if Hashtbl.mem store.sub_boards_by_slug slug
@@ -117,12 +138,13 @@ let create_sub_board
                         (Printf.sprintf "Sub-board slug %S already exists" slug))
                  else Ok ())
              in
-             let* () = append_sub_board store sb in
+             let outcome = Board_sub_boards_source.append store sb in
+             publish_policy store outcome (fun () ->
              with_lock store (fun () ->
                Hashtbl.replace store.sub_boards (Sub_board_id.to_string sb.id) sb;
                Hashtbl.replace store.sub_boards_by_slug slug
                  (Sub_board_id.to_string sb.id);
-               Ok sb))))
+               sb)))))
 ;;
 
 
@@ -136,8 +158,8 @@ let update_sub_board
       ()
   : (sub_board, board_error) Result.t
   =
-  let* () = require_persisted_snapshot_readable store.sub_boards_load_result in
   with_persist_lock store (fun () ->
+    let* () = Board_sub_boards_source.require_readable store in
     let result =
       with_lock store (fun () ->
         let sb_opt =
@@ -179,13 +201,16 @@ let update_sub_board
     match result with
     | Error _ as error -> error
     | Ok (updated, content) ->
-      let* () = save_sub_boards_jsonl store content in
+      let outcome = Board_sub_boards_source.rewrite store content in
+      publish_policy store outcome (fun () ->
       with_lock store (fun () ->
         Hashtbl.replace store.sub_boards (Sub_board_id.to_string updated.id) updated;
-        Ok updated))
+        updated)))
 ;;
 
 let get_sub_board store ~sub_board_id : (sub_board, board_error) Result.t =
+  with_persist_lock store (fun () ->
+  let* () = Board_sub_boards_source.require_readable store in
   with_lock store (fun () ->
     match Hashtbl.find_opt store.sub_boards sub_board_id with
     | Some sb -> Ok (sub_board_with_post_count_unlocked store sb)
@@ -198,7 +223,7 @@ let get_sub_board store ~sub_board_id : (sub_board, board_error) Result.t =
           | None ->
             Error (Invalid_id (Printf.sprintf "Sub-board not found: %s" sub_board_id)))
        | None ->
-         Error (Invalid_id (Printf.sprintf "Sub-board not found: %s" sub_board_id))))
+         Error (Invalid_id (Printf.sprintf "Sub-board not found: %s" sub_board_id)))))
 ;;
 
 let list_sub_boards store : sub_board list =
@@ -212,9 +237,15 @@ let list_sub_boards store : sub_board list =
       compare a.created_at b.created_at))
 ;;
 
-let delete_sub_board store ~sub_board_id : (unit, board_error) Result.t =
-  let* () = require_persisted_snapshot_readable store.sub_boards_load_result in
+let read_sub_boards store =
   with_persist_lock store (fun () ->
+    let* () = Board_sub_boards_source.require_readable store in
+    Ok (list_sub_boards store))
+;;
+
+let delete_sub_board store ~sub_board_id : (unit, board_error) Result.t =
+  with_persist_lock store (fun () ->
+    let* () = Board_sub_boards_source.require_readable store in
     let snapshot =
       with_lock store (fun () ->
       let resolved_opt =
@@ -237,7 +268,8 @@ let delete_sub_board store ~sub_board_id : (unit, board_error) Result.t =
     match snapshot with
     | Error _ as e -> e
     | Ok (sb, content) ->
-      let* () = save_sub_boards_jsonl store content in
+      let outcome = Board_sub_boards_source.rewrite store content in
+      publish_policy store outcome (fun () ->
       with_lock store (fun () ->
         Hashtbl.remove store.sub_boards (Sub_board_id.to_string sb.id);
         Hashtbl.remove store.sub_boards_by_slug sb.slug;
@@ -253,5 +285,5 @@ let delete_sub_board store ~sub_board_id : (unit, board_error) Result.t =
              | _ -> ())
           store.posts;
         invalidate_post_caches store;
-        Ok ()))
+        ())))
 ;;

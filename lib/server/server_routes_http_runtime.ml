@@ -1559,7 +1559,7 @@ let full_health_snapshot_metadata ~now (view : full_health_state_view) =
       ("stale_since_ts", stale_since_ts);
     ]
 
-let mark_full_health_refresh_requested () =
+let mark_full_health_refresh_requested ~now () =
   let wake, refresh =
     with_full_health_snapshot_lock (fun () ->
       let epoch = current_workspace_epoch () in
@@ -1576,10 +1576,18 @@ let mark_full_health_refresh_requested () =
           || not (Health_observation.same_scope epoch snapshot.workspace_epoch))
           (!full_health_observation).snapshot
       in
+      let expired_success =
+        Option.exists (fun (snapshot : Health_observation.snapshot) ->
+          Option.is_none snapshot.failure
+          && Option.is_none snapshot.stale_since_ts
+          && snapshot_is_stale ~now snapshot)
+          (!full_health_observation).snapshot
+      in
       let requested = Health_refresh.request refresh in
       full_health_refresh := requested;
       (not worker_matches
        && (foreign_worker || foreign_snapshot
+           || expired_success
            || Option.is_none (!full_health_observation).snapshot)), requested)
   in
   if wake then signal_full_health_refresh_wakeup ();
@@ -1683,7 +1691,7 @@ let make_cached_full_health_json_with ~after_selection ?timing ?(listener = defa
     | Some snapshot -> snapshot_is_stale ~now snapshot
   in
   let view =
-    if needs_refresh then { view with refresh = mark_full_health_refresh_requested () }
+    if needs_refresh then { view with refresh = mark_full_health_refresh_requested ~now () }
     else view
   in
   let fields =

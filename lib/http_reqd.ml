@@ -345,8 +345,19 @@ let respond_with_streaming ?flush_headers_immediately t response =
     if h2_stream_over ~stream_end reqd
     then Body_writer.Ended
     else (
+      (* The HEADERS frame goes out at once, whatever the caller asked.
+         Told to wait for the first flush, h2 makes the connection writer
+         pass its next turn (h2 reqd.ml [send_streaming_response]), and the
+         frame leaves once body bytes move or once the writer is woken
+         after that turn. A body written before that turn wakes nothing
+         later, and a stream whose window is zero moves no byte (h2 reqd.ml
+         [flush_response_body]): its headers would wait for a PING, for a
+         later write that reaches h2, or for the reset at the stall bound. *)
       let writer =
-        H2.Reqd.respond_with_streaming reqd ?flush_headers_immediately (h2_response_of response)
+        H2.Reqd.respond_with_streaming
+          reqd
+          ~flush_headers_immediately:true
+          (h2_response_of response)
       in
       let body = Response_body.create stream_end writer in
       http2.streaming <- Some body;

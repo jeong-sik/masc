@@ -305,9 +305,10 @@ function BdAuthor({ label, size = 24 }: { label: string; size?: number }) {
 }
 
 // ── Post card (v2 list item) ───────────────────────────────────────
-function PostCard({ post, batchObservation }: {
+function PostCard({ post, batchObservation, getLatestBatchRevision }: {
   post: BoardPost
   batchObservation: ReactionBatchObservation
+  getLatestBatchRevision: () => number
 }) {
   const isDeleting = deletingPostId.value === post.id
   const previewBody = dedupeLeadingHeading(post.title, post.body)
@@ -447,6 +448,7 @@ function PostCard({ post, batchObservation }: {
             initialSummaries=${post.reactions}
             supportedEmojis=${post.supported_reaction_emojis}
             batchObservation=${batchObservation}
+            getLatestBatchRevision=${getLatestBatchRevision}
           />
         </div>
         <span class="karma" aria-label=${voteScoreAria} title=${voteScoreLabel}>karma <b>${voteScoreLabel}</b></span>
@@ -1297,21 +1299,24 @@ function UnifiedBoardFeed({
   // that response -- and asking per row made twenty of the twenty-three
   // requests that opening the board sent.
   const drawnIds = posts.slice(0, visibleLimit).map(post => post.id).join(',')
-  const [batchedReactions, setBatchedReactions] = useState<ReactionBatchObservation>({ state: 'loading' })
+  const batchRevision = useRef(0)
+  const getLatestBatchRevision = useCallback(() => batchRevision.current, [])
+  const [batchedReactions, setBatchedReactions] = useState<ReactionBatchObservation>({ state: 'loading', revision: 0 })
   useEffect(() => {
     const ids = drawnIds === '' ? [] : drawnIds.split(',')
+    const revision = ++batchRevision.current
     if (ids.length === 0) {
-      setBatchedReactions({ state: 'ready', byTargetId: new Map(), supportedEmojis: [] })
+      setBatchedReactions({ state: 'ready', revision, byTargetId: new Map(), supportedEmojis: [] })
       return
     }
     let cancelled = false
-    setBatchedReactions({ state: 'loading' })
+    setBatchedReactions({ state: 'loading', revision })
     void fetchBoardReactionsBatch('post', ids)
-      .then(next => { if (!cancelled) setBatchedReactions({ state: 'ready', ...next }) })
+      .then(next => { if (!cancelled) setBatchedReactions({ state: 'ready', revision, ...next }) })
       .catch(err => {
         // Each bar falls back to fetching its own, which is what it did before.
         console.warn('[board] reaction batch failed', err instanceof Error ? err.message : err)
-        if (!cancelled) setBatchedReactions({ state: 'unavailable' })
+        if (!cancelled) setBatchedReactions({ state: 'unavailable', revision })
       })
     return () => { cancelled = true }
   }, [drawnIds])
@@ -1340,7 +1345,8 @@ function UnifiedBoardFeed({
       ${posts.slice(0, visibleLimit).map(post => html`<${PostCard}
         key=${post.id}
         post=${post}
-        batchObservation=${batchedReactions} />`)}
+        batchObservation=${batchedReactions}
+        getLatestBatchRevision=${getLatestBatchRevision} />`)}
     </div>
     ${hasMore ? html`
       <${ScrollMarker} onVisible=${expand} />

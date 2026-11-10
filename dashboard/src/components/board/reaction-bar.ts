@@ -7,9 +7,13 @@ import type { BoardReactionSummary, BoardReactionTargetType } from '../../types'
 
 type Target = { targetType: BoardReactionTargetType; targetId: string }
 export type ReactionBatchObservation =
-  | { state: 'loading' }
-  | { state: 'unavailable' }
-  | { state: 'ready'; byTargetId: ReadonlyMap<string, BoardReactionSummary[]>; supportedEmojis: readonly string[] }
+  { revision: number } & (
+    | { state: 'loading' }
+    | { state: 'unavailable' }
+    | { state: 'ready'; byTargetId: ReadonlyMap<string, BoardReactionSummary[]>; supportedEmojis: readonly string[] }
+  )
+
+type BatchFence = { owner: () => number; through: number }
 
 type Observation = Target & {
   batch: ReactionBatchObservation | undefined
@@ -17,14 +21,34 @@ type Observation = Target & {
   summaries: BoardReactionSummary[]
   catalog: readonly string[] | null
   message: string
+  fence?: BatchFence
 }
-type Request = Target & { batch: ReactionBatchObservation | undefined } & (
+type Request = Target & { batch: ReactionBatchObservation | undefined; fence?: BatchFence } & (
   | { kind: 'read' }
   | { kind: 'write'; refreshAfterWrite: boolean }
 )
 
 function owns(target: Target, targetType: BoardReactionTargetType, targetId: string): boolean {
   return target.targetType === targetType && target.targetId === targetId
+}
+
+function captureBatchFence(owner?: () => number): BatchFence | undefined {
+  return owner ? { owner, through: owner() } : undefined
+}
+
+function coveredByFence(batch: ReactionBatchObservation | undefined, fence: BatchFence | undefined, owner?: () => number): boolean {
+  return batch !== undefined && batch.state !== 'unavailable'
+    && fence !== undefined && fence.owner === owner && batch.revision <= fence.through
+}
+
+function projectBatch(current: Observation, incoming: Observation, owner?: () => number): Observation {
+  if (!owns(current, incoming.targetType, incoming.targetId)) return incoming
+  if (current.batch === incoming.batch || current.phase === 'writing'
+    || coveredByFence(incoming.batch, current.fence, owner)) return current
+  if (incoming.phase === 'ready') return incoming
+  return {
+    ...incoming, summaries: current.summaries, catalog: current.catalog ?? incoming.catalog, fence: current.fence,
+  }
 }
 
 function initialObservation(
@@ -56,6 +80,7 @@ export function ReactionBar({
   initialSummaries,
   supportedEmojis,
   batchObservation,
+  getLatestBatchRevision,
 }: {
   targetType: BoardReactionTargetType
   targetId: string
@@ -64,14 +89,14 @@ export function ReactionBar({
   supportedEmojis?: readonly string[]
   /** An actual parent batch observation, preserved across ordinary rerenders. */
   batchObservation?: ReactionBatchObservation
+  /** Synchronous batch-start order, including starts whose loading render was coalesced. */
+  getLatestBatchRevision?: () => number
 }) {
   const incoming = initialObservation(targetType, targetId, initialSummaries, supportedEmojis, batchObservation)
   const hasInitialState = incoming.phase === 'ready'
   const [observation, setObservation] = useState<Observation>(() => incoming)
   const activeRequest = useRef<Request | null>(null)
-  const visible = owns(observation, targetType, targetId)
-    && (observation.batch === batchObservation || observation.phase === 'writing')
-    ? observation : incoming
+  const visible = projectBatch(observation, incoming, getLatestBatchRevision)
 
   useEffect(() => () => {
     const request = activeRequest.current
@@ -90,13 +115,13 @@ export function ReactionBar({
         }
         return
       }
-      if (request.batch === batchObservation) return
+      if (request.batch === batchObservation
+        || coveredByFence(batchObservation, request.fence, getLatestBatchRevision)) return
     }
     activeRequest.current = null
-    setObservation(current => owns(current, targetType, targetId)
-      && current.batch === batchObservation && current.phase !== 'loading'
-      ? current : initialObservation(targetType, targetId, initialSummaries, supportedEmojis, batchObservation))
-  }, [targetType, targetId, initialSummaries, supportedEmojis, batchObservation])
+    setObservation(current => projectBatch(current,
+      initialObservation(targetType, targetId, initialSummaries, supportedEmojis, batchObservation), getLatestBatchRevision))
+  }, [targetType, targetId, initialSummaries, supportedEmojis, batchObservation, getLatestBatchRevision])
 
   const refresh = useCallback((batch = batchObservation) => {
     const pending = activeRequest.current
@@ -104,11 +129,12 @@ export function ReactionBar({
       pending.refreshAfterWrite = true
       return
     }
-    const request: Request = { kind: 'read', targetType, targetId, batch }
+    const fence = captureBatchFence(getLatestBatchRevision)
+    const request: Request = { kind: 'read', targetType, targetId, batch, fence }
     activeRequest.current = request
     setObservation(current => ({
       ...(owns(current, targetType, targetId) ? current : initialObservation(targetType, targetId)),
-      batch, phase: 'loading', message: '',
+      batch, fence, phase: 'loading', message: '',
     }))
     void fetchBoardReactionState(targetType, targetId)
       .then(next => {
@@ -116,19 +142,20 @@ export function ReactionBar({
         activeRequest.current = null
         setObservation({
           targetType, targetId, batch, phase: 'ready', summaries: next.summaries,
-          catalog: next.supportedEmojis, message: '',
+          catalog: next.supportedEmojis, message: '', fence: captureBatchFence(getLatestBatchRevision),
         })
       })
       .catch(err => {
         if (activeRequest.current !== request) return
         activeRequest.current = null
         console.warn('[board] reaction summary failed', err instanceof Error ? err.message : err)
+        const fence = captureBatchFence(getLatestBatchRevision)
         setObservation(current => ({
           ...(owns(current, targetType, targetId) ? current : initialObservation(targetType, targetId)),
-          batch, phase: 'unavailable', message: '리액션 요약을 불러오지 못했습니다',
+          batch, phase: 'unavailable', message: '리액션 요약을 불러오지 못했습니다', fence,
         }))
       })
-  }, [targetType, targetId, batchObservation])
+  }, [targetType, targetId, batchObservation, getLatestBatchRevision])
 
   useEffect(() => {
     if (!hasInitialState && batchObservation?.state !== 'loading') refresh()
@@ -151,16 +178,20 @@ export function ReactionBar({
       const result = await toggleReaction(targetType, targetId, emoji)
       if (activeRequest.current !== request) return
       activeRequest.current = null
+      const fence = captureBatchFence(getLatestBatchRevision)
       setObservation(current => owns(current, targetType, targetId)
-        ? { ...current, batch: request.batch, phase: 'ready', summaries: result.summary, message: '' } : current)
+        ? { ...current, batch: request.batch, phase: 'ready', summaries: result.summary, message: '',
+          fence } : current)
       if (request.refreshAfterWrite) refresh(request.batch)
     } catch (err) {
       if (activeRequest.current !== request) return
       activeRequest.current = null
       console.warn('[board] reaction toggle failed', err instanceof Error ? err.message : err)
       const message = '리액션 반영에 실패했습니다'
+      const fence = captureBatchFence(getLatestBatchRevision)
       setObservation(current => owns(current, targetType, targetId)
-        ? { ...current, batch: request.batch, phase: 'unavailable', message } : current)
+        ? { ...current, batch: request.batch, phase: 'unavailable', message,
+          fence } : current)
       showToast(message, 'error')
       if (request.refreshAfterWrite) refresh(request.batch)
     }

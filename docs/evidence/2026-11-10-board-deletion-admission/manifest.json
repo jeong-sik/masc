@@ -1,0 +1,7 @@
+{
+  "scope": "Selected source validation and local review interpretation, not execution proof",
+  "payloads": {
+    "validation.json": "ed6cacadb97fa9e961f0f43b867cabd11c119850d298eec84719511bb2bd2149",
+    "local-source-reviews.txt": "32671648e31973892784171053a29605250585e40c3499047a534712fea43e1f"
+  }
+}

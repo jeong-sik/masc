@@ -1,0 +1,9 @@
+Local source review record
+
+Target: 9888ad1502838b2c72b3fc4ece27442e0ab7662b, before the main-based transplant.
+
+/root/issue_disposition_review: Actor P2 is closed in source. Both cached parent and canonical latest row from the exact expected snapshot check the original authority. The stable guard spans raw filesystem marker IO; source publication occurs on the caller before reserved cleanup propagation. No additional P0-P2 in this bounded admission delta. Cleanup selection races and general Posts settlement/model mismatch remain open. No build, type check, backend execution or formal GitHub approval.
+
+/root/history_redaction_response: ML/MLI authority identities and the Board_access-to-Board_types dependency match. MCP single delete, cleanup and Admin HTTP carry distinct authority. Read the updated fault boundaries, four authorization/guard deletion cases and five Fs guard cases; requested closed-variant enumeration was corrected. No additional P0-P2 in the bounded admission delta. No build, type check, backend execution or formal GitHub approval.
+
+Transplant: 52 of 53 owned paths kept the same blobs; test/dune retained current-main unrelated stanza changes. Final production additionally clarifies the proven predecision-refusal message and storage specification, reviewed directly by the author. Board_posts_source's inherited manual-prefix-to-String.starts_with delta was read directly; it changes neither the source-only settlement contract nor the authority API. These reuse boundaries do not constitute current-head formal approval.

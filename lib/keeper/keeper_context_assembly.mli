@@ -16,10 +16,18 @@ type receipt = private
   ; spans : span list
   }
 type system_observation =
+  | Current_norms of string
   | Active_goals of string
   | Direct_input_source of string
   | Goals_awaiting_proof of string
-(** Only these renderer-issued observations can become System suffixes.
+(** Only these issued observations can become System suffixes.
+    [Current_norms] is the complete article set of
+    {!Keeper_turn_system.t.current_norms}, under the
+    {!Prompt_block_id.Constitution_amendments} id. It is the same text on
+    every request of a turn, so Agent Core carries it here: as a User tail it
+    was answered again after every tool result. Official clients receive it
+    as a context block, because their System outlives the turn.
+    The other three come from the renderer.
     The admitted operation source follows the Goal snapshot and is held across
     tool rounds independently of the remaining dynamic context. Agent Core
     keeps the current turn's proof state here so tool feedback remains the

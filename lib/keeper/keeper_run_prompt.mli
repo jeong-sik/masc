@@ -68,8 +68,12 @@ val assemble_request_context :
     sections acquire none of these identities.
     [system] is the System the request sends: the turn's own, or
     {!Keeper_turn_system.with_bytes} of a pre-existing override. Its
-    ordinary amendments or the complete current norms ride every round as the
-    {!Prompt_block_id.Constitution_amendments} block. Later tool rounds
+    ordinary amendments ride every round as the
+    {!Prompt_block_id.Constitution_amendments} block. Its complete current
+    norms ride every round too: in the issued System, first among the
+    observations, for Agent Core, and as that block for an official client.
+    They are read from [system] on each round and follow [checkpoint_owner],
+    so a fallback moves them to the carrier of the request's owner. Later tool rounds
     retain the exact issued observations and Completion Authority the previous
     round of this turn carried. Proof state follows [checkpoint_owner], even
     when a fallback changes the execution owner. They also retain

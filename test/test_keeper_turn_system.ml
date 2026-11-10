@@ -371,26 +371,64 @@ let test_a_resent_system_of_unknown_provenance_has_no_block () =
 
 (* Current withholding is independent of the historical System's basis. A
    native call must keep its recorded bytes while every request, including a
-   tool continuation or an override, receives the current authority notice. *)
+   tool continuation or an override, receives the current authority notice.
+   Where the notice rides follows the owner of the request. Agent Core carries
+   it in the issued System, so a request that follows tool results adds no
+   User tail. An official client receives it as the context block. *)
 let check_withholding_reaches_requests (system : System.t) =
   let withheld = match system.current_norms with
     | Some block -> block
     | None -> Alcotest.fail "the current withholding notice is required"
   in
-  let assemble ~post_tool_round ~previous_assembly system =
-    Keeper_run_prompt.assemble_request_context
-      ~checkpoint_owner:Runtime_execution.Masc_agent_core ~system
-      ~post_tool_round ~previous_assembly ~dynamic_context_partition:None
-      ~existing_extra_system_context:None ~blocks:[]
+  let assemble checkpoint_owner ~previous_assembly =
+    Keeper_run_prompt.assemble_request_context ~checkpoint_owner ~system
+      ~post_tool_round:(Option.is_some previous_assembly) ~previous_assembly
+      ~dynamic_context_partition:None ~existing_extra_system_context:None ~blocks:[]
   in
-  let first = assemble ~post_tool_round:false ~previous_assembly:None system in
-  let later = assemble ~post_tool_round:true ~previous_assembly:(Some first) system in
-  List.iter
-    (fun (assembly : Keeper_context_assembly.t) ->
-      Alcotest.(check (option string)) "the whole authority notice reaches the request"
-        (Some withheld)
-        (List.assoc_opt Prompt_block_id.Constitution_amendments assembly.blocks))
-    [first; later]
+  let in_system (assembly : Keeper_context_assembly.t) =
+    match assembly.system_prompt with
+    | None -> []
+    | Some issued ->
+      List.filter_map (function
+        | Keeper_context_assembly.Current_norms text -> Some text
+        | Active_goals _ | Direct_input_source _ | Goals_awaiting_proof _ -> None)
+        issued.observations
+  in
+  let as_block (assembly : Keeper_context_assembly.t) =
+    List.assoc_opt Prompt_block_id.Constitution_amendments assembly.blocks
+  in
+  let check_agent_core label (assembly : Keeper_context_assembly.t) =
+    Alcotest.(check (list string)) (label ^ ": the issued System carries the whole notice once")
+      [ withheld ] (in_system assembly);
+    Alcotest.(check string) (label ^ ": the System is its own bytes, then the notice")
+      (system.text ^ "\n\n" ^ withheld)
+      (Keeper_context_assembly.effective_system_prompt ~base_text:system.text assembly);
+    Alcotest.(check (option string)) (label ^ ": no context block repeats the notice") None
+      (as_block assembly)
+  in
+  let check_official label (assembly : Keeper_context_assembly.t) =
+    Alcotest.(check (option string)) (label ^ ": the context block carries the whole notice")
+      (Some withheld) (as_block assembly);
+    Alcotest.(check (list string)) (label ^ ": the vendor System is not given the notice") []
+      (in_system assembly)
+  in
+  let agent_first = assemble Runtime_execution.Masc_agent_core ~previous_assembly:None in
+  let agent_later =
+    assemble Runtime_execution.Masc_agent_core ~previous_assembly:(Some agent_first) in
+  check_agent_core "Agent Core first request" agent_first;
+  check_agent_core "Agent Core after a tool result" agent_later;
+  Alcotest.(check (option string)) "Agent Core adds no User tail after a tool result" None
+    agent_later.extra_system_context;
+  let official_first = assemble Runtime_execution.Official_client ~previous_assembly:None in
+  let official_later =
+    assemble Runtime_execution.Official_client ~previous_assembly:(Some official_first) in
+  check_official "official first request" official_first;
+  check_official "official after a tool result" official_later;
+  (* A fallback changes the owner between two rounds of one turn. *)
+  check_official "official after an Agent Core round"
+    (assemble Runtime_execution.Official_client ~previous_assembly:(Some agent_first));
+  check_agent_core "Agent Core after an official round"
+    (assemble Runtime_execution.Masc_agent_core ~previous_assembly:(Some official_first))
 ;;
 
 let test_withholding_survives_unknown_native_bases_and_overrides () =

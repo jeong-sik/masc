@@ -1077,7 +1077,8 @@ let completed_delegate_reply ~base_dir ~keeper_name ~delivery_key ~outcome_ref =
                        | Keeper_chat_delivery_identity.Approval_resolution
                        | Keeper_chat_delivery_identity.Approval_replay
                        | Keeper_chat_delivery_identity.Approval_replay_correction
-                       | Keeper_chat_delivery_identity.Approval_continuation )
+                       | Keeper_chat_delivery_identity.Approval_continuation
+                       | Keeper_chat_delivery_identity.Autonomous_input_binding _ )
                    ; _
                    } ) -> None)
            transcript.assistant

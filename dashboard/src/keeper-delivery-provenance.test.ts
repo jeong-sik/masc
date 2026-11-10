@@ -13,7 +13,7 @@ import {
 
 // Each key below is the object delivery_key_to_yojson writes for one
 // delivery_key constructor
-// (lib/keeper_chat_delivery_identity/keeper_chat_delivery_identity.ml:96).
+// (lib/keeper_chat_delivery_identity/keeper_chat_delivery_identity.ml).
 const checkpointKey = {
   kind: 'operation_checkpoint',
   operation_id: 'kmsg-3',
@@ -32,6 +32,12 @@ const goalNotificationKey = {
   owner: 'rondo',
   event: 'overdue',
 }
+const autonomousKey = { kind: 'autonomous_turn', turn_ref: 'trace-fixture#7' } as const
+const approvalInputs = [
+  { approval_id: 'approval-a', input_fingerprint: 'a'.repeat(64) },
+  { approval_id: 'approval-b', input_fingerprint: 'b'.repeat(64) },
+] as const
+const inputBinding = { kind: 'autonomous_input_binding', inputs: approvalInputs } as const
 
 describe('keeper chat delivery provenance', () => {
   it('keeps original connector events distinct from operations and other events', () => {
@@ -58,6 +64,9 @@ describe('keeper chat delivery provenance', () => {
       ordinal: 1,
     }],
     [{ kind: 'approval_lifecycle', approval_id: 'approval-1' }, { kind: 'approval_request' }],
+    [autonomousKey, inputBinding],
+    [autonomousKey, { kind: 'tool_call', execution_id: 'exec-a', ordinal: 0 }],
+    [autonomousKey, { kind: 'tool_delivery', ordinal: 1 }],
     [goalNotificationKey, { kind: 'terminal_result' }],
   ])('decodes every backend delivery-key variant with its transcript slot', (deliveryKey, slot) => {
     const decoded = decodeKeeperChatDeliveryProvenance(deliveryKey, slot)
@@ -96,6 +105,18 @@ describe('keeper chat delivery provenance', () => {
     [{ ...checkpointKey, trace_id: 'trace.3' }, { kind: 'accepted_user' }],
     [{ kind: 'operation_native', operation_id: 'kmsg-4' }, { kind: 'accepted_user' }],
     [{ ...goalNotificationKey, owner: ' \t' }, { kind: 'accepted_user' }],
+    [{ ...autonomousKey, turn_ref: 'trace-fixture' }, inputBinding],
+    [{ ...autonomousKey, turn_ref: '#7' }, inputBinding],
+    [{ ...autonomousKey, turn_ref: 'trace-fixture#07' }, inputBinding],
+    [{ ...autonomousKey, turn_ref: 'trace-fixture#-0' }, inputBinding],
+    [autonomousKey, { kind: 'accepted_user' }],
+    [{ kind: 'approval_lifecycle', approval_id: 'approval-a' }, inputBinding],
+    [autonomousKey, { ...inputBinding, inputs: [] }],
+    [autonomousKey, { ...inputBinding, inputs: [approvalInputs[0], approvalInputs[0]] }],
+    [autonomousKey, { ...inputBinding, inputs: [{ ...approvalInputs[0], input_fingerprint: 'A'.repeat(64) }] }],
+    [autonomousKey, { ...inputBinding, inputs: [{ ...approvalInputs[0], input_fingerprint: 'bad' }] }],
+    [autonomousKey, { ...inputBinding, inputs: [{ ...approvalInputs[0], approval_id: 'bad id' }] }],
+    [autonomousKey, { ...inputBinding, inputs: [{ ...approvalInputs[0], extra: true }] }],
   ])('rejects provenance that is outside the backend contract', (deliveryKey, slot) => {
     expect(decodeKeeperChatDeliveryProvenance(deliveryKey, slot)).toEqual({
       status: 'invalid',
@@ -120,6 +141,25 @@ describe('keeper chat delivery provenance', () => {
     expect(sameDeliveryProvenance(user, { ...user })).toBe(true)
     expect(isOperationDeliveryProvenance(user, 'kmsg-1', 'accepted_user')).toBe(true)
     expect(isOperationDeliveryProvenance(user, 'kmsg-1', 'terminal_result')).toBe(false)
+  })
+
+  it('keeps the actual turn and ordered canonical input vector in its identity', () => {
+    const provenance = { delivery_key: autonomousKey, transcript_slot: inputBinding }
+    expect(sameDeliveryProvenance(provenance, {
+      delivery_key: { ...autonomousKey },
+      transcript_slot: { ...inputBinding, inputs: approvalInputs.map(input => ({ ...input })) },
+    })).toBe(true)
+    expect(sameDeliveryProvenance(provenance, {
+      ...provenance, delivery_key: { ...autonomousKey, turn_ref: 'trace-fixture#8' },
+    })).toBe(false)
+    expect(sameDeliveryProvenance(provenance, {
+      ...provenance, transcript_slot: { ...inputBinding, inputs: [...approvalInputs].reverse() },
+    })).toBe(false)
+    expect(sameDeliveryProvenance(provenance, {
+      ...provenance, transcript_slot: { ...inputBinding, inputs: [
+        { approval_id: 'approval-a', input_fingerprint: 'c'.repeat(64) }, approvalInputs[1],
+      ] },
+    })).toBe(false)
   })
 
   it('retains authoritative failure after an earlier assistant result', () => {

@@ -126,12 +126,12 @@ carries none, and the endpoint applies its default.
 ```sh
 MASC_BASE_PATH=<base> uv run scripts/tinker/librarian/e_real_manifest.py \
   --out scripts/tinker/librarian/e_real_manifest.json
-uv run scripts/tinker/librarian/synth_generate.py --split eval --seed 20261109 \
-  --out artifacts/tinker/librarian/synth-eval --budget 5
+uv run scripts/tinker/librarian/synth_generate.py --split eval --seed 20261110 \
+  --out artifacts/tinker/librarian/synth-eval --budget 6
 uv run scripts/tinker/librarian/e_synth_audit.py cases \
   --requests artifacts/tinker/librarian/synth-eval/requests.jsonl \
   --run artifacts/tinker/librarian/eval-base-synth --baseline base \
-  --sample 1000 --seed 20261109 --out artifacts/tinker/librarian/e-synth-audit
+  --sample 1000 --seed 20261110 --out artifacts/tinker/librarian/e-synth-audit
 uv run scripts/tinker/librarian/e_synth_audit.py apply \
   --requests artifacts/tinker/librarian/synth-eval/requests.jsonl \
   --audit artifacts/tinker/librarian/e-synth-audit \

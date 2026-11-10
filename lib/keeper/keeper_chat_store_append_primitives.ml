@@ -2,6 +2,11 @@ open Keeper_chat_types
 open Keeper_chat_store_provenance_index
 
 let append_line_once path ~provenance ~row_id line =
+  match provenance.Keeper_chat_delivery_identity.delivery_key with
+  | Keeper_chat_delivery_identity.Autonomous_turn _ ->
+    Error "autonomous turn rows require the binding-aware batch writer"
+  | Keeper_chat_delivery_identity.Operation _ | Operation_checkpoint _ | Operation_native _
+  | Fusion_run _ | Workspace_message _ | Connector_message _ | Approval_lifecycle _ ->
   match
     Fs_compat.update_private_file_durable_locked_result path (fun existing ->
       match find_provenance existing ~provenance with

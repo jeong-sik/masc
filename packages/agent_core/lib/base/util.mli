@@ -15,9 +15,6 @@ val string_contains : needle:string -> string -> bool
 (** Construct a {!Error.Serialization} [JsonParseError]. *)
 val json_parse_error : string -> Error.t
 
-(** Construct a {!Error.Io} [FileOpFailed] with [op = "read"]. *)
-val file_read_error : path:string -> detail:string -> Error.t
-
 (** Append a single element to the end of a list. *)
 val snoc : 'a list -> 'a -> 'a list
 

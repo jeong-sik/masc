@@ -26,3 +26,14 @@ file, so merging one does not make the other conflict.
   `python3 scripts/changelog-fragments.py assemble`, which folds every
   fragment into `## [Unreleased]` of `CHANGELOG.md` (grouped by section, in
   pull request order, duplicates dropped) and deletes the fragments.
+
+
+## Fragment exemptions
+
+`scripts/changelog-fragments-exempt.txt` lists pull-request numbers the
+strict missing-fragment gate may not count as blocking findings. A number
+belongs there only when the pull request's own content is changelog work —
+for example a backfill PR whose payload is another PR's fragment. Every
+other omission is fixed by writing or backfilling the fragment, not by
+exempting the number. Unrecognized lines in that file are reported on
+stderr and ignored.

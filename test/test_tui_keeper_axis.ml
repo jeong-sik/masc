@@ -8,6 +8,7 @@ let make_librarian
     () : Tui_decode_memory_health.memory_librarian_health =
   { mlh_state = None
   ; mlh_admission_wait = None
+  ; mlh_operator_action_required = false
   ; mlh_measured_at = None
   ; mlh_unread_atom_turns = unread_atom_turns
   ; mlh_unread_official_turns = unread_official_turns
@@ -86,6 +87,7 @@ let make_snapshot ?(refusals = []) keepers : Tui_decode_memory_health.memory_hea
   ; mhs_warn_alerts = 0
   ; mhs_error_alerts = 0
   ; mhs_starving_keepers = 0
+  ; mhs_librarian_attention_required_keepers = 0
   }
 ;;
 
@@ -172,9 +174,25 @@ let test_segments_extracts_scheduled_and_memory_cells () =
   Alcotest.(check bool) "the wake strip reads the state's agenda" true
     (Masc_tui_keeper_axis.wake_strip state ~now ~ahead:2 ~keeper_name:"edgar"
      = Masc_tui_keeper_next_run.[ Wakes 0; Wakes 0; Wakes 1 ]);
+  Alcotest.(check bool) "recurrence belongs to the unique exact next run" true
+    (Masc_tui_keeper_axis.next_recurrence state ~keeper_name:"edgar" = Some Schedule_domain.One_shot);
+  let agenda = state.schedules_agenda in
+  state.schedules_agenda <- Option.map (fun snapshot ->
+    { snapshot with Masc_tui_types.scs_rows = [ row; { row with sch_schedule_id = "same-due";
+        sch_recurrence = Ok (Schedule_domain.Interval { interval_sec = 600 }) } ] }) agenda;
+  Alcotest.(check bool) "equal due times do not choose an arbitrary recurrence" true
+    (Masc_tui_keeper_axis.next_recurrence state ~keeper_name:"edgar" = None);
+  state.schedules_agenda <- Option.map (fun snapshot ->
+    { snapshot with Masc_tui_types.scs_rows = [ row; { row with sch_schedule_id = "unknown-status";
+        sch_status = "not-understood" } ] }) agenda;
+  Alcotest.(check bool) "unknown-status equal due remains an ambiguous candidate" true
+    (Masc_tui_keeper_axis.next_recurrence state ~keeper_name:"edgar" = None);
+  state.schedules_agenda <- agenda;
   (* A failed read keeps the last agenda on hand, and the strip does not
      vouch for it. *)
   state.schedules_agenda_error <- Some "agenda read failed";
+  Alcotest.(check bool) "failed agenda read withdraws recurrence" true
+    (Masc_tui_keeper_axis.next_recurrence state ~keeper_name:"edgar" = None);
   Alcotest.(check bool) "after a failed agenda read every slot is unknown" true
     (Masc_tui_keeper_axis.wake_strip state ~now ~ahead:2 ~keeper_name:"edgar"
      = Masc_tui_keeper_next_run.[ Wakes_unknown; Wakes_unknown; Wakes_unknown ]);

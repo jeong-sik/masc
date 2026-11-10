@@ -388,7 +388,9 @@ let keeper_remote_workspace_cleanup_enabled =
   register_bool ~key:"keeper_remote_workspace_cleanup_enabled" ~default:(fun () -> true)
     ~meta:{ Runtime_params.description =
               "remote_ssh 키퍼의 작업 루트 바로 아래 항목 중 오래 안 \
-               건드린 것을 그 endpoint 에서 주기적으로 지울지. 원격에 없는 \
+               건드린 것을 그 endpoint 에서 주기적으로 지울지. 최근에 건드린 \
+               항목은 그 안의 오래된 하위 폴더만 지운다. .git 이나 \
+               dune-project 가 있는 폴더는 안으로 들어가지 않는다. 원격에 없는 \
                커밋이나 stash 가 있는 항목, 이름이 점으로 시작하는 항목, 살아 \
                있는 프로세스가 쓰는 항목은 남긴다. 커밋 안 한 변경과 untracked \
                파일은 남기지 않는다. 점검 주기는 keeper_build_cleanup_interval_sec \

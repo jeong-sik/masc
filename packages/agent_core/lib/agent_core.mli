@@ -111,7 +111,6 @@ module Harness = Harness
 module Trajectory = Trajectory
 module Metrics = Metrics
 module Async_agent = Async_agent
-module Consumer = Consumer
 module Eval_stats = Eval_stats
 module Runtime_store = Runtime_store
 module Tool_input_validation = Tool_input_validation

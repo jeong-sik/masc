@@ -156,7 +156,7 @@ let goal_list_answering = [ "b"; "t"; "p"; "v"; "f"; "s"; "Esc"; "r"; "q" ]
 let test_an_empty_goal_list_names_no_key_that_needs_a_row () =
   check bool "Goals has a key that needs a row" true
     (Keys.has_row_scoped_keys T.Planning);
-  let empty = Keys.footer_hints_planning_goal_list ~has_rows:false in
+  let empty = Keys.footer_hints_planning_goal_list ~lang:Masc_tui_types.Lang_en ~has_rows:false in
   List.iter
     (fun key ->
       check bool ("Goals empty list does not name " ^ key) false
@@ -169,7 +169,7 @@ let test_an_empty_goal_list_names_no_key_that_needs_a_row () =
     goal_list_answering
 
 let test_a_goal_list_with_a_row_names_every_key () =
-  let full = Keys.footer_hints_planning_goal_list ~has_rows:true in
+  let full = Keys.footer_hints_planning_goal_list ~lang:Masc_tui_types.Lang_en ~has_rows:true in
   List.iter
     (fun key ->
       check bool ("Goals list with a row names " ^ key) true
@@ -183,7 +183,8 @@ let test_a_goal_list_with_a_row_names_every_key () =
    [w] and [e] open a palette, so they act on an empty queue too. *)
 let approvals_footer ?(approvals = false) ?(asks = Keys.No_asks)
     ?(source = false) () =
-  Keys.footer_hints_approvals (Keys.Approval_browsing { approvals; asks; source })
+  Keys.footer_hints_approvals
+    (Keys.Approval_browsing { approvals; asks; source; last_answer = false })
 
 let approvals_always = [ "w"; "e"; "r"; "Tab"; "Esc"; "q" ]
 

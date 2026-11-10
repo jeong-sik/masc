@@ -1,0 +1,24 @@
+ [2mOperations[0m  [2mWork[0m  [1;7m▸Keepers[0m  [2mFeatures & plugins[0m  [2mWorkspace[0m  [2mSystem[0m
+
+ [1m MASC Memory[0m · 2 keepers · 0 need memory · read 11/09 23:54  HTTP [connected]
+ ──────────────────────────────────────────────────────────────────────────────
+   v:details · attention reported
+   Sort [s]: Facts (Most)  ·  [u]: tokens  [/]: Filter
+ ──────────────────────────────────────────────────────────────────────────────
+   Keeper · state
+ ──────────────────────────────────────────────────────────────────────────────
+[7m   ! sourcereader                           Librarian failed
+[0m   ! quietreader                            Librarian failed
+ ──────────────────────────────────────────────────────────────────────────────
+   Selected · sourcereader · Librarian failed · observed 2026-11-09 23:54
+   Librarian: Original history publication is blocked: Original history Addon …
+   1 reported alerts (including history) · v:evidence
+   Fact age · first seen · 2 facts · under 1d 1 · 1–7d 1 · over 7d 0
+   Snapshot saved · 2026-11-09 23:18 · not a source revalidation time
+   Source invalidation · 1 source facts · 0 source invalidations
+   Librarian · 0 unread turns · continuity lag unmeasured · pass stopped
+   Shared memory · no ledger
+
+[2m  ACTION NEEDED 1  j/k:move  Enter:facts  Esc:clear / back  q:quit  …?[0m
+ Schedule may be out of date
+[2m › to quietreader   (i to write)

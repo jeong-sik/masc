@@ -63,6 +63,7 @@ let render_keeper_navigation (state : state) =
   let buf = Buffer.create 2048 in
   keeper_roster_pane ~focused:true state ~rows:terminal_rows ~cols buf;
   finish_frame_beside_acting_pane state ~surface_key:"keeper-navigation"
+    ~help_door:(Option.is_none (text_input_target state ~compact_viewport:false))
     ~cursor:Frame_presenter.Hidden ~rows:terminal_rows ~cols
     ~footer:
       (Footer_hints

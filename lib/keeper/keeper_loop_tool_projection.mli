@@ -1,31 +1,22 @@
-(** Durable tool rows for a continuation turn the keeper loop runs on its own.
+(** Common tool projection for autonomous approval continuations.
+    The actual turn owns its tool rows and an internal ordered binding of the
+    canonical approval inputs prepared for it. The binding proves preparation,
+    not provider acceptance, checkpoint admission or effect permission.
 
-    The chat lane persists the tool calls a turn made by feeding the raw
-    AGENT_CORE stream into {!Keeper_stream_tool_accum} and appending the
-    finalized rows once the turn settles. The autonomous lane never did: a
-    continuation turn that followed an approval replay ran its tools in the
-    keeper loop, and the chat surface showed only the approval's lifecycle
-    rows and then nothing until the keeper's next utterance (#33127).
-
-    This module is that same collector for the loop lane. Feed it the two
-    stream callbacks {!Keeper_agent_run.run_turn} exposes, then
-    {!persist_continuation} once the turn has a result.
-
-    Agent Core rows are delivery-only here: its [on_tool_result_ready]
-    callback is not installed by the loop. Codex can separately report an
-    [Official_tool_result] with its producer-bound block and committed host
-    invocation. That receipt is retained without changing the loop's
-    tool-log failure policy.
-
-    The projection is visibility, not authority: a stream whose occurrence
-    mapping the collector rejects loses its rows for this turn and says so
-    through {!Projection_dropped}; it never fails the turn. The chat lane
-    aborts on the same rejection because there the live stream is what the
-    operator is acting on. *)
+    Stream mapping and append failures remain optional observations: they
+    produce [Projection_dropped] without changing the principal turn result.
+    Runtime attempt boundaries quarantine abandoned tool rows; the prepared
+    input association stays frozen across those attempts. *)
 
 type t
 
 val create : unit -> t
+
+val bind_prepared_inputs :
+  t -> turn_ref:Ids.Turn_ref.t -> Keeper_gate_replay.model_message -> unit
+(** Capture the actual preparer's canonical approval input vector and turn
+    owner. Repeated runtime attempts keep the same association. A changed or
+    invalid vector is an observation failure, never execution authority. *)
 
 val on_event : t -> Agent_core.Types.sse_event -> unit
 (** One raw stream event of the turn. *)
@@ -42,16 +33,15 @@ type drop_reason =
   | Mapping_rejected of string
       (** the collector refused a turn mapping or a sourceless close; the
           string is the collector's own sentence *)
-  | Invalid_approval_id of string
-      (** the approval id is not a delivery identity; the string is the
-          identity parser's sentence *)
+  | Input_binding_unavailable of string
+      (** the actual prepared input or turn association cannot be proved *)
   | Append_failed of string
       (** the chat store refused the rows; the string is its sentence *)
 
 val drop_reason_to_string : drop_reason -> string
 
 type outcome =
-  | Nothing_to_project  (** the turn finalized no tool call *)
+  | Nothing_to_project  (** neither prepared input nor finalized tool calls *)
   | Projected of Keeper_chat_store.append_once_result
   | Projection_dropped of drop_reason
       (** the rows of this turn are not in the store, and why *)
@@ -78,20 +68,16 @@ val persist_continuation :
   t ->
   base_dir:string ->
   keeper_name:string ->
-  approval_id:string ->
   turn_ref:Ids.Turn_ref.t ->
   turn_failed:bool ->
   persisted
-(** Append the turn's finalized tool rows once under the delivery identity
-    of the approval whose replay this turn continues. With [turn_failed] the
+(** Append the turn's prepared input binding and finalized common tool rows
+    once under the actual [Autonomous_turn] identity. With [turn_failed] the
     snapshot is the failure-safe one: an unsealed provider scope is
     invalidated and only sealed evidence is kept. A rejected mapping is
     {!Projection_dropped} whatever the rows, since a refused seal finalizes
-    nothing; otherwise a turn with no finalized tool call is
-    {!Nothing_to_project} before the approval id is even read.
-
-    One approval projects one turn. The store merges once-appends per slot
-    ordinal, so a second turn under the same approval would interleave its
-    rows with the first turn's under one identity; a key that already holds
-    a tool row is answered with [Projected (Already_present _)] before
-    anything is appended. *)
+    nothing. A clean prepared turn without tools still records its internal input
+    binding. The provided owner must equal the preparer's actual turn ref.
+    A different input vector conflicts before any append. Common tools are
+    neither copied under each approval nor assigned to a representative.
+    Projection failures preserve the principal result and existing rows. *)

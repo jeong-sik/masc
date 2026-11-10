@@ -60,7 +60,7 @@ type ctx =
       (* Reply route for a continuation-bearing wake, handed to tool setup so
          surface posts know the admitted external destination. *)
   ; approval_admission : Keeper_approval_origin.admission
-  ; hitl_resolution : Keeper_event_queue.hitl_resolution option
+  ; hitl_resolutions : Keeper_hitl_resolution_batch.t option
       (* Typed decision for the originating Keeper's exact external-effect
          Gate. It is never converted to a generic AGENT_CORE approval. *)
   ; config : Workspace.config
@@ -102,7 +102,7 @@ let run (ctx : ctx)
       ; channel
       ; continuation_channel
       ; approval_admission
-      ; hitl_resolution
+      ; hitl_resolutions
       ; shared_context
       ; base_dir
       ; build_turn_prompt
@@ -134,24 +134,18 @@ let run (ctx : ctx)
    let checkpoint_progress =
      Atomic.make Keeper_turn_driver_try_provider.No_checkpoint_stage
    in
-   (* The tool rows of a continuation turn, collected from the same stream
-      the chat lane persists from and appended once the turn settles. Only a
-      turn that continues an approval replay collects: it is the one turn
-      with a delivery identity to append under. One collector for the whole
-      turn: the run's attempt boundaries reach it through the observation
-      hook, so a failed candidate's rows are quarantined the way the chat
-      lane quarantines them (#33127). Live visibility below separately observes
-      committed tool results without changing this lane's best-effort tool-log
-      failure policy. *)
+   (* One collector for this approval continuation's common tool stream.
+      The actual preparer supplies its input association; runtime attempt
+      boundaries quarantine abandoned rows without changing that association.
+      The turn owns the shared transcript, never a representative approval. *)
    let tool_projection =
-     match hitl_resolution with
-     | Some { Keeper_event_queue.decision = Keeper_event_queue.Hitl_approved; _ } ->
-       Some (Keeper_loop_tool_projection.create ())
-     (* A rejection carries no replay to continue: whatever tools this turn
-        runs are not that approval's, so they are not delivered under its
-        identity. *)
-     | Some { Keeper_event_queue.decision = Keeper_event_queue.Hitl_rejected _; _ } | None ->
-       None
+     let approved = Option.fold ~none:false ~some:(fun batch ->
+       List.exists (fun (resolution : Keeper_event_queue.hitl_resolution) ->
+         match resolution.decision with
+         | Keeper_event_queue.Hitl_approved -> true
+         | Keeper_event_queue.Hitl_rejected _ -> false)
+         (Keeper_hitl_resolution_batch.resolutions batch)) hitl_resolutions in
+     if approved then Some (Keeper_loop_tool_projection.create ()) else None
    in
    let turn_ref =
      Ids.Turn_ref.make
@@ -228,7 +222,9 @@ let run (ctx : ctx)
                  ~publication_recovery
                  ~profile_defaults
                  ?continuation_channel
-                 ?hitl_resolution
+                 ?hitl_resolutions
+                 ?on_gate_inputs_prepared:(Option.map
+                   Keeper_loop_tool_projection.bind_prepared_inputs tool_projection)
                  ~turn_ctx_cell
                  ~base_dir
                  ~max_context:execution.max_context
@@ -501,17 +497,11 @@ let run (ctx : ctx)
       Keeper_autonomous_stream.finish live_stream (Keeper_autonomous_stream.Failed (Printexc.to_string exn));
       raise exn
   in
-  (* A continuation turn follows an approval replay, so its tool rows are
-     delivered under that approval's identity, beside the lifecycle rows the
-     queue already wrote for it. Any other autonomous turn has no delivery
-     identity of its own; its live events use the turn journal instead. The identity
-     is per approval, not per turn: should a second tool-executing turn ever
-     continue the same approval, its rows read as already present and are
-     said so, not dropped silently. *)
-  (try (match tool_projection, hitl_resolution with
-   | None, None | None, Some _ | Some _, None -> ()
-   | Some projection, Some resolution ->
-     let approval_id = resolution.Keeper_event_queue.approval_id in
+  (* Common tool visibility is optional. Bind the actual turn and its complete
+     prepared approval vector before the existing store appends any row. *)
+  (try (match tool_projection with
+   | None -> ()
+   | Some projection ->
      let turn_ref =
        Ids.Turn_ref.make
          ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
@@ -522,7 +512,6 @@ let run (ctx : ctx)
          projection
          ~base_dir:config.base_path
          ~keeper_name:meta.name
-         ~approval_id
          ~turn_ref
          ~turn_failed:(Result.is_error result)
      in
@@ -535,10 +524,10 @@ let run (ctx : ctx)
        (fun (kind, (occurrence : Keeper_chat_events.tool_stream_occurrence), detail) ->
           Log.Keeper.warn
             ~keeper_name:meta.name
-            "%s: continuation turn tool row quarantined under approval %s (%s at \
+            "%s: continuation turn tool row quarantined for turn %s (%s at \
              stream_scope=%d block_index=%d): %s"
             meta.name
-            approval_id
+            (Ids.Turn_ref.to_string turn_ref)
             (Keeper_chat_events.stream_protocol_error_kind_to_string kind)
             occurrence.stream_scope
             occurrence.block_index
@@ -550,10 +539,9 @@ let run (ctx : ctx)
       | Keeper_loop_tool_projection.Projected (Keeper_chat_store.Already_present _) ->
         Log.Keeper.info
           ~keeper_name:meta.name
-          "%s: continuation turn tool rows were already present under approval %s; \
-           a later turn under the same approval is not projected"
+          "%s: continuation turn tool rows were already present for turn %s"
           meta.name
-          approval_id
+          (Ids.Turn_ref.to_string turn_ref)
       | Keeper_loop_tool_projection.Projection_dropped reason ->
         Log.Keeper.warn
           ~keeper_name:meta.name
@@ -565,8 +553,8 @@ let run (ctx : ctx)
      Keeper_autonomous_stream.finish live_stream Keeper_autonomous_stream.Cancelled;
      raise exn
    | exn ->
-     Keeper_autonomous_stream.finish live_stream (Keeper_autonomous_stream.Failed (Printexc.to_string exn));
-     raise exn);
+     Log.Keeper.warn ~keeper_name:meta.name
+       "optional common tool transcript projection failed: %s" (Printexc.to_string exn));
   Keeper_autonomous_stream.finish live_stream
     (match result with
      | Ok result -> Keeper_autonomous_stream.Completed

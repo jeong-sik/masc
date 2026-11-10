@@ -132,10 +132,7 @@ let relax_strict_tool_choice_for_keeper = function
   | (Some (Agent_core.Types.Auto | Agent_core.Types.None_) | None) as other -> other
 
 let project_model_input ~base_path ~gate_replay_evidence messages =
-  match gate_replay_evidence with
-  | None -> Ok messages
-  | Some evidence ->
-    Keeper_gate_replay.project_model_input ~base_path evidence messages
+  Keeper_gate_replay.project_model_inputs ~base_path gate_replay_evidence messages
 ;;
 
 (* One tool result's identity as the skill ledger matches it. The wire content

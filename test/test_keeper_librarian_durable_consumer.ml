@@ -1260,6 +1260,59 @@ let test_admission_wait_survives_durable_measurement_and_release_race () =
       (Fs_compat.load_file memory_path))
 ;;
 
+let test_memory_attention_snapshot_joins_both_original_lanes () =
+  Masc_test_deps.with_process_env Env_config.KeeperMemoryOs.librarian_env_key (Some "true") @@ fun () ->
+  with_workspace @@ fun config ->
+  let module Pending = Masc.Keeper_librarian_pending in
+  let module Worker = Masc.Keeper_memory_admission_worker in
+  prepare_three_unread_turns config ~trace_id:"trace-attention-health";
+  let memory_path = seed_pending_memory config ~trace_id:"trace-attention-health" in
+  let memory_before = Fs_compat.load_file memory_path and progress_before = read_progress config in
+  let installation_id = "[\"configuration\",\"keeper-librarian\"]" in
+  let waiting request_id wait : Pending.worker = { installation_id; request_id; wait } in
+  let admission wait = Queue_refresh.For_testing.run_explicit_admission_with
+    ~base_path:config.base_path ~keeper_name
+    ~run:(fun () -> Worker.Awaiting_worker (waiting "admission-original" wait)) in
+  let durable wait = ignore (Queue_refresh.For_testing.run_durable_with_commit
+    ~config ~keeper_name ~commit:(fun _ -> Consumer.Memory_pending
+      (Pending.Worker (waiting "durable-original" wait)))) in
+  let snapshot () = Queue_refresh.attention_health_json ~config in
+  let field name value = Yojson.Safe.Util.member name value in
+  Fun.protect ~finally:(fun () -> Queue_refresh.forget_measurement ~config ~keeper_name) (fun () ->
+    admission Pending.Processing;
+    durable Pending.Processing;
+    check bool "normal processing needs no operator decision" false
+      (Yojson.Safe.Util.to_bool (field "operator_action_required" (snapshot ())));
+    durable Pending.Missing_after_dispatch;
+    check int "uncertain durable original names this Keeper once" 1
+      (Yojson.Safe.Util.to_int (field "attention_required_keepers" (snapshot ())));
+    admission Pending.Outcome_unknown;
+    let joined = snapshot () in
+    check int "both uncertain lanes still count one Keeper" 1
+      (Yojson.Safe.Util.to_int (field "attention_required_keepers" joined));
+    (match field "keepers" joined with
+     | `List [row] ->
+       check string "durable original identity is retained" "durable-original"
+         Yojson.Safe.Util.(row |> member "durable_pending" |> member "request_id" |> to_string);
+       check string "independent admission identity is retained" "admission-original"
+         Yojson.Safe.Util.(row |> member "admission_wait" |> member "request_id" |> to_string)
+     | _ -> fail "expected exactly the affected Keeper");
+    durable Pending.Processing;
+    check bool "admission uncertainty survives normal durable processing" true
+      (Yojson.Safe.Util.to_bool (field "operator_action_required" (snapshot ())));
+    let other = Queue_refresh.attention_health_json
+      ~config:(Workspace.default_config (config.base_path ^ "-other-workspace")) in
+    check int "another workspace cannot inherit the original attention" 0
+      (Yojson.Safe.Util.to_int (field "attention_required_keepers" other));
+    Queue_refresh.For_testing.run_explicit_admission_with ~base_path:config.base_path
+      ~keeper_name ~run:(fun () -> Worker.Idle);
+    check bool "new nonattention observations clear the action flag" false
+      (Yojson.Safe.Util.to_bool (field "operator_action_required" (snapshot ())));
+    check bool "attention observation grants no source ACK" true (read_progress config = progress_before);
+    check string "attention observation does not publish Memory" memory_before
+      (Fs_compat.load_file memory_path))
+;;
+
 let test_pending_preserves_selection_and_memory ~after_failure () =
   with_workspace @@ fun config ->
   let trace_id = "trace-pending-selection" in
@@ -5384,6 +5437,8 @@ let () =
             test_capacity_release_wakes_only_proven_pre_admission_waits
         ; test_case "admission wait survives history observations and result-before-registration" `Quick
             test_admission_wait_survives_durable_measurement_and_release_race
+        ; test_case "Memory attention joins both original lanes without consuming input" `Quick
+            test_memory_attention_snapshot_joins_both_original_lanes
         ; test_case "count overflow is reviewed without unread history" `Quick
             test_memory_count_cleanup_without_history
         ; test_case "saved count progress continues without an external wake" `Quick

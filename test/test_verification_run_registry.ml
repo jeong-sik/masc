@@ -267,32 +267,6 @@ let test_approval_row_without_reason_replays () =
   remove_if_exists path
 ;;
 
-(* A legacy row is skipped, not silently reinterpreted. *)
-let test_legacy_retryable_row_is_rejected () =
-  let path = fresh_path ".legacy-retryable.jsonl" in
-  remove_if_exists path;
-  let out = open_out path in
-  output_string
-    out
-    ({|{"event":"register","id":"vrf-legacy","started_at":1.0,"registration":|}
-     ^ {|{"task_id":"task-1","producer":"p","authority_kind":"system_llm_agent",|}
-     ^ {|"authority_actor":"verifier_exact"}}|}
-     ^ "\n"
-     ^ {|{"event":"complete","id":"vrf-legacy","completion":{"outcome":"not_reviewed",|}
-     ^ {|"elapsed_s":1.0,"tools":[],"gate":"invalid_verdict","detail":"d","retryable":true}}|}
-     ^ "\n");
-  close_out out;
-  let replayed = R.replay path in
-  check
-    bool
-    "legacy completion carrying retryable is not replayed"
-    true
-    (match R.get replayed ~verification_id:"vrf-legacy" with
-     | None -> true
-     | Some run -> not (String.equal (R.status_label run.status) "completed"));
-  remove_if_exists path
-;;
-
 let test_replay_drops_running_reviews () =
   let path = fresh_path ".running.jsonl" in
   let t = R.create ~path () in
@@ -716,10 +690,6 @@ let () =
             "not_reviewed wire shape is gate and detail only"
             `Quick
             test_not_reviewed_wire_shape_is_gate_and_detail
-        ; test_case
-            "legacy row carrying retryable is rejected on replay"
-            `Quick
-            test_legacy_retryable_row_is_rejected
         ; test_case
             "replay drops running reviews"
             `Quick

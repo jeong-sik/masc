@@ -61,10 +61,6 @@ val supported_interfaces
   -> supported_interface list
   -> supported_interfaces
 
-val supported_interfaces_of_list
-  :  supported_interface list
-  -> (supported_interfaces, Error.t) result
-
 val supported_interfaces_to_list : supported_interfaces -> supported_interface list
 
 type skill_meta =

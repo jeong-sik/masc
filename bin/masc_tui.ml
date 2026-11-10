@@ -6700,7 +6700,8 @@ let launch_all_memory_facts_load state ~mailbox =
       (* One answer: the merged facts and the keepers missing from them
          travel together, so the handler never has to keep one answer across
          another. *)
-      Ok (Masc.Tui_decode_memory_facts.merge_keeper_memory_facts loads))
+      Ok (Masc.Tui_decode_memory_facts.merge_keeper_memory_facts
+        ~refused:health.mhs_refused_keepers loads))
 
 let open_all_fleet_memory state ~mailbox =
   state.memory_facts_keeper <- Some "*";
@@ -9221,7 +9222,7 @@ let owe_keeper_calls_read state ~mailbox ~keeper_name =
   update_calls_owed state ~keeper_name Masc_tui_owed_read.changed;
   launch_owed_keeper_calls state ~mailbox
 
-(* The open Board post reads when it opens or [r] asks, when
+(* The Board post being read or replied to reads when it opens or [r] asks, when
    [notifications/board] names it or names no post, after the operator's own
    comment or vote, on a revalidation or a resumed authority, and again after
    a failed read (RFC-0480 §3.1). *)
@@ -9229,7 +9230,8 @@ let board_post_on_screen state =
   if state.view = Board then
     match state.board_mode with
     | Board_read post_id -> Some post_id
-    | Board_list | Board_compose -> None
+    | Board_compose -> state.board_compose_reply_to
+    | Board_list -> None
   else None
 
 let settle_board_post_owed state ~post_id transition =
@@ -9604,17 +9606,18 @@ let launch_owed_memory_health state ~mailbox =
    than that (RFC-0511 D11). *)
 let memory_world_read_interval_s = Server_dashboard_http_core_cache.standard_cache_ttl_s
 
-(* Runs on every loop iteration. Only the Memory overview draws the world line,
-   so only the Memory overview reads the world: the facts browser, Metrics and
-   the Keepers list have no use for it. Each answer sets the time before which
+(* Runs on every loop iteration. The Memory overview and the Keepers memory/age
+   views draw the same world reading. Each answer sets the time before which
    no read starts, so an open screen asks once per interval, a failed read
    waits the same interval, and a screen entered again within it draws the
    inventory already held. The read carries the expected workspace and needs
    the server's receipt for it, so an answer from another workspace is an
    error and not a count. *)
 let launch_owed_memory_world state ~mailbox =
-  if state.view = Memory && Option.is_none state.memory_facts_keeper
-     && server_authority_ready state then
+  let visible = (state.view = Memory && Option.is_none state.memory_facts_keeper)
+    || (state.view = Keepers Keeper_list
+        && Masc_tui_keeper_list_model.has_world state.keeper_list_view) in
+  if visible && server_authority_ready state then
     match Masc_tui_memory_world.start ~now:(monotonic_now_s ()) state.memory_world with
     | None -> ()
     | Some (next, request) ->
@@ -9958,9 +9961,9 @@ let owe_schedules_read state =
   state.schedules_page_owed <- Masc_tui_owed_read.changed state.schedules_page_owed
 
 (* The agenda strip says its list may be behind until a read that began after
-   this point answers: on a schedule change, on a newly opened observer and
-   after lost events. A read in flight is overtaken; its successor is the
-   owed read, which bursts share. *)
+   this point answers: on a schedule change, on an observer reopen that did
+   not resume cleanly, and after lost events. A read in flight is overtaken;
+   its successor is the owed read, which bursts share. *)
 let owe_agenda_revalidation state =
   state.schedules_agenda_freshness <- Masc_tui_agenda.Refresh_needed;
   owe_schedules_read state
@@ -10028,7 +10031,8 @@ let keeper_story_turns_on_screen state =
   | Some
       ( Masc_tui_keeper_story.Story
       | Masc_tui_keeper_story.Schedule
-      | Masc_tui_keeper_story.Memory )
+      | Masc_tui_keeper_story.Memory
+      | Masc_tui_keeper_story.World )
   | None -> None
 
 (* One Keeper's schedules read again under the same rules as the fleet list,
@@ -17484,6 +17488,9 @@ let withdraw_currency_authority state =
    match reloads it, so a screen never shows rows from a workspace the server
    just stopped serving. *)
 let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigation ~draft =
+  state.keeper_list_focus <- None;
+  state.keeper_list_folded <- [];
+  state.keeper_list_seen_groups <- [];
   state.followed_from <- None;
   withdraw_usage_workspace state;
   withdraw_voice_capture state;
@@ -18088,15 +18095,18 @@ let launch_local_source_followup state ~mailbox source =
     | Local_work ->
         launch_local_work_read state ~mailbox ~intent:Snapshot_read.Poll state.local_base_path
 
-let observe_local_source state ~source request result =
-  let observation = Masc_tui_types.take_local_workspace_read state ~source request result in
+let observe_local_source state ~source ~is_observed request result =
+  let observation = Masc_tui_types.take_local_workspace_read state ~source ~is_observed request result in
   Log.Transport.info
     "tui_local_workspace_settled source=%s intent=%s request=%d demand_revision=%s started_ns=%Ld observed_ns=%Ld outcome=%s followup_pending=%b full_refresh_running=%b"
     (local_read_source_name source) (local_read_intent_name request.lwr_intent)
     (Local_read_order.request_id request.lwr_request)
     (Local_read_order.revision_to_string (Local_read_order.request_revision request.lwr_request))
     request.lwr_started_ns (Mtime_clock.elapsed_ns ())
-    (match observation with None -> "discarded" | Some (Ok _) -> "received" | Some (Error _) -> "failed")
+    (match observation with
+     | None -> "discarded"
+     | Some (Ok reading) -> if is_observed reading then "received" else "source_failed"
+     | Some (Error _) -> "failed")
     (Local_read_order.has_followup (local_source_order state source))
     (Option.is_some state.http_refresh_started_ns);
   observation
@@ -19229,15 +19239,19 @@ let keeper_story_action state key =
   if String.equal key "esc" && Option.is_some state.keeper_settings_intent then None
   else
     Masc_tui_keeper_story.action_of_key
-      ~on_keeper:(Option.is_some (selected_keeper state))
+      ~selection:(match keeper_list_stop state with
+        | Some Masc_tui_keeper_list_model.Stop_world -> Masc_tui_keeper_story.World_selected
+        | Some (Masc_tui_keeper_list_model.Stop_row _) -> Masc_tui_keeper_story.Keeper_selected
+        | Some (Masc_tui_keeper_list_model.Stop_heading _) | None -> Masc_tui_keeper_story.No_selection)
       state.keeper_story key
 ;;
 
-(* What a key or a press does to the Story window. Only [Open_detail] leaves
-   the list, so it is the one that needs the mailbox. *)
+(* World selects its own row before opening; it never borrows the Keeper
+   that was under the cursor. Only [Open_detail] leaves the list. *)
 let apply_keeper_story_action state ~mailbox = function
   | Masc_tui_keeper_story.Show page -> state.keeper_story <- Some page
   | Masc_tui_keeper_story.Close -> state.keeper_story <- None
+  | Masc_tui_keeper_story.Open_world -> open_keeper_world state
   | Masc_tui_keeper_story.Open_detail ->
       state.keeper_story <- None;
       Option.iter (open_keeper_detail state ~mailbox) (selected_keeper state)
@@ -19413,6 +19427,14 @@ let press_marked_target state ~mailbox (target : press_target) =
                Masc_tui_lane_inventory.find_identity target [row])) ->
              open_lane_inventory_selection state ~mailbox
          | Some index -> Option.iter (fun list -> list.rl_place index) (row_list state))
+  | Press_keeper_world ->
+      if state.view = Keepers Keeper_list
+         && Masc_tui_keeper_list_model.has_world state.keeper_list_view then
+        if keeper_list_stop state = Some Masc_tui_keeper_list_model.Stop_world then
+          Option.iter (apply_keeper_story_action state ~mailbox)
+            (Masc_tui_keeper_story.action_of_key ~selection:Masc_tui_keeper_story.World_selected
+               state.keeper_story "\r")
+        else place_keeper_list_stop state Masc_tui_keeper_list_model.Stop_world
   | Press_keeper_row name -> (
       match keeper_index state name with
       (* A press read against a list frame after a key in the same burst
@@ -19424,10 +19446,10 @@ let press_marked_target state ~mailbox (target : press_target) =
          the cursor is on is Enter on it, which opens the window, and on an
          open window it is Right, which opens the detail: a press is the
          pointer's only way to either. *)
-      | Some index when index = state.keeper_cursor && not (keeper_list_on_heading state) ->
+      | Some index when keeper_list_stop state = Some (Masc_tui_keeper_list_model.Stop_row index) ->
           let key = if Option.is_some state.keeper_story then "right" else "\r" in
           Option.iter (apply_keeper_story_action state ~mailbox)
-            (Masc_tui_keeper_story.action_of_key ~on_keeper:true state.keeper_story key)
+            (Masc_tui_keeper_story.action_of_key ~selection:Masc_tui_keeper_story.Keeper_selected state.keeper_story key)
       | Some _ -> keeper_list_select_name state name)
   | Press_keeper_view view ->
       if state.view = Keepers Keeper_list && view <> state.keeper_list_view then begin
@@ -19691,6 +19713,12 @@ let launch_fleet_stream state ~expected_workspace ~host ~port ~mailbox =
         in
         let read_one_connection () =
           Masc_tui_fleet_stream.started reader;
+          (* [Ok ()] covers two different ends: the transport returned without
+             an error, or this client chose to stop reading -- a revision gap,
+             an update before the snapshot, a rejected frame -- and unwound
+             through Close_connection. The metric must not call the second one
+             a server close, so the choice is remembered here. *)
+          let client_reconnect = ref false in
           let outcome =
             try
               Masc_tui_http.observe_fleet_stream ~clock ~expected_workspace ~host ~port
@@ -19699,19 +19727,35 @@ let launch_fleet_stream state ~expected_workspace ~host ~port ~mailbox =
                   post ();
                   match step with
                   | Masc_tui_fleet_stream.Keep_reading -> ()
-                  | Masc_tui_fleet_stream.Reconnect -> raise Close_connection)
+                  | Masc_tui_fleet_stream.Reconnect ->
+                      client_reconnect := true;
+                      raise Close_connection)
             with Close_connection -> Ok ()
           in
+          (* Every end emits exactly one connection_ended line so reconnect
+             cadence is countable per outcome; the warn on transport failure
+             stays the alarm signal with the detail. This replaces the old
+             debug-only tui_fleet_stream_ended, which no reader could see. *)
           (match outcome with
            | Error (Masc_tui_http.Http_refused { status; detail }) ->
-               Masc_tui_fleet_stream.refused reader ~status ~detail
+               Masc_tui_fleet_stream.refused reader ~status ~detail;
+               Log.Transport.info
+                 "tui_fleet_stream_connection_ended outcome=refused status=%d detail=%s"
+                 status detail
            | Error (Masc_tui_http.Transport_failed detail) ->
-               Log.Transport.warn "tui_fleet_stream_lost detail=%s" detail
+               Log.Transport.warn "tui_fleet_stream_lost detail=%s" detail;
+               Log.Transport.info "tui_fleet_stream_connection_ended outcome=transport_failed"
            | Error (Masc_tui_http.Invalid_handshake detail) ->
-               Masc_tui_fleet_stream.invalid_response reader detail
+               Masc_tui_fleet_stream.invalid_response reader detail;
+               Log.Transport.info
+                 "tui_fleet_stream_connection_ended outcome=invalid_handshake detail=%s" detail
            | Error (Masc_tui_http.Retry_without_cursor (_, detail)) ->
-               Masc_tui_fleet_stream.invalid_response reader detail
-           | Ok () -> Log.Transport.debug "tui_fleet_stream_ended");
+               Masc_tui_fleet_stream.invalid_response reader detail;
+               Log.Transport.info
+                 "tui_fleet_stream_connection_ended outcome=retry_without_cursor detail=%s" detail
+           | Ok () ->
+               Log.Transport.info "tui_fleet_stream_connection_ended outcome=%s"
+                 (if !client_reconnect then "client_reconnect" else "closed_by_server"));
           Masc_tui_fleet_stream.lost reader ~now:(Eio.Time.now clock);
           post ()
         in
@@ -20339,9 +20383,8 @@ let resume_reads_after_authority_change state ~mailbox ~refresh_inflight
               launch_fusion_launch_options_load state ~mailbox
           | Some (Fusion_launch_open _ | Fusion_launch_started _) | None -> ())
      | Board ->
-         (match state.board_mode with
-          | Board_read post_id -> owe_board_post_read state ~mailbox ~post_id
-          | Board_list | Board_compose -> ())
+         Option.iter (fun post_id -> owe_board_post_read state ~mailbox ~post_id)
+           (board_post_on_screen state)
      | Keepers Keeper_message ->
          Option.iter (fun keeper_name ->
            launch_keeper_chat_file_changes_load ~force:true state ~mailbox ~keeper_name;
@@ -24101,16 +24144,25 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
              state.observer_cursor <- None;
              state.observer_replay <- Observer_replay_unavailable "peer does not advertise scoped replay");
         record_observer_opened state ~session_id ~at:(Unix.gettimeofday ());
-        launch_keeper_waiting_load ~change:Waiting_all state ~mailbox;
-        owe_agenda_revalidation state;
-        (* A change can land between the initial read and subscription, or
-           during a disconnected interval. Read under the current authority. *)
-        launch_local_workspace_read state ~mailbox ~intent:Snapshot_read.Refresh state.local_base_path;
-        revalidate_visible_fusion state ~mailbox;
         (* The feed announces changes only while it is open. Unless this
            connection replays every event since the last applied one, the
-           visible surfaces read once more (RFC-0480 §3.3). *)
-        if not (Masc_tui_types.observer_replay_is_complete handshake) then begin
+           visible surfaces read once more (RFC-0480 §3.3): a change can land
+           between the initial read and subscription, or during a
+           disconnected interval, and the reads run under the current
+           authority. A Resumed replay missed no event, but a read owed by an
+           already applied event may still be missing, failed or running.
+           Recover only those local observations; successful reads need no
+           followup and replayed events owe their own reads. *)
+        if Masc_tui_types.observer_replay_is_complete handshake then begin
+          List.iter (fun source ->
+              note_local_source_observer_resume state source;
+              launch_local_source_followup state ~mailbox source)
+            [Local_keepers; Local_work]
+        end else begin
+          launch_keeper_waiting_load ~change:Waiting_all state ~mailbox;
+          owe_agenda_revalidation state;
+          launch_local_workspace_read state ~mailbox ~intent:Snapshot_read.Refresh state.local_base_path;
+          revalidate_visible_fusion state ~mailbox;
           state.play_room <- Option.map Masc_tui_play_room.revalidate state.play_room;
           if state.view = Memory then owe_memory_health_read state;
           start_http_refresh state ~host:server_peer_host ~port:state.port
@@ -24428,7 +24480,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       (* The local Keeper list is the metadata files and the Keepers runtime
          config declares without one. While the server or the feed is down
          nothing is announced; the Keepers run in the server, so their files
-         hold still, and a CLI write shows on reopen or [r]. *)
+         hold still, and a CLI write shows on a reopen that missed events or
+         on [r]. A clean resume replays the server's own roster events. *)
       if !local_keepers_changed || !observer_source_loss_seen || !runtime_config_changed then
         launch_local_keeper_read state ~mailbox ~intent:Snapshot_read.Refresh state.local_base_path;
       if !observer_source_loss_seen then owe_agenda_revalidation state;
@@ -24689,7 +24742,13 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       state.observer_machine <- None;
       state.observer_browser <- None;
       state.observer_play <- None;
-      state.schedules_agenda_freshness <- Masc_tui_agenda.Refresh_needed;
+      (* The disconnect itself is not agenda staleness: the observer status
+         display carries the broken-since time (RFC-0480 §3.3), and the reopen
+         settles the question -- a gap revalidates, a Resumed replay redelivers
+         the schedules events that changed anything. Marking Refresh_needed
+         here made every clean resume owe a read that proved nothing, and the
+         "may be out of date" marker then outlived the resume (review, PR
+         #50679). A real read debt is flagged where it is incurred. *)
       let was_opening = state.observer = Observer_opening in
       let reason =
         match outcome with
@@ -29016,7 +29075,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
           state.verification_owed <- failed_read state.verification_owed;
           state.verification_error <- Some detail)
   | Local_msg (Local_workspace_read (request, result)) ->
-      (match observe_local_source state ~source:Local_work request result with
+      (match observe_local_source state ~source:Local_work
+          ~is_observed:Masc_tui_loader.local_workspace_observed request result with
        | None -> ()
        | Some result ->
            (match result with
@@ -29025,7 +29085,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                 (Masc_tui_loader.apply_local_workspace state) reading);
            launch_local_source_followup state ~mailbox Local_work)
   | Local_msg (Local_keepers_read (request, result)) ->
-      (match observe_local_source state ~source:Local_keepers request result with
+      (match observe_local_source state ~source:Local_keepers
+          ~is_observed:Masc_tui_loader.local_keepers_observed request result with
        | None -> ()
        | Some result ->
            (match result with
@@ -38076,6 +38137,16 @@ Use relative paths for resources already held in the package. -->
        | Some "w" when state.view = Resources ->
            Masc_tui_resources_updates.toggle_layout state
        | Some "v"
+         when state.view = Approvals && not state.approval_detail_open
+              && state.ask_answer_mode = Ask_browsing
+              && not state.composer_focused
+              && not (modal_owns_keys state) && not state.palette_open
+              && not state.answering_open && not state.patch_modal_open && not state.link_modal_open
+              && Option.is_none (text_input_target state ~compact_viewport) ->
+           (match Masc_tui_render_approvals.answer_feedback_reading state with
+            | Some reading -> open_detail_reading state reading
+            | None -> report_action state "info" "No answer receipt in this workspace")
+       | Some "v"
          when state.view = Approvals && state.approval_detail_open
               && not state.composer_focused
               && not (modal_owns_keys state) && not state.palette_open
@@ -39356,7 +39427,7 @@ Use relative paths for resources already held in the package. -->
                 keeper.k_name)
        (* The Story window under the list takes its keys before the list and the
           surface ring do: an open window owns Tab, Esc, [s] and [m] (RFC-0515
-          section 2.5, E15). A closed one takes Enter alone. *)
+          section 2.5, E15). W explicitly selects the World dock. *)
        | Some key
          when state.view = Keepers Keeper_list
               && Option.is_some (keeper_story_action state key) ->
@@ -39384,7 +39455,7 @@ Use relative paths for resources already held in the package. -->
        | Some (("left" | "right") as arrow)
          when state.view = Keepers Keeper_list && Option.is_none (current_detail_reading state)
               && keeper_list_on_heading state ->
-           refold_keeper_list_heading state
+           refold_keeper_list_focus state
              (if arrow = "left" then Masc_tui_keeper_list_model.Fold
               else Masc_tui_keeper_list_model.Unfold)
        | Some "o" when state.view = Keepers Keeper_list ->
@@ -39471,8 +39542,7 @@ Use relative paths for resources already held in the package. -->
             | Connectors | Runtime | Config | Code | Tools
             | System_logs -> ())
        | Some k when Masc_tui_keys.opens_keepers ~message_mode k ->
-           state.detail_focus_recovery <- None;
-           transition_keeper_view state (Keepers Keeper_list)
+           goto_surface state ~mailbox:async_messages (Keepers Keeper_list)
        (* Following preserves the source surface; Esc returns to it. *)
        | Some "\x1d" ->
            (match
@@ -39744,6 +39814,14 @@ Use relative paths for resources already held in the package. -->
                let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
                let projection = Masc_tui_types.lanes_overview_projection state ~rows ~cols in
                Masc_tui_scroll.page_step ~height:projection.lop_list_height
+             else if (state.view = Verification
+                       && Option.is_none state.verification_detail_request_id)
+                     || (state.view = Harness && Option.is_none state.harness_detail) then
+               (match scrolled_surface state state.view with
+                | None -> surface_page_rows state
+                | Some scrolled ->
+                    Masc_tui_scroll.page_step
+                      ~height:(surface_body_height ~rows:(surface_rows state) scrolled))
              else surface_page_rows state
            in
            let direction = if key = Some "pagedown" then 1 else -1 in
@@ -40400,13 +40478,11 @@ Use relative paths for resources already held in the package. -->
                 if state.resource_focus = Right_pane then
                   state.resource_focus <- Left_pane
                 else
-                  (* Off-ring child: the way out of the list is the ring
-                     parent, loaded, same as Connectors and Code. *)
-                  goto_surface state ~mailbox:async_messages Config
+                  goto_surface state ~mailbox:async_messages
+                    (Masc_tui_surface_navigation.surface_ring_family state.view)
              | Clients ->
-                 (* Off-ring child: the way out is the ring parent, loaded,
-                    the same exit Resources takes to Config. *)
-                 goto_surface state ~mailbox:async_messages Runtime
+                 goto_surface state ~mailbox:async_messages
+                   (Masc_tui_surface_navigation.surface_ring_family state.view)
              | Lanes ->
                 state.lanes_action_error <- None;
                 (match state.lanes_mode with
@@ -40492,13 +40568,14 @@ Use relative paths for resources already held in the package. -->
                   (* Off-ring child: the way out of the list is Activity,
                      the ring parent, same as the other hang-offs. *)
                   goto_surface state ~mailbox:async_messages Acting
-            | Connectors -> state.view <- Keepers Keeper_detail
+            | Connectors ->
+                goto_surface state ~mailbox:async_messages
+                  (Masc_tui_surface_navigation.surface_ring_family state.view)
             | Memory ->
                 (match memory_back state with
                  | Memory_stays -> ()
                  | Memory_leaves -> state.view <- Overview)
             | Tools ->
-                (* Off-ring child: back to the parent that opened it. *)
                 if Option.is_some state.tools_async_task_source then begin
                   close_tools_async_task state;
                   launch_tools_async_detail state ~mailbox:async_messages
@@ -40506,7 +40583,8 @@ Use relative paths for resources already held in the package. -->
                   (* Back on the request list, which reads on its own pushes
                      ([launch_owed_async_requests]). *)
                   close_tools_async_detail state
-                else goto_surface state ~mailbox:async_messages Config
+                else goto_surface state ~mailbox:async_messages
+                  (Masc_tui_surface_navigation.surface_ring_family state.view)
             | Config ->
                 state.runtime_model_jump <- None;
                 state.runtime_config_jump_section <- None;
@@ -41896,7 +41974,11 @@ Use relative paths for resources already held in the package. -->
                 state.board_compose_reply_to <- Some post_id;
                 state.board_compose_hearth <- None;
                 state.board_compose_attach_input <- None;
-                state.board_post_error <- None
+                state.board_post_error <- None;
+                (match Board_detail.view_for state.board_detail ~post_id with
+                 | Absent ->
+                     owe_board_post_read state ~mailbox:async_messages ~post_id
+                 | Loading | Ready _ | Failed _ -> ())
             | Board_list | Board_compose -> ())
        | Some "v" | Some "V" when state.view = Board ->
            (* Lowercase votes up, uppercase votes down -- the shift is the
@@ -42169,7 +42251,8 @@ Use relative paths for resources already held in the package. -->
             | Masc_tui_types.Runtime_all ->
                 enter_standalone_lanes state ~mailbox:async_messages)
        | Some "p" | Some "P" when state.view = Clients ->
-           goto_surface state ~mailbox:async_messages Runtime
+           goto_surface state ~mailbox:async_messages
+             (Masc_tui_surface_navigation.surface_ring_family state.view)
        | Some "p" | Some "P"
          when state.view = Lanes && state.lanes_mode = Lanes_overview ->
            goto_surface state ~mailbox:async_messages Runtime
@@ -42698,6 +42781,7 @@ Use relative paths for resources already held in the package. -->
       let pending_row_live =
         Option.is_some (local_source_pending state Local_keepers)
         || Option.is_some (local_source_pending state Local_work)
+        || Option.is_some (Keeper_waiting_read.awaiting_age state.keeper_waiting_read)
       in
       if not anything_running && state.activity_frame >= 0 then begin
         state.activity_frame <- -1;

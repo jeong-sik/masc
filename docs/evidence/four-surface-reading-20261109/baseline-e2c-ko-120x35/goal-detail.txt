@@ -1,0 +1,35 @@
+ 운영  ▸작업  키퍼  기능·플러그인  워크스페이스  시스템
+                                 │
+  Work                      (2)  │  MASC 작업  ▸목표  작업 검토  작업 판정  [paused] goal-surface-long
+  ─────────────────────────────  │ ────────────────────────────────────────────────────────────────────────────────────
+ ▸ [pause] P… 증거를 쉽게 읽는다 │   Actions: [c] Request completion   [x] Drop   [o] Reopen   [p] Pause   [r] Resume
+   [block] P…sed reading example │   [b] Block   [u] Unblock
+                                 │   [ 1. 목표 개요 · 단계 및 지표 ]
+                                 │   Title: 공유 화면에서 요청과 증거를 쉽게 읽는다
+                                 │   Goal: goal-surface-long
+                                 │   Stage: [paused]  resumes executing
+                                 │   Next: paused - [r] restores the prior state; linked Tasks continue independently
+                                 │   Metric: 세 기능의 원래 요청과 현재 상태를 읽고, 근거가 없는 상태를 완료로 오해하지
+                                 │           않는다. 긴 성공 조건도 상세에서 끝까지 읽을 수 있어야 한다. Original
+                                 │           English criterion content remains unchanged by the UI language.
+                                 │   Target: 3 / 3
+                                 │   Due: —
+                                 │   Priority: P2
+                                 │   Created: 2026-11-09T14:38:04.908961Z
+                                 │   Updated: 2026-11-09T14:38:04.908961Z
+                                 │   Link: masc://planning/goal-surface-long
+                                 │
+                                 │   [ 2. 연결된 작업 ]
+                                 │   Open tasks: 2
+                                 │   task-surface-claimed  claimed · Preserve evidence when a read fails
+                                 │   task-surface-todo  todo · 요청의 핵심을 먼저 보여주기
+                                 │
+                                 │   [ Candle 지급 기록 [z:조회] ]
+                                 │   Last observed config: off
+                                 │   Ledger: file absent; earlier history is not observed
+                                 │   Model execution: not observed from the payout ledger
+                                 │   [lines 1-24/38]
+                                 │
+  ACTION NEEDED 1 · keeper_memory_execution:addon_unattached  z:Candle  j/k:move  Left / Esc:back  q:quit  …?
+ 일정 정보가 오래됐을 수 있음
+ › to quietreader   (i to write)

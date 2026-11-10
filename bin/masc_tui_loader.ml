@@ -335,11 +335,21 @@ let add_event (state : state) event_type content =
 let record_observer_opened (state : state) ~session_id ~at =
   state.observer_last_close <- None;
   state.observer <- Observer_live { session_id; since = at; events = 0 };
+  Log.Transport.info "tui_observer_opened replay=%s"
+    (observer_replay_word state.observer_replay);
   add_event state "observer"
     (observer_replay_description ~source_loss:state.observer_source_loss state.observer_replay);
   add_event state "observer" "runtime event feed open"
 
 let record_observer_closed (state : state) ~workspace outcome ~reason ~at =
+  (* The transport log is how connection cadence is measured at all: the
+     session event list is bounded and in-memory. lived_s says whether this
+     was a long-lived stream ending or another flap. *)
+  (match state.observer with
+   | Observer_live { since; _ } ->
+       Log.Transport.info "tui_observer_closed lived_s=%.1f reason=%s" (at -. since) reason
+   | Observer_off | Observer_opening | Observer_closed_before_answer _
+   | Observer_closed_after_live _ -> Log.Transport.info "tui_observer_closed reason=%s" reason);
   let repeated =
     match state.observer_last_close with
     | Some (previous_workspace, previous) ->
@@ -567,6 +577,26 @@ type local_keeper_reading =
   { lkr_keepers : keeper list
   ; lkr_error : string option
   }
+
+(* A returned worker can still report a source failure. Keep its useful partial
+   payload, but do not let it settle the source's observation revision. Optional
+   data that was not requested is not a failure; explicit read failures are. *)
+let local_workspace_observed (reading : local_reading) =
+  let rows_observed = match reading.lr_rows with
+    | Masc_tui_overview_tasks.Rows_read _ -> true
+    | Masc_tui_overview_tasks.Rows_unread | Masc_tui_overview_tasks.Rows_unavailable _ -> false in
+  let agenda_observed = function
+    | Masc_tui_agenda.Read_failed _ -> false
+    | Masc_tui_agenda.Not_read | Masc_tui_agenda.Read _ -> true in
+  let links_observed = match reading.lr_goal_task_links with
+    | Goal_links_read_failed _ -> false
+    | Goal_links_not_read | Goal_links_read _ -> true in
+  rows_observed && Option.is_none reading.lr_tasks_error && links_observed
+  && agenda_observed reading.lr_operator_stalled
+  && agenda_observed reading.lr_goals_to_confirm
+
+let local_keepers_observed (reading : local_keeper_reading) =
+  Option.is_none reading.lkr_error
 
 (* The metadata and archive caches have different resource owners. A work
    scan must not hold the metadata lock needed by input and saved chat opening. *)

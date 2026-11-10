@@ -112,9 +112,12 @@ let assemble_request_context ~checkpoint_owner ~(system : Keeper_turn_system.t) 
          observations, (Prompt_block_id.Goals_awaiting_proof, text) :: blocks)
     | None -> observations, blocks
   in
-  let amendments = match system.amendments with
-    | None -> []
-    | Some text -> [Prompt_block_id.Constitution_amendments, Inference_utils.sanitize_text_utf8 text] in
+  let amendments =
+    match List.filter_map Fun.id [system.amendments; system.current_norms] with
+    | [] -> []
+    | sections ->
+      [Prompt_block_id.Constitution_amendments,
+       Inference_utils.sanitize_text_utf8 (String.concat "\n" sections)] in
   let blocks = amendments @ blocks
     |> List.filter (fun (id, _) -> not post_tool_round || Prompt_block_id.injected_on_post_tool_round id)
     |> List.stable_sort (fun (left, _) (right, _) ->

@@ -80,7 +80,8 @@ let board_error_failure_class = function
      thread at its comment cap, an unsupported broadcast selector. The same
      call cannot succeed, and the message names the correction (other text, a
      successor post). Reporting it as a runtime failure told the model to
-     report a fault instead of correcting the call. *)
+     report a fault instead of correcting the call. Server configuration
+     failures and store conflicts are [Io_error], never this constructor. *)
   | Board.Validation_error _ ->
     Tool_result.Workflow_rejection
   | Board.Io_error _

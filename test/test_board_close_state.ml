@@ -424,6 +424,76 @@ let test_tool_answers_a_refused_comment_as_a_workflow_rejection () =
     (comment ~post_id:(Board.Post_id.to_string open_post.id)
        "type t = A [@@deriving show]")
 
+(* A close or reopen by someone who did not write the post reads the server's
+   moderator list. With a readable list that does not name the actor, the
+   call is refused and a different actor can succeed: a workflow rejection.
+   With a list the server cannot read, no change to the call helps and the
+   operator has to repair [runtime.toml]: a runtime failure. Every case runs
+   for close and reopen, and the message names the cause, so a failure of the
+   embedded default cannot stand in for a failure of the workspace file. *)
+let test_tool_reports_an_unreadable_moderator_list_as_a_runtime_failure () =
+  let write_runtime_toml content =
+    let path =
+      Config_dir_resolver.runtime_toml_path_for_base_path
+        ~base_path:(Env_config_core.base_path ())
+    in
+    Fs_compat.mkdir_p (Filename.dirname path);
+    Out_channel.with_open_bin path (fun oc -> output_string oc content)
+  in
+  let post =
+    create_post_exn ~author:"moderated-author" ~content:"a post to moderate"
+  in
+  let post_id = Board.Post_id.to_string post.id in
+  let call tool args =
+    Board_tool.handle_tool ~reader:Masc_board_handlers.Board_access.Operator
+      ~result_boundary:Tool_output.Sent_to_client tool (`Assoc args)
+  in
+  let close () =
+    call "masc_board_close"
+      [ "post_id", `String post_id
+      ; "closed_by", `String "outsider"
+      ; "summary", `String "no longer current"
+      ; "no_successor", `Bool true
+      ]
+  in
+  let reopen () =
+    call "masc_board_reopen"
+      [ "post_id", `String post_id; "reopened_by", `String "outsider" ]
+  in
+  let require_failure ~label ~expected_class ~affix result =
+    match result with
+    | Tool_result.Failed { Tool_result.class_; message; _ } ->
+      Alcotest.(check string) (label ^ " class") expected_class
+        (Tool_result.tool_failure_class_to_string class_);
+      Alcotest.(check bool) (label ^ " names " ^ affix) true
+        (Astring.String.is_infix ~affix message)
+    | Tool_result.Completed _ | Tool_result.Deferred _ ->
+      Alcotest.failf "%s must fail" label
+  in
+  write_runtime_toml "[board]\nmoderators = [\"a-moderator\"]\n";
+  require_failure ~label:"close by an actor the list does not name"
+    ~expected_class:"workflow_rejection"
+    ~affix:"not author or configured Board moderator" (close ());
+  require_failure ~label:"reopen by an actor the list does not name"
+    ~expected_class:"workflow_rejection"
+    ~affix:"not author or configured Board moderator" (reopen ());
+  List.iter
+    (fun (cause, toml, affix) ->
+       write_runtime_toml toml;
+       require_failure ~label:("close with " ^ cause)
+         ~expected_class:"runtime_failure" ~affix (close ());
+       require_failure ~label:("reopen with " ^ cause)
+         ~expected_class:"runtime_failure" ~affix (reopen ()))
+    [ "invalid TOML", "board = [\n", "runtime.toml is invalid TOML"
+    ; "a [board] that is not a table", "board = 1\n", "[board] must be a table"
+    ; ( "moderators that are not an array"
+      , "[board]\nmoderators = \"a-moderator\"\n"
+      , "moderators must be an array of keeper names" )
+    ; ( "a moderator name that is not a keeper name"
+      , "[board]\nmoderators = [\"not a keeper\"]\n"
+      , "moderators contains an invalid keeper name" )
+    ]
+
 (* Which refusals tell the model to correct the call and which tell it to
    report a fault. [Validation_error] sat with the faults, so a comment on a
    full thread came back as "the tool failed inside the runtime, not on your
@@ -524,6 +594,9 @@ let () =
         ; Alcotest.test_case
             "tool answers a refused comment as a workflow rejection" `Quick
             (with_eio test_tool_answers_a_refused_comment_as_a_workflow_rejection)
+        ; Alcotest.test_case
+            "tool reports an unreadable moderator list as a runtime failure" `Quick
+            (with_eio test_tool_reports_an_unreadable_moderator_list_as_a_runtime_failure)
         ; Alcotest.test_case
             "close rejects a blank summary" `Quick
             (with_eio test_close_rejects_blank_summary)

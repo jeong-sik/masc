@@ -79,8 +79,10 @@ class TransportSignalTest(unittest.TestCase):
         def opened(server: owed.ChatServer, step: Callable[..., None]) -> None:
             usage = cast(TransportServer, server)
             usage.set_phase("open")
-            # Keepers -> Usage.
-            step("keys", "\t")
+            # Keepers -> Usage via the palette (#50465 took Usage off the tab ring).
+            step("keys", ":go Operations / Usage")
+            step("drain", 0.3)
+            step("keys", "\r")
             step(
                 "wait",
                 lambda: usage.response_count("open", TRANSPORT_PATH) >= 1,

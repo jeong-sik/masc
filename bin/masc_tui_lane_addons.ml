@@ -2095,20 +2095,7 @@ let detail_lines ~height ~width view =
             @ List.concat_map wrap ([""; "Activity timeline"]
                 @ timeline_lines ~width ~instances:[item] ?selected rows
                 @ snapshot_coverage_lines snapshot.output.coverage)
-      | Connections ->
-          let sources = match Masc.Lane_addon_sources.parse item.binding with
-            | Error detail -> ["Input binding: " ^ detail]
-            | Ok [] -> ["No bound inputs"]
-            | Ok sources -> List.map (fun source ->
-                let module S = Masc.Lane_addon_sources in
-                match source with
-                | S.Lane_output {installation_id;output_id;_} ->
-                    "Input: " ^ installation_id ^ "/" ^ Option.value ~default:"*" output_id
-                | S.Snapshot_file {id;path} -> "Input: " ^ id ^ " · " ^ path
-                | S.Fusion_run {id;run_id} -> "Input: " ^ id ^ " · Fusion " ^ run_id
-                | S.Msx_capture {id} | S.Dos_capture {id}
-                | S.Browser_document {id;_} -> "Input: " ^ id) sources in
-          List.concat_map wrap (sources @ List.map (fun (name,_) -> "Output: " ^ name) item.outputs)
+      | Connections -> []
       | Configurations -> fact_spans ~width (
           [Fact_fields { indent = 0; fields =
              ["Source:", Option.value ~default:"not supplied" item.source_path;
@@ -2228,24 +2215,30 @@ let declared_layers ~identity workers =
         (ready :: layers) waiting in
   place [] [] nodes
 
-let flow_lines ?(embedded=false) view =
+(* The flow of one Plugin, for the Links tab and the full flow: a heading takes
+   the label colour and a field shares the label column of [fact_spans]. The
+   lines under a heading stay plain text. *)
+let flow_rows ?(embedded=false) view =
+  let text line = Fact_text line in
   (match selected_instance view with
-   | None -> ["No selected Plugin action target"]
-   | Some instance -> ["Action target: " ^ instance.title ^ " · " ^ instance.id])
-  @ ["Declared Add-on layers · last received snapshot";
-     "Same layer: independent dependencies. Downward: declared upstream -> consumer.";
-     "Layer placement describes wiring; execution and delivery need their own receipts."]
+   | None -> [Fact_text "No selected Plugin action target"]
+   | Some instance ->
+       [Fact_fields { indent = 0; fields = ["Action target:", instance.title ^ " · " ^ instance.id] }])
+  @ [Fact_heading "Declared Add-on layers · last received snapshot";
+     Fact_text "Same layer: independent dependencies. Downward: declared upstream -> consumer.";
+     Fact_text "Layer placement describes wiring; execution and delivery need their own receipts."]
   @ (match view.error with
      | None -> []
      | Some ((Detail_read_failure _ | Request_failure _ | Input_failure _) as diagnostic) ->
-         [diagnostic_text diagnostic])
+         [Fact_text (diagnostic_text diagnostic)])
   @ (match view.snapshot_read_error, view.snapshot with
-     | Some detail, Some _ -> ["Read: " ^ detail ^ " · previous graph retained"]
-     | Some detail, None -> ["Read: " ^ detail]
+     | Some detail, Some _ ->
+         [Fact_fields { indent = 0; fields = ["Read:", detail ^ " · previous graph retained"] }]
+     | Some detail, None -> [Fact_fields { indent = 0; fields = ["Read:", detail] }]
      | None, (Some _ | None) -> [])
-  @ Option.to_list (detail_read_note view)
+  @ List.map text (Option.to_list (detail_read_note view))
   @ (match view.snapshot with
-     | None -> ["Connections unavailable: no snapshot read yet"]
+     | None -> [Fact_text "Connections unavailable: no snapshot read yet"]
      | Some snapshot ->
          let declarations = Option.fold ~none:[] ~some:(fun c -> c.declarations) snapshot.configuration in
          let name = installation_name in
@@ -2267,26 +2260,27 @@ let flow_lines ?(embedded=false) view =
            | Ok sources -> List.map (fun source ->
                "  " ^ source ^ " -> " ^ name worker
                ^ (if historical then " · stored binding" else "")) sources) workers in
-         let source_lines = [""; "Bound external inputs · declared sources"]
-           @ (if external_inputs=[] then ["  No external source bindings in this view"]
+         let source_lines = [Fact_text ""; Fact_heading "Bound external inputs · declared sources"]
+           @ List.map text (if external_inputs=[] then ["  No external source bindings in this view"]
               else external_inputs)
-           @ [""; "Add-on layers · worker state and latest completed result summary"] in
+           @ [Fact_text ""; Fact_heading "Add-on layers · worker state and latest completed result summary"] in
          let layers, unresolved = if historical then [], [] else declared_layers ~identity workers in
          let layer_lines = if historical then
-             ["Stored bindings · producer incarnations are not reconstructed as current layers"]
+             [Fact_text "Stored bindings · producer incarnations are not reconstructed as current layers"]
            else List.concat (List.mapi (fun index nodes ->
-             [(if index=0 then "" else "    ↓"); "Layer " ^ string_of_int index;
-              "  " ^ String.concat "  |  " (List.map (fun node -> "[" ^ name node.worker ^ "]") nodes)]
-             @ List.map (fun node -> "    " ^ name node.worker ^ ": " ^ flow_worker_state node.worker) nodes) layers)
+             [Fact_text (if index=0 then "" else "    ↓"); Fact_heading ("Layer " ^ string_of_int index)]
+             @ List.map text (
+               ["  " ^ String.concat "  |  " (List.map (fun node -> "[" ^ name node.worker ^ "]") nodes)]
+               @ List.map (fun node -> "    " ^ name node.worker ^ ": " ^ flow_worker_state node.worker) nodes)) layers)
              @ List.concat_map (fun node ->
-                 ["Layer unavailable: " ^ name node.worker]
-                 @ (match node.problems with
+                 Fact_heading ("Layer unavailable: " ^ name node.worker)
+                 :: List.map text (match node.problems with
                     | [] -> ["  Cyclic or unresolved upstream dependency"]
                     | problems -> List.map (fun detail -> "  " ^ detail) problems)) unresolved in
-         notices @ source_lines @ layer_lines
-         @ (if workers=[] then ["No current workers to place. Review installation issues or install a Plugin."] else [])
-         @ [""; "Declared inputs and outputs"]
-         @ List.concat_map (fun instance ->
+         List.map text notices @ source_lines @ layer_lines
+         @ (if workers=[] then [Fact_text "No current workers to place. Review installation issues or install a Plugin."] else [])
+         @ [Fact_text ""; Fact_heading "Declared inputs and outputs"]
+         @ List.map text (List.concat_map (fun instance ->
            let target = name instance in
            [(if Some instance.id = Option.map (fun i -> i.id) (selected_instance view) then "> " else "  ") ^ target ^ " · " ^ instance.title ^ " · " ^ phase_label instance.phase]
            @ (match flow_inputs instance.binding with
@@ -2304,15 +2298,36 @@ let flow_lines ?(embedded=false) view =
                   @ (match input.output_id with
                     | None -> []
                     | Some port -> ["    Input " ^ input.source_id ^ ": " ^ input.installation_id ^ "/" ^ port])) upstream)
-           @ List.map (fun (port,selection) -> "  output " ^ port ^ " -> " ^ (match selection with Row.All_lanes -> "all supplied lanes" | Row.Selected_lanes lanes -> String.concat ", " lanes)) instance.outputs) workers)
-  @ [""; "Result -> retained evidence -> explicit Keeper / Broadcast sharing -> agent use";
-     "Delivery acceptance and agent reading are separate recorded stages."]
+           @ List.map (fun (port,selection) -> "  output " ^ port ^ " -> " ^ (match selection with Row.All_lanes -> "all supplied lanes" | Row.Selected_lanes lanes -> String.concat ", " lanes)) instance.outputs) workers))
+  @ [Fact_text ""; Fact_heading "Result -> retained evidence -> explicit Keeper / Broadcast sharing -> agent use";
+     Fact_text "Delivery acceptance and agent reading are separate recorded stages."]
   @ (match Option.map evidence_receipt_lines view.receipt with
-     | Some (_ :: _ as receipt) -> ["Last evidence sharing receipt · this session"] @ receipt
-     | Some [] | None -> ["No evidence sharing receipt in this session."])
-  @ [
+     | Some (_ :: _ as receipt) -> Fact_heading "Last evidence sharing receipt · this session" :: List.map text receipt
+     | Some [] | None -> [Fact_text "No evidence sharing receipt in this session."])
+  @ [Fact_text
      (if embedded then "f:open full flow  D:technical details  J/K:scroll"
       else "f:back to observations  D:technical details  J/K:scroll")]
+
+(* The Links tab: the selected Plugin's bound inputs and outputs, then its
+   flow. Inputs and outputs are fields, so they share a label column with the
+   fields of the flow. *)
+let links_lines ~width view =
+  let module S = Masc.Lane_addon_sources in
+  let bound = match selected_instance view, view.snapshot with
+    | Some item, Some _ ->
+        (match S.parse item.binding with
+         | Error detail -> [Fact_fields { indent = 0; fields = ["Input binding:", detail] }]
+         | Ok [] -> [Fact_text "No bound inputs"]
+         | Ok sources -> [Fact_fields { indent = 0; fields = List.map (function
+             | S.Lane_output {installation_id;output_id;_} ->
+                 "Input:", installation_id ^ "/" ^ Option.value ~default:"*" output_id
+             | S.Snapshot_file {id;path} -> "Input:", id ^ " · " ^ path
+             | S.Fusion_run {id;run_id} -> "Input:", id ^ " · Fusion " ^ run_id
+             | S.Msx_capture {id} | S.Dos_capture {id}
+             | S.Browser_document {id;_} -> "Input:", id) sources }])
+        @ [Fact_fields { indent = 0; fields = List.map (fun (name,_) -> "Output:", name) item.outputs }]
+    | Some _, None | None, (Some _ | None) -> [] in
+  fact_spans ~width (bound @ (Fact_text "" :: flow_rows ~embedded:true view))
 
 let lines ?(height=24) ?(failed_note = "") ~width view =
   match view.installer with
@@ -2347,8 +2362,7 @@ let lines ?(height=24) ?(failed_note = "") ~width view =
       |> List.concat_map (document_rows ~width)
   | None,None,None ->
       if view.help_open then List.concat_map (document_rows ~width) help_lines
-      else if view.presentation = Flow then flow_lines view |> List.concat_map
-        (document_rows ~width)
+      else if view.presentation = Flow then fact_spans ~width (flow_rows view)
       else if view.presentation = Technical && view.screen=Overview && view.focus=Configurations
         && Option.is_none view.document_key && Option.is_none view.draft
       then installation_detail_lines ~width view
@@ -2365,8 +2379,7 @@ let lines ?(height=24) ?(failed_note = "") ~width view =
         | Overview -> overview_lines ~width view @ receipt_lines
         | Detail _ -> receipt_lines @ detail_lines ~height:(height - List.length receipt_lines) ~width view
             @ (match view.focus with
-               | Connections -> [""] @ (flow_lines ~embedded:true view |> List.concat_map (fun line ->
-                   document_rows ~width line))
+               | Connections -> links_lines ~width view
                | Timeline | Configurations | Instances | Rows -> []))
 
 (* A TOML declaration may exist while no worker can run. Keep the file count,

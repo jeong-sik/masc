@@ -350,8 +350,14 @@ not become an empty list. The common footer names the observed action count in
 the selected UI language and points to Operations instead of repeating a raw
 diagnostic. Its existing press target opens that destination.
 
-The new key is in the canonical binding source and screen map. The generated
-key-reference document has not been regenerated; it must come from the actual
-generator, not a manual edit. Current-candidate execution and installation,
-remaining Operations states and the full 23-surface scope remain open. No new
-screen wording, layout, row-order or PTY assertion tests were added.
+The new key is in the canonical binding source and screen map. The committed
+key reference is the byte-for-byte output of the actual generator built from
+source `3a0737e3`, including previously stale rows from that registry.
+`Minimal manual checks` run `42758272437` completed successfully on workflow
+ref `main`, workflow head `4f1ac0e8`, selected source `3a0737e3`. It built the
+matching server, TUI and generator and passed the three selected workspace-file
+suites; this is not Full CI. The generated output's SHA-256 is
+`f87a7e316dd705c9818cc4d1f892ac80f07cd1430e1250bdbf87618e75b68ca5`.
+Operations interaction, installation, remaining Operations states and the full
+23-surface scope remain open. No new screen wording, layout, row-order or PTY
+assertion tests were added.

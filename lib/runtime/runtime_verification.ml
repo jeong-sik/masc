@@ -639,8 +639,8 @@ let authorize_host client =
   Runtime_account_access.authorize_host client |> Result.map_error not_authorized
 ;;
 
-(* An API provider sends with the credential its operator declared, whoever
-   asks for the check: only a single-user process shares it (plan D4). *)
+(* HIGH-RISK-UNREVIEWED: an API provider sends with the credential its
+   operator declared, whoever asks for the check: only a single-user process shares it (plan D4). *)
 let authorize_api sealed =
   Runtime_account_access.authorize_api sealed |> Result.map_error not_authorized
 ;;

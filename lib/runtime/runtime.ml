@@ -895,8 +895,8 @@ let exact_output_targets runtimes =
        match targets, rt.execution with
        | (Error (_ : Runtime_account_access.refusal) as refused), _ -> refused
        | Ok targets, Runtime_execution.Agent_core sealed ->
-         (* The slot keeps the key, so the registry is where the key leaves the
-            seal (plan D4). *)
+         (* HIGH-RISK-UNREVIEWED: the slot keeps the key, so the registry is
+            where the key leaves the seal (plan D4). *)
          Result.map
            (fun config ->
            ({ target_ref = rt.id

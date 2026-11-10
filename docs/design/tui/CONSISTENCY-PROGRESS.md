@@ -417,3 +417,38 @@ baseline exposed the ID-first wide list and the clock/HTTP heading in a narrow
 list and composer; it does not execute this source change. Candidate execution
 and installation, remaining Board input states and the full 23-surface scope
 remain open.
+
+## Account input and Voice configuration source
+
+The matching 6157b06b native fixture exposed two System defects. At 36x20,
+Config > runtime.toml > account addition > Tab twice kept the Location field
+outside the frame, although input still belonged to it. Widening the same
+form to 120x36 revealed the selected account-home field; it was cancelled
+without submitting. The Voice pane simultaneously showed a failed read that
+found neither voice source and a claim that runtime.toml declared voice.
+The preserved captures and source audit are under
+`artifacts/tui-system-audit-20261110/` and
+`artifacts/native-tui-proof-42789874637/observation/captures/`.
+
+Account filling now receives the pane's actual remaining height. When the
+complete form fits, its rows stay intact; otherwise the current field takes
+space before introductions, with a bounded surrounding field window and
+explicit continuation notices for long refusals or login instructions.
+Login commands are not split by the new vertical budget. With one row only,
+a refusal is signalled on the current field; its full retained reason needs
+a larger window. Saved-form rendering and command copying, drafts, revision
+checks, keyboard ownership and save/recovery authority are unchanged. Existing
+form tests only receive the new required height argument; no wording, layout,
+row-order, snapshot or PTY assertions were added.
+
+Voice configuration sources follow the setup response: runtime_toml names the
+TOML section, standalone_json needs its actual path, and a successful null
+source means neither source configures voice. Failed reads remain failed;
+missing, malformed and not-yet-observed sources remain unknown. Absence of a
+snapshot is not called an in-flight request. The independent config/setup
+reads and wizard/save/probe contracts are unchanged.
+
+This source change does not establish candidate rendering or installation.
+Runtime's separate narrow picker-prefix defect, Activity and both log sources,
+the other settings forms and failed/retained/uncertain outcomes remain in the
+full 6-family, 23-surface audit. No new key-reference output is claimed.

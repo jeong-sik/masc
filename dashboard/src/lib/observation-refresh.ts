@@ -42,6 +42,13 @@ type Observer = {
 
 const observers = new Set<Observer>()
 
+/** A combined read must not let an earlier transient error hide a refused
+ * sibling request and repeatedly resend that sibling's credential. */
+export function selectObservationReadFailure(causes: readonly unknown[]): unknown | null {
+  return causes.find(cause => cause instanceof ApiRequestError && (cause.status === 401 || cause.status === 403))
+    ?? causes.find(cause => cause !== null && cause !== undefined) ?? null
+}
+
 export function isDashboardObservationTopic(value: unknown): value is DashboardObservationTopic {
   return DASHBOARD_OBSERVATION_TOPICS.some(topic => topic === value)
 }

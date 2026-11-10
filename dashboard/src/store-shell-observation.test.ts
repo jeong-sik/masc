@@ -125,6 +125,43 @@ describe('App-owned Shell observation', () => {
     expect(fetch).toHaveBeenCalledTimes(2)
   })
 
+  it.each([
+    ['token', 'initializing'], ['token', 'failure'],
+    ['connection', 'initializing'], ['connection', 'failure'],
+    ['workspace', 'initializing'], ['workspace', 'failure'],
+  ] as const)('keeps the current refusal debt when an older bootstrap crosses %s then returns %s', async (boundary, outcome) => {
+    const held = delayed()
+    const fetch = vi.fn().mockImplementationOnce(() => held.promise).mockImplementation(() =>
+      Promise.resolve(new Response('{"error":"forbidden"}', { status: 403 })))
+    vi.stubGlobal('fetch', fetch)
+    const { store } = await surface()
+    stop?.(); stop = undefined
+    const core = await import('./api/core')
+    core.setStoredToken('original')
+    const older = store.refreshDashboard({ force: true })
+    if (boundary === 'token') core.setStoredToken('replacement')
+    else if (boundary === 'connection') store.resetExecutionSnapshotGeneration()
+    else store.hydrateExecutionSnapshot({
+      execution_publication_epoch: 'replacement-process', execution_publication_generation: 1,
+      observer_instance_id: 'instance-B', status: { project: 'B', workspace_root: '/B' },
+    })
+    const { hydrateServerPushEvent } = await import('./sse-store')
+    hydrateServerPushEvent({ type: 'project_snapshot', payload: { root: {
+      status: { project: 'B' }, counts: { tasks: 9 }, configured_keepers: 13,
+    } } })
+    expect(await store.refreshShell({ force: true })).toBe(false)
+    expect(fetch).toHaveBeenCalledTimes(2)
+    if (outcome === 'failure') held.reject(new Error('retired bootstrap failed'))
+    else held.resolve(json({ shell: { status: { project: 'initializing' }, auth: null },
+      execution: { status: { project: 'retired-A' } }, namespace_truth: { root: { status: { project: 'retired-A' } } } }))
+    await older
+    await vi.advanceTimersByTimeAsync(300_000)
+    expect(fetch).toHaveBeenCalledTimes(2)
+    expect(store.serverStatus.value?.project).toBe('B')
+    expect(store.shellCounts.value?.tasks).toBe(9)
+    expect(effects.toast).toHaveBeenCalledTimes(1)
+  })
+
   it.each(['success', 'failure'] as const)('aborts the last mounted read and suppresses its late %s effects', async outcome => {
     const held = delayed()
     const fetch = vi.fn((_path: string, _init?: RequestInit) => held.promise)

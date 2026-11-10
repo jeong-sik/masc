@@ -211,6 +211,7 @@ data and paint. A missing finish record remains an unfinished observation.
 | `w` | on Usage: cycle the exact UTC day window for provider report history and tool calls |
 | `1 / 2 / 3` | on Telemetry: Engine, Work, or Tools |
 | `Esc` | Dashboard |
+| `Tab` | next |
 
 ## Work / Board
 
@@ -304,7 +305,6 @@ data and paint. A missing finish record remains an unfinished observation.
 | `Esc` | back to Dashboard |
 | `r` | reload |
 | `Tab` | next |
-| `q` | quit |
 
 Runtime model and account form saves keep input and its opening revision while
 workspace checks, source reading, preview and guarded commit run outside the
@@ -361,6 +361,8 @@ and UI admission decision; these are not painted-frame or key-latency evidence.
 | `Enter` | Actions/Everything: exact selected event; Turns are aggregates |
 | `Esc` | close event evidence; from the list, back to Dashboard |
 | `Home/End` | g and G as well; the ring counts back from the newest, so its top is now |
+| `Tab` | next |
+| `q` | quit |
 
 ## Keeper detail
 
@@ -443,9 +445,6 @@ and UI admission decision; these are not painted-frame or key-latency evidence.
 | `Ctrl-D` | cycle compact / results / full tool detail |
 | `Ctrl-S` | unfold the running turn's status rows, or fold them back to the progress line |
 | `Ctrl-N` | cycle Memory journal summary / full / hidden |
-| `/memory` | cycle Memory journal summary / full / hidden |
-| `/memory status` | read the selected Keeper's current memory health, including its last processing observation and waiting reason |
-| `/memory sync` | request catch-up on the existing Memory lane, including for a paused Keeper; acceptance does not mean completion |
 | `Ctrl-F` | cycle no clock / inline clock / full timestamp and request id |
 | `Ctrl-O` | preview the newest image or Mermaid diagram; /images lists all; any key returns |
 | `/approve /deny` | type a command and Enter to answer a tool approval |
@@ -764,6 +763,8 @@ count is drawn beyond the available space.
 | `/` | find a resource name in the list, or text in the loaded detail |
 | `n / N` | next / previous match |
 | `r` | reload |
+| `Tab` | next |
+| `q` | quit |
 
 ## Features & plugins / Tools
 
@@ -852,9 +853,9 @@ or completion.
 | `NOW` | what the keeper is doing at this moment |
 | `AGE` | time since it last moved: the open turn's latest update (its start before it reports one), else the later of its last turn and the start of its wait |
 | `LIFECYCLE` | the keeper process |
-| `◂ ┃ ● now ┃ next ▹ due lag` | every view but the list draws a keeper on the same columns, fixed from the right edge so the ┃ lines stand in one column: the row mark (! failing, ○ paused, ✓ recovered in the cause view, ● the rest), the name, the turn pulse, the NOW cell, the half hours ahead (◷ a scheduled wake, · none, ? unknown), the next scheduled run (its time within a day, late, held, held? from an earlier reading, ? unknown) and the librarian's unread turns with a level against the keeper furthest behind. The memory and age views pick their own columns. With two lines a failing keeper of the state and cause views adds a line: ◂ since when it fails, the attempts of the failed turn (✗━✗) and the failure word, and the runtime of the next dispatch (▹, or ◌ wait while the path rests) |
-| `◂ turns ┃ librarian ┃ lag ▹ digest gap` | the memory view: the turn pulse, how the librarian's last pass ended (no data without a memory row), the unread turns as a bar against the listed keeper furthest behind, the time since the last digest (— before the first) and the atoms requests skip; ? is a value the server did not measure, a pass this server has not seen yet too |
-| `facts by age ▸ ┃ saved ┃ lag ▹ stale facts` | the age view: the keeper's facts in the server's 24 age bins, 30d or older on the left and under 1h on the right, on log steps between the edges 1h, 1d, 7d, 30d, two or four bins to a cell on a narrow list; a cell is a level against the row's largest one, · when empty, in the info colour under 1d, the row's own to 7d and dim past that, and a group title adds up its keepers; + the time since its memory snapshot was saved (— no snapshot without one), the unread-turn bar, ×N invalidated sources and the fact count with a level against the keeper with the most facts; ? is a value the server did not measure |
+| `◂ │ ● now │ next ▹ due lag` | every view but the list draws a keeper on the same columns, fixed from the right edge so the │ lines stand in one column: the row mark (! failing, ○ paused, ✓ recovered in the cause view, ● the rest), the name, the turn pulse, the NOW cell, the state view's known wake count and any partial observation, or the other views' half hours ahead (▁ a scheduled wake, blank none, ─ an unknown range; entirely unknown or empty windows have one label), the next scheduled run (its time within a day, late, held, held? from an earlier reading, ? unknown) and the librarian's unread turns with a level against the keeper furthest behind. The memory and age views pick their own columns. With two lines a failing keeper of the state and cause views adds a line: ◂ since when it fails, the attempts of the failed turn (✗━✗) and the failure word, and the runtime of the next dispatch (▹, or ◌ wait while the path rests) |
+| `◂ turns │ librarian │ lag ▹ digest gap` | the memory view: the turn pulse, how the librarian's last pass ended (no data without a memory row), the unread turns as a bar against the listed keeper furthest behind, the time since the last digest (— before the first) and the atoms requests skip; ? is a value the server did not measure, a pass this server has not seen yet too |
+| `facts by age ▸ │ saved │ lag ▹ stale facts` | the age view: the keeper's facts in the server's 24 age bins, 30d or older on the left and under 1h on the right, on log steps between the edges 1h, 1d, 7d, 30d, two or four bins to a cell on a narrow list; a cell is a level against the row's largest one, · when empty, in the info colour under 1d, the row's own to 7d and dim past that, and a group title adds up its keepers; + the time since its memory snapshot was saved (— no snapshot without one), the unread-turn bar, ×N invalidated sources and the fact count with a level against the keeper with the most facts; ? is a value the server did not measure |
 | `· ▁ ▄ █ ?` | the views' turn pulse: autonomous turn results of the last half hours, one mark per half hour, newest on the right: · no turn / ▁ ok / ▄ failed and ok / █ failed / ? unknown; a rested turn counts as failed, chat turns are not counted, and a half hour from before the server's record of the keeper reads ?. The header names how long the marks span |
 | `◂` | a failing keeper's last failure: how long ago · cause · the runtime that ended it · candidates tried. The list draws it in place of its runtime or first in DETAIL |
 | `failing` | how long the keeper has been in the failing phase; ? when the server recorded no start, or the start is ahead of this screen's clock (Detailed second row) |

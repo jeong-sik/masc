@@ -115,6 +115,11 @@ let enqueue ~config ~keeper_name ~(cancellation : Keeper_event_queue.task_cancel
     Delivered { keeper_name }
   | Keeper_registry_event_queue.Stimulus_already_present ->
     Already_present { keeper_name }
+  | Keeper_registry_event_queue.Stimulus_shutdown_reserved operation_id ->
+    Enqueue_failed
+      { keeper_name
+      ; detail = Keeper_registry_event_queue.shutdown_reserved_detail operation_id
+      }
   | Keeper_registry_event_queue.Stimulus_storage_error detail ->
     Enqueue_failed { keeper_name; detail }
 ;;

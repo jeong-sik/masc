@@ -466,6 +466,18 @@ let reconcile_or_fail ~base_path =
   | Error error -> fail (Keeper_ask_store.read_error_to_string error)
 ;;
 
+(* Which Keeper's answers a pass held, and whether one shutdown holds them all. *)
+let held_answers (report : Wake.report) =
+  List.map (fun (held : Wake.held_answer) -> held.owner, held.answered_ask_id)
+    report.shutdown_reserved
+;;
+
+let held_by operation_id (report : Wake.report) =
+  List.for_all (fun (held : Wake.held_answer) ->
+      Keeper_shutdown_types.Operation_id.equal operation_id held.shutdown_operation_id)
+    report.shutdown_reserved
+;;
+
 let terminalize_answer ~base_path ~keeper_name source =
   let selection = match select_queue_entry ~base_path ~keeper_name ~now:300. ~ready:(fun _ -> true) with
     | Ok (Some selection) -> selection
@@ -881,18 +893,17 @@ let test_recovery_pulse_keeps_independent_owners_moving () =
        | Keeper_shutdown_intake_fence.Intake_committed () -> ()
        | Intake_shutdown_reserved _ -> fail "the already admitted holder changed");
       let blocked = Eio.Promise.await first_alpha in
+      (* The shutdown that took the intake holds alpha's captured batch. It is
+         a hold on that one original answer, not a delivery failure. *)
+      check (list (pair string string)) "fresh shutdown holds the original active batch"
+        [ "alpha", original.ask_id ] (held_answers blocked);
+      check bool "the hold names the shutdown that took the intake" true
+        (held_by operation_id blocked);
       (match blocked.failures with
-       | [failure] ->
-           check (option string) "refusal keeps original owner" (Some "alpha") failure.Wake.keeper_name;
-           check (option string) "refusal keeps original active batch"
-             (Some original.ask_id) failure.Wake.ask_id;
-           (match failure.Wake.error with
-            | Wake.Queue_storage_failed _ -> ()
-            | Ask_store_unavailable _ | Ask_missing _ | Ask_not_answered _
-            | Invalid_answered_record _ | Delivery_evidence_unavailable _
-            | Owner_unavailable _ ->
-                fail "fresh intake fence was not authoritative")
-       | [] | _ :: _ -> fail "original active batch was replaced or duplicated");
+       | [] -> ()
+       | failure :: _ ->
+           fail ("intake fence was reported as a delivery failure: "
+                 ^ Wake.error_to_string failure.Wake.error));
       check (list string) "fresh shutdown refuses delivery" []
         (List.map (fun (_, payload) -> payload.Keeper_event_queue.ask_id)
            (pending_asks ~base_path ~keeper_name:"alpha"));
@@ -1002,18 +1013,30 @@ let test_lifecycle_fence_defers_delivery_until_recovery () =
   with_persistence @@ fun config ensure_keeper ->
   let base_path = config.Workspace.base_path in
   ensure_keeper "alpha";
-  ignore (persist_answer ~base_path ~keeper_name:"alpha" ~ask_id:"fenced-answer" ());
+  let fenced = persist_answer ~base_path ~keeper_name:"alpha" ~ask_id:"fenced-answer" () in
   let operation_id = Keeper_shutdown_types.Operation_id.generate () in
   ignore (Keeper_shutdown_intake_fence.begin_shutdown ~base_path ~keeper_name:"alpha" ~operation_id);
   Fun.protect ~finally:(fun () ->
       ignore (Keeper_shutdown_intake_fence.rollback_shutdown ~base_path ~keeper_name:"alpha" ~operation_id))
     (fun () ->
+      (match Wake.deliver ~base_path ~keeper_name:"alpha" ~ask_id:fenced.ask_id with
+       | Error (Wake.Intake_shutdown_reserved reserved_by) ->
+           check bool "answering names the shutdown that holds the intake" true
+             (Keeper_shutdown_types.Operation_id.equal operation_id reserved_by)
+       | Error error -> fail (Wake.error_to_string error)
+       | Ok _ -> fail "a Keeper whose shutdown holds the intake accepted an answer");
       let blocked = reconcile_or_fail ~base_path in
-      check int "shutdown intake fence retains delivery failure" 1 (List.length blocked.failures);
+      check (list (pair string string)) "shutdown holds the answered ask"
+        [ "alpha", fenced.ask_id ] (held_answers blocked);
+      check bool "the hold names the shutdown that holds the intake" true
+        (held_by operation_id blocked);
+      check int "a held answer is not a delivery failure" 0 (List.length blocked.failures);
       check int "fence admits no answer source" 0 blocked.enqueued;
       check int "pending stays empty" 0 (List.length (pending_asks ~base_path ~keeper_name:"alpha")));
   let recovered = reconcile_or_fail ~base_path in
-  check int "existing pulse recovers after the fence opens" 1 recovered.enqueued
+  check int "existing pulse recovers after the fence opens" 1 recovered.enqueued;
+  check (list (pair string string)) "the released answer is no longer held" []
+    (held_answers recovered)
 ;;
 
 let test_canonical_owner_survives_a_nonidentity_filename () =

@@ -397,6 +397,8 @@ let deliver_addressed_board_signal
   with
   | Keeper_registry_event_queue.Stimulus_enqueued
   | Keeper_registry_event_queue.Stimulus_already_present -> Ok ()
+  | Keeper_registry_event_queue.Stimulus_shutdown_reserved operation_id ->
+    Error (Keeper_registry_event_queue.shutdown_reserved_detail operation_id)
   | Keeper_registry_event_queue.Stimulus_storage_error detail -> Error detail
 ;;
 
@@ -411,14 +413,20 @@ let retain_unavailable_board_routing ~(config : Workspace.config)
       ~arrived_at:(Time_compat.now ()) addressed in
     (* No owner signal or model input is authorized by unavailable evidence.
        The existing owner intake retries the exact original audience later. *)
+    let retention_failed detail =
+      Log.Keeper.warn
+        "board routing retention failed: keeper=%s post=%s error=%s"
+        meta.name addressed.signal.post_id detail
+    in
     (match Keeper_registry_event_queue.enqueue_stimulus_durable_result
        ~base_path:config.base_path meta.name stimulus with
      | Keeper_registry_event_queue.Stimulus_enqueued
      | Keeper_registry_event_queue.Stimulus_already_present -> ()
+     | Keeper_registry_event_queue.Stimulus_shutdown_reserved operation_id ->
+       retention_failed
+         (Keeper_registry_event_queue.shutdown_reserved_detail operation_id)
      | Keeper_registry_event_queue.Stimulus_storage_error detail ->
-       Log.Keeper.warn
-         "board routing retention failed: keeper=%s post=%s error=%s"
-         meta.name addressed.signal.post_id detail)
+       retention_failed detail)
 ;;
 
 (* Every route checks current parent readership. A transient source refusal

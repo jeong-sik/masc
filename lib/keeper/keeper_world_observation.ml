@@ -1462,6 +1462,10 @@ let collect_board_events_with_cursor_policy
                        ~base_path meta.name stimulus with
                | Keeper_registry_event_queue.Stimulus_enqueued
                | Keeper_registry_event_queue.Stimulus_already_present -> Ok None
+               | Keeper_registry_event_queue.Stimulus_shutdown_reserved operation_id ->
+                 Error
+                   (Delivery_failed
+                      (Keeper_registry_event_queue.shutdown_reserved_detail operation_id))
                | Keeper_registry_event_queue.Stimulus_storage_error detail ->
                  Error (Delivery_failed detail))
              else

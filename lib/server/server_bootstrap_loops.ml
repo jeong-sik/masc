@@ -256,15 +256,7 @@ let deliver_broadcast_mention
               ; payload = Keeper_event_queue.Workspace_message message
               }
             in
-            match
-              Keeper_registry_event_queue.enqueue_stimulus_durable_result
-                ~base_path
-                target
-                stimulus
-            with
-            | Keeper_registry_event_queue.Stimulus_enqueued
-            | Keeper_registry_event_queue.Stimulus_already_present -> ()
-            | Keeper_registry_event_queue.Stimulus_storage_error detail ->
+            let delivery_failed detail =
               Otel_metric_store.inc_counter
                 Keeper_metrics.(to_string KeepaliveSignalFailures)
                 ~labels:
@@ -273,6 +265,20 @@ let deliver_broadcast_mention
               Log.Keeper.error
                 "keeper message durable delivery failed keeper=%s request_id=%s: %s"
                 target delivery.request_id detail
+            in
+            match
+              Keeper_registry_event_queue.enqueue_stimulus_durable_result
+                ~base_path
+                target
+                stimulus
+            with
+            | Keeper_registry_event_queue.Stimulus_enqueued
+            | Keeper_registry_event_queue.Stimulus_already_present -> ()
+            | Keeper_registry_event_queue.Stimulus_shutdown_reserved operation_id ->
+              delivery_failed
+                (Keeper_registry_event_queue.shutdown_reserved_detail operation_id)
+            | Keeper_registry_event_queue.Stimulus_storage_error detail ->
+              delivery_failed detail
           in
           let request_wake () =
             commit_queue_entry ();

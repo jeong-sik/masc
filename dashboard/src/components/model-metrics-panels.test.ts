@@ -6,7 +6,7 @@ import { decodeModelMetricsFrame, subscribeModelMetricsStream } from '../api/mod
 import { QueryStreamProtocolError } from '../api/query-observation-stream'
 import { clearStoredToken, setStoredToken } from '../api/core'
 import { confirmRuntimeTestWorkspace } from '../lib/runtime-workspace.test-fixture'
-import { hydrateExecutionSnapshot, invalidateExecutionSnapshotGeneration } from '../store'
+import { executionWorkspaceAuthority, hydrateExecutionSnapshot, invalidateExecutionSnapshotGeneration } from '../store'
 import { CostDashboard } from './cost-dashboard'
 import { RuntimeMonitor } from './runtime-monitor'
 import { OverviewRuntimeStats } from './overview/runtime-stats'
@@ -46,7 +46,7 @@ function stream(path: string, signal: AbortSignal, initial = true): Response {
   let connection!: Connection
   const body = new ReadableStream<Uint8Array>({ start(source) { connection = { path, signal, source }; connections.push(connection) } })
   if (initial) send(connection, frame(Number(url.searchParams.get('window')), Number(url.searchParams.get('bucket_min'))))
-  return new Response(body, { headers: { 'content-type': 'text/event-stream', 'x-masc-sse-idle-timeout-ms': '90000' } })
+  return new Response(body, { headers: { 'content-type': 'text/event-stream', 'x-masc-sse-idle-timeout-ms': '90000', 'x-masc-sse-instance-id': executionWorkspaceAuthority.peek()!.observerInstanceId! } })
 }
 beforeEach(() => {
   vi.useFakeTimers(); connections = []; renderErrors = []
@@ -69,6 +69,10 @@ it('moves all three mounted panels to native queries, with no healthy status rea
     '/api/v1/models/metrics/stream?window=60&bucket_min=0',
     '/api/v1/models/metrics/stream?window=60&bucket_min=5',
   ])
+  for (const [, init] of fetch.mock.calls) {
+    expect(new Headers(init.headers).get('x-masc-sse-instance-id'))
+      .toBe(executionWorkspaceAuthority.peek()!.observerInstanceId)
+  }
   await vi.waitFor(() => {
     expect(renderErrors).toEqual([])
     expect(text()).toContain('native-60-0')
@@ -114,7 +118,7 @@ it('withdraws prior authority metrics before new frames, including an unmounted 
   initial = false
   invalidateExecutionSnapshotGeneration('models-new-workspace', 0)
   await act(async () => {
-    hydrateExecutionSnapshot({ execution_publication_epoch: 'models-new-workspace', execution_publication_generation: 1,
+    hydrateExecutionSnapshot({ observer_instance_id: 'models-new-instance', execution_publication_epoch: 'models-new-workspace', execution_publication_generation: 1,
       status: { project: 'new', workspace_root: '/new' } } as Parameters<typeof hydrateExecutionSnapshot>[0])
     await flush()
   })
@@ -126,7 +130,7 @@ it('withdraws prior authority metrics before new frames, including an unmounted 
   view.unmount()
   setStoredToken('gap-authority', { source: 'manual' })
   invalidateExecutionSnapshotGeneration('models-unmounted-workspace', 0)
-  hydrateExecutionSnapshot({ execution_publication_epoch: 'models-unmounted-workspace', execution_publication_generation: 1,
+  hydrateExecutionSnapshot({ observer_instance_id: 'models-unmounted-instance', execution_publication_epoch: 'models-unmounted-workspace', execution_publication_generation: 1,
     status: { project: 'unmounted', workspace_root: '/unmounted' } } as Parameters<typeof hydrateExecutionSnapshot>[0])
   const next = render(html`<${OverviewRuntimeStats} />`)
   await act(flush)
@@ -259,6 +263,64 @@ it('withdraws retained partial metrics when the query or workspace changes befor
   await act(async () => { connections.at(-1)!.source.error(new Error('workspace-B-body-failed')); await flush() })
   expect(view.container.textContent).not.toContain('workspace-A-partial-row')
   expect(renderErrors).toEqual([])
+})
+
+it('keeps partial cost IO failure debt across bodies and resets backoff only after a complete read', async () => {
+  const fetch = vi.fn(async (path: string, init: RequestInit) => stream(path, init.signal!, false))
+  vi.stubGlobal('fetch', fetch)
+  const received = vi.fn(), error = vi.fn()
+  const stop = subscribeModelMetricsStream({ windowMinutes: 60, bucketMinutes: 0 }, {
+    onReset: vi.fn(), onFrame: received, onError: error,
+  })
+  await flush()
+  for (const [index, delay] of [1_000, 2_000, 4_000].entries()) {
+    const connection = connections[index]!
+    send(connection, { ...frame(60, 0), cost_ledger_read: { state: 'unavailable', detail: 'temporary IO failure' } })
+    connection.source.close()
+    await flush()
+    expect(received).toHaveBeenCalledTimes(index + 1)
+    expect(received.mock.lastCall![0].cost_ledger_read).toEqual({ state: 'unavailable', detail: 'temporary IO failure' })
+    expect(error).toHaveBeenCalledTimes(index + 1)
+    await vi.advanceTimersByTimeAsync(delay - 1)
+    expect(fetch).toHaveBeenCalledTimes(index + 1)
+    await vi.advanceTimersByTimeAsync(1)
+    expect(fetch).toHaveBeenCalledTimes(index + 2)
+  }
+  send(connections[3]!, frame(60, 0, 'complete-after-recovery'))
+  connections[3]!.source.close()
+  await flush()
+  expect(received).toHaveBeenCalledTimes(4)
+  await vi.advanceTimersByTimeAsync(999)
+  expect(fetch).toHaveBeenCalledTimes(4)
+  await vi.advanceTimersByTimeAsync(1)
+  expect(fetch).toHaveBeenCalledTimes(5)
+  stop()
+  await flush()
+  expect(vi.getTimerCount()).toBe(0)
+})
+
+it('retains partial rows beside unavailable state in every panel after the failed body closes', async () => {
+  vi.stubGlobal('fetch', vi.fn(async (path: string, init: RequestInit) => stream(path, init.signal!, false)))
+  const overview = render(html`<${OverviewRuntimeStats} />`)
+  const runtime = render(html`<${Boundary}><${RuntimeMonitor} /><//>`)
+  const cost = render(html`<${Boundary}><${CostDashboard} /><//>`)
+  await act(async () => { await flush(); vi.advanceTimersToNextFrame(); await flush() })
+  await act(async () => {
+    for (const connection of connections) {
+      const query = new URL(connection.path, window.location.origin).searchParams
+      send(connection, { ...frame(Number(query.get('window')), Number(query.get('bucket_min')), 'partial-retained-row'),
+        cost_ledger_read: { state: 'unavailable', detail: 'temporary cost IO failure' } })
+      connection.source.close()
+    }
+    await flush()
+  })
+  await vi.waitFor(() => {
+    expect(renderErrors).toEqual([])
+    for (const view of [overview, runtime, cost]) {
+      expect(view.container.textContent).toContain('partial-retained-row')
+      expect(view.container.querySelector('[role="alert"]')).not.toBeNull()
+    }
+  })
 })
 
 it.each([401, 403])('keeps an actual %s refusal stopped across manual query refresh', async status => {

@@ -1,12 +1,16 @@
 import { apiRequestErrorFromResponse, authHeaders, fetchControlPlane } from './core'
 import { ensureDevToken } from './dev-token'
 import { DEFAULT_GET_TIMEOUT_MS } from '../config/constants'
-import { OBSERVER_IDLE_TIMEOUT_HEADER } from '../lib/observer-protocol'
+import { isObserverInstance, OBSERVER_IDLE_TIMEOUT_HEADER, OBSERVER_INSTANCE_HEADER } from '../lib/observer-protocol'
 import { parseUniqueJson } from '../lib/json-unique'
 import { readSse } from '../lib/sse-reader'
 
 export class QueryStreamProtocolError extends Error {
   readonly name: string = 'QueryStreamProtocolError'
+}
+
+export class QueryStreamScopeError extends QueryStreamProtocolError {
+  readonly name = 'QueryStreamScopeError'
 }
 
 /** The server advertises its deadline; accepting a clamped browser timeout
@@ -22,9 +26,10 @@ function idleDeadline(response: Response): number {
 
 /** One authenticated GET, with admission and byte-activity deadlines. */
 export async function readQueryObservationStream<Frame>(
-  path: string, signal: AbortSignal, decode: (wire: unknown) => Frame,
+  path: string, observerInstance: string, signal: AbortSignal, decode: (wire: unknown) => Frame,
   onFrame: (frame: Frame) => void, onActivity?: () => void,
 ): Promise<void> {
+  if (!isObserverInstance(observerInstance)) throw new QueryStreamScopeError('Original observation scope is unavailable')
   await ensureDevToken()
   if (signal.aborted) throw new DOMException('Observer stopped', 'AbortError')
   const controller = new AbortController()
@@ -37,7 +42,8 @@ export async function readQueryObservationStream<Frame>(
     let response: Response
     try {
       response = await fetchControlPlane(path, {
-        method: 'GET', headers: { ...authHeaders(), Accept: 'text/event-stream' },
+        method: 'GET', headers: { ...authHeaders(), Accept: 'text/event-stream',
+          [OBSERVER_INSTANCE_HEADER]: observerInstance },
         credentials: 'omit', signal: controller.signal,
       })
     } catch (cause) {
@@ -46,7 +52,15 @@ export async function readQueryObservationStream<Frame>(
     } finally { clearTimeout(timer) }
     body = response.body
     if (signal.aborted) throw new DOMException('Observer stopped', 'AbortError')
-    if (!response.ok) throw await apiRequestErrorFromResponse('GET', path, response)
+    if (!response.ok) {
+      const error = await apiRequestErrorFromResponse('GET', path, response)
+      if (error.errorCode === 'observer_instance_changed' || error.errorCode === 'observer_instance_required'
+        || error.errorCode === 'observer_instance_ambiguous') throw new QueryStreamScopeError(error.message)
+      throw error
+    }
+    if (response.headers.get(OBSERVER_INSTANCE_HEADER) !== observerInstance) {
+      throw new QueryStreamScopeError('Observation stream did not attest its original workspace')
+    }
     if (!body || !response.headers.get('content-type')?.toLowerCase().startsWith('text/event-stream')) {
       throw new QueryStreamProtocolError('Observation stream response is unavailable')
     }

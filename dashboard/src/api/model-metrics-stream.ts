@@ -29,9 +29,10 @@ export function decodeModelMetricsFrame(query: ModelMetricsQuery, wire: unknown)
 const subscribe = createQueryObservationStream<ModelMetricsQuery, DashboardRuntimeModelMetricsResponse, ModelMetricsReadError>({
   key: modelMetricsStreamPath,
   recoveryTopics: ['model_metrics'],
-  read: (query, _previous, signal, onFrame, onActivity) => readQueryObservationStream(
-    modelMetricsStreamPath(query), signal, wire => decodeModelMetricsFrame(query, wire), onFrame, onActivity),
+  read: (query, _previous, signal, onFrame, onActivity, observerInstance) => readQueryObservationStream(
+    modelMetricsStreamPath(query), observerInstance, signal, wire => decodeModelMetricsFrame(query, wire), onFrame, onActivity),
   merge: (_previous, frame) => frame,
+  readOutcome: frame => frame.cost_ledger_read?.state === 'available' ? 'complete' : 'partial',
   failure: cause => cause instanceof ModelMetricsReadError ? cause
     : new ModelMetricsReadError(cause instanceof Error ? cause.message : String(cause)),
   terminal: cause => cause instanceof QueryStreamProtocolError,

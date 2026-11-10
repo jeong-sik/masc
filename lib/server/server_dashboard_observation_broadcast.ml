@@ -101,6 +101,8 @@ let install ~state ~sw ~mono_clock =
           then Server_dashboard_http_core_cache.invalidate_tool_metrics_series ~base_path;
           if payload.topic = `Activity || payload.topic = `Ide_events
           then Server_dashboard_http_core_cache.invalidate_ide_file_activity ~base_path;
+          if payload.topic = `Activity then
+            Dashboard_snapshot.invalidate_public_activity_events ~base_path;
           (match payload.scope with
            | `Keeper name ->
                if payload.topic = `Keeper_composite then

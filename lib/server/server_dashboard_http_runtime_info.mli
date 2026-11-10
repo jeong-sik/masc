@@ -139,6 +139,10 @@ val runtime_inventory_json : unit -> Yojson.Safe.t
     [assignment_status] so operators can see explicit keeper-runtime
     assignment blast radius without the dashboard parsing TOML independently. *)
 
+val invalidate_dashboard_tools : base_path:string -> unit
+(** Retire the shared HTTP query cache before a successful source-owned Tools
+    publication, including pending computations and exact-Keeper fallbacks. *)
+
 val dashboard_tools_http_result :
   ?read_policy:Dashboard_projection_read.t ->
   ?keeper:string ->

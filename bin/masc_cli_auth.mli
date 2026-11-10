@@ -2,7 +2,8 @@
    multi-account installation and prints the one link that lets the first
    Admin in. *)
 
-(** [masc auth bootstrap], [masc auth invite] and [masc auth preview]. *)
+(** [masc auth bootstrap], [masc auth invite], [masc auth off] and
+    [masc auth preview]. *)
 
 (** [masc auth bootstrap]: activates a multi-account installation on a base
     path where no server runs (design 5.1-1, 8.4, plan B3d-1).
@@ -27,6 +28,14 @@ val bootstrap : base_path:string -> external_store:string -> int
     {!bootstrap} first, and prints its link once. For a first invitation that
     expired before it was spent, or whose link was lost. Same exit codes. *)
 val invite : base_path:string -> int
+
+(** [masc auth off]: turns the accounts of an activated workspace off with
+    {!Authz_off.turn_off}, under the lease of {!bootstrap}, and prints the
+    workspace (design 10.5, plan F3a-2). It reads neither [MASC_HTTP_BASE_URL]
+    nor the anonymous-mutation setting: the Off depends on the log and the
+    external store alone. Returns [0] once the Off is committed, [1] otherwise,
+    with the reason on standard error. *)
+val off : base_path:string -> int
 
 (** The environment variable that holds the client secret of the GitHub OAuth
     App of {!preview}: [MASC_GITHUB_CLIENT_SECRET]. *)

@@ -1181,9 +1181,10 @@ let auth_cmd =
            The invitation works once and expires after 24 hours."
       ; `P
           ("This build does not serve multi-account yet: once the command \
-            succeeds, a server stops at boot on the workspace, and no command \
-            undoes the activation; "
-           ^ Authz_boot_mode_read.single_user_again
+            succeeds, a server stops at boot on the workspace. "
+           ^ String.capitalize_ascii Authz_boot_mode_read.turn_off_line
+           ^ ". "
+           ^ String.capitalize_ascii Authz_boot_mode_read.single_user_again
            ^ ".")
       ]
     in
@@ -1222,6 +1223,31 @@ let auth_cmd =
       Term.(
         const (fun base_path ->
           Masc_cli_auth.invite ~base_path:(Env_config.normalize_masc_base_path_input base_path))
+        $ base_path)
+  in
+  let off_cmd =
+    let doc = "Turn the accounts of an activated workspace off while no server runs on it." in
+    let man =
+      [ `S Manpage.s_description
+      ; `P
+          "Writes an Off mode event to the authorization log and the external \
+           store. The log must have made Multi_account, and the external store \
+           must match it; config.json may ask for anything. The command takes \
+           the workspace lease, so stop the server first."
+      ; `P
+          "Once config.json does not ask for Multi_account (take account_mode \
+           out), a server boots a single user. The records of the accounts stay \
+           read-only: no turn runs for a Keeper or on a Runtime of the log, and \
+           no client starts on a home under .masc/accounts. A config.json that \
+           asks for Multi_account again is a reactivation, which this build \
+           refuses."
+      ]
+    in
+    Cmd.v
+      (Cmd.info "off" ~doc ~man)
+      Term.(
+        const (fun base_path ->
+          Masc_cli_auth.off ~base_path:(Env_config.normalize_masc_base_path_input base_path))
         $ base_path)
   in
   let preview_cmd =
@@ -1271,7 +1297,7 @@ let auth_cmd =
         $ github_client_id)
   in
   let doc = "Set up multi-account authorization on this workspace." in
-  Cmd.group (Cmd.info "auth" ~doc) [ bootstrap_cmd; invite_cmd; preview_cmd ]
+  Cmd.group (Cmd.info "auth" ~doc) [ bootstrap_cmd; invite_cmd; off_cmd; preview_cmd ]
 
 let login_cmd =
   let doc =

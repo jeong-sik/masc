@@ -386,6 +386,12 @@ let tools_refresh =
     ~help:"refresh the open original Task body/history, original request \
            detail, or Tools list"
 
+let tools_volume_gc_binding =
+  b ~ko:"볼륨" Act Masc_tui_volume_gc.key "volumes"
+    ~help:"in All tools, open retired Keeper volumes and request a report; \
+           in that reading, an armed V reclaims only the reported names, \
+           other input disarms, and Esc returns to the catalog position"
+
 (* The views [v] walks, named from the walk itself so the sheet cannot list
    one the key skips. *)
 let keeper_list_view_names =
@@ -517,7 +523,8 @@ let keeper_navigation_hints = "Up/Down:move  Enter:open  Right/Esc:back"
 let tools_bracket_binding ~pane =
   let label = match pane with
     | Tools_surface -> "run"
-    | Tools_async | Tools_activations | Tools_usage | Tools_catalog -> "Keeper"
+    | Tools_async | Tools_activations | Tools_usage
+    | Tools_catalog (Tools_catalog_list | Tools_catalog_volumes _) -> "Keeper"
   in
   b Navigate "[ / ]" label
     ~help:"in Available, older/newer retained original run; in other panes, previous/next Keeper"
@@ -1309,7 +1316,7 @@ let for_surface = function
          "\r" arm) is named on the sheet's Enter row only. The footer table
          cannot carry Enter -- the fitter never drops it -- so advertising it
          here squeezed the action diagnosis out of the 98-cell row and broke
-         the sheet-only contract (test_tui_keys, tools_async_bindings). *)
+         the sheet-only contract (test_tui_keys, tools_detail_bindings). *)
       ; tools_bracket_binding ~pane:Tools_surface
       ; b Act "c / C" "new Skill"
           ~help:"open $EDITOR on a template for a new Skill; c starts an \
@@ -1427,10 +1434,26 @@ let footer_hints_planning_goal_detail ~lang =
 
 let footer_hints_tools ~lang ~pane =
   let bracket = tools_bracket_binding ~pane in
-  hints_of_bindings ~lang
-    (List.map (fun (binding : binding) ->
+  let bindings =
+    List.map (fun (binding : binding) ->
        if String.equal binding.key bracket.key then bracket else binding)
-       (for_surface Tools))
+       (for_surface Tools) in
+  match pane with
+  | Tools_catalog (Tools_catalog_volumes _) ->
+      hints_in_order ~lang
+        [ tools_volume_gc_binding
+        ; b ~ko:"스크롤" Navigate "j/k" "scroll"
+        ; b ~ko:"페이지" Navigate "PgUp/PgDn" "page"
+        ; b ~ko:"처음/끝" Navigate "Home/End" "top/bottom"
+        ; b ~ko:"다음 탭" Navigate "p" "section"
+        ; b ~ko:"목록" Act "Esc" "catalog"
+        ; tools_refresh; listing_next; listing_quit ]
+  | Tools_catalog Tools_catalog_list ->
+      hints_in_order ~lang
+        (tools_volume_gc_binding :: List.stable_sort
+          (fun a b -> compare (group_rank a.group) (group_rank b.group)) bindings)
+  | Tools_surface | Tools_async | Tools_activations | Tools_usage ->
+      hints_of_bindings ~lang bindings
 
 type ask_supply =
   | No_asks
@@ -2638,13 +2661,11 @@ let sheet_bindings surface =
     (fun binding -> not (List.mem binding listing_meta))
     (for_surface surface)
 
-(* Keys Tools answers only in its async runs pane, and Work only with a Task
-   detail open. The Tools footer is one row for all five panes and the Goals
-   footer never has a Task detail under it, so listing these in
-   [for_surface] would advertise them where they do nothing. The sheet
-   carries them, each sentence naming where the key answers. *)
-let tools_async_bindings =
-  [ b Act "Enter" "read request / Skill evidence"
+(* Additional reading keys stay on the sheet, each naming its owner. The
+   volume binding is also used by its catalog and child footers. *)
+let tools_detail_bindings =
+  [ tools_volume_gc_binding
+  ; b Act "Enter" "read request / Skill evidence"
       ~help:"in async runs, read the selected original request; \
              otherwise load retained evidence for the selected Skill"
   ; b Navigate "t / T" "source Task"
@@ -2700,7 +2721,7 @@ let located_sections ?current () =
                    (entries bindings_memory_fact_detail)
            | Lanes -> entries [preflight_detail_binding]
            | Planning -> entries work_task_detail_bindings
-           | Tools -> entries tools_async_bindings
+           | Tools -> entries tools_detail_bindings
            | Keepers (Keeper_list | (Keeper_logs | (Keeper_calls | (Keeper_message | Keeper_runtime_pick))))
            | Overview | Acting | Metrics | Clients | Board | Approvals | Schedules
            | Verification | Harness | Fusion | Repositories | Code | Changes | Connectors | Runtime

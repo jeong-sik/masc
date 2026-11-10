@@ -784,6 +784,7 @@ count is drawn beyond the available space.
 | `d` | remove the selected published package; press d again on the same row to confirm |
 | `Esc` | return from original Task to request, then request to list; otherwise back to Features & plugins |
 | `r` | refresh the open original Task body/history, original request detail, or Tools list |
+| `V` | in All tools, open retired Keeper volumes and request a report; in that reading, an armed V reclaims only the reported names, other input disarms, and Esc returns to the catalog position |
 | `Enter` | in async runs, read the selected original request; otherwise load retained evidence for the selected Skill |
 | `t / T` | from async request detail, read its original source Task and history |
 | `H` | from original Task detail, read earlier stored history; retains the observed prefix on failure |

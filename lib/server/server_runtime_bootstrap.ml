@@ -2221,8 +2221,17 @@ let run ~sw ~runtime_sw ~env ~address ~port ~base_path ?input_base_path ?on_read
             Server_bootstrap_http.listen_https_socket ~sw:serving_sw ~net ~address ~config https
           in
           let trust_policy = request_trust_policy ~https_port:(bound_https_port https_listener) in
+          (* Handlers run on the main domain (RFC
+             http-transport-runs-on-its-own-domain §3.3), so the table is
+             built there, with the main switch for what handlers fork. *)
           let routes =
-            make_routes ~port:config.port ~host:config.host ~sw:serving_sw ~clock
+            Eio_context.run_on_owner_domain (fun () ->
+              make_routes
+                ~port:config.port
+                ~host:config.host
+                ~sw
+                ~transport_sw:serving_sw
+                ~clock)
           in
           let request_handler = make_request_handler ~trust_policy routes in
           let h2_request_handler = make_h2_request_handler ~trust_policy ~routes in
@@ -2239,7 +2248,9 @@ let run ~sw ~runtime_sw ~env ~address ~port ~base_path ?input_base_path ?on_read
     let socket = Server_bootstrap_http.listen_socket ~sw ~net ~address config in
     let https_listener = Server_bootstrap_http.listen_https_socket ~sw ~net ~address ~config https in
     let trust_policy = request_trust_policy ~https_port:(bound_https_port https_listener) in
-    let routes = make_routes ~port:config.port ~host:config.host ~sw ~clock in
+    let routes =
+      make_routes ~port:config.port ~host:config.host ~sw ~transport_sw:sw ~clock
+    in
     let request_handler = make_request_handler ~trust_policy routes in
     let h2_request_handler = make_h2_request_handler ~trust_policy ~routes in
     let h2_error_handler = make_h2_error_handler () in

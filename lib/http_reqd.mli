@@ -39,6 +39,11 @@ val of_gluten : Httpun.Reqd.t Gluten.Reqd.t -> t
 (** The handle for a request the httpun-eio connection handler delivers. It
     carries the connection's {!upgrade} capability. *)
 
+val with_connection_switch : Eio.Switch.t -> (unit -> 'a) -> 'a
+(** [with_connection_switch sw f] runs [f], the handler of one HTTP/1.1
+    connection, with [sw] as that connection's scope. {!of_gluten} called
+    inside reads it; httpun itself gives a request no scope. *)
+
 val of_httpun : Httpun.Reqd.t -> t
 (** A handle over a bare httpun descriptor, without an upgrade capability:
     in-memory connections in tests, fixtures. *)
@@ -192,6 +197,45 @@ val read_body
     by {!report_exn}, or by httpun itself before a response started. httpun
     leaves no trace of a chunked body it cut after a response started, and
     that body is delivered as it came. *)
+
+(** {1 A handler on another domain}
+
+    RFC http-transport-runs-on-its-own-domain §3.3. httpun and h2 writers are
+    not safe across domains, so a handler that runs on another domain than
+    its connection gets a handle that touches neither. *)
+
+val relay_scope : t -> Eio.Switch.t option
+(** The switch a relayed request's operations are applied under: the stream's
+    on HTTP/2, the connection's on HTTP/1.1 ({!with_connection_switch}).
+    [None] for a handle without one ({!of_httpun}) and for a handle that is
+    itself relayed. *)
+
+val relay : t -> sw:Eio.Switch.t -> post:((unit -> unit) -> unit) -> (t -> unit) -> unit
+(** [relay t ~sw ~post handler] hands the request to a handler on another
+    domain. [post work] must queue [work] to run on that domain and return.
+
+    [handler] is posted with a handle that sends each thing it asks of the
+    request to a fiber forked on [sw], which applies them to [t] in the order
+    they were sent. Call this on the connection's domain with [sw] from
+    {!relay_scope}.
+
+    Through that handle {!try_respond_with_string}, {!respond_with_streaming}
+    and {!response_state} wait for the connection's fiber to answer.
+    {!Body_writer.write_string}, {!Body_writer.close}, {!read_body} and
+    {!report_exn} return at once. The callbacks of {!Body_writer.flush} and
+    {!read_body} run on the handler's domain, through [post].
+    {!Body_writer.is_closed} trails the transport: it turns true when the
+    connection's fiber next looks at the real writer, so a flush answered
+    [`Closed] or {!Body_writer.stream_end} is how a producer learns of a
+    client that left. {!upgrade} is [None].
+
+    The fiber ends when the response is whole and its flushes are answered,
+    or when [sw] ends. After that the handle answers as a request that is
+    over does: a response is rejected, a streaming response gets a closed
+    writer, a flush answers [`Closed], a body read delivers nothing. A flush
+    the transport had not answered when [sw] ended is answered [`Closed]
+    too: the handler's fiber does not end with the connection, so it is
+    never left waiting for one. *)
 
 val report_exn : t -> exn -> unit
 (** Tells the transport the request failed with [exn]. Before a response,

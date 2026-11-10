@@ -25,6 +25,20 @@ val make_routes :
   sw:Eio.Switch.t ->
   clock:float Eio.Time.clock_ty Eio.Resource.t ->
   Http.Router.t
-(** Compose the full route table. Side-effect: registers connectors
+(** Compose the full route table for a server whose connections and handlers
+    run on one domain: {!make_routes_with_transport} with [sw] for both. Side-effect: registers connectors
     ([Channel_gate_discord_state], [Channel_gate_imessage_state]) on
     [Channel_gate_connector] before wiring routes. *)
+
+val make_routes_with_transport :
+  port:int ->
+  host:string ->
+  sw:Eio.Switch.t ->
+  transport_sw:Eio.Switch.t ->
+  clock:float Eio.Time.clock_ty Eio.Resource.t ->
+  Http.Router.t
+(** {!make_routes} for a server whose connections run on another domain than
+    its handlers (RFC http-transport-runs-on-its-own-domain §3.3). [sw] is
+    the switch handlers fork under. [transport_sw] is a switch of the domain
+    that runs the connections, for the one route that keeps a fiber beside
+    its connection: the WebSocket heartbeat. Call it on the domain of [sw]. *)

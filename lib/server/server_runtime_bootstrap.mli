@@ -290,6 +290,7 @@ val run :
   ?on_ready:(unit -> unit) ->
   accept_store_quarantine:bool ->
   make_routes:(port:int -> host:string -> sw:Eio.Switch.t ->
+               transport_sw:Eio.Switch.t ->
                clock:float Eio.Time.clock_ty Eio.Resource.t -> 'a) ->
   make_request_handler:(trust_policy:Server_request_authority.trust_policy ->
                         'a ->

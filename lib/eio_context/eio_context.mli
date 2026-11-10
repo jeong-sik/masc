@@ -45,6 +45,16 @@ val root_switch_on_current_domain : unit -> bool
     domains must check this exact ownership boundary before forking. This guard
     does not transfer work to the owner domain. *)
 
+val owner_post : unit -> ((unit -> unit) -> unit) option
+(** [Some post] when a root switch is installed and the caller runs on another
+    domain; [None] on the owner domain and when no root switch is installed.
+    [post task] queues [task] for the owner domain and returns without
+    waiting. Each task runs in a fiber of its own under the root switch.
+    Tasks start in the order posted, one for each pass of the owner domain's
+    run queue. What a task raises is dropped, so a task reports its own
+    failure. A task posted after the root switch was cancelled may never
+    run. *)
+
 val run_on_owner_domain : (unit -> 'a) -> 'a
 (** [run_on_owner_domain f] executes [f ()] on the domain that installed the
     root switch via [set_switch]. If called from the owner domain (or when no

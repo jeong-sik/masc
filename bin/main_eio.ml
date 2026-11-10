@@ -77,7 +77,7 @@ let run_server ~sw ~runtime_sw ~env ~address ~port ~base_path ~input_base_path ~
      cancelled service has finished its journal cleanup. *)
   try
     Server_runtime_bootstrap.run ~sw ~runtime_sw ~env ~address ~port ~base_path
-      ~input_base_path ~on_ready ~accept_store_quarantine ~make_routes:Server_routes_http.make_routes
+      ~input_base_path ~on_ready ~accept_store_quarantine ~make_routes:Server_routes_http.make_routes_with_transport
       ~make_request_handler:Server_http_ingress.http1_handler
       ~make_h2_request_handler:Server_h2_gateway.make_request_handler
       ~make_h2_error_handler:Server_h2_gateway.make_error_handler

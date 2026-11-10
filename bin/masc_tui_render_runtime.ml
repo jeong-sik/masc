@@ -1073,15 +1073,9 @@ let render_tools (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   let buf = Buffer.create 4096 in
-  let now = Unix.localtime (Unix.gettimeofday ()) in
-  let timestamp =
-    Printf.sprintf "%02d:%02d:%02d" now.Unix.tm_hour now.Unix.tm_min
-      now.Unix.tm_sec
-  in
   let header =
-    Printf.sprintf "%s  %s  %s"
-      (screen_title " MASC Features & plugins / Tools") timestamp
-      (connection_badge state)
+    feature_child_heading state ~cols
+      ~title:(ui_text state ~ko:"도구·스킬" ~en:"Tools & Skills")
   in
   box_top buf cols;
   box_line buf cols header;

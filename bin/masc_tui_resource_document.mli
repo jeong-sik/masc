@@ -1,5 +1,7 @@
-(** The exact current Resources document. This projection reads state without
-    changing retained bytes, request ownership, selection or scroll. *)
+(** The exact current Resources document. Read failures, report state and
+    uncertain sharing/recovery lead the original body. Full source metadata is
+    an explicit information reading. This projection does not change retained
+    bytes, request ownership, selection or scroll. *)
 type t = Masc_tui_resource_reading.t
 val diagrams_allowed : Masc_tui_types.state -> bool
 (** Whether search or a recovery prompt permits diagram presentation and preparation. *)

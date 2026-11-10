@@ -207,7 +207,7 @@ let pretty_resource_text ~mime text =
 
 type piece = Markdown_text of string | Html_text of string
 type origin = Metadata | Selection | Part_heading of int | Part_body of int
-  | Read_status | Progress | Failure of int
+  | Read_status | Report_status | Recovery | Progress | Failure of int
 
 let resource_document entry
     (contents : Masc_tui_mcp.resource_content list option) ~error ~requested ~image_cursor ~text_cursor ~revisions ~presentation ~metadata_expanded ~confirmation ~shared ~share_uncertain ~recovery_preview ~public_url =
@@ -240,15 +240,6 @@ let resource_document entry
       ; "**Type:** `" ^ mime ^ "` · **Size:** " ^ size
       ] @ revision_note)
   in
-  let metadata = match entry, metadata_expanded with
-    | Catalog.Report report, false ->
-      String.concat "\n\n" ([
-        Printf.sprintf "**%s · v%d** · %s · %s"
-          (match report.revision.format with Masc.Published_artifact.Markdown -> "Markdown" | Html -> "HTML")
-          report.revision.revision report.revision.author report.revision.created_at;
-        report.revision.summary
-      ] @ revision_note)
-    | (Catalog.Mcp _ | Catalog.Report _), true | Catalog.Mcp _, false -> details in
   let part_document index (part : Masc_tui_mcp.resource_content) =
     let part_mime = Option.value part.rc_mime_type ~default:mime in
     let body = match part.rc_kind with
@@ -267,22 +258,23 @@ let resource_document entry
     | Some (_ :: _ :: _) ->
       [Part_heading index, Markdown_text (Printf.sprintf "### Part %d · %s" index part_mime); Part_body index, body]
     | Some (_ :: []) | Some [] | None -> [Part_body index, body] in
-  let body = match error, contents with
-    | Some detail, _ -> [Read_status, Markdown_text detail]
-    | None, None when requested -> [Read_status, Markdown_text "(reading resource…)"]
-    | None, None -> [Read_status, Markdown_text "(Enter reads the selected resource.)"]
+  let read_status, body = match error, contents with
+    | Some detail, _ -> [Read_status, Markdown_text detail], []
+    | None, None when requested -> [Read_status, Markdown_text "(reading resource…)"], []
+    | None, None -> [Read_status, Markdown_text "(Enter reads the selected resource.)"], []
+    | None, Some [] -> [Read_status, Markdown_text "(No content parts returned.)"], []
     | None, Some parts ->
       let texts = text_parts parts in
       let text_selection = match selected_text_part texts text_cursor with
-        | Some (part, _) -> Printf.sprintf "Text %d/%d · part %d · (/): select · y: copy source"
+        | Some (part, _) -> Printf.sprintf "Text %d/%d · part %d"
             (text_cursor + 1) (List.length texts) part
         | None -> "" in
       let images = Masc_tui_resource_images.images ~mime_type:resource.mime_type parts in
       let selection = match List.nth_opt images image_cursor with
-        | Some (part, _) -> Printf.sprintf "Image %d/%d · part %d · ,/.: select · Ctrl-O: preview"
+        | Some (part, _) -> Printf.sprintf "Image %d/%d · part %d"
             (image_cursor + 1) (List.length images) part
         | None -> "" in
-      [Selection, Markdown_text (text_selection ^ "\n\n" ^ selection)]
+      [], [Selection, Markdown_text (text_selection ^ "\n\n" ^ selection)]
         @ List.concat (List.mapi (fun index part -> part_document (index + 1) part) parts) in
   let confirmation = match confirmation with
     | None -> ""
@@ -294,12 +286,18 @@ let resource_document entry
     | Catalog.Report _, false, None -> "\n\n**External sharing:** unknown (R: reread this revision)"
     | Catalog.Report _, false, Some true -> "\n\n**External sharing:** last observed enabled (P: revoke)"
     | Catalog.Report _, false, Some false -> "\n\n**External sharing:** last observed private (P: enable)" in
-  let public_link = match public_url with
-    | Some (Ok url) -> "\n\n**Public link:** `" ^ url ^ "` · Y: copy (origin not verified)"
-    | Some (Error detail) -> "\n\n**Public link unavailable:** " ^ detail
-    | None -> "" in
-  let recovery = Option.fold ~none:[] ~some:(fun preview -> [Metadata, Markdown_text preview]) recovery_preview in
-  recovery @ ((Metadata, Markdown_text (metadata ^ confirmation ^ sharing ^ public_link ^ "\n\n---")) :: body)
+  let link_notice, public_link = match public_url with
+    | Some (Ok url) -> "", "\n\n**Public link:** `" ^ url ^ "` · Y: copy (origin not verified)"
+    | Some (Error detail) -> "\n\n**Public link unavailable:** " ^ detail, ""
+    | None -> "", "" in
+  let report_status = confirmation ^ sharing ^ link_notice in
+  let report_status = if report_status = "" then []
+    else [Report_status, Markdown_text report_status] in
+  let metadata = if metadata_expanded then
+      [Metadata, Markdown_text (details ^ public_link ^ "\n\n---")]
+    else [] in
+  let recovery = Option.fold ~none:[] ~some:(fun preview -> [Recovery, Markdown_text preview]) recovery_preview in
+  recovery @ report_status @ read_status @ metadata @ body
 
 type diagram = {
   first_row : int;
@@ -477,7 +475,8 @@ let capture_anchor ~cols ~height state =
 
 let source_position anchor = match anchor.location with
   | Block (Part_body part,source_start,_) -> Some (part,source_start)
-  | Top | End | Block ((Metadata | Selection | Part_heading _ | Read_status | Progress | Failure _),_,_) -> None
+  | Top | End | Block ((Metadata | Selection | Part_heading _ | Read_status
+      | Report_status | Recovery | Progress | Failure _),_,_) -> None
 
 let restore_anchor ~cols ~height state anchor =
   match anchor_reading state with
@@ -491,12 +490,16 @@ let restore_anchor ~cols ~height state anchor =
         | Block (origin,source_start,within) ->
             let block = List.find_opt (fun block -> block.origin=origin
               && block.source.source_offset=source_start) rendered.blocks in
-            (* Preparation chrome can disappear entirely. Its semantic successor
-               is metadata, regardless of how many failures were inserted. *)
+            (* Preparation chrome can disappear entirely. Continue at the first
+               actual document block, including notices and explicit metadata. *)
             let block = match block,origin with
               | None,(Progress | Failure _) ->
-                  List.find_opt (fun block -> block.origin=Metadata) rendered.blocks
-              | (Some _ | None),(Metadata | Selection | Part_heading _ | Part_body _ | Read_status)
+                  List.find_opt (fun block -> match block.origin with
+                    | Metadata | Selection | Part_heading _ | Part_body _
+                    | Read_status | Report_status | Recovery -> true
+                    | Progress | Failure _ -> false) rendered.blocks
+              | (Some _ | None),(Metadata | Selection | Part_heading _ | Part_body _
+                  | Read_status | Report_status | Recovery)
               | Some _,(Progress | Failure _) -> block in
             Option.map (fun block ->
               let last = max 0 (block.source.row_count-1) in

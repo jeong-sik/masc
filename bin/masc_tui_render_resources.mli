@@ -1,4 +1,4 @@
-(** MCP resource inventory and document reading. Returns a frame and optional
+(** Resources child identity, inventory and body reading. Returns a frame and optional
     normalized resource scroll for the caller to apply. *)
 
 val render_resources : Masc_tui_types.state ->

@@ -1953,6 +1953,11 @@ let reading_connection_notice (state : state) =
   in
   if exceptional then Some (usage_connection_badge state) else None
 
+let feature_child_heading (state : state) ~cols ~title =
+  detail_heading ~cols ~lead:(Lead_text (screen_title (" " ^ title)))
+    ~id:"" ~after:[]
+    ~tail:(Option.value (reading_connection_notice state) ~default:"")
+
 (* A narrow Usage title keeps a textual state visible while its longer
    workspace and refresh details remain available in the scrolled body. *)
 let compact_connection_badge (state : state) ~width =
@@ -6374,8 +6379,8 @@ let runtime_substrate_tabs (state : state)
     , Press_surface Clients )
   ]
 
-(* The title row of Runtime, Features and Clients: the title, the strip they
-   share, the pieces of [after] and the connection badge last. It is laid out
+(* The Runtime title, its related destinations, the pieces of [after] and the
+   connection badge last. It is laid out
    by [detail_heading] like the Activity row, so the badge stays whole, the
    pieces of [after] are left out whole from the end, and the strip draws in
    what they leave. The strip is whole or it is not drawn, and a strip that

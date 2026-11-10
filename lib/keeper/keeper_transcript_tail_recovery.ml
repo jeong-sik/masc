@@ -3,7 +3,7 @@ module History = Keeper_checkpoint_store.Saved_history
 module Unit_ = Keeper_transcript_unit
 
 type keeper_outcome =
-  | Already_dispatchable
+  | Nothing_to_close
   | Closed of { tool_use_ids : string list }
   | Unparseable of Unit_.structural_error
   | Meta_unavailable of string
@@ -37,11 +37,11 @@ let history_or_outcome = function
        aside), so there is no open tool cycle to close. Reporting it as a
        load failure logged an ERROR and counted one recovery failure on
        every boot -- 27 boots on 2026-09-22 for one such keeper. *)
-    Error Already_dispatchable
+    Error Nothing_to_close
   | Ok (History.Superseded _) ->
     (* The next turn starts fresh and does not replay this history, so no
        tool cycle in it is open for that turn. *)
-    Error Already_dispatchable
+    Error Nothing_to_close
   | Error
       ((History.Ref_read_failed _ | History.Ref_identity_invalid _
        | History.Ref_session_mismatch _ | History.Ref_lock_failed _) as error) ->
@@ -84,7 +84,7 @@ let close_tail_of_whole_history ~session_dir ~session_id =
   | Ok (checkpoint, expected_source_ref) ->
     (match Unit_.close_open_tail checkpoint.Agent_core.Checkpoint.messages with
      | Error structural -> Unparseable structural
-     | Ok { Unit_.closed_tool_use_ids = []; _ } -> Already_dispatchable
+     | Ok { Unit_.closed_tool_use_ids = []; _ } -> Nothing_to_close
      | Ok { Unit_.messages; closed_tool_use_ids } ->
        let candidate = { checkpoint with Agent_core.Checkpoint.messages } in
        (* The closers end the interrupted turn, so its messages become one
@@ -104,7 +104,7 @@ let close_tail_of_whole_history ~session_dir ~session_id =
 let recover_keeper config name =
   match Keeper_meta_store.read_meta config name with
   | Error error -> Meta_unavailable error
-  | Ok None -> Already_dispatchable
+  | Ok None -> Nothing_to_close
   | Ok (Some meta) ->
     let session_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
     let session_dir =
@@ -114,7 +114,7 @@ let recover_keeper config name =
        history_or_outcome (Store.saved_history_of_ref (tail_end ~session_dir ~session_id))
      with
      | Error outcome -> outcome
-     | Ok Unit_.Every_request_answered -> Already_dispatchable
+     | Ok Unit_.Every_request_answered -> Nothing_to_close
      | Ok Unit_.Request_awaits_results -> close_tail_of_whole_history ~session_dir ~session_id)
 ;;
 
@@ -122,7 +122,7 @@ let accumulate report (name, outcome) =
   let report = { report with examined = report.examined + 1 } in
   let report =
     match outcome with
-    | Already_dispatchable -> report
+    | Nothing_to_close -> report
     | Closed { tool_use_ids } ->
       { report with
         closed = report.closed + 1
@@ -138,7 +138,7 @@ let accumulate report (name, outcome) =
 
 let log_outcome name outcome =
   match outcome with
-  | Already_dispatchable -> ()
+  | Nothing_to_close -> ()
   | Closed { tool_use_ids } ->
     (* RFC-0240 §2.4. This is the line that says a lane was saved from
        latching, so it is not silent even on the happy path. *)

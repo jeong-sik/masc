@@ -118,22 +118,37 @@ let canonical_bytes ~session_dir ~trace_id =
     In_channel.input_all
 ;;
 
-(* Removes the bundle of the first closed turn the head names, so the history
-   can no longer be read whole. *)
-let remove_first_turn_bundle ~session_dir ~trace_id =
-  (match
-     Agent_core.Checkpoint_objects.head_of_string (canonical_bytes ~session_dir ~trace_id)
-   with
-   | Error error -> fail (Agent_core.Checkpoint_objects.load_error_to_string error)
-   | Ok (head : Agent_core.Checkpoint_objects.head) ->
-     (match head.history.turns with
-      | [] -> fail "the fixture has no closed turn"
-      | (first : Agent_core.Checkpoint_objects.turn) :: _ ->
-        Sys.remove (Keeper_checkpoint_object_store.path ~session_dir first.bundle)));
+let head_of_canonical ~session_dir ~trace_id : Agent_core.Checkpoint_objects.head =
+  match
+    Agent_core.Checkpoint_objects.head_of_string (canonical_bytes ~session_dir ~trace_id)
+  with
+  | Ok head -> head
+  | Error error -> fail (Agent_core.Checkpoint_objects.load_error_to_string error)
+;;
+
+(* Removes one object the head names, so the history can no longer be read
+   whole. *)
+let remove_object ~session_dir ~trace_id named =
+  Sys.remove
+    (Keeper_checkpoint_object_store.path
+       ~session_dir
+       (named (head_of_canonical ~session_dir ~trace_id)));
   match Keeper_checkpoint_store.load_agent_core ~session_dir ~session_id:trace_id with
   | Error (_ : Keeper_checkpoint_store.checkpoint_load_error) -> ()
   | Ok _ -> fail "the fixture still loads whole"
 ;;
+
+(* The bundle of the first closed turn: a reading that ends in a later turn
+   does not read it. *)
+let first_turn_bundle (head : Agent_core.Checkpoint_objects.head) =
+  match head.history.turns with
+  | [] -> fail "the fixture has no closed turn"
+  | (first : Agent_core.Checkpoint_objects.turn) :: _ -> first.bundle
+;;
+
+(* The object that holds the tool list: a whole load reads it, a reading of
+   the messages does not. *)
+let tools_object (head : Agent_core.Checkpoint_objects.head) = head.header_objects.tools
 
 let only_outcome (report : Recovery.report) =
   match report.outcomes with
@@ -171,7 +186,7 @@ let test_a_keeper_without_a_canonical_checkpoint_has_nothing_to_recover () =
   check int "one keeper examined" 1 report.Recovery.examined;
   check int "no recovery failure" 0 report.Recovery.failed;
   match report.Recovery.outcomes with
-  | [ (reported, Recovery.Already_dispatchable) ] ->
+  | [ (reported, Recovery.Nothing_to_close) ] ->
     check string "the keeper is reported" name reported
   | [ (_, Recovery.Checkpoint_unavailable _) ] ->
     fail "a missing checkpoint is not a load failure"
@@ -221,7 +236,7 @@ let test_a_superseded_checkpoint_has_nothing_to_recover () =
     check int (label ^ ": no recovery failure") 0 report.Recovery.failed;
     check int (label ^ ": nothing closed") 0 report.Recovery.closed;
     match report.Recovery.outcomes with
-    | [ (_, Recovery.Already_dispatchable) ] -> ()
+    | [ (_, Recovery.Nothing_to_close) ] -> ()
     | [ (_, Recovery.Checkpoint_unavailable error) ] ->
       failf "%s: %s" label (Keeper_checkpoint_store.saved_history_ref_error_to_string error)
     | outcomes -> failf "%s: unexpected outcomes: %d" label (List.length outcomes)
@@ -232,9 +247,11 @@ let test_a_superseded_checkpoint_has_nothing_to_recover () =
     (In_channel.with_open_bin path In_channel.input_all)
 ;;
 
-(* The turn a process death interrupted: its request has no result. The boot
-   appends one, and the next boot finds nothing to do. *)
-let test_a_request_that_awaits_results_is_closed () =
+(* A history that ends with a request without a result. The boot appends
+   one, and the next boot finds nothing to do. [boundary] is how that history
+   was saved and [open_messages] how many messages the save leaves open in
+   the head, which says where the reading meets the request. *)
+let check_a_request_that_awaits_results_is_closed ~boundary ~open_messages =
   with_workspace @@ fun config ->
   let name = "open-tail" in
   let trace_id, session_dir = persisted_keeper config name in
@@ -243,10 +260,10 @@ let test_a_request_that_awaits_results_is_closed () =
     ~boundary:Agent_core.Checkpoint_objects.Turn_closes
     (checkpoint ~trace_id ~name ~turn_count:1 closed_turn);
   let interrupted = closed_turn @ [ text Agent_core.Types.User "q2"; request "call-open" ] in
-  save
-    ~session_dir
-    ~boundary:Agent_core.Checkpoint_objects.Turn_continues
-    (checkpoint ~trace_id ~name ~turn_count:2 interrupted);
+  save ~session_dir ~boundary (checkpoint ~trace_id ~name ~turn_count:2 interrupted);
+  let head = head_of_canonical ~session_dir ~trace_id in
+  check int "the messages the head leaves open" open_messages
+    (List.length head.history.open_messages);
   let report = Recovery.recover_open_tails config in
   check int "one keeper closed" 1 report.Recovery.closed;
   check int "one result appended" 1 report.Recovery.tool_results_appended;
@@ -254,7 +271,7 @@ let test_a_request_that_awaits_results_is_closed () =
   (match only_outcome report with
    | Recovery.Closed { tool_use_ids } ->
      check (list string) "the request without a result" [ "call-open" ] tool_use_ids
-   | Recovery.Already_dispatchable -> fail "the open request was left as it was"
+   | Recovery.Nothing_to_close -> fail "the open request was left as it was"
    | Recovery.Unparseable _ | Recovery.Meta_unavailable _ | Recovery.Checkpoint_unavailable _
    | Recovery.Commit_rejected _ -> fail "the open request was not closed");
   (match Keeper_checkpoint_store.load_agent_core ~session_dir ~session_id:trace_id with
@@ -269,12 +286,29 @@ let test_a_request_that_awaits_results_is_closed () =
   let next = Recovery.recover_open_tails config in
   check int "the next boot closes nothing" 0 next.Recovery.closed;
   (match only_outcome next with
-   | Recovery.Already_dispatchable -> ()
+   | Recovery.Nothing_to_close -> ()
    | Recovery.Closed _ | Recovery.Unparseable _ | Recovery.Meta_unavailable _
    | Recovery.Checkpoint_unavailable _ | Recovery.Commit_rejected _ ->
      fail "the next boot did not find the history closed");
   check string "the next boot writes nothing" after_first_boot
     (canonical_bytes ~session_dir ~trace_id)
+;;
+
+(* The turn a process death interrupted: the request is the head's last open
+   message. *)
+let test_a_request_that_awaits_results_in_the_open_turn_is_closed () =
+  check_a_request_that_awaits_results_is_closed
+    ~boundary:Agent_core.Checkpoint_objects.Turn_continues
+    ~open_messages:2
+;;
+
+(* A checkpoint purge saves the history it rewrote as closed turns and keeps
+   a request that awaits results at its end: the head leaves no message open
+   and the request is the last message of the last bundle. *)
+let test_a_request_that_awaits_results_at_the_end_of_a_closed_turn_is_closed () =
+  check_a_request_that_awaits_results_is_closed
+    ~boundary:Agent_core.Checkpoint_objects.Turn_closes
+    ~open_messages:0
 ;;
 
 let check_left_as_it_is label config ~session_dir ~trace_id =
@@ -284,7 +318,7 @@ let check_left_as_it_is label config ~session_dir ~trace_id =
   check int (label ^ ": no recovery failure") 0 report.Recovery.failed;
   check int (label ^ ": nothing unparseable") 0 report.Recovery.unparseable;
   (match only_outcome report with
-   | Recovery.Already_dispatchable -> ()
+   | Recovery.Nothing_to_close -> ()
    | Recovery.Checkpoint_unavailable error ->
      failf "%s: %s" label (Keeper_checkpoint_store.saved_history_ref_error_to_string error)
    | Recovery.Closed _ | Recovery.Unparseable _ | Recovery.Meta_unavailable _
@@ -310,6 +344,9 @@ let test_a_history_whose_requests_are_answered_is_left_as_it_is () =
   check_left_as_it_is "an open turn without a request" config ~session_dir ~trace_id
 ;;
 
+(* No message requests a tool call. Every message is read and the history is
+   still not loaded whole: the object that holds its tool list is gone and the
+   boot still answers. *)
 let test_a_history_without_a_request_is_left_as_it_is () =
   with_workspace @@ fun config ->
   let name = "no-request" in
@@ -319,7 +356,8 @@ let test_a_history_without_a_request_is_left_as_it_is () =
     ~boundary:Agent_core.Checkpoint_objects.Turn_closes
     (checkpoint ~trace_id ~name ~turn_count:1
        [ text Agent_core.Types.User "q"; text Agent_core.Types.Assistant "a" ]);
-  check_left_as_it_is "every message read" config ~session_dir ~trace_id
+  remove_object ~session_dir ~trace_id tools_object;
+  check_left_as_it_is "no message requests" config ~session_dir ~trace_id
 ;;
 
 (* The last request has its results in the last turn, so the turn before it is
@@ -343,7 +381,7 @@ let test_an_answered_end_is_told_without_the_turns_before_it () =
     ~session_dir
     ~boundary:Agent_core.Checkpoint_objects.Turn_closes
     (checkpoint ~trace_id ~name ~turn_count:2 (closed_turn @ second_turn));
-  remove_first_turn_bundle ~session_dir ~trace_id;
+  remove_object ~session_dir ~trace_id first_turn_bundle;
   check_left_as_it_is "the last turn alone" config ~session_dir ~trace_id
 ;;
 
@@ -362,14 +400,14 @@ let test_an_unanswered_end_is_decided_by_the_whole_history () =
     ~boundary:Agent_core.Checkpoint_objects.Turn_continues
     (checkpoint ~trace_id ~name ~turn_count:2
        (closed_turn @ [ text Agent_core.Types.User "q2"; request "call-open" ]));
-  remove_first_turn_bundle ~session_dir ~trace_id;
+  remove_object ~session_dir ~trace_id first_turn_bundle;
   let before = canonical_bytes ~session_dir ~trace_id in
   let report = Recovery.recover_open_tails config in
   check int "nothing closed" 0 report.Recovery.closed;
   check int "one recovery failure" 1 report.Recovery.failed;
   (match only_outcome report with
    | Recovery.Checkpoint_unavailable (_ : Keeper_checkpoint_store.Saved_history.ref_error) -> ()
-   | Recovery.Already_dispatchable -> fail "the open request was not seen"
+   | Recovery.Nothing_to_close -> fail "the open request was not seen"
    | Recovery.Closed _ -> fail "a result was appended to a history that was not read"
    | Recovery.Unparseable _ | Recovery.Meta_unavailable _ | Recovery.Commit_rejected _ ->
      fail "the unreadable history was reported as something else");
@@ -389,9 +427,13 @@ let () =
             `Quick
             test_a_superseded_checkpoint_has_nothing_to_recover
         ; test_case
-            "a request that awaits results is closed"
+            "a request that awaits results in the open turn is closed"
             `Quick
-            test_a_request_that_awaits_results_is_closed
+            test_a_request_that_awaits_results_in_the_open_turn_is_closed
+        ; test_case
+            "a request that awaits results at the end of a closed turn is closed"
+            `Quick
+            test_a_request_that_awaits_results_at_the_end_of_a_closed_turn_is_closed
         ] )
     ; ( "a history read from its end"
       , [ test_case

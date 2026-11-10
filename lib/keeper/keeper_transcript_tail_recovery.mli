@@ -6,7 +6,7 @@
     it, so provider admission rejected the history on every reload and the
     lane stayed permanently unresumable.
 
-    This runs during the [Recovering_requests] boot phase, before keeper loops
+    This runs during the [Recovering_persistence] boot phase, before keeper loops
     start, so no writer races the compare-and-swap. Shutdown hooks cannot cover
     this: an ungraceful kill runs none.
 
@@ -18,15 +18,20 @@
     what is appended. For a history that parses the two readings agree, so
     nothing is appended to a history that the first reading leaves.
 
-    A defect before the end of a history whose last request has its results
-    is not reported here: a structural break, an object that is missing or
-    does not match its digest, a chain that does not match. The keeper's next
-    turn reads the whole history and meets it there. *)
+    A history whose last request has its results is not parsed here: the
+    reading does not judge the messages it reads, reads none before the last
+    request, does not read the header objects and does not check the chains.
+    So nothing that is wrong with such a history is reported at boot,
+    wherever it lies: a structural break, an object that is missing or does
+    not match its digest among those not read, a chain that does not match.
+    The keeper's next turn reads the whole history and meets it there. *)
 
 type keeper_outcome =
-  | Already_dispatchable
+  | Nothing_to_close
       (** No durable metadata, no canonical checkpoint yet, a canonical of a
-          version this build supersedes, or no open tail. *)
+          version this build supersedes, or a history whose last request has
+          its results. It does not say that the history parses: such a
+          history is not parsed here. *)
   | Closed of { tool_use_ids : string list }
   | Unparseable of Keeper_transcript_unit.structural_error
       (** Genuine corruption — only the open tail is recoverable. Reported
@@ -51,5 +56,6 @@ type report =
 
 val recover_open_tails : Workspace.config -> report
 (** Close every persisted keeper's open tool cycle. Each keeper is independent:
-    one failure never aborts the sweep, because a single unrecoverable lane must
-    not keep the rest of the fleet down. *)
+    a keeper whose recovery fails is reported in its outcome and the next
+    keeper is read, because a single unrecoverable lane must not keep the rest
+    of the fleet down. *)

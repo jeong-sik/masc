@@ -843,9 +843,9 @@ let tail_end_name = function
   | U.Every_request_answered -> "Every_request_answered"
   | U.Request_awaits_results -> "Request_awaits_results"
 
-(* Every history of up to five of these messages. Five hold a cycle of two
+(* Every history of up to five of these messages. Four hold a cycle of two
    calls answered one result at a time and the request of the cycle after
-   it. *)
+   it, and the fifth is any message before, between or after them. *)
 let test_tail_reading_agrees_with_close_open_tail () =
   let kinds =
     [ "user text", text T.User "q"

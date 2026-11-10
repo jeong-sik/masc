@@ -182,6 +182,7 @@ val read_tail_message : tail_reading -> Agent_core.Types.message -> tail_step
 
     For a history {!partition} accepts, reading from the last message this way
     ends with [Request_awaits_results] exactly when {!close_open_tail} appends
-    a result. For a history {!partition} refuses it can end either way: no
-    message before the last request is read, so what is wrong before it is not
-    found. *)
+    a result. For a history {!partition} refuses it can end either way: the
+    reading does not judge the messages it reads (their roles, an id that
+    repeats, a result nobody requested) and reads none before the last
+    request. *)

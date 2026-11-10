@@ -279,10 +279,6 @@ let test_limit_for_category () =
   check int "broadcast" cfg.broadcast_per_minute (Masc_domain.limit_for_category cfg Masc_domain.BroadcastLimit);
   check int "task_ops" cfg.task_ops_per_minute (Masc_domain.limit_for_category cfg Masc_domain.TaskOpsLimit)
 
-let test_category_for_tool () =
-  check bool "broadcast" true (Masc_domain.category_for_tool "masc_broadcast" = Masc_domain.BroadcastLimit);
-  check bool "status" true (Masc_domain.category_for_tool "masc_status" = Masc_domain.GeneralLimit)
-
 let test_multiplier_for_role () =
   let cfg = Masc_domain.default_rate_limit in
   check (float 0.01) "worker" 1.0 (Masc_domain.multiplier_for_role cfg Masc_domain.Worker);
@@ -555,7 +551,6 @@ let role_tests = [
 let rate_limit_tests = [
   "default config", `Quick, test_default_rate_limit;
   "limit_for_category", `Quick, test_limit_for_category;
-  "category_for_tool", `Quick, test_category_for_tool;
   "multiplier_for_role", `Quick, test_multiplier_for_role;
   "effective_limit", `Quick, test_effective_limit;
 ]

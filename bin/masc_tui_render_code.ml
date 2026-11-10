@@ -920,20 +920,19 @@ let render_code (state : state) =
               block is what hides it. Continuation rows hold the same cells in
               blanks so the code stays in one column.
 
-              No colour of its own. The theme's three tones are Normal, Dim
-              and the single accent, and a colour outside them is a claim
-              about state -- blame carries no state, only who and when. So
-              the answer (the name) draws Normal and the qualifier (the age)
-              draws Dim, and nothing here competes with the lexer's own
-              colours in the code beside it. *)
+              No colour of its own. The frame draws plain, dim or the single
+              accent, and a colour outside them is a claim about state --
+              blame carries no state, only who and when. So the answer (the
+              name) draws plain and the qualifier (the age) draws dim, and
+              nothing here competes with the lexer's own colours in the code
+              beside it. *)
            let blame_cell line =
              match blame_blocks with
              | [] -> ""
              | _ -> (
                match Masc.Tui_decode.blame_block_at blame_blocks line with
                | Some (block, true) ->
-                   Printf.sprintf "%s%s %s%s%s "
-                     (Masc_tui_theme.tone Masc_tui_theme.Normal)
+                   Printf.sprintf "%s %s%s%s "
                      (Message_layout.fit_width block.bb_author
                         blame_author_cells)
                      Ansi.dim

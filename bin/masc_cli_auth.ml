@@ -6,6 +6,13 @@ module T = Server_startup_takeover
 let ( let* ) = Result.bind
 let now_ms () = int_of_float (Unix.gettimeofday () *. 1000.)
 
+let account_server_line =
+  "a server boots the workspace as a multi-account installation: the account server, which \
+   answers the health probes (GET /health, /health/live and /health/ready) and no route that \
+   reads the credentials of a single user. It does not serve the login routes yet; masc auth \
+   preview serves them on 127.0.0.1 while no server runs"
+;;
+
 let with_lease ~base_path f =
   match Unix.realpath base_path with
   | exception Unix.Unix_error (error, _, _) ->
@@ -102,12 +109,10 @@ let bootstrap ~base_path ~external_store =
   | Ok (base_url, { A.workspace_id; invitation }) ->
     Printf.printf
       "The installation is activated for multi-account use, workspace %s.\n\
-       A server now boots this workspace as a multi-account installation: the account server, \
-       which answers GET /health and none of the routes of a single-user server. It does not \
-       serve the login routes yet; masc auth preview serves them on 127.0.0.1 while no server \
-       runs. %s. The external store is %s.\n\
+       From now on %s. %s. The external store is %s.\n\
        The first Admin is invited.\n"
       (Authz_types.Workspace_id.to_string workspace_id)
+      account_server_line
       (String.capitalize_ascii Authz_boot_mode_read.turn_off_line)
       external_store;
     print_link ~command:"bootstrap" ~base_url invitation

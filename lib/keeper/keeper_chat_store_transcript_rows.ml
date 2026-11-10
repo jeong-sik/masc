@@ -33,6 +33,16 @@ let remember_transcript path cache =
     Hashtbl.replace transcript_caches path cache)
 ;;
 
+(* The registration of a load that went on from [from]. It stands only while
+   the table still holds that very entry: a purge in between removed it, and a
+   load that finished first put its own in. *)
+let advance_transcript path ~from cache =
+  Stdlib.Mutex.protect transcript_caches_mu (fun () ->
+    match Hashtbl.find_opt transcript_caches path with
+    | Some held when held == from -> Hashtbl.replace transcript_caches path cache
+    | Some _ | None -> ())
+;;
+
 let forget_transcript path =
   Stdlib.Mutex.protect transcript_caches_mu (fun () -> Hashtbl.remove transcript_caches path)
 ;;

@@ -29,7 +29,9 @@ let registry : (string, entry) Hashtbl.t = Hashtbl.create 16
 (* Guards only the table lookup, which never yields. The per-path mutex is
    held by a fiber across the whole update, whose file work runs in a system
    thread, so it is a [Cross_context_mutex]: a second fiber waits on its Eio
-   gate and does not block its domain (#33322). *)
+   gate and does not block its domain (#33322). It is taken as a durable
+   lock: the update's worker changes [entry.folded], so a turn ends when that
+   worker is done and not when its fiber is cancelled. *)
 let registry_mutex = Stdlib.Mutex.create ()
 
 let entry_of path =
@@ -80,7 +82,10 @@ let index_of_file entry (file : folded Fs_compat.private_jsonl_rows_from_cursor)
 
 let update_indexed_transcript path decide =
   let entry = entry_of path in
-  Cross_context_mutex.with_lock entry.mutex (fun () ->
+  (* A fiber already cancelled when it asks does nothing, as the Fs update
+     alone would not start. The durable lock does not look. *)
+  if Eio_guard.is_eio_fiber () then Eio.Fiber.check ();
+  Cross_context_mutex.with_durable_lock entry.mutex (fun () ->
     Fs_compat.update_private_jsonl_after_cursor_durable_locked_result
       path
       ~after:(Option.map (fun folded -> folded.rows_end, folded) entry.folded)
@@ -89,7 +94,7 @@ let update_indexed_transcript path decide =
 
 let purge_indexed_transcript path ~remove =
   let entry = entry_of path in
-  Cross_context_mutex.with_lock entry.mutex (fun () ->
+  Cross_context_mutex.with_durable_lock entry.mutex (fun () ->
     (* Keep the registry entry: a queued delivery must not take a different
        mutex after the purge. Forget the index whatever [remove] answers, since
        a failure may follow the unlink. *)

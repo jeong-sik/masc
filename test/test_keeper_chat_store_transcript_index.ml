@@ -300,6 +300,29 @@ let test_fibers_take_turns_at_a_transcript () =
       check_present "a delivery from before the fibers" (reply "warm" ~base_dir)))
 ;;
 
+(* A fiber that is cancelled before it delivers writes nothing and is not
+   answered. The delivery then goes in when it is asked again. *)
+let test_a_cancelled_fiber_writes_nothing () =
+  with_eio_fs (fun () ->
+    with_store (fun base_dir ->
+      warm ~base_dir;
+      let before = bytes ~base_dir in
+      (match
+         Eio.Cancel.sub (fun context ->
+           Eio.Cancel.cancel context Exit;
+           question "cancelled" ~base_dir)
+       with
+       | exception Eio.Cancel.Cancelled _ -> ()
+       | (Appended | Present _ | Refused _) as answered ->
+         failf "a cancelled fiber was answered: %a" pp_answer answered);
+      check string "the transcript" before (bytes ~base_dir);
+      check
+        answer_testable
+        "the same delivery, asked again"
+        Appended
+        (question "cancelled" ~base_dir)))
+;;
+
 let test_an_unreadable_row_refuses_every_delivery () =
   with_store (fun base_dir ->
     warm ~base_dir;
@@ -480,6 +503,11 @@ let () =
             test_a_refused_delivery_is_asked_of_the_whole_file_again
         ] )
     ; ( "deliveries at the same time"
-      , [ test_case "fibers take turns at a transcript" `Quick test_fibers_take_turns_at_a_transcript ] )
+      , [ test_case "fibers take turns at a transcript" `Quick test_fibers_take_turns_at_a_transcript
+        ; test_case
+            "a cancelled fiber writes nothing"
+            `Quick
+            test_a_cancelled_fiber_writes_nothing
+        ] )
     ]
 ;;

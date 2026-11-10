@@ -316,15 +316,19 @@ function ArtifactsObservation({ authRevision, workspaceRoot, draftRetention, all
       }
       const failures: unknown[] = []
       const reads: Promise<void>[] = []
-      let boundApplied = false
+      // Body completion does not grant the workspace authority held only by
+      // an attested response. Ordinary unbound viewing still owes the bound read.
+      const admission: { kind: 'pending' | 'readonly' | 'bound' } = { kind: 'pending' }
+      const isRefusal = (error: unknown) => error instanceof ApiRequestError && (error.status === 401 || error.status === 403)
       let publicRequested = false
       const readFailed = async (error: unknown) => {
         failures.push(error)
         if (signal.aborted || !currentDocument()) return
+        if (admission.kind === 'readonly' && !isRefusal(error)) return
         const previous = documentRef.current
         const retained = previous?.key === documentKey && previous.kind !== 'public-loading'
           && previous.data?.kind === 'operator' ? previous.data : undefined
-        if (retained || !(error instanceof ApiRequestError && (error.status === 401 || error.status === 403))) {
+        if (retained || !isRefusal(error)) {
           // Keep the same visit's editor and draft mounted after a failed refresh.
           publish({ key: documentKey, kind: 'error', message: errorMessage(error), data: retained })
           return
@@ -334,17 +338,17 @@ function ArtifactsObservation({ authRevision, workspaceRoot, draftRetention, all
         const publicOwner: DocumentRemote = { key: documentKey, kind: 'public-loading' }
         publish(publicOwner)
         await fetchPublicArtifact(selectedId, revision, signal).then(document => {
-          if (!boundApplied && documentRef.current === publicOwner) publish({ key: documentKey, kind: 'loaded', data: { kind: 'public', document }, receivedAt: Date.now() })
+          if (admission.kind === 'pending' && documentRef.current === publicOwner) publish({ key: documentKey, kind: 'loaded', data: { kind: 'public', document }, receivedAt: Date.now() })
         }, publicError => {
           failures.push(publicError)
-          if (!boundApplied && documentRef.current === publicOwner) publish({ key: documentKey, kind: 'error', message: errorMessage(publicError) })
+          if (admission.kind === 'pending' && documentRef.current === publicOwner) publish({ key: documentKey, kind: 'error', message: errorMessage(publicError) })
         })
       }
       const publishUnbound = (document: ArtifactDocument) => {
         const previous = documentRef.current
         const alreadyBound = previous?.key === documentKey && previous.kind !== 'public-loading'
           && previous.data?.kind === 'operator' && previous.data.workspace !== undefined
-        if (boundApplied) return
+        if (admission.kind !== 'pending') return
         if (alreadyBound && previous.kind === 'loaded') {
           publish({ key: documentKey, kind: 'error', message: '작업 공간을 다시 확인하고 있습니다.', data: previous.data, revalidating: true })
         } else if (!alreadyBound) publish({ key: documentKey, kind: 'loaded', data: { kind: 'operator', document }, receivedAt: Date.now() })
@@ -358,7 +362,7 @@ function ArtifactsObservation({ authRevision, workspaceRoot, draftRetention, all
         // Viewing does not wait for a slow health response. Until the bound
         // read is admitted, this observation has no mutation authority.
         reads.push(fetchPublishedArtifact(selectedId, revision, signal).then(publishUnbound, async error => {
-          if (!boundApplied) await readFailed(error)
+          if (admission.kind !== 'bound') await readFailed(error)
         }))
       }
       reads.push(captureArtifactWorkspace(workspaceRoot, signal).then(async workspace => {
@@ -379,7 +383,7 @@ function ArtifactsObservation({ authRevision, workspaceRoot, draftRetention, all
               publish({ key: documentKey, kind: 'error', message: '문서 조회 결과가 서로 달라 작업 공간을 확인하지 못했습니다. 다시 확인해 주세요.', data: priorData })
               return
             }
-            boundApplied = true
+            admission.kind = 'bound'
             publish({ key: documentKey, kind: 'loaded', data: { kind: 'operator', document, workspace, shareObservation }, receivedAt: Date.now() })
           }
         } catch (error) {
@@ -388,14 +392,14 @@ function ArtifactsObservation({ authRevision, workspaceRoot, draftRetention, all
             const alreadyBound = previous?.key === documentKey && previous.kind !== 'public-loading'
               && previous.data?.kind === 'operator' && previous.data.workspace !== undefined
             if (alreadyBound) await readFailed(error)
-            else publishUnbound(error.document)
-          } else if (!boundApplied) await readFailed(error)
+            else { publishUnbound(error.document); admission.kind = 'readonly' }
+          } else if (admission.kind !== 'bound') await readFailed(error)
         }
       }, error => readFailed(error)))
       await Promise.all(reads)
-      if (signal.aborted || !currentDocument() || boundApplied) return
+      if (signal.aborted || !currentDocument() || admission.kind === 'bound') return
       const failure = selectObservationReadFailure(failures)
-      if (failure !== null) throw failure
+      if (failure !== null && (admission.kind !== 'readonly' || isRefusal(failure))) throw failure
     }, { topics: ['published_artifacts'], resetRead: () => {
       if (initialReset) { initialReset = false; return }
       documentRef.current = null

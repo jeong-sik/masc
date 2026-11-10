@@ -465,8 +465,12 @@ let current_execution_http_revision ~owner () =
 let with_execution_observer_instance ~owner json =
   match owner.binding, json with
   | Some (_, scope), `Assoc fields ->
-      `Assoc (("observer_instance_id", `String (Server_observer_scope.instance_id scope))
-        :: List.remove_assoc "observer_instance_id" fields)
+      let instance_id = Server_observer_scope.instance_id scope in
+      (match List.assoc_opt "observer_instance_id" fields with
+       | Some (`String current) when String.equal current instance_id -> json
+       | Some _ | None ->
+           `Assoc (("observer_instance_id", `String instance_id)
+             :: List.remove_assoc "observer_instance_id" fields))
   | None, `Assoc fields -> `Assoc (List.remove_assoc "observer_instance_id" fields)
   | (None | Some _), (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _) -> json
 ;;

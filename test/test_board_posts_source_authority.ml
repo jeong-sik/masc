@@ -676,6 +676,8 @@ let test_unknown_rewrite_cannot_be_read_clear base_path _workspace =
   let store, _, armed, _, fired = fault_store base_path in
   load_posts store 0;
   let post = require_post (create store "before unknown rewrite") in
+  let post_id = Board.Post_id.to_string post.id in
+  require_board (Board.set_thread_id store ~post_id ~thread_id:"pending-memory-canary");
   armed := true;
   require_io_refusal (edit store post "published but durability unknown");
   Alcotest.(check int) "actual post-rename parent-sync hook failed once" 1 !fired;
@@ -688,9 +690,14 @@ let test_unknown_rewrite_cannot_be_read_clear base_path _workspace =
   require_unknown_parent_sync store;
   require_pre_effect (create store "ordinary reload cannot authorize another write");
   require_io_refusal (edit store post "cannot overwrite an unsettled effect");
+  Alcotest.(check string) "display retains the old row without write authority"
+    "before unknown rewrite" (current store post).body;
   Board.flush_dirty store;
   Alcotest.(check string) "unknown source cannot be overwritten or cleaned" bytes
-    (read_bytes (Board.persist_path store))
+    (read_bytes (Board.persist_path store));
+  require_unknown_parent_sync store;
+  Alcotest.(check string) "fresh load keeps the actual new body after refused flush"
+    "published but durability unknown" (current (reloaded base_path 1) post).body
 
 let jsonl_row_count path =
   read_bytes path |> String.split_on_char '\n'

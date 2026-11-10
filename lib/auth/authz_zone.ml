@@ -299,7 +299,8 @@ let error_detail = function
 ;;
 
 (* A record that was turned down says why to whoever sent it. A failure is
-   the zone's own, and its reason names paths of the server. *)
+   the zone's own: whoever sent the record cannot act on its reason, and the
+   reason can name paths of the server. *)
 type cause =
   | Refusal
   | Failure

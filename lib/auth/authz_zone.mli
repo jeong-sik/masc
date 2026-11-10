@@ -317,18 +317,20 @@ type error =
 
 (** What a caller that answers a person gives. A record that was turned down
     ({!Refused}, {!Record_not_built}, {!Log_holds_records}) says why, as
-    {!error_detail} does. Every other error is a failure of the zone: its
-    reason names paths of the server, so the text is one fixed sentence. *)
+    {!error_detail} does. Every other error is a failure of the zone. A person
+    cannot act on its reason, and the reason can name paths of the server, so
+    the text is one fixed sentence. *)
 val error_to_string : error -> string
 
 (** The reason in full, with the paths of the files: for the operator of the
     host. *)
 val error_detail : error -> string
 
-(** Appends one record, as the module text says. A failure of the zone is
-    written to the log with {!error_detail}, so the operator has the reason
-    that {!error_to_string} leaves out. A record that was turned down is not
-    written to the log. *)
+(** Appends one record, as the module text says. A failure of the zone that
+    this call returns is written to the log of the server once, as a warning
+    with {!error_detail}, so the operator has the reason that
+    {!error_to_string} leaves out. A record that was turned down is not
+    written to the log, and neither is an exception that leaves this call. *)
 val commit : t -> draft -> (committed, error) result
 
 (** Appends the first record of a log with the steps of {!commit}, for

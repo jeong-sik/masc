@@ -334,7 +334,7 @@ let detail_status ~reader post_id = fst (detail ~reader post_id)
 let check_runtime_failure label result =
   Alcotest.(check bool) label true
     (match result with
-     | Tool_result.Failed { class_ = Tool_result.Runtime_failure; _ } -> true
+     | Tool_result.Failed { Tool_result.class_ = Tool_result.Runtime_failure; _ } -> true
      | Tool_result.Failed _ | Tool_result.Completed _ | Tool_result.Deferred _ -> false)
 
 type query_source = Initial_missing | Present_empty | Non_regular | Invalid_row | Torn_tail

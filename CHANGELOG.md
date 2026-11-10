@@ -2,6 +2,1061 @@
 
 ## [Unreleased]
 
+## [0.70.0] - 2026-11-09
+
+1. 이번 0.70.0 은 0.69.0 이후 쌓인 744건의 사용자 대상 변경(Added 89·Changed 100·Fixed 147·Removed 11)과 350건이 넘는 내부 정비를 담은 대형 릴리스입니다.
+2. 다계정 인가가 갖춰졌습니다: 스코프 PAT(`mpat_`)와 서비스 자격증명(`msvc_`)의 발급·철회·만료가 인가 원장에 본문과 함께 기록되고, 원장 컷 뒤에도 철회가 살아남니다 (#49709·#49712·#49716·#49721·#49729·#49734).
+3. 브라우저 ego 연결이 인간급 조작까지 갑니다: 페이지 터치(tap/swipe), 창 목록·`list_windows`, 지정 호스트 요청 차단, 쿠키·저장소·네트워크·콘솔 읽기가 개별 권한으로 켜집니다 (RFC ego CDP L4~L11, #49295·#49320·#49379·#49561·#49642·#49657·#49723).
+4. TUI Keeper 목록이 개편됐습니다: 다음 dispatch 대상·휴식 경로 시각화(#49730), 실패 시도 사슬(`✗ › ✗`)과 종단 실패 원점(#49731), 시각축 칸·7종 다음 실행 상태(#49738), 저장 레이아웃 단순화(#50264).
+5. 새 모델 경로: tinker(Thinking Machines Inkling-2-Small) exact-output 레인(#49702)과 Mistral Vibe headless 출력 디코딩(#49724).
+6. Keeper 의미 실행 저장이 v2 로 하드컷됩니다: 예전 형식의 chat-operations 저장은 더 읽지 않습니다 — 업그레이드 노트의 fresh-state 절차를 먼저 읽으세요 (#50583).
+7. 대형 수리: 유지된 스크린샷 수십 장이 다음 턴을 모델창 초과로 거절하던 문제(#49665), 레인 전환의 잔여 캐리어가 모든 재시도를 막던 Anthropic 문제(#49633), Lane Add-on Detach 교착이 설정 잠금을 쥐던 문제(#49359·#49666), 허용 밖 파일 읽기 거부가 정상 완료로 기록되던 문제(#48773).
+8. 취소·종료 신뢰성: 실행 중 취소된 도구 호출이 `wire_outcome: unknown` 원장 행으로 남고(#49718), 프로세스 그룹이 끝난 턴 정지가 2초 유예를 다 기다리지 않습니다(#49706).
+9. 성능: HTTP 쿼리 파라미터 파싱 최대 47배 가속·제로 할당화(#49683), provider 입력 스냅샷 디코딩 무할당화, 대형 JSON 검사의 GC 부담 절감(#50665).
+10. 업그레이드 주의 3가지: Keeper TOML 의 `microvm_delivery` 키 제거(#50589), TUI·서버 함께 업데이트(fleet 스트림 요구), `tui-keepers.toml` 의 `layout` 줄 무시(#50264) — 나머지는 업그레이드 노트 5항목에.
+11. 배포·검증 축: 설치 검증(install 2종, #50673)·browser_lane(#50700)·goal_verification_gate(#50701)·TUI memory_push 회귀가 이번 사이클에서 실측 초록으로 닫혔습니다.
+12. Known issues: TUI 시그널·전송 계열 python 15사례(task-3471)·muse deadline 4 subtest(#50591 — RC 검증에서 시험 fixture 누락 확인, 제품 무결함, #50756 으로 이 트리에서 수리) — 나머지는 제품 경로가 아닌 시험 잔여이며 v0.71.0 창에서 수리합니다. GuestShim(#50050) 16건과 LocalBuildInstall 21건은 이번 창에 회복됐습니다.
+13. Known issues 추가: 이번 컷 창 도입 비필수 3건 — executor 합성 수령 1건(task-3483, #50684 의 retention receipt, 효과는 이미 커밋된 뒤 증거 수령이 상점 부재시 실행을 멈추는 경계), tui_decode memory-health 디코드 1건(task-3489), sandbox read_backend run_command 1건(task-3490). 기준선 상존 OCaml RED 54스위트는 Known issues 표에 군집으로 기재했습니다.
+14. 게이트 증거: 컷 635a443a(15:28Z) + 게이트 수리 #50721 = RC 8f3b2a57 — Test 전체 회귀 42657800048(필수 10/10 통과, 전체 실패는 Known issues 기재)·Release full checks 42657805305(4잡 초록)·첫 RC 검증 42681028060 은 installation 축 4잡이 muse 4 subtest 로 실패해(취소된 이전 run 들의 'Release checks passed'·'Record candidate verification' failure 표기는 잡 취소 파생이며 시험 실패가 아님) 시험 fixture 수리 #50756 을 rc 에 cherry-pick(첫 동결 예외)했다. 재검증 RC 42689442386(0d808279)은 step 16 muse 축 4/4 통과를 확인하는 대신 설치 축 4잡이 영수증 검증(install-smoke step 34 invalid_receipt)에서 실패했다 — #50360 이 추가한 다섯 번째 동반 바이너리 masc-antigravity-path-hook 를 영수증 파서 허용목록과 발행 게이트 expected 자산 집합이 아직 인정하지 않았기 때문이다. 수리 #50773(파서 허용목록+시험)·#50782(발행 게이트 expected)를 rc 에 cherry-pick(두 번째 동결 예외)하고 RC 를 재발급해 최종 재검증 42702017022(6b992a8918)에서 설치 축 4/4 통과를 확인했다. 이 증거 확정 커밋(CHANGELOG·ROADMAP 메타 전용)에서 RC 검증을 다시 통과한 뒤 태그한다 — 발행 게이트는 태그 커밋과 RC run head 의 정확 일치를 요구한다.
+15. 다음: v0.71.0 창에는 동결 시각(15:28Z) 이후 main 에 착지한 조각 23건 — 전체 명세는 아래 Known issues 의 '동결 이월' 줄 — 과 위 Known issues 수리가 들어갑니다.
+
+
+### Upgrade notes
+
+- `tui-keepers.toml` stores `view` and `density`. A `layout` line is no longer read and is ignored without an error, so a saved layout opens on the state view with two lines (#50264).
+- Update the TUI with the server. The fleet stream now requires
+  `fleet.proactive_interval_sec`: a TUI built before this change refuses a
+  new server's fleet stream as an unknown field, and a new TUI refuses an
+  older server's as a missing field. There is no compatibility reader (#50579).
+- Delete the `microvm_delivery` line from every Keeper TOML while the server is stopped, then start this release. A TOML that still names the key fails to load as `unknown keeper TOML keys`, and the server's health lists it under `keeper_config_unknown_keys` (#50589).
+- The 24 memory `age_bins` counts now start bins exactly at 1h, 1d, 7d and
+  30d: under an hour, 8 log steps from an hour to a day, 8 from a day to
+  seven days, 6 from seven days to 30 days, then 30 days or older. The array
+  keeps its length, its newest-first order and its sum, but the ages each
+  bin counts change (#50639).
+- The memory health response schema is
+  `keeper.memory_os.current_health.v11`. Its `age_bins` counts the bin edges
+  of #50639 (1h, 1d, 7d, 30d) in the same 24-count array that v10 used for
+  the earlier edges. A TUI or dashboard built before this change refuses the
+  v11 response and shows memory health as not read, and this build refuses
+  a v10 response. Install the server, the TUI and the dashboard from the
+  same build (#50641).
+
+### Fresh state required
+
+- Semantic execution records in formats other than `masc.keeper_semantic_execution.v2` are no longer read or converted. For fresh state in an existing workspace, stop every writer and preserve the old workspace and evidence before removing `<base-path>/.masc/keepers/<keeper>/chat-operations.sqlite3` (`Common.chat_operation_store_basename`) and any `chat-operations.sqlite3-wal`, `chat-operations.sqlite3-shm` and `chat-operations.sqlite3-journal` beside it. This discards that Keeper's queued, running and settled operations, their input and batch-member history, semantic continuations, trace input/checkpoint ownership references and native-call history associations. Checkpoint payload files and Core journals are separate; this removal does not delete them, but a later startup sweep can collect accepted checkpoints no remaining journal names. Preserve dependent checkpoint evidence before choosing fresh state. A separate fresh base path leaves the old workspace intact. See [the stored-state guide](../docs/guides/DURABLE-STORE-HARD-CUT.md#keeper-chat-operation-journals); this change performs no installed-state removal (#50583).
+- The four-key `age_bins` object (`under_hour`, `under_day`, `under_week`,
+  `older`) is no longer read. A TUI or dashboard built before this change
+  refuses the v10 memory health response, so install the server, the TUI and
+  the dashboard from the same build. No stored file changes; the bins are
+  counted on each request (#50588).
+
+### Added
+
+- Browser ego connection supports page touch via `tap_at` and `swipe` wire commands (RFC ego CDP L4). Single `page.touch` step maps each gesture to CDP coordinates. 가이드 없음(문서 없음) (#49295).
+- Browser ego connection tab list (`list_tabs`) now includes `windowId`, and the `list_windows` wire command is available on the ego connection (RFC ego CDP L5). 가이드 없음(문서 없음) (#49320).
+- Browser ego connection supports blocking page sub-requests to specified hosts via `block_requests` and `unblock_requests` wire commands; the `intercept_network` live capability is enabled (RFC ego CDP L6). 가이드 없음(문서 없음) (#49379).
+- Browser ego connection reads cookie and storage names visible to the tab without values via `masc_browser_read mode=cookies`; the `read_storage` live capability is enabled (RFC ego CDP L7). 가이드 없음(문서 없음) (#49561).
+- Browser ego connection reads tab request lists without values via `masc_browser_read mode=network`; the `read_network` live capability is enabled (RFC ego CDP L8). 가이드 없음(문서 없음) (#49642).
+- Browser ego connection reads console lines and uncaught errors written by the tab document via `masc_browser_read mode=console`; the `read_console` live capability is enabled (RFC ego CDP L9). 가이드 없음(문서 없음) (#49657).
+- The AGENT_CORE catalog has a `tinker` provider row and a `thinkingmachines/Inkling-2-Small` model row: a 65,536-token window, the `minimal` to `xhigh` effort ladder without `none`, reasoning on `reasoning_content`, and neither JSON mode nor native schema, because the endpoint accepts both and applies neither. An exact-output lane can name `tinker.tinker-inkling-2-small` as a slot; the schema travels in the prompt and the reply is validated locally — `docs/guides/tinker-integration.md`, "Using Inkling-2-Small on an exact-output lane" (#49702).
+- A scoped PAT and a Service credential have ids and a token text: `mpat_<id>.<secret>` and `msvc_<id>.<secret>`, with a labelled SHA-256 of the secret for their records. A bearer with neither prefix reads as no token of these kinds (#49709).
+- The authorization log has the body of an authorization scope: its runtimes, channels and effects, each `"all"` or a list of labels in ascending order. A body that repeats a label, names an unknown one, or lists another order is refused (#49712).
+- The authorization log has the body of a scoped PAT record: an issued PAT with its Human, a labelled SHA-256 of its secret, its scope and an optional expiry, or a revoked PAT. A record whose scope does not read is refused (#49716).
+- The authorization log has the body of a Service credential record: an issued credential with its service and a labelled SHA-256 of its secret, or a revoked credential. A credential has no expiry (#49721).
+- Browser ego connection supports cookie write and delete on the operator's ego profile via `set_cookie` and `delete_cookie` wire commands (RFC ego CDP L11). Requires `tabId` for writes; operator-tab scripts are refused. 가이드 없음(문서 없음) (#49723).
+- `Runtime_vibe_headless` decodes Mistral Vibe headless output: the session entries `vibe -p` writes to stdout (`--output json` or `streaming`) and the `export.json` it writes to `--output-dir`. Outcomes, stop reasons, roles, effect statuses and effect error codes decode to closed variants that keep an unknown wire value as itself; `schema_version` other than 1 and missing required fields are errors (#49724).
+- An intent of the authorization log can name a scoped PAT or a Service credential as its subject, so their revocations survive a log cut back to before them (#49729).
+- The Keepers list draws the next dispatch target or resting path at the end of the DETAIL column. Resting paths distinguish whether the reset time was provider-stated (`제공자`) or MASC-bounded (`상한`), use relative durations, and prefix with `▹` only when the previous turn failed (#49730).
+- The Keepers list Detailed view draws the attempt chain (`✗ › ✗`) of failed turns on its secondary row, showing candidate runtimes and terminal failure origin with priority truncation for constrained viewports (#49731).
+- A multi-account authorization log reads scoped PAT and Service credential records. A Human issues and revokes their own PAT, which also ends at its expiry; the local operator issues and revokes Service credentials. A revoke of either is a Revoke intent (#49734).
+- In the TUI, visual axis cell representation and next run reduction for the Keeper list secondary row are implemented, supporting the seven next run states, truncation fallback, and hold status readings (#49738).
+- Scoped PATs and Service credentials can be issued, authenticated and revoked against the authorization log. A token acts while its credential is open, unexpired and unrevoked, its secret matches, and, for a PAT, its Human is active (#49739).
+- In the TUI Keepers list, the Detailed layout's secondary row now renders right-aligned axis cells including next scheduled run or hold status, shrinking left detail text on narrow viewports (#49748).
+- Extracted memory health reading and unread lag reduction into `masc_tui_keeper_memory_reading` for TUI keeper second-row memory axis cells (#49749).
+- The TUI Keepers list screen now fetches memory health snapshots on entry, updates rows on memory health SSE pushes, and refreshes them on manual reload (#49751).
+- The TUI Keepers list Detailed layout now draws right-aligned memory health axis cells (gap, unread lag, update clock, and invalidated sources) alongside schedule cells on the second row (#49754).
+- Exposed `operator_disposition` and `operator_disposition_reason` on keeper list row projections from the latest execution receipt (#49756).
+- Rendered operator intervention glyphs (`!`) and Korean disposition reason words on keeper roster rows whose latest receipt requires human action, unless the row already shows a newer state such as a running turn or a pause (#49757).
+- Exposed `failing_since` timestamp on keeper roster rows while in Failing phase (#49759).
+- Implement Keeper_turn_pulse module retaining turn outcomes (Turn_ok, Turn_rested, Turn_failed) within a sliding window (#49761).
+- Project recent 12-hour turn pulse samples recent_turns onto keeper list rows (#49762).
+- Add Keeper_memory_age_bins module categorizing first_seen fact timestamps into discrete age bins (#49764).
+- Project keeper memory age bins onto health row and bump schema to v9 (#49770).
+- Add workspace memory inventory route GET /api/v1/dashboard/workspace-memory-inventory and briefing pass observation (#49772).
+- Add workspace memory inventory wire decoder Tui_decode_workspace_memory (#49773).
+- Multi-account mode can read which credential a request presents: none, a browser session, a scoped PAT, a Service credential, an MCP OAuth token, a legacy bearer, a query credential, several, or one that does not read. Two credentials are always several (#49781).
+- `tool_execute` takes `run_in_background`. The call returns a `request_id` at
+  once, the command runs on the server until it exits or reaches `timeout_sec`,
+  and its result arrives as a tool-result receipt that wakes the Keeper. A run
+  that does not finish, because the server stopped or the run was cancelled,
+  gets an `unfinished` receipt. In the 2026-11-05 to 11-08 ledger, Execute
+  calls held 67.79 h, of which 18.68 h were `sleep` polls of two Keepers
+  (#49825).
+- `Runtime_vibe_cli` runs Mistral Vibe once in headless mode: the prompt in a file passed with `--prompt-file`, the `ask` agent, `--output json`, and a per-call directory that is removed afterwards, cancelled calls included. The child environment is a fixed list of names, so the server's `MISTRAL_API_KEY` never reaches Vibe; without it Vibe read the key stored in the macOS Keychain. No turn cap is passed, and a time limit is optional. A program that cannot start comes back as a typed spawn refusal. `export.json`'s outcome decides the result, and an exit code that disagrees with it is an error that names both values. Nothing calls it yet (#49834).
+- `Runtime_vibe_headless` decodes all twelve outcomes of Vibe 3.1.0's `RunOutcome` and gives the exit code Vibe pairs with each (#49834).
+- Multi-account mode can judge a request against the kind of its route: it reads the credential, authenticates it, and answers who the request acts as, or a 401 or 403 reason. A Human with an Admin assignment gets the Admin permissions, a Member and a service get the Worker permissions, and a PAT never gets CanInit, CanReset or CanAdmin (#49836).
+- The server opens a TLS 1.3 listener (default port 8938, `transport.https_port`; 0 disables it) and picks h2 or http/1.1 by ALPN on the same route table as the cleartext listener. Without `transport.tls_cert_file` and `tls_key_file` it writes a self-signed certificate under `.masc/tls/`. Transport health reports the listener as `https_listener` and the dashboard shows it as an HTTPS card (#49840).
+- 보류된 Candle 지급 창을 해제하는 운영 경로. `Candidate_window_released` 원장 행과 `POST /api/v1/dashboard/goals/candle/hold/release`(CanAdmin)로 열린 보류를 닫으면, 다음 payout pass가 후보 관측을 한 번 다시 읽는다. 같은 영구 모호성이 재현되면 두 번째 보류 대신 `window_released` 이유의 Unattributed로 닫힌다(#49841).
+  - Usage: Candle 기록이 on인 서버에서 CanAdmin 토큰으로 `curl -X POST -d '{"goal_id":"<goal-id>"}' <server>/api/v1/dashboard/goals/candle/hold/release`. 열린 보류가 없으면 409 `not_held`, 지급 의무가 없으면 400 `unknown_goal`, 해제되면 `released`와 함께 payout worker가 즉시 재판정한다. 끄는 법: 이 엔드포인트를 호출하지 않으면 된다 — 해제는 운영자 호출로만 일어난다.
+- `Runtime_vibe_acp_readiness` reads whether Mistral Vibe can take a lane call, over `vibe-acp` and without a prompt or model call: `_auth/status` for where the stored credential came from and `_account/read` for the account status, key scope and Vibe Code allowance. A signed-out Vibe is reported as not signed in without opening a session. A credential that is not the keyring one, an account that is not ready, a key without Vibe scope and an allowance at 100% or more (NaN included) are each a typed reason; a budget Vibe did not give is reported as unknown, and the caller decides what that means. Nothing calls it yet (#49849).
+- `Login_client.loopback` makes a login client whose redirect is `http://127.0.0.1:<port><path>`, for the localhost preview of multi-account login. Its host is fixed; `make` and `of_environment` still refuse a redirect that is not https (#49854).
+- The localhost preview of multi-account login has its pages and a who-am-I answer: an invitation page that starts a GitHub login with the token of the link, a home page that shows the session and signs out, and `GET /api/v1/auth/whoami`, judged as a read by `Auth_gate.decide` (#49856).
+- `masc auth preview --github-client-id ID [--port 8940]` serves a localhost preview of multi-account login on 127.0.0.1: a person signs in with GitHub from the invitation link, sees who the server takes them for at `/api/v1/auth/whoami`, and signs out. It runs where `masc auth invite` runs, holds the workspace lease, reads the client secret from `MASC_GITHUB_CLIENT_SECRET`, and serves no Keeper, Runtime, MCP or Board route (#49860).
+- A runtime.toml provider with `protocol = "vibe-cli"` runs Mistral Vibe once per call in headless mode, with the binding's `api-name` as `--model`. It takes no credentials or `account-home`, since Vibe uses the operator's own `~/.vibe` config and keychain login, and it needs a declared `max-context`. Fusion panelists and `masc-lane-cli-probe` can call it; a Keeper turn on it is refused before dispatch, and it stands in no exact-output list. Its calls have no MASC time limit, so a model `turn-timeout-s` or `reasoning-effort` drops the binding, and a Fusion group `timeout_s`, an output schema or an image refuses the panelist. The answer is the text of a finished run's last entry when that entry is an assistant message (#49908).
+- `masc-lane-cli-probe --vibe-acp PATH` asks `vibe-acp` once, before the trials, whether Vibe can take the call. A known budget is printed with its use and reset time, an unknown one is printed and the probe goes on, and any other not-ready reason exits 3 (#49908).
+- The multi-account log reads `provider_account` records: a person links a provider entry of `runtime.toml` as their own subscription. An account keeps its owner for good; a second link, a link for another person (an Admin's included), and a link by a service, the local operator or a system author are refused. A link takes no intent, so a log restored from before it leaves the account with no owner (#49952).
+- A route kind `Manage_own_provider` for the subscription connect routes: in multi-account, every active person passes it, an Admin and a Member alike; a PAT needs `Manage_own_provider` in its scope, and a service credential is refused (#49953).
+- The localhost multi-account preview connects a person's own subscription: a signed-in person starts the existing official-client login (`POST /api/v1/setup/accounts/login`), its account home goes under `accounts/<namespace>` of the masc directory, and a confirmed login links the account to the person in the authorization log. `GET /api/v1/auth/provider-accounts` lists what the person owns. In this mode `account_ref` and Antigravity are refused; the single-user connect routes are unchanged (#49957).
+- The localhost multi-account preview calls a person's own subscription once: `POST /api/v1/setup/accounts/verify` builds the runtime of one model from the workspace provider the login used, with the person's account home, and runs the readiness check of `runtime-verify` (a model answer and a tool round trip within 120 seconds). Another person's account id is answered as a missing one; nothing is written to `runtime.toml` or the authorization log (#49989).
+- The Keepers list's Detailed second row shows `failing <span>` for a failing keeper, drawn from the roster's `failing_since`; a keeper that is failing with no recorded start, or whose recorded start is ahead of the screen clock, shows `failing ?`. The word and the `?` mark are in the Keeper columns table of `docs/guides/TUI-KEYS.md` (RFC-0511 D1, #49995).
+- 원격 장비에서 한 Keeper 의 작업 폴더 밑 안 쓰는 항목을 치우는 payload `config/scripts/keeper-remote-workspace-cleanup.py` 를 더했어요. 이번 층은 서버가 부르지 않고 운영자가 직접 도는 경로예요(다음 층 L2 가 서버 호출) (#49999).
+  - Usage: `ssh <endpoint> python3 - --root <keeper root> --retention-sec 172800 < config/scripts/keeper-remote-workspace-cleanup.py` 처럼 돌려요. `--retention-sec` 는 필수예요. `--apply` 가 없으면 보고만 하고, 붙이면 그 기준 시각 넘게 아무 파일도 안 바뀐 항목을 지워요. 점으로 시작하는 항목(`.config/gh` 등)·symlink·살아 있는 프로세스가 있는 항목·원격에 없는 커밋이나 stash 가 있는 git 저장소·밖 worktree 의 본 저장소·판단에 필요한 사실을 하나라도 못 읽은 항목은 남겨요. 커밋 안 한 변경과 untracked 파일은 보호되지 않아요. 끄는 법: `--apply` 를 빼면 아무것도 지우지 않아요.
+- The Keepers list's Detailed second row ends with a 12-hour turn pulse: one mark per hour, newest on the right, drawn from the roster's `recent_turns` (ok, rested, failed, no turn, unknown). Hours the server no longer holds read `?`; the server counts autonomous turns only. See the Keeper columns table of `docs/guides/TUI-KEYS.md` (RFC-0511 D1, #50001).
+- The server's hourly cleanup pass now sweeps each idle remote_ssh Keeper's workspace root on its endpoint. An entry goes when nothing in it changed for `keeper_remote_workspace_cleanup_retention_sec` (two days), no live process uses it, and removing it loses no commit or stash. `keeper_remote_workspace_cleanup_enabled` (default true) turns it off. Guide: `docs/guides/KEEPER-VM-BUILD-CLEANUP.md` (#50013).
+- The Memory screen draws the memory server's age ladder: an `Ordinary:` row in the fleet header sums the Keepers' ordinary facts by time since first seen (7 days or older, 1 to 7 days, 1 hour to 1 day, under 1 hour) and counts the Keepers the server did not measure and the rows this build refused, and the selected Keeper's detail draws its own ladder under the facts line. A ladder the server did not measure is drawn as `?`, not as zeros. 가이드 없음(문서 없음) (#50017).
+- The Keepers list Detailed second row ends with a `facts` cell: the Keeper's ordinary fact count and a four-mark strip of the same ladder (a bar is relative to the tallest bin of the strip, `0` is an empty bin), or `facts ?` when the server did not measure it. Guide: `docs/guides/TUI-KEYS.md`, Keeper columns (#50017).
+- Memory 개요 화면 머리에 `World:` 줄을 더해요. `GET /api/v1/dashboard/workspace-memory-inventory` 로 curator 장부의 공유 주장·충돌 건수와 브리핑 상태를 읽어요. Memory 개요가 열려 있는 동안만, 서버 캐시(60초)보다 잦지 않게 읽어요. 아직 안 읽었거나 읽기가 실패하면 0 이 아니라 `?` 를 그려요. 도움말 시트 Memory marks 에 낱말 여섯 줄이 늘어요. (#50060)
+- Generate labelled synthetic keeper-librarian admission requests on Tinker with `scripts/tinker/librarian/synth_generate.py`, in an evaluation split and a training split with disjoint Keepers. 가이드 없음(docs/guides/tinker-integration.md) (#50066)
+- Measure models on the keeper-librarian admission sets and apply gates G1-G5 with `scripts/tinker/librarian/eval_admission.py`, and remove synthetic requests whose labels a blind judge does not confirm with `e_synth_audit.py`. 가이드 없음(docs/guides/tinker-integration.md) (#50067)
+- Sample teacher answers that match the synthetic labels and train an answer-only (A) and a teacher-thinking (B) LoRA branch on the 256K Inkling 2 Small ID with `scripts/tinker/librarian/teacher_sample.py` and `train_sft.py`; training refuses to start unless the fixed pass lines are unchanged. 가이드 없음(docs/guides/tinker-integration.md) (#50069)
+- The multi-account log reads `runtime` records: a person makes a Runtime on a provider account they own, and the same record names its Self grant. A Runtime keeps its owner, account and grant for good; a Runtime on an account no one linked or another person owns, one made for another person (an Admin's included), a Runtime made twice, a grant id named twice, and a Runtime by a service, the local operator or a system author are refused. A Runtime takes no intent, so a log restored from before it has neither the Runtime nor its grant (#50084).
+- The multi-account log reads `keeper` records: a person makes a Keeper and is its owner (`made`), and the owner gives it one of their Runtimes (`assigned`); a later assignment replaces the Runtime. In multi-account mode the assignment of a Keeper lives in the log, not in `[runtime.assignments]` of `runtime.toml`. A Keeper made twice (by anyone), one made for another person (an Admin's included), an assignment to a Keeper no record made or of another person, a Runtime no record made or of another person (an Admin's included), and a record by an inactive person, a service, the local operator or a system author are refused. A Keeper with no assignment has no Runtime (#50177).
+- The localhost multi-account preview lets a person make a Keeper (`POST /api/v1/auth/keepers`), give it one of their Runtimes (`POST /api/v1/auth/keepers/assign`) and list their Keepers (`GET /api/v1/auth/keepers`), under the new route kind `Manage_own_keeper`: open to every active person, a PAT needs `manage_own_keeper` in its scope, and a service is refused. A Keeper or a Runtime of another person is answered as not there (404), and a name another person took is a 409. The home page shows My Keepers. No Keeper TOML is written and no turn runs (#50178).
+- The server pull request snapshot reads the title, the head commit and the last review of each account (account, state, commit) of every open pull request. `GET /api/v1/repositories/pulls` rows carry `title`, `head_oid`, `head_review` (`reviewed_on_head`, `not_reviewed_on_head`, `review_history_incomplete` or `unknown`) and `reviews`. A column the reader cannot read stays on its own row as `null` or `not_read` and does not drop the row (#50214).
+- Add a manual auth-route transport parity workflow that distinguishes ordinary
+  WebSocket discovery requests from WebSocket-only endpoints and reports
+  incomplete runs and missing responses (#50242).
+- The Keeper tool `keeper_pull_requests_list` lists the open pull requests of the registered repositories from the server's last reading and does not call GitHub. A row carries the placement of the pull request (checks failing, changes requested, conflicting, not reviewed on the head commit, reviewed on the head commit while the review decision still waits for an approval, and the placements that need no work), its checks, review and mergeable state, whether an account's last review is on the head commit, and the last review of each account. The default rows are the five placements that need work; the other placements are counted. The tool declares `defer_loading = true`, so a Keeper finds it through tool search. 가이드 없음(docs/rfc/RFC-keeper-world-state-shows-open-work.md) (#50259).
+- Enable GitHub Auto-merge by default for ordinary Ready PRs targeting main, requiring two distinct account approvals, and merge Native Stacks whole through their top PR. Review events run metadata-only workers from trusted default-branch code; see docs/guides/NATIVE-GITHUB-STACKS.md#operator-requested-automatic-merge (#50267).
+- RFC-0516: 반복 예약(`masc.keeper_wake`)과 Task가 이어 쓸 게시 아티팩트 id를 `continues_artifact` 타입 필드로 가리키는 설계를 문서화했다. 필드가 있으면 wake가 대상 id를 구조화로 전달·기록하고(발행 강제는 없음), 없으면 오늘 동작 그대로, 대상 문서가 지워졌으면 발행이 저장소 `Missing`으로 거절되어 새 문서가 만들어지지 않는다. 11-06 운영자 임시 조치(예약 문구에 고정 문서 id)의 이행 순서와 운영자 재검토 세 반론에 대한 답을 본문 §4·§5에 적었다 (#50299)
+- Add a source-checked map of TUI screens, nested views, overlays, and music workspaces. #50332
+- Review Goal criterion feasibility asynchronously with retained original judgments, exact revision binding and Dashboard/TUI observations. Guide: [Goal criterion review](../docs/design/goal-criterion-review.md) (#50341).
+- A tool result that an official client (Claude Code, Codex, Antigravity, Muse) receives from a Keeper now ends with the queue rows that arrived since the turn began, once each, oldest first, up to 8 a result with the rest counted. Results that end the turn, results the block would take past the tool's declared size ceiling, and an unreadable queue go out unchanged. The rows stay queued and start their own turn after the run. Each appended block is recorded in the run's RAW trace as the `arrived_stimuli_projection` hook, and `measure_runs_and_arrivals.py` reports the rows shown, their wait to the first block, and the block bytes. 가이드 없음(docs/rfc/RFC-arrived-stimuli-reach-the-running-turn.md) (#50365)
+- Enforce recorded Direct Board readership across reads, aggregates, queued delivery and public observations, preserving unresolved original signals for recovery. Guide: [Direct Board readers](../docs/design/board-direct-readers.md) (#50387).
+- `masc_keeper_delegate_targets` reads the chat queue and the live turn of up to 16 named Keepers, so a Keeper can compare delegate targets before it calls `masc_keeper_delegate`. Each row carries `queued_count`, `oldest_queued_age_s` while work waits, and `turn_age_s` while the Keeper is inside a turn. The `target_turn_age_s` in the delegate result comes from the same read. The tool is deferred, so a request carries its schema only after the model asks for it by name. 가이드 없음(문서 없음) (#50447).
+- The keeper-librarian verdict asks a blind judge, for every memory an E-synth answer absorbs, the question MASC's absorb gate asks its judgment model, in the gate's words from `config/prompts/librarian.md` and with the state the gate sends, and reports absorb precision and judged merge recall per target. Each case shows the claim of the call its row names, and the verdict reads the decisions only for the run the cases came from. An absorbed planted stale fact is wrong without a case (#50458)
+- In the multi-account preview, a person sends their Keeper a message and the Runtime they gave it answers once on their own Claude Code subscription (`POST /api/v1/auth/keepers/turn`, a Run button under My Keepers); a Codex Runtime is refused until plan D2-6 (multi-account plan D2-8). 가이드 없음(문서 없음) (#50467).
+- The keeper-librarian harness measures admission prompts on GLM: `eval_admission.py run --provider glm` sends Z.AI's coding endpoint the request MASC's GLM slot sends, reads GLM's error code before the HTTP status, stops on auth and quota codes with GLM's message, resumes from the same `--out`, and caps the requests under one `--out` with `--max-calls`. `run --template <librarian.md>` draws every prompt with another template from the same request data (#50509)
+- 카탈로그 발행 때 최근 7일 내 활성 이력이 있으나 디스크·카탈로그 원천이 없는 스킬을 `skill_missing_on_disk` 경고(WARN 로그·감사 행·SSE 런타임 옵저버 이벤트)로 기록한다(RFC-0506, #49178). 스킬 발행 성공마다 Board 에 짧은 영수증(이름·원천·게시자·상태)을 남긴다 (#50531).
+- The Keepers fleet line ends with `proactive every <interval>` (`5m`, `1h`,
+  `1m30s`), the
+  `keeper.keepalive_interval_sec` setting the heartbeat loop reads for
+  periodic turns, carried in the fleet stream and in the `keeper_fleet_safety`
+  health section as `proactive_interval_sec`. A narrow screen drops it before
+  the counts and the blocker. 가이드 없음(docs/guides/TUI-KEYS.md) (#50579).
+- The server runs `masc_sandbox_volume_gc` as a report, without `execute`, one maintenance pulse after it starts and every six hours after that. The pass deletes nothing, keeps its outcome in server memory and writes one log line. A host without Apple Container records the pass as skipped before any volume command runs. The `/api/v1/dashboard/tools` envelope carries the last pass as `sandbox_volume_gc_report`, and the TUI Tools catalog pane shows its time and reclaim candidates under the `V` line (#50580).
+- Read completed direct native execution history through token-bound Admin endpoints, with stored batch-leader identity, original trace directories, bounded call/event pages and Core cursor validation (#50592).
+- Keep canonical recursive event identities separate from redacted display content, without recovering execution or falling back to trajectory logs (#50592).
+- The Keepers state, cause, time and runtime views draw each Keeper's scheduled wakes of the next 12 hours in the strip column, one mark per half hour from the now slot: ◷ for a known wake, · for none and ? for a half hour that may hold a wake the TUI cannot list (#50597).
+- Inspect retained Core calls and recursive execution history from a direct-operation conversation, with bounded pages, call selection and explicit evidence errors (#50619).
+- Keep conversation/tool observations independent of Core history and cancel stale history reads through response-body consumption when the selected Keeper, operation or credentials change (#50619).
+- Keeper chat supports `/memory status` for a fresh health read and `/memory sync` to request the existing Memory lane (including while paused) under health contract v12 from #50642, while keeping acceptance separate from completion and preserving uncertain catch-up receipts in their original workspace. (#50643) Guide: [Chat](https://github.com/jeong-sik/masc/blob/fdf5d9c2b17129db054d656043cb4e48e380fea8/docs/guides/TUI-KEYS.md#chat).
+- `keeper_remote_workspace_cleanup_timeout_sec` (default five minutes) sets how long one Keeper's remote_ssh workspace cleanup may run on its endpoint; it was a fixed constant. Guide: `docs/guides/KEEPER-VM-BUILD-CLEANUP.md` (#50646).
+- Retain producer-owned Board comment and reaction facts in the exact tool-call record, including committed writes whose model-facing result fails (#50684).
+- Read selected execution records in one Admin-protected indexed request, preserving missing and duplicate rows independently of the recent-call window (#50684).
+- Report an exact Board execution's recording confirmation separately from the completed Board write when MCP history storage cannot confirm its append (#50684).
+- Open recorded Board comments, parent replies and reaction targets from a Keeper turn, including older indexed executions, while keeping ambiguous or unavailable evidence unconfirmed (#50693).
+
+### Changed
+
+- The route table records what a `Public_read` route asks for under strict auth: `{"kind":"public_read","when_strict":"credential"}` today, or `"open"` for a route that stays open. The HTTP/2 gate reads it; every registration still records `credential`, so nothing opens or closes (#49655).
+- A route can be registered as `Public_read_open_when_strict`, a public read that stays open when strict auth is on, and `Public_read_on_canonical_host` names its strict reading (`when_strict`). The dashboard routes keep `Credential_when_strict` and no route uses the new kind yet, so nothing opens or closes (#49664).
+- The twelve public reads strict auth already left open (the gate reads, the favicons, the dashboard pages, the MSX cart list and voice audio) are registered as `Public_read_open_when_strict`, so the route table says `"when_strict":"open"` for them. Nothing opens or closes (#49668).
+- Published-artifact links (`GET /api/v1/published-artifacts/<id>`) are registered as a public read that stays open under strict auth. The handler still checks the optional token and answers 401 for a private artifact; a malformed id sent without a credential now gets the handler's 400 instead of 401 (#49674).
+- Under strict auth a public read that asks for a credential always asks: the public-read path list (`Server_auth.is_public_read_path`) is gone, and a route that stays open says so in its kind (`Public_read_open_when_strict`). No route opens or closes (#49682).
+- The Dashboard draws a `Tool calls 24h` row under its cards: the calls of the last 24 UTC hours as one glyph per hour, then the day's calls and failed calls, read from the same `tool-metrics/series` answer as Usage's Calls section. A reading that is missing says `reading…`, `unavailable` or `no calls` and is never drawn as zero. Calls follows `w` and the Dashboard always draws the last day, so a move between the two reads the series again (#49692)
+- A press on the Dashboard's `Tool calls 24h` row opens Usage on its Calls section, the move `m` then `V` makes (#49699)
+- Server shutdown now logs one line for each Keeper whose running turn it stops: the turn's lane and age, how long the stop took, and whether it succeeded. The 3-second hook timeout does not cut these stops, only the 10-second process watchdog does, and this names which turn holds shutdown (#49684, #49707)
+- The authorization log has a `pat` record kind, written by the person whose PAT it is. A Service credential record is now written by the local operator instead of an authenticated principal. The state does not read either kind yet (#49727).
+- The web dashboard Lab Tools page shows the `도구 실행 통계` card (hourly and daily call counts, execution time, p50 and p95 latency) first, under the view switch. It used to sit after the tool inventory, about 24,900 px down a 26,284 px page (#49735).
+- `keeper_tools_list` returns the names of the Tools and Skills filed under their availability, and a row carries the refusal reason, the transport alias target, the Skill kind and the Tools a withheld composition lacks. The schema name is `masc.keeper.capability_inventory.v1` and the `descriptor_surface` field is now `tools`. The full descriptor rows of a surface of 203 Tools and 52 Skills were 253,258 to 292,878 bytes, above the inline ceiling of every lane, so all 53 calls in the 24 hours to 2026-11-07T09:52Z reached the model as a blob marker; the same surfaces come to 8,623 to 9,888 bytes (#49803).
+- `masc_dashboard` lists the suggested action of neighbouring Attention items
+  once, after the run of items that share it, with the number of items above
+  it when the run has more than one. The line was printed under every item,
+  and in the 33 stored results (16,789 to 18,719 B) it was printed 21 to 27
+  times, which put every result above the 16,384 B inline ceiling of the
+  antigravity lane. The same results become 15,596 to 17,451 B, and 15 of the
+  33 fit under the ceiling (#49817).
+- The Vibe child environment also passes `ALL_PROXY` and `all_proxy`; proxy URLs reach Vibe as they are, user info included (#49855).
+- H2 connections on the cleartext and TLS listeners no longer advertise server push (RFC 9113 §8.4). `transport.h2_initial_window_size` in `runtime.toml` (env `MASC_H2_INITIAL_WINDOW_SIZE`) sets the per-stream flow-control window; its default is the h2 library's 134217728, so nothing changes until an operator sets it. The largest accepted frame stays the library's 16384 because the pinned h2 sizes the frames it writes by that value until the peer announces its own (#49940) (#49863).
+- `masc auth bootstrap` 도움말·성공 문구와 다계정 부팅 거부 문구가 단일 사용자로 되돌리는 길을 알린다. masc 프로세스를 멈추고 `authz.jsonl`, 외부 저장소, 설치 기록을 지운 뒤 `config.json`에서 `account_mode`를 빼면 단일 사용자로 뜬다. 로그만 지우면 복원으로 보고 거부한다(#49916).
+- The start result of a `tool_execute` call with `run_in_background` names
+  `keeper_composition_status` and `keeper_composition_cancel`, which take its
+  `request_id`, and `keeper_tool_search`, which loads them. The two tools take
+  any async request id, so a background run works with them as it is; their
+  descriptions now say so (#49942).
+- A runtime binding whose model has no AGENT_CORE catalog row, under a provider whose capability preset answers, now has its whole capability table read: every value it states (`max-context`, `tools-support`, `streaming`, `thinking-support` and every `[models.X.capabilities]` key) overrides the preset. `tools-support` and `streaming` override it even when unwritten, because the parser fills them with `false` and `true`; other unstated keys keep the preset value. Unstated image, audio, video and multimodal input stays off; document input has no runtime.toml key and keeps the preset value. Before, only four keys were read. The agent_core request policy reports which catalog layer answered as a closed type (#49993).
+- The agy that masc starts for Keeper turns, readiness and probes, model, context and usage reads, and the Antigravity login now runs with `AGY_CLI_DISABLE_AUTO_UPDATE=true`, so a Keeper turn no longer swaps the agy binary under the next turn and parallel turns no longer each start an updater. The operator updates agy with `agy update` or by running agy directly (#49998)
+- A remote SSH endpoint's preflight pass is reused longer by calls that only
+  read. Read, Grep, a read-authority capture and `tool_execute` with
+  `intent=auto` reuse a pass that let them through for
+  `MASC_KEEPER_SSH_PREFLIGHT_READ_TTL_SEC` (default 300 s). A refusal and every
+  call that may write keep `MASC_KEEPER_SSH_PREFLIGHT_TTL_SEC` (default 60 s)
+  (#50012).
+- A runtime binding whose model has no AGENT_CORE catalog row, under a provider the catalog has a row for, is now an exact-output slot when its runtime.toml states the five capabilities an exact slot needs: the window (`max-context`, on the model, the binding or the provider table), the effort ladder (`accepted-reasoning-efforts`), JSON mode (`supports-response-format-json`), native schema (`supports-structured-output`) and the output ceiling (`max-output-tokens`). A provider preset never stands in for one of these five. The rest of what an exact request reads describes the provider's API: the schema dialect, thinking control, the system prompt and document input. Those follow the provider preset wherever runtime.toml states nothing. The slot answers with the capabilities the binding's Keeper turns run on. A Tinker `tinker://` sampler checkpoint is the first such model. A binding that leaves one of the five unstated is still left out as `Target_not_in_catalog` on every wire, and the boot log names the keys to write. A binding whose provider has no catalog row is still left out (#50026).
+- In the localhost multi-account preview, a passing call of a person's own subscription (`POST /api/v1/setup/accounts/verify`) makes that model a Runtime of the person: the first pass writes the Runtime record with its Self grant, a later pass finds it, and the answer is `{"verification": ..., "runtime": ...}`. One verification of an account runs at a time and an overlapping request gets 409; the failure detail and the load diagnostic, which can name server paths, go to the server log instead of the person. The preview lists the person's Runtimes under My Runtimes (#50085).
+- The Code file footer names `d` (diff), `H` (history), `b` (blame), `m` (notes) and `y` (copy source) before the language-server keys `K R D B` and the draft keys `e S V X A`. A footer row gives up keys from its back, and at 300 cells the file footer used to name `K R D B e S V X` and none of the view keys. The footer also spells the pan key `Shift-←/→` instead of `Shift-Left / Shift-Right`, as the diff footer already did. The key guide rows move with the table (#50150)
+- The Code footer on the project's file list names `d` (changes), the key that opens the project's Git changes. The footer drew the list without it because it treated `d` as a file key. A keeper's or a repository's file list has no arm for `d` and keeps leaving it out. The key handler and the footer read one function, `code_tree_opens_changes`, so the two cannot disagree (#50161)
+- Pin the compiler, dependency metadata, CI setup, container builders and source-install instructions to OCaml 5.5.2. Existing binaries and images require rebuilding. (#50176)
+- Judge E-synth drops the labels do not ask for before the keeper-librarian admission verdict: `scripts/tinker/librarian/e_synth_audit.py drops` shows each such fact to a blind judge among other facts of the same memory, every case of one memory shows the same facts, including the ones the label audit picks on any of its requests, and when the judge takes the fact out as well, no target is scored on that memory, while a drop the judge keeps still counts as wrong. G4 now passes at a paired lead of −0.06 or more and G5 at a latency ratio of 1.16 or less, twice the spread two runs of the base model showed in one window (#50181)
+- The Code diff overlay names the rows its window holds ("rows 1-22/184") in the row under the pane, where the file pane names its lines, when the diff is longer than the window; a diff that fits is unchanged. The Code file, hover, notes and history position lines are built by `Masc_tui_scroll.window_reading`, the builder the other surfaces use, so they read "rows X-Y/Z" and "lines X-Y/Z" instead of "rows X-Y of Z" (#50188)
+- The Keepers pulse counts autonomous turns per half-hour slot over the last day instead of keeping the last 24 turns, so a busy keeper no longer shows `?` for most of the 12 hours. The roster sends `recent_turns` as `{known_since, slots}` (a hard cut), the TUI draws clock hours, and an empty hour reads `?` only before the server's `known_since`. The boot seed counts only autonomous-cycle turns, so chat turns no longer show in the pulse after a restart (RFC-0515 P1, #50190, #49984).
+- The Keepers list Detailed second row keeps 10 columns for its DETAIL text. When the cells on the right (failing, schedule, memory, pulse, `facts`) would leave it fewer, the last cells are dropped first and the first cell stays. A row without DETAIL text is laid out as before (#50197).
+- `drag_to` takes only `{selector}` for `source` and `destination`, and refuses `documentId`/`nodeId`, `via` and `durationMs`. The ego connection refused scene-node and waypoint drags and a nonzero duration before input, so only a selector-to-selector drag ever ran. `durationMs` stays for `swipe` (#50202)
+- The Memory overview `World:` line now says why a read failed. After `read failed` it adds `workspace unconfirmed` when reading was suspended until the workspace is confirmed again, or the failure text the client received, cut with `…` to the width the row has left and left out when fewer than ten cells remain. The header keeps its height (#50212)
+- The Logs footer no longer names `Right / Enter:detail` inside an open entry, where both keys do nothing. With no entry on the list it also drops `j/k`, `PgUp/PgDn`, `Right / Enter`, `n / N` and `Home/End`, which need one. `PgUp/PgDn` reads `page` instead of `detail page`, since on the list it moves the cursor a page (#50249)
+- Reviewer Keepers post a verdict, APPROVE or REQUEST_CHANGES, on draft and ready pull requests alike. The shared Keeper prompt, the review routing prompt, the PR patrol skill and the sample reviewer config no longer have a COMMENT-only reviewer role or one final judge per GitHub account; a reviewer whose account authored the pull request still leaves a COMMENT, since GitHub refuses that verdict (#50261)
+- The Keepers list walks eight views with `v` (list, state, cause, time, memory, age, runtime, 24h) and switches between one and two lines per Keeper with `V`. Each grouping view draws a heading over each bucket of RFC-0515 §2.3, and the 24h view orders Keepers by their failed half-hour slots of the last day. The list opens on the state view with two lines (RFC-0515 V1, #50264).
+- A multi-account Runtime record names the effects its Self grant allows, and a Keeper record names the policy its owner's turns run under: a drawn policy id and a scope of Runtimes, channels and effects. A verified Runtime allows read_state, invoke_model and use_tool; a Keeper made in the preview allows the autonomous and direct channels. A policy id named by another Keeper is refused. Both bodies change as a hard cut. When the same person makes the same Keeper twice at once, the preview answers "existing" instead of a conflict naming another person (#50268).
+- Scope MASC PR reviews to the current repository contracts and available review skills, distinguish external deployment claims, and omit irrelevant review-limit boilerplate (#50271).
+- The Machine activity and Exact activity pages draw a title, facts and notes apart: labels receded in one column, rules receded, a draft that differs from the file reads `not saved` and is warned, and a value with a word wider than its column goes under the label (tui) (#50288)
+- The Keepers list draws its eight views as a strip under the title, and a press on a name opens that view and saves it the way `v` does. In a grouping view `j`/`k` also stop on group headings, `[`/`]` jump to the previous or next heading, and on a heading `Left` folds and `Right` unfolds its group for this session; on a Keeper row both arrows keep their meaning, and an open `K` reading still takes `[`/`]` first (RFC-0515 V2, #50292).
+- Score synthetic keeper-librarian admissions by the memory an answer leaves: new knowledge lands in a new claim, a corrected fact leaves, a complemented fact merges into the new claim, a restated fact stays or merges into the rewrite, and a transient state adds nothing. Planted stale facts count as removed only by `dropped`, and each planted duplicate pair has to end as one fact. The scorer moves to `scripts/tinker/librarian/memory_scores.py` (#50325)
+- Inline Keeper compositions admit `Execute` and `masc_board_post` nodes (RFC-0502); each inline effect passes through the invoking Keeper's own Gate approval or Board policy, while durable async plans still refuse both (#50328).
+- Start the TUI command palette with main destinations, group detail paths, and search aliases without duplicate rows. #50333
+- The Keepers list draws the selected Keeper's portrait only in the two-line list view, as a whole-body figure instead of the face thumbnail; the axis views use those rows for Keepers (RFC-0515 E20, #50336).
+- `Enter` on the Keepers list opens a Story window below the list for the Keeper under the cursor, and `Right` opens the Keeper detail that `Enter` used to open. The window has three pages (story, schedules, memory); while it is open `Tab`, `s` and `m` move between them and `Esc` closes it. It reads only values the TUI already holds (RFC-0515 S1, #50354).
+- The `d` reading of a Browser, Machine, Package or manual-attachment row in Features draws its facts and notes apart like the activity pages: labels receded in one column, rules receded, and the Reading value in the same colour the list draws for that standing; a failed worker, an invalid declaration, an admission error and a failed read on the activity pages use a new failure tone (tui) (#50359)
+- Every Keepers view but the list draws a Keeper as one axis row under a `keeper ◂ 12h ● now ▹ next` header: the 12-hour turn pulse, the NOW cell, then what comes next -- what the Keeper waits on a person for, the next scheduled run, the next dispatch path and the librarian lag. With two lines only a failing Keeper draws a second line, holding its last failure and the attempts of that turn. The list view keeps its columns and its detailed second line (RFC-0515 V3, #50366).
+- The Story window reads the Keeper's own first page of schedules from the server while it is open, draws it on the schedules page, and adds the Keeper's last wake to the story page (RFC-0515 S2, #50382).
+- The Keepers memory and age views draw cells of their own on the axis row. The memory view draws the turn pulse, how the librarian's last pass ended, then the unread turns as a bar against the listed Keeper furthest behind, the time since the last digest and the gap. The age view draws the facts by age in the server's four bins, the time since the memory last changed, then the unread-turn bar, the invalidated sources and the fact count. A value the server did not measure draws `?`, a Keeper with no memory snapshot draws `—`, and one whose memory row was not read or was refused draws `mem ?` or `mem !`, never a value in their place. The Memory pane's Librarian line names how the last pass ended in the same words (RFC-0515 V6, #50394).
+- In the multi-account preview, a login check or a verification starts Claude Code or Codex only on a home of the person it serves, spelled by one layout; a refused verification reports `account_not_authorized` (multi-account plan D2-4) (#50421).
+- Claude Code starts only on an account authorized for the Keeper turn or operator call it serves: the turn driver, Fusion, the capability and dashboard probes, verification and login checks ask for it, and host tools publish single-user access first. `masc runtime-probe` exits 5 with `account-not-authorized` when the access refuses the probe (multi-account plan D2-5) (#50422).
+- The Story window's story page lists the Keeper's newest three turns, read from the turn-records page Memory reads with limit=3: each turn's stop reason as the receipt recorded it and its age, and a turn without a stop reason says so (RFC-0515 S3a, #50439).
+- The code lexer names the four roles of a JSON document (key, number, literal, punctuation) and the Markdown palette, the Code pane and the Config pane draw them with the `Theme.Syntax.json_*` colours the chat and a Task note already use, so one JSON reads the same on every screen that lexes it (tui) (#50442)
+- The shared keeper prompt no longer carries GitHub review, merge or Native
+  Stack procedure. That procedure is in the `masc-pr-patrol` skill, the
+  constitution and the stack guide. The review routing document, which no
+  turn ever loaded, is removed, and the sample `code-reviewer.toml` names only
+  the role and the skill (#50454).
+- The Logs detail draws Level, Message, Timestamp, Category and the metadata block through the Page_line reading renderer the Features detail uses, now in `masc_tui_page_reading`: one label column across both blocks, receded labels, the level in the tone of its severity with the list's mark, a missing field as a receded dash, and no repeated "STRUCTURED DETAILS" line (tui) (#50455)
+- The Story window's story page tells its past group as one time-ordered feed: the Keeper's newest three turns, the newest two wakes among its schedules and the Librarian's last digest, oldest first with their ages, and a line after them for each source that is not read or whose read failed (RFC-0515 S3b, #50459).
+- The permission a keeper GET sub-route needs is decided by one exhaustive match over the typed route instead of sixteen path-suffix comparisons, so a route added without a permission decision no longer compiles (#50461)
+- Organize TUI navigation into Operations, Work, Keepers, Features & plugins, Workspace and System, retaining explicit Usage and Board routes and prioritizing submitted Tasks awaiting verification (#50465).
+- Show feature purpose and observed state before technical details, distinguish plugin configuration from current or retained workers, and open System on configuration status before source text (#50465).
+- The schedule modify form fills its recurrence fields from the decoded recurrence, and a recurrence the TUI cannot read no longer opens the editor, since saving would write a default over it (#50469).
+- `masc_run_list` returns the most recently updated runs first as summary rows (`task_id`, `agent_name`, `plan_bytes`, `created_at`, `updated_at`) instead of every run with its full plan text, and takes `limit` (1 to 100, default 50); `count` is the total and `shown` the rows returned. A listing of 787 runs was 962,022 bytes, over the 16,384-byte tool result ceiling, so a model received a stored-blob preview of 200 characters instead of the list (#50476).
+- The Runtime row detail and the Routes page draw their fields through the Page_line reading renderer the Logs and Features details use: one label column per page (`detail_page`), receded labels, values in the tone of what they say, a label wider than the column on a row of its own, and a blank value as the empty mark. `Page_line` gets an `Info` tone, and the Runtime action notice colour is read from one tone table. The Logs detail draws an entry without a Keeper as the empty mark, as the log list does (tui) (#50492)
+- Unify lexical path normalization (`Path_scope.lexical_normalize_abs` / `lexical_normalize_relative`) across `Exec_policy_paths.normalize_path` and `Keeper_remote_path.normalize_logical`, delegate `Exec_policy_paths.resolve_path` to `Fs_compat.realpath_lenient`, share per-keeper override row codec and upsert helpers (`Keeper_gate_mode.override_row_t`) with `Keeper_tool_approval_mode`, and share schema metadata extractors (`Tool_input_contract.schema_properties` / `required_names` / `forbids_additional_properties`) across `Agent_core_tool_contract` and `Keeper_tool_plan` (#50496).
+- The Keepers state, cause, time, runtime and day views draw each Keeper on the RFC-0515 grid: columns fixed from the right edge, the name taking what is left, a gutter and row mark from the failing / paused / recovered / sound verdict, the hour pulse on the right of its column, the now cell between two `┃` lines on a band that runs down the list, a strip of dots for the half hours ahead, a due column (`HH:MM`, `late`, `held`, `?`) and the librarian lag with its level against the roster; the ▹ cell no longer carries the runtime id or a person's wait (tui) (#50499)
+- The Keepers memory and age views draw on the same RFC-0515 grid as the other views: the memory view shows the librarian's pass word, a lag bar against the roster, the last digest's age and the atoms requests skip; the age view shows the server's age bins, `+` the time since the snapshot was saved, the lag bar, `×N` invalidated sources and the fact count with its level. With two lines, a failing Keeper of the state and cause views gets a second line with when it began failing, its failed attempts and the runtime of the next dispatch, and group titles get the grid frame (`▌`, `−` / `+`, the band) (tui) (#50517)
+- The Features exact lane detail draws its fields through the Page_line reading renderer the Logs, Runtime and Routes details use: one label column for the whole page, receded labels, values in the tone of what they say, the type (`Optional`) no longer taking the state colour, and `Output meaning` / `Evidence` drawn as labels instead of text prefixes. The candidate lists (`1차 HTTP 후보`, `2차 CLI 후보`, dropped candidates) are a new `Page_line.Items` element drawn as numbered rows, and the section titles and field names are the feature overview's (`현재 관측 · 최근 실행`, `설정된 실행 후보`, `보존된 실행`, `속도`) (tui) (#50524)
+- Codex starts only on an account authorized for the Keeper turn or operator call it serves: the turn driver, the Codex Keeper runtime, Fusion, the capability and dashboard probes, verification, login checks, the model refresh and the usage reads ask for it, and `masc runtime-probe` exits 5 for a Codex runtime as well. `masc runtime-codex-models` resolves its workspace like the other host tools and exits 1 when the access refuses the refresh (multi-account plan D2-6) (#50525).
+- In the multi-account preview, a Keeper turn also runs on a Codex Runtime: the app-server starts on the person's own authorized Codex account, in an ephemeral thread with read-only permissions and no shell (multi-account plan D2-6b) (#50527).
+- The Routes page and the Runtime row detail draw a field that repeats (probe errors, probe limitations, the stale-configuration lines, the media candidates when there are several) as one receded label with the entries under it as numbered rows, instead of one `label: value` line per entry. A single entry stays one line without a number, so the media candidates lose their ` 1` label suffix (tui) (#50529)
+- The keeper-librarian teacher filter keeps a teacher answer that absorbs a memory, on the label or off it, once a blind merge judge finds each absorb mergeable (`teacher_sample.py sample`, `cases`, `apply`), and drops an answer that absorbs a planted stale fact as `stale_absorbed` (#50536)
+- Rebuild native TUI landing bodies around operator decisions, selected Goal/Task evidence, Keeper work and help, five memory observations, capability application and checkout scope (#50538).
+- Show configuration validation and application in the System fact table, and share actual list viewport calculations with keyboard paging. New Keeper sessions default to the operator list while restoring saved view preferences (#50538).
+- Give Goal and Task titles the list width, with status and owner on a second row; show the actual question before its background in Operations (#50538).
+- The runtime table holds the Codex and Claude Code accounts sealed: a reader of the table gets the account home and a same-capture comparison, and the environment of an account comes only from an account authorized for the turn or operator call (multi-account plan D2-7) (#50543).
+- The System configuration status page (`v` on the settings file screen) draws its facts through the Page_line reading renderer the Runtime, Routes and Features details use: one label column shared by the three sections, receded labels, plain values, the validation verdict in its own tone (a new `Page_line.Success` tone for a check that passed), the routing and keeper state as two facts instead of one line, and the applied, pending-restart and environment-preempted keys as numbered rows under one label. A `Page_line.Items` with no values draws nothing, not even its label. A section heading wider than the pane wraps instead of being cut at the edge, on every page drawn through `detail_page` (the Runtime, Routes, Logs and Features detail pages as well). The status page draws "Configuration has not been read" receded (tui) (#50565)
+- Document the exact-source TUI scroll/input measurements, corrected viewport observations, installation evidence and remaining limitations. (#50566)
+- The remote workspace sweep's profile mismatch warning names the declared (TOML) sandbox_profile, and the RFC documents the `unreadable=` field and what the pass counts mean (#50570).
+- `masc_sandbox_volume_gc` with `execute` deletes only the keepers named in its new `keepers` argument that it still judges reclaim candidates, and refuses `execute` without names and names without `execute`. Named keepers the volume listing no longer shows come back as `unlisted_keepers`. The TUI Tools catalog pane's second `V` sends the candidate names its first report showed, so a candidate that appears between the two presses is not deleted (#50572).
+- The pulse column of the Keepers grid views draws the server's half-hour slots, `side` of them with the now slot on the right: `·` no turn, `▁` ok, `█` failed, `▄` failed and ok in the same half hour, `?` a half hour from before the server's record. A rested turn counts as failed. The pulse and strip headers name the same span (`◂ 12h … 30m` at 24 cells). The list view and the Detailed second row keep the twelve clock hours (tui) (#50575)
+- The `tool_result_ready` line of the "Arrived While This Turn Ran" block names the receipt it points at: `call_id`, `tool` and, for a background `Execute` run, `outcome` (`completed`, `deferred`, `failed` or `unfinished`), each a JSON string cut at 96 bytes. `call_id` is the `request_id` the run's start result returned, so a Keeper can tell which request ended. The Agent Core hook and the official-client block (Claude Code, Codex, Antigravity, Muse) read the receipt through one `Keeper_client_tool_outbox.summary_reader`. An outbox that cannot be read is logged once and the line stays `tool_result_ready receipt_id=<sha256>`. The queue row, the reaction ledger preview and the TUI text do not change (#50577).
+- Show failing Keepers against observed runtime attempts and the next dispatch head in the runtime view (#50581).
+- Render the Keepers day view as a half-hour wall with a clock ruler and three health sections (#50584).
+- The web dashboard Lab Tools page draws a failure-rate chart (failed calls over calls, per hour or day) beside the call-count chart and lays the four charts out two by two. On the call-count chart's axis the failure line lay flat: over 7 days its highest point was 1.5% of the axis height (46 failures an hour against 3,137 calls). A bucket with no call is a gap, not 0%. The series response does not change (#50586).
+- The keeper-librarian verdict gates the memory an answer leaves (G3 `memory_state_accuracy`) and the judged merges (G6 `absorb_precision`, `judged_merge_recall`), measures one candidate, A, and refuses, as `train_sft.py` does, while a gate has no finite number. A ratio over nothing is None and fails its gate, and `eval_admission.py synth-numbers` prints each target's E-synth numbers without gates or trained runs (#50587)
+- The memory health row's `age_bins` is an array of 24 fact counts, newest
+  first: under an hour, 22 log steps from one hour to 30 days, then 30 days or
+  older. The counts add up to `facts`. The response schema is
+  `keeper.memory_os.current_health.v10` (#50588).
+- An Apple container Keeper guest always takes its requests through the guest agent socket. The microVM backend alone decides how a request reaches a guest: `nerdctl_kata` and `microsandbox` keep one exec of the shim per request. Attaching to a running Apple guest that does not publish the agent's socket is refused with `microvm_agent_not_published`, and that Keeper's next turn replaces the guest (#50589).
+- A Muse client starts only on an authorized account: the runtime table holds the declared Muse home, the Keeper turn, verification, Fusion, the capability probe, the usage read and `masc runtime-muse-models` authorize it first, and a multi-account process refuses the home of another person and the process environment (multi-account plan D3a) (#50591).
+- The Operations / Usage section row (Plan, Trend, Keepers, Calls) is drawn by the shared tab strip: a `▸` and bold bright cyan on the section being read, the others dim, and `‹n` / `n›` counts where a narrow row holds sections back. On a narrow row the `v:next` hint gives way before the section being read does, and below the cells the neighbours' counts need the section is drawn alone. Before it drew its own reverse-video pill (tui) (#50598).
+- Read the visible Resources catalog window in one pass when navigating a long list. (#50610)
+- The Keepers age view draws the 24 fact-age bins, 30 days or older on the
+  left and under an hour on the right, adding two or four bins to a cell on
+  a narrow list. A cell is coloured by the newest bin it adds, the header
+  marks the ladder's ages, and an age group title draws the sum of its
+  Keepers (#50611).
+- The Story and Memory screens and the Detailed `facts` cell count the facts
+  in age groups instead of drawing the 24 bins (#50611).
+- The answer of `masc_board_comment` no longer repeats `content`, the text the writer sent in the same call. It keeps `id`, `post_id`, `parent_id`, `author`, `created_at`, `expires_at`, `votes_up`, `votes_down`, `audience`, `unresolved`, `comment_offset` and `comments_total`. The board stores the text as sent, and `masc_board_post_get` returns it as the comment's `content` (#50620).
+- The Keepers age view colours a cell cyan under a day, in the row's colour
+  from a day to seven days and dim past that, and its header marks 30d 7d 1d
+  1h at the bins those edges start (#50639).
+- The Story and Memory screens and the Detailed `facts` cell count facts in
+  three groups: under 1d, 1–7d and over 7d (#50639).
+- Reuse immutable Memory overview and fact projections for unchanged snapshot, filters and sort. (#50648)
+- A multi-account process starts no Antigravity or Vibe client: both start on accounts of the host, so every start that reaches a host credential takes a token only a single-user process gives, and `masc runtime-antigravity-models` and `masc runtime-antigravity-context` take `--base-path` to judge the workspace first (multi-account plan D3b) (#50649).
+- Reuse Code draft/history preparation and recorded Changes diffs while their source values remain unchanged. (#50650)
+- Reuse prepared Resources document layouts while all reading and visual inputs remain unchanged. (#50651)
+- Reuse Detail wrapping/search and Prompts/status document preparation across navigation and drawing. (#50652)
+- Reuse Unicode draft boundary indexes across cursor movement and complete tail deletion. (#50653)
+- Reserve fast activity redraws for visible moving marks while retaining the seconds clock for age and read notices. (#50654)
+- Preserve typed activity text and visible-motion observation in the default Keeper list after integrating the new main renderer. (#50654)
+- Add an explicit native TUI check for prepared documents, input, Memory and activity scheduling. (#50661)
+
+### Removed
+
+- The keeper status config and dashboard keeper config responses no longer carry the `auto_execution_session` key, which always held the constant `{"status":"removed","enabled":false}` (keeper) (#50109)
+- Remove the unused `Runtime_provider_usage_read.read_all`; the server start read is `watch_declared` (#50130)
+- Remove the experimental `tinker-trainer` Lane Add-on and `scripts/tinker/tinker_runner.py`: the runner trained one step on UTF-8 byte tokens without evaluation, and the add-on only read its snapshot. Admission training and its fixed gates live in `scripts/tinker/librarian/`, described in `docs/guides/tinker-integration.md` §2 (#50144)
+- audit 항목의 `workspace_id` 칸과 `Audit_log.log_action` 의 `?workspace_id` 인자를 지웠어요. 어느 호출도 값을 넘기지 않아 파일에는 `null` 만 적혀 있었고, 옛 줄에 남은 `"workspace_id":null` 은 읽을 때 무시해요 (#50154)
+- `Typesafeai_client.evaluate` 의 `?timeout_sec` 인자를 지웠어요. 호출 12곳 어디도 값을 넘기지 않았고, 각 destination 의 요청은 그대로 `Masc_http_client.default_request_timeout_sec` 안에 끝나야 해요 (#50155)
+- `Provider_tool_support.provider_supports_inline_tools` 의 `?override` 인자와, 그것만 쓰던 `runtime_capabilities_override`·`capabilities` 타입을 지웠어요. 호출 3곳 어디도 값을 넘기지 않았고, 판정은 그대로 AGENT_CORE 능력 표의 `supports_tools` 예요 (#50156)
+- `BrowserInteract` and `BrowserGoto` no longer offer a `lane` argument. Both act on a named `clientId`, and `lane` never picked a browser for them: a call with `lane` and no `clientId` was refused as needing a binding. A Keeper call that still sends `lane` is refused as an unknown argument (#50200)
+- The raw `drag` action of `BrowserInteract` is gone, together with the TUI's drag request and its `drag:` hint. Every connection refused a point-to-point drag before input, so the action never moved a pointer. In the TUI a press and release on two different cells now sends nothing; a press and release on one cell is still a click (#50201)
+- Remove the misleading Goal-payout jump and repeated palette status lines. #50333
+- Remove obsolete TUI menu proposals and shorten the roadmap and workbench design around current screens and operator decisions. #50334
+- The `microvm_delivery` Keeper TOML key (#50589).
+
+### Fixed
+
+- antigravity 레인에서 모델이 허용 밖 파일을 읽으려다 거절된 턴(`status: SUCCESS` + `denied_actions`)이 중간 글을 답으로 삼아 정상 완료로 기록되던 것을 실패로 바꿨어요. 거절이 달린 성공은 `Actions_denied` 오류로 끝나고(`error_type = "actions_denied"`, 복구 `Provider_rejected`, exact lane `Output_unusable`) 중간 글은 증거로만 남아요 (#48773)
+- A spent turn-scoped context row — one the next user message already cleared — lowers away instead of refusing the request, so a lane switch's leftover carrier cannot wedge a keeper's every retry on the Anthropic wire (#49633)
+- A Keeper on an official client runtime no longer carries base64 media from retained tool results into the next turn's system text. Each base64 image, document or audio in a retained result is shown there as `media_omitted` with its byte length and `content_sha256`. Before this, about one hundred retained screenshots made that text larger than the model window and every following turn was refused before it reached the model. The retained results themselves are unchanged (#49665).
+- A Lane Add-on `Detach` that arrived while a failed cleanup was still writing its verdict no longer waits forever. The cleanup that ends now starts the cleanup that `Detach` asked for, also when it raised after its verdict. If another failure replaced the `Detach` first, the `Detach` returns that failure. Before, the `Detach` held the configuration lock while it waited, so every Attach and Detach of that workspace stopped too (#49359, #49666)
+- The Lane Add-on configuration pass removes the binding, observation folder and action folder of a released Lane instance once a newer instance of the same declaration revision replaces it, and the folders no binding claims. Before this, every server start left one more record per Add-on, and every pass read and the Add-on list returned all of them. A record that cannot be read and names no instance keeps every folder for that pass. Each pass that removes something logs the planned and removed counts (#49688).
+- The cheat sheet (`?`) sets each section under the shorter of its two columns instead of pairing sections two to a row, so a long section such as the slash commands no longer stands beside blank rows and the sheet takes fewer rows at 96 columns and wider (#49690)
+- A retained official-client tool receipt keeps a base64 payload that does
+  not decode, by blob address and with the decoder's reason, instead of
+  ending the turn (#49698).
+- Blob maintenance no longer stops when a retained receipt holds a document
+  typed as the result manifest: receipt media blobs carry a neutral label
+  (#49698).
+- The text bodies of a retained receipt go by blob address once the result
+  carries 2,048 bytes of text, for every Keeper and not only one that offers
+  the artifact reader (#49698).
+- The commented Tinker template in `config/runtime.toml` and the Tinker guide no longer declare a 262,144-token window, structured output, audio input or a `none` profile for exact-output gates on `thinkingmachines/Inkling-2-Small`. The binding states no capability, and the guide's price table matches the Tinker pricing page as of October 19, 2026 (#49702).
+- Stopping a Keeper turn no longer waits out the whole 2-second TERM grace when the turn's process group has already exited. The process reaper looks at the group every 50 ms during the grace and reaps the leader once no member is alive; a live descendant still gets the full grace. Takes full effect together with #49705 (#49706)
+- A tool call cancelled while its handler ran (server shutdown, operator stop, a cancelled parallel batch) now leaves a tool-call row with `wire_outcome: unknown` and no disposition, read back as unsettled. Before, such a call left no row, so the ledger could not tell a call that never happened from one whose effect is unknown. It is not counted as a tool failure (#49718)
+- In the Keepers list, the failure sentence in the DETAIL column is no longer truncated with ellipsis on narrow viewports such as 80 cells. The widest failure sentence measured across rows is reserved from slack as a floor for the detail column before the name column expands up to its maximum width (#49719).
+- Work, Schedules, Clients, Librarian history, Runtime, Task review, Task verdicts and Logs draw "(reading…)" instead of "(not loaded yet — press r)" while their first read is on its way, and Connectors draws no row because its notice already says it (#49720)
+- Fusion, Memory (health and fact browser) and Workspace draw "(reading…)" instead of "(not loaded yet — press r)" while their first read is on its way (#49736)
+- A fibre cancelled while waiting on the tool plan gate, a DOS announcement relay, or an LSP server spawn no longer disables that Eio mutex for the rest of the process; the cancellation propagates and the lock stays usable (#49750)
+- Closing the server switch no longer wedges the MCP session store for the rest of the process; the store loop resets its flag and dispatch serves callers directly until a later boot restarts the loop (#49752)
+- A decision-audit record appended while a flush was writing its batch is no longer erased from the unflushed count: each ring serialises append and flush under its own Eio mutex, and a failed flush leaves the count for the retry (#49755)
+- The telemetry trajectory summary cache no longer stages in one fixed temp path, which let two processes interleave into the same file before the rename (#49768)
+- A page whose first read starts after the frame that opened it (Logs and Clients today) draws "(reading…)" instead of "(not loaded yet — press r)", because the loop now asks for a frame when a read starts anywhere in its iteration (#49792)
+- `Grep` cuts each returned matched line to 2,000 bytes and the `rg` error text to 32,000 bytes, and ends a cut text with `...[cut: K of N bytes kept]`. A file stored as one line used to come back whole: in the 24 hours to 2026-11-07T09:52Z, 67 `Grep` calls carried a 285 KB line each, above the inline ceiling of every lane (#49794).
+- Dashboard by_tool counter keys tool names through the canonical internal name, so refused keeper-runtime calls (e.g. "Execute") no longer accumulate as separate public-name rows with zero successes (#49810).
+- `BrowserTabs` lists the constraints of a conditional browser operation only
+  when the operation is in `requiredActions`, and puts the browser selection
+  and the tabs before `browserCapabilities`. The constraints were most of a
+  32,889 to 35,394 B result, which is above the inline ceiling of the codex,
+  antigravity, muse and claude_code lanes, so a Keeper got a blob marker
+  instead of its tabs. In the 49 stored results that could be read, the size
+  becomes 6,988 to 10,683 B. To read the constraints of another operation,
+  name it in `requiredActions` (#49812).
+- The Changes page draws "(reading…)" instead of "pick a keeper on the Keepers surface, then press r" while the picked keeper's file changes are on their way, and the loop asks for a frame when that read starts (#49848)
+- `Runtime_vibe_cli` no longer reports success when the prompt file could not be written in full: the final flush failure that `Out_channel.with_open_gen` swallowed now ends the call as `Call_dir_failed` instead of running Vibe on a cut-off prompt. A call cancelled before its switch starts no longer leaves an empty call directory behind (#49855).
+- peer 가 RST_STREAM 으로 reset 한 H2 스트림에서 flush 가 끝나지 않아, 막힌 구독자의 공용 `/mcp` `subscriptions/listen` 스트림이 stall 90초까지 남고 ledger lease 도 그동안 잡혀 있던 것을 고쳤어요. 스트림이 끝날 때 기다리던 flush 에 `Closed` 를 답해 바로 정리돼요 (#49862)
+- Ctrl-Z turns mouse reporting off while the shell has the terminal and turns it on again when the TUI continues, unless F2 had handed the mouse back to the terminal (#49871)
+- 도구 플랜의 독점 게이트와 DOS 공지 배수가 파이버 취소 중에 뮤텍스를 영구 잠그던 버그를 고쳤다. `Exclusive_gate.acquire_shared`·`acquire_exclusive`와 `Dos_machine_tools.flush_announcements`는 이제 `~protect:true`로 취소를 지연해 락 해제를 보장하고, 플랜 호출자는 `Fun.protect release`로 보유 구역을 감싸 예외·취소 어느 경로에서도 게이트를 돌려놓는다(#49876).
+- An `$EDITOR` round trip, an editor launched on the terminal from a jump, and the player handoff now give the terminal back through the same pair as Ctrl-Z. Mouse reporting is off while the other program runs. When it exits the TUI retakes the alternate screen and the mouse, unless F2 gave the mouse to the terminal. Before, the TUI kept painting on the main screen after an editor and left its last frame over the shell history on quit (#49877)
+- `masc_board_comment` returns `comment_offset` and `comments_total` with the written comment, so a writer that wants the replies after its own comment passes the reported offset to `masc_board_post_get` instead of counting it and asking for the thread size plus one (#49881)
+- A `Grep` that ends in rg's exit 2 on a remote_ssh or microvm endpoint returns rg's error text in `error_detail`, as the docker lane already does, instead of `matches: []` with no reason (#49887)
+- LSP 워크스페이스 풀이 파이버 취소 중에 spawn 잠금을 영구 잠그던 버그를 고쳤다. `ensure`의 초기화 대기 중 취소돼도 `~protect:true`로 초기화를 끝내고 락을 풀어, 해당 워크스페이스의 후속 요청이 더는 멈추지 않는다(#49888).
+- The command palette keeps its text when no command matches it. Before, the list said "No matching commands" while the footer still offered Enter, and Enter closed the palette with no message. Now Enter does nothing, the footer lists only the clear and close keys, and a typed Code question such as `def sym` still runs (#49890)
+- `POST /auth/github/start` 가 칸이 없는 form, 끝에 `&` 가 붙은 form 을 400 으로 거절하던 문제를 고쳤다. form 을 읽기 전에 빈 조각을 버린다(#49896).
+- McpSessionStore survives its loop fiber dying: the switch release resets `loop_started` so every session operation (generate_id, create, get, peek, get_or_create, cleanup_stale, list_all, remove) falls back to synchronous dispatch instead of waiting on a promise forever, stranded callers are drained with defined throwaway values, and the loop is forked as a daemon like the registry's (#49901)
+- Concurrent runtime-config reloads no longer race: `load_and_apply_document`'s snapshot→apply→validate→rollback sequence is serialized by a module mutex, so two reloads cannot interleave their applies or let one snapshot-based rollback clobber the other's writes; cross-domain readers can still observe a mid-sequence value only in the tiny preemptive window, as documented at the call site (#49902)
+- A find query that Enter settled is drawn only on screens where `/` has rows. Before, the footer kept `/board` on Schedules, Dashboard, Usage and the keeper detail panes, where `/` does not open and n/N do not move. The query stays stored and comes back, with its count and `n/N`, on the screen that has the list (#49911)
+- Server shutdown no longer waits out the 2-second TERM grace for the child processes of the Keeper turns it stops. The official-client CLI or Execute command of such a turn now gets SIGKILL at once, because nothing waits on the stopped turn. Other cancellations stop children as before. A grace that already started, for example after an operator interrupt, still runs to its end. A child stopped this way runs no TERM handler, so git may leave `.git/index.lock` behind. The stop reason recorded for these turns is now printed as `Posix_spawn_process_mgr.Stop_without_grace` (#49684, #49923)
+- `masc auth preview` 의 "Sign in with GitHub" 가 브라우저에서 403 으로 막히던 문제를 고쳤다. 페이지의 `Referrer-Policy` 를 `same-origin` 으로 바꿔 form POST 가 `Origin: null` 대신 페이지 출처를 싣는다(#49929).
+- HTTPS 리스너(8938)에 리스너 자기 주소(`127.0.0.1:8938`, `localhost:8938`)로 보낸 요청이 400 `request_authority_untrusted` 로 끝나던 것을 고쳐요. 신뢰 정책이 TLS 리스너 identity(`make_trust_policy ~https_port`)를 알아요. (#49933)
+- 루프백 별칭(`localhost`, `[::1]`)으로 들어온 요청을 정규 주소로 보내는 리다이렉트가 요청이 들어온 리스너의 scheme 과 포트를 그대로 써요. TLS 리스너에서는 `https://127.0.0.1:<TLS 포트>/...` 로 가요. (#49933)
+- A Claude Code run refused for its size now first carries the retained tool
+  receipts by address (the receipt count, the receipts per tool and one blob
+  marker) and sends again at the same capacity, before the memory step and
+  history shrinking. Receipts that alone exceed the model window then fit
+  instead of locking the Keeper, when the refusal is typed, comes before any
+  response or tool effect, is not a Gate continuation, and the blob write
+  succeeds. A run loads the receipts once, so later attempts keep the
+  switched form and the run acknowledges exactly what it carried (#49958).
+- A remote SSH endpoint under the free-disk floor
+  (`MASC_KEEPER_SSH_PREFLIGHT_DISK_FREE_MIN_KIB`) still runs the calls that
+  only read: Read, Grep, a read-authority capture and `tool_execute` with
+  `intent=auto`. They are no longer refused with `remote_ssh_disk_low`. Write,
+  Edit, checkout, `tool_execute` with `intent=request_effect` and `keeper up`
+  keep the whole preflight. One preflight pass records a verdict for each kind
+  of caller (#49959).
+- A Codex run refused for its size (`contextWindowExceeded`) now first carries
+  the retained tool receipts by address (the receipt count, the receipts per
+  tool and one blob marker) and starts again at the same capacity, before the
+  memory step and history shrinking. Receipts that alone exceed the model
+  window then fit instead of locking the Keeper, when the run knows no tool
+  effect came before the refusal, is not a Gate continuation, and the blob
+  write succeeds. A run loads the receipts once, so later attempts keep the
+  switched form and the run acknowledges exactly what it carried. A carrier
+  over the app-server's 10,485,760-character item limit is still refused
+  untyped (#49950) (#49983).
+- An agent_core run refused for its size (`ContextOverflow`, or a request body
+  the provider refuses such as HTTP 413) now first carries the retained tool
+  receipts by address (the receipt count, the receipts per tool and one blob
+  marker) and sends again at the same capacity, before the memory step and
+  history shrinking. Receipts that alone exceed the model window then fit
+  instead of locking the Keeper, when the run knows the refusal came before
+  any checkpoint or tool effect and the blob write succeeds. A run loads the
+  receipts once, so later attempts keep the switched form and the run
+  acknowledges exactly what it carried (#50004).
+- A Keeper can now send `take_over` with `lane=live` and no `clientId` to reclaim or reopen an ego task space its worker reported user-owned or missing. The Keeper argument parser used to refuse this call although the host accepts it, so the recovery hint led to a refusal. The host and the parser now share one route rule, and every recovery hint names `lane=live` (#50010)
+- HTTP/2 스트림을 클라이언트가 RST_STREAM 으로 끊으면, 그 응답에서 기다리던 flush 와 close 가 바로 `Closed` 로 끝나요. 전에는 h2 가 reset 된 스트림을 비우지 않아 영원히 기다렸어요. (#50027)
+- HTTP/2 로 연 SSE 스트림(MCP `subscriptions/listen`, Keeper 대화·fleet·observer 스트림)을 클라이언트가 끊으면 서버가 그 스트림을 바로 끝내고 구독을 지워요. 전에는 다음 keepalive(30초)까지 남았어요. (#50027)
+- `scripts/install-local-build.sh` now replaces the dashboard bundle a
+  workspace serves. A workspace that holds `<base-path>/assets/dashboard` gets
+  the checkout's `assets/dashboard` when its `.build-stamp` is newer, and the
+  old bundle is kept as `dashboard-backup-<UTC time>`. A workspace with no
+  bundle is given none, a symlink is not followed, and a refusal is one line
+  with a zero exit status. Before this, `masc start` read `<base-path>/assets`
+  and a local install never touched it, so an old bundle kept being served
+  (#49980, #50050).
+- The Features lane run list footer draws a key only while it can act. Before, an empty list still drew `j/k`, `Right / Enter` and `]:older`, and a list whose title ends in `end` still drew `]:older`; none of those keys did anything. `j/k` and `Right / Enter` come back once a run is loaded, and `]:older` once the server names an older page (#50051)
+- `/api/v1/openapi.json` 의 `servers[0].url` 이 요청이 들어온 리스너의 scheme 과 포트를 적어요. TLS 리스너로 들어온 요청은 `https://` 로, 포트 없는 Host 는 scheme 의 기본 포트로 적혀요. 전에는 늘 `http` 와 평문 리스너 포트였어요 (#50056).
+- The Schedules and Task Verdicts footers leave out the keys that need a row while the list has none. Before, an empty list still drew `j/k`, `PgUp/PgDn` and `Right / Enter` (and `y / x` on Task Verdicts), which did nothing there, and on a narrow terminal they pushed the keys that do act, such as `n:new`, behind `…?`. The key table now marks each such key `Needs_row`, and the footer drops them when the list renderer says it has no rows (#50076)
+- `masc prerequisite-actions --help` no longer lists `firefox`, which the command refuses as an unknown prerequisite, and a comment no longer names the removed `masc browser-lane-setup --mode bidi` (cli) (#50079)
+- The Task Review, Fusion and Clients footers leave out the keys that need a row while the list has none. Before, an empty list still drew `j/k`, `Right / Enter` and `a / x` on Task Review, `j/k`, `PgUp/PgDn`, `K` and `Enter` on Fusion, and `j/k`, `PgUp/PgDn` and `Enter` on Clients. Those keys did nothing there or only showed a notice, and on a narrow terminal they pushed the keys that do act, such as Fusion's `a:new run`, behind `…?`. The three list renderers now tell the footer whether the list has rows, and the key table marks their row keys `Needs_row` (#50081)
+- The Workspace and Changes footers leave out the keys that need a row while the list has none. Before, a Workspace with no repository still drew `v`, `j/k`, `Enter` and `H`, and a keeper that wrote nothing still left `j/k` and `Right / Enter` on the Changes footer. Those keys did nothing there or only showed a notice, and on a narrow terminal they pushed the key that does act, such as the Workspace's `a:add`, behind `…?`. The two list renderers now tell the footer whether the list has rows, and the key table marks their row keys `Needs_row` (#50087)
+- The Goals footer leaves out the keys that need a row while the list has none. Before, an empty Goals list still drew `z`, `j/k` and `Right / Enter`. Those keys did nothing there or only showed a notice, and on a narrow terminal they pushed the keys that do act, such as `v`, `f`, `s` and `b`, behind `…?`. The Goals renderer now tells the footer whether the list has rows, and the key table marks the row keys `Needs_row`. The Workspace `v` carries a new `Needs_reading` mark: after a failed read with no repository selected it still opens the failure, so the footer keeps it. The empty Workspace list no longer titles itself `Repositories · j/k select` (#50094)
+- The Approvals footer leaves out the keys that have nothing to act on. Before, an Approvals list with no approval and no question still drew `j/k`, `y / n`, `[ / ]`, `a` and `o / O`. There `y / n` answered "Approval list changed", `a` answered "No question is waiting on you", `o` answered "No Keeper turn asked this question" and `[ / ]` moved nothing, and the notice then pushed `j/k` and the other keys out of the footer. The footer now follows three facts: whether the queue has a row (`j/k`, `y / n`), what the ask list offers (`[ / ]` while a question waits, `a` once one is selected) and whether a question source is on hand (`o / O`). `w` and `e` open a palette whatever the queue holds, so they stay. The Questions heading names the answer key only while a question is selected, and it uses the footer's words (`a:answer a question`, where the heading used to say `a:open answers`). The Task Verdicts footer leaves out `n / N` while the list has no row (#50112)
+- 모델 응답 조건 경고(capability drop·dialect ignored)와 keeper 프로필 적재 경고의 원샷 기록표가 Eio 런타임 밖 문맥(단위 시험·초기화 경로)에서 Effect.Unhandled 를 내며 뮤텍스를 망가뜨리던 결함을 수리했어요. 세 지점의 원샷표 락을 Stdlib.Mutex 로 바꾸고 경고·메트릭 출력은 락 밖으로 옮겼어요 (#50124)
+- The `dos-machine` package is published as `0.2.3` with the image
+  `masc-lane-dos-machine:0.2.3`, because `masc_dos_step`, `masc_dos_press`,
+  `masc_dos_click` and `masc_dos_type` take `include_frame` in the worker since
+  #48923 and the `0.2.2` image, built on 2026-10-27, does not list it, so a
+  Keeper never sees the argument. Run the `lane-addon-images.yml` workflow at
+  the merged commit and load the image before restarting the server; without
+  it the worker's `image inspect` step fails and the lane does not start
+  (#50128).
+- Keep the label out of synthetic keeper-librarian admission data before training: each claim draws its dates and numbers apart from its label, `scripts/tinker/librarian/synth_candidate_plan.py` deals candidate marks and length bands out per label kind, the label audit shows every candidate's closest facts in full, and the pass lines pin the regenerated E-synth (119 requests). Three E-real runs of the base model with the same bytes put the same-window spread at 0.030 for G4's paired lead and 0.08 for G5's latency ratio (#50140)
+- A footer row that cannot show every key and fits the keys that cannot be dropped whole used to end in padding and a bare `?`, or in `q:quit?` with the `?` against the last key. It now ends in `…?` like every other row with keys left out. The last resort of the footer fitter put `…` on a row only when it cut cells, so a row that dropped keys without cutting any said nothing about them (#50141)
+- HTTP/2 로 온 `/health` 가 본문 `protocol.listener` 에 `h2` 를 적어요. HTTP/2 가 HTTP/1.1 과 같은 경로 표를 타게 된 뒤(#49814)로는 어느 쪽으로 와도 `http/1.1` 이라고 답했어요 (#50151)
+- HTTP/2 로 온 MCP 요청이 OpenTelemetry `network.protocol.version` 에 `2` 를 기록해요. HTTP/2 가 HTTP/1.1 과 같은 경로 표를 타게 된 뒤(#49814)로는 어느 쪽으로 와도 `1.1` 로 기록했어요 (#50153)
+- A `take_over` that reclaims an ego task space now reports success to the Keeper. The worker's reclaim answer lacked the `data` field the host reads, so a reclaim that had finished came back as a failure, and a second call was refused because the worker had already cleared its record. The answer now uses the same `ok`/`data` envelope as every other live page answer. The recovery hints also say that only a Space configured by name is opened again, and the route refusal names the `open_tab` exception (#50171)
+- In the Code diff over an open file, PgUp, PgDn, Home and End move the diff. They reached the arm that moves the file cursor, so the diff stayed put while the cursor moved under the overlay. `j` and `k` stop at the last window: `j` stored a scroll up to the last row while the frame stops at the last full window, so at 120x30 the first `k` after the bottom that moved the window was the 22nd press (#50172)
+- Record the recent seven-day development flow, two reproduced behavioral defects, and the OCaml 5.5.2 adoption scope with explicit validation limits. (#50179)
+- Preserve bare repositories and standalone Git administrative directories during automatic remote Keeper workspace cleanup, including directories that own an external worktree. (#50182)
+- Cancel queued tool-plan gate waits before admitting another tool. Remove unnecessary single-domain mutex waits and release the gate only after acquisition. (#50183)
+- The Detailed Keepers row no longer repeats its detail sentence: with the runtime column drawn, the first row has no DETAIL column and the sentence stays on the second row, so the second row's schedule, memory and pulse cells are not pushed off the edge. Under 120 cells the first row keeps its detail, which carries the failure sentence (RFC-0515 P2, #50195).
+- An agent_core Keeper's max-tokens continuation keeps what an earlier size
+  refusal shrank in the same run: the retained-result carrier stays in its
+  address form and the current turn's demoted tool results stay markers, so
+  the continuation no longer resends the refused size (#50238).
+- The remote_ssh workspace sweep no longer waits for the Keeper to be idle. Review Keepers run turns back to back, so the first pass after #50013 found almost every one of them mid-turn and removed nothing. Guest build cleanup still waits for the idle Maintenance slot (#50239).
+- Allow ordinary Dashboard WebSocket discovery over HTTP/2 while retaining explicit rejection of unsupported upgrades. (#50251)
+- Preserve meaningful whitespace and literal newlines in the Grep regular expression through descriptor and backend dispatch. (#50252)
+- Refuse a GitHub run-watch update when its validated schedule instance changed concurrently; record the feature audit and remaining product gaps. (#50253)
+- The Memory fact browser no longer names `j/k`, `Enter`, `n / N` and `Home/End` in its footer when it holds no fact, and `Enter` there no longer opens a reading that holds one line saying so (#50278)
+- Make every synthetic keeper-librarian admission label one MASC accepts: a request whose candidates are all transient expects its planted facts to stay, since MASC refuses Memory changes without an incorporated or already_represented candidate. `scripts/tinker/librarian/synth_spec.py` adds the COMPLEMENT candidate, whose claim absorbs its target, and planted duplicate pairs, of which the answer keeps one (#50290)
+- `keeper_skill_validate` reuses the verdict for identical (source bytes, package id, descriptor surface) inputs instead of re-parsing, so a repeated validation returns the first result with `cached: true` (#50311)
+- Follow an accepted Native Stack merge-async receipt to a verified merge: keep reading the same UUID while it is pending, treat enqueued/merged as final answers and decide completion from every member being merged with a merge commit, report failed/still_pending/observation_unavailable/submission_unknown separately, hand a long-pending receipt to a new run of the same workflow (workflow_dispatch receipt input) instead of submitting again, and never resend after a lost answer (#50320).
+- Keep synthetic keeper-librarian memories from showing their labels in the counts the prompt prints: no category holds more than 30 facts once planted stale facts and duplicates are counted, and new and transient candidates take their category the way targeted candidates do, so a large category no longer marks a correction, complement or paraphrase. `scripts/tests/test_tinker_librarian_synth_generate.py` drives the generator with a fake model (#50348)
+- Keep teacher answers for keeper-librarian training when they leave the memory their label asks for, including the merges complement and duplicate-pair labels ask for; before, any absorb refused the answer. `scripts/tinker/librarian/teacher_sample.py` and `train_sft.py` stop while a file `pass_lines.json` pins has other bytes (#50355)
+- Reconnect an Agent Core HTTP turn with fresh connections after a peer reset or EOF before streaming, checkpoint, or tool-effect progress. Preserve the original synchronous or streaming execution mode and return a failed reconnect directly. #50357
+- Keep an Antigravity Keeper turn running after an out-of-scope native file read by returning a tool error through a packaged read hook. Preserve existing permissions and reads of the current conversation's generated results. #50360
+- Read each synthetic keeper-librarian label from its request row instead of a label stored beside it, so a label cannot disagree with its request. `scripts/tinker/librarian/synth_rows.py` writes and reads the rows and refuses any row the generator cannot write, such as a repeated request ID or a target on a planted fact (#50363)
+- main 전체 회귀 잔여 red 축 중 addon_client 축(test_browser_addon_client :133 "valid worker snapshot rejected")을 수리했다. transport_policy 시험 fixture가 워커 스냅샷 행의 현재 10필드 계약(wire 6필드 + interactions + lastActivities + spaceObservation + spacePresence)을 그대로 따르게 했다. 기존 fixture는 6필드 wire 행을 그대로 스냅샷 행으로 써 `Browser_addon_observation.decode_snapshot`의 정확 필드집합 검사(`lib/browser_addon_observation.ml`:81)에서 거절됐다 (#50364)
+- The default `User-Agent` of outbound HTTP requests reports the build version (`masc/<version>`) instead of the fixed `masc/0.31.0` (#50367)
+- The browser, DOS and MSX add-on MCP servers report the build version instead of the fixed `0.1.0` (#50369)
+- The type-check of `main` after the Goal criterion review landed: `masc` lists `masc_backend` as a direct dependency and the TUI `planning_goal` re-declaration carries `pg_criterion_review` (#50372).
+- Score each keeper-librarian E-synth candidate by the knowledge memory keeps: a restated fact that is dropped or absorbed into a claim already in memory, a correction target absorbed into another candidate's claim, or a duplicate pair absorbed into an unrelated kept claim no longer counts as right, and two corrections that name one claim both count. `pass_lines.json` now pins `memory_scores.py` and `synth_rows.py`, and a test keeps the pinned files equal to the modules the verdict imports (#50378)
+- The type-check of `main` after #50371 and #50372 landed: `lib/dune` listed `masc_backend` twice, so `dune build @check` stopped with `library "masc_backend" is present twice`; the second entry is removed (#50385).
+- The remote_ssh workspace sweep now leaves a line for every Keeper it reaches, removed=0 included, and each cleanup pass logs how many Keepers each step reached. A missing stored meta, a stored profile other than remote_ssh and an unavailable owner inventory are warnings instead of silent passes (#50391).
+- In Logs, `l`, `v` and `c` no longer change the list's filters while a log entry is open: `[` and `]` step from the open entry and closing it returns to the list as it was (tui) (#50392)
+- Test fixture cleanup in `test_keeper_playground_checkout_discovery` and `test_metrics_store_eio` unlinks symlinks instead of following them into their targets or skipping dangling links into `ENOTEMPTY` (#50395).
+- The type-check of `main` after #50357 landed: the connection recovery test named `Keeper_turn_driver_try_provider` without the `Masc.` prefix, so `dune build @check` stopped at that file; the test now names `Masc.Keeper_turn_driver_try_provider` (#50397).
+- The keeper-librarian label audit and off-label drop judge read complement candidates and duplicate pairs: the judge's vocabulary gains `complements:<m>` and a fact class `restates:<m>`, `e_synth_audit.py cases` and `drops` read every request row before picking any, and drop precision keeps the wrong drops on a memory the judge leaves out, including dropped complement targets and duplicate facts (#50399)
+- Check changed PR changelog fragments from the local merge tree without a GitHub PR-files API request, preserving stacked scope and filename boundaries. (#50407)
+- Synthetic keeper-librarian request rows are read only when each fact's memory ID is the one the prompt shows at its place, the request holds a candidate, and every fact and candidate has its own text, so a label cannot name another fact than the prompt shows and a copied claim names one source. The generator no longer keeps a candidate that copies a fact or an earlier candidate (#50415)
+- Keep tracking accepted automatic merge requests when member PR reads temporarily fail, hand off the same UUID without replaying a merge, and preserve terminal request failure reasons (#50427).
+- The keeper-librarian E-synth scoring treats a planted stale fact as stale on every request, so dropping it is a right drop even where no candidate supports a change and no longer sends the memory to the off-label judge; a correction counts only with an added claim; a claim that copies another candidate's text no longer counts as this candidate's addition. The teacher sampler counts rejections and HTTP errors after its worker pool (#50429)
+- main 전체 회귀 잔여 red 축 중 play_page 축(test_play_page "a machine" — machine=false)을 수리했다. 좌석 시험의 DOS 도구 호출이 fixture의 직접 워커 RPC로 host 호출 경로를 우회해 May_change 관측 wake가 발화하지 않았고, 좌석이 적재 전 관측에 머물렀다. 호출을 `call_exported_tool_with_authority`로 감싸 controller를 mediation으로 전달하고, 변이 호출 뒤에는 갱신된 관측 행이 도착할 때까지 좌석을 폴링한다 (#50446)
+- Reuse verified opam release binaries from a version, OS and architecture cache in CI. Only matching default-branch push source may save the cache; invalid binaries and failed downloads still fail. (#50451)
+- Retry approval-worker GitHub GETs after server-provided quota deadlines, preserving retry times across UUID handoffs and revalidating admission reads without replaying writes. #50462
+- Qualify retained fleet grades and counts as the last observation during scan failures or disconnection, keep long navigation labels inside the operator-badge budget, and distinguish fact age from snapshot saves and source invalidation (#50465).
+- Keeper turn requests accept either JSON field order while refusing missing, duplicate, additional and non-string fields (#50467).
+- `Agent_core.Mcp.initialize` takes `~client_version` instead of sending the literal `"0.10.0"` in `clientInfo`; the Add-on worker protocol passes `Build_version.current` (#50478)
+- `masc_goal_list` rows carry the criterion review verdict (`state`, `request_id`, `criterion_revision`, `reason`, `detail`, `authority`) without the reviewer's structured result and tool calls. After the criterion review shipped, that evidence was 517,662 of the 941,529 bytes of one 62-goal list; the dashboard keeps the full projection (#50490).
+- Reduce TUI garbage-collection coordination and redundant chat projections while scrolling and editing messages. (#50493)
+- `scripts/audit-dead-tools.py` counts a ledger row under every name that row declares, so a tool registered as `tool_write_file` is no longer reported as never called when the ledger spells the same call `Write` (#50500).
+- Reuse unchanged committed chat identities while scrolling so the TUI does not rebuild the same search-anchor index on every frame. (#50502)
+- The `test_browser_ego_peer` sweep test records `page.delete_cookie` in its verb-to-step table, so "the peer serves what the lane table says" stays green after #49723 put the cookie-delete wire step on the wire (#50507).
+- `scripts/audit-dead-tools.py` no longer turns a ledger whose newest row predates the window into a `0회` verdict for every registered tool; such a source is now `판정 불가` with the newest row named, while a cumulative snapshot stays exempt from the staleness rule (#50508).
+- BrowserInteract scroll and scroll_at accept x or y alone and read the axis left out as 0, instead of refusing it as "x must be a JavaScript-safe integer" (19 of 153 scroll calls between 2026-11-02 and 11-09; 18 were retried within 25 seconds with x set to 0) (#50513).
+- `config/tools/Execute.toml` restores the missing public-name entry for the `Execute` bare builtin, and `test_tool_name_prefix_boundary` now pins that every bare builtin has a same-named TOML (#50516).
+- The Keeper schedule page lists its rows oldest first by the time each one shows, instead of putting held or unsettled rows and then the last result around the upcoming runs; a held row or one whose delivered wake has not settled names that state in its status column (#50522).
+- Let queued chat input drain after an overrun frame before rendering again during continuous scrolling. (#50534)
+- The keeper-librarian GLM measurement sends the exact lane's `max_tokens`, as MASC's GLM slot receives it after rollout, and reads GLM's error code as MASC does: under a status other than 200, only quota, auth and context-overflow codes replace the status. `eval_admission.py run --template` sends E-real retirement evidence under the new template's retirement policy (#50535)
+- Qualify retained Task assignments and Keeper turn readings after failed refreshes, and distinguish registered default branches from exact repository Git observations (#50538).
+- Preserve selected Keeper and capability rows in short terminals, including the runtime candidate that owns Enter while its picker is open (#50538).
+- Mark partial Task counts and empty readings as incomplete in both Goal rows and selected previews (#50538).
+- Bind the terminal-safe text helper used by the 24-hour Keeper wall (#50538).
+- `scripts/audit-dead-tools.py` no longer lets a row after the window end qualify a source to judge `0회`, so a report pinned with `--now` in the past cannot claim 215 unused tools from a ledger whose rows all fall outside that window (#50544).
+- `scripts/audit-dead-tools.py` reads `[world.tools].export` from `addons/*/lane.toml` as a second registry, so an addon-only tool name is no longer filed under "outside the registry" where it could never reach the unused list; the `config/tools` population and its count are unchanged (#50548).
+- The System configuration status page (`v` on the settings file screen) scrolls to its last row with `End` or `G` and back to the top with `g`, as `Home` already did. Before, `End`, `G` and `g` did nothing there, so a long key list could only be walked down with `j` or `PgDn`. The footer hint names `Home/End` (tui) (#50549)
+- The hourly cleanup pass now picks each Keeper's step from its TOML-resolved sandbox_profile. It used the stored meta's decoder placeholder (always Docker), so remote_ssh Keepers never reached the workspace sweep (#50550).
+- `Activity_graph.tool_execution_event_kind_of_string` is back. #50511 removed it while the Direct board projection from #50387 still read it, which broke the type-check on main (#50568).
+- Match Dashboard pending Keeper message reads and controls to chat submission authentication, restoring queue access when tokens are optional while retaining same-origin mutation checks and token-bound reasoning access. #50569
+- Retain every direct native call's immutable Core locator and original trace after replacement and operation settlement; historical references do not authorize continuation or retain checkpoints (#50583).
+- Require semantic execution record schema v2 with an explicit call history. Both operation-store open paths now reject unsupported saved records and inconsistent semantic indexes before returning an Owner handle, including settled records; errors identify the saved scope and codec or index failure. Deployment refusal points to the applicable fresh-state instructions (#50583).
+- `Masc_tui_fleet_summary` declares the `Proactive_interval` reading in its interface, so the tree type-checks again after #50579 (#50590).
+- Restore the vision runtime a browser fixture attach replaces, so screenshot tests that read pixels through the vision reader find their image candidate again. #50596
+- Bind `Masc_tui_ansi.Terminal_text` in `bin/masc_tui_keeper_wall.ml` so `masc_tui.exe` compiles after #50584 (#50600).
+- HTTP/2 요청 fiber 시험의 직접 의존성에 `httpun`을 추가해 `Unbound module Httpun` 컴파일 오류를 고친다 (#50601).
+- alphaTex 악보의 줄바꿈이 마디 경계를 먼저 지킵니다. 패인보다 넓은 마디가 앞 마디가 남긴 자리에서 시작해 줄 중간에서 끊기던 것을, 그 마디의 첫 조각부터 새 system 에 놓습니다. 비트·마디 번호·반복과 엔딩 표시는 그대로입니다 (#50609).
+- Test fixture cleanup in `test_tool_blob_store` unlinks symlinks instead of following them, which used to abort the sweep mid-tree and silently leak the temp directory (#50621).
+- An HTTP/2 route that closes its streaming body and then raises keeps its
+  response. Before, the stream was reset while the close still waited for
+  the bytes already written (#50636).
+- An HTTP/1.1 request body that ends short no longer reaches the route: a
+  body with fewer bytes than its declared length, or a chunked body that
+  masc's `report_exn` cut, or that httpun cut before any response. A client
+  that leaves mid-body before any response gets httpun's 400 instead of
+  having the route run on the bytes so far. A chunked body that httpun cuts
+  after a response started is still delivered as it came (#50636).
+- A route that raises `Auth_config_error` after opening a streaming response
+  is cut like any other failure; before any response it still gets the 503
+  (#50636).
+- The GitHub login stream and the account login stream close their response
+  only when they end normally. An exception now cuts the response, an HTTP/2
+  stream with RST_STREAM, instead of ending it as if it were complete
+  (#50636).
+- Keeper memory health now retains the original Librarian wait reason and resumes known capacity waiters after an accepted result releases capacity, and administrators can request catch-up through the existing Memory lane under health contract v12 (since main already uses v11 for the age-bin change in #50641). (#50642)
+- When the remote_ssh workspace cleanup stops because another user's process is unreadable, its reason now names the Keeper root's mode and the fix (rerun bootstrap or `chmod go-rwx`). Bootstrap's directory modes are named constants, and the SSH runbook documents the `0700` requirement (#50645).
+- Keeper hands an autonomous turn's saved tool boundary to ready queued chat, retaining uncompleted work and respecting the Owner's lifecycle, runner readiness and single-writer slot. (#50647)
+- Keeper batches ready scheduled requests without splitting every occurrence into its own turn, while preserving captured reply routes and retaining uncompleted work across chat handoffs. (#50662)
+- The install test suites stage `scripts/lib/install-workspace-dashboard.sh` in their dune deps, so `runtest-test_install_local_build_guest_shim` and `test_runtime_install_artifact` find the script that #50050 made `install-local-build.sh` source; git-checkout installs and release artifacts are unaffected (#50673).
+- The typed Execute rejection message lists `run_in_background` among its accepted fields since that field became part of the contract, so `test_keeper_tool_dispatch_runtime` and `test_keeper_sandbox_docker_route` now expect the message the parser actually produces; the nightly behavioural lane failed on both stale strings for four nights (#42430, #50675).
+- Accept absent `id`/`agent_id`/`expires_at` keys in agent credential JSON as `Ok None` instead of rejecting them with "missing required field"; explicit `null` keeps loading as before (#50683).
+- Six test helpers remove their temporary trees through `Unix.lstat`, so a
+  directory link is unlinked instead of walked into and a dangling link is
+  removed instead of skipped. Cleanup no longer depends on each fixture's
+  `~finally` unlinking its own link first (#50687).
+- The browser lane tests no longer expect the ego connection to refuse page touch: it has served `tap_at`/`swipe` since #49295, so the two assertions that assumed otherwise made `test_browser_lane` fail on main. The message test now states which connection serves the capability, and its "no connection serves it" branch is documented as unreachable while `Ego_task_space` is the only transport and serves every capability (#50700).
+- Invalidate the Goal dashboard projection once per recorded measurement, avoiding duplicate generation advances and notifications (#50701).
+
+### Performance
+
+- `Server_utils`: `query_param` 쿼리 부재 시 47.3배 가속 및 100% zero-alloc 직접 스캔 적용, 쿼리 존재 시 14.3배 가속 및 -93.8% GC 절감, `query_param_from_target` 노출 (#49683).
+- Provider-input snapshot decoding checks exact JSON fields without allocating
+  a filtered list for every expected key. Missing, unknown and duplicate fields
+  are still rejected; local installation retains its full stored-state check
+  (#50634).
+- Apply the shared minor-heap policy to `validate-stores` to reduce collection work during large JSON scans, preserving operator `OCAMLRUNPARAM` settings and all stored-state compatibility checks (#50665).
+
+### Documentation
+
+- The multi-account plan sets the A4d back-half scope: 13 of the 130 `Public_read` registrations stay open under strict auth (counted from the source on 11-07), `Route_access.Public_read` will carry whether strict auth asks for a read credential, the published-artifacts prefix stays open under strict auth, and three layers remove `is_public_read_path` (#49651).
+- Record Tinker Inkling 2 Small exact-lane measurements: a 65,536-token window on the base ID, `response_format` accepted but not applied, librarian replay 17/17 valid at effort low, board agreement 0.80 below the 0.9 line (#49654)
+- The L4 evidence of RFC-0503 keeps eight before and after captures of the Keepers list on 15 synthetic keepers, with the build receipts and a README that records the heads, the commands and what was not seen. It changes no code (#49660).
+- The multi-account plan scopes C4: `Auth_gate.decide` judges multi-account requests only, Service credentials are issued by the host CLI as `Local_operator`, and scoped PATs are issued by their Human through a browser-session route. The design records the same two decisions (#49704).
+- RFC-0511 splits the 13 Keeper Pulse sheet rows RFC-0503 left over into four independent PR stacks (Keepers list text, roster server projections, row cells for schedules and memory reading, memory server), with wire shapes, file ownership and two later display layers. It changes no code (#49711).
+- The Vibe official-client lane RFC now carries measured Vibe 3.1.0 headless contracts: exit codes 0-3 (the exit 1 argument error writes no `export.json`; every other run reports an `outcome` there), tool denial as an effect state with exit 0, env `MISTRAL_API_KEY` taking precedence over the keychain credential, and one call on that keychain credential finishing while the env key got the Mistral API budget 402. The runs are retained under `docs/evidence/vibe-official-client-lane-20261107/` (#49717).
+- Record the Tinker Inkling 2 Small replay in the request shape MASC exact lanes send this row, with no `response_format` and the schema instruction appended: librarian 17/17 valid at effort low with and without temperature, largest reply 3,172 output tokens (#49726)
+- The `docs/evidence` reports for aged tool results, execute waits, artifact read misses and repeated tool results carry the 24 hour re-measurement of 2026-11-06T09:52Z to 11-07T09:52Z, and `docs/evidence/failed-calls-2026-11` counts failed tool calls by tool and failure text (#49786).
+- `docs/evidence/grep-long-lines-2026-11` measures the matched line lengths of Keeper `Grep` results and replays the cut over the ledger (#49794).
+- `docs/evidence/tools-list-inventory-2026-11` measures the size of `keeper_tools_list` results over the ledger and replays the inventory on the stored surfaces (#49803).
+- The Vibe official-client lane RFC now takes readiness from `vibe-acp` (`_auth/status`, `_account/read`, no prompt and no model call) and usage from the Vibe budget meter that `_account/read` reports, since `cost_usd` stays 0.0 on the keychain credential. The evidence bundle records the plan kinds Vibe gave the two credentials (`chat` for the keychain credential, `api` for the env key; the scopes follow from a table in Vibe's source) and one call that moved the meter, without account values (#49828).
+- The multi-account plan scopes a localhost preview: `masc auth preview` binds to 127.0.0.1, serves only the login routes, two pages and a who-am-I route judged by `Auth_gate.decide`, and opens no Keeper, Runtime, MCP or Board route. Its GitHub redirect is a loopback-only client; the https rule of the server stays (#49852).
+- Record the Tinker Inkling 2 Small replay of the 94 retained keeper-librarian Lane Add-on requests: admission misses its 0.95 line with 50 of 62 in-window requests valid (0.806), and 24 of 86 prompts exceed the 65,536-token window. Correct two claims in the research note and the guide: MASC sends this row's requests without a pre-dispatch window check, so the Tinker 400 advances the walk to the next slot; and a lane without `max_output_tokens` sends no `max_tokens`, so Tinker applies its 4,096 default instead of the binding's 8,192 (#49857)
+- Record a Tinker SFT pipeline check for Inkling 2 Small: a LoRA rank 8 run through the tinker-cookbook renderer raised a fixed held-out set on a hidden record-encoding rule from 0/40 to 39/40 (unseen names and cities 19/20), passing all three pass lines fixed before the run. The model trained on answer-only targets stopped emitting reasoning at effort `low`, and two base answers hit Tinker's 4,096-token default output cap (#49927)
+- RFC-0511 adds the D2c layer: the TUI reads the workspace memory world route and draws a world line on the Memory screen, because nothing under bin/ called the world decoder. D2 keeps the age ladder. It changes no code (#49938).
+- The multi-account plan scopes D1: a subscription account (ProviderAccount) and a Runtime get an owner in `authz.jsonl`, a Runtime record carries its Self grant, a Keeper record names its owner, account homes live under the owner's namespace, and in multi-account a Keeper with no Runtime assigned is refused with `NoAuthorizedRuntime` instead of taking the global default. The existing connect route keeps its flow and gains the owner; the localhost preview carries it (#49943).
+- RFC-0514 lets a model the catalog has no row for be an exact-output slot when its runtime binding declares capabilities. The adapter reads the whole capability table when only the provider preset answers, and the exact resolver binds such a binding to its provider row. A rowless model without a table is still left out of the registry (#49955).
+- `docs/reports/2026-11-08-tool-efficiency-after-the-1107-deploy.md` compares the tool-call ledger before and after the 2026-11-07T18:24Z boot in two 19.7 hour windows. `docs/evidence/tool-efficiency-before-after-2026-11` keeps the script that counts both windows with one set of definitions, its result for that boot and its tests, and `docs/evidence/failed-calls-2026-11` counts failed calls for the later window (#49988).
+- Before-and-after captures of the Keepers second row show the failing-for cell and the 12-hour turn pulse at 80, 120 and 200 columns, with colour and with `NO_COLOR=1`, under `docs/evidence/2026-11-08-tui-keepers-failing-and-pulse-50001/` (RFC-0511 D1, #50015).
+- The Tools efficiency evidence folder splits Execute overhead by sandbox and
+  by the intent of the call, replays the remote SSH preflight cache for a pair
+  of lifetimes, sizes the queue wait that overlaps long Execute calls, and
+  counts the Execute calls that ran the same command again and got the same
+  answer or only read the clock. The last count goes per Keeper and per UTC
+  hour, next to the model requests and input tokens of the same Keeper, and
+  says how many of the repeats ran in the same turn as the run before, how
+  often they came back and how many times each command ran. Tests and the
+  results of the 2026-11-06 to 2026-11-08 windows come with it, including the
+  first 32 minutes after the server restart that carries the remote SSH
+  preflight reuse (#50021).
+- Record that a rank 8 LoRA trained on `thinkingmachines/Inkling-2-Small:peft:262144` serves a 256K window through Tinker's OpenAI-compatible endpoint: it answered 100K- and 230K-token prompts and recalled a passphrase placed at the start, while the 64K base refused the 100K prompt (#50062)
+- Fix the keeper-librarian admission pass lines in `scripts/tinker/librarian/pass_lines.json` before any training, and record the base model's baselines: on E-synth it scored outcome accuracy 0.866, drop precision 0.954 and planted-stale recall 0.357 against lines of 0.95, 1.0 and 0.9 (#50068)
+- Attach or drop 15 doc comments that OCaml ignored in nine interfaces (fusion, board, dashboard, server), and fix two typos in the fusion config error docs (#50127)
+- Attach or drop 14 doc comments that OCaml ignored in nine files (board, keeper, lsp, voice, tool result, common), and rewrite the `Common.protect` doc from its implementation (#50129)
+- Attach or drop 14 more doc comments that OCaml ignored in nine files (keeper status, tool shared runtime, voice runtime, tool schemas, safe ops, backend), so they show on the value they describe or disappear with the value they described (#50133)
+- RFC-0379 gains section 6.6, which records how often Keepers re-ran the same
+  command to wait for a pull request head to change (2026-11-06 to
+  2026-11-08 ledger window) and sketches a schedule argument beside
+  `until_github_run` for it, with the open owner decisions listed (#50138).
+- RFC-0515 plans the Keepers screen frame that RFC-0511 deferred: view tabs grouped by closed values, a past/now/next row, a Story sheet on Enter, and keys that keep their current meanings. Its first layer replaces the 24-turn pulse cap with half-hour slots over a day (#50189).
+- The browser lane design, the ego guides and the ego RFC describe `drag_to` as selector to selector, drop the raw drag refusals and the `lane` argument of `BrowserGoto`, and say that raw typing uses the bounded native-window path (#50203)
+- Captures of the Memory overview header (the age ladder line and the world line) and of the Keepers second row `facts` cell, taken from the proof build of #50060 against a synthetic server, are under `docs/evidence/2026-11-09-tui-memory-world-and-age-ladder-50060/` (RFC-0511 D2 and D2c, #50209).
+- The Tools efficiency evidence folder counts the Execute calls that read pull
+  requests with `gh`, the hours they held a turn and their shape (a loop over a
+  list that `gh` made, a wait, a single read), per UTC day and per Keeper. The
+  result of 2026-11-06 to 2026-11-08 and 37 synthetic tests come with it
+  (#50210).
+- RFC-0515 states the pulse `known_since` rules as #50190 implements them, corrects where `[` `]` are used today, moves the Story sheet below the list with story · schedule · memory pages, lists where the design differs from the mock, and adds the V5 · S3 · W1 layers and decisions E8-E15 (#50260).
+- The Tools efficiency evidence folder counts, among the Execute calls that
+  read pull requests with `gh`, the calls whose command text names none of
+  eleven facts the open pull request snapshot lacks, per need and per Keeper.
+  The result of 2026-11-06 to 2026-11-08 and 25 synthetic tests come with it
+  (#50277).
+- Fix two sentences in the glossary that #48422 left duplicated and update the Live Transport capability list from 32 to 37 with the five newer ego CDP capabilities (#50286).
+- RFC-0515 lets each view pick what the three axis cells show, adds the header band and group heading sums, adds the V6 · V7 · V8 layers for the memory and age cells, the 12-hour schedule strip and the band, and records decisions E16-E19 (#50287).
+- Measure #50012 over the first 2 h 56 min after its boot (remote Execute calls with 0.5 s or more overhead 49.5% to 10.9%), widen the daily tool-efficiency chart to 2026-11-09, record the background Execute receipt lag on five runs in the execute-background RFC, and list in the report what main already holds for async Execute, Delegate visibility and charts (#50297).
+- Explain Goal criterion review observations, retry boundaries and their separation from completion proof and human confirmation (#50343).
+- A research record traces a one-off Keeper delegation stored as a standing
+  memory constraint. The wrong Draft review came from the delegation message
+  before the memory existed, and the memory was never read. The record
+  compares the case with four articles and 19 papers and recommends one
+  operator-edited review policy source per server, changed before any
+  broadcast (#50384).
+- Describe Direct Board identities, public notifications, deferred routing and the limits of historical memory revocation (#50388).
+- Re-measure Keeper-to-Keeper delegations on 2026-11-08 and 2026-11-09 with the script used for 2026-11-01..05 (failed 16.0% to 2.2%, queue-wait p90 575 s to 37 s), and record that the two windows ran different lanes, so the drop is not read as a change to delegation (#50410).
+- RFC-0515 draws the Keepers axis row on the mock's layout grid: right-anchored columns, a now band, 24 half-hour pulse cells, a wake strip with due and lag columns, folded groups and a 24-cell server age ladder, with layers G1-G4 and A1 and decisions E23-E27 (#50452).
+- Add a reader for the tool-call ledger that sizes the rows of masc_run_list and masc_goal_list (8 and 152 calls in November, up to 958,907 and 941,529 bytes each) and what cutting a field from each row saves, with the numbers behind #50476 and #50490 (#50506).
+- Add two ledger readers to the tool-efficiency evidence folder: one groups failed tool calls by error head and shows how the same Keeper retried them (301 of 26,915 calls failed between 2026-11-08 07:45Z and 11-09 07:45Z), the other splits Execute overhead into the first 300 seconds after each server boot and the rest (344 cold calls with 26.7% slow, 8,712 warm calls with 13.2% slow, across five boots on 11-09) (#50526).
+- `docs/reports/rfc-0515-remaining-layers-brief-20261109.md` hands the remaining RFC-0515 layers (V5, V4, G4, V8, W1) to another session with their RFC sections, mock functions, the files open pull requests own and the column comparison against the mock (#50578).
+
+### Internal
+
+- Remove seven functions that lost their last caller in earlier removals,
+  including the C stub `masc_process_group_of` (#49669)
+- One gate test reads which paths strict auth opens off the production route table, by the kind of the route each path reaches. It replaces the tests that asked the public-read list the same question (#49676).
+- Let the keeper profile TOML parser and io interfaces include the interfaces
+  their implementations already include, instead of listing every item of the
+  normalizers, agent_core_env and parser interfaces again (#49679)
+- Drop three environment settings from the launchd and systemd templates that the server never reads (#49695)
+- `Server_routes_http_routes_dashboard` registers the `/api/v1/keepers_bulk/*`
+  and `/api/v1/keepers/*` routes through the new
+  `Server_routes_http_routes_keepers.add_routes`, called at the same point of
+  its pipeline (#49708).
+- `Server_routes_http_routes_dashboard` registers the Keeper Gate routes
+  through the new `Server_routes_http_routes_keeper_gate.add_routes`. The gate
+  handlers and the two `For_testing` members the gate test uses moved with
+  them (#49715).
+- Keep one `error_json` and `respond_error` in
+  `Server_dashboard_http_keeper_api_types` and call them from the
+  keeper API POST modules and the dashboard routes module (#49722).
+- Drop the second copy of the AuthIdentityFSM TLA+ model from specs/bug-models and regenerate specs/INDEX.md (#49728)
+- Move the ten Skill editor dashboard routes, their request decoders and
+  audit rows from `Server_routes_http_routes_dashboard` into
+  `Server_routes_http_routes_skills` (#49732).
+- Eliminate duplicate top-level `additionalProperties` check in `Tool_input_contract.check_arguments`, combine token minting and module-tag resolution via `Tool_dispatch.mint_token_with_tag` and single-pass `allow_direct_call` authority in `Mcp_server_eio_execute`, thread already-lowered `Shell_ir.t` into `Keeper_gate.decide` / `Keeper_gate_readonly.classify_request`, remove single-constructor fossil types (`Tool_catalog.lifecycle`, `Board_metrics_hooks.flusher_outcome`, `Board_dispatch.Jsonl`), reconcile `Tool_unified.tool_info` stats with `Tool_metrics`, and replace `lib/workspace/` sub-module `include` chains with `open` (#49740, #49744).
+- Keeper identity drift health, the MSX checkpoint receipt ok flag, and capacity-error affected-provider lists now derive from the typed state instead of re-comparing the serialised status string (#49758)
+- The runtime-config cursor no longer reverses its row list on every move, and the latest coverage gap is folded without building a reversed copy (#49760)
+- The JSON option encoders, RFC 3339 stamps, and JSONL day keys each have one definition again: the duplicate long-named encoders are gone, the sandbox image tag and MSX mtime call Time_codec, and the workspace memory capture calls Jsonl_writer (#49763)
+- Keeper_path_check_error no longer re-parses its own rendered messages into a half-filled variant; the parser had no production callers and its round-trip tests are gone with it (#49765)
+- Keeper_librarian binds String_util.trim_nonempty instead of redefining the identical body (#49766)
+- coverage_reason_of_result decides all four usage/telemetry flag pairs in one match; the redundant leading guard that made one arm unreachable is gone (#49771)
+- Tool_catalog.implementation_status (always Real) is removed along with the Tool_spec plumbing that carried it; the wire JSON key "implementationStatus" remains as constant "real" for client compatibility (#49774)
+- The final attempt, last journal timestamp, and last token block are taken by a single-pass fold instead of reversing the list and calling a partial head (#49776)
+- The turn FSM action-label arm that cannot run states why it cannot run (assert_transition_allowed is classify_transition) and no longer carries a dead WARN; journal_stats lets cancellation propagate instead of reading it as missing stats (#49777)
+- Keep Browser_backend and its Browser_lane alias: newer main revisions use the source type and codec throughout the browser Add-on, so the proposed deletion is withdrawn (#49778)
+- The three one-constructor failure-site taxonomy modules are gone; their single OTel label now stands as a literal at its one call site (#49779)
+- Drop 62 library entries from the masc_operator dune file that no source of the library names (#49788)
+- Drop 72 unused library entries from 1 dune file (dashboard) (#49790)
+- Drop 54 unused library entries from 2 dune files (server) (#49791)
+- Drop 90 unused library entries from the bin dune file, leaving the masc_tui stanza alone (#49793)
+- Drop 18 unused library entries from 9 dune files under lib (activity_graph to exec) (#49795)
+- Drop 23 unused library entries from 9 dune files (dune) (#49796)
+- Drop 13 unused library entries from 9 dune files (dune) (#49797)
+- Drop 15 unused library entries from 9 dune files (dune) (#49798)
+- Drop 20 unused library entries from 5 dune files (dune) (#49799)
+- Drop 31 unused library entries from 6 dune files (dune) (#49800)
+- Drop 6 unused library entries from 5 dune files (dune) (#49801)
+- Remove 9 exported functions that only tests call: Pulse.set_rhythm, get_rhythm, last_beat, add_consumer, remove_consumer, default_rhythm and Tool_registry.get_top_n, get_never_called, distinct_tools_called (#49806)
+- Remove With_process.drain_to_buffer and Config.is_tool_allowed, which only tests call; the pause-status config test now calls Tool_catalog.is_visible directly (#49808)
+- Remove the test-only Discord_rest_client.build_edit_embed_request and Gate_protocol.message_request_status_of_string (#49809)
+- Remove the test-only Client_identity.anonymous, has_capability and same_agent (#49815)
+- Remove the test-only Keeper_turn_outcome.of_stop_reason and Keeper_turn_terminal_code.of_core_error_wire (#49819)
+- Remove the unused Gate_time_util.parse_iso8601_opt and the test that only exercised it (#49821)
+- Remove the unused System_error_class.to_raw_text and Transport_read_model.context_from_env with the tests that only exercised them (#49822)
+- Remove the unused Keeper_workspace_ops_setup module and Masc_exec.Bash_history, which only it called (#49823)
+- Remove the SOUL evolution callback with no registrant and the agent lookup hook only it read (#49824)
+- Fold the repeated snapshot refresh and authoring descriptor lookup in
+  `Server_routes_http_routes_skills` into two local helpers (#49829).
+- Remove Exec_core.process_result_json and the unused Host_config.coreutils type and field (#49832)
+- Move the runtime.toml write operation type, its audit row and the commit
+  answer out of `Server_routes_http_routes_dashboard` into
+  `Server_runtime_config_editor` (#49837).
+- Remove four exported values that no code calls: valid_agent_status_strings, read_json_file_opt, named_slot_to_string and start_with_retry_interval (#49838)
+- Remove three accessors that no code calls: Keeper_tool_plan.compiled_children, Keeper_tool_plan.output_node_id and Keeper_event_queue_persistence.load_snapshot_with_errors (#49843)
+- Move the eleven runtime config and `[tui]` preference routes, their request
+  decoders and handlers from `Server_routes_http_routes_dashboard` into
+  `Server_routes_http_routes_runtime_config` (#49844).
+- Remove the keeper_default_read_root alias that nobody calls (#49846)
+- Move the fourteen Setup dashboard routes (`/api/v1/setup/*`) from
+  `Server_routes_http_routes_dashboard` into
+  `Server_routes_http_routes_setup` (#49847).
+- Remove two publication-recovery test seams in Atomic_write that nothing calls, with the types and helpers only they used (#49850)
+- The boundary audit and the architecture doc no longer name
+  `Parse_outcome.to_option`, a function deleted earlier (#49851).
+- The deployment preflight helper acquires the BasePath lease through one
+  shared function instead of six copies (#49858).
+- The Keeper SSE bridge and the tool accumulator share one definition of the
+  stream phase and its decision tables (#49864).
+- Remove two profile normalizers, normalize_name_list_opt and lower_string_list_opt, that no code calls. (#49868)
+- Remove two Keeper_registry_setup helpers, install_entry_if_current and set_turn_phase_with, that no code calls. (#49869)
+- Remove the post-append fault seam, its hook and its mutex from the reaction ledger; nothing calls the seam. (#49870)
+- Remove the lifecycle event name string lists in Keeper_lifecycle_events that no code reads. (#49872)
+- Remove four exported helpers that no code calls: dashboard_memory_http_json, Sse.broadcast_encoded_to, cached_chat_markdown and polled_turn_output_entries. (#49874)
+- Remove Keeper_tool_outcome.is_nonprogress, whose last caller was removed with the governance rewrite. (#49875)
+- The Keeper GET dispatcher matches on one route type parsed from the path
+  instead of testing path suffixes in order (#49879).
+- Remove nine DOS tool schema values that no code names, and read every DOS tool definition at startup from the tool enumeration instead. (#49883)
+- The Keeper chat-history helpers and GET handlers move out of the dashboard
+  Keeper API file into their own module (#49884).
+- Remove 17 dune library entries that no masc_tui or masc_tui_keeper_next_run source names (16 from the masc_tui executable, yojson from masc_tui_keeper_next_run). (#49886)
+- The Keeper tool-call helpers and GET handlers move out of the dashboard
+  Keeper API file into their own module (#49891).
+- The Keeper memory-read helpers and GET handlers move out of the dashboard
+  Keeper API file into their own module (#49892).
+- Drop three unused library entries that the earlier dune scans left open: masc_backend in the masc library, agent_core in the anthropic_live_proof executable and yojson in fd_accountant (#49893)
+- Drop masc.agent_core.base from the masc_server library; no source under lib/server names Agent_core_base (#49894)
+- The Keeper turn-record and turn-transcript helpers and GET handlers move out
+  of the dashboard Keeper API file into their own module (#49895).
+- Drop masc_core and its stale comment from the masc_host_config library; host_config.ml and host_config.mli no longer name any module it provides (#49906)
+- The Keeper raw-trace and trajectory GET handlers move out of the dashboard
+  Keeper API file into their own module (#49907).
+- The Keeper last-prompt and provider-input GET handlers move out of the
+  dashboard Keeper API file into their own module (#49909).
+- Drop masc.masc_candle_config and its stale comment from the masc_server library; no source under lib/server names Candle_config (#49912)
+- Drop masc.jsonl_writer and its stale comment from the masc_workspace library; the code that called Jsonl_writer was replaced by Dated_jsonl.Store (#49913)
+- Drop masc_proto from the masc library; only masc_server, which lists it itself, names Masc_proto (#49914)
+- Drop masc.tool_types and its stale comment from the masc_tui_render_chat library; the module no longer names any Tool_result constructor (#49915)
+- Drop Keeper_sandbox_runtime_setup.turn_container_kind, which no code writes or reads since the docker turn containers were replaced by keeper-lifetime ones (#49917)
+- The execution-trust dashboard response takes its freshness fields from
+  the shared source-freshness helpers instead of a second copy (#49918).
+- Drop Tui_decode.parse_log_entry, which nothing calls, and name its test group after decode_log_entry (#49919)
+- Add the address form of the retained tool-result carrier and its capacity-refusal hook step: a run's carrier switches once, when that is strictly shorter, to the receipt count, the receipts per tool and the marker of one blob holding its inline text. No runtime uses it yet (#49920)
+- System_error_class classifies an exception by the errno it carries — read structurally from Unix.Unix_error and from the Eio_unix.Unix_error payload nested inside Eio.Exn.Io (bare, Fs, Net, Multiple) — and no longer scans the rendered Printexc text; only Sys_error / Failure payloads keep the boundary string parse, and its test rides its own stanza instead of masc_test_deps (#49922)
+- Cancel_safe.is_internal_race_cancel decides from the calling fiber's own cancellation context (Eio.Fiber.is_cancelled) instead of matching the rendered "Eio__core__Fiber.Not_first" text: a Cancelled seen while the caller is still live came from an inner Fiber.first race, one seen while the caller is cancelled did not (#49922)
+- The workspace route closures in `add_routes` become named handlers, and
+  `add_routes` lists the routes with their auth kinds in one place (#49926).
+- `Host_config.host` takes its `test_mode` from
+  `Env_config_core.running_under_test_executable` instead of repeating the
+  executable-name check (#49930).
+- A tool definition's `[[params]]` can declare `role = "path"` on a top-level string param; `action_radius.observed_paths` now lists the values of those declared params instead of guessing from key spelling (`cwd`, anything containing "path"), so an undeclared `note_path` is no longer a path and a declared `keeper_skill.file` is. The role never reaches the published schema, is refused on projection or nested params, and a tool without an embedded definition reports no paths (#49931)
+- Drop 13 unused library entries from lib/dashboard/dune (dune) (#49934)
+- Drop 13 unused library entries from lib/server/dune (dune) (#49935)
+- Drop 11 unused library entries from 3 dune files (dune) (#49936)
+- Drop 13 unused library entries from bin/dune (dune) (#49937)
+- `Workspace.expected_workspace_error_message` gives the sentence of a refused
+  `expected_workspace` precondition, and the task and goal tools use it instead
+  of their own copies (#49939).
+- Drop 18 unused library entries from lib/dune (dune) (#49941)
+- Drop 9 unused library entries from 8 dune files under lib (dune) (#49944)
+- Drop 6 unused library entries from 6 dune files (dune) (#49945)
+- `Server_refusal.expected_workspace_error` gives the status, code and sentence
+  of a refused `expected_workspace` precondition, and the play, play room,
+  artifact app data and published artifact routes use it (#49946).
+- The activity, dashboard, keeper and verification routes take the sentence of a
+  refused `expected_workspace` precondition from
+  `Workspace.expected_workspace_error_message` (#49948).
+- Builder drops nine setters nothing calls and the fields behind them; build passes the defaults those fields held (#49956).
+- Tool_telemetry.tool_type_of_name labels a tool from its own declaration — the descriptor's policy.readonly_hint / executor (Read, Grep read; Write, Edit write; Execute execute) or the catalog's readonly — and no longer from read/write/edit/execute name prefixes or the "grep" literal; WebSearch reads its declared read-only and becomes read, an attached service's read_file-style name that declares nothing is other (#49960)
+- process_eio names its explicit-timeout and argv-error log lines once instead of repeating them in 14 branches (#49961).
+- Run_registry_core gains a shared change-observer contract (Observer.make/notify — cancellation propagates, any other observer failure goes to the caller's logger) and a shared current-source refusal wording (source_error_to_string, parameterized by the registry's volatile/proper name spellings); the verification and Goal registries delegate both to it with their sentences byte-identical, the exact-lane registry delegates only the observer and keeps its own receipt wording, and payload shapes, publication API shapes and retention bounds stay per-registry as intended (#49965)
+- Duplicated helper reimplementations now delegate to their canonical owners: one `String_util.utf8_length` character counter replaces the copies in tool_input_contract, the librarian absorb gate, and wiki_rank; prompt_preset calls `Types_core.now_iso`; the dos and msx lanes write through `Fs_compat` atomic replacement instead of hand-rolled temp-file writes; tool_metrics keeps durations in a stdlib `Map.Make(Float)` multiset instead of a hand-rolled order-statistics AVL; and one `Keeper_identity_tools.write_json_snapshot` writes both the OAuth catalog and disconnect-receipt snapshots with a unique 0600 temp file (#49966)
+- Deduplicate task claim decision resolution, Turn FSM transition classification, board post title/author validation, and web tool approval gate classification (#49967).
+- Replace duplicate atomic file writes, directory creation, SHA-256 hex validation, and string trimming helpers with shared `Fs_compat.mkdir_p`, `Keeper_oauth_client_store.write_whole`, and `String_util` helpers (#49968).
+- Parse keeper history roles into closed `Agent_core.Types.role` values at the JSON boundary, use derived TLA outcome symbols in `Audit_log`, and simplify dashboard queue fallback lookups (#49969).
+- Remove duplicate facade `include`s in `Otel_metric_store` and `Dashboard_execution`, add $O(1)$ `Tool_registry.find_stats`, and add `Dated_jsonl.close` for releasing replaced `Tool_usage_log` store handles (#49970).
+- Replace `provider_runtime_failure` wildcard boolean guards in `Keeper_execution_receipt`, replace intermediate result-list partitioning in `Slack_rest_client` with a short-circuiting tail-recursive fold, and narrow `Keeper_late_approval.journal_stats` exception handlers (#49971).
+- Audit 7/8 anti-pattern repairs: validate_tool_result_shape takes one closed `tool_result_shape` variant instead of two booleans (both-true no longer passes a scalar like `` `Int 42 ``); two masc_tui fork_daemon catch-alls re-raise Eio.Cancel.Cancelled or treat spawn cancellation as shutdown instead of an error; slack_rest_client decodes conversations.history through List.partition (the arm the type checker demanded becomes one explicit or-pattern) with no Result.get_ok; five identity matches, four bool-match idioms, keeper_owner's five-step continuation staircase and six-guard chain, and two partial functions (`List.hd (List.rev …)`, wizard `List.hd`) collapse to direct expressions (#49973)
+- Four producers no longer emit alias keys for the same value in one JSON object: the runtime trust snapshot drops `raw_phase` and `selected_model`, the dashboard execution row writes `runtime_trust` only (the `trust` alias and its four TypeScript fallbacks go with it; the separate execution-trust endpoint keeps its own single `trust` member), the keeper card drops `recent_event` (renders read `recent_output_preview`), and the compact trust projections emit the snapshot's canonical `approval`/`execution` names instead of re-aliasing them as `approval_state`/`execution_summary` (#49974)
+- Log.Ring entries carry a closed in-memory diagnostic_kind (External_signal of string / Agent_decode_failure) set at the five emission sites — the server signal handler tags External_signal, workspace_lifecycle (rebound/end), workspace_gc and Masc_grpc_service tag Agent_decode_failure — and runtime_diagnostics_json classifies dashboard diagnostics from that typed kind instead of substring-matching log wording; rows restored from the JSONL sink are classified once at the load boundary (the only place a legacy string is all that remains), the wire schema (LogEntryRawSchema) and JSONL sink stay untouched, and the diagnostics output shape (ts/kind/signal/message) is unchanged (#49975)
+- board_tool_post's handle_post_create no longer recomputes an empty-title check its own earlier match already rejected — the unreachable "title is required" branch and its `title_is_empty` binding are gone (#49976)
+- Two include diamonds are cut: keeper_types_profile includes Keeper_config once instead of twice, and the Otel_metric_store facade stops re-receiving the seven metric-name modules through a direct include beside the Otel_builtin_metric_names path (four alias `let`s that duplicated already-included Otel_metric_names members go with them). Scope docs pin four single-constructor seams: tool_info's call_stats is a process-lifetime counter distinct from summary_report percentiles, tool_catalog.lifecycle and review_kind ride wire/JSONL rows, and Tool_capability.kind restates the registration-time policy axis by layering necessity (#49977)
+- board_tool_post's author checks (post create and comment add) are one exhaustive match each (`None | Some "" | Some "anonymous"` rejected in a single arm) instead of an `Option.is_none` guard followed by a match whose `None` arm the guard had made unreachable (#49982)
+- completion_authority_agent names its review installation and package ids once instead of repeating each at seven call sites (#49986).
+- The six gemini_url inline tests build their config with Provider_config.make instead of a 37-line record literal each (#49990).
+- Drop the ambient-context-eio entry from the library lists of masc_dashboard, masc_operator and masc_server; eio, which it re-exports, is listed next to it (#49991)
+- json_util builds the shared missing and null errors of its require_* functions once; messages are unchanged (#49992).
+- Drop ocaml-protoc-plugin, grpc-direct and ambient-context-eio from the masc library list in lib/dune; the comment above grpc-direct moves to lib/server/dune, which calls it (#49994)
+- Harness.Model_grader asks the grader for a `Score: <number>` line and reads that marker first, then the first line's number, then the first float anywhere in the response (the previous sole behavior), so a decimal in the explanation that precedes the score no longer becomes the score; four `model_grader` test cases cover the marker precedence and the fallbacks (#49997)
+- tool_misc_web_search settles the HTTP outcome and builds the hit response of its six provider fetches in one place, and the Z.ai error mapping shares the transport and status errors; requests and error messages are unchanged (#50000).
+- Drop 21 unused ppx entries (ppx_deriving.eq x4, ppx_deriving.show x5, ppx_deriving_yojson x3, ppx_let x4, ppx_tla x5) from 6 dune files (#50005)
+- Drop 16 unused ppx entries (ppx_deriving.eq x6, ppx_deriving.ord x1, ppx_deriving.show x4, ppx_deriving_yojson x5) from 8 dune files (#50006)
+- The goal store and the verification store share one content-addressed prepared cache (`Mirrored_store_cache.Content_cache`) instead of two line-for-line copies of the Hashtbl+Mutex+byte-equality machinery; each store keeps its own load classification and recovery policy (#50007)
+- lib/types/ids.ml builds its seven string ID modules from a String_id functor and a Sequenced_id functor instead of repeating the same functions and generators; ids.mli, ID formats and decode errors are unchanged (#50008).
+- The keeper tool boundary matrix doc and its audit script are deleted; the script already failed on 122 unlisted files and no CI job ran it (#50011).
+- The Board vote, comment, comment vote and Goal transition tool routes answer through one shared function for JSON parsing, 400 responses and cancellation; statuses and messages are unchanged (#50024).
+- The Keeper github-login, oauth-login, identity-refresh and identity-switch POST handlers share one Keeper lookup, and the three provider handlers share the body and provider check; the unreachable second keeper-name check in six POST handlers is removed, with statuses and messages unchanged (#50028).
+- Drop 10 unused library entries from 9 test/stanzas include files (test, 1/24) (#50029)
+- Drop 28 unused library entries from 9 test/stanzas include files (test, 3/24) (#50030)
+- Drop 34 unused library entries from test/dune (test, 20/25) (#50031)
+- Chat store writers report a failed append or load through `Keeper_chat_store_paths.report_store_failure` instead of ten copies of the counter, warning and error text, and `keeper_chat_store_turn_append.ml` builds its tool lines in one function (#50032).
+- Drop 9 unused library entries from 9 test/stanzas include files (test, 2/46) (#50033)
+- Drop 12 unused library entries from 9 test/stanzas include files (test, 4/46) (#50034)
+- Drop 11 unused library entries from 9 test/stanzas include files (test, 5/46) (#50035)
+- Drop 18 unused library entries from 9 test/stanzas include files (test, 6/46) (#50036)
+- Drop 14 unused library entries from 9 test/stanzas include files (test, 7/46) (#50037)
+- Drop 15 unused library entries from 9 test/stanzas include files (test, 8/46) (#50038)
+- Drop 12 unused library entries from 9 test/stanzas include files (test, 9/46) (#50039)
+- Drop 11 unused library entries from 9 test/stanzas include files (test, 10/46) (#50040)
+- Drop 19 unused library entries from 9 test/stanzas include files (test, 11/46) (#50041)
+- Drop 11 unused library entries from 9 test/stanzas include files (test, 12/46) (#50042)
+- Drop 12 unused library entries from 9 test/stanzas include files (test, 13/46) (#50043)
+- Drop 20 unused library entries from 9 test/stanzas include files (test, 14/46) (#50044)
+- Drop 14 unused library entries from 9 test/stanzas include files (test, 15/46) (#50045)
+- Drop 12 unused library entries from 9 test/stanzas include files (test, 16/46) (#50046)
+- Drop 13 unused library entries from 9 test/stanzas include files (test, 17/46) (#50047)
+- Drop 16 unused library entries from 9 test/stanzas include files (test, 18/46) (#50048)
+- Drop 7 unused library entries from 5 test/stanzas include files (test, 19/46) (#50049)
+- Drop 34 unused library entries from test/dune (test, 21/46) (#50052)
+- Drop 44 unused library entries from test/dune (test, 22/46) (#50053)
+- Drop 44 unused library entries from test/dune (test, 23/46) (#50054)
+- Drop 26 unused library entries from test/dune (test, 24/46) (#50055)
+- Eight listings that named all 42 chat events to ask whether an event ends a run, or ends it in error, now ask `Keeper_chat_run_signal.of_event`: three in the journal audit, four in the chat event log, and `Server_keeper_chat_agui_projection.is_terminal` (removed) (#50059).
+- Drop 10 unused library entries from test/dune (test, follow-up) (#50061)
+- Add a reader for keeper-librarian admission prompts under `scripts/tinker/librarian/` that splits a prompt MASC sent with `config/prompts/librarian.md` and writes it back byte for byte; it reads all 101 retained admission prompts (#50063)
+- Port MASC's acceptance checks for keeper-librarian admission answers to `scripts/tinker/librarian/admission_validator.py`: all 99 accepted retained answers pass, and breaking any one enforced rule fails with that rule's kind (#50064)
+- Pin E-real, the 99 answered keeper-librarian admission records, by digest and file sha256 in `scripts/tinker/librarian/e_real_manifest.json`, and add a read-only store check for the admission prompt reader and validator (#50065)
+- Drop 6 unused library entries from test/dune (test, follow-up) (#50071)
+- The five pending event queue transitions (cancel, cancel if present, transfer, source-terminal ACK, turn terminalization) share one `with_locked_state` frame for owner lookup, durable lock, state load and exception handling; error texts and signatures are unchanged (#50072).
+- The Keeper task tool dispatch matches `Keeper_tooling.Name.t` directly; the private `task_op` copy of its eight constructors and the identity mapping into it are deleted (#50077).
+- Drop four unused values from browser_lane.ml that the removed Firefox executor and external host left behind (browser) (#50078)
+- Rejection and approval wakes to the producer Keeper share one `Keeper_task_outcome_wake.delivery` type and one producer lookup and live-wake step; `Completion_authority_wakeup.wake_rejected_producer` returns `rejection_outcome` (`Delivery` or `Rejection_superseded`) (#50080).
+- `Server_dashboard_http_keeper_get_route.of_path` returns `None` for a Keeper GET path whose name is empty after trimming, so the dispatcher answers 404 for it; the 21 empty-name checks in the GET handlers are deleted (#50083).
+- `Json_field` no longer exports `string_opt`, `int_opt`, `bool_opt`, `list_opt` and `assoc_opt`, and `Server_dashboard_http_json_utils` no longer exports `json_assoc`; none of them had a caller (#50088).
+- Drop 18 unused re-exports and the `Http_negotiation` alias from `Server_routes_http_common`; the originals stay in `Server_mcp_transport_http` (server) (#50089)
+- Drop the unused `Typesafeai_types.model` type and `model_to_string`; the model id is a string end to end (typesafeai) (#50090)
+- Drop five unused re-exports from `Keeper_heartbeat_loop` and the uncalled `Keeper_heartbeat_loop_presence.keeper_agent_status` (keeper) (#50091)
+- Drop ten unused re-exports from `Keeper_context_runtime`, `Keeper_context_core_accessors` and `Keeper_unified_metrics_support`, and the three matching declarations in `keeper_context_core.mli` (keeper) (#50092)
+- `Workspace_task_receipts` and the 12 functions `Workspace_task_schedule` re-exported from it are deleted, and the Execution_receipt row of the observability artifact registry no longer lists it as a consumer; nothing has called it since #19728 removed the `required_tools` contract (#50093).
+- Drop three unused re-exports from `Keeper_agent_tool_surface` and `Keeper_current_task_reconcile.owned_active_task_id_for_meta`, which they left without a caller (keeper) (#50095)
+- Drop three unused one-line re-exports: `process_status_is_timeout`, `first_some` and `snapshot_view_to_string` (keeper, operator) (#50096)
+- Drop three unused one-line re-exports (`Tool_schedule.schemas`, `Tool_workspace.valid_assertion_strings`, `Voice_bridge.default_capture_timeout_seconds`) and point two comments at the owning modules (tools) (#50098)
+- Remove the unused `Keeper_registry_fsm_validators` module and its `Keeper_registry_setup.validate_turn_phase_transition` alias, and point four comments at the functions that raise the turn_phase violation (keeper) (#50099)
+- `Keeper_metrics_broadcast` and its old announce test are deleted. Nothing has sent `keeper_metrics_appended` since #48677 moved the announcement to `Workspace_dataset_event`, so the test could not hear it; `test_keeper_metrics_announce` covers the live event, and the `append_keeper_metrics` doc names what it sends now (#50100).
+- Remove the unused `Dashboard_http_keeper_outcomes` module with its `Dashboard_http_keeper.compute_outcomes_rollup` alias and `Dashboard_harness_health.read_recent_verdicts_for_agents`, and two unused `Dashboard_execution_helpers` re-exports (dashboard) (#50101)
+- Remove the unused `label_resolution_error_to_string` and `label_resolution_error_to_core_error` helpers and the three-layer alias chain behind `Runtime_agent`'s label-resolution re-exports (runtime) (#50102)
+- `Fs_compat.file_mtime`, `Operator_control_snapshot_cache.stats` (with its `slot_kind` helper) and `Keeper_exact_walk_failure.of_flow` (with `of_rejection`) are deleted; nothing calls them, and `invalidate_snapshot_cache` no longer tests `Eio_guard.is_ready` to run the same `Atomic.set` in both branches (#50103).
+- Remove the keeper detail "결과" section, the `OutcomesLedger` component, the `KeeperOutcomes` type and the `Keeper.outcomes` field that the server stopped filling after #48797 (dashboard) (#50104)
+- Remove the `KeeperOutcomesConservation` TLA+ spec, its two cfg files and its `scripts/tla-check.sh` runs after the outcomes rollup it modeled was removed (specs) (#50106)
+- Remove the unused `Move_queued_operation_to_front` Keeper owner command with its two wrapper functions, `Keeper_model_input_ledger.blocks_to_json`, and `Dashboard_goals_types_accessor.iso_max`/`latest_iso` (keeper) (#50108)
+- Remove two unused `json_assoc_member_opt` aliases of `Masc_tui_json.member_opt` from `Masc_tui` and `Masc_tui_render` (tui) (#50110)
+- Replace four code comments that named the deleted `sidecars/discord-bot/` and `sidecars/imessage-bot/` connectors with what the Discord and iMessage gateway modules do now (connector) (#50111)
+- The open asks, the selected ask, its question and its source are read from one place in `Masc_tui_types`. The footer used to keep its own copies, and while an answer was open its copy followed the cursor index where the key handlers followed the ask the answer belongs to (#50112)
+- Remove three unused re-exports of `Server_dashboard_http_core` and the `operator_snapshot_cache_diagnostics_json` definition they pointed to (server) (#50113)
+- Remove the unused `configured_http_port` and `configured_http_host` readers from `Server_routes_http_runtime` and `Transport_read_model` (server) (#50114)
+- Remove the uncalled `Keeper_recovery_transmission.error_to_string`, `Config_boot_overrides.source_to_string`, `Keeper_execution_outcome.completion_contract_result` and `Keeper_librarian_context_io.render` (keeper) (#50115)
+- Remove two unused nickname aliases from `Auth_credential_base` and the `Auth_nickname.is_generated_nickname_shape` helper they exposed (auth) (#50116)
+- Remove the unused `capability_directory_sync_error_to_string` from `Fs_compat` and `Atomic_write` (fs-compat) (#50117)
+- Remove the unused `report_owner` accessor from the publication recovery reconciler chain (fs-compat) (#50118)
+- Remove the uncalled `Checkpoint.content_block_of_json`, `Exact_output_execution.receipt_dispatch_count` and `Exact_output_flow.record_attempt`, and the three `Cli_common_json` JSON list/pair helpers that `Util` also defines (agent_core) (#50119)
+- Remove the `MASC_STALLED_SESSION_THRESHOLD_SEC` knob, its `Operator_digest_types` alias and its settings snapshot row, which nothing has read since the session digest code was removed (config) (#50121)
+- Remove the uncalled `Keeper_event_queue_persistence.persist_snapshot` and `Util.string_list_of_json` (keeper) (#50122)
+- Remove the uncalled `Server_auth.strip_prefix` and `Server_auth.strip_suffix` (server) (#50123)
+- Remove the Settings Notify "Runtime warning" row and the `runtime_warning_ctx_ratio` keeper field that no server code sends; the keeper context attention threshold stays the constant 0.95 (dashboard) (#50126)
+- Remove the `MASC_DASHBOARD_RUNTIME_WARNING_CTX_RATIO` knob, the `Env_config_keeper.DashboardHealth` module, its `Dashboard_http_keeper_types` alias and its settings snapshot row, which nothing has read since the dashboard stopped using the keeper field (config) (#50131)
+- Remove the `worker` settings category and its `MASC_LOCAL_RUNTIME_COOLDOWN_SEC` and `MASC_LOCAL_RUNTIME_DEBUG` snapshot rows, which nothing has read since the local runtime pool was removed, and drop `worker` from the `masc_config` category enum (config) (#50132)
+- The footer atoms, the Keeper detail tab row and the Questions heading build `key:label` through one function, `key_hint` in `masc_tui_keys.ml`. `hints_in_order` and `keeper_detail_tab_hint` used to join a key and its label by hand. The strings they build do not change (#50134)
+- Machine_lane.of_wire 를 더하고, play room·machine spectator·workspace dataset 이벤트가 msx/dos 이름을 to_wire/of_wire 한 쌍으로 쓰고 읽게 했어요. 문자열 복사본 machine_name 3개와 presence_action 복사본 1개를 지웠고 에러 문구는 그대로예요 (#50135)
+- Lane add-on 저장소 폴더 이름을 Lane_addon_store 한 곳(name_in_masc_dir·directory·of_config)에서 정하게 했어요. lane_addon 모듈 4곳이 따로 적던 이름과 Lane_addon_runtime.lane_addons_dirname 을 지웠고 경로는 그대로예요 (#50136)
+- Remove `scripts/viewer-local-e2e-check.sh`, whose only contract step requests `/api/v1/namespace/current`, a route the server does not serve, together with its `viewer-local-e2e-check` make target and the two docs rows that point to it (scripts) (#50137)
+- 상수가 이미 있는 이름 문자열(SQLite 사이드카 접미사 -wal·-shm·-journal, goal 상태 파일 이름, dos·msx 폴더 이름)을 상수로 읽게 했어요. 값은 그대로예요 (#50139)
+- .masc/upgrades 폴더 이름을 Common.upgrades_dirname 한 곳에서 정하고, 저널 복구 묶음(keeper_journal_preparation)과 설정 업그레이드 백업(released_workspace_upgrade)의 파일 이름 리터럴을 이름 붙인 상수로 모았어요. 디스크 경로는 그대로예요 (#50142)
+- server 코드 6곳이 따로 적던 Lane add-on 저장소 폴더 경로(13곳)를 Lane_addon_store.of_config 와 Lane_addon_store.directory 로 바꿨어요. 경로는 그대로예요 (#50143)
+- Remove `.railwayignore`, which only served the Railway deployment that #29062 retired and which no workflow, script or document names (deploy) (#50145)
+- prompt_overrides.json 파일 이름을 Prompt_override_persistence.filename 한 곳에서 정하게 했어요. Prompt_registry 의 경로 세 곳과 Prompt_preset.overrides_file 이 따로 적던 이름을 모았고 파일 경로는 그대로예요 (#50146)
+- /health 와 /health/ready 경로를 문자열로 적던 다섯 곳(속도 제한 면제 검사, 런타임 정보의 endpoints, restart CLI 세 곳)이 Server_health_paths 상수를 읽게 했어요. 경로 값은 그대로예요 (#50147)
+- Remove two design documents for the Add-on companion path that #48690 and #48700 removed (docs) (#50148)
+- lib·bin 코드 7곳이 따로 적던 Lane add-on 저장소 폴더 경로(11곳)를 Lane_addon_store.of_config 와 Lane_addon_store.directory 로 바꿨어요. 경로는 그대로예요 (#50149)
+- Remove the generated typed token constants `tokens.generated.ts` that no dashboard file imports, and the generator output for it (dashboard) (#50152)
+- Remove two statements that say the retired `tokens-drift` workflow enforces design token gates, in the design-system SPEC and a `source.ts` comment (dashboard) (#50157)
+- Remove six self-tests of CI scripts under `scripts/ci/tests` that no workflow, dune rule or document runs, as `docs/spec/15-testing.md` asks (ci) (#50158)
+- lane 의 JSON 을 만드는 `output_to_json`·`entry_json`·인벤토리 `to_json` 이 멤버 목록(`output_fields`·`entry_fields`·`inventory_fields`)을 먼저 만들고, 호출 쪽이 그 목록 앞에 멤버를 붙여요. 객체 모양을 다시 맞춰 보던 `assert false` 다섯 곳이 사라져요 (#50159)
+- Keeper 채팅 스트림의 큐 이벤트 타입(`keeper_stream_worker_event`)에서 큐에 들어가지 않던 `Stream_terminal`·`Stream_client_disconnected` 를 뺐어요. 터미널은 `stage_completion (Completion_terminal …)` 을, 끊김은 `signal_client_disconnected ()` 를 바로 불러요. 큐를 읽는 쪽의 `assert false` 갈래와 `Completion_terminal` 의 사본 타입이 사라져요 (#50160)
+- 확정된 Broadcast 행을 읽는 `read_committed_message` 가 「행이 없음」을 `Ok None` 으로 돌려줘요. 복구 루프가 없는 행을 다시 만든 뒤 같은 값을 `match` 하면서 이미 없앤 갈래를 막던 `assert false` 가 사라져요 (#50162)
+- `Masc_http_client.response` 가 `Pool.response` 와 같은 타입이에요. 같은 세 필드의 레코드가 둘이라 `post_response_sync`·`get_response_sync` 가 `Pool.request` 의 결과를 필드마다 옮겨 담던 코드 두 곳이 사라져요 (#50163)
+- Remove the paragraph about the removed companion proof job from the CI review workflow doc (docs) (#50164)
+- `Exact_lane_run_registry.usage` 가 `Agent_core.Types.api_usage` 와 같은 타입이에요. 같은 다섯 필드의 레코드가 둘이라 `usage_of_api_usage` 가 필드마다 옮겨 담던 코드와 그 함수를 부르던 세 곳의 `Option.map` 이 사라져요 (#50165)
+- `Keeper_usage_resolution.sample` 이 `Agent_core.Types.api_usage` 와 같은 타입이에요. 같은 다섯 필드의 레코드가 둘이라 에이전트 훅에서 지출 장부까지 사용량이 `api_usage → sample → api_usage → sample` 로 복사되던 production 코드 열 곳이 사라져요 (#50166)
+- `Keeper_usage_resolution.sample_of_api_usage` 와 `api_usage_of_sample` 이 사라져요. 두 이름이 한 타입이 된 뒤에는 받은 값을 그대로 돌려주던 함수라서, 시험 세 파일의 호출 열한 곳도 값을 그대로 넘겨요 (#50167)
+- `Lane_addon_worker.start` 의 `?mounts` 와 `Session.start_mcp_session_cleanup_loop` 의 `?interval` 이 사라져요. 두 인자를 넘기는 호출처가 production 에도 시험에도 없어서, 늘 `[]` 만 받던 `Lane_addon_engine.create_arguments` 의 `~mounts` 와 목록을 컨테이너 인자로 바꾸던 코드도 같이 사라져요 (#50169)
+- `Backend_compression.compress_with_header` 가 사라져요. 압축을 끈 2026-03-28 뒤로 입력을 그대로 돌려주던 함수라서, `Backend.FileSystem` 의 `set`·`set_if_not_exists`·`atomic_update` 는 이 함수를 거치지 않고 값을 그대로 저장해요. `backend.ml` 에 「저장할 때 압축한다」고 적힌 설명도 고쳤어요 (#50173)
+- `Backend_compression` 모듈과 `Backend.Compression` 별칭이 사라져요. `Backend.FileSystem` 의 `get` 과 `atomic_update` 는 2026-03-28 전에 `ZSTD`/`ZSTDD` 머리글을 붙여 저장한 값을 더 이상 풀지 않고 읽은 바이트를 그대로 돌려줘요. 그런 값이 든 파일은 서버를 멈추고 지운 뒤 설치해요 (#50185)
+- `Compression_codec` 의 `Dictionary` 인코딩이 사라져요. `compress` 가 늘 표준 zstd 만 돌려줬고 사전 압축을 만드는 코드가 없어서, `Compressed` 는 압축한 문자열 하나를 담고 `content_encoding` 은 `"zstd"` 상수가 돼요. 서버 전송 규격 15.5절의 `zstd-dict`·256바이트 설명도 실제 동작(zstd, gzip, 압축 없음, 32바이트)으로 고쳤어요 (#50187)
+- 값을 읽지 않고 `ignore` 로만 맞춰 두던 매개변수 셋이 사라져요: `Keeper_shutdown_prepare_join.read_guarded_meta` 의 `~cleanup_reason`, `Keeper_runtime_contract.runtime_observability_contract_json` 의 `~config`(한 칸짜리 객체를 돌려주던 `runtime_contract_json` 도 같이), `Dos_machine_tools.left_inventory` 의 `~root`. 결과 JSON 은 그대로예요 (#50194)
+- 이미 쓰는 값에 붙어 있던 `ignore` 두 줄(`Server_dashboard_http_hitl_recover.handle_journal_restore` 의 `request`, `Keeper_media_reading.project` 의 `block`)이 사라져요. `Tool_local_runtime_systemone.validate_question` 은 아무도 읽지 않던 "다시 만든 질문" 대신 `unit` 결과를 돌려줘요. 동작은 그대로예요 (#50196)
+- `Log` 의 `classify_legacy_diagnostic` 을 `classify_restored_diagnostic` 으로 바꾸고 주석을 사실대로 고쳤어요. 진단 종류는 메모리에만 있고 디스크 기록에는 키가 없어서, 디스크에서 읽은 줄은 모두 이 함수가 글자로 분류해요. "옛 줄만 거친다"는 옛 설명이 틀렸어요. 동작은 그대로예요 (#50199)
+- The ego input contract no longer has a raw pointer drag case or the pre-input refusal for it. After the selector-only `drag_to` change no action or workflow step could produce one (#50203)
+- `test_mcp_integration.ml` 의 `test_connect_all_second_fails` 가 `Ok`·`Error` 어느 쪽이든 통과하던 것을 `Ok` 에서 실패하게 고쳤어요. `Mcp.connect_all` 은 한 서버가 실패하면 먼저 연결한 서버를 닫고 첫 오류를 돌려줘요. `test_mcp_coverage.ml` 과 이름·본문이 같은 `test_close_all_empty` 하나를 지웠어요 (#50205)
+- The pull request snapshot types, `keeper_of_author`, the JSON projection and the published value move from `Server_repository_pulls` to `Repository_pulls` in `masc`, so a Keeper tool can read the snapshot the HTTP route shows. The reader stays in `masc_server`. Behaviour is unchanged (#50213).
+- `Keeper_sandbox_microvm` is split into thirteen private modules, `Keeper_sandbox_microvm_base` through `Keeper_sandbox_microvm_listing`; its interface is unchanged (#50229)
+- Remove the viewer build script, its selected test and the make targets, part 1 of 14 of removing viewer/ (viewer) (#50231)
+- Remove the pointers to viewer/ in the ignore list, licence notice, spec and matrix, part 2 of 14 of removing viewer/ (viewer) (#50232)
+- Remove 8 files of the unused viewer app, part 3 of 14 of removing viewer/ (viewer) (#50233)
+- Remove 8 files of the unused viewer app, part 4 of 14 of removing viewer/ (viewer) (#50234)
+- Remove 8 files of the unused viewer app, part 5 of 14 of removing viewer/ (viewer) (#50235)
+- Remove 8 files of the unused viewer app, part 6 of 14 of removing viewer/ (viewer) (#50236)
+- Remove 8 files of the unused viewer app, part 7 of 14 of removing viewer/ (viewer) (#50237)
+- Remove 8 files of the unused viewer app, part 8 of 14 of removing viewer/ (viewer) (#50240)
+- Remove 8 files of the unused viewer app, part 9 of 14 of removing viewer/ (viewer) (#50243)
+- Remove 8 files of the unused viewer app, part 10 of 14 of removing viewer/ (viewer) (#50244)
+- Remove 8 files of the unused viewer app, part 11 of 14 of removing viewer/ (viewer) (#50245)
+- Remove 8 files of the unused viewer app, part 12 of 14 of removing viewer/ (viewer) (#50246)
+- Remove 8 files of the unused viewer app, part 13 of 14 of removing viewer/ (viewer) (#50247)
+- Remove 6 files of the unused viewer app, part 14 of 14 of removing viewer/ (viewer) (#50248)
+- Remove five hand-run scripts that no workflow, script or document calls: version-truth sync, TLA drift baseline, agent-core payload audit, gRPC descriptor generator and Ollama context check (scripts) (#50256)
+- Remove three self-tests of the approved-selection verifier and the review and CI integration under `scripts/review`, as `docs/spec/15-testing.md` asks (ci) (#50257)
+- The TUI key handler steps a scroll through one function, `Masc_tui_scroll.step_uncounted`, at 17 page-key and signed-step sites and in the Metrics card rebase. It stops at `max_int` instead of wrapping negative, and two page-key arms that repeated another arm or never ran are removed (tui) (#50269)
+- Remove five hand-run verify and probe scripts for the play page, report artifacts and the browser ego tool that no workflow, script or document calls (scripts) (#50270)
+- Remove five Python tests of the terminal-bench harness, the vst stream tool and the review scripts that only people run by hand (tests) (#50273)
+- The issue template, `CONTRIBUTING.md` and `docs/PRODUCT-OPERATING-PLAN.md` no longer name the removed `Issue Taxonomy` workflow (removed in #41275) as the thing that reads a `masc-triage` block and attaches labels; they say a triager attaches them, and that the template no longer answers a value outside the vocabulary SSOT (#50274).
+- Remove the unused make health bundle: the health snapshot, ml line cap and base policy audit scripts with their baselines and the BASE-POLICY doc, and the stale ratchet text in COMMON-PITFALLS (scripts) (#50275)
+- Remove the withdrawn Figma Studio design and the Figma platform research from docs/design, and the roadmap link to the first (docs) (#50276)
+- Remove 23 citations of line numbers in design-system/prototype-v2 from dashboard CSS and TS comments (#50280)
+- Remove 119 citations of line numbers in design-system/prototype-v2 from dashboard CSS comments (#50281)
+- Delete the README, notes and two CSS files of design-system/prototype-v2 (1/3) (#50282)
+- Delete six CSS files of design-system/prototype-v2 (2/3) (#50283)
+- Delete the last six CSS files of design-system/prototype-v2 (3/3) (#50284)
+- Remove the --live mode of harness_tool_call_quality.sh, which calls a tool no catalog defines (#50285)
+- Remove the dashboard keepers/purge-status and goals/delete routes that no client calls (#50289)
+- Remove the GET /api/v1/activity/graph route that no client calls (#50293)
+- Stop computing activity_graph_default in the dashboard snapshot and drop Activity_graph.default_projections (#50298)
+- Delete the four Builder-only agent_core test files and drop the compatibility promise from the stability doc (#50307)
+- `Keeper_turn_sandbox_runtime` is split into seventeen private modules, `Keeper_turn_sandbox_runtime_registry` through `Keeper_turn_sandbox_runtime_maintenance`; its interface is unchanged (#50318)
+- Remove Activity_graph.graph_json, the graph builder and their tests (#50321)
+- Build the agents of five agent_core test suites with Agent.create instead of Builder (#50322)
+- Replace optional-callback tuple invariants in `Keeper_chat_slack` and
+  `Keeper_tools_agent_core_handler` with closed types (`streaming_transport` and
+  `Keeper_prepared_inline_files.operation`), and replace partial list selectors
+  in `Reliable_change_g1` with `last_opt` (#50323).
+- Remove the activity graph reducer module and the graph-only types (#50324)
+- Delete the agent_core Builder module and its Agent_core alias (#50327)
+- Delete the agent_core Plan module and its test (#50331)
+- Avoid warning 4 (`fragile-match`) when checking the canonical descriptor
+  handler in `Keeper_tools_agent_core_handler` (#50337).
+- `Dashboard_goals_types_builder.build_tree` and `Dashboard_goals.build_goal_events_projection` no longer take the goal list they never read (#50338)
+- Delete the unused agent_core image and speech generation modules (#50339)
+- `Keeper_chat_operation_store.edit_queued` no longer keeps a reference it only wrote to (#50340)
+- Merge held world norms into one: `keeper_constitution_write` takes `replaces` and writes a `Replaced` ledger line retiring the bundle, and ledger reads isolate lines whose subject the keeper roster does not resolve (RFC-0504) (#50342)
+- Delete the agent_core Agent_tool module and its test (#50345)
+- `Keeper_provider_runtime_boundary.classify_provider_runtime_error_record` no longer takes the `detail` argument it ignored (#50346)
+- Delete the agent_core Typed_tool module and its test (#50347)
+- Delete the agent_core Artifact_service module and its test (#50350)
+- Delete the agent_core Fs_atomic_eio module and its race test (#50351)
+- Delete the agent_core Tool_middleware module and its tests (#50353)
+- Three `Backend.FileSystem` documentation comments (`set`, `set_if_not_exists`, `try_acquire_lock`) are no longer also attached to the value before or after them (#50356)
+- Delete six exact-output receipt accessors that nothing calls (#50358)
+- `Keeper_sandbox_control.checkout_identity_rows` no longer takes the optional `inspection_budget_sec` argument; it always bounds git inspection by `Repo_git.inspection_timeout_sec` (#50362)
+- The `/health` route is registered through `Server_health_paths.health` like the liveness and readiness routes, instead of a separate `"/health"` literal (#50370)
+- The tree builds again after #50341: the masc library lists masc_backend, whose Backend_types it names, and the TUI goal record restates the pg_criterion_review field (#50371).
+- Delete the eighteen global Otel_tracer values only tests call, and test_otel.ml with them (#50376)
+- Delete the ten Sessions_store values only tests call (#50377)
+- Unused `open` lines are removed from 7 modules, among them `keeper_agent_run_finalize_response`, `keeper_agent_run_receipt` and 5 more (#50379)
+- Unused `open` lines are removed from 5 modules, among them `keeper_context_core_history`, `keeper_context_runtime` and 3 more (#50380)
+- Unused `open` lines are removed from 6 modules, among them `keeper_gate_auto_judge_worker`, `keeper_heartbeat_loop` and 4 more (#50381)
+- Delete the six Mcp client values and the four resource and prompt type aliases only tests call (#50386)
+- `lib/dune` lists `masc_backend` once in the libraries of the `masc` library; the duplicate stopped `dune build @check` with "library masc_backend is present twice" (#50390)
+- Delete the Telemetry_bus and Event_bus values only tests call, with the filter constructors and wrapper tests they leave unused (#50396)
+- The sort-cycle test in `test_tui_keys` changes `keeper_turns` through `preserve_keeper_list_selection`, as the app does, so the cursor stays on the selected Keeper in the By_state view; it failed on `main` with `Received: Some "gamma"` (tui) (#50401)
+- Delete the Eval collector, comparison and threshold values only tests call, keeping the types and encoders Trajectory reaches (#50402)
+- `Keeper_unified_turn_execution.run` no longer takes `~registry_base_path`, `~runtime_id_of_meta` and `~start_background_turn_event_bus_drain`, and its `ctx` drops `cleanup`, `turn_id`, `event_bus_integrity_error_snapshot` and `tool_completed_count_snapshot`; `run` read none of them (#50403).
+- `test_world_constitution_types` handles `Replaced` in the reason-less removal check and `test_keeper_provider_connection_recovery` names `Masc.Keeper_turn_driver_try_provider`; without them `dune build @check` stopped with a non-exhaustive match (warning 8) and `The module Recovery is an alias for module Keeper_turn_driver_try_provider, which is missing` (#50405).
+- Delete the Async_agent future API (spawn, await, is_ready, cancel, race) and two unused helpers, keeping all (#50406)
+- Four declarations the compiler reports as unused are dropped: the `rec` of `Frontmatter`'s `next_line` and of `Bash`'s `arg_as_assignment` (warning 39), the `as 'a` alias in the signature of `Dashboard_briefing_sections.json`, and `Server_ide_http`'s re-declaration of `Server_ide_scope.ide_scope` (warning 34) (#50408).
+- `Voice_speak.try_http_tts_for_dashboard` no longer takes `~voice` and `~audio_device`, and `try_http_tts_for_browser_audio` no longer takes `~sw`, `~clock`, `~net`, `~priority` and `?audio_device`; neither read them (#50411).
+- Delete the Harness verdict JSON encoders and the Fs_result read_dir and remove_file only tests call (#50413)
+- `Keeper_agent_run_finalize_response.finalize` no longer takes `~publication_recovery`, `~ctx_snapshot`, `~profile_defaults` and `?continuation_channel`, nor the trailing unit argument that only erased the optional one; its body read none of them (#50416).
+- Decide whether a Keeper turn may run on the Runtime its owner gave it from one snapshot of the authorization log, through the existing decision (`Authz_keeper_turn.decide`, multi-account plan D2-1) (#50418).
+- Judge a base path a single user for a host tool without opening a file the server may be writing (`Authz_boot_mode_read.tool`, multi-account plan D2-2) (#50419).
+- An official CLI starts only on an account that `Runtime_account_access` authorizes for the request it serves, and a server publishes its single-user access when it opens its owner state (multi-account plan D2-3) (#50420).
+- Delete six `agent_core` public values nothing calls: the `Paths` module, `Nonempty.hd`, `Nonempty.length`, `Capability_manifest.empty`, `Checkpoint_snapshot.turn` and `Checkpoint_snapshot.timestamp` (#50426)
+- `Keeper_unified_turn_success` no longer passes `~terminal_outcome` and `~execution_outcome` to `append_metrics_snapshot` or `~lifecycle` to `emit_usage_metrics_and_log`; none was read. `For_testing.persist_terminal_turn_meta_for_outcome` is now `For_testing.persist_terminal_turn_meta` without the ignored outcome argument, and `For_testing.terminal_outcome` is removed (#50431).
+- `cached_surface_cache_json`, `with_cached_dashboard_surface_metadata` and `with_execution_metadata` no longer take or pass `~ttl_s` and `~timeout_s`, and `start_transport_health_refresh_loop` no longer takes `~state`; none was read (#50432).
+- `broadcast_drop_marker`, `bootstrap_live_keeper_meta`, `prepare_cleanup` and `unregister_retired_exact` no longer take `~stage_label`, `?lifecycle_token`, `~entry` and `~base_path`; none was read (#50433).
+- `slack_delivery` no longer takes `~thread_ts` and the ignored `~user_name`, `deliver_inbound` no longer takes `~base_dir`, and `deployment_state_json` no longer takes `~workspace_commit` and `~resolved_base_commit`; none was read (#50435).
+- Unused `open` lines are removed from 6 modules, among them `keeper_meta_json`, `keeper_official_client_context_projection` and 4 more (#50440)
+- Unused `open` lines are removed from 6 modules, among them `keeper_sandbox_exec_failure`, `keeper_sandbox_read_backend` and 4 more (#50443)
+- Unused `open` lines are removed from 7 modules, among them `keeper_tool_keeper_audit`, `keeper_tool_memory_runtime` and 5 more (#50448)
+- Unused `open` lines are removed from 6 modules, among them `keeper_turn_helpers`, `keeper_turn_runtime_budget` and 4 more (#50449)
+- Unused `open` lines are removed from 4 modules, among them `tool_shard_types_schemas_filesystem`, `voice_bridge` and 2 more (#50453)
+- Two agent_core runtime output surfaces that have no schema reader, type or producer (`runtime_sync_window.v1`, `runtime_evidence_bundle.v1`) are removed from the surface catalog, the index and the schema directory (#50457)
+- `scripts/audit-dead-tools.py` compares the `config/tools` registry with the
+  trailing call window and reports registered tools with no recorded call,
+  keeping tools whose call family a source cannot see in a separate
+  "unverified" list instead of calling them unused (#50464).
+- Spell each workspace dataset name once in `Workspace_dataset_event.Kind.to_wire`; `Kind.of_wire` and `of_fields` read it back through `Kind.all`, so a new kind that `of_fields` does not handle fails to compile (#50468)
+- The Keepers TUI counts each Keeper's wakes of the next 12 hours per half-hour slot by walking its schedules' recurrences from each request's next due. A slot is unknown where a recurrence did not decode, a row is late, held or has a status word the TUI cannot read, the agenda read failed or the cut agenda stops. The grid draws these values in a later layer (#50469).
+- Delete `Backend_anthropic.effective_max_output_tokens`, `Backend_anthropic.required_max_output_tokens` and `Backend_openai_request.effective_max_output_tokens`, which no code or test calls (#50470)
+- Delete the `metrics` field of `Trajectory.trajectory` and the `"metrics"` key `Trajectory.to_json` wrote, which was always null (#50471)
+- Delete the `Eval` run-metrics module (three types and their JSON encoders, no remaining user) and `Util.json_of_string_pairs`, which only it called (#50472)
+- Delete the `Contract` module (prompt and context bundle with `with_skill`, `merge`, `compose_system_prompt` and others), which only its own test called (#50474)
+- Remove three labelled parameters no function body reads: `run_without_lifecycle ~capacity_bytes` in the Codex runtime, `Keeper_run_tools.prepare_agent_setup ~context_injector` and `Keeper_agent_run_turn_helpers.turn_progress_callbacks ~turn_id` (#50475)
+- Unused `open` lines are removed from 6 modules, among them `keeper_unified_metrics`, `keeper_unified_metrics_json_support` and 4 more (#50477)
+- Delete `Mcp.connect_and_load` and `Mcp.close_all`, which only tests called, and what only they used: `Mcp.close_managed`, `Mcp.merge_env`, `Mcp.list_tools`, `Mcp.call_tool` and the `Mcp.server_spec` type (#50491)
+- Delete the `agent_core.agent_tool.prompt_param_description` prompt (template section, `Prompt_names` constant and `Tool_guidance_text` field), which no code reads (#50494)
+- Delete the `Mcp_http` module (HTTP transport that builds an `Mcp.managed`), which only its own test called (#50495)
+- Three exports with no caller are deleted: `Keeper_config_text.bool_of_env_opt` with its two re-exports, `Server_routes_http_runtime_fleet_scan.keeper_phase_counts` and `Tool_blob_store.addressed_bytes` (#50501)
+- `Keeper_turn_terminal.of_failure` loses the `?tool_call_count` argument and `Activity_graph_types.tool_execution_event_kind_of_string` is deleted; no caller passed the argument and nothing called the decoder (#50511)
+- Audit entries lose the `cost_estimate` and `token_count` fields and the matching optional arguments of the `Audit_log.log_*` functions; no caller ever set either one (#50512)
+- `Keeper_runtime_contract.runtime_contract_json_from_fields` is deleted along with its backend-detail redaction helpers, and `Keeper_turn_driver_wrappers.run_named_with_masc_tools` loses the `?native_tools`, `?temperature`, `?accept`, `?hooks`, `?on_event`, and `?transport` arguments; no production code called the projection and no caller passed the arguments (#50519)
+- The keeper feed test builds its schedule row with a decoded `Ok One_shot` recurrence, which restores `dune build @check` on main after #50469 changed the field type (#50521)
+- Correct the `run_in_background` validation test label to say it accepts the schema's boolean boundary parameter (#50532).
+- Delete `Agent_card.has_capability`, `Agent_card.can_handle_tool` and `Agent_card.has_skill`, one-line `List.exists` queries that only tests called (#50539)
+- Delete `Count_tokens_sync.count_anthropic` and `Sessions_store.get_raw_trace_run`, which only tests called, and `Sessions_store.file_read_error`, which only `get_raw_trace_run` used (#50540)
+- Delete `Response_shape.ended_without_deliverable_content` and `Consumer.run_agents`, which only tests called, and the private `Consumer.agent_name` that only `run_agents` used (#50541)
+- Delete `Api_common.default_base_url`, `Api_common.max_stdio_buffer`, `Api_common.json_of_string_or_raw` and `Provider_catalog.default_model_for_provider`, which only tests called (#50542)
+- Delete `Util.file_write_error`, `Util.result_traverse` and `Util.safe_sub`, which only `test_util.ml` called, and `Util.json_member_bool`, which nothing called (#50545)
+- Delete `Runtime_store.read_window_events`, `Runtime_store.save_snapshot`, `Runtime_store.save_artifact_text` and `Sessions.participant_by_name`, which only tests called, and what only they used: `Runtime_store.snapshot_path` and the `run_event_record` and `run_window_events` types (#50546)
+- Delete `Telemetry_event.event_type_name` and `Openai_wire.chunk_has_non_empty_delta`, which only tests called, and drop the mention of the second from the References list of `PERFORMANCE-SLO.md` (#50547)
+- `lib/fs_compat/fs_compat.ml` (5,552 lines) is split into twelve `Fs_compat_*` modules that `Fs_compat` includes in order, and `fs_compat.mli` and the public names of the library are unchanged; the twelve modules are listed in `private_modules` so no other library can name them (#50564)
+- `.github/workflows/dead-tools-report.yml` and `scripts/audit-dead-tools.py` are
+  gone. The weekly report could only produce a number on a machine that carries
+  MASC runtime state (`<base>/.masc`); on a GitHub-hosted runner it reported every
+  tool as unjudgeable, so the report was withdrawn rather than repaired (#49174,
+  #50582).
+- Delete `Voice_bridge_core.local_playback_enabled_for_agent`, `Browser_lane.ego_input_contract` and `Masc_tui_resource_document.rows_with_search`, which nothing calls (#50605)
+- Delete `Tool_shard_types_enum_mirrors` and its two enum string lists, which nothing reads (#50606)
+- Stop naming the removed `Tool_shard_types_enum_mirrors` in three keeper `.mli` comments and `test_enum_mirror_sync` (#50607)
+- Delete `Keeper_meta_contract.runtime_exhaustion_reason_retryable`, `Keeper_unified_metrics_json_support.tool_call_detail_to_json` and `Keeper_owner_registry.interrupt_running_operation`, which forwarded to other modules and had no caller (#50608)
+- Delete `Keeper_hooks_agent_core_types.key_tool_call_count` and `Keeper_tool_descriptor.public_name_for_internal`, which nothing calls (#50614)
+- Delete `Keeper_registry_setup.clear_turn_switch` and `Keeper_registry_types.wake_reason_label`, which nothing calls (#50615)
+- Delete `Server_dashboard_http_core.dashboard_messages_safe` (and the `Server_dashboard_http_core_entities` function it forwarded to) and `Activity_graph_registry.unregister_if_current`, which nothing calls (#50617)
+- Delete `Mcp_server_eio_execute.caller_agent_name_from_arguments`, which forwarded to `Mcp_server_eio_caller_identity` and had no caller (#50618)
+- `lib/keeper/keeper_memory_os_current.ml` (3,950 lines) is split into eleven `Keeper_memory_os_current_*` modules that `Keeper_memory_os_current` includes in order; `keeper_memory_os_current.mli` and the public names are unchanged, and the eleven modules are listed in `private_modules` so no code outside the `masc` library can name them (#50633)
+- `test/test_keeper_tool_dispatch_runtime.ml`'s `cleanup_dir` no longer follows
+  symbolic links. It used `Sys.is_directory`, so the live directory link the
+  visible-cwd case leaves behind (`escape-link`) made the cleanup enumerate the
+  link target, delete its entries and then fail its `rmdir` with `ENOTDIR`; the
+  `try ... with _ -> ()` around it hid that, so the cleanup stopped halfway and
+  every run leaked a temporary tree while the case still ended green. The new
+  body reads `Unix.lstat` and unlinks `S_LNK` entries, and a regression case
+  pins both link shapes plus the target's contents (#26648, #50638).
+- The `test_server_base_path_guard` fixture cleanup unlinks symlinks instead
+  of following them. It used `Sys.is_directory`, which stats through a link,
+  so a directory link was walked into and emptied its target and then failed
+  with `ENOTDIR`, while a dangling link read false from `Sys.file_exists` and
+  was skipped, leaving `Unix.rmdir` with `ENOTEMPTY`. Which shape the cleanup
+  met depended only on `Sys.readdir` order. A regression test builds both in
+  one tree (#50656).
+- Delete test_dashboard_runtime_probe_loop and test_runtime_metrics_announce, which no dune stanza includes (#50657)
+- Delete test_fusion_wake, which runs only when MASC_RUN_FLAKY_TESTS=true and nothing in the repository sets it (#50658)
+- 시험 세 곳(test_keeper_tool_plan_executor·test_mcp_server_eio_call_tool·test_keeper_tool_dispatch_runtime)이 Board_dispatch.init_jsonl 의 구조화된 오류 타입(initialization_error)을 Result.get_ok 정규형으로 받도록 맞췄어요. (#50721, #50684 뒤처리)
+동결 예외 1: muse 마감 경계 시험 fixture 가 실제 마감값과 어긋나 첫 RC 검증(42681028060)의 설치 축 4잡을 막았다. 경계를 실측값으로 맞추고 rc 에 cherry-pick 했다(#50756).
+동결 예외 2: #50360 이 추가한 다섯 번째 동반 바이너리 masc-antigravity-path-hook 를 설치 영수증 파서 허용목록이 인정하지 않아 재검증 RC(42689442386)의 설치 축 4잡이 invalid_receipt 로 실패했다. 파서 허용목록과 시험 fixture 를 고치고 rc 에 cherry-pick 했다(#50773).
+동결 예외 2(계속): 발행 게이트의 expected 자산 집합에도 같은 이름이 없어 발행 단계에서 'Distribution assets are missing or unexpected' 로 실패할 예정이었다(정적·실행 재현으로 확정). expected 집합 1행을 고치고 rc 에 cherry-pick 했다(#50782).
+
+### Known issues
+
+전체 회귀 상태(게이트 run 42657800048, head 8f3b2a57 = 컷 635a443a + 게이트 수리 #50721, 2026-11-09, 아티팩트 test-suite-log 실측): **필수 프로파일 10스위트 전부 통과**(test_keeper_turn_interrupt·test_keeper_chat_operation_http·test_keeper_chat_delivery_identity·test_mcp_session_task_lifecycle·test_keeper_chat_operation_store·test_goal_tools·test_goal_verification_agent·test_workspace_memory_ledger·test_keeper_librarian_continuity·test_schedule_store). 전체 회귀에는 아래 실패가 남으며, 각각 이월 과제로 등록돼 있다.
+
+**이번 컷 창(11-09 11:36–15:28Z) 도입 — 비필수 스위트 각 1사례 (task-3483·3489·3490, v0.71.0 수리)**
+- `keeper_tool_plan_executor` — case "Board write survives composition" 1/38. 보존 영수증 경계(#50684, b5af2f8a)로, 효과는 이미 커밋된 뒤 증거 수령이 상점 부재 시 실행을 멈추는 동작.
+- `tui_decode` — decode_repositories case 8 "memory healt…" 1건. 컷 635a443a(42645360201 아티팩트)에서 동일 실패.
+- `Keeper_sandbox_read_backend` — run_command case 5, 1/85. 컷 run 에서 동일 1 failure.
+
+**TUI 시그널·전송 계열(python 15사례, 기준선 상존 — task-3471)**
+test_a_board_write_about_the_open_post_is_read·test_a_board_write_reads_the_list_and_census·test_a_change_of_the_detail_keeper_is_read·test_a_held_call_change_reads_the_held_calls_on_the_dashboard·test_a_transport_measurement_reads_the_transport·test_account_emails_read_once_per_reason·test_an_entry_read_superseded_by_a_refresh_is_read_again·test_changes_while_reading_coalesce_without_cadence·test_failed_composite_reads_are_read_again_with_growing_waits·test_failed_held_call_reads_are_read_again_with_growing_waits·test_failed_list_reads_are_read_again_with_growing_waits·test_failed_post_reads_are_read_again_with_growing_waits·test_failed_transport_reads_are_read_again·test_only_the_repositories_dataset_reads_the_list·test_same_path_epoch_change_retires_old_reads_and_revalidates — 제품 경로가 아닌 시험 잔여이며 도입 창 핀포인트는 (02:53, 03:32Z]로 좁혀져 있다.
+
+**그 외 기준선 상존 (b577c0b5 run 42610395195 와 같은 상태)**
+- `test_muse` deadline 경계 4 subtest(#50591 창 도입) — 첫 RC 검증에서 시험 fixture 누락(호출이 workspace 를 만들지 않아 인자 검증 대신 workspace 오류를 만남)으로 확인되었고 제품 코드는 무결함이어서, #50756 이 이 트리에서 수리했다. 게이트 run 42657800048(8f3b2a57)에는 4 subtest FAIL 로 남아 있었다(python 16 id 중 1 — 게이트 run 시점 실제 잔여는 15 id). 재검증 RC 42689442386 에서 네 플랫폼 모두 통과를 확인했고 최종 RC 42702017022 에서도 초록이다(더 이상 알려진 문제가 아님).
+- OCaml 축 RED 54스위트 — 대상: board_persistence/board_rest_routes/board_vote_persistence 등 board 계열, Candle·Curator·DOS·Dashboard·Exact·H2·Keeper·Lane·Provider·Telemetry·Tool·Tool_plan 등 모듈 스위트. 11-09 11:36Z 기준선(56)과 같은 인구에서 5스위트가 이번 창에 회복(Endpoint·Keeper_sandbox_docker_route·goal_projection_announce·goal_verification_gate·keeper_claude_code_runtime).
+- 기준선 대조 판정: python 추가 실패 0(40→16, GuestShim #50050 16건·LocalBuildInstall 21건은 이번 창에 회복), OCaml 신규 RED 3(위 기재, 전부 비필수·1사례).
+- #50125 dashboard vitest 2건 — fixture 키 원인, 제품 결함 아님.
+
+- 동결 이월: 동결 시각 2026-11-09 15:28Z(컷 635a443a) 이후 main 에 착지한 25커밋 중 사용자 가시 조각 23건(#50666 #50668 #50670 #50674 #50679 #50682 #50685 #50691 #50692 #50696 #50702 #50717 #50718 #50719 #50721 #50724 #50729 #50731 #50732 #50736 #50737 #50739 #50741)은 이 릴리스에 없고 v0.71.0 에 실린다(조각은 main changelog.d 에 보존돼 [Unreleased] 로 접힌다. #50742 는 조각 없는 수리 병합이며 agent_core 2좌표 해소는 이 트리에 없다, #50721 의 코드는 이 트리 8f3b2a57 에 이미 반영됐다).
+
+(0.69.0 노트 누락 보정 — 이 절에는 v0.69.0 노트에 접히지 못한 24건(#48773, #49295~#49690)이 포함된다. 모두 v0.69.0 태그 이전 병합이다.)
+
 ## [0.69.0] - 2026-11-07
 
 ### Upgrade notes

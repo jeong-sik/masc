@@ -32,7 +32,7 @@ BaseChatServer: TypeAlias = owed.ChatServer
 
 # An empty fleet the TUI decodes: every total is zero because there is no row.
 EMPTY_FLEET: dict[str, object] = {
-    "schema": "keeper.memory_os.current_health.v12",
+    "schema": "keeper.memory_os.current_health.v13",
     "generated_at": 1.0,
     "execution": {},
     "keepers": [],
@@ -68,6 +68,7 @@ EMPTY_FLEET: dict[str, object] = {
             "snapshot_read_error_keepers",
             "source_snapshot_read_error_keepers",
             "librarian_stopped_keepers",
+            "librarian_attention_required_keepers",
             "librarian_starving_keepers",
         )
     },
@@ -106,7 +107,7 @@ EMPTY_ROW: dict[str, object] = {
         "state": "drained",
         "detail": None,
         "pending": None,
-        "admission_wait": None,
+        "admission_wait": None, "operator_action_required": False,
         "measured_at": 1.0,
         "unread_atom_turns": 0,
         "unread_official_turns": 0,
@@ -146,7 +147,7 @@ class HealthHandler(owed.ChatHandler):
                 key = HEALTH_PATH + "?keeper=" + keeper[0]
                 phase = server.record(key)
                 body = {
-                    "schema": "keeper.memory_os.current_health.v12",
+                    "schema": "keeper.memory_os.current_health.v13",
                     "generated_at": 2.0,
                     "keeper": server.row,
                 }

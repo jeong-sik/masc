@@ -24,6 +24,7 @@ let cached_field_names =
     "keeper_fleet_safety";
     "keeper_identity_drift";
     "keeper_memory_execution";
+    "keeper_memory_attention";
     "publication_recovery_activation";
     "keeper_reaction_ledger";
     "keeper_owner";

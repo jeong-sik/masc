@@ -32,7 +32,9 @@ val row_standing : Masc.Tui_decode_lane_inventory.row -> Masc_tui_lane_standing.
 (** How the row stands. A package row with a failed worker is [Failing]
     whatever its declaration says; otherwise the declaration's application
     decides, and without a usable declaration its workers do. Something
-    switched off that still has work in flight is [Changing]. *)
+    switched off that still has work in flight is [Changing]. An exact route
+    with admitted candidates is [Configured], not evidence of a ready
+    executor, attached Add-on or successful provider call. *)
 val row_standing_in : Masc.Tui_decode_lane_inventory.snapshot -> Masc.Tui_decode_lane_inventory.row -> Masc_tui_lane_standing.t
 (** [row_standing], with an exact row's run observation from the same
     capture: a degraded lane is [Failing], one switched off that is still

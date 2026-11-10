@@ -173,11 +173,8 @@ let perform_task_transition
           | Some v when backlog.version <> v ->
             Error
               (Masc_domain.Task
-                 (Masc_domain.Task_error.InvalidState
-                    (Printf.sprintf
-                       "Version mismatch (expected %d, got %d)"
-                       v
-                       backlog.version)))
+                 (Masc_domain.Task_error.BacklogVersionConflict
+                    { expected = v; actual = backlog.version }))
           | _ -> Ok ()
         in
         let task_opt = List.find_opt (fun (t : task) -> t.id = task_id) backlog.tasks in

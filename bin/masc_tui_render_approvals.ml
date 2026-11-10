@@ -322,51 +322,57 @@ let ask_summary_line state ~cols ~now ~(row : Masc.Tui_decode_asks.ask_row) =
   let width = max 1 (framed_inner_width cols - Message_layout.display_width context - 3) in
   Printf.sprintf " %s%s  %s%s" (Theme.recede ()) (fit_width prompt width) context Ansi.reset
 
-let draw_ask_answer_feedback buf cols (state : state) =
+(* Keep the original strings until the reader sanitizes and wraps them.
+   Compact rendering and the immutable reader share the same receipt facts. *)
+let ask_answer_feedback_document (state : state) =
   let module Decode = Masc.Tui_decode_asks in
-  Option.iter (fun feedback ->
+  Option.map (fun feedback ->
+    let fields = ref [] in
+    let emit heading style body =
+      let section : Masc_tui_detail_reading.section = {heading; body} in
+      fields := (section, style) :: !fields in
     let followup = Masc_tui_types.current_ask_followup state in
     let delivered ~already = function
       | Decode.Ask_wake_stored ->
-          (if already then "Answer receipt: existing answer retained · wake recorded"
-           else "Answer receipt: saved · wake recorded"), Theme.info (),
+          (if already then "Existing answer retained · wake recorded"
+           else "Answer saved · wake recorded"), Theme.info (),
           (match followup with None -> Some "Keeper activity shows whether work has resumed." | Some _ -> None)
       | Decode.Ask_wake_pending detail ->
-          (if already then "Answer receipt: existing answer retained · initial delivery pending"
-           else "Answer receipt: saved · initial delivery pending"), Theme.warn (), Some detail in
+          (if already then "Existing answer retained · initial delivery pending"
+           else "Answer saved · initial delivery pending"), Theme.warn (), Some detail in
     let status, style, detail = match feedback.Ask_projection.af_receipt with
       | Ok (Decode.Keeper_answer_receipt (Decode.Ask_answer_recorded delivery)) -> delivered ~already:false delivery
       | Ok (Decode.Keeper_answer_receipt (Decode.Ask_answer_already_recorded { aar_delivery; _ })) ->
           delivered ~already:true aar_delivery
       | Ok (Decode.Keeper_answer_receipt (Decode.Ask_answer_written_unconfirmed detail)) ->
-          "Last answer: log written · winning answer unconfirmed", Theme.warn (), Some detail
+          "Winning answer unconfirmed · log written", Theme.warn (), Some detail
       | Ok (Decode.Keeper_answer_receipt (Decode.Ask_answer_refused detail))
       | Ok (Decode.Installation_answer_receipt (Decode.Installation_answer_refused detail)) ->
-          "Last answer: refused", Theme.bad (), Some detail
+          "Answer refused", Theme.bad (), Some detail
       | Ok (Decode.Installation_answer_receipt Decode.Installation_answer_recorded) ->
-          "Answer receipt: saved · the installation reads it on its next host request cycle", Theme.info (), None
+          "Answer saved · installation reads it on its next host request cycle", Theme.info (), None
       | Ok (Decode.Installation_answer_receipt (Decode.Installation_answer_already_answered _)) ->
-          "Answer receipt: an earlier answer stands", Theme.info (), None
+          "An earlier answer stands", Theme.info (), None
       | Ok (Decode.Installation_answer_receipt (Decode.Installation_answer_withdrawn _)) ->
-          "Last answer: the installation withdrew the question", Theme.warn (), None
+          "Installation withdrew the question", Theme.warn (), None
       | Error detail ->
-          "Last answer: recording unconfirmed", Theme.warn (), Some detail in
-    box_divider buf cols;
-    (* The state comes first; a long label or error cannot hide it. The same
-       drawn block below determines the question and approval row budgets. *)
-    box_wrapped_field buf cols ~head:"  " ~style status;
-    let subject = match feedback.af_submitted_label with
-      | Some label -> label | None -> Decode.ask_asker_label feedback.af_asker in
-    box_line buf cols ("  " ^ Ansi.dim ^ Terminal_text.single_line subject ^ Ansi.reset);
+          "Answer recording unconfirmed", Theme.warn (), Some detail in
+    emit "Recording" style status;
+    emit "Question" Ansi.dim
+      (Decode.ask_asker_label feedback.af_asker ^ "\nAsk ID: " ^ feedback.af_ask_id);
+    Option.iter (emit "Recorded answer label" Ansi.dim) feedback.af_submitted_label;
+    Option.iter (emit "Recording details" (Theme.warn ())) detail;
     (match feedback.af_asker with
      | Decode.Ask_keeper _ ->
          let source = match feedback.af_source_turn_ref with
            | None -> "Original asking turn: not recorded"
-           | Some reference -> Printf.sprintf "Original asking turn: #%d" (Ids.Turn_ref.absolute_turn reference) in
-         box_wrapped_field buf cols ~head:"  " ~style:Ansi.dim source
+           | Some reference ->
+               "Original asking turn:\n" ^ Yojson.Safe.pretty_to_string (Ids.Turn_ref.to_yojson reference) in
+         emit "Original asking turn" Ansi.dim source
      | Decode.Ask_installation { ai_title; _ } ->
-         box_wrapped_field buf cols ~head:"  " ~style:Ansi.dim
-           ("g: open " ^ Terminal_text.single_line ai_title ^ " Results"));
+         emit "Installation" Ansi.dim
+           ("Esc to return · g: open " ^ ai_title ^ " Results\n"
+            ^ Yojson.Safe.pretty_to_string (Ask_projection.asker_to_json feedback.af_asker)));
     Option.iter (fun reading ->
       let observed = Ask_projection.followup_view reading in
       let source_notice source = match source.Ask_projection.fo_state with
@@ -374,8 +380,7 @@ let draw_ask_answer_feedback buf cols (state : state) =
             (match source.fo_value with None -> "" | Some _ -> " · reading latest")
         | Followup_received -> ""
         | Followup_unconfirmed ->
-            (match source.fo_value with
-             | None -> ""
+            (match source.fo_value with None -> ""
              | Some _ -> " · earlier observation; latest source unconfirmed") in
       let source_style source observed = match source.Ask_projection.fo_state with
         | Followup_unconfirmed -> Theme.warn ()
@@ -384,63 +389,66 @@ let draw_ask_answer_feedback buf cols (state : state) =
         | Followup_pending -> label ^ ": reading", Theme.recede ()
         | Followup_received -> label ^ ": observation unavailable", Theme.warn ()
         | Followup_unconfirmed -> label ^ ": latest source unconfirmed", Theme.warn () in
+      Option.iter (fun identity ->
+        emit "Original answer identity" Ansi.dim
+          (Yojson.Safe.pretty_to_string (`Assoc [
+            "answered_at", `Float identity.Decode.afi_answered_at;
+            "stimulus_id", `String identity.afi_stimulus_id]))) observed.fv_identity;
       (match observed.fv_reactions.fo_value with
        | None ->
-         let text, style = absent observed.fv_reactions "Keeper wake/turn" in
-         box_wrapped_field buf cols ~head:"  " ~style text
+           let text, style = absent observed.fv_reactions "Keeper wake/turn" in
+           emit "Keeper follow-up" style text
        | Some Decode.Ask_reactions_unavailable ->
-         box_wrapped_field buf cols ~head:"  " ~style:(Theme.warn ())
-           ("Keeper follow-up: wake/turn observation unavailable"
-             ^ source_notice observed.fv_reactions)
+           emit "Keeper follow-up" (Theme.warn ())
+             ("Wake/turn observation unavailable" ^ source_notice observed.fv_reactions)
        | Some (Ask_reactions_observed reactions) ->
-         let facts = List.filter_map Fun.id
-           [Option.map (fun _ -> "turn entry observed") reactions.ar_turn_started_at;
-            Option.map (fun _ -> "turn boundary observed") reactions.ar_turn_finished_at;
-            Option.map (fun _ -> "wake settled or transferred (consumption unproven)") reactions.ar_queue_settled_at;
-            Option.map (fun _ -> "wake cancelled") reactions.ar_queue_cancelled_at] in
-         let facts = if facts=[] then ["no turn entry observed"] else facts in
-         let facts = if reactions.ar_evidence_complete then facts else facts @ ["evidence incomplete"] in
-         let facts = if reactions.ar_evidence_current then facts
-           else facts @ ["some earlier observations remain unconfirmed"] in
-         box_wrapped_field buf cols ~head:"  "
-           ~style:(source_style observed.fv_reactions
-             (if reactions.ar_evidence_complete && reactions.ar_evidence_current
-              then Theme.info () else Theme.warn ()))
-           ("Keeper follow-up: " ^ String.concat " · " facts ^ source_notice observed.fv_reactions));
+           let facts = List.filter_map Fun.id
+             [Option.map (fun _ -> "turn entry observed") reactions.ar_turn_started_at;
+              Option.map (fun _ -> "turn boundary observed") reactions.ar_turn_finished_at;
+              Option.map (fun _ -> "wake settled or transferred (consumption unproven)") reactions.ar_queue_settled_at;
+              Option.map (fun _ -> "wake cancelled") reactions.ar_queue_cancelled_at] in
+           let facts = if facts=[] then ["no turn entry observed"] else facts in
+           let facts = if reactions.ar_evidence_complete then facts else facts @ ["evidence incomplete"] in
+           let facts = if reactions.ar_evidence_current then facts
+             else facts @ ["some earlier observations remain unconfirmed"] in
+           emit "Keeper follow-up"
+             (source_style observed.fv_reactions
+               (if reactions.ar_evidence_complete && reactions.ar_evidence_current
+                then Theme.info () else Theme.warn ()))
+             (String.concat " · " facts ^ source_notice observed.fv_reactions));
       let action_text, action_style = match observed.fv_tools.fo_value with
         | None -> absent observed.fv_tools "Tool results"
-        | Some Decode.Ask_tools_unavailable -> "Tool results: observation unavailable", Theme.warn ()
+        | Some Decode.Ask_tools_unavailable -> "Observation unavailable", Theme.warn ()
         | Some (Decode.Ask_tools_observed {at_count;at_outcomes;at_evidence_current;_}) ->
             let counts = List.filter_map (fun (label,count) ->
                 if count=0 then None else Some (Printf.sprintf "%s %d" label count))
               ["succeeded",at_outcomes.ato_succeeded;"failed",at_outcomes.ato_failed;
                "deferred",at_outcomes.ato_deferred;"unsettled",at_outcomes.ato_unsettled;
                "malformed",at_outcomes.ato_malformed] in
-            let text = if at_count=0 then "Tool results: none observed"
-              else Printf.sprintf "Tool results: %d observed · %s" at_count (String.concat " · " counts) in
+            let text = if at_count=0 then "None observed"
+              else Printf.sprintf "%d observed · %s" at_count (String.concat " · " counts) in
             let uncertain = at_outcomes.ato_failed>0 || at_outcomes.ato_unsettled>0 || at_outcomes.ato_malformed>0 in
             if at_evidence_current then text, (if uncertain then Theme.warn () else Theme.info ())
             else text ^ " · retained earlier evidence", Theme.warn () in
-      box_wrapped_field buf cols ~head:"  "
-        ~style:(source_style observed.fv_tools action_style)
+      emit "Tool results" (source_style observed.fv_tools action_style)
         (action_text ^ source_notice observed.fv_tools);
       (match observed.fv_tools.fo_value with
        | Some (Decode.Ask_tools_observed {at_latest=Some latest;at_evidence_current;_}) ->
-         let style = match latest.ata_outcome with
-           | Tool_result.Recorded_failed when at_evidence_current -> Theme.bad ()
-           | Recorded_succeeded | Recorded_deferred when at_evidence_current -> Theme.info ()
-           | Recorded_failed | Recorded_succeeded | Recorded_deferred
-           | Recorded_unsettled | Recorded_malformed -> Theme.warn () in
-         box_wrapped_field buf cols ~head:"  " ~style
-           (Printf.sprintf "Latest Tool result: %s · %s · turn #%d"
-             (Tool_result.recorded_call_outcome_to_string latest.ata_outcome)
-             (Terminal_text.single_line latest.ata_tool) latest.ata_keeper_turn_id)
+           let style = match latest.ata_outcome with
+             | Tool_result.Recorded_failed when at_evidence_current -> Theme.bad ()
+             | Recorded_succeeded | Recorded_deferred when at_evidence_current -> Theme.info ()
+             | Recorded_failed | Recorded_succeeded | Recorded_deferred
+             | Recorded_unsettled | Recorded_malformed -> Theme.warn () in
+           emit "Latest Tool result" style
+             (Printf.sprintf "%s · %s · turn #%d"
+               (Tool_result.recorded_call_outcome_to_string latest.ata_outcome)
+               latest.ata_tool latest.ata_keeper_turn_id)
        | None | Some Decode.Ask_tools_unavailable | Some (Ask_tools_observed {at_latest=None;_}) -> ());
       let task_text, task_style = match observed.fv_task.fo_value with
         | None -> absent observed.fv_task "Original Task"
-        | Some Decode.Ask_task_unlinked -> "Original question: no linked Task", Theme.recede ()
-        | Some (Ask_task_missing id) -> "Original Task " ^ id ^ ": not observed in lookup", Theme.warn ()
-        | Some (Ask_task_unavailable id) -> "Original Task " ^ id ^ ": observation unavailable", Theme.warn ()
+        | Some Decode.Ask_task_unlinked -> "No linked Task", Theme.recede ()
+        | Some (Ask_task_missing id) -> id ^ ": not observed in lookup", Theme.warn ()
+        | Some (Ask_task_unavailable id) -> id ^ ": observation unavailable", Theme.warn ()
         | Some (Ask_task_observed {akt_task_id;akt_location;akt_status;akt_evidence_current;akt_observed_at=_}) ->
             let phase = match akt_status with
               | Masc_domain.Todo -> "to do"
@@ -453,25 +461,41 @@ let draw_ask_answer_feedback buf cols (state : state) =
               | Decode.Ask_task_backlog -> "" | Ask_task_archive -> " · archived" in
             let freshness = if akt_evidence_current then ""
               else " · last observed; not freshly confirmed" in
-            "Original Task " ^ akt_task_id ^ ": " ^ phase ^ location ^ freshness,
+            akt_task_id ^ ": " ^ phase ^ location ^ freshness,
             (if akt_evidence_current then Theme.info () else Theme.warn ()) in
-      box_wrapped_field buf cols ~head:"  "
-        ~style:(source_style observed.fv_task task_style)
+      emit "Original Task" (source_style observed.fv_task task_style)
         (task_text ^ source_notice observed.fv_task);
-      (match observed.fv_identity,observed.fv_task.fo_value with
-       | Some _,Some (Decode.Ask_task_missing _ | Ask_task_unavailable _ | Ask_task_observed _) ->
-         box_wrapped_field buf cols ~head:"  " ~style:(Theme.info ())
-           "T: inspect this last answered Ask's original Task · h/H history · v verification evidence"
-       | Some _,(Some Decode.Ask_task_unlinked | None)
-       | None,(Some _ | None) -> ()))
-      followup;
-    (match state.ask_followup_error with
-     | None -> ()
-     | Some detail -> box_wrapped_field buf cols ~head:"  " ~style:(Theme.warn ())
-         ("Follow-up read incomplete · completed sources retained\n" ^ Masc_tui_ask_projection.followup_failure_text detail));
-    Option.iter (fun detail ->
-      box_line buf cols ("  " ^ Ansi.dim ^ Terminal_text.single_line detail ^ Ansi.reset)) detail)
-    (Masc_tui_types.current_ask_answer_feedback state)
+      (match observed.fv_identity, observed.fv_task.fo_value with
+       | Some _, Some (Decode.Ask_task_missing _ | Ask_task_unavailable _ | Ask_task_observed _) ->
+           emit "Original Task reader" (Theme.info ())
+             "Esc to return · T: inspect this answered Ask's original Task, history and verification evidence"
+       | Some _, (Some Decode.Ask_task_unlinked | None)
+       | None, (Some _ | None) -> ())) followup;
+    Option.iter (fun failure ->
+      emit "Follow-up read incomplete" (Theme.warn ())
+        ("Completed sources retained\n" ^ Ask_projection.followup_failure_text failure)) state.ask_followup_error;
+    List.rev !fields) (Masc_tui_types.current_ask_answer_feedback state)
+
+let answer_feedback_reading (state : state) =
+  Option.map (fun fields ->
+    Masc_tui_detail_reading.create ~ko:(state.ui_language = Lang_ko)
+      ~title:(ui_text state ~ko:"마지막 답변 결과" ~en:"Last answer")
+      (List.map fst fields)) (ask_answer_feedback_document state)
+
+let draw_ask_answer_feedback buf cols state =
+  match ask_answer_feedback_document state with
+  | Some ((section, style) :: _) ->
+      box_line buf cols ("  v: " ^ style ^ Terminal_text.single_line section.body ^ Ansi.reset)
+  | Some [] | None -> ()
+
+let draw_compact_ask_origin buf cols state =
+  Option.iter (fun (origin : Ask_projection.origin) ->
+    let turn = match origin.ao_source_turn_ref with
+      | None -> " · original turn not recorded"
+      | Some reference -> Printf.sprintf " · turn #%d" (Ids.Turn_ref.absolute_turn reference) in
+    box_line buf cols (Ansi.dim ^ "  o/O source: "
+      ^ Terminal_text.single_line (origin.ao_keeper_name ^ turn ^ " · " ^ origin.ao_ask_id)
+      ^ Ansi.reset)) (Masc_tui_types.current_ask_origin state)
 
 (* Copy complete terminal rows from the original safe question rendering.
    Do not cut an ANSI/UTF-8 sequence, reflow the prompt or borrow choice/draft
@@ -954,23 +978,25 @@ let render_approvals (state : state) =
   Buffer.add_string footer_buf
     (footer_line state ~max_cells:cols ~hints:(question_hints state));
   let footer_rows = count_frame_lines footer_buf in
-  let intro_buf = Buffer.create 1024 in
-  draw_ask_answer_feedback intro_buf cols state;
-  draw_ask_origin intro_buf cols state;
-  let intro_rows = count_frame_lines intro_buf in
   let preview_minimum =
     if Option.is_some state.pending_approval_action || action_inflight then 1 else 0 in
   let base_head_rows = count_frame_lines buf + count_frame_lines policy_buf in
-  (* Keep an armed decision or in-flight receipt visible before reserving the
-     question preview. Ask_layout can use one or two prompt rows when its
-     usual compact allowance does not fit beside that active decision. *)
+  (* Reserve the selected question, decision notice and footer first. Last
+     answer/source summaries use only the remaining complete terminal rows;
+     their full text stays available in the receipt/question readers. *)
   let question_room = max 0
-      (rows - base_head_rows - footer_rows - 2 - intro_rows - preview_minimum) in
+      (rows - base_head_rows - footer_rows - 2 - preview_minimum) in
   let question_rows = min question_room
       (match Masc_tui_approvals_model.approvals_open_questions state with
        | None -> 0
        | Some [] -> 3
        | Some (_ :: _) -> 2 + Ask_layout.min_expanded_rows) in
+  let intro_room = max 0 (question_room - question_rows) in
+  let intro_buf = Buffer.create 256 in
+  if intro_room > 0 then draw_ask_answer_feedback intro_buf cols state;
+  if count_frame_lines intro_buf < intro_room then
+    draw_compact_ask_origin intro_buf cols state;
+  let intro_rows = count_frame_lines intro_buf in
   let primary_rows = 1 (* queue *) + 1 (* closing edge *) + footer_rows
       + intro_rows + question_rows + preview_minimum in
   let notice_room = max 0 (rows - base_head_rows - primary_rows) in

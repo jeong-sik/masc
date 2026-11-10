@@ -329,17 +329,14 @@ module Syntax : sig
       full weight is what makes a document read as noise. Strings reuse
       {!string_}, which is the same reading a code fence gives them. *)
 
-  val code_comment : string
   val code_number : string
   val code_type : string
   val code_span : string
   val link : string
-  val rule : string
-  (** The rest of what a fenced block and a chat row hold: a comment, a
-      number, a type name, an inline [`span`], a link's text, and the
-      horizontal rule that divides sections.
+  (** The rest of what a fenced block and a chat row hold: a number, a type
+      name, an inline [`span`] and a link's text.
 
-      Content, not state -- a slanted comment says it is a comment, not that
+      Content, not state -- a number or a type name says what it is, not that
       anything is unwell. Named here for the same reason the keyword is: a
       renderer that picks the code itself is one the readability lift cannot
       reach, and there were ninety-odd of those before these names existed. *)

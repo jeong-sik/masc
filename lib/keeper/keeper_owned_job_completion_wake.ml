@@ -30,6 +30,8 @@ let deliver ~on_result_ready (record : Store.record) =
   let* () = match Keeper_registry_event_queue.enqueue_stimulus_once_durable_result
       ~base_path:record.base_path record.keeper_name stimulus with
     | Keeper_registry_event_queue.Stimulus_enqueued | Stimulus_already_present -> Ok ()
+    | Stimulus_shutdown_reserved operation_id ->
+        Error (Store.Io_failed (Keeper_registry_event_queue.shutdown_reserved_detail operation_id))
     | Stimulus_storage_error detail -> Error (Store.Io_failed detail) in
   (* The exact completed output and notification are already durable. The
      continuation observer can schedule its original DAG without a model turn. *)

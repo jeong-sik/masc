@@ -263,6 +263,9 @@ let test_distinct_connector_events_are_not_collapsed () =
             stimulus
         with
         | actual when actual = expected -> ()
+        | Masc.Keeper_registry_event_queue.Stimulus_shutdown_reserved operation_id ->
+          Alcotest.failf "durable Connector delivery failed: %s"
+            (Masc.Keeper_registry_event_queue.shutdown_reserved_detail operation_id)
         | Masc.Keeper_registry_event_queue.Stimulus_storage_error detail ->
           Alcotest.failf "durable Connector delivery failed: %s" detail
         | Masc.Keeper_registry_event_queue.Stimulus_enqueued

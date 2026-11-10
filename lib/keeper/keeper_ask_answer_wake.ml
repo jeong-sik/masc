@@ -297,6 +297,8 @@ let deliver_row ~base_path ~keeper_name ~already_delivered ask resolution =
     let evidence_since = stimulus.Keeper_event_queue.arrived_at in
     match Keeper_registry_event_queue.enqueue_stimulus_once_durable_result
         ~not_before:evidence_since ~base_path keeper_name stimulus with
+    | Keeper_registry_event_queue.Stimulus_shutdown_reserved operation_id ->
+        Error (Queue_storage_failed (Keeper_registry_event_queue.shutdown_reserved_detail operation_id))
     | Keeper_registry_event_queue.Stimulus_storage_error detail -> Error (Queue_storage_failed detail)
     | Keeper_registry_event_queue.Stimulus_enqueued ->
         wake_hint ~log_deferred:true ~base_path ~keeper_name ~ask_id:ask.Keeper_ask.ask_id;

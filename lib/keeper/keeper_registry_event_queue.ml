@@ -429,7 +429,24 @@ let enqueue_if_missing_durable_result
 type enqueue_stimulus_durable_result =
   | Stimulus_enqueued
   | Stimulus_already_present
+  | Stimulus_shutdown_reserved of Keeper_shutdown_types.Operation_id.t
   | Stimulus_storage_error of string
+
+let shutdown_reserved_detail operation_id =
+  durable_intake_error_to_string (Durable_intake_shutdown_reserved operation_id)
+;;
+
+(* A shutdown that holds the intake stops the call before the queue is read or
+   written: the store is not at fault, so the refusal keeps its operation id
+   instead of becoming storage-failure text. A token that is not live stays
+   text: the caller presented a fence token that is no longer the Keeper's,
+   which is not a Keeper lifecycle state. *)
+let stimulus_intake_refused = function
+  | Durable_intake_shutdown_reserved operation_id ->
+    Stimulus_shutdown_reserved operation_id
+  | Durable_intake_token_not_live as error ->
+    Stimulus_storage_error (durable_intake_error_to_string error)
+;;
 
 type transfer_target_error =
   | Transfer_target_name_mismatch of
@@ -486,7 +503,7 @@ let enqueue_stimulus_durable_result
       (fun () -> enqueue_stimulus_durable_result_unfenced ~base_path name stimulus)
   with
   | Ok result -> result
-  | Error error -> Stimulus_storage_error (durable_intake_error_to_string error)
+  | Error error -> stimulus_intake_refused error
 ;;
 
 let enqueue_stimulus_once_durable_result ?not_before ~base_path name stimulus =
@@ -507,7 +524,7 @@ let enqueue_stimulus_once_durable_result ?not_before ~base_path name stimulus =
         | Ok Keeper_event_queue_persistence.Already_present -> Stimulus_already_present
         | Error detail -> Stimulus_storage_error detail) with
   | Ok result -> result
-  | Error error -> Stimulus_storage_error (durable_intake_error_to_string error)
+  | Error error -> stimulus_intake_refused error
 ;;
 
 let project_accepted_transfer_durable_result

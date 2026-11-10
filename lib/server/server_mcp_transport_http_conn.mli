@@ -258,3 +258,14 @@ val check_standalone_observer_connect_guard :
     Use this as the required admission callback of
     {!Sse.register_standalone_observer_with_client}, so the exact credential
     charged is the one published. No raw bearer token is kept in the guard. *)
+
+module For_testing : sig
+  val check_standalone_observer_connect_guard :
+    now:float -> observer_instance_id:string -> credential:Masc_domain.agent_credential ->
+    (unit, Sse_reject_reason.t * float) result
+  val reap_stale_guards : now:float -> int
+end
+(** Deterministic timestamps for the same production guard, registry and
+    maintenance reaper. This neither seeds private state nor replaces policy.
+    It models captured request times completing out of order; it does not
+    establish a real multi-domain CAS interleaving. *)

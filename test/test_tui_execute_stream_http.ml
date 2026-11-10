@@ -1140,6 +1140,61 @@ let test_standalone_observer_window_survives_connection_cleanup env =
           Alcotest.(check int) "disabling the window does not enable a shared cooldown" 200 disabled)))
 ;;
 
+let with_standalone_guard_window env body =
+  let module Registry = Server_mcp_transport_http_conn in
+  Masc_test_deps.with_process_env "MASC_SSE_RECONNECT_MIN_INTERVAL_S" (Some "3600") @@ fun () ->
+  Masc_test_deps.with_process_env "MASC_SSE_CONNECT_WINDOW_S" (Some "60") @@ fun () ->
+  Masc_test_deps.with_process_env "MASC_SSE_CONNECT_MAX_IN_WINDOW" (Some "2") @@ fun () ->
+  with_standalone_observer_server env (fun ~workspace ~state ~token ~sw:_ ~clock:_ ~port:_ ->
+    let credential = match Auth.find_credential_by_token workspace ~token with
+      | Ok credential -> credential
+      | Error error -> Alcotest.fail (Masc_domain.masc_error_to_string error)
+    in
+    let observer_instance_id = Server_observer_scope.instance_id (Masc.Mcp_server.workspace_scope state) in
+    let admit now = Registry.For_testing.check_standalone_observer_connect_guard
+        ~now ~observer_instance_id ~credential in
+    let reap now = ignore (Registry.For_testing.reap_stale_guards ~now) in
+    Fun.protect ~finally:(fun () -> ignore (Registry.reap_stale_guards ()))
+      (fun () -> body ~admit ~reap))
+;;
+
+let expect_guard_admission label = function
+  | Ok () -> ()
+  | Error (reason, delay) -> Alcotest.failf "%s: %s (%.3fs)" label
+      (Sse_reject_reason.to_label reason) delay
+;;
+
+let expect_guard_window_refusal label = function
+  | Ok () -> Alcotest.fail (label ^ ": unexpectedly admitted")
+  | Error (reason, delay) ->
+      Alcotest.(check string) (label ^ ": reason") "window_limit" (Sse_reject_reason.to_label reason);
+      Alcotest.(check bool) (label ^ ": positive retry delay") true (delay > 0.0)
+;;
+
+let test_standalone_guard_retains_later_time_after_reversed_completion env =
+  with_standalone_guard_window env (fun ~admit ~reap ->
+    (* Real admission and maintenance state, with captured timestamps completing
+       in reverse order. This does not claim a multi-domain scheduler trace. *)
+    expect_guard_admission "later request commits first" (admit 59.0);
+    expect_guard_admission "earlier captured request completes later" (admit 0.0);
+    reap 61.0;
+    expect_guard_window_refusal "reaper retains the live window" (admit 61.0);
+    reap 119.0;
+    expect_guard_admission "the recorded window eventually expires" (admit 119.0))
+;;
+
+let test_standalone_guard_expires_each_boundary_entry_once env =
+  with_standalone_guard_window env (fun ~admit ~reap ->
+    expect_guard_admission "first request" (admit 0.0);
+    expect_guard_admission "second request" (admit 59.0);
+    expect_guard_admission "exactly one slot expires at the boundary" (admit 60.0);
+    expect_guard_window_refusal "the expired oldest entry cannot keep granting slots" (admit 60.0);
+    reap 61.0;
+    expect_guard_window_refusal "maintenance retains both current entries" (admit 61.0);
+    expect_guard_admission "the next old entry expires" (admit 119.0);
+    expect_guard_window_refusal "its slot is consumed once" (admit 119.0))
+;;
+
 let test_standalone_observer_keeps_auth_and_supplied_session_checks env =
   with_standalone_observer_server env (fun ~workspace:_ ~state:_ ~token ~sw:_ ~clock ~port ->
     let client_count = Masc.Sse.client_count () in
@@ -1946,6 +2001,10 @@ let () =
             test_standalone_observer_reconnects_with_response_identifiers
         ; case "standalone Observer window survives connection cleanup"
             test_standalone_observer_window_survives_connection_cleanup
+        ; case "standalone guard retains later times after reversed completion"
+            test_standalone_guard_retains_later_time_after_reversed_completion
+        ; case "standalone guard expires each boundary entry once"
+            test_standalone_guard_expires_each_boundary_entry_once
         ; case "standalone Observer keeps auth and supplied-session checks"
             test_standalone_observer_keeps_auth_and_supplied_session_checks
         ; case "invalid handshake is not opened or read" test_observer_rejects_bad_replay_before_delivering_bytes

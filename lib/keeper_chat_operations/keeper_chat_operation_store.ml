@@ -3306,6 +3306,42 @@ let running_settlement_unacknowledged_detail = function
     "the operation store became unavailable before Owner receipt acknowledgement"
 ;;
 
+(* Every [Running] row, as the settlement reads them. The boot path reads the
+   same rows outside the settle transaction to pre-fetch journal terminals on
+   a fiber, which the settle's systhread forbids. Pure sqlite reads; no Eio
+   effects. *)
+let read_running_operations db ~operation =
+  with_statement db ~operation
+    ("SELECT " ^ select_columns ^ " FROM operations WHERE state = 'running'")
+    (fun statement ->
+      let rec read acc =
+        let rc = Sqlite3.step statement in
+        if rc = Sqlite3.Rc.DONE then Ok (List.rev acc)
+        else if rc = Sqlite3.Rc.ROW then
+          let* operation = decode_operation statement in read (operation :: acc)
+        else Error (Store_unavailable (sqlite_error db operation rc)) in
+      read [])
+
+(* The running rows that still hold an active native call, with each call.
+   The Owner reads these journals on its own fiber before settling, then
+   answers the settle's [journal_terminal] from those reads. *)
+let running_direct_active_calls store =
+  let* () = ensure_open store in
+  let* running =
+    read_running_operations store.db ~operation:"read running active native calls" in
+  Ok
+    (List.filter_map (fun (operation : Operation.t) ->
+       match direct_execution_with_db store.db operation with
+       | Error _ -> None
+       | Ok execution ->
+         match Option.map (fun (execution : Semantic.t) -> execution.native_call) execution with
+         | Some (Keeper_native_call.Active call) -> Some (operation.operation_id, call)
+         | Some (Keeper_native_call.Terminal_unacknowledged _) -> None
+         | Some Keeper_native_call.No_native_call -> None
+         | None -> None)
+       running)
+;;
+
 (* The journal gate answers one question for a row whose Owner receipt is
    still active: does the Core journal already hold a terminal for that call?
    The store cannot read the journal itself, so the Owner installs this check.
@@ -3321,16 +3357,8 @@ let settle_running_without_executor_with_journal_terminal
     |> Result.map_error (fun detail -> Invalid_input detail)
   in
   with_transaction store (fun () ->
-    let* running = with_statement store.db ~operation:"read interrupted direct operations"
-      ("SELECT " ^ select_columns ^ " FROM operations WHERE state = 'running'")
-      (fun statement ->
-        let rec read acc =
-          let rc = Sqlite3.step statement in
-          if rc = Sqlite3.Rc.DONE then Ok (List.rev acc)
-          else if rc = Sqlite3.Rc.ROW then
-            let* operation = decode_operation statement in read (operation :: acc)
-          else Error (Store_unavailable (sqlite_error store.db "read interrupted direct operations" rc)) in
-        read []) in
+    let* running =
+      read_running_operations store.db ~operation:"read interrupted direct operations" in
     (* A running operation with a durable continuation goes back to Queued and
        resumes; one without is a request whose executor ended without
        committing it, and only those are failed below. An active native call

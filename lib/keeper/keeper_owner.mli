@@ -23,14 +23,23 @@ val install_journal_terminal_gate :
     keeper_name:string ->
     session_root:string ->
     operation_id:Keeper_chat_operation.Operation_id.t ->
+    Keeper_native_call.t ->
     (Agent_core.Agent.execution_terminal_disposition option, string) result)
   -> unit
-(** Install the read-only journal gate the boot settlement consults. The
-    bootstrap layer owns the wiring because the native continuation adapter
-    sits above the Owner in the module graph. Unset keeps the pre-gate
+(** Install the read-only journal gate the boot settlement consults. The gate
+    receives the still-active call from the store row, so the read never goes
+    through the owner registry: a boot start holds the pool mutex and the
+    owner is not registered yet. The bootstrap layer owns the wiring because
+    the native continuation adapter sits above the Owner in the module graph,
+    and the Owner runs the gate on its own fiber — the projection reader needs
+    fiber effects the settlement's systhread forbids. Unset keeps the pre-gate
     behavior: running rows requeue at restart and terminate the same way on
     their next dispatch. The gate never mutates the Owner receipt or the
     journal. *)
+
+val clear_journal_terminal_gate : unit -> unit
+(** Remove the installed gate. Tests install and clear it; unset keeps the
+    pre-gate behavior. *)
 
 type store =
   { replace : Keeper_meta_contract.keeper_meta -> (unit, string) result

@@ -479,6 +479,12 @@ val settle_running_without_executor_with_journal_terminal :
     would fail anyway; [Ok None] and a read failure keep the resume behavior.
     The gate must not touch the operation store: it runs inside this
     settlement's transaction and reads only the Owner receipt and the journal. *)
+val running_direct_active_calls :
+  t -> ((Operation.Operation_id.t * Keeper_native_call.t) list, error) result
+(** The running rows that still hold an active native call, with each call.
+    The Owner reads these journals on its own fiber before settling, because
+    the journal projection needs fiber effects the settlement's systhread
+    forbids; the settle's [journal_terminal] then answers from those reads. *)
 val error_to_string : error -> string
 
 module For_testing : sig

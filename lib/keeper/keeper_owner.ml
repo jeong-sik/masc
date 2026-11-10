@@ -49,6 +49,7 @@ let journal_terminal_gate
       keeper_name:string ->
       session_root:string ->
       operation_id:Operation_id.t ->
+      Keeper_native_call.t ->
       (Agent_core.Agent.execution_terminal_disposition option, string) result)
     option
     Atomic.t
@@ -56,6 +57,9 @@ let journal_terminal_gate
 
 let install_journal_terminal_gate gate =
   Atomic.set journal_terminal_gate (Some gate)
+
+let clear_journal_terminal_gate () =
+  Atomic.set journal_terminal_gate None
 
 type runtime_retry_revalidation =
   | Keep_retry_wait
@@ -1406,17 +1410,37 @@ let start
      at boot instead of requeueing it into a dispatch that fails with a bare
      string error later. Without an installed reader the row requeues and
      terminates the same way on its next dispatch. *)
+  (* The gate runs the projection reader, which needs fiber effects (Eio
+     promises, mutexes, yields) that a systhread forbids, and it must not go
+     through the owner registry while this start holds the pool mutex — the
+     owner is not registered yet. So the Owner reads the still-active calls'
+     journals HERE, on its own fiber, and the settle's gate answers from that
+     map inside the systhread. A read failure keeps the resumable behavior:
+     the row requeues and terminates the same way on its next dispatch. *)
+  let precomputed_terminals =
+    match
+      run_operation_store ~label:"read running active native calls" (fun () ->
+        Chat_operation_store.running_direct_active_calls operation_store)
+    with
+    | Error _ -> []
+    | Ok rows ->
+      List.map (fun (operation_id, call) ->
+        let read =
+          match Atomic.get journal_terminal_gate with
+          | Some gate -> gate ~base_path ~keeper_name ~session_root ~operation_id call
+          | None -> Ok None in
+        (match read with
+         | Error detail ->
+           Log.Keeper.warn ~keeper_name
+             "restart journal gate could not read the journal operation=%s: %s"
+             (Chat_operation.Operation_id.to_string operation_id) detail
+         | Ok _ -> ());
+        (operation_id, read))
+        rows
+  in
   let journal_terminal operation_id =
-    match Atomic.get journal_terminal_gate with
-    | Some gate ->
-      let read = gate ~base_path ~keeper_name ~session_root ~operation_id in
-      (match read with
-       | Error detail ->
-         Log.Keeper.warn ~keeper_name
-           "restart journal gate could not read the journal operation=%s: %s"
-           (Chat_operation.Operation_id.to_string operation_id) detail
-       | Ok _ -> ());
-      read
+    match List.assoc_opt operation_id precomputed_terminals with
+    | Some read -> read
     | None -> Ok None
   in
   let startup_result =

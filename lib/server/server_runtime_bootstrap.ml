@@ -531,7 +531,7 @@ let create_server_state ~sw ~base_path ?input_base_path ~clock ~mono_clock ~net
      bootstrap layer wires it in before any Owner boots and settles a
      restart. *)
   Keeper_owner.install_journal_terminal_gate
-    Keeper_direct_native_continuation.journal_terminal;
+    Keeper_direct_native_continuation.journal_terminal_for_call;
   Server_keeper_event_queue_broadcast.install ~sw;
   Skill_catalog_snapshot_service.install_publication_observer
     (Server_skill_catalog_broadcast.publication_observer ~base_path
@@ -1048,6 +1048,30 @@ let initialize_owner_state_blocking
       raise (Owner_initialization_failed (Admin_credential_bootstrap_failed error)));
   sync_internal_keeper_token_env state;
   sync_bootable_keeper_credentials state;
+  (* One budget for every domain of the process (RFC-0474 L1). The calling
+     domain counts as one; the systhread host, the snapshot codec and the
+     optional serving domain each report their own. The runtime is installed
+     BEFORE the Keeper inventory boots: an Owner's boot settlement reads the
+     Core journal through this runtime, so it must already exist here. *)
+  let main_domain = 1 in
+  let fixed_domains =
+    main_domain + Systhread_host.domain_count
+    + Keeper_event_queue_snapshot_codec.domain_count
+    + (if Env_config.Transport.serving_domain_enabled () then 1 else 0)
+  in
+  let budget =
+    match
+      Domain_budget.plan ~recommended:(Domain.recommended_domain_count ())
+        ~fixed:fixed_domains ~override:(Env_config.Executor.domain_count_override ())
+    with
+    | Ok budget -> budget
+    | Error error -> raise (Owner_initialization_failed (Domain_budget_exceeded error))
+  in
+  (match Runtime_agent_execution_runtime.initialize ~sw:runtime_sw ~domain_mgr
+      ~domain_count:budget.Domain_budget.execution_codec with
+   | Ok () -> ()
+   | Error error ->
+     raise (Owner_initialization_failed (Native_execution_runtime_failed error)));
   (* Shutdown admission restore below is mailbox-linearized by the Keeper
      Owner. Install the inventory before persistence preparation so a durable
      shutdown fence can be restored on a real process restart. The operation
@@ -1151,23 +1175,6 @@ let initialize_owner_state_blocking
        hours
        stale_threshold_hours
    | _ -> ());
-  (* One budget for every domain of the process (RFC-0474 L1). The calling
-     domain counts as one; the systhread host, the snapshot codec and the
-     optional serving domain each report their own. *)
-  let main_domain = 1 in
-  let fixed_domains =
-    main_domain + Systhread_host.domain_count
-    + Keeper_event_queue_snapshot_codec.domain_count
-    + (if Env_config.Transport.serving_domain_enabled () then 1 else 0)
-  in
-  let budget =
-    match
-      Domain_budget.plan ~recommended:(Domain.recommended_domain_count ())
-        ~fixed:fixed_domains ~override:(Env_config.Executor.domain_count_override ())
-    with
-    | Ok budget -> budget
-    | Error error -> raise (Owner_initialization_failed (Domain_budget_exceeded error))
-  in
   let domain_pool =
     Domain_pool.create ~sw ~domain_count:budget.Domain_budget.shared_pool domain_mgr
   in
@@ -1177,11 +1184,6 @@ let initialize_owner_state_blocking
   install_domain_pool_references ~read:read_pool domain_pool;
   Server_pending_confirm_expiry.start ~sw ~clock ~mono_clock ~state;
   Systhread_host.start ();
-  (match Runtime_agent_execution_runtime.initialize ~sw:runtime_sw ~domain_mgr
-      ~domain_count:budget.Domain_budget.execution_codec with
-   | Ok () -> ()
-   | Error error ->
-     raise (Owner_initialization_failed (Native_execution_runtime_failed error)));
   let log = if Domain_budget.within_limit budget then Log.Server.info else Log.Server.warn in
   log
     "Executor domains: %d shared pool + %d read pool + %d execution codec + %d fixed = %d (limit %d = recommended %d - 1)"

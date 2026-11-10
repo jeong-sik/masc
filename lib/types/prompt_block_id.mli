@@ -19,8 +19,11 @@
     is. The [Active_goals] rows carry no such mark, so a Goal entering or
     leaving [Verifying] does not change the System (RFC-0491 §3.3).
     [Constitution_amendments] names the world articles written or taken back
-    since the turn's System rendered its [<norms>] (RFC-0491 §3.2). It exists
-    only beside a System rendered with articles the world has since changed.
+    since the turn's System rendered its [<norms>] (RFC-0491 §3.2). That
+    delta exists only beside a System rendered with articles the world has
+    since changed. The same id names the complete current article set of a
+    turn that carries one (RFC-0504 §2.4), whatever its System was rendered
+    with.
     [Dynamic_context] is the remaining composite soft-context string built by
     keeper_turn.ml/keeper_run_prompt.ml (continuity snapshot, skill
     route, worktree, telemetry feedback, turn instructions, recent
@@ -99,8 +102,8 @@ val cache_rank : t -> int
     cache reads.
 
     [constitution_amendments] sits after [skill_compositions]: it changes only
-    when the world's article ledger is written, and leaves when the System is
-    rendered again.
+    when the world's article ledger is written. The delta leaves when the
+    System is rendered again; the complete current article set does not.
 
     [goals_awaiting_proof] sits just in front of [completion_authority]: it
     changes when a Goal is asked to complete or its proof is refuted, a few

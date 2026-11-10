@@ -409,7 +409,7 @@ let check_withholding_reaches_requests (system : System.t) =
   let check_official label (assembly : Keeper_context_assembly.t) =
     Alcotest.(check (option string)) (label ^ ": the context block carries the whole notice")
       (Some withheld) (as_block assembly);
-    Alcotest.(check (list string)) (label ^ ": the vendor System is not given the notice") []
+    Alcotest.(check (list string)) (label ^ ": the issuer adds no System observation") []
       (in_system assembly)
   in
   let agent_first = assemble Runtime_execution.Masc_agent_core ~previous_assembly:None in

@@ -244,8 +244,13 @@ type composition =
 
 (* Keeper instructions and the Goal observation ride in the system prompt; the
    remaining prompt blocks, Completion Authority, the constitution amendments
-   and the Goals awaiting proof among them (RFC-0491 §3.1-§3.3), ride as
-   pinned extra context. Message kinds are the
+   and the Goals awaiting proof among them (RFC-0491 §3.1-§3.3), are counted
+   as pinned extra context. A turn record names a block by its id, not by the
+   carrier it rode, so the two an Agent Core request carries in its issued
+   System, the Goals awaiting proof and the complete current norms
+   ([Keeper_run_prompt.assemble_request_context]), are counted with the
+   pinned blocks too: the sum is the request's, the split between the two
+   slots is not (#50908). Message kinds are the
    history the range decides about and belong to neither. A composition is a
    first round's when it carries a block the post-tool assembly drops; the
    predicate is the assembly's own, and so is the block order: the assembly

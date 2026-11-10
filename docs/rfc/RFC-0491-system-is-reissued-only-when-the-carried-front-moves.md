@@ -148,6 +148,8 @@ Keeper 세션은 기준점을 runtime 마다 하나씩 든다. 앞부분을 runt
 
 `Constitution_amendments` 는 끝 문맥이라 System 보다 뒤에 읽힌다. 뒤에 온 글이 지금 상태로 읽힌다는 것은 RFC-0366 이 운영자 메모를 맨 뒤에 둔 근거와 같다(`lib/keeper/keeper_run_tools_hooks.ml` `Operator_note` 주석). 끝 문맥은 런타임이 조립하는 `[system context]` 다. 모델이 쓴 글은 조항 본문뿐이고, 그 본문은 System 에서와 같은 escape 를 거친다.
 
+현재 조항 전체 목록(`norms_current`, RFC-0504 §2.4)을 싣는 턴은 이 절의 차이를 쓰지 않는다. native 재개와, 접은 이력에 격리 줄이 있는 세계의 턴이 그렇다. 에이전트 코어는 그 목록을 System 뒤에 붙는 관측으로 보낸다(#50882). 기준점 조항으로 렌더한 System(`keeper_instructions`)은 그대로다. 하지만 요청이 보내는 System 은 조항이 쓰일 때 뒷부분이 바뀌고, 그 요청은 대화 기록 캐시를 놓친다. 목록을 끝 문맥에 두었을 때는 도구 결과 뒤 요청마다 같은 목록이 새 발화로 읽혔고 Keeper 가 매번 답했다. 그래서 이 비용을 받아들였다.
+
 ### 3.3 Goal 단계와 순서는 System 을 바꾸지 않는다
 
 3층이 들어간 서버(2026-11-06 03:10:41Z 부팅)에서 §1.1 과 같은 방법으로 07:20Z 까지 다시 쟀다(`docs/evidence/2026-11-06-rfc-0491-system-cache/README.md` 「3층 배포 뒤」). 앞부분이 그대로인데 `active_goals` 만 바뀐 쌍이 70개다. 첫 요청 미적중 토큰의 45.7% 이고, 미적중률은 97.6% 다. 아무 블록도 바뀌지 않은 쌍은 30.5% 다.
@@ -202,7 +204,7 @@ Keeper 세션은 기준점을 runtime 마다 하나씩 든다. 앞부분을 runt
 - 시험: native 이어가기가 재시작 뒤에도 seed checkpoint 의 기준점으로 차이 블록을 낸다. 기준점이 없는 seed 는 블록 없이 기록된 System 을 보낸다. 두 runtime 을 번갈아 쓰는 세션은 runtime 마다 자기 기준점을 받는다. 원장 위치는 그 뒤 덧붙인 조항과 제자리 수정에도 같은 조항을 돌려주고, 앞 바이트가 바뀌면 아무것도 돌려주지 않는다.
 - 시험(4층 수리): Agent Core의 실제 HTTP 요청 세 개에서 `Verifying` Goal의 id·표시가 같은 System 관측으로 유지되고, 도구 뒤에는 그 표시를 담은 User 메시지가 없다. 새 턴의 단계 변화는 System에 반영된다. official Start/Resume와 실행 주체 fallback에서는 현재 단계가 전달되고 vendor System에 턴별 단계가 남지 않는다. 같은 priority의 Goal은 created_at, id 순이다.
 - 수리 배포 뒤에는 동일 기준으로 단계 표시 반복 응답과 System 변경 비용을 각각 잰다. 소스·합성 API 비교 결과를 운영 Keeper의 회복이나 캐시 절감 증명으로 바꾸지 않는다.
-- 배포 뒤: §1.1 과 같은 방법으로 "앞부분 그대로, System 바뀜" 쌍과 그 몫을 다시 센다. 기대값은 `completion_authority` 쌍 0, 조항 추가로 바뀐 `keeper_instructions` 쌍 0 이다. 지시문 수정과 배포로 바뀐 쌍은 남는다.
+- 배포 뒤: §1.1 과 같은 방법으로 "앞부분 그대로, System 바뀜" 쌍과 그 몫을 다시 센다. 기대값은 `completion_authority` 쌍 0, 조항 추가로 바뀐 `keeper_instructions` 쌍 0 이다. 지시문 수정과 배포로 바뀐 쌍은 남는다. 전체 목록을 싣는 턴이 보내는 System 의 변화는 `keeper_instructions` digest 에 잡히지 않아 이 수에 들어가지 않는다(§3.2 끝).
 
 ## 7. 층
 

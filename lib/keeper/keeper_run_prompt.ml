@@ -48,9 +48,11 @@ let assemble_extra_system_context = Keeper_context_assembly.assemble
    round carries this turn's authority block again because the post-tool
    assembly drops the [Dynamic_context] it came from (#45853). Proof state
    remains visible too, but Agent Core keeps this recurring state out of the
-   post-tool User tail by carrying it in the issued System. The complete
-   current norms go the same way. Official clients retain their turn-scoped
-   delivery, because their System outlives this turn. *)
+   post-tool User tail by carrying it in the issued System. Official clients
+   retain their turn-scoped delivery of it, because their System outlives
+   this turn. The complete current norms ride the Agent Core System for the
+   same reason; an official client still receives them as the
+   [Constitution_amendments] block. *)
 let assemble_request_context ~checkpoint_owner ~(system : Keeper_turn_system.t) ~post_tool_round ~previous_assembly
     ~dynamic_context_partition ~existing_extra_system_context ~blocks =
   let observations, blocks, dynamic_context_partition, proof_state =
@@ -119,9 +121,13 @@ let assemble_request_context ~checkpoint_owner ~(system : Keeper_turn_system.t) 
   (* The complete current norms are the same text on every request of the
      turn. Agent Core carries them in the issued System, in front of the
      observations that change more often, so a request that follows tool
-     results still ends with those results. An official client's System outlives the
-     turn, so it keeps the block. The delta against the System's basis stays
-     an end-context block for both (RFC-0491). *)
+     results still ends with those results. On a turn that has them, an
+     article write therefore changes the System a request sends, although
+     [system.text] stays equal (RFC-0491 §3.2). An official client keeps the
+     block: its projection sends a block the session holds again only when
+     the bytes change ([Prompt_block_id.resent_when_held]). A turn without
+     the complete list carries its delta as the end-context block for both
+     owners. *)
   let constitution sections =
     Inference_utils.sanitize_text_utf8 (String.concat "\n" sections) in
   let observations, amendments =

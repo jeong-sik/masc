@@ -259,7 +259,10 @@ function ArtifactsObservation({ authRevision, workspaceRoot, draftRetention, all
     if (!publishable()) return
     const failure = selectObservationReadFailure(results.map(result => result.status === 'rejected' ? result.reason : null))
     if (failure !== null) throw failure
-  }, { topics: ['published_artifacts', 'artifact_checks'], resetRead: () => { setCatalog(null); setChecks(null) } }), [authRevision, catalogKey, refresh])
+  }, { topics: ['published_artifacts', 'artifact_checks'], resetRead: () => {
+    setCatalog(null)
+    setChecks(null)
+  } }), [authRevision, catalogKey, refresh])
   useEffect(() => {
     if (!selectedId || !currentDocument()) return
     let stopRead = () => {}

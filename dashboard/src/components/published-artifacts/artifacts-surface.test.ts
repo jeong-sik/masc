@@ -12,9 +12,9 @@ const workspaceOwner = vi.hoisted(() => ({ reset: () => {} }))
 const authOwner = vi.hoisted(() => ({ change: undefined as ((epoch: number) => void) | undefined }))
 
 vi.mock('../../store', async () => {
-  const { signal } = await import('@preact/signals')
-  const authority = signal<unknown>(null)
-  workspaceOwner.reset = () => { authority.value = { epoch: 'fixture', workspaceRoot: '/workspace', connectionGeneration: 1 } }
+  const { acceptedExecutionWorkspace: authority } = await import('../../execution-workspace-authority')
+  workspaceOwner.reset = () => { authority.value = { epoch: 'fixture', workspaceRoot: '/workspace',
+    connectionGeneration: 1, observerInstanceId: 'artifact-test-instance' } }
   return { executionWorkspaceAuthority: authority }
 })
 
@@ -23,7 +23,8 @@ vi.mock('../../router', async () => {
   const route = signal({ tab: 'workspace', params: {} as Record<string, string>, postId: null })
   return { route, navigate: vi.fn((tab: string, params: Record<string, string>) => { route.value = { tab, params, postId: null } }) }
 })
-vi.mock('../../api/core', () => ({
+vi.mock('../../api/core', async original => ({
+  ...await original<typeof import('../../api/core')>(),
   get: vi.fn(), getPublic: vi.fn(), getWithResponse: vi.fn(), post: vi.fn(), currentStoredTokenRevision: vi.fn(() => 0), getStoredToken: vi.fn(() => 'test-token'),
   subscribeStoredTokenChanges:vi.fn(()=>()=>{}),
   ApiRequestError: class extends Error { status = 404 },

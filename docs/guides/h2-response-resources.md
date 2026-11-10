@@ -24,7 +24,8 @@ remain outside this ledger. This is not a process RSS limit.
 A whole response reserves its encoded payload before sending headers. If the
 listener has insufficient capacity, it returns an empty 503 with `no-store`,
 preserving CORS headers and removing the source representation's encoding and
-cache validators. Accepted responses keep the existing flush-before-close
+cache validators, and logs the refusal at warn with the request method and
+path. Accepted responses keep the existing flush-before-close
 behavior, including clients that consume more slowly than the initial H2 window,
 as long as each 16 KiB slice of the body drains within the stall bound below.
 Reset and connection cancellation release reservations even when the writer's
@@ -32,20 +33,23 @@ flush callback cannot run.
 
 Subscription callbacks reserve and enqueue immutable SSE frames without waiting
 on the network while holding the shared publisher lock. A separate request
-fiber drains one frame at a time. Capacity exhaustion resets that stream;
+fiber drains one frame at a time. Capacity exhaustion resets that stream and
+logs the refusal at warn;
 it does not silently drop events or end a partial SSE as successful. GitHub login
 SSE uses a sequential, reserved write-and-flush path outside publisher locks.
 
 A stream whose oldest response flush goes 90 seconds without an answer is
 reset with RST_STREAM(INTERNAL_ERROR), and one warn line names the request
-method and path, without the query (RFC-0518 D2). The time counts from when
-that flush became the oldest one waiting. A flush registered behind it, such
-as an SSE keepalive, does not extend it. Response bodies written through
-`Http_reqd` get a flush at every 16 KiB slice (D3), so the 90 seconds run
-between one slice and the next, not over the whole body. A client that opens
-its window again only after reading a batch of bytes has to read each batch
-within 90 seconds: at 32 KiB per batch that is about 364 B/s. The reset
-releases the stream's fibers and reservations.
+method and path, without the query (RFC-0518 D2). A response body written
+through `Http_reqd` reaches h2 one 16 KiB slice at a time: the next slice is
+written when the socket took the one before (D3). The 90 seconds are
+therefore for one slice to cross the socket, not for the whole body, and one
+socket write carries one slice of each stream at most, so a long body does
+not keep the other streams of its connection waiting. Frames written behind
+a slice that waits, such as SSE keepalives, wait in order and do not extend
+the bound. A client that opens its window again only after reading a batch
+of bytes has to read each batch within 90 seconds: at 32 KiB per batch that
+is about 364 B/s. The reset releases the stream's fibers and reservations.
 
 h2 answers a flush once its bytes were written to the socket. The bound
 therefore ends the scope of a stream whose peer keeps its window shut, and
@@ -62,7 +66,7 @@ an SSE frame gets on HTTP/1.1. gRPC listener responses are written by
 An error answer h2 opened for a failed request ends differently when it
 stalls: the client gets the bytes its window allowed and an empty
 END_STREAM (anmonteiro/ocaml-h2#278). Its diagnostic is one short line,
-written without slices. Two error answers have no bound: one h2 opens on the
+written at once. Two error answers have no bound: one h2 opens on the
 connection reader, and one for a fiber forked on the stream switch that
 raised before the response, which is reported after the stream's scope
 ended.

@@ -1,6 +1,13 @@
 (** Applies Code surface replies. These functions perform no terminal or
     network IO; the caller executes layout and file-read followups. *)
 
+val prepare_file : path:string -> Masc.Tui_decode.workspace_file_source ->
+  Masc_tui_types.code_prepared_file
+(** Prepare the immutable whole-file document, width and memos before delivering
+    a file reply. This pure work uses an isolated text-measurement scope and
+    neither reads UI state nor admits a request. The original bytes and revision
+    remain available for draft observation; admission still checks the request. *)
+
 (** The Code pane's async answers. [Masc_tui_async_protocol.async_msg]
     carries them in [Code_msg]. *)
 type msg =
@@ -22,7 +29,7 @@ type msg =
       * (Masc.Tui_decode.workspace_search, string) result
   | Code_finder_file_loaded of
       (Masc_tui_types.code_workspace_scope * string) Masc_tui_fetched.request
-      * (Masc.Tui_decode.workspace_file_source, string) result
+      * (Masc_tui_types.code_prepared_file, string) result
   | Code_entries_loaded of
       (Masc_tui_types.code_workspace_scope * string) Masc_tui_fetched.request
       * (Masc.Tui_decode.workspace_tree_node list, string) result
@@ -30,7 +37,7 @@ type msg =
   | Code_file_loaded of
       Masc_tui_types.code_file_load_intent
       * string Masc_tui_fetched.request
-      * (Masc.Tui_decode.workspace_file_source, string) result
+      * (Masc_tui_types.code_prepared_file, string) result
   | Code_history_loaded of
       (Masc_tui_types.code_workspace_scope * string) Masc_tui_fetched.request
       * (Masc_tui_types.code_history_listing, string) result
@@ -121,7 +128,7 @@ val choose_search_match : Masc_tui_types.state ->
     nothing. *)
 val apply_found_file : ?input_pending:bool -> Masc_tui_types.state ->
   (Masc_tui_types.code_workspace_scope * string) Masc_tui_fetched.request ->
-  (Masc.Tui_decode.workspace_file_source, string) result -> bool
+  (Masc_tui_types.code_prepared_file, string) result -> bool
 (** [true] only when successful navigation was committed. Failure and stale
     replies preserve the original file, sibling panes, cursor and directory. *)
 val take_ready_found_file : Masc_tui_types.state -> input_pending:bool -> bool
@@ -129,7 +136,7 @@ val take_ready_found_file : Masc_tui_types.state -> input_pending:bool -> bool
     incomplete terminal sequences have had the opportunity to retire it. *)
 val apply_file : ?intent:Masc_tui_types.code_file_load_intent ->
   Masc_tui_types.state -> string Masc_tui_fetched.request ->
-  (Masc.Tui_decode.workspace_file_source, string) result -> unit
+  (Masc_tui_types.code_prepared_file, string) result -> unit
 val copy_file_source : Masc_tui_types.state -> ((string * string), string) result
 (** The current readable file's path and original response bytes, without
     display sanitation, syntax colours, gutters or line-ending reconstruction.

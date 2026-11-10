@@ -314,6 +314,7 @@ let test_actual_no_result_failure_does_not_repeat_cold_reads () =
         Operator_control.snapshot_read ?read_policy ?actor ?view ?include_messages
           ?include_keepers ?include_summary_fields ?lightweight_summary ctx)};
     let path = Operator_pending_confirm.pending_confirms_path scope.config in
+    Fs_compat.mkdir_p (Filename.dirname path);
     (match Fs_compat.save_file_atomic path "{" with Ok () -> () | Error detail -> fail detail);
     let cold = read ~state ~sw ~clock "" in
     let owner = Owner.owner_for_scope ~state scope in

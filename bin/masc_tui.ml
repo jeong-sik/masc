@@ -8723,6 +8723,10 @@ let leave_browser_lane state ~mailbox =
 
 let goto_surface ?(from_reference = false) state ~mailbox (destination : surface) =
   if state.view <> Memory || destination <> Memory then state.memory_return <- None;
+  if state.view = Memory && destination <> Memory then begin
+    state.memory_fact_detail_open <- false;
+    state.memory_fact_detail_scroll <- 0
+  end;
   state.code_hover <- None;
   state.runtime_config_jump_section <- None;
   if destination <> Tools && state.tools_async_detail_open then close_tools_async_detail state;
@@ -19339,6 +19343,9 @@ let apply_keeper_story_action state ~mailbox = function
        | None -> ()
        | Some keeper ->
          let origin = {mr_keeper=keeper.k_name; mr_search=state.search; mr_search_last=state.search_last} in
+         state.memory_fact_detail_open <- false;
+         state.memory_fact_detail_scroll <- 0;
+         state.memory_fact_claim_wrap <- None;
          goto_surface state ~mailbox Memory;
          state.memory_return <- Some origin;
          state.search <- None;

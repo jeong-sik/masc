@@ -181,8 +181,14 @@ let change_reading (state : Masc_tui_types.state) ~keeper_name =
       | facts -> String.concat "\n\n" (List.map (fun (fact : Activity.fact) ->
           match fact.claim with Some claim -> clean claim
           | None -> text "본문 미확인 · " "claim not observed · " ^ clean fact.memory_id) facts) in
+    let notes = match activity_view state keeper_name with
+      | Fetched.Ready activity -> activity.notes
+      | Fetched.Stale (activity, reason) ->
+          (text "이전 관측 · " "last observation · " ^ reason) :: activity.notes
+      | Fetched.Failed reason -> [reason]
+      | Fetched.Absent | Fetched.Loading -> [] in
     let sections : Masc_tui_detail_reading.section list =
-      [{heading=keeper_name; body=String.concat "\n" (List.map clean (activity_notes ~ko state keeper_name))};
+      [{heading=keeper_name; body=String.concat "\n" (List.map clean notes)};
        {heading=text "이전" "Before"; body=body event.before};
        {heading=text "이후" "After"; body=body event.after}]
       @ (match event.reason with None -> [] | Some reason ->

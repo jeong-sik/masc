@@ -56,8 +56,9 @@ val publication : owner -> publication
 
 val publication_is_current : owner -> publication -> bool
 val publication_status : owner -> publication -> publication_status
-(** Superseded cache preparation retains bounded publication debt; a source
-    generation still awaiting its read settles until that read completes.
+(** Superseded cache preparation retains bounded publication debt; only the
+    current owner generation still awaiting its read is [Source_pending]. An
+    older preparation becomes [Superseded] once the current read completes.
     This distinction prevents both a lost first completion after a cancelled
     request's attempt stamp and a busy publisher during a long source read. *)
 

@@ -4,6 +4,10 @@ open Masc
 module Owner = Server_dashboard_mission_observation
 module Cache = Server_dashboard_http_cache
 
+let () =
+  Dashboard_projection_cache.register_operator_snapshot_json {snapshot = Operator_control.snapshot_json};
+  Dashboard_projection_cache.register_operator_digest_observer {observe_digest = Operator_control.observe}
+
 let with_owner f = Eio_main.run (fun env ->
   let previous_fs = Fs_compat.get_fs_opt () in
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -54,6 +58,8 @@ let test_invalidated_read_remains_owed () = with_owner (fun _state _scope owner 
   let fresh = Owner.begin_attempt owner ~origin:Source_read in
   check bool "next current read settles the actual source debt" true
     (Owner.publish_success fresh (observation "current source" None));
+  check bool "an older preparation owes publication after the current read has settled" true
+    (Owner.publication_status owner prepared = Owner.Superseded);
   check bool "the current immutable publication can be sent" true
     (Owner.publication_is_current owner (Owner.publication owner)))
 
@@ -99,9 +105,114 @@ let test_failure_keeps_last_good_rows_and_callback_outcome () = with_owner (fun 
     check (option string) "cache diagnostic retains the original cause" (Some "isolated read failure")
       publication.source.last_error))
 
+let test_actual_worker_follows_store_and_policy_inputs () = Eio_main.run (fun env ->
+  let previous_fs = Fs_compat.get_fs_opt () in
+  let previous_context = Eio_context.snapshot_state () in
+  let previous_clock = Eio_context.get_clock_opt () in
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_path = Masc_test_deps.setup_test_workspace () in
+  let clock = Eio_mock.Clock.make () in
+  Eio_mock.Clock.set_time clock (Unix.gettimeofday ());
+  Fun.protect ~finally:(fun () ->
+    Eio_context.restore_state previous_context;
+    (match previous_clock with Some clock -> Time_compat.set_clock clock | None -> Time_compat.clear_clock ());
+    Masc_test_deps.cleanup_test_workspace base_path;
+    match previous_fs with Some fs -> Fs_compat.set_fs fs | None -> Fs_compat.clear_fs ()) (fun () ->
+    (* Real-clock watchdog bounds fixture hangs only, not product freshness. *)
+    Eio.Time.with_timeout_exn (Eio.Stdenv.clock env) 10.0 (fun () ->
+      Eio.Switch.run (fun sw ->
+        Eio_context.with_test_env ~net:(Eio.Stdenv.net env) ~clock
+          ~mono_clock:(Eio.Stdenv.mono_clock env) ~sw (fun () ->
+          Time_compat.set_clock clock;
+          let state = Mcp_server.For_testing.create_state ~base_path in
+          let scope = Mcp_server.workspace_scope state in
+          let config = scope.config in
+          ignore (Workspace.init config ~agent_name:None);
+          let initial_request = Server_dashboard_http_core_mission.request ~state
+              (Httpun.Request.create `GET "/api/v1/dashboard/briefing") in
+          let cold = Server_dashboard_http_core_mission.json ~sw ~clock initial_request in
+          check string "the actual cold HTTP read installs canonical default metadata" "ready"
+            Yojson.Safe.Util.(cold |> member "mission_observation_state" |> to_string);
+          check string "cold HTTP metadata belongs to its captured instance"
+            (Server_observer_scope.instance_id scope)
+            Yojson.Safe.Util.(cold |> member "observer_instance_id" |> to_string);
+          let frames = Eio.Stream.create 8 in
+          let id = "actual-mission-source-observation" in
+          Sse.subscribe_external ~id
+            ~runtime_authority:(Sse.runtime_authority_exn ~base_path)
+            ~observer_instance_id:(Server_observer_scope.instance_id scope)
+            ~callback:(fun event ->
+              if Yojson.Safe.Util.member "type" event.Sse.ext_payload = `String "mission_snapshot" then
+                Eio.Stream.add frames (Yojson.Safe.Util.member "payload" event.ext_payload)) ();
+          Eio.Switch.on_release sw (fun () -> Sse.unsubscribe_external id);
+          let rec ready () =
+            let payload = Eio.Stream.take frames in
+            match Yojson.Safe.Util.member "mission_observation_state" payload with
+            | `String "ready" -> payload
+            | `String "initializing" -> ready ()
+            | `String "error" -> fail "production Mission read failed"
+            | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ | `Assoc _ ->
+                fail "Mission frame lost its closed observation state" in
+          Server_dashboard_http_core_mission.start ~state ~sw ~clock
+            ~mono_clock:(Eio.Stdenv.mono_clock env);
+          let initial = ready () in
+          check string "canonical initial success uses the actual captured instance"
+            (Server_observer_scope.instance_id scope)
+            Yojson.Safe.Util.(initial |> member "observer_instance_id" |> to_string);
+          Eio.Fiber.yield ();
+          check bool "healthy empty Mission has no refresh clock" false (Eio_mock.Clock.try_advance clock);
+          let now = Time_compat.now () in
+          let confidence = match Operator_judgment.Confidence.of_float 0.91 with
+            | Some value -> value | None -> fail "invalid fixture confidence" in
+          let judgment = Operator_judgment.record config ~surface:Operator_judgment.Command_namespace
+              ~target_type:Operator_judgment.Workspace ~target_id:None ~summary:"Actual source input"
+              ~confidence ~generated_at:(Masc_domain.iso8601_of_unix_seconds now) ~generated_at_unix:now
+              ~fresh_until:(Masc_domain.iso8601_of_unix_seconds (now +. 60.0)) ~fresh_until_unix:(now +. 60.0)
+              ~keeper_name:"actual-source-judge"
+              ~recommended_action:(`Assoc ["action_kind", `String "actual-recorded-action"]) () in
+          let changed = ready () in
+          let actions payload = Yojson.Safe.Util.(payload |> member "recommended_actions" |> to_list) in
+          check int "actual judgment append reaches the production worker and canonical frame" 1 (List.length (actions changed));
+          check bool "canonical action is exactly the original recorded value" true
+            (actions changed = [`Assoc ["action_kind", `String "actual-recorded-action"]]);
+          let owner = Owner.owner_for_scope ~state scope in
+          check (option (float 0.0)) "the worker adopted the exact recorded expiry"
+            (Some judgment.fresh_until_unix) (Owner.next_deadline_unix owner);
+          Eio_mock.Clock.set_time clock judgment.fresh_until_unix;
+          let expired = ready () in
+          check int "at the actual policy deadline no old authority action survives" 0 (List.length (actions expired));
+          let stamp = Masc_domain.iso8601_of_unix_seconds (Time_compat.now ()) in
+          let agent : Masc_domain.agent = {id = None; name = "actual-mission-agent";
+            agent_type = "test"; status = Masc_domain.Active; capabilities = [];
+            current_task = None; session_bound_at = stamp; last_seen = stamp; meta = None} in
+          Workspace_agent_record.write config (Filename.concat (Workspace.agents_dir config) "actual-mission-agent.json")
+            ~previous:None agent;
+          let live = ready () in
+          let truth payload = match Yojson.Safe.Util.(payload |> member "agent_briefs" |> to_list) with
+            | [row] -> Yojson.Safe.Util.(row |> member "signal_truth" |> to_string)
+            | rows -> failf "expected the one actual source agent, got %d" (List.length rows) in
+          check string "actual agent write reaches canonical Mission" "live" (truth live);
+          let expected = match Masc_domain.parse_iso8601_opt stamp with
+            | Some seen -> seen +. 301.0 | None -> fail "fixture timestamp is unreadable" in
+          check (option (float 0.0)) "only the actual integer-policy boundary remains" (Some expected)
+            (Owner.next_deadline_unix owner);
+          Eio_mock.Clock.set_time clock expected;
+          check string "actual semantic expiry changes canonical agent truth" "stale" (truth (ready ()));
+          Eio.Fiber.yield ();
+          check bool "settled policies leave no healthy cadence or output feedback" false (Eio_mock.Clock.try_advance clock);
+          let context = Server_dashboard_http_core_mission.request ~state
+              (Httpun.Request.create `GET "/api/v1/dashboard/briefing") in
+          (match Mcp_server.set_workspace_config state config with
+           | Ok () -> () | Error _ -> fail "same-path worker scope replacement failed");
+          let late = Server_dashboard_http_core_mission.json ~sw ~clock context in
+          check string "request context cannot borrow the replacement instance after dispatch"
+            (Server_observer_scope.instance_id scope)
+            Yojson.Safe.Util.(late |> member "observer_instance_id" |> to_string))))))
+
 let () = run "Mission observation owner"
   ["publication", [
     test_case "own success and ordered attempts" `Quick test_own_success_and_newer_attempt_order;
     test_case "source invalidation keeps actual read debt" `Quick test_invalidated_read_remains_owed;
     test_case "same-path scope retirement preserves instance" `Quick test_same_path_retirement_keeps_its_original_instance;
-    test_case "read failure retains rows and original outcome" `Quick test_failure_keeps_last_good_rows_and_callback_outcome]]
+    test_case "read failure retains rows and original outcome" `Quick test_failure_keeps_last_good_rows_and_callback_outcome;
+    test_case "actual cold read and worker follow original writes and exact policy deadlines" `Quick test_actual_worker_follows_store_and_policy_inputs]]

@@ -42,7 +42,7 @@ val last_good_shell_light : Yojson.Safe.t Atomic.t
 type operator_snapshot_publication =
   Server_dashboard_http_core_operator.operator_snapshot_publication
 
-val mission_cache : cached_surface
+val mission_cache : state:Mcp_server.server_state -> cached_surface
 
 (** {1 Dashboard Timeout} *)
 
@@ -103,24 +103,18 @@ val start_mission_refresh_loop :
   state:Mcp_server.server_state ->
   sw:Eio.Switch.t ->
   clock:float Eio.Time.clock_ty Eio.Resource.t ->
+  mono_clock:Eio.Time.Mono.ty Eio.Resource.t ->
   unit
 
-val dashboard_briefing_http_json :
-  state:Mcp_server.server_state ->
-  sw:Eio.Switch.t ->
-  clock:float Eio.Time.clock_ty Eio.Resource.t ->
-  Httpun.Request.t ->
-  Yojson.Safe.t
-
-val dashboard_health_line_http_json :
-  state:Mcp_server.server_state ->
-  sw:Eio.Switch.t ->
-  clock:float Eio.Time.clock_ty Eio.Resource.t ->
-  Yojson.Safe.t
-(** The Home Health line ({!Server_workspace_health_line.of_briefing}) of the
-    default mission, with the Keeper observations of the moment laid over it,
-    as the briefing route answers it. A reader reads it again when the server
-    announces [workspace_health]. *)
+type mission_http_request
+val mission_http_request : state:Mcp_server.server_state -> Httpun.Request.t -> mission_http_request
+(** Captured at the route entry before executor dispatch. *)
+val dashboard_briefing_for_request :
+  sw:Eio.Switch.t -> clock:float Eio.Time.clock_ty Eio.Resource.t ->
+  mission_http_request -> Yojson.Safe.t
+val dashboard_health_line_for_request :
+  sw:Eio.Switch.t -> clock:float Eio.Time.clock_ty Eio.Resource.t ->
+  mission_http_request -> Yojson.Safe.t
 
 val dashboard_briefing_sections_http_json :
   state:Mcp_server.server_state ->

@@ -72,6 +72,9 @@ type stop =
 (** What the boot does. Only a single user boots. *)
 type decision =
   | Boot_single_user
+  | Boot_after_off of Authz_state.t
+      (** The accounts were turned off (row 4). A single user boots, and the
+          records of the accounts in the state stay read-only. *)
   | Stop of stop
 
 val decide : Authz_boot_mode.input -> decision
@@ -96,6 +99,12 @@ type single_user
 
 (** The base path that {!boot} read. *)
 val single_user_base_path : single_user -> string
+
+(** The state of the authorization log of a base path whose accounts were
+    turned off (row 4). The Keepers, the Runtimes and the account homes it
+    names stay read-only: no run starts on them ({!Runtime_account_access}).
+    [None] for a base path never set up for accounts. *)
+val turned_off : single_user -> Authz_state.t option
 
 (** {!input}, {!decide} and {!messages} in one call: the judged base path for a
     single-user boot, and the messages of the stop otherwise. *)

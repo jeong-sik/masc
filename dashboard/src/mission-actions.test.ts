@@ -12,6 +12,7 @@ vi.mock('./api/dashboard-mission', () => apiMocks)
 
 const missionPayload = {
   observer_instance_id: 'mission-test-A',
+  projection_diagnostics: { read_completeness: 'complete', read_error: null },
   generated_at: '2026-03-25T09:00:00Z',
   summary: {
     workspace_health: 'ok',
@@ -62,7 +63,11 @@ beforeEach(async () => {
     connectionGeneration: 1, observerInstanceId: 'mission-test-A' })
 })
 
-afterEach(() => {
+afterEach(async () => {
+  const { acceptedExecutionWorkspace } = await import('./execution-workspace-authority')
+  acceptedExecutionWorkspace.value = null
+  const { refreshMissionSnapshot } = await import('./mission-actions')
+  await refreshMissionSnapshot({ force: true })
   vi.clearAllMocks()
   vi.resetModules()
 })

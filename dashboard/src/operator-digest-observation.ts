@@ -8,6 +8,7 @@ import {
 import { subscribeDashboardObservation } from './lib/observation-refresh'
 import { createReadRecovery } from './lib/read-recovery'
 import { isRecord } from './lib/type-guards'
+import { projectionReadOutcome, type ProjectionReadOutcome } from './lib/projection-read-outcome'
 import { normalizeOperatorDigest } from './operator-normalizers'
 import { operatorWorkspaceDigest, operatorDigestLoading, operatorDigestError, operatorDigestErrorStatus } from './operator-signals'
 import { operatorDigestPublication, operatorDigestQuery, sameOperatorDigestQuery,
@@ -55,7 +56,7 @@ function admittedOwner(): Owner | null {
   return owner
 }
 
-function installBody(raw: unknown, state: 'initializing' | 'ready' | 'error') {
+function installBody(raw: unknown, state: 'initializing' | 'ready' | 'error', outcome: ProjectionReadOutcome | null) {
   const diagnostics = isRecord(raw) && isRecord(raw.projection_diagnostics) ? raw.projection_diagnostics : null
   batch(() => {
     if (state !== 'initializing' || operatorWorkspaceDigest.peek() === null) {
@@ -63,7 +64,8 @@ function installBody(raw: unknown, state: 'initializing' | 'ready' | 'error') {
     }
     operatorDigestLoading.value = false
     operatorDigestError.value = state === 'error'
-      ? typeof diagnostics?.stale_reason === 'string' ? diagnostics.stale_reason : 'Operator Digest source read failed' : null
+      ? outcome?.kind === 'partial' ? outcome.error
+        : typeof diagnostics?.stale_reason === 'string' ? diagnostics.stale_reason : 'Operator Digest source read failed' : null
     operatorDigestErrorStatus.value = null
   })
 }
@@ -73,6 +75,9 @@ export function hydrateOperatorDigest(raw: unknown): boolean {
   const publication = operatorDigestPublication(raw)
   const original = admittedOwner()
   if (publication === null || original === null || publication.instance !== original.instance) return false
+  let outcome: ProjectionReadOutcome | null
+  try { outcome = projectionReadOutcome(raw) } catch { return false }
+  if (publication.state === 'ready' && outcome?.kind !== 'complete') return false
   if (publication.generation < original.generation
     || publication.generation === original.generation && publication.sequence <= original.sequence) return false
   original.generation = publication.generation
@@ -88,7 +93,7 @@ export function hydrateOperatorDigest(raw: unknown): boolean {
   original.recovery.succeeded()
   const previous = flight
   if (previous?.owner === original) { flight = null; previous.controller.abort() }
-  installBody(raw, publication.state)
+  installBody(raw, publication.state, outcome)
   return true
 }
 
@@ -123,17 +128,21 @@ export async function refreshOperatorWorkspaceDigest(opts?: { force?: boolean })
       const publication = operatorDigestPublication(raw)
       if (publication === null && ('digest_publication_generation' in raw || 'digest_publication_sequence' in raw
         || 'digest_observation_state' in raw)) throw new Error('Operator Digest publication metadata is invalid')
-      const state = publication?.state ?? (raw.health === 'initializing' ? 'initializing' : 'ready')
+      const outcome = projectionReadOutcome(raw)
+      const state = publication?.state ?? (outcome?.kind === 'partial' ? 'error'
+        : raw.health === 'initializing' ? 'initializing' : 'ready')
+      if (state === 'ready' && outcome?.kind !== 'complete') throw new Error('Operator Digest omitted its complete read outcome')
       // A repeated HTTP ordering still carries this request's actual body.
       // A newer installed broadcast has already fenced it by displayRevision.
-      installBody(raw, state)
+      installBody(raw, state, outcome)
       if (publication !== null && (publication.generation > original.generation
         || publication.generation === original.generation && publication.sequence > original.sequence)) {
         original.generation = publication.generation
         original.sequence = publication.sequence
       }
       original.lastReadAt = Date.now()
-      if (state === 'initializing' && publication === null) original.recovery.waiting(() => { void refreshOperatorWorkspaceDigest({ force: true }) })
+      if (publication === null && outcome?.kind === 'partial') original.recovery.failed(() => { void refreshOperatorWorkspaceDigest({ force: true }) })
+      else if (state === 'initializing' && publication === null) original.recovery.waiting(() => { void refreshOperatorWorkspaceDigest({ force: true }) })
       else original.recovery.succeeded()
     } catch (cause) {
       if (!current(original) || read.controller.signal.aborted || original.displayRevision !== revision) return

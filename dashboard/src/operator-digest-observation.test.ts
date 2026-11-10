@@ -8,6 +8,7 @@ const query = (actor: string | null = 'dashboard') => ({ actor, target_type: 'wo
   effective_target_type: 'workspace', target_id: null, include_workers: null, default_namespace_request: actor === null })
 const body = (trace = 'initial', actor: string | null = 'dashboard', instance = 'digest-A') => ({
   observer_instance_id: instance, query: query(actor), target_type: 'workspace', trace_id: trace,
+  projection_diagnostics: { read_completeness: 'complete', read_error: null },
   health: 'ok', attention_items: [], recommended_actions: [],
 })
 const publication = (trace = 'canonical', generation = 1, sequence = 1,
@@ -34,6 +35,73 @@ async function surface(admit = true) {
 }
 
 describe('Operator Digest actor and workspace observation', () => {
+  it.each([
+    {}, { read_completeness: 'unknown', read_error: null },
+    { read_completeness: 'complete', read_error: 'contradictory error' },
+  ])('retains read failure instead of accepting invalid private completeness %o', async diagnostics => {
+    const fetch = vi.fn().mockResolvedValue(json({ ...body(), projection_diagnostics: diagnostics }))
+    vi.stubGlobal('fetch', fetch)
+    const s = await surface()
+    stop = s.setupOperatorDigestObservation()
+    await flush()
+    expect(s.operatorWorkspaceDigest.value).toBeNull()
+    expect(s.operatorDigestError.value).toBeTruthy()
+    expect(fetch).toHaveBeenCalledTimes(1)
+  })
+
+  it('retains private partial rows and retries the actual failed read after quiet repair', async () => {
+    const partial = { ...body('private partial'), projection_diagnostics: {
+      read_completeness: 'partial', read_error: 'original approval queue read failed' } }
+    const fetch = vi.fn().mockResolvedValueOnce(json(partial)).mockResolvedValue(json(body('repaired')))
+    vi.stubGlobal('fetch', fetch)
+    const s = await surface()
+    stop = s.setupOperatorDigestObservation()
+    await flush()
+    expect(s.operatorWorkspaceDigest.value?.trace_id).toBe('private partial')
+    expect(s.operatorDigestError.value).toBe('original approval queue read failed')
+    expect(fetch).toHaveBeenCalledTimes(1)
+    await vi.advanceTimersByTimeAsync(3_000)
+    expect(fetch).toHaveBeenCalledTimes(2)
+    expect(s.operatorWorkspaceDigest.value?.trace_id).toBe('repaired')
+    expect(s.operatorDigestError.value).toBeNull()
+    await vi.advanceTimersByTimeAsync(300_000)
+    expect(fetch).toHaveBeenCalledTimes(2)
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it('lets a canonical partial body own its retry and keeps its actual read error visible', async () => {
+    const fetch = vi.fn().mockResolvedValue(json(body()))
+    vi.stubGlobal('fetch', fetch)
+    const s = await surface()
+    stop = s.setupOperatorDigestObservation()
+    await flush()
+    s.hydrateOperatorDigest({ ...publication('partial canonical', 4, 9, 'error'),
+      projection_diagnostics: { read_completeness: 'partial', read_error: 'original source failure' } })
+    expect(s.operatorWorkspaceDigest.value?.trace_id).toBe('partial canonical')
+    expect(s.operatorDigestError.value).toBe('original source failure')
+    await vi.advanceTimersByTimeAsync(300_000)
+    expect(fetch).toHaveBeenCalledTimes(1)
+    s.hydrateOperatorDigest(publication('complete canonical', 4, 10))
+    expect(s.operatorDigestError.value).toBeNull()
+    expect(s.operatorWorkspaceDigest.value?.trace_id).toBe('complete canonical')
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it('cancels a private partial retry when its matching canonical producer completes', async () => {
+    const fetch = vi.fn().mockResolvedValue(json({ ...body('partial'), projection_diagnostics: {
+      read_completeness: 'partial', read_error: 'original private read failure' } }))
+    vi.stubGlobal('fetch', fetch)
+    const s = await surface()
+    stop = s.setupOperatorDigestObservation()
+    await flush()
+    expect(s.operatorDigestError.value).toBe('original private read failure')
+    s.hydrateOperatorDigest(publication('canonical repair'))
+    await vi.advanceTimersByTimeAsync(300_000)
+    expect(fetch).toHaveBeenCalledTimes(1)
+    expect(s.operatorDigestError.value).toBeNull()
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
   it('waits for real scope, then requests the server workspace vocabulary once', async () => {
     const fetch = vi.fn().mockResolvedValue(json(body()))
     vi.stubGlobal('fetch', fetch)

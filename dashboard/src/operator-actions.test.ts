@@ -7,6 +7,7 @@ const apiMocks = vi.hoisted(() => ({
   fetchOperatorSnapshot: vi.fn(),
   fetchOperatorDigest: vi.fn(),
 }))
+let releaseDigestOwner: (() => Promise<void>) | undefined
 
 // Only the transport calls are mocked. extractApiError / ApiRequestError stay
 // real so the error-path tests exercise the actual summary shape the
@@ -30,6 +31,10 @@ async function load() {
     connectionGeneration: 1, observerInstanceId: 'operator-test' })
   const mod = await import('./operator-actions')
   const signals = await import('./operator-signals')
+  releaseDigestOwner = async () => {
+    acceptedExecutionWorkspace.value = null
+    await mod.refreshOperatorWorkspaceDigest({ force: true })
+  }
   return { mod, signals }
 }
 
@@ -74,6 +79,7 @@ const validSnapshot = {
 
 function validDigest(extra: Record<string, unknown> = {}) {
   return { observer_instance_id: 'operator-test', target_type: 'workspace',
+    projection_diagnostics: { read_completeness: 'complete', read_error: null },
     query: { actor: 'vincent', target_type: 'workspace', effective_target_type: 'workspace',
       target_id: null, include_workers: null, default_namespace_request: false }, ...extra }
 }
@@ -84,7 +90,9 @@ beforeEach(() => {
   apiMocks.fetchOperatorDigest.mockResolvedValue(validDigest())
 })
 
-afterEach(() => {
+afterEach(async () => {
+  await releaseDigestOwner?.()
+  releaseDigestOwner = undefined
   vi.useRealTimers()
   vi.clearAllMocks()
   vi.resetModules()

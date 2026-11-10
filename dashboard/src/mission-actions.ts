@@ -14,6 +14,7 @@ import { subscribeDashboardObservation } from './lib/observation-refresh'
 import { missionSnapshot, missionLoading, missionError, missionInitializing } from './mission-signals'
 import { normalizeMission } from './mission-normalizers'
 import { missionPublication } from './mission-observation-contract'
+import { projectionReadOutcome } from './lib/projection-read-outcome'
 
 type ReadOwner = ReturnType<typeof captureDashboardObservationOwner>
 interface Owner {
@@ -70,6 +71,9 @@ export function hydrateMissionSnapshot(raw: unknown): boolean {
   const original = admittedOwner()
   if (publication === null || original === null
     || publication.observer_instance_id !== original.instance) return false
+  let outcome: ReturnType<typeof projectionReadOutcome>
+  try { outcome = projectionReadOutcome(raw) } catch { return false }
+  if (publication.mission_observation_state === 'ready' && outcome?.kind !== 'complete') return false
   const generation = publication.mission_publication_generation
   const sequence = publication.mission_publication_sequence
   if (generation < original.generation || generation === original.generation && sequence <= original.sequence) return false
@@ -87,7 +91,8 @@ export function hydrateMissionSnapshot(raw: unknown): boolean {
     missionLoading.value = false
     missionInitializing.value = state === 'initializing'
     missionError.value = state === 'error'
-      ? typeof diagnostics?.stale_reason === 'string' ? diagnostics.stale_reason : 'Mission source read failed'
+      ? outcome?.kind === 'partial' ? outcome.error
+        : typeof diagnostics?.stale_reason === 'string' ? diagnostics.stale_reason : 'Mission source read failed'
       : null
   })
   return true
@@ -111,20 +116,30 @@ export async function refreshMissionSnapshot(opts?: { force?: boolean }): Promis
       if (!isRecord(raw) || raw.observer_instance_id !== original.instance) {
         throw new Error('Mission response did not attest its original workspace')
       }
-      if (missionPublication(raw) !== null) { hydrateMissionSnapshot(raw); return }
+      const outcome = projectionReadOutcome(raw)
+      const publication = missionPublication(raw)
+      if (publication !== null) {
+        if (publication.mission_observation_state === 'ready' && outcome?.kind !== 'complete') {
+          throw new Error('Mission publication omitted its complete read outcome')
+        }
+        hydrateMissionSnapshot(raw)
+        return
+      }
       if ('mission_publication_generation' in raw || 'mission_publication_sequence' in raw
         || 'mission_observation_state' in raw) throw new Error('Mission publication metadata is invalid')
       // Actor-local HTTP has no canonical ordering. A newer canonical body
       // fences this whole read, including initializing and failure outcomes.
       const normalized = normalizeMission(raw)
-      const initializing = normalized.summary.workspace_health === 'initializing'
+      const initializing = normalized.summary.workspace_health === 'initializing' && outcome?.kind !== 'partial'
+      if (!initializing && outcome === null) throw new Error('Mission response omitted its read outcome')
       batch(() => {
         if (!initializing || missionSnapshot.peek() === null) missionSnapshot.value = normalized
         missionInitializing.value = initializing
-        missionError.value = null
+        missionError.value = outcome?.kind === 'partial' ? outcome.error : null
       })
       original.lastReadAt = Date.now()
-      if (initializing) original.recovery.waiting(retry)
+      if (outcome?.kind === 'partial') original.recovery.failed(retry)
+      else if (initializing) original.recovery.waiting(retry)
       else original.recovery.succeeded()
     } catch (cause) {
       if (!current(original) || read.controller.signal.aborted || revision !== original.revision) return

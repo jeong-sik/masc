@@ -205,13 +205,14 @@ let test_refused_policy_parent_cleanup base = with_parent_cleanup base (fun firs
        [Board.sub_boards_path first; Board.persist_path first] paths
    | _ -> Alcotest.fail "guard refusal invented an unsettled comments write"))
 
-(* Source-confirmed blocker: delete_sub_board currently acknowledges only the
-   policy file and leaves the hearth unlink dirty in memory. This normal
-   accepted transition must become durable before this candidate is Ready. *)
+(* A completed policy deletion also owns durable hearth unlinking. *)
 let test_deleted_sub_board_keeps_comment_available base =
   let first = fresh base in
   let board, parent = scoped first in
-  require (Board.delete_sub_board first ~sub_board_id:(Board.Sub_board_id.to_string board.id));
+  (match require (Board.delete_sub_board first ~authorization:Board.Operator_sub_board_deletion
+     ~sub_board_id:(Board.Sub_board_id.to_string board.id)) with
+   | Board.Durable_deletion -> ()
+   | Board.Deletion_decision_pending detail | Board.Deletion_persistence_pending detail -> Alcotest.fail detail);
   let comment = require (append first parent "comment immediately after accepted sub-board deletion") in
   let restarted = fresh base in
   let restored = match Board.read_post restarted ~post_id:(Board.Post_id.to_string parent.id) with

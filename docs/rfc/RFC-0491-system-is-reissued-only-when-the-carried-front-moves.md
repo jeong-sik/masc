@@ -3,7 +3,7 @@ rfc: "0491"
 title: "System 은 범위 앞부분이 움직일 때만 다시 만들고, 그 사이 바뀐 세계 상태는 끝 문맥으로 보낸다"
 status: Active
 created: 2026-11-05
-updated: 2026-11-06
+updated: 2026-11-09
 author: claude
 supersedes: []
 superseded_by: null
@@ -31,7 +31,7 @@ related: ["0442", "goal-observations-leave-the-system-prompt", "0488"]
 
 1. `Completion_authority` 는 System 에 붙이지 않는다. 그 턴의 끝 문맥 블록으로 보내고, 같은 턴의 뒤 round 에도 다시 싣는다(§3.1).
 2. 조항이 바뀌어도 System 은 그 Keeper 가 마지막으로 보낸 조항으로 렌더한다. 그 뒤 바뀐 조항은 끝 문맥 블록 `Constitution_amendments` 로 보낸다. 범위 앞부분이 움직이면 System 을 지금 조항으로 다시 만든다(§3.2).
-3. Goal 의 증명 대기 표시는 System 이 아니라 끝 문맥 블록이 싣고, System 의 Goal 순서는 바뀌지 않는 키로 정한다. 2 를 배포한 뒤 다시 재서, `active_goals` 변화의 81% 가 이 둘에서 나온다는 것을 보고 정했다(§3.3).
+3. System 의 Goal 순서는 바뀌지 않는 키로 정한다. 증명 대기 표시는 Agent Core에서는 그 턴의 System 관측으로, official client에서는 턴별 입력으로 보낸다. 같은 상태를 매 도구 뒤 새 User 발화처럼 붙이지 않는다(§3.3).
 
 ## 1. 측정
 
@@ -163,12 +163,14 @@ Keeper 세션은 기준점을 runtime 마다 하나씩 든다. 앞부분을 runt
 - 증명 대기 표시는 Goal 이 `Verifying` 일 때 System 의 Goal 줄 끝에 붙는다(`keeper_unified_prompt.ml` `format_goal_summaries`). 완료 요청(`Request_complete`)으로 붙고, verifier 의 반박(`Record_proof_refuted`)이나 `Reopen` 으로 떨어진다. 10-30 뒤 `Verifying` 으로 간 33건 중 30건이 masc-tui 운영자 요청이고, 다시 `Executing` 으로 돌아온 28건은 verifier 반박이다. 둘은 12~20분 간격으로 오간다. 한 번 오갈 때마다 모든 Keeper 의 System 이 두 번 바뀐다.
 - 순서는 `updated_at` 내림차순이다. 반박을 쓰면 `updated_at` 이 바뀐다. 그래서 표시가 붙었다 떨어진 Goal 이 같은 priority 무리의 맨 앞으로 가고, 바이트가 같은 채 순서만 바뀐다.
 
-그래서 이렇게 한다.
+11-06의 #49257은 이 표시를 매 요청 끝의 User-role 문맥으로 옮겼다. 11-09에는 `code-reviewer-brother`의 한 실행에서 도구 뒤 재주입 37회와 같은 Goal을 다시 언급한 응답 20개를 확인했다. 긴 도구 루프의 유일한 원인인지는 입증되지 않았지만, 같은 상태가 도구 결과보다 뒤의 새 발화로 보이는 전달 경로는 확인됐다. [실측과 수리 범위](../evidence/2026-11-09-keeper-proof-context-feedback/README.md)에 따라 전달 위치를 다음처럼 고친다.
 
-- System 의 Goal 줄은 증명 대기 표시를 싣지 않는다. 표시는 새 끝 문맥 블록 `Goals_awaiting_proof` 가 싣는다. 블록에는 지금 `Verifying` 인 Goal 의 id 와 표시 문구가 들어간다. 그런 Goal 이 없으면 블록도 없다.
-- 이 블록은 §3.1 의 `Completion_authority` 처럼 같은 턴의 뒤 round 에도 싣는다(`injected_on_post_tool_round`). 뒤 round 가 증명 대기 Goal 을 보통 일로 읽으면 RFC-0387 P0-1 이 막은 결함이 돌아온다. resume 도 블록을 다시 보낸다(`resent_when_held`). 단계는 resume 사이에도 바뀐다.
+- `Goals_awaiting_proof`에는 지금 `Verifying`인 Goal의 id와 표시 문구가 들어간다. 그런 Goal이 없으면 관측도 없다. `Active_goals`의 개별 줄에는 표시를 붙이지 않는다.
+- Agent Core에서는 이 관측을 첫 요청의 System suffix에 넣고, 같은 실행의 도구 뒤 요청에는 정확히 같은 관측을 유지한다. 다른 새 문맥이 없으면 도구 결과가 요청의 마지막 메시지다. 새 턴에서는 현재 단계를 다시 읽으므로 증명 대기가 끝나면 관측도 빠진다. 이 상태 변화가 System 바이트를 바꾸는 비용은 감수한다.
+- official client는 vendor System이 턴보다 오래 남으므로 기존처럼 현재 Start 입력과 매 Resume 입력에 이 블록을 보낸다. 실제 실행 주체인 `Runtime_execution.checkpoint_owner`가 전달 위치를 정하며, fallback으로 주체가 바뀌어도 같은 관측을 새 주체의 위치로 옮긴다. provider 이름이나 문장으로 분기하지 않는다.
+- 뒤 요청에서 증명 대기 Goal이 다시 일반 일로 보이면 RFC-0387 P0-1의 회귀다. 이 수리는 관측을 생략하지 않는다. §3.1의 `Completion_authority` 전달도 유지한다.
 - System 의 Goal 순서는 (priority, created_at, id) 다. System 줄에는 priority 가 없어서, 순서가 priority 를 보여 주는 유일한 신호다. 그래서 id 만으로 정렬하지 않는다. 이 정렬은 System 렌더에서만 한다. `Goal_store.list_goals_result` 의 순서를 쓰는 다른 곳은 그대로다.
-- 이 둘로 78건 중 63건(81%)이 System 을 바꾸지 않는다. Goal 추가와 성공 기준 수정은 여전히 System 을 바꾼다. Goal 목록을 기준점으로 드는 방법(§4)은 이 층을 배포하고 다시 잰 뒤 연다.
+- 11-06 설계는 78건 중 63건(81%)의 System 변경을 없애려는 것이었다. 11-09 수리 후에는 증명 대기 전환도 System을 바꾸므로 이 수치를 현재의 절감량으로 쓰지 않는다. Goal 목록을 기준점으로 드는 방법(§4)은 별도 측정 뒤 판단한다.
 
 ## 4. 검토한 대안
 
@@ -198,8 +200,8 @@ Keeper 세션은 기준점을 runtime 마다 하나씩 든다. 앞부분을 runt
 
 - 시험: `assemble_request_context` 가 `Completion_authority` 를 System 이 아닌 블록으로 내고, 뒤 round 에도 같은 블록을 싣는다. official Start 의 System 과 carrier 에는 그 블록이 없고, Start prompt 앞과 Resume 마다 carrier span 증명과 함께 실린다. 조항이 바뀐 턴에서 범위 앞부분이 같으면 System 바이트가 같고 차이 layer 가 생긴다. 앞부분이 다르면 System 이 지금 조항을 담고 차이 layer 가 없다. 지시문이 바뀌면 System 이 바로 바뀐다.
 - 시험: native 이어가기가 재시작 뒤에도 seed checkpoint 의 기준점으로 차이 블록을 낸다. 기준점이 없는 seed 는 블록 없이 기록된 System 을 보낸다. 두 runtime 을 번갈아 쓰는 세션은 runtime 마다 자기 기준점을 받는다. 원장 위치는 그 뒤 덧붙인 조항과 제자리 수정에도 같은 조항을 돌려주고, 앞 바이트가 바뀌면 아무것도 돌려주지 않는다.
-- 시험(4층): `Verifying` 인 Goal 은 System 줄에 표시가 없고 `Goals_awaiting_proof` 블록에 id 가 있다. 블록은 뒤 round 와 resume 에도 실린다. 표시가 붙거나 떨어져도, 반박이 `updated_at` 을 바꿔도 System 바이트가 같다. 같은 priority 의 Goal 은 created_at, id 순이다.
-- 4층 배포 뒤: 같은 스크립트로 `active_goals / no` 쌍을 다시 센다. 증명 대기 표시와 순서 때문에 바뀐 쌍은 0 이어야 한다. 남은 쌍의 원인(Goal 추가, 성공 기준 수정)과 몫을 적고, §4 의 Goal 기준점을 열지 정한다.
+- 시험(4층 수리): Agent Core의 실제 HTTP 요청 세 개에서 `Verifying` Goal의 id·표시가 같은 System 관측으로 유지되고, 도구 뒤에는 그 표시를 담은 User 메시지가 없다. 새 턴의 단계 변화는 System에 반영된다. official Start/Resume와 실행 주체 fallback에서는 현재 단계가 전달되고 vendor System에 턴별 단계가 남지 않는다. 같은 priority의 Goal은 created_at, id 순이다.
+- 수리 배포 뒤에는 동일 기준으로 단계 표시 반복 응답과 System 변경 비용을 각각 잰다. 소스·합성 API 비교 결과를 운영 Keeper의 회복이나 캐시 절감 증명으로 바꾸지 않는다.
 - 배포 뒤: §1.1 과 같은 방법으로 "앞부분 그대로, System 바뀜" 쌍과 그 몫을 다시 센다. 기대값은 `completion_authority` 쌍 0, 조항 추가로 바뀐 `keeper_instructions` 쌍 0 이다. 지시문 수정과 배포로 바뀐 쌍은 남는다.
 
 ## 7. 층
@@ -207,5 +209,5 @@ Keeper 세션은 기준점을 runtime 마다 하나씩 든다. 앞부분을 runt
 1. 이 문서.
 2. §3.1 `Completion_authority` 를 끝 문맥 블록으로.
 3. §3.2 조항 기준점과 `Constitution_amendments`. 예상 앞부분은 forecast 의 `carry` 로 구한다.
-4. §3.3 증명 대기 표시를 `Goals_awaiting_proof` 블록으로 옮기고, System 의 Goal 순서를 (priority, created_at, id) 로 한다. 3층을 배포하고 잰 결과(§3.3)로 연다.
+4. §3.3 System의 Goal 순서를 (priority, created_at, id)로 한다. 11-06에는 증명 대기를 끝 문맥으로 옮겼고, 11-09 수리에서는 Agent Core의 System 관측과 official의 턴별 입력으로 나눈다.
 5. §4 의 Goal 기준점. 4층을 배포하고 다시 잰 뒤 연다.

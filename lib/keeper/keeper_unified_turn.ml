@@ -102,7 +102,10 @@ let execution_boundary_of_turn_failure error =
 
 type turn_success =
   | Turn_completed of { meta : keeper_meta }
-  | Turn_checkpointed of { meta : keeper_meta }
+  | Turn_checkpointed of
+      { meta : keeper_meta
+      ; followup : Keeper_agent_result.checkpoint_followup
+      }
   | Turn_input_required of keeper_meta
   | Turn_cancelled of keeper_meta
   | Turn_skipped of keeper_meta
@@ -112,16 +115,16 @@ type turn_success =
       ; deferred_runtime_lane : Keeper_turn_driver.deferred_runtime_lane option
       }
 
-let turn_success_of_stop_reason ~meta = function
+let turn_success_of_stop_reason ~meta ~followup = function
   | Runtime_agent.Completed _ -> Turn_completed { meta }
   | Runtime_agent.Yielded_to_durable_stimulus _ ->
-    Turn_checkpointed { meta }
+    Turn_checkpointed { meta; followup }
   | Runtime_agent.InputRequired _ -> Turn_input_required meta
 ;;
 
 (* RFC-0377 admits a whole conversation backlog as one wake: intake batches
    one connector conversation's pending rows together with every other ready
-   payload (at most one HITL resolution), so a batch is not connector rows
+   payload, including a compatible HITL cohort, so a batch is not connector rows
    only. The batch continues on one channel only when every member has a routable
    channel and all of them are the same conversation; one channel-less member
    ([Board_signal], [Bootstrap], ...) routes the batch nowhere. The chosen
@@ -168,7 +171,7 @@ let run_keeper_cycle
       ~(turn_decision : Keeper_world_observation.keeper_cycle_decision)
       ?shared_context
       ?event_bus
-      ?hitl_resolution
+      ?hitl_resolutions
       ()
   : (turn_success, turn_failure) result
   =
@@ -770,7 +773,7 @@ let run_keeper_cycle
                            ; approval_admission = Keeper_approval_origin.Admitted
                                (Keeper_heartbeat_source_batch.selections
                                   (Keeper_heartbeat_source_batch.sources turn_input))
-                           ; hitl_resolution
+                           ; hitl_resolutions
                            ; config
                            ; drain_turn_event_bus
                            ; event_bus
@@ -1277,6 +1280,7 @@ let run_keeper_cycle
                      Ok
                        (turn_success_of_stop_reason
                           ~meta:updated_meta
+                          ~followup:result.Keeper_agent_run.checkpoint_followup
                           result.Keeper_agent_run.stop_reason),
                      turn_state))))
                      )

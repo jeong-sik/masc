@@ -2,7 +2,10 @@
 
 type cycle_outcome =
   | Completed of { meta : Keeper_meta_contract.keeper_meta }
-  | Checkpointed of { meta : Keeper_meta_contract.keeper_meta }
+  | Checkpointed of
+      { meta : Keeper_meta_contract.keeper_meta
+      ; followup : Keeper_agent_result.checkpoint_followup
+      }
   | Input_required of Keeper_meta_contract.keeper_meta
   | Cancelled of Keeper_meta_contract.keeper_meta
   | Skipped of Keeper_meta_contract.keeper_meta
@@ -38,7 +41,7 @@ val run_keeper_cycle
   -> ?deferred_runtime_lane:Keeper_turn_driver.deferred_runtime_lane
   -> ?on_deferred_runtime_consumed:(unit -> unit)
   -> ?event_bus:Agent_core.Event_bus.t
-  -> ?hitl_resolution:Keeper_event_queue.hitl_resolution
+  -> ?hitl_resolutions:Keeper_hitl_resolution_batch.t
   -> ctx:_ Keeper_types_profile.context
   -> meta_after_triage:Keeper_meta_contract.keeper_meta
   -> stop:bool Atomic.t

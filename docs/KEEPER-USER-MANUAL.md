@@ -19,6 +19,11 @@ The typed agent engine is built from `packages/agent_core` as the internal
 `masc.agent_core` library. It has no external opam pin or separately released
 SDK version; the MASC commit and build identity are the source of truth.
 
+### Memory processing and recovery
+
+For Librarian waits, original-result recovery and the limits of `/memory sync`,
+see [Keeper memory recovery](guides/KEEPER-MEMORY-RECOVERY.md).
+
 ### Checkpoints when the model changes
 
 A resumed Keeper retains its original conversation, reasoning provenance and
@@ -864,6 +869,12 @@ tool. `detailed=true` includes Keeper summaries; `total`, `limit` and `truncated
 describe the returned roster's coverage. A listed Keeper is not proof that it
 has accepted work. Submit through `masc_keeper_delegate` and follow the original
 target and operation ID for the result.
+
+For a direct request, MASC also tells the receiving model who sent the original
+operation. A registered Keeper stays distinct from an unattributed
+`local_request`; the latter is not proof of operator identity. This source
+observation remains bound to that operation through tool use and host resume
+cues. It grants neither operator authority nor Task ownership.
 
 Open a Keeper's Turn Inspector and select a turn, then **입력과 실행**
 (input and execution). The view uses the complete `turn_ref` — trace and

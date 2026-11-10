@@ -309,7 +309,14 @@ let test_unknown_names_never_register_or_cache_empty_history () =
     Alcotest.(check int) "no registry entries" before_registry
       (Keeper_registry.all ~base_path:config.base_path () |> List.length);
     let name = "unknown-history-1" in
+    (match Chat_history.keeper_chat_initial_reply_json config name with
+     | Error Server_keeper_chat_history_read.Unknown_keeper -> ()
+     | Error (Server_keeper_chat_history_read.History_unavailable _) | Ok _ ->
+       Alcotest.fail "initial reply admitted an unknown Keeper");
     write_lane ~base_dir:config.base_path ~keeper_name:name [ row ~content:"retained" (`At 1.) ];
+    (match Chat_history.keeper_chat_initial_reply_json config name with
+     | Ok (`List []) -> ()
+     | Ok _ | Error _ -> Alcotest.fail "retained direct history lost read authority");
     let status, body = get_history state name in
     Alcotest.(check int) "later retained history remains readable without registration" 200 status;
     Alcotest.(check (list string)) "no negative empty cache" [ "retained" ]

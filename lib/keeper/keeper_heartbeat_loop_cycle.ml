@@ -36,7 +36,10 @@ module Observations = Keeper_heartbeat_loop_observations
 
 type cycle_outcome =
   | Completed of { meta : keeper_meta }
-  | Checkpointed of { meta : keeper_meta }
+  | Checkpointed of
+      { meta : keeper_meta
+      ; followup : Keeper_agent_result.checkpoint_followup
+      }
   | Input_required of keeper_meta
   | Cancelled of keeper_meta
   | Skipped of keeper_meta
@@ -87,7 +90,7 @@ let run_keeper_cycle_admitted
       ?deferred_runtime_lane
       ?on_deferred_runtime_consumed
       ?event_bus
-      ?hitl_resolution
+      ?hitl_resolutions
       ~ctx
       ~meta_after_triage
       ~stop
@@ -109,7 +112,7 @@ let run_keeper_cycle_admitted
         ~publication_recovery_provider:ctx.publication_recovery_provider
         ~observation:obs
         ~turn_input
-        ?hitl_resolution
+        ?hitl_resolutions
         (* RFC-0315: pass the whole decision, not just its channel — the
            prompt renders the verdict reasons so the turn knows why it woke. *)
         ~turn_decision
@@ -187,9 +190,9 @@ let run_keeper_cycle_admitted
   | Ok (Keeper_unified_turn.Turn_completed { meta }) ->
     record_pulse Keeper_turn_pulse.Turn_ok;
     Completed { meta }
-  | Ok (Keeper_unified_turn.Turn_checkpointed { meta }) ->
+  | Ok (Keeper_unified_turn.Turn_checkpointed { meta; followup }) ->
     record_pulse Keeper_turn_pulse.Turn_ok;
-    Checkpointed { meta }
+    Checkpointed { meta; followup }
   | Ok (Keeper_unified_turn.Turn_input_required updated) ->
     record_pulse Keeper_turn_pulse.Turn_ok;
     Input_required updated
@@ -205,7 +208,7 @@ let run_keeper_cycle
       ?deferred_runtime_lane
       ?on_deferred_runtime_consumed
       ?event_bus
-      ?hitl_resolution
+      ?hitl_resolutions
       ~ctx
       ~meta_after_triage
       ~stop
@@ -234,6 +237,6 @@ let run_keeper_cycle
     ~shared_context
     ~turn_input
     ?event_bus
-    ?hitl_resolution
+    ?hitl_resolutions
     ()
 ;;

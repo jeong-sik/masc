@@ -19,20 +19,11 @@ type run_listing =
   ; failures : run_load_failure list
   }
 
-type run_window =
-  | Last_n_runs of int
-  | Session of string
-  | Rolling_seconds of float
-
 let sessions_dir store = Filename.concat store.root "sessions"
 let session_dir store session_id = Filename.concat (sessions_dir store) session_id
 
 let session_path store session_id =
   Filename.concat (session_dir store session_id) "session.json"
-;;
-
-let events_path store session_id =
-  Filename.concat (session_dir store session_id) "events.jsonl"
 ;;
 
 let snapshots_dir store session_id =
@@ -195,141 +186,4 @@ let list_runs store =
              listing.failures
        }
        : run_listing)
-;;
-
-let take n xs =
-  if n <= 0
-  then []
-  else (
-    let rec loop remaining acc = function
-      | [] -> List.rev acc
-      | _ when remaining <= 0 -> List.rev acc
-      | x :: rest -> loop (remaining - 1) (x :: acc) rest
-    in
-    loop n [] xs)
-;;
-
-let select_from_listing store (listing : run_listing) = function
-  | Last_n_runs n -> listing.runs |> List.rev |> take n |> sort_runs, []
-  | Session session_id ->
-    (match
-       List.find_opt
-         (fun run -> String.equal run.session.session_id session_id)
-         listing.runs
-     with
-     | Some run -> [ run ], []
-     | None ->
-       if
-         List.exists
-           (fun (failure : run_load_failure) ->
-              String.equal failure.session_id session_id)
-           listing.failures
-       then [], []
-       else
-         ( []
-         , [ run_failure
-               store
-               session_id
-               (Printf.sprintf "session %S not found in runtime store" session_id)
-           ] ))
-  | Rolling_seconds seconds ->
-    if seconds <= 0.0
-    then [], []
-    else (
-      match List.rev listing.runs with
-      | [] -> [], []
-      | newest :: _ ->
-        let lower_bound = newest.session.updated_at -. seconds in
-        List.filter (fun run -> run.session.updated_at >= lower_bound) listing.runs, [])
-;;
-
-module String_set = Set.Make (String)
-
-let dedupe_runs runs =
-  let _, rev =
-    List.fold_left
-      (fun (seen, acc) run ->
-         let session_id = run.session.session_id in
-         if String_set.mem session_id seen
-         then seen, acc
-         else String_set.add session_id seen, run :: acc)
-      (String_set.empty, [])
-      runs
-  in
-  List.rev rev |> sort_runs
-;;
-
-let dedupe_failures failures =
-  let _, rev =
-    List.fold_left
-      (fun (seen, acc) (failure : run_load_failure) ->
-         let key = failure.session_id ^ "\x00" ^ failure.path ^ "\x00" ^ failure.detail in
-         if String_set.mem key seen
-         then seen, acc
-         else String_set.add key seen, failure :: acc)
-      (String_set.empty, [])
-      failures
-  in
-  List.rev rev
-  |> List.sort (fun (left : run_load_failure) (right : run_load_failure) ->
-    match String.compare left.session_id right.session_id with
-    | 0 -> String.compare left.detail right.detail
-    | order -> order)
-;;
-
-let select_run_windows store windows =
-  let* listing = list_runs store in
-  let selected, window_failures =
-    List.fold_left
-      (fun (runs, failures) window ->
-         let window_runs, new_failures = select_from_listing store listing window in
-         window_runs @ runs, new_failures @ failures)
-      ([], [])
-      windows
-  in
-  Ok
-    ({ runs = dedupe_runs selected
-     ; failures = dedupe_failures (listing.failures @ window_failures)
-     }
-     : run_listing)
-;;
-
-let append_event store session_id (event : event) =
-  let* () = ensure_tree store session_id in
-  let path = events_path store session_id in
-  let line = (event |> event_to_yojson |> Yojson.Safe.to_string) ^ "\n" in
-  Fs_result.append_file path line
-;;
-
-let read_events store session_id ?after_seq () =
-  let path = events_path store session_id in
-  if not (Sys.file_exists path)
-  then Ok []
-  else (
-    let parse_event_line line =
-      try
-        event_of_yojson (Yojson.Safe.from_string line)
-        |> Result.map_error (fun detail ->
-          Error.Serialization (JsonParseError { detail }))
-      with
-      | Yojson.Json_error detail ->
-        Error (Error.Serialization (JsonParseError { detail }))
-    in
-    let* raw = load_text path in
-    raw
-    |> String.split_on_char '\n'
-    |> List.map String.trim
-    |> Util.filter_non_empty
-    |> List.fold_left
-         (fun acc line ->
-            let* rev = acc in
-            let* event = parse_event_line line in
-            let should_include =
-              match after_seq with
-              | Some min_seq -> event.seq > min_seq
-              | None -> true
-            in
-            Ok (if should_include then event :: rev else rev))
-         (Ok [])
-    |> Result.map List.rev)
 ;;

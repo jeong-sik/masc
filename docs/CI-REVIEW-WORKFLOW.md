@@ -205,7 +205,10 @@ reason and falls back to building the alias inside its budget.
 To check this runner boundary without an OCaml build, run
 `python3 -m unittest discover -s scripts/ci/tests -p test_targeted_stanza_isolation.py -v`.
 Its shell-runner fixture substitutes the build command; it is not a product
-test result. Keep this focused CI self-check separate from product behavior suites.
+test result. Keep this focused CI self-check separate from product behavior
+suites. The RC nightly cut gate has the same shape of suite: run
+`python3 -m unittest discover -s scripts/ci/tests -p test_nightly_cut_gate.py -v`;
+its stub `gh` serves fixture responses and no cut is recorded.
 
 Reading a run's own log needs a writable cache directory. `gh run view RUN --log`
 writes under `$HOME/.cache/gh`, so on a lane whose home is read-only it fails with

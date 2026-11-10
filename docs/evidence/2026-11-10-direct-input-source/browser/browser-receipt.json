@@ -1,0 +1,107 @@
+{
+  "observed_at": "2026-11-09T15:52:39.066055+00:00",
+  "task_space": {
+    "id": 44,
+    "name": "masc-26049-input-source-evidence",
+    "page": "p1",
+    "previous_id_42": "task space not found; no finish/claim attempted on other existing spaces"
+  },
+  "source_worktree": "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source",
+  "source_head_at_receipt": "0480843d4793d5379f9df916534893fea2a33a8f",
+  "source_binding": "uncommitted worktree source bytes bound by before/after/loaded manifests; commit alone does not identify this UI delta",
+  "backend": "synthetic HTTP fixture only; no real MASC, Keeper, Board, provider or authentication operations",
+  "url": "http://127.0.0.1:5195/",
+  "user_agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36",
+  "viewport": {
+    "width": 1548,
+    "height": 990,
+    "devicePixelRatio": 2
+  },
+  "observed_source_legend": {
+    "label": "요청 출처",
+    "bytes": "113B",
+    "bounds": {
+      "x": 898.0546875,
+      "y": 309.25,
+      "width": 302.5,
+      "height": 17.8203125,
+      "top": 309.25,
+      "right": 1200.5546875,
+      "bottom": 327.0703125,
+      "left": 898.0546875
+    }
+  },
+  "expected_source_bytes": 113,
+  "expected_total_content_bytes": 1232,
+  "expected_wire_bytes": 1343,
+  "decoded_response_contains": {
+    "block": "direct_input_source",
+    "input_component": "prompt.direct_input_source"
+  },
+  "browser_errors": [],
+  "api_calls": [
+    {
+      "path": "/api/v1/dashboard/dev-token",
+      "status": 404
+    },
+    {
+      "path": "/api/v1/keepers/synthetic-peer-source-26049/turn-records?limit=24",
+      "status": 200
+    }
+  ],
+  "resource_origins": [
+    "http://127.0.0.1:5195"
+  ],
+  "source_files_changed_during_capture": [],
+  "screenshot": {
+    "path": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/issue-campaign-20261109/26049-peer-source/browser/memory-inspector-source-raw.png",
+    "sha256": "1bb090b68aa5dda154d7b84c37e839c2da2ab069b3644f3b2f7b1096d18ddac2",
+    "width": 1548,
+    "height": 990,
+    "image_modified": false,
+    "visually_inspected": true
+  },
+  "server_owner": {
+    "pid": 55303,
+    "port": 5195,
+    "url": "http://127.0.0.1:5195/",
+    "entry": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/issue-campaign-20261109/26049-peer-source/browser/vite-server.mjs",
+    "started_at": "2026-11-09T15:50:33.407Z"
+  },
+  "limits": [
+    "Only the actual individual MemoryInspector component with imported dashboard CSS was rendered, not the entire production dashboard.",
+    "The strict HTTP envelope, TurnRecord contents, source facts and byte observations are synthetic; this is not backend producer, model, installed-runtime or deployment evidence.",
+    "The visible composition label comes from input_components; blocks direct_input_source is jointly accepted by the actual decoder.",
+    "Initial invalid fixture was rejected and retained in attempt1-* artifacts before correcting fixture-only data."
+  ],
+  "cleanup": {
+    "owned_server": {
+      "pid": 55303,
+      "stopped": true,
+      "owned_exec_session_exit_code": 143,
+      "port_5195_listener_present_after_stop": false
+    },
+    "initial_fixture_server": {
+      "pid": 24089,
+      "stopped_before_corrected_payload_reload": true,
+      "owned_exec_session_exit_code": 143
+    },
+    "task_space_44": {
+      "id": 44,
+      "name": "masc-26049-input-source-evidence",
+      "finished_at": "2026-11-09T15:52:55.599Z",
+      "result": {
+        "spaceId": 44,
+        "closedSpace": true,
+        "keptManagedLabels": [],
+        "closedManagedLabels": [
+          "p1"
+        ],
+        "preservedUnmanagedCount": 0
+      },
+      "keptPages": []
+    },
+    "previous_task_space_42": "was absent; never finished or claimed"
+  },
+  "completed_at": "2026-11-09T15:53:48.126761+00:00"
+}

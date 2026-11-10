@@ -10,6 +10,7 @@ type keeper_route =
   | Github_identity
   | Board_attention_quarantines
   | Chat_history_page
+  | Chat_initial_reply
   | Chat_history
   | Checkpoints
   | File_changes

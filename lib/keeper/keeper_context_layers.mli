@@ -16,6 +16,10 @@ type layer_id =
   | Active_goals
       (** Goal ids, titles and criteria. Changes when a Goal is created,
           edited or closed. *)
+  | Direct_input_source
+      (** The original admitted operation id and typed input source.
+          Promoted from its producer-issued partition to a separate immutable
+          System observation after [Active_goals]; never an authority grant. *)
   | Goal_observations
       (** Each Active Goal's latest review and measurement and this keeper's
           held-Task link marker. These change without a Goal event, so they
@@ -23,8 +27,8 @@ type layer_id =
           (docs/rfc/RFC-goal-observations-leave-the-system-prompt.md). *)
   | Goals_awaiting_proof
       (** The ids of the Goals in [Verifying] with the proof-pending mark.
-          Changes on a completion request, a refuted proof or a reopen, so it
-          stays out of the System as well (RFC-0491 §3.3). *)
+          Agent Core carries this turn's state in System; official clients
+          receive it through their turn-scoped input (RFC-0491 §3.3). *)
   | Current_task
   | Approval_authority
   | Connected_surfaces

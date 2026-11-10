@@ -65,7 +65,8 @@ val close : t -> unit
 
 val close_after : t -> (unit -> 'a) -> 'a
 (** [close_after t f] runs [f] and {!close}s [t] when [f] returns. When [f]
-    raises, [t] stays open and the exception goes on. *)
+    raises, [t] stays open and the exception goes on. Cancellation is such an
+    exception too: a cancelled [f] also leaves [t] open. *)
 
 val is_closed : t -> bool
 

@@ -132,15 +132,16 @@ val goal_candle_refresh_key : string
 val keeper_navigation_hints : string
 (** Keys while the Keeper navigator opened with Left holds focus. *)
 
-val footer_hints_planning_goal_list : has_rows:bool -> string
+val footer_hints_planning_goal_list : lang:Masc_tui_types.ui_language -> has_rows:bool -> string
 (** The Goal list offers a direct route to its selected Candle record.
     [has_rows] is whether the list on screen holds a Goal: with none, the
     keys that read the Goal under the cursor are left out. *)
 
-val footer_hints_planning_goal_detail : string
+val footer_hints_planning_goal_detail : lang:Masc_tui_types.ui_language -> string
 (** The Goal detail has a separate Candle read key: its [r] may mean Resume. *)
 
 val footer_hints :
+  ?lang:Masc_tui_types.ui_language ->
   ?detail_open:bool ->
   ?has_rows:bool ->
   ?has_reading:bool ->
@@ -168,7 +169,9 @@ val footer_hints :
 val footer_hints_tools : pane:Masc_tui_types.tools_pane -> string
 (** Tools' bracket keys select retained runs in Available and Keepers in other panes. *)
 
-val footer_hints_metrics : telemetry:bool -> string
+val footer_hints_metrics :
+  lang:Masc_tui_types.ui_language ->
+  section:Masc_tui_types.usage_section -> telemetry:bool -> string
 (** Usage footer, showing only the keys for the visible Usage or Telemetry
     reading. *)
 
@@ -178,11 +181,14 @@ type ask_supply =
   | Asks_unselected  (** questions wait and the cursor is on none of them *)
   | Ask_selected  (** the cursor is on a question *)
 
-(** The browsing footer follows three facts: [approvals] says the queue has a
+(** The browsing footer follows these facts: [approvals] says the queue has a
     row, [asks] what the ask list offers, and [source] that a question source
-    is on hand to read, the last answer's included. *)
+    is on hand to read, the last answer's included. [last_answer] exposes the
+    immutable receipt reader, independently of the current question. *)
 type approvals_footer =
-  | Approval_browsing of { approvals : bool; asks : ask_supply; source : bool }
+  | Approval_browsing of {
+      approvals : bool; asks : ask_supply; source : bool; last_answer : bool;
+    }
   | Approval_writing
   | Approval_armed
   | Approval_answering of { has_choices : bool; takes_text : bool }
@@ -211,22 +217,29 @@ val footer_hints_config : lang:Masc_tui_types.ui_language -> pane:Masc_tui_types
 (** Config bindings available on the active pane. The surface-wide help keeps
     the union, with pane restrictions explained by each binding. *)
 
-val footer_hints_board_compose_writing : reply:bool -> string
+val footer_hints_board_compose_writing : lang:Masc_tui_types.ui_language -> reply:bool -> string
 (** The Board draft while it takes letters: a literal "type to write" and the
     keys that are not letters. [reply] drops the attach key a comment has no
     wire for. *)
 
-val footer_hints_goal_drop_reason : string
+val footer_hints_goal_drop_reason : lang:Masc_tui_types.ui_language -> string
 (** A Goal drop reason while it takes letters: a literal "type why" and the
     keys that are not letters. *)
 
-val footer_hints_board_attach_input : string
+val footer_hints_board_attach_input : lang:Masc_tui_types.ui_language -> string
 (** The Board attach path input while it takes letters: a literal "type the
     file path" and its two keys. The path itself is drawn on the pane. *)
 
-val footer_hints_board_compose_armed : reply:bool -> string
-(** The Board draft's send menu after Esc. [reply] drops the hearth cycle a
-    comment has no use for. *)
+type board_compose_menu_hints = {
+  choices : string;
+  hints : string;
+}
+
+val board_compose_menu_hints :
+  lang:Masc_tui_types.ui_language -> reply:bool -> board_compose_menu_hints
+(** The Board draft's send menu after Esc. [choices] keeps send, discard and
+    continue writing together; [hints] holds the editor and, for a new post,
+    the hearth cycle. Both come from the actual binding records. *)
 
 type approval_value_hint = No_value_reading | Readable_values | Byte_values
 val footer_hints_approval_detail : value_hint:approval_value_hint -> string
@@ -265,7 +278,7 @@ val footer_hints_prompt_assets : lang:Masc_tui_types.ui_language -> string
 val work_tasks_bindings : binding list
 (** Work's task list while it owns j/k. *)
 
-val footer_hints_work_tasks : string
+val footer_hints_work_tasks : lang:Masc_tui_types.ui_language -> string
 (** {!work_tasks_bindings} as a footer. *)
 
 (** The step Esc and Left take next on the Code surface. *)
@@ -338,6 +351,7 @@ val footer_hints_resources : detail_focus:bool -> string
     other keys still project from {!for_surface}. *)
 
 val footer_hints_board_read :
+  lang:Masc_tui_types.ui_language ->
   focus_posts:bool ->
   focus_comments:bool ->
   full_history:bool ->
@@ -355,7 +369,7 @@ val footer_hints_board_read :
     not drawn. The vote, reply and copy keys are the Board surface list's own
     bindings. *)
 
-val footer_hints_board_pending : string
+val footer_hints_board_pending : lang:Masc_tui_types.ui_language -> string
 (** Board read controls while the post is loading, missing, or failed.
     Projects the live [r], [Left / Esc], and [Tab] bindings. *)
 
@@ -387,7 +401,7 @@ val footer_hints_git_changes : string
 val footer_hints_git_diff : string
 (** The Git diff view for a changed file in repository changes. *)
 
-val footer_hints_memory_facts : cols:int -> has_rows:bool -> string
+val footer_hints_memory_facts : lang:Masc_tui_types.ui_language -> cols:int -> has_rows:bool -> string
 (** The Memory fact browser opened by Enter on a health row: row movement,
     the category cycle, search, and the way back to the table. Omits
     [d:Category pane] on narrow frames where the Category rail does not fit,
@@ -405,7 +419,7 @@ val bindings_memory_fact_detail : binding list
     the browser row has none of; [?] files them under Memory with the screen
     named. *)
 
-val memory_fact_detail_hints : string
+val memory_fact_detail_hints : lang:Masc_tui_types.ui_language -> string
 (** The keys the reading's footer row leads with, [key:label] joined by two
     spaces. Projects {!bindings_memory_fact_detail}, so the footer and the
     help sheet cannot name different keys. The renderer leads the row with the

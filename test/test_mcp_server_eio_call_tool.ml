@@ -987,9 +987,8 @@ let with_runtime_mcp_board_call
       Call_log.reset_for_testing ();
       Masc.Board_dispatch.reset_for_test ();
       Masc.Board.reset_global_for_test ()) @@ fun () ->
-    (match Masc.Board_dispatch.init_jsonl ~base_path
-        ~recipient_lookup:Masc_board_handlers.Recipient_lookup.none_declared () with
-     | Ok () -> () | Error detail -> fail detail);
+    Result.get_ok (Masc.Board_dispatch.init_jsonl ~base_path
+      ~recipient_lookup:Masc_board_handlers.Recipient_lookup.none_declared ());
     ignore (Masc.Keeper_registry.register_offline ~base_path keeper_name meta);
     Masc.Keeper_registry.mark_turn_started
       ~observation_token:(Masc.Keeper_turn_observation_token.fresh ()) ~base_path

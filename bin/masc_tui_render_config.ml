@@ -1721,7 +1721,7 @@ let render_runtime_config_status state =
     ~surface_key:"config-status"
     ~title:(config_pane_title ~cols
       ~name:(screen_title (ui_text state
-        ~ko:" MASC 시스템 / 상태" ~en:" MASC System / Status")) state)
+        ~ko:" 설정 상태" ~en:" Settings status")) state)
     ~hints:(ui_text state
       ~ko:"v/Esc:설정 원문  j/k:스크롤  PgUp/PgDn:페이지  Home/End:처음/끝  r:새로고침"
       ~en:"v/Esc:settings source  j/k:scroll  PgUp/PgDn:page  Home/End:top/end  r:reload")

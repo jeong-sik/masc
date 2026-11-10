@@ -7,6 +7,7 @@ type keeper_route =
   | Github_identity
   | Board_attention_quarantines
   | Chat_history_page
+  | Chat_initial_reply
   | Chat_history
   | Checkpoints
   | File_changes
@@ -51,6 +52,7 @@ let suffix = function
   | Github_identity -> Types.keeper_suffix_github_identity
   | Board_attention_quarantines -> Types.keeper_suffix_board_attention_quarantines
   | Chat_history_page -> "/chat/history/page"
+  | Chat_initial_reply -> "/chat/history/initial-reply"
   | Chat_history -> "/chat/history"
   | Checkpoints -> Types.keeper_suffix_checkpoints
   | File_changes -> Types.keeper_suffix_file_changes
@@ -147,6 +149,7 @@ let permission ?(include_thinking = false) = function
      | Tool_result -> Some Masc_domain.CanAdmin
      | Board_attention_quarantines
      | Chat_history_page
+     | Chat_initial_reply
      | Chat_history
      | Runtime_trace
      | Config

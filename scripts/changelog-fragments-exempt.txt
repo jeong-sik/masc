@@ -1,0 +1,5 @@
+# Pull requests exempt from the strict missing-fragment gate.
+# One PR number per line; '#' starts a comment. A number earns its place
+# only when the PR's own content IS changelog work (e.g. a fragment
+# backfill PR whose payload is another PR's fragment).
+50747

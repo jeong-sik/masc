@@ -1,0 +1,35 @@
+ 운영  작업  ▸키퍼  기능·플러그인  워크스페이스  시스템
+┌──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│ MASC MEMORY - FACT DETAIL                                                                                            │
+├──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│  Source-Bound Fact Detail                                                                                            │
+│    원본 파일은 요청과 현재 관측을 구분한다고 기록합니다.                                                             │
+│    Keeper:      sourcereader                                                                                         │
+│    Bound Path:  <user>/me/workspace/yousleepwhen/masc/artifacts/surface-minimalism-20261109/private-installed-│
+│                 baseline-w122ltws/workspace/fixture-sources/reading-contract.md                                      │
+│    File SHA:    sha256:0044f31f4296ad91eafd570b1527e7b3f9bcd4114ed3a51e8f0164bae35b1df7 · First Seen: 3m             │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+  ACTION NEEDED 1 · keeper_memory_execution:addon_unattached  j/k:scroll  PgUp/PgDn:page  Esc:close  …?
+ 일정 정보가 오래됐을 수 있음
+ › to quietreader   (i to write)

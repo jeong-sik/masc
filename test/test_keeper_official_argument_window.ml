@@ -60,6 +60,7 @@ let reader base_path =
       | Tool_result.Failed class_ -> Tool_result.make_err ~tool_name:schema.name ~class_
           ~start_time:(Tool_timing.start ()) execution.raw_output
       | Tool_result.Deferred () -> fail "the canonical reader cannot defer")
+    |> Result.get_ok
 
 let source ?(seed=Some raw_seed)
     ?(replay_prefix=Keeper_replay_prefix.unchanged) ?(turn_start=turn_start) base_path =

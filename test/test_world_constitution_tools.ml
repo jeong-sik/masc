@@ -668,12 +668,75 @@ let test_isolated_lines_are_reported_to_the_caller () =
           Alcotest.(check bool) "the caller is told which line" true
             (List.assoc_opt "line" row = Some (`Int 2));
           Alcotest.(check bool) "the caller is told whose" true
-            (List.assoc_opt "subject" row = Some (`String "codex-operator"))
+            (List.assoc_opt "subject" row = Some (`String "codex-operator"));
+          Alcotest.(check bool) "the caller is told which article is withheld" true
+            (List.assoc_opt "article_ids" row =
+               Some (`List [ `String (Types.Article_id.to_string outsider.Types.id) ]))
         | Some other ->
           Alcotest.failf "unexpected shape %s" (Yojson.Safe.to_string other)
         | None ->
           Alcotest.failf "the isolated line was not reported: %s" (output execution))
       | _ -> Alcotest.failf "unexpected output %s" (output execution))
+
+let test_a_retired_remover_does_not_reactivate_a_withdrawn_norm () =
+  with_world (fun base_path ->
+      let config = Masc.Workspace.default_config base_path in
+      let withdrawn =
+        write ~base_path (`Assoc [ "text", `String "a norm withdrawn by a former keeper" ]) in
+      let unrelated =
+        write ~base_path (`Assoc [ "text", `String "an unrelated norm" ]) in
+      let withdrawn_id = article_id_of withdrawn in
+      let unrelated_id = article_id_of unrelated in
+      Alcotest.(check bool) "the original removal succeeded" false
+        (failed (remove ~base_path ~reason:"the board withdrew it" withdrawn_id));
+      let original_entries = entries ~base_path in
+      let ledger_bytes () =
+        In_channel.with_open_bin (Store.ledger_path ~base_path) In_channel.input_all in
+      let before_retirement = ledger_bytes () in
+      Masc.Keeper_registry.For_testing.unregister ~base_path "critic";
+      Sys.remove (Masc.Keeper_types_profile.keeper_meta_path config "critic");
+      let inspect execution articles_held =
+        Alcotest.(check bool) "the rostered operation succeeds" false (failed execution);
+        match Yojson.Safe.from_string (output execution) with
+        | `Assoc fields ->
+            Alcotest.(check bool) "only current norms are counted" true
+              (List.assoc_opt "articles_held" fields = Some (`Int articles_held));
+            (match List.assoc_opt "isolated_ledger_lines" fields with
+             | Some (`List [ `Assoc row ]) ->
+                 Alcotest.(check bool) "the removal line and former keeper remain visible" true
+                   (List.assoc_opt "line" row = Some (`Int 3)
+                    && List.assoc_opt "subject" row = Some (`String "critic"));
+                 Alcotest.(check bool) "the affected id remains visible" true
+                   (List.assoc_opt "article_ids" row = Some (`List [ `String withdrawn_id ]))
+             | Some other -> Alcotest.failf "unexpected isolation %s" (Yojson.Safe.to_string other)
+             | None -> Alcotest.fail "the unresolved removal was not reported");
+            fields
+        | _ -> Alcotest.failf "unexpected output %s" (output execution)
+      in
+      let read = inspect (Tools.read_with_outcome ~config) 1 in
+      Alcotest.(check bool) "the read retains the original addition and removal history" true
+        (List.assoc_opt "entries" read =
+           Some (`List (List.map Masc.World_constitution_wire.entry_to_json original_entries)));
+      Alcotest.(check string) "quarantine does not rewrite the ledger"
+        before_retirement (ledger_bytes ());
+      Alcotest.(check (option string)) "the withheld id cannot be removed as a current norm"
+        (Some "policy_rejection")
+        (failure_class (remove ~base_path ~keeper:"lane-smith" withdrawn_id));
+      Alcotest.(check (option string)) "the withheld id cannot authorize a replacement"
+        (Some "policy_rejection")
+        (failure_class
+           (write ~base_path
+              (`Assoc [ "text", `String "short";
+                        "replaces", `List [ `String withdrawn_id ] ])));
+      Alcotest.(check string) "neither refused mutation appends a retirement"
+        before_retirement (ledger_bytes ());
+      let (_ : (string * Yojson.Safe.t) list) =
+        inspect (write ~base_path (`Assoc [ "text", `String "a newly adopted norm" ])) 2 in
+      let (_ : (string * Yojson.Safe.t) list) =
+        inspect (remove ~base_path ~keeper:"lane-smith" unrelated_id) 1 in
+      let (_ : (string * Yojson.Safe.t) list) =
+        inspect (Tools.read_with_outcome ~config) 1 in
+      ())
 
 let test_a_retained_author_survives_registry_loss_and_bad_metadata () =
   with_world (fun base_path ->
@@ -714,6 +777,8 @@ let () =
             `Quick test_an_unreadable_ledger_is_not_rendered_as_no_articles;
           Alcotest.test_case "a retained author survives unavailable runtime metadata"
             `Quick test_a_retained_author_survives_registry_loss_and_bad_metadata;
+          Alcotest.test_case "a retired remover does not reactivate a withdrawn norm"
+            `Quick test_a_retired_remover_does_not_reactivate_a_withdrawn_norm;
           Alcotest.test_case "an unreadable roster refuses the read"
             `Quick test_an_unreadable_roster_refuses_the_read;
         ] );

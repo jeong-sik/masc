@@ -2471,6 +2471,7 @@ module Argument_start_fixture = struct
         | Tool_result.Failed class_ -> Tool_result.make_err ~tool_name:schema.name ~class_
             ~start_time:(Tool_timing.start ()) execution.raw_output
         | Tool_result.Deferred () -> fail "canonical reader cannot defer")
+    |> Result.get_ok
   let envelopes prompt =
     String.split_on_char '\n' prompt |> List.filter_map (fun line ->
       try match Yojson.Safe.from_string line with

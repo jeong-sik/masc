@@ -1,5 +1,6 @@
 module Capture = Keeper_librarian_admission_capture
 module Parts = Keeper_librarian_admission_parts
+module Closure = Keeper_librarian_admission_closure
 module Owner = Lane_addon_tool_request_owner
 module Store = Lane_addon_store
 module Runtime = Lane_addon_runtime
@@ -17,8 +18,22 @@ let discover_parts ~store ~parts_by_owner owner =
     result
 let admission_keeper ~store ~parts_by_owner ~base_path ~keepers_dir original =
   let* owner=Capture.observe_record_owner ~base_path ~keepers_dir original in
-  let* inventory=discover_parts ~store ~parts_by_owner owner in
-  let* capture=Capture.restore ~owner ~load_parent:(Parts.load_parent inventory) original in
+  let read ~scope ~request_id=Owner.load ~store ~scope ~request_id |> Result.map_error Owner.error_to_string in
+  let read_scope ~scope=Owner.load_scope ~store ~scope |> Result.map_error Owner.error_to_string in
+  let reader=Owner.Published_reader.create ~read_body:(fun ~scope ~request_digest ->
+    Store.load_tool_request_body store ~scope ~request_digest) in
+  let read_archive ~scope ~date ~request_id=Owner.load_settled ~store ~scope ~date ~request_id
+    |> Result.map_error Owner.error_to_string in
+  let* view=Closure.project ~owner ~read ~read_scope ~read_body:(Owner.Published_reader.request reader) ~read_archive in
+  let* capture=match view.closure with
+    | None ->
+      let* inventory=discover_parts ~store ~parts_by_owner owner in
+      Capture.restore ~owner ~load_parent:(Parts.load_parent inventory) original
+    | Some _ ->
+      (* A wake grants no execution or settlement authority. A closing forest
+         can have archived gates/sources, so use its verified payload parents
+         only to notify the same physical owner; the lane reconfirms receipts. *)
+      Capture.restore ~owner ~load_parent:(Parts.load_parent_payload ~read:view.read ~owner) original in
   Ok (Capture.keeper_id owner,(Capture.destination capture).installation_id)
 let history_keeper ~base_path ~keepers_dir original =
   let* owner=History.observe_record_owner ~base_path ~keepers_dir original in

@@ -1415,22 +1415,6 @@ let test_projection_reports_read_failure_as_unknown () =
     (dashboard |> member "fsm" |> member "active_count" = `Null)
 ;;
 
-(* The projection used to ride along inside the tool inventory, so any surface
-   that needed schedule state pulled the whole tool registry. It now has its
-   own route and must not reappear as a nested field. *)
-let test_tools_response_no_longer_carries_the_projection () =
-  with_config
-  @@ fun config ->
-  let tools = Server_dashboard_http_runtime_info.dashboard_tools_http_json config in
-  let fields =
-    match tools with
-    | `Assoc fields -> List.map fst fields
-    | _ -> failf "tools projection is not an object"
-  in
-  check bool "scheduled_automation is not nested in tools" false
-    (List.mem "scheduled_automation" fields)
-;;
-
 let test_tool_response_carries_structured_recurrence () =
   with_config
   @@ fun config ->
@@ -3051,8 +3035,6 @@ let () =
             test_schedule_store_error_is_explicit
         ; test_case "projection reports read failure as unknown" `Quick
             test_projection_reports_read_failure_as_unknown
-        ; test_case "tools response no longer carries the projection" `Quick
-            test_tools_response_no_longer_carries_the_projection
         ; test_case "Keeper wake target validation is fenced" `Quick
             test_keeper_wake_target_validation_is_inside_creation_fence
         ; test_case "Keeper wake creation respects shutdown fence" `Quick

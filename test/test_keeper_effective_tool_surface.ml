@@ -214,7 +214,7 @@ let test_skill_name_selection_is_structured_and_filters_task () =
         ()
     with
     | Ok surface -> surface
-    | Error error -> fail (Keeper_task_skill_turn.error_to_string error)
+    | Error error -> fail (Keeper_effective_tool_surface.projection_error_to_string error)
   in
   check int "one selected instruction" 1 (List.length selected.instruction_skills);
   check int "Task composition is filtered" 0 (List.length selected.composition_skills);
@@ -262,7 +262,7 @@ let test_skill_name_selection_is_structured_and_filters_task () =
         ()
     with
     | Ok surface -> surface
-    | Error error -> fail (Keeper_task_skill_turn.error_to_string error)
+    | Error error -> fail (Keeper_effective_tool_surface.projection_error_to_string error)
   in
   check int "explicit empty has no instruction Skills" 0 (List.length none.instruction_skills);
   check int "explicit empty has no composition Skills" 0 (List.length none.composition_skills)
@@ -280,7 +280,7 @@ let test_projection_names_equal_turn_surface_authority () =
       ~native_posture:Runtime_native_tools.Native_read
       ()
   with
-  | Error error -> fail (Keeper_task_skill_turn.error_to_string error)
+  | Error error -> fail (Keeper_effective_tool_surface.projection_error_to_string error)
   | Ok surface ->
     let descriptors = Keeper_tool_descriptor.model_visible_descriptors () in
     let catalog, diagnostics = Keeper_skill_catalog.of_snapshot snapshot in
@@ -362,7 +362,7 @@ let test_projection_names_equal_turn_surface_authority () =
     let instruction_entries = instruction_entries snapshot [ task_reference ] in
     let tool =
       Keeper_tool_composition_surface.instruction_skill_schema_tool
-        ~instruction_skills:instruction_entries
+        ~instruction_skills:instruction_entries |> Result.get_ok
     in
     (
        check string "projection carries the exact Available list"
@@ -445,7 +445,7 @@ let test_external_composition_preserves_snapshot_provenance () =
       ~task_selection:None
       ~skill_snapshot:(configured_external_skill_snapshot ())
   with
-  | Error error -> fail (Keeper_task_skill_turn.error_to_string error)
+  | Error error -> fail (Keeper_effective_tool_surface.projection_error_to_string error)
   | Ok surface ->
     let provenance =
       List.find_map
@@ -516,7 +516,7 @@ let test_the_tui_reads_the_origin_of_every_tool_this_surface_writes () =
         ~skill_snapshot:(configured_external_skill_snapshot ())
     with
     | Ok surface -> surface
-    | Error error -> fail (Keeper_task_skill_turn.error_to_string error)
+    | Error error -> fail (Keeper_effective_tool_surface.projection_error_to_string error)
   in
   let expected =
     List.map
@@ -585,7 +585,7 @@ let test_instruction_skill_without_read_is_admitted () =
       ~native_posture:Runtime_native_tools.Native_read
       ()
   with
-  | Error error -> fail (Keeper_task_skill_turn.error_to_string error)
+  | Error error -> fail (Keeper_effective_tool_surface.projection_error_to_string error)
   | Ok surface ->
     check string
       "exact instruction reference is admitted"
@@ -611,7 +611,7 @@ let test_instruction_description_changes_digest () =
     check bool "instruction description participates in digest" true
       (left.tool_surface_sha256 <> right.tool_surface_sha256)
   | Error error, _ | _, Error error ->
-    fail (Keeper_task_skill_turn.error_to_string error)
+    fail (Keeper_effective_tool_surface.projection_error_to_string error)
 ;;
 
 let rec remove_tree path =
@@ -800,7 +800,7 @@ let test_turn_admission_covers_held_tasks_beyond_current () =
                ~task_selection:(Some selection)
                ~skill_snapshot:snapshot
            with
-           | Error error -> fail (Keeper_task_skill_turn.error_to_string error)
+           | Error error -> fail (Keeper_effective_tool_surface.projection_error_to_string error)
            | Ok surface ->
              check bool "bundle keeps prompt-phase held exact ref" true
                (List.exists
@@ -848,7 +848,7 @@ let test_left_out_skills_reach_the_surface () =
       ~native_posture:Runtime_native_tools.Native_read
       ()
   with
-  | Error error -> Alcotest.fail (Keeper_task_skill_turn.error_to_string error)
+  | Error error -> Alcotest.fail (Keeper_effective_tool_surface.projection_error_to_string error)
   | Ok surface ->
     Alcotest.(check (list string))
       "the surface carries what was left out"
@@ -860,7 +860,7 @@ let test_left_out_skills_reach_the_surface () =
        project ~task_skill_references:[]
          ~native_posture:Runtime_native_tools.Native_read ()
      with
-     | Error error -> Alcotest.fail (Keeper_task_skill_turn.error_to_string error)
+     | Error error -> Alcotest.fail (Keeper_effective_tool_surface.projection_error_to_string error)
      | Ok clean ->
        Alcotest.(check (list string)) "and says nothing when there is nothing"
          [] clean.Keeper_effective_tool_surface.skills_left_out)
@@ -892,7 +892,7 @@ let test_unprojectable_task_skill_is_a_typed_row () =
       ~native_posture:Runtime_native_tools.Native_read
       ()
   with
-  | Error error -> fail (Keeper_task_skill_turn.error_to_string error)
+  | Error error -> fail (Keeper_effective_tool_surface.projection_error_to_string error)
   | Ok surface ->
     let row =
       match surface.Keeper_effective_tool_surface.unavailable_task_skills with
@@ -941,7 +941,7 @@ let test_global_instruction_is_present_in_receipt () =
       ~native_posture:Runtime_native_tools.Native_read
       ()
   with
-  | Error error -> fail (Keeper_task_skill_turn.error_to_string error)
+  | Error error -> fail (Keeper_effective_tool_surface.projection_error_to_string error)
   | Ok surface ->
     check string
       "global instruction receipt is exact"
@@ -972,7 +972,7 @@ let test_runtime_capability_suppression_is_explicit_and_empty () =
       ~task_selection:None
       ~skill_snapshot
   with
-  | Error error -> fail (Keeper_task_skill_turn.error_to_string error)
+  | Error error -> fail (Keeper_effective_tool_surface.projection_error_to_string error)
   | Ok surface ->
     check (list string) "no tool reaches the model" [] (names surface);
     check int "instruction tool is not readable" 0
@@ -1101,7 +1101,7 @@ let test_frozen_selection_carries_the_shadowed_exact_reference () =
       ~skill_snapshot:snapshot
   in
   let frozen = match project ~task_skill_references:[] ~task_selection:(Some selection) with
-   | Error error -> fail (Keeper_task_skill_turn.error_to_string error)
+   | Error error -> fail (Keeper_effective_tool_surface.projection_error_to_string error)
    | Ok surface ->
      check bool "frozen selection carries the shadowed exact revision" true
        (List.exists
@@ -1111,7 +1111,7 @@ let test_frozen_selection_carries_the_shadowed_exact_reference () =
   let reports = ref [] in
   (match O.capture_result ~on_report:(fun report -> reports := report :: !reports)
       (fun () -> project ~task_skill_references:[shadowed_reference] ~task_selection:None) with
-   | Error error -> fail (Keeper_task_skill_turn.error_to_string error)
+   | Error error -> fail (Keeper_effective_tool_surface.projection_error_to_string error)
    | Ok fresh ->
      check (list string) "fresh exact references and supplied selection expose the same tools"
        (names frozen) (names fresh);
@@ -1127,7 +1127,7 @@ let test_frozen_selection_carries_the_shadowed_exact_reference () =
      && sample.outcome=O.Returned && sample.decision=Some O.Reused)) retained;
   match project ~task_skill_references:[shadowed_reference]
       ~task_selection:(Some Keeper_task_skill_turn.empty) with
-  | Error error -> fail (Keeper_task_skill_turn.error_to_string error)
+  | Error error -> fail (Keeper_effective_tool_surface.projection_error_to_string error)
   | Ok control ->
     check bool
       "supplied empty selection cannot borrow fresh references"
@@ -1251,7 +1251,7 @@ value = {}
       ~skill_names:None ~current_task_id:None ~task_skill_references:[]
       ~task_selection:(Some selection) ~skill_snapshot:snapshot with
     | Ok surface -> surface
-    | Error error -> fail (Keeper_task_skill_turn.error_to_string error) in
+    | Error error -> fail (Keeper_effective_tool_surface.projection_error_to_string error) in
   let static = Keeper_tool_descriptor.all_descriptors () in
   let attached = project_with (static @ [addon_descriptor "fixture_machine_input"]) in
   check bool "attached machine composition is callable" true

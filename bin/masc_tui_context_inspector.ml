@@ -695,6 +695,7 @@ let prompt_block_label = function
   | Prompt_block_id.Keeper_instructions -> "Keeper instructions"
   | Prompt_block_id.Dynamic_context -> "Dynamic context"
   | Prompt_block_id.Active_goals -> "Active Goals"
+  | Prompt_block_id.Direct_input_source -> "Admitted request source"
   | Prompt_block_id.Completion_authority -> "Task completion decisions"
   | Prompt_block_id.Goals_awaiting_proof -> "Goals awaiting proof"
   | Prompt_block_id.Constitution_amendments -> "Constitution amendments"
@@ -838,6 +839,7 @@ let input_map_rows (record : Turn_record.t) (provider_input : provider_input opt
              | Turn_record.Prompt_block
                  ( Prompt_block_id.Dynamic_context
                  | Prompt_block_id.Active_goals
+                 | Prompt_block_id.Direct_input_source
                  | Prompt_block_id.Completion_authority
                  | Prompt_block_id.Goals_awaiting_proof
                  | Prompt_block_id.Constitution_amendments

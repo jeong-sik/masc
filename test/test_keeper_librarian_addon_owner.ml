@@ -11,6 +11,7 @@ module Current = Keeper_memory_os_current
 module Types = Keeper_memory_os_types
 module Capture = Keeper_librarian_admission_capture
 module Parts = Keeper_librarian_admission_parts
+module Closure = Keeper_librarian_admission_closure
 module Gate = Keeper_librarian_admission_gate
 module Commit = Keeper_librarian_admission_commit
 module Owner = Lane_addon_tool_request_owner
@@ -331,6 +332,185 @@ let with_fixture ?(initial=["a","Durable A";"b","Durable B"]) f =
         set_enabled fixture false;
         Memory_lane.For_testing.reset ())))))))))))
 
+let closure_inputs fixture = io (fun () ->
+  let owner=original_owner fixture.base_path fixture.keepers_dir in
+  let inventory=Parts.discover ~store:fixture.store ~owner |> get in
+  let candidates=Parts.completion_candidates inventory
+    |> Option.to_result ~none:"fixture forest is not structurally complete" |> get in
+  let originals=List.concat_map (fun (kind,scope) ->
+    Owner.load_scope ~store:fixture.store ~scope |> owned
+    |> List.map (fun record -> kind,record))
+    [Closure.Part,Parts.scope owner;Closure.Partition,Parts.partition_scope owner;
+     Closure.Execution,Capture.scope owner;Closure.Gate,Gate.scope owner] in
+  owner,candidates,originals)
+let closure_manifest fixture =
+  let owner,candidates,originals=closure_inputs fixture in
+  let manifest=io (fun () -> Closure.retain ~store:fixture.store ~owner
+    ~request_id:(Capture.fresh_request_id owner) ~candidates ~originals |> get) in
+  owner,manifest
+let closure_preflight fixture = io (fun () ->
+  Lane_addon_store_preflight.scan ~validate_tool_request:Keeper_librarian_store_preflight.validator
+    Lane_addon_store_preflight.Store.Tool_request_owners ~base_path:fixture.base_path |> get)
+let close_member fixture manifest member = io (fun () ->
+  Owner.settle ~store:fixture.store ~date:(Closure.date manifest) (Closure.member_record member)
+  |> Result.map_error Owner.settle_error_to_string |> get)
+let test_closure_projection_preserves_each_partial_move ()=with_fixture (fun ~sw:_ fixture ->
+  drive_until fixture settled |> assert_settled;
+  let owner,manifest=closure_manifest fixture in
+  let posts=F.post_count fixture.server in
+  let memory_path=Current.path_for_keepers_dir ~keepers_dir:fixture.keepers_dir ~keeper_id:keeper_name in
+  let queue_path=Queue.path ~keepers_dir:fixture.keepers_dir ~keeper_id:keeper_name in
+  let memory_before=io (fun () -> Fs_compat.load_file memory_path) in
+  let queue_before=io (fun () -> Fs_compat.load_file queue_path) in
+  let manifest=memory_action fixture (fun () -> io (fun () -> Closure.intend ~store:fixture.store manifest |> get)) in
+  (match Progress.phase (Closure.record manifest).progress with
+   | Progress.Committing _ -> ()
+   | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Commit_unknown _ | Finished _
+   | Conflicted _ | Rejected _ | Subdividing _ | Subdivided _ -> fail "closure observed completion before moving members");
+  List.iter (fun member ->
+    memory_action fixture (fun () -> close_member fixture manifest member);
+    let report=closure_preflight fixture in
+    check int "each interrupted movement remains compatible" 0 (List.length report.refusals);
+    let archived=io (fun () ->
+      let record=Closure.member_record member in
+      Owner.load_settled ~store:fixture.store ~scope:(Owner.Record.scope record)
+        ~date:(Closure.date manifest) ~request_id:(Owner.Record.request_id record) |> owned) in
+    check bool "a moved member has exact archived metadata" true
+      (match archived with None -> false | Some actual ->
+        Yojson.Safe.equal (Owner.record_to_json actual) (Owner.record_to_json (Closure.member_record member)));
+    let sweep=io (fun () -> Server_settled_archive_sweep.run ~store:fixture.store
+      |> Result.map_error Server_settled_archive_sweep.error_to_string |> get) in
+    check int "the live closure protects every required archive marker" 0 sweep.removed_records)
+    (Closure.members manifest);
+  let manifest=memory_action fixture (fun () -> io (fun () -> Closure.confirm ~store:fixture.store manifest |> get)) in
+  check int "the after-state remains readable before the anchor moves" 0
+    (List.length (closure_preflight fixture).refusals);
+  memory_action fixture (fun () -> io (fun () ->
+    Owner.settle ~store:fixture.store ~date:(Closure.date manifest) (Owner.listed (Closure.record manifest))
+    |> Result.map_error Owner.settle_error_to_string |> get));
+  check int "the closure leaves no active original" 0
+    (io (fun () -> Owner.discover_all ~store:fixture.store |> owned |> List.length));
+  check int "the finished forest is absent" 0
+    (io (fun () -> Parts.discover ~store:fixture.store ~owner |> get |> Parts.roots |> List.length));
+  check string "closing never rewrites Memory" memory_before (io (fun () -> Fs_compat.load_file memory_path));
+  check string "closing never acknowledges a queue row" queue_before (io (fun () -> Fs_compat.load_file queue_path));
+  check int "closing and preflight never dispatch" posts (F.post_count fixture.server))
+let test_captured_closure_cannot_explain_a_missing_member ()=with_fixture (fun ~sw:_ fixture ->
+  drive_until fixture settled |> assert_settled;
+  let _,manifest=closure_manifest fixture in
+  memory_action fixture (fun () -> close_member fixture manifest (List.hd (Closure.members manifest)));
+  check bool "retaining a manifest is not permission to omit a member" true
+    ((closure_preflight fixture).refusals<>[]))
+let test_closing_manifest_does_not_hide_changed_or_missing_evidence missing ()=with_fixture (fun ~sw:_ fixture ->
+  drive_until fixture settled |> assert_settled;
+  let _,manifest=closure_manifest fixture in
+  let manifest=memory_action fixture (fun () -> io (fun () -> Closure.intend ~store:fixture.store manifest |> get)) in
+  let member=List.hd (Closure.members manifest) in
+  let record=Closure.member_record member in
+  if missing then (
+    memory_action fixture (fun () -> close_member fixture manifest member);
+    io (fun () -> Sys.remove (Filename.concat (Store.root fixture.store)
+      (Store.tool_request_archive_record_path ~scope:(Owner.Record.scope record)
+        ~date:(Closure.date manifest) ~request_id:(Owner.Record.request_id record)))))
+  else io (fun () ->
+    let json=Owner.record_to_json record in
+    let json=match json with
+      | `Assoc fields -> `Assoc (List.map (fun (key,value) -> key,if key="tool" then `String "changed" else value) fields)
+      | _ -> fail "owner metadata is not an object" in
+    Store.save_tool_request_owner fixture.store ~scope:(Owner.Record.scope record)
+      ~request_id:(Owner.Record.request_id record) json |> get);
+  check bool "the closure cannot borrow missing or changed evidence" true
+    ((closure_preflight fixture).refusals<>[]))
+let test_foreign_closure_id_is_refused_before_publication ()=with_fixture (fun ~sw:_ fixture ->
+  drive_until fixture settled |> assert_settled;
+  let owner,candidates,originals=closure_inputs fixture in
+  let other=match Capture.owner_to_json owner with
+    | `Assoc fields -> `Assoc (List.map (fun (key,value) ->
+        key,if key="keeper_id" then `String "other-closure-owner" else value) fields)
+      |> Capture.owner_of_json |> get
+    | _ -> fail "owner is not an object" in
+  let result=memory_action fixture (fun () -> io (fun () -> Closure.retain ~store:fixture.store ~owner
+    ~request_id:(Capture.fresh_request_id other) ~candidates ~originals)) in
+  check bool "a foreign ID is refused" true (Result.is_error result);
+  check int "no bad closure record is published" 0
+    (io (fun () -> Owner.discover ~store:fixture.store ~scope:(Closure.scope owner) |> owned |> List.length));
+  check bool "no closure body directory is created" false (io (fun () ->
+    Sys.file_exists (Filename.concat (Store.root fixture.store)
+      (Filename.concat Store.tool_request_bodies_directory (Store.digest (Closure.scope owner)))))))
+let test_preflight_rechecks_a_closure_created_after_an_empty_observation ()=with_fixture (fun ~sw:_ fixture ->
+  drive_until fixture settled |> assert_settled;
+  let validate=Keeper_librarian_store_preflight.validator () in
+  let read ~scope ~request_id=Owner.load ~store:fixture.store ~scope ~request_id |> Result.map_error Owner.error_to_string in
+  let read_scope ~scope=Owner.load_scope ~store:fixture.store ~scope |> Result.map_error Owner.error_to_string in
+  let body=Owner.Published_reader.create ~read_body:(fun ~scope ~request_digest ->
+    Store.load_tool_request_body fixture.store ~scope ~request_digest) in
+  let read_body=Owner.Published_reader.request body in
+  let read_archive ~scope ~date ~request_id=Owner.load_settled ~store:fixture.store ~scope ~date ~request_id
+    |> Result.map_error Owner.error_to_string in
+  let original=match observed_originals fixture with (record,_)::_ -> record | [] -> fail "no original" in
+  io (fun () -> validate ~read ~read_scope ~read_body ~read_archive original |> get);
+  let _,manifest=closure_manifest fixture in
+  let manifest=memory_action fixture (fun () -> io (fun () -> Closure.intend ~store:fixture.store manifest |> get)) in
+  let member=List.hd (Closure.members manifest) in
+  memory_action fixture (fun () -> close_member fixture manifest member);
+  io (fun () -> validate ~read ~read_scope ~read_body ~read_archive original |> get);
+  io (fun () -> validate ~read ~read_scope ~read_body ~read_archive (Closure.record manifest) |> get);
+  let record=Closure.member_record member in
+  io (fun () -> Sys.remove (Filename.concat (Store.root fixture.store)
+    (Store.tool_request_archive_record_path ~scope:(Owner.Record.scope record)
+      ~date:(Closure.date manifest) ~request_id:(Owner.Record.request_id record))));
+  List.iter (fun record ->
+    check bool "a previously empty scope grants no stale closure verdict" true
+      (io (fun () -> validate ~read ~read_scope ~read_body ~read_archive record |> Result.is_error)))
+    [Closure.record manifest;original])
+let test_owner_recovers_a_partial_closure prefix ()=with_fixture (fun ~sw:_ fixture ->
+  drive_until fixture settled |> assert_settled;
+  let original=match observed_originals fixture with (record,_)::_ -> record | [] -> fail "no original" in
+  let body_path=Filename.concat (Store.root fixture.store)
+    (Store.tool_request_body_path ~scope:original.scope ~request_digest:original.request_digest) in
+  let body=io (fun () -> Fs_compat.load_file body_path) in
+  let memory_path=Current.path_for_keepers_dir ~keepers_dir:fixture.keepers_dir ~keeper_id:keeper_name in
+  let queue_path=Queue.path ~keepers_dir:fixture.keepers_dir ~keeper_id:keeper_name in
+  let memory=io (fun () -> Fs_compat.load_file memory_path) and queue=io (fun () -> Fs_compat.load_file queue_path) in
+  let posts=F.post_count fixture.server and moved=ref 0 in
+  let interrupted=memory_action fixture (fun () ->
+    Keeper_librarian_admission_owner.For_testing.run ~base_path:fixture.base_path ~keeper_name
+      ~after_settle:(fun _ -> incr moved;if !moved=prefix then Error "fixture stopped after moving a member" else Ok ())) in
+  check bool "the owner stops before finishing its anchor" true
+    (match interrupted with Worker.Unavailable _ -> true
+     | Disabled | Idle | Recheck_new_input | Settled _ | Pending _ | Awaiting_worker _ | Addon_unattached _ -> false);
+  if prefix=2 then io (fun () -> Fs_compat.save_file_atomic_strict body_path body |> get);
+  check int "a restart can still install over the partial closure" 0 (List.length (closure_preflight fixture).refusals);
+  let keepers,refusals,_=io (fun () -> Server_librarian_addon_wake.For_testing.discover
+    ~config:fixture.config ~store:fixture.store ~after_inventory:(fun () -> ()) ~on_original:(fun _ -> ())
+    ~event:Runtime.Configuration_observed |> get) in
+  check bool "configuration wake still finds the closing owner" true (List.mem keeper_name keepers);
+  check int "configuration wake understands the partial forest" 0 (List.length refusals);
+  check bool "the normal owner finishes the same closure and is idle" true
+    (match run_worker fixture with Worker.Idle -> true
+     | Disabled | Recheck_new_input | Settled _ | Pending _ | Awaiting_worker _ | Addon_unattached _ | Unavailable _ -> false);
+  check int "all original records leave the active inventory" 0
+    (io (fun () -> Owner.discover_all ~store:fixture.store |> owned |> List.length));
+  check bool "a body left after its record moved is removed on recovery" false
+    (io (fun () -> Sys.file_exists body_path));
+  check string "recovery does not write Memory" memory (io (fun () -> Fs_compat.load_file memory_path));
+  check string "recovery does not rewrite queue ACKs" queue (io (fun () -> Fs_compat.load_file queue_path));
+  check int "recovery makes no provider call" posts (F.post_count fixture.server))
+let test_closure_recovery_refuses_pending_ack ()=with_fixture (fun ~sw:_ fixture ->
+  let queue_path=Queue.path ~keepers_dir:fixture.keepers_dir ~keeper_id:keeper_name in
+  let pending=io (fun () -> Fs_compat.load_file queue_path) in
+  drive_until fixture settled |> assert_settled;
+  let _,manifest=closure_manifest fixture in
+  io (fun () -> Fs_compat.save_file_atomic_strict queue_path pending |> get);
+  let posts=F.post_count fixture.server in
+  check bool "a retained manifest cannot acknowledge its own candidates" true
+    (match run_worker fixture with Worker.Unavailable _ -> true
+     | Disabled | Idle | Recheck_new_input | Settled _ | Pending _ | Awaiting_worker _ | Addon_unattached _ -> false);
+  check string "recovery leaves pending candidates untouched" pending (io (fun () -> Fs_compat.load_file queue_path));
+  check int "no member moved before ACK proof" (List.length (Closure.members manifest))
+    (io (fun () -> Owner.discover_all ~store:fixture.store |> owned |> List.length) - 1);
+  check int "no provider call is used to repair closure evidence" posts (F.post_count fixture.server))
+
 let test_actual_happy_path ()=with_fixture (fun ~sw:_ fixture ->
   let ids=io (fun () -> match pending fixture.keepers_dir with Some batch -> Queue.candidate_ids batch
     | None -> fail "fixture inputs are absent") in
@@ -383,7 +563,41 @@ let test_pass_without_new_input_after_commit_is_idle ()=with_fixture (fun ~sw:_ 
   check bool "a pass with no new input over finished parts reports Idle" true
     (match run_worker fixture with Worker.Idle -> true
      | Disabled | Recheck_new_input | Settled _ | Pending _ | Awaiting_worker _ | Addon_unattached _ | Unavailable _ -> false);
-  check int "the idle pass starts no provider call" posts (F.post_count fixture.server))
+  check int "the idle pass starts no provider call" posts (F.post_count fixture.server);
+  check int "the idle pass closes the fully committed forest" 0
+    (io (fun () -> Owner.discover_all ~store:fixture.store |> owned |> List.length)))
+
+let test_production_lane_closes_without_another_external_event ()=with_fixture (fun ~sw:_ fixture ->
+  Fun.protect ~finally:(fun () ->
+    Keeper_librarian_queue_signal.install (fun ~base_path:_ ~keeper_name:_ -> ())) (fun () ->
+    Keeper_librarian_queue_refresh.install ();
+    drive_until fixture settled |> assert_settled;
+    Memory_lane.For_testing.await_idle ~base_path:fixture.base_path ~keeper_name;
+    check int "the actual installed lane closes a quiet completed Keeper" 0
+      (io (fun () -> Owner.discover_all ~store:fixture.store |> owned |> List.length));
+    check int "the closure pass repeats no original provider" 1 (F.post_count fixture.server);
+    check (list string) "the real committed Memory remains" ["Durable A";"Durable B"]
+      (io (fun () -> claims fixture.keepers_dir))))
+
+let test_a_new_tail_survives_closing_the_finished_forest ()=with_fixture (fun ~sw:_ fixture ->
+  drive_until fixture settled |> assert_settled;
+  let previous=observed_originals fixture in
+  io (fun () -> ignore (append fixture.keepers_dir "new-tail" "Durable tail"));
+  let seen=ref [] in
+  fixture.set_response (fun capture ->
+    seen:=List.map (fun (row:Queue.candidate) -> row.request_id) (Queue.candidates (Capture.batch capture)) :: !seen;
+    `OK,F.openai_response (answer (fun _ -> true) capture));
+  drive_until fixture settled |> assert_settled;
+  check (list (list string)) "only the distinct new input reaches the next provider" [["new-tail"]] (List.rev !seen);
+  let owner=io (fun () -> original_owner fixture.base_path fixture.keepers_dir) in
+  List.iter (fun (record,_) ->
+    let original=io (fun () -> Owner.load ~store:fixture.store ~scope:record.Owner.scope
+      ~request_id:record.request_id |> owned) in
+    check bool "old execution is no longer active" true (Option.is_none original)) previous;
+  check int "the new root does not retain a supersession link to a closed forest" 1
+    (io (fun () -> Parts.discover ~store:fixture.store ~owner |> get |> Parts.roots |> List.length));
+  check (list string) "old admitted facts and the tail remain" ["Durable A";"Durable B";"Durable tail"]
+    (io (fun () -> claims fixture.keepers_dir)))
 
 let test_unchanged_deferred_does_not_remint ()=with_fixture (fun ~sw:_ fixture ->
   fixture.set_response (fun capture -> `OK,F.openai_response (answer (fun _ -> false) capture));
@@ -404,6 +618,20 @@ let test_gap_and_new_tail_are_rejudged_together ()=with_fixture (fun ~sw:_ fixtu
   drive_until fixture settled |> assert_settled;
   check (list int) "original partial commit leaves a sparse gap" [1]
     (io (fun () -> List.map (fun (row:Queue.candidate) -> row.sequence) (pending_rows fixture.keepers_dir)));
+  let originals=observed_originals fixture in
+  check bool "a partial commit retains original input before whole-batch completion" true (originals<>[]);
+  (* The partial commit added B to actual Memory. That changed context can
+     legitimately retain a new original for gap A before another queue tail.
+     Wait for that real Deferred answer before changing the fixture response. *)
+  drive_original_terminal fixture;
+  List.iter (fun (original,_) ->
+    let retained=io (fun () -> Owner.load ~store:fixture.store ~scope:original.Owner.scope
+      ~request_id:original.request_id |> owned) in
+    check bool "Finished subset preserves each original input" true
+      (match retained with Some current -> current.request_digest=original.request_digest | None -> false)) originals;
+  let owner=io (fun () -> original_owner fixture.base_path fixture.keepers_dir) in
+  check int "a deferred original gap prevents closure publication" 0
+    (io (fun () -> Owner.discover ~store:fixture.store ~scope:(Closure.scope owner) |> owned |> List.length));
   io (fun () -> ignore (append fixture.keepers_dir "c" "Durable C"));
   let observed=ref [] in
   fixture.set_response (fun capture ->
@@ -417,7 +645,10 @@ let test_gap_and_new_tail_are_rejudged_together ()=with_fixture (fun ~sw:_ fixtu
   check (list string) "all independently retained knowledge survives" ["Durable A";"Durable B";"Durable C"]
     (io (fun () -> claims fixture.keepers_dir));
   check int "the new decision ACKs only its original complete candidates" 0
-    (io (fun () -> List.length (pending_rows fixture.keepers_dir))))
+    (io (fun () -> List.length (pending_rows fixture.keepers_dir)));
+  ignore (run_worker fixture);
+  check int "a fully committed supersession forest closes together" 0
+    (io (fun () -> Owner.discover_all ~store:fixture.store |> owned |> List.length)))
 
 (* #46372: the answer revises a Memory another writer removes before the
    commit. The locked plan refuses the revised claim, so the destination the
@@ -618,18 +849,38 @@ let test_sparse_whole_candidate_partition_reads_fresh_memory ()=
        once for the scan. Before it kept the proof, every record read both
        scopes again, and a workspace with dozens of records per owner took
        minutes to scan. *)
-    let forest_reads=ref 0 and validated=ref 0 in
+    let forest_reads=ref 0 and closure_reads=ref 0 and validated=ref 0 in
     let counting ()=
       let validate=Keeper_librarian_store_preflight.validator () in
-      fun ~read ~read_scope ~read_body record ->
+      fun ~read ~read_scope ~read_body ~read_archive record ->
         incr validated;
-        validate ~read ~read_body record
-          ~read_scope:(fun ~scope -> incr forest_reads;read_scope ~scope) in
+        validate ~read ~read_body ~read_archive record
+          ~read_scope:(fun ~scope ->
+            if Keeper_librarian_admission_closure.is_scope scope then incr closure_reads
+            else incr forest_reads;
+            read_scope ~scope) in
     let report=io (fun () -> Lane_addon_store_preflight.scan ~validate_tool_request:counting
       Lane_addon_store_preflight.Store.Tool_request_owners ~base_path:fixture.base_path) |> get in
     check int "the preflight refuses none of the owner's real records" 0 (List.length report.refusals);
     check bool "the scan validated several records of the one owner" true (!validated>2);
-    check int "the owner's parts and partitions are read once for the whole scan" 2 !forest_reads)
+    check int "the owner's parts and partitions are read once for the whole scan" 2 !forest_reads;
+    check int "closure presence is reobserved for every scanned original" !validated !closure_reads;
+    let _,manifest=closure_manifest fixture in
+    let posts=F.post_count fixture.server in
+    List.iteri (fun index _ ->
+      let moved=ref 0 in
+      let outcome=memory_action fixture (fun () ->
+        Keeper_librarian_admission_owner.For_testing.run ~base_path:fixture.base_path ~keeper_name
+          ~after_settle:(fun _ -> incr moved;if !moved=index+1 then Error "fixture restart during a split closure" else Ok ())) in
+      check bool "a split closure stops at the selected move" true
+        (match outcome with Worker.Unavailable _ -> true
+         | Disabled | Idle | Recheck_new_input | Settled _ | Pending _ | Awaiting_worker _ | Addon_unattached _ -> false);
+      check int "every partial split forest remains compatible" 0 (List.length (closure_preflight fixture).refusals))
+      (Closure.members manifest);
+    ignore (run_worker fixture);
+    check int "all split parents, children, executions and gates leave together" 0
+      (io (fun () -> Owner.discover_all ~store:fixture.store |> owned |> List.length));
+    check int "split closure never repeats a provider call" posts (F.post_count fixture.server))
 
 let test_purge_cancels_waiting_memory_unit_without_consumption ()=with_fixture (fun ~sw fixture ->
   let arrived,signal=Eio.Promise.create () and release,unblock=Eio.Promise.create () in
@@ -1755,6 +2006,20 @@ let () =
   if Sys.getenv_opt "MASC_TEST_46252_WAKE" = Some "1" then (
     test_configuration_wake_completes_before_concurrent_settle (); exit 0);
   run "Actual Addon Librarian explicit-candidate owner" ["production",[
+  test_case "foreign closure IDs are refused before publication" `Quick test_foreign_closure_id_is_refused_before_publication;
+  test_case "preflight observes closures published after its empty observation" `Quick
+    test_preflight_rechecks_a_closure_created_after_an_empty_observation;
+  test_case "the owner recovers after moving a gate" `Quick (test_owner_recovers_a_partial_closure 1);
+  test_case "the owner recovers after an execution record moved before body cleanup" `Quick
+    (test_owner_recovers_a_partial_closure 2);
+  test_case "the owner recovers after moving the final source" `Quick (test_owner_recovers_a_partial_closure 3);
+  test_case "a closure cannot consume pending ACKs" `Quick test_closure_recovery_refuses_pending_ack;
+  test_case "closure preflight and sweep preserve each partial movement" `Quick test_closure_projection_preserves_each_partial_move;
+  test_case "a Captured closure cannot explain a missing member" `Quick test_captured_closure_cannot_explain_a_missing_member;
+  test_case "a closing manifest cannot hide changed live metadata" `Quick
+    (test_closing_manifest_does_not_hide_changed_or_missing_evidence false);
+  test_case "a closing manifest cannot hide a missing archive marker" `Quick
+    (test_closing_manifest_does_not_hide_changed_or_missing_evidence true);
   test_case "captured admission and retirement policy survive override changes" `Quick test_admission_capture_keeps_original_policy;
   test_case "unused retirement policy cannot block capture or ACK" `Quick test_unused_retirement_policy_does_not_block_admission;
   test_case "retirement policy is required only for its actual suffix" `Quick test_retirement_policy_is_required_only_for_its_suffix;
@@ -1766,6 +2031,10 @@ let () =
   test_case "absorbing admission captures both context policies" `Quick test_absorbing_admission_captures_both_context_policies;
   test_case "actual Memory lane, worker, HTTP, domain validation and receipt-backed ACK" `Quick test_actual_happy_path;
   test_case "a pass with no new input after the commit is Idle" `Quick test_pass_without_new_input_after_commit_is_idle;
+  test_case "the production lane closes a completed Keeper without another external event" `Quick
+    test_production_lane_closes_without_another_external_event;
+  test_case "a distinct new tail survives closing its predecessor forest" `Quick
+    test_a_new_tail_survives_closing_the_finished_forest;
   test_case "unchanged semantic deferral preserves the same original" `Quick test_unchanged_deferred_does_not_remint;
   test_case "new tail rejudges the complete old sparse gap against current Memory" `Quick test_gap_and_new_tail_are_rejudged_together;
   test_case "an absent destination ends the original once and its candidate is judged again" `Quick

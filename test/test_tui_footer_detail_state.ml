@@ -110,12 +110,12 @@ let back_keys_of_surface name surface =
 let approvals_list_footer =
   Keys.footer_hints_approvals
     (Keys.Approval_browsing
-       { approvals = true; asks = Keys.Ask_selected; source = true })
+       { approvals = true; asks = Keys.Ask_selected; source = true; last_answer = false })
 
 let scoped_keys =
   [ ( "Planning",
-      Keys.footer_hints_planning_goal_list ~has_rows:true,
-      Keys.footer_hints_planning_goal_detail,
+      Keys.footer_hints_planning_goal_list ~lang:Masc_tui_types.Lang_en ~has_rows:true,
+      (Keys.footer_hints_planning_goal_detail ~lang:Masc_tui_types.Lang_en),
       [ "t"; "p"; "/"; "n / N" ] )
   ; ( "Board",
       Keys.footer_hints ~detail_open:true Masc_tui_types.Board,
@@ -153,8 +153,8 @@ let scoped_keys =
       [ "v" ] )
   ]
   @ back_keys "Planning"
-      ~list:(Keys.footer_hints_planning_goal_list ~has_rows:true)
-      ~detail:Keys.footer_hints_planning_goal_detail
+      ~list:(Keys.footer_hints_planning_goal_list ~lang:Masc_tui_types.Lang_en ~has_rows:true)
+      ~detail:(Keys.footer_hints_planning_goal_detail ~lang:Masc_tui_types.Lang_en)
   @ back_keys_of_surface "Board" Masc_tui_types.Board
   @ back_keys_of_surface "Schedules" Masc_tui_types.Schedules
   @ back_keys_of_surface "Verification" Masc_tui_types.Verification

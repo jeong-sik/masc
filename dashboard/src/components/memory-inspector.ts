@@ -75,6 +75,7 @@ const PROMPT_BLOCK_META: Readonly<Record<TurnPromptBlockId, BlockMeta>> = {
   keeper_instructions: { lbl: 'Keeper 지침', color: 'var(--text-dim)', mem: false },
   dynamic_context: { lbl: '동적 컨텍스트', color: 'var(--volt)', mem: false },
   active_goals: { lbl: '현재 Goal', color: 'var(--volt)', mem: false },
+  direct_input_source: { lbl: '요청 출처', color: 'var(--info)', mem: false },
   completion_authority: { lbl: 'Task 검증 판정', color: 'var(--volt)', mem: false },
   // RFC-0491 §3.3: the Goals in Verifying, out of the System's Goal rows.
   goals_awaiting_proof: { lbl: '증명 대기 Goal', color: 'var(--volt)', mem: false },
@@ -133,6 +134,7 @@ const INPUT_COMPONENT_META: Readonly<Record<TurnInputComponentId, BlockMeta>> = 
   'prompt.keeper_instructions': PROMPT_BLOCK_META.keeper_instructions,
   'prompt.dynamic_context': PROMPT_BLOCK_META.dynamic_context,
   'prompt.active_goals': PROMPT_BLOCK_META.active_goals,
+  'prompt.direct_input_source': PROMPT_BLOCK_META.direct_input_source,
   'prompt.completion_authority': PROMPT_BLOCK_META.completion_authority,
   'prompt.goals_awaiting_proof': PROMPT_BLOCK_META.goals_awaiting_proof,
   'prompt.constitution_amendments': PROMPT_BLOCK_META.constitution_amendments,

@@ -371,10 +371,10 @@ let global =
   ]
 
 (* The plain-listing tail every converted footer shares. *)
-let listing_refresh = b Meta "r" "refresh"
+let listing_refresh = b ~ko:"새로 조회" Meta "r" "refresh"
 let goal_candle_refresh_key = "z"
-let listing_next = b Meta "Tab" "next"
-let listing_quit = b Meta "q" "quit"
+let listing_next = b ~ko:"다음 화면" Meta "Tab" "next"
+let listing_quit = b ~ko:"종료" Meta "q" "quit"
 let listing_meta = [ listing_refresh; listing_next; listing_quit ]
 
 (* Tools' [r] keeps the listing's footer word, but what it reloads follows
@@ -413,15 +413,15 @@ let keeper_actions =
    list, and that is one decision, so the table should not be able to claim
    them for one listing and forget them on the next. Each needs a row: with
    [rl_count = 0] the dispatcher answers them with [()]. *)
-let row_list_page = b ~rows:Needs_row Navigate "PgUp/PgDn" "page"
+let row_list_page = b ~ko:"페이지" ~rows:Needs_row Navigate "PgUp/PgDn" "page"
 let row_list_jumps =
   [ row_list_page
-  ; b ~rows:Needs_row Navigate "Home/End" "top/bottom"
+  ; b ~ko:"처음/끝" ~rows:Needs_row Navigate "Home/End" "top/bottom"
   ]
 
 (* The same two, minus the page key, for the surfaces whose own entry already
    spells one because a detail pane under them pages too. *)
-let row_list_edges = [ b ~rows:Needs_row Navigate "Home/End" "top/bottom" ]
+let row_list_edges = [ b ~ko:"처음/끝" ~rows:Needs_row Navigate "Home/End" "top/bottom" ]
 
 (* The two keys the whole surface exists for, as one binding. Spelled apart
    ("y" and "n") they were two items a fitted row could drop one at a time,
@@ -443,6 +443,9 @@ let approval_read =
 let approval_value_bytes =
   b Navigate "v" "string bytes" ~detail:Detail_only
     ~help:"read decoded top-level Gate string values as bytes, not JSON wire; v or Esc returns"
+let approval_answer_receipt =
+  b ~ko:"마지막 답변" Navigate "v" "last answer" ~detail:List_only
+    ~help:"while browsing, capture the last answer receipt, original question identity and retained follow-up; scroll or search the complete text; v or Esc returns"
 let approval_answer =
   b Act "a" "answer a question"
     ~help:"open the selected question, from a Keeper or a Lane Add-on installation, in its own mode; Esc leaves it"
@@ -493,14 +496,14 @@ let approval_back =
    footer that spelled c, Y and Esc again and had no vote key at all, so that
    row was the only place on the screen that said v votes. *)
 let board_vote_key =
-  b Act "v / V" "up / down"
+  b ~ko:"추천 / 비추천" Act "v / V" "up / down"
     ~help:"press twice to vote: v up, V down; while reading, on the selected \
            comment when the comments have focus, otherwise on the post"
 let board_reply_key =
-  b Act "c" "reply" ~detail:Detail_only ~help:"reply (while reading)"
-let board_copy_key = b Act "Y" "copy link" ~help:"copy the selected post reference"
+  b ~ko:"댓글" Act "c" "reply" ~detail:Detail_only ~help:"reply (while reading)"
+let board_copy_key = b ~ko:"링크 복사" Act "Y" "copy link" ~help:"copy the selected post reference"
 let board_read_focus_key =
-  b Navigate "b" "post / comments" ~detail:Detail_only
+  b ~ko:"본문 / 댓글" Navigate "b" "post / comments" ~detail:Detail_only
     ~help:"switch the focused reading window; on the comments, j/k select a \
            comment and PgUp/PgDn scroll by rows"
 
@@ -519,16 +522,44 @@ let tools_bracket_binding ~pane =
   b Navigate "[ / ]" label
     ~help:"in Available, older/newer retained original run; in other panes, previous/next Keeper"
 
+type metrics_key_scope =
+  | Metrics_all
+  | Metrics_usage
+  | Metrics_usage_sections of usage_section list
+  | Metrics_telemetry
+
+let metrics_bindings =
+  [ b ~ko:"스크롤" Navigate "j/k" "scroll", Metrics_all
+  ; b ~ko:"사용량 / 진단" Navigate "p" "Usage / Telemetry"
+      ~help:"switch between quota and Keeper usage, and engine telemetry", Metrics_all
+  ; b ~ko:"계정 선택" Navigate "f" "account"
+      ~help:"search quota accounts; selection follows Plan and Trend", Metrics_usage_sections [Usage_plan; Usage_trend]
+  ; b ~ko:"전체 계정" Navigate "a" "all accounts"
+      ~help:"clear the quota account selection", Metrics_usage_sections [Usage_plan; Usage_trend]
+  ; b ~ko:"한도 그룹 표시" Navigate "x" "toggle limit group"
+      ~help:"on Plan: show or hide the group for reports at limit or observed exhaustion", Metrics_usage_sections [Usage_plan]
+  ; b ~ko:"보기" Navigate "v / V" "view"
+      ~help:"cycle the Usage reading: Plan, Trend, Keepers, Calls; V goes back", Metrics_usage
+  ; b ~ko:"1 / 7 / 14일" Navigate "w" "1d / 7d / 14d"
+      ~help:"on Usage: cycle the exact UTC day window for provider report history and tool calls", Metrics_usage_sections [Usage_trend; Usage_calls]
+  ; b ~ko:"지표 선택" Navigate "1 / 2 / 3" "telemetry section"
+      ~help:"on Telemetry: Engine, Work, or Tools", Metrics_telemetry
+  ; b ~ko:"뒤로" Act "Esc" "Dashboard", Metrics_all
+  ; b ~ko:"새로 조회" Meta "r" "refresh", Metrics_all
+  ; b ~ko:"다음" Meta "Tab" "next", Metrics_all
+  ; b ~ko:"종료" Meta "q" "quit", Metrics_all
+  ]
+
 let for_surface = function
   | Overview ->
-      [ b Navigate "Left" "Keepers" ~help:"open the Keeper list; Enter opens a chat; Right or Esc returns"
-      ; b Navigate "j/k" "choose" ~help:"move between decision links and conversations"
-      ; b Navigate "Enter" "open" ~help:"open the selected destination; never approve"
-      ; b Navigate "p" "requests" ~help:"approvals and questions"
-      ; b Navigate "g" "quiz" ~help:"the operator quiz's Results: scorecard windows and wrong-answer notes"
-      ; b Navigate ";" "agenda" ~help:"held calls, questions, Goal confirmations and task owner routes"
-      ; b Navigate "m" "Usage" ~help:"account windows and Keeper usage"
-      ; b Navigate "s" "music" ~help:"phrases, arrangements and recorded takes; no Keeper or score required"
+      [ b ~ko:"키퍼" Navigate "Left" "Keepers" ~help:"open the Keeper list; Enter opens a chat; Right or Esc returns"
+      ; b ~ko:"선택" Navigate "j/k" "choose" ~help:"move between decision links and conversations"
+      ; b ~ko:"열기" Navigate "Enter" "open" ~help:"open the selected destination; never approve"
+      ; b ~ko:"승인·질문" Navigate "p" "requests" ~help:"approvals and questions"
+      ; b ~ko:"퀴즈" Navigate "g" "quiz" ~help:"the operator quiz's Results: scorecard windows and wrong-answer notes"
+      ; b ~ko:"일정·요청" Navigate ";" "agenda" ~help:"held calls, questions, Goal confirmations and task owner routes"
+      ; b ~ko:"사용량" Navigate "m" "Usage" ~help:"account windows and Keeper usage"
+      ; b ~ko:"음악" Navigate "s" "music" ~help:"phrases, arrangements and recorded takes; no Keeper or score required"
       ]
       @ listing_meta
   | Acting ->
@@ -564,24 +595,7 @@ let for_surface = function
       ; b Meta "q" "quit"
       ]
   | Metrics ->
-      [ b Navigate "j/k" "scroll"
-      ; b Navigate "p" "Usage / Telemetry"
-          ~help:"switch between quota and Keeper usage, and engine telemetry"
-      ; b Navigate "f" "account" ~help:"search quota accounts; selection follows Plan and Trend"
-      ; b Navigate "a" "all accounts" ~help:"clear the quota account selection"
-      ; b Navigate "x" "toggle limit group"
-          ~help:"on Plan: show or hide the group for reports at limit or observed exhaustion"
-      ; b Navigate "v / V" "view"
-          ~help:"cycle the Usage reading: Plan, Trend, Keepers, Calls; V goes back"
-      ; b Navigate "w" "1d / 7d / 14d"
-          ~help:"on Usage: cycle the exact UTC day window for provider report history and tool calls"
-      ; b Navigate "1 / 2 / 3" "telemetry section"
-          ~help:"on Telemetry: Engine, Work, or Tools"
-      ; b Act "Esc" "Dashboard"
-      ; b Meta "r" "refresh"
-      ; b Meta "Tab" "next"
-      ; b Meta "q" "quit"
-      ]
+      List.map fst metrics_bindings
   | Keepers Keeper_list ->
       (b Navigate "j/k" "move"
          ~help:"move the roster cursor; a grouping view also stops on each group heading")
@@ -595,10 +609,12 @@ let for_surface = function
       :: (b Act "J" "jobs" ~help:"open the selected Keeper's schedules")
       :: (b Act "K" "relations" ~help:"browse Keeper-origin requests queued for the selected Keeper")
       :: (b Act "Enter" "story"
-            ~help:"open the Story window below the list for the Keeper under the cursor; on its story page it closes the window")
+            ~help:"open the selected Keeper Story or shared World window; Enter closes its story/world page")
+      :: (b Act "W" "world"
+            ~help:"select shared World and open its dock; outside memory/age, switch to age; lowercase w still wakes a Keeper")
       :: (b Act "Right" "detail" ~help:"keeper detail")
       :: (b Act "Tab / s / m" "pages"
-            ~help:"with the Story window open: next page / schedules / memory; Esc closes it")
+            ~help:"with a Keeper Story open: next page / schedules / memory; World keeps its own page; Esc closes either window")
       :: keeper_actions
       @ [ b Search "/" "search" ~help:"search names; Enter keeps the query"
         ; b Search "n / N" "next / previous match"
@@ -796,53 +812,53 @@ let for_surface = function
       ]
       @ row_list_jumps @ listing_meta
   | Board ->
-      [ b Navigate "j/k" "move"
-      ; b Act "Right / Enter" "read" ~help:"read the post"
+      [ b ~ko:"선택" Navigate "j/k" "move"
+      ; b ~ko:"읽기" Act "Right / Enter" "read" ~help:"read the post"
         (* Left closes the open post and does nothing on the list
            ([Board_list | Board_compose -> ()] in the [Some "left"] arm of
            masc_tui.ml); Esc leaves the list for the Dashboard. One row per
            state, so the list footer stops offering a key that does nothing
            there. *)
-      ; b Act "Esc" "back" ~detail:List_only ~help:"back to Dashboard"
-      ; b Act "Left / Esc" "back" ~detail:Detail_only ~help:"close the post"
-      ; b Act "w" "write" ~help:"write a post"
+      ; b ~ko:"뒤로" Act "Esc" "back" ~detail:List_only ~help:"back to Dashboard"
+      ; b ~ko:"뒤로" Act "Left / Esc" "back" ~detail:Detail_only ~help:"close the post"
+      ; b ~ko:"글쓰기" Act "w" "write" ~help:"write a post"
       ; board_vote_key
       ; board_reply_key
-      ; b Navigate "1–9" "attachment" ~detail:Detail_only
+      ; b ~ko:"첨부" Navigate "1–9" "attachment" ~detail:Detail_only
           ~help:"preview a stored image or read a stored File/Score here; other media use their existing action"
-      ; b Navigate "O" "original image" ~detail:Detail_only
+      ; b ~ko:"원본 이미지" Navigate "O" "original image" ~detail:Detail_only
           ~help:"after selecting a stored image, read it and open or save its verified original"
-      ; b Navigate "Ctrl-O" "diagram" ~detail:Detail_only
+      ; b ~ko:"다이어그램" Navigate "Ctrl-O" "diagram" ~detail:Detail_only
           ~help:"preview the selected post or comment's Mermaid diagram"
-      ; b Navigate ", / ." "diagram choice" ~detail:Detail_only
+      ; b ~ko:"다이어그램 선택" Navigate ", / ." "diagram choice" ~detail:Detail_only
           ~help:"choose the previous or next Mermaid diagram in the selected post or comment"
       (* Three keys below answer only while a post is open, and the table said
          so in prose the footer cannot read. The list footer named them and
          the dispatcher refused all three there: [[ / ]] steps the open post
          ([step_board_read] returns on [Board_list]), [z] and [h/l] want a
          detail pane beside the list. *)
-      ; b Navigate "S" "successor" ~detail:Detail_only
+      ; b ~ko:"후속 글" Navigate "S" "successor" ~detail:Detail_only
           ~help:"follow the closed post's recorded successor; Esc returns to this post"
-      ; b Navigate "[ / ]" "previous / next post" ~detail:Detail_only
+      ; b ~ko:"이전 / 다음 글" Navigate "[ / ]" "previous / next post" ~detail:Detail_only
           ~help:"while reading, open the post before or after this one"
-      ; b Navigate "s" "sort" ~help:"cycle hot / trending / recent / updated / discussed"
-      ; b Search "f / F" "next / previous hearth"
+      ; b ~ko:"정렬" Navigate "s" "sort" ~help:"cycle hot / trending / recent / updated / discussed"
+      ; b ~ko:"다음 / 이전 게시판" Search "f / F" "next / previous hearth"
           ~help:"move forward or backward through all hearths"
-      ; b Search "H" "choose hearth" ~help:"search hearth names and choose directly"
-      ; b Navigate "z" "wide detail" ~detail:Detail_only
+      ; b ~ko:"게시판 선택" Search "H" "choose hearth" ~help:"search hearth names and choose directly"
+      ; b ~ko:"상세 넓히기" Navigate "z" "wide detail" ~detail:Detail_only
           ~help:"hide or show the post list while reading"
       ; board_read_focus_key
       ; board_copy_key
-      ; b Navigate "Ctrl-W" "pane"
+      ; b ~ko:"영역" Navigate "Ctrl-W" "pane"
           ~help:"cycle the post list, the detail pane, and the Activity pane when it is drawn"
-      ; b Navigate "h/l" "pane" ~detail:Detail_only
+      ; b ~ko:"영역" Navigate "h/l" "pane" ~detail:Detail_only
           ~help:"focus the post list or detail pane"
         (* Beside [f], not instead of it: [f] narrows the list to one hearth,
            this jumps the cursor to a post without changing what is listed. *)
-      ; b Navigate "PgUp/PgDn" "page"
+      ; b ~ko:"페이지" Navigate "PgUp/PgDn" "page"
           ~help:"page through the focused post list, body, or comments"
-      ; b Search "/" "find" ~help:"jump the cursor to a matching post id, author or title"
-      ; b Search "n / N" "next / previous match"
+      ; b ~ko:"찾기" Search "/" "find" ~help:"jump the cursor to a matching post id, author or title"
+      ; b ~ko:"다음 / 이전 일치" Search "n / N" "next / previous match"
       ]
       @ row_list_edges @ listing_meta
   | Approvals ->
@@ -851,6 +867,7 @@ let for_surface = function
            argument is readable before y answers it. *)
       ; approval_read
       ; approval_value_bytes
+      ; approval_answer_receipt
       ; approval_decide
       ; approval_retry
         (* The footer names this key and the sheet did not, so an operator who
@@ -881,45 +898,45 @@ let for_surface = function
       (* With no Goal on the list, the keys that read the one under the cursor
          do nothing or answer with a notice. [b], [t], [p], [v], [f] and [s]
          still act: a filter that leaves no Goal is undone with [f]. *)
-      [ b Navigate "j/k" "move" ~rows:Needs_row
-      ; b Act "b" "summary" ~detail:List_only
+      [ b ~ko:"선택" Navigate "j/k" "move" ~rows:Needs_row
+      ; b ~ko:"요약" Act "b" "summary" ~detail:List_only
           ~help:"read captured Goal totals, the global Task backlog, history, and snapshot changes"
         (* [t] and [p] answer on the list only. In a Goal detail [p] is Pause
            and [r] is Resume (the Actions row), so the detail footer must not
            name [p] as Approvals. *)
-      ; b Navigate "t" "Goals / Tasks" ~detail:List_only
+      ; b ~ko:"목표 / 작업" Navigate "t" "Goals / Tasks" ~detail:List_only
           ~help:"switch between Goals and the active task list"
-      ; b Navigate "p" "Approvals" ~detail:List_only
+      ; b ~ko:"승인" Navigate "p" "Approvals" ~detail:List_only
           ~help:"open operator approvals and Keeper questions; Esc returns to Work"
-      ; b Navigate "v" "next Work tab"
+      ; b ~ko:"다음 작업 탭" Navigate "v" "next Work tab"
           ~help:"Goals, then the two task surfaces: Task Review and \
                  Task Verdicts. Not stages of one flow"
-      ; b Act "Right / Enter" "detail" ~detail:List_only ~rows:Needs_row
+      ; b ~ko:"상세" Act "Right / Enter" "detail" ~detail:List_only ~rows:Needs_row
         (* Left only closes an open Goal or Task detail ([Planning_list -> ()]
            in the [Some "left"] arm of masc_tui.ml); Esc also leaves Work. *)
-      ; b Act "Esc" "back" ~detail:List_only ~help:"leave Work for the Dashboard"
-      ; b Act "Left / Esc" "back" ~detail:Detail_only ~help:"close the detail"
-      ; b Navigate "f" "filter" ~help:"cycle all / active / completed / dropped"
-      ; b Navigate "s" "sort" ~help:"cycle phase / updated / due"
-      ; b Navigate "[ / ]" "previous / next" ~detail:Detail_only
+      ; b ~ko:"뒤로" Act "Esc" "back" ~detail:List_only ~help:"leave Work for the Dashboard"
+      ; b ~ko:"뒤로" Act "Left / Esc" "back" ~detail:Detail_only ~help:"close the detail"
+      ; b ~ko:"필터" Navigate "f" "filter" ~help:"cycle all / active / completed / dropped"
+      ; b ~ko:"정렬" Navigate "s" "sort" ~help:"cycle phase / updated / due"
+      ; b ~ko:"이전 / 다음" Navigate "[ / ]" "previous / next" ~detail:Detail_only
           ~help:"while a detail is open, step to the row before or after it"
-      ; b Act "c" "request completion" ~detail:Detail_only
+      ; b ~ko:"완료 요청" Act "c" "request completion" ~detail:Detail_only
           ~help:"in Goal detail, request completion or recovery; press again to submit"
-      ; b Act "a" "confirm proof" ~detail:Detail_only
+      ; b ~ko:"근거 확인" Act "a" "confirm proof" ~detail:Detail_only
           ~help:"in Goal detail, read the proof; confirm it after it is shown and awaiting confirmation"
-      ; b Act "x" "drop" ~detail:Detail_only
+      ; b ~ko:"중단" Act "x" "drop" ~detail:Detail_only
           ~help:"in Goal detail, enter a reason and press Enter"
-      ; b Act "o" "reopen" ~detail:Detail_only
+      ; b ~ko:"다시 열기" Act "o" "reopen" ~detail:Detail_only
           ~help:"in Goal detail, press twice to request reopening"
       ; b Act goal_candle_refresh_key "Candle" ~rows:Needs_row
           ~help:"open the selected Goal's Candle payout from the list, or read it again in detail"
-      ; b Act "Y" "copy link" ~rows:Needs_row
+      ; b ~ko:"링크 복사" Act "Y" "copy link" ~rows:Needs_row
           ~help:"copy the selected goal reference"
         (* Over the goals [f] and [s] left on screen, in the order they are
            drawn: the search walks what the list shows, not the snapshot. *)
-      ; b Search "/" "find" ~detail:List_only ~rows:Needs_row
+      ; b ~ko:"찾기" Search "/" "find" ~detail:List_only ~rows:Needs_row
           ~help:"jump the cursor to a matching goal id or title"
-      ; b Search "n / N" "next / previous match" ~detail:List_only
+      ; b ~ko:"다음 / 이전 일치" Search "n / N" "next / previous match" ~detail:List_only
           ~rows:Needs_row
       ]
       @ row_list_jumps @ listing_meta
@@ -1050,25 +1067,25 @@ let for_surface = function
       ]
       @ row_list_edges @ listing_meta
   | Memory ->
-      [ b Navigate "j/k" "move" ~help:"move the keeper row"
-      ; b Act "Enter" "facts"
+      [ b ~ko:"선택" Navigate "j/k" "move" ~help:"move the keeper row"
+      ; b ~ko:"기억 항목" Act "Enter" "facts"
           ~help:"browse what the selected keeper actually remembers"
-      ; b Act "v" "health details"
+      ; b ~ko:"상태 상세" Act "v" "health details"
           ~help:"read the complete fleet summary and selected keeper health in a scrollable capture"
-      ; b Act "a / A" "all fleet"
+      ; b ~ko:"전체 Keeper" Act "a / A" "all fleet"
           ~help:"browse and search consolidated memory across the entire fleet"
-      ; b Act "s" "sort"
+      ; b ~ko:"정렬" Act "s" "sort"
           ~help:"cycle sort keepers (facts, size, delta, state, name)"
-      ; b Act "u" "units"
+      ; b ~ko:"단위" Act "u" "units"
           ~help:"switch stored memory and request input between tokens and KiB"
-      ; b Act "d" "detail"
+      ; b ~ko:"상세" Act "d" "detail"
           ~help:"show the selected keeper's ledger rows, or fold them back to \
                  its state, last save and actions"
-      ; b Act "Esc" "clear / back"
+      ; b ~ko:"지우기 / 뒤로" Act "Esc" "clear / back"
           ~help:"clear the filter, or return to Dashboard"
-      ; b Search "/" "filter"
+      ; b ~ko:"찾기" Search "/" "filter"
           ~help:"show only keepers whose id or state matches"
-      ; b Search "n / N" "next / previous match"
+      ; b ~ko:"다음 / 이전 일치" Search "n / N" "next / previous match"
       ]
       @ row_list_jumps @ listing_meta
   | Repositories ->
@@ -1077,17 +1094,17 @@ let for_surface = function
          the first opens the editor to register one, the second opens the
          search line. [v] needs a reading, not a row: after a failed read it
          opens the failure with no repository selected. *)
-      [ b Navigate "v" "full details" ~rows:Needs_reading
+      [ b ~ko:"전체 정보" Navigate "v" "full details" ~rows:Needs_reading
           ~help:"read the complete selected path, Keeper assignments and errors"
-      ; b Navigate "j/k" "scroll" ~rows:Needs_row
-      ; b Act "Enter" "browse" ~rows:Needs_row
+      ; b ~ko:"이동" Navigate "j/k" "scroll" ~rows:Needs_row
+      ; b ~ko:"파일" Act "Enter" "browse" ~rows:Needs_row
           ~help:"open the repository tree, or the selected changed file"
-      ; b Navigate "H" "recent activity" ~rows:Needs_row
+      ; b ~ko:"쓰기 이력" Navigate "H" "recent activity" ~rows:Needs_row
           ~help:"recorded clone writes by Keeper and Task in the last day"
-      ; b Act "d" "Git changes" ~rows:Needs_row
+      ; b ~ko:"Git 변경" Act "d" "Git changes" ~rows:Needs_row
           ~help:"show the selected repository's current working-tree changes"
-      ; b Act "a" "add" ~help:"register a repository; opens $EDITOR"
-      ; b Act "Esc" "back"
+      ; b ~ko:"등록" Act "a" "add" ~help:"register a repository; opens $EDITOR"
+      ; b ~ko:"뒤로" Act "Esc" "back"
           ~help:"return to Dashboard; inside Git changes, close the diff, \
                  then Git changes (Left does the same there)"
       ; b Search "/" "find"
@@ -1397,25 +1414,25 @@ let answers_in_state ?detail_open ?has_rows ?has_reading binding =
       | Needs_reading ->
           (match has_reading with Some false -> false | Some true | None -> true))
 
-let footer_hints ?detail_open ?has_rows ?has_reading surface =
-  hints_of_bindings
+let footer_hints ?(lang = Lang_en) ?detail_open ?has_rows ?has_reading surface =
+  hints_of_bindings ~lang
     (List.filter (answers_in_state ?detail_open ?has_rows ?has_reading)
        (for_surface surface))
 
 (* [r] is Resume for a paused Goal, so the generic refresh label must not
    advertise it as a read in this detail. The Candle read has its own key. *)
-let planning_goal_hints ~detail_open ~has_rows =
+let planning_goal_hints ~lang ~detail_open ~has_rows =
   let bindings = for_surface Planning
     |> List.filter (answers_in_state ~detail_open ?has_rows)
     |> List.filter (fun binding -> not detail_open || not (String.equal binding.key "r")) in
   let read, others = List.partition (fun binding -> String.equal binding.key goal_candle_refresh_key) bindings in
-  hints_in_order (read @ List.stable_sort (fun a b -> compare (group_rank a.group) (group_rank b.group)) others)
+  hints_in_order ~lang (read @ List.stable_sort (fun a b -> compare (group_rank a.group) (group_rank b.group)) others)
 
-let footer_hints_planning_goal_list ~has_rows =
-  planning_goal_hints ~detail_open:false ~has_rows:(Some has_rows)
+let footer_hints_planning_goal_list ~lang ~has_rows =
+  planning_goal_hints ~lang ~detail_open:false ~has_rows:(Some has_rows)
 
-let footer_hints_planning_goal_detail =
-  planning_goal_hints ~detail_open:true ~has_rows:None
+let footer_hints_planning_goal_detail ~lang =
+  planning_goal_hints ~lang ~detail_open:true ~has_rows:None
 
 let footer_hints_tools ~pane =
   let bracket = tools_bracket_binding ~pane in
@@ -1430,7 +1447,9 @@ type ask_supply =
   | Ask_selected
 
 type approvals_footer =
-  | Approval_browsing of { approvals : bool; asks : ask_supply; source : bool }
+  | Approval_browsing of {
+      approvals : bool; asks : ask_supply; source : bool; last_answer : bool;
+    }
   | Approval_writing
   | Approval_armed
   | Approval_answering of { has_choices : bool; takes_text : bool }
@@ -1442,8 +1461,8 @@ let footer_hints_approvals mode =
   let hint = key_hint in
   let row items = String.concat "  " items in
   match mode with
-  | Approval_browsing { approvals; asks; source } ->
-      (* Three things a key can need. [j/k] and [y / n] act on an approval
+  | Approval_browsing { approvals; asks; source; last_answer } ->
+      (* Each key follows its own source. [j/k] and [y / n] act on an approval
          row; with none the decision answers with a notice. [ / ] selects a
          waiting question and [a] opens the selected one, so a cursor on none
          of them keeps [ / ] and drops [a]. [o / O] read the source of a
@@ -1457,6 +1476,7 @@ let footer_hints_approvals mode =
             | Asks_unselected -> [ hint approval_walk ]
             | Ask_selected -> [ hint approval_walk; hint approval_answer ])
          @ (if source then [ hint approval_origin ] else [])
+         @ (if last_answer then [ hint approval_answer_receipt ] else [])
          @ [ hint listing_refresh; hint listing_next
              (* The way out: the two keys a cut row keeps
                 ([Masc_tui_footer.never_dropped_keys]). *)
@@ -1500,12 +1520,18 @@ let has_row_scoped_keys surface =
       | Needs_row | Needs_reading -> true)
     (for_surface surface)
 
-let footer_hints_metrics ~telemetry =
-  for_surface Metrics
-  |> List.filter (fun binding ->
-         if telemetry then not (List.mem binding.key [ "w"; "v / V"; "f"; "a"; "x" ])
-         else not (String.equal binding.key "1 / 2 / 3"))
-  |> hints_of_bindings
+let footer_hints_metrics ~lang ~section ~telemetry =
+  metrics_bindings
+  |> List.filter_map (fun (binding, scope) ->
+         let shown = match scope, telemetry with
+           | Metrics_all, _
+           | Metrics_usage, false | Metrics_telemetry, true -> true
+           | Metrics_usage, true | Metrics_telemetry, false
+           | Metrics_usage_sections _, true -> false
+           | Metrics_usage_sections sections, false -> List.mem section sections
+         in
+         if shown then Some binding else None)
+  |> hints_of_bindings ~lang
 
 (* The keys an open approval answers to. Its footer was written out in the
    renderer, which is how it came to spell the decision keys apart from the
@@ -1530,50 +1556,64 @@ let footer_hints_approval_detail ~value_hint =
    that the footer never named. Both rows project from here, and the pane
    keeps to what the draft is and where it goes. *)
 let board_compose_writing_bindings ~reply =
-  [ b Act "Enter" "newline" ~help:"newline in the draft; Esc opens the send menu"
+  [ b ~ko:"줄바꿈" Act "Enter" "newline" ~help:"newline in the draft; Esc opens the send menu"
   ; b Act "Ctrl-E" "$EDITOR" ~help:"hand the draft to $EDITOR and take it back"
   ]
   (* A comment's wire carries text only, so the hint appears where the key
      works -- a reply's Ctrl-A says why instead of staging. *)
   @ (if reply then []
-     else [ b Act "Ctrl-A" "attach" ~help:"stage a local file to upload with the post" ])
-  @ [ b Meta "Esc" "menu" ~help:"send, discard, or keep writing"
-    ; b Meta "Tab" "surfaces"
+     else [ b ~ko:"첨부" Act "Ctrl-A" "attach" ~help:"stage a local file to upload with the post" ])
+  @ [ b ~ko:"메뉴" Meta "Esc" "menu" ~help:"send, discard, or keep writing"
+    ; b ~ko:"화면" Meta "Tab" "surfaces"
     ]
 
 (* No [q] here: while the draft has the keys, [q] is a printable scalar and
    goes into the draft like any other letter. Leaving is Esc and then d. *)
-let footer_hints_board_compose_writing ~reply =
-  "type to write  " ^ hints_of_bindings (board_compose_writing_bindings ~reply)
+let footer_hints_board_compose_writing ~lang ~reply =
+  (match lang with Lang_ko -> "내용 입력  " | Lang_en -> "type to write  ")
+  ^ hints_of_bindings ~lang (board_compose_writing_bindings ~reply)
 
 (* The path input after Ctrl-A owns the compose keys until the file is staged
    or the input is cancelled. *)
 let board_attach_input_bindings =
-  [ b Act "Enter" "stage"
-  ; b Meta "Esc" "cancel"
+  [ b ~ko:"첨부 준비" Act "Enter" "stage"
+  ; b ~ko:"취소" Meta "Esc" "cancel"
   ]
 
-let footer_hints_board_attach_input =
-  "type the file path  " ^ hints_of_bindings board_attach_input_bindings
+let footer_hints_board_attach_input ~lang =
+  (match lang with Lang_ko -> "파일 경로 입력  " | Lang_en -> "type the file path  ")
+  ^ hints_of_bindings ~lang board_attach_input_bindings
 
-let board_compose_armed_bindings ~reply =
-  [ b Act "s" "send" ]
-  @ [ b Act "e" "edit in $EDITOR" ]
-  @ (if reply then [] else [ b Act "h" "cycle hearth" ~help:"a new post's sub-board" ])
-  @ [ b Act "d" "discard"; b Meta "Esc" "keep writing" ]
+type board_compose_menu_hints = {
+  choices : string;
+  hints : string;
+}
 
-let footer_hints_board_compose_armed ~reply =
-  hints_of_bindings (board_compose_armed_bindings ~reply)
+let board_compose_menu_hints ~lang ~reply =
+  { choices =
+      hints_of_bindings ~lang
+        [ b ~ko:"전송" Act "s" "send"
+        ; b ~ko:"버리기" Act "d" "discard"
+        ; b ~ko:"계속" Meta "Esc" "continue"
+        ]
+  ; hints =
+      hints_of_bindings ~lang
+        ([ b ~ko:"$EDITOR에서 편집" Act "e" "edit in $EDITOR" ]
+         @ (if reply then []
+            else [ b ~ko:"게시판 전환" Act "h" "cycle hearth"
+                     ~help:"a new post's sub-board" ]))
+  }
 
 (* No [q] here either: while a drop reason has the keys, every printable
    scalar is a letter of it. *)
 let goal_drop_reason_bindings =
-  [ b Act "Enter" "drop" ~help:"request a drop with this reason; Tasks observed unclaimed may be cancelled"
-  ; b Meta "Esc" "cancel" ~help:"close the reason; the goal stays as it is"
+  [ b ~ko:"중단" Act "Enter" "drop" ~help:"request a drop with this reason; Tasks observed unclaimed may be cancelled"
+  ; b ~ko:"취소" Meta "Esc" "cancel" ~help:"close the reason; the goal stays as it is"
   ]
 
-let footer_hints_goal_drop_reason =
-  "type why  " ^ hints_of_bindings goal_drop_reason_bindings
+let footer_hints_goal_drop_reason ~lang =
+  (match lang with Lang_ko -> "중단 이유 입력  " | Lang_en -> "type why  ")
+  ^ hints_of_bindings ~lang goal_drop_reason_bindings
 
 (* A pane's own keys, then the keys all seven panes share. *)
 let config_pane_bindings pane =
@@ -1758,13 +1798,13 @@ let footer_hints_prompt_assets ~lang =
    surface reads [footer_hints Planning]; this is the other half of that one
    screen, so its keys come from a table too rather than from the renderer. *)
 let work_tasks_bindings =
-  [ b Navigate "j/k" "select" ~help:"move through Work's open tasks"
-  ; b Navigate "t / Esc" "Goals" ~help:"hand j/k back to the Goals list"
-  ; b Act "Enter" "detail" ~help:"open the selected task"
+  [ b ~ko:"선택" Navigate "j/k" "select" ~help:"move through Work's open tasks"
+  ; b ~ko:"목표" Navigate "t / Esc" "Goals" ~help:"hand j/k back to the Goals list"
+  ; b ~ko:"상세" Act "Enter" "detail" ~help:"open the selected task"
   ]
   @ listing_meta
 
-let footer_hints_work_tasks = hints_of_bindings work_tasks_bindings
+let footer_hints_work_tasks ~lang = hints_of_bindings ~lang work_tasks_bindings
 
 (* The step Esc and Left take next on the Code surface. Both walk one ladder,
    from the layer drawn on top down to the project tree; only Esc goes on from
@@ -2019,11 +2059,11 @@ let cancels_two_press ~input_seen ~key ~second_press =
    [K] and [B] answer in the detail as they do on the list (masc_tui.ml
    matches them under [Fusion_detail]); the footer left them out, and a body
    row said "K Keeper · B Board" in its own notation instead. *)
-let footer_hints_board_read ~focus_posts ~focus_comments ~full_history
+let footer_hints_board_read ~lang ~focus_posts ~focus_comments ~full_history
     ~(layout : board_read_layout) ~has_attachments ~has_successor =
   let pane_keys =
     match layout with
-    | Board_read_split -> [ b Navigate "h/l" "pane"; b Navigate "Ctrl-W" "switch" ]
+    | Board_read_split -> [ b ~ko:"영역" Navigate "h/l" "pane"; b ~ko:"전환" Navigate "Ctrl-W" "switch" ]
     | Board_read_wide | Board_read_one_pane -> []
   in
   (* The label is where the key goes, and [z] goes both ways. Drawn as "wide"
@@ -2032,8 +2072,8 @@ let footer_hints_board_read ~focus_posts ~focus_comments ~full_history
      second layout to reach, and the key is not drawn. *)
   let width_key =
     match layout with
-    | Board_read_split -> [ b Navigate "z" "wide" ]
-    | Board_read_wide -> [ b Navigate "z" "list" ]
+    | Board_read_split -> [ b ~ko:"넓게" Navigate "z" "wide" ]
+    | Board_read_wide -> [ b ~ko:"목록" Navigate "z" "list" ]
     | Board_read_one_pane -> []
   in
   (* On the comments j/k move the selection, not the rows, and the vote keys
@@ -2041,18 +2081,18 @@ let footer_hints_board_read ~focus_posts ~focus_comments ~full_history
      vote on the post above. *)
   let vote_key =
     if focus_comments && not focus_posts then
-      b Act "v / V" "comment up / down"
+      b ~ko:"댓글 추천 / 비추천" Act "v / V" "comment up / down"
     else board_vote_key
   in
-  hints_of_bindings
-    ([ b Navigate "j/k"
+  hints_of_bindings ~lang
+    ([ b ~ko:(if focus_posts then "글" else if focus_comments then "댓글" else "본문") Navigate "j/k"
          (if focus_posts then "posts"
           else if focus_comments then "comment" else "body")
      ; board_read_focus_key
-     ; b Navigate "[/]" "post"
-     ; b Navigate "PgUp/PgDn" "page"
+     ; b ~ko:"글" Navigate "[/]" "post"
+     ; b ~ko:"페이지" Navigate "PgUp/PgDn" "page"
      ]
-     @ (if has_successor then [b Navigate "S" "successor"] else [])
+     @ (if has_successor then [b ~ko:"후속 글" Navigate "S" "successor"] else [])
      @ pane_keys @ width_key
      (* [o] goes after the pane and width keys. The fitter gives up the last
         droppable hint first, so a key placed ahead of them pushes them off:
@@ -2066,25 +2106,25 @@ let footer_hints_board_read ~focus_posts ~focus_comments ~full_history
         row. Measured at 140 cells: [o] and this hint ride the same drop
         wave as [c], [Y], [r] and [Tab] — the row is over budget long
         before this key existed. *)
-     @ (if has_attachments then [ b Navigate "1-9" "open"; b Navigate "O" "original image" ] else [])
+     @ (if has_attachments then [ b ~ko:"열기" Navigate "1-9" "open"; b ~ko:"원본 이미지" Navigate "O" "original image" ] else [])
      @ (if focus_posts then [] else
-          [b Navigate "Ctrl-O" "diagram"; b Navigate ",/." "choose diagram"])
-     @ [ b Navigate "o" (if full_history then "newest 20" else "all comments") ]
+          [b ~ko:"다이어그램" Navigate "Ctrl-O" "diagram"; b ~ko:"다이어그램 선택" Navigate ",/." "choose diagram"])
+     @ [ b ~ko:(if full_history then "최근 20개" else "모든 댓글") Navigate "o" (if full_history then "newest 20" else "all comments") ]
      @ [ vote_key
        ; board_reply_key
        ; board_copy_key
-       ; b Act "Left / Esc" "back"
-       ; b Meta "r" "refresh"
-       ; b Meta "Tab" "next"
+       ; b ~ko:"뒤로" Act "Left / Esc" "back"
+       ; b ~ko:"새로 조회" Meta "r" "refresh"
+       ; b ~ko:"다음 화면" Meta "Tab" "next"
        ])
 
 (* A missing post has no read pane or copy target. Keep only the Board
    bindings that still act while loading or after a failed read. *)
-let footer_hints_board_pending =
+let footer_hints_board_pending ~lang =
   for_surface Board
   |> List.filter (fun binding ->
          List.exists (String.equal binding.key) [ "r"; "Left / Esc"; "Tab" ])
-  |> hints_of_bindings
+  |> hints_of_bindings ~lang
 
 (* The scroll position is not here. It is not a key and it cannot be looked
    up, so it travels to the footer as its own argument
@@ -2172,16 +2212,16 @@ let footer_hints_git_diff =
    instead of pausing a keeper -- so a reader who has not pressed them learns
    them only from [?], which is what [?] answers. *)
 let bindings_memory_facts =
-  [ b Navigate "j/k" "move" ~rows:Needs_row
-  ; b Act "Enter" "detail" ~rows:Needs_row
+  [ b ~ko:"이동 / 스크롤" Navigate "j/k" "move" ~rows:Needs_row
+  ; b ~ko:"상세" Act "Enter" "detail" ~rows:Needs_row
       ~help:"read the whole fact in a wide overlay that owns the terminal"
-  ; b Act "c / C" "category" ~help:"cycle category filter (forward / backward)"
-  ; b Act "d" "Category pane" ~help:"show or hide the Category rail on wide screens; facts use the full width by default"
-  ; b Act "s" "sort" ~help:"cycle sort (recency, last retrieved, retrieved count, category, claim)"
-  ; b Act "a / A" "all fleet" ~help:"switch to consolidated memory across entire fleet"
-  ; b Search "/" "filter" ~help:"live text filter / search"
-  ; b Search "n / N" "next / previous match" ~rows:Needs_row
-  ; b Act "Esc" "close / clear" ~help:"clear filter or exit to health table"
+  ; b ~ko:"분류" Act "c / C" "category" ~help:"cycle category filter (forward / backward)"
+  ; b ~ko:"분류 영역" Act "d" "Category pane" ~help:"show or hide the Category rail on wide screens; facts use the full width by default"
+  ; b ~ko:"정렬" Act "s" "sort" ~help:"cycle sort (recency, last retrieved, retrieved count, category, claim)"
+  ; b ~ko:"전체 Keeper" Act "a / A" "all fleet" ~help:"switch to consolidated memory across entire fleet"
+  ; b ~ko:"필터" Search "/" "filter" ~help:"live text filter / search"
+  ; b ~ko:"다음 / 이전 일치" Search "n / N" "next / previous match" ~rows:Needs_row
+  ; b ~ko:"닫기 / 지우기" Act "Esc" "close / clear" ~help:"clear filter or exit to health table"
   ]
   @ row_list_edges @ listing_meta
 
@@ -2189,26 +2229,26 @@ let bindings_memory_facts =
    filter that left none, has nothing for [j/k], [Enter] and [n / N] to act on.
    [c / C], [s], [a / A] and [/] stay: a filter that left no fact is undone
    with them. *)
-let footer_hints_memory_facts ~cols ~has_rows =
+let footer_hints_memory_facts ~lang ~cols ~has_rows =
   let bindings =
     if cols >= Masc_tui_roster_pane.threshold_cols then bindings_memory_facts
     else List.filter (fun (binding : binding) -> binding.key <> "d") bindings_memory_facts
   in
-  hints_of_bindings (List.filter (answers_in_state ~has_rows) bindings)
+  hints_of_bindings ~lang (List.filter (answers_in_state ~has_rows) bindings)
 
 (* The reading the browser's Enter opens. One fact scrolls under the cursor
    instead of the cursor moving rows, so it owns page and edge keys the
    browser row has none of. The window marker it leads with is not a key, and
    the renderer adds it. *)
 let bindings_memory_fact_detail =
-  [ b Navigate "j/k" "scroll"
-  ; b Navigate "PgUp/PgDn" "page"
-  ; b Navigate "g / G" "top/bottom"
+  [ b ~ko:"이동 / 스크롤" Navigate "j/k" "scroll"
+  ; b ~ko:"페이지" Navigate "PgUp/PgDn" "page"
+  ; b ~ko:"처음/끝" Navigate "g / G" "top/bottom"
       ~help:"jump to the first or last line of the fact"
-  ; b Act "Esc" "close" ~help:"return to the fact list"
+  ; b ~ko:"닫기" Act "Esc" "close" ~help:"return to the fact list"
   ]
 
-let memory_fact_detail_hints = hints_of_bindings bindings_memory_fact_detail
+let memory_fact_detail_hints ~lang = hints_of_bindings ~lang bindings_memory_fact_detail
 
 (* The reading Activity's [Enter] opens on an event row. One event's evidence
    scrolls under the cursor instead of the cursor moving rows, so it owns page

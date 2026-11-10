@@ -33,32 +33,10 @@ echo "Bumping release version to $NEW_VERSION"
 # A malformed changelog fragment stops the bump before any file changes.
 python3 "$ROOT_DIR/scripts/changelog-fragments.py" check --dir "$ROOT_DIR/changelog.d"
 
-# 1) SSOT: dune-project
-sedi -E "s/^\(version [^)]+\)$/\(version $NEW_VERSION\)/" \
-  "$ROOT_DIR/dune-project"
-echo "  dune-project updated"
-
-# 2) README badge, if the README still carries one
-if grep -Eq 'version-[0-9]+\.[0-9]+\.[0-9]+-blue' "$ROOT_DIR/README.md"; then
-  sedi -E "s/version-[0-9]+\.[0-9]+\.[0-9]+-blue/version-$NEW_VERSION-blue/" \
-    "$ROOT_DIR/README.md"
-  echo "  README.md badge updated"
-else
-  echo "  README.md has no version badge — nothing to update"
-fi
-
-# 3) opam metadata (if tracked)
-if [ -f "$ROOT_DIR/masc.opam" ]; then
-  sedi -E "s/^version: \"[^\"]*\"$/version: \"$NEW_VERSION\"/" "$ROOT_DIR/masc.opam"
-  echo "  masc.opam version synchronized (CI verifies generated metadata)"
-fi
-
-# 4) CHANGELOG: fold the per-PR fragments (changelog.d/<PR>.md) into
-# [Unreleased], then add the version stub if missing. The release author moves
-# the [Unreleased] entries into the version section before tagging.
 # Before folding, list the pull requests merged since the last release whose
 # changes carry no fragment (#39079, #39095: nine entries had to be backfilled
-# after their releases). It reports; it does not refuse. A broken report
+# after their releases). With --strict it refuses the bump when a merged
+# pull request still lacks a fragment. A broken report
 # (bad base, crash) announces itself instead of passing as an empty list.
 # The base cannot come from `git describe --tags --abbrev=0`, which only sees
 # tags that are ancestors of HEAD: release branches land back on main as
@@ -84,29 +62,72 @@ if [ -n "$last_tag" ]; then
   fi
   if [ -z "$base_ref" ]; then
     # Between tagging and folding the branch back onto main the reflection
-    # commit does not exist yet and the tag is not an ancestor of HEAD, so
-    # no base can be found. Say so instead of silently skipping the report
-    # ("A broken report announces itself" — an empty report must not look
-    # like one).
-    echo "warning: cannot determine missing-fragment base for $last_tag:" \
-      "no 'chore(release): merge $last_tag back into main' commit on main" \
-      "first-parent and $last_tag is not an ancestor of HEAD;" \
-      "skipping the missing-fragment report" >&2
+    # commit does not exist yet and the tag is not an ancestor of HEAD. The
+    # tag still names the release cut, and `git log <tag>..HEAD` is a range
+    # query that needs no ancestry: since the release branch shares the cut
+    # commit with main, the range covers exactly the post-cut window. Fall
+    # back to it instead of skipping the report — a skipped report is how
+    # v0.69.0's window went unchecked (only the reflection-grep matched).
+    base_ref="$last_tag"
+    echo "note: using $last_tag itself as the missing-fragment base" \
+      "(no 'chore(release): merge $last_tag back into main' commit on" \
+      "first-parent and the tag is not an ancestor of HEAD)" >&2
   fi
 fi
 if [ -n "$base_ref" ]; then
   missing_err="$(mktemp)"
+  missing_out="$(mktemp)"
   missing_status=0
   python3 "$ROOT_DIR/scripts/changelog-fragments.py" missing \
-    --base "$base_ref" --dir "$ROOT_DIR/changelog.d" \
-    2>"$missing_err" || missing_status=$?
+    --base "$base_ref" --dir "$ROOT_DIR/changelog.d" --strict \
+    >"$missing_out" 2>"$missing_err" || missing_status=$?
+  if [ "$missing_status" -eq 3 ]; then
+    # Exit 3 is the strict gate's "findings" verdict: the report listed
+    # non-exempt pull requests without fragments. Refuse the bump — write
+    # or backfill the fragments first. (Exempt-only output exits 0 and is
+    # echoed below, so the operator still sees every omission.)
+    cat "$missing_out" >&2
+    echo "error: merged pull requests above lack changelog fragments; refusing to bump" >&2
+    rm -f "$missing_err" "$missing_out"
+    exit 1
+  fi
   if [ "$missing_status" -ne 0 ]; then
     # An empty list means "nothing missing"; a crash must not look like one.
     echo "warning: missing-fragment list failed (exit $missing_status)" >&2
     sed 's/^/  /' "$missing_err" >&2
   fi
-  rm -f "$missing_err"
+  if [ "$missing_status" -eq 0 ] && [ -s "$missing_out" ]; then
+    # Exempt-only findings still exit 0; echo them so the operator sees
+    # every omission, not just the blocking ones.
+    cat "$missing_out" >&2
+  fi
+  rm -f "$missing_err" "$missing_out"
 fi
+
+
+# 1) SSOT: dune-project
+sedi -E "s/^\(version [^)]+\)$/\(version $NEW_VERSION\)/" \
+  "$ROOT_DIR/dune-project"
+echo "  dune-project updated"
+
+# 2) README badge, if the README still carries one
+if grep -Eq 'version-[0-9]+\.[0-9]+\.[0-9]+-blue' "$ROOT_DIR/README.md"; then
+  sedi -E "s/version-[0-9]+\.[0-9]+\.[0-9]+-blue/version-$NEW_VERSION-blue/" \
+    "$ROOT_DIR/README.md"
+  echo "  README.md badge updated"
+else
+  echo "  README.md has no version badge — nothing to update"
+fi
+
+# 3) opam metadata (if tracked)
+if [ -f "$ROOT_DIR/masc.opam" ]; then
+  sedi -E "s/^version: \"[^\"]*\"$/version: \"$NEW_VERSION\"/" "$ROOT_DIR/masc.opam"
+  echo "  masc.opam version synchronized (CI verifies generated metadata)"
+fi
+
+# 4) CHANGELOG: fold the per-PR fragments (changelog.d/<PR>.md) into
+# [Unreleased], then add the version stub if missing. The release author moves
+# the [Unreleased] entries into the version section before tagging.
 python3 "$ROOT_DIR/scripts/changelog-fragments.py" assemble \
   --dir "$ROOT_DIR/changelog.d" --changelog "$ROOT_DIR/CHANGELOG.md"
 if ! grep -q "^## \[$NEW_VERSION\]" "$ROOT_DIR/CHANGELOG.md"; then

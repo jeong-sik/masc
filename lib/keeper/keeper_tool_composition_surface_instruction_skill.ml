@@ -143,6 +143,11 @@ let make_instruction_skill_tool
   let description = instruction_skill_description instruction_skills in
   let observe handler execution_env input =
     let result = handler execution_env input in
+    (* task-3268: the Skill reader bypasses the exec handler, so its honest
+       typed result never reached the shared dispatch observers and
+       tool_metric_events held zero keeper_skill rows (#38824). Emit here,
+       where the result still carries its Completed/Failed disposition. *)
+    Tool_dispatch.run_dispatch_observers Dispatch_outcome.Handled (Some result);
     Option.iter (fun callback -> callback ~input result) on_result;
     result
   in

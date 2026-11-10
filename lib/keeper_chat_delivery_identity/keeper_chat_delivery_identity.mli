@@ -9,6 +9,23 @@ module Request_id : sig
   val equal : t -> t -> bool
 end
 
+type approval_input_binding = private
+  { approval_id : Request_id.t
+  ; input_fingerprint : string
+  }
+(** Identity of one prepared canonical approval input. The fingerprint does
+    not attest provider acceptance, checkpoint persistence or wire bytes. *)
+
+val approval_input_binding :
+  approval_id:string -> input_fingerprint:string ->
+  (approval_input_binding, string) result
+
+val validate_approval_input_bindings : approval_input_binding list -> (unit, string) result
+(** Require an ordered nonempty vector without duplicate approval IDs. *)
+
+val approval_input_bindings_equal :
+  approval_input_binding list -> approval_input_binding list -> bool
+
 type delivery_key =
   | Operation of Request_id.t
   | Operation_checkpoint of { operation_id : Request_id.t; checkpoint : Keeper_checkpoint_ref.t }
@@ -17,6 +34,9 @@ type delivery_key =
   | Workspace_message of Request_id.t
   | Connector_message of Request_id.t
   | Approval_lifecycle of Request_id.t
+  | Autonomous_turn of Ids.Turn_ref.t
+(** Common tool rows belong to their actual autonomous turn. They never
+    borrow the first approval's identity or invent a chat operation. *)
 
 (** [Workspace_message] identifies one producer-minted workspace broadcast.
     It lets a mentioned Keeper append that exact broadcast to its durable
@@ -40,6 +60,11 @@ type transcript_slot =
   | Approval_replay
   | Approval_replay_correction
   | Approval_continuation
+  | Autonomous_input_binding of approval_input_binding list
+(** Internal metadata row bound to [Autonomous_turn], persisted atomically
+    with its common tool rows and omitted from user-facing history. One turn
+    may have only one exact ordered input vector. A different vector is a
+    conflict, even though its full transcript slot is structurally different. *)
 
 (** [Tool_call] identifies a row by the canonical execution committed by the
     tool log. [Tool_delivery] is the store-owned ordinal used only when no
@@ -62,6 +87,7 @@ val delivery_key_equal : delivery_key -> delivery_key -> bool
 val transcript_slot_to_yojson : transcript_slot -> Yojson.Safe.t
 val transcript_slot_of_yojson : Yojson.Safe.t -> (transcript_slot, string) result
 val transcript_slot_equal : transcript_slot -> transcript_slot -> bool
+val transcript_slot_is_internal : transcript_slot -> bool
 
 (** The two JSON fields a row carries for {!delivery_provenance}, written
     together. *)

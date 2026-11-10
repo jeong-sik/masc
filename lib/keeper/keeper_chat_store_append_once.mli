@@ -30,8 +30,9 @@ val announce_if_appended :
   (append_once_result, 'a) result ->
   (append_once_result, 'a) result
 
-(* [line] is encoded under the file lock only when its slot is absent, so a
-   lazy route is never read for a row that is already present. Stdlib.Lazy:
+(* Ordinary delivery lines are encoded under the file lock only when their
+   slot is absent. Autonomous candidates are also decoded for owner/binding
+   validation before writing; their wrapper uses a fixed route. Stdlib.Lazy:
    the lock body runs in a systhread where Eio.Lazy cannot run, and each lazy
    belongs to one append call, so nothing forces it concurrently. *)
 type append_once_line =
@@ -65,3 +66,14 @@ val append_tool_calls_once :
   ?turn_ref:Ids.Turn_ref.t ->
   unit ->
   (append_once_result, string) result
+
+val append_autonomous_tool_calls_once :
+  base_dir:string -> keeper_name:string -> turn_ref:Ids.Turn_ref.t ->
+  input_binding:Keeper_chat_delivery_identity.approval_input_binding list ->
+  tool_calls:tool_call list -> unit ->
+  (append_once_result * Keeper_chat_store_append_primitives.tool_ownership list, string) result
+(** Append the turn's internal binding and common tool rows under one existing
+    chat lock and durable update. Even an empty tool list records the binding.
+    A different vector or mismatched row owner refuses the whole append.
+    The receipt names only execution slots actually added under that lock;
+    an existing prefix is never announced as newly committed ownership. *)

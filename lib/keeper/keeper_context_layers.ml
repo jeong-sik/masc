@@ -2,6 +2,7 @@
 
 type layer_id =
   | Active_goals
+  | Direct_input_source
   | Goal_observations
   | Goals_awaiting_proof
   | Current_task
@@ -38,6 +39,7 @@ type layer_id =
    fleet-volatile section and sits last. *)
 let ordered =
   [ Active_goals
+  ; Direct_input_source
   ; Goal_observations
   ; Goals_awaiting_proof
   ; Current_task
@@ -66,26 +68,27 @@ let ordered =
    call site) a rendering for the new layer. *)
 let order_index = function
   | Active_goals -> 0
-  | Goal_observations -> 1
-  | Goals_awaiting_proof -> 2
-  | Current_task -> 3
-  | Approval_authority -> 4
-  | Connected_surfaces -> 5
-  | Namespace_state -> 6
-  | Workspace_memory -> 7
-  | Wiki -> 8
-  | Lane_updates -> 9
-  | Autonomous_trigger -> 10
-  | Scheduled_automation -> 11
-  | Completion_authority -> 12
-  | Task_cancellations -> 13
-  | Pending_mentions -> 14
-  | Scope_messages -> 15
-  | Own_board_posts -> 16
-  | Board_activity -> 17
-  | Own_recent_actions -> 18
-  | Recent_work -> 19
-  | Fleet_messages -> 20
+  | Direct_input_source -> 1
+  | Goal_observations -> 2
+  | Goals_awaiting_proof -> 3
+  | Current_task -> 4
+  | Approval_authority -> 5
+  | Connected_surfaces -> 6
+  | Namespace_state -> 7
+  | Workspace_memory -> 8
+  | Wiki -> 9
+  | Lane_updates -> 10
+  | Autonomous_trigger -> 11
+  | Scheduled_automation -> 12
+  | Completion_authority -> 13
+  | Task_cancellations -> 14
+  | Pending_mentions -> 15
+  | Scope_messages -> 16
+  | Own_board_posts -> 17
+  | Board_activity -> 18
+  | Own_recent_actions -> 19
+  | Recent_work -> 20
+  | Fleet_messages -> 21
 ;;
 
 type unattributed = World_frame | Host_workspace_recall | Direct_turn | Unprojected_input
@@ -153,6 +156,7 @@ let assemble ~content_of =
 
 let layer_name = function
   | Active_goals -> "active_goals"
+  | Direct_input_source -> "direct_input_source"
   | Goal_observations -> "goal_observations"
   | Goals_awaiting_proof -> "goals_awaiting_proof"
   | Current_task -> "current_task"
@@ -202,7 +206,7 @@ let source_of_name name =
    [Dynamic_context] block has ({!Prompt_block_id.resent_when_held}). *)
 let resend_on_resume = function
   | Layer
-      ( Active_goals | Goal_observations | Current_task | Approval_authority | Connected_surfaces
+      ( Active_goals | Direct_input_source | Goal_observations | Current_task | Approval_authority | Connected_surfaces
       | Namespace_state | Workspace_memory | Wiki | Lane_updates
       | Own_board_posts | Own_recent_actions | Recent_work | Fleet_messages )
   | Unattributed (Host_workspace_recall | Direct_turn | Unprojected_input) ->

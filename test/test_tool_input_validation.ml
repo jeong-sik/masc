@@ -380,6 +380,28 @@ let test_required_without_properties_rejects_schema () =
       "expected malformed schema to fail, got %s"
       (Yojson.Safe.to_string forwarded)
 
+let test_schema_conversion_error_is_typed () =
+  let schema = `Assoc [ "properties", `String "invalid" ] in
+  match Tool_bridge.params_of_json_schema schema with
+  | Error (Tool_bridge.Schema_conversion_error detail) ->
+    Alcotest.(check bool) "diagnostic is present" true (String.length detail > 0)
+  | Error error -> Alcotest.failf "unexpected error: %s" (Tool_bridge.schema_error_to_string error)
+  | Ok _ -> Alcotest.fail "invalid properties must be rejected"
+
+let test_bridge_constructors_return_typed_schema_error () =
+  let schema = `Assoc [ "type", `String "array" ] in
+  let check = function
+    | Error (Tool_bridge.Invalid_tool_schema { name; detail }) ->
+      Alcotest.(check string) "tool identity" "broken" name;
+      Alcotest.(check bool) "diagnostic is present" true (String.length detail > 0)
+    | Error error -> Alcotest.failf "wrong error: %s" (Tool_bridge.schema_error_to_string error)
+    | Ok _ -> Alcotest.fail "invalid root schema must be rejected"
+  in
+  check (Tool_bridge.agent_core_tool_of_masc ~name:"broken" ~description:"test"
+           ~input_schema:schema (fun _ -> assert false));
+  check (Tool_bridge.agent_core_tool_of_masc_with_execution_env ~name:"broken" ~description:"test"
+           ~input_schema:schema (fun _ _ -> assert false))
+
 let test_schema_ambiguous_union_is_rejected () =
   let schema =
     `Assoc
@@ -401,8 +423,9 @@ let test_schema_ambiguous_union_is_rejected () =
       ]
   in
   match Tool_bridge.params_of_json_schema schema with
-  | _ -> Alcotest.fail "ambiguous union must not select its first member"
-  | exception Invalid_argument _ -> ()
+  | Ok _ -> Alcotest.fail "ambiguous union must not select its first member"
+  | Error (Tool_bridge.Unprojected_property "payload") -> ()
+  | Error error -> Alcotest.failf "unexpected error: %s" (Tool_bridge.schema_error_to_string error)
 
 let test_schema_nullable_union_preserves_non_null_type () =
   let schema =
@@ -419,15 +442,15 @@ let test_schema_nullable_union_preserves_non_null_type () =
       ]
   in
   match Tool_bridge.params_of_json_schema schema with
-  | [ (param : Agent_core.Types.tool_param) ] ->
+  | Ok [ (param : Agent_core.Types.tool_param) ] ->
       Alcotest.(check string) "name" "payload" param.name;
       Alcotest.(check bool) "optional" false param.required;
       (match param.param_type with
        | Agent_core.Types.Object -> ()
        | _ -> Alcotest.fail "nullable object must remain object")
-  | params ->
-      Alcotest.failf "expected one converted parameter, got %d"
-        (List.length params)
+  | Ok params ->
+      Alcotest.failf "expected one converted parameter, got %d" (List.length params)
+  | Error error -> Alcotest.fail (Tool_bridge.schema_error_to_string error)
 
 (* A property that declares [oneOf] alternatives and no [type] (BrowserAct
    [keepPages]) is left off the typed view without raising, while its sibling
@@ -454,27 +477,30 @@ let test_schema_declared_alternatives_are_not_projected () =
     ]
   in
   (match Tool_bridge.params_of_json_schema (schema alternatives) with
-   | [ (param : Agent_core.Types.tool_param) ] ->
+   | Ok [ (param : Agent_core.Types.tool_param) ] ->
      Alcotest.(check string) "sibling stays projected" "action" param.name
-   | params ->
-     Alcotest.failf "expected only the sibling parameter, got %d" (List.length params));
+   | Ok params ->
+     Alcotest.failf "expected only the sibling parameter, got %d" (List.length params)
+   | Error error -> Alcotest.fail (Tool_bridge.schema_error_to_string error));
   (match Tool_bridge.params_of_json_schema (schema [ ("oneOf", `List []) ]) with
-   | _ -> Alcotest.fail "an empty oneOf declares no alternatives and must be refused"
-   | exception Invalid_argument _ -> ());
+   | Ok _ -> Alcotest.fail "an empty oneOf declares no alternatives and must be refused"
+   | Error (Tool_bridge.Unprojected_property "keepPages") -> ()
+   | Error error -> Alcotest.failf "unexpected error: %s" (Tool_bridge.schema_error_to_string error));
   match
     Tool_bridge.params_of_json_schema
       (schema [ ("type", `List [ `String "string"; `String "array" ]) ])
   with
-  | _ -> Alcotest.fail "a bare multi-type array must still be refused"
-  | exception Invalid_argument _ -> ()
+  | Ok _ -> Alcotest.fail "a bare multi-type array must still be refused"
+  | Error _ -> ()
 
 let test_all_masc_tool_schemas_project_through_agent_core () =
   List.iter
     (fun (schema : Masc_domain.tool_schema) ->
       match Tool_bridge.params_of_json_schema schema.input_schema with
-      | _ -> ()
-      | exception Invalid_argument detail ->
-          Alcotest.failf "tool %s has invalid AGENT_CORE schema: %s" schema.name detail)
+      | Ok _ -> ()
+      | Error error ->
+          Alcotest.failf "tool %s has invalid AGENT_CORE schema: %s" schema.name
+            (Tool_bridge.schema_error_to_string error))
     Config.raw_all_tool_schemas
 
 (* ================================================================ *)
@@ -1196,7 +1222,11 @@ let check_param_type name expected params =
   | None -> Alcotest.failf "missing param: %s" name
 
 let test_tool_execute_schema_exposes_typed_boundary () =
-  let params = Tool_bridge.params_of_json_schema tool_execute_schema in
+  let params =
+    match Tool_bridge.params_of_json_schema tool_execute_schema with
+    | Ok params -> params
+    | Error error -> Alcotest.fail (Tool_bridge.schema_error_to_string error)
+  in
   Alcotest.(check bool)
     "retired executable field is not exposed"
     true
@@ -2749,6 +2779,10 @@ let () =
         test_empty_schema_rejects_arguments;
       Alcotest.test_case "required without properties rejects schema" `Quick
         test_required_without_properties_rejects_schema;
+      Alcotest.test_case "schema conversion error is typed" `Quick
+        test_schema_conversion_error_is_typed;
+      Alcotest.test_case "bridge constructors return typed schema errors" `Quick
+        test_bridge_constructors_return_typed_schema_error;
       Alcotest.test_case "ambiguous schema union is rejected" `Quick
         test_schema_ambiguous_union_is_rejected;
       Alcotest.test_case "nullable schema union keeps its type" `Quick

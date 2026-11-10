@@ -276,7 +276,8 @@ let user_matches_turn ~messages ~turn_ref =
             | Keeper_chat_delivery_identity.Approval_resolution
             | Keeper_chat_delivery_identity.Approval_replay
             | Keeper_chat_delivery_identity.Approval_replay_correction
-            | Keeper_chat_delivery_identity.Approval_continuation )
+            | Keeper_chat_delivery_identity.Approval_continuation
+            | Keeper_chat_delivery_identity.Autonomous_input_binding _ )
         ; _
         } ) -> None)
       messages
@@ -304,7 +305,8 @@ let user_matches_turn ~messages ~turn_ref =
             | Keeper_chat_delivery_identity.Approval_resolution
             | Keeper_chat_delivery_identity.Approval_replay
             | Keeper_chat_delivery_identity.Approval_replay_correction
-            | Keeper_chat_delivery_identity.Approval_continuation )
+            | Keeper_chat_delivery_identity.Approval_continuation
+            | Keeper_chat_delivery_identity.Autonomous_input_binding _ )
         ; _
         } ) -> false
   in

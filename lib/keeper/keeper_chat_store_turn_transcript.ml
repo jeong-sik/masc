@@ -14,6 +14,11 @@ let trace_block_for_turn ~trace_block_by_turn_ref (m : chat_message) =
 let to_json_array ?base_dir ?trace_block_by_turn_ref
     ?(omit_stream_contract = false)
     (messages : chat_message list) : Yojson.Safe.t =
+  let messages = List.filter (fun (message : chat_message) ->
+    not (Option.exists (fun provenance ->
+      Keeper_chat_delivery_identity.transcript_slot_is_internal
+        provenance.Keeper_chat_delivery_identity.transcript_slot)
+      message.delivery_provenance)) messages in
   `List
     (List.map
        (fun (m : chat_message) ->

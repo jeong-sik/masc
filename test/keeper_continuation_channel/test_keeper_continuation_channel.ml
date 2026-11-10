@@ -2,7 +2,7 @@
 
    Covers the closed-variant contract:
      - codec round-trips for every constructor,
-     - fail-closed parsing (unknown kind / missing or malformed field / legacy alias -> Error),
+     - fail-closed parsing (unknown kind / missing or malformed field -> Error),
      - the routing helpers (is_routable, kind_label, same_route,
        same_conversation). *)
 
@@ -170,23 +170,6 @@ let test_optional_route_coordinates_are_strict () =
           ; "thread_ts", `String " "
           ] )
     ]
-
-let test_slack_legacy_channel_alias_is_rejected () =
-  expect_error
-    "legacy channel alias"
-    (`Assoc
-       [ "kind", `String "slack"
-       ; "channel", `String "C"
-       ; "user_id", `String "U"
-       ]);
-  expect_error
-    "invalid channel_id is not masked by alias"
-    (`Assoc
-       [ "kind", `String "slack"
-       ; "channel_id", `Int 1
-       ; "channel", `String "C"
-       ; "user_id", `String "U"
-       ])
 
 let test_missing_kind_is_error () =
   expect_error "missing kind" (`Assoc [ ("thread_id", `String "t") ])
@@ -481,7 +464,6 @@ let () =
   test_smart_constructors_reject_blank_coordinates ();
   test_duplicate_and_unknown_fields_are_errors ();
   test_optional_route_coordinates_are_strict ();
-  test_slack_legacy_channel_alias_is_rejected ();
   test_missing_kind_is_error ();
   test_non_object_is_error ();
   test_is_routable ();

@@ -88,7 +88,7 @@ val empty_response_detail : Agent_core.Types.api_response -> string
 
 (** [masc_web_search] / [masc_web_fetch]를 [Agent_core.Tool.t]로 변환한 목록.
     [Keeper_tool_descriptor]에서 descriptor를 찾지 못하면 빈 목록을 반환한다. *)
-val web_tool_bundle : unit -> Agent_core.Tool.t list
+val web_tool_bundle : unit -> (Agent_core.Tool.t list, Tool_bridge.schema_error) result
 
 (** api_response의 [Text] 블록만 모아 답 텍스트로 (Thinking/ToolUse 제외). *)
 val answer_text : Agent_core.Types.api_response -> string

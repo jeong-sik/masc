@@ -7,10 +7,10 @@ module Terminal_text = Masc_tui_ansi.Terminal_text
 
 let day_slots = Masc.Keeper_turn_pulse.window_seconds / Masc.Keeper_turn_pulse.slot_seconds
 
-let failed_slots slots =
-  List.fold_left (fun count -> function
-    | Pulse.Half_hour_failed | Pulse.Half_hour_failed_and_ok -> count + 1
-    | Pulse.Half_hour_unknown | Pulse.Half_hour_quiet | Pulse.Half_hour_ok -> count) 0 slots
+let count_text = function
+  | Pulse.Exact n -> string_of_int n
+  | Pulse.At_least n -> "≥" ^ string_of_int n
+  | Pulse.Count_unknown -> "?"
 
 let pulse = function
   | Some runtime -> runtime.Masc.Tui_decode.kr_recent_turns
@@ -30,7 +30,10 @@ let group ~now runtime =
   | Grid.Sound ->
       (match pulse runtime with
        | None -> Other
-       | Some _ -> if failed_slots (slots ~now ~count:day_slots runtime) > 0 then Other else Sound)
+       | Some _ ->
+           (* Classification uses observed failures, not an exact total. *)
+           if Pulse.failure_lower_bound (Pulse.failure_count (slots ~now ~count:day_slots runtime)) > 0
+           then Other else Sound)
 
 let rank = function Failing -> 0 | Other -> 1 | Sound -> 2
 
@@ -74,16 +77,19 @@ let row ~cols ~now ~name runtime =
     | Grid.Paused -> "○"
     | Grid.Recovered | Grid.Sound | Grid.Other -> "●" in
   prefix name_cells mark name ^ marks hours ^ "┃ "
-  ^ Printf.sprintf "%d/%d" (failed_slots hours) count
+  ^ Printf.sprintf "%s/%d" (count_text (Pulse.failure_count hours)) count
 
 let fleet ~cols ~now runtimes =
   let name_cells, count = dimensions cols in
   let all = List.map (slots ~now ~count) runtimes in
   let counts = List.init count (fun position ->
-    List.fold_left (fun n hours -> match List.nth_opt hours position with
-      | Some (Pulse.Half_hour_failed | Pulse.Half_hour_failed_and_ok) -> n + 1
-      | Some (Pulse.Half_hour_unknown | Pulse.Half_hour_quiet | Pulse.Half_hour_ok) | None -> n) 0 all) in
-  let peak = List.fold_left max 0 counts in
+    Pulse.failure_count (List.map (fun hours ->
+      match List.nth_opt hours position with Some hour -> hour | None -> Pulse.Half_hour_unknown) all)) in
+  let peak = Pulse.peak_failure_count counts in
   prefix name_cells " " "fleet"
-  ^ String.concat "" (List.map (fun n -> if n = 0 then "·" else Grid.level_glyph ~peak n) counts)
-  ^ Printf.sprintf "┃ peak %d" peak
+  ^ String.concat "" (List.map (function
+      | Pulse.Count_unknown -> Pulse.half_hour_mark Pulse.Half_hour_unknown
+      | Pulse.Exact 0 -> Pulse.half_hour_mark Pulse.Half_hour_quiet
+      | (Pulse.Exact n | Pulse.At_least n) ->
+          Grid.level_glyph ~peak:(Pulse.failure_lower_bound peak) n) counts)
+  ^ "┃ peak " ^ count_text peak

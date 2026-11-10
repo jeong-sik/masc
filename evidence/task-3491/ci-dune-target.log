@@ -1,0 +1,74 @@
+# GitHub Actions 표적 실행 — 저장소 dune 표적이 실제로 빌드·실행됨
+# run https://github.com/jeong-sik/masc/actions/runs/42687856414
+# head 3957614cfbf217f93285d24473ccb93211816787 (= PR #50748 현 head)
+# conclusion success — 직독: gh api repos/jeong-sik/masc/actions/runs/42687856414
+# dispatch inputs: suite=test_tui_terminal_text, minimal=true
+# 실행자: GitHub Actions 러너 (이 Keeper 레인이 아님 — 레인은 jose 부재로 dune 불가)
+
+test suite	Test	2026-11-09T19:56:21.3755049Z [targeted] EIO_BACKEND=<unset> timeout=600s per suite
+test suite	Test	2026-11-09T19:56:21.4343786Z [targeted] dune build test/test_tui_terminal_text.exe 
+test suite	Test	2026-11-09T19:56:29.4703158Z (cd _build/default/lib/sse_event && /home/runner/.opam/ci-5-5-2/bin/atdgen -j -j-std ./sse_event.atd)
+test suite	Test	2026-11-09T19:56:29.4735134Z Warning: option "-j-std" is deprecated.
+test suite	Test	2026-11-09T19:58:51.1883502Z [targeted] test/test_tui_terminal_text: stanza env MASC_BASE_PATH= ZAI_API_KEY= TYPESAFEAI_API_KEY= MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED=false
+test suite	Test	2026-11-09T19:58:51.1904462Z [targeted] test/test_tui_terminal_text: start 2026-11-09T19:58:51Z
+test suite	Test	2026-11-09T19:58:51.1948129Z ##[group]{terminal text boundary}
+test suite	Test	2026-11-09T19:58:51.1948455Z Testing `terminal text boundary'.
+test suite	Test	2026-11-09T19:58:51.1948730Z This run has ID `JW6LNX5X'.
+test suite	Test	2026-11-09T19:58:51.1948880Z 
+test suite	Test	2026-11-09T19:58:51.1951063Z ASSERT ESC: no raw control byte
+test suite	Test	2026-11-09T19:58:51.1951490Z ASSERT ESC: an escape is drawn
+test suite	Test	2026-11-09T19:58:51.1951901Z ASSERT BEL: no raw control byte
+test suite	Test	2026-11-09T19:58:51.1953394Z ASSERT BEL: an escape is drawn
+test suite	Test	2026-11-09T19:58:51.1955202Z ASSERT DEL: no raw control byte
+test suite	Test	2026-11-09T19:58:51.1955594Z ASSERT DEL: an escape is drawn
+test suite	Test	2026-11-09T19:58:51.1955908Z ASSERT NUL: no raw control byte
+test suite	Test	2026-11-09T19:58:51.1956222Z ASSERT NUL: an escape is drawn
+test suite	Test	2026-11-09T19:58:51.1956525Z ASSERT CR: no raw control byte
+test suite	Test	2026-11-09T19:58:51.1956861Z ASSERT CR: an escape is drawn
+test suite	Test	2026-11-09T19:58:51.1957176Z ASSERT tab: no raw control byte
+test suite	Test	2026-11-09T19:58:51.1957569Z ASSERT tab: an escape is drawn
+test suite	Test	2026-11-09T19:58:51.1957788Z ASSERT vertical tab: no raw control byte
+test suite	Test	2026-11-09T19:58:51.1958039Z ASSERT vertical tab: an escape is drawn
+test suite	Test	2026-11-09T19:58:51.1958276Z ASSERT backspace: no raw control byte
+test suite	Test	2026-11-09T19:58:51.1958513Z ASSERT backspace: an escape is drawn
+test suite	Test	2026-11-09T19:58:51.1958742Z ASSERT form feed: no raw control byte
+test suite	Test	2026-11-09T19:58:51.1958976Z ASSERT form feed: an escape is drawn
+test suite	Test	2026-11-09T19:58:51.1959272Z   [OK]          security              0   a control byte never reaches the te...
+test suite	Test	2026-11-09T19:58:51.1959564Z ASSERT prefix survives
+test suite	Test	2026-11-09T19:58:51.1959760Z ASSERT suffix survives
+test suite	Test	2026-11-09T19:58:51.1959962Z ASSERT sequence body survives
+test suite	Test	2026-11-09T19:58:51.1960210Z ASSERT the escape replaces one byte with more than one
+test suite	Test	2026-11-09T19:58:51.1960527Z   [OK]          security              1   visible text survives the escape.
+test suite	Test	2026-11-09T19:58:51.1960822Z ASSERT C1 becomes a codepoint escape
+test suite	Test	2026-11-09T19:58:51.1961048Z ASSERT no raw C1 byte pair
+test suite	Test	2026-11-09T19:58:51.1961316Z   [OK]          security              2   a C1 control uses the codepoint esc...
+test suite	Test	2026-11-09T19:58:51.1961785Z ASSERT second pass is a no-op
+test suite	Test	2026-11-09T19:58:51.1962124Z ASSERT second pass is a no-op
+test suite	Test	2026-11-09T19:58:51.1962331Z ASSERT second pass is a no-op
+test suite	Test	2026-11-09T19:58:51.1962542Z ASSERT second pass is a no-op
+test suite	Test	2026-11-09T19:58:51.1962810Z   [OK]          security              3   sanitize is idempotent.
+test suite	Test	2026-11-09T19:58:51.1963072Z ASSERT hello world
+test suite	Test	2026-11-09T19:58:51.1963263Z ASSERT keeper#42 (ready)
+test suite	Test	2026-11-09T19:58:51.1963533Z ASSERT a|b->c
+test suite	Test	2026-11-09T19:58:51.1964087Z ASSERT 값 0.5 초
+test suite	Test	2026-11-09T19:58:51.1964296Z ASSERT 안녕하세요
+test suite	Test	2026-11-09T19:58:51.1964546Z   [OK]          preservation          0   plain text is returned unchanged.
+test suite	Test	2026-11-09T19:58:51.1964828Z ASSERT no raw control byte
+test suite	Test	2026-11-09T19:58:51.1965040Z ASSERT first syllable intact
+test suite	Test	2026-11-09T19:58:51.1965264Z ASSERT second syllable intact
+test suite	Test	2026-11-09T19:58:51.1965465Z ASSERT the NUL itself is drawn
+test suite	Test	2026-11-09T19:58:51.1965743Z   [OK]          preservation          1   multi-byte letters are not read as ...
+test suite	Test	2026-11-09T19:58:51.1966025Z ASSERT no raw CR
+test suite	Test	2026-11-09T19:58:51.1966205Z ASSERT LF still breaks the line
+test suite	Test	2026-11-09T19:58:51.1966419Z ASSERT one line break preserved
+test suite	Test	2026-11-09T19:58:51.1966624Z ASSERT CR is drawn
+test suite	Test	2026-11-09T19:58:51.1966812Z ASSERT first line text survives
+test suite	Test	2026-11-09T19:58:51.1967027Z ASSERT second line text survives
+test suite	Test	2026-11-09T19:58:51.1967272Z ASSERT third line text survives
+test suite	Test	2026-11-09T19:58:51.1967522Z   [OK]          preservation          2   lines keep LF and escape CR.
+test suite	Test	2026-11-09T19:58:51.1967718Z 
+test suite	Test	2026-11-09T19:58:51.1967808Z Test Successful in 0.000s. 7 tests run.
+test suite	Test	2026-11-09T19:58:51.1968252Z ##[endgroup]
+test suite	Test	2026-11-09T19:58:51.1982591Z [targeted] test/test_tui_terminal_text: OK in 0s
+test suite	Upload equipped portrait HTTP evidence	﻿2026-11-09T19:58:51.2030986Z ##[group]Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+test suite	Upload equipped portrait HTTP evidence	2026-11-09T19:58:51.2031445Z with:

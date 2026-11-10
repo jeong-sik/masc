@@ -15,7 +15,7 @@ let comments = List.init 128 (fun index ->
 
 let source : Layout.source =
   { post; detail = Detail.Ready (post, comments, None); related_posts = [post];
-    keeper_names = ["keeper"]; columns = 100; styles = ["cyan"];
+    keeper_names = ["keeper"]; columns = 100; language = Masc_tui_types.Lang_en; styles = ["cyan"];
     table_frame = false }
 
 let render source () =
@@ -70,6 +70,7 @@ let test_live_inputs_replace_rows () =
       "related posts", {source with related_posts = [{post with bp_body = "new reference"}]};
       "keeper roles", {source with keeper_names = []};
       "width", {source with columns = 60};
+      "language", {source with language = Masc_tui_types.Lang_ko};
       "style", {source with styles = ["dark cyan"]};
       "tables", {source with table_frame = true};
       "loading", {source with detail = Detail.Loading};

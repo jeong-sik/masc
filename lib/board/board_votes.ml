@@ -253,12 +253,6 @@ let reopen store ~post_id : (unit, board_error) Result.t =
            finish_posts_write outcome))
 ;;
 
-let comments_jsonl_snapshot store =
-  Board_snapshot_rows.render
-    ~rows:store.comment_rows
-    ~to_json:comment_to_yojson
-    store.comments
-
 let reactions_jsonl_snapshot store =
   let buf = Buffer.create 4096 in
   Hashtbl.iter
@@ -274,7 +268,7 @@ module Snapshot_batch = Board_snapshot_batch
 let capture_snapshot_batch store selection =
   Snapshot_batch.capture selection
     ~posts:(fun () -> capture_posts_snapshot store)
-    ~comments:(fun () -> comments_jsonl_snapshot store)
+    ~comments:(fun () -> capture_comments_snapshot store)
     ~votes:(fun () -> vote_log_jsonl store)
     ~reactions:(fun () -> reactions_jsonl_snapshot store)
 ;;
@@ -316,7 +310,7 @@ let delete_post store ~post_id : (deletion_outcome, board_error) Result.t =
      each file it rewrites must have loaded fully first (#38595). *)
   with_persist_lock store (fun () ->
   let* () = require_posts_source_readable store in
-  let* () = require_persisted_snapshot_readable store.comments_load_result in
+  let* () = require_comments_source_readable store in
   let* () = require_persisted_snapshot_readable store.votes_load_result in
   let* () = require_persisted_snapshot_readable store.reactions_load_result in
   match Post_id.of_string post_id with

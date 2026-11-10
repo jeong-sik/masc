@@ -83,9 +83,10 @@ The command palette is `:`.
 | `o` | cycle priority / recent / oldest / activity / name |
 | `J` | open the selected Keeper's schedules |
 | `K` | browse Keeper-origin requests queued for the selected Keeper |
-| `Enter` | open the Story window below the list for the Keeper under the cursor; on its story page it closes the window |
+| `Enter` | open the selected Keeper Story or shared World window; Enter closes its story/world page |
+| `W` | select shared World and open its dock; outside memory/age, switch to age; lowercase w still wakes a Keeper |
 | `Right` | keeper detail |
-| `Tab / s / m` | with the Story window open: next page / schedules / memory; Esc closes it |
+| `Tab / s / m` | with a Keeper Story open: next page / schedules / memory; World keeps its own page; Esc closes either window |
 | `c` | chat with the keeper |
 | `l` | logs |
 | `t` | tool calls |
@@ -521,6 +522,7 @@ and UI admission decision; these are not painted-frame or key-latency evidence.
 | `j/k` | move |
 | `Enter` | the reader takes its own keys: j/k and the page keys scroll it, Home/End reach its ends, [ / ] step asks, Esc goes back |
 | `v` | read decoded top-level Gate string values as bytes, not JSON wire; v or Esc returns |
+| `v` | while browsing, capture the last answer receipt, original question identity and retained follow-up; scroll or search the complete text; v or Esc returns |
 | `y / n` | y confirms, n denies the approval under the cursor |
 | `R` | only when the blocked row is safely rearmable |
 | `a` | open the selected question, from a Keeper or a Lane Add-on installation, in its own mode; Esc leaves it |

@@ -460,6 +460,7 @@ let artifact_reader ~base_path =
     ~model_projection:(fun () -> Tool_output.bounded_inline_model_projection)
     ~name:schema.name ~description:schema.description ~input_schema:schema.input_schema
     (fun _ _ -> fail "no request calls the reader")
+    |> Result.get_ok
 ;;
 
 (* RFC librarian-lifecycle §4.10, rule 6 before rule 8. The failed turn

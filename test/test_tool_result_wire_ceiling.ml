@@ -109,6 +109,7 @@ let test_the_projection_is_asked_on_every_call () =
            ~start_time:(Tool_timing.start ())
            ~data:(`String "ok")
            ())
+    |> Result.get_ok
   in
   let invocation turn =
     Agent_core.Tool_contract.Invocation.create

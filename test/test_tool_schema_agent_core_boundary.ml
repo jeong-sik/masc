@@ -39,8 +39,9 @@ let test_all_keeper_schemas_convert () =
   List.iter
     (fun (schema : Masc_domain.tool_schema) ->
        match Tool_bridge.params_of_json_schema schema.input_schema with
-       | _ -> ()
-       | exception Invalid_argument detail ->
+       | Ok _ -> ()
+       | Error error ->
+         let detail = Tool_bridge.schema_error_to_string error in
          Alcotest.failf
            "Keeper model tool schema %S is not convertible by the MASC/AGENT_CORE \
             boundary (Tool_bridge.params_of_json_schema): %s. Fix the reported \

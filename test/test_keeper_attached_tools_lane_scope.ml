@@ -187,7 +187,7 @@ let with_bundle
       ?identity_surface
       ?skill_activation_context
       ~capability_surface
-      ()
+      () |> Result.get_ok
   in
   (match retained_agent with
    | None -> ()

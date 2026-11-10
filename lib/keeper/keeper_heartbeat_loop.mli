@@ -143,6 +143,10 @@ type keepalive_turn_outcome = {
       (** The cycle admitted at least one event-queue stimulus and acked
           every entry of that batch on completion. The loop reads it to
           skip the cadence sleep while more entries are pending. *)
+  checkpoint_followup : Keeper_agent_result.checkpoint_followup;
+      (** Carries a ready-chat yield only after its unfinished source was
+          retained successfully. This schedules one admission attempt; the
+          Owner's lifecycle, shutdown and child-slot gates still decide it. *)
   after_failure : after_failure option;
       (** What the cycle's turn failure or provider rest leaves the next
           cycle; [None] keeps the plain cadence. A rested cycle carries the
@@ -318,6 +322,31 @@ val run_heartbeat_loop :
   wakeup:bool Atomic.t -> cadence_sleeping:bool Atomic.t -> unit
 
 module For_testing : sig
+  val select_hitl_resolutions :
+    base_path:string -> keeper_name:string ->
+    stimuli:Keeper_event_queue.stimulus list ->
+    peek:(unit -> Keeper_event_queue.hitl_resolution option) ->
+    (Keeper_hitl_resolution_batch.t, Keeper_hitl_resolution_batch.join_error) result
+  (** Revalidate the actual admitted HITL vector before effects. A contextual
+      peek supplies at most one input only when that vector is empty. *)
+
+  val settle_hitl_continuations :
+    base_path:string -> keeper_name:string ->
+    cycle_outcome:Keeper_heartbeat_loop_cycle.cycle_outcome option ->
+    resolutions:Keeper_event_queue.hitl_resolution list ->
+    (Keeper_event_queue.hitl_resolution *
+     (Keeper_approval_queue.continuation_projection_result, string) result) list
+  (** Project each input's own settlement. A non-cancellation failure is
+      returned beside that input and does not skip independent siblings. *)
+
+  val hitl_selection_has_recorded_continuation :
+    projections:(Keeper_event_queue.hitl_resolution *
+      (Keeper_approval_queue.continuation_projection_result, string) result) list ->
+    Keeper_event_queue_state.pending_selection -> bool
+  (** HITL requires its own successful projection. Other source families keep
+      their existing disposition policy; queue terminalization still checks
+      the original pending selection and incarnation. *)
+
   val record_replay_owned_turn_started_reactions :
     ctx:'a context -> keeper_name:string -> Keeper_event_queue.stimulus list -> unit
   (** Production turn-entry recording for the admitted source batch. *)
@@ -358,13 +387,19 @@ module For_testing : sig
 
   (** Whether the loop starts another cycle without sleeping. A serving
       deferred suffix is itself unfinished input and starts immediately;
-      ordinary cadence and path-release outcomes retain the existing
-      acknowledged-pending-stimulus rule. *)
+      a retained checkpoint that yielded to ready chat retries admission while
+      its source is pending. Ordinary checkpoints and path-release outcomes
+      retain the existing acknowledged-pending-stimulus rule. *)
   val next_cycle_starts_now :
     after_failure:after_failure option ->
     stimuli_acked:bool ->
+    checkpoint_followup:Keeper_agent_result.checkpoint_followup ->
     pending_stimulus:(unit -> bool) ->
     bool
+
+  val checkpoint_followup_after_retention :
+    cycle_outcome:Keeper_heartbeat_loop_cycle.cycle_outcome option ->
+    retained_stimulus:bool -> Keeper_agent_result.checkpoint_followup
 
   (** Scheduling authority chosen from the loop's exact state. A deferred
       runtime suffix takes precedence over cadence because it is unfinished

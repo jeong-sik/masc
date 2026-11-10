@@ -243,27 +243,16 @@ let ordered_conflicts items =
   List.concat_map (fun retention ->
     List.filter (fun item -> item.retention = retention) items) conflict_order
 
-(* What ends a row that had to give something up. The ellipsis says items
-   were dropped; the key says where they went.
-
-   The ellipsis alone stops one question short. It reports a cut and leaves
-   the reader unable to tell whether one key is hidden or six, and on the
-   surfaces that reach here -- Keepers, Approvals, Board, Verification,
-   Harness, Changes, Tools at eighty columns -- the dropped keys have no
-   other way of being found. [?] opens the sheet, and [help_sections
-   ~current] puts the reader's own surface at the top of it, so what was
-   dropped is the first thing on the screen that follows.
-
-   The key travels alone where something else already marked the cut. Cell
-   truncation ends in the same […], so a row cut by the cell budget and a row
-   cut by dropping items both end […?] -- one mark for the cut, one key for
-   what it hid, and never the mark twice. *)
+(* The ellipsis says items were omitted. The help key follows only where
+   the current input owner lets it open the sheet; a text draft owns [?] as
+   content. When cell truncation already supplies the ellipsis, append only
+   the available help key rather than marking the cut twice. *)
 let more_key = "?"
-let cut_marker = "\xe2\x80\xa6" ^ more_key
+let cut_marker more_key = "\xe2\x80\xa6" ^ more_key
 
-let with_position_and_marker ~mark_omission position hints =
+let with_position_and_marker ~more_key ~mark_omission position hints =
   let positioned = with_position position hints in
-  if mark_omission then positioned ^ "  " ^ cut_marker else positioned
+  if mark_omission then positioned ^ "  " ^ cut_marker more_key else positioned
 
 (* Hints are "key:action" items separated by two spaces. When even an empty
    status tail leaves the row too wide, whole items drop from the back and
@@ -480,7 +469,8 @@ let undroppable_keys hints =
    nothing carries no marker, and counting one there rejects a notice that fits a
    row exactly. So the marker's cells are counted here, where a step is already
    known to be needed. *)
-let without_a_blocking_conflict ?literal_prefix ?position ~max_cells ~hints conflicts =
+let without_a_blocking_conflict ?literal_prefix ?position ~more_key ~max_cells ~hints conflicts =
+  let cut_marker = cut_marker more_key in
   let undroppable = undroppable_keys hints in
   let narrowest conflict =
     with_position position
@@ -520,7 +510,8 @@ let without_a_blocking_conflict ?literal_prefix ?position ~max_cells ~hints conf
    drawn in a shorter text, or put aside when none is short enough, before
    priority is read. Otherwise one long path would starve a short, actionable
    build mismatch that ranks below it and fits on its own. *)
-let drop_hint_items ?literal_prefix ?position ~max_cells ~conflicts hints =
+let drop_hint_items ?literal_prefix ?position ~more_key ~max_cells ~conflicts hints =
+  let cut_marker = cut_marker more_key in
   let keys = Lazy.force hints.items in
   let row conflicts kept =
     with_position position
@@ -573,26 +564,26 @@ let drawable_conflicts ?literal_prefix ~max_cells ~hints = function
 (* What fits with this conflict set kept whole: the status facts give way in
    [omission_order], then the keys give way as whole items. [None] when even the
    keys that cannot be dropped will not fit beside these conflicts. *)
-let rec fit_with_conflicts ?literal_prefix ?position ~mark_omission ~max_cells
+let rec fit_with_conflicts ?literal_prefix ?position ~more_key ~mark_omission ~max_cells
     ~conflicts ~hints ~omissions statuses =
   let leading =
     String.concat "  "
       (List.map (fun item -> item.text) conflicts
        @ Option.to_list literal_prefix
-       @ [ with_position_and_marker ~mark_omission position hints.full_text ])
+       @ [ with_position_and_marker ~more_key ~mark_omission position hints.full_text ])
   in
   let rendered = body leading statuses in
   if Masc_tui_message_layout.display_width rendered <= max_cells then
     Some rendered
   else
     match statuses, omissions with
-    | [], _ -> drop_hint_items ?literal_prefix ?position ~max_cells ~conflicts hints
+    | [], _ -> drop_hint_items ?literal_prefix ?position ~more_key ~max_cells ~conflicts hints
     | _, retention :: rest ->
-      fit_with_conflicts ?literal_prefix ?position ~mark_omission ~max_cells
+      fit_with_conflicts ?literal_prefix ?position ~more_key ~mark_omission ~max_cells
         ~conflicts ~hints ~omissions:rest
         (List.filter (fun status -> status.retention <> retention) statuses)
     | _, [] ->
-      fit_with_conflicts ?literal_prefix ?position ~mark_omission ~max_cells
+      fit_with_conflicts ?literal_prefix ?position ~more_key ~mark_omission ~max_cells
         ~conflicts ~hints ~omissions:[] []
 
 (* Every notice that has a shorter text, in that text; the others stay as they
@@ -607,8 +598,9 @@ let notices_in_their_shorter_text conflicts =
    status list and the whole key row again. Shrinking in one pass left a row
    carrying only [q:quit  ...?] where the task line and the port all fit once
    the notice was gone. *)
-let rec fit_body ?literal_prefix ?action_text ?position ~max_cells ~conflicts ~hints
+let rec fit_body ?literal_prefix ?action_text ?position ~more_key ~max_cells ~conflicts ~hints
     ~omissions statuses =
+  let cut_marker = cut_marker more_key in
   let prefix_with_action action =
     match Option.to_list literal_prefix @ (if action = "" then [] else [ action ]) with
     | [] -> None
@@ -621,7 +613,7 @@ let rec fit_body ?literal_prefix ?action_text ?position ~max_cells ~conflicts ~h
     let prefix = match action_text with
       | None -> literal_prefix
       | Some action -> prefix_with_action action in
-    fit_with_conflicts ?literal_prefix:prefix ?position ~mark_omission:false
+    fit_with_conflicts ?literal_prefix:prefix ?position ~more_key ~mark_omission:false
       ~max_cells ~conflicts ~hints ~omissions statuses
   in
   match complete with
@@ -642,7 +634,7 @@ let rec fit_body ?literal_prefix ?action_text ?position ~max_cells ~conflicts ~h
     | None -> false
   in
   if outcome_present && shorter_notices <> conflicts then
-    fit_body ?literal_prefix ?action_text ?position ~max_cells
+    fit_body ?literal_prefix ?action_text ?position ~more_key ~max_cells
       ~conflicts:shorter_notices ~hints ~omissions statuses
   else
   let displayed_prefix, mark_omission =
@@ -674,15 +666,15 @@ let rec fit_body ?literal_prefix ?action_text ?position ~max_cells ~conflicts ~h
          must not displace the warning or its pinned keys either. *)
       prefix, mark_omission
   in
-  match fit_with_conflicts ?literal_prefix:displayed_prefix ?position ~max_cells
+  match fit_with_conflicts ?literal_prefix:displayed_prefix ?position ~more_key ~max_cells
           ~mark_omission ~conflicts ~hints ~omissions statuses with
   | Some fitted -> fitted
   | None ->
     (match conflicts with
      | _ :: _ ->
-       fit_body ?literal_prefix ?action_text ?position ~max_cells
+       fit_body ?literal_prefix ?action_text ?position ~more_key ~max_cells
          ~conflicts:
-           (without_a_blocking_conflict ?literal_prefix ?position ~max_cells ~hints
+           (without_a_blocking_conflict ?literal_prefix ?position ~more_key ~max_cells ~hints
               conflicts)
          ~hints ~omissions statuses
      | [] ->
@@ -707,7 +699,7 @@ let rec fit_body ?literal_prefix ?action_text ?position ~max_cells ~conflicts ~h
        in
        let rendered =
          body
-           (with_position_and_marker ~mark_omission position
+           (with_position_and_marker ~more_key ~mark_omission position
               (with_literal_prefix displayed_prefix cut_from))
            []
        in
@@ -750,6 +742,9 @@ let rec fit_body ?literal_prefix ?action_text ?position ~max_cells ~conflicts ~h
 type preferred_action =
   | Outcome of string * (string -> string)
   | Pending_question of string * (string -> string)
+  | Menu_choices of string
+      (** Draw the choices together when they fit. Otherwise return them to
+          the ordinary key-item fitter, which preserves the way out. *)
 
 (** Where a [Pending_question] goes on the row, decided once from the widths:
     in front of the notices and the keys that can be dropped, on a row of its
@@ -778,11 +773,17 @@ type question_place =
     ({!leads_the_row}) rather than left in the tail, so it outlives the keys
     instead of going before them.
 
+    [help_key_answers] controls whether an omission can offer [?] as a way to
+    recover the hidden keys. The caller supplies its current input ownership.
+
     [preferred_action] is the caller's choice for the notice slot once it has
     resolved priority; {!preferred_action} says what each kind does. *)
-let line ?literal_prefix ?action_text ?preferred_action ?position ?(status = []) ?port ~dim ~reset
+let line ?literal_prefix ?action_text ?preferred_action ?position ?(status = []) ?port
+    ?(help_key_answers = true) ~dim ~reset
     ~max_cells ~hints () =
   let max_cells = max 0 max_cells in
+  let more_key = if help_key_answers then more_key else "" in
+  let cut_marker = cut_marker more_key in
   let hints = prepare_hints hints in
   let statuses =
     List.filter_map status_item_projection
@@ -804,16 +805,28 @@ let line ?literal_prefix ?action_text ?preferred_action ?position ?(status = [])
     <= max_cells
   in
   let alone text = Masc_tui_message_layout.display_width ("  " ^ text) <= max_cells in
+  let place_question text mark =
+    if beside_the_pinned_keys text then
+      Leads_the_row { text = mark text; retention = Armed_action; shorter = [] }
+    else if alone text then Alone (mark text)
+    else Not_drawn
+  in
   let place =
     match preferred_action with
-    | Some (Pending_question (text, mark)) ->
-      if beside_the_pinned_keys text then
-        Leads_the_row { text = mark text; retention = Armed_action; shorter = [] }
-      else if alone text then Alone (mark text)
-      else Not_drawn
+    | Some (Pending_question (text, mark)) -> place_question text mark
+    | Some (Menu_choices text) -> place_question text Fun.id
     | Some (Outcome _) | None -> Not_drawn
   in
   let fit_row question =
+    let hints =
+      match question with
+      | Some _ -> hints
+      | None ->
+          (match preferred_action with
+           | Some (Menu_choices text) ->
+               prepare_hints (text ^ "  " ^ hints.full_text)
+           | Some (Outcome _ | Pending_question _) | None -> hints)
+    in
     let conflicts =
       drawable_conflicts ?literal_prefix ~max_cells ~hints
         (ordered_conflicts (Option.to_list question @ conflicts))
@@ -828,7 +841,7 @@ let line ?literal_prefix ?action_text ?preferred_action ?position ?(status = [])
         let prefix = String.concat "  " (Option.to_list literal_prefix @ [text]) in
         let fits_beside conflicts =
           Option.is_some
-            (fit_with_conflicts ~literal_prefix:prefix ?position ~mark_omission:false
+            (fit_with_conflicts ~literal_prefix:prefix ?position ~more_key ~mark_omission:false
                ~max_cells ~conflicts ~hints ~omissions:omission_order statuses)
         in
         (* Whole beside the notices at full length, or beside their shorter
@@ -836,10 +849,10 @@ let line ?literal_prefix ?action_text ?preferred_action ?position ?(status = [])
         if fits_beside conflicts || fits_beside (notices_in_their_shorter_text conflicts)
         then Some (mark text)
         else action_text
-      | None, (Some (Pending_question _) | None) -> action_text
+      | None, (Some (Pending_question _ | Menu_choices _) | None) -> action_text
     in
     let fitted =
-      fit_body ?literal_prefix ?action_text ?position ~max_cells
+      fit_body ?literal_prefix ?action_text ?position ~more_key ~max_cells
         ~conflicts ~hints ~omissions:omission_order statuses
     in
     Printf.sprintf "%s%s%s\n" dim fitted reset

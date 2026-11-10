@@ -174,10 +174,11 @@ type terminal_error_segment = Existing_segment | Operation_settlement of operati
 val find_operation_terminal :
   journal -> settlement:operation_settlement -> (terminal_error_receipt option, string) result
 (** Read the matching final operation terminal. Missing or different settlement
-    metadata returns [None]; malformed metadata is an error. A terminal that
-    is the last row is answered from the bounded tail window, as
-    {!record_terminal_error} answers it; every other case reads the whole
-    journal. *)
+    metadata returns [None]. A terminal that is the last row is answered from
+    the bounded tail window, as {!record_terminal_error} answers it, and the
+    rows before it are then not decoded. Every other case reads the whole
+    journal, where a row that does not decode, malformed settlement metadata
+    included, is an error. *)
 
 val record_terminal_error :
   ?segment:terminal_error_segment -> journal -> ts:float -> message:string -> (terminal_error_receipt, string) result

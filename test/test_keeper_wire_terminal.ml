@@ -925,9 +925,11 @@ let test_operation_settlement_reads_its_terminal_from_the_journal_tail () =
       (Journal.record_terminal_error ~segment journal ~ts:99. ~message:"cut by restart"))
 
 (* The Owner's settle hook asks once more without a settlement, right after
-   the failure projection recorded the terminal. *)
-let test_existing_segment_reads_its_terminal_from_the_journal_tail () =
-  with_terminal_behind_a_corrupt_row ~name:"terminal-tail-segment" Journal.Existing_segment
+   the failure projection recorded the terminal with one. *)
+let test_existing_segment_reads_a_settled_terminal_from_the_journal_tail () =
+  let name = "terminal-tail-segment" in
+  with_terminal_behind_a_corrupt_row ~name
+    (Journal.Operation_settlement (settlement_of ~operation_id:("op-" ^ name)))
     (fun journal ->
        Result.map Option.some
          (Journal.record_terminal_error journal ~ts:99. ~message:"another cause"))
@@ -941,29 +943,85 @@ let test_find_operation_terminal_reads_the_journal_tail () =
     (fun journal -> Journal.find_operation_terminal journal ~settlement)
 
 (* A crash can cut an append written after the settled terminal. The terminal
-   still answers, as the full read answers it, and the fragment is left for
-   the next append to cut. *)
-let test_operation_settlement_terminal_stands_before_a_torn_fragment () =
+   still answers [ask], as the full read answers it, and the fragment is left
+   for the next append to cut. *)
+let with_torn_fragment_after_the_terminal ~name ask =
   with_workspace @@ fun base_path ->
-  let keeper_name = "terminal-tail-torn" and operation_id = "op-terminal-tail-torn" in
-  let id = match Keeper_chat_operation.Operation_id.of_string operation_id with
-    | Ok id -> id | Error detail -> fail detail in
-  let settlement : Journal.operation_settlement = {operation_id=id;completed_at=3.} in
+  let keeper_name = name and operation_id = "op-" ^ name in
+  let settlement = settlement_of ~operation_id in
   let journal = Journal.open_journal ~base_dir:base_path ~keeper_name ~operation_id () in
-  let settle ts = Journal.record_terminal_error ~segment:(Operation_settlement settlement) journal ~ts ~message:"cut by restart" in
-  (match settle 3. with
+  (match Journal.record_terminal_error ~segment:(Operation_settlement settlement)
+           journal ~ts:3. ~message:"cut by restart" with
    | Ok (Recorded_terminal_error {seq=0;_}) -> ()
    | Ok _ | Error _ -> fail "the first settlement must append");
   let path = Journal.journal_path ~base_dir:base_path ~keeper_name ~operation_id in
   Out_channel.with_open_gen [ Open_append; Open_wronly; Open_binary ] 0o600 path
     (fun oc -> Out_channel.output_string oc "{\"v\":2,\"seq\":1,\"ts\":4.0,\"event\":{\"type\":\"text_del");
   let torn = In_channel.with_open_bin path In_channel.input_all in
-  (match settle 99. with
-   | Ok (Existing_terminal_error {seq=0;ts=3.;_}) -> ()
-   | Ok (Existing_terminal_error _) -> fail "another row stood in for the terminal"
-   | Ok (Recorded_terminal_error _) -> fail "a second terminal was appended"
+  (match ask journal settlement with
+   | Ok (Journal.Existing_terminal_error {seq=0;ts=3.;_}) -> ()
+   | Ok (Journal.Existing_terminal_error _) -> fail "another row stood in for the terminal"
+   | Ok (Journal.Recorded_terminal_error _) -> fail "a second terminal was appended"
    | Error detail -> fail ("the torn journal refused its terminal: " ^ detail));
   check string "nothing was written" torn (In_channel.with_open_bin path In_channel.input_all)
+
+let test_operation_settlement_terminal_stands_before_a_torn_fragment () =
+  with_torn_fragment_after_the_terminal ~name:"terminal-tail-torn" (fun journal settlement ->
+    Journal.record_terminal_error ~segment:(Operation_settlement settlement)
+      journal ~ts:99. ~message:"cut by restart")
+
+let test_existing_segment_terminal_stands_before_a_torn_fragment () =
+  with_torn_fragment_after_the_terminal ~name:"terminal-tail-torn-segment" (fun journal _settlement ->
+    Journal.record_terminal_error journal ~ts:99. ~message:"another cause")
+
+(* The last row is not the settlement's terminal, so the tail has no answer
+   and the whole journal is read: a journal that is not there and one without
+   a terminal hold none, and a row that does not decode is the read's
+   error. *)
+let test_find_operation_terminal_reads_the_whole_journal_without_a_terminal () =
+  with_workspace @@ fun base_path ->
+  let keeper_name = "terminal-find-whole" and operation_id = "op-terminal-find-whole" in
+  let settlement = settlement_of ~operation_id in
+  let journal = Journal.open_journal ~base_dir:base_path ~keeper_name ~operation_id () in
+  let holds_none label =
+    match Journal.find_operation_terminal journal ~settlement with
+    | Ok None -> ()
+    | Ok (Some _) -> fail (label ^ ": a terminal was found")
+    | Error detail -> fail (label ^ ": " ^ detail) in
+  holds_none "a journal that is not there";
+  (match Journal.append_result journal ~seq:0 ~ts:1.0
+           (Events.Run_started { run_id = "run-find"; thread_id = "keeper:" ^ keeper_name }) with
+   | Ok () -> ()
+   | Error detail -> fail detail);
+  holds_none "a journal without a terminal";
+  let path = Journal.journal_path ~base_dir:base_path ~keeper_name ~operation_id in
+  Out_channel.with_open_gen [ Open_append; Open_wronly; Open_binary ] 0o600 path
+    (fun oc -> Out_channel.output_string oc "not json\n");
+  match Journal.find_operation_terminal journal ~settlement with
+  | Error _ -> ()
+  | Ok _ -> fail "a row that is not JSON was read past"
+
+(* The read that gives a terminal its sequence refuses rows whose sequences do
+   not increase, and nothing is written. *)
+let test_record_terminal_error_refuses_sequences_that_do_not_increase () =
+  with_workspace @@ fun base_path ->
+  let keeper_name = "terminal-sequences" and operation_id = "op-terminal-sequences" in
+  let journal = Journal.open_journal ~base_dir:base_path ~keeper_name ~operation_id () in
+  (match Journal.append_result journal ~seq:0 ~ts:1.0 Events.Agent_core_stream_ping with
+   | Ok () -> ()
+   | Error detail -> fail detail);
+  let row seq =
+    Journal.journaled_event_to_string
+      ({ seq; ts = 1.0; event = Events.Agent_core_stream_ping } : Journal.journaled_event)
+    ^ "\n" in
+  let path = Journal.journal_path ~base_dir:base_path ~keeper_name ~operation_id in
+  Out_channel.with_open_gen [ Open_append; Open_wronly; Open_binary ] 0o600 path
+    (fun oc -> Out_channel.output_string oc (row 2 ^ row 1));
+  let rows = In_channel.with_open_bin path In_channel.input_all in
+  (match Journal.record_terminal_error journal ~ts:9. ~message:"cut by restart" with
+   | Error _ -> ()
+   | Ok _ -> fail "a terminal was recorded after sequences that do not increase");
+  check string "nothing was written" rows (In_channel.with_open_bin path In_channel.input_all)
 
 (* A last row that is another settlement of the same operation does not stand
    in for this one: the tail gives no answer and the full read appends. *)
@@ -1035,13 +1093,19 @@ let () =
             test_operation_settlement_retries_and_replays_past_a_live_cursor
         ; test_case "settlement terminal is read from the journal tail" `Quick
             test_operation_settlement_reads_its_terminal_from_the_journal_tail
-        ; test_case "a terminal without a settlement is read from the journal tail" `Quick
-            test_existing_segment_reads_its_terminal_from_the_journal_tail
+        ; test_case "a settled terminal answers a recording without a settlement from the tail" `Quick
+            test_existing_segment_reads_a_settled_terminal_from_the_journal_tail
         ; test_case "find_operation_terminal reads the journal tail" `Quick
             test_find_operation_terminal_reads_the_journal_tail
+        ; test_case "find_operation_terminal reads the whole journal without a terminal" `Quick
+            test_find_operation_terminal_reads_the_whole_journal_without_a_terminal
+        ; test_case "record_terminal_error refuses sequences that do not increase" `Quick
+            test_record_terminal_error_refuses_sequences_that_do_not_increase
         ; test_case "tail of another settlement still appends" `Quick
             test_operation_settlement_tail_of_another_settlement_still_appends
         ; test_case "settled terminal stands before a torn fragment" `Quick
             test_operation_settlement_terminal_stands_before_a_torn_fragment
+        ; test_case "settled terminal answers a recording without a settlement before a torn fragment" `Quick
+            test_existing_segment_terminal_stands_before_a_torn_fragment
         ] )
     ]

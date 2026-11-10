@@ -1254,8 +1254,9 @@ let find_operation_terminal journal ~settlement =
 
 (* One read of the whole journal: its rows say which sequence a terminal would
    take and whether [segment] already has one. The sequence is asked first, so
-   rows whose sequences do not increase are refused whatever the last row
-   is. *)
+   this read refuses rows whose sequences do not increase whatever the last
+   row is. [record_terminal_error] asks the tail before this read; a terminal
+   the tail finds is answered without it, and without this check. *)
 let record_terminal_error_from_journal ~segment journal ~ts ~message =
   let open Result.Syntax in
   let* entries = read_journal_envelopes journal in

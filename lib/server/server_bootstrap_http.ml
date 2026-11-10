@@ -334,8 +334,9 @@ let serve_h2_connection
                 Http_h2_response_ledger.with_request resources ~sw:stream_sw
                   (fun () ->
                     try
-                      with_request_lane (H2.Reqd.request reqd).meth (fun () ->
-                        h2_request_handler ~stream_end addr reqd)
+                      with_request_lane
+                        (Http_h2_stream.Stream_end.request stream_end).meth
+                        (fun () -> h2_request_handler ~stream_end addr reqd)
                     with
                     | Eio.Cancel.Cancelled _ as exn -> raise exn
                     | exn ->

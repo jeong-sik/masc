@@ -28,4 +28,9 @@ val write_reserved
   -> unit
 (** [write_reserved lease ~write writer payload] copies the reserved payload
     into [writer] with [write], then releases at flush. Switch cleanup is the
-    alternate release path. A payload size mismatch is an invalid argument. *)
+    alternate release path. A payload size mismatch is an invalid argument.
+
+    The flush that releases is h2's own and has no stall bound. A stream's
+    bound counts the flushes [write] and the caller make through
+    [Http_h2_stream.Stream_end]: the slice boundaries, and the caller's
+    flush or close after the payload. *)

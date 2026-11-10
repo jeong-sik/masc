@@ -187,7 +187,13 @@ val sse_ping_interval_s : float
 
 val sse_stalled_after_s : float
 (** Three {!sse_ping_interval_s}. An SSE frame that has not reached the socket
-    after this long closes its response (RFC-0493 §3.3). *)
+    after this long closes its response (RFC-0493 §3.3).
+
+    It is also the bound every HTTP/2 stream gives a response flush
+    ({!Server_bootstrap_http.serve_h2_connection}). RFC-0518 D2 keeps one
+    stall bound for the server, so an SSE stream is cut at the same age on
+    either transport. A change here moves the smallest drain rate of every
+    HTTP/2 response with it: one 16 KiB slice within the bound. *)
 
 val observer_idle_timeout_header : string
 val observer_idle_timeout_ms : int

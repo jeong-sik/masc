@@ -25,6 +25,10 @@ let mismatch = B.Judged (H.Mismatch (H.Commit_not_in_log some_hash, []))
 let unreadable_store = B.Store_unreadable "install record corrupt"
 let store_unreadable = B.External_store_unreadable "install record corrupt"
 
+(* The table reads only that the last mode event is Off. The state rides along
+   to the boot, which keeps its records read-only (row 4). *)
+let off = B.Made_off Authz_state.empty
+
 let input ?(settings = secure) ?(anonymous_mutations = false) requested log_mode high_water =
   { B.requested; log_mode; high_water; settings; anonymous_mutations }
 ;;
@@ -59,8 +63,16 @@ let test_rows () =
     (fun hw ->
        expect_refused "row 3" [ B.Downgraded_from_multi_account ] (input B.Not_set B.Made_multi_account hw))
     [ absent; matches; mismatch; unreadable_store ];
-  (* Row 4: Off with a matching store waits for the Off event's own layer. *)
-  expect_refused "row 4" [ B.Off_mode_not_supported ] (input su B.Made_off matches);
+  (* Row 4: a single user after Off, with the state the log replayed to. *)
+  List.iter
+    (fun requested ->
+       match B.judge (input requested off matches) with
+       | Ok (B.Single_user_after_off state) ->
+         Alcotest.(check bool) "row 4 hands on the state of the log" true (state == Authz_state.empty)
+       | Ok got -> Alcotest.failf "row 4: booted as %s" (B.mode_to_string got)
+       | Error (r, rs) ->
+         Alcotest.failf "row 4: refused: %s" (String.concat "; " (List.map B.refusal_to_string (r :: rs))))
+    [ B.Not_set; su ];
   (* Row 5: a request before activation. *)
   expect_mode "row 5" B.Activation_requested (input ma B.No_mode_event absent);
   (* Row 6: a rewind, not a new installation. *)
@@ -74,20 +86,20 @@ let test_rows () =
     (fun hw -> expect_mode "row 8" B.Multi_account_uncertain (input ma B.Made_multi_account hw))
     [ absent; mismatch; unreadable_store ];
   (* Row 9: a reactivation without the recovery procedure. *)
-  expect_refused "row 9" [ B.Reactivation_not_ready ] (input ma B.Made_off matches);
+  expect_refused "row 9" [ B.Reactivation_not_ready ] (input ma off matches);
   (* Row 10: Off with a store that does not match, whatever the config asks. *)
   List.iter
     (fun requested ->
        List.iter
-         (fun hw -> expect_refused "row 10" [ B.Rewound_after_off ] (input requested B.Made_off hw))
+         (fun hw -> expect_refused "row 10" [ B.Rewound_after_off ] (input requested off hw))
          [ absent; mismatch ];
-       expect_refused "row 10, store unreadable" [ store_unreadable ] (input requested B.Made_off unreadable_store))
+       expect_refused "row 10, store unreadable" [ store_unreadable ] (input requested off unreadable_store))
     [ B.Not_set; su; ma ];
   (* Row 11: an unknown value, whatever the log and the store say. *)
   List.iter
     (fun (log, hw) ->
        expect_refused "row 11" [ B.Unknown_account_mode "null" ] (input (B.Unknown_value "null") log hw))
-    [ B.No_mode_event, absent; B.Made_multi_account, matches; B.Made_off, matches ];
+    [ B.No_mode_event, absent; B.Made_multi_account, matches; off, matches ];
   (* The rewind does not depend on the config, so it comes with the unknown value. *)
   expect_refused
     "row 11 over a rewind"
@@ -113,7 +125,7 @@ let test_every_reason_is_returned () =
   expect_refused
     "unknown value and Off rewound"
     [ B.Unknown_account_mode "\"multi_account\""; B.Rewound_after_off ]
-    (input (B.Unknown_value "\"multi_account\"") B.Made_off mismatch);
+    (input (B.Unknown_value "\"multi_account\"") off mismatch);
   expect_refused
     "rewind and every insecure setting"
     [ B.Rewound_before_bootstrap
@@ -199,18 +211,10 @@ let test_single_user_keeps_its_settings () =
     (input ~settings:(B.Settings_read { enabled = false; require_token = false }) B.Not_set B.No_mode_event absent)
 ;;
 
+(* A state with a mode event comes only from records, so Multi_account and
+   Off are read from real logs in test_authz_boot_mode_read. *)
 let test_mode_events () =
-  let workspace =
-    match Authz_types.Workspace_id.of_string "workspace-1" with
-    | Ok id -> id
-    | Error _ -> Alcotest.fail "fixture id rejected by Authz_id"
-  in
-  Alcotest.(check bool) "no bootstrap" true (B.of_mode_state Authz_mode_state.Not_bootstrapped = B.No_mode_event);
-  Alcotest.(check bool)
-    "Multi_account"
-    true
-    (B.of_mode_state (Authz_mode_state.Multi_account workspace) = B.Made_multi_account);
-  Alcotest.(check bool) "Off" true (B.of_mode_state (Authz_mode_state.Off workspace) = B.Made_off)
+  Alcotest.(check bool) "no bootstrap" true (B.of_state Authz_state.empty = B.No_mode_event)
 ;;
 
 (* The account_mode member of config.json. *)

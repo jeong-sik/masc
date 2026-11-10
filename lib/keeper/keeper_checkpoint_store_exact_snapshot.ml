@@ -256,3 +256,44 @@ let load_agent_core_with_ref ~session_dir ~session_id =
   |> Result.map (fun snapshot ->
     exact_snapshot_checkpoint snapshot, exact_snapshot_reference snapshot)
 ;;
+
+(* The head names its session without an object read, so a canonical of
+   another session is refused here as a load refuses it. What is read after
+   that is what [Objects.find_last] reads: the messages from the last one
+   back to the one that answers [find]. No summary of the canonical is
+   published: this reading has not seen every object the head names, and
+   [known_canonical] parses a head nobody published. *)
+let find_last_agent_core_message ~session_dir ~session_id find =
+  match Keeper_id.Trace_id.of_string session_id with
+  | Error reason -> Error (Ref_identity_invalid (Session_id_invalid reason))
+  | Ok expected_session_id ->
+    let find_in_canonical session_dir =
+      let canonical_path =
+        agent_core_checkpoint_path
+          ~session_dir
+          ~session_id:(Keeper_id.Trace_id.to_string expected_session_id)
+      in
+      match load_canonical_bytes_strict canonical_path with
+      | Error error -> Error (Ref_read_failed error)
+      | Ok None -> Error Ref_not_found
+      | Ok (Some ((_ : canonical_identity), head_bytes)) ->
+        offload_checkpoint_cpu (fun () ->
+          match Objects.head_of_string head_bytes with
+          | Error error -> Error (Ref_read_failed (classify_objects_error error))
+          | Ok (head : Objects.head) ->
+            (match Keeper_id.Trace_id.of_string head.header.session_id with
+             | Error reason -> Error (Ref_identity_invalid (Session_id_invalid reason))
+             | Ok actual when not (Keeper_id.Trace_id.equal actual expected_session_id) ->
+               Error (Ref_session_mismatch { expected = expected_session_id; actual })
+             | Ok (_ : Keeper_id.Trace_id.t) ->
+               Objects.find_last
+                 ~read_object:(Keeper_checkpoint_object_store.read ~session_dir)
+                 head
+                 find
+               |> Result.map_error (fun error ->
+                 Ref_read_failed (classify_objects_error error))))
+    in
+    (match with_session_lock ~session_dir find_in_canonical with
+     | Ok result -> result
+     | Error detail -> Error (Ref_lock_failed detail))
+;;

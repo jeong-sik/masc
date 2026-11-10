@@ -583,6 +583,25 @@ val load_agent_core_with_ref :
   , checkpoint_ref_load_error )
   result
 
+(** [find_last_agent_core_message ~session_dir ~session_id find] is the first
+    [Some] that [find] gives for the canonical's messages, last message first,
+    or [None] when it gives none for any of them. It reads the head under the
+    session lock and then only the objects that hold the messages [find] is
+    asked ({!Agent_core.Checkpoint_objects.find_last}): each is checked
+    against its digest, and nothing is said about the messages before the one
+    that answered. A canonical that cannot be read whole can therefore answer
+    here. A missing file is [Ref_not_found]; a head of another session is
+    [Ref_session_mismatch].
+
+    [find] runs where the objects are read and decoded, which is a pool domain
+    when the caller is an Eio fiber and the pool exists. It must not perform
+    Eio effects. *)
+val find_last_agent_core_message :
+  session_dir:string ->
+  session_id:string ->
+  (Agent_core.Types.message -> 'a option) ->
+  ('a option, checkpoint_ref_load_error) result
+
 type checkpoint_cas_error =
   | Source_unavailable of checkpoint_ref_load_error
   | Source_changed of Keeper_checkpoint_ref.t

@@ -1,0 +1,68 @@
+{
+  "base": "840321a4d1d95a655810f4441ece7e58572ec57e",
+  "lower": "266ba0733853c8cd1bcaf49a802a8f3efa1c1bb4",
+  "case_source": "e6856d5357bd7ddaccc4b14b3f19276e266fba17",
+  "stack": 51180,
+  "prs": [
+    51178,
+    51179
+  ],
+  "paths": [
+    {
+      "path": "changelog.d/51178.md",
+      "sha256": "c619b33e9ed452af564ed30883564740eab396863e6fb1f5f20cea28bb8f2b1b"
+    },
+    {
+      "path": "changelog.d/51179.md",
+      "sha256": "b840751c19c1f909d172ebb452b697e0c70db2fdd376f532a22de5eab2bc54a6"
+    },
+    {
+      "path": "docs/spec/11-board.md",
+      "sha256": "ea5310b423cc1d498884115e1fb86c90c5e9a3af6698538b66694c88eee797fb"
+    },
+    {
+      "path": "lib/board/board_core.mli",
+      "sha256": "b6fa473302f50f299a662a36f40072b048f915884f007579016f337ac52fb286"
+    },
+    {
+      "path": "lib/board/board_core_persist.ml",
+      "sha256": "c562f07322883da14c1ba0269f6c8a51cf9a451dcaa1894891e2e27a62784933"
+    },
+    {
+      "path": "lib/board/board_core_persist.mli",
+      "sha256": "57bc4a494669c66cffc2a162a326a257bff558ad27952b4941ac7d8cbcd02308"
+    },
+    {
+      "path": "lib/board/board_posts_source.ml",
+      "sha256": "9ae23641572adcfefa86f9c7771654ea5c7d32e31e678bd0a1bcdfbd62df371e"
+    },
+    {
+      "path": "lib/board/board_posts_source.mli",
+      "sha256": "bb97b2bad92c123f9de967a6b84c62aa064cf09610754d9a206317047219be43"
+    },
+    {
+      "path": "lib/board_types/board_types.ml",
+      "sha256": "b39d0e07e888f50b4585256d35b165d14a056d4dc817156735a9df7d196739a6"
+    },
+    {
+      "path": "lib/board_types/board_types.mli",
+      "sha256": "3bee9d9f19b29c6088be458e902e93b5b8af935b0550b42ec987e2d42b974847"
+    },
+    {
+      "path": "test/test_board_deletion_recovery.ml",
+      "sha256": "0145696e6005728bd0399c65bf2bb16ad588bbc1c75d0d4a31f6fd4f89069f2a"
+    },
+    {
+      "path": "test/test_board_posts_source_authority.ml",
+      "sha256": "4ebee2cd9f21d3539fc3044ea62dc6fce5369743f68f89f0a5efffce25e5c148"
+    },
+    {
+      "path": "test/test_board_sub_board_deletion_recovery.ml",
+      "sha256": "8f7c600721bfea1781c626c48b681eb948596dae17c6d59c95f0c6a44ffd2f0e"
+    },
+    {
+      "path": "test/test_board_target_admission.ml",
+      "sha256": "32415287f8aa69803bc1a5ba717064cb42344f30e07a6c3dec4f42cf255cbb7c"
+    }
+  ]
+}

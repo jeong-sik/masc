@@ -1,0 +1,43 @@
+{
+  "kind": "independent_local_source_review",
+  "base": "840321a4d1d95a655810f4441ece7e58572ec57e",
+  "lower": "266ba0733853c8cd1bcaf49a802a8f3efa1c1bb4",
+  "case_source": "e6856d5357bd7ddaccc4b14b3f19276e266fba17",
+  "reviewers": [
+    {
+      "session": "/root/history_redaction_response",
+      "initial_lower": "e8114de3eb55c0792e3c4b7e84566bc1e37f790b",
+      "initial_lower_paths": 8,
+      "initial_upper": "87bbdd9ad6494671bce2e2dbb9332d78181df252",
+      "initial_upper_paths": 4,
+      "final_lower": "266ba0733853c8cd1bcaf49a802a8f3efa1c1bb4",
+      "final_case_source": "e6856d5357bd7ddaccc4b14b3f19276e266fba17",
+      "scope": "Complete initial lower and upper diffs, public interfaces and direct consumers; then all final deltas, including both changelog fragments.",
+      "final_verdict": "No unresolved P0-P2 in the reviewed source scope.",
+      "addressed_findings": [
+        "Cached read uses board_read_error and converts opaque Agent_id to string.",
+        "Real public vote creates dirty parent work before the unknown edit; dirty flags are asserted before and after the refused flush."
+      ],
+      "execution_verified": false,
+      "formal_github_approval": false
+    },
+    {
+      "session": "/root/issue_disposition_review",
+      "initial_lower": "e8114de3eb55c0792e3c4b7e84566bc1e37f790b",
+      "initial_lower_paths": 8,
+      "initial_upper": "87bbdd9ad6494671bce2e2dbb9332d78181df252",
+      "initial_upper_paths": 4,
+      "final_lower": "266ba0733853c8cd1bcaf49a802a8f3efa1c1bb4",
+      "final_case_source": "e6856d5357bd7ddaccc4b14b3f19276e266fba17",
+      "scope": "Complete initial lower and upper diffs, public interfaces and direct consumers; then all final deltas, including both changelog fragments.",
+      "final_verdict": "No unresolved P0-P2 in the reviewed source scope.",
+      "addressed_findings": [
+        "Cached read uses board_read_error and converts opaque Agent_id to string.",
+        "Real public vote creates dirty parent work before the unknown edit; dirty flags are asserted before and after the refused flush."
+      ],
+      "execution_verified": false,
+      "formal_github_approval": false
+    }
+  ],
+  "limits": "No local reviewer executed types, warnings, builds, Dune or backend cases. These local sessions did not submit formal GitHub approval."
+}

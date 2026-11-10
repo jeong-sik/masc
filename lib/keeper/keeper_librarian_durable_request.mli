@@ -64,6 +64,12 @@ val confirm_predecessor : store:Lane_addon_store.t -> require_confirmed:bool -> 
 (** Blocking full parent read and immutable intent check. Retention may accept
     the exact pending intent; dispatch and retained delivery require its ACK.
     Offload the whole call. This performs no publication, ACK or provider work. *)
+val validate_predecessor_link_payload :
+  read:(scope:string -> request_id:string -> (Lane_addon_tool_request_owner.retained option, string) result) ->
+  require_confirmed:bool -> t -> (unit, string) result
+(** One existing known-basis link, without traversing ancestors. The history
+    resolution lineage reader composes this with its fenced-parent link and
+    applies one cycle/ancestry check across both kinds. No effect authority. *)
 val validate_predecessor_payload :
   read:(scope:string -> request_id:string -> (Lane_addon_tool_request_owner.retained option, string) result) ->
   require_confirmed:bool -> t -> (unit, string) result
@@ -72,6 +78,8 @@ val validate_predecessor_payload :
     captured payloads and rejects cycles; does not inspect live source roots. *)
 val to_json : t -> Yojson.Safe.t
 val request_id : t -> string
+val body_digest : t -> string
+(** Digest of the verified complete canonical captured request body. *)
 val physical_owner : t -> owner
 val destination : t -> destination
 val source : t -> Keeper_librarian_durable_capture.t

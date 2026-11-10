@@ -154,6 +154,7 @@ let predecessor_of_json = function
       "Original history predecessor digest is invalid" in
     Some {request_id;request_digest}
 let request_id capture=capture.id
+let body_digest capture=capture.digest
 let physical_owner capture=capture.owner
 let destination capture=capture.destination
 let source capture=capture.source
@@ -267,6 +268,9 @@ let confirm_predecessor ~store ~require_confirmed capture =
     ~read:(fun ~scope ~request_id -> Owner.load ~store ~scope ~request_id
       |> Result.map_error Owner.error_to_string)
     ~restore_parent:(fun ~owner parent -> restore ~owner parent |> Result.map (fun _ -> ()))
+let validate_predecessor_link_payload ~read ~require_confirmed capture =
+  check_predecessor ~read ~require_confirmed capture
+    ~restore_parent:(fun ~owner parent -> restore_payload ~owner parent |> Result.map (fun _ -> ()))
 let validate_predecessor_payload ~read ~require_confirmed capture =
   let rec visit seen ~require_confirmed capture =
     let* ()=require (not (List.mem capture.id seen)) "History replacement ancestry contains a cycle" in

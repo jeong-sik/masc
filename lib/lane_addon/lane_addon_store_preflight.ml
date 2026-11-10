@@ -41,8 +41,10 @@ type tool_request_scope_reader = scope:string ->
   (Lane_addon_tool_request_owner.retained list, string) result
 type tool_request_archive_reader = scope:string -> date:string -> request_id:string ->
   (Lane_addon_tool_request_owner.Record.t option, string) result
+type history_resolution_reader = scope:string -> request_id:string -> (Yojson.Safe.t option, string) result
 type payload_validator = read:tool_request_reader -> read_scope:tool_request_scope_reader -> read_body:request_body_reader ->
   read_archive:tool_request_archive_reader ->
+  read_fence:history_resolution_reader -> read_resolution:history_resolution_reader ->
   Lane_addon_tool_request_owner.retained -> (unit, string) result
 
 type refusal =
@@ -274,7 +276,7 @@ let scan_native_claims root =
        empty
        names)
 
-let scan_with ?(validate_tool_request=(fun () ~read:_ ~read_scope:_ ~read_body:_ ~read_archive:_ _ -> Ok ())) ~after_read store ~base_path =
+let scan_with ?(validate_tool_request=(fun () ~read:_ ~read_scope:_ ~read_body:_ ~read_archive:_ ~read_fence:_ ~read_resolution:_ _ -> Ok ())) ~after_read store ~base_path =
   let root = Lane_addon_store.directory ~masc_dir:(Common.masc_dir_from_base_path ~base_path) in
   let report =
     match store with
@@ -307,6 +309,12 @@ let scan_with ?(validate_tool_request=(fun () ~read:_ ~read_scope:_ ~read_body:_
           Error (path ^ ": " ^ operation ^ ": " ^ Unix.error_message error) in
       let read_body_bytes ~scope ~request_digest =
         read_text (Filename.concat root (Lane_addon_store.tool_request_body_path ~scope ~request_digest)) in
+      let read_sidecar path ~scope ~request_id =
+        let* bytes=read_text (Filename.concat root (path ~scope ~request_id)) in
+        match bytes with None -> Ok None | Some bytes ->
+          (try Ok (Some (Yojson.Safe.from_string bytes)) with Yojson.Json_error detail -> Error detail) in
+      let read_fence=read_sidecar Lane_addon_store.history_fence_path in
+      let read_resolution=read_sidecar Lane_addon_store.history_resolution_path in
       (* Discovery reads a scope as a whole and fails it on one record it
          cannot read, so fresh state deletes the scope: its owner records and
          its request bodies. *)
@@ -360,7 +368,7 @@ let scan_with ?(validate_tool_request=(fun () ~read:_ ~read_scope:_ ~read_body:_
           fun ~name ~path:_ json ->
             let* record=Reader.read reader ~directory_name:group ~file_name:name json
               |> decoded Tool_request_owner in
-            validate_tool_request ~read ~read_scope ~read_body ~read_archive record |> Result.map_error (fun detail ->
+            validate_tool_request ~read ~read_scope ~read_body ~read_archive ~read_fence ~read_resolution record |> Result.map_error (fun detail ->
               Tool_request_payload, Printf.sprintf "scope=%S request_id=%S request_digest=%s: %s"
                 record.scope record.request_id record.request_digest detail))
   in

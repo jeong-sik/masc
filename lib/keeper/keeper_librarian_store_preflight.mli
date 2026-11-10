@@ -23,4 +23,6 @@ val validator : unit ->
   read_body:(scope:string -> request_digest:string -> (Yojson.Safe.t, string) result) ->
   read_archive:(scope:string -> date:string -> request_id:string ->
     (Lane_addon_tool_request_owner.Record.t option, string) result) ->
+  read_fence:Keeper_librarian_history_resolution_lineage.reader ->
+  read_resolution:Keeper_librarian_history_resolution_lineage.reader ->
   Lane_addon_tool_request_owner.retained -> (unit, string) result

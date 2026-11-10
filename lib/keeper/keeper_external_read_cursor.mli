@@ -26,6 +26,13 @@ val observation_matches_floor_preparation : observation -> after:int -> through:
 (** A pending message-floor preparation has the original range identity with
     unread-message coverage added by its completed program. This compares the
     original range and cursor coordinates while ignoring only those holes. *)
+val restore_original_preparation : runtime_keepers_dir:string -> keeper_name:string ->
+  expected:observation -> original:observation -> (unit, string) result
+(** Only for an explicitly fenced history original inside its serialized
+    Memory lane and held source locks. Compare the current complete observation
+    and restore that original's exact preparation at the same offset. Does not
+    recover a publication, acknowledge input or change the offset. The caller
+    verifies the immutable source/range and absence of its Memory effect. *)
 
 type token
 val read : memory_keepers_dir:string -> runtime_keepers_dir:string -> keeper_name:string ->

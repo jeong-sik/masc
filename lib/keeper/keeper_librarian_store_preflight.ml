@@ -43,9 +43,9 @@ let forest_proof () =
     else
       let+ ()=Parts.validate_payload_forest ~read_scope ~owner in
       Hashtbl.replace proved key ()
-let history_capture ~read ~owner (record:Owner.retained) =
+let history_capture ~read ~read_fence ~read_resolution ~owner (record:Owner.retained) =
   let* capture=History.restore_payload ~owner record in
-  let+ ()=History.validate_predecessor_payload ~read
+  let+ ()=Keeper_librarian_history_resolution_lineage.validate_predecessor_payload ~read ~read_fence ~read_resolution
     ~require_confirmed:(Lane_addon_request_progress.events record.progress<>[]) capture in capture
 let floor_capture ~read ~owner record =
   let* capture=Floor.restore ~owner record in
@@ -56,7 +56,7 @@ let validator () =
   let admission_capture ~read ~read_scope ~owner record =
     let* ()=forest ~read_scope ~owner in
     Admission.restore ~owner ~load_parent:(Parts.load_parent_payload ~read ~owner) record in
-  let validate ~read ~read_scope ~read_body (record:Owner.retained) =
+  let validate ~read ~read_scope ~read_body ~read_fence ~read_resolution (record:Owner.retained) =
   match purpose record.scope with
   | None -> Ok ()
   | Some Admission_execution ->
@@ -76,7 +76,7 @@ let validator () =
     let+ _=Closure.restore ~owner record in ()
   | Some History_execution ->
     let* owner=history_owner record in
-    let* capture=history_capture ~read ~owner record in
+    let* capture=history_capture ~read ~read_fence ~read_resolution ~owner record in
     Keeper_librarian_durable_gate.validate_preparation_payload ~read ~read_body ~owner ~capture ~parent:record
   | Some Floor_execution ->
     let* owner=history_owner record in
@@ -94,7 +94,7 @@ let validator () =
     let* request_id=Gate.parent_execution_id record in
     let* owner=history_owner record in
     let* parent=parent ~read ~scope:(History.scope owner) ~request_id in
-    let* capture=history_capture ~read ~owner parent in
+    let* capture=history_capture ~read ~read_fence ~read_resolution ~owner parent in
     Gate.validate_payload ~read ~read_body ~owner ~capture ~parent ~record
   | Some Floor_gate ->
     let module Gate=Keeper_librarian_floor_step_gate in
@@ -106,16 +106,16 @@ let validator () =
   in
   (* Unlike the immutable forest payload, absence is not stable: a running
      owner can publish its closing journal before the next scanned record. *)
-  fun ~read ~read_scope ~read_body ~read_archive (record:Owner.retained) ->
+  fun ~read ~read_scope ~read_body ~read_archive ~read_fence ~read_resolution (record:Owner.retained) ->
   match purpose record.scope with
   | None | Some (History_execution | Floor_execution | History_gate | Floor_gate) ->
-    validate ~read ~read_scope ~read_body record
+    validate ~read ~read_scope ~read_body ~read_fence ~read_resolution record
   | Some (Admission_execution | Admission_part | Admission_partition | Admission_gate | Admission_closure) ->
     let* owner=admission_owner record in
     let* view=Closure.project ~owner ~read ~read_scope ~read_body ~read_archive in
     match view.closure with
     | None ->
-      validate ~read ~read_scope ~read_body record
+      validate ~read ~read_scope ~read_body ~read_fence ~read_resolution record
     | Some closure ->
       let* ()=if Closure.is_scope record.scope then
         let current=Closure.record closure in
@@ -128,7 +128,7 @@ let validator () =
           | Some current when Yojson.Safe.equal (Owner.record_to_json (Owner.listed current))
               (Owner.record_to_json (Owner.listed record)) -> Ok ()
           | None | Some _ -> Error "Admission closure member changed during preflight" in
-      let check=validate ~read:view.read ~read_scope:view.read_scope ~read_body:view.read_body in
+      let check=validate ~read:view.read ~read_scope:view.read_scope ~read_body:view.read_body ~read_fence ~read_resolution in
       let* ()=check record in
       if Closure.is_scope record.scope then
         List.fold_left (fun result original -> let* ()=result in check original)

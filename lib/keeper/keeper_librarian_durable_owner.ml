@@ -30,7 +30,7 @@ let same left right =
 let check_request request (record:Owner.retained) =
   io (fun () -> Request.confirm_record request record) |> rejected
 let check_predecessor ~store ~dispatch request =
-  io (fun () -> Request.confirm_predecessor ~store ~require_confirmed:dispatch request) |> rejected
+  io (fun () -> Keeper_librarian_history_resolution_lineage.confirm_predecessor ~store ~require_confirmed:dispatch request) |> rejected
 let retain ~store request =
   let* ()=io (fun () -> Request.confirm_owner request) |> rejected in
   let* ()=check_predecessor ~store ~dispatch:false request in

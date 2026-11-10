@@ -1817,10 +1817,7 @@ streaming = true
     (Result.is_error (provider_config_for_binding unsafe_config binding))
 ;;
 
-(* The cases verify as [masc runtime-verify] does, which publishes the single
-   user of a base path never set up for accounts. *)
 let () =
-  Masc_test_deps.publish_single_user_access ();
   run
     "runtime verification"
     [ ( "selected probe idle",

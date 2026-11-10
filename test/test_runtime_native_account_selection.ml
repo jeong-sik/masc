@@ -351,7 +351,6 @@ let test_missing_codex_home () =
           (Some directory) (env_value "CODEX_HOME" (child_environment (materialize Codex)))))))
 
 let () =
-  Masc_test_deps.publish_single_user_access ();
   run "native account selection"
   ["admission to execution",
     [test_case "Claude inherited user home is captured" `Quick (test_inherited_home Claude);

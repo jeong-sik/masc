@@ -166,8 +166,10 @@ val footer_hints :
     the keys that need one, [Needs_reading] in the table. A failed read leaves
     no row and still has this, so the two answers differ there. *)
 
-val footer_hints_tools : pane:Masc_tui_types.tools_pane -> string
-(** Tools' bracket keys select retained runs in Available and Keepers in other panes. *)
+val footer_hints_tools :
+  lang:Masc_tui_types.ui_language -> pane:Masc_tui_types.tools_pane -> string
+(** Tools' bracket keys select retained runs in Available and Keepers in other
+    panes. The catalog's volume child shows only volume and reading controls. *)
 
 val footer_hints_metrics :
   lang:Masc_tui_types.ui_language ->
@@ -406,6 +408,9 @@ val footer_hints_memory_facts : lang:Masc_tui_types.ui_language -> cols:int -> h
     the category cycle, search, and the way back to the table. Omits
     [d:Category pane] on narrow frames where the Category rail does not fit,
     and the keys that act on a fact when [has_rows] is false. *)
+
+val footer_hints_memory_changes : lang:Masc_tui_types.ui_language -> string
+(** Shared Memory browser navigation and selected change reading. *)
 
 val bindings_memory_facts : binding list
 (** The fact browser's own keys. Separate from {!for_surface} because they are

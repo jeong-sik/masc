@@ -1020,6 +1020,73 @@ type comments_source_state =
     losing a source this store observed Present is refused. This lifetime
     evidence does not prove absence across different processes. *)
 
+type sub_boards_source_observation = {
+  policy_path : string;
+  policy_snapshot : Fs_compat.private_jsonl_snapshot;
+  policy_workspace : Board_workspace_binding.observation;
+}
+
+type sub_boards_source_history =
+  | No_policy_observation
+  | Policy_observed of sub_boards_source_observation
+  | Policy_present_without_snapshot
+
+type sub_boards_row_error =
+  | Invalid_policy_json of { line : int; detail : string }
+  | Invalid_policy_row of { line : int }
+
+type sub_boards_source_diagnostic =
+  | Policy_file_diagnostic of Fs_compat.private_jsonl_transaction_error
+  | Policy_workspace_diagnostic of Board_workspace_binding.rejection
+  | Policy_raised_diagnostic of {
+      exception_ : exn;
+      backtrace : Printexc.raw_backtrace;
+    }
+
+type sub_boards_source_failure =
+  | Policy_not_observed
+  | Policy_rows_rejected of sub_boards_row_error list
+  | Policy_transaction_failed of Fs_compat.private_jsonl_transaction_error
+  | Policy_missing
+  | Policy_binding_mismatch
+  | Policy_publication_pending
+  | Policy_workspace_refused of Board_workspace_binding.rejection
+  | Policy_raised of { exception_ : exn; backtrace : Printexc.raw_backtrace }
+
+type sub_boards_write_kind = Policy_append | Policy_rewrite
+
+type sub_boards_pending_write = {
+  policy_before : sub_boards_source_observation;
+  policy_kind : sub_boards_write_kind;
+  policy_intended_bytes : string;
+}
+
+type sub_boards_publication = {
+  policy_after : sub_boards_source_observation;
+  policy_cleanup : sub_boards_source_diagnostic list;
+}
+
+type sub_boards_source_state =
+  | Policy_unobserved
+  | Policy_readable of sub_boards_source_observation
+  | Policy_publishing of sub_boards_publication
+  | Policy_refused of {
+      policy_history : sub_boards_source_history;
+      policy_failure : sub_boards_source_failure;
+      policy_diagnostics : sub_boards_source_diagnostic list;
+    }
+  | Policy_unsettled of {
+      policy_pending : sub_boards_pending_write;
+      policy_failure : sub_boards_source_failure;
+      policy_diagnostics : sub_boards_source_diagnostic list;
+    }
+(** Policy authority belongs to persist_mutex. Unknown writes and interrupted
+    model publication remain fail-stop for this store, with the exact pending
+    bytes or known-success receipt retained. Only a fresh store can reload
+    them. This is not multi-source crash recovery; see #26378. *)
+
+type snapshot_retry = Independent_snapshots | Deletion_pending
+
 type store = {
   (** Canonical posts observation/refusal/uncertainty, owned by persist_mutex.
       Successful loads and writes advance it; dirty cards need not equal its bytes. *)
@@ -1028,10 +1095,11 @@ type store = {
   (** Source authority is owned by persist_mutex. *)
   mutable comments_source : comments_source_state;
   comments_source_io : Fs_compat.private_jsonl_transaction_io_for_testing option;
-  (** Derived outcomes of the other three source loads. *)
+  mutable sub_boards_source : sub_boards_source_state;
+  sub_boards_source_io : Fs_compat.private_jsonl_transaction_io_for_testing option;
+  (** Derived outcomes of the other two source loads. *)
   mutable votes_load_result : (unit, string) result;
   mutable reactions_load_result : (unit, string) result;
-  mutable sub_boards_load_result : (unit, string) result;
   mutable workspace_binding: Board_workspace_binding.t;
   posts: (string, post) Hashtbl.t;
   comments: (string, comment) Hashtbl.t;
@@ -1054,6 +1122,7 @@ type store = {
   reactions: (string, reaction) Hashtbl.t;                 (** unique target/user/emoji reactions *)
   mutable dirty_posts: bool;                               (** Deferred flush flag *)
   mutable dirty_comments: bool;                            (** Deferred flush flag *)
+  mutable snapshot_retry: snapshot_retry;
   dirty_post_ids: (string, unit) Hashtbl.t;                 (** Deferred post snapshots *)
   dirty_comment_ids: (string, unit) Hashtbl.t;              (** Deferred comment snapshots *)
   post_rows: (string, post * string) Hashtbl.t;             (** See .mli *)

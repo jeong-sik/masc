@@ -133,14 +133,18 @@ let all_turn_states : Keeper_turn_fsm.any_state list =
   ]
 
 let test_turn_state_labels_unique () =
-  let labels = List.map Keeper_turn_fsm.any_state_label all_turn_states in
+  let labels =
+    List.map
+      (fun (Keeper_turn_fsm.Any s) -> Keeper_turn_fsm.turn_state_label s)
+      all_turn_states
+  in
   Alcotest.(check (list string))
     "no duplicate turn_state labels" [] (duplicates labels)
 
 let test_failed_label_carries_reason () =
   let s =
-    Keeper_turn_fsm.any_state_label
-      (Keeper_turn_fsm.Any (Failed (Failure_runtime_unavailable { base = "b"; resolved = None })))
+    Keeper_turn_fsm.turn_state_label
+      (Keeper_turn_fsm.Failed (Failure_runtime_unavailable { base = "b"; resolved = None }))
   in
   Alcotest.(check string)
     "Failed label uses 'failed:' prefix + reason"
@@ -148,7 +152,7 @@ let test_failed_label_carries_reason () =
 
 let test_cancelled_label_carries_reason () =
   let s =
-    Keeper_turn_fsm.any_state_label (Keeper_turn_fsm.Any (Cancelled Cancelled_provider_timeout))
+    Keeper_turn_fsm.turn_state_label (Keeper_turn_fsm.Cancelled Cancelled_provider_timeout)
   in
   Alcotest.(check string)
     "Cancelled label uses 'cancelled:' prefix + reason"

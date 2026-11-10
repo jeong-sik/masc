@@ -83,13 +83,13 @@ let test_build_mismatch_names_the_older_side () =
             ~max_cells:120 ~port:8935 ~hints:"q" ()))
   | None -> Alcotest.fail "a differing pair produced no item"
 
-(* RFC-0484 §3.3: the server's rollup leads the row with its count and first
-   reason, ahead of the keys, on every working surface. *)
+(* RFC-0484 §3.3: the server's rollup leads the row with its count and detail,
+   ahead of the keys, on every working surface. *)
 let test_operator_action_leads_the_row () =
   let item =
     Masc_tui_footer.Operator_action
-      { first = "typesafeai:payment_required https://api.typesafe.ai/v1/systemone since=2026-11-04T06:45:51Z"
-      ; count = 2
+      { notice = "ACTION NEEDED 2"
+      ; detail = "Open Operations"
       }
   in
   let line =

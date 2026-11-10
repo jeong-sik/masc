@@ -1234,6 +1234,11 @@ let test_masc_board_configured_moderator_can_close_and_reopen () =
   Alcotest.(check bool) "invalid config is named" true
     (String_util.contains_substring (Tool_result.message invalid)
        "board.moderators configuration");
+  Alcotest.(check bool) "invalid config is a runtime failure" true
+    (match invalid with
+     | Tool_result.Failed { Tool_result.class_ = Tool_result.Runtime_failure; _ }
+       -> true
+     | _ -> false);
   match Board_dispatch.get_post ~reader:Masc_board_handlers.Board_access.Operator ~post_id with
   | Ok post -> Alcotest.(check bool) "refused closes leave post open" true
       (Option.is_none post.closed)

@@ -41,8 +41,12 @@ let require_post_author ~reader ~action ~post_id ~author =
 ;;
 
 let board_moderators_from_toml ~missing contents =
+  (* A malformed moderator configuration is an operator-side fault: no change
+     to the Board call arguments can repair it, so it travels as [Io_error]
+     (runtime failure at the tool boundary), not [Validation_error] (which
+     maps to a caller-correctable workflow rejection). *)
   let invalid reason =
-    Error (Board.Validation_error ("board.moderators configuration: " ^ reason))
+    Error (Board.Io_error ("board.moderators configuration: " ^ reason))
   in
   match Otoml.Parser.from_string_result contents with
   | Error _ -> invalid "runtime.toml is invalid TOML"
@@ -73,7 +77,7 @@ let default_board_moderators =
      | None -> Error (Board.Io_error "embedded runtime.toml is missing")
      | Some contents ->
        board_moderators_from_toml
-         ~missing:(Error (Board.Validation_error "embedded board.moderators is missing"))
+         ~missing:(Error (Board.Io_error "embedded board.moderators is missing"))
          contents)
 ;;
 

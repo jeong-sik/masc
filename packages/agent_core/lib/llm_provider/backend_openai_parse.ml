@@ -558,7 +558,7 @@ let parse_openai_response_result_json
 
 (** [parse_openai_response_result] parses [json_str] then delegates to
     {!parse_openai_response_result_json}.  Callers that already hold the
-    parsed [Yojson.Safe.t] (e.g. {!Backend_glm.parse_response}, which also
+    parsed [Yojson.Safe.t] (e.g. {!Backend_glm.parse_response_result}, which also
     error-checks and reasoning-extracts from the same body) should call
     {!parse_openai_response_result_json} directly to avoid re-parsing. *)
 let parse_openai_response_result

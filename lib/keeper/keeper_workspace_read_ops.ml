@@ -37,6 +37,31 @@ let validate_rg_inputs ~pattern:_ ~file_type =
 
 let rg_type_list_max_bytes = 1_000_000
 
+(* [ -e path ] exits with this status when nothing can be found at the path. *)
+let path_missing_exit = 1
+
+let path_probe_max_bytes = 1_024
+
+(* The path is a positional argument of [sh], never spliced into the script, as
+   in [Keeper_sandbox_read_backend.read_window_argv]. *)
+let path_probe_argv path = [ "sh"; "-c"; {|[ -e "$1" ]|}; "sh"; path ]
+
+(* Only the exit status of the probe proves a path missing. A probe that failed
+   to run, or ended any other way, proves nothing. *)
+let proves_path_missing = function
+  | Ok (Unix.WEXITED code, _) -> code = path_missing_exit
+  | Ok ((Unix.WSIGNALED _ | Unix.WSTOPPED _), _) | Error _ -> false
+;;
+
+(* One wording for a Grep path that is not there; [where] says who looked. *)
+let path_not_found_message ~where path =
+  Printf.sprintf
+    "path_not_found: %s (%s; list your workspace root to see what is actually \
+     there before searching)"
+    path
+    where
+;;
+
 let rg_type_names listing =
   String.split_on_char '\n' listing
   |> List.filter_map (fun line ->
@@ -151,10 +176,7 @@ let try_handle_with_authority
       Error
         ( Tool_result.Policy_rejection
         , sandbox_read_error ~target
-            (Printf.sprintf
-               "path_not_found: %s (host path does not exist; list your \
-                workspace root to see what is actually there before searching)"
-               target) )
+            (path_not_found_message ~where:"host path does not exist" target) )
     else
       (* An admitted path the backend cannot map, or a backend command that
          failed, is not claimed as the caller's: a declared endpoint path maps
@@ -195,6 +217,19 @@ let try_handle_with_authority
          | Ok () -> (
            let limit = shell_readonly_limit args in
            let glob = Safe_ops.json_string ~default:"" "glob" args |> String.trim in
+           (* The backend that ran rg is asked, so an endpoint-owned tree is
+              judged by the endpoint and not by this host's filesystem. *)
+           let backend_path_is_missing backend_path =
+             proves_path_missing
+               (run_command_with_status
+                  ~ok_exit_codes:[ 0; path_missing_exit ]
+                  ~config
+                  ~meta
+                  ~command_argv:(path_probe_argv backend_path)
+                  ~max_bytes:path_probe_max_bytes
+                  ~timeout_sec:(Env_config_sandbox.Shell_timeout.timeout_sec ~bucket:Read ())
+                  ())
+           in
            let rg_in_sandbox target =
                let base_argv = [ "rg"; "-n"; "-m"; string_of_int limit ] in
                let type_argv = if file_type <> "" then [ "--type"; file_type ] else [] in
@@ -231,12 +266,16 @@ let try_handle_with_authority
                         , `String (cut_to_bytes ~max_bytes:search_result_max_bytes trimmed_out) )
                       ]
                   in
+                  let shown_path =
+                    match meta.sandbox_profile with
+                    | Remote_ssh -> cpath
+                    | Docker | Micro_vm -> target
+                  in
                   let payload =
                     `Assoc
                         ([ "ok", `Bool is_ok
                          ; "op", `String op
-                         ; "path", `String (match meta.sandbox_profile with
-                             | Remote_ssh -> cpath | Docker | Micro_vm -> target)
+                         ; "path", `String shown_path
                          ; "pattern", `String pattern
                          ; "via", `String (Keeper_sandbox_read_runner.backend_via ~meta)
                          ; "status", Keeper_alerting_path.process_status_to_json st
@@ -246,6 +285,23 @@ let try_handle_with_authority
                   in
                   if is_ok
                   then Keeper_tool_execution.success_data payload
+                  else if
+                    (* [ok_exit_codes] leaves exit 2 as the only failing status
+                       here. rg exits 2 for a missing path, a bad pattern and a
+                       half-readable tree alike, so only the backend's own
+                       answer about the path makes this the caller's path. *)
+                    (match st with
+                     | Unix.WEXITED 2 -> backend_path_is_missing cpath
+                     | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ -> false)
+                  then
+                    (* The same class and wording as the host-side check above. *)
+                    Keeper_tool_execution.failure
+                      ~class_:Tool_result.Policy_rejection
+                      (sandbox_read_error
+                         ~target:shown_path
+                         (path_not_found_message
+                            ~where:"nothing could be found or reached at that path on the sandbox backend"
+                            shown_path))
                   else
                     (* Preserve rg's own error payload. A missing --type can
                        be established from this backend's type inventory;

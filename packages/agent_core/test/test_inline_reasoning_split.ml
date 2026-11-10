@@ -62,14 +62,6 @@ let test_text_before_and_between_tags () =
   check "all three stretches of reply" "before middleafter" text
 ;;
 
-let test_inside_reports_the_open_tag () =
-  let state = Split.create () in
-  let (_ : Split.segment list) = Split.feed_segments state "<think>still going" in
-  Alcotest.(check bool) "inside an open tag" true (Split.inside state);
-  let (_ : Split.segment list) = Split.feed_segments state "</think>" in
-  Alcotest.(check bool) "closed again" false (Split.inside state)
-;;
-
 let () =
   Alcotest.run
     "inline_reasoning_split"
@@ -85,8 +77,6 @@ let () =
             test_unterminated_tag_keeps_its_content
         ; Alcotest.test_case "text before and between tags" `Quick
             test_text_before_and_between_tags
-        ; Alcotest.test_case "inside reports the open tag" `Quick
-            test_inside_reports_the_open_tag
         ] )
     ]
 ;;

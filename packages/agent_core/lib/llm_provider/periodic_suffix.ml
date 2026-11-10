@@ -40,5 +40,3 @@ let find s ~max_period ~min_copies =
     in
     scan n)
 ;;
-
-let cycle s { span; period } = String.sub s (String.length s - span) period

@@ -32,6 +32,24 @@ val update_private_file_durable_locked_result :
   (string -> string option * 'a) ->
   ('a, durable_append_error) private_file_transaction_outcome
 
+type 'kept private_jsonl_rows_read =
+  | Rows_after_cursor of 'kept
+  | Rows_from_start
+
+type 'kept private_jsonl_rows_from_cursor =
+  { read : 'kept private_jsonl_rows_read
+  ; rows : string
+  ; incomplete_tail : string
+  ; rows_end : Private_jsonl_cursor.t
+  }
+
+val update_private_jsonl_after_cursor_durable_locked_result :
+  ?create:bool ->
+  string ->
+  after:(Private_jsonl_cursor.t * 'kept) option ->
+  ('kept private_jsonl_rows_from_cursor -> string option * 'a) ->
+  ('a, durable_append_error) private_file_transaction_outcome
+
 val update_private_file_tail_durable_locked_result :
   string ->
   max_bytes:int ->

@@ -333,43 +333,17 @@ let latency_histogram (entries : raw_entry list) : latency_bucket list =
 
 open Result.Syntax
 
-let compute ~base_path ~window_minutes =
-  let since_unix = Time_compat.now () -. (Float.of_int window_minutes *. 60.0) in
-  let* entries, cost_read = read_complete_entries ~base_path ~since_unix in
+let aggregate_entries ~window_minutes ~bucket_minutes ~cost_read entries =
   let models = aggregate_by_model entries in
-  let total_error_entries = count_if is_error_entry entries in
-  Ok { window_minutes
-  ; bucket_minutes = 0
-  ; models
-  ; total_entries = List.length entries
-  ; total_error_entries
-  ; latency_buckets = latency_histogram entries
-  ; cost_read
-  }
-;;
-
-let compute_with_buckets ~base_path ~window_minutes ~bucket_minutes =
-  let bucket_minutes = max 1 bucket_minutes in
-  let since_unix = Time_compat.now () -. (Float.of_int window_minutes *. 60.0) in
-  let* entries, cost_read = read_complete_entries ~base_path ~since_unix in
-  let models = aggregate_by_model entries in
-  let bucket_sec = bucket_minutes * 60 in
-  let by_model_map : raw_entry list StringMap.t =
-    List.fold_left
-      (fun acc (model, es) -> StringMap.add model es acc)
-      StringMap.empty
-      (group_entries_by_model entries)
-  in
   let models_with_buckets =
-    List.map
-      (fun (s : model_stats) ->
-         let model_entries =
-           match StringMap.find_opt s.model_id by_model_map with
-           | Some es -> es
-           | None -> []
-         in
-         { s with buckets = bucket_entries_for_model model_entries ~bucket_sec })
-      models
+    if bucket_minutes <= 0 then models
+    else
+      let by_model_map = List.fold_left
+          (fun acc (model, es) -> StringMap.add model es acc) StringMap.empty
+          (group_entries_by_model entries) in
+      List.map (fun (s : model_stats) ->
+        let model_entries = Option.value ~default:[] (StringMap.find_opt s.model_id by_model_map) in
+        { s with buckets = bucket_entries_for_model model_entries ~bucket_sec:(bucket_minutes * 60) }) models
   in
   let total_error_entries = count_if is_error_entry entries in
   Ok { window_minutes
@@ -380,6 +354,25 @@ let compute_with_buckets ~base_path ~window_minutes ~bucket_minutes =
   ; latency_buckets = latency_histogram entries
   ; cost_read
   }
+;;
+
+let compute ~base_path ~window_minutes =
+  let since_unix = Time_compat.now () -. (Float.of_int window_minutes *. 60.0) in
+  let* entries, cost_read = read_complete_entries ~base_path ~since_unix in
+  aggregate_entries ~window_minutes ~bucket_minutes:0 ~cost_read entries
+;;
+
+let compute_with_buckets ~base_path ~window_minutes ~bucket_minutes =
+  let since_unix = Time_compat.now () -. (Float.of_int window_minutes *. 60.0) in
+  let* entries, cost_read = read_complete_entries ~base_path ~since_unix in
+  aggregate_entries ~window_minutes ~bucket_minutes:(max 1 bucket_minutes) ~cost_read entries
+;;
+
+let aggregate_reading ~window_minutes ~bucket_minutes (reading : Model_inference_metrics_kept.reading) =
+  match reading.decision_read with
+  | Error error -> Error (Decisions_unavailable error)
+  | Ok () -> aggregate_entries ~window_minutes ~bucket_minutes
+      ~cost_read:reading.cost_read reading.entries
 ;;
 
 let aggregate_buckets ~base_path ~window_min ~bucket_min =

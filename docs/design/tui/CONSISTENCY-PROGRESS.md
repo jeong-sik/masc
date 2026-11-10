@@ -371,7 +371,9 @@ Board heading, without a repeating wall clock or healthy connection badge.
 Exceptional transport, workspace, partial/interrupted/failed reads and event
 loss retain the shared typed notice. The existing header fitter reserves its
 width before the title, including in the composer and reader. Ordinary pending
-reads keep the Board's own indications. Sort,
+reads keep the Board's own indications. When the complete warning cannot fit,
+the existing typed compact state leads instead of clipping a failure word at
+the end of a healthy HTTP prefix. Event loss remains a separate label. Sort,
 hearth, observed counts, retained/failed reads, original timestamps, publication
 receipts and the one-row cursor budget keep their existing owners.
 

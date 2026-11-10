@@ -20,10 +20,30 @@ module Board_attachments = Masc_tui_board_attachments
 
 let words state ko en = ui_text state ~ko ~en
 
+let board_notice_summary ~width state =
+  let compact width = fst (compact_connection_badge state ~width:(max 0 width)) in
+  let summary =
+    if not state.observer_source_loss then compact width
+    else
+      let gap label =
+        let separator = " · " in
+        let remaining = width - Message_layout.display_width (label ^ separator) in
+        Theme.warn () ^ label ^ Ansi.reset ^ separator ^ compact remaining
+      in
+      let full = gap (words state "이벤트 유실" "events lost") in
+      if Message_layout.display_width full <= width then full
+      else gap (words state "유실" "gap")
+  in
+  fit_width summary (max 0 width)
+
 let board_title ~cols state title =
   match reading_connection_notice state with
   | None -> title
-  | Some badge -> badge_row ~cols ~lead:" " ~label:title ~badge
+  | Some badge ->
+      let heading = badge_row ~cols ~lead:" " ~label:title ~badge in
+      let width = framed_inner_width cols in
+      if Message_layout.display_width heading <= width then heading
+      else board_notice_summary ~width state
 
 let board_sort_text state sort =
   if state.ui_language <> Lang_ko then board_sort_explanation sort

@@ -1,10 +1,11 @@
 (** What one Memory commit changed, counted by memory ID, and the metrics
     those counts move (RFC-0517 §2.2).
 
-    [Keeper_memory_os_current_update] records a commit that rewrote the
-    snapshot once both store locks are released. A commit that kept the stored
-    snapshot ([Unchanged]) is not recorded: its snapshot still carries the
-    change of the commit before it. *)
+    [Keeper_memory_os_current_update] sets the gauges of a commit that
+    rewrote the snapshot while it still holds the store locks, so they follow
+    commit order, and moves the counter once both locks are released. A commit
+    that kept the stored snapshot ([Unchanged]) moves neither: its snapshot
+    still carries the change of the commit before it. *)
 
 type counts =
   { added : int  (** IDs the result holds that the basis did not *)
@@ -22,7 +23,9 @@ val of_change :
     identity and changed only its payload, so it is counted nowhere. *)
 
 val of_publication : Keeper_memory_os_program_types.publication -> counts
-(** An ordered program, summed stage by stage from its proof. *)
+(** An ordered program, once, from its initial to its final facts with the
+    absorptions and revisions of all its stages. Only an ID of the initial
+    facts can be absorbed, superseded or dropped. *)
 
 (** How a commit is counted: under the pass that called it, from the committed
     snapshot and the commit's own output. [replace] seeds a whole snapshot and
@@ -34,13 +37,18 @@ type 'a change_count =
       }
   | Not_counted
 
-val record :
+val set_gauges :
+  keeper_id:string -> 'a change_count -> Keeper_memory_os_current_types.t -> unit
+(** Set [masc_keeper_memory_facts] and [masc_keeper_memory_snapshot_bytes] from
+    the committed snapshot. The bytes are its rendered facts, the same count
+    the Memory health row shows. In-memory only, so the store calls it under
+    its locks. *)
+
+val count_changes :
   keeper_id:string ->
   'a change_count ->
   Keeper_memory_os_current_types.t ->
   'a ->
   unit
 (** Move [masc_keeper_memory_changes_total] by each count under the keeper,
-    the pass and the change, and set [masc_keeper_memory_facts] and
-    [masc_keeper_memory_snapshot_bytes] from the committed snapshot. The bytes
-    are its rendered facts, the same count the Memory health row shows. *)
+    the pass and the change. *)

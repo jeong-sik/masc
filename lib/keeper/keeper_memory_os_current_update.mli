@@ -68,10 +68,11 @@ val update_locked_with_output :
   (t *
    commit_effect * 'a, 'b)
   result
-(** [change_count] is recorded after both locks are released, for a commit
-    that rewrote the snapshot. That includes a commit that returns an error
-    because its journal evidence is still pending. A kept snapshot is not
-    counted. *)
+(** For a commit that rewrote the snapshot, [change_count] sets the Memory
+    gauges under both locks, in commit order, and moves the change counter
+    after both locks are released. That includes a commit that returns an
+    error because its journal evidence is still pending. A kept snapshot is
+    not counted. *)
 
 val update_locked_with_error :
   ?clock:float Eio.Time.clock_ty Eio.Time.clock_base ->

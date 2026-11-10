@@ -254,26 +254,6 @@ let runtime_base_path source =
   keep_runtime_base_path_inside_request base_path resolved
 
 (* ============================================ *)
-(* Environment helpers                          *)
-(* ============================================ *)
-
-let is_unresolved_template value =
-  let v = String.trim value in
-  (String.length v >= 2 && v.[0] = '{' && v.[1] = '{')
-  || String.starts_with v ~prefix:"op://"
-
-let env_opt name =
-  match Sys.getenv_opt name with
-  | Some value when String.trim value <> "" ->
-      if is_unresolved_template value then begin
-        Log.Backend.warn
-          "%s contains unresolved 1Password template; skipping" name;
-        None
-      end else
-        Some value
-  | _ -> None
-
-(* ============================================ *)
 (* Backend creation                             *)
 (* ============================================ *)
 

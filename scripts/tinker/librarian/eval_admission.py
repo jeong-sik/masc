@@ -5,7 +5,8 @@
 # pyright: strict
 """Measure models on the keeper-librarian admission evaluation sets.
 
-    MASC_BASE_PATH=<base> uv run scripts/tinker/librarian/eval_admission.py run --set real \
+    MASC_BASE_PATH=artifacts/tinker/librarian/e-real-snapshot \
+        uv run scripts/tinker/librarian/eval_admission.py run --set real \
         --target base=thinkingmachines/Inkling-2-Small:peft:262144 --target A=tinker://... \
         --out artifacts/tinker/librarian/eval-<name>-real --budget 6
     uv run scripts/tinker/librarian/eval_admission.py run --set synth --requests <requests.jsonl> ...
@@ -37,8 +38,9 @@ refuses a run drawn with another template than the pinned one.
 the request MASC's GLM slot sends (`glm_chat`), with the pass lines'
 `max_tokens`, so a prompt change can be measured on that model too. It sends no
 warm call, `--max-calls` caps its requests in place of `--budget`, and its rows
-cost nothing per token: the calls draw on the key's usage quota. The summary
-names the provider of the run.
+cost nothing per token: the calls draw on the key's usage quota. It waits on one
+request at a time, since the key's rate limit also counts the live Keepers'
+requests. The summary names the provider of the run.
 
 Definitions:
 - valid: HTTP 200 with no provider error, finish_reason "stop", and
@@ -148,7 +150,10 @@ from tinker_oai import HTTP_OK, Call, Caller
 
 HERE = Path(__file__).resolve().parent
 PASS_LINES = HERE / "pass_lines.json"
-WORKERS = 4
+TINKER_IN_FLIGHT = 4
+# The GLM key is the live Keepers' account. On 11-10 a run waiting on four GLM requests
+# at once met the rate limit (1302), and a live Keeper's turn failed on it in the same minute.
+GLM_IN_FLIGHT = 1
 # Tinker keeps a prompt's prefix cached for at least half an hour (11-08: a rerun of the
 # E-real prompts read 100% of their tokens from cache), and a LoRA checkpoint has its own
 # cache. Before the measured calls of an item, every target gets the same prompt with this
@@ -287,6 +292,17 @@ def measured(lane: Lane, model: str, label: str, messages: list[str]) -> tuple[C
         case GlmLane(caller=caller, max_tokens=max_tokens):
             call = caller.ask(model=model, label=label, messages=messages, max_tokens=max_tokens)
             return (call, 0.0) if call is not None else None
+        case _:
+            assert_never(lane)
+
+
+def in_flight(lane: Lane) -> int:
+    """Requests the run waits on at once."""
+    match lane:
+        case TinkerLane():
+            return TINKER_IN_FLIGHT
+        case GlmLane():
+            return GLM_IN_FLIGHT
         case _:
             assert_never(lane)
 
@@ -439,7 +455,7 @@ def run(args: argparse.Namespace) -> int:
     def one(item: Item) -> list[JsonObject]:
         return run_item(lane, targets, item)
 
-    with ThreadPoolExecutor(max_workers=WORKERS) as pool:
+    with ThreadPoolExecutor(max_workers=in_flight(lane)) as pool:
         rows = [r for rs in pool.map(one, items) for r in rs]
     with (out / "rows.jsonl").open("w", encoding="utf-8") as fh:
         fh.writelines(json.dumps(r, ensure_ascii=False) + "\n" for r in rows)

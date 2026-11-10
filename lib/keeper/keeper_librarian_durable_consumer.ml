@@ -552,7 +552,8 @@ let continuity_saved_position
       ~messages
       lines
   =
-  continuity_saved_ranges ~config ~keeper_name ~memory_keepers_dir
+  Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
+    continuity_saved_ranges ~config ~keeper_name ~memory_keepers_dir)
   |> List.fold_left
        (fun furthest candidate ->
           if not
@@ -605,6 +606,19 @@ let current_memory ~keepers_dir ~keeper_name =
       "librarian routing undecodable current snapshot into write-path quarantine: %s"
       rejection;
     Ok (None, None)
+;;
+
+(* [Capture.create] writes every held checkpoint message as JSON, digests the
+   bytes and projects the source again to compare it with the input. It reads
+   no file and no shared state. On the caller's fiber that is one run with no
+   yield: 1.8 s on the server's main domain for one round on 2026-11-10
+   (#46410), during which no other fiber of that domain ran. As a pool job the
+   caller waits on a promise and its domain keeps scheduling. *)
+let capture_original ~runtime_keepers_dir ~extent ~boundaries ~positions ~source ~counterparts
+    ~external_before ~external_prepared ~expected_revision ~range_id ~official_range_id input =
+  Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
+    Capture.create ~runtime_keepers_dir ~extent ~boundaries ~positions ~source ~counterparts
+      ~external_before ~external_prepared ~expected_revision ~range_id ~official_range_id input)
 ;;
 
 let write_progress ~write ~keepers_dir ~keeper_name progress outcome =
@@ -1318,10 +1332,11 @@ let consume_one_with_extent
       | None -> Ok None
       | Some (range, boundary_lines_seen, end_boundary_line, _, _) ->
         let* committed_range =
-          Keeper_memory_os_current.committed_durable_coverage
-            ~keepers_dir:memory_keepers_dir
-            ~keeper_id:keeper_name
-            ~receipt_scope:runtime_keepers_dir
+          Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
+            Keeper_memory_os_current.committed_durable_coverage
+              ~keepers_dir:memory_keepers_dir
+              ~keeper_id:keeper_name
+              ~receipt_scope:runtime_keepers_dir)
           |> Result.map_error (fun detail -> Memory_snapshot_unreadable detail)
         in
         let recovery_range, recovery_boundary_line, recovery_boundary_lines_seen =
@@ -1629,7 +1644,7 @@ let consume_one_with_extent
         ; counterpart_observations
         }
       in
-      let* original = Capture.create ~runtime_keepers_dir ~extent ~boundaries:lines
+      let* original = capture_original ~runtime_keepers_dir ~extent ~boundaries:lines
         ~positions:{Capture.current=progress;selection=selection_progress;counterpart=counterpart_progress;official=official_cursor}
         ~source ~counterparts ~external_before ~external_prepared ~expected_revision
         ~range_id:atom_next ~official_range_id input

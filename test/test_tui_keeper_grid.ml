@@ -132,11 +132,11 @@ let test_the_lag_bar_fills_its_share_of_the_peak () =
    (RFC-0515 §2.4.4, the mock's [drawRuler]). *)
 let test_a_strip_half_hour_draws_one_mark () =
   let mark slot = Grid.strip_mark (Grid.strip_cell slot) in
-  Alcotest.(check string) "no wake" "\xc2\xb7" (mark (Masc_tui_keeper_next_run.Wakes 0));
-  Alcotest.(check string) "one wake" "\xe2\x97\xb7" (mark (Masc_tui_keeper_next_run.Wakes 1));
-  Alcotest.(check string) "three wakes draw the same mark" "\xe2\x97\xb7"
+  Alcotest.(check string) "no wake" " " (mark (Masc_tui_keeper_next_run.Wakes 0));
+  Alcotest.(check string) "one wake" "▁" (mark (Masc_tui_keeper_next_run.Wakes 1));
+  Alcotest.(check string) "three wakes draw the same mark" "▁"
     (mark (Masc_tui_keeper_next_run.Wakes 3));
-  Alcotest.(check string) "a half hour this build cannot list" "?"
+  Alcotest.(check string) "a half hour this build cannot list" "─"
     (mark Masc_tui_keeper_next_run.Wakes_unknown)
 
 let () =

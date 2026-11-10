@@ -548,8 +548,8 @@ let handle_check ~tool_name ~start_time ctx args =
     Workspace_assertions.handle_check ~inspect_state:inspect ~tool_name ~start_time ctx args
 ;;
 
-(* Goal tools route on their closed type. [dispatchable_names] and the routing
-   below both read Tool_name.Goal_name, so a constructor added there is a
+(* Goal tools route on their closed type. The routing below reads
+   Tool_name.Goal_name, so a constructor added there is a
    compile error in [goal_handler] rather than a tool that gets advertised and
    then answers "unknown". The two entries left in [dispatch_bindings] own no
    closed type yet. *)
@@ -559,10 +559,6 @@ let goal_handler : Tool_name.Goal_name.t -> dispatch_handler = function
   | Tool_name.Goal_name.Goal_upsert -> Workspace_goals.handle_goal_upsert
   | Tool_name.Goal_name.Goal_transition -> Workspace_goals.handle_goal_transition
 ;;
-
-let dispatchable_names =
-  List.map Tool_schemas_workspace_core.tool_name Tool_schemas_workspace_core.operations
-  @ List.map Tool_name.Goal_name.to_string Tool_name.Goal_name.all
 
 (* Both families route on their closed type. [Status] takes the task-list
    projection the other two do not, which is why it kept a separate arm rather
@@ -626,9 +622,8 @@ let goal_schema goal =
 ;;
 
 (* Registration walks the same two closed types [dispatch] matches, so the
-   advertised set and the routed set are the same set by construction --
-   [test_tool_registry_consistency] compared them at test time, and PR CI does
-   not run tests. read_only used to come from a membership list over three name
+   advertised set and the routed set are the same set by construction.
+   read_only used to come from a membership list over three name
    strings; it is a match on each type now. *)
 let () =
   let register ~name ~(schema : Masc_domain.tool_schema) ~is_read_only =

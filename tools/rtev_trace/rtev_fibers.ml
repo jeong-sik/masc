@@ -128,6 +128,8 @@ let () =
   (* What each lock holder suspended on while it held the lock: a holder that
      waits on a file or another job keeps every waiter behind that wait. *)
   let held_waits : (int, (string * int64) list) Hashtbl.t = Hashtbl.create 1024 in
+  (* The report prints this many of a hold's first suspensions; no more are kept. *)
+  let hold_reasons_shown = 8 in
   let long_holds = ref [] in
   (* The locks each fiber holds now, so a suspend looks only at its own. *)
   let holding : (int, int list) Hashtbl.t = Hashtbl.create 1024 in
@@ -139,12 +141,46 @@ let () =
   let brackets : (int * string * string, int * int64) Hashtbl.t = Hashtbl.create 256 in
   (* Objects created while tracing, by kind. A promise or stream also reports
      [Get]; only mutexes, semaphores and objects older than the trace (the
-     module-level mutexes) are treated as locks. *)
+     module-level mutexes) are treated as locks.
+
+     An id with no object kind is not always an older object. Eio reports
+     [Get] on a fiber's id when its [Fiber.fork_promise] result is awaited,
+     and on a cancellation context's id when its switch is awaited; the trace
+     saw those ids created as a fiber or a context. An older stream or
+     resolved promise can report repeated [Get] without a [Put]. After the
+     second [Get], [awaiting_put] ignores further [Get] events for that id
+     and keeps only its latest candidate holder and capped suspension
+     reasons. Without a [Put], that candidate never reaches the report.
+
+     An older semaphore of more than one unit also reports [Get] twice with
+     no [Put] between, and then a [Put]. That first [Put] reports the retained
+     candidate and takes the id out of [awaiting_put]. [released] remembers
+     it, so subsequent overlapping [Get] events follow the latest holder,
+     as for a semaphore the trace saw created. This tracks one holder, not
+     all permits, and cannot tell which holder a [Put] released. *)
   let obj_kind : (int, string) Hashtbl.t = Hashtbl.create 4096 in
+  let awaiting_put : (int, unit) Hashtbl.t = Hashtbl.create 64 in
+  let released : (int, unit) Hashtbl.t = Hashtbl.create 1024 in
   let lock_like id =
     match Hashtbl.find_opt obj_kind id with
-    | None -> true
+    | None ->
+      not (Hashtbl.mem parent id || Hashtbl.mem cc_kind id || Hashtbl.mem awaiting_put id)
     | Some kind -> String.equal kind "mutex" || String.equal kind "semaphore"
+  in
+  (* Ends the hold recorded for [lock] and returns it. A lock is in
+     [holding] under exactly the fiber [held] names for it. *)
+  let end_hold lock =
+    match Hashtbl.find_opt held lock with
+    | None -> None
+    | Some (holder, _, _) as hold ->
+      Hashtbl.remove held lock;
+      (match Hashtbl.find_opt holding holder with
+       | Some locks ->
+         (match List.filter (fun other -> other <> lock) locks with
+          | [] -> Hashtbl.remove holding holder
+          | rest -> Hashtbl.replace holding holder rest)
+       | None -> ());
+      hold
   in
   let lock_waits : (int * string, int * int64 * int64) Hashtbl.t = Hashtbl.create 256 in
   let lock_holds : (int * string, int * int64 * int64) Hashtbl.t = Hashtbl.create 256 in
@@ -209,7 +245,8 @@ let () =
          List.iter
            (fun lock ->
               let prior = Option.value ~default:[] (Hashtbl.find_opt held_waits lock) in
-              Hashtbl.replace held_waits lock ((reason, ts) :: prior))
+              if List.compare_length_with prior hold_reasons_shown < 0 then
+                Hashtbl.replace held_waits lock ((reason, ts) :: prior))
            (Option.value ~default:[] (Hashtbl.find_opt holding id))
        | None -> ());
       close d ts reason
@@ -253,6 +290,13 @@ let () =
     | `Get lock when lock_like lock ->
       (match (state d).cur with
        | Some (fiber, _, _) ->
+         let unreleased = end_hold lock in
+         Hashtbl.remove held_waits lock;
+         (match unreleased, Hashtbl.find_opt obj_kind lock with
+          | Some _, None when not (Hashtbl.mem released lock) ->
+            Hashtbl.replace awaiting_put lock ()
+          | Some _, (Some _ | None) (* a semaphore with more than one unit: follow its latest holder *)
+          | None, (Some _ | None) -> ());
          Hashtbl.replace held lock (fiber, ts, span_label fiber);
          Hashtbl.replace taken_after lock
            (Option.value ~default:"(first run)" (Hashtbl.find_opt last_reason fiber));
@@ -261,15 +305,10 @@ let () =
        | None -> ())
     | `Get _ -> ()
     | `Put lock ->
-      (match Hashtbl.find_opt held lock with
+      Hashtbl.replace released lock ();
+      Hashtbl.remove awaiting_put lock;
+      (match end_hold lock with
        | Some (holder, since, label) ->
-         Hashtbl.remove held lock;
-         (match Hashtbl.find_opt holding holder with
-          | Some locks ->
-            (match List.filter (fun other -> other <> lock) locks with
-             | [] -> Hashtbl.remove holding holder
-             | rest -> Hashtbl.replace holding holder rest)
-          | None -> ());
          let dur = Int64.sub ts since in
          bump lock_holds (lock, label) dur;
          let reasons =
@@ -527,7 +566,7 @@ let () =
   let print_hold (lock, holder, dur, label, reasons) =
     Printf.printf "lock#%d %d %9.1f %s [%s]%s  {%s}\n" lock holder (ms dur) label (label_of holder)
       (ancestry holder)
-      (String.concat ", " (List.filteri (fun j _ -> j < 8) reasons))
+      (String.concat ", " (List.filteri (fun j _ -> j < hold_reasons_shown) reasons))
   in
   Printf.printf "\nwhat holders of the three most waited-on locks did around them (count hold_ms before -> after)\n";
   List.iteri

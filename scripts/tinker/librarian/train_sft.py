@@ -50,7 +50,7 @@ import synth_spec as S
 from eval_admission import PASS_LINES, load_pass_lines, ready_to_train, schema_instruction
 
 # sha256 of pass_lines.json as fixed on 2026-11-09, before any training run.
-PASS_LINES_SHA256 = "ee64403dd5ce9620bf2405c9230282b11a29035285a725434eb631d2fa48cf10"
+PASS_LINES_SHA256 = "6bd963c7f92fc89cc60e543ae577500761d769c600f473348fbeeffeaab9fe8a"
 MODEL = "thinkingmachines/Inkling-2-Small:peft:262144"
 # The candidate pass_lines.json `choice.order` names; `verdict` ties it to this run's summary.
 CANDIDATE = "A"

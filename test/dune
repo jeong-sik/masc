@@ -3525,7 +3525,7 @@
 ; RFC-0084 PR-3 — Tool_telemetry.with_span + Tool_dispatch.guarded_dispatch
 ; skeleton tests. Verifies 4-tuple emission wrapper invariants (callback
 ; invocation count, trace_id thunk callable, outcome label propagation,
-; idempotent register_metrics, result passthrough). Requires masc_test_deps
+; result passthrough). Requires masc_test_deps
 ; because it exercises Masc.Tool_telemetry.* directly.
 
 (test

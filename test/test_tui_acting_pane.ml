@@ -659,7 +659,8 @@ let test_an_age_the_clocks_cannot_give_draws_the_no_value_mark () =
 let test_keeper_waiting_context_preserves_evidence () =
   let module Model = Masc_tui_keeper_list_model in
   let context waiting = Pane.{keeper_name = "alpha"; task = Task_not_observed;
-    waiting; waiting_stale = false} in
+    waiting; waiting_stale = false; waiting_revalidating = false;
+    waiting_failed = false} in
   let item source producer what : Masc.Tui_decode.waiting_item =
     {kwi_source = source; kwi_waiting_on = "item"; kwi_what = what;
      kwi_wake_producer = producer; kwi_since = None; kwi_due_at = None;

@@ -4,7 +4,6 @@
     - storage_backend type: Memory, FileSystem
     - config record type
     - parse_gitdir_to_main_root: gitdir line parsing for worktrees
-    - env_opt: environment variable helper
     - backend_config_for: filesystem backend config
 *)
 
@@ -282,21 +281,6 @@ let test_resolved_base_escapes_temp_request () =
   check bool "non-temp request is never an escape" false
     (Workspace_utils.resolved_base_escapes_temp_request "/Users/worker/ws"
        "/Users/worker/ws")
-
-(* ============================================================
-   env_opt Tests
-   ============================================================ *)
-
-let test_env_opt_nonexistent () =
-  match Workspace_utils.env_opt "MASC_NONEXISTENT_VAR_12345" with
-  | Some _ -> fail "expected None"
-  | None -> ()
-
-let test_env_opt_home () =
-  (* HOME should exist on most systems *)
-  match Workspace_utils.env_opt "HOME" with
-  | Some path -> check bool "nonempty" true (String.length path > 0)
-  | None -> ()  (* Some systems might not have HOME *)
 
 (* ============================================================
    strip_prefix Tests
@@ -779,10 +763,6 @@ let () =
       test_case "is_temp_scratch_dir" `Quick test_is_temp_scratch_dir;
       test_case "resolved_base_escapes_temp_request" `Quick
         test_resolved_base_escapes_temp_request;
-    ];
-    "env_opt", [
-      test_case "nonexistent" `Quick test_env_opt_nonexistent;
-      test_case "home" `Quick test_env_opt_home;
     ];
     "storage_backend", [
       test_case "memory is tagged" `Quick test_storage_backend_memory_is_tagged;

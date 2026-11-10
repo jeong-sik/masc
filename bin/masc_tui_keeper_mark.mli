@@ -102,18 +102,23 @@ val axis_now_header : string
 (** {1 The views' grid} (RFC-0515 §2.4.1 – §2.4.3) *)
 
 val grid_gutter_glyph : string
-(** [▌]: the first cell of a grid row, in the colour of the row's verdict. *)
+(** [▌]: the retained rail mark for the world row and runtime matrix.
+    Activity rows use two leading spaces before the verdict mark. *)
 
 val grid_now_line : string
-(** [┃]: the two lines on either side of the now cell. *)
+(** [│]: the quiet separators on either side of the now cell. *)
 
 val grid_dot_mark : string
-(** [·]: a strip cell with nothing in it, and a pulse half hour in which no
-    turn ended. *)
+(** [·]: the quiet pulse model mark and the unfilled lag-bar background.
+    Activity history and scheduled-wake views leave known empty slots blank. *)
 
 val grid_wake_mark : string
-(** [◷]: a strip half hour that holds one scheduled wake or more, the
-    schedule badge's mark. *)
+(** [▁]: a strip half hour that holds one scheduled wake or more. Adjacent
+    scheduled slots join into a low bar; the schedule badge stays a clock. *)
+
+val grid_unknown_range_mark : string
+(** [─]: a strip half hour without a known wake whose schedule is unknown.
+    An entirely unknown window is labelled once by the strip renderer. *)
 
 val grid_failing_mark : string
 val grid_paused_mark : string
@@ -156,7 +161,7 @@ val grid_more_mark : string
 
 val grid_open_mark : string
 val grid_folded_mark : string
-(** [−] an open group title, [+] a folded one. *)
+(** [▾] an open group title, [▸] a folded one. *)
 
 val grid_saved_mark : string
 val grid_stale_mark : string

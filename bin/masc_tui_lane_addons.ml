@@ -1448,10 +1448,12 @@ let label_style () =
 let bold_style () = Span.weight Masc_tui_theme.Sgr.bold
 
 (* Wrap [text] after a styled lead so continuation pieces start under the
-   text, not under the lead. *)
-let led_rows ~width ~lead ~text_style text =
+   text, not under the lead. [split] cuts the text to a width. By default it
+   cuts at the cell, which keeps the exact spaces of a value, and prose passes
+   a cut at spaces. *)
+let led_rows ?(split = fun ~width text -> document_rows ~width text) ~width ~lead ~text_style text =
   let lead_cells = Span.width lead in
-  let pieces = document_rows ~width:(max 1 (width - lead_cells)) text in
+  let pieces = split ~width:(max 1 (width - lead_cells)) text in
   let hang = Span.text Span.plain (String.make lead_cells ' ') in
   List.mapi (fun index piece ->
     Span.concat [ (if index = 0 then lead else hang); Span.text text_style piece ])
@@ -1737,24 +1739,57 @@ let overview_lines ~width view =
     (texts (diagnostic_lines view) @ content
      @ texts ([""; overview_hints view] @ action_lines view))
 
-let help_lines = [
-  "Plugins keys · Esc:close";
-  "Install Plugins and switch them on/off. Lanes are their work and observation paths.";
-  "List: j/k select · Enter open · h history/current · i install · n new TOML";
-  "Detail: 1 Results · 2 Links · 3 Installation · 4 Records · Tab next";
-  "Both: ?:help · Esc back · q back · r refresh · J/K scroll";
-  "Actions: o observe/retry · d remove TOML/worker · a advertised actions";
-  "TOML-managed removal deletes the matching declaration from disk and cleans up its owned worker.";
-  "Manual attachments remove only the worker and its owned resources.";
-  "Declarations now owned by another instance are preserved; observations and evidence remain.";
-  "Actions: t check last request · D raw details · f flow";
-  "Installation: Space on/off draft · E edit · s save · l reload · u/U revision";
-  "Saving off keeps the TOML and evidence; r reads the actual worker cleanup state.";
-  "Links: S subscriptions · Left/Right lane";
-  "Records: Space mark row · e export marked rows";
-  "Navigation: : command palette · Esc returns to Plugins";
-  "Advanced: A opens Plugin commands · Enter submits (including act or detach ID)";
+(* One line of the Plugins help. [Help_keys] names the keys of a screen or a
+   task under a label, and [Help_note] explains the line above it. *)
+type help_row =
+  | Help_title of string
+  | Help_about of string
+  | Help_keys of { group : string; keys : string }
+  | Help_note of string
+
+let help_rows = [
+  Help_title "Plugins keys · Esc:close";
+  Help_about "Install Plugins and switch them on/off. Lanes are their work and observation paths.";
+  Help_keys { group = "List"; keys = "j/k select · Enter open · h history/current · i install · n new TOML" };
+  Help_keys { group = "Detail"; keys = "1 Results · 2 Links · 3 Installation · 4 Records · Tab next" };
+  Help_keys { group = "Both"; keys = "?:help · Esc back · q back · r refresh · J/K scroll" };
+  Help_keys { group = "Actions"; keys = "o observe/retry · d remove TOML/worker · a advertised actions" };
+  Help_note "TOML-managed removal deletes the matching declaration from disk and cleans up its owned worker.";
+  Help_note "Manual attachments remove only the worker and its owned resources.";
+  Help_note "Declarations now owned by another instance are preserved; observations and evidence remain.";
+  Help_keys { group = "Actions"; keys = "t check last request · D raw details · f flow" };
+  Help_keys { group = "Installation"; keys = "Space on/off draft · E edit · s save · l reload · u/U revision" };
+  Help_note "Saving off keeps the TOML and evidence; r reads the actual worker cleanup state.";
+  Help_keys { group = "Links"; keys = "S subscriptions · Left/Right lane" };
+  Help_keys { group = "Records"; keys = "Space mark row · e export marked rows" };
+  Help_keys { group = "Navigation"; keys = ": command palette · Esc returns to Plugins" };
+  Help_keys { group = "Advanced"; keys = "A opens Plugin commands · Enter submits (including act or detach ID)" };
 ]
+
+(* Labels share one column, as wide as the longest label and a two-cell gap,
+   so the keys and the notes start under each other. A column wider than half
+   the width leaves the keys a sliver, so the label then takes its own row and
+   the keys and the notes hang two cells under it. *)
+let help_lines ~width =
+  let label_cells = 2 + List.fold_left (fun widest -> function
+    | Help_keys { group; _ } -> max widest (Masc_tui_message_layout.display_width group)
+    | Help_title _ | Help_about _ | Help_note _ -> widest) 0 help_rows in
+  let beside = 2 * label_cells <= width in
+  let hang_cells = if beside then label_cells else max 0 (min 2 (width - 1)) in
+  let hang = Span.text Span.plain (String.make hang_cells ' ') in
+  let split ~width text = Masc_tui_message_layout.wrap_words ~max_cells:width text in
+  let rows = function
+    | Help_title text -> led_rows ~split ~width ~lead:Span.empty ~text_style:(label_style ()) text
+    | Help_about text -> led_rows ~split ~width ~lead:Span.empty ~text_style:Span.plain text
+    | Help_keys { group; keys } when beside ->
+        let lead = Span.pad_to label_cells Span.plain (Span.text (label_style ()) group) in
+        led_rows ~split ~width ~lead ~text_style:Span.plain keys
+    | Help_keys { group; keys } ->
+        led_rows ~split ~width ~lead:Span.empty ~text_style:(label_style ()) group
+        @ led_rows ~split ~width ~lead:hang ~text_style:Span.plain keys
+    | Help_note text -> led_rows ~split ~width ~lead:hang ~text_style:Span.plain text in
+  List.concat_map (fun row ->
+    List.map (fun span -> Span.render (Span.truncate width span)) (rows row)) help_rows
 
 type read_target =
   | Read_screen
@@ -2346,7 +2381,7 @@ let lines ?(height=24) ?(failed_note = "") ~width view =
       (diagnostic_lines view @ Masc_tui_lane_records.lines overlay)
       |> List.concat_map (document_rows ~width)
   | None,None,None ->
-      if view.help_open then List.concat_map (document_rows ~width) help_lines
+      if view.help_open then help_lines ~width
       else if view.presentation = Flow then flow_lines view |> List.concat_map
         (document_rows ~width)
       else if view.presentation = Technical && view.screen=Overview && view.focus=Configurations

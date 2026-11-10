@@ -437,9 +437,6 @@ val transport_health_measured : event -> bool
 (** The server's transport refresh loop measured again; the Usage surface's
     transport health reads again on it. *)
 
-val roster_change : event -> roster_change option
-(** What a Keeper roster push owes the roster. *)
-
 val turn_change : event -> (string * turn_change) option
 (** The Keeper a turns push names, and what it says changed. *)
 

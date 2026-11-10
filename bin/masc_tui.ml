@@ -38178,6 +38178,12 @@ Use relative paths for resources already held in the package. -->
                      let delta = if List.mem key ["k"; "up"; "pageup"] then -step else step in
                      state.runtime_config_status_scroll <-
                        max 0 (min limit (min limit state.runtime_config_status_scroll + delta))))
+       | Some "!"
+         when state.view = Keepers Keeper_list && not state.composer_focused
+              && Option.is_none (text_input_target state ~compact_viewport)
+              && not (modal_owns_keys state) ->
+           Option.iter (open_detail_reading state)
+             (Masc_tui_render_keepers.keeper_observation_reading state)
        | Some (("." | "…" | "\015") as key)
          when state.view = Memory && state.memory_page = Memory_changes
               && not state.composer_focused && not (modal_owns_keys state) ->

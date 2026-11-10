@@ -237,7 +237,7 @@ let install ~on_io_failure =
 let read_recent ?(n = 10_000) () : Yojson.Safe.t list =
   match Atomic.get store_ref with
   | None -> []
-  | Some store -> Dated_jsonl.read_recent store n
+  | Some {store; _} -> Dated_jsonl.read_recent store n
 
 let source_metadata_json ~masc_root =
   let now = Time_compat.now () in

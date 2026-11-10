@@ -270,7 +270,7 @@ let with_persist_lock_internal ~defer_settlement store f =
       | Error failure -> Error failure
       | Ok () ->
         (* Reserved settlement travels as a carrier and leaves the lock
-           cleanly so an uncertain store stays settleable. Only an explicit
+           cleanly so an uncertain store retains its evidence. Only an explicit
            non-reserved exception crossing [use_rw] poisons it. Observer
            exceptions leave normally before re-raising. *)
         let result =

@@ -39,7 +39,7 @@ val publish_read : store -> posts_source_read -> unit
 val require_readable : store -> (unit, board_error) result
 (** Pure: unobserved, refused and unsettled phases never authorize posts.
     An unsettled store retains its unknown-write evidence and rejects further
-    reads and writes. A fresh store loads the actual source instead. *)
+    source reads and writes. A fresh store loads the actual source instead. *)
 val failure_to_board_error : posts_source_failure -> board_error
 val finish_write : posts_write_outcome -> (unit, board_error) result
 val finish_read : posts_source_read -> unit

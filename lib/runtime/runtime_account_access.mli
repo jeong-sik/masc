@@ -117,6 +117,15 @@ type host_client =
       (** The exact-output targets of the full replacement catalog
           [AGENT_CORE_MODEL_CATALOG] names, which carries its own providers
           and their credentials (plan D4b). *)
+  | Web_search
+      (** A provider of [masc_web_search] that needs a key: Brave, Tavily,
+          Exa, Bing, Ollama or Z.AI (plan D4d). SearXNG needs none. *)
+  | Systemone_cloud
+      (** The cloud backend of the SystemOne tool, called with
+          [OLLAMA_CLOUD_API_KEY] (plan D4d). The local backend needs none. *)
+  | Voice_endpoint
+      (** A voice endpoint whose adapter names a key variable, such as
+          ElevenLabs (plan D4d). An endpoint that names none needs no key. *)
 
 (** A start of a host client that the published access allows. Only
     {!authorize_host} makes one. *)

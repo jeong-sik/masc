@@ -1,4 +1,4 @@
-import { setupObservationRefresh } from '../lib/observation-refresh'
+import { selectObservationReadFailure, setupObservationRefresh } from '../lib/observation-refresh'
 // Attribution Panel — Layer 4 observation surface.
 //
 // 관찰 대시보드. 4-field per event: 누가(gate) / 어디서(origin) / 뭘(outcome) /
@@ -246,7 +246,7 @@ export function AttributionPanel() {
 
     const load = async (signal: AbortSignal) => {
       try {
-        const [s, r] = await Promise.all([
+        const [summaryRead, recentRead] = await Promise.allSettled([
           fetchAttributionSummary({ signal: signal }),
           fetchAttributionRecent(
             {
@@ -257,18 +257,30 @@ export function AttributionPanel() {
           ),
         ])
         if (cancelled || signal.aborted) return
-        summary.value = s
-        recent.value = r.events
+        if (summaryRead.status === 'rejected' || recentRead.status === 'rejected') {
+          throw selectObservationReadFailure([
+            summaryRead.status === 'rejected' ? summaryRead.reason : null,
+            recentRead.status === 'rejected' ? recentRead.reason : null,
+          ]) ?? new Error('attribution fetch failed')
+        }
+        summary.value = summaryRead.value
+        recent.value = recentRead.value.events
         error.value = null
       } catch (e) {
         if (cancelled || signal.aborted || isAbortError(e)) return
         error.value = (e as Error).message || 'attribution fetch failed'
+        throw e
       } finally {
-        if (!cancelled) loading.value = false
+        if (!cancelled && !signal.aborted) loading.value = false
       }
     }
 
-    const dispose = setupObservationRefresh(load, { topics: ['attribution'], readError: () => error.peek() })
+    const dispose = setupObservationRefresh(load, { topics: ['attribution'], resetRead: () => {
+      summary.value = null
+      recent.value = []
+      error.value = null
+      loading.value = true
+    } })
     return () => {
       cancelled = true
       dispose()

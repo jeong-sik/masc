@@ -1,4 +1,4 @@
-import { setupObservationRefresh } from '../lib/observation-refresh'
+import { selectObservationReadFailure, setupObservationRefresh } from '../lib/observation-refresh'
 // Skills Panel — the published skill snapshot and exact parser-derived surface.
 import { html } from 'htm/preact'
 import { useEffect, useMemo, useRef } from 'preact/hooks'
@@ -39,13 +39,14 @@ import {
 } from '../api/dashboard-skills'
 import { SurfaceCard } from './common/card'
 import { EmptyState, ErrorState, LoadingState } from './common/feedback-state'
-import { currentStoredTokenRevision } from '../api/core'
 import { storedTokenRevision } from '../api/token-revision'
+import { dashboardActorRevision, managedDashboardActorRevision } from '../lib/dashboard-session-actor'
+import { captureDashboardObservationOwner, dashboardObservationOwnerHasWorkspace,
+  dashboardObservationOwnerIsCurrent, type DashboardObservationOwner } from '../lib/observation-read-owner'
 import {
   executionLoaded,
   executionWorkspaceAuthority,
   keepers,
-  type ExecutionWorkspaceAuthority,
 } from '../store'
 
 
@@ -756,10 +757,8 @@ export function SkillSourceEditor({ reference, onPublished, onMutation, observat
 }
 
 
-interface SkillsObservationOwner {
+interface SkillsObservationOwner extends DashboardObservationOwner {
   readonly mount: number
-  readonly authRevision: number
-  readonly authority: ExecutionWorkspaceAuthority | null
 }
 
 function identityLabel(identity: SkillIdentity): string {
@@ -784,20 +783,24 @@ function mutationMessage(result: SkillMutationResult): string {
 export function SkillsPanel() {
   const authRevision = storedTokenRevision.value
   const authority = executionWorkspaceAuthority.value
+  void dashboardActorRevision.value
+  void managedDashboardActorRevision.value
+  const observation = captureDashboardObservationOwner()
   const mounts = useRef(0)
   // The ordinal only keys UI lifetime. Authority remains the existing SSOT's
   // object identity, including a new object with otherwise equal fields.
-  const owner = useMemo(() => ({ mount: ++mounts.current, authRevision, authority }), [authRevision, authority])
+  const owner = useMemo(() => ({ ...observation, mount: ++mounts.current }), [authRevision, authority,
+    observation.actor, observation.actorRevision, observation.managed])
   const receipts = useSignal<readonly { owner: SkillsObservationOwner; result: SkillMutationResult }[]>([])
   return html`<div>
     ${receipts.value.length > 0 ? html`<section aria-label="Skill mutation receipts" data-testid="skill-mutation-receipts">
       ${receipts.value.map((receipt, index) => html`<div key=${index}>
         ${mutationMessage(receipt.result)}
-        <span class="ss-muted"> · original workspace ${receipt.owner.authority?.workspaceRoot ?? 'unconfirmed'}
+        <span class="ss-muted"> · original workspace ${receipt.owner.workspace?.workspaceRoot ?? 'unconfirmed'}
           ${receipt.owner !== owner ? ' · previous access context' : ''}</span>
       </div>`)}
     </section>` : null}
-    ${authority === null
+    ${!dashboardObservationOwnerHasWorkspace(owner)
       ? html`<p role="status">Confirm the current workspace before reading Skills.</p>`
       : html`<${SkillsObservationPanel} key=${owner.mount} owner=${owner}
           onMutation=${(result: SkillMutationResult) => { receipts.value = [...receipts.value, { owner, result }] }} />`}
@@ -854,6 +857,8 @@ function SkillsObservationPanel({ owner, onMutation }: {
   const error = useSignal<string | null>(null)
   const asyncObservation = useSignal<AsyncRequestObservation | null>(null)
   const asyncObservationError = useSignal<string | null>(null)
+  const catalogReadError = useRef<unknown | null>(null)
+  const asyncReadError = useRef<unknown | null>(null)
   const asyncSubmitter = useSignal('')
   const asyncKeeper = useSignal('')
   const asyncRequestId = useSignal('')
@@ -870,10 +875,8 @@ function SkillsObservationPanel({ owner, onMutation }: {
   const active = useRef(true)
   const catalogGeneration = useRef(0)
   const asyncGeneration = useRef(0)
-  const current = () => active.current
-    && currentStoredTokenRevision() === owner.authRevision
-    && executionWorkspaceAuthority.peek() === owner.authority
-    && owner.authority !== null
+  const current = () => active.current && dashboardObservationOwnerIsCurrent(owner)
+    && dashboardObservationOwnerHasWorkspace(owner)
 
   const inspectAsync = (identity: AsyncRequestIdentity) => {
     if (!current()) return
@@ -907,7 +910,7 @@ function SkillsObservationPanel({ owner, onMutation }: {
       names.map(name => fetchKeeperSkillUsage(name, { signal: readSignal })),
     )
     if (!current() || readSignal.aborted) return
-    usageReadError.current = settled.find(result => result.status === 'rejected')?.reason ?? null
+    usageReadError.current = selectObservationReadFailure(settled.map(result => result.status === 'rejected' ? result.reason : null))
     keeperUsage.value = keeperUsageReading(
       names.map((keeper, index) => ({ keeper, result: settled[index]! })),
     )
@@ -915,37 +918,44 @@ function SkillsObservationPanel({ owner, onMutation }: {
 
   const load = async (signal?: AbortSignal) => {
     if (!current()) return
+    catalogReadError.current = null
     const generation = ++catalogGeneration.current
     try {
       const res = await fetchSkills({ signal })
-      if (!current() || generation !== catalogGeneration.current) return
+      if (!current() || signal?.aborted || generation !== catalogGeneration.current) return
       response.value = res
       error.value = null
       if (res.state === 'ready') await loadUsage(signal)
     } catch (cause) {
-      if (!current() || generation !== catalogGeneration.current || isAbortError(cause)) return
+      if (!current() || signal?.aborted || generation !== catalogGeneration.current || isAbortError(cause)) return
+      catalogReadError.current = cause
       error.value = cause instanceof Error ? cause.message : 'skills fetch failed'
     } finally {
-      if (current() && generation === catalogGeneration.current) loading.value = false
+      if (current() && !signal?.aborted && generation === catalogGeneration.current) loading.value = false
     }
   }
 
   useEffect(() => {
     const loadAsyncObservation = async (signal: AbortSignal) => {
+      if (!current() || signal.aborted) return
+      asyncReadError.current = null
       const generation = ++asyncGeneration.current
       try {
         const observation = await fetchAsyncRequestObservation({ signal: signal })
-        if (!current() || generation !== asyncGeneration.current) return
+        if (!current() || signal.aborted || generation !== asyncGeneration.current) return
         asyncObservation.value = observation
         asyncObservationError.value = null
       } catch (e) {
-        if (!current() || generation !== asyncGeneration.current || isAbortError(e)) return
+        if (!current() || signal.aborted || generation !== asyncGeneration.current || isAbortError(e)) return
+        asyncReadError.current = e
         asyncObservationError.value = (e as Error).message || 'async observation fetch failed'
       }
     }
     const dispose = setupObservationRefresh(signal => Promise.all([
       load(signal), loadAsyncObservation(signal),
-    ]), { topics: ['skills', 'async_requests', 'skill_usage'], readError: () => error.peek() ?? asyncObservationError.peek() ?? usageReadError.current })
+    ]), { topics: ['skills', 'async_requests', 'skill_usage'], readError: () => selectObservationReadFailure([
+      catalogReadError.current, asyncReadError.current, usageReadError.current,
+    ]) })
     return () => {
       active.current = false
       usageController.current?.abort()

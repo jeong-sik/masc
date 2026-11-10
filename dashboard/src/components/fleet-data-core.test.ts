@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { acceptedExecutionWorkspace } from '../execution-workspace-authority'
 
 import {
   __resetFleetDataCoreForTests,
@@ -41,12 +42,15 @@ function okJson<T>(body: T) {
 
 describe('fleet-data-core', () => {
   beforeEach(() => {
+    acceptedExecutionWorkspace.value = Object.freeze({ epoch: 'fixture', workspaceRoot: '/fixture',
+      connectionGeneration: 0, observerInstanceId: 'fixture-instance' })
     __resetFleetDataCoreForTests()
     vi.unstubAllGlobals()
   })
 
   afterEach(() => {
     __resetFleetDataCoreForTests()
+    acceptedExecutionWorkspace.value = null
     vi.unstubAllGlobals()
   })
 

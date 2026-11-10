@@ -21,6 +21,8 @@ import { formatMsCompact, formatNumber } from '../../lib/format-number'
 import { refreshShell, shellRuntimeResolution } from '../../store'
 import {
   cancelSharedToolQuality,
+  prepareSharedToolQualityRead,
+  readSharedToolQualityError,
   refreshSharedToolQuality,
   sharedToolQuality,
   sharedToolQualityError,
@@ -198,7 +200,8 @@ export function ToolMonitorOperationsBoard() {
     const dispose = setupObservationRefresh(signal => Promise.all([
       refreshSharedToolQuality({ signal, windowHours: TOOL_MONITOR_WINDOW_HOURS }),
       refreshShell({ force: true }),
-    ]), { topics: ['tool_metrics', 'health'], readError: () => sharedToolQualityError.peek(), cancelRead: cancelSharedToolQuality })
+    ]), { topics: ['tool_metrics', 'health'], readError: readSharedToolQualityError, cancelRead: cancelSharedToolQuality,
+      resetRead: prepareSharedToolQualityRead })
     return () => { dispose(); cancelSharedToolQuality() }
   }, [])
 

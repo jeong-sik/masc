@@ -9,6 +9,8 @@ import { Eyebrow } from './common/eyebrow'
 import { ProgressBar } from './common/progress-bar'
 import {
   cancelSharedToolQuality,
+  prepareSharedToolQualityRead,
+  readSharedToolQualityError,
   refreshSharedToolQuality,
   sharedToolQuality,
   sharedToolQualityError,
@@ -370,7 +372,8 @@ export function ToolQualityPanel() {
   useEffect(() => {
     const dispose = setupObservationRefresh(signal => refreshSharedToolQuality({
       signal, windowHours: TOOL_QUALITY_WINDOW_HOURS,
-    }), { topics: ['tool_metrics'], readError: () => sharedToolQualityError.peek(), cancelRead: cancelSharedToolQuality })
+    }), { topics: ['tool_metrics'], readError: readSharedToolQualityError, cancelRead: cancelSharedToolQuality,
+      resetRead: prepareSharedToolQualityRead })
     return () => { dispose(); cancelSharedToolQuality() }
   }, [])
 

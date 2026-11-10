@@ -174,7 +174,17 @@ type uncertain =
       }
   | Store_answers_nothing
 
+(* Which of the four it is, and nothing a file said. *)
 let uncertain_to_string = function
+  | Log_is_stopped (_ : L.stop) -> "the authorization log is stopped"
+  | Store_is_stopped (_ : S.stop) -> "the external store is stopped"
+  | Files_disagree { first = _; rest = _ } ->
+    "the external store and the authorization log do not agree"
+  | Store_answers_nothing ->
+    "the external store holds no answer, and the authorization log holds a Fresh_bootstrap"
+;;
+
+let uncertain_detail = function
   | Log_is_stopped { L.path; reason } ->
     Printf.sprintf "the authorization log %s is stopped: %s" path reason
   | Store_is_stopped { S.path; reason } ->
@@ -182,8 +192,7 @@ let uncertain_to_string = function
   | Files_disagree { first; rest } ->
     "the external store and the log do not agree: "
     ^ String.concat "; " (List.map H.reason_to_string (first :: rest))
-  | Store_answers_nothing ->
-    "the external store holds no answer, and the authorization log holds a Fresh_bootstrap"
+  | Store_answers_nothing as uncertain -> uncertain_to_string uncertain
 ;;
 
 type trusted = snapshot
@@ -254,11 +263,11 @@ let entry_label = function
   | S.Aborted_intent _ -> "an aborted intent"
 ;;
 
-let error_to_string = function
-  | Store_stopped stop -> uncertain_to_string (Store_is_stopped stop)
-  | Log_stopped stop -> uncertain_to_string (Log_is_stopped stop)
-  | Uncertain { first; rest } -> uncertain_to_string (Files_disagree { first; rest })
-  | Store_holds_no_answer -> uncertain_to_string Store_answers_nothing
+let error_detail = function
+  | Store_stopped stop -> uncertain_detail (Store_is_stopped stop)
+  | Log_stopped stop -> uncertain_detail (Log_is_stopped stop)
+  | Uncertain { first; rest } -> uncertain_detail (Files_disagree { first; rest })
+  | Store_holds_no_answer -> uncertain_detail Store_answers_nothing
   | Log_holds_records { next_seq } ->
     Printf.sprintf
       "the authorization log is to be installed and holds records: the next one is %d"
@@ -287,6 +296,36 @@ let error_to_string = function
       "the record %s is in the log and its answer was not written: %s"
       (R.Hash.to_hex record_hash)
       (S.append_error_to_string error)
+;;
+
+(* A record that was turned down says why to whoever sent it. A failure is
+   the zone's own, and its reason names paths of the server. *)
+type cause =
+  | Refusal
+  | Failure
+
+let cause = function
+  | Log_holds_records { next_seq = _ }
+  | Record_not_built (_ : R.make_error)
+  | Refused (_ : Authz_state.refusal) -> Refusal
+  | Store_stopped (_ : S.stop)
+  | Log_stopped (_ : L.stop)
+  | Uncertain { first = _; rest = _ }
+  | Store_holds_no_answer
+  | Store_entry_refused { entry = _; violation = _ }
+  | Abort_not_confirmed (_ : L.end_error)
+  | Settlement_not_written (_ : S.append_error)
+  | Intent_not_written (_ : S.append_error)
+  | Record_not_appended (_ : L.append_error)
+  | Answer_not_written { record_hash = _; error = _ } -> Failure
+;;
+
+let not_recorded = "The server could not finish recording this. Try again later."
+
+let error_to_string error =
+  match cause error with
+  | Refusal -> error_detail error
+  | Failure -> not_recorded
 ;;
 
 (* The probe takes the entry before the store does, so an entry that the probe
@@ -434,10 +473,25 @@ let in_both_zones ~store ~log f =
 ;;
 
 let commit t draft =
-  in_both_zones ~store:t.store ~log:t.log (fun store_writer (_ : S.State.t) log_writer head ->
-    let* settled = entered_to_add (H.settle_on_entry (Atomic.get t.probe)) in
-    let* snapshot, record_hash = in_zone t draft store_writer log_writer head settled in
-    Ok { snapshot; record_hash; settled })
+  let result =
+    in_both_zones ~store:t.store ~log:t.log (fun store_writer (_ : S.State.t) log_writer head ->
+      let* settled = entered_to_add (H.settle_on_entry (Atomic.get t.probe)) in
+      let* snapshot, record_hash = in_zone t draft store_writer log_writer head settled in
+      Ok { snapshot; record_hash; settled })
+  in
+  (* A caller that answers a person gives [error_to_string], which leaves the
+     reason of a failure out. The operator reads it here, written once, after
+     both zones are left. *)
+  (match result with
+   | Ok (_ : committed) -> ()
+   | Error error ->
+     (match cause error with
+      | Refusal -> ()
+      | Failure ->
+        Log.Auth.warn
+          "a record was not committed to the authorization zone: %s"
+          (error_detail error)));
+  result
 ;;
 
 (* The handles are the caller's, and the log they show holds no record, so the

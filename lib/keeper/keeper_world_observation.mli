@@ -372,11 +372,6 @@ type turn_verdict =
   | Run of { reasons : turn_reason * turn_reason list }
   | Skip of { reasons : skip_reason * skip_reason list }
 
-(** Convert a single skip reason to a flat string tag.
-    The tag is a stable snake_case form of the typed variant.
-    Variant payloads are intentionally omitted. *)
-val skip_reason_to_string : skip_reason -> string
-
 (** Convert channel to its canonical wire tag ("turn" / "scheduled_autonomous"). *)
 val channel_to_string : keeper_cycle_channel -> string
 
@@ -512,9 +507,6 @@ val observe_direct_keeper_msg :
   meta:Keeper_meta_contract.keeper_meta ->
   active_goals:(string list, Goal_store.unavailable) result ->
   world_observation
-
-(** Structured work signal present in the observation itself. *)
-val actionable_signal_present : world_observation -> bool
 
 (** Whether the observation contains actual Board-compatible activity.
     A [Schedule_due] work request is actionable but is not Board activity. *)

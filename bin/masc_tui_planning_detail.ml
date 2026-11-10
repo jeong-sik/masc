@@ -1,6 +1,8 @@
 module Message_layout = Masc_tui_message_layout
 module Tui_decode = Masc.Tui_decode
 module Terminal_text = Masc_tui_ansi.Terminal_text
+module Text_block = Masc_tui_text_block
+module Tool_detail = Masc_tui_tool_detail
 
 (* The field is one wider than the longest label ("reviewed:") so every value
    keeps one gap after its colon. *)
@@ -35,12 +37,46 @@ let without_line_end_cr line =
   then String.sub line 0 (length - 1)
   else line
 
-let wrapped ~width tone text =
+let wrapped_indent ~width ~indent tone text =
   String.split_on_char '\n' text
   |> List.concat_map (fun line ->
-       Message_layout.wrap_words ~max_cells:width
+       Message_layout.wrap_words ~max_cells:(max 1 (width - indent))
          (Masc.Tui_terminal_text.sanitize_terminal_text (without_line_end_cr line)))
-  |> List.map (fun row -> { tone; text = row })
+  |> List.map (fun row -> { tone; text = String.make indent ' ' ^ row })
+
+let wrapped ~width tone text = wrapped_indent ~width ~indent:0 tone text
+
+(* A summary sometimes carries a whole JSON value -- a keeper's failed turn
+   names its cause that way. Kept inside the sentence it is one long line the
+   terminal wraps mid-token; laid out as the structure it is -- one member
+   per line, nesting indented -- the reader sees the fields instead of the
+   punctuation. Yojson is the arbiter of what is JSON: the value must parse
+   either to the end of the summary or from the first brace to the last when
+   prose follows it. A cause the server previews to a byte prefix does not
+   parse and stays the sentence it arrived in, rather than a half-tree that
+   reads as decided. Answers (text before the value, the rendered document,
+   text after it). *)
+let split_embedded_json (text : string) : (string * string * string) option =
+  match String.index_opt text '{' with
+  | None -> None
+  | Some start ->
+      let attempt stop =
+        match
+          Tool_detail.document (String.sub text start (stop - start))
+        with
+        | Some document ->
+            Some
+              ( String.sub text 0 start
+              , document
+              , String.sub text stop (String.length text - stop) )
+        | None -> None
+      in
+      (match attempt (String.length text) with
+       | Some split -> Some split
+       | None -> (
+           match String.rindex_opt text '}' with
+           | Some stop when stop + 1 > start -> attempt (stop + 1)
+           | _ -> None))
 
 (* The confirmation read answers with the metadata projection of each
    submitted original, not the originals: identity and size reach the
@@ -545,11 +581,27 @@ let criterion_review_lines ~width ~ko review =
       @ wrapped ~width Quiet (text "검토 요청: " "Review request: " ^ observed.request_id) in
   rows @ scope
 
-(* Shared with Task history; Goal activity uses the full source timestamp. *)
+(* Shared with Task history. The goal timeline rows read [event_stamp] below,
+   which keeps the seconds; this one is the task-history shape alone. *)
 let short_ts ts =
   if String.length ts >= 16 then
     String.sub ts 5 5 ^ " " ^ String.sub ts 11 5
   else ts
+
+(* The stamp a timeline row leads with. The full source timestamp repeats the
+   year and the timezone on every row of a screen whose events span days, so
+   the row keeps the date and the clock and drops the rest -- the seconds
+   stay, because one goal's evening holds events a minute apart and their
+   order is the story. A value not shaped like an ISO timestamp is shown
+   whole rather than guessed at, the way [short_ts] does. *)
+let event_stamp (ts : string) =
+  let iso_shaped =
+    String.length ts >= 19
+    && Char.equal ts.[4] '-'
+    && Char.equal ts.[7] '-'
+    && (Char.equal ts.[10] 'T' || Char.equal ts.[10] ' ')
+  in
+  if iso_shaped then String.sub ts 5 5 ^ " " ^ String.sub ts 11 8 else ts
 
 let severity_tone = function
   | "ok" -> Quiet
@@ -574,6 +626,21 @@ let subject (event : Tui_decode.goal_timeline_event) =
         (String.length event.gt_lane - index - 1)
   | None -> event.gt_kind
 
+(* A keeper row's title arrives as "<keeper> · <event title>" while the
+   subject column beside it already names the keeper, so the leading
+   repetition goes. Both joins are tried exactly -- the one the server
+   spells and the one this pane spells -- and a title that carries neither
+   keeps every word. *)
+let strip_subject ~subject title =
+  List.fold_left
+    (fun title prefix ->
+       let length = String.length prefix in
+       if String.length title > length
+          && String.equal (String.sub title 0 length) prefix
+       then String.sub title length (String.length title - length)
+       else title)
+    title [ subject ^ " \xc2\xb7 "; subject ^ "  \xc2\xb7 " ]
+
 (* Title first, state after: the title names the row and the summary qualifies
    it. A task's summary is its status ("todo"), an approval's is its input
    preview, a keeper's is its event summary -- none of them identify the row on
@@ -581,12 +648,13 @@ let subject (event : Tui_decode.goal_timeline_event) =
    attached. A summary that only repeats the title adds nothing and is
    dropped, and so is one that repeats the subject column beside it: a goal's
    own creation event carries its kind in both, and the row read
-   "goal_created  Goal Event \xc2\xb7 goal_created". *)
-let headline ~subject (event : Tui_decode.goal_timeline_event) =
-  let title = String.trim event.gt_title in
-  let summary = String.trim event.gt_summary in
-  let summary = if String.equal summary subject then "" else summary in
-  if String.equal summary "" || String.equal summary title then title
+   "goal_created  Goal Event \xc2\xb7 goal_created". The summary arrives
+   pre-trimmed and may be only the sentence half of one that carried a JSON
+   value, which [timeline] splits off before it gets here. *)
+let headline ~subject ~title summary =
+  let title = strip_subject ~subject title in
+  let summary = if String.equal summary subject || String.equal summary title then "" else summary in
+  if String.equal summary "" then title
   else if String.equal title "" then summary
   else title ^ "  \xc2\xb7 " ^ summary
 
@@ -607,6 +675,13 @@ let timeline ~ko ~width ~goal_id
   let header =
     { tone = Heading; text = (text "관련 기록 · 연결 항목별 마지막 상태" "RELATED ACTIVITY · latest state per linked item") }
   in
+  (* One event, three volumes: a dim lead naming when it happened and to
+     what, the severity-coloured sentence under it, and -- when the summary
+     carried a JSON value -- the value's own structure one more step in, no
+     louder than the sentence above it. Before this, the whole event was one
+     wrapped paragraph: the timestamp and the subject and the cause ran
+     together, a continuation line started at the pane's edge where it read
+     as a row that lost its parent, and a JSON cause wrapped mid-token. *)
   let observed = function
         | [] ->
             [ { tone = Quiet; text = (text "  (기록 없음)" "  (no events recorded)") } ]
@@ -615,9 +690,31 @@ let timeline ~ko ~width ~goal_id
               (fun (event : Tui_decode.goal_timeline_event) ->
                 let tone = severity_tone event.gt_severity in
                 let subject = subject event in
-                wrapped ~width tone
-                  (Printf.sprintf "  %s  %s  %s" event.gt_ts subject
-                     (headline ~subject event)))
+                let lead =
+                  wrapped ~width Quiet
+                    (Printf.sprintf "  %s  %s" (event_stamp event.gt_ts) subject) in
+                let title = String.trim event.gt_title in
+                let summary = String.trim event.gt_summary in
+                let body =
+                  match split_embedded_json summary with
+                  | None ->
+                      wrapped_indent ~width ~indent:4 tone
+                        (headline ~subject ~title summary)
+                  | Some (sentence, document, after) ->
+                      wrapped_indent ~width ~indent:4 tone
+                        (headline ~subject ~title sentence)
+                      (* The document's own nesting is indentation, so it
+                         keeps it: [preformatted_rows] wraps a long member
+                         without flattening the levels above it, the way the
+                         task history draws the same documents. *)
+                      @ (Text_block.preformatted_rows
+                           ~max_cells:(max 1 (width - 6)) document
+                         |> List.map (fun row ->
+                             { tone = Note; text = "      " ^ row }))
+                      @ (if String.equal (String.trim after) "" then []
+                         else wrapped_indent ~width ~indent:6 Note after)
+                in
+                lead @ body)
               events
   in
   let view = Masc_tui_fetched.view_for ~equal:String.equal loaded ~key:goal_id in

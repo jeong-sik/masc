@@ -62,6 +62,10 @@ val tool_series_window :
 (** The REST reader and mounted series stream share query validation and
     the exact sliding-window shape. *)
 
+val tool_series_cache_key : Masc.Workspace.config -> tool_series_request -> string
+(** The REST read and native query deadline share this exact filtered key.
+    Writer invalidation still clears the whole workspace series family. *)
+
 val agent_activity_http_json :
   config:Masc.Workspace.config -> hours:float -> Yojson.Safe.t
 (** Per-agent tool-call rollup for [GET /api/v1/agent-activity], cached per

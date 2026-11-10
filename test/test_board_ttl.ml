@@ -512,6 +512,11 @@ let test_post_kind_automation_contract () =
   let store = create_store
       ~base_path:(Env_config_core.base_path ()) () in
   load_sources store;
+  (* A hearth post reads the canonical sub-board policy before it appends
+     (post creation policy guard); the fixture must observe it first. *)
+  (match reload_sub_boards store with
+   | Ok _ -> ()
+   | Error error -> Alcotest.fail (show_board_error error));
   match
     create_post store ~author:"dashboard-harness-bot" ~content:"Harness post"
       ~visibility:Internal ~ttl_hours:1 ~hearth:"dashboard-harness"

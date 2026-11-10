@@ -752,10 +752,10 @@ let flush_pending_events_locked config =
       | Available { pending_events = []; _ } -> Ok ()
       | Available state ->
           let path = goal_events_path config in
-          let append_attempted = ref false in
+          let append_requested = ref false in
           let outcome = Fun.protect
             ~finally:(fun () ->
-              if !append_attempted then
+              if !append_requested then
                 Goal_event_observation.attempted ~base_path:config.Workspace_utils.base_path)
             (fun () -> Fs_compat.update_private_file_durable_locked_result path (fun existing ->
             let inspect () =
@@ -796,9 +796,11 @@ let flush_pending_events_locked config =
                   | [] -> None, false
                   | events -> Some (String.concat "" (List.map (fun event ->
                       Yojson.Safe.to_string (pending_event_to_yojson event) ^ "\n") events)), true in
-                (* The transaction may leave visible bytes after an uncertain
-                   write. A read, empty outbox or duplicate suffix owes no hint. *)
-                if changed then append_attempted := true;
+                (* An uncertain transaction may leave visible bytes. A later
+                   binding refusal may conservatively produce this read hint
+                   too; it is never a durable-write receipt. Empty/duplicate
+                   suffixes and rejected ledger reads owe no hint. *)
+                if changed then append_requested := true;
                 suffix, Ok changed)) in
           let appended = match outcome with
             | Fs_compat.Private_file_succeeded result -> result

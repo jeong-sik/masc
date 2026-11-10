@@ -15,6 +15,12 @@ type scope =
   | Credential_file of string
   | Official_client_home of string * string
 
+let scope_to_string = function
+  | Provider_row row -> "provider:" ^ row
+  | Credential_env name -> "env:" ^ name
+  | Credential_file path -> "file:" ^ path
+  | Official_client_home (client, home) -> "official:" ^ client ^ ":home:" ^ home
+
 (* Two facts, not one duration. [Until] is the provider's own reset time.
    [Observed] is a spent quota that stated no reset. It rests the scope for
    the hard-quota fallback ([path_rest_sec] of [Hard_quota] without a hint,
@@ -46,6 +52,12 @@ let mu = Stdlib.Mutex.create ()
 
 let note_exhausted ~scope ~resets_at =
   Stdlib.Mutex.protect mu (fun () ->
+    let before = match Hashtbl.find_opt windows scope with
+      | None -> "none"
+      | Some (Until existing) -> Printf.sprintf "until:%f" existing
+      | Some (Observed { rests_until; _ }) -> Printf.sprintf "observed:%f" rests_until in
+    Log.Runtime_agent.warn "DIAG note_exhausted scope=%s resets_at=%f before=%s"
+      (scope_to_string scope) resets_at before;
     match Hashtbl.find_opt windows scope with
     | Some (Until existing) when Float.compare existing resets_at >= 0 -> ()
     (* A stated reset is more than an observation, so it replaces one. *)
@@ -122,7 +134,14 @@ let rest ~scope ~now =
    an observation whose rest has not passed. Prunes a passed entry the way
    [active_until] does. *)
 let is_exhausted ~scope ~now =
-  Stdlib.Mutex.protect mu (fun () -> Option.is_some (live_entry ~scope ~now))
+  Stdlib.Mutex.protect mu (fun () ->
+    let entry = match Hashtbl.find_opt windows scope with
+      | None -> "none"
+      | Some (Until r) -> Printf.sprintf "until:%f" r
+      | Some (Observed { rests_until; _ }) -> Printf.sprintf "observed:%f" rests_until in
+    Log.Runtime_agent.warn "DIAG is_exhausted scope=%s now=%f entry=%s"
+      (scope_to_string scope) now entry;
+    Option.is_some (live_entry ~scope ~now))
 
 type answered_rest =
   | Stated_reset_ahead
@@ -150,12 +169,6 @@ let demote_order ~now ~quota_scope_of candidates =
       candidates
   in
   match demoted with [] -> candidates | _ -> kept @ demoted
-
-let scope_to_string = function
-  | Provider_row row -> "provider:" ^ row
-  | Credential_env name -> "env:" ^ name
-  | Credential_file path -> "file:" ^ path
-  | Official_client_home (client, home) -> "official:" ^ client ^ ":home:" ^ home
 
 (* Preserve the IDs already persisted by provider Usage history. These name
    credential locations, not the provider accounts whose secrets occupy them. *)

@@ -64,10 +64,19 @@ let report origin (usage : Runtime_muse_msp.subscription_usage) =
    writes a file and can be cancelled with the turn, and a spent account must
    rest even then. *)
 let observe ~scope origin usage =
+  let reset_ms = Runtime_muse_msp.exhausted_subscription_reset_ms usage in
+  Log.Runtime_agent.warn
+    "DIAG observe origin=%s scope=%s observed_at_ms=%d window=%d/%d weekly=%d/%d reset_ms=%s"
+    (method_name origin)
+    (Runtime_quota_window.scope_to_string scope)
+    usage.observed_at_ms
+    usage.window.used_percent usage.window.resets_at_ms
+    usage.weekly.weekly_used_percent usage.weekly.weekly_resets_at_ms
+    (match reset_ms with None -> "none" | Some ms -> string_of_int ms);
   Option.iter
     (fun reset_ms ->
        Runtime_quota_window.note_exhausted ~scope ~resets_at:(float_of_int reset_ms /. 1000.))
-    (Runtime_muse_msp.exhausted_subscription_reset_ms usage);
+    reset_ms;
   match report origin usage with
   | Ok report -> Usage_window.record ~scope ~observed_at:(Time_compat.now ()) report
   | Error error ->

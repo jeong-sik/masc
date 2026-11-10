@@ -1,0 +1,53 @@
+{
+  "at": "2026-11-10T18:52:18.155540+00:00",
+  "kind": "Independent local source review; not formal approval",
+  "pins": {
+    "base": "4a3f017e9880c8556c969d877cc835c9d38cb518",
+    "first_production": "58c5e9835c9e55af636b0008b4683f5a37701e77",
+    "repaired_production": "363ab6c9627a0ee8e62fc2ef98784c81f2f62fc2",
+    "first_cases": "a8c51c91a6ea45750d35b03e0f036ae7082d1c4a",
+    "final_lower": "b1a60af068bab0d53d83090a0cd6146e30d93468",
+    "final_upper": "35584707bedb70a9a2e6bb5b4257c8067503dffc"
+  },
+  "corrections": [
+    {
+      "finding": "Both readers identified ambiguous record-label inference for cleanup_admission post.id.",
+      "repair": "Explicit ~(post : post) annotation, independently reread. This was a static source finding, not a compiler failure."
+    },
+    {
+      "finding": "Dispatch initialization returns its own initialization_error rather than board_error.",
+      "repair": "The author checked the actual MLI and used an explicit result match before the first case-source commit."
+    }
+  ],
+  "reviews": [
+    {
+      "agent": "/root/issue_disposition_review",
+      "scope": "Complete10 original lower paths and3 original upper paths, direct public MLIs, filesystem guard and receipt implementation, caller/refusal/model/replay boundaries.",
+      "reuse": "Lower production ML/MLI unchanged after explicit receiver annotation; final lower adds changelog only. Upper stanza/include unchanged; helper delta adds actual Down comment vote to the positive override case, plus changelog. Main base unchanged.",
+      "verdict": "No further confirmed P0-P2 or fixture reachability failure found. Actual optional Votes refusal, known decision before cleanup, fixed replay and unknown no-replay remain separate."
+    },
+    {
+      "agent": "/root/history_redaction_response",
+      "scope": "Complete10 original lower paths and3 original upper paths, actual public constructors/callers and feature fixtures/IO/initialization APIs, then final delta.",
+      "reuse": "Same lower source after annotation; final changes are two changelogs and the actual Down comment-vote helper/call.",
+      "verdict": "No confirmed P0-P2 remains. Reader/conditions, canonical sources, scope flattening, actual-owner refusal and original decision replay agree with the interfaces."
+    }
+  ],
+  "nonblocking_limits": [
+    "Tool cases inspect counts and restart state, not verdict/effect_disposition directly."
+  ],
+  "backend_cases": {
+    "authored": 13,
+    "executed": 0
+  },
+  "formal_approval": false,
+  "cross_model_claimed": false,
+  "not_run": [
+    "OCaml types/warnings",
+    "Dune/build",
+    "Backend13 cases",
+    "CI",
+    "Browser/live Board HTTP",
+    "Install/deploy"
+  ]
+}

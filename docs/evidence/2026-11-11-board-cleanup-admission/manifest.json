@@ -1,0 +1,89 @@
+{
+  "at": "2026-11-10T18:49:41.407742+00:00",
+  "base": "4a3f017e9880c8556c969d877cc835c9d38cb518",
+  "production_source": "b1a60af068bab0d53d83090a0cd6146e30d93468",
+  "case_source": "35584707bedb70a9a2e6bb5b4257c8067503dffc",
+  "lower_paths": [
+    "changelog.d/51175.md",
+    "docs/spec/11-board.md",
+    "lib/board/board_deletion.ml",
+    "lib/board/board_deletion.mli",
+    "lib/board/board_deletion_source.ml",
+    "lib/board/board_deletion_source.mli",
+    "lib/board/board_votes.ml",
+    "lib/board/board_votes.mli",
+    "lib/board/board_votes_source.ml",
+    "lib/board/board_votes_source.mli",
+    "lib/board_tool_adapter/board_tool_handlers.ml"
+  ],
+  "case_paths": [
+    "changelog.d/51176.md",
+    "test/dune",
+    "test/stanzas/test_board_cleanup_admission.inc",
+    "test/test_board_cleanup_admission.ml"
+  ],
+  "files": [
+    {
+      "path": "changelog.d/51175.md",
+      "sha256": "c895a4f518126f11e45118079964007684166b53fff9154aa2aff68a92976dbd"
+    },
+    {
+      "path": "changelog.d/51176.md",
+      "sha256": "f97b593ad3215882489a3b7a2ed4c2a11551656c9dfc95d493958fa5bfa8e75e"
+    },
+    {
+      "path": "docs/spec/11-board.md",
+      "sha256": "38276378f65b5408042098608e0729d8073a8ee3d640a61b778172fb45931d6b"
+    },
+    {
+      "path": "lib/board/board_deletion.ml",
+      "sha256": "01f3e75ea7f3f27fba0eb8a44500211077db3ac04657fe32db782e90bef54461"
+    },
+    {
+      "path": "lib/board/board_deletion.mli",
+      "sha256": "d1ea8dbd70dd62f9c3010daa59d9cc88711c7f73dcdeb67a6875a64203ff46e5"
+    },
+    {
+      "path": "lib/board/board_deletion_source.ml",
+      "sha256": "acbf31f45e1efae4da0046c49bfd285f38a3f088601e8beb562d6d5e7cf57620"
+    },
+    {
+      "path": "lib/board/board_deletion_source.mli",
+      "sha256": "f9be06a8bcf8def809a26e2ffc8713272c6528bf5841ece45b4e0d3b6240c851"
+    },
+    {
+      "path": "lib/board/board_votes.ml",
+      "sha256": "8341fd1af23effa3d389cab116b5ee4bf979b075cee3f4954fc582288d1e5c08"
+    },
+    {
+      "path": "lib/board/board_votes.mli",
+      "sha256": "e79ca18c2d24c2024813f1f96af80ffebd8d4dab8e5e2efb97edf163bb49580f"
+    },
+    {
+      "path": "lib/board/board_votes_source.ml",
+      "sha256": "2c57c1f19e8a81997872133972ef6879879abca2108b6a8a761247d5bc738539"
+    },
+    {
+      "path": "lib/board/board_votes_source.mli",
+      "sha256": "f62dfedb759e0bce8a1b16d9969a386fc50a2b28e96d22511e6d5d958c446f52"
+    },
+    {
+      "path": "lib/board_tool_adapter/board_tool_handlers.ml",
+      "sha256": "44a84d396f4249b9fc8ad7927367a0eb413ddf97b099c712a7fe7f9e7c21352f"
+    },
+    {
+      "path": "test/dune",
+      "sha256": "f32f57357b5693a985c627eca0ecbd031ba3c077336974c02a845730a6404e93"
+    },
+    {
+      "path": "test/stanzas/test_board_cleanup_admission.inc",
+      "sha256": "fe8bd49d3891be926d2662dd424d2d0e6c6c36300ec849577da841d875267f02"
+    },
+    {
+      "path": "test/test_board_cleanup_admission.ml",
+      "sha256": "865287a0f95be77bb9e4bc2219d9fcdf7fc21a422db66368d321f75c83192c1f"
+    }
+  ],
+  "dashboard_tree": "7bb15ad1fcf789424d2077130511300ef144356f",
+  "new_backend_cases_executed": 0
+}

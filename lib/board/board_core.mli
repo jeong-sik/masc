@@ -191,21 +191,6 @@ val publish_posts_read : store -> posts_source_read -> unit
 val read_posts_source : store -> posts_source_read
 (** Caller holds persistence; general reads never recover tails or settle an
     unknown write. Complete and partial reads retain the actual Fs snapshot. *)
-val settle_posts_source : store -> posts_settle_outcome
-(** Settle the retained unknown write of an unsettled store. Caller holds
-    persistence; revalidates the workspace of the pre-write observation,
-    performs one locked posts read and at most one durable proof rewrite, and
-    never touches the in-memory post tables. A store that is not unsettled
-    yields [Posts_settle_nothing_to_settle] with no IO. *)
-val settle_posts_diagnostics : posts_settle_outcome -> posts_source_diagnostic list
-type settle_direction = Board_core_persist.settle_direction =
-  | Direction_landed
-  | Direction_absent
-  | Direction_diverged
-val settle_direction_for_testing :
-  pending:posts_unsettled_write -> Fs_compat.private_jsonl_snapshot -> settle_direction
-(** Pure settlement direction; test and diagnostic entry only. Grants no
-    authority; see [Board_posts_source.settle_direction_for_testing]. *)
 val finish_posts_read : posts_source_read -> unit
 type posts_inspection_framing = Board_core_persist.posts_inspection_framing =
   | Complete_rows

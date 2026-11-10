@@ -625,34 +625,6 @@ type posts_write_outcome =
       diagnostics : posts_source_diagnostic list;
     }
 
-type posts_settle_outcome =
-  | Posts_settled_written of {
-      observation : posts_source_observation;
-      diagnostics : posts_source_diagnostic list;
-    }
-  | Posts_settled_not_written of {
-      observation : posts_source_observation;
-      diagnostics : posts_source_diagnostic list;
-    }
-  | Posts_settle_superseded of {
-      failure : posts_source_failure;
-      diagnostics : posts_source_diagnostic list;
-    }
-  | Posts_settle_inconclusive of {
-      failure : posts_source_failure;
-      diagnostics : posts_source_diagnostic list;
-    }
-  | Posts_settle_nothing_to_settle
-(** Outcome of settling an unknown posts write. [Posts_settled_written]
-    carries the fresh durable observation and the store is readable.
-    [Posts_settled_not_written] carries the restored pre-write observation
-    and the store is readable; the caller may retry once with its staged
-    bytes, fenced by that observation's cursor. [Posts_settle_superseded]
-    means a coherent third-party state was proven and the store is refused
-    (reloadable). [Posts_settle_inconclusive] keeps the store unsettled with
-    its pending evidence intact. [Posts_settle_nothing_to_settle] performs
-    no IO and changes nothing. *)
-
 type posts_source_read =
   | Posts_complete of {
       observation : posts_source_observation;
@@ -965,7 +937,7 @@ type deletion_progress =
   | Sources_uncertain
   | Sources_written
 (** Sources_uncertain retains an unknown source effect and requires fresh-store
-    recovery even if a public source-only settlement later makes a file readable.
+    recovery. Same-store reload and ordinary flush do not replay that effect.
     Sources_written means all sources selected by the recorded operation have
     known durable receipts: four for a post, Posts and Policy for a sub-board. *)
 

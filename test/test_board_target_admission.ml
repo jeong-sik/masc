@@ -257,7 +257,7 @@ let test_unknown_reaction_retained base =
   Board.flush_dirty store;
   Alcotest.(check int) "ordinary requests do not replay unknown effect" before !calls
 
-let test_source_only_settle_refuses_old_model base =
+let test_unknown_posts_refuse_leaf_mutations base =
   let armed = ref false in
   let io : Fs_compat.private_jsonl_transaction_io_for_testing = {
     before_sync_parent = (fun _ -> if !armed then (armed := false; raise (Sys_error "ownership sync")));
@@ -268,10 +268,10 @@ let test_source_only_settle_refuses_old_model base =
   armed := true;
   expect_io (Board.update_post_with_outcome store ~lookup:Recipient_lookup.none_declared
     ~post_id:(Board.Post_id.to_string parent.id) ~editor:"owner" ~content:parent.body ~new_author:"next-owner" ());
-  (match Board.with_persist_lock store (fun () -> Board.settle_posts_source store) with
-   | Board.Posts_settled_written _ -> ()
-   | Posts_settled_not_written _ | Posts_settle_superseded _ | Posts_settle_inconclusive _
-   | Posts_settle_nothing_to_settle -> Alcotest.fail "ownership write was not settled");
+  (match store.posts_source with
+   | Board.Posts_unsettled _ -> ()
+   | Posts_unobserved | Posts_readable _ | Posts_refused _ ->
+     Alcotest.fail "real ownership sync failure lost its unknown source");
   let before = capture_leaves store in
   List.iter (fun kind -> expect_io (apply kind store ~reader:Access.Operator ~actor:"refused" parent comment)) all;
   unchanged_leaves before;
@@ -305,5 +305,5 @@ let () = Alcotest.run "Board canonical target admission" ["feature", [
   Alcotest.test_case "known reaction survives parent cleanup cause" `Quick (with_fixture (test_known_parent_cleanup Post_reaction));
   Alcotest.test_case "duplicate validates the actual vote source" `Quick (with_fixture test_duplicate_checks_vote_source);
   Alcotest.test_case "guarded unknown reaction retains evidence without replay" `Quick (with_fixture test_unknown_reaction_retained);
-  Alcotest.test_case "source-only settlement cannot authorize the old model" `Quick (with_fixture test_source_only_settle_refuses_old_model)
+  Alcotest.test_case "unknown posts refuse all four vote and reaction mutations" `Quick (with_fixture test_unknown_posts_refuse_leaf_mutations)
 ]]

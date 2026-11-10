@@ -342,6 +342,11 @@ val compact_connection_state : Masc_tui_types.state -> compact_connection_state
 
 val usage_connection_badge : Masc_tui_types.state -> string
 
+val reading_connection_notice : Masc_tui_types.state -> string option
+(** Exceptional transport, workspace, refresh or observer-loss evidence.
+    Healthy HTTP and ordinary pending reads return [None]; each view keeps
+    its own pending-read indication. The notice retains the full context. *)
+
 val compact_connection_badge : Masc_tui_types.state -> width:int -> string * string option
 (** A narrow textual state and any longer status details that remain to show. *)
 

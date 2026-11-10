@@ -648,15 +648,23 @@ type memory_row_badge =
   | Badge_source
   | Badge_dropped
 
-let memory_fact_row_line ~ko ?(is_fleet = false) ~cols (row : memory_fact_row) =
+let memory_fact_row_line ~ko ?(is_fleet = false) ?(sort = Sort_recency) ~cols (row : memory_fact_row) =
   let inner_width = max 1 (framed_inner_width cols) in
-  let keeper, badge, claim, at, path = match row with
+  let usage, at = match row, sort with
+    | Memory_row_fact fact, (Sort_retrieved_count | Sort_last_retrieved) ->
+      (match fact.mf_events.mfe_retrieval with
+       | Retrieved {count; last_at; distinct_days = _} -> (Printf.sprintf "%d× " count, last_at)
+       | Never_retrieved -> ((if ko then "미조회 " else "unretrieved "), fact.mf_last_seen))
+    | Memory_row_fact fact, (Sort_recency | Sort_category | Sort_claim) -> ("", fact.mf_last_seen)
+    | Memory_row_source_fact fact, (Sort_recency | Sort_retrieved_count | Sort_last_retrieved | Sort_category | Sort_claim) -> ("", fact.msf_first_seen)
+    | Memory_row_invalidation fact, (Sort_recency | Sort_retrieved_count | Sort_last_retrieved | Sort_category | Sort_claim) -> ("", fact.mi_invalidated_at) in
+  let keeper, badge, claim, path = match row with
     | Memory_row_fact fact ->
-        fact.mf_keeper, Badge_category fact.mf_category, fact.mf_claim, fact.mf_last_seen, None
+        fact.mf_keeper, Badge_category fact.mf_category, fact.mf_claim, None
     | Memory_row_source_fact fact ->
-        fact.msf_keeper, Badge_source, fact.msf_claim, fact.msf_first_seen, Some fact.msf_path
+        fact.msf_keeper, Badge_source, fact.msf_claim, Some fact.msf_path
     | Memory_row_invalidation row ->
-        row.mi_keeper, Badge_dropped, row.mi_reason, row.mi_invalidated_at, Some row.mi_source_path in
+        row.mi_keeper, Badge_dropped, row.mi_reason, Some row.mi_source_path in
   let label = match badge with
     | Badge_category category -> memory_category_text ~ko category
     | Badge_source -> if ko then "원본" else "source"
@@ -667,7 +675,7 @@ let memory_fact_row_line ~ko ?(is_fleet = false) ~cols (row : memory_fact_row) =
     else "" in
   let label_room = min 10 (max 0 (inner_width / 5)) in
   let label = Message_layout.truncate_middle label_room label in
-  let prefix = "  " ^ owner ^ (if label = "" then "" else "[" ^ label ^ "] ") in
+  let prefix = "  " ^ owner ^ usage ^ (if label = "" then "" else "[" ^ label ^ "] ") in
   let room = max 0 (inner_width - Message_layout.display_width prefix) in
   let age = memory_fact_age_label at in
   let path = Option.map (fun path -> Message_layout.truncate_middle 16
@@ -1778,7 +1786,7 @@ let render_memory_facts_body_single ?(show_category_strip = true) ~cols ~budget 
       match Rows.at rows_window idx with
       | None -> push_empty ()
       | Some row ->
-          let line = memory_fact_row_line ~ko ~is_fleet ~cols row in
+          let line = memory_fact_row_line ~ko ~is_fleet ~sort:state.memory_facts_sort ~cols row in
           if idx = cursor then push_selected (Masc_tui_theme.strip_sgr line)
           else push line
     done;

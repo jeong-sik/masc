@@ -2,7 +2,7 @@ open Board_core_persist
 
 open Result.Syntax
 
-let vote_direction_to_string = function Up -> "up" | Down -> "down"
+let vote_direction_to_string = Board_vote_row.direction_to_string
 
 (* Variant witness used to derive the schema enum from the canonical encoder. *)
 let all_vote_directions = [ Up; Down ]
@@ -20,77 +20,65 @@ let vote_direction_of_string_opt raw =
 
 let vote_log_path store = Board_paths.store_file_path store Board_paths.Votes
 
-(* Append and snapshot writers persist the cast timestamp stored for the exact
-   [(target, voter)] vote identity. Returns [Error (Io_error _)] instead of
-   swallowing the write failure, so a disk-full or permission error propagates
-   to the caller instead of leaving the in-memory vote as the only copy. *)
-let append_vote_log store ~target ~voter ~direction ~ts : (unit, board_error) Result.t =
+(* Finish a known settlement before logging, preserving the shared carrier
+   when the logger itself observes a reserved exception. *)
+let finish_vote_write outcome result =
+  let result = Board_votes_source.finish_write outcome result in
   try
-    let* () = ensure_masc_dir ~where:"append_vote_log" store in
-    let path = vote_log_path store in
-    let json = `Assoc [
-      ("target", `String target);
-      ("voter", `String voter);
-      ("direction", `String (vote_direction_to_string direction));
-      ("ts", `Float ts);
-    ] in
-    Fs_compat.append_file path (Yojson.Safe.to_string json ^ "\n");
-    Ok ()
-  with Sys_error msg ->
-    record_persist_error ~where:"append_vote_log" msg;
-    Error (Io_error (Printf.sprintf "append_vote_log: %s" msg))
+    (match result with
+     | Ok _ -> ()
+     | Error error -> record_persist_error ~where:"votes source" (show_board_error error));
+    result
+  with exception_ ->
+    let backtrace = Printexc.get_raw_backtrace () in
+    Board_posts_source.defer_reserved ~result:(Result.map (fun _ -> ()) result)
+      exception_ backtrace;
+    Printexc.raise_with_backtrace exception_ backtrace
+
+let publish_vote_write store outcome publish =
+  let module Source = Board_votes_source in
+  let result = match outcome with
+    | Source.Written { publication; _ } ->
+      let projected =
+        try publish () with exception_ ->
+          Source.fail_publication store publication exception_ (Printexc.get_raw_backtrace ()) in
+      (match projected with
+       | Ok value ->
+         let* () = Source.acknowledge_publication store publication in
+         Ok value
+       | Error error ->
+         Source.reject_publication store publication error;
+         Error error)
+    | Source.Not_written _ | Source.Unknown _ ->
+      Error (Io_error "Board data is unavailable.") in
+  finish_vote_write outcome result
 
 let vote_log_jsonl store =
   let buf = Buffer.create 4096 in
   Hashtbl.iter
     (fun target (direction, ts) ->
-      let voter =
+      let vote =
         match Board_vote_key.of_string target with
-        | Some vote -> Board_vote_key.voter vote |> Agent_id.to_string
+        | Some vote -> vote
         | None -> invalid_arg (Printf.sprintf "invalid in-memory vote key: %S" target)
       in
-      let json =
-        `Assoc
-          [
-            ("target", `String target);
-            ("voter", `String voter);
-            ("direction", `String (vote_direction_to_string direction));
-            (* Snapshot rewrites preserve the cast timestamp. *)
-            ("ts", `Float ts);
-          ]
-      in
+      let json = Board_vote_row.to_yojson (vote, direction, ts) in
       Buffer.add_string buf (Yojson.Safe.to_string json);
       Buffer.add_char buf '\n')
     store.vote_log;
   Buffer.contents buf
 
-(* Full snapshot rewrite of the vote log, used by [flush_dirty] (compaction)
-   and [delete_post] (removing a target's votes). Returns
-   [Error (Io_error _)] instead of only logging, on the same contract as
-   [append_vote_log] — the previous unit-returning version logged via
-   [Log.BoardLog.error] directly, which meant this write's failures never
-   incremented [persist_errors], unlike every other persist path in this
-   file. *)
+(* The captured deletion/flush model is already installed under this same
+   persistence interval. Acknowledge only the exact successful file receipt. *)
 let save_vote_log_jsonl store content : (unit, board_error) Result.t =
-  try
-    let* () = ensure_masc_dir ~where:"save_vote_log_jsonl" store in
-    let path = vote_log_path store in
-    match Fs_compat.save_file_atomic path content with
-    | Ok () -> Ok ()
-    | Error msg ->
-      record_persist_error ~where:"save_vote_log_jsonl" msg;
-      Error (Io_error (Printf.sprintf "save_vote_log_jsonl: %s" msg))
-  with Sys_error msg ->
-    record_persist_error ~where:"save_vote_log_jsonl" msg;
-    Error (Io_error (Printf.sprintf "save_vote_log_jsonl: %s" msg))
+  publish_vote_write store (Board_votes_source.rewrite store content) (fun () -> Ok ())
 
 (* The caller retains persistence through its fresh state publication, so a
    snapshot cannot remove this row between append and memory commit. *)
-let append_admitted_vote store ~target ~voter ~direction ~ts
-    : (unit, board_error) Result.t =
-  let* () = require_persisted_snapshot_readable store.votes_load_result in
+let append_admitted_vote store ~vote ~direction ~ts publish =
+  let* () = Board_votes_source.require_readable store in
   let* () = require_posts_source_readable store in
-  append_vote_log store ~target ~voter ~direction ~ts
+  publish_vote_write store (Board_votes_source.append store (vote, direction, ts)) publish
 
 let current_vote_for_post store ~voter ~post_id
     : (vote_direction option, board_error) Result.t =
@@ -100,6 +88,8 @@ let current_vote_for_post store ~voter ~post_id
   match Post_id.of_string post_id with
   | Error e -> Error e
   | Ok pid ->
+      with_persist_lock store @@ fun () ->
+      let* () = Board_votes_source.require_readable store in
       with_lock store (fun () ->
         let post_key = Post_id.to_string pid in
         if not (Hashtbl.mem store.posts post_key) then Error (Post_not_found post_id)
@@ -123,10 +113,10 @@ let vote store ~voter ~post_id ~direction : (int, board_error) Result.t =
   | Error e -> Error e
   | Ok pid ->
       with_persist_lock store @@ fun () ->
+      let* () = Board_votes_source.require_readable store in
       let post_key = Post_id.to_string pid in
-      let vote_key =
-        Board_vote_key.post ~post_id:pid ~voter:agent |> Board_vote_key.to_string
-      in
+      let vote_id = Board_vote_key.post ~post_id:pid ~voter:agent in
+      let vote_key = Board_vote_key.to_string vote_id in
       let staged : (float, board_error) Result.t =
         with_lock store (fun () ->
           match Hashtbl.find_opt store.posts post_key with
@@ -142,9 +132,7 @@ let vote store ~voter ~post_id ~direction : (int, board_error) Result.t =
       (match staged with
        | Error _ as e -> e
        | Ok ts ->
-         (match append_admitted_vote store ~target:vote_key ~voter ~direction ~ts with
-          | Error _ as e -> e
-          | Ok () ->
+         append_admitted_vote store ~vote:vote_id ~direction ~ts (fun () ->
               with_lock store (fun () ->
                 match Hashtbl.find_opt store.posts post_key with
                 | None -> Error (Post_not_found post_id)
@@ -186,6 +174,8 @@ let current_vote_for_comment store ~voter ~comment_id
   match Comment_id.of_string comment_id with
   | Error e -> Error e
   | Ok cid ->
+      with_persist_lock store @@ fun () ->
+      let* () = Board_votes_source.require_readable store in
       with_lock store (fun () ->
         let comment_key = Comment_id.to_string cid in
         if not (Hashtbl.mem store.comments comment_key) then
@@ -207,10 +197,10 @@ let vote_comment store ~voter ~comment_id ~direction : (int, board_error) Result
   | Error e -> Error e
   | Ok cid ->
       with_persist_lock store @@ fun () ->
+      let* () = Board_votes_source.require_readable store in
       let comment_key = Comment_id.to_string cid in
-      let vote_key =
-        Board_vote_key.comment ~comment_id:cid ~voter:agent |> Board_vote_key.to_string
-      in
+      let vote_id = Board_vote_key.comment ~comment_id:cid ~voter:agent in
+      let vote_key = Board_vote_key.to_string vote_id in
       let staged : (float, board_error) Result.t =
         with_lock store (fun () ->
           match Hashtbl.find_opt store.comments comment_key with
@@ -226,9 +216,7 @@ let vote_comment store ~voter ~comment_id ~direction : (int, board_error) Result
       (match staged with
        | Error _ as e -> e
        | Ok ts ->
-         (match append_admitted_vote store ~target:vote_key ~voter ~direction ~ts with
-          | Error _ as e -> e
-          | Ok () ->
+         append_admitted_vote store ~vote:vote_id ~direction ~ts (fun () ->
               with_lock store (fun () ->
                 match Hashtbl.find_opt store.comments comment_key with
                 | None -> Error (Comment_not_found comment_id)

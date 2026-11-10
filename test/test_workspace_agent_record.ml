@@ -106,6 +106,39 @@ let test_the_report_names_the_workspace () =
            | _ -> fail "one prune reports once")))
 ;;
 
+let test_signal_change_keeps_roster_contract_and_committed_record () =
+  with_recorded_observer (fun bases -> with_workspace (fun config ->
+    let path = Filename.concat (Workspace.agents_dir config) "gemini-signal.json" in
+    let first = agent "gemini-signal" in
+    Workspace_agent_record.write config path ~previous:None first;
+    let changes = ref [] in
+    let unsubscribe = Workspace_agent_record.subscribe_signal_changed (fun change ->
+      changes := change :: !changes) in
+    let failures = Workspace_agent_record.signal_observer_failures () in
+    let unsubscribe_bad = Workspace_agent_record.subscribe_signal_changed
+        (fun _ -> raise (Failure "isolated observation failure")) in
+    Fun.protect ~finally:(fun () -> unsubscribe (); unsubscribe_bad ()) (fun () ->
+      let heartbeat = { first with last_seen = "2026-11-05T01:05:00Z" } in
+      (match Workspace_agent_record.write_commit_result config path
+          ~previous:(Some first) heartbeat with
+       | Ok _ -> () | Error error -> fail error);
+      check int "heartbeat leaves the Clients roster unchanged" 1 (List.length (bases ()));
+      (match !changes with
+       | [change] ->
+           check string "original agent identity" first.name change.agent_name;
+           check string "writer root is canonical before the append"
+             (Fs_compat.realpath_lenient (Workspace.masc_dir config)) change.canonical_masc_root
+       | _ -> fail "one heartbeat owes one source observation");
+      check int "a bad listener cannot replace a committed write" (failures + 1)
+        (Workspace_agent_record.signal_observer_failures ());
+      Workspace_agent_record.write config path ~previous:(Some heartbeat) heartbeat;
+      check int "an identical reconcile is not a new signal" 1 (List.length !changes);
+      unsubscribe ();
+      Workspace_agent_record.write config path ~previous:(Some heartbeat)
+        { heartbeat with capabilities = ["review"] };
+      check int "released listener is no longer invoked" 1 (List.length !changes))))
+;;
+
 let () =
   run "workspace agent record"
     [ ( "row"
@@ -113,6 +146,8 @@ let () =
             test_write_reports_what_the_roster_draws
         ; test_case "the report names the workspace" `Quick
             test_the_report_names_the_workspace
+        ; test_case "source signal preserves the roster and write outcome" `Quick
+            test_signal_change_keeps_roster_contract_and_committed_record
         ] )
     ]
 ;;

@@ -16,7 +16,7 @@ import { clearStoredToken, setStoredToken } from '../api/core'
 import { asyncRequestSourceKey, ObservationReadError } from '../api/composition-observation'
 import { AsyncRequestDetails, OriginalToolResultInspector, NestedExecutionView } from './composition-observation-view'
 
-const authority = () => ({ epoch: 'fixture', workspaceRoot: '/workspace', connectionGeneration: 1 })
+const authority = () => ({ epoch: 'fixture', workspaceRoot: '/workspace', connectionGeneration: 1, observerInstanceId: null })
 const reference = { identity: { source_id: 'workspace', package_id: 'child', name: 'child' }, content_revision: 'd'.repeat(64) }
 const nested: NestedReading = { kind: 'observed', children: [{ alias: 'actual-child', reference, execution: 'async',
   arguments: { kind: 'fixed', value: { argument: 'declared' } }, admission: { kind: 'not_attempted' },

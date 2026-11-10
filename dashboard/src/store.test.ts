@@ -234,6 +234,26 @@ describe('manual execution refresh completion through the actual HTTP reader', (
     return { promise, resolve }
   }
 
+  it('binds the observed workspace instance independently of the process execution epoch', async () => {
+    const store = await import('./store')
+    const snapshot = execution(1)
+    expect(store.hydrateExecutionSnapshot({ ...snapshot, observer_instance_id: 'workspace-instance-A' })).toBe(true)
+    const first = store.executionWorkspaceAuthority.peek()!
+    expect(first.observerInstanceId).toBe('workspace-instance-A')
+    expect(store.hydrateExecutionSnapshot({ ...snapshot, observer_instance_id: 'workspace-instance-A' })).toBe(true)
+    expect(store.executionWorkspaceAuthority.peek()).toBe(first)
+    expect(store.hydrateExecutionSnapshot({ ...snapshot, observer_instance_id: 'workspace-instance-B' })).toBe(true)
+    const second = store.executionWorkspaceAuthority.peek()!
+    expect(second).not.toBe(first)
+    expect(second.epoch).toBe(first.epoch)
+    expect(second.workspaceRoot).toBe(first.workspaceRoot)
+    expect(second.observerInstanceId).toBe('workspace-instance-B')
+    for (const observer_instance_id of [undefined, '', 'two instances', 'A,B']) {
+      expect(store.hydrateExecutionSnapshot({ ...snapshot, observer_instance_id })).toBe(true)
+      expect(store.executionWorkspaceAuthority.peek()?.observerInstanceId).toBeNull()
+    }
+  })
+
   it('rejects a delayed pre-purchase overlay within the same execution generation', async () => {
     const store = await import('./store')
     const snapshot = execution(1)

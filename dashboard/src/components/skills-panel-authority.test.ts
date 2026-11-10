@@ -25,7 +25,7 @@ function pending<T>() {
   const promise = new Promise<T>((ok, fail) => { resolve = ok; reject = fail })
   return { promise, resolve, reject }
 }
-const authority = (root = '/workspace-a'): ExecutionWorkspaceAuthority => ({ epoch: 'fixture', workspaceRoot: root, connectionGeneration: 1 })
+const authority = (root = '/workspace-a'): ExecutionWorkspaceAuthority => ({ epoch: 'fixture', workspaceRoot: root, connectionGeneration: 1, observerInstanceId: null })
 const reference = (name: string): SkillReference => ({ identity: { source_id: 'workspace', package_id: name, name }, content_revision: `revision-${name}` })
 function catalog(names = ['alpha', 'beta']): SkillsResponse {
   return { schema: 'masc.skill-snapshot/v1', state: 'ready', snapshot: {

@@ -19,8 +19,10 @@ val written :
   base_path:string -> scope:Sse_event.Types.dashboard_observation_scope ->
   Sse_event.Types.dashboard_observation_topic -> unit
 (** Notify after the authoritative write attempt, including a failure whose
-    atomic rename may already be visible. [base_path] is resolved through its
-    existing ancestors and symlinks. The notification does not change the
+    atomic rename may already be visible. [base_path] retains the writer's
+    workspace owner spelling. The server worker resolves its authority before
+    publication; this after-commit function performs no filesystem work.
+    The notification does not change the
     writer's result; subscriber exceptions, cancellation included, are logged
     without escaping this non-yielding boundary. *)
 

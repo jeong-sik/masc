@@ -917,7 +917,7 @@ class WakingTheMainBuild(unittest.TestCase):
 
     def test_the_auto_merge_arming_readback_wakes_the_main_build(self):
         """`gh pr merge --auto` followed by a merged readback returns at 468."""
-        environment = {'GITHUB_REPOSITORY': REPO, 'GITHUB_EVENT_NAME': 'workflow_run',
+        environment = {'GITHUB_REPOSITORY': REPO, 'GITHUB_EVENT_NAME': 'workflow_dispatch',
                        'DISPATCH_PR': '102', 'GITHUB_STEP_SUMMARY': ''}
         automatic = {'status': 'merged', 'pr': 102, 'merge_commit_sha': sha(102)}
         with patch.dict(os.environ, environment), patch.object(sys, 'argv', ['auto-merge']), \
@@ -930,7 +930,7 @@ class WakingTheMainBuild(unittest.TestCase):
     def test_a_resumed_receipt_that_reports_a_merge_wakes_the_main_build(self):
         """follow() reaches merged without ever calling submit(), then returns."""
         receipt = {'uuid': UUID, 'pr': 102, 'head': sha(102),
-                   'members': [101, 102], 'since': T1}
+                   'members': [101, 102], 'since': 1}
         environment = {'GITHUB_REPOSITORY': REPO, 'GITHUB_EVENT_NAME': 'workflow_dispatch',
                        'DISPATCH_PR': '102', 'GITHUB_STEP_SUMMARY': '',
                        'DISPATCH_RECEIPT': json.dumps(receipt)}
@@ -944,7 +944,7 @@ class WakingTheMainBuild(unittest.TestCase):
     def test_an_unsettled_receipt_does_not_wake_the_build(self):
         """Nothing merged yet, so no build request and a visible red exit."""
         receipt = {'uuid': UUID, 'pr': 102, 'head': sha(102),
-                   'members': [101, 102], 'since': T1}
+                   'members': [101, 102], 'since': 1}
         environment = {'GITHUB_REPOSITORY': REPO, 'GITHUB_EVENT_NAME': 'workflow_dispatch',
                        'DISPATCH_PR': '102', 'GITHUB_STEP_SUMMARY': '',
                        'DISPATCH_RECEIPT': json.dumps(receipt)}
@@ -958,7 +958,7 @@ class WakingTheMainBuild(unittest.TestCase):
     def test_a_dry_run_reports_the_merge_without_waking_the_build(self):
         """--dry-run reads admission; it must never dispatch anything."""
         receipt = {'uuid': UUID, 'pr': 102, 'head': sha(102),
-                   'members': [101, 102], 'since': T1}
+                   'members': [101, 102], 'since': 1}
         environment = {'GITHUB_REPOSITORY': REPO, 'GITHUB_EVENT_NAME': 'workflow_dispatch',
                        'DISPATCH_PR': '102', 'GITHUB_STEP_SUMMARY': '',
                        'DISPATCH_RECEIPT': json.dumps(receipt)}

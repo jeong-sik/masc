@@ -42,6 +42,10 @@ type Observer = {
 
 const observers = new Set<Observer>()
 
+/** This read published no authoritative projection. Its producer, a newer
+ * accepted observation, or recovery/focus owns completion without polling. */
+export class ObservationPending extends Error {}
+
 /** A combined read must not let an earlier transient error hide a refused
  * sibling request and repeatedly resend that sibling's credential. */
 export function selectObservationReadFailure(causes: readonly unknown[]): unknown | null {
@@ -154,6 +158,10 @@ export function setupObservationRefresh(
         dirty = false
         clearRetry()
         if (options.onError) options.onError(error)
+      } else if (error instanceof ObservationPending) {
+        retryDelayMs = TRANSPORT_RETRY_BASE_MS
+        // Retain any invalidation received during the read as one trailing
+        // read; otherwise the producer completes it.
       } else {
         dirty = true
         retryTimer = setTimeout(() => {

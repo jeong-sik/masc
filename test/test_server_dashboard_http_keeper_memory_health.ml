@@ -13,7 +13,13 @@ let fresh_dir prefix = Filename.temp_dir prefix ""
 (* The projection caches each keeper's row and drops it when a writer reports a
    commit. The server wires that at startup ([Server_runtime_bootstrap]); a test
    that writes and then reads again has to wire the same observers, or the
-   second read answers from the row the first one cached. *)
+   second read answers from the row the first one cached.
+
+   Installing at module load is not idempotent: [install] retains the restore
+   closures it collects but never returns them, and each
+   [install_commit_observer] replaces the previous observer rather than
+   chaining, so a later [For_testing.with_runtime] restore can drop this
+   registration. *)
 let () = Health.install ()
 
 let fact claim : Types.fact =
@@ -960,10 +966,13 @@ let test_context_cycle_reads_the_librarian_position_beside_the_cut () =
   Fun.protect ~finally:(fun () -> Fs_compat.remove_tree base) @@ fun () ->
   let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path:base in
   write_keeper_config ~keepers_dir ~keeper_id:keeper_name ();
-  let cycle () =
-    (* This fixture writes the progress and snapshot files itself, so no
-       writer announces the commit [install] listens for. *)
-    Health.For_testing.invalidate ~base_path:base ~keeper:keeper_name;
+  let cycle ?(invalidate = true) () =
+    (* [P.write] announces its commit, and the observer [install] wires is
+       what must empty the row afterwards; pre-empting that with a manual
+       invalidation would hide the path this change repairs. The snapshot
+       below is written straight to a file, though, and no writer announces
+       that one, so the caller says which kind of read it is. *)
+    if invalidate then Health.For_testing.invalidate ~base_path:base ~keeper:keeper_name;
     member "context_cycle"
       (keeper_obj keeper_name (Health.keeper_memory_health_http_json ~base_path:base)) in
   Alcotest.(check bool) "a keeper that has read nothing has no position" true
@@ -996,7 +1005,9 @@ let test_context_cycle_reads_the_librarian_position_beside_the_cut () =
     {P.position = {trace_id; end_atom = 12887; last_atom_digest = String.make 64 'a'};
      boundary_lines_seen = 385}
   |> Result.map_error P.write_error_to_string |> get;
-  let observed = cycle () in
+  (* No manual invalidation: [P.write] fires the commit observer for the
+     runtime root, and that observer has to be what empties the row. *)
+  let observed = cycle ~invalidate:false () in
   Alcotest.(check int) "the cut the request starts at" snapshot.S.end_atom
     (int_field "end_atom" (member "saved" observed));
   Alcotest.(check int) "the position that cut is read against" 12887

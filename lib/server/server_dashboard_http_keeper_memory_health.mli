@@ -28,7 +28,13 @@ module For_testing : sig
   val invalidate : base_path:string -> keeper:string -> unit
   (** Empty [keeper]'s cached row under [base_path]. A test that writes an
       input file directly has no writer to announce the commit [install]
-      listens for, so it says so here instead. *)
+      listens for, so it says so here instead.
+
+      The row is found through
+      [Config_dir_resolver.keepers_dir_for_base_path], so only a row cached
+      under the config root can be emptied from here. That holds today
+      because every row is cached under the config root; a row cached under
+      the runtime root would need its own lookup. *)
 
   val with_runtime :
     keeper_health:(config:Workspace.config -> keepers_dir:string -> string -> keeper_health) ->

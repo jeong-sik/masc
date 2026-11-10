@@ -10,7 +10,9 @@ let get_created = function
 
 let nobody_declared = Masc.Recipient_lookup.none_declared
 let create_post store = create_post store ~lookup:nobody_declared
-let add_comment store = add_comment store ~lookup:nobody_declared
+let add_comment store =
+  add_comment store ~reader:Masc_board_handlers.Board_access.Operator
+    ~lookup:nobody_declared
 
 (* Every writing fixture loads posts and comments explicitly. Give each case
    its own workspace so that load cannot adopt another case's persisted rows. *)

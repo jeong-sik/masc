@@ -3,7 +3,7 @@ rfc: "0517"
 title: "librarian 은 지식마다 맞는 fact 하나를 남긴다"
 status: Draft
 created: 2026-11-09
-updated: 2026-11-09
+updated: 2026-11-10
 author: claude
 supersedes: []
 superseded_by: null
@@ -16,6 +16,7 @@ related: ["librarian-absorb-gate", "0463", "keeper-recall-reaches-the-turn", "05
 - 근거: [연구 문서](../research/2026-11-09-librarian-keeps-one-correct-fact.md)와 [측정 기록](../evidence/research/2026-11-09-librarian-memory-state/README.md). 이 RFC 의 숫자는 모두 연구 문서에 출처가 있다.
 - 하네스 쪽 구현은 T 스택이 한다. #50290 이 계약 안에서 맞힐 수 있는 라벨을, #50325 가 남는 기억 채점을 넣는다.
 - §7 의 세 가지는 사용자가 고른다. 고르기 전에는 그 부분을 구현하지 않는다.
+- 2026-11-10 에 사용자가 F1 두 가지를 정했다. `pass` 는 커밋 함수의 필수 인자로 받는다. 흡수 게이트 판정은 두 길에서 슬롯 라벨 없이 센다(§2.2).
 
 ## 0. 요약
 
@@ -119,30 +120,46 @@ Prometheus 지표는 기존 recall 지표처럼 `Otel_metric_store` 에 `keeper`
 
 | 이름 | 종류 | 라벨 | 세는 자리 |
 | --- | --- | --- | --- |
-| `masc_keeper_memory_changes_total` | counter | `keeper`, `pass`, `change` | 기억 커밋이 성공한 뒤 |
+| `masc_keeper_memory_changes_total` | counter | `keeper`, `pass`, `change` | 저장소 커밋 함수가 커밋을 마치고 lock 을 놓은 뒤 |
 | `masc_keeper_memory_facts` | gauge | `keeper` | 같은 자리. 커밋 뒤 fact 수 |
-| `masc_keeper_memory_snapshot_bytes` | gauge | `keeper` | 같은 자리. 커밋 뒤 바이트 |
-| `masc_keeper_librarian_absorb_sources_total` | counter | `keeper`, `slot`, `outcome`, `decision` | forward 판정을 로그로 쓰는 자리 |
-| `masc_keeper_librarian_absorb_copy_checks_total` | counter | `keeper`, `slot`, `verdict` | reverse 판정을 로그로 쓰는 자리 |
+| `masc_keeper_memory_snapshot_bytes` | gauge | `keeper` | 같은 자리. 커밋 뒤 fact 를 그린 바이트로, 건강 행과 같은 셈이다 |
+| `masc_keeper_librarian_absorb_sources_total` | counter | `keeper`, `outcome`, `decision` | 흡수 게이트 판정이 끝나는 두 자리 |
+| `masc_keeper_librarian_absorb_copy_checks_total` | counter | `keeper`, `verdict` | 같은 두 자리 |
 
-- `pass` 는 커밋을 부른 자리가 닫힌 variant 로 넘긴다. 값은 admission, durable, cleanup, program 발행, Keeper 직접 쓰기, Keeper 직접 지우기다.
-  커밋 함수가 이 인자를 필수로 받으면, 빠진 자리를 컴파일러가 잡는다.
-- `change` 는 서로 겹치지 않는 넷이다.
-  - `added`: 새 claim
-  - `absorbed`: 흡수로 빠진 fact
-  - `superseded`: 교정(`supersedes`)으로 빠진 fact
-  - `dropped`: 뒤를 잇는 claim 없이 지운 fact
-- `outcome` 은 forward 결과(conveyed·left·unjudged·unjudgeable)다. `decision` 은 원문 판정(mergeable·different_context·loses_knowledge·uncertain)이고, 판정이 없으면 `none` 이다.
+- `pass` 는 커밋을 부른 자리가 닫힌 variant 로 넘긴다. 값은 여덟이다.
+  - admission, durable, continuity, cleanup, program 발행
+  - Keeper 직접 쓰기, Keeper 직접 지우기, 운영자 지우기
+- 저장소 커밋 함수가 `~pass` 를 필수로 받는다. 빠진 자리를 컴파일러가 잡는다(사용자 2026-11-10).
+  - 함수: `Keeper_memory_os_current` 의 `apply_disposition`·`apply_disposition_guarded`·`apply_program`·`upsert_fact`·`supersede_fact`·`retract_fact`·`retract_facts`
+  - runtime 이 커밋하는 durable·continuity·cleanup 은 `run_best_effort` 를 부르는 세 자리가 `~pass` 로 넘긴다.
+  - 운영자 지우기는 대시보드 기억 정리(`server_dashboard_http_keeper_memory_cleanup.ml` 의 `retract_facts`)다.
+  - main 에서 세면 lib 은 약 12곳, 시험은 22개 파일 99줄이 바뀐다. 시험은 `~pass` 만 넣는 기계적 커밋 하나로 따로 올린다.
+- `change` 는 서로 겹치지 않는 넷이다. ID 로 센다.
+  - `added`: 새 claim. 커밋 전에 없던 ID 다.
+  - `absorbed`: 흡수로 빠진 fact(`absorbed_applied`)
+  - `superseded`: 교정(`supersedes`)으로 빠진 fact(`revisions_applied`)
+  - `dropped`: 뒤를 잇는 claim 없이 빠진 나머지 fact. `invalidated` 도 여기에 든다.
+- ID 는 같고 내용만 바뀐 fact 는 `added`·`removed` 에 다 들어 있다. 이런 fact 는 넷 중 어디에도 세지 않는다.
+- 커밋이 `Unchanged` 면 세지 않는다. 그때 snapshot 의 `change` 는 앞선 커밋의 것이다.
+- `outcome` 은 forward 결과(conveyed·left·unjudged·unjudgeable)다. `decision` 은 원문 판정(mergeable·different_context·loses_knowledge·uncertain)이고, 판정이 없으면 `none` 이다. conveyed 의 판정은 늘 mergeable 이다.
 - `verdict` 는 reverse 판정(copy·carries_new_statement·not_judged)이다.
-- `slot` 은 답을 낸 레인 슬롯이다. 롤아웃에서 슬롯끼리 mergeable 비율을 견준다.
-  게이트 결과를 받는 runtime 은 이미 슬롯을 안다(`lib/keeper/keeper_librarian_runtime.ml:2176` 의 `selected_slot`). 게이트 안 로그 자리까지 그 값이 오는지는 F1 PR 이 확인한다.
+- 흡수 게이트 판정은 두 자리에서 끝난다(`lib/keeper/keeper_librarian_absorb_gate.ml`, 사용자 2026-11-10).
+  - runtime 경로는 `run_resolved` 에서 끝난다. 지금 판정 로그는 여기에만 있다.
+  - admission·durable·floor 는 캡처를 이어 받는 길(`continue_captured`, `restore`)이라 `restore_with` 에서 끝난다. 이 길은 로그를 남기지 않는다.
+  - 두 자리가 같은 셈 함수를 부른다.
+- 슬롯 라벨은 두지 않는다. 캡처를 이어 받는 길은 답한 레인 슬롯을 모른다.
+  롤아웃은 올리기 전·후 시간 창으로 견준다. 슬롯별로 나눠야 하면 exact 요청 기록과 맞춰 따로 본다.
 
-건강 행은 schema `keeper.memory_os.current_health.v10` 으로 올린다(지금 v9, `lib/server/server_dashboard_http_keeper_memory_health.ml:772`).
+건강 행은 schema `keeper.memory_os.current_health.v14` 로 올린다(지금 v13, `lib/server/server_dashboard_http_keeper_memory_health.ml` 의 `schema`).
 
 - 서버가 뜬 뒤의 셈을 Keeper 마다 `pass` × `change` 로 싣는다. 위 counter 와 같은 값이다.
-- 크기 추이를 싣는다. journal 의 커밋마다 `retained + added` 가 그 커밋 뒤의 fact 수다. 기록 시각과 같이 싣는다.
-  journal 에는 F1 이전 커밋도 있다. 그래서 롤아웃 전 기준선을 따로 모으지 않는다.
+- 크기 추이를 싣는다. journal 의 커밋마다 `retained + added` 가 그 커밋 뒤의 fact 수다.
+  - 건강 행이 이미 쓰는 `Keeper_memory_journal_outcome` 의 접기에서 같이 모은다.
+  - `unchanged` 행은 남긴 snapshot 의 `change` 를 되풀이한다. 그 행의 fact 수는 맞지만, `added` 를 새 claim 으로 더하지 않는다.
+  - 한 시간마다 그 시간 마지막 커밋 뒤의 fact 수를 기록 시각과 같이 싣는다. 최근 168시간(7일)만 싣는다. 롤아웃 앞뒤 24시간을 넉넉히 덮는 길이다.
+  - journal 에는 F1 이전 커밋도 있다. 그래서 롤아웃 전 기준선을 따로 모으지 않는다.
 - 지금 칸(fact 수, 바이트, 마지막 커밋의 `added`·`removed`)은 그대로 둔다.
+- schema 를 올리면 서버와 TUI 디코더(`lib/tui_decode_memory_health.ml`), 대시보드(`dashboard/src/api/dashboard-misc.ts`), 그 시험들이 같이 바뀐다. 이 층은 9개 파일이다.
 
 지키는 것:
 
@@ -196,7 +213,7 @@ F1 만으로는 아무것도 고쳐지지 않는다. 지우기가 보여도 틀�
 | 층 | 무엇 | 어디 |
 | --- | --- | --- |
 | H | 계약 안 라벨(#50290), 남는 기억 채점(#50325), 합침 판정, GLM 호출기와 `--template`, 교사 필터, 게이트 재고정 | T 스택 `scripts/tinker/librarian/` |
-| F1 | 지표 다섯, 건강 행 v10, 기능 시험 하나 | main 위 별도 스택. OCaml PR 하나 |
+| F1 | 지표 다섯, 커밋 함수의 필수 `pass`, 건강 행 v14, 기능 시험 하나 | main 위 별도 스택. 지표 이름, 셈 모듈, 부르는 자리, 시험의 `~pass`, 크기 추이, schema 순서로 층을 나눈다 |
 | P | 프롬프트 정리안, 고정 기준, 두 모델의 근거 묶음 | main 위 별도 스택 |
 | §7 | 사용자가 고른 것 | 고른 뒤 각각 |
 

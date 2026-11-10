@@ -3,7 +3,7 @@ rfc: "0498"
 title: "settled 보관 위치는 살아 있는 기록이 가리키는 표시만 남기고, 본문과 원본 없는 Exact 기록은 지운다"
 status: Draft
 created: 2026-11-06
-updated: 2026-11-06
+updated: 2026-11-10
 author: claude
 supersedes: []
 superseded_by: null
@@ -146,7 +146,10 @@ type owner_family =
   | Completion_review | Goal_proof_review
 ```
 
-- `Lane_addon_tool_request_owner.settle` 은 `family` 를 받는다. 부르는 곳은 `Librarian_admission`(RFC-0500), `Librarian_history`, `Librarian_floor`, `Workspace_curator` 다. 새 호출처나 새 owner 는 이 타입에 항목을 더해야 컴파일된다.
+- 이 타입은 `Server_tool_request_consumer` 에 있다. 시작 pass 와 설치 전 검사(`deployment_preflight_helper` 의 `validate_tool_request`)가 같은 타입을 와일드카드 없이 match 한다. 그래서 설치 전 검사가 받는 scope 는 pass 도 분류한다.
+  - 타입에 없는 owner 가 살아 있는 기록을 남기면 설치 전 검사가 배포를 멈춘다. 타입에 항목을 더하면 두 match 가 그 항목의 답을 적어야 컴파일된다.
+  - scope 하나에 기록을 다 두는 owner 는 넷이다. Curator, 두 review, Candle appraiser(`candle-appraisals`)다. Librarian 기록의 종류는 아래처럼 `purpose` 가 정한다.
+  - settle 을 부르는 owner 는 Librarian 과 Curator 다. Candle appraiser 는 settle 하지 않고 보관 위치도 읽지 않는다. 그래서 두 review 처럼 progress 이벤트의 ID 만 답한다.
 - 두 review 항목은 settle 하지 않는다. 그래서 보관 위치에 그 owner 의 기록이 없고, 답은 빈 집합이다. 구현 층은 그 기록이 다른 owner 의 요청 ID 를 담지 않는지 확인한다(§7).
 - 각 항목은 살아 있는 기록 하나가 담은 원본 ID 를 모두 답한다. §3.2 의 표보다 넓다. 마저 끝내기가 묻는 ID 만이 아니라, `Lane_addon_request_progress` 의 이벤트 중 요청 ID 를 담는 것(`Preparation_intended`, `Replacement_intended`, `Successor_intended`, `Subdividing`, `Subdivided` 등)과 gate inventory 의 execution ID 를 모두 넣는다. 모든 phase 와 이벤트를 와일드카드 없이 match 한다. 그래서 새 이벤트가 생기면 컴파일러가 이 답을 고치게 한다.
 - 한 항목 안에 기록 종류가 여럿 있다. 11-06 에 Librarian 기록을 아래 종류로 다시 셌다.
@@ -262,3 +265,4 @@ barrier 는 2·3 동안만 잡는다. 1 은 실행 증명을 통째로 읽어서
   - P3: `Undecided` 를 못 읽음 규칙에 묶었다. Exact 기록은 파일 이름만 맞댄다. 거절이 다시 쓰는 작은 기록의 반복을 L1 에서 센다(§7).
 - 2026-11-06 둘째 자체 확인: 1층을 짜려고 기록을 종류별로 다시 셌다. `admit_memory` 한 (package, tool) 에 실행·gate·part 세 종류가 있다. 보관 위치의 절반(6,053개)은 history gate 다. 그래서 항목을 기록 종류로 정하고, 답을 종류마다의 decoder 로 꺼내게 §4.2 를 고쳤다. 배포 전 검사의 validator 는 고아 gate 에서 오류가 나서 쓰지 않는다.
 - 2026-11-06 자체 확인: §4.2 의 닫힌 타입이 settle 호출처 셋만 적어서, "어느 항목에도 속하지 않는 scope 면 지우지 않는다" 규칙대로라면 pass 가 매번 멈췄다. 살아 있는 scope 에 admission·두 review owner 가 있기 때문이다. 타입을 살아 있는 owner 다섯 종류로 넓혔다. RFC-0500 1층이 admission 을 넷째 settle 호출처로 더하는 것도 같이 적었다.
+- 2026-11-10 운영 확인: 11-09 09:57Z 기동부터 열한 번, pass 가 "a live record is in a scope no owner claims" 로 아무것도 지우지 않았다. 살아 있는 `candle-appraisals` 기록 13개가 pass 의 분류표에 없었다. 설치 전 검사는 같은 일을 하는 표를 따로 두었고 그 표에는 Candle 이 있었다(#49635). 두 표를 `Server_tool_request_consumer` 하나로 합치고 §4.2 를 그렇게 고쳤다(#48946).

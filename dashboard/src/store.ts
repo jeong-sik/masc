@@ -40,11 +40,11 @@ import { isAbortError } from './lib/async-state'
 import { normalizeKeepers } from './keeper-store-normalize'
 import { setArrayByKeyIfChanged } from './signal-utils'
 import { FetchScheduler } from './lib/fetch-scheduler'
-import { WARM_MAX_RETRIES, warmRetryDelayFor } from './lib/warm-retry'
+import { createReadRecovery } from './lib/read-recovery'
+import { ObservationPending, retainObservationReadFailure, setupObservationRefresh } from './lib/observation-refresh'
 import { isRecord, asString, asNumber } from './components/common/normalize'
 import { currentCanonicalDashboardActor, managedCredentialNeedsRevalidation, managedDashboardRefusal, setCanonicalDashboardActor } from './lib/dashboard-session-actor'
 import { sanitizeDashboardActorName } from './lib/dashboard-actor'
-import { ObservationPending, setupObservationRefresh } from './lib/observation-refresh'
 import {
   captureDashboardObservationOwner,
   dashboardObservationOwnerIsCurrent,
@@ -52,13 +52,14 @@ import {
 } from './lib/observation-read-owner'
 import {
   captureDashboardCredentialOwner,
+  ApiRequestError,
   dashboardCredentialOwnerIsCurrent,
   getStoredTokenMeta,
   type DashboardCredentialOwner,
 } from './api/core'
 import { recoverFromRejectedCredential } from './api/dev-token'
 import { timeBoardRequest } from './board-metrics'
-import { namespaceTruth, namespaceTruthError, namespaceTruthInitializing } from './namespace-truth-signals'
+import { namespaceTruth, namespaceTruthError, namespaceTruthInitializing, namespaceTruthReadRecovery } from './namespace-truth-signals'
 import { normalizeNamespaceTruth } from './namespace-truth-normalizers'
 import {
   goalTreeData,
@@ -585,6 +586,7 @@ interface ShellRefreshFlight {
   stopAuthorityWatch: () => void
 }
 let inflightShellRefresh: ShellRefreshFlight | null = null
+const shellReadRecovery = createReadRecovery()
 let inflightWorkspaceMessagesRefresh: Promise<void> | null = null
 let inflightWorkspaceMessagesRefreshProject: string | null = null
 let workspaceMessagesRefreshController: AbortController | null = null
@@ -733,6 +735,7 @@ function hydrateDashboardBootstrap(
     namespaceTruth.value = normalized
     namespaceTruthError.value = null
     namespaceTruthInitializing.value = false
+    namespaceTruthReadRecovery.succeeded()
     serverStatus.value = mergeServerStatus(
       serverStatus.value,
       normalized.root.status ?? null,
@@ -990,6 +993,12 @@ export function hydrateShellSnapshot(
   }
   const admitted = !staleOwner && (opts.preserveAuth === true || applyAuth)
   lastShellRefreshAt = admitted ? Date.now() : 0
+  if (admitted) {
+    const status: unknown = data.status
+    if (status === 'initializing' || (isRecord(status) && status.project === 'initializing')) {
+      shellReadRecovery.waiting(() => { void refreshShell({ light: wantsLight, force: true }) })
+    } else shellReadRecovery.succeeded()
+  }
   return admitted
 }
 
@@ -1054,6 +1063,7 @@ export async function readShell(opts?: RefreshOptions & { recoverAuth?: boolean;
     stopAuthorityWatch: () => {},
   }
   inflightShellRefresh = flight
+  shellReadRecovery.started()
   const authOwner = captureDashboardCredentialOwner()
   const requestOwner = captureDashboardObservationOwner()
   const stopAuthorityWatch = subscribeDashboardObservationOwnerChanges(() => retireShellRefresh(flight))
@@ -1078,6 +1088,8 @@ export async function readShell(opts?: RefreshOptions & { recoverAuth?: boolean;
       // may retire strict hydration authority while the request headers stay
       // the same; keep that original refusal and its retry policy intact.
       shellAuthSummary.value = null
+      shellReadRecovery.failed(() => { void refreshShell({ light: wantsLight, force: true }) },
+        !(err instanceof ApiRequestError && (err.status === 401 || err.status === 403)))
       showToast('서버 연결 실패 — 데이터를 불러올 수 없습니다', 'error', 6000)
       console.warn('[Dashboard] shell fetch error:', err)
       return { kind: 'failed', cause: err }
@@ -1099,7 +1111,7 @@ export async function refreshShell(opts?: RefreshOptions & { recoverAuth?: boole
 export function setupShellObservation(): () => void {
   return setupObservationRefresh(async signal => {
     const outcome = await readShell({ force: true, signal })
-    if (outcome.kind === 'failed') throw outcome.cause
+    if (outcome.kind === 'failed') throw retainObservationReadFailure(outcome.cause)
     if (outcome.kind === 'cancelled') throw new ObservationPending('Shell observation is pending')
   }, {
     topics: ['runtime_resolved'], initial: false,
@@ -1331,6 +1343,7 @@ export function hydrateExecutionSnapshot(
     .filter((row): row is DashboardExecutionContinuityBrief => row !== null)
   setArrayByKeyIfChanged(executionContinuityBriefs, normalizedContinuityBriefs, c => c.name, stableValueEqual)
   executionLoaded.value = true
+  executionReadRecovery.succeeded()
   return true
 }
 
@@ -1344,27 +1357,13 @@ export function isInitializingExecutionPayload(data: DashboardExecutionResponse)
   return status === 'initializing' || (isRecord(status) && status.project === 'initializing')
 }
 
-let executionWarmRetryAttempt = 0
-let executionWarmRetryTimer: ReturnType<typeof setTimeout> | null = null
+const executionReadRecovery = createReadRecovery()
 
-function scheduleExecutionWarmRetry(): void {
-  executionWarmRetryAttempt += 1
-  if (executionWarmRetryAttempt > WARM_MAX_RETRIES) {
-    executionWarmRetryAttempt = 0
-    executionError.value = 'Server warm-up timed out. Try refreshing.'
-    return
-  }
-  const delayMs = warmRetryDelayFor(executionWarmRetryAttempt)
-  if (executionWarmRetryTimer) clearTimeout(executionWarmRetryTimer)
-  executionWarmRetryTimer = setTimeout(() => {
-    executionWarmRetryTimer = null
-    executionScheduler.requestNow()
-  }, delayMs)
-}
-
-class ExecutionRefreshUnavailable extends Error {}
+class ExecutionRefreshUnavailable extends ObservationPending {}
 
 async function doFetchExecution(): Promise<void> {
+  executionReadRecovery.started()
+  const authOwner = captureDashboardCredentialOwner()
   const force = nextExecutionForce
   nextExecutionForce = false
   const requestGeneration = executionSnapshotRequestGeneration()
@@ -1376,6 +1375,9 @@ async function doFetchExecution(): Promise<void> {
   try {
     const { fetchDashboardExecution } = await import('./api/dashboard-execution')
     const data = await fetchDashboardExecution({ force })
+    if (!dashboardCredentialOwnerIsCurrent(authOwner)) {
+      throw new ExecutionRefreshUnavailable('Execution credential was superseded by a newer observation')
+    }
     if (isInitializingExecutionPayload(data)) {
       if (requestGeneration !== executionHydrationRequestGeneration
         || requestEpoch !== executionPublicationEpoch
@@ -1385,29 +1387,31 @@ async function doFetchExecution(): Promise<void> {
       }
       acceptedExecutionWorkspace.value = null
       candleObservation.value = { status: 'unavailable', reason: 'Server is initializing' }
-      scheduleExecutionWarmRetry()
+      executionReadRecovery.waiting(() => { void executionScheduler.requestNow() })
       throw new ExecutionRefreshUnavailable('Execution projection is initializing')
     }
-    executionWarmRetryAttempt = 0
     if (!hydrateExecutionSnapshot(data, { requestGeneration })) {
       throw new ExecutionRefreshUnavailable('Execution response was superseded by a newer observation')
     }
   } catch (err) {
-    // Initializing keeps its existing warm retry; superseded reads cannot
+    // Initializing awaits its producer; superseded reads cannot
     // overwrite the newer accepted authority or turn into successful refresh.
     if (err instanceof ExecutionRefreshUnavailable) throw err
     if (requestGeneration !== executionHydrationRequestGeneration
       || requestEpoch !== executionPublicationEpoch
       || requestPublicationGeneration !== executionPublicationGenerationWatermark
-      || requestCandleSequence !== candleObservationSequenceWatermark) {
+      || requestCandleSequence !== candleObservationSequenceWatermark
+      || !dashboardCredentialOwnerIsCurrent(authOwner)) {
       throw new ExecutionRefreshUnavailable('Execution failure was superseded by a newer observation')
     }
     console.warn('[Dashboard] execution fetch error:', err)
     acceptedExecutionWorkspace.value = null
     executionError.value = errorMessageOr(err, 'Execution projection load failed')
     candleObservation.value = { status: 'unavailable', reason: executionError.value }
+    executionReadRecovery.failed(() => { void executionScheduler.requestNow() },
+      !(err instanceof ApiRequestError && (err.status === 401 || err.status === 403)))
     showToast('실행 데이터 로드 실패', 'error', 5000)
-    throw err
+    throw retainObservationReadFailure(err)
   } finally {
     executionLoading.value = false
   }
@@ -1417,6 +1421,20 @@ const executionScheduler = new FetchScheduler(doFetchExecution, {
   cooldownMs: 2_000,
   debounceMs: 300,
 })
+
+export function recoverExecutionReadDebt(authorityChanged = false): void {
+  executionReadRecovery.recover(authorityChanged)
+}
+
+export function recoverShellReadDebt(authorityChanged = false): void {
+  shellReadRecovery.recover(authorityChanged)
+}
+
+export function disposeExecutionReadRecovery(): void {
+  executionReadRecovery.dispose()
+  shellReadRecovery.dispose()
+  executionScheduler.dispose()
+}
 
 export function refreshExecution(opts?: RefreshOptions): Promise<void> {
   if (opts?.force) {

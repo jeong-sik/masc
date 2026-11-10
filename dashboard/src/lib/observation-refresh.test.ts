@@ -9,6 +9,7 @@ import {
   selectObservationReadFailure,
   setupObservationRefresh,
   ObservationPending,
+  retainObservationReadFailure,
 } from './observation-refresh'
 
 const disposers: Array<() => void> = []
@@ -32,9 +33,12 @@ afterEach(() => {
 })
 
 describe('authoritative observation reads', () => {
-  it('waits for a pending producer without creating a retry timer', async () => {
+  it.each([
+    () => new ObservationPending('projection is initializing'),
+    () => retainObservationReadFailure(new Error('store owns failed read debt')),
+  ])('waits for its producer or store recovery without a duplicate retry timer', async failure => {
     vi.useFakeTimers()
-    const read = vi.fn(async () => { throw new ObservationPending('producer is pending') })
+    const read = vi.fn(async () => { throw failure() })
     disposers.push(setupObservationRefresh(read, { topics: ['keeper_composite'] }))
     await flush()
     await vi.advanceTimersByTimeAsync(300_000)

@@ -93,15 +93,13 @@ let check_commit ~commit ~pass ~expected write =
   snapshot
 ;;
 
-(* One stage of an ordered program: the exact facts it starts from and its
-   decision. *)
+(* One program stage: the exact facts it starts from and its decision. *)
 let stage ~input ?(dropped = []) ?(absorbed = []) ?(revisions = []) new_claims =
   input, new_claims, dropped, absorbed, revisions
 ;;
 
 (* Build an ordered program over [current], one message per stage, like the
-   ordered recall programs of test_keeper_memory_os_current, and commit it
-   with [apply]. *)
+   recall programs of test_keeper_memory_os_current, and commit it. *)
 let publish_program ~keepers_dir ~transaction_id ~current ~apply stages =
   let anchor = Current.capture_program_anchor ~keepers_dir ~keeper_id |> require_ok in
   let program_keeper = Masc_test_deps.keeper_id_fixture keeper_id in
@@ -189,43 +187,47 @@ let test_a_commit_counts_its_changes_under_its_pass () =
      |> require_ok)
       .snapshot
   in
-  (* A program of two stages, counted once from its first facts to its last.
-     The first stage absorbs [successor] into [combined], [spare] into
-     [folded], revises [merged] into [refined] and adds [staged]. The second
-     drops [refined] and [folded] and revises [staged] and [kept]. So
-     [successor] was absorbed and [kept] superseded, [merged] and [spare] went
-     into claims that did not last and were dropped, and [staged] never
-     reached a committed snapshot. *)
+  (* A program of three stages, counted once from its first facts to its
+     last by following each chain. Stage 0 absorbs [successor] into
+     [combined] and [spare] into [folded], revises [merged] into [refined] and
+     adds [staged]. Stage 1 revises [refined] into [polished], [folded] into
+     [pressed], [staged] into [restated] and [kept] into [clarified]. Stage 2
+     drops [pressed]. So [successor] was absorbed, [merged] (through
+     [refined]) and [kept] were superseded, [spare] ended in a dropped claim,
+     and [staged] never reached a committed snapshot. *)
   let refined = fact "refined claim"
+  and polished = fact "polished claim"
   and combined = fact "combined claim"
   and folded = fact "folded claim"
+  and pressed = fact "pressed claim"
   and staged = fact "staged claim"
   and restated = fact "restated claim"
   and clarified = fact "clarified claim" in
   let held = List.filter (fun (value : Types.fact) -> String.equal (id value) (id kept)) disposed.facts in
+  let replaced = "a later claim replaces it" in
   let published =
-    check_commit ~commit:"a two-stage program" ~pass:"continuity" ~expected:[ 3; 1; 1; 2 ]
+    check_commit ~commit:"a three-stage program" ~pass:"continuity" ~expected:[ 4; 1; 2; 1 ]
     @@ fun () ->
     (publish_program ~keepers_dir ~transaction_id:"change-metrics-program" ~current:disposed.facts
        ~apply:(fun ~anchor ~source program ->
          Current.apply_program ~pass:Pass.Continuity ~keepers_dir ~keeper_id ~now:300.0 ~anchor ~source
            ~validate_source:(fun () -> Ok ()) program)
-       [ stage ~input:disposed.facts ~dropped:[ drop merged "the refinement restates it" ]
+       [ stage ~input:disposed.facts ~dropped:[ drop merged replaced ]
            ~absorbed:[ absorb successor combined; absorb spare folded ] ~revisions:[ revision merged refined ]
            [ refined; combined; folded; staged ]
        ; stage ~input:(held @ [ refined; combined; folded; staged ])
-           ~dropped:
-             [ drop refined "no longer true"; drop folded "no longer true"
-             ; drop staged "the restatement replaces it"; drop kept "the clarification replaces it"
-             ]
-           ~revisions:[ revision staged restated; revision kept clarified ]
-           [ restated; clarified ]
+           ~dropped:[ drop refined replaced; drop folded replaced; drop staged replaced; drop kept replaced ]
+           ~revisions:
+             [ revision refined polished; revision folded pressed; revision staged restated; revision kept clarified ]
+           [ polished; pressed; restated; clarified ]
+       ; stage ~input:[ combined; polished; pressed; restated; clarified ]
+           ~dropped:[ drop pressed "no longer true" ] []
        ]
      |> require_ok)
       .snapshot
   in
   check (list string) "the program leaves only the claims its last stage kept"
-    (List.sort String.compare [ combined.claim; restated.claim; clarified.claim ])
+    (List.sort String.compare [ combined.claim; polished.claim; restated.claim; clarified.claim ])
     (claims published);
   (* The rename of this program's snapshot returns, but the directory sync
      fails. The commit returns an error, yet its snapshot is the store's state

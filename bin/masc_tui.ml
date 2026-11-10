@@ -40190,6 +40190,9 @@ Use relative paths for resources already held in the package. -->
                 | Some scrolled ->
                     Masc_tui_scroll.page_step
                       ~height:(surface_body_height ~rows:(surface_rows state) scrolled))
+             else if state.view = Acting && Option.is_none state.acting_detail then
+               let terminal_rows, _ = get_terminal_size () in
+               Masc_tui_render_activity.acting_page_rows state ~terminal_rows
              else surface_page_rows state
            in
            let direction = if key = Some "pagedown" then 1 else -1 in

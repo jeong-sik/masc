@@ -590,7 +590,8 @@ let for_surface = function
          event, so the label was saying the surface's own subject back to the
          reader. The six cells it gives back are what lets [f] stay on the row
          beside it -- see the footer case in test_tui_keys. *)
-      ; b Act "Enter" "evidence" ~help:"Actions/Everything: exact selected event; Turns are aggregates"
+      ; b Act "Enter" "evidence" ~detail:List_only ~rows:Needs_reading
+          ~help:"Actions/Everything: exact selected event; Turns are aggregates"
       (* One key, one row. Esc closes the evidence pane when one is open
          (masc_tui.ml guards the close on acting_detail) and otherwise
          leaves the surface, so two rows read as two bindings. *)

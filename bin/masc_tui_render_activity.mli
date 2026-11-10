@@ -17,3 +17,8 @@ val render_keeper_calls :
 val render_acting :
   Masc_tui_types.state ->
   Masc_tui_frame_presenter.frame * Masc_tui_types.clamped_scroll option
+
+val acting_page_rows : Masc_tui_types.state -> terminal_rows:int -> int
+(** Page step of the activity list, using the same exceptional feed/replay
+    notices and body allocation as [render_acting]. Evidence keeps its
+    existing separate scroll domain. *)

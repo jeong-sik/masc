@@ -290,8 +290,9 @@ type system_log_column =
   | Log_message
 
 val system_log_layout : inner_width:int -> system_log_column Masc_tui_table.layout
-(** Keep time, level and message. Fold category, keeper and module in that
-    order when they would squeeze the message below its readable floor. *)
+(** Read message and severity first. Fold time, category, keeper and module
+    in that order before shrinking the message. The two retained columns
+    share the actual available width, including in a narrow frame. *)
 
 val system_log_header_row : layout:system_log_column Masc_tui_table.layout -> string
 val system_log_row :

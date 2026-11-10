@@ -590,3 +590,46 @@ This source change does not establish candidate rendering or installation.
 Runtime's separate narrow picker-prefix defect, Activity and both log sources,
 the other settings forms and failed/retained/uncertain outcomes remain in the
 full 6-family, 23-surface audit. No new key-reference output is claimed.
+
+## System Activity and Logs reading (source candidate, 2026-11-11)
+
+The matching `097b4c2d` native observation showed Activity's receipt clock and
+minimum-width Keeper/event columns consuming the 36x20 list before the event
+detail could be read. Server Logs similarly gave time and level priority over
+the message, and the heading's clock/HTTP strip displaced the selected source.
+Empty Turns still advertised individual event evidence. The preserved baseline
+is `artifacts/native-tui-proof-42808378032/observation/manual-coverage-system-activity-logs.json`;
+it does not execute this candidate, based on `90ec37b2`.
+
+Activity now reads the event sentence before its actual actor. Receipt time
+follows only when it leaves the content allocation intact; Actions/Everything
+still open the exact selected immutable event, including its original TUI
+receipt timestamp. Turns remain aggregates, without individual evidence.
+Normal live-feed/replay explanations no longer occupy body rows. Off, opening,
+closed and failed feeds, retained events, dropped/undecodable/unseen counts,
+replay uncertainty/reset/gaps/source loss and unavailable traces keep separate
+notice rows. The same notice projection sets the rendered body height and list
+PageUp/PageDown step. Existing flat selection, aggregate scrolling, follow and
+event attribution remain owned by their existing state.
+
+Logs lead with the original message and severity. Time and optional context
+columns fold before those two consume the actual narrow width. Server/This TUI
+stays in the heading; This TUI does not borrow server connection evidence.
+Exceptional server/workspace/read/source-loss notices remain bounded beside
+the identity. Full message, timestamp, category, Keeper/turn, module, producer
+source, owning source, exact sequence and structured details remain in the
+existing per-source detail reader. A retained failed read is qualified beside
+the original error, whose complete text is also in that reader.
+
+Activity's Enter footer follows a separate individual-reading predicate, rather
+than equating aggregate rows with readable event evidence. The canonical key
+binding gains only list/reading metadata; key/help text is unchanged and the
+reference producer does not consume that metadata. The generated key guide was
+not edited or regenerated. The existing detail-scope consumer list only gains
+Activity; no wording, layout, row-order or PTY assertions were added.
+
+Only OCaml 5.5.1 parsing and `git diff --check` have been performed for this
+candidate. Type checking, native rendering, wide/narrow page/resize interaction,
+failed/retained/uncertain source states, installation and GUI observation remain
+unverified. The full 6-family, 23-surface scope, including all children, forms
+and overlays, remains open.

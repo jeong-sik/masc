@@ -1532,22 +1532,10 @@ let evidence_fields (entry : entry) =
 
 (* ── The Activity table's two measured columns ─────────────────────────── *)
 
-(* What every row spends before the columns below: the two leading cells, the
-   clock, the glyph, and the gap that brings each of the four fields. *)
-let table_fixed_cells = 15
+type columns = { keeper_cells : int; content_cells : int; show_clock : bool }
 
-(* What the two columns drew before they were measured. Neither goes under it,
-   so a narrow frame draws the table it drew yesterday. *)
-let keeper_minimum_cells = 16
-let label_minimum_cells = 16
-
-type columns = { keeper_cells : int; label_cells : int }
-
-(* What measuring reads: the two named columns and nothing else. A row is
-   more than this -- it carries the detail sentence the table's third column
-   draws -- and measuring every kept entry as a row spells that sentence for
-   entries the page never shows. [measured_of_event] builds this straight
-   from the event instead. *)
+(* Measuring needs the actor and label, without spelling the detail sentence
+   of every retained off-screen event. *)
 type measured = { measured_keeper : string; measured_label : string }
 
 let measured_of_row row =
@@ -1582,24 +1570,15 @@ let columns ~inner_width measures =
           max widest (drawn_cells text)))
       0 measures
   in
-  let keeper_needed =
-    max keeper_minimum_cells (widest (fun m -> m.measured_keeper))
-  in
-  let label_needed =
-    max label_minimum_cells (widest (fun m -> m.measured_label))
-  in
-  (* Detail is the column that carries sentences -- a tool name, a turn, a
-     cost -- so the two named ones together take at most half of what the
-     frame leaves. *)
-  let share =
-    max
-      (keeper_minimum_cells + label_minimum_cells)
-      (max 0 (inner_width - table_fixed_cells) / 2)
-  in
-  let keeper_cells =
-    max keeper_minimum_cells (min keeper_needed (share - label_minimum_cells))
-  in
-  let label_cells =
-    max label_minimum_cells (min label_needed (share - keeper_cells))
-  in
-  { keeper_cells; label_cells }
+  (* Two leading cells, a glyph, and the gaps before content and actor.
+     Content owns at least two thirds; receipt time uses only the space an
+     actor shorter than its allocation leaves behind. *)
+  let available = max 0 (inner_width - 5) in
+  let actor_budget = available / 3 in
+  let keeper_needed = max (drawn_cells "ACTOR") (widest (fun m -> m.measured_keeper)) in
+  let keeper_cells = min keeper_needed actor_budget in
+  let clock_cells = drawn_cells "00:00:00" + 1 in
+  let content_floor = max (available - actor_budget) (widest (fun m -> m.measured_label)) in
+  let show_clock = available - keeper_cells - clock_cells >= content_floor in
+  let content_cells = available - keeper_cells - (if show_clock then clock_cells else 0) in
+  { keeper_cells; content_cells; show_clock }

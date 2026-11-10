@@ -52,7 +52,10 @@ let list_footer_refusals =
 
 (* Surfaces that draw their two states from builders of their own, not from
    [Keys.footer_hints ~detail_open]. [scoped_keys] holds their rows. *)
-let builder_surfaces = [ ("Approvals", Masc_tui_types.Approvals) ]
+let builder_surfaces =
+  [ ("Approvals", Masc_tui_types.Approvals)
+  ; ("Acting", Masc_tui_types.Acting)
+  ]
 
 let test_each_list_footer_names_no_key_it_refuses () =
   List.iter

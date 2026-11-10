@@ -312,7 +312,7 @@ observations stay private in `artifacts/native-tui-proof-42732829605/`.
 This confirms those observed candidate views only, without proving production
 installation, the new navigation repair, or the remaining child/input states.
 
-## Tools catalog and volume reading
+## Tools catalog and volume reading (#50872)
 
 The catalog's long periodic volume report moves to an explicit child reading.
 The five Tools tabs remain unchanged. Catalog `V` captures its scroll position,

@@ -84,15 +84,13 @@ let save_vote_log_jsonl store content : (unit, board_error) Result.t =
     record_persist_error ~where:"save_vote_log_jsonl" msg;
     Error (Io_error (Printf.sprintf "save_vote_log_jsonl: %s" msg))
 
-(* Append before publishing a vote in memory. The vote-log gate precedes the
-   persistence lock; the primary posts gate shares that lock with the append.
-   Release persistence before the caller's fresh state-lock commit. *)
-let record_vote_side_effect store ~target ~voter ~direction ~ts
+(* The caller retains persistence through its fresh state publication, so a
+   snapshot cannot remove this row between append and memory commit. *)
+let append_admitted_vote store ~target ~voter ~direction ~ts
     : (unit, board_error) Result.t =
   let* () = require_persisted_snapshot_readable store.votes_load_result in
-  with_persist_lock store (fun () ->
-    let* () = require_posts_source_readable store in
-    append_vote_log store ~target ~voter ~direction ~ts)
+  let* () = require_posts_source_readable store in
+  append_vote_log store ~target ~voter ~direction ~ts
 
 let current_vote_for_post store ~voter ~post_id
     : (vote_direction option, board_error) Result.t =
@@ -111,13 +109,11 @@ let current_vote_for_post store ~voter ~post_id
           in
           Ok (Option.map fst (Hashtbl.find_opt store.vote_log vote_key)))
 
-(* Write-ahead: validate under [with_lock] with no mutation, append outside
-   the state lock under the persistence lock, then commit under [with_lock]
-   re-deciding the branch
-   from a fresh read (not the stale staged one) so a concurrent unrelated
-   post mutation is not clobbered and a same-key race is caught rather than
-   silently overwritten. If step 1 rejects or step 2's append fails, nothing
-   was ever mutated, so there is nothing to roll back. *)
+(* Write-ahead under one persistence interval: stage under the state lock,
+   append outside it, then publish under a fresh state lock. Snapshot writers
+   and other casts cannot pass the durable row before its memory publication.
+   A fresh read preserves unrelated state-only edits. Rejection or an append
+   failure occurs before any vote mutation, so nothing needs rollback. *)
 let vote store ~voter ~post_id ~direction : (int, board_error) Result.t =
   match Agent_id.of_string voter with
   | Error e -> Error e
@@ -126,6 +122,7 @@ let vote store ~voter ~post_id ~direction : (int, board_error) Result.t =
   match Post_id.of_string post_id with
   | Error e -> Error e
   | Ok pid ->
+      with_persist_lock store @@ fun () ->
       let post_key = Post_id.to_string pid in
       let vote_key =
         Board_vote_key.post ~post_id:pid ~voter:agent |> Board_vote_key.to_string
@@ -145,7 +142,7 @@ let vote store ~voter ~post_id ~direction : (int, board_error) Result.t =
       (match staged with
        | Error _ as e -> e
        | Ok ts ->
-         (match record_vote_side_effect store ~target:vote_key ~voter ~direction ~ts with
+         (match append_admitted_vote store ~target:vote_key ~voter ~direction ~ts with
           | Error _ as e -> e
           | Ok () ->
               with_lock store (fun () ->
@@ -155,12 +152,6 @@ let vote store ~voter ~post_id ~direction : (int, board_error) Result.t =
                   let previous = Option.map fst (Hashtbl.find_opt store.vote_log vote_key) in
                   match Board_vote_transition.decide ~previous ~direction with
                   | Board_vote_transition.Already_cast ->
-                      (* Another call for this exact voter+target committed
-                         first while our append was in flight. Our append is
-                         now an orphan row on disk; the winner's own
-                         [mark_dirty_post] schedules a [flush_dirty] snapshot
-                         rewrite from committed memory. This call does not
-                         clean up its appended row immediately. *)
                       Error (Already_voted (Printf.sprintf "%s already voted %s on %s"
                         voter (vote_direction_to_string direction) post_id))
                   | Board_vote_transition.Cast transition ->
@@ -215,6 +206,7 @@ let vote_comment store ~voter ~comment_id ~direction : (int, board_error) Result
   match Comment_id.of_string comment_id with
   | Error e -> Error e
   | Ok cid ->
+      with_persist_lock store @@ fun () ->
       let comment_key = Comment_id.to_string cid in
       let vote_key =
         Board_vote_key.comment ~comment_id:cid ~voter:agent |> Board_vote_key.to_string
@@ -234,7 +226,7 @@ let vote_comment store ~voter ~comment_id ~direction : (int, board_error) Result
       (match staged with
        | Error _ as e -> e
        | Ok ts ->
-         (match record_vote_side_effect store ~target:vote_key ~voter ~direction ~ts with
+         (match append_admitted_vote store ~target:vote_key ~voter ~direction ~ts with
           | Error _ as e -> e
           | Ok () ->
               with_lock store (fun () ->

@@ -1,0 +1,24 @@
+ KEEPERS 36    cause  time  memory  age │  runtime  24h              13:30:33
+ !2 ▫▫  ✓20 ▪▪▪▪▪▪▪▪▪▪▪▪▪▪▪▪▪▪▪▪  ○14 ··············
+    fleet max 20       ▂▂▂▆▅▃·█▁▃▁▁▃·· ┃              ┃ █▆·▂···▂·▃·▁·▂▁▁ max 8
+──────────────────────────────────────────────────────────────────────────────
+    keeper             ◂ turns 7.5h30m ┃ librarian    ┃ lag ▹            diges
+▌ ■ world · shared     ledger + briefi ┃ ◌ building   ┃ █·····465 absent 10m
+▌ − gap · requests skip atoms          ┃ 17           ┃ Σ lag 1572
+▌ ● keeper-08-alphax   ··········▁▁▄▁▁ ┃  pending     ┃ ████████████████ 2d
+▌ ● keeper-02-alp      ▄▁▁▁▄··▄▁▁▁▁▁▁▁ ┃  pending     ┃ ████████········ 79m
+▌ ● k29-ag             ··▁▁█··█·▄▁▁▁▁· ┃  pending     ┃ ███████········· 17h
+▌ ● keeper-23-al       ···▄▁█·█▁▁▁▁▁▁· ┃  pending     ┃ ████············ 27h
+▌ ● keeper-22-alpha    ██████·█▁▄▄▁▁▁▁ ┃  pending     ┃ █··············· 33h
+▌ ● keeper-21-alpha-b… ▁▁▁███·█▁▁·▁▄▁· ┃  pending     ┃ ████████████···· 2d
+▌ ○ keeper-15-alp      ··············· ┃  pending     ┃ ██████·········· 36h
+▌ ● keeper-34-a        ▁▁▁▁█··▄▁▁·▁▄·· ┃  pending     ┃ ████████········ 37h
+▌ ● keeper-32          ···█···█···▁▁▁· ┃  pending     ┃ ████████········ 32h
+▌ ● keeper-35-alpha    ▁▁▁█···▄▁▁·▁▄▁· ┃  pending     ┃ ██████████······ 41h
+▌ ● keeper-16-alpha-b… ▁▁▁█···█▁▁·▁▁▁· ┃  pending     ┃ ██████·········· 37h
+▌ ● keeper-07-alpha-b… ▁▁▁█···▄▁·▁··▁· ┃  pending     ┃ ██·············· 20h
+▌ ○ keeper-03-alpha-b… ··············· ┃  pending     ┃ █··············· 20h
+▌ ○ keeper-05-alpha-b… ··············· ┃  pending     ┃ █··············· 79m
+──────────────────────────────────────────────────────────────────────────────
+ world · shared  ◌ briefing building  465 keeper facts absent from the ledger
+ ↑↓ move ←→ fold [ ] group ⏎ story o lens n color t theme f/r sim x reset

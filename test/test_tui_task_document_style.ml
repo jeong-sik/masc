@@ -61,7 +61,7 @@ let task ~title ~created_by ~status : Masc_domain.task =
   }
 
 let body_rows ~cols task =
-  Document.prepare (Document.body ~cols ~goals:(Document.Membership [ "goal-1" ]) task)
+  Document.prepare (Document.body ~ko:false ~cols ~goals:(Document.Membership [ "goal-1" ]) task)
 
 let contains ~affix text =
   let affix_length = String.length affix in
@@ -101,7 +101,19 @@ let event ~note : Masc.Tui_decode.task_history_event =
 
 let history_rows ~cols notes =
   Document.prepare
-    (Document.history ~cols (List.map (fun note -> event ~note) notes))
+    (Document.history ~ko:false ~cols (List.map (fun note -> event ~note) notes))
+
+let test_document_identity_includes_language () =
+  let source = task ~title:"Original request" ~created_by:None ~status:todo in
+  let body ko = Document.body ~ko ~cols:72 ~goals:Document.Unread source in
+  check bool "same immutable source and language can reuse preparation" true
+    (Document.equal_input (body false) (body false));
+  check bool "a language change withdraws body reuse" false
+    (Document.equal_input (body false) (body true));
+  let events = [event ~note:None] in
+  let history ko = Document.history ~ko ~cols:72 events in
+  check bool "a language change withdraws history reuse" false
+    (Document.equal_input (history false) (history true))
 
 (* Within one row every style that opens is reset before the row ends. *)
 let check_every_style_closes_in_its_row rows =
@@ -152,7 +164,8 @@ let test_note_text_cannot_put_a_style_on_a_history_row () =
 
 let () =
   run "tui task document style"
-    [ ( "style"
+    [ ("identity", [test_case "language binds prepared documents" `Quick test_document_identity_includes_language])
+    ; ( "style"
       , [ test_case "task text cannot put a style on a row" `Quick
             test_task_text_cannot_put_a_style_on_a_row
         ; test_case "note text cannot put a style on a history row" `Quick

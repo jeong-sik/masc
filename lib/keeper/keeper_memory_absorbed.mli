@@ -26,6 +26,8 @@ type record =
 
 val path_for_keepers_dir : keepers_dir:string -> keeper_id:string -> string
 
+val suffix : string
+
 (** {1 Codec} *)
 
 val record_to_json : record -> Yojson.Safe.t

@@ -81,6 +81,8 @@ val acknowledge_committed :
     pending is empty. *)
 
 val path : keepers_dir:string -> keeper_id:string -> string
+
+val suffix : string
 val list_keeper_ids : keepers_dir:string -> (string list, string) result
 
 module For_testing : sig

@@ -38,13 +38,17 @@ val is_current : owner -> bool
 val begin_attempt : owner -> origin:origin -> attempt
 val publish_success : attempt -> Dashboard_briefing.observation -> bool
 val publish_failure_message : attempt -> string -> bool
-(** Completion admits only the captured scope/generation and ordered attempt.
+(** Completion admits only the captured scope and ordered attempt.
     A successful attempt cannot later degrade its own result when the outer
-    timeout window also closes. Callback failures never change this decision. *)
+    timeout window also closes. A source notification during an actual read
+    preserves trailing read debt, but does not discard that read's completed
+    observation. Generation fences prepared publications; it does not claim
+    an atomic read of every source. Callback failures cannot change admission. *)
 
 val invalidate : owner -> unit
-(** Advance source admission and retain the last-good rows. Invalidated work
-    still owes an actual read; it does not turn into a fresh observation. *)
+(** Fence already prepared publications and notify read debt, retaining the
+    last-good rows. A read completing after this notice may publish its actual
+    observation while the worker retains one coalesced trailing read. *)
 
 val next_deadline_unix : owner -> float option
 val subscribe_completed : owner -> (completion -> unit) -> (unit -> unit)
@@ -56,8 +60,8 @@ val publication : owner -> publication
 
 val publication_is_current : owner -> publication -> bool
 val publication_status : owner -> publication -> publication_status
-(** Superseded cache preparation retains bounded publication debt; only the
-    current owner generation still awaiting its read is [Source_pending]. An
+(** Superseded cache preparation retains bounded publication debt; only an
+    input frontier with no subsequent read completion is [Source_pending]. An
     older preparation becomes [Superseded] once the current read completes.
     This distinction prevents both a lost first completion after a cancelled
     request's attempt stamp and a busy publisher during a long source read. *)

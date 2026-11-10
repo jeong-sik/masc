@@ -319,12 +319,7 @@ let test_close_rejects_self_as_successor () =
    with a message naming the cap and pointing at opening a successor
    post, the same shape the closed-post refusal uses but for size instead
    of an explicit close. *)
-let test_comment_past_the_cap_is_refused_with_successor_hint () =
-  let post =
-    create_post_exn ~author:"cap-thread-author" ~content:"fill me to the cap"
-  in
-  let post_id = Board.Post_id.to_string post.id in
-  let cap = Board.Limits.comment_count_cap in
+let fill_to_the_cap ~post_id =
   let rec fill n =
     if n = 0
     then ()
@@ -338,7 +333,15 @@ let test_comment_past_the_cap_is_refused_with_successor_hint () =
         Alcotest.failf "filler comment %d must succeed: %s" n
           (Board.show_board_error e))
   in
-  fill cap;
+  fill Board.Limits.comment_count_cap
+
+let test_comment_past_the_cap_is_refused_with_successor_hint () =
+  let post =
+    create_post_exn ~author:"cap-thread-author" ~content:"fill me to the cap"
+  in
+  let post_id = Board.Post_id.to_string post.id in
+  let cap = Board.Limits.comment_count_cap in
+  fill_to_the_cap ~post_id;
   (match
      Board_dispatch.add_comment ~post_id ~author:"latecomer"
        ~content:"one past the cap" ()
@@ -359,6 +362,160 @@ let test_comment_past_the_cap_is_refused_with_successor_hint () =
    | Error e -> Alcotest.fail (Board.show_board_error e));
   Alcotest.(check int) "reply_count frozen at the cap" cap
     (get_post_exn post_id).reply_count
+
+(* The same refusals through [masc_board_comment]. A full thread, a closed
+   thread and a body that names an unsupported broadcast selector refuse the
+   call the same way each time it is repeated, and the message names the way
+   on (the successor post, other text). They are workflow rejections. They
+   were reported as runtime failures, which told the model to report a fault
+   instead of correcting the call. *)
+let test_tool_answers_a_refused_comment_as_a_workflow_rejection () =
+  let comment ~post_id content =
+    Board_tool.handle_tool ~reader:Masc_board_handlers.Board_access.Operator
+      ~result_boundary:Tool_output.Sent_to_client "masc_board_comment"
+      (`Assoc
+        [ "post_id", `String post_id
+        ; "author", `String "latecomer"
+        ; "content", `String content
+        ])
+  in
+  let require_workflow_rejection ~label ~affix result =
+    match result with
+    | Tool_result.Failed
+        { Tool_result.class_ = Tool_result.Workflow_rejection; message; _ } ->
+      Alcotest.(check bool) (label ^ " names the way on") true
+        (Astring.String.is_infix ~affix message)
+    | Tool_result.Failed { Tool_result.class_; _ } ->
+      Alcotest.failf "%s: expected workflow_rejection, got %s" label
+        (Tool_result.tool_failure_class_to_string class_)
+    | Tool_result.Completed _ | Tool_result.Deferred _ ->
+      Alcotest.failf "%s must be refused" label
+  in
+  let full =
+    create_post_exn ~author:"cap-tool-author" ~content:"fill me to the cap"
+  in
+  let full_id = Board.Post_id.to_string full.id in
+  fill_to_the_cap ~post_id:full_id;
+  require_workflow_rejection ~label:"a comment past the cap" ~affix:"successor"
+    (comment ~post_id:full_id "one past the cap");
+  let closed =
+    create_post_exn ~author:"closed-tool-author" ~content:"no more replies"
+  in
+  let closed_id = Board.Post_id.to_string closed.id in
+  let successor =
+    create_post_exn ~author:"closed-tool-author" ~content:"continues here"
+  in
+  let successor_id = Board.Post_id.to_string successor.id in
+  (match
+     Board_votes.set_closed (store ()) ~post_id:closed_id
+       ~closed_by:"closed-tool-author"
+       ~successor:(Board.Successor successor_id)
+       ~summary:"moved to the successor" ()
+   with
+   | Ok () -> ()
+   | Error e -> Alcotest.fail (Board.show_board_error e));
+  require_workflow_rejection ~label:"a comment on a closed post"
+    ~affix:successor_id (comment ~post_id:closed_id "can I still reply?");
+  let open_post =
+    create_post_exn ~author:"selector-author" ~content:"an open thread"
+  in
+  require_workflow_rejection ~label:"a body with an unsupported selector"
+    ~affix:"@@deriving"
+    (comment ~post_id:(Board.Post_id.to_string open_post.id)
+       "type t = A [@@deriving show]")
+
+(* A close or reopen by someone who did not write the post reads the server's
+   moderator list. With a readable list that does not name the actor, the
+   call is refused and a different actor can succeed: a workflow rejection.
+   With a list the server cannot read, no change to the call helps and the
+   operator has to repair [runtime.toml]: a runtime failure. Every case runs
+   for close and reopen, and the message names the cause, so a failure of the
+   embedded default cannot stand in for a failure of the workspace file. *)
+let test_tool_reports_an_unreadable_moderator_list_as_a_runtime_failure () =
+  let write_runtime_toml content =
+    let path =
+      Config_dir_resolver.runtime_toml_path_for_base_path
+        ~base_path:(Env_config_core.base_path ())
+    in
+    Fs_compat.mkdir_p (Filename.dirname path);
+    Out_channel.with_open_bin path (fun oc -> output_string oc content)
+  in
+  let post =
+    create_post_exn ~author:"moderated-author" ~content:"a post to moderate"
+  in
+  let post_id = Board.Post_id.to_string post.id in
+  let call tool args =
+    Board_tool.handle_tool ~reader:Masc_board_handlers.Board_access.Operator
+      ~result_boundary:Tool_output.Sent_to_client tool (`Assoc args)
+  in
+  let close () =
+    call "masc_board_close"
+      [ "post_id", `String post_id
+      ; "closed_by", `String "outsider"
+      ; "summary", `String "no longer current"
+      ; "no_successor", `Bool true
+      ]
+  in
+  let reopen () =
+    call "masc_board_reopen"
+      [ "post_id", `String post_id; "reopened_by", `String "outsider" ]
+  in
+  let require_failure ~label ~expected_class ~affix result =
+    match result with
+    | Tool_result.Failed { Tool_result.class_; message; _ } ->
+      Alcotest.(check string) (label ^ " class") expected_class
+        (Tool_result.tool_failure_class_to_string class_);
+      Alcotest.(check bool) (label ^ " names " ^ affix) true
+        (Astring.String.is_infix ~affix message)
+    | Tool_result.Completed _ | Tool_result.Deferred _ ->
+      Alcotest.failf "%s must fail" label
+  in
+  write_runtime_toml "[board]\nmoderators = [\"a-moderator\"]\n";
+  require_failure ~label:"close by an actor the list does not name"
+    ~expected_class:"workflow_rejection"
+    ~affix:"not author or configured Board moderator" (close ());
+  require_failure ~label:"reopen by an actor the list does not name"
+    ~expected_class:"workflow_rejection"
+    ~affix:"not author or configured Board moderator" (reopen ());
+  List.iter
+    (fun (cause, toml, affix) ->
+       write_runtime_toml toml;
+       require_failure ~label:("close with " ^ cause)
+         ~expected_class:"runtime_failure" ~affix (close ());
+       require_failure ~label:("reopen with " ^ cause)
+         ~expected_class:"runtime_failure" ~affix (reopen ()))
+    [ "invalid TOML", "board = [\n", "runtime.toml is invalid TOML"
+    ; "a [board] that is not a table", "board = 1\n", "[board] must be a table"
+    ; ( "moderators that are not an array"
+      , "[board]\nmoderators = \"a-moderator\"\n"
+      , "moderators must be an array of keeper names" )
+    ; ( "a moderator name that is not a keeper name"
+      , "[board]\nmoderators = [\"not a keeper\"]\n"
+      , "moderators contains an invalid keeper name" )
+    ]
+
+(* Which refusals tell the model to correct the call and which tell it to
+   report a fault. [Validation_error] sat with the faults, so a comment on a
+   full thread came back as "the tool failed inside the runtime, not on your
+   arguments" while its message said to open a successor post. *)
+let test_board_error_failure_class () =
+  let class_of error =
+    Tool_result.tool_failure_class_to_string
+      (Board_tool_format.board_error_failure_class error)
+  in
+  List.iter
+    (fun (label, error, expected) ->
+       Alcotest.(check string) label expected (class_of error))
+    [ "invalid_id", Board.Invalid_id "x", "workflow_rejection"
+    ; "post_not_found", Board.Post_not_found "x", "workflow_rejection"
+    ; "comment_not_found", Board.Comment_not_found "x", "workflow_rejection"
+    ; "unauthorized", Board.Unauthorized "x", "workflow_rejection"
+    ; "validation_error", Board.Validation_error "x", "workflow_rejection"
+    ; "io_error", Board.Io_error "x", "runtime_failure"
+    ; "recipient_lookup_failed", Board.Recipient_lookup_failed "x", "runtime_failure"
+    ; "already_voted", Board.Already_voted "x", "runtime_failure"
+    ; "already_exists", Board.Already_exists "x", "runtime_failure"
+    ]
 
 (* Ruling on issuecomment-5858752752 (wool-nova FAIL 5858744915): the
    non-positive cap opt-out must not be silent. The pure decider warns for
@@ -435,10 +592,21 @@ let () =
             "comment past the cap is refused with the successor hint" `Quick
             (with_eio test_comment_past_the_cap_is_refused_with_successor_hint)
         ; Alcotest.test_case
+            "tool answers a refused comment as a workflow rejection" `Quick
+            (with_eio test_tool_answers_a_refused_comment_as_a_workflow_rejection)
+        ; Alcotest.test_case
+            "tool reports an unreadable moderator list as a runtime failure" `Quick
+            (with_eio test_tool_reports_an_unreadable_moderator_list_as_a_runtime_failure)
+        ; Alcotest.test_case
             "close rejects a blank summary" `Quick
             (with_eio test_close_rejects_blank_summary)
         ; Alcotest.test_case
             "cap warning message for the non-positive opt-out" `Quick
             test_cap_warning_message_decides_the_nonpositive_opt_out
+        ] )
+    ; ( "failure_class"
+      , [ Alcotest.test_case
+            "each board error has the class its recovery needs" `Quick
+            test_board_error_failure_class
         ] )
     ]

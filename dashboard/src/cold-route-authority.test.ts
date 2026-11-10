@@ -39,8 +39,6 @@ it.each(directRoutes)('obtains workspace authority on direct $tab/$params.sectio
   await vi.advanceTimersByTimeAsync(300)
   await vi.waitFor(() => expect(executionWorkspaceAuthority.peek()?.workspaceRoot).toBe('/fixture/workspace'))
   expect(fetch.mock.calls.filter(([path]) => path === '/api/v1/dashboard/execution')).toHaveLength(1)
-  const { dashboardSlicesForRoute } = await import('./dashboard-ws')
-  expect(dashboardSlicesForRoute(route)).toContain('execution')
 })
 
 it('keeps artifact access unverified when the execution response lacks a workspace', async () => {

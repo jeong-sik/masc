@@ -26,9 +26,9 @@ vi.mock('../../api/dashboard-scheduled-automation', () => ({
 vi.mock('../../sse-store', () => ({
   registerKeeperWaitingInventoryRefresh: vi.fn(() => vi.fn()),
 }))
-vi.mock('../../dashboard-ws-state', () => ({
-  dashboardWsReady: { value: true },
-  dashboardWsReconnectCount: {
+vi.mock('../../dashboard-observer-state', () => ({
+  dashboardObserverReady: { value: true },
+  dashboardObserverReconnectCount: {
     value: 0,
     subscribe: vi.fn(() => vi.fn()),
   },

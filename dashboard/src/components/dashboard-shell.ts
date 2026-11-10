@@ -12,11 +12,11 @@ import {
 } from '../api/dashboard-tools-prompts'
 import { hashForRoute, navigate, route } from '../router'
 import {
-  dashboardWsConnected,
-  dashboardWsLastDisconnectedAt,
-  dashboardWsReady,
-  dashboardWsReconnectCount,
-} from '../dashboard-ws-state'
+  dashboardObserverConnected,
+  dashboardObserverLastDisconnectedAt,
+  dashboardObserverReady,
+  dashboardObserverReconnectCount,
+} from '../dashboard-observer-state'
 import { isKeeperPaused } from '../lib/keeper-predicates'
 import { KEEPER_STATUS_LABEL_KO } from '../lib/keeper-operational-state'
 import { dashboardLoading, executionError, keepers, serverStatus, shellCounts, shellRuntimeResolution, tasksByStatus } from '../store'
@@ -128,25 +128,25 @@ function describeReconnecting(args: {
 }
 
 export function ConnectionStatus() {
-  const reconn = dashboardWsReconnectCount.value
+  const reconn = dashboardObserverReconnectCount.value
   const reconnecting = describeReconnecting({
-    disconnectedAt: dashboardWsLastDisconnectedAt.value,
+    disconnectedAt: dashboardObserverLastDisconnectedAt.value,
     now: Date.now(),
     reconnects: reconn,
   })
   const status = (() => {
-    if (dashboardWsReady.value) {
+    if (dashboardObserverReady.value) {
       return {
         tone: 'ok' as const,
         label: reconn > 0 ? 'Reconnected' : 'Connected',
         title: reconn > 0 ? `Reconnect attempts ${reconn}` : '',
       }
     }
-    if (dashboardWsConnected.value) {
+    if (dashboardObserverConnected.value) {
       return {
         tone: 'warn' as const,
-        label: 'Connecting WS',
-        title: 'Client WS socket is open; waiting for dashboard/hello.',
+        label: 'Connecting SSE',
+        title: 'Client SSE is awaiting observer admission.',
       }
     }
     return {
@@ -607,7 +607,7 @@ export function DashboardHealthStrip({ hidden = false }: { hidden?: boolean }) {
     }, { topics: ['runtime_probe'], resetRead: () => { shellRuntimeProviderProbe.value = null; shellRuntimeProviderProbeError.value = null } })
   }, [])
 
-  const live = dashboardWsReady.value
+  const live = dashboardObserverReady.value
   // dashboardHealthChips does 2 keeper filter passes + resolveRuntimeCounts +
   // up to ~12 chip objects. The input object below is a fresh literal every
   // render, so memoizing on the object would always miss — instead list the
@@ -1112,7 +1112,7 @@ function SurfaceLead() {
 export function DashboardMain() {
   useSurfaceDocumentTitle()
 
-  if (dashboardLoading.value && !dashboardWsConnected.value && !namespaceTruthInitializing.value) {
+  if (dashboardLoading.value && !dashboardObserverConnected.value && !namespaceTruthInitializing.value) {
     return html`<${LoadingState}>Loading dashboard...<//>`
   }
 

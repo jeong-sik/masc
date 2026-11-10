@@ -2136,15 +2136,31 @@ let keeper_plain_headers (state : state) ~now ~cols ~inner ~selected_reading ~pu
   let badge = connection_badge state in
   let gap = max 1 (inner - Message_layout.display_width heading - Message_layout.display_width badge) in
   let warning prefix reason = Theme.warn () ^ "  " ^ prefix ^ Terminal_text.single_line reason ^ Ansi.reset in
-  let errors = List.filter_map Fun.id
-      [ Option.map (warning (text "목록: " "roster metadata: ")) state.keepers_error
-      ; Option.map (warning (text "실행 관측: " "live roster: ")) state.keeper_roster_error
-      ; Option.map (warning (text "턴 관측: " "turn observation: ")) state.keeper_turns_error
-      ; Option.map (warning (text "대기 목록: " "waiting inventory: ")) state.keeper_waiting_error
-      ; Option.map (warning (text "별도 실행: " "async observation: ")) state.tools_async_observation_error
-      ; Option.map (warning (text "승인 요청: " "approval reading: ")) state.keeper_tool_approvals_error
-      ; Option.map (warning (text "질문: " "questions: ")) state.asks_error
-      ]
+  (* One failing read at most names itself with its reason; several at once
+     fold into a single summary line. Either way the header grows by one line
+     instead of one per failure, so a burst of read errors cannot shove the
+     whole list up and down. *)
+  let errors =
+    let failing =
+      List.filter_map Fun.id
+        [ Option.map (fun e -> (text "목록" "roster metadata", e)) state.keepers_error
+        ; Option.map (fun e -> (text "실행 관측" "live roster", e)) state.keeper_roster_error
+        ; Option.map (fun e -> (text "턴 관측" "turn observation", e)) state.keeper_turns_error
+        ; Option.map (fun e -> (text "대기 목록" "waiting inventory", e)) state.keeper_waiting_error
+        ; Option.map (fun e -> (text "별도 실행" "async observation", e)) state.tools_async_observation_error
+        ; Option.map (fun e -> (text "승인 요청" "approval reading", e)) state.keeper_tool_approvals_error
+        ; Option.map (fun e -> (text "질문" "questions", e)) state.asks_error
+        ]
+    in
+    match failing with
+    | [] -> []
+    | [ (label, reason) ] -> [ warning (label ^ ": ") reason ]
+    | many ->
+      let labels = many |> List.map fst |> Message_layout.join_fitting ~sep:" · " ~cells:(max 1 inner) in
+      [ warning ""
+          (text
+             (Printf.sprintf "관측 오류 %d종: %s" (List.length many) labels)
+             (Printf.sprintf "%d observation errors: %s" (List.length many) labels)) ]
   in
   let roster = match Keeper_control.roster_view state.keeper_roster with
     | Keeper_control.Roster_partial { observed; total } ->

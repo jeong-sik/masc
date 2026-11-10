@@ -62,9 +62,9 @@ let test_board_post_capability_merges_public_and_keeper_projections () =
 
 
 let test_spawned_agent_surface_stays_curated () =
-  let names = Lib.Capability_registry.spawned_agent_prefixed_tools in
+  let names = Tool_catalog_surfaces.spawned_agent_surface_tools in
   check bool "contains masc_status" true
-    (List.mem "mcp__masc__masc_status" names)
+    (List.mem "masc_status" names)
 
 let test_keeper_surface_is_exact_descriptor_projection () =
   let projected_names =

@@ -18,7 +18,14 @@ vi.mock('../common/toast', () => ({
 import { fetchBoardReactionState, toggleReaction } from '../../api/board'
 import { lastEvent } from '../../sse'
 import { showToast } from '../common/toast'
-import { ReactionBar } from './reaction-bar'
+import { ReactionBar, type ReactionBatchObservation } from './reaction-bar'
+
+function orderedBatch(revision: number, count = 0): ReactionBatchObservation {
+  return {
+    state: 'ready', revision, supportedEmojis: ['👍'],
+    byTargetId: new Map([['ordered-row', [{ emoji: '👍', count, reacted: count > 0, recent_user_ids: [] }]]]),
+  }
+}
 
 afterEach(() => {
   cleanup()
@@ -270,5 +277,90 @@ describe('ReactionBar', () => {
     expect(await screen.findByRole('button', { name: '👍 리액션 2개' })).toHaveAttribute('aria-pressed', 'true')
     expect(fetchBoardReactionState).toHaveBeenCalledTimes(1)
     expect(toggleReaction).toHaveBeenCalledTimes(1)
+  })
+
+  it.each(['success', 'failure'] as const)('fences an unseen batch start when a toggle settles with %s', async outcome => {
+    let finishToggle!: (value: Awaited<ReturnType<typeof toggleReaction>>) => void
+    let failToggle!: (error: Error) => void
+    vi.mocked(toggleReaction).mockImplementationOnce(() => new Promise((resolve, reject) => {
+      finishToggle = resolve
+      failToggle = reject
+    }))
+    let latestRevision = 1
+    const props = { targetType: 'post' as const, targetId: 'ordered-row', getLatestBatchRevision: () => latestRevision }
+    const { rerender } = render(h(ReactionBar, { ...props, batchObservation: orderedBatch(1, 1) }))
+    fireEvent.click(screen.getByRole('button', { name: '👍 리액션 1개' }))
+    // The request starts before settlement, without delivering its loading render.
+    latestRevision = 2
+    await act(async () => {
+      if (outcome === 'failure') failToggle(new Error('write unavailable'))
+      else finishToggle({
+        target_type: 'post', target_id: 'ordered-row', user_id: 'viewer', emoji: '👍', reacted: true,
+        summary: [{ emoji: '👍', count: 2, reacted: true, recent_user_ids: ['viewer'] }],
+      })
+    })
+    rerender(h(ReactionBar, { ...props, batchObservation: orderedBatch(2) }))
+    const button = screen.getByRole('button', { name: outcome === 'success' ? '👍 리액션 2개' : '👍 리액션 확인 불가' })
+    if (outcome === 'success') expect(button).toHaveAttribute('aria-pressed', 'true')
+    else {
+      expect(button).toBeDisabled()
+      expect(button).not.toHaveAttribute('aria-pressed')
+      expect(button).toHaveTextContent('1')
+    }
+    expect(toggleReaction).toHaveBeenCalledTimes(1)
+    expect(fetchBoardReactionState).not.toHaveBeenCalled()
+
+    latestRevision = 3
+    rerender(h(ReactionBar, { ...props, batchObservation: orderedBatch(3, 3) }))
+    expect(screen.getByRole('button', { name: '👍 리액션 3개' })).not.toBeDisabled()
+  })
+
+  it('revokes local authority when an overlapping batch is unavailable', async () => {
+    vi.mocked(toggleReaction).mockResolvedValueOnce({
+      target_type: 'post', target_id: 'ordered-row', user_id: 'viewer', emoji: '👍', reacted: true,
+      summary: [{ emoji: '👍', count: 1, reacted: true, recent_user_ids: ['viewer'] }],
+    })
+    vi.mocked(fetchBoardReactionState).mockRejectedValueOnce(new Error('read unavailable'))
+    let latestRevision = 1
+    const props = { targetType: 'post' as const, targetId: 'ordered-row', getLatestBatchRevision: () => latestRevision }
+    const { rerender } = render(h(ReactionBar, { ...props, batchObservation: orderedBatch(1) }))
+    fireEvent.click(screen.getByRole('button', { name: '👍 리액션 0개' }))
+    latestRevision = 2
+    await waitFor(() => expect(screen.getByRole('button', { name: '👍 리액션 1개' })).toHaveAttribute('aria-pressed', 'true'))
+    rerender(h(ReactionBar, { ...props, batchObservation: { state: 'unavailable', revision: 2 } }))
+    await waitFor(() => expect(screen.getByRole('button', { name: '👍 리액션 확인 불가' })).toBeDisabled())
+    const button = screen.getByRole('button', { name: '👍 리액션 확인 불가' })
+    expect(button).not.toHaveAttribute('aria-pressed')
+    expect(button).toHaveTextContent('1')
+    expect(toggleReaction).toHaveBeenCalledTimes(1)
+  })
+
+  it.each(['success', 'failure'] as const)('fences a batch begun during an SSE read that settles with %s', async outcome => {
+    let finishRead!: (value: Awaited<ReturnType<typeof fetchBoardReactionState>>) => void
+    let failRead!: (error: Error) => void
+    vi.mocked(fetchBoardReactionState).mockImplementationOnce(() => new Promise((resolve, reject) => {
+      finishRead = resolve
+      failRead = reject
+    }))
+    let latestRevision = 1
+    const props = { targetType: 'post' as const, targetId: 'ordered-row', getLatestBatchRevision: () => latestRevision }
+    const { rerender } = render(h(ReactionBar, { ...props, batchObservation: orderedBatch(1, 1) }))
+    await act(async () => {
+      lastEvent.value = { type: 'reaction_changed', target_type: 'post', target_id: 'ordered-row', user_id: 'other', emoji: '👍', reacted: true }
+    })
+    latestRevision = 2
+    await act(async () => {
+      if (outcome === 'failure') failRead(new Error('read unavailable'))
+      else finishRead({
+        summaries: [{ emoji: '👍', count: 2, reacted: true, recent_user_ids: ['other', 'viewer'] }], supportedEmojis: ['👍'],
+      })
+    })
+    // No retained matching event is available to repair a later stale overwrite.
+    lastEvent.value = null
+    rerender(h(ReactionBar, { ...props, batchObservation: orderedBatch(2) }))
+    if (outcome === 'success') expect(screen.getByRole('button', { name: '👍 리액션 2개' })).toHaveAttribute('aria-pressed', 'true')
+    else expect(screen.getByRole('button', { name: '👍 리액션 확인 불가' })).toBeDisabled()
+    expect(fetchBoardReactionState).toHaveBeenCalledTimes(1)
+    expect(toggleReaction).not.toHaveBeenCalled()
   })
 })

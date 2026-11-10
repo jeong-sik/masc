@@ -177,6 +177,7 @@ let reaction_fault_store base_path io =
       Alcotest.failf "load %s: %s" path (Printexc.to_string error))
     [Masc_board_handlers.Board_votes_json.load_persisted_posts;
      Masc_board_handlers.Board_votes_json.load_persisted_comments];
+  ignore (require (Board.reload_votes store));
   ignore (require (Board.reload_reactions store));
   store
 

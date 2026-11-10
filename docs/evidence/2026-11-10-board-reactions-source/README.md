@@ -11,7 +11,7 @@ The final run used real Chromium in task space 60, page p1, the versioned isolat
 
 The root opened all three final PNGs and visually checked them. The earlier capture exposed pin/delete labels squeezed into vertical text; moving the existing footer wrap rule to all viewport sizes fixes that observed layout. The final captures retain the error message and readable controls.
 
-[manifest.json](manifest.json) preserves the exact capture source pins, source-file and capture hashes, and observation bounds. Those pins are historical capture identities; later delivery commits must be compared to these bytes, not substituted into this manifest. The [parsing receipt](source-parsing.json) belongs to its original upper `657cfe55`; all 33 OCaml input hashes were compared equal at capture. Parsing used OCaml 5.5.1 while the repository targets 5.5.2; it is not typing or backend execution.
+[manifest.json](manifest.json) preserves the exact capture source pins, source-file and capture hashes, and observation bounds. Its `dashboard_source_tree` identifies `dashboard/src`. Those pins are historical capture identities; later delivery commits must be compared to these bytes, not substituted into this manifest. The [parsing receipt](source-parsing.json) belongs to its original upper `657cfe55`; all 33 OCaml input hashes were compared equal at capture. Parsing used OCaml 5.5.1 while the repository targets 5.5.2; it is not typing or backend execution.
 
 [Frontend checks](frontend-checks.json) record 81/81 tests across three files, whole-Dashboard TypeScript checking, and targeted ESLint. Their TS/JS inputs are unchanged in the capture; the subsequent CSS-only layout fix was verified in Chromium. The new fixture is outside tsconfig's include paths.
 

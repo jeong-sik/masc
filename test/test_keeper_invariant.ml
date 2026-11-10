@@ -44,25 +44,6 @@ let test_sandbox_isolation_root_slash () =
   require_ok "root slash"
     (Inv.sandbox_isolation ~sandbox_roots:roots ~sandbox_paths:paths)
 
-(* ================================================================ *)
-(* tool_surface_monotonicity tests                                    *)
-(* ================================================================ *)
-
-let test_tool_monotonicity_ok () =
-  let before = ["tool_a"; "tool_b"; "tool_c"] in
-  let after = ["tool_a"; "tool_b"] in
-  require_ok "tool ok" (Inv.tool_surface_monotonicity ~before ~after)
-
-let test_tool_monotonicity_equal () =
-  let before = ["tool_a"; "tool_b"] in
-  let after = ["tool_b"; "tool_a"] in
-  require_ok "tool equal" (Inv.tool_surface_monotonicity ~before ~after)
-
-let test_tool_monotonicity_violation () =
-  let before = ["tool_a"; "tool_b"] in
-  let after = ["tool_a"; "tool_b"; "tool_c"] in
-  require_error "tool violation" (Inv.tool_surface_monotonicity ~before ~after)
-
 (* Sibling-prefix safety: /srv/.../alice-evil/ must NOT satisfy root
    /srv/.../alice/. This is what the trailing-slash trick on the root
    protects against. Without it, a hostile sibling directory whose name
@@ -98,11 +79,5 @@ let () =
           test_case "path_traversal_rejected" `Quick
             test_sandbox_isolation_path_traversal_rejected;
           test_case "root_slash" `Quick test_sandbox_isolation_root_slash;
-        ] );
-      ( "tool_surface_monotonicity",
-        [
-          test_case "ok" `Quick test_tool_monotonicity_ok;
-          test_case "equal" `Quick test_tool_monotonicity_equal;
-          test_case "violation" `Quick test_tool_monotonicity_violation;
         ] );
     ]

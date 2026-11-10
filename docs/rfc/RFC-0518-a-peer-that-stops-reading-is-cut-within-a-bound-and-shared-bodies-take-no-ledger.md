@@ -147,7 +147,7 @@ related: ["0512", "0493", "0350"]
 - **공유 본문 타입을 둔다.** `Shared_body.t` 는 만든 뒤 바꾸지 않는 bigstring 을 감싼 추상 타입이다. `Bigstringaf.t` 의 `private` 약칭은 쓰지 않는다. `:>` 로 변환하면 바이트를 고칠 수 있다. 바이트는 이 모듈 안에서만 h2·httpun 에 넘긴다.
 - **`Http_reqd.respond_with_shared` 를 더한다.**
   - HTTP/1.1 은 bigstring 을 복사 없이 건다.
-  - HTTP/2 는 16 KiB `schedule_bigstring` 조각으로 보내고 조각 경계마다 D2 의 flush 를 건다. h2 는 이 bigstring 을 복사하지 않는다(h2.mli 385줄).
+  - HTTP/2 는 D3 의 큐로 보낸다. 16 KiB 조각을 `schedule_bigstring` 으로 하나씩 넣는다. h2 는 이 bigstring 을 복사하지 않는다(h2.mli 385줄).
   - 요청마다 생기는 사본이 없으니 원장 예약도 없다.
 - **대시보드 정적 asset 이 첫 사용처다.**
   - 읽을 때마다 receipt 와 digest 를 검증하는 계약은 그대로다(`lib/installed_dashboard.mli` 29줄).

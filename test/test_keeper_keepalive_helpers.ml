@@ -1525,11 +1525,58 @@ let test_unresolved_comment_name_cannot_become_a_recipient () =
                    | Error unavailable ->
                      fail (KWOBS.unavailable_to_string unavailable))
                 | _ -> fail "expected exactly one queued stimulus for bystander"))))
+    (* A Direct thread cannot reach the "later alias" step below: #50387 makes
+       a comment on a Direct post addressable only to the parent post's
+       readers (lib/board/board_comment_admission.ml), so replying with a name
+       resolved outside that set is refused instead of stored. The Direct
+       refusal is pinned by [test_direct_comment_cannot_address_a_non_reader]. *)
     [ "public", Board.Public, 1
     ; "internal", Board.Internal, 1
     ; "unlisted", Board.Unlisted, 0
-    ; "direct", Board.Direct, 0
     ]
+;;
+
+(* #50387: a comment on a Direct post may address only the parent post's
+   readers. A name resolved outside that set cannot be added by replying, so
+   the reply is refused and nothing is stored. *)
+let test_direct_comment_cannot_address_a_non_reader () =
+  Eio_main.run @@ fun _env ->
+  let recipient_lookup =
+    Recipient_lookup.make (fun candidate ->
+      Ok (Result.to_option (Board.Agent_id.parse (Recipient_lookup.Candidate.to_string candidate)))) in
+  with_board_workspace ~recipient_lookup @@ fun config ->
+  Fun.protect
+    ~finally:(fun () ->
+      Board_dispatch.set_board_signal_hook (fun _ -> ());
+      Keeper_registry.For_testing.clear ())
+    (fun () ->
+       let poster = make_board_resume_meta "posterlane" in
+       persist_and_register_board_lane config poster;
+       let post =
+         match
+           Board_dispatch.create_post ~author:poster.name ~content:"@posterlane direct topic"
+             ~title:"direct" ~post_kind:Board.Human_post ~visibility:Board.Direct ()
+         with
+         | Ok post -> post
+         | Error error -> fail (Board.Post_publication_failure.to_string error) in
+       let post_id = Board.Post_id.to_string post.id in
+       (match
+          Board_dispatch.add_comment
+            ~reader:Masc_board_handlers.Board_access.Operator ~post_id
+            ~author:"external-author" ~content:"@latealias research" ()
+        with
+        | Ok comment ->
+          Alcotest.(check bool) "unresolved name stays a thread audience" true
+            (comment.audience = Some Board.Thread_participants)
+        | Error error -> fail (Board.show_board_error error));
+       match
+         Board_dispatch.add_comment
+           ~reader:Masc_board_handlers.Board_access.Operator ~post_id
+           ~author:"external-author" ~content:"@latealias explicit target" ()
+       with
+       | Ok _ -> fail "a Direct comment addressed a name outside the parent's readers"
+       | Error (Board.Validation_error _) -> ()
+       | Error error -> fail (Board.show_board_error error))
 ;;
 
 (* RFC-provider-path-rest §3.3: a path's rest comes from the provider's answer
@@ -1803,6 +1850,8 @@ let () =
             test_comment_discovery_respects_parent_visibility
         ; test_case "later alias does not readdress stored thread comment" `Quick
             test_unresolved_comment_name_cannot_become_a_recipient
+        ; test_case "a Direct comment cannot address a name outside the parent's readers"
+            `Quick test_direct_comment_cannot_address_a_non_reader
         ; test_case "comment on own post wakes the author" `Quick
             test_comment_on_own_post_wakes_the_author
         ; test_case "vote on own post wakes the author once" `Quick

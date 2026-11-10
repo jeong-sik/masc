@@ -73,7 +73,7 @@ let with_session f =
                }
            with
            | Ok (_ : Z.committed) -> ()
-           | Error error -> Alcotest.failf "invitation refused: %s" (Z.error_to_string error));
+           | Error error -> Alcotest.failf "invitation refused: %s" (Z.error_detail error));
           let fresh = ref 0 in
           let draw () =
             incr fresh;

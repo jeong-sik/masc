@@ -260,7 +260,7 @@ let with_installation ?(capacity = 8) f =
                }
            with
            | Ok (_ : Z.committed) -> ()
-           | Error error -> Alcotest.failf "invitation refused: %s" (Z.error_to_string error));
+           | Error error -> Alcotest.failf "invitation refused: %s" (Z.error_detail error));
           let providers =
             { clock
             ; discovery_up = ref true

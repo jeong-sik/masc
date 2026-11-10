@@ -85,7 +85,7 @@ let with_installation f =
                }
            with
            | Ok (_ : Z.committed) -> ()
-           | Error error -> Alcotest.failf "invitation refused: %s" (Z.error_to_string error));
+           | Error error -> Alcotest.failf "invitation refused: %s" (Z.error_detail error));
           f { zone; clock; admin_token; log_path; store_path = store }))
 ;;
 
@@ -130,7 +130,7 @@ let admitted_id = function
 let commit t ~by kind body =
   match Z.commit t.zone { Z.author = Author.Authenticated (Principal.Human by); kind; body } with
   | Ok (_ : Z.committed) -> ()
-  | Error error -> Alcotest.failf "fixture commit refused: %s" (Z.error_to_string error)
+  | Error error -> Alcotest.failf "fixture commit refused: %s" (Z.error_detail error)
 ;;
 
 let member_invitation t ~invite_id ~token =

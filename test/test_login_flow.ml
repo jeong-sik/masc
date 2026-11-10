@@ -280,7 +280,7 @@ let issue_invitation zone ~invite_id ~token ~role =
       { Z.author = Author.Local_operator; kind = Authz_record.Kind.Invite; body = get_ok (E.to_body invitation) }
   with
   | Ok (_ : Z.committed) -> ()
-  | Error error -> Alcotest.failf "invitation refused: %s" (Z.error_to_string error)
+  | Error error -> Alcotest.failf "invitation refused: %s" (Z.error_detail error)
 ;;
 
 let client_of ~client_id ~redirect_uri ~variable ~secret =

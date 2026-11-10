@@ -99,11 +99,14 @@ let test_impossible_and_explicit () = with_browsers (fun ~ego ->
      check int "it lists every connected browser as a candidate" 1 (List.length candidates)
    | Ok _ | Error (Selection.Binding_required | No_available_browser | Ambiguous_browsers _
      | Unsupported_required_actions _) -> fail "no browser zooms and types, so none is chosen");
-  (* Same reason as the selection above: the ego connection serves touch
-     (lib/browser_capabilities.ml:266-271), so an explicit request naming it
-     for touch is admitted rather than refused. *)
-  check bool "an explicit ego connection that serves touch is admitted" true
-    (admitted ["touch"] (Lane.Live_route (Some ego.client_id)) = Ok ()))
+  (* An explicit route skips the capability filter in [choose] and reaches
+     [Selection.require] for the missing set, so this is the one place that
+     asserts Unsupported_required_actions affirmatively. The ego connection
+     serves touch since #49295 (lib/browser_capabilities.ml:266-271), and it
+     has no browser zoom (lib/browser_capabilities.ml:194-197), which the
+     two assertions above already rely on. *)
+  check bool "an explicit ego connection that cannot zoom is refused, not replaced" true
+    (unsupported (admitted ["page_zoom"] (Lane.Live_route (Some ego.client_id)))))
 
 (* Required actions are parsed before any browser is chosen. A refused list
    fails as the caller's input, before the tool looks for a browser Add-on;

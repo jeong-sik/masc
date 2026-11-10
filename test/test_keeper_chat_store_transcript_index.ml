@@ -125,13 +125,15 @@ let rows_of deliver =
     bytes ~base_dir:donor)
 ;;
 
-(* What [deliver] answers in a new store that holds the same bytes. That store
-   has no index yet, so its writer reads the whole file. *)
+(* What [deliver] answers in a new store that holds the same bytes, or no
+   transcript when there is none yet. That store has no index, so its writer
+   reads the whole file. *)
 let in_copy ~base_dir deliver =
-  let contents = bytes ~base_dir in
   with_store (fun copy ->
-    Fs_compat.mkdir_p (Filename.dirname (path ~base_dir:copy));
-    write (path ~base_dir:copy) contents;
+    if Sys.file_exists (path ~base_dir)
+    then (
+      Fs_compat.mkdir_p (Filename.dirname (path ~base_dir:copy));
+      write (path ~base_dir:copy) (bytes ~base_dir));
     deliver ~base_dir:copy)
 ;;
 

@@ -412,14 +412,20 @@ def wake_main_build(repo):
     Dispatch it here. A failed dispatch must not change the merge verdict:
     the merge already happened and this call cannot undo it.
     """
-    operation = subprocess.run(
-        ['gh', 'api', '--method', 'POST',
-         f'repos/{repo}/actions/workflows/{MAIN_BUILD_WORKFLOW}/dispatches',
-         '-f', 'ref=main'],
-        capture_output=True, text=True, check=False)
+    try:
+        operation = subprocess.run(
+            ['gh', 'api', '--method', 'POST',
+             f'repos/{repo}/actions/workflows/{MAIN_BUILD_WORKFLOW}/dispatches',
+             '-f', 'ref=main'],
+            capture_output=True, text=True, check=False, timeout=120)
+    except (OSError, subprocess.SubprocessError) as error:
+        # The merge already happened; a wake that cannot run must stay a
+        # recorded miss and never escape into the merge verdict.
+        return {'dispatched': False, 'exit_code': None,
+                'stderr': f'{type(error).__name__}: {error}'[:300]}
     return {'dispatched': operation.returncode == 0,
             'exit_code': operation.returncode,
-            'stderr': operation.stderr.strip()[:300]}
+            'stderr': (operation.stderr or '').strip()[:300]}
 
 
 _WAKE = {'repo': None, 'enabled': False}

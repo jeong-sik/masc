@@ -91,6 +91,12 @@ let test_published_once () =
             | Ok (_ : Access.host_account) ->
               Alcotest.failf "%s was allowed before the publication" label)
           hosts;
+        (match Access.host_access () with
+         | Error Access.Host_unpublished -> ()
+         | Error Access.Host_not_shared ->
+           Alcotest.fail "the accounts of the host were not shared before the publication"
+         | Ok (_ : Access.host_account) ->
+           Alcotest.fail "the accounts of the host were shared before the publication");
         List.iter
           (fun posture ->
             match Access.authorize_native posture with
@@ -128,6 +134,10 @@ let test_published_once () =
               | Error refusal ->
                 Alcotest.failf "%s was refused: %s" label (Access.refusal_to_string refusal))
             hosts;
+          (match Access.host_access () with
+           | Ok (_ : Access.host_account) -> ()
+           | Error (Access.Host_unpublished | Access.Host_not_shared) ->
+             Alcotest.fail "a single user does not share the accounts of the host");
           (* The one person of a single-user process owns every home its
              native tools can read (plan D3c). *)
           List.iter

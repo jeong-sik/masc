@@ -16,7 +16,7 @@ import { html } from 'htm/preact'
 import { useEffect } from 'preact/hooks'
 import { navigate } from '../../router'
 import { MISSING_DATA_DASH } from '../../lib/format-string'
-import { selectObservationReadFailure, setupObservationRefresh } from '../../lib/observation-refresh'
+import { retainObservationReadFailure, selectObservationReadFailure, setupObservationRefresh } from '../../lib/observation-refresh'
 import { formatMsCompact, formatNumber } from '../../lib/format-number'
 import { readShell, shellRuntimeResolution } from '../../store'
 import {
@@ -207,7 +207,7 @@ export function ToolMonitorOperationsBoard() {
       const failure = selectObservationReadFailure([
         ...results.map(result => result.status === 'rejected' ? result.reason : null),
         readSharedToolQualityError(),
-        shell.status === 'fulfilled' && shell.value.kind === 'failed' ? shell.value.cause : null,
+        shell.status === 'fulfilled' && shell.value.kind === 'failed' ? retainObservationReadFailure(shell.value.cause) : null,
       ])
       if (failure !== null) throw failure
     }, { topics: ['tool_metrics', 'health'], cancelRead: cancelSharedToolQuality, resetRead: prepareSharedToolQualityRead })

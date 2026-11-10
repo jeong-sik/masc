@@ -34,12 +34,10 @@ export const TRANSPORT_RETRY_JITTER_MS = 1_000
 // --- Refresh & debounce (milliseconds) ---
 export const SHELL_TTL_MS = 5_000
 export const UI_REFRESH_TTL_MS = 1_000
-export const MISSION_BRIEFING_POLL_DELAY_MS = 1_500
 export const SSE_DEFAULT_DEBOUNCE_MS = 500
 export const SSE_ACTIVITY_DEBOUNCE_MS = 2_000
 export const SSE_KEEPER_OPERATOR_DEBOUNCE_MS = 600
 export const SSE_KEEPER_THREAD_DEBOUNCE_MS = 800
-export const SSE_RECONNECT_RETRY_MS = 3_000
 
 // --- Keeper UI/runtime limits ---
 export const KEEPER_HISTORY_TAIL_MESSAGES = 200

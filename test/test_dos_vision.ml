@@ -83,6 +83,15 @@ let test_keeper_screen_carries_the_frame () =
                         | _ -> None) blocks with
                        | Some png -> png | None -> fail "Keeper result lost PNG image block")
                   | None -> fail "Keeper result lost multimodal content" in
+                (* The model reads the PNG from the content blocks. The structured copy
+                   records the block's size and not its bytes. *)
+                let image = match List.find_opt (fun block ->
+                    String.equal (block |> member "type" |> to_string) "image")
+                    (data |> member "content" |> to_list) with
+                  | Some block -> block | None -> fail "structured copy lost the image block" in
+                check bool "the structured copy holds no image bytes" true (member "data" image = `Null);
+                check int "the structured copy names the image's base64 length"
+                  (String.length (Base64.encode_exn png)) (image |> member "base64_chars" |> to_int);
                 check string "a PNG" "\x89PNG\r\n\x1a\n" (String.sub png 0 8);
                 check string "IHDR first" "IHDR" (String.sub png 12 4);
                 check int "PNG width" frame.width (be32 png 16);
@@ -100,11 +109,64 @@ let test_keeper_screen_carries_the_frame () =
                 check bool "detached call cannot replay a stale image" true (stale.content_blocks=None)))))))
 ;;
 
+let text_block text =
+  Mcp_protocol.Mcp_types.TextContent { type_ = "text"; text; annotations = None }
+;;
+
+let worker_reply content : Mcp_protocol.Mcp_types.tool_result =
+  { content
+  ; is_error = Some false
+  ; structured_content = Some (`Assoc [ "steps", `Int 7 ])
+  ; _meta = Some (`Assoc [ "marker", `String "kept" ])
+  }
+;;
+
+let test_media_bytes_stay_out_of_the_structured_copy () =
+  let open Yojson.Safe.Util in
+  let base64 = String.make 40_000 'A' in
+  let reply =
+    worker_reply
+      [ text_block "{\"steps\":7}"
+      ; Mcp_protocol.Mcp_types.ImageContent
+          { type_ = "image"; data = base64; mime_type = "image/png"; annotations = None }
+      ; Mcp_protocol.Mcp_types.AudioContent
+          { type_ = "audio"; data = base64; mime_type = "audio/wav"; annotations = None }
+      ]
+  in
+  let data = Keeper_lane_addon_runtime.data_of_worker_result reply in
+  check bool "no base64 survives in the structured copy" true
+    (String.length (Yojson.Safe.to_string data) < 1_000);
+  check (list string) "the blocks keep their order and types" [ "text"; "image"; "audio" ]
+    (data |> member "content" |> to_list |> List.map (fun block -> block |> member "type" |> to_string));
+  let media index = List.nth (data |> member "content" |> to_list) index in
+  check string "the image keeps its MIME type" "image/png" (media 1 |> member "mimeType" |> to_string);
+  check int "the image keeps its size" (String.length base64)
+    (media 1 |> member "base64_chars" |> to_int);
+  check string "the audio keeps its MIME type" "audio/wav" (media 2 |> member "mimeType" |> to_string);
+  check bool "the text block is unchanged" true
+    (media 0 = Mcp_protocol.Mcp_types.tool_content_to_yojson (text_block "{\"steps\":7}"));
+  check bool "structuredContent is unchanged" true
+    (member "structuredContent" data = `Assoc [ "steps", `Int 7 ]);
+  check bool "_meta is unchanged" true (member "_meta" data = `Assoc [ "marker", `String "kept" ]);
+  check bool "isError is unchanged" true (member "isError" data = `Bool false)
+;;
+
+let test_a_reply_without_media_is_unchanged () =
+  let reply = worker_reply [ text_block "{\"steps\":7}"; text_block "second" ] in
+  check bool "the structured copy is the reply's own JSON" true
+    (Keeper_lane_addon_runtime.data_of_worker_result reply
+     = Mcp_protocol.Mcp_types.tool_result_to_yojson reply)
+;;
+
 let () =
   run "DOS vision"
     [ ( "Keeper"
       , [ test_case "attached worker image crosses Keeper boundary without input" `Quick
             test_keeper_screen_carries_the_frame
+        ; test_case "media bytes stay out of the structured copy" `Quick
+            test_media_bytes_stay_out_of_the_structured_copy
+        ; test_case "a reply without media is unchanged" `Quick
+            test_a_reply_without_media_is_unchanged
         ] )
     ]
 ;;

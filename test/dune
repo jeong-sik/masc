@@ -372,7 +372,7 @@
  (name test_dos_vision)
  (modules test_dos_vision)
  (libraries machine_worker_fixture eio_main base64 masc.machine_configuration alcotest unix yojson fs_compat masc masc_test_deps
-   masc.dos_lane masc.tool_types))
+   masc.dos_lane masc.tool_types mcp_protocol))
 
 (test
  (name test_sse_observer_epoch)

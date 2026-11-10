@@ -156,7 +156,7 @@ let rewrite_with_io io before bytes = match io with
   | None -> Fs_compat.rewrite_private_jsonl_durable_locked_at_snapshot_result
       before.decision_path ~expected:before.decision_snapshot bytes
   | Some io -> Fs_compat.rewrite_private_jsonl_durable_locked_at_snapshot_with_io_for_testing
-      ~io ~before_sync_rewrite_parent:io.before_sync_parent
+      ~io ~before_sync_rewrite_parent:io.Fs_compat.before_sync_parent
       before.decision_path ~expected:before.decision_snapshot bytes
 
 let rewrite store before bytes = rewrite_with_io store.deletion_source_io before bytes

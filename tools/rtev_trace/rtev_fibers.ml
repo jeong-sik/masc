@@ -146,25 +146,25 @@ let () =
      An id with no object kind is not always an older object. Eio reports
      [Get] on a fiber's id when its [Fiber.fork_promise] result is awaited,
      and on a cancellation context's id when its switch is awaited; the trace
-     saw those ids created as a fiber or a context. And an older stream or
-     promise reports [Get] again with no [Put] between and never a [Put]:
-     [not_locks] holds the ids that did the first and have not done the
-     second. As locks they stayed held until the trace ended, each added
-     again at every [Get].
+     saw those ids created as a fiber or a context. An older stream or
+     resolved promise can report repeated [Get] without a [Put]. After the
+     second [Get], [awaiting_put] ignores further [Get] events for that id
+     and keeps only its latest candidate holder and capped suspension
+     reasons. Without a [Put], that candidate never reaches the report.
 
      An older semaphore of more than one unit also reports [Get] twice with
-     no [Put] between, and then a [Put]. [released] holds every id a [Put]
-     named: such an id is a lock, so a [Put] takes it out of [not_locks], and
-     from then on a second [Get] follows the latest holder as it does for a
-     semaphore the trace saw created. Its holds before that first [Put] are
-     not in the report. *)
+     no [Put] between, and then a [Put]. That first [Put] reports the retained
+     candidate and takes the id out of [awaiting_put]. [released] remembers
+     it, so subsequent overlapping [Get] events follow the latest holder,
+     as for a semaphore the trace saw created. This tracks one holder, not
+     all permits, and cannot tell which holder a [Put] released. *)
   let obj_kind : (int, string) Hashtbl.t = Hashtbl.create 4096 in
-  let not_locks : (int, unit) Hashtbl.t = Hashtbl.create 64 in
+  let awaiting_put : (int, unit) Hashtbl.t = Hashtbl.create 64 in
   let released : (int, unit) Hashtbl.t = Hashtbl.create 1024 in
   let lock_like id =
     match Hashtbl.find_opt obj_kind id with
     | None ->
-      not (Hashtbl.mem parent id || Hashtbl.mem cc_kind id || Hashtbl.mem not_locks id)
+      not (Hashtbl.mem parent id || Hashtbl.mem cc_kind id || Hashtbl.mem awaiting_put id)
     | Some kind -> String.equal kind "mutex" || String.equal kind "semaphore"
   in
   (* Ends the hold recorded for [lock] and returns it. A lock is in
@@ -294,19 +294,19 @@ let () =
          Hashtbl.remove held_waits lock;
          (match unreleased, Hashtbl.find_opt obj_kind lock with
           | Some _, None when not (Hashtbl.mem released lock) ->
-            Hashtbl.replace not_locks lock ()
+            Hashtbl.replace awaiting_put lock ()
           | Some _, (Some _ | None) (* a semaphore with more than one unit: follow its latest holder *)
-          | None, (Some _ | None) ->
-            Hashtbl.replace held lock (fiber, ts, span_label fiber);
-            Hashtbl.replace taken_after lock
-              (Option.value ~default:"(first run)" (Hashtbl.find_opt last_reason fiber));
-            Hashtbl.replace holding fiber
-              (lock :: Option.value ~default:[] (Hashtbl.find_opt holding fiber)))
+          | None, (Some _ | None) -> ());
+         Hashtbl.replace held lock (fiber, ts, span_label fiber);
+         Hashtbl.replace taken_after lock
+           (Option.value ~default:"(first run)" (Hashtbl.find_opt last_reason fiber));
+         Hashtbl.replace holding fiber
+           (lock :: Option.value ~default:[] (Hashtbl.find_opt holding fiber))
        | None -> ())
     | `Get _ -> ()
     | `Put lock ->
       Hashtbl.replace released lock ();
-      Hashtbl.remove not_locks lock;
+      Hashtbl.remove awaiting_put lock;
       (match end_hold lock with
        | Some (holder, since, label) ->
          let dur = Int64.sub ts since in

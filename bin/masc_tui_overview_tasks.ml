@@ -162,14 +162,12 @@ let step tasks ~selected direction =
       id_at tasks target
 
 let work_rows tasks =
-  rows tasks
-  @ List.filter
+  List.filter
       (fun (task : Tui_decode.task) ->
         match task.status with
-        | Masc_domain.Todo -> true
-        | Masc_domain.InProgress _ | Masc_domain.AwaitingVerification _
-        | Masc_domain.Claimed _ | Masc_domain.Done _
-        | Masc_domain.Cancelled _ -> false)
+        | Masc_domain.Todo | Masc_domain.Claimed _ | Masc_domain.InProgress _
+        | Masc_domain.AwaitingVerification _ -> true
+        | Masc_domain.Done _ | Masc_domain.Cancelled _ -> false)
       tasks
 
 let work_selected_index tasks ~selected =

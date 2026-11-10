@@ -102,16 +102,11 @@ let surface_row_texts ~cols (state : state) : surface -> string list option =
           (memory_facts_snapshot state)
       else
         Option.map
-          (* Keeper id and the state label, which is the pair
-             [visible_memory_keepers] keeps a row for. Leaving the label out
-             kept rows on screen that the search could neither count nor
-             reach. *)
+          (* The same Keeper id, canonical state and translated state words
+             as the filter. Counting a different projection would leave a
+             visible match unreachable by the cursor. *)
           (fun _ ->
-            List.map
-              (fun k ->
-                k.Masc.Tui_decode_memory_health.mkh_keeper_id ^ " "
-                ^ memory_state_label (memory_state k))
-              (visible_memory_keepers state))
+            List.map memory_keeper_search_text (visible_memory_keepers state))
           state.memory_health
   | Connectors when Option.is_some (browser_lane_on_screen state) -> None
   | Connectors ->

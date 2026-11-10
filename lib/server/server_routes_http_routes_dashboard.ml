@@ -719,7 +719,7 @@ let add_routes ~sw ~clock router =
            | Workspace_memory_ledger.Missing | Workspace_memory_ledger.Available _ ->
              let cache_key = "workspace_memory_inventory:" ^ base_path in
              respond_cached_read ~request:req ~reqd ~cache_key ~ttl:standard_cache_ttl_s
-               (Pool_work.cpu ~name:__FUNCTION__ (fun () ->
+               (Pool_work.io ~name:__FUNCTION__ (fun () ->
                  match Workspace_memory_ledger_view.inventory ~base_path () with
                  | Ok json -> json
                  | Error detail -> `Assoc [ "error", `String detail ])))

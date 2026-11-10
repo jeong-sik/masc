@@ -1,0 +1,17 @@
+{
+  "schema": "masc.targeted-memory-validation.v1",
+  "phase": "after-test-cleanup-and-native-restack",
+  "run_id": 42652183034,
+  "head": "b56552704a5b1350d636449d57c1ff0d920c8adc",
+  "branch": "fix/tui-memory-reading-20261110",
+  "event": "workflow_dispatch",
+  "minimal": true,
+  "suites": [
+    "test_tui_decode",
+    "test_tui_render_memory"
+  ],
+  "status_at_identity_read": "in_progress",
+  "conclusion_at_identity_read": null,
+  "source_base": "7175899d3af7801f489265afb42e6f4836a31f2e",
+  "why_decode_repeated": "Published parent includes v12 health interface and changed decoder inputs; the initial 407-case result does not cover this source"
+}

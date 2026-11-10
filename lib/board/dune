@@ -16,6 +16,7 @@
   board_reactions
   board_comments
   board_posts_source
+  board_comments_source
   board_vote_row
   board_store_load
   board_store_lifecycle)
@@ -38,6 +39,7 @@
   board_paths
   board_post_publication_failure
   board_posts_source
+  board_comments_source
   board_snapshot_batch
   board_snapshot_rows
   board_sort

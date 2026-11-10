@@ -245,9 +245,9 @@ let page_tone = function
   | Warning -> Masc_tui_page_line.Attention
   | Bad -> Masc_tui_page_line.Failure
 
-let source_heading = "1. 설정 출처 · 유효성 및 스키마 검증 (Source & Schema Validation)"
+let source_heading = "설정 원문 · Source"
 
-let detail_blocks ~lead metadata =
+let detail_blocks ?(notices = []) ~lead metadata =
   let module Line = Masc_tui_page_line in
   let fact tone label value = Line.fact ~tone:(page_tone tone) label value in
   let validation_tone, validation_value = validation_verdict metadata.validation in
@@ -263,28 +263,22 @@ let detail_blocks ~lead metadata =
               (Printf.sprintf "%s · %s: %s" issue.key (issue_kind_label issue.kind) issue.detail))
           report.issues
   in
-  let restart_word required = if required then "required" else "not required" in
-  let source =
-    lead
-    @ [ fact Neutral "Source revision" metadata.source_revision;
-        fact validation_tone "Validation" validation_value;
+  let application =
+    notices
+    @ [ fact validation_tone "Validation" validation_value;
         fact (routing_tone metadata) "Routing"
           (routing_label metadata.routing ~requires_restart:metadata.routing_requires_restart);
         fact (keeper_tone metadata) "Keeper" (keeper_label metadata.keeper) ]
     @ validation
+    @ [ fact Neutral "Keeper settings" (Printf.sprintf "%d configured" metadata.configured_count) ]
   in
-  let application =
-    [ fact (routing_tone metadata) "Routing restart" (restart_word metadata.routing_requires_restart);
-      fact (if metadata.keeper_requires_restart then Warning else Neutral) "Keeper restart"
-        (restart_word metadata.keeper_requires_restart);
-      fact Neutral "Keeper settings" (Printf.sprintf "%d configured" metadata.configured_count) ]
-  in
+  let source = lead @ [ fact Neutral "Source revision" metadata.source_revision ] in
   let keys label tone values = Line.items ~tone:(page_tone tone) label values in
-  [ source_heading, source;
-    "2. 라우팅 · 키퍼 적용 상태 (Routing & Keeper Application)", application ]
+  [ "적용 상태 · Application", application;
+    source_heading, source ]
   @ (if metadata.pending_keys = [] && metadata.preempted_keys = [] && metadata.applied_keys = [] then []
      else
-       [ "3. 키퍼 설정 키 · 재시작 대기 및 환경변수 우선 (Pending / Preempted / Applied Keys)",
+       [ "Keeper 설정 · Settings",
          [ keys "Pending restart" Warning metadata.pending_keys;
            keys "Preempted by environment" Warning metadata.preempted_keys;
            keys "Applied" Neutral metadata.applied_keys ] ])

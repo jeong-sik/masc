@@ -1,0 +1,35 @@
+ 운영  ▸작업  키퍼  기능·플러그인  워크스페이스  시스템
+                                 │
+  Board                     (2)  │  MASC Board  [p-s…e-closed]   0  💬0
+  ─────────────────────────────  │ ────────────────────────────────────────────────────────────────────────────────────
+ ▸ 해결한 논의와 다음 글         │ > 해결한 논의와 다음 글
+   함께 읽을 요청과 댓글         │   @fixture-operator [Author]  ·  2026-11-09 23:38:04  ·  masc://board/p-surface-clo…
+                                 │ ────────────────────────────────────────────────────────────────────────────────────
+                                 │     Resolution
+                                 │     Closed by fixture-operator
+                                 │     Closed at 2026-11-09T14:38:04Z
+                                 │     Successor · S:open · masc://board/p-surface-open
+                                 │   요청과 근거를 읽는 순서를 정했습니다. Continued in the successor post.
+                                 │
+                                 │   목록에서는 핵심을 읽고, 상세에서는 종결 기록과 후속 글을 확인합니다.
+                                 │
+                                 │
+                                 │
+                                 │
+                                 │
+                                 │
+                                 │
+                                 │
+                                 │
+                                 │
+                                 │
+                                 │
+                                 │
+                                 │
+                                 │
+                                 │
+                                 │
+                                 │
+  ACTION NEEDED 1 · keeper_memory_execution:addon_unattached  j/k:body  v / V:up / down  Left / Esc:back  …?
+ 일정 정보가 오래됐을 수 있음
+ › to quietreader   (i to write)

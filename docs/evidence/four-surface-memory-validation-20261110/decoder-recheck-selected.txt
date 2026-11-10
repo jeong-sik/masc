@@ -1,0 +1,7 @@
+2026-11-09T16:32:34.6901209Z ASSERT measured durable pass: original admission owner retained
+2026-11-09T16:32:34.6902152Z ASSERT measured durable pass: fleet unread measurement retained
+2026-11-09T16:32:34.6902490Z ASSERT unobserved durable pass: original admission owner retained
+2026-11-09T16:32:34.6903460Z ASSERT unobserved durable pass: fleet unread measurement retained
+2026-11-09T16:32:34.6926362Z ASSERT unknown unread cannot report a zero fleet total
+2026-11-09T16:32:34.7537340Z Test Successful in 0.035s. 407 tests run.
+2026-11-09T16:32:34.7537796Z [targeted] test/test_tui_decode: OK in 0s

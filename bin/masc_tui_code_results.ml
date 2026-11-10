@@ -824,7 +824,7 @@ let complete_draft_save state request outcome =
               | Some address -> Draft.equal_address address request.csr_address | None -> false);
         if !refresh then begin
           state.code_draft_open <- false;
-          state.code_lsp_note <- Some "Draft saved; refreshing server source"
+          state.code_lsp_note <- Some (ui_text state ~ko:"파일 저장됨" ~en:"File saved")
         end;
         None) state.code_drafts;
   !refresh

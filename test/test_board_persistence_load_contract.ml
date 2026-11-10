@@ -9,8 +9,8 @@
 
     The current contract returns [(int, string * exn) result]. A first load
     of an absent posts file starts empty; once a store has observed an actual
-    posts file, its absence is refused. Missing comments remain a legitimate
-    empty source. *)
+    posts file, its absence is refused. First observed missing comments are legitimate empty input; losing a
+    comments source this store observed Present is refused. *)
 
 open Masc
 
@@ -30,15 +30,23 @@ let fresh_test_base_path () =
   dir
 ;;
 
-let load_posts_source store =
-  match Masc_board_handlers.Board_votes_json.load_persisted_posts store with
-  | Ok _ -> ()
-  | Error (path, cause) ->
-    Alcotest.failf "posts fixture load failed: %s (%s)" path (Printexc.to_string cause)
+let load_sources store =
+  List.iter (fun load ->
+    match load store with
+    | Ok _ -> ()
+    | Error (path, cause) ->
+      Alcotest.failf "board fixture load failed: %s (%s)" path (Printexc.to_string cause))
+    [Masc_board_handlers.Board_votes_json.load_persisted_posts;
+     Masc_board_handlers.Board_votes_json.load_persisted_comments]
 ;;
 
 let posts_source_health store =
   Board.with_persist_lock store (fun () -> Board.require_posts_source_readable store)
+  |> Result.map_error Board.show_board_error
+;;
+
+let comments_source_health store =
+  Board.with_persist_lock store (fun () -> Board.require_comments_source_readable store)
   |> Result.map_error Board.show_board_error
 ;;
 
@@ -102,7 +110,7 @@ let test_loader_keeps_only_current_rows () =
   let _dir = fresh_test_base_path () in
   let source_store = Board_core.create_store
       ~base_path:(Env_config_core.base_path ()) () in
-  load_posts_source source_store;
+  load_sources source_store;
   let post =
     match
       Board_core.create_post
@@ -181,7 +189,7 @@ let test_loader_keeps_only_current_rows () =
   Alcotest.(check bool) "valid expired comments remain available for dependent cleanup" true
     (Masc_board_handlers.Board_votes_json.load_persisted_comments expired_store = Ok 1);
   Alcotest.(check bool) "expired comments remain a complete source" true
-    (expired_store.comments_load_result = Ok ());
+    (comments_source_health expired_store = Ok ());
   Alcotest.(check (pair int int)) "sweeper owns expiry after reload" (1, 1)
     (Board_core.sweep expired_store)
 ;;
@@ -198,10 +206,10 @@ let test_source_failure_clears_only_after_successful_reload () =
       ~base_path:(Env_config_core.base_path ()) () in
     let loaders = [
       (Board.persist_path store, Masc_board_handlers.Board_votes_json.load_persisted_posts,
-       (fun () -> posts_source_health store), false);
+       (fun () -> posts_source_health store));
       (Board.comments_path store, Masc_board_handlers.Board_votes_json.load_persisted_comments,
-       (fun () -> store.Board.comments_load_result), true)] in
-    List.iter (fun (path, load, health, missing_can_be_new) ->
+       (fun () -> comments_source_health store))] in
+    List.iter (fun (path, load, health) ->
       Fs_compat.mkdir_p (Filename.dirname path);
       let write text = Out_channel.with_open_bin path (fun out -> output_string out text) in
       List.iter (fun malformed ->
@@ -219,13 +227,10 @@ let test_source_failure_clears_only_after_successful_reload () =
       Alcotest.(check bool) "unreadable source is not a missing file" true
         (Result.is_error (load store));
       Unix.rmdir path;
-      if missing_can_be_new then
-        Alcotest.(check bool) "missing comments file is legitimate" true (load store = Ok 0)
-      else (
-        Alcotest.(check bool) "missing previously observed posts cannot become new authority" true
-          (Result.is_error (load store));
-        Alcotest.(check bool) "missing posts retain the refusal" true
-          (Result.is_error (health ())))) loaders)
+      Alcotest.(check bool) "missing previously observed source cannot become new authority" true
+        (Result.is_error (load store));
+      Alcotest.(check bool) "missing source retains the refusal" true
+        (Result.is_error (health ()))) loaders)
 ;;
 
 (* #38595: a load that meets a damaged line keeps every row it can decode,
@@ -239,7 +244,7 @@ let test_partial_load_never_rewrites_the_file () =
   let _dir = fresh_test_base_path () in
   let source_store = Board_core.create_store
       ~base_path:(Env_config_core.base_path ()) () in
-  load_posts_source source_store;
+  load_sources source_store;
   let make_post content =
     match
       Board_core.create_post source_store ~lookup:nobody_declared ~author:"partial-writer" ~content
@@ -288,9 +293,16 @@ let test_partial_load_never_rewrites_the_file () =
     (Result.is_error (Masc_board_handlers.Board_votes_json.load_persisted_comments store));
   Alcotest.(check bool) "posts after the damaged line are still served" true
     (Result.is_ok (Board_core.read_post store ~post_id:(Board.Post_id.to_string after.id)));
-  Alcotest.(check bool) "comments after the damaged line are still served" true
-    (Result.is_ok
-       (Board_core.get_comment store ~comment_id:(Board.Comment_id.to_string c_after.id)));
+  let observed = match Board_core.observe_comments store
+      ~post_id:(Board.Post_id.to_string c_after.post_id) with
+    | Ok observed -> observed
+    | Error error -> Alcotest.fail (Board.show_board_read_error error) in
+  Alcotest.(check bool) "comments after the damaged line remain display rows" true
+    (List.exists (fun (comment : Board.comment) -> comment.id = c_after.id) observed.comments);
+  Alcotest.(check bool) "display rows retain their incomplete source status" true
+    (match observed.completeness with
+     | Board.Source_incomplete (Board.Io_error _) -> true
+     | Board.Source_incomplete _ | Board.Source_complete -> false);
   let unchanged label =
     Alcotest.(check string) (label ^ ": posts file untouched") posts_on_disk (read posts_path);
     Alcotest.(check string) (label ^ ": comments file untouched") comments_on_disk
@@ -317,7 +329,9 @@ let test_partial_load_never_rewrites_the_file () =
    | Board.Posts_written _ | Board.Posts_write_unknown _ ->
      Alcotest.fail "partial posts source must refuse the exact captured snapshot before writing");
   Alcotest.(check bool) "direct comments snapshot is refused" true
-    (Result.is_error (Board_core.save_comments_snapshot store ""));
+    (Result.is_error (Board.with_persist_lock store (fun () ->
+      let snapshot = Board.with_lock store (fun () -> Board.capture_comments_snapshot store) in
+      Board.save_comments_snapshot store snapshot)));
   unchanged "direct save";
   Alcotest.(check bool) "delete is refused before it touches memory" true
     (Result.is_error (Board.delete_post store ~post_id:before_id));
@@ -380,7 +394,7 @@ let test_explicit_workspace_is_captured_once () =
       Unix.putenv "MASC_BASE_PATH" second;
       Alcotest.(check string) "relative directory is anchored without trimming"
         captured (Board.workspace_masc_dir store);
-      load_posts_source store;
+      load_sources store;
       let post =
         match Board.create_post store ~lookup:nobody_declared ~author:"writer"
           ~content:"written after cwd and Env change" ~post_kind:Board.Human_post () with
@@ -447,7 +461,7 @@ let test_all_persistence_stays_in_captured_workspace () =
       (* Seed B through real store producers, so redirecting any of the five
          files would overwrite independent accepted data rather than an empty fixture. *)
       let store_b = Board.create_store ~base_path:base_b () in
-      load_posts_source store_b;
+      load_sources store_b;
       let b = post_ok (Board.create_post store_b ~lookup:nobody_declared ~author:"b-owner"
         ~content:"B must survive untouched" ~post_kind:Board.Human_post ()) in
       let bid = Board.Post_id.to_string b.id in
@@ -542,7 +556,7 @@ let test_a_vote_does_not_move_updated_at_back () =
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let _dir = fresh_test_base_path () in
   let store = Board_core.create_store ~base_path:(Env_config_core.base_path ()) () in
-  load_posts_source store;
+  load_sources store;
   let post =
     match
       Board_core.create_post store ~lookup:nobody_declared ~author:"fixture-author"

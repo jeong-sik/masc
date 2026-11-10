@@ -4,6 +4,32 @@ The operator accepted the conversation-first preview in #41685 and asked to
 extend the same treatment consistently. This is the full scope of that work;
 completing one row does not complete the overall request.
 
+## 2026-11-10: Runtime picker candidates
+
+[#51137](https://github.com/jeong-sik/masc/pull/51137) gives an open Runtime
+picker the surface body. The ordinary probe summary, resolved default route and
+candidate table resume when the picker closes. Its count/filter, candidate page
+and wrapped catalogue/write/read-back diagnostics use the available body rows;
+the frame and page keys share the same page calculation. At the smallest height
+the selected candidate takes the single body row. Diagnostics that exceed the
+remaining rows retain an ellipsis. Their state is preserved and a taller window
+provides additional rows.
+The footer names Enter's actual create, append or replace action and respects
+the filter's ownership of printable keys.
+
+The matching-server native baseline at `6157b06b` showed the failure: at 36×20,
+`f`, `j`, `j` moved the default-route selection without displaying any candidate;
+widening the same open picker to 120×36 revealed the changed selection. No Enter
+was submitted. Its footer advertised detail while Enter would replace the route.
+Those retained raw captures establish the baseline, not execution of this repair.
+
+The five changed OCaml files parse and the patch passes `git diff --check`.
+No new screen-wording, layout, row-order or PTY assertion test was added; the
+existing footer test only receives the required `picker:None` API argument.
+Candidate execution, installed GUI, the rest of System and the full six-family,
+23-surface audit remain open. This slice does not change lane write admission,
+catalogue ownership or the Lanes editor.
+
 ## Shared rules
 
 - Lead with the object or content being read. Use one stable content column and

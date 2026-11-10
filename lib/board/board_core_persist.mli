@@ -196,7 +196,7 @@ val acknowledge_comments_recovery : store -> comments_recovery_receipt -> (unit,
     exceptions. Receive and acknowledge it under persistence, then fully reload
     comments before model authority. Does not replay the interrupted operation. *)
 type comment_append_receipt
-val append_comment : store -> comment -> (comment_append_receipt, board_error) result
+val append_comment : store -> reader:Board_access.reader -> comment -> (comment_append_receipt, board_error) result
 val publish_comment_append : store -> comment_append_receipt -> (unit, board_error) result
 (** Caller retains persistence through append and normal model publication.
     On a typed publication rejection, record the owned row's cleanup as dirty

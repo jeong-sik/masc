@@ -618,7 +618,7 @@ let handle_comment_add ~reader ~tool_name ~start_time args : Tool_result.result 
         "author is required"
     | Some author ->
       (match
-         Board_dispatch.add_comment_with_unresolved
+         Board_dispatch.add_comment_with_unresolved ~reader
            ~post_id
            ~author
            ~content

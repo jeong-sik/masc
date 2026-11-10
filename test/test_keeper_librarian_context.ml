@@ -535,7 +535,7 @@ let test_capture_rechecks_direct_readers_and_retained_context () = with_store @@
   let direct_body = "@direct-reader DIRECT_BODY_ONLY" in
   let direct = create Board.Direct "DIRECT_TITLE_ONLY" direct_body in
   let direct_id = Board.Post_id.to_string direct.id in
-  let comment = match Board_dispatch.add_comment ~post_id:direct_id ~author
+  let comment = match Board_dispatch.add_comment ~reader:Masc_board_handlers.Board_access.Operator ~post_id:direct_id ~author
       ~content:"DIRECT_COMMENT_ONLY" () with
     | Ok comment -> comment | Error error -> fail (Board.show_board_error error) in
   let public = create Board.Public "PUBLIC_TITLE_ONLY" "PUBLIC_BODY_ONLY" in

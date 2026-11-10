@@ -481,7 +481,7 @@ let test_cross_writer_projection base_path _workspace =
   let closed = current store first in
   Alcotest.(check bool) "close was actually published" true (Option.is_some closed.closed);
   require_board (Board.reopen store ~post_id:first_id);
-  let comment = require_board (Board.add_comment store
+  let comment = require_board (Board.add_comment ~reader:Masc_board_handlers.Board_access.Operator store
     ~lookup:Recipient_lookup.none_declared ~post_id:first_id ~author:"source-reader"
     ~content:"persisted comment" ~ttl_hours:0 ()) in
   ignore (require_board (Board.vote store ~voter:"source-voter" ~post_id:first_id
@@ -489,8 +489,10 @@ let test_cross_writer_projection base_path _workspace =
   ignore (require_board (Board.vote_comment store ~voter:"comment-voter"
     ~comment_id:(Board.Comment_id.to_string comment.id) ~direction:Board.Up));
   Board.flush_dirty store;
-  require_board (Board.delete_sub_board store
-    ~sub_board_id:(Board.Sub_board_id.to_string topic.id));
+  (match require_board (Board.delete_sub_board ~authorization:Board.Operator_sub_board_deletion store
+    ~sub_board_id:(Board.Sub_board_id.to_string topic.id)) with
+   | Board.Durable_deletion -> ()
+   | Board.Deletion_decision_pending detail | Board.Deletion_persistence_pending detail -> Alcotest.fail detail);
   Board.flush_dirty store;
   let order store = Board.list_posts store ()
     |> List.map (fun (post : Board.post) -> Board.Post_id.to_string post.id) in
@@ -701,7 +703,7 @@ let test_flush_cleanup_preserves_later_work base_path _workspace =
   load_reactions store;
   let post = require_post (create store "flush batch source") in
   let post_id = Board.Post_id.to_string post.id in
-  let comment = require_board (Board.add_comment store
+  let comment = require_board (Board.add_comment ~reader:Masc_board_handlers.Board_access.Operator store
     ~lookup:Recipient_lookup.none_declared ~post_id ~author:"batch-reader"
     ~content:"comment awaiting its counter snapshot" ~ttl_hours:0 ()) in
   let comment_id = Board.Comment_id.to_string comment.id in
@@ -760,7 +762,7 @@ let test_delete_cleanup_preserves_dependents base_path _workspace =
   load_reactions store;
   let post = require_post (create store "delete batch source") in
   let post_id = Board.Post_id.to_string post.id in
-  let comment = require_board (Board.add_comment store
+  let comment = require_board (Board.add_comment ~reader:Masc_board_handlers.Board_access.Operator store
     ~lookup:Recipient_lookup.none_declared ~post_id ~author:"delete-reader"
     ~content:"dependent comment on disk" ~ttl_hours:0 ()) in
   let comment_id = Board.Comment_id.to_string comment.id in
@@ -894,7 +896,7 @@ let test_fresh_workspace_accepts_every_writer base_path _workspace =
   load_reactions store;
   let post = require_post (create store "first post in a fresh workspace") in
   let post_id = Board.Post_id.to_string post.id in
-  ignore (require_board (Board.add_comment store ~lookup:Recipient_lookup.none_declared
+  ignore (require_board (Board.add_comment ~reader:Masc_board_handlers.Board_access.Operator store ~lookup:Recipient_lookup.none_declared
     ~post_id ~author:"fresh-reader" ~content:"first comment" ~ttl_hours:0 ()));
   ignore (require_board (Board.vote store ~voter:"fresh-voter" ~post_id ~direction:Board.Up));
   load_policy store;

@@ -137,7 +137,7 @@ let create_post_exn ~author ~content =
   | Error e -> Alcotest.fail (Board.Post_publication_failure.to_string e)
 
 let add_comment_exn ~post_id ~author ~content =
-  match Board_dispatch.add_comment ~post_id ~author ~content () with
+  match Board_dispatch.add_comment ~reader:Masc_board_handlers.Board_access.Operator ~post_id ~author ~content () with
   | Ok comment -> comment
   | Error e -> Alcotest.fail (Board.show_board_error e)
 

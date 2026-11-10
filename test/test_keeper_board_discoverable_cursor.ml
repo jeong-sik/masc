@@ -287,7 +287,7 @@ let test_replayed_comment_discovery_respects_parent_visibility () =
          | Error error -> fail (Board.Post_publication_failure.to_string error) in
        let post_id = Board.Post_id.to_string post.id in
        let comment =
-         match Board_dispatch.add_comment ~post_id ~author:"comment-author"
+         match Board_dispatch.add_comment ~reader:Masc_board_handlers.Board_access.Operator ~post_id ~author:"comment-author"
                  ~content:"@latealias new research" () with
          | Ok comment -> comment
          | Error error -> fail (Board.show_board_error error) in
@@ -389,7 +389,7 @@ let test_live_comment_and_catchup_share_identity_after_title_edit () =
   ignore (Keeper_world_observation.collect_board_events ~base_path:config.base_path ~meta);
   Board_dispatch.set_board_signal_hook (KKS.wakeup_relevant_keeper_for_board_signal ~config);
   let post_id = Board.Post_id.to_string post.id in
-  let comment = get (Board_dispatch.add_comment ~post_id ~author:"external"
+  let comment = get (Board_dispatch.add_comment ~reader:Masc_board_handlers.Board_access.Operator ~post_id ~author:"external"
       ~content:"@commentreader reply" ()) in
   check int "live comment is queued" 1 (queue_length config meta.name);
   ignore (get (Board_dispatch.update_post ~post_id ~editor:"editor"
@@ -487,10 +487,10 @@ let test_thread_activity_does_not_project_unbound_parent_content () =
     ~title:"Private parent" ~body:original_body ~visibility:Board.Direct
     ~hearth:"private-hearth" ~post_kind:Board.Human_post ()) in
   let post_id = Board.Post_id.to_string post.id in
-  let own_comment = get (Board_dispatch.add_comment ~post_id ~author:"alice" ~content:"Earlier comment" ()) in
+  let own_comment = get (Board_dispatch.add_comment ~reader:Masc_board_handlers.Board_access.Operator ~post_id ~author:"alice" ~content:"Earlier comment" ()) in
   let own_comment_id = Board.Comment_id.to_string own_comment.id in
   Board_dispatch.set_board_signal_hook (KKS.wakeup_relevant_keeper_for_board_signal ~config);
-  let reply = get (Board_dispatch.add_comment ~post_id ~author:"peer" ~parent_id:own_comment_id
+  let reply = get (Board_dispatch.add_comment ~reader:Masc_board_handlers.Board_access.Operator ~post_id ~author:"peer" ~parent_id:own_comment_id
     ~content:"@alice a reply" ()) in
   ignore (get (Board_dispatch.vote_comment ~voter:"peer" ~comment_id:own_comment_id ~direction:Board.Up));
   ignore (get (Board_dispatch.toggle_reaction ~reader:(Masc_board_handlers.Board_access.named "peer")
@@ -687,7 +687,7 @@ let test_existing_durable_comment_candidates_respect_parent_visibility () =
        let post_id = Board.Post_id.to_string post.id in
        let comment =
          get
-           (Board_dispatch.add_comment
+           (Board_dispatch.add_comment ~reader:Masc_board_handlers.Board_access.Operator
               ~post_id
               ~author:"comment-author"
               ~content:"unaddressed research comment"
@@ -793,7 +793,7 @@ let test_unavailable_posts_retain_a_judged_comment () =
     ~title:"thread" ~content:"research" ~visibility:Board.Public
     ~post_kind:Board.Human_post ()) in
   let post_id = Board.Post_id.to_string post.id in
-  let comment = match Board_dispatch.add_comment ~post_id ~author:"comment-author"
+  let comment = match Board_dispatch.add_comment ~reader:Masc_board_handlers.Board_access.Operator ~post_id ~author:"comment-author"
       ~content:"research comment" () with
     | Ok comment -> comment | Error error -> fail (Board.show_board_error error) in
   let signal : Board_dispatch.board_signal =

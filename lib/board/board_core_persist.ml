@@ -718,7 +718,10 @@ let save_comments_snapshot store snapshot =
   finish_comments_write (Board_comments_source.rewrite store snapshot)
 let settle_comments_source store = finish_comments_write (Board_comments_source.settle store)
 let acknowledge_comments_recovery = Board_comments_source.acknowledge_recovery
-let append_comment store comment = match Board_comments_source.append store comment with
+let append_comment store ~reader comment =
+  let* () = Board_comments_source.require_readable store in
+  let* admission = with_lock store (fun () -> Board_comment_admission.capture store ~reader comment) in
+  match Board_comments_source.append store ~admission comment with
   | Written { value; _ } -> Ok value
   | (Not_written _ | Unknown _) as outcome -> finish_comments_write outcome
 let publish_comment_append store receipt =
@@ -802,17 +805,7 @@ let sub_board_with_post_count_unlocked store (sb : sub_board) =
 let sub_board_with_post_count counts (sb : sub_board) =
   { sb with post_count = sub_board_post_count_from_counts counts sb.slug }
 ;;
-let sub_board_author_allowed (sb : sub_board) ~author_id =
-  let author = Agent_id.to_string author_id in
-  let owner = Agent_id.to_string sb.owner in
-  match sb.access with
-  | Open -> true
-  | Owner_only -> String.equal author owner
-  | Members_only ->
-    String.equal author owner
-    || List.exists
-         (fun member_id -> String.equal author (Agent_id.to_string member_id))
-         sb.members
+let sub_board_author_allowed sb ~author_id = Board_access.can_post_in_sub_board ~author_id sb
 ;;
 let validate_sub_board_post_policy_unlocked store ~author_id ~hearth =
   match hearth with

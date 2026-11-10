@@ -157,7 +157,7 @@ val put_post : store -> post -> unit
 val rebuild_hot_post_index : store -> unit
 
 type comment_append_receipt = Board_core_persist.comment_append_receipt
-val append_comment : store -> comment -> (comment_append_receipt, board_error) result
+val append_comment : store -> reader:Board_access.reader -> comment -> (comment_append_receipt, board_error) result
 val publish_comment_append : store -> comment_append_receipt -> (unit, board_error) result
 (** Append against the exact loaded comments observation while holding
     persistence. Retain the receipt through a normal model publication; typed
@@ -479,6 +479,7 @@ val search_posts : store -> predicate:(post -> bool) -> limit:int -> post list
 
 val add_comment
   :  store
+  -> reader:Board_access.reader
   -> lookup:Recipient_lookup.t
   -> post_id:string
   -> author:string
@@ -490,6 +491,7 @@ val add_comment
 
 val add_comment_with_audience
   :  store
+  -> reader:Board_access.reader
   -> lookup:Recipient_lookup.t
   -> post_id:string
   -> author:string
@@ -599,9 +601,10 @@ val list_sub_boards : store -> sub_board list
 val read_sub_boards : store -> (sub_board list, board_error) result
 (** Capture policy completeness and rows under one persistence interval. *)
 
-(** Persist an exact-source-checked removal before publishing it in memory.
-    Post hearth unlinking remains dirty work, not a multi-source transaction. *)
-val delete_sub_board : store -> sub_board_id:string -> (unit, board_error) Result.t
+(** Durably record the original board and affected post IDs, then remove policy
+    and unlink only those posts. Pending outcomes retain their owned recovery. *)
+val delete_sub_board : store -> authorization:sub_board_deletion_authorization ->
+  sub_board_id:string -> (deletion_outcome, board_error) Result.t
 
 (** Updates an existing sub-board by ID or slug.
     Only provided fields are changed; owner and slug are immutable.

@@ -57,3 +57,9 @@ val finish_write : write -> ('a, board_error) result -> ('a, board_error) result
 (** Finish after model publication/acknowledgement on known success. Preserve
     the original reserved cleanup cause through the shared Board carrier. *)
 val require_readable : store -> (unit, board_error) result
+val observe_guard_refusal : store -> sub_boards_source_observation ->
+  Fs_compat.private_jsonl_guard_failure -> unit
+(** Caller owns persistence. An actual refusal at this exact current policy
+    observation revokes authority only when the existing transaction classifier
+    proves a contradictory file observation. Contention and cleanup alone do
+    not invalidate the source. Never call for an outer Posts refusal. *)

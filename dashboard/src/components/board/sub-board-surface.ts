@@ -2,6 +2,7 @@ import { html } from 'htm/preact'
 import { useCallback, useEffect, useMemo, useState } from 'preact/hooks'
 import { Hash, Pencil, Plus, RefreshCw, Trash2, Users } from 'lucide-preact'
 import { createSubBoard, deleteSubBoard, fetchSubBoards, updateSubBoard } from '../../api/board'
+import type { SubBoardDeletionResult } from '../../api/board'
 import { boardHearthFilter } from '../../store'
 import type { SubBoard, SubBoardAccess } from '../../types'
 import { ActionButton } from '../common/button'
@@ -48,9 +49,15 @@ interface SubBoardRowProps {
   onEdit: (board: SubBoard) => void
   onDelete: (board: SubBoard) => void
   deleting: boolean
+  deletionPending: boolean
 }
 
-function SubBoardRow({ board, onEdit, onDelete, deleting }: SubBoardRowProps) {
+type PendingDeletion = {
+  board: Pick<SubBoard, 'id' | 'slug'>
+  outcome: Exclude<SubBoardDeletionResult, { persistence: 'durable' }>
+}
+
+function SubBoardRow({ board, onEdit, onDelete, deleting, deletionPending }: SubBoardRowProps) {
   return html`
     <${SurfaceCard} variant="compact" class="v2-workspace-row" testId=${`sub-board-row-${board.slug}`}>
       <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
@@ -103,7 +110,7 @@ function SubBoardRow({ board, onEdit, onDelete, deleting }: SubBoardRowProps) {
               size="sm"
               class="v2-workspace-action"
               onClick=${() => onDelete(board)}
-              disabled=${deleting}
+              disabled=${deleting || deletionPending}
               ariaLabel="Delete sub-board"
             >
               <${Trash2} size=${12} aria-hidden="true" />
@@ -134,6 +141,7 @@ export function SubBoardSurface() {
   const [editSubmitting, setEditSubmitting] = useState(false)
 
   const [deletingId, setDeletingId] = useState<string | null>(null)
+  const [pendingDeletions, setPendingDeletions] = useState<Map<string, PendingDeletion>>(() => new Map())
 
   const effectiveSlug = useMemo(() => slug.trim() || slugFromName(name), [name, slug])
   const memberList = useMemo(() => parseMembers(members), [members])
@@ -222,16 +230,33 @@ export function SubBoardSurface() {
   }
 
   const handleDelete = async (board: SubBoard) => {
+    if (pendingDeletions.has(board.id)) return
     const confirmed = await requestConfirm({
       title: 'Delete Sub-board',
-      message: `Delete "/${board.slug}"? Posts inside will keep their hearth tag but the space itself will be removed.`,
+      message: `Delete "/${board.slug}"? Existing posts will leave this sub-board and remain on the Board.`,
       tone: 'danger',
     })
     if (!confirmed) return
     setDeletingId(board.id)
     try {
-      await deleteSubBoard(board.id)
-      showToast('Sub-board deleted', 'success')
+      const result = await deleteSubBoard(board.id)
+      switch (result.persistence) {
+        case 'durable':
+          showToast('Sub-board deleted', 'success')
+          break
+        case 'pending':
+          setPendingDeletions(current => new Map(current).set(board.id, {
+            board: { id: board.id, slug: board.slug }, outcome: result,
+          }))
+          showToast('Sub-board removed; saving is still pending. Check the Board before trying again.', 'warning')
+          break
+        case 'decision_pending':
+          setPendingDeletions(current => new Map(current).set(board.id, {
+            board: { id: board.id, slug: board.slug }, outcome: result,
+          }))
+          showToast('Deletion is pending and has not been applied. Check the Board before trying again.', 'warning')
+          break
+      }
       await load()
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to delete sub-board'
@@ -262,6 +287,15 @@ export function SubBoardSurface() {
           </span>
         <//>
       </div>
+
+      ${Array.from(pendingDeletions.values()).map(({ board, outcome }) => html`
+        <p key=${board.id} role="status" aria-label=${`Deletion progress for /${board.slug}`}
+          class="text-xs text-[var(--color-fg-secondary)]">
+          /${board.slug}: ${outcome.applied
+            ? 'Removed; saving is pending. Check the Board before trying again.'
+            : 'Deletion is pending and has not been applied. Check the Board before trying again.'}
+        </p>
+      `)}
 
       ${!editingBoard ? html`
         <form class="v2-workspace-panel grid gap-3 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3" onSubmit=${submit}>
@@ -422,6 +456,7 @@ export function SubBoardSurface() {
                 onEdit=${startEdit}
                 onDelete=${handleDelete}
                 deleting=${deletingId === board.id}
+                deletionPending=${pendingDeletions.has(board.id)}
               />`)}
             </div>
           `}

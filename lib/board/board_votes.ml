@@ -268,11 +268,6 @@ type deletion_authorization = Board_deletion.deletion_authorization =
   | Author_deletion of { reader : Board_access.reader; author : Agent_id.t }
   | Cleanup_deletion of Board_access.reader
 
-type deletion_outcome = Board_deletion.deletion_outcome =
-  | Durable_deletion
-  | Deletion_decision_pending of string
-  | Deletion_persistence_pending of string
-
 let delete_post = Board_deletion.delete_post
 let flush_dirty = Board_deletion.flush_dirty
 let initialize_store = Board_store_lifecycle.initialize_store

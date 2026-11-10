@@ -16,10 +16,20 @@ type write =
   | Not_written of deletion_diagnostic list
   | Unknown of deletion_diagnostic list
 
-val record : store -> parent:posts_source_observation ->
-  comments:comments_source_observation -> deletion_plan -> write
-(** Exact Posts then Comments snapshots stay guarded through marker IO. Both
-    workspaces are revalidated before entry. A refused guard never records a decision;
+type readset =
+  | Post_readset of {
+      parent : posts_source_observation;
+      comments : comments_source_observation;
+    }
+  | Sub_board_readset of {
+      posts : posts_source_observation;
+      policy : sub_boards_source_observation;
+    }
+
+val record : store -> readset:readset -> deletion_plan -> write
+(** Exact Posts then Comments or Policy snapshots stay guarded through marker IO.
+    The readset kind must match the operation. Both workspaces are revalidated
+    before entry. A refused guard never records a decision;
     cleanup after record is retained before finish propagates a reserved cause. *)
 val fence_recovery : store -> write
 (** Rewrites the exact observed decision bytes through CAS to obtain a new

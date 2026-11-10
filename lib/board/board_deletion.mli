@@ -7,11 +7,6 @@ type deletion_authorization =
 (** Calling-boundary authority, never decoded from request JSON. Author and
     cleanup retain the actual reader; neither is promoted to operator. *)
 
-type deletion_outcome =
-  | Durable_deletion
-  | Deletion_decision_pending of string
-  | Deletion_persistence_pending of string
-
 val delete_post :
   store -> authorization:deletion_authorization -> post_id:string ->
   (deletion_outcome, board_error) result
@@ -22,6 +17,14 @@ val delete_post :
     model. The child IDs come from the canonical comments snapshot. Guard Posts
     then Comments through recording, so a child accepted before the decision
     is captured or causes a pre-decision refusal, before model changes. *)
+val delete_sub_board :
+  store -> authorization:sub_board_deletion_authorization -> sub_board_id:string ->
+  (deletion_outcome, board_error) result
+(** Resolve ID/slug from canonical policy, verify the current owner and complete
+    model/source correspondence, then record the exact affected Posts IDs while
+    guarding Posts -> Policy -> decision. Persist only Posts and Policy. Fresh
+    recovery unlinks those IDs still in the original hearth and preserves later
+    rows, moved posts and a new board with the same slug but another ID. *)
 val flush_dirty : store -> unit
 (** Resume owned known work; never replay a marker-unknown store. *)
 val recover_on_initialize : store -> (unit, board_error) result

@@ -798,11 +798,11 @@ let log_board_error ~op ~ids (e : Board_types.board_error) =
 let log_signal_skip ~op ~read ~id detail =
   Log.BoardLog.warn "board %s skipped: %s failed for %s: %s" op read id detail
 
-let add_comment_with_unresolved ~post_id ~author ~content ?parent_id
+let add_comment_with_unresolved ~reader ~post_id ~author ~content ?parent_id
     ?(ttl_hours = Board.Limits.default_ttl_hours) () =
   let store = backend () in
       (match
-         Board.add_comment_with_audience store ~lookup:(recipient_lookup ())
+         Board.add_comment_with_audience store ~reader ~lookup:(recipient_lookup ())
            ~post_id ~author ~content ?parent_id ~ttl_hours ()
        with
       | Ok creation ->
@@ -833,8 +833,8 @@ let add_comment_with_unresolved ~post_id ~author ~content ?parent_id
           Ok (comment, creation.unresolved)
       | Error _ as err -> err)
 
-let add_comment ~post_id ~author ~content ?parent_id ?ttl_hours () =
-  add_comment_with_unresolved ~post_id ~author ~content ?parent_id ?ttl_hours ()
+let add_comment ~reader ~post_id ~author ~content ?parent_id ?ttl_hours () =
+  add_comment_with_unresolved ~reader ~post_id ~author ~content ?parent_id ?ttl_hours ()
   |> Result.map fst
 
 let current_vote_for_post ~reader ~voter ~post_id =
@@ -1244,8 +1244,14 @@ let list_sub_boards ~reader () =
     List.map (fun (board : Board.sub_board) ->
       { board with post_count = (match List.assoc_opt board.slug counts with None -> 0 | Some count -> count) }) boards)
 
-let delete_sub_board ~sub_board_id =
-  let store = backend () in Board.delete_sub_board store ~sub_board_id
+let delete_sub_board ~authorization ~sub_board_id =
+  let store = backend () in
+  match Board.delete_sub_board store ~authorization ~sub_board_id with
+  | Ok ((Board.Durable_deletion | Board.Deletion_persistence_pending _) as outcome) ->
+    emit_board_sse_event ~visibility:None Board_changed;
+    Ok outcome
+  | Ok (Board.Deletion_decision_pending _) as pending -> pending
+  | Error _ as refused -> refused
 
 let update_sub_board ~reader ~sub_board_id ?name ?description ?members ?access () =
   let store = backend () in Board.update_sub_board store ~sub_board_id ?name ?description ?members ?access ()

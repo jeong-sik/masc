@@ -191,15 +191,6 @@ type deletion_authorization =
 (** The calling boundary supplies authority. Author and cleanup requests retain
     their actual reader. The store rechecks it before recording any decision. *)
 
-type deletion_outcome =
-  | Durable_deletion
-  | Deletion_decision_pending of string
-      (** Decision recording is uncertain or known work has not reached model
-          publication. Do not report an applied deletion or replay the request. *)
-  | Deletion_persistence_pending of string
-      (** The deletion is applied in memory. Failed and unattempted rewrites
-          remain ordered work for [flush_dirty]. The detail names actual write failures. *)
-
 val delete_post :
   store -> authorization:deletion_authorization -> post_id:string ->
   (deletion_outcome, board_error) Result.t

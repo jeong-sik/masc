@@ -385,6 +385,7 @@ val post_to_yojson_with_karma :
 (** {1 Comments} *)
 
 val add_comment :
+  reader:Board_access.reader ->
   post_id:string ->
   author:string ->
   content:string ->
@@ -394,6 +395,7 @@ val add_comment :
   (Board.comment, Board.board_error) Result.t
 
 val add_comment_with_unresolved :
+  reader:Board_access.reader ->
   post_id:string ->
   author:string ->
   content:string ->
@@ -571,8 +573,9 @@ val list_sub_boards : reader:Board_access.reader -> unit ->
   (Board.sub_board list, Board.board_error) result
 
 val delete_sub_board :
+  authorization:Board.sub_board_deletion_authorization ->
   sub_board_id:string ->
-  (unit, Board.board_error) Result.t
+  (Board.deletion_outcome, Board.board_error) Result.t
 
 val update_sub_board :
   reader:Board_access.reader ->

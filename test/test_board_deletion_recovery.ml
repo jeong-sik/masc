@@ -34,7 +34,7 @@ let post ?hearth store content =
 
 let seed store =
   let parent = post store "fixed original deletion" in
-  let reply = require (Board.add_comment store ~lookup:Recipient_lookup.none_declared
+  let reply = require (Board.add_comment ~reader:Masc_board_handlers.Board_access.Operator store ~lookup:Recipient_lookup.none_declared
     ~post_id:(Board.Post_id.to_string parent.id) ~author:"reader" ~content:"fixed original reply" ~ttl_hours:0 ()) in
   Board.flush_dirty store;
   parent, reply
@@ -100,7 +100,9 @@ let test_unknown_record base_path =
    | Board.Deletion_unsettled { attempt = Board.Recording_decision plan; intended_bytes; _ } ->
      Alcotest.(check string) "unknown retains its exact intended marker" intended_bytes (Fs_compat.load_file !marker_path);
      Alcotest.(check string) "unknown owns the original post" (Board.Post_id.to_string parent.id)
-       (Board.Post_id.to_string plan.deleted_post)
+       (match plan.operation with
+        | Board.Delete_post { deleted_post; _ } -> Board.Post_id.to_string deleted_post
+        | Board.Delete_sub_board _ -> Alcotest.fail "wrong decision kind")
    | Board.Deletion_unsettled { attempt = Board.Retiring_decision _; _ }
    | Board.Deletion_unobserved | Board.Deletion_readable _ | Board.Deletion_pending _
    | Board.Deletion_refused _ | Board.Deletion_projection_failed _ -> Alcotest.fail "record uncertainty lost");
@@ -222,15 +224,20 @@ let test_retirement_then_new_dirty_work base_path =
    | Board.Deletion_persistence_pending _ -> ()
    | Board.Durable_deletion | Board.Deletion_decision_pending _ -> Alcotest.fail "expected proven nonwrite at retirement");
   expect_progress store Board.Sources_written;
-  require (Board.delete_sub_board store ~sub_board_id:(Board.Sub_board_id.to_string room.id));
-  Alcotest.(check bool) "hearth unlink creates real subsequent dirty work" true store.dirty_posts;
+  let later = require (Board.add_comment ~reader:Masc_board_handlers.Board_access.Operator store
+    ~lookup:Recipient_lookup.none_declared ~post_id:(Board.Post_id.to_string survivor.id)
+    ~author:"later-reader" ~content:"accepted after source persistence" ()) in
+  Alcotest.(check bool) "later reply creates real subsequent dirty work" true store.dirty_posts;
   Unix.chmod (Fs_compat.private_jsonl_lock_path !marker_path) 0o600;
   Board.flush_dirty store;
   Alcotest.(check bool) "single shutdown flush also writes new dirty work" false store.dirty_posts;
   let restarted = fresh base_path in
   check_removed restarted parent reply;
   let kept = read_post restarted (Board.Post_id.to_string survivor.id) in
-  Alcotest.(check bool) "hearth unlink survives restart" true (Option.is_none kept.hearth)
+  Alcotest.(check (option string)) "unrelated hearth remains attached" (Some room.slug) kept.hearth;
+  Alcotest.(check int) "later reply counter survives the same shutdown flush" 1 kept.reply_count;
+  Alcotest.(check bool) "later reply row remains after restart" true
+    (Hashtbl.mem restarted.Board.comments (Board.Comment_id.to_string later.id))
 
 let test_invalid_marker base_path =
   let store = fresh base_path in
@@ -444,7 +451,7 @@ let test_later_child_after_decision base_path =
    | exception Eio.Time.Timeout -> ());
   expect_progress store Board.Decision_recorded;
   Alcotest.(check bool) "original decision exists before foreign append" true (Sys.file_exists marker_path);
-  let later = require (Board.add_comment other ~lookup:Recipient_lookup.none_declared
+  let later = require (Board.add_comment ~reader:Masc_board_handlers.Board_access.Operator other ~lookup:Recipient_lookup.none_declared
     ~post_id:(Board.Post_id.to_string parent.id) ~author:"late-reader"
     ~content:"accepted after the fixed decision" ()) in
   let comment_id = Board.Comment_id.to_string later.id in
@@ -485,7 +492,7 @@ let test_comments_refusal_and_parent_cleanup base_path =
   require (Board.initialize_store store);
   let parent, _ = seed store in
   let other = fresh base_path in
-  let foreign = require (Board.add_comment other ~lookup:Recipient_lookup.none_declared
+  let foreign = require (Board.add_comment ~reader:Masc_board_handlers.Board_access.Operator other ~lookup:Recipient_lookup.none_declared
     ~post_id:(Board.Post_id.to_string parent.id) ~author:"foreign-reader"
     ~content:"accepted before the deletion decision" ()) in
   let before = snapshots other in
@@ -559,7 +566,7 @@ let run_cases () = Alcotest.run "board_deletion_recovery"
     Alcotest.test_case "known retirement survives reserved cleanup" `Quick (with_fixture (test_reserved_marker true));
     Alcotest.test_case "unknown retirement is not replayed" `Quick (with_fixture test_unknown_retirement);
     Alcotest.test_case "last source cleanup stops before marker retirement" `Quick (with_fixture test_last_source_cleanup);
-    Alcotest.test_case "retirement flush also saves later hearth unlink" `Quick (with_fixture test_retirement_then_new_dirty_work);
+    Alcotest.test_case "retirement flush also saves later reply" `Quick (with_fixture test_retirement_then_new_dirty_work);
     Alcotest.test_case "invalid decision preserves source bytes" `Quick (with_fixture test_invalid_marker);
     Alcotest.test_case "captured comment belonging to another thread is preserved" `Quick (with_fixture test_changed_comment_parent);
     Alcotest.test_case "stale author cannot record a deletion after foreign ownership transfer" `Quick

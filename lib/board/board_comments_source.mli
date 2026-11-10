@@ -52,9 +52,11 @@ val finish_write : 'a write_outcome -> ('a, board_error) result
     The carrier retains actual write success versus failure, including cleanup. *)
 
 type append_receipt
-val append : store -> comment -> append_receipt write_outcome
+val append : store -> admission:Board_comment_admission.t -> comment -> append_receipt write_outcome
 (** Known success retains [Comments_publishing] and the actual resulting cursor
-    paired with this call's intended bytes. It never substitutes a reread. *)
+    paired with this call's intended bytes. It never substitutes a reread.
+    Guard refusal means the append never ran. Executed guards preserve the
+    actual append result and inner-to-outer cleanup diagnostics. *)
 val publish_append : store -> append_receipt -> unit write_outcome
 (** Acknowledge the exact store-owned receipt after a normal state callback.
     Rejected publication must first record the owned row's cleanup as dirty.

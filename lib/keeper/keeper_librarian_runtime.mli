@@ -283,7 +283,11 @@ val admission_mode_valid
   -> bool
 
 val run_best_effort
-  :  ?write_scope:write_scope
+  :  pass:Keeper_memory_commit_pass.t
+       (** The pass whose Memory commit this run makes; the store labels the
+           commit's change counts with it. A [Context_only] run writes no
+           Memory, so its pass labels nothing. *)
+  -> ?write_scope:write_scope
   -> ?admission:Keeper_memory_admission_queue.batch
        (** Explicit candidates use a separate strict judgment envelope. Any
            deferred candidate leaves the entire batch pending. This mode is

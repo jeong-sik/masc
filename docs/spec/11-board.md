@@ -134,10 +134,24 @@ Store mutation은 `Board_dispatch.*`를 경유하고, 타입/직렬화 접근은
 | `.masc/board_posts.jsonl` | 게시물 (줄 단위 JSON) |
 | `.masc/board_comments.jsonl` | 댓글 |
 | `.masc/board_votes.jsonl` | 투표 로그 |
+| `.masc/board_reactions.jsonl` | 리액션 |
+| `.masc/board_sub_boards.jsonl` | 하위 게시판 정책 |
+| `.masc/board_deletion.jsonl` | 진행 중인 삭제 결정과 원래 글·댓글 ID |
 
 **저장 전략:**
-- 모든 mutation: expected version 아래 atomic current-state snapshot rewrite
-- persistence 실패: mutation을 완전한 durable 성공으로 위장하지 않고 typed error 반환. 특히 `delete_post` 등 인메모리 상태가 먼저 갱신된 뒤 스냅샷 재기록이 실패한 경우(`#43267`), 호출자에게 snapshot rewrite 미완료(pending snapshot persistence) 상태를 명시적으로 구분해 보고한다.
+- 각 원본의 쓰기는 관측한 파일 버전과 바이트를 검사한다. 추가 기록과 스냅샷 재기록은 해당 원본의 저장 경로를 따른다.
+- `delete_post`는 요청자의 권한과 부모 글 원본을 확인한 뒤 원래 글·댓글 ID를 먼저 기록한다. 부모 파일의 잠금은 이 결정 쓰기까지 유지한다. 이후 글·댓글·투표·리액션을 순서대로 저장하고 네 쓰기가 확인된 뒤 결정 파일을 정리한다.
+- 결정이 기록되기 전 거절은 모델을 바꾸지 않는다. 결과가 불확실한 결정은 일반 요청이나 flush가 재실행하지 않는다. fresh store 초기화는 남아 있는 결정을 다시 확인하고 원래 ID의 삭제만 이어간다. 나중에 추가된 댓글과 그 표·리액션은 이 결정에 포함하지 않는다.
+
+Dashboard 삭제 응답은 다음 세 조합을 구분한다. `decision_pending`에서는 행·선택·상세를 유지하고 경고한다. 두 pending 응답 모두 같은 삭제 POST를 반복하지 않는다.
+
+| HTTP | `applied` | `persistence` | 의미 |
+|------|-----------|---------------|------|
+| 200 | `true` | `durable` | 원본 저장과 결정 정리 완료 |
+| 202 | `true` | `pending` | 모델 삭제 적용, 원본 저장 또는 결정 정리 대기 |
+| 202 | `false` | `decision_pending` | 결정 결과 또는 적용이 미확인 |
+
+MCP 단건 삭제는 원래 author와 reader를 보관해 현재 모델과 관측 원본 양쪽에 다시 검사한다. 일괄 cleanup은 실제 reader를 보관하며, Admin HTTP 경로만 operator 권한을 전달한다. 이 계약은 별도 정책 read-set이나 cleanup 후보 조건의 동시 재검증을 완료했다는 뜻이 아니다.
 
 **캐시:**
 - `sorted_posts_cache` -- 정렬된 게시물 목록 (invalidated on post mutation)

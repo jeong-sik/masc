@@ -213,7 +213,9 @@ let delete_post store ~authorization ~post_id =
     let* plan, parent = with_lock store (fun () -> stage store ~authorization pid) in
     let recorded = Source.record store ~parent plan in
     match recorded with
-    | Source.Not_written _ | Source.Cleared _ -> Source.finish recorded (Error (Io_error pending_detail))
+    | Source.Not_written _ | Source.Cleared _ ->
+      Source.finish recorded (Error (Io_error
+        "Board deletion was not recorded. Refresh Board data before requesting deletion again."))
     | Source.Unknown _ -> Source.finish recorded (Ok (Deletion_decision_pending pending_detail))
     | Source.Recorded _ ->
       let* () = Source.finish recorded (Ok ()) in

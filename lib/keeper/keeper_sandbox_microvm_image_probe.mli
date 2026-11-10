@@ -93,9 +93,6 @@ val classify_image_probe_for :
   listing:(Unix.process_status * string * string) option ->
   image_probe_outcome
 
-val image_probe_for :
-  Keeper_microvm_backend.t -> image:string -> timeout_sec:float -> image_probe_outcome
-
 val image_present_for :
   Keeper_microvm_backend.t ->
   name:string option ->

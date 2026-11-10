@@ -1220,9 +1220,10 @@ let get_sub_board ~reader ~sub_board_id =
 
 let list_sub_boards ~reader () =
   let store = backend () in
-  let counts = list_hearths ~reader () in
-  Board.read_sub_boards store |> Result.map (List.map (fun (board : Board.sub_board) ->
-    { board with post_count = (match List.assoc_opt board.slug counts with None -> 0 | Some count -> count) }))
+  Board.read_sub_boards store |> Result.map (fun boards ->
+    let counts = list_hearths ~reader () in
+    List.map (fun (board : Board.sub_board) ->
+      { board with post_count = (match List.assoc_opt board.slug counts with None -> 0 | Some count -> count) }) boards)
 
 let delete_sub_board ~sub_board_id =
   let store = backend () in Board.delete_sub_board store ~sub_board_id

@@ -1093,11 +1093,11 @@ type store = {
   (** Source authority is owned by persist_mutex. *)
   mutable comments_source : comments_source_state;
   comments_source_io : Fs_compat.private_jsonl_transaction_io_for_testing option;
+  mutable sub_boards_source : sub_boards_source_state;
+  sub_boards_source_io : Fs_compat.private_jsonl_transaction_io_for_testing option;
   (** Derived outcomes of the other two source loads. *)
   mutable votes_load_result : (unit, string) result;
   mutable reactions_load_result : (unit, string) result;
-  mutable sub_boards_source : sub_boards_source_state;
-  sub_boards_source_io : Fs_compat.private_jsonl_transaction_io_for_testing option;
   mutable workspace_binding: Board_workspace_binding.t;
   posts: (string, post) Hashtbl.t;
   comments: (string, comment) Hashtbl.t;

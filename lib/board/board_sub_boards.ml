@@ -28,11 +28,7 @@ let reload_sub_boards store =
     with exception_ ->
       Board_sub_boards_source.fail_read store outcome exception_ (Printexc.get_raw_backtrace ()) in
     match Board_sub_boards_source.finish_read outcome with
-    | Ok () ->
-      let count = match outcome with
-        | Complete { rows; _ } | Partial { rows; _ } -> List.length rows
-        | Unavailable _ -> 0 in
-      Ok count
+    | Ok count -> Ok count
     | Error error -> Error (Board_paths.sub_boards_path store, Failure (error_to_string error)))
 
 type snapshot_change =
@@ -65,10 +61,11 @@ let publish_policy store outcome publish =
       Board_sub_boards_source.acknowledge_publication store publication
       |> Result.map (fun () -> value)
     | Not_written _ | Unknown _ -> Error (Io_error "Board data is unavailable.") in
+  let result = Board_sub_boards_source.finish_write outcome result in
   (match result with
    | Ok _ -> ()
    | Error error -> record_persist_error ~where:"sub_board_policy" (error_to_string error));
-  Board_sub_boards_source.finish_write outcome result
+  result
 ;;
 
 let valid_slug_pattern = Re.Pcre.re {|^[a-z0-9][a-z0-9_-]*$|} |> Re.compile
@@ -102,48 +99,20 @@ let create_sub_board
       (match parse_sub_board_members ~owner:owner_id members with
        | Error e -> Error e
        | Ok members ->
-         (* Stage without mutation. The final uniqueness check is serialized
-            with every runtime sub-board policy mutation before append. *)
-         let staged =
-           with_lock store (fun () ->
-             if Hashtbl.mem store.sub_boards_by_slug slug
-             then
-               Error
-                 (Already_exists (Printf.sprintf "Sub-board slug %S already exists" slug))
-             else (
-               let id = Sub_board_id.generate () in
-               Ok
-                 { id
-                 ; slug
-                 ; name = String.trim name
-                 ; description = String.trim description
-                 ; owner = owner_id
-                 ; members
-                 ; access
-                 ; created_at = Time_compat.now ()
-                 ; post_count = 0
-                 }))
-         in
-         match staged with
-         | Error _ as error -> error
-         | Ok sb ->
-           with_persist_lock store (fun () ->
-             let* () = Board_sub_boards_source.require_readable store in
-             let* () =
-               with_lock store (fun () ->
-                 if Hashtbl.mem store.sub_boards_by_slug slug
-                 then
-                   Error
-                     (Already_exists
-                        (Printf.sprintf "Sub-board slug %S already exists" slug))
-                 else Ok ())
-             in
-             let outcome = Board_sub_boards_source.append store sb in
-             publish_policy store outcome (fun () ->
+         with_persist_lock store (fun () ->
+           let* () = Board_sub_boards_source.require_readable store in
+           let* sb = with_lock store (fun () ->
+             if Hashtbl.mem store.sub_boards_by_slug slug then
+               Error (Already_exists (Printf.sprintf "Sub-board slug %S already exists" slug))
+             else Ok {
+               id = Sub_board_id.generate ();
+               slug; name = String.trim name; description = String.trim description;
+               owner = owner_id; members; access; created_at = Time_compat.now (); post_count = 0 }) in
+           let outcome = Board_sub_boards_source.append store sb in
+           publish_policy store outcome (fun () ->
              with_lock store (fun () ->
                Hashtbl.replace store.sub_boards (Sub_board_id.to_string sb.id) sb;
-               Hashtbl.replace store.sub_boards_by_slug slug
-                 (Sub_board_id.to_string sb.id);
+               Hashtbl.replace store.sub_boards_by_slug slug (Sub_board_id.to_string sb.id);
                sb)))))
 ;;
 

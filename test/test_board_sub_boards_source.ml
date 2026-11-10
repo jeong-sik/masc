@@ -74,6 +74,7 @@ let test_stale_append_and_delete_preserve_foreign_policy base_path =
   let path = Board.sub_boards_path first in
   let bytes = Fs_compat.load_file path in
   require_unavailable (create stale "not-appended");
+  require_unavailable (create stale "existing");
   Alcotest.(check string) "stale append preserves both policies" bytes (Fs_compat.load_file path);
   ignore (reload stale);
   ignore (require (Board.update_sub_board first ~sub_board_id:"existing" ~name:"newer policy" ()));

@@ -172,16 +172,17 @@ let fail_read store outcome exception_ backtrace =
   Unavailable { failure; diagnostics }
 
 let finish_read = function
-  | Complete { diagnostics; _ } -> finish (Ok ()) diagnostics
+  | Complete { rows; diagnostics; _ } -> finish (Ok (List.length rows)) diagnostics
   | Partial { diagnostics; _ } | Unavailable { diagnostics; _ } ->
     finish (Error (unavailable_error ())) diagnostics
 
 let rec contradicts_observation = function
   | Fs_compat.Cursor_mismatch _ | Transaction_content_changed _ | Transaction_path_binding_changed _
-  | Incomplete_transaction_tail _ | Ambiguous_transaction_file_identity _ -> true
+  | Incomplete_transaction_tail _ | Ambiguous_transaction_file_identity _
+  | Unexpected_transaction_file_kind _ -> true
   | Transaction_settlement_failed { primary = Transaction_failed error; _ } -> contradicts_observation error
   | Stable_lock_contended _ | Unexpected_stable_lock_permissions _ | Invalid_stable_lock_state _
-  | Unexpected_transaction_file_kind _ | Invalid_transaction_suffix | Private_jsonl_operation_failed _
+  | Invalid_transaction_suffix | Private_jsonl_operation_failed _
   | Rewrite_stage_failed _ | Rewrite_published_durability_unknown _
   | Transaction_settlement_failed { primary = Transaction_succeeded _; _ }
   | Transaction_append_failed _ -> false

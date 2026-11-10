@@ -22,7 +22,7 @@ type read =
 val read : store -> read
 val publish_read : store -> read -> unit
 val fail_read : store -> read -> exn -> Printexc.raw_backtrace -> read
-val finish_read : read -> (unit, board_error) result
+val finish_read : read -> (int, board_error) result
 (** Complete reload replaces both policy indexes. Partial rows are display
     data only. Neither reload nor an ordinary write clears an uncertain write
     or interrupted model publication; these require a fresh store. *)

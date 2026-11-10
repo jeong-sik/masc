@@ -312,6 +312,35 @@ observations stay private in `artifacts/native-tui-proof-42732829605/`.
 This confirms those observed candidate views only, without proving production
 installation, the new navigation repair, or the remaining child/input states.
 
+## Feature child identity and resource body (#51023)
+
+The matching be3302c2 server/TUI baseline at 120x36 and 36x20 showed a
+Resources JSON body of `[]` entirely below fixed origin/About/URI/type metadata
+on the narrow first page. Clients lost its child name to the family prefix and
+Runtime menu, while Channels and Tools repeated render clocks and parent names.
+The baseline is retained in
+`artifacts/tui-feature-children-reading-20261110/baseline-observation.json`.
+
+[#51023](https://github.com/jeong-sik/masc/pull/51023) gives those four children
+short KO/EN titles beneath the existing family strip. Exceptional connection
+evidence and each body's own missing/failed/retained reading remain separate.
+Clients still derives row ages from its roster observation; channel state and
+binding decisions are unchanged.
+
+Resources now opens its admitted body with the selected original part target.
+Full MCP/report metadata, including a known public URL, expands with the existing
+`i` action. Read failures, report confirmation, unknown/uncertain sharing and
+share recovery precede the body; original copy/export/share authority and bytes
+are unchanged. Source anchors keep separate notice origins and continue at the
+first actual document block when preparation chrome disappears. A returned
+empty part list remains distinct from unread or failed content.
+
+Local OCaml 5.5.1 parsing and `git diff --check` pass. The changed Help registry
+still needs its actual generated key reference. Independent source reviews,
+matching candidate build and manual interaction, failure/retained and nonempty
+states, installation and GUI display are separate work. No wording/layout/
+row-order tests were added, and the full 23-surface scope remains open.
+
 ## Tools catalog and volume reading (#50872)
 
 The catalog's long periodic volume report moves to an explicit child reading.

@@ -54,6 +54,13 @@ type t =
   | Connector of string
   | Store of store_change
   | Board
+  | Board_attention of {
+      keeper : string;
+      source : Keeper_board_attention_change.source;
+    }
+      (** An actual Candidate/Partition ledger publication attempt in this
+          workspace, including uncertain outcomes. No candidate content or
+          quarantine decision is retained. *)
   | Execution_invalidated
   | Agent_core of { keeper : string option; change : agent_core_change }
   | Telemetry_sample
@@ -109,8 +116,8 @@ val subscribe :
     Non-external observer publications (Schedule, Goal, pending confirms and
     exports included) use that same exact publication boundary. Coverage gaps
     additionally use their exact after-append hook. Judgment append attempts
-    use their after-attempt hook, comparing roots resolved before writing and
-    before subscription. ToolHost selection reads the process ring, so its
+    and Board-attention ledger attempts use their after-attempt hooks,
+    comparing roots resolved before writing and before subscription. ToolHost selection reads the process ring, so its
     actual slot publication/overwrite is a process input. Callbacks are
     synchronous and must not block or yield. Switch release unsubscribes only
     this listener. *)

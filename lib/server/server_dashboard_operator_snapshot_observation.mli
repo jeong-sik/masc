@@ -33,8 +33,9 @@ val cache_snapshot : owner -> Server_dashboard_http_cache.surface_snapshot
 val is_current : owner -> bool
 val has_observation : owner -> bool
 val observation_is_usable : owner -> bool
-(** Complete and partial actual bodies satisfy a cold request. A healthy
-    observation with no semantic deadline is usable. Source debt, a passed
+(** A complete/partial body or a terminal no-result error satisfies a cold
+    request. Repeating a failed GET cannot bypass the worker's existing failure
+    retry. A healthy observation with no semantic deadline is usable. Source debt, a passed
     semantic deadline, a mutation invalidation or scope retirement is not.
     Reading this predicate does not create a timer or authorize an action. *)
 

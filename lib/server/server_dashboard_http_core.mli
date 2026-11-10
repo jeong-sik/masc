@@ -37,11 +37,7 @@ val shell_warming : bool Atomic.t
 val last_good_shell : Yojson.Safe.t Atomic.t
 val last_good_shell_light : Yojson.Safe.t Atomic.t
 
-(** Late-bound broadcast callbacks — set by [Server_dashboard_http]
-    after [Sse] module is in scope. *)
-type operator_snapshot_publication =
-  Server_dashboard_http_core_operator.operator_snapshot_publication
-
+(** Captured-scope Mission read cache. *)
 val mission_cache : state:Mcp_server.server_state -> cached_surface
 
 (** {1 Dashboard Timeout} *)
@@ -72,7 +68,7 @@ val start_operator_snapshot_refresh_loop :
   state:Mcp_server.server_state ->
   sw:Eio.Switch.t ->
   clock:float Eio.Time.clock_ty Eio.Resource.t ->
-  broadcast_snapshot:(operator_snapshot_publication -> unit) ->
+  mono_clock:Eio.Time.Mono.ty Eio.Resource.t ->
   unit
 
 val start_operator_digest_refresh_loop :
@@ -86,7 +82,6 @@ val operator_snapshot_http_json :
   state:Mcp_server.server_state ->
   sw:Eio.Switch.t ->
   clock:float Eio.Time.clock_ty Eio.Resource.t ->
-  broadcast_snapshot:(operator_snapshot_publication -> unit) ->
   Httpun.Request.t ->
   Yojson.Safe.t
 

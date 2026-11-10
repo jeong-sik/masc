@@ -2103,8 +2103,7 @@ let run ~sw ~runtime_sw ~env ~address ~port ~base_path ?input_base_path ?on_read
         ; mission_refresh = (fun () ->
             Server_dashboard_http.start_mission_refresh_loop ~state ~sw ~clock ~mono_clock)
         ; operator_snapshot_refresh = (fun () ->
-            Server_dashboard_http.start_operator_snapshot_refresh_loop ~state ~sw ~clock
-              ~broadcast_snapshot:Server_dashboard_http_execution_surfaces.broadcast_refreshed_operator_snapshot)
+            Server_dashboard_http.start_operator_snapshot_refresh_loop ~state ~sw ~clock ~mono_clock)
         ; operator_digest_refresh = (fun () ->
             Server_dashboard_http.start_operator_digest_refresh_loop ~state ~sw ~clock ~mono_clock)
         ; shell_prewarm = (fun () ->

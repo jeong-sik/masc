@@ -37,10 +37,6 @@ let broadcast_payload_mu = Stdlib.Mutex.create ()
 (* Where a surface payload is encoded. Either way it is encoded once, and the
    SSE frame is written around those bytes.
 
-   An operator snapshot is 2.8 MB: encoding it, hashing it for the delta check
-   and encoding it again for the frame took 27 ms standalone, and the snapshot
-   refresh fiber's runs on the scheduler domain were 35-63 ms (2026-09-16).
-
    The pool hands the fiber back to the scheduler while it encodes, so only a
    caller that may yield takes it. [still_current] is checked after encoding
    and again after acquiring the publication lock, so waiting for an earlier
@@ -135,77 +131,6 @@ let broadcast_cached_surface ?(target = Sse.Observers) ~encoding ~event_type (js
 
 let execution_actor_for_request ~base_path request =
   Server_auth.sanitized_dashboard_actor_for_request ~base_path request
-;;
-
-(* These two used to be installed into process-global Atomics from module
-   initializers, because Server_dashboard_http_core_operator is compiled before
-   Sse is in scope here and so cannot name these bodies. They are ordinary
-   functions now; the refresh loops take them as arguments (#25927). *)
-let operator_snapshot_publication_is_current
-      (publication :
-        Server_dashboard_http_core_operator.operator_snapshot_publication)
-  =
-  let current =
-    Server_dashboard_http_core_operator.operator_snapshot_publication ()
-  in
-  String.equal current.epoch publication.epoch
-  && Int.equal current.generation publication.generation
-  && Int.equal current.compute_sequence publication.compute_sequence
-  && Int.equal current.terminal_sequence publication.terminal_sequence
-;;
-
-let operator_snapshot_json =
-  Server_dashboard_http_core_operator.operator_snapshot_publication_json
-;;
-
-let broadcast_operator_snapshot
-      (publication :
-        Server_dashboard_http_core_operator.operator_snapshot_publication)
-  =
-    if operator_snapshot_publication_is_current publication
-    then
-      broadcast_cached_surface
-        ~encoding:Encode_inline
-        ~event_type:"operator_snapshot"
-        (operator_snapshot_json publication)
-;;
-
-(* A publication that replaced this one while it was encoding is handed on.
-   An invalidation or a failure was broadcast by whoever published it; a
-   success the /api/v1/operator route published is broadcast by nobody else,
-   so the current success is broadcast in this one's place. When its publisher
-   has already sent it, the delta check drops it. *)
-let rec broadcast_refreshed_operator_snapshot
-      (publication :
-        Server_dashboard_http_core_operator.operator_snapshot_publication)
-  =
-    if operator_snapshot_publication_is_current publication
-    then
-      broadcast_cached_surface
-        ~encoding:
-          (Encode_on_pool
-             { still_current =
-                 (fun () -> operator_snapshot_publication_is_current publication)
-             ; on_superseded = broadcast_current_successful_operator_snapshot
-             })
-        ~event_type:"operator_snapshot"
-        (operator_snapshot_json publication)
-
-and broadcast_current_successful_operator_snapshot () =
-  let current = Server_dashboard_http_core_operator.operator_snapshot_publication () in
-  if current.has_success then broadcast_refreshed_operator_snapshot current
-;;
-
-let () =
-  Dashboard_projection_cache.register_snapshot_generation_observer
-    (fun generation ->
-       match
-         Server_dashboard_http_core_operator
-         .publish_operator_snapshot_invalidation_if_current
-           ~generation
-       with
-       | None -> ()
-       | Some publication -> broadcast_operator_snapshot publication)
 ;;
 
 let broadcast_operator_digest json =

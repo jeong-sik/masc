@@ -23,8 +23,7 @@ module Make (Key : Map.OrderedType) = struct
         then signal_locked ())
     in
     (* Bound retries after a transport failure; an idle source has no timer. *)
-    let retry_initial_s = 1.0 in
-    let retry_ceiling_s = 60.0 in
+    let retry_initial_s = Server_observation_retry.initial_delay_s in
     let publish_one key =
       let rec attempt delay =
         match publish key with
@@ -37,7 +36,7 @@ module Make (Key : Map.OrderedType) = struct
              carries no rows, and logs must not expose confirmation tokens. *)
           Log.Server.warn "workspace invalidation publish failed; retrying";
           Eio.Time.Mono.sleep mono_clock delay;
-          attempt (Float.min retry_ceiling_s (delay *. 2.0))
+          attempt (Server_observation_retry.next_delay_s delay)
       in
       Fun.protect ~finally:(fun () -> finish key)
         (fun () -> attempt retry_initial_s)

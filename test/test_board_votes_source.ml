@@ -26,7 +26,7 @@ let post store content =
   | Error error -> Alcotest.fail (Board.Post_publication_failure.to_string error)
 
 let cast store (parent : Board.post) voter =
-  Board.vote store ~post_id:(Board.Post_id.to_string parent.id)
+  Board.vote store ~reader:Masc_board_handlers.Board_access.Operator ~post_id:(Board.Post_id.to_string parent.id)
     ~voter ~direction:Board.Up
 
 let require_io_error = function

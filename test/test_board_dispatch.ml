@@ -163,7 +163,7 @@ let test_content_update_time_survives_activity_and_reload () =
     post.created_at post.content_updated_at;
   Unix.sleepf 0.01;
   ignore (get (Board_dispatch.add_comment ~reader:Masc_board_handlers.Board_access.Operator ~post_id ~author:"peer" ~content:"reply" ()));
-  ignore (get (Board_dispatch.vote ~post_id ~voter:"peer" ~direction:Board.Up));
+  ignore (get (Board_dispatch.vote ~reader:Masc_board_handlers.Board_access.Operator ~post_id ~voter:"peer" ~direction:Board.Up));
   ignore (get (Board_dispatch.set_pinned ~post_id ~pinned:true));
   same post.content_updated_at;
   let edit ?new_author ~editor ~title ~body () =
@@ -852,7 +852,7 @@ let test_vote_returns_total_score_not_change () =
   in
   let post_id = Board.Post_id.to_string post.id in
   let vote_exn ~voter =
-    match Board_dispatch.vote ~voter ~post_id ~direction:Board.Up with
+    match Board_dispatch.vote ~reader:Masc_board_handlers.Board_access.Operator ~voter ~post_id ~direction:Board.Up with
     | Ok score -> score
     | Error e -> Alcotest.fail (Board.show_board_error e)
   in
@@ -872,7 +872,7 @@ let test_recent_sort_bypasses_hot_cutoff () =
     | Error e -> Alcotest.fail (Board.Post_publication_failure.to_string e)
   in
   let vote_up_exn ~post_id ~voter =
-    match Board_dispatch.vote ~voter ~post_id ~direction:Board.Up with
+    match Board_dispatch.vote ~reader:Masc_board_handlers.Board_access.Operator ~voter ~post_id ~direction:Board.Up with
     | Ok _ -> ()
     | Error e -> Alcotest.fail (Board.show_board_error e)
   in
@@ -1276,7 +1276,7 @@ let test_vote_post () =
   | Error e -> Alcotest.fail (Board.Post_publication_failure.to_string e)
   | Ok post ->
       let pid = Board.Post_id.to_string post.id in
-      match Board_dispatch.vote ~voter:"judge" ~post_id:pid ~direction:Board.Up with
+      match Board_dispatch.vote ~reader:Masc_board_handlers.Board_access.Operator ~voter:"judge" ~post_id:pid ~direction:Board.Up with
       | Error e -> Alcotest.fail (Board.show_board_error e)
       | Ok score ->
           Alcotest.(check int) "score after upvote" 1 score
@@ -1289,8 +1289,8 @@ let test_vote_dedup () =
   | Error e -> Alcotest.fail (Board.Post_publication_failure.to_string e)
   | Ok post ->
       let pid = Board.Post_id.to_string post.id in
-      ignore (Board_dispatch.vote ~voter:"same-voter" ~post_id:pid ~direction:Board.Up);
-      match Board_dispatch.vote ~voter:"same-voter" ~post_id:pid ~direction:Board.Up with
+      ignore (Board_dispatch.vote ~reader:Masc_board_handlers.Board_access.Operator ~voter:"same-voter" ~post_id:pid ~direction:Board.Up);
+      match Board_dispatch.vote ~reader:Masc_board_handlers.Board_access.Operator ~voter:"same-voter" ~post_id:pid ~direction:Board.Up with
       | Ok _ -> Alcotest.fail "Expected Already_voted error"
       | Error (Board.Already_voted _) -> ()
       | Error e -> Alcotest.fail (Board.show_board_error e)
@@ -1303,8 +1303,8 @@ let test_vote_flip () =
   | Error e -> Alcotest.fail (Board.Post_publication_failure.to_string e)
   | Ok post ->
       let pid = Board.Post_id.to_string post.id in
-      ignore (Board_dispatch.vote ~voter:"flipper" ~post_id:pid ~direction:Board.Up);
-      match Board_dispatch.vote ~voter:"flipper" ~post_id:pid ~direction:Board.Down with
+      ignore (Board_dispatch.vote ~reader:Masc_board_handlers.Board_access.Operator ~voter:"flipper" ~post_id:pid ~direction:Board.Up);
+      match Board_dispatch.vote ~reader:Masc_board_handlers.Board_access.Operator ~voter:"flipper" ~post_id:pid ~direction:Board.Down with
       | Error e -> Alcotest.fail (Board.show_board_error e)
       | Ok score ->
           Alcotest.(check int) "score after flip" (-1) score
@@ -1323,7 +1323,7 @@ let test_current_vote_lookup () =
        | Ok vote ->
            Alcotest.(check (option string)) "post vote starts empty" None
              (vote_label vote));
-      ignore (Board_dispatch.vote ~voter:"reader" ~post_id:pid ~direction:Board.Up);
+      ignore (Board_dispatch.vote ~reader:Masc_board_handlers.Board_access.Operator ~voter:"reader" ~post_id:pid ~direction:Board.Up);
       (match Board_dispatch.current_vote_for_post ~reader:Masc_board_handlers.Board_access.Operator ~voter:"reader" ~post_id:pid with
        | Error e -> Alcotest.fail (Board.show_board_error e)
        | Ok vote ->
@@ -1345,7 +1345,7 @@ let test_current_vote_lookup () =
                 Alcotest.(check (option string)) "comment vote starts empty" None
                   (vote_label vote));
            ignore
-             (Board_dispatch.vote_comment ~voter:"reader" ~comment_id:cid
+             (Board_dispatch.vote_comment ~reader:Masc_board_handlers.Board_access.Operator ~voter:"reader" ~comment_id:cid
                 ~direction:Board.Down);
            match
              Board_dispatch.current_vote_for_comment ~reader:Masc_board_handlers.Board_access.Operator ~voter:"reader"
@@ -1414,7 +1414,7 @@ let test_vote_persisted_by_flusher_actor () =
           | Error e -> Alcotest.fail (Board.Post_publication_failure.to_string e)
           | Ok post -> Board.Post_id.to_string post.id
         in
-        (match Board_dispatch.vote ~voter:"judge" ~post_id ~direction:Board.Up with
+        (match Board_dispatch.vote ~reader:Masc_board_handlers.Board_access.Operator ~voter:"judge" ~post_id ~direction:Board.Up with
          | Error e -> Alcotest.fail (Board.show_board_error e)
          | Ok _ -> ());
         let store = Board_dispatch.backend () in
@@ -1752,7 +1752,7 @@ let test_dashboard_comment_context_contains_page_and_focus_ancestors () =
   let missing = read ~focused_comment:"deleted-comment" () in
   Alcotest.(check (list string)) "missing focus still returns the ordinary context"
     (ids "comment_context" latest) (ids "comment_context" missing);
-  (match Board_dispatch.vote_comment ~comment_id:newest_reply ~voter:"context-voter"
+  (match Board_dispatch.vote_comment ~reader:Masc_board_handlers.Board_access.Operator ~comment_id:newest_reply ~voter:"context-voter"
       ~direction:Board.Up with
    | Ok _ -> ()
    | Error error -> Alcotest.fail (Board.show_board_error error));
@@ -1894,7 +1894,7 @@ let test_board_signal_vote_cast_on_post () =
   in
   let post_id = Board.Post_id.to_string post.id in
   let signals = vote_signals_seen () in
-  (match Board_dispatch.vote ~voter:"voter-one" ~post_id ~direction:Board.Up with
+  (match Board_dispatch.vote ~reader:Masc_board_handlers.Board_access.Operator ~voter:"voter-one" ~post_id ~direction:Board.Up with
    | Error e -> Alcotest.fail (Board.show_board_error e)
    | Ok _ -> ());
   (match signals () with
@@ -1920,7 +1920,7 @@ let test_board_signal_vote_cast_on_post () =
    | signals ->
      Alcotest.failf "expected exactly one board signal, got %d" (List.length signals));
   (* A same-direction duplicate is Already_voted: no store change, no signal. *)
-  (match Board_dispatch.vote ~voter:"voter-one" ~post_id ~direction:Board.Up with
+  (match Board_dispatch.vote ~reader:Masc_board_handlers.Board_access.Operator ~voter:"voter-one" ~post_id ~direction:Board.Up with
    | Error (Board.Already_voted _) -> ()
    | Ok _ -> Alcotest.fail "expected Already_voted"
    | Error e -> Alcotest.fail (Board.show_board_error e));
@@ -1947,7 +1947,7 @@ let test_board_signal_vote_cast_on_comment_names_comment_author () =
   let comment_id = Board.Comment_id.to_string comment.id in
   let signals = vote_signals_seen () in
   (match
-     Board_dispatch.vote_comment ~voter:"voter-two" ~comment_id ~direction:Board.Down
+     Board_dispatch.vote_comment ~reader:Masc_board_handlers.Board_access.Operator ~voter:"voter-two" ~comment_id ~direction:Board.Down
    with
    | Error e -> Alcotest.fail (Board.show_board_error e)
    | Ok _ -> ());
@@ -3364,8 +3364,8 @@ let test_direct_reads_and_aggregates () =
     [Masc_board_handlers.Board_access.named owner; target; Masc_board_handlers.Board_access.Operator];
   Alcotest.(check bool) "internal observation remains available" true
     (Result.is_ok (Board_dispatch.read_post_unchecked ~post_id:private_id));
-  ignore (Result.get_ok (Board_dispatch.vote ~voter:"peer" ~post_id:public_id ~direction:Board.Up));
-  ignore (Result.get_ok (Board_dispatch.vote_comment ~voter:"peer"
+  ignore (Result.get_ok (Board_dispatch.vote ~reader:Masc_board_handlers.Board_access.Operator ~voter:"peer" ~post_id:public_id ~direction:Board.Up));
+  ignore (Result.get_ok (Board_dispatch.vote_comment ~reader:Masc_board_handlers.Board_access.Operator ~voter:"peer"
     ~comment_id:(Board.Comment_id.to_string comment.id) ~direction:Board.Up));
   Alcotest.(check int) "operator sees both earned votes" 2
     (Board_dispatch.get_agent_karma ~reader:Masc_board_handlers.Board_access.Operator ~agent_name:owner);

@@ -455,8 +455,8 @@ let test_later_child_after_decision base_path =
     ~post_id:(Board.Post_id.to_string parent.id) ~author:"late-reader"
     ~content:"accepted after the fixed decision" ()) in
   let comment_id = Board.Comment_id.to_string later.id in
-  ignore (require (Board.vote_comment other ~comment_id ~voter:"late-voter" ~direction:Board.Up));
-  ignore (require (Board.toggle_reaction other ~target_type:Board.Reaction_comment
+  ignore (require (Board.vote_comment other ~reader:Masc_board_handlers.Board_access.Operator ~comment_id ~voter:"late-voter" ~direction:Board.Up));
+  ignore (require (Board.toggle_reaction other ~reader:Masc_board_handlers.Board_access.Operator ~target_type:Board.Reaction_comment
     ~target_id:comment_id ~user_id:"late-reactor" ~emoji:"👍"));
   let before = List.map (fun path -> path, Fs_compat.load_file path)
     [Board.comments_path other; Board.vote_log_path other; Board.reactions_path other] in

@@ -60,7 +60,7 @@ val current_vote_for_post :
 
 val vote :
   store ->
-  voter:string ->
+  reader:Board_access.reader -> voter:string ->
   post_id:string ->
   direction:vote_direction ->
   (int, board_error) Result.t
@@ -90,7 +90,7 @@ val current_vote_for_comment :
 
 val vote_comment :
   store ->
-  voter:string ->
+  reader:Board_access.reader -> voter:string ->
   comment_id:string ->
   direction:vote_direction ->
   (int, board_error) Result.t

@@ -293,7 +293,7 @@ let test_an_old_post_without_an_audience_costs_nothing () =
   Unix.sleepf 0.01;
   ignore
     (get
-       (Board_dispatch.vote
+       (Board_dispatch.vote ~reader:Masc_board_handlers.Board_access.Operator
           ~voter:"someone"
           ~post_id:(post_id old_post)
           ~direction:Board.Up));

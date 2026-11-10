@@ -26,7 +26,7 @@ let post store content =
   | Error error -> Alcotest.fail (Board.Post_publication_failure.to_string error)
 
 let toggle store (parent : Board.post) user emoji =
-  Board.toggle_reaction store ~target_type:Board.Reaction_post
+  Board.toggle_reaction store ~reader:Masc_board_handlers.Board_access.Operator ~target_type:Board.Reaction_post
     ~target_id:(Board.Post_id.to_string parent.id) ~user_id:user ~emoji
 
 let summaries store (parent : Board.post) user =
@@ -34,7 +34,7 @@ let summaries store (parent : Board.post) user =
     ~target_id:(Board.Post_id.to_string parent.id) ~user_id:user ())
 
 let dirty_through_vote store (parent : Board.post) =
-  ignore (require (Board.vote store ~voter:"compaction-trigger"
+  ignore (require (Board.vote store ~reader:Masc_board_handlers.Board_access.Operator ~voter:"compaction-trigger"
     ~post_id:(Board.Post_id.to_string parent.id) ~direction:Board.Up));
   Alcotest.(check bool) "a real accepted vote schedules post compaction" true
     store.Board.dirty_posts

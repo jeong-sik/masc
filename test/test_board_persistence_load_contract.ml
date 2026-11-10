@@ -481,8 +481,8 @@ let test_all_persistence_stays_in_captured_workspace () =
       let bid = Board.Post_id.to_string b.id in
       ignore (board_ok (Board.add_comment ~reader:Masc_board_handlers.Board_access.Operator store_b ~lookup:nobody_declared ~post_id:bid
         ~author:"b-reader" ~content:"B comment" ~ttl_hours:0 ()));
-      ignore (board_ok (Board.vote store_b ~voter:"b-voter" ~post_id:bid ~direction:Board.Up));
-      ignore (board_ok (Board.toggle_reaction store_b ~target_type:Board.Reaction_post
+      ignore (board_ok (Board.vote store_b ~reader:Masc_board_handlers.Board_access.Operator ~voter:"b-voter" ~post_id:bid ~direction:Board.Up));
+      ignore (board_ok (Board.toggle_reaction store_b ~reader:Masc_board_handlers.Board_access.Operator ~target_type:Board.Reaction_post
         ~target_id:bid ~user_id:"b-reader" ~emoji:"🚀"));
       ignore (board_ok (Board.create_sub_board store_b ~slug:"b-room" ~name:"B room"
         ~description:"independent policy" ~owner:"b-owner" ()));
@@ -503,8 +503,8 @@ let test_all_persistence_stays_in_captured_workspace () =
       let comment = board_ok (Board_dispatch.add_comment ~reader:Masc_board_handlers.Board_access.Operator ~post_id:pid ~author:"a-reader"
         ~content:"A comment" ~ttl_hours:0 ()) in
       let cid = Board.Comment_id.to_string comment.id in
-      ignore (board_ok (Board_dispatch.vote ~voter:"a-voter" ~post_id:pid ~direction:Board.Up));
-      ignore (board_ok (Board_dispatch.vote_comment ~voter:"a-voter" ~comment_id:cid
+      ignore (board_ok (Board_dispatch.vote ~reader:Masc_board_handlers.Board_access.Operator ~voter:"a-voter" ~post_id:pid ~direction:Board.Up));
+      ignore (board_ok (Board_dispatch.vote_comment ~reader:Masc_board_handlers.Board_access.Operator ~voter:"a-voter" ~comment_id:cid
         ~direction:Board.Down));
       ignore (board_ok (Board_dispatch.toggle_reaction ~reader:Masc_board_handlers.Board_access.Operator ~target_type:Board.Reaction_post
         ~target_id:pid ~user_id:"a-reader" ~emoji:"🚀"));
@@ -586,7 +586,7 @@ let test_a_vote_does_not_move_updated_at_back () =
   Hashtbl.replace store.posts post_id
     { post with updated_at = edited_at; content_updated_at = edited_at };
   (match
-     Masc_board_handlers.Board_votes.vote store ~voter:"fixture-voter" ~post_id
+     Masc_board_handlers.Board_votes.vote store ~reader:Masc_board_handlers.Board_access.Operator ~voter:"fixture-voter" ~post_id
        ~direction:Board.Up
    with
    | Ok _ -> ()

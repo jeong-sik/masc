@@ -202,8 +202,22 @@ vote_log 키: `"post:<pid>:<voter>"` 또는 `"comment:<cid>:<voter>"`
 | Up | Down | Flip: up -1, down +1, vote_log 갱신 |
 | Down | Up | Flip: down -1, up +1, vote_log 갱신 |
 
-Votes update the requested post/comment counters only. They do not change model
-selection, Keeper priority, reputation, credit, or authorization.
+투표는 대상 글·댓글의 카운터를 갱신한다. 모델 선택, Keeper 우선순위나 권한을
+결정하는 입력으로 쓰지는 않는다.
+
+새 투표와 반응은 요청의 실제 reader를 저장 경계까지 전달한다. voter/user_id는
+효과의 주체이며 읽기 권한을 대신하지 않는다. 글 대상은 canonical Posts를,
+댓글 대상은 canonical Comments의 댓글→글 연결과 Posts를 확인한다. 모델의
+권한·연결 필드가 이 원본과 다르면 쓰기 전에 거절한다. 잠금은 Posts → 필요한
+경우 Comments → Votes/Reactions 순서이며 실제 leaf 쓰기까지 유지한다.
+
+중복 투표도 부모와 투표 원본을 읽기 전용 guard로 확인한 뒤 `Already_voted`를
+반환한다. 새 append나 성공 쓰기 영수증을 만들지 않는다. 부모 guard의 거절은
+leaf 미실행이며, 실제 leaf 성공 뒤 정리 실패는 모델 반영·ACK 뒤 원인과 함께
+전달한다. 결과가 불확실하면 기존 unsettled 쓰기를 보존하고 임의 재실행하지 않는다.
+
+이미 저장된 orphan 행의 로드·보존은 이 신규 변경 승인과 별개다. 읽을 수 있는
+closed 글에도 투표·반응할 수 있으며 소게시판의 게시글 생성 정책을 적용하지 않는다.
 
 ---
 

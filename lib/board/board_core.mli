@@ -552,7 +552,7 @@ val list_reactions_batch
 
 val toggle_reaction
   :  store
-  -> target_type:reaction_target_type
+  -> reader:Board_access.reader -> target_type:reaction_target_type
   -> target_id:string
   -> user_id:string
   -> emoji:string

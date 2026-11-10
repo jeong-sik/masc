@@ -162,7 +162,7 @@ let handle_vote ~reader ~tool_name ~start_time args =
     (match Board.vote_direction_of_string_opt direction_str with
      | None -> invalid_vote_direction ~tool_name ~start_time direction_str
      | Some direction ->
-       (match Board_dispatch.vote ~voter ~post_id ~direction with
+       (match Board_dispatch.vote ~reader ~voter ~post_id ~direction with
         | Ok new_score ->
           let arrow = if direction = Board.Up then "↑" else "↓" in
           Tool_result.make_ok
@@ -260,7 +260,7 @@ let handle_search ~reader ~tool_name ~start_time args : Tool_result.result =
 ;;
 
 (** Vote on comment. *)
-let handle_comment_vote ~tool_name ~start_time args : Tool_result.result =
+let handle_comment_vote ~reader ~tool_name ~start_time args : Tool_result.result =
   let comment_id = get_string args "comment_id" "" in
   let voter = get_string args "voter" "anonymous" in
   match Safe_ops.json_string_opt "direction" args with
@@ -277,7 +277,7 @@ let handle_comment_vote ~tool_name ~start_time args : Tool_result.result =
         ~start_time
         "comment_id required"
     else (
-      match Board_dispatch.vote_comment ~voter ~comment_id ~direction with
+      match Board_dispatch.vote_comment ~reader ~voter ~comment_id ~direction with
       | Ok score ->
         Tool_result.make_ok
           ~tool_name

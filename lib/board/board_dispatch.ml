@@ -861,10 +861,10 @@ let emit_vote_board_signal ~target ~target_author ~voter ~direction
     ; audience = Board.audience_for_vote
     }
 
-let vote ~voter ~post_id ~direction =
+let vote ~reader ~voter ~post_id ~direction =
   let result =
     let store = backend () in
-        (match Board.vote store ~voter ~post_id ~direction with
+        (match Board.vote store ~reader ~voter ~post_id ~direction with
          | Ok _score as ok ->
              (match Board.read_post store ~post_id with
               | Ok post ->
@@ -897,10 +897,10 @@ let current_vote_for_comment ~reader ~voter ~comment_id =
     | Error _ -> Error (Board.Comment_not_found comment_id)
     | Ok _ -> Board.current_vote_for_comment store ~voter ~comment_id
 
-let vote_comment ~voter ~comment_id ~direction =
+let vote_comment ~reader ~voter ~comment_id ~direction =
   let result =
     let store = backend () in
-        (match Board.vote_comment store ~voter ~comment_id ~direction with
+        (match Board.vote_comment store ~reader ~voter ~comment_id ~direction with
          | Ok _score as ok ->
              (match Board.get_comment store ~comment_id with
               | Error e ->
@@ -963,8 +963,8 @@ let require_readable_target ~reader ~target_type ~target_id =
 
 let emit_reaction_board_signal store (toggled : Board.reaction_toggle_result) =
   match
-    post_for_reaction_target store ~target_type:toggled.target_type
-      ~target_id:toggled.target_id
+    Board.read_post store ~post_id:(Board.Post_id.to_string toggled.post_id)
+    |> Result.map_error Board.board_error_of_read_error
   with
   | Ok post ->
       emit_board_signal
@@ -1001,10 +1001,10 @@ type reaction_write =
 let toggle_reaction ~reader ~target_type ~target_id ~user_id ~emoji =
   match readable_reaction_target ~reader ~target_type ~target_id with
   | Error _ as error -> error
-  | Ok parent ->
+  | Ok _ ->
   let result =
     let store = backend () in
-        (match Board.toggle_reaction store ~target_type ~target_id ~user_id ~emoji with
+        (match Board.toggle_reaction store ~reader ~target_type ~target_id ~user_id ~emoji with
          | Ok toggled as ok ->
              emit_reaction_board_signal store toggled;
              ok
@@ -1013,7 +1013,7 @@ let toggle_reaction ~reader ~target_type ~target_id ~user_id ~emoji =
   (match result with
    | Ok toggled ->
        let store = backend () in
-       let visibility = match post_for_reaction_target store ~target_type ~target_id with
+       let visibility = match Board.read_post store ~post_id:(Board.Post_id.to_string toggled.post_id) with
          | Ok post -> Some post.visibility
          | Error _ -> None in
        emit_board_sse_event ~visibility
@@ -1030,7 +1030,7 @@ let toggle_reaction ~reader ~target_type ~target_id ~user_id ~emoji =
          ~ids:(Printf.sprintf "target=%s:%s user=%s emoji=%s"
            (Board.reaction_target_type_to_string target_type)
            target_id user_id emoji) e);
-  Result.map (fun reaction -> { post_id = parent.Board.id; reaction }) result
+  Result.map (fun (reaction : Board.reaction_toggle_result) -> { post_id = reaction.post_id; reaction }) result
 
 let list_reactions ~reader ~target_type ~target_id ?user_id () =
   match require_readable_target ~reader ~target_type ~target_id with

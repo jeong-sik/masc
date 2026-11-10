@@ -56,9 +56,9 @@ let test_durable_unlink_and_unselected_work base =
   let board = room store "original" in
   let parent = post store board.slug "retained parent" in
   let reply = comment store parent in
-  ignore (require (Board.vote store ~voter:"room-voter" ~post_id:(Board.Post_id.to_string parent.id)
+  ignore (require (Board.vote store ~reader:Masc_board_handlers.Board_access.Operator ~voter:"room-voter" ~post_id:(Board.Post_id.to_string parent.id)
     ~direction:Board.Up));
-  ignore (require (Board.toggle_reaction store ~target_type:Board.Reaction_post
+  ignore (require (Board.toggle_reaction store ~reader:Masc_board_handlers.Board_access.Operator ~target_type:Board.Reaction_post
     ~target_id:(Board.Post_id.to_string parent.id) ~user_id:"room-reactor" ~emoji:"👍"));
   let untouched = List.map (fun path -> path, bytes path)
     [Board.comments_path store; Board.vote_log_path store; Board.reactions_path store] in

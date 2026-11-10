@@ -438,7 +438,7 @@ val current_vote_for_post : reader:Board_access.reader ->
   (Board.vote_direction option, Board.board_error) Result.t
 
 val vote :
-  voter:string ->
+  reader:Board_access.reader -> voter:string ->
   post_id:string ->
   direction:Board.vote_direction ->
   (int, Board.board_error) Result.t
@@ -449,7 +449,7 @@ val current_vote_for_comment : reader:Board_access.reader ->
   (Board.vote_direction option, Board.board_error) Result.t
 
 val vote_comment :
-  voter:string ->
+  reader:Board_access.reader -> voter:string ->
   comment_id:string ->
   direction:Board.vote_direction ->
   (int, Board.board_error) Result.t

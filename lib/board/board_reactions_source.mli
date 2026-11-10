@@ -1,6 +1,6 @@
 (** Exact reaction-file authority. The caller owns persistence; filesystem work
-    runs outside the Board state mutex. This source does not authorize reads
-    of a parent or policy in another file. *)
+    runs outside the Board state mutex. New toggles retain supplied canonical
+    parent admission; deletion/flush rewrites keep their own-source contract. *)
 open Board_types
 
 type row = reaction
@@ -51,6 +51,10 @@ val rewrite : store -> string -> write
     stable file lock. Rewrite bytes come from a model capture in this same
     persistence interval. The write receipt precedes model publication; an
     after-write reread cannot replace it. *)
+
+val rewrite_admitted : store -> admission:Board_target_admission.t -> string -> write
+(** A new toggle retains canonical parent dependencies through the leaf write.
+    Ordinary deletion/flush rewrites retain their own-source contract. *)
 
 val acknowledge_publication : store -> publication -> (unit, board_error) result
 (** Acknowledge the exact store-owned receipt after the model callback returns

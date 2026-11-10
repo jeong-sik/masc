@@ -270,6 +270,7 @@ type reaction_summary = {
 }
 
 type reaction_toggle_result = {
+  post_id : Post_id.t; (** Canonical parent admitted for this exact write. *)
   target_type : reaction_target_type;
   target_id : string;
   user_id : string;
@@ -851,6 +852,7 @@ type reactions_row_error =
 
 type reactions_source_diagnostic =
   | Reaction_file_diagnostic of Fs_compat.private_jsonl_transaction_error
+  | Reaction_guard_diagnostic of Fs_compat.private_jsonl_guard_failure
   | Reaction_workspace_diagnostic of Board_workspace_binding.rejection
   | Reaction_raised_diagnostic of {
       exception_ : exn;
@@ -1025,6 +1027,7 @@ type votes_row_error =
 
 type votes_source_diagnostic =
   | Vote_file_diagnostic of Fs_compat.private_jsonl_transaction_error
+  | Vote_guard_diagnostic of Fs_compat.private_jsonl_guard_failure
   | Vote_workspace_diagnostic of Board_workspace_binding.rejection
   | Vote_raised_diagnostic of {
       exception_ : exn;

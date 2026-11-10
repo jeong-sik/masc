@@ -178,7 +178,7 @@ let test_unknown_rewrite_requires_explicit_recovery_and_reload base_path =
   let store = Board.create_store_with_comments_io_for_testing ~base_path ~io () in
   load_sources store;
   let comment = require (append store post "real row before an uncertain rewrite") in
-  ignore (require (Board.vote_comment store ~voter:"comments-source-voter"
+  ignore (require (Board.vote_comment store ~reader:Masc_board_handlers.Board_access.Operator ~voter:"comments-source-voter"
     ~comment_id:(Board.Comment_id.to_string comment.id) ~direction:Board.Up));
   Board.with_persist_lock store (fun () ->
     let snapshot = Board.with_lock store (fun () -> Board.capture_comments_snapshot store) in
@@ -258,7 +258,7 @@ let test_completed_recovery_survives_reserved_close base_path =
   load_sources store;
   lock_path := Some (Fs_compat.private_jsonl_lock_path (Board.comments_path store));
   let comment = require (append store post "row whose recovery receipt must survive") in
-  ignore (require (Board.vote_comment store ~voter:"recovery-receipt-voter"
+  ignore (require (Board.vote_comment store ~reader:Masc_board_handlers.Board_access.Operator ~voter:"recovery-receipt-voter"
     ~comment_id:(Board.Comment_id.to_string comment.id) ~direction:Board.Up));
   Board.with_persist_lock store (fun () ->
     let snapshot = Board.with_lock store (fun () -> Board.capture_comments_snapshot store) in

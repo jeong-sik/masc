@@ -308,6 +308,15 @@ let rec contradicts_observation = function
   | Transaction_settlement_failed { primary = Transaction_succeeded _; _ }
   | Transaction_append_failed _ -> false
 
+let observe_guard_refusal store observation failure =
+  match store.comments_source with
+  | Comments_readable current when current.observation == observation
+      && String.equal failure.Fs_compat.guard_path observation.source_path
+      && contradicts_observation failure.guard_error ->
+    refuse store (Comments_transaction_failed failure.guard_error) [Comments_guard_diagnostic failure]
+  | Comments_readable _ | Comments_unobserved | Comments_publishing _
+  | Comments_refused _ | Comments_unsettled _ | Comments_recovered _ -> ()
+
 let not_written failure diagnostics = Not_written { failure; diagnostics }
 
 type file_result = (Fs_compat.Private_jsonl_cursor.t, Fs_compat.private_jsonl_transaction_error) result

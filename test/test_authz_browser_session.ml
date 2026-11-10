@@ -98,7 +98,7 @@ let with_installation f =
                }
            with
            | Ok (_ : Z.committed) -> ()
-           | Error error -> Alcotest.failf "invitation refused: %s" (Z.error_to_string error));
+           | Error error -> Alcotest.failf "invitation refused: %s" (Z.error_detail error));
           let admin =
             match
               Login.sign_in
@@ -185,7 +185,7 @@ let member t =
        }
    with
    | Ok (_ : Z.committed) -> ()
-   | Error error -> Alcotest.failf "invitation refused: %s" (Z.error_to_string error));
+   | Error error -> Alcotest.failf "invitation refused: %s" (Z.error_detail error));
   match
     Login.sign_in
       t.zone
@@ -264,7 +264,7 @@ let a_cookie_that_does_not_act () =
          }
      with
      | Ok (_ : Z.committed) -> ()
-     | Error error -> Alcotest.failf "disable refused: %s" (Z.error_to_string error));
+     | Error error -> Alcotest.failf "disable refused: %s" (Z.error_detail error));
     Alcotest.(check string)
       "a disabled principal"
       (Bs.refusal_to_string (Bs.Principal_inactive member_id))

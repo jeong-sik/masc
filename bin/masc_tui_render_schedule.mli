@@ -299,43 +299,6 @@ val system_log_row :
   layout:system_log_column Masc_tui_table.layout -> system_log_row_values -> string
 (** Header and styled rows share the measured column allocation. *)
 
-(** {1 Task Review columns} *)
-
-type verification_row_values = {
-  vrow_task : string;
-  vrow_submitted_by : string;
-  vrow_evidence : string;
-  vrow_review : string;
-  vrow_title : string;
-}
-
-val verification_minimum_title_width : int
-
-type verification_column
-
-val verification_layout :
-  inner_width:int ->
-  submitter_width:int ->
-  verification_column Masc_tui_table.layout
-(** Keep the task and its title. When the title would fall below
-    {!verification_minimum_title_width}, fold the submitter, then the evidence
-    counts, then the automatic verification state. [submitter_width] is the
-    width the submitter column takes when it is shown. *)
-
-val verification_header_row :
-  submitter_width:int ->
-  layout:verification_column Masc_tui_table.layout ->
-  string
-
-val verification_row :
-  submitter_width:int ->
-  layout:verification_column Masc_tui_table.layout ->
-  verification_row_values ->
-  string
-(** One request, on the same columns as {!verification_header_row}. The widths
-    used to live in two format strings, and printf's width is a floor: a task
-    id past fourteen cells pushed every column after it out of line. *)
-
 (** {1 Work / Tasks list columns} *)
 
 type work_task_row_values = {
@@ -720,45 +683,6 @@ val fusion_pipeline_diagram :
   unit ->
   string
 
-(** {1 Harness verdict columns} *)
-
-type harness_row_values = {
-  hrow_time : string;
-  hrow_task : string;
-  hrow_gate : string;
-  hrow_verdict : string;
-  hrow_evaluator : string;
-  hrow_reason : string;
-}
-
-(** The verdict list's columns, named so a narrow list can say which it
-    spares. *)
-type harness_column =
-  | Harness_time
-  | Harness_task
-  | Harness_gate
-  | Harness_verdict
-  | Harness_evaluator
-  | Harness_reason
-
-val harness_layout : inner_width:int -> harness_column Masc_tui_table.layout
-(** The columns the verdict list draws in [inner_width] and the reason's share
-    of it. When the row is narrow the evaluator goes first, then the time and
-    the gate; the task, the verdict and the reason stay, and the reason takes
-    what the others leave, never below its floor. *)
-
-val harness_header_row : layout:harness_column Masc_tui_table.layout -> string
-
-val harness_row :
-  verdict_style:string ->
-  layout:harness_column Masc_tui_table.layout ->
-  harness_row_values ->
-  string
-(** One verdict, on the same columns as {!harness_header_row}. The task and
-    gate cells are fitted now: they were padded and never cut, so an id or a
-    gate name longer than its column pushed the evaluator and the reason
-    beside it out of line with every other row. *)
-
 (** Planning goal columns.
 
     The list named no columns at all, and its title took the terminal minus a
@@ -887,12 +811,13 @@ val board_layout : inner_width:int -> board_column Masc_tui_table.layout
     leave, never below its floor. *)
 
 val board_header_row :
-  age_header:string -> layout:board_column Masc_tui_table.layout -> string
+  ko:bool -> age_header:string -> layout:board_column Masc_tui_table.layout -> string
 (** [age_header] is the word over the age column, which names the time the
     column holds. *)
 
 val board_row :
   ?close:string ->
+  ko:bool ->
   styles:board_row_styles ->
   age_header:string ->
   layout:board_column Masc_tui_table.layout ->

@@ -1,0 +1,35 @@
+ [2m운영[0m  [2m작업[0m  [1;7m▸키퍼[0m  [2m기능·플러그인[0m  [2m워크스페이스[0m  [2m시스템[0m
+
+ [1m MASC Memory[0m ▸ sourcereader (3 facts · All)  23:41:36  HTTP [connected]
+ ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+   (2 ord · 1 src · 0 drop) · Sort [s]: Recency (Newest)
+ [2m  c/C:category  [0;1m[96m▸All 3[0m  [2mfact 2[0m  [2msource 1  d:Category 펼치기
+[0m ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+   CATEGORY        AGE CLAIM / BOUND PATH
+ ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+[7m   [SOURCE    ]     3m …ing-contract.md 원본 파일은 요청과 현재 관측을 구분한다고 기록합니다.
+[0m   [1m[FACT      ][0m     1h 기억은 조회 시각과 실제 실패를 구분해서 읽습니다.
+   [1m[FACT      ][0m     2d Original English memory remains unchanged by the chrome language.
+
+
+
+
+
+
+
+
+
+
+
+
+ ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+   [1m[96mSource-Bound Fact Detail[0m
+     원본 파일은 요청과 현재 관측을 구분한다고 기록합니다.
+     Keeper:      sourcereader
+     Bound Path:  <user>/me/workspace/yousleepwhen/masc/artifacts/surface-minimalism-20261109/private-installed-
+                  baseline-w122ltws/workspace/fixture-sources/reading-contract.md
+     File SHA:    sha256:0044f31f4296ad91eafd570b1527e7b3f9bcd4114ed3a51e8f0164bae35b1df7 · First Seen: 3m
+
+[2m  ACTION NEEDED 1 · keeper_memory_execution:addon_unattached  j/k:move  Enter:detail  Esc:close / clear  q:quit  …?[0m
+ 일정 정보가 오래됐을 수 있음
+[2m › to quietreader   (i to write)

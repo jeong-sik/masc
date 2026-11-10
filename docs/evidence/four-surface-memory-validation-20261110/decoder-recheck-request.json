@@ -1,0 +1,16 @@
+{
+  "schema": "masc.targeted-memory-validation.v1",
+  "phase": "decoder-fixture-recheck",
+  "workflow": "Test",
+  "run_id": 42654972273,
+  "head": "f35a50b9ec9ba4d3cdd03cf0d03ea57f5924f657",
+  "branch": "fix/tui-memory-reading-20261110",
+  "event": "workflow_dispatch",
+  "minimal": true,
+  "suites": [
+    "test_tui_decode"
+  ],
+  "status_at_identity_read": "in_progress",
+  "conclusion_at_identity_read": null,
+  "why_memory_not_repeated": "Only test/test_tui_decode.ml changed since the 13-case Memory success at b56552704a5b1350d636449d57c1ff0d920c8adc"
+}

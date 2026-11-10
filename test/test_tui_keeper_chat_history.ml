@@ -635,6 +635,27 @@ let test_delivery_keys_do_not_invent_turn_ownership () =
   ) keys
 ;;
 
+let test_autonomous_delivery_requires_the_matching_actual_turn () =
+  let delivery_key = `Assoc
+    [ "kind", `String "autonomous_turn"; "turn_ref", `String "trace-fixture#7" ] in
+  let transcript_slot = `Assoc [ "kind", `String "tool_delivery"; "ordinal", `Int 0 ] in
+  List.iter (fun supplied ->
+    let decoded = decode (`List
+      [ row ~role:"tool" ~delivery_key ~transcript_slot ?turn_ref:supplied
+          ~tool_call_name:"Read" "{}" ]) in
+    match decoded.History.rows with
+    | [ decoded_row ] ->
+      let matches = supplied = Some "trace-fixture#7" in
+      check (option string) "only an actual matching owner supplies turn identity"
+        (if matches then supplied else None) decoded_row.History.turn_id;
+      check (option string) "an autonomous turn invents no operation" None
+        decoded_row.History.operation_id;
+      check bool "execution source follows the matching actual turn" matches
+        (Option.is_some decoded_row.History.execution_source)
+    | _ -> fail "expected the tool evidence to remain available")
+    [ Some "trace-fixture#7"; Some "trace-fixture#8"; None ]
+;;
+
 let test_native_continuation_rows_keep_the_original_operation () =
   let key = `Assoc [ "kind", `String "operation_native";
     "operation_id", `String "original-operation";
@@ -1986,6 +2007,8 @@ let () =
             test_rows_carry_the_operation_id_only_for_direct_turns
         ; test_case "delivery keys do not invent turn ownership" `Quick
             test_delivery_keys_do_not_invent_turn_ownership
+        ; test_case "autonomous delivery requires the matching actual turn" `Quick
+            test_autonomous_delivery_requires_the_matching_actual_turn
         ; test_case "native continuation keeps original operation" `Quick
             test_native_continuation_rows_keep_the_original_operation
         ; test_case "rows retain the exact turn identity" `Quick

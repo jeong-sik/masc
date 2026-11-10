@@ -1264,9 +1264,9 @@ let usage_lines ~cols ~rows (state : state) =
             ~account_emails:state.overview_account_emails
             ~show_limit_exhausted:state.usage_show_limit_exhausted
             ~now:(Unix.gettimeofday ()) ~width:(max 1 (framed_inner_width cols)) ~rows with
-    | Some section -> section.title :: section.lines
+    | Some section -> section.lines
     (* [section] answers [None] only before the first read. *)
-    | None -> [ " Plan usage · not observed" ]
+    | None -> [ui_text state ~ko:" 계정 한도 미관측" ~en:" Plan usage · not observed"]
   in
   let keepers () =
     match state.keeper_usage with
@@ -1452,29 +1452,26 @@ let usage_lines ~cols ~rows (state : state) =
 
 let render_metrics (state : state) =
   let terminal_rows, cols = get_terminal_size () in
-  let now = Unix.localtime (Unix.gettimeofday ()) in
-  let timestamp =
-    Printf.sprintf "%02d:%02d:%02d" now.Unix.tm_hour now.Unix.tm_min now.Unix.tm_sec
-  in
   (* The section being read is marked on the strip under this row, so the
      title does not name it a second time. *)
   let heading =
     screen_title
-      (if state.usage_telemetry_open then " MASC Operations / Usage / Telemetry"
-       else " MASC Operations / Usage")
+      (if state.usage_telemetry_open then
+         ui_text state ~ko:" 운영 · 사용량 · 진단" ~en:" Operations · Usage · Telemetry"
+       else ui_text state ~ko:" 운영 · 사용량" ~en:" Operations · Usage")
   in
   let connection = usage_connection_badge state in
-  let timed_title = Printf.sprintf "%s  %s  %s" heading timestamp connection in
-  let untimed_title = Printf.sprintf "%s  %s" heading connection in
+  let full_title = Printf.sprintf "%s  %s" heading connection in
   let width = framed_inner_width cols in
   let title, connection_rows =
-    if Message_layout.display_width timed_title <= width then timed_title, []
-    else if Message_layout.display_width untimed_title <= width then untimed_title, []
+    if Message_layout.display_width full_title <= width then full_title, []
     else
       let summary, details =
         match compact_connection_state state with
         | Compact_http Connected ->
-            let name = screen_title "Usage" in
+            let name = screen_title
+                (if state.usage_telemetry_open then ui_text state ~ko:"진단" ~en:"Telemetry"
+                 else ui_text state ~ko:"사용량" ~en:"Usage") in
             let available = width - Message_layout.display_width name - 1 in
             let status, details = compact_connection_badge state ~width:available in
             if Message_layout.display_width status <= available then name ^ " " ^ status, details
@@ -1485,7 +1482,7 @@ let render_metrics (state : state) =
             compact_connection_badge state ~width in
       let rows = Option.fold ~none:[] ~some:(fun details ->
         let wrap = Message_layout.split_styled_cells ~max_cells:(max 1 width) in
-        wrap "Status" @ wrap details) details in
+        wrap (ui_text state ~ko:"연결 상태" ~en:"Status") @ wrap details) details in
       summary, rows
   in
   (* The section's lines are formatted by the drawing, so the row it could
@@ -1502,6 +1499,7 @@ let render_metrics (state : state) =
     state ~terminal_rows ~cols ~surface_key:"metrics"
     ~title
     ~hints:(Masc_tui_keys.footer_hints_metrics
+              ~lang:state.ui_language ~section:state.usage_section
               ~telemetry:state.usage_telemetry_open)
     ~body:(fun ~budget c ->
       if state.usage_telemetry_open then
@@ -1519,14 +1517,18 @@ let render_metrics (state : state) =
            row has to hold sections back. The screen title does not name the
            section, so the section being read outranks the hint on this row. *)
         let usage_label = function
-          | Usage_plan -> "Plan" | Usage_trend -> "Trend"
-          | Usage_keepers -> "Keepers" | Usage_calls -> "Calls" in
+          | Usage_plan -> ui_text state ~ko:"계정 한도" ~en:"Plan"
+          | Usage_trend -> ui_text state ~ko:"추이" ~en:"Trend"
+          | Usage_keepers -> ui_text state ~ko:"키퍼" ~en:"Keepers"
+          | Usage_calls -> ui_text state ~ko:"도구 호출" ~en:"Calls" in
         let usage_sections = [ Usage_plan; Usage_trend; Usage_keepers; Usage_calls ] in
         let usage_tabs reading =
           List.map (fun section -> (usage_label section, section = reading, ())) usage_sections in
         let draw_tabs ~width tabs = tab_strip ~width ~press:(fun () text -> text) tabs in
         let navigation =
-          let lead = " " and wide_hint = "   v:next view" and compact_hint = "  v:next" in
+          let lead = " "
+          and wide_hint = ui_text state ~ko:"   v:다음 보기" ~en:"   v:next view"
+          and compact_hint = ui_text state ~ko:"  v:다음" ~en:"  v:next" in
           let room hint = tab_strip_width ~cols ~before:lead ~after:hint in
           (* What gives way when the row is short, first to last: the long hint,
              the short hint, the neighbours and their counts. The section being
@@ -1559,7 +1561,8 @@ let render_metrics (state : state) =
         if navigation_rows > 0 then c.push navigation;
         if spacing_rows > 0 then
           c.push (if connection_rows = [] then ""
-                  else Theme.recede () ^ "End: status" ^ Ansi.reset);
+                  else Theme.recede ()
+                    ^ ui_text state ~ko:"End: 연결 상태" ~en:"End: status" ^ Ansi.reset);
         let content_budget = max 0 (budget - navigation_rows - spacing_rows) in
         (* Put variable-length status details after account rows: refreshes do
            not move the account the reader is already scrolling through. *)
@@ -1577,7 +1580,8 @@ let render_metrics (state : state) =
           lines;
         if overflow_rows > 0 then
           c.push_styled ~style:(Theme.recede ())
-            (Printf.sprintf "  [rows %s · j/k to scroll]"
+            (Printf.sprintf (if state.ui_language = Lang_ko then
+                 "  [줄 %s · j/k:스크롤]" else "  [rows %s · j/k to scroll]")
                (Masc_tui_scroll.window_text ~scroll ~height
                   (List.length lines)))
       end)

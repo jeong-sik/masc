@@ -1,5 +1,0 @@
-ASSERT hello world
-ASSERT keeper#42 (ready)
-ASSERT a|b->c
-ASSERT 값 0.5 초
-ASSERT 안녕하세요

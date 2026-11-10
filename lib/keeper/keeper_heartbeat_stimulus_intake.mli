@@ -228,9 +228,13 @@ val reconcile_spent_selection
 
     RFC-0377's routing boundary remains: only members of the first ready
     [Connector_attention] conversation are eligible, and only the selected
-    batch is projected. Other connector conversations remain queued. At most
-    one [Hitl_resolved] is eligible because a turn carries one exact cycle grant.
-    Later ready HITL resolutions remain queued for their own replay turns.
+    batch is projected. Other connector conversations remain queued. Ready
+    [Hitl_resolved] inputs share a turn only as an ordered cohort of fresh
+    approved nonterminal host replays with the same exact reply route, or an
+    explicit no-reply partition. Rejections, recovery and model-issued or
+    terminal operations continue individually. The first incompatible ready
+    HITL input fences later HITL inputs for this turn; unready inputs do not.
+    Each member keeps its own exact grant and continuation receipt.
     Scheduled requests without result delivery share the unrouted general batch;
     they cannot remove another source's captured reply route. Requests
     with result delivery share a batch only with scheduled requests for the same

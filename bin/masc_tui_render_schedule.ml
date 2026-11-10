@@ -699,101 +699,6 @@ let system_log_header_row ~layout =
 let system_log_row ~styles ~level_style ~layout values =
   Table.row (system_log_cells ~styles ~level_style ~layout values)
 
-(* Task Review columns.
-
-   The header and the rows carried the same widths in two format strings, and
-   printf's width is a floor rather than a field: a task id past fourteen
-   cells printed whole and pushed the three columns after it out of line,
-   which is the pair this module was written to replace.
-
-   The header also spelled its names in sentence case -- "Task  Submitted by
-   Evidence  What it asks for" -- the one table in the TUI that did. Its
-   sibling tab, one press of [v] away, reads TIME TASK GATE VERDICT EVALUATOR
-   REASON, and all fifty-six columns declared through {!Masc_tui_table} are
-   capitals.
-
-   The last column carries the task's own title, which is what a verification
-   request asks for: that this task be verified. It is the column that says
-   which task a row is, so it takes what the others leave and its floor is kept
-   before any other column is. The view Enter opens carries the submitter, both
-   evidence counts and the verdict sentence in full, so those give way first
-   when the row is too wide: the submitter, then the evidence counts, then the
-   verdict. *)
-let verification_task_width = 14
-let verification_evidence_width = 17
-let verification_review_width = 16
-let verification_minimum_title_width = 16
-
-type verification_row_values = {
-  vrow_task : string;
-  vrow_submitted_by : string;
-  vrow_evidence : string;
-  vrow_review : string;
-  vrow_title : string;
-}
-
-let verification_no_values =
-  { vrow_task = ""
-  ; vrow_submitted_by = ""
-  ; vrow_evidence = ""
-  ; vrow_review = ""
-  ; vrow_title = ""
-  }
-
-type verification_column =
-  | Verification_task
-  | Verification_submitter
-  | Verification_evidence
-  | Verification_review
-  | Verification_title
-
-let verification_column_width ~submitter_width = function
-  | Verification_task -> verification_task_width
-  | Verification_submitter -> submitter_width
-  | Verification_evidence -> verification_evidence_width
-  | Verification_review -> verification_review_width
-  | Verification_title -> verification_minimum_title_width
-
-let verification_layout ~inner_width ~submitter_width =
-  Table.fit ~inner_width
-    ~width:(verification_column_width ~submitter_width)
-    ~flex:Verification_title
-    ~drop_order:[ Verification_submitter; Verification_evidence; Verification_review ]
-    [ Verification_task
-    ; Verification_submitter
-    ; Verification_evidence
-    ; Verification_review
-    ; Verification_title
-    ]
-
-let verification_cells ~submitter_width ~(layout : verification_column Table.layout)
-    values =
-  List.map
-    (function
-      | Verification_task ->
-          Table.cell ~header:"TASK" ~width:verification_task_width
-            values.vrow_task
-      | Verification_submitter ->
-          Table.cell ~header:"SUBMITTED BY" ~width:submitter_width
-            values.vrow_submitted_by
-      | Verification_evidence ->
-          Table.cell ~header:"제출 / 요구" ~width:verification_evidence_width
-            values.vrow_evidence
-      | Verification_review ->
-          Table.cell ~header:"자동 검증" ~width:verification_review_width
-            values.vrow_review
-      | Verification_title ->
-          Table.cell ~fold:Table.Fold_tail ~header:"TITLE"
-            ~width:layout.Table.flex_width values.vrow_title)
-    layout.Table.shown
-
-let verification_header_row ~submitter_width ~layout =
-  Table.header_row
-    (verification_cells ~submitter_width ~layout verification_no_values)
-
-let verification_row ~submitter_width ~layout values =
-  Table.row (verification_cells ~submitter_width ~layout values)
-
 (* Work / Tasks list columns.
 
    The list drew one line per task and let the title take whatever its
@@ -1804,114 +1709,6 @@ let fusion_pipeline_diagram
   in
   step_question ^ arrow ^ step_panel ^ arrow ^ step_judge ^ arrow ^ step_evidence
 
-(* Harness verdict columns.
-
-   Six widths in the header and the same six in the rows. The header called
-   the task column "Task -> Overview" -- fifteen cells in a column of
-   fourteen -- so the header itself ran over and pushed Gate and every column
-   after it one cell right of the rows they labelled. The arrow was also
-   saying something the footer already says: it names the cursor's task as a
-   link on every draw. The task and gate cells were padded and never cut, so
-   an id longer than its column moved those same columns again from the row
-   side. *)
-
-let harness_time_width = 8
-let harness_task_width = 14
-let harness_gate_width = 9
-let harness_verdict_width = 9
-let harness_evaluator_width = 24
-
-(* Below this the reason says nothing a reader can act on. Below it the list
-   gives up columns in its drop order rather than cut the reason. *)
-let harness_minimum_reason_width = 12
-
-type harness_row_values = {
-  hrow_time : string;
-  hrow_task : string;
-  hrow_gate : string;
-  hrow_verdict : string;
-  hrow_evaluator : string;
-  hrow_reason : string;
-}
-
-let harness_no_values =
-  { hrow_time = ""
-  ; hrow_task = ""
-  ; hrow_gate = ""
-  ; hrow_verdict = ""
-  ; hrow_evaluator = ""
-  ; hrow_reason = ""
-  }
-
-(* The verdict list's columns, named so a narrow list can say which it
-   spares (workbench RFC section 5.4, #36347). At eighty columns every column
-   needed more than the frame held, and the reason -- the last column -- kept
-   five cells. *)
-type harness_column =
-  | Harness_time
-  | Harness_task
-  | Harness_gate
-  | Harness_verdict
-  | Harness_evaluator
-  | Harness_reason
-
-let harness_columns =
-  [ Harness_time
-  ; Harness_task
-  ; Harness_gate
-  ; Harness_verdict
-  ; Harness_evaluator
-  ; Harness_reason
-  ]
-
-(* The reason's entry is its floor: it is the flexible column and takes what
-   the others leave. *)
-let harness_column_width = function
-  | Harness_time -> harness_time_width
-  | Harness_task -> harness_task_width
-  | Harness_gate -> harness_gate_width
-  | Harness_verdict -> harness_verdict_width
-  | Harness_evaluator -> harness_evaluator_width
-  | Harness_reason -> harness_minimum_reason_width
-
-(* What a narrow list gives up, first to go first (operator, 2026-09-28): the
-   evaluator, the time, then the gate. The task, the verdict and the reason
-   never go: which task was judged, what the judge said, and why. *)
-let harness_drop_order = [ Harness_evaluator; Harness_time; Harness_gate ]
-
-let harness_layout ~inner_width =
-  Table.fit ~inner_width ~width:harness_column_width ~flex:Harness_reason
-    ~drop_order:harness_drop_order harness_columns
-
-let harness_cell ~verdict_style ~reason_width values = function
-  | Harness_time ->
-      Table.cell ~header:"TIME" ~width:harness_time_width values.hrow_time
-  | Harness_task ->
-      Table.cell ~header:"TASK" ~width:harness_task_width values.hrow_task
-  | Harness_gate ->
-      Table.cell ~header:"GATE" ~width:harness_gate_width values.hrow_gate
-  | Harness_verdict ->
-      Table.cell ~style:verdict_style ~header:"VERDICT"
-        ~width:harness_verdict_width values.hrow_verdict
-  | Harness_evaluator ->
-      Table.cell ~header:"EVALUATOR" ~width:harness_evaluator_width
-        values.hrow_evaluator
-  | Harness_reason ->
-      Table.cell ~fold:Table.Fold_tail ~header:"REASON" ~width:reason_width
-        values.hrow_reason
-
-let harness_cells ?(verdict_style = "")
-    ~(layout : harness_column Table.layout) values =
-  List.map
-    (harness_cell ~verdict_style ~reason_width:layout.Table.flex_width values)
-    layout.Table.shown
-
-let harness_header_row ~layout =
-  Table.header_row (harness_cells ~layout harness_no_values)
-
-let harness_row ~verdict_style ~layout values =
-  Table.row (harness_cells ~verdict_style ~layout values)
-
 (* Planning goal columns.
 
    This list named no columns at all. A reader met "[shaping] * P2  3 open 1
@@ -2171,7 +1968,7 @@ let board_layout ~inner_width =
   Table.fit ~inner_width ~width:board_column_width ~flex:Board_title
     ~drop_order:board_drop_order board_columns
 
-let board_cell ~styles ~age_header ~title_width values = function
+let board_cell ~ko ~styles ~age_header ~title_width values = function
   | Board_mark ->
       (* The kind mark is a mark, like Planning's proof. A name would be
          wider than the cell holding it, and it carries its own dress: the
@@ -2181,13 +1978,13 @@ let board_cell ~styles ~age_header ~title_width values = function
       Table.cell ~style:styles.bstyle_id ~header:"ID" ~width:board_id_width
         values.brow_id
   | Board_hearth ->
-      Table.cell ~style:styles.bstyle_hearth ~header:"HEARTH"
+      Table.cell ~style:styles.bstyle_hearth ~header:(if ko then "게시판" else "HEARTH")
         ~width:board_hearth_width values.brow_hearth
   | Board_author ->
-      Table.cell ~style:styles.bstyle_author ~header:"AUTHOR"
+      Table.cell ~style:styles.bstyle_author ~header:(if ko then "작성자" else "AUTHOR")
         ~width:board_author_width values.brow_author
   | Board_title ->
-      Table.cell ~fold:Table.Fold_tail ~header:"TITLE" ~width:title_width
+      Table.cell ~fold:Table.Fold_tail ~header:(if ko then "제목" else "TITLE") ~width:title_width
         values.brow_title
   | Board_age ->
       (* Right, the way Planning's age reads. A span is a number and the two
@@ -2196,16 +1993,16 @@ let board_cell ~styles ~age_header ~title_width values = function
       Table.cell ~align:Table.Right ~style:styles.bstyle_age
         ~header:age_header ~width:board_age_width values.brow_age
   | Board_score ->
-      Table.cell ~style:styles.bstyle_score ~header:"SCORE"
+      Table.cell ~style:styles.bstyle_score ~header:(if ko then "점수" else "SCORE")
         ~width:board_score_width values.brow_score
   | Board_replies ->
-      Table.cell ~style:styles.bstyle_replies ~header:"REPLIES"
+      Table.cell ~style:styles.bstyle_replies ~header:(if ko then "댓글" else "REPLIES")
         ~width:board_replies_width values.brow_replies
 
-let board_cells ?(styles = board_no_styles) ~age_header
+let board_cells ?(styles = board_no_styles) ~ko ~age_header
     ~(layout : board_column Table.layout) values =
   List.map
-    (board_cell ~styles ~age_header ~title_width:layout.Table.flex_width
+    (board_cell ~ko ~styles ~age_header ~title_width:layout.Table.flex_width
        values)
     layout.Table.shown
 
@@ -2235,11 +2032,11 @@ let board_age_text ~now = function
 let sidebar_row_label ~about ~apart =
   match apart with None -> about | Some apart -> about ^ "  " ^ apart
 
-let board_header_row ~age_header ~layout =
-  Table.header_row (board_cells ~age_header ~layout board_no_values)
+let board_header_row ~ko ~age_header ~layout =
+  Table.header_row (board_cells ~ko ~age_header ~layout board_no_values)
 
-let board_row ?close ~styles ~age_header ~layout values =
-  Table.row ?close (board_cells ~styles ~age_header ~layout values)
+let board_row ?close ~ko ~styles ~age_header ~layout values =
+  Table.row ?close (board_cells ~ko ~styles ~age_header ~layout values)
 
 module Terminal_size_cache = struct
   type refresh =

@@ -129,7 +129,7 @@ val run_keeper_cycle
   -> turn_decision:Keeper_world_observation.keeper_cycle_decision
   -> ?shared_context:Agent_core.Context.t
   -> ?event_bus:Agent_core.Event_bus.t
-  -> ?hitl_resolution:Keeper_event_queue.hitl_resolution
+  -> ?hitl_resolutions:Keeper_hitl_resolution_batch.t
   -> unit
   -> (turn_success, turn_failure) result
 

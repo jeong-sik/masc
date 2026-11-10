@@ -54,7 +54,6 @@ val confirm_queue_reading : Masc_tui_types.state -> approval_list_reading
 val approvals_surface_pending : Masc_tui_types.state -> int
 val approvals_reading_current : Masc_tui_types.state -> bool
 val approval_list_note : name:string -> approval_list_reading -> string
-val approvals_title_notes : approvals_reading -> string
 val approvals_empty_queue : approvals_reading -> approvals_empty_queue
 
 val list_is_read : approval_list_reading -> bool

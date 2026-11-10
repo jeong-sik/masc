@@ -73,12 +73,20 @@ let msg ~role ?(id = "test-msg") ?(ts = 1.0) ?(surface = None) ?(speaker = None)
 
 let contents pms = List.map snd pms
 
+let pending_mentions messages =
+  MS.pairs_of_kind MS.Mention (MS.pending_messages_of_messages ~targets messages)
+;;
+
+let pending_scope messages =
+  MS.pairs_of_kind MS.Scope (MS.pending_messages_of_messages ~targets messages)
+;;
+
 let turn_ref n = Some (Ids.Turn_ref.make ~trace_id:"trace-scope" ~absolute_turn:n)
 
 let test_unanswered_mention_is_pending () =
   let messages = [ msg ~role:Store.Role.User ~ts:10.0 "@alice please look" ] in
   check (list string) "no later own line -> pending" [ "@alice please look" ]
-    (contents (MS.pending_mentions_of_messages ~targets messages))
+    (contents (pending_mentions messages))
 ;;
 
 let test_answered_mention_is_cleared () =
@@ -89,7 +97,7 @@ let test_answered_mention_is_cleared () =
     ]
   in
   check (list string) "own line after mention -> cleared" []
-    (contents (MS.pending_mentions_of_messages ~targets messages))
+    (contents (pending_mentions messages))
 ;;
 
 let test_rementioned_after_reply_is_pending () =
@@ -101,7 +109,7 @@ let test_rementioned_after_reply_is_pending () =
     ]
   in
   check (list string) "new mention after reply -> pending" [ "@alice again" ]
-    (contents (MS.pending_mentions_of_messages ~targets messages))
+    (contents (pending_mentions messages))
 ;;
 
 (* 2026-09-10 drain investigation: a checkpoint/defer boundary persists an
@@ -158,17 +166,17 @@ let test_empty_carrier_row_does_not_answer_the_delivery () =
   in
   check (list string) "empty carrier row leaves the message pending"
     [ "@alice status?" ]
-    (contents (MS.pending_mentions_of_messages ~targets [ user; empty_carrier ]));
+    (contents (pending_mentions [ user; empty_carrier ]));
   check (list string) "a spoken reply still answers the delivery" []
-    (contents (MS.pending_mentions_of_messages ~targets [ user; spoken_reply ]));
+    (contents (pending_mentions [ user; spoken_reply ]));
   check (list string) "a media-only reply answers the delivery" []
-    (contents (MS.pending_mentions_of_messages ~targets [ user; media_reply ]))
+    (contents (pending_mentions [ user; media_reply ]))
 ;;
 
 let test_assistant_self_mention_ignored () =
   let messages = [ msg ~role:Store.Role.Assistant ~ts:10.0 "@alice note to self" ] in
   check (list string) "own assistant line is never a pending mention" []
-    (contents (MS.pending_mentions_of_messages ~targets messages))
+    (contents (pending_mentions messages))
 ;;
 
 let speaker_with authority : Store.speaker option =
@@ -208,7 +216,7 @@ let test_addressed_row_is_not_fleet () =
   check (list string) "a row addressed to me belongs to the mention lane only" []
     (fleet_contents (fleet ~limit:10 messages));
   check (list string) "and it is still a pending mention" [ "@alice take this" ]
-    (contents (MS.pending_mentions_of_messages ~targets messages))
+    (contents (pending_mentions messages))
 ;;
 
 (* RFC-0468 §3.2: another Keeper's direct message is Keeper speech, not the
@@ -223,7 +231,7 @@ let test_keeper_direct_row_is_scope_not_fleet () =
   in
   check (list string) "a direct Keeper line is a scope line"
     [ "can you take task-12?" ]
-    (contents (MS.pending_scope_of_messages ~targets messages));
+    (contents (pending_scope messages));
   check (list string) "and it is not fleet context" []
     (fleet_contents (fleet ~limit:10 messages))
 ;;
@@ -237,7 +245,7 @@ let test_keeper_broadcast_row_is_fleet_not_scope () =
   check (list string) "a Keeper broadcast is fleet context" [ "deploy is green" ]
     (fleet_contents (fleet ~limit:10 messages));
   check (list string) "and it is not a scope line" []
-    (contents (MS.pending_scope_of_messages ~targets messages))
+    (contents (pending_scope messages))
 ;;
 
 let test_owner_row_is_not_fleet () =
@@ -330,20 +338,20 @@ let test_rows_partition_across_lanes_and_fleet () =
 let test_owner_unmentioned_line_is_scope () =
   let messages = [ msg ~role:Store.Role.User ~ts:10.0 ~speaker:owner "can you check the deploy" ] in
   check (list string) "operator without @ -> scope" [ "can you check the deploy" ]
-    (contents (MS.pending_scope_of_messages ~targets messages))
+    (contents (pending_scope messages))
 ;;
 
 let test_owner_mention_is_not_scope () =
   (* an owner line that mentions is a mention, not a scope message (disjoint) *)
   let messages = [ msg ~role:Store.Role.User ~ts:10.0 ~speaker:owner "@alice check it" ] in
   check (list string) "owner mention excluded from scope" []
-    (contents (MS.pending_scope_of_messages ~targets messages))
+    (contents (pending_scope messages))
 ;;
 
 let test_external_unmentioned_is_not_scope () =
   let messages = [ msg ~role:Store.Role.User ~ts:10.0 ~speaker:external_ "random channel chatter" ] in
   check (list string) "external without @ -> ignored" []
-    (contents (MS.pending_scope_of_messages ~targets messages))
+    (contents (pending_scope messages))
 ;;
 
 let test_answered_owner_line_is_cleared () =
@@ -354,7 +362,7 @@ let test_answered_owner_line_is_cleared () =
     ]
   in
   check (list string) "answered owner line -> cleared" []
-    (contents (MS.pending_scope_of_messages ~targets messages))
+    (contents (pending_scope messages))
 ;;
 
 (* Exact causal acknowledgement properties. Stable lane ids and typed
@@ -371,7 +379,7 @@ let test_skewed_clock_cannot_unanswer () =
     ]
   in
   check (list string) "skewed reply ts still clears" []
-    (contents (MS.pending_mentions_of_messages ~targets messages))
+    (contents (pending_mentions messages))
 ;;
 
 let test_ts_fuzz_does_not_change_pending () =
@@ -388,7 +396,7 @@ let test_ts_fuzz_does_not_change_pending () =
   List.iter
     (fun (label, ts_of) ->
       check (list string) label expected
-        (contents (MS.pending_mentions_of_messages ~targets (lane ts_of))))
+        (contents (pending_mentions (lane ts_of))))
     [ ("ordered ts", fun i -> float_of_int (10 + i))
     ; ("reversed ts", fun i -> float_of_int (10 - i))
     ]
@@ -424,7 +432,7 @@ let test_tool_lines_do_not_clear () =
     [ msg ~role:Store.Role.User ~ts:10.0 "@alice please look"; tool_line ]
   in
   check (list string) "tool line is not an answer" [ "@alice please look" ]
-    (contents (MS.pending_mentions_of_messages ~targets messages))
+    (contents (pending_mentions messages))
 ;;
 
 let test_transport_failure_does_not_clear () =
@@ -442,12 +450,12 @@ let test_transport_failure_does_not_clear () =
     [ msg ~role:Store.Role.User ~ts:10.0 ~turn_ref "@alice please look"; failure ]
   in
   check (list string) "failure marker is not an answer" [ "@alice please look" ]
-    (contents (MS.pending_mentions_of_messages ~targets messages));
+    (contents (pending_mentions messages));
   let answered =
     messages @ [ msg ~role:Store.Role.Assistant ~ts:11.0 ~turn_ref "done" ]
   in
   check (list string) "a real utterance still clears" []
-    (contents (MS.pending_mentions_of_messages ~targets answered))
+    (contents (pending_mentions answered))
 ;;
 
 let test_voice_audio_self_output_is_not_recent_context () =
@@ -489,9 +497,9 @@ let test_unrelated_assistant_does_not_clear_pending () =
     ]
   in
   check (list string) "unrelated assistant keeps mention pending" [ "@alice a" ]
-    (contents (MS.pending_mentions_of_messages ~targets lane));
+    (contents (pending_mentions lane));
   check (list string) "unrelated assistant keeps scope pending" [ "status?" ]
-    (contents (MS.pending_scope_of_messages ~targets lane))
+    (contents (pending_scope lane))
 ;;
 
 let test_ack_clears_only_injected_prefix () =
@@ -536,7 +544,7 @@ let () =
         ; test_case "no_mention" `Quick test_no_mention
         ; test_case "empty_targets" `Quick test_empty_targets
         ] )
-    ; ( "pending_mentions_of_messages"
+    ; ( "pending_mention_lane"
       , [ test_case "unanswered_pending" `Quick test_unanswered_mention_is_pending
         ; test_case "answered_cleared" `Quick test_answered_mention_is_cleared
         ; test_case "rementioned_pending" `Quick test_rementioned_after_reply_is_pending
@@ -544,7 +552,7 @@ let () =
         ; test_case "empty_carrier_row_not_an_answer" `Quick
             test_empty_carrier_row_does_not_answer_the_delivery
         ] )
-    ; ( "pending_scope_of_messages"
+    ; ( "pending_scope_lane"
       , [ test_case "owner_unmentioned_is_scope" `Quick test_owner_unmentioned_line_is_scope
         ; test_case "owner_mention_not_scope" `Quick test_owner_mention_is_not_scope
         ; test_case "external_unmentioned_ignored" `Quick test_external_unmentioned_is_not_scope

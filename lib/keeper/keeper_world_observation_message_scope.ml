@@ -364,32 +364,6 @@ let pending_messages_of_messages
       }))
 ;;
 
-(* RFC-0230 P2 — scope messages: a keeper's lane is, in practice, an operator
-   (Owner) conversation. The operator often addresses the keeper without an
-   "@name", so an unanswered Owner line that is not already a mention is a scope
-   message. External (connector) chatter without a mention is ignored, so a busy
-   channel does not flood the keeper. Same watermark as mentions; the mention
-   exclusion keeps the two reactive signals disjoint. *)
-let pending_scope_of_messages
-      ?ack_id
-      ~(targets : string list)
-      (messages : Keeper_chat_store.chat_message list)
-  : (string * string) list
-  =
-  pending_messages_of_messages ?ack_id ~targets messages
-  |> pairs_of_kind Scope
-;;
-
-let pending_mentions_of_messages
-      ?ack_id
-      ~(targets : string list)
-      (messages : Keeper_chat_store.chat_message list)
-  : (string * string) list
-  =
-  pending_messages_of_messages ?ack_id ~targets messages
-  |> pairs_of_kind Mention
-;;
-
 (* Fleet messages: keeper broadcasts projected into this keeper's transcript.
    [Surface_ref.Broadcast] is the typed marker the fleet fanout writes; an
    [Surface_ref.Agent] row (direct keeper-to-keeper delivery) that lands in no

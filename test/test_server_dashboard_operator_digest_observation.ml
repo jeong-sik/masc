@@ -46,9 +46,9 @@ let test_invalidation_then_completion_keeps_publication_debt () = with_owner (fu
   Owner.invalidate owner;
   check bool "current source generation is still unread" true
     (Owner.publication_status owner prepared = Owner.Source_pending);
-  check bool "pre-mutation read cannot settle new source debt" false
-    (Owner.publish_success old_read (observation "stale source" None));
-  check string "last-good rows remain while the current read is owed" "old rows" (marker owner);
+  check bool "actual completion after a source notice can publish its observation" true
+    (Owner.publish_success old_read (observation "completed read" None));
+  check string "continuous inputs do not discard actual completed reads" "completed read" (marker owner);
   let current = Owner.begin_attempt owner ~origin:Source_read in
   check bool "actual post-mutation read settles the current source" true
     (Owner.publish_success current (observation "current rows" None));

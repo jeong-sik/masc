@@ -21,7 +21,7 @@ type owner = {
   listeners : listener list Atomic.t;
 }
 
-type attempt = {owner : owner; generation : int; sequence : int; origin : origin}
+type attempt = {owner : owner; sequence : int; origin : origin}
 type publication = {json : Yojson.Safe.t; source : Cache.surface_snapshot; generation : int}
 
 let generation_sequence = Atomic.make 0
@@ -89,11 +89,11 @@ let notify owner completion =
 let begin_attempt owner ~origin = Stdlib.Mutex.protect owner.mu (fun () ->
   incr owner.next_sequence;
   Cache.mark_cached_surface_attempt owner.cache;
-  {owner; generation = !(owner.generation); sequence = !(owner.next_sequence); origin})
+  {owner; sequence = !(owner.next_sequence); origin})
 
 let admits attempt ~failure =
   let owner = attempt.owner in
-  is_current owner && attempt.generation = !(owner.generation)
+  is_current owner
   && match !(owner.terminal) with
      | None -> true
      | Some (Success sequence) ->
@@ -104,11 +104,12 @@ let publish_success attempt (observation : Dashboard_projection_cache.digest_obs
   let owner = attempt.owner in
   let published = Stdlib.Mutex.protect owner.mu (fun () ->
     if not (admits attempt ~failure:false) then false else (
-      let json = with_metadata ~scope:owner.scope ~generation:attempt.generation
+      let generation = !(owner.generation) in
+      let json = with_metadata ~scope:owner.scope ~generation
           ~sequence:attempt.sequence ~state:Ready observation.json in
       Cache.mark_cached_surface_success owner.cache json;
       owner.terminal := Some (Success attempt.sequence);
-      owner.admitted_generation := attempt.generation;
+      owner.admitted_generation := generation;
       owner.next_deadline := observation.next_deadline_unix;
       true)) in
   if published then notify owner (Installed attempt.origin);
@@ -119,12 +120,13 @@ let publish_failure_message attempt message =
   let now = Unix.gettimeofday () in
   let published = Stdlib.Mutex.protect owner.mu (fun () ->
     if not (admits attempt ~failure:true) then false else (
+      let generation = !(owner.generation) in
       Cache.update_cached_surface owner.cache (fun current ->
-        {current with json = with_metadata ~scope:owner.scope ~generation:attempt.generation
+        {current with json = with_metadata ~scope:owner.scope ~generation
             ~sequence:attempt.sequence ~state:Read_failed current.json;
           last_error = Some message; last_error_unix = Some now});
       owner.terminal := Some (Failure attempt.sequence);
-      owner.admitted_generation := attempt.generation;
+      owner.admitted_generation := generation;
       true)) in
   if published then notify owner (Failed attempt.origin);
   published

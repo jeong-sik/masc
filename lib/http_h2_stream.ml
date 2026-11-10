@@ -112,10 +112,11 @@ let run_all thunks =
    A peer that keeps the stream open with its window at 0 drains nothing
    either, and nothing ends that stream. The watchdog gives the oldest flush
    still waiting [stalled_after_s] to be answered and resets the stream with
-   [Stalled] when it is not (RFC-0518 D2). A response body reaches h2 one
-   slice at a time, each behind its own flush ([Response_body], D3), so the
-   bound is on one slice crossing the socket, not on the whole body, and
-   WINDOW_UPDATEs of a byte or two do not stretch it (RFC-0518 §3.3).
+   [Stalled] when it is not (RFC-0518 D2). A response body reaches h2 in
+   slices, each behind its own flush ([Response_body], D3), so the bound is
+   on what one socket write carries of the body, a slice or two, not on the
+   whole body, and WINDOW_UPDATEs of a byte or two do not stretch it
+   (RFC-0518 §3.3).
 
    All of it runs on the connection's domain, where h2's own body writer has
    to be called: the table and the condition take no lock. *)
@@ -280,36 +281,47 @@ end
    within one stall bound when the peer's window covers it, however steadily
    the peer reads, and the connection writes nothing else meanwhile.
 
-   So h2 holds one slice of a body at most. The rest waits here in the order
-   it was written, the flushes and the close in their place, and the answer
-   to a slice's flush sends the next slice. That answer comes from h2's
-   writer or from the end of the stream: no fiber waits, and the order holds
-   without a lock. *)
+   So h2 holds two slices of a body at most. The rest waits here in the
+   order it was written, the flushes and the close in their place, and the
+   answer to a slice's flush sends the next slice. That answer comes from
+   h2's writer or from the end of the stream: no fiber waits, and the order
+   holds without a lock. *)
 module Response_body = struct
+  (* What h2 does not hold yet: payload bytes, and what is due once the bytes
+     before it left. A flush waits as its answer, the close as the answer
+     that closes h2's body. *)
   type entry =
     | Payload of
         { text : string
         ; mutable written : int
         ; sent : unit -> unit
         }
-    | Flush of ([ `Written | `Closed ] -> unit)
-    | Close
+    | After of ([ `Written | `Closed ] -> unit)
 
-  (* [in_flight]: a slice is in h2 and its flush has no answer yet. Entries
-     wait only then. *)
+  (* [in_flight]: the slices in h2 whose flushes have no answer yet. Entries
+     wait only while there are some, and a payload is the first of them. *)
   type t =
     { stream_end : Stream_end.t
     ; writer : H2.Body.Writer.t
     ; entries : entry Queue.t
-    ; mutable in_flight : bool
+    ; mutable in_flight : int
     ; mutable closed : bool
     }
 
   (* One DATA frame of the default SETTINGS_MAX_FRAME_SIZE (RFC 9113 §6.5.2). *)
   let slice_bytes = 16_384
 
+  (* h2 fills a DATA frame from the bytes it holds of a body (serialize.ml
+     [schedule_iovecs]). With one slice in h2 a frame ended where the slice
+     did, whatever the peer's window still allowed. A peer that returns its
+     credit frame by frame then got the credit of one frame back as two
+     frames at every slice's end, and the frames only got smaller. With two
+     slices the one behind is in h2 when a frame reaches the end of the one
+     in front, and the frame goes on into it (RFC-0518 D3). *)
+  let slices_in_h2 = 2
+
   let create stream_end writer =
-    { stream_end; writer; entries = Queue.create (); in_flight = false; closed = false }
+    { stream_end; writer; entries = Queue.create (); in_flight = 0; closed = false }
   ;;
 
   let is_closed t =
@@ -319,8 +331,8 @@ module Response_body = struct
   let told outcome answers = List.map (fun answer () -> answer outcome) answers
 
   (* Writes one slice from the head of the queue. Returns what the slice
-     settles once the socket took it: the payloads it finished, and the
-     flushes that follow them before the next payload byte. *)
+     settles once the socket took it: the payloads it finished, and what
+     waits behind them before the next payload byte. *)
   let write_slice t =
     let rec take room settled =
       match Queue.peek_opt t.entries with
@@ -335,10 +347,10 @@ module Response_body = struct
           take
             (room - len)
             ((fun (_ : [ `Written | `Closed ]) -> payload.sent ()) :: settled))
-      | Some (Flush answer) ->
+      | Some (After answer) ->
         ignore (Queue.pop t.entries : entry);
         take room (answer :: settled)
-      | Some (Payload _ | Close) | None -> settled
+      | Some (Payload _) | None -> settled
     in
     List.rev (take slice_bytes [])
   ;;
@@ -352,8 +364,7 @@ module Response_body = struct
         (fun waiting entry ->
            match entry with
            | Payload { sent; _ } -> (fun (_ : [ `Written | `Closed ]) -> sent ()) :: waiting
-           | Flush answer -> answer :: waiting
-           | Close -> waiting)
+           | After answer -> answer :: waiting)
         []
         t.entries
     in
@@ -361,73 +372,70 @@ module Response_body = struct
     told `Closed (List.rev waiting)
   ;;
 
-  (* Called with no slice in flight. Sends the next slice or closes the body,
-     and returns the answers that became due: those of the flushes at the
-     head of the queue, which have nothing before them any more. h2 drops
-     what is written to a body it closed and answers a flush there as if the
-     bytes had gone (body.ml [write_string], [flush]), so such a body takes
-     nothing more. *)
-  let rec next t =
-    match Queue.peek_opt t.entries with
-    | None -> []
-    | Some (Flush answer) ->
-      ignore (Queue.pop t.entries : entry);
-      let later = next t in
-      (fun () -> answer `Written) :: later
-    | Some Close ->
-      ignore (Queue.pop t.entries : entry);
-      H2.Body.Writer.close t.writer;
-      []
-    | Some (Payload _) ->
+  (* Hands h2 slices until it holds [slices_in_h2] or nothing waits here, and
+     returns the answers that became due. Those are the answers of all that
+     waits here once h2 closed the body itself: h2 drops what is written to
+     a body it closed and answers a flush there as if the bytes had gone
+     (body.ml [write_string], [flush]), so such a body takes nothing more. *)
+  let rec fill t =
+    if t.in_flight < slices_in_h2 && not (Queue.is_empty t.entries)
+    then
       if H2.Body.Writer.is_closed t.writer
       then abandon t
       else (
         send_slice t;
-        [])
+        fill t)
+    else []
 
-  (* The next slice starts before the answers run, so an answer that writes,
-     flushes or closes finds the queue in order. Each answer runs whatever
-     another raised, and what they raise ends the stream
+  (* The slices that follow start before the answers run, so an answer that
+     writes, flushes or closes finds the queue in order. Each answer runs
+     whatever another raised, and what they raise ends the stream
      ([Stream_end.flush]). *)
   and send_slice t =
     let settled = write_slice t in
-    t.in_flight <- true;
+    t.in_flight <- t.in_flight + 1;
     Stream_end.flush t.stream_end t.writer (fun outcome ->
-      t.in_flight <- false;
+      t.in_flight <- t.in_flight - 1;
       match outcome with
       | `Written ->
-        let due = next t in
+        let due = fill t in
         run_all (told `Written settled @ due)
       | `Closed ->
         let abandoned = abandon t in
         run_all (told `Closed settled @ abandoned))
   ;;
 
+  (* [write] and [flush] are for a body that is not closed. Http_reqd asks
+     [is_closed] first: a write has to know before it reserves in the
+     ledger, and nothing suspends between its question and the call here. *)
   let write t ~sent text =
-    if is_closed t || String.length text = 0
+    if String.length text = 0
     then sent ()
     else (
       Queue.push (Payload { text; written = 0; sent }) t.entries;
-      if not t.in_flight then send_slice t)
+      run_all (fill t))
   ;;
 
-  (* With nothing of the body in h2, h2 answers at once. *)
+  (* h2 answers the flushes of a body in the order of the bytes before them
+     (faraday.ml [shift_flushes]). With no payload waiting here it holds
+     every byte written so far, and answers at once when they all left. *)
   let flush t answer =
-    if is_closed t
-    then answer `Closed
-    else if t.in_flight
-    then Queue.push (Flush answer) t.entries
-    else Stream_end.flush t.stream_end t.writer answer
+    if Queue.is_empty t.entries
+    then Stream_end.flush t.stream_end t.writer answer
+    else Queue.push (After answer) t.entries
   ;;
 
   (* h2 cuts a body that is closed with bytes pending at the peer's window
-     (anmonteiro/ocaml-h2#278). The close waits its turn in the queue, so h2
-     gets it once every slice before it has left. *)
+     (anmonteiro/ocaml-h2#278). The close waits as a flush does, so h2 gets
+     it once every byte before it has left. A stream that ended first has no
+     body left to close. *)
   let close t =
     if not t.closed
     then (
       t.closed <- true;
-      if t.in_flight then Queue.push Close t.entries else H2.Body.Writer.close t.writer)
+      flush t (function
+        | `Written -> H2.Body.Writer.close t.writer
+        | `Closed -> ()))
   ;;
 end
 

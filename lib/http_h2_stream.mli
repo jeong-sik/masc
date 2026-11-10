@@ -90,12 +90,13 @@ module Stream_end : sig
       [stream_sw]: once the switch is released, {!ended} is true, {!signal}
       is resolved and every flush still waiting is answered with [`Closed],
       each one whatever another's answer raised. It also forks a daemon on
-      [stream_sw] that watches the flushes. h2 answers them oldest first.
-      When the oldest flush still waiting goes [stalled_after_s] by [clock]
-      without an answer, counted from its registration or from the answer
-      before it, whichever came later, the daemon logs the method and the
-      path of [request] at warn, the path without its query, and {!reset}s
-      the stream with [Stalled], which fails [stream_sw].
+      [stream_sw] that watches the flushes. h2 answers those that have to
+      wait oldest first. When the oldest flush still waiting goes
+      [stalled_after_s] by [clock] without an answer, counted from its
+      registration or from the answer before it, whichever came later, the
+      daemon logs the method and the path of [request] at warn, the path
+      without its query, and {!reset}s the stream with [Stalled], which
+      fails [stream_sw].
 
       [request] is what h2 gave the request handler for [reqd]. Read it
       there, with [H2.Reqd.request], before the fiber yields: h2 has no
@@ -139,22 +140,36 @@ module Stream_end : sig
       answers through [t]. *)
 end
 
-(** The body of one HTTP/2 response (RFC-0518 D3). h2 holds one slice of it
+(** The body of one HTTP/2 response (RFC-0518 D3). h2 holds two slices of it
     at most. h2 gives the connection whatever the peer's windows allow in one
     piece and answers a flush once the socket took all of it, so a body it
     held whole would have to cross the socket within one stall bound, and
-    the other streams of the connection would wait behind it. Here the next
-    slice is written when the flush of the one before is answered, and what
-    is written meanwhile waits in order. Each slice has the stream's stall
-    bound to cross the socket, so a stream keeps going while its peer takes
-    a slice within the bound, however long the whole body takes.
+    the other streams of the connection would wait behind it. Here a slice
+    is written when the flush of an earlier one is answered, and what is
+    written meanwhile waits in order. The stall bound runs from one answer
+    to the next ({!Stream_end}), and a slice is answered when the socket
+    write that carries its last byte is through. So a stream keeps going
+    while its peer takes within the bound what one write carries, however
+    long the whole body takes: one slice when the peer's window holds the
+    body back, both when the socket does.
 
-    h2 gives the socket one stream's bytes at a time and takes the streams
-    in turn (scheduler.ml [flush]). The bodies of a connection therefore
-    share its link a slice at a time: with [k] bodies in flight, a slice
-    also waits for a slice of each of the others (RFC-0518 §5).
+    h2 holds two slices and not one, because it fills a DATA frame from the
+    bytes it holds. With one slice a frame ended where the slice did,
+    whatever the peer's window allowed, and a peer that returns its credit
+    frame by frame got ever smaller frames.
 
-    Like {!Stream_end}, a body is used from the connection's domain only. *)
+    h2 gives the socket one stream's bytes at a time and picks the stream by
+    a fair queue over the bytes each got (scheduler.ml [flush], after
+    nghttp2). One write carries what h2 holds of a body, so the bodies of a
+    connection share its link up to two slices at a time: a write waits for
+    the one in progress and for up to two slices of each other body in
+    flight, and so does the first write of a new response (RFC-0518 §5).
+
+    Like {!Stream_end}, a body is used from the connection's domain only.
+    {!Response_body.write} and {!Response_body.flush} are for a body that
+    {!Response_body.is_closed} does not report closed: [Http_reqd.Body_writer]
+    asks first, before it reserves in the response ledger, and drops the
+    write or answers the flush [`Closed] itself. *)
 module Response_body : sig
   type t
 
@@ -165,31 +180,35 @@ module Response_body : sig
   val slice_bytes : int
   (** 16 KiB: one DATA frame of the default SETTINGS_MAX_FRAME_SIZE. *)
 
+  val slices_in_h2 : int
+  (** 2: how many slices of a body h2 holds at most. *)
+
   val write : t -> sent:(unit -> unit) -> string -> unit
   (** [write t ~sent payload] puts [payload] behind everything written
       before it. The call does not suspend, so payloads written by different
       fibers stay whole and in the order of the calls. [sent] runs once:
       when the socket took the last byte of [payload], or when the body can
-      take no more of it, because it was closed, the stream ended, or h2
-      closed the body. *)
+      take no more of it, because the stream or its connection ended or h2
+      closed the body. A payload written after {!close} would wait behind
+      the close, and go out after the end of the body or be cut. *)
 
   val flush : t -> ([ `Written | `Closed ] -> unit) -> unit
   (** [flush t f] calls [f] once: with [`Written] when the socket took every
       byte written before the call, with [`Closed] when the body ended
-      before that or was closed already. The answer comes with the slice
-      that carries the last of those bytes. That slice is filled up with
-      what was written after the call, so the answer can wait for up to one
-      slice of later bytes too. What [f] raises ends the stream
-      ({!Stream_end.flush}). *)
+      before that. The answer comes when the socket write that carries the
+      last of those bytes is through, and that write can carry up to two
+      slices of what was written after the call. What [f] raises ends the
+      stream ({!Stream_end.flush}). *)
 
   val close : t -> unit
-  (** Ends the body after the bytes written so far. Later writes are dropped
-      and later flushes answered [`Closed]. Closing twice is the same as
-      closing once. *)
+  (** Ends the body after the bytes written so far: {!is_closed} is true
+      from then on. Closing twice is the same as closing once. *)
 
   val is_closed : t -> bool
-  (** True once {!close} was called, the stream ended, or h2 closed the body.
-      Bytes written before a {!close} may still be on their way. *)
+  (** True once {!close} was called, the stream ended, or h2 takes no more
+      of the body: it closed the body, or answered one of its slices
+      [`Closed], as it does once the connection's writer is closed. Bytes
+      written before a {!close} may still be on their way. *)
 end
 
 val dispatch : Stream_end.t -> (unit -> unit) -> unit

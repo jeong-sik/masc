@@ -131,6 +131,33 @@ let acting_pane_chunk_projection (state : state) ~terminal_rows ~terminal_cols ~
   else Some (recent_chunk_projection state)
 ;;
 
+let operator_actions_reading (state : state) =
+  let text ko en = ui_text state ~ko ~en in
+  let sections =
+    match state.server_identity with
+    | None ->
+        [{ Masc_tui_detail_reading.heading = text "서버 관측" "Server observation"
+         ; body = text "서버 응답을 아직 읽지 못했습니다."
+             "The server response has not been read yet." }]
+    | Some identity ->
+        (match identity.Tui_decode.sid_operator_action with
+         | None ->
+             [{ Masc_tui_detail_reading.heading = text "조치 원인 미확인" "Reasons unavailable"
+              ; body = text "서버 응답에 조치 원인 목록이 없거나 읽을 수 없는 형식입니다."
+                  "The server response has no readable action-reason list." }]
+         | Some [] ->
+             [{ Masc_tui_detail_reading.heading = text "조치 원인" "Action reasons"
+              ; body = text "이 서버 관측에는 조치가 필요한 이유가 없습니다."
+                  "This server observation reports no reason requiring action." }]
+         | Some reasons ->
+             let count = List.length reasons in
+             List.mapi (fun index reason ->
+               { Masc_tui_detail_reading.heading = Printf.sprintf "%d / %d" (index + 1) count
+               ; body = reason }) reasons)
+  in
+  Masc_tui_detail_reading.create ~ko:(state.ui_language = Lang_ko)
+    ~title:(text "조치가 필요한 이유" "Why action is needed") sections
+
 (* Requests and capacity have separate observation paths. In particular a
    working HTTP connection does not make a retained fleet reading current. *)
 let overview_capacity_lines (state : state) =
@@ -240,7 +267,8 @@ let render_overview (state : state) home =
            ^ ui_text state ~ko:" — 화면별 조작" ~en:" — every screen's keys"
            ^ Ansi.reset);
       c.push
-        (" " ^ pressable (Press_surface Approvals)
+        (" " ^ Ansi.dim ^ ui_text state ~ko:"v:조치 원인" ~en:"v:action reasons" ^ Ansi.reset
+         ^ "  " ^ pressable (Press_surface Approvals)
            (Ansi.dim ^ ui_text state ~ko:"p:승인·질문" ~en:"p:Requests" ^ Ansi.reset)
          ^ "  " ^ pressable (Press_surface Metrics)
            (Ansi.dim ^ ui_text state ~ko:"m:사용량" ~en:"m:Usage" ^ Ansi.reset));
@@ -428,11 +456,11 @@ let render_memory (state : state) =
           | Some _ -> ""
         in
         Printf.sprintf "%s  %s  %s  %s"
-          (screen_title (if ko then " MASC 기억" else " MASC Memory")) reading_note timestamp
+          (screen_title (if ko then " MASC 기억 · 전체 저장 상태" else " MASC Memory · fleet storage")) reading_note timestamp
           (connection_badge state)
     | Some s ->
         Printf.sprintf "%s · %s · %s · %s  %s"
-          (screen_title (if ko then " MASC 기억" else " MASC Memory"))
+          (screen_title (if ko then " MASC 기억 · 전체 저장 상태" else " MASC Memory · fleet storage"))
           (if ko then Printf.sprintf "키퍼 %d명" shown else Masc_tui_message_layout.count_noun shown "keeper")
           (match current_memory_starving_count s with
            | Some count -> Printf.sprintf (if ko then "기억 필요 %d" else "%d need memory") count
@@ -449,6 +477,16 @@ let render_memory (state : state) =
       Render_memory.render_memory_body ~cols ~budget state
         ~push:c.push ~push_styled:c.push_styled ~push_selected:c.push_selected
         ~push_divider:c.push_divider ~push_empty:c.push_empty)
+
+let render_memory_changes (state : state) keeper_name =
+  let terminal_rows, cols = get_terminal_size () in
+  surface_chrome ~overflow:Paged_by_cursor state ~terminal_rows ~cols ~surface_key:"memory-changes"
+    ~title:(screen_title (ui_text state ~ko:" MASC 기억 · 변화 · " ~en:" MASC Memory · changes · "
+      ^ Terminal_text.single_line keeper_name))
+    ~hints:(Masc_tui_keys.footer_hints_memory_changes ~lang:state.ui_language)
+    ~body:(fun ~budget c ->
+      Masc_tui_render_keeper_memory.changes_lines state ~cols ~max_lines:budget
+        ~now:(Unix.gettimeofday ()) ~keeper_name |> List.iter c.push)
 
 (* The Memory facts list's [Enter] reading: the whole fact wrapped to this
    overlay's own width and windowed, instead of the narrow block the list
@@ -648,9 +686,10 @@ let render_surface ~home (state : state) =
        | (Some (Fusion_launch_started _) | None), Fusion_historical_detail reference ->
            Masc_tui_render_fusion.render_fusion_detail state reference.fhe_run_id)
   | Memory ->
-      if Option.is_some state.memory_facts_keeper then
-        render_memory_facts state
-      else render_memory state
+      (match state.memory_facts_keeper, state.memory_page with
+       | Some keeper_name, Memory_changes -> render_memory_changes state keeper_name
+       | Some _, Memory_facts -> render_memory_facts state
+       | None, (Memory_facts | Memory_changes) -> render_memory state)
   | Repositories ->
       (match state.workspace_activity_repo with
        | Some repo_id -> Masc_tui_render_repositories.render_workspace_activity state repo_id

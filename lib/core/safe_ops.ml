@@ -20,17 +20,6 @@ let protect ~default f =
     Printexc.raise_with_backtrace e bt
   | _ -> default
 
-(** Execute a function, logging exceptions and returning None on failure *)
-let try_with_log context f =
-  try Some (f ())
-  with
-  | Eio.Cancel.Cancelled _ as e ->
-    let bt = Printexc.get_raw_backtrace () in
-    Printexc.raise_with_backtrace e bt
-  | e ->
-    Log.Misc.error "%s failed: %s" context (Printexc.to_string e);
-    None
-
 (** Cancel-aware exception handler.
     Re-raises [Eio.Cancel.Cancelled] with backtrace; delegates other
     exceptions to [handler]. *)
@@ -460,17 +449,6 @@ let list_dir_safe path : (string list, string) result =
     | Eio.Cancel.Cancelled _ as e -> raise e
     | e ->
       Error (Printf.sprintf "Failed to list %s: %s" path (Printexc.to_string e))
-
-(** Get environment variable with logging when invalid *)
-let get_env_int_logged name ~default =
-  match Sys.getenv_opt name with
-  | None -> default
-  | Some v ->
-    match int_of_string_safe v with
-    | Some n -> n
-    | None ->
-      Log.Misc.warn "Invalid int for %s=%s, using default %d" name v default;
-      default
 
 let parse_bool_string s =
   if String.trim s = "" then Some false else String_util.bool_of_word s

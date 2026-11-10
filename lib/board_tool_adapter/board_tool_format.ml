@@ -75,10 +75,16 @@ let board_error_failure_class = function
   | Board.Unauthorized _
   (* The id itself has the wrong shape (a typed id parser refused it), so
      the same call can never succeed; the message names the accepted shape. *)
-  | Board.Invalid_id _ ->
+  | Board.Invalid_id _
+  (* The store refused the request itself: empty content, a closed thread, a
+     thread at its comment cap, an unsupported broadcast selector. The same
+     call cannot succeed, and the message names the correction (other text, a
+     successor post). Reporting it as a runtime failure told the model to
+     report a fault instead of correcting the call. Server configuration
+     failures and store conflicts are [Io_error], never this constructor. *)
+  | Board.Validation_error _ ->
     Tool_result.Workflow_rejection
   | Board.Io_error _
-  | Board.Validation_error _
   | Board.Already_voted _
   | Board.Already_exists _
   (* The Keeper settings could not be read, or two Keepers claim one alias.

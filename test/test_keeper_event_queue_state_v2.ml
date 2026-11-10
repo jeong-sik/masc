@@ -2469,6 +2469,8 @@ let test_durable_enqueue_replays_write_and_signal_nothing () =
            | Registry_event_queue.Stimulus_enqueued -> ()
            | Registry_event_queue.Stimulus_already_present ->
              Alcotest.fail "first delivery was already present"
+           | Registry_event_queue.Stimulus_shutdown_reserved operation_id ->
+             Alcotest.fail (Registry_event_queue.shutdown_reserved_detail operation_id)
            | Registry_event_queue.Stimulus_storage_error detail -> Alcotest.fail detail);
           Alcotest.(check (pair int int)) "first delivery writes and signals once" (1, 1)
             (!writes, !signals);
@@ -2481,6 +2483,8 @@ let test_durable_enqueue_replays_write_and_signal_nothing () =
             | Registry_event_queue.Stimulus_already_present -> ()
             | Registry_event_queue.Stimulus_enqueued ->
               Alcotest.failf "replay %d enqueued the source again" replay
+            | Registry_event_queue.Stimulus_shutdown_reserved operation_id ->
+              Alcotest.fail (Registry_event_queue.shutdown_reserved_detail operation_id)
             | Registry_event_queue.Stimulus_storage_error detail -> Alcotest.fail detail)
             [ 1; 2; 3 ];
           Alcotest.(check (pair int int)) "replays write and signal nothing" (1, 1)

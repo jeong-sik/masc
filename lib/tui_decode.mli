@@ -1487,9 +1487,6 @@ type keeper_failure_status = {
 }
 
 val keeper_current_activity_of_turn : keeper_turn_state -> keeper_current_activity
-val keeper_failure_status_of_readings :
-  health:keeper_health option -> turn:keeper_turn_state option ->
-  runtime:keeper_runtime option -> keeper_failure_status option
 
 val decode_keeper_turns :
   Yojson.Safe.t -> (keeper_turn_row list, string) result
@@ -2116,7 +2113,6 @@ type context_observation =
     }
   | Context_unavailable of context_unavailable_reason
 
-val decode_agent : Yojson.Safe.t -> (agent, string) result
 val task_of_domain : ?goal_ids:string list -> Masc_domain.task -> task
 
 val active_tasks_of_domain
@@ -2324,14 +2320,6 @@ val required_display_any_field :
   Yojson.Safe.t -> string list -> (string, string) result
 val optional_body_field : Yojson.Safe.t -> (string, string) result
 val required_body_field : Yojson.Safe.t -> (string, string) result
-val bounded_parent_depth :
-  ?max_depth:int ->
-  id_of:('a -> string) ->
-  parent_id_of:('a -> string option) ->
-  'a list ->
-  'a ->
-  int
-val parse_keeper_chat_response : string -> (string, string) result
 
 (** {1 Keeper file changes}
 

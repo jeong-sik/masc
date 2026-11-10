@@ -84,7 +84,10 @@ let load_pair ~source ~cert_file ~key_file =
 
 (* {1 Making a self-signed pair} *)
 
-let subject = X509.Distinguished_name.[ Relative_distinguished_name.singleton (CN "masc") ]
+let subject =
+  X509.Distinguished_name.
+    [ Relative_distinguished_name.singleton (CN (Common_name.v "masc")) ]
+;;
 
 (* The bind host as subject alternative name octets, unless it is the
    unspecified address, which no client connects to. *)

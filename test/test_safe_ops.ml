@@ -244,18 +244,6 @@ let test_json_string_opt_missing () =
    Additional coverage tests for uncovered functions
    ================================================================ *)
 
-(* try_with_log *)
-let test_try_with_log_success () =
-  let open Safe_ops in
-  let result = try_with_log "test" (fun () -> 42) in
-  check (option int) "Some on success" (Some 42) result
-
-let test_try_with_log_failure () =
-  let open Safe_ops in
-  let result = try_with_log "test" (fun () -> failwith "boom") in
-  check (option int) "None on failure" None result
-
-
 (* float_of_string_with_default *)
 let test_float_of_string_with_default_valid () =
   let open Safe_ops in
@@ -323,24 +311,6 @@ let test_read_file_safe_valid () =
   match result with
   | Ok content -> check string "reads content" "hello world" content
   | Error e -> fail (Printf.sprintf "unexpected error: %s" e)
-
-(* get_env_int_logged *)
-let test_get_env_int_logged_missing () =
-  let open Safe_ops in
-  let result = get_env_int_logged "MASC_TEST_NONEXISTENT_VAR_12345" ~default:99 in
-  check int "default on missing" 99 result
-
-let test_get_env_int_logged_valid () =
-  let open Safe_ops in
-  Unix.putenv "MASC_TEST_INT_VAR" "42";
-  let result = get_env_int_logged "MASC_TEST_INT_VAR" ~default:0 in
-  check int "parses env var" 42 result
-
-let test_get_env_int_logged_invalid () =
-  let open Safe_ops in
-  Unix.putenv "MASC_TEST_INT_VAR_BAD" "not_int";
-  let result = get_env_int_logged "MASC_TEST_INT_VAR_BAD" ~default:99 in
-  check int "default on invalid" 99 result
 
 let test_get_env_bool_logged_missing () =
   let open Safe_ops in
@@ -606,15 +576,6 @@ let () =
       test_case "nonexistent" `Quick test_list_dir_safe_nonexistent;
       test_case "not a dir" `Quick test_list_dir_safe_not_a_dir;
       test_case "valid dir" `Quick test_list_dir_safe_valid;
-    ];
-    "try_with_log", [
-      test_case "success" `Quick test_try_with_log_success;
-      test_case "failure" `Quick test_try_with_log_failure;
-    ];
-    "get_env_int_logged", [
-      test_case "missing" `Quick test_get_env_int_logged_missing;
-      test_case "valid" `Quick test_get_env_int_logged_valid;
-      test_case "invalid" `Quick test_get_env_int_logged_invalid;
     ];
     "get_env_bool_logged", [
       test_case "missing" `Quick test_get_env_bool_logged_missing;

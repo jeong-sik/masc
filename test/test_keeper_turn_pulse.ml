@@ -109,27 +109,6 @@ let test_pulses_are_kept_per_workspace_and_keeper () =
   Alcotest.(check int) "p1 k2" (base + (2 * Pulse.slot_seconds)) (newest ~base_path:"/tmp/p1" ~keeper_name:"k2")
 ;;
 
-let test_sample_of_decision_line () =
-  let line ?(path = {|,"execution_path":"autonomous_cycle"|}) ~event ~ts ~outcome () =
-    Printf.sprintf {|{"event":"%s","ts_unix":%.1f,"outcome":"%s"%s}|} event ts outcome path
-  in
-  (match Pulse.sample_of_decision_line (line ~event:"turn" ~ts:1794037335.0 ~outcome:"success" ()) with
-   | None -> Alcotest.fail "expected sample"
-   | Some s ->
-     Alcotest.(check (float 0.001)) "ts" 1794037335.0 s.at;
-     Alcotest.(check bool) "outcome ok" true (s.outcome = Pulse.Turn_ok));
-  (match Pulse.sample_of_decision_line (line ~event:"turn" ~ts:1794036000.0 ~outcome:"error" ()) with
-   | None -> Alcotest.fail "expected sample"
-   | Some s -> Alcotest.(check bool) "outcome failed" true (s.outcome = Pulse.Turn_failed));
-  let ignored label raw = Alcotest.(check bool) label true (Pulse.sample_of_decision_line raw = None) in
-  ignored "ignore non-turn" (line ~event:"heartbeat" ~ts:1794035000.0 ~outcome:"success" ());
-  ignored
-    "ignore a chat turn"
-    (line ~path:{|,"execution_path":"direct_turn"|} ~event:"turn" ~ts:1794035000.0 ~outcome:"success" ());
-  ignored "ignore a turn with no path" (line ~path:"" ~event:"turn" ~ts:1794035000.0 ~outcome:"success" ());
-  ignored "ignore bad json" "not json"
-;;
-
 let rec remove_tree path =
   if Sys.file_exists path
   then
@@ -252,6 +231,46 @@ let test_seed_knows_the_log_from_rows_of_any_event () =
     check_known "a chat row is the log's first row" (at_slot 85) (seeded config "chat-inside"))
 ;;
 
+(* A row counts only when it is an autonomous-cycle turn with a known outcome.
+   Another event, a chat turn, a turn with no execution path and a line that is
+   not JSON are read past, so the slots show which rows counted. *)
+let test_seed_counts_only_autonomous_turns_by_outcome () =
+  let line ?(path = {|,"execution_path":"autonomous_cycle"|}) ~event ~slot ~outcome () =
+    Printf.sprintf
+      {|{"event":"%s","ts_unix":%.1f,"outcome":"%s"%s}|}
+      event
+      (at_slot slot)
+      outcome
+      path
+  in
+  with_workspace (fun config log_path ->
+    write_lines
+      (log_path "mixed")
+      [ line ~event:"turn" ~slot:90 ~outcome:"success" ()
+      ; line ~event:"turn" ~slot:91 ~outcome:"error" ()
+      ; line ~event:"heartbeat" ~slot:92 ~outcome:"success" ()
+      ; line
+          ~path:{|,"execution_path":"direct_turn"|}
+          ~event:"turn"
+          ~slot:93
+          ~outcome:"success"
+          ()
+      ; line ~path:"" ~event:"turn" ~slot:94 ~outcome:"success" ()
+      ; "not json"
+      ];
+    match seeded config "mixed" with
+    | Some pulse ->
+      Alcotest.check
+        tally_list
+        "the success and the error turn are counted, no other row is"
+        (flat
+           [ base + (91 * Pulse.slot_seconds), 0, 0, 1
+           ; base + (90 * Pulse.slot_seconds), 1, 0, 0
+           ])
+        (flat (tallies pulse))
+    | None -> Alcotest.fail "expected a seeded pulse")
+;;
+
 let test_seed_drops_turns_stamped_after_now () =
   with_workspace (fun config log_path ->
     write_turns (log_path "skewed") [ at_slot 90; now +. 600.0 ];
@@ -298,8 +317,7 @@ let () =
             test_pulses_are_kept_per_workspace_and_keeper
         ] )
     ; ( "seed"
-      , [ Alcotest.test_case "sample of decision line" `Quick test_sample_of_decision_line
-        ; Alcotest.test_case "seed reads what the logs can tell" `Quick
+      , [ Alcotest.test_case "seed reads what the logs can tell" `Quick
             test_seed_reads_what_the_logs_can_tell
         ; Alcotest.test_case "seed reads the primary log alone when it reaches the window" `Quick
             test_seed_reads_the_primary_log_alone_when_it_reaches_the_window
@@ -307,6 +325,8 @@ let () =
             test_seed_reads_the_rotated_log_when_the_primary_is_missing
         ; Alcotest.test_case "seed knows the log from rows of any event" `Quick
             test_seed_knows_the_log_from_rows_of_any_event
+        ; Alcotest.test_case "seed counts only autonomous turns by outcome" `Quick
+            test_seed_counts_only_autonomous_turns_by_outcome
         ; Alcotest.test_case "seed drops turns stamped after now" `Quick
             test_seed_drops_turns_stamped_after_now
         ; Alcotest.test_case "seed knows a long log from its oldest read turn" `Quick

@@ -800,7 +800,34 @@ let test_turn_failures_summary_names_the_newest_failed_receipt () =
         [ "labels the cancelled turn", "cancelled"
         ; "names the cancelled turn's reason", "api_error_timeout"
         ; "names the cancelled turn's message", "provider wall-clock timeout"
-        ])
+        ];
+      (* The cause rides whole: a receipt message longer than the preview
+         helper's old 220-byte default -- a third of the live corpus, and the
+         JSON error bodies among them unparseable once cut -- must reach the
+         summary uncut, or every timeline reader loses the tail together. *)
+      let long_cause =
+        "Internal error: [masc_agent_core_error] {\"kind\":\"terminal_effect_failed\",\"failure_class\":\"dependency_unavailable\",\"effect_disposition\":\"effect_outcome_unknown\",\"detail\":{\"kind\":\"tool_failed\",\"internal_tool_name\":\"tool_execute\",\"attempt\":3,\"note\":\"a cause long enough to run past two hundred and twenty bytes so the old preview cut it mid-token\"}}"
+      in
+      Alcotest.(check bool)
+        "the long cause is longer than the old preview cap"
+        true
+        (String.length long_cause > 220);
+      Dated_jsonl.append
+        store
+        (Keeper_execution_receipt.to_json
+           (receipt_row
+              ~keeper_name
+              ~outcome:`Error
+              ~terminal_reason_code:"terminal_effect_failed"
+              ~error_message:(Some long_cause)
+              ~ended_at:"2026-09-23T02:00:00Z"));
+      let long_summary = summary () in
+      Alcotest.(check string)
+        "the whole long cause reaches the summary uncut"
+        long_cause
+        (String.sub long_summary
+           (String.length long_summary - String.length long_cause)
+           (String.length long_cause)))
 ;;
 
 let () =

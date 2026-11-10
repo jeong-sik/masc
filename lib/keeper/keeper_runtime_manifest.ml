@@ -36,12 +36,6 @@ let source_clock_of_event = function
   | Runtime_failed | Pre_dispatch_blocked | Provider_lane_resolved | Checkpoint_loaded
   | Checkpoint_saved | Receipt_appended | Turn_finished -> Wall
 
-type logical_ordering = {
-  parent_event_id : string option;
-  caused_by : string option;
-  logical_seq : int option;
-}
-
 module StringSet = Set_util.StringSet
 
 let schema_version = 1
@@ -108,42 +102,6 @@ let source_clock_from_manifest manifest =
     | Some (`String s) -> source_clock_of_string s
     | _ -> None)
   | _ -> None
-
-let logical_ordering manifest =
-  match extract_clock_refs manifest.decision with
-  | Some (`Assoc fields) ->
-    let parent_event_id =
-      match List.assoc_opt "parent_event_id" fields with
-      | Some (`String s) -> Some s
-      | _ -> None
-    in
-    let caused_by =
-      match List.assoc_opt "caused_by" fields with
-      | Some (`String s) -> Some s
-      | _ -> None
-    in
-    let logical_seq =
-      match List.assoc_opt "logical_seq" fields with
-      | Some (`Int i) -> Some i
-      | _ -> None
-    in
-    { parent_event_id; caused_by; logical_seq }
-  | _ -> { parent_event_id = None; caused_by = None; logical_seq = None }
-
-let comparable_for_latency a b =
-  match source_clock_from_manifest a, source_clock_from_manifest b with
-  | Some sc_a, Some sc_b ->
-    if sc_a = sc_b then Ok sc_a
-    else
-      Error
-        (Printf.sprintf
-           "latency comparison invalid: source_clock mismatch (%s vs %s)"
-           (source_clock_to_string sc_a)
-           (source_clock_to_string sc_b))
-  | None, _ ->
-    Error "latency comparison invalid: manifest a has no source_clock"
-  | _, None ->
-    Error "latency comparison invalid: manifest b has no source_clock"
 
 let clock_lane_of_event = function
   | Turn_started

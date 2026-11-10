@@ -36,9 +36,6 @@ val voice_meter_text : state -> string
     observed recording, unavailable input, processing or original-slot stopping.
     A missing level is not evidence of active recording. Presentation only. *)
 
-val runtime_assignment_targets : runtime_assignment -> string -> bool
-(** Whether an assignment resolves to the named lane or runtime. *)
-
 type planning_tab =
   Render_schedule.planning_tab =
     Planning_goals
@@ -341,6 +338,11 @@ val compact_connection_state : Masc_tui_types.state -> compact_connection_state
 (** Select the highest-priority current workspace, read or HTTP observation. *)
 
 val usage_connection_badge : Masc_tui_types.state -> string
+
+val reading_connection_notice : Masc_tui_types.state -> string option
+(** Exceptional transport, workspace, refresh or observer-loss evidence.
+    Healthy HTTP and ordinary pending reads return [None]; each view keeps
+    its own pending-read indication. The notice retains the full context. *)
 
 val compact_connection_badge : Masc_tui_types.state -> width:int -> string * string option
 (** A narrow textual state and any longer status details that remain to show. *)

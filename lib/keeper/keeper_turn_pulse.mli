@@ -57,10 +57,6 @@ type sample = {
   outcome : outcome;
 }
 
-val sample_of_decision_line : string -> sample option
-(** A decision log line that is an autonomous-cycle turn with a known outcome
-    and a finite time; [None] for any other line, chat turns included. *)
-
 val seed_from_decision_log :
   ?now:float -> config:Workspace.config -> keeper_name:string -> unit -> unit
 (** Fill a keeper's pulse from the tail of [decisions.jsonl], and from

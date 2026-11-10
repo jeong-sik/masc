@@ -372,7 +372,7 @@
  (name test_dos_vision)
  (modules test_dos_vision)
  (libraries machine_worker_fixture eio_main base64 masc.machine_configuration alcotest unix yojson fs_compat masc masc_test_deps
-   masc.dos_lane masc.tool_types))
+   masc.dos_lane masc.tool_types mcp_protocol))
 
 (test
  (name test_sse_observer_epoch)
@@ -482,7 +482,6 @@
   test_keeper_lifecycle_global_gate
   test_keeper_memory_lane
   test_keeper_connector_attention_wake
-  test_keeper_raw_task_signal_wake
   test_broadcast_stores_raw_text
   test_keeper_mention_scope
   test_keeper_lane_mentions
@@ -819,7 +818,6 @@
   test_keeper_memory_lane
   test_env_keeper_scrub
   test_keeper_connector_attention_wake
-  test_keeper_raw_task_signal_wake
   test_broadcast_stores_raw_text
   test_keeper_mention_scope
   test_keeper_lane_mentions
@@ -2727,6 +2725,8 @@
 (include stanzas/test_board_delete_order.inc)
 (include stanzas/test_board_comments_source.inc)
 (include stanzas/test_board_sub_boards_source.inc)
+(include stanzas/test_board_votes_source.inc)
+(include stanzas/test_board_reactions_source.inc)
 (include stanzas/test_board_posts_preflight.inc)
 
 (include stanzas/test_board_snapshot_rows.inc)
@@ -4111,11 +4111,6 @@
  (libraries alcotest masc_tui_types))
 
 (test
- (name test_tui_quiz_scorecard)
- (modules test_tui_quiz_scorecard)
- (libraries alcotest masc masc_tui_types))
-
-(test
  (name test_tui_memory_fold)
  (modules test_tui_memory_fold)
  (libraries masc_tui_image_preview alcotest masc_tui_message_layout masc_tui_types))
@@ -4187,7 +4182,7 @@
 (test
  (name test_tui_palette_matching)
  (modules test_tui_palette_matching)
- (libraries masc.runtime masc_tui_palette masc_tui_pick_list alcotest masc.masc_types masc_tui_code_lexer masc_tui_types masc_tui_fetched masc))
+ (libraries masc.runtime masc_tui_palette masc_tui_pick_list alcotest masc.masc_types masc_tui_code_lexer masc_tui_types masc_tui_fetched masc_tui_code_results masc))
 
 (test
  (name test_tui_workspace_entries)
@@ -4708,6 +4703,11 @@
   masc_tui_theme
   masc_tui_types  unix
 ))
+
+(test
+ (name test_tui_memory_lineage)
+ (modules test_tui_memory_lineage)
+ (libraries alcotest masc masc_tui_memory_lineage))
 
 (test
  (name test_tui_memory_facts_explorer)
@@ -7087,7 +7087,7 @@
  (name test_tui_resource_image_admission)
  (modules test_tui_resource_image_admission)
  (libraries masc masc.agent_core.digest masc.skill_reference masc_tui_loader masc_tui_image_requests masc_tui_input_reader masc_tui_resource_diagrams masc_tui_keeper_chat_projection masc_tui_resource_catalog alcotest masc_tui_types masc_tui_mcp masc_tui_resource_images masc_tui_board_detail masc_tui_board_reader masc_tui_board_preview_work masc_tui_image_cache masc_tui_image_payload masc_tui_async_protocol masc_tui_attachment_action masc_tui_browser masc_tui_pele unix threads mtime.clock.os
-  masc_tui_image_preview masc_tui_image_viewport masc_tui_resources_updates
+  masc_tui_image_preview masc_tui_image_viewport masc_tui_resources_updates masc_tui_fetched
   masc_tui_workspace_result masc_eio_context eio eio_main))
 
 (test
@@ -7320,6 +7320,8 @@
 (include stanzas/test_task_history_page_cursor.inc)
 
 (include stanzas/test_list_util.inc)
+
+(include stanzas/test_release_companion_consistency.inc)
 
 (include stanzas/test_tui_code_msg.inc)
 (include stanzas/test_tui_context_msg.inc)

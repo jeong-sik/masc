@@ -279,10 +279,6 @@ let test_limit_for_category () =
   check int "broadcast" cfg.broadcast_per_minute (Masc_domain.limit_for_category cfg Masc_domain.BroadcastLimit);
   check int "task_ops" cfg.task_ops_per_minute (Masc_domain.limit_for_category cfg Masc_domain.TaskOpsLimit)
 
-let test_category_for_tool () =
-  check bool "broadcast" true (Masc_domain.category_for_tool "masc_broadcast" = Masc_domain.BroadcastLimit);
-  check bool "status" true (Masc_domain.category_for_tool "masc_status" = Masc_domain.GeneralLimit)
-
 let test_multiplier_for_role () =
   let cfg = Masc_domain.default_rate_limit in
   check (float 0.01) "worker" 1.0 (Masc_domain.multiplier_for_role cfg Masc_domain.Worker);
@@ -481,26 +477,9 @@ let test_validate_agent_name_r_valid () =
   let result = Workspace_utils.validate_agent_name_r "valid-agent" in
   check bool "ok result" true (is_ok result)
 
-let test_validate_task_id_valid () =
-  let result = Workspace_utils.validate_task_id "task-12345" in
-  check bool "valid" true (is_ok result)
-
 let test_validate_task_id_r_valid () =
   let result = Workspace_utils.validate_task_id_r "task-abc" in
   check bool "ok result" true (is_ok result)
-
-let test_validate_file_path_valid () =
-  let result = Workspace_utils.validate_file_path "src/main.ml" in
-  check bool "valid" true (is_ok result)
-
-let test_validate_file_path_too_long () =
-  let long_path = String.make 501 'a' in
-  let result = Workspace_utils.validate_file_path long_path in
-  check bool "invalid too long" true (is_error result)
-
-let test_validate_file_path_angle_brackets () =
-  let result = Workspace_utils.validate_file_path "file<name>.txt" in
-  check bool "invalid angle brackets" true (is_error result)
 
 (* ============================================================ *)
 (* String_util.contains_substring Tests                           *)
@@ -572,7 +551,6 @@ let role_tests = [
 let rate_limit_tests = [
   "default config", `Quick, test_default_rate_limit;
   "limit_for_category", `Quick, test_limit_for_category;
-  "category_for_tool", `Quick, test_category_for_tool;
   "multiplier_for_role", `Quick, test_multiplier_for_role;
   "effective_limit", `Quick, test_effective_limit;
 ]
@@ -618,11 +596,7 @@ let sanitize_tests = [
 let validation_tests = [
   "agent_name valid", `Quick, test_validate_agent_name_valid;
   "agent_name_r valid", `Quick, test_validate_agent_name_r_valid;
-  "task_id valid", `Quick, test_validate_task_id_valid;
   "task_id_r valid", `Quick, test_validate_task_id_r_valid;
-  "file_path valid", `Quick, test_validate_file_path_valid;
-  "file_path too long", `Quick, test_validate_file_path_too_long;
-  "file_path angle brackets", `Quick, test_validate_file_path_angle_brackets;
 ]
 
 let substring_tests = [

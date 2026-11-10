@@ -1416,6 +1416,10 @@ let test_fresh_lane_serves_queued_schedule_wake_after_warmup () =
        | Masc.Keeper_registry_event_queue.Stimulus_enqueued -> ()
        | Masc.Keeper_registry_event_queue.Stimulus_already_present ->
          fail "the schedule wake was already queued in a fresh workspace"
+       | Masc.Keeper_registry_event_queue.Stimulus_shutdown_reserved operation_id ->
+         fail
+           ("the schedule wake could not be queued: "
+            ^ Masc.Keeper_registry_event_queue.shutdown_reserved_detail operation_id)
        | Masc.Keeper_registry_event_queue.Stimulus_storage_error detail ->
          fail ("the schedule wake could not be queued: " ^ detail));
       Masc.Keeper_reaction_ledger.record_event_queue_stimulus

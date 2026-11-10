@@ -280,7 +280,6 @@ let credential_file config agent_name =
 
 module Nickname_helpers = Auth_nickname
 
-let extract_agent_type_prefix = Nickname_helpers.extract_agent_type_prefix
 let credential_agent_name = Nickname_helpers.credential_agent_name
 
 let raw_token_file config agent_name =

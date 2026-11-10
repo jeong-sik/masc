@@ -54,19 +54,6 @@ type source_clock =
   | Logical
   | Event_bus
 
-(** {2 F5: Clock separation policy}
-
-    Wall-clock ([ts]) is display-only.  Ordering uses logical
-    [parent_event_id]/[caused_by]/[logical_seq].  Latency comparison
-    ([elapsed_ms]) is only valid between events that share the same
-    [source_clock]. *)
-
-type logical_ordering = {
-  parent_event_id : string option;
-  caused_by : string option;
-  logical_seq : int option;
-}
-
 (** {1 Own-module vals} *)
 
 val source_clock_to_string : source_clock -> string
@@ -146,26 +133,11 @@ val append_best_effort : ?site:string -> Workspace.config -> t -> unit
 (** Extract the source_clock from a manifest's decision JSON. *)
 val source_clock_from_manifest : t -> source_clock option
 
-(** Extract the logical ordering fields from a manifest's clock_refs. *)
-val logical_ordering : t -> logical_ordering
-
-(** Validate that two manifests share the same source_clock so that
-    their [elapsed_ms] values are comparable.  Returns [Ok source_clock]
-    on match, [Error msg] on mismatch or missing clock. *)
-val comparable_for_latency : t -> t -> (source_clock, string) result
-
 (** {2 F8: Turn completeness policy} *)
 
 (** The clock_refs keys that are mandatory for a structurally complete
     manifest at this event lane. *)
 val mandatory_clock_refs_for_event : event_kind -> string list
 
-(** Check whether a manifest carries all mandatory clock_refs for its event. *)
-val validate_manifest_completeness : t -> (unit, string) result
-
 (** Whether a list of manifests includes a [Turn_finished] event. *)
 val is_finished_turn : t list -> bool
-
-(** Whether a turn is both [finished] and has all mandatory lane artifacts:
-    receipt link + checkpoint link. *)
-val is_complete_turn : t list -> bool

@@ -83,6 +83,44 @@ python3 harness2.py > run2.jsonl
 - `stock`: accept 한 소켓을 그대로 tls-eio 에 넘긴다. eio 의 4096 바이트 `simple_copy` 를 탄다.
 - `copy:N`: tls-eio 의 `copy` 를 N 바이트 버퍼 하나로 읽어 소켓에 쓰는 감싸개다. 버퍼는 연결마다 하나다. 쓰는 fiber 가 하나뿐인 벤치에서만 맞는 모양이다.
 
+## run7: HTTP/2 본문을 h2 에 조각 몇 개씩 넣을 때의 프레임 수와 시간, 2026-11-10
+
+RFC-0518 D3 이 본문을 h2 에 조각 둘까지 넣기로 한 근거다. 위의 run1~run6 과 달리 설치된 masc 서버를 띄우지 않았다.
+
+| 항목 | 값 |
+| --- | --- |
+| 실행 파일 | `test/test_h2_request_fibers.ml` 에 `h2_body_slices_probe.ml` 을 붙여 링크한 시험 실행 파일. main `9d67e41d1c4f` 의 cmi 스냅숏에 #50765 의 바뀐 단위를 다시 컴파일했다. OCaml 5.5.2 switch |
+| 서버 | 그 프로세스 안에서 `Server_bootstrap_http.serve_h2_connection` 을 TCP loopback 리스너에 붙였다. 평문 HTTP/2, 양쪽 `TCP_NODELAY` |
+| 클라이언트 | 탐침에 든 손으로 쓴 HTTP/2 클라이언트. 다른 domain 에서 돈다. 창을 언제 돌려줄지 장면마다 정한다 |
+| 비교한 셋 | `one`: 조각 하나만 h2 에 두는 큐(커밋 `cb6ab3d79b4b` 의 트리, `a30bc89c29aa` 의 큐와 같다). `two`: 조각 둘까지 두는 큐. `whole`: `cb6ab3d79b4b` 트리에서 `write_slice` 가 payload 전체를 한 번에 넣게 바꾼 것. main 의 통째 쓰기와 같다 |
+| 끝난 시각(UTC) | limited3 04:08:20, open3 04:11:05, frame3 04:13:26 |
+| 호스트 | macOS, M3 Max 한 대. 다른 세션의 빌드가 같이 돌았다. limited3 은 이 세션의 빌드도 같이 돌았다 |
+
+결과는 `run7-body-slices.txt` 다. 장면은 `MiB:스트림 창:연결 창:창 반환 정책:busy_us:회차` 다.
+
+- 창 반환 정책 `frame` 은 DATA 프레임마다 돌려준다. ocaml-h2 의 client 가 이렇게 한다(client_connection.ml 306~322줄). `go` 는 x/net/http2 의 `inflow.add` 규칙이다. `half` 는 받은 양이 창의 반 이상이면 돌려준다. nghttp2 의 규칙이다(nghttp2_helper.c `nghttp2_should_send_window_update`). Chromium 은 반을 넘거나 정해 둔 시간이 지나면 돌려준다(net/spdy/spdy_stream.cc `IncreaseRecvWindowSize`). 탐침은 그 시간 조건을 흉내 내지 않는다. 두 소스는 2026-11-10 에 각 저장소의 기본 브랜치에서 읽었다.
+- `busy_us` 는 서버 domain 의 다른 fiber 가 스케줄러 턴마다 쓰는 CPU 시간이다.
+
+읽은 것:
+
+- 8 MiB, 창 65,535 B, `frame`: `one` 은 프레임 33,152개(1 KiB 미만 32,640개)에 중앙값 11.0~13.5초, `two` 는 513개에 0.09~0.34초, `whole` 은 513개에 0.09~0.20초다.
+- 같은 창, `go`: `one` 1,021개, `two`·`whole` 513개. 시간은 셋이 흔들림 안에서 같다.
+- 같은 창, `half`: `one`·`two` 767개, `whole` 513개.
+- 32 MiB, 스트림 창 6 MiB·연결 창 15 MiB, `half`: `one` 133~152 ms, `two` 39~62 ms, `whole` 24~78 ms.
+- 8 MiB, 같은 창, 턴마다 1 ms 를 쓰는 fiber 가 있을 때: `one` 551~562 ms, `two` 281~320 ms, `whole` 27~33 ms.
+
+한계:
+
+- 시간은 같은 장면도 회차마다 2~3배 흔들렸다. 프레임 수는 매번 같았다.
+- TLS 와 cloudflared 를 거친 값은 재지 않았다. 실제 서버의 스케줄러 턴 시간도 재지 않았다.
+- 스트림 하나만 보냈다. 한 연결에 본문 여럿이 같이 나갈 때는 재지 않았다.
+
+다시 돌리려면 탐침을 `test/test_h2_request_fibers.ml` 의 마지막 `let () = run ...` 앞에 붙이고, 그 목록에 `"throughput probe", tp_cases` 를 더해 빌드한다. `TP_SCENES`, `TP_LABEL`, `TP_OUT` 환경 변수로 장면, 줄 머리, 출력 파일을 준다.
+
+```bash
+TP_SCENES="8:65535:65535:frame:0:3" TP_LABEL=two ./test_h2_request_fibers.exe test "throughput probe"
+```
+
 ## 관찰과 한계
 
 - run1 의 descriptor, TCP descriptor, 리스너 활성 연결, `sse_clients` 는 모든 표본에서 warm 값이었다. 오래 연 연결을 닫은 뒤 cold 값이 됐다.

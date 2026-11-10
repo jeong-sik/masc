@@ -6,7 +6,6 @@
 
 (** {1 Environment} *)
 
-val config_bootstrap_mode : unit -> [ `Auto | `Empty | `Skip ]
 val bootstrap_base_path_config_root : base_path:string -> unit
 
 val apply_runtime_toml : base_path:string -> unit
@@ -298,7 +297,7 @@ val run :
                         Httpun.Reqd.t Gluten.Reqd.t -> unit) ->
   make_h2_request_handler:(trust_policy:Server_request_authority.trust_policy ->
                            routes:'a ->
-                           request_sw:Eio.Switch.t ->
+                           stream_end:Http_h2_stream.Stream_end.t ->
                            Eio.Net.Sockaddr.stream ->
                            H2.Reqd.t -> unit) ->
   make_h2_error_handler:(unit ->

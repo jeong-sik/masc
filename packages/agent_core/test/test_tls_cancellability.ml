@@ -24,12 +24,13 @@
 let timeout_budget_s = 2.0
 let overshoot_tolerance_s = 0.7
 
-(* ── self-signed cert/key (x509 1.0.6 / mirage-crypto 1.2.0) ────────── *)
+(* ── self-signed cert/key ──────────────────────────────────────────── *)
 
 let make_self_signed () : X509.Certificate.t * X509.Private_key.t =
   let key = X509.Private_key.generate ~bits:2048 `RSA in
   let dn =
-    X509.Distinguished_name.[ Relative_distinguished_name.singleton (CN "localhost") ]
+    X509.Distinguished_name.
+      [ Relative_distinguished_name.singleton (CN (Common_name.v "localhost")) ]
   in
   let csr =
     match X509.Signing_request.create dn key with

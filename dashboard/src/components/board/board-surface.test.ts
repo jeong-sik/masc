@@ -1,5 +1,5 @@
 import { h } from 'preact'
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/preact'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/preact'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import {
   BOARD_DETAIL_WIDTH_DEFAULT,
@@ -12,7 +12,7 @@ import {
 import { boardPosts, boardLoading, boardSortMode, boardExcludeSystem, boardExcludeAutomation, boardHiddenCategories, boardAuthorFilter, boardHearthFilter, boardHasMore, boardLoadingMore, messages, shellAuthSummary, keepers } from '../../store'
 import { route } from '../../router'
 import { createPost, fetchBoardPost } from '../../api'
-import { requestBoardContextInference, voteComment } from '../../api/board'
+import { requestBoardContextInference, voteComment, votePost } from '../../api/board'
 import { deleteBoardPost } from '../../api/actions'
 import { showToast } from '../common/toast'
 import { dispatchOperatorAction, operatorSnapshot } from '../../operator-store'
@@ -74,6 +74,7 @@ vi.mock('../common/toast', () => ({
 
 vi.mock('../../api/board', () => ({
   requestBoardContextInference: vi.fn(),
+  votePost: vi.fn().mockResolvedValue(undefined),
   voteComment: vi.fn().mockResolvedValue(undefined),
   fetchBoardReactionState: vi.fn().mockResolvedValue({
     summaries: [],
@@ -81,10 +82,10 @@ vi.mock('../../api/board', () => ({
   }),
   // The feed asks for its rows together; a bar only fetches its own when this
   // one fails, which is the path fetchBoardReactionState above still covers.
-  fetchBoardReactionsBatch: vi.fn().mockResolvedValue({
-    byTargetId: new Map(),
+  fetchBoardReactionsBatch: vi.fn().mockImplementation(async (_type, ids: string[]) => ({
+    byTargetId: new Map(ids.map(id => [id, []])),
     supportedEmojis: ['👍', '❤️', '🎉', '🚀', '👀', '😕', '👏', '🔥'],
-  }),
+  })),
   toggleReaction: vi.fn(),
 }))
 
@@ -132,6 +133,8 @@ function makePost(overrides: Partial<BoardPost> & { id: string; title: string; a
     tags: [],
     votes: 0,
     vote_balance: 0,
+    current_vote: null,
+    has_voted: false,
     comment_count: 0,
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
@@ -611,7 +614,14 @@ describe('BoardSurface Component', () => {
     expect(fetchBoardReactionState).not.toHaveBeenCalled()
   })
 
-  it('renders embedded reaction summaries on post cards', () => {
+  it('renders selected reactions after the fresh batch confirms them', async () => {
+    const { fetchBoardReactionsBatch } = await import('../../api/board')
+    vi.mocked(fetchBoardReactionsBatch).mockResolvedValueOnce({
+      byTargetId: new Map([['post-reacted', [{
+        emoji: '🔥', count: 2, reacted: true, recent_user_ids: ['ani1999'],
+      }]]]),
+      supportedEmojis: ['🔥'],
+    })
     boardPosts.value = [
       makePost({
         id: 'post-reacted',
@@ -629,10 +639,83 @@ describe('BoardSurface Component', () => {
 
     render(h(BoardSurface, null))
 
-    expect(screen.getByRole('button', { name: '🔥 리액션 2개' })).toHaveAttribute('aria-pressed', 'true')
+    expect(await screen.findByRole('button', { name: '🔥 리액션 2개' })).toHaveAttribute('aria-pressed', 'true')
   })
 
-  it('keeps reaction controls visible for zero-reaction post cards', () => {
+  it('keeps a settled toggle when an earlier feed batch arrives afterward', async () => {
+    const { fetchBoardReactionsBatch, fetchBoardReactionState, toggleReaction } = await import('../../api/board')
+    let finishBatch!: (value: Awaited<ReturnType<typeof fetchBoardReactionsBatch>>) => void
+    let finishToggle!: (value: Awaited<ReturnType<typeof toggleReaction>>) => void
+    const summary = [{ emoji: '🔥', count: 1, reacted: true, recent_user_ids: ['viewer'] }]
+    vi.mocked(fetchBoardReactionsBatch)
+      .mockResolvedValueOnce({ byTargetId: new Map([['post-toggled', []], ['post-other', []]]), supportedEmojis: ['🔥'] })
+      .mockImplementationOnce(() => new Promise(resolve => { finishBatch = resolve }))
+    vi.mocked(toggleReaction).mockImplementationOnce(() => new Promise(resolve => { finishToggle = resolve }))
+    vi.mocked(fetchBoardReactionState).mockResolvedValueOnce({ summaries: summary, supportedEmojis: ['🔥'] })
+    const target = makePost({ id: 'post-toggled', title: 'Toggled row', author: 'keeper' })
+    boardPosts.value = [target, makePost({ id: 'post-other', title: 'Other row', author: 'keeper' })]
+    render(h(BoardSurface, null))
+    const row = within(screen.getByTestId(`bd-post-${target.id}`))
+    await waitFor(() => expect(row.getByRole('button', { name: '🔥 리액션 0개' })).not.toBeDisabled())
+    fireEvent.click(row.getByRole('button', { name: '🔥 리액션 0개' }))
+    expect(toggleReaction).toHaveBeenCalledTimes(1)
+
+    // Changing the drawn rows starts a batch that reads the pre-toggle state.
+    await act(async () => { boardPosts.value = [target] })
+    await waitFor(() => expect(fetchBoardReactionsBatch).toHaveBeenCalledTimes(2))
+    await act(async () => {
+      finishToggle({
+        target_type: 'post', target_id: target.id, user_id: 'viewer', emoji: '🔥', reacted: true, summary,
+      })
+    })
+    await waitFor(() => expect(screen.getByRole('button', { name: '🔥 리액션 1개' })).toHaveAttribute('aria-pressed', 'true'))
+    await act(async () => {
+      finishBatch({
+        byTargetId: new Map([[target.id, []]]), supportedEmojis: ['🔥'],
+      })
+    })
+
+    expect(screen.getByRole('button', { name: '🔥 리액션 1개' })).toHaveAttribute('aria-pressed', 'true')
+    expect(toggleReaction).toHaveBeenCalledTimes(1)
+  })
+
+  it('preserves unavailable reaction rows when only the emoji catalog is known', async () => {
+    const { fetchBoardReactionsBatch, fetchBoardReactionState, toggleReaction } = await import('../../api/board')
+    vi.mocked(fetchBoardReactionsBatch).mockRejectedValueOnce(new Error('source unavailable'))
+    vi.mocked(fetchBoardReactionState).mockRejectedValueOnce(new Error('source unavailable'))
+    boardPosts.value = [makePost({
+      id: 'unknown-reaction-row', title: 'Unknown reactions', author: 'keeper',
+      supported_reaction_emojis: ['🔥'],
+    })]
+    render(h(BoardSurface, null))
+
+    await waitFor(() => expect(fetchBoardReactionsBatch).toHaveBeenCalled())
+    const reaction = await screen.findByRole('button', { name: '🔥 리액션 확인 불가' })
+    expect(reaction).toBeDisabled()
+    expect(reaction).not.toHaveAttribute('aria-pressed')
+    fireEvent.click(reaction)
+    expect(toggleReaction).not.toHaveBeenCalled()
+  })
+
+  it('invalidates cached empty reactions when the fresh batch is unavailable', async () => {
+    const { fetchBoardReactionsBatch, fetchBoardReactionState, toggleReaction } = await import('../../api/board')
+    vi.mocked(fetchBoardReactionsBatch).mockRejectedValueOnce(new Error('source unavailable'))
+    vi.mocked(fetchBoardReactionState).mockRejectedValueOnce(new Error('source unavailable'))
+    boardPosts.value = [makePost({
+      id: 'cached-reaction-row', title: 'Cached reactions', author: 'keeper',
+      reactions: [], supported_reaction_emojis: ['🔥'],
+    })]
+    render(h(BoardSurface, null))
+
+    await waitFor(() => expect(fetchBoardReactionsBatch).toHaveBeenCalled())
+    const reaction = await screen.findByRole('button', { name: '🔥 리액션 확인 불가' })
+    expect(reaction).toBeDisabled()
+    expect(reaction).not.toHaveAttribute('aria-pressed')
+    fireEvent.click(reaction)
+    expect(toggleReaction).not.toHaveBeenCalled()
+  })
+
+  it('keeps reaction controls usable after loading known empty summaries', async () => {
     boardPosts.value = [
       makePost({
         id: 'post-zero-reactions',
@@ -644,8 +727,8 @@ describe('BoardSurface Component', () => {
 
     render(h(BoardSurface, null))
 
-    expect(screen.getByRole('button', { name: '👍 리액션 0개' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '👀 리액션 0개' })).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: '👍 리액션 0개' })).not.toBeDisabled()
+    expect(screen.getByRole('button', { name: '👀 리액션 0개' })).toHaveAttribute('aria-pressed', 'false')
   })
 
   it('renders flair badges on post cards', () => {
@@ -781,9 +864,30 @@ describe('BoardSurface Component', () => {
     expect(fetchBoardPost).toHaveBeenCalledExactlyOnceWith(post.id, undefined, undefined, 'deleted-reply')
   })
 
+  it('does not cast from an unreadable vote state in the feed', async () => {
+    boardPosts.value = [
+      makePost({ id: 'unknown-vote', title: 'Unknown vote', author: 'writer',
+        current_vote: undefined, has_voted: undefined }),
+      makePost({ id: 'known-no-vote', title: 'Known absence', author: 'writer' }),
+    ]
+    render(h(BoardSurface, null))
+
+    const unreadable = within(screen.getByTestId('bd-post-unknown-vote'))
+    const upvote = unreadable.getByRole('button', { name: '추천', exact: true })
+    expect(upvote).toBeDisabled()
+    expect(upvote).not.toHaveAttribute('aria-pressed')
+    expect(unreadable.getByRole('button', { name: '비추천', exact: true })).toBeDisabled()
+    fireEvent.click(upvote)
+    expect(votePost).not.toHaveBeenCalled()
+
+    fireEvent.click(within(screen.getByTestId('bd-post-known-no-vote'))
+      .getByRole('button', { name: '추천', exact: true }))
+    await waitFor(() => expect(votePost).toHaveBeenCalledWith('known-no-vote', 'up'))
+  })
+
   it('clears focused-route ancestry when returning to a retained compact thread', async () => {
     const post = makePost({ id: 'retained-thread', title: 'Retained thread', author: 'keeper', post_kind: 'direct' })
-    const reply = { id: 'retained-reply', post_id: post.id, parent_id: 'older-parent', author: 'keeper', content: 'Current reply', created_at: post.created_at }
+    const reply = { id: 'retained-reply', post_id: post.id, parent_id: 'older-parent', author: 'keeper', content: 'Current reply', created_at: post.created_at, current_vote: null, has_voted: false }
     const parent = { ...reply, id: 'older-parent', parent_id: null, content: 'Older parent' }
     boardPosts.value = [post]
     selectedBoardPostId.value = post.id

@@ -196,6 +196,14 @@ let test_selected ?hook_effort ?(replacement = Replace)
 ;;
 
 let () =
+  (* A CLI starts on an account only by the access its process published, once
+     per process (Runtime_account_access). Antigravity asks its host for that
+     access before it spawns (keeper_turn_driver.ml, run_antigravity), so a
+     process that never publishes refuses every turn with Host_account and no
+     child is ever started — which is exactly "the native child consumed input"
+     failing everywhere. The sibling Antigravity suites publish this too
+     (#50649 added the call there and this suite was left out). *)
+  Masc_test_deps.publish_single_user_access ();
   let case name ?hook_effort ?replacement ?(selected_effort = None) ?(live_effort = None)
       ?(selected_timeout = None) ?(live_timeout = None) expected =
     test_case name `Quick (test_selected ?hook_effort ?replacement

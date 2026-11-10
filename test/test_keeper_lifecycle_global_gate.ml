@@ -212,7 +212,9 @@ let test_global_reactive_off_does_not_suppress_typed_mention () =
   let d = decide ~meta:(ready_meta ()) mention_obs in
   check bool "typed mention remains runnable" true d.should_run;
   check (list string) "typed mention has no skip reasons" []
-    (List.map WO.skip_reason_to_string (skip_reasons d))
+    (match d.verdict with
+     | WO.Skip _ -> WO.verdict_reasons_to_strings d.verdict
+     | WO.Run _ -> [])
 
 (* Review-flagged: a pending reactive trigger must not, on its own, starve
    the scheduled-autonomous decision when the reactive gate is off -- a

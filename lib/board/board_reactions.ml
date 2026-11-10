@@ -9,6 +9,22 @@ let normalize_reaction_emoji raw =
     Error (Validation_error (Printf.sprintf "Unsupported board reaction emoji: %s" emoji))
 ;;
 
+let canonical_reaction_target_id ~target_type target_id =
+  match target_type with
+  | Reaction_post -> Result.map Post_id.to_string (Post_id.of_string target_id)
+  | Reaction_comment -> Result.map Comment_id.to_string (Comment_id.of_string target_id)
+;;
+
+let canonical_reaction_targets targets =
+  let rec loop acc = function
+    | [] -> Ok (List.rev acc)
+    | (target_type, target_id) :: rest ->
+      let* target_id = canonical_reaction_target_id ~target_type target_id in
+      loop ((target_type, target_id) :: acc) rest
+  in
+  loop [] targets
+;;
+
 let ensure_reaction_target_unlocked store ~target_type ~target_id =
   match target_type with
   | Reaction_post ->
@@ -162,16 +178,23 @@ let normalize_reaction_user_id = function
 let list_reactions store ~target_type ~target_id ?user_id () =
   maybe_sweep store;
   let user_id = normalize_reaction_user_id user_id in
-  with_lock store (fun () ->
-    match ensure_reaction_target_unlocked store ~target_type ~target_id with
-    | Error e -> Error e
-    | Ok () -> Ok (reaction_summaries_unlocked store ~target_type ~target_id ?user_id ()))
+  with_persist_lock store (fun () ->
+    let* () = Board_reactions_source.require_readable store in
+    let* target_id = canonical_reaction_target_id ~target_type target_id in
+    with_lock store (fun () ->
+      match ensure_reaction_target_unlocked store ~target_type ~target_id with
+      | Error e -> Error e
+      | Ok () -> Ok (reaction_summaries_unlocked store ~target_type ~target_id ?user_id ())))
 ;;
 
 let list_reactions_batch store ~targets ?user_id () =
   maybe_sweep store;
   let user_id = normalize_reaction_user_id user_id in
-  with_lock store (fun () -> reaction_summaries_batch_unlocked store ~targets ?user_id ())
+  with_persist_lock store (fun () ->
+    let* () = Board_reactions_source.require_readable store in
+    let* targets = canonical_reaction_targets targets in
+    with_lock store (fun () ->
+      Ok (reaction_summaries_batch_unlocked store ~targets ?user_id ())))
 ;;
 
 type staged_reaction_toggle =
@@ -261,8 +284,11 @@ let commit_staged_reaction_unlocked store staged =
     let current = Hashtbl.find_opt store.reactions staged.key in
     if not (same_reaction_state current staged.previous)
     then
+      (* The caller's request was valid, but the model changed after the file
+         write. The source retains that known receipt without acknowledging it
+         or rolling it back. Report the storage/model conflict as [Io_error]. *)
       Error
-        (Validation_error
+        (Io_error
            (Printf.sprintf
               "reaction state changed before durable commit: target=%s user=%s emoji=%s"
               outcome.target_id
@@ -276,44 +302,40 @@ let commit_staged_reaction_unlocked store staged =
 let toggle_reaction store ~target_type ~target_id ~user_id ~emoji
   : (reaction_toggle_result, board_error) Result.t
   =
-  let* () = require_persisted_snapshot_readable store.reactions_load_result in
+  let* target_id = canonical_reaction_target_id ~target_type target_id in
   maybe_sweep store;
   match Agent_id.of_string user_id, normalize_reaction_emoji emoji with
   | Error e, _ -> Error e
   | _, Error e -> Error e
   | Ok user_id, Ok emoji ->
     with_persist_lock store (fun () ->
+      let module Source = Board_reactions_source in
+      let* () = Source.require_readable store in
       let* () = require_posts_source_readable store in
-      match
-        with_lock store (fun () ->
-          stage_reaction_toggle_unlocked
-            store
-            ~target_type
-            ~target_id
-            ~user_id
-            ~emoji)
-      with
-      | Error _ as error -> error
-      | Ok staged ->
-        (match save_reactions_jsonl_result store staged.snapshot with
-         | Error _ as error -> error
-         | Ok () ->
-           (match with_lock store (fun () -> commit_staged_reaction_unlocked store staged) with
-            | Ok _ as committed -> committed
-            | Error commit_error ->
-              let current_snapshot =
-                with_lock store (fun () -> reactions_jsonl_unlocked store)
-              in
-              (match save_reactions_jsonl_result store current_snapshot with
-               | Ok () -> Error commit_error
-               | Error persistence_error ->
-                 (* The durable rollback write also failed, so [persistence_error]
-                    is the error returned to the caller.  Log the superseded
-                    [commit_error] here — otherwise the divergence between the
-                    staged write and the in-memory commit is lost entirely. *)
-                 Log.BoardLog.warn
-                   "reaction commit error superseded by durable rollback failure: commit_error=%s persistence_error=%s"
-                   (Board_types.show_board_error commit_error)
-                   (Board_types.show_board_error persistence_error);
-                 Error persistence_error))))
+      let* staged = with_lock store (fun () ->
+        stage_reaction_toggle_unlocked store ~target_type ~target_id ~user_id ~emoji) in
+      let outcome = Source.rewrite store staged.snapshot in
+      let result = match outcome with
+        | Source.Written { publication; _ } ->
+          let projected =
+            try with_lock store (fun () -> commit_staged_reaction_unlocked store staged)
+            with exception_ ->
+              Source.fail_publication store publication exception_ (Printexc.get_raw_backtrace ()) in
+          (match projected with
+           | Ok value ->
+             let* () = Source.acknowledge_publication store publication in
+             Ok value
+           | Error error -> Source.reject_publication store publication error; Error error)
+        | Source.Not_written _ | Source.Unknown _ -> Error (Io_error "Board data is unavailable.") in
+      let result = Source.finish_write outcome result in
+      try
+        (match result with
+         | Ok _ -> ()
+         | Error error -> record_persist_error ~where:"reactions source" (show_board_error error));
+        result
+      with exception_ ->
+        let backtrace = Printexc.get_raw_backtrace () in
+        Board_posts_source.defer_reserved ~result:(Result.map (fun _ -> ()) result)
+          exception_ backtrace;
+        Printexc.raise_with_backtrace exception_ backtrace)
 ;;

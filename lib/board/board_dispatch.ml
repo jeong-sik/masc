@@ -1019,8 +1019,8 @@ let toggle_reaction ~reader ~target_type ~target_id ~user_id ~emoji =
        emit_board_sse_event ~visibility
          (Reaction_changed
             {
-              target_type;
-              target_id;
+              target_type = toggled.target_type;
+              target_id = toggled.target_id;
               user_id = toggled.user_id;
               emoji = toggled.emoji;
               reacted = toggled.reacted;
@@ -1038,8 +1038,18 @@ let list_reactions ~reader ~target_type ~target_id ?user_id () =
   | Ok () -> let store = backend () in Board.list_reactions store ~target_type ~target_id ?user_id ()
 
 let list_reactions_batch ~reader ~targets ?user_id () =
-  let targets = List.filter (fun (target_type, target_id) ->
-    Result.is_ok (require_readable_target ~reader ~target_type ~target_id)) targets in
+  let rec visible acc = function
+    | [] -> Ok (List.rev acc)
+    | ((target_type, target_id) as target) :: rest ->
+      (match require_readable_target ~reader ~target_type ~target_id with
+       | Ok () -> visible (target :: acc) rest
+       | Error (Board.Invalid_id _ | Board.Post_not_found _ | Board.Comment_not_found _
+                | Board.Unauthorized _) -> visible acc rest
+       | Error ((Board.Io_error _ | Board.Recipient_lookup_failed _ | Board.Validation_error _
+                 | Board.Already_voted _ | Board.Already_exists _) as error) -> Error error)
+  in
+  let open Result.Syntax in
+  let* targets = visible [] targets in
   let store = backend () in
   Board.list_reactions_batch store ~targets ?user_id ()
 

@@ -10,9 +10,6 @@ val protect : default:'a -> (unit -> 'a) -> 'a
 (** Run [f ()], re-raising [Eio.Cancel.Cancelled] with its original backtrace
     and returning [default] for any other exception. *)
 
-val try_with_log : string -> (unit -> 'a) -> 'a option
-(** Execute a function, logging exceptions and returning None on failure. *)
-
 val handle : (unit -> 'a) -> (exn -> 'a) -> 'a
 (** Cancel-aware exception handler.
     Re-raises [Eio.Cancel.Cancelled]; delegates other exceptions to the handler. *)
@@ -157,9 +154,6 @@ val float_of_string_with_default : default:float -> string -> float
 (** Float parsing with default. *)
 
 (** {1 Environment Variables} *)
-
-val get_env_int_logged : string -> default:int -> int
-(** Get environment variable as int with logging when invalid. *)
 
 val get_env_bool_logged : string -> default:bool -> bool
 (** Get environment variable as bool with logging when invalid. Empty strings

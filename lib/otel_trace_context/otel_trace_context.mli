@@ -50,8 +50,5 @@ val inject_json :
 val header_name : string
 (** ["traceparent"] *)
 
-val of_headers : (string * string) list -> t option
-(** Extract traceparent from HTTP headers (case-insensitive). *)
-
 val to_header : t -> string * string
 (** Build [(header_name, traceparent)] pair for outbound HTTP. *)

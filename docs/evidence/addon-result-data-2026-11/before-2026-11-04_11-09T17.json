@@ -1,0 +1,166 @@
+{
+ "ledger": {
+  "rows": 136507,
+  "result_bytes": 841940544
+ },
+ "externalized": {
+  "rows": 4876,
+  "distinct_blob_bytes": 420845113
+ },
+ "tools": [
+  {
+   "tool": "masc_dos_screen",
+   "rows": 3323,
+   "result_bytes": 315087992,
+   "mean_result_bytes": 94820,
+   "blob_rows": 3161,
+   "distinct_blobs": 2980,
+   "blob_bytes": 287505680,
+   "envelope_rows": 162
+  },
+  {
+   "tool": "Execute",
+   "rows": 72878,
+   "result_bytes": 147094922,
+   "mean_result_bytes": 2018,
+   "blob_rows": 937,
+   "distinct_blobs": 937,
+   "blob_bytes": 3440837,
+   "envelope_rows": 0
+  },
+  {
+   "tool": "masc_dos_press",
+   "rows": 4782,
+   "result_bytes": 54860840,
+   "mean_result_bytes": 11472,
+   "blob_rows": 0,
+   "distinct_blobs": 0,
+   "blob_bytes": 0,
+   "envelope_rows": 4779
+  },
+  {
+   "tool": "masc_lane_inspect",
+   "rows": 16,
+   "result_bytes": 41651784,
+   "mean_result_bytes": 2603236,
+   "blob_rows": 14,
+   "distinct_blobs": 14,
+   "blob_bytes": 41651698,
+   "envelope_rows": 0
+  },
+  {
+   "tool": "Grep",
+   "rows": 3808,
+   "result_bytes": 40804202,
+   "mean_result_bytes": 10715,
+   "blob_rows": 122,
+   "distinct_blobs": 118,
+   "blob_bytes": 33781579,
+   "envelope_rows": 0
+  },
+  {
+   "tool": "masc_board_post_get",
+   "rows": 5447,
+   "result_bytes": 34007534,
+   "mean_result_bytes": 6243,
+   "blob_rows": 0,
+   "distinct_blobs": 0,
+   "blob_bytes": 0,
+   "envelope_rows": 0
+  },
+  {
+   "tool": "keeper_tools_list",
+   "rows": 240,
+   "result_bytes": 25930407,
+   "mean_result_bytes": 108043,
+   "blob_rows": 86,
+   "distinct_blobs": 18,
+   "blob_bytes": 5154020,
+   "envelope_rows": 0
+  },
+  {
+   "tool": "Read",
+   "rows": 3911,
+   "result_bytes": 24786335,
+   "mean_result_bytes": 6337,
+   "blob_rows": 30,
+   "distinct_blobs": 30,
+   "blob_bytes": 589213,
+   "envelope_rows": 0
+  },
+  {
+   "tool": "keeper_artifact_read",
+   "rows": 2674,
+   "result_bytes": 19895732,
+   "mean_result_bytes": 7440,
+   "blob_rows": 0,
+   "distinct_blobs": 0,
+   "blob_bytes": 0,
+   "envelope_rows": 0
+  },
+  {
+   "tool": "BrowserRead",
+   "rows": 2789,
+   "result_bytes": 16316462,
+   "mean_result_bytes": 5850,
+   "blob_rows": 36,
+   "distinct_blobs": 35,
+   "blob_bytes": 1333269,
+   "envelope_rows": 0
+  },
+  {
+   "tool": "masc_goal_list",
+   "rows": 164,
+   "result_bytes": 14183166,
+   "mean_result_bytes": 86482,
+   "blob_rows": 48,
+   "distinct_blobs": 48,
+   "blob_bytes": 12424618,
+   "envelope_rows": 0
+  },
+  {
+   "tool": "masc_board_list",
+   "rows": 2899,
+   "result_bytes": 9198654,
+   "mean_result_bytes": 3173,
+   "blob_rows": 44,
+   "distinct_blobs": 1,
+   "blob_bytes": 74225,
+   "envelope_rows": 0
+  },
+  {
+   "tool": "masc_dos_step",
+   "rows": 785,
+   "result_bytes": 9002506,
+   "mean_result_bytes": 11468,
+   "blob_rows": 0,
+   "distinct_blobs": 0,
+   "blob_bytes": 0,
+   "envelope_rows": 784
+  },
+  {
+   "tool": "masc_dos_save",
+   "rows": 360,
+   "result_bytes": 3988580,
+   "mean_result_bytes": 11079,
+   "blob_rows": 0,
+   "distinct_blobs": 0,
+   "blob_bytes": 0,
+   "envelope_rows": 355
+  },
+  {
+   "tool": "masc_dos_type",
+   "rows": 103,
+   "result_bytes": 1182332,
+   "mean_result_bytes": 11478,
+   "blob_rows": 0,
+   "distinct_blobs": 0,
+   "blob_bytes": 0,
+   "envelope_rows": 103
+  }
+ ],
+ "window": {
+  "since": "2026-11-04T00:00:00Z",
+  "end": "2026-11-09T17:00:00Z"
+ }
+}

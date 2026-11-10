@@ -184,7 +184,7 @@ let request_handler ~trust_policy _addr (reqd : Httpun.Reqd.t Gluten.Reqd.t) =
     "h1"
 ;;
 
-let h2_request_handler ~trust_policy ~request_sw:_ _addr reqd =
+let h2_request_handler ~trust_policy ~stream_end:_ _addr reqd =
   let status =
     match
       Server_request_authority.classify_h2_request ~trust_policy (H2.Reqd.request reqd)

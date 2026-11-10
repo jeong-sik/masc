@@ -76,6 +76,10 @@ let load_policy store = match Board.reload_sub_boards store with
   | Ok _ -> ()
   | Error (path, error) -> Alcotest.failf "load %s: %s" path (Printexc.to_string error)
 
+let load_votes store = ignore (require_board (Board.reload_votes store))
+
+let load_reactions store = ignore (require_board (Board.reload_reactions store))
+
 let create ?hearth store body =
   Board.create_post store ~lookup:Recipient_lookup.none_declared
     ~author:"source-writer" ~content:body ~title:"source title" ~body
@@ -459,6 +463,8 @@ let test_cross_writer_projection base_path _workspace =
   let store = make_store base_path in
   load_posts store 0;
   load_comments store 0;
+  load_votes store;
+  load_reactions store;
   load_policy store;
   let topic = require_board (Board.create_sub_board store ~slug:"source-topic"
     ~name:"Source topic" ~description:"real policy source" ~owner:"source-writer" ()) in
@@ -688,6 +694,8 @@ let test_flush_cleanup_preserves_later_work base_path _workspace =
   let store, armed, _, fired, _ = fault_store base_path in
   load_posts store 0;
   load_comments store 0;
+  load_votes store;
+  load_reactions store;
   let post = require_post (create store "flush batch source") in
   let post_id = Board.Post_id.to_string post.id in
   let comment = require_board (Board.add_comment store
@@ -745,6 +753,8 @@ let test_delete_cleanup_preserves_dependents base_path _workspace =
   let store, armed, _, fired, _ = fault_store base_path in
   load_posts store 0;
   load_comments store 0;
+  load_votes store;
+  load_reactions store;
   let post = require_post (create store "delete batch source") in
   let post_id = Board.Post_id.to_string post.id in
   let comment = require_board (Board.add_comment store
@@ -877,6 +887,8 @@ let test_fresh_workspace_accepts_every_writer base_path _workspace =
   let store = make_store base_path in
   load_posts store 0;
   load_comments store 0;
+  load_votes store;
+  load_reactions store;
   let post = require_post (create store "first post in a fresh workspace") in
   let post_id = Board.Post_id.to_string post.id in
   ignore (require_board (Board.add_comment store ~lookup:Recipient_lookup.none_declared
@@ -1116,6 +1128,7 @@ let test_settle_absent_retry_stays_fenced base_path _workspace =
 let test_settle_preserves_memory_tables base_path _workspace =
   let store, _, armed, _, _ = fault_store base_path in
   load_posts store 0;
+  load_votes store;
   let post = require_post (create store "memory canary post") in
   let post_id = Board.Post_id.to_string post.id in
   require_board (Board.set_thread_id store ~post_id ~thread_id:"canary-thread");

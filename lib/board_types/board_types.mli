@@ -824,6 +824,69 @@ type sub_boards_source_state =
     bytes or known-success receipt retained. Only a fresh store can reload
     them. This is not multi-source crash recovery; see #26378. *)
 
+type reactions_source_observation = {
+  reaction_path : string;
+  reaction_snapshot : Fs_compat.private_jsonl_snapshot;
+  reaction_workspace : Board_workspace_binding.observation;
+}
+
+type reactions_source_history =
+  | No_reactions_observation
+  | Reactions_observed of reactions_source_observation
+  | Reactions_present_without_snapshot
+
+type reactions_row_error =
+  | Invalid_reaction_json of { line : int; detail : string }
+  | Invalid_reaction_row of { line : int }
+
+type reactions_source_diagnostic =
+  | Reaction_file_diagnostic of Fs_compat.private_jsonl_transaction_error
+  | Reaction_workspace_diagnostic of Board_workspace_binding.rejection
+  | Reaction_raised_diagnostic of {
+      exception_ : exn;
+      backtrace : Printexc.raw_backtrace;
+    }
+  | Reaction_projection_diagnostic of board_error
+
+type reactions_source_failure =
+  | Reactions_not_observed
+  | Reactions_rows_rejected of reactions_row_error list
+  | Reactions_transaction_failed of Fs_compat.private_jsonl_transaction_error
+  | Reactions_missing
+  | Reactions_binding_mismatch
+  | Reactions_publication_pending
+  | Reactions_workspace_refused of Board_workspace_binding.rejection
+  | Reactions_raised of { exception_ : exn; backtrace : Printexc.raw_backtrace }
+
+type reactions_pending_write = {
+  reaction_before : reactions_source_observation;
+  reaction_intended_bytes : string;
+}
+
+type reactions_publication = {
+  reaction_after : reactions_source_observation;
+  reaction_cleanup : reactions_source_diagnostic list;
+}
+
+type reactions_source_state =
+  | Reactions_unobserved
+  | Reactions_readable of reactions_source_observation
+  | Reactions_publishing of reactions_publication
+  | Reactions_refused of {
+      reaction_history : reactions_source_history;
+      reaction_failure : reactions_source_failure;
+      reaction_diagnostics : reactions_source_diagnostic list;
+    }
+  | Reactions_unsettled of {
+      reaction_pending : reactions_pending_write;
+      reaction_failure : reactions_source_failure;
+      reaction_diagnostics : reactions_source_diagnostic list;
+    }
+(** Reaction authority belongs to persist_mutex. Known file success remains owned
+    until model publication is acknowledged. Unknown writes and unfinished
+    publication require a fresh store; an ordinary reload cannot clear them. *)
+
+
 type snapshot_retry = Independent_snapshots | Deletion_pending
 (** A failed deletion retains its cross-source ordering in subsequent flushes.
     This process-local retry context does not durably record a deletion decision.
@@ -833,6 +896,71 @@ type snapshot_retry = Independent_snapshots | Deletion_pending
     writers retain their own source admission. A fresh store observes the files
     without replaying the old memory-only intent, so an unwritten parent
     deletion can reappear while completed file writes remain applied. *)
+
+type votes_source_observation = {
+  vote_path : string;
+  vote_snapshot : Fs_compat.private_jsonl_snapshot;
+  vote_workspace : Board_workspace_binding.observation;
+}
+
+type votes_source_history =
+  | No_votes_observation
+  | Votes_observed of votes_source_observation
+  | Votes_present_without_snapshot
+
+type votes_row_error =
+  | Invalid_vote_json of { line : int; detail : string }
+  | Invalid_vote_row of { line : int }
+
+type votes_source_diagnostic =
+  | Vote_file_diagnostic of Fs_compat.private_jsonl_transaction_error
+  | Vote_workspace_diagnostic of Board_workspace_binding.rejection
+  | Vote_raised_diagnostic of {
+      exception_ : exn;
+      backtrace : Printexc.raw_backtrace;
+    }
+  | Vote_projection_diagnostic of board_error
+
+type votes_source_failure =
+  | Votes_not_observed
+  | Votes_rows_rejected of votes_row_error list
+  | Votes_transaction_failed of Fs_compat.private_jsonl_transaction_error
+  | Votes_missing
+  | Votes_binding_mismatch
+  | Votes_publication_pending
+  | Votes_workspace_refused of Board_workspace_binding.rejection
+  | Votes_raised of { exception_ : exn; backtrace : Printexc.raw_backtrace }
+
+type votes_write_kind = Vote_append | Vote_rewrite
+
+type votes_pending_write = {
+  vote_before : votes_source_observation;
+  vote_kind : votes_write_kind;
+  vote_intended_bytes : string;
+}
+
+type votes_publication = {
+  vote_after : votes_source_observation;
+  vote_cleanup : votes_source_diagnostic list;
+}
+
+type votes_source_state =
+  | Votes_unobserved
+  | Votes_readable of votes_source_observation
+  | Votes_publishing of votes_publication
+  | Votes_refused of {
+      vote_history : votes_source_history;
+      vote_failure : votes_source_failure;
+      vote_diagnostics : votes_source_diagnostic list;
+    }
+  | Votes_unsettled of {
+      vote_pending : votes_pending_write;
+      vote_failure : votes_source_failure;
+      vote_diagnostics : votes_source_diagnostic list;
+    }
+(** Vote authority belongs to persist_mutex. Known file success remains owned
+    until model publication is acknowledged. Unknown writes and unfinished
+    publication require a fresh store; an ordinary reload cannot clear them. *)
 
 type store = {
   (** Canonical posts observation/refusal/uncertainty, owned by persist_mutex.
@@ -846,9 +974,12 @@ type store = {
   (** None selects production comments IO. *)
   mutable sub_boards_source : sub_boards_source_state;
   sub_boards_source_io : Fs_compat.private_jsonl_transaction_io_for_testing option;
-  (** Derived outcomes of the other two source loads. *)
-  mutable votes_load_result : (unit, string) result;
-  mutable reactions_load_result : (unit, string) result;
+  (** Vote-file observation and unfinished effects are owned by persist_mutex. *)
+  mutable votes_source : votes_source_state;
+  votes_source_io : Fs_compat.private_jsonl_transaction_io_for_testing option;
+  (** None selects production vote-file IO. *)
+  mutable reactions_source : reactions_source_state;
+  reactions_source_io : Fs_compat.private_jsonl_transaction_io_for_testing option;
   mutable workspace_binding : Board_workspace_binding.t;
   (** One explicit BasePath capture attempt, refined with actual Present
       state-directory observations under persist_mutex or quiescent loading.

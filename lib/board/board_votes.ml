@@ -3,6 +3,16 @@ include Board_voting
 
 open Result.Syntax
 
+let reload_votes store =
+  match Board_store_load.load_persisted_votes store with
+  | Ok rows -> Ok rows
+  | Error _ -> Error (Io_error "Board data is unavailable.")
+
+let reload_reactions store =
+  match Board_store_load.load_persisted_reactions store with
+  | Ok loaded -> Ok loaded
+  | Error _ -> Error (Io_error "Board data is unavailable.")
+
 (** {1 Stats} *)
 
 let stats store =
@@ -277,10 +287,10 @@ let write_snapshot store = function
   | Snapshot_batch.Posts_payload snapshot -> finish_posts_write (save_posts_snapshot store snapshot)
   | Snapshot_batch.Comments_payload content -> save_comments_snapshot store content
   | Snapshot_batch.Votes_payload content ->
-    let* () = require_persisted_snapshot_readable store.votes_load_result in
+    let* () = Board_votes_source.require_readable store in
     save_vote_log_jsonl store content
   | Snapshot_batch.Reactions_payload content ->
-    let* () = require_persisted_snapshot_readable store.reactions_load_result in
+    let* () = Board_reactions_source.require_readable store in
     Board_core_persist.save_reactions_jsonl_result store content
 ;;
 
@@ -315,8 +325,8 @@ let delete_post store ~post_id : (deletion_outcome, board_error) Result.t =
   with_persist_lock store (fun () ->
   let* () = require_posts_source_readable store in
   let* () = require_comments_source_readable store in
-  let* () = require_persisted_snapshot_readable store.votes_load_result in
-  let* () = require_persisted_snapshot_readable store.reactions_load_result in
+  let* () = Board_votes_source.require_readable store in
+  let* () = Board_reactions_source.require_readable store in
   match Post_id.of_string post_id with
   | Error e -> Error e
   | Ok pid ->
@@ -429,8 +439,8 @@ let flush_dirty store =
         | Independent_snapshots -> Snapshot_batch.for_flush
           ~dirty_posts:store.dirty_posts
           ~dirty_comments:store.dirty_comments
-          ~votes_readable:(Result.is_ok store.votes_load_result)
-          ~reactions_readable:(Result.is_ok store.reactions_load_result)
+          ~votes_readable:(Result.is_ok (Board_votes_source.require_readable store))
+          ~reactions_readable:(Result.is_ok (Board_reactions_source.require_readable store))
       in
       let batch = capture_snapshot_batch store selection in
       Hashtbl.clear store.dirty_post_ids;

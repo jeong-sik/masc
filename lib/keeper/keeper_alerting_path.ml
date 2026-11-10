@@ -818,12 +818,11 @@ let resolve_keeper_path_within_sandbox_roots ~config ~sandbox_roots ~raw_path =
 
 let resolve_keeper_target_path = resolve_keeper_path_within_sandbox_roots
 
-(* Playground path SSOT lives in [Playground_paths] (masc_config). These
-   names preserve the historical keeper-facing API. Do not re-implement
+(* Playground path SSOT lives in [Playground_paths] (masc_config). This
+   name preserves the historical keeper-facing API. Do not re-implement
    the literal ".masc/playground" layout here — edit [Playground_paths]
    if it ever changes. *)
 let sanitize_keeper_name = Playground_paths.sanitize_keeper_name
-let playground_path_of_keeper = Playground_paths.bundle_root
 
 let sandbox_path_of_meta ~(meta : Keeper_meta_contract.keeper_meta) =
   Keeper_sandbox.sandbox_root_rel_of_meta ~meta

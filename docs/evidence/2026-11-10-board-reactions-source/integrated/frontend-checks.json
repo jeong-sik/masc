@@ -1,0 +1,36 @@
+{
+  "at": "2026-11-10T07:16:55.841646+00:00",
+  "source_upper": "aa9e06339e79a2d6e51af2564b0e7245885f786d",
+  "checks": [
+    {
+      "stage": "tests",
+      "exit": 0,
+      "tests": 218,
+      "passed": 218,
+      "failed": 0,
+      "failures": []
+    },
+    {
+      "stage": "tsc",
+      "exit": 0
+    },
+    {
+      "stage": "eslint",
+      "exit": 0
+    }
+  ],
+  "test_files": [
+    "src/api/board.test.ts",
+    "src/components/board/post-detail.test.ts",
+    "src/components/board/reaction-bar.test.ts",
+    "src/components/board/reaction-bar.a11y.test.ts",
+    "src/components/board/board-surface.test.ts"
+  ],
+  "typecheck": "whole Dashboard tsc --noEmit",
+  "lint_files": [
+    "src/components/board/reaction-bar.ts",
+    "src/components/board/reaction-bar.test.ts",
+    "src/components/board/board-surface.ts",
+    "src/components/board/board-surface.test.ts"
+  ]
+}

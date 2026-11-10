@@ -51,11 +51,6 @@ let test_both_off_and_and_semantics () =
   check bool "global autonomous off → autonomous disabled" false
     (enabled G.Autonomous ~global:global_only ~meta:G.all_enabled)
 
-let test_gate_labels () =
-  check string "reactive label" "reactive" (G.gate_to_string G.Reactive);
-  check string "proactive label" "proactive" (G.gate_to_string G.Proactive);
-  check string "autonomous label" "autonomous" (G.gate_to_string G.Autonomous)
-
 let () =
   run "keeper_lifecycle_gate"
     [ ( "gate_enabled",
@@ -63,6 +58,5 @@ let () =
         ; test_case "global kill-switch" `Quick test_global_kill_switch
         ; test_case "per-keeper flag" `Quick test_per_keeper_flag
         ; test_case "AND semantics" `Quick test_both_off_and_and_semantics
-        ; test_case "gate labels" `Quick test_gate_labels
         ] )
     ]

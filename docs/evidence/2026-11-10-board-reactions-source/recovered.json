@@ -1,0 +1,63 @@
+{
+  "url": "http://127.0.0.1:5173/?case=known",
+  "title": "Reaction source availability fixture",
+  "text": "👍2🔥",
+  "footerWrap": "wrap",
+  "buttons": [
+    {
+      "label": "👍 리액션 2개",
+      "disabled": false,
+      "pressed": "false",
+      "text": "👍2"
+    },
+    {
+      "label": "🔥 리액션 0개",
+      "disabled": false,
+      "pressed": "false",
+      "text": "🔥"
+    }
+  ],
+  "calls": [
+    {
+      "method": "GET",
+      "path": "/api/v1/board",
+      "query": "?voter=dashboard&limit=100"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/board/reactions/batch",
+      "query": "?target_type=post&target_ids=p-reaction-source"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/board/hearths",
+      "query": ""
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/board/flairs",
+      "query": ""
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/board/reactions",
+      "query": "",
+      "body": {
+        "target_type": "post",
+        "target_id": "p-reaction-source",
+        "emoji": "👍"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/board/reactions",
+      "query": "?target_type=post&target_id=p-reaction-source"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/board/reactions",
+      "query": "?target_type=post&target_id=p-reaction-source"
+    }
+  ],
+  "failures": []
+}

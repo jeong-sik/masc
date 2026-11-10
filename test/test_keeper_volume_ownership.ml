@@ -80,13 +80,6 @@ let test_not_json_at_all_is_unverified_not_a_guess () =
    | _ -> Alcotest.fail "garbage bytes must never answer owned or another-workspace")
 ;;
 
-let test_a_missing_marker_is_a_legacy_volume () =
-  Alcotest.(check (fst ownership_case))
-    "no marker means the owner is unknown, not this workspace"
-    (Kvo.Unverified Kvo.Unmarked)
-    (Kvo.interpret_marker_absent ())
-;;
-
 let test_the_marker_path_is_at_the_volume_root () =
   Alcotest.(check string)
     "the marker lives at the guest-visible root"
@@ -107,8 +100,6 @@ let () =
             test_malformed_marker_bytes_stay_unverified
         ; test_case "garbage bytes never guess" `Quick
             test_not_json_at_all_is_unverified_not_a_guess
-        ; test_case "missing marker is a legacy volume" `Quick
-            test_a_missing_marker_is_a_legacy_volume
         ; test_case "marker path is at the volume root" `Quick
             test_the_marker_path_is_at_the_volume_root
         ] )

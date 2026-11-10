@@ -3,7 +3,7 @@ rfc: "backlog-never-preempts-a-running-turn"
 title: "쌓인 대기열은 실행 중인 턴을 멈추지 않는다 — 끝낼 때는 Keeper 가 정한다"
 status: Draft
 created: 2026-10-29
-updated: 2026-11-06
+updated: 2026-11-10
 revision: 5
 author: claude
 related: ["0441", "0377", "event-queue-admit-all-ready", "board-attention-asks-jev-once-per-event", "keeper-recall-reaches-the-turn", "arrived-stimuli-reach-the-running-turn"]
@@ -205,7 +205,7 @@ flowchart LR
     T --> P
 ```
 
-**admit 한 행.** 한 턴은 행을 최대 32개 admit 한다(`MASC_KEEPER_ADMISSION_MAX_EVENTS`, 기본 32, 범위 1~256, `env_config_keeper.ml:520-533`). 넘친 행은 다음 턴으로 남는다. admit 한 행은 종류에 따라 네 가지로 보인다.
+**admit 한 행.** 한 턴은 행을 최대 32개 admit 한다(`runtime.toml` 의 `turn.admission_max_events`, 기본 32, 범위 1~256, `Env_config_keeper.KeeperAdmissionBounds`). 넘친 행은 다음 턴으로 남는다. admit 한 행은 종류에 따라 네 가지로 보인다.
 
 | 모델에게 보이는 방식 | 종류 |
 |---|---|
@@ -449,7 +449,7 @@ TLC 는 `-workers 1` 로 돌렸다. 모델은 종류 구분, intake 시점, 영�
 
 1. `Operation_queued` 멈춤도 같은 원칙으로 Keeper 가 정하게 할 것인가. 채팅 작업은 사람이 보낸 것과 다른 Keeper 가 보낸 것이 섞여 있고, 지금 판정이 둘을 나누지 않는 것으로 보인다. **[확인 필요]** 사람이 기다리는 경우의 우선권(RFC-0441)을 지키면서 나눌 수 있는지 먼저 봐야 한다. Codex 는 이 멈춤을 모델에게 보내는 안내문 한 문장으로 한다(1.7). 문장이 턴을 끝내라고 적고 있어서 강제 정지와 얼마나 다른지는 재지 않았다. **[확인 필요]**
 2. `Repeated_tool_call`, `Repeated_assistant_text` 멈춤은 횟수가 근거다. 헌법 `magic_number` 는 반복 횟수를 중단의 근거로 삼지 않는다고 적고 있다. 별도 RFC 로 다룬다.
-3. 한 턴이 admit 하는 행의 상한(기본 32, `MASC_KEEPER_ADMISSION_MAX_EVENTS`)은 숫자로 흐름을 정하는 값이다. `RFC-event-queue-admit-all-ready` 는 "개수·시간 창은 두지 않는다"고 적었다. 2단계 요약이 들어가면 이 값이 필요한지 다시 본다.
+3. 한 턴이 admit 하는 행의 상한(기본 32, `turn.admission_max_events`)은 숫자로 흐름을 정하는 값이다. `RFC-event-queue-admit-all-ready` 는 "개수·시간 창은 두지 않는다"고 적었다. 2단계 요약이 들어가면 이 값이 필요한지 다시 본다.
 4. 3단계의 판단 대상을 어디에 영속할지. 큐 스냅샷 옆에 두는 새 파일이 필요할 수 있다. 새 상태는 없을 때 durable truth 가 손상되는 경우에만 더한다는 규칙(`projects.md`)에 맞는지 먼저 묻는다.
 5. 3단계에 쓸 lane 이름과 슬롯. `board_attention_exact` 를 같이 쓰면 줄이 길어진다(`RFC-board-attention-asks-jev-once-per-event` 1.3 나).
 6. 3.1 표의 분류가 맞는가. 같은 종류 안에서 구분이 안 되는 곳이 둘 있다.

@@ -63,19 +63,6 @@ let test_tool_monotonicity_violation () =
   let after = ["tool_a"; "tool_b"; "tool_c"] in
   require_error "tool violation" (Inv.tool_surface_monotonicity ~before ~after)
 
-(* ================================================================ *)
-(* check_all tests                                                    *)
-(* ================================================================ *)
-
-let test_check_all_ok () =
-  let roots = ["/tmp/masc_sandbox_turn_1"] in
-  let paths = ["/tmp/masc_sandbox_turn_1/foo.ml"] in
-  let before_tools = ["tool_a"] in
-  let after_tools = ["tool_a"] in
-  require_ok "check_all ok"
-    (Inv.check_all ~sandbox_roots:roots ~sandbox_paths:paths ~before_tools
-       ~after_tools)
-
 (* Sibling-prefix safety: /srv/.../alice-evil/ must NOT satisfy root
    /srv/.../alice/. This is what the trailing-slash trick on the root
    protects against. Without it, a hostile sibling directory whose name
@@ -97,21 +84,6 @@ let test_sandbox_isolation_path_traversal_rejected () =
   require_error "path traversal rejected"
     (Inv.sandbox_isolation ~sandbox_roots:roots ~sandbox_paths:paths)
 
-let test_check_all_first_error () =
-  let roots = ["/tmp/masc_sandbox_turn_1"] in
-  let paths = ["/etc/passwd"] in
-  let before_tools = ["tool_a"] in
-  let after_tools = ["tool_a"] in
-  let result =
-    Inv.check_all ~sandbox_roots:roots ~sandbox_paths:paths ~before_tools
-      ~after_tools
-  in
-  match result with
-  | Ok () -> failf "check_all first error: expected sandbox error"
-  | Error msg ->
-    if String.starts_with ~prefix:"Sandbox isolation" msg then ()
-    else failf "check_all first error: expected sandbox error, got: %s" msg
-
 let () =
   run "Keeper Invariant"
     [
@@ -132,10 +104,5 @@ let () =
           test_case "ok" `Quick test_tool_monotonicity_ok;
           test_case "equal" `Quick test_tool_monotonicity_equal;
           test_case "violation" `Quick test_tool_monotonicity_violation;
-        ] );
-      ( "check_all",
-        [
-          test_case "ok" `Quick test_check_all_ok;
-          test_case "first_error" `Quick test_check_all_first_error;
         ] );
     ]

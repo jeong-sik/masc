@@ -132,7 +132,6 @@ val dashboard_briefing_sections_http_json :
 (** {1 Shell and Data Helpers} *)
 
 val dashboard_shell_status_json : Workspace.config -> Yojson.Safe.t
-val dashboard_message_json : Masc_domain.message -> Yojson.Safe.t
 val dashboard_tasks_safe : Workspace.config -> Masc_domain.task list
 val dashboard_agents_safe : Workspace.config -> Masc_domain.agent list
 val provider_capacity_json : unit -> Yojson.Safe.t

@@ -77,7 +77,8 @@ let test_refused_parent_preserves_comments_after_flush base_path =
   let restarted = fresh_store base_path in
   List.iter (fun (expected : Board.post) ->
     Alcotest.(check string) "both accepted posts survive a fresh load" expected.body
-      (require (Board.get_post restarted ~post_id:(Board.Post_id.to_string expected.id))).body)
+      (require (Board_dispatch.get_post ~reader:Masc_board_handlers.Board_access.Operator
+                  ~post_id:(Board.Post_id.to_string expected.id))).body)
     [parent; foreign];
   Alcotest.(check string) "the retained parent still has its accepted reply" reply.content
     (require (Board.get_comment restarted ~comment_id:(Board.Comment_id.to_string reply.id))).content
@@ -133,6 +134,8 @@ let test_reserved_parent_cleanup_retains_deletion_order base_path =
     | Error (path, error) -> Alcotest.failf "load %s: %s" path (Printexc.to_string error))
     [Masc_board_handlers.Board_votes_json.load_persisted_posts;
      Masc_board_handlers.Board_votes_json.load_persisted_comments];
+  ignore (require (Board.reload_votes stale));
+  ignore (require (Board.reload_reactions stale));
   let parent = post stale "known parent deletion before reserved cleanup" in
   let reply = comment stale parent "pending dependent cleanup" in
   let comments_path = Board.comments_path stale in
@@ -153,7 +156,8 @@ let test_reserved_parent_cleanup_retains_deletion_order base_path =
     (Fs_compat.load_file comments_path);
   let restarted = fresh_store base_path in
   Alcotest.(check string) "foreign post survives the retry" foreign.body
-    (require (Board.get_post restarted ~post_id:(Board.Post_id.to_string foreign.id))).body;
+    (require (Board_dispatch.get_post ~reader:Masc_board_handlers.Board_access.Operator
+                ~post_id:(Board.Post_id.to_string foreign.id))).body;
   Alcotest.(check string) "valid orphan reply survives the retry" reply.content
     (require (Board.get_comment restarted ~comment_id:(Board.Comment_id.to_string reply.id))).content
 

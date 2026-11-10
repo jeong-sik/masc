@@ -791,11 +791,23 @@ let test_unreadable_snapshots_reject_mutation_and_survive_flush () =
       match result with
       | Error _ -> ()
       | Ok () -> Alcotest.failf "%s load silently accepted an unreadable row" label)
-    [ "votes", store.votes_load_result
-    ; "reactions", store.reactions_load_result
+    [ "votes", (Board.current_vote_for_post store ~voter:"blocked-voter" ~post_id
+        |> Result.map (fun _ -> ()) |> Result.map_error Board.show_board_error)
+    ; "reactions", (Board.list_reactions_batch store ~targets:[] ()
+        |> Result.map (fun _ -> ()) |> Result.map_error Board.show_board_error)
     ; "sub-boards", (Board.read_sub_boards store |> Result.map (fun _ -> ())
         |> Result.map_error Board.show_board_error)
     ];
+  let reader = Masc_board_handlers.Board_access.Operator in
+  let readable_post = Result.get_ok (Board_dispatch.get_post ~reader ~post_id) in
+  let current_vote = Server_utils.board_current_vote_for_post ~reader
+      ~voter:(Some "blocked-voter") ~post_id in
+  (match Server_utils.board_post_dashboard_json ?current_vote ~author_karma:0 readable_post with
+   | `Assoc fields ->
+     List.iter (fun name -> Alcotest.(check bool)
+       ("unavailable votes do not assert " ^ name) false (List.mem_assoc name fields))
+       ["current_vote"; "has_voted"]
+   | _ -> Alcotest.fail "post JSON must be an object");
   expect_io_error
     "vote"
     (Board_dispatch.vote ~voter:"blocked-voter" ~post_id ~direction:Board.Up);

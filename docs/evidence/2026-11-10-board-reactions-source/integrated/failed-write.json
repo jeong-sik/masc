@@ -1,0 +1,102 @@
+{
+  "before": {
+    "url": "http://127.0.0.1:5173/?case=known",
+    "title": "Reaction source availability fixture",
+    "text": "👍1🔥",
+    "footerWrap": "wrap",
+    "buttons": [
+      {
+        "label": "👍 리액션 1개",
+        "disabled": false,
+        "pressed": "true",
+        "text": "👍1"
+      },
+      {
+        "label": "🔥 리액션 0개",
+        "disabled": false,
+        "pressed": "false",
+        "text": "🔥"
+      }
+    ],
+    "calls": [
+      {
+        "method": "GET",
+        "path": "/api/v1/board",
+        "query": "?voter=dashboard&limit=100"
+      },
+      {
+        "method": "GET",
+        "path": "/api/v1/board/reactions/batch",
+        "query": "?target_type=post&target_ids=p-reaction-source"
+      },
+      {
+        "method": "GET",
+        "path": "/api/v1/board/hearths",
+        "query": ""
+      },
+      {
+        "method": "GET",
+        "path": "/api/v1/board/flairs",
+        "query": ""
+      }
+    ],
+    "failures": []
+  },
+  "url": "http://127.0.0.1:5173/?case=known",
+  "title": "Reaction source availability fixture",
+  "text": "👍1🔥리액션 반영에 실패했습니다 마지막 확인한 수치를 표시합니다.다시 확인",
+  "footerWrap": "wrap",
+  "buttons": [
+    {
+      "label": "👍 리액션 확인 불가",
+      "disabled": true,
+      "pressed": null,
+      "text": "👍1"
+    },
+    {
+      "label": "🔥 리액션 확인 불가",
+      "disabled": true,
+      "pressed": null,
+      "text": "🔥"
+    },
+    {
+      "label": "리액션 다시 확인",
+      "disabled": false,
+      "pressed": null,
+      "text": "다시 확인"
+    }
+  ],
+  "calls": [
+    {
+      "method": "GET",
+      "path": "/api/v1/board",
+      "query": "?voter=dashboard&limit=100"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/board/reactions/batch",
+      "query": "?target_type=post&target_ids=p-reaction-source"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/board/hearths",
+      "query": ""
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/board/flairs",
+      "query": ""
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/board/reactions",
+      "query": "",
+      "body": {
+        "target_type": "post",
+        "target_id": "p-reaction-source",
+        "emoji": "👍"
+      }
+    }
+  ],
+  "failures": []
+}

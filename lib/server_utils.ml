@@ -171,7 +171,7 @@ let board_current_vote_for_post ~reader ~voter ~post_id =
   | Some voter -> (
       match Board_dispatch.current_vote_for_post ~reader ~voter ~post_id with
       | Ok vote -> Some vote
-      | Error _ -> Some None)
+      | Error _ -> None)
 
 let board_current_vote_for_comment ~reader ~voter ~comment_id =
   match voter with
@@ -179,7 +179,7 @@ let board_current_vote_for_comment ~reader ~voter ~comment_id =
   | Some voter -> (
       match Board_dispatch.current_vote_for_comment ~reader ~voter ~comment_id with
       | Ok vote -> Some vote
-      | Error _ -> Some None)
+      | Error _ -> None)
 
 let max_filtered_board_window = 5200
 
@@ -202,27 +202,32 @@ let board_reactions_for_post ~reader ~voter ~post_id =
     Board_dispatch.list_reactions ~reader ~target_type:Board.Reaction_post
       ~target_id:post_id ?user_id:voter ()
   with
-  | Ok summaries -> summaries
+  | Ok summaries -> Some summaries
   | Error err ->
       Log.Server.warn "board reactions: post %s summary failed: %s" post_id
         (Board_types.show_board_error err);
-      []
+      None
 
 let board_reactions_for_comment ~reader ~voter ~comment_id =
   match
     Board_dispatch.list_reactions ~reader ~target_type:Board.Reaction_comment
       ~target_id:comment_id ?user_id:voter ()
   with
-  | Ok summaries -> summaries
+  | Ok summaries -> Some summaries
   | Error err ->
       Log.Server.warn "board reactions: comment %s summary failed: %s"
         comment_id (Board_types.show_board_error err);
-      []
+      None
 
 let board_reactions_batch ~reader ~targets ~voter =
   match targets with
-  | [] -> []
-  | _ -> Board_dispatch.list_reactions_batch ~reader ~targets ?user_id:voter ()
+  | [] -> Some []
+  | _ ->
+    (match Board_dispatch.list_reactions_batch ~reader ~targets ?user_id:voter () with
+     | Ok rows -> Some rows
+     | Error error ->
+       Log.Server.warn "board reaction batch failed: %s" (Board_types.show_board_error error);
+       None)
 
 module Reaction_target_map = Map.Make (struct
   type t = Board.reaction_target_type * string
@@ -232,13 +237,13 @@ module Reaction_target_map = Map.Make (struct
     if c <> 0 then c else String.compare id1 id2
 end)
 
-let board_reactions_lookup rows =
-  let table =
-    List.fold_left
+let board_reactions_lookup = function
+  | None -> (fun _ -> None)
+  | Some rows ->
+    let table = List.fold_left
       (fun acc (target, summaries) -> Reaction_target_map.add target summaries acc)
-      Reaction_target_map.empty rows
-  in
-  fun target -> Reaction_target_map.find_opt target table |> Option.value ~default:[]
+      Reaction_target_map.empty rows in
+    fun target -> Some (Reaction_target_map.find_opt target table |> Option.value ~default:[])
 
 let board_reaction_fields = function
   | None -> []

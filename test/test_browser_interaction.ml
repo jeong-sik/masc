@@ -208,22 +208,6 @@ let test_click_button_capability () =
     [Browser_lane.Pointer.Middle;Browser_lane.Pointer.Secondary];
   check bool "a live ego connection serves it" true
     (Browser_lane.live_transport_serves Browser_lane.Ego_task_space Browser_lane.Trusted_button_click)
-let test_click_button_wire_numbers () =
-  let viewport : Browser_lane.Pointer.viewport =
-    {document_id="d";width=100.;height=100.;scroll_x=0.;scroll_y=0.} in
-  let numbers button =
-    let sources = Browser_lane.Pointer.input_sources ~pointer_id:"p" ~wheel_id:"w" ~viewport
-      ~start:{x=0.5;y=0.5} (Browser_lane.Pointer.Click button) in
-    match sources with
-    | `List [source] ->
-      Yojson.Safe.Util.(source |> member "actions" |> to_list
-        |> List.filter_map (fun action -> match member "type" action with
-          | `String ("pointerDown" | "pointerUp") -> Some (member "button" action |> to_int)
-          | _ -> None))
-    | _ -> fail "one pointer source required" in
-  check (list int) "primary presses and releases button 0" [0;0] (numbers Browser_lane.Pointer.Primary);
-  check (list int) "middle presses and releases button 1" [1;1] (numbers Browser_lane.Pointer.Middle);
-  check (list int) "secondary presses and releases button 2" [2;2] (numbers Browser_lane.Pointer.Secondary)
 let test_set_viewport () =
   let url = ["expectedUrl",`String "https://example.org"] in
   let size_of extra = match (parsed (fields "set_viewport" @ url @ extra)).action with
@@ -384,27 +368,6 @@ let test_touch_actions () =
      "swipe without a destination",fields "swipe" @ base @ ["from",point];
      "swipe with a point",swipe @ ["point",point];
      "swipe with a button",swipe @ ["button",`String "middle"]]
-let test_touch_sources_use_a_touch_pointer () =
-  let viewport : Browser_lane.Pointer.viewport = {document_id="d";width=100.;height=100.;scroll_x=0.;scroll_y=0.} in
-  let start : Browser_lane.Pointer.point = {x=0.1;y=0.1} and stop : Browser_lane.Pointer.point = {x=0.9;y=0.1} in
-  let source gesture = match Browser_lane.Pointer.input_sources ~pointer_id:"p" ~wheel_id:"w" ~viewport ~start gesture with
-    | `List [source] -> source | _ -> fail "one input source required" in
-  let pointer_type gesture = Yojson.Safe.Util.(source gesture |> member "parameters" |> member "pointerType" |> to_string) in
-  let types gesture = Yojson.Safe.Util.(source gesture |> member "actions" |> to_list
-    |> List.map (fun action -> member "type" action |> to_string)) in
-  let swipe = Browser_lane.Pointer.Swipe {via=[];destination=stop;duration_ms=40}
-  and drag = Browser_lane.Pointer.Drag {via=[];destination=stop;duration_ms=40} in
-  check string "a tap is a touch pointer" "touch" (pointer_type Browser_lane.Pointer.Tap);
-  check string "a swipe is a touch pointer" "touch" (pointer_type swipe);
-  check string "a click stays a mouse pointer" "mouse" (pointer_type (Browser_lane.Pointer.Click Browser_lane.Pointer.Primary));
-  check string "a drag stays a mouse pointer" "mouse" (pointer_type drag);
-  check (list string) "a tap presses and releases once" ["pointerMove";"pointerDown";"pointerUp"] (types Browser_lane.Pointer.Tap);
-  check (list string) "a swipe moves as a drag does" (types drag) (types swipe);
-  let id gesture = Yojson.Safe.Util.(source gesture |> member "id" |> to_string) in
-  check bool "a tap does not reuse the hover's source id" true (id Browser_lane.Pointer.Tap <> id Browser_lane.Pointer.Hover);
-  check bool "a swipe does not reuse the drag's source id" true (id swipe <> id drag);
-  check string "a tap and a swipe share the touch source" (id Browser_lane.Pointer.Tap) (id swipe);
-  check string "a click, a hover and a drag share the mouse source" (id Browser_lane.Pointer.Hover) (id drag)
 let () = run "browser interaction" ["typed boundary", [
   test_case "native keyboard and double click parser" `Quick test_native_keyboard_parser;
   test_case "observed semantic pointer targets" `Quick test_semantic_pointer_actions;
@@ -416,9 +379,7 @@ let () = run "browser interaction" ["typed boundary", [
   test_case "select_option parses, round trips and refuses mixed fields" `Quick test_select_option;
   test_case "an ego snapshot target parses alone and round trips" `Quick test_snapshot_targets;
   test_case "tap_at and swipe parse as touch" `Quick test_touch_actions;
-  test_case "touch sources use a touch pointer" `Quick test_touch_sources_use_a_touch_pointer;
   test_case "click button picks the live capability" `Quick test_click_button_capability;
-  test_case "click button uses the WebDriver button numbers" `Quick test_click_button_wire_numbers;
   test_case "source hints preserve scope and reject malformed paths" `Quick test_source_context;
   test_case "observed node reference contract" `Quick test_scene_reference;
   test_case "closed live write actions" `Quick test_typed_actions;

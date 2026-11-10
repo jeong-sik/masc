@@ -239,6 +239,71 @@ let send_call
       ()
 ;;
 
+(* A finished attached call fails with this class, and a service that reports
+   an error may have applied an effect before it did. The replayed execution
+   ([execution_of_call_result]) and the live observation
+   ([observed_of_call_result]) both read these two values, so a failed call is
+   the same failure wherever it is counted. *)
+let call_failure_class = Tool_result.Runtime_failure
+let reported_error_effect = Tool_result.Effect_outcome_unknown
+
+(* What the shared dispatch observers (dashboard series, spans) are told about
+   a call. [agent_tool] answers Agent Core in Agent Core's types, so the call
+   never passes through [Tool_dispatch.guarded_dispatch] or the Keeper exec
+   handler, the two places that fire the observers. Without this the series
+   held an attached tool's refused calls
+   ([Keeper_hooks_agent_core.observe_refused_call]) and none of its completed
+   ones: from 2026-11-09 23:24 to 2026-11-10 05:45 UTC it held one call of
+   [github_list_pull_requests], a refused one, where the tool-call ledger held
+   27.
+
+   The service's own words are not copied into the result. They are as long as
+   the service makes them and an HTTP error carries the response body, so the
+   observers get only what the call's type proves; the words stay in the
+   tool-call row. *)
+let observed_failure ~tool_name ~start_time ~class_ ~effect_disposition =
+  Tool_result.make_err
+    ~tool_name
+    ~class_
+    ~start_time
+    ~effect_disposition
+    (Printf.sprintf
+       "attached service call failed (effect: %s)"
+       (Tool_result.failure_effect_disposition_to_string effect_disposition))
+;;
+
+(* [read] is what the model is given for the same [answer]. The tool-call row
+   is written from that, so the observers read it too: a service that
+   completed the call while MASC could not keep the answer for the model is a
+   failure to the Keeper, and the effect is proven to have happened. *)
+let observed_of_call_result ~tool_name ~start_time ~answer ~read =
+  match answer with
+  | Error call_error ->
+    observed_failure
+      ~tool_name
+      ~start_time
+      ~class_:call_failure_class
+      ~effect_disposition:
+        (Keeper_identity_tools.effect_disposition_of_call_error call_error)
+  | Ok (result : Mcp_client.tool_result) ->
+    if result.Mcp_client.is_error
+    then
+      observed_failure
+        ~tool_name
+        ~start_time
+        ~class_:call_failure_class
+        ~effect_disposition:reported_error_effect
+    else (
+      match read with
+      | Ok _ -> Tool_result.make_ok ~tool_name ~start_time ()
+      | Error _ ->
+        observed_failure
+          ~tool_name
+          ~start_time
+          ~class_:call_failure_class
+          ~effect_disposition:Tool_result.Proven_post_effect)
+;;
+
 let agent_tool
       ?transports
       ?clock
@@ -263,13 +328,18 @@ let agent_tool
       ~read_only:offered.Keeper_identity_tools.read_only
       ()
   in
-  let run_raw arguments =
+  let read_answer answer =
     Keeper_identity_tools.tool_result_of_call
       ~base_path:config.Workspace.base_path
       ~inline_ceiling_bytes:(inline_ceiling_bytes ())
-      (send arguments)
+      answer
+  in
+  let tool_name = offered.Keeper_identity_tools.schema.Agent_core.Types.name in
+  let observe result =
+    Tool_dispatch.run_dispatch_observers Dispatch_outcome.Handled (Some result)
   in
   let gated arguments =
+    let start_time = Tool_timing.start () in
     (* Provider annotations are hints, not authority to bypass this lane. *)
       let provider = offered.Keeper_identity_tools.provider in
       let provider_id = provider.Provider.id in
@@ -305,19 +375,30 @@ let agent_tool
              ~audit_receipts
              ()
          in
+         observe
+           (Keeper_gate_deferred_payload.to_tool_result ~tool_name ~start_time payload);
          Ok
            { Agent_core.Types.content =
                Yojson.Safe.to_string (Keeper_gate_deferred_payload.data payload)
            ; content_blocks = None; _meta = None
            }
        | Keeper_gate.Unavailable reason ->
+         observe
+           (observed_failure
+              ~tool_name
+              ~start_time
+              ~class_:Tool_result.Dependency_unavailable
+              ~effect_disposition:Tool_result.Proven_pre_effect);
          Error
            { Agent_core.Types.message = gate_unavailable_message reason
            ; recoverable = true
            ; error_class = Some Agent_core.Types.Transient
            }
        | Keeper_gate.Allow authorization ->
-         (match run_raw arguments with
+         let answer = send arguments in
+         let read = read_answer answer in
+         observe (observed_of_call_result ~tool_name ~start_time ~answer ~read);
+         (match read with
           | Ok output ->
             Ok
               { output with
@@ -341,15 +422,15 @@ let execution_of_call_result result =
     then
       (* A failed tool may have applied an effect before reporting its error. *)
       Keeper_tool_execution.failure
-        ~class_:Tool_result.Runtime_failure
-        ~effect_disposition:Tool_result.Effect_outcome_unknown
+        ~class_:call_failure_class
+        ~effect_disposition:reported_error_effect
         (Mcp_client.model_text answer)
     else Keeper_tool_execution.success (Mcp_client.model_text answer)
   | Error call_error ->
     (* The disposition is the call's own statement of what it proves; the
        model-facing result reads the same one for retry safety. *)
     Keeper_tool_execution.failure
-      ~class_:Tool_result.Runtime_failure
+      ~class_:call_failure_class
       ~effect_disposition:
         (Keeper_identity_tools.effect_disposition_of_call_error call_error)
       (Keeper_identity_tools.call_error_to_string call_error)

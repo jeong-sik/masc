@@ -30,11 +30,6 @@ let check_last_error name ~kind ~message (last_error : Metrics.failure option) =
       check string (name ^ " message") message failure.message
   | None -> fail (name ^ ": expected a failure")
 
-let test_error_kind_round_trip () =
-  match Metrics.error_kind_of_string "validation" with
-  | Some kind -> check_error_kind "round trip" "validation" kind
-  | None -> fail "expected Ek_validation for \"validation\""
-
 let test_record_attempt_tracks_connector_diagnostics () =
   with_eio (fun () ->
       let channel = unique_channel "discord-metrics" in
@@ -317,7 +312,6 @@ let () =
     [
       ( "metrics",
         [
-          test_case "error kind round trip" `Quick test_error_kind_round_trip;
   test_case "carries the previous keeper and workspace" `Quick
     test_record_attempt_carries_previous_keeper_and_workspace;
           test_case "records connector diagnostics" `Quick

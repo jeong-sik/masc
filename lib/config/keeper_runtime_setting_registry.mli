@@ -118,9 +118,5 @@ val requires_restart : setting -> bool
 (** [true] for settings whose next effect boundary requires a fiber or process
     restart. *)
 
-val validate_registry : unit -> (unit, string list) result
-(** Rejects duplicate environment/TOML identities, malformed exposure, and
-    TOML settings without a concrete consumer. *)
-
 val schema_to_yojson : unit -> Yojson.Safe.t
 (** Machine-readable catalog used by operator surfaces and generated docs. *)

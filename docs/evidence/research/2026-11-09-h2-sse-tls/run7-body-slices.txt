@@ -1,0 +1,83 @@
+# run7, 2026-11-10. One line per scene: variant, pass, scene, then the fastest, median and slowest round in ms,
+# MiB/s of the median round, and for that round the DATA frames with a payload, how many of them
+# were under 1 KiB, and the smallest.
+# scene = MiB : stream window : connection window : credit policy : busy_us : rounds
+# one = one slice in h2, two = two slices in h2, whole = the payload handed to h2 at once
+
+## limited3: window-limited scenes, one pass, while another build of this session ran
+one pass=1 8:65535:65535:frame:0:3 ms_min=13197.7 ms_median=13518.5 ms_max=14026.4 mib_per_s=0.6 data_frames=33152 under_1k=32640 smallest=1
+one pass=1 8:65535:65535:go:0:3 ms_min=160.6 ms_median=188.1 ms_max=392.5 mib_per_s=42.5 data_frames=1021 under_1k=509 smallest=1
+one pass=1 8:65535:65535:half:0:3 ms_min=88.2 ms_median=90.6 ms_max=139.4 mib_per_s=88.3 data_frames=767 under_1k=255 smallest=1
+one pass=1 8:262144:262144:frame:0:3 ms_min=163.4 ms_median=198.1 ms_max=310.0 mib_per_s=40.4 data_frames=512 under_1k=0 smallest=16384
+one pass=1 8:24576:65535:frame:0:3 ms_min=471.6 ms_median=529.2 ms_max=816.6 mib_per_s=15.1 data_frames=1023 under_1k=0 smallest=8192
+two pass=1 8:65535:65535:frame:0:3 ms_min=219.7 ms_median=340.9 ms_max=571.3 mib_per_s=23.5 data_frames=513 under_1k=1 smallest=128
+two pass=1 8:65535:65535:go:0:3 ms_min=124.7 ms_median=166.9 ms_max=236.5 mib_per_s=47.9 data_frames=513 under_1k=1 smallest=128
+two pass=1 8:65535:65535:half:0:3 ms_min=71.6 ms_median=122.0 ms_max=144.3 mib_per_s=65.6 data_frames=767 under_1k=255 smallest=1
+two pass=1 8:262144:262144:frame:0:3 ms_min=159.3 ms_median=169.4 ms_max=264.3 mib_per_s=47.2 data_frames=512 under_1k=0 smallest=16384
+two pass=1 8:24576:65535:frame:0:3 ms_min=175.8 ms_median=202.2 ms_max=294.8 mib_per_s=39.6 data_frames=683 under_1k=0 smallest=8192
+whole pass=1 8:65535:65535:frame:0:3 ms_min=108.3 ms_median=196.4 ms_max=197.9 mib_per_s=40.7 data_frames=513 under_1k=1 smallest=128
+whole pass=1 8:65535:65535:go:0:3 ms_min=195.8 ms_median=298.5 ms_max=360.9 mib_per_s=26.8 data_frames=513 under_1k=1 smallest=128
+whole pass=1 8:65535:65535:half:0:3 ms_min=147.7 ms_median=170.8 ms_max=274.6 mib_per_s=46.8 data_frames=513 under_1k=1 smallest=128
+whole pass=1 8:262144:262144:frame:0:3 ms_min=286.5 ms_median=322.2 ms_max=332.0 mib_per_s=24.8 data_frames=512 under_1k=0 smallest=16384
+whole pass=1 8:24576:65535:frame:0:3 ms_min=197.1 ms_median=286.0 ms_max=305.3 mib_per_s=28.0 data_frames=683 under_1k=0 smallest=8192
+
+## open3: three passes
+two pass=1 32:6291456:15728640:half:0:5 ms_min=52.4 ms_median=62.5 ms_max=88.1 mib_per_s=512.4 data_frames=2048 under_1k=0 smallest=16384
+two pass=1 32:4194304:1073741824:go:0:5 ms_min=178.2 ms_median=247.6 ms_max=269.5 mib_per_s=129.2 data_frames=2048 under_1k=0 smallest=16384
+two pass=1 8:6291456:15728640:half:1000:3 ms_min=306.2 ms_median=320.5 ms_max=494.4 mib_per_s=25.0 data_frames=512 under_1k=0 smallest=16384
+two pass=1 8:65535:65535:half:0:3 ms_min=73.9 ms_median=142.2 ms_max=161.1 mib_per_s=56.2 data_frames=767 under_1k=255 smallest=1
+two pass=1 8:65535:65535:go:0:3 ms_min=109.1 ms_median=188.4 ms_max=276.0 mib_per_s=42.5 data_frames=513 under_1k=1 smallest=128
+whole pass=1 32:6291456:15728640:half:0:5 ms_min=53.0 ms_median=78.3 ms_max=184.4 mib_per_s=408.8 data_frames=2048 under_1k=0 smallest=16384
+whole pass=1 32:4194304:1073741824:go:0:5 ms_min=224.4 ms_median=355.5 ms_max=371.5 mib_per_s=90.0 data_frames=2048 under_1k=0 smallest=16384
+whole pass=1 8:6291456:15728640:half:1000:3 ms_min=28.4 ms_median=32.8 ms_max=33.1 mib_per_s=243.8 data_frames=512 under_1k=0 smallest=16384
+whole pass=1 8:65535:65535:half:0:3 ms_min=55.5 ms_median=55.8 ms_max=75.8 mib_per_s=143.3 data_frames=513 under_1k=1 smallest=128
+whole pass=1 8:65535:65535:go:0:3 ms_min=144.0 ms_median=188.0 ms_max=301.4 mib_per_s=42.6 data_frames=513 under_1k=1 smallest=128
+one pass=1 32:6291456:15728640:half:0:5 ms_min=99.9 ms_median=133.4 ms_max=142.6 mib_per_s=239.9 data_frames=2048 under_1k=0 smallest=16384
+one pass=1 32:4194304:1073741824:go:0:5 ms_min=146.5 ms_median=186.1 ms_max=244.9 mib_per_s=171.9 data_frames=2048 under_1k=0 smallest=16384
+one pass=1 8:6291456:15728640:half:1000:3 ms_min=549.3 ms_median=561.7 ms_max=616.4 mib_per_s=14.2 data_frames=512 under_1k=0 smallest=16384
+one pass=1 8:65535:65535:half:0:3 ms_min=65.3 ms_median=65.4 ms_max=79.3 mib_per_s=122.3 data_frames=767 under_1k=255 smallest=1
+one pass=1 8:65535:65535:go:0:3 ms_min=79.9 ms_median=110.5 ms_max=115.7 mib_per_s=72.4 data_frames=1021 under_1k=509 smallest=1
+two pass=2 32:6291456:15728640:half:0:5 ms_min=47.0 ms_median=49.8 ms_max=67.7 mib_per_s=642.2 data_frames=2048 under_1k=0 smallest=16384
+two pass=2 32:4194304:1073741824:go:0:5 ms_min=164.8 ms_median=211.4 ms_max=229.7 mib_per_s=151.4 data_frames=2048 under_1k=0 smallest=16384
+two pass=2 8:6291456:15728640:half:1000:3 ms_min=280.7 ms_median=281.0 ms_max=298.6 mib_per_s=28.5 data_frames=512 under_1k=0 smallest=16384
+two pass=2 8:65535:65535:half:0:3 ms_min=35.4 ms_median=35.8 ms_max=42.2 mib_per_s=223.5 data_frames=767 under_1k=255 smallest=1
+two pass=2 8:65535:65535:go:0:3 ms_min=45.1 ms_median=46.8 ms_max=48.1 mib_per_s=170.9 data_frames=513 under_1k=1 smallest=128
+whole pass=2 32:6291456:15728640:half:0:5 ms_min=22.2 ms_median=24.3 ms_max=28.3 mib_per_s=1316.4 data_frames=2048 under_1k=0 smallest=16384
+whole pass=2 32:4194304:1073741824:go:0:5 ms_min=160.8 ms_median=189.7 ms_max=219.9 mib_per_s=168.7 data_frames=2048 under_1k=0 smallest=16384
+whole pass=2 8:6291456:15728640:half:1000:3 ms_min=25.3 ms_median=26.9 ms_max=28.9 mib_per_s=297.8 data_frames=512 under_1k=0 smallest=16384
+whole pass=2 8:65535:65535:half:0:3 ms_min=27.2 ms_median=27.5 ms_max=55.7 mib_per_s=290.8 data_frames=513 under_1k=1 smallest=128
+whole pass=2 8:65535:65535:go:0:3 ms_min=44.7 ms_median=52.1 ms_max=53.9 mib_per_s=153.4 data_frames=513 under_1k=1 smallest=128
+one pass=2 32:6291456:15728640:half:0:5 ms_min=89.1 ms_median=135.2 ms_max=164.3 mib_per_s=236.7 data_frames=2048 under_1k=0 smallest=16384
+one pass=2 32:4194304:1073741824:go:0:5 ms_min=251.3 ms_median=382.3 ms_max=519.6 mib_per_s=83.7 data_frames=2048 under_1k=0 smallest=16384
+one pass=2 8:6291456:15728640:half:1000:3 ms_min=550.1 ms_median=551.3 ms_max=558.1 mib_per_s=14.5 data_frames=512 under_1k=0 smallest=16384
+one pass=2 8:65535:65535:half:0:3 ms_min=52.5 ms_median=56.7 ms_max=57.5 mib_per_s=141.0 data_frames=767 under_1k=255 smallest=1
+one pass=2 8:65535:65535:go:0:3 ms_min=62.8 ms_median=66.8 ms_max=71.2 mib_per_s=119.7 data_frames=1021 under_1k=509 smallest=1
+two pass=3 32:6291456:15728640:half:0:5 ms_min=35.7 ms_median=38.6 ms_max=66.5 mib_per_s=829.1 data_frames=2048 under_1k=0 smallest=16384
+two pass=3 32:4194304:1073741824:go:0:5 ms_min=129.6 ms_median=175.8 ms_max=205.8 mib_per_s=182.0 data_frames=2048 under_1k=0 smallest=16384
+two pass=3 8:6291456:15728640:half:1000:3 ms_min=281.4 ms_median=299.2 ms_max=558.0 mib_per_s=26.7 data_frames=512 under_1k=0 smallest=16384
+two pass=3 8:65535:65535:half:0:3 ms_min=66.8 ms_median=67.6 ms_max=90.1 mib_per_s=118.4 data_frames=767 under_1k=255 smallest=1
+two pass=3 8:65535:65535:go:0:3 ms_min=58.3 ms_median=68.1 ms_max=111.4 mib_per_s=117.4 data_frames=513 under_1k=1 smallest=128
+whole pass=3 32:6291456:15728640:half:0:5 ms_min=30.1 ms_median=46.1 ms_max=84.9 mib_per_s=694.0 data_frames=2048 under_1k=0 smallest=16384
+whole pass=3 32:4194304:1073741824:go:0:5 ms_min=328.7 ms_median=671.7 ms_max=773.4 mib_per_s=47.6 data_frames=2048 under_1k=0 smallest=16384
+whole pass=3 8:6291456:15728640:half:1000:3 ms_min=28.8 ms_median=31.0 ms_max=55.6 mib_per_s=258.0 data_frames=512 under_1k=0 smallest=16384
+whole pass=3 8:65535:65535:half:0:3 ms_min=47.9 ms_median=52.4 ms_max=71.5 mib_per_s=152.7 data_frames=513 under_1k=1 smallest=128
+whole pass=3 8:65535:65535:go:0:3 ms_min=56.7 ms_median=68.1 ms_max=83.4 mib_per_s=117.5 data_frames=513 under_1k=1 smallest=128
+one pass=3 32:6291456:15728640:half:0:5 ms_min=110.9 ms_median=151.8 ms_max=255.2 mib_per_s=210.8 data_frames=2048 under_1k=0 smallest=16384
+one pass=3 32:4194304:1073741824:go:0:5 ms_min=183.0 ms_median=221.8 ms_max=337.5 mib_per_s=144.3 data_frames=2048 under_1k=0 smallest=16384
+one pass=3 8:6291456:15728640:half:1000:3 ms_min=554.4 ms_median=554.9 ms_max=595.4 mib_per_s=14.4 data_frames=512 under_1k=0 smallest=16384
+one pass=3 8:65535:65535:half:0:3 ms_min=39.7 ms_median=41.7 ms_max=44.6 mib_per_s=191.8 data_frames=767 under_1k=255 smallest=1
+one pass=3 8:65535:65535:go:0:3 ms_min=47.5 ms_median=47.5 ms_max=47.7 mib_per_s=168.3 data_frames=1021 under_1k=509 smallest=1
+
+## frame3: per-frame credit, two passes
+two pass=1 8:65535:65535:frame:0:3 ms_min=228.3 ms_median=283.4 ms_max=300.5 mib_per_s=28.2 data_frames=513 under_1k=1 smallest=128
+two pass=1 8:24576:65535:frame:0:3 ms_min=201.9 ms_median=207.1 ms_max=235.1 mib_per_s=38.6 data_frames=683 under_1k=0 smallest=8192
+whole pass=1 8:65535:65535:frame:0:3 ms_min=117.4 ms_median=131.7 ms_max=284.4 mib_per_s=60.8 data_frames=513 under_1k=1 smallest=128
+whole pass=1 8:24576:65535:frame:0:3 ms_min=162.8 ms_median=393.5 ms_max=464.0 mib_per_s=20.3 data_frames=683 under_1k=0 smallest=8192
+one pass=1 8:65535:65535:frame:0:3 ms_min=8306.1 ms_median=12022.5 ms_max=12606.8 mib_per_s=0.7 data_frames=33152 under_1k=32640 smallest=1
+one pass=1 8:24576:65535:frame:0:3 ms_min=131.7 ms_median=132.6 ms_max=281.5 mib_per_s=60.3 data_frames=1023 under_1k=0 smallest=8192
+two pass=2 8:65535:65535:frame:0:3 ms_min=75.1 ms_median=92.3 ms_max=137.4 mib_per_s=86.7 data_frames=513 under_1k=1 smallest=128
+two pass=2 8:24576:65535:frame:0:3 ms_min=90.1 ms_median=93.5 ms_max=114.3 mib_per_s=85.6 data_frames=683 under_1k=0 smallest=8192
+whole pass=2 8:65535:65535:frame:0:3 ms_min=58.8 ms_median=93.7 ms_max=103.0 mib_per_s=85.4 data_frames=513 under_1k=1 smallest=128
+whole pass=2 8:24576:65535:frame:0:3 ms_min=86.7 ms_median=97.8 ms_max=116.9 mib_per_s=81.8 data_frames=683 under_1k=0 smallest=8192
+one pass=2 8:65535:65535:frame:0:3 ms_min=10488.2 ms_median=10971.3 ms_max=15111.4 mib_per_s=0.7 data_frames=33152 under_1k=32640 smallest=1
+one pass=2 8:24576:65535:frame:0:3 ms_min=397.8 ms_median=494.4 ms_max=676.6 mib_per_s=16.2 data_frames=1023 under_1k=0 smallest=8192

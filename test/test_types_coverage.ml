@@ -1363,35 +1363,6 @@ let test_limit_for_category_task_ops () =
   check int "task_ops" 100 (Masc_domain.limit_for_category config Masc_domain.TaskOpsLimit)
 
 (* ============================================================
-   category_for_tool Tests
-   ============================================================ *)
-
-let test_category_for_tool_broadcast () =
-  check bool "masc_broadcast" true (Masc_domain.category_for_tool "masc_broadcast" = Masc_domain.BroadcastLimit)
-  (* masc_listen removed: tool pruned *)
-
-let test_category_for_tool_task_ops () =
-  check bool "masc_add_task" true (Masc_domain.category_for_tool "masc_add_task" = Masc_domain.TaskOpsLimit);
-  check bool "masc_transition" true (Masc_domain.category_for_tool "masc_transition" = Masc_domain.TaskOpsLimit)
-
-(* Regression guard for #8873: plan-slot writes must share the
-   TaskOpsLimit (30/min) bucket with the other per-task ops, not fall
-   through to GeneralLimit (10/min). *)
-let test_category_for_tool_plan_slot_writes () =
-  check bool "masc_plan_set_task" true
-    (Masc_domain.category_for_tool "masc_plan_set_task" = Masc_domain.TaskOpsLimit);
-  check bool "masc_plan_clear_task" true
-    (Masc_domain.category_for_tool "masc_plan_clear_task" = Masc_domain.TaskOpsLimit)
-
-let test_category_for_tool_general () =
-  check bool "masc_status" true (Masc_domain.category_for_tool "masc_status" = Masc_domain.GeneralLimit);
-  check bool "unknown" true (Masc_domain.category_for_tool "unknown_tool" = Masc_domain.GeneralLimit);
-  (* masc_batch_add_tasks intentionally stays in GeneralLimit until a
-     maintainer call on batch rate-limiting (#8873). *)
-  check bool "masc_batch_add_tasks" true
-    (Masc_domain.category_for_tool "masc_batch_add_tasks" = Masc_domain.GeneralLimit)
-
-(* ============================================================
    more masc_error_to_string Tests (coverage for all variants)
    ============================================================ *)
 
@@ -1818,12 +1789,6 @@ let () =
       test_case "general" `Quick test_limit_for_category_general;
       test_case "broadcast" `Quick test_limit_for_category_broadcast;
       test_case "task_ops" `Quick test_limit_for_category_task_ops;
-    ];
-    "category_for_tool", [
-      test_case "broadcast" `Quick test_category_for_tool_broadcast;
-      test_case "task_ops" `Quick test_category_for_tool_task_ops;
-      test_case "plan_slot_writes (#8873)" `Quick test_category_for_tool_plan_slot_writes;
-      test_case "general" `Quick test_category_for_tool_general;
     ];
     "masc_error_extended", [
       test_case "agent invalid name" `Quick test_masc_error_agent_invalid_name;

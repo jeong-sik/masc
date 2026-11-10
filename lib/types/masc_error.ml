@@ -17,20 +17,6 @@ let limit_for_category config = function
   | BroadcastLimit -> config.broadcast_per_minute
   | TaskOpsLimit -> config.task_ops_per_minute
 
-let category_for_tool_opt = function
-  | "masc_broadcast" -> Some BroadcastLimit
-  | "masc_add_task"
-  | "masc_update_priority"
-  | "masc_plan_set_task"
-  | "masc_plan_clear_task"
-  | "masc_transition" -> Some TaskOpsLimit
-  | _ -> None
-
-let category_for_tool tool =
-  match category_for_tool_opt tool with
-  | Some category -> category
-  | None -> GeneralLimit
-
 module Task_error = struct
   type transition_rejection =
     | Current_owner_required of { current_assignee : string }

@@ -157,6 +157,26 @@ let test_live_readset_locks base =
     "contended\ncontended" (Fs_compat.load_file receipt);
   ignore (require (Board.get_comment (fresh base) ~comment_id:(Board.Comment_id.to_string comment.id)))
 
+let test_scoped_policy_refusal_revokes_queries base =
+  let first = fresh base in
+  let board, parent = scoped first in
+  let path = Board.sub_boards_path first in
+  let retained = path ^ ".retained" in
+  Unix.rename path retained;
+  Unix.mkdir path 0o700;
+  let before = bytes (Board.comments_path first) in
+  expect_io (append first parent "failed canonical policy guard");
+  same_bytes "refused policy never appends" before (Board.comments_path first);
+  expect_io (Board.read_sub_boards first);
+  expect_io (Board.get_sub_board first ~sub_board_id:board.slug);
+  Unix.rmdir path;
+  Unix.rename retained path;
+  expect_io (Board.read_sub_boards first);
+  (match Board.reload_sub_boards first with
+   | Ok _ -> ()
+   | Error (path, error) -> Alcotest.failf "%s: %s" path (Printexc.to_string error));
+  ignore (require (append first parent "explicit healthy policy reload restores admission"))
+
 let with_parent_cleanup base f =
   let armed = ref false in
   let lock_path = ref None in
@@ -241,6 +261,7 @@ let () = match Array.to_list Sys.argv with
        "foreign restricted policy", test_foreign_policy;
        "new policy for an unregistered hearth", test_new_policy_for_unregistered_hearth;
        "unscoped parent with unavailable policy", test_unscoped_policy_failure;
+       "scoped policy refusal revokes strict queries", test_scoped_policy_refusal_revokes_queries;
        "boundary reader is not author", test_boundary_reader_is_not_author;
        "live parent and policy locks", test_live_readset_locks;
        "known append before parent cleanup", test_known_append_parent_cleanup;

@@ -133,6 +133,38 @@ let stop_after_known_record marker_path armed = {
     if !armed && same_inode stat lock && Sys.file_exists !marker_path then (
       armed := false; raise Eio.Time.Timeout)) }
 
+let test_deleted_winner_restores_restricted_shadow base =
+  let seed = fresh base in
+  let shadowed = require (Board.create_sub_board seed ~slug:"shared" ~name:"restricted"
+    ~description:"remaining policy" ~owner:"room-owner" ~access:Board.Owner_only ()) in
+  let winner = require (Board.create_sub_board seed ~slug:"other" ~name:"winner"
+    ~description:"active policy" ~owner:"other-owner" ()) in
+  let winner = { winner with slug = shadowed.slug } in
+  let path = Board.sub_boards_path seed in
+  let observed = Result.get_ok (Fs_compat.read_private_jsonl_durable_locked_result path ~after:None) in
+  let content = String.concat "" (List.map (fun board ->
+    Yojson.Safe.to_string (Board.sub_board_to_yojson board) ^ "\n") [shadowed; winner]) in
+  ignore (Result.get_ok (Fs_compat.rewrite_private_jsonl_durable_locked_at_snapshot_result
+    path ~expected:observed content));
+  let store = fresh base in
+  let parent = post store winner.slug "old active board post" in
+  durable (require (delete store winner));
+  let restarted = fresh base in
+  List.iter (fun current ->
+    let actual = require (Board.get_sub_board current ~sub_board_id:shadowed.slug) in
+    Alcotest.(check string) "current and fresh stores agree on the remaining policy"
+      (Board.Sub_board_id.to_string shadowed.id) (Board.Sub_board_id.to_string actual.id);
+    (match Board.create_post current ~lookup:Recipient_lookup.none_declared ~author:"outsider"
+       ~content:"must not bypass the restored owner policy" ~hearth:shadowed.slug
+       ~post_kind:Board.Human_post ~ttl_hours:0 () with
+     | Ok _ -> Alcotest.fail "remaining owner-only policy was bypassed"
+     | Error failure ->
+       match Board.Post_publication_failure.cause failure with
+       | Board.Post_publication_failure.Board_error (Board.Validation_error _) -> ()
+       | Board.Post_publication_failure.Board_error error -> Alcotest.fail (Board.show_board_error error)
+       | Board.Post_publication_failure.Raised error -> Alcotest.fail (Printexc.to_string error))) [store; restarted];
+  Alcotest.(check (option string)) "original winner's captured post remains unlinked" None (read restarted parent).hearth
+
 let test_fixed_ids_after_interruption base =
   let marker_path = ref "" and armed = ref false in
   let store = Board.create_store_with_deletion_io_for_testing ~base_path:base
@@ -280,6 +312,7 @@ let () = Alcotest.run "Sub-board owned deletion recovery" ["real sources", List.
   ["durable unlink keeps comments and unselected work", test_durable_unlink_and_unselected_work;
    "foreign post before decision", test_foreign_predecision_post;
    "shadowed ID preserves canonical slug winner", test_shadowed_board_does_not_unlink_winner;
+   "deleted winner restores restricted shadow policy", test_deleted_winner_restores_restricted_shadow;
    "fixed IDs after known-record interruption", test_fixed_ids_after_interruption;
    "unknown decision never replays", test_unknown_decision;
    "unknown source stays owned after file settlement", test_unknown_posts_never_resume_after_settlement;

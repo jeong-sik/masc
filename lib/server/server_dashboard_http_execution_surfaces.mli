@@ -42,7 +42,9 @@ val execution_cached_observation_for_scope :
     same owner lock. [None] means no admitted observation/error in the current
     hard generation; it must not become a complete namespace observation.
     Actual failure with no body is [Partial] for canonical error reporting,
-    while default Execution GET still distinguishes it from retained rows. *)
+    while default Execution GET still distinguishes it from retained rows.
+    An explicit canonical cache success marker is also complete; ordinary
+    invalidation clears both success and error markers. *)
 
 val last_good_shell_for_scope :
   state:Mcp_server.server_state -> Mcp_server.workspace_scope -> Yojson.Safe.t option

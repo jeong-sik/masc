@@ -379,7 +379,11 @@ let execution_cached_observation_for_scope ~state scope =
     let source = Server_dashboard_http_cache.snapshot owner.cache in
     let completeness = match !(owner.retained_read) with
       | Some (generation, completeness) when generation = !(owner.generation) -> Some completeness
-      | Some _ | None -> Option.map (fun detail -> Dashboard_projection_read.Partial detail) source.last_error in
+      | Some _ | None ->
+          (match source.last_error, source.last_success_unix with
+           | Some detail, _ -> Some (Dashboard_projection_read.Partial detail)
+           | None, Some _ -> Some Dashboard_projection_read.Complete
+           | None, None -> None) in
     source, completeness)
 ;;
 
@@ -1514,6 +1518,7 @@ let patchexecution_cache_for_keeper ~owner ~keeper_name ~event ~keepalive_runnin
   if Option.is_none (Dashboard_execution_helpers.execution_fixture_name ()) then
   let patch =
     with_execution_publication_lock ~owner (fun () ->
+      let previous_generation = !(owner.generation) in
       owner.generation := next_execution_generation ();
       let generation = !(owner.generation) in
       clear_execution_default_light_http_body ~owner ();
@@ -1522,6 +1527,11 @@ let patchexecution_cache_for_keeper ~owner ~keeper_name ~event ~keepalive_runnin
         let json = with_execution_publication_generation ~owner ~generation json in
         Server_dashboard_http_cache.update_cached_surface owner.cache
           (fun current -> { current with json });
+        (* This authoritative patch changes row fields, not the completeness
+           of their original source read. Transport that exact outcome only
+           when it belonged to the generation actually patched. *)
+        owner.retained_read := Option.bind !(owner.retained_read) (fun (read_generation, completeness) ->
+          if read_generation = previous_generation then Some (generation, completeness) else None);
         Patched ()
       in
       match (Server_dashboard_http_cache.snapshot owner.cache).json with

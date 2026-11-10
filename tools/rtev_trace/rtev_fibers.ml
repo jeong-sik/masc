@@ -150,7 +150,13 @@ let () =
      promise reports [Get] again with no [Put] between, which a mutex cannot:
      [not_locks] holds the ids that did. None of these ever reports the [Put]
      that would end a hold, so as locks they stayed held until the trace
-     ended, each added again at every [Get]. *)
+     ended, each added again at every [Get].
+
+     An older semaphore with more than one unit looks the same at its second
+     overlapping [Get] (Get A, Get B, Put A, Put B), but it does report a
+     [Put]. The first [Put] seen on an id in [not_locks] takes it out again,
+     so the semaphore is tracked from its next [Get]; the overlapped window
+     itself has no hold. *)
   let obj_kind : (int, string) Hashtbl.t = Hashtbl.create 4096 in
   let not_locks : (int, unit) Hashtbl.t = Hashtbl.create 64 in
   let lock_like id =
@@ -296,6 +302,7 @@ let () =
        | None -> ())
     | `Get _ -> ()
     | `Put lock ->
+      Hashtbl.remove not_locks lock;
       (match end_hold lock with
        | Some (holder, since, label) ->
          let dur = Int64.sub ts since in

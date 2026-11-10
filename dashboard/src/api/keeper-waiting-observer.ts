@@ -71,7 +71,7 @@ export async function observeKeeperWaitingChanges(
       } else {
         onChange({ scope: 'workspace' })
       }
-    }, { idleTimeoutMs })
+    }, { idleTimeoutMs, signal: controller.signal })
     if (!signal.aborted) throw new Error('observer stream closed')
   } finally {
     signal.removeEventListener('abort', abort)

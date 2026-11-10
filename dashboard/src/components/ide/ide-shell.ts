@@ -40,7 +40,7 @@ import { activeKeeperName } from '../../keeper-state'
 import { keepers } from '../../store'
 import { dashboardBearerToken } from '../../api/core'
 import { devTokenBootstrapStatus } from '../../api/dev-token'
-import { dashboardWsReady } from '../../dashboard-ws-state'
+import { dashboardObserverReady } from '../../dashboard-observer-state'
 import { fetchRepositoryObservation, type Repository } from '../../api/repositories'
 import type { WorkspaceSource } from '../../api/workspace-source'
 import type { WorkspaceFetchIssue } from './ide-data-workspace-store'
@@ -298,7 +298,7 @@ function statusbarWorkspaceLabel(
 }
 
 function dashboardRuntimeConnected(): boolean {
-  return dashboardWsReady.value
+  return dashboardObserverReady.value
 }
 
 /**

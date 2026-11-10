@@ -1,4 +1,4 @@
-// WebSocket server-push reaction and periodic refresh — extracted from store.ts
+// SSE server-push reaction — extracted from store.ts
 // Routes pushed events to the minimal refresh function needed.
 //
 // Event routing uses a declarative map for simple refresh-only events,
@@ -11,10 +11,10 @@ import {
   normalizeSSEDispatchType,
 } from './sse'
 import {
-  dashboardWsLastDisconnectedAt,
-  dashboardWsReady,
-  dashboardWsReconnectCount,
-} from './dashboard-ws-state'
+  dashboardObserverLastDisconnectedAt,
+  dashboardObserverReady,
+  dashboardObserverAdmissionCount,
+} from './dashboard-observer-state'
 import type {
   BoardPost,
   DashboardExecutionResponse,
@@ -41,7 +41,6 @@ import {
   boardOffset,
 } from './store'
 import {
-  requestNamespaceTruth,
   requestNamespaceTruthNow,
   namespaceTruth,
   namespaceTruthError,
@@ -67,8 +66,6 @@ import {
 import { route } from './router'
 import { routeWantsRefreshTarget, type RouteRefreshTarget } from './refresh-scope'
 import {
-  PERIODIC_REFRESH_DEV_MS,
-  PERIODIC_REFRESH_PROD_MS,
   SSE_ACTIVITY_DEBOUNCE_MS,
   SSE_DEFAULT_DEBOUNCE_MS,
   SSE_KEEPER_OPERATOR_DEBOUNCE_MS,
@@ -502,15 +499,15 @@ let latestOperatorSnapshotComputeSequence: number | null = null
 let latestOperatorSnapshotTerminalSequence: number | null = null
 const retiredOperatorSnapshotEpochs = new Set<string>()
 
-function handleReconnect(): void {
+function handleReconnect(notify = true): void {
   scheduleIdeConversationRefresh('board')
   scheduleIdeConversationRefresh('decisions')
-  const disconnectedMs = dashboardWsLastDisconnectedAt.value > 0
-    ? Date.now() - dashboardWsLastDisconnectedAt.value
+  const disconnectedMs = dashboardObserverLastDisconnectedAt.value > 0
+    ? Date.now() - dashboardObserverLastDisconnectedAt.value
     : 0
   const durationSec = Math.round(disconnectedMs / 1000)
   const label = durationSec > 0 ? `${durationSec}초 단절 후 재연결됨` : '서버 연결 복구됨'
-  showToast(label, 'success', 3000)
+  if (notify) showToast(label, 'success', 3000)
 
   // Refresh all data to recover events missed during disconnect.
   // If the server is still warming up after restart, the first fetch may fail.
@@ -938,37 +935,12 @@ export function hydrateServerPushEvent(event: SSEEvent): boolean {
   return false
 }
 
-function eventPayloadRecord(payload: unknown): Record<string, unknown> {
-  return isRecord(payload) ? payload : { payload }
-}
-
-export function hydrateDashboardSlice(_slice: string, payload: unknown, eventType?: string): void {
-  switch (eventType) {
-    case 'project_snapshot':
-    case 'execution_snapshot':
-    case 'operator_snapshot':
-    case 'operator_digest':
-    case 'transport_health_snapshot':
-      hydrateServerPushEvent({ type: eventType, payload } as SSEEvent)
-      return
-  }
-  if (eventType) {
-    routeServerPushEvent({
-      type: eventType,
-      ...eventPayloadRecord(payload),
-    } as SSEEvent)
-    return
-  }
-
-  // Dashboard deltas require an event type so the typed handler is explicit.
-}
-
-// --- WebSocket server-push reaction setup ---
+// --- SSE server-push reaction setup ---
 
 export function setupServerPushReaction(): () => void {
-  const unsubReconnect = dashboardWsReconnectCount.subscribe((count) => {
-    if (count > 0 && dashboardWsReady.value) {
-      handleReconnect()
+  const unsubReconnect = dashboardObserverAdmissionCount.subscribe((count) => {
+    if (count > 0 && dashboardObserverReady.value) {
+      handleReconnect(count > 1)
     }
   })
 
@@ -978,37 +950,6 @@ export function setupServerPushReaction(): () => void {
       clearTimeout(_debounceTimers[key])
       delete _debounceTimers[key]
     }
-  }
-}
-
-// --- Periodic refresh ---
-
-const PERIODIC_REFRESH_MS = import.meta.env.DEV
-  ? PERIODIC_REFRESH_DEV_MS
-  : PERIODIC_REFRESH_PROD_MS
-
-let _periodicId: ReturnType<typeof setInterval> | null = null
-
-export function startPeriodicRefresh(): void {
-  if (_periodicId) return
-  _periodicId = setInterval(() => {
-    // Fallback only. While the WS is delivering, every route surface this
-    // would refetch is already hydrated by push, so firing anyway just
-    // duplicates the traffic. Previously only invalidateDashboardCache()
-    // was gated and the two refresh calls ran unconditionally.
-    if (dashboardWsReady.value) return
-    invalidateDashboardCache()
-    requestNamespaceTruth()
-    void refreshActiveRoute().catch(err =>
-      console.warn('[periodic] route refresh failed', err instanceof Error ? err.message : err),
-    )
-  }, PERIODIC_REFRESH_MS)
-}
-
-export function stopPeriodicRefresh(): void {
-  if (_periodicId) {
-    clearInterval(_periodicId)
-    _periodicId = null
   }
 }
 

@@ -96,7 +96,7 @@ export function escapeRegExp(value: string): string {
  * stable display label is needed.
  *
  * ~45 call sites currently inline this exact ternary across
- * `dashboard-ws`, `lib/async-state` (file-internal helper),
+ * `dashboard-observer`, `lib/async-state` (file-internal helper),
  * `api/mcp`, `components/runtime-config-panel`,
  * `components/runtime-inspector`, `components/runtime-waterfall`,
  * `components/goals/goal-tree`,

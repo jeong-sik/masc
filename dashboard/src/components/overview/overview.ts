@@ -1254,7 +1254,7 @@ function OverviewDomainSection({
 
       <!-- BOARD · overview.jsx:233-237
            The overview route subscribes to the GLOBAL + execution slices only
-           (dashboardSlicesForRoute in dashboard-ws.ts) and never calls
+           (dashboard-observer.ts) and never calls
            refreshBoard, so boardPosts is empty here on every fresh load.
            Rendering its length printed "전체 포스트 0" while the board route
            and the post store both held posts. lastBoardRefreshAt stays null

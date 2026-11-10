@@ -1,0 +1,5 @@
+{
+  "schema_version": 1,
+  "usage": "Cutting over a red ancestor nightly requires an explicit entry: the run_id and exact head_sha of the scheduled nightly Test run a release owner reviewed. An empty list keeps a cut refuse-closed while the nightly is red.",
+  "allowed_failure_runs": []
+}

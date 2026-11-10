@@ -75,6 +75,17 @@ let replace_loaded_comments store comments =
     if not (List.mem id ids) then Hashtbl.replace store.comments_by_post post_id (id :: ids)) comments;
   store.karma_cache <- None
 
+let merge_loaded_comments store comments =
+  List.iter (fun (comment : comment) ->
+    Hashtbl.replace store.comments (Comment_id.to_string comment.id) comment) comments;
+  Hashtbl.clear store.comments_by_post;
+  Hashtbl.iter (fun id (comment : comment) ->
+    let pid = Post_id.to_string comment.post_id in
+    let ids = match Hashtbl.find_opt store.comments_by_post pid with
+      | None -> [] | Some ids -> ids in
+    Hashtbl.replace store.comments_by_post pid (id :: ids)) store.comments;
+  invalidate_comment_caches store
+
 let merge_loaded_posts store posts =
   List.iter (fun (post : post) ->
     Hashtbl.replace store.posts (Post_id.to_string post.id) post;
@@ -130,42 +141,53 @@ let propagate_workspace_check = function
       (Board_workspace_binding.raised rejection)
 
 let load_persisted_comments store =
-  let path = Board_paths.store_file_path store Board_paths.Comments in
-  let workspace_check = Board_paths.check_workspace store in
-  let result = match workspace_check with
-    | Error rejection -> Error (path, Failure (Board_workspace_binding.rejection_to_string rejection))
-    | Ok () -> try
-    if Fs_compat.exact_path_kind path = Fs_compat.Exact_missing then (
-      replace_loaded_comments store []; Ok 0)
-    else begin
-      let t0 = Time_compat.now () in
-      let loaded = ref 0 and retained = ref [] in
-      let parsed = load_source_rows path ~decode:comment_of_yojson ~accept:(fun c ->
-             (* Retain expired targets until the sweeper can also remove
-                their votes and reactions. Absence alone is not deletion. *)
-             retained := c :: !retained;
-             let cid = Comment_id.to_string c.id in
-             Hashtbl.replace store.comments cid c;
-             let post_key = Post_id.to_string c.post_id in
-             let existing =
-               Hashtbl.find_opt store.comments_by_post post_key
-               |> Option.value ~default:[]
-             in
-             let indexed =
-               if List.exists (String.equal cid) existing then existing else cid :: existing
-             in
-             Hashtbl.replace store.comments_by_post post_key indexed;
-             incr loaded) in
-      (match parsed with Ok () -> replace_loaded_comments store (List.rev !retained) | Error _ -> ());
-      let elapsed = Time_compat.now () -. t0 in
-      log_loaded ~noun:"comments" ~loaded:!loaded ~path ~elapsed parsed;
-      Result.map (fun () -> !loaded) parsed
-    end
+  let module Source = Board_comments_source in
+  with_persist_lock store (fun () ->
+    let path = Board_paths.comments_path store in
+    let t0 = Time_compat.now () in
+    let error failure = Error (path, Failure (show_board_error (Source.failure_to_board_error failure))) in
+    let outcome = Source.read store in
+    let outcome, result =
+      try
+        let result = with_lock store (fun () ->
+          match outcome with
+          | Source.Complete { comments; _ } ->
+            replace_loaded_comments store comments;
+            Ok (List.length comments)
+          | Source.Partial { comments; errors; _ } ->
+            merge_loaded_comments store comments;
+            error (Comments_rows_rejected errors)
+          | Source.Display_only { comments; failure; _ } ->
+            merge_loaded_comments store comments;
+            error failure
+          | Source.Unavailable { failure; _ } -> error failure) in
+        Source.publish_read store outcome;
+        outcome, result
+      with exception_ ->
+        let outcome = Source.fail_read store outcome ~stage:Project_comments exception_
+            (Printexc.get_raw_backtrace ()) in
+        let result = match outcome with
+          | Source.Unavailable { failure; _ } -> error failure
+          | Source.Complete _ | Source.Partial _ | Source.Display_only _ -> error Comments_publication_pending in
+        outcome, result in
+    try
+      let _ = Source.finish_read outcome in
+      List.iter (fun diagnostic -> record_persist_error ~where:"comments read settlement"
+        (Source.diagnostic_to_string diagnostic)) (Source.read_diagnostics outcome);
+      let loaded = match outcome with
+        | Source.Complete { comments; _ } | Source.Partial { comments; _ }
+        | Source.Display_only { comments; _ } -> List.length comments
+        | Source.Unavailable _ -> 0 in
+      log_loaded ~noun:"comments" ~loaded ~path ~elapsed:(Time_compat.now () -. t0)
+        (Result.map (fun _ -> ()) result);
+      result
     with
-    | Eio.Cancel.Cancelled _ as e -> raise e
-    | e -> Error (path, e)
-  in
-  let result = record_load_result (fun result -> store.comments_load_result <- result) result in
-  propagate_workspace_check workspace_check;
-  result
+    | Board_posts_source.Reserved_settlement _ as carrier -> raise carrier
+    | exception_ ->
+      let outcome = Source.fail_read store outcome ~stage:Report_comments exception_
+          (Printexc.get_raw_backtrace ()) in
+      let _ = Source.finish_read outcome in
+      (match outcome with
+       | Source.Unavailable { failure; _ } -> error failure
+       | Source.Complete _ | Source.Partial _ | Source.Display_only _ -> error Comments_publication_pending))
 ;;

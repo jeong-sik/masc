@@ -23,7 +23,7 @@ val for_flush :
 
 type payload =
   | Posts_payload of Board_core_persist.posts_snapshot
-  | Comments_payload of string
+  | Comments_payload of Board_core_persist.comments_snapshot
   | Votes_payload of string
   | Reactions_payload of string
 val kind_of_payload : payload -> kind
@@ -34,7 +34,8 @@ type t
 
 val capture : selection ->
   posts:(unit -> Board_core_persist.posts_snapshot) ->
-  comments:(unit -> string) -> votes:(unit -> string) -> reactions:(unit -> string) -> t
+  comments:(unit -> Board_core_persist.comments_snapshot) ->
+  votes:(unit -> string) -> reactions:(unit -> string) -> t
 (** Invoke the selected producer once for each selected kind, in selection order. The caller
     holds the state lock while the producer observes the store and updates row caches. *)
 

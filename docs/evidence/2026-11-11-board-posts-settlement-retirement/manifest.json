@@ -1,7 +1,7 @@
 {
-  "base": "840321a4d1d95a655810f4441ece7e58572ec57e",
-  "lower": "266ba0733853c8cd1bcaf49a802a8f3efa1c1bb4",
-  "case_source": "e6856d5357bd7ddaccc4b14b3f19276e266fba17",
+  "base": "cea83a6b7ad417974b1a7a267f463bdbab798312",
+  "lower": "7f61a56a5e38534bd5462e02ec29dd3cd7e77edd",
+  "case_source": "c2832168977de6686d756fd451aeb4609d79e7b7",
   "stack": 51180,
   "prs": [
     51178,
@@ -10,11 +10,11 @@
   "paths": [
     {
       "path": "changelog.d/51178.md",
-      "sha256": "c619b33e9ed452af564ed30883564740eab396863e6fb1f5f20cea28bb8f2b1b"
+      "sha256": "22322000aaf7b527f6d6cde48753a87f3d37c2990c021c1fac9b1ec94f1b005d"
     },
     {
       "path": "changelog.d/51179.md",
-      "sha256": "b840751c19c1f909d172ebb452b697e0c70db2fdd376f532a22de5eab2bc54a6"
+      "sha256": "8b2e68cdd463889093ce200a72d3d2a9af6f426926f78849d444b1792f6e8f54"
     },
     {
       "path": "docs/spec/11-board.md",
@@ -64,5 +64,14 @@
       "path": "test/test_board_target_admission.ml",
       "sha256": "32415287f8aa69803bc1a5ba717064cb42344f30e07a6c3dec4f42cf255cbb7c"
     }
-  ]
+  ],
+  "layer_scope": {
+    "lower_paths": 13,
+    "upper_paths": 6,
+    "source_union_paths": 14,
+    "evidence_files": 4,
+    "lower_functional_cases_ported": 5,
+    "lower_api_only_cases_removed": 7,
+    "upper_existing_case_enhanced": 1
+  }
 }

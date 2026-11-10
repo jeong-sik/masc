@@ -1,43 +1,31 @@
 {
   "kind": "independent_local_source_review",
-  "base": "840321a4d1d95a655810f4441ece7e58572ec57e",
-  "lower": "266ba0733853c8cd1bcaf49a802a8f3efa1c1bb4",
-  "case_source": "e6856d5357bd7ddaccc4b14b3f19276e266fba17",
+  "base": "cea83a6b7ad417974b1a7a267f463bdbab798312",
+  "lower": "7f61a56a5e38534bd5462e02ec29dd3cd7e77edd",
+  "case_source": "c2832168977de6686d756fd451aeb4609d79e7b7",
+  "prior_combined_source": "e6856d5357bd7ddaccc4b14b3f19276e266fba17",
+  "prior_record_head": "271cf2099a4c1be27243db5b5c25d2fc57438218",
   "reviewers": [
     {
       "session": "/root/history_redaction_response",
-      "initial_lower": "e8114de3eb55c0792e3c4b7e84566bc1e37f790b",
-      "initial_lower_paths": 8,
-      "initial_upper": "87bbdd9ad6494671bce2e2dbb9332d78181df252",
-      "initial_upper_paths": 4,
-      "final_lower": "266ba0733853c8cd1bcaf49a802a8f3efa1c1bb4",
-      "final_case_source": "e6856d5357bd7ddaccc4b14b3f19276e266fba17",
-      "scope": "Complete initial lower and upper diffs, public interfaces and direct consumers; then all final deltas, including both changelog fragments.",
-      "final_verdict": "No unresolved P0-P2 in the reviewed source scope.",
-      "addressed_findings": [
-        "Cached read uses board_read_error and converts opaque Agent_id to string.",
-        "Real public vote creates dirty parent work before the unknown edit; dirty flags are asserted before and after the refused flush."
-      ],
+      "reused_scope": "Prior complete API removal and case diff, direct interfaces and consumers, and all repaired findings.",
+      "newly_read_scope": "New lower 13-path API/caller boundary, upper dirty-flush-only source delta, retired-symbol scan, final 11-blob identity and all four moved-base paths.",
+      "observation": "Cached read error/Agent ID repairs remain in lower. Only the lower authority fixture predates the upper enhancement.",
+      "final_verdict": "No unresolved P0-P2 in the reviewed repartition.",
+      "evidence_refresh_reviewed": false,
       "execution_verified": false,
       "formal_github_approval": false
     },
     {
       "session": "/root/issue_disposition_review",
-      "initial_lower": "e8114de3eb55c0792e3c4b7e84566bc1e37f790b",
-      "initial_lower_paths": 8,
-      "initial_upper": "87bbdd9ad6494671bce2e2dbb9332d78181df252",
-      "initial_upper_paths": 4,
-      "final_lower": "266ba0733853c8cd1bcaf49a802a8f3efa1c1bb4",
-      "final_case_source": "e6856d5357bd7ddaccc4b14b3f19276e266fba17",
-      "scope": "Complete initial lower and upper diffs, public interfaces and direct consumers; then all final deltas, including both changelog fragments.",
-      "final_verdict": "No unresolved P0-P2 in the reviewed source scope.",
-      "addressed_findings": [
-        "Cached read uses board_read_error and converts opaque Agent_id to string.",
-        "Real public vote creates dirty parent work before the unknown edit; dirty flags are asserted before and after the refused flush."
-      ],
+      "reused_scope": "Prior 11 final ML/MLI blobs and spec, byte-identical to the reviewed combined source.",
+      "newly_read_scope": "Lower caller port bodies, upper one-case enhancement, both changelog fragments and the four unrelated base changes.",
+      "observation": "The old lower caller mismatch is resolved in source; old upper green does not certify the moved base or new heads.",
+      "final_verdict": "No additional P0-P2 in the reviewed repartition.",
+      "evidence_refresh_reviewed": false,
       "execution_verified": false,
       "formal_github_approval": false
     }
   ],
-  "limits": "No local reviewer executed types, warnings, builds, Dune or backend cases. These local sessions did not submit formal GitHub approval."
+  "limits": "New evidence refresh follows the case source and is not included in these two source verdicts. No local reviewer executed types, warnings, builds, Dune or backend cases. Current-head formal approval and required CI admission are separate."
 }

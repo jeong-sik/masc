@@ -575,15 +575,24 @@ let a_blocked_principal_does_not_sign_in () =
 let a_stopped_log_signs_nobody_in () =
   with_installation (fun t ->
     let admin = admitted_id (sign_in t ~identity:(google "111") ~invite:(digest t.admin_token)) in
+    let invited = String.make 64 'c' in
+    issue t ~admin ~invite_id:"invite-1" ~token:invited;
     Out_channel.with_open_gen [ Open_append; Open_binary ] 0o600 t.log_path (fun channel ->
       Out_channel.output_string channel "{}\n");
     (match issue_result t ~admin ~invite_id:"invite-2" ~token:(String.make 64 'b') with
      | Ok () -> Alcotest.fail "the zone wrote over a log another writer moved"
      | Error (_ : Z.error) -> ());
+    let uncertain = "the authorization log cannot be trusted now, so nobody signs in" in
     Alcotest.(check string)
-      "uncertain"
-      "the authorization log cannot be trusted now, so nobody signs in"
-      (outcome (sign_in t ~identity:(google "111") ~invite:None)))
+      "a person who joined"
+      uncertain
+      (outcome (sign_in t ~identity:(google "111") ~invite:None));
+    (* The invitation was issued while the log was trusted. Its holder is
+       refused before the admission is tried, as the person who joined is. *)
+    Alcotest.(check string)
+      "a person who holds an invitation"
+      uncertain
+      (outcome (sign_in t ~identity:(google "222") ~invite:(digest invited))))
 ;;
 
 let conflicts_are_the_writer_races () =

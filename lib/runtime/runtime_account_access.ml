@@ -119,6 +119,7 @@ type request =
 type refusal =
   | Not_published
   | No_operator
+  | Zone_uncertain of Authz_zone.uncertain
   | Not_a_keeper_id of string
   | Turn_refused of Authz_keeper_turn.refusal
   | Not_the_assigned_runtime of
@@ -139,6 +140,9 @@ type refusal =
 let refusal_to_string = function
   | Not_published -> "this process has not published whether a CLI may start on an account"
   | No_operator -> "in multi-account mode no operator owns the account of a person"
+  | Zone_uncertain uncertain ->
+    "the authorization log cannot be trusted now, so no client starts on an account: "
+    ^ Authz_zone.uncertain_to_string uncertain
   | Not_a_keeper_id name -> Printf.sprintf "the Keeper %S is not an id of the authorization log" name
   | Turn_refused refusal -> "the turn is refused: " ^ Authz_keeper_turn.refusal_to_string refusal
   | Not_the_assigned_runtime { requested; assigned } ->
@@ -234,38 +238,41 @@ let own_home ~base_path (state : Authz_state.t) user_id provider_account_id clai
           else Error (Not_the_account_home provider_account_id)))
 ;;
 
-let state_of zone = (Authz_zone.snapshot zone).Authz_zone.state
-
+(* One request is judged on one snapshot, and only on one the zone could be
+   trusted for: the person, the turn and the home are read in the same state. *)
 let multi_account ~zone ~base_path ~now request claim =
+  let on_trusted judge =
+    match Authz_zone.read zone with
+    | Error uncertain -> Error (Zone_uncertain uncertain)
+    | Ok trusted -> judge trusted (trusted :> Authz_zone.snapshot).Authz_zone.state
+  in
   match request with
   | Operator_call -> Error No_operator
   | Own_account { user_id; provider_account_id } ->
-    let state = state_of zone in
-    (match Ps.find state.Authz_state.principals user_id with
-     | Some { Ps.status = Ps.Active; _ } -> own_home ~base_path state user_id provider_account_id claim
-     | Some { Ps.status = Ps.Disabled; _ } | None -> Error (Not_active user_id))
+    on_trusted (fun (_ : Authz_zone.trusted) state ->
+      match Ps.find state.Authz_state.principals user_id with
+      | Some { Ps.status = Ps.Active; _ } -> own_home ~base_path state user_id provider_account_id claim
+      | Some { Ps.status = Ps.Disabled; _ } | None -> Error (Not_active user_id))
   | Keeper_turn { keeper_name; channel; runtime_id } ->
     (match Authz_types.Keeper_id.of_string keeper_name with
      | Error (_ : Authz_id.error) -> Error (Not_a_keeper_id keeper_name)
      | Ok keeper_id ->
-       (match Authz_keeper_turn.decide zone ~keeper_id ~channel ~now:(now ()) with
-        | Error refusal -> Error (Turn_refused refusal)
-        | Ok turn ->
-          if String.equal (Authz_types.Runtime_id.to_string turn.Authz_keeper_turn.runtime_id) runtime_id
-          then
-            (* The namespace of a member is fixed by their admission, so a
-               later snapshot reads the one the decision saw, or none for a
-               principal deleted since. *)
-            own_home
-              ~base_path
-              (state_of zone)
-              turn.Authz_keeper_turn.owner
-              turn.Authz_keeper_turn.provider_account_id
-              claim
-          else
-            Error
-              (Not_the_assigned_runtime
-                 { requested = runtime_id; assigned = turn.Authz_keeper_turn.runtime_id })))
+       on_trusted (fun trusted state ->
+         match Authz_keeper_turn.decide trusted ~keeper_id ~channel ~now:(now ()) with
+         | Error refusal -> Error (Turn_refused refusal)
+         | Ok turn ->
+           if String.equal (Authz_types.Runtime_id.to_string turn.Authz_keeper_turn.runtime_id) runtime_id
+           then
+             own_home
+               ~base_path
+               state
+               turn.Authz_keeper_turn.owner
+               turn.Authz_keeper_turn.provider_account_id
+               claim
+           else
+             Error
+               (Not_the_assigned_runtime
+                  { requested = runtime_id; assigned = turn.Authz_keeper_turn.runtime_id })))
 ;;
 
 (* The Keeper or the Runtime of the log that [name] spells, if the log made one.

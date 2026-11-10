@@ -110,18 +110,21 @@ val callback
 (** [POST /auth/logout]. The request passes {!Authz_browser_request.check},
     so it carries the CSRF token. The answer is a 204 that clears the session
     cookie, or a JSON [{"error": ...}]. A cookie that does not act is cleared
-    with its 401; a refusal for the origin or the token clears nothing. *)
+    with its 401; a refusal for the origin or the token clears nothing, and
+    neither does the 503 of a zone that cannot be trusted
+    ({!zone_uncertain}). *)
 val logout : t -> Authz_browser_request.request -> answer
 
 (** [GET /auth/session]. The JSON
     [{"user_id": ..., "expires_at_ms": ..., "csrf_token": ...}] of the
-    session, or a JSON [{"error": ...}] with a 401 or a 403. A page reads the
-    CSRF token here, as the cookie is HttpOnly. *)
+    session, or a JSON [{"error": ...}] with a 401 or a 403, or the 503 of
+    {!zone_uncertain}. A page reads the CSRF token here, as the cookie is
+    HttpOnly. *)
 val session : t -> Authz_browser_request.request -> answer
 
 (** For the other routes a browser session calls (the allowlist of plan
     C3-9): the session that [request] acts through, and its cookie, or the
-    JSON refusal that {!session} would give, a 401 or a 403. *)
+    JSON refusal that {!session} would give, a 401, a 403 or a 503. *)
 val acting
   :  t
   -> Authz_browser_request.request
@@ -129,3 +132,13 @@ val acting
 
 (** A JSON object answer with [cache-control: no-store]. *)
 val json : status -> (string * Yojson.Safe.t) list -> answer
+
+(** What a person is told when a route decides on the authorization state
+    and the zone cannot be trusted ({!Authz_zone.read}): one fixed sentence.
+    The reason names a path of the server, so this writes it to the log and
+    does not give it. *)
+val zone_uncertain_message : Authz_zone.uncertain -> string
+
+(** The answer of such a route: a 503 JSON [{"error": ...}] with the sentence
+    of {!zone_uncertain_message}. *)
+val zone_uncertain : Authz_zone.uncertain -> answer

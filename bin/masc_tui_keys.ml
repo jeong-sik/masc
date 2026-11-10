@@ -445,7 +445,7 @@ let approval_value_bytes =
     ~help:"read decoded top-level Gate string values as bytes, not JSON wire; v or Esc returns"
 let approval_answer_receipt =
   b ~ko:"마지막 답변" Navigate "v" "last answer" ~detail:List_only
-    ~help:"while browsing, capture the last answer receipt, original question and retained follow-up; scroll or search the complete text; v or Esc returns"
+    ~help:"while browsing, capture the last answer receipt, original question identity and retained follow-up; scroll or search the complete text; v or Esc returns"
 let approval_answer =
   b Act "a" "answer a question"
     ~help:"open the selected question, from a Keeper or a Lane Add-on installation, in its own mode; Esc leaves it"

@@ -82,6 +82,8 @@ let recalculate_vote_counts store =
 
 let load_persisted_votes store =
   let path = Board_paths.store_file_path store Board_paths.Votes in
+  let open Result.Syntax in
+  let* () = Board_core_persist.require_model_reload_allowed store ~path in
   let workspace_check = Board_paths.check_workspace store in
   let result = match workspace_check with
     | Error rejection -> Error (path, Failure (Board_workspace_binding.rejection_to_string rejection))
@@ -130,6 +132,8 @@ let load_persisted_votes store =
 
 let load_persisted_reactions store =
   let path = Board_paths.store_file_path store Board_paths.Reactions in
+  let open Result.Syntax in
+  let* () = Board_core_persist.require_model_reload_allowed store ~path in
   let workspace_check = Board_paths.check_workspace store in
   let result = match workspace_check with
     | Error rejection -> Error (path, Failure (Board_workspace_binding.rejection_to_string rejection))

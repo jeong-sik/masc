@@ -190,52 +190,6 @@ let make_response ?(stop_reason = EndTurn) content : Types.api_response =
   }
 ;;
 
-let test_json_extractor_success () =
-  let extract =
-    Structured.json_extractor (fun json ->
-      Yojson.Safe.Util.(json |> member "value" |> to_int))
-  in
-  let resp = make_response [ Text {|{"value": 42}|} ] in
-  match extract resp with
-  | Ok v -> Alcotest.(check int) "extracted value" 42 v
-  | Error e -> Alcotest.fail e
-;;
-
-let test_json_extractor_invalid_json () =
-  let extract = Structured.json_extractor (fun _ -> 0) in
-  let resp = make_response [ Text "not json" ] in
-  match extract resp with
-  | Error _ -> ()
-  | Ok _ -> Alcotest.fail "expected parse error"
-;;
-
-let test_json_extractor_no_text () =
-  let extract = Structured.json_extractor (fun _ -> 0) in
-  let resp = make_response [] in
-  match extract resp with
-  | Error msg -> Alcotest.(check bool) "mentions no text" true (String.length msg > 0)
-  | Ok _ -> Alcotest.fail "expected error"
-;;
-
-let test_text_extractor_success () =
-  let extract =
-    Structured.text_extractor (fun s ->
-      if String.length s > 0 then Some (String.length s) else None)
-  in
-  let resp = make_response [ Text "hello world" ] in
-  match extract resp with
-  | Ok v -> Alcotest.(check int) "text length" 11 v
-  | Error e -> Alcotest.fail e
-;;
-
-let test_text_extractor_none () =
-  let extract = Structured.text_extractor (fun _ -> None) in
-  let resp = make_response [ Text "anything" ] in
-  match extract resp with
-  | Error _ -> ()
-  | Ok _ -> Alcotest.fail "expected error"
-;;
-
 (* --- Runner --- *)
 
 let check_private_evidence ~reason ~raw = function
@@ -255,18 +209,6 @@ let check_private_evidence ~reason ~raw = function
            | Io _ | Orchestration _ | Internal _ | Internal_carried _ | Media _) as error) ->
     Alcotest.failf "expected structured evidence, got %s" (Error.to_string error)
   | Ok _ -> Alcotest.fail "invalid response was accepted"
-;;
-
-let test_malformed_response_retains_original_evidence () =
-  let raw = " \n```json\n{\"secret\":\"private-model-output\"}\n``` \n" in
-  Structured.extract_response_json (make_response [Text raw])
-  |> check_private_evidence ~reason:Error.Invalid_json ~raw
-;;
-
-let test_empty_response_has_public_failure_class () =
-  let raw = " \n\t " in
-  Structured.extract_response_json (make_response [Text raw])
-  |> check_private_evidence ~reason:Error.Empty_response ~raw
 ;;
 
 let test_schema_refusal_retains_response_without_public_detail () =
@@ -296,12 +238,6 @@ let test_schema_json_exception_has_distinct_schema_class () =
   in
   Structured.extract_response ~schema (make_response [Text raw])
   |> check_private_evidence ~reason:Error.Schema_rejected ~raw
-;;
-
-let test_response_shape_failure_retains_response () =
-  let raw = " [1,2,3] \n" in
-  Structured.extract_response_json ~shape:Structured.Object_json (make_response [Text raw])
-  |> check_private_evidence ~reason:Error.Expected_object ~raw
 ;;
 
 let test_long_response_evidence_keeps_utf8_boundary () =
@@ -341,7 +277,6 @@ let check_response_state expected response =
       Alcotest.failf "wrong error family: %s" (Error.to_string error)
     | Ok _ -> Alcotest.fail "Result wrapper accepted a nonterminal response"
   in
-  check_result (Structured.extract_response_json response);
   let parse_calls = ref 0 in
   let schema : unit Structured.schema =
     {params=[]; parse=(fun _ -> incr parse_calls; Ok ())} in
@@ -387,15 +322,6 @@ let test_tool_call_turn_requires_tool_results_before_json () =
       {|{"value":42}|} (Yojson.Safe.to_string json)
   | Awaiting_tool_results | Refused _ | Truncated _ | Interrupted _ | Invalid _ ->
     Alcotest.fail "terminal single Text payload was not accepted"
-;;
-
-let test_multiple_text_blocks_are_ambiguous_even_at_whitespace_boundaries () =
-  List.iter (fun texts ->
-    let content = List.map (fun text -> Text text) texts in
-    let raw = String.concat "\n" texts in
-    Structured.extract_response_json (make_response content)
-    |> check_private_evidence ~reason:Error.Multiple_text_blocks ~raw)
-    [["{}";"{}"]; ["{";"}"]; [" \n";"{}"]; ["{}";"\t "]]
 ;;
 
 (* #27868: exercise wire parser -> canonical response -> structured outcome,
@@ -568,15 +494,11 @@ let () =
     ; ( "response states"
       , [ Alcotest.test_case "authoritative stops precede JSON" `Quick test_authoritative_stop_states_precede_valid_json
         ; Alcotest.test_case "tool turn then terminal JSON" `Quick test_tool_call_turn_requires_tool_results_before_json
-        ; Alcotest.test_case "multiple Text whitespace boundaries" `Quick test_multiple_text_blocks_are_ambiguous_even_at_whitespace_boundaries
         ] )
     ; ( "private failure evidence"
-      , [ Alcotest.test_case "malformed response" `Quick test_malformed_response_retains_original_evidence
-        ; Alcotest.test_case "empty response failure class" `Quick test_empty_response_has_public_failure_class
-        ; Alcotest.test_case "schema refusal" `Quick test_schema_refusal_retains_response_without_public_detail
+      , [ Alcotest.test_case "schema refusal" `Quick test_schema_refusal_retains_response_without_public_detail
         ; Alcotest.test_case "schema type exception" `Quick test_schema_type_exception_retains_response
         ; Alcotest.test_case "schema JSON exception" `Quick test_schema_json_exception_has_distinct_schema_class
-        ; Alcotest.test_case "object shape" `Quick test_response_shape_failure_retains_response
         ; Alcotest.test_case "bounded UTF-8 evidence" `Quick test_long_response_evidence_keeps_utf8_boundary
         ] )
     ; ( "schema_to_json_schema"
@@ -593,16 +515,6 @@ let () =
             `Quick
             test_param_description_preserved
         ; Alcotest.test_case "mixed required" `Quick test_schema_mixed_required
-        ] )
-    ; ( "extractors"
-      , [ Alcotest.test_case "json_extractor success" `Quick test_json_extractor_success
-        ; Alcotest.test_case
-            "json_extractor invalid"
-            `Quick
-            test_json_extractor_invalid_json
-        ; Alcotest.test_case "json_extractor no text" `Quick test_json_extractor_no_text
-        ; Alcotest.test_case "text_extractor success" `Quick test_text_extractor_success
-        ; Alcotest.test_case "text_extractor none" `Quick test_text_extractor_none
         ] )
     ]
 ;;

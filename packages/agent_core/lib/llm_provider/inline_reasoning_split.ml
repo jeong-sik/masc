@@ -20,7 +20,6 @@ let restore state (mode, pending) =
   state.pending <- pending
 
 let create () = { mode = Outside; pending = "" }
-let inside state = state.mode = Inside
 
 (* Naive search: the haystack here is one delta plus at most a tag's worth of
    held bytes, and the needles are seven and eight bytes long. *)

@@ -4,10 +4,10 @@ import { html } from 'htm/preact'
 import { signal, computed } from '@preact/signals'
 import { fetchDashboardTools, type DashboardToolsResponse, type DashboardToolInventoryItem } from '../../api'
 import { createManagedAsyncResource } from '../../lib/async-state'
-import { setupVisibleAutoRefresh } from '../../lib/auto-refresh'
+import { setupObservationRefresh } from '../../lib/observation-refresh'
 
 // Managed (stale-while-revalidate): the previously loaded response stays
-// readable while a refetch is in flight. Panel-level polling therefore
+// readable while a refetch is in flight. Source invalidation therefore
 // keeps showing the last inventory instead of flashing a loading gap every
 // cycle. A plain createAsyncResource would blank the data on each load.
 const toolsResource = createManagedAsyncResource<DashboardToolsResponse>()
@@ -41,21 +41,17 @@ export async function loadTools() {
   await toolsResource.load(signal => fetchDashboardTools({ signal }))
 }
 
-export const KEEPER_WAITING_INVENTORY_REFRESH_MS = 15_000
 let toolsRefreshSubscriberCount = 0
 let stopToolsRefresh: (() => void) | null = null
 
-/** Share one visibility-aware tools poller across mounted tools, schedule,
+/** Share one tools observation across mounted tools, schedule,
  * and Keeper conversation surfaces. The managed resource deduplicates fetch state;
  * this subscription also deduplicates the timer and global visibility/focus
  * listeners that trigger it. */
 export function subscribeToolsAutoRefresh(): () => void {
   toolsRefreshSubscriberCount += 1
   if (toolsRefreshSubscriberCount === 1) {
-    if (!toolsData.value && !toolsLoading.value) void loadTools()
-    stopToolsRefresh = setupVisibleAutoRefresh(() => {
-      void loadTools()
-    }, KEEPER_WAITING_INVENTORY_REFRESH_MS)
+    stopToolsRefresh = setupObservationRefresh(loadTools, { topics: ['tools'] })
   }
   return () => {
     toolsRefreshSubscriberCount = Math.max(0, toolsRefreshSubscriberCount - 1)

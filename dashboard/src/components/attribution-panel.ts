@@ -1,3 +1,4 @@
+import { setupObservationRefresh } from '../lib/observation-refresh'
 // Attribution Panel — Layer 4 observation surface.
 //
 // 관찰 대시보드. 4-field per event: 누가(gate) / 어디서(origin) / 뭘(outcome) /
@@ -23,7 +24,6 @@ import { highlightMatch } from '../lib/highlight-match'
 import { unixSecondsToDate } from '../lib/format-time'
 import { isAbortError } from '../lib/async-state'
 
-const POLL_INTERVAL_MS = 5_000
 const RECENT_LIMIT = 50
 
 // The gates the backend emits. Every Attribution constructor call in masc
@@ -269,12 +269,11 @@ export function AttributionPanel() {
       }
     }
 
-    load()
-    const iv = window.setInterval(load, POLL_INTERVAL_MS)
+    const dispose = setupObservationRefresh(load, { topics: ['attribution'] })
     return () => {
       cancelled = true
       ctl.abort()
-      window.clearInterval(iv)
+      dispose()
     }
   }, [filterGate.value])
 

@@ -1,3 +1,4 @@
+import { setupObservationRefresh } from '../lib/observation-refresh'
 import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
 import { lazy, Suspense } from 'preact/compat'
@@ -616,11 +617,10 @@ export function DashboardHealthStrip({ hidden = false }: { hidden?: boolean }) {
         inFlight = false
       }
     }
-    void refresh()
-    const interval = window.setInterval(() => void refresh(), 30_000)
+    const dispose = setupObservationRefresh(refresh, { topics: ['runtime_probe'] })
     return () => {
       disposed = true
-      window.clearInterval(interval)
+      dispose()
       activeController?.abort()
     }
   }, [])

@@ -1,3 +1,4 @@
+import { setupObservationRefresh } from '../lib/observation-refresh'
 // Skills Panel — the published skill snapshot and exact parser-derived surface.
 import { html } from 'htm/preact'
 import { useEffect, useMemo, useRef } from 'preact/hooks'
@@ -47,7 +48,6 @@ import {
   type ExecutionWorkspaceAuthority,
 } from '../store'
 
-const POLL_INTERVAL_MS = 30_000
 
 export function isAbortError(e: unknown): boolean {
   return e instanceof Error && e.name === 'AbortError'
@@ -917,7 +917,7 @@ function SkillsObservationPanel({ owner, onMutation }: {
       if (!current() || generation !== catalogGeneration.current) return
       response.value = res
       error.value = null
-      if (res.state === 'ready') void loadUsage()
+      if (res.state === 'ready') await loadUsage()
     } catch (cause) {
       if (!current() || generation !== catalogGeneration.current || isAbortError(cause)) return
       error.value = cause instanceof Error ? cause.message : 'skills fetch failed'
@@ -940,17 +940,14 @@ function SkillsObservationPanel({ owner, onMutation }: {
         asyncObservationError.value = (e as Error).message || 'async observation fetch failed'
       }
     }
-    void load(ctl.signal)
-    loadAsyncObservation()
-    const iv = window.setInterval(() => {
-      void load(ctl.signal)
-      loadAsyncObservation()
-    }, POLL_INTERVAL_MS)
+    const dispose = setupObservationRefresh(() => Promise.all([
+      load(ctl.signal), loadAsyncObservation(),
+    ]), { topics: ['skills', 'async_requests', 'skill_usage'] })
     return () => {
       active.current = false
       ctl.abort()
       usageController.current?.abort()
-      window.clearInterval(iv)
+      dispose()
     }
   }, [])
 

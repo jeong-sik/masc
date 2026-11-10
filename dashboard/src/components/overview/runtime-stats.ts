@@ -10,7 +10,7 @@ import {
 } from '../../api/dashboard-runtime'
 import type { ProviderUsageScope, ProviderUsageWindow, RuntimeResolvedResponse } from '../../api/schemas/runtime-resolved'
 import { loadRuntimeCatalog, reloadRuntimeCatalog, runtimeCatalogState } from '../../lib/runtime-catalog-resource'
-import { setupVisibleAutoRefresh, DEFAULT_PANEL_REFRESH_MS } from '../../lib/auto-refresh'
+import { setupObservationRefresh } from '../../lib/observation-refresh'
 import { RouteLink } from '../common/route-link'
 import { executionWorkspaceAuthority, type ExecutionWorkspaceAuthority } from '../../store'
 
@@ -156,8 +156,7 @@ export function OverviewRuntimeStats() {
         publish({ kind: 'error', message: error instanceof Error ? error.message : String(error) })
       } finally { inFlight = false }
     }
-    void refresh()
-    const stopRefresh = setupVisibleAutoRefresh(refresh, DEFAULT_PANEL_REFRESH_MS)
+    const stopRefresh = setupObservationRefresh(refresh, { topics: ['runtime_resolved'] })
     return () => { stopRefresh(); controller.abort() }
   }, [authority, usageCatalog, generation])
   useEffect(() => {
@@ -180,8 +179,7 @@ export function OverviewRuntimeStats() {
         publish({ kind: 'error', message: error instanceof Error ? error.message : String(error) })
       } finally { inFlight = false }
     }
-    void refresh()
-    const stopRefresh = setupVisibleAutoRefresh(refresh, DEFAULT_PANEL_REFRESH_MS)
+    const stopRefresh = setupObservationRefresh(refresh, { topics: ['model_metrics'] })
     return () => { stopRefresh(); controller.abort() }
   }, [authority, windowMinutes, generation])
   const accounts = new Map<string, DashboardRuntimeProviderSnapshot>()

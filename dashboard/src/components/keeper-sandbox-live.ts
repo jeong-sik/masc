@@ -4,7 +4,7 @@ import {
   fetchKeeperSandboxLiveStatus,
   type KeeperSandboxLiveStatus,
 } from '../api/keeper'
-import { DEFAULT_PANEL_REFRESH_MS, setupVisibleAutoRefresh } from '../lib/auto-refresh'
+import { setupObservationRefresh } from '../lib/observation-refresh'
 import { errorMessageOr } from '../lib/format-string'
 import { sandboxContainerCli } from '../types'
 import { DetailCard, DetailRow, MutedSpan } from './keeper-detail-kpi'
@@ -75,8 +75,7 @@ export function KeeperSandboxLivePanel({ keeperName }: { keeperName: string }) {
         }
       }
     }
-    void refresh()
-    const cleanup = setupVisibleAutoRefresh(refresh, DEFAULT_PANEL_REFRESH_MS)
+    const cleanup = setupObservationRefresh(refresh, { topics: ['keeper_sandbox'], keeperName })
     return () => {
       cancelled = true
       controller.abort()

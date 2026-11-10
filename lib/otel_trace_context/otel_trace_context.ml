@@ -115,20 +115,6 @@ let inject_json (fields : (string * Yojson.Safe.t) list)
 (** Header name per W3C spec (lowercase). *)
 let header_name = "traceparent"
 
-(** Extract traceparent from HTTP headers (case-insensitive lookup).
-    W3C spec: if multiple traceparent headers exist, discard all. *)
-let of_headers (headers : (string * string) list) : t option =
-  let lower_name = header_name in
-  let matches =
-    List.filter_map
-      (fun (k, v) ->
-         if String.lowercase_ascii k = lower_name then Some v else None)
-      headers
-  in
-  match matches with
-  | [single] -> parse single
-  | _ -> None  (* absent or multiple → invalid per W3C spec *)
-
 (** Build a traceparent header pair for outbound HTTP requests. *)
 let to_header (ctx : t) : string * string =
   (header_name, ctx.traceparent)

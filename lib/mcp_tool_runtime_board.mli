@@ -1,14 +1,11 @@
 (** Mcp_tool_runtime_board — MCP server-local board tool runtime.
 
-    Three external entries:
+    Two external entries:
     - {!dispatch}: invoked when the main MCP runtime router has
       no match (catch-all branch in {!Mcp_tool_runtime.dispatch}).
     - {!bind_caller_identity}: the identity binding {!dispatch} applies
       first, driven by the generated board registry, exposed so a test
       can pin that every declared field is bound.
-    - {!ensure_board_post_author}: caller-identity enforcement on
-      [masc_board_post] [author] field, exposed for direct test
-      coverage.
 
     RFC-0062 Phase 4c-2: {!dispatch} now returns [Tool_result.result option]
     instead of [(bool * string) option].
@@ -30,19 +27,6 @@ val bind_caller_identity :
     generated from [config/tools/masc_board_*.toml], the same source the
     Keeper runtime's [bind_board_identity] reads. *)
 
-val ensure_board_post_author :
-  agent_name:string -> Yojson.Safe.t -> Yojson.Safe.t
-(** [ensure_board_post_author ~agent_name args] enforces the
-    [masc_board_post] author-identity contract: when [args.author]
-    differs from [agent_name] (both trimmed), records
-    the spoof attempt via the Otel_metric_store counter and rewrites the
-    author field to [agent_name].
-
-    Returns the (possibly mutated) [args] JSON object.  Specialised
-    delegate of the internal [enforce_caller_identity] helper —
-    same contract, [tool = "masc_board_post"] and
-    [field = "author"] pinned. *)
-
 val enforce_caller_identity :
   tool:string ->
   field:string ->
@@ -57,8 +41,7 @@ val enforce_caller_identity :
     behaviour-tests under
     {!test/test_board_author_identity_10297} which cover all four
     board entries ([masc_board_post] / [_comment] / [_vote] /
-    [_comment_vote]).  Prefer {!ensure_board_post_author} for the
-    [masc_board_post]/[author] specialisation. *)
+    [_comment_vote]). *)
 
 module For_testing : sig
   val result_after_activity_projection :

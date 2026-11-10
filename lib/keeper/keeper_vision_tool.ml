@@ -759,6 +759,8 @@ let run_candidates_outcome
           ~attempt_index:(attempt_index + 1)
           rest
       in
+      (* HIGH-RISK-UNREVIEWED: the candidate sends the key its operator
+         declared, so a refused candidate is recorded and skipped (plan D4). *)
       match Runtime_account_access.authorize_api sealed with
       | Error refusal ->
         record_vision_candidate_attempt

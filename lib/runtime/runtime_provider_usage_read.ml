@@ -43,8 +43,8 @@ type readable =
 let how_of_runtime (rt : Runtime_instance.t) =
   match rt.execution with
   | Runtime_execution.Agent_core sealed ->
-    (* The read sends the key the operator declared; a process that does not
-       share it reads nothing (plan D4). *)
+    (* HIGH-RISK-UNREVIEWED: the read sends the key the operator declared; a
+       process that does not share it reads nothing (plan D4). *)
     (match rt.provider.usage_read, Runtime_account_access.authorize_api sealed with
      | Some usage_read, Ok config ->
        Some (Http { credential = config.credential_source, config.api_key; usage_read })

@@ -170,6 +170,11 @@ let pending_board_action_evidence :
       (Board_tool_evidence.t, string) result Invocation_table.t =
   Invocation_table.create 8
 
+(* An ephemeron table cannot be enumerated, so the testing snapshot follows the
+   most recently retained invocation through a one-slot weak array. The slot
+   does not keep the invocation alive. *)
+let latest_board_action_invocation : Invocation_key.t Weak.t = Weak.create 1
+
 let pending_board_action_mu = Stdlib.Mutex.create ()
 let with_pending_board_action_lock f =
   Stdlib.Mutex.lock pending_board_action_mu;
@@ -177,6 +182,7 @@ let with_pending_board_action_lock f =
 
 let set_board_action_evidence ~invocation ~evidence =
   with_pending_board_action_lock (fun () ->
+    Weak.set latest_board_action_invocation 0 (Some invocation);
     Invocation_table.replace pending_board_action_evidence invocation evidence)
 
 let peek_board_action_evidence ~invocation () =
@@ -482,6 +488,7 @@ let reset_for_testing () =
   with_pending_file_change_evidence_lock (fun () ->
     Invocation_table.reset pending_file_change_evidence);
   with_pending_board_action_lock (fun () ->
+    Weak.set latest_board_action_invocation 0 None;
     Invocation_table.reset pending_board_action_evidence);
   with_retained_artifacts_lock (fun () -> Invocation_table.reset pending_retained_artifacts)
 ;;
@@ -500,9 +507,12 @@ let pending_file_change_evidence_count_for_testing () =
 
 let pending_board_action_evidence_for_testing () =
   with_pending_board_action_lock (fun () ->
-    Invocation_table.clean pending_board_action_evidence;
-    Invocation_table.fold (fun invocation evidence values -> (invocation,evidence)::values)
-      pending_board_action_evidence [])
+    match Weak.get latest_board_action_invocation 0 with
+    | None -> []
+    | Some invocation ->
+      (match Invocation_table.find_opt pending_board_action_evidence invocation with
+       | Some evidence -> [ (invocation, evidence) ]
+       | None -> []))
 ;;
 
 let store () = (Atomic.get store_state).store

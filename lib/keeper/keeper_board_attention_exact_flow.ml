@@ -79,12 +79,13 @@ type prepared_transport =
           walk cannot be asked to report "no slots declared" on a path whose
           value proves one. *)
   | Http_held of { until : float }
-      (** Every slot is an HTTP slot waiting for a time its provider stated,
-          so no flow starts. Execution asks Jev as an HTTP lane does, then
-          ends as a walk whose every binding refused for its account's rest,
-          without a call (RFC-exact-lane-waits-for-a-stated-reset R5). The
-          worker then defers the candidate instead of stopping on a setup
-          error. [until] is the earliest stated time. *)
+      (** Every HTTP slot waits for a time its provider stated, so no flow
+          starts. Execution asks Jev as an HTTP lane does, then ends the HTTP
+          walk as one whose every binding refused for its account's rest,
+          without a call (RFC-exact-lane-waits-for-a-stated-reset R5), and
+          walks the lane's CLI slots after it as after a refused HTTP flow.
+          With no CLI slot the worker defers the candidate instead of
+          stopping on a setup error. [until] is the earliest stated time. *)
 
 type prepared =
   { candidate : Keeper_board_attention_candidate.candidate
@@ -218,10 +219,13 @@ let prepare ~base_path ~keeper_name ~net candidate =
     in
     let* transport =
       match candidates, resolved.cli_slots with
-      | [], [] ->
-        (match ordered.held_http with
-         | [] -> Error Lane_resolved_without_slots
-         | (first : Runtime_exact_lane_backpressure.held_slot) :: rest ->
+      | [], cli_slots ->
+        (* A held HTTP slot keeps the lane an HTTP lane: Jev is asked in
+           front of it and the CLI slots follow it, as when the slot was
+           called and refused (R5). Only a lane that declares no HTTP slot
+           runs as CLI-only. *)
+        (match ordered.held_http, cli_slots with
+         | (first : Runtime_exact_lane_backpressure.held_slot) :: rest, _ ->
            Ok
              (Http_held
                 { until =
@@ -230,8 +234,9 @@ let prepare ~base_path ~keeper_name ~net candidate =
                          Float.min until held.until)
                       first.until
                       rest
-                }))
-      | [], first_slot :: other_slots -> Ok (Cli_only { first_slot; other_slots })
+                })
+         | [], first_slot :: other_slots -> Ok (Cli_only { first_slot; other_slots })
+         | [], [] -> Error Lane_resolved_without_slots)
       | first :: rest, _ ->
         let* snapshot =
           Exact_output.snapshot_flow ~first ~rest ~messages requirement
@@ -917,8 +922,10 @@ let execute_current
            | Jev_uncertain _
            | Jev_failed _ ->
              (* The walk the provider asked to wait for: every binding at
-                rest, and no attempt, because none was made. *)
-             Error
+                rest, and no attempt, because none was made. The CLI tail
+                follows it as it follows a refused HTTP flow; a lane without
+                CLI slots ends here. *)
+             run_cli_after_http
                (Providers_exhausted
                   { attempts = []
                   ; detail =

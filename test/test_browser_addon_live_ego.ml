@@ -351,6 +351,13 @@ def run(script,answer):
         page={'answer':json.dumps({'url':'https://fixture.test/','title':'Fixture','scrollX':0,'scrollY':0})}
         (root/'clicked').write_text(json.dumps([args['x'],args['y'],args['button'],args['cursor']]))
         answer({'guard':page,'receipt':page,'error':None})
+    elif step=='page.touch':
+        # A tap the ego connection serves (since #49295) reaches the space as
+        # this step, carrying start and moves in viewport pixels. The test
+        # reads the marker back to prove the touch left the worker.
+        page={'answer':json.dumps({'url':'https://fixture.test/','title':'Fixture','scrollX':0,'scrollY':0})}
+        (root/'touched').write_text(step)
+        answer({'guard':page,'receipt':page,'error':None})
     elif step=='page.downloads':
         # What the page's download wait saved: <downloads>/<id>, in folders
         # no one else may write, as ego's saveAs makes them.
@@ -649,11 +656,19 @@ let scenario mode =
         check bool "native activation crosses the worker boundary with its observed window" true
           Yojson.Safe.Util.(member "active" activation_data = `Bool true
             && member "stateAfter" (member "window" activation_data) = `String "normal");
-        check bool "an input the table refuses never reaches ego" true
-          (match issue (B.Page_interact {tab_id=1;expected_url=Some "https://fixture.test/";action=B.Tap_at {point={x=0.5;y=0.5};viewport={document_id="d1";width=800.;height=600.;scroll_x=0.;scroll_y=0.}}}) with
-           | W.Issue_result (Error (B.Transport_unsupported _)) -> true
-           | W.Issue_result (Ok _ | Error _) | Snapshot_result _ | Download_reply _
-           | Poll_result _ | Receipt | Service_refusal _ -> false);
+        (* #49295 gave this connection tap_at/swipe, so Touch_input is served
+           (lib/browser_lane/browser_lane.ml:642-648) and a tap reaches ego as
+           page.touch instead of being refused as an unserved capability.
+           [live_transport] has one constructor and it serves every
+           capability, so no issue path builds Transport_unsupported today;
+           test_browser_lane.ml:205-208 says the same. What this line holds is
+           the other half of the old claim: touch now does reach ego, and the
+           answer says the snapshot refs are gone. *)
+        let tapped = answered (issue (B.Page_interact {tab_id=1;expected_url=Some "https://fixture.test/";action=B.Tap_at {point={x=0.5;y=0.5};viewport={document_id="d1";width=800.;height=600.;scroll_x=0.;scroll_y=0.}}})) in
+        check string "a tap reaches ego as its touch step" "page.touch"
+          (read (Filename.concat root "touched"));
+        check bool "the tap answer reports snapshot refs invalidated" true
+          Yojson.Safe.Util.(member "refsInvalidated" tapped = `Bool true);
         ignore (answered (issue (B.Page_act (B.Action.Control B.Action.Space_status))));
         check string "explicit refresh reaches ordinary connection observations" "Renamed native Space"
           Yojson.Safe.Util.(published_space_observation () |> member "spaceName" |> to_string);

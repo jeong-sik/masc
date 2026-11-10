@@ -1,7 +1,7 @@
 ; The account server of a multi-account installation (plan S1a): what its
 ; table may hold, and the server started on a real installation in a temporary
 ; directory and a loopback port. The access is published once per process, so
-; one case starts the server.
+; one case serves, and the case whose boot stops does so before the publication.
 ; It lists its libraries without masc_test_deps: an executable that links
 ; masc_test_deps publishes the single-user access when it starts.
 ;
@@ -21,5 +21,6 @@
   masc.auth
   masc.fs_compat
   masc.server
+  masc.workspace_connection
   unix
   yojson))

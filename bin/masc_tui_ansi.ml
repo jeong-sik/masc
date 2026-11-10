@@ -237,6 +237,14 @@ module Theme = struct
      their own names rather than borrowing [ok] and [bad]. *)
   let action_probe () = (resolved ()).probe
   let action_message () = (resolved ()).message
+
+  (* The frame's one accent: a key letter in a hint row, a label, a column the
+     reader scans for. [Masc_tui_theme.tone Accent] answered with the plain
+     bright-cyan code, so it skipped the lift every other colour here goes
+     through, and bright cyan reads under 4.5:1 against the page in 11 of the
+     53 bundled themes. It is the same cyan as [info] and [hue_cyan]: a screen
+     that drew two cyans would not say which one is the accent. *)
+  let accent () = (resolved ()).hue_cyan
   let selection = Masc_tui_theme.selection
   let sidebar_selection () =
     Masc_tui_terminal_palette.snapshot ()

@@ -167,6 +167,16 @@ module Ring : sig
 
   val bounds : unit -> bounds
 
+  type entry_change = { entry : entry; overwritten : entry option }
+
+  val subscribe_published : (entry_change -> unit) -> (unit -> unit)
+  (** Observe a completed in-memory ring slot publication, including the
+      prior retained slot it overwrote. This is the ring's source boundary,
+      not a durable file-sink receipt. Synchronous callbacks must not yield
+      or do I/O. Listener failure cannot replace the original log operation. *)
+
+  val failed_publication_notifications : unit -> int
+
   val await_newer_than : int -> unit
   (** [await_newer_than seq] returns once the ring has handed out a sequence
       above [seq], at once if it already has. It suspends the calling Eio

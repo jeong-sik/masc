@@ -204,6 +204,8 @@ let open_error_name : Z.open_error -> string = function
   | Z.Log_not_opened _ -> "Log_not_opened"
   | Z.Not_bootstrapped _ -> "Not_bootstrapped"
   | Z.Log_not_checked _ -> "Log_not_checked"
+  | Z.Store_not_there _ -> "Store_not_there"
+  | Z.Store_not_checked _ -> "Store_not_checked"
 ;;
 
 let open_zone dirs =
@@ -578,28 +580,37 @@ let refused_records_write_nothing () =
 ;;
 
 (* The first record of a log goes through [Z.install], once the install record
-   names the store. A zone opened from paths does not open a log without it. *)
+   names the store. A zone opened from paths does not open a log without it,
+   and opens neither file while one of the two is not there. *)
 let the_zone_opens_only_a_bootstrapped_log () =
   with_dirs (fun dirs ->
-    let check_refused label =
+    let check_refused label expected =
       match Z.open_at_start ~now_ms ~log_path:(log_file dirs) ~store_path:dirs.store_file with
       | Ok (_ : Z.t) -> Alcotest.failf "%s: a zone was opened" label
       | Error error ->
-        Alcotest.(check string) (label ^ ": the refusal") "Not_bootstrapped" (open_error_name error)
+        Alcotest.(check string) (label ^ ": the refusal") expected (open_error_name error)
     in
-    check_refused "no log";
-    Alcotest.(check bool)
-      "no log: no store directory"
-      false
-      (Sys.file_exists (Filename.dirname dirs.store_file));
+    let store_dir = Filename.dirname dirs.store_file in
+    let empty_file path =
+      Out_channel.with_open_gen [ Open_wronly; Open_creat; Open_excl ] 0o600 path ignore
+    in
+    check_refused "no log" "Not_bootstrapped";
+    Alcotest.(check bool) "no log: no store directory" false (Sys.file_exists store_dir);
     Alcotest.(check bool)
       "no log: no log directory"
       false
       (Sys.file_exists (Filename.dirname (log_file dirs)));
     make_dirs (Filename.dirname (log_file dirs));
-    Out_channel.with_open_gen [ Open_wronly; Open_creat; Open_excl ] 0o600 (log_file dirs) ignore;
-    check_refused "an empty log";
-    Alcotest.(check bool) "an empty log: no store file" false (Sys.file_exists dirs.store_file);
+    empty_file (log_file dirs);
+    check_refused "an empty log and no store" "Store_not_there";
+    Alcotest.(check bool)
+      "an empty log and no store: no store directory"
+      false
+      (Sys.file_exists store_dir);
+    make_dirs store_dir;
+    empty_file dirs.store_file;
+    check_refused "an empty log" "Not_bootstrapped";
+    Alcotest.(check string) "an empty log: the store" "" (read_file dirs.store_file);
     Alcotest.(check string) "an empty log: the log" "" (read_file (log_file dirs)))
 ;;
 
@@ -621,30 +632,60 @@ let a_log_that_cannot_be_checked_is_not_opened () =
    answer for it reads [Absent], which design 5.1 does not let a writer go on
    from. *)
 let a_store_with_no_answer_refuses_every_commit () =
+  with_dirs (fun dirs ->
+    ignore (bootstrap dirs : B.completed);
+    Unix.truncate dirs.store_file 0;
+    check_judgment "what the files say" dirs "Absent";
+    let zone = open_zone dirs in
+    let log_before = read_file (log_file dirs) in
+    check_decision "no decision rests on it" "store holds no answer" zone;
+    check_error "a commit" "Store_holds_no_answer" zone (mode_draft M.Off);
+    check_error "a commit, again" "Store_holds_no_answer" zone (mode_draft ~at_ms:(at_ms + 2) M.Off);
+    Alcotest.(check string) "the log" log_before (read_file (log_file dirs));
+    Alcotest.(check string) "the store" "" (read_file dirs.store_file);
+    check_judgment "a restart" dirs "Absent")
+;;
+
+(* A store that is not there is not opened, whether its file or its whole
+   directory is gone: opening it makes the directory and the lock file, and a
+   volume that is mounted again finds its mount point as it left it. *)
+let a_store_that_is_not_there_is_not_opened () =
   List.iter
-    (fun (label, empty_the_store, store_after) ->
+    (fun (label, lose_the_store) ->
       with_dirs (fun dirs ->
         ignore (bootstrap dirs : B.completed);
-        empty_the_store dirs.store_file;
-        check_judgment (label ^ ": what the files say") dirs "Absent";
-        let zone = open_zone dirs in
+        let store_dir = Filename.dirname dirs.store_file in
+        lose_the_store dirs.store_file;
+        let where_the_store_was () =
+          if Sys.file_exists store_dir
+          then Some (List.sort String.compare (Array.to_list (Sys.readdir store_dir)))
+          else None
+        in
+        let before = where_the_store_was () in
         let log_before = read_file (log_file dirs) in
-        check_decision (label ^ ": no decision rests on it") "store holds no answer" zone;
-        check_error label "Store_holds_no_answer" zone (mode_draft M.Off);
-        check_error
-          (label ^ ", again")
-          "Store_holds_no_answer"
-          zone
-          (mode_draft ~at_ms:(at_ms + 2) M.Off);
-        Alcotest.(check string) (label ^ ": the log") log_before (read_file (log_file dirs));
-        Alcotest.(check (option string))
-          (label ^ ": the store")
-          store_after
-          (if Sys.file_exists dirs.store_file then Some (read_file dirs.store_file) else None);
-        check_judgment (label ^ ": a restart") dirs "Absent"))
-    [ "an emptied store", (fun path -> Unix.truncate path 0), Some ""
-    ; "a store that is not there", Sys.remove, None
+        (match Z.open_at_start ~now_ms ~log_path:(log_file dirs) ~store_path:dirs.store_file with
+         | Ok (_ : Z.t) -> Alcotest.failf "%s: a zone was opened" label
+         | Error error ->
+           Alcotest.(check string) (label ^ ": the refusal") "Store_not_there" (open_error_name error));
+        Alcotest.(check (option (list string)))
+          (label ^ ": where the store was")
+          before
+          (where_the_store_was ());
+        Alcotest.(check string) (label ^ ": the log") log_before (read_file (log_file dirs))))
+    [ "the file is gone", Sys.remove
+    ; "the directory is gone", (fun path -> remove_tree (Filename.dirname path))
     ]
+;;
+
+(* A store path that cannot be looked at is not taken for a store that is not
+   there, and is not opened either. *)
+let a_store_that_cannot_be_checked_is_not_opened () =
+  with_dirs (fun dirs ->
+    ignore (bootstrap dirs : B.completed);
+    match Z.open_at_start ~now_ms ~log_path:(log_file dirs) ~store_path:(dirs.store_file ^ "\000") with
+    | Ok (_ : Z.t) -> Alcotest.fail "a zone was opened"
+    | Error error ->
+      Alcotest.(check string) "the refusal" "Store_not_checked" (open_error_name error))
 ;;
 
 (* ---- failures ---- *)
@@ -1991,6 +2032,14 @@ let () =
             "a store with no answer refuses every commit"
             `Quick
             a_store_with_no_answer_refuses_every_commit
+        ; Alcotest.test_case
+            "a store that is not there is not opened"
+            `Quick
+            a_store_that_is_not_there_is_not_opened
+        ; Alcotest.test_case
+            "a store that cannot be checked is not opened"
+            `Quick
+            a_store_that_cannot_be_checked_is_not_opened
         ] )
     ; ( "failures"
       , [ Alcotest.test_case

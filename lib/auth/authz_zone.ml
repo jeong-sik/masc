@@ -109,6 +109,11 @@ type open_error =
       { path : string
       ; detail : string
       }
+  | Store_not_there of { path : string }
+  | Store_not_checked of
+      { path : string
+      ; detail : string
+      }
 
 let open_error_to_string = function
   | Store_not_opened error -> S.open_error_to_string S.violation_to_string error
@@ -117,6 +122,12 @@ let open_error_to_string = function
     Printf.sprintf "the authorization log %s is not there or holds no Fresh_bootstrap" path
   | Log_not_checked { path; detail } ->
     Printf.sprintf "whether the authorization log %s is there cannot be told: %s" path detail
+  | Store_not_there { path } ->
+    Printf.sprintf
+      "the authorization log is there and the external store %s is not, so neither is opened"
+      path
+  | Store_not_checked { path; detail } ->
+    Printf.sprintf "whether the external store %s is there cannot be told: %s" path detail
 ;;
 
 let open_files ~now_ms ~log_path ~store_path =
@@ -139,13 +150,17 @@ let open_files ~now_ms ~log_path ~store_path =
             }))
 ;;
 
-(* Opening a file makes its directory and its lock file, so a log that is not
-   there is refused before either file is opened. *)
+(* Opening a file makes its directory and its lock file, so a log or a store
+   that is not there is refused before either file is opened. *)
 let open_at_start ~now_ms ~log_path ~store_path =
   match P.of_path log_path with
   | P.Not_there -> Error (Not_bootstrapped { path = log_path })
   | P.Cannot_check detail -> Error (Log_not_checked { path = log_path; detail })
-  | P.There -> open_files ~now_ms ~log_path ~store_path
+  | P.There ->
+    (match P.of_path store_path with
+     | P.Not_there -> Error (Store_not_there { path = store_path })
+     | P.Cannot_check detail -> Error (Store_not_checked { path = store_path; detail })
+     | P.There -> open_files ~now_ms ~log_path ~store_path)
 ;;
 
 let snapshot t = Atomic.get t.current

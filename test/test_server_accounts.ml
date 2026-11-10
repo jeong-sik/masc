@@ -32,6 +32,7 @@ let rec remove_tree path =
 
 let nothing _request _reqd = ()
 let nothing_with_state _state _request _reqd = ()
+let answered (_ : Httpun.Request.t) reqd = Http_server_eio.Response.json_value (`Assoc []) reqd
 
 let kind_label register =
   match Server_account_table.checked register with
@@ -71,6 +72,83 @@ let test_table_kinds () =
             (Server_route.Self_authenticated Route_access.Loopback_dev_token)
             "/api/v1/dashboard/dev-token"
             nothing))
+;;
+
+(* One raw request through an httpun connection that dispatches on the
+   table: the status of the answer. *)
+let status_from_table table ~meth ~path =
+  Eio_main.run (fun (_ : Eio_unix.Stdenv.base) ->
+    let output = Buffer.create 256 in
+    let connection =
+      Httpun.Server_connection.create (fun reqd ->
+        Server_account_table.dispatch table (Httpun.Reqd.request reqd) (Http_reqd.of_httpun reqd))
+    in
+    let raw =
+      Printf.sprintf "%s %s HTTP/1.1\r\nHost: localhost\r\nContent-Length: 0\r\n\r\n" meth path
+    in
+    let input = Bigstringaf.of_string ~off:0 ~len:(String.length raw) raw in
+    let (_ : int) =
+      Httpun.Server_connection.read_eof connection input ~off:0 ~len:(Bigstringaf.length input)
+    in
+    let rec drain () =
+      match Httpun.Server_connection.next_write_operation connection with
+      | `Write iovecs ->
+        let written =
+          List.fold_left
+            (fun total (iov : Bigstringaf.t Httpun.IOVec.t) ->
+              Buffer.add_string output (Bigstringaf.substring iov.buffer ~off:iov.off ~len:iov.len);
+              total + iov.len)
+            0
+            iovecs
+        in
+        Httpun.Server_connection.report_write_result connection (`Ok written);
+        drain ()
+      | `Yield | `Close (_ : int) -> ()
+    in
+    drain ();
+    match String.split_on_char ' ' (Buffer.contents output) with
+    | (_ : string) :: status :: (_ : string list) -> int_of_string_opt status
+    | [] | [ (_ : string) ] -> None)
+;;
+
+(* A router is one shared table that a registration changes in place, and the
+   registration function can keep the router it was given. A route of another
+   kind that is added after the check is not served. *)
+let test_a_route_added_after_the_check () =
+  let kept = ref None in
+  let table =
+    match
+      Server_account_table.checked (fun router ->
+        kept := Some router;
+        Server_route.get Server_route.Always_public Server_health_paths.health answered router)
+    with
+    | Ok table -> table
+    | Error refusal -> Alcotest.fail (Server_account_table.refusal_to_string refusal)
+  in
+  let late = "/api/v1/dashboard/dev-token" in
+  Alcotest.(check (option int))
+    "a route of the table"
+    (Some 200)
+    (status_from_table table ~meth:"GET" ~path:Server_health_paths.health);
+  (match !kept with
+   | None -> Alcotest.fail "the registration was not called"
+   | Some router ->
+     let (_ : Http_server_eio.Router.t) =
+       Server_route.get
+         (Server_route.Self_authenticated Route_access.Loopback_dev_token)
+         late
+         answered
+         router
+     in
+     ());
+  Alcotest.(check (option int))
+    "a route of another kind that was added after the check"
+    (Some 404)
+    (status_from_table table ~meth:"GET" ~path:late);
+  Alcotest.(check (option int))
+    "the route of the table, after it"
+    (Some 200)
+    (status_from_table table ~meth:"GET" ~path:Server_health_paths.health)
 ;;
 
 (* ---- the server ---- *)
@@ -197,9 +275,18 @@ let mode_label : Authz_mode_state.t -> string = function
   | Authz_mode_state.Off (_ : Authz_types.Workspace_id.t) -> "off"
 ;;
 
+let open_error_label : Authz_zone.open_error -> string = function
+  | Authz_zone.Store_not_opened _ -> "the store did not open"
+  | Authz_zone.Log_not_opened _ -> "the log did not open"
+  | Authz_zone.Not_bootstrapped { path = _ } -> "not bootstrapped"
+  | Authz_zone.Log_not_checked { path = _; detail = _ } -> "the log cannot be checked"
+  | Authz_zone.Store_not_there { path = _ } -> "the store is not there"
+  | Authz_zone.Store_not_checked { path = _; detail = _ } -> "the store cannot be checked"
+;;
+
 let refusal_label : Server_accounts.refusal -> string = function
   | Server_accounts.Http_mode_refused _ -> "HTTP mode refused"
-  | Server_accounts.Zone_not_opened _ -> "zone not opened"
+  | Server_accounts.Zone_not_opened error -> "zone not opened: " ^ open_error_label error
   | Server_accounts.Zone_not_trusted uncertain -> "zone not trusted: " ^ uncertain_label uncertain
   | Server_accounts.Zone_not_multi_account mode -> "zone not multi-account: " ^ mode_label mode
   | Server_accounts.Route_of_another_kind _ -> "route of another kind"
@@ -210,23 +297,53 @@ let refusal_label : Server_accounts.refusal -> string = function
   | Server_accounts.Trust_policy_refused _ -> "trust policy refused"
 ;;
 
-(* The three cases below stop before the access of the process is published,
-   so the case that serves can still publish it. *)
+exception Still_serving
+
+(* The cases below stop before the access of the process is published, so
+   the case that serves can still publish it. A boot that does not stop
+   serves until its switch is cancelled, so the wait for the refusal has an
+   end: the exception cancels the switch and what the server forked on it. *)
 let boot_outcome env ~port multi_account =
-  Eio.Switch.run (fun sw ->
-    match Server_accounts.run ~sw ~env ~address:loopback ~port multi_account with
-    | Ok () -> "served"
-    | Error refusal -> refusal_label refusal)
+  match
+    Eio.Switch.run (fun sw ->
+      Eio.Fiber.first
+        (fun () ->
+          match Server_accounts.run ~sw ~env ~address:loopback ~port multi_account with
+          | Ok () -> "returned"
+          | Error refusal -> refusal_label refusal)
+        (fun () ->
+          Eio.Time.sleep (Eio.Stdenv.clock env) seconds_to_serve;
+          raise Still_serving))
+  with
+  | outcome -> outcome
+  | exception Still_serving -> "still serving"
 ;;
 
 (* The judgment read a store that matched the log. A store that is gone when
-   the zone opens is the store of row 8, and the boot stops as that row
-   stops. *)
-let test_stops_when_the_store_changed () =
+   the zone opens is not opened, and nothing is made where it was: a volume
+   that is mounted again finds its mount point as it left it. *)
+let test_stops_when_the_store_is_gone () =
   with_installation (fun env { base = _; config = _; store; multi_account } ->
-    Sys.remove store;
+    let directory = Filename.dirname store in
+    remove_tree directory;
     Alcotest.(check string)
       "the boot over a store that is gone"
+      "zone not opened: the store is not there"
+      (boot_outcome env ~port:(free_port ()) multi_account);
+    Alcotest.(check bool) "no directory is made for the store" false (Sys.file_exists directory))
+;;
+
+(* A store that holds no line when the zone opens is the store of row 8: the
+   zone opens, cannot be trusted, and the boot stops as that row stops. *)
+let test_stops_when_the_store_was_emptied () =
+  with_installation (fun env { base = _; config = _; store; multi_account } ->
+    Out_channel.with_open_gen
+      [ Open_wronly; Open_trunc; Open_binary ]
+      0o600
+      store
+      (fun (_ : Out_channel.t) -> ());
+    Alcotest.(check string)
+      "the boot over a store that was emptied"
       "zone not trusted: the store answers nothing"
       (boot_outcome env ~port:(free_port ()) multi_account))
 ;;
@@ -251,6 +368,20 @@ let recorded_port ~base =
   match Workspace_connection.read ~base_path:base with
   | Ok recorded -> Option.map Workspace_connection.to_int recorded
   | Error error -> Alcotest.fail (Workspace_connection.error_message error)
+;;
+
+(* The HTTP mode of the process is read once and kept
+   ([Env_config.Transport.configure_h2_from_env]); a value outside its
+   vocabulary is refused and not kept. This case therefore runs before every
+   case that reads the mode: after one of them the value below is not read. *)
+let test_stops_on_an_http_mode_outside_its_vocabulary () =
+  with_installation (fun env { base; config = _; store = _; multi_account } ->
+    Unix.putenv "MASC_USE_H2" "sometimes";
+    Alcotest.(check string)
+      "the boot under an HTTP mode outside its vocabulary"
+      "HTTP mode refused"
+      (boot_outcome env ~port:(free_port ()) multi_account);
+    Alcotest.(check (option int)) "no port is recorded" None (recorded_port ~base))
 ;;
 
 (* A port that another socket listens on. *)
@@ -380,7 +511,13 @@ let () =
     "server_accounts"
     [ ( "account server"
       , [ Alcotest.test_case "the kinds its table may hold" `Quick test_table_kinds
-        ; Alcotest.test_case "the boot stops when the store changed" `Quick test_stops_when_the_store_changed
+        ; Alcotest.test_case "a route added after the check" `Quick test_a_route_added_after_the_check
+        ; Alcotest.test_case
+            "the boot stops on an HTTP mode outside its vocabulary"
+            `Quick
+            test_stops_on_an_http_mode_outside_its_vocabulary
+        ; Alcotest.test_case "the boot stops when the store is gone" `Quick test_stops_when_the_store_is_gone
+        ; Alcotest.test_case "the boot stops when the store was emptied" `Quick test_stops_when_the_store_was_emptied
         ; Alcotest.test_case
             "the boot stops when the accounts were turned off"
             `Quick

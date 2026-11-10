@@ -866,34 +866,35 @@ let test_operation_settlement_retries_and_replays_past_a_live_cursor () =
       ; Events.Event_error {message}, ["operation_settlement",metadata;"operation_settlement",metadata]
       ; Events.Text_delta {text="not terminal"; response=Unobserved_scope (None)}, ["operation_settlement",metadata] ])
 
-(* Boot settles every retained failure again, and most journals already end
-   with that settlement's terminal. The answer then comes from the last row
-   alone: the journal is longer than the tail window, the row before the
-   terminal is not JSON, and the call still reports the terminal and writes
-   nothing. A full read would refuse the corrupt row. *)
 let journal_past_the_tail_window = 256 * 1024 (* the tail reads 64 KiB *)
 
-let test_operation_settlement_reads_its_terminal_from_the_journal_tail () =
-  with_workspace @@ fun base_path ->
-  let keeper_name = "terminal-tail" and operation_id = "op-terminal-tail" in
+let settlement_of ~operation_id : Journal.operation_settlement =
   let id = match Keeper_chat_operation.Operation_id.of_string operation_id with
     | Ok id -> id | Error detail -> fail detail in
-  let settlement : Journal.operation_settlement = {operation_id=id;completed_at=3.} in
+  {operation_id=id;completed_at=3.}
+
+(* A journal that ends in the terminal [segment] records. It is longer than
+   the tail window, and the row before the terminal is not JSON, which a full
+   read would refuse. [ask] is put to that journal: the last row alone has to
+   answer it, and nothing may be written. *)
+let with_terminal_behind_a_corrupt_row ~name segment ask =
+  with_workspace @@ fun base_path ->
+  let keeper_name = name and operation_id = "op-" ^ name in
   let journal = Journal.open_journal ~base_dir:base_path ~keeper_name ~operation_id () in
   let append seq event =
     match Journal.append_result journal ~seq ~ts:1.0 event with
     | Ok () -> ()
     | Error detail -> fail detail in
-  append 0 (Events.Run_started { run_id = "run-tail"; thread_id = "keeper:terminal-tail" });
+  append 0 (Events.Run_started { run_id = "run-tail"; thread_id = "keeper:" ^ name });
   let delta = String.make 200 'x' in
   let deltas = 1 + (journal_past_the_tail_window / String.length delta) in
   for seq = 1 to deltas do
     append seq (Events.Text_delta {text=delta; response=Unobserved_scope (None)})
   done;
   let message = "cut by restart" in
-  (match Journal.record_terminal_error ~segment:(Operation_settlement settlement) journal ~ts:3. ~message with
+  (match Journal.record_terminal_error ~segment journal ~ts:3. ~message with
    | Ok (Recorded_terminal_error {seq;_}) -> check int "terminal after the deltas" (deltas + 1) seq
-   | Ok (Existing_terminal_error _) | Error _ -> fail "the first settlement must append");
+   | Ok (Existing_terminal_error _) | Error _ -> fail "the first call must append");
   let path = Journal.journal_path ~base_dir:base_path ~keeper_name ~operation_id in
   let rows = In_channel.with_open_bin path In_channel.input_all
     |> String.split_on_char '\n' |> List.filter (fun line -> line <> "") in
@@ -904,14 +905,40 @@ let test_operation_settlement_reads_its_terminal_from_the_journal_tail () =
     (fun oc -> Out_channel.output_string oc corrupted);
   check bool "the journal is longer than the tail window" true
     (String.length corrupted > journal_past_the_tail_window);
-  (match Journal.record_terminal_error ~segment:(Operation_settlement settlement) journal ~ts:99. ~message with
-   | Ok (Existing_terminal_error {seq;ts;message=recorded}) ->
+  (match ask journal with
+   | Ok (Some (Journal.Existing_terminal_error {seq;ts;message=recorded})) ->
      check int "the recorded terminal is reported" (deltas + 1) seq;
      check (float 0.) "at its own time" 3. ts;
      check string "with its cause" message recorded
-   | Ok (Recorded_terminal_error _) -> fail "a second terminal was appended"
+   | Ok (Some (Journal.Recorded_terminal_error _)) -> fail "a second terminal was appended"
+   | Ok None -> fail "the last row was not taken for the terminal"
    | Error detail -> fail ("the tail did not answer: " ^ detail));
   check string "nothing was written" corrupted (In_channel.with_open_bin path In_channel.input_all)
+
+(* Boot settles every retained failure again, and most journals already end
+   with that settlement's terminal. *)
+let test_operation_settlement_reads_its_terminal_from_the_journal_tail () =
+  let name = "terminal-tail" in
+  let segment = Journal.Operation_settlement (settlement_of ~operation_id:("op-" ^ name)) in
+  with_terminal_behind_a_corrupt_row ~name segment (fun journal ->
+    Result.map Option.some
+      (Journal.record_terminal_error ~segment journal ~ts:99. ~message:"cut by restart"))
+
+(* The Owner's settle hook asks once more without a settlement, right after
+   the failure projection recorded the terminal. *)
+let test_existing_segment_reads_its_terminal_from_the_journal_tail () =
+  with_terminal_behind_a_corrupt_row ~name:"terminal-tail-segment" Journal.Existing_segment
+    (fun journal ->
+       Result.map Option.some
+         (Journal.record_terminal_error journal ~ts:99. ~message:"another cause"))
+
+(* A reader that reconnects to a settled operation asks for its terminal and
+   records nothing. *)
+let test_find_operation_terminal_reads_the_journal_tail () =
+  let name = "terminal-tail-find" in
+  let settlement = settlement_of ~operation_id:("op-" ^ name) in
+  with_terminal_behind_a_corrupt_row ~name (Journal.Operation_settlement settlement)
+    (fun journal -> Journal.find_operation_terminal journal ~settlement)
 
 (* A crash can cut an append written after the settled terminal. The terminal
    still answers, as the full read answers it, and the fragment is left for
@@ -1008,6 +1035,10 @@ let () =
             test_operation_settlement_retries_and_replays_past_a_live_cursor
         ; test_case "settlement terminal is read from the journal tail" `Quick
             test_operation_settlement_reads_its_terminal_from_the_journal_tail
+        ; test_case "a terminal without a settlement is read from the journal tail" `Quick
+            test_existing_segment_reads_its_terminal_from_the_journal_tail
+        ; test_case "find_operation_terminal reads the journal tail" `Quick
+            test_find_operation_terminal_reads_the_journal_tail
         ; test_case "tail of another settlement still appends" `Quick
             test_operation_settlement_tail_of_another_settlement_still_appends
         ; test_case "settled terminal stands before a torn fragment" `Quick

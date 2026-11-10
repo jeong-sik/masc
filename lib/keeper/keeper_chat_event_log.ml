@@ -830,12 +830,14 @@ let journaled_event_to_string journaled =
   Yojson.Safe.to_string (journaled_event_to_json journaled)
 ;;
 
-(** Strict decode of one journal line. [Yojson.Json_error] is caught and
-    returned as [Error]. *)
-let journaled_event_of_string line =
-  try journaled_event_of_json (Yojson.Safe.from_string line) with
+(** Strict decode of one journal line with its envelope. [Yojson.Json_error]
+    is caught and returned as [Error]. *)
+let journaled_envelope_of_string line =
+  try journaled_envelope_of_json (Yojson.Safe.from_string line) with
   | Yojson.Json_error message -> Error (Malformed ("journaled_event: invalid JSON: " ^ message))
 ;;
+
+let journaled_event_of_string line = Result.map fst (journaled_envelope_of_string line)
 
 (** {1 Journal} *)
 
@@ -1096,48 +1098,57 @@ let read_journal_rows_path path = read_complete_rows ~allow_torn_tail:true path
 let read_journal_path_result path = read_journal_path ~allow_torn_tail:true path
 let read_journal journal = read_journal_path_result journal.path
 
+(* The complete rows of a journal with their envelopes, for a caller that ends
+   the journal or asks how it ended. No journal yet is no rows. A fragment
+   after the last newline is not a row and is left out: the append that
+   follows cuts it. *)
 let read_journal_envelopes journal =
-  let decode line =
-    try journaled_envelope_of_json (Yojson.Safe.from_string line) with
-    | Yojson.Json_error detail -> Error (Malformed detail) in
-  Result.bind (read_complete_rows ~allow_torn_tail:true journal.path)
-    (decode_rows_with decode ~path:journal.path)
+  match
+    Result.bind (read_complete_rows ~allow_torn_tail:true journal.path)
+      (decode_rows_with journaled_envelope_of_string ~path:journal.path)
+  with
+  | Ok entries -> Ok entries
+  | Error Journal_missing -> Ok []
+  | Error (Journal_unreadable detail | Journal_corrupt detail) -> Error detail
+  | Error (Journal_unsupported_version version) -> Error (version_mismatch_to_string version)
 ;;
 
-(* [allow_torn_tail] only changes which bytes count as rows: a fragment after
-   the last newline is not one either way. A producer resuming a segment must
-   refuse it (the cursor may sit past a frame a live reader already holds), so
-   [next_sequence] keeps it false. Recovery that ends the journal after a
-   crash passes true and derives the cursor from the complete rows; the append
-   that follows cuts the fragment. *)
-let sequence_after_complete_rows ~allow_torn_tail ~require_existing journal =
-  match read_journal_path ~allow_torn_tail journal.path with
+(* The sequence the next row takes after [entries], the complete rows of a
+   journal in order: one past the last. Their sequences must increase, and
+   [require_existing] asks that the last of them ends a segment. [Error] says
+   what is wrong with the rows. *)
+let sequence_after ~require_existing entries =
+  let rec last previous = function
+    | [] -> Ok previous
+    | entry :: rest ->
+      (match previous with
+       | Some prior when entry.seq <= prior.seq ->
+         Error "operation journal sequences are not increasing"
+       | Some _ | None -> last (Some entry) rest) in
+  Result.bind (last None entries) (fun latest ->
+    let complete = match latest with
+      | Some { event; _ } -> Keeper_chat_run_signal.is_terminal event
+      | None -> false in
+    if require_existing && not complete then
+      Error "continuation journal has no durable terminal segment boundary"
+    else
+      let highest = Option.fold ~none:(-1) ~some:(fun entry -> entry.seq) latest in
+      if highest = max_int then Error "journal sequence space exhausted"
+      else Ok (highest + 1))
+;;
+
+(* A fragment after the last newline is not a row. A producer resuming a
+   segment must refuse a journal that ends in one (the cursor may sit past a
+   frame a live reader already holds), so this read does not allow a torn
+   tail. Recovery that ends the journal after a crash reads the complete rows
+   ([read_journal_envelopes]) and its append cuts the fragment. *)
+let next_sequence ?(require_existing = false) journal =
+  match read_journal_path ~allow_torn_tail:false journal.path with
   | Error Journal_missing when not require_existing -> Ok 0
   | Error (Journal_missing | Journal_unreadable _ | Journal_corrupt _ | Journal_unsupported_version _) as error -> error
   | Ok entries ->
-    let rec last previous = function
-      | [] -> Ok previous
-      | entry :: rest ->
-        (match previous with
-         | Some prior when entry.seq <= prior.seq ->
-           Error (Journal_corrupt "operation journal sequences are not increasing")
-         | Some _ | None -> last (Some entry) rest) in
-    (match last None entries with
-     | Error _ as error -> error
-     | Ok latest ->
-       let complete = match latest with
-         | Some { event; _ } -> Keeper_chat_run_signal.is_terminal event
-         | None -> false in
-       if require_existing && not complete then
-         Error (Journal_corrupt "continuation journal has no durable terminal segment boundary")
-       else
-         let highest = Option.fold ~none:(-1) ~some:(fun entry -> entry.seq) latest in
-         if highest = max_int then Error (Journal_corrupt "journal sequence space exhausted")
-         else Ok (highest + 1))
-;;
-
-let next_sequence ?(require_existing = false) journal =
-  sequence_after_complete_rows ~allow_torn_tail:false ~require_existing journal
+    sequence_after ~require_existing entries
+    |> Result.map_error (fun detail -> Journal_corrupt detail)
 ;;
 
 type terminal_error_receipt =
@@ -1161,33 +1172,32 @@ let existing_terminal_error { event; seq; ts } =
   | Keeper_chat_run_signal.Progress -> None
 ;;
 
-let existing_operation_terminal settlement = function
-  | (entry, Some recorded) :: _
-    when same_operation_settlement settlement recorded ->
-    existing_terminal_error entry
-  | [] | _ :: _ -> None
+(* What the last row of a journal says about [segment]: the terminal error it
+   records for that segment, if it records one. Any last error ends an
+   [Existing_segment]. An [Operation_settlement] is ended only by the error
+   that carries that settlement. *)
+let terminal_of_last_row segment (entry, recorded) =
+  match segment, recorded with
+  | Existing_segment, (Some _ | None) -> existing_terminal_error entry
+  | Operation_settlement settlement, Some recorded
+    when same_operation_settlement settlement recorded -> existing_terminal_error entry
+  | Operation_settlement _, (Some _ | None) -> None
 ;;
 
-let find_operation_terminal journal ~settlement =
-  match read_journal_envelopes journal with
-  | Ok entries -> Ok (existing_operation_terminal settlement (List.rev entries))
-  | Error Journal_missing -> Ok None
-  | Error (Journal_unreadable detail | Journal_corrupt detail) -> Error detail
-  | Error (Journal_unsupported_version version) -> Error (version_mismatch_to_string version)
-;;
+let last_row rows = List.fold_left (fun _ row -> Some row) None rows
 
 (* A terminal row holds one error message. A final row longer than this
    window falls back to the full read. *)
 let terminal_tail_bytes = 64 * 1024
 
-(* [existing_operation_terminal] reads only the journal's last row, so a
-   bounded tail answers it without reading the whole journal. Anything the
-   tail cannot settle (a missing or unreadable store, no complete row in the
-   window, a row that does not decode, or a last row that is not this
-   settlement's terminal) falls back to the full read, which reports what it
-   finds. The tail logs only what the full read will not see again: its own
-   read failure, a cleanup failure, and a torn tail it answered past. *)
-let operation_terminal_from_tail settlement journal =
+(* [terminal_of_last_row] reads only the journal's last row, so a bounded tail
+   answers it without reading the whole journal. Anything the tail cannot
+   settle (a missing or unreadable store, no complete row in the window, a
+   row that does not decode, or a last row that is not the segment's
+   terminal) falls back to the full read, which reports what it finds. The
+   tail logs only what the full read will not see again: its own read
+   failure, a cleanup failure, and a torn tail it answered past. *)
+let terminal_from_tail segment journal =
   let path = journal.path in
   let of_tail = function
     | Fs_compat.Private_jsonl_tail.Tail_missing -> None
@@ -1199,18 +1209,17 @@ let operation_terminal_from_tail settlement journal =
       (match last with
        | [] -> None
        | line :: _ ->
-         (match journaled_envelope_of_json (Yojson.Safe.from_string line) with
+         (match journaled_envelope_of_string line with
           | Ok envelope ->
-            let receipt = existing_operation_terminal settlement [envelope] in
+            let receipt = terminal_of_last_row segment envelope in
             if incomplete_tail && Option.is_some receipt
             then
               Log.Keeper.warn
-                "keeper_chat_event_log: journal has a torn tail path=%s end_offset=%d: bytes after its settled terminal are an append that never completed; the terminal stands"
+                "keeper_chat_event_log: journal has a torn tail path=%s end_offset=%d: bytes after its terminal are an append that never completed; the terminal stands"
                 path
                 end_offset;
             receipt
-          | Error (Unsupported_version _ | Malformed _) -> None
-          | exception Yojson.Json_error _ -> None)) in
+          | Error (Unsupported_version _ | Malformed _) -> None)) in
   let log_tail_failure error =
     Log.Keeper.warn
       "keeper_chat_event_log: journal tail read failed path=%s: %s; reading the whole journal"
@@ -1233,45 +1242,42 @@ let operation_terminal_from_tail settlement journal =
     None
 ;;
 
+let find_operation_terminal journal ~settlement =
+  let segment = Operation_settlement settlement in
+  match terminal_from_tail segment journal with
+  | Some receipt -> Ok (Some receipt)
+  | None ->
+    Result.map
+      (fun entries -> Option.bind (last_row entries) (terminal_of_last_row segment))
+      (read_journal_envelopes journal)
+;;
+
+(* One read of the whole journal: its rows say which sequence a terminal would
+   take and whether [segment] already has one. The sequence is asked first, so
+   rows whose sequences do not increase are refused whatever the last row
+   is. *)
 let record_terminal_error_from_journal ~segment journal ~ts ~message =
   let open Result.Syntax in
-  let read_error = function
-    | Journal_missing -> "operation journal disappeared during settlement"
-    | Journal_unreadable detail | Journal_corrupt detail -> detail
-    | Journal_unsupported_version version -> version_mismatch_to_string version in
-  let* seq =
-    sequence_after_complete_rows ~allow_torn_tail:true ~require_existing:false journal
-    |> Result.map_error read_error in
-  let* entries = match read_journal_envelopes journal with
-    | Ok entries -> Ok entries
-    | Error Journal_missing -> Ok []
-    | Error (Journal_unreadable _ | Journal_corrupt _ | Journal_unsupported_version _ as error) -> Error (read_error error) in
-  match segment, List.rev entries with
-  | Existing_segment, entries ->
-    let existing =
-      match entries with
-      | (entry, _) :: _ -> existing_terminal_error entry
-      | [] -> None in
-    (match existing with
-     | Some receipt -> Ok receipt
-     | None ->
-         let* () = append_result journal ~seq ~ts (Event_error {message}) in
-         Ok (Recorded_terminal_error {seq;ts}))
-  | Operation_settlement settlement, entries ->
-    (match existing_operation_terminal settlement entries with
-     | Some receipt -> Ok receipt
-     | None ->
-         let* () = append_journaled_result ~operation_settlement:settlement journal ~seq ~ts (Event_error {message}) in
-         Ok (Recorded_terminal_error {seq;ts}))
+  let* entries = read_journal_envelopes journal in
+  let* seq = sequence_after ~require_existing:false (List.map fst entries) in
+  match Option.bind (last_row entries) (terminal_of_last_row segment) with
+  | Some receipt -> Ok receipt
+  | None ->
+    let operation_settlement =
+      match segment with
+      | Existing_segment -> None
+      | Operation_settlement settlement -> Some settlement
+    in
+    let* () =
+      append_journaled_result ?operation_settlement journal ~seq ~ts (Event_error {message})
+    in
+    Ok (Recorded_terminal_error {seq;ts})
 ;;
 
 let record_terminal_error ?(segment = Existing_segment) journal ~ts ~message =
-  match segment with
-  | Operation_settlement settlement ->
-    (match operation_terminal_from_tail settlement journal with
-     | Some receipt -> Ok receipt
-     | None -> record_terminal_error_from_journal ~segment journal ~ts ~message)
-  | Existing_segment -> record_terminal_error_from_journal ~segment journal ~ts ~message
+  match terminal_from_tail segment journal with
+  | Some receipt -> Ok receipt
+  | None -> record_terminal_error_from_journal ~segment journal ~ts ~message
 ;;
 
 (** {1 Replay position} *)

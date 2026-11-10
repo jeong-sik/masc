@@ -1,6 +1,7 @@
-(** CanAdmin HTTP boundary for observing and explicitly acknowledging a retained
-    shutdown record whose owner is absent. Authentication is applied by the
-    router; [actor] must be the verified bearer credential owner. *)
+(** CanAdmin HTTP boundary for absent-owner acknowledgement and explicit retry
+    of one blocked dormant task settlement. Authentication is applied by the
+    router; [actor] must be the verified bearer credential owner. Task retry
+    preparation, finalizer scheduling and completion are separate facts. *)
 type target
 
 val route : string -> target option

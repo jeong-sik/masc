@@ -1111,25 +1111,67 @@ let test_transition_submit_for_verification_requires_notes () =
 let test_transition_version_mismatch () =
   with_test_env (fun config ->
     let _ = Workspace.add_task config ~title:"Test" ~priority:1 ~description:"" in
-    let observed_version = (Workspace.read_backlog config).version in
-    (* Pass wrong expected version *)
+    let read_backlog () =
+      match Workspace_backlog.read_backlog_r config with
+      | Ok backlog -> backlog
+      | Error detail -> Alcotest.fail detail
+    in
+    let prior = read_backlog () in
+    (match Workspace.claim_task_r config ~agent_name:"claude" ~task_id:"task-001" () with
+     | Ok _ -> ()
+     | Error error -> Alcotest.fail (Masc_domain.masc_error_to_string error));
+    let before = read_backlog () in
+    let backlog_path = Workspace_backlog.backlog_path config in
+    let before_bytes = Fs_compat.load_file backlog_path in
+    let event_files () =
+      let location = Dated_jsonl.Store.at (Workspace_utils.dated_store_root config)
+          Dated_jsonl.Store.Root.Events in
+      let rec read path =
+        match Unix.lstat path with
+        | { Unix.st_kind = Unix.S_DIR; _ } ->
+            Sys.readdir path |> Array.to_list |> List.sort String.compare
+            |> List.concat_map (fun name -> read (Filename.concat path name))
+        | { Unix.st_kind = Unix.S_REG; _ } -> [path, Fs_compat.load_file path]
+        | { Unix.st_kind = (Unix.S_CHR | Unix.S_BLK | Unix.S_LNK | Unix.S_FIFO | Unix.S_SOCK); _ } ->
+            Alcotest.fail "unexpected file kind in task event ledger"
+        | exception Unix.Unix_error (Unix.ENOENT, _, _) -> []
+      in
+      read (Dated_jsonl.Store.dir location)
+    in
+    let before_events = event_files () in
+    Alcotest.(check bool) "the fixture has a task transition ledger" true
+      (before_events <> []);
+    let handoff_context : Masc_domain.task_handoff_context =
+      { summary = "Return the task after reading current ownership"
+      ; reason = None
+      ; next_step = None
+      ; failure_mode = None
+      ; evidence_refs = []
+      ; updated_at = None
+      ; updated_by = None
+      }
+    in
     let result =
-      Workspace.transition_task_r
+      Workspace.release_task_r
         config
         ~agent_name:"claude"
         ~task_id:"task-001"
-        ~action:Masc_domain.Claim
-        ~expected_version:999
+        ~expected_version:prior.version
+        ~handoff_context
         ()
     in
-    match result with
-    | Error (Masc_domain.Task
-               (Masc_domain.Task_error.BacklogVersionConflict { expected; actual })) ->
-      Alcotest.(check int) "requested backlog version" 999 expected;
-      Alcotest.(check int) "authoritative backlog version" observed_version actual;
-      Alcotest.(check int) "rejected transition did not commit" observed_version
-        (Workspace.read_backlog config).version
-    | _ -> Alcotest.fail "Expected typed backlog version conflict")
+    (match result with
+     | Error (Masc_domain.Task (Masc_domain.Task_error.BacklogVersionConflict { expected; actual })) ->
+         Alcotest.(check int) "the rejected expected version is retained" prior.version expected;
+         Alcotest.(check int) "the authoritative version is retained" before.version actual
+     | Error error -> Alcotest.fail (Masc_domain.masc_error_to_string error)
+     | Ok _ -> Alcotest.fail "stale release changed task ownership");
+    Alcotest.(check bool) "the whole task backlog remains unchanged" true
+      (read_backlog () = before);
+    Alcotest.(check string) "the canonical task document is not written" before_bytes
+      (Fs_compat.load_file backlog_path);
+    Alcotest.(check (list (pair string string))) "no task transition is appended"
+      before_events (event_files ()))
 ;;
 
 let test_transition_done_idempotent () =

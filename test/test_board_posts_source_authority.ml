@@ -72,6 +72,12 @@ let load_comments store expected =
   | Error (path, error) ->
     Alcotest.failf "load %s: %s" path (Printexc.to_string error)
 
+let load_policy store = match Board.reload_sub_boards store with
+  | Ok _ -> ()
+  | Error (path, error) -> Alcotest.failf "load %s: %s" path (Printexc.to_string error)
+
+let load_votes store = ignore (require_board (Board.reload_votes store))
+
 let create ?hearth store body =
   Board.create_post store ~lookup:Recipient_lookup.none_declared
     ~author:"source-writer" ~content:body ~title:"source title" ~body
@@ -185,6 +191,7 @@ let test_directory_replacement_stays_refused ~replace_root base_path workspace =
 let test_sub_board_only_retains_the_state_directory base_path workspace =
   present_empty_posts base_path;
   let store = make_store base_path in
+  load_policy store;
   let create_topic slug = Board.create_sub_board store ~slug ~name:slug
       ~description:"actual sub-board-only publication" ~owner:"source-writer" () in
   ignore (require_board (create_topic "first"));
@@ -210,6 +217,7 @@ let test_sub_board_only_retains_the_state_directory base_path workspace =
         (List.length (Board.list_sub_boards store));
       Alcotest.(check string) "refused publication preserves the original actual rows"
         original_bytes (read_bytes (Filename.concat backup (Filename.basename path))));
+  load_policy store;
   ignore (require_board (create_topic "second"));
   Alcotest.(check int) "restoring the actual directory permits a new publication" 2
     (List.length (Board.list_sub_boards store));
@@ -453,6 +461,8 @@ let test_cross_writer_projection base_path _workspace =
   let store = make_store base_path in
   load_posts store 0;
   load_comments store 0;
+  load_votes store;
+  load_policy store;
   let topic = require_board (Board.create_sub_board store ~slug:"source-topic"
     ~name:"Source topic" ~description:"real policy source" ~owner:"source-writer" ()) in
   let first = require_post (create ~hearth:topic.slug store "first post") in
@@ -681,6 +691,7 @@ let test_flush_cleanup_preserves_later_work base_path _workspace =
   let store, armed, _, fired, _ = fault_store base_path in
   load_posts store 0;
   load_comments store 0;
+  load_votes store;
   let post = require_post (create store "flush batch source") in
   let post_id = Board.Post_id.to_string post.id in
   let comment = require_board (Board.add_comment store
@@ -738,6 +749,7 @@ let test_delete_cleanup_preserves_dependents base_path _workspace =
   let store, armed, _, fired, _ = fault_store base_path in
   load_posts store 0;
   load_comments store 0;
+  load_votes store;
   let post = require_post (create store "delete batch source") in
   let post_id = Board.Post_id.to_string post.id in
   let comment = require_board (Board.add_comment store
@@ -870,11 +882,13 @@ let test_fresh_workspace_accepts_every_writer base_path _workspace =
   let store = make_store base_path in
   load_posts store 0;
   load_comments store 0;
+  load_votes store;
   let post = require_post (create store "first post in a fresh workspace") in
   let post_id = Board.Post_id.to_string post.id in
   ignore (require_board (Board.add_comment store ~lookup:Recipient_lookup.none_declared
     ~post_id ~author:"fresh-reader" ~content:"first comment" ~ttl_hours:0 ()));
   ignore (require_board (Board.vote store ~voter:"fresh-voter" ~post_id ~direction:Board.Up));
+  load_policy store;
   ignore (require_board (Board.create_sub_board store ~slug:"fresh" ~name:"fresh"
     ~description:"first topic in a fresh workspace" ~owner:"source-writer" ()));
   Board.flush_dirty store;
@@ -889,6 +903,7 @@ let test_auxiliary_writes_never_read_posts base_path _workspace =
   let posts_calls = ref 0 in
   let store = Board.create_store_with_source_io_for_testing ~base_path
     ~io:{ posts = Some (counting_io posts_calls) } () in
+  load_policy store;
   let create_topic slug = Board.create_sub_board store ~slug ~name:slug
     ~description:"auxiliary source without a posts load" ~owner:"source-writer" () in
   ignore (require_board (create_topic "auxiliary-only"));
@@ -1107,6 +1122,7 @@ let test_settle_absent_retry_stays_fenced base_path _workspace =
 let test_settle_preserves_memory_tables base_path _workspace =
   let store, _, armed, _, _ = fault_store base_path in
   load_posts store 0;
+  load_votes store;
   let post = require_post (create store "memory canary post") in
   let post_id = Board.Post_id.to_string post.id in
   require_board (Board.set_thread_id store ~post_id ~thread_id:"canary-thread");

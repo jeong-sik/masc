@@ -3,7 +3,7 @@
     Tests for MCP Progress Notifications:
     - progress: record type
     - validation_error: TaskIdEmpty, TaskIdTooLong, TaskIdInvalidChars, ProgressOutOfRange
-    - validate_task_id, validate_progress
+    - validate_progress
     - validation_error_to_string
     - progress_to_jsonrpc
     - Tracker module
@@ -12,45 +12,6 @@
 open Alcotest
 
 module Progress = Masc.Progress
-
-(* ============================================================
-   validate_task_id Tests
-   ============================================================ *)
-
-let test_validate_task_id_valid () =
-  match Progress.validate_task_id "task-001" with
-  | Ok s -> check string "valid" "task-001" s
-  | Error _ -> fail "should be valid"
-
-let test_validate_task_id_printable_ascii () =
-  match Progress.validate_task_id "Task_123-test" with
-  | Ok s -> check string "printable" "Task_123-test" s
-  | Error _ -> fail "should be valid"
-
-let test_validate_task_id_empty () =
-  match Progress.validate_task_id "" with
-  | Ok _ -> fail "should reject empty"
-  | Error Progress.TaskIdEmpty -> ()
-  | Error _ -> fail "expected TaskIdEmpty"
-
-let test_validate_task_id_too_long () =
-  let long = String.make 300 'a' in
-  match Progress.validate_task_id long with
-  | Ok _ -> fail "should reject too long"
-  | Error (Progress.TaskIdTooLong n) -> check bool "length > 256" true (n > 256)
-  | Error _ -> fail "expected TaskIdTooLong"
-
-let test_validate_task_id_invalid_chars () =
-  match Progress.validate_task_id "task\x00id" with
-  | Ok _ -> fail "should reject invalid chars"
-  | Error Progress.TaskIdInvalidChars -> ()
-  | Error _ -> fail "expected TaskIdInvalidChars"
-
-let test_validate_task_id_max_length () =
-  let max = String.make 256 'x' in
-  match Progress.validate_task_id max with
-  | Ok s -> check int "max length ok" 256 (String.length s)
-  | Error _ -> fail "should accept 256 chars"
 
 (* ============================================================
    validate_progress Tests
@@ -222,14 +183,6 @@ let test_progress_record_minimal () =
 
 let () =
   run "Progress Coverage" [
-    "validate_task_id", [
-      test_case "valid" `Quick test_validate_task_id_valid;
-      test_case "printable ascii" `Quick test_validate_task_id_printable_ascii;
-      test_case "empty" `Quick test_validate_task_id_empty;
-      test_case "too long" `Quick test_validate_task_id_too_long;
-      test_case "invalid chars" `Quick test_validate_task_id_invalid_chars;
-      test_case "max length" `Quick test_validate_task_id_max_length;
-    ];
     "validate_progress", [
       test_case "valid" `Quick test_validate_progress_valid;
       test_case "zero" `Quick test_validate_progress_zero;

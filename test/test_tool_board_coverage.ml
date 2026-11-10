@@ -1234,6 +1234,11 @@ let test_masc_board_configured_moderator_can_close_and_reopen () =
   Alcotest.(check bool) "invalid config is named" true
     (String_util.contains_substring (Tool_result.message invalid)
        "board.moderators configuration");
+  Alcotest.(check bool) "invalid config is a runtime failure" true
+    (match invalid with
+     | Tool_result.Failed { Tool_result.class_ = Tool_result.Runtime_failure; _ }
+       -> true
+     | _ -> false);
   match Board_dispatch.get_post ~reader:Masc_board_handlers.Board_access.Operator ~post_id with
   | Ok post -> Alcotest.(check bool) "refused closes leave post open" true
       (Option.is_none post.closed)
@@ -1601,7 +1606,15 @@ let test_committed_board_projection_failure_reaches_callers_as_completed () =
   let activity_path = Filename.concat (Workspace.masc_dir config) Activity_graph.store_dirname in
   Out_channel.with_open_bin activity_path (fun channel -> output_string channel "blocked activity store");
   let name = Tool_name.Board_name.to_string Tool_name.Board_name.Board_post in
-  let arguments = `Assoc ["content", `String "A committed post survives projection failure"] in
+  (* Posting defaults to internal, and only a Public post reaches the activity
+     graph (mcp_tool_runtime_board.ml, public_created_post). This test needs the
+     projection attempt to happen and fail, so the post asks to be Public. *)
+  let arguments =
+    `Assoc
+      [ ("content", `String "A committed post survives projection failure")
+      ; ("visibility", `String "public")
+      ]
+  in
   let request = Mcp_server_eio_call_request.decode
       (Some (`Assoc ["name", `String name; "arguments", arguments])) |> Result.get_ok in
   let observed = ref None and dispatches = ref 0 in
@@ -1678,10 +1691,15 @@ let test_board_activity_does_not_complete_tasks () =
     result
   in
   let id result = Yojson.Safe.Util.(Tool_result.data result |> member "id" |> to_string) in
+  (* Only a Public post reaches the activity graph (mcp_tool_runtime_board.ml
+     public_created_post / public_post). Posting defaults to internal, so this
+     test asks for Public where it counts Board actions as observable. *)
   let posted = runtime "masc_board_post"
-    (make_args ["content", `String "A Board post is not a Task"]) |> id in
+    (make_args ["content", `String "A Board post is not a Task";
+                "visibility", `String "public"]) |> id in
   let other_post = dispatch_result "masc_board_post"
-    (make_args ["author", `String "other-author"; "content", `String "Discussion target"]) in
+    (make_args ["author", `String "other-author"; "content", `String "Discussion target";
+                "visibility", `String "public"]) in
   Alcotest.(check bool) "other author's post created" true (Tool_result.is_success other_post);
   let post_id = id other_post in
   ignore (runtime "masc_board_comment"
@@ -3184,12 +3202,23 @@ let test_vote_requires_explicit_direction () =
   with_eio @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
+  (* The direction is checked after the target exists. A missing post_id is
+     refused by the access pre-check, which can say nothing about the
+     direction, so the target has to be a real post and a real comment. *)
+  let parent = dispatch_result "masc_board_post"
+    (make_args [("author", `String "poster"); ("content", `String "vote direction")]) in
+  let post_id = Yojson.Safe.Util.(Tool_result.data parent |> member "id" |> to_string) in
+  let comment = dispatch_result "masc_board_comment"
+    (make_args
+       [ ("post_id", `String post_id); ("author", `String "poster")
+       ; ("content", `String "comment for vote direction") ]) in
+  let comment_id = Yojson.Safe.Util.(Tool_result.data comment |> member "id" |> to_string) in
   let empty_direction =
     dispatch_result
       "masc_board_vote"
       (make_args
          [
-           ("post_id", `String "missing");
+           ("post_id", `String post_id);
            ("voter", `String "v");
            ("direction", `String "");
          ])
@@ -3204,7 +3233,7 @@ let test_vote_requires_explicit_direction () =
   let missing_direction =
     dispatch_result
       "masc_board_vote"
-      (make_args [ ("post_id", `String "missing"); ("voter", `String "v") ])
+      (make_args [ ("post_id", `String post_id); ("voter", `String "v") ])
   in
   Alcotest.(check bool) "missing direction rejected" false (Tool_result.is_success missing_direction);
   check_failure_class
@@ -3220,7 +3249,7 @@ let test_vote_requires_explicit_direction () =
   let comment_missing_direction =
     dispatch_result
       "masc_board_comment_vote"
-      (make_args [ ("comment_id", `String "c-missing"); ("voter", `String "v") ])
+      (make_args [ ("comment_id", `String comment_id); ("voter", `String "v") ])
   in
   Alcotest.(check bool)
     "comment vote missing direction rejected"
@@ -3260,8 +3289,14 @@ let test_comment_add_missing_author_rejected () =
   with_eio @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
+  (* The post has to exist. A missing post_id is refused by the access
+     pre-check before the write ever looks at the author, so it can say
+     nothing about author validation. *)
+  let parent = dispatch_result "masc_board_post"
+    (make_args [("author", `String "poster"); ("content", `String "author check")]) in
+  let post_id = Yojson.Safe.Util.(Tool_result.data parent |> member "id" |> to_string) in
   let ok, body = dispatch "masc_board_comment"
-    (make_args [("post_id", `String "missing"); ("content", `String "hi")]) in
+    (make_args [("post_id", `String post_id); ("content", `String "hi")]) in
   Alcotest.(check bool) "missing author rejected" false ok;
   Alcotest.(check bool) "error mentions author" true
     (String_util.contains_substring body "author")
@@ -3270,9 +3305,12 @@ let test_comment_add_anonymous_author_rejected () =
   with_eio @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
+  let parent = dispatch_result "masc_board_post"
+    (make_args [("author", `String "poster"); ("content", `String "anonymous check")]) in
+  let post_id = Yojson.Safe.Util.(Tool_result.data parent |> member "id" |> to_string) in
   let ok, body = dispatch "masc_board_comment"
     (make_args
-       [("post_id", `String "missing"); ("content", `String "hi"); ("author", `String "anonymous")]) in
+       [("post_id", `String post_id); ("content", `String "hi"); ("author", `String "anonymous")]) in
   Alcotest.(check bool) "anonymous author rejected" false ok;
   Alcotest.(check bool) "error mentions author" true
     (String_util.contains_substring body "author")
@@ -3365,6 +3403,16 @@ let test_native_board_evidence_survives_lost_output ~cancelled () =
   Eio.Switch.run @@ fun sw ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
+  (* [cleanup] wipes the ledger directory, but the index keeps a store handle
+     per ledger directory in this process. A handle left from an earlier test
+     still holds cursor rows whose continuity file is gone, and this test's
+     first read then raises Continuity_unavailable instead of starting a fresh
+     generation. Drop the handle so the read opens the wiped directory. *)
+  Keeper_tool_call_index.forget_for_ledger
+    ~ledger_dir:
+      (Filename.concat
+         (Workspace.masc_dir (Workspace.default_config _test_base_path))
+         "tool_calls");
   let module Log = Keeper_tool_call_log in
   Keeper_registry.For_testing.clear ();
   Fun.protect ~finally:(fun () ->

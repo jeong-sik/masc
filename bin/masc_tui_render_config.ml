@@ -1275,9 +1275,9 @@ let render_themes (state : state) =
          (Theme.tool_origin ()) Ansi.reset);
     box_line buf cols
       (Printf.sprintf "  Syntax: %slet%s x = %s\"val\"%s in %s123%s  %s(+gain)%s  %s(-loss)%s"
-         Theme.Syntax.keyword Ansi.reset
-         Theme.Syntax.string Ansi.reset
-         Theme.Syntax.code_number Ansi.reset
+         (Theme.Syntax.keyword ()) Ansi.reset
+         (Theme.Syntax.string ()) Ansi.reset
+         (Theme.Syntax.code_number ()) Ansi.reset
          Theme.Syntax.diff_added Ansi.reset
          Theme.Syntax.diff_removed Ansi.reset);
   end;

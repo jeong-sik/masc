@@ -565,7 +565,8 @@ val get_sub_board : reader:Board_access.reader ->
   sub_board_id:string ->
   (Board.sub_board, Board.board_error) Result.t
 
-val list_sub_boards : reader:Board_access.reader -> unit -> Board.sub_board list
+val list_sub_boards : reader:Board_access.reader -> unit ->
+  (Board.sub_board list, Board.board_error) result
 
 val delete_sub_board :
   sub_board_id:string ->

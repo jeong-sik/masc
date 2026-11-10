@@ -401,17 +401,17 @@ let test_a_large_failure_keeps_the_warning_inline () =
       check str "the stored body is the service's text" answer
         (stored_body ~base_path marker)
 
+let block_the_blob_store ~base_path =
+  let root = Tool_blob_store.root_dir (Tool_blob_store.create ~base_path) in
+  Fs_compat.mkdir_p (Filename.dirname root);
+  Out_channel.with_open_bin root (fun channel ->
+    Out_channel.output_string channel "a file where the store's directory goes")
+
 (* A store that cannot keep the answer must not make a completed call look
    like one that can simply be sent again. *)
 let test_an_unstorable_answer_reports_the_call_as_completed () =
   let answer = oversized_answer () in
-  let block_the_store ~base_path =
-    let root = Tool_blob_store.root_dir (Tool_blob_store.create ~base_path) in
-    Fs_compat.mkdir_p (Filename.dirname root);
-    Out_channel.with_open_bin root (fun channel ->
-      Out_channel.output_string channel "a file where the store's directory goes")
-  in
-  match allowed_call ~before_call:block_the_store ~call_text:answer ~call_is_error:false () with
+  match allowed_call ~before_call:block_the_blob_store ~call_text:answer ~call_is_error:false () with
   | _, Ok output ->
       Alcotest.failf "an unstored answer reached the model as %d bytes"
         (String.length output.Agent_core.Types.content)
@@ -426,6 +426,169 @@ let test_a_small_answer_stays_inline () =
   | _, Ok output -> check str "the answer is inline" "PK-1" output.Agent_core.Types.content
   | _, Error error ->
       Alcotest.failf "an allowed read failed: %s" error.Agent_core.Types.message
+
+(* ── the observers: the dashboard series hears of every attached call ──── *)
+
+(* [Gate.agent_tool] answers Agent Core in Agent Core's types, so its calls
+   never pass through [Tool_dispatch.guarded_dispatch] or the Keeper exec
+   handler, the two places that fire the dispatch observers. The dashboard
+   series is written by one of those observers: until the tool fired them
+   itself, an attached tool's refused calls were its only rows there. *)
+let observed_calls run =
+  let seen = ref [] in
+  Tool_dispatch.clear_hooks ();
+  Fun.protect ~finally:Tool_dispatch.clear_hooks (fun () ->
+      Tool_dispatch.register_dispatch_observer (fun outcome result ->
+          match (outcome, result) with
+          | Dispatch_outcome.Handled, Some handled -> seen := handled :: !seen
+          | (Dispatch_outcome.Handled, None) | (Dispatch_outcome.No_handler, _) -> ());
+      let answer = run () in
+      (answer, List.rev !seen))
+
+let the_one_observed_call = function
+  | [ call ] -> call
+  | calls -> Alcotest.failf "expected one observed call, saw %d" (List.length calls)
+
+let failure_of observed =
+  match observed with
+  | Tool_result.Failed failure -> failure
+  | (Tool_result.Completed _ | Tool_result.Deferred _) as other ->
+      Alcotest.failf "expected a failed call, saw %s"
+        (Tool_result.string_of_disposition other)
+
+let test_a_completed_call_reaches_the_observers () =
+  let (_, answer), observed =
+    observed_calls (fun () -> allowed_call ~call_text:"PK-1" ~call_is_error:false ())
+  in
+  (match answer with
+   | Ok output ->
+       check str "the model still gets the answer" "PK-1" output.Agent_core.Types.content
+   | Error error ->
+       Alcotest.failf "an allowed read failed: %s" error.Agent_core.Types.message);
+  let call = the_one_observed_call observed in
+  check str "under the name the model calls it by" "atlassian_getJiraIssue"
+    (Tool_result.tool_name call);
+  check str "as completed" "completed" (Tool_result.string_of_disposition call);
+  check Alcotest.bool "with a measured duration" true (Tool_result.duration_ms call >= 0.0)
+
+(* A service that reports an error may have applied an effect first. The
+   observers get that and the class; the service's own words stay in the
+   tool-call row, because they are as long as the service makes them. *)
+let test_a_reported_error_reaches_the_observers_without_the_services_words () =
+  let words = "the-services-own-error-words" in
+  let (_, answer), observed =
+    observed_calls (fun () -> allowed_call ~call_text:words ~call_is_error:true ())
+  in
+  (match answer with
+   | Ok output ->
+       Alcotest.failf "a reported failure became a success: %s"
+         output.Agent_core.Types.content
+   | Error error ->
+       check Alcotest.bool "the model still reads the words" true
+         (contains ~needle:words error.Agent_core.Types.message));
+  let call = the_one_observed_call observed in
+  check str "as failed" "failed" (Tool_result.string_of_disposition call);
+  let failure = failure_of call in
+  check str "as a runtime failure"
+    (Tool_result.tool_failure_class_to_string Tool_result.Runtime_failure)
+    (Tool_result.tool_failure_class_to_string failure.Tool_result.class_);
+  check str "whose effect is unknown"
+    (Tool_result.failure_effect_disposition_to_string
+       Tool_result.Effect_outcome_unknown)
+    (Tool_result.failure_effect_disposition_to_string
+       failure.Tool_result.effect_disposition);
+  check Alcotest.bool "without the words" false
+    (contains ~needle:words failure.Tool_result.message)
+
+(* The tool-call row is written from what the model is given, and here the
+   model is given an error: the service completed the call, but its answer
+   could not be kept. The observers read the same, with the effect proven. *)
+let test_an_answer_that_cannot_be_kept_reaches_the_observers_as_post_effect () =
+  let (_, answer), observed =
+    observed_calls (fun () ->
+        allowed_call ~before_call:block_the_blob_store
+          ~call_text:(oversized_answer ()) ~call_is_error:false ())
+  in
+  (match answer with
+   | Ok output ->
+       Alcotest.failf "an unstored answer reached the model as %d bytes"
+         (String.length output.Agent_core.Types.content)
+   | Error _ -> ());
+  let call = the_one_observed_call observed in
+  check str "as failed, like the row" "failed" (Tool_result.string_of_disposition call);
+  let failure = failure_of call in
+  check str "after the effect"
+    (Tool_result.failure_effect_disposition_to_string Tool_result.Proven_post_effect)
+    (Tool_result.failure_effect_disposition_to_string
+       failure.Tool_result.effect_disposition)
+
+(* No clock means nothing was sent, and the observers are told so. *)
+let test_a_call_that_was_never_sent_reaches_the_observers_as_pre_effect () =
+  let base_path = temp_base () in
+  allow_external ~base_path;
+  let config = Masc.Workspace.default_config base_path in
+  let tool =
+    Gate.agent_tool ~config ~meta:(meta ())
+      ~inline_ceiling_bytes:(fun () -> Common.max_tool_result_wire_bytes)
+      (offered ~read_only:true "getJiraIssue")
+  in
+  let answer, observed =
+    observed_calls (fun () ->
+        Agent_core.Base.Tool.execute tool (`Assoc [ ("key", `String "PK-1") ]))
+  in
+  (match answer with
+   | Ok output ->
+       Alcotest.failf "a call with no clock ran: %s" output.Agent_core.Types.content
+   | Error _ -> ());
+  let failure = failure_of (the_one_observed_call observed) in
+  check str "the effect never began"
+    (Tool_result.failure_effect_disposition_to_string Tool_result.Proven_pre_effect)
+    (Tool_result.failure_effect_disposition_to_string
+       failure.Tool_result.effect_disposition)
+
+let test_a_deferral_reaches_the_observers_as_deferred () =
+  let base_path = temp_base () in
+  install_queue ~base_path;
+  let answer, observed =
+    observed_calls (fun () ->
+        execute ~post:(unreachable_transport ()) ~base_path
+          (offered "addCommentToJiraIssue")
+          (`Assoc [ ("key", `String "PK-1") ]))
+  in
+  (match answer with
+   | Ok _ -> ()
+   | Error error ->
+       Alcotest.failf "a deferral is an answer, not a failure: %s"
+         error.Agent_core.Types.message);
+  let call = the_one_observed_call observed in
+  check str "under the name the model calls it by" "atlassian_addCommentToJiraIssue"
+    (Tool_result.tool_name call);
+  check str "as deferred" "deferred" (Tool_result.string_of_disposition call)
+
+(* A Gate that cannot record its decision runs nothing; that is a dependency
+   being down, not a fault in the call. A workspace whose approval queue was
+   never installed is such a Gate: a deferral has nowhere to be written. *)
+let test_an_unavailable_gate_reaches_the_observers_as_a_dependency_failure () =
+  let base_path = temp_base () in
+  let answer, observed =
+    observed_calls (fun () ->
+        execute ~post:(unreachable_transport ()) ~base_path
+          (offered ~read_only:true "getJiraIssue")
+          (`Assoc [ ("key", `String "PK-1") ]))
+  in
+  (match answer with
+   | Ok output ->
+       Alcotest.failf "a call ran with no Gate decision: %s"
+         output.Agent_core.Types.content
+   | Error _ -> ());
+  let failure = failure_of (the_one_observed_call observed) in
+  check str "as a dependency failure"
+    (Tool_result.tool_failure_class_to_string Tool_result.Dependency_unavailable)
+    (Tool_result.tool_failure_class_to_string failure.Tool_result.class_);
+  check str "before any effect"
+    (Tool_result.failure_effect_disposition_to_string Tool_result.Proven_pre_effect)
+    (Tool_result.failure_effect_disposition_to_string
+       failure.Tool_result.effect_disposition)
 
 (* Real queue, grant, Gate and client wiring, with only the remote HTTP
    answers stubbed. This intentionally exercises the direct identity replay
@@ -768,6 +931,22 @@ let () =
             `Quick test_an_unstorable_answer_reports_the_call_as_completed;
           Alcotest.test_case "a small answer stays inline" `Quick
             test_a_small_answer_stays_inline;
+        ] );
+      ( "the observers",
+        [ Alcotest.test_case "a completed call reaches the observers" `Quick
+            test_a_completed_call_reaches_the_observers;
+          Alcotest.test_case
+            "a reported error reaches the observers without the service's words"
+            `Quick
+            test_a_reported_error_reaches_the_observers_without_the_services_words;
+          Alcotest.test_case "an answer that cannot be kept is post-effect" `Quick
+            test_an_answer_that_cannot_be_kept_reaches_the_observers_as_post_effect;
+          Alcotest.test_case "a call that was never sent is pre-effect" `Quick
+            test_a_call_that_was_never_sent_reaches_the_observers_as_pre_effect;
+          Alcotest.test_case "a deferral reaches the observers as deferred" `Quick
+            test_a_deferral_reaches_the_observers_as_deferred;
+          Alcotest.test_case "an unavailable Gate is a dependency failure" `Quick
+            test_an_unavailable_gate_reaches_the_observers_as_a_dependency_failure;
         ] );
       ( "the inversion",
         [ Alcotest.test_case "the gate input inverts" `Quick

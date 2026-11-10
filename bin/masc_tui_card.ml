@@ -25,20 +25,21 @@ let top_edge_fixed_cells = 5
 let repeat text count = String.concat "" (List.init (max 0 count) (fun _ -> text))
 let blank width = String.make (max 0 width) ' '
 
-let top_edge ~style ~width title =
+let top_edge ~rounded ~style ~width title =
   let room = max 0 (width - top_edge_fixed_cells) in
   let label_cells = min room (Layout.display_width title) in
   let label = Layout.fit_width title label_cells in
   let fill = width - top_edge_fixed_cells - label_cells in
   String.concat ""
-    [ style.edge; Box.tl; Box.h; " "; style.reset
+    [ style.edge; (if rounded then "╭" else Box.tl); Box.h; " "; style.reset
     ; style.title_style; label; style.reset
-    ; style.edge; " "; repeat Box.h fill; Box.tr; style.reset
+    ; style.edge; " "; repeat Box.h fill; (if rounded then "╮" else Box.tr); style.reset
     ]
 
-let bottom_edge ~style ~width =
+let bottom_edge ~rounded ~style ~width =
   String.concat ""
-    [ style.edge; Box.bl; repeat Box.h (width - 2); Box.br; style.reset ]
+    [ style.edge; (if rounded then "╰" else Box.bl); repeat Box.h (width - 2);
+      (if rounded then "╯" else Box.br); style.reset ]
 
 let body_row ~style ~width content =
   String.concat ""
@@ -63,19 +64,19 @@ let window ~style ~rows body =
 (* [body] is the rows already asked of the card at its content width, so a
    body that wraps is asked once per card however many times the layout reads
    its height. *)
-let render_body ~style ~width ~height ~title body =
+let render_body ~rounded ~style ~width ~height ~title body =
   if width < min_width || height < min_height then
     List.init (max 0 height) (fun _ -> blank width)
   else begin
     let rows = height - 2 in
     let body = window ~style ~rows body in
     let filler = List.init (rows - List.length body) (fun _ -> "") in
-    (top_edge ~style ~width title :: List.map (body_row ~style ~width) (body @ filler))
-    @ [ bottom_edge ~style ~width ]
+    (top_edge ~rounded ~style ~width title :: List.map (body_row ~style ~width) (body @ filler))
+    @ [ bottom_edge ~rounded ~style ~width ]
   end
 
-let render ~style ~width ~height card =
-  render_body ~style ~width ~height ~title:card.title
+let render ?(rounded=false) ~style ~width ~height card =
+  render_body ~rounded ~style ~width ~height ~title:card.title
     (card.body ~cells:(content_cells ~width))
 
 let columns_that_fit ~inner_width ~gap ~min_card_width ~max_columns =
@@ -114,7 +115,7 @@ let column_rows ~style ~row_gap ~width ~height prepared =
     List.mapi
       (fun index (title, body) ->
          let card_height = natural_height body + if index = last then extra else 0 in
-         render_body ~style ~width ~height:card_height ~title body)
+         render_body ~rounded:false ~style ~width ~height:card_height ~title body)
       prepared
   in
   let gap_rows = List.init row_gap (fun _ -> blank width) in

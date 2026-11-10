@@ -10,7 +10,7 @@ open Masc_tui_types
 
 val tools_pane_strip : cols:int -> state -> string
 (** The pane selector drawn in the surface header, with the active pane
-    marked. *)
+    marked. The volume reading is a child of the catalog, not another tab. *)
 
 val tools_selection_line : cols:int -> state -> string
 (** Pinned action target, sharing the exact selection used by Enter/edit.
@@ -27,4 +27,6 @@ val tools_display_lines : ?cols:int -> ?terminal_rows:int -> state -> (string * 
     tool whose evidence wraps is more than one row. [cols] defaults to 80;
     pass the viewport width for usage cards, complete metadata wrapping and
     matching physical-row scroll geometry. Rows that already fit retain their
-    alignment and card borders; revisions and timestamps remain literal. *)
+    alignment and card borders; revisions and timestamps remain literal.
+    Each pane starts with its observed content and read notices. Static
+    scope and column legends are in the Tools section's Help binding. *)

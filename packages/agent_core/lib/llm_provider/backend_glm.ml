@@ -374,29 +374,6 @@ let parse_response_result
      | Yojson.Safe.Util.Undefined (msg, _) -> raise (glm_parse_error msg))
 ;;
 
-(* Raising wrapper over [parse_response_result] for raise-style callers and the
-   coverage tests: returns the [api_response] on success and raises
-   [Glm_api_error] on any parse/provider error (an empty completion raises the
-   pre-#2621 "empty assistant turn" message instead of surfacing its typed
-   [stop_reason]). Production paths use [parse_response_result] directly so an
-   overflow empty turn's [stop_reason] reaches the overflow classifier. *)
-let parse_response ?content_inline_reasoning body =
-  match parse_response_result ?content_inline_reasoning body with
-  | Ok resp -> resp
-  | Error
-      (Backend_openai_parse.Provider_error
-        { message; error_type = _; provider_status = _; report = _ })
-  | Error (Backend_openai_parse.Unreadable_response message) ->
-    raise (glm_parse_error message)
-  | Error (Backend_openai_parse.Empty_completion empty_comp) ->
-    let stop_reason_str = Types.stop_reason_to_string empty_comp.stop_reason in
-    raise
-      (glm_parse_error
-         (Printf.sprintf
-            "empty completion (stop_reason=%s): provider returned an empty assistant turn"
-            stop_reason_str))
-;;
-
 (* ── Streaming ───────────────────────────────────── *)
 
 (** Parse a GLM SSE chunk using the resolved model/provider dialect.

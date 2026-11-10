@@ -117,10 +117,12 @@ val h2_config : unit -> H2.Config.t
     {!H2_response_limits}. *)
 
 val serve_h2_connection :
+  clock:_ Eio.Time.clock ->
   ?streams:Server_h2_stream_registry.t ->
   ?resources:Http_h2_response_ledger.t ->
   sw:Eio.Switch.t ->
-  h2_request_handler:(request_sw:Eio.Switch.t -> Eio.Net.Sockaddr.stream -> H2.Reqd.t -> unit) ->
+  h2_request_handler:
+    (stream_end:Http_h2_stream.Stream_end.t -> Eio.Net.Sockaddr.stream -> H2.Reqd.t -> unit) ->
   h2_error_handler:
     (Eio.Net.Sockaddr.stream -> ?request:H2.Request.t -> H2.Server_connection.error -> (H2.Headers.t -> H2.Body.Writer.t) -> unit) ->
   Eio.Net.Sockaddr.stream ->
@@ -130,10 +132,18 @@ val serve_h2_connection :
     failure cancels pending requests and their children, including response
     producers, without waiting for an occupied CPU pool.
 
-    Each request stream runs under its own switch in [streams] (a fresh
-    registry when omitted), and [h2_request_handler] receives that stream
-    switch as [request_sw]. A peer RST_STREAM releases the stream's entry and
-    cancels its work and children at once; a finished response releases the
+    Each request stream runs in its own scope in [streams], and
+    [h2_request_handler] receives that scope as [stream_end]: the stream's
+    switch and the bound on its response flushes. When [streams] is omitted,
+    a fresh registry bounds response flushes by [clock] and
+    {!Server_mcp_transport_http_headers.sse_stalled_after_s}.
+
+    A stream's work and children are cancelled at once when a RST_STREAM goes
+    either way: one the peer sends, one h2 writes for an error masc reported
+    or found itself, or the RST_STREAM(NO_ERROR) h2 writes after a complete
+    response while the request is still open. A handler exception resets the
+    stream ([Raised]), and so does a response flush the peer leaves
+    unanswered past the bound ([Stalled]). A finished response releases the
     entry when its work returns. Siblings and the connection keep running.
 
     The finite peer-stream limit comes from {!H2_response_limits}.
@@ -146,7 +156,8 @@ val serve_h2 :
   clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
   socket:[> [> `Generic | `Unix ] Eio.Net.listening_socket_ty ] Eio.Resource.t ->
   addr_label:string ->
-  h2_request_handler:(request_sw:Eio.Switch.t -> Eio.Net.Sockaddr.stream -> H2.Reqd.t -> unit) ->
+  h2_request_handler:
+    (stream_end:Http_h2_stream.Stream_end.t -> Eio.Net.Sockaddr.stream -> H2.Reqd.t -> unit) ->
   h2_error_handler:
     (Eio.Net.Sockaddr.stream -> ?request:H2.Request.t -> H2.Server_connection.error -> (H2.Headers.t -> H2.Body.Writer.t) -> unit) ->
   unit
@@ -160,7 +171,8 @@ val serve_auto :
   socket:[> [> `Generic | `Unix ] Eio.Net.listening_socket_ty ] Eio.Resource.t ->
   addr_label:string ->
   request_handler:(Eio.Net.Sockaddr.stream -> Httpun.Reqd.t Gluten.Reqd.t -> unit) ->
-  h2_request_handler:(request_sw:Eio.Switch.t -> Eio.Net.Sockaddr.stream -> H2.Reqd.t -> unit) ->
+  h2_request_handler:
+    (stream_end:Http_h2_stream.Stream_end.t -> Eio.Net.Sockaddr.stream -> H2.Reqd.t -> unit) ->
   h2_error_handler:
     (Eio.Net.Sockaddr.stream -> ?request:H2.Request.t -> H2.Server_connection.error -> (H2.Headers.t -> H2.Body.Writer.t) -> unit) ->
   unit
@@ -177,7 +189,8 @@ val serve_tls :
   addr_label:string ->
   tls:Tls.Config.server ->
   request_handler:(Eio.Net.Sockaddr.stream -> Httpun.Reqd.t Gluten.Reqd.t -> unit) ->
-  h2_request_handler:(request_sw:Eio.Switch.t -> Eio.Net.Sockaddr.stream -> H2.Reqd.t -> unit) ->
+  h2_request_handler:
+    (stream_end:Http_h2_stream.Stream_end.t -> Eio.Net.Sockaddr.stream -> H2.Reqd.t -> unit) ->
   h2_error_handler:
     (Eio.Net.Sockaddr.stream -> ?request:H2.Request.t -> H2.Server_connection.error -> (H2.Headers.t -> H2.Body.Writer.t) -> unit) ->
   unit

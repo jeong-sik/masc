@@ -42,12 +42,12 @@ type status_item =
       }
   (* The server's rollup says the operator has to act: credit to add, a key to
      change, a Keeper to move to a route with quota left (RFC-0484 §3.3).
-     [first] is the first reason, [count] how many there are. Built only from
-     a non-empty list, so the notice always has a reason to show. A row too
-     narrow for the reason keeps the count. *)
+     [notice] summarizes the observed count in the current UI language;
+     [detail] names where to read every reason. Built only from a non-empty
+     list. A narrow row keeps the notice, without clipping a diagnostic. *)
   | Operator_action of
-      { first : string
-      ; count : int
+      { notice : string
+      ; detail : string
       }
   | Port of int
 
@@ -139,10 +139,9 @@ let status_item_projection = function
       ; retention = Armed_action
       ; shorter = []
       }
-  | Operator_action { first; count } ->
-    let notice = Printf.sprintf "ACTION NEEDED %d" count in
+  | Operator_action { notice; detail } ->
     Some
-      { text = Printf.sprintf "%s \xc2\xb7 %s" notice first
+      { text = Printf.sprintf "%s \xc2\xb7 %s" notice detail
       ; retention = Operator_notice
       ; shorter = [ notice ]
       }

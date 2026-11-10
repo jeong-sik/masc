@@ -34,13 +34,6 @@ let test_production_shapes () =
   check_found "run" ("ok" ^ repeat 300 "!") ~max_period:2730 ~min_copies:3 ~span:300 ~period:1
 ;;
 
-let test_unit_is_the_first_period_of_the_suffix () =
-  let s = "prefix " ^ repeat 5 "abc" in
-  match P.find s ~max_period:10 ~min_copies:3 with
-  | Some found -> Alcotest.(check string) "cycle" "abc" (P.cycle s found)
-  | None -> Alcotest.fail "five copies of abc must be found"
-;;
-
 (* A partial last copy still counts toward the span; copies are span / period. *)
 let test_partial_last_copy_extends_the_span () =
   check_found "partial" (repeat 4 "abcd" ^ "ab") ~max_period:10 ~min_copies:3 ~span:18 ~period:4
@@ -86,7 +79,6 @@ let () =
     "periodic_suffix"
     [ ( "find"
       , [ Alcotest.test_case "production loop shapes" `Quick test_production_shapes
-        ; Alcotest.test_case "unit is the first period" `Quick test_unit_is_the_first_period_of_the_suffix
         ; Alcotest.test_case "partial last copy extends the span" `Quick test_partial_last_copy_extends_the_span
         ; Alcotest.test_case "below min copies" `Quick test_below_min_copies_is_not_periodic
         ; Alcotest.test_case "period above max" `Quick test_period_above_max_is_not_periodic

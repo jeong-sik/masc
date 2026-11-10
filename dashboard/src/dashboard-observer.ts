@@ -12,6 +12,8 @@ import { parseSSEMessage } from './schemas/sse'
 import { recordServerPushEvent } from './sse'
 import { routeServerPushEvent } from './sse-store'
 import type { DashboardObservationTopic } from './lib/observation-refresh'
+import { captureDashboardObservationOwner } from './lib/observation-read-owner'
+import { rejectOperatorSnapshotFrame, type OperatorSnapshotObservationSource } from './operator-snapshot-observation'
 import {
   dashboardObserverConnected, dashboardObserverReady, dashboardObserverLastError,
   dashboardObserverLastActivityAt, noteDashboardObserverReady,
@@ -28,7 +30,7 @@ let unsubscribeToken: (() => void) | null = null
 let credentialRecovery: 'available' | 'in_flight' | 'spent' = 'available'
 
 /** Decode at the wire boundary. A scope always retains its original authority. */
-export function receiveDashboardObserverEvent(raw: unknown): void {
+export function receiveDashboardObserverEvent(raw: unknown, source?: OperatorSnapshotObservationSource): void {
   if (!isRecord(raw)) return
   const candidate = raw.jsonrpc && isRecord(raw.params) && typeof raw.params.type === 'string'
     ? raw.params : raw
@@ -53,7 +55,13 @@ export function receiveDashboardObserverEvent(raw: unknown): void {
     return
   }
   const event = parseSSEMessage(candidate)
-  if (!event) return
+  if (!event) {
+    if (candidate.type === 'operator_snapshot') {
+      noteDashboardObserverRejectedFrame('Operator Snapshot observation envelope is invalid')
+      if (source !== undefined) rejectOperatorSnapshotFrame(candidate.payload, source)
+    }
+    return
+  }
   batch(() => {
     noteDashboardObserverEvent()
     recordServerPushEvent(event)
@@ -102,6 +110,7 @@ async function observe(attempt: number, abort: AbortController): Promise<void> {
   try {
     await ensureDevToken()
     if (!current(attempt) || abort.signal.aborted) return
+    const authority = captureDashboardObservationOwner()
     deadline = setTimeout(() => { timedOut = true; abort.abort() }, DEFAULT_GET_TIMEOUT_MS)
     const response = await fetchControlPlane('/mcp?sse_kind=observer', {
       signal: abort.signal,
@@ -152,7 +161,7 @@ async function observe(attempt: number, abort: AbortController): Promise<void> {
     publishDashboardObservationRecovery()
     await readSse(body, (_event, data) => {
       if (!current(attempt)) return
-      try { receiveDashboardObserverEvent(JSON.parse(data)) }
+      try { receiveDashboardObserverEvent(JSON.parse(data), { authority, instance }) }
       catch (error) {
         noteDashboardObserverRejectedFrame(errorToString(error))
       }

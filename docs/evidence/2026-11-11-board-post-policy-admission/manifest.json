@@ -1,0 +1,18 @@
+{
+  "at": "2026-11-10T16:32:23.724619+00:00",
+  "source_base": "9188d8050faf685b4614976f131d85832b6fdd39",
+  "source_heads": {
+    "lower": "36cdb66c69c0202ba3f36996548f716f1f7239ce",
+    "upper": "3e33991e21dd7137d916ea6151cffaa62152d00a"
+  },
+  "unchanged_copy_sha256": {
+    "validation.json": "58e494bb1961a9e4b0a48c9fef29b81e94be91d1dc4ec8b05354ff06b710bfb9",
+    "reconstruction-on-main.json": "56f65b9ed3fc49ef8706bd24b30af665495f5c4250f50bf7be04d00ae3d3742a"
+  },
+  "payloads": {
+    "README.md": "c695ae15655bb59cfcc06a3716ce1aa8b57e46a43396ac19ff808aaaeee51aaf",
+    "reconstruction-on-main.json": "56f65b9ed3fc49ef8706bd24b30af665495f5c4250f50bf7be04d00ae3d3742a",
+    "source-reviews.json": "1d1c004c0abac64aad4fd458c671de1461696c93b55ee7573d23096ac89b4546",
+    "validation.json": "58e494bb1961a9e4b0a48c9fef29b81e94be91d1dc4ec8b05354ff06b710bfb9"
+  }
+}

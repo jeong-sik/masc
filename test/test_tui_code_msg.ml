@@ -202,6 +202,36 @@ let test_a_binary_file_has_no_text_to_edit_or_copy () =
   Alcotest.(check bool) "and is editable" true
     (Result.is_ok (Code.prepare_draft state))
 
+let test_revalidation_reuses_only_its_original_document () =
+  let text = Bytes.to_string (Bytes.of_string "let value = 42\r\n") in
+  let source : Masc.Tui_decode.workspace_file_source =
+    { wfs_content = text; wfs_revision = String.make 64 'a' } in
+  let prepared = Code.prepare_file ~path:"src/a.ml" source in
+  let retained = "src/a.ml", prepared.Types.cpf_document in
+  let fresh_source : Masc.Tui_decode.workspace_file_source =
+    { wfs_content = text; wfs_revision = source.wfs_revision } in
+  let reused = match Code.reuse_file ~path:"src/a.ml" retained fresh_source with
+    | Some reading -> reading
+    | None -> Alcotest.fail "validated original content was not reused" in
+  Alcotest.(check bool) "the retained immutable document is shared" true
+    (reused.cpf_document == prepared.cpf_document);
+  Alcotest.(check bool) "the fresh source still owns draft observation" true
+    (reused.cpf_source == fresh_source);
+  let refused label path source =
+    Alcotest.(check bool) label true (Option.is_none (Code.reuse_file ~path retained source)) in
+  refused "another path cannot borrow preparation" "src/b.ml" fresh_source;
+  refused "another revision cannot borrow preparation" "src/a.ml"
+    { fresh_source with wfs_revision = String.make 64 'b' };
+  refused "fresh decoded bytes require preparation" "src/a.ml"
+    { fresh_source with wfs_content = Bytes.to_string (Bytes.of_string text) };
+  refused "changed bytes require preparation" "src/a.ml"
+    { fresh_source with wfs_content = "different" };
+  let binary = Code.prepare_file ~path:"image.png"
+    { wfs_content = "\000PNG"; wfs_revision = String.make 64 'a' } in
+  Alcotest.(check bool) "binary size alone cannot stand for original content" true
+    (Option.is_none (Code.reuse_file ~path:"image.png"
+      ("image.png", binary.cpf_document) binary.cpf_source))
+
 let () =
   Alcotest.run "tui code msg"
     [ ( "classifiers"
@@ -215,4 +245,6 @@ let () =
         ; Alcotest.test_case "a committed save asks to read its file again" `Quick
             test_a_committed_save_rereads_its_file
         ; Alcotest.test_case "a binary file has no text to edit or copy" `Quick
-            test_a_binary_file_has_no_text_to_edit_or_copy ] ) ]
+            test_a_binary_file_has_no_text_to_edit_or_copy
+        ; Alcotest.test_case "revalidation retains the original immutable document" `Quick
+            test_revalidation_reuses_only_its_original_document ] ) ]

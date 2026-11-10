@@ -145,8 +145,10 @@ let test_unknown_rewrite_retains_exact_deletion_bytes base_path =
   let restarted = fresh_store base_path in
   Alcotest.(check int) "a fresh store can observe the current empty ledger" 0
     (require (Board.reload_votes restarted));
-  Alcotest.(check bool) "the completed parent deletion is visible to a fresh store" true
-    (Result.is_error (Board.get_post restarted ~post_id:(Board.Post_id.to_string parent.id)));
+  (match Board.read_post restarted ~post_id:(Board.Post_id.to_string parent.id) with
+   | Error (Board.Read_post_not_found _) -> ()
+   | Error error -> Alcotest.fail (Board.show_board_read_error error)
+   | Ok _ -> Alcotest.fail "the completed parent deletion reappeared");
   check_retained ()
 
 let test_known_append_publishes_before_reserved_cleanup base_path =
@@ -181,11 +183,11 @@ let test_known_append_publishes_before_reserved_cleanup base_path =
    | Some Board.Up -> ()
    | Some Board.Down | None -> Alcotest.fail "known append was not published before cleanup escaped");
   Alcotest.(check int) "the accepted vote changed the model exactly once" 1
-    (require (Board.get_post store ~post_id:(Board.Post_id.to_string parent.id))).votes_up;
+    (read_post store parent).votes_up;
   ignore (require (cast store parent "next-voter"));
   let restarted = fresh_store base_path in
   Alcotest.(check int) "the known append and a subsequent cast both survive a fresh store" 2
-    (require (Board.get_post restarted ~post_id:(Board.Post_id.to_string parent.id))).votes_up
+    (read_post restarted parent).votes_up
 
 let () =
   Alcotest.run "board_votes_source"

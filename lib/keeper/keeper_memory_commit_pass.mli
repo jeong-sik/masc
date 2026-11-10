@@ -14,5 +14,8 @@ type t =
   | Keeper_delete
   | Operator_delete
 
+val all : t list
+(** Every pass once, in the order above. *)
+
 val to_label : t -> string
 (** The [pass] label value of the Memory change metrics. *)

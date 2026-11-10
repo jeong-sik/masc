@@ -8,6 +8,7 @@ import {
   publishDashboardObservationRecovery,
   selectObservationReadFailure,
   setupObservationRefresh,
+  ObservationPending,
 } from './observation-refresh'
 
 const disposers: Array<() => void> = []
@@ -31,6 +32,35 @@ afterEach(() => {
 })
 
 describe('authoritative observation reads', () => {
+  it('waits for a pending producer without creating a retry timer', async () => {
+    vi.useFakeTimers()
+    const read = vi.fn(async () => { throw new ObservationPending('producer is pending') })
+    disposers.push(setupObservationRefresh(read, { topics: ['keeper_composite'] }))
+    await flush()
+    await vi.advanceTimersByTimeAsync(300_000)
+    expect(read).toHaveBeenCalledTimes(1)
+    expect(vi.getTimerCount()).toBe(0)
+    publishDashboardObservationChange({ topic: 'keeper_composite' })
+    await flush()
+    expect(read).toHaveBeenCalledTimes(2)
+  })
+
+  it('preserves a trailing invalidation received during a pending read', async () => {
+    let finish!: () => void
+    const read = vi.fn(async () => {
+      if (read.mock.calls.length === 1) {
+        await new Promise<void>(resolve => { finish = resolve })
+        throw new ObservationPending('producer is pending')
+      }
+    })
+    disposers.push(setupObservationRefresh(read, { topics: ['keeper_composite'] }))
+    await flush()
+    publishDashboardObservationChange({ topic: 'keeper_composite' })
+    finish()
+    await flush(); await flush()
+    expect(read).toHaveBeenCalledTimes(2)
+  })
+
   it('preserves a combined read refusal ahead of a transient sibling failure', () => {
     const transient = new Error('temporary failure')
     const refused = new ApiRequestError({ method: 'GET', path: '/fixture', status: 403 })

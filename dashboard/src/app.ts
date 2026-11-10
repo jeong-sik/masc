@@ -20,7 +20,7 @@ import { route, initRouter } from './router'
 import { requestNamespaceTruthNow, disposeNamespaceTruthScheduler } from './namespace-truth-store'
 import { cancelPendingServerPushRefreshes, registerGateRefresh, registerMissionRefresh, setupServerPushReaction, startPeriodicRefresh, stopPeriodicRefresh } from './sse-store'
 import { initNotificationDelivery } from './notifications'
-import { refreshShell } from './store'
+import { refreshShell, setupShellObservation } from './store'
 import { connectDashboardWS, disconnectDashboardWS, subscribeDashboardRoute } from './dashboard-ws'
 import {
   devTokenBootstrapNeedsReadinessProbe,
@@ -161,6 +161,8 @@ export function App() {
 
   useEffect(() => {
     let cancelled = false
+    const shellBoot = new AbortController()
+    const stopShellObservation = setupShellObservation()
     let devTokenReadinessTimer: number | null = null
 
     // Initialize hash router and compatible deep links
@@ -184,7 +186,7 @@ export function App() {
       .finally(() => {
         if (cancelled) return
         scheduleDevTokenReadinessProbe()
-        void refreshShell({ light: true })
+        void refreshShell({ light: true, signal: shellBoot.signal })
         requestNamespaceTruthNow()
 
         void connectDashboardWS(route.value)
@@ -222,6 +224,8 @@ export function App() {
 
     return () => {
       cancelled = true
+      shellBoot.abort()
+      stopShellObservation()
       if (devTokenReadinessTimer !== null) {
         window.clearTimeout(devTokenReadinessTimer)
         devTokenReadinessTimer = null

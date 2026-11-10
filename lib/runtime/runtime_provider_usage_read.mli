@@ -219,7 +219,9 @@ val read_after_account_refusal :
     projection. A failed read rests nothing. *)
 
 val http_read_of_runtime : Runtime_instance.t -> http_read option
-(** The runtime's HTTP usage read when its provider declares [usage-read]. *)
+(** The runtime's HTTP usage read when its provider declares [usage-read]. A
+    process that {!Runtime_account_access.authorize_api} refuses has none:
+    the read would send the key the operator declared (plan D4). *)
 
 type account_refusal_skip =
   | Scope_rest_dated

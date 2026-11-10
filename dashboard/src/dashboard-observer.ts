@@ -16,6 +16,7 @@ import {
   dashboardObserverConnected, dashboardObserverReady, dashboardObserverLastError,
   dashboardObserverLastActivityAt, noteDashboardObserverReady,
   noteDashboardObserverDisconnected, noteDashboardObserverEvent,
+  noteDashboardObserverRejectedFrame,
 } from './dashboard-observer-state'
 
 let running = false
@@ -150,7 +151,11 @@ async function observe(attempt: number, abort: AbortController): Promise<void> {
     // Every reconnect requests a fresh stream and re-reads mounted scopes.
     publishDashboardObservationRecovery()
     await readSse(body, (_event, data) => {
-      if (current(attempt)) receiveDashboardObserverEvent(JSON.parse(data))
+      if (!current(attempt)) return
+      try { receiveDashboardObserverEvent(JSON.parse(data)) }
+      catch (error) {
+        noteDashboardObserverRejectedFrame(errorToString(error))
+      }
     }, {
       idleTimeoutMs,
       signal: abort.signal,

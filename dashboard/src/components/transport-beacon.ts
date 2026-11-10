@@ -15,6 +15,8 @@ import {
   dashboardObserverLastDisconnectedAt,
   dashboardObserverReconnectCount,
   dashboardObserverReady,
+  dashboardObserverRejectedFrameCount,
+  dashboardObserverLastRejectedFrameError,
 } from '../dashboard-observer-state'
 type BeaconState = 'green' | 'yellow' | 'red'
 
@@ -80,6 +82,10 @@ const beaconView = computed<BeaconView>(() => computeBeaconView({
 export function TransportBeacon() {
   const view = beaconView.value
   const details = [view.title, `Reconnect attempts ${dashboardObserverReconnectCount.value}`]
+  if (dashboardObserverRejectedFrameCount.value > 0) {
+    details.push(`Discarded frames in this tab: ${dashboardObserverRejectedFrameCount.value}`)
+    if (dashboardObserverLastRejectedFrameError.value) details.push(dashboardObserverLastRejectedFrameError.value)
+  }
   if (dashboardObserverLastDisconnectedAt.value > 0) {
     details.push(`Last disconnected ${new Date(dashboardObserverLastDisconnectedAt.value).toLocaleTimeString()}`)
   }

@@ -102,11 +102,20 @@ let keeper_attention_kind reason =
    attention, and every surface that draws one titles its list for that, so
    the row carries only what differs between rows: the Keeper's name, the
    attention reason after a colon, and the runtime blocker summary in
-   parentheses when there is one. *)
+   parentheses when there is one.
+
+   The parenthetical is this row's own preview, not the blocker summary the
+   source now carries whole: a digest row is one line among many, while the
+   full cause -- which the failure path can write as a few hundred bytes of
+   JSON -- stays one evidence field below ([evidence.runtime_blocker]). The
+   edge that needs brevity cuts here; no other reader of the summary loses
+   the rest. *)
 let keeper_attention_summary ~name ~reason ~runtime_blocker_summary =
   let reason = Keeper_attention_reason.to_wire reason in
   match runtime_blocker_summary with
-  | Some summary -> Printf.sprintf "%s: %s (%s)" name reason summary
+  | Some summary ->
+    Printf.sprintf "%s: %s (%s)" name reason
+      (Keeper_types_profile.short_preview ~max_len:160 summary)
   | None -> Printf.sprintf "%s: %s" name reason
 
 (* Waiting connector messages are read off the event queue, not off the

@@ -81,55 +81,54 @@ let recalculate_vote_counts store =
 ;;
 
 let load_persisted_votes store =
-  let path = Board_paths.store_file_path store Board_paths.Votes in
-  let workspace_check = Board_paths.check_workspace store in
-  let result = match workspace_check with
-    | Error rejection -> Error (path, Failure (Board_workspace_binding.rejection_to_string rejection))
-    | Ok () ->
-    if not (Fs_compat.file_exists path)
-    then (
-      recalculate_vote_counts store;
-      Ok 0)
-    else begin
+  let module Source = Board_votes_source in
+  with_persist_lock store (fun () ->
+    let path = Board_paths.store_file_path store Board_paths.Votes in
+    let open Result.Syntax in
+    let* () = Board_core_persist.require_model_reload_allowed store ~path in
+    let t0 = Time_compat.now () in
+    let outcome = Source.read store in
+    let install rows =
+      List.iter (fun (vote, direction, ts) ->
+        (* Target absence is not authority to discard an accepted vote. *)
+        Hashtbl.replace store.vote_log (Board_vote_key.to_string vote) (direction, ts)) rows;
+      store.karma_cache <- None in
+    let outcome =
       try
-      let t0 = Time_compat.now () in
-      let loaded = ref 0 in
-      let parsed =
-        Board_votes_json.load_source_rows
-          path
-          ~decode:Board_vote_row.of_yojson
-          ~accept:(fun (vote, direction, ts) ->
-            (* A vote is kept whether or not its post or comment is loaded.
-               The snapshot writes [store.vote_log] back whole, so a vote
-               skipped here is gone from disk at the next flush. On
-               2026-09-19 the posts file had been renamed away, the board
-               loaded no posts, and all 225 votes were skipped and then
-               overwritten. Deleting a post already removes its votes
-               ([delete_post]); a vote whose target is absent at load is not
-               stale data but a sign the target failed to load, and
-               [recalculate_vote_counts] leaves it out of every count. *)
-            Hashtbl.replace
-              store.vote_log
-              (Board_vote_key.to_string vote)
-              (direction, ts);
-            Stdlib.incr loaded)
-      in
-      if Result.is_ok parsed then recalculate_vote_counts store;
-      let elapsed = Time_compat.now () -. t0 in
-      Board_votes_json.log_loaded ~noun:"vote entries" ~loaded:!loaded ~path ~elapsed parsed;
-      Result.map (fun () -> !loaded) parsed
-      with
-      | Eio.Cancel.Cancelled _ as e -> raise e
-      | e -> Error (path, e)
-    end
-  in
-  let result = Board_votes_json.record_load_result
-    (fun result -> store.votes_load_result <- result) result in
-  Board_votes_json.propagate_workspace_check workspace_check;
-  result
+        with_lock store (fun () ->
+          match outcome with
+          | Source.Complete { rows; _ } ->
+            Hashtbl.clear store.vote_log;
+            install rows;
+            recalculate_vote_counts store
+          | Source.Partial { rows; _ } -> install rows
+          | Source.Unavailable _ -> ());
+        Source.publish_read store outcome;
+        outcome
+      with exception_ ->
+        Source.fail_read store outcome exception_ (Printexc.get_raw_backtrace ()) in
+    let finish outcome =
+      Source.finish_read outcome
+      |> Result.map_error (fun error -> path, Failure (show_board_error error)) in
+    try
+      (* Preserve a reserved read/cleanup cause before invoking the logger. *)
+      let result = finish outcome in
+      let loaded = match outcome with
+        | Source.Complete { rows; _ } | Source.Partial { rows; _ } -> List.length rows
+        | Source.Unavailable _ -> 0 in
+      Board_votes_json.log_loaded ~noun:"vote entries" ~loaded ~path
+        ~elapsed:(Time_compat.now () -. t0) (Result.map (fun _ -> ()) result);
+      result
+    with
+    | Board_posts_source.Reserved_settlement _ as carrier -> raise carrier
+    | exception_ ->
+      let outcome = Source.fail_read store outcome exception_ (Printexc.get_raw_backtrace ()) in
+      finish outcome)
 
 let load_persisted_reactions store =
   let path = Board_paths.store_file_path store Board_paths.Reactions in
+  let open Result.Syntax in
+  let* () = Board_core_persist.require_model_reload_allowed store ~path in
   let workspace_check = Board_paths.check_workspace store in
   let result = match workspace_check with
     | Error rejection -> Error (path, Failure (Board_workspace_binding.rejection_to_string rejection))
@@ -165,39 +164,5 @@ let load_persisted_reactions store =
   in
   let result = Board_votes_json.record_load_result
     (fun result -> store.reactions_load_result <- result) result in
-  Board_votes_json.propagate_workspace_check workspace_check;
-  result
-
-let load_persisted_sub_boards store =
-  let path = Board_paths.store_file_path store Board_paths.Sub_boards in
-  let workspace_check = Board_paths.check_workspace store in
-  let result = match workspace_check with
-    | Error rejection -> Error (path, Failure (Board_workspace_binding.rejection_to_string rejection))
-    | Ok () ->
-    if not (Fs_compat.file_exists path) then Ok 0
-    else begin
-      try
-      let t0 = Time_compat.now () in
-      let loaded = ref 0 in
-      let parsed =
-        Board_votes_json.load_source_rows
-          path
-          ~decode:sub_board_of_yojson
-          ~accept:(fun sb ->
-            let id = Sub_board_id.to_string sb.id in
-            Hashtbl.replace store.sub_boards id sb;
-            Hashtbl.replace store.sub_boards_by_slug sb.slug id;
-            Stdlib.incr loaded)
-      in
-      let elapsed = Time_compat.now () -. t0 in
-      Board_votes_json.log_loaded ~noun:"sub-boards" ~loaded:!loaded ~path ~elapsed parsed;
-      Result.map (fun () -> !loaded) parsed
-      with
-      | Eio.Cancel.Cancelled _ as e -> raise e
-      | e -> Error (path, e)
-    end
-  in
-  let result = Board_votes_json.record_load_result
-    (fun result -> store.sub_boards_load_result <- result) result in
   Board_votes_json.propagate_workspace_check workspace_check;
   result

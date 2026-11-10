@@ -171,7 +171,7 @@ let board_current_vote_for_post ~reader ~voter ~post_id =
   | Some voter -> (
       match Board_dispatch.current_vote_for_post ~reader ~voter ~post_id with
       | Ok vote -> Some vote
-      | Error _ -> Some None)
+      | Error _ -> None)
 
 let board_current_vote_for_comment ~reader ~voter ~comment_id =
   match voter with
@@ -179,7 +179,7 @@ let board_current_vote_for_comment ~reader ~voter ~comment_id =
   | Some voter -> (
       match Board_dispatch.current_vote_for_comment ~reader ~voter ~comment_id with
       | Ok vote -> Some vote
-      | Error _ -> Some None)
+      | Error _ -> None)
 
 let max_filtered_board_window = 5200
 

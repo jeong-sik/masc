@@ -588,9 +588,10 @@ function normalizeBoardActorIdentity(
   }
 }
 
-function normalizeBoardVoteDirection(raw: unknown): BoardVoteDirection | null {
+function normalizeBoardVoteDirection(raw: unknown): BoardVoteDirection | null | undefined {
+  if (raw === null) return null
   const direction = asString(raw, '').trim().toLowerCase()
-  return direction === 'up' || direction === 'down' ? direction : null
+  return direction === 'up' || direction === 'down' ? direction : undefined
 }
 
 // RFC-0233 §7: parse the typed origin object (post_to_yojson_with_karma emits
@@ -643,7 +644,8 @@ function normalizeBoardPost(raw: unknown): BoardPost | null {
   const score = votesUp - votesDown
   const votes = asNumber(raw.votes, score)
   const currentVote = normalizeBoardVoteDirection(raw.current_vote)
-  const hasVoted = typeof raw.has_voted === 'boolean' ? raw.has_voted : currentVote !== null
+  const hasVoted = typeof raw.has_voted === 'boolean' ? raw.has_voted
+    : currentVote === undefined ? undefined : currentVote !== null
   const commentCount = asNumber(raw.comment_count, asNumber(raw.reply_count, 0))
   const flairValue = (() => {
     const flair = raw.flair
@@ -692,8 +694,8 @@ function normalizeBoardPost(raw: unknown): BoardPost | null {
     tags,
     votes,
     vote_balance: score,
-    current_vote: currentVote,
-    has_voted: hasVoted,
+    ...(currentVote !== undefined ? { current_vote: currentVote } : {}),
+    ...(hasVoted !== undefined ? { has_voted: hasVoted } : {}),
     comment_count: commentCount,
     created_at: createdAt ?? '',
     updated_at: updatedAt ?? '',
@@ -728,7 +730,8 @@ function normalizeBoardComment(raw: unknown): BoardComment | null {
   const score = asNumber(raw.score, votesUp - votesDown)
   const votes = asNumber(raw.votes, score)
   const currentVote = normalizeBoardVoteDirection(raw.current_vote)
-  const hasVoted = typeof raw.has_voted === 'boolean' ? raw.has_voted : currentVote !== null
+  const hasVoted = typeof raw.has_voted === 'boolean' ? raw.has_voted
+    : currentVote === undefined ? undefined : currentVote !== null
   const reactions = Array.isArray(raw.reactions)
     ? raw.reactions
         .map(normalizeBoardReactionSummary)
@@ -748,8 +751,8 @@ function normalizeBoardComment(raw: unknown): BoardComment | null {
     vote_balance: score,
     votes_up: votesUp,
     votes_down: votesDown,
-    current_vote: currentVote,
-    has_voted: hasVoted,
+    ...(currentVote !== undefined ? { current_vote: currentVote } : {}),
+    ...(hasVoted !== undefined ? { has_voted: hasVoted } : {}),
     ...(reactions !== undefined ? { reactions } : {}),
     ...(supportedReactionEmojis !== undefined
       ? { supported_reaction_emojis: supportedReactionEmojis }

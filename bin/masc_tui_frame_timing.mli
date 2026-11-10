@@ -26,6 +26,29 @@ val enabled : bool
     clocks and retain no samples. Caller checks and helper calls still have
     unmeasured instruction overhead. *)
 
+type chat_page_application = {
+  keeper : string;
+  generation : int;
+  page_rows : int;
+  before_rows : int;
+  after_rows : int;
+  draft_preserved : bool;
+  scroll_preserved : bool;
+  pin_preserved : bool;
+}
+
+val note_chat_page_application : chat_page_application -> unit
+(** Observe a successfully admitted older page, with the next Build ordinal.
+    UI-domain use only. Callers capture metadata only when {!enabled}.
+    [draft_preserved] compares the input revision token, [scroll_preserved]
+    the integer scroll, and [pin_preserved] the pin option's physical identity
+    immediately before and after admission. The revision follows the editor's
+    invalidation contract, including attachment/reference mutations; this
+    observation does not copy those values or inspect the logical cursor,
+    later viewport or physical paint. Contains no draft contents or
+    cursor bytes. Retains the first {!max_frames_per_phase} events and reports
+    omissions. This diagnostic never grants request or workspace authority. *)
+
 type ask_owner = Keeper of string | Installation of string
 type ask_identity = {
   owner : ask_owner;

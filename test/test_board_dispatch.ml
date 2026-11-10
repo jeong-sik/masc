@@ -2794,7 +2794,7 @@ let test_sub_board_list () =
             ~owner:"agent-1" ());
   ignore (Board_dispatch.create_sub_board ~reader:Masc_board_handlers.Board_access.Operator ~slug:"list-b" ~name:"B" ~description:""
             ~owner:"agent-2" ());
-  let all = Board_dispatch.list_sub_boards ~reader:Masc_board_handlers.Board_access.Operator () in
+  let all = (Result.get_ok (Board_dispatch.list_sub_boards ~reader:Masc_board_handlers.Board_access.Operator ())) in
   Alcotest.(check bool) "has sub-boards" true (List.length all >= 2)
 
 let test_sub_board_slug_conflict () =
@@ -3088,7 +3088,7 @@ let test_sub_board_post_count_projection () =
    | Error e -> Alcotest.fail (Board.show_board_error e)
    | Ok sb -> Alcotest.(check int) "derived post_count" 2 sb.Board.post_count);
   let listed =
-    Board_dispatch.list_sub_boards ~reader:Masc_board_handlers.Board_access.Operator ()
+    (Result.get_ok (Board_dispatch.list_sub_boards ~reader:Masc_board_handlers.Board_access.Operator ()))
     |> List.find_opt (fun sb -> String.equal sb.Board.slug "counted")
   in
   match listed with

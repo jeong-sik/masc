@@ -26,9 +26,6 @@ val of_list : Tool.t list -> t
 (** Merge two tool sets.  On name conflict the right-hand tool wins. *)
 val merge : t -> t -> t
 
-(** Merge a list of tool sets left-to-right. *)
-val concat : t list -> t
-
 (** {1 Query} *)
 
 val to_list : t -> Tool.t list

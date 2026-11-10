@@ -172,54 +172,6 @@ let test_build_request_thinking_modes_and_tool_stream () =
     (field_count "thinking" passthrough)
 ;;
 
-let test_parse_response_extracts_reasoning_and_usage () =
-  let resp = K.parse_response (response_json ()) in
-  check string "id" "chatcmpl-provider-k" resp.id;
-  check string "model" "glm-5.1" resp.model;
-  (match resp.content with
-   | [ T.Thinking { content = "step by step"; _ }; T.Text "answer" ] -> ()
-   | _ -> fail "expected reasoning block followed by answer text");
-  match resp.usage with
-  | Some usage ->
-    check int "input tokens" 7 usage.input_tokens;
-    check int "output tokens" 3 usage.output_tokens
-  | None -> fail "expected usage"
-;;
-
-let test_parse_response_classifies_glm_errors () =
-  let cases =
-    [ ( {|{"error":{"code":"1305","message":"service overloaded"}}|}
-      , Some "1305"
-      , K.Glm_rate_limited )
-    ; ( {|{"error":{"code":1234,"message":"server unavailable"}}|}
-      , Some "1234"
-      , K.Glm_server_error )
-    ; ( {|{"error":{"code":{"nested":true},"message":"quota exceeded"}}|}
-      , None
-      , K.Glm_invalid_request )
-    ; {|{"error":{"code":1200}}|}, Some "1200", K.Glm_invalid_request
-    ]
-  in
-  List.iter
-    (fun (body, code, expected_class) ->
-       match K.parse_response body with
-       | exception K.Glm_api_error err ->
-         check (option string) "error code" code err.code;
-         check_class "error class" expected_class err.error_class
-       | _ -> fail "expected Glm_api_error")
-    cases
-;;
-
-let test_parse_response_wraps_openai_parse_errors () =
-  match K.parse_response {|{"choices":"not-a-list"}|} with
-  | exception K.Glm_api_error err ->
-    check (option string) "parse code absent" None err.code;
-    check bool "parse origin" true (err.origin = K.Response_parse);
-    check_class "parse class" K.Glm_invalid_request err.error_class;
-    check bool "parse message surfaced" true (String.length err.message > 0)
-  | _ -> fail "expected Glm_api_error"
-;;
-
 let test_extract_reasoning_handles_empty_and_malformed_bodies () =
   let resp =
     { T.id = "resp"
@@ -321,15 +273,6 @@ let () =
         ] )
     ; ( "response"
       , [ test_case "stream reports wire metadata before reasoning" `Quick test_stream_reports_wire_metadata_before_reasoning
-        ; test_case
-            "reasoning content and usage"
-            `Quick
-            test_parse_response_extracts_reasoning_and_usage
-        ; test_case "glm error classes" `Quick test_parse_response_classifies_glm_errors
-        ; test_case
-            "openai parse errors"
-            `Quick
-            test_parse_response_wraps_openai_parse_errors
         ; test_case
             "empty and malformed reasoning bodies"
             `Quick

@@ -811,35 +811,40 @@ let timeline_lines ?(instances=[]) ?selected ~width rows =
       let first : Row.row = first in
       let since, until = List.fold_left (fun (a, b) (row : Row.row) ->
         min a row.observed_at, max b row.observed_at) (first.observed_at, first.observed_at) rest in
-      let label_width = min 28 (max 8 (width / 3)) in
-      let axis_width = max 2 (width - label_width - 4) in
       let lanes = (List.map (fun (row : Row.row) -> row.lane_id) rows
         @ List.concat_map (fun instance -> List.concat_map (fun (_,selection) ->
             match selection with Row.All_lanes -> []
             | Row.Selected_lanes lanes -> List.map (fun lane -> instance.id ^ "/" ^ lane) lanes) instance.outputs) instances)
         |> List.sort_uniq String.compare in
-      let label lane =
+      (* A lane id is "<instance id>/<lane>". The detail screen draws one
+         instance, which its heading already names, so a lane is labelled by
+         the part after the slash and the label column is as wide as the
+         widest label, up to a cap. *)
+      let local lane =
         match String.index_opt lane '/' with
         | Some separator when separator > 0 ->
-            let instance = String.sub lane (max 0 (separator - 8)) (min 8 separator) in
-            let local = String.sub lane (separator + 1) (String.length lane - separator - 1) in
-            let suffix = " · " ^ instance in
-            let local_width = label_width - Masc_tui_message_layout.display_width suffix in
-            if local_width > 0 then Masc_tui_message_layout.fit_width local local_width ^ suffix
-            else Masc_tui_message_layout.fit_width local label_width
-        | _ -> Masc_tui_message_layout.fit_width lane label_width in
+            String.sub lane (separator + 1) (String.length lane - separator - 1)
+        | _ -> lane in
+      let label_width = List.fold_left (fun widest lane ->
+          max widest (Masc_tui_message_layout.display_width (local lane))) 1 lanes
+        |> min (min 28 (max 8 (width / 3))) in
+      let axis_width = max 2 (width - label_width - 4) in
+      let label lane = Masc_tui_message_layout.fit_width (local lane) label_width in
       let position time = if since = until then axis_width / 2 else
         let span = until -. since in
         let fraction = if Float.is_finite span then (time -. since) /. span
           else (time /. 2. -. since /. 2.) /. (until /. 2. -. since /. 2.) in
         max 0 (min (axis_width - 1) (int_of_float (fraction *. float_of_int (axis_width - 1)))) in
-      [Printf.sprintf "Wall time %.3f → %.3f · o event · v value · * relation" since until]
+      [Printf.sprintf "Wall time %s UTC"
+         (if since = until then utc_stamp since
+          else utc_stamp since ^ " → " ^ utc_stamp until)]
       @ List.map (fun lane ->
           let axis = Bytes.make axis_width '-' in
           List.iter (fun (row : Row.row) -> if row.lane_id = lane then
             Bytes.set axis (position row.observed_at) (match row.kind with Row.Event -> 'o' | Row.Value -> 'v' | Row.Relation -> '*')) rows;
           (match selected with Some (row : Row.row) when row.lane_id=lane -> ">" | _ -> " ")
           ^ label lane ^ " |" ^ Bytes.to_string axis ^ "|") lanes
+      @ ["o event · v value · * relation"]
       @ List.filter_map (fun instance ->
           if List.exists (fun (row : Row.row) ->
             String.starts_with ~prefix:(instance.id ^ "/") row.lane_id) rows then None

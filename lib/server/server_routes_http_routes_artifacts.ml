@@ -50,8 +50,6 @@ open Server_auth
 
 module Http = Http_server_eio
 
-let is_valid_sha256 value = Result.is_ok (Tool_blob_store.validate_sha256 value)
-
 let artifact_read_permission = Masc_domain.CanAdmin
 
 (* Writing into the store is held to the same bar as reading exact bytes out

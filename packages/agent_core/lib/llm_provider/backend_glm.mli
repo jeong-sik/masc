@@ -110,17 +110,6 @@ val parse_response_result
   -> string
   -> (api_response, Backend_openai_parse.parse_error) result
 
-(** Raising variant of {!parse_response_result} for raise-style callers and the
-    coverage tests: returns the parsed [api_response] on success and raises
-    {!Glm_api_error} on any parse/provider error (an empty completion raises
-    rather than surfacing its typed [stop_reason]). Production paths use
-    {!parse_response_result} so an overflow empty turn's [stop_reason] reaches
-    the overflow classifier (agent-core boundary). *)
-val parse_response
-  :  ?content_inline_reasoning:Capabilities.content_inline_reasoning
-  -> string
-  -> api_response
-
 (** Extract [reasoning_content] from Glm response body and prepend
     as a {!Types.Thinking} content block to the parsed response. *)
 val extract_reasoning_content : api_response -> string -> api_response

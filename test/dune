@@ -558,6 +558,7 @@
   test_keeper_turn_terminal_disposition_field
   test_keeper_memory_os_current
   test_keeper_memory_os_events
+  test_keeper_memory_activity
   test_server_dashboard_http_keeper_api_trace
   test_server_dashboard_http_keeper_chat_page
   test_server_dashboard_http_keeper_tool_lookup
@@ -896,6 +897,7 @@
   test_keeper_turn_terminal_disposition_field
   test_keeper_memory_os_current
   test_keeper_memory_os_events
+  test_keeper_memory_activity
   test_server_dashboard_http_keeper_api_trace
   test_server_dashboard_http_keeper_chat_page
   test_server_dashboard_http_keeper_tool_lookup
@@ -2722,7 +2724,10 @@
 (include stanzas/test_board_persistence_load_contract.inc)
 
 (include stanzas/test_board_posts_source_authority.inc)
+(include stanzas/test_board_delete_order.inc)
 (include stanzas/test_board_comments_source.inc)
+(include stanzas/test_board_sub_boards_source.inc)
+(include stanzas/test_board_votes_source.inc)
 (include stanzas/test_board_posts_preflight.inc)
 
 (include stanzas/test_board_snapshot_rows.inc)
@@ -3386,6 +3391,7 @@
 (include stanzas/test_keeper_agent_core_retained_carrier.inc)
 (include stanzas/test_keeper_execute_background.inc)
 (include stanzas/test_keeper_host_result_retention.inc)
+(include stanzas/test_keeper_arrived_preview_readership.inc)
 (include stanzas/test_keeper_result_producer_liveness.inc)
 (include stanzas/test_runtime_claude_code.inc)
 (include stanzas/test_runtime_claude_input_attribution.inc)
@@ -4182,7 +4188,7 @@
 (test
  (name test_tui_palette_matching)
  (modules test_tui_palette_matching)
- (libraries masc.runtime masc_tui_palette masc_tui_pick_list alcotest masc.masc_types masc_tui_code_lexer masc_tui_types masc_tui_fetched masc))
+ (libraries masc.runtime masc_tui_palette masc_tui_pick_list alcotest masc.masc_types masc_tui_code_lexer masc_tui_types masc_tui_fetched masc_tui_code_results masc))
 
 (test
  (name test_tui_workspace_entries)
@@ -4703,6 +4709,11 @@
   masc_tui_theme
   masc_tui_types  unix
 ))
+
+(test
+ (name test_tui_memory_lineage)
+ (modules test_tui_memory_lineage)
+ (libraries alcotest masc masc_tui_memory_lineage))
 
 (test
  (name test_tui_memory_facts_explorer)

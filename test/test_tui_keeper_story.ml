@@ -6,6 +6,7 @@ let action =
     | Story.Close -> Format.pp_print_string ppf "Close"
     | Story.Open_detail -> Format.pp_print_string ppf "Open_detail"
     | Story.Open_world -> Format.pp_print_string ppf "Open_world"
+    | Story.Open_memory _ -> Format.pp_print_string ppf "Open_memory"
   in
   Alcotest.testable pp ( = )
 
@@ -25,7 +26,7 @@ let check_every_page ?(of_key = on_row) ~key ~expected () =
 let shown_by_tab page =
   match on_row (Some page) "\t" with
   | Some (Story.Show next) -> next
-  | Some (Story.Close | Story.Open_detail | Story.Open_world) | None ->
+  | Some (Story.Close | Story.Open_detail | Story.Open_world | Story.Open_memory _) | None ->
       Alcotest.fail "Tab must show a page"
 
 (* The window is a ring of pages: one lap of Tab returns to the first page
@@ -61,7 +62,7 @@ let test_enter_closes_the_story_page_and_returns_to_it_elsewhere () =
          (fun key ->
             Alcotest.check (Alcotest.option action)
               (Printf.sprintf "%S on the %s page" key (Story.tab_label page))
-              (Some (Story.Show Story.Story))
+              (Some (if page = Story.Memory then Story.Open_memory Story.Memory_recent else Story.Show Story.Story))
               (on_row (Some page) key))
          [ "\r"; "\n"; "enter" ])
     [ Story.Schedule; Story.Memory ]

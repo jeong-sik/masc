@@ -23,9 +23,6 @@ val restore : state -> snapshot -> unit
 
 val create : unit -> state
 
-val inside : state -> bool
-(** [true] while the stream sits between an open and a close tag. *)
-
 type segment = Text of string | Reasoning of string
 
 val feed_segments : state -> string -> segment list

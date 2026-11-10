@@ -35,6 +35,7 @@ The command palette is `:`.
 
 | Keys | What it does |
 |---|---|
+| `v` | read every reason in the last server rollup; scroll and search the captured reading; Esc returns without changing a decision or setting |
 | `Left` | open the Keeper list; Enter opens a chat; Right or Esc returns |
 | `j/k` | move between decision links and conversations |
 | `Enter` | open the selected destination; never approve |
@@ -87,6 +88,7 @@ The command palette is `:`.
 | `W` | select shared World and open its dock; outside memory/age, switch to age; lowercase w still wakes a Keeper |
 | `Right` | keeper detail |
 | `Tab / s / m` | with a Keeper Story open: next page / schedules / memory; World keeps its own page; Esc closes either window |
+| `1 / 2 / 3 / 4` | with Keeper Memory preview open: browse recent records / retrievals / committed changes / storage in the shared Memory browser; Enter also opens recent records |
 | `c` | chat with the keeper |
 | `l` | logs |
 | `t` | tool calls |
@@ -211,6 +213,7 @@ data and paint. A missing finish record remains an unfinished observation.
 | `w` | on Usage: cycle the exact UTC day window for provider report history and tool calls |
 | `1 / 2 / 3` | on Telemetry: Engine, Work, or Tools |
 | `Esc` | Dashboard |
+| `Tab` | next |
 
 ## Work / Board
 
@@ -304,7 +307,6 @@ data and paint. A missing finish record remains an unfinished observation.
 | `Esc` | back to Dashboard |
 | `r` | reload |
 | `Tab` | next |
-| `q` | quit |
 
 Runtime model and account form saves keep input and its opening revision while
 workspace checks, source reading, preview and guarded commit run outside the
@@ -361,6 +363,8 @@ and UI admission decision; these are not painted-frame or key-latency evidence.
 | `Enter` | Actions/Everything: exact selected event; Turns are aggregates |
 | `Esc` | close event evidence; from the list, back to Dashboard |
 | `Home/End` | g and G as well; the ring counts back from the newest, so its top is now |
+| `Tab` | next |
+| `q` | quit |
 
 ## Keeper detail
 
@@ -443,9 +447,6 @@ and UI admission decision; these are not painted-frame or key-latency evidence.
 | `Ctrl-D` | cycle compact / results / full tool detail |
 | `Ctrl-S` | unfold the running turn's status rows, or fold them back to the progress line |
 | `Ctrl-N` | cycle Memory journal summary / full / hidden |
-| `/memory` | cycle Memory journal summary / full / hidden |
-| `/memory status` | read the selected Keeper's current memory health, including its last processing observation and waiting reason |
-| `/memory sync` | request catch-up on the existing Memory lane, including for a paused Keeper; acceptance does not mean completion |
 | `Ctrl-F` | cycle no clock / inline clock / full timestamp and request id |
 | `Ctrl-O` | preview the newest image or Mermaid diagram; /images lists all; any key returns |
 | `/approve /deny` | type a command and Enter to answer a tool approval |
@@ -625,6 +626,7 @@ count is drawn beyond the available space.
 
 | Keys | What it does |
 |---|---|
+| `1 / 2 / 3 / 4` | one Memory browser; changes require an individual Keeper, while storage opens the fleet health view |
 | `j/k` | move the keeper row |
 | `Enter` | browse what the selected keeper actually remembers |
 | `v` | read the complete fleet summary and selected keeper health in a scrollable capture |
@@ -637,6 +639,7 @@ count is drawn beyond the available space.
 | `n / N` | next / previous match |
 | `PgUp/PgDn` | page |
 | `Home/End` | top/bottom |
+| `1 / 2 / 3 / 4` | in the facts browser: one Memory browser; changes require an individual Keeper, while storage opens the fleet health view |
 | `j/k` | in the facts browser: move |
 | `Enter` | in the facts browser: read the whole fact in a wide overlay that owns the terminal |
 | `c / C` | in the facts browser: cycle category filter (forward / backward) |
@@ -650,6 +653,16 @@ count is drawn beyond the available space.
 | `r` | in the facts browser: refresh |
 | `Tab` | in the facts browser: next |
 | `q` | in the facts browser: quit |
+| `1 / 2 / 3 / 4` | in the changes browser: one Memory browser; changes require an individual Keeper, while storage opens the fleet health view |
+| `j/k` | in the changes browser: move |
+| `Enter` | in the changes browser: read all original and successor claims of the selected committed change |
+| `. / Ctrl-O` | in the changes browser: open the selected change's connected observed memory lineage with the offline Pele Mermaid preview; full claims remain on Enter |
+| `PgUp/PgDn` | in the changes browser: page |
+| `Esc` | in the changes browser: back to facts |
+| `Home/End` | in the changes browser: top/bottom |
+| `r` | in the changes browser: refresh |
+| `Tab` | in the changes browser: next |
+| `q` | in the changes browser: quit |
 | `j/k` | in the fact detail: scroll |
 | `PgUp/PgDn` | in the fact detail: page |
 | `g / G` | in the fact detail: jump to the first or last line of the fact |
@@ -765,6 +778,8 @@ count is drawn beyond the available space.
 | `/` | find a resource name in the list, or text in the loaded detail |
 | `n / N` | next / previous match |
 | `r` | reload |
+| `Tab` | next |
+| `q` | quit |
 
 ## Features & plugins / Tools
 
@@ -783,6 +798,7 @@ count is drawn beyond the available space.
 | `d` | remove the selected published package; press d again on the same row to confirm |
 | `Esc` | return from original Task to request, then request to list; otherwise back to Features & plugins |
 | `r` | refresh the open original Task body/history, original request detail, or Tools list |
+| `V` | in All tools, open retired Keeper volumes and request a report; in that reading, an armed V reclaims only the reported names, other input disarms, and Esc returns to the catalog position |
 | `Enter` | in async runs, read the selected original request; otherwise load retained evidence for the selected Skill |
 | `t / T` | from async request detail, read its original source Task and history |
 | `H` | from original Task detail, read earlier stored history; retains the observed prefix on failure |
@@ -806,8 +822,8 @@ or completion.
 
 | Keys | What it does |
 |---|---|
-| `o` | switch between server logs and this TUI's own observations |
 | `e` | Events |
+| `o` | switch between server logs and this TUI's own observations |
 | `j/k` | move / scroll |
 | `PgUp/PgDn` | page |
 | `[ / ]` | while detail is open, inspect the adjacent visible log entry |

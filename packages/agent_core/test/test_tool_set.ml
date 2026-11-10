@@ -60,18 +60,6 @@ let test_validate_ok () =
   | Error _ -> Alcotest.fail "expected Ok"
 ;;
 
-let test_concat () =
-  let a = Tool_set.singleton (make_tool "a") in
-  let b = Tool_set.singleton (make_tool "b") in
-  let c = Tool_set.singleton (make_tool "c") in
-  let all = Tool_set.concat [ a; b; c ] in
-  Alcotest.(check int) "concat size" 3 (Tool_set.size all);
-  Alcotest.(check (list string))
-    "concat names"
-    [ "a"; "b"; "c" ]
-    (List.sort String.compare (Tool_set.names all))
-;;
-
 (* ── QCheck property tests ───────────────────────────────── *)
 
 let gen_tool_name =
@@ -156,7 +144,6 @@ let () =
         ; Alcotest.test_case "of_list dedup" `Quick test_of_list_dedup
         ; Alcotest.test_case "merge last-writer-wins" `Quick test_merge_last_writer_wins
         ; Alcotest.test_case "validate ok" `Quick test_validate_ok
-        ; Alcotest.test_case "concat" `Quick test_concat
         ] )
     ; ( "properties"
       , List.map

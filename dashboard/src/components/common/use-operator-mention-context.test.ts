@@ -1,9 +1,9 @@
 import { html } from 'htm/preact'
 import { render } from 'preact'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { useOperatorMentionContext, type OperatorMentionContext } from './use-operator-mention-context'
-import { operatorSnapshot } from '../../operator-store'
+import { operatorSnapshotFixture as operatorSnapshot } from '../../operator-snapshot.test-fixture'
 import type { OperatorKeeperSnapshot, OperatorSnapshot } from '../../types'
 
 const LISTBOX_ID = 'test-listbox'
@@ -187,4 +187,10 @@ describe('useOperatorMentionContext', () => {
 
     expect(captured?.activeMentionOptionId).toBe(`${LISTBOX_ID}-option-0`)
   })
+})
+
+vi.mock('../../operator-snapshot-state', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../operator-snapshot-state')>()
+  const { operatorSnapshotFixture } = await import('../../operator-snapshot.test-fixture')
+  return { ...actual, operatorSnapshot: operatorSnapshotFixture }
 })

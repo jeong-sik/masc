@@ -1,3 +1,4 @@
+import { operatorSnapshotFixture as operatorSnapshot } from '../../operator-snapshot.test-fixture'
 import { h } from 'preact'
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/preact'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
@@ -15,7 +16,7 @@ import { createPost, fetchBoardPost } from '../../api'
 import { requestBoardContextInference, voteComment, votePost } from '../../api/board'
 import { deleteBoardPost } from '../../api/actions'
 import { showToast } from '../common/toast'
-import { dispatchOperatorAction, operatorSnapshot } from '../../operator-store'
+import { dispatchOperatorAction } from '../../operator-store'
 import { PAGE_SIZE, feedVisibleLimit, boardFlairs, boardFlairsError, boardHearths, boardHearthsError, contentCategory, selectedBoardPostId, boardComposerMode, detailPostId, detailPost, detailFocusedCommentId, detailComments, detailCommentPage, detailLoading, detailReadPhase, loadPostDetail, refreshBoard } from './board-state'
 import { resetBoardLatencyMetrics } from '../../board-metrics'
 import type { BoardPost, OperatorSnapshot } from '../../types'
@@ -1467,4 +1468,10 @@ describe('BoardSurface Component', () => {
     fireEvent.click(button)
     expect(mockInfer).toHaveBeenCalledWith('post-non-keeper-2', 'keeper-sangsu')
   })
+})
+
+vi.mock('../../operator-snapshot-state', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../operator-snapshot-state')>()
+  const { operatorSnapshotFixture } = await import('../../operator-snapshot.test-fixture')
+  return { ...actual, operatorSnapshot: operatorSnapshotFixture }
 })

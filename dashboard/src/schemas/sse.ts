@@ -22,6 +22,7 @@ import { isRecord } from '../lib/type-guards'
 import { isAgentCoreEventType } from '../lib/sse-event-type'
 import { missionPublication } from '../mission-observation-contract'
 import { operatorDigestPublication } from '../operator-digest-contract'
+import { operatorSnapshotPublication } from '../operator-snapshot-contract'
 
 type SchemaIssue = { path?: string; message: string }
 type SafeParseSuccess<T> = { success: true; data: T }
@@ -1250,6 +1251,9 @@ export const SSEMessageSchema = schema<SSEMessage>((value) => {
 
   if (value.type === 'mission_snapshot' && missionPublication(value.payload) === null) {
     return fail('payload', 'Expected captured Mission instance, generation, sequence and observation state')
+  }
+  if (value.type === 'operator_snapshot' && operatorSnapshotPublication(value.payload) === null) {
+    return { success: false, error: { issues: [{ message: 'operator snapshot publication is invalid' }] } }
   }
   if (value.type === 'operator_digest' && operatorDigestPublication(value.payload) === null) {
     return fail('payload', 'Expected captured Operator Digest instance, ordering, state and query')

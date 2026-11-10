@@ -4,7 +4,7 @@ import { h, render } from 'preact'
 import { waitFor } from '@testing-library/preact'
 import { ConnectionStatus, DashboardHealthStrip, DashboardMain, dashboardHealthChips, isKeeperDetailDashboardRoute, shouldRenderSurfaceLead } from './dashboard-shell'
 import { route } from '../router'
-import { dashboardWsConnected, dashboardWsLastError, dashboardWsReady } from '../dashboard-ws-state'
+import { dashboardObserverConnected, dashboardObserverLastError, dashboardObserverReady } from '../dashboard-observer-state'
 import { dashboardLoading } from '../store'
 import { namespaceTruthInitializing } from '../namespace-truth-store'
 import { normalizeDashboardRuntimeResolution } from '../store-normalizers'
@@ -16,8 +16,8 @@ describe('DashboardMain solo mode', () => {
     container = document.createElement('div')
     document.body.appendChild(container)
     dashboardLoading.value = false
-    dashboardWsConnected.value = true
-    dashboardWsReady.value = true
+    dashboardObserverConnected.value = true
+    dashboardObserverReady.value = true
     namespaceTruthInitializing.value = false
     document.title = 'MASC Dashboard'
   })
@@ -55,8 +55,8 @@ describe('DashboardMain primary heading', () => {
     container = document.createElement('div')
     document.body.appendChild(container)
     dashboardLoading.value = false
-    dashboardWsConnected.value = true
-    dashboardWsReady.value = true
+    dashboardObserverConnected.value = true
+    dashboardObserverReady.value = true
     namespaceTruthInitializing.value = false
     document.title = 'MASC Dashboard'
   })
@@ -85,22 +85,22 @@ describe('ConnectionStatus', () => {
   beforeEach(() => {
     container = document.createElement('div')
     document.body.appendChild(container)
-    dashboardWsConnected.value = false
-    dashboardWsReady.value = false
-    dashboardWsLastError.value = null
+    dashboardObserverConnected.value = false
+    dashboardObserverReady.value = false
+    dashboardObserverLastError.value = null
   })
 
   afterEach(() => {
     render(null, container)
     container.remove()
-    dashboardWsConnected.value = false
-    dashboardWsReady.value = false
-    dashboardWsLastError.value = null
+    dashboardObserverConnected.value = false
+    dashboardObserverReady.value = false
+    dashboardObserverLastError.value = null
   })
 
   it('uses WS readiness as the connection signal', () => {
-    dashboardWsConnected.value = true
-    dashboardWsReady.value = true
+    dashboardObserverConnected.value = true
+    dashboardObserverReady.value = true
 
     render(h(ConnectionStatus, {}), container)
 
@@ -108,13 +108,13 @@ describe('ConnectionStatus', () => {
     expect(container.textContent).not.toContain('Reconnecting')
   })
 
-  it('shows handshaking instead of reconnecting while the WS hello is pending', () => {
-    dashboardWsConnected.value = true
-    dashboardWsReady.value = false
+  it('shows handshaking instead of reconnecting while observer admission is pending', () => {
+    dashboardObserverConnected.value = true
+    dashboardObserverReady.value = false
 
     render(h(ConnectionStatus, {}), container)
 
-    expect(container.textContent).toContain('Connecting WS')
+    expect(container.textContent).toContain('Connecting SSE')
     expect(container.textContent).not.toContain('Reconnecting')
   })
 })

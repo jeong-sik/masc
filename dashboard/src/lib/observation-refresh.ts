@@ -1,16 +1,9 @@
 // Observation topics name authoritative read models. The transport publishes
 // invalidations here; a mounted consumer reads only the models it uses.
-export const DASHBOARD_OBSERVATION_TOPICS = [
-  'logs', 'health', 'runtime_probe', 'attribution', 'keeper_composite',
-  'keeper_runtime_trace', 'keeper_sandbox', 'keeper_turns', 'keeper_memory_health',
-  'runtime_resolved', 'model_metrics', 'runtime_observables', 'scheduled_automation',
-  'tools', 'tool_metrics', 'skills', 'async_requests', 'skill_usage', 'skill_activations',
-  'telemetry', 'published_artifacts', 'artifact_checks', 'verification_requests',
-  'verification_specs', 'tlc_results', 'activity', 'ide_presence', 'ide_events',
-  'gate', 'gate_tool_events', 'chat_operation',
-] as const
+import { readDashboardObservationTopic } from '../schemas/sse_event_generated'
+import type { DashboardObservationTopic as GeneratedTopic } from '../schemas/sse_event_generated'
 
-export type DashboardObservationTopic = typeof DASHBOARD_OBSERVATION_TOPICS[number]
+export type DashboardObservationTopic = Lowercase<GeneratedTopic['kind']>
 
 export interface DashboardObservationChange {
   readonly topic: DashboardObservationTopic
@@ -33,7 +26,7 @@ type Observer = {
 const observers = new Set<Observer>()
 
 export function isDashboardObservationTopic(value: unknown): value is DashboardObservationTopic {
-  return DASHBOARD_OBSERVATION_TOPICS.some(topic => topic === value)
+  try { readDashboardObservationTopic(value); return true } catch { return false }
 }
 
 export function publishDashboardObservationChange(change: DashboardObservationChange): void {

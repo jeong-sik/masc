@@ -39,7 +39,9 @@
   "G3_e_synth_drop_precision_min": 1.0,
   "G3_e_synth_stale_drop_recall_min": 0.9,
   "G4_e_real_paired_lead_min": -0.06,
-  "G5_e_real_latency_p50_ratio_max": 1.16
+  "G5_e_real_latency_p50_ratio_max": 1.16,
+  "G6_e_synth_absorb_precision_min": 0.85,
+  "G6_e_synth_judged_merge_recall_min": 0.7
  },
  "choice": {
   "order": [

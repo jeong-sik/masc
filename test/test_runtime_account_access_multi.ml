@@ -771,12 +771,38 @@ let test_multi_account () =
                 "a turn with native %s tools was allowed"
                 (Runtime_native_tools.to_string posture))
           Runtime_native_tools.[ Native_read; Native_full ];
-        match
-          Access.publish
-            (Access.Multi_account { zone; base_path; now = (fun () -> 0.) })
-        with
-        | Error Access.Already_published -> ()
-        | Ok () -> Alcotest.fail "a second publication was taken"))
+        (match
+           Access.publish
+             (Access.Multi_account { zone; base_path; now = (fun () -> 0.) })
+         with
+         | Error Access.Already_published -> ()
+         | Ok () -> Alcotest.fail "a second publication was taken");
+        (* Bytes another writer added to the log: the next commit finds the
+           end moved and stops the log. No decision rests on the state of the
+           zone from then on, so no client starts for a person or for a turn
+           of their Keeper. A refusal that reads no record stays as it was. *)
+        Out_channel.with_open_gen
+          [ Open_append; Open_binary ]
+          0o600
+          (Authz_log.path_of_base_path ~base_path)
+          (fun channel -> Out_channel.output_string channel "{}\n");
+        (match
+           Authz_provider_account.link
+             zone
+             ~user_id:alice.user_id
+             ~provider_account_id:(get (Provider_account_id.of_string "account-late"))
+         with
+         | Ok () -> Alcotest.fail "the zone wrote over a log another writer moved"
+         | Error (_ : Authz_provider_account.error) -> ());
+        let log_stopped = function
+          | Access.Zone_uncertain (Z.Log_is_stopped _) -> true
+          | _ -> false
+        in
+        refused "the person's own account in a stopped zone" (own alice ()) alice_account log_stopped;
+        refused "a turn in a stopped zone" (turn alice ()) alice_account log_stopped;
+        refused "an operator call in a stopped zone" Access.Operator_call alice_account (function
+          | Access.No_operator -> true
+          | _ -> false)))
 ;;
 
 let () =

@@ -27,7 +27,10 @@
     carries the credentials of the process environment. For a Keeper turn
     that person is the owner of the Keeper, and the log decides the turn
     ({!Authz_keeper_turn.decide}) and names the Runtime and the account. No
-    operator owns the account of a person, so an operator call is refused. *)
+    operator owns the account of a person, so an operator call is refused.
+    Each request is judged on one snapshot that the zone could be trusted for
+    ({!Authz_zone.read}); a zone whose files stopped or disagree refuses every
+    request ({!Zone_uncertain}). *)
 
 (** An account captured from a declaration. No CLI starts on it, and it
     gives no environment: the runtime table holds this, so a reader of the
@@ -185,6 +188,11 @@ type request =
 type refusal =
   | Not_published  (** The process has not published its access. *)
   | No_operator  (** An operator call in a multi-account process. *)
+  | Zone_uncertain of Authz_zone.uncertain
+      (** A file of the authorization zone is stopped, or the files disagree
+          ({!Authz_zone.read}): nothing is decided on its state, so no client
+          starts for a person or for a turn. The text of the reason names a
+          path of the server. *)
   | Not_a_keeper_id of string  (** The name of the Keeper is not an id of the log. *)
   | Turn_refused of Authz_keeper_turn.refusal
   | Not_the_assigned_runtime of

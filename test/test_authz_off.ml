@@ -111,8 +111,9 @@ let stop_label = function
   | Read.Boot_after_off (_ : Authz_state.t) -> "boot single user after Off"
   | Read.Stop (Read.Refuse (first, rest)) ->
     "refuse: " ^ String.concat "; " (List.map B.refusal_to_string (first :: rest))
+  | Read.Boot_multi_account -> "boot multi-account"
   | Read.Stop Read.Activation_requested -> "activation requested"
-  | Read.Stop (Read.Multi_account_not_served mode) -> "not served: " ^ B.mode_to_string mode
+  | Read.Stop Read.Authorization_uncertain -> "authorization uncertain"
 ;;
 
 let check_refusal name expected dirs =
@@ -125,7 +126,9 @@ let check_refusal name expected dirs =
 let check_boots_after_off name workspace_id dirs =
   match Read.boot ~base_path:dirs.base ~config_dir:(Some dirs.config) ~anonymous_mutations:false with
   | Error (first, _) -> Alcotest.failf "%s: the boot refused: %s" name first
-  | Ok single_user ->
+  | Ok (Read.Multi_account (_ : Read.multi_account)) ->
+    Alcotest.failf "%s: booted as a multi-account installation" name
+  | Ok (Read.Single_user single_user) ->
     (match Read.turned_off single_user with
      | None -> Alcotest.failf "%s: booted as a base path never set up" name
      | Some state ->

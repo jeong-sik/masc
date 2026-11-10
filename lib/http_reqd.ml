@@ -8,16 +8,7 @@ type acceptance = Transport_metrics.response_write_acceptance =
   | Rejected_by_writer
 
 module Stream_end = Http_h2_stream.Stream_end
-
-(* The body writer [respond_with_streaming] opened on an HTTP/2 stream.
-   [closed_by_route] is set by [Body_writer.close]. masc closes the h2 writer
-   only once the bytes written before the close have drained
-   ([Stream_end.close_after_flush], h2#278), so until then the writer looks
-   open although the route finished it. *)
-type h2_body =
-  { writer : H2.Body.Writer.t
-  ; mutable closed_by_route : bool
-  }
+module Response_body = Http_h2_stream.Response_body
 
 (* One constructor per transport that carries requests. [streaming] is the
    body writer [respond_with_streaming] opened: neither library hands it back,
@@ -35,7 +26,7 @@ type t =
       ; request : Httpun.Request.t
       ; ledger : Http_h2_response_ledger.request
       ; stream_end : Stream_end.t
-      ; mutable streaming : h2_body option
+      ; mutable streaming : Response_body.t option
       }
 
 let of_gluten (gluten_reqd : Httpun.Reqd.t Gluten.Reqd.t) =
@@ -163,7 +154,13 @@ let payload_description_fields =
   [ "content-encoding"; "content-length"; "content-type"; "etag"; "last-modified"; "cache-control" ]
 ;;
 
-let h2_refuse_for_capacity ~stream_end reqd (response : Httpun.Response.t) =
+(* The answer was computed and is not sent. The client sees only a 503
+   without a body, so the line here is the trace of what happened. *)
+let h2_refuse_for_capacity ~stream_end ~bytes reqd (response : Httpun.Response.t) =
+  Log.Http.warn
+    "[h2] %s: the response ledger has no room for %d bytes; answering 503"
+    (Stream_end.request_line stream_end)
+    bytes;
   let retained =
     List.filter
       (fun (name, _) -> not (List.mem (String.lowercase_ascii name) payload_description_fields))
@@ -184,11 +181,15 @@ let h2_refuse_for_capacity ~stream_end reqd (response : Httpun.Response.t) =
 let h2_respond_with_string ~stream_end reqd ledger response body =
   (* A request whose body nobody read must still release its stream. *)
   H2.Body.Reader.discard (H2.Reqd.request_body reqd);
-  match Http_h2_response_ledger.reserve ledger ~bytes:(String.length body) with
-  (* [Request_closed] does not come here: the ledger closes a request when its
-     stream switch is released, and [h2_stream_over] answered before that. *)
-  | Error (Capacity_exhausted | Request_closed) ->
-    h2_refuse_for_capacity ~stream_end reqd response;
+  let bytes = String.length body in
+  match Http_h2_response_ledger.reserve ledger ~bytes with
+  (* The ledger closes a request when its stream switch is released: the
+     stream is over, and h2 has nothing left to answer on. *)
+  | Error Request_closed ->
+    Log.Http.debug "[http] response skipped, the HTTP/2 stream is already over";
+    Rejected_by_writer
+  | Error Capacity_exhausted ->
+    h2_refuse_for_capacity ~stream_end ~bytes reqd response;
     Rejected_by_writer
   | Ok lease ->
     (* With no headers out there is no response, so the reservation goes
@@ -204,12 +205,9 @@ let h2_respond_with_string ~stream_end reqd ledger response body =
        Http_h2_response_ledger.release lease;
        raise exn
      | writer ->
-       Http_h2_response_ledger.write_reserved
-         lease
-         ~write:(Stream_end.write_slices stream_end)
-         writer
-         body;
-       Stream_end.close_after_flush stream_end writer;
+       let out = Response_body.create stream_end writer in
+       Response_body.write out ~sent:(fun () -> Http_h2_response_ledger.release lease) body;
+       Response_body.close out;
        Accepted_by_writer)
 ;;
 
@@ -224,8 +222,8 @@ let h2_stream_over ~stream_end reqd =
   || Option.is_some (H2.Reqd.error_code reqd)
 ;;
 
-let h2_writer_closed ~stream_end reqd writer =
-  H2.Body.Writer.is_closed writer || Stream_end.ended stream_end || h2_stream_over ~stream_end reqd
+let h2_body_closed ~stream_end reqd body =
+  Response_body.is_closed body || h2_stream_over ~stream_end reqd
 ;;
 
 let try_respond_with_string t response body =
@@ -256,47 +254,55 @@ module Body_writer = struct
     | H1 of Httpun.Body.Writer.t
     | H2 of
         { reqd : H2.Reqd.t
-        ; body : h2_body
+        ; body : Response_body.t
         ; ledger : Http_h2_response_ledger.request
         ; stream_end : Stream_end.t
         }
     (* An HTTP/2 stream that was over before the response opened. *)
     | Ended
 
-  (* Exhausted capacity resets this stream, as the ledger's own drain did
-     (RFC-0493 §3): the client sees a cut, never a frame reported as sent. *)
-  let write_string t s =
-    match t with
-    | H1 writer -> Httpun.Body.Writer.write_string writer s
-    | H2 { reqd; body = { writer; _ }; ledger; stream_end } ->
-      (match Http_h2_response_ledger.reserve ledger ~bytes:(String.length s) with
-       | Ok lease ->
-         Http_h2_response_ledger.write_reserved
-           lease
-           ~write:(Stream_end.write_slices stream_end)
-           writer
-           s
-       | Error refusal ->
-         Http_h2_stream.reset
-           ~stream_sw:(Stream_end.switch stream_end)
-           reqd
-           (Http_h2_stream.Out_of_capacity refusal);
-         (* h2 closed the body of a started response it reset. A stream that
-            was already closed is not reset again, so close it here too. *)
-         H2.Body.Writer.close writer)
-    | Ended -> ()
-  ;;
-
   let is_closed = function
     | H1 writer -> Httpun.Body.Writer.is_closed writer
-    | H2 { reqd; body = { writer; _ }; stream_end; _ } ->
-      h2_writer_closed ~stream_end reqd writer
+    | H2 { reqd; body; stream_end; _ } -> h2_body_closed ~stream_end reqd body
     | Ended -> true
   ;;
 
+  (* Exhausted capacity resets this stream, as the ledger's own drain did
+     (RFC-0493 §3): the client sees a cut, never a frame reported as sent.
+     The reset leaves no line of its own once a response has started, so the
+     refusal is logged here. *)
+  let write_string t s =
+    match t with
+    | H1 writer -> Httpun.Body.Writer.write_string writer s
+    | H2 { reqd; body; ledger; stream_end } ->
+      if not (is_closed t)
+      then (
+        let bytes = String.length s in
+        match Http_h2_response_ledger.reserve ledger ~bytes with
+        | Ok lease ->
+          Response_body.write body ~sent:(fun () -> Http_h2_response_ledger.release lease) s
+        (* The ledger closes a request with its stream's scope, and
+           [is_closed] saw that scope end first. *)
+        | Error Request_closed -> ()
+        | Error Capacity_exhausted ->
+          Log.Http.warn
+            "[h2] %s: the response ledger has no room for %d bytes; resetting the stream"
+            (Stream_end.request_line stream_end)
+            bytes;
+          Http_h2_stream.reset
+            ~stream_sw:(Stream_end.switch stream_end)
+            reqd
+            (Http_h2_stream.Out_of_capacity Capacity_exhausted);
+          (* h2 closed the body of a started response it reset. A stream
+             that was already closed is not reset again, so close the body
+             here too. *)
+          Response_body.close body)
+    | Ended -> ()
+  ;;
+
   (* The transport's own end of the stream under the writer. h2 reports a
-     peer reset and a connection end through the stream's switch; httpun
-     reports nothing before the body closes. *)
+     peer reset, a stall and a connection end through the stream's switch;
+     httpun reports nothing before the body closes. *)
   let stream_end = function
     | H1 _ -> None
     | H2 { stream_end; _ } -> Some (Stream_end.signal stream_end)
@@ -314,15 +320,13 @@ module Body_writer = struct
     else (
       match t with
       | H1 writer -> Httpun.Body.Writer.flush writer f
-      | H2 { body = { writer; _ }; stream_end; _ } -> Stream_end.flush stream_end writer f
+      | H2 { body; _ } -> Response_body.flush body f
       | Ended -> f `Closed)
   ;;
 
   let close = function
     | H1 writer -> Httpun.Body.Writer.close writer
-    | H2 { body; stream_end; _ } ->
-      body.closed_by_route <- true;
-      Stream_end.close_after_flush stream_end body.writer
+    | H2 { body; _ } -> Response_body.close body
     | Ended -> ()
   ;;
 end
@@ -344,7 +348,7 @@ let respond_with_streaming ?flush_headers_immediately t response =
       let writer =
         H2.Reqd.respond_with_streaming reqd ?flush_headers_immediately (h2_response_of response)
       in
-      let body = { writer; closed_by_route = false } in
+      let body = Response_body.create stream_end writer in
       http2.streaming <- Some body;
       Body_writer.H2 { reqd; body; ledger = http2.ledger; stream_end })
 ;;
@@ -364,10 +368,7 @@ let response_state = function
   | Http2 { reqd; stream_end; streaming; _ } ->
     (match streaming, H2.Reqd.response reqd with
      | Some body, _ ->
-       if body.closed_by_route
-          || h2_writer_closed ~stream_end reqd body.writer
-       then Answered
-       else Streaming_open
+       if h2_body_closed ~stream_end reqd body then Answered else Streaming_open
      | None, Some _ -> Answered
      | None, None -> Not_started)
 ;;

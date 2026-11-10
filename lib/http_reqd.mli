@@ -71,10 +71,12 @@ val try_respond_with_string : t -> Httpun.Response.t -> string -> acceptance
 (** Writes the whole response. A write the request can no longer take is
     logged once (debug for the late-response shapes {!Late_response} knows,
     warn with a backtrace for anything else) and reported as
-    [Rejected_by_writer]. On HTTP/2 the body is reserved in the ledger first;
-    when the capacity is exhausted, the client gets an empty 503 [no-store]
-    that keeps the response's other headers, and the result is
-    [Rejected_by_writer]. An HTTP/2 stream that is already over (see
+    [Rejected_by_writer]. On HTTP/2 the body is reserved in the ledger first
+    and then goes to h2 one 16 KiB slice at a time
+    ({!Http_h2_stream.Response_body}); the call does not wait for it. When
+    the capacity is exhausted, the client gets an empty 503 [no-store] that
+    keeps the response's other headers, the refusal is logged at warn, and
+    the result is [Rejected_by_writer]. An HTTP/2 stream that is already over (see
     {!respond_with_streaming}) gets no response, and the result is
     [Rejected_by_writer]. [Eio.Cancel.Cancelled] passes through. *)
 
@@ -87,11 +89,13 @@ module Body_writer : sig
   type t
 
   val write_string : t -> string -> unit
-  (** On HTTP/2 the bytes are reserved in the ledger first. When that fails,
-      the stream is reset ({!Http_h2_stream.reset} with [Out_of_capacity])
-      and the writer closed, so the next {!flush} answers [`Closed] and
-      {!is_closed} is true. A writer for a stream that was already over drops
-      the bytes. *)
+  (** On HTTP/2 the bytes are reserved in the ledger first and wait behind
+      those written before them: h2 gets one 16 KiB slice at a time
+      ({!Http_h2_stream.Response_body}), and the call does not wait for it.
+      When the ledger has no room, the refusal is logged at warn, the stream
+      is reset ({!Http_h2_stream.reset} with [Out_of_capacity]) and the
+      writer closed, so the next {!flush} answers [`Closed] and {!is_closed}
+      is true. A closed HTTP/2 writer drops the bytes. *)
 
   val flush : t -> ([ `Written | `Closed ] -> unit) -> unit
   (** [flush t f] calls [f `Written] once every byte written so far reached
@@ -99,25 +103,26 @@ module Body_writer : sig
       writer that is already closed it calls [f `Closed] at once. The h2
       library drains neither a stream the peer reset nor a connection that
       ended while the stream's window was 0, so on HTTP/2 [f `Closed] also
-      comes from the end of the stream's switch ({!of_h2}). An HTTP/2 flush
-      that waits past the stall bound resets the stream, and [f] then gets
-      [`Closed]. *)
+      comes from the end of the stream's switch ({!of_h2}). Each slice of an
+      HTTP/2 body has the stall bound to reach the socket. One that waits
+      longer resets the stream, and [f] then gets [`Closed]. *)
 
   val close : t -> unit
-  (** Ends the body as complete. On HTTP/2 the close waits for the bytes
-      written so far; a stream that ends first (peer reset) answers that wait
-      and the writer closes. A route that raises after closing keeps its
-      response ({!response_state} is [Answered]), so a route that fails does
-      not close. *)
+  (** Ends the body as complete, and {!is_closed} is true from then on. On
+      HTTP/2 the bytes written so far still go out before the stream ends,
+      unless the stream ends first (peer reset, stall). A route that raises
+      after closing keeps its response ({!response_state} is [Answered]), so
+      a route that fails does not close. *)
 
   val is_closed : t -> bool
-  (** On HTTP/2 also true once the stream is over: its switch failed or
-      ended, or an error was reported on it. *)
+  (** True once {!close} was called. On HTTP/2 also true once the stream is
+      over: its switch failed or ended, or an error was reported on it. *)
 
   val stream_end : t -> unit Eio.Promise.t option
   (** On HTTP/2, resolved once the stream's switch ended: the peer reset the
-      stream, the stream stalled, or the connection ended ({!of_h2}). A producer that waits for
-      events elsewhere races it to stop for a client that is gone. [None] on
+      stream, the stream stalled, or the connection ended ({!of_h2}). A
+      producer that waits for events elsewhere races it to stop for a client
+      that is gone. [None] on
       HTTP/1.1: httpun reports no end of the connection before the body
       closes, so there a client that went away is noticed by the next write. *)
 end

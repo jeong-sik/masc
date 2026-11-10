@@ -420,6 +420,9 @@ is-default = true
       Eio.Promise.resolve resolve_completed execution)} in
   Registry.install_from_store ~sw ~operation_runner:(Some runner) ~on_turn_slot_released:None config
     |> require "install real Owner" |> ignore;
+  Keeper_direct_native_continuation.complete_restart_settlements
+    ~runtime:(Runtime_agent_execution_runtime.get () |> Option.get) ~base_path:root
+    |> require "complete startup native journal settlement" |> ignore;
   if fresh then Registry.submit_operation ~base_path:root ~keeper_name ~operation_id ~source ~input:(original_input ())
     |> require "submit original operation" |> ignore;
   if child || cut = Settled_result then (

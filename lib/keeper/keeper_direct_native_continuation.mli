@@ -34,15 +34,24 @@ val load : binding:binding -> (admission, string) result
     is used for missing or inconsistent retained evidence. *)
 
 val journal_terminal :
+  runtime:Agent_core.Agent.execution_runtime ->
   base_path:string -> keeper_name:string -> session_root:string ->
-  operation_id:Keeper_chat_operation.Operation_id.t ->
+  Keeper_chat_operation_store.restart_native_call ->
   (Agent_core.Agent.execution_terminal_disposition option, string) result
-(** Read-only gate for settling a restart: [Some disposition] means the Core
-    journal already terminated the call that the Owner receipt still calls
-    active, so re-queueing the operation would only fail again on dispatch;
-    [None] means the receipt is not active or its journal holds no terminal.
-    This never mutates the Owner receipt or the journal. Receipt and journal
-    read failures return [Error]; the store settles those as resumable. *)
+(** Read the supplied exact call's canonical terminal using the application's
+    runtime in Eio context. Never looks up an Owner or mutates either journal.
+    The binding digest comes from the observed operation, not from the call
+    itself. Store settlement separately revalidates the complete observation.
+    None means no journal terminal; read failures remain Error. *)
+
+val complete_restart_settlements :
+  runtime:Agent_core.Agent.execution_runtime -> base_path:string ->
+  (int, Keeper_owner_registry.install_error) result
+(** Bind the canonical reader to the installed Owner inventory. Production
+    bootstrap and standalone compositions call this after their application
+    runtime is ready and before Keeper execution starts. The BasePath pool
+    retains that reader for later Owner creation under the same application
+    switch; a missing metadata snapshot does not skip journal settlement. *)
 
 val reconcile_after_dispatch : binding -> (unit -> 'a) -> 'a
 (** Run the native dispatch. When it ends, by return or by exception, and the

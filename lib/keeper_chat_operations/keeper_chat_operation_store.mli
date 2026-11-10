@@ -467,24 +467,30 @@ type running_settlement =
     requests on 2026-09-14). *)
 val settle_running_without_executor :
   t -> cause:running_settlement -> now:float -> (Operation.t list, error) result
+type restart_native_call = private
+  { snapshot_store : t
+  ; operation : Operation.t
+  ; execution_revision : int64
+  ; call : Keeper_native_call.t
+  }
+
+val running_native_calls : t -> (restart_native_call list, error) result
+(** Exact Running operations with Active native calls. The Owner reads these
+    before journal I/O; they grant no dispatch authority. *)
+
 val settle_running_without_executor_with_journal_terminal :
-  journal_terminal:(Operation.Operation_id.t ->
-    (Agent_core.Agent.execution_terminal_disposition option, string) result) ->
+  observations:(restart_native_call *
+    (Agent_core.Agent.execution_terminal_disposition option, string) result) list ->
   t -> cause:running_settlement -> now:float -> (Operation.t list, error) result
-(** The same settlement with the boot gate the Owner installs. For a row whose
-    Owner receipt is still active, [journal_terminal] reports the terminal the
-    Core journal already holds for that call: [Ok (Some disposition)] records
-    that disposition on the Owner receipt and fails the row as
-    [Interrupted_by_restart] instead of re-queueing a call whose next dispatch
-    would fail anyway; [Ok None] and a read failure keep the resume behavior.
-    The gate must not touch the operation store: it runs inside this
-    settlement's transaction and reads only the Owner receipt and the journal. *)
-val running_direct_active_calls :
-  t -> ((Operation.Operation_id.t * Keeper_native_call.t) list, error) result
-(** The running rows that still hold an active native call, with each call.
-    The Owner reads these journals on its own fiber before settling, because
-    the journal projection needs fiber effects the settlement's systhread
-    forbids; the settle's [journal_terminal] then answers from those reads. *)
+(** Restart settlement from previously read journal observations. No callback
+    or journal I/O runs in its transaction. An Active call without an
+    observation remains Running, outside the interrupted result and batch
+    settlement. A supplied observation must still match the exact operation,
+    execution revision and native call or the transaction refuses unchanged.
+    Some terminal records the disposition then fails as Interrupted_by_restart;
+    None or journal read Error preserves the existing resume behavior.
+    After_store_recovery retains its unknown-effect policy. The ungated wrapper
+    above keeps its original immediate requeue contract. *)
 val error_to_string : error -> string
 
 module For_testing : sig

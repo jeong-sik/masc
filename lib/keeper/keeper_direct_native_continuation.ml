@@ -111,15 +111,18 @@ let execution_dir binding call_id =
   | Some fs ->
     Ok Eio.Path.(fs / binding.session_dir / "native-executions" / call_id)
 
-let open_projection binding (call : Native.t) =
+let open_projection_using runtime binding (call : Native.t) =
   let* () = if call.operation_digest = binding.execution_digest then Ok ()
     else Error "native call operation input changed before journal inspection" in
-  let* runtime = match Runtime_agent_execution_runtime.get () with
-    | Some runtime -> Ok runtime
-    | None -> Error "native execution runtime has not been initialized" in
   let* dir = execution_dir binding call.call_id in
   Agent.open_execution_projection ~runtime ~dir call.locator
   |> Result.map_error Agent.Execution_projection.error_to_string
+
+let open_projection binding call =
+  let* runtime = match Runtime_agent_execution_runtime.get () with
+    | Some runtime -> Ok runtime
+    | None -> Error "native execution runtime has not been initialized" in
+  open_projection_using runtime binding call
 
 let restore binding call =
   let* seed, resumed = restore_checkpoints binding call in
@@ -159,28 +162,29 @@ let reconcile_terminal binding (call : Native.t) =
         ~disposition:terminal.disposition |> owner in
     Ok (Some terminal)
 
-(* The boot settlement gate answers this read-only question for one call: does
-   the Core journal already terminate the call whose Owner receipt still reads
-   active? The store hands the call from the row itself, so this read never
-   goes through the owner registry — a boot start holds the pool mutex and the
-   owner is not registered yet — and never mutates the receipt or the journal.
-   A read failure keeps the resumable behavior, since a requeued call still
-   terminates the same way. The caller runs this on a fiber: the projection
-   reader needs fiber effects a systhread forbids. *)
-let journal_terminal_for_call ~base_path ~keeper_name ~session_root ~operation_id
-    (call : Native.t) =
+(* Called by the upper composition after application runtime initialization,
+   outside Store transactions and registry locks. It never asks this Owner's
+   mailbox to answer its own startup recovery command. *)
+let journal_terminal ~runtime ~base_path ~keeper_name ~session_root
+    (observed : Keeper_chat_operation_store.restart_native_call) =
+  let call = observed.call in
   let session_id = Keeper_id.Trace_id.to_string call.seed_checkpoint.trace_id in
   let binding : binding =
-    { base_path
-    ; keeper_name
-    ; operation_id
-    ; execution_digest = call.operation_digest
+    { base_path; keeper_name; operation_id = observed.operation.operation_id
+    ; execution_digest = observed.operation.execution_digest
     ; session_dir = Filename.concat session_root session_id
     ; session_id } in
-  let* terminal = inspect_terminal binding call in
+  let* projection = open_projection_using runtime binding call in
+  let* terminal = Agent.read_execution_terminal projection
+    |> Result.map_error Agent.Execution_projection.error_to_string in
   match terminal with
   | Some terminal -> Ok (Some terminal.disposition)
   | None -> Ok None
+
+let complete_restart_settlements ~runtime ~base_path =
+  Owner.complete_restart_settlements ~base_path
+    ~journal_terminal:(fun ~keeper_name ~session_root observed ->
+      journal_terminal ~runtime ~base_path ~keeper_name ~session_root observed)
 
 (* Core records the terminal disposition under cancellation protection, but a
    cancelled writer supervisor, or a failed Owner write, can leave the Owner

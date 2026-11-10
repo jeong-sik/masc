@@ -18,29 +18,6 @@ val install_state_change_observer : (unit -> unit) -> unit
     fiber itself propagates; if a persistence exception is already unwinding,
     that original exception takes precedence over an observer exception. *)
 
-val install_journal_terminal_gate :
-  (base_path:string ->
-    keeper_name:string ->
-    session_root:string ->
-    operation_id:Keeper_chat_operation.Operation_id.t ->
-    Keeper_native_call.t ->
-    (Agent_core.Agent.execution_terminal_disposition option, string) result)
-  -> unit
-(** Install the read-only journal gate the boot settlement consults. The gate
-    receives the still-active call from the store row, so the read never goes
-    through the owner registry: a boot start holds the pool mutex and the
-    owner is not registered yet. The bootstrap layer owns the wiring because
-    the native continuation adapter sits above the Owner in the module graph,
-    and the Owner runs the gate on its own fiber — the projection reader needs
-    fiber effects the settlement's systhread forbids. Unset keeps the pre-gate
-    behavior: running rows requeue at restart and terminate the same way on
-    their next dispatch. The gate never mutates the Owner receipt or the
-    journal. *)
-
-val clear_journal_terminal_gate : unit -> unit
-(** Remove the installed gate. Tests install and clear it; unset keeps the
-    pre-gate behavior. *)
-
 type store =
   { replace : Keeper_meta_contract.keeper_meta -> (unit, string) result
   ; remove : Keeper_meta_contract.keeper_meta -> (unit, string) result
@@ -279,6 +256,11 @@ val start
     removes, under it, the retained checkpoints that commit released
     ({!Keeper_chat_operation_store.take_released_checkpoints}).
 
+    Active calls inherited from another process remain Running until
+    {!complete_restart_settlement} reads their journals with the application
+    runtime. The composition must complete that step before starting Keeper
+    loops. These rows are not initial failed-operation projections.
+
     [on_turn_slot_released] fires when a turn ends, the slot is still unclaimed
     after queued chat has been offered it, and the autonomous lane has been
     refused the slot since the last notification. The
@@ -417,6 +399,20 @@ val exact_operation
     and earlier starts. The registry retries their idempotent journal and
     transcript projections; the owner has no transcript of its own. *)
 val failed_operations_at_start : t -> Chat_operation.t list
+
+val complete_restart_settlement :
+  t ->
+  journal_terminal:(Keeper_chat_operation_store.restart_native_call ->
+    (Agent_core.Agent.execution_terminal_disposition option, string) result) ->
+  (Chat_operation.t list, error) result
+(** Complete this Owner's deferred Active startup calls in its Eio mailbox,
+    after the application execution runtime is ready and before Keeper loops
+    start. Journal reads precede the identity-checked Store transaction. Repeat
+    completion returns no rows and never settles a later live child. Returns
+    the confirmed Failed batch rows for the registry's startup projections,
+    including compositions without a live operation runner. A failed
+    startup Store commit closes this actor; the registry fences its exact
+    handle as unavailable, independently of other Keepers. *)
 
 (** Durable cooperative checkpoint continuation, independent of provider retry. *)
 val direct_checkpoint : t -> operation_id:Chat_operation.Operation_id.t -> (Keeper_semantic_execution.gate_checkpoint option, error) result

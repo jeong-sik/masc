@@ -36,31 +36,6 @@ module Chat_operation = Keeper_chat_operation
 module Chat_operation_store = Keeper_chat_operation_store
 module Operation_id = Chat_operation.Operation_id
 
-(* The boot settlement asks one read-only question the store cannot answer and
-   the Owner must not reach for itself: does the Core journal already hold a
-   terminal for a call whose Owner receipt still reads active? The reader lives
-   in the native continuation adapter, which sits above the Owner in the
-   module graph — the journal producer already depends back on the Owner — so
-   the bootstrap layer installs it here. An unset slot keeps the pre-gate
-   behavior: the row requeues and terminates the same way on its next
-   dispatch. *)
-let journal_terminal_gate
-  : (base_path:string ->
-      keeper_name:string ->
-      session_root:string ->
-      operation_id:Operation_id.t ->
-      Keeper_native_call.t ->
-      (Agent_core.Agent.execution_terminal_disposition option, string) result)
-    option
-    Atomic.t
-  = Atomic.make None
-
-let install_journal_terminal_gate gate =
-  Atomic.set journal_terminal_gate (Some gate)
-
-let clear_journal_terminal_gate () =
-  Atomic.set journal_terminal_gate None
-
 type runtime_retry_revalidation =
   | Keep_retry_wait
   | Update_retry_wait of
@@ -388,6 +363,10 @@ type _ command =
       }
       -> (Chat_operation.t, error) result command
   | Observe_runtime_retry_waits : (unit, error) result command
+  | Complete_restart_settlement :
+      (Chat_operation_store.restart_native_call ->
+        (Agent_core.Agent.execution_terminal_disposition option, string) result) ->
+      (Chat_operation.t list, error) result command
   | Wake_operation_drain : (unit, error) result command
   | Run_if_idle :
       { lane : turn_lane
@@ -501,6 +480,7 @@ type t =
            turn duration. Only a lane that actually lost the slot needs telling
            that it is free. Owner-fiber-local; every reader and writer below
            runs in the command loop. *)
+  ; pending_restart_calls : Chat_operation_store.restart_native_call list ref
   ; failed_at_start : Chat_operation.t list
         (* All durable [Failed] operations, including batch
            members and prior starts, so the transcript and event journal can
@@ -737,7 +717,7 @@ let answer : type response. response command -> answer = function
   | Batch_operations _ -> In_its_drain_step
   | Claim_next_operation -> In_its_drain_step
   | Succeed_running_operation _ -> In_its_drain_step
-  | Observe_runtime_retry_waits | Wake_operation_drain -> In_its_drain_step
+  | Observe_runtime_retry_waits | Wake_operation_drain | Complete_restart_settlement _ -> In_its_drain_step
   | Run_if_idle _ -> Possibly_when_the_child_finishes
   | Begin_shutdown _ -> In_its_drain_step
   | Rollback_shutdown _ -> In_its_drain_step
@@ -1403,52 +1383,12 @@ let start
   (match operation_store_result with
    | Error _ as error -> error
    | Ok operation_store ->
-  (* The store cannot read the Core journal, so this gate answers for it when
-     the bootstrap layer has installed the reader. It reports the terminal the
-     journal already holds for a call whose Owner receipt is still active, and
-     the store records that disposition on the receipt and interrupts the row
-     at boot instead of requeueing it into a dispatch that fails with a bare
-     string error later. Without an installed reader the row requeues and
-     terminates the same way on its next dispatch. *)
-  (* The gate runs the projection reader, which needs fiber effects (Eio
-     promises, mutexes, yields) that a systhread forbids, and it must not go
-     through the owner registry while this start holds the pool mutex — the
-     owner is not registered yet. So the Owner reads the still-active calls'
-     journals HERE, on its own fiber, and the settle's gate answers from that
-     map inside the systhread. A read failure keeps the resumable behavior:
-     the row requeues and terminates the same way on its next dispatch. *)
-  let precomputed_terminals =
-    match
-      run_operation_store ~label:"read running active native calls" (fun () ->
-        Chat_operation_store.running_direct_active_calls operation_store)
-    with
-    | Error _ -> []
-    | Ok rows ->
-      List.map (fun (operation_id, call) ->
-        let read =
-          match Atomic.get journal_terminal_gate with
-          | Some gate -> gate ~base_path ~keeper_name ~session_root ~operation_id call
-          | None -> Ok None in
-        (match read with
-         | Error detail ->
-           Log.Keeper.warn ~keeper_name
-             "restart journal gate could not read the journal operation=%s: %s"
-             (Chat_operation.Operation_id.to_string operation_id) detail
-         | Ok _ -> ());
-        (operation_id, read))
-        rows
-  in
-  let journal_terminal operation_id =
-    match List.assoc_opt operation_id precomputed_terminals with
-    | Some read -> read
-    | None -> Ok None
-  in
   let startup_result =
     let startup_now = now () in
     match
       run_operation_store ~label:"settle Keeper chat operations after restart" (fun () ->
         Chat_operation_store.settle_running_without_executor_with_journal_terminal
-          ~journal_terminal
+          ~observations:[]
           ~cause:Chat_operation_store.After_process_restart operation_store ~now:startup_now)
       |> Result.map_error owner_error_of_operation_error
     with
@@ -1469,16 +1409,19 @@ let start
          |> Result.map_error owner_error_of_operation_error)
         (fun projection ->
         run_operation_store ~label:"read restart recovery operations" (fun () ->
-          Chat_operation_store.list_failed operation_store)
+          let open Result.Syntax in
+          let* recovery = Chat_operation_store.list_failed operation_store in
+          let* pending = Chat_operation_store.running_native_calls operation_store in
+          Ok (recovery, pending))
         |> Result.map_error owner_error_of_operation_error
-        |> Result.map (fun recovery -> projection, recovery))
+        |> Result.map (fun (recovery, pending) -> projection, recovery, pending))
   in
   (match startup_result with
    | Error _ as error ->
      (* See startup failure path: preserve the original error; close is best-effort. *)
      ignore (Chat_operation_store.close operation_store : (unit, _) result);
      error
-   | Ok (initial_operation_projection, failed_at_start) ->
+   | Ok (initial_operation_projection, failed_at_start, pending_restart_calls) ->
   let closed_p, resolve_closed = Eio.Promise.create () in
   let t =
     { keeper_name
@@ -1503,6 +1446,7 @@ let start
     ; shutdown_idle_waiters = ref []
     ; on_turn_slot_released
     ; operation_runner
+    ; pending_restart_calls = ref pending_restart_calls
     ; failed_at_start
     }
   in
@@ -2064,6 +2008,73 @@ let start
         | Command (Exact_projection, resolve) ->
           Eio.Promise.resolve resolve (Ok (Keeper_owner_reducer.projection state));
           loop state
+        | Command (Complete_restart_settlement journal_terminal, resolve) ->
+          if Option.is_some (Atomic.get t.turn_in_flight) && !(t.pending_restart_calls) <> []
+          then (
+            Eio.Promise.resolve resolve (Error (Operation_rejected Chat_operation_store.Native_call_unsettled));
+            loop state)
+          else
+            let response =
+              try
+                match !(t.pending_restart_calls) with
+                | [] -> Ok []
+                | pending ->
+                  let observations = List.map (fun observed ->
+                    let terminal = journal_terminal observed in
+                    (match terminal with
+                     | Ok _ -> ()
+                     | Error detail ->
+                       Log.Keeper.warn ~keeper_name:t.keeper_name
+                         "restart journal read failed operation=%s: %s"
+                         (Operation_id.to_string observed.Chat_operation_store.operation.operation_id) detail);
+                    observed, terminal) pending in
+                  let settlement_now = t.now () in
+                  let settled = run_operation_store ~label:"complete Keeper restart settlement" (fun () ->
+                    Chat_operation_store.settle_running_without_executor_with_journal_terminal
+                      ~observations ~cause:Chat_operation_store.After_process_restart
+                      t.operation_store ~now:settlement_now) in
+                  (match settled with
+                   | Error error -> Error (record_operation_error t error)
+                   | Ok interrupted ->
+                     release_committed_checkpoints ~keeper_name:t.keeper_name
+                       ~session_root:t.session_root t.operation_store;
+                     (match read_operation_projection t.operation_store ~now:(t.now ()) with
+                      | Error error -> Error (record_operation_error t error)
+                      | Ok projection ->
+                        (match run_operation_store ~label:"read committed restart failures" (fun () ->
+                           let open Result.Syntax in
+                           let* reversed = List.fold_left (fun result (operation : Chat_operation.t) ->
+                             let* reversed = result in
+                             let* members = Chat_operation_store.batch_operations t.operation_store
+                                 ~operation_id:operation.operation_id in
+                             Ok (List.rev_append members reversed)) (Ok []) interrupted in
+                           Ok (List.rev reversed)) with
+                         | Error error -> Error (record_operation_error t error)
+                         | Ok failed ->
+                           t.pending_restart_calls := [];
+                           publish_operation_projection t projection;
+                           Keeper_waiting_inventory_broadcast.changed ~base_path:t.base_path
+                             ~keeper_name:t.keeper_name ~source:Keeper_waiting_inventory_broadcast.Chat_operation;
+                           Ok failed)))
+              with
+              | Eio.Cancel.Cancelled _ as exn -> raise exn
+              | exn -> Error (Store_unavailable ("restart journal settlement raised: " ^ Printexc.to_string exn))
+            in
+            (match response with
+             | Ok _ ->
+               Eio.Promise.resolve resolve response;
+               start_child_if_needed state shutdown_operation_id;
+               loop state
+             | Error _ ->
+               (* No child owns this handle. Match failed initial startup:
+                  close it and let the registry fence only this exact Owner. *)
+               (match run_operation_store ~label:"close failed startup operation store"
+                   (fun () -> Chat_operation_store.close t.operation_store) with
+                | Ok () -> ()
+                | Error error -> Log.Keeper.error ~keeper_name:t.keeper_name
+                    "startup operation store close failed: %s"
+                    (Chat_operation_store.error_to_string error));
+               Eio.Promise.resolve resolve response)
         | Command (Autonomous_chat_handoff_ready child, resolve) ->
           let ready =
             match Atomic.get t.turn_in_flight, operation_runner with
@@ -3177,6 +3188,8 @@ let resume_direct_runtime_retry t ~operation_id ~observed =
 let exact_operation t operation_id = request t (Exact_operation operation_id)
 
 let failed_operations_at_start t = t.failed_at_start
+let complete_restart_settlement t ~journal_terminal =
+  request t (Complete_restart_settlement journal_terminal)
 let pause_and_interrupt ?expected_control_token t target = request t (Pause_and_interrupt {target; expected_control_token})
 let interrupt_turn = pause_and_interrupt
 let run_next_operation ?priority_predecessors t ~operation_id ~observed =

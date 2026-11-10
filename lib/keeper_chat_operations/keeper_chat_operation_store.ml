@@ -3306,12 +3306,15 @@ let running_settlement_unacknowledged_detail = function
     "the operation store became unavailable before Owner receipt acknowledgement"
 ;;
 
-(* Every [Running] row, as the settlement reads them. The boot path reads the
-   same rows outside the settle transaction to pre-fetch journal terminals on
-   a fiber, which the settle's systhread forbids. Pure sqlite reads; no Eio
-   effects. *)
-let read_running_operations db ~operation =
-  with_statement db ~operation
+type restart_native_call =
+  { snapshot_store : t
+  ; operation : Operation.t
+  ; execution_revision : int64
+  ; call : Keeper_native_call.t
+  }
+
+let running_operations_with_db db =
+  with_statement db ~operation:"read interrupted direct operations"
     ("SELECT " ^ select_columns ^ " FROM operations WHERE state = 'running'")
     (fun statement ->
       let rec read acc =
@@ -3319,46 +3322,54 @@ let read_running_operations db ~operation =
         if rc = Sqlite3.Rc.DONE then Ok (List.rev acc)
         else if rc = Sqlite3.Rc.ROW then
           let* operation = decode_operation statement in read (operation :: acc)
-        else Error (Store_unavailable (sqlite_error db operation rc)) in
+        else Error (Store_unavailable (sqlite_error db "read interrupted direct operations" rc)) in
       read [])
 
-(* The running rows that still hold an active native call, with each call.
-   The Owner reads these journals on its own fiber before settling, then
-   answers the settle's [journal_terminal] from those reads. *)
-let running_direct_active_calls store =
+let running_native_calls store =
   let* () = ensure_open store in
-  let* running =
-    read_running_operations store.db ~operation:"read running active native calls" in
-  Ok
-    (List.filter_map (fun (operation : Operation.t) ->
-       match direct_execution_with_db store.db operation with
-       | Error _ -> None
-       | Ok execution ->
-         match Option.map (fun (execution : Semantic.t) -> execution.native_call) execution with
-         | Some (Keeper_native_call.Active call) -> Some (operation.operation_id, call)
-         | Some (Keeper_native_call.Terminal_unacknowledged _) -> None
-         | Some Keeper_native_call.No_native_call -> None
-         | None -> None)
-       running)
-;;
+  let* running = running_operations_with_db store.db in
+  let* calls = List.fold_left (fun result (operation : Operation.t) ->
+    let* calls = result in
+    let* execution = direct_execution_with_db store.db operation in
+    match execution with
+    | Some ({ native_call = Keeper_native_call.Active call; revision; _ } : Semantic.t) ->
+      Ok ({ snapshot_store = store; operation; execution_revision = revision; call } :: calls)
+    | Some { native_call = Keeper_native_call.No_native_call | Terminal_unacknowledged _; _ }
+    | None -> Ok calls) (Ok []) running in
+  Ok (List.rev calls)
 
-(* The journal gate answers one question for a row whose Owner receipt is
-   still active: does the Core journal already hold a terminal for that call?
-   The store cannot read the journal itself, so the Owner installs this check.
-   [Ok (Some disposition)] records that terminal on the receipt and settles
-   the row as interrupted; [Ok None] and a read failure requeue it, because a
-   requeued call still terminates the same way on dispatch and the store
-   cannot tell the two states apart on its own. *)
+(* Journal I/O happens before this transaction, in the Owner's Eio mailbox.
+   Missing observations deliberately leave Active calls Running until the
+   application runtime is ready. Supplied observations must still name the
+   same Store handle, complete operation, semantic revision and native call. *)
 let settle_running_without_executor_with_journal_terminal
-    ~journal_terminal store ~cause ~now =
+    ~observations store ~cause ~now =
   let* () = ensure_open store in
   let* () =
     Operation.validate_timestamp ~field:"completed_at" now
     |> Result.map_error (fun detail -> Invalid_input detail)
   in
   with_transaction store (fun () ->
-    let* running =
-      read_running_operations store.db ~operation:"read interrupted direct operations" in
+    let* running = running_operations_with_db store.db in
+    let* _validated = List.fold_left (fun result ((observed : restart_native_call), _) ->
+      let* seen = result in
+      let id = observed.operation.operation_id in
+      let* () =
+        if observed.snapshot_store == store
+           && not (List.exists (Operation.Operation_id.equal id) seen)
+        then Ok ()
+        else Error (Integrity_error "restart journal observation has another Store or duplicate operation") in
+      let* operation = match List.find_opt
+          (fun (operation : Operation.t) -> Operation.Operation_id.equal operation.operation_id id) running with
+        | Some operation when operation = observed.operation -> Ok operation
+        | Some _ | None -> Error (Integrity_error "restart journal operation changed after observation") in
+      let* execution = direct_execution_with_db store.db operation in
+      let* () = match execution with
+        | Some ({ native_call = Keeper_native_call.Active call; revision; _ } : Semantic.t)
+          when Int64.equal revision observed.execution_revision
+               && Keeper_native_call.equal call observed.call -> Ok ()
+        | Some _ | None -> Error (Integrity_error "restart journal native call changed after observation") in
+      Ok (id :: seen)) (Ok []) observations in
     (* A running operation with a durable continuation goes back to Queued and
        resumes; one without is a request whose executor ended without
        committing it, and only those are failed below. An active native call
@@ -3372,8 +3383,10 @@ let settle_running_without_executor_with_journal_terminal
       | Some (Keeper_native_call.Active call) ->
         (match cause with
          | After_process_restart ->
-           (match journal_terminal operation.operation_id with
-            | Ok (Some disposition) ->
+           (match List.find_opt (fun ((observed : restart_native_call), _) ->
+              Operation.Operation_id.equal observed.operation.operation_id operation.operation_id) observations with
+            | None -> Ok interrupted
+            | Some (_, Ok (Some disposition)) ->
               (* The Owner gate reports a journal terminal for this still-active
                  receipt: record that terminal first, then settle. Settling an
                  active receipt directly is refused with
@@ -3397,9 +3410,9 @@ let settle_running_without_executor_with_journal_terminal
                 closed in
               let* () = update_semantic store ~expected:closed next in
               Ok (operation :: interrupted)
-            | Ok None ->
+            | Some (_, Ok None) ->
               requeue_continuation_with_db store.db operation |> Result.map (fun _ -> interrupted)
-            | Error _ ->
+            | Some (_, Error _) ->
               requeue_continuation_with_db store.db operation |> Result.map (fun _ -> interrupted))
          | After_store_recovery ->
            let* closed =
@@ -3441,10 +3454,12 @@ let settle_running_without_executor_with_journal_terminal
            requeue_continuation_with_db store.db operation |> Result.map (fun _ -> interrupted))) (Ok []) running in
     let interrupted = List.rev interrupted in
     let* _reconciled = reconcile_semantic_running store ~now in
-    let* count = with_statement
+    let* count = List.fold_left (fun result (operation : Operation.t) ->
+      let* total = result in
+      let* count = with_statement
       store.db
       ~operation:"settle interrupted operations"
-      "UPDATE operations SET state = 'failed', input_json = NULL, completed_at = ?, failure_kind = ?, failure_detail = ? WHERE state = 'running'"
+      "UPDATE operations SET state = 'failed', input_json = NULL, completed_at = ?, failure_kind = ?, failure_detail = ? WHERE state = 'running' AND operation_id = ?"
       (fun stmt ->
          let failure_kind, failure_detail = running_settlement_failure cause in
          let* () = bind_float store.db stmt ~operation:"bind settlement time" 1 now in
@@ -3459,10 +3474,13 @@ let settle_running_without_executor_with_journal_terminal
          let* () =
            bind_text store.db stmt ~operation:"bind settlement failure detail" 3 failure_detail
          in
+         let* () = bind_text store.db stmt ~operation:"bind interrupted operation" 4
+             (Operation.Operation_id.to_string operation.operation_id) in
          let* () = expect_done store.db stmt ~operation:"settle interrupted operations" in
          Ok (Sqlite3.changes store.db)) in
+      Ok (total + count)) (Ok 0) interrupted in
     let* () = List.fold_left (fun result (operation : Operation.t) -> let* () = result in
-      settle_batch_members_with_db store.db ~execution_id:operation.operation_id) (Ok ()) running in
+      settle_batch_members_with_db store.db ~execution_id:operation.operation_id) (Ok ()) interrupted in
     let* () =
       if count = List.length interrupted then Ok ()
       else Error (Integrity_error (Printf.sprintf
@@ -3474,8 +3492,13 @@ let settle_running_without_executor_with_journal_terminal
 ;;
 
 let settle_running_without_executor store ~cause ~now =
+  let* observations = match cause with
+    | After_store_recovery -> Ok []
+    | After_process_restart ->
+      let* calls = running_native_calls store in
+      Ok (List.map (fun call -> call, Ok None) calls) in
   settle_running_without_executor_with_journal_terminal
-    ~journal_terminal:(fun _ -> Ok None) store ~cause ~now
+    ~observations store ~cause ~now
 ;;
 
 module For_testing = struct

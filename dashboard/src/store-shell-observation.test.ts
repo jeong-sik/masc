@@ -66,6 +66,112 @@ async function surface(acceptWorkspace = true) {
 }
 
 describe('App-owned Shell observation', () => {
+  it('does not read an unknown workspace and reads an accepted owner only once', async () => {
+    const fetch = vi.fn().mockResolvedValue(json(shell()))
+    vi.stubGlobal('fetch', fetch)
+    const { observation, workspace } = await surface(false)
+    observation.publishDashboardObservationChange({ topic: 'runtime_resolved' })
+    window.dispatchEvent(new Event('focus'))
+    observation.publishDashboardObservationRecovery()
+    await flush()
+    await vi.advanceTimersByTimeAsync(300_000)
+    expect(fetch).not.toHaveBeenCalled()
+    workspace.acceptedExecutionWorkspace.value = Object.freeze({
+      epoch: 'accepted-process', workspaceRoot: '/workspace', connectionGeneration: 1, observerInstanceId: 'shell-B',
+    })
+    await flush()
+    expect(fetch).toHaveBeenCalledTimes(1)
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it.each([401, 403])('retains HTTP %s refusal across source/focus/recovery until its actual token changes', async status => {
+    const fetch = vi.fn().mockResolvedValueOnce(new Response('{"error":"forbidden"}', { status }))
+      .mockResolvedValue(json(shell('replacement')))
+    vi.stubGlobal('fetch', fetch)
+    const { store, observation } = await surface()
+    const api = await import('./api/dashboard-hot')
+    const actualRead = api.fetchDashboardShell
+    let originalCause: unknown
+    vi.spyOn(api, 'fetchDashboardShell').mockImplementation(options => actualRead(options).catch(cause => {
+      originalCause = cause
+      throw cause
+    }))
+    const retain = vi.spyOn(observation, 'retainObservationReadFailure')
+    observation.publishDashboardObservationChange({ topic: 'runtime_resolved' })
+    await flush()
+    expect(fetch).toHaveBeenCalledTimes(1)
+    expect(originalCause).toBeInstanceOf((await import('./api/core')).ApiRequestError)
+    expect(retain).toHaveBeenCalledWith(originalCause)
+    expect(store.shellAuthSummary.value).toBeNull()
+    for (let i = 0; i < 3; i++) {
+      observation.publishDashboardObservationChange({ topic: 'runtime_resolved' })
+      window.dispatchEvent(new Event('focus'))
+      observation.publishDashboardObservationRecovery()
+      await flush()
+    }
+    await vi.advanceTimersByTimeAsync(300_000)
+    expect(fetch).toHaveBeenCalledTimes(1)
+    expect(vi.getTimerCount()).toBe(0)
+    const { setStoredToken } = await import('./api/core')
+    setStoredToken('replacement')
+    // The production global push recovery calls this after the helper's
+    // owner listener. Both paths owe the same new-owner read.
+    store.recoverShellReadDebt(true)
+    await flush()
+    expect(fetch).toHaveBeenCalledTimes(2)
+    expect(store.serverStatus.value?.project).toBe('replacement')
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it.each([401, 403])('keeps a managed HTTP %s cause without inventing a new header owner', async status => {
+    const core = await import('./api/core')
+    const actor = await import('./lib/dashboard-session-actor')
+    const ownership = await import('./lib/observation-read-owner')
+    core.setStoredToken('managed', { source: 'dev', actor: 'dashboard', role: 'admin' })
+    actor.setCanonicalDashboardActor('dashboard')
+    const rejected = vi.fn()
+    core.setRejectedCredentialListener(rejected)
+    const fetch = vi.fn().mockResolvedValue(new Response('{"auth_error_code":"invalid_token"}', { status }))
+    vi.stubGlobal('fetch', fetch)
+    const { store, observation } = await surface()
+    const headerOwner = ownership.captureDashboardObservationOwner()
+    const strictOwner = core.captureDashboardCredentialOwner()
+    observation.publishDashboardObservationChange({ topic: 'runtime_resolved' })
+    await flush()
+    expect(ownership.dashboardObservationOwnerIsCurrent(headerOwner)).toBe(true)
+    expect(actor.currentCanonicalDashboardActor()).toBe('dashboard')
+    if (status === 401) {
+      expect(core.dashboardCredentialOwnerIsCurrent(strictOwner)).toBe(false)
+      expect(rejected).toHaveBeenCalledTimes(1)
+    }
+    observation.publishDashboardObservationChange({ topic: 'runtime_resolved' })
+    window.dispatchEvent(new Event('focus'))
+    observation.publishDashboardObservationRecovery()
+    await flush()
+    await vi.advanceTimersByTimeAsync(300_000)
+    expect(fetch).toHaveBeenCalledTimes(1)
+    expect(store.shellAuthSummary.value).toBeNull()
+    expect(effects.toast).toHaveBeenCalledTimes(1)
+    expect(vi.getTimerCount()).toBe(0)
+    core.setRejectedCredentialListener(null)
+  })
+
+  it('waits without a timer after a successful pending read and accepts the next source read', async () => {
+    const fetch = vi.fn().mockResolvedValueOnce(json(shell('initializing'))).mockResolvedValue(json(shell('ready')))
+    vi.stubGlobal('fetch', fetch)
+    const { store, observation } = await surface()
+    observation.publishDashboardObservationChange({ topic: 'runtime_resolved' })
+    await flush()
+    await vi.advanceTimersByTimeAsync(300_000)
+    expect(fetch).toHaveBeenCalledTimes(1)
+    expect(vi.getTimerCount()).toBe(0)
+    observation.publishDashboardObservationChange({ topic: 'runtime_resolved' })
+    await flush()
+    expect(fetch).toHaveBeenCalledTimes(2)
+    expect(store.serverStatus.value?.project).toBe('ready')
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
   it('subscribes without a boot read, then refreshes full config/runtime once per owed source change', async () => {
     const held = delayed()
     const fetch = vi.fn().mockResolvedValueOnce(json(shell())).mockImplementationOnce(() => held.promise)
@@ -461,11 +567,13 @@ describe('App-owned Shell observation', () => {
     const { store, observation } = await surface()
     observation.publishDashboardObservationChange({ topic: 'runtime_resolved' })
     await flush()
+    expect(vi.getTimerCount()).toBe(1)
     await vi.advanceTimersByTimeAsync(2_999)
     expect(fetch).toHaveBeenCalledTimes(1)
     await vi.advanceTimersByTimeAsync(1)
     expect(fetch).toHaveBeenCalledTimes(2)
     expect(store.serverStatus.value?.project).toBe('recovered')
+    expect(vi.getTimerCount()).toBe(0)
     await vi.advanceTimersByTimeAsync(300_000)
     expect(fetch).toHaveBeenCalledTimes(2)
   })

@@ -45,12 +45,12 @@ import { createReadRecovery } from './lib/read-recovery'
 import { ObservationPending, retainObservationReadFailure, setupObservationRefresh } from './lib/observation-refresh'
 import { isRecord, asString, asNumber } from './components/common/normalize'
 import { currentCanonicalDashboardActor, managedCredentialNeedsRevalidation, managedDashboardRefusal, setCanonicalDashboardActor } from './lib/dashboard-session-actor'
-import { sanitizeDashboardActorName } from './lib/dashboard-actor'
 import {
   captureDashboardObservationOwner,
   dashboardObservationOwnerIsCurrent,
   subscribeDashboardObservationOwnerChanges,
 } from './lib/observation-read-owner'
+import { sanitizeDashboardActorName } from './lib/dashboard-actor'
 import {
   captureDashboardCredentialOwner,
   ApiRequestError,
@@ -576,6 +576,7 @@ export const tasksByStatus = computed(() => {
 let inflightDashboardRefresh: Promise<void> | null = null
 export type ShellReadOutcome =
   | { readonly kind: 'ready' }
+  | { readonly kind: 'pending'; readonly admitted: boolean }
   | { readonly kind: 'failed'; readonly cause: unknown }
   | { readonly kind: 'cancelled' }
 interface ShellRefreshFlight {
@@ -941,6 +942,23 @@ function recoverFromRejectedShellAuth(
 type ShellRootSnapshot = Pick<DashboardShellResponse, 'generated_at' | 'counts' | 'configured_keepers'>
   & { status?: ServerStatus | null }
 
+function shellSnapshotIsInitializing(data: DashboardShellResponse): boolean {
+  const status: unknown = data.status
+  return status === 'initializing' || (isRecord(status) && status.project === 'initializing')
+}
+
+function requestShellRecoveryRead(light: boolean): void {
+  const revision = shellReadRecovery.revision
+  const requestOwner = captureDashboardObservationOwner()
+  // A root completion or global recovery may accompany the mounted helper's
+  // same-owner read. Let that read start, then retain only unsatisfied debt.
+  queueMicrotask(() => {
+    if (revision !== shellReadRecovery.revision || !dashboardObservationOwnerIsCurrent(requestOwner)) return
+    if (inflightShellRefresh && (light || !inflightShellRefresh.light)) return
+    void refreshShell({ light, force: true })
+  })
+}
+
 /** Shell and namespace snapshots share this root projection. A namespace read
  * or push completion fences reads already in flight without claiming their auth or
  * config/runtime-resolution slices were refreshed. */
@@ -973,14 +991,13 @@ export function hydrateShellSnapshot(
   const staleOwner = opts.authOwner !== undefined && !dashboardCredentialOwnerIsCurrent(opts.authOwner)
   if (staleOwner) return false
   const rootSuperseded = opts.rootRevision !== undefined && opts.rootRevision !== shellRootCompletionRevision
-  const status: unknown = data.status
-  const initializing = status === 'initializing' || (isRecord(status) && status.project === 'initializing')
+  const initializing = shellSnapshotIsInitializing(data)
   if (rootSuperseded && initializing) {
     // This read missed a completion we already accepted. Its synthetic auth
     // and empty projections cannot replace it, and no second producer event
     // is owed. Recover that one read after its current flight releases.
     const revision = shellReadRecovery.revision
-    shellReadRecovery.waiting(() => { void refreshShell({ light: wantsLight, force: true }) })
+    shellReadRecovery.waiting(() => requestShellRecoveryRead(wantsLight))
     queueMicrotask(() => { if (shellReadRecovery.revision === revision) shellReadRecovery.recover() })
     return false
   }
@@ -1034,7 +1051,7 @@ export function hydrateShellSnapshot(
   lastShellRefreshAt = admitted ? Date.now() : 0
   if (admitted) {
     if (initializing) {
-      shellReadRecovery.waiting(() => { void refreshShell({ light: wantsLight, force: true }) })
+      shellReadRecovery.waiting(() => requestShellRecoveryRead(wantsLight))
     } else shellReadRecovery.succeeded()
   }
   return admitted
@@ -1074,7 +1091,7 @@ function joinShellRefresh(flight: ShellRefreshFlight, signal?: AbortSignal): Pro
   })
 }
 
-/** Mounted shell observers keep the exact outcome of their shared request. */
+/** Mounted observers keep the shared request signal and exact failure cause. */
 export async function readShell(opts?: RefreshOptions & { recoverAuth?: boolean; signal?: AbortSignal }): Promise<ShellReadOutcome> {
   if (opts?.signal?.aborted) return { kind: 'cancelled' }
   const wantsLight = opts?.light === true
@@ -1119,6 +1136,7 @@ export async function readShell(opts?: RefreshOptions & { recoverAuth?: boolean;
       stopAuthorityWatch()
       const admitted = hydrateShellSnapshot(data, { light: wantsLight, sentToken: authOwner.token, authOwner,
         recoverAuth: opts?.recoverAuth, rootRevision })
+      if (shellSnapshotIsInitializing(data)) return { kind: 'pending', admitted }
       return { kind: admitted ? 'ready' : 'cancelled' }
     } catch (err) {
       if (!current() || isAbortError(err)) return { kind: 'cancelled' }
@@ -1127,7 +1145,7 @@ export async function readShell(opts?: RefreshOptions & { recoverAuth?: boolean;
       // may retire strict hydration authority while the request headers stay
       // the same; keep that original refusal and its retry policy intact.
       shellAuthSummary.value = null
-      shellReadRecovery.failed(() => { void refreshShell({ light: wantsLight, force: true }) },
+      shellReadRecovery.failed(() => requestShellRecoveryRead(wantsLight),
         !(err instanceof ApiRequestError && (err.status === 401 || err.status === 403)))
       showToast('서버 연결 실패 — 데이터를 불러올 수 없습니다', 'error', 6000)
       console.warn('[Dashboard] shell fetch error:', err)
@@ -1143,7 +1161,7 @@ export async function readShell(opts?: RefreshOptions & { recoverAuth?: boolean;
 
 export async function refreshShell(opts?: RefreshOptions & { recoverAuth?: boolean; signal?: AbortSignal }): Promise<boolean> {
   const outcome = await readShell(opts)
-  return outcome.kind === 'ready'
+  return outcome.kind === 'ready' || (outcome.kind === 'pending' && outcome.admitted)
 }
 
 /** App owns initial boot separately; successful quiet observation does no HTTP. */
@@ -1151,7 +1169,7 @@ export function setupShellObservation(): () => void {
   return setupObservationRefresh(async signal => {
     const outcome = await readShell({ force: true, signal })
     if (outcome.kind === 'failed') throw retainObservationReadFailure(outcome.cause)
-    if (outcome.kind === 'cancelled') throw new ObservationPending('Shell observation is pending')
+    if (outcome.kind === 'pending' || outcome.kind === 'cancelled') throw new ObservationPending('Shell observation is pending')
   }, {
     topics: ['runtime_resolved'], initial: false,
   })

@@ -5,9 +5,6 @@ import { html } from 'htm/preact'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { waitFor } from '@testing-library/preact'
 
-vi.mock('../../lib/auto-refresh', () => ({
-  setupVisibleAutoRefresh: vi.fn(() => vi.fn()),
-}))
 
 import { agents, executionLoaded, keepers } from '../../store'
 import { navigate, route } from '../../router'

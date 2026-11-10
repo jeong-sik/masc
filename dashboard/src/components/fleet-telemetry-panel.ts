@@ -619,14 +619,17 @@ function FailureCategoryPanel({ toolQuality }: { toolQuality: ToolQualityRespons
 
 export function FleetTelemetryPanel() {
   const latestRequestId = useRef(0)
+  const observationReadError = useRef<unknown | null>(null)
   const activeController = useRef<AbortController | null>(null)
   const state = useSignal<FleetTelemetryState>(emptyState())
   const [query] = useSavedSignal('dash:filter:fleet-telemetry:query', '')
 
-  const loadFleetTelemetry = async () => {
+  const loadFleetTelemetry = async (signal?: AbortSignal) => {
+    observationReadError.current = null
     activeController.current?.abort()
     const controller = new AbortController()
     activeController.current = controller
+    const readSignal = signal ? AbortSignal.any([signal, controller.signal]) : controller.signal
     const requestId = ++latestRequestId.current
     state.value = {
       ...state.value,
@@ -637,15 +640,17 @@ export function FleetTelemetryPanel() {
 
     try {
       const [executionResult, executionTrustResult, toolQualityResult, telemetrySummaryResult, namespaceTruthResult] = await Promise.allSettled([
-        fetchDashboardExecution({ signal: controller.signal }),
-        fetchDashboardExecutionTrust({ signal: controller.signal }),
-        fetchToolQuality({ n: 5000, windowHours: 24, signal: controller.signal }),
-        fetchTelemetrySummary({ signal: controller.signal }),
-        fetchDashboardNamespaceTruth({ signal: controller.signal }),
+        fetchDashboardExecution({ signal: readSignal }),
+        fetchDashboardExecutionTrust({ signal: readSignal }),
+        fetchToolQuality({ n: 5000, windowHours: 24, signal: readSignal }),
+        fetchTelemetrySummary({ signal: readSignal }),
+        fetchDashboardNamespaceTruth({ signal: readSignal }),
       ])
 
-      if (controller.signal.aborted || requestId !== latestRequestId.current) return
+      if (readSignal.aborted || requestId !== latestRequestId.current) return
 
+      observationReadError.current = [executionResult, executionTrustResult, toolQualityResult, telemetrySummaryResult, namespaceTruthResult]
+        .find(result => result.status === 'rejected')?.reason ?? null
       const warnings: string[] = []
 
       const keepers =
@@ -728,6 +733,7 @@ export function FleetTelemetryPanel() {
   useEffect(() => {
     const disposeAutoRefresh = setupObservationRefresh(loadFleetTelemetry, {
       topics: ['keeper_composite', 'keeper_turns', 'telemetry', 'tool_metrics', 'health'],
+      readError: () => observationReadError.current,
     })
     return () => {
       disposeAutoRefresh()

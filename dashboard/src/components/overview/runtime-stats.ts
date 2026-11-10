@@ -146,14 +146,16 @@ export function OverviewRuntimeStats() {
     let inFlight = false
     const publish = (state: UsageState) => { if (current()) setUsageReading({ authority, catalog: usageCatalog, state }) }
     publish({ kind: 'loading' })
-    const refresh = async () => {
+    const refresh = async (signal: AbortSignal) => {
       if (!current() || inFlight) return
       inFlight = true
       try {
-        const value = await fetchRuntimeResolved({ signal: controller.signal })
-        publish({ kind: 'ready', value })
+        const value = await fetchRuntimeResolved({ signal: AbortSignal.any([signal, controller.signal]) })
+        if (!signal.aborted) publish({ kind: 'ready', value })
       } catch (error) {
+        if (signal.aborted) return
         publish({ kind: 'error', message: error instanceof Error ? error.message : String(error) })
+        throw error
       } finally { inFlight = false }
     }
     const stopRefresh = setupObservationRefresh(refresh, { topics: ['runtime_resolved'] })
@@ -166,17 +168,19 @@ export function OverviewRuntimeStats() {
     let inFlight = false
     const publish = (state: State) => { if (current()) setReading({ authority, state }) }
     publish({ kind: 'loading' })
-    const refresh = async () => {
+    const refresh = async (signal: AbortSignal) => {
       if (!current() || inFlight) return
       inFlight = true
       try {
-        const value = await fetchRuntimeModelMetrics(windowMinutes, 0, { signal: controller.signal })
-        publish({
+        const value = await fetchRuntimeModelMetrics(windowMinutes, 0, { signal: AbortSignal.any([signal, controller.signal]) })
+        if (!signal.aborted) publish({
           kind: value.cost_ledger_read?.state === 'pending' ? 'pending' : 'ready',
           value, receivedAt: new Date(),
         })
       } catch (error) {
+        if (signal.aborted) return
         publish({ kind: 'error', message: error instanceof Error ? error.message : String(error) })
+        throw error
       } finally { inFlight = false }
     }
     const stopRefresh = setupObservationRefresh(refresh, { topics: ['model_metrics'] })

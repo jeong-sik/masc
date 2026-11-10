@@ -57,7 +57,7 @@ describe('IdePersistencePanel', () => {
       mermaid: 'graph TD',
     } satisfies KeeperStateDiagramResponse)
 
-    render(html`<${IdePersistencePanel} pollMs=${60_000} />`)
+    render(html`<${IdePersistencePanel} />`)
 
     await waitFor(() => expect(fetchKeeperStateDiagramMock).toHaveBeenCalledWith(
       'sangsu',
@@ -74,7 +74,7 @@ describe('IdePersistencePanel', () => {
     fetchKeeperStateDiagramMock.mockResolvedValue({
       keeper: 'sangsu', current_phase: phase, mermaid: 'graph TD',
     } satisfies KeeperStateDiagramResponse)
-    render(html`<${IdePersistencePanel} pollMs=${60_000} />`)
+    render(html`<${IdePersistencePanel} />`)
     await waitFor(() => expect(fetchKeeperStateDiagramMock).toHaveBeenCalled())
     expect(screen.queryByText('저장됨')).toBeNull()
     expect(screen.queryByText('동기화 중')).toBeNull()
@@ -88,7 +88,7 @@ describe('IdePersistencePanel', () => {
       mermaid: 'graph TD',
     } satisfies KeeperStateDiagramResponse)
 
-    render(html`<${IdePersistencePanel} keeperName="keeper-2" pollMs=${60_000} />`)
+    render(html`<${IdePersistencePanel} keeperName="keeper-2" />`)
 
     await waitFor(() => expect(fetchKeeperStateDiagramMock).toHaveBeenCalledWith(
       'keeper-2',
@@ -110,7 +110,7 @@ describe('IdePersistencePanel', () => {
       mermaid: 'graph TD',
     } satisfies KeeperStateDiagramResponse)
 
-    render(html`<${IdePersistencePanel} pollMs=${60_000} />`)
+    render(html`<${IdePersistencePanel} />`)
 
     await waitFor(() => expect(fetchKeeperStateDiagramMock).toHaveBeenCalled())
 

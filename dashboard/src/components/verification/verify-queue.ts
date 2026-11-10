@@ -535,7 +535,7 @@ export function VerifyQueue() {
 
   useEffect(() => {
     const load = () => resource.load(signal => fetchVerificationRequests({ view: 'awaiting', limit: REQUESTS_LIMIT, signal }))
-    const dispose = setupObservationRefresh(load, { topics: ['verification_requests'] })
+    const dispose = setupObservationRefresh(load, { topics: ['verification_requests'], readError: () => resource.state.peek().error, cancelRead: () => resource.cancel() })
     return () => {
       dispose()
       resource.cancel()

@@ -59,9 +59,6 @@ vi.mock('./tool-state', () => ({
   KEEPER_WAITING_INVENTORY_REFRESH_MS: 15_000,
 }))
 
-vi.mock('../../lib/auto-refresh', () => ({
-  setupVisibleAutoRefresh: () => () => {},
-}))
 
 vi.mock('../common/card', () => ({
   SectionCard: ({ label, children }: { label: string; children: unknown }) => html`

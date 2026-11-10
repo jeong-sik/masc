@@ -201,7 +201,7 @@ export function TlcResultsPanel() {
   const resource = useManagedAsyncResource<TlcResultsResponse>()
 
   useEffect(() => {
-    const dispose = setupObservationRefresh(() => loadTlcResults(resource), { topics: ['tlc_results'] })
+    const dispose = setupObservationRefresh(() => loadTlcResults(resource), { topics: ['tlc_results'], readError: () => resource.state.peek().error, cancelRead: () => resource.cancel() })
     return () => { dispose(); resource.cancel() }
   }, [resource])
 

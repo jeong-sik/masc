@@ -112,10 +112,10 @@ export function Tools() {
       return
     }
     let controller: AbortController | null = null
-    const refresh = () => {
+    const refresh = (signal: AbortSignal) => {
       controller?.abort()
       controller = new AbortController()
-      const current = controller
+      const current = { signal: AbortSignal.any([signal, controller.signal]) }
       setKeeperReceiptLoading(true)
       setKeeperReceiptError(null)
       return Promise.all([
@@ -136,6 +136,7 @@ export function Tools() {
           if (current.signal.aborted) return
           setKeeperReceipt(null)
           setKeeperReceiptError(cause instanceof Error ? cause.message : String(cause))
+          throw cause
         })
         .finally(() => {
           if (!current.signal.aborted) setKeeperReceiptLoading(false)

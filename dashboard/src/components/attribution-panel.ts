@@ -243,36 +243,34 @@ export function AttributionPanel() {
 
   useEffect(() => {
     let cancelled = false
-    const ctl = new AbortController()
 
-    const load = async () => {
+    const load = async (signal: AbortSignal) => {
       try {
         const [s, r] = await Promise.all([
-          fetchAttributionSummary({ signal: ctl.signal }),
+          fetchAttributionSummary({ signal: signal }),
           fetchAttributionRecent(
             {
               limit: RECENT_LIMIT,
               ...(filterGate.value ? { gate: filterGate.value } : {}),
             },
-            { signal: ctl.signal },
+            { signal: signal },
           ),
         ])
-        if (cancelled) return
+        if (cancelled || signal.aborted) return
         summary.value = s
         recent.value = r.events
         error.value = null
       } catch (e) {
-        if (cancelled || isAbortError(e)) return
+        if (cancelled || signal.aborted || isAbortError(e)) return
         error.value = (e as Error).message || 'attribution fetch failed'
       } finally {
         if (!cancelled) loading.value = false
       }
     }
 
-    const dispose = setupObservationRefresh(load, { topics: ['attribution'] })
+    const dispose = setupObservationRefresh(load, { topics: ['attribution'], readError: () => error.peek() })
     return () => {
       cancelled = true
-      ctl.abort()
       dispose()
     }
   }, [filterGate.value])

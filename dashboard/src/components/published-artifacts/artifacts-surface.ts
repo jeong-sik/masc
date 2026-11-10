@@ -9,7 +9,7 @@ import { ExternalShareOutcomes } from './external-share-outcomes'
 import { PublicationOutcomes } from './publication-outcomes'
 import { artifactPublicationOutcomes, type ArtifactPublicationOwner } from '../../lib/artifact-publication-outcomes'
 import { fetchArtifactChecks, resolveArtifactCheck, type ArtifactCheckList, type ArtifactCheckState } from '../../api/published-artifact-checks'
-import { setupObservationRefresh } from '../../lib/observation-refresh'
+import { setupObservationRefresh, subscribeDashboardObservation } from '../../lib/observation-refresh'
 import { ArtifactReader, type ArtifactShareSelection } from './artifact-reader'
 import { ArtifactPreview } from './artifact-preview'
 import { ArtifactCheckControl, type ArtifactCheckOutcome } from './artifact-check-control'
@@ -209,6 +209,7 @@ function ArtifactsObservation({ authRevision, workspaceRoot, draftRetention, all
 }) {
   const { artifact: selectedId, revision } = route.value.params
   const [refresh, setRefresh] = useState(0)
+  const [documentRefresh, setDocumentRefresh] = useState(0)
   const [query, setQuery] = useState('')
   const [format, setFormat] = useState<'all' | 'markdown' | 'html'>('all')
   const [todayOnly, setTodayOnly] = useState(false)
@@ -240,28 +241,30 @@ function ArtifactsObservation({ authRevision, workspaceRoot, draftRetention, all
     && selectedId !== undefined && selectedArtifact(selectedId, revision)
   useEffect(() => () => { active.current = false }, [])
 
-  useEffect(() => setupObservationRefresh(() => setRefresh(n => n + 1), {
-    topics: ['published_artifacts', 'artifact_checks'], initial: false,
-  }), [])
-  useEffect(() => {
-    const controller = new AbortController()
-    void fetchPublishedArtifacts(controller.signal).then(data => {
-      if (!controller.signal.aborted && current()) setCatalog({ key: catalogKey, kind: 'loaded', data, receivedAt: Date.now() })
-    }, error => {
-      if (!controller.signal.aborted && current()) setCatalog({ key: catalogKey, kind: 'error', message: errorMessage(error) })
-    })
-    return () => controller.abort()
-  }, [authRevision, catalogKey, refresh])
-  useEffect(() => {
-    const controller = new AbortController()
-    setChecks(null)
-    void fetchArtifactChecks(controller.signal).then(data => {
-      if (!controller.signal.aborted && current()) setChecks({ key: catalogKey, kind: 'loaded', data, receivedAt: Date.now() })
-    }, error => {
-      if (!controller.signal.aborted && current()) setChecks({ key: catalogKey, kind: 'error', message: errorMessage(error) })
-    })
-    return () => controller.abort()
-  }, [authRevision, catalogKey, refresh])
+  // Document reads retain their visit/workspace fences below. A committed
+  // artifact change rechecks the selected version under those same fences.
+  useEffect(() => subscribeDashboardObservation({ topics: ['published_artifacts'] },
+    () => setDocumentRefresh(n => n + 1)), [])
+  useEffect(() => setupObservationRefresh(async signal => {
+    const publishable = () => !signal.aborted && current()
+    const results = await Promise.allSettled([
+      fetchPublishedArtifacts(signal).then(data => {
+        if (publishable()) setCatalog({ key: catalogKey, kind: 'loaded', data, receivedAt: Date.now() })
+      }, error => {
+        if (publishable()) setCatalog({ key: catalogKey, kind: 'error', message: errorMessage(error) })
+        throw error
+      }),
+      fetchArtifactChecks(signal).then(data => {
+        if (publishable()) setChecks({ key: catalogKey, kind: 'loaded', data, receivedAt: Date.now() })
+      }, error => {
+        if (publishable()) setChecks({ key: catalogKey, kind: 'error', message: errorMessage(error) })
+        throw error
+      }),
+    ])
+    if (!publishable()) return
+    const failed = results.find(result => result.status === 'rejected')
+    if (failed) throw failed.reason
+  }, { topics: ['published_artifacts', 'artifact_checks'] }), [authRevision, catalogKey, refresh])
   useEffect(() => {
     if (!selectedId || !currentDocument()) return
     const controller = new AbortController()
@@ -387,7 +390,7 @@ function ArtifactsObservation({ authRevision, workspaceRoot, draftRetention, all
       }
     }, error => { if (priorBound) readFailed(error) })
     return cleanup
-  }, [authRevision, selectedId, revision, documentKey, visit, refresh, allowReader])
+  }, [authRevision, selectedId, revision, documentKey, visit, refresh, documentRefresh, allowReader])
 
   const list = catalog?.key === catalogKey ? catalog : null
   const doc = document?.key === documentKey ? document : null

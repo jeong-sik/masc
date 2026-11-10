@@ -4702,7 +4702,7 @@ export function ChatTranscript({
 
   // Advance the cursor when the tab regains visibility while pinned to bottom:
   // background rows that streamed in are treated as seen only once the operator
-  // could actually see them. Pattern mirrors lib/auto-refresh.ts visibilitychange.
+  // could actually see them. Visibility changes keep the visible observation current.
   useEffect(() => {
     const onVisible = () => {
       if (typeof document.visibilityState === 'string' && document.visibilityState !== 'visible') return

@@ -1,8 +1,6 @@
 // Shared observation for /api/v1/keepers/turns — the roster's "answering now"
-// badge. Same shape as dashboard-full-health-state: one visibility-aware
-// interval shared by every subscriber, cancelled when the last one leaves.
-// 5s, not the health poll's 60s: a turn that starts and ends inside a
-// minute is exactly what the badge exists to show.
+// badge. One event subscription is shared by every mounted subscriber and
+// retired when the last one leaves.
 
 import { computed, signal } from '@preact/signals'
 import {
@@ -42,7 +40,7 @@ let stopRefresh: (() => void) | null = null
 export function subscribeKeeperTurnsRefresh(): () => void {
   subscriberCount += 1
   if (subscriberCount === 1) {
-    stopRefresh = setupObservationRefresh(loadKeeperTurns, { topics: ['keeper_turns'] })
+    stopRefresh = setupObservationRefresh(loadKeeperTurns, { topics: ['keeper_turns'], readError: () => keeperTurnsResource.state.peek().error, cancelRead: () => keeperTurnsResource.cancel() })
   }
   return () => {
     subscriberCount -= 1
@@ -67,10 +65,10 @@ export function runningTurnFor(
 // ── the finish glow ────────────────────────────────────────────────
 //
 // Same contract as the TUI's advance_finishes (#31208): two consecutive
-// polls are what "just finished" is made of — running in the previous,
+// observations are what "just finished" is made of — running in the previous,
 // idle in this one. Unavailable→idle is not a finish (an owner lookup
 // failure says nothing about the turn), a keeper missing from the current
-// poll is not a finish (removed, not answered), and a keeper that starts
+// observation is not a finish (removed, not answered), and a keeper that starts
 // running again drops its glow — one keeper must not read as both
 // answering and answered.
 
@@ -109,7 +107,7 @@ export function advanceFinishes(
 }
 
 /** The live glow for [keeperName], or null — expired entries filtered by the
- *  reader's own clock so the glow dies on time, not on the next poll. */
+ *  reader's own clock so the glow dies on time, not on the next observation. */
 export function finishGlowFor(
   finishes: readonly KeeperFinish[],
   keeperName: string,

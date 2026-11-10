@@ -60,10 +60,6 @@ vi.mock('../../store', () => ({
   refreshShell: storeMock.refreshShell,
 }))
 
-vi.mock('../../lib/auto-refresh', () => ({
-  formatAutoRefreshLabel: () => '자동 갱신 30s',
-  setupVisibleAutoRefresh: () => () => {},
-}))
 
 // Avoid pulling the whole fleet-health panel tree; mirror the real summary
 // projection and the local not-running subtraction

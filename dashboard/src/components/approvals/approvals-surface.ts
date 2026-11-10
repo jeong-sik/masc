@@ -1,3 +1,4 @@
+import { gateResource } from '../gate-signals'
 // MASC Dashboard — Gate / HITL Surface
 // Pending external effects wait here for Human judgment without blocking the
 // Keeper lane. Exact Always rules and Auto Judge share this same Gate contract.
@@ -1088,7 +1089,7 @@ function ApAside({
 
 export function ApprovalsSurface() {
   useEffect(() => {
-    const disposeAutoRefresh = setupObservationRefresh(() => refreshGate(), { topics: ['gate'] })
+    const disposeAutoRefresh = setupObservationRefresh(() => refreshGate(), { topics: ['gate'], cancelRead: () => gateResource.cancel(), readError: () => gateError.peek() || null })
     return () => {
       disposeAutoRefresh()
     }

@@ -879,8 +879,8 @@ function decodeKeeperMemoryHealth(raw: unknown): KeeperMemoryHealthResponse | nu
   }
 }
 
-export function fetchKeeperMemoryHealth(): Promise<KeeperMemoryHealthResponse> {
-  return get<unknown>('/api/v1/dashboard/keeper-memory-health').then((raw) => {
+export function fetchKeeperMemoryHealth(opts?: { signal?: AbortSignal }): Promise<KeeperMemoryHealthResponse> {
+  return get<unknown>('/api/v1/dashboard/keeper-memory-health', opts).then((raw) => {
     const decoded = decodeKeeperMemoryHealth(raw)
     if (!decoded) throw new Error('유효하지 않은 keeper memory health payload')
     return decoded

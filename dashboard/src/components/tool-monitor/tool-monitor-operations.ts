@@ -195,24 +195,11 @@ function FailureCategories() {
 
 export function ToolMonitorOperationsBoard() {
   useEffect(() => {
-    const controller = new AbortController()
-    const runRefresh = () => {
-      return Promise.all([
-        refreshSharedToolQuality({ signal: controller.signal, windowHours: TOOL_MONITOR_WINDOW_HOURS }),
-        refreshShell({ force: true }),
-      ])
-    }
-
-    const disposeAutoRefresh = setupObservationRefresh(() => {
-      if (controller.signal.aborted) return
-      return runRefresh()
-    }, { topics: ['tool_metrics', 'health'] })
-
-    return () => {
-      controller.abort()
-      cancelSharedToolQuality()
-      disposeAutoRefresh()
-    }
+    const dispose = setupObservationRefresh(signal => Promise.all([
+      refreshSharedToolQuality({ signal, windowHours: TOOL_MONITOR_WINDOW_HOURS }),
+      refreshShell({ force: true }),
+    ]), { topics: ['tool_metrics', 'health'], readError: () => sharedToolQualityError.peek(), cancelRead: cancelSharedToolQuality })
+    return () => { dispose(); cancelSharedToolQuality() }
   }, [])
 
   const quality = sharedToolQuality.value

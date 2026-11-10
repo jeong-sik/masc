@@ -368,23 +368,10 @@ function FailureList({ categories }: { categories: FailureCategory[] }) {
 
 export function ToolQualityPanel() {
   useEffect(() => {
-    const lifecycleController = new AbortController()
-    const runRefresh = () =>
-      refreshSharedToolQuality({
-        signal: lifecycleController.signal,
-        windowHours: TOOL_QUALITY_WINDOW_HOURS,
-      })
-
-    const disposeAutoRefresh = setupObservationRefresh(() => {
-      if (lifecycleController.signal.aborted) return
-      return runRefresh()
-    }, { topics: ['tool_metrics'] })
-
-    return () => {
-      lifecycleController.abort()
-      cancelSharedToolQuality()
-      disposeAutoRefresh()
-    }
+    const dispose = setupObservationRefresh(signal => refreshSharedToolQuality({
+      signal, windowHours: TOOL_QUALITY_WINDOW_HOURS,
+    }), { topics: ['tool_metrics'], readError: () => sharedToolQualityError.peek(), cancelRead: cancelSharedToolQuality })
+    return () => { dispose(); cancelSharedToolQuality() }
   }, [])
 
   const d = data.value

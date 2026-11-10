@@ -1410,7 +1410,7 @@ function LogViewer() {
     }
 
     settingsLogsResource.reset()
-    const dispose = setupObservationRefresh(tick, { topics: ['logs'] })
+    const dispose = setupObservationRefresh(tick, { topics: ['logs'], cancelRead: () => settingsLogsResource.cancel(), readError: () => { const s = settingsLogsResource.state.peek(); return s._tag === 'Failure' ? s.error : null } })
 
     return () => {
       dispose()

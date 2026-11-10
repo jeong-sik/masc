@@ -14,7 +14,7 @@ import {
 import { fetchGateKeepers } from '../api/gate-keepers'
 import { dashboardRuntime } from '../api/effect-http'
 import { executionLoaded, keepers, refreshExecution } from '../store'
-import { compositeTick } from '../composite-signals'
+import { setupObservationRefresh } from '../lib/observation-refresh'
 import { nowSecondsSignal, useNowSecondsTicker } from '../lib/now-signal'
 import { useGlobalShortcut } from '../lib/use-global-shortcut'
 import { isImeComposing } from '../lib/keyboard'
@@ -398,7 +398,7 @@ export function FsmHub(props: FsmHubProps = {}) {
   }, [props.selectedName])
   const [hub, dispatch] = useReducer(reduceHubState, initialHubState)
   const [keeperFilter, setKeeperFilter] = useState('')
-  const [pollTick, setPollTick] = useState(0)
+  const [refreshKey, setRefreshKey] = useState(0)
   // The 5 s wall-clock signal is now subscribed to by each leaf that
   // actually displays elapsed durations — this hub component itself
   // never reads `nowSecondsSignal.value`, so 5 s ticks no longer
@@ -412,7 +412,7 @@ export function FsmHub(props: FsmHubProps = {}) {
   const [refreshFlash, setRefreshFlash] = useState(false)
   const flashTimeoutRef = useRef<number | null>(null)
   const refreshNow = () => {
-    setPollTick(t => t + 1)
+    setRefreshKey(t => t + 1)
     setRefreshFlash(true)
     if (flashTimeoutRef.current != null) window.clearTimeout(flashTimeoutRef.current)
     flashTimeoutRef.current = window.setTimeout(() => {
@@ -453,7 +453,6 @@ export function FsmHub(props: FsmHubProps = {}) {
     const stored = window.localStorage.getItem('fsm-hub:density')
     return stored === 'compact' ? 'compact' : 'comfortable'
   })
-  const requestIdRef = useRef(0)
 
   useEffect(() => {
     shortcutsOpenRef.current = shortcutsOpen
@@ -488,9 +487,6 @@ export function FsmHub(props: FsmHubProps = {}) {
     const handler = () => {
       const hidden = document.visibilityState === 'hidden'
       setPaused(hidden)
-      if (!hidden) {
-        setPollTick(t => t + 1)
-      }
     }
     document.addEventListener('visibilitychange', handler)
     return () => document.removeEventListener('visibilitychange', handler)
@@ -518,7 +514,7 @@ export function FsmHub(props: FsmHubProps = {}) {
     return () => window.removeEventListener('keydown', handler)
   }, [])
 
-  // Primary source: store signal (from dashboard/shell polling).
+  // Primary source: the event-hydrated dashboard shell store.
   // Fallback: direct gate fetch — the shell endpoint omits keeper
   // details (only sends configured_keepers count), so without this
   // fallback the FsmHub sees zero keepers and renders empty state.
@@ -530,23 +526,21 @@ export function FsmHub(props: FsmHubProps = {}) {
   )
   useEffect(() => {
     if (!shouldUseGateKeeperFallback(executionLoadedValue, storeNames)) return
-    const controller = new AbortController()
-    void dashboardRuntime
-      .runPromise(fetchGateKeepers(), { signal: controller.signal })
-      .then(data => {
+    return setupObservationRefresh(async signal => {
+      try {
+        const data = await dashboardRuntime.runPromise(fetchGateKeepers(), { signal })
+        if (signal.aborted) return
         const next = data.keepers.map(k => k.name).sort()
         setGateKeeperNames(prev =>
           prev.length === next.length && prev.every((v, i) => v === next[i])
             ? prev
             : next,
         )
-      })
-      .catch(() => {
-        // Gate endpoint auth failure or network error — keep the last
-        // successful fallback snapshot until the primary store path lands.
-      })
-    return () => { controller.abort() }
-  }, [executionLoadedValue, storeNames, pollTick])
+      } catch (error) {
+        if (!signal.aborted) throw error
+      }
+    }, { topics: ['keeper_composite', 'gate'] })
+  }, [executionLoadedValue, storeNames, refreshKey])
 
   const keeperNames = shouldUseGateKeeperFallback(executionLoadedValue, storeNames)
     ? gateKeeperNames
@@ -559,23 +553,6 @@ export function FsmHub(props: FsmHubProps = {}) {
     if (selected && keeperNames.includes(selected)) return selected
     return keeperNames[0] ?? null
   }, [keeperNames, selected])
-
-  useEffect(() => {
-    if (paused) return undefined
-    // pollTick was previously a dep, but the interval body already
-    // self-triggers via setPollTick(t => t + 1) — including pollTick
-    // forced clearInterval + setInterval every 30 s for nothing.
-    const id = setInterval(() => setPollTick(t => t + 1), 30_000)
-    return () => clearInterval(id)
-  }, [paused])
-
-  // The 5 s tick that previously lived here is now provided by
-  // useNowSecondsTicker() above (shared, ref-counted, runs once
-  // module-wide regardless of how many fsm-hubs are mounted).
-
-  const tick = compositeTick.value
-  const shouldRefetchForTick =
-    activeSelected != null && tick.name === activeSelected ? tick.ts_unix : 0
 
   useEffect(() => {
     if (!activeSelected) return
@@ -598,13 +575,11 @@ export function FsmHub(props: FsmHubProps = {}) {
       return
     }
 
-    const requestId = requestIdRef.current + 1
-    requestIdRef.current = requestId
-    dispatch({ type: 'fetch_started', keeperName: activeSelected })
-    void (async () => {
+    return setupObservationRefresh(async signal => {
+      dispatch({ type: 'fetch_started', keeperName: activeSelected })
       try {
-        const data = await fetchKeeperComposite(activeSelected)
-        if (requestIdRef.current !== requestId) return
+        const data = await fetchKeeperComposite(activeSelected, { signal })
+        if (signal.aborted) return
         dispatch({
           type: 'fetch_succeeded',
           keeperName: activeSelected,
@@ -612,7 +587,7 @@ export function FsmHub(props: FsmHubProps = {}) {
           fetchedAt: Date.now() / 1000,
         })
       } catch (err) {
-        if (requestIdRef.current !== requestId) return
+        if (signal.aborted) return
         const failedAt = Date.now() / 1000
         if (isCompositeFetchNotFound(err)) {
           setGateKeeperNames(prev => prev.filter(name => name !== activeSelected))
@@ -632,9 +607,10 @@ export function FsmHub(props: FsmHubProps = {}) {
           error: err instanceof Error ? err.message : 'composite fetch failed',
           failedAt,
         })
+        throw err
       }
-    })()
-  }, [activeSelected, shouldRefetchForTick, pollTick, externalSnapshot])
+    }, { topics: ['keeper_composite'], keeperName: activeSelected })
+  }, [activeSelected, refreshKey, externalSnapshot])
 
   useGlobalShortcut(
     (ev) => ev.key >= '1' && ev.key <= '9',
@@ -984,7 +960,7 @@ function StatusBar({
           ${paused ? html`
             <span
               class="px-1.5 py-0.5 rounded-[var(--r-1)] border text-3xs font-mono text-[var(--color-fg-muted)] border-[var(--color-border-default)] bg-[var(--color-bg-surface)]"
-              title="백그라운드 — 폴링 일시정지"
+              title="백그라운드 — 화면 조회 대기"
             >
               ⏸ 일시 중지
             </span>

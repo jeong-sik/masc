@@ -871,7 +871,7 @@ export function LogViewer() {
       if (!autoRefresh.value) { void loadLogs('reset'); return }
       disposeObservation = setupObservationRefresh(
         () => loadLogs(Option.isSome(remotePrevious(logResource.state.value)) ? 'delta' : 'reset'),
-        { topics: ['logs'] },
+        { topics: ['logs'], cancelRead: () => logResource.cancel(), readError: () => { const s = logResource.state.peek(); return s._tag === 'Failure' ? s.error : null } },
       )
     }
 

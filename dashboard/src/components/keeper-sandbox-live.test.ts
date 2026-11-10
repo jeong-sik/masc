@@ -14,10 +14,6 @@ vi.mock('../api/keeper', async () => {
   return { ...actual, fetchKeeperSandboxLiveStatus: vi.fn() }
 })
 
-vi.mock('../lib/auto-refresh', () => ({
-  DEFAULT_PANEL_REFRESH_MS: 30_000,
-  setupVisibleAutoRefresh: vi.fn(() => () => undefined),
-}))
 
 import { KeeperSandboxLivePanel } from './keeper-sandbox-live'
 

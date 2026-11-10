@@ -1,3 +1,5 @@
+import { TRANSPORT_RETRY_BASE_MS, TRANSPORT_RETRY_MAX_MS } from '../config/constants'
+
 // Observation topics name authoritative read models. The transport publishes
 // invalidations here; a mounted consumer reads only the models it uses.
 import { readDashboardObservationTopic } from '../schemas/sse_event_generated'
@@ -60,10 +62,16 @@ export interface ObservationRefreshOptions extends DashboardObservationSelection
   /** Use false only when another mount effect owns the initial read. */
   readonly initial?: boolean
   readonly onError?: (error: unknown) => void
+  /** State-backed resources consume rejection to render it. Expose that
+   * failure here without changing their manual-refresh promise contract. */
+  readonly readError?: () => unknown | null
+  /** Retire an active state-resource read when its own controller owns I/O. */
+  readonly cancelRead?: () => void
 }
 
 /** Subscribe before the first read. Invalidation during a read retains one
- * trailing read, including after recovery. Quiet streams never trigger HTTP.
+ * trailing read, including after recovery. Successful quiet streams never trigger HTTP.
+ * A failed owed read retains one capped-backoff retry until it succeeds.
  * Hidden consumers remember invalidation and read once when visible again. */
 export function setupObservationRefresh(
   refresh: (signal: AbortSignal) => void | Promise<unknown>,
@@ -74,12 +82,18 @@ export function setupObservationRefresh(
   let inFlight = false
   let dirty = false
   let controller: AbortController | null = null
+  let retryTimer: ReturnType<typeof setTimeout> | null = null
+  let retryDelayMs = TRANSPORT_RETRY_BASE_MS
+  const clearRetry = () => {
+    if (retryTimer !== null) clearTimeout(retryTimer)
+    retryTimer = null
+  }
 
   const visible = () => typeof document.visibilityState !== 'string'
     || document.visibilityState === 'visible'
 
   const schedule = () => {
-    if (!active || scheduled || inFlight || !dirty || !visible()) return
+    if (!active || scheduled || inFlight || retryTimer !== null || !dirty || !visible()) return
     scheduled = true
     queueMicrotask(() => { void drain() })
   }
@@ -98,8 +112,19 @@ export function setupObservationRefresh(
     controller = new AbortController()
     try {
       await refresh(controller.signal)
+      if (!controller.signal.aborted) {
+        const error = options.readError?.()
+        if (error !== null && error !== undefined) throw error
+        retryDelayMs = TRANSPORT_RETRY_BASE_MS
+      }
     } catch (error) {
       if (active && !controller.signal.aborted) {
+        dirty = true
+        retryTimer = setTimeout(() => {
+          retryTimer = null
+          schedule()
+        }, retryDelayMs)
+        retryDelayMs = Math.min(retryDelayMs * 2, TRANSPORT_RETRY_MAX_MS)
         if (options.onError) options.onError(error)
         else console.warn('[observation] authoritative read failed', error)
       }
@@ -111,10 +136,15 @@ export function setupObservationRefresh(
   }
 
   const recover = () => {
-    controller?.abort()
+    clearRetry()
+    retryDelayMs = TRANSPORT_RETRY_BASE_MS
+    if (controller !== null) {
+      controller.abort()
+      options.cancelRead?.()
+    }
     invalidate()
   }
-  const refreshWhenVisible = () => { if (visible()) invalidate() }
+  const refreshWhenVisible = () => { if (visible()) { clearRetry(); invalidate() } }
   const unsubscribe = subscribeDashboardObservation(options, invalidate, recover)
   window.addEventListener('focus', refreshWhenVisible)
   document.addEventListener('visibilitychange', refreshWhenVisible)
@@ -123,7 +153,11 @@ export function setupObservationRefresh(
   return () => {
     active = false
     dirty = false
-    controller?.abort()
+    clearRetry()
+    if (controller !== null) {
+      controller.abort()
+      options.cancelRead?.()
+    }
     unsubscribe()
     window.removeEventListener('focus', refreshWhenVisible)
     document.removeEventListener('visibilitychange', refreshWhenVisible)

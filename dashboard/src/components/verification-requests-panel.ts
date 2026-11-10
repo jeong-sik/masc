@@ -6,7 +6,7 @@ import { setupObservationRefresh } from '../lib/observation-refresh'
 //   GET /api/v1/verification/requests?task_id=&limit=
 //
 // Pattern mirrors RuntimeConfigPanel: managed async resource + manual
-// refresh + 15s auto-tick. Row expansion uses <details> so we avoid
+// refresh + scoped committed-change invalidation. Row expansion uses <details> so we avoid
 // component-local state plumbing for a read-only table. Async task verdicts
 // belong to the system LLM completion-authority boundary, not a Keeper claim.
 
@@ -237,7 +237,7 @@ export function VerificationRequestsPanel() {
   const resource = useManagedAsyncResource<VerificationRequestsResponse>()
 
   useEffect(() => {
-    const dispose = setupObservationRefresh(() => loadData(resource), { topics: ['verification_requests'] })
+    const dispose = setupObservationRefresh(() => loadData(resource), { topics: ['verification_requests'], readError: () => resource.state.peek().error, cancelRead: () => resource.cancel() })
     return () => {
       dispose()
       resource.cancel()

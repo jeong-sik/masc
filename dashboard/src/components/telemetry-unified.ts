@@ -1103,7 +1103,7 @@ export function TelemetryUnified() {
   const latestRequestId = useRef(0)
   const activeController = useRef<AbortController | null>(null)
   const initialLoadDone = useRef(false)
-  const autoRefreshLoadRef = useRef<() => Promise<void>>(async () => undefined)
+  const autoRefreshLoadRef = useRef<(signal?: AbortSignal) => Promise<void>>(async () => undefined)
   const state = useSignal<TelemetryState>({
     entries: [],
     telemetry: null,
@@ -1140,22 +1140,27 @@ export function TelemetryUnified() {
     route.value.params.q,
   ])
 
-  async function load() {
+  const observationReadError = useRef<unknown | null>(null)
+
+  async function load(signal?: AbortSignal) {
+    observationReadError.current = null
     activeController.current?.abort()
     const controller = new AbortController()
     activeController.current = controller
+    const readSignal = signal ? AbortSignal.any([signal, controller.signal]) : controller.signal
     const requestId = ++latestRequestId.current
     state.value = { ...state.value, loading: true, error: null }
     try {
       const catchStoreFailure = <T,>(promise: Promise<T>) =>
         promise.catch(error => {
           if (isAbortError(error)) throw error
+          observationReadError.current = error
           return null
         })
       const storePromise = Promise.all([
-        catchStoreFailure(fetchDashboardShell({ light: true, signal: controller.signal })),
-        catchStoreFailure(fetchDashboardTools({ signal: controller.signal })),
-        catchStoreFailure(fetchDashboardNamespaceTruth({ signal: controller.signal })),
+        catchStoreFailure(fetchDashboardShell({ light: true, signal: readSignal })),
+        catchStoreFailure(fetchDashboardTools({ signal: readSignal })),
+        catchStoreFailure(fetchDashboardNamespaceTruth({ signal: readSignal })),
       ]).then(([shell, tools, truth]) => {
         const counts = shell?.counts
         const execSummary = truth?.execution?.summary
@@ -1176,7 +1181,7 @@ export function TelemetryUnified() {
           uptime: shell?.status?.build?.uptime_seconds ?? null,
         } satisfies StoreSnapshot
       })
-      const cacheStatsPromise = fetchDashboardCacheStats({ signal: controller.signal })
+      const cacheStatsPromise = fetchDashboardCacheStats({ signal: readSignal })
         .then(cacheStats => ({ cacheStats, cacheStatsError: null as string | null }))
         .catch(error => {
           if (isAbortError(error)) throw error
@@ -1193,15 +1198,15 @@ export function TelemetryUnified() {
           operation_id: operationFilter.value || undefined,
           worker_run_id: workerRunFilter.value || undefined,
           n: limit.value,
-          signal: controller.signal,
+          signal: readSignal,
         }),
         // Summary is shared via fleet-data-core so Phase 2's fleet-health view
         // does not duplicate this fetch across panels.
-        refreshSharedTelemetrySummary({ signal: controller.signal }),
+        refreshSharedTelemetrySummary({ signal: readSignal }),
         storePromise,
         cacheStatsPromise,
       ])
-      if (requestId !== latestRequestId.current) return
+      if (readSignal.aborted || requestId !== latestRequestId.current) return
       // refreshSharedTelemetrySummary records failures on the shared error
       // signal rather than throwing (so tool-quality-panel can keep rendering
       // the last-good value). Telemetry-unified, however, treated a summary
@@ -1241,7 +1246,6 @@ export function TelemetryUnified() {
   useEffect(() => {
     if (!initialLoadDone.current) {
       initialLoadDone.current = true
-      void autoRefreshLoadRef.current()
       return
     }
     const timeoutId = window.setTimeout(() => {
@@ -1260,8 +1264,9 @@ export function TelemetryUnified() {
   ])
 
   useEffect(() => {
-    const disposeAutoRefresh = setupObservationRefresh(() => autoRefreshLoadRef.current(), {
+    const disposeAutoRefresh = setupObservationRefresh(signal => autoRefreshLoadRef.current(signal), {
       topics: ['telemetry', 'tool_metrics', 'tools', 'health'],
+      readError: () => observationReadError.current ?? state.peek().error ?? state.peek().cacheStatsError,
     })
     return () => {
       disposeAutoRefresh()

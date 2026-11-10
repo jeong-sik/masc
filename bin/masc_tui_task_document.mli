@@ -1,4 +1,6 @@
 (** Complete immutable Task documents. Preparation is presentation only. *)
+val status_label : ko:bool -> Masc_domain.task_status -> string
+(** Shared localized label for the list, preview and current Task document. *)
 type goals = Unread | Unavailable of string | Membership of string list | Canonical of string option
 type part = Body | History
 type input

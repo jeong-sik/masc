@@ -43,7 +43,7 @@ let persist_io_error ~where msg =
   Error (Io_error (Printf.sprintf "%s: %s" where msg))
 ;;
 
-let create_store_with_source_io ~base_path posts_source_io comments_source_io sub_boards_source_io () =
+let create_store_with_source_io ~base_path posts_source_io comments_source_io sub_boards_source_io votes_source_io () =
   let workspace_binding = Board_workspace_binding.capture ~base_path in
   { posts_source = Posts_unobserved
   ; posts_source_io
@@ -51,7 +51,8 @@ let create_store_with_source_io ~base_path posts_source_io comments_source_io su
   ; comments_source_io
   ; sub_boards_source = Policy_unobserved
   ; sub_boards_source_io
-  ; votes_load_result = Ok ()
+  ; votes_source = Votes_unobserved
+  ; votes_source_io
   ; reactions_load_result = Ok ()
   ; workspace_binding
   ; posts = Hashtbl.create 1024
@@ -84,13 +85,15 @@ let create_store_with_source_io ~base_path posts_source_io comments_source_io su
 ;;
 
 let create_store ~base_path () =
-  create_store_with_source_io ~base_path { posts = None } None None ()
+  create_store_with_source_io ~base_path { posts = None } None None None ()
 let create_store_with_source_io_for_testing ~base_path ~io () =
-  create_store_with_source_io ~base_path io None None ()
+  create_store_with_source_io ~base_path io None None None ()
 let create_store_with_comments_io_for_testing ~base_path ~io () =
-  create_store_with_source_io ~base_path { posts = None } (Some io) None ()
+  create_store_with_source_io ~base_path { posts = None } (Some io) None None ()
 let create_store_with_sub_boards_io_for_testing ~base_path ~io () =
-  create_store_with_source_io ~base_path { posts = None } None (Some io) ()
+  create_store_with_source_io ~base_path { posts = None } None (Some io) None ()
+let create_store_with_votes_io_for_testing ~base_path ~io () =
+  create_store_with_source_io ~base_path { posts = None } None None (Some io) ()
 
 let require_comments_source_readable = Board_comments_source.require_readable
 
@@ -310,7 +313,7 @@ let sweep store =
        of a target and its dependents until all four sources loaded fully.
        The loader retains the typed failures for diagnosis and healthy reload. *)
     match Board_posts_source.require_readable store, require_comments_source_readable store,
-          store.votes_load_result, store.reactions_load_result with
+          Board_votes_source.require_readable store, store.reactions_load_result with
     | Error _, _, _, _ | _, Error _, _, _
     | _, _, Error _, _ | _, _, _, Error _ -> 0, 0
     | Ok (), Ok (), Ok (), Ok () ->

@@ -122,8 +122,13 @@ let with_fixture f =
     let trust_policy = require_ok Server_request_authority.trust_policy_error_to_string
       (Server_request_authority.make_trust_policy ~bind_host:"localhost"
         ~bind_port:8935 ~https_port:None ~explicit_base_url:None) in
-    let handler = Server_h2_gateway.make_request_handler ~routes:(Server_routes_http.make_routes ~port:0 ~host:"127.0.0.1" ~sw ~clock:(Eio.Stdenv.clock env)) ~trust_policy ~request_sw:sw
-      (`Tcp (Eio.Net.Ipaddr.V4.loopback, 54321)) in
+    let gateway = Server_h2_gateway.make_request_handler ~routes:(Server_routes_http.make_routes ~port:0 ~host:"127.0.0.1" ~sw ~clock:(Eio.Stdenv.clock env)) ~trust_policy in
+    (* Every answer comes at once, far inside the 90 s flush bound. *)
+    let handler h2_reqd = gateway
+      ~stream_end:(Masc.Http_h2_stream.Stream_end.create ~stream_sw:sw ~clock:(Eio.Stdenv.clock env)
+        ~stalled_after_s:Server_mcp_transport_http_headers.sse_stalled_after_s
+        ~request:(H2.Reqd.request h2_reqd) h2_reqd)
+      (`Tcp (Eio.Net.Ipaddr.V4.loopback, 54321)) h2_reqd in
     let h1 headers path =
       let token = List.assoc_opt "authorization" headers |> Option.map (fun value ->
         String.sub value 7 (String.length value-7)) in

@@ -44,6 +44,8 @@ let make_keeper_health
   ; mkh_removed = removed
   ; mkh_snapshot_present = true
   ; mkh_age_bins = age_bins
+  ; mkh_facts_by_hour = []
+  ; mkh_changes_since_start = []
   ; mkh_context_cycle =
       { mcc_saved = None
       ; mcc_saved_unreadable = false

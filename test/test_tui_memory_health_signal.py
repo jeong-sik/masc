@@ -30,9 +30,17 @@ TOGGLE_BROWSER_LANE = "\x1e"
 # [HealthServer].
 BaseChatServer: TypeAlias = owed.ChatServer
 
+# Every pass and change the server counts, none moved since it started.
+NO_MEMORY_CHANGES: dict[str, dict[str, int]] = {
+    commit_pass: {change: 0 for change in ("added", "absorbed", "superseded", "dropped")}
+    for commit_pass in (
+        "admission", "durable", "continuity", "cleanup", "keeper_write", "keeper_delete", "operator_delete",
+    )
+}
+
 # An empty fleet the TUI decodes: every total is zero because there is no row.
 EMPTY_FLEET: dict[str, object] = {
-    "schema": "keeper.memory_os.current_health.v13",
+    "schema": "keeper.memory_os.current_health.v14",
     "generated_at": 1.0,
     "execution": {},
     "keepers": [],
@@ -90,6 +98,8 @@ EMPTY_ROW: dict[str, object] = {
     "removed": 0,
     "snapshot_present": False,
     "age_bins": None,
+    "facts_by_hour": [],
+    "changes_since_start": NO_MEMORY_CHANGES,
     "context_cycle": {
         "saved": None,
         "saved_read_error": None,
@@ -147,7 +157,7 @@ class HealthHandler(owed.ChatHandler):
                 key = HEALTH_PATH + "?keeper=" + keeper[0]
                 phase = server.record(key)
                 body = {
-                    "schema": "keeper.memory_os.current_health.v13",
+                    "schema": "keeper.memory_os.current_health.v14",
                     "generated_at": 2.0,
                     "keeper": server.row,
                 }

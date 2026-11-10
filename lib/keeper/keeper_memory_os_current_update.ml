@@ -528,6 +528,9 @@ let update_locked_with_output
              (* The snapshot is durable now. Publish the original producer's
                 commit marker before any cancellable secondary I/O. *)
              observe next Rewritten;
+             (* In memory and under both locks, so the gauges of one keeper
+                follow its commit order. *)
+             Keeper_memory_os_current_change_metrics.set_gauges ~keeper_id change_count next;
              rewritten := Some (next, output);
              let journal_result =
                match finalize_journal ~keepers_dir ~keeper_id publication with
@@ -596,7 +599,8 @@ let update_locked_with_output
     let count () =
       Option.iter
         (fun (snapshot, output) ->
-           Keeper_memory_os_current_change_metrics.record ~keeper_id change_count snapshot output)
+           Keeper_memory_os_current_change_metrics.count_changes
+             ~keeper_id change_count snapshot output)
         !rewritten
     in
     match write () with

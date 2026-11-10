@@ -84,11 +84,14 @@ let resolve_runtime_providers ~runtime_id () =
   let runtime_id = String.trim runtime_id in
   let provider_config_of_runtime rt =
     match rt.Runtime_instance.execution with
-    | Runtime_execution.Agent_core provider_config ->
-      (match Runtime_instance.validate_dispatch_credential ~provider_config rt with
-       | Ok () -> Ok provider_config
-       | Error error ->
-         Error (Runtime_instance.dispatch_credential_error_to_string error))
+    | Runtime_execution.Agent_core sealed ->
+      (match Runtime_account_access.authorize_api sealed with
+       | Error refusal -> Error (Runtime_account_access.refusal_to_string refusal)
+       | Ok provider_config ->
+         (match Runtime_instance.validate_dispatch_credential ~provider_config rt with
+          | Ok () -> Ok provider_config
+          | Error error ->
+            Error (Runtime_instance.dispatch_credential_error_to_string error)))
     | Runtime_execution.Codex_app_server _
     | Runtime_execution.Claude_code _
     | Runtime_execution.Muse_serve _

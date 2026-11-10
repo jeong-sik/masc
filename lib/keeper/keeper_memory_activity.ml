@@ -1,6 +1,9 @@
 open Result.Syntax
 module Memory = Keeper_memory_os_types
-module Current = Keeper_memory_os_current
+module Current = Keeper_memory_os_current_types
+module Store = Keeper_memory_os_current
+module Snapshot = Keeper_memory_os_snapshot_codec
+module Journal = Keeper_memory_os_current_journal
 module Codec = Keeper_memory_os_journal_codec
 module Program = Keeper_memory_os_program_types
 
@@ -139,13 +142,22 @@ let project_entry ?snapshot ?archive_error ~identity ~absorbed json entry =
           | Removed, ([] | _ :: _ :: _) -> true) confirmed @ unresolved)
 
 let project ?snapshot ?archive_error ~identity ~absorbed json =
+  (* The installed public store interface seals its concrete types. Cross
+     that interface through the canonical validated snapshot wire format;
+     production reads below already hold the internal guarded model. *)
+  let* snapshot = match snapshot with
+    | None -> Ok None
+    | Some snapshot ->
+      let+ snapshot = Snapshot.of_json (Store.to_json snapshot)
+        |> Result.map_error Snapshot.snapshot_rejection_to_string in
+      Some snapshot in
   let* entry = Codec.journal_entry_of_json json in
   project_entry ?snapshot ?archive_error ~identity ~absorbed json entry
 
 module Archive_index = Map.Make (struct type t = string * float let compare = compare end)
 
 let read_inline ~keepers_dir ~keeper_id ~limit =
-  let path = Current.journal_path_for_keepers_dir ~keepers_dir ~keeper_id in
+  let path = Keeper_memory_os_current_layout.journal_path_for_keepers_dir ~keepers_dir ~keeper_id in
   (* Fix the journal window first: a commit visible here has already appended
      its absorption rows. A concurrent later commit cannot enter this window. *)
   let rows =
@@ -185,9 +197,9 @@ let read_inline ~keepers_dir ~keeper_id ~limit =
       Archive_index.update (row.trace_id, row.recorded_at)
         (fun previous -> Some (row :: Option.value previous ~default:[])) index) Archive_index.empty archive in
     let snapshot = if not needs_legacy then None else
-      match Current.read_classified ~keepers_dir ~keeper_id with
-      | Current.Readable snapshot -> Some snapshot
-      | Current.No_snapshot | Current.Undecodable _ | Current.Io_unreadable _ -> None in
+      match Journal.read_classified ~keepers_dir ~keeper_id with
+      | Journal.Readable snapshot -> Some snapshot
+      | Journal.No_snapshot | Journal.Undecodable _ | Journal.Io_unreadable _ -> None in
     let events, notes = List.fold_left (fun (events, notes) (offset, row) ->
       let identity = Printf.sprintf "memory:%s:%d" keeper_id offset in
       let result = match row with

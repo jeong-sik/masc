@@ -147,10 +147,10 @@ let test_reobservation () =
   Fun.protect ~finally:(fun () -> Fs_compat.remove_tree keepers_dir) (fun () ->
     Fs_compat.save_file_atomic
       (Current.journal_path_for_keepers_dir ~keepers_dir ~keeper_id:"alpha")
-      (Yojson.Safe.to_string json ^ "\n");
+      (Yojson.Safe.to_string json ^ "\n") |> require;
     Fs_compat.save_file_atomic
       (Masc.Keeper_memory_absorbed.path_for_keepers_dir ~keepers_dir ~keeper_id:"alpha")
-      "not JSON\n";
+      "not JSON\n" |> require;
     let observed = Activity.read ~keepers_dir ~keeper_id:"alpha" ~limit:50 in
     check (list string) "payload update does not read unrelated broken archive" [] observed.notes;
     check int "read retains one actual reobservation" 1 (List.length observed.events))

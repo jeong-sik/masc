@@ -153,6 +153,9 @@ let summary = function
          | Masc.Workspace_dataset_event.Play_room { machine } ->
              ":" ^ Masc.Machine_lane.to_wire machine
          | Masc.Workspace_dataset_event.Browser_observation _ -> ""
+         | Masc.Workspace_dataset_event.Dashboard_observation _
+         | Masc.Workspace_dataset_event.World_memory
+         | Masc.Workspace_dataset_event.Play_seats
          | Masc.Workspace_dataset_event.Repositories
          | Masc.Workspace_dataset_event.Verification_requests
          | Masc.Workspace_dataset_event.Harness_verdicts
@@ -986,7 +989,10 @@ let test_a_verification_or_run_push_reads_the_requests () =
                   | Masc.Workspace_dataset_event.Runtime_config
                   | Masc.Workspace_dataset_event.Connectors
                   | Masc.Workspace_dataset_event.Lanes
-                  | Masc.Workspace_dataset_event.Memory_health _
+                  | Masc.Workspace_dataset_event.Dashboard_observation _
+                  | Masc.Workspace_dataset_event.World_memory
+              | Masc.Workspace_dataset_event.Play_seats
+              | Masc.Workspace_dataset_event.Memory_health _
                   | Masc.Workspace_dataset_event.Machine_live _
                   | Masc.Workspace_dataset_event.Play_room _
                   | Masc.Workspace_dataset_event.Browser_observation _
@@ -1089,7 +1095,10 @@ let test_a_repository_push_reads_the_list () =
                   | Masc.Workspace_dataset_event.Runtime_config
                   | Masc.Workspace_dataset_event.Connectors
                   | Masc.Workspace_dataset_event.Lanes
-                  | Masc.Workspace_dataset_event.Memory_health _
+                  | Masc.Workspace_dataset_event.Dashboard_observation _
+                  | Masc.Workspace_dataset_event.World_memory
+              | Masc.Workspace_dataset_event.Play_seats
+              | Masc.Workspace_dataset_event.Memory_health _
                   | Masc.Workspace_dataset_event.Machine_live _
                   | Masc.Workspace_dataset_event.Play_room _
                   | Masc.Workspace_dataset_event.Browser_observation _
@@ -1123,6 +1132,9 @@ let test_a_repository_push_reads_the_list () =
               | Masc.Workspace_dataset_event.Runtime_config
               | Masc.Workspace_dataset_event.Connectors
               | Masc.Workspace_dataset_event.Lanes
+              | Masc.Workspace_dataset_event.Dashboard_observation _
+              | Masc.Workspace_dataset_event.World_memory
+              | Masc.Workspace_dataset_event.Play_seats
               | Masc.Workspace_dataset_event.Memory_health _
               | Masc.Workspace_dataset_event.Machine_live _
               | Masc.Workspace_dataset_event.Play_room _
@@ -1693,6 +1705,19 @@ let test_play_room_pushes_share_cross_machine_changes () =
     ; [ "type", `String "workspace_dataset_changed"; "dataset", `String "play_room"
       ; "machine", `String "other" ] ]
 
+let test_workspace_memory_and_play_seats_reach_the_typed_consumer () =
+  List.iter (fun dataset ->
+    let wire = Yojson.Safe.to_string (`Assoc
+      [ "type", `String Masc.Workspace_dataset_event.event_type
+      ; "dataset", `String (Masc.Workspace_dataset_event.dataset_to_wire dataset)
+      ; "ts_unix", `Float 1.0 ]) in
+    match decode_all [ "data: " ^ wire ^ "\n\n" ] with
+    | [Observer.Event event] ->
+        check bool "the producer name reaches the dataset read dispatcher" true
+          (Observer.dataset_owed event = Some dataset)
+    | [] | _ :: _ -> fail "the workspace push did not decode as one event")
+    [Masc.Workspace_dataset_event.World_memory; Masc.Workspace_dataset_event.Play_seats]
+
 let test_memory_health_pushes_require_their_keeper () =
   let fields = [ "type", `String "workspace_dataset_changed"
                ; "dataset", `String "memory_health"; "keeper", `String "alpha" ] in
@@ -1794,6 +1819,8 @@ let () =
             test_play_room_pushes_share_cross_machine_changes
         ; test_case "Memory health pushes require their Keeper" `Quick
             test_memory_health_pushes_require_their_keeper
+        ; test_case "workspace memory and Play seats reach their typed consumer" `Quick
+            test_workspace_memory_and_play_seats_reach_the_typed_consumer
         ; test_case "Machine live pushes name their machine" `Quick
             test_machine_live_pushes_scope_the_machine
         ; test_case "Browser observation pushes decode their exact scope" `Quick

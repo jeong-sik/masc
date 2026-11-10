@@ -199,6 +199,7 @@ async function mcpPost(
   scoped = false,
   onUnauthorized?: () => void,
   onStaleTaskSuccess?: (text: string) => void,
+  requestSignal?: AbortSignal,
 ): Promise<string> {
   assertBinding(binding)
   const request = currentRequest(body)
@@ -207,8 +208,10 @@ async function mcpPost(
     headers: mcpHeadersForActor(binding, request.method, request.name, actorName),
     body: JSON.stringify(request.body),
     reportCredentialRefusal: !scoped,
+    signal: requestSignal,
   }
   const consume = async (res: Response) => {
+    requestSignal?.throwIfAborted()
     // Only a Task creation's completed HTTP 200 can preserve evidence under
     // its original owner. Other responses keep the normal header guard.
     if (!onStaleTaskSuccess || res.status !== 200) assertBinding(binding)
@@ -223,6 +226,7 @@ async function mcpPost(
       throw error
     }
     const text = await res.text()
+    requestSignal?.throwIfAborted()
     if (onStaleTaskSuccess && res.status === 200 && currentStoredTokenRevision() !== binding.authRevision) {
       // The observer receives only a validated projection and cannot change
       // the stale result or trigger credential recovery by throwing.
@@ -457,7 +461,9 @@ async function callMcpToolInternal(
   taskCapture?: TaskCreationCapture,
   strictTaskResult = false,
   onReceiptUnauthorized?: () => void,
+  requestSignal?: AbortSignal,
 ): Promise<string> {
+  requestSignal?.throwIfAborted()
   const requestId = randomUuid()
   let explicitActor: string | null = null
   let sentToken: string | null = null
@@ -474,13 +480,13 @@ async function callMcpToolInternal(
     // a global bootstrap here could install a different credential after the
     // original workspace has retired. Let the owner observe bootstrap changes
     // and submit again under the newly observed identity instead.
-    const scopedIsCurrent = () => !expectedIdentity || (
+    const scopedIsCurrent = () => !requestSignal?.aborted && (!expectedIdentity || (
       currentStoredTokenRevision() === expectedIdentity.revision
       && (getStoredToken() !== null || currentDashboardActor() === expectedIdentity.actor)
       && !(getStoredToken() !== null && getStoredTokenMeta()?.source === 'dev'
         && (managedDashboardRefusal.peek() === expectedIdentity.revision
           || managedDashboardUnverified.peek() === expectedIdentity.revision))
-      && (!isCurrent || isCurrent()))
+      && (!isCurrent || isCurrent())))
     if (!scopedIsCurrent()) throw new McpPreDispatchIdentityChangedError()
     // Preserve the asynchronous dispatch boundary so ownership can retire
     // before any scoped request leaves the browser.
@@ -530,7 +536,9 @@ async function callMcpToolInternal(
         && currentStoredTokenRevision() === sentRevision && sentActorIsCurrent() && current) {
         noteManagedCredentialRefusalObservation(expectedIdentity.revision)
       }
-    }, taskCapture ? text => { retainStaleTaskCreation(text, requestId, taskCapture) } : undefined)
+    }, taskCapture ? text => { retainStaleTaskCreation(text, requestId, taskCapture) } : undefined, requestSignal)
+    requestSignal?.throwIfAborted()
+    if (requestSignal && isCurrent && !isCurrent()) throw new DOMException('MCP read owner retired', 'AbortError')
     const strictResult = taskCapture !== undefined || strictTaskResult
     const parsed = parseMcpHttpResponse(text, expectedIdentity ? requestId : undefined, strictResult)
     if (strictResult && parsed.error === undefined && parsed.result?.isError !== true) {
@@ -541,6 +549,7 @@ async function callMcpToolInternal(
     }
     return extractMcpText(parsed)
   } catch (err) {
+    requestSignal?.throwIfAborted()
     const authErrorCode = err instanceof McpToolCallError
       ? err.authErrorCode
       : err instanceof ApiRequestError && err.status === 401
@@ -587,7 +596,9 @@ export async function callMcpTool(toolName: string, args: Record<string, unknown
   return callMcpToolInternal(toolName, args)
 }
 
-/** Dispatch only under the caller's observed identity and workspace. */
+/** Dispatch only under the caller's observed identity and workspace.
+ * Observer reads may supply requestSignal; existing effect callers retain
+ * their original transport and receipt lifetime. */
 export async function callMcpToolAtIdentity(
   toolName: string,
   args: Record<string, unknown>,
@@ -595,8 +606,10 @@ export async function callMcpToolAtIdentity(
   isCurrent?: () => boolean,
   recoveryIsCurrent?: () => boolean,
   waitForRecoveryCurrent?: () => Promise<boolean>,
+  requestSignal?: AbortSignal,
 ): Promise<string> {
-  return callMcpToolInternal(toolName, args, false, expectedIdentity, isCurrent, recoveryIsCurrent, waitForRecoveryCurrent)
+  return callMcpToolInternal(toolName, args, false, expectedIdentity, isCurrent, recoveryIsCurrent, waitForRecoveryCurrent,
+    undefined, false, undefined, requestSignal)
 }
 
 /** Preserve only a validated late Task result for its original receipt.

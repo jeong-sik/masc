@@ -3,6 +3,7 @@ import type { Task } from '../types'
 import { get, post } from './core'
 import {
   callMcpTool,
+  callMcpToolAtIdentity,
   mcpCallFailureDisposition,
   mcpStructuredContentFromError,
 } from './mcp'
@@ -100,19 +101,31 @@ export async function sendBroadcast(_actorHint: string, content: string): Promis
   }
 }
 
-export async function fetchWorkspaceMessages(limit = 40): Promise<string[]> {
-  const text = await callMcpTool('masc_messages', { limit })
+export interface ScopedMcpReadOptions {
+  readonly signal: AbortSignal
+  readonly identity: { readonly revision: number; readonly actor: string }
+  readonly isCurrent: () => boolean
+}
+
+function callReadTool(toolName: string, args: Record<string, unknown>, options?: ScopedMcpReadOptions): Promise<string> {
+  return options
+    ? callMcpToolAtIdentity(toolName, args, options.identity, options.isCurrent, undefined, undefined, options.signal)
+    : callMcpTool(toolName, args)
+}
+
+export async function fetchWorkspaceMessages(limit = 40, options?: ScopedMcpReadOptions): Promise<string[]> {
+  const text = await callReadTool('masc_messages', { limit }, options)
   return text
     .split('\n')
     .map(line => line.trim())
     .filter(line => line !== '')
 }
 
-export async function fetchTaskHistory(taskId: string, limit = 20): Promise<string> {
-  return callMcpTool('masc_task_history', {
+export async function fetchTaskHistory(taskId: string, limit = 20, options?: ScopedMcpReadOptions): Promise<string> {
+  return callReadTool('masc_task_history', {
     task_id: taskId,
     limit,
-  })
+  }, options)
 }
 
 export async function fetchTaskDetail(taskId: string): Promise<Task> {

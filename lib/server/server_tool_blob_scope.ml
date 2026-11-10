@@ -197,6 +197,33 @@ let config_keepers =
       { suffix = Keeper_librarian_context_recall.filename_suffix
       ; reason = M.Repairable_pointer
       }
+    (* The Memory OS keeps facts, a journal and an epoch marker. Their rows
+       carry claim text, timestamps and original source paths, never a tool
+       blob reference, so a scan that reads them adds nothing. Leave them
+       unclassified and the sweep's unclassified gate refuses every deletion
+       in a workspace where a Keeper has memory. *)
+  ; M.Keeper_files
+      { suffix = Keeper_memory_os_current_layout.suffix
+      ; reason = M.Writes_no_reference
+      }
+  ; M.Keeper_files
+      { suffix = Keeper_memory_os_current_layout.journal_suffix
+      ; reason = M.Writes_no_reference
+      }
+  ; M.Keeper_files
+      { suffix = Keeper_memory_source_current.suffix
+      ; reason = M.Writes_no_reference
+      }
+  ; M.Keeper_files
+      { suffix = Keeper_memory_os_current_layout.epoch_suffix
+      ; reason = M.Writes_no_reference
+      }
+    (* The aggregate lock names its own [.lock]; the derived suffix resolves
+       once this base name is classified. *)
+  ; M.Keeper_files
+      { suffix = Keeper_memory_os_aggregate_lock.suffix
+      ; reason = M.Writes_no_reference
+      }
   ; finder_metadata
   ; unpublished_writes
   ]

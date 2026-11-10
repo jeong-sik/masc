@@ -39,8 +39,10 @@ let publication_receipt_path ~keepers_dir ~keeper_id =
   Filename.concat keepers_dir (keeper_id ^ publication_receipt_suffix)
 ;;
 
+let epoch_suffix = ".memory-epoch.json"
+
 let epoch_path ~keepers_dir ~keeper_id =
-  Filename.concat keepers_dir (keeper_id ^ ".memory-epoch.json")
+  Filename.concat keepers_dir (keeper_id ^ epoch_suffix)
 
 let read_epoch ~keepers_dir ~keeper_id =
   match Fs_compat.load_file_opt (epoch_path ~keepers_dir ~keeper_id) with

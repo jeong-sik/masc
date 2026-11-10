@@ -1,6 +1,8 @@
 (* The absorb-gate counters (RFC-0517 §2.2) move once for each finished
-   judgment, on the runtime run and on the captured continuation, and not when
-   a reader replays a retained judgment. Synthetic answers; they say nothing
+   judgment. The runtime run counts itself. A captured continuation counts
+   nothing: its owner stores the terminal and then calls [count_judgment]
+   (test_keeper_librarian_addon_owner covers that owner). A reader's replay
+   of a retained judgment counts nothing. Synthetic answers; they say nothing
    about judgment quality. *)
 
 module Gate = Masc.Keeper_librarian_absorb_gate
@@ -198,8 +200,11 @@ let test_each_path_counts_its_judgment_once () =
       ~cited_observations ~facts ~new_claims ~superseding:[] ~absorbed ()
     |> require_replay
   in
-  check_moved ~what:"the captured continuation" captured_keeper ~sources:one_judgment_sources
-    ~copy_checks:one_judgment_checks;
+  check_moved ~what:"the captured continuation before its terminal is stored" captured_keeper ~sources:[]
+    ~copy_checks:[];
+  Gate.count_judgment ~keeper_id:captured_keeper captured;
+  check_moved ~what:"the captured judgment once its owner counts it" captured_keeper
+    ~sources:one_judgment_sources ~copy_checks:one_judgment_checks;
   check_moved ~what:"the runtime Keeper after the captured run" runtime_keeper ~sources:one_judgment_sources
     ~copy_checks:one_judgment_checks;
   Alcotest.(check int) "each path asked three forward and two reverse questions" 10 (F.post_count server);
@@ -219,7 +224,7 @@ let test_each_path_counts_its_judgment_once () =
 let () =
   Alcotest.run "keeper_librarian_absorb_gate_metrics"
     [ ( "counters"
-      , [ Alcotest.test_case "each gate path counts its judgment once" `Quick
+      , [ Alcotest.test_case "a judgment counts once on each gate path" `Quick
             test_each_path_counts_its_judgment_once
         ] )
     ]

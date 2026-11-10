@@ -1,9 +1,8 @@
-(* What a response that times its own frames needs: the wait, and what its
-   stall line names. *)
+(* What a response that times its own frames needs: the wait, and the bound
+   its stall line names. *)
 type own_timer =
   { stall : unit -> unit
   ; stalled_after_s : float
-  ; path : string
   }
 
 (* What ends a frame the client does not take. On HTTP/2 the stream's flush
@@ -19,7 +18,8 @@ type stall_bound =
   | Own_timer of own_timer
 
 type t =
-  { writer : Http_reqd.Body_writer.t
+  { reqd : Http_reqd.t
+  ; writer : Http_reqd.Body_writer.t
   ; closed : unit Eio.Promise.t
   ; resolve_closed : unit Eio.Promise.u
   ; stall_bound : stall_bound
@@ -30,10 +30,13 @@ type outcome =
   | Closed
   | Stalled
 
-let target_path target =
+(* The request's path without its query, which can carry a token. *)
+let path t =
+  let target = (Http_reqd.request t.reqd).target in
   match String.index_opt target '?' with
   | Some idx -> String.sub target 0 idx
   | None -> target
+;;
 
 let respond ~clock ~stalled_after_s ?flush_headers_immediately reqd response =
   let closed, resolve_closed = Eio.Promise.create () in
@@ -44,13 +47,9 @@ let respond ~clock ~stalled_after_s ?flush_headers_immediately reqd response =
     match Http_reqd.Body_writer.stream_end writer with
     | Some _ -> Stream_flush_bound
     | None ->
-      Own_timer
-        { stall = (fun () -> Eio.Time.sleep clock stalled_after_s)
-        ; stalled_after_s
-        ; path = target_path (Http_reqd.request reqd).target
-        }
+      Own_timer { stall = (fun () -> Eio.Time.sleep clock stalled_after_s); stalled_after_s }
   in
-  { writer; closed; resolve_closed; stall_bound }
+  { reqd; writer; closed; resolve_closed; stall_bound }
 ;;
 
 let is_closed t = Http_reqd.Body_writer.is_closed t.writer
@@ -114,7 +113,7 @@ let send t frame =
     let outcome =
       match t.stall_bound with
       | Stream_flush_bound -> Watched_work.run ~watcher:response_closed frame_flushed
-      | Own_timer { stall; stalled_after_s; path } ->
+      | Own_timer { stall; stalled_after_s } ->
         let outcome =
           Watched_work.run
             ~watcher:(fun () ->
@@ -130,7 +129,7 @@ let send t frame =
          | Stalled ->
            Log.Server.warn
              "SSE response for %s closed: a frame did not reach the socket within %.0f seconds"
-             path
+             (path t)
              stalled_after_s);
         outcome
     in
@@ -138,4 +137,55 @@ let send t frame =
      | Written -> ()
      | Closed | Stalled -> close t);
     outcome)
+;;
+
+(* The end of a served response: closed, then the producer's own cleanup.
+   [release] is the route's code and runs in a release hook of a fiber on
+   the server's switch, so what it raises is logged here and goes no
+   further. *)
+let end_serving t ~release =
+  close t;
+  match release () with
+  | () -> ()
+  | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+  | exception exn ->
+    Log.Server.warn
+      "SSE response for %s: the cleanup of its producer failed: %s"
+      (path t)
+      (Printexc.to_string exn)
+;;
+
+(* A producer that raised did not finish its response, and a close would
+   tell the client it did. The response is cut the way the request's own
+   error handling cuts one whose handler failed
+   (Server_http_ingress.handler_failed): [Http_reqd.report_exn] resets the
+   HTTP/2 stream or stops the HTTP/1.1 body, and logs the exception. A
+   response that had already ended has nothing left to cut. *)
+let producer_failed t exn =
+  if is_closed t
+  then
+    Log.Server.error
+      "SSE producer for %s raised after its response ended: %s"
+      (path t)
+      (Printexc.to_string exn)
+  else Http_reqd.report_exn t.reqd exn
+;;
+
+(* [Eio.Fiber.fork] runs nothing on a switch that is already off, so the
+   response is ended here then. On a live switch the fork runs the fiber at
+   once, and its release hook is registered before [sw] can be cancelled.
+   The hook sits on a switch of the response's own: [sw] lives as long as
+   the server and keeps every hook given to it until it ends (eio core
+   switch.ml [on_release]). *)
+let serve ~sw ?(release = ignore) t produce =
+  match Eio.Switch.get_error sw with
+  | Some (_ : exn) -> end_serving t ~release
+  | None ->
+    Eio.Fiber.fork ~sw (fun () ->
+      Eio.Switch.run (fun response_sw ->
+        Eio.Switch.on_release response_sw (fun () -> end_serving t ~release);
+        match Eio.Fiber.first produce (fun () -> await_closed t) with
+        | () -> ()
+        | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+        | exception exn -> producer_failed t exn))
 ;;

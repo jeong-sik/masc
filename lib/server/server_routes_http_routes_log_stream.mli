@@ -38,8 +38,9 @@ val serve :
   unit
 (** [serve ~sw ~clock ~encode ~query reqd] starts the response and, in [sw],
     the fiber that sends [query]'s frames, each as the SSE bytes [encode]
-    gives for it. It returns once that fiber runs. The fiber ends when a
-    frame or a keepalive is not taken: the client is gone, or it stalled.
+    gives for it. It returns once that fiber waits. The fiber ends with the
+    response ({!Server_sse_response.serve}): when a frame or a keepalive is
+    not taken, and on HTTP/2 as soon as the stream ends under it.
     {!add_routes} encodes a frame as the [/logs] answer with [reset]. Exposed
     so tests drive the loop the server runs. *)
 

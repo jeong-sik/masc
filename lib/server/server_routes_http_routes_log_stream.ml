@@ -107,17 +107,13 @@ let serve ~sw ~clock ~encode ~(query : Server_logs_query.t) reqd =
     | `Appended -> deliver ~ping_at (Some after)
     | `Quiet -> sent ~after (keepalive ())
   in
-  Eio.Fiber.fork ~sw (fun () ->
-    Eio.Switch.run (fun stream_sw ->
-      Server_bootstrap_http.with_cleanups_on_release ~sw:stream_sw
-        [ (fun () -> Server_sse_response.close sse) ];
-      (* A frame that stalled is logged once: by [Server_sse_response.send] on
-         HTTP/1.1, by the stream's flush bound on HTTP/2. This loop is held at
-         that frame's send then, so the line wakes only the other streams. *)
-      match deliver ~ping_at:(next_ping ()) query.since_seq with
-      | () -> ()
-      | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
-      | exception exn -> Log.Server.warn "Log stream failed: %s" (Printexc.to_string exn)))
+  (* A frame that stalled is logged once: by [Server_sse_response.send] on
+     HTTP/1.1, by the stream's flush bound on HTTP/2. This loop is held at
+     that frame's send then, so the line wakes only the other streams. The
+     response ends the loop when its client is gone: a wait for the ring or
+     for the keepalive time is cancelled with the HTTP/2 stream. *)
+  Server_sse_response.serve ~sw sse (fun () ->
+    deliver ~ping_at:(next_ping ()) query.since_seq)
 ;;
 
 let add_routes ~sw ~clock router =

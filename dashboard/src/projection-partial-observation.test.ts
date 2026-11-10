@@ -91,6 +91,28 @@ describe('partial projection outcomes through HTTP and the real SSE dispatcher',
     expect(vi.getTimerCount()).toBe(0)
   })
 
+  it('keeps a same-generation canonical Execution completion when an older bootstrap returns partial', async () => {
+    let resolve!: (value: Response) => void
+    const fetch = vi.fn().mockReturnValue(new Promise<Response>(yes => { resolve = yes }))
+    vi.stubGlobal('fetch', fetch)
+    const { store, publish } = await surface()
+    const body = (agent: string, diagnostics: Record<string, unknown> = complete) => ({ ...execution('same-project', 1, diagnostics),
+      candle_observation_sequence: 5, agents: [{ name: agent, status: 'active' }] })
+    publish('execution_snapshot', body('original-agent'))
+    const older = store.refreshDashboard({ force: true })
+    await flush()
+    expect(fetch).toHaveBeenCalledTimes(1)
+    publish('execution_snapshot', body('canonical-agent'))
+    resolve(json({ shell: { status: { project: 'same-project' }, counts: {}, providers: {} },
+      execution: { ...body('older-bootstrap-agent', partial), query: { default_light_request: true } } }))
+    await older
+    expect(store.agents.value.map(agent => agent.name)).toEqual(['canonical-agent'])
+    expect(store.executionError.value).toBeNull()
+    await vi.advanceTimersByTimeAsync(600_000)
+    expect(fetch).toHaveBeenCalledTimes(1)
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
   it('retains Execution partial rows and its exact failure until a quiet HTTP repair', async () => {
     const fetch = vi.fn().mockResolvedValueOnce(json(execution('partial rows', 1, partial)))
       .mockResolvedValue(json(execution('repaired', 2)))

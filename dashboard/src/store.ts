@@ -721,6 +721,7 @@ let pendingGoalRefresh: symbol | null = null
 function hydrateDashboardBootstrap(
   data: DashboardBootstrapResponse,
   executionRequestGeneration: number,
+  executionReadRevision: number,
   goalOwnerAtStart: symbol,
   authOwner: DashboardCredentialOwner,
   shellRootRevision: number,
@@ -736,7 +737,9 @@ function hydrateDashboardBootstrap(
   }
 
   hydrateShellSnapshot(data.shell, { light: true, sentToken: authOwner.token, authOwner, rootRevision: shellRootRevision })
-  hydrateExecutionSnapshot(data.execution, { requestGeneration: executionRequestGeneration, rootRevision: shellRootRevision })
+  if (executionReadRecovery.revision === executionReadRevision) {
+    hydrateExecutionSnapshot(data.execution, { requestGeneration: executionRequestGeneration, rootRevision: shellRootRevision })
+  }
 
   if (data.namespace_truth && !bootstrapSliceError(data.namespace_truth)
     && namespaceTruthReadRecovery.revision === namespaceRevision
@@ -808,11 +811,13 @@ export async function refreshDashboard(opts?: RefreshOptions): Promise<void> {
       try {
         const shellRootRevision = shellRootCompletionRevision
         const namespaceRevision = namespaceTruthReadRecovery.revision
+        const executionReadRevision = executionReadRecovery.revision
         const data = await fetchDashboardBootstrap()
         if (!current()) return
         hydrateDashboardBootstrap(
           data,
           executionRequestGeneration,
+          executionReadRevision,
           goalOwnerAtStart,
           authOwner,
           shellRootRevision,

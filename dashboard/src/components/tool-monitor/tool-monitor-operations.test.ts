@@ -35,8 +35,6 @@ const fleetMock = vi.hoisted(() => {
     sharedToolQualityError: { value: null as string | null },
     refreshSharedToolQuality: vi.fn(),
     cancelSharedToolQuality: vi.fn(),
-    prepareSharedToolQualityRead: vi.fn(),
-    readSharedToolQualityError: vi.fn(() => null),
   }
 })
 
@@ -57,8 +55,6 @@ vi.mock('../fleet-data-core', () => ({
   prepareSharedToolQualityRead: vi.fn<() => void>(),
   refreshSharedToolQuality: fleetMock.refreshSharedToolQuality,
   cancelSharedToolQuality: fleetMock.cancelSharedToolQuality,
-  prepareSharedToolQualityRead: fleetMock.prepareSharedToolQualityRead,
-  readSharedToolQualityError: fleetMock.readSharedToolQualityError,
 }))
 
 vi.mock('../../store', () => ({

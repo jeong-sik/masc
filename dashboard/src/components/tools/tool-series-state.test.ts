@@ -226,6 +226,33 @@ describe('loading the picked window', () => {
 })
 
 describe('subscribeToolSeriesRefresh', () => {
+  it('withdraws the previous workspace series after token and authority change between mounts', async () => {
+    const store = await import('../../store')
+    const { setStoredToken, clearStoredToken } = await import('../../api/core')
+    const workspace = (root: string, generation: number) => ({
+      generated_at: '2026-11-10T00:00:00Z',
+      execution_publication_epoch: 'series-remount', execution_publication_generation: generation,
+      status: { project: 'series', workspace_root: root }, agents: [], tasks: [], messages: [],
+      keepers: [], execution_queue: [], worker_support_briefs: [], continuity_briefs: [],
+    })
+    expect(store.hydrateExecutionSnapshot(workspace('/workspace-a', 1))).toBe(true)
+    const stop = state.subscribeToolSeriesRefresh()
+    subscribeToolSeriesStream.mock.calls[0]![1].onFrame(series())
+    expect(state.visibleSeries.value).not.toBeNull()
+    stop()
+    setStoredToken('workspace-b-token', { source: 'manual' })
+    expect(store.hydrateExecutionSnapshot(workspace('/workspace-b', 2))).toBe(true)
+    expect(store.executionWorkspaceAuthority.peek()?.workspaceRoot).toBe('/workspace-b')
+    const remounted = state.subscribeToolSeriesRefresh()
+    try {
+      expect(state.visibleSeries.value).toBeNull()
+      expect(state.seriesLoading.value).toBe(true)
+      expect(fetchToolMetricsSeries).not.toHaveBeenCalled()
+      subscribeToolSeriesStream.mock.calls[1]![1].onFrame(series({ total: { ...busy, call_count: 99 } }))
+      expect(state.visibleSeries.value?.total.call_count).toBe(99)
+    } finally { remounted(); clearStoredToken() }
+  })
+
   it('mounts one native query, applies snapshots and releases the last reader without GET', async () => {
     const { publishDashboardObservationChange } = await import('../../lib/observation-refresh')
     const release = vi.fn()

@@ -106,6 +106,9 @@ export function selectTool(tool: string | null): void {
 export function subscribeToolSeriesRefresh(): () => void {
   mounted += 1
   if (mounted === 1) {
+    // No stream owner observes authority changes while every chart is gone.
+    // A new mount must await its own query before displaying retained data.
+    seriesResource.reset()
     const updateOffset = () => { viewerUtcOffsetMin.value = currentUtcOffsetMin() }
     const visibleOffset = () => { if (document.visibilityState === 'visible') updateOffset() }
     window.addEventListener('focus', updateOffset)

@@ -4,11 +4,11 @@ module Facts = Masc.Tui_decode_memory_facts
 module Activity = Masc.Keeper_memory_activity
 module Layout = Masc_tui_message_layout
 module Table = Masc_tui_table
+module Card = Masc_tui_card
 
 let quiet text = Theme.recede () ^ text ^ Ansi.reset
 let warning text = Theme.warn () ^ text ^ Ansi.reset
 let clean = Terminal_text.single_line
-let fit width text = Layout.fit_width (clean text) (max 0 width)
 let age ~now at = Option.value (Layout.age_text ~now ~since:at) ~default:"—"
 
 let facts_view (state : Masc_tui_types.state) keeper_name =
@@ -41,6 +41,10 @@ let events state keeper_name =
   | Some activity -> List.rev activity.events
 let change_count state ~keeper_name = List.length (events state keeper_name)
 
+let selected_event state keeper_name =
+  let rows = events state keeper_name in
+  List.nth_opt rows (max 0 (min (max 0 (List.length rows - 1)) state.Masc_tui_types.memory_changes_cursor))
+
 let observation_notes ~ko label = function
   | Fetched.Absent -> [quiet (label ^ if ko then " · 미조회" else " · not read")]
   | Fetched.Loading -> [quiet (label ^ if ko then " · 읽는 중" else " · loading")]
@@ -70,15 +74,13 @@ let activity_notes ~ko state keeper_name =
     | Some activity -> [warning ((if ko then "이력 일부 · " else "partial history · ")
         ^ string_of_int (List.length activity.notes) ^ " · " ^ clean (List.hd activity.notes))]
 
-let kind_word ~ko = function
-  | Activity.Created -> if ko then "생성" else "created"
-  | Activity.Reobserved -> if ko then "재관측" else "observed"
-  | Activity.Revised -> if ko then "수정" else "revised"
-  | Activity.Absorbed -> if ko then "흡수" else "absorbed"
-  | Activity.Retracted -> if ko then "삭제" else "retracted"
-  | Activity.Removed -> if ko then "제외" else "removed"
-  | Activity.Invalidated -> if ko then "무효화" else "invalidated"
-  | Activity.Relation_unavailable -> if ko then "관계 미확인" else "unresolved"
+let kind_word = Masc_tui_memory_lineage.kind_label
+
+let kind_style = function
+  | Activity.Created | Activity.Reobserved -> Theme.ok ()
+  | Activity.Revised | Activity.Absorbed -> Theme.info ()
+  | Activity.Retracted | Activity.Invalidated -> Theme.bad ()
+  | Activity.Removed | Activity.Relation_unavailable -> Theme.warn ()
 
 let endpoints facts = match facts with
   | [] -> "—"
@@ -89,18 +91,19 @@ let endpoints facts = match facts with
     let count = if List.length facts > 1 then string_of_int (List.length facts) ^ " · " else "" in
     count ^ String.concat " + " (List.map claim facts)
 
-let event_cells ~ko ~now ~cols (event : Activity.event) =
+let event_cells ?(selected=false) ~ko ~now ~cols (event : Activity.event) =
   let cell = Table.cell ~fold:Table.Fold_tail in
   let after = match event.after, event.reason with
     | [], Some reason -> clean reason
     | ([] | _ :: _), (None | Some _) -> endpoints event.after in
   let time = cell ~header:(if ko then "시각" else "when") ~width:7 (age ~now event.recorded_at) in
-  let kind = cell ~header:(if ko then "변화" else "change") ~width:10 (kind_word ~ko event.kind) in
+  let kind = cell ~header:(if ko then "변화" else "change") ~width:12
+    ~style:(if selected then "" else kind_style event.kind) (kind_word ~ko event.kind) in
   if cols < 70 then
     [time; kind; cell ~header:(if ko then "기억의 흐름" else "memory flow")
-      ~width:(max 1 (cols - 19)) (endpoints event.before ^ " → " ^ after)]
+      ~width:(max 1 (cols - 21)) (endpoints event.before ^ " → " ^ after)]
   else
-    let room = max 1 ((cols - 20) / 2) in
+    let room = max 1 ((cols - 22) / 2) in
     [time; kind;
      cell ~header:(if ko then "이전" else "before") ~width:room (endpoints event.before);
      cell ~header:(if ko then "이후 / 사유" else "after / reason") ~width:room after]
@@ -110,7 +113,7 @@ let summary_lines (state : Masc_tui_types.state) ~cols ~max_lines ~now ~keeper_n
   let text ko_text en = if ko then ko_text else en in
   let width = max 1 (cols - 4) in
   let notes = fact_notes ~ko state keeper_name @ activity_notes ~ko state keeper_name in
-  let nav = quiet (text "Enter 전문  1 최근  2 조회  3 변화  4 저장"
+  let nav = quiet (text "Enter 목록  1 최근  2 조회  3 변화  4 저장"
       "Enter browse  1 recent  2 retrievals  3 changes  4 storage") in
   let notes = List.take (max 0 (max_lines - 1)) notes in
   let budget = max 0 (max_lines - 1 - List.length notes) in
@@ -118,14 +121,19 @@ let summary_lines (state : Masc_tui_types.state) ~cols ~max_lines ~now ~keeper_n
     age ~now fact.Facts.mf_last_seen ^ "  " ^ clean fact.mf_claim) in
   let right = frequent state keeper_name |> List.take 2 |> List.map (fun (fact, count, at) ->
     Printf.sprintf "%d×  %s  %s" count (age ~now at) (clean fact.Facts.mf_claim)) in
-  let half = max 1 ((width - 3) / 2) in
+  let half = max 1 ((width - 2) / 2) in
   let at rows i = Option.value (List.nth_opt rows i) ~default:"—" in
-  let claims = if width >= 90 then
-      quiet (fit half (text "최근 갱신" "recently recorded") ^ "   " ^ text "자주 조회" "frequently retrieved")
-      :: List.init 2 (fun i -> fit half (at left i) ^ "   " ^ fit half (at right i))
-    else
-      [quiet (text "최근 갱신" "recently recorded"); at left 0;
-       quiet (text "자주 조회" "frequently retrieved"); at right 0] in
+  let card ~width ~height title rows =
+    let style : Card.style = {edge=Theme.recede (); title_style=Theme.info (); reset=Ansi.reset} in
+    Card.render ~rounded:true ~style ~width ~height {title; body=(fun ~cells:_ -> rows)} in
+  let claims = if width >= 90 && budget >= 5 then
+      let left = card ~width:half ~height:4 (text "↻ 최근 갱신" "↻ Recently recorded") [at left 0; at left 1] in
+      let right = card ~width:(width-half-2) ~height:4 (text "◇ 자주 조회" "◇ Frequently retrieved") [at right 0; at right 1] in
+      List.map2 (fun a b -> a ^ "  " ^ b) left right
+    else if budget >= 7 && width >= Card.min_width then
+      card ~width ~height:3 (text "↻ 최근 갱신" "↻ Recently recorded") [at left 0]
+      @ card ~width ~height:3 (text "◇ 자주 조회" "◇ Frequently retrieved") [at right 0]
+    else [text "↻ 최근 · " "↻ Recent · " ^ at left 0; text "◇ 조회 · " "◇ Retrieved · " ^ at right 0] in
   let changes = match events state keeper_name |> List.take 2 with
     | [] -> if Option.is_some (Fetched.value (activity_view state keeper_name))
         then [quiet (text "확인된 변경 없음" "no observed changes")] else []
@@ -141,6 +149,11 @@ let summary_lines (state : Masc_tui_types.state) ~cols ~max_lines ~now ~keeper_n
   List.take max_lines (List.map (fun line -> "  " ^ line)
     (notes @ List.take budget (usage @ claims @ changes) @ [nav]))
 
+let changes_page_size (state : Masc_tui_types.state) ~max_lines ~keeper_name =
+  let notes = activity_notes ~ko:(state.ui_language = Masc_tui_types.Lang_ko) state keeper_name in
+  let scope_rows = if Option.is_some (Fetched.value (activity_view state keeper_name)) then 1 else 0 in
+  max 0 (max_lines - 1 - List.length notes - scope_rows - 4)
+
 let changes_lines (state : Masc_tui_types.state) ~cols ~max_lines ~now ~keeper_name =
   let ko = state.ui_language = Masc_tui_types.Lang_ko in
   let text ko_text en = if ko then ko_text else en in
@@ -154,26 +167,29 @@ let changes_lines (state : Masc_tui_types.state) ~cols ~max_lines ~now ~keeper_n
     | Some activity -> [quiet (text
         (Printf.sprintf "최근 처리 기록 %d / 최대 %d회" activity.journal_lines activity.limit)
         (Printf.sprintf "latest %d / up to %d journal entries" activity.journal_lines activity.limit))] in
-  let budget = max 0 (max_lines - List.length notes - List.length scope - 3) in
-  let body = match rows with
+  let budget = changes_page_size state ~max_lines ~keeper_name in
+  let body ~cells = match rows with
     | [] -> if Option.is_some (Fetched.value (activity_view state keeper_name))
         then [quiet (text "확인된 변경 없음" "no observed changes")] else []
     | first :: _ ->
       let shown = List.drop offset rows |> List.take budget in
-      quiet (Table.header_row (event_cells ~ko ~now ~cols:(max 1 (cols - 4)) first))
+      quiet (Table.header_row (event_cells ~ko ~now ~cols:cells first))
       :: List.mapi (fun i event ->
-          let row = Table.row (event_cells ~ko ~now ~cols:(max 1 (cols - 4)) event) in
+          let row = Table.row ~close:(if i = 0 then Ansi.reset ^ Theme.selection else Ansi.reset)
+            (event_cells ~selected:(i = 0) ~ko ~now ~cols:cells event) in
           if i = 0 then Theme.selection ^ row ^ Ansi.reset else row) shown
       @ [quiet (Printf.sprintf "%d–%d / %d · Enter %s" (offset + 1) (offset + List.length shown) total
-          (text "전문" "full reading"))] in
+          (text "전문  ·  … [.] 형성 트리" "full reading  ·  … [.] formation tree"))] in
+  let height = max 0 (min (total + 4) (max_lines - 1 - List.length notes - List.length scope)) in
+  let style : Card.style = {edge=Theme.recede ();title_style=Theme.info ();reset=Ansi.reset} in
+  let body = Card.render ~rounded:true ~style ~width:(max 1 (cols - 4)) ~height
+    {title=text "◇ 기억의 흐름" "◇ Memory flow";body} in
   List.take max_lines (List.map (fun line -> "  " ^ line) ([header] @ notes @ scope @ body))
 
 let change_reading (state : Masc_tui_types.state) ~keeper_name =
   let ko = state.ui_language = Masc_tui_types.Lang_ko in
   let text ko_text en = if ko then ko_text else en in
-  let rows = events state keeper_name in
-  let cursor = max 0 (min (max 0 (List.length rows - 1)) state.memory_changes_cursor) in
-  match List.nth_opt rows cursor with
+  match selected_event state keeper_name with
   | None -> None
   | Some event ->
     let body facts = match facts with
@@ -196,3 +212,16 @@ let change_reading (state : Masc_tui_types.state) ~keeper_name =
           [section (text "사유" "Reason") reason]) in
     Some (Masc_tui_detail_reading.create ~ko
       ~title:(text "기억 변화 · " "Memory change · " ^ kind_word ~ko event.kind) sections)
+
+let change_diagram (state : Masc_tui_types.state) ~keeper_name =
+  match selected_event state keeper_name, activity_view state keeper_name with
+  | Some event, (Fetched.Ready activity | Fetched.Stale (activity, _)) ->
+      let notes = match activity_view state keeper_name with
+        | Fetched.Stale (_, reason) -> ("Last observation: " ^ reason) :: activity.notes
+        | Fetched.Ready _ | Fetched.Absent | Fetched.Loading | Fetched.Failed _ -> activity.notes in
+      Masc_tui_memory_lineage.select ~event_id:event.identity {activity with notes}
+      |> Option.map (fun chart -> Masc_tui_image_preview.mermaid
+          ~name:((if state.ui_language = Masc_tui_types.Lang_ko then "기억 형성 · " else "Memory formation · ") ^ keeper_name)
+          (Masc_tui_memory_lineage.mermaid ~ko:(state.ui_language = Masc_tui_types.Lang_ko) chart))
+  | (Some _ | None), (Fetched.Absent | Fetched.Loading | Fetched.Failed _)
+  | None, (Fetched.Ready _ | Fetched.Stale _) -> None

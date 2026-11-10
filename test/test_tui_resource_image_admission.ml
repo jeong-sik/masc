@@ -592,6 +592,22 @@ let test_displayed_chat_cell_is_captured () =
   check bool "chat image without a source anchor is marked unconfirmed" true
     (Types.image_cell_source_unconfirmed state origin)
 
+let test_memory_image_keeper_owner () =
+  let state=state () in
+  state.view <- Types.Memory;
+  state.memory_page <- Types.Memory_changes;
+  state.memory_facts_keeper <- Some "memory-keeper";
+  state.msg_target_keeper_name <- Some "unrelated-chat";
+  let origin={ (pending state (Types.Peer_image_read state.workspace_read_authority)) with
+    sir_keeper=Some "memory-keeper" } in
+  let current () = Types.image_request_keeper_is_current state origin in
+  check bool "memory request is independent of the chat target" true (current ());
+  state.memory_facts_keeper <- Some "another-keeper";
+  check bool "another memory keeper refuses completion" false (current ());
+  state.memory_facts_keeper <- Some "memory-keeper";
+  state.memory_page <- Types.Memory_facts;
+  check bool "leaving changes refuses diagram completion" false (current ())
+
 let test_tools_image_keeper_owner () =
   let state=state () in
   state.view <- Types.Tools;
@@ -1252,6 +1268,7 @@ let () =
   test_case "displayed cell Board source survives failed rereads" `Quick test_displayed_cell_board_owner;
   test_case "displayed cell attachment treats malformed absence as unconfirmed" `Quick test_displayed_cell_attachment_uncertain;
   test_case "displayed chat cell names its unconfirmed source" `Quick test_displayed_chat_cell_is_captured;
+  test_case "Memory diagram owns its keeper" `Quick test_memory_image_keeper_owner;
   test_case "Tools image owns the selected keeper" `Quick test_tools_image_keeper_owner;
   test_case "roster navigation retires a pending image worker" `Quick test_roster_view_change_retires_pending_worker;
   test_case "image completions wait for input" `Quick test_image_preview_input_barrier;

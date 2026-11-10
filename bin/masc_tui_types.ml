@@ -19118,7 +19118,8 @@ let tools_keeper_observation_confirmed (state : state) =
   && state.local_keepers = Local_workspace_read && Option.is_none state.keepers_error
 
 let image_keeper_is_current (state : state) ~view ~keeper_name =
-  view = Resources || view = Board || keeper_name = state.msg_target_keeper_name
+  if view = Memory then state.memory_page = Memory_changes && keeper_name = state.memory_facts_keeper
+  else view = Resources || view = Board || keeper_name = state.msg_target_keeper_name
 
 let image_request_keeper_is_current (state : state) (request : sent_image_read) =
   match request.sir_view, request.sir_skill_reference with

@@ -15,7 +15,8 @@ vi.mock('./api/core', () => ({
 vi.mock('./api/dev-token', () => ({
   ensureDevToken: mocks.ensure,
   refreshDevTokenAfterAuthError: mocks.refresh,
-  devTokenBootstrapNeedsReadinessProbe: () => false,
+  hasPendingDevTokenFailure: () => false,
+  pendingDevTokenRetryDelayMs: () => 0,
 }))
 vi.mock('./sse-store', () => ({ routeServerPushEvent: mocks.route }))
 vi.mock('./sse', () => ({ recordServerPushEvent: mocks.record }))

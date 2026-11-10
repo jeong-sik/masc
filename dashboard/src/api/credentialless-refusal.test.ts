@@ -92,7 +92,7 @@ describe('a request without a credential that the server refused', () => {
 
   it('is sent with the dev token that a retried bootstrap stored', async () => {
     const devTokenAnswers = [
-      new Response('{"status":"initializing"}', { status: 200, headers: { 'Content-Type': 'application/json' } }),
+      new Response('{"status":"initializing"}', { status: 503, headers: { 'Content-Type': 'application/json' } }),
       new Response('{"token":"dev-token-1","actor":"dashboard","role":"admin"}', {
         status: 200,
         headers: { 'Content-Type': 'application/json' },

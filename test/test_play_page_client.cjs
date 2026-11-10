@@ -89,9 +89,9 @@ function fixture(reply, { storage = new Map(), hash = '#fixture-token', roomRepl
       cancel() { finish(); return Promise.resolve(); }
     }; } } };
   };
-  const emit = change => {
+  const emit = (change, fields = {}) => {
     if (!observation || observation.closed) return;
-    const value = new TextEncoder().encode('event: play\ndata: ' + JSON.stringify({ change }) + '\n\n');
+    const value = new TextEncoder().encode('event: play\ndata: ' + JSON.stringify({ change, ...fields }) + '\n\n');
     if (observation.pending) { const deliver = observation.pending; observation.pending = null; deliver({ done:false, value }); }
     else observation.chunks.push(value);
   };
@@ -164,6 +164,7 @@ function fixture(reply, { storage = new Map(), hash = '#fixture-token', roomRepl
     },
     async seatsChanged() { emit('seats'); await settle(); },
     async roomChanged() { emit('room'); await settle(); },
+    async keeperChanged(keeper) { emit('keeper', { keeper }); await settle(); },
     async machineChanged(elapsed = 5000) {
       now += elapsed;
       if (timers.length) {
@@ -3390,3 +3391,51 @@ for (const failure of ['http', 'schema', 'rgb']) {
     assert.equal(page.idleTimerCount, 0);
   });
 }
+
+test('continuous unrelated Keeper activity cannot starve a slow valid seat response', async () => {
+  let held, finish, hold = false, reads = 0;
+  const page = fixture((request, signal) => {
+    if (request.url === '/api/v1/play/seat') {
+      reads++;
+      if (hold) { held = signal; return new Promise(resolve => { finish = () => resolve(response(seat)); }); }
+    }
+    return gameReply(request);
+  });
+  await page.settle();
+  hold = true;
+  await page.seatsChanged();
+  const during = reads;
+  for (let index = 0; index < 5; index++) await page.keeperChanged('other-keeper-' + (index % 2));
+  assert.equal(held.aborted, false);
+  assert.equal(reads, during);
+  finish(); await page.settle();
+  assert.equal(page.padButton.disabled, false, 'unrelated lifecycle hints do not discard this authority');
+  assert.equal(reads, during, 'unrelated hints do not leave a permanent authority-read cycle');
+  for (let index = 0; index < 5; index++) await page.keeperChanged('other-keeper-' + (index % 2));
+  assert.equal(page.padButton.disabled, false);
+  assert.equal(reads, during);
+});
+
+test('a Keeper holder change during a seat read retains exactly one authority follow-up', async () => {
+  let hold = false, finish, recoverable = false, reads = 0;
+  const page = fixture(request => {
+    if (request.url === '/api/v1/play/seat') {
+      reads++;
+      if (hold) {
+        hold = false;
+        return new Promise(resolve => { finish = () => resolve(response({ ...seat, controller:'operator' })); });
+      }
+      return response({ ...seat, controller:'operator', controller_recoverable:recoverable });
+    }
+    return gameReply(request);
+  });
+  await page.settle();
+  hold = true; await page.seatsChanged();
+  const during = reads;
+  recoverable = true; await page.keeperChanged('operator');
+  assert.equal(reads, during);
+  finish(); await page.settle();
+  assert.equal(reads, during + 1);
+  assert.equal(page.padButton.disabled, false, 'the related phase change reaches recoverability without a frame event');
+  assert.equal(page.requests.some(request => request.method === 'POST'), false);
+});

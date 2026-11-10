@@ -828,7 +828,7 @@ async function refreshSeat(signal, authorityCurrent = () => true) {
   // Pending authority cannot authorize a move, even while live frames continue.
   controllerError = '자리 정보를 확인하고 있어요.';
   renderTurn();
-  const current = () => latestSeatRequest === request && authorityCurrent();
+  const current = snapshot => latestSeatRequest === request && authorityCurrent(snapshot);
   let r;
   try {
     r = await api('GET', SEAT_PATH, undefined, request.abort.signal, current);
@@ -839,7 +839,7 @@ async function refreshSeat(signal, authorityCurrent = () => true) {
     setStatus('seat', controllerError);
     return null;
   }
-  if (ended || request.abort.signal.aborted || !current()) return null;
+  if (ended || request.abort.signal.aborted || !current(r.json)) return null;
   // An invalidation received during this read owns a follow-up observation.
   // The older response cannot re-enable input before that observation lands.
   if (r.status !== 200 || !r.json || typeof r.json.machine !== 'boolean'
@@ -913,12 +913,12 @@ async function refreshParticipants() {
   if (participantsRead !== null) { participantsRead.again = true; return participantsRead.promise; }
   const request = { abort:new AbortController(), again:false, promise:null };
   participantsRead = request;
-  const current = () => participantsRead === request && !request.abort.signal.aborted && !request.again;
+  const current = () => participantsRead === request && !request.abort.signal.aborted;
   request.promise = (async () => {
     let r;
     try { r = await api('GET', PARTICIPANTS_PATH, undefined, request.abort.signal, current); }
     catch (_) { return; }
-    if (ended || !current() || request.again) return;
+    if (ended || !current()) return;
     if (r.status !== 200 || !r.json || !Array.isArray(r.json.participants)
         || !r.json.participants.every(name => typeof name === 'string')) { observationReadFailed(); return; }
     renderPassTargets(r.json.participants);
@@ -1087,7 +1087,7 @@ function refreshObservedFrame(revision, abort) {
   });
 }
 
-function observed(change, revision, abort) {
+function observed(change, revision, abort, keeper) {
   if (ended || abort.signal.aborted || revision !== viewRevision) return;
   switch (change) {
     case 'snapshot':
@@ -1103,6 +1103,12 @@ function observed(change, revision, abort) {
       refreshParticipants();
       break;
     case 'room': refreshRoom(); break;
+    case 'keeper':
+      if (typeof keeper !== 'string' || keeper.length === 0) throw new Error('invalid Play keeper');
+      refreshParticipants();
+      if (controller === keeper || frameSeatRequest !== null)
+        refreshFrameSeat(revision, abort.signal, false, false, keeper);
+      break;
     default: throw new Error('invalid Play observation');
   }
 }
@@ -1143,7 +1149,10 @@ async function observe(revision, abort) {
           }
           if (!current()) return;
           if (event === 'unavailable') throw new Error('Play observation unavailable');
-          if (event === 'play') observed(JSON.parse(data.join('\n')).change, revision, abort);
+          if (event === 'play') {
+            const change = JSON.parse(data.join('\n'));
+            observed(change.change, revision, abort, change.keeper);
+          }
         }
       }
     } finally { void reader.cancel().catch(() => {}); }
@@ -1182,7 +1191,7 @@ function refreshFramePad(revision, signal) {
   });
 }
 
-function refreshFrameSeat(revision, signal, authorityChanged = false, machineChanged = false) {
+function refreshFrameSeat(revision, signal, authorityChanged = false, machineChanged = false, keeper = null) {
   if (ended || disconnecting) return;
   // Serialized input moves the activity feed itself. A read now would mark
   // authority pending, and the next queued key would fail canMove() and be
@@ -1194,7 +1203,8 @@ function refreshFrameSeat(revision, signal, authorityChanged = false, machineCha
   }
   if (frameSeatRequest !== null) {
     if (!machineChanged) {
-      if (authorityChanged) frameSeatRequest.again = true;
+      if (authorityChanged) { frameSeatRequest.again = true; frameSeatRequest.invalidated = true; }
+      if (keeper !== null) frameSeatRequest.keepers.add(keeper);
       return;
     }
     const retired = frameSeatRequest;
@@ -1208,11 +1218,15 @@ function refreshFrameSeat(revision, signal, authorityChanged = false, machineCha
   };
   signal.addEventListener('abort', cancel, { once:true });
   if (signal.aborted) cancel();
-  const request = { cancel, again:false };
+  const request = { cancel, again:false, invalidated:false, keepers:new Set() };
   frameSeatRequest = request;
-  void refreshSeat(abort.signal, () => !request.again).then(() => {
+  void refreshSeat(abort.signal, snapshot => {
+    if (request.invalidated) return false;
+    if (snapshot && request.keepers.has(snapshot.controller)) { request.again = true; return false; }
+    return true;
+  }).then(authority => {
     if (ended || abort.signal.aborted || revision !== viewRevision || frameSeatRequest !== request) return;
-    if (!request.again) refreshFramePad(revision, signal);
+    if (authority !== null) refreshFramePad(revision, signal);
   }).catch(() => {
     if (!ended && !abort.signal.aborted && revision === viewRevision && frameSeatRequest === request)
       setStatus('seat', '자리 정보를 읽지 못했어요. 다시 시도하고 있어요.');

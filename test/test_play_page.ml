@@ -555,7 +555,7 @@ let test_observation_requires_a_scoped_bearer () =
 let test_observation_invalidates_only_its_public_read_models () =
   let changed fields = Events.change_of_payload ~machine:Machine_lane.Dos (`Assoc fields) in
   let dataset name extra = changed
-      (["type", `String Workspace_dataset_event.event_type; "dataset", `String name; "ts_unix", `Float 1.] @ extra) in
+      (["type", `String Masc.Workspace_dataset_event.event_type; "dataset", `String name; "ts_unix", `Float 1.] @ extra) in
   check bool "selected machine changed" true
     (dataset "machine_live" ["machine", `String "dos"] = Some Events.Machine);
   check bool "another machine cannot drive this frame read" true
@@ -567,9 +567,9 @@ let test_observation_invalidates_only_its_public_read_models () =
   let keeper kind extra = changed
       (["type", `String kind; "name", `String "private-holder-name"; "ts_unix", `Float 1.] @ extra) in
   check bool "idle Keeper pause refreshes recoverability" true
-    (keeper "keeper_phase_changed" ["prev_phase", `String "running"; "new_phase", `String "paused"] = Some Events.Seats);
+    (keeper "keeper_phase_changed" ["prev_phase", `String "running"; "new_phase", `String "paused"] = Some (Events.Keeper "private-holder-name"));
   check bool "composite changes refresh holder identity" true
-    (keeper "keeper_composite_changed" [] = Some Events.Seats);
+    (keeper "keeper_composite_changed" [] = Some (Events.Keeper "private-holder-name"));
   check bool "invalid lifecycle state is not a producer" true
     (keeper "keeper_phase_changed" ["prev_phase", `String "running"; "new_phase", `String "invented"] = None);
   check bool "private chat cannot appear on the Play transport" true

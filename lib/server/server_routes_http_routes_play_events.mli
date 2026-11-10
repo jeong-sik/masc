@@ -9,11 +9,13 @@
     including when no machine frame changes. *)
 val path : string
 
-type change = Snapshot | Machine | Seats | Room
+type change = Snapshot | Machine | Seats | Room | Keeper of string
 val change_of_payload : machine:Machine_lane.t -> Yojson.Safe.t -> change option
 (** Decode typed workspace dataset and Keeper lifecycle notifications relevant to Play.
     Machine observations belong to the selected machine; room changes are
-    shared. Unrelated/private event payloads are never forwarded. *)
+    shared. A Keeper hint carries only the same identity visible in the public
+    Play roster, so unrelated fleet activity cannot retire holder authority.
+    Unrelated/private event payloads are never forwarded. *)
 val frame : change -> string
 val add_routes : Http_server_eio.Router.t -> Http_server_eio.Router.t
 

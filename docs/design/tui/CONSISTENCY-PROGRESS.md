@@ -352,6 +352,18 @@ established. The 6157b06b native results belong to the body-reading parent,
 not this save change. Matching execution, installation, GUI display and the
 rest of the 23-surface audit remain open.
 
+At repaired source af2391c4, `Test` run 42802898140 on
+`fix/tui-report-save-receipts-20261110` completed successfully with exactly
+`test_tui_resource_export,test_fs_compat_capability_write`: four export cases
+and 68 filesystem cases ran. This is the selected semantic scope, not full
+regression or native UI execution. `Minimal manual checks` run 42802891578,
+workflow `main` at b43d447c with selected source af2391c4 and
+`resource-reading`, failed while building `test_tui_published_reports`:
+its new input-ownership cases directly reference `Masc_tui_message_input`
+and `Masc_tui_resource_export`, but their stanza omitted both libraries.
+The stanza now lists those direct dependencies; corrected native compilation,
+the four resource suites and the actual key generator remain unverified.
+
 ## Feature child identity and resource body (#51023)
 
 The matching be3302c2 server/TUI baseline at 120x36 and 36x20 showed a

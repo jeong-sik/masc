@@ -39,7 +39,7 @@ let rec remove_tree path =
 let commit zone ~author ~kind body =
   match Z.commit zone { Z.author; kind; body } with
   | Ok (_ : Z.committed) -> ()
-  | Error error -> Alcotest.failf "a record was refused: %s" (Z.error_to_string error)
+  | Error error -> Alcotest.failf "a record was refused: %s" (Z.error_detail error)
 ;;
 
 type person =
@@ -94,7 +94,7 @@ let person zone ~base_path ~name ~hex =
        ~draw:(fun () -> "grant-" ^ name)
    with
    | Ok (_ : Grant_id.t) -> ()
-   | Error error -> Alcotest.fail (Authz_runtime.error_to_string error));
+   | Error error -> Alcotest.fail (Authz_runtime.error_detail error));
   let keeper = "keeper-" ^ name in
   let keeper_id = get (Keeper_id.of_string keeper) in
   let turn_scope =
@@ -105,10 +105,10 @@ let person zone ~base_path ~name ~hex =
   in
   (match Authz_keeper.make zone ~user_id ~keeper_id ~turn_scope ~draw:(fun () -> "policy-" ^ name) with
    | Ok () -> ()
-   | Error error -> Alcotest.fail (Authz_keeper.error_to_string error));
+   | Error error -> Alcotest.fail (Authz_keeper.error_detail error));
   (match Authz_keeper.assign zone ~user_id ~keeper_id ~runtime_id:runtime with
    | Ok () -> ()
-   | Error error -> Alcotest.fail (Authz_keeper.error_to_string error));
+   | Error error -> Alcotest.fail (Authz_keeper.error_detail error));
   let runtime_root = Layout.person_runtime_root ~base_path ~namespace in
   Fs_compat.mkdir_p runtime_root;
   let home =

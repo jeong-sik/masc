@@ -36,7 +36,7 @@ let workspace = get (Workspace_id.of_string "workspace-1")
 let commit zone ~author ~kind body =
   match Z.commit zone { Z.author; kind; body } with
   | Ok (_ : Z.committed) -> ()
-  | Error error -> Alcotest.failf "a record was refused: %s" (Z.error_to_string error)
+  | Error error -> Alcotest.failf "a record was refused: %s" (Z.error_detail error)
 ;;
 
 (* The CLI of the template. It answers [auth status] as a signed-in
@@ -253,7 +253,7 @@ let join zone ~base_path ~name ~hex ~integration ~client ~model =
        ~draw:(fun () -> "grant-" ^ name)
    with
    | Ok (_ : Grant_id.t) -> ()
-   | Error error -> Alcotest.fail (Authz_runtime.error_to_string error));
+   | Error error -> Alcotest.fail (Authz_runtime.error_detail error));
   { person = { Login.zone; user_id; namespace }; account_id = Provider_account_id.to_string account }, runtime_id
 ;;
 
@@ -272,13 +272,13 @@ let keeper zone (who : someone) name ?runtime () =
        "policy-" ^ name)
    with
    | Ok () -> ()
-   | Error error -> Alcotest.fail (Authz_keeper.error_to_string error));
+   | Error error -> Alcotest.fail (Authz_keeper.error_detail error));
   match runtime with
   | None -> ()
   | Some runtime_id ->
     (match Authz_keeper.assign zone ~user_id:who.person.user_id ~keeper_id ~runtime_id with
      | Ok () -> ()
-     | Error error -> Alcotest.fail (Authz_keeper.error_to_string error))
+     | Error error -> Alcotest.fail (Authz_keeper.error_detail error))
 ;;
 
 let body ~keeper ~message =

@@ -35,6 +35,7 @@ The command palette is `:`.
 
 | Keys | What it does |
 |---|---|
+| `v` | read every reason in the last server rollup; scroll and search the captured reading; Esc returns without changing a decision or setting |
 | `Left` | open the Keeper list; Enter opens a chat; Right or Esc returns |
 | `j/k` | move between decision links and conversations |
 | `Enter` | open the selected destination; never approve |
@@ -212,6 +213,7 @@ data and paint. A missing finish record remains an unfinished observation.
 | `w` | on Usage: cycle the exact UTC day window for provider report history and tool calls |
 | `1 / 2 / 3` | on Telemetry: Engine, Work, or Tools |
 | `Esc` | Dashboard |
+| `Tab` | next |
 
 ## Work / Board
 
@@ -305,7 +307,6 @@ data and paint. A missing finish record remains an unfinished observation.
 | `Esc` | back to Dashboard |
 | `r` | reload |
 | `Tab` | next |
-| `q` | quit |
 
 Runtime model and account form saves keep input and its opening revision while
 workspace checks, source reading, preview and guarded commit run outside the
@@ -362,6 +363,8 @@ and UI admission decision; these are not painted-frame or key-latency evidence.
 | `Enter` | Actions/Everything: exact selected event; Turns are aggregates |
 | `Esc` | close event evidence; from the list, back to Dashboard |
 | `Home/End` | g and G as well; the ring counts back from the newest, so its top is now |
+| `Tab` | next |
+| `q` | quit |
 
 ## Keeper detail
 
@@ -444,9 +447,6 @@ and UI admission decision; these are not painted-frame or key-latency evidence.
 | `Ctrl-D` | cycle compact / results / full tool detail |
 | `Ctrl-S` | unfold the running turn's status rows, or fold them back to the progress line |
 | `Ctrl-N` | cycle Memory journal summary / full / hidden |
-| `/memory` | cycle Memory journal summary / full / hidden |
-| `/memory status` | read the selected Keeper's current memory health, including its last processing observation and waiting reason |
-| `/memory sync` | request catch-up on the existing Memory lane, including for a paused Keeper; acceptance does not mean completion |
 | `Ctrl-F` | cycle no clock / inline clock / full timestamp and request id |
 | `Ctrl-O` | preview the newest image or Mermaid diagram; /images lists all; any key returns |
 | `/approve /deny` | type a command and Enter to answer a tool approval |
@@ -766,6 +766,8 @@ count is drawn beyond the available space.
 | `/` | find a resource name in the list, or text in the loaded detail |
 | `n / N` | next / previous match |
 | `r` | reload |
+| `Tab` | next |
+| `q` | quit |
 
 ## Features & plugins / Tools
 

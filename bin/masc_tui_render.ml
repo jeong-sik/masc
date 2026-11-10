@@ -131,6 +131,33 @@ let acting_pane_chunk_projection (state : state) ~terminal_rows ~terminal_cols ~
   else Some (recent_chunk_projection state)
 ;;
 
+let operator_actions_reading (state : state) =
+  let text ko en = ui_text state ~ko ~en in
+  let sections =
+    match state.server_identity with
+    | None ->
+        [{ Masc_tui_detail_reading.heading = text "서버 관측" "Server observation"
+         ; body = text "서버 응답을 아직 읽지 못했습니다."
+             "The server response has not been read yet." }]
+    | Some identity ->
+        (match identity.Tui_decode.sid_operator_action with
+         | None ->
+             [{ Masc_tui_detail_reading.heading = text "조치 원인 미확인" "Reasons unavailable"
+              ; body = text "서버 응답에 조치 원인 목록이 없거나 읽을 수 없는 형식입니다."
+                  "The server response has no readable action-reason list." }]
+         | Some [] ->
+             [{ Masc_tui_detail_reading.heading = text "조치 원인" "Action reasons"
+              ; body = text "이 서버 관측에는 조치가 필요한 이유가 없습니다."
+                  "This server observation reports no reason requiring action." }]
+         | Some reasons ->
+             let count = List.length reasons in
+             List.mapi (fun index reason ->
+               { Masc_tui_detail_reading.heading = Printf.sprintf "%d / %d" (index + 1) count
+               ; body = reason }) reasons)
+  in
+  Masc_tui_detail_reading.create ~ko:(state.ui_language = Lang_ko)
+    ~title:(text "조치가 필요한 이유" "Why action is needed") sections
+
 (* Requests and capacity have separate observation paths. In particular a
    working HTTP connection does not make a retained fleet reading current. *)
 let overview_capacity_lines (state : state) =
@@ -240,7 +267,8 @@ let render_overview (state : state) home =
            ^ ui_text state ~ko:" — 화면별 조작" ~en:" — every screen's keys"
            ^ Ansi.reset);
       c.push
-        (" " ^ pressable (Press_surface Approvals)
+        (" " ^ Ansi.dim ^ ui_text state ~ko:"v:조치 원인" ~en:"v:action reasons" ^ Ansi.reset
+         ^ "  " ^ pressable (Press_surface Approvals)
            (Ansi.dim ^ ui_text state ~ko:"p:승인·질문" ~en:"p:Requests" ^ Ansi.reset)
          ^ "  " ^ pressable (Press_surface Metrics)
            (Ansi.dim ^ ui_text state ~ko:"m:사용량" ~en:"m:Usage" ^ Ansi.reset));

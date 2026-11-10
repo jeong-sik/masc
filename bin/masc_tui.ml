@@ -36486,10 +36486,13 @@ Use relative paths for resources already held in the package. -->
               && not (modal_owns_keys state) && not state.palette_open
               && not state.answering_open && not state.patch_modal_open && not state.link_modal_open
               && Option.is_none (text_input_target state ~compact_viewport)
-              && ((state.view=Repositories && Option.is_none state.workspace_activity_repo)
+              && ((state.view=Overview && not state.keeper_navigation_open)
+                  || (state.view=Repositories && Option.is_none state.workspace_activity_repo)
                   || (state.view=Config && state.config_pane=Config_models)
                   || (state.view=Memory && Option.is_none state.memory_facts_keeper)) ->
-           let reading = if state.view=Repositories then
+           let reading = if state.view=Overview then
+               Some (Masc_tui_render.operator_actions_reading state)
+             else if state.view=Repositories then
                Masc_tui_render_repositories.selected_repository_reading state
              else if state.view=Memory then
                Some (Masc_tui_render_memory.memory_overview_reading ~cols:terminal_columns state)

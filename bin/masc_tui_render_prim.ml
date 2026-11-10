@@ -774,8 +774,18 @@ let footer_line ?help_door ?(status = []) ?position ?(recovery_in_slot = None) ?
         @
         (* The server's rollup, from the probe it serves on every refresh. *)
         (match Masc_tui_types.operator_actions state with
-         | first :: rest ->
-           [ Masc_tui_footer.Operator_action { first; count = 1 + List.length rest } ]
+         | _ :: rest ->
+           let count = 1 + List.length rest in
+           let notice =
+             ui_text state
+               ~ko:(Printf.sprintf "조치 필요 %d" count)
+               ~en:(Printf.sprintf "Action needed %d" count)
+             |> pressable (Press_surface Overview)
+           in
+           [ Masc_tui_footer.Operator_action
+               { notice
+               ; detail = ui_text state ~ko:"운영에서 확인" ~en:"Open Operations"
+               } ]
          | [] -> [])
         @
         (* This TUI's own embedded commit against the server's: the pair

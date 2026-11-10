@@ -121,7 +121,7 @@ let test_subscribe_read_and_retirement () = with_workspace (fun config ->
     Alcotest.(check bool) "retired query receives no work" false !owed))
 
 let test_typed_query_and_invalidation () =
-  let parse target = Stream.request (Httpun.Request.create ~target `GET) in
+  let parse target = Stream.request (Httpun.Request.create `GET target) in
   Alcotest.(check bool) "zero/negative windows refused" true
     (Result.is_error (parse "/?window=0") && Result.is_error (parse "/?window=-1"));
   Alcotest.(check bool) "malformed query refused" true (Result.is_error (parse "/?bucket_min=NaN"));

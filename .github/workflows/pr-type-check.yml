@@ -16,6 +16,12 @@ name: PR type-check (dune build @check)
 # 2026-11-10): adopt in two stages — first give every PR a check context
 # (this change), verify the skip path, then require the check in the
 # branch ruleset.
+#
+# The filter is deliberately fail-closed (review P2-1 on #51155): the file
+# listing is captured with its exit status, so an API failure fails this
+# job red instead of producing an empty list that would read as "no
+# sources" and skip the check. A PR at the 3000-file listing cap cannot be
+# filtered reliably and is checked in full.
 on:
   # workflow_dispatch lets a maintainer re-check a branch on demand, and is the
   # only way to time this job without opening a throwaway source change.
@@ -37,6 +43,9 @@ jobs:
     timeout-minutes: 5
     permissions:
       contents: read
+      # GET /pulls/{n}/files needs Pull requests read; the repo's other
+      # workflows declare the same permission for this call.
+      pull-requests: read
     outputs:
       src: ${{ steps.filter.outputs.src }}
     steps:
@@ -47,6 +56,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_CHANGED_FILES: ${{ github.event.pull_request.changed_files }}
         shell: bash
         run: |
           set -euo pipefail
@@ -55,6 +65,20 @@ jobs:
             echo "src=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
+          # The files listing caps at 3000 entries; at or beyond the cap the
+          # list is truncated and cannot prove "no sources". Fail toward
+          # more checking, never less.
+          if [ "${PR_CHANGED_FILES:-0}" -ge 3000 ]; then
+            echo "PR lists ${PR_CHANGED_FILES} changed files (API cap 3000) — running the check"
+            echo "src=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # Fail closed: command substitution propagates the API call's exit
+          # status to set -e, so a 403/rate-limit/network failure fails this
+          # job red rather than silently skipping the type-check.
+          files="$(gh api --paginate \
+            "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}/files?per_page=100" \
+            --jq '.[].filename')"
           src=false
           while IFS= read -r f; do
             case "$f" in
@@ -71,9 +95,7 @@ jobs:
               .github/actions/*) src=true; break ;;
               .github/workflows/pr-type-check.yml) src=true; break ;;
             esac
-          done < <(gh api --paginate \
-            "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}/files?per_page=100" \
-            --jq '.[].filename')
+          done <<< "$files"
           echo "src=$src" >> "$GITHUB_OUTPUT"
 
   type-check:

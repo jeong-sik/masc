@@ -31,7 +31,7 @@ let frequent state keeper_name =
     | Facts.Never_retrieved -> None
     | Facts.Retrieved {count; last_at; distinct_days = _} -> Some (fact, count, last_at))
     (facts state keeper_name)
-  |> List.sort (fun (a, ac, at) (b, bc, bt) ->
+  |> List.sort (fun ((a : Facts.memory_fact), ac, at) ((b : Facts.memory_fact), bc, bt) ->
     let count = Int.compare bc ac in
     if count <> 0 then count else let clock = Float.compare bt at in
     if clock <> 0 then clock else String.compare a.mf_memory_id b.mf_memory_id)

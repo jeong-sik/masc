@@ -134,7 +134,10 @@ type host_account
 (** The access of a process. *)
 type t =
   | Single_user of Authz_boot_mode_read.single_user
-      (** The boot judged the base path a single-user boot. *)
+      (** The boot judged the base path a single-user boot. After the accounts
+          were turned off ({!Authz_boot_mode_read.turned_off}), their records
+          stay read-only: {!authorize} refuses a run on their Keepers, their
+          Runtimes and the homes of their persons. *)
   | Multi_account of
       { zone : Authz_zone.t  (** The authorization zone of [base_path]. *)
       ; base_path : string
@@ -200,6 +203,16 @@ type refusal =
   | Host_account of host_client
       (** A host client in a multi-account process, which shares no account
           of its host. *)
+  | Off_keeper of Authz_types.Keeper_id.t
+      (** A turn of a Keeper of the log, after the accounts were turned off. *)
+  | Off_runtime of Authz_types.Runtime_id.t
+      (** A turn on a Runtime of the log, after the accounts were turned off. *)
+  | Off_person_home
+      (** A start on a home under the runtime roots of the persons
+          ({!Runtime_account_home_layout.under_persons}), after the accounts
+          were turned off. *)
+  | Off_own_account of Authz_types.User_id.t
+      (** A person's own account, after the accounts were turned off. *)
 
 val refusal_to_string : refusal -> string
 

@@ -131,6 +131,10 @@ type refusal =
   | Not_a_declared_home
   | Not_the_account_home of Authz_types.Provider_account_id.t
   | Host_account of host_client
+  | Off_keeper of Authz_types.Keeper_id.t
+  | Off_runtime of Authz_types.Runtime_id.t
+  | Off_person_home
+  | Off_own_account of Authz_types.User_id.t
 
 let refusal_to_string = function
   | Not_published -> "this process has not published whether a CLI may start on an account"
@@ -171,6 +175,24 @@ let refusal_to_string = function
       "%s starts on an account of the host, and a multi-account process shares no \
        account of its host"
       (host_client_name client)
+  | Off_keeper keeper_id ->
+    Printf.sprintf
+      "the Keeper %s belongs to an account, and the accounts of this installation were \
+       turned off: it stays read-only and runs no turn"
+      (Authz_types.Keeper_id.to_string keeper_id)
+  | Off_runtime runtime_id ->
+    Printf.sprintf
+      "the Runtime %s belongs to an account, and the accounts of this installation were \
+       turned off: no turn runs on it"
+      (Authz_types.Runtime_id.to_string runtime_id)
+  | Off_person_home ->
+    "the home is under the runtime roots of the persons (.masc/accounts), whose accounts were \
+     turned off: no client starts on it"
+  | Off_own_account user_id ->
+    Printf.sprintf
+      "the accounts of this installation were turned off, so no client starts on an account \
+       of %s"
+      (Authz_types.User_id.to_string user_id)
 ;;
 
 let layout_client (type client) (client : client Runtime_official_account.client) =
@@ -246,10 +268,60 @@ let multi_account ~zone ~base_path ~now request claim =
                  { requested = runtime_id; assigned = turn.Authz_keeper_turn.runtime_id })))
 ;;
 
+(* The Keeper or the Runtime of the log that [name] spells, if the log made one.
+   A name that is no id names no record. *)
+let off_keeper (records : Authz_state.t) name =
+  match Authz_types.Keeper_id.of_string name with
+  | Error (_ : Authz_id.error) -> None
+  | Ok keeper_id ->
+    Option.map
+      (fun (_ : Authz_keeper_state.keeper) -> Off_keeper keeper_id)
+      (Authz_keeper_state.find records.Authz_state.keepers keeper_id)
+;;
+
+let off_runtime (records : Authz_state.t) name =
+  match Authz_types.Runtime_id.of_string name with
+  | Error (_ : Authz_id.error) -> None
+  | Ok runtime_id ->
+    Option.map
+      (fun (_ : Authz_runtime_state.runtime) -> Off_runtime runtime_id)
+      (Authz_runtime_state.find records.Authz_state.runtimes runtime_id)
+;;
+
+(* HIGH-RISK-UNREVIEWED: a single user after Off keeps the records of the
+   accounts read-only and runs nothing of theirs on the authority of the
+   operator (design 5.1 row 4, 10.5): no turn of their Keepers, no turn on
+   their Runtimes, and no client on the homes of the persons, whichever request
+   it is for. A home the environment of the process chose is the operator's. *)
+let after_off ~base_path (records : Authz_state.t) request claim =
+  let by_request =
+    match request with
+    | Operator_call -> None
+    | Own_account { user_id; provider_account_id = _ } -> Some (Off_own_account user_id)
+    | Keeper_turn { keeper_name; channel = _; runtime_id } ->
+      (match off_keeper records keeper_name with
+       | Some refusal -> Some refusal
+       | None -> off_runtime records runtime_id)
+  in
+  match by_request, claim.declared_home with
+  | Some refusal, (None | Some (_ : string)) -> Error refusal
+  | None, None -> Ok ()
+  | None, Some home ->
+    if Layout.under_persons ~base_path home then Error Off_person_home else Ok ()
+;;
+
 let judge request claim =
   match Atomic.get state with
   | Unpublished -> Error Not_published
-  | Published (Single_user (_ : Authz_boot_mode_read.single_user)) -> Ok ()
+  | Published (Single_user single_user) ->
+    (match Authz_boot_mode_read.turned_off single_user with
+     | None -> Ok ()
+     | Some records ->
+       after_off
+         ~base_path:(Authz_boot_mode_read.single_user_base_path single_user)
+         records
+         request
+         claim)
   | Published (Multi_account { zone; base_path; now }) ->
     multi_account ~zone ~base_path ~now request claim
 ;;

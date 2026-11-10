@@ -347,6 +347,10 @@ let test_seat_reports_controller_recovery holder =
   let answer = dispatch ~state ~token:operator ~meth:"GET"
     ~target:Server_routes_http_routes_play_page.seat_path ~body:"" in
   check int "the current seat can be observed" 200 (status answer);
+  (match holder with
+   | Expired_holder | Removed_holder | Stopped_keeper ->
+     prerr_endline ("PROBE seat=" ^ Yojson.Safe.to_string (json answer))
+   | Live_holder -> ());
   check bool "departure is reported from authoritative holder state" true
     (member "controller_recoverable" (json answer) = Some (`Bool recoverable));
   check (option string) "observing departure never releases the controller" (Some "guest") (controller ());

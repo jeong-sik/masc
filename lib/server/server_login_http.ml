@@ -222,29 +222,39 @@ let gate_request ~request_authority (request : Httpun.Request.t) =
 
 let page answer_of (t : R.t) (_ : Httpun.Request.t) reqd = respond reqd (answer_of ~nonce:(t.draw ()))
 
-let whoami (t : R.t) request reqd =
-  with_authority reqd (fun request_authority ->
-    respond
-      reqd
-      (Auth_preview.whoami
-         (Authz_zone.snapshot t.zone).Authz_zone.state
-         ~now_ms:(int_of_float (Ptime.to_float_s (t.now ()) *. ms_per_second))
-         (gate_request ~request_authority request)))
+(* A request is judged on one snapshot of the zone, and only on one the zone
+   could be trusted for. A zone whose file stopped, or whose files disagree,
+   gives none, and the request gets a 503 before any credential is read. *)
+let on_trusted (t : R.t) reqd f =
+  match Authz_zone.read t.zone with
+  | Error uncertain -> respond reqd (R.zone_uncertain uncertain)
+  | Ok trusted -> f trusted
 ;;
 
-(* The one a route of a person acts for, judged by [gate] on one snapshot of
-   the zone. *)
+let whoami (t : R.t) request reqd =
+  with_authority reqd (fun request_authority ->
+    on_trusted t reqd (fun trusted ->
+      respond
+        reqd
+        (Auth_preview.whoami
+           trusted
+           ~now_ms:(int_of_float (Ptime.to_float_s (t.now ()) *. ms_per_second))
+           (gate_request ~request_authority request))))
+;;
+
+(* The one a route of a person acts for, judged by [gate]. [f] gets the state
+   of the snapshot that judged the request. *)
 let as_gated (t : R.t) ~gate request reqd f =
   with_authority reqd (fun request_authority ->
-    let state = (Authz_zone.snapshot t.zone).Authz_zone.state in
-    match
-      gate
-        state
-        ~now_ms:(int_of_float (Ptime.to_float_s (t.now ()) *. ms_per_second))
-        (gate_request ~request_authority request)
-    with
-    | Error answer -> respond reqd answer
-    | Ok who -> f state who)
+    on_trusted t reqd (fun trusted ->
+      match
+        gate
+          trusted
+          ~now_ms:(int_of_float (Ptime.to_float_s (t.now ()) *. ms_per_second))
+          (gate_request ~request_authority request)
+      with
+      | Error answer -> respond reqd answer
+      | Ok who -> f (trusted :> Authz_zone.snapshot).Authz_zone.state who))
 ;;
 
 (* The person a subscription route acts for; the connect handler checks the

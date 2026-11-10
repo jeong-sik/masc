@@ -46,28 +46,33 @@ let request_of body =
 ;;
 
 (* The Runtime the person gave the Keeper, and the account that Runtime
-   spends. A Keeper of another person is answered as one that is not there,
-   as the other Keeper routes answer it. *)
+   spends, in a state the zone can be trusted for. A Keeper of another person
+   is answered as one that is not there, as the other Keeper routes answer
+   it. *)
 let assigned (person : Login.person) keeper_id =
-  let state = (Authz_zone.snapshot person.zone).Authz_zone.state in
-  match Ks.find state.Authz_state.keepers keeper_id with
-  | Some { Ks.owner; runtime; policy_id = _; turn_scope = _ }
-    when Authz_types.User_id.equal owner person.user_id ->
-    (match runtime with
-     | None -> Error (error R.Conflict_409 no_runtime)
-     | Some runtime_id ->
-       (match Authz_runtime_state.find state.Authz_state.runtimes runtime_id with
-        | Some { Authz_runtime_state.provider_account_id; owner = _; self_grant = _; self_effects = _ } ->
-          Ok (runtime_id, provider_account_id)
-        | None ->
-          (* The log gives a Keeper only a Runtime it made, and a Runtime it
-             made stays. *)
-          Log.Server.warn
-            "Keeper %s has the Runtime %s, which the log does not have"
-            (Authz_types.Keeper_id.to_string keeper_id)
-            (Authz_types.Runtime_id.to_string runtime_id);
-          Error (error R.Internal_error_500 "The Runtime of this Keeper is not in the log.")))
-  | Some (_ : Ks.keeper) | None -> Error (error R.Not_found_404 unknown_keeper)
+  match Authz_zone.read person.zone with
+  | Error uncertain -> Error (R.zone_uncertain uncertain)
+  | Ok trusted ->
+    let state = (trusted :> Authz_zone.snapshot).Authz_zone.state in
+    (match Ks.find state.Authz_state.keepers keeper_id with
+     | Some { Ks.owner; runtime; policy_id = _; turn_scope = _ }
+       when Authz_types.User_id.equal owner person.user_id ->
+       (match runtime with
+        | None -> Error (error R.Conflict_409 no_runtime)
+        | Some runtime_id ->
+          (match Authz_runtime_state.find state.Authz_state.runtimes runtime_id with
+           | Some
+               { Authz_runtime_state.provider_account_id; owner = _; self_grant = _; self_effects = _ }
+             -> Ok (runtime_id, provider_account_id)
+           | None ->
+             (* The log gives a Keeper only a Runtime it made, and a Runtime it
+                made stays. *)
+             Log.Server.warn
+               "Keeper %s has the Runtime %s, which the log does not have"
+               (Authz_types.Keeper_id.to_string keeper_id)
+               (Authz_types.Runtime_id.to_string runtime_id);
+             Error (error R.Internal_error_500 "The Runtime of this Keeper is not in the log.")))
+     | Some (_ : Ks.keeper) | None -> Error (error R.Not_found_404 unknown_keeper))
 ;;
 
 let login_answer (status, message) =
@@ -91,8 +96,10 @@ let refusal_answer (refusal : Runtime_account_access.refusal) =
     error R.Conflict_409 text
   | Runtime_account_access.Turn_refused (Authz_keeper_turn.Keeper_not_made _) ->
     error R.Not_found_404 unknown_keeper
-  | Runtime_account_access.Turn_refused Authz_keeper_turn.Log_kept_moving ->
-    error R.Service_unavailable_503 text
+  | Runtime_account_access.Zone_uncertain uncertain ->
+    (* The zone stopped, or its files came to disagree, after the route read
+       the Keeper. *)
+    R.zone_uncertain uncertain
   | Runtime_account_access.Home_unresolved _ ->
     (* The reason can name a path of the server (issue #50018). *)
     Log.Server.warn "A Keeper turn was refused: %s" text;

@@ -717,7 +717,8 @@ let add_routes ~sw ~clock router =
              Http.Response.json_value ~status:`Service_unavailable ~request:req
                (`Assoc [ "error", `String detail ]) reqd
            | Workspace_memory_ledger.Missing | Workspace_memory_ledger.Available _ ->
-             let cache_key = "workspace_memory_inventory:" ^ base_path in
+             let cache_key =
+               Server_dashboard_http_core_cache.workspace_memory_inventory_cache_key ~base_path in
              respond_cached_read ~request:req ~reqd ~cache_key ~ttl:standard_cache_ttl_s
                (Pool_work.io ~name:__FUNCTION__ (fun () ->
                  match Workspace_memory_ledger_view.inventory ~base_path () with

@@ -346,13 +346,16 @@ let save ~base_path t =
   io (fun () ->
     let* () = require_base ~base_path in
     Fs_compat.mkdir_p (directory ~base_path);
+    Fun.protect
+      ~finally:(fun () -> Workspace_memory_changed.written ~directory:(directory ~base_path))
+      (fun () ->
     match Fs_compat.save_file_atomic_strict_staged (path ~base_path)
             (Yojson.Safe.to_string (to_json t)) with
     | Ok () -> Ok ()
     | Error failure ->
       (match failure.exception_ with
        | Eio.Cancel.Cancelled _ as exn -> Printexc.raise_with_backtrace exn failure.backtrace
-       | _ -> Error (Fs_compat.atomic_replace_failure_to_string failure)))
+       | _ -> Error (Fs_compat.atomic_replace_failure_to_string failure))))
 
 let briefing_sources ledger =
   let source kind (id, text) : Workspace_memory_briefing.source =

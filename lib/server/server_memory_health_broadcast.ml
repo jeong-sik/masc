@@ -20,12 +20,19 @@ let install ~sw ~(config : Workspace.config) =
     physical (Config_dir_resolver.keepers_dir_for_base_path ~base_path)
   in
   let runtime_keepers_dir = physical (Workspace.keepers_runtime_dir config) in
+  let world_directory = physical (Workspace_memory_ledger.directory ~base_path) in
+  let world_changed () =
+    Dashboard_cache.invalidate
+      (Server_dashboard_http_core_cache.workspace_memory_inventory_cache_key ~base_path);
+    Workspace_dataset_event.announce ~base_path Workspace_dataset_event.World_memory
+  in
   let written ~keepers_dir ~keeper_id =
     if String.equal keepers_dir config_keepers_dir
        || String.equal keepers_dir runtime_keepers_dir
     then (
       Dashboard_cache.invalidate
         (Server_dashboard_http_keeper_memory_health.fleet_cache_key ~base_path);
+      world_changed ();
       Workspace_dataset_event.announce ~base_path
         (Workspace_dataset_event.Memory_health { keeper = keeper_id }))
   in
@@ -44,7 +51,12 @@ let install ~sw ~(config : Workspace.config) =
         }
       -> written ~keepers_dir ~keeper_id)
   in
+  let unsubscribe_world =
+    Workspace_memory_changed.subscribe (fun ~directory ->
+      if String.equal directory world_directory then world_changed ())
+  in
   Eio.Switch.on_release sw (fun () ->
     unsubscribe_inputs ();
-    unsubscribe_commits ())
+    unsubscribe_commits ();
+    unsubscribe_world ())
 ;;

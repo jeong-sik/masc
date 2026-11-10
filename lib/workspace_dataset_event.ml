@@ -36,6 +36,9 @@ type dataset =
   | Lanes
   | Machine_live of { machine : Machine_lane.t }
   | Memory_health of { keeper : string }
+  | World_memory
+  | Play_seats
+  | Dashboard_observation of Sse_event.Types.dashboard_observation_changed_payload
   | Play_room of { machine : Machine_lane.t }
   | Lane_addons of { instance_id : string }
   | Browser_observation of browser_observation
@@ -63,6 +66,9 @@ module Kind = struct
     | Lanes
     | Machine_live
     | Memory_health
+    | World_memory
+    | Play_seats
+    | Dashboard_observation
     | Play_room
     | Lane_addons
     | Browser_observation
@@ -90,6 +96,9 @@ module Kind = struct
     | Lanes -> "lanes"
     | Machine_live -> "machine_live"
     | Memory_health -> "memory_health"
+    | World_memory -> "world_memory"
+    | Play_seats -> "play_seats"
+    | Dashboard_observation -> "dashboard_observation"
     | Play_room -> "play_room"
     | Lane_addons -> "lane_addons"
     | Browser_observation -> "browser_observation"
@@ -121,6 +130,9 @@ let kind = function
   | Lanes -> Kind.Lanes
   | Machine_live _ -> Kind.Machine_live
   | Memory_health _ -> Kind.Memory_health
+  | World_memory -> Kind.World_memory
+  | Play_seats -> Kind.Play_seats
+  | Dashboard_observation _ -> Kind.Dashboard_observation
   | Play_room _ -> Kind.Play_room
   | Lane_addons _ -> Kind.Lane_addons
   | Browser_observation _ -> Kind.Browser_observation
@@ -236,7 +248,7 @@ let browser_observation_of_fields fields =
 let keeper_field = function
   | Repositories | Verification_requests | Harness_verdicts | Goals | Runtime_config | Connectors
   | Skill_catalog | Clients | Account_emails | Provider_usage | Provider_standing | Keeper_costs
-  | Workspace_health | Runtime_probe | Runtime_metrics | Lanes -> []
+  | Workspace_health | Runtime_probe | Runtime_metrics | Lanes | World_memory | Play_seats -> []
   | Machine_live { machine } | Play_room { machine } ->
       [ "machine", `String (Machine_lane.to_wire machine) ]
   | Lane_addons { instance_id } -> [ "instance_id", `String instance_id ]
@@ -245,6 +257,9 @@ let keeper_field = function
   | Memory_health { keeper }
   | Keeper_metrics { keeper } | Keeper_oauth_attempts { keeper } | Skill_activations { keeper } ->
     [ "keeper", `String keeper ]
+  | Dashboard_observation payload ->
+      Sse_event.dashboard_observation_changed_payload_to_json payload
+      |> Yojson.Safe.Util.to_assoc
 
 let keeper_of_fields name fields =
   match List.assoc_opt "keeper" fields with
@@ -295,6 +310,11 @@ let of_fields fields =
        Result.map (fun machine -> Machine_live { machine }) (machine_of_fields fields)
      | Some Kind.Memory_health ->
        Result.map (fun keeper -> Memory_health { keeper }) (keeper_of_fields name fields)
+     | Some Kind.World_memory -> Ok World_memory
+     | Some Kind.Play_seats -> Ok Play_seats
+     | Some Kind.Dashboard_observation ->
+       Sse_event.dashboard_observation_changed_payload_of_json (`Assoc fields)
+       |> Result.map (fun payload -> Dashboard_observation payload)
      | Some Kind.Play_room ->
        Result.map (fun machine -> Play_room { machine }) (machine_of_fields fields)
      | Some Kind.Lane_addons ->
@@ -324,6 +344,10 @@ let announce_with_fields ~base_path fields dataset =
       (Printexc.to_string exn)
 
 let announce ~base_path dataset = announce_with_fields ~base_path [] dataset
+
+let announce_dashboard_observation ~base_path ~scope topic =
+  announce ~base_path
+    (Dashboard_observation { topic; scope })
 
 let announce_lane_addon ~base_path ~instance_id ~visibility =
   announce_with_fields ~base_path [ "visibility", visibility ]

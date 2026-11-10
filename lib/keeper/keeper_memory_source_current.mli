@@ -86,6 +86,8 @@ type source_read_failure =
 
 val source_read_failure_to_string : source_read_failure -> string
 
+val suffix : string
+
 val install_commit_observer :
   (keepers_dir:string -> keeper_id:string -> unit) -> (unit -> unit)
 

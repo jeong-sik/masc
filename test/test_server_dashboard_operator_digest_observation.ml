@@ -484,8 +484,27 @@ let test_execution_partial_read_retries_after_quiet_repair () =
         (Httpun.Request.create `GET ("/api/v1/dashboard/execution" ^ suffix)) in
     let diagnostic json field = Yojson.Safe.Util.(json |> member "projection_diagnostics" |> member field) in
     let assert_partial json =
+      let diagnostic_members = match json with
+        | `Assoc fields -> List.filter (fun (key, _) -> key = "projection_diagnostics") fields
+        | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ ->
+            fail "actual Execution response is not an object" in
+      check int "actual partial HTTP/body carries one diagnostic member" 1 (List.length diagnostic_members);
       check bool "Execution carries actual partial read diagnostics" true
         (diagnostic json "read_completeness" = `String "partial");
+      let original_error = diagnostic json "read_error" in
+      (match original_error with
+       | `String detail when String.length detail > 0 -> ()
+       | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ | `Assoc _ ->
+           fail "actual partial read lost its original error diagnostic");
+      let annotated = Server_dashboard_http_core_cache.with_projection_diagnostics
+          ~surface:"fixture annotation" ~started_at:(Unix.gettimeofday ())
+          ~extra:["read_completeness", `String "complete"; "read_error", `Null] json in
+      check bool "performance metadata cannot replace the original same-read outcome" true
+        (diagnostic annotated "read_completeness" = `String "partial");
+      check bool "performance metadata preserves the exact original read error" true
+        (diagnostic annotated "read_error" = original_error);
+      check string "generated metadata owns its own surface field" "fixture annotation"
+        Yojson.Safe.Util.(diagnostic annotated "surface" |> to_string);
       check bool "Execution retains its independently readable row" true
         Yojson.Safe.Util.(json |> member "keepers" |> to_list |> List.exists (fun row ->
           row |> member "name" = `String "readable-declaration"));

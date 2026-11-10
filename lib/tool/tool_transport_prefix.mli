@@ -1,6 +1,6 @@
 (** The prefix MCP puts on every masc tool name on the wire.
 
-    The literal lived in four places -- [Capability_registry.prefixed_tool_names]
+    The literal lived in four places -- [Capability_registry]
     built names with it, [Tool_dispatch.surface_of_tool_name] and
     [Keeper_tool_descriptor_resolution] detected it, and [Tool_misc] removed it
     -- and the two removers disagreed. One required a non-empty remainder, the

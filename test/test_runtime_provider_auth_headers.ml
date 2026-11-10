@@ -1568,7 +1568,7 @@ let runtime_or_fail ?(provider = runpod_provider) () =
 
 let agent_core_provider_config_or_fail runtime =
   match runtime.Runtime_instance.execution with
-  | Runtime_execution.Agent_core provider_config -> provider_config
+  | Runtime_execution.Agent_core sealed -> Masc_test_deps.api_config sealed
   | Runtime_execution.Codex_app_server _
   | Runtime_execution.Claude_code _
   | Runtime_execution.Antigravity_cli _
@@ -2485,7 +2485,7 @@ is-default = true
          match runtime.bindings with
          | [ binding ] ->
            (match execution_for_binding runtime binding with
-            | Ok (Runtime_execution.Agent_core config) -> config
+            | Ok (Runtime_execution.Agent_core sealed) -> Masc_test_deps.api_config sealed
             | Ok (Runtime_execution.Codex_app_server _
                  | Runtime_execution.Claude_code _
                  | Runtime_execution.Antigravity_cli _
@@ -3348,7 +3348,7 @@ let test_parallel_policy_survives_fresh_resume_and_wire_serialization () =
       let cfg, binding = parallel_policy_runtime ~provider_id ~protocol ~model_id ~policy in
       let provider_cfg =
         match execution_for_binding cfg binding with
-        | Ok (Runtime_execution.Agent_core config) -> config
+        | Ok (Runtime_execution.Agent_core sealed) -> Masc_test_deps.api_config sealed
         | Ok _ -> fail "HTTP policy selected an official client"
         | Error detail -> fail detail
       in
@@ -3829,7 +3829,8 @@ let test_dashboard_probe_uses_selected_header_fields () =
   let config = agent_core_provider_config_or_fail runtime in
   let config = {config with Llm_provider.Provider_config.auth_scheme=Bearer_token;
     headers=["X-Selected", "selected-context"]} in
-  let runtime = {runtime with execution=Runtime_execution.Agent_core config} in
+  let runtime = {runtime with
+    execution=Runtime_execution.Agent_core (Runtime_account_access.seal_api config)} in
   let calls = ref 0 in
   let json = with_dashboard_probe_http_get
     (fun ~url:_ ~headers ~timeout_sec:_ ->

@@ -7,6 +7,7 @@ import {
   apiRequestErrorFromResponse,
   ApiRequestError,
   jsonHeaders,
+  get,
   post,
   fetchControlPlane,
   fetchWithTimeout,
@@ -1223,14 +1224,9 @@ export async function fetchKeeperComposite(
   name: string,
   opts?: { signal?: AbortSignal },
 ): Promise<KeeperCompositeSnapshot> {
-  const resp = await fetchWithTimeout(
-    `/api/v1/keepers/${encodeURIComponent(name)}/composite`,
-    { headers: jsonHeaders(), signal: opts?.signal },
-    DEFAULT_GET_TIMEOUT_MS,
-  )
-  if (!resp.ok) throw new Error(`composite fetch failed: ${resp.status}`)
+  const raw = await get<unknown>(`/api/v1/keepers/${encodeURIComponent(name)}/composite`, opts)
   const { parseKeeperCompositeSnapshot } = await import('./schemas/keeper-composite')
-  return parseKeeperCompositeSnapshot(await resp.json())
+  return parseKeeperCompositeSnapshot(raw)
 }
 
 

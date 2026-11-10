@@ -1146,6 +1146,16 @@ let exact_slot_degradation_to_string (degradation : Runtime_config_error.exact_s
 let judge_runtime_config ~base_path ~config_root path =
   let judged =
     try
+      (* HIGH-RISK-UNREVIEWED: boot builds the exact-output registry after it
+         publishes its account access, and the registry takes the credentials
+         of the runtime table only through that access (plan D4). This helper
+         judges what boot would do, so it publishes the access of a host tool
+         on the same BasePath first. Nothing is sent. *)
+      let* () =
+        Runtime_account_access.publish_host_tool ~base_path
+          ~config_dir:(Env_config_core.masc_config_dir_opt ())
+        |> Result.map_error (fun (first, rest) -> String.concat "; " (first :: rest))
+      in
       let (_ : string option) =
         Server_runtime_bootstrap.configure_agent_core_model_catalog_env ()
       in

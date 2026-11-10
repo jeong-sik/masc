@@ -9,6 +9,10 @@ type error =
   | Ask_not_answered of string
   | Invalid_answered_record of string
   | Delivery_evidence_unavailable of Keeper_reaction_ledger.strict_delivery_evidence_error
+  | Intake_shutdown_reserved of Keeper_shutdown_types.Operation_id.t
+      (** The Keeper's shutdown operation holds its intake, so the queue took
+          nothing. The store did not fail and the answer stays in the ask log.
+          Delivery waits for the operation to release the intake. *)
   | Queue_storage_failed of string
   | Owner_unavailable of string
 
@@ -117,6 +121,7 @@ type report =
   ; enqueued : int
   ; already_pending : int
   ; already_delivered : int
+  ; shutdown_reserved : string list
   ; owners_absent : string list
   ; failures : failure list
   }
@@ -137,7 +142,12 @@ val reconcile : base_path:string -> (report, Keeper_ask_store.read_error) result
     file is gone: its name lands in [owners_absent], nothing is enqueued for it
     and its log is left as it is. An unreadable meta file is an
     [Owner_unavailable] failure. [pulse] reads the owner the same way and logs
-    the absent names once per pass. *)
+    the absent names once per pass.
+
+    An answer whose Keeper has its intake held by a shutdown operation is
+    named by ask id in [shutdown_reserved], not in [failures]: nothing failed
+    and no warning is logged for it. The answer stays in the ask log, and the
+    first pass after the operation releases the intake enqueues it. *)
 
 type t
 val create :

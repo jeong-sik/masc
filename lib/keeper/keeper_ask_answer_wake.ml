@@ -6,6 +6,7 @@ type error =
   | Ask_not_answered of string
   | Invalid_answered_record of string
   | Delivery_evidence_unavailable of Keeper_reaction_ledger.strict_delivery_evidence_error
+  | Intake_shutdown_reserved of Keeper_shutdown_types.Operation_id.t
   | Queue_storage_failed of string
   | Owner_unavailable of string
 
@@ -16,6 +17,8 @@ let error_to_string = function
   | Invalid_answered_record detail -> "canonical answer is invalid: " ^ detail
   | Delivery_evidence_unavailable error ->
       Keeper_reaction_ledger.strict_delivery_evidence_error_to_string error
+  | Intake_shutdown_reserved operation_id ->
+      "answer wake held: " ^ Keeper_registry_event_queue.shutdown_reserved_detail operation_id
   | Queue_storage_failed detail -> "answer wake storage failed: " ^ detail
   | Owner_unavailable detail -> "answer owner metadata unreadable: " ^ detail
 
@@ -298,7 +301,7 @@ let deliver_row ~base_path ~keeper_name ~already_delivered ask resolution =
     match Keeper_registry_event_queue.enqueue_stimulus_once_durable_result
         ~not_before:evidence_since ~base_path keeper_name stimulus with
     | Keeper_registry_event_queue.Stimulus_shutdown_reserved operation_id ->
-        Error (Queue_storage_failed (Keeper_registry_event_queue.shutdown_reserved_detail operation_id))
+        Error (Intake_shutdown_reserved operation_id)
     | Keeper_registry_event_queue.Stimulus_storage_error detail -> Error (Queue_storage_failed detail)
     | Keeper_registry_event_queue.Stimulus_enqueued ->
         wake_hint ~log_deferred:true ~base_path ~keeper_name ~ask_id:ask.Keeper_ask.ask_id;
@@ -337,6 +340,7 @@ type report =
   ; enqueued : int
   ; already_pending : int
   ; already_delivered : int
+  ; shutdown_reserved : string list
   ; owners_absent : string list
   ; failures : failure list
   }
@@ -365,7 +369,8 @@ let delivery_window since =
 
 let empty_report =
   { inspected=0; evidence_window_reads=0; enqueued=0;
-    already_pending=0; already_delivered=0; owners_absent=[]; failures=[] }
+    already_pending=0; already_delivered=0; shutdown_reserved=[];
+    owners_absent=[]; failures=[] }
 
 let reconcile_rows ~base_path ~keeper_name report rows =
   let open Result.Syntax in
@@ -418,7 +423,14 @@ let reconcile_rows ~base_path ~keeper_name report rows =
     | Ok Enqueued -> { report with enqueued = report.enqueued + 1 }
     | Ok Already_pending -> { report with already_pending = report.already_pending + 1 }
     | Ok Already_delivered -> { report with already_delivered = report.already_delivered + 1 }
-    | Error error -> { report with failures = { keeper_name = Some keeper_name;
+    (* The answer stays in the ask log and nothing failed: the Keeper's
+       shutdown holds its intake. The pass after the release enqueues it. *)
+    | Error (Intake_shutdown_reserved _) ->
+        { report with shutdown_reserved = ask_id :: report.shutdown_reserved }
+    | Error (( Ask_store_unavailable _ | Ask_missing _ | Ask_not_answered _
+             | Invalid_answered_record _ | Delivery_evidence_unavailable _
+             | Queue_storage_failed _ | Owner_unavailable _ ) as error) ->
+        { report with failures = { keeper_name = Some keeper_name;
         ask_id = Some ask_id; error } :: report.failures }) report answered in
   { report with evidence_window_reads =
       report.evidence_window_reads + !window_reads }
@@ -460,6 +472,7 @@ let reconcile ~base_path =
                     error = Owner_unavailable detail } :: report.failures })
     empty_report logs in
   Ok {report with failures=List.rev report.failures;
+                  shutdown_reserved=List.rev report.shutdown_reserved;
                   owners_absent=List.rev report.owners_absent}
 
 type recovery_phase = Reserved | Started | Settled of report | Interrupted | Raised
@@ -472,9 +485,10 @@ let observe_recovery ~base_path ~keeper_name ~started_ns phase =
         | Interrupted -> "interrupted", ""
         | Raised -> "raised", ""
         | Settled report -> "settled", Printf.sprintf
-            " inspected=%d evidence_windows=%d enqueued=%d pending=%d already_delivered=%d failures=%d"
+            " inspected=%d evidence_windows=%d enqueued=%d pending=%d already_delivered=%d shutdown_reserved=%d failures=%d"
             report.inspected report.evidence_window_reads report.enqueued
-            report.already_pending report.already_delivered (List.length report.failures) in
+            report.already_pending report.already_delivered
+            (List.length report.shutdown_reserved) (List.length report.failures) in
       Printf.sprintf "ask_recovery_owner keeper=%s started_ns=%Ld phase=%s at_ns=%Ld%s base_path=%S"
         keeper_name started_ns phase (Mtime_clock.elapsed_ns ()) detail base_path)
     with
@@ -489,9 +503,10 @@ let log_report ~base_path ~keeper_name report =
       (match failure.ask_id with Some ask_id -> ask_id | None -> "<store>")
       (error_to_string failure.error) base_path) report.failures;
   if report.enqueued > 0 then Log.Server.info
-    "ask answer recovery keeper=%s inspected=%d evidence_windows=%d enqueued=%d pending=%d already_delivered=%d failures=%d base_path=%S"
+    "ask answer recovery keeper=%s inspected=%d evidence_windows=%d enqueued=%d pending=%d already_delivered=%d shutdown_reserved=%d failures=%d base_path=%S"
     keeper_name report.inspected report.evidence_window_reads report.enqueued
-    report.already_pending report.already_delivered (List.length report.failures) base_path
+    report.already_pending report.already_delivered
+    (List.length report.shutdown_reserved) (List.length report.failures) base_path
 
 let log_discovery ~base_path = function
   | Ok () -> ()
@@ -530,7 +545,8 @@ let discover_and_schedule ~sw supervisor =
             observe_recovery ~base_path:supervisor.base_path ~keeper_name ~started_ns Started;
             let report = reconcile_rows ~base_path:supervisor.base_path
                 ~keeper_name empty_report rows in
-            let report = {report with failures=List.rev report.failures} in
+            let report = {report with failures=List.rev report.failures;
+              shutdown_reserved=List.rev report.shutdown_reserved} in
             observe_recovery ~base_path:supervisor.base_path ~keeper_name ~started_ns (Settled report);
             (try supervisor.on_report ~keeper_name report with
              | Eio.Cancel.Cancelled _ as exn -> raise exn

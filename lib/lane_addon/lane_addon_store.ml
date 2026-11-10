@@ -827,12 +827,12 @@ let publish_history_resolution t ~scope ~request_id ~expected ~next =
   protect (fun () -> with_tool_request_owner_serialization t ~scope (fun () ->
     let* current = history_resolution_record t ~scope ~request_id in
     let canonical = function None -> Ok None | Some json ->
-      Result.map Option.some (Lane_addon_action.canonical json) in
+      Result.map Option.some (Lane_addon_json.canonical json) in
     let* current = canonical current in
     let* expected = canonical expected in
     if current<>expected then Ok History_resolution_changed else
     let saved = protect (fun () ->
-      let* next = Lane_addon_action.canonical next in
+      let* next = Lane_addon_json.canonical next in
       let path=Filename.concat t.root (history_resolution_path ~scope ~request_id) in
       let directory = Filename.dirname path in
       durable_directory t ~sync_parent:sync_parent_directory directory;

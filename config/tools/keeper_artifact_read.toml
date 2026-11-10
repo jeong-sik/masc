@@ -24,7 +24,7 @@ additional_properties = false
 name = "sha256"
 type = "string"
 required = true
-description = "Exact sha256 from a [masc:blob ...] ToolResult or a ToolUse input _blob reference."
+description = "Exact sha256 from a [masc:blob ...] ToolResult or a ToolUse input _blob reference. A marker can carry a second hash, answer_sha256=; it fingerprints the answer and names no artifact, so pass the value written sha256=."
 
 [[params]]
 name = "offset"

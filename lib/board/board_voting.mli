@@ -1,8 +1,10 @@
 (** Voting and vote-log effects for one canonical Board store.
 
-    Cast operations stage under the state lock, append under persistence,
-    release persistence, then commit under a fresh state lock. The primary
-    posts source must be authoritative before the vote append is admitted. *)
+    Cast operations hold persistence across staging, the durable append and
+    fresh state publication. A snapshot cannot overwrite an appended vote
+    before that vote enters the committed ledger. State locks remain separate
+    from append IO; the fresh publication preserves other state-only edits.
+    The primary posts source must be authoritative before append admission. *)
 
 open Board_types
 

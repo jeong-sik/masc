@@ -2,7 +2,8 @@
 
     [append_line_once] appends a line to a transcript under the file lock
     unless [find_provenance] already finds the delivery in it, and says
-    whether the line was appended or was already present.
+    whether the line was appended or was already present. Autonomous turns
+    require the binding-aware batch writer and are refused here.
     [append_chat_payload_durable] appends one payload durably and raises
     [Sys_error] when the write fails. [announce_appended] tells the open
     transcripts that a row was stored.

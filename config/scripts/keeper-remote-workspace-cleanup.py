@@ -3,7 +3,9 @@
 
 Removes the immediate entries of one Keeper's workspace root that nobody
 has touched for the retention period, unless removing one could lose a
-commit or a stash. Uncommitted changes and untracked files are not kept
+commit or a stash. Inside an entry that was touched, it does the same for
+old subdirectories, without entering a git tree or a Dune project.
+Uncommitted changes and untracked files are not kept
 (RFC-remote-keeper-workspace-entries-are-swept-on-their-endpoint, section 2).
 Any fact the decision needs that cannot be read keeps the entry.
 
@@ -226,6 +228,107 @@ def free_kib(root: Path) -> int:
     return shutil.disk_usage(root).free // 1024
 
 
+def is_unit(directory: Path) -> bool:
+    """A directory that goes whole or not at all.
+
+    A git working tree, a Git directory and a Dune project are trees someone
+    builds or reads as one piece: removing only their old part (docs/, an
+    untouched pack) breaks the rest. Any other directory is a container whose
+    old subdirectories can go on their own.
+    """
+    return (
+        os.path.lexists(directory / ".git")
+        or (directory / "dune-project").is_file()
+        or (
+            (directory / "HEAD").is_file()
+            and ((directory / "objects").is_dir() or (directory / "commondir").is_file())
+        )
+    )
+
+
+def judge(
+    entry: Path, record: dict[str, Any], *, cutoff: float, in_use: list[Path], apply: bool
+) -> bool:
+    """Decide one entry and fill [record]. True when it was touched within
+    the retention, the only case where something inside it can still be old."""
+    try:
+        size, newest, repos = tree_facts(entry)
+        record["allocated_bytes"] = size
+        if newest > cutoff:
+            record["result"] = "skipped"
+            record["reason"] = "touched within retention"
+            return True
+        if any(path == entry or path.is_relative_to(entry) for path in in_use):
+            record["result"] = "skipped"
+            record["reason"] = "live process uses it"
+            return False
+        reason = next(
+            (found for repo in repos if (found := keep_reason(repo, entry)) is not None),
+            None,
+        )
+    except Unreadable as error:
+        record["result"] = "skipped"
+        record["reason"] = str(error)
+        return False
+    if reason is not None:
+        record["result"] = "skipped"
+        record["reason"] = reason
+        return False
+    if not apply:
+        record["result"] = "would remove"
+        return False
+    try:
+        if entry.is_dir():
+            shutil.rmtree(entry)
+        else:
+            entry.unlink()
+        record["result"] = "removed"
+    except OSError as error:
+        record["result"] = "failed"
+        record["reason"] = str(error)[-ERROR_TAIL_CHARS:]
+    return False
+
+
+def sweep_inside(
+    container: Path,
+    records: list[dict[str, Any]],
+    *,
+    root: Path,
+    cutoff: float,
+    in_use: list[Path],
+    apply: bool,
+) -> None:
+    """The old subdirectories of a container touched within the retention.
+
+    A Keeper that keeps writing notes into one directory keeps that whole
+    directory young; the old copies beside the notes would otherwise never
+    go. Only subdirectories are judged here: files, dot entries and symlinks
+    inside stay. A young subdirectory that is not a unit is entered in turn.
+    Only subdirectories that were old get a record, so the report does not
+    list every young directory on the way down.
+    """
+    try:
+        children = sorted(container.iterdir(), key=lambda path: path.name)
+    except OSError as error:
+        records.append(
+            {
+                "name": str(container.relative_to(root)),
+                "result": "skipped",
+                "reason": f"list: {error}"[-ERROR_TAIL_CHARS:],
+            }
+        )
+        return
+    for child in children:
+        if child.name.startswith(".") or child.is_symlink() or not child.is_dir():
+            continue
+        record: dict[str, Any] = {"name": str(child.relative_to(root))}
+        if judge(child, record, cutoff=cutoff, in_use=in_use, apply=apply):
+            if not is_unit(child):
+                sweep_inside(child, records, root=root, cutoff=cutoff, in_use=in_use, apply=apply)
+            continue
+        records.append(record)
+
+
 def sweep(
     root: Path, retention_sec: float, apply: bool, *, proc: Path = Path("/proc"), now: float | None = None
 ) -> dict[str, Any]:
@@ -245,9 +348,10 @@ def sweep(
         report["skip"] = str(error)
         report["free_kib_after"] = report["free_kib_before"]
         return report
+    records: list[dict[str, Any]] = report["entries"]
     for entry in sorted(root.iterdir(), key=lambda path: path.name):
         record: dict[str, Any] = {"name": entry.name}
-        report["entries"].append(record)
+        records.append(record)
         if entry.name.startswith("."):
             # Home and tool state: the Keeper's gh login (.config/gh) and the
             # remote write tool's .masc-write.* temporaries live here.
@@ -258,41 +362,9 @@ def sweep(
             record["result"] = "skipped"
             record["reason"] = "symlink"
             continue
-        try:
-            size, newest, repos = tree_facts(entry)
-            record["allocated_bytes"] = size
-            if newest > cutoff:
-                record["result"] = "skipped"
-                record["reason"] = "touched within retention"
-                continue
-            if any(path == entry or path.is_relative_to(entry) for path in in_use):
-                record["result"] = "skipped"
-                record["reason"] = "live process uses it"
-                continue
-            reason = next(
-                (found for repo in repos if (found := keep_reason(repo, entry)) is not None),
-                None,
-            )
-        except Unreadable as error:
-            record["result"] = "skipped"
-            record["reason"] = str(error)
-            continue
-        if reason is not None:
-            record["result"] = "skipped"
-            record["reason"] = reason
-            continue
-        if not apply:
-            record["result"] = "would remove"
-            continue
-        try:
-            if entry.is_dir():
-                shutil.rmtree(entry)
-            else:
-                entry.unlink()
-            record["result"] = "removed"
-        except OSError as error:
-            record["result"] = "failed"
-            record["reason"] = str(error)[-ERROR_TAIL_CHARS:]
+        young = judge(entry, record, cutoff=cutoff, in_use=in_use, apply=apply)
+        if young and entry.is_dir() and not is_unit(entry):
+            sweep_inside(entry, records, root=root, cutoff=cutoff, in_use=in_use, apply=apply)
     report["free_kib_after"] = free_kib(root)
     return report
 

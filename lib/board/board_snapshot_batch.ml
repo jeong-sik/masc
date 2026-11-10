@@ -4,7 +4,7 @@ type selection = kind list
 
 type payload =
   | Posts_payload of Board_core_persist.posts_snapshot
-  | Comments_payload of string
+  | Comments_payload of Board_core_persist.comments_snapshot
   | Votes_payload of string
   | Reactions_payload of string
 

@@ -1,0 +1,472 @@
+{
+  "schema": "keepers-pulse-followthrough.retained-observations.v1",
+  "source_identity": {
+    "source_commit": "677fe1e84dfee7b5cd9d7c2f1560a9898684bb16",
+    "source_tree": "f288d2f351175c2aeb47ff882af396e85f73011b",
+    "workflow_head": "3d1271ef26b82b604b8f88dd6c126947ee4578bd",
+    "run_id": "42620614284",
+    "run_attempt": "1",
+    "download_checksums_sha256": "becb0e35061712c9f12ae352793bbbffbaa49eed5c44542d789026ef1bf6e3b0",
+    "download_files": {
+      "dependencies.txt": "6d651d7c7483ecb158bc6feae02cea5ab04f4c146498f10e5aea982db662394f",
+      "masc-antigravity-path-hook-macos-arm64": "59727c65ad60440b3d5e2f1fcc0cf3ab7b6415d6aff0b0ec0d239486522d3dbc",
+      "masc-check-runtime-deployment-preflight-macos-arm64": "fea1060a28c8e1a4ae29a7263f14d56ac16b9639bb54c1a6d9d18da7a510970a",
+      "masc-deployment-preflight-helper-macos-arm64": "fe7b7ee635b702778a1878df5d405bdfa6c5b4924575c2f352e4cf23910ce177",
+      "masc-exec-ssh-bootstrap-macos-arm64": "f47fde433f5f5782748435b19857e38292f585b6e94d13e1b00bb119871b9edc",
+      "masc-macos-arm64": "91af708917af22af087273738fd8b182ca8caf669932b879790f2876025b9fc6",
+      "masc-runtime-macos-arm64.tar.gz": "3000dfe4fc7dd453ac9d9795e7b42ecb58d7e3cb96da55a8e26e931c0a2f8703",
+      "masc-tui-macos-arm64": "89770062e34095c17976cf4480048ec6c163650c274ef9c5e8cb5219ecbc1bbb",
+      "probe.json": "79d38eccea58b2ac43d1bdc29b92d629e71cf54d6a498f90803f90acf3554e88",
+      "runtime-provenance.json": "1105da3a46609adae21289a5d7c3e5b6fbf911ad2aba078a1fe120146b775e24",
+      "server-version.txt": "b5514ca3a3adaa881325f3f22f088ed44fc2544ded3532dc89ec6f5f0d6a0020",
+      "ssh-bootstrap-help.txt": "41ef472ad49c017d7e7afc79d2fa391bd68ff256036062f4fdcc978348939b17",
+      "tui-build-commit.txt": "4c044e96f65bd220d0518282a7e4b08549f3229b62254cea0d0c5afd503da815",
+      "tui-version.txt": "b5514ca3a3adaa881325f3f22f088ed44fc2544ded3532dc89ec6f5f0d6a0020"
+    },
+    "staged_build_commits": {
+      "masc": "677fe1e84dfee7b5cd9d7c2f1560a9898684bb16",
+      "masc-tui": "677fe1e84dfee7b5cd9d7c2f1560a9898684bb16"
+    },
+    "staged_binary_sha256": {
+      "masc": "91af708917af22af087273738fd8b182ca8caf669932b879790f2876025b9fc6",
+      "masc-tui": "89770062e34095c17976cf4480048ec6c163650c274ef9c5e8cb5219ecbc1bbb",
+      "masc-deployment-preflight-helper": "fe7b7ee635b702778a1878df5d405bdfa6c5b4924575c2f352e4cf23910ce177",
+      "masc-exec-ssh-bootstrap": "f47fde433f5f5782748435b19857e38292f585b6e94d13e1b00bb119871b9edc",
+      "masc-antigravity-path-hook": "59727c65ad60440b3d5e2f1fcc0cf3ab7b6415d6aff0b0ec0d239486522d3dbc",
+      "masc-check-runtime-deployment-preflight": "fea1060a28c8e1a4ae29a7263f14d56ac16b9639bb54c1a6d9d18da7a510970a"
+    }
+  },
+  "artifact": {
+    "id": 13677536296,
+    "zip_sha256": "652b244a66753ed44fb0e5e1e8d7cf5727a995137d599564b768f8806ae58a3b",
+    "zip_bytes": 186655616
+  },
+  "reference_original_digest_record": {
+    "document_sha256": "d313cab8bcf284b379e69c8b8dc9a9ea15df023842a9dc41944749a540acc370",
+    "image_sha256": "0a36ee68f98ae4acb70c2ffa46f89f837aa551e321faee04a51f3bae7d6351db"
+  },
+  "runs": [
+    {
+      "size": "120x35",
+      "original_manifest_sha256": "fb5d53904fb601f2a915cddb9a1f7de0395c492bb2e01ba96f1e97daac17acc1",
+      "runner_source_sha256": "9d9c04d2b7db896ac1219b7e668667381b24f188ef2286713b017e52f7929e0e",
+      "capture_started_at_utc": "2026-11-09T13:24:51.214464+00:00",
+      "capture_finished_at_utc": "2026-11-09T13:26:19.779747+00:00",
+      "capture_failure": null,
+      "live_preferences_unchanged": true,
+      "live_preferences_start_sha256": "f89270f2a5e4e0aa14b365cbd6bfd4289e64bc2d5a51d57125cbf44251ebb23c",
+      "live_preferences_finish_sha256": "f89270f2a5e4e0aa14b365cbd6bfd4289e64bc2d5a51d57125cbf44251ebb23c",
+      "selected_base_preferences_unchanged": true,
+      "private_configuration_matches": {
+        "matches_expected_private_config": true,
+        "matches_expected_private_base": true,
+        "matches_expected_proxy_port": true,
+        "TERM": "xterm-256color"
+      },
+      "post_put_patch_delete_forwarded": false,
+      "fault_enabled_at_finish": false,
+      "navigation_actions": [
+        {
+          "keys": [
+            "3"
+          ],
+          "at_utc": "2026-11-09T13:25:11.192432+00:00"
+        },
+        {
+          "keys": [
+            "v",
+            "v",
+            "v",
+            "v",
+            "v"
+          ],
+          "at_utc": "2026-11-09T13:25:24.830610+00:00"
+        },
+        {
+          "keys": [
+            "W"
+          ],
+          "at_utc": "2026-11-09T13:25:25.610169+00:00"
+        },
+        {
+          "keys": [
+            "Escape",
+            "Home",
+            "Down",
+            "Down",
+            "Enter"
+          ],
+          "at_utc": "2026-11-09T13:25:47.106046+00:00"
+        },
+        {
+          "manual_fault_enabled": true,
+          "previously_enabled": false,
+          "exact_path": "/api/v1/dashboard/keeper-memory-health",
+          "at_utc": "2026-11-09T13:26:01.127932+00:00"
+        },
+        {
+          "keys": [
+            "R"
+          ],
+          "at_utc": "2026-11-09T13:26:01.128047+00:00"
+        },
+        {
+          "manual_fault_enabled": false,
+          "previously_enabled": true,
+          "exact_path": "/api/v1/dashboard/keeper-memory-health",
+          "at_utc": "2026-11-09T13:26:18.588878+00:00"
+        },
+        {
+          "keys": [
+            "q"
+          ],
+          "at_utc": "2026-11-09T13:26:18.589009+00:00"
+        }
+      ],
+      "memory_health_requests": [
+        {
+          "method": "GET",
+          "path": "/api/v1/dashboard/keeper-memory-health",
+          "status": 200,
+          "at_utc": "2026-11-09T13:25:11.243699+00:00",
+          "body_observation": {
+            "file": "native-memory-health-read-0001.json",
+            "wire_sha256": "5909b5b1a89ecd64cececf79e5480dbcfa5ceaac7a0c721f5cdf695ea885223a",
+            "sanitized_sha256": "5909b5b1a89ecd64cececf79e5480dbcfa5ceaac7a0c721f5cdf695ea885223a",
+            "status": 200,
+            "completed_at_utc": "2026-11-09T13:25:11.246212+00:00"
+          }
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/dashboard/keeper-memory-health",
+          "status": null,
+          "at_utc": "2026-11-09T13:26:01.321469+00:00",
+          "fault": "explicit-memory-health-connection-disconnect",
+          "upstream_contacted": false,
+          "http_response_written": false
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/dashboard/keeper-memory-health",
+          "status": null,
+          "at_utc": "2026-11-09T13:26:03.349248+00:00",
+          "fault": "explicit-memory-health-connection-disconnect",
+          "upstream_contacted": false,
+          "http_response_written": false
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/dashboard/keeper-memory-health",
+          "status": null,
+          "at_utc": "2026-11-09T13:26:07.366720+00:00",
+          "fault": "explicit-memory-health-connection-disconnect",
+          "upstream_contacted": false,
+          "http_response_written": false
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/dashboard/keeper-memory-health",
+          "status": null,
+          "at_utc": "2026-11-09T13:26:15.398068+00:00",
+          "fault": "explicit-memory-health-connection-disconnect",
+          "upstream_contacted": false,
+          "http_response_written": false
+        }
+      ],
+      "native_memory_health_receipts": [
+        {
+          "file": "native-memory-health-read-0001.json",
+          "wire_sha256": "5909b5b1a89ecd64cececf79e5480dbcfa5ceaac7a0c721f5cdf695ea885223a",
+          "sanitized_sha256": "5909b5b1a89ecd64cececf79e5480dbcfa5ceaac7a0c721f5cdf695ea885223a",
+          "status": 200,
+          "completed_at_utc": "2026-11-09T13:25:11.246212+00:00"
+        }
+      ],
+      "captures": [
+        {
+          "size": "120x35",
+          "requested_view": "list",
+          "requested_role": "plain-auto-memory",
+          "at_utc": "2026-11-09T13:25:24.830279+00:00",
+          "navigation_action_count": 1,
+          "files": {
+            "followthrough-120x35-list-diagnostic-plain-auto-memory.txt": "e16aac3c73148c13ce70ce0e233b9362ac91e3c1555e4079050b7a1726762013",
+            "followthrough-120x35-list-diagnostic-plain-auto-memory.ansi": "d177531e380293bf3d868f567accaf0318a615a87bdf0e8b6748f7c15ee34bd2"
+          },
+          "manual_panel_review": "root read actual text frame; panels and clipping described in README"
+        },
+        {
+          "size": "120x35",
+          "requested_view": "age",
+          "requested_role": "age",
+          "at_utc": "2026-11-09T13:25:25.609872+00:00",
+          "navigation_action_count": 2,
+          "files": {
+            "followthrough-120x35-age-diagnostic-age.txt": "9ed490b3a7690b2c1f59a289df6cbfa450351af93229cb03d244b787a137c0cc",
+            "followthrough-120x35-age-diagnostic-age.ansi": "ba68379fffc53fb85510cefcdfadacfeb8f8f1823613ba5353aa787b5e7f2537"
+          },
+          "manual_panel_review": "root read actual text frame; panels and clipping described in README"
+        },
+        {
+          "size": "120x35",
+          "requested_view": "age",
+          "requested_role": "world-dock",
+          "at_utc": "2026-11-09T13:25:26.400652+00:00",
+          "navigation_action_count": 3,
+          "files": {
+            "followthrough-120x35-age-diagnostic-world-dock.txt": "18ad02798bfdd63db3e5c09a99d8ee90d40ae2582b5dde656ee574c7ef37f3ba",
+            "followthrough-120x35-age-diagnostic-world-dock.ansi": "0c6d0911de963185c42a4b97ba5fdd145e923d527d3f9d7e2e9f9856ce1e0b47"
+          },
+          "manual_panel_review": "root read actual text frame; panels and clipping described in README"
+        },
+        {
+          "size": "120x35",
+          "requested_view": "age",
+          "requested_role": "story-read-error",
+          "at_utc": "2026-11-09T13:26:05.314552+00:00",
+          "navigation_action_count": 6,
+          "files": {
+            "followthrough-120x35-age-diagnostic-story-read-error.txt": "7f24017c49d465b25d24721f828e9ec1b3eb974aa6beb1f1d5820ceb6f1f337d",
+            "followthrough-120x35-age-diagnostic-story-read-error.ansi": "d485f471c730594eaf9de53a11de001b79dcff8e97cbf32800d82c4fb46da4eb"
+          },
+          "manual_panel_review": "root read actual text frame; panels and clipping described in README"
+        }
+      ],
+      "controller_exit_status_reported_by_capture_agent": 0,
+      "TUI_child_exit_status": "not separately recorded; q sent and dedicated tmux reaped"
+    },
+    {
+      "size": "80x24",
+      "original_manifest_sha256": "79f9ab611ef9d646ae6f21f30f31bcf60444dcc1edbfbd2fd5b3bd62c6b099f1",
+      "runner_source_sha256": "9d9c04d2b7db896ac1219b7e668667381b24f188ef2286713b017e52f7929e0e",
+      "capture_started_at_utc": "2026-11-09T13:26:39.813527+00:00",
+      "capture_finished_at_utc": "2026-11-09T13:28:24.275812+00:00",
+      "capture_failure": null,
+      "live_preferences_unchanged": true,
+      "live_preferences_start_sha256": "f89270f2a5e4e0aa14b365cbd6bfd4289e64bc2d5a51d57125cbf44251ebb23c",
+      "live_preferences_finish_sha256": "f89270f2a5e4e0aa14b365cbd6bfd4289e64bc2d5a51d57125cbf44251ebb23c",
+      "selected_base_preferences_unchanged": true,
+      "private_configuration_matches": {
+        "matches_expected_private_config": true,
+        "matches_expected_private_base": true,
+        "matches_expected_proxy_port": true,
+        "TERM": "xterm-256color"
+      },
+      "post_put_patch_delete_forwarded": false,
+      "fault_enabled_at_finish": false,
+      "navigation_actions": [
+        {
+          "keys": [
+            "3"
+          ],
+          "at_utc": "2026-11-09T13:27:18.911484+00:00"
+        },
+        {
+          "keys": [
+            "v",
+            "v",
+            "v",
+            "v",
+            "v"
+          ],
+          "at_utc": "2026-11-09T13:27:31.487337+00:00"
+        },
+        {
+          "keys": [
+            "W"
+          ],
+          "at_utc": "2026-11-09T13:27:32.273949+00:00"
+        },
+        {
+          "keys": [
+            "Escape",
+            "Home",
+            "Down",
+            "Down",
+            "Enter"
+          ],
+          "at_utc": "2026-11-09T13:27:50.384164+00:00"
+        },
+        {
+          "manual_fault_enabled": true,
+          "previously_enabled": false,
+          "exact_path": "/api/v1/dashboard/keeper-memory-health",
+          "at_utc": "2026-11-09T13:27:59.791346+00:00"
+        },
+        {
+          "keys": [
+            "R"
+          ],
+          "at_utc": "2026-11-09T13:27:59.792160+00:00"
+        },
+        {
+          "manual_fault_enabled": false,
+          "previously_enabled": true,
+          "exact_path": "/api/v1/dashboard/keeper-memory-health",
+          "at_utc": "2026-11-09T13:28:23.216710+00:00"
+        },
+        {
+          "keys": [
+            "q"
+          ],
+          "at_utc": "2026-11-09T13:28:23.216973+00:00"
+        }
+      ],
+      "memory_health_requests": [
+        {
+          "method": "GET",
+          "path": "/api/v1/dashboard/keeper-memory-health",
+          "status": 200,
+          "at_utc": "2026-11-09T13:27:19.045736+00:00",
+          "body_observation": {
+            "file": "native-memory-health-read-0001.json",
+            "wire_sha256": "7ad5fad703bb57a1c5c25dcb7b7676ed5a4a64667a64ecf0e4ded9a123ddeab7",
+            "sanitized_sha256": "7ad5fad703bb57a1c5c25dcb7b7676ed5a4a64667a64ecf0e4ded9a123ddeab7",
+            "status": 200,
+            "completed_at_utc": "2026-11-09T13:27:19.051302+00:00"
+          }
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/dashboard/keeper-memory-health",
+          "status": null,
+          "at_utc": "2026-11-09T13:27:59.832917+00:00",
+          "fault": "explicit-memory-health-connection-disconnect",
+          "upstream_contacted": false,
+          "http_response_written": false
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/dashboard/keeper-memory-health",
+          "status": null,
+          "at_utc": "2026-11-09T13:28:01.871218+00:00",
+          "fault": "explicit-memory-health-connection-disconnect",
+          "upstream_contacted": false,
+          "http_response_written": false
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/dashboard/keeper-memory-health",
+          "status": null,
+          "at_utc": "2026-11-09T13:28:05.902370+00:00",
+          "fault": "explicit-memory-health-connection-disconnect",
+          "upstream_contacted": false,
+          "http_response_written": false
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/dashboard/keeper-memory-health",
+          "status": null,
+          "at_utc": "2026-11-09T13:28:13.930350+00:00",
+          "fault": "explicit-memory-health-connection-disconnect",
+          "upstream_contacted": false,
+          "http_response_written": false
+        }
+      ],
+      "native_memory_health_receipts": [
+        {
+          "file": "native-memory-health-read-0001.json",
+          "wire_sha256": "7ad5fad703bb57a1c5c25dcb7b7676ed5a4a64667a64ecf0e4ded9a123ddeab7",
+          "sanitized_sha256": "7ad5fad703bb57a1c5c25dcb7b7676ed5a4a64667a64ecf0e4ded9a123ddeab7",
+          "status": 200,
+          "completed_at_utc": "2026-11-09T13:27:19.051302+00:00"
+        }
+      ],
+      "captures": [
+        {
+          "size": "80x24",
+          "requested_view": "list",
+          "requested_role": "plain-auto-memory",
+          "at_utc": "2026-11-09T13:27:31.487140+00:00",
+          "navigation_action_count": 1,
+          "files": {
+            "followthrough-80x24-list-diagnostic-plain-auto-memory.txt": "dd2e1047c213c4e4c25094e4447a202a7222561ff878a35056b4a604fd963bf7",
+            "followthrough-80x24-list-diagnostic-plain-auto-memory.ansi": "e3ac8dad76a3f2564133768ef47fddf8262bbd5079bdd71b27b41892b48824cf"
+          },
+          "manual_panel_review": "root read actual text frame; panels and clipping described in README"
+        },
+        {
+          "size": "80x24",
+          "requested_view": "age",
+          "requested_role": "age",
+          "at_utc": "2026-11-09T13:27:32.273527+00:00",
+          "navigation_action_count": 2,
+          "files": {
+            "followthrough-80x24-age-diagnostic-age.txt": "036ac42328d069d40a7efc0f29471399117a539d0cfbc6717ce76db6706baf54",
+            "followthrough-80x24-age-diagnostic-age.ansi": "e2645b2bb19ff0ce48ba0584711f4defa55b922bbc398b230005aaf077648ae9"
+          },
+          "manual_panel_review": "root read actual text frame; panels and clipping described in README"
+        },
+        {
+          "size": "80x24",
+          "requested_view": "age",
+          "requested_role": "world-dock",
+          "at_utc": "2026-11-09T13:27:33.239955+00:00",
+          "navigation_action_count": 3,
+          "files": {
+            "followthrough-80x24-age-diagnostic-world-dock.txt": "a0cd57105c8038d4346c5fd5ed7d9ce9fa66b60c3cddb6b1a963416bb1bf8225",
+            "followthrough-80x24-age-diagnostic-world-dock.ansi": "1410490666103e5b01084d82d0a9872d4f7d314214c8a89da3486b89d8805a13"
+          },
+          "manual_panel_review": "root read actual text frame; panels and clipping described in README"
+        },
+        {
+          "size": "80x24",
+          "requested_view": "age",
+          "requested_role": "story-read-error",
+          "at_utc": "2026-11-09T13:28:03.946380+00:00",
+          "navigation_action_count": 6,
+          "files": {
+            "followthrough-80x24-age-diagnostic-story-read-error.txt": "f70b2d7b45adc9b28a4b85af779fe1d7cd2d0c8d17dad07966f506dc5ae04207",
+            "followthrough-80x24-age-diagnostic-story-read-error.ansi": "20a303f5bb5069b1c31a6086e67495f5be197d7dd955c91d23a581a181dc0de1"
+          },
+          "manual_panel_review": "root read actual text frame; panels and clipping described in README"
+        }
+      ],
+      "controller_exit_status_reported_by_capture_agent": 0,
+      "TUI_child_exit_status": "not separately recorded; q sent and dedicated tmux reaped"
+    }
+  ],
+  "derivative_policy": "Selected already-sanitized frames and native memory-health body receipts copied byte-for-byte; compact JSON selects original observations, not an original manifest. Native wire and derivative hashes retain their distinct meanings.",
+  "not_proven": [
+    "current a96ec36 native runtime",
+    "provider recovery",
+    "production fleet behavior",
+    "full regression",
+    "installation",
+    "deployment"
+  ],
+  "owned_server_cleanup": {
+    "at_utc": "2026-11-09T13:28:43.763708+00:00",
+    "pid": 53551,
+    "owned_process_absent": true,
+    "native_exit_status_if_observed": 0,
+    "dedicated_tmux_cleanup_attempted": true,
+    "sigkill_sent": false,
+    "original_receipt_sha256": "bcd7090ecf2367837c2bdac4a93c24bb098553e1b113a282324ad837535071b5"
+  },
+  "focused_verification": {
+    "workflow": "Test",
+    "run_id": 42625266384,
+    "head": "a96ec36efb3f7d3248f0d4e85d07644f08a1a2f4",
+    "ref": "feat/keepers-world-absence",
+    "conclusion": "success",
+    "TARGET_SUITES": "test_workspace_memory_ledger,test_workspace_memory_ledger_view,test_tui_decode_workspace_memory,test_tui_memory_world,test_tui_keeper_axis",
+    "tests_by_suite": {
+      "test_workspace_memory_ledger": 18,
+      "test_workspace_memory_ledger_view": 7,
+      "test_tui_decode_workspace_memory": 7,
+      "test_tui_memory_world": 6,
+      "test_tui_keeper_axis": 5
+    },
+    "total_tests": 43,
+    "full_regression": false
+  },
+  "type_verification": {
+    "workflow": "PR type-check (dune build @check)",
+    "run_id": 42625243301,
+    "head": "a96ec36efb3f7d3248f0d4e85d07644f08a1a2f4",
+    "ref": "feat/keepers-world-absence",
+    "conclusion": "success"
+  }
+}

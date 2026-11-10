@@ -8,27 +8,36 @@ let sub_board_to_yojson = Board_sub_board_json.sub_board_to_yojson
 let parse_sub_board_members = Board_sub_board_json.parse_sub_board_members
 let sub_board_of_yojson = Board_sub_board_json.sub_board_of_yojson
 
-let sub_boards_jsonl_unlocked store =
+type snapshot_change =
+  | Replace_sub_board of sub_board
+  | Remove_sub_board of Sub_board_id.t
+
+let changed_sub_boards_jsonl_unlocked store change =
   let buf = Buffer.create 1024 in
   Hashtbl.iter
-    (fun _ (sb : sub_board) ->
-       Buffer.add_string buf (Yojson.Safe.to_string (sub_board_to_yojson sb));
-       Buffer.add_char buf '\n')
+    (fun id (sb : sub_board) ->
+       let row = match change with
+         | Replace_sub_board updated ->
+           Some (if String.equal id (Sub_board_id.to_string updated.id) then updated else sb)
+         | Remove_sub_board removed ->
+           if String.equal id (Sub_board_id.to_string removed) then None else Some sb
+       in
+       Option.iter (fun row ->
+         Buffer.add_string buf (Yojson.Safe.to_string (sub_board_to_yojson row));
+         Buffer.add_char buf '\n') row)
     store.sub_boards;
   Buffer.contents buf
 ;;
 
 let save_sub_boards_jsonl store content =
   try
-    match ensure_masc_dir ~where:"rewrite_sub_boards" store with
-    | Error _ -> () (* The checked gate already recorded the ordinary refusal. *)
-    | Ok () ->
-      let path = sub_boards_path store in
-      match Fs_compat.save_file_atomic path content with
-      | Ok () -> ()
-      | Error msg -> record_persist_error ~where:"rewrite_sub_boards" msg
+    let* () = ensure_masc_dir ~where:"rewrite_sub_boards" store in
+    let path = sub_boards_path store in
+    match Fs_compat.save_file_atomic path content with
+    | Ok () -> Ok ()
+    | Error msg -> persist_io_error ~where:"rewrite_sub_boards" msg
   with
-  | Sys_error msg -> record_persist_error ~where:"rewrite_sub_boards" msg
+  | Sys_error msg -> persist_io_error ~where:"rewrite_sub_boards" msg
 ;;
 
 let append_sub_board store (sb : sub_board) =
@@ -164,14 +173,16 @@ let update_sub_board
                ; access = Option.value ~default:sb.access access
                }
              in
-             Hashtbl.replace store.sub_boards (Sub_board_id.to_string sb.id) updated;
-             Ok (updated, sub_boards_jsonl_unlocked store)))
+             Ok (updated, changed_sub_boards_jsonl_unlocked store
+               (Replace_sub_board updated))))
     in
     match result with
     | Error _ as error -> error
     | Ok (updated, content) ->
-      save_sub_boards_jsonl store content;
-      Ok updated)
+      let* () = save_sub_boards_jsonl store content in
+      with_lock store (fun () ->
+        Hashtbl.replace store.sub_boards (Sub_board_id.to_string updated.id) updated;
+        Ok updated))
 ;;
 
 let get_sub_board store ~sub_board_id : (sub_board, board_error) Result.t =
@@ -208,26 +219,33 @@ let delete_sub_board store ~sub_board_id : (unit, board_error) Result.t =
       with_lock store (fun () ->
       let resolved_opt =
         match Hashtbl.find_opt store.sub_boards sub_board_id with
-        | Some sb -> Some (sub_board_id, sb.slug)
+        | Some sb -> Some sb
         | None ->
           (match Hashtbl.find_opt store.sub_boards_by_slug sub_board_id with
            | None -> None
            | Some id ->
              (match Hashtbl.find_opt store.sub_boards id with
-              | Some sb -> Some (id, sb.slug)
+              | Some sb -> Some sb
               | None -> None))
       in
       match resolved_opt with
       | None ->
         Error (Invalid_id (Printf.sprintf "Sub-board not found: %s" sub_board_id))
-      | Some (id, slug) ->
-        Hashtbl.remove store.sub_boards id;
-        Hashtbl.remove store.sub_boards_by_slug slug;
+      | Some sb ->
+        Ok (sb, changed_sub_boards_jsonl_unlocked store (Remove_sub_board sb.id)))
+    in
+    match snapshot with
+    | Error _ as e -> e
+    | Ok (sb, content) ->
+      let* () = save_sub_boards_jsonl store content in
+      with_lock store (fun () ->
+        Hashtbl.remove store.sub_boards (Sub_board_id.to_string sb.id);
+        Hashtbl.remove store.sub_boards_by_slug sb.slug;
         (* Orphan policy: clear hearth on posts that belonged to this sub-board *)
         Hashtbl.iter
           (fun _ (post : post) ->
              match post.hearth with
-             | Some h when String.equal h slug ->
+             | Some h when String.equal h sb.slug ->
                let updated = { post with hearth = None } in
                Hashtbl.replace store.posts (Post_id.to_string post.id) updated;
                store.dirty_posts <- true;
@@ -235,12 +253,5 @@ let delete_sub_board store ~sub_board_id : (unit, board_error) Result.t =
              | _ -> ())
           store.posts;
         invalidate_post_caches store;
-        let content = sub_boards_jsonl_unlocked store in
-        Ok content)
-    in
-    match snapshot with
-    | Error _ as e -> e
-    | Ok content ->
-      save_sub_boards_jsonl store content;
-      Ok ())
+        Ok ()))
 ;;

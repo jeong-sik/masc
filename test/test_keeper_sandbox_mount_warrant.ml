@@ -78,15 +78,23 @@ let test_mounts_are_warranted () =
     Setup.docker_workspace_state_mounts
 ;;
 
-(* The stores a keeper is given, and nothing beside them. These four subtrees
-   are the measured read demand that is deliberately refused; naming them here
-   is what keeps the refusal a decision rather than an omission. *)
+(* The stores a keeper is given, and nothing beside them. The first four
+   subtrees are the measured read demand that is deliberately refused; the
+   account homes of a multi-account process hold the login of every person
+   (plan D3c-1). Naming them here is what keeps the refusal a decision
+   rather than an omission. *)
 let refused =
   [ "official-clients", "the provider CLI's private HOME: OAuth token, keychain"
   ; "traces", "writes authorization headers verbatim"
   ; "tool_blobs", "arbitrary tool payloads, no schema MASC owns"
   ; "logs", "flat and shared, so no per-keeper boundary exists"
+  ; Runtime_account_home_layout.accounts_dir, "the account home and login of every person"
   ]
+;;
+
+(* A mount refuses a subtree when it is the subtree or lies inside it. *)
+let inside subtree rel_path =
+  String.equal rel_path subtree || String.starts_with ~prefix:(subtree ^ "/") rel_path
 ;;
 
 let test_refused_subtrees_are_not_mounted () =
@@ -98,7 +106,7 @@ let test_refused_subtrees_are_not_mounted () =
               bool
               (Printf.sprintf "%s stays out (%s)" subtree reason)
               false
-              (String.equal rel_path subtree))
+              (inside subtree rel_path))
          Setup.docker_workspace_state_mounts)
     refused
 ;;

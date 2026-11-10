@@ -322,6 +322,31 @@ val run_heartbeat_loop :
   wakeup:bool Atomic.t -> cadence_sleeping:bool Atomic.t -> unit
 
 module For_testing : sig
+  val select_hitl_resolutions :
+    base_path:string -> keeper_name:string ->
+    stimuli:Keeper_event_queue.stimulus list ->
+    peek:(unit -> Keeper_event_queue.hitl_resolution option) ->
+    (Keeper_hitl_resolution_batch.t, Keeper_hitl_resolution_batch.join_error) result
+  (** Revalidate the actual admitted HITL vector before effects. A contextual
+      peek supplies at most one input only when that vector is empty. *)
+
+  val settle_hitl_continuations :
+    base_path:string -> keeper_name:string ->
+    cycle_outcome:Keeper_heartbeat_loop_cycle.cycle_outcome option ->
+    resolutions:Keeper_event_queue.hitl_resolution list ->
+    (Keeper_event_queue.hitl_resolution *
+     (Keeper_approval_queue.continuation_projection_result, string) result) list
+  (** Project each input's own settlement. A non-cancellation failure is
+      returned beside that input and does not skip independent siblings. *)
+
+  val hitl_selection_has_recorded_continuation :
+    projections:(Keeper_event_queue.hitl_resolution *
+      (Keeper_approval_queue.continuation_projection_result, string) result) list ->
+    Keeper_event_queue_state.pending_selection -> bool
+  (** HITL requires its own successful projection. Other source families keep
+      their existing disposition policy; queue terminalization still checks
+      the original pending selection and incarnation. *)
+
   val record_replay_owned_turn_started_reactions :
     ctx:'a context -> keeper_name:string -> Keeper_event_queue.stimulus list -> unit
   (** Production turn-entry recording for the admitted source batch. *)

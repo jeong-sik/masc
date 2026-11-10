@@ -1,0 +1,35 @@
+ Operations  ▸Work  Keepers  Features & plugins  Workspace  System
+                                 │
+  Goals                     (2)  │  MASC Work  ▸Goals  Task Review  Task Verdicts  [paused]
+  ─────────────────────────────  │ ────────────────────────────────────────────────────────────────────────────────────
+ ▸ paused · … 증거를 쉽게 읽는다 │   Actions: [c] Request completion   [x] Drop   [o] Reopen   [p] Pause   [r] Resume
+   blocked ·…sed reading example │   [b] Block   [u] Unblock
+                                 │   [ Goal and criterion ]
+                                 │   Title: 공유 화면에서 요청과 증거를 쉽게 읽는다
+                                 │   Metric: 세 기능의 원래 요청과 현재 상태를 읽고, 근거가 없는 상태를 완료로 오해하지
+                                 │           않는다. 긴 성공 조건도 상세에서 끝까지 읽을 수 있어야 한다. Original
+                                 │           English criterion content remains unchanged by the UI language.
+                                 │   Target: 3 / 3
+                                 │   Next: paused - [r] restores the prior state; linked Tasks continue independently
+                                 │
+                                 │   [ Proof and measurement ]
+                                 │   no verdict on the ledger
+                                 │   Actual measurement not recorded
+                                 │   Linked Tasks: 0/2 done (separate from the measurement)
+                                 │   Criterion review not recorded
+                                 │   Criterion feasibility review; completion proof and human confirmation remain
+                                 │   separate.
+                                 │
+                                 │   [ Linked Tasks ]
+                                 │   Open tasks: 2
+                                 │   task-surface-claimed  claimed · Preserve evidence when a read fails
+                                 │   task-surface-todo  todo · 요청의 핵심을 먼저 보여주기
+                                 │
+                                 │   [ Candle payout record [z:read] ]
+                                 │   Last observed config: off
+                                 │   Ledger: file absent; earlier history is not observed
+                                 │   [lines 1-24/40]
+                                 │
+  ACTION NEEDED 1 · keeper_memory_execution:addon_unattached  z:Candle  j/k:move  Left / Esc:back  q:quit  …?
+ Schedule may be out of date
+ › to quietreader   (i to write)

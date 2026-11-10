@@ -256,7 +256,7 @@ let prepare_agent_setup
       ?on_tool_stream_observation
       ?on_tool_result_ready
       ?(tool_result_commit_policy = Keeper_hooks_agent_core.Require_commit)
-      ?hitl_resolution
+      ?hitl_resolutions
       ?on_gate_deferred
       ?composition_plan_index
       ()
@@ -540,7 +540,7 @@ let prepare_agent_setup
     ; project_for_runtime = project_bundle_for_runtime
     ; cleanup = keeper_tools_cleanup
     ; terminal_effect_state
-    ; gate_replay_delivery
+    ; gate_replay_inputs
     ; turn_sandbox_factory
     }
     =
@@ -553,7 +553,7 @@ let prepare_agent_setup
       ~capability_surface
       ?continuation_channel
       ~gate_context
-      ?hitl_resolution
+      ?hitl_resolutions
       ?on_gate_deferred
       ~identity_surface:
         { Keeper_tools_agent_core.offered =
@@ -579,10 +579,24 @@ let prepare_agent_setup
               { field = "tool input_schema"; detail = Tool_bridge.schema_error_to_string error }))
   in
   let replay_delivery =
-    Option.map
-      (fun { Keeper_tools_agent_core.approval_id; outcome } ->
-         approval_id, outcome)
-      gate_replay_delivery
+    List.find_map
+      (fun input ->
+         match Keeper_gate_replay.input_replay_execution input with
+         | Some { outcome = Keeper_gate_replay.Repair_required _ as outcome; _ } ->
+           Some ((Keeper_gate_replay.input_resolution input).approval_id, outcome)
+         | None
+         | Some { outcome = (Keeper_gate_replay.Not_applicable | Applied _
+                            | Applied_with_warning _ | Failed _ | Indeterminate _
+                            | Resolution_absent _); _ } -> None)
+      gate_replay_inputs
+  in
+  let cleanup_after_gate_setup_failure () =
+    try keeper_tools_cleanup () with
+    | Eio.Cancel.Cancelled _ as exn -> raise exn
+    | exn ->
+      Log.Keeper.error
+        "keeper tool cleanup after Gate setup failure raised: %s"
+        (Printexc.to_string exn)
   in
   let* () =
     match replay_delivery with
@@ -590,12 +604,7 @@ let prepare_agent_setup
         ( approval_id
         , Keeper_gate_replay.Repair_required
             { operation; stage; detail } ) ->
-      (try keeper_tools_cleanup () with
-       | Eio.Cancel.Cancelled _ as exn -> raise exn
-       | exn ->
-         Log.Keeper.error
-           "keeper tool cleanup after Gate replay repair failure raised: %s"
-           (Printexc.to_string exn));
+      cleanup_after_gate_setup_failure ();
       Error
         (Keeper_internal_error.core_error_of_masc_internal_error
            (Keeper_internal_error.Gate_replay_repair_required
@@ -655,8 +664,7 @@ let prepare_agent_setup
     Keeper_gate_replay.compose_model_message
       ~base_path:config.base_path
       ~user_message
-      ~hitl_resolution
-      ~replay_delivery
+      ~inputs:gate_replay_inputs
   in
   let user_message = model_message.Keeper_gate_replay.text in
   let prompt_metrics =

@@ -135,8 +135,10 @@ let render_system_log_detail (state : state) seq =
    the other, so the mark and the surface could disagree and nothing would say
    so. The keys leave with it: the Activity footer projects from the key table,
    which names 1 / 2 there, and no other surface puts its keys in its title. *)
-let activity_tabs ~on_logs : (string * bool * surface) list =
-  [ ("Events", not on_logs, Acting); ("Logs", on_logs, System_logs) ]
+let activity_tabs ~ko ~on_logs : (string * bool * surface) list =
+  [ ((if ko then "활동" else "Events"), not on_logs, Acting)
+  ; ((if ko then "로그" else "Logs"), on_logs, System_logs)
+  ]
 
 (* The title row of both readings: the title, the strip, then what the reading
    on screen holds after a dot, and the clock and the badge last. The count used
@@ -151,9 +153,13 @@ let activity_tabs ~on_logs : (string * bool * surface) list =
    reading's pieces are left out whole from the end, and the strip draws in
    what they leave. The strip is whole or it is not drawn, and a strip that
    draws nothing takes its separator with it. *)
-let activity_heading ~cols ~on_logs ~reading ~tail =
-  let tabs = activity_tabs ~on_logs in
-  let title = screen_title " MASC Activity" in
+let activity_heading ~ko ~cols ~on_logs ~reading ~tail =
+  let tabs = activity_tabs ~ko ~on_logs in
+  let title =
+    screen_title
+      (if on_logs then (if ko then " MASC 로그" else " MASC Logs")
+       else if ko then " MASC 활동" else " MASC Activity")
+  in
   let before = title ^ "  " and dot = "  \xc2\xb7" in
   let cells text =
     Message_layout.display_width (Masc_tui_theme.strip_sgr text)
@@ -239,13 +245,13 @@ let render_system_logs (state : state) =
           | None -> title_missing_reading ~error:None
           | Some _ -> ""
         in
-        activity_heading ~cols ~on_logs:true
+        activity_heading ~ko:(state.ui_language = Lang_ko) ~cols ~on_logs:true
           ~reading:(("  " ^ reading_note) :: set_filter_pieces)
           ~tail:(timestamp ^ "  " ^ system_logs_status state)
     | Some snapshot ->
         (* [total] counts what the ring has seen, not what this page holds.
            Showing both keeps "300 of 774273" from reading as "300 exist". *)
-        activity_heading ~cols ~on_logs:true
+        activity_heading ~ko:(state.ui_language = Lang_ko) ~cols ~on_logs:true
           ~reading:
             (Printf.sprintf "  (%d of %d)" total_entries snapshot.sys_total
              :: (match snapshot.sys_latest_seq with
@@ -811,7 +817,7 @@ let render_acting (state : state) =
      other. The scope name left with it: the row under the feed says it,
      "scope turns · …", one line down. *)
   let header =
-    activity_heading ~cols ~on_logs:false
+    activity_heading ~ko:(state.ui_language = Lang_ko) ~cols ~on_logs:false
       ~reading:
         [ "  "
           ^ Masc_tui_types.activity_title_reading ~observer:state.observer

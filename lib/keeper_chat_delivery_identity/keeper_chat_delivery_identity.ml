@@ -30,6 +30,11 @@ module Request_id = struct
   let equal = String.equal
 end
 
+type approval_input_binding =
+  { approval_id : Request_id.t
+  ; input_fingerprint : string
+  }
+
 type delivery_key =
   | Operation of Request_id.t
   | Operation_checkpoint of { operation_id : Request_id.t; checkpoint : Keeper_checkpoint_ref.t }
@@ -38,6 +43,7 @@ type delivery_key =
   | Workspace_message of Request_id.t
   | Connector_message of Request_id.t
   | Approval_lifecycle of Request_id.t
+  | Autonomous_turn of Ids.Turn_ref.t
 
 type transcript_slot =
   | Accepted_user
@@ -53,6 +59,7 @@ type transcript_slot =
   | Approval_replay
   | Approval_replay_correction
   | Approval_continuation
+  | Autonomous_input_binding of approval_input_binding list
 
 type delivery_provenance =
   { delivery_key : delivery_key
@@ -60,6 +67,32 @@ type delivery_provenance =
   }
 
 open Result.Syntax
+
+let approval_input_binding ~approval_id ~input_fingerprint =
+  let* approval_id = Request_id.of_string approval_id in
+  match Agent_core_sha256.consistent_of_hex_opt input_fingerprint with
+  | Some digest when String.equal input_fingerprint (Agent_core_sha256.to_hex digest) ->
+    Ok { approval_id; input_fingerprint }
+  | Some _ | None -> Error "approval input fingerprint must be canonical SHA-256"
+;;
+
+let validate_approval_input_bindings inputs =
+  let module Approval_ids = Set.Make (String) in
+  let rec inspect seen = function
+    | [] -> Ok ()
+    | input :: rest ->
+      let id = Request_id.to_string input.approval_id in
+      if Approval_ids.mem id seen then Error "duplicate approval in autonomous input binding"
+      else inspect (Approval_ids.add id seen) rest in
+  match inputs with
+  | [] -> Error "autonomous input binding must not be empty"
+  | _ :: _ -> inspect Approval_ids.empty inputs
+;;
+
+let approval_input_bindings_equal = List.equal (fun left right ->
+  Request_id.equal left.approval_id right.approval_id
+  && String.equal left.input_fingerprint right.input_fingerprint)
+;;
 
 let assoc_field name fields =
   match List.assoc_opt name fields with
@@ -123,6 +156,8 @@ let delivery_key_to_yojson = function
       [ "kind", `String "approval_lifecycle"
       ; "approval_id", `String (Request_id.to_string approval_id)
       ]
+  | Autonomous_turn turn_ref ->
+    `Assoc [ "kind", `String "autonomous_turn"; "turn_ref", Ids.Turn_ref.to_yojson turn_ref ]
 ;;
 
 let delivery_key_of_yojson = function
@@ -196,6 +231,12 @@ let delivery_key_of_yojson = function
        let* approval_id = string_field "approval_id" fields in
        let* approval_id = Request_id.of_string approval_id in
        Ok (Approval_lifecycle approval_id)
+     | "autonomous_turn" ->
+       let* () = validate_fields ~context:"autonomous turn delivery identity"
+         ~expected:[ "kind"; "turn_ref" ] fields in
+       let* turn_ref = assoc_field "turn_ref" fields in
+       let* turn_ref = Ids.Turn_ref.of_yojson turn_ref in
+       Ok (Autonomous_turn turn_ref)
      | _ -> Error (Printf.sprintf "unsupported delivery identity kind %S" kind))
   | _ -> Error "delivery identity must be an object"
 ;;
@@ -213,8 +254,11 @@ let delivery_key_equal left right =
   | Workspace_message left, Workspace_message right -> Request_id.equal left right
   | Connector_message left, Connector_message right -> Request_id.equal left right
   | Approval_lifecycle left, Approval_lifecycle right -> Request_id.equal left right
-  | (Operation _ | Operation_checkpoint _ | Operation_native _ | Fusion_run _ | Workspace_message _ | Connector_message _ | Approval_lifecycle _),
-    (Operation _ | Operation_checkpoint _ | Operation_native _ | Fusion_run _ | Workspace_message _ | Connector_message _ | Approval_lifecycle _) ->
+  | Autonomous_turn left, Autonomous_turn right -> Ids.Turn_ref.equal left right
+  | (Operation _ | Operation_checkpoint _ | Operation_native _ | Fusion_run _
+    | Workspace_message _ | Connector_message _ | Approval_lifecycle _ | Autonomous_turn _),
+    (Operation _ | Operation_checkpoint _ | Operation_native _ | Fusion_run _
+    | Workspace_message _ | Connector_message _ | Approval_lifecycle _ | Autonomous_turn _) ->
     false
 ;;
 
@@ -228,6 +272,11 @@ let transcript_slot_to_yojson = function
   | Approval_replay_correction ->
     `Assoc [ "kind", `String "approval_replay_correction" ]
   | Approval_continuation -> `Assoc [ "kind", `String "approval_continuation" ]
+  | Autonomous_input_binding inputs ->
+    `Assoc [ "kind", `String "autonomous_input_binding"
+           ; "inputs", `List (List.map (fun input ->
+               `Assoc [ "approval_id", `String (Request_id.to_string input.approval_id)
+                      ; "input_fingerprint", `String input.input_fingerprint ]) inputs) ]
   | Tool_call { execution_id; ordinal } ->
     `Assoc
       [ "kind", `String "tool_call"
@@ -309,6 +358,25 @@ let transcript_slot_of_yojson = function
            fields
        in
        Ok Approval_continuation
+     | "autonomous_input_binding" ->
+       let* () = validate_fields ~context:"autonomous input binding slot"
+         ~expected:[ "kind"; "inputs" ] fields in
+       let* inputs = assoc_field "inputs" fields in
+       let rec decode reversed = function
+         | [] -> Ok (List.rev reversed)
+         | `Assoc fields :: rest ->
+           let* () = validate_fields ~context:"approval input binding"
+             ~expected:[ "approval_id"; "input_fingerprint" ] fields in
+           let* approval_id = string_field "approval_id" fields in
+           let* input_fingerprint = string_field "input_fingerprint" fields in
+           let* input = approval_input_binding ~approval_id ~input_fingerprint in
+           decode (input :: reversed) rest
+         | _ :: _ -> Error "approval input binding must be an object" in
+       let* inputs = match inputs with
+         | `List values -> decode [] values
+         | _ -> Error "autonomous input bindings must be an array" in
+       let* () = validate_approval_input_bindings inputs in
+       Ok (Autonomous_input_binding inputs)
      | "tool_call" ->
        let* () =
          validate_fields
@@ -351,16 +419,21 @@ let transcript_slot_equal left right =
     Ids.Execution_id.equal left.execution_id right.execution_id
     && Int.equal left.ordinal right.ordinal
   | Tool_delivery left, Tool_delivery right -> Int.equal left.ordinal right.ordinal
-  | Accepted_user, (Settled_failure | Terminal_result | Tool_call _ | Tool_delivery _ | Approval_request | Approval_resolution | Approval_replay | Approval_replay_correction | Approval_continuation)
-  | Settled_failure, (Accepted_user | Terminal_result | Tool_call _ | Tool_delivery _ | Approval_request | Approval_resolution | Approval_replay | Approval_replay_correction | Approval_continuation)
-  | Terminal_result, (Settled_failure | Accepted_user | Tool_call _ | Tool_delivery _ | Approval_request | Approval_resolution | Approval_replay | Approval_replay_correction | Approval_continuation)
-  | Tool_call _, (Settled_failure | Accepted_user | Terminal_result | Tool_delivery _ | Approval_request | Approval_resolution | Approval_replay | Approval_replay_correction | Approval_continuation)
-  | Tool_delivery _, (Settled_failure | Accepted_user | Terminal_result | Tool_call _ | Approval_request | Approval_resolution | Approval_replay | Approval_replay_correction | Approval_continuation)
-  | Approval_request, (Settled_failure | Accepted_user | Terminal_result | Tool_call _ | Tool_delivery _ | Approval_resolution | Approval_replay | Approval_replay_correction | Approval_continuation)
-  | Approval_resolution, (Settled_failure | Accepted_user | Terminal_result | Tool_call _ | Tool_delivery _ | Approval_request | Approval_replay | Approval_replay_correction | Approval_continuation)
-  | Approval_replay, (Settled_failure | Accepted_user | Terminal_result | Tool_call _ | Tool_delivery _ | Approval_request | Approval_resolution | Approval_replay_correction | Approval_continuation)
-  | Approval_replay_correction, (Settled_failure | Accepted_user | Terminal_result | Tool_call _ | Tool_delivery _ | Approval_request | Approval_resolution | Approval_replay | Approval_continuation)
-  | Approval_continuation, (Settled_failure | Accepted_user | Terminal_result | Tool_call _ | Tool_delivery _ | Approval_request | Approval_resolution | Approval_replay | Approval_replay_correction) -> false
+  | Autonomous_input_binding left, Autonomous_input_binding right ->
+    approval_input_bindings_equal left right
+  | (Accepted_user | Terminal_result | Settled_failure | Tool_call _ | Tool_delivery _
+    | Approval_request | Approval_resolution | Approval_replay | Approval_replay_correction
+    | Approval_continuation | Autonomous_input_binding _),
+    (Accepted_user | Terminal_result | Settled_failure | Tool_call _ | Tool_delivery _
+    | Approval_request | Approval_resolution | Approval_replay | Approval_replay_correction
+    | Approval_continuation | Autonomous_input_binding _) -> false
+;;
+
+let transcript_slot_is_internal = function
+  | Autonomous_input_binding _ -> true
+  | Accepted_user | Terminal_result | Settled_failure | Tool_call _ | Tool_delivery _
+  | Approval_request | Approval_resolution | Approval_replay | Approval_replay_correction
+  | Approval_continuation -> false
 ;;
 
 let delivery_provenance_fields { delivery_key; transcript_slot } =

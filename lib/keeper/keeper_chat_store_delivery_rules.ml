@@ -38,7 +38,8 @@ let validate_delivery_execution_identity ~execution_id
         | Keeper_chat_delivery_identity.Approval_resolution
         | Keeper_chat_delivery_identity.Approval_replay
         | Keeper_chat_delivery_identity.Approval_replay_correction
-        | Keeper_chat_delivery_identity.Approval_continuation ),
+        | Keeper_chat_delivery_identity.Approval_continuation
+        | Keeper_chat_delivery_identity.Autonomous_input_binding _ ),
         None ->
           Ok ()
       | ( Keeper_chat_delivery_identity.Accepted_user
@@ -48,7 +49,8 @@ let validate_delivery_execution_identity ~execution_id
         | Keeper_chat_delivery_identity.Approval_resolution
         | Keeper_chat_delivery_identity.Approval_replay
         | Keeper_chat_delivery_identity.Approval_replay_correction
-        | Keeper_chat_delivery_identity.Approval_continuation ),
+        | Keeper_chat_delivery_identity.Approval_continuation
+        | Keeper_chat_delivery_identity.Autonomous_input_binding _ ),
         Some _ ->
           Error "non-tool transcript slot forbids row execution_id")
 ;;
@@ -63,7 +65,8 @@ let validate_delivery_role ~role_label
     | Keeper_chat_delivery_identity.Approval_resolution
     | Keeper_chat_delivery_identity.Approval_replay
     | Keeper_chat_delivery_identity.Approval_replay_correction
-    | Keeper_chat_delivery_identity.Approval_continuation ),
+    | Keeper_chat_delivery_identity.Approval_continuation
+    | Keeper_chat_delivery_identity.Autonomous_input_binding _ ),
     "system"
   | ( Keeper_chat_delivery_identity.Tool_call _
     | Keeper_chat_delivery_identity.Tool_delivery _ ),
@@ -75,6 +78,8 @@ let validate_delivery_role ~role_label
     Error "settled_failure transcript slot requires a request_failure row"
   | Keeper_chat_delivery_identity.Terminal_result, _ ->
     Error "terminal_result transcript slot requires an assistant or request_failure row"
+  | Keeper_chat_delivery_identity.Autonomous_input_binding _, _ ->
+    Error "autonomous input binding requires a system row"
   | ( Keeper_chat_delivery_identity.Approval_request
     | Keeper_chat_delivery_identity.Approval_resolution
     | Keeper_chat_delivery_identity.Approval_replay
@@ -86,4 +91,60 @@ let validate_delivery_role ~role_label
     | Keeper_chat_delivery_identity.Tool_delivery _ ),
     _ ->
     Error "tool transcript slot requires a tool row"
+;;
+
+let validate_delivery_slot_owner
+    (provenance : Keeper_chat_delivery_identity.delivery_provenance) =
+  match provenance.delivery_key, provenance.transcript_slot with
+  | Keeper_chat_delivery_identity.Autonomous_turn _,
+      (Autonomous_input_binding _ | Tool_call _ | Tool_delivery _) -> Ok ()
+  | Keeper_chat_delivery_identity.Autonomous_turn _,
+      (Accepted_user | Terminal_result | Settled_failure | Approval_request | Approval_resolution
+       | Approval_replay | Approval_replay_correction | Approval_continuation) ->
+    Error "autonomous turn owns only its input binding and tool rows"
+  | (Keeper_chat_delivery_identity.Operation _ | Operation_checkpoint _ | Operation_native _
+     | Fusion_run _ | Workspace_message _ | Connector_message _ | Approval_lifecycle _),
+      Autonomous_input_binding _ -> Error "autonomous input binding belongs to an autonomous turn"
+  | (Keeper_chat_delivery_identity.Operation _ | Operation_checkpoint _ | Operation_native _
+     | Fusion_run _ | Workspace_message _ | Connector_message _ | Approval_lifecycle _),
+      (Accepted_user | Terminal_result | Settled_failure | Tool_call _ | Tool_delivery _
+       | Approval_request | Approval_resolution | Approval_replay | Approval_replay_correction
+       | Approval_continuation) -> Ok ()
+;;
+
+let validate_delivery_fields
+    ~(provenance : Keeper_chat_delivery_identity.delivery_provenance) fields =
+  let open Result.Syntax in
+  let* () = validate_delivery_slot_owner provenance in
+  let role_label = match List.assoc_opt "role" fields with
+    | Some (`String label) -> label
+    | Some _ | None -> "" in
+  let* () = validate_delivery_role ~role_label provenance in
+  let* execution_id = execution_id_of_fields fields in
+  let* () = validate_delivery_execution_identity ~execution_id (Some provenance) in
+  match provenance.delivery_key with
+  | Keeper_chat_delivery_identity.Autonomous_turn owner ->
+    let* turn_ref = match List.assoc_opt "turn_ref" fields with
+      | None -> Error "autonomous transcript row requires its turn_ref"
+      | Some value -> Ids.Turn_ref.of_yojson value in
+    let* () = if Ids.Turn_ref.equal owner turn_ref then Ok ()
+      else Error "autonomous transcript row turn_ref conflicts with its owner" in
+    (match provenance.transcript_slot with
+     | Keeper_chat_delivery_identity.Autonomous_input_binding inputs ->
+       let* () = Keeper_chat_delivery_identity.validate_approval_input_bindings inputs in
+       (match List.assoc_opt "content" fields with
+        | Some (`String "") -> Ok ()
+        | Some _ | None -> Error "autonomous input binding must have empty content")
+     | Keeper_chat_delivery_identity.Tool_call _ | Tool_delivery _ -> Ok ()
+     | Keeper_chat_delivery_identity.Accepted_user | Terminal_result | Settled_failure
+     | Approval_request | Approval_resolution | Approval_replay | Approval_replay_correction
+     | Approval_continuation -> Error "autonomous turn owns only its input binding and tool rows")
+  | Keeper_chat_delivery_identity.Operation _ | Operation_checkpoint _ | Operation_native _
+  | Fusion_run _ | Workspace_message _ | Connector_message _ | Approval_lifecycle _ ->
+    match provenance.transcript_slot with
+    | Keeper_chat_delivery_identity.Autonomous_input_binding _ ->
+      Error "autonomous input binding belongs to an autonomous turn"
+    | Keeper_chat_delivery_identity.Accepted_user | Terminal_result | Settled_failure
+    | Tool_call _ | Tool_delivery _ | Approval_request | Approval_resolution | Approval_replay
+    | Approval_replay_correction | Approval_continuation -> Ok ()
 ;;

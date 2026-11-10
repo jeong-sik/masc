@@ -13,7 +13,7 @@ val make_tool_bundle_for_capability_surface
   -> ?clock:float Eio.Time.clock_ty Eio.Resource.t
   -> ?continuation_channel:Keeper_continuation_channel.t
   -> ?gate_context:Keeper_gate_causal_context.t
-  -> ?hitl_resolution:Keeper_event_queue.hitl_resolution
+  -> ?hitl_resolutions:Keeper_hitl_resolution_batch.t
   -> ?on_gate_deferred:(string -> unit)
   -> ?identity_surface:Keeper_tools_agent_core.attached_surface
   -> ?composition_plan_index:Keeper_tool_composition_plan_index.t
@@ -63,7 +63,7 @@ module For_testing : sig
     -> ?clock:float Eio.Time.clock_ty Eio.Resource.t
     -> ?continuation_channel:Keeper_continuation_channel.t
     -> ?gate_context:Keeper_gate_causal_context.t
-  -> ?hitl_resolution:Keeper_event_queue.hitl_resolution
+    -> ?hitl_resolutions:Keeper_hitl_resolution_batch.t
     -> ?on_gate_deferred:(string -> unit)
     -> ?capability_surface:Keeper_capability_surface.t
     -> ?skill_catalog:Keeper_skill_catalog.t
@@ -108,7 +108,7 @@ module For_testing : sig
       that handler's failure with this effect disposition ends the turn. *)
 
   val initial_terminal_effect_state :
-    Keeper_tools_agent_core.gate_replay_delivery option ->
+    Keeper_gate_replay.resolution_input list ->
     Keeper_tools_agent_core.terminal_effect_state
 
   val terminal_externalization_failure :

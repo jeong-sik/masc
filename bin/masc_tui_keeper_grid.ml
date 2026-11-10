@@ -1,4 +1,3 @@
-module Decode = Masc.Tui_decode
 module Pulse = Masc.Keeper_turn_pulse
 module Mark = Masc_tui_keeper_mark
 
@@ -61,50 +60,15 @@ let window_label ~slots = window_of_minutes (slots * slot_minutes)
 
 let slot_label = window_label ~slots:1
 
-type verdict =
+type verdict = Masc_tui_keeper_verdict.t =
   | Failing of { resting : bool }
   | Paused
   | Recovered
   | Sound
   | Other
 
-let recovery_slots = 24
-
-let failed_slot ({ tally = { failed; rested; ok = _ }; starts_at = _ } : Pulse.slot) =
-  failed + rested > 0
-
-let failed_recently ~now = function
-  | None -> false
-  | Some ({ slots; known_since = _ } : Pulse.pulse) ->
-      let since = Pulse.slot_start now - ((recovery_slots - 1) * Pulse.slot_seconds) in
-      List.exists (fun (slot : Pulse.slot) -> slot.starts_at >= since && failed_slot slot) slots
-;;
-
-let resting (runtime : Decode.keeper_runtime) =
-  match runtime.kr_runtime_path_rest with
-  | Ok (Some (Decode.Path_rest_resting _)) -> true
-  | Ok (Some (Decode.Path_rest_serving _)) | Ok None | Error _ -> false
-;;
-
-let verdict ~now = function
-  | None -> Other
-  | Some (runtime : Decode.keeper_runtime) -> (
-      let health = Decode.keeper_health_reading runtime.kr_health in
-      match
-        Masc_tui_keeper_pulse.failing_of_health ~health ~failing_since:runtime.kr_failing_since
-      with
-      | Masc_tui_keeper_pulse.Failing_since _ | Masc_tui_keeper_pulse.Failing_unrecorded ->
-          Failing { resting = resting runtime }
-      | Masc_tui_keeper_pulse.Not_failing ->
-          if runtime.kr_paused then Paused
-          else (
-            match health with
-            | Decode.Health_running | Decode.Health_idle ->
-                if failed_recently ~now runtime.kr_recent_turns then Recovered else Sound
-            (* [failing_of_health] reads a failing health as failing, so only
-               offline reaches here. *)
-            | Decode.Health_offline | Decode.Health_failing -> Other))
-;;
+let recovery_slots = Masc_tui_keeper_verdict.recovery_slots
+let verdict = Masc_tui_keeper_verdict.of_runtime
 
 let marks_recovery = function
   | Masc_tui_keeper_list_model.By_cause -> true

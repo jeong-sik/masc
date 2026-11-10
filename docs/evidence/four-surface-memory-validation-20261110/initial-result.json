@@ -1,0 +1,45 @@
+{
+  "schema": "masc.targeted-memory-validation.v1",
+  "phase": "initial",
+  "workflow": "Test",
+  "workflow_path": ".github/workflows/test.yml",
+  "run_id": 42647821236,
+  "run_url": "https://github.com/jeong-sik/masc/actions/runs/42647821236",
+  "job_id": 129265767319,
+  "event": "workflow_dispatch",
+  "attempt": 1,
+  "head": "671cf26047fdb8a8785bff33355972b3a1f03d66",
+  "ref": "fix/tui-memory-reading-20261110",
+  "minimal": true,
+  "status": "completed",
+  "conclusion": "failure",
+  "suites": [
+    {
+      "name": "test_tui_decode",
+      "cases": 407,
+      "conclusion": "success"
+    },
+    {
+      "name": "test_tui_render_memory",
+      "cases": 14,
+      "passed": 11,
+      "failed": 3,
+      "conclusion": "failure",
+      "failed_cases": [
+        "memory_overflow_selection",
+        "Category rail keeps counts, click targets and frame width",
+        "Category rail wrapped range exposure and overflow"
+      ]
+    }
+  ],
+  "new_state_search_case": "passed",
+  "failure_scope": "Existing row-count/category-panel wording and layout assertions",
+  "not_claimed": [
+    "Full CI",
+    "native TUI execution",
+    "Enter event dispatch",
+    "installation",
+    "merge",
+    "deployment"
+  ]
+}

@@ -246,25 +246,7 @@ let field_cell ~unmeasured ~measured = function
    Memory pane and in the memory view's ● column. The wire words name code
    paths ("not_committed"); these say what happened, in a word that fits the
    column. *)
-let pass_word = function
-  | Tui_decode_memory_health.Pass_off -> "switched off"
-  | Tui_decode_memory_health.Pass_lane_unconfigured -> "no lane set"
-  | Tui_decode_memory_health.Pass_drained -> "caught up"
-  | Tui_decode_memory_health.Pass_yielded_to_waiting_unit -> "yielded"
-  | Tui_decode_memory_health.Pass_pending pending ->
-    (match pending with
-     | Masc.Keeper_librarian_pending.Worker { wait = Capacity; _ } -> "queue full"
-     | Worker { wait = Processing; _ } -> "processing"
-     | Worker { wait = (Outcome_unknown | Missing_after_dispatch); _ } -> "check outcome"
-     | Worker { wait = Unreachable; _ } -> "worker offline"
-     | Worker { wait = Journal_recheck; _ } -> "rechecking"
-     | Publication _ -> "settling"
-     | Basis_changed _ -> "source changed"
-     | Message_floor _ -> "reading parts"
-     | Local_failure _ -> "recovery failed")
-  | Tui_decode_memory_health.Pass_not_committed -> "saved none"
-  | Tui_decode_memory_health.Pass_stopped _ -> "stopped"
-  | Tui_decode_memory_health.Pass_raised _ -> "crashed"
+let pass_word ending = Masc_tui_types.memory_pass_text ~ko:false ending
 ;;
 
 (* A pass that broke is a failure. A pass that saved nothing, or a librarian

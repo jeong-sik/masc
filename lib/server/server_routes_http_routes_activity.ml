@@ -797,8 +797,14 @@ let handle_board_context_inference_request
       | Ok { post_id; target_keeper } -> (
           match Board_dispatch.get_post_and_comments ~reader ~post_id with
           | Error err ->
+              let status = match err with
+                | Board.Io_error _ -> `Service_unavailable
+                | Board.Invalid_id _ | Board.Post_not_found _ | Board.Comment_not_found _
+                | Board.Validation_error _ | Board.Already_voted _ | Board.Already_exists _
+                | Board.Unauthorized _ | Board.Recipient_lookup_failed _ -> `Bad_request
+              in
               respond_board_context_inference_error request reqd
-                ~status:`Bad_request
+                ~status
                 ~message:(Board_tool.board_error_to_string err)
           | Ok (post, comments) -> (
               let config = Mcp_server.workspace_config state in

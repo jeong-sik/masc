@@ -186,15 +186,15 @@ let repository_git_observation (state : state) (repo : Tui_decode.repository) =
 
 let repository_preview_lines state ~width (repo : Tui_decode.repository) =
   let fields =
-    [ ui_text state ~ko:"작업 경로" ~en:"Checkout", repo.rp_resolved_local_path
-    ; ui_text state ~ko:"기준 브랜치 (등록)" ~en:"Default branch (registered)", repo.rp_default_branch
-    ; "Keeper", (match repo.rp_keepers with
-        | [] -> ui_text state ~ko:"미배정" ~en:"Unassigned"
-        | names -> String.concat ", " names)
-    ; ui_text state ~ko:"Git 관측" ~en:"Git observation",
+    [ ui_text state ~ko:"Git 관측" ~en:"Git observation",
         (match repository_git_observation state repo with
          | Some reading -> reading
-         | None -> ui_text state ~ko:"d:현재 Git 읽기" ~en:"d:read current Git")
+         | None -> ui_text state ~ko:"미관측 · d:조회" ~en:"Not observed · d:read")
+    ; ui_text state ~ko:"키퍼" ~en:"Keeper", (match repo.rp_keepers with
+        | [] -> ui_text state ~ko:"미배정" ~en:"Unassigned"
+        | names -> String.concat ", " names)
+    ; ui_text state ~ko:"기준 브랜치 (등록)" ~en:"Default branch (registered)", repo.rp_default_branch
+    ; ui_text state ~ko:"작업 경로" ~en:"Checkout", repo.rp_resolved_local_path
     ] in
   let failure = match Tui_decode.repository_status_reason repo.rp_status with
     | None -> []
@@ -207,32 +207,29 @@ let repository_preview_lines state ~width (repo : Tui_decode.repository) =
 let repository_inventory_intro (state : state) ~width =
   let observation = match state.repositories, state.repositories_error,
       state.repositories_inflight with
-    | Some _, Some _, _ -> ui_text state
-        ~ko:"등록 경로·배정 · 마지막 목록, 갱신 실패"
-        ~en:"Registered paths and assignments · retained inventory, refresh failed"
-    | None, Some _, _ -> ui_text state ~ko:"저장소 목록을 읽지 못했습니다"
-        ~en:"Repository inventory unavailable"
-    | Some _, None, true -> ui_text state ~ko:"등록 경로·배정 · 이전 목록, 다시 읽는 중"
-        ~en:"Registered paths and assignments · previous inventory, refreshing"
-    | Some _, None, false -> ui_text state ~ko:"등록 경로·배정 관측 · 현재 Git과 기록된 쓰기는 별도 조회"
-        ~en:"Registered paths and assignments · current Git and recorded writes are separate reads"
-    | None, None, true -> ui_text state ~ko:"등록된 저장소 목록 조회 중"
-        ~en:"Reading registered repositories"
-    | None, None, false -> ui_text state ~ko:"등록된 저장소 목록 미관측"
-        ~en:"Repository inventory not observed" in
+    | Some _, Some _, _ -> [Theme.warn (), ui_text state
+        ~ko:"이전 저장소 목록 · 갱신 실패"
+        ~en:"Previous repository list · refresh failed"]
+    | None, Some _, _ -> [Theme.bad (), ui_text state ~ko:"저장소 목록 조회 실패"
+        ~en:"Repository list unavailable"]
+    | Some _, None, true -> [Theme.recede (), ui_text state ~ko:"저장소 목록 갱신 중 · 이전 관측"
+        ~en:"Refreshing repositories · previous observation"]
+    | Some _, None, false -> []
+    | None, None, true -> [Theme.recede (), ui_text state ~ko:"저장소 목록 조회 중"
+        ~en:"Reading repositories"]
+    | None, None, false -> [Theme.recede (), ui_text state ~ko:"저장소 목록 미조회"
+        ~en:"Repositories not read"] in
   let actions = match state.repositories with
     | Some {rs_repositories = _ :: _; _} -> ui_text state
-        ~ko:"d:현재 Git  H:쓰기 이력  Enter:파일 탐색  v:전체 경로·배정"
-        ~en:"d:current Git  H:recorded writes  Enter:files  v:complete context"
+        ~ko:"Enter:파일  d:Git  H:쓰기 이력  v:전체 정보"
+        ~en:"Enter:files  d:Git  H:write history  v:details"
     | Some {rs_repositories = []; _} | None -> ui_text state
         ~ko:"a:저장소 등록  r:다시 읽기" ~en:"a:register repository  r:read again" in
-  [ui_text state ~ko:"어느 checkout의 결과인가" ~en:"Which checkout produced this result?";
-   observation; actions]
-  |> List.mapi (fun index text ->
+  (observation @ [Theme.recede (), actions])
+  |> List.concat_map (fun (style, text) ->
       Message_layout.wrap_words ~max_cells:(max 1 (width - 2)) text
       |> List.map (fun line -> "  "
-          ^ (if index = 0 then Ansi.bold else Theme.recede ()) ^ line ^ Ansi.reset))
-  |> List.concat
+          ^ style ^ line ^ Ansi.reset))
 
 type repository_studio_geometry = {
   rsg_intro : string list;
@@ -251,12 +248,12 @@ let repository_studio_geometry (state : state) ~cols ~budget ~cursor =
     | None -> [] | Some snapshot -> snapshot.rs_repositories in
   let shown = List.length repos in
   let width = max 1 (framed_inner_width cols) in
-  (* Four rows preserve a panel's edges, heading and one selected row. On a
+  (* Three rows preserve a panel's edges and one selected row. On a
      shorter viewport the list remains unboxed and still keeps its cursor. *)
   let intro = repository_inventory_intro state ~width
-    |> List.take (max 0 (budget - 4)) in
+    |> List.take (max 0 (budget - 3)) in
   let panel_budget = max 1 (budget - List.length intro) in
-  let boxed = panel_budget >= 4 in
+  let boxed = panel_budget >= 3 in
   let named_width = Message_layout.display_width "Repository · status" + 4 in
   let detail_minimum = Message_layout.display_width "d:Git  H:history  Enter:files" + 4 in
   let split = boxed && width >= named_width + detail_minimum + 2 && panel_budget >= 8 in
@@ -278,8 +275,7 @@ let repository_studio_geometry (state : state) ~cols ~budget ~cursor =
   let detail = match selected with
     | Some repo when context_budget > 0 ->
         studio_panel ~width:detail_width
-          ~title:(ui_text state ~ko:"선택한 checkout · " ~en:"Selected checkout · "
-                  ^ Terminal_text.single_line repo.rp_name)
+          ~title:(Terminal_text.single_line repo.rp_name)
           ~lines:(visible_context @ if show_notice then
             [ui_text state ~ko:"v:전체 경로·배정 읽기" ~en:"v:read complete context"] else [])
     | Some _ | None -> [] in
@@ -289,7 +285,7 @@ let repository_studio_geometry (state : state) ~cols ~budget ~cursor =
         [Theme.bad () ^ Message_layout.truncate_middle (max 1 (list_width - 4))
            (Terminal_text.single_line reason) ^ Ansi.reset]
     | Some _ | None -> [] in
-  let room = max 1 (list_budget - (if boxed then 3 else 0) - List.length errors) in
+  let room = max 1 (list_budget - (if boxed then 2 else 0) - List.length errors) in
   let overflowing = shown > room && room > 1 in
   let content_height = max 1 (min shown (room - if overflowing then 1 else 0)) in
   {rsg_intro = intro; rsg_split = split; rsg_boxed = boxed;
@@ -315,7 +311,7 @@ let render_repository_list (state : state) =
   in
   surface_chrome ~overflow:Paged_by_cursor state ~terminal_rows ~cols ~surface_key:"repositories"
     ~title
-    ~hints:(Masc_tui_keys.footer_hints ~has_rows:(shown > 0)
+    ~hints:(Masc_tui_keys.footer_hints ~lang:state.ui_language ~has_rows:(shown > 0)
               ~has_reading:(Option.is_some (selected_repository_reading state))
               state.view)
     ~body:(fun ~budget c ->
@@ -357,10 +353,7 @@ let render_repository_list (state : state) =
               else line)
       in
       let lines =
-        (if geometry.rsg_boxed then
-          [Theme.recede () ^ ui_text state ~ko:"저장소 · 등록 상태" ~en:"Repository · registered state" ^ Ansi.reset]
-         else [])
-        @ geometry.rsg_errors @ lines
+        geometry.rsg_errors @ lines
         @ (if geometry.rsg_overflowing then
              ["repositories " ^ Masc_tui_scroll.window_text ~scroll ~height:content_height shown]
            else []) in

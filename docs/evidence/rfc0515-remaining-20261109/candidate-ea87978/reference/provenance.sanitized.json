@@ -1,0 +1,37 @@
+{
+  "kind": "original-mock-buildScreen-render",
+  "source_path": "docs/research/2026-11-06-keepers-list-past-now-next-preview.html",
+  "source_sha256": "a9bcd2547d7af043f9bcade8c72863a834514828c1ede88d20107d4cc0e0f5c9",
+  "created_at_utc": "2026-11-09T10:52:14.950Z",
+  "usable_list_columns": [
+    118,
+    78
+  ],
+  "terminal_columns_corresponding": [
+    120,
+    80
+  ],
+  "rows": [
+    35,
+    24
+  ],
+  "browser_task_space": 41,
+  "files": {
+    "cause-118x35.txt": "3674eaeb2d4015019b8a1a7a2eef75edc9f8b4be07670a04a86ec1a85767b057",
+    "time-118x35.txt": "6a360fcfea5ff691d9ebf52345b21bf7c482492b069e546d61187426bd53c6df",
+    "memory-118x35.txt": "0f761e9611ec881ab65383b239f78d49db0f4a9ebf0f7eb879f60517cca64aa5",
+    "memory-118x35-world-dock.txt": "0362927f2f7015a0d4cffcfef23206b439d2827da2dbdefa656ec4fd5263234f",
+    "age-118x35.txt": "576864919daf099292cb9a9ae8971be1b59c73585f5f8600485a6ed06bc79307",
+    "age-118x35-world-dock.txt": "cfe882a847283ee9fd01095de911539ea0413ffb1222f94a13326008e5ef29a2",
+    "matrix-118x35.txt": "46645794fe59149db867025913cbef84d20b58914c01a36bb7d86ba836850de5",
+    "wall-118x35.txt": "9325811a51ec7cce52f1bab3b956d33b5dfd702fc9e833a954b01b3af309500e",
+    "cause-78x24.txt": "103d22387bc93705eba6b24c5c3d4158a35fd74ab890a43b7d3904447b3a794d",
+    "time-78x24.txt": "f03da06bd9d016ef86620bcdd530e2a7c039206313b8993ab8cd0cc0692e3361",
+    "memory-78x24.txt": "6aa6d775944242870a1cd82df95e63744b7e8473f7bf668e45de49701f95384b",
+    "memory-78x24-world-dock.txt": "9b5bcd4ac2775722c66b3ca5857674fe92314a02451809edcc2967c1d274815d",
+    "age-78x24.txt": "4d22007c3013b02d6c453298aa11f25669403d34316556df738728eadf7c8173",
+    "age-78x24-world-dock.txt": "bc566c5ea34cd4423eafd31ce132f87c1a9d90e7aaa55776d047a423ad17f30a",
+    "matrix-78x24.txt": "bb4670aba999eda1ca4fc7ac97608c35ca0fc2c3757ba25f5fdd81949a550c6a",
+    "wall-78x24.txt": "4623e1bca570443b4cf54c7008854d748804fea9e3659b70637a2e6f3bbdc4a9"
+  }
+}

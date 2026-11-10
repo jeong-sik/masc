@@ -758,10 +758,9 @@ let require_persisted_sources_readable () =
       Board.with_persist_lock store (fun () ->
         let open Result.Syntax in
         let* () = Board.require_posts_source_readable store in
-        Board.with_lock store (fun () ->
-          match store.Board.comments_load_result with
-          | Ok () -> Ok ()
-          | Error detail -> Error (Board.Io_error detail)))
+        Board.require_comments_source_readable store)
+      |> Result.map_error (fun error ->
+          Board.board_error_of_read_error (Board.Read_source_unavailable error))
 
 let get_post_and_comments_unchecked ~post_id =
   let store = backend () in
@@ -769,9 +768,15 @@ let get_post_and_comments_unchecked ~post_id =
       |> Result.map_error Board.board_error_of_read_error
 
 let get_post_and_comments ~reader ~post_id =
-  match get_post_and_comments_unchecked ~post_id with
-  | Ok (post, comments) when Board_access.can_read ~reader post -> Ok (post, comments)
-  | Ok _ -> Error (Board.Post_not_found post_id)
+  let store = backend () in
+  match Board.observe_post_and_comments store ~post_id
+        |> Result.map_error Board.board_error_of_read_error with
+  | Ok (post, observation) ->
+    if not (Board_access.can_read ~reader post) then Error (Board.Post_not_found post_id)
+    else (match observation.completeness with
+      | Board.Source_complete -> Ok (post, observation.comments)
+      | Board.Source_incomplete error ->
+        Error (Board.board_error_of_read_error (Board.Read_source_unavailable error)))
   | Error _ as error -> error
 
 (* One owner for board-operation failure lines. A re-vote is a routine

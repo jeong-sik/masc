@@ -408,7 +408,7 @@ val board_post_detail_json :
   response_format:Server_board_post_response_format.t ->
   post_id:string ->
   unit ->
-  [> `OK | `Not_found | `Bad_request ] * string
+  [> `OK | `Not_found | `Bad_request | `Service_unavailable ] * string
 (** [board_post_detail_json ~voter ~reaction_actor ~response_format ~post_id] returns
     [(status, json_string)] for [GET /api/v1/board/<post_id>].
     When [voter] is supplied, post/comment rows include vote state for
@@ -438,6 +438,7 @@ val board_post_detail_json :
     | Outcome | Status | Body |
     |---|---|---|
     | Post missing | [404 Not Found] | [{"error":"Post not found: <id>"}] |
+    | Required source unavailable | [503 Service Unavailable] | error |
     | Offset past total | [400 Bad Request] | error and code |
     | Found | [200 OK] | per response_format |
 

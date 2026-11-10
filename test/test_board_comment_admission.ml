@@ -119,6 +119,9 @@ let contend path =
   | Error _ -> exit 2
   | Ok _ -> exit 3
 
+let same_inode left right =
+  left.Unix.st_dev = right.Unix.st_dev && left.Unix.st_ino = right.Unix.st_ino
+
 let test_live_readset_locks base =
   let initial = fresh base in
   let _, parent = scoped initial in
@@ -127,8 +130,13 @@ let test_live_readset_locks base =
   let armed = ref false in
   let receipt = Filename.concat base "contenders.txt" in
   let io : Fs_compat.private_jsonl_transaction_io_for_testing = {
-    before_sync_parent = (fun path ->
-      if !armed && String.equal path comments then (
+    before_sync_parent = (fun _ -> ());
+    close_fd = (fun fd ->
+      let stat = Unix.fstat fd in
+      Unix.close fd;
+      (* The data descriptor closes after the actual append. Both source
+         guards and the append's stable sibling lock are still owned here. *)
+      if !armed && Sys.file_exists comments && same_inode stat (Unix.stat comments) then (
         let results = List.map (fun target ->
           let exe = Sys.executable_name in
           let pid = Unix.create_process exe [|exe; "--contend-comment-admission"; target|]
@@ -137,8 +145,7 @@ let test_live_readset_locks base =
           | Unix.WEXITED 0 -> "contended"
           | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ -> "unexpected") targets in
         let output = open_out_bin receipt in
-        output_string output (String.concat "\n" results); close_out output));
-    close = (fun _ fd -> Unix.close fd)
+        output_string output (String.concat "\n" results); close_out output))
   } in
   let first = loaded (Board.create_store_with_comments_io_for_testing ~base_path:base ~io ()) in
   armed := true;
@@ -149,15 +156,20 @@ let test_live_readset_locks base =
 
 let with_parent_cleanup base f =
   let armed = ref false in
-  let path = ref "" in
+  let lock_path = ref None in
   let io : Fs_compat.private_jsonl_transaction_io_for_testing = {
     before_sync_parent = (fun _ -> ());
-    close = (fun closing fd -> Unix.close fd;
-      if !armed && String.equal closing !path then (armed := false; raise Eio.Time.Timeout))
+    close_fd = (fun fd ->
+      let stat = Unix.fstat fd in
+      Unix.close fd;
+      match !lock_path with
+      | Some path when !armed && same_inode stat (Unix.stat path) ->
+        armed := false; raise Eio.Time.Timeout
+      | Some _ | None -> ())
   } in
   let first = loaded (Board.create_store_with_source_io_for_testing ~base_path:base
       ~io:{ posts = Some io } ()) in
-  path := Board.persist_path first;
+  lock_path := Some (Fs_compat.private_jsonl_lock_path (Board.persist_path first));
   f first armed
 
 let expect_timeout f = match f () with

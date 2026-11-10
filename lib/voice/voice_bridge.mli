@@ -45,20 +45,9 @@ type say_voice =
   | Say_has_it
   | Say_lacks_it of { installed : int }  (** how many voices the catalogue has *)
 
-val say_voice_in_catalogue : catalogue_voice list -> voice:string -> say_voice
-
 (** Parse what [espeak-ng --voices] prints. Separate from the asking so a
     recorded answer can be replayed on a machine that has no espeak-ng. *)
 val espeak_catalogue_of_output : string -> catalogue_voice list
-
-(** Whether an espeak-ng catalogue answers to [voice]. espeak-ng's [-v]
-    accepts the voice name with its spaces, the Language column, the
-    parenthesised aliases, and any of these followed by a [+<variant>] suffix
-    (or [+<variant>] alone for the default voice), so a match on any of them,
-    ignoring ASCII case, is installed. Unlike say, espeak-ng refuses an unknown
-    voice itself; this check still runs first so the refusal names the voice
-    asked for and points at the list it can be picked from. *)
-val espeak_voice_in_catalogue : catalogue_voice list -> voice:string -> bool
 
 (** Whether a say or espeak-ng endpoint has every one of [voices], listing its
     voices once however many names are asked. A blank name is [Ok]: the
@@ -273,19 +262,10 @@ val transcribe_audio :
     of {!Voice_config.trigger_margin_db} exported from this module went on
     describing it as a peak margin after the capture had moved to RMS. *)
 
-val db_of_amplitude : float -> float
-(** dBFS for a linear RMS amplitude; [neg_infinity] at zero. *)
-
 val amplitude_of_db : float -> float
 (** The inverse, with [neg_infinity] mapping back to zero. *)
 
 (** {1 Microphone record + transcribe} *)
-
-val recorder_refusal_message : ?device:string -> Process_eio.spawn_refusal -> string
-(** What {!record_and_transcribe} answers when its recorder never started.
-    A missing executable is named with the command that installs it -- a fresh
-    mac has no sox, which carries [rec] -- and every other refusal keeps the
-    runner's own sentence rather than a guessed cause. *)
 
 val measure_noise_floor : agent_id:string -> unit -> float option
 (** One short capture, as long as the configured

@@ -23,6 +23,7 @@
 
 open Alcotest
 module Bridge = Masc.Voice_bridge
+module Capture = Masc.Voice_capture
 
 let capture = Voice_config.default_capture
 let trigger_margin_db = capture.Voice_config.trigger_margin_db
@@ -131,7 +132,7 @@ let approx name expected actual =
 
 let test_db_and_amplitude_round_trip () =
   List.iter
-    (fun db -> approx "round trip" db (Bridge.db_of_amplitude (Bridge.amplitude_of_db db)))
+    (fun db -> approx "round trip" db (Capture.db_of_amplitude (Bridge.amplitude_of_db db)))
     [ -60.0; -37.2; -26.3; -20.2; -6.0 ];
   (* Silence is the case the gate reads most often; it must not produce a
      number that compares as louder than the floor. *)
@@ -139,7 +140,7 @@ let test_db_and_amplitude_round_trip () =
     bool
     "zero amplitude is negative infinity, not a finite level"
     true
-    (Bridge.db_of_amplitude 0.0 = Float.neg_infinity);
+    (Capture.db_of_amplitude 0.0 = Float.neg_infinity);
   approx "and maps back to zero" 0.0 (Bridge.amplitude_of_db Float.neg_infinity)
 ;;
 
@@ -147,7 +148,7 @@ let test_db_and_amplitude_round_trip () =
    scale. Both measured floors are above it, which is why the old threshold
    never fired. *)
 let test_the_old_constant_was_below_both_measured_floors () =
-  let one_percent_db = Bridge.db_of_amplitude 0.01 in
+  let one_percent_db = Capture.db_of_amplitude 0.01 in
   check
     bool
     "1% of full scale is below the quieter measured floor"

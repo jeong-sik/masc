@@ -261,6 +261,12 @@ type inference =
       ; observe_failure : Keeper_librarian_input_refusal.t list option -> unit
       }
 
+(* A best-effort run commits an accepted Memory answer under the pass that
+   called it. An inference returns its answer and never commits. *)
+type run_kind =
+  | Best_effort of Keeper_memory_commit_pass.t
+  | Inference of inference
+
 (* Memory inference asks the same Memory question without publishing. Context
    passes ask only for continuation or queue organization, never Memory. *)
 type pass =
@@ -1550,7 +1556,7 @@ let admission_mode_valid ~has_admission ~write_scope ~has_continuity
 ;;
 
 let run_pass
-      ?inference
+      ~run_kind
       ?(write_scope = Context_and_memory)
       ?admission
       ?continuity
@@ -1569,6 +1575,9 @@ let run_pass
       ~expected_revision
       (inp : Keeper_librarian.input)
   =
+  let inference = match run_kind with
+    | Best_effort _ -> None
+    | Inference inference -> Some inference in
   let on_not_committed ?(exhausted_input_refusals=None) report =
     on_not_committed report;
     match inference with
@@ -2175,8 +2184,12 @@ let run_pass
                     } in
                   Ok (`Memory_inferred (step, served_by, exact_output, selected_slot)))
              | Commit_memory ->
+             let* commit_pass = match run_kind with
+               | Best_effort commit_pass -> Ok commit_pass
+               | Inference _ -> Error (Domain_output_invalid "a Memory inference does not commit Memory") in
              let+ disposition =
                Keeper_memory_os_current.apply_disposition
+                 ~pass:commit_pass
                  ~on_committed:(fun disposition ->
                    committed_memory := Some (disposition, exact_output, selected_slot, absorb_gate);
                    on_memory_committed ())
@@ -2471,7 +2484,7 @@ let run_pass
              (Printexc.to_string exn))
 ;;
 
-let run_best_effort = run_pass ?inference:None
+let run_best_effort ~pass = run_pass ~run_kind:(Best_effort pass)
 
 type inference_failure =
   { reports : not_committed list
@@ -2492,9 +2505,9 @@ let infer_working_state ?cli_runner ~base_path ~keepers_dir ~keeper_id
   let inferred = ref None and reports = ref [] and exhausted_input_refusals = ref None in
   let preparation = ref Not_prepared in
   run_pass ~write_scope:Context_only
-    ~inference:(Infer_state {previous_state; unread_messages; preparation;
+    ~run_kind:(Inference (Infer_state {previous_state; unread_messages; preparation;
       observe=(fun ~served_by working_state -> inferred := Some (working_state, served_by));
-      observe_failure=(fun exhausted -> exhausted_input_refusals := exhausted)})
+      observe_failure=(fun exhausted -> exhausted_input_refusals := exhausted)}))
     ~on_not_committed:(fun report -> reports := report :: !reports)
     ?cli_runner ~base_path ~keepers_dir ~keeper_id ~expected_revision:None input;
   let outcome = match !inferred with
@@ -2512,9 +2525,9 @@ let infer_memory_step ?cli_runner ~base_path ~keepers_dir ~keeper_id
     ~previous_state ~unread_messages input =
   let inferred = ref None and reports = ref [] and exhausted_input_refusals = ref None in
   run_pass ~write_scope:Context_and_memory
-    ~inference:(Infer_memory {previous_state; unread_messages;
+    ~run_kind:(Inference (Infer_memory {previous_state; unread_messages;
       observe=(fun ~served_by step -> inferred := Some (step, served_by));
-      observe_failure=(fun exhausted -> exhausted_input_refusals := exhausted)})
+      observe_failure=(fun exhausted -> exhausted_input_refusals := exhausted)}))
     ~on_not_committed:(fun report -> reports := report :: !reports)
     ?cli_runner ~base_path ~keepers_dir ~keeper_id ~expected_revision:None input;
   match !inferred with

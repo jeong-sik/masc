@@ -181,6 +181,13 @@ val compute_with_buckets :
 (** Same as {!compute} but each returned [model_stats] additionally carries
     a [buckets] list produced by {!aggregate_buckets}. *)
 
+val aggregate_reading :
+  window_minutes:int -> bucket_minutes:int ->
+  Model_inference_metrics_kept.reading -> (aggregate, read_error) result
+(** The aggregate of one supplied reading, using the same projection as
+    {!compute} and {!compute_with_buckets}. It samples no clock and performs
+    no second store read. Empty buckets do not have advancing labels. *)
+
 val aggregate_buckets :
   base_path:string ->
   window_min:int ->

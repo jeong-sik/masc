@@ -181,6 +181,7 @@ let refresh ~base_path ~now ~window_minutes kept =
 
 let next_change kept ~window_minutes ~after =
   let window_s = Float.of_int window_minutes *. 60.0 in
+  let since_unix = after -. window_s in
   let leaves = function
     | Row_entry (entry : raw_entry) -> Some (Float.succ (entry.ts_unix +. window_s))
     | Row_schema_violation { ts_unix = Some ts; _ } -> Some (Float.succ (ts +. window_s))
@@ -192,7 +193,10 @@ let next_change kept ~window_minutes ~after =
   let instants =
     String_map.fold (fun _ file acc -> row_instants file.rows @ acc) kept.decisions []
     @ Dated_jsonl_kept_days.fold kept.costs ~init:[] ~f:(fun acc (day : Dated_jsonl_kept_days.day) rows ->
-      (day.starts_at +. Dated_jsonl_kept_days.seconds_per_day +. window_s) :: row_instants rows @ acc)
+      let row_deadlines = row_instants rows @ acc in
+      if rows.malformed_rows > 0 || List.exists (row_in_window ~since_unix) rows.readings then
+        (day.starts_at +. Dated_jsonl_kept_days.seconds_per_day +. window_s) :: row_deadlines
+      else row_deadlines)
   in
   List.fold_left
     (fun earliest instant ->

@@ -334,13 +334,18 @@ let deliver ~base_path ~keeper_name ~ask_id =
         |> Result.map_error (fun error -> Delivery_evidence_unavailable error)) ask resolution
 
 type failure = { keeper_name : string option; ask_id : string option; error : error }
+type held_answer =
+  { owner : string
+  ; answered_ask_id : string
+  ; shutdown_operation_id : Keeper_shutdown_types.Operation_id.t
+  }
 type report =
   { inspected : int
   ; evidence_window_reads : int
   ; enqueued : int
   ; already_pending : int
   ; already_delivered : int
-  ; shutdown_reserved : string list
+  ; shutdown_reserved : held_answer list
   ; owners_absent : string list
   ; failures : failure list
   }
@@ -425,8 +430,10 @@ let reconcile_rows ~base_path ~keeper_name report rows =
     | Ok Already_delivered -> { report with already_delivered = report.already_delivered + 1 }
     (* The answer stays in the ask log and nothing failed: the Keeper's
        shutdown holds its intake. The pass after the release enqueues it. *)
-    | Error (Intake_shutdown_reserved _) ->
-        { report with shutdown_reserved = ask_id :: report.shutdown_reserved }
+    | Error (Intake_shutdown_reserved shutdown_operation_id) ->
+        { report with shutdown_reserved =
+            { owner = keeper_name; answered_ask_id = ask_id; shutdown_operation_id }
+            :: report.shutdown_reserved }
     | Error (( Ask_store_unavailable _ | Ask_missing _ | Ask_not_answered _
              | Invalid_answered_record _ | Delivery_evidence_unavailable _
              | Queue_storage_failed _ | Owner_unavailable _ ) as error) ->
@@ -502,6 +509,19 @@ let log_report ~base_path ~keeper_name report =
       keeper_name
       (match failure.ask_id with Some ask_id -> ask_id | None -> "<store>")
       (error_to_string failure.error) base_path) report.failures;
+  (* A hold is the Keeper's shutdown state, which the shutdown announces
+     itself, so it is told at the level the skipped owners are. *)
+  (match report.shutdown_reserved with
+   | [] -> ()
+   | _ :: _ as held ->
+       Log.Server.routine "ask answer recovery held by shutdown keeper=%s asks=%s operations=%s base_path=%S"
+         keeper_name
+         (String.concat "," (List.map (fun (held : held_answer) -> held.answered_ask_id) held))
+         (String.concat ","
+            (List.sort_uniq String.compare
+               (List.map (fun (held : held_answer) ->
+                    Keeper_shutdown_types.Operation_id.to_string held.shutdown_operation_id) held)))
+         base_path);
   if report.enqueued > 0 then Log.Server.info
     "ask answer recovery keeper=%s inspected=%d evidence_windows=%d enqueued=%d pending=%d already_delivered=%d shutdown_reserved=%d failures=%d base_path=%S"
     keeper_name report.inspected report.evidence_window_reads report.enqueued

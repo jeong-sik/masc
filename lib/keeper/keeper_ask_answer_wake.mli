@@ -115,13 +115,22 @@ val followup_source_to_json : followup_source -> string * Yojson.Safe.t
     by the aggregate response. No unavailable placeholder for another source. *)
 
 type failure = { keeper_name : string option; ask_id : string option; error : error }
+
+type held_answer =
+  { owner : string
+  ; answered_ask_id : string
+  ; shutdown_operation_id : Keeper_shutdown_types.Operation_id.t
+  }
+(** An answered ask whose enqueue a shutdown operation refused: the Keeper the
+    answer is for, the ask, and the operation that holds that Keeper's intake. *)
+
 type report =
   { inspected : int
   ; evidence_window_reads : int
   ; enqueued : int
   ; already_pending : int
   ; already_delivered : int
-  ; shutdown_reserved : string list
+  ; shutdown_reserved : held_answer list
   ; owners_absent : string list
   ; failures : failure list
   }
@@ -144,10 +153,15 @@ val reconcile : base_path:string -> (report, Keeper_ask_store.read_error) result
     [Owner_unavailable] failure. [pulse] reads the owner the same way and logs
     the absent names once per pass.
 
-    An answer whose Keeper has its intake held by a shutdown operation is
-    named by ask id in [shutdown_reserved], not in [failures]: nothing failed
-    and no warning is logged for it. The answer stays in the ask log, and the
-    first pass after the operation releases the intake enqueues it. *)
+    An answer whose enqueue a shutdown operation refused is listed in
+    [shutdown_reserved] with its Keeper and that operation, not in
+    [failures]: nothing failed, and the default observer logs no warning for
+    it. The answer stays in the ask log, and the first pass after the
+    operation releases the intake enqueues it. The shutdown is met only at
+    the enqueue. A row that fails validation, or one whose delivery evidence
+    cannot be read, is a failure whether or not a shutdown holds the intake,
+    and an answer the evidence shows as delivered is counted in
+    [already_delivered]. *)
 
 type t
 val create :

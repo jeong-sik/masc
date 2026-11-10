@@ -439,8 +439,8 @@ let shutdown_reserved_detail operation_id =
 (* A shutdown that holds the intake stops the call before the queue is read or
    written: the store is not at fault, so the refusal keeps its operation id
    instead of becoming storage-failure text. A token that is not live stays
-   text: the caller presented a fence token that is no longer the Keeper's,
-   which is not a Keeper lifecycle state. *)
+   text: the fence token the caller presented was released or belongs to
+   another intake slot, which says nothing about this Keeper's lifecycle. *)
 let stimulus_intake_refused = function
   | Durable_intake_shutdown_reserved operation_id ->
     Stimulus_shutdown_reserved operation_id

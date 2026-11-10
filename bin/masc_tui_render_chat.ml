@@ -2111,6 +2111,29 @@ let keeper_message_visible_entries visible_timeline =
 
 ;;
 
+(* A frame owns one preview snapshot and one semantic map per projected entry.
+   Physical row ordinals can change with terminal width or origin gutters;
+   only a producer-owned source byte can recover that same reading position. *)
+type source_body_index = {
+  source_rows : (chat_source_position, int) Hashtbl.t;
+  row_sources : (int, chat_source_position) Hashtbl.t;
+  row_end_sources : (int, chat_source_position) Hashtbl.t;
+}
+
+type source_body_key = {
+  source_width : int;
+  source_palette_generation : int;
+  source_origin : Message_layout.origin_display;
+  source_preview_mode : [`Off | `Compact | `Rich];
+  source_previews : Masc_tui_link_preview.og_preview list;
+  source_polled_input : (int * int * string) option;
+  source_polled_unavailable : bool;
+}
+
+type source_body_memo = { key : source_body_key; index : source_body_index option }
+
+let source_body_indexes = Entry_cache.create 64
+
 (* Positions whose message record, projected moment, and turn edge all
    survived a conversation change keep the entry already computed for them.
    The first position that differs ends the sharing, because the index
@@ -2146,10 +2169,19 @@ let rec shared_layout_entry_prefix ~refresh_owner reversed old_visible old_entri
 let reindex_entry ~shift (entry : Message_layout.entry) =
   match entry.markdown_source with
   | Message_layout.Markdown_stable ({ entry_index; _ } as source) ->
-      { entry with
+      let reindexed = { entry with
         markdown_source =
           Message_layout.Markdown_stable
-            { source with entry_index = entry_index + shift } }
+            { source with entry_index = entry_index + shift } } in
+      (* Only the list position changed. URL discovery and semantic source
+         coordinates depend on the unchanged body, presentation and journal,
+         not this position. The source memo still checks the current width,
+         palette, origin, previews and polled producer input before reuse. *)
+      Option.iter (Entry_cache.replace entry_urls reindexed)
+        (Entry_cache.find_opt entry_urls entry);
+      Option.iter (Entry_cache.replace source_body_indexes reindexed)
+        (Entry_cache.find_opt source_body_indexes entry);
+      reindexed
   | Message_layout.Markdown_growing _ | Message_layout.Markdown_streaming -> entry
 
 let shifted_entry_prefix ~refresh_owner old_visible old_entries new_visible =
@@ -3607,25 +3639,6 @@ let projection_index_of_scroll_anchor projection = function
   | (Scroll_pending _ | Scroll_polled _) as anchor ->
       Hashtbl.find_opt (scroll_anchor_index projection).transient_indices anchor
 
-(* A frame owns one preview snapshot and one semantic map per projected entry.
-   Physical row ordinals can change with terminal width or origin gutters;
-   only a producer-owned source byte can recover that same reading position. *)
-type source_body_index = {
-  source_rows : (chat_source_position, int) Hashtbl.t;
-  row_sources : (int, chat_source_position) Hashtbl.t;
-  row_end_sources : (int, chat_source_position) Hashtbl.t;
-}
-
-type source_body_key = {
-  source_width : int;
-  source_palette_generation : int;
-  source_origin : Message_layout.origin_display;
-  source_preview_mode : [`Off | `Compact | `Rich];
-  source_previews : Masc_tui_link_preview.og_preview list;
-  source_polled_input : (int * int * string) option;
-  source_polled_unavailable : bool;
-}
-
 (* Every field is compared, so a field added to the key and left out here is
    reported as never read. *)
 let same_source_body_key (a : source_body_key) (b : source_body_key) =
@@ -3637,9 +3650,6 @@ let same_source_body_key (a : source_body_key) (b : source_body_key) =
   && a.source_polled_input = b.source_polled_input
   && Bool.equal a.source_polled_unavailable b.source_polled_unavailable
 
-type source_body_memo = { key : source_body_key; index : source_body_index option }
-
-let source_body_indexes = Entry_cache.create 64
 let source_index_builds = ref 0
 
 type source_mapping_owner =

@@ -926,6 +926,51 @@ let test_lost_source_points_release_numeric_scroll () = at_sizes (fun origin ->
   check bool "lost search pin is released" true
     (match state.msg_scroll_pin with None | Some {T.pin_mode=T.Follow_live;_} -> true | Some _ -> false))
 
+let test_older_page_preserves_source_pin_and_draft () = at_sizes (fun origin ->
+  let state = state origin in
+  state.link_previews_mode <- `Rich;
+  let url = "https://example.test/older-page-source-pin" in
+  let preview = Masc_tui_link_preview.synthesize_preview url in
+  Masc_tui_link_preview.cache_store
+    {preview with has_metadata=true; title=Some "PAGED_PREVIEW_SOURCE"};
+  let held = row ~id:"held-source" ~request_id:"held-source" ~role:user
+      ~text:(long_answer "HELD_BODY_" ^ "\n" ^ url) 10. in
+  T.set_keeper_chat_sources state
+    {state.msg_loaded_sources with kcs_history=T.Chat_history_received [held]};
+  ignore (find state "PAGED_PREVIEW_SOURCE");
+  let observe () =
+    let _, clamped = Render.render_keeper_message state in
+    Option.iter (T.apply_clamped_scroll state) clamped
+  in
+  observe ();
+  let positions () = match state.msg_scroll_pin with
+    | None -> []
+    | Some pin -> List.map (fun point -> point.T.scroll_anchor, point.source_position)
+        pin.T.pin_points
+  in
+  let before = positions () in
+  check bool "the selected preview has a producer source" true (before <> []);
+  Masc_tui_message_input.insert state.msg_input "draft retained across older pages";
+  let revision = Masc_tui_message_input.revision state.msg_input in
+  let older = row ~id:"older-source" ~request_id:"older-source" ~role:user
+      ~text:"earlier input" 1. in
+  T.set_keeper_chat_sources state
+    {state.msg_loaded_sources with kcs_history=T.Chat_history_received
+      (T.prepend_older_history_page ~older:[older] ~held:[held])};
+  observe ();
+  check bool "prepend preserves the exact source reading" true (before = positions ());
+  check bool "prepend does not mutate the active input revision" true
+    (Masc_tui_message_input.has_revision state.msg_input revision);
+  (* The same row can receive different preview metadata after reindexing.
+     Its previous source version must then stop authorizing a search pin. *)
+  Masc_tui_link_preview.cache_store
+    {preview with has_metadata=true; title=Some "replacement preview"};
+  observe ();
+  check bool "changed source metadata releases the obsolete search position" true
+    (List.for_all (fun position -> not (List.mem position before)) (positions ()));
+  check bool "metadata refresh leaves the draft revision intact" true
+    (Masc_tui_message_input.has_revision state.msg_input revision))
+
 let test_idle_search_pin_reuses_semantic_index () = at_sizes (fun origin ->
   let state = state origin in
   state.link_previews_mode <- `Rich;
@@ -1462,6 +1507,8 @@ let () = run "chat search projection" [
     test_case "unmapped blank cannot override typed pin after reflow" `Quick test_unmapped_blank_does_not_override_typed_pin;
     test_case "lost source points release stale numeric scroll" `Quick test_lost_source_points_release_numeric_scroll;
     test_case "idle search pin reuses semantic and URL indexes" `Quick test_idle_search_pin_reuses_semantic_index;
+    test_case "older page preserves source pin and draft, then invalidates changed metadata" `Quick
+      test_older_page_preserves_source_pin_and_draft;
     test_case "search pin preserves query endpoint through width and gutters" `Quick test_search_pin_retains_query_endpoint_through_reflow;
     test_case "semantic search repetitive prefixes and optional boundaries" `Quick test_semantic_search_repetitive_prefix_and_boundaries;
     test_case "search folds Unicode case and keeps source scalar offsets" `Quick test_search_folds_unicode_case;

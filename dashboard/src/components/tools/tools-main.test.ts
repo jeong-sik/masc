@@ -7,6 +7,7 @@ import type {
   DashboardSkillActivationProjection,
   DashboardToolsResponse,
 } from '../../api'
+import { confirmRuntimeTestWorkspace } from '../../lib/runtime-workspace.test-fixture'
 
 type MockToolsResponse = {
   generated_at?: string
@@ -316,6 +317,7 @@ describe('Tools', () => {
   let container: HTMLDivElement
 
   beforeEach(() => {
+    confirmRuntimeTestWorkspace()
     container = document.createElement('div')
     document.body.appendChild(container)
     mocks.loadTools.mockClear()

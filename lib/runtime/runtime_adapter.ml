@@ -1207,7 +1207,8 @@ let materialize_execution ~construction (cfg : Runtime_schema.config) (binding :
         | Messages_api | Chat_completions_api | Ollama_api | Gemini_api | Vertex_gemini_api ->
           Result.map
             (fun (selected : provider_materialization) ->
-              {execution=Runtime_execution.Agent_core selected.provider_config;
+              {execution=Runtime_execution.Agent_core
+                  (Runtime_account_access.seal_api selected.provider_config);
                credential_admission=Some selected.credential_admission})
             (materialize_provider_binding ~construction cfg binding)))
 ;;

@@ -61,8 +61,14 @@ let test_init_writes_the_declared_default_state () =
   with_workspace (fun config ->
     let messages = Q.messages_dir config in
     Fs_compat.mkdir_p messages;
+    (* The counter resumes from a committed message, which the reader
+       recognises by the production suffix. A name the reader does not accept
+       would leave the counter at 0 and make this parity check pass or fail for
+       a reason the fixture invented. *)
     Out_channel.with_open_text
-      (Filename.concat messages (Printf.sprintf "%d_filed.json" filed_message_seq))
+      (Filename.concat messages
+         (Printf.sprintf "%09d_filed_fixture%s" filed_message_seq
+            Q.committed_message_suffix))
       (fun oc -> output_string oc "{}");
     let (_ : string) = Q.init config ~agent_name:None in
     let written =

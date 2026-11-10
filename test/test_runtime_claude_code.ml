@@ -4807,7 +4807,6 @@ let test_provider_retry_with_duplicate_field_is_ignored_without_failing_turn () 
 ;;
 
 let () =
-  Masc_test_deps.publish_single_user_access ();
   run
     "runtime_claude_code"
     [ ( "provider retry",

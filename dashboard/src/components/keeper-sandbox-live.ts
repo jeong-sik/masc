@@ -75,7 +75,8 @@ export function KeeperSandboxLivePanel({ keeperName }: { keeperName: string }) {
         }
       }
     }
-    const cleanup = setupObservationRefresh(refresh, { topics: ['keeper_sandbox'], keeperName, resetRead: () => setState({ kind: 'loading' }) })
+    const cleanup = setupObservationRefresh(refresh, { topics: ['keeper_sandbox'], keeperName,
+      resetRead: () => { setState({ kind: 'loading' }) } })
     return () => {
       cancelled = true
       cleanup()

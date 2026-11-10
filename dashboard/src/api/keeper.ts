@@ -122,13 +122,7 @@ export async function fetchKeeperSandboxLiveStatus(
   opts?: { signal?: AbortSignal },
 ): Promise<KeeperSandboxLiveStatus> {
   const path = `/api/v1/gate/keeper-status?name=${encodeURIComponent(name)}`
-  const resp = await fetchWithTimeout(
-    path,
-    { headers: jsonHeaders(), signal: opts?.signal },
-    DEFAULT_GET_TIMEOUT_MS,
-  )
-  if (!resp.ok) throw await apiRequestErrorFromResponse('GET', path, resp)
-  return parseKeeperSandboxLiveStatus(await resp.json())
+  return parseKeeperSandboxLiveStatus(await get<unknown>(path, opts))
 }
 
 // --- Runtime trace evidence (split to keeper-runtime-trace.ts) ---

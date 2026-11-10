@@ -147,8 +147,11 @@ export function RuntimeObservablesPanel() {
       }
     }
 
-    setLoading(true)
-    const cleanup = setupObservationRefresh(refresh, { topics: ['runtime_observables'], resetRead: () => { setSnapshot(null); setError(null); setLoading(true) } })
+    const cleanup = setupObservationRefresh(refresh, { topics: ['runtime_observables'], resetRead: () => {
+      setSnapshot(null)
+      setLoading(true)
+      setError(null)
+    } })
 
     return () => {
       cleanup()

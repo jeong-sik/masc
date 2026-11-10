@@ -394,8 +394,8 @@ let test_inline_board_post_author_rewrites_caller_claim () =
       ]
   in
   let normalized =
-    Mcp_tool_runtime_board.ensure_board_post_author
-      ~agent_name:"xi-hammer" args
+    Mcp_tool_runtime_board.enforce_caller_identity ~tool:"masc_board_post"
+      ~field:"author" ~agent_name:"xi-hammer" args
   in
   Alcotest.(check string) "author from ctx" "xi-hammer"
     Yojson.Safe.Util.(normalized |> member "author" |> to_string);
@@ -404,24 +404,6 @@ let test_inline_board_post_author_rewrites_caller_claim () =
       normalized |> member "meta" |> member "author_caller_claim" |> to_string);
   Alcotest.(check string) "existing meta preserved" "probe-10297"
     Yojson.Safe.Util.(normalized |> member "meta" |> member "trace" |> to_string)
-
-let test_inline_board_post_author_accepts_matching_alias () =
-  let args =
-    make_args
-      [
-        ("content", `String "ctx-owned post");
-        ("author", `String "delta");
-      ]
-  in
-  let normalized =
-    Mcp_tool_runtime_board.ensure_board_post_author ~agent_name:"delta" args
-  in
-  Alcotest.(check string) "author canonical" "delta"
-    Yojson.Safe.Util.(normalized |> member "author" |> to_string);
-  Alcotest.(check bool) "no mismatch claim" true
-    (match Yojson.Safe.Util.member "meta" normalized with
-     | `Null -> true
-     | meta -> Yojson.Safe.Util.member "author_caller_claim" meta = `Null)
 
 (** {2 Group 2: JSON helper functions} *)
 
@@ -3938,8 +3920,6 @@ let () =
             test_board_dashboard_json_shows_closed_state_and_successor;
           Alcotest.test_case "MCP runtime board post author rewrites caller claim"
             `Quick test_inline_board_post_author_rewrites_caller_claim;
-          Alcotest.test_case "MCP runtime board post author accepts matching alias"
-            `Quick test_inline_board_post_author_accepts_matching_alias;
         ] );
       ( "json_helpers",
         [

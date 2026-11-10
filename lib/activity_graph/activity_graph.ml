@@ -6,6 +6,34 @@ include Activity_graph_registry
 
 module StringSet = Set_util.StringSet
 
+type write_observer = { callback : base_path:string -> unit }
+let write_observers : write_observer list Atomic.t = Atomic.make []
+let write_notification_failures = Atomic.make 0
+let failed_write_notifications () = Atomic.get write_notification_failures
+
+let rec update_write_observers change =
+  let before = Atomic.get write_observers in
+  if not (Atomic.compare_and_set write_observers before (change before)) then
+    update_write_observers change
+;;
+
+let subscribe_written callback =
+  let observer = { callback } in
+  update_write_observers (fun before -> observer :: before);
+  fun () -> update_write_observers (List.filter (fun current -> current != observer))
+;;
+
+let notify_written ~base_path =
+  List.iter (fun observer ->
+    match observer.callback ~base_path with
+    | () -> ()
+    | exception _ ->
+        (* cancel-guard-ok: a metadata listener cannot replace the write's
+           outcome, including cancellation. No I/O runs at this boundary. *)
+        ignore (Atomic.fetch_and_add write_notification_failures 1))
+    (Atomic.get write_observers)
+;;
+
 (* ================================================================ *)
 (* File storage paths                                               *)
 (* ================================================================ *)
@@ -873,8 +901,10 @@ let activity_events_store_path config = root_dir config
 (* Event emission                                                   *)
 (* ================================================================ *)
 
-let emit config ?actor ?subject ?(tags = []) ~kind ~payload () =
+let emit (config : Workspace_utils.config) ?actor ?subject ?(tags = []) ~kind ~payload () =
   let value, json_line =
+    Fun.protect ~finally:(fun () -> notify_written ~base_path:config.base_path)
+      (fun () ->
     Workspace_utils.with_file_lock config (lock_path config) (fun () ->
         let dated = current_dated_path config in
         ensure_dirs config dated;
@@ -895,7 +925,7 @@ let emit config ?actor ?subject ?(tags = []) ~kind ~payload () =
         in
         let json_line = Yojson.Safe.to_string (event_to_yojson value) in
         append_line dated.Dated_jsonl.Store.path (json_line ^ "\n");
-        (value, json_line))
+        (value, json_line)))
   in
   let encoded = format_sse_event_data ~seq:value.seq json_line in
   let snapshot =

@@ -51,15 +51,26 @@ let keeper_config_cache_key (config : Workspace.config) name =
     (cache_key_string_segment name)
 ;;
 
-let keeper_composite_cache_key ~base_path name =
-  Printf.sprintf
-    "keeper:composite:%s:%s"
+let keeper_composite_cache_prefix ~base_path =
+  Printf.sprintf "keeper:composite:%s:"
     (cache_key_string_segment (Common.masc_dir_from_base_path ~base_path))
-    (cache_key_string_segment name)
+;;
+
+let keeper_composite_cache_key ~base_path name =
+  keeper_composite_cache_prefix ~base_path ^ cache_key_string_segment name
 ;;
 
 let fleet_composite_cache_key ~base_path =
   Printf.sprintf "dashboard:fleet-composite:%s" base_path
+;;
+
+let invalidate_fleet_composite_cache ~base_path =
+  Dashboard_cache.invalidate (fleet_composite_cache_key ~base_path)
+;;
+
+let invalidate_workspace_keeper_composites ~base_path =
+  Dashboard_cache.invalidate_prefix (keeper_composite_cache_prefix ~base_path);
+  invalidate_fleet_composite_cache ~base_path
 ;;
 
 let invalidate_keeper_composite_cache ~base_path ~name =
@@ -68,16 +79,25 @@ let invalidate_keeper_composite_cache ~base_path ~name =
 
 let invalidate_keeper_composite_caches ~base_path ~name =
   invalidate_keeper_composite_cache ~base_path ~name;
-  Dashboard_cache.invalidate (fleet_composite_cache_key ~base_path)
+  invalidate_fleet_composite_cache ~base_path
+;;
+
+let keeper_runtime_trace_cache_prefix ~base_path ~name =
+  Printf.sprintf "keeper:runtime-trace:%s:%s:"
+    (cache_key_string_segment (Common.masc_dir_from_base_path ~base_path))
+    (cache_key_string_segment name)
+;;
+
+let invalidate_keeper_runtime_traces ~base_path ~name =
+  Dashboard_cache.invalidate_prefix (keeper_runtime_trace_cache_prefix ~base_path ~name)
 ;;
 
 let keeper_runtime_trace_cache_key (config : Workspace.config) name ?trace_id
       ?turn_id ~limit ()
   =
   Printf.sprintf
-    "keeper:runtime-trace:%s:%s:%s:%s:%d"
-    (cache_key_string_segment (Workspace.masc_dir config))
-    (cache_key_string_segment name)
+    "%s%s:%s:%d"
+    (keeper_runtime_trace_cache_prefix ~base_path:config.base_path ~name)
     (cache_key_string_opt_segment trace_id)
     (cache_key_int_opt_segment turn_id)
     limit

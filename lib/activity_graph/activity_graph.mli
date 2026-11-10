@@ -51,6 +51,14 @@ val root_entry_is_metadata : string -> bool
 
 (** {1 Event emission} *)
 
+val subscribe_written : (base_path:string -> unit) -> (unit -> unit)
+(** Observe an event-store write attempt after its file lock is released,
+    including a failure after a visible append or sequence update. Carries
+    the raw workspace owner only. Callbacks must not block or yield, and
+    cannot change the writer's result. The returned removal is idempotent. *)
+
+val failed_write_notifications : unit -> int
+
 val emit :
   Workspace_utils.config ->
   ?actor:entity_ref ->

@@ -1,10 +1,11 @@
 import { html } from 'htm/preact'
 import { render } from 'preact'
 import { signal } from '@preact/signals'
-import { waitFor } from '@testing-library/preact'
+import { act } from '@testing-library/preact'
 import { Effect } from 'effect'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type * as ApiCore from '../api/core'
+import { TRANSPORT_RETRY_BASE_MS } from '../config/constants'
 
 // 90s window absorbs cold-build transform overhead (observed 60-140s on
 // the first run) for the first/heaviest test in this file — render of a
@@ -168,13 +169,14 @@ function sampleKeepersResponse(overrides?: Partial<Record<string, unknown>>) {
 async function flushUi(): Promise<void> {
   for (let i = 0; i < 4; i += 1) {
     await Promise.resolve()
-    await new Promise(resolve => setTimeout(resolve, 0))
+    if (vi.isFakeTimers()) await vi.advanceTimersByTimeAsync(0)
+    else await new Promise(resolve => setTimeout(resolve, 0))
   }
 }
 
 async function loadComponentWithApi(api: {
-  fetchGateStatus: () => Promise<unknown>
-  fetchGateConnectors: () => Promise<unknown>
+  fetchGateStatus: (signal?: AbortSignal) => Promise<unknown>
+  fetchGateConnectors: (signal?: AbortSignal) => Promise<unknown>
   fetchGateKeepers: () => Promise<unknown>
   post?: (path: string, body: unknown) => Promise<unknown>
   lastEvent: { value: unknown }
@@ -196,9 +198,20 @@ async function loadComponentWithApi(api: {
     fetchGateStatus: api.fetchGateStatus,
     fetchGateConnectors: api.fetchGateConnectors,
   }))
-  vi.doMock('../api/gate-keepers', () => ({
-    fetchGateKeepers: () => Effect.promise(api.fetchGateKeepers),
-  }))
+  vi.doMock('../api/gate-keepers', async () => {
+    const { DashboardTransportError } = await import('../api/effect-http')
+    return {
+      fetchGateKeepers: () => Effect.tryPromise({
+        try: api.fetchGateKeepers,
+        catch: cause => new DashboardTransportError({
+          method: 'GET',
+          path: '/api/v1/gate/keepers',
+          message: cause instanceof Error ? cause.message : String(cause),
+          cause,
+        }),
+      }),
+    }
+  })
   vi.doMock('../sse', () => ({
     lastEvent: api.lastEvent,
     connected: { value: true },
@@ -212,7 +225,16 @@ async function loadComponentWithApi(api: {
   // its real implementation instead of substituting a framework shim.
   const module = await import('./connector-status')
   module.resetConnectorStatusState()
-  return module
+  const { acceptedExecutionWorkspace } = await import('../execution-workspace-authority')
+  acceptedExecutionWorkspace.value = Object.freeze({
+    epoch: 'connector-A',
+    workspaceRoot: '/workspace-A',
+    connectionGeneration: 1,
+    observerInstanceId: 'connector-instance-A',
+  })
+  const observation = await import('../lib/observation-refresh')
+  const { ApiRequestError } = await import('../api/core')
+  return { ...module, ...observation, acceptedExecutionWorkspace, ApiRequestError }
 }
 
 describe('ConnectorStatusPanel', () => {
@@ -1304,7 +1326,7 @@ describe('ConnectorStatusPanel v2 surface layout', () => {
     expect(drawer!.textContent).not.toContain('Test connection')
   })
 
-  it('refreshes connector drawer read-only fields from the backend snapshot', async () => {
+  it('consumes an actual changed connector while unrelated SSE keeps arriving', async () => {
     const fetchGateStatus = vi.fn<() => Promise<unknown>>().mockResolvedValue(sampleGateResponse())
     const firstConnector = {
       ...sampleConnectorsResponse().connectors[0],
@@ -1329,7 +1351,7 @@ describe('ConnectorStatusPanel v2 surface layout', () => {
     const fetchGateKeepers = vi.fn<() => Promise<unknown>>().mockResolvedValue(sampleKeepersResponse())
     const last = signal<unknown>(null)
 
-    const { ConnectorStatusPanel } = await loadComponentWithApi({
+    const { ConnectorStatusPanel, publishDashboardObservationChange } = await loadComponentWithApi({
       fetchGateStatus,
       fetchGateConnectors,
       fetchGateKeepers,
@@ -1347,16 +1369,185 @@ describe('ConnectorStatusPanel v2 surface layout', () => {
     expect(container.querySelector('input[aria-label="connector bot"]')).toBeNull()
     expect(container.querySelector('[data-testid="connector-readonly-bot-row"]')?.textContent).toContain('server bot initial')
 
-    last.value = { type: 'connector_refresh' }
-    // The refetch sits behind a 2000ms debounce (timer in ConnectorStatusPanel).
-    // Sleeping 2100ms and then asserting leaves 100ms of slack for a timer to
-    // be late in, which a parallel suite run spends easily. Waiting for the
-    // call returns as soon as it lands -- usually well before 2.1s -- and
-    // tolerates a timer that fires behind schedule.
-    await waitFor(() => expect(fetchGateConnectors).toHaveBeenCalledTimes(2), {
-      timeout: 8000,
+    vi.useFakeTimers()
+    try {
+      // Production announces the raw connector change and its typed Gate
+      // projection. Unrelated accepted events keep updating lastEvent.
+      last.value = { type: 'gate_connector_changed', connector: 'discord', ts_unix: 1 }
+      publishDashboardObservationChange({ topic: 'gate' })
+      for (let i = 0; i < 6; i += 1) {
+        last.value = { type: 'keeper_chat_appended', name: 'unrelated', ts_unix: i + 2 }
+        await vi.advanceTimersByTimeAsync(1000)
+        await flushUi()
+      }
+      expect(fetchGateConnectors).toHaveBeenCalledTimes(2)
+      expect(container.querySelector('[data-testid="connector-readonly-bot-row"]')?.textContent).toContain('server bot refreshed')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('reads a typed keeper change and retains one invalidation behind a slow read', async () => {
+    let finish!: (value: unknown) => void
+    const fetchGateStatus = vi.fn().mockResolvedValue(sampleGateResponse())
+    const fetchGateConnectors = vi.fn()
+      .mockResolvedValueOnce(sampleConnectorsResponse())
+      .mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+      .mockResolvedValue(sampleConnectorsResponse())
+    const fetchGateKeepers = vi.fn().mockResolvedValue(sampleKeepersResponse())
+    const { ConnectorStatusPanel, publishDashboardObservationChange } = await loadComponentWithApi({
+      fetchGateStatus, fetchGateConnectors, fetchGateKeepers, lastEvent: signal(null),
     })
+    render(html`<${ConnectorStatusPanel} />`, container)
     await flushUi()
-    expect(container.querySelector('[data-testid="connector-readonly-bot-row"]')?.textContent).toContain('server bot refreshed')
+    publishDashboardObservationChange({ topic: 'keeper_composite', keeperName: 'luna' })
+    await flushUi()
+    expect(fetchGateConnectors).toHaveBeenCalledTimes(2)
+    publishDashboardObservationChange({ topic: 'gate' })
+    publishDashboardObservationChange({ topic: 'gate' })
+    publishDashboardObservationChange({ topic: 'runtime_resolved' })
+    await flushUi()
+    expect(fetchGateConnectors).toHaveBeenCalledTimes(2)
+    finish(sampleConnectorsResponse())
+    await flushUi()
+    expect(fetchGateConnectors).toHaveBeenCalledTimes(3)
+    expect(fetchGateKeepers).toHaveBeenCalledTimes(3)
+  })
+
+  it('recovers an initially unavailable Gate during quiet SSE while preserving partial UI', async () => {
+    const fetchGateStatus = vi.fn()
+    const fetchGateConnectors = vi.fn().mockResolvedValue(sampleConnectorsResponse())
+    const fetchGateKeepers = vi.fn().mockResolvedValue(sampleKeepersResponse())
+    const { ConnectorStatusPanel, ApiRequestError } = await loadComponentWithApi({
+      fetchGateStatus, fetchGateConnectors, fetchGateKeepers, lastEvent: signal(null),
+    })
+    fetchGateStatus.mockRejectedValueOnce(new ApiRequestError({ method: 'GET',
+      path: '/api/v1/gate/status', status: 503 })).mockResolvedValue(sampleGateResponse())
+    vi.useFakeTimers()
+    try {
+      await act(async () => { render(html`<${ConnectorStatusPanel} />`, container) })
+      await flushUi()
+      expect(fetchGateStatus).toHaveBeenCalledTimes(1)
+      expect(container.textContent).toContain('Discord')
+      await vi.advanceTimersByTimeAsync(TRANSPORT_RETRY_BASE_MS)
+      await flushUi()
+      expect(fetchGateStatus).toHaveBeenCalledTimes(2)
+      await vi.advanceTimersByTimeAsync(TRANSPORT_RETRY_BASE_MS * 10)
+      expect(fetchGateStatus).toHaveBeenCalledTimes(2)
+    } finally { vi.useRealTimers() }
+  })
+
+  it('retries a partial keeper directory during quiet SSE without discarding usable rows', async () => {
+    const fetchGateStatus = vi.fn().mockResolvedValue(sampleGateResponse())
+    const fetchGateConnectors = vi.fn().mockResolvedValue(sampleConnectorsResponse())
+    const fetchGateKeepers = vi.fn()
+      .mockResolvedValueOnce(sampleKeepersResponse({
+        directoryIssues: [{ keeperName: 'broken', message: 'directory read failed' }],
+      }))
+      .mockResolvedValue(sampleKeepersResponse())
+    const { ConnectorStatusPanel } = await loadComponentWithApi({
+      fetchGateStatus, fetchGateConnectors, fetchGateKeepers, lastEvent: signal(null),
+    })
+    vi.useFakeTimers()
+    try {
+      await act(async () => { render(html`<${ConnectorStatusPanel} />`, container) })
+      await flushUi()
+      expect(fetchGateKeepers).toHaveBeenCalledTimes(1)
+      expect(container.textContent).toContain('directory read failed')
+      expect(container.querySelector('[data-keeper="luna"]')).not.toBeNull()
+      await vi.advanceTimersByTimeAsync(TRANSPORT_RETRY_BASE_MS)
+      await flushUi()
+      expect(fetchGateKeepers).toHaveBeenCalledTimes(2)
+      expect(container.textContent).not.toContain('directory read failed')
+      expect(container.querySelector('[data-keeper="luna"]')).not.toBeNull()
+      await vi.advanceTimersByTimeAsync(TRANSPORT_RETRY_BASE_MS * 10)
+      expect(fetchGateKeepers).toHaveBeenCalledTimes(2)
+    } finally { vi.useRealTimers() }
+  })
+
+  it.each(['owner', 'recovery'] as const)('cancels a retired %s read and discards its late body', async change => {
+    let finish!: (value: unknown) => void
+    const signals: AbortSignal[] = []
+    const fetchGateStatus = vi.fn().mockResolvedValue(sampleGateResponse())
+    const fetchGateConnectors = vi.fn((signal?: AbortSignal) => {
+      if (signal) signals.push(signal)
+      if (signals.length === 1) return new Promise(resolve => { finish = resolve })
+      return Promise.resolve(sampleConnectorsResponse({ connectors: [] }))
+    })
+    const fetchGateKeepers = vi.fn().mockResolvedValue(sampleKeepersResponse())
+    const { ConnectorStatusPanel, acceptedExecutionWorkspace, publishDashboardObservationRecovery } = await loadComponentWithApi({
+      fetchGateStatus, fetchGateConnectors, fetchGateKeepers, lastEvent: signal(null),
+    })
+    await act(async () => { render(html`<${ConnectorStatusPanel} />`, container) })
+    await flushUi()
+    expect(fetchGateConnectors).toHaveBeenCalledTimes(1)
+    if (change === 'owner') acceptedExecutionWorkspace.value = { epoch: 'connector-B', workspaceRoot: '/workspace-B',
+      connectionGeneration: 2, observerInstanceId: 'connector-instance-B' }
+    else publishDashboardObservationRecovery()
+    await flushUi()
+    expect(signals[0]!.aborted).toBe(true)
+    expect(fetchGateConnectors).toHaveBeenCalledTimes(2)
+    finish(sampleConnectorsResponse({ connectors: [{ ...sampleConnectorsResponse().connectors[0],
+      display_name: 'Retired connector body' }] }))
+    await flushUi()
+    expect(container.textContent).not.toContain('Retired connector body')
+  })
+
+  it('waits for an accepted workspace and cancels its read on unmount', async () => {
+    const signals: AbortSignal[] = []
+    const fetchGateStatus = vi.fn().mockResolvedValue(sampleGateResponse())
+    const fetchGateConnectors = vi.fn((signal?: AbortSignal) => {
+      if (signal) signals.push(signal)
+      return new Promise(() => {})
+    })
+    const fetchGateKeepers = vi.fn().mockResolvedValue(sampleKeepersResponse())
+    const { ConnectorStatusPanel, acceptedExecutionWorkspace } = await loadComponentWithApi({
+      fetchGateStatus, fetchGateConnectors, fetchGateKeepers, lastEvent: signal(null),
+    })
+    const owner = acceptedExecutionWorkspace.peek()
+    acceptedExecutionWorkspace.value = null
+    await act(async () => { render(html`<${ConnectorStatusPanel} />`, container) })
+    await flushUi()
+    expect(fetchGateStatus).not.toHaveBeenCalled()
+    acceptedExecutionWorkspace.value = owner
+    await flushUi()
+    expect(fetchGateStatus).toHaveBeenCalledTimes(1)
+    render(null, container)
+    await flushUi()
+    expect(signals[0]!.aborted).toBe(true)
+  })
+
+  it.each([
+    ['gate', 401], ['connectors', 403], ['keepers', 401], ['keepers', 403],
+  ] as const)('retains the original %s %i refusal until its actual owner changes', async (refusedSource, status) => {
+    const fetchGateStatus = vi.fn().mockResolvedValue(sampleGateResponse())
+    const fetchGateConnectors = vi.fn().mockResolvedValue(sampleConnectorsResponse())
+    const fetchGateKeepers = vi.fn().mockResolvedValue(sampleKeepersResponse())
+    const { ConnectorStatusPanel, ApiRequestError, acceptedExecutionWorkspace,
+      publishDashboardObservationChange, publishDashboardObservationRecovery } = await loadComponentWithApi({
+      fetchGateStatus, fetchGateConnectors, fetchGateKeepers, lastEvent: signal(null),
+    })
+    const refused = new ApiRequestError({ method: 'GET', path: `/api/v1/gate/${refusedSource}`, status })
+    const target = refusedSource === 'gate' ? fetchGateStatus : refusedSource === 'connectors' ? fetchGateConnectors : fetchGateKeepers
+    target.mockRejectedValueOnce(refused)
+    // A preceding transient sibling must not hide the keeper refusal.
+    if (refusedSource === 'keepers') fetchGateStatus.mockRejectedValueOnce(new ApiRequestError({
+      method: 'GET', path: '/api/v1/gate/status', status: 503 }))
+    vi.useFakeTimers()
+    try {
+      await act(async () => { render(html`<${ConnectorStatusPanel} />`, container) })
+      await flushUi()
+      expect(target).toHaveBeenCalledTimes(1)
+      publishDashboardObservationChange({ topic: 'gate' })
+      publishDashboardObservationRecovery()
+      window.dispatchEvent(new Event('focus'))
+      await vi.advanceTimersByTimeAsync(TRANSPORT_RETRY_BASE_MS * 10)
+      await flushUi()
+      expect(target).toHaveBeenCalledTimes(1)
+      acceptedExecutionWorkspace.value = { epoch: 'connector-B', workspaceRoot: '/workspace-B',
+        connectionGeneration: 2, observerInstanceId: 'connector-instance-B' }
+      await flushUi()
+      expect(target).toHaveBeenCalledTimes(2)
+    } finally { vi.useRealTimers() }
   })
 })

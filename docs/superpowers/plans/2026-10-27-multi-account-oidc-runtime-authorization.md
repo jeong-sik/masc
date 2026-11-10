@@ -697,9 +697,13 @@ Runtime 조회: rg -n --glob '*.ml' '\bRuntime\.(get_runtime_by_id|resolve_assig
 - 층.
   - D4a 실행 표 봉인. 위 26곳과 시험이다. 시험은 실제 경로(`masc runtime-token-sample`, verify)에서 다계정이면 요청이 나가지 않는다는 것을 본다.
   - D4b 모델 목록 조회(서버 setup 경로), `masc_file_*`, 교체 카탈로그.
-  - D4c TypeSafe AI lane. lane을 쓸 수 없는 이유에 호스트 계정을 나누지 않는다는 이유를 더한다. 흡수 gate, Board attention, memory recall과 그 TUI가 이 이유를 받는다.
+  - D4c TypeSafe AI lane. lane을 쓸 수 없는 이유에 둘을 더한다.
+    - `Access_unpublished`: 프로세스가 접근을 아직 게시하지 않았다.
+    - `Host_account_not_shared`: 다계정 프로세스는 호스트 계정을 나누지 않는다.
+    - 판정은 `host_access` 하나다. lane은 그 거절을 자기 이유로 옮긴다. key를 읽는 함수(`arm`)는 `host_account`를 받는다.
+    - 이유를 받는 곳은 둘을 lane의 이유로 묶는다. 흡수 gate는 흡수를 미룬다. Board attention은 Jev에게 묻지 않는다. memory recall 보기와 TUI는 이유를 따로 보여 준다. Jev readiness와 health는 꺼짐으로 본다.
   - D4d MASC 도구의 호스트 key. web search, SystemOne cloud, voice.
-  - 판정은 모두 `authorize_host`다. 대상마다 `host_client`에 닫힌 variant를 더해서, 거절 문장이 무엇을 막았는지 말한다.
+  - D4a, D4b, D4d의 판정은 `authorize_host`다. 대상마다 `host_client`에 닫힌 variant를 더해서, 거절 문장이 무엇을 막았는지 말한다. D4c는 lane의 이유가 이미 닫힌 variant라서 같은 결정(`host_access`)을 그 이유로 받는다.
 - D4a에서 남긴 것.
   - 시험 프로세스는 시작할 때 단일 사용자 접근을 게시한다(하네스 #50867). 그래서 D4a는 시험에 게시 호출을 더하지 않는다. 다계정 시험은 실행 표가 만든 API 런타임으로 verify를 불러, 거절(`account_not_authorized`)과 연결 0건을 본다.
   - 다계정 서버 부팅: exact-output 대상 하나가 거절되면 등록표를 만들지 않고 설정 오류로 멈춘다. 지금은 전체 서버가 다계정으로 뜨지 않아서(`Multi_account_not_served`) 이 경로에 닿지 않는다. S1에서 정한다. 거절된 대상을 본문 시간 제한이 없는 slot처럼 gap으로 내리면, 그 slot만 가진 lane은 비고 부팅은 계속된다.

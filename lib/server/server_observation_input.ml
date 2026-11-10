@@ -32,6 +32,11 @@ type t =
     }
   | Keeper_tool_call of { keeper : string }
   | Keeper_approval_audit of { keeper : string; event : Keeper_approval.Audit.event }
+  | Workspace_agent_signal of { agent : string }
+  | Workspace_messages of {
+      request_id : string;
+      mention_delivery : Masc_domain.message_mention_delivery;
+    }
 
 let ( let* ) = Option.bind
 let field fields name = List.assoc_opt name fields
@@ -134,6 +139,15 @@ let of_fields fields =
   | value when String.equal value Runtime_config_changed_event.event_type -> Some (Store Runtime_config)
   | value when String.equal value Skill_catalog_published_event.event_type -> Some (Store Skill_catalog)
   | value when String.equal value Lane_addon_exports_broadcast.changed_event -> Some (Store Lane_addon_exports)
+  | "workspace_message_delivery_changed" ->
+      let* request_id = text fields "request_id" in
+      let* mention_delivery = match text fields "mention_delivery" with
+        | Some "passive" -> Some Masc_domain.Mention_passive
+        | Some "pending" -> Some Masc_domain.Mention_pending
+        | Some "accepted" -> Some Masc_domain.Mention_accepted
+        | Some "rejected" -> Some Masc_domain.Mention_rejected
+        | Some _ | None -> None in
+      Some (Workspace_messages {request_id; mention_delivery})
   | value when String.equal value Gate_connector_changed_event.event_type ->
       Option.map (fun connector -> Connector connector) (text fields "connector")
   | "keeper_phase_changed" ->
@@ -240,6 +254,10 @@ let subscribe ~sw ~base_path ?observer_instance_id notify =
   let unsubscribe_audits = Keeper_approval.Audit.subscribe_written (fun change ->
     if String.equal canonical_masc_root change.canonical_masc_root then
       notify (Keeper_approval_audit {keeper = change.keeper_name; event = change.event_type})) in
+  let unsubscribe_agents = Workspace_agent_record.subscribe_signal_changed (fun change ->
+    if String.equal canonical_masc_root change.canonical_masc_root then
+      notify (Workspace_agent_signal {agent = change.agent_name})) in
   Eio.Switch.on_release sw (fun () ->
-    unsubscribe (); unsubscribe_gaps (); unsubscribe_tools (); unsubscribe_audits ())
+    unsubscribe (); unsubscribe_gaps (); unsubscribe_tools (); unsubscribe_audits ();
+    unsubscribe_agents ())
 ;;

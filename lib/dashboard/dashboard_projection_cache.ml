@@ -297,6 +297,7 @@ let get_or_compute_digest_json ~config ~actor work =
 
 type operator_snapshot_fn = {
   snapshot : 'a.
+    ?read_policy:Dashboard_projection_read.t ->
     ?actor:string ->
     ?view:string ->
     ?include_messages:bool ->
@@ -318,7 +319,7 @@ type operator_digest_fn = {
 }
 
 let operator_snapshot_json_ref : operator_snapshot_fn ref =
-  ref { snapshot = (fun ?actor:_ ?view:_ ?include_messages:_ ?include_keepers:_ ?include_summary_fields:_ ?lightweight_summary:_ _ctx ->
+  ref { snapshot = (fun ?read_policy:_ ?actor:_ ?view:_ ?include_messages:_ ?include_keepers:_ ?include_summary_fields:_ ?lightweight_summary:_ _ctx ->
     `Null) }
 
 let register_operator_snapshot_json fn =
@@ -331,8 +332,8 @@ let operator_digest_json_ref : operator_digest_fn ref =
 let register_operator_digest_json fn =
   operator_digest_json_ref := fn
 
-let operator_snapshot_json ?actor ?view ?include_messages ?include_keepers ?include_summary_fields ?lightweight_summary ctx =
-  (!operator_snapshot_json_ref).snapshot ?actor ?view ?include_messages ?include_keepers ?include_summary_fields ?lightweight_summary ctx
+let operator_snapshot_json ?read_policy ?actor ?view ?include_messages ?include_keepers ?include_summary_fields ?lightweight_summary ctx =
+  (!operator_snapshot_json_ref).snapshot ?read_policy ?actor ?view ?include_messages ?include_keepers ?include_summary_fields ?lightweight_summary ctx
 
 let operator_digest_json ?actor ?target_type ?target_id ?include_workers ctx =
   (!operator_digest_json_ref).digest ?actor ?target_type ?target_id ?include_workers ctx

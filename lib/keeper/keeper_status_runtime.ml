@@ -208,6 +208,13 @@ let keeper_quiet_reason_to_string = function
   | Starting_up -> "startup"
   | Never_started -> "never_started"
 
+let keeper_quiet_reason_of_string_opt = function
+  | "disabled" -> Some Proactive_disabled
+  | "not_running" -> Some Keepalive_not_running
+  | "startup" -> Some Starting_up
+  | "never_started" -> Some Never_started
+  | _ -> None
+
 type keeper_next_action_path =
   | Recover
   | Probe

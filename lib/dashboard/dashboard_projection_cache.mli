@@ -68,6 +68,7 @@ val get_or_compute_digest_json :
 
 type operator_snapshot_fn = {
   snapshot : 'a.
+    ?read_policy:Dashboard_projection_read.t ->
     ?actor:string ->
     ?view:string ->
     ?include_messages:bool ->
@@ -93,6 +94,7 @@ val register_operator_snapshot_json : operator_snapshot_fn -> unit
 val register_operator_digest_json : operator_digest_fn -> unit
 
 val operator_snapshot_json :
+  ?read_policy:Dashboard_projection_read.t ->
   ?actor:string ->
   ?view:string ->
   ?include_messages:bool ->

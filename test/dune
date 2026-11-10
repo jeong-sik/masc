@@ -2730,6 +2730,7 @@
 (include stanzas/test_board_comment_admission.inc)
 (include stanzas/test_board_post_policy_admission.inc)
 (include stanzas/test_board_target_admission.inc)
+(include stanzas/test_board_cleanup_admission.inc)
 
 (include stanzas/test_board_sub_board_deletion_recovery.inc)
 (include stanzas/test_fs_compat_snapshot_guard.inc)

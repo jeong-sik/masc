@@ -3,7 +3,9 @@
 //
 // `p50_ms`, `p95_ms` and `max_ms` are null for a bucket in which no call ran:
 // there is no call to take them from, and a chart must leave a gap there
-// rather than draw zero. Fields the server adds later are dropped on decode.
+// rather than draw zero. `long_count` and `long_total_ms` are zero there:
+// no call ran past the line, and no time went into one. The line itself is
+// the response's `long_call_ms`. Fields the server adds later are dropped on decode.
 
 import { Schema } from 'effect'
 
@@ -15,6 +17,8 @@ const SeriesStatFields = {
   p50_ms: Schema.NullOr(Schema.Finite),
   p95_ms: Schema.NullOr(Schema.Finite),
   max_ms: Schema.NullOr(Schema.Finite),
+  long_count: Schema.Finite,
+  long_total_ms: Schema.Finite,
 }
 
 const ToolMetricsSeriesBucketSchema = Schema.Struct({
@@ -38,6 +42,8 @@ const ToolMetricsSeriesResponseSchema = Schema.Struct({
     utc_offset_min: Schema.Finite,
   }),
   tool: Schema.NullOr(Schema.String),
+  /** A call that ran at least this many milliseconds counts as long. */
+  long_call_ms: Schema.Finite,
   total: Schema.Struct(SeriesStatFields),
   buckets: Schema.Array(ToolMetricsSeriesBucketSchema),
   top_by_time: Schema.Array(ToolMetricsSeriesToolSchema),

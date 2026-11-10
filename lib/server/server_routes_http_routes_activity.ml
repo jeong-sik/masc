@@ -538,12 +538,12 @@ let board_curation_json ~reader () =
   | Some snap -> `Assoc [ ("snapshot", Board_curation.snapshot_to_yojson snap) ]
 
 let board_sub_boards_json ~reader () =
-  let sub_boards = Board_dispatch.list_sub_boards ~reader () in
+  Board_dispatch.list_sub_boards ~reader () |> Result.map (fun sub_boards ->
   `Assoc
     [
       ( "sub_boards",
         `List (List.map Board.sub_board_to_yojson sub_boards) );
-    ]
+    ])
 
 let board_karma_ledger_json ~reader req =
   let agent = query_param req "agent" in
@@ -837,6 +837,12 @@ let handle_board_context_inference_request
 let respond_board_json reqd json =
   Http.Response.json_value json reqd
 
+let respond_board_sub_boards reqd ~reader =
+  match board_sub_boards_json ~reader () with
+  | Ok json -> respond_board_json reqd json
+  | Error error -> Http.Response.json_value ~status:`Service_unavailable
+      (`Assoc [("error", `String (Board_tool.board_error_to_string error))]) reqd
+
 let add_routes ~sw ~clock router =
   router
   |> Server_route.get Server_route.Public_read "/api/v1/activity/events" (fun state req reqd ->
@@ -1055,7 +1061,7 @@ let add_routes ~sw ~clock router =
          Server_auth.with_board_access
            ~base_path:(Mcp_server.workspace_config state).base_path
            req reqd (fun reader _board_reader_actor ->
-         respond_board_json reqd (board_sub_boards_json ~reader ())
+         respond_board_sub_boards reqd ~reader
        ))
 
   |> Server_route.post (Server_route.Tool_actor { tool_name = Keeper_tool_name.(to_string Keeper_delegate) }) "/api/v1/board/context-inference" (fun state submitted_by request reqd ->
@@ -1093,7 +1099,7 @@ let add_routes ~sw ~clock router =
               | Ok sb ->
                   Http.Response.json_value (Board.sub_board_to_yojson sb) reqd
               | Error e ->
-                  Http.Response.json_value ~status:`Bad_request
+                  Http.Response.json_value ~status:(board_sub_board_error_status ~fallback:`Bad_request e)
                     (`Assoc [("error", `String (Board_tool.board_error_to_string e))])
                     reqd)
            with Yojson.Json_error msg ->
@@ -1125,7 +1131,7 @@ let add_routes ~sw ~clock router =
               let owner = String.trim agent_name in
               (match Board_dispatch.get_sub_board ~reader ~sub_board_id with
                | Error e ->
-                   Http.Response.json_value ~status:`Not_found
+                   Http.Response.json_value ~status:(board_sub_board_error_status ~fallback:`Not_found e)
                      (`Assoc [("error", `String (Board_tool.board_error_to_string e))])
                      reqd
                | Ok sb when not (sub_board_owner_matches ~owner sb) ->
@@ -1137,7 +1143,7 @@ let add_routes ~sw ~clock router =
                | Ok () ->
                    Http.Response.json_value (`Assoc [("deleted", `Bool true)]) reqd
                | Error e ->
-                   Http.Response.json_value ~status:`Not_found
+                   Http.Response.json_value ~status:(board_sub_board_error_status ~fallback:`Not_found e)
                      (`Assoc [("error", `String (Board_tool.board_error_to_string e))])
                      reqd)))
          ))
@@ -1169,7 +1175,7 @@ let add_routes ~sw ~clock router =
                   let owner = String.trim agent_name in
                   (match Board_dispatch.get_sub_board ~reader ~sub_board_id with
                    | Error e ->
-                       Http.Response.json_value ~status:`Not_found
+                       Http.Response.json_value ~status:(board_sub_board_error_status ~fallback:`Not_found e)
                          (`Assoc [("error", `String (Board_tool.board_error_to_string e))])
                          reqd
                    | Ok sb when not (sub_board_owner_matches ~owner sb) ->
@@ -1181,7 +1187,7 @@ let add_routes ~sw ~clock router =
                    | Ok sb ->
                        Http.Response.json_value (Board.sub_board_to_yojson sb) reqd
                    | Error e ->
-                       Http.Response.json_value ~status:`Bad_request
+                       Http.Response.json_value ~status:(board_sub_board_error_status ~fallback:`Bad_request e)
                          (`Assoc [("error", `String (Board_tool.board_error_to_string e))])
                          reqd)))
            with Yojson.Json_error msg ->
@@ -1202,7 +1208,7 @@ let add_routes ~sw ~clock router =
           | Some "curation" ->
               respond_board_json reqd (board_curation_json ~reader ())
           | Some "sub-boards" ->
-              respond_board_json reqd (board_sub_boards_json ~reader ())
+              respond_board_sub_boards reqd ~reader
           | Some "karma/ledger" ->
               respond_board_json reqd (board_karma_ledger_json ~reader req)
           | Some post_id ->

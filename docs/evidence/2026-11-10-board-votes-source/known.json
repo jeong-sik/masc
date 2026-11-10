@@ -1,0 +1,132 @@
+{
+  "scope": "Actual Chromium and source components, synthetic HTTP only; no live backend writes",
+  "before": {
+    "buttons": [
+      {
+        "label": "추천",
+        "disabled": false,
+        "pressed": "false"
+      },
+      {
+        "label": "비추천",
+        "disabled": false,
+        "pressed": "false"
+      },
+      {
+        "label": "▲ 추천",
+        "disabled": false,
+        "pressed": "false"
+      },
+      {
+        "label": "▼ 비추천",
+        "disabled": false,
+        "pressed": "false"
+      },
+      {
+        "label": "댓글 추천",
+        "disabled": false,
+        "pressed": "false"
+      },
+      {
+        "label": "댓글 비추천",
+        "disabled": false,
+        "pressed": "false"
+      }
+    ],
+    "calls": [
+      {
+        "method": "GET",
+        "path": "/api/v1/board"
+      },
+      {
+        "method": "GET",
+        "path": "/api/v1/board/p-vote-source"
+      },
+      {
+        "method": "GET",
+        "path": "/api/v1/board/reactions/batch"
+      },
+      {
+        "method": "GET",
+        "path": "/api/v1/board/hearths"
+      },
+      {
+        "method": "GET",
+        "path": "/api/v1/board/flairs"
+      },
+      {
+        "method": "GET",
+        "path": "/api/v1/board/reactions"
+      },
+      {
+        "method": "GET",
+        "path": "/api/v1/board/reactions"
+      },
+      {
+        "method": "GET",
+        "path": "/api/v1/board/p-vote-source"
+      },
+      {
+        "method": "GET",
+        "path": "/api/v1/board/reactions"
+      }
+    ],
+    "failures": []
+  },
+  "after": {
+    "pressed": "true",
+    "disabled": true,
+    "calls": [
+      {
+        "method": "GET",
+        "path": "/api/v1/board"
+      },
+      {
+        "method": "GET",
+        "path": "/api/v1/board/p-vote-source"
+      },
+      {
+        "method": "GET",
+        "path": "/api/v1/board/reactions/batch"
+      },
+      {
+        "method": "GET",
+        "path": "/api/v1/board/hearths"
+      },
+      {
+        "method": "GET",
+        "path": "/api/v1/board/flairs"
+      },
+      {
+        "method": "GET",
+        "path": "/api/v1/board/reactions"
+      },
+      {
+        "method": "GET",
+        "path": "/api/v1/board/reactions"
+      },
+      {
+        "method": "GET",
+        "path": "/api/v1/board/p-vote-source"
+      },
+      {
+        "method": "GET",
+        "path": "/api/v1/board/reactions"
+      },
+      {
+        "method": "POST",
+        "path": "/api/v1/tools/masc_board_vote",
+        "body": {
+          "post_id": "p-vote-source",
+          "direction": "up",
+          "voter": "dashboard-user"
+        }
+      },
+      {
+        "method": "GET",
+        "path": "/api/v1/dashboard/board"
+      }
+    ],
+    "failures": []
+  }
+}

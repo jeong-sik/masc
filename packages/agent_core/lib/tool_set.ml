@@ -48,11 +48,6 @@ let of_list tools =
 
 let merge left right = of_list (left.tools @ right.tools)
 
-let concat sets =
-  let all_tools = List.concat_map (fun s -> s.tools) sets in
-  of_list all_tools
-;;
-
 let to_list set = set.tools
 let find name set = Tool_map.find_opt name set.by_name
 let mem name set = Tool_map.mem name set.by_name

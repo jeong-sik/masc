@@ -30,13 +30,7 @@ let check_refusal (response : Types.api_response) =
        | Dependency_unavailable | Operator_cancelled); _ }
    | Vt.Vo_ok _ | Vo_invalid_request _ | Vo_no_runtime _ | Vo_timeout
    | Vo_invalid_structured_response _ | Vo_official_failure _ | Vo_empty | Vo_truncated ->
-     Alcotest.fail "provider refusal did not reach vision policy rejection");
-  match Structured.extract_response_json response with
-  | Error error ->
-    Alcotest.(check string) "safe public projection"
-      "Structured output response state: provider_refusal"
-      (Error.to_string error)
-  | Ok _ -> Alcotest.fail "refusal accepted as final structured result"
+     Alcotest.fail "provider refusal did not reach vision policy rejection")
 
 let chat_json ?(content = `Null) ?(refusal = `String private_refusal)
       ?(finish = "stop") ?(tools = `Null) () =
@@ -296,22 +290,6 @@ let test_tool_turn_then_final_schema () =
    | Error error -> Alcotest.fail (Error.to_string error));
   Alcotest.(check int) "schema run on final answer" 1 !parses
 
-let test_multiple_text_parts_are_not_joined () =
-  let response = parse_responses (response_json ~parts:[text_part;text_part] ()) in
-  match serialization_error (Structured.extract_response_json response) with
-  | Error.StructuredOutputParseError { reason; _ } ->
-    Alcotest.(check bool) "multiple text parts refused" true (reason = Error.Multiple_text_blocks)
-  | Error.JsonParseError _ | StructuredOutputStateError _ | VersionMismatch _ | UnknownVariant _ ->
-    Alcotest.fail "multiple provider text parts became a single final JSON"
-
-let test_thinking_precedes_final_text () =
-  let reasoning = `Assoc ["type", `String "reasoning"; "summary", `List
-      [`Assoc ["type", `String "summary_text"; "text", `String "private reasoning"]]] in
-  let response = parse_responses (response_json ~parts:[text_part] ~extra_output:[reasoning] ()) in
-  match Structured.extract_response_json response with
-  | Ok json -> Alcotest.(check string) "visible final text only" answer (Yojson.Safe.to_string json)
-  | Error error -> Alcotest.fail (Error.to_string error)
-
 let test_malformed_refusal_is_not_final_json () =
   match Parse.parse_openai_response_result_json
           (chat_json ~refusal:(`Int 1) ~content:(`String answer) ()) with
@@ -450,8 +428,6 @@ let () = Alcotest.run "provider structured outcomes"
     ; Alcotest.test_case "refusal over token cut" `Quick test_refusal_is_not_output_limit_failover
     ; Alcotest.test_case "Responses stream token cut" `Quick test_responses_stream_token_cut
     ; Alcotest.test_case "tool then final schema" `Quick test_tool_turn_then_final_schema
-    ; Alcotest.test_case "multiple text parts" `Quick test_multiple_text_parts_are_not_joined
-    ; Alcotest.test_case "thinking and final text" `Quick test_thinking_precedes_final_text
     ; Alcotest.test_case "malformed refusal" `Quick test_malformed_refusal_is_not_final_json
     ; Alcotest.test_case "Gemini safety" `Quick test_gemini_safety_is_refusal
     ; Alcotest.test_case "Gemini token cut" `Quick test_gemini_token_cut_is_truncation

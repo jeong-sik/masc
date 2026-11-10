@@ -29,21 +29,26 @@ let with_temp_base_path f =
 
 let test_valid_sha256 () =
   Alcotest.(check bool) "exact 64 lowercase hex" true
-    (A.is_valid_sha256
-       "abc1234567890123456789012345678901234567890123456789012345678901");
+    (Result.is_ok
+       (B.validate_sha256
+          "abc1234567890123456789012345678901234567890123456789012345678901"));
   Alcotest.(check bool) "uppercase hex" false
-    (A.is_valid_sha256
-       "ABC1234567890123456789012345678901234567890123456789012345678901");
+    (Result.is_ok
+       (B.validate_sha256
+          "ABC1234567890123456789012345678901234567890123456789012345678901"));
   Alcotest.(check bool) "63 chars" false
-    (A.is_valid_sha256
-       "abc123456789012345678901234567890123456789012345678901234567890");
+    (Result.is_ok
+       (B.validate_sha256
+          "abc123456789012345678901234567890123456789012345678901234567890"));
   Alcotest.(check bool) "65 chars" false
-    (A.is_valid_sha256
-       "abc12345678901234567890123456789012345678901234567890123456789012");
+    (Result.is_ok
+       (B.validate_sha256
+          "abc12345678901234567890123456789012345678901234567890123456789012"));
   Alcotest.(check bool) "non-hex char" false
-    (A.is_valid_sha256
-       "ghi1234567890123456789012345678901234567890123456789012345678901");
-  Alcotest.(check bool) "empty" false (A.is_valid_sha256 "")
+    (Result.is_ok
+       (B.validate_sha256
+          "ghi1234567890123456789012345678901234567890123456789012345678901"));
+  Alcotest.(check bool) "empty" false (Result.is_ok (B.validate_sha256 ""))
 
 let test_artifact_bytes_require_operator_auth () =
   Alcotest.(check bool)

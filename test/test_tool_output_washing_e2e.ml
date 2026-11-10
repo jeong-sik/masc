@@ -327,14 +327,15 @@ let test_full_flow_externalize_reference_serve () =
 
 let test_endpoint_rejects_invalid_sha () =
   Alcotest.(check bool) "exact 64 hex" true
-    (A.is_valid_sha256 (String.make 64 'a'));
+    (Result.is_ok (Tool_blob_store.validate_sha256 (String.make 64 'a')));
   Alcotest.(check bool) "63 chars" false
-    (A.is_valid_sha256 (String.make 63 'a'));
+    (Result.is_ok (Tool_blob_store.validate_sha256 (String.make 63 'a')));
   Alcotest.(check bool) "non-hex" false
-    (A.is_valid_sha256
-       ("g" ^ String.make 63 'a'));
+    (Result.is_ok
+       (Tool_blob_store.validate_sha256
+          ("g" ^ String.make 63 'a')));
   Alcotest.(check bool) "path-traversal attempt" false
-    (A.is_valid_sha256 "../../etc/passwd")
+    (Result.is_ok (Tool_blob_store.validate_sha256 "../../etc/passwd"))
 
 let () =
   Alcotest.run "tool_output_washing_e2e"

@@ -9,27 +9,6 @@
 (** Store handle wrapping a root directory. *)
 type t = { root : string }
 
-(** One loadable runtime run from the store. [path] points at the canonical
-    [session.json]. Run ordering is deterministic: ascending
-    [session.updated_at], then ascending [session.session_id]. *)
-type run_record =
-  { session : Runtime.session
-  ; path : string
-  }
-
-(** Non-fatal run/window read failure. Listing APIs keep loading other runs
-    and report corrupted or incomplete directories here. *)
-type run_load_failure =
-  { session_id : string
-  ; path : string
-  ; detail : string
-  }
-
-type run_listing =
-  { runs : run_record list
-  ; failures : run_load_failure list
-  }
-
 (** {1 Store creation} *)
 
 val create : ?root:string -> unit -> (t, Error.t) result
@@ -52,4 +31,3 @@ val load_text : string -> (string, Error.t) result
 
 val save_session : t -> Runtime.session -> (unit, Error.t) result
 val load_session : t -> string -> (Runtime.session, Error.t) result
-val list_runs : t -> (run_listing, Error.t) result

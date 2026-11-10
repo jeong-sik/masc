@@ -10045,6 +10045,15 @@ type state = {
   (* The read those turns owe: drawing them, a push about the Keeper's turns, a
      revalidation and a failed read each owe it. *)
   mutable keeper_story_turns_owed: Masc_tui_owed_read.t;
+  (* Independently delivered, Keeper-keyed reads for the Memory dock. *)
+  mutable keeper_story_memory_facts:
+    (string, Masc.Tui_decode_memory_facts.memory_fact_snapshot * string option) Masc_tui_fetched.t;
+  mutable keeper_story_memory_activity: (string, Masc.Keeper_memory_activity.t) Masc_tui_fetched.t;
+  mutable keeper_story_memory_facts_owed: Masc_tui_owed_read.t;
+  mutable keeper_story_memory_activity_owed: Masc_tui_owed_read.t;
+  mutable keeper_story_memory_view: Masc_tui_keeper_story.memory_view;
+  mutable keeper_story_memory_offset: int;
+  mutable keeper_story_memory_owner: string option;
   mutable keeper_list_sort: Masc_tui_keeper_list_model.sort;
   mutable keeper_list_preference_notice: string option;
   mutable keeper_list_preference_startup_error: string option;
@@ -15042,6 +15051,10 @@ let suspend_workspace_readings state =
   state.schedules_page_owed <- Masc_tui_owed_read.settled;
   state.keeper_schedules_owed <- None;
   state.keeper_story_turns <- Masc_tui_fetched.suspend state.keeper_story_turns;
+  state.keeper_story_memory_facts <- Masc_tui_fetched.suspend state.keeper_story_memory_facts;
+  state.keeper_story_memory_activity <- Masc_tui_fetched.suspend state.keeper_story_memory_activity;
+  state.keeper_story_memory_facts_owed <- Masc_tui_owed_read.settled;
+  state.keeper_story_memory_activity_owed <- Masc_tui_owed_read.settled;
   state.keeper_story_turns_owed <- Masc_tui_owed_read.settled;
   state.chat_native_tasks_owed <- None;
   state.chat_child_content_owed <- None;
@@ -20334,6 +20347,13 @@ let create_state
   keeper_story = None;
   keeper_story_turns = Masc_tui_fetched.initial;
   keeper_story_turns_owed = Masc_tui_owed_read.settled;
+  keeper_story_memory_facts = Masc_tui_fetched.initial;
+  keeper_story_memory_activity = Masc_tui_fetched.initial;
+  keeper_story_memory_facts_owed = Masc_tui_owed_read.settled;
+  keeper_story_memory_activity_owed = Masc_tui_owed_read.settled;
+  keeper_story_memory_view = Masc_tui_keeper_story.Memory_summary;
+  keeper_story_memory_offset = 0;
+  keeper_story_memory_owner = None;
   keeper_list_sort = Masc_tui_keeper_list_model.Priority;
   keeper_list_preference_notice = None;
   keeper_list_preference_startup_error = None;

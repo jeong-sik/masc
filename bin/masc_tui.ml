@@ -6608,6 +6608,19 @@ let launch_keeper_story_turns_load state ~mailbox ~keeper_name ~refresh =
             (fun () -> Masc_tui_http.fetch_keeper_story_turns ~host ~port ~keeper_name)
   end
 
+(* Independent Memory dock sources deliver without waiting for one another. *)
+let launch_keeper_story_memory_read state ~mailbox ~keeper_name ~refresh
+    source owed ~set_source ~set_owed ~deliver read =
+  if server_authority_ready state
+     && (refresh || Masc_tui_fetched.current_key source <> Some keeper_name) then
+    match Masc_tui_fetched.start ~equal:String.equal source ~key:keeper_name with
+    | Masc_tui_fetched.Already_loading -> ()
+    | Masc_tui_fetched.Started (next, request) ->
+      set_source next;
+      set_owed (Masc_tui_owed_read.started owed);
+      launch_workspace_json_read state ~mailbox
+        ~deliver:(fun result -> Keeper_msg (deliver request result)) read
+
 let launch_memory_health_load state ~mailbox =
   if server_authority_ready state then begin
   if state.memory_health_inflight
@@ -8484,6 +8497,8 @@ let owe_machine_live_read state machine =
 (* The fleet memory health reads on arrival, on a revalidation, when a row
    read cannot be merged, and again after a failed read (RFC-0487). *)
 let owe_memory_health_read state =
+  state.keeper_story_memory_facts_owed <- Masc_tui_owed_read.changed state.keeper_story_memory_facts_owed;
+  state.keeper_story_memory_activity_owed <- Masc_tui_owed_read.changed state.keeper_story_memory_activity_owed;
   state.memory_health_owed <- Masc_tui_owed_read.changed state.memory_health_owed
 
 (* The input pane shows the selected Keeper's turn records. A memory health
@@ -8495,6 +8510,10 @@ let owe_memory_input_read state =
    Keeper's row is read on its own and merged into the fleet answer, so a
    Keeper that writes often costs one row per push (RFC-0487). *)
 let owe_memory_health_row state keeper =
+  if Masc_tui_fetched.current_key state.keeper_story_memory_facts = Some keeper then
+    state.keeper_story_memory_facts_owed <- Masc_tui_owed_read.changed state.keeper_story_memory_facts_owed;
+  if Masc_tui_fetched.current_key state.keeper_story_memory_activity = Some keeper then
+    state.keeper_story_memory_activity_owed <- Masc_tui_owed_read.changed state.keeper_story_memory_activity_owed;
   if not (List.exists (String.equal keeper) state.memory_health_rows_owed) then
     state.memory_health_rows_owed <- state.memory_health_rows_owed @ [ keeper ]
 
@@ -8806,6 +8825,7 @@ let cycle_surface state ~mailbox ~backwards =
 
 let launch_keeper_older_page state ~mailbox ~keeper_name ~cursor =
   if server_authority_ready state then begin
+  Masc_tui_frame_timing.time_stage ~name:"chat.older.requested" (fun () -> ());
   (* Explicit/resumed paging owns the cursor from here. A still-running cold
      first page must not later rewind it, even if both requested [None]. *)
   (match state.msg_history_inflight with
@@ -10183,6 +10203,42 @@ let launch_owed_keeper_story_turns state ~mailbox =
       if not other_keeper_reading then
         launch_keeper_story_turns_load state ~mailbox ~keeper_name
           ~refresh:(Masc_tui_owed_read.due ~now:(monotonic_now_s ()) read)
+
+(* Hidden docks stay owed. Cursor movement waits for the previous request,
+   then reads only the Keeper actually still selected. *)
+let launch_owed_keeper_story_memory state ~mailbox =
+  let keeper =
+    if state.view = Keepers Keeper_list && state.keeper_story = Some Masc_tui_keeper_story.Memory
+    then Option.map (fun (keeper : keeper) -> keeper.k_name) (selected_keeper state)
+    else None in
+  match keeper with
+  | None ->
+    state.keeper_story_memory_facts_owed <- Masc_tui_owed_read.changed Masc_tui_owed_read.settled;
+    state.keeper_story_memory_activity_owed <- Masc_tui_owed_read.changed Masc_tui_owed_read.settled
+  | Some keeper_name ->
+    if state.keeper_story_memory_owner <> Some keeper_name then begin
+      state.keeper_story_memory_owner <- Some keeper_name;
+      state.keeper_story_memory_offset <- 0
+    end;
+    let drive source owed ~set_source ~set_owed ~deliver read =
+      let reading = Masc_tui_fetched.in_flight source in
+      let owed = if reading then owed else Masc_tui_owed_read.abandoned owed in
+      set_owed owed;
+      if not (reading && Masc_tui_fetched.current_key source <> Some keeper_name) then
+        launch_keeper_story_memory_read state ~mailbox ~keeper_name
+          ~refresh:(Masc_tui_owed_read.due ~now:(monotonic_now_s ()) owed)
+          source owed ~set_source ~set_owed ~deliver read in
+    let host = server_peer_host and port = state.port in
+    drive state.keeper_story_memory_facts state.keeper_story_memory_facts_owed
+      ~set_source:(fun source -> state.keeper_story_memory_facts <- source)
+      ~set_owed:(fun owed -> state.keeper_story_memory_facts_owed <- owed)
+      ~deliver:(fun request result -> Keeper_story_memory_facts_loaded (request, result))
+      (fun () -> Masc_tui_loader.load_keeper_story_memory_facts ~host ~port ~keeper_name);
+    drive state.keeper_story_memory_activity state.keeper_story_memory_activity_owed
+      ~set_source:(fun source -> state.keeper_story_memory_activity <- source)
+      ~set_owed:(fun owed -> state.keeper_story_memory_activity_owed <- owed)
+      ~deliver:(fun request result -> Keeper_story_memory_activity_loaded (request, result))
+      (fun () -> Masc_tui_http.fetch_keeper_memory_activity ~host ~port ~keeper_name)
 
 (* The Keeper whose chat pane is open; its native tasks and child content are
    drawn beside the transcript. *)
@@ -17518,6 +17574,12 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
   state.memory_input <- Masc_tui_fetched.clear state.memory_input;
   state.memory_input_owed <- Masc_tui_owed_read.settled;
   state.keeper_story_turns <- Masc_tui_fetched.clear state.keeper_story_turns;
+  state.keeper_story_memory_facts <- Masc_tui_fetched.clear state.keeper_story_memory_facts;
+  state.keeper_story_memory_activity <- Masc_tui_fetched.clear state.keeper_story_memory_activity;
+  state.keeper_story_memory_facts_owed <- Masc_tui_owed_read.settled;
+  state.keeper_story_memory_activity_owed <- Masc_tui_owed_read.settled;
+  state.keeper_story_memory_owner <- None;
+  state.keeper_story_memory_offset <- 0;
   state.keeper_story_turns_owed <- Masc_tui_owed_read.settled;
   state.memory_health <- None;
   state.memory_health_error <- None;
@@ -19250,6 +19312,20 @@ let keeper_story_action state key =
    that was under the cursor. Only [Open_detail] leaves the list. *)
 let apply_keeper_story_action state ~mailbox = function
   | Masc_tui_keeper_story.Show page -> state.keeper_story <- Some page
+  | Masc_tui_keeper_story.Show_memory view ->
+      state.keeper_story_memory_view <- view;
+      state.keeper_story_memory_offset <- 0
+  | Masc_tui_keeper_story.Scroll_memory delta ->
+      (match selected_keeper state with
+       | None -> ()
+       | Some keeper ->
+         if state.keeper_story_memory_owner <> Some keeper.k_name then begin
+           state.keeper_story_memory_owner <- Some keeper.k_name;
+           state.keeper_story_memory_offset <- 0
+         end;
+         let maximum = max 0 (Masc_tui_render_keeper_memory.row_count state ~keeper_name:keeper.k_name - 1) in
+         state.keeper_story_memory_offset <-
+           max 0 (min maximum (state.keeper_story_memory_offset + delta)))
   | Masc_tui_keeper_story.Close -> state.keeper_story <- None
   | Masc_tui_keeper_story.Open_world -> open_keeper_world state
   | Masc_tui_keeper_story.Open_detail ->
@@ -23322,7 +23398,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
         | Keeper_action_done (_, _, _, _) | Keeper_memory_catch_up_done _)
         | (Board_msg (Board_publication_done _ | Board_comment_done _)) | (Board_msg (Board_vote_done _) | Artifact_msg (Artifact_check_changed _)) | Goal_msg (Goal_transition_done _
         | Goal_confirmation_submitted _ | Goal_confirmation_loaded (_, _)) | Schedule_msg (Schedules_loaded (_, _)
-        | Schedule_wake_history_loaded (_, _)) | Keeper_msg (Keeper_schedules_loaded (_, _) | Keeper_story_turns_loaded (_, _))
+        | Schedule_wake_history_loaded (_, _)) | Keeper_msg (Keeper_schedules_loaded (_, _) | Keeper_story_turns_loaded (_, _) | Keeper_story_memory_facts_loaded (_, _) | Keeper_story_memory_activity_loaded (_, _))
         | System_log_streamed _ | Schedule_msg (Schedule_cancel_done (_, _)) | Verification_msg (Verification_verdict_done _)
         | Harness_msg (Harness_label_done _) | Board_msg (Board_attachment_loaded _ | Board_attachment_prepared _ | Board_attachment_saved _) | Chat_msg (Chat_call_loaded _) | Keeper_msg (Keeper_calls_loaded (_, _, _)) | Goal_msg (Goal_timeline_loaded (_, _) | Goal_candle_loaded (_, _))
         | Task_msg (Task_history_loaded (_, _) | Task_cancel_done (_, _, _))
@@ -26543,6 +26619,20 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
            | Error _ -> failed_read state.keeper_story_turns_owed);
       state.keeper_story_turns <-
         Masc_tui_fetched.complete ~equal:String.equal state.keeper_story_turns request result
+  | Keeper_msg (Keeper_story_memory_facts_loaded (request, result)) ->
+      if Masc_tui_fetched.is_current ~equal:String.equal state.keeper_story_memory_facts request then
+        state.keeper_story_memory_facts_owed <-
+          (match result with Ok _ -> Masc_tui_owed_read.succeeded state.keeper_story_memory_facts_owed
+           | Error _ -> failed_read state.keeper_story_memory_facts_owed);
+      state.keeper_story_memory_facts <-
+        Masc_tui_fetched.complete ~equal:String.equal state.keeper_story_memory_facts request result
+  | Keeper_msg (Keeper_story_memory_activity_loaded (request, result)) ->
+      if Masc_tui_fetched.is_current ~equal:String.equal state.keeper_story_memory_activity request then
+        state.keeper_story_memory_activity_owed <-
+          (match result with Ok _ -> Masc_tui_owed_read.succeeded state.keeper_story_memory_activity_owed
+           | Error _ -> failed_read state.keeper_story_memory_activity_owed);
+      state.keeper_story_memory_activity <-
+        Masc_tui_fetched.complete ~equal:String.equal state.keeper_story_memory_activity request result
   | Schedule_msg (Schedule_cancel_done (schedule_id, result)) -> (
       match result with
       | Ok message ->
@@ -29135,6 +29225,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
         ~outcome:(if not admitted then "discarded" else
           match result with Ok _ -> "received" | Error _ -> "failed")
   | Keeper_msg (Keeper_chat_older_loaded (generation, keeper_name, cursor, result)) ->
+      Masc_tui_frame_timing.time_stage ~name:"chat.older.apply" (fun () ->
       (* A page that arrived for a keeper the pane has since left, or after a
          reload moved the cursor, is dropped: prepending it would put rows
          above a transcript they do not belong to. *)
@@ -29149,6 +29240,13 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
         state.msg_older_loading <- false;
         match result with
         | Ok page ->
+            let observation =
+              if Masc_tui_frame_timing.enabled then
+                Some (Masc_tui_message_input.revision state.msg_input,
+                  state.msg_scroll, state.msg_scroll_pin,
+                  List.length (keeper_chat_history_rows state.msg_loaded_sources.kcs_history))
+              else None
+            in
             let journal_targets =
               if state.msg_journal_reads_refused then []
               else journal_source_fetch_targets ~keeper_name
@@ -29160,21 +29258,24 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                 |> List.map (fun (source, at) -> source, at,
                     journal_resume_position state ~keeper_name source)
             in
-            let rows =
+            let rows = Masc_tui_frame_timing.time_stage ~name:"chat.older.rows" (fun () ->
               msg_entries_of_history_rows state keeper_name
                 page.Keeper_chat_history.decoded.Keeper_chat_history.rows
+              )
             in
             (* The paging cursor owns the raw storage window, so an older page
                is prepended here. [chat_timeline] then recomputes the one
                displayed-time projection across that complete window; scroll
                pins retain row identity rather than this cache position. *)
             let held = keeper_chat_history_rows state.msg_loaded_sources.kcs_history in
-            let history = prepend_older_history_page ~older:rows ~held in
+            let history = Masc_tui_frame_timing.time_stage ~name:"chat.older.merge" (fun () ->
+              prepend_older_history_page ~older:rows ~held) in
             set_keeper_chat_sources state {state.msg_loaded_sources with kcs_history=Chat_history_received history};
             (* Loaded rows arrive here too: a held turn whose rows only an
                older page carries gets its calls' outcome and duration the
                same way a refreshed page gives them. *)
-            enrich_held_logs_from_rows state ~keeper_name rows;
+            Masc_tui_frame_timing.time_stage ~name:"chat.older.enrich" (fun () ->
+              enrich_held_logs_from_rows state ~keeper_name rows);
             state.msg_loaded_dropped <-
               state.msg_loaded_dropped
               + page.Keeper_chat_history.decoded.Keeper_chat_history.dropped;
@@ -29186,6 +29287,13 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
               page.Keeper_chat_history.has_more
               && Option.is_some page.Keeper_chat_history.next_cursor;
             state.msg_older_error <- None;
+            Option.iter (fun (revision, scroll, pin, before_rows) ->
+              Masc_tui_frame_timing.note_chat_page_application
+                { keeper=keeper_name; generation; page_rows=List.length rows;
+                  before_rows; after_rows=List.length history;
+                  draft_preserved=Masc_tui_message_input.has_revision state.msg_input revision;
+                  scroll_preserved=state.msg_scroll = scroll;
+                  pin_preserved=state.msg_scroll_pin == pin }) observation;
             launch_keeper_chat_journal_loads state ~mailbox ~keeper_name journal_targets;
             launch_unavailable_journal_operations state ~mailbox ~keeper_name
         | Error Keeper_chat_history.Page_stale ->
@@ -29195,7 +29303,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
             state.msg_older_error <- Some (Keeper_chat_history.page_error_to_string Keeper_chat_history.Page_stale)
         | Error (Keeper_chat_history.Page_read_failed detail) ->
             (* A failed read retains its exact cursor for retry. *)
-            state.msg_older_error <- Some detail)
+            state.msg_older_error <- Some detail))
 (* How long one pass of the loop applies queued results before it goes back
    to read a key. Results arrive in bursts (a history page, then a journal
    read for each turn on it), and applying all of them in one pass held a
@@ -34178,6 +34286,7 @@ Use relative paths for resources already held in the package. -->
       launch_owed_schedules state ~mailbox:async_messages;
       launch_owed_keeper_schedules state ~mailbox:async_messages;
       launch_owed_keeper_story_turns state ~mailbox:async_messages;
+      launch_owed_keeper_story_memory state ~mailbox:async_messages;
       launch_owed_chat_journals state ~mailbox:async_messages;
       launch_owed_board_list state ~refresh_inflight:http_scoped_refresh_inflight
         ~full_refresh_inflight:http_refresh_inflight ~scoped_refresh_followup
@@ -40478,13 +40587,11 @@ Use relative paths for resources already held in the package. -->
                 if state.resource_focus = Right_pane then
                   state.resource_focus <- Left_pane
                 else
-                  (* Off-ring child: the way out of the list is the ring
-                     parent, loaded, same as Connectors and Code. *)
-                  goto_surface state ~mailbox:async_messages Config
+                  goto_surface state ~mailbox:async_messages
+                    (Masc_tui_surface_navigation.surface_ring_family state.view)
              | Clients ->
-                 (* Off-ring child: the way out is the ring parent, loaded,
-                    the same exit Resources takes to Config. *)
-                 goto_surface state ~mailbox:async_messages Runtime
+                 goto_surface state ~mailbox:async_messages
+                   (Masc_tui_surface_navigation.surface_ring_family state.view)
              | Lanes ->
                 state.lanes_action_error <- None;
                 (match state.lanes_mode with
@@ -40570,13 +40677,14 @@ Use relative paths for resources already held in the package. -->
                   (* Off-ring child: the way out of the list is Activity,
                      the ring parent, same as the other hang-offs. *)
                   goto_surface state ~mailbox:async_messages Acting
-            | Connectors -> state.view <- Keepers Keeper_detail
+            | Connectors ->
+                goto_surface state ~mailbox:async_messages
+                  (Masc_tui_surface_navigation.surface_ring_family state.view)
             | Memory ->
                 (match memory_back state with
                  | Memory_stays -> ()
                  | Memory_leaves -> state.view <- Overview)
             | Tools ->
-                (* Off-ring child: back to the parent that opened it. *)
                 if Option.is_some state.tools_async_task_source then begin
                   close_tools_async_task state;
                   launch_tools_async_detail state ~mailbox:async_messages
@@ -40584,7 +40692,8 @@ Use relative paths for resources already held in the package. -->
                   (* Back on the request list, which reads on its own pushes
                      ([launch_owed_async_requests]). *)
                   close_tools_async_detail state
-                else goto_surface state ~mailbox:async_messages Config
+                else goto_surface state ~mailbox:async_messages
+                  (Masc_tui_surface_navigation.surface_ring_family state.view)
             | Config ->
                 state.runtime_model_jump <- None;
                 state.runtime_config_jump_section <- None;
@@ -42251,7 +42360,8 @@ Use relative paths for resources already held in the package. -->
             | Masc_tui_types.Runtime_all ->
                 enter_standalone_lanes state ~mailbox:async_messages)
        | Some "p" | Some "P" when state.view = Clients ->
-           goto_surface state ~mailbox:async_messages Runtime
+           goto_surface state ~mailbox:async_messages
+             (Masc_tui_surface_navigation.surface_ring_family state.view)
        | Some "p" | Some "P"
          when state.view = Lanes && state.lanes_mode = Lanes_overview ->
            goto_surface state ~mailbox:async_messages Runtime

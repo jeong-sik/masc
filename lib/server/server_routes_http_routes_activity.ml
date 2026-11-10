@@ -973,7 +973,7 @@ let add_routes ~sw ~clock router =
               Server_board_reaction_http.targets_of_strings
                 ~target_type:(query_param req "target_type")
                 ~target_ids:(query_param req "target_ids")
-              |> Result.map (Server_board_reaction_http.list_batch_json ~reader ~actor)
+              |> fun parsed -> Result.bind parsed (Server_board_reaction_http.list_batch_json ~reader ~actor)
             in
             respond_board_reaction_result request reqd result))
 

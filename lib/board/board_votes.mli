@@ -331,3 +331,9 @@ val post_to_yojson_with_karma :
 val get_karma_by_post : store -> (string * (string * int) list) list
 (** Cached recipient -> parent post -> earned delta, sharing the lifetime and
     invalidation of [get_all_karma]. Comment votes resolve to their parent. *)
+
+val reload_reactions : store -> (int, board_error) result
+(** Explicit reaction model/source reload under persistence then state. A
+    complete load replaces the table; partial rows grant no mutation or full
+    summary authority. Pending deletion, uncertainty and unfinished publication
+    refuse reload. A fresh store observes current files without replaying intent. *)

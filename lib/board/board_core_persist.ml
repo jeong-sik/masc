@@ -43,7 +43,7 @@ let persist_io_error ~where msg =
   Error (Io_error (Printf.sprintf "%s: %s" where msg))
 ;;
 
-let create_store_with_source_io ~base_path posts_source_io comments_source_io sub_boards_source_io votes_source_io () =
+let create_store_with_source_io ~base_path posts_source_io comments_source_io sub_boards_source_io votes_source_io reactions_source_io () =
   let workspace_binding = Board_workspace_binding.capture ~base_path in
   { posts_source = Posts_unobserved
   ; posts_source_io
@@ -53,7 +53,8 @@ let create_store_with_source_io ~base_path posts_source_io comments_source_io su
   ; sub_boards_source_io
   ; votes_source = Votes_unobserved
   ; votes_source_io
-  ; reactions_load_result = Ok ()
+  ; reactions_source = Reactions_unobserved
+  ; reactions_source_io
   ; workspace_binding
   ; posts = Hashtbl.create 1024
   ; comments = Hashtbl.create 4096
@@ -85,15 +86,17 @@ let create_store_with_source_io ~base_path posts_source_io comments_source_io su
 ;;
 
 let create_store ~base_path () =
-  create_store_with_source_io ~base_path { posts = None } None None None ()
+  create_store_with_source_io ~base_path { posts = None } None None None None ()
 let create_store_with_source_io_for_testing ~base_path ~io () =
-  create_store_with_source_io ~base_path io None None None ()
+  create_store_with_source_io ~base_path io None None None None ()
 let create_store_with_comments_io_for_testing ~base_path ~io () =
-  create_store_with_source_io ~base_path { posts = None } (Some io) None None ()
+  create_store_with_source_io ~base_path { posts = None } (Some io) None None None ()
 let create_store_with_sub_boards_io_for_testing ~base_path ~io () =
-  create_store_with_source_io ~base_path { posts = None } None (Some io) None ()
+  create_store_with_source_io ~base_path { posts = None } None (Some io) None None ()
 let create_store_with_votes_io_for_testing ~base_path ~io () =
-  create_store_with_source_io ~base_path { posts = None } None None (Some io) ()
+  create_store_with_source_io ~base_path { posts = None } None None (Some io) None ()
+let create_store_with_reactions_io_for_testing ~base_path ~io () =
+  create_store_with_source_io ~base_path { posts = None } None None None (Some io) ()
 
 let require_comments_source_readable = Board_comments_source.require_readable
 
@@ -313,7 +316,7 @@ let sweep store =
        of a target and its dependents until all four sources loaded fully.
        The loader retains the typed failures for diagnosis and healthy reload. *)
     match Board_posts_source.require_readable store, require_comments_source_readable store,
-          Board_votes_source.require_readable store, store.reactions_load_result with
+          Board_votes_source.require_readable store, Board_reactions_source.require_readable store with
     | Error _, _, _, _ | _, Error _, _, _
     | _, _, Error _, _ | _, _, _, Error _ -> 0, 0
     | Ok (), Ok (), Ok (), Ok () ->
@@ -740,15 +743,25 @@ let reactions_jsonl_unlocked store =
     store.reactions;
   Buffer.contents buf
 ;;
+(* Deletion/flush captured an already-installed model in this persistence
+   interval. Acknowledge only the exact known-success file receipt. *)
 let save_reactions_jsonl_result store content =
+  let module Source = Board_reactions_source in
+  let outcome = Source.rewrite store content in
+  let result = match outcome with
+    | Source.Written { publication; _ } -> Source.acknowledge_publication store publication
+    | Source.Not_written _ | Source.Unknown _ -> Error (Io_error "Board data is unavailable.")
+  in
+  let result = Source.finish_write outcome result in
   try
-    let* () = ensure_masc_dir ~where:"rewrite_reactions" store in
-    let path = reactions_path store in
-    match Fs_compat.save_file_atomic path content with
-    | Ok () -> Ok ()
-    | Error msg -> persist_io_error ~where:"rewrite_reactions" msg
-  with
-  | Sys_error msg -> persist_io_error ~where:"rewrite_reactions" msg
+    (match result with
+     | Ok () -> ()
+     | Error error -> record_persist_error ~where:"rewrite_reactions" (show_board_error error));
+    result
+  with exception_ ->
+    let backtrace = Printexc.get_raw_backtrace () in
+    Board_posts_source.defer_reserved ~result exception_ backtrace;
+    Printexc.raise_with_backtrace exception_ backtrace
 ;;
 
 let sub_board_access_to_string = Board_sub_board_json.sub_board_access_to_string

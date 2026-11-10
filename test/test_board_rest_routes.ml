@@ -1566,9 +1566,11 @@ let test_board_reaction_batch_answers_every_id_asked_about () =
   Fs_compat.mkdir_p base_path;
   with_board_store ~base_path (fun () ->
   let json =
-    Server_board_reaction_http.list_batch_json ~reader:Masc_board_handlers.Board_access.Operator
+    match Server_board_reaction_http.list_batch_json ~reader:Masc_board_handlers.Board_access.Operator
       ~actor:"tester"
-      (parsed_targets "p-one,p-two,p-three")
+      (parsed_targets "p-one,p-two,p-three") with
+    | Ok json -> json
+    | Error error -> fail (Yojson.Safe.to_string (Server_board_reaction_http.error_json error))
   in
   check
     (list string)

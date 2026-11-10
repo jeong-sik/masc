@@ -135,6 +135,7 @@ let test_reserved_parent_cleanup_retains_deletion_order base_path =
     [Masc_board_handlers.Board_votes_json.load_persisted_posts;
      Masc_board_handlers.Board_votes_json.load_persisted_comments];
   ignore (require (Board.reload_votes stale));
+  ignore (require (Board.reload_reactions stale));
   let parent = post stale "known parent deletion before reserved cleanup" in
   let reply = comment stale parent "pending dependent cleanup" in
   let comments_path = Board.comments_path stale in

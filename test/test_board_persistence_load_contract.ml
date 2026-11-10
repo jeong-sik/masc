@@ -30,6 +30,11 @@ let fresh_test_base_path () =
   dir
 ;;
 
+let load_reactions store = match Board.reload_reactions store with
+  | Ok _ -> ()
+  | Error error -> Alcotest.fail (Board.show_board_error error)
+;;
+
 let load_sources store =
   List.iter (fun load ->
     match load store with
@@ -39,9 +44,10 @@ let load_sources store =
     [Masc_board_handlers.Board_votes_json.load_persisted_posts;
      Masc_board_handlers.Board_votes_json.load_persisted_comments;
      Board.reload_sub_boards];
-  match Board.reload_votes store with
-  | Ok _ -> ()
-  | Error error -> Alcotest.fail (Board.show_board_error error)
+  (match Board.reload_votes store with
+   | Ok _ -> ()
+   | Error error -> Alcotest.fail (Board.show_board_error error));
+  load_reactions store
 ;;
 
 let posts_source_health store =
@@ -195,6 +201,7 @@ let test_loader_keeps_only_current_rows () =
   Alcotest.(check bool) "expired comments remain a complete source" true
     (comments_source_health expired_store = Ok ());
   ignore (Result.get_ok (Board.reload_votes expired_store));
+  load_reactions expired_store;
   Alcotest.(check (pair int int)) "sweeper owns expiry after reload" (1, 1)
     (Board_core.sweep expired_store)
 ;;
@@ -297,6 +304,7 @@ let test_partial_load_never_rewrites_the_file () =
   Alcotest.(check bool) "comments load reports the damage" true
     (Result.is_error (Masc_board_handlers.Board_votes_json.load_persisted_comments store));
   ignore (Result.get_ok (Board.reload_votes store));
+  load_reactions store;
   Alcotest.(check bool) "posts after the damaged line are still served" true
     (Result.is_ok (Board_core.read_post store ~post_id:(Board.Post_id.to_string after.id)));
   let observed = match Board_core.observe_comments store

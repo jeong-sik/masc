@@ -1,8 +1,7 @@
-(** Persistence loaders. Posts, comments and reactions require quiescent
-    startup; the vote loader owns its persistence/state interval and also
-    serves explicit reload. All four refuse model replacement while deletion
-    work is pending. Counts describe accepted physical rows, including
-    duplicate identities. *)
+(** Persistence loaders. Posts and comments serve quiescent startup; votes
+    and reactions also serve explicit reload under their persistence/state
+    interval. All four refuse model replacement while deletion work is
+    pending. Counts include accepted duplicate physical rows. *)
 val load_persisted_posts : Board_types.store -> (int, string * exn) result
 val load_persisted_comments : Board_types.store -> (int, string * exn) result
 val load_persisted_votes : Board_types.store -> (int, string * exn) result

@@ -24,3 +24,13 @@ val try_handle_with_outcome :
 val path_probe_argv : string -> string list
 
 val path_missing_exit : int
+
+(** The program and arguments Grep runs inside the backend to learn whether its
+    rg can compile [pattern]: [rg -e pattern /dev/null]. It searches nothing, so
+    it exits 1 when the pattern is accepted and {!pattern_invalid_exit} when it
+    is not; any other status is a probe that did not run and proves nothing. A
+    failed rg search is called a bad pattern by that code, never by rg's
+    stderr. *)
+val pattern_probe_argv : string -> string list
+
+val pattern_invalid_exit : int

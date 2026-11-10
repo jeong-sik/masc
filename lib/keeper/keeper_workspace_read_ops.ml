@@ -62,6 +62,24 @@ let path_not_found_message ~where path =
     where
 ;;
 
+(* rg exits 2 for a pattern it cannot compile, and also for a missing path, an
+   unknown --type and a half-readable tree. [rg -e PATTERN /dev/null] searches
+   nothing, so it exits 1 when rg accepts the pattern and 2 when it does not.
+   [-e] keeps a pattern that starts with a dash a pattern, as in the search
+   itself. *)
+let pattern_invalid_exit = 2
+
+let pattern_probe_max_bytes = 1_024
+
+let pattern_probe_argv pattern = [ "rg"; "-e"; pattern; "/dev/null" ]
+
+(* Only the exit status of the probe proves a pattern invalid. A probe that
+   failed to run, or ended any other way, proves nothing. *)
+let proves_pattern_invalid = function
+  | Ok (Unix.WEXITED code, _) -> code = pattern_invalid_exit
+  | Ok ((Unix.WSIGNALED _ | Unix.WSTOPPED _), _) | Error _ -> false
+;;
+
 let rg_type_names listing =
   String.split_on_char '\n' listing
   |> List.filter_map (fun line ->
@@ -73,15 +91,27 @@ let rg_type_names listing =
 (* The failed rg and this inventory run on the same backend, so custom types
    from that backend's config are included. An incomplete or unavailable
    inventory cannot prove that the caller's type is invalid. *)
-let rg_error_class ~status ~file_type ~read_type_list =
+let type_is_unknown ~file_type ~read_type_list =
+  if String.equal file_type ""
+  then false
+  else (
+    match read_type_list () with
+    | Some listing when String.length listing < rg_type_list_max_bytes ->
+      (match rg_type_names listing with
+       | _ :: _ as names -> not (List.mem file_type names)
+       | [] -> false)
+    | Some _ | None -> false)
+;;
+
+(* Exit 2 is the caller's when the type is not one the backend knows or the
+   backend's own rg cannot compile the pattern. Any other exit 2 stays a
+   runtime failure: the caller's arguments are not proven wrong. *)
+let rg_error_class ~status ~file_type ~read_type_list ~pattern_is_invalid =
   match status with
-  | Unix.WEXITED 2 when not (String.equal file_type "") ->
-    (match read_type_list () with
-     | Some listing when String.length listing < rg_type_list_max_bytes ->
-       (match rg_type_names listing with
-        | _ :: _ as names when not (List.mem file_type names) -> Tool_result.Policy_rejection
-        | [] | _ :: _ -> Tool_result.Runtime_failure)
-     | Some _ | None -> Tool_result.Runtime_failure)
+  | Unix.WEXITED 2 ->
+    if type_is_unknown ~file_type ~read_type_list || pattern_is_invalid ()
+    then Tool_result.Policy_rejection
+    else Tool_result.Runtime_failure
   | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ -> Tool_result.Runtime_failure
 ;;
 
@@ -230,6 +260,19 @@ let try_handle_with_authority
                   ~timeout_sec:(Env_config_sandbox.Shell_timeout.timeout_sec ~bucket:Read ())
                   ())
            in
+           (* Asked only after rg failed with exit 2, on the backend that ran
+              it, so the answer is that backend's own rg. *)
+           let backend_pattern_is_invalid () =
+             proves_pattern_invalid
+               (run_command_with_status
+                  ~ok_exit_codes:[ 1; pattern_invalid_exit ]
+                  ~config
+                  ~meta
+                  ~command_argv:(pattern_probe_argv pattern)
+                  ~max_bytes:pattern_probe_max_bytes
+                  ~timeout_sec:(Env_config_sandbox.Shell_timeout.timeout_sec ~bucket:Read ())
+                  ())
+           in
            let rg_in_sandbox target =
                let base_argv = [ "rg"; "-n"; "-m"; string_of_int limit ] in
                let type_argv = if file_type <> "" then [ "--type"; file_type ] else [] in
@@ -304,10 +347,13 @@ let try_handle_with_authority
                             shown_path))
                   else
                     (* Preserve rg's own error payload. A missing --type can
-                       be established from this backend's type inventory;
-                       other exit-2 causes stay unclassified as caller errors. *)
+                       be established from this backend's type inventory and a
+                       pattern rg cannot compile from this backend's rg; other
+                       exit-2 causes stay runtime failures. *)
                     Keeper_tool_execution.failure
-                      ~class_:(rg_error_class ~status:st ~file_type ~read_type_list:(fun () ->
+                      ~class_:(rg_error_class ~status:st ~file_type
+                        ~pattern_is_invalid:backend_pattern_is_invalid
+                        ~read_type_list:(fun () ->
                         match
                           run_command_with_status
                             ~config ~meta ~command_argv:[ "rg"; "--type-list" ]

@@ -176,7 +176,8 @@ let runtime_request_config_json (rt : Runtime_instance.t) =
       ; "model", `String config.model
       ; "verified", `Bool false
       ]
-  | Runtime_execution.Agent_core cfg ->
+  | Runtime_execution.Agent_core sealed ->
+    let cfg = Runtime_account_access.api_declaration sealed in
     `Assoc
     [ "source", `String "agent_core-provider-config"
     ; "provider_kind", `String (Llm_provider.Provider_config.string_of_provider_kind cfg.kind)

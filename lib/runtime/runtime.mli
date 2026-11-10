@@ -336,9 +336,14 @@ val init_default : config_path:string -> (unit, string) result
     callers or {!init_default_degraded_report} for server boot). Safe for tests
     with arbitrary-model runtime fixtures. *)
 
-val exact_output_targets : t list -> Agent_core.Exact_output.declared_target list
+val exact_output_targets
+  :  t list
+  -> (Agent_core.Exact_output.declared_target list, Runtime_account_access.refusal) result
 (** The exact-output slots of [runtimes]: every HTTP binding, carried whole with
-    its resolved credential and its [exact-body-timeout-s]. A binding whose
+    its resolved credential and its [exact-body-timeout-s]. The credential
+    leaves the seal of the runtime table here, so a process that
+    {!Runtime_account_access.authorize_api} refuses gets the refusal and no
+    slot (plan D4). A binding whose
     runtime.toml states the five reads {!Runtime_exact_reads.parse} requires
     also declares its model: those reads as stated, laid over the
     capabilities its Keeper turns run on. The declaration answers where the
@@ -359,7 +364,7 @@ type exact_output_catalog =
 val exact_output_resolver_catalog :
   exact_output_lane_decls:Runtime_schema.exact_output_lane_decl list ->
   t list ->
-  exact_output_catalog
+  (exact_output_catalog, Runtime_account_access.refusal) result
 (** The catalog an exact-output resolver snapshot for [runtimes] is built from.
     {!exact_output_target_source} decides: the full replacement
     [AGENT_CORE_MODEL_CATALOG] names, or the embedded catalog with

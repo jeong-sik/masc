@@ -1719,20 +1719,27 @@ let help_rows = [
 ]
 
 (* Labels share one column, as wide as the longest label and a two-cell gap,
-   so the keys and the notes start under each other. *)
+   so the keys and the notes start under each other. A column wider than half
+   the width leaves the keys a sliver, so the label then takes its own row and
+   the keys and the notes hang two cells under it. *)
 let help_lines ~width =
   let label_cells = 2 + List.fold_left (fun widest -> function
     | Help_keys { group; _ } -> max widest (Masc_tui_message_layout.display_width group)
     | Help_title _ | Help_about _ | Help_note _ -> widest) 0 help_rows in
+  let beside = 2 * label_cells <= width in
+  let hang_cells = if beside then label_cells else max 0 (min 2 (width - 1)) in
+  let hang = Span.text Span.plain (String.make hang_cells ' ') in
   let split ~width text = Masc_tui_message_layout.wrap_words ~max_cells:width text in
   let rows = function
     | Help_title text -> led_rows ~split ~width ~lead:Span.empty ~text_style:(label_style ()) text
     | Help_about text -> led_rows ~split ~width ~lead:Span.empty ~text_style:Span.plain text
-    | Help_keys { group; keys } ->
+    | Help_keys { group; keys } when beside ->
         let lead = Span.pad_to label_cells Span.plain (Span.text (label_style ()) group) in
         led_rows ~split ~width ~lead ~text_style:Span.plain keys
-    | Help_note text ->
-        led_rows ~split ~width ~lead:(Span.text Span.plain (String.make label_cells ' ')) ~text_style:Span.plain text in
+    | Help_keys { group; keys } ->
+        led_rows ~split ~width ~lead:Span.empty ~text_style:(label_style ()) group
+        @ led_rows ~split ~width ~lead:hang ~text_style:Span.plain keys
+    | Help_note text -> led_rows ~split ~width ~lead:hang ~text_style:Span.plain text in
   List.concat_map (fun row ->
     List.map (fun span -> Span.render (Span.truncate width span)) (rows row)) help_rows
 

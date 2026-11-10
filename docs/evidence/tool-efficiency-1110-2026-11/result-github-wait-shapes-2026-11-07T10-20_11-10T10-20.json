@@ -1,0 +1,184 @@
+{
+  "window": {
+    "since": "2026-11-07T10:20:00Z",
+    "end": "2026-11-10T10:20:00Z",
+    "hours": 72.0
+  },
+  "execute": {
+    "calls": 61128,
+    "run_in_background": 77,
+    "long_calls": 675,
+    "long_run_in_background": 0
+  },
+  "github_wait": {
+    "calls": 517,
+    "hours": 30.839,
+    "shapes": {
+      "single_run": {
+        "calls": 159,
+        "hours": 11.858,
+        "share_of_hours": 0.3845,
+        "top_keepers": [
+          [
+            "rondo",
+            80
+          ],
+          [
+            "masc-productor-owner",
+            29
+          ],
+          [
+            "github-pr-checker",
+            18
+          ],
+          [
+            "wkbl-data",
+            10
+          ]
+        ]
+      },
+      "api_other": {
+        "calls": 159,
+        "hours": 9.487,
+        "share_of_hours": 0.3076,
+        "top_keepers": [
+          [
+            "masc-productor-owner",
+            40
+          ],
+          [
+            "rondo",
+            31
+          ],
+          [
+            "code-reviewer-mother",
+            21
+          ],
+          [
+            "code-reviewer-uncle",
+            14
+          ]
+        ]
+      },
+      "pr_checks": {
+        "calls": 120,
+        "hours": 5.145,
+        "share_of_hours": 0.1668,
+        "top_keepers": [
+          [
+            "code-reviewer",
+            78
+          ],
+          [
+            "sangsu",
+            14
+          ],
+          [
+            "rondo",
+            8
+          ],
+          [
+            "github-pr-checker",
+            6
+          ]
+        ]
+      },
+      "commit_checks": {
+        "calls": 72,
+        "hours": 3.962,
+        "share_of_hours": 0.1285,
+        "top_keepers": [
+          [
+            "rondo",
+            31
+          ],
+          [
+            "code-reviewer-brother",
+            15
+          ],
+          [
+            "masc-productor-owner",
+            9
+          ],
+          [
+            "pr-updater",
+            5
+          ]
+        ]
+      },
+      "other": {
+        "calls": 4,
+        "hours": 0.24,
+        "share_of_hours": 0.0078,
+        "top_keepers": [
+          [
+            "wkbl-data",
+            2
+          ],
+          [
+            "github-pr-checker",
+            1
+          ],
+          [
+            "wkbl-web-leader",
+            1
+          ]
+        ]
+      },
+      "run_list": {
+        "calls": 3,
+        "hours": 0.147,
+        "share_of_hours": 0.0048,
+        "top_keepers": [
+          [
+            "github-pr-checker",
+            1
+          ],
+          [
+            "rondo",
+            1
+          ],
+          [
+            "e-masc-the-leader",
+            1
+          ]
+        ]
+      }
+    }
+  },
+  "single_run_polls": {
+    "calls": 159,
+    "hours": 11.858,
+    "watched_by_same_keeper": {
+      "calls": 10,
+      "hours": 1.021
+    },
+    "not_watched": {
+      "calls": 149,
+      "hours": 10.837,
+      "top_keepers": [
+        [
+          "rondo",
+          78
+        ],
+        [
+          "masc-productor-owner",
+          23
+        ],
+        [
+          "github-pr-checker",
+          18
+        ],
+        [
+          "wkbl-data",
+          8
+        ]
+      ]
+    },
+    "schedule_create_in_prior_15_min": {
+      "any": 12,
+      "with_until_github_run": 10,
+      "refused_missing_due": 2
+    }
+  }
+}

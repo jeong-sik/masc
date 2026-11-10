@@ -168,10 +168,10 @@ let test_activity_events_revalidate_public_parents () =
     Yojson.Safe.Util.(after |> member "count" |> to_int)
 ;;
 
-let ready_publisher config tools =
-  let publisher = Dashboard_snapshot.activate ~config in
+let ready_publisher ?(is_current = fun () -> true) config tools =
+  let publisher = Dashboard_snapshot.activate ~config ~is_current in
   Dashboard_snapshot.publish_shell publisher ~shell:(`String "full") ~shell_light:(`String "light");
-  Dashboard_snapshot.publish_tools publisher tools;
+  Dashboard_snapshot.publish_tools (Dashboard_snapshot.prepare_tools publisher tools);
   Dashboard_snapshot.publish_telemetry publisher (`String "telemetry");
   publisher
 ;;
@@ -207,7 +207,7 @@ let test_tools_component_reuses_complete_representations () =
     Alcotest.(check bool) "idle reads retain prepared bytes" true (body == again))
     [None, None; Some "gzip", Some "gzip"; Some "zstd,gzip", Some "zstd";
      Some "gzip;q=0,zstd;q=0", None];
-  Dashboard_snapshot.publish_tools publisher (json 2);
+  Dashboard_snapshot.publish_tools (Dashboard_snapshot.prepare_tools publisher (json 2));
   let second = (require_snapshot config).tools in
   Alcotest.(check bool) "actual component publication replaces ETag" true (first.etag <> second.etag);
   Alcotest.(check string) "retained immutable snapshot remains readable" raw first.encoded.identity;
@@ -217,18 +217,30 @@ let test_tools_component_reuses_complete_representations () =
 
 let test_workspace_epoch_retires_its_own_publisher () =
   Dashboard_snapshot.reset_for_test ();
-  let old = ready_publisher config (`String "old") in
+  let old_current = ref true in
+  let old = ready_publisher ~is_current:(fun () -> !old_current) config (`String "old") in
   let retained = require_snapshot config in
   let foreign = Workspace.default_config "/tmp/dashboard-snapshot-other" in
   Alcotest.(check bool) "foreign workspace cannot read the active components" true
     (Option.is_none (Dashboard_snapshot.current_for_config foreign));
-  let successor = Dashboard_snapshot.activate ~config in
-  Dashboard_snapshot.publish_tools old (`String "late old answer");
+  old_current := false;
+  Alcotest.(check bool) "scope replacement withdraws Shell before a successor is activated" true
+    (Option.is_none (Dashboard_snapshot.shell_for_config config));
+  Alcotest.(check bool) "scope replacement withdraws Tools before a successor is activated" true
+    (Option.is_none (Dashboard_snapshot.tools_for_config config));
+  Alcotest.(check bool) "scope replacement withdraws telemetry before a successor is activated" true
+    (Option.is_none (Dashboard_snapshot.telemetry_for_config config));
+  let successor = Dashboard_snapshot.activate ~config ~is_current:(fun () -> true) in
+  Dashboard_snapshot.publish_tools (Dashboard_snapshot.prepare_tools old (`String "late old answer"));
   Dashboard_snapshot.retire old;
   Alcotest.(check bool) "a same-path successor starts without the prior epoch's data" true
     (Option.is_none (Dashboard_snapshot.current ()));
   Dashboard_snapshot.publish_shell successor ~shell:(`String "new full") ~shell_light:(`String "new light");
-  Dashboard_snapshot.publish_tools successor (`String "new tools");
+  Dashboard_snapshot.publish_tools (Dashboard_snapshot.prepare_tools successor (`String "new tools"));
+  Alcotest.(check bool) "Tools success is readable while telemetry is still pending" true
+    (Option.is_some (Dashboard_snapshot.tools_for_config config));
+  Alcotest.(check bool) "Shell success is readable while telemetry is still pending" true
+    (Option.is_some (Dashboard_snapshot.shell_for_config config));
   Alcotest.(check bool) "partial initialization stays distinguishable from a complete observation" true
     (Option.is_none (Dashboard_snapshot.current ()));
   Dashboard_snapshot.publish_telemetry successor (`String "new telemetry");

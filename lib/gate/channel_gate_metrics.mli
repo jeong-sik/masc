@@ -26,11 +26,6 @@ type error_kind =
   | Ek_dispatch_unavailable
   | Ek_internal
 
-val error_kind_of_string : string -> error_kind option
-(** Parse one of the four labels {!error_kind_to_string} writes. Anything
-    else is [None], including [""]: the status JSON writes [""] when there is
-    no failure, and that is not a kind. *)
-
 val error_kind_to_string : error_kind -> string
 (** The JSON/status label: [validation], [keeper], [dispatch_unavailable]
     or [internal]. *)

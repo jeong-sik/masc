@@ -43,9 +43,11 @@ val capture : selection ->
   posts:(unit -> Board_core_persist.posts_snapshot) ->
   comments:(unit -> Board_core_persist.comments_snapshot) ->
   votes:(unit -> string) -> reactions:(unit -> string) ->
-  policy:(unit -> string) -> t
+  policy:(unit -> (string, Board_types.board_error) result) ->
+  (t, Board_types.board_error) result
 (** Invoke the selected producer once for each selected kind, in selection order. The caller
-    holds the state lock while the producer observes the store and updates row caches. *)
+    holds the state lock while the producer observes the store and updates row
+    caches. A rejected policy snapshot preserves the caller's dirty obligations. *)
 
 type outcome
 (** Every selected obligation in batch order, distinguishing attempted writes

@@ -34,22 +34,31 @@ let selection = function
   | Delete_post _ -> Batch.for_delete
   | Delete_sub_board _ -> Batch.for_sub_board_delete
 
+let policy_observation store = match store.sub_boards_source with
+  | Policy_readable observation -> Ok observation
+  | Policy_unobserved | Policy_publishing _ | Policy_refused _ | Policy_unsettled _ ->
+    Error (Io_error "Board data is unavailable.")
+
+let filter_policy_snapshot (snapshot : Fs_compat.private_jsonl_snapshot) ~keep =
+  let rec rows reversed = function
+    | [] -> Ok (String.concat "\n" (List.rev reversed))
+    | text :: remaining ->
+      if String.equal (String.trim text) "" then rows (text :: reversed) remaining
+      else match Yojson.Safe.from_string text with
+        | json ->
+          (match Board_sub_board_json.sub_board_of_yojson json with
+           | None -> Error (Io_error "Board data is unavailable.")
+           | Some board -> rows (if keep board.id then text :: reversed else reversed) remaining)
+        | exception Yojson.Json_error _ -> Error (Io_error "Board data is unavailable.") in
+  rows [] (String.split_on_char '\n' snapshot.bytes)
+
 let policy_jsonl store =
-  let rows = Hashtbl.fold (fun _ board rows -> board :: rows) store.sub_boards [] in
-  let owns_slug (board : sub_board) =
-    match Hashtbl.find_opt store.sub_boards_by_slug board.slug with
-    | None -> false
-    | Some id -> String.equal id (Sub_board_id.to_string board.id) in
-  (* Preserve each loaded slug's canonical winner when compacting rows. *)
-  let rows = List.sort (fun (left : sub_board) right ->
-    match Bool.compare (owns_slug left) (owns_slug right) with
-    | 0 -> String.compare (Sub_board_id.to_string left.id) (Sub_board_id.to_string right.id)
-    | order -> order) rows in
-  let buffer = Buffer.create 1024 in
-  List.iter (fun board ->
-    Buffer.add_string buffer (Yojson.Safe.to_string (Board_sub_board_json.sub_board_to_yojson board));
-    Buffer.add_char buffer '\n') rows;
-  Buffer.contents buffer
+  let* observation = policy_observation store in
+  (* Policy changes publish synchronously; the owned deletion is the only
+     unpersisted removal. Keep all other physical rows in their original order,
+     including shadowed IDs and aliases, so fresh and current indexes agree. *)
+  filter_policy_snapshot observation.policy_snapshot ~keep:(fun id ->
+    Hashtbl.mem store.sub_boards (Sub_board_id.to_string id))
 
 let reactions_jsonl store =
   let buffer = Buffer.create 4096 in
@@ -59,7 +68,7 @@ let reactions_jsonl store =
   Buffer.contents buffer
 
 let capture store selection =
-  let batch = Batch.capture selection
+  let* batch = Batch.capture selection
     ~posts:(fun () -> capture_posts_snapshot store)
     ~comments:(fun () -> capture_comments_snapshot store)
     ~votes:(fun () -> Board_voting.vote_log_jsonl store)
@@ -72,7 +81,7 @@ let capture store selection =
     Hashtbl.clear store.dirty_comment_ids;
     store.dirty_comments <- false);
   store.last_flush <- Time_compat.now ();
-  batch
+  Ok batch
 
 let write_snapshot store = function
   | Batch.Posts_payload snapshot -> finish_posts_write (save_posts_snapshot store snapshot)
@@ -283,10 +292,13 @@ let apply_sub_board store ~deleted_sub_board ~deleted_slug ~unlinked_posts =
     | None -> Ok ()
     | Some board when String.equal board.slug deleted_slug -> Ok ()
     | Some _ -> Error (Io_error "Board deletion sub-board identity changed.") in
+  let* policy = policy_observation store in
+  let* remaining_bytes = filter_policy_snapshot policy.policy_snapshot ~keep:(fun candidate ->
+    not (String.equal (Sub_board_id.to_string candidate) id)) in
+  let* _, remaining_slugs = policy_in_snapshot { policy.policy_snapshot with bytes = remaining_bytes } in
   Hashtbl.remove store.sub_boards id;
-  (match Hashtbl.find_opt store.sub_boards_by_slug deleted_slug with
-   | Some indexed when String.equal indexed id -> Hashtbl.remove store.sub_boards_by_slug deleted_slug
-   | Some _ | None -> ());
+  Hashtbl.clear store.sub_boards_by_slug;
+  String_map.iter (fun slug owner -> Hashtbl.replace store.sub_boards_by_slug slug owner) remaining_slugs;
   List.iter (fun pid ->
     let key = Post_id.to_string pid in
     match Hashtbl.find_opt store.posts key with
@@ -371,12 +383,21 @@ let resume store work = match work.deletion_progress with
           | Model_applied | Sources_uncertain | Sources_written -> Ok () in
         let applied = { work with deletion_progress = Model_applied } in
         store.deletion_state <- Deletion_pending applied;
-        Ok (applied, capture store (selection work.decision_receipt.decision.operation))) in
+        let* batch = capture store (selection work.decision_receipt.decision.operation) in
+        Ok (applied, batch)) in
       match staged with
       | Error error ->
-        store.deletion_state <- Deletion_pending { work with
-          deletion_last_failure = Some (Deletion_projection_rejected error) };
-        Ok (Deletion_decision_pending pending_detail)
+        (match store.deletion_state with
+         | Deletion_pending current ->
+           store.deletion_state <- Deletion_pending { current with
+             deletion_last_failure = Some (Deletion_projection_rejected error) };
+           (match current.deletion_progress with
+            | Decision_recorded -> Ok (Deletion_decision_pending pending_detail)
+            | Model_applied | Sources_uncertain | Sources_written ->
+              Ok (Deletion_persistence_pending pending_detail))
+         | Deletion_unobserved | Deletion_readable _ | Deletion_unsettled _
+         | Deletion_refused _ | Deletion_projection_failed _ ->
+           Ok (Deletion_decision_pending pending_detail))
       | Ok (applied, batch) -> persist_applied store applied batch
 
 let delete_post store ~authorization ~post_id =
@@ -438,7 +459,7 @@ let recover_on_initialize store =
 
 let flush_independent store =
   let* () = Source.require_empty store in
-  let batch = with_lock store (fun () ->
+  let* batch = with_lock store (fun () ->
     capture store (Batch.for_flush ~dirty_posts:store.dirty_posts ~dirty_comments:store.dirty_comments
       ~votes_readable:(Result.is_ok (Board_votes_source.require_readable store))
       ~reactions_readable:(Result.is_ok (Board_reactions_source.require_readable store)))) in

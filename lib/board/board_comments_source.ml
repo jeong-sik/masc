@@ -314,7 +314,8 @@ type file_result = (Fs_compat.Private_jsonl_cursor.t, Fs_compat.private_jsonl_tr
 type write_io =
   | Direct_io of file_result
   | Parent_io of file_result Fs_compat.private_jsonl_guard_result
-  | Parent_policy_io of file_result Fs_compat.private_jsonl_guard_result Fs_compat.private_jsonl_guard_result
+  | Parent_policy_io of sub_boards_source_observation *
+      file_result Fs_compat.private_jsonl_guard_result Fs_compat.private_jsonl_guard_result
 
 let write store ~(before : comments_source_observation) ~kind ~bytes perform =
   let pending = { expected = before; kind; intended_bytes = bytes } in
@@ -354,13 +355,14 @@ let write store ~(before : comments_source_observation) ~kind ~bytes perform =
   try match perform () with
     | Direct_io result -> classify result []
     | Parent_io (Fs_compat.Guard_refused failure)
-    | Parent_policy_io (Fs_compat.Guard_refused failure) -> guard_refused failure []
+    | Parent_policy_io (_, Fs_compat.Guard_refused failure) -> guard_refused failure []
     | Parent_io (Fs_compat.Guard_executed { value; cleanup_failures }) ->
       classify value (cleanup cleanup_failures)
-    | Parent_policy_io (Fs_compat.Guard_executed {
+    | Parent_policy_io (policy, Fs_compat.Guard_executed {
         value = Fs_compat.Guard_refused failure; cleanup_failures }) ->
+      Board_sub_boards_source.observe_guard_refusal store policy failure;
       guard_refused failure cleanup_failures
-    | Parent_policy_io (Fs_compat.Guard_executed {
+    | Parent_policy_io (_, Fs_compat.Guard_executed {
         value = Fs_compat.Guard_executed { value; cleanup_failures = policy_cleanup };
         cleanup_failures = parent_cleanup }) ->
       classify value (cleanup (policy_cleanup @ parent_cleanup))
@@ -419,7 +421,7 @@ let append store ~(admission : Board_comment_admission.t) (comment : comment) = 
             match admission.policy with
             | None -> Parent_io (guard_with_io parent_io admission.parent.source_path
                 ~expected:admission.parent.snapshot ~f:append)
-            | Some policy -> Parent_policy_io (guard_with_io parent_io admission.parent.source_path
+            | Some policy -> Parent_policy_io (policy, guard_with_io parent_io admission.parent.source_path
                 ~expected:admission.parent.snapshot ~f:(fun () ->
                   guard_with_io policy_io policy.policy_path ~expected:policy.policy_snapshot ~f:append)))
 

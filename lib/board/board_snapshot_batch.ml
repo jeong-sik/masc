@@ -1,3 +1,5 @@
+open Result.Syntax
+
 type kind = Posts | Comments | Votes | Reactions | Policy
 
 type purpose = Delete | Flush
@@ -46,19 +48,17 @@ let for_flush ~dirty_posts ~dirty_comments ~votes_readable ~reactions_readable =
   { purpose = Flush; kinds }
 
 let capture selection ~posts ~comments ~votes ~reactions ~policy =
-  let contents = List.fold_left
-    (fun reversed kind ->
-       let content = match kind with
-         | Posts -> Posts_payload (posts ())
-         | Comments -> Comments_payload (comments ())
-         | Votes -> Votes_payload (votes ())
-         | Reactions -> Reactions_payload (reactions ())
-         | Policy -> Policy_payload (policy ()) in
-       content :: reversed)
-    []
-    selection.kinds
-  |> List.rev in
-  { selection; contents }
+  let rec gather reversed = function
+    | [] -> Ok { selection; contents = List.rev reversed }
+    | kind :: remaining ->
+      let* content = match kind with
+        | Posts -> Ok (Posts_payload (posts ()))
+        | Comments -> Ok (Comments_payload (comments ()))
+        | Votes -> Ok (Votes_payload (votes ()))
+        | Reactions -> Ok (Reactions_payload (reactions ()))
+        | Policy -> Result.map (fun bytes -> Policy_payload bytes) (policy ()) in
+      gather (content :: reversed) remaining in
+  gather [] selection.kinds
 
 let persist batch ~write =
   let rec loop reversed = function

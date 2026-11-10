@@ -1,4 +1,4 @@
-(** System / Runtime, Tools, Usage / Metrics, and Keeper runtime picker
+(** System / Runtime, the Tools child, Usage / Metrics, and Keeper runtime picker
     screen entry points. *)
 
 val render_runtime_detail :

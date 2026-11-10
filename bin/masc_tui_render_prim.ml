@@ -1990,6 +1990,37 @@ let compact_connection_badge (state : state) ~width =
     else refresh_progress_badge state in
   style ^ label ^ Ansi.reset, (if String.equal details "" then None else Some details)
 
+let reading_connection_summary ~width state =
+  let compact width = fst (compact_connection_badge state ~width:(max 0 width)) in
+  let summary =
+    if not state.observer_source_loss then compact width
+    else
+      let gap label =
+        let separator = " · " in
+        let remaining = width - Message_layout.display_width (label ^ separator) in
+        Theme.warn () ^ label ^ Ansi.reset ^ separator ^ compact remaining
+      in
+      let full = gap (ui_text state ~ko:"이벤트 유실" ~en:"events lost") in
+      if Message_layout.display_width full <= width then full
+      else gap (ui_text state ~ko:"유실" ~en:"gap")
+  in
+  fit_width summary (max 0 width)
+
+let feature_child_heading (state : state) ~cols ~title =
+  let lead = Lead_text (screen_title (" " ^ title)) in
+  match reading_connection_notice state with
+  | None -> detail_heading ~cols ~lead ~id:"" ~after:[] ~tail:""
+  | Some notice ->
+      let heading = detail_heading ~cols ~lead ~id:"" ~after:[] ~tail:notice in
+      let width = framed_inner_width cols in
+      if Message_layout.display_width heading <= width then heading
+      else
+        (* The summary pads a table cell; the heading owns this free space. *)
+        let tail = reading_connection_summary
+          ~width:(max 0 (width - Message_layout.display_width "  ")) state
+          |> String.trim in
+        detail_heading ~cols ~lead ~id:"" ~after:[] ~tail
+
 (* A header row of [lead], a bracketed [label] and [badge]. The badge says
    whether the screen can be trusted, so it is drawn whole and the label gives
    up cells to it, down to losing its brackets. The six cells are the two gaps
@@ -6382,8 +6413,8 @@ let runtime_substrate_tabs (state : state)
     , Press_surface Clients )
   ]
 
-(* The title row of Runtime, Features and Clients: the title, the strip they
-   share, the pieces of [after] and the connection badge last. It is laid out
+(* The Runtime title, its related destinations, the pieces of [after] and the
+   connection badge last. It is laid out
    by [detail_heading] like the Activity row, so the badge stays whole, the
    pieces of [after] are left out whole from the end, and the strip draws in
    what they leave. The strip is whole or it is not drawn, and a strip that

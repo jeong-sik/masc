@@ -1,4 +1,4 @@
-(** Connectors table, Browser Lane, and Browser History screen entry points
+(** Channels table, Browser Lane, and Browser History screen entry points
     and scroll bounds. *)
 
 val browser_lane_scroll_limit :

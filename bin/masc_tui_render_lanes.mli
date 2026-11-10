@@ -1,4 +1,5 @@
-(** Features, plugin and client screen entry points and shared helpers. *)
+(** Features, plugin and client screen entry points and shared helpers.
+    Clients keeps its own identity beneath the Features family strip. *)
 
 type lane_run_tool_counts = {
   completed : int;

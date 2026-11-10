@@ -312,6 +312,53 @@ observations stay private in `artifacts/native-tui-proof-42732829605/`.
 This confirms those observed candidate views only, without proving production
 installation, the new navigation repair, or the remaining child/input states.
 
+## Feature child identity and resource body (#51023)
+
+The matching be3302c2 server/TUI baseline at 120x36 and 36x20 showed a
+Resources JSON body of `[]` entirely below fixed origin/About/URI/type metadata
+on the narrow first page. Clients lost its child name to the family prefix and
+Runtime menu, while Channels and Tools repeated render clocks and parent names.
+The baseline is retained in
+`artifacts/tui-feature-children-reading-20261110/baseline-observation.json`.
+
+[#51023](https://github.com/jeong-sik/masc/pull/51023) gives those four children
+short KO/EN titles beneath the existing family strip. Exceptional connection
+evidence and each body's own missing/failed/retained reading remain separate.
+Long connection evidence uses Board's existing bounded typed state/gap summary,
+now shared rather than copied, so the failure is not lost beyond the frame.
+Clients still derives row ages from its roster observation; channel state and
+binding decisions are unchanged.
+
+Resources now opens its admitted body with the selected original part target.
+Full MCP/report metadata, including a known public URL, expands with the existing
+`i` action. Read failures, report confirmation, unknown/uncertain sharing and
+share recovery precede the body; original copy/export/share authority and bytes
+are unchanged. Source anchors keep separate notice origins and continue at the
+first actual document block when preparation chrome disappears. A returned
+empty part list remains distinct from unread or failed content.
+
+The d58145cf matching server/TUI reached the JSON body on the narrow first page,
+and its report information/source actions remained readable. A nonempty private
+report still had no body on the 36x20 first page: generated leading status space
+and an absent image-selection paragraph occupied four rows. The source now omits
+those empty pieces while preserving every confirmation and sharing notice.
+The matching 6157b06b server/TUI now shows the report title and first body line
+at 36x20. The unchanged before/after captures are retained in
+[the evidence bundle](../../evidence/tui-feature-resource-body-20261110/README.md).
+
+Local OCaml 5.5.1 parsing and `git diff --check` pass. The changed Help registry
+now has its exact full generated key reference. `Minimal manual checks`
+(`pr-check.yml`, `main@f5876874`, `resource-reading`) run 42789874637 succeeded
+for source 6157b06b and its four existing targeted suites. The same native pair
+also displayed the four short child names at both widths. During a controlled
+fixture-server stop, the Clients title retained the failed/unconfirmed reading;
+after the same server source recovered, the normal empty roster returned.
+The narrow title reports workspace confirmation pending, while the wide title
+also shows the HTTP read failure. These are native PTY observations, not GUI.
+Independent review of the final documentation delta, remaining failed/retained
+cases, installation and GUI display remain separate work. No wording/layout/
+row-order tests were added, and the full 23-surface scope remains open.
+
 ## Tools catalog and volume reading (#50872)
 
 The catalog's long periodic volume report moves to an explicit child reading.

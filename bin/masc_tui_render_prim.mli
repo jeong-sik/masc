@@ -344,8 +344,18 @@ val reading_connection_notice : Masc_tui_types.state -> string option
     Healthy HTTP and ordinary pending reads return [None]; each view keeps
     its own pending-read indication. The notice retains the full context. *)
 
+val feature_child_heading : Masc_tui_types.state -> cols:int -> title:string -> string
+(** Short identity for a Features child, followed by exceptional connection
+    evidence. Overflow uses the bounded typed summary and preserves observer
+    loss. The family strip supplies its parent; no clock or Runtime menu
+    competes with the child name. Read notices remain owned by each body. *)
+
 val compact_connection_badge : Masc_tui_types.state -> width:int -> string * string option
 (** A narrow textual state and any longer status details that remain to show. *)
+
+val reading_connection_summary : width:int -> Masc_tui_types.state -> string
+(** Bounded connection/read state, retaining observer loss as a separate fact.
+    Shared by child headings and Board's existing overflow fallback. *)
 
 val badge_row : cols:int -> lead:string -> label:string -> badge:string -> string
 (** A header row of [lead], a bracketed [label] and [badge] for a surface drawn
@@ -821,8 +831,8 @@ val runtime_substrate_heading :
   current:[ `Runtime_lanes | `Runtime_all | `Features | `Clients ] ->
   after:string list ->
   string
-(** The title row of [System / Runtime] ([Candidate orders] and [All runtimes]),
-    [Features] and [Clients]: [title], the clickable tab strip the three share,
+(** The title row of [System / Runtime] ([Candidate orders] and [All runtimes]):
+    [title], the clickable strip of related destinations,
     the pieces of [after] (each carrying its own leading gap) and the connection
     badge last. The badge stays whole, every piece of [after] is whole or left
     out (from the end, never cut), and the strip draws in the cells they

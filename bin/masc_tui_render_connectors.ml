@@ -396,22 +396,9 @@ let render_connectors (state : state) =
       let width = if column = Connector_name_column then layout.flex_width else column_width column in
       Masc_tui_table.cell ~header ~width value) layout.shown
   in
-  let now = Unix.localtime (Unix.gettimeofday ()) in
-  let timestamp =
-    Printf.sprintf "%02d:%02d:%02d" now.Unix.tm_hour now.Unix.tm_min
-      now.Unix.tm_sec
-  in
   let title =
-    match state.connectors with
-    | None ->
-        Printf.sprintf "%s  %s  %s"
-          (screen_title " MASC Connectors") timestamp
-          (connection_badge state)
-    | Some snapshot ->
-        Printf.sprintf "%s (%d of %d available)  %s  %s"
-          (screen_title " MASC Connectors")
-          snapshot.Masc.Tui_decode_connectors.cs_active snapshot.Masc.Tui_decode_connectors.cs_total
-          timestamp (connection_badge state)
+    feature_child_heading state ~cols
+      ~title:(ui_text state ~ko:"채널" ~en:"Channels")
   in
   let read_notice = connectors_read_notice state in
   surface_chrome ~overflow:Paged_by_cursor state ~terminal_rows ~cols ~surface_key:"connectors" ~title

@@ -194,7 +194,10 @@ let render_resources (state : state) =
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   let buf = Buffer.create 4096 in
   let split = resource_split state ~cols in
-  pane_surface_header buf cols state ~name:"Artifacts / Resources" ~split;
+  if not split then box_top buf cols;
+  box_line buf cols
+    (feature_child_heading state ~cols
+      ~title:(ui_text state ~ko:"리소스" ~en:"Resources"));
   let pane_rows = max 0 (pane_surface_content_height ~rows - save_prompt_height state) in
   Option.iter (fun prompt ->
     let input = prompt.rsp_path in

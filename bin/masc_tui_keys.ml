@@ -1183,8 +1183,8 @@ let for_surface = function
       ; b Act "w" "layout" ~help:"switch full-width list/reader and side-by-side browsing"
       ; b Act "v" "document / source" ~detail:Detail_only
           ~help:"show the document or its original text syntax; copied bytes stay original"
-      ; b Act "i" "report info" ~detail:Detail_only
-          ~help:"expand the URI, type, size and complete report metadata"
+      ; b Act "i" "resource info" ~detail:Detail_only
+          ~help:"expand the source, URI, type, size and complete metadata for an MCP resource or report; the body is shown first by default"
       ; b Navigate "j/k" "move"
           ~help:"move the list; with the text focused, scroll it"
       ; b Navigate "h/l" "pane" ~help:"focus the resource list or text"

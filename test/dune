@@ -4710,6 +4710,11 @@
 ))
 
 (test
+ (name test_tui_memory_lineage)
+ (modules test_tui_memory_lineage)
+ (libraries alcotest masc masc_tui_memory_lineage))
+
+(test
  (name test_tui_memory_facts_explorer)
  (modules test_tui_memory_facts_explorer)
  (libraries alcotest masc masc_tui_fetched masc_tui_render_memory masc_tui_roster_pane masc_tui_types))

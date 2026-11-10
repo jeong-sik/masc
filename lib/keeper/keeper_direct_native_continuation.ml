@@ -510,3 +510,13 @@ let request_evidence binding ~boundary ~runtime_id =
           Ok (Request_observation.Recorded {call_id=call.call_id;requests}) in
   match read () with Ok evidence -> evidence | Error detail -> Request_observation.Read_failed detail
 ;;
+
+let unreported_request_evidence ~binding ~dispatch ~checkpoint_owner =
+  match dispatch, checkpoint_owner, binding with
+  | Keeper_attempt_dispatch.Rejected_before_dispatch, _, _ -> Request_observation.Not_dispatched
+  | Keeper_attempt_dispatch.Dispatched, Some Runtime_execution.Official_client, (Some _ | None)
+  | Keeper_attempt_dispatch.Dispatched, (Some Runtime_execution.Masc_agent_core | None), None ->
+    Request_observation.No_durable_scope
+  | Keeper_attempt_dispatch.Dispatched, (Some Runtime_execution.Masc_agent_core | None), Some _ ->
+    Request_observation.Read_failed "native API invocation returned no current request observation"
+;;

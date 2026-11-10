@@ -783,7 +783,11 @@ export function KeeperConversationPanel({
   const streamStartedAt = keeperStreamStartedAt.value[keeperName] ?? null
   // Before the first SSE event arrives, measure the stall from stream
   // start instead so a never-responding stream is also flagged.
-  const lastSignalAt = keeperStreamLastEventAt.value[keeperName] ?? streamStartedAt
+  const activeReplies = rawThread.filter(isActiveAssistantEntry)
+  const waitingOnly = activeReplies.length > 0 && activeReplies.every(entry => entry.delivery === 'queued')
+  // An accepted queued receipt waits for its durable state transition; silence
+  // there is not a missing response frame. Running replies still expose age.
+  const lastSignalAt = waitingOnly ? null : keeperStreamLastEventAt.value[keeperName] ?? streamStartedAt
   const stalled =
     sending && lastSignalAt !== null && Date.now() - lastSignalAt >= STREAM_STALL_THRESHOLD_S * 1000
 

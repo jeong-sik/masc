@@ -663,6 +663,22 @@ describe('normalizeKeeperApprovalQueueItem', () => {
 // ================================================================
 
 describe('fetchBoard', () => {
+  it('keeps source-unavailable votes unknown while retaining known absence', async () => {
+    const post = { id: 'unknown-vote', author: 'writer', body: 'Readable post' }
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      posts: [post, { ...post, id: 'known-no-vote', current_vote: null, has_voted: false },
+        { ...post, id: 'unrecognized-vote', current_vote: 'sideways' }],
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } })))
+
+    const result = await fetchBoard()
+
+    expect(result.posts[0]).not.toHaveProperty('current_vote')
+    expect(result.posts[0]).not.toHaveProperty('has_voted')
+    expect(result.posts[1]).toMatchObject({ current_vote: null, has_voted: false })
+    expect(result.posts[2]).not.toHaveProperty('current_vote')
+    expect(result.posts[2]).not.toHaveProperty('has_voted')
+  })
+
   it('preserves board actor identity provenance from the server', async () => {
     const rawResponse = {
       posts: [
@@ -1007,6 +1023,23 @@ describe('fetchBoardCuration', () => {
 })
 
 describe('fetchBoardPost', () => {
+  it('keeps source-unavailable post and comment votes unknown', async () => {
+    const comment = { id: 'unknown-comment', post_id: 'post-1', author: 'reader', content: 'Reply' }
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      post: { id: 'post-1', author: 'writer', body: 'Readable post' },
+      comments: [comment, { ...comment, id: 'known-no-vote', current_vote: null, has_voted: false }],
+      comment_page: { offset: 0, total: 2 },
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } })))
+
+    const result = await fetchBoardPost('post-1')
+
+    expect(result).not.toHaveProperty('current_vote')
+    expect(result).not.toHaveProperty('has_voted')
+    expect(result.comments[0]).not.toHaveProperty('current_vote')
+    expect(result.comments[0]).not.toHaveProperty('has_voted')
+    expect(result.comments[1]).toMatchObject({ current_vote: null, has_voted: false })
+  })
+
   it('requests focused context directly and uses the complete companion rows', async () => {
     const root = { id: 'root', thread_offset: 0, post_id: 'post-1', author: 'keeper', content: 'root', created_at: 1_713_000_000 }
     const reply = { ...root, id: 'reply', thread_offset: 219, parent_id: 'root', content: 'reply' }

@@ -42,11 +42,12 @@ val min_height : int
 val content_cells : width:int -> int
 (** The width of a card's content for a card [width] cells wide. *)
 
-val render : style:style -> width:int -> height:int -> t -> string list
+val render : ?rounded:bool -> style:style -> width:int -> height:int -> t -> string list
 (** [render ~style ~width ~height card] is [height] rows of [width] cells each,
     the body stretched to the height with blank rows. Below {!min_width} or
     {!min_height} it returns that many blank rows rather than a box with no
-    room in it, so a caller that counts rows still counts them. *)
+    room in it, so a caller that counts rows still counts them.
+    [rounded] changes only corner glyphs; defaults to [false]. *)
 
 val columns_that_fit :
   inner_width:int -> gap:int -> min_card_width:int -> max_columns:int -> int

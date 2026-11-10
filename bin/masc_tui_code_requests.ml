@@ -16,6 +16,38 @@ let code_scope_axes_of = function
 
 let code_scope_axes state = code_scope_axes_of state.code_scope
 
+let launch_prepared_file state ~scope ~path ~current ~deliver read =
+  let workspace = state.workspace_authority in
+  let read_epoch = state.workspace_read_authority in
+  let previous =
+    if state.code_scope <> scope then None
+    else match Masc_tui_fetched.current state.code_file with
+      | Some (path, (Masc_tui_fetched.Ready document
+                   | Masc_tui_fetched.Stale (document, _))) -> Some (path, document)
+      | None | Some (_, (Masc_tui_fetched.Absent | Masc_tui_fetched.Loading
+                        | Masc_tui_fetched.Failed _)) -> None
+  in
+  Masc_tui_async_read.launch
+    ~deliver:(function
+      | Ok None -> ()
+      | Ok (Some prepared) -> deliver (Ok prepared)
+      | Error detail -> deliver (Error detail))
+    (fun () ->
+      let result = read () in
+      (* This check runs on the caller fiber, before the CPU submission. It
+         saves obsolete work without giving the worker UI state or replacing
+         the final admission check. A queued/entered job still settles normally. *)
+      if state.workspace_authority != workspace
+        || state.workspace_read_authority != read_epoch || not (current ())
+      then Ok None
+      else Result.map (fun source ->
+        let reused = Option.bind previous (fun previous ->
+          Masc_tui_code_results.reuse_file ~path previous source) in
+        match reused with
+        | Some prepared -> Some prepared
+        | None -> Some (Masc_tui_response_decode.run ~name:"code.file.prepare_wait" (fun () ->
+            Masc_tui_code_results.prepare_file ~path source))) result)
+
 let launch_file_finder state ~host ~deliver =
   if not (server_authority_ready state) then
     Masc_tui_loader.report_action state "error" "File finder needs a confirmed workspace"
@@ -145,7 +177,16 @@ let open_found_file state ~host ~deliver ~path =
            state.code_finder_file <- reading;
            let port = state.port in
            let keeper, repo = code_scope_axes_of origin.cfo_scope in
-           Masc_tui_async_read.launch
+           launch_prepared_file state ~scope:origin.cfo_scope ~path
+             ~current:(fun () ->
+               match state.palette_mode with
+               | Palette_files current_origin ->
+                   state.palette_open && code_finder_current state origin
+                   && current_origin.cfo_scope = origin.cfo_scope
+                   && Masc_tui_fetched.is_current ~equal:code_scope_path_equal
+                        state.code_finder_file request
+               | Palette_branches _ | Palette_worktrees _ | Palette_search _
+               | Palette_locations _ | Palette_jump | Palette_choice _ -> false)
              ~deliver:(fun result -> deliver (Masc_tui_code_results.Code_finder_file_loaded (request, result)))
              (fun () -> Masc_tui_http.fetch_workspace_file ?keeper ?repo
                  ~expected_workspace ~host ~port ~path ()))
@@ -188,7 +229,11 @@ let launch_navigation_read state ~host ~deliver owner request =
   let port = state.port in
   let keeper, repo = code_scope_axes_of owner.cno_destination.cj_scope in
   let path = Masc_tui_fetched.request_key request in
-  Masc_tui_async_read.launch
+  launch_prepared_file state ~scope:owner.cno_destination.cj_scope ~path
+    ~current:(fun () -> match state.code_navigation with
+      | Some reading -> reading.cnr_owner == owner && code_navigation_owner_current state owner
+          && Masc_tui_fetched.is_current ~equal:String.equal reading.cnr_file request
+      | None -> false)
     ~deliver:(fun result -> deliver (Masc_tui_code_results.Code_file_loaded (Navigate_code_file owner, request, result)))
     (fun () -> match expected_workspace with
        | None -> Error "Navigation has no workspace identity"
@@ -220,7 +265,8 @@ let launch_file_load ?(intent = Open_code_file) state ~host ~deliver ~path =
       (code_draft_address state);
     state.code_file_resume_intent <- intent;
     let port = state.port in
-    Masc_tui_async_read.launch
+    launch_prepared_file state ~scope ~path
+      ~current:(fun () -> Masc_tui_fetched.is_current ~equal:String.equal state.code_file request)
       ~deliver:(fun result -> deliver (Masc_tui_code_results.Code_file_loaded (intent, request, result)))
       (fun () ->
          let keeper, repo = code_scope_axes_of scope in

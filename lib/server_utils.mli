@@ -128,12 +128,13 @@ val board_voter_query : Httpun.Request.t -> string option
 val board_current_vote_for_post :
   reader:Masc_board_handlers.Board_access.reader ->
   voter:string option -> post_id:string -> Board.vote_direction option option
-(** [None] means no voter was supplied; [Some None] means a voter was
-    supplied but has not voted on this post. *)
+(** [None] omits vote-state fields when no voter was supplied or the vote is
+    unavailable. [Some None] is a known absence from a readable vote model. *)
 
 val board_current_vote_for_comment :
   reader:Masc_board_handlers.Board_access.reader ->
   voter:string option -> comment_id:string -> Board.vote_direction option option
+(** Same observation rule as {!board_current_vote_for_post}. *)
 
 val board_reactions_for_post :
   reader:Masc_board_handlers.Board_access.reader ->

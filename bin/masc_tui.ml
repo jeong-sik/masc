@@ -13279,6 +13279,7 @@ let open_msx_screen (state : Masc_tui_types.state) ~mailbox =
     write_to_terminal Masc_tui_graphics.delete_all;
     state.image_open <- false;
     state.image_inspection <- None;
+    state.image_pixel_source <- None;
     state.image_cell_view <- None
   end;
   observe_msx_frame ~clear_notice:true state ~mailbox;
@@ -13302,6 +13303,7 @@ let open_msx_spectator (state : Masc_tui_types.state) ~mailbox =
     write_to_terminal Masc_tui_graphics.delete_all;
     state.image_open <- false;
     state.image_inspection <- None;
+    state.image_pixel_source <- None;
     state.image_cell_view <- None
   end;
   state.machine_source <- Masc.Machine_lane.Msx;
@@ -13329,6 +13331,7 @@ let open_dos_screen (state : Masc_tui_types.state) ~mailbox =
     write_to_terminal Masc_tui_graphics.delete_all;
     state.image_open <- false;
     state.image_inspection <- None;
+    state.image_pixel_source <- None;
     state.image_cell_view <- None
   end;
   state.machine_source <- Masc.Machine_lane.Dos;
@@ -13529,7 +13532,20 @@ let inspection_window ~cell_pixels viewport =
   Masc_tui_image_viewport.window ~cell_pixels
     ~columns:(max 1 (columns-2)) ~rows:(max 1 (rows-3)) viewport
 
+let pixel_image_footer (state : state) footer =
+  match state.image_pixel_source with
+  | None -> footer
+  | Some source ->
+      let source = match image_pixel_source_for_redraw state source with
+        | Some current -> current
+        | None -> {source with ips_unconfirmed=true} in
+      state.image_pixel_source <- Some {source with ips_footer=footer};
+      if source.ips_unconfirmed then "! source unconfirmed · " ^ footer else footer
+
 let draw_inspected_image ?(fresh=true) state inspected =
+  match state.image_pixel_source with
+  | Some source when Option.is_none (image_pixel_source_for_redraw state source) -> ()
+  | Some _ | None ->
   withdraw_resource_diagram_pending state;
   match !active_graphics_protocol, !image_cell_pixels with
   | Masc_tui_graphics.Kitty_protocol, Some cell_pixels ->
@@ -13557,6 +13573,7 @@ let draw_inspected_image ?(fresh=true) state inspected =
       (if state.view=Resources then "v source · " else "")
       (100.*.Masc_tui_image_viewport.zoom inspected.ii_viewport)
       status in
+    let footer = pixel_image_footer state footer in
     Masc_tui_msx.invalidate ();
     let image = if fresh then Masc_tui_graphics.place_viewport ~data placement
       else Masc_tui_graphics.put_viewport placement in
@@ -13580,6 +13597,7 @@ let draw_image state ?(inspect=false) ?scene ?origin ?(caption = []) ?(footer = 
   else begin
   state.browser_viewport <- None;
   state.image_inspection <- None;
+  state.image_pixel_source <- None;
   browser_image_region := None;
   browser_pointer_press := None;
   match Masc.Keeper_vision_tool.sniff_image_media_type data with
@@ -13621,6 +13639,12 @@ let draw_image state ?(inspect=false) ?scene ?origin ?(caption = []) ?(footer = 
            browser_image_region := Some {top=header_rows+1;left=1;height_cells;
              width_cells=height_cells *. ch *. iw /. ih /. cw}
        | _ -> ());
+      state.image_pixel_source <-
+        (match origin with
+         | Some origin when origin.sir_view = Memory ->
+             Some {ips_workspace=state.workspace_authority;ips_origin=origin;
+               ips_unconfirmed=image_cell_source_unconfirmed state origin;ips_footer=footer}
+         | Some _ | None -> None);
       let inspection = match inspect, !active_graphics_protocol, !image_cell_pixels, image_pixels with
        | true, Masc_tui_graphics.Kitty_protocol, Some _, Some (width,height) ->
            Masc_tui_image_viewport.create ~width ~height
@@ -13652,6 +13676,7 @@ let draw_image state ?(inspect=false) ?scene ?origin ?(caption = []) ?(footer = 
              header_lines)
       in
       Masc_tui_msx.invalidate ();
+      let footer = pixel_image_footer state footer in
       write_to_terminal
         (Ansi.clear ^ Masc_tui_graphics.delete_all ^ header
         ^ Printf.sprintf "\x1b[%d;1H" (header_rows + 1)
@@ -13738,6 +13763,7 @@ let draw_cell_image state ~terminal_size:(rows, columns) (view : image_cell_fram
   write_terminal_text (Ansi.clear ^ contents);
   state.browser_viewport <- None;
   state.image_inspection <- None;
+  state.image_pixel_source <- None;
   browser_image_region := None;
   browser_pointer_press := None;
   state.image_cell_view <- Some (Image_cells {view with ic_terminal_size=(rows, columns)});
@@ -13805,6 +13831,7 @@ let show_image_link_card state ~origin ~page_url ~copy ~unsaved ~last_open =
       Masc_tui_msx.invalidate ();
       state.browser_viewport <- None;
       state.image_inspection <- None;
+      state.image_pixel_source <- None;
       browser_image_region := None;
       browser_pointer_press := None;
       state.image_cell_view <- Some (Image_cells view);
@@ -14165,7 +14192,7 @@ let launch_image_render state ~mailbox ~notice:_ ~title ~caption ~page_url image
   let request = {sir_generation=state.image_request_generation; sir_view=view;
     sir_keeper=(if view = Resources then None else state.msg_target_keeper_name);
     sir_name=title; sir_owner=Remote_url_image_read state.workspace_authority;
-    sir_resource=None; sir_skill_reference=None;
+    sir_resource=None; sir_memory_activity=None; sir_skill_reference=None;
     sir_purpose=Open_image} in
   state.sent_image_read <- Some request;
   (* Classify already-buffered input and signals before starting a download.
@@ -14424,8 +14451,9 @@ let open_preview_image ?skill_reference ?board_subject state ~mailbox ~notice ~n
     let keeper_name = match state.view, skill_reference with
       | Tools, Some _ -> Option.map (fun (keeper : keeper) -> keeper.k_name) (selected_keeper state)
       | (Resources | Board), (Some _ | None) -> None
+      | Memory, (Some _ | None) -> state.memory_facts_keeper
       | Tools, None
-      | (Overview | Acting | Metrics | Keepers _ | Memory | Lanes | Clients | Approvals
+      | (Overview | Acting | Metrics | Keepers _ | Lanes | Clients | Approvals
         | Planning | Schedules | Verification | Harness | Fusion | Repositories | Code | Changes
         | Connectors | Runtime | Config | System_logs), (Some _ | None) -> state.msg_target_keeper_name in
     let generation = state.image_request_generation in
@@ -14433,6 +14461,9 @@ let open_preview_image ?skill_reference ?board_subject state ~mailbox ~notice ~n
     let request = {sir_generation=generation; sir_view=view;
       sir_keeper=keeper_name; sir_name=name; sir_owner=owner;
       sir_resource=(if view = Resources then state.resource_content else None);
+      sir_memory_activity=(if view = Memory then Option.bind keeper_name (fun keeper ->
+        Masc_tui_fetched.value
+          (Masc_tui_fetched.view_for ~equal:String.equal state.memory_activity ~key:keeper)) else None);
       sir_skill_reference=skill_reference;
       sir_purpose=Open_image} in
     state.sent_image_read <- Some request;
@@ -14730,7 +14761,9 @@ let open_resource_image (state : state) ~mailbox =
   | None -> notice ~kind:Notice_failure "No image in the current resource reading"
 
 let open_selected_image state ~mailbox preview =
-  let notice = chat_notice state ~keeper_name:state.msg_target_keeper_name in
+  let notice = if state.view = Memory then
+      image_notice state ~view:Memory ~keeper_name:state.memory_facts_keeper
+    else chat_notice state ~keeper_name:state.msg_target_keeper_name in
   match preview with
   | Masc_tui_image_preview.Named_path path -> open_image state ~mailbox ~notice path
   | Masc_tui_image_preview.Staged attachment ->
@@ -14923,6 +14956,7 @@ let close_image state =
   state.browser_viewport <- None;
   state.image_inspection <- None;
   state.image_cell_view <- None;
+  state.image_pixel_source <- None;
   match state.image_open with
   | false -> ()
   | true ->
@@ -32663,6 +32697,21 @@ Use relative paths for resources already held in the package. -->
              Option.iter (draw_inspected_image state) state.image_inspection;
            true
        | Render_schedule.Terminal_size_cache.Unchanged _ -> false in
+      (match state.image_pixel_source with
+       | Some source when state.image_open && not state.msx_open ->
+           (match image_pixel_source_for_redraw state source with
+            | None ->
+                close_image state;
+                invalidate_frame_for_resize frame_presenter render_schedule
+            | Some current ->
+                state.image_pixel_source <- Some current;
+                if resized || current.ips_unconfirmed <> source.ips_unconfirmed then begin
+                  let rows, columns = Masc_tui_ansi.get_terminal_size () in
+                  let footer = pixel_image_footer state current.ips_footer in
+                  write_to_terminal (Printf.sprintf "\027[%d;1H\027[2K%s" rows
+                    (Message_layout.fit_width footer (max 1 (columns-1))))
+                end)
+       | Some _ | None -> ());
       (match state.image_cell_view with
        | Some (Image_cells view) when state.image_open && not state.msx_open ->
            (match image_cell_origin_for_redraw state ~workspace:view.ic_workspace view.ic_origin with
@@ -38129,6 +38178,16 @@ Use relative paths for resources already held in the package. -->
                      let delta = if List.mem key ["k"; "up"; "pageup"] then -step else step in
                      state.runtime_config_status_scroll <-
                        max 0 (min limit (min limit state.runtime_config_status_scroll + delta))))
+       | Some (("." | "…" | "\015") as key)
+         when state.view = Memory && state.memory_page = Memory_changes
+              && not state.composer_focused && not (modal_owns_keys state) ->
+           (match state.memory_facts_keeper with
+            | None -> ()
+            | Some keeper_name ->
+                Option.iter
+                  (fun preview -> open_selected_image state ~mailbox:async_messages preview)
+                  ((if key = "\015" then Masc_tui_render_keeper_memory.change_diagram
+                    else Masc_tui_render_keeper_memory.change_focus_diagram) state ~keeper_name))
        | Some ("1" | "2" | "3" | "4" as page)
          when state.view = Memory && not state.memory_fact_detail_open
               && not state.composer_focused && not (modal_owns_keys state) ->
@@ -38173,7 +38232,9 @@ Use relative paths for resources already held in the package. -->
               | "g" | "home" -> state.memory_changes_cursor <- 0
               | "G" | "end" -> state.memory_changes_cursor <- maximum
               | _ ->
-                  let page = max 1 (surface_body_rows state ~terminal_rows:(fst (get_terminal_size ())) - 6) in
+                  let page = max 1 (Masc_tui_render_keeper_memory.changes_page_size state
+                    ~max_lines:(Masc_tui_render_prim.surface_chrome_budget state
+                      ~terminal_rows:(fst (get_terminal_size ()))) ~keeper_name) in
                   let delta = match key with
                     | "k" | "up" | "wheel-up" | "[" -> -1
                     | "pageup" -> -page | "pagedown" -> page | _ -> 1 in

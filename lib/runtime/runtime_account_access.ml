@@ -261,6 +261,10 @@ let authorize_host client =
   | Published (Multi_account { zone = _; base_path = _; now = _ }) -> Error (Host_account client)
 ;;
 
+(* HIGH-RISK-UNREVIEWED: an API provider of the runtime table sends with the
+   credential its operator declared, an account of the host (plan D4). The
+   whole config leaves the seal only through [authorize_api]; a reader gets
+   [api_declaration], without the key and the headers. *)
 type api_sealed = Llm_provider.Provider_config.t
 
 let seal_api config = config

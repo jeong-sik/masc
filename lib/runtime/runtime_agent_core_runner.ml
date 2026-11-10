@@ -85,6 +85,8 @@ let resolve_runtime_providers ~runtime_id () =
   let provider_config_of_runtime rt =
     match rt.Runtime_instance.execution with
     | Runtime_execution.Agent_core sealed ->
+      (* HIGH-RISK-UNREVIEWED: the runner sends the key the operator declared,
+         so it takes the config through the access (plan D4). *)
       (match Runtime_account_access.authorize_api sealed with
        | Error refusal -> Error (Runtime_account_access.refusal_to_string refusal)
        | Ok provider_config ->

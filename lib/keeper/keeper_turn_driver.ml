@@ -303,8 +303,8 @@ let authorize_host_account client =
   Runtime_account_access.authorize_host client |> Result.map_error account_refused
 ;;
 
-(* An Agent_core candidate sends with the key its operator declared, which
-   only a single-user process shares (plan D4). *)
+(* HIGH-RISK-UNREVIEWED: an Agent_core candidate sends with the key its
+   operator declared, which only a single-user process shares (plan D4). *)
 let authorize_api_provider sealed =
   Runtime_account_access.authorize_api sealed |> Result.map_error account_refused
 ;;

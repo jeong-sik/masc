@@ -69,7 +69,7 @@ val respond_sse_register_error :
 val respond_sse_rate_limited :
   deps:Server_mcp_transport_http_types.deps ->
   origin:string ->
-  session_id:string ->
+  session_id:string option ->
   protocol_version:string ->
   reason:Sse_reject_reason.t ->
   retry_after_s:float ->
@@ -79,6 +79,9 @@ val respond_sse_rate_limited :
     ~protocol_version ~reason ~retry_after_s reqd] writes a JSON
     response with HTTP status [429 Too Many Requests] for SSE
     connection rate-limit decisions.
+
+    [Some session_id] retains the supplied-session protocol headers. [None]
+    is a standalone Observer refusal and advertises no MCP session identifier.
 
     Two contractual normalisations on [retry_after_s]:
 

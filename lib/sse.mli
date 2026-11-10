@@ -142,15 +142,23 @@ val register_with_client :
     same-session client, and any cap-evicted session. An older registration
     cannot replace a newer same-session client and returns [Registration_stale]. *)
 
+type 'admission_error standalone_observer_error =
+  | Credential_refused of registration_error
+  | Admission_refused of 'admission_error
+
 val register_standalone_observer_with_client :
   ?on_disconnect:(unit -> unit) -> observer_instance_id:string ->
+  admit:(Masc_domain.agent_credential -> (unit, 'admission_error) result) ->
   auth:registration_auth -> string -> last_event_id:int ->
-  (client * client option * string option, registration_error) result
+  (client * client option * string option, 'admission_error standalone_observer_error) result
 (** Register a read-only Observer on a fresh server-generated connection id.
     The transport must authenticate and admit the workspace before calling
     this entrypoint, and must not pass a client-supplied session id. Bearer
     validation, role, workspace scope and client lifetime are the same as
     {!register_with_client}; no initialized MCP session is required or created.
+    [admit] receives the exact validated credential once, before any client is
+    published. A refusal creates no client, queue or cap eviction. On success
+    that same credential is used for publication, without a second lookup.
     Client-supplied ids and agent streams use {!register_with_client}, which
     retains the existing session, expiry and owner checks. *)
 

@@ -905,9 +905,13 @@ let handle_get_mcp ~deps ?(profile = Full) ?(sse_kind = Sse.Agent_stream)
             Server_auth.auth_token_from_request request
       in
       let auth = { Sse.config = base_path; token } in
-      (match check_sse_connect_guard session_id with
+      let session_guard = match standalone_observer_instance with
+        | Some _ -> Ok () (* Charged with the validated actor just before publication. *)
+        | None -> check_sse_connect_guard session_id
+      in
+      (match session_guard with
       | Error (reason, retry_after_s) ->
-          respond_sse_rate_limited ~deps ~origin ~session_id ~protocol_version
+          respond_sse_rate_limited ~deps ~origin ~session_id:(Some session_id) ~protocol_version
             ~reason ~retry_after_s reqd
       | Ok () ->
           if Option.is_some last_event_id then
@@ -1020,12 +1024,19 @@ let handle_get_mcp ~deps ?(profile = Full) ?(sse_kind = Sse.Agent_stream)
                match standalone_observer_instance with
                | Some observer_instance_id ->
                  Sse.register_standalone_observer_with_client ~auth
-                   ~observer_instance_id ~on_disconnect session_id ~last_event_id
+                    ~observer_instance_id
+                    ~admit:(fun credential ->
+                      check_standalone_observer_connect_guard ~observer_instance_id ~credential)
+                    ~on_disconnect session_id ~last_event_id
                | None ->
                  Sse.register_with_client ~kind:sse_kind ~auth ?observer_instance_id
-                   ~on_disconnect session_id ~last_event_id)
+                    ~on_disconnect session_id ~last_event_id
+                  |> Result.map_error (fun error -> Sse.Credential_refused error))
            with
-           | Error reg_err ->
+            | Error (Sse.Admission_refused (reason, retry_after_s)) ->
+                respond_sse_rate_limited ~deps ~origin ~session_id:None ~protocol_version
+                  ~reason ~retry_after_s reqd
+            | Error (Sse.Credential_refused reg_err) ->
                let msg = Sse.registration_error_to_string reg_err in
                Log.Server.warn "%s" msg;
                (match reg_err with
@@ -1099,10 +1110,23 @@ let handle_get_mcp ~deps ?(profile = Full) ?(sse_kind = Sse.Agent_stream)
                            ; binary_commit = Build_identity.embedded_commit }
                      | (Sse.Observer | Sse.Agent_stream | Sse.Presence), _, _, _ -> [])
               in
+              let stream_headers =
+                let headers = sse_stream_headers ~deps session_id protocol_version origin in
+                match standalone_observer_instance with
+                | None -> headers
+                | Some _ ->
+                  (* This id belongs only to the live SSE connection, not an MCP
+                     session. Returning it as a cookie or session header would
+                     cause a subsequent Observer request to fail session lookup. *)
+                  List.filter (fun (name, value) ->
+                    match String.lowercase_ascii name with
+                    | "mcp-session-id" -> false
+                    | "set-cookie" when String.starts_with ~prefix:"mcp-session-id=" value -> false
+                    | _ -> true) headers
+              in
               let headers =
                 Httpun.Headers.of_list
-                  (admission_headers @ observer_headers @ identity_headers
-                   @ sse_stream_headers ~deps session_id protocol_version origin)
+                  (admission_headers @ observer_headers @ identity_headers @ stream_headers)
               in
               let response = Httpun.Response.create ~headers `OK in
               if not (scope_is_current ()) then begin

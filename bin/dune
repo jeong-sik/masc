@@ -589,7 +589,7 @@
  (name masc_tui_collab)
  (wrapped false)
  (modules masc_tui_collab)
- (libraries masc masc.masc_types))
+ (libraries masc masc.masc_types masc_tui_message_layout))
 
 (library
  (name masc_tui_play_room)

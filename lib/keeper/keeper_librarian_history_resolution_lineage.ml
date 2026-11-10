@@ -71,5 +71,4 @@ let confirmed_resolution_child ~store ~request ~original =
       let* intended=Option.to_result ~none:"Acknowledged resolution child payload is absent" (Intent.intended_child intent) in
       let* request=Request.of_json ~owner:(Request.physical_owner request) intended.request in
       let+ ()=confirm_predecessor ~store ~require_confirmed:true request in Some child.request_id
-    | Requested | Fenced | Child_intended _ -> Ok None
-    | Refused _ -> Error "Fenced history resolution is recorded as refused"
+    | Requested | Refused _ | Fenced | Child_intended _ -> Ok None

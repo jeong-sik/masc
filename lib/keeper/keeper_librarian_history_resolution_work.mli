@@ -36,7 +36,9 @@ val run_serialized : config:Workspace.config -> keeper_name:string ->
   (unit, error) result
 (** Process every active intent before ordinary history discovery. Caller is
     the existing Memory-lane unit/purge exclusion; no inline HTTP execution.
-    Unknown publication or unreadable state stops this unit. Restart and a
+    A definite unreplayable source before child intent is durably refused,
+    retaining its fence so ordinary discovery can continue. Unknown
+    publication or unreadable state stops this unit. Restart and a
     coalesced ordinary wake discover the same durable intent/child ID. *)
 val record_completed_serialized : config:Workspace.config -> keeper_name:string ->
   request:Keeper_librarian_durable_request.t ->

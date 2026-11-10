@@ -2055,6 +2055,83 @@ let test_history_fence_uncertain_publication_still_blocks () = with_fixture (fun
    | History_fence_stored | History_fence_already_stored | History_fence_owner_changed ->
      fail "post-replacement error was reported as a confirmed fence");
   refuse_fenced_resume fixture original request)
+let test_fenced_resolution_survives_cursor_advance ~nested () = with_fixture (fun ~sw:_ fixture ->
+  let submit request expected=io (fun () -> Resolution_work.submit ~config:fixture.config ~keeper_name
+    ~request_id:(Capture.request_id request) ~expected ~actor:"operator" ~reason:"resume the exact history"
+    ~now:(Time_compat.now ())) in
+  let read request=io (fun () -> Resolution_work.read ~config:fixture.config ~keeper_name
+    ~request_id:(Capture.request_id request) |> Result.map_error Resolution_intent.error_to_string |> get) in
+  let last request=List.rev (read request).intents |> List.hd in
+  let run ()=memory_action fixture (fun () -> Resolution_work.run_serialized ~config:fixture.config ~keeper_name) in
+  let run_ok ()=run () |> Result.map_error Resolution_intent.error_to_string |> get in
+  let original,request=retain_absent_history_original fixture in
+  let original,request=if not nested then original,request else (
+    ignore (submit request (fence_preview fixture request).expected
+      |> Result.map_error Resolution_intent.error_to_string |> get);
+    run_ok ();
+    let child_id=match (last request).phase with
+      | Child_confirmed child -> child.request_id
+      | Requested | Refused _ | Fenced | Child_intended _ -> fail "nested fixture has no confirmed child" in
+    let child,request=io (fun () ->
+      let child=Owner.load ~store:fixture.store ~scope:original.scope ~request_id:child_id |> owned |> Option.get in
+      let request=Capture.restore ~owner:(Capture.physical_owner request) child |> get in child,request) in
+    let advance child event=io (fun () -> match Owner.advance ~store:fixture.store ~expected:child ~event with
+      | Ok (Owner.Stored child | Already_stored child) -> child
+      | Ok (Unconfirmed detail) -> fail detail
+      | Error error -> fail (Owner.update_error_to_string error)) in
+    let child=advance child Progress.Dispatch_intended in
+    advance child (Progress.Execution_observed (Progress.Absent (`Assoc []))),request) in
+  let preview=fence_preview fixture request in
+  let submission=submit request preview.expected |> Result.map_error Resolution_intent.error_to_string |> get in
+  let fenced=memory_action fixture (fun () -> io (fun () ->
+    let fence=Resolution.fence_serialized ~config:fixture.config ~keeper_name ~request_id:original.request_id
+      ~expected:preview.expected ~actor:"operator" ~reason:"resume the exact history" ~now:(Time_compat.now ())
+      |> Result.map_error Resolution.error_to_string |> get in
+    Resolution_intent.confirm_fence ~store:fixture.store ~expected:submission.intent fence
+      |> Result.map_error Resolution_intent.error_to_string |> get)) in
+  check bool "the interruption is after fence but before any child intent" true
+    (fenced.phase=Resolution_intent.Fenced && Resolution_intent.intended_child fenced=None);
+  let owner=Capture.physical_owner request in
+  let cursor_path=Keeper_external_read_cursor.path_for_keepers_dir
+    ~keepers_dir:(Capture.runtime_keepers_dir owner) ~keeper_id:keeper_name in
+  io (fun () -> write cursor_path "{unreadable cursor");
+  check bool "unreadable source state stays unavailable rather than terminal" true
+    (match run () with Error (Resolution_intent.Unavailable _) -> true
+     | Ok () | Error (Invalid _ | Conflict _ | Publication_uncertain _) -> false);
+  check bool "an unavailable read preserves the fenced phase" true ((last request).phase=Resolution_intent.Fenced);
+  (* Model the durable cursor left by another operation during the crash cut;
+     resolution itself must neither advance it nor restore the older offset. *)
+  let cursor=Keeper_external_read_cursor.observation_of_json (`Assoc [
+    "after",`Int (Keeper_external_read_cursor.observation_offset (Source.external_before (Capture.source request))+1);
+    "pending",`Null]) |> get in
+  io (fun () -> write cursor_path (Yojson.Safe.to_string (Keeper_external_read_cursor.observation_to_json cursor)));
+  run_ok ();
+  check bool "a definite post-fence cursor change is durably refused" true
+    (match (last request).phase with Refused (No_longer_eligible _) -> true
+     | Requested | Refused Observation_changed | Fenced | Child_intended _ | Child_confirmed _ -> false);
+  check bool "terminal refusal has no child or claimed Memory receipt" true
+    (Resolution_intent.intended_child (last request)=None && (read request).completion=Resolution_work.Not_observed);
+  check bool "refusal does not move the externally observed cursor" true
+    (io (fun () -> Keeper_external_read_cursor.observe ~runtime_keepers_dir:(Capture.runtime_keepers_dir owner)
+      ~keeper_name |> get)=cursor);
+  no_memory fixture;
+  check int "recovery dispatched no provider request" 0 (F.post_count fixture.server);
+  refuse_fenced_resume fixture original request;
+  let retry=submit request preview.expected |> Result.map_error Resolution_intent.error_to_string |> get in
+  check bool "an identical retry observes the same terminal intent" true
+    (retry.reobserved && retry.intent.intent_id=fenced.intent_id && retry.intent.phase=(last request).phase);
+  let changed={preview.expected with cursors_sha256=Store.digest "another observation"} in
+  check bool "another guard cannot remove or retarget the immutable fence" true
+    (match submit request changed with Error (Resolution_intent.Conflict _) -> true
+     | Ok _ | Error (Invalid _ | Unavailable _ | Publication_uncertain _) -> false);
+  run_ok ();
+  drive_advanced fixture;
+  check int "ordinary fresh history runs after the durable refusal" 1 (F.post_count fixture.server);
+  check bool "fresh history actually commits Memory" true (io (fun () -> claims fixture.keepers_dir)<>[]);
+  check bool "the unknown original stays live and unchanged" true
+    (Option.map Owner.to_json (io (fun () -> Owner.load ~store:fixture.store ~scope:original.scope
+      ~request_id:original.request_id |> owned))=Some (Owner.to_json original));
+  refuse_fenced_resume fixture original request)
 let test_history_resolution_rejects_stale_then_continues_the_same_original () = with_fixture (fun ~sw:_ fixture ->
   let original,request=retain_absent_history_original fixture in
   let preview=fence_preview fixture request in
@@ -3546,6 +3623,10 @@ let () = Alcotest.run "keeper_librarian_durable_execution" ["actual configured c
     test_history_fence_retains_unknown_and_blocks_late_observations;
   test_case "a fenced unknown original does not block the next history pass" `Quick
     test_history_fence_allows_the_next_history_pass;
+  test_case "a post-fence cursor change terminates only its continuation" `Quick
+    (test_fenced_resolution_survives_cursor_advance ~nested:false);
+  test_case "a refused nested continuation does not block its ancestor or fresh history" `Quick
+    (test_fenced_resolution_survives_cursor_advance ~nested:true);
   test_case "an actual original range commit refuses a later fence" `Quick
     test_history_fence_refuses_a_real_range_commit;
   test_case "uncertain visible fence publication still blocks the original" `Quick

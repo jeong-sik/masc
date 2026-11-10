@@ -258,7 +258,16 @@ let update ~store ~expected change =
   let values=List.map (fun intent -> if intent.intent_id=next.intent_id then next else intent) values in
   let+ ()=persist ~store ~scope:expected.scope ~request_id:expected.original_request_id ~previous values in next
 let refuse ~store ~expected refusal = update ~store ~expected (fun actual ->
-  let+ ()=require (actual.phase=Requested) "Only an unapplied resolution can be refused" in
+  let+ ()=match actual.phase,refusal with
+    | Requested,(Observation_changed | No_longer_eligible _) -> Ok ()
+    | Fenced,No_longer_eligible _ ->
+      let* fence=Fence.read ~store ~scope:actual.scope ~request_id:actual.original_request_id in
+      let* fence=Option.to_result ~none:"Resolution fence is absent" fence in
+      require (fence.expected=actual.expected && fence.actor=actual.actor && fence.reason=actual.reason)
+        "Resolution refusal has another immutable fence"
+    | Fenced,Observation_changed
+    | (Refused _ | Child_intended _ | Child_confirmed _),(Observation_changed | No_longer_eligible _) ->
+      Error "Only a resolution without a child intent can be refused" in
   {actual with phase=Refused refusal})
 let confirm_fence ~store ~expected fence = update ~store ~expected (fun actual ->
   let* ()=require (actual.phase=Requested && fence.Fence.scope=actual.scope

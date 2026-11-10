@@ -40,6 +40,7 @@ let fence_matches intent fence =
   require (fence.Fence.scope=intent.Intent.scope && fence.request_id=intent.original_request_id
     && fence.expected=intent.expected && fence.actor=intent.actor && fence.reason=intent.reason)
     "Existing history fence belongs to another resolution"
+type child_source = Replayable of Source.t | Unreplayable of string
 let prepare_child ~config ~keeper_name ~store intent =
   let* parent,request=io (fun () -> original ~config ~keeper_name ~store intent) |> unavailable in
   let* source=io (fun () ->
@@ -55,14 +56,20 @@ let prepare_child ~config ~keeper_name ~store intent =
       let expected_revision=Option.map (fun (snapshot:Current.t) -> snapshot.revision) snapshot in
       let current=Option.map (fun (snapshot:Current.t) ->
         ({Keeper_librarian.facts=snapshot.facts}:Keeper_librarian.current_selection)) snapshot in
-      let* source=Source.with_current ~expected_revision ~current (Request.source request)
-        |> Result.map_error Source.error_to_string in
+      match Source.with_current ~expected_revision ~current (Request.source request) with
+      | Error error -> Ok (Unreplayable (Source.error_to_string error))
+      | Ok source ->
       let runtime_keepers_dir=Request.runtime_keepers_dir owner in
       let* expected=Cursor.observe ~runtime_keepers_dir ~keeper_name in
-      let* ()=require (Cursor.observation_offset expected=Cursor.observation_offset (Source.external_before source))
-        "Original external offset changed before continuation" in
+      if Cursor.observation_offset expected<>Cursor.observation_offset (Source.external_before source) then
+        Ok (Unreplayable "Original external offset changed before continuation")
+      else
       let+ ()=Cursor.restore_original_preparation ~runtime_keepers_dir ~keeper_name
-        ~expected ~original:(Source.external_prepared source) in source)) |> unavailable in
+        ~expected ~original:(Source.external_prepared source) in Replayable source)) |> unavailable in
+  match source with
+  | Unreplayable detail ->
+    io (fun () -> Intent.refuse ~store ~expected:intent (Intent.No_longer_eligible detail))
+  | Replayable source ->
   let* preparation=Keeper_librarian_runtime.prepare_durable ~now:(Time_compat.now ()) (Source.input source) |> unavailable in
   Edge.with_destination ~config ~reserved:(Edge.reserved ()) (fun destination ->
     let* child=io (fun () -> Request.create ~request_id:(Request.fresh_request_id (Request.physical_owner request))

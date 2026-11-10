@@ -34,7 +34,9 @@ val submit : config:Workspace.config -> keeper_name:string -> request_id:string 
   reason:string -> now:float -> (t * bool, error) result
 (** The bool is true for an existing identical submission. This only persists
     the intent; no scheduling or Memory effect. Changed payloads refuse while
-    active or fenced. A definite refusal permits a new guard, preserving both. *)
+    active or fenced. A pre-fence refusal permits a new guard, preserving both.
+    A post-fence refusal terminates only the continuation; its immutable fence
+    remains and a changed submission for that original is still refused. *)
 val read : config:Workspace.config -> keeper_name:string -> request_id:string ->
   (t list, error) result
 val active_for_keeper : config:Workspace.config -> keeper_name:string ->
@@ -42,6 +44,9 @@ val active_for_keeper : config:Workspace.config -> keeper_name:string ->
 (** Strict complete scope inventory. Any unreadable intent prevents new work. *)
 val reload : store:Lane_addon_store.t -> t -> (t, error) result
 val refuse : store:Lane_addon_store.t -> expected:t -> refusal -> (t, error) result
+(** Requested may be refused; Fenced may only be refused as No_longer_eligible
+    before any child intent, after confirming the same durable fence. No fence,
+    source cursor or Memory receipt is removed or acknowledged. *)
 val confirm_fence : store:Lane_addon_store.t -> expected:t ->
   Keeper_librarian_history_resolution_state.t -> (t, error) result
 val intend_child : store:Lane_addon_store.t -> expected:t ->

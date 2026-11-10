@@ -229,6 +229,14 @@ val tool_request_settled : t -> scope:string -> date:string -> request_id:string
     gone. A failed synchronization returns an error, so recovery cannot treat
     an interrupted move as confirmed. This observes the record only; it does
     not remove or require the removal of the body. *)
+val load_settled_tool_request_owner : t -> scope:string -> date:string -> request_id:string ->
+  (Yojson.Safe.t option, string) result
+(** Read an archived record, without its removed request body, through the
+    owned-descriptor verifier and the original scope serializer. A positive
+    read synchronizes the same source/archive directories as a repeated
+    settle. [None] means no archive record; changed, malformed or unowned
+    records are errors. This is metadata observation, never domain completion
+    or permission to move an original. *)
 val tool_request_owner_inventory : t -> scope:string -> ((string * Yojson.Safe.t) list, string) result
 (** Complete sorted published [.json] records in one scope, with filenames for
     the consumer's exact key/schema validation. Missing descendants under an

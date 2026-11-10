@@ -296,6 +296,11 @@ let cached_keeper_chat_history_json config name =
     ~ttl:Limits.keeper_hot_path_cache_ttl_s ~render:(render_keeper_chat_history config name)
 ;;
 
+let keeper_chat_initial_reply_json config name =
+  Server_keeper_chat_history_read.initial_reply_json ~config ~keeper_name:name
+    ~render:(fun turn -> `List (Option.to_list (Option.map autonomous_turn_json turn)))
+;;
+
 let handle_page_get state req request reqd name =
   if not (Keeper_config.validate_name name) then
     Server_auth.respond_json_value_with_cors ~status:`Bad_request request reqd
@@ -332,7 +337,7 @@ let handle_page_get state req request reqd name =
            (Types.error_json (Page.error_to_string error))))
 ;;
 
-let handle_get state request reqd name =
+let handle_read read state request reqd name =
   if not (Keeper_config.validate_name name) then
     (* Reject before touching the cache: the cache key embeds the raw
        name, so unvalidated garbage names would mint unbounded
@@ -348,7 +353,7 @@ let handle_get state request reqd name =
        on the CPU executor. Responses in general stay on the serving fiber:
        the executor also runs dashboard computes, and a timeout or error
        answer must not wait behind them. *)
-    (match cached_keeper_chat_history_json config name with
+    (match read config name with
      | Ok body ->
        Http.Response.json_value_on_cpu
          ~status:`OK ~request
@@ -364,3 +369,6 @@ let handle_get state request reqd name =
        Server_auth.respond_json_value_with_cors ~status request reqd
          (Types.error_json (Server_keeper_chat_history_read.error_to_string error)))
 ;;
+
+let handle_get = handle_read cached_keeper_chat_history_json
+let handle_initial_reply_get = handle_read keeper_chat_initial_reply_json

@@ -217,65 +217,6 @@ let test_json_extractor_no_text () =
   | Ok _ -> Alcotest.fail "expected error"
 ;;
 
-let test_response_json_extractor_object_success () =
-  let extract = Structured.response_json_extractor ~shape:Structured.Object_json () in
-  let resp = make_response [ Text {|{"value": 42}|} ] in
-  match extract resp with
-  | Ok (`Assoc fields) ->
-    Alcotest.(check bool) "value field present" true (List.mem_assoc "value" fields)
-  | Ok _ -> Alcotest.fail "expected JSON object"
-  | Error e -> Alcotest.fail e
-;;
-
-let test_response_json_extractor_rejects_fenced_object () =
-  let extract = Structured.response_json_extractor ~shape:Structured.Object_json () in
-  let resp = make_response [ Text "```json\n{\"ok\":true}\n```" ] in
-  match extract resp with
-  | Error e -> Alcotest.(check bool) "has parse error text" true (String.length e > 0)
-  | Ok _ -> Alcotest.fail "expected fenced JSON rejection"
-;;
-
-let test_response_json_extractor_any_accepts_array () =
-  let extract = Structured.response_json_extractor () in
-  let resp = make_response [ Text "[1,2,3]" ] in
-  match extract resp with
-  | Ok (`List values) -> Alcotest.(check int) "array length" 3 (List.length values)
-  | Ok _ -> Alcotest.fail "expected JSON array"
-  | Error e -> Alcotest.fail e
-;;
-
-let test_response_json_extractor_object_rejects_array () =
-  let extract = Structured.response_json_extractor ~shape:Structured.Object_json () in
-  let resp = make_response [ Text "[1,2,3]" ] in
-  match extract resp with
-  | Error e -> Alcotest.(check bool) "has error text" true (String.length e > 0)
-  | Ok _ -> Alcotest.fail "expected object shape error"
-;;
-
-(* A tool result is an execution payload, not the answer. It used to be
-   joined to the Text block before parsing, so a turn carrying both could
-   not parse as JSON (#27868). *)
-let test_response_json_extractor_ignores_tool_result () =
-  let extract = Structured.response_json_extractor ~shape:Structured.Object_json () in
-  let resp =
-    make_response
-      [ ToolResult
-          { tool_use_id = "t1"
-          ; content = "tool stdout, not JSON"
-          ; outcome = Tool_succeeded
-          ; json = None
-          ; content_blocks = None
-          }
-      ; Text {|{"value": 42}|}
-      ]
-  in
-  match extract resp with
-  | Ok (`Assoc fields) ->
-    Alcotest.(check bool) "value field present" true (List.mem_assoc "value" fields)
-  | Ok _ -> Alcotest.fail "expected JSON object"
-  | Error e -> Alcotest.fail e
-;;
-
 let test_text_extractor_success () =
   let extract =
     Structured.text_extractor (fun s ->
@@ -293,42 +234,6 @@ let test_text_extractor_none () =
   match extract resp with
   | Error _ -> ()
   | Ok _ -> Alcotest.fail "expected error"
-;;
-
-let test_schema_extractor_success () =
-  let extract = Structured.schema_extractor person_schema in
-  let resp = make_response [ Text "{\"name\":\"Dana\",\"age\":42}" ] in
-  match extract resp with
-  | Ok (name, age) ->
-    Alcotest.(check string) "name" "Dana" name;
-    Alcotest.(check int) "age" 42 age
-  | Error e -> Alcotest.fail e
-;;
-
-let test_schema_extractor_parse_failure () =
-  let extract = Structured.schema_extractor person_schema in
-  let resp = make_response [ Text "{\"name\":123}" ] in
-  match extract resp with
-  | Error e -> Alcotest.(check bool) "has error text" true (String.length e > 0)
-  | Ok _ -> Alcotest.fail "expected schema parse error"
-;;
-
-let test_schema_extractor_parser_json_error () =
-  let schema : unit Structured.schema =
-    { params = []
-    ; parse =
-        (fun json ->
-          let open Yojson.Safe.Util in
-          let nested = json |> member "nested" |> to_string in
-          ignore (Yojson.Safe.from_string nested : Yojson.Safe.t);
-          Ok ())
-    }
-  in
-  let extract = Structured.schema_extractor schema in
-  let resp = make_response [ Text {|{"nested":"{"}|} ] in
-  match extract resp with
-  | Error e -> Alcotest.(check bool) "has json error text" true (String.length e > 0)
-  | Ok _ -> Alcotest.fail "expected parser json error"
 ;;
 
 (* --- Runner --- *)
@@ -412,32 +317,6 @@ let test_long_response_evidence_keeps_utf8_boundary () =
   | Serialization (JsonParseError _ | StructuredOutputStateError _ | VersionMismatch _ | UnknownVariant _)
   | Io _ | Orchestration _ | Internal _ | Internal_carried _ | Media _ ->
     Alcotest.fail "wrong evidence constructor"
-;;
-
-let test_public_extractors_keep_safe_failure_class () =
-  let check_public label raw = function
-    | Error message ->
-      Alcotest.(check string) "public class without model/parser fragments"
-        (Printf.sprintf "Structured output parse error: %s (response bytes: %d)"
-           label (String.length raw)) message
-    | Ok _ -> Alcotest.fail "invalid response was accepted"
-  in
-  let check_json ?shape label raw =
-    Structured.response_json_extractor ?shape () (make_response [Text raw])
-    |> check_public label raw
-  in
-  check_json "empty_response" " \n ";
-  check_json "invalid_json" "private-model-output";
-  check_json ~shape:Structured.Object_json "expected_object" "[]";
-  let raw = {|{"name":123}|} in
-  let refused : unit Structured.schema =
-    {params=[]; parse=(fun _ -> Error "private-schema-fragment")} in
-  Structured.schema_extractor refused (make_response [Text raw])
-  |> check_public "schema_rejected" raw;
-  let typed : string Structured.schema =
-    {params=[]; parse=(fun json -> Ok Yojson.Safe.Util.(json |> member "name" |> to_string))} in
-  Structured.schema_extractor typed (make_response [Text raw])
-  |> check_public "schema_type_mismatch" raw
 ;;
 
 let check_response_state expected response =
@@ -699,7 +578,6 @@ let () =
         ; Alcotest.test_case "schema JSON exception" `Quick test_schema_json_exception_has_distinct_schema_class
         ; Alcotest.test_case "object shape" `Quick test_response_shape_failure_retains_response
         ; Alcotest.test_case "bounded UTF-8 evidence" `Quick test_long_response_evidence_keeps_utf8_boundary
-        ; Alcotest.test_case "public extractors keep safe failure class" `Quick test_public_extractors_keep_safe_failure_class
         ] )
     ; ( "schema_to_json_schema"
       , [ Alcotest.test_case "structure" `Quick test_schema_to_json_structure
@@ -723,40 +601,8 @@ let () =
             `Quick
             test_json_extractor_invalid_json
         ; Alcotest.test_case "json_extractor no text" `Quick test_json_extractor_no_text
-        ; Alcotest.test_case
-            "response_json_extractor object"
-            `Quick
-            test_response_json_extractor_object_success
-        ; Alcotest.test_case
-            "response_json_extractor rejects fenced object"
-            `Quick
-            test_response_json_extractor_rejects_fenced_object
-        ; Alcotest.test_case
-            "response_json_extractor any array"
-            `Quick
-            test_response_json_extractor_any_accepts_array
-        ; Alcotest.test_case
-            "response_json_extractor object rejects array"
-            `Quick
-            test_response_json_extractor_object_rejects_array
-        ; Alcotest.test_case
-            "response_json_extractor ignores tool result"
-            `Quick
-            test_response_json_extractor_ignores_tool_result
         ; Alcotest.test_case "text_extractor success" `Quick test_text_extractor_success
         ; Alcotest.test_case "text_extractor none" `Quick test_text_extractor_none
-        ; Alcotest.test_case
-            "schema_extractor success"
-            `Quick
-            test_schema_extractor_success
-        ; Alcotest.test_case
-            "schema_extractor parse failure"
-            `Quick
-            test_schema_extractor_parse_failure
-        ; Alcotest.test_case
-            "schema_extractor parser json error"
-            `Quick
-            test_schema_extractor_parser_json_error
         ] )
     ]
 ;;

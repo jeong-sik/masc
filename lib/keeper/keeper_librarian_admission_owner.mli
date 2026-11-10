@@ -22,4 +22,15 @@ val run : base_path:string -> keeper_name:string -> outcome
     that needs no worker (retained judgments, commits, ACKs) still runs
     first. A conflicting export is [Unavailable], not off.
     [Settled] requires an actual receipt-backed commit, and [has_more] names
-    only input appended beyond the original frontier. *)
+    only input appended beyond the original frontier. A fully committed and
+    acknowledged forest closes on a subsequent pass. A retained closing
+    transaction recovers before ordinary discovery, with fresh physical owner,
+    exact candidate receipt and ACK checks, and never performs a provider call,
+    Memory commit or queue ACK. *)
+module For_testing : sig
+  val run : after_settle:(Lane_addon_tool_request_owner.Record.t -> (unit, string) result) ->
+    base_path:string -> keeper_name:string -> outcome
+  (** The production owner with a fault port after each successful closure
+      member settle. Caller holds the same Memory lane and purge fence.
+      Returning Error stops before further moves, completion or new work. *)
+end

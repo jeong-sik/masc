@@ -328,6 +328,8 @@ let handle_keeper_get_subroutes state req request reqd =
            ~keeper_names:[ name ]))
   | Some Route.(Keeper (Chat_history_page, name)) ->
     Chat_history.handle_page_get state req request reqd name
+  | Some Route.(Keeper (Chat_initial_reply, name)) ->
+    Chat_history.handle_initial_reply_get state request reqd name
   | Some Route.(Keeper (Chat_history, name)) ->
     Chat_history.handle_get state request reqd name
   | Some Route.(Keeper (Checkpoints, name)) -> (

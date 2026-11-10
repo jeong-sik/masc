@@ -349,6 +349,30 @@ let test_multi_account () =
                 "a host client was refused for another reason: %s"
                 (Access.refusal_to_string refusal))
           [ Access.Antigravity; Access.Vibe ];
+        (* A native tool runs as the user of the server process and reaches
+           the account homes of other people, so a model turn runs here only
+           without native tools (plan D3c). *)
+        (match Access.authorize_native Runtime_native_tools.Native_none with
+         | Ok () -> ()
+         | Error refusal ->
+           Alcotest.failf
+             "a turn without native tools was refused: %s"
+             (Access.native_refusal_to_string refusal));
+        List.iter
+          (fun posture ->
+            match Access.authorize_native posture with
+            | Error (Access.Native_tools_reach_other_homes refused) ->
+              Alcotest.(check string)
+                "the refusal names the posture of the turn"
+                (Runtime_native_tools.to_string posture)
+                (Runtime_native_tools.to_string refused)
+            | Error Access.Native_unpublished ->
+              Alcotest.fail "the multi-account access was not published"
+            | Ok () ->
+              Alcotest.failf
+                "a turn with native %s tools was allowed"
+                (Runtime_native_tools.to_string posture))
+          Runtime_native_tools.[ Native_read; Native_full ];
         match
           Access.publish
             (Access.Multi_account { zone; base_path; now = (fun () -> 0.) })

@@ -40,14 +40,27 @@ let run_named_with_masc_tools
     ?net
     ()
   : (Runtime_agent.run_result, Agent_core.Error.t) result =
-  let bridged_tools = List.map (fun (td : Masc_domain.tool_schema) ->
-    Tool_bridge.agent_core_tool_of_masc
-      ~base_path
-      ?model_projection:tool_result_projection
-      ~name:td.name ~description:td.description
-      ~input_schema:td.input_schema
-      (fun input -> dispatch ~name:td.name ~args:input)
-  ) masc_tools in
+  let rec bridge_tools = function
+    | [] -> Ok []
+    | (td : Masc_domain.tool_schema) :: rest ->
+      let* tool =
+        Tool_bridge.agent_core_tool_of_masc
+          ~base_path
+          ?model_projection:tool_result_projection
+          ~name:td.name ~description:td.description
+          ~input_schema:td.input_schema
+          (fun input -> dispatch ~name:td.name ~args:input)
+        |> Result.map_error (fun error ->
+          Agent_core.Error.Config
+            (Agent_core.Error.InvalidConfig
+               { field = "tool input_schema"
+               ; detail = Tool_bridge.schema_error_to_string error
+               }))
+      in
+      let+ tools = bridge_tools rest in
+      tool :: tools
+  in
+  let* bridged_tools = bridge_tools masc_tools in
   let+ selected =
     Keeper_turn_driver.run_named
       ~runtime_id

@@ -50,4 +50,4 @@ val make_request_control_tool :
   on_rejected:(Agent_core_base.Tool.Execution_env.t -> 'a) ->
   handle:(Agent_core_base.Tool.Execution_env.t ->
           string -> Tool_result.result) ->
-  Agent_core_base.Tool.t
+  (Agent_core_base.Tool.t, Tool_bridge.schema_error) result

@@ -439,7 +439,7 @@ let with_bundle_tools
            ~composition_plan_index
            ?skill_activation_context:
              (if record_activations then Some skill_activation_context else None)
-           ()
+           () |> Result.get_ok
        in
        Option.iter (fun cell -> cell := Some (Agent_core.Agent.create ~media_store:(Agent_core.History.Memory_store.create ())
          ~config:(Agent_core.Types.default_config ~model:"fixture-model")
@@ -1429,7 +1429,7 @@ let test_bundle_matches_expected_projection () =
         ~skill_snapshot:snapshot
         ~task_selection:(Some task_selection)
     with
-    | Error error -> fail (Keeper_task_skill_turn.error_to_string error)
+    | Error error -> fail (Keeper_effective_tool_surface.projection_error_to_string error)
     | Ok surface ->
       let effective_names =
         identity_names

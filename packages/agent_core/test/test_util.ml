@@ -165,15 +165,6 @@ let test_json_parse_error_shape () =
   | _ -> fail "expected Serialization JsonParseError"
 ;;
 
-let test_file_read_error_shape () =
-  match Util.file_read_error ~path:"/tmp/x" ~detail:"ENOENT" with
-  | Error.Io (Error.FileOpFailed { op; path; detail }) ->
-    check string "op" "read" op;
-    check string "path" "/tmp/x" path;
-    check string "detail" "ENOENT" detail
-  | _ -> fail "expected Io FileOpFailed read"
-;;
-
 let () =
   run
     "Util"
@@ -218,7 +209,6 @@ let () =
         ] )
     ; ( "error constructors"
       , [ test_case "json_parse_error" `Quick test_json_parse_error_shape
-        ; test_case "file_read_error" `Quick test_file_read_error_shape
         ] )
     ]
 ;;

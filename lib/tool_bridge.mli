@@ -139,9 +139,16 @@ val to_agent_core_typed_result :
 
 (** {1 Schema Conversion} *)
 
-val params_of_json_schema : Yojson.Safe.t -> Agent_core.Types.tool_param list
+type schema_error =
+  | Schema_conversion_error of string
+  | Unprojected_property of string
+  | Invalid_tool_schema of { name : string; detail : string }
+
+val schema_error_to_string : schema_error -> string
+
+val params_of_json_schema : Yojson.Safe.t -> (Agent_core.Types.tool_param list, schema_error) result
 (** Convert a MASC [input_schema] with the AGENT_CORE schema-conversion SSOT.
-    Raises [Invalid_argument] when a property type is missing, unsupported, or
+    Returns an error when a property type is missing, unsupported, or
     ambiguous; no local default or union-member selection is applied.
 
     A property that declares non-empty [oneOf] or [anyOf] alternatives and no
@@ -160,7 +167,7 @@ val agent_core_tool_of_masc :
   description:string ->
   input_schema:Yojson.Safe.t ->
   (Yojson.Safe.t -> Tool_result.result) ->
-  Agent_core.Tool.t
+  (Agent_core.Tool.t, schema_error) result
 (** Create an AGENT_CORE [Tool.t] from a MASC tool name, description,
     JSON input schema, and typed handler function.
 
@@ -197,7 +204,7 @@ val agent_core_tool_of_masc_with_execution_env :
   description:string ->
   input_schema:Yojson.Safe.t ->
   (Agent_core.Tool.Execution_env.t -> Yojson.Safe.t -> Tool_result.result) ->
-  Agent_core.Tool.t
+  (Agent_core.Tool.t, schema_error) result
 (** Create an AGENT_CORE [Tool.t] whose handler also receives the exact AGENT_CORE execution
     environment. This is for correlation and observability; callers must not
     treat invocation metadata as authorization.

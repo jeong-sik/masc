@@ -26,6 +26,18 @@ val keeper_chat_history_page_json :
     paging. Autonomous rows remain on the transcript route. A stale file or
     malformed row refuses the entire page rather than advancing its cursor. *)
 
+val keeper_chat_initial_reply_json :
+  Workspace.config -> string ->
+  (Yojson.Safe.t, Server_keeper_chat_history_read.error) result
+(** A zero-or-one-row partial transcript containing only the newest committed
+    record's exact autonomous final reply. No tool blocks, physical page cursor
+    or assertion that the complete history is empty accompany this response. *)
+
+val handle_initial_reply_get :
+  Mcp_server.server_state -> Httpun.Request.t -> Http_reqd.t -> string -> unit
+(** Answer [GET /api/v1/keepers/<name>/chat/history/initial-reply] with the
+    same owner checks, validation and error statuses as [handle_get]. *)
+
 val handle_page_get :
   Mcp_server.server_state -> Httpun.Request.t -> Httpun.Request.t -> Http_reqd.t -> string -> unit
 (** Answer [GET /api/v1/keepers/<name>/chat/history/page] with one page of

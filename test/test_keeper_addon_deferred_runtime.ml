@@ -121,7 +121,7 @@ let with_bundle ~config ~meta ~net ~export ~deny f =
     ~publication_recovery:{Keeper_publication_recovery_availability.provider=
       Keeper_publication_recovery_availability.non_runtime_provider;keeper_name=keeper}
     ~identity_surface:{Keeper_tools_agent_core.offered=[];agent_cell=cell;history=[];
-      load_receipts=receipts;keeper_turn_id=1} () in
+      load_receipts=receipts;keeper_turn_id=1} () |> Result.get_ok in
   Fun.protect ~finally:bundle.cleanup (fun () ->
     let agent = Agent_core.Agent.create ~media_store:(Agent_core.History.Memory_store.create ()) ~config:(Agent_core.Types.default_config ~model:"fixture-model")
       ~net ~tools:bundle.agent_core_tools () in

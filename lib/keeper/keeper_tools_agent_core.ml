@@ -22,13 +22,6 @@ type terminal_effect_state =
   | Terminal_effect_completed of Keeper_tool_execution.terminal_effect_receipt
   | Terminal_effect_failed of terminal_effect_failure
 
-type gate_replay_delivery =
-  { approval_id : string
-  ; outcome : Keeper_gate_replay.outcome
-  ; terminal_effect_receipt :
-      Keeper_tool_execution.terminal_effect_receipt option
-  }
-
 type attached_surface =
   { offered : Keeper_identity_tools.offered_tool list
   ; agent_cell : Agent_core.Agent.t option ref
@@ -73,7 +66,7 @@ type tool_bundle =
   ; project_for_runtime : model_tool_projection
   ; cleanup : unit -> unit
   ; terminal_effect_state : unit -> terminal_effect_state
-  ; gate_replay_delivery : gate_replay_delivery option
+  ; gate_replay_inputs : Keeper_gate_replay.resolution_input list
   ; turn_sandbox_factory : Keeper_sandbox_factory.t option
   }
 

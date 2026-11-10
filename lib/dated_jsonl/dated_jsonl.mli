@@ -267,6 +267,14 @@ val read_recent_lines : ?offset:int -> t -> int -> string list
 (** Like {!read_recent} but returns raw JSONL strings (no parse).
     Useful for tail-readers that do their own parsing. *)
 
+val read_recent_lines_result :
+  ?offset:int -> t -> int -> ((string * string) list, read_error) result
+(** Strict raw counterpart of {!read_recent_result}, with the same physical
+    non-empty row selection, chronological order, offset and storage errors.
+    Each pair carries the source path and the original line without its newline.
+    JSON is not parsed: a caller can compare exact already-validated source
+    bytes before decoding them again. Malformed JSON still occupies a row. *)
+
 val range_day_file_paths_result :
   t -> since:string -> until:string -> (string list, read_error) result
 (** Enumerate the complete selected dated paths, oldest first. A missing

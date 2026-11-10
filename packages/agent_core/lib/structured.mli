@@ -72,19 +72,5 @@ val extract_response
   -> api_response
   -> ('a, Error.t) result
 
-(** Agent-level extractor form of {!extract_response_json}. *)
-val response_json_extractor
-  :  ?shape:response_json_shape
-  -> unit
-  -> Yojson.Safe.t extractor
-
-(** Build an {!extractor} from a typed schema.
-
-    This is the Agent-level counterpart to {!extract}: it parses the response
-    text as JSON and delegates shape validation to [schema.parse]. Its string
-    error projection omits private output evidence; use {!extract_response}
-    when the caller needs the typed failure. *)
-val schema_extractor : 'a schema -> 'a extractor
-
 val json_extractor : (Yojson.Safe.t -> 'a) -> 'a extractor
 val text_extractor : (string -> 'a option) -> 'a extractor

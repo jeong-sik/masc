@@ -57,12 +57,12 @@ val make_instruction_skill_tool :
      (Keeper_skill_activation_ledger.record_outcome, Keeper_skill_activation_recorder.error) result) ->
   ?assess_applicability:(reference:Skill_reference.t -> body:string -> Typesafeai_skill_applicability.t) ->
   ?on_result:(input:Yojson.Safe.t -> Tool_result.result -> unit) ->
-  instruction_skills:instruction_skill list -> unit -> Agent_core.Tool.t
+  instruction_skills:instruction_skill list -> unit -> (Agent_core.Tool.t, Tool_bridge.schema_error) result
 (** Read a frozen Skill body or bundled resource without a Keeper turn or
     composition execution. Native Agent-Core invocation identity is preserved. *)
 
 val composition_schema_tool :
-  Keeper_tool_composition_catalog.entry -> Agent_core.Tool.t
+  Keeper_tool_composition_catalog.entry -> (Agent_core.Tool.t, Tool_bridge.schema_error) result
 (** The single declared composition schema, without materializing async or
     transient controls. Its schema has the same description/parameters as its
     row in {!schema_tool_rows}; it cannot execute. *)
@@ -80,7 +80,7 @@ val schema_tool_rows :
   ?include_drafts:bool ->
   ?skill_compositions:(Keeper_tool_composition_catalog.entry * 'evidence) list ->
   unit ->
-  ('evidence schema_tool_origin * Agent_core.Tool.t) list
+  ('evidence schema_tool_origin * (Agent_core.Tool.t, Tool_bridge.schema_error) result) list
 (** Handler-free schemas paired with caller-owned composition evidence. This
     preserves typed provenance through materialization instead of recovering it
     from a generated tool name. The async controls are rows exactly when
@@ -91,7 +91,7 @@ val schema_tool_rows :
 
 val instruction_skill_schema_tool :
   instruction_skills:instruction_skill list ->
-  Agent_core.Tool.t
+  (Agent_core.Tool.t, Tool_bridge.schema_error) result
 (** Handler-free [keeper_skill] schema with the same exact Available
     description used by the executable tool. *)
 
@@ -195,7 +195,7 @@ val make_tools
   -> ?on_failed:(Keeper_tools_agent_core.terminal_effect_failure -> unit)
   -> ?on_externalization_error:(Tool_bridge.externalization_error -> unit)
   -> unit
-  -> (Agent_core.Tool.t * Tool_definition_toml.loading * Tool_output.model_projection) list
+  -> ((Agent_core.Tool.t * Tool_definition_toml.loading * Tool_output.model_projection) list, Tool_bridge.schema_error) result
 (** Production materialization consumes the same immutable authority as direct
     dispatch. Its descriptor set cannot be supplied independently.
 
@@ -253,7 +253,7 @@ module Compatibility : sig
     -> ?on_failed:(Keeper_tools_agent_core.terminal_effect_failure -> unit)
     -> ?on_externalization_error:(Tool_bridge.externalization_error -> unit)
     -> unit
-    -> (Agent_core.Tool.t * Tool_definition_toml.loading * Tool_output.model_projection) list
+    -> ((Agent_core.Tool.t * Tool_definition_toml.loading * Tool_output.model_projection) list, Tool_bridge.schema_error) result
 end
 (** Explicit compatibility adapter for tests that supply a descriptor list
     without an enclosing Keeper turn. *)
@@ -378,7 +378,7 @@ module For_testing : sig
     ?on_result:(input:Yojson.Safe.t -> Tool_result.result -> unit) ->
     instruction_skills:instruction_skill list ->
     unit ->
-    Agent_core.Tool.t
+    (Agent_core.Tool.t, Tool_bridge.schema_error) result
 
   val status_result :
     config:Workspace.config ->

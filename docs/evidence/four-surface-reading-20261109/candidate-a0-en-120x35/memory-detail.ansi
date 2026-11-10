@@ -1,0 +1,35 @@
+ [2mOperations[0m  [2mWork[0m  [1;7m▸Keepers[0m  [2mFeatures & plugins[0m  [2mWorkspace[0m  [2mSystem[0m
+[90m┌──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│[1m[39m MASC Memory · fact[0m                                                                                                   [90m│
+├──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│[39m  [1m[96mSource-Bound Fact Detail[0m                                                                                            [90m│
+│[39m    원본 파일은 요청과 현재 관측을 구분한다고 기록합니다.                                                             [90m│
+│[39m    Keeper:      sourcereader                                                                                         [90m│
+│[39m    Bound Path:  <user>/me/workspace/yousleepwhen/masc/artifacts/surface-minimalism-20261109/private-surfaces- [90m│
+│[39m                 9ddyyq3m/workspace/fixture-sources/reading-contract.md                                               [90m│
+│[39m    File SHA:    sha256:0044f31f4296ad91eafd570b1527e7b3f9bcd4114ed3a51e8f0164bae35b1df7 · First Seen: 38m            [90m│
+│[39m                                                                                                                      [90m│
+│[39m                                                                                                                      [90m│
+│[39m                                                                                                                      [90m│
+│[39m                                                                                                                      [90m│
+│[39m                                                                                                                      [90m│
+│[39m                                                                                                                      [90m│
+│[39m                                                                                                                      [90m│
+│[39m                                                                                                                      [90m│
+│[39m                                                                                                                      [90m│
+│[39m                                                                                                                      [90m│
+│[39m                                                                                                                      [90m│
+│[39m                                                                                                                      [90m│
+│[39m                                                                                                                      [90m│
+│[39m                                                                                                                      [90m│
+│[39m                                                                                                                      [90m│
+│[39m                                                                                                                      [90m│
+│[39m                                                                                                                      [90m│
+│[39m                                                                                                                      [90m│
+│[39m                                                                                                                      [90m│
+│[39m                                                                                                                      [90m│
+│[39m                                                                                                                      [90m│
+└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+[2m[39m  ACTION NEEDED 1 · keeper_memory_execution:addon_unattached  j/k:scroll  PgUp/PgDn:page  Esc:close  …?[0m
+ Schedule may be out of date
+[2m › to quietreader   (i to write)

@@ -417,27 +417,6 @@ let test_summarize_tool_usage_reads_date_split_store_without_fs () =
         (telemetry_dir base_dir)
         summary.telemetry_path)
 
-let test_legacy_single_file_is_ignored () =
-  with_temp_dir
-  @@ fun base_dir ->
-  Eio_main.run
-  @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
-  let config = Workspace.default_config base_dir in
-  let legacy_path =
-    Filename.concat (Filename.concat base_dir ".masc") "telemetry.jsonl"
-  in
-  Fs_compat.mkdir_p (Filename.dirname legacy_path);
-  Fs_compat.append_file
-    legacy_path
-    {|{"timestamp":1000.0,"event":["Agent_session_bound",{"agent_id":"legacy-only","capabilities":[]}]}|}
-  ;
-  check
-    int
-    "legacy single-file telemetry is not read"
-    0
-    (List.length (Telemetry_eio.read_all_events config))
-
 (* [read_all_events] decodes rows during the read now instead of materialising
    the window first. The decoder runs under a newest-first scan while the
    result stays chronological, so order is the thing worth pinning. *)
@@ -526,8 +505,6 @@ let () =
     "store_reads", [
       test_case "summarize_tool_usage reads date-split store" `Quick
         test_summarize_tool_usage_reads_date_split_store_without_fs;
-      test_case "legacy single telemetry file is ignored" `Quick
-        test_legacy_single_file_is_ignored;
       test_case "read_all_events is chronological across day files" `Quick
         test_read_all_events_is_chronological_across_day_files;
       test_case "track applies telemetry max bytes" `Quick

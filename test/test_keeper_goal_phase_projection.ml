@@ -675,11 +675,9 @@ let test_a_measurement_or_a_claim_moves_only_the_goal_observations () =
     (String.equal observed_measured observed_claimed)
 ;;
 
-(* RFC-0491 §3.3. The Active Goals layer becomes the System that precedes the
-   history. A completion request, a refuted proof and a reopen move a Goal in
-   and out of [Verifying] and write its [updated_at]; none of them may change
-   the System. The proof-pending mark rides the Goals Awaiting Proof block,
-   which every round of the turn carries. *)
+(* Agent Core carries the current proof state in System so every tool round
+   sees it without an extra User message. The Active Goals list keeps its
+   stable order, while a new turn observes any proof-state change. *)
 let system_of_text text =
   match
     Keeper_turn_system.issue ~held:None ~lane:Keeper_turn_system.Without_basis
@@ -716,7 +714,7 @@ let first_request config =
         (Keeper_unified_prompt.active_goal_summaries ~config ~keeper_name:meta.name)
       ~observation ()
   in
-  ( Keeper_run_prompt.assemble_request_context ~system:(system_of_text "BASE")
+  ( Keeper_run_prompt.assemble_request_context ~checkpoint_owner:Runtime_execution.Masc_agent_core ~system:(system_of_text "BASE")
       ~post_tool_round:false ~previous_assembly:None
       ~dynamic_context_partition:(Some world_partition) ~existing_extra_system_context:None
       ~blocks:[ Prompt_block_id.Dynamic_context, world_state ]
@@ -733,14 +731,14 @@ let awaiting_blocks (assembly : Keeper_context_assembly.t) =
   List.filter_map
     (fun (id, text) ->
        if Prompt_block_id.equal id Prompt_block_id.Goals_awaiting_proof then Some text else None)
-    assembly.blocks
+    (Keeper_context_assembly.logical_blocks assembly)
 ;;
 
 let awaiting_row goal_id =
   fragment Prompt_names.keeper_world_goals_awaiting_proof_row [ "goal_id", goal_id ]
 ;;
 
-let test_a_goal_under_proof_leaves_the_system_as_it_was () =
+let test_a_goal_under_proof_is_current_system_state () =
   with_workspace @@ fun config ->
   let at hour = Printf.sprintf "2026-11-06T%02d:00:00Z" hour in
   let goal phase ~updated = goal_at phase ~priority:3 ~created_at:(at 1) ~updated_at:(at updated) in
@@ -758,13 +756,13 @@ let test_a_goal_under_proof_leaves_the_system_as_it_was () =
   check (list string) "the completion request reorders the store" [ "goal-b"; "goal-a" ]
     (store_order ());
   let verifying, _ = first_request config in
-  check string "entering Verifying leaves the System bytes" (issued_system executing)
-    (issued_system verifying);
+  check bool "entering Verifying changes current System state" false
+    (String.equal (issued_system executing) (issued_system verifying));
   let row = fragment Prompt_names.keeper_world_active_goals_row
       [ "goal_id", "goal-b"; "title", "title of goal-b" ] in
   check bool "the System row of the Goal under proof is the plain row" true
     (List.mem row (String.split_on_char '\n' (issued_system verifying)));
-  check bool "the System carries no proof-pending mark" false
+  check bool "the System carries the current proof-pending mark" true
     (contains_in (issued_system verifying) (awaiting_row "goal-b"));
   (match awaiting_blocks verifying with
    | [ block ] ->
@@ -772,25 +770,122 @@ let test_a_goal_under_proof_leaves_the_system_as_it_was () =
        (contains_in block (awaiting_row "goal-b"));
      check bool "and no other Goal" false (contains_in block "goal-a")
    | blocks -> failf "one Goals_awaiting_proof block expected, got %d" (List.length blocks));
-  check bool "the block reaches the end context" true
+  check bool "the proof mark is absent from the User context" false
     (match verifying.extra_system_context with
      | Some carrier -> contains_in carrier (awaiting_row "goal-b")
      | None -> false);
   let later =
-    Keeper_run_prompt.assemble_request_context ~system:(system_of_text "BASE")
+    Keeper_run_prompt.assemble_request_context ~checkpoint_owner:Runtime_execution.Masc_agent_core ~system:(system_of_text "BASE")
       ~post_tool_round:true ~previous_assembly:(Some verifying) ~dynamic_context_partition:None
       ~existing_extra_system_context:None ~blocks:[]
   in
   check (list string) "a later round of the turn carries the same block"
     (awaiting_blocks verifying) (awaiting_blocks later);
+  check string "tool rounds retain the exact same System"
+    (issued_system verifying) (issued_system later);
+  check (option string) "proof state creates no post-tool User carrier" None later.extra_system_context;
   (* The verifier refutes the proof: goal-b is back in Executing and its
      [updated_at] moved again. *)
   write_goals config
     [ goal Goal_phase.Executing ~updated:3 "goal-a"; goal Goal_phase.Executing ~updated:5 "goal-b" ];
   let refuted, _ = first_request config in
-  check string "a refuted proof leaves the System bytes" (issued_system executing)
+  check string "a refuted proof restores the executing System" (issued_system executing)
     (issued_system refuted);
   check (list string) "and the block leaves" [] (awaiting_blocks refuted)
+;;
+
+let test_proof_state_follows_the_runtime_execution_owner () =
+  let operation = "kmsg-eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee" in
+  let peer = "proof-source-peer" in
+  let operation_id = match Keeper_chat_operation.Operation_id.of_string operation with
+    | Ok id -> id | Error detail -> fail detail in
+  let keeper_id = match Keeper_identity.Keeper_id.of_string peer with
+    | Some id -> id | None -> fail "fixture peer must have a canonical Keeper identity" in
+  let source = Keeper_direct_input_source.of_admitted_input ~operation_id
+      ~speaker:(Keeper_input_speaker.Person (Keeper_input_speaker.Keeper keeper_id))
+      |> Keeper_direct_input_source.render in
+  List.iter (fun identity -> check bool "the admitted source names its original operation and peer"
+    true (contains_in source identity)) [operation; peer];
+  let partition = Keeper_context_layers.assemble ~content_of:(function
+    | Keeper_context_layers.Goals_awaiting_proof -> Some "CURRENT_PROOF_STATE"
+    | Keeper_context_layers.Active_goals -> Some "CURRENT_GOAL"
+    | Keeper_context_layers.Direct_input_source -> Some source
+    | Keeper_context_layers.Goal_observations | Current_task | Approval_authority
+    | Connected_surfaces | Namespace_state | Workspace_memory | Wiki | Lane_updates
+    | Autonomous_trigger | Scheduled_automation | Completion_authority | Task_cancellations
+    | Pending_mentions | Scope_messages | Own_board_posts | Board_activity
+    | Own_recent_actions | Recent_work | Fleet_messages -> None) in
+  let assemble checkpoint_owner post_tool_round previous_assembly blocks =
+    Keeper_run_prompt.assemble_request_context ~checkpoint_owner
+      ~system:(system_of_text "BASE") ~post_tool_round ~previous_assembly
+      ~dynamic_context_partition:(Some partition) ~existing_extra_system_context:None ~blocks in
+  let check_source (assembly : Keeper_context_assembly.t) =
+    let sources = match assembly.system_prompt with
+      | None -> fail "the admitted source requires an issued System"
+      | Some issued -> List.filter_map (function
+          | Keeper_context_assembly.Direct_input_source text -> Some text
+          | Active_goals _ | Goals_awaiting_proof _ -> None) issued.observations in
+    check (list string) "the exact admitted source stays in System once" [source] sources;
+    check bool "the actual issued System retains the exact source bytes" true
+      (contains_in (issued_system assembly) source);
+    check bool "the source acquires no User context block" false
+      (List.mem_assoc Prompt_block_id.Direct_input_source assembly.blocks);
+    List.iter (fun identity ->
+      check bool "the original operation and peer are not replayed in a User carrier" false
+        (match assembly.extra_system_context with
+         | Some carrier -> contains_in carrier identity
+         | None -> false)) [operation; peer] in
+  List.iter (fun extra_blocks ->
+    let first = assemble Runtime_execution.Masc_agent_core false None
+        ((Prompt_block_id.Dynamic_context, Keeper_context_layers.text partition) :: extra_blocks) in
+    check_source first;
+    check bool "only renderer-issued proof enters System" false
+      (contains_in (issued_system first) "UNISSUED_PROOF");
+    let official = assemble Runtime_execution.Official_client true (Some first) [] in
+    check_source official;
+    check bool "official System retains no turn-scoped proof state" false
+      (contains_in (issued_system official) "CURRENT_PROOF_STATE");
+    check (list string) "official fallback receives only the renderer-issued proof state"
+      ["CURRENT_PROOF_STATE"] (awaiting_blocks official);
+    check (list (pair string string)) "only proof moves to the official User carrier"
+      ["goals_awaiting_proof", "CURRENT_PROOF_STATE"]
+      (List.map (fun (id, text) -> Prompt_block_id.to_string id, text) official.blocks);
+    let core = assemble Runtime_execution.Masc_agent_core true (Some official) [] in
+    check_source core;
+    check string "Agent Core fallback restores the same System"
+      (issued_system first) (issued_system core);
+    check (option string) "Agent Core fallback leaves no proof User carrier" None core.extra_system_context)
+    [ []; [Prompt_block_id.Goals_awaiting_proof, "UNISSUED_PROOF"] ]
+;;
+
+let test_unattributed_proof_text_is_not_system_authority () =
+  let partition = Keeper_context_layers.assemble ~content_of:(function
+    | Keeper_context_layers.Goals_awaiting_proof -> Some "RENDERED_PROOF"
+    | _ -> None) in
+  let raw = Prompt_block_id.Goals_awaiting_proof, "UNISSUED_PROOF" in
+  let cases =
+    [ false, None, [raw]
+    ; false, Some partition, [Prompt_block_id.Dynamic_context, "STALE_RENDER"; raw]
+    ; true, None, [raw] ] in
+  List.iter (fun (post_tool_round, dynamic_context_partition, blocks) ->
+    let assembly = Keeper_run_prompt.assemble_request_context
+        ~checkpoint_owner:Runtime_execution.Masc_agent_core
+        ~system:(system_of_text "BASE") ~post_tool_round ~previous_assembly:None
+        ~dynamic_context_partition ~existing_extra_system_context:None ~blocks in
+    let check_unissued assembly =
+      check string "unattributed text acquires no System authority" "BASE"
+        (issued_system assembly);
+      check bool "no renderer-issued proof is inferred from raw blocks" true
+        (Option.is_none assembly.Keeper_context_assembly.proof_state) in
+    check_unissued assembly;
+    ignore (List.fold_left (fun previous checkpoint_owner ->
+      let later = Keeper_run_prompt.assemble_request_context ~checkpoint_owner
+          ~system:(system_of_text "BASE") ~post_tool_round:true ~previous_assembly:(Some previous)
+          ~dynamic_context_partition:None ~existing_extra_system_context:None ~blocks:[] in
+      check_unissued later;
+      later) assembly
+      [Runtime_execution.Masc_agent_core; Runtime_execution.Official_client;
+       Runtime_execution.Masc_agent_core])) cases
 ;;
 
 let test_the_system_orders_goals_by_priority_created_at_and_id () =
@@ -851,8 +946,12 @@ let () =
             test_held_tasks_mark_their_goals_without_hiding_others
         ; test_case "a measurement or a claim moves only the Goal observations" `Quick
             test_a_measurement_or_a_claim_moves_only_the_goal_observations
-        ; test_case "a Goal under proof leaves the System as it was" `Quick
-            test_a_goal_under_proof_leaves_the_system_as_it_was
+        ; test_case "a Goal under proof is current System state without a User replay" `Quick
+            test_a_goal_under_proof_is_current_system_state
+        ; test_case "proof state follows an execution-owner fallback" `Quick
+            test_proof_state_follows_the_runtime_execution_owner
+        ; test_case "unattributed proof text acquires no System authority" `Quick
+            test_unattributed_proof_text_is_not_system_authority
         ; test_case "the System orders Goals by priority, created_at and id" `Quick
             test_the_system_orders_goals_by_priority_created_at_and_id
         ; test_case "world observation drops terminal goals" `Quick

@@ -32,3 +32,8 @@ val constitution_amendments_block : World_constitution_render.amendments -> stri
     articles added since a System's [<norms>] were rendered, with their text,
     and the ids of the ones removed. Raises [Invalid_argument] when a slot is
     missing or cannot render, under the same contract as the System's slots. *)
+
+val constitution_current_block : World_constitution_types.t list -> string
+(** The complete current norms, including an empty set, independently of a
+    System's basis. Isolated moves are not approved; their prior texts do not
+    remain active through an older System. Same rendering failure contract. *)

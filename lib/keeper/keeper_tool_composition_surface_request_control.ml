@@ -185,7 +185,8 @@ let make_request_control_tool
     ~description
     ~input_schema
     (fun execution_env input ->
-      let start_time = Tool_timing.start () in
+      let dispatch_result =
+        let start_time = Tool_timing.start () in
       match
         Tool_input_validation.validate_args
           ~schema:input_schema
@@ -202,5 +203,10 @@ let make_request_control_tool
            Tool_result.runtime_err
              ~tool_name:name
              ~start_time
-             "validated composition request input lost request_id"))
+             "validated composition request input lost request_id")
+      in
+      (* task-3268: status/cancel bypass the exec handler, so emit the shared
+         dispatch observers here with the honest typed result (#38824). *)
+      Tool_dispatch.run_dispatch_observers Dispatch_outcome.Handled (Some dispatch_result);
+      dispatch_result)
 ;;

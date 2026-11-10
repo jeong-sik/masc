@@ -53,35 +53,42 @@ filesystem mutation, not a live process/worker restart or a domain commit.
 
 `Lane_addon_tool_request_owner.settle` moves one original out of the scope that
 discovery reads, into `tool-request-owners-settled/<scope digest>/<YYYY-MM-DD>/`,
-its record under `records/` and its body under `bodies/`. It first reads the
-record the scope holds now, and moves nothing and returns `Settle_changed` when
+its record under `records/`, then removes its live body. It keeps no body in
+the archive. It first reads the record the scope holds now, and moves nothing
+and returns `Settle_changed` when
 that record differs from the one the caller read. The read and the move each
 take the scope serializer, so the caller's lease and serialization keep the
-record from changing between them, as for `advance`. The record moves first
-and then its body, the reverse of publication: a settle that stops between the
+record from changing between them, as for `advance`. The record moves first;
+body removal follows, the reverse of publication: a settle that stops between the
 two leaves a body no record names, as an interrupted retain does, never a
 record without its body. A file already in the archive counts as moved, so the
 store's settle call run again completes the move; a file in neither place is
-an error. Only single-link regular files this process owns move, and both
-directories are synced after each rename. The consumer picks the date; the
+an error. Only single-link regular files this process owns move or are removed.
+The record directories are synced after the rename, and the body directory
+after removal. The consumer picks the date; the
 Workspace Curator uses the UTC date its chain's root ID was minted.
 
-Nothing settles an original again once its record has left the scope, so a
-body that a stopped settle left beside the scope stays there, like one a
-stopped retain left. No pass, load or deploy check reads such a body; #45320
-tracks collecting them.
+A consumer that no longer names the moved record cannot retry its body
+cleanup. Such a body remains like one a stopped retain left; #45320 tracks
+collecting these bodies. Admission closure retains every member's complete
+expected metadata until its final anchor moves, and repeats even an already
+archived member's settle to complete body removal. The final anchor can still
+leave an unnamed body if its own settle stops between the two operations.
 
 A known-ID load reads the record and the body it names under one hold of the
 same serializer, so it finds an original whole or gone, never a record whose
-body a settle moved between two reads. The deploy store check runs beside a
+body a settle removed between two reads. The deploy store check runs beside a
 live server and takes none of its locks: a record it read before a settle
-moved it, and whose body it then finds gone, counts as absent. A known-ID load
-and the deploy store check do not look in the archive; the Curator's discovery
-only asks whether a child's record is there, to finish a stopped settle, and
-`settled` answers only that. The caller settles only originals no pass needs
+moved it, and whose body it then finds gone, counts as absent. The ordinary
+known-ID load does not fall back to the archive. `settled` answers only whether
+an owned marker exists and its directories are synchronized. The explicit
+`load_settled` port decodes its complete current metadata without restoring a
+body. Admission's read-only preflight uses that port and the retained typed
+manifest to validate a partial closure; marker existence alone is insufficient.
+The caller settles only originals no pass needs
 again and whose body no other record names. The `settle` group of
-`test_lane_addon_request_discovery` moves real files: the record and body
-arrive unchanged and leave the scope, a record that changed after it was read
+`test_lane_addon_request_discovery` moves real files: the record arrives
+unchanged and its body is removed, a record that changed after it was read
 stays, settling again completes a move stopped after the record, a record that
 cannot move leaves the original whole, and a date that is not a day or an
 original in neither place is refused.

@@ -133,7 +133,9 @@ let lifecycle_ends_run_error row =
 let is_terminal_result_slot (row : Store.chat_message) =
   match row.delivery_provenance with
   | Some { Delivery.transcript_slot = (Delivery.Terminal_result | Delivery.Settled_failure); _ } -> true
-  | Some { transcript_slot = (Delivery.Accepted_user | (Delivery.Approval_request | (Delivery.Approval_resolution | (Delivery.Approval_replay | (Delivery.Approval_replay_correction | (Delivery.Approval_continuation | (Delivery.Tool_call _ | Delivery.Tool_delivery _)))))));_}
+  | Some { transcript_slot = (Delivery.Accepted_user | Approval_request | Approval_resolution
+      | Approval_replay | Approval_replay_correction | Approval_continuation | Tool_call _
+      | Tool_delivery _ | Autonomous_input_binding _); _ }
   | None -> false
 ;;
 
@@ -190,7 +192,7 @@ let assistant_text_mismatch ~entries ~reply_details rows =
      Compare Reply_details with the earlier stream result it describes. *)
   let rows = List.filter (fun (row : Store.chat_message) ->
     match row.delivery_provenance with
-    | Some { Delivery.transcript_slot = Delivery.Settled_failure; _ } -> false
+    | Some { Delivery.transcript_slot = (Delivery.Settled_failure | Autonomous_input_binding _); _ } -> false
     | None
     | Some { Delivery.transcript_slot =
         (Delivery.Accepted_user | Terminal_result | Approval_request

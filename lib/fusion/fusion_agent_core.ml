@@ -262,7 +262,7 @@ let panel_failure_text (failure : Fusion_types.panel_failure) : string =
 (** [Keeper_tool_descriptor]에서 날것의 web tool descriptor를 찾아
     [Agent_core.Tool.t]로 변환한다. 패널/심판이 web_search/web_fetch를
     호출할 수 있게 하는 목적으로만 쓰인다. *)
-let agent_core_tool_of_descriptor (d : Keeper_tool_descriptor.t) : Agent_core.Tool.t option =
+let agent_core_tool_of_descriptor (d : Keeper_tool_descriptor.t) : (Agent_core.Tool.t, Tool_bridge.schema_error) result =
   let handler args =
     let start_time = Tool_timing.start () in
     match d.Keeper_tool_descriptor.internal_name with
@@ -281,18 +281,25 @@ let agent_core_tool_of_descriptor (d : Keeper_tool_descriptor.t) : Agent_core.To
         ~start_time
         "fusion: unsupported web tool"
   in
-  Some
-    (Tool_bridge.agent_core_tool_of_masc
-       ~name:d.internal_name
-       ~description:d.description
-       ~input_schema:d.input_schema
-       handler)
+  Tool_bridge.agent_core_tool_of_masc
+    ~name:d.internal_name
+    ~description:d.description
+    ~input_schema:d.input_schema
+    handler
 
-let web_tool_bundle () : Agent_core.Tool.t list =
-  [ "masc_web_search"; "masc_web_fetch" ]
-  |> List.map Keeper_tool_descriptor.descriptors_for_internal
-  |> List.concat
-  |> List.filter_map agent_core_tool_of_descriptor
+let web_tool_bundle () : (Agent_core.Tool.t list, Tool_bridge.schema_error) result =
+  let descriptors =
+    [ "masc_web_search"; "masc_web_fetch" ]
+    |> List.map Keeper_tool_descriptor.descriptors_for_internal
+    |> List.concat
+  in
+  let rec convert = function
+    | [] -> Ok []
+    | descriptor :: rest ->
+      Result.bind (agent_core_tool_of_descriptor descriptor) (fun tool ->
+        Result.map (fun tools -> tool :: tools) (convert rest))
+  in
+  convert descriptors
 
 (* AGENT_CORE 는 데드라인을 요청받으면 그것을 강제할 clock 도 함께 요구한다:
    [body_timeout_s] 만 주고 clock 을 빼면 요청이 dispatch 전에

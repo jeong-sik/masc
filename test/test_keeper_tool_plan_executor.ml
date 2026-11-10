@@ -2108,10 +2108,8 @@ let test_board_write_survives_composition_output_schema_failure () =
     Board.reset_global_for_test ()) @@ fun () ->
   Board_dispatch.reset_for_test ();
   Board.reset_global_for_test ();
-  (match Board_dispatch.init_jsonl ~base_path
-      ~recipient_lookup:Masc_board_handlers.Recipient_lookup.none_declared () with
-   | Ok () -> ()
-   | Error detail -> fail detail);
+  Result.get_ok (Board_dispatch.init_jsonl ~base_path
+    ~recipient_lookup:Masc_board_handlers.Recipient_lookup.none_declared ());
   Log.reset_for_testing ();
   Log.init ~base_path ();
   let write name args = Board_tool.handle_tool ~reader:Masc_board_handlers.Board_access.Operator

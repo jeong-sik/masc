@@ -219,15 +219,6 @@ let extract ~sw ~net ~provider_config ~config ~(schema : 'a schema) prompt
 (** An extractor converts an api_response into a typed value. *)
 type 'a extractor = api_response -> ('a, string) result
 
-let schema_extractor (schema : 'a schema) : 'a extractor =
-  fun response -> extract_response ~schema response |> Result.map_error Error.to_string
-;;
-
-let response_json_extractor ?shape () : Yojson.Safe.t extractor =
-  fun response ->
-  extract_response_json ?shape response |> Result.map_error Error.to_string
-;;
-
 (* NOTE: keep [json_extractor] / [text_extractor] for callers who parse
    free-form responses themselves. *)
 let try_parse f x =

@@ -8,6 +8,7 @@
     focused on per-tool handler construction. *)
 
 open Keeper_tools_agent_core
+open Result.Syntax
 
 type model_input_requirement = No_model_image | Model_image
 
@@ -36,32 +37,29 @@ let terminal_externalization_failure
     None
 ;;
 
-let initial_terminal_effect_state = function
-  | Some
-      { Keeper_tools_agent_core.outcome =
+let initial_terminal_effect_state inputs =
+  match List.filter_map Keeper_gate_replay.input_replay_execution inputs with
+  | [ { Keeper_gate_replay.outcome =
           ( Keeper_gate_replay.Applied _
           | Keeper_gate_replay.Applied_with_warning _ )
       ; terminal_effect_receipt = Some receipt
-      ; _
-      } ->
+      } ] ->
     Keeper_tools_agent_core.Terminal_effect_completed receipt
-  | None
-  | Some
-      { Keeper_tools_agent_core.outcome =
+  | []
+  | _ :: _ :: _
+  | [ { Keeper_gate_replay.outcome =
           ( Keeper_gate_replay.Applied _
           | Keeper_gate_replay.Applied_with_warning _ )
       ; terminal_effect_receipt = None
-      ; _
-      }
-  | Some
-      { Keeper_tools_agent_core.outcome =
+      } ]
+  | [ { Keeper_gate_replay.outcome =
           ( Keeper_gate_replay.Not_applicable
           | Keeper_gate_replay.Failed _
           | Keeper_gate_replay.Indeterminate _
           | Keeper_gate_replay.Repair_required _
           | Keeper_gate_replay.Resolution_absent _ )
       ; _
-      } -> Keeper_tools_agent_core.Terminal_effect_open
+      } ] -> Keeper_tools_agent_core.Terminal_effect_open
 ;;
 
 (* The failure callback every ordinary descriptor's handler receives. The
@@ -86,7 +84,7 @@ let make_tool_bundle_for_descriptors_with_policy
       ?clock
       ?continuation_channel
       ?gate_context
-      ?hitl_resolution
+      ?(hitl_resolutions = Keeper_hitl_resolution_batch.empty)
       ?on_gate_deferred
       ?(skill_catalog = Keeper_skill_catalog.empty)
       ?(identity_surface : Keeper_tools_agent_core.attached_surface option)
@@ -101,7 +99,7 @@ let make_tool_bundle_for_descriptors_with_policy
       ?(tool_result_inline_ceiling_bytes = fun () -> Common.max_tool_result_wire_bytes)
       ~(descriptors : Keeper_tool_descriptor.t list)
       ()
-  : tool_bundle
+  : (tool_bundle, Tool_bridge.schema_error) result
   =
   (* Which lane will execute this call. The bundle is built before the turn
      resolves a runtime, so this is asked per call rather than read now.
@@ -150,6 +148,43 @@ let make_tool_bundle_for_descriptors_with_policy
                 descriptor.id))
       descriptors
   in
+  (* Validate the immutable schemas before replaying any approved effect. *)
+  let rec validate_descriptors = function
+    | [] -> Ok []
+    | (descriptor : Keeper_tool_descriptor.t) :: rest ->
+      let name = match Keeper_tool_descriptor.keeper_model_names descriptor with
+        | name :: _ -> name | [] -> descriptor.internal_name in
+      let* schema =
+        Keeper_schema_observation.with_definition descriptor (fun () ->
+          Keeper_descriptor_schema.for_descriptor descriptor)
+        |> Result.map_error (fun detail -> Tool_bridge.Invalid_tool_schema { name; detail })
+      in
+      let+ rest = validate_descriptors rest in
+      (descriptor, schema) :: rest
+  in
+  let* validated_descriptors = validate_descriptors descriptors in
+  let skill_compositions =
+    Keeper_skill_catalog.compositions skill_catalog
+    |> List.map (fun (composition : Keeper_skill_catalog.composition) ->
+      composition.entry, composition.provenance)
+  in
+  let schema_rows = Keeper_tool_composition_surface.schema_tool_rows
+      ~include_drafts:(Option.is_some capability_surface) ~skill_compositions () in
+  let rec validate_rows = function
+    | [] -> Ok ()
+    | (_, schema) :: rest ->
+      let* _ = schema in
+      validate_rows rest
+  in
+  let* () = validate_rows schema_rows in
+  let instruction_skills =
+    Keeper_tool_composition_surface.instruction_skills_of_catalog skill_catalog in
+  let* () = match instruction_skills with
+    | [] -> Ok ()
+    | skills ->
+      let+ _ = Keeper_tool_composition_surface.instruction_skill_schema_tool
+          ~instruction_skills:skills in ()
+  in
   Option.iter (fun index ->
     Keeper_tool_composition_plan_index.bind_descriptors index descriptors)
     composition_plan_index;
@@ -172,87 +207,30 @@ let make_tool_bundle_for_descriptors_with_policy
      projects [meta.sandbox_profile], so every call in this turn gets the same
      answer from the [meta] captured here. *)
   let turn_sandbox_factory = Some (Keeper_sandbox_factory.create ~config ~meta ()) in
-  let gate_grant =
-    Option.bind hitl_resolution Keeper_gate.cycle_grant_of_resolution
-  in
   let gate_context_provider =
     Option.map
       (fun context () -> Keeper_gate_causal_context.snapshot context)
       gate_context
   in
-  (* RFC-0356: the approval owns its effect. Spend the one-shot grant on the
-     payload the Gate approved instead of waiting for the model to re-emit a
-     byte-identical call, which it cannot do for large write payloads
-     (#25947). Consumption is the durable grant, so a second bundle build in
-     the same cycle replays nothing.
-
-     Replay carries the same causal context the model-issued path carries: a
-     replay whose re-derived input no longer matches its approval follows the
-     producer's ordinary Gate behavior instead of inventing another replay
-     constraint. *)
-  let gate_replay_delivery =
-    match hitl_resolution, gate_grant with
-    | ( Some
-          { Keeper_event_queue.approval_id
-          ; decision = Keeper_event_queue.Hitl_approved
-          ; _
-          }
-      , Some grant ) ->
-      let replay_execution =
-        Keeper_gate_replay.replay_approved_effect_with_receipt
-           ~config
-           ~meta
-           ~publication_recovery
-           ~turn_sandbox_factory
-           ?continuation_channel
-           ?gate_context:gate_context_provider
-           ~grant
-           ~approval_id
-           ()
-      in
-      let outcome = replay_execution.Keeper_gate_replay.outcome in
-      (match outcome with
-       | Keeper_gate_replay.Not_applicable -> ()
-       | Keeper_gate_replay.Applied _ as outcome ->
-         Log.Keeper.info
-           "gate replay approval=%s %s"
-           approval_id
-           (Keeper_gate_replay.outcome_to_string outcome)
-       | Keeper_gate_replay.Applied_with_warning _ as outcome ->
-         Log.Keeper.error
-           "gate replay approval=%s %s"
-           approval_id
-           (Keeper_gate_replay.outcome_to_string outcome)
-       | Keeper_gate_replay.Failed _ as outcome ->
-         Log.Keeper.error
-           "gate replay approval=%s %s"
-           approval_id
-           (Keeper_gate_replay.outcome_to_string outcome)
-       | Keeper_gate_replay.Indeterminate _ as outcome ->
-         Log.Keeper.error
-           "gate replay approval=%s %s"
-           approval_id
-           (Keeper_gate_replay.outcome_to_string outcome)
-       | Keeper_gate_replay.Repair_required _ as outcome ->
-         Log.Keeper.error
-           "gate replay approval=%s %s"
-           approval_id
-           (Keeper_gate_replay.outcome_to_string outcome)
-       | Keeper_gate_replay.Resolution_absent _ as outcome ->
-         Log.Keeper.warn
-           "gate replay approval=%s %s"
-           approval_id
-           (Keeper_gate_replay.outcome_to_string outcome));
-      Some
-        Keeper_tools_agent_core.
-          { approval_id
-          ; outcome
-          ; terminal_effect_receipt = replay_execution.terminal_effect_receipt
-          }
-    | None, _
-    | Some { Keeper_event_queue.decision = Keeper_event_queue.Hitl_rejected _; _ }, _
-    | Some { Keeper_event_queue.decision = Keeper_event_queue.Hitl_approved; _ }, None ->
-      None
+  (* The frozen cohort supplies no combined grant. Host replay binds each
+     source to its own execution and stops at the first repair. Only an
+     actual singleton may retain its exact model-issued grant. *)
+  let gate_replay_inputs =
+    Keeper_gate_replay.replay_resolution_inputs
+      ~config ~meta ~publication_recovery ~turn_sandbox_factory
+      ?gate_context:gate_context_provider hitl_resolutions
+  in
+  let gate_grant =
+    match gate_replay_inputs with
+    | [ input ] ->
+      (match Keeper_gate_replay.input_replay_execution input with
+       | Some { outcome = Keeper_gate_replay.Not_applicable; _ } ->
+         Keeper_gate.cycle_grant_of_resolution (Keeper_gate_replay.input_resolution input)
+       | None
+       | Some { outcome = (Keeper_gate_replay.Applied _ | Applied_with_warning _
+                          | Failed _ | Indeterminate _ | Repair_required _
+                          | Resolution_absent _); _ } -> None)
+    | [] | _ :: _ :: _ -> None
   in
   let record_gate_result =
     Option.map
@@ -279,7 +257,7 @@ let make_tool_bundle_for_descriptors_with_policy
      failure dominates every state regardless of callback order. Failure is
      sticky so its first detail remains authoritative. *)
   let terminal_effect_state =
-    Atomic.make (initial_terminal_effect_state gate_replay_delivery)
+    Atomic.make (initial_terminal_effect_state gate_replay_inputs)
   in
   let mark_deferred_tool_result () =
     ignore
@@ -360,7 +338,7 @@ let make_tool_bundle_for_descriptors_with_policy
      [descriptor.input_schema] provides the LLM-facing schema. *)
   let descriptor_tool_rows =
     List.concat_map
-      (fun (descriptor : Keeper_tool_descriptor.t) ->
+      (fun ((descriptor : Keeper_tool_descriptor.t), schema) ->
          let internal = descriptor.internal_name in
          (* A static declaration holds even when a hook normalizes the input.
             Input-dependent or missing declarations remain effect-possible. *)
@@ -476,13 +454,6 @@ let make_tool_bundle_for_descriptors_with_policy
                    ()
              in
              let bridge h =
-               Keeper_schema_observation.with_definition descriptor @@ fun () ->
-               let schema =
-                 match Keeper_descriptor_schema.for_descriptor descriptor with
-                 | Ok schema -> schema
-                 | Error detail ->
-                   invalid_arg (Printf.sprintf "tool %S schema invalid: %s" model_name detail)
-               in
                Tool_bridge.agent_core_tool_of_schema_with_execution_env
                ~base_path:config.base_path
                ~answer_reader:(fun output_text ->
@@ -556,7 +527,7 @@ let make_tool_bundle_for_descriptors_with_policy
              , Keeper_tool_descriptor.declared_loading descriptor
              , (if descriptor_admitted Image_input_unavailable descriptor
                 then No_model_image else Model_image) )))
-      descriptors
+      validated_descriptors
   in
   let descriptor_tools_with_loading =
     List.map (fun (tool, loading, _) -> tool, loading) descriptor_tool_rows
@@ -571,7 +542,7 @@ let make_tool_bundle_for_descriptors_with_policy
       descriptor_tool_rows
   in
   let descriptor_tools = List.map fst descriptor_tools_with_loading in
-  let composition_tools_with_loading, task_required_tool_names =
+  let* composition_tools_with_loading, task_required_tool_names =
     let instruction_skills =
       Keeper_tool_composition_surface.instruction_skills_of_catalog skill_catalog
     in
@@ -635,7 +606,7 @@ let make_tool_bundle_for_descriptors_with_policy
         Keeper_tool_composition_surface.Compatibility.make_tools ~descriptors ?record_nested_composition_activation
           ?nested_activation_context:skill_activation_context
     in
-    let tools = make_composition_tools
+    let+ tools = make_composition_tools
         ?result_delivery:composition_result_delivery
         ?on_inline_receipt_committed
         ~instruction_skills
@@ -907,7 +878,7 @@ let make_tool_bundle_for_descriptors_with_policy
       ~result_bounds:(List.filter (fun (name, _) -> List.mem name names) result_bounds)
       ~listing:(placement deferred listing)
   in
-  { tools
+  Ok { tools
   ; agent_core_tools = agent_core_view ~admitted:(fun _ -> true) ~deferred:deferred_builtin_tools identity_listing
   ; on_demand_tool_names =
       (* What an official client holds back: the same built-ins the Agent
@@ -936,7 +907,7 @@ let make_tool_bundle_for_descriptors_with_policy
           (List.rev !listings);
         Option.iter Keeper_sandbox_factory.cleanup turn_sandbox_factory)
   ; terminal_effect_state = (fun () -> Atomic.get terminal_effect_state)
-  ; gate_replay_delivery
+  ; gate_replay_inputs
   ; turn_sandbox_factory
   }
 ;;
@@ -949,7 +920,7 @@ let make_tool_bundle_for_capability_surface
       ?clock
       ?continuation_channel
       ?gate_context
-      ?hitl_resolution
+      ?hitl_resolutions
       ?on_gate_deferred
       ?identity_surface
       ?composition_plan_index
@@ -970,7 +941,7 @@ let make_tool_bundle_for_capability_surface
     ?clock
     ?continuation_channel
     ?gate_context
-    ?hitl_resolution
+    ?hitl_resolutions
       ?on_gate_deferred
     ~skill_catalog:(Keeper_capability_surface.skill_catalog capability_surface)
     ?identity_surface
@@ -996,7 +967,7 @@ module For_testing = struct
         ?clock
         ?continuation_channel
         ?gate_context
-        ?hitl_resolution
+        ?hitl_resolutions
       ?on_gate_deferred
         ?capability_surface
         ?skill_catalog
@@ -1015,12 +986,13 @@ module For_testing = struct
       ?clock
       ?continuation_channel
       ?gate_context
-      ?hitl_resolution
+      ?hitl_resolutions
       ?on_gate_deferred
       ?skill_catalog
       ~allow_unrecorded_skill_surface:true
       ?turn_ctx_cell
       ()
+    |> Result.get_ok
   ;;
 
   let make_tools
@@ -1062,7 +1034,7 @@ module For_testing = struct
        ~descriptors
        ?skill_catalog
        ~allow_unrecorded_skill_surface:true
-       ())
+       () |> Result.get_ok)
       .tools
   ;;
 

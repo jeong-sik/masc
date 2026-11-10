@@ -2428,7 +2428,9 @@
   masc.masc_types
   masc.agent_core
   masc.keeper_chat_delivery_identity
+  masc.keeper_runtime
   masc.runtime
+  yojson
   unix))
 
 (test
@@ -2720,6 +2722,7 @@
 (include stanzas/test_board_persistence_load_contract.inc)
 
 (include stanzas/test_board_posts_source_authority.inc)
+(include stanzas/test_board_comments_source.inc)
 (include stanzas/test_board_posts_preflight.inc)
 
 (include stanzas/test_board_snapshot_rows.inc)
@@ -3203,6 +3206,7 @@
 (include stanzas/test_tui_io_domain.inc)
 (include stanzas/test_keeper_tool_call_index_witness.inc)
 (include stanzas/test_keeper_tool_call_index_domain.inc)
+(include stanzas/test_keeper_tool_call_execution_fold.inc)
 (include stanzas/test_keeper_tool_call_log_file_change_concurrent.inc)
 
 (include stanzas/test_keeper_surface_status.inc)
@@ -4027,6 +4031,14 @@
  (modules test_tui_terminal_json)
  (libraries alcotest masc masc.string_util yojson))
 
+; task-3491: the terminal-text boundary had no test of its own. These cases
+; call the sanitizer directly: which bytes may reach the terminal, and that the
+; visible text survives the escape.
+(test
+ (name test_tui_terminal_text)
+ (modules test_tui_terminal_text)
+ (libraries alcotest masc masc.string_util))
+
 (test
  (name test_tui_json_document)
  (modules test_tui_json_document)
@@ -4159,7 +4171,7 @@
 (test
  (name test_tui_server_identity_refresh)
  (modules test_tui_server_identity_refresh)
- (libraries masc_tui_owed_read masc_tui_pick_list masc_tui_presented astring masc.masc_candle masc_tui_pr_ref masc_tui_message_layout masc_tui_frame masc_tui_ansi masc_tui_theme masc_tui_frame_presenter masc_tui_render_schedule masc_tui_render_prim masc_tui_render_repositories masc_tui_queue_layout masc_tui_press masc_tui_hit masc_tui_queue_inspection masc_tui_play_card masc_tui_scroll masc_tui_resource_catalog masc.config masc_tui_runtime_config_snapshot masc_tui_runtime_config_edit masc_tui_runtime_config_receipt masc_tui_model_form masc_tui_model_runtime_table masc_tui_runtime_account_form masc_tui_runtime_config_view masc_tui_keeper_config masc_tui_metrics_tail masc.dated_jsonl masc_tui_ask_projection masc_tui_response_decode masc_tui_kept_reads masc.masc_core masc.masc_types masc.keeper_cost_coverage masc.tool_types masc.runtime masc.sse_wire eio eio_main masc_tui_child_content masc_tui_native_tasks alcotest masc masc.browser_lane masc_tui_lane_subscriptions masc_tui_lane_addons masc_tui_types masc_tui_task_payloads masc_tui_async_protocol masc_tui_context_inspector masc.fs_compat masc_tui_context_state masc_tui_fetched masc_tui_loader masc_tui_overview_tasks masc_tui_task_flow masc_tui_agenda masc_tui_keeper_control masc_tui_keeper_list_model masc_tui_board_detail masc_tui_message_input masc_tui_lane_installer masc_tui_voice_wizard_session masc_tui_account_login masc_tui_composer_projection masc_tui_composer masc.voice_setup masc.voice_wizard unix yojson))
+ (libraries mtime.clock.os masc_tui_owed_read masc_tui_pick_list masc_tui_presented astring masc.masc_candle masc_tui_pr_ref masc_tui_message_layout masc_tui_frame masc_tui_ansi masc_tui_theme masc_tui_frame_presenter masc_tui_render_schedule masc_tui_render_prim masc_tui_render_repositories masc_tui_queue_layout masc_tui_press masc_tui_hit masc_tui_queue_inspection masc_tui_play_card masc_tui_scroll masc_tui_resource_catalog masc.config masc_tui_runtime_config_snapshot masc_tui_runtime_config_edit masc_tui_runtime_config_receipt masc_tui_model_form masc_tui_model_runtime_table masc_tui_runtime_account_form masc_tui_runtime_config_view masc_tui_keeper_config masc_tui_metrics_tail masc.dated_jsonl masc_tui_ask_projection masc_tui_response_decode masc_tui_kept_reads masc.masc_core masc.masc_types masc.keeper_cost_coverage masc.tool_types masc.runtime masc.sse_wire eio eio_main masc_tui_child_content masc_tui_native_tasks alcotest masc masc.browser_lane masc_tui_lane_subscriptions masc_tui_lane_addons masc_tui_types masc_tui_task_payloads masc_tui_async_protocol masc_tui_context_inspector masc.fs_compat masc_tui_context_state masc_tui_fetched masc_tui_loader masc_tui_overview_tasks masc_tui_task_flow masc_tui_agenda masc_tui_keeper_control masc_tui_keeper_list_model masc_tui_board_detail masc_tui_message_input masc_tui_lane_installer masc_tui_voice_wizard_session masc_tui_account_login masc_tui_composer_projection masc_tui_composer masc.voice_setup masc.voice_wizard unix yojson))
 
 (test
  (name test_tool_transport_prefix)
@@ -6050,7 +6062,7 @@
 (test
  (name test_workspace_memory_ledger_view)
  (modules test_workspace_memory_ledger_view)
- (libraries alcotest  masc.agent_core.digest yojson masc masc.fs_compat))
+ (libraries alcotest  masc.agent_core.digest yojson masc masc.fs_compat masc.config_dir_resolver))
 
 (test
  (name test_workspace_memory_ledger)
@@ -7271,6 +7283,7 @@
 (include stanzas/test_authz_boot_mode_read.inc)
 (include stanzas/test_runtime_account_access.inc)
 (include stanzas/test_runtime_account_access_multi.inc)
+(include stanzas/test_keeper_account_home_reach.inc)
 (include stanzas/test_server_preview_keeper_turn.inc)
 (include stanzas/test_authz_state.inc)
 (include stanzas/test_authz_zone.inc)

@@ -279,6 +279,8 @@ type pulse = { known_since : float; slots : slot list }   (* 새 칸이 앞 *)
   - 나이별: 24시간 · 모름
   - 상태별 · runtime: 접지 않는다
 - 월드 줄은 같은 격자를 쓴다(시안 `paintWorld`). W1 이 올린다.
+- 월드의 absent는 현재 읽힌 ordinary 사실 중 장부에 등록되지 않은 사실 수다. Keeper ID와 claim 원문의 SHA256을 함께 비교하고, 같은 Keeper의 같은 사실은 한 번 센다. claim · conflict · excluded 어느 처분이든 장부에 있으면 absent가 아니다. 총 사실 수에서 claim 수를 빼지 않는다.
+- absent 집계는 가벼운 inventory 응답에 싣는다. 모든 ordinary 저장소를 읽었으면 정확한 수, 일부를 못 읽었으면 읽힌 사실에 대한 하한, Keeper 발견 자체가 실패했으면 미확인이다. 없는 저장소는 알려진 빈 상태이며, 없는 장부는 별도 상태를 유지한다. source-bound 저장소의 실패는 ordinary 집계를 흐리지 않는다. 왜 장부에 없는지, 언제 들어갈지는 추측하지 않는다.
 - 고른 Keeper 의 초상은 목록 보기의 두 줄에서만 그리고, 전신으로 그린다(E20).
 
 ### 2.5 Story 창
@@ -305,6 +307,7 @@ type pulse = { known_since : float; slots : slot list }   (* 새 칸이 앞 *)
 | `Enter` | Story 창 | 지금은 상세. 상세는 `→` 로 간다 |
 | `←` `→` | 묶음 제목 줄에서 접기 · 펼치기 | 새 뜻(제목 줄에서만). 묶는 보기에서는 `j` `k` 가 제목 줄에도 선다. 제목 줄에서는 접기가 `←` 의 "뒤로" 보다 먼저다. 행 위의 `←` `→` 는 그대로다 |
 | `J` `K` | 지금 뜻 | 그대로. `J` 는 상세 Automation 탭을 연다. Story 일정 쪽은 그 탭과 같은 값을 그린다 |
+| `W` | 월드 창 열기 | 모든 Keepers 목록 보기에서 받는다. 기억별 · 나이별에서는 보기를 유지하고, 다른 보기에서는 나이별로 옮긴 뒤 월드 줄을 고른다. Keeper 작업 대상은 고르지 않는다 |
 | `o` | 정렬 순환 | 그대로 |
 | `s` `m` `w` `x` `n` `t` | 지금 뜻 | 그대로. 시안의 뜻은 Story 창 안의 `s` `m` 만 받는다 |
 
@@ -318,6 +321,7 @@ type pulse = { known_since : float; slots : slot list }   (* 새 칸이 앞 *)
 | --- | --- | --- |
 | 보기 순환 `o` | `v` · `V` | `o` 는 정렬이다(E3 · E4) |
 | 목록에서 `s` `m` 으로 dock 쪽 열기 | Story 창 안에서만 | 목록의 `s` 는 shutdown, `m` 은 대화다(E6) |
+| 월드 열기 `w` | 대문자 `W` | 소문자 `w` 는 Keeper wake다. 월드 창은 Keeper를 깨우지 않는다 |
 | 시뮬레이션 키와 `[sim]` | 올리지 않는다 | 시연 장치다 |
 | runtime 교차표(실패 Keeper × runtime) | V1 은 runtime id 로 묶고, V5 가 교차표로 바꾼다 | 묶기는 V1 의 묶는 함수로 바로 된다. 교차표는 `Masc_tui_keeper_trail.attempts_of_runtime` 을 읽는 새 그리기다 |
 | 24h 벽의 세 묶음(실패 · 그 밖 · 정상)과 시간 눈금자 | V4 에 넣는다 | 48칸 맥박과 같은 층의 그리기다 |

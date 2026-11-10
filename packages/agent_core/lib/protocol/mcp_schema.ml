@@ -66,12 +66,6 @@ let mcp_tool_to_agent_core_tool_result ~call_fn mcp_tool =
     call_fn
 ;;
 
-let mcp_tool_to_agent_core_tool ~call_fn mcp_tool =
-  match mcp_tool_to_agent_core_tool_result ~call_fn mcp_tool with
-  | Ok tool_ -> tool_
-  | Error detail -> invalid_arg detail
-;;
-
 [@@@coverage off]
 (* === Inline tests === *)
 

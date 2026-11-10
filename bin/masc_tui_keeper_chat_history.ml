@@ -447,6 +447,12 @@ let explicit_turn_id_of_fields fields =
   | None -> autonomous_turn_id_of_fields fields
 ;;
 
+let autonomous_owner_of_fields fields owner =
+  Option.bind (string_field fields "turn_ref") (fun raw ->
+    Option.bind (Ids.Turn_ref.of_string raw) (fun actual ->
+      if Ids.Turn_ref.equal owner actual then Some owner else None))
+;;
+
 let turn_id_of_fields fields =
   let explicit_turn () = explicit_turn_id_of_fields fields in
   match Delivery_identity.delivery_provenance_of_fields fields with
@@ -456,6 +462,8 @@ let turn_id_of_fields fields =
        | Delivery_identity.Operation_checkpoint {operation_id=request_id; _}
        | Delivery_identity.Operation request_id ->
            Some (Delivery_identity.Request_id.to_string request_id)
+       | Delivery_identity.Autonomous_turn owner ->
+           autonomous_owner_of_fields fields owner |> Option.map Ids.Turn_ref.to_string
        | Delivery_identity.Fusion_run _
        | Delivery_identity.Workspace_message _
        | Delivery_identity.Connector_message _
@@ -485,7 +493,8 @@ let operation_id_of_fields fields =
          { Delivery_identity.delivery_key =
              ( Delivery_identity.Fusion_run _ | Delivery_identity.Workspace_message _
              | Delivery_identity.Connector_message _
-             | Delivery_identity.Approval_lifecycle _ )
+             | Delivery_identity.Approval_lifecycle _
+             | Delivery_identity.Autonomous_turn _ )
          ; _
          }) ->
       None
@@ -501,6 +510,9 @@ let execution_source_of_fields fields =
            Option.bind raw (fun raw ->
              Option.map (fun reference -> Masc_tui_keeper_chat_log.Autonomous_turn reference)
                (Ids.Turn_ref.of_string raw))
+       | Ok (Some { Delivery_identity.delivery_key = Delivery_identity.Autonomous_turn owner; _ }) ->
+           autonomous_owner_of_fields fields owner
+           |> Option.map (fun reference -> Masc_tui_keeper_chat_log.Autonomous_turn reference)
        | Ok (Some { Delivery_identity.delivery_key =
                       (Delivery_identity.Fusion_run _
                       | Delivery_identity.Workspace_message _

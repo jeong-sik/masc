@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { DashboardScheduledAutomationProjection } from '../../api'
 import { confirmRuntimeTestWorkspace } from '../../lib/runtime-workspace.test-fixture'
 import { acceptedExecutionWorkspace } from '../../execution-workspace-authority'
+import { TRANSPORT_RETRY_BASE_MS } from '../../config/constants'
 
 const mocks = vi.hoisted(() => ({
   fetchDashboardScheduledAutomation: vi.fn(),
@@ -13,6 +14,9 @@ vi.mock('../../api/dashboard-scheduled-automation', () => ({
 
 import {
   subscribeScheduledAutomationRefresh,
+  loadScheduledAutomation,
+  scheduledAutomationProjection,
+  scheduledAutomationError,
 } from './schedule-state'
 
 function emptyProjection(): DashboardScheduledAutomationProjection {
@@ -55,7 +59,52 @@ describe('scheduled automation refresh', () => {
   afterEach(() => {
     acceptedExecutionWorkspace.value = null
     vi.clearAllTimers()
+    vi.restoreAllMocks()
     vi.useRealTimers()
+  })
+
+  it('retires pending and queued reads before reading a new confirmed workspace', async () => {
+    let finishFirst!: (projection: DashboardScheduledAutomationProjection) => void
+    let finishSecond!: (projection: DashboardScheduledAutomationProjection) => void
+    let firstSignal!: AbortSignal
+    mocks.fetchDashboardScheduledAutomation
+      .mockImplementationOnce(({ signal }: { signal: AbortSignal }) => {
+        firstSignal = signal
+        return new Promise(resolve => { finishFirst = resolve })
+      })
+      .mockImplementationOnce(() => new Promise(resolve => { finishSecond = resolve }))
+    const stop = subscribeScheduledAutomationRefresh()
+    try {
+      await vi.advanceTimersByTimeAsync(0)
+      const queued = loadScheduledAutomation({ fresh: true })
+      confirmRuntimeTestWorkspace()
+      await vi.advanceTimersByTimeAsync(0)
+      expect(firstSignal.aborted).toBe(true)
+      expect(mocks.fetchDashboardScheduledAutomation).toHaveBeenCalledTimes(2)
+      finishFirst(emptyProjection())
+      await queued
+      await vi.advanceTimersByTimeAsync(0)
+      expect(mocks.fetchDashboardScheduledAutomation).toHaveBeenCalledTimes(2)
+      expect(scheduledAutomationProjection.value).toBeNull()
+      finishSecond(emptyProjection())
+      await vi.advanceTimersByTimeAsync(0)
+      expect(scheduledAutomationProjection.value?.state).toBe('available')
+    } finally { stop() }
+  })
+
+  it('retries a failed final schedule read without another source event', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    mocks.fetchDashboardScheduledAutomation.mockRejectedValueOnce(new Error('offline'))
+      .mockResolvedValue(emptyProjection())
+    const stop = subscribeScheduledAutomationRefresh()
+    try {
+      await vi.advanceTimersByTimeAsync(0)
+      expect(scheduledAutomationError.value).not.toBeNull()
+      await vi.advanceTimersByTimeAsync(TRANSPORT_RETRY_BASE_MS)
+      expect(mocks.fetchDashboardScheduledAutomation).toHaveBeenCalledTimes(2)
+      expect(scheduledAutomationError.value).toBeNull()
+      expect(scheduledAutomationProjection.value?.state).toBe('available')
+    } finally { stop() }
   })
 
   it('keeps a pending read alive and retains a trailing read for committed schedule changes', async () => {

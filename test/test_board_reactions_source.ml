@@ -169,6 +169,138 @@ let test_public_target_spelling_survives_restart base_path =
     Alcotest.(check int) "the accepted row occurs once" 1 summary.count
   | _ -> Alcotest.fail "batch query disagrees with the accepted target identity"
 
+let reaction_fault_store base_path io =
+  let store = Board.create_store_with_reactions_io_for_testing ~base_path ~io () in
+  List.iter (fun load -> match load store with
+    | Ok _ -> ()
+    | Error (path, error) ->
+      Alcotest.failf "load %s: %s" path (Printexc.to_string error))
+    [Masc_board_handlers.Board_votes_json.load_persisted_posts;
+     Masc_board_handlers.Board_votes_json.load_persisted_comments];
+  ignore (require (Board.reload_reactions store));
+  store
+
+let test_partial_source_is_not_empty_wire_state base_path =
+  let seeded = fresh_store base_path in
+  let parent = post seeded "partial reaction input stays visible without write authority" in
+  ignore (require (toggle seeded parent "retained-reactor" "👍"));
+  let path = Board.reactions_path seeded in
+  let damaged = Fs_compat.load_file path ^ "{invalid reaction json\n" in
+  Fs_compat.save_file path damaged;
+  let partial = fresh_store base_path in
+  require_io_error (Board.reload_reactions partial);
+  Alcotest.(check int) "valid partial rows remain available for display" 1
+    (Hashtbl.length partial.Board.reactions);
+  let post_id = Board.Post_id.to_string parent.id in
+  require_io_error (Board.list_reactions partial ~target_type:Board.Reaction_post
+    ~target_id:post_id ~user_id:"retained-reactor" ());
+  require_io_error (Board.list_reactions_batch partial
+    ~targets:[Board.Reaction_post, post_id] ());
+  let reader = Masc_board_handlers.Board_access.Operator in
+  let reactions = Server_utils.board_reactions_for_post ~reader
+    ~voter:(Some "retained-reactor") ~post_id in
+  (match reactions with
+   | None -> ()
+   | Some _ -> Alcotest.fail "partial input became a known Dashboard summary");
+  let json = Server_utils.board_post_dashboard_json ?reactions ~author_karma:0 parent in
+  (match json with
+   | `Assoc fields ->
+     List.iter (fun key -> Alcotest.(check bool)
+       ("unavailable Dashboard state omits " ^ key) false (List.mem_assoc key fields))
+       ["reactions"; "supported_reaction_emojis"]
+   | _ -> Alcotest.fail "expected a Dashboard post object");
+  let module Http = Server_board_reaction_http in
+  let targets = match Http.targets_of_strings ~target_type:(Some "post")
+      ~target_ids:(Some post_id) with
+    | Ok value -> value
+    | Error error -> Alcotest.fail (Yojson.Safe.to_string (Http.error_json error)) in
+  (match Http.list_batch_json ~reader ~actor:"retained-reactor" targets with
+   | Ok _ -> Alcotest.fail "partial source produced a successful empty HTTP batch"
+   | Error error -> Alcotest.(check bool) "the shared HTTP result is a storage failure" true
+       (Http.error_status error = `Internal_server_error));
+  require_io_error (toggle partial parent "refused-reactor" "🔥");
+  Board.flush_dirty partial;
+  Alcotest.(check string) "reload, toggle and flush retain the damaged source" damaged
+    (Fs_compat.load_file path)
+
+let test_unknown_rewrite_retains_exact_bytes_without_replay base_path =
+  let seeded = fresh_store base_path in
+  let parent = post seeded "an uncertain reaction removal is not replayed" in
+  let armed = ref false and calls = ref 0 in
+  let io : Fs_compat.private_jsonl_transaction_io_for_testing =
+    { before_sync_parent = (fun _ ->
+        incr calls;
+        if !armed then (armed := false; raise (Failure "reaction parent sync")))
+    ; close_fd = (fun fd -> incr calls; Unix.close fd) } in
+  let store = reaction_fault_store base_path io in
+  ignore (require (toggle store parent "uncertain-reactor" "👍"));
+  let path = Board.reactions_path store in
+  let accepted = Fs_compat.load_file path in
+  armed := true;
+  require_io_error (toggle store parent "uncertain-reactor" "👍");
+  Alcotest.(check bool) "the actual post-rename parent sync fault was reached" false !armed;
+  Alcotest.(check string) "the rename is visible without a durability proof" ""
+    (Fs_compat.load_file path);
+  Alcotest.(check int) "uncertain removal leaves the prior model for display" 1
+    (Hashtbl.length store.Board.reactions);
+  let check_retained () = match store.Board.reactions_source with
+    | Board.Reactions_unsettled { reaction_pending; _ } ->
+      Alcotest.(check string) "the complete before observation stays owned" accepted
+        reaction_pending.reaction_before.reaction_snapshot.bytes;
+      Alcotest.(check string) "the exact intended removal stays owned" ""
+        reaction_pending.reaction_intended_bytes
+    | Reactions_unobserved | Reactions_readable _ | Reactions_publishing _ | Reactions_refused _ ->
+      Alcotest.fail "the uncertain rewrite lost its pending evidence" in
+  check_retained ();
+  let before = !calls in
+  require_io_error (Board.list_reactions store ~target_type:Board.Reaction_post
+    ~target_id:(Board.Post_id.to_string parent.id) ());
+  require_io_error (Board.reload_reactions store);
+  require_io_error (toggle store parent "not-replayed" "🔥");
+  Board.flush_dirty store;
+  Alcotest.(check int) "ordinary operations perform no reaction IO replay" before !calls;
+  check_retained ();
+  let restarted = fresh_store base_path in
+  Alcotest.(check int) "a fresh store can observe the currently empty file" 0
+    (require (Board.reload_reactions restarted));
+  Alcotest.(check int) "fresh observation sees no remaining reaction" 0
+    (List.length (summaries restarted parent "uncertain-reactor"));
+  check_retained ()
+
+let test_known_rewrite_publishes_before_reserved_cleanup base_path =
+  let seeded = fresh_store base_path in
+  let parent = post seeded "accepted reactions survive reserved cleanup" in
+  let armed = ref false and lock_path = ref None in
+  let io : Fs_compat.private_jsonl_transaction_io_for_testing =
+    { before_sync_parent = (fun _ -> ())
+    ; close_fd = (fun fd ->
+        let stat = Unix.fstat fd in
+        let target = Option.map Unix.lstat !lock_path in
+        Unix.close fd;
+        match !armed, target with
+        | true, Some lock when stat.Unix.st_dev = lock.Unix.st_dev
+                               && stat.Unix.st_ino = lock.Unix.st_ino ->
+          armed := false;
+          raise Eio.Time.Timeout
+        | false, (None | Some _) | true, None | true, Some _ -> ()) } in
+  let store = reaction_fault_store base_path io in
+  lock_path := Some (Fs_compat.private_jsonl_lock_path (Board.reactions_path store));
+  armed := true;
+  (match toggle store parent "cleanup-reactor" "👍" with
+   | _ -> Alcotest.fail "the original reserved cleanup cause was swallowed"
+   | exception Eio.Time.Timeout -> ());
+  Alcotest.(check bool) "the actual stable-lock descriptor close failed" false !armed;
+  ignore (reaction_cursor store);
+  (match summaries store parent "cleanup-reactor" with
+   | [summary] ->
+     Alcotest.(check bool) "known success publishes before its cleanup cause escapes" true summary.reacted;
+     Alcotest.(check int) "the accepted model changed once" 1 summary.count
+   | _ -> Alcotest.fail "the known write did not publish its model");
+  ignore (require (toggle store parent "next-reactor" "🔥"));
+  let restarted = fresh_store base_path in
+  Alcotest.(check int) "accepted write and subsequent toggle survive a fresh store" 2
+    (List.length (summaries restarted parent "cleanup-reactor"))
+
 let () =
   Alcotest.run "board_reactions_source"
     ["actual writers and fresh loads",
@@ -179,4 +311,11 @@ let () =
        Alcotest.test_case "valid orphan survives compaction and restart" `Quick
          (with_fixture test_valid_orphan_survives_compaction);
        Alcotest.test_case "public target spelling remains valid after restart" `Quick
-         (with_fixture test_public_target_spelling_survives_restart)]]
+         (with_fixture test_public_target_spelling_survives_restart)];
+     "actual partial source and transaction settlement",
+      [Alcotest.test_case "partial source is not empty Dashboard or HTTP state" `Quick
+         (with_fixture test_partial_source_is_not_empty_wire_state);
+       Alcotest.test_case "unknown rewrite retains exact bytes without replay" `Quick
+         (with_fixture test_unknown_rewrite_retains_exact_bytes_without_replay);
+       Alcotest.test_case "known rewrite publishes before reserved cleanup escapes" `Quick
+         (with_fixture test_known_rewrite_publishes_before_reserved_cleanup)]]

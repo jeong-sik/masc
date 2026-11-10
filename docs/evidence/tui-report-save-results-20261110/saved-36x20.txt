@@ -1,0 +1,20 @@
+ ‹3 ▸기능·플러그인  워크스페이스 1›
+
+  리소스
+  ▸ Resource · Markdown · 격리 리 …
+ ──────────────────────────────────
+   원본 파일 저장됨
+
+   ┌─ text ──────────────────────
+   │ /Users/dancer/me/workspace/y
+   │ ousleepwhen/masc/artifacts/n
+   │ ative-tui-proof-42808378032/
+   │ observation/fixture report s
+   │ aved candidate.md
+   └─────────────────────────────
+
+   i: 오류 정보·이전 저장
+
+
+  Enter:read  Esc:back  q:quit  …?
+ › no keeper selected

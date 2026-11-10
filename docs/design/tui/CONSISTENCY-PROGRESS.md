@@ -312,6 +312,59 @@ observations stay private in `artifacts/native-tui-proof-42732829605/`.
 This confirms those observed candidate views only, without proving production
 installation, the new navigation repair, or the remaining child/input states.
 
+## Resources save results (#51105)
+
+The 072796b2 native baseline exclusively created the exact 393-byte fixture
+report, then refused an explicit second save to the same existing path. The
+36x20 success and refusal captures were identical: the footer had no space for
+the result. The refusal also closed the path form, whose footer advertised
+reader keys while printable keys still belonged to the path.
+
+The source now retains each original report/workspace/path and typed save
+outcome. The reader leads with the newest result for that exact report; `i`
+also exposes diagnostics and earlier saves. A failed save retains editable
+input, and a late result cannot close a replacement form or label an edited
+path as saved. Issued writes keep their own frozen destination. Closing input
+does not replay or cancel them, and their original receipt still settles after
+workspace read authority is withdrawn. The form footer reflects its actual
+keys; page keys can read a long result without editing the path.
+
+The canonical filesystem boundary preserves the original publication failure,
+target effect, lane-release value/failure and ordinary boundary exception.
+Existing files remain protected by the same staged exclusive writer, recovery
+registry and 0600 mode. None/unobserved and interrupted writes do not become
+unchanged or successful results. A nonblocking source-review limitation remains:
+plain cancellation after the wrapper observed creation can still be reported
+as unknown when that observation is not carried into the cancellation payload.
+
+Independent core/export and UI/state source reviews found no remaining P0-P2
+in their recorded scopes after three UI findings were repaired. Two subsequent
+compilation repairs were independently reread: enumerate the nested result
+constructors, and declare both direct input/export libraries in the published
+report test stanza. Their earlier failed runs remain in the working evidence.
+
+At source 097b4c2d, `Minimal manual checks` run 42808378032, workflow
+`main` at 8969425ef9ff430f3785998f7a31131011efbcc7 and `resource-reading`,
+completed successfully. Matching macOS server/TUI build commits and hashes,
+four complete unfiltered resource suites (20, 18, 37 and 12 cases), and the
+actual full key-generator output were verified. Its 60,306 bytes, SHA-256
+`e219ef686d1de8d862147b9dde70c11ebe061da618382e7874ce8d1c0ec911c5`,
+were copied unchanged into the guide. Separately, `Test` run 42802898140 on
+`fix/tui-report-save-receipts-20261110@af2391c4` succeeded with exactly
+`test_tui_resource_export,test_fs_compat_capability_write` (4 and 68 cases).
+That earlier-source scoped result was not repeated or called full regression.
+
+The matching 097b4c2d isolated native pair then showed distinct success and
+existing-file refusal at 36x20. Creation preserved all 393 original bytes with
+mode 0600; the existing baseline retained its measured bytes/mode/inode/mtime.
+Refusal kept the editable destination. Edited unsubmitted input, literal q,
+page navigation and retained original results were also observed. The actual
+original diagnostic and both results were readable in the wide expanded view.
+Selected raw captures, provenance and readbacks are preserved in
+`docs/evidence/tui-report-save-results-20261110/`.
+This is not installed GUI, native fault/late-completion coverage, whole-system
+health or completion of the full 23-surface audit; those remain open.
+
 ## Feature child identity and resource body (#51023)
 
 The matching be3302c2 server/TUI baseline at 120x36 and 36x20 showed a

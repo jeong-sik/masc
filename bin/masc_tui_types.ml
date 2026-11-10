@@ -9101,11 +9101,38 @@ type listen_request = {
   lr_destination : listen_destination;
 }
 
+type resource_save_request = {
+  save_form : unit ref;
+  save_document : Masc_tui_resource_export.t;
+  save_input_path : string;
+  save_path : string;
+  save_workspace : workspace_input_identity;
+}
+
+type resource_save_outcome =
+  | Resource_save_result of (unit, Masc_tui_resource_export.save_error) result
+  | Resource_save_not_started of string
+  | Resource_save_unconfirmed of { detail : string; cause : exn option }
+  | Resource_save_interrupted of Masc_tui_resource_export.cancellation option
+
+type resource_save_phase =
+  | Resource_save_pending
+  | Resource_save_settled of resource_save_outcome
+
+type resource_save_receipt = {
+  save_request : resource_save_request;
+  save_phase : resource_save_phase;
+}
+
 type resource_save_prompt = {
+  rsp_owner : unit ref;
   rsp_document : Masc_tui_resource_export.t;
   rsp_path : Masc_tui_message_input.t;
   rsp_authority : workspace_authority;
   rsp_read_authority : unit ref;
+  rsp_workspace : workspace_input_identity;
+  rsp_directory : string;
+  mutable rsp_error : string option;
 }
 
 type resource_share_request = {
@@ -9709,6 +9736,10 @@ type state = {
   mutable resource_diagrams: Masc_tui_resource_diagrams.t option;
   mutable resource_text_cursor: int;
   mutable resource_save_prompt: resource_save_prompt option;
+  (* Original local-write receipts survive selection, form replacement and
+     workspace withdrawal; they do not authorize a later save. Newest request
+     first, with completion replacing only its own registered pending slot. *)
+  mutable resource_save_receipts: resource_save_receipt list;
   (* The Config surface owns the files the server reads. runtime.toml is one;
      the prompt registry is the other, and a prompt is edited the same way —
      $EDITOR over the effective text, the server persists what comes back. *)
@@ -19948,6 +19979,96 @@ let ui_text (state : state) ~ko ~en =
   | Lang_ko -> ko
   | Lang_en -> en
 
+let resource_save_path prompt =
+  let path = Masc_tui_message_input.contents prompt.rsp_path in
+  if Filename.is_relative path then Filename.concat prompt.rsp_directory path else path
+
+let resource_save_pending_for_prompt state prompt =
+  List.exists (fun receipt ->
+    let request = receipt.save_request in
+    (request.save_form == prompt.rsp_owner
+     || (request.save_workspace = prompt.rsp_workspace
+         && request.save_path = resource_save_path prompt
+         && Masc_tui_resource_export.same request.save_document prompt.rsp_document))
+    && match receipt.save_phase with
+       | Resource_save_pending -> true
+       | Resource_save_settled _ -> false) state.resource_save_receipts
+
+let resource_save_receipts_for state key =
+  match workspace_input_identity_of_server state.server_identity with
+  | None -> []
+  | Some workspace -> List.filter (fun receipt ->
+      receipt.save_request.save_workspace = workspace
+      && Masc_tui_resource_export.matches_key receipt.save_request.save_document key)
+      state.resource_save_receipts
+
+let resource_save_prompt_receipt state prompt =
+  List.find_opt (fun receipt ->
+    receipt.save_request.save_form == prompt.rsp_owner
+    && receipt.save_request.save_input_path = Masc_tui_message_input.contents prompt.rsp_path)
+    state.resource_save_receipts
+
+let resource_save_document_title document =
+  match Masc_tui_resource_export.key document with
+  | Masc_tui_resource_catalog.Report_revision report -> report.revision.title
+  | Masc_tui_resource_catalog.Mcp_uri uri -> uri
+
+let resource_save_summary state phase =
+  let describe_effect ~interrupted = function
+    | Some Fs_compat.Target_unchanged ->
+        if interrupted then ui_text state ~ko:"저장 중단 · 대상 파일 변경 없음"
+          ~en:"Save interrupted · destination unchanged"
+        else ui_text state ~ko:"저장하지 못함 · 대상 파일 변경 없음"
+          ~en:"Not saved · destination unchanged"
+    | Some Fs_compat.Target_created ->
+        if interrupted then ui_text state ~ko:"파일 생성 후 중단 · 완료 확인 필요"
+          ~en:"Interrupted after file creation · completion unconfirmed"
+        else ui_text state ~ko:"파일 생성 후 오류 · 완료 확인 필요"
+          ~en:"File created · completion error"
+    | Some Fs_compat.Target_replaced ->
+        ui_text state ~ko:"대상 파일 교체됨 · 완료 확인 필요"
+          ~en:"Destination replaced · completion unconfirmed"
+    | Some Fs_compat.Target_state_unknown | None ->
+        ui_text state ~ko:"저장 결과 확인 필요 · 다시 저장하기 전 파일을 확인하세요"
+          ~en:"Save result unconfirmed · inspect the file before saving again"
+  in
+  match phase with
+  | Resource_save_pending -> ui_text state ~ko:"파일 저장 중" ~en:"Saving original"
+  | Resource_save_settled (Resource_save_result (Ok ())) ->
+      ui_text state ~ko:"원본 파일 저장됨" ~en:"Original file saved"
+  | Resource_save_settled (Resource_save_result (Error error)) ->
+      if Masc_tui_resource_export.refused_existing_target error then
+        ui_text state ~ko:"이미 있는 파일 · 변경하지 않았습니다"
+          ~en:"File already exists · left unchanged"
+      else describe_effect ~interrupted:false (Masc_tui_resource_export.error_target_effect error)
+  | Resource_save_settled (Resource_save_not_started _) ->
+      ui_text state ~ko:"저장 요청을 시작하지 않았습니다" ~en:"Save not started"
+  | Resource_save_settled (Resource_save_unconfirmed _) -> describe_effect ~interrupted:false None
+  | Resource_save_settled (Resource_save_interrupted cancellation) ->
+      describe_effect ~interrupted:true
+        (Option.bind cancellation Masc_tui_resource_export.cancellation_effect)
+
+let settle_resource_save state request outcome =
+  let accepted = ref false in
+  state.resource_save_receipts <- List.map (fun receipt ->
+    if receipt.save_request == request then
+      match receipt.save_phase with
+      | Resource_save_pending ->
+          accepted := true;
+          {receipt with save_phase=Resource_save_settled outcome}
+      | Resource_save_settled _ -> receipt
+    else receipt) state.resource_save_receipts;
+  if !accepted then begin
+    match outcome, state.resource_save_prompt with
+    | Resource_save_result (Ok ()), Some prompt
+      when prompt.rsp_owner == request.save_form
+        && Masc_tui_message_input.contents prompt.rsp_path = request.save_input_path ->
+        state.resource_save_prompt <- None
+    | (Resource_save_result (Ok () | Error _) | Resource_save_not_started _
+        | Resource_save_unconfirmed _ | Resource_save_interrupted _), (Some _ | None) -> ()
+  end;
+  !accepted
+
 (* The server's own list of what needs the operator. The footer's ACTION
    NEEDED row and the terminal title count it, and the Dashboard lists it. An
    older server, or one before its first snapshot, cannot say and counts as
@@ -20208,6 +20329,7 @@ let create_state
   resource_diagrams = None;
   resource_text_cursor = 0;
   resource_save_prompt = None;
+  resource_save_receipts = [];
   config_pane = Config_runtime;
   tools_pane = Tools_surface;
   theme_choice = None;

@@ -746,6 +746,7 @@ type resource_msg =
   | Resources_listed of
       unit ref * (Masc_tui_resource_catalog.listing, string) result
   | Resource_exported of string * (string, string) result
+  | Resource_saved of Masc_tui_types.resource_save_request * Masc_tui_types.resource_save_outcome
   | Resource_share_changed of Masc_tui_types.resource_share_request * (Masc_tui_types.resource_share_outcome, Masc_tui_types.resource_share_failure) result
   | Resource_share_recovery_loaded of Masc_tui_types.resource_share_recovery_lookup * (Masc_tui_artifact_share_pending.entry option, string) result
   | Resource_read of
@@ -1079,7 +1080,7 @@ let rec workspace_message_is_read = function
   | Original_msg answer ->
       (match Masc_tui_original_results.answer_kind answer with
        | Masc_tui_original_results.Read -> true)
-  | Board_msg (Board_attachment_saved _) | Resource_msg (Resource_exported _ | Resource_share_changed _) | Verification_msg (Verification_evidence_exported _) -> false
+  | Board_msg (Board_attachment_saved _) | Resource_msg (Resource_exported _ | Resource_saved _ | Resource_share_changed _) | Verification_msg (Verification_evidence_exported _) -> false
   | (Keeper_msg (Keeper_logs_loaded _ | Keeper_execute_streamed _)) -> true
   | Chat_msg (Chat_search_finished _) -> true
   | Workspace_scoped (_, _, message)
@@ -1384,7 +1385,7 @@ let rec message_waits_for_input ~resource_read ~recovery_loaded = function
   | Preset_deleted _) | Play_msg (Play_room_received _ | Play_invites_listed _ | Play_invite_issued _
   | Play_invite_revoked _) | Librarian_input_loaded _ | Artifact_msg (Artifact_checks_loaded _
   | Artifact_check_changed _) | Resource_msg (Resources_listed _)
-  | Acting_pane_changes_loaded _ | Resource_msg (Resource_exported _ | Resource_share_changed _)
+  | Acting_pane_changes_loaded _ | Resource_msg (Resource_exported _ | Resource_saved _ | Resource_share_changed _)
   | Github_msg (Github_identity_view_loaded _) | Identity_msg (Identity_providers_loaded _ | Identity_switch_set _
   | Identity_login_started _ | Identity_refreshed _ | Identity_app_saved _
   | Identity_disconnected _) | Account_msg (Account_login_event _ | Account_login_json _
@@ -1554,7 +1555,7 @@ let retired_operation_observation state ~authority ~reading message =
     | Play_invite_issued (_, _, _) | Play_invite_revoked (_, _, _, _))
     | Librarian_input_loaded (_, _) | (Resource_msg (Resources_listed _) | Artifact_msg (Artifact_checks_loaded _))
     | Board_msg (Board_attachment_saved _) | Acting_pane_changes_loaded (_, _)
-    | Resource_msg (Resource_exported _ | Resource_share_changed _ | Resource_share_recovery_loaded _ | Resource_read (_, _, _) | Resource_diagram_ready _)
+    | Resource_msg (Resource_exported _ | Resource_saved _ | Resource_share_changed _ | Resource_share_recovery_loaded _ | Resource_read (_, _, _) | Resource_diagram_ready _)
     | Github_msg (Github_identity_view_loaded (_, _)) | Identity_msg (Identity_providers_loaded (_, _, _)
     | Identity_switch_set (_, _, _, _) | Identity_login_started (_, _)
     | Identity_refreshed (_, _) | Identity_app_saved (_, _, _)
@@ -1699,7 +1700,7 @@ let rec project_workspace_operation_reply state ~authority ~reading message =
   | Play_invite_issued (_, _, _) | Play_invite_revoked (_, _, _, _))
   | Librarian_input_loaded (_, _) | (Resource_msg (Resources_listed _) | Artifact_msg (Artifact_checks_loaded _))
   | Board_msg (Board_attachment_saved _) | Acting_pane_changes_loaded (_, _)
-  | Resource_msg (Resource_exported _ | Resource_share_changed _ | Resource_share_recovery_loaded _ | Resource_read (_, _, _) | Resource_diagram_ready _)
+  | Resource_msg (Resource_exported _ | Resource_saved _ | Resource_share_changed _ | Resource_share_recovery_loaded _ | Resource_read (_, _, _) | Resource_diagram_ready _)
   | Github_msg (Github_identity_view_loaded (_, _)) | Identity_msg (Identity_providers_loaded (_, _, _)
   | Identity_switch_set (_, _, _, _) | Identity_login_started (_, _)
   | Identity_refreshed (_, _) | Identity_app_saved (_, _, _)

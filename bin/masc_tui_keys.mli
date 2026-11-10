@@ -353,6 +353,11 @@ val footer_hints_resources : detail_focus:bool -> string
 (** The Resources footer, with [j/k] relabelled for the focused pane. All
     other keys still project from {!for_surface}. *)
 
+val footer_hints_resource_save : pending:bool -> string
+(** The path form owns printable keys, including q. Enter creates a file only
+    while no matching save is pending; Esc closes input and does not cancel an
+    issued write. Page keys read the retained result below the form. *)
+
 val footer_hints_board_read :
   lang:Masc_tui_types.ui_language ->
   focus_posts:bool ->

@@ -1208,7 +1208,7 @@ let for_surface = function
       ; b Navigate "( / )" "text part" ~detail:Detail_only
           ~help:"select the previous or next original text part for copying"
       ; b Act "s" "save original" ~detail:Detail_only
-          ~help:"choose a local destination; exclusively create the selected report revision's exact bytes"
+          ~help:"choose a local destination; Enter exclusively creates the selected report revision's exact bytes, Esc closes path input; the retained result stays with that original report"
       ; b Act "o" "open Dashboard" ~detail:Detail_only
           ~help:"open the selected fixed report revision; the browser uses its own authentication"
       ; b Act "P" "external sharing" ~detail:Detail_only
@@ -2064,6 +2064,13 @@ let footer_hints_resources ~detail_focus =
          if String.equal binding.key "j/k" then
            { binding with label = (if detail_focus then "scroll text" else "move") }
          else binding)
+  |> hints_of_bindings
+
+let footer_hints_resource_save ~pending =
+  (if pending then [] else [b Act "Enter" "create file"])
+  @ [ b Navigate "Esc" "close input"
+    ; b Act "Ctrl-U" "clear path"
+    ; b Navigate "PgUp/PgDn" "read result" ]
   |> hints_of_bindings
 
 let opens_keepers ~message_mode key =

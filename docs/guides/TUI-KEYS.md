@@ -768,7 +768,7 @@ count is drawn beyond the available space.
 | `, / .` | select the previous or next image or Mermaid diagram in the loaded resource |
 | `Ctrl-O` | open the selected image or Pele diagram from the retained resource bytes |
 | `( / )` | select the previous or next original text part for copying |
-| `s` | choose a local destination; exclusively create the selected report revision's exact bytes |
+| `s` | choose a local destination; Enter exclusively creates the selected report revision's exact bytes, Esc closes path input; the retained result stays with that original report |
 | `o` | open the selected fixed report revision; the browser uses its own authentication |
 | `P` | enable or revoke external access to all revisions of this report |
 | `U` | inspect the original recorded share operation |

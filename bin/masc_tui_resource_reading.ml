@@ -12,13 +12,14 @@ type t = {
   shared : bool option;
   share_uncertain : bool;
   recovery_preview : string option;
+  save_notice : string option;
   public_url : (string, string) result option;
   diagrams : Masc_tui_resource_diagrams.t option;
 }
 let create ~entry ~contents ~error ~requested ~image_cursor ~text_cursor
-    ~revisions ~presentation ~metadata_expanded ~confirmation ~shared ~share_uncertain ~recovery_preview ~public_url ~diagrams =
+    ~revisions ~presentation ~metadata_expanded ~confirmation ~shared ~share_uncertain ~recovery_preview ~save_notice ~public_url ~diagrams =
   {entry;contents;error;requested;image_cursor;text_cursor;revisions;presentation;
-   metadata_expanded;confirmation;shared;share_uncertain;recovery_preview;public_url;diagrams}
+   metadata_expanded;confirmation;shared;share_uncertain;recovery_preview;save_notice;public_url;diagrams}
 let searchable reading = match reading.contents, reading.error with
   | Some _, None -> true
   | (Some _ | None), (Some _ | None) -> false
@@ -34,14 +35,14 @@ let record_landing ~cols ~query ~index reading = Landed {index;cols;query;readin
 let[@warning "+9+27"] same_reading
     { entry; contents; error; requested; image_cursor; text_cursor; revisions;
       presentation; metadata_expanded; confirmation; shared; share_uncertain;
-      recovery_preview; public_url; diagrams } b =
+      recovery_preview; save_notice; public_url; diagrams } b =
   entry=b.entry && Option.equal (==) contents b.contents
   && error=b.error && requested=b.requested
   && image_cursor=b.image_cursor && text_cursor=b.text_cursor
   && revisions=b.revisions && presentation=b.presentation
   && metadata_expanded=b.metadata_expanded && confirmation=b.confirmation
   && shared=b.shared && share_uncertain=b.share_uncertain
-  && recovery_preview=b.recovery_preview && public_url=b.public_url
+  && recovery_preview=b.recovery_preview && save_notice=b.save_notice && public_url=b.public_url
   && Option.equal (==) diagrams b.diagrams
 
 let landing ~cols ~query reading = function

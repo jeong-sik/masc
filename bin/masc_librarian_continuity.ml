@@ -226,6 +226,7 @@ let create_report_bytes ~fs ~output_path bytes =
     let (_ : string) = Masc.Keeper_fs.ensure_dir directory in
     Fs_compat.create_file_exclusive ~fs ~owner:"librarian-continuity"
       ~path:output_path ~permissions:0o600 bytes
+    |> Result.map_error Fs_compat.create_file_error_to_string
   with
   | Sys_error detail -> Error detail
   | Eio.Io _ as error -> Error (Printexc.to_string error)

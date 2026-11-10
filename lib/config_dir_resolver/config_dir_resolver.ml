@@ -476,7 +476,7 @@ let log_resolution ?(context = "ConfigDir") () =
 
    Layout SSOT: callers stop computing base_path plus .masc child paths
    and instead route through these helpers. The directory structure decision
-   ([auth], [credentials], [runtime/agent], etc.) lives in this single module
+   ([auth], [credentials], [repos], etc.) lives in this single module
    so that future relocations need a single edit + a CI gate to enforce. *)
 
 let masc_root ~base_path =
@@ -491,9 +491,6 @@ let credentials_dir ~base_path =
   Filename.concat (masc_root ~base_path) credentials_dirname
 
 let runtime_dirname = "runtime"
-
-let agent_runtime_dir ~base_path =
-  Filename.concat (Filename.concat (masc_root ~base_path) runtime_dirname) "agent"
 
 let repos_dirname = "repos"
 

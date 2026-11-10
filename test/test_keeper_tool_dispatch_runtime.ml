@@ -10868,7 +10868,6 @@ let test_write_content_artifact_mode_uses_typed_parser () =
 
 let () =
   Masc_test_deps.init_unified_tool_registry ();
-  Masc_test_deps.publish_single_user_access ();
   run "Keeper_tool_dispatch_runtime" [
     ("peer_artifacts", [test_case "materializes exact binary through recipient write" `Quick test_peer_artifact_materializes_exact_binary]);
     ("peer_delegate_schema", [test_case "nested artifact and target schemas reach API and official clients" `Quick test_peer_delegate_schema_reaches_model_wires]);

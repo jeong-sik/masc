@@ -202,8 +202,8 @@ let without_response_format (provider_cfg : Llm_provider.Provider_config.t) =
 
 (* The anti-rationalization reviewer's verdict channel is the
    [report_review_verdict] tool call: exactly-once dispatch enforced in
-   [Workspace_metric_hooks], args re-validated by the total parser
-   [Task.Anti_rationalization.parse_review_verdict_from_json]. A wire
+   [Workspace_metric_hooks], args re-validated by the total parser behind
+   [Task.Anti_rationalization.step_verdict_call]. A wire
    response format constrains only the final assistant text, which this
    surface never parses — while its capability branch rejected every
    json_object-only provider (Glm/DeepSeek/Kimi), so the gate

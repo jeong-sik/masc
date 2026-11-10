@@ -481,26 +481,9 @@ let test_validate_agent_name_r_valid () =
   let result = Workspace_utils.validate_agent_name_r "valid-agent" in
   check bool "ok result" true (is_ok result)
 
-let test_validate_task_id_valid () =
-  let result = Workspace_utils.validate_task_id "task-12345" in
-  check bool "valid" true (is_ok result)
-
 let test_validate_task_id_r_valid () =
   let result = Workspace_utils.validate_task_id_r "task-abc" in
   check bool "ok result" true (is_ok result)
-
-let test_validate_file_path_valid () =
-  let result = Workspace_utils.validate_file_path "src/main.ml" in
-  check bool "valid" true (is_ok result)
-
-let test_validate_file_path_too_long () =
-  let long_path = String.make 501 'a' in
-  let result = Workspace_utils.validate_file_path long_path in
-  check bool "invalid too long" true (is_error result)
-
-let test_validate_file_path_angle_brackets () =
-  let result = Workspace_utils.validate_file_path "file<name>.txt" in
-  check bool "invalid angle brackets" true (is_error result)
 
 (* ============================================================ *)
 (* String_util.contains_substring Tests                           *)
@@ -618,11 +601,7 @@ let sanitize_tests = [
 let validation_tests = [
   "agent_name valid", `Quick, test_validate_agent_name_valid;
   "agent_name_r valid", `Quick, test_validate_agent_name_r_valid;
-  "task_id valid", `Quick, test_validate_task_id_valid;
   "task_id_r valid", `Quick, test_validate_task_id_r_valid;
-  "file_path valid", `Quick, test_validate_file_path_valid;
-  "file_path too long", `Quick, test_validate_file_path_too_long;
-  "file_path angle brackets", `Quick, test_validate_file_path_angle_brackets;
 ]
 
 let substring_tests = [

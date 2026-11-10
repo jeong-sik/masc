@@ -242,6 +242,7 @@ let write_samples_to_store ~masc_root () =
   Otel_metric_store_core.set_gauge
     Otel_metric_store.metric_runtime_observables_last_write_unixtime
     stamped_at;
+  Dashboard_observation_commit.process_written `Runtime_observables;
   List.length samples
 ;;
 

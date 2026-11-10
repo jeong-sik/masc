@@ -35,7 +35,10 @@ module For_testing : sig
   (** Compute the samples once and land them in [Otel_metric_store]
       cells via [set_gauge] (masc#29023) — the internal step the
       {!start_store_writer} fiber repeats. Returns how many samples
-      were written. Exposed for tests; production callers go through
+      were written. After the whole sample and its timestamp are committed,
+      announces the process [Runtime_observables] read model. Individual
+      metric writes and SSE transport activity do not announce this sample.
+      Exposed for tests; production callers go through
       {!start_store_writer}. *)
   val write_samples_to_store : masc_root:string -> unit -> int
   val reset_store_cache : unit -> unit

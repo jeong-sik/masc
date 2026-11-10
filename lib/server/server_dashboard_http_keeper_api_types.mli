@@ -71,6 +71,10 @@ val keeper_composite_cache_key : base_path:string -> string -> string
 val fleet_composite_cache_key : base_path:string -> string
 (** Cache key for the fleet composite envelope of one workspace. *)
 
+val invalidate_workspace_keeper_composites : base_path:string -> unit
+(** Retire the roster's fleet envelope and every Keeper selection after a
+    membership change. Individual row changes can invalidate one Keeper. *)
+
 val invalidate_keeper_composite_cache : base_path:string -> name:string -> unit
 (** Drop the Keeper's composite, so the next read of
     [/api/v1/keepers/<name>/composite] computes it from the registry. *)
@@ -89,6 +93,10 @@ val keeper_runtime_trace_cache_key :
   string
 (** Cache key for [/api/v1/keepers/<name>/runtime-trace]. Optional query
     fields are tagged so absent values cannot collide with literal payloads. *)
+
+val invalidate_keeper_runtime_traces : base_path:string -> name:string -> unit
+(** Retire all trace/turn/limit selections for this exact workspace and
+    Keeper, including any computation that began before the committed input. *)
 
 type keeper_board_attention_quarantine_route =
   { keeper_name : string

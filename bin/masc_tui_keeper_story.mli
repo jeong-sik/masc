@@ -19,11 +19,15 @@ val tab_label : page -> string
 
 type selection = Keeper_selected | World_selected | No_selection
 
+type memory_view = Memory_summary | Memory_recent | Memory_frequent | Memory_changes | Memory_storage
+
 type action =
   | Show of page  (** Open the window on this page, or move it to this page. *)
   | Close  (** Close the window. *)
   | Open_detail  (** Close the window and open the Keeper's detail. *)
   | Open_world  (** Select World in a memory/age view and open its own dock. *)
+  | Show_memory of memory_view
+  | Scroll_memory of int
 
 val action_of_key : selection:selection -> page option -> string -> action option
 (** What [key] does to the window, [None] when it is closed. [key] is a name
@@ -39,4 +43,7 @@ val action_of_key : selection:selection -> page option -> string -> action optio
     Without a selected Keeper or World --
     the cursor stands on a group heading, or the list has no Keeper -- Enter
     opens nothing and an open window leaves Enter and Right to the list,
-    where on a heading Left folds the group and Right unfolds it. *)
+    where on a heading Left folds the group and Right unfolds it.
+    On a selected Keeper's Memory page, [0] shows the overview, [1] recent
+    records, [2] recorded retrievals, [3] committed changes and [4] storage.
+    Brackets page the table without moving the selected Keeper. *)

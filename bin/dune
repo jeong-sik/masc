@@ -2849,6 +2849,7 @@
   masc_tui_keeper_world
   masc_tui_keeper_wall
   masc_tui_render_keeper_story
+  masc_tui_render_keeper_memory
   masc_tui_render_runtime
   masc_tui_render_overlays
   masc_tui_render_connectors)

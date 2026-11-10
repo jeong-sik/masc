@@ -144,11 +144,11 @@ let test_turn_state_labels_cover_every_variant () =
     ]
   in
   List.iter
-    (fun (s, expected) ->
+    (fun (F.Any s, expected) ->
        Alcotest.(check string)
          ("turn_state_label " ^ expected)
          expected
-         (F.any_state_label s))
+         (F.turn_state_label s))
     pairs
 ;;
 

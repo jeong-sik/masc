@@ -8,13 +8,7 @@
 open Masc_board_handlers
 open Tool_args
 
-(* RFC-0189 PR-1b.3 — handlers return typed [Tool_result.result].
-   Sub-board Board_dispatch errors (slug already exists, owner not found,
-   sub_board not found, etc.) are predominantly caller-input violations →
-   [Workflow_rejection]. A future RFC may route through
-   [Board_tool_format.board_error_failure_class] for per-variant routing,
-   but for the current sub_board error vocabulary a uniform
-   Workflow_rejection matches observed semantics. *)
+(* The shared formatter preserves workflow rejection versus source/IO failure. *)
 
 let owner_arg args =
   match get_string_opt args "owner" with
@@ -78,7 +72,9 @@ let handle_sub_board_create ~reader ~tool_name ~start_time args : Tool_result.re
 ;;
 
 let handle_sub_board_list ~reader ~tool_name ~start_time _args : Tool_result.result =
-  let boards = Board_dispatch.list_sub_boards ~reader () in
+  match Board_dispatch.list_sub_boards ~reader () with
+  | Error error -> Board_tool_format.error_of_board_error ~tool_name ~start_time error
+  | Ok boards ->
   let lines =
     List.map
       (fun (sb : Board.sub_board) ->

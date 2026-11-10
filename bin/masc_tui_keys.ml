@@ -615,6 +615,8 @@ let for_surface = function
       :: (b Act "Right" "detail" ~help:"keeper detail")
       :: (b Act "Tab / s / m" "pages"
             ~help:"with a Keeper Story open: next page / schedules / memory; World keeps its own page; Esc closes either window")
+      :: (b Act "0 / 1 / 2 / 3 / 4 / [ / ]" "memory"
+            ~help:"with Keeper Memory open: overview / recent records / retrievals / committed changes / storage; brackets scroll the table")
       :: keeper_actions
       @ [ b Search "/" "search" ~help:"search names; Enter keeps the query"
         ; b Search "n / N" "next / previous match"
@@ -1323,8 +1325,13 @@ let for_surface = function
       ]
       @ [ tools_refresh; listing_next; listing_quit ]
   | System_logs ->
-      [ b Navigate "o" "log origin" ~help:"switch between server logs and this TUI's own observations"
-      ; b Navigate "e" "Events"
+      (* [e] leads, as [e / l] leads on Events. The title row draws the
+         Events / Logs strip only where its readings leave room, and at 80
+         columns it does not on either reading, so this row is the one place
+         that names the other. With [o] first, 80 and 84 columns under an
+         ACTION NEEDED notice kept [o:log origin] and dropped [e:Events]. *)
+      [ b Navigate "e" "Events"
+      ; b Navigate "o" "log origin" ~help:"switch between server logs and this TUI's own observations"
       ; b Navigate "j/k" "move / scroll" ~rows:Needs_row
       ; row_list_page
       ; b Navigate "[ / ]" "previous / next" ~detail:Detail_only

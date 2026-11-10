@@ -451,6 +451,9 @@ let test_current_reaction_schema_is_exact () =
 let test_current_sub_board_schema_is_exact () =
   let store = Board_core.create_store
       ~base_path:(Env_config_core.base_path ()) () in
+  (match Board_core.reload_sub_boards store with
+   | Ok _ -> ()
+   | Error (path, error) -> Alcotest.failf "load %s: %s" path (Printexc.to_string error));
   let sub_board =
     match
       Board_core.create_sub_board
@@ -522,6 +525,9 @@ let test_current_sub_board_schema_is_exact () =
 let test_sub_board_update_rejects_invalid_members () =
   let store = Board_core.create_store
       ~base_path:(Env_config_core.base_path ()) () in
+  (match Board_core.reload_sub_boards store with
+   | Ok _ -> ()
+   | Error (path, error) -> Alcotest.failf "load %s: %s" path (Printexc.to_string error));
   let sub_board =
     match
       Board_core.create_sub_board

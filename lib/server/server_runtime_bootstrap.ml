@@ -2087,7 +2087,7 @@ let run_single_user ~sw ~runtime_sw ~env ~address ~port ~base_path ~single_user 
         ; execution_refresh = (fun () ->
             Server_dashboard_http.start_execution_refresh_loop ~state ~sw ~clock ~net ~mono_clock)
         ; transport_health_refresh = (fun () ->
-            Server_dashboard_http.start_transport_health_refresh_loop ~sw ~clock)
+            Server_dashboard_http.start_transport_health_refresh_loop ~state ~sw ~clock)
         ; execution_trust_refresh = (fun () ->
             Server_dashboard_http.start_execution_trust_refresh_loop ~state ~sw ~clock)
         ; mission_refresh = (fun () ->

@@ -26,6 +26,7 @@ type t =
   | Execution_invalidated
   | Agent_core of { keeper : string option; change : agent_core_change }
   | Telemetry_sample
+  | Transport_state
   | Telemetry_gap of {
       source : Telemetry_unified_source.source option;
       keeper : string option;
@@ -243,6 +244,10 @@ let subscribe ~sw ~base_path ?observer_instance_id notify =
     Fs_compat.realpath_lenient (Common.masc_dir_from_base_path ~base_path) in
   let unsubscribe = Sse.subscribe_publication_inputs ~runtime_authority
       ?observer_instance_id (fun event -> Option.iter notify (of_event event)) in
+  let unsubscribe_transport = Transport_metrics.subscribe_source_changed
+      (fun () -> notify Transport_state) in
+  let unsubscribe_https = Https_listener_metrics.subscribe_source_changed
+      (fun () -> notify Transport_state) in
   let unsubscribe_gaps = Telemetry_coverage_gap.subscribe_changed (fun change ->
     if String.equal canonical_masc_root change.canonical_masc_root then
       notify (Telemetry_gap {
@@ -258,6 +263,7 @@ let subscribe ~sw ~base_path ?observer_instance_id notify =
     if String.equal canonical_masc_root change.canonical_masc_root then
       notify (Workspace_agent_signal {agent = change.agent_name})) in
   Eio.Switch.on_release sw (fun () ->
-    unsubscribe (); unsubscribe_gaps (); unsubscribe_tools (); unsubscribe_audits ();
+    unsubscribe (); unsubscribe_transport (); unsubscribe_https ();
+    unsubscribe_gaps (); unsubscribe_tools (); unsubscribe_audits ();
     unsubscribe_agents ())
 ;;

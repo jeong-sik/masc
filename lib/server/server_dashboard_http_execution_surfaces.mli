@@ -209,12 +209,14 @@ val start_execution_refresh_loop :
     leaves workspace for the first build window after boot. *)
 
 val start_transport_health_refresh_loop :
+  state:Mcp_server.server_state ->
   sw:Eio.Switch.t ->
   clock:float Eio.Time.clock_ty Eio.Resource.t ->
   unit
-(** Forks the transport-health cache refresh fiber.
-    Cheap compared to the execution refresh — a single
-    snapshot at the current clock instant. *)
+(** Subscribe before an initial transport sample, then refresh only on actual
+    transport lifecycle or validated original publication input. A successful
+    quiet surface has no interval. Observation delivery/cost mirrors are
+    measured at the next actual sample or manual read, avoiding self fanout. *)
 
 val start_execution_trust_refresh_loop :
   state:Mcp_server.server_state ->

@@ -60,6 +60,10 @@ type t =
       (** A committed [Dashboard_agent_core_bridge] sample. The published
           entry, shared timestamp and matching provider/model identity are
           checked; metric rows and provider/model labels are not retained. *)
+  | Transport_state
+      (** Actual listener/session/connection/gRPC/TLS lifecycle metadata.
+          Snapshot fanout, downstream delivery and mirrored metrics are not
+          source inputs. No listener errors, addresses or payloads retained. *)
   | Telemetry_gap of {
       source : Telemetry_unified_source.source option;
       keeper : string option;

@@ -13,6 +13,18 @@
 
 (** {1 SSE hot-queue snapshot} *)
 
+val subscribe_source_changed : (unit -> unit) -> (unit -> unit)
+(** Observe completed listener, connection, gRPC/WebSocket membership and
+    authentication/liveness source changes. Carries no rows. Callbacks must
+    not block or yield; their exceptions cannot change the mutation's result.
+    Removal is idempotent. Queue/delivery/cost mirror metrics do not notify:
+    sending an observation must not create another source observation. *)
+
+val record_sse_lifecycle_change : unit -> unit
+(** Called by the canonical SSE registry after an actual client registration
+    or retirement and its full transport metrics snapshot have committed.
+    Not called by snapshot publication, queue drain or mirrored gauge setters. *)
+
 type sse_session_kind = Sse_queue_inventory.kind =
   | Observer
   | Agent_stream

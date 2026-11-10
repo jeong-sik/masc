@@ -296,7 +296,7 @@ let replay filename () =
       "captured request differs from current contract; recorded response was not replayed") in
   let prior_runs = Runs.list_runs (Runs.global ()) in
   let committed = ref 0 and refusals = ref [] in
-  Runtime.run_best_effort ~pass:Masc.Keeper_memory_commit_pass.Admission ~write_scope:Runtime.Memory_maintenance ~admission ~cli_runner:runner
+  Runtime.run_best_effort ~write_scope:(Runtime.Memory_maintenance Masc.Keeper_memory_commit_pass.Admission) ~admission ~cli_runner:runner
     ~on_memory_committed:(fun () -> incr committed)
     ~on_not_committed:(fun reason -> refusals := reason :: !refusals)
     ~base_path ~keepers_dir ~keeper_id
@@ -508,7 +508,7 @@ let replay filename () =
           followup_candidates)])) in
     let prior_followup_runs = Runs.list_runs (Runs.global ()) in
     let captured_at = Time_compat.now () in
-    Runtime.run_best_effort ~pass:Masc.Keeper_memory_commit_pass.Admission ~write_scope:Runtime.Memory_maintenance ~admission:followup ~cli_runner:runner
+    Runtime.run_best_effort ~write_scope:(Runtime.Memory_maintenance Masc.Keeper_memory_commit_pass.Admission) ~admission:followup ~cli_runner:runner
       ~on_memory_committed:(fun () -> incr followup_commits)
       ~on_admission_deferred:(fun () -> incr deferred)
       ~base_path ~keepers_dir ~keeper_id

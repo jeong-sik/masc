@@ -177,3 +177,30 @@ val acknowledge_absent_owner :
     authoritative backlog guards; it cannot re-enter this store. The snapshot
     includes corrupt siblings. Original finalization evidence is immutable.
     A repeated acknowledgement returns the retained record without [decide]. *)
+
+type task_settlement_retry_plan =
+  { backlog_version : int
+  ; receipted_task_ids : Keeper_id.Task_id.t list
+  }
+
+type task_settlement_retry_result =
+  | Task_settlement_retry_prepared of Keeper_shutdown_types.t
+  | Task_settlement_retry_ineligible of Keeper_shutdown_types.t
+
+val task_settlement_retry_eligible : Keeper_shutdown_types.t -> bool
+(** The one phase/lane/turn decision table shared by observation and CAS. *)
+
+val prepare_task_settlement_retry :
+  config:Workspace.config ->
+  keeper_name:string ->
+  operation_id:Keeper_shutdown_types.Operation_id.t ->
+  expected_revision:int ->
+  decide:(Keeper_shutdown_types.t -> inventory_entry list ->
+    (task_settlement_retry_plan, 'error) result) ->
+  ((task_settlement_retry_result, 'error) result, error) result
+(** Purpose-specific CAS from dormant, no-inflight [Blocked Task_settlement]
+    to [Finalizing_tasks]. The caller holds intake, lifecycle and authoritative
+    backlog guards. [decide] runs under inventory and exact-operation locks;
+    it may return only the checked backlog version and original Task receipts.
+    Original identity, actor, intent and Task IDs are retained. No finalizer is
+    run here, and a stale revision never invokes [decide]. *)

@@ -357,6 +357,139 @@ let test_purge_workspace_admission_and_retry () =
     check bool "legacy purge removed its agent artifact" false (Sys.file_exists legacy_agent_path))
 ;;
 
+let test_explicit_task_retry_authorization_cas_and_readback () =
+  with_fixture (fun ~config ~router ~operation:ownerless ~admin ~worker ->
+    let retry_path operation = Printf.sprintf
+      "/api/v1/keepers/%s/shutdown-operations/%s/task-settlement-retry"
+      operation.keeper_name (Operation_id.to_string operation.operation_id) in
+    let path = retry_path ownerless in
+    List.iter (fun meth ->
+      let status, _ = http ~router ~meth ~path () in
+      check int "anonymous retry endpoint denied" 401 status;
+      let status, _ = http ~router ~token:worker ~meth ~path () in
+      check int "worker cannot preview or retry task settlement" 403 status) ["GET"; "POST"];
+    let status, observed = http ~router ~token:admin ~meth:"GET" ~path () in
+    check int "finalized record is readable without an Owner" 200 status;
+    check bool "owner absence does not hide original completion evidence" true
+      (Yojson.Safe.Util.member "operation" observed = Keeper_shutdown_store.to_json ownerless);
+    check bool "finalized operation is not retry eligible" false
+      Yojson.Safe.Util.(observed |> member "eligible" |> to_bool);
+    let keeper_name = "retry-http-owner" in
+    let meta = require_ok Fun.id (Masc_test_deps.meta_of_json_fixture
+      (`Assoc ["name", `String keeper_name; "trace_id", `String "http-task-retry-original"])) in
+    ignore (require_ok Keeper_owner_registry.command_error_to_string
+      (Keeper_owner_registry.create_meta ~base_path:config.base_path meta));
+    let operation = { ownerless with operation_id = Operation_id.generate (); keeper_name
+      ; trace_id = require_ok Fun.id (Keeper_id.Trace_id.of_string "http-task-retry-original")
+      ; join_evidence = None; expected_backlog_version = (require_ok Fun.id (Workspace_backlog.read_backlog_r config)).version
+      ; phase = Blocked { stage = Task_settlement; detail = "retained refusal, never parsed" } } in
+    store_ok (Keeper_shutdown_store.persist_new ~config operation);
+    ignore (require_ok Keeper_owner_registry.command_error_to_string
+      (Keeper_owner_registry.restore_shutdown ~base_path:config.base_path ~keeper_name ~operation_id:operation.operation_id));
+    (match Keeper_shutdown_intake_fence.restore_shutdown ~base_path:config.base_path ~keeper_name ~operation_id:operation.operation_id with
+     | Restored | Already_restored -> () | Restore_conflict _ -> fail "retry fence fixture failed");
+    let path = retry_path operation in
+    let preview () =
+      let status, json = http ~router ~token:admin ~meth:"GET" ~path () in
+      check int "exact blocked operation preview" 200 status; json in
+    let fields preview =
+      [ "schema", `String "masc.keeper_shutdown.task_settlement_retry.request.v1"
+      ; "expected_revision", Yojson.Safe.Util.member "expected_revision" preview
+      ; "expected_backlog_version", Yojson.Safe.Util.member "expected_backlog_version" preview
+      ; "reason", `String "Rechecked the original owner, trace, task receipts and backlog" ] in
+    let post fields = http ~router ~token:admin ~meth:"POST" ~path
+      ~body:(Yojson.Safe.to_string (`Assoc fields)) () in
+    let first = preview () in
+    check bool "exact retained operation is eligible" true
+      Yojson.Safe.Util.(first |> member "eligible" |> to_bool);
+    let initial = fields first in
+    List.iter (fun malformed ->
+      let status, _ = post malformed in check int "strict retry request" 400 status)
+      [ ("actor", `String "spoofed-actor") :: initial
+      ; ("expected_revision", `Int operation.revision) :: initial
+      ; ("reason", `String " ") :: List.remove_assoc "reason" initial
+      ; ("schema", `String "unknown") :: List.remove_assoc "schema" initial ];
+    let status, _ = post (("expected_revision", `Int 0) :: List.remove_assoc "expected_revision" initial) in
+    check int "stale operation revision is a conflict" 409 status;
+    let backlog = require_ok Fun.id (Workspace_backlog.read_backlog_r config) in
+    Workspace_backlog.write_backlog config backlog;
+    let status, _ = post initial in
+    check int "stale backlog is a conflict" 409 status;
+    check bool "all failed requests retain original operation" true (load ~config operation = operation);
+    let fresh = fields (preview ()) in
+    let before = require_ok Fun.id (Workspace_backlog.read_backlog_r config) in
+    let status, response = post fresh in
+    check bool "preparation is distinct from scheduling" true (status = 200 || status = 202);
+    check bool "explicit operation CAS applied" true Yojson.Safe.Util.(response |> member "applied" |> to_bool);
+    check bool "worker reservation never claims completion" false Yojson.Safe.Util.(response |> member "completed" |> to_bool);
+    let committed = store_ok (Keeper_shutdown_store.of_json (Yojson.Safe.Util.member "operation" response)) in
+    (match committed.phase with Finalizing_tasks [] -> () | _ -> fail "POST did not return the preparation receipt");
+    check bool "preparation preserves immutable actor and intent" true (immutable_fields_equal operation committed);
+    check bool "POST did not mutate the canonical Task backlog" true
+      (require_ok Fun.id (Workspace_backlog.read_backlog_r config) = before);
+    let status, readback = http ~router ~token:admin ~meth:"GET" ~path () in
+    check int "the same GET observes post-prepare progress" 200 status;
+    let current = load ~config operation in
+    check bool "readback returns the current canonical operation phase and receipts" true
+      (Yojson.Safe.Util.member "operation" readback = Keeper_shutdown_store.to_json current);
+    check bool "an advanced operation is no longer retry eligible" false
+      Yojson.Safe.Util.(readback |> member "eligible" |> to_bool);
+    let status, _ = post fresh in
+    check int "original request is not replayed after its CAS" 409 status;
+    let audit = Audit_log.read_entries_matching config ~keep:(fun (entry : Audit_log.audit_entry) ->
+      match entry.action with
+      | Audit_log.Custom name -> String.equal name "keeper_shutdown_task_settlement_retry"
+      | ClaimTask | StartTask | DoneTask | CancelTask | ReleaseTask | Broadcast | Suspend
+      | ToolCall _ | AuthSuccess | AuthFailure | CircuitOpen | CircuitClose | SearchRefinement
+      | GateDecision _ | RuntimeConfigWrite | Unknown _ -> false) in
+    check bool "authenticated actor and supplied reason are audited" true
+      (List.exists (fun (entry : Audit_log.audit_entry) ->
+        String.equal entry.agent_id "ack-admin"
+        && Yojson.Safe.Util.member "reason" entry.details = List.assoc "reason" fresh) audit))
+;;
+
+let test_audit_io_failure_keeps_the_applied_receipt () =
+  with_fixture (fun ~config ~router ~operation:original ~admin ~worker:_ ->
+    let keeper_name = "audit-retry-owner" in
+    let meta = require_ok Fun.id (Masc_test_deps.meta_of_json_fixture
+      (`Assoc [ "name", `String keeper_name; "trace_id", `String "http-absence-original" ])) in
+    ignore (require_ok Keeper_owner_registry.command_error_to_string
+      (Keeper_owner_registry.create_meta ~base_path:config.base_path meta));
+    let operation = { original with keeper_name; operation_id = Operation_id.generate ()
+      ; expected_backlog_version = (require_ok Fun.id (Workspace_backlog.read_backlog_r config)).version
+      ; join_evidence = None; phase = Blocked { stage = Task_settlement; detail = "retained refusal" } } in
+    store_ok (Keeper_shutdown_store.persist_new ~config operation);
+    ignore (require_ok Keeper_owner_registry.command_error_to_string
+      (Keeper_owner_registry.restore_shutdown ~base_path:config.base_path ~keeper_name ~operation_id:operation.operation_id));
+    (match Keeper_shutdown_intake_fence.restore_shutdown ~base_path:config.base_path ~keeper_name ~operation_id:operation.operation_id with
+     | Restored | Already_restored -> () | Restore_conflict _ -> fail "audit fixture fence conflict");
+    let path = Printf.sprintf "/api/v1/keepers/%s/shutdown-operations/%s/task-settlement-retry"
+      keeper_name (Operation_id.to_string operation.operation_id) in
+    let body = Yojson.Safe.to_string (`Assoc
+      [ "schema", `String "masc.keeper_shutdown.task_settlement_retry.request.v1"
+      ; "expected_revision", `Int operation.revision
+      ; "expected_backlog_version", `Int operation.expected_backlog_version
+      ; "reason", `String "Rechecked the original operation" ]) in
+    let audit_dir = Dated_jsonl.Store.dir
+      (Dated_jsonl.Store.at (Workspace_utils.dated_store_root config) Dated_jsonl.Store.Root.Audit) in
+    let saved = audit_dir ^ ".fixture-saved" in
+    let existed = Sys.file_exists audit_dir in
+    if existed then Unix.rename audit_dir saved;
+    Fs_compat.save_file audit_dir "a file cannot contain an audit day ledger";
+    Fun.protect ~finally:(fun () -> Unix.unlink audit_dir; if existed then Unix.rename saved audit_dir) (fun () ->
+      let status, response = http ~router ~token:admin ~meth:"POST" ~path ~body () in
+      check bool "audit I/O cannot erase an applied response" true (status = 200 || status = 202);
+      check bool "operation CAS remains applied" true Yojson.Safe.Util.(response |> member "applied" |> to_bool);
+      check string "audit failure is a separate observation" "unavailable"
+        Yojson.Safe.Util.(response |> member "audit" |> member "state" |> to_string);
+      let prepared = store_ok (Keeper_shutdown_store.of_json (Yojson.Safe.Util.member "operation" response)) in
+      check int "preparation revision survives audit failure" (operation.revision + 1) prepared.revision;
+      let status, readback = http ~router ~token:admin ~meth:"GET" ~path () in
+      check int "the exact operation remains observable" 200 status;
+      check bool "readback is the stored operation" true
+        (Yojson.Safe.Util.member "operation" readback = Keeper_shutdown_store.to_json (load ~config operation))))
+;;
+
 let () = run "keeper shutdown acknowledgement HTTP"
   [ "actual router", [ test_case "admin authorization and observational preview" `Quick
         test_real_router_requires_admin_for_preview_and_commit
@@ -365,4 +498,8 @@ let () = run "keeper shutdown acknowledgement HTTP"
     ; test_case "Memory resolution enforces operator and workspace authority" `Quick
         test_memory_resolution_requires_admin_and_matching_workspace
     ; test_case "purge admits the captured workspace before existing and new work" `Quick
-        test_purge_workspace_admission_and_retry ] ]
+        test_purge_workspace_admission_and_retry
+    ; test_case "explicit task retry authorization CAS and observation" `Quick
+        test_explicit_task_retry_authorization_cas_and_readback
+    ; test_case "audit I/O preserves the applied receipt" `Quick
+        test_audit_io_failure_keeps_the_applied_receipt ] ]

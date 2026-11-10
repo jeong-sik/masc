@@ -334,3 +334,24 @@ findings were repaired. Syntax parsing uses local OCaml 5.5.1; project type
 checking, candidate execution and installation remain separate. No new screen
 wording, layout or row-order tests were added. The full screen scope remains
 open.
+
+## Operations action-reason reading
+
+The f89b3e6f baseline was observed at 120x36 and 36x20 with two actual server
+reasons. The narrow Operations view showed the first and `+1 more`; Home
+selection did not include those reasons. The global footer repeated an internal
+code. This observation does not execute the following repair.
+
+Operations `v` opens every reason from the last server rollup in the existing
+immutable detail reader. Its original order and complete text are retained;
+scrolling, search and resize use that reader, and Esc returns without an
+approval, setting change or new request. Missing server/rollup observations do
+not become an empty list. The common footer names the observed action count in
+the selected UI language and points to Operations instead of repeating a raw
+diagnostic. Its existing press target opens that destination.
+
+The new key is in the canonical binding source and screen map. The generated
+key-reference document has not been regenerated; it must come from the actual
+generator, not a manual edit. Current-candidate execution and installation,
+remaining Operations states and the full 23-surface scope remain open. No new
+screen wording, layout, row-order or PTY assertion tests were added.

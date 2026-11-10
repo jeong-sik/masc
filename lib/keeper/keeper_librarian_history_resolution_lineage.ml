@@ -21,7 +21,7 @@ let validate ~restore ~read ~read_fence ~read_resolution ~require_confirmed requ
       let scope=Request.scope owner in
       let* parent=read ~scope ~request_id:predecessor.request_id in
       let* parent=Option.to_result ~none:"History predecessor is absent" parent in
-      let* ()=require (parent.request_digest=predecessor.request_digest) "History predecessor digest differs" in
+      let* ()=require (parent.Owner.request_digest=predecessor.request_digest) "History predecessor digest differs" in
       let* parent_request=restore ~owner parent in
       let* fence=read_fence ~scope ~request_id:parent.request_id in
       let* ()=match fence with

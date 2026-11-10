@@ -32,7 +32,7 @@ let digest json = let+ value=Lane_addon_action.canonical json in Store.digest (Y
 let payload ~scope ~request_id ~expected ~actor ~reason = `Assoc [
   "scope",`String scope;"original_request_id",`String request_id;
   "expected",Fence.guard_to_json expected;"actor",`String actor;"reason",`String reason]
-let child_json child = `Assoc ["request_id",`String child.request_id;"request_digest",`String child.request_digest]
+let child_json (child : child) = `Assoc ["request_id",`String child.request_id;"request_digest",`String child.request_digest]
 let phase_json = function
   | Requested -> `Assoc ["kind",`String "requested"]
   | Refused Observation_changed -> `Assoc ["kind",`String "refused";"reason",`String "observation_changed";"detail",`Null]

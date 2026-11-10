@@ -31,6 +31,7 @@ const settle = () => act(async () => { await vi.advanceTimersByTimeAsync(0); awa
 function workspace(label: string) {
   expect(hydrateExecutionSnapshot({ execution_publication_epoch: 'fleet-consumer-fixture',
     execution_publication_generation: ++generation, observer_instance_id: `fleet-${label}`,
+    projection_diagnostics: { read_completeness: 'complete', read_error: null },
     status: { project: label, workspace_root: `/workspace-${label}` }, agents: [], tasks: [], messages: [],
     keepers: [{ name: 'shared-keeper', status: 'active', phase: 'Running', registered: true, keepalive_running: true }],
     execution_queue: [], worker_support_briefs: [], continuity_briefs: [],

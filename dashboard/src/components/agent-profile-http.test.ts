@@ -26,6 +26,7 @@ function workspace(label: string) {
   scope = label
   expect(hydrateExecutionSnapshot({ execution_publication_epoch: 'profile-http-owner',
     execution_publication_generation: ++generation, observer_instance_id: `profile-${label}`,
+    projection_diagnostics: { read_completeness: 'complete', read_error: null },
     status: { project: 'profile', workspace_root: `/workspace-${label}` }, agents: [],
     tasks: [{ id: `${label}-task`, title: `${label} task`, assignee: profile, status: 'claimed' }],
     messages: [], keepers: [], execution_queue: [], worker_support_briefs: [], continuity_briefs: [],

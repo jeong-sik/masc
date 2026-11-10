@@ -53,6 +53,8 @@ vi.mock('../fleet-data-core', () => ({
   get sharedToolQuality() { return fleetMock.sharedToolQuality },
   get sharedToolQualityLoading() { return fleetMock.sharedToolQualityLoading },
   get sharedToolQualityError() { return fleetMock.sharedToolQualityError },
+  readSharedToolQualityError: (): unknown | null => null,
+  prepareSharedToolQualityRead: vi.fn<() => void>(),
   refreshSharedToolQuality: fleetMock.refreshSharedToolQuality,
   cancelSharedToolQuality: fleetMock.cancelSharedToolQuality,
   prepareSharedToolQualityRead: fleetMock.prepareSharedToolQualityRead,

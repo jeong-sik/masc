@@ -15,7 +15,7 @@ let load_all_persisted store =
   recalculate_reply_counts store;
   log_persistence_result ~kind:"votes" (load_persisted_votes store);
   log_persistence_result ~kind:"reactions" (load_persisted_reactions store);
-  log_persistence_result ~kind:"sub-boards" (load_persisted_sub_boards store)
+  log_persistence_result ~kind:"sub-boards" (Board_core.reload_sub_boards store)
 
 let new_global_lazy () =
   Eio.Lazy.from_fun ~cancel:`Protect (fun () ->

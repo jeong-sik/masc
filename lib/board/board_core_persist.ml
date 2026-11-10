@@ -43,15 +43,16 @@ let persist_io_error ~where msg =
   Error (Io_error (Printf.sprintf "%s: %s" where msg))
 ;;
 
-let create_store_with_source_io ~base_path posts_source_io comments_source_io () =
+let create_store_with_source_io ~base_path posts_source_io comments_source_io sub_boards_source_io () =
   let workspace_binding = Board_workspace_binding.capture ~base_path in
   { posts_source = Posts_unobserved
   ; posts_source_io
   ; comments_source = Comments_unobserved
   ; comments_source_io
+  ; sub_boards_source = Policy_unobserved
+  ; sub_boards_source_io
   ; votes_load_result = Ok ()
   ; reactions_load_result = Ok ()
-  ; sub_boards_load_result = Ok ()
   ; workspace_binding
   ; posts = Hashtbl.create 1024
   ; comments = Hashtbl.create 4096
@@ -82,11 +83,13 @@ let create_store_with_source_io ~base_path posts_source_io comments_source_io ()
 ;;
 
 let create_store ~base_path () =
-  create_store_with_source_io ~base_path { posts = None } None ()
+  create_store_with_source_io ~base_path { posts = None } None None ()
 let create_store_with_source_io_for_testing ~base_path ~io () =
-  create_store_with_source_io ~base_path io None ()
+  create_store_with_source_io ~base_path io None None ()
 let create_store_with_comments_io_for_testing ~base_path ~io () =
-  create_store_with_source_io ~base_path { posts = None } (Some io) ()
+  create_store_with_source_io ~base_path { posts = None } (Some io) None ()
+let create_store_with_sub_boards_io_for_testing ~base_path ~io () =
+  create_store_with_source_io ~base_path { posts = None } None (Some io) ()
 
 let require_comments_source_readable = Board_comments_source.require_readable
 
@@ -789,7 +792,7 @@ let validate_sub_board_post_policy_unlocked store ~author_id ~hearth =
   | None -> Ok ()
   | Some slug ->
     Result.bind
-      (require_persisted_snapshot_readable store.sub_boards_load_result)
+      (Board_sub_boards_source.require_readable store)
       (fun () ->
         match Hashtbl.find_opt store.sub_boards_by_slug slug with
         | None -> Ok ()

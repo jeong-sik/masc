@@ -793,7 +793,8 @@ let test_unreadable_snapshots_reject_mutation_and_survive_flush () =
       | Ok () -> Alcotest.failf "%s load silently accepted an unreadable row" label)
     [ "votes", store.votes_load_result
     ; "reactions", store.reactions_load_result
-    ; "sub-boards", store.sub_boards_load_result
+    ; "sub-boards", (Board.read_sub_boards store |> Result.map (fun _ -> ())
+        |> Result.map_error Board.error_to_string)
     ];
   expect_io_error
     "vote"

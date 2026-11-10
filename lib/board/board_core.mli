@@ -61,6 +61,10 @@ val create_store_with_comments_io_for_testing :
   base_path:string -> io:Fs_compat.private_jsonl_transaction_io_for_testing ->
   unit -> store
 (** One immutable comments transaction IO seam; creates/adopts nothing. *)
+val create_store_with_sub_boards_io_for_testing :
+  base_path:string -> io:Fs_compat.private_jsonl_transaction_io_for_testing ->
+  unit -> store
+(** One immutable sub-board transaction IO seam; creates/adopts nothing. *)
 
 (** {1 Locking + cache invalidation} *)
 
@@ -548,6 +552,10 @@ val sub_board_access_field_of_yojson
 val sub_board_to_yojson : sub_board -> Yojson.Safe.t
 val sub_board_of_yojson : Yojson.Safe.t -> sub_board option
 
+val reload_sub_boards : store -> (int, string * exn) result
+(** Explicit full policy load/reload under persist then state. Partial rows
+    remain display-only. Cannot clear unknown writes or interrupted publication. *)
+
 (** Creates a new sub-board with the given slug (unique, lowercase).
     [members] are canonicalised agent ids; the owner is always included.
     Returns [Validation_error] when the slug is invalid and [Already_exists]
@@ -567,19 +575,20 @@ val create_sub_board
 (** Resolves a sub-board by its ID or slug. *)
 val get_sub_board : store -> sub_board_id:string -> (sub_board, board_error) Result.t
 
-(** Returns all sub-boards sorted by [created_at] ascending. *)
+(** Best-effort display rows, sorted by [created_at]. This is not a complete
+    policy query or permission evidence. *)
 val list_sub_boards : store -> sub_board list
 
-(** Removes a sub-board by ID or slug under the state lock, then persists the
-    rewritten snapshot outside the state lock while retaining this store's
-    persistence lock. Snapshot-save failures retain their logging behavior. *)
+val read_sub_boards : store -> (sub_board list, board_error) result
+(** Capture policy completeness and rows under one persistence interval. *)
+
+(** Persist an exact-source-checked removal before publishing it in memory.
+    Post hearth unlinking remains dirty work, not a multi-source transaction. *)
 val delete_sub_board : store -> sub_board_id:string -> (unit, board_error) Result.t
 
 (** Updates an existing sub-board by ID or slug.
     Only provided fields are changed; owner and slug are immutable.
-    Takes this store's persistence lock before changing policy under the state
-    lock, then persists its snapshot outside the state lock. Snapshot-save
-    failures retain their logging behavior. *)
+    Persist an exact-source-checked candidate before publishing policy memory. *)
 val update_sub_board
   :  store
   -> sub_board_id:string

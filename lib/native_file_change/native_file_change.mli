@@ -12,6 +12,7 @@ type error =
   | Unsupported_platform
   | System_error of { operation : operation; error : Unix.error }
   | Ambiguous_watch_identity
+  | Target_changed
   | Closed
 
 type loss = Overflow | Target_retired | Unknown_watch

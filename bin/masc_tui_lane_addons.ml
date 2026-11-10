@@ -1457,7 +1457,9 @@ let led_rows ~width ~lead ~text_style text =
    colour. Fields are label and value pairs: the fields of one indent share a
    label column across the page, so their values start under each other, and
    a long value hangs under itself. Text is a sentence and keeps its own
-   indent. *)
+   indent. A label column wider than half the width leaves the values a
+   sliver, so every label then takes its own row and its value hangs two
+   cells under it. *)
 type fact_row =
   | Fact_heading of string
   | Fact_fields of { indent : int; fields : (string * string) list }
@@ -1469,15 +1471,23 @@ let fact_spans ~width rows =
         List.fold_left (fun widest (label, _) ->
           max widest (Masc_tui_message_layout.display_width label)) widest fields
     | Fact_fields _ | Fact_heading _ | Fact_text _ -> widest) 0 rows in
+  let beside = List.for_all (function
+    | Fact_fields { indent; _ } -> 2 * (indent + label_cells indent) <= width
+    | Fact_heading _ | Fact_text _ -> true) rows in
+  let spaces cells = Span.text Span.plain (String.make (max 0 (min cells (width - 1))) ' ') in
   let spans = function
     | Fact_heading text -> led_rows ~width ~lead:Span.empty ~text_style:(label_style ()) text
     | Fact_text text -> led_rows ~width ~lead:Span.empty ~text_style:Span.plain text
-    | Fact_fields { indent; fields } ->
+    | Fact_fields { indent; fields } when beside ->
         List.concat_map (fun (label, value) ->
           let lead = Span.concat
             [ Span.text Span.plain (String.make indent ' ')
             ; Span.pad_to (label_cells indent) Span.plain (Span.text (label_style ()) label) ] in
-          led_rows ~width ~lead ~text_style:Span.plain value) fields in
+          led_rows ~width ~lead ~text_style:Span.plain value) fields
+    | Fact_fields { indent; fields } ->
+        List.concat_map (fun (label, value) ->
+          led_rows ~width ~lead:(spaces indent) ~text_style:(label_style ()) label
+          @ led_rows ~width ~lead:(spaces (indent + 2)) ~text_style:Span.plain value) fields in
   List.concat_map (fun row ->
     List.map (fun span -> Span.render (Span.truncate width span)) (spans row)) rows
 

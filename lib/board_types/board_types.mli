@@ -824,6 +824,81 @@ type sub_boards_source_state =
     bytes or known-success receipt retained. Only a fresh store can reload
     them. This is not multi-source crash recovery; see #26378. *)
 
+type snapshot_retry = Independent_snapshots | Deletion_pending
+(** A failed deletion retains its cross-source ordering in subsequent flushes.
+    This process-local retry context does not durably record a deletion decision.
+    A proven nonwrite that preserves source authority can retry after repair.
+    A source refusal cannot be refreshed by these retries or a partial model
+    reload. Later obligations in the deletion batch remain pending; unrelated
+    writers retain their own source admission. A fresh store observes the files
+    without replaying the old memory-only intent, so an unwritten parent
+    deletion can reappear while completed file writes remain applied. *)
+
+type votes_source_observation = {
+  vote_path : string;
+  vote_snapshot : Fs_compat.private_jsonl_snapshot;
+  vote_workspace : Board_workspace_binding.observation;
+}
+
+type votes_source_history =
+  | No_votes_observation
+  | Votes_observed of votes_source_observation
+  | Votes_present_without_snapshot
+
+type votes_row_error =
+  | Invalid_vote_json of { line : int; detail : string }
+  | Invalid_vote_row of { line : int }
+
+type votes_source_diagnostic =
+  | Vote_file_diagnostic of Fs_compat.private_jsonl_transaction_error
+  | Vote_workspace_diagnostic of Board_workspace_binding.rejection
+  | Vote_raised_diagnostic of {
+      exception_ : exn;
+      backtrace : Printexc.raw_backtrace;
+    }
+  | Vote_projection_diagnostic of board_error
+
+type votes_source_failure =
+  | Votes_not_observed
+  | Votes_rows_rejected of votes_row_error list
+  | Votes_transaction_failed of Fs_compat.private_jsonl_transaction_error
+  | Votes_missing
+  | Votes_binding_mismatch
+  | Votes_publication_pending
+  | Votes_workspace_refused of Board_workspace_binding.rejection
+  | Votes_raised of { exception_ : exn; backtrace : Printexc.raw_backtrace }
+
+type votes_write_kind = Vote_append | Vote_rewrite
+
+type votes_pending_write = {
+  vote_before : votes_source_observation;
+  vote_kind : votes_write_kind;
+  vote_intended_bytes : string;
+}
+
+type votes_publication = {
+  vote_after : votes_source_observation;
+  vote_cleanup : votes_source_diagnostic list;
+}
+
+type votes_source_state =
+  | Votes_unobserved
+  | Votes_readable of votes_source_observation
+  | Votes_publishing of votes_publication
+  | Votes_refused of {
+      vote_history : votes_source_history;
+      vote_failure : votes_source_failure;
+      vote_diagnostics : votes_source_diagnostic list;
+    }
+  | Votes_unsettled of {
+      vote_pending : votes_pending_write;
+      vote_failure : votes_source_failure;
+      vote_diagnostics : votes_source_diagnostic list;
+    }
+(** Vote authority belongs to persist_mutex. Known file success remains owned
+    until model publication is acknowledged. Unknown writes and unfinished
+    publication require a fresh store; an ordinary reload cannot clear them. *)
+
 type store = {
   (** Canonical posts observation/refusal/uncertainty, owned by persist_mutex.
       Successful loads and writes advance it; dirty cards need not equal its bytes. *)
@@ -836,8 +911,10 @@ type store = {
   (** None selects production comments IO. *)
   mutable sub_boards_source : sub_boards_source_state;
   sub_boards_source_io : Fs_compat.private_jsonl_transaction_io_for_testing option;
-  (** Derived outcomes of the other two source loads. *)
-  mutable votes_load_result : (unit, string) result;
+  (** Vote-file observation and unfinished effects are owned by persist_mutex. *)
+  mutable votes_source : votes_source_state;
+  votes_source_io : Fs_compat.private_jsonl_transaction_io_for_testing option;
+  (** None selects production vote-file IO. *)
   mutable reactions_load_result : (unit, string) result;
   mutable workspace_binding : Board_workspace_binding.t;
   (** One explicit BasePath capture attempt, refined with actual Present
@@ -866,6 +943,8 @@ type store = {
   (** Unique reactions keyed by target type, target id, user id, and emoji. *)
   mutable dirty_posts : bool;
   mutable dirty_comments : bool;
+  mutable snapshot_retry : snapshot_retry;
+  (** Owned by persist_mutex and changed with dirty work under the state lock. *)
   dirty_post_ids : (string, unit) Hashtbl.t;
   dirty_comment_ids : (string, unit) Hashtbl.t;
   post_rows : (string, post * string) Hashtbl.t;

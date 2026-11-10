@@ -173,12 +173,12 @@ let transition_svg ~ko ~palette (chart : t) =
   let footer = height - 72 in
   add "<path d=\"M32 %d H1208\" stroke=\"%s\" stroke-opacity=\"0.35\"/>\n" (footer - 20) ink;
   line ~x:32 ~y:footer ~size:13
-    (Printf.sprintf (text "관측 범위: 최근 %d / 최대 %d회 · 연결된 변화 %d건" "Observed window: latest %d / up to %d entries · %d connected changes")
+    (Printf.sprintf (if ko then "관측 범위: 최근 %d / 최대 %d회 · 연결된 변화 %d건" else "Observed window: latest %d / up to %d entries · %d connected changes")
       chart.journal_lines chart.limit (List.length chart.events));
   line ~x:32 ~y:(footer + 25) ~size:13
     (if chart.notes = [] then text "원문 일부 · Esc 목록으로 · 목록에서 Enter 원문 / Ctrl-O 연결 트리"
         "Claim excerpts · Esc back · From the list: Enter full text / Ctrl-O connected tree"
-     else Printf.sprintf (text "! 부분 이력 %d건 · Esc 목록으로 · 목록에서 Enter 원문과 관측 안내" "! %d history notes · Esc back · From the list: Enter full text and observation notes") (List.length chart.notes));
+     else Printf.sprintf (if ko then "! 부분 이력 %d건 · Esc 목록으로 · 목록에서 Enter 원문과 관측 안내" else "! %d history notes · Esc back · From the list: Enter full text and observation notes") (List.length chart.notes));
   add "</g></svg>\n";
   Buffer.contents buffer
 

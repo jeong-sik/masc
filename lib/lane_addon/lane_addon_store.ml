@@ -774,12 +774,12 @@ let load_history_fence t ~scope ~request_id =
   serialized_tool_request_read t ~scope (fun () -> history_fence_record t ~scope ~request_id)
 let publish_history_fence_with ~write_fence t ~scope ~request_id ~expected_owner ~fence =
   protect (fun () -> with_tool_request_owner_serialization t ~scope (fun () ->
-    let* expected = Lane_addon_action.canonical expected_owner in
-    let* next = Lane_addon_action.canonical fence in
+    let* expected = Lane_addon_json.canonical expected_owner in
+    let* next = Lane_addon_json.canonical fence in
     let* previous = history_fence_record t ~scope ~request_id in
     match previous with
     | Some previous ->
-      let* previous = Lane_addon_action.canonical previous in
+      let* previous = Lane_addon_json.canonical previous in
       if Yojson.Safe.equal previous next then Ok History_fence_already_stored
       else Error "A different immutable history fence already owns this original"
     | None ->
@@ -787,7 +787,7 @@ let publish_history_fence_with ~write_fence t ~scope ~request_id ~expected_owner
       match current with
       | None -> Ok History_fence_owner_changed
       | Some current ->
-        let* current = Lane_addon_action.canonical current in
+        let* current = Lane_addon_json.canonical current in
         if not (Yojson.Safe.equal expected current) then Ok History_fence_owner_changed
         else
           let saved = protect (fun () ->

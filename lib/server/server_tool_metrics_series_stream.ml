@@ -77,10 +77,14 @@ let serve ~sw ~clock ~config ~request reqd =
             (fun () -> Eio.Fiber.first
               (fun () -> Eio.Stream.take wake; `Changed)
               (fun () -> Eio.Time.sleep clock delay;
-                if Time_compat.now () >= deadline then `Changed else `Keepalive)) in
+                if Time_compat.now () >= deadline then `Deadline else `Keepalive)) in
         match action with
         | `Closed -> ()
         | `Changed -> deliver ()
+        | `Deadline ->
+            Dashboard_cache.invalidate
+              (Server_dashboard_http_agent_api.tool_series_cache_key config request);
+            deliver ()
         | `Keepalive ->
             if send ": keepalive\n\n" then wait deadline
       in

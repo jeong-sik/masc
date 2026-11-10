@@ -2042,17 +2042,42 @@ let footer_hints_code ~pane =
       | Code_history -> hints_of_bindings code_history_bindings
       | Code_tree _ | Code_root _ | Code_file | Code_diff -> hints
 
-(* The Runtime footer is the table's, with the two keys that depend on the
-   reading on screen: [p] names where it goes from here, and [e] names the edit
-   owned by the selected runtime or keeper lane. The renderer
-   used to spell its own line -- "j/k:scroll  Enter:detail  p:%s  Tab:next
-   q:quit  r:live refresh" -- which never named [c], the one key to Clients,
-   or [Esc], the way back to Config, and called the global refresh a live
-   one. *)
-let footer_hints_runtime ~(mode : runtime_mode) =
-  List.filter_map (runtime_footer_binding ~mode) runtime_keys
-  @ row_list_edges @ listing_meta
-  |> hints_of_bindings
+(* The ordinary reading and its picker answer different Enter keys. The
+   footer reads the same pick/filter state the dispatcher owns; printable
+   letters only belong to the surface while no filter is being typed. *)
+let footer_hints_runtime ~(mode : runtime_mode) ~picker =
+  match picker with
+  | None ->
+      List.filter_map (runtime_footer_binding ~mode) runtime_keys
+      @ row_list_edges @ listing_meta
+      |> hints_of_bindings
+  | Some (pick, list) ->
+      let enter = match pick with
+        | Pick_new_lane _ -> "create"
+        | Pick_conversation_lane _ | Pick_exact_lane _ | Pick_media_failover -> "append"
+        | Pick_exact_lane_replacement _ | Pick_route_default -> "replace"
+      in
+      let controls = match list.Masc_tui_pick_list.query with
+        | None ->
+            [ b Act "e / E / Esc" "cancel"
+            ; b Navigate "j/k" "move"
+            ; b Navigate "PgUp/PgDn" "page"
+            ; b Search "/" "filter"
+            ] @ row_list_edges @ listing_meta
+        | Some query ->
+            let back = match pick with
+              | (Pick_exact_lane _ | Pick_exact_lane_replacement _)
+                when String.equal query "" -> "cancel"
+              | Pick_route_default | Pick_conversation_lane _ | Pick_exact_lane _
+              | Pick_exact_lane_replacement _ | Pick_new_lane _
+              | Pick_media_failover -> "clear filter"
+            in
+            [ b Act "Esc" back
+            ; b Navigate "↑/↓" "move"
+            ; b Navigate "PgUp/PgDn" "page"
+            ] @ row_list_edges
+      in
+      b Act "Enter" enter :: controls |> hints_of_bindings
 
 let footer_hints_resources ~detail_focus =
   for_surface Resources

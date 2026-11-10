@@ -23769,8 +23769,8 @@ type runtime_picker_projection = {
       (* The filter being typed, if one is. *)
 }
 
-(* How many runtimes the picker draws at once, and so how far PgUp/PgDn move
-   it. The listing under it gives these rows up while it is open. *)
+(* The picker's maximum page. Runtime reduces it to the frame's available
+   rows; rendering and PgUp/PgDn use [runtime_exact_picker_page] together. *)
 let runtime_picker_page = 3
 
 (* The text a runtime's picker row draws before its notes, made terminal
@@ -24048,8 +24048,52 @@ let runtime_picker_empty_note picker =
 let runtime_picker_keys enter = function
   | None -> Printf.sprintf "j/k move, PgUp/PgDn page, %s, e cancel" enter
   | Some _ -> Printf.sprintf "\xe2\x86\x91/\xe2\x86\x93 move, %s, Esc clear filter" enter
+
+let runtime_picker_choice_height = function
+  | Pick_exact_lane _ | Pick_exact_lane_replacement _ -> 2
+  | Pick_route_default | Pick_conversation_lane _ | Pick_new_lane _
+  | Pick_media_failover -> 1
+
+(* These observations remain alongside an open picker. The normal table and
+   its probe/default-route chrome do not own the picker's body. Both the page
+   calculation and drawing count the same wrapped diagnostic rows. *)
+let runtime_picker_notice_rows ~cols (state : state) =
+  let catalogue =
+    match state.runtime_catalog_reading with
+    | Runtime_catalog_read -> []
+    | (Runtime_catalog_unread | Runtime_catalog_loading
+      | Runtime_catalog_refreshing _ | Runtime_catalog_stale _
+      | Runtime_catalog_failed _) as reading ->
+        [ runtime_catalog_reading_suffix reading ]
+  in
+  let notices =
+    catalogue
+    @ Option.to_list (Option.map runtime_lane_notice_text state.runtime_lane_notice)
+    @ runtime_lane_stale_lines state
+    @ Option.to_list state.runtime_surface_error
+  in
+  List.concat_map
+    (fun text ->
+      Masc_tui_message_layout.boxed_rows
+        ~inner:(Masc_tui_frame.inner_width ~cols)
+        (Masc.Tui_terminal_text.sanitize_terminal_text ~newlines:Preserve text))
+    notices
+
 let runtime_exact_picker_page (state : state) ~terminal_rows ~cols =
   match state.view, state.slot_editor with
+  | Runtime, _ ->
+    (match state.runtime_lane_pick with
+     | None -> runtime_picker_page
+     | Some (pick, _) ->
+       let budget =
+         Masc_tui_frame.content_height
+           ~rows:(surface_body_rows state ~terminal_rows)
+       in
+       let summary_rows = if budget > 1 then 1 else 0 in
+       let notes = List.length (runtime_picker_notice_rows ~cols state) in
+       max 1
+         (min runtime_picker_page
+            ((budget - summary_rows - notes) / runtime_picker_choice_height pick)))
   | Lanes, Some { se_target = Exact_lane_slots _; _ } ->
     let extra =
       lanes_action_error_row_count ~cols state.lanes_action_error
@@ -24061,7 +24105,7 @@ let runtime_exact_picker_page (state : state) ~terminal_rows ~cols =
     (* Two lines per model, after the frame, search, selected ID and keys. *)
     max 1 ((surface_body_rows state ~terminal_rows - 10 - extra) / 2)
   | (Lanes, Some { se_target = Media_failover_slots;_}) | (Lanes, None)
-  | ((Overview | (Acting | (Metrics | (Memory | (Clients | (Board | (Approvals | (Planning | (Schedules | (Verification | (Harness | (Fusion | (Repositories | (Code | (Changes | (Connectors | (Runtime | (Config | (Resources | (Tools | (System_logs | Keepers _))))))))))))))))))))), _) -> runtime_picker_page
+  | ((Overview | (Acting | (Metrics | (Memory | (Clients | (Board | (Approvals | (Planning | (Schedules | (Verification | (Harness | (Fusion | (Repositories | (Code | (Changes | (Connectors | (Config | (Resources | (Tools | (System_logs | Keepers _)))))))))))))))))))), _) -> runtime_picker_page
 
 let runtime_model_picker_title (runtime : Tui_decode.runtime_option) =
   let effort = Option.fold ~none:"default" ~some:Tui_decode.runtime_reasoning_effort_label

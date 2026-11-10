@@ -85,7 +85,14 @@ let load_all ~base_dir ~keeper_name : chat_message list =
                parse_transcript_rows ~path ~redaction bytes)
          in
          let messages_rev = List.rev_append fresh cache.messages_rev in
-         remember_transcript path { cache with parsed_end = end_offset; messages_rev };
+         (* The read and the parse above can suspend this fiber. Register only
+            when the path still names the cached file, as the full load does:
+            after a purge or a replacement in between, these rows are those of
+            a file that is gone. *)
+         (match transcript_identity path with
+          | Some (device, inode, _) when cache.device = device && cache.inode = inode ->
+            remember_transcript path { cache with parsed_end = end_offset; messages_rev }
+          | Some _ | None -> forget_transcript path);
          List.rev messages_rev
        | Private_file_failed _ | Private_file_failed_with_cleanup_failure _ ->
          load_transcript_fully ~path ~redaction)

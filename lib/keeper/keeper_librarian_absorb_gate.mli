@@ -356,7 +356,9 @@ val restore
     policy; an unrequested answer identity is rejected. No filesystem or
     model effects occur. This does not authenticate a caller-supplied input
     snapshot: original fact IDs and availability must already be bound to the
-    host's immutable original pass, never reconstructed from worker data. *)
+    host's immutable original pass, never reconstructed from worker data.
+    It moves no counter: readers replay a retained judgment on every read,
+    and {!continue_captured} counted it when it finished. *)
 
 val absorbed_of_run : run_result -> Keeper_memory_os_types.absorbed_statement list
 
@@ -459,7 +461,8 @@ val continue_captured
     HTTP is admitted. An unavailable clock returns [Clock_unavailable] without
     changing the transcript. With a clock, the client's existing request time
     limit applies. Hooks retain requests before dispatch and protect
-    terminal/aborted recording exactly as run_captured does. *)
+    terminal/aborted recording exactly as run_captured does. A judgment it
+    finishes ([Ok (Evaluated _)]) counts once under [keeper_id], as in {!run}. *)
 
 val run
   :  ?observe:(observation -> unit)
@@ -492,4 +495,7 @@ val run
     opaque token (which may pair its identity with a monotonic start value).
     [after_evaluate] receives that same token and closes the record after a provider result;
     [on_evaluation_aborted] closes it when dispatch raises. Cancellation is
-    propagated unchanged. *)
+    propagated unchanged. An [Evaluated] result counts once under the Keeper:
+    each absorbed source in [masc_keeper_librarian_absorb_sources_total] by
+    forward outcome and choice ([none] when never asked), and each copy check
+    in [masc_keeper_librarian_absorb_copy_checks_total] by reverse verdict. *)

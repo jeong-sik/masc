@@ -1,4 +1,4 @@
-(** See [server_dashboard_snapshot_select.mli] for the contract. *)
+(** Scope and producer authority are checked before each retained read. *)
 
 let select_shell_json
       ?clock ?request ?timing ?(light = false) (config : Workspace.config)
@@ -11,11 +11,7 @@ let select_shell_json
   in
   if light
   then (
-    (* RFC-0204 section 8.3 ("A"): serve the published light projection
-       wait-free.  Mirrors the non-light branch below but reads
-       [snap.shell_light]; falls back to the (offloaded, timeout-guarded)
-       recompute only before the first snapshot publish. *)
-    match Dashboard_snapshot.current () with
+    match Dashboard_snapshot.current_for_config config with
     | Some snap ->
       let shell =
         Server_timing.measure
@@ -32,7 +28,7 @@ let select_shell_json
       Server_dashboard_http_core.dashboard_shell_http_json
         ?clock ?request ~timing:timing_obj ~light config)
   else (
-    match Dashboard_snapshot.current () with
+    match Dashboard_snapshot.current_for_config config with
     | Some snap ->
       let shell =
         Server_timing.measure
@@ -62,7 +58,7 @@ let select_tools_response_with ~fallback
     | Some t -> t
     | None -> Server_timing.create ()
   in
-  match keeper, Dashboard_snapshot.current () with
+  match keeper, Dashboard_snapshot.current_for_config config with
   | None, Some snap
     when String.equal snap.tools.base_path config.base_path
       && String.equal snap.tools.workspace_path config.workspace_path
@@ -98,16 +94,13 @@ let select_telemetry_summary_json
     | Some t -> t
     | None -> Server_timing.create ()
   in
-  match Dashboard_snapshot.current () with
+  match Dashboard_snapshot.current_for_config config with
   | Some snap ->
     Server_timing.measure
       timing_obj
       (Server_timing.Custom "snapshot_read")
       (fun () -> snap.telemetry_summary)
   | None ->
-    (* Cold-start fallback (snapshot=None) computes the summary fresh;
-       the refresh fiber takes ownership within ~2s. The narrow window
-       without dedup is acceptable for a per-process once-only path. *)
     let base_path = config.base_path in
     let masc_root = Workspace.masc_dir config in
     let keeper_keepalive_interval_s =
@@ -136,22 +129,11 @@ let select_project_snapshot_json ~state ~sw ~clock ?timing req
     | Some t -> t
     | None -> Server_timing.create ()
   in
-  match Dashboard_snapshot.current () with
-  | Some snap when snap.namespace_truth <> `Null ->
-    Server_timing.measure
-      timing_obj
-      (Server_timing.Custom "snapshot_read")
-      (fun () -> snap.namespace_truth)
-  | _ ->
-    (* Fallback: snapshot not yet published or namespace_truth is [`Null].
-       Compute directly — the snapshot refresh loop (~2s) republishes
-       quickly, so this cold path is hit at most once per process
-       lifetime or after a brief LRU eviction window. *)
-    Server_timing.measure
-      timing_obj
-      Server_timing.Project_snapshot_runtime
-      (fun () ->
-        Server_dashboard_http_namespace_truth
-          .dashboard_namespace_truth_http_json
-          ~state ~sw ~clock req)
+  match Server_dashboard_http_namespace_truth.namespace_truth_snapshot_from_caches state with
+  | Some snapshot ->
+    Server_timing.measure timing_obj (Server_timing.Custom "snapshot_read") (fun () -> snapshot)
+  | None ->
+    Server_timing.measure timing_obj Server_timing.Project_snapshot_runtime (fun () ->
+      Server_dashboard_http_namespace_truth.dashboard_namespace_truth_http_json
+        ~state ~sw ~clock req)
 ;;

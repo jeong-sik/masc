@@ -82,6 +82,8 @@ let recalculate_vote_counts store =
 
 let load_persisted_votes store =
   let path = Board_paths.store_file_path store Board_paths.Votes in
+  let open Result.Syntax in
+  let* () = Board_core_persist.require_model_reload_allowed store ~path in
   let workspace_check = Board_paths.check_workspace store in
   let result = match workspace_check with
     | Error rejection -> Error (path, Failure (Board_workspace_binding.rejection_to_string rejection))
@@ -130,6 +132,8 @@ let load_persisted_votes store =
 
 let load_persisted_reactions store =
   let path = Board_paths.store_file_path store Board_paths.Reactions in
+  let open Result.Syntax in
+  let* () = Board_core_persist.require_model_reload_allowed store ~path in
   let workspace_check = Board_paths.check_workspace store in
   let result = match workspace_check with
     | Error rejection -> Error (path, Failure (Board_workspace_binding.rejection_to_string rejection))
@@ -165,39 +169,5 @@ let load_persisted_reactions store =
   in
   let result = Board_votes_json.record_load_result
     (fun result -> store.reactions_load_result <- result) result in
-  Board_votes_json.propagate_workspace_check workspace_check;
-  result
-
-let load_persisted_sub_boards store =
-  let path = Board_paths.store_file_path store Board_paths.Sub_boards in
-  let workspace_check = Board_paths.check_workspace store in
-  let result = match workspace_check with
-    | Error rejection -> Error (path, Failure (Board_workspace_binding.rejection_to_string rejection))
-    | Ok () ->
-    if not (Fs_compat.file_exists path) then Ok 0
-    else begin
-      try
-      let t0 = Time_compat.now () in
-      let loaded = ref 0 in
-      let parsed =
-        Board_votes_json.load_source_rows
-          path
-          ~decode:sub_board_of_yojson
-          ~accept:(fun sb ->
-            let id = Sub_board_id.to_string sb.id in
-            Hashtbl.replace store.sub_boards id sb;
-            Hashtbl.replace store.sub_boards_by_slug sb.slug id;
-            Stdlib.incr loaded)
-      in
-      let elapsed = Time_compat.now () -. t0 in
-      Board_votes_json.log_loaded ~noun:"sub-boards" ~loaded:!loaded ~path ~elapsed parsed;
-      Result.map (fun () -> !loaded) parsed
-      with
-      | Eio.Cancel.Cancelled _ as e -> raise e
-      | e -> Error (path, e)
-    end
-  in
-  let result = Board_votes_json.record_load_result
-    (fun result -> store.sub_boards_load_result <- result) result in
   Board_votes_json.propagate_workspace_check workspace_check;
   result

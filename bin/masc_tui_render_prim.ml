@@ -1724,9 +1724,10 @@ let surface_chrome ~overflow ?help_door ?(frame = Chrome_screen) ?status ?sideba
    | Some row, Chrome_overlay ->
        let text = row.recovery_text in
        let remaining = max 0 (framed_rule_width cols - Message_layout.display_width text) in
+       let edge = Theme.recede () in
        Buffer.add_string buf
-         (Ansi.gray ^ Ansi.box_bl ^ Ansi.reset ^ Theme.warn () ^ text ^ Ansi.reset
-          ^ Ansi.gray ^ draw_hline remaining ^ Ansi.box_br ^ Ansi.reset ^ "\n"));
+         (edge ^ Ansi.box_bl ^ Ansi.reset ^ Theme.warn () ^ text ^ Ansi.reset
+          ^ edge ^ draw_hline remaining ^ Ansi.box_br ^ Ansi.reset ^ "\n"));
   let buf = match sidebar with
     | None -> buf
     | Some (left_cols, draw) ->
@@ -2363,21 +2364,21 @@ let lexed_span (text, kind) =
   else
     let style =
       if String.equal kind Masc_tui_code_lexer.kind_keyword then
-        Theme.Syntax.keyword
+        Theme.Syntax.keyword ()
       else if String.equal kind Masc_tui_code_lexer.kind_string then
-        Theme.Syntax.string
+        Theme.Syntax.string ()
       else if String.equal kind Masc_tui_code_lexer.kind_comment then
-        Theme.Syntax.code_comment
+        Theme.Syntax.code_comment ()
       else if String.equal kind Masc_tui_code_lexer.kind_number then
-        Theme.Syntax.code_number
+        Theme.Syntax.code_number ()
       else if String.equal kind Masc_tui_code_lexer.kind_type then
-        Ansi.bold ^ Theme.Syntax.code_type
+        Ansi.bold ^ Theme.Syntax.code_type ()
       else if String.equal kind Masc_tui_code_lexer.kind_json_key then
-        Theme.Syntax.json_key
+        Theme.Syntax.json_key ()
       else if String.equal kind Masc_tui_code_lexer.kind_json_number then
-        Theme.Syntax.json_number
+        Theme.Syntax.json_number ()
       else if String.equal kind Masc_tui_code_lexer.kind_json_literal then
-        Theme.Syntax.json_literal
+        Theme.Syntax.json_literal ()
       else if String.equal kind Masc_tui_code_lexer.kind_json_punctuation then
         Theme.Syntax.json_punctuation
       else ""
@@ -2605,6 +2606,7 @@ let question_hints (state : state) =
            { approvals = not (List.is_empty (Masc_tui_approvals_model.approval_items state))
            ; asks
            ; source = Option.is_some (selected_ask_origin state)
+           ; last_answer = Option.is_some (current_ask_answer_feedback state)
            })
   | Ask_answering _ ->
       (match state.ask_text_entry with

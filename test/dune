@@ -558,6 +558,7 @@
   test_keeper_turn_terminal_disposition_field
   test_keeper_memory_os_current
   test_keeper_memory_os_events
+  test_keeper_memory_activity
   test_server_dashboard_http_keeper_api_trace
   test_server_dashboard_http_keeper_chat_page
   test_server_dashboard_http_keeper_tool_lookup
@@ -896,6 +897,7 @@
   test_keeper_turn_terminal_disposition_field
   test_keeper_memory_os_current
   test_keeper_memory_os_events
+  test_keeper_memory_activity
   test_server_dashboard_http_keeper_api_trace
   test_server_dashboard_http_keeper_chat_page
   test_server_dashboard_http_keeper_tool_lookup
@@ -2722,7 +2724,9 @@
 (include stanzas/test_board_persistence_load_contract.inc)
 
 (include stanzas/test_board_posts_source_authority.inc)
+(include stanzas/test_board_delete_order.inc)
 (include stanzas/test_board_comments_source.inc)
+(include stanzas/test_board_sub_boards_source.inc)
 (include stanzas/test_board_posts_preflight.inc)
 
 (include stanzas/test_board_snapshot_rows.inc)
@@ -3430,6 +3434,7 @@
 (include stanzas/test_keeper_shutdown_blocked_purge_release.inc)
 (include stanzas/test_keeper_shutdown_fence_stage.inc)
 (include stanzas/test_keeper_shutdown_blocked_replay.inc)
+(include stanzas/test_keeper_shutdown_task_settlement.inc)
 
 (include stanzas/test_keeper_shutdown_ownerless_admission_release.inc)
 (include stanzas/test_keeper_shutdown_reconciliation_http.inc)

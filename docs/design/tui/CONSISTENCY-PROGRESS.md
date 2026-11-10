@@ -160,6 +160,18 @@ scope remain open. Existing answer-receipt/origin blocks can themselves exceed a
 short viewport; bounding those blocks remains a separate input-surface repair.
 No wording, layout or row-order tests are added.
 
+The subsequent [Requests repair](https://github.com/jeong-sik/masc/pull/50802)
+reserves the selected question, armed/in-flight
+decision notice and footer before drawing bounded last-answer/source summaries.
+The oversized block affected the compact question list; the active answer
+editor already excludes those diagnostics. Browsing `v` captures the complete
+last-answer receipt and retained typed follow-up in the existing scrollable,
+searchable reader, with the original Ask/asker/turn and unflattened error text.
+The captured document does not follow a changed question cursor or issue a
+request. Gate-detail byte reading and answer-input ownership remain separate.
+This is a source repair: native execution and installed GUI confirmation of
+this follow-up are pending, and the full 23-surface scope remains open.
+
 The [second four-surface source review](../../reports/2026-11-10-four-surface-reading-review.md)
 keeps Memory health queries aligned with the displayed canonical/KO/EN state
 and carries refused health rows into fleet fact coverage, including anonymous
@@ -243,3 +255,82 @@ c2fa4c88, `minimal=true`. The actual retained runner log records
 `test_tui_approval_authority` (15 cases) and `test_tui_ask_projection` (65 cases).
 Those 80 cases check approval/Ask identity and decisions; they are not the whole
 TUI regression and do not execute the later Verification/Harness changes.
+
+## Feature route configuration is not runtime availability
+
+The [feature state repair](https://github.com/jeong-sik/masc/pull/50811) gives
+an exact model route with admitted candidates the shared `Configured`
+standing. Configuration alone no longer produces `Ready` in the feature list,
+its counts or the selected reading. The selected fields name model
+configuration, and the full reading no longer calls an unobserved run history
+normal readiness. Browser, machine and Add-on worker observations retain their
+own readiness meanings; failures, disabled routes and missing observations
+keep their existing states. These standings do not authorize execution.
+
+The matching b9d9b809 native pair showed Librarian as ready in the 80x24 and
+36x20 feature readings while the same isolated workspace reported an unattached
+Memory execution Add-on. Those observations demonstrate the configuration and
+execution distinction; that baseline does not execute this repair. The later
+candidate observation below executes it separately. Installed verification
+remains pending, and the full 23-surface goal is open.
+
+## Feature child navigation
+
+[#50855](https://github.com/jeong-sik/masc/pull/50855) makes the outermost return
+from Clients, Resources, Channels and Tools use their existing typed surface
+family, Features & plugins. Resources still closes its text before leaving;
+Tools still closes an original Task, then its request, then its list. Browser
+readings, input owners and explicit followed-reference returns keep their
+earlier dispatch priority. The Help registry and committed key reference name
+the same destination. The screen map also records the actual six empty-palette
+destinations.
+
+Local OCaml 5.5.1 syntax parsing and diff checks passed for the initial code
+slice. They are not project type checking, tests or native execution of this
+navigation repair. The earlier f89b3e6f matching native server/TUI observation
+does execute #50811's configured-state repair, separately from this navigation
+change. All 23 surfaces, their child/input readings, and installed verification
+remain the goal.
+
+## Matching feature-state candidate observation
+
+`Manual probe artifacts` [run 42732829605](https://github.com/jeong-sik/masc/actions/runs/42732829605)
+completed with conclusion `success`, workflow ref `main` at
+4d532df1cecf3459959c423f80a8fb68c472cefb, selected source
+f89b3e6fe22732f7b1ef0a8989317366b6b7b0cc. The GitHub artifact digest,
+payload hashes, trusted Git source tree, embedded commits and bundled runtime
+were checked before running the candidate. This was a native probe build,
+not Full CI or Release verification.
+
+The matching native server/TUI pair showed four exact routes as configured.
+A 36x20 terminal viewport in a real Ghostty window showed Verifier as
+`설정됨`, beside an unconfigured Candle Appraiser. The physical window was
+larger than that viewport; it was not a 36-column desktop window. A separate
+GUI capture showed the exact activity editor. Blank compositor captures are
+retained as unsuccessful captures and do not prove screen behavior. Raw
+observations stay private in `artifacts/native-tui-proof-42732829605/`.
+This confirms those observed candidate views only, without proving production
+installation, the new navigation repair, or the remaining child/input states.
+
+## Tools catalog and volume reading (#50872)
+
+The catalog's long periodic volume report moves to an explicit child reading.
+The five Tools tabs remain unchanged. Catalog `V` captures its scroll position,
+opens the volume reading and requests a report, unless a request is already
+running. It never reuses an old reclaim arm. The child uses the existing
+report/reclaim protocol, exact candidate names, workspace request owner and
+uncertain-result messages. Esc returns to the captured catalog position.
+Skill and Keeper action keys do not act on the volume report; its footer names
+volume, scroll, refresh and return controls. Periodic inventory refresh does
+not reset the reading. A newly answered operator request starts at the first
+line, where an armed reclaim names its targets.
+
+The f89b3e6f native baseline was reobserved at 36x20 and 80x24. The narrower
+view contained no actual tool row; the wider view put a missing-image error
+before the catalog. These are baseline observations, not execution of this
+repair. Two independent source reviews covered the nine-file implementation
+and its three-file follow-up. Their refresh-key and inflight-documentation
+findings were repaired. Syntax parsing uses local OCaml 5.5.1; project type
+checking, candidate execution and installation remain separate. No new screen
+wording, layout or row-order tests were added. The full screen scope remains
+open.

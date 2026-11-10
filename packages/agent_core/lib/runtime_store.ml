@@ -3,22 +3,6 @@ open Result_syntax
 
 type t = { root : string }
 
-type run_record =
-  { session : session
-  ; path : string
-  }
-
-type run_load_failure =
-  { session_id : string
-  ; path : string
-  ; detail : string
-  }
-
-type run_listing =
-  { runs : run_record list
-  ; failures : run_load_failure list
-  }
-
 let sessions_dir store = Filename.concat store.root "sessions"
 let session_dir store session_id = Filename.concat (sessions_dir store) session_id
 
@@ -135,55 +119,4 @@ let parse_session raw =
 let load_session store session_id =
   let* raw = load_text (session_path store session_id) in
   parse_session raw
-;;
-
-let compare_run_record left right =
-  match Float.compare left.session.updated_at right.session.updated_at with
-  | 0 -> String.compare left.session.session_id right.session.session_id
-  | order -> order
-;;
-
-let sort_runs runs = List.sort compare_run_record runs
-
-let run_failure store session_id detail =
-  { session_id; path = session_path store session_id; detail }
-;;
-
-let list_runs store =
-  let root = sessions_dir store in
-  if not (Sys.file_exists root)
-  then Ok { runs = []; failures = [] }
-  else
-    root
-    |> Sys.readdir
-    |> Array.to_list
-    |> List.sort String.compare
-    |> List.fold_left
-         (fun acc session_id ->
-            let ({ runs; failures } : run_listing) = acc in
-            let dir = session_dir store session_id in
-            if not (Sys.is_directory dir)
-            then acc
-            else (
-              match load_session store session_id with
-              | Ok session ->
-                { runs = { session; path = session_path store session_id } :: runs
-                ; failures
-                }
-              | Error err ->
-                { runs
-                ; failures =
-                    run_failure store session_id (Error.to_string err) :: failures
-                }))
-         ({ runs = []; failures = [] } : run_listing)
-    |> fun (listing : run_listing) ->
-    Ok
-      ({ runs = sort_runs listing.runs
-       ; failures =
-           List.sort
-             (fun (left : run_load_failure) (right : run_load_failure) ->
-                String.compare left.session_id right.session_id)
-             listing.failures
-       }
-       : run_listing)
 ;;

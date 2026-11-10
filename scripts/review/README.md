@@ -75,6 +75,10 @@ python3 scripts/review/review-worklist.py --repo OWNER/REPO \
 
 An assignment is not an active or completed review. Preserve existing requests,
 read the entire history and distinguish an unreadable snapshot from no work.
+Each action's `current_head_submissions` preserves submitted reviews on that
+exact head, including COMMENTED and DISMISSED, in API order. These are observations,
+not approvals or proof of a completed source review. Missing comment identity or
+submission time remains null; formal review decisions keep their existing rules.
 Repository prompt changes do not themselves update a running Keeper's instructions.
 
 Inspect REST `stack` metadata and ordered stack membership before selecting merge

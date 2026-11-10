@@ -2227,17 +2227,19 @@ let fetch_keeper_chat_history_page ~(host : string) ~(port : int)
        | None -> ""
        | Some value -> "&cursor=" ^ percent_encode_path_segment value)
   in
-  match http_get ~host ~port ~path with
+  match Masc_tui_frame_timing.time_stage ~name:"chat.history_page.http_wait"
+      (fun () -> http_get ~host ~port ~path) with
   | Error detail -> Error (Masc_tui_keeper_chat_history.Page_read_failed detail)
   | Ok (409, _) -> Error Masc_tui_keeper_chat_history.Page_stale
   | Ok (status, body) when not (Masc.Tui_decode.is_success_http_status status) ->
       Error (Masc_tui_keeper_chat_history.Page_read_failed (named_refusal "chat history page" ~status ~body))
-  | Ok (_, body) -> Masc_tui_response_decode.run ~name:"chat.history_page.decode_wait" (fun () ->
+  | Ok (_, body) -> Masc_tui_frame_timing.time_stage ~name:"chat.history_page.decode_wait" (fun () ->
+      Masc_tui_response_decode.run ~name:"chat.history_page.decode_wait" (fun () ->
       match Yojson.Safe.from_string body with
       | json -> Masc_tui_keeper_chat_history.page_of_json json
           |> Result.map_error (fun detail -> Masc_tui_keeper_chat_history.Page_read_failed detail)
       | exception Yojson.Json_error detail ->
-          Error (Masc_tui_keeper_chat_history.Page_read_failed ("chat history page was not JSON: " ^ detail)))
+          Error (Masc_tui_keeper_chat_history.Page_read_failed ("chat history page was not JSON: " ^ detail))))
 
 let fetch_keeper_memory_input ~host ~port ~keeper_name =
   let path = Printf.sprintf "/api/v1/keepers/%s/turn-records?limit=%d"
@@ -4024,6 +4026,19 @@ let fetch_keeper_memory_facts ~(host : string) ~(port : int)
       ("/api/v1/keepers/"
        ^ percent_encode_path_segment keeper_name
        ^ "/memory-facts")
+
+(** Read the explicit activity projection; older servers remain unavailable. *)
+let fetch_keeper_memory_activity ~(host : string) ~(port : int) ~(keeper_name : string) =
+  match get_json ~host ~port ~path:("/api/v1/keepers/"
+      ^ percent_encode_path_segment keeper_name ^ "/memory-journal?limit=50&activity=1") with
+  | Error reason -> Error reason
+  | Ok json ->
+      (match Json_util.require_string json "keeper" with
+       | Error reason -> Error reason
+       | Ok keeper when keeper <> keeper_name -> Error "memory activity Keeper mismatch"
+       | Ok _ -> match Json_util.assoc_member_opt "activity" json with
+       | None -> Error "memory activity is unavailable on this server"
+       | Some value -> Masc.Keeper_memory_activity.of_json value)
 
 (** Fetch Git working-tree changes for the current project workspace. *)
 let fetch_project_changes ~(host : string) ~(port : int) :

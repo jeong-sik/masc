@@ -33,7 +33,7 @@ Tab 순환과 상단 선택 표시는 `surface_ring`과 `surface_ring_family`가
 | 기능·플러그인 | Features / `Lanes` | 제공 기능·관측 상태·설정 적용·실행 이력·측정 상세 | Tab, Runtime `p`, 팔레트 |
 | 기능·플러그인 | Clients / `Clients` | 접속한 Keeper·MCP client·fiber, 선택 상세 | Runtime `c`, 팔레트 |
 | 기능·플러그인 | Resources / `Resources` | MCP 리소스·산출물 목록과 원문 | System `s`, 팔레트 |
-| 기능·플러그인 | Tools & Skills / `Tools` | 아래 도구 탭 5개, 비동기 요청·연결 Task 상세 | System `t`, 팔레트 |
+| 기능·플러그인 | Tools & Skills / `Tools` | 아래 도구 탭 5개, 비동기 요청·연결 Task·볼륨 정리 읽기 | System `t`, 팔레트 |
 | System | Activity / `Acting` | Keeper 턴·호출 사건과 증거 | System `A`, 팔레트 |
 | System | Logs / `System_logs` | 서버 로그·분류·수준·원문 | System `L`, Activity `l`, 팔레트 |
 
@@ -53,6 +53,7 @@ Keeper 상세의 Automation과 Channels는 해당 Keeper의 별도 읽기 탭이
 | Keeper 상세 탭 11개 | Info, Items, Sandbox, Settings, Secrets, GitHub, Identity, Channels, Automation, Runs, Terminal |
 | System 설정 탭 7개 | runtime.toml, models, params, prompts, presets, themes, voice |
 | Tools 탭 5개 | 유효 도구, 비동기 요청, Skill 활성화, Skill 사용, 전체 카탈로그 |
+| Tools 하위 읽기 | 전체 카탈로그의 `V`: 은퇴 Keeper 볼륨 보고·회수 결과, Esc로 원래 목록 위치 복귀 |
 | Runtime | lane 후보, 전체 runtime, 선택 runtime 상세·후보 선택·모델 편집 |
 | Features | 기능 목록, inventory 상세, lane 실행 목록·원문, 측정 상세 |
 | Usage | Plan, Keepers, Calls, Trend, 계정 범위 선택·telemetry |
@@ -80,7 +81,7 @@ Keeper 상세의 Automation과 Channels는 해당 Keeper의 별도 읽기 탭이
 ## 정리 기준
 
 - 같은 동작의 별칭은 검색어로 묶는다. 기본 팔레트에 같은 목적지를 두 번 나열하지 않는다.
-- 빈 팔레트는 최상위 일곱 목적지부터 보여 준다. 상세 화면·Keeper·Task·글·계정·설정 변경은
+- 빈 팔레트는 최상위 여섯 목적지부터 보여 준다. 상세 화면·Keeper·Task·글·계정·설정 변경은
   검색으로 찾는다. 새 키나 별도 메뉴 체계를 추가하지 않는다.
 - 화면 이름에는 소속을 붙인다. Work의 검증과 System의 runtime을 독립 최상위 기능처럼 나열하지 않는다.
 - Candle 지급은 Goal 상세에서 한다. Goal 목록만 여는 명령을 지급 화면처럼 부르지 않는다.

@@ -426,6 +426,10 @@ type keeper_msg =
      the Keeper: an answer for one the cursor has left is dropped. *)
   | Keeper_story_turns_loaded of
       string Masc_tui_fetched.request * (Masc_tui_keeper_turns.turn list, string) result
+  | Keeper_story_memory_facts_loaded of string Masc_tui_fetched.request
+      * (Masc.Tui_decode_memory_facts.memory_fact_snapshot * string option, string) result
+  | Keeper_story_memory_activity_loaded of string Masc_tui_fetched.request
+      * (Masc.Keeper_memory_activity.t, string) result
   | Keeper_calls_loaded of
       int * string * (Masc.Tui_decode.keeper_calls_snapshot, string) result
   | Keeper_settings_editor_loaded of Masc_tui_types.keeper_settings_request *

@@ -6,6 +6,7 @@ import { confirmRuntimeTestWorkspace } from './runtime-workspace.test-fixture'
 import {
   publishDashboardObservationChange,
   publishDashboardObservationRecovery,
+  selectObservationReadFailure,
   setupObservationRefresh,
 } from './observation-refresh'
 
@@ -30,6 +31,14 @@ afterEach(() => {
 })
 
 describe('authoritative observation reads', () => {
+  it('preserves a combined read refusal ahead of a transient sibling failure', () => {
+    const transient = new Error('temporary failure')
+    const refused = new ApiRequestError({ method: 'GET', path: '/fixture', status: 403 })
+    expect(selectObservationReadFailure([transient, null, refused])).toBe(refused)
+    expect(selectObservationReadFailure([undefined, transient])).toBe(transient)
+    expect(selectObservationReadFailure([null, undefined])).toBeNull()
+  })
+
   it('reads initially and after a matching change, without periodic HTTP', async () => {
     vi.useFakeTimers()
     const read = vi.fn(async () => ({ state: 'ready' }))

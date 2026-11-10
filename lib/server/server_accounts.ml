@@ -30,15 +30,16 @@ let refusal_to_string = function
   | Trust_policy_refused error -> Server_request_authority.trust_policy_error_to_string error
 ;;
 
-(* The build and the mode, and nothing of the workspace: the answer goes to
-   anyone who reaches the listener. *)
+(* The release version and the mode, and nothing of the host or the
+   workspace: the answer goes to anyone who reaches the listener.
+   [Build_identity.to_yojson] is not part of it, because it carries the path
+   of the executable and of its checkout, the commit, and when the process
+   started. *)
 let health (_ : Httpun.Request.t) reqd =
-  let build = Build_identity.current () in
   Http.Response.json_value
     (`Assoc
        [ "server", `String "masc"
-       ; "version", `String build.Build_identity.release_version
-       ; "build", Build_identity.to_yojson build
+       ; "version", `String Runtime_build_version.current
        ; ( "account_mode"
          , `String (Masc_domain.account_mode_label Masc_domain.Multi_account) )
        ])

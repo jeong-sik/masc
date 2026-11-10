@@ -48,7 +48,7 @@ describe('GateMonitor', () => {
     }
   })
 
-  it('auto-refreshes Gate metrics while visible', async () => {
+  it('refreshes Gate metrics on scoped observation changes', async () => {
     const get = vi.fn().mockResolvedValue({
       generated_at: '2026-04-21T00:00:00Z',
       window_minutes: 60,
@@ -70,9 +70,11 @@ describe('GateMonitor', () => {
     await flushUi()
 
     expect(get).toHaveBeenCalledTimes(1)
-    expect(container.textContent).toContain('Auto-refresh 30s')
 
     await vi.advanceTimersByTimeAsync(30_000)
+    expect(get).toHaveBeenCalledTimes(1)
+    const { publishDashboardObservationChange } = await import('../lib/observation-refresh')
+    publishDashboardObservationChange({ topic: 'gate_tool_events' })
     await flushUi()
 
     expect(get).toHaveBeenCalledTimes(2)

@@ -8,11 +8,6 @@ const { fetchKeeperRuntimeTrace, fetchKeeperComposite } = vi.hoisted(() => ({
   fetchKeeperComposite: vi.fn(),
 }))
 vi.mock('../api/keeper', () => ({ fetchKeeperRuntimeTrace, fetchKeeperComposite }))
-// Silence the visible-auto-refresh timer so only explicit (initial + nonce) fetches occur.
-vi.mock('../lib/auto-refresh', () => ({
-  DEFAULT_PANEL_REFRESH_MS: 30_000,
-  setupVisibleAutoRefresh: () => () => {},
-}))
 
 import { useKeeperRuntimeTraceEvidence } from './keeper-detail-hooks'
 import { bumpKeeperRuntimeTraceRefresh } from './keeper-runtime-trace-refresh'

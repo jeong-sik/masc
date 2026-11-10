@@ -43,7 +43,7 @@ describe('IdePersistencePanel a11y', () => {
       mermaid: 'graph TD',
     } satisfies KeeperStateDiagramResponse)
 
-    const { container, findByTestId } = render(html`<${IdePersistencePanel} pollMs=${60_000} />`)
+    const { container, findByTestId } = render(html`<${IdePersistencePanel} />`)
     await findByTestId('ide-persistence-lifecycle')
     await waitFor(() => expect(fetchKeeperStateDiagramMock).toHaveBeenCalled())
 

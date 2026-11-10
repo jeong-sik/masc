@@ -1,3 +1,4 @@
+import { setupObservationRefresh } from '../../lib/observation-refresh'
 import { html } from 'htm/preact'
 import { memo } from 'preact/compat'
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks'
@@ -161,7 +162,6 @@ export interface IdeActivityPanelProps {
   /** RFC-0378 §5.3b: canonical codebase slug — the wire key. */
   readonly codebase?: string | null
   readonly diffRows?: ReadonlyArray<UnifiedDiffRow>
-  readonly pollMs?: number
   readonly compact?: boolean
   readonly children?: unknown
 }
@@ -203,10 +203,11 @@ function mapApiEvent(event: ApiActivityEvent, workspaceId: string): RunActivityE
 }
 
 async function fetchActivityEvents(
-  codebase?: string | null,
+  codebase: string | null | undefined,
+  signal: AbortSignal,
 ): Promise<ActivityFetchResult> {
-  const graph = await fetchActivityGraphEvents()
-  const bridge = await fetchIdeBridgeRunActivityEvents(graph.workspaceId, codebase)
+  const graph = await fetchActivityGraphEvents(signal)
+  const bridge = await fetchIdeBridgeRunActivityEvents(graph.workspaceId, codebase, signal)
   return {
     workspaceId: graph.workspaceId,
     history: graph.history,
@@ -218,9 +219,9 @@ async function fetchActivityEvents(
   }
 }
 
-async function fetchActivityGraphEvents(): Promise<GraphFetchResult> {
+async function fetchActivityGraphEvents(signal: AbortSignal): Promise<GraphFetchResult> {
   try {
-    const data = await get<ApiActivityResponse>('/api/v1/activity/events?limit=50')
+    const data = await get<ApiActivityResponse>('/api/v1/activity/events?limit=50', { signal })
     const rawEvents = data.events
     if (!Array.isArray(rawEvents)) throw new Error('Activity events are unavailable')
     const reportedTotal = data.total_matching_events
@@ -242,11 +243,12 @@ interface BridgeFetchResult {
 
 async function fetchIdeBridgeRunActivityEvents(
   workspaceId: string,
-  codebase?: string | null,
+  codebase: string | null | undefined,
+  signal: AbortSignal,
 ): Promise<BridgeFetchResult> {
   const sources: Array<Promise<ReadonlyArray<IdeBridgeEvent>>> = []
   const scoped = codebase?.trim()
-  if (scoped) sources.push(fetchIdeEvents({ limit: 50, codebase: scoped }))
+  if (scoped) sources.push(fetchIdeEvents({ limit: 50, codebase: scoped, signal }))
   // No codebase is set: there is nothing to query, not a request that
   // happened to find zero events. The caller derives the visible no-scope
   // state from the current props, before any asynchronous response arrives.
@@ -435,11 +437,6 @@ function positiveInteger(value: unknown): number | undefined {
   return isPositiveSafeInteger(value) ? value : undefined
 }
 
-function normalizedPollMs(value: number | undefined): number | null {
-  if (value === undefined || value <= 0 || !Number.isFinite(value)) return null
-  return Math.floor(value)
-}
-
 function activityScopeKey(codebase?: string | null): string {
   return codebase?.trim() || ''
 }
@@ -453,7 +450,6 @@ export function IdeActivityPanel(props: IdeActivityPanelProps = {}) {
     activeFile: rawActiveFile = '',
     codebase = null,
     diffRows = EMPTY_DIFF_ROWS,
-    pollMs = 0,
     compact = false,
   } = props
   const activeFile = rawActiveFile ?? ''
@@ -470,7 +466,6 @@ export function IdeActivityPanel(props: IdeActivityPanelProps = {}) {
   const [historyWindow, setHistoryWindow] = useState<ActivityHistoryWindow | null>(null)
   const [compactInsightsOpen, setCompactInsightsOpen] = useState(false)
   const emittedTraceIds = useRef<ReadonlySet<string>>(new Set())
-  const refreshMs = normalizedPollMs(pollMs)
 
   useEffect(() => {
     if (loadedScopeKeyRef.current !== requestedScopeKey) {
@@ -478,47 +473,38 @@ export function IdeActivityPanel(props: IdeActivityPanelProps = {}) {
     }
   }, [requestedScopeKey])
 
-  useEffect(() => {
-    let cancelled = false
-    let timer: ReturnType<typeof setTimeout> | null = null
-    const load = async () => {
-      const attemptMs = Date.now()
-      setRefreshState(prev => ({
-        ...prev,
+  useEffect(() => setupObservationRefresh(async signal => {
+    const attemptMs = Date.now()
+    setRefreshState(prev => ({
+      ...prev,
+      lastAttemptMs: attemptMs,
+      tone: prev.lastOkMs === null && prev.failedCount === 0 ? 'loading' : prev.tone,
+    }))
+    const { events, workspaceId, ok, history } = await fetchActivityEvents(codebase, signal)
+    if (signal.aborted) return
+    if (ok) {
+      store.reset(workspaceId)
+      store.seed(events)
+      setHistoryWindow(history)
+      loadedScopeKeyRef.current = requestedScopeKey
+      setLoadedScopeKey(requestedScopeKey)
+      setRefreshState({
+        tone: 'live',
+        lastOkMs: Date.now(),
         lastAttemptMs: attemptMs,
-        tone: prev.lastOkMs === null && prev.failedCount === 0 ? 'loading' : prev.tone,
+        failedCount: 0,
+      })
+    } else {
+      const sameScopeSnapshot = loadedScopeKeyRef.current === requestedScopeKey
+      setRefreshState(prev => ({
+        tone: sameScopeSnapshot && prev.lastOkMs !== null ? 'stale' : 'offline',
+        lastOkMs: sameScopeSnapshot ? prev.lastOkMs : null,
+        lastAttemptMs: attemptMs,
+        failedCount: prev.failedCount + 1,
       }))
-      const { events, workspaceId, ok, history } = await fetchActivityEvents(codebase)
-      if (cancelled) return
-      if (ok) {
-        store.reset(workspaceId)
-        store.seed(events)
-        setHistoryWindow(history)
-        loadedScopeKeyRef.current = requestedScopeKey
-        setLoadedScopeKey(requestedScopeKey)
-        setRefreshState({
-          tone: 'live',
-          lastOkMs: Date.now(),
-          lastAttemptMs: attemptMs,
-          failedCount: 0,
-        })
-      } else {
-        const sameScopeSnapshot = loadedScopeKeyRef.current === requestedScopeKey
-        setRefreshState(prev => ({
-          tone: sameScopeSnapshot && prev.lastOkMs !== null ? 'stale' : 'offline',
-          lastOkMs: sameScopeSnapshot ? prev.lastOkMs : null,
-          lastAttemptMs: attemptMs,
-          failedCount: prev.failedCount + 1,
-        }))
-      }
-      if (refreshMs !== null) timer = setTimeout(load, refreshMs)
+      throw new Error('Activity observation is unavailable')
     }
-    void load()
-    return () => {
-      cancelled = true
-      if (timer !== null) clearTimeout(timer)
-    }
-  }, [store, refreshMs, codebase, requestedScopeKey])
+  }, { topics: ['activity', 'ide_events'] }), [store, codebase, requestedScopeKey])
 
   useStoreSubscription(store.subscribe)
   useSignalValue(globalPresenceSnapshot)
@@ -560,10 +546,10 @@ export function IdeActivityPanel(props: IdeActivityPanelProps = {}) {
               class="ide-activity-refresh-status"
               data-state=${refreshState.tone}
               role="status"
-              aria-label=${`Activity refresh ${activityRefreshLabel(refreshState, refreshMs)}`}
-              title=${activityRefreshTitle(refreshState, refreshMs)}
+              aria-label=${`Activity refresh ${activityRefreshLabel(refreshState)}`}
+              title=${activityRefreshTitle(refreshState)}
             >
-              ${activityRefreshLabel(refreshState, refreshMs)}
+              ${activityRefreshLabel(refreshState)}
             </span>
           </span>
         </div>
@@ -582,11 +568,11 @@ export function IdeActivityPanel(props: IdeActivityPanelProps = {}) {
           class="ide-activity-compact-status"
           data-state=${refreshState.tone}
           role="status"
-          aria-label=${`Activity refresh ${activityRefreshLabel(refreshState, refreshMs)}`}
-          title=${activityRefreshTitle(refreshState, refreshMs)}
+          aria-label=${`Activity refresh ${activityRefreshLabel(refreshState)}`}
+          title=${activityRefreshTitle(refreshState)}
         >
           <span>${events.length} events · ${keepers.length} keepers</span>
-          <span>${activityRefreshLabel(refreshState, refreshMs)}</span>
+          <span>${activityRefreshLabel(refreshState)}</span>
         </div>
         <div class="ide-activity-compact-insights">
           <button
@@ -973,18 +959,17 @@ function activityRouteContext(item: RunActivityEvent, codebase?: string | null):
   }
 }
 
-function activityRefreshLabel(state: ActivityRefreshState, refreshMs: number | null): string {
+function activityRefreshLabel(state: ActivityRefreshState): string {
   if (state.tone === 'loading') return 'syncing'
-  if (state.tone === 'live') return refreshMs === null ? 'loaded' : 'live'
+  if (state.tone === 'live') return 'live'
   const failures = state.failedCount === 1 ? '1 failed' : `${state.failedCount} failed`
   return state.tone === 'offline' ? `offline ${failures}` : `stale ${failures}`
 }
 
-function activityRefreshTitle(state: ActivityRefreshState, refreshMs: number | null): string {
-  const parts = [`Activity refresh ${activityRefreshLabel(state, refreshMs)}`]
+function activityRefreshTitle(state: ActivityRefreshState): string {
+  const parts = [`Activity refresh ${activityRefreshLabel(state)}`]
   if (state.lastOkMs !== null) parts.push(`last update ${formatActivityTime(state.lastOkMs)}`)
   if (state.lastAttemptMs !== null) parts.push(`last attempt ${formatActivityTime(state.lastAttemptMs)}`)
-  if (refreshMs !== null) parts.push(`poll ${Math.max(1, Math.round(refreshMs / 1000))}s`)
   return parts.join(' | ')
 }
 

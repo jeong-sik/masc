@@ -3,7 +3,7 @@ import { html } from 'htm/preact'
 import { render, cleanup, fireEvent, waitFor, act } from '@testing-library/preact'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { get, post } from '../../api/core'
-import { DEFAULT_PANEL_REFRESH_MS } from '../../lib/auto-refresh'
+import { publishDashboardObservationChange } from '../../lib/observation-refresh'
 import { route } from '../../router'
 import { OverviewRuntimeStats } from './runtime-stats'
 import { reloadRuntimeCatalog } from '../../lib/runtime-catalog-resource'
@@ -228,7 +228,7 @@ it('follows the real pending cache envelope through to available without operato
   expect(view.getByRole('status').textContent).toContain('서버가 첫 집계를 준비')
   expect(view.queryByText(/초기 캐시 응답/)).toBeNull()
   expect(view.queryByText('비용 원장 읽기 상태 미보고')).toBeNull()
-  await act(async () => { await vi.advanceTimersByTimeAsync(DEFAULT_PANEL_REFRESH_MS) })
+  await act(async () => { publishDashboardObservationChange({ topic: 'model_metrics' }); await vi.advanceTimersByTimeAsync(0) })
   expect(get).toHaveBeenCalledTimes(2)
   expect(view.getByText('runtime_lane_example')).toBeTruthy()
   expect(view.queryByRole('status')).toBeNull()
@@ -244,7 +244,7 @@ it('stops a pending refresh lifecycle when unmounted', async () => {
   view.unmount()
   expect(signal.aborted).toBe(true)
   await act(async () => {
-    await vi.advanceTimersByTimeAsync(DEFAULT_PANEL_REFRESH_MS)
+    publishDashboardObservationChange({ topic: 'model_metrics' }); await vi.advanceTimersByTimeAsync(0)
     window.dispatchEvent(new Event('focus'))
   })
   expect(get).toHaveBeenCalledTimes(1)
@@ -259,11 +259,12 @@ it('aborts the old pending window and prevents a late follow-up from replacing t
     .mockResolvedValueOnce({ ...response, window_minutes: 30 })
   const view = render(html`<${OverviewRuntimeStats} />`)
   await act(async () => { await vi.advanceTimersByTimeAsync(0) })
-  await act(async () => { await vi.advanceTimersByTimeAsync(DEFAULT_PANEL_REFRESH_MS) })
+  await act(async () => { publishDashboardObservationChange({ topic: 'model_metrics' }); await vi.advanceTimersByTimeAsync(0) })
   const signal = vi.mocked(get).mock.calls[1]![1]!.signal!
-  await act(async () => { fireEvent.change(view.getByLabelText('집계 요청 기간'), { target: { value: '30' } }) })
+  await act(async () => { fireEvent.change(view.getByLabelText('집계 요청 기간'), { target: { value: '30' } }); await vi.advanceTimersByTimeAsync(0) })
   expect(signal.aborted).toBe(true)
-  await act(async () => { finishOld(pending) })
+  await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+  await act(async () => { finishOld(pending); await vi.advanceTimersByTimeAsync(0) })
   expect(view.getByText('runtime_lane_example')).toBeTruthy()
   expect(view.getByText(/서버 집계 창:/).textContent).toContain('30분')
   expect(get).toHaveBeenCalledTimes(3)

@@ -339,10 +339,31 @@ let test_the_half_hours_draw_different_marks () =
     (List.length (List.sort_uniq String.compare marks))
 ;;
 
+let test_failed_counts_preserve_unknown_readings () =
+  let check label expected actual = Alcotest.(check bool) label true (expected = actual) in
+  check "unobserved day is unknown, not zero" P.Count_unknown
+    (P.failure_count (P.half_hours ~now ~count:48 None));
+  check "known quiet and ok are exactly zero" (P.Exact 0)
+    (P.failure_count [P.Half_hour_quiet; P.Half_hour_ok]);
+  check "mixed failed outcomes each count once" (P.Exact 2)
+    (P.failure_count [P.Half_hour_failed; P.Half_hour_failed_and_ok; P.Half_hour_ok]);
+  check "partial observations give a positive lower bound" (P.At_least 1)
+    (P.failure_count [P.Half_hour_failed; P.Half_hour_unknown]);
+  check "no positive lower bound stays unknown" P.Count_unknown
+    (P.failure_count [P.Half_hour_quiet; P.Half_hour_unknown]);
+  check "a missing fleet reading can raise the peak" (P.At_least 2)
+    (P.peak_failure_count [P.Exact 2; P.Count_unknown]);
+  check "fully unknown fleet peak is unknown" P.Count_unknown
+    (P.peak_failure_count [P.Count_unknown]);
+  check "fully observed fleet peak is exact" (P.Exact 2)
+    (P.peak_failure_count [P.Exact 0; P.Exact 2]);
+  check "empty fleet is a known zero" (P.Exact 0) (P.peak_failure_count [])
+
 let () =
   Alcotest.run "tui_keeper_pulse"
     [ ( "failing"
-      , [ Alcotest.test_case "failing is read from the health and the start" `Quick
+      , [ Alcotest.test_case "failed counts preserve unknown readings" `Quick test_failed_counts_preserve_unknown_readings
+        ; Alcotest.test_case "failing is read from the health and the start" `Quick
             test_failing_is_read_from_health_and_start
         ; Alcotest.test_case "the failing cell" `Quick test_failing_cell_decisions
         ] )

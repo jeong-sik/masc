@@ -1,0 +1,44 @@
+{
+  "schema": "masc.targeted-memory-validation.v1",
+  "phase": "after-test-cleanup-and-native-restack",
+  "workflow": "Test",
+  "workflow_path": ".github/workflows/test.yml",
+  "run_id": 42652183034,
+  "run_url": "https://github.com/jeong-sik/masc/actions/runs/42652183034",
+  "job_id": 129281167197,
+  "event": "workflow_dispatch",
+  "attempt": 1,
+  "head": "b56552704a5b1350d636449d57c1ff0d920c8adc",
+  "ref": "fix/tui-memory-reading-20261110",
+  "minimal": true,
+  "status": "completed",
+  "conclusion": "failure",
+  "suites": [
+    {
+      "name": "test_tui_decode",
+      "cases": 407,
+      "passed": 406,
+      "failed": 1,
+      "conclusion": "failure",
+      "failed_cases": [
+        "test_decode_memory_health_keeps_ordinary_and_source_axes"
+      ]
+    },
+    {
+      "name": "test_tui_render_memory",
+      "cases": 13,
+      "passed": 13,
+      "failed": 0,
+      "conclusion": "success"
+    }
+  ],
+  "decoder_failure": "memory health totals or alert summary disagree with keeper rows",
+  "not_claimed": [
+    "Full CI",
+    "native TUI execution",
+    "Enter event dispatch",
+    "installation",
+    "merge",
+    "deployment"
+  ]
+}

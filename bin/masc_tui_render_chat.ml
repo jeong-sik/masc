@@ -4343,6 +4343,14 @@ let render_keeper_message (state : state) =
      Activity pane, which [finish_frame_beside_acting_pane] draws beside it. *)
   let rows, cols = get_terminal_size () in
   let buf = Buffer.create 4096 in
+  (* Text search owns [?] before chat does. Keeper navigation then opens
+     help with any draft; the composer itself does so only while empty.
+     Both chat footers use the same decision as their help hint. *)
+  let help_door =
+    Option.is_none (text_input_target state ~compact_viewport:false)
+    && (state.keeper_navigation_open
+        || Masc_tui_message_input.length state.msg_input = 0)
+  in
 
   match state.msg_target_keeper_name with
   | None ->
@@ -4358,7 +4366,7 @@ let render_keeper_message (state : state) =
     done;
     box_bottom buf cols;
     finish_frame_beside_acting_pane state ~surface_key:"keeper-message" ~cursor:Frame_presenter.Hidden
-      ~rows ~cols
+      ~help_door ~rows ~cols
       ~footer:
         (Footer_hints
            { hints = Masc_tui_keys.footer_hints state.view; position = None })
@@ -5117,11 +5125,8 @@ let render_keeper_message (state : state) =
       | Some _ -> Some "↑/↓:select  Tab/Enter:insert  Esc:close"
       | None -> slash_hint_text ~restore:Ansi.default_fg (Masc_tui_message_input.contents state.msg_input)
     in
-    (* [?] opens the sheet only while the draft is empty, so the row says so
-       exactly while it is true -- a typing row that named the door would
-       advertise a key the draft owns. *)
     let help_hint =
-      if Masc_tui_message_input.length state.msg_input = 0 then "  ?:help"
+      if help_door then "  ?:help"
       else ""
     in
     let footer_hints =
@@ -5277,6 +5282,7 @@ let render_keeper_message (state : state) =
     finish_frame_beside_acting_pane state ~surface_key:"keeper-message"
       ~clamped:(Message_scroll scroll_feedback) ?roster
       ~recovery_in_slot
+      ~help_door
       ~cursor:
         (if state.keeper_message_focus = Left_pane then
            Frame_presenter.Hidden

@@ -1,0 +1,35 @@
+ 운영  작업  ▸키퍼  기능·플러그인  워크스페이스  시스템
+
+  MASC Keepers · 일과 도움                                                                             HTTP [connected]
+   운영 관측: blocked · keeper bootstrap off · 실행 0/2 · proactive every 5m
+   ▸list  state  cause  time  memory  age  runtime  24h
+ ✓ 1 recovered ▪  ○ 1 paused ·  ? 1 unknown ?
+     fleet fail/30m max 1             ???????????????█??█??█?? ┃              ┃ ························· max 0
+ Keeper 목록 · 현재 상태 / 일과 대기            │ pausedproof
+ ›  pausedproof                    Ⅱ 일시정지   │
+    quietproof                     × 오프라인   │ 지금 하는 일
+    recoveredproof                 × 오프라인   │   턴 관측: 실행 중인 턴 없음 · 작업 이름 미관측
+                                                │
+                                                │ 사람의 도움
+                                                │   관측된 사람 대기 없음 · Approvals에서 확인
+                                                │
+                                                │ 최근 관측 결과
+                                                │   최근 자율 턴: 아직 시작하지 않음 · 턴 종료 기록 미조회 ·
+                                                │   Enter:Story
+                                                │
+                                                │ c:대화·원래 요청   →:상세   Enter:Story
+                                                │ Enter→m:기억   J:일정   l:로그
+                                                │
+                                                │
+                                                │
+                                                │
+                                                │
+                                                │
+                                                │
+                                                │
+                                                │
+ pausedproof Ⅱ 일시정지
+ ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  WORKTREE server (not the root build)  ACTION NEEDED 2  v:view  Enter / Right:story / detail  Esc:dashboard  q:quit  …?
+ 일정 정보가 오래됐을 수 있음
+ › to pausedproof   (i to write)

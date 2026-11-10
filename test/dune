@@ -2428,7 +2428,9 @@
   masc.masc_types
   masc.agent_core
   masc.keeper_chat_delivery_identity
+  masc.keeper_runtime
   masc.runtime
+  yojson
   unix))
 
 (test
@@ -2720,6 +2722,7 @@
 (include stanzas/test_board_persistence_load_contract.inc)
 
 (include stanzas/test_board_posts_source_authority.inc)
+(include stanzas/test_board_comments_source.inc)
 (include stanzas/test_board_posts_preflight.inc)
 
 (include stanzas/test_board_snapshot_rows.inc)
@@ -6059,7 +6062,7 @@
 (test
  (name test_workspace_memory_ledger_view)
  (modules test_workspace_memory_ledger_view)
- (libraries alcotest  masc.agent_core.digest yojson masc masc.fs_compat))
+ (libraries alcotest  masc.agent_core.digest yojson masc masc.fs_compat masc.config_dir_resolver))
 
 (test
  (name test_workspace_memory_ledger)

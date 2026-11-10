@@ -82,7 +82,7 @@ type confirmation_state =
   | Inspecting of confirmation_read
   | Submitting of string * confirmation_read
 
-val confirmation_read_error_message : credential_is_current:(unit ref -> bool) -> confirmation_read_error -> string
+val confirmation_read_error_message : ko:bool -> credential_is_current:(unit ref -> bool) -> confirmation_read_error -> string
 
 val suspend_confirmation_read : confirmation_read -> confirmation_read
 (** Withdraw a proof's authority while retaining its key for a later reread. *)
@@ -104,22 +104,22 @@ val confirmation_lines : width:int -> ko:bool -> confirmation -> line list
     does not establish that each earlier row was read. *)
 
 val body :
-  width:int -> Tui_decode.goal_proof -> string option -> line list
+  ko:bool -> width:int -> Tui_decode.goal_proof -> string option -> line list
 (** The verdict, its reason, and the keeper's own note, wrapped to [width].
 
     An idle ledger with no note still says so: an empty block would read as a
     goal nobody has looked at, which is the same picture a goal whose verdict
     failed to decode would draw. *)
 
-val unreconciled_heading : Goal_reconcile_step.t -> string
+val unreconciled_heading : ko:bool -> Goal_reconcile_step.t -> string
 (** Which verifier step could not settle the goal, as the row's headline. *)
 
-val verifying_next_step : can_retry:bool -> Tui_decode.verifier_unreconciled option -> tone * string
+val verifying_next_step : ko:bool -> can_retry:bool -> Tui_decode.verifier_unreconciled option -> tone * string
 (** The retry is offered only while the displayed proof has a readable binding.
     Its response may report an unresolved original instead of a new review. *)
 
 val unreconciled_lines :
-  width:int -> Tui_decode.verifier_unreconciled -> line list
+  ko:bool -> width:int -> Tui_decode.verifier_unreconciled -> line list
 (** The headline and the store's reason, wrapped and sanitized like a
     verdict, for a Verifying goal the latest verifier scan could not
     settle. *)
@@ -132,7 +132,7 @@ val timeline_unavailability_detail : Tui_decode.goal_timeline_unavailability -> 
 (** Preserve the typed source failure's cause at the history read boundary. *)
 
 val timeline :
-  width:int ->
+  ko:bool -> width:int ->
   goal_id:string ->
   (string, Tui_decode.goal_timeline_event list) Masc_tui_fetched.t ->
   line list

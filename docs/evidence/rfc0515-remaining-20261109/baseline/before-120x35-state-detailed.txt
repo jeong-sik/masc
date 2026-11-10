@@ -1,0 +1,35 @@
+ 운영  작업  ▸키퍼  기능·플러그인  워크스페이스  시스템
+
+  MASC Keepers (34)                                                                                    HTTP [connected]
+   list  ▸state  cause  time  memory  age  runtime  24h
+   detailed · name
+   fleet last observed: ok   running 26/28   turn capacity 28/28   autoboot keepers paused
+   fleet reading: stale · scans failing for 4m29s (refresh timed out)
+   failing 2 (retrying 2)   paused 6   awaiting verdict 16
+     keeper                           ◂ 12h                 1h ┃ ● now        ┃ next ▹ 12h                due     lag
+ ▌ ● polisher                                     ··✓✓✓✓✓✓✓✓✓· ┃ > streaming  ┃ ························· 19:00   mem ?
+ ▌ ● wkbl-front                                   ✓✗✓✓✓✗✓✓✓✓✓· ┃ ◐ running    ┃ ························· 20:22   mem ?
+ ▌ ● wkbl-growth                                  ✓✓✓✓✓✓✓✓✓✓✓· ┃ > streaming  ┃ ························· ?       mem ?
+ ▌ − ◌ WAITING 15  ■ tool 9 · ◔ model 4 · ◌ external 2         ┃              ┃
+ ▌ ● code-reviewer-father                         ✓✓✓✓✓✓✓✓✓✓✓· ┃ ■ tool wait  ┃ ························· ?       mem ?
+ ▌ ● code-reviewer-mother                         ✓✓····✓✓✓·✓· ┃ ◔ model wait ┃ ························· ?       mem ?
+ ▌ ● code-reviewer-sister                         ✓✓✓✓✓✓✓✓✓✓✓✓ ┃ ◔ model wait ┃ ························· ?       mem ?
+ ▌ ● code-reviewer-uncle                          ✓✓✓✓✓✓✓✓✓✓✓· ┃ ■ tool wait  ┃ ························· ?       mem ?
+ ▌ ● context-reviewer                             ✓✓✗✓✓✓✗✗·✓✓· ┃ ■ tool wait  ┃ ························· 18:59   mem ?
+ ▌ ● glossary-maniac                              ··✓✓✓✓✓✓✓✓✓· ┃ ■ tool wait  ┃ ························· ?       mem ?
+ ▌ ● kidsnote-incoming-dd-manager                 ✓✓✓✓✓✓✓✓✓✓✓· ┃ ■ tool wait  ┃ ························· ?       mem ?
+ ▌ ● kidsnote-slack-reader                        ✗✗✓✗✗✗✓✓✓✓✓✓ ┃ ◌ external   ┃ ························· 19:41   mem ?
+ ▌ ● masc-productor-owner                         ✓✓✓✓✓✓✓✓✓✓✓· ┃ ■ tool wait  ┃ ························· 19:13   mem ?
+ ▌ ● msx-retro-mania                              ✗✗✓✗·✗·✗✗·✗· ┃ ◔ model wait ┃ ························· held?   mem ?
+ ▌ ● music-sensei                                 ✓✓✓✓✓✓✓✓✓✓✓✓ ┃ ◌ external   ┃ ························· ?       mem ?
+ ▌ ● pr-updater                                   ✓✓✗✓✓✓✓✓✓✓✓· ┃ ■ tool wait  ┃ ························· 19:00   mem ?
+ ▌ ● rondo                                        ··✓✓✓✓✓✓··✓· ┃ ■ tool wait  ┃ ························· ?       mem ?
+ ▌ ● sangsu                                       ✓✗✓·✓✗·✗·✗✓· ┃ ◔ model wait ┃ ························· 18:14   mem ?
+ ▌ ● wkbl-data                                    ✓✗✗✗✓✓✓✓✓✓✓· ┃ ■ tool wait  ┃ ························· ?       mem ?
+ ▌ − ○ INACTIVE 7                                              ┃              ┃
+ ▌ ○ build-maniac                                 ············ ┃ Ⅱ paused     ┃ ························· ?       mem ?
+   [keepers 10–28/34]
+ ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  v:view  o:order  j/k:move  p:boot  w:wake  s:shutdown  Enter / Right:story / detail  Esc:dashboard  q:quit  …?
+ 일정 정보가 오래됐을 수 있음
+ › to build-maniac   (i to write)

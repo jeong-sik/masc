@@ -179,7 +179,8 @@ let refusal_to_string = function
      hold; the base path was restored to before its bootstrap"
   | Downgraded_from_multi_account ->
     "the authorization log made Multi_account and config.json does not ask for it; set \
-     account_mode to \"Multi_account\""
+     account_mode to \"Multi_account\", or turn the accounts off with masc auth off while no \
+     server runs"
   | Reactivation_not_ready ->
     "config.json asks for Multi_account after an Off mode event; reactivation needs the \
      recovery procedure, which this build does not have yet"

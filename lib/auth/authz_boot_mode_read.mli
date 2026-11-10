@@ -86,10 +86,16 @@ val decide : Authz_boot_mode.input -> decision
     It is one line for {!messages} and for the texts of [masc auth bootstrap]. *)
 val single_user_again : string
 
+(** The way from an active workspace to a single user that keeps the records
+    of the accounts read-only ({!Authz_off}). One line for {!messages} and for
+    the texts of [masc auth bootstrap]. *)
+val turn_off_line : string
+
 (** One line per reason, the first apart, so a stop always has a reason. A
     {!Multi_account_not_served} stop also says what the high-water mark found
-    when it is not a match. {!Activation_requested} and
-    {!Multi_account_not_served} end with {!single_user_again}. *)
+    when it is not a match, and for an active workspace (row 7) it says
+    {!turn_off_line}. {!Activation_requested} and {!Multi_account_not_served}
+    end with {!single_user_again}. *)
 val messages : Authz_boot_mode.input -> stop -> string * string list
 
 (** A base path that {!boot} judged a single-user boot. Only {!boot} makes one,

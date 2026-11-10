@@ -6,15 +6,20 @@ lines whether the trained checkpoint may answer that output first.
 
 Everything runs on the operator's machine with `uv run`. Each script pins its
 dependencies in a PEP 723 header. `TINKER_API_KEY`, and `ZAI_API_KEY` for a GLM
-run, come from the environment and are never written. Paths to the MASC runtime
-store come from `--base` or
-`MASC_BASE_PATH`. Output goes under `artifacts/` (git-ignored).
+run, come from the environment and are never written. `--base` or
+`MASC_BASE_PATH` names a MASC base path: the server's when the E-real snapshot
+is taken, the snapshot's for an E-real run. Output goes under `artifacts/`
+(git-ignored).
 
 ## Data rule
 
-The exact-request store holds real Keeper memory. Scripts read it in place.
-Nothing from it is copied into this repository: the E-real manifest holds only
-record digests and file sha256 values. E-real model answers stay in the run's
+The exact-request store holds real Keeper memory. The server removes an
+admission's text once every candidate is committed and acknowledged, so
+`e_real_manifest.py --snapshot` copies the answered admission records into
+`artifacts/tinker/librarian/e-real-snapshot/`, readable by its owner alone,
+when E-real is pinned. E-real runs read that copy. Nothing from the store is
+copied into this repository: the E-real manifest holds only record digests and
+file sha256 values. E-real model answers stay in the run's
 `calls.jsonl` under `artifacts/`. The committed evidence holds numbers, IDs and
 verdicts. A GLM run sends E-real prompts to Z.AI, where MASC's GLM slot sends
 them.
@@ -28,8 +33,8 @@ Synthetic Keepers, memories and candidates are invented by the model from
 | --- | --- |
 | `pass_lines.json` | Fixed request shape, evaluation sets, baseline, candidates, gates and the files whose bytes they assume: every module `eval_admission.py`, `e_synth_audit.py` and `merge_cases.py` import, and the prompt template |
 | `e_real_manifest.json` | E-real: the answered admission records, by digest and sha256 |
-| `exact_store.py` | Reads answered admission records from the store, read only |
-| `e_real_manifest.py` | Writes the manifest |
+| `exact_store.py` | Reads answered admission records and copies them into the E-real snapshot; never writes the server's store |
+| `e_real_manifest.py` | Takes the E-real snapshot and writes its manifest |
 | `synth_spec.py` | Plan of a synthetic request: measured distributions, ID shapes, labels |
 | `synth_candidate_plan.py` | Plans a split's candidates before any call, dealing marks and lengths out per label kind |
 | `synth_prompts.py` | Prompts that ask the model for role material, memories and candidates |
@@ -125,6 +130,7 @@ carries none, and the endpoint applies its default.
 
 ```sh
 MASC_BASE_PATH=<base> uv run scripts/tinker/librarian/e_real_manifest.py \
+  --snapshot artifacts/tinker/librarian/e-real-snapshot \
   --out scripts/tinker/librarian/e_real_manifest.json
 uv run scripts/tinker/librarian/synth_generate.py --split eval --seed 20261110 \
   --out artifacts/tinker/librarian/synth-eval --budget 6
@@ -136,7 +142,8 @@ uv run scripts/tinker/librarian/e_synth_audit.py apply \
   --requests artifacts/tinker/librarian/synth-eval/requests.jsonl \
   --audit artifacts/tinker/librarian/e-synth-audit \
   --final artifacts/tinker/librarian/e-synth/requests.jsonl
-MASC_BASE_PATH=<base> uv run scripts/tinker/librarian/eval_admission.py run --set real \
+MASC_BASE_PATH=artifacts/tinker/librarian/e-real-snapshot \
+  uv run scripts/tinker/librarian/eval_admission.py run --set real \
   --target base=thinkingmachines/Inkling-2-Small:peft:262144 \
   --target A=<sampler path of A> \
   --out artifacts/tinker/librarian/verdict-real --budget 6
@@ -195,7 +202,8 @@ refuses a run whose template is not the pinned one.
 
 `run --provider glm --target glm=<model> --max-calls <n>` measures the same
 sets on GLM (`glm_chat.py`). It sends no warm call, and its rows cost nothing
-per token. `--max-calls` caps the requests under `--out`, counting the ones
+per token. It waits on one request at a time, since the key's rate limit (1302)
+also counts the live Keepers' requests. `--max-calls` caps the requests under `--out`, counting the ones
 already logged; a run killed mid-call can pass the cap by the calls that were
 in flight, since an attempt counts once its row is logged. GLM's code is read
 as MASC reads it: under another status than 200, only a quota, auth or

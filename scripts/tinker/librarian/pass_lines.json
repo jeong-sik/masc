@@ -14,8 +14,8 @@
  },
  "e_real": {
   "manifest": "e_real_manifest.json",
-  "manifest_sha256": "16d3a90a83eda27517b72a1073b8df74097f5947e720aa8fec12206a10ea70d6",
-  "items": 99
+  "manifest_sha256": "d22c1150474a8d5bf261dbeb288d0b3b532245f545ee36099862262519594293",
+  "items": 52
  },
  "e_synth": {
   "generator_split": "eval",
@@ -39,7 +39,9 @@
   "G3_e_synth_drop_precision_min": 1.0,
   "G3_e_synth_stale_drop_recall_min": 0.9,
   "G4_e_real_paired_lead_min": -0.06,
-  "G5_e_real_latency_p50_ratio_max": 1.16
+  "G5_e_real_latency_p50_ratio_max": 1.16,
+  "G6_e_synth_absorb_precision_min": 0.85,
+  "G6_e_synth_judged_merge_recall_min": 0.7
  },
  "choice": {
   "order": [
@@ -54,8 +56,8 @@
   "admission_validator.py": "05ce32b4a3468578bf20a65facda4b7fac26e4c905ee70ea7d606b31ef7ba546",
   "audit_decisions.py": "88b508aa5ef572bb151df87d674f7a36c8b8db7d27d15087872b650d5a1b7416",
   "e_synth_audit.py": "28d5e563bc907b15000bd406299d2faa76a9a75315f84954f7bd338f01179139",
-  "eval_admission.py": "f0d521cccc2a5cf24aa5be4ad43fdce6a59cfa3552a03bb3f0d605cb10594677",
-  "exact_store.py": "c47d1ba5c4092ba4624335813538140641b50d392bcd76eaf6eadfea34b9fa57",
+  "eval_admission.py": "fab591c9c31b2bbc5a31129e21fd7f570c55c85a1250f761494ee15d1890d9a0",
+  "exact_store.py": "1bd812c01c679890c70b264e04319f1028d4c25c89c53f7c94dc0cbd0f8a7df8",
   "glm_chat.py": "b02ff93b68ccf8e4ff7b9e848724b20e14c0480d9b59131946028eb6e2b4ae8c",
   "lane_addon_checks.py": "d4f50ecd293243c9af6edb9612cb54ac6cd2771e48704ed86d1d3e22b53f1ccd",
   "librarian_selection.py": "2847371ccabb72031bb4f4dad8cef8b6f80ea17c3d3e94f9f72f1483cb9ed6de",

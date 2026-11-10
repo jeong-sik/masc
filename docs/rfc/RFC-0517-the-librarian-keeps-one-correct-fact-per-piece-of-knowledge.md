@@ -121,24 +121,27 @@ Prometheus 지표는 기존 recall 지표처럼 `Otel_metric_store` 에 `keeper`
 | 이름 | 종류 | 라벨 | 세는 자리 |
 | --- | --- | --- | --- |
 | `masc_keeper_memory_changes_total` | counter | `keeper`, `pass`, `change` | 저장소 커밋 함수가 커밋을 마치고 lock 을 놓은 뒤 |
-| `masc_keeper_memory_facts` | gauge | `keeper` | 같은 자리. 커밋 뒤 fact 수 |
+| `masc_keeper_memory_facts` | gauge | `keeper` | 커밋 안에서 lock 을 쥔 채 커밋 순서대로 둔다. 파일 I/O 는 없다. 커밋 뒤 fact 수 |
 | `masc_keeper_memory_snapshot_bytes` | gauge | `keeper` | 같은 자리. 커밋 뒤 fact 를 그린 바이트로, 건강 행과 같은 셈이다 |
 | `masc_keeper_librarian_absorb_sources_total` | counter | `keeper`, `outcome`, `decision` | 흡수 게이트 판정이 끝나는 두 자리 |
 | `masc_keeper_librarian_absorb_copy_checks_total` | counter | `keeper`, `verdict` | 같은 두 자리 |
 
-- `pass` 는 커밋을 부른 자리가 닫힌 variant 로 넘긴다. 값은 여덟이다.
-  - admission, durable, continuity, cleanup, program 발행
+- `pass` 는 커밋을 부른 패스가 닫힌 variant 로 넘긴다. 값은 일곱이다.
+  - admission, durable, continuity, cleanup
   - Keeper 직접 쓰기, Keeper 직접 지우기, 운영자 지우기
+- program 발행은 그것을 부른 레인의 값으로 센다. durable 원문이 거절된 뒤의 floor 는 durable 이고, 메시지 단위 continuity 는 continuity 다.
 - 저장소 커밋 함수가 `~pass` 를 필수로 받는다. 빠진 자리를 컴파일러가 잡는다(사용자 2026-11-10).
   - 함수: `Keeper_memory_os_current` 의 `apply_disposition`·`apply_disposition_guarded`·`apply_program`·`upsert_fact`·`supersede_fact`·`retract_fact`·`retract_facts`
-  - runtime 이 커밋하는 durable·continuity·cleanup 은 `run_best_effort` 를 부르는 세 자리가 `~pass` 로 넘긴다.
+  - runtime 의 `run_best_effort` 는 pass 를 `write_scope` 로 받는다. 기억을 쓰는 scope 만 pass 를 품는다. 기억을 쓰지 않는 working context 실행(`Context_only`)은 pass 가 없다.
   - 운영자 지우기는 대시보드 기억 정리(`server_dashboard_http_keeper_memory_cleanup.ml` 의 `retract_facts`)다.
-  - main 에서 세면 lib 은 약 12곳, 시험은 22개 파일 99줄이 바뀐다. 시험은 `~pass` 만 넣는 기계적 커밋 하나로 따로 올린다.
+  - 시험의 `~pass`·`write_scope` 는 기계적 커밋으로 따로 올린다.
 - `change` 는 서로 겹치지 않는 넷이다. ID 로 센다.
   - `added`: 새 claim. 커밋 전에 없던 ID 다.
   - `absorbed`: 흡수로 빠진 fact(`absorbed_applied`)
   - `superseded`: 교정(`supersedes`)으로 빠진 fact(`revisions_applied`)
   - `dropped`: 뒤를 잇는 claim 없이 빠진 나머지 fact. `invalidated` 도 여기에 든다.
+- program 은 단계가 여럿이어도 한 번 센다. 첫 단계 전 fact 와 마지막 단계 뒤 fact 를 견주고, 단계마다 적용한 흡수·교정을 합친다. 중간 단계에만 있던 ID 는 세지 않는다.
+  - 흡수·교정으로 빠진 fact 는 이어 받은 claim 을 뒤 단계까지 따라가 마지막 fact 에 닿을 때만 `absorbed`·`superseded` 다. 종류는 처음 빠진 방식을 따른다. 끝이 마지막 fact 에 없으면 `dropped` 다. disposition 커밋이 교정한 claim 을 snapshot 에 요구하는 것과 같다.
 - ID 는 같고 내용만 바뀐 fact 는 `added`·`removed` 에 다 들어 있다. 이런 fact 는 넷 중 어디에도 세지 않는다.
 - 커밋이 `Unchanged` 면 세지 않는다. 그때 snapshot 의 `change` 는 앞선 커밋의 것이다.
 - `outcome` 은 forward 결과(conveyed·left·unjudged·unjudgeable)다. `decision` 은 원문 판정(mergeable·different_context·loses_knowledge·uncertain)이고, 판정이 없으면 `none` 이다. conveyed 의 판정은 늘 mergeable 이다.

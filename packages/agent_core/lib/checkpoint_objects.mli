@@ -121,9 +121,10 @@ type boundary =
     follows them. One memo serves one sequence of saves of one checkpoint.
 
     What a message is written as does not live here. The process keeps it for
-    every message value it has encoded or loaded, by identity ([==]), for as
-    long as the value is alive, so a save, a digest or another memo encodes
-    only values no call has seen. *)
+    each message it has encoded, by identity ([==]), for as long as the
+    message is alive, so a save, a digest or another memo encodes only
+    messages no call has encoded. What a load read stays in the memo the
+    load filled: another memo encodes the loaded records once. *)
 type memo
 
 val create_memo : unit -> memo

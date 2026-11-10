@@ -2142,7 +2142,7 @@ let test_history_resolution_rejects_stale_then_continues_the_same_original () = 
   let initial=submit preview.expected in
   let fact=Types.observed ~claim:"A concurrent fact changes the preview basis" ~category:Types.Fact
     ~now:(Time_compat.now ()) ~origin:{kind=Types.Authored;trace_id="concurrent-writer"} in
-  io (fun () -> Current.upsert_fact ~keepers_dir:fixture.keepers_dir ~keeper_id:keeper_name
+  io (fun () -> Current.upsert_fact ~pass:Keeper_memory_commit_pass.Keeper_write ~keepers_dir:fixture.keepers_dir ~keeper_id:keeper_name
     ~now:(Time_compat.now ()) ~source:{kind=Current.Explicit_write;trace_id="concurrent-writer"} fact
     |> Result.map_error Current.upsert_error_to_string |> get) |> ignore;
   let run_resolution ()=memory_action fixture (fun () -> Resolution_work.run_serialized

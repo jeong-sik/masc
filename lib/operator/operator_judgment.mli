@@ -110,6 +110,17 @@ val is_fresh : ?now:float -> record -> bool
 
 (** {1 Persistence} *)
 
+type written = { canonical_masc_root : string; surface : surface }
+
+val subscribe_written : (written -> unit) -> (unit -> unit)
+(** Subscribe to append attempts after their writer returns or raises. The
+    original store owner is resolved before the write. A failed append may
+    have committed bytes, so it also invalidates observations. Callbacks run
+    synchronously without I/O and must not yield; failures are counted and
+    never replace the writer's value, exception or cancellation. *)
+
+val failed_write_notifications : unit -> int
+
 val judgments_path : Workspace.config -> string
 (** [judgments_path config] returns
     [<masc_dir>/operator/judgments.jsonl].  Exposed for tests

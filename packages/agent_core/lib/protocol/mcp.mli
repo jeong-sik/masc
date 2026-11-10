@@ -35,21 +35,7 @@ val tool_of_input_schema_result
   -> (Yojson.Safe.t -> Types.tool_result)
   -> (Tool.t, string) result
 
-val mcp_tool_to_agent_core_tool_result
-  :  call_fn:(Yojson.Safe.t -> Types.tool_result)
-  -> mcp_tool
-  -> (Tool.t, string) result
-
 val mcp_tool_of_json : Yojson.Safe.t -> mcp_tool option
-
-(** {1 Per-tool schema conversion} *)
-
-(** An MCP tool left out because its input schema could not be converted
-    into a {!Tool.t}. [detail] is the converter's diagnostic. *)
-type skipped_tool =
-  { tool_name : string
-  ; detail : string
-  }
 
 (** {1 Client handle} *)
 
@@ -112,22 +98,5 @@ val call_tool_full :
   t -> name:string -> arguments:Yojson.Safe.t ->
   (Mcp_schema.Sdk_types.tool_result, Error.t) result
 
-(** {1 Managed connections} *)
+(** {1 Tool results} *)
 val text_of_tool_result : Mcp_schema.Sdk_types.tool_result -> string
-
-type transport =
-  | Stdio of { client : t }
-  | Http of
-      { close_fn : unit -> unit
-      ; base_url : string
-      ; headers : (string * string) list
-      }
-
-(** [skipped_tools] lists the server's tools that were not loaded because
-    their input schema failed conversion; [tools] holds the rest. *)
-type managed =
-  { tools : Tool.t list
-  ; skipped_tools : skipped_tool list
-  ; name : string
-  ; transport : transport
-  }

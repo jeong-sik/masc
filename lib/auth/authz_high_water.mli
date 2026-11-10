@@ -75,8 +75,17 @@
     ({!Commit_not_in_log}, item 4). The last [Committed] is the one the store
     holds before any write. A promoted intent does not stand in for it.
 
-    The epoch values that design 5.1 compares as well are not part of the store
-    yet, so this module does not compare them. *)
+    {b The epochs.} Design 5.1 also wants the epochs of the replay to be the
+    ones the store holds. The store keeps no epoch value. An epoch rises, a
+    credential generation changes and the mode changes only by a record that
+    takes an intent ({!Authz_state.apply} says which), and the last [Committed]
+    fixes every record before it, as a record hash covers the hash before it.
+    So the epochs agree exactly when the log holds as many records that take an
+    intent as the store answers, a promoted intent counted as answered. A
+    record that takes an intent and was appended outside the zone breaks this
+    ({!Answers_differ}), whatever was appended after it. A record that takes no
+    intent (a lease, the issue of an invitation, an enable) is not counted, so
+    one appended outside the zone is not seen here. *)
 
 (** What closes the pending intent. *)
 type settlement =
@@ -105,6 +114,17 @@ type reason =
       (** The log has no record after the [previous_record_hash] of the intent
           and does not end there either: [previous_record_hash] is not in the
           log. The log was rewound to before it, or replaced (item 5). *)
+  | Answers_differ of
+      { asked : int  (** The records of the log that take an intent. *)
+      ; answered : int
+          (** The [Committed] of the store, and one more for a promoted
+              intent. *)
+      }
+      (** Every other judgment passes and the two numbers differ: the epochs of
+          the replay are not the ones the store holds (design 5.1). A mode
+          event or a revocation appended outside the zone reads this way. It is
+          judged only when the store holds an answer and nothing else is
+          wrong, so it comes alone. *)
 
 (** The value of the external high-water mark (design 5.1), apart from the one
     that comes from not opening the store at all. *)
@@ -117,7 +137,8 @@ type t =
           [Fresh_bootstrap]. *)
   | Matches
       (** Every judgment passes, and something was answered or is promoted: the
-          last [Committed] is in the log and {!settle} is [Ok]. A store with no
+          last [Committed] is in the log, {!settle} is [Ok], and the log holds
+          as many records that take an intent as the store answers. A store with no
           [Committed] whose [Fresh_bootstrap] intent is a {!Promote} is
           [Matches], because design 5.1 counts a promoted intent as a
           [Committed]. Without a [Committed] and a {!Promote} the value is
@@ -125,7 +146,7 @@ type t =
   | Mismatch of reason * reason list
       (** The store can be read and does not agree with the log. Every reason is
           listed. {!Commit_not_in_log} comes first, then the reason of the
-          intent. *)
+          intent. {!Answers_differ} comes alone. *)
 
 (** What a few records of the log say, as far as the store needs. *)
 module Probe : sig
@@ -137,8 +158,13 @@ module Probe : sig
   (** The probe after the next record of the log. Feed the records in file
       order, for instance from the fold function of {!Authz_log.open_at_start}.
       The records are those that {!Authz_log} has checked, so their hashes and
-      links are not checked again. *)
-  val add : t -> Authz_record.t -> t
+      links are not checked again. [high_water] is what {!Authz_state.apply}
+      gives for the record: the change it takes an intent for, or [None]. *)
+  val add
+    :  t
+    -> Authz_record.t
+    -> high_water:Authz_external_store.Change.t option
+    -> t
 
   (** The probe after the external store took [entry], for a writer that keeps
       one probe while it writes both files, so that it does not read the log
@@ -176,9 +202,10 @@ type agreement =
   | Nothing_answered  (** The value is {!Absent}: the store holds no [Committed]. *)
   | Answered of settlement  (** The value is {!Matches}. *)
 
-(** Items 2 to 5, as a writer reads them each time it enters its zone (design
-    8.2, item 1). When every judgment passes, whether the store holds an answer,
-    with the settlement. Otherwise every reason, in the order of {!Mismatch}.
+(** Items 2 to 5 and the epochs, as a writer reads them each time it enters its
+    zone (design 8.2, item 1). When every judgment passes, whether the store
+    holds an answer, with the settlement. Otherwise every reason, in the order
+    of {!Mismatch}.
     A writer that adds to an installed log wants {!Answered}. A writer that
     installs one reads {!settle_over_empty_log}. *)
 val settle_on_entry : Probe.t -> (agreement, reason * reason list) result

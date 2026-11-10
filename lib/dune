@@ -171,6 +171,7 @@
   keeper_chat_store_row_codec
   keeper_chat_store_delivery_rules
   keeper_chat_store_provenance_index
+  keeper_chat_store_transcript_index
   keeper_chat_store_append_primitives
   keeper_chat_store_turn_append
   keeper_chat_store_append_once

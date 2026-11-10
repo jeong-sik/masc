@@ -1,203 +1,45 @@
 (** The index of the delivery provenance in a transcript.
 
     A row may carry [delivery_provenance], the address of the delivery that
-    wrote it. [provenance_of_line] reads one line into a [scanned_provenance]:
-    no provenance, a valid one with its row id, or a delivery key that the row
-    poisons because its role or its execution id does not fit its transcript
-    slot. [provenance_index_of_existing] reads a whole transcript into a
-    [provenance_index]: the rows by provenance, by tool ordinal and by
-    execution id, and the poisoned delivery keys. A provenance, a tool ordinal
-    or an execution id that appears twice poisons its delivery key, and a line
-    that cannot be read at all is an [Error].
-    [find_indexed_provenance] answers from an index that is built:
-    [Ok (Some row_id)] when the delivery already has its row and [Ok None] when
-    it has none. It is an [Error] when the delivery cannot be answered safely:
-    its key is poisoned, its rows are duplicated, or its tool ordinal or
-    execution id belongs to another delivery. [find_provenance] builds the
-    index first. [transcript_provenance_readable] asks only whether the index
-    can be built.
+    wrote it. [scan_transcript_rows] reads the lines of a transcript, or of a
+    part of one, into [scanned_provenance] values: no provenance, a valid one
+    with its row id, or a delivery key that the row poisons because its role or
+    its execution id does not fit its transcript slot. A line that cannot be
+    read at all is an [Error], and nothing is added to any index by the scan.
+
+    A [provenance_index] holds the rows by provenance, by tool ordinal and by
+    execution id, and the poisoned delivery keys. [add_scanned_provenance]
+    adds one row. A provenance, a tool ordinal or an execution id that appears
+    twice poisons its delivery key. Adding the rows of a transcript in file
+    order gives the same index whether they are added in one read or in
+    several, so an index of the rows read so far can take the rows a later
+    append wrote.
+
+    [find_indexed_provenance] answers from an index: [Ok (Some row_id)] when
+    the delivery already has its row and [Ok None] when it has none. It is an
+    [Error] when the delivery cannot be answered safely: its key is poisoned,
+    its rows are duplicated, or its tool ordinal or execution id belongs to
+    another delivery. An autonomous turn whose tool rows have no input binding
+    row is poisoned for as long as that row is missing.
+    [transcript_provenance_readable] asks only whether every line can be read.
     [Keeper_chat_store] includes this module. *)
 
-module Provenance_key :
-  sig
-    type t = Keeper_chat_delivery_identity.delivery_provenance
-    val equal : t -> t -> bool
-    val hash : 'a -> int
-  end
+type scanned_provenance
 
-module Provenance_index :
-  sig
-    type key = Provenance_key.t
-    type 'a t = 'a Hashtbl.Make(Provenance_key).t
-    val create : int -> 'a t
-    val clear : 'a t -> unit
-    val reset : 'a t -> unit
-    val copy : 'a t -> 'a t
-    val add : 'a t -> key -> 'a -> unit
-    val remove : 'a t -> key -> unit
-    val find_and_remove : 'a t -> key -> 'a option
-    val find : 'a t -> key -> 'a
-    val find_opt : 'a t -> key -> 'a option
-    val find_all : 'a t -> key -> 'a list
-    val replace : 'a t -> key -> 'a -> unit
-    val find_and_replace : 'a t -> key -> 'a -> 'a option
-    val mem : 'a t -> key -> bool
-    val iter : (key -> 'a -> unit) -> 'a t -> unit
-    val filter_map_inplace : (key -> 'a -> 'a option) -> 'a t -> unit
-    val fold : (key -> 'a -> 'acc -> 'acc) -> 'a t -> 'acc -> 'acc
-    val length : 'a t -> int
-    val stats : 'a t -> Hashtbl.statistics
-    val to_seq : 'a t -> (key * 'a) Seq.t
-    val to_seq_keys : 'a t -> key Seq.t
-    val to_seq_values : 'a t -> 'a Seq.t
-    val add_seq : 'a t -> (key * 'a) Seq.t -> unit
-    val replace_seq : 'a t -> (key * 'a) Seq.t -> unit
-    val of_seq : (key * 'a) Seq.t -> 'a t
-  end
-
-module Delivery_key :
-  sig
-    type t = Keeper_chat_delivery_identity.delivery_key
-    val equal : t -> t -> bool
-    val hash : 'a -> int
-  end
-
-module Poisoned_delivery_keys :
-  sig
-    type key = Delivery_key.t
-    type 'a t = 'a Hashtbl.Make(Delivery_key).t
-    val create : int -> 'a t
-    val clear : 'a t -> unit
-    val reset : 'a t -> unit
-    val copy : 'a t -> 'a t
-    val add : 'a t -> key -> 'a -> unit
-    val remove : 'a t -> key -> unit
-    val find_and_remove : 'a t -> key -> 'a option
-    val find : 'a t -> key -> 'a
-    val find_opt : 'a t -> key -> 'a option
-    val find_all : 'a t -> key -> 'a list
-    val replace : 'a t -> key -> 'a -> unit
-    val find_and_replace : 'a t -> key -> 'a -> 'a option
-    val mem : 'a t -> key -> bool
-    val iter : (key -> 'a -> unit) -> 'a t -> unit
-    val filter_map_inplace : (key -> 'a -> 'a option) -> 'a t -> unit
-    val fold : (key -> 'a -> 'acc -> 'acc) -> 'a t -> 'acc -> 'acc
-    val length : 'a t -> int
-    val stats : 'a t -> Hashtbl.statistics
-    val to_seq : 'a t -> (key * 'a) Seq.t
-    val to_seq_keys : 'a t -> key Seq.t
-    val to_seq_values : 'a t -> 'a Seq.t
-    val add_seq : 'a t -> (key * 'a) Seq.t -> unit
-    val replace_seq : 'a t -> (key * 'a) Seq.t -> unit
-    val of_seq : (key * 'a) Seq.t -> 'a t
-  end
-
-module Tool_ordinal :
-  sig
-    type t = Poisoned_delivery_keys.key * int
-    val equal :
-      Poisoned_delivery_keys.key * int ->
-      Poisoned_delivery_keys.key * int -> bool
-    val hash : 'a -> int
-  end
-
-module Tool_ordinal_index :
-  sig
-    type key = Tool_ordinal.t
-    type 'a t = 'a Hashtbl.Make(Tool_ordinal).t
-    val create : int -> 'a t
-    val clear : 'a t -> unit
-    val reset : 'a t -> unit
-    val copy : 'a t -> 'a t
-    val add : 'a t -> key -> 'a -> unit
-    val remove : 'a t -> key -> unit
-    val find_and_remove : 'a t -> key -> 'a option
-    val find : 'a t -> key -> 'a
-    val find_opt : 'a t -> key -> 'a option
-    val find_all : 'a t -> key -> 'a list
-    val replace : 'a t -> key -> 'a -> unit
-    val find_and_replace : 'a t -> key -> 'a -> 'a option
-    val mem : 'a t -> key -> bool
-    val iter : (key -> 'a -> unit) -> 'a t -> unit
-    val filter_map_inplace : (key -> 'a -> 'a option) -> 'a t -> unit
-    val fold : (key -> 'a -> 'acc -> 'acc) -> 'a t -> 'acc -> 'acc
-    val length : 'a t -> int
-    val stats : 'a t -> Hashtbl.statistics
-    val to_seq : 'a t -> (key * 'a) Seq.t
-    val to_seq_keys : 'a t -> key Seq.t
-    val to_seq_values : 'a t -> 'a Seq.t
-    val add_seq : 'a t -> (key * 'a) Seq.t -> unit
-    val replace_seq : 'a t -> (key * 'a) Seq.t -> unit
-    val of_seq : (key * 'a) Seq.t -> 'a t
-  end
-
-module Execution_id_key :
-  sig
-    type t = Ids.Execution_id.t
-    val equal : t -> t -> bool
-    val hash : 'a -> int
-  end
-
-module Execution_index :
-  sig
-    type key = Execution_id_key.t
-    type 'a t = 'a Hashtbl.Make(Execution_id_key).t
-    val create : int -> 'a t
-    val clear : 'a t -> unit
-    val reset : 'a t -> unit
-    val copy : 'a t -> 'a t
-    val add : 'a t -> key -> 'a -> unit
-    val remove : 'a t -> key -> unit
-    val find_and_remove : 'a t -> key -> 'a option
-    val find : 'a t -> key -> 'a
-    val find_opt : 'a t -> key -> 'a option
-    val find_all : 'a t -> key -> 'a list
-    val replace : 'a t -> key -> 'a -> unit
-    val find_and_replace : 'a t -> key -> 'a -> 'a option
-    val mem : 'a t -> key -> bool
-    val iter : (key -> 'a -> unit) -> 'a t -> unit
-    val filter_map_inplace : (key -> 'a -> 'a option) -> 'a t -> unit
-    val fold : (key -> 'a -> 'acc -> 'acc) -> 'a t -> 'acc -> 'acc
-    val length : 'a t -> int
-    val stats : 'a t -> Hashtbl.statistics
-    val to_seq : 'a t -> (key * 'a) Seq.t
-    val to_seq_keys : 'a t -> key Seq.t
-    val to_seq_values : 'a t -> 'a Seq.t
-    val add_seq : 'a t -> (key * 'a) Seq.t -> unit
-    val replace_seq : 'a t -> (key * 'a) Seq.t -> unit
-    val of_seq : (key * 'a) Seq.t -> 'a t
-  end
-
-type indexed_provenance =
-  | Unique_provenance of string
-  | Duplicate_provenance
-
-type indexed_tool_ordinal =
-  | Unique_tool_ordinal of
-      Keeper_chat_delivery_identity.transcript_slot * string
-  | Duplicate_tool_ordinal
-
-type execution_owner =
-  { delivery_key : Keeper_chat_delivery_identity.delivery_key
-  ; ordinal : int
+type scanned_rows =
+  { scanned : scanned_provenance list (** The lines that are not empty, in order. *)
+  ; newlines : int (** How many newlines the text holds. *)
   }
 
-type indexed_execution =
-  | Unique_execution of execution_owner
-  | Reused_execution
+val scan_transcript_rows : first_line:int -> string -> (scanned_rows, string) result
+(** [first_line] is the number of the text's first line in its transcript; an
+    [Error] names the line it could not read by that numbering. *)
 
-type autonomous_input_index
+type provenance_index
 
-type provenance_index =
-  { valid : indexed_provenance Provenance_index.t
-  ; poisoned_delivery_keys : string Poisoned_delivery_keys.t
-  ; tool_ordinals : indexed_tool_ordinal Tool_ordinal_index.t
-  ; executions : indexed_execution Execution_index.t
-  ; autonomous_inputs : autonomous_input_index
-  }
+val empty_provenance_index : unit -> provenance_index
 
-val provenance_index_of_existing :
-  string -> (provenance_index, string) result
+val add_scanned_provenance : provenance_index -> scanned_provenance -> unit
 
 val transcript_provenance_readable : string -> (unit, string) result
 
@@ -212,7 +54,5 @@ val validate_indexed_autonomous_inputs :
 
 val find_indexed_provenance :
   provenance_index ->
-  provenance:Provenance_index.key -> (string option, string) result
-
-val find_provenance :
-  string -> provenance:Provenance_index.key -> (string option, string) result
+  provenance:Keeper_chat_delivery_identity.delivery_provenance ->
+  (string option, string) result

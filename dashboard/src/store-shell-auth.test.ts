@@ -107,7 +107,7 @@ describe('refreshShell auth failure handling', () => {
     expect(fullFetches.length).toBe(2)
   })
 
-  it('clears canonical actor and auth summary when shell refresh fails', async () => {
+  it('keeps the request actor and withdraws auth summary when the shell read fails', async () => {
     apiMocks.fetchDashboardShell.mockRejectedValue(new Error('network down'))
 
     const sessionActor = await import('./lib/dashboard-session-actor')
@@ -132,7 +132,7 @@ describe('refreshShell auth failure handling', () => {
     const refreshed = await store.refreshShell({ force: true })
 
     expect(refreshed).toBe(false)
-    expect(sessionActor.currentCanonicalDashboardActor()).toBeNull()
+    expect(sessionActor.currentCanonicalDashboardActor()).toBe('codex')
     expect(store.shellAuthSummary.value).toBeNull()
     expect(toastMocks.showToast).toHaveBeenCalledWith(
       '서버 연결 실패 — 데이터를 불러올 수 없습니다',

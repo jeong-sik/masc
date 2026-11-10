@@ -827,6 +827,88 @@ let test_admission_repairs_resume_checkpoint () =
   Alcotest.(check bool) "resume dispatched" true !dispatched
 ;;
 
+(* The end of a history, read from its last message as a store that holds the
+   messages apart reads it. *)
+let tail_end_of messages =
+  let rec read reading = function
+    | [] -> U.Every_request_answered
+    | message :: before ->
+      (match U.read_tail_message reading message with
+       | U.Tail_end ending -> ending
+       | U.Reads_message_before reading -> read reading before)
+  in
+  read U.tail_reading_start (List.rev messages)
+
+let tail_end_name = function
+  | U.Every_request_answered -> "Every_request_answered"
+  | U.Request_awaits_results -> "Request_awaits_results"
+
+(* Every history of up to five of these messages. Five hold a cycle of two
+   calls answered one result at a time and the request of the cycle after
+   it. *)
+let test_tail_reading_agrees_with_close_open_tail () =
+  let kinds =
+    [ "user text", text T.User "q"
+    ; "assistant text", text T.Assistant "a"
+    ; "use a", message T.Assistant [ use "a" ]
+    ; "use b", message T.Assistant [ use "b" ]
+    ; "use a+b", message T.Assistant [ use "a"; use "b" ]
+    ; "result a", message T.Tool [ result "a" ]
+    ; "result b", message T.Tool [ result "b" ]
+    ; "result a+b", message T.Tool [ result "a"; result "b" ]
+    ; "user result a", message T.User [ result "a" ]
+    ; "use a with result a", message T.Assistant [ use "a"; result "a" ]
+    ; "user use a", message T.User [ use "a" ]
+    ]
+  in
+  let rec histories_of_length length =
+    if length = 0
+    then [ [] ]
+    else
+      List.concat_map
+        (fun later -> List.map (fun kind -> kind :: later) kinds)
+        (histories_of_length (length - 1))
+  in
+  let appended = ref 0 in
+  let left_as_is = ref 0 in
+  let refused_answered = ref 0 in
+  let refused_awaiting = ref 0 in
+  List.iter
+    (fun length ->
+       List.iter
+         (fun history ->
+            let ending = tail_end_of (List.map snd history) in
+            let disagree closers =
+              Alcotest.failf
+                "[%s]: close_open_tail appends %d results, the end reads %s"
+                (String.concat "; " (List.map fst history))
+                closers
+                (tail_end_name ending)
+            in
+            match U.close_open_tail (List.map snd history), ending with
+            | Ok { U.closed_tool_use_ids = []; _ }, U.Every_request_answered -> incr left_as_is
+            | Ok { U.closed_tool_use_ids = _ :: _; _ }, U.Request_awaits_results -> incr appended
+            | Ok { U.closed_tool_use_ids; _ }, (U.Every_request_answered | U.Request_awaits_results) ->
+              disagree (List.length closed_tool_use_ids)
+            | Error (_ : U.structural_error), U.Every_request_answered -> incr refused_answered
+            | Error (_ : U.structural_error), U.Request_awaits_results -> incr refused_awaiting)
+         (histories_of_length length))
+    [ 0; 1; 2; 3; 4; 5 ];
+  let seen label count = Alcotest.(check bool) label true (!count > 0) in
+  seen "histories that get a result appended" appended;
+  seen "histories left as they are" left_as_is;
+  seen "refused histories whose end reads answered" refused_answered;
+  seen "refused histories whose end awaits results" refused_awaiting
+
+(* The results a request carries itself do not answer it: [partition] refuses
+   such a message, and the end then awaits results so the whole history is
+   read. *)
+let test_tail_reading_does_not_count_the_results_of_the_request_itself () =
+  Alcotest.(check string)
+    "a request with its own result"
+    "Request_awaits_results"
+    (tail_end_name (tail_end_of [ message T.Assistant [ use "a"; result "a" ] ]))
+
 let () =
   Alcotest.run "keeper_transcript_unit"
     [ ( "resume admission", [ Alcotest.test_case "repairs the checkpoint used by resume" `Quick test_admission_repairs_resume_checkpoint ] )
@@ -908,5 +990,11 @@ let () =
             test_close_open_cycles_closes_only_the_unanswered_ids
         ; Alcotest.test_case "admission dispatches an interrupted history" `Quick
             test_admission_dispatches_an_interrupted_history
+        ] )
+    ; ( "the end read from the last message"
+      , [ Alcotest.test_case "agrees with close_open_tail on every accepted history" `Quick
+            test_tail_reading_agrees_with_close_open_tail
+        ; Alcotest.test_case "does not count the results of the request itself" `Quick
+            test_tail_reading_does_not_count_the_results_of_the_request_itself
         ] )
     ]

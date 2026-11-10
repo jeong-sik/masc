@@ -39,7 +39,7 @@ let delivery ~target ~request_id ~seq ~content : Workspace_broadcast.broadcast_d
   }
 ;;
 
-let with_workspace f =
+let with_workspace_env f =
   let root = Filename.temp_file "broadcast-wakeup-" "" in
   Sys.remove root;
   Unix.mkdir root 0o755;
@@ -55,7 +55,10 @@ let with_workspace f =
       Eio_guard.disable ();
       ignore (Workspace.reset config);
       Unix.rmdir root)
-    (fun () -> f config)
+    (fun () -> f env config)
+;;
+
+let with_workspace f = with_workspace_env (fun _ config -> f config)
 ;;
 
 let rec mkdir_p path =
@@ -772,7 +775,9 @@ let test_projection_waits_for_the_mention_transcript () =
 ;;
 
 let test_workspace_message_mutation_invalidates_workspace_and_health () =
-  with_workspace @@ fun config ->
+  with_workspace_env @@ fun env config ->
+  Eio.Switch.run @@ fun sw ->
+  let state = Mcp_server.For_testing.create_state ~base_path:config.base_path in
   let workspace_projection = ref 0 in
   let dashboard_projection = ref 0 in
   let unrelated_projection = ref 0 in
@@ -790,12 +795,25 @@ let test_workspace_message_mutation_invalidates_workspace_and_health () =
   ignore (read workspace_key workspace_projection);
   ignore (read "unrelated:message-mutation" unrelated_projection);
   let previous = Atomic.get Workspace_hooks.on_workspace_message_mutation_fn in
+  let received = Eio.Stream.create 8 and foreign = ref 0 in
+  let scope = Mcp_server.workspace_scope state in
+  Server_observation_input.subscribe ~sw ~base_path:config.base_path
+    ~observer_instance_id:(Server_observer_scope.instance_id scope) (fun input ->
+      match input with
+      | Server_observation_input.Workspace_messages _ -> Eio.Stream.add received input
+      | _ -> ());
+  Server_observation_input.subscribe ~sw ~base_path:(config.base_path ^ "-foreign")
+    ~observer_instance_id:(Server_observer_scope.instance_id scope) (fun input ->
+      match input with
+      | Server_observation_input.Workspace_messages _ -> incr foreign
+      | _ -> ());
   Fun.protect
     ~finally:(fun () ->
       Atomic.set Workspace_hooks.on_workspace_message_mutation_fn previous;
       Dashboard_cache.invalidate_all ())
     (fun () ->
       Broadcast_wakeup.install_workspace_message_mutation_invalidation
+        ~state ~sw ~mono_clock:(Eio.Stdenv.mono_clock env)
         ~invalidate_full_health_snapshot:(fun () ->
           incr full_health_invalidations)
         ();
@@ -809,7 +827,22 @@ let test_workspace_message_mutation_invalidates_workspace_and_health () =
       check int "dashboard workspace projection recomputed" 2 !dashboard_projection;
       check int "workspace projection recomputed" 2 !workspace_projection;
       check int "unrelated projection preserved" 1 !unrelated_projection;
-      check int "full health invalidated once" 1 !full_health_invalidations)
+      check int "full health invalidated once" 1 !full_health_invalidations;
+      ignore (Eio.Stream.take received);
+      let content = "Original committed system-record observation" in
+      let delivery = match Workspace.broadcast ~audience:Workspace_broadcast.System_record
+          config ~from_agent:"source-writer" ~content with
+        | Ok delivery -> delivery
+        | Error _ -> fail "the original workspace message did not commit" in
+      check bool "actual durable broadcast reaches its scoped direct consumer" true
+        (Eio.Stream.take received = Server_observation_input.Workspace_messages {
+          request_id = delivery.request_id; mention_delivery = Masc_domain.Mention_passive });
+      check int "another workspace receives no message hint" 0 !foreign;
+      (match Workspace.find_broadcast ~request_id:delivery.request_id config
+          ~from_agent:"source-writer" ~content with
+       | Ok (Some stored) -> check string "hint retains the exact committed message"
+           delivery.request_id stored.request_id
+       | Ok None | Error _ -> fail "hint had no matching original message"))
 ;;
 
 let test_durable_fleet_recipient_projection_is_idempotent () =

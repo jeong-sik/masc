@@ -929,9 +929,9 @@ let render_observation ~read_policy ~effective_actor ~light ~config ~sw ~clock ~
     {json; next_deadline_unix})
 ;;
 
-let observe_current ?actor ?(light = true) ~config ~sw ~clock ~proc_mgr () =
+let observe_current ?actor ?fixture ?(light = true) ~config ~sw ~clock ~proc_mgr () =
   let effective_actor = Dashboard_projection_cache.normalize_actor_name actor in
-  match execution_fixture_name () with
+  match execution_fixture_name ?fixture () with
   | Some "execution_smoke" -> {json = execution_smoke_fixture_json (); next_deadline_unix = None}
   | Some _ | None ->
       render_observation ~read_policy:Dashboard_projection_read.Current

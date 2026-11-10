@@ -1384,6 +1384,7 @@ let claim_and_start_keeper_persistence
       ~prepared_persistence
       ~sw
       ~clock
+      ~mono_clock
       ~net
       ~proc_mgr
       state
@@ -1407,6 +1408,7 @@ let claim_and_start_keeper_persistence
         Server_routes_http_runtime.invalidate_full_health_snapshot
       ~sw
       ~clock
+      ~mono_clock
       ~net
       ~proc_mgr
       state
@@ -1654,6 +1656,7 @@ let activate_owner_state
     ~prepared_persistence:initialized.prepared_keeper_persistence
     ~sw
     ~clock
+    ~mono_clock
     ~net
     ~proc_mgr
     state;

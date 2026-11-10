@@ -221,7 +221,7 @@ let test_reports_revision_snapshot_bytes_and_latest_delta () =
   let keeper = keeper_obj "solo" json in
   Alcotest.(check string)
     "schema"
-    "keeper.memory_os.current_health.v13"
+    "keeper.memory_os.current_health.v14"
     (string_field "schema" json);
   Alcotest.(check int) "revision" 2 (int_field "revision" keeper);
   Alcotest.(check int) "facts" 2 (int_field "facts" keeper);
@@ -1347,7 +1347,7 @@ let test_one_keepers_row_is_its_fleet_row () =
   let fleet = Health.keeper_memory_health_http_json ~base_path:base in
   let answer = Health.keeper_memory_health_row_http_json ~base_path:base ~keeper:"solo" in
   Alcotest.(check string) "the row answer names the fleet schema"
-    "keeper.memory_os.current_health.v13" (string_field "schema" answer);
+    "keeper.memory_os.current_health.v14" (string_field "schema" answer);
   Alcotest.(check bool) "the row is the fleet's row for the Keeper" true
     (Yojson.Safe.equal (keeper_obj "solo" fleet) (member "keeper" answer));
   let row_of keeper =
@@ -1357,6 +1357,163 @@ let test_one_keepers_row_is_its_fleet_row () =
     (Yojson.Safe.equal `Null (row_of "absent"));
   Alcotest.(check bool) "a path-shaped name answers no row" true
     (Yojson.Safe.equal `Null (row_of "../solo"))
+;;
+
+(* RFC-0517 §2.2: a commit moves its Keeper's since-start cells of the pass
+   that committed by exactly what it changed, and the hourly trend holds the
+   facts after each hour's last commit, from any source, for the last week. *)
+let test_a_commit_moves_its_pass_cells_and_the_hourly_trend () =
+  let module Pass = Masc.Keeper_memory_commit_pass in
+  let module Outcome = Masc.Keeper_memory_journal_outcome in
+  let base = fresh_dir "masc-memory-health-change-cells" in
+  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path:base in
+  let keeper_id = "change-cells" in
+  Fs_compat.mkdir_p keepers_dir;
+  let seconds_per_hour = 3600. in
+  let hour_of time = Float.floor (time /. seconds_per_hour) in
+  (* Every commit sits inside an hour that has already ended, so the clock
+     this test reads cannot move a commit across an hour's edge. *)
+  let current_hour = hour_of (Unix.gettimeofday ()) in
+  let at ~hours_ago ~minute =
+    ((current_hour -. float_of_int hours_ago) *. seconds_per_hour) +. (minute *. 60.)
+  in
+  let explicit kind = { source with Current.kind } in
+  let id = Types.memory_id in
+  let passes =
+    [ "admission"; "durable"; "continuity"; "cleanup"; "keeper_write"; "keeper_delete"
+    ; "operator_delete" ]
+  in
+  let changes = [ "added"; "absorbed"; "superseded"; "dropped" ] in
+  let row () = Health.keeper_memory_health_row_http_json ~base_path:base ~keeper:keeper_id in
+  let cells answer =
+    let table = member "changes_since_start" (member "keeper" answer) in
+    List.map (fun pass -> List.map (fun change -> int_field change (member pass table)) changes) passes
+  in
+  let absorbed_one = fact "absorbed one"
+  and absorbed_two = fact "absorbed two"
+  and absorbed_three = fact "absorbed three"
+  and revised_one = fact "revised one"
+  and revised_two = fact "revised two"
+  and retired = fact "retired claim"
+  and kept = fact "kept claim" in
+  ignore
+    (Current.replace ~keepers_dir ~keeper_id ~expected_revision:None
+       ~now:(at ~hours_ago:200 ~minute:15.) ~source
+       ~facts:
+         [ absorbed_one; absorbed_two; absorbed_three; revised_one; revised_two; retired; kept ]
+       ()
+     |> require_ok);
+  let written = fact "written claim" in
+  ignore
+    (Current.upsert_fact ~pass:Pass.Keeper_write ~keepers_dir ~keeper_id
+       ~now:(at ~hours_ago:168 ~minute:15.) ~source:(explicit Current.Explicit_write) written
+     |> Result.map_error Current.upsert_error_to_string
+     |> require_ok);
+  (match
+     Current.retract_fact ~pass:Pass.Keeper_delete ~keepers_dir ~keeper_id
+       ~now:(at ~hours_ago:167 ~minute:15.) ~source:(explicit Current.Explicit_retract)
+       ~memory_id:(id written) ~reason:"the Keeper withdrew it" ()
+   with
+   | Ok _ -> ()
+   | Error _ -> Alcotest.fail "the retraction failed");
+  let before = cells (row ()) in
+  (* One durable disposition: three absorptions, two revisions, a plain drop
+     and four new claims, so each change moves by its own amount. *)
+  let merged = fact "merged claim"
+  and successor_one = fact "successor one"
+  and successor_two = fact "successor two"
+  and fresh = fact "fresh claim" in
+  let drop value reason = { Types.memory_id = id value; reason } in
+  let absorb from = { Types.absorbed = id from; into = id merged } in
+  let revision from into = { Types.superseded = id from; superseded_by = id into } in
+  ignore
+    (Current.apply_disposition ~pass:Pass.Durable
+       ~dropped_statements:
+         [ drop revised_one "successor one restates it"
+         ; drop revised_two "successor two restates it"
+         ; drop retired "no longer true"
+         ]
+       ~absorbed:[ absorb absorbed_one; absorb absorbed_two; absorb absorbed_three ]
+       ~revisions:[ revision revised_one successor_one; revision revised_two successor_two ]
+       ~keepers_dir ~keeper_id ~now:(at ~hours_ago:3 ~minute:10.) ~source
+       ~new_claims:[ merged; successor_one; successor_two; fresh ]
+       ()
+     |> require_ok);
+  let moved = List.map2 (List.map2 (fun before after -> after - before)) before (cells (row ())) in
+  Alcotest.(check (list (pair string (list int))))
+    "the durable commit moves only its own pass, by each change it made"
+    (List.map
+       (fun pass -> pass, if String.equal pass "durable" then [ 4; 3; 2; 1 ] else [ 0; 0; 0; 0 ])
+       passes)
+    (List.combine passes moved);
+  (* A later commit of the same hour takes its point; a Librarian pass that
+     restates a held fact keeps the snapshot and adds no claim. *)
+  ignore
+    (Current.upsert_fact ~pass:Pass.Keeper_write ~keepers_dir ~keeper_id
+       ~now:(at ~hours_ago:3 ~minute:40.) ~source:(explicit Current.Explicit_write)
+       (fact "late claim")
+     |> Result.map_error Current.upsert_error_to_string
+     |> require_ok);
+  let before_restatement = cells (row ()) in
+  let restated =
+    Current.apply_disposition ~pass:Pass.Durable ~absorbed:[] ~revisions:[] ~keepers_dir ~keeper_id
+      ~now:(at ~hours_ago:1 ~minute:15.) ~source ~new_claims:[ fresh ] ()
+    |> require_ok
+  in
+  Alcotest.(check bool) "the restatement keeps the snapshot" true
+    (restated.Current.commit = Current.Unchanged);
+  Alcotest.(check (list (list int))) "a kept snapshot moves no cell" before_restatement
+    (cells (row ()));
+  let points = List.map (fun (point : Outcome.facts_at_hour) -> point.recorded_at, point.facts) in
+  let journaled =
+    [ at ~hours_ago:168 ~minute:15., 8
+    ; at ~hours_ago:167 ~minute:15., 7
+    ; at ~hours_ago:3 ~minute:40., 6
+    ; at ~hours_ago:1 ~minute:15., 6
+    ]
+  in
+  Alcotest.(check (list (pair (float 0.) int)))
+    "the journal keeps the week of hours that ends with its newest commit"
+    journaled
+    (points (Outcome.read ~keepers_dir ~keeper_id).Outcome.facts_by_hour);
+  let answer = row () in
+  let generated_hour = hour_of (float_field "generated_at" answer) in
+  (* The answer reads the same clock a moment later: this hour, or the next
+     one when an hour ended in between. The hours it keeps are counted from
+     its own time below. *)
+  Alcotest.(check bool) "the answer was written in this test's hour or the next" true
+    (generated_hour = current_hour || generated_hour = current_hour +. 1.);
+  let in_trend (recorded_at, _) =
+    let hour = hour_of recorded_at in
+    hour >= generated_hour -. 167. && hour <= generated_hour
+  in
+  let trend = List.filter in_trend journaled in
+  Alcotest.(check (list (pair (float 0.) int)))
+    "the row keeps the hours of the week that ends with its own"
+    trend
+    (List.map
+       (fun point -> float_field "recorded_at" point, int_field "facts" point)
+       (list_field "facts_by_hour" (member "keeper" answer)));
+  Alcotest.(check (list (pair (float 0.) int)))
+    "a point after the answer's hour is left out" []
+    (points
+       (Outcome.within ~now:(float_field "generated_at" answer)
+          [ { Outcome.recorded_at = (generated_hour +. 1.) *. seconds_per_hour; facts = 1 } ]));
+  let module Decode = Masc.Tui_decode_memory_health in
+  match Decode.decode_memory_health_row ~keeper:keeper_id answer with
+  | Ok { Decode.mhr_keeper = Decode.Row_present decoded; _ } ->
+    Alcotest.(check (list (pair (float 0.) int))) "the TUI reads the same trend" trend
+      (points decoded.Decode.mkh_facts_by_hour);
+    Alcotest.(check (list (pair string (list int))))
+      "the TUI reads the same counts"
+      (List.combine passes (cells answer))
+      (List.map
+         (fun (pass, (counts : Masc.Keeper_memory_commit_change.counts)) ->
+            ( Pass.to_label pass
+            , [ counts.added; counts.absorbed; counts.superseded; counts.dropped ] ))
+         decoded.Decode.mkh_changes_since_start)
+  | Ok _ -> Alcotest.fail "the TUI did not read the row as present"
+  | Error detail -> Alcotest.fail detail
 ;;
 
 (* The totals count the rows: unread turns go unknown with one unmeasured
@@ -1703,6 +1860,8 @@ let () =
             test_cold_health_read_and_commit_do_not_deadlock
         ; Alcotest.test_case "one Keeper's row is its fleet row" `Quick
             test_one_keepers_row_is_its_fleet_row
+        ; Alcotest.test_case "a commit moves its pass cells and the hourly trend" `Quick
+            test_a_commit_moves_its_pass_cells_and_the_hourly_trend
         ; Alcotest.test_case "the totals count the rows" `Quick test_totals_count_the_rows
         ; Alcotest.test_case "attention retains original observations" `Quick
             test_attention_retains_originals_and_clears_on_observation

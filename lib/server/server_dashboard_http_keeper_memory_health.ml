@@ -152,6 +152,10 @@ type keeper_health =
   ; removed : int
   ; snapshot_present : bool
   ; first_seen : float list option
+  ; facts_by_hour : Keeper_memory_journal_outcome.facts_at_hour list
+      (** Oldest first, as the journal fold keeps them. A cached row
+          outlives the hour it was read in, so the answer cuts these with
+          {!Keeper_memory_journal_outcome.within} at its own time. *)
   ; context_cycle : context_cycle
   ; librarian : librarian_health
   ; librarian_failures : int
@@ -223,11 +227,9 @@ let continuity_unread_atoms ~runtime_keepers_dir ~keeper_id saved =
      | Ok (Some _) | Ok None | Error _ -> None)
 ;;
 
-let librarian_health ~config ~keepers_dir keeper_id ~continuity_saved =
+let librarian_health ~config keeper_id ~continuity_saved
+    ~journal:{ Keeper_memory_journal_outcome.last_success_at; last_failure; facts_by_hour = _ } =
   let measurement = Keeper_librarian_queue_refresh.last_measurement ~config ~keeper_name:keeper_id in
-  let { Keeper_memory_journal_outcome.last_success_at; last_failure } =
-    Keeper_memory_journal_outcome.read ~keepers_dir ~keeper_id
-  in
   let last_failure_kind =
     Option.map Keeper_memory_os_journal_codec.librarian_failure_kind_to_string last_failure
   in
@@ -375,9 +377,9 @@ let source_health ~keepers_dir keeper_id =
 let keeper_health ~config ~keepers_dir keeper_id =
   let source_health = source_health ~keepers_dir keeper_id in
   let context_cycle = context_cycle ~config ~keeper_name:keeper_id in
+  let journal = Keeper_memory_journal_outcome.read ~keepers_dir ~keeper_id in
   let librarian =
-    librarian_health ~config ~keepers_dir keeper_id
-      ~continuity_saved:context_cycle.saved
+    librarian_health ~config keeper_id ~continuity_saved:context_cycle.saved ~journal
   in
   match
     Keeper_memory_os_current.read_for_keepers_dir ~keepers_dir ~keeper_id
@@ -395,6 +397,7 @@ let keeper_health ~config ~keepers_dir keeper_id =
     ; removed = 0
     ; snapshot_present = false
     ; first_seen = None
+    ; facts_by_hour = journal.facts_by_hour
     ; context_cycle
     ; librarian
     ; librarian_failures = librarian_failures_for_keeper keeper_id
@@ -435,6 +438,7 @@ let keeper_health ~config ~keepers_dir keeper_id =
           (List.map
              (fun (f : Keeper_memory_os_types.fact) -> f.first_seen)
              snapshot.facts)
+    ; facts_by_hour = journal.facts_by_hour
     ; context_cycle
     ; librarian
     ; librarian_failures = librarian_failures_for_keeper keeper_id
@@ -462,6 +466,7 @@ let keeper_health ~config ~keepers_dir keeper_id =
     ; removed = 0
     ; snapshot_present = false
     ; first_seen = None
+    ; facts_by_hour = journal.facts_by_hour
     ; context_cycle
     ; librarian
     ; librarian_failures = librarian_failures_for_keeper keeper_id
@@ -728,6 +733,14 @@ let keeper_health_entry_to_json ~now (h : keeper_health) =
     ; "removed", `Int h.removed
     ; "snapshot_present", `Bool h.snapshot_present
     ; "age_bins", age_bins_json
+    ; ( "facts_by_hour"
+      , Keeper_memory_journal_outcome.(facts_by_hour_to_json (within ~now h.facts_by_hour)) )
+      (* Read when the answer is written, not kept in the cached row. The
+         store counts after it releases its locks: the journal line that
+         empties the cached row comes before the count, and the commit
+         notification that empties a written fleet answer comes after it. *)
+    ; ( "changes_since_start"
+      , Keeper_memory_commit_change.(by_pass_to_json (since_start ~keeper_id:h.keeper_id)) )
     ; "context_cycle", context_cycle_to_json h.context_cycle
     ; ( "librarian"
       , `Assoc
@@ -821,7 +834,7 @@ let keeper_health_entry_to_json ~now (h : keeper_health) =
     ]
 ;;
 
-let schema = "keeper.memory_os.current_health.v13"
+let schema = "keeper.memory_os.current_health.v14"
 
 let fleet_cache_key ~base_path = "keeper_memory_health:" ^ base_path
 

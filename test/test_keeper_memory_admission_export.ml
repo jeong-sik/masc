@@ -121,7 +121,7 @@ let export cohort () = with_workspace @@ fun ~base_path ->
                 "memory_claim",`Null; "reason",`String "Capture-only fixture; no semantic judgment was performed."])
         candidates)])) in
   let committed = ref 0 and not_committed = ref 0 in
-  Runtime.run_best_effort ~pass:Masc.Keeper_memory_commit_pass.Admission ~write_scope:Runtime.Memory_maintenance ~admission ~cli_runner:runner
+  Runtime.run_best_effort ~write_scope:(Runtime.Memory_maintenance Masc.Keeper_memory_commit_pass.Admission) ~admission ~cli_runner:runner
     ~on_memory_committed:(fun () -> incr committed)
     ~on_not_committed:(fun _ -> incr not_committed)
     ~base_path ~keepers_dir ~keeper_id

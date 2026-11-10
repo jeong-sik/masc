@@ -168,9 +168,6 @@ val auth_dir : base_path:string -> string
 val credentials_dir : base_path:string -> string
 (** [<base_path>/.masc/credentials/]. Per-credential file storage. *)
 
-val agent_runtime_dir : base_path:string -> string
-(** [<base_path>/.masc/runtime/agent/]. Per-session agent runtime markers. *)
-
 val repos_dir : base_path:string -> string
 (** [<base_path>/.masc/repos/]. Managed repository checkouts. *)
 
@@ -319,7 +316,7 @@ val wiki_dirname : string
 (** The directory {!wiki_dir} names below [<base>/.masc]. *)
 
 val runtime_dirname : string
-(** The directory {!agent_runtime_dir} sits in below [<base>/.masc]. *)
+(** The runtime directory below [<base>/.masc]. *)
 
 val microvm_dirname : string
 (** The directory the microvm paths sit in below [<base>/.masc]. *)

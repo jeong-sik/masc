@@ -186,8 +186,7 @@ let json_of_body ~content_type body =
     | Some value ->
       let lowered = String.lowercase_ascii value in
       let prefix = "text/event-stream" in
-      String.length lowered >= String.length prefix
-      && String.equal (String.sub lowered 0 (String.length prefix)) prefix
+      String.starts_with ~prefix lowered
     | None -> false
   in
   if not is_event_stream
@@ -214,8 +213,7 @@ let json_of_body ~content_type body =
       let data =
         List.filter_map
           (fun line ->
-            if String.length line >= String.length prefix
-               && String.equal (String.sub line 0 (String.length prefix)) prefix
+            if String.starts_with ~prefix line
             then (
               let rest = String.sub line 5 (String.length line - 5) in
               (* One optional space after the colon belongs to the framing,

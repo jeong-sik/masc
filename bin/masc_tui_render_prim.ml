@@ -100,9 +100,6 @@ let runtime_assignment_label (assignment : runtime_assignment) =
       source
 ;;
 
-let runtime_assignment_targets = Masc_tui_types.runtime_assignment_targets
-;;
-
 let acting_pane_reserved_cols = ref 0
 
 
@@ -568,7 +565,7 @@ let search_marker_styled (state : state) =
   | Some marker ->
       Printf.sprintf "  %s%s%s"
         (match state.search with
-         | Some _ -> Masc_tui_theme.tone Masc_tui_theme.Accent
+         | Some _ -> Theme.accent ()
          | None -> Ansi.dim)
         marker Ansi.reset
 
@@ -840,7 +837,7 @@ let slash_hint_text ~restore draft =
   let paint (span : Masc_tui_command.hint_span) =
     match span with
     | Masc_tui_command.Typed text ->
-        Masc_tui_theme.tone Masc_tui_theme.Accent ^ text ^ restore
+        Theme.accent () ^ text ^ restore
     | Masc_tui_command.Wrong text -> Theme.bad () ^ text ^ restore
     | Masc_tui_command.Untyped text | Masc_tui_command.Detail text -> text
   in
@@ -2737,7 +2734,7 @@ let board_read_title ~screen ~id ~hearth ~votes ~replies =
     | _ -> ""
   in
   Printf.sprintf "%s  %s%s%s%s  %s%s%s  %s💬%d%s" screen
-    (Masc_tui_theme.tone Masc_tui_theme.Accent) id Ansi.reset hearth_tag
+    (Theme.accent ()) id Ansi.reset hearth_tag
     (board_score_style votes) (board_score_text votes) Ansi.reset
     (if replies > 0 then Theme.ok () else Ansi.dim) replies Ansi.reset
 
@@ -2746,7 +2743,7 @@ let board_read_title ~screen ~id ~hearth ~votes ~replies =
    screen draws through. Emphasis only ever restates what the count beside it
    already says, so NO_COLOR costs a reader nothing they cannot read. *)
 let magnitude_tone = function
-  | Magnitude.Leading -> (Masc_tui_theme.tone Masc_tui_theme.Accent)
+  | Magnitude.Leading -> (Theme.accent ())
   | Magnitude.Ordinary -> Ansi.reset
   | Magnitude.Below_even_share -> Ansi.dim
 
@@ -2871,8 +2868,8 @@ let planning_phase_column ~ko =
    Completed and Dropped are how the goal is doing; Verifying is where it
    is, and a goal under review is neither well nor unwell. It used to keep a
    raw colour for want of anywhere else to put it -- the theme had [status]
-   for health, [tone] for weight and [Syntax] for what a token is, and
-   nothing for a kind.
+   for health, dim and the accent for weight and [Syntax] for what a token
+   is, and nothing for a kind.
 
    It takes a categorical slot now (RFC-0431). Slot 4 is magenta, the hue it
    already drew, and magenta is one of the two the status axis does not
@@ -3179,7 +3176,7 @@ let keeper_control_hints ?(offers_chat = true) ?(offers_back = true) ?(taken = [
      key that needs two presses does not read like the keys that need one. *)
   let hint action label =
     let key_color =
-      if Keeper_control.requires_confirmation action then (Theme.bad ()) else (Masc_tui_theme.tone Masc_tui_theme.Accent)
+      if Keeper_control.requires_confirmation action then (Theme.bad ()) else (Theme.accent ())
     in
     if List.mem action available then
       Printf.sprintf "%s%s%s:%s" key_color (Keeper_control.action_key action)
@@ -3197,7 +3194,7 @@ let keeper_control_hints ?(offers_chat = true) ?(offers_back = true) ?(taken = [
     match reading with
     | Some reading
       when List.mem reading.Keeper_control.name state.keeper_yolo_names ->
-        (Masc_tui_theme.tone Masc_tui_theme.Accent) ^ "g" ^ Ansi.reset ^ ":auto"
+        (Theme.accent ()) ^ "g" ^ Ansi.reset ^ ":auto"
     | Some _ | None -> (Theme.bad ()) ^ "g" ^ Ansi.reset ^ ":yolo"
   in
   let toggle_key =
@@ -3218,8 +3215,8 @@ let keeper_control_hints ?(offers_chat = true) ?(offers_back = true) ?(taken = [
      remote_ssh backend, and the row beside it still said "s:shutdown". *)
   let view_and_order =
     if state.view = Keepers Keeper_list then
-      [ "v", (Masc_tui_theme.tone Masc_tui_theme.Accent) ^ "v" ^ Ansi.reset ^ ":view"
-      ; "o", (Masc_tui_theme.tone Masc_tui_theme.Accent) ^ "o" ^ Ansi.reset ^ ":order"
+      [ "v", (Theme.accent ()) ^ "v" ^ Ansi.reset ^ ":view"
+      ; "o", (Theme.accent ()) ^ "o" ^ Ansi.reset ^ ":order"
       ]
     else []
   in
@@ -3228,7 +3225,7 @@ let keeper_control_hints ?(offers_chat = true) ?(offers_back = true) ?(taken = [
      spell them. The roster wrote [right/enter] in lowercase, which
      [Masc_tui_footer.never_dropped_keys] does not pin, and gave no way back
      to the Dashboard at all. *)
-  let accent key = (Masc_tui_theme.tone Masc_tui_theme.Accent) ^ key ^ Ansi.reset in
+  let accent key = (Theme.accent ()) ^ key ^ Ansi.reset in
   (* The Story window belongs to the list. It takes Enter, Esc and Tab while it
      is open, and [s] and [m] with them. *)
   let story = if state.view = Keepers Keeper_list then state.keeper_story else None in
@@ -3276,7 +3273,7 @@ let keeper_control_hints ?(offers_chat = true) ?(offers_back = true) ?(taken = [
           (* RFC tui-server-lifecycle: with no server up, "s" starts one
              rather than shutting a keeper down, so the hint follows suit. *)
           ; "s", (match state.connection_status with
-             | Disconnected -> (Masc_tui_theme.tone Masc_tui_theme.Accent) ^ "s" ^ Ansi.reset ^ ":start server"
+             | Disconnected -> (Theme.accent ()) ^ "s" ^ Ansi.reset ^ ":start server"
              | Connecting | Booting | Degraded | Connected ->
                  hint Keeper_control.Shutdown "shutdown")
             (* Delete is the only action a keeper whose configuration failed to
@@ -3285,21 +3282,21 @@ let keeper_control_hints ?(offers_chat = true) ?(offers_back = true) ?(taken = [
                dimmed "p pause" and nothing else, so the one key that worked was
                the one key nothing named. *)
           ; Keeper_control.action_key Keeper_control.Delete, hint Keeper_control.Delete "delete"
-          ; "e", (Masc_tui_theme.tone Masc_tui_theme.Accent) ^ "e" ^ Ansi.reset ^ ":settings"
-          ; "a", (Masc_tui_theme.tone Masc_tui_theme.Accent) ^ "a" ^ Ansi.reset ^ ":new"
+          ; "e", (Theme.accent ()) ^ "e" ^ Ansi.reset ^ ":settings"
+          ; "a", (Theme.accent ()) ^ "a" ^ Ansi.reset ^ ":new"
           ; (if state.view = Keepers Keeper_detail then
-               "o", (Masc_tui_theme.tone Masc_tui_theme.Accent) ^ "o" ^ Ansi.reset ^ ":logs"
-             else "l", (Masc_tui_theme.tone Masc_tui_theme.Accent) ^ "l" ^ Ansi.reset ^ ":logs")
-          ; "t", (Masc_tui_theme.tone Masc_tui_theme.Accent) ^ "t" ^ Ansi.reset ^ ":calls"
+               "o", (Theme.accent ()) ^ "o" ^ Ansi.reset ^ ":logs"
+             else "l", (Theme.accent ()) ^ "l" ^ Ansi.reset ^ ":logs")
+          ; "t", (Theme.accent ()) ^ "t" ^ Ansi.reset ^ ":calls"
           ; "g", gate_hint
           ; (if state.view = Keepers Keeper_detail then "U" else "u"),
-            (Masc_tui_theme.tone Masc_tui_theme.Accent)
+            (Theme.accent ())
             ^ (if state.view = Keepers Keeper_detail then "U" else "u")
             ^ Ansi.reset ^ ":runtime"
             (* Dimmed rather than dropped, the same way an unavailable
                lifecycle key is: chat lives in detail, and a key that vanishes
                between surfaces reads as a key that does not exist. *)
-          ; "c", (if offers_chat then (Masc_tui_theme.tone Masc_tui_theme.Accent) ^ "c" ^ Ansi.reset ^ ":chat"
+          ; "c", (if offers_chat then (Theme.accent ()) ^ "c" ^ Ansi.reset ^ ":chat"
              else Ansi.dim ^ "c:chat" ^ Ansi.reset)
           ]
       @ way
@@ -4041,7 +4038,7 @@ let config_metadata_summary (state : state) =
    Sheet, so on a 30-row terminal those rows came out of the keys the sheet is
    opened to read. *)
 let help_masthead (_state : state) =
-  [ "  " ^ Ansi.bold ^ Masc_tui_theme.tone Masc_tui_theme.Accent ^ "MASC"
+  [ "  " ^ Ansi.bold ^ Theme.accent () ^ "MASC"
     ^ Ansi.reset ^ Ansi.dim ^ " \xc2\xb7 Multi-Agent Shared Context" ^ Ansi.reset
   ; ""
   ]
@@ -4134,7 +4131,7 @@ let help_lines ~width (state : state) =
            in
            help_entry_rows ~width
              ~lead:
-               (Printf.sprintf "  %s%s%s " (Masc_tui_theme.tone Masc_tui_theme.Accent)
+               (Printf.sprintf "  %s%s%s " (Theme.accent ())
                   key_cell Ansi.reset)
              ~lead_cells:(2 + Message_layout.display_width key_cell + 1)
              ~column:(2 + help_key_cells + 1) action)
@@ -4229,7 +4226,7 @@ module Context_bars = Masc_tui_context_bars
 let context_source_style = function
   | Masc_tui_context_inspector.Turn_prompt_assembly -> Theme.warn ()
   | Masc_tui_context_inspector.Effective_tool_surface ->
-      Masc_tui_theme.tone Masc_tui_theme.Accent
+      Theme.accent ()
   | Masc_tui_context_inspector.Provider_message_list ->
       Theme.category Theme.Slot_2
 

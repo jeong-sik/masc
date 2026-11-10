@@ -32,8 +32,6 @@ type extraction_error =
           consumed the whole budget). Retry with a larger budget or a runtime
           that is not thinking-token-starved. *)
 
-val string_of_error : extraction_error -> string
-
 val classify
   :  truncated:bool
   -> content:string

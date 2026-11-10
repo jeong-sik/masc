@@ -382,8 +382,6 @@ type turn_verdict = Keeper_world_observation_turn_types.turn_verdict =
 
 let turn_reason_of_event_queue_trigger =
   Keeper_world_observation_turn_types.turn_reason_of_event_queue_trigger
-let skip_reason_to_string =
-  Keeper_world_observation_turn_types.skip_reason_to_string
 let channel_to_string = Keeper_world_observation_turn_types.channel_to_string
 let channel_of_string = Keeper_world_observation_turn_types.channel_of_string
 let is_autonomous = Keeper_world_observation_turn_types.is_autonomous
@@ -1464,6 +1462,10 @@ let collect_board_events_with_cursor_policy
                        ~base_path meta.name stimulus with
                | Keeper_registry_event_queue.Stimulus_enqueued
                | Keeper_registry_event_queue.Stimulus_already_present -> Ok None
+               | Keeper_registry_event_queue.Stimulus_shutdown_reserved operation_id ->
+                 Error
+                   (Delivery_failed
+                      (Keeper_registry_event_queue.shutdown_reserved_detail operation_id))
                | Keeper_registry_event_queue.Stimulus_storage_error detail ->
                  Error (Delivery_failed detail))
              else
@@ -1761,18 +1763,6 @@ let observe_direct_keeper_msg ~(config : Workspace.config) ~(meta : keeper_meta)
    a signal before the Keeper can observe it. *)
 let claimable_drives_wake claimable_task_count = claimable_task_count > 0
 let failed_drives_wake failed_task_count = failed_task_count > 0
-(* An AwaitingVerification obligation is NOT a Keeper wake signal: the
-   application-owned system LLM completion authority or authenticated HITL
-   operator decides it out of band. Neither authority is a Keeper. Surfacing
-   it here would hand Keepers work that is not theirs — which is how a Keeper
-   named "verifier" came to hold approval authority in the first place. *)
-let actionable_signal_present (observation : world_observation) =
-  observation.pending_messages <> []
-  || observation.pending_board_events <> []
-  || claimable_drives_wake (claimable_task_count observation)
-  || failed_drives_wake observation.failed_task_count
-  || observation.scheduled_automation.due_ready_count > 0
-;;
 
 let has_pending_board_activity (observation : world_observation) =
   List.exists is_board_activity_event observation.pending_board_events

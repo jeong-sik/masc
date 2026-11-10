@@ -67,11 +67,11 @@ let test_missing_assignment_does_not_target_any_runtime () =
   Alcotest.(check bool)
     "not grouped under the configured default"
     false
-    (Masc_tui_render_prim.runtime_assignment_targets assignment "default.lane");
+    (Masc_tui_types.runtime_assignment_targets assignment "default.lane");
   Alcotest.(check bool)
     "not grouped under another runtime"
     false
-    (Masc_tui_render_prim.runtime_assignment_targets assignment "other.runtime")
+    (Masc_tui_types.runtime_assignment_targets assignment "other.runtime")
 ;;
 
 let () =

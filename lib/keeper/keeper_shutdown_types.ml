@@ -16,7 +16,7 @@ module Operation_id = struct
     let prefix_length = String.length prefix in
     if
       String.length value = prefix_length + 36
-      && String.equal (String.sub value 0 prefix_length) prefix
+      && String.starts_with ~prefix value
     then
       match Uuidm.of_string (String.sub value prefix_length 36) with
       | Some _ -> Ok value

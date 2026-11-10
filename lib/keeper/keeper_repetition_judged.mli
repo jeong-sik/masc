@@ -45,11 +45,3 @@ val reset_history : Agent_core.Context.t -> (Agent_core.Context.t, error) result
     An absent boundary stays absent so first activation still snapshots the ledger. *)
 
 val record : Agent_core.Context.t -> t -> unit
-
-(** [seed_beyond ~judged pairs] keeps the newest [length pairs - judged] of
-    [pairs] (newest first): everything a previous yield has not judged.
-    [judged] at or past the length keeps nothing. *)
-val seed_beyond
-  :  judged:int
-  -> 'a list
-  -> 'a list

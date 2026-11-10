@@ -1,0 +1,67 @@
+{
+  "captured_at": "2026-11-10T07:03:15.722252+00:00",
+  "source_upper": "6b894ca5604d62b9af3b406538e30283190b7854",
+  "source_lower": "a4b9a50833cd1fad69ec420e4eb2aa58787c571b",
+  "source_base": "2ed1d7061e529e5f0c0ab9cb1cdaaf16e5458b3d",
+  "dashboard_source_tree": "332dcb164c3600c8ef94f44ee58531226f21fc75",
+  "browser_space": 60,
+  "page": "p1",
+  "browser": "Ego Lite Chromium",
+  "fixture": "dashboard/fixtures/board-reactions-source",
+  "transport": "all application window.fetch calls handled by isolated synthetic HTTP; no live Board writes",
+  "cases": [
+    "failed batch/fallback after cached empty data: disabled, aria-pressed omitted, actual mouse click POST0",
+    "known selected reaction then failed POST: retain count, revoke authority, POST1",
+    "failed read-only retry: still disabled, POST1",
+    "successful read-only retry: count2, enabled, pressed=false, POST1"
+  ],
+  "frontend_source_sha256": {
+    "dashboard/src/components/board/reaction-bar.ts": "a057ad3502509249eb8682a101d774100554439e2d8cd5f77f372d36b7afefc9",
+    "dashboard/src/components/board/reaction-bar.test.ts": "58c2293ed563e34eefc4d93eccfd39c3d581a9dbc90f92eb7d461535eec9951f",
+    "dashboard/src/components/board/board-surface.ts": "466382499bf388cb904f5cf69d4cbbc78c9053467103ac21573d00a183adba8d",
+    "dashboard/src/components/board/board-surface.test.ts": "2b51012098818fbb1a63b55821b844491cdcd140bf05ab544184ef689e062b88",
+    "dashboard/src/styles/board-v2.css": "5f624e6d34fa5a861b531ad86693536fc049a70da533768c2a68ea31f1adcf87"
+  },
+  "backend_parse_origin_upper": "657cfe55fac7a9e43f2e1931799fca934b0d9839",
+  "backend_parse_inputs_match_capture": true,
+  "backend_feature_cases_authored": 7,
+  "backend_feature_cases_executed": 0,
+  "files": {
+    "unknown.json": {
+      "bytes": 1264,
+      "sha256": "f9bb5d328b11cb4e34ec13662ce47805871de45bc261cd7290ef1d9de8875123"
+    },
+    "unknown.png": {
+      "bytes": 58487,
+      "sha256": "ae4dee11ed138e5d155333a639f36a05468dec2db6f126b569c4cb8e04005e70"
+    },
+    "failed-write.json": {
+      "bytes": 2336,
+      "sha256": "0bdcd40379cd0c80ad1e94b3012df561de6205d6d3b7c7621b1f689ab1229803"
+    },
+    "failed-write.png": {
+      "bytes": 63293,
+      "sha256": "d95f915b21120d98ffdc55dbc19e82a5dfe9b958be055a61ec648be3482f169d"
+    },
+    "failed-read.json": {
+      "bytes": 1499,
+      "sha256": "3275aad57314bd9dd561b2cbb2637884576cd931653702e8ccaa9ae8dfc024ad"
+    },
+    "recovered.json": {
+      "bytes": 1388,
+      "sha256": "bbba3a9a74e90f18d9dcff0a6bb1e70ff0c7fcc41ca540031c253cfece5e7cd0"
+    },
+    "recovered.png": {
+      "bytes": 57581,
+      "sha256": "d29351dd6c01a0d659c23aa68c681ec145ab87e6ad3a612b252cdc1301ae5b39"
+    }
+  },
+  "not_established": [
+    "OCaml typing or warning checks",
+    "backend execution or durability",
+    "actual HTTP server behavior",
+    "CI",
+    "installation",
+    "deployment"
+  ]
+}

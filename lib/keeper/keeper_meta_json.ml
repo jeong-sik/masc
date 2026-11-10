@@ -107,5 +107,3 @@ let current_write_json meta =
   | Ok _ -> Ok json
   | Error detail -> Error detail
 ;;
-
-let canonical_keeper_meta_key_names = current_field_names

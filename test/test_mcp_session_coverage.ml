@@ -169,7 +169,7 @@ let test_inject_agent_name_adds_internal_actor_when_missing () =
     {|{"jsonrpc":"2.0","method":"tools/call","params":{"name":"masc_status","arguments":{"days":7}},"id":1}|}
   in
   let args =
-    Http_transport.inject_agent_name_into_body ~agent_name:"codex" body
+    Actor_injection.inject_agent_name_into_body ~agent_name:"codex" body
     |> tool_arguments_of_body
   in
   let open Yojson.Safe.Util in
@@ -183,7 +183,7 @@ let test_inject_agent_name_preserves_tool_target_by_default () =
     {|{"jsonrpc":"2.0","method":"tools/call","params":{"name":"masc_agent_fitness","arguments":{"agent_name":"target-keeper","days":7}},"id":1}|}
   in
   let args =
-    Http_transport.inject_agent_name_into_body ~agent_name:"codex" body
+    Actor_injection.inject_agent_name_into_body ~agent_name:"codex" body
     |> tool_arguments_of_body
   in
   let open Yojson.Safe.Util in
@@ -197,7 +197,7 @@ let test_inject_agent_name_rewrites_internal_actor_only () =
     {|{"jsonrpc":"2.0","method":"tools/call","params":{"name":"masc_agent_fitness","arguments":{"_agent_name":"dashboard","agent_name":"target-keeper","days":7}},"id":1}|}
   in
   let args =
-    Http_transport.inject_agent_name_into_body
+    Actor_injection.inject_agent_name_into_body
       ~rewrite_existing:true ~agent_name:"codex" body
     |> tool_arguments_of_body
   in

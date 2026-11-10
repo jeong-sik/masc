@@ -372,7 +372,7 @@
  (name test_dos_vision)
  (modules test_dos_vision)
  (libraries machine_worker_fixture eio_main base64 masc.machine_configuration alcotest unix yojson fs_compat masc masc_test_deps
-   masc.dos_lane masc.tool_types))
+   masc.dos_lane masc.tool_types mcp_protocol))
 
 (test
  (name test_sse_observer_epoch)
@@ -482,7 +482,6 @@
   test_keeper_lifecycle_global_gate
   test_keeper_memory_lane
   test_keeper_connector_attention_wake
-  test_keeper_raw_task_signal_wake
   test_broadcast_stores_raw_text
   test_keeper_mention_scope
   test_keeper_lane_mentions
@@ -819,7 +818,6 @@
   test_keeper_memory_lane
   test_env_keeper_scrub
   test_keeper_connector_attention_wake
-  test_keeper_raw_task_signal_wake
   test_broadcast_stores_raw_text
   test_keeper_mention_scope
   test_keeper_lane_mentions
@@ -2728,6 +2726,7 @@
 (include stanzas/test_board_comments_source.inc)
 (include stanzas/test_board_sub_boards_source.inc)
 (include stanzas/test_board_votes_source.inc)
+(include stanzas/test_board_reactions_source.inc)
 (include stanzas/test_board_posts_preflight.inc)
 
 (include stanzas/test_board_snapshot_rows.inc)
@@ -4110,11 +4109,6 @@
  (name test_tui_surface_needs)
  (modules test_tui_surface_needs)
  (libraries alcotest masc_tui_types))
-
-(test
- (name test_tui_quiz_scorecard)
- (modules test_tui_quiz_scorecard)
- (libraries alcotest masc masc_tui_types))
 
 (test
  (name test_tui_memory_fold)
@@ -7326,6 +7320,8 @@
 (include stanzas/test_task_history_page_cursor.inc)
 
 (include stanzas/test_list_util.inc)
+
+(include stanzas/test_release_companion_consistency.inc)
 
 (include stanzas/test_tui_code_msg.inc)
 (include stanzas/test_tui_context_msg.inc)

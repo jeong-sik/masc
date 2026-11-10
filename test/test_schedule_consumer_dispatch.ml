@@ -1176,6 +1176,8 @@ let test_one_call_cancels_every_pending_occurrence_of_a_schedule () =
     | Keeper_registry_event_queue.Stimulus_enqueued -> ()
     | Keeper_registry_event_queue.Stimulus_already_present ->
       fail "piled occurrence already present in a fresh workspace"
+    | Keeper_registry_event_queue.Stimulus_shutdown_reserved operation_id ->
+      fail (Keeper_registry_event_queue.shutdown_reserved_detail operation_id)
     | Keeper_registry_event_queue.Stimulus_storage_error detail -> fail detail
   in
   enqueue (occurrence 1);
@@ -1670,6 +1672,8 @@ let test_schedule_cancel_mid_turn_withdraws_the_running_turns_wake () =
    | Keeper_registry_event_queue.Stimulus_enqueued -> ()
    | Keeper_registry_event_queue.Stimulus_already_present ->
      fail "untaken occurrence already present in a fresh workspace"
+   | Keeper_registry_event_queue.Stimulus_shutdown_reserved operation_id ->
+     fail (Keeper_registry_event_queue.shutdown_reserved_detail operation_id)
    | Keeper_registry_event_queue.Stimulus_storage_error detail -> fail detail);
   let ctx : Tool_schedule.context =
     { config
@@ -1790,6 +1794,8 @@ let test_dispatch_drops_a_wake_withdrawn_after_intake () =
        | Keeper_registry_event_queue.Stimulus_enqueued -> ()
        | Keeper_registry_event_queue.Stimulus_already_present ->
          fail "batched wake already present in a fresh workspace"
+       | Keeper_registry_event_queue.Stimulus_shutdown_reserved operation_id ->
+         fail (Keeper_registry_event_queue.shutdown_reserved_detail operation_id)
        | Keeper_registry_event_queue.Stimulus_storage_error detail -> fail detail)
     [ wake ~schedule_id:"cancelled-schedule" ~occurrence_id:"cancelled-occurrence"
     ; wake ~schedule_id:"kept-schedule" ~occurrence_id:"kept-occurrence"
@@ -2320,10 +2326,14 @@ let test_shutdown_fence_covers_direct_durable_queue_producers () =
             keeper_name
             stimulus
         with
+        | Keeper_registry_event_queue.Stimulus_shutdown_reserved reserved_by ->
+          check bool "direct stimulus enqueue names the shutdown operation" true
+            (Keeper_shutdown_types.Operation_id.equal operation_id reserved_by)
         | Keeper_registry_event_queue.Stimulus_storage_error detail ->
-          check string "direct stimulus enqueue reports shutdown fence"
-            expected_rejection
-            detail
+          fail
+            ("direct stimulus enqueue reported the shutdown fence as a storage \
+              failure: "
+             ^ detail)
         | Keeper_registry_event_queue.Stimulus_enqueued
         | Keeper_registry_event_queue.Stimulus_already_present ->
           fail "direct stimulus enqueue bypassed shutdown fence");

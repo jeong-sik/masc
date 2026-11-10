@@ -224,13 +224,6 @@ module Box = struct
   let r = "\xe2\x94\xa4"
 end
 
-type tone = Normal | Dim | Accent
-
-let tone = function
-  | Normal -> ""
-  | Dim -> Sgr.dim
-  | Accent -> Sgr.bright_cyan
-
 type status = Ok | Warn | Bad | Info | Muted
 
 let status = function

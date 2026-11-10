@@ -89,8 +89,6 @@ let rank = function
   | Warming | Snapshot_not_ready -> 1
   | Ok | Idle -> 0
 
-let rank_string raw = raw |> of_string |> rank
-
 let max left right = if rank left >= rank right then left else right
 
 let max_string left right = max (of_string left) (of_string right) |> to_string

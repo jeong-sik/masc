@@ -23,6 +23,3 @@ val current_write_json :
 (** Serialize and immediately prove that the current exact reader accepts the
     emitted object. Persistence must use this guarded surface so non-finite
     values and reader/writer invariant drift cannot be written. *)
-
-(** Canonical key list shared by the exact current reader and writer. *)
-val canonical_keeper_meta_key_names : string list

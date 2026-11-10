@@ -346,7 +346,7 @@ let fence_len = String.length fence
 (* ```json ... ``` 또는 ``` ... ``` 코드펜스를 벗긴다. *)
 let strip_fences (s : string) : string =
   let s = String.trim s in
-  if String.length s >= fence_len && String.equal (String.sub s 0 fence_len) fence then
+  if String.starts_with ~prefix:fence s then
     match String.index_opt s '\n' with
     | Some nl ->
       let body = String.trim (String.sub s (nl + 1) (String.length s - nl - 1)) in

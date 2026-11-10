@@ -450,7 +450,7 @@ let document_outline text =
       let stop = line_end offset in
       let line = String.sub text offset (stop - offset) in
       let line_len = String.length line in
-      let fence_line = line_len >= 3 && String.equal (String.sub line 0 3) "```" in
+      let fence_line = String.starts_with ~prefix:"```" line in
       let heading =
         (not in_fence) && (not fence_line)
         &&

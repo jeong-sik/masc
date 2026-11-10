@@ -39,9 +39,9 @@ val list_json :
   reader:Masc_board_handlers.Board_access.reader ->
   actor:string -> target -> (Yojson.Safe.t, error) result
 
-val list_batch_json : reader:Masc_board_handlers.Board_access.reader -> actor:string -> target list -> Yojson.Safe.t
+val list_batch_json : reader:Masc_board_handlers.Board_access.reader -> actor:string -> target list -> (Yojson.Safe.t, error) result
 (** Reaction state for every target asked about, keyed by [target_id]. A target
-    the store has nothing for answers with an empty list rather than being
+    a complete source has nothing for answers with an empty list rather than being
     left out. *)
 
 val toggle_json :

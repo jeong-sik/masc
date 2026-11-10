@@ -163,7 +163,7 @@ let render_board_compose (state : state) =
   in
   let header = board_title ~cols state (Printf.sprintf "%s  %s[%s]%s"
     (screen_title (words state " 게시판" " Board"))
-    (Masc_tui_theme.tone Masc_tui_theme.Accent)
+    (Theme.accent ())
     (match state.board_compose_reply_to with
      | Some _ -> words state "댓글" "reply"
      | None -> words state "새 글" "new post")
@@ -468,7 +468,7 @@ let render_board_list (state : state) =
     match query.bq_hearth with
     | None -> ""
     | Some hearth ->
-        Printf.sprintf (if state.ui_language = Lang_ko then "  %s게시판:%s%s" else "  %shearth:%s%s") (Masc_tui_theme.tone Masc_tui_theme.Accent)
+        Printf.sprintf (if state.ui_language = Lang_ko then "  %s게시판:%s%s" else "  %shearth:%s%s") (Theme.accent ())
           (Terminal_text.single_line hearth) Ansi.reset
   in
   let observation,pending=board_posts_reading state in
@@ -644,7 +644,7 @@ let comment_gutter = String.make Board_read_layout.comment_gutter_cells ' '
 
 (* Same cell count as [comment_gutter]: a marker cell, then blanks. *)
 let selected_comment_gutter () =
-  Masc_tui_theme.tone Masc_tui_theme.Accent ^ Ansi.bold ^ ">" ^ Ansi.reset
+  Theme.accent () ^ Ansi.bold ^ ">" ^ Ansi.reset
   ^ String.make (Board_read_layout.comment_gutter_cells - 1) ' '
 
 let comment_row_gutter ~focus (state : state) =
@@ -783,20 +783,20 @@ let board_read_pane ~focus (state : state) (list_post : board_post) ~rows ~cols 
         Printf.sprintf
           (if state.ui_language = Lang_ko then "%s@%s%s %s[자동 게시]%s"
            else "%s@%s%s %s[Automation]%s")
-          (Masc_tui_theme.tone Masc_tui_theme.Accent)
+          (Theme.accent ())
           author_name
           Ansi.reset
           (Theme.warn ())
           Ansi.reset
     | Some Post_by_person ->
         Printf.sprintf (if state.ui_language = Lang_ko then "%s@%s%s %s[작성자]%s" else "%s@%s%s %s[Author]%s")
-          (Masc_tui_theme.tone Masc_tui_theme.Accent)
+          (Theme.accent ())
           author_name
           Ansi.reset
           (Theme.info ())
           Ansi.reset
     | Some (Post_by_system | Post_kind_unknown _) | None -> Printf.sprintf "%s@%s%s"
-          (Masc_tui_theme.tone Masc_tui_theme.Accent)
+          (Theme.accent ())
           author_name
           Ansi.reset
   in
@@ -842,7 +842,7 @@ let board_read_pane ~focus (state : state) (list_post : board_post) ~rows ~cols 
       keeper_names = List.map (fun (k : Tui_decode.keeper) -> k.k_name) state.keepers;
       columns = cols; language = state.ui_language;
       styles = [ Theme.info (); Theme.warn (); Theme.bad (); Theme.recede ();
-                 Masc_tui_theme.tone Masc_tui_theme.Accent ];
+                 Theme.accent () ];
       table_frame = !table_frame_enabled }
   in
   Masc_tui_frame_timing.finish_stage ~name:"board.pane_prep" prep_started;
@@ -1031,7 +1031,7 @@ let board_read_pane ~focus (state : state) (list_post : board_post) ~rows ~cols 
                  let heading =
                    Printf.sprintf "%s%s@%s%s%s  %s%s%s  %s%s%s"
                      rail
-                     (Masc_tui_theme.tone Masc_tui_theme.Accent)
+                     (Theme.accent ())
                      author
                      Ansi.reset
                      author_role
@@ -1071,7 +1071,7 @@ let board_read_pane ~focus (state : state) (list_post : board_post) ~rows ~cols 
                        else
                          let identity =
                            Printf.sprintf "%s%s@%s%s%s  %s%s%s" rail
-                             (Masc_tui_theme.tone Masc_tui_theme.Accent)
+                             (Theme.accent ())
                              author Ansi.reset author_role
                              (board_score_style score)
                              (board_score_text score)

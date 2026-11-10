@@ -52,6 +52,17 @@ type runtime_blocker_surface =
    operator to go and find it. The window this fills runs from boot until
    the next successful turn resets the streak.
 
+   The cause rides whole, not previewed: this summary is the only carrier of
+   the cause for every reader of the runtime-trust timeline and the blocker
+   fields -- the goal timeline, the keeper detail pane, the dashboard -- and
+   a byte cap cut it here for all of them at once, mid-token, with no way
+   back. Measured on the live receipts (2026-11-10, 14,578 error messages)
+   47% ran past the old 220-byte preview and a third carried a JSON error
+   body whose truncation left it unreadable and unparseable. A reader that
+   wants one short line previews at its own edge (the operator digest does).
+   The upper bound is the receipt writer's own: the largest message in that
+   sample was 3.3 kB.
+
    Only a newest receipt the failure path wrote is presented as the cause:
    [`Error], and [`Cancelled], which the same path writes for a provider
    wall-clock timeout and for required input
@@ -71,7 +82,7 @@ let turn_failures_summary ~count (latest_receipt : Keeper_execution_receipt.late
       receipt.latest_ended_at
       receipt.latest_terminal_reason_code
       (match receipt.latest_error_message with
-       | Some message -> ": " ^ short_preview message
+       | Some message -> ": " ^ message
        | None -> " (the receipt has no error.message)")
   in
   match latest_receipt with

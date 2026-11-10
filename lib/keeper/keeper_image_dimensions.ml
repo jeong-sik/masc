@@ -64,11 +64,7 @@ let gif_dimensions bytes =
    each spells the canvas differently; a wrong table here would print a
    confident wrong size, which is worse than printing none. *)
 let image_dimensions bytes =
-  let starts prefix =
-    let prefix_len = String.length prefix in
-    String.length bytes >= prefix_len
-    && String.equal (String.sub bytes 0 prefix_len) prefix
-  in
+  let starts prefix = String.starts_with ~prefix bytes in
   if starts "\x89PNG" then png_dimensions bytes
   else if starts "\xff\xd8\xff" then jpeg_dimensions bytes
   else if starts "GIF8" then gif_dimensions bytes

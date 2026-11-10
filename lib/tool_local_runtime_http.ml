@@ -332,7 +332,7 @@ let parse_status_line line =
   in
   match words with
   | version :: code :: _
-    when String.length version >= 5 && String.equal (String.sub version 0 5) "HTTP/" ->
+    when String.starts_with ~prefix:"HTTP/" version ->
       parse_int_opt code
   | _ -> None
 

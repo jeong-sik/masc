@@ -2054,13 +2054,13 @@ let board_post_detail_json ~reader ?(comment_request = default_board_comment_req
         let reactions = reactions_for (Board.Reaction_post, post_id) in
         let post_json =
           board_post_dashboard_json ?current_vote
-            ~reactions ~author_karma post
+            ?reactions ~author_karma post
         in
         let comment_json (comment : Board.comment) =
           let comment_id = Board.Comment_id.to_string comment.id in
           let current_vote = board_current_vote_for_comment ~reader ~voter ~comment_id in
           let reactions = reactions_for (Board.Reaction_comment, comment_id) in
-          board_comment_dashboard_json ?current_vote ~reactions comment in
+          board_comment_dashboard_json ?current_vote ?reactions comment in
         let context_comment_json (comment : Board.comment) =
           match comment_json comment with
           | `Assoc fields -> `Assoc

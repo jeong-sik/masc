@@ -1012,6 +1012,10 @@ let accept_keeper_wake_occurrence
          keeper_name
          stimulus
      with
+     | Keeper_registry_event_queue.Stimulus_shutdown_reserved operation_id ->
+       retryable_dispatch_failure
+         ("scheduled keeper wake durable enqueue failed: "
+          ^ Keeper_registry_event_queue.shutdown_reserved_detail operation_id)
      | Keeper_registry_event_queue.Stimulus_storage_error detail ->
        retryable_dispatch_failure
          ("scheduled keeper wake durable enqueue failed: " ^ detail)

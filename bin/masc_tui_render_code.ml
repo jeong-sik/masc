@@ -556,7 +556,7 @@ let render_code (state : state) =
                    | None -> state.code_lsp_note) in
             match (if hover_showing then None else note) with
             | Some note ->
-                base ^ "  " ^ (Masc_tui_theme.tone Masc_tui_theme.Accent)
+                base ^ "  " ^ (Theme.accent ())
                 ^ Terminal_text.single_line note ^ Ansi.reset
             | None -> base
           in
@@ -589,7 +589,7 @@ let render_code (state : state) =
                     | Some word -> " (" ^ word ^ ")"
                   in
                   with_note ^ "  "
-                  ^ (Masc_tui_theme.tone Masc_tui_theme.Accent)
+                  ^ (Theme.accent ())
                   ^ "memo "
                   ^ Terminal_text.single_line memo.Ide_memo.author
                   ^ kind ^ Ansi.reset ^ " "
@@ -886,20 +886,19 @@ let render_code (state : state) =
               block is what hides it. Continuation rows hold the same cells in
               blanks so the code stays in one column.
 
-              No colour of its own. The theme's three tones are Normal, Dim
-              and the single accent, and a colour outside them is a claim
-              about state -- blame carries no state, only who and when. So
-              the answer (the name) draws Normal and the qualifier (the age)
-              draws Dim, and nothing here competes with the lexer's own
-              colours in the code beside it. *)
+              No colour of its own. The frame draws plain, dim or the single
+              accent, and a colour outside them is a claim about state --
+              blame carries no state, only who and when. So the answer (the
+              name) draws plain and the qualifier (the age) draws dim, and
+              nothing here competes with the lexer's own colours in the code
+              beside it. *)
            let blame_cell line =
              match blame_blocks with
              | [] -> ""
              | _ -> (
                match Masc.Tui_decode.blame_block_at blame_blocks line with
                | Some (block, true) ->
-                   Printf.sprintf "%s%s %s%s%s "
-                     (Masc_tui_theme.tone Masc_tui_theme.Normal)
+                   Printf.sprintf "%s %s%s%s "
                      (Message_layout.fit_width block.bb_author
                         blame_author_cells)
                      Ansi.dim
@@ -929,7 +928,7 @@ let render_code (state : state) =
                  let mark =
                    let line = row_index + 1 in
                    if covers line note_spans then
-                     (Masc_tui_theme.tone Masc_tui_theme.Accent)
+                     (Theme.accent ())
                      ^ "\xe2\x97\x8f" ^ Ansi.reset
                    else if covers line keeper_spans then Ansi.dim ^ "\xc2\xb7" ^ Ansi.reset
                    else " "

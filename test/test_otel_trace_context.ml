@@ -151,28 +151,6 @@ let test_inject_json_none () =
 
 (* --- HTTP header helpers --- *)
 
-let test_of_headers_found () =
-  let headers = [
-    ("content-type", "application/json");
-    ("Traceparent", valid_traceparent);
-  ] in
-  match Otel_trace_context.of_headers headers with
-  | Some ctx ->
-    check string "from header" valid_traceparent ctx.traceparent
-  | None -> fail "expected Some from valid header"
-
-let test_of_headers_case_insensitive () =
-  let headers = [("TRACEPARENT", valid_traceparent)] in
-  match Otel_trace_context.of_headers headers with
-  | Some _ -> ()
-  | None -> fail "expected case-insensitive match"
-
-let test_of_headers_absent () =
-  let headers = [("content-type", "text/plain")] in
-  match Otel_trace_context.of_headers headers with
-  | None -> ()
-  | Some _ -> fail "expected None for missing header"
-
 let test_to_header () =
   match Otel_trace_context.parse valid_traceparent with
   | Some ctx ->
@@ -183,15 +161,6 @@ let test_to_header () =
 
 let test_header_name () =
   check string "W3C spec lowercase" "traceparent" Otel_trace_context.header_name
-
-let test_of_headers_multiple_discard () =
-  let headers = [
-    ("traceparent", valid_traceparent);
-    ("traceparent", "00-aaaabbbbccccddddaaaabbbbccccdddd-1122334455667788-01");
-  ] in
-  match Otel_trace_context.of_headers headers with
-  | None -> ()
-  | Some _ -> fail "expected None for multiple traceparent headers (W3C spec)"
 
 (* --- Whitespace handling --- *)
 
@@ -246,12 +215,8 @@ let () =
       test_case "inject none" `Quick test_inject_json_none;
     ];
     "http_headers", [
-      test_case "found" `Quick test_of_headers_found;
-      test_case "case insensitive" `Quick test_of_headers_case_insensitive;
-      test_case "absent" `Quick test_of_headers_absent;
       test_case "to_header" `Quick test_to_header;
       test_case "header_name" `Quick test_header_name;
-      test_case "multiple headers discarded" `Quick test_of_headers_multiple_discard;
     ];
     "edge_cases", [
       test_case "whitespace trimmed" `Quick test_parse_with_whitespace;

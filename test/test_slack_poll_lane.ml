@@ -256,12 +256,12 @@ let lane_msg ~ts ~text : Lane.lane_message =
 
 let test_lane_order_and_dedupe () =
   Lane.clear ();
-  Lane.push_many ~channel_id:"C1"
+  List.iter
+    (fun msg -> Lane.push ~channel_id:"C1" msg ~capacity:10)
     [ lane_msg ~ts:"1.000000" ~text:"first"
     ; lane_msg ~ts:"2.000000" ~text:"second"
     ; lane_msg ~ts:"2.000000" ~text:"second again (duplicate ts)"
-    ]
-    ~capacity:10;
+    ];
   let recent = Lane.recent ~channel_id:"C1" ~limit:10 in
   check int "dedupe on ts" 2 (List.length recent);
   (match recent with
@@ -277,7 +277,7 @@ let test_lane_capacity_trim () =
   let msgs =
     List.init 10 (fun i -> lane_msg ~ts:(Printf.sprintf "%02d.000000" i) ~text:"m")
   in
-  Lane.push_many ~channel_id:"C1" msgs ~capacity:3;
+  List.iter (fun msg -> Lane.push ~channel_id:"C1" msg ~capacity:3) msgs;
   let recent = Lane.recent ~channel_id:"C1" ~limit:10 in
   check int "capacity trim keeps 3" 3 (List.length recent);
   (match recent with

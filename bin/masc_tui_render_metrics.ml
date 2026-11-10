@@ -694,7 +694,7 @@ let render_section_tools ~cols (state : state) : string list =
       let items =
         Tool_map.fold
           (fun name count acc ->
-            { Chart.name; count; style = Some Masc_tui_theme.Warn } :: acc)
+            { Chart.name; count; style = Masc_tui_theme.Warn } :: acc)
           counts []
         |> List.sort (fun (a : Chart.bar_item) (b : Chart.bar_item) ->
                let c = Int.compare b.count a.count in

@@ -187,7 +187,7 @@ let keeper_flag_cell (runtime : keeper_runtime option) =
       let sandbox =
         match Mark.sandbox_of_profile row.kr_sandbox_profile, row.kr_sandbox_profile with
         | Some (Mark.Docker as known), _ ->
-          (Masc_tui_theme.tone Masc_tui_theme.Accent) ^ Mark.sandbox_letter known ^ Ansi.reset
+          (Theme.accent ()) ^ Mark.sandbox_letter known ^ Ansi.reset
         | Some (Mark.Micro_vm as known), _ ->
           (Theme.category Theme.Slot_2) ^ Mark.sandbox_letter known ^ Ansi.reset
         | Some (Mark.Remote_ssh as known), _ ->
@@ -714,7 +714,7 @@ let grid_blank_line (grid : Grid.t) =
   String.make (grid_lead_cells grid) ' ' ^ " " ^ grid_band grid_blank_now
 
 (* The mock's [okd]: the ok colour, receded. *)
-let grid_receded_ok () = Masc_tui_theme.tone Masc_tui_theme.Dim ^ Theme.ok ()
+let grid_receded_ok () = Ansi.dim ^ Theme.ok ()
 
 let grid_gutter_style = function
   | Grid.Failing { resting = false } -> Theme.warn ()
@@ -3598,7 +3598,7 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
          in
          match List.assoc_opt k.k_name state.keeper_gate_modes with
          | Some mode ->
-             (Masc_tui_theme.tone Masc_tui_theme.Accent)
+             (Theme.accent ())
              ^ Terminal_text.single_line (gate_mode_reading_word mode)
              ^ Ansi.reset
          | None ->
@@ -3616,7 +3616,7 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
          with
          | [] -> Ansi.dim ^ "lane order" ^ Ansi.reset
          | firsts ->
-             (Masc_tui_theme.tone Masc_tui_theme.Accent)
+             (Theme.accent ())
              ^ Terminal_text.single_line
                  (String.concat ", "
                     (List.map

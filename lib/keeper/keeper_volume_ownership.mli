@@ -50,8 +50,5 @@ val interpret_marker_bytes : probed_base_path:string -> string -> t
 (** Interpret raw marker bytes for the workspace asking at
     [probed_base_path]. Malformed bytes are [Unverified], never a guess. *)
 
-val interpret_marker_absent : unit -> t
-(** The marker file does not exist: an unmarked legacy volume. *)
-
 val unverified_to_string : unverified -> string
 (** Human-readable reason, for logs and reconciliation reports. *)

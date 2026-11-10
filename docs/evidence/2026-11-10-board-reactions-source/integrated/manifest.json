@@ -1,0 +1,65 @@
+{
+  "captured_at": "2026-11-10T07:21:57.829412+00:00",
+  "source_upper": "aa9e06339e79a2d6e51af2564b0e7245885f786d",
+  "source_lower": "039c2fdb5f034133bde3af2d53cfd2ccf925be76",
+  "source_base": "fdde0336dd0166103aef3e470f0cacc85ee85c26",
+  "dashboard_src_tree": "82e5bbd856027448800b50ce604f0e13052412a3",
+  "tree_path": "dashboard/src",
+  "browser_space": 60,
+  "page": "p1",
+  "fixture": "dashboard/fixtures/board-reactions-source",
+  "transport": "strict synthetic application HTTP in real Chromium; no live Board write",
+  "browser_case_post_counts": {
+    "unknown": 0,
+    "failed-write": 1,
+    "failed-read": 1,
+    "recovered": 1
+  },
+  "backend_cases_authored": 7,
+  "backend_cases_executed": 0,
+  "frontend_file_sha256": {
+    "dashboard/src/components/board/reaction-bar.ts": "a057ad3502509249eb8682a101d774100554439e2d8cd5f77f372d36b7afefc9",
+    "dashboard/src/components/board/reaction-bar.test.ts": "58c2293ed563e34eefc4d93eccfd39c3d581a9dbc90f92eb7d461535eec9951f",
+    "dashboard/src/components/board/board-surface.ts": "f5e52e88cc5767990cb905dd05c75e141d5afb9b519e759c735b7c9332d377ef",
+    "dashboard/src/components/board/board-surface.test.ts": "7c7ba718bcc691430f2c19dc4a12d0314e9c754a73691b250c1489ba9232df0c",
+    "dashboard/src/styles/board-v2.css": "5f624e6d34fa5a861b531ad86693536fc049a70da533768c2a68ea31f1adcf87"
+  },
+  "files": {
+    "failed-write.png": {
+      "bytes": 64648,
+      "sha256": "281c186d2159fe4cc26c719ab2ef3af619ff6e027ec321c13c282664986c9f8f"
+    },
+    "unknown.png": {
+      "bytes": 59899,
+      "sha256": "57f68d5a7b0d5832f6f56c00184b11670d16e4b5d52b8b0e4b73a19f865c190d"
+    },
+    "recovered.json": {
+      "bytes": 1388,
+      "sha256": "bbba3a9a74e90f18d9dcff0a6bb1e70ff0c7fcc41ca540031c253cfece5e7cd0"
+    },
+    "failed-read.json": {
+      "bytes": 1499,
+      "sha256": "3275aad57314bd9dd561b2cbb2637884576cd931653702e8ccaa9ae8dfc024ad"
+    },
+    "recovered.png": {
+      "bytes": 59084,
+      "sha256": "c093359809e555a859bae1dd819c77ae4a91f61b82df969cba005e74026faf50"
+    },
+    "frontend-checks.json": {
+      "bytes": 876,
+      "sha256": "421aa58d7ad1c455b01c0d86a089a7e9df678e3bfef2f5a06096b21a9cbd5ab7"
+    },
+    "failed-write.json": {
+      "bytes": 2336,
+      "sha256": "0bdcd40379cd0c80ad1e94b3012df561de6205d6d3b7c7621b1f689ab1229803"
+    },
+    "unknown.json": {
+      "bytes": 1264,
+      "sha256": "f9bb5d328b11cb4e34ec13662ce47805871de45bc261cd7290ef1d9de8875123"
+    },
+    "source-parsing.json": {
+      "bytes": 7646,
+      "sha256": "fb734558140532a035fed005d0b06bf27683e3e1513ac87b2fca99daaaeedd81"
+    }
+  }
+}

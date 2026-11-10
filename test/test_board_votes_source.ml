@@ -108,6 +108,7 @@ let vote_fault_store base_path io =
     [Masc_board_handlers.Board_votes_json.load_persisted_posts;
      Masc_board_handlers.Board_votes_json.load_persisted_comments];
   ignore (require (Board.reload_votes store));
+  ignore (require (Board.reload_reactions store));
   store
 
 let test_unknown_rewrite_retains_exact_deletion_bytes base_path =

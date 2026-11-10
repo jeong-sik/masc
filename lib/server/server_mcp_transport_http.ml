@@ -261,10 +261,6 @@ let should_stream_post_tools_call request body_str accept_mode =
       | None -> false)
   | _ -> false
 
-let inject_agent_name_into_body ?(rewrite_existing = false) ~agent_name body_str =
-  Server_mcp_actor_injection.inject_agent_name_into_body ~rewrite_existing
-    ~agent_name body_str
-
 let body_with_canonical_http_actor ~base_path ~auth_token request body_str =
   match body_jsonrpc_method body_str with
   | Some ("tools/call", _) ->

@@ -182,7 +182,7 @@ let rule_of_string raw =
     let prefix_length = String.length wildcard_prefix in
     if
       String.length host_text > prefix_length
-      && String.equal (String.sub host_text 0 prefix_length) wildcard_prefix
+      && String.starts_with ~prefix:wildcard_prefix host_text
     then (
       let apex =
         String.sub host_text prefix_length (String.length host_text - prefix_length)

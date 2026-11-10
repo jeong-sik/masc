@@ -11,16 +11,14 @@ let target_keys =
   ; "schema"
   ]
 
-let test_canonical_includes_runtime_keys () =
-  let canonical = Keeper_meta_json.canonical_keeper_meta_key_names in
+let test_current_fields_include_runtime_keys () =
+  let current = Keeper_meta_json.current_field_names in
   List.iter
     (fun key ->
       Alcotest.(check bool)
-        (Printf.sprintf
-           "canonical_keeper_meta_key_names contains %s"
-           key)
+        (Printf.sprintf "current_field_names contains %s" key)
         true
-        (List.mem key canonical))
+        (List.mem key current))
     target_keys
 
 let valid_json () =
@@ -67,7 +65,7 @@ let () =
       , [ Alcotest.test_case
             "runtime keys present"
             `Quick
-            test_canonical_includes_runtime_keys
+            test_current_fields_include_runtime_keys
         ; Alcotest.test_case
             "unknown field is rejected"
             `Quick

@@ -215,11 +215,6 @@ val classify_image_probe_for :
     match the returned target; alternate names for the same content are valid.
     Empty native inspection is not evidence that an image is present. *)
 
-val image_probe_for :
-  Keeper_microvm_backend.t -> image:string -> timeout_sec:float -> image_probe_outcome
-(** Run the structured probe against one runtime and retain its typed outcome
-    before the public sandbox boundary renders an operator-facing error. *)
-
 type constraint_refusal =
   { guest_constraint : Keeper_microvm_backend.guest_constraint
   ; reason : string

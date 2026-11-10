@@ -30,7 +30,6 @@ val with_dashboard_timeout :
   clock:_ Eio.Time.clock -> (unit -> Yojson.Safe.t) -> Yojson.Safe.t
 
 val dashboard_cache_key : Workspace.config -> string -> string -> string
-val dashboard_query_cache_segment : string option -> string
 val dashboard_query_cache_key :
   Workspace.config -> string -> (string * string option) list -> string
 

@@ -30,28 +30,6 @@ let test_mandatory_clock_refs () =
     [ "edge_id"; "lane"; "checkpoint_id" ]
     keys2
 
-let test_validate_completeness_pass () =
-  let m =
-    manifest ~event:M.Turn_started
-      ~decision:(clock_refs [ ("edge_id", `String "e1"); ("lane", `String "L1") ])
-      ~links:(links ())
-  in
-  Alcotest.(check (result unit string))
-    "valid manifest passes" (Ok ()) (M.validate_manifest_completeness m)
-
-let test_validate_completeness_fail_missing_key () =
-  let m =
-    manifest ~event:M.Checkpoint_saved
-      ~decision:(clock_refs [ ("edge_id", `String "e1"); ("lane", `String "L1") ])
-      ~links:(links ())
-  in
-  match M.validate_manifest_completeness m with
-  | Ok () -> Alcotest.fail "expected failure for missing checkpoint_id"
-  | Error msg ->
-    Alcotest.(check string) "error mentions missing keys"
-      "manifest for checkpoint_saved missing mandatory clock_refs keys: [checkpoint_id]"
-      msg
-
 let test_is_finished_turn () =
   let manifests =
     [ manifest ~event:M.Turn_started
@@ -79,43 +57,6 @@ let test_is_finished_turn () =
   Alcotest.(check bool)
     "runtime execution built is not a terminal turn" false
     (M.is_finished_turn pre_dispatch_ready)
-
-let test_is_complete_turn () =
-  let finished_only =
-    [ manifest ~event:M.Turn_finished
-        ~decision:(clock_refs [ ("edge_id", `String "e1"); ("lane", `String "L1") ])
-        ~links:(links ())
-    ]
-  in
-  Alcotest.(check bool)
-    "finished without receipt+checkpoint is not complete" false
-    (M.is_complete_turn finished_only);
-  let with_receipt =
-    [ manifest ~event:M.Turn_finished
-        ~decision:(clock_refs [ ("edge_id", `String "e1"); ("lane", `String "L1") ])
-        ~links:(links ~receipt_path:"/tmp/r.jsonl" ())
-    ; manifest ~event:M.Receipt_appended
-        ~decision:(clock_refs [ ("edge_id", `String "e1"); ("lane", `String "L1") ])
-        ~links:(links ~receipt_path:"/tmp/r.jsonl" ())
-    ]
-  in
-  Alcotest.(check bool)
-    "finished+receipt without checkpoint is not complete" false
-    (M.is_complete_turn with_receipt);
-  let complete =
-    [ manifest ~event:M.Turn_finished
-        ~decision:(clock_refs [ ("edge_id", `String "e1"); ("lane", `String "L1") ])
-        ~links:(links ~receipt_path:"/tmp/r.jsonl" ~checkpoint_path:"/tmp/c.jsonl" ())
-    ; manifest ~event:M.Receipt_appended
-        ~decision:(clock_refs [ ("edge_id", `String "e1"); ("lane", `String "L1") ])
-        ~links:(links ~receipt_path:"/tmp/r.jsonl" ~checkpoint_path:"/tmp/c.jsonl" ())
-    ; manifest ~event:M.Checkpoint_saved
-        ~decision:(clock_refs [ ("edge_id", `String "e1"); ("lane", `String "L1"); ("checkpoint_id", `String "c1") ])
-        ~links:(links ~receipt_path:"/tmp/r.jsonl" ~checkpoint_path:"/tmp/c.jsonl" ())
-    ]
-  in
-  Alcotest.(check bool) "finished+receipt+checkpoint is complete" true
-    (M.is_complete_turn complete)
 
 (* Runtime attempt attribution (#28871): the driver's per-candidate walk
    records the attempted candidate as decision.runtime_id (with idx, and
@@ -197,10 +138,7 @@ let () =
   Alcotest.run "KeeperRuntimeManifestCompleteness"
     [ ( "defined but never registered until task-1768",
           [ Alcotest.test_case "mandatory clock refs" `Quick test_mandatory_clock_refs
-          ; Alcotest.test_case "validate completeness pass" `Quick test_validate_completeness_pass
-          ; Alcotest.test_case "validate completeness fail missing key" `Quick test_validate_completeness_fail_missing_key
           ; Alcotest.test_case "is finished turn" `Quick test_is_finished_turn
-          ; Alcotest.test_case "is complete turn" `Quick test_is_complete_turn
           ; Alcotest.test_case "runtime attempt attribution public projection" `Quick test_runtime_attempt_attribution_public_projection
           ; Alcotest.test_case "intake source public projection" `Quick test_intake_source_public_projection
           ] )

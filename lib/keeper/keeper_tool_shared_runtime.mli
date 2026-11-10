@@ -175,22 +175,13 @@ val tag_dispatch_fn
 
 (** Issue #10349 Phase 2: registry-canonical meta lookup.
     [find_registry_meta] does the lookup + drift-counter increment and
-    returns [None] on missing entry.  Callers that need to return a
-    different type on error (e.g. [string option]) use this directly.
-    [with_registry_meta] is the convenience wrapper for the common
-    [string]-returning case; its [None] branch calls [error_json].
+    returns [None] on missing entry.
     [source_layer] is the Otel_metric_store label value (e.g. ["fs_resolver"],
     ["masc_path_resolver"], ["tool_dispatcher"]). *)
 val find_registry_meta
   :  keeper_name:string
   -> source_layer:string
   -> Keeper_meta_contract.keeper_meta option
-
-val with_registry_meta
-  :  keeper_name:string
-  -> source_layer:string
-  -> (Keeper_meta_contract.keeper_meta -> string)
-  -> string
 
 (** Render the keeper-tools-list JSON envelope: tool names grouped
     by category plus descriptor_surface metadata for executor/policy/schema

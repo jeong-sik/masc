@@ -330,18 +330,6 @@ let split_at_codepoint s ~limit =
     walk 0 0
   end
 
-(* Split [s] into a list of chunks each at most [limit] Unicode scalar
-   values, every chunk valid UTF-8. Empty input yields [[]]. *)
-let chunk_by_codepoint s ~limit =
-  let rec loop acc rest =
-    if String.length rest = 0 then List.rev acc
-    else
-      let head, tail = split_at_codepoint rest ~limit in
-      if String.length head = 0 then List.rev (rest :: acc)
-      else loop (head :: acc) tail
-  in
-  loop [] s
-
 (* Truncate content to Discord's message_content_limit for PATCH edits,
    on a codepoint boundary so the result is valid UTF-8.
    Discord rejects messages exceeding 2000 Unicode scalar units. *)

@@ -335,7 +335,7 @@ let render_system_logs (state : state) =
                 ~styles:
                   { Render_schedule.slog_time_style = Ansi.dim
                   ; slog_module_style =
-                      Masc_tui_theme.tone Masc_tui_theme.Accent
+                      Theme.accent ()
                   ; slog_keeper_style = Theme.keeper_origin ()
                   ; slog_category_style = Ansi.dim
                   }

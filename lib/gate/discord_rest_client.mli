@@ -23,11 +23,6 @@ val split_at_codepoint : string -> limit:int -> string * string
     codepoint boundaries (not bytes) keeps each piece valid UTF-8 so
     Discord does not reject it with a 400. *)
 
-val chunk_by_codepoint : string -> limit:int -> string list
-(** [chunk_by_codepoint s ~limit] splits [s] into chunks of at most
-    [limit] Unicode scalar values each, every chunk valid UTF-8.
-    [chunk_by_codepoint "" ~limit] is [[]]. *)
-
 val truncate_to_limit : string -> string
 (** Truncate to {!message_content_limit} Unicode scalar values on a
     codepoint boundary (valid UTF-8). Used for PATCH edits. *)

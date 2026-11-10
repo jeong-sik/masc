@@ -55,6 +55,8 @@ let notify ~base_path ~keeper_name =
       match Keeper_registry_event_queue.enqueue_stimulus_durable_result
           ~base_path keeper_name stimulus with
       | Keeper_registry_event_queue.Stimulus_enqueued | Stimulus_already_present -> Ok ()
+      | Stimulus_shutdown_reserved operation_id ->
+          Error (Keeper_registry_event_queue.shutdown_reserved_detail operation_id)
       | Stimulus_storage_error detail -> Error detail)
         (Ok ()) receipt_ids in
     (* Retry a lost hint for the same still-pending queue row. Receipt ACK is

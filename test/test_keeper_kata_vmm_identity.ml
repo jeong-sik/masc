@@ -57,23 +57,6 @@ let test_runtime_set_is_closed () =
   Alcotest.(check bool "runc is not kata") false
     (kata_family "io.containerd.runc.v2")
 
-let test_choice_decoder_refuses_everything_else () =
-  Alcotest.(check (result vmm string))
-    "three exact names are accepted" (Ok V.Qemu) (V.vmm_of_choice "qemu");
-  Alcotest.(check (result vmm string))
-    "cloud-hypervisor accepted" (Ok V.Cloud_hypervisor)
-    (V.vmm_of_choice "cloud-hypervisor");
-  Alcotest.(check (result vmm string))
-    "dragonball accepted" (Ok V.Dragonball) (V.vmm_of_choice "dragonball");
-  (match V.vmm_of_choice "io.containerd.kata-custom.v2" with
-   | Error m ->
-     Alcotest.(check bool) "a runtime id is refused as a choice" true
-       (String.length m > 0)
-   | Ok _ -> Alcotest.fail "a runtime id must not be a valid choice");
-  (match V.vmm_of_choice "" with
-   | Error _ -> ()
-   | Ok _ -> Alcotest.fail "empty choice refused")
-
 let test_classify_keeps_mismatch_explicit () =
   Alcotest.(check vmm) "per-VMM id resolves" V.Cloud_hypervisor
     (match V.classify_runtime_id (V.runtime_id_of V.Cloud_hypervisor) with
@@ -171,8 +154,6 @@ let case name f = (name, `Slow, f)
 let () =
   run "kata vmm closed identity"
     [ ( "closed set", [ case "closed set" test_runtime_set_is_closed ] )
-    ; ( "choice decoder",
-        [ case "choice decoder" test_choice_decoder_refuses_everything_else ] )
     ; ( "classification",
         [ case "classification" test_classify_keeps_mismatch_explicit ] )
     ; ( "inventory",

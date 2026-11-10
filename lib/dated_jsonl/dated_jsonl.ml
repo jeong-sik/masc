@@ -804,7 +804,7 @@ type append_outcome =
    best-effort byte-budget prune that never touches the current day file.
    Divergence between append paths here would give the same store two
    different size limits, so both call this one helper. Removing day files
-   by age is the prune pass's job ([prune_listed_stores]). *)
+   by age is the prune pass's job ([prune_listed_stores_bound]). *)
 let run_post_append_pruning_unlocked t ~(dated : Store.dated_path) =
   match t.max_bytes with
   | None -> ()
@@ -1977,12 +1977,6 @@ let prune_listed_stores_bound root held ~operator_window_days ~on_pruned =
              if removed > 0 then on_pruned location;
              removed))
     0 Store.all
-
-let prune_listed_stores root ~operator_window_days =
-  match Store.with_retention_root root (fun held ->
-    prune_listed_stores_bound root held ~operator_window_days ~on_pruned:ignore) with
-  | None -> 0
-  | Some count -> count
 
 (* Test hooks declared in the .mli — implementation lives in this
    module so tests can verify mutex-registry sharing without

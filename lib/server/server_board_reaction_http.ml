@@ -243,12 +243,13 @@ module Target_map = Map.Make (struct
   end)
 
 let list_batch_json ~reader ~actor targets =
-  let rows =
+  let* rows =
     Board_dispatch.list_reactions_batch ~reader
       ~targets:
         (List.map (fun target -> (target.target_type, target.target_id)) targets)
       ~user_id:actor
       ()
+    |> Result.map_error of_board_error
   in
   let by_target =
     List.fold_left
@@ -260,7 +261,7 @@ let list_batch_json ~reader ~actor targets =
     Target_map.find_opt (target.target_type, target.target_id) by_target
     |> Option.value ~default:[]
   in
-  `Assoc
+  Ok (`Assoc
     [ ( "targets"
       , `List
           (List.map
@@ -275,7 +276,7 @@ let list_batch_json ~reader ~actor targets =
                   ])
              targets) )
     ; "supported_reaction_emojis", supported_reaction_emojis_json ()
-    ]
+    ])
 ;;
 
 let toggle_json ~reader ~actor request =

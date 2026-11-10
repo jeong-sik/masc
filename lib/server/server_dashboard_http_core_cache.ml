@@ -111,13 +111,6 @@ let dashboard_cache_key (config : Workspace.config) prefix suffix =
   partition_cache_key ~partition:(cache_partition_segment config) prefix suffix
 ;;
 
-let dashboard_query_cache_segment = function
-  | Some raw ->
-    let value = String.trim raw in
-    if value = "" then "missing" else value
-  | None -> "missing"
-;;
-
 let dashboard_query_cache_value_json = function
   | Some raw ->
     let value = String.trim raw in

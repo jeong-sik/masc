@@ -929,10 +929,13 @@ let planning_detail_action_rows ~ko ~cols ~armed ~drop_reason (goal : planning_g
 (* A verdict's reason runs to several wrapped rows. The first row keeps its
    two-space lead; a continuation goes one step further in, so a long reason
    reads as hanging under the row that began it instead of as rows the wrap
-   dropped at the same edge. *)
+   dropped at the same edge. The wrap happens at the continuation width --
+   the deeper of the two indents -- or a row wrapped at the full width and
+   then pushed four cells in would run past the frame and lose its tail to
+   the fitter, which does not carry the cut word to the next row. *)
 let planning_proof_rows ~width lines =
   List.concat_map (fun (line : Planning_detail.line) ->
-    match Masc_tui_text_block.rows ~max_cells:width line.text with
+    match Masc_tui_text_block.rows ~max_cells:(max 1 (width - 4)) line.text with
     | [] -> [{line with text=""}]
     | rows ->
         List.mapi

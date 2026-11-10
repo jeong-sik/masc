@@ -190,11 +190,9 @@ let test_dashboard_briefing_http_full_contract () =
       Operator_control.invalidate_snapshot_cache ();
       let state = Lib.Mcp_server_eio.For_testing.create_state ~base_path:dir () in
       let json =
-        Server_dashboard_http.dashboard_briefing_http_json
-          ~state
-          ~sw
-          ~clock
-          (request "/api/v1/dashboard/briefing?agent_name=test-dashboard-http")
+        Server_dashboard_http.dashboard_briefing_for_request ~sw ~clock
+          (Server_dashboard_http.mission_http_request ~state
+            (request "/api/v1/dashboard/briefing?agent_name=test-dashboard-http"))
       in
       let open Yojson.Safe.Util in
       check bool "operator targets present in mission http payload" true
@@ -215,11 +213,8 @@ let test_dashboard_briefing_http_default_bootstraps_first_success () =
       seed_workspace config session_id;
       let state = Lib.Mcp_server_eio.For_testing.create_state ~base_path:dir () in
       let json =
-        Server_dashboard_http.dashboard_briefing_http_json
-          ~state
-          ~sw
-          ~clock
-          (request "/api/v1/dashboard/briefing")
+        Server_dashboard_http.dashboard_briefing_for_request ~sw ~clock
+          (Server_dashboard_http.mission_http_request ~state (request "/api/v1/dashboard/briefing"))
       in
       let open Yojson.Safe.Util in
       check string "default mission cache becomes fresh" "fresh"
@@ -245,11 +240,8 @@ let test_dashboard_briefing_keeper_tool_audit_fallback () =
       Operator_control.invalidate_snapshot_cache ();
       let state = Lib.Mcp_server_eio.For_testing.create_state ~base_path:dir () in
       let json =
-        Server_dashboard_http.dashboard_briefing_http_json
-          ~state
-          ~sw
-          ~clock
-          (request "/api/v1/dashboard/briefing")
+        Server_dashboard_http.dashboard_briefing_for_request ~sw ~clock
+          (Server_dashboard_http.mission_http_request ~state (request "/api/v1/dashboard/briefing"))
       in
       let open Yojson.Safe.Util in
       check string "default mission cache becomes fresh" "fresh"

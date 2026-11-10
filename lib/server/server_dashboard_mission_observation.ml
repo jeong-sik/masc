@@ -154,8 +154,9 @@ let publication owner =
 let publication_status owner publication =
   Stdlib.Mutex.protect owner.mu (fun () ->
     if not (is_current owner) then Retired
-    else if publication.generation <> !(owner.generation) then Source_pending
-    else if publication.source != Cache.snapshot owner.cache then Superseded
+    else if !(owner.admitted_generation) <> !(owner.generation) then Source_pending
+    else if publication.generation <> !(owner.generation)
+      || publication.source != Cache.snapshot owner.cache then Superseded
     else Current)
 
 let publication_is_current owner publication = match publication_status owner publication with

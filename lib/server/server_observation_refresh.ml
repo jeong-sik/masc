@@ -1,6 +1,6 @@
 module Input = Server_observation_input
 
-type surface = Execution_trust | Execution | Transport_health
+type surface = Execution_trust | Execution | Transport_health | Mission
 
 let affects_trust = function
   | Input.Keeper { change =
@@ -72,6 +72,16 @@ let affects surface input = match surface with
   | Execution_trust -> affects_trust input
   | Execution -> affects_execution input
   | Transport_health -> affects_transport_health input
+  | Mission ->
+      (match input with
+       | Input.Operator_judgment Operator_judgment.Command_namespace | Tool_host_attention -> true
+       | Operator_judgment Intervene -> false
+       | Board | Transport_state -> false
+       | Dataset _ | Keeper _ | Every_keeper_row | Chat_operation _ | Gate _ | Connector _ | Store _
+       | Execution_invalidated | Agent_core _ | Telemetry_sample | Telemetry_gap _
+       | Keeper_tool_call _ | Keeper_approval_audit _ | Workspace_agent_signal _ | Workspace_messages _ ->
+           affects_execution input)
+
 ;;
 
 type 'a generation = {

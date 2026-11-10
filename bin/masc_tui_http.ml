@@ -4027,6 +4027,19 @@ let fetch_keeper_memory_facts ~(host : string) ~(port : int)
        ^ percent_encode_path_segment keeper_name
        ^ "/memory-facts")
 
+(** Read the explicit activity projection; older servers remain unavailable. *)
+let fetch_keeper_memory_activity ~(host : string) ~(port : int) ~(keeper_name : string) =
+  match get_json ~host ~port ~path:("/api/v1/keepers/"
+      ^ percent_encode_path_segment keeper_name ^ "/memory-journal?limit=50&activity=1") with
+  | Error reason -> Error reason
+  | Ok json ->
+      (match Json_util.require_string json "keeper" with
+       | Error reason -> Error reason
+       | Ok keeper when keeper <> keeper_name -> Error "memory activity Keeper mismatch"
+       | Ok _ -> match Json_util.assoc_member_opt "activity" json with
+       | None -> Error "memory activity is unavailable on this server"
+       | Some value -> Masc.Keeper_memory_activity.of_json value)
+
 (** Fetch Git working-tree changes for the current project workspace. *)
 let fetch_project_changes ~(host : string) ~(port : int) :
     (Yojson.Safe.t, string) result =

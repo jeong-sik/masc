@@ -379,6 +379,10 @@ val memory_id_shape : string
     retention, duplicate rejection, and observability. *)
 val memory_id : fact -> string
 
+val memory_id_of_claim : string -> string
+(** The same identity from the exact claim bytes, without inventing fact
+    metadata to validate a read-side reference. *)
+
 val fact_to_json : fact -> Yojson.Safe.t
 
 (** Inverse of {!fact_to_json}. The current shape is closed and field-exact.

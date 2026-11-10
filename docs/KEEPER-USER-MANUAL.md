@@ -19,6 +19,11 @@ The typed agent engine is built from `packages/agent_core` as the internal
 `masc.agent_core` library. It has no external opam pin or separately released
 SDK version; the MASC commit and build identity are the source of truth.
 
+### Memory processing and recovery
+
+For Librarian waits, original-result recovery and the limits of `/memory sync`,
+see [Keeper memory recovery](guides/KEEPER-MEMORY-RECOVERY.md).
+
 ### Checkpoints when the model changes
 
 A resumed Keeper retains its original conversation, reasoning provenance and

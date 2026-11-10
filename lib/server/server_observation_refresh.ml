@@ -1,6 +1,6 @@
 module Input = Server_observation_input
 
-type surface = Execution_trust | Execution | Transport_health | Mission
+type surface = Execution_trust | Execution | Transport_health | Mission | Operator_digest
 
 let affects_trust = function
   | Input.Keeper { change =
@@ -68,20 +68,33 @@ let affects_transport_health = function
   | Workspace_agent_signal _ | Workspace_messages _ | Operator_judgment _ | Tool_host_attention -> true
 ;;
 
+let affects_mission input = match input with
+       | Input.Operator_judgment Operator_judgment.Command_namespace | Tool_host_attention -> true
+       | Operator_judgment Intervene -> false
+       | Board | Transport_state -> false
+       | Keeper {change = Turn_preview; _} -> false
+       | Dataset _
+       | Keeper {change = (Phase _ | Composite | Row | Turn | Chat | Native_tasks | Child_content
+           | Memory_journal | Async_requests | Asks | Tool_approval_waits | Tool_approval_mode
+           | Gate_settings | Event_queue | Waiting_inventory _); _}
+       | Every_keeper_row | Chat_operation _ | Gate _ | Connector _ | Store _
+       | Execution_invalidated | Agent_core _ | Telemetry_sample | Telemetry_gap _
+       | Keeper_tool_call _ | Keeper_approval_audit _ | Workspace_agent_signal _ | Workspace_messages _ ->
+           affects_execution input
+;;
+
 let affects surface input = match surface with
   | Execution_trust -> affects_trust input
   | Execution -> affects_execution input
   | Transport_health -> affects_transport_health input
-  | Mission ->
+  | Mission -> affects_mission input
+  | Operator_digest ->
       (match input with
-       | Input.Operator_judgment Operator_judgment.Command_namespace | Tool_host_attention -> true
-       | Operator_judgment Intervene -> false
-       | Board | Transport_state -> false
+       | Input.Workspace_agent_signal _ | Workspace_messages _ | Transport_state -> false
        | Dataset _ | Keeper _ | Every_keeper_row | Chat_operation _ | Gate _ | Connector _ | Store _
-       | Execution_invalidated | Agent_core _ | Telemetry_sample | Telemetry_gap _
-       | Keeper_tool_call _ | Keeper_approval_audit _ | Workspace_agent_signal _ | Workspace_messages _ ->
-           affects_execution input)
-
+       | Board | Execution_invalidated | Agent_core _ | Telemetry_sample | Telemetry_gap _
+       | Keeper_tool_call _ | Keeper_approval_audit _ | Operator_judgment _ | Tool_host_attention ->
+           affects_mission input)
 ;;
 
 type 'a generation = {

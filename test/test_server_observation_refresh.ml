@@ -141,9 +141,24 @@ let test_mission_dependency_matrix () =
      Input.Tool_host_attention];
   List.iter (fun input -> check bool "unread or own output cannot wake Mission" false (affects input))
     [Input.Operator_judgment Operator_judgment.Intervene; Input.Board;
+     Input.Keeper {keeper = "piano"; change = Input.Turn_preview};
      Input.Dataset Workspace_dataset_event.Workspace_health;
      Input.Dataset (Workspace_dataset_event.Dashboard_observation {topic = `Health; scope = `Workspace});
      Input.Telemetry_sample]
+;;
+
+let test_digest_dependency_matrix () =
+  let affects = Refresh.affects Refresh.Operator_digest in
+  List.iter (fun input -> check bool "actual Digest input is admitted" true (affects input))
+    [Input.Operator_judgment Operator_judgment.Command_namespace; Input.Tool_host_attention;
+     Input.Keeper {keeper = "piano"; change = Input.Event_queue};
+     Input.Store Input.Pending_confirms];
+  List.iter (fun input -> check bool "unread source or own output does not scan Digest" false (affects input))
+    [Input.Workspace_agent_signal {agent = "source-agent"};
+     Input.Workspace_messages {request_id = "source-message"; mention_delivery = Masc_domain.Mention_passive};
+     Input.Keeper {keeper = "piano"; change = Input.Turn_preview}; Input.Board;
+     Input.Operator_judgment Operator_judgment.Intervene; Input.Telemetry_sample;
+     Input.Dataset (Workspace_dataset_event.Dashboard_observation {topic = `Telemetry; scope = `Workspace})]
 ;;
 
 let with_execution_workspace f =
@@ -609,7 +624,8 @@ let () =
     [ "policy", [test_case "receipt health deadline" `Quick test_source_health_deadline;
                   test_case "closed source dependencies" `Quick test_exact_dependency_matrix;
                   test_case "execution original dependencies" `Quick test_execution_dependency_matrix]
-    ; "mission policy", [test_case "closed Mission source dependencies" `Quick test_mission_dependency_matrix]
+    ; "mission policy", [test_case "closed Mission source dependencies" `Quick test_mission_dependency_matrix;
+                         test_case "closed Digest source dependencies" `Quick test_digest_dependency_matrix]
     ; "consumer", [test_case "actual trust cache completion and scope cell" `Quick test_actual_cache_completion_and_scope_cell;
                     test_case "replacement cancels the retired read" `Quick test_replaced_read_is_cancelled_before_new_generation;
                     test_case "actual commits preserve writer outcomes" `Quick test_actual_commit_inputs_and_listener_failure;

@@ -1,0 +1,24 @@
+ KEEPERS 36    cause  time  memory  age │  runtime  24h              13:30:33
+ !2 ▫▫  ✓20 ▪▪▪▪▪▪▪▪▪▪▪▪▪▪▪▪▪▪▪▪  ○14 ··············
+    fleet max 20       ▂▂▂▆▅▃·█▁▃▁▁▃·· ┃              ┃ █▆·▂···▂·▃·▁·▂▁▁ max 8
+──────────────────────────────────────────────────────────────────────────────
+    keeper                   A  last ◂ 4h
+▌   muse-spark · provider ×2
+▌ ! keeper-25-alph           ✗◌ 77m  ███·█···
+▌ ! keeper-01-al             ✗◌ 77m  ███·█···
+
+ ✗ failed in last walk   ▹ next head   ◌ head is resting
+ A muse-spark
+
+
+
+
+
+
+
+
+
+
+──────────────────────────────────────────────────────────────────────────────
+ keeper-25-alph  ○ idle 77m  since 11-05 18:51  ◌ wait muse-spark  ◷ 13:33 eve
+ ↑↓ move ⏎ open in list o lens n color t theme f/r sim x reset

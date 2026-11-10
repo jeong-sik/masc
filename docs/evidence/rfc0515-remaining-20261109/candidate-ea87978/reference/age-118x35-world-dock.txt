@@ -1,0 +1,35 @@
+ KEEPERS 36    cause  time  memory  age │  runtime  24h                                                      13:30:33
+ █ 4 fresh ▪▪▪▪  ▆ 13 today ▪▪▪▪▪▪▪▪▪▪▪▪▪  ▃ 8 cooling ▪▪▪▪▪▪▪▪  ▁ 9 dormant ▫▫▫▫▫▫▫▫▫
+    stale events/day                 ▃▁·▁··▁·▁▁····▅▁█▂▁▁▆▁▃▁ ┃ max 25       ┃ Σ 164 · changed 43 · gone 121
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+    keeper  facts by age ▸           30d  7d    1d   6h    1h ┃ renewed      ┃ lag · unread turns ▹      stale   facts
+▌ ■ world · shared                   ▅▃▄█▅▁▁▃▃▅▁▁▁▁▁▁▁▁·▁▁▁▁· ┃ ◌ building   ┃ ███············465 absent ×164     2.0k
+▌ − fresh <3h                        ···▇▄··▃▆▆▅█▃▅▄▁▃▁·▁▁▂▅· ┃ 4            ┃ Σ 146 facts · lag 0
+▌ ● keeper-13-alpha-b                ·········█▄···········█· ┃ + 10m        ┃ ·························          20 ▂
+▌ ! keeper-01-al                     ·······▂█·············▄· ┃ + 41m        ┃ ·························          19 ▂
+▌ ● keeper-19-alpha-bravo            ········▄▅█▄▂▄▂▂····▂▇·· ┃ + 88m        ┃ ·························          22 ▂
+▌ ● keeper-06-alpha-brav             ···▇▄··▂▁▂▁█▃▅▃·▃▁·▁▁··· ┃ + 1h52m      ┃ ·························          85 ▆
+▌ + today <24h                       ▂▃▅█▅▁▂▅▅█▂·▁▁▁·▁······· ┃ 13           ┃ Σ 878 facts · lag 830
+▌ − cooling 1–3d                     ▂▃▅█▄▁▂▄▄▆▁▁············ ┃ 8            ┃ Σ 478 facts · lag 801
+▌ ● keeper-23-al                     ··▇█▇▂▆▂▂█▂▃············ ┃ + 27h        ┃ ███████·················· ×5       32 ▂
+▌ ● keeper-32                        ▁▃▅▅▃▁·█▇▄·▁············ ┃ + 32h        ┃ ████████████············· ×17      71 ▅
+▌ ● keeper-22-alpha                  ▂▂▁█▃·▁▁▁▂▁▁············ ┃ + 33h        ┃ █························ ×2       63 ▄
+▌ ● keeper-34-a                      ▃██▆▂▁·▂▂▆▅············· ┃ + 37h        ┃ ████████████············· ×15      61 ▄
+▌ ● keeper-16-alpha-bravo-charli     ·▄█▄▄···▂▆▂············· ┃ + 37h        ┃ ██████████··············· ×1       15 ▁
+▌ ● keeper-35-alpha                  ▁▂▂█▁··▄▇█▁············· ┃ + 41h        ┃ ████████████████········· ×30      92 ▆
+┌─ world · shared workspace memory ──────────────────────────────────────────────────────────────────────────────────┐
+│ ◂ keepers       2031 facts (+49 source-bound) · 37 keepers · newest 79m · re-observed 0 of 2031                    │
+│   ↓ ledger      1613 facts → 1400 claims · 3 conflicts · 10 excluded · saved 13:26 (4m)                            │
+│   ↓ absent      465 keeper facts are absent from the ledger (23%) · 30h–4d old, none newer                         │
+│ ● now           building 0/1395 · from scratch · ledger 1403 · published 13:20                                     │
+│ ▹ next          no time announced · rebuilds when the source set or contract changes                               │
+│   server says   stored_bindings_not_revalidated · individual_store_snapshots                                       │
+│                 ledger semantic_verification: not_performed                                                        │
+│ ✗ stale events  164 source invalidations · source_changed 43 · source_unavailable 121                              │
+│   last 20 days  ··▁·▁▁····▅▁█▂▁▁▆▁▃▁ oldest ◂ today                                                                │
+│   older than 20 days: 87 · stale = the source file changed or vanished                                             │
+│                                                                                                                    │
+│                                                                                                                    │
+│                                                                                                                    │
+└────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+ ↑↓ move  ⏎ feed  s schedules  m memory  esc close  o lens  u renew  c curator  d +1d  w world  x reset

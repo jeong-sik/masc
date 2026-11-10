@@ -1,0 +1,35 @@
+ Operations  ▸Work  Keepers  Features & plugins  Workspace  System
+
+  MASC Board (2)  23:56:44  HTTP [connected]
+ ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ Sort [s]: net votes first; newer breaks ties · H:choose hearth
+ hearths · census empty
+   ID           HEARTH       AUTHOR           TITLE                                                   AGE SCORE REPLIES
+ ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ @ p-s…e-closed              fixture-operator 🔒 해결한 논의와 다음 글                             38m36s  0    0
+ @ p-s…ace-open              fixture-operator 함께 읽을 요청과 댓글                                38m36s  0    1
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  ACTION NEEDED 1 · keeper_memory_execution:addon_unattached  Right / Enter:read  Esc:back  v / V:up / down  q:quit  …?
+ Schedule may be out of date
+ › to quietreader   (i to write)

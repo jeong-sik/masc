@@ -1,0 +1,154 @@
+{
+  "source": "ea87978b18e3fc6c4a143cf8e74de8cbc495d67e",
+  "status": "incomplete; zero Runtime terminal frames",
+  "observations_count": 54,
+  "first_native_failing": {
+    "observed_request_started_unix": 1794226872.232957,
+    "response_body_sha256": "ef1092972da3fd8f5cb2561e95681db5efb7020860db603f6dd21f71f6499c4a",
+    "row": {
+      "name": "recoveredproof",
+      "phase": "failing",
+      "health": "failing",
+      "last_failure": {
+        "cause": "provider",
+        "at_unix": 1794226871.981226
+      },
+      "failing_since": 1794226871.981857,
+      "runtime_lane_observation": {
+        "state": "observed",
+        "turn": {
+          "trace_id": "trace-recoveredproof",
+          "turn_count": 1,
+          "ended_at": "2026-11-09T12:21:11Z"
+        },
+        "evidence": {
+          "failures": [
+            {
+              "summary": "Runtime provider refused the connection; nothing is listening on the runtime endpoint",
+              "attempt": 0,
+              "runtime_id": "deepseek.smoke",
+              "dispatch": "dispatched",
+              "failure": {
+                "cause": {
+                  "kind": "provider_network",
+                  "provider": null,
+                  "network_kind": "connection_refused",
+                  "detail": "Eio.Io Net Connection_failure Refused Unix_error (Connection refused, \"connect-in-progress\", \"\"),\n  connecting to tcp:127.0.0.1:9"
+                }
+              },
+              "api_candidate_fault": {
+                "kind": "unknown_after_dispatch"
+              }
+            }
+          ],
+          "terminal": {
+            "kind": "candidate",
+            "runtime_id": "deepseek.smoke",
+            "attempt": 0,
+            "failure": {
+              "cause": {
+                "kind": "provider_network",
+                "provider": null,
+                "network_kind": "connection_refused",
+                "detail": "Eio.Io Net Connection_failure Refused Unix_error (Connection refused, \"connect-in-progress\", \"\"),\n  connecting to tcp:127.0.0.1:9"
+              }
+            },
+            "summary": "Runtime provider refused the connection; nothing is listening on the runtime endpoint"
+          }
+        },
+        "error": null
+      },
+      "runtime_path_rest": {
+        "status": "serving",
+        "runtime_id": "deepseek.smoke"
+      }
+    }
+  },
+  "last_native_failing": {
+    "observed_request_started_unix": 1794226888.5572832,
+    "response_body_sha256": "ef1092972da3fd8f5cb2561e95681db5efb7020860db603f6dd21f71f6499c4a",
+    "row": {
+      "name": "recoveredproof",
+      "phase": "failing",
+      "health": "failing",
+      "last_failure": {
+        "cause": "provider",
+        "at_unix": 1794226871.981226
+      },
+      "failing_since": 1794226871.981857,
+      "runtime_lane_observation": {
+        "state": "observed",
+        "turn": {
+          "trace_id": "trace-recoveredproof",
+          "turn_count": 1,
+          "ended_at": "2026-11-09T12:21:11Z"
+        },
+        "evidence": {
+          "failures": [
+            {
+              "summary": "Runtime provider refused the connection; nothing is listening on the runtime endpoint",
+              "attempt": 0,
+              "runtime_id": "deepseek.smoke",
+              "dispatch": "dispatched",
+              "failure": {
+                "cause": {
+                  "kind": "provider_network",
+                  "provider": null,
+                  "network_kind": "connection_refused",
+                  "detail": "Eio.Io Net Connection_failure Refused Unix_error (Connection refused, \"connect-in-progress\", \"\"),\n  connecting to tcp:127.0.0.1:9"
+                }
+              },
+              "api_candidate_fault": {
+                "kind": "unknown_after_dispatch"
+              }
+            }
+          ],
+          "terminal": {
+            "kind": "candidate",
+            "runtime_id": "deepseek.smoke",
+            "attempt": 0,
+            "failure": {
+              "cause": {
+                "kind": "provider_network",
+                "provider": null,
+                "network_kind": "connection_refused",
+                "detail": "Eio.Io Net Connection_failure Refused Unix_error (Connection refused, \"connect-in-progress\", \"\"),\n  connecting to tcp:127.0.0.1:9"
+              }
+            },
+            "summary": "Runtime provider refused the connection; nothing is listening on the runtime endpoint"
+          }
+        },
+        "error": null
+      },
+      "runtime_path_rest": {
+        "status": "serving",
+        "runtime_id": "deepseek.smoke"
+      }
+    }
+  },
+  "source_native_requests_sha256": "5282cf7a6d2e593c102ff9b1c11c185f714fba9931a647e5d79d1c6a8daf63b4",
+  "scope": "Extracted from native responses; actual dispatched loopback attempt 0 failed with connection_refused. Path stayed serving without release_at, so the prepared expected-rest predicate was not met. This is native API evidence only, not positive Runtime terminal coverage. No retry or restart.",
+  "stop": {
+    "reason": "capture-finished-or-aborted",
+    "requested_at": "2026-11-09T12:21:28.561915+00:00",
+    "signal_sent": true,
+    "pid_exit_observed": true,
+    "port_listener_absent": true,
+    "settled": true,
+    "finished_at": "2026-11-09T12:21:29.372499+00:00"
+  },
+  "preferences": [
+    {
+      "path": "<candidate-worktree>/rfc0515-remaining-20261109/candidate-ea87978-run42607821655/isolated-native-pair-62sdgkyw/workspace/.masc/config/tui-keepers.toml",
+      "unchanged": true,
+      "before_sha256": null,
+      "after_sha256": null
+    },
+    {
+      "path": "<user>/me/.masc/config/tui-keepers.toml",
+      "unchanged": true,
+      "before_sha256": "f89270f2a5e4e0aa14b365cbd6bfd4289e64bc2d5a51d57125cbf44251ebb23c",
+      "after_sha256": "f89270f2a5e4e0aa14b365cbd6bfd4289e64bc2d5a51d57125cbf44251ebb23c"
+    }
+  ]
+}

@@ -300,12 +300,6 @@ let approval_list_note ~name = function
   | List_not_read (Approval_unavailable _) ->
       Printf.sprintf ", %s unavailable" name
 
-let approvals_title_notes (reading : approvals_reading) =
-  String.concat ""
-    (List.map
-       (fun (name, list_reading) -> approval_list_note ~name list_reading)
-       (approval_row_lists reading @ [ ("questions", reading.questions) ]))
-
 (* What the queue says when it has no approval row to draw. "No pending
    approvals" is a reading of all three row lists, so it is said only when
    each of them was read; otherwise each list that was not read is named with

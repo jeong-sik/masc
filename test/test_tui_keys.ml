@@ -886,6 +886,28 @@ let roster_turn name : Tui_decode.keeper_turn_row =
 let selected_roster_name state =
   Option.map (fun keeper -> keeper.Tui_decode.k_name) (selected_keeper state)
 
+let test_world_selection_never_names_a_keeper () =
+  let module Model = Masc_tui_keeper_list_model in
+  let state = create_state ~workspace:"" ~port:0 () in
+  state.view <- Keepers Keeper_list;
+  state.keepers <- [roster_keeper "alpha"];
+  state.keeper_list_view <- Model.By_memory;
+  place_keeper_list_stop state Model.Stop_world;
+  Alcotest.(check (option string)) "World cannot target row zero" None (selected_roster_name state);
+  preserve_keeper_list_selection state (fun () -> state.keepers <- [roster_keeper "beta"]);
+  cycle_keeper_list_sort state;
+  Alcotest.(check bool) "refresh and sort retain typed World focus" true
+    (keeper_list_stop state = Some Model.Stop_world);
+  state.keepers <- [];
+  Alcotest.(check (option string)) "empty roster still has no Keeper" None (selected_roster_name state);
+  Alcotest.(check bool) "empty roster keeps World" true (keeper_list_stop state = Some Model.Stop_world);
+  state.keepers <- [roster_keeper "beta"];
+  choose_keeper_row state 0;
+  Alcotest.(check (option string)) "choosing a real Keeper clears World focus" (Some "beta") (selected_roster_name state);
+  place_keeper_list_stop state Model.Stop_world;
+  set_keeper_list_view state Model.Plain;
+  Alcotest.(check (option string)) "leaving World view selects a real row" (Some "beta") (selected_roster_name state)
+
 let test_keeper_list_cycles_preserve_selected_name () =
   let state = create_state ~workspace:"" ~port:0 () in
   state.view <- Keepers Keeper_list;
@@ -933,6 +955,30 @@ let test_keeper_list_detail_transition_preserves_selected_name () =
   Alcotest.(check (option string)) "files keeps the name" (Some "beta") (selected_roster_name state);
   transition_keeper_view state (Keepers Keeper_list);
   Alcotest.(check (option string)) "files return keeps the name" (Some "beta") (selected_roster_name state)
+
+let test_world_shortcut_selects_no_keeper () =
+  List.iter (fun view ->
+    List.iter (fun populated ->
+      let state = create_state ~workspace:"" ~port:0 () in
+      state.view <- Keepers Keeper_list;
+      state.keeper_list_view <- view;
+      if populated then state.keepers <- List.map roster_keeper ["alpha"; "beta"];
+      open_keeper_world state;
+      Alcotest.(check bool) "World has a visible row" true
+        (Masc_tui_keeper_list_model.has_world state.keeper_list_view);
+      Alcotest.(check bool) "existing memory/age view is retained" true
+        (state.keeper_list_view =
+          if Masc_tui_keeper_list_model.has_world view then view
+          else Masc_tui_keeper_list_model.By_age);
+      Alcotest.(check bool) "World owns selection" true
+        (keeper_list_stop state = Some Masc_tui_keeper_list_model.Stop_world);
+      Alcotest.(check bool) "no Keeper is an action target" true
+        (Option.is_none (selected_keeper state));
+      reconcile_keeper_story state;
+      Alcotest.(check bool) "reconciliation keeps the World dock" true
+        (state.keeper_story = Some Masc_tui_keeper_story.World))
+      [false; true])
+    Masc_tui_keeper_list_model.views
 
 let test_activity_keeper_selection_uses_the_current_roster () =
   let state = create_state ~workspace:"" ~port:0 () in
@@ -2332,6 +2378,9 @@ let () =
             test_keepers_jump_uses_one_binding_for_dispatch_and_help
         ; Alcotest.test_case "Keepers view and sort preserve the selected name" `Quick
             test_keeper_list_cycles_preserve_selected_name
+        ; Alcotest.test_case "World selection never names a Keeper" `Quick test_world_selection_never_names_a_keeper
+        ; Alcotest.test_case "World shortcut selects no Keeper in every view" `Quick
+            test_world_shortcut_selects_no_keeper
         ; Alcotest.test_case "Keepers detail transition preserves the selected name" `Quick
             test_keeper_list_detail_transition_preserves_selected_name
         ; Alcotest.test_case "Activity keeps the requested Keeper through roster selection" `Quick

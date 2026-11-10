@@ -300,7 +300,8 @@ let make_health_probe_json ?timing ?(listener = default_listener) ?(extra_fields
     (make_health_probe_fields ?timing ~listener ~health_detail:"probe"
        ~full_health_url:Server_health_paths.full ~request_authority request
      @ [ "auxiliary_startup",
-         Server_auxiliary_startup.to_yojson Server_auxiliary_startup.global ]
+         Server_auxiliary_startup.to_yojson Server_auxiliary_startup.global;
+         "tla_source_observation", Server_tla_source_events.health_json () ]
      @ extra_fields)
 
 (* Keeper fleet scan / paused-keeper diagnostics / phase counts / fleet safety
@@ -588,6 +589,7 @@ let make_health_json ?(listener = default_listener) ?section_timings_ref
     ("dashboard_surface", Web_dashboard.surface_status_json ());
     ("subsystems", Subsystem_health.to_yojson ());
     ("auxiliary_startup", Server_auxiliary_startup.to_yojson Server_auxiliary_startup.global);
+    ("tla_source_observation", Server_tla_source_events.health_json ());
     (* Server log visibility belongs on the first health probe too.  Keep the
        payload cheap and redacted: only ring counters, latest metadata, and
        file-sink state are exposed here; full log rows stay behind the
@@ -897,6 +899,7 @@ let full_health_placeholder_fields ?error ?(component_timed_out = false)
         ~status () );
     ( "auxiliary_startup",
       Server_auxiliary_startup.to_yojson Server_auxiliary_startup.global );
+    ( "tla_source_observation", Server_tla_source_events.health_json () );
     ( "paused_keepers",
       `Assoc
         [

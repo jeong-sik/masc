@@ -60,7 +60,9 @@ val generate_id : unit -> string
 
 (** [delete_request base_path req_id] removes the verification record for
     [req_id]. RFC-0221 §3.1 compensation: undo a record write whose Task status
-    commit did not land. A missing record is success (idempotent). *)
+    commit did not land. A missing record is success (idempotent).
+    Write/remove attempts drop the listing's exact file key before notifying
+    the typed Dashboard commit hook, including uncertain failed attempts. *)
 val delete_request : string -> string -> (unit, string) result
 
 val load_request : string -> string -> (verification_request, string) result

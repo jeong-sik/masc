@@ -1,3 +1,4 @@
+import { acceptedExecutionWorkspace } from '../../execution-workspace-authority'
 import { publishDashboardObservationChange } from '../../lib/observation-refresh'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { h } from 'preact'
@@ -32,6 +33,8 @@ function observedGoalList<T extends Goal>(list: T[]): T[] {
 }
 
 beforeEach(() => {
+  acceptedExecutionWorkspace.value = { epoch: 'activity-fixture', workspaceRoot: '/workspace',
+    connectionGeneration: 0, observerInstanceId: 'activity-fixture' }
   stubEmptyActivityFetch()
   clearTraces()
 })
@@ -39,6 +42,7 @@ beforeEach(() => {
 afterEach(() => {
   for (const container of renderedContainers) preactRender(null, container)
   renderedContainers.clear()
+  acceptedExecutionWorkspace.value = null
   vi.useRealTimers()
   vi.unstubAllGlobals()
   ideContextFocus.value = null

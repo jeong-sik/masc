@@ -1,3 +1,4 @@
+import { acceptedExecutionWorkspace } from '../../execution-workspace-authority'
 // @vitest-environment happy-dom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { render } from 'preact'
@@ -19,7 +20,12 @@ describe('IdeActivityPanel a11y', () => {
     document.body.appendChild(container)
   })
 
-  afterEach(() => {
+  beforeEach(() => {
+  acceptedExecutionWorkspace.value = { epoch: 'ide-fixture', workspaceRoot: '/workspace',
+    connectionGeneration: 0, observerInstanceId: 'ide-fixture' }
+})
+
+afterEach(() => {
     render(null, container)
     document.body.removeChild(container)
     vi.unstubAllGlobals()

@@ -1,7 +1,8 @@
+import { acceptedExecutionWorkspace } from '../../execution-workspace-authority'
 // @vitest-environment happy-dom
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/preact'
 import { html } from 'htm/preact'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import {
   fetchKeeperStateDiagram,
@@ -24,8 +25,14 @@ vi.mock('../../api/keeper', async () => {
 
 const fetchKeeperStateDiagramMock = vi.mocked(fetchKeeperStateDiagram)
 
+beforeEach(() => {
+  acceptedExecutionWorkspace.value = { epoch: 'ide-fixture', workspaceRoot: '/workspace',
+    connectionGeneration: 0, observerInstanceId: 'ide-fixture' }
+})
+
 afterEach(() => {
   cleanup()
+  acceptedExecutionWorkspace.value = null
   vi.clearAllMocks()
   activeKeeperName.value = ''
   keepers.value = []

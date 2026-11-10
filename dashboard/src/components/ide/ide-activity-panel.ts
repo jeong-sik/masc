@@ -1,4 +1,4 @@
-import { setupObservationRefresh } from '../../lib/observation-refresh'
+import { selectObservationReadFailure, setupObservationRefresh } from '../../lib/observation-refresh'
 import { html } from 'htm/preact'
 import { memo } from 'preact/compat'
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks'
@@ -75,7 +75,16 @@ interface GraphFetchResult {
   readonly history: ActivityHistoryWindow | null
   readonly events: ReadonlyArray<RunActivityEvent>
   readonly workspaceId: string
-  readonly ok: boolean
+  readonly read: ActivityReadOutcome
+}
+
+type ActivityReadOutcome = { readonly kind: 'ready' } | { readonly kind: 'failed'; readonly cause: unknown }
+const READ_READY: ActivityReadOutcome = { kind: 'ready' }
+
+function combineReadOutcomes(...outcomes: ActivityReadOutcome[]): ActivityReadOutcome {
+  const failures = outcomes.filter(outcome => outcome.kind === 'failed')
+  if (failures.length === 0) return READ_READY
+  return { kind: 'failed', cause: selectObservationReadFailure(failures.map(failure => failure.cause)) ?? failures[0]!.cause }
 }
 
 type ActivityFetchResult = GraphFetchResult
@@ -207,14 +216,16 @@ async function fetchActivityEvents(
   signal: AbortSignal,
 ): Promise<ActivityFetchResult> {
   const graph = await fetchActivityGraphEvents(signal)
+  signal.throwIfAborted()
   const bridge = await fetchIdeBridgeRunActivityEvents(graph.workspaceId, codebase, signal)
+  signal.throwIfAborted()
   return {
     workspaceId: graph.workspaceId,
     history: graph.history,
     // A bridge fetch failure must degrade the refresh tone instead of
     // rendering an empty-but-"live" feed: an operator cannot distinguish
     // "no keeper activity" from "the activity source is broken" otherwise.
-    ok: graph.ok && bridge.ok,
+    read: combineReadOutcomes(graph.read, bridge.read),
     events: mergeRunActivityEvents(graph.events, bridge.events),
   }
 }
@@ -230,15 +241,15 @@ async function fetchActivityGraphEvents(signal: AbortSignal): Promise<GraphFetch
     const history = { loaded: rawEvents.length, total }
     const workspaceId = rawEvents[0]?.workspace_id || DEFAULT_WORKSPACE_ID
     const mapped = rawEvents.map(e => mapApiEvent(e, workspaceId))
-    return { events: mapped, workspaceId, ok: true, history }
-  } catch {
-    return { events: EMPTY_ACTIVITY, workspaceId: DEFAULT_WORKSPACE_ID, ok: false, history: null }
+    return { events: mapped, workspaceId, read: READ_READY, history }
+  } catch (cause) {
+    return { events: EMPTY_ACTIVITY, workspaceId: DEFAULT_WORKSPACE_ID, read: { kind: 'failed', cause }, history: null }
   }
 }
 
 interface BridgeFetchResult {
   readonly events: ReadonlyArray<RunActivityEvent>
-  readonly ok: boolean
+  readonly read: ActivityReadOutcome
 }
 
 async function fetchIdeBridgeRunActivityEvents(
@@ -246,27 +257,18 @@ async function fetchIdeBridgeRunActivityEvents(
   codebase: string | null | undefined,
   signal: AbortSignal,
 ): Promise<BridgeFetchResult> {
-  const sources: Array<Promise<ReadonlyArray<IdeBridgeEvent>>> = []
   const scoped = codebase?.trim()
-  if (scoped) sources.push(fetchIdeEvents({ limit: 50, codebase: scoped, signal }))
   // No codebase is set: there is nothing to query, not a request that
   // happened to find zero events. The caller derives the visible no-scope
   // state from the current props, before any asynchronous response arrives.
-  if (!scoped) return { events: EMPTY_ACTIVITY, ok: true }
-  const settled = await Promise.allSettled(sources)
-  const events: RunActivityEvent[] = []
-  let ok = true
-  for (const result of settled) {
-    if (result.status === 'fulfilled') {
-      for (const event of result.value) {
-        const key = bridgeEventKey(event)
-        events.push(mapIdeBridgeEvent(event, workspaceId, key, scoped))
-      }
-    } else {
-      ok = false
-    }
+  if (!scoped) return { events: EMPTY_ACTIVITY, read: READ_READY }
+  try {
+    const source = await fetchIdeEvents({ limit: 50, codebase: scoped, signal })
+    const events = source.map(event => mapIdeBridgeEvent(event, workspaceId, bridgeEventKey(event), scoped))
+    return { events, read: READ_READY }
+  } catch (cause) {
+    return { events: EMPTY_ACTIVITY, read: { kind: 'failed', cause } }
   }
-  return { events, ok }
 }
 
 function mergeRunActivityEvents(
@@ -480,9 +482,9 @@ export function IdeActivityPanel(props: IdeActivityPanelProps = {}) {
       lastAttemptMs: attemptMs,
       tone: prev.lastOkMs === null && prev.failedCount === 0 ? 'loading' : prev.tone,
     }))
-    const { events, workspaceId, ok, history } = await fetchActivityEvents(codebase, signal)
+    const { events, workspaceId, read, history } = await fetchActivityEvents(codebase, signal)
     if (signal.aborted) return
-    if (ok) {
+    if (read.kind === 'ready') {
       store.reset(workspaceId)
       store.seed(events)
       setHistoryWindow(history)
@@ -502,9 +504,16 @@ export function IdeActivityPanel(props: IdeActivityPanelProps = {}) {
         lastAttemptMs: attemptMs,
         failedCount: prev.failedCount + 1,
       }))
-      throw new Error('Activity observation is unavailable')
+      throw read.cause
     }
-  }, { topics: ['activity', 'ide_events'] }), [store, codebase, requestedScopeKey])
+  }, { topics: ['activity', 'ide_events'], resetRead: () => {
+    store.reset(DEFAULT_WORKSPACE_ID)
+    setHistoryWindow(null)
+    loadedScopeKeyRef.current = null
+    setLoadedScopeKey(null)
+    setRefreshState(INITIAL_REFRESH_STATE)
+    emittedTraceIds.current = new Set()
+  } }), [store, codebase, requestedScopeKey])
 
   useStoreSubscription(store.subscribe)
   useSignalValue(globalPresenceSnapshot)

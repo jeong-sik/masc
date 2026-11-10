@@ -167,7 +167,10 @@ export function IdePersistencePanel({
           throw err
         }
       }
-    }, { topics: ['keeper_composite', 'keeper_turns'], keeperName: name })
+    }, { topics: ['keeper_composite', 'keeper_turns'], keeperName: name, resetRead: () => {
+      setDiagram(null)
+      setError(null)
+    } })
   }, [keeperName])
 
   const phase = diagram?.current_phase ?? keeper?.phase ?? null

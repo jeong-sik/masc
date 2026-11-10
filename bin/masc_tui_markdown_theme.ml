@@ -34,11 +34,11 @@ let palette ~closing : Markdown.palette =
   ; quote = (Ansi.dim, closing)
   ; link_text = (Theme.Syntax.link, closing)
   ; link_target = (Ansi.dim, closing)
-  ; rule = (Theme.Syntax.rule, closing)
+  ; rule = (Theme.Syntax.rule (), closing)
   ; bullet = "\xe2\x80\xa2"
   ; code_gutter = "\xe2\x94\x82 "
   ; code_header = (Ansi.bold ^ Theme.category Theme.Slot_1, closing)
-  ; code_border = (Theme.Syntax.rule, closing)
+  ; code_border = (Theme.Syntax.rule (), closing)
   ; quote_gutter = "\xe2\x96\x8f "
   ; table_header = (Ansi.bold ^ Theme.category Theme.Slot_1, closing)
   ; table_gutter = " \xe2\x94\x82 "
@@ -49,7 +49,7 @@ let palette ~closing : Markdown.palette =
      what the reader can skip. *)
   ; code_keyword = (Theme.Syntax.keyword, closing)
   ; code_string = (Theme.Syntax.string, closing)
-  ; code_comment = (Theme.Syntax.code_comment, closing)
+  ; code_comment = (Theme.Syntax.code_comment (), closing)
   ; code_number = (Theme.Syntax.code_number, closing)
   ; code_type = (Ansi.bold ^ Theme.Syntax.code_type, closing)
   (* A JSON body has the four roles the chat's tool results and a Task note

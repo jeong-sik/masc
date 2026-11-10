@@ -1,5 +1,6 @@
 // Tool call series panel — hourly or daily totals of the retained tool calls,
-// drawn as calls, failure rate, time spent and latency, with the tools that spent the most time.
+// drawn as calls, failure rate, time spent (and the part of it inside calls that ran a minute
+// or more) and latency, with the tools that spent the most time.
 
 import { html } from 'htm/preact'
 import { useEffect } from 'preact/hooks'
@@ -25,6 +26,8 @@ import {
   type SeriesWindowKey,
 } from './tool-series-state'
 
+const MS_PER_SECOND = 1_000
+const MS_PER_MINUTE = 60_000
 const MS_PER_HOUR = 3_600_000
 const PERCENT = 100
 
@@ -34,6 +37,26 @@ export function formatTotalTime(ms: number): string {
 
 function formatCount(count: number): string {
   return `${Math.round(count).toLocaleString()}회`
+}
+
+/** The line a call counts as long from, as the server counted it: "1분", or "90초" when it is not whole minutes. */
+export function longCallLine(thresholdMs: number): string {
+  return thresholdMs % MS_PER_MINUTE === 0
+    ? `${thresholdMs / MS_PER_MINUTE}분`
+    : `${thresholdMs / MS_PER_SECOND}초`
+}
+
+function longCallLabel(series: ToolMetricsSeriesResponse): string {
+  return `${longCallLine(series.long_call_ms)} 이상 걸린 호출`
+}
+
+function longTimeLabel(series: ToolMetricsSeriesResponse): string {
+  return `${longCallLine(series.long_call_ms)} 이상 걸린 시간`
+}
+
+/** "12회 · 3.4h": how many calls ran that long and the time they took. */
+function formatLongCalls(count: number, ms: number): string {
+  return `${formatCount(count)} · ${formatTotalTime(ms)}`
 }
 
 /** Share of failed calls, or null when nothing ran. */
@@ -77,9 +100,20 @@ export function failureRateSeries(series: ToolMetricsSeriesResponse): MetricChar
   ]
 }
 
+/**
+ * Time spent per bucket, and the part of it that went into calls running the
+ * long-call line or more. Both are times, so they share one axis, and the
+ * second line never rises above the first.
+ */
 export function timeSeries(series: ToolMetricsSeriesResponse): MetricChartSeries[] {
   return [
     { name: '실행 시간 합계', color: 'var(--color-accent-fg)', readings: bucketReadings(series, bucket => bucket.total_ms) },
+    {
+      name: longTimeLabel(series),
+      color: 'var(--color-status-warn)',
+      dashed: true,
+      readings: bucketReadings(series, bucket => bucket.long_total_ms),
+    },
   ]
 }
 
@@ -112,11 +146,13 @@ function ToolSeriesCharts({ series }: { series: ToolMetricsSeriesResponse }) {
   const total = series.total
   const cutShort = cutShortBucketCount(series)
   return html`
-    <div class="grid grid-cols-[repeat(6,minmax(0,1fr))] gap-3 max-[1100px]:grid-cols-[repeat(3,minmax(0,1fr))] max-[520px]:grid-cols-[repeat(2,minmax(0,1fr))]">
+    <div class="grid grid-cols-[repeat(4,minmax(0,1fr))] gap-3 min-[1400px]:grid-cols-[repeat(8,minmax(0,1fr))] max-[520px]:grid-cols-[repeat(2,minmax(0,1fr))]">
       <${StatTile} label="호출" value=${formatCount(total.call_count)} status="brass" />
       <${StatTile} label="실패" value=${formatCount(total.failure_count)} status="brass" />
       <${StatTile} label="실패율" value=${formatFailureRate(total.call_count, total.failure_count)} status="brass" />
       <${StatTile} label="실행 시간 합계" value=${formatTotalTime(total.total_ms)} status="brass" />
+      <${StatTile} label=${longCallLabel(series)} value=${formatCount(total.long_count)} status="brass" />
+      <${StatTile} label=${longTimeLabel(series)} value=${formatTotalTime(total.long_total_ms)} status="brass" />
       <${StatTile} label="지연 p50" value=${formatMsCompact(total.p50_ms, '-')} status="brass" />
       <${StatTile} label="지연 p95" value=${formatMsCompact(total.p95_ms, '-')} status="brass" />
     </div>
@@ -153,7 +189,8 @@ function ToolSeriesTable({ series, tool, onTool }: {
         <thead>
           <tr>
             <th scope="col">도구</th><th scope="col">호출</th><th scope="col">실패</th>
-            <th scope="col">시간 합계</th><th scope="col">p50</th><th scope="col">p95</th><th scope="col">최대</th>
+            <th scope="col">시간 합계</th><th scope="col">${longCallLabel(series)}</th>
+            <th scope="col">p50</th><th scope="col">p95</th><th scope="col">최대</th>
           </tr>
         </thead>
         <tbody>
@@ -168,6 +205,7 @@ function ToolSeriesTable({ series, tool, onTool }: {
               <td>${row.call_count.toLocaleString()}</td>
               <td>${row.failure_count.toLocaleString()}</td>
               <td>${formatTotalTime(row.total_ms)}</td>
+              <td>${row.long_count === 0 ? '-' : formatLongCalls(row.long_count, row.long_total_ms)}</td>
               <td>${formatMsCompact(row.p50_ms, '-')}</td>
               <td>${formatMsCompact(row.p95_ms, '-')}</td>
               <td>${formatMsCompact(row.max_ms, '-')}</td>

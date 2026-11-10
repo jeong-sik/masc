@@ -1778,6 +1778,112 @@ let test_grep_preserves_regex_bytes_through_remote_dispatch () =
       "needle ", true, "(?i)needle ", 0, Some "2:needle \n5:NEEDLE \n";
       "\nneedle", false, "\nneedle", 2, None ]
 
+(* The first dispatch after a probe is rg, which exits 2 with its own message.
+   The second is the existence probe that asks the endpoint about the path, and
+   it exits [test_exit]. Dispatch N keeps the request the endpoint received as
+   [frame_path].N, read by its own length as in [fake_ssh_recording_script]. *)
+let fake_ssh_rg_then_probe_script ~frame_path ~test_exit =
+  let trailer code =
+    Exec_ssh_protocol.render_trailer
+      { v = Exec_ssh_protocol.newest
+      ; exit = Some code
+      ; signal = None
+      ; timed_out = false
+      ; shim_error = None
+      ; observed_syscalls = []
+      }
+  in
+  Printf.sprintf
+    {|#!/bin/sh
+case "$*" in
+  *--probe*) printf '%%s' '%s'; exit 0 ;;
+esac
+base=%s
+count=$(cat "$base.count" 2>/dev/null || echo 0)
+echo $((count + 1)) > "$base.count"
+dd bs=1 count=8 of="$base.$count.len" 2>/dev/null
+len=0
+for byte in $(od -An -tu1 "$base.$count.len"); do len=$((len * 256 + byte)); done
+dd bs=1 count="$len" of="$base.$count.body" 2>/dev/null
+cat "$base.$count.len" "$base.$count.body" > "$base.$count"
+cat >/dev/null 2>/dev/null &
+if [ "$count" = 0 ]; then
+  printf 'rg: missing: No such file or directory (os error 2)\n'
+  printf '%%s' '%s' >&2
+else
+  printf '%%s' '%s' >&2
+fi
+exit 0
+|}
+    fake_shim_probe
+    (Filename.quote frame_path)
+    (trailer 2)
+    (trailer test_exit)
+
+(* rg exits 2 for a missing path, a bad pattern and a half-readable tree
+   alike, and the endpoint owns the tree, so this host cannot look at the path.
+   Only the endpoint's own "not there" answer makes the failure the caller's
+   path. Any other answer leaves it a runtime failure, as before. *)
+let test_grep_of_a_missing_endpoint_path_is_a_path_error () =
+  let base, config, meta =
+    remote_reader_with_allowed_paths ~allowed_paths:(fun _ -> [ "/app" ])
+  in
+  Fun.protect ~finally:(fun () -> cleanup_fixture_dir base) @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED" "false" @@ fun () ->
+  let searches = ref 0 in
+  let argv_of frame_path index =
+    match Exec_ssh_protocol.decode_request (read_file (Printf.sprintf "%s.%d" frame_path index)) with
+    | Ok (request, _) -> request.argv
+    | Error detail -> Alcotest.fail detail
+  in
+  (* The failure, the path rg was given, and the path the probe asked about. *)
+  let grep ~path ~test_exit =
+    incr searches;
+    let frame_path = Filename.concat base (Printf.sprintf "grep-frame-%d" !searches) in
+    with_fake_ssh (fake_ssh_rg_then_probe_script ~frame_path ~test_exit) @@ fun () ->
+    match
+      Masc.Keeper_workspace_read_ops.try_handle_with_outcome
+        ~turn_sandbox_factory:None ~config ~meta ~op:"rg" ~raw_path:path
+        ~args:(`Assoc [ "path", `String path; "pattern", `String "needle" ])
+    with
+    | None -> Alcotest.fail "Grep was not dispatched"
+    | Some execution ->
+      let searched =
+        match List.rev (argv_of frame_path 0) with
+        | last :: _ -> last
+        | [] -> Alcotest.fail "rg was dispatched with no arguments"
+      in
+      execution, searched, argv_of frame_path 1
+  in
+  (* POSIX: [test -e] exits 1 when the path does not exist. *)
+  let missing, searched, probe = grep ~path:"/app/missing.txt" ~test_exit:1 in
+  Alcotest.(check bool) "a path the endpoint says is missing is the caller's" true
+    (missing.disposition = Tool_result.Failed Tool_result.Policy_rejection);
+  Alcotest.(check bool) "the failure names the path and the way forward" true
+    (String_util.contains_substring missing.raw_output "path_not_found: /app/missing.txt"
+     && String_util.contains_substring missing.raw_output "list your workspace root");
+  Alcotest.(check (list string)) "the probe asks the endpoint about that path"
+    (Masc.Keeper_workspace_read_ops.path_probe_argv "/app/missing.txt") probe;
+  Alcotest.(check string) "rg was given the same path" "/app/missing.txt" searched;
+  let present, _, _ = grep ~path:"/app/missing.txt" ~test_exit:0 in
+  Alcotest.(check bool) "a path that exists leaves rg's exit 2 a runtime failure" true
+    (present.disposition = Tool_result.Failed Tool_result.Runtime_failure);
+  Alcotest.(check bool) "rg's own message survives" true
+    (String_util.contains_substring present.raw_output "No such file or directory");
+  let unknown, _, _ = grep ~path:"/app/missing.txt" ~test_exit:2 in
+  Alcotest.(check bool) "an answer that is neither yes nor no proves nothing" true
+    (unknown.disposition = Tool_result.Failed Tool_result.Runtime_failure);
+  (* The keeper's own tree has a different name on the endpoint than on this
+     host. The probe asks for the endpoint's name, the one rg was given. *)
+  let own, searched, probe = grep ~path:"notes.md" ~test_exit:1 in
+  Alcotest.(check bool) "rg was given the endpoint's name, not this host's" false
+    (String.starts_with ~prefix:base searched);
+  Alcotest.(check (list string)) "the probe asks the endpoint about the same name"
+    (Masc.Keeper_workspace_read_ops.path_probe_argv searched) probe;
+  Alcotest.(check bool) "the failure shows the endpoint's name" true
+    (own.disposition = Tool_result.Failed Tool_result.Policy_rejection
+     && String_util.contains_substring own.raw_output ("path_not_found: " ^ searched))
+
 (* analyze_image reads a generated image through this prefix. The endpoint's
    bytes come back as they are, even when they spell the keeper's remote
    root: the text reads map that root to the host's, which is right for
@@ -3466,9 +3572,47 @@ let test_read_window_directory_fails () =
       | (Unix.WSIGNALED _ | Unix.WSTOPPED _), _ -> Alcotest.fail "read window was signalled")
     [ 1; 10 ]
 
+(* The existence probe runs as-is inside the backend. Running the same argv here
+   checks the shell text itself: a file and a directory are both something, a
+   missing name is nothing, and shell syntax in a name is looked up, not run. *)
+let path_probe_exit path =
+  let argv = Masc.Keeper_workspace_read_ops.path_probe_argv path in
+  let ic = Unix.open_process_args_in (List.hd argv) (Array.of_list argv) in
+  let (_ : string) = In_channel.input_all ic in
+  match Unix.close_process_in ic with
+  | Unix.WEXITED code -> code
+  | Unix.WSIGNALED _ | Unix.WSTOPPED _ -> Alcotest.fail "the path probe was signalled"
+
+let test_path_probe_finds_only_what_exists () =
+  let dir = Filename.temp_file "path-probe-" "" in
+  Sys.remove dir;
+  Unix.mkdir dir 0o700;
+  Fun.protect ~finally:(fun () -> cleanup_fixture_dir dir) @@ fun () ->
+  let file = Filename.concat dir "present.txt" in
+  Out_channel.with_open_bin file (fun oc -> output_string oc "x");
+  let missing = Masc.Keeper_workspace_read_ops.path_missing_exit in
+  Alcotest.(check int) "a file is there" 0 (path_probe_exit file);
+  Alcotest.(check int) "a directory is there" 0 (path_probe_exit dir);
+  Alcotest.(check int) "an absent name is nothing" missing
+    (path_probe_exit (Filename.concat dir "absent.txt"));
+  let canary = Filename.concat dir "ran" in
+  let hostile =
+    Printf.sprintf "%s/$(touch %s); \"x' `touch %s`" dir canary canary
+  in
+  Alcotest.(check int) "shell syntax in a name is only a name" missing
+    (path_probe_exit hostile);
+  Alcotest.(check bool) "nothing in the name was run" false (Sys.file_exists canary);
+  Alcotest.(check int) "a name that looks like an option is only a name" missing
+    (path_probe_exit "-f")
+
 let run_tests ~clock ~fs ~net () =
   Alcotest.run "Keeper_sandbox_read_backend"
     [
+      ( "path_probe_argv",
+        [
+          Alcotest.test_case "finds only what exists" `Quick
+            test_path_probe_finds_only_what_exists;
+        ] );
       ( "read_window_argv",
         [
           Alcotest.test_case "reaches lines past the old 200,000-byte prefix" `Quick
@@ -3557,6 +3701,8 @@ let run_tests ~clock ~fs ~net () =
             `Quick test_read_of_a_declared_path_asks_the_endpoint_for_that_path;
           Alcotest.test_case "Grep preserves regex bytes through remote dispatch"
             `Quick test_grep_preserves_regex_bytes_through_remote_dispatch;
+          Alcotest.test_case "Grep of a missing endpoint path is a path error"
+            `Quick test_grep_of_a_missing_endpoint_path_is_a_path_error;
           Alcotest.test_case "raw prefix keeps remote bytes that spell the workspace root"
             `Quick test_raw_prefix_keeps_remote_bytes_that_spell_the_workspace_root;
         ] );

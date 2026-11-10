@@ -20086,7 +20086,7 @@ let settle_resource_save state request outcome =
       when prompt.rsp_owner == request.save_form
         && Masc_tui_message_input.contents prompt.rsp_path = request.save_input_path ->
         state.resource_save_prompt <- None
-    | (Resource_save_result _ | Resource_save_not_started _
+    | (Resource_save_result (Ok () | Error _) | Resource_save_not_started _
         | Resource_save_unconfirmed _ | Resource_save_interrupted _), (Some _ | None) -> ()
   end;
   !accepted

@@ -339,11 +339,18 @@ as unknown when that observation is not carried into the cancellation payload.
 
 Independent core/export and UI/state source reviews found no remaining P0-P2
 in their recorded scopes after three UI findings were repaired. OCaml parsing
-and diffcheck are separate from type/build/execution evidence. The changed Help
-still needs its actual generated reference; semantic file-effect and receipt
-ownership checks have not run for this source. The 6157b06b native results
-belong to the body-reading parent, not this save change. Matching execution,
-installation, GUI display and the rest of the 23-surface audit remain open.
+and diffcheck are separate from type/build/execution evidence. At 61217c4e,
+`Test` run 42799681363 on `fix/tui-report-save-receipts-20261110`, selecting only
+`test_tui_resource_export,test_fs_compat_capability_write`, failed while building
+before either suite ran: warning 4 rejected a wildcard over the nested result
+in `settle_resource_save`. `Minimal manual checks` run 42799673031, workflow
+`main` at 277b52f2 with selected source 61217c4e and `resource-reading`, failed
+at the same compilation boundary. The fallback now enumerates `Ok` and `Error`
+without changing receipt ownership or the form-closing guard. The changed Help
+still needs its actual generated reference; corrected-source execution is not
+established. The 6157b06b native results belong to the body-reading parent,
+not this save change. Matching execution, installation, GUI display and the
+rest of the 23-surface audit remain open.
 
 ## Feature child identity and resource body (#51023)
 

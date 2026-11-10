@@ -73,17 +73,3 @@ let tool_surface_monotonicity ~before ~after =
           configuration: %s"
          (String.concat ", " added)))
 ;;
-
-let check_all
-      ~sandbox_roots
-      ~sandbox_paths
-      ~before_tools
-      ~after_tools
-  =
-  match sandbox_isolation ~sandbox_roots ~sandbox_paths with
-  | Error _ as e -> e
-  | Ok () ->
-    (match tool_surface_monotonicity ~before:before_tools ~after:after_tools with
-     | Error _ as e -> e
-     | Ok () -> Ok ())
-;;

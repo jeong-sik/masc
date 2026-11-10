@@ -113,7 +113,11 @@ let test_partial_body_and_semantic_deadline_are_same_read () =
     check bool "a later read with no result is a separate failure" true
       (Owner.publish_failure_message failed "actual read raised");
     check bool "a failed read does not reissue prior approval rows" true
-      Yojson.Safe.Util.(json owner |> member "marker" = `Null))
+      Yojson.Safe.Util.(json owner |> member "marker" = `Null);
+    check bool "a no-result failure is not an actual observation" false (Owner.has_observation owner);
+    check bool "the terminal error answers GET while failure retry is owed" true (Owner.observation_is_usable owner);
+    Owner.source_changed owner;
+    check bool "a later actual source still owes a new read" false (Owner.observation_is_usable owner))
 
 let test_same_path_replacement_and_listener_failure_keep_original_authority () =
   with_owner (fun state scope owner ->

@@ -23,6 +23,8 @@ val with_operator_snapshot_metadata :
   query:Yojson.Safe.t ->
   Yojson.Safe.t ->
   Yojson.Safe.t
+(** Snapshot retention follows source changes and the actual read's semantic
+    deadline. There is no healthy background refresh interval. *)
 
 val with_operator_digest_metadata :
   config:Workspace.config ->
@@ -30,7 +32,7 @@ val with_operator_digest_metadata :
   Yojson.Safe.t ->
   Yojson.Safe.t
 (** Digest retention reports source/deadline observation, with no healthy
-    [background_refresh_interval_s]. This does not change Snapshot retention. *)
+    [background_refresh_interval_s]. *)
 
 val operator_snapshot_default_query : unit -> Yojson.Safe.t
 

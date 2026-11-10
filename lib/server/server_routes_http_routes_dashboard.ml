@@ -761,9 +761,6 @@ let add_routes ~sw ~clock router =
              ~state
              ~sw
              ~clock
-             ~broadcast_snapshot:
-               Server_dashboard_http_execution_surfaces
-               .broadcast_operator_snapshot
              req
          in
          Http.Response.json_value ~compress:true ~request:req json reqd

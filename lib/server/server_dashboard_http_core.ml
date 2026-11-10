@@ -33,14 +33,6 @@ let dashboard_cache_key = Server_dashboard_http_core_cache.dashboard_cache_key
 let dashboard_briefing_timeout_s = Server_dashboard_http_core_cache.dashboard_briefing_timeout_s
 
 
-type operator_snapshot_publication =
-  Server_dashboard_http_core_operator.operator_snapshot_publication
-
-;;
-
-;;
-
-;;
 let json_assoc_int_opt = Server_dashboard_http_core_json.json_assoc_int_opt
 (* Operator query-JSON + envelope metadata helpers extracted to
    [Server_dashboard_http_core_operator_query] (godfile decomp). *)

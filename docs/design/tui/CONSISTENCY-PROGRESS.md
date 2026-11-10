@@ -342,15 +342,22 @@ and its report information/source actions remained readable. A nonempty private
 report still had no body on the 36x20 first page: generated leading status space
 and an absent image-selection paragraph occupied four rows. The source now omits
 those empty pieces while preserving every confirmation and sharing notice.
-This final spacing change still needs matching execution observation.
+The matching 6157b06b server/TUI now shows the report title and first body line
+at 36x20. The unchanged before/after captures are retained in
+[the evidence bundle](../../evidence/tui-feature-resource-body-20261110/README.md).
 
 Local OCaml 5.5.1 parsing and `git diff --check` pass. The changed Help registry
-still needs its actual generated key reference. The native `resource-reading`
-run 42782496683 succeeded for source d58145cf only; its four targeted suites and
-manual PTY captures do not certify the rebased candidate or installed GUI.
-Independent review of the final delta, failure/retained and nonempty states,
-installation and GUI display remain separate work. No wording/layout/row-order
-tests were added, and the full 23-surface scope remains open.
+now has its exact full generated key reference. `Minimal manual checks`
+(`pr-check.yml`, `main@f5876874`, `resource-reading`) run 42789874637 succeeded
+for source 6157b06b and its four existing targeted suites. The same native pair
+also displayed the four short child names at both widths. During a controlled
+fixture-server stop, the Clients title retained the failed/unconfirmed reading;
+after the same server source recovered, the normal empty roster returned.
+The narrow title reports workspace confirmation pending, while the wide title
+also shows the HTTP read failure. These are native PTY observations, not GUI.
+Independent review of the final documentation delta, remaining failed/retained
+cases, installation and GUI display remain separate work. No wording/layout/
+row-order tests were added, and the full 23-surface scope remains open.
 
 ## Tools catalog and volume reading (#50872)
 

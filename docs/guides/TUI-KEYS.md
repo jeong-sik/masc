@@ -754,7 +754,7 @@ count is drawn beyond the available space.
 | `t` | toggle the local publication day captured at this keypress |
 | `w` | switch full-width list/reader and side-by-side browsing |
 | `v` | show the document or its original text syntax; copied bytes stay original |
-| `i` | expand the URI, type, size and complete report metadata |
+| `i` | expand the source, URI, type, size and complete metadata for an MCP resource or report; the body is shown first by default |
 | `j/k` | move the list; with the text focused, scroll it |
 | `h/l` | focus the resource list or text |
 | `Ctrl-W` | cycle the resource list, the text, and the Activity pane when it is drawn |

@@ -90,13 +90,34 @@ let chat_markdown_streaming ~context ~width body =
    fetching retain the existing link-preview cache policy. *)
 module Entry_cache = Ephemeron.K1.Make (struct
   type t = Message_layout.entry
-  let equal = ( == )
-  let hash (entry : t) = Hashtbl.hash (entry.Message_layout.style,
-    entry.markdown_source, entry.body_presentation)
+  let equal (left : t) (right : t) =
+    left == right ||
+    match left.markdown_source, right.markdown_source with
+    | Message_layout.Markdown_stable a, Message_layout.Markdown_stable b ->
+        String.equal a.keeper_name b.keeper_name
+        && String.equal a.request_id b.request_id
+        && Float.equal a.observed_at b.observed_at
+        && left.style = right.style
+        && left.body_presentation = right.body_presentation
+        && String.equal left.body right.body
+        && left.journal = right.journal
+    | Message_layout.Markdown_stable _, (Message_layout.Markdown_growing _ | Markdown_streaming)
+    | (Message_layout.Markdown_growing _ | Markdown_streaming),
+      (Message_layout.Markdown_stable _ | Markdown_growing _ | Markdown_streaming) -> false
+  let hash (entry : t) =
+    match entry.markdown_source with
+    | Message_layout.Markdown_stable source ->
+        Hashtbl.hash (entry.style, source.keeper_name, source.request_id,
+          source.observed_at, entry.body_presentation, String.length entry.body)
+    | Message_layout.Markdown_growing _ | Markdown_streaming ->
+        Hashtbl.hash (entry.style, entry.markdown_source, entry.body_presentation)
 end)
 
-(* Immutable entry identity owns discovery. Ephemeron keys release both URLs
-   and source indexes when the projection no longer retains that entry. *)
+(* Stable entries share only exact body/presentation/journal projections of
+   the same producer, independently of their current list ordinal. Growing
+   and streaming entries retain physical-key semantics. Keys are refreshed
+   before replacing the old layout, so only currently retained entries keep
+   their observations alive through the ephemeron table. *)
 let entry_urls = Entry_cache.create 64
 let source_url_discoveries = ref 0
 
@@ -2121,6 +2142,7 @@ type source_body_index = {
 }
 
 type source_body_key = {
+  source_workspace : workspace_authority;
   source_width : int;
   source_palette_generation : int;
   source_origin : Message_layout.origin_display;
@@ -2133,6 +2155,17 @@ type source_body_key = {
 type source_body_memo = { key : source_body_key; index : source_body_index option }
 
 let source_body_indexes = Entry_cache.create 64
+
+let rebind_entry_observations entry =
+  let rebind table =
+    Option.iter (fun value ->
+      (* [replace] need not replace an equal key's representative. Install the
+         current entry itself before the old layout loses its strong root. *)
+      Entry_cache.remove table entry;
+      Entry_cache.add table entry value) (Entry_cache.find_opt table entry)
+  in
+  rebind entry_urls;
+  rebind source_body_indexes
 
 (* Positions whose message record, projected moment, and turn edge all
    survived a conversation change keep the entry already computed for them.
@@ -2169,19 +2202,10 @@ let rec shared_layout_entry_prefix ~refresh_owner reversed old_visible old_entri
 let reindex_entry ~shift (entry : Message_layout.entry) =
   match entry.markdown_source with
   | Message_layout.Markdown_stable ({ entry_index; _ } as source) ->
-      let reindexed = { entry with
+      { entry with
         markdown_source =
           Message_layout.Markdown_stable
-            { source with entry_index = entry_index + shift } } in
-      (* Only the list position changed. URL discovery and semantic source
-         coordinates depend on the unchanged body, presentation and journal,
-         not this position. The source memo still checks the current width,
-         palette, origin, previews and polled producer input before reuse. *)
-      Option.iter (Entry_cache.replace entry_urls reindexed)
-        (Entry_cache.find_opt entry_urls entry);
-      Option.iter (Entry_cache.replace source_body_indexes reindexed)
-        (Entry_cache.find_opt source_body_indexes entry);
-      reindexed
+            { source with entry_index = entry_index + shift } }
   | Message_layout.Markdown_growing _ | Message_layout.Markdown_streaming -> entry
 
 let shifted_entry_prefix ~refresh_owner old_visible old_entries new_visible =
@@ -2308,6 +2332,7 @@ let keeper_message_layout_entries ?messages (state : state) ~keeper_name
             @ compute_keeper_message_layout_entries state ~keeper_name ~request_owners
                 ~chat_cols ~start_index:(List.length prefix) suffix
       in
+      if entries != memo.lem_entries then List.iter rebind_entry_observations entries;
       layout_entries_memo :=
         Some
           { memo with
@@ -2323,6 +2348,7 @@ let keeper_message_layout_entries ?messages (state : state) ~keeper_name
         compute_keeper_message_layout_entries state ~keeper_name ~request_owners ~chat_cols
           ~start_index:0 visible_entries
       in
+      List.iter rebind_entry_observations entries;
       layout_entries_memo :=
         Some
           { lem_keeper_name = keeper_name;
@@ -3642,7 +3668,8 @@ let projection_index_of_scroll_anchor projection = function
 (* Every field is compared, so a field added to the key and left out here is
    reported as never read. *)
 let same_source_body_key (a : source_body_key) (b : source_body_key) =
-  a.source_width = b.source_width
+  a.source_workspace = b.source_workspace
+  && a.source_width = b.source_width
   && a.source_palette_generation = b.source_palette_generation
   && a.source_origin = b.source_origin
   && a.source_preview_mode = b.source_preview_mode
@@ -3693,7 +3720,8 @@ let source_body_key state ~width ~theme ~preview ~polled_input ~unavailable
     | (Message_layout.Journal, Message_layout.Markdown_stable _, (`Compact | `Rich))
     | (Message_layout.Error, Message_layout.Markdown_stable _, (`Compact | `Rich))
     | (Message_layout.Thinking _, Message_layout.Markdown_stable _, (`Compact | `Rich)) -> bare_urls_for_entry entry in
-  {source_width=width;source_palette_generation=context.palette_generation;
+  {source_workspace=state.workspace_authority;
+   source_width=width;source_palette_generation=context.palette_generation;
    source_origin=state.msg_origin_display;source_preview_mode=state.link_previews_mode;
    source_previews=List.map preview urls;source_polled_input=polled_input;
    source_polled_unavailable=unavailable}

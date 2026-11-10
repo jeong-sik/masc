@@ -961,6 +961,13 @@ let test_older_page_preserves_source_pin_and_draft () = at_sizes (fun origin ->
   check bool "prepend preserves the exact source reading" true (before = positions ());
   check bool "prepend does not mutate the active input revision" true
     (Masc_tui_message_input.has_revision state.msg_input revision);
+  let reconstructed = {held with me_text=String.init (String.length held.me_text)
+      (String.get held.me_text)} in
+  T.set_keeper_chat_sources state
+    {state.msg_loaded_sources with kcs_history=T.Chat_history_received [older; reconstructed]};
+  observe ();
+  check bool "a fresh copy of the same durable body keeps its source reading" true
+    (before = positions ());
   (* The same row can receive different preview metadata after reindexing.
      Its previous source version must then stop authorizing a search pin. *)
   Masc_tui_link_preview.cache_store
@@ -969,6 +976,19 @@ let test_older_page_preserves_source_pin_and_draft () = at_sizes (fun origin ->
   check bool "changed source metadata releases the obsolete search position" true
     (List.for_all (fun position -> not (List.mem position before)) (positions ()));
   check bool "metadata refresh leaves the draft revision intact" true
+    (Masc_tui_message_input.has_revision state.msg_input revision);
+  ignore (find state "HELD_BODY_050");
+  observe ();
+  let body_before = positions () in
+  check bool "the body search has a producer source" true (body_before <> []);
+  let changed = {reconstructed with me_text=String.mapi
+      (fun index value -> if index=0 then 'X' else value) reconstructed.me_text} in
+  T.set_keeper_chat_sources state
+    {state.msg_loaded_sources with kcs_history=T.Chat_history_received [older; changed]};
+  observe ();
+  check bool "a same-length body replacement cannot borrow old source bytes" true
+    (List.for_all (fun position -> not (List.mem position body_before)) (positions ()));
+  check bool "source replacement leaves the draft revision intact" true
     (Masc_tui_message_input.has_revision state.msg_input revision))
 
 let test_idle_search_pin_reuses_semantic_index () = at_sizes (fun origin ->

@@ -1312,7 +1312,22 @@ let for_surface = function
       ; b Navigate "PgUp/PgDn" "page"
       ; b Navigate "Home/End" "top/bottom"
       ; b Navigate "p" "section"
-          ~help:"available / async runs / receipts / usage / all tools"
+          ~help:"available / async runs / receipts / usage / all tools. \
+                 Available shows the selected Keeper's exposed tools and Skills; \
+                 ORIGIN names the tool source. Async runs shows workspace requests \
+                 and recovery: active counts active ledger requests, runtime-owned \
+                 means a current runtime owner, ownership-unknown is unconfirmed. \
+                 Receipts keeps current-session Skill evidence: triggered=invoked, \
+                 delivered/handed off=delivered, actions=later tool actions. \
+                 These are separate events; no record does not prove no use. \
+                 Usage aggregates recorded calls by exact Skill revision across \
+                 current Keeper sessions; last use is the ledger's recorded time, \
+                 and unread ledgers stay qualified. \
+                 All tools lists process-wide registrations, separately from \
+                 a Keeper's callable surface and observed calls. \
+                 DIRECT=direct calls allowed; SURFACES=exposure paths; \
+                 none=no exposure path. Use Skill receipts for usage evidence \
+                 and Activity for tool input/output."
       ; b Navigate "J/K" "Skill"
           ~help:"in async runs, select an original request; otherwise select \
                  a published Skill"
@@ -1434,7 +1449,11 @@ let footer_hints ?(lang = Lang_en) ?detail_open ?has_rows ?has_reading surface =
 let planning_goal_hints ~lang ~detail_open ~has_rows =
   let bindings = for_surface Planning
     |> List.filter (answers_in_state ~detail_open ?has_rows)
-    |> List.filter (fun binding -> not detail_open || not (String.equal binding.key "r")) in
+    |> List.filter (fun binding -> not detail_open || not (String.equal binding.key "r"))
+    |> List.map (fun binding ->
+      if detail_open && String.equal binding.key "j/k" then
+        {binding with label = "scroll"; label_ko = Some "스크롤"}
+      else binding) in
   let read, others = List.partition (fun binding -> String.equal binding.key goal_candle_refresh_key) bindings in
   hints_in_order ~lang (read @ List.stable_sort (fun a b -> compare (group_rank a.group) (group_rank b.group)) others)
 
@@ -2242,8 +2261,10 @@ let bindings_memory_changes =
   [ b ~ko:"이동" Navigate "j/k" "move"
   ; b ~ko:"전문" Act "Enter" "full reading"
       ~help:"read all original and successor claims of the selected committed change"
-  ; b ~ko:"… 형성 트리" Act ". / Ctrl-O" "… formation tree"
-      ~help:"open the selected change's connected observed memory lineage with the offline Pele Mermaid preview; full claims remain on Enter"
+  ; b ~ko:"… 변화 카드" Act "." "… change cards"
+      ~help:"open only the selected change as before/change/after cards with wrapped claim excerpts; full text remains on Enter"
+  ; b ~ko:"연결 트리" Act "Ctrl-O" "connected tree"
+      ~help:"open the selected change's complete connected observed memory lineage with the offline Pele Mermaid preview"
   ; b ~ko:"페이지" Navigate "PgUp/PgDn" "page"
   ; b ~ko:"뒤로" Act "Esc" "back to facts" ]
   @ row_list_edges @ listing_meta

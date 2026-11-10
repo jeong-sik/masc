@@ -1,0 +1,258 @@
+{
+  "at": "2026-11-10T17:47:59.485136+00:00",
+  "base": "0e9718ca67e6132531614d5133cd836a2dc7aabc",
+  "production_source": "2b2d43780e36b43ff65579713baf68eafadfd638",
+  "case_source": "a97dc61c76b6ecf425822ea2021627213a636152",
+  "files": [
+    {
+      "path": "changelog.d/51162.md",
+      "sha256": "bf463c86dc690de80f4b00c003702143a6510b45c230767a5ac6c09a8f51e44b"
+    },
+    {
+      "path": "docs/spec/11-board.md",
+      "sha256": "0c85b079ac53a545fbdf4876b15ec63e2b36c1bf841097510e673d24ef4f9891"
+    },
+    {
+      "path": "lib/board/board_comment_admission.ml",
+      "sha256": "b4bfd37ff0816cbf6922f4a632f333986ba7659d5f45451603922a25ded9404e"
+    },
+    {
+      "path": "lib/board/board_comments_source.ml",
+      "sha256": "1ba27849d2e5d7795ef2101ab7f7cbf0f20933a95368211c9acc571eb0b2a96a"
+    },
+    {
+      "path": "lib/board/board_comments_source.mli",
+      "sha256": "cbd10b9da76ac738c1069028c265f4d262061f0c87716889529758901fcb8ba5"
+    },
+    {
+      "path": "lib/board/board_core.mli",
+      "sha256": "27a547034bd19bf387b8a88d560f942307c0dd084914cb51b7d1afa667769fa9"
+    },
+    {
+      "path": "lib/board/board_dispatch.ml",
+      "sha256": "92c17556d710849fbb97f73d28db05d878165945ab500adbb512baf600ad41ff"
+    },
+    {
+      "path": "lib/board/board_dispatch.mli",
+      "sha256": "2cdb2aa735c9550c43eb139eb976467bfd4a44da972e1a6ff05f845f9e3daff8"
+    },
+    {
+      "path": "lib/board/board_posts_rows.ml",
+      "sha256": "043af046e335a054c034ed32f0eddaa3523739b84a5b05294c987d5383f313a8"
+    },
+    {
+      "path": "lib/board/board_posts_rows.mli",
+      "sha256": "86b3092249bf9ff7703c7ba1990c5249fb18823a6e1f961ee65f26e103dafaef"
+    },
+    {
+      "path": "lib/board/board_posts_source.ml",
+      "sha256": "4fe5ab21315c7d56dc8776694690428689f0f4d4456ae7353bef1728221473a9"
+    },
+    {
+      "path": "lib/board/board_posts_source.mli",
+      "sha256": "8a98e490747b36eaf9bd6b491146fdcb9127f32e84be19674e548b59c97c0231"
+    },
+    {
+      "path": "lib/board/board_reactions.ml",
+      "sha256": "8a707b05157121d33e6c088b70248798db2dd21388216e8b42581cc37bd23df6"
+    },
+    {
+      "path": "lib/board/board_reactions.mli",
+      "sha256": "2298c2673de75f05803dc147b4e282755237982628bdc9ad9cad51233fc6df64"
+    },
+    {
+      "path": "lib/board/board_reactions_source.ml",
+      "sha256": "152b652728b96a110062231a02c15af985d4358c08c05f56117358b5b74dbcae"
+    },
+    {
+      "path": "lib/board/board_reactions_source.mli",
+      "sha256": "86bfaf24eaecbbd51ec136c9480f3abaaac12a1c7c28a8020001f48b05d1b1c4"
+    },
+    {
+      "path": "lib/board/board_target_admission.ml",
+      "sha256": "e7e450cb0590b59cdcf18438d4eaa7a84cd08fe846e27d5889b0658d602c76ad"
+    },
+    {
+      "path": "lib/board/board_target_admission.mli",
+      "sha256": "d378c62adae837637d7e62f7b9be5700c1da1e2ee8912384ad692532353632de"
+    },
+    {
+      "path": "lib/board/board_votes.mli",
+      "sha256": "16aaaf9a9beb50b108c8c4e1a07a381bd5b5de3640589c9ea239b2ef237687a7"
+    },
+    {
+      "path": "lib/board/board_votes_source.ml",
+      "sha256": "88ca0a4c79238caebcca18eb00b35fdd87d48a7a9fa370dd7b0756f312698bf9"
+    },
+    {
+      "path": "lib/board/board_votes_source.mli",
+      "sha256": "fca5d45785dc8e0374a18997f567815b30fc84624e9b021e543e1ffa9621c52d"
+    },
+    {
+      "path": "lib/board/board_voting.ml",
+      "sha256": "21076253a34b89d0179ea50aafc6419ac2b441ea40182b1b5abd676083ddb849"
+    },
+    {
+      "path": "lib/board/board_voting.mli",
+      "sha256": "00c708dc8aa576e62200fe20418dddf6577b505bffe04b9602ef3c76f2ece90e"
+    },
+    {
+      "path": "lib/board/dune",
+      "sha256": "6a14af31ccbf6097e3768ba3f4c4e1074ade41bbb700043e37c58f195d966dbe"
+    },
+    {
+      "path": "lib/board_tool_adapter/board_tool_dispatch.ml",
+      "sha256": "362607b85179ef556a3d8a557a9a4a568dfb4c40496a4f7afbbc78536d51be73"
+    },
+    {
+      "path": "lib/board_tool_adapter/board_tool_handlers.ml",
+      "sha256": "4e4aeca50242fa2c20f37880bf528423096c7b74b8e93d1867288a5ec5b0179a"
+    },
+    {
+      "path": "lib/board_types/board_types.ml",
+      "sha256": "f0d188e4107aefe7fbef0a35af173fa4dfbcc3162a8a2bb4c544bb17595c7d04"
+    },
+    {
+      "path": "lib/board_types/board_types.mli",
+      "sha256": "ef24f944c830dc2498666b927969494f9f678ca43bdb042ac22ca44875499dee"
+    },
+    {
+      "path": "test/dune",
+      "sha256": "68a7b7099e421ed6b9477baf3d3ac8f8d7b6ae6bd6aa6983a944bf4efeb43c5b"
+    },
+    {
+      "path": "test/stanzas/test_board_target_admission.inc",
+      "sha256": "204bd8b4b94935bd88302ef37cc78b8d97a7c87c05695fa4e63f348459b338f3"
+    },
+    {
+      "path": "test/test_board_comments_source.ml",
+      "sha256": "72cf75d9cb8e50a9e87ec9ea30fe534f11217f1f27cf75875b64ad89680c17a7"
+    },
+    {
+      "path": "test/test_board_delete_order.ml",
+      "sha256": "4ae55aa58dfbf185a2e776ba5ddba3a21da74b7724435e9433685553f269f0fc"
+    },
+    {
+      "path": "test/test_board_delete_rewrite_requeue.ml",
+      "sha256": "bde21054a3fa19d452e393df5de979e9d9ca60fe1d5cf47014c4ed4fd280d9b0"
+    },
+    {
+      "path": "test/test_board_deletion_recovery.ml",
+      "sha256": "cad40bd1db498cfd26e6c80d439bc9b7321415acd2a19a3210c22994ecf4901c"
+    },
+    {
+      "path": "test/test_board_dispatch.ml",
+      "sha256": "785314b3d8c4927fbfa742f9581ed17ee8e675f44afef603505ad013d5a14750"
+    },
+    {
+      "path": "test/test_board_karma_ledger.ml",
+      "sha256": "41f426f4e8d8a591654cf5433bc6f0a07725b93ccefe9b5a8bacd58642d07e8b"
+    },
+    {
+      "path": "test/test_board_persistence_load_contract.ml",
+      "sha256": "659a3a5573dfec4580b2f88f6472bdef4898d0d462058c7bd134458be9f3a64a"
+    },
+    {
+      "path": "test/test_board_posts_source_authority.ml",
+      "sha256": "fbea317640225e702c0cb11de38d5355fe7cde02bfb4e5a56fd2db9be9efdbb2"
+    },
+    {
+      "path": "test/test_board_reactions_source.ml",
+      "sha256": "8484a194409068225faae3ed0b813f1d7956bb33119f4eb0c49006a299d578a3"
+    },
+    {
+      "path": "test/test_board_sub_board_deletion_recovery.ml",
+      "sha256": "68c8ff4e42736ee81da514d8a4d64cf7ba2713d60de3f29ebc9ad171096e7b76"
+    },
+    {
+      "path": "test/test_board_target_admission.ml",
+      "sha256": "9c01f26445661ebe0d625cddf3d8b0807e20e0b79c7ee478ac3b32d39971eeab"
+    },
+    {
+      "path": "test/test_board_ttl.ml",
+      "sha256": "f86b1058007750f0da6e62a3114ea5acd1db5f9502717988717facc0a14a4780"
+    },
+    {
+      "path": "test/test_board_vote_persistence.ml",
+      "sha256": "5c666c9e5def2cfbbd455a2ec7672db45a686c6e371290ecaf326d89e24c10ad"
+    },
+    {
+      "path": "test/test_board_votes_source.ml",
+      "sha256": "6ddbf32a4078b6da7de94cfee4c3f7c5bf5bfb9bc340ff2bd2a3e1af455823be"
+    },
+    {
+      "path": "test/test_keeper_board_discoverable_cursor.ml",
+      "sha256": "f01fce12e5de737faf4256a792514d5cd973430340f3d253671f935d9d0cea9a"
+    },
+    {
+      "path": "test/test_keeper_board_recorded_audience.ml",
+      "sha256": "834018b3c88eb80603f3723c975076144093f41fee0c97e3dec950f32ffd0882"
+    },
+    {
+      "path": "test/test_keeper_keepalive_helpers.ml",
+      "sha256": "0f5620b48d034c4d8b57af6201b8050420725e095d38ede4541f586b66a24908"
+    }
+  ],
+  "lower_paths": [
+    "changelog.d/51162.md",
+    "docs/spec/11-board.md",
+    "lib/board/board_comment_admission.ml",
+    "lib/board/board_comments_source.ml",
+    "lib/board/board_comments_source.mli",
+    "lib/board/board_core.mli",
+    "lib/board/board_dispatch.ml",
+    "lib/board/board_dispatch.mli",
+    "lib/board/board_posts_rows.ml",
+    "lib/board/board_posts_rows.mli",
+    "lib/board/board_posts_source.ml",
+    "lib/board/board_posts_source.mli",
+    "lib/board/board_reactions.ml",
+    "lib/board/board_reactions.mli",
+    "lib/board/board_reactions_source.ml",
+    "lib/board/board_reactions_source.mli",
+    "lib/board/board_target_admission.ml",
+    "lib/board/board_target_admission.mli",
+    "lib/board/board_votes.mli",
+    "lib/board/board_votes_source.ml",
+    "lib/board/board_votes_source.mli",
+    "lib/board/board_voting.ml",
+    "lib/board/board_voting.mli",
+    "lib/board/dune",
+    "lib/board_tool_adapter/board_tool_dispatch.ml",
+    "lib/board_tool_adapter/board_tool_handlers.ml",
+    "lib/board_types/board_types.ml",
+    "lib/board_types/board_types.mli",
+    "test/test_board_comments_source.ml",
+    "test/test_board_delete_order.ml",
+    "test/test_board_delete_rewrite_requeue.ml",
+    "test/test_board_deletion_recovery.ml",
+    "test/test_board_dispatch.ml",
+    "test/test_board_karma_ledger.ml",
+    "test/test_board_persistence_load_contract.ml",
+    "test/test_board_posts_source_authority.ml",
+    "test/test_board_reactions_source.ml",
+    "test/test_board_sub_board_deletion_recovery.ml",
+    "test/test_board_ttl.ml",
+    "test/test_board_vote_persistence.ml",
+    "test/test_board_votes_source.ml",
+    "test/test_keeper_board_discoverable_cursor.ml",
+    "test/test_keeper_board_recorded_audience.ml",
+    "test/test_keeper_keepalive_helpers.ml"
+  ],
+  "case_paths": [
+    "test/dune",
+    "test/stanzas/test_board_target_admission.inc",
+    "test/test_board_target_admission.ml"
+  ],
+  "dashboard_tree": "7bb15ad1fcf789424d2077130511300ef144356f",
+  "main_delta_paths": [
+    ".github/workflows/pr-type-check.yml",
+    "changelog.d/51113.md",
+    "changelog.d/51155.md",
+    "changelog.d/51161.md",
+    "evidence/task-3502-three-modules-main-a024816.md",
+    "test/test_board_post_policy_admission.ml",
+    "test/test_board_ttl.ml",
+    "test/test_browser_addon_live_ego.ml"
+  ]
+}

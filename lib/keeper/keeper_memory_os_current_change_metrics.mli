@@ -25,7 +25,9 @@ val of_change :
 val of_publication : Keeper_memory_os_program_types.publication -> counts
 (** An ordered program, once, from its initial to its final facts with the
     absorptions and revisions of all its stages. Only an ID of the initial
-    facts can be absorbed, superseded or dropped. *)
+    facts can be absorbed, superseded or dropped, and it is absorbed or
+    superseded only into a claim the final facts hold; otherwise it is
+    dropped. *)
 
 (** How a commit is counted: under the pass that called it, from the committed
     snapshot and the commit's own output. [replace] seeds a whole snapshot and

@@ -20,6 +20,8 @@ val toggle_history_change : Masc_tui_types.state -> bool
     even when another record has the same payload. *)
 val render_code : Masc_tui_types.state ->
   Masc_tui_frame_presenter.frame * Masc_tui_types.clamped_scroll option
+(** Diff bodies use the returned diff rows. Their line numbers address that
+    diff's revisions, not the independently observed open file. *)
 
 val code_draft_rows : Masc_tui_types.state -> cols:int -> string list
 (** The same immutable draft comparison supplies drawing and scrolling.

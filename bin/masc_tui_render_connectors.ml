@@ -401,17 +401,16 @@ let render_connectors (state : state) =
     Printf.sprintf "%02d:%02d:%02d" now.Unix.tm_hour now.Unix.tm_min
       now.Unix.tm_sec
   in
+  let lead = screen_title " MASC Connectors" in
   let title =
     match state.connectors with
-    | None ->
-        Printf.sprintf "%s  %s  %s"
-          (screen_title " MASC Connectors") timestamp
-          (connection_badge state)
+    | None -> surface_title_row ~cols state ~lead ~readings:[ "  " ^ timestamp ]
     | Some snapshot ->
-        Printf.sprintf "%s (%d of %d available)  %s  %s"
-          (screen_title " MASC Connectors")
-          snapshot.Masc.Tui_decode_connectors.cs_active snapshot.Masc.Tui_decode_connectors.cs_total
-          timestamp (connection_badge state)
+        surface_title_row ~cols state ~lead
+          ~readings:
+            [ Printf.sprintf " (%d of %d available)"
+                snapshot.Masc.Tui_decode_connectors.cs_active snapshot.Masc.Tui_decode_connectors.cs_total
+            ; "  " ^ timestamp ]
   in
   let read_notice = connectors_read_notice state in
   surface_chrome ~overflow:Paged_by_cursor state ~terminal_rows ~cols ~surface_key:"connectors" ~title

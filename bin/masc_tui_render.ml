@@ -447,6 +447,7 @@ let render_memory (state : state) =
     Printf.sprintf "%02d:%02d:%02d" now.Unix.tm_hour now.Unix.tm_min
       now.Unix.tm_sec
   in
+  let lead = screen_title (if ko then " MASC 기억 · 전체 저장 상태" else " MASC Memory · fleet storage") in
   let title =
     match state.memory_health with
     | None ->
@@ -455,21 +456,19 @@ let render_memory (state : state) =
           | None -> ui_text state ~ko:"(미조회)" ~en:(title_missing_reading ~error:None)
           | Some _ -> ""
         in
-        Printf.sprintf "%s  %s  %s  %s"
-          (screen_title (if ko then " MASC 기억 · 전체 저장 상태" else " MASC Memory · fleet storage")) reading_note timestamp
-          (connection_badge state)
+        surface_title_row ~cols state ~lead ~readings:[ "  " ^ reading_note; "  " ^ timestamp ]
     | Some s ->
-        Printf.sprintf "%s · %s · %s · %s  %s"
-          (screen_title (if ko then " MASC 기억 · 전체 저장 상태" else " MASC Memory · fleet storage"))
-          (if ko then Printf.sprintf "키퍼 %d명" shown else Masc_tui_message_layout.count_noun shown "keeper")
-          (match current_memory_starving_count s with
-           | Some count -> Printf.sprintf (if ko then "기억 필요 %d" else "%d need memory") count
-           | None -> if ko then "기억 필요 ? (일부 미조회)" else "? need memory (unread rows)")
-          (let tm = Unix.localtime s.mhs_generated_at in
-           Printf.sprintf (if ko then "%02d/%02d %02d:%02d 관측" else "read %02d/%02d %02d:%02d")
-             (tm.Unix.tm_mon + 1) tm.Unix.tm_mday
-             tm.Unix.tm_hour tm.Unix.tm_min)
-          (connection_badge state)
+        surface_title_row ~cols state ~lead
+          ~readings:
+            [ " · " ^ (if ko then Printf.sprintf "키퍼 %d명" shown else Masc_tui_message_layout.count_noun shown "keeper")
+            ; " · " ^ (match current_memory_starving_count s with
+               | Some count -> Printf.sprintf (if ko then "기억 필요 %d" else "%d need memory") count
+               | None -> if ko then "기억 필요 ? (일부 미조회)" else "? need memory (unread rows)")
+            ; " · " ^ (let tm = Unix.localtime s.mhs_generated_at in
+               Printf.sprintf (if ko then "%02d/%02d %02d:%02d 관측" else "read %02d/%02d %02d:%02d")
+                 (tm.Unix.tm_mon + 1) tm.Unix.tm_mday
+                 tm.Unix.tm_hour tm.Unix.tm_min)
+            ]
   in
   surface_chrome ~overflow:Paged_by_cursor state ~terminal_rows ~cols ~surface_key:"memory"
     ~title ~hints:(Masc_tui_keys.footer_hints ~lang:state.ui_language state.view)

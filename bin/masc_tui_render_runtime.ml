@@ -1079,9 +1079,8 @@ let render_tools (state : state) =
       now.Unix.tm_sec
   in
   let header =
-    Printf.sprintf "%s  %s  %s"
-      (screen_title " MASC Features & plugins / Tools") timestamp
-      (connection_badge state)
+    surface_title_row ~cols state ~lead:(screen_title " MASC Features & plugins / Tools")
+      ~readings:[ "  " ^ timestamp ]
   in
   box_top buf cols;
   box_line buf cols header;

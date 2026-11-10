@@ -1498,10 +1498,8 @@ let render_schedule_list (state : state) =
   let now = Unix.localtime (Unix.gettimeofday ()) in
   let timestamp = Printf.sprintf "%02d:%02d:%02d"
     now.Unix.tm_hour now.Unix.tm_min now.Unix.tm_sec in
-  let header = Printf.sprintf "%s  %s  %s"
-    (screen_title " MASC Keepers / Schedules")
-    timestamp
-    (connection_badge state) in
+  let header = surface_title_row ~cols state
+    ~lead:(screen_title " MASC Keepers / Schedules") ~readings:[ "  " ^ timestamp ] in
 
   surface_chrome ~overflow:Paged_by_cursor state ~terminal_rows ~cols ~surface_key:"schedules" ~title:header
     ~hints:

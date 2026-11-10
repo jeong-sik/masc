@@ -7,6 +7,9 @@ val render_keeper_list :
     selected Keeper's current work, human waits, last observed result and
     existing detail paths; narrow terminals stack those panes. The other
     views and the explicitly opened Story keep their axis/window renderer.
+    State summarizes known scheduled wakes and partial observation in one
+    cell; the time view keeps the half-hour schedule strip. Quiet separators,
+    sparse history and palette-derived selection retain the same row geometry.
     Selection and fleet width/health summaries read
     the same synchronous ordered row model as the visible list. That model is
     not retained across draws or used by input handlers. Story turn records,

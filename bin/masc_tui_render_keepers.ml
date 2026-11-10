@@ -659,15 +659,11 @@ let axis_peak_facts state rows =
 module Grid = Masc_tui_keeper_grid
 module Keeper_mark = Masc_tui_keeper_mark
 
-(* [┃ now ┃] on the band's ground. A cell inside resets its own style, so the
-   ground opens again after every reset and reaches the second line. *)
+(* Quiet separators frame the current activity without painting a full-height
+   pane behind every row. Status text keeps its own semantic colour. *)
 let grid_band now_text =
-  let ground = Theme.side_pane_background () in
-  let restore = Ansi.reset ^ ground in
-  let line = Theme.info () ^ Keeper_mark.grid_now_line ^ restore in
-  ground ^ line ^ " "
-  ^ String_util.replace_substring ~needle:Ansi.reset ~by:restore now_text
-  ^ " " ^ line ^ Ansi.reset
+  let line = Theme.recede () ^ Keeper_mark.grid_now_line ^ Ansi.reset in
+  line ^ " " ^ now_text ^ " " ^ line
 
 let grid_blank_now = String.make Grid.now_cells ' '
 
@@ -708,11 +704,6 @@ let grid_tail_cells (grid : Grid.t) =
   + Grid.due_cells
   + if grid.mem_cells > 0 then 1 + grid.mem_cells else 0
 
-(* A list row with nothing drawn still carries the band, so the now lines run
-   down to the footer. *)
-let grid_blank_line (grid : Grid.t) =
-  String.make (grid_lead_cells grid) ' ' ^ " " ^ grid_band grid_blank_now
-
 (* The mock's [okd]: the ok colour, receded. *)
 let grid_receded_ok () = Masc_tui_theme.tone Masc_tui_theme.Dim ^ Theme.ok ()
 
@@ -723,7 +714,7 @@ let grid_gutter_style = function
   | Grid.Sound -> Theme.ok ()
 
 let grid_gutter view verdict =
-  grid_gutter_style verdict ^ Keeper_mark.grid_gutter_glyph ^ " " ^ Ansi.bold
+  "  " ^ grid_gutter_style verdict ^ Ansi.bold
   ^ Grid.mark view verdict ^ Ansi.reset ^ " "
 
 let grid_name (grid : Grid.t) ~yolo verdict name =
@@ -736,45 +727,54 @@ let grid_name (grid : Grid.t) ~yolo verdict name =
 
 let grid_repeat count mark = String.concat "" (List.init (max 0 count) (fun _ -> mark))
 
-(* Each half hour in the mock's colour: failed ones warn, ok ones are the
-   receded ok, quiet and unknown ones recede. *)
+(* Failures remain prominent; successful history is secondary to current work. *)
 let grid_half_hour_style = function
   | Masc_tui_keeper_pulse.Half_hour_failed | Masc_tui_keeper_pulse.Half_hour_failed_and_ok ->
       Theme.warn ()
-  | Masc_tui_keeper_pulse.Half_hour_ok -> grid_receded_ok ()
+  | Masc_tui_keeper_pulse.Half_hour_ok -> Theme.recede ()
   | Masc_tui_keeper_pulse.Half_hour_quiet | Masc_tui_keeper_pulse.Half_hour_unknown ->
       Theme.recede ()
 
 (* One mark per half hour of the column, the now slot on the right. *)
-let grid_half_hour_pulse (grid : Grid.t) ~now pulse =
-  String.concat ""
+let grid_half_hour_pulse state (grid : Grid.t) ~now pulse =
+  let slots = Masc_tui_keeper_pulse.half_hours ~now ~count:grid.side_cells pulse in
+  if grid.side_cells = 0 then ""
+  else if List.for_all (function
+    | Masc_tui_keeper_pulse.Half_hour_unknown -> true
+    | Half_hour_quiet | Half_hour_ok | Half_hour_failed | Half_hour_failed_and_ok -> false) slots then
+    let label = if state.ui_language = Lang_ko then "기록 미확인" else "history unknown" in
+    Theme.recede () ^ fit_width
+      (if Message_layout.display_width label <= grid.side_cells then label else "?")
+      grid.side_cells ^ Ansi.reset
+  else String.concat ""
     (List.map
        (fun half_hour ->
-         grid_half_hour_style half_hour ^ Masc_tui_keeper_pulse.half_hour_mark half_hour
+         let mark = match half_hour with
+           | Masc_tui_keeper_pulse.Half_hour_quiet -> " "
+           | Half_hour_unknown -> Keeper_mark.grid_unknown_range_mark
+           | Half_hour_ok | Half_hour_failed | Half_hour_failed_and_ok ->
+               Masc_tui_keeper_pulse.half_hour_mark half_hour in
+         grid_half_hour_style half_hour ^ mark
          ^ Ansi.reset)
-       (Masc_tui_keeper_pulse.half_hours ~now ~count:grid.side_cells pulse))
+       slots)
 
-(* The strip of the activity columns (§2.4.4): the Keeper's scheduled wakes
-   per half hour, the now slot first. As the mock's [drawRuler], a wake is in
-   the info colour, receded for a paused Keeper, and bold in the now slot. *)
+let grid_wake_window state ~style slots =
+  let ko = state.ui_language = Lang_ko in
+  match state.keeper_list_view with
+  | Keeper_list_model.By_state -> Masc_tui_keeper_strip.wake_summary ~ko slots
+  | Plain | By_cause | By_time | By_memory | By_age | By_runtime | Day_wall ->
+      Masc_tui_keeper_strip.wake_strip ~ko ~style slots
+
+(* Scheduled wakes per half hour, the now slot first. Unknown windows get
+   one label; the shared renderer keeps mixed unknown and empty slots apart. *)
 let grid_wake_strip state (grid : Grid.t) ~now verdict ~keeper_name =
-  let wake_style =
-    match verdict with
-    | Grid.Paused -> Theme.recede ()
-    | Grid.Failing _ | Grid.Recovered | Grid.Sound | Grid.Other -> Theme.info ()
-  in
-  String.concat ""
-    (List.mapi
-       (fun index slot ->
-         let cell = Grid.strip_cell slot in
-         let style =
-           match cell with
-           | Grid.Strip_wake -> if index = 0 then Ansi.bold ^ wake_style else wake_style
-           | Grid.Strip_empty | Grid.Strip_unknown -> Theme.recede ()
-         in
-         style ^ Grid.strip_mark cell ^ Ansi.reset)
-       (Masc_tui_keeper_axis.wake_strip state ~now ~ahead:(Grid.strip_cells grid - 1)
-          ~keeper_name))
+  let paused = match verdict with
+    | Grid.Paused -> true
+    | Grid.Failing _ | Grid.Recovered | Grid.Sound | Grid.Other -> false in
+  grid_wake_window state
+    ~style:(Masc_tui_keeper_strip.Keeper_wakes { paused })
+    (Masc_tui_keeper_axis.wake_strip state ~now ~ahead:(Grid.strip_cells grid - 1)
+       ~keeper_name)
 
 let grid_due ~now verdict next_run =
   let style =
@@ -971,7 +971,7 @@ let grid_keeper_row state (grid : Grid.t) columns ~view ~peak_lag ~peak_facts ~n
   let gutter = grid_gutter view verdict in
   let name = grid_name grid ~yolo verdict keeper_name in
   let pulse () =
-    grid_half_hour_pulse grid ~now
+    grid_half_hour_pulse state grid ~now
       (Option.bind runtime (fun runtime -> runtime.Tui_decode.kr_recent_turns))
   in
   grid_line grid
@@ -1157,7 +1157,8 @@ let group_number = function
   | None -> "?"
 
 (* Each heading adds every member's known wakes, including paused Keepers.
-   The shared reducer keeps an unknown slot only when no known wake fills it. *)
+   The shared reducer retains unknowns alongside known counts; the state
+   summary exposes that partial observation. *)
 let group_wake_strip state (grid : Grid.t) ~now members =
   let open Masc_tui_keeper_next_run in
   let slots =
@@ -1168,15 +1169,8 @@ let group_wake_strip state (grid : Grid.t) ~now members =
       members
     |> sum_wake_strips
   in
-  let peak = List.fold_left (fun peak -> function
-    | Wakes count -> max peak count
-    | Wakes_unknown -> peak) 0 slots in
-  String.concat "" (List.mapi (fun position -> function
-    | Wakes count when count > 0 ->
-        (if position = 0 then Ansi.bold else "") ^ Theme.info ()
-        ^ Grid.level_glyph ~peak count ^ Ansi.reset
-    | Wakes _ -> Theme.recede () ^ Keeper_mark.grid_dot_mark ^ Ansi.reset
-    | Wakes_unknown -> Theme.recede () ^ Keeper_mark.unknown_mark ^ Ansi.reset) slots)
+  grid_wake_window state
+    ~style:Masc_tui_keeper_strip.Wake_counts slots
 
 let grid_group_title state (grid : Grid.t) ~now ~group ~members ~folded ~style ~pulse title =
   let count = List.length members in
@@ -1232,9 +1226,9 @@ let grid_group_title state (grid : Grid.t) ~now ~group ~members ~folded ~style ~
   let tail_width = grid_tail_cells grid in
   let right_width = grid.mem_cells in
   String.concat ""
-    [ style ^ Keeper_mark.grid_gutter_glyph ^ Ansi.reset ^ " "
-    ; Ansi.bold ^ (if folded then Keeper_mark.grid_folded_mark else Keeper_mark.grid_open_mark) ^ Ansi.reset ^ " "
-    ; style ^ Ansi.bold ^ fit_width title title_width ^ Ansi.reset
+    [ "  "
+    ; style ^ (if folded then Keeper_mark.grid_folded_mark else Keeper_mark.grid_open_mark) ^ Ansi.reset ^ " "
+    ; Ansi.bold ^ fit_width title title_width ^ Ansi.reset
     ; (if pulse_width > 0 then " " ^ pulse else "")
     ; " " ^ grid_band (style ^ fit_width now_text Grid.now_cells ^ Ansi.reset)
     ; " " ^ Theme.recede () ^ fit_width tail (max 0 (tail_width - right_width))
@@ -1291,9 +1285,9 @@ let grid_facts_by_age_offset = 8
 
 (* The column headers draw the two lines and no band. A header word over the
    due column may run into the gap after it. *)
-let grid_header (grid : Grid.t) (columns : Axis_row.columns) =
+let grid_header state (grid : Grid.t) (columns : Axis_row.columns) =
   let recede text = Theme.recede () ^ text ^ Ansi.reset in
-  let line = " " ^ Theme.info () ^ Keeper_mark.grid_now_line ^ Ansi.reset ^ " " in
+  let line = " " ^ recede Keeper_mark.grid_now_line ^ " " in
   (* The pulse draws [side_cells] half hours up to the now slot and the strip
      as many after it, so one span names both. *)
   let window = Grid.window_label ~slots:grid.side_cells in
@@ -1310,7 +1304,11 @@ let grid_header (grid : Grid.t) (columns : Axis_row.columns) =
         ( Keeper_mark.grid_keeper_header
         , pulse_header (Keeper_mark.grid_pulse_header ~window)
         , Keeper_mark.axis_now_header
-        , Keeper_mark.grid_next_header ~window
+        , (match state.keeper_list_view with
+           | Keeper_list_model.By_state ->
+               ui_text state ~ko:("예약 확인 · " ^ window) ~en:("known wakes · " ^ window)
+           | Plain | By_cause | By_time | By_memory | By_age | By_runtime | Day_wall ->
+               Keeper_mark.grid_next_header ~window)
         , Keeper_mark.grid_due_header
         , Message_layout.pad_left Keeper_mark.grid_lag_header (grid.mem_cells - grid_level_cells) )
     | Axis_row.Memory_columns ->
@@ -1338,7 +1336,7 @@ let grid_header (grid : Grid.t) (columns : Axis_row.columns) =
     ; line
     ; Ansi.bold ^ fit_width now_word Grid.now_cells ^ Ansi.reset
     ; line
-    ; (if side then Theme.info () ^ fit_width strip (Grid.strip_cells grid) ^ Ansi.reset ^ " "
+    ; (if side then recede (fit_width strip (Grid.strip_cells grid)) ^ " "
        else "")
     ; recede (fit_width due (Grid.due_cells + if mem then 1 else 0))
     ; (if mem then recede (fit_width right grid.mem_cells) else "")
@@ -1558,14 +1556,14 @@ let keeper_group_heading_style = function
   | Keeper_list_model.Group_age Keeper_list_model.Age_unknown -> Theme.recede ()
 
 let keeper_state_heading_text ~available_cells rows group count =
-  let glyph, label =
+  let label =
     match group with
-    | Keeper_list_model.Attention -> "!", "ATTENTION"
-    | Keeper_list_model.Failing -> failing_glyph, "FAILING"
-    | Keeper_list_model.Active -> "\xe2\x96\xb6", "ACTIVE" (* ▶ *)
-    | Keeper_list_model.Waiting -> "\xe2\x97\x8c", "WAITING" (* ◌ *)
-    | Keeper_list_model.Inactive -> "\xe2\x97\x8b", "INACTIVE" (* ○ *)
-    | Keeper_list_model.Unobserved -> "?", "UNKNOWN"
+    | Keeper_list_model.Attention -> "Attention"
+    | Keeper_list_model.Failing -> "Failing"
+    | Keeper_list_model.Active -> "Active"
+    | Keeper_list_model.Waiting -> "Waiting"
+    | Keeper_list_model.Inactive -> "Inactive"
+    | Keeper_list_model.Unobserved -> "Unknown"
   in
   let detail =
     match group with
@@ -1575,7 +1573,7 @@ let keeper_state_heading_text ~available_cells rows group count =
     | Keeper_list_model.Attention | Keeper_list_model.Failing | Keeper_list_model.Active
     | Keeper_list_model.Inactive | Keeper_list_model.Unobserved -> ""
   in
-  Printf.sprintf "%s %s %d%s" glyph label count detail
+  Printf.sprintf "%s %d%s" label count detail
 
 let keeper_group_heading_text ~available_cells rows group count =
   match group with
@@ -2066,7 +2064,7 @@ let keeper_pulse_headers (state : state) ~now ~inner ~(grid : Grid.t) ~selected_
   header :: (match state.keeper_list_view with
   | Keeper_list_model.By_age -> []
   | Keeper_list_model.(Plain | By_state | By_cause | By_time | By_memory | By_runtime | Day_wall) ->
-      let fleet = Masc_tui_keeper_strip.fleet_cells ~now ~grid
+      let fleet = Masc_tui_keeper_strip.fleet_cells ~ko:(state.ui_language = Lang_ko) ~now ~grid
           ~wakes:(fun row -> Masc_tui_keeper_axis.wake_strip state ~now
             ~ahead:grid.side_cells ~keeper_name:row.Keeper_list_model.keeper.Tui_decode.k_name) all_rows in
       [(grid_line grid
@@ -2692,6 +2690,7 @@ let render_keeper_axes (state : state) =
     | Keeper_list_model.(Plain | By_state | By_cause | By_time | By_memory | By_age | Day_wall) -> None in
   let peak_lag = axis_peak_lag state model_rows in
   let peak_facts = axis_peak_facts state model_rows in
+  box_line buf cols "";
   (match matrix, shape with
    | Some matrix, (Axis_row.List_columns | Axis_row.Wall_columns | Axis_row.Grid _) ->
        box_line_styled buf cols ~style:(Theme.recede ()) (matrix_header matrix)
@@ -2701,7 +2700,7 @@ let render_keeper_axes (state : state) =
          (List.map keeper_row_runtime model_rows))
    | None, Axis_row.List_columns ->
        box_line_styled buf cols ~style:(Theme.recede ()) (keeper_column_header columns)
-   | None, Axis_row.Grid grid_columns -> box_line buf cols (grid_header grid grid_columns));
+   | None, Axis_row.Grid grid_columns -> box_line buf cols (grid_header state grid grid_columns));
 
   (match keepers_error with
    | Some err -> box_line buf cols ((Theme.bad ()) ^ "  " ^ err ^ Ansi.reset)
@@ -2858,6 +2857,10 @@ let render_keeper_axes (state : state) =
       state.keeper_list_scroll
   in
   let entries_window = List.take window_entries (List.drop scroll_offset entries) in
+  (* Strip visual SGR before adding pressable marks: those marks also end in
+     [m] and must reach the frame presenter. *)
+  let selected_line text =
+    box_line_styled buf cols ~style:(Theme.sidebar_selection ()) text in
   List.iter
     (function
       | Keeper_world as entry ->
@@ -2877,7 +2880,7 @@ let render_keeper_axes (state : state) =
             ; right = Message_layout.pad_left world.right grid.mem_cells }).text in
           let text = pressable Press_keeper_world (fit_width text inner) in
           if keeper_entry_selected stop entry then
-            box_line_selected buf cols (Masc_tui_theme.strip_sgr text)
+            selected_line (Masc_tui_theme.strip_sgr text)
           else box_line buf cols text
       | Keeper_group_heading (group, count) as entry ->
           let text =
@@ -2892,7 +2895,7 @@ let render_keeper_axes (state : state) =
                   ~pulse:(grid_group_pulse state grid list_reading group) title
           in
           if keeper_entry_selected stop entry then
-            box_line_selected buf cols (Masc_tui_theme.strip_sgr text)
+            selected_line (Masc_tui_theme.strip_sgr text)
           else box_line buf cols text
       | Keeper_display_row (position, row) as entry ->
           if wall_separator position then box_line buf cols (Theme.recede () ^ draw_hline inner ^ Ansi.reset);
@@ -2920,7 +2923,7 @@ let render_keeper_axes (state : state) =
           in
           let emit text =
             if selected then
-              box_line_selected buf cols (press (Masc_tui_theme.strip_sgr text))
+              selected_line (press (Masc_tui_theme.strip_sgr text))
             else box_line buf cols (press text)
           in
           (match primary.motion with
@@ -2966,7 +2969,7 @@ let render_keeper_axes (state : state) =
     match matrix, shape with
     | Some _, (Axis_row.Grid _ | Axis_row.List_columns | Axis_row.Wall_columns)
     | None, (Axis_row.List_columns | Axis_row.Wall_columns) -> box_empty buf cols
-    | None, Axis_row.Grid _ -> box_line buf cols (grid_blank_line grid)
+    | None, Axis_row.Grid _ -> box_line buf cols ""
   done;
   List.iter (fun line -> box_line_styled buf cols ~style:(Theme.recede ()) line) legend;
 

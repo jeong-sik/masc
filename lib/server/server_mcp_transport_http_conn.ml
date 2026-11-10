@@ -59,7 +59,15 @@ module Connect_guard_key = struct
     | Session of string
     | Standalone_observer of { instance_id : string; agent_name : string }
 
-  let compare = Stdlib.compare
+  let compare left right =
+    match left, right with
+    | Session left, Session right -> String.compare left right
+    | Session _, Standalone_observer _ -> -1
+    | Standalone_observer _, Session _ -> 1
+    | Standalone_observer { instance_id = left_instance; agent_name = left_agent },
+      Standalone_observer { instance_id = right_instance; agent_name = right_agent } ->
+        let instance_order = String.compare left_instance right_instance in
+        if instance_order <> 0 then instance_order else String.compare left_agent right_agent
 end
 
 module Guard_map = Map.Make (Connect_guard_key)

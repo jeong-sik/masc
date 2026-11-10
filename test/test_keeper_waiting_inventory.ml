@@ -613,7 +613,7 @@ let test_owner_shutdown_row_is_deferred () =
 ;;
 
 let with_shutdown_fence config keeper_name operation_id f =
-  let base_path = config.Workspace.base_path in
+  let base_path = config.Masc.Workspace.base_path in
   (match Keeper_owner_registry.begin_shutdown ~base_path ~keeper_name ~operation_id with
    | Ok (Masc.Keeper_owner.Shutdown_reserved _) -> ()
    | Ok (Masc.Keeper_owner.Shutdown_already_reserved _) -> fail "unexpected existing fence"

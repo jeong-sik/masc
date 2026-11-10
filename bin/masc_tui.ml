@@ -38178,7 +38178,7 @@ Use relative paths for resources already held in the package. -->
                      let delta = if List.mem key ["k"; "up"; "pageup"] then -step else step in
                      state.runtime_config_status_scroll <-
                        max 0 (min limit (min limit state.runtime_config_status_scroll + delta))))
-       | Some ("." | "…" | "\015")
+       | Some (("." | "…" | "\015") as key)
          when state.view = Memory && state.memory_page = Memory_changes
               && not state.composer_focused && not (modal_owns_keys state) ->
            (match state.memory_facts_keeper with
@@ -38186,7 +38186,8 @@ Use relative paths for resources already held in the package. -->
             | Some keeper_name ->
                 Option.iter
                   (fun preview -> open_selected_image state ~mailbox:async_messages preview)
-                  (Masc_tui_render_keeper_memory.change_diagram state ~keeper_name))
+                  ((if key = "\015" then Masc_tui_render_keeper_memory.change_diagram
+                    else Masc_tui_render_keeper_memory.change_focus_diagram) state ~keeper_name))
        | Some ("1" | "2" | "3" | "4" as page)
          when state.view = Memory && not state.memory_fact_detail_open
               && not state.composer_focused && not (modal_owns_keys state) ->

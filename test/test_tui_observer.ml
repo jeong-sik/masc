@@ -886,8 +886,8 @@ let test_a_roster_push_names_the_row_or_every_row () =
   let changes frames =
     decode_all frames
     |> List.filter_map (function
-         | Observer.Event event -> Observer.roster_change event
-         | Observer.Undecodable _ -> None)
+         | Observer.Event (Observer.Keeper_roster_change change) -> Some change
+         | Observer.Event _ | Observer.Undecodable _ -> None)
     |> List.length
   in
   check int "both owe the roster a read" 2 (changes roster_frames);

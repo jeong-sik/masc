@@ -466,18 +466,6 @@ let transport_health_measured = function
   | Lane_resource _ | Execution_snapshot | Other _ ->
       false
 
-let roster_change = function
-  | Keeper_roster_change change -> Some change
-  | Keeper_chat_appended _ | Keeper_memory_journal_appended _ | Keeper_runtime_journal_appended _ | Keeper_turn_observation _
-  | Agent_core _ | Keeper_heartbeat _ | Keeper_tool_call _
-  | Keeper_turn_complete _
-  | Keeper_composite_changed _ | Keeper_metrics_appended _
-  | Keeper_chat_stream_frame _ | Keeper_turn_stream_frame _ | Keeper_waiting_inventory_changed _
-  | Keeper_turn_changed _ | Keeper_async_requests_changed _ | Keeper_skill_activations_changed _
-  | Fusion_run_status _ | Internal_agent_runs_changed _ | Workspace_store_changed _ | Dataset_changed _ | Gate_connector_changed _ | Keeper_event_queue_changed _ | Board_changed _
-  | Approval_change _ | Lane_resource _ | Snapshot _ | Execution_snapshot | Other _ ->
-      None
-
 let turn_change = function
   | Keeper_turn_changed { keeper; change } -> Some (keeper, change)
   | Keeper_chat_appended _ | Keeper_memory_journal_appended _ | Keeper_runtime_journal_appended _ | Keeper_turn_observation _

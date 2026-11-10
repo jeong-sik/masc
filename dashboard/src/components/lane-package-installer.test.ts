@@ -35,7 +35,7 @@ const snapshot = { configuration: { directory, complete: true, issues: [], decla
 })) }, instances: [instance('producer'), instance('other-run', 'different-run')], rows: [], coverage: [] }
 let sequence = 0, generation = 0, epoch = ''
 function workspace(root: string | null) {
-  expect(hydrateExecutionSnapshot({ execution_publication_epoch: epoch, execution_publication_generation: ++generation,
+  expect(hydrateExecutionSnapshot({ projection_diagnostics: { read_completeness: 'complete', read_error: null }, execution_publication_epoch: epoch, execution_publication_generation: ++generation,
     status: { project: 'package-test', workspace_root: root } } as Parameters<typeof hydrateExecutionSnapshot>[0])).toBe(true)
 }
 beforeEach(() => {

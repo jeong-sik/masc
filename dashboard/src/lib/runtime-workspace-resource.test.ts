@@ -7,7 +7,7 @@ import { loadRuntimeCatalog, reloadRuntimeCatalog, resetRuntimeCatalog, runtimeC
 import { loadRuntimeResolved, reloadRuntimeResolved, resetRuntimeResolved, runtimeResolvedState } from './runtime-resolved-resource'
 let epoch = 0, generation = 0
 function workspace(root: string | null) {
-  hydrateExecutionSnapshot({ execution_publication_epoch: `runtime-cache-${epoch}`, execution_publication_generation: ++generation,
+  hydrateExecutionSnapshot({ projection_diagnostics: { read_completeness: 'complete', read_error: null }, execution_publication_epoch: `runtime-cache-${epoch}`, execution_publication_generation: ++generation,
     status: { project: 'fixture', workspace_root: root } } as Parameters<typeof hydrateExecutionSnapshot>[0])
 }
 beforeEach(() => {

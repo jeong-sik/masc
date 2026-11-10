@@ -11,7 +11,7 @@ let generation = 0
 let epoch = ''
 let epochSequence = 0
 function workspace(root: string | null) {
-  expect(hydrateExecutionSnapshot({ execution_publication_epoch: epoch, execution_publication_generation: ++generation,
+  expect(hydrateExecutionSnapshot({ projection_diagnostics: { read_completeness: 'complete', read_error: null }, execution_publication_epoch: epoch, execution_publication_generation: ++generation,
     status: { project: 'audit', workspace_root: root } } as Parameters<typeof hydrateExecutionSnapshot>[0])).toBe(true)
 }
 function snapshot(id: string, actions = false) {

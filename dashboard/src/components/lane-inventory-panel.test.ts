@@ -12,7 +12,7 @@ import { LaneInventoryPanel } from './lane-inventory-panel'
 let generation = 0
 const epoch = 'lane-inventory-test'
 function workspace(root: string) {
-  hydrateExecutionSnapshot({ execution_publication_epoch: epoch, execution_publication_generation: ++generation,
+  hydrateExecutionSnapshot({ projection_diagnostics: { read_completeness: 'complete', read_error: null }, execution_publication_epoch: epoch, execution_publication_generation: ++generation,
     status: { project: 'fixture', workspace_root: root } } as Parameters<typeof hydrateExecutionSnapshot>[0])
 }
 afterEach(() => { cleanup(); vi.resetAllMocks() })

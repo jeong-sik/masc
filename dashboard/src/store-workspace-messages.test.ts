@@ -40,6 +40,7 @@ describe('durable workspace message authority', () => {
     await store.refreshDashboardWorkspaceMessages('ws')
 
     store.hydrateExecutionSnapshot({
+      projection_diagnostics: { read_completeness: 'complete', read_error: null },
       status: { project: 'ws' },
       messages: [{
         seq: 7,
@@ -54,12 +55,12 @@ describe('durable workspace message authority', () => {
   })
   it('retires account authority on workspace and publication changes', async () => {
     const store = await import('./store')
-    store.hydrateExecutionSnapshot({ status: { project: 'A' } })
+    store.hydrateExecutionSnapshot({ projection_diagnostics: { read_completeness: 'complete', read_error: null }, status: { project: 'A' } })
     const a = store.executionWorkspaceRevision.value
-    store.hydrateExecutionSnapshot({ status: { project: 'B' } })
+    store.hydrateExecutionSnapshot({ projection_diagnostics: { read_completeness: 'complete', read_error: null }, status: { project: 'B' } })
     const b = store.executionWorkspaceRevision.value
     expect(b).not.toBe(a)
-    store.hydrateExecutionSnapshot({ status: { project: 'B' } })
+    store.hydrateExecutionSnapshot({ projection_diagnostics: { read_completeness: 'complete', read_error: null }, status: { project: 'B' } })
     expect(store.executionWorkspaceRevision.value).toBe(b)
     store.invalidateExecutionSnapshotGeneration('replacement', 1)
     const replacement = store.executionWorkspaceRevision.value

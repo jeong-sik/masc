@@ -42,6 +42,7 @@ let fixtureGeneration = 0
 let fixtureConnectionGeneration = 0
 function observeWorkspace(root: unknown, includeRoot = true, project = 'same-project') {
   expect(hydrateExecutionSnapshot({
+    projection_diagnostics: { read_completeness: 'complete', read_error: null },
     execution_publication_epoch: fixtureEpoch,
     execution_publication_generation: ++fixtureGeneration,
     // Deliberately identical project label across distinct canonical roots.
@@ -324,6 +325,7 @@ describe('Keeper Item tab', () => {
     expect(executionWorkspaceAuthority.peek()).toBeNull()
     expect(screen.queryByText('보유 2 / 18개')).toBeNull()
     expect(hydrateExecutionSnapshot({
+      projection_diagnostics: { read_completeness: 'complete', read_error: null },
       execution_publication_epoch: fixtureEpoch,
       execution_publication_generation: ++fixtureGeneration,
       status: { workspace_root: '/fixture/workspace-a' },

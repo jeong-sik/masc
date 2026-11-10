@@ -54,7 +54,7 @@ function document(text: string, path = '/workspace/runtime.toml') {
 function deferred<T>() { let resolve!: (value: T) => void; const promise = new Promise<T>(done => { resolve = done }); return { promise, resolve } }
 let epoch = 0, generation = 0, stored = source
 function workspace(root: string) {
-  hydrateExecutionSnapshot({ execution_publication_epoch: `machine-activity-${epoch}`, execution_publication_generation: ++generation,
+  hydrateExecutionSnapshot({ projection_diagnostics: { read_completeness: 'complete', read_error: null }, execution_publication_epoch: `machine-activity-${epoch}`, execution_publication_generation: ++generation,
     status: { project: 'fixture', workspace_root: root } } as Parameters<typeof hydrateExecutionSnapshot>[0])
   return executionWorkspaceAuthority.peek()!
 }

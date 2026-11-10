@@ -47,7 +47,7 @@ import { resetRuntimeTomlSessionsForTesting } from '../lib/runtime-toml-session'
 let workspaceEpoch = 0
 let workspaceGeneration = 0
 function workspace(root: string | null) {
-  hydrateExecutionSnapshot({ execution_publication_epoch: `runtime-editor-${workspaceEpoch}`,
+  hydrateExecutionSnapshot({ projection_diagnostics: { read_completeness: 'complete', read_error: null }, execution_publication_epoch: `runtime-editor-${workspaceEpoch}`,
     execution_publication_generation: ++workspaceGeneration,
     status: { project: 'test', workspace_root: root } } as Parameters<typeof hydrateExecutionSnapshot>[0])
 }

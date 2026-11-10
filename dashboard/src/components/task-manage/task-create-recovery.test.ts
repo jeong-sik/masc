@@ -35,6 +35,7 @@ beforeEach(() => {
   showTaskCreate.value = false
   resetForm()
   expect(store.hydrateExecutionSnapshot({
+    projection_diagnostics: { read_completeness: 'complete', read_error: null },
     execution_publication_epoch: 'recovery-fixture', execution_publication_generation: 1,
     status: { project: 'project-a', workspace_root: '/a' }, agents: [], tasks: [], messages: [], keepers: [],
   })).toBe(true)
@@ -99,14 +100,14 @@ it.each(['same-generation', 'token-aba', 'actor-aba', 'owner-retired', 'authorit
       const revision = store.executionWorkspaceRevision.peek()
       await expect(store.refreshExecution({ force: true })).rejects.toThrow('execution unavailable')
       expect(store.executionWorkspaceAuthority.peek()).toBeNull()
-      expect(store.hydrateExecutionSnapshot({ execution_publication_epoch: 'recovery-fixture', execution_publication_generation: 1,
+      expect(store.hydrateExecutionSnapshot({ projection_diagnostics: { read_completeness: 'complete', read_error: null }, execution_publication_epoch: 'recovery-fixture', execution_publication_generation: 1,
         status: { project: 'project-a', workspace_root: '/a' }, agents: [], tasks: [], messages: [], keepers: [] })).toBe(true)
       expect(store.executionWorkspaceRevision.peek()).toBe(revision)
     } else if (scenario === 'workspace-aba') {
       const revision = store.executionWorkspaceRevision.peek()
-      expect(store.hydrateExecutionSnapshot({ execution_publication_epoch: 'recovery-fixture', execution_publication_generation: 1,
+      expect(store.hydrateExecutionSnapshot({ projection_diagnostics: { read_completeness: 'complete', read_error: null }, execution_publication_epoch: 'recovery-fixture', execution_publication_generation: 1,
         status: { project: 'project-b', workspace_root: '/b' }, agents: [], tasks: [], messages: [], keepers: [] })).toBe(true)
-      expect(store.hydrateExecutionSnapshot({ execution_publication_epoch: 'recovery-fixture', execution_publication_generation: 1,
+      expect(store.hydrateExecutionSnapshot({ projection_diagnostics: { read_completeness: 'complete', read_error: null }, execution_publication_epoch: 'recovery-fixture', execution_publication_generation: 1,
         status: { project: 'project-a', workspace_root: '/a' }, agents: [], tasks: [], messages: [], keepers: [] })).toBe(true)
       expect(store.executionWorkspaceRevision.peek()).toBeGreaterThan(revision)
     }
@@ -297,7 +298,7 @@ it.each(['recorded', 'denied', 'workspace-mismatch', 'workspace-change-after', '
       const revision = store.executionWorkspaceRevision.peek()
       const pendingRead = recheckTaskCreation(creationRequestId)
       await waitFor(() => expect(healthReads).toBe(2))
-      expect(store.hydrateExecutionSnapshot({ execution_publication_epoch: 'recovery-fixture', execution_publication_generation: 1,
+      expect(store.hydrateExecutionSnapshot({ projection_diagnostics: { read_completeness: 'complete', read_error: null }, execution_publication_epoch: 'recovery-fixture', execution_publication_generation: 1,
         status: { project: 'project-a', workspace_root: '/a' }, agents: [], tasks: [], messages: [], keepers: [] })).toBe(true)
       expect(store.executionWorkspaceAuthority.peek()).not.toBeNull()
       await expect(store.refreshExecution({ force: true })).rejects.toThrow('execution unavailable')
@@ -883,7 +884,7 @@ it.each([401, 403])('hides and protects a receipt while health HTTP %i body is p
 
 it('keeps a pending receipt through automatic cleanup while its health preflight is in flight', async () => {
   setStoredToken('actor-a-token', { source: 'manual' })
-  mocks.fetchExecution.mockResolvedValue({ execution_publication_epoch: 'recovery-fixture', execution_publication_generation: 1,
+  mocks.fetchExecution.mockResolvedValue({ projection_diagnostics: { read_completeness: 'complete', read_error: null }, execution_publication_epoch: 'recovery-fixture', execution_publication_generation: 1,
     status: { project: 'project-a', workspace_root: '/a' }, agents: [], messages: [], keepers: [],
     tasks: [{ id: 'task-private', title: 'Task', status: 'todo' }] })
   let healthCount = 0
@@ -978,6 +979,7 @@ it.each(['partial', 'attested', 'nested', 'missing-attestation', 'duplicate-task
   'uses the real Goal refresh and direct workspace attestation before cleanup: %s', async scenario => {
     setStoredToken('actor-a-token', { source: 'manual' })
     mocks.fetchExecution.mockResolvedValue({
+      projection_diagnostics: { read_completeness: 'complete', read_error: null },
       execution_publication_epoch: 'recovery-fixture', execution_publication_generation: 1,
       status: { project: 'project-a', workspace_root: '/a' }, agents: [], messages: [], keepers: [],
       tasks: [{ id: 'task-private', title: 'Task', goal_id: 'goal-a', status: 'todo' }],
@@ -1046,7 +1048,7 @@ it.each(['partial', 'attested', 'nested', 'missing-attestation', 'duplicate-task
 
 it.each([401, 403])('treats scoped Goal HTTP %i as a Goal response while its body is delayed', async status => {
   setStoredToken('actor-a-token', { source: 'manual' })
-  mocks.fetchExecution.mockResolvedValue({ execution_publication_epoch: 'recovery-fixture', execution_publication_generation: 1,
+  mocks.fetchExecution.mockResolvedValue({ projection_diagnostics: { read_completeness: 'complete', read_error: null }, execution_publication_epoch: 'recovery-fixture', execution_publication_generation: 1,
     status: { project: 'project-a', workspace_root: '/a' }, agents: [], messages: [], keepers: [],
     tasks: [{ id: 'task-private', title: 'Task', status: 'todo', goal_id: 'goal-a' }] })
   const tree = { approval_queue_state: { state: 'ready' }, tree: [{ id: 'goal-a', title: 'Goal', phase: 'executing',

@@ -14,12 +14,15 @@ type input_refusal =
 type t =
   | Transient
       (** A transport failure or a cause that does not prove a refusal. The
-          same request may pass later with nothing changed. *)
+          same request may pass later with nothing changed. So may one whose
+          quota or billing refusal states when the account may be called
+          again. *)
   | Auth_refused
       (** The credentials were refused. It may pass after they change. *)
   | Configuration_refused
-      (** The slot, its runtime, its quota or its billing refused the call. It
-          may pass after the operator changes them. A failure with no named
+      (** The slot, its runtime, its quota or its billing refused the call
+          without stating when it may pass. It may pass after the operator
+          changes them. A failure with no named
           cause is read the same way when its runtime's retry policy says the
           same call will not pass: nothing blamed this input, so something on
           the operator's side has to change. *)

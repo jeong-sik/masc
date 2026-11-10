@@ -9,8 +9,6 @@ open Workspace_utils_backend_setup
 (** {1 Validators (string-error)} *)
 
 val validate_agent_name : string -> (string, string) result
-val validate_task_id : string -> (string, string) result
-val validate_file_path : string -> (string, string) result
 
 (** {1 Sanitizers} *)
 

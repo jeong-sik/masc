@@ -173,14 +173,6 @@ let call_tool_full t ~name ~arguments =
   | Ok result -> Ok result
 ;;
 
-(** One MCP tool whose input schema could not be converted into a
-    {!Tool.t}. The tool is left out of {!managed.tools}; [detail] is the
-    converter's diagnostic. *)
-type skipped_tool =
-  { tool_name : string
-  ; detail : string
-  }
-
 (** Close the MCP client and terminate the subprocess. *)
 let close_with_release ~close_client ~release ~report_release_failure =
   match close_client () with
@@ -266,25 +258,6 @@ let%test "close attempts process release and preserves the client-close exceptio
          String.length expected > 0 && String.starts_with ~prefix:expected observed
        | None, _ | _, None -> false)
 ;;
-
-(* ── Managed lifecycle ─────────────────────────────────────────── *)
-
-(** Transport backend for a managed MCP connection. *)
-type transport =
-  | Stdio of { client : t }
-  | Http of
-      { close_fn : unit -> unit
-      ; base_url : string
-      ; headers : (string * string) list
-      }
-
-(** A connected MCP server together with its converted agent-core tools. *)
-type managed =
-  { tools : Tool.t list
-  ; skipped_tools : skipped_tool list
-  ; name : string
-  ; transport : transport
-  }
 
 [@@@coverage off]
 (* === Inline tests === *)

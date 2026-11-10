@@ -7369,6 +7369,7 @@
 (include stanzas/test_authz_bootstrap.inc)
 
 (include stanzas/test_authz_activation.inc)
+(include stanzas/test_authz_off.inc)
 
 (include stanzas/test_authz_service_credential_host.inc)
 

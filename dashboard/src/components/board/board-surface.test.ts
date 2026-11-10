@@ -306,6 +306,28 @@ describe('BoardSurface Component', () => {
     expect(showToast).toHaveBeenCalledExactlyOnceWith(expect.any(String), 'warning')
   })
 
+  it('keeps the selected thread visible for a pending decision without a success refresh', async () => {
+    const post = makePost({ id: 'decision-pending', title: 'Deletion decision pending', author: 'keeper' })
+    boardPosts.value = [post]
+    selectedBoardPostId.value = post.id
+    detailPostId.value = post.id
+    detailPost.value = post
+    vi.mocked(fetchBoardPost).mockResolvedValue({ ...post, comments: [], commentPage: { offset: 0, total: 0 } })
+    vi.mocked(deleteBoardPost).mockResolvedValueOnce({
+      status: 'decision_pending', postId: post.id, detail: 'decision durability is unknown',
+    })
+    render(h(BoardSurface, {}))
+    await waitFor(() => expect(detailLoading.value).toBe(false))
+    vi.mocked(refreshBoard).mockClear()
+    await fireEvent.click(screen.getByRole('button', { name: `게시글 삭제: ${post.id}` }))
+    await waitFor(() => expect(deleteBoardPost).toHaveBeenCalledExactlyOnceWith(post.id))
+    expect(showToast).toHaveBeenCalledExactlyOnceWith(expect.any(String), 'warning')
+    expect(refreshBoard).not.toHaveBeenCalled()
+    expect(boardPosts.value.map(value => value.id)).toEqual([post.id])
+    expect(selectedBoardPostId.value).toBe(post.id)
+    expect(detailPost.value?.id).toBe(post.id)
+  })
+
   it('clears retained full-view focus when returning to the same compact thread', async () => {
     const post = makePost({ id: 'focused-back', title: 'Retained selected thread', author: 'keeper' })
     const latest = { ...post, comments: [], commentPage: { offset: 20, total: 20 } }

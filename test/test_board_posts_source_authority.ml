@@ -391,7 +391,7 @@ let test_partial_then_missing base_path _workspace =
   require_pre_effect (create reader "partial load must not append");
   require_io_refusal (edit reader first "partial load must not overwrite");
   require_io_refusal
-    (Board.delete_post reader ~post_id:(Board.Post_id.to_string first.id));
+    (Board.delete_post reader ~authorization:Board.Operator_deletion ~post_id:(Board.Post_id.to_string first.id));
   Alcotest.(check string) "partial source is not cleaned or rewritten" bytes
     (read_bytes path);
   Sys.remove path;
@@ -453,8 +453,9 @@ let test_retained_snapshot_is_stale base_path _workspace =
   check_observed_bytes store
 
 let durable_delete store (post : Board.post) =
-  match Board.delete_post store ~post_id:(Board.Post_id.to_string post.id) with
+  match Board.delete_post store ~authorization:Board.Operator_deletion ~post_id:(Board.Post_id.to_string post.id) with
   | Ok Board.Durable_deletion -> ()
+  | Ok (Board.Deletion_decision_pending detail) -> Alcotest.fail detail
   | Ok (Board.Deletion_persistence_pending detail) -> Alcotest.fail detail
   | Error error -> Alcotest.fail (Board.show_board_error error)
 
@@ -527,7 +528,7 @@ let test_cross_writer_projection base_path _workspace =
 
 type cleanup_fault = Ordinary_close | Timeout_close | Allocation_close
 
-let fault_store base_path =
+let fault_store ?(only_after_empty = false) base_path =
   present_empty_posts base_path;
   let workspace = Common.masc_dir_from_base_path ~base_path in
   let lock_path = Fs_compat.private_jsonl_lock_path
@@ -545,7 +546,9 @@ let fault_store base_path =
         let stable_lock = actual.Unix.st_dev = expected.Unix.st_dev
           && actual.Unix.st_ino = expected.Unix.st_ino in
         Unix.close fd;
-        match stable_lock, !close_fault with
+        let eligible = stable_lock && (not only_after_empty
+          || String.equal "" (read_bytes (Paths.posts_file ~workspace_masc_dir:workspace))) in
+        match eligible, !close_fault with
         | true, Some fault ->
           close_fault := None;
           incr close_failures;
@@ -750,7 +753,7 @@ let test_flush_cleanup_preserves_later_work base_path _workspace =
   Alcotest.(check int) "cleanup injection stayed one-shot" 1 !fired
 
 let test_delete_cleanup_preserves_dependents base_path _workspace =
-  let store, armed, _, fired, _ = fault_store base_path in
+  let store, armed, _, fired, _ = fault_store ~only_after_empty:true base_path in
   load_posts store 0;
   load_comments store 0;
   load_votes store;
@@ -780,7 +783,7 @@ let test_delete_cleanup_preserves_dependents base_path _workspace =
   let dependent_bytes = List.map (fun path -> path, read_bytes path) dependents in
   armed := Some Timeout_close;
   expect_reserved Timeout_close (fun () ->
-    ignore (Board.delete_post store ~post_id));
+    ignore (Board.delete_post store ~authorization:Board.Operator_deletion ~post_id));
   Alcotest.(check int) "delete posts settlement failed once" 1 !fired;
   check_known_settlement store;
   check_observed_bytes store;

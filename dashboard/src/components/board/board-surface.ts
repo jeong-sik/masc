@@ -347,6 +347,10 @@ function PostCard({ post, batchObservation, getLatestBatchRevision }: {
     deletingPostId.value = post.id
     try {
       const outcome = await deleteBoardPost(post.id)
+      if (outcome.status === 'decision_pending') {
+        showToast('삭제 처리 상태를 확인하지 못했습니다. 삭제를 다시 요청하지 말고 상태를 확인해 주세요.', 'warning')
+        return
+      }
       if (outcome.status === 'persistence_pending') {
         showToast('게시글 삭제를 적용했습니다. 저장이 아직 완료되지 않았습니다.', 'warning')
       } else {

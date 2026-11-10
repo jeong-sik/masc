@@ -79,6 +79,7 @@
   fs_compat_private_file_update
   fs_compat_private_jsonl_read
   fs_compat_private_jsonl_transaction
+  fs_compat_private_jsonl_guard
   fs_compat_private_jsonl_write)
  (private_modules
   fs_compat_base_io
@@ -92,6 +93,7 @@
   fs_compat_private_file_update
   fs_compat_private_jsonl_read
   fs_compat_private_jsonl_transaction
+  fs_compat_private_jsonl_guard
   fs_compat_private_jsonl_write)
  ; RFC-0071 §3.4 Phase 5 ratchet (warning 4) + unused-value ratchet (warning 32)
  (flags

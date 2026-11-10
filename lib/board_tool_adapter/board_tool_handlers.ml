@@ -23,23 +23,6 @@ let same_agent_id left right =
   String.equal (Board.Agent_id.to_string left) (Board.Agent_id.to_string right)
 ;;
 
-let require_post_author ~reader ~action ~post_id ~author =
-  match Board_dispatch.get_post ~reader ~post_id with
-  | Error _ as err -> err
-  | Ok post ->
-    if same_agent_id post.Board.author author
-    then Ok ()
-    else
-      Error
-        (Board.Unauthorized
-           (Printf.sprintf
-              "agent %s cannot %s post %s owned by %s"
-              (Board.Agent_id.to_string author)
-              action
-              post_id
-              (Board.Agent_id.to_string post.author)))
-;;
-
 let board_moderators_from_toml ~missing contents =
   (* A malformed moderator configuration is an operator-side fault: no change
      to the Board call arguments can repair it, so it travels as [Io_error]
@@ -475,16 +458,25 @@ let handle_delete ~reader ~tool_name ~start_time args : Tool_result.result =
     match agent_id_arg ~field:"author" args with
     | Error e -> refused e
     | Ok author ->
-    match require_post_author ~reader ~action:"delete" ~post_id ~author with
-    | Error e -> refused e
-    | Ok () ->
-    match Board_dispatch.delete_post ~post_id with
+    match Board_dispatch.delete_post ~authorization:(Board.Author_deletion { reader; author }) ~post_id with
     | Ok Board.Durable_deletion ->
       Tool_result.make_ok
         ~tool_name
         ~start_time
         ~data:(`String (Printf.sprintf "Deleted post %s" post_id))
         ()
+    | Ok (Board.Deletion_decision_pending detail) ->
+      Tool_result.make_err
+        ~tool_name ~start_time
+        ~class_:Tool_result.Runtime_failure
+        ~effect_disposition:Tool_result.Effect_outcome_unknown
+        ~data:(`Assoc
+          [ "post_id", `String post_id
+          ; "applied", `Bool false
+          ; "persistence", `String "decision_pending"
+          ; "detail", `String detail
+          ])
+        "Deletion decision is pending. Do not repeat the deletion; check its state."
     | Ok (Board.Deletion_persistence_pending detail) ->
       Tool_result.make_err
         ~tool_name ~start_time
@@ -677,14 +669,18 @@ let handle_board_cleanup ~reader ~tool_name ~start_time args : Tool_result.resul
   else (
     let deleted = ref 0 in
     let persistence_pending = ref [] in
+    let decision_pending = ref [] in
     let failed = ref 0 in
     let unknown_failures = ref 0 in
     List.iter
       (fun (p : Board.post) ->
          let pid = Board.Post_id.to_string p.id in
          try
-           match Board_dispatch.delete_post ~post_id:pid with
+           match Board_dispatch.delete_post ~authorization:(Board.Cleanup_deletion reader) ~post_id:pid with
            | Ok Board.Durable_deletion -> Stdlib.incr deleted
+           | Ok (Board.Deletion_decision_pending detail) ->
+             decision_pending :=
+               (`Assoc ["post_id", `String pid; "detail", `String detail]) :: !decision_pending
            | Ok (Board.Deletion_persistence_pending detail) ->
              persistence_pending :=
                (`Assoc ["post_id", `String pid; "detail", `String detail])
@@ -698,9 +694,10 @@ let handle_board_cleanup ~reader ~tool_name ~start_time args : Tool_result.resul
       targets;
     let message =
       Printf.sprintf
-        "Cleanup done: %d durable deletions, %d persistence pending, %d failed (scanned %d, age>%dh)"
+        "Cleanup done: %d durable deletions, %d persistence pending, %d decisions pending, %d failed (scanned %d, age>%dh)"
         !deleted
         (List.length !persistence_pending)
+        (List.length !decision_pending)
         !failed
         (List.length all_posts)
         max_age_hours
@@ -709,20 +706,25 @@ let handle_board_cleanup ~reader ~tool_name ~start_time args : Tool_result.resul
       if !persistence_pending = [] then message
       else message ^ ". Pending deletions are already applied; do not repeat them."
     in
+    let message =
+      if !decision_pending = [] then message
+      else message ^ ". Decision outcomes are pending; do not repeat these deletions."
+    in
     let data =
       `Assoc
         [ "message", `String message
         ; "durable_deletions", `Int !deleted
         ; "persistence_pending", `List (List.rev !persistence_pending)
+        ; "decision_pending", `List (List.rev !decision_pending)
         ; "failed", `Int !failed
         ; "refused_deletions", `Int (!failed - !unknown_failures)
-        ; "outcome_unknown", `Int !unknown_failures
+        ; "outcome_unknown", `Int (!unknown_failures + List.length !decision_pending)
         ]
     in
-    if !failed > 0 || !persistence_pending <> []
+    if !failed > 0 || !persistence_pending <> [] || !decision_pending <> []
     then
       let effect_disposition =
-        if !unknown_failures > 0 then Tool_result.Effect_outcome_unknown
+        if !unknown_failures > 0 || !decision_pending <> [] then Tool_result.Effect_outcome_unknown
         else if !deleted > 0 || !persistence_pending <> [] then Tool_result.Proven_post_effect
         else Tool_result.Proven_pre_effect
       in

@@ -184,39 +184,49 @@ val reopen :
 (** Clears a post's [closed] state back to open. Idempotent: reopening an
     already-open post is [Ok ()]. Same permission boundary as [set_closed]. *)
 
+type deletion_authorization =
+  | Operator_deletion
+  | Author_deletion of { reader : Board_access.reader; author : Agent_id.t }
+  | Cleanup_deletion of Board_access.reader
+(** The calling boundary supplies authority. Author and cleanup requests retain
+    their actual reader. The store rechecks it before recording any decision. *)
+
 type deletion_outcome =
   | Durable_deletion
+  | Deletion_decision_pending of string
+      (** Decision recording is uncertain or known work has not reached model
+          publication. Do not report an applied deletion or replay the request. *)
   | Deletion_persistence_pending of string
       (** The deletion is applied in memory. Failed and unattempted rewrites
           remain ordered work for [flush_dirty]. The detail names actual write failures. *)
 
 val delete_post :
-  store -> post_id:string -> (deletion_outcome, board_error) Result.t
-(** Removes the post and every comment under it from the
-    in-memory store, then rewrites the posts, comments, vote
-    and reaction snapshots without them.  Refused with
-    [Io_error], before anything changes, while any of those
-    four stores did not load fully: the rewrite would delete
-    the rows memory never held (#38595). [Error] always means no deletion
-    was applied. Once applied, [Ok Durable_deletion] means all four rewrites
-    succeeded; [Ok (Deletion_persistence_pending detail)] keeps the applied
-    transition distinct from a refused write. Retrying deletion is not a
-    persistence retry: the post is already absent; [flush_dirty] retries the
-    failed and unattempted snapshots in deletion order, stopping on the first
-    error again. A temporary nonwrite that retains source authority can retry
-    after repair. A conflicting/refused source requires a fresh store: partial
-    reload cannot safely reconstruct the pending deletion's models. The fresh
-    store keeps completed file writes but does not replay the memory-only
-    intent, so an unwritten parent deletion can reappear. Pending is not durable
-    completion. #26378 retains deletion-decision and multi-source recovery work. *)
+  store -> authorization:deletion_authorization -> post_id:string ->
+  (deletion_outcome, board_error) Result.t
+(** Durably record the original post and comment IDs before removing them from
+    memory. Authority is checked against both current memory and the expected
+    source's canonical parent under persistence. The exact parent source stays
+    guarded through decision recording. Four complete source
+    observations are required. Each snapshot uses
+    its own exact CAS, and the decision is retired only after four known writes.
+    [Error] is a pre-decision refusal. [Deletion_decision_pending] does not
+    establish model removal; [Deletion_persistence_pending] does. Neither is
+    durable completion. Do not retry the delete request to flush work.
+    [flush_dirty] resumes owned known work in order. Fresh [initialize_store]
+    durably fences an observed decision and filters only its fixed IDs from
+    fresh models, preserving later foreign comments and unrelated accepted rows.
+    Ordinary reload/flush cannot settle an unknown marker publication. *)
 
 (** {1 Global store + lifecycle} *)
 
+val initialize_store : store -> (unit, board_error) result
+(** Shared quiescent initialization for a fresh explicit store or global.
+    Loads display data best effort and recovers the durable original decision.
+    Reinitializing an already observed store is refused without replacing it. *)
+
 val global : unit -> store
-(** Lazy singleton.  First call constructs the store via
-    {!create_store}, then runs the five loaders
-    ([load_persisted_posts] / [_comments] / [_votes] / reactions / sub-boards +
-    [recalculate_reply_counts]) under
+(** Lazy singleton. First call constructs the store and calls
+    {!initialize_store} under
     [Eio.Lazy.from_fun ~cancel:`Protect] so a cancelled
     fiber cannot leave the singleton half-initialised. *)
 

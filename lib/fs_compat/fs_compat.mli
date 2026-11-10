@@ -1586,6 +1586,19 @@ val private_jsonl_cursor_success_receipt :
   , private_jsonl_transaction_error )
   result
 
+type private_jsonl_guard_failure = {
+  guard_path : string;
+  guard_error : private_jsonl_transaction_error;
+}
+
+type 'a private_jsonl_guard_result =
+  | Guard_refused of private_jsonl_guard_failure
+  | Guard_executed of {
+      value : 'a;
+      cleanup_failures : private_jsonl_guard_failure list;
+    }
+
+
 val private_jsonl_transaction_error_to_string :
   private_jsonl_transaction_error -> string
 
@@ -1666,6 +1679,23 @@ type private_jsonl_transaction_io_for_testing =
   { before_sync_parent : string -> unit
   ; close_fd : Unix.file_descr -> unit
   }
+
+val with_private_jsonl_snapshot_guard_result :
+  string -> expected:private_jsonl_snapshot ->
+  f:(unit -> 'a) -> 'a private_jsonl_guard_result
+(** Exact snapshot validation and the existing stable lock span [f]. Refused
+    means the callback never ran. Executed retains its result before guard
+    cleanup, including reserved cleanup causes. The callback runs in the
+    blocking worker and performs filesystem effects only: no Eio effects,
+    model mutation or re-entry into this path. Callers consistently order any
+    nested guards and target locks. Directory/file binding still belongs to
+    the existing cooperative private JSONL protocol. *)
+
+val with_private_jsonl_snapshot_guard_with_io_for_testing :
+  io:private_jsonl_transaction_io_for_testing ->
+  string -> expected:private_jsonl_snapshot ->
+  f:(unit -> 'a) -> 'a private_jsonl_guard_result
+
 
 val fold_private_jsonl_unique_regular_locked_with_io_for_testing :
   io:private_jsonl_transaction_io_for_testing ->

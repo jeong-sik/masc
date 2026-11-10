@@ -131,6 +131,24 @@ end = struct
   let generate () = Random_id.prefixed ~prefix ~bytes:random_bytes
 end
 
+module Deletion_id : sig
+  type t
+  val of_string : string -> (t, board_error) result
+  val to_string : t -> string
+  val generate : unit -> t
+end = struct
+  type t = string
+  let prefix = "d-"
+  let random_bytes = 16
+  let length = String.length prefix + (2 * random_bytes)
+  let pattern = Re.Pcre.re (Printf.sprintf "^%s[0-9a-f]{%d}$" prefix (2 * random_bytes)) |> Re.compile
+  let of_string text =
+    if String.length text = length && Re.execp pattern text then Ok text
+    else Error (Invalid_id "Invalid Board deletion decision ID.")
+  let to_string id = id
+  let generate () = Random_id.prefixed ~prefix ~bytes:random_bytes
+end
+
 module Agent_id : sig
   type t
   val parse : string -> (t, board_error) result
@@ -1148,7 +1166,85 @@ type reactions_source_state =
     publication require a fresh store; an ordinary reload cannot clear them. *)
 
 
-type snapshot_retry = Independent_snapshots | Deletion_pending
+type deletion_plan = {
+  decision_id : Deletion_id.t;
+  deleted_post : Post_id.t;
+  deleted_comments : Comment_id.t list;
+}
+(** Fixed original identities. Recovery never adds newly observed children. *)
+
+type deletion_observation = {
+  decision_path : string;
+  decision_snapshot : Fs_compat.private_jsonl_snapshot;
+  decision_workspace : Board_workspace_binding.observation;
+}
+
+type deletion_diagnostic =
+  | Deletion_file_diagnostic of Fs_compat.private_jsonl_transaction_error
+  | Deletion_guard_diagnostic of Fs_compat.private_jsonl_guard_failure
+  | Deletion_workspace_diagnostic of Board_workspace_binding.rejection
+  | Deletion_raised_diagnostic of {
+      exception_ : exn; backtrace : Printexc.raw_backtrace;
+    }
+
+type deletion_failure =
+  | Deletion_invalid_decision of string
+  | Deletion_transaction_failed of Fs_compat.private_jsonl_transaction_error
+  | Deletion_workspace_refused of Board_workspace_binding.rejection
+  | Deletion_marker_missing
+  | Deletion_binding_mismatch
+  | Deletion_projection_rejected of board_error
+  | Deletion_raised of { exception_ : exn; backtrace : Printexc.raw_backtrace }
+
+type deletion_receipt = {
+  decision : deletion_plan;
+  decision_after : deletion_observation;
+  decision_cleanup : deletion_diagnostic list;
+}
+(** Known durable marker publication, retained before any model change. *)
+
+type deletion_progress = Decision_recorded | Model_applied | Sources_written
+
+type deletion_work = {
+  decision_receipt : deletion_receipt;
+  deletion_progress : deletion_progress;
+  deletion_last_failure : deletion_failure option;
+  deletion_diagnostics : deletion_diagnostic list;
+}
+
+type deletion_attempt =
+  | Recording_decision of deletion_plan
+  | Retiring_decision of deletion_receipt
+
+type deletion_state =
+  | Deletion_unobserved
+  | Deletion_readable of {
+      observation : deletion_observation;
+      plan : deletion_plan option;
+      diagnostics : deletion_diagnostic list;
+    }
+  | Deletion_pending of deletion_work
+  | Deletion_unsettled of {
+      before : deletion_observation;
+      attempt : deletion_attempt;
+      intended_bytes : string;
+      failure : deletion_failure;
+      diagnostics : deletion_diagnostic list;
+    }
+  | Deletion_refused of {
+      last_observed : deletion_observation option;
+      failure : deletion_failure;
+      diagnostics : deletion_diagnostic list;
+    }
+  | Deletion_projection_failed of {
+      receipt : deletion_receipt;
+      exception_ : exn;
+      backtrace : Printexc.raw_backtrace;
+    }
+(** Sole deletion owner under persist_mutex. Ordinary flush/reload cannot settle
+    an unknown record/retirement or an exceptional model publication. A fresh
+    initializer durably fences an observed decision before applying its fixed
+    IDs to fresh complete models. Four known source writes precede retirement. *)
 
 type votes_source_observation = {
   vote_path : string;
@@ -1231,6 +1327,7 @@ type store = {
   (** None selects production vote-file IO. *)
   mutable reactions_source : reactions_source_state;
   reactions_source_io : Fs_compat.private_jsonl_transaction_io_for_testing option;
+  deletion_source_io : Fs_compat.private_jsonl_transaction_io_for_testing option;
   mutable workspace_binding: Board_workspace_binding.t;
   posts: (string, post) Hashtbl.t;
   comments: (string, comment) Hashtbl.t;
@@ -1253,7 +1350,7 @@ type store = {
   reactions: (string, reaction) Hashtbl.t;                 (** unique target/user/emoji reactions *)
   mutable dirty_posts: bool;                               (** Deferred flush flag *)
   mutable dirty_comments: bool;                            (** Deferred flush flag *)
-  mutable snapshot_retry: snapshot_retry;
+  mutable deletion_state: deletion_state;
   dirty_post_ids: (string, unit) Hashtbl.t;                 (** Deferred post snapshots *)
   dirty_comment_ids: (string, unit) Hashtbl.t;              (** Deferred comment snapshots *)
   post_rows: (string, post * string) Hashtbl.t;             (** See .mli *)

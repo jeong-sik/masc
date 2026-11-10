@@ -184,9 +184,8 @@ let purge_private_jsonl_durable_locked_at_snapshot_with_io_for_testing =
   purge_private_jsonl_durable_locked_at_snapshot_with_io
 ;;
 
-let read_private_jsonl_durable_locked_with_io ~io path ~after =
+let read_private_jsonl_snapshot_locked ~io path ~after =
   let success snapshot = Snapshot_succeeded snapshot in
-  with_private_jsonl_stable_lock ~io ~success path @@ fun ~dir:_ ~path ->
   match private_jsonl_open_existing ~close_fd:io.close_fd path [ Unix.O_RDONLY ] with
   | Error _ as error -> error
   | Ok None ->
@@ -236,6 +235,12 @@ let read_private_jsonl_durable_locked_with_io ~io path ~after =
                       ~from
                       ~end_offset:stats.Unix.st_size
                     |> Result.map (fun bytes -> { bytes; cursor = actual })))))
+;;
+
+let read_private_jsonl_durable_locked_with_io ~io path ~after =
+  let success snapshot = Snapshot_succeeded snapshot in
+  with_private_jsonl_stable_lock ~io ~success path @@ fun ~dir:_ ~path ->
+  read_private_jsonl_snapshot_locked ~io path ~after
 ;;
 
 let read_private_jsonl_durable_locked_result path ~after =

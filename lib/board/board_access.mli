@@ -3,7 +3,7 @@
     visibility modes retain their existing behavior. *)
 type reader =
   | Anonymous
-  | Named of { name : string; addressed_by : Board.Agent_id.t -> bool }
+  | Named of { name : string; addressed_by : Board_types.Agent_id.t -> bool }
   | Operator
 
 val named : string -> reader
@@ -13,6 +13,6 @@ val is_operator : reader -> bool
 val cache_key : reader -> string
 (** For HTTP readers whose [Named] address predicate is exact-name equality. *)
 val can_read_fields :
-  reader:reader -> author:Board.Agent_id.t -> visibility:Board.visibility ->
-  audience:Board.audience option -> bool
-val can_read : reader:reader -> Board.post -> bool
+  reader:reader -> author:Board_types.Agent_id.t -> visibility:Board_types.visibility ->
+  audience:Board_types.audience option -> bool
+val can_read : reader:reader -> Board_types.post -> bool

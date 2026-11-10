@@ -123,8 +123,9 @@ let test_unknown_rewrite_retains_exact_deletion_bytes base_path =
   let store = vote_fault_store base_path io in
   ignore (require (cast store parent "accepted-before-deletion"));
   armed := true;
-  (match require (Board.delete_post store
+  (match require (Board.delete_post store ~authorization:Board.Operator_deletion
       ~post_id:(Board.Post_id.to_string parent.id)) with
+   | Board.Deletion_decision_pending detail -> Alcotest.fail detail
    | Board.Deletion_persistence_pending _ -> ()
    | Board.Durable_deletion -> Alcotest.fail "an uncertain vote rewrite reported durable deletion");
   Alcotest.(check bool) "the real post-rename fault was reached" false !armed;

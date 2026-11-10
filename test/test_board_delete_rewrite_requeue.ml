@@ -230,8 +230,8 @@ let test_individual_snapshot_failure path () =
   Alcotest.(check int) "restart has no deleted votes" 0 (Hashtbl.length restored.vote_log);
   Alcotest.(check int) "restart has no deleted reactions" 0 (Hashtbl.length restored.reactions)
 
-let test_multiple_snapshot_failures_keep_healthy_writes_and_retry () =
-  let doomed = create_post_exn ~content:"delete despite independent snapshot failures" in
+let test_failed_prerequisite_preserves_dependents_until_retry () =
+  let doomed = create_post_exn ~content:"delete with ordered snapshot retries" in
   let post_id = Board.Post_id.to_string doomed.id in
   ignore
     (require_ok
@@ -248,6 +248,8 @@ let test_multiple_snapshot_failures_keep_healthy_writes_and_retry () =
   Alcotest.(check int) "reaction is on disk before deletion" 1
     (List.length (Fs_compat.load_jsonl (Board.reactions_path (Board.global ()))));
   let active = store () in
+  let comments_before = Fs_compat.load_file (Board.comments_path active) in
+  let reactions_before = Fs_compat.load_file (Board.reactions_path active) in
   let with_blocked_path path f =
     let backup = path ^ ".before-delete" in
     Unix.rename path backup;
@@ -264,11 +266,11 @@ let test_multiple_snapshot_failures_keep_healthy_writes_and_retry () =
        | Error error -> Alcotest.fail (Board.show_board_error error)
        | Ok Board.Durable_deletion ->
          Alcotest.fail "failed snapshots must leave deletion persistence pending");
-      Alcotest.(check int) "both failed writes are counted" 2
+      Alcotest.(check int) "only the blocked parent write is attempted" 1
         (Board.persist_error_count () - errors_before);
-      Alcotest.(check string) "comments are removed before repair" ""
+      Alcotest.(check string) "comments remain while parent deletion is blocked" comments_before
         (Fs_compat.load_file (Board.comments_path (Board.global ())));
-      Alcotest.(check string) "reactions are removed before repair" ""
+      Alcotest.(check string) "reactions remain while parent deletion is blocked" reactions_before
         (Fs_compat.load_file (Board.reactions_path (Board.global ())))));
   Alcotest.(check bool) "multiple failures retain the original store" true
     (active == store ());
@@ -283,6 +285,13 @@ let test_multiple_snapshot_failures_keep_healthy_writes_and_retry () =
     (row_has_post_id post_id (post_rows ()));
   Alcotest.(check bool) "multiple-failure retry clears posts work" false
     active.Board.dirty_posts;
+  List.iter (fun load -> match load active with
+    | Ok _ -> ()
+    | Error (path, error) -> Alcotest.failf "reload after repaired retry %s: %s"
+        path (Printexc.to_string error))
+    [Masc_board_handlers.Board_votes_json.load_persisted_posts;
+     Masc_board_handlers.Board_votes_json.load_persisted_comments];
+  check_post_deleted "repaired retry allows reload without restoring the parent" post_id;
   Board.reset_global_for_test ();
   Board_dispatch.reset_for_test ();
   Result.get_ok (Board_dispatch.init_jsonl
@@ -509,11 +518,24 @@ let test_cleanup_mixed_pending_and_refused_is_post_effect () =
   flush ();
   let repair_source = ref None in
   with_blocked_reactions (fun () ->
-    (* The hook runs after persistence unlock, so this is a real subsequent
-       source read rather than a reentrant loader under the write mutex. *)
+    (* The hook runs after persistence unlock. A real subsequent append CAS
+       observes the damaged source while the deletion model stays pending. *)
     Board_dispatch.set_board_sse_hook (function
       | Board_dispatch.Post_changed _ ->
-        repair_source := Some (refuse_posts_source ())
+        let active = store () in
+        let path = Board.persist_path active in
+        let original = In_channel.with_open_bin path In_channel.input_all in
+        Out_channel.with_open_gen [Open_wronly; Open_append; Open_binary] 0o600 path
+          (fun out -> output_string out "{invalid-post-source\n");
+        (match Board_dispatch.create_post ~author:"source-refusal-probe"
+           ~content:"must not append to a changed source" ~post_kind:Board.Human_post () with
+         | Error _ -> ()
+         | Ok _ -> Alcotest.fail "changed source unexpectedly accepted a probe post");
+        Alcotest.(check bool) "append CAS actually records source refusal" true
+          (Result.is_error (Board.with_persist_lock active (fun () ->
+             Board.require_posts_source_readable active)));
+        repair_source := Some (fun () ->
+          Out_channel.with_open_bin path (fun out -> output_string out original))
       | _ -> ());
     let result =
       Board_tool.handle_tool ~reader:Masc_board_handlers.Board_access.Operator ~result_boundary:Tool_output.Sent_to_client "masc_board_cleanup"
@@ -533,6 +555,14 @@ let test_cleanup_mixed_pending_and_refused_is_post_effect () =
   (match !repair_source with
    | Some repair -> repair ()
    | None -> Alcotest.fail "first applied deletion did not reach the corruption hook");
+  Board.reset_global_for_test ();
+  Board_dispatch.reset_for_test ();
+  Result.get_ok (Board_dispatch.init_jsonl
+    ~base_path:(Env_config_core.base_path ())
+    ~recipient_lookup:Recipient_lookup.none_declared ());
+  check_post_deleted "fresh store retains the applied parent deletion" pending_id;
+  Alcotest.(check bool) "fresh store retains the refused post" true
+    (Result.is_ok (Board_dispatch.get_post ~reader:Masc_board_handlers.Board_access.Operator ~post_id:refused_id));
   flush ()
 
 let () =
@@ -550,8 +580,8 @@ let () =
             (with_eio (test_individual_snapshot_failure Board.vote_log_path))
         ; Alcotest.test_case "reactions rewrite remains pending and retries" `Quick
             (with_eio (test_individual_snapshot_failure Board.reactions_path))
-        ; Alcotest.test_case "multiple failed snapshots preserve healthy writes and retry" `Quick
-            (with_eio test_multiple_snapshot_failures_keep_healthy_writes_and_retry)
+        ; Alcotest.test_case "failed prerequisite preserves dependents until retry" `Quick
+            (with_eio test_failed_prerequisite_preserves_dependents_until_retry)
         ; Alcotest.test_case "obstructed delete retry refuses changed same-cursor bytes" `Quick
             (with_eio test_obstructed_delete_retry_refuses_changed_same_cursor_bytes)
         ; Alcotest.test_case "unreadable snapshot refuses without a transition" `Quick

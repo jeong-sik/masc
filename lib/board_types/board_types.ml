@@ -1085,6 +1085,8 @@ type sub_boards_source_state =
     bytes or known-success receipt retained. Only a fresh store can reload
     them. This is not multi-source crash recovery; see #26378. *)
 
+type snapshot_retry = Independent_snapshots | Deletion_pending
+
 type store = {
   (** Canonical posts observation/refusal/uncertainty, owned by persist_mutex.
       Successful loads and writes advance it; dirty cards need not equal its bytes. *)
@@ -1120,6 +1122,7 @@ type store = {
   reactions: (string, reaction) Hashtbl.t;                 (** unique target/user/emoji reactions *)
   mutable dirty_posts: bool;                               (** Deferred flush flag *)
   mutable dirty_comments: bool;                            (** Deferred flush flag *)
+  mutable snapshot_retry: snapshot_retry;
   dirty_post_ids: (string, unit) Hashtbl.t;                 (** Deferred post snapshots *)
   dirty_comment_ids: (string, unit) Hashtbl.t;              (** Deferred comment snapshots *)
   post_rows: (string, post * string) Hashtbl.t;             (** See .mli *)

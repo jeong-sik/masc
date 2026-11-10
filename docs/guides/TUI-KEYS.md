@@ -656,6 +656,8 @@ count is drawn beyond the available space.
 | `1 / 2 / 3 / 4` | in the changes browser: one Memory browser; changes require an individual Keeper, while storage opens the fleet health view |
 | `j/k` | in the changes browser: move |
 | `Enter` | in the changes browser: read all original and successor claims of the selected committed change |
+| `.` | in the changes browser: open only the selected change as before/change/after cards with wrapped claim excerpts; full text remains on Enter |
+| `Ctrl-O` | in the changes browser: open the selected change's complete connected observed memory lineage with the offline Pele Mermaid preview |
 | `PgUp/PgDn` | in the changes browser: page |
 | `Esc` | in the changes browser: back to facts |
 | `Home/End` | in the changes browser: top/bottom |
@@ -787,7 +789,7 @@ count is drawn beyond the available space.
 | `j/k` | scroll |
 | `PgUp/PgDn` | page |
 | `Home/End` | top/bottom |
-| `p` | available / async runs / receipts / usage / all tools |
+| `p` | available / async runs / receipts / usage / all tools. Available shows the selected Keeper's exposed tools and Skills; ORIGIN names the tool source. Async runs shows workspace requests and recovery: active counts active ledger requests, runtime-owned means a current runtime owner, ownership-unknown is unconfirmed. Receipts keeps current-session Skill evidence: triggered=invoked, delivered/handed off=delivered, actions=later tool actions. These are separate events; no record does not prove no use. Usage aggregates recorded calls by exact Skill revision across current Keeper sessions; last use is the ledger's recorded time, and unread ledgers stay qualified. All tools lists process-wide registrations, separately from a Keeper's callable surface and observed calls. DIRECT=direct calls allowed; SURFACES=exposure paths; none=no exposure path. Use Skill receipts for usage evidence and Activity for tool input/output. |
 | `J/K` | in async runs, select an original request; otherwise select a published Skill |
 | `f` | outside async requests, select the next Composition and load its exact-revision performance charts |
 | `Ctrl-O` | outside async requests, preview the declared composition with Pele |

@@ -259,6 +259,7 @@ function CommentItem({
   const authorLabel = boardActorDisplayName(comment.author, comment.author_identity)
   const authorAvatarKey = boardActorAvatarKey(comment.author, comment.author_identity)
   const authorTitle = boardActorTitle(comment.author, comment.author_identity)
+  const voteKnown = comment.current_vote !== undefined
   const upvoteActive = comment.current_vote === 'up'
   const downvoteActive = comment.current_vote === 'down'
   const isRouteFocused = focusedCommentId === comment.id
@@ -272,6 +273,7 @@ function CommentItem({
     : ''
 
   const handleCommentVote = async (dir: 'up' | 'down') => {
+    if (!voteKnown) return
     try {
       await voteComment(comment.id, dir)
       await loadPostDetail(postId)
@@ -306,8 +308,9 @@ function CommentItem({
               type="button"
               class=${`v2-workspace-action h-5 w-6 rounded-[var(--r-1)] border-0 bg-transparent text-2xs ${upvoteActive ? 'active text-[var(--warn-bright)] bg-[var(--warn-10)] cursor-default' : 'text-[var(--color-fg-muted)] hover:bg-[var(--warn-10)] hover:text-[var(--warn-bright)]'}`}
               aria-label="댓글 추천"
-              aria-pressed=${upvoteActive ? 'true' : 'false'}
-              disabled=${upvoteActive}
+              aria-pressed=${voteKnown ? String(upvoteActive) : undefined}
+              disabled=${!voteKnown || upvoteActive}
+              title=${voteKnown ? undefined : '내 투표 상태를 확인할 수 없습니다.'}
               onClick=${() => handleCommentVote('up')}
             >▲</button>
             <span
@@ -319,10 +322,12 @@ function CommentItem({
               type="button"
               class=${`v2-workspace-action h-5 w-6 rounded-[var(--r-1)] border-0 bg-transparent text-2xs ${downvoteActive ? 'active text-[var(--color-accent-fg)] bg-[var(--accent-10)] cursor-default' : 'text-[var(--color-fg-muted)] hover:bg-[var(--accent-10)] hover:text-[var(--color-accent-fg)]'}`}
               aria-label="댓글 비추천"
-              aria-pressed=${downvoteActive ? 'true' : 'false'}
-              disabled=${downvoteActive}
+              aria-pressed=${voteKnown ? String(downvoteActive) : undefined}
+              disabled=${!voteKnown || downvoteActive}
+              title=${voteKnown ? undefined : '내 투표 상태를 확인할 수 없습니다.'}
               onClick=${() => handleCommentVote('down')}
             >▼</button>
+            ${!voteKnown ? html`<span class="text-2xs text-[var(--color-fg-muted)]">내 투표 확인 불가</span>` : null}
           </div>
           <${ActionButton}
             variant="subtle"
@@ -579,6 +584,7 @@ export function PostDetail({ post }: { post: BoardPost }) {
   }, [post.id, focusedCommentId])
 
   const handleVote = async (dir: 'up' | 'down') => {
+    if (post.current_vote === undefined) return
     try {
       await votePost(post.id, dir)
       await loadPostDetail(post.id)
@@ -591,6 +597,7 @@ export function PostDetail({ post }: { post: BoardPost }) {
   const authorLabel = boardActorDisplayName(post.author, post.author_identity)
   const authorAvatarKey = boardActorAvatarKey(post.author, post.author_identity)
   const authorTitle = boardActorTitle(post.author, post.author_identity)
+  const voteKnown = post.current_vote !== undefined
   const upvoteActive = post.current_vote === 'up'
   const downvoteActive = post.current_vote === 'down'
   const postVoteLabel = `${post.votes} votes`
@@ -711,18 +718,21 @@ export function PostDetail({ post }: { post: BoardPost }) {
               variant="ghost"
               size="sm"
               class=${`vote-btn upvote text-xs hover:text-[var(--warn-bright)] hover:border-[var(--warn-30)] hover:bg-[var(--warn-10)] ${upvoteActive ? 'active text-[var(--warn-bright)] border-[var(--warn-30)] bg-[var(--warn-10)]' : ''}`}
-              pressed=${upvoteActive}
-              disabled=${upvoteActive}
+              pressed=${voteKnown ? upvoteActive : undefined}
+              disabled=${!voteKnown || upvoteActive}
+              title=${voteKnown ? undefined : '내 투표 상태를 확인할 수 없습니다.'}
               onClick=${() => handleVote('up')}
             >▲ 추천<//>
             <${ActionButton}
               variant="ghost"
               size="sm"
               class=${`vote-btn downvote text-xs hover:text-[var(--color-accent-fg)] hover:border-[var(--accent-30)] hover:bg-[var(--accent-10)] ${downvoteActive ? 'active text-[var(--color-accent-fg)] border-[var(--accent-30)] bg-[var(--accent-10)]' : ''}`}
-              pressed=${downvoteActive}
-              disabled=${downvoteActive}
+              pressed=${voteKnown ? downvoteActive : undefined}
+              disabled=${!voteKnown || downvoteActive}
+              title=${voteKnown ? undefined : '내 투표 상태를 확인할 수 없습니다.'}
               onClick=${() => handleVote('down')}
             >▼ 비추천<//>
+            ${!voteKnown ? html`<span class="text-2xs text-[var(--color-fg-muted)]">내 투표 확인 불가</span>` : null}
           </div>
 
           <${ReactionBar}

@@ -3,6 +3,16 @@ module Tui_decode = Masc.Tui_decode
 module Message_layout = Masc_tui_message_layout
 module Planning_detail = Masc_tui_planning_detail
 
+let status_label ~ko (status : Masc_domain.task_status) =
+  let text korean english = if ko then korean else english in
+  match status with
+  | Masc_domain.Todo -> text "할 일" "Todo"
+  | Claimed _ -> text "담당됨" "Claimed"
+  | InProgress _ -> text "진행 중" "In progress"
+  | AwaitingVerification _ -> text "검증 대기" "Awaiting verification"
+  | Done _ -> text "완료" "Done"
+  | Cancelled _ -> text "취소" "Cancelled"
+
 (* A Task opened from its Goal reads like the Goal: the same section title
    style (info colour, bold) and the same receded rows for where a fact came
    from ([Masc_tui_render_work.planning_detail_tone]). A style goes on a row
@@ -143,23 +153,24 @@ let body_lines ~ko ~cols ~goal_lines (task : Masc_domain.task) =
   let quiet ko en value = field ~style:provenance_style ko en value in
   let heading ko en = section_rows ~width (text ko en) in
   let status value = field ~style:(task_state_style task.task_status) "상태" "Status" value in
+  let label = status_label ~ko task.task_status in
   let state, times = match task.task_status with
-    | Masc_domain.Todo -> status (text "할 일 · 미배정" "Todo · unassigned"), []
+    | Masc_domain.Todo -> status (label ^ text " · 미배정" " · unassigned"), []
     | Claimed {assignee; claimed_at} ->
-      status (text "담당됨" "Claimed") @ field "담당" "Owner" assignee,
+      status label @ field "담당" "Owner" assignee,
       quiet "담당 시각" "Claimed" claimed_at
     | InProgress {assignee; started_at} ->
-      status (text "진행 중" "In progress") @ field "담당" "Owner" assignee,
+      status label @ field "담당" "Owner" assignee,
       quiet "시작" "Started" started_at
     | AwaitingVerification {assignee; started_at; submitted_at; verification_id} ->
-      status (text "검증 대기" "Awaiting verification") @ field "담당" "Owner" assignee
+      status label @ field "담당" "Owner" assignee
       @ field "검증 요청" "Verification" verification_id,
       quiet "시작" "Started" started_at @ quiet "제출" "Submitted" submitted_at
     | Done {assignee; completed_at; notes} ->
-      status (text "완료" "Done") @ field "담당" "Owner" assignee @ optional "메모" "Notes" notes,
+      status label @ field "담당" "Owner" assignee @ optional "메모" "Notes" notes,
       quiet "완료 시각" "Completed" completed_at
     | Cancelled {cancelled_by; cancelled_at; reason} ->
-      status (text "취소" "Cancelled") @ field "취소한 주체" "Cancelled by" cancelled_by
+      status label @ field "취소한 주체" "Cancelled by" cancelled_by
       @ optional "사유" "Reason" reason,
       quiet "취소 시각" "Cancelled" cancelled_at in
   let request = heading "요청과 상태" "Request and status"

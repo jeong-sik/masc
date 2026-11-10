@@ -1878,7 +1878,6 @@ let board_minimum_title_width = 30
 
 type board_row_values = {
   brow_mark : string;
-  brow_id : string;
   brow_hearth : string;
   brow_author : string;
   brow_title : string;
@@ -1888,7 +1887,6 @@ type board_row_values = {
 }
 
 type board_row_styles = {
-  bstyle_id : string;
   bstyle_hearth : string;
   bstyle_author : string;
   bstyle_age : string;
@@ -1898,7 +1896,6 @@ type board_row_styles = {
 
 let board_no_values =
   { brow_mark = ""
-  ; brow_id = ""
   ; brow_hearth = ""
   ; brow_author = ""
   ; brow_title = ""
@@ -1908,8 +1905,7 @@ let board_no_values =
   }
 
 let board_no_styles =
-  { bstyle_id = ""
-  ; bstyle_hearth = ""
+  { bstyle_hearth = ""
   ; bstyle_author = ""
   ; bstyle_age = ""
   ; bstyle_score = ""
@@ -1920,7 +1916,6 @@ let board_no_styles =
    when the row is narrow (workbench RFC section 5.4, #38988). *)
 type board_column =
   | Board_mark
-  | Board_id
   | Board_hearth
   | Board_author
   | Board_title
@@ -1930,10 +1925,9 @@ type board_column =
 
 let board_columns =
   [ Board_mark
-  ; Board_id
-  ; Board_hearth
-  ; Board_author
   ; Board_title
+  ; Board_author
+  ; Board_hearth
   ; Board_age
   ; Board_score
   ; Board_replies
@@ -1943,7 +1937,6 @@ let board_columns =
    the others leave. *)
 let board_column_width = function
   | Board_mark -> board_mark_width
-  | Board_id -> board_id_width
   | Board_hearth -> board_hearth_width
   | Board_author -> board_author_width
   | Board_title -> board_minimum_title_width
@@ -1952,8 +1945,6 @@ let board_column_width = function
   | Board_replies -> board_replies_width
 
 (* What a narrow list gives up, first to go first (operator, 2026-09-28).
-   - The id: the reader takes it with Y (workbench RFC section 5.6) and the
-     post it opens shows it whole.
    - The hearth: the census row above the list already names the hearths and
      their counts.
    - The replies and then the score: counts a reader can do without before
@@ -1962,7 +1953,7 @@ let board_column_width = function
    The mark, the title and the age never go: the kind of post, what it is
    about, and how long ago it moved are what a row is for. *)
 let board_drop_order =
-  [ Board_id; Board_hearth; Board_replies; Board_score; Board_author ]
+  [ Board_hearth; Board_replies; Board_score; Board_author ]
 
 let board_layout ~inner_width =
   Table.fit ~inner_width ~width:board_column_width ~flex:Board_title
@@ -1974,9 +1965,6 @@ let board_cell ~ko ~styles ~age_header ~title_width values = function
          wider than the cell holding it, and it carries its own dress: the
          glyph and its colour are chosen together. *)
       Table.cell ~header:" " ~width:board_mark_width values.brow_mark
-  | Board_id ->
-      Table.cell ~style:styles.bstyle_id ~header:"ID" ~width:board_id_width
-        values.brow_id
   | Board_hearth ->
       Table.cell ~style:styles.bstyle_hearth ~header:(if ko then "게시판" else "HEARTH")
         ~width:board_hearth_width values.brow_hearth

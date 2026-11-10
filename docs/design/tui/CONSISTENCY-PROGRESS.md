@@ -312,7 +312,7 @@ observations stay private in `artifacts/native-tui-proof-42732829605/`.
 This confirms those observed candidate views only, without proving production
 installation, the new navigation repair, or the remaining child/input states.
 
-## Resources save results (in progress)
+## Resources save results (#51105)
 
 The 072796b2 native baseline exclusively created the exact 393-byte fixture
 report, then refused an explicit second save to the same existing path. The

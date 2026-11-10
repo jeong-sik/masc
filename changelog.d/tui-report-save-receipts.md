@@ -1,2 +1,0 @@
-### Fixed
-- Keep each report-save destination and result with its original report. Show existing-file refusals, file creation followed by an error, and unconfirmed writes separately. Preserve path input after refusal or late completion, keep form keys accurate, and retain original results after workspace withdrawal without replaying the write.

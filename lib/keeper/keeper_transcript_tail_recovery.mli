@@ -12,15 +12,16 @@
 
     A keeper's history is first read from its last message back to the last
     one that requests tool calls ({!Keeper_transcript_unit.read_tail_message}).
-    Only a history whose last request awaits results is then read whole, and
+    A history whose last request has its results is left as it is. A history
+    whose last request awaits results is read whole, and
     {!Keeper_transcript_unit.close_open_tail} of the whole history decides
-    what is appended, as before. For a history that parses the two readings
-    agree, so what a boot writes is unchanged.
+    what is appended. For a history that parses the two readings agree, so
+    nothing is appended to a history that the first reading leaves.
 
-    What a boot no longer reports is a defect before the end of a history
-    whose last request has its results: a structural break, an object that is
-    missing or does not match its digest, a chain that does not match. The
-    keeper's next turn reads the whole history and meets it there. *)
+    A defect before the end of a history whose last request has its results
+    is not reported here: a structural break, an object that is missing or
+    does not match its digest, a chain that does not match. The keeper's next
+    turn reads the whole history and meets it there. *)
 
 type keeper_outcome =
   | Already_dispatchable

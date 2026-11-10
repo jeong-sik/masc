@@ -51,8 +51,9 @@ let history_or_outcome = function
 
 (* How the canonical's history ends, read from its last message back to the
    last one that requests tool calls. Reading every keeper's whole history
-   took a boot 17 to 214 seconds for 29 or 30 keepers on 2026-11-10 (#46541),
-   so a history is read whole only when this says a request awaits results.
+   took a boot 15 to 214 seconds, in 25 boots from 2026-11-08 to 2026-11-10
+   (#46541), so a history is read whole only when this says a request awaits
+   results.
 
    The store asks for the messages one by one, last message first, and each
    once, so [reading] always holds what the messages after the one asked

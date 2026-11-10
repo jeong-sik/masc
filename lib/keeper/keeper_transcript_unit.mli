@@ -150,9 +150,9 @@ val close_open_tail
 (** {1 The end of a history, read from its last message}
 
     Whether {!close_open_tail} appends anything can be told from the last
-    messages of a history {!partition} accepts: when a cycle closes,
-    {!partition} keeps nothing of the messages before it, and an open cycle
-    admits no other request. *)
+    messages of a history {!partition} accepts: once a cycle closes, no later
+    verdict of {!partition} depends on the messages before it, and an open
+    cycle admits no other request. *)
 
 type tail_reading
 (** What the last messages of a history, read from the last one backwards,
@@ -172,9 +172,9 @@ type tail_end =
 type tail_step =
   | Tail_end of tail_end
   | Reads_message_before of tail_reading
-      (** The message requests nothing, so the one before it is read next. A
-          history whose first message is read this way requests nothing at
-          all: it ends with [Every_request_answered]. *)
+      (** The message requests nothing, so the one before it is read next.
+          When the first message of a history is read this way, the history
+          requests nothing at all and its end is [Every_request_answered]. *)
 
 val read_tail_message : tail_reading -> Agent_core.Types.message -> tail_step
 (** [read_tail_message reading message] reads [message], the one directly

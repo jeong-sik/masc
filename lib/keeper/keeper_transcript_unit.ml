@@ -308,12 +308,12 @@ type tail_step =
   | Tail_end of tail_end
   | Reads_message_before of tail_reading
 
-(* [partition] forgets everything when a cycle closes, and a cycle that is
-   open admits no other request. So in a history it accepts, the cycle of the
-   last message that requests is the only one that can be open, and it is open
-   exactly when a requested id has no result in the messages after it. The
-   results of the requesting message itself are not counted: [partition]
-   refuses a request that carries one. *)
+(* Once a cycle closes, no later verdict of [partition] depends on the
+   messages before it, and a cycle that is open admits no other request. So in
+   a history it accepts, the cycle of the last message that requests is the
+   only one that can be open, and it is open exactly when a requested id has
+   no result in the messages after it. The results of the requesting message
+   itself are not counted: [partition] refuses a request that carries one. *)
 let read_tail_message answered (message : T.message) =
   let requested, answered_from_this_message =
     add_requested_and_completed ([], answered) message

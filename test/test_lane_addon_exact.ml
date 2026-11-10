@@ -117,6 +117,9 @@ let one_started_marker = function
   | _ -> false
 let observe store request = Eio_unix.run_in_systhread (fun () ->
   Exact.observe_retained ~store ~declaration_id ~schema request)
+let recover store request = Eio.Cancel.protect (fun () ->
+  Eio_unix.run_in_systhread (fun () ->
+    Exact.recover_retained ~store ~declaration_id ~schema request))
 
 (* The run republishes its record while an observer reads it (#45134). The
    seam republishes a larger record once, after the reader opened the old one
@@ -371,6 +374,16 @@ let test_confirmed_proof_recovers_lost_outcome_publication () =
       | `Assoc fields -> `Assoc (("attempts",`List [other_process_marker])::List.remove_assoc "attempts" fields)
       | _ -> fail "original Exact record expected" in
     require (Store.save_exact_request store ~declaration_id ~request_id:"r12" from_another_process);
+    check bool "publication recovery refuses another original schema" true
+      (Result.is_error (Eio.Cancel.protect (fun () -> Eio_unix.run_in_systhread (fun () ->
+        Exact.recover_retained ~store ~declaration_id
+          ~schema:(`Assoc ["type",`String "object";"title",`String "another schema"])
+          (request "r12")))));
+    check bool "owner restores the proven terminal without a worker listing" true
+      (match require (recover (Store.create ~root) (request "r12")) with
+       | Exact.Retained_terminal (Exact.Retained_call (Exact.Answered {output;_})) ->
+           Exact.checked_json output=question
+       | Exact.Retained_absent | Retained_open | Retained_terminal _ -> false);
     let runner, sends, _ = counting_runner store (ref []) in
     check bool "the original answer is published without another send" true (answered_with question (run_request store runner (request "r12")));
     check bool "completed proof wins over another process's marker" true
@@ -407,10 +420,89 @@ let test_v2_proof_recovers_lost_outcome_publication () =
       | `Assoc fields -> `Assoc (("attempts",`List [other_process_marker])::List.remove_assoc "attempts" fields)
       | _ -> fail "original Exact record expected" in
     require (Store.save_exact_request store ~declaration_id ~request_id:original.request_id interrupted);
+    check bool "owner restores the v2 proven terminal without a worker listing" true
+      (match require (recover (Store.create ~root) original) with
+       | Exact.Retained_terminal (Exact.Retained_call (Exact.Answered {output;_})) ->
+           Exact.checked_json output=question
+       | Exact.Retained_absent | Retained_open | Retained_terminal _ -> false);
     let unused,sends,_=counting_runner store (ref []) in
     check bool "v2 proof restores the original answer" true (answered_with question (run_request store unused original));
     check int "the original runner was called once" 1 !sent;
     check int "recovery did not call a provider" 0 !sends)
+
+let test_original_consumer_recovers_proof_without_worker_rpc () =
+  with_root (fun root ->
+    let module Owner=Masc.Lane_addon_tool_request_owner in
+    let module Progress=Masc.Lane_addon_request_progress in
+    let module Submit=Masc.Lane_addon_submit_once in
+    let store=Store.create ~root in
+    let original=request "consumer-recovers-proof" in
+    let scope="proof-publication-consumer" in
+    let owned value=require (Result.map_error Owner.error_to_string value) in
+    require (Result.map_error Owner.error_to_string
+      (Owner.retain ~store ~scope ~request_id:original.request_id
+        ~installation_id:(Owner.installation_id (Owner.Configuration declaration_id))
+        ~package_id:package.id ~tool:"derive" ~summary:`Null
+        ~request:(Exact.request_to_json original)));
+    let retained=Option.get (owned (Owner.load ~store ~scope ~request_id:original.request_id)) in
+    let retained=match require (Result.map_error Owner.update_error_to_string
+      (Owner.advance ~store ~expected:retained ~event:Progress.Dispatch_intended)) with
+      | Owner.Stored record | Already_stored record -> record
+      | Unconfirmed detail -> fail detail in
+    let runner,sends,_=counting_runner store (ref [Answer question]) in
+    ignore (run_request store runner original);
+    let wire=Option.get (require (Store.load_exact_request store ~declaration_id
+      ~request_id:original.request_id)) in
+    let unpublished=match wire with
+      | `Assoc fields -> `Assoc (("attempts",`List [other_process_marker])::
+          ("final",`Null)::List.remove_assoc "attempts" (List.remove_assoc "final" fields))
+      | _ -> fail "original Exact record expected" in
+    require (Store.save_exact_request store ~declaration_id
+      ~request_id:original.request_id unpublished);
+    let calls=ref 0 in
+    let result=Submit.resume ~store ~label:"Proven original" ~original:retained
+      ~request:original ~schema ~decode_final:(Exact.final_of_json ~schema)
+      ~prepare:(fun () -> fail "recovery requested fresh admission")
+      ~call:(fun ~arguments:_ -> incr calls; fail "recovery contacted the worker")
+      ~terminal:(fun _ final ->
+        match Exact.read_latest_original_execution ~store ~declaration_id ~schema original with
+        | Error detail -> Error (Submit.Rejected detail)
+        | Ok actual -> match actual,final with
+        | Exact.Completed_latest {execution={outcome=Exact.Call_ended (Exact.Answered {output;_});_};_},
+          Exact.Call_final (Exact.Answered {output=delivered;_})
+          when Exact.checked_json output=question && Exact.checked_json delivered=question -> Ok final
+        | Exact.No_completed_latest,_ | Exact.Completed_latest _,_ ->
+          Error (Submit.Rejected "consumer requires its actual proven answer")) in
+    (match result with
+     | Ok (Submit.Final (Exact.Call_final (Exact.Answered {output;_}))) ->
+       check bool "consumer validates its original answer" true (Exact.checked_json output=question)
+     | Error error -> fail (Submit.error_to_string error)
+     | Ok (Submit.Awaiting _ | Final _ | Commit_pending _ | Settled _) ->
+       fail "consumer did not recover the proven terminal");
+    let after=Option.get (owned (Owner.load ~store ~scope ~request_id:original.request_id)) in
+    check bool "only the original judgment is retained; no domain ACK is invented" true
+      (match Progress.phase after.progress with
+       | Progress.Judged _ -> true
+       | Captured | Admission_wait _ | Dispatch_pending _ | Committing _ | Commit_unknown _
+       | Finished _ | Conflicted _ | Rejected _ | Subdividing _ | Subdivided _ -> false);
+    check int "the actual provider ran only for the original" 1 !sends;
+    check int "the missing worker was never contacted" 0 !calls)
+
+let test_publication_recovery_preserves_unproven_original () =
+  with_root (fun root ->
+    let store=Store.create ~root in
+    let original=request "unproven-publication" in
+    check bool "absent remains absent" true
+      (require (recover store original)=Exact.Retained_absent);
+    check bool "an absence read creates no store" false (Sys.file_exists root);
+    let wire=`Assoc ["declaration_id",`String declaration_id;
+      "request_id",`String original.request_id;"digest",`String (Exact.digest original);
+      "request",Exact.request_to_json original;"attempts",`List [other_process_marker];"final",`Null] in
+    require (Store.save_exact_request store ~declaration_id ~request_id:original.request_id wire);
+    check bool "no proof leaves the old start open without inventing interrupted" true
+      (require (recover store original)=Exact.Retained_open);
+    check bool "the unproven original is unchanged" true
+      (require (Store.load_exact_request store ~declaration_id ~request_id:original.request_id)=Some wire))
 
 let original_execution store ?(attempt_ordinal=1) original =
   Exact.read_original_execution ~store ~declaration_id ~schema ~attempt_ordinal original
@@ -536,6 +628,10 @@ let test_latest_execution_never_borrows_an_earlier_proof () =
     require (Store.save_exact_request store ~declaration_id ~request_id:original.request_id started);
     check bool "a later started attempt cannot borrow a completed predecessor" true
       (latest ()=Exact.No_completed_latest);
+    check bool "publication recovery cannot borrow the earlier proof either" true
+      (require (recover store original)=Exact.Retained_open);
+    check bool "unproven latest attempt is not rewritten" true
+      (require (Store.load_exact_request store ~declaration_id ~request_id:original.request_id)=Some started);
     require (Store.save_exact_request store ~declaration_id ~request_id:original.request_id retained);
     ignore (run_request store runner original);
     check bool "a later unstarted attempt cannot borrow a completed predecessor" true
@@ -608,6 +704,8 @@ let test_malformed_proof_refuses_publication_recovery () =
             | _ -> fail "expected one original attempt") else value) fields)
       | _ -> fail "expected original execution link" in
     require (Store.save_host_result store ~instance_id ~request_id changed);
+    check bool "publication-only recovery refuses malformed proof" true
+      (Result.is_error (recover store original));
     let unused,_,_=counting_runner store (ref []) in
     check bool "malformed original refuses rather than becoming absence" true
       (Result.is_error (Exact.run ~authorize_request ~store:(Store.create ~root) ~declaration_id ~package ~runner:unused original));
@@ -662,6 +760,8 @@ let test_orphaned_proof_prevents_another_dispatch () =
     let path=Filename.concat (Filename.concat (Filename.concat root "exact-requests") (Store.digest declaration_id))
       (Store.digest original.request_id ^ ".json") in
     Sys.remove path;
+    check bool "publication-only recovery refuses an orphan proof" true
+      (Result.is_error (recover store original));
     let unused,_,_=counting_runner store (ref []) in
     check bool "orphan proof is not permission to run the original again" true
       (Result.is_error (Exact.run ~authorize_request ~store:(Store.create ~root) ~declaration_id ~package ~runner:unused original));
@@ -683,6 +783,11 @@ let test_recovered_refusal_is_returned_before_a_later_retry () =
     let result=Exact.run ~authorize_request ~store ~declaration_id ~package ~runner:first original in
     Unix.chmod directory 0o700;
     check bool "original not-final outcome publication failed" true (Result.is_error result);
+    let before=require (Store.load_exact_request store ~declaration_id ~request_id:original.request_id) in
+    check bool "proven provider refusal does not become a terminal or a new attempt" true
+      (require (recover store original)=Exact.Retained_open);
+    check bool "publication-only recovery leaves the nonterminal original unchanged" true
+      (before=require (Store.load_exact_request store ~declaration_id ~request_id:original.request_id));
     let unused,_,_=counting_runner store (ref []) in
     check bool "recovery returns that original refusal without a new trigger" true
       (run_request store unused original=Exact.Not_final (Exact.Provider_refused busy));
@@ -858,6 +963,8 @@ let test_observe_started_is_open_while_provider_is_running ()=with_root (fun roo
     let before=require (Store.load_exact_request store ~declaration_id ~request_id:original.request_id) in
     check bool "actual provider's started record remains open" true
       (require (observe (Store.create ~root) original)=Exact.Retained_open);
+    check bool "publication recovery respects the active original claim" true
+      (require (recover (Store.create ~root) original)=Exact.Retained_open);
     check bool "read cannot infer terminal uncertainty or rewrite started history" true
       (before=require (Store.load_exact_request store ~declaration_id ~request_id:original.request_id));
     let output=require (validate question) in executed (Exact.Call_ended (Exact.Answered {output;slot="original";usage=None}))) in
@@ -1148,6 +1255,10 @@ let () =
             test_confirmed_proof_recovers_lost_outcome_publication
         ; test_case "v2 proof recovers lost outcome publication" `Quick
             test_v2_proof_recovers_lost_outcome_publication
+        ; test_case "original consumer recovers proof without worker RPC" `Quick
+            test_original_consumer_recovers_proof_without_worker_rpc
+        ; test_case "publication recovery preserves an unproven original" `Quick
+            test_publication_recovery_preserves_unproven_original
         ; test_case "original execution binds request schema and actual attempt" `Quick test_original_execution_is_bound_to_one_attempt
         ; test_case "v1 and v2 original proofs remain distinct" `Quick test_v1_and_v2_original_proofs_remain_distinct
         ; test_case "latest original evidence cannot borrow a previous attempt" `Quick test_latest_execution_never_borrows_an_earlier_proof

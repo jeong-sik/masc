@@ -48,6 +48,7 @@ let make_keeper ~keeper_id age_bins : Masc.Tui_decode_memory_health.memory_keepe
   ; mkh_librarian =
       { mlh_state = None
       ; mlh_admission_wait = None
+      ; mlh_operator_action_required = false
       ; mlh_measured_at = None
       ; mlh_unread_atom_turns = None
       ; mlh_unread_official_turns = None

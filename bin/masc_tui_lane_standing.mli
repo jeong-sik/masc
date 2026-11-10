@@ -8,6 +8,8 @@
 
 type t =
   | Ready  (** Set up and usable now. *)
+  | Configured  (** An exact model route admits candidates. This establishes
+                    configuration, not executor or provider readiness. *)
   | Waiting  (** Switched on, but what it needs has not arrived: no browser
                  connected, no executor registered, no screen yet. *)
   | Changing  (** A worker is starting, stopping or being replaced. *)

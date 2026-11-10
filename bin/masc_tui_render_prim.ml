@@ -1724,9 +1724,10 @@ let surface_chrome ~overflow ?help_door ?(frame = Chrome_screen) ?status ?sideba
    | Some row, Chrome_overlay ->
        let text = row.recovery_text in
        let remaining = max 0 (framed_rule_width cols - Message_layout.display_width text) in
+       let edge = Theme.recede () in
        Buffer.add_string buf
-         (Ansi.gray ^ Ansi.box_bl ^ Ansi.reset ^ Theme.warn () ^ text ^ Ansi.reset
-          ^ Ansi.gray ^ draw_hline remaining ^ Ansi.box_br ^ Ansi.reset ^ "\n"));
+         (edge ^ Ansi.box_bl ^ Ansi.reset ^ Theme.warn () ^ text ^ Ansi.reset
+          ^ edge ^ draw_hline remaining ^ Ansi.box_br ^ Ansi.reset ^ "\n"));
   let buf = match sidebar with
     | None -> buf
     | Some (left_cols, draw) ->
@@ -2605,6 +2606,7 @@ let question_hints (state : state) =
            { approvals = not (List.is_empty (Masc_tui_approvals_model.approval_items state))
            ; asks
            ; source = Option.is_some (selected_ask_origin state)
+           ; last_answer = Option.is_some (current_ask_answer_feedback state)
            })
   | Ask_answering _ ->
       (match state.ask_text_entry with

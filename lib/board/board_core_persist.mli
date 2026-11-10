@@ -53,6 +53,11 @@ val create_store_with_sub_boards_io_for_testing :
   base_path:string -> io:Fs_compat.private_jsonl_transaction_io_for_testing ->
   unit -> store
 (** Immutable IO seam using the real sub-board file transaction. *)
+val create_store_with_votes_io_for_testing :
+  base_path:string -> io:Fs_compat.private_jsonl_transaction_io_for_testing ->
+  unit -> store
+(** Immutable IO seam using the real vote-file transaction. The constructor
+    leaves the vote source unobserved until an explicit load. *)
 
 val require_persisted_snapshot_readable :
   (unit, string) result -> (unit, board_error) result

@@ -678,16 +678,7 @@ let assemble_hooks
                     their receipts: %s" detail))
           arrived_tracker
           ~now:(Time_compat.now ())
-          ~read:(fun () ->
-            match Keeper_meta_store.read_effective_meta config meta.name with
-            | Error detail -> Error detail
-            | Ok None -> Error "Keeper readership metadata unavailable"
-            | Ok (Some current_meta) ->
-              Keeper_registry_event_queue.pending_selections_result
-                ~base_path:config.base_path
-                meta.name
-              |> Result.map (List.filter (fun (selection : Keeper_event_queue_state.pending_selection) ->
-                Keeper_board_audience.can_project_queued_stimulus ~meta:current_meta selection.source)))
+          ~read:(Keeper_arrived_stimuli_reader.read ~config ~keeper_name:meta.name)
           ~on_unavailable:(fun detail ->
             Log.Keeper.warn ~keeper_name:meta.name
               "arrived stimuli unavailable; this round carries none: %s" detail)

@@ -19,8 +19,10 @@ const mockState = signal({
 vi.mock('../lib/async-state', () => ({
   createManagedAsyncResource: () => ({
     state: mockState,
+    readError: () => null,
     load: vi.fn(),
     cancel: vi.fn(),
+    reset: vi.fn(),
   }),
 }))
 

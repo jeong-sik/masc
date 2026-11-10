@@ -249,6 +249,8 @@ type preparation_wait_intent =
 type _ command =
   | Exact_projection :
       (Keeper_owner_reducer.projection, error) result command
+  | Autonomous_chat_handoff_ready :
+      Keeper_interrupt_token.t -> (bool, error) result command
   | Apply_meta :
       Keeper_owner_reducer.meta_command * Keeper_input_birth.seed option
       -> (Keeper_meta_contract.keeper_meta option, error) result command
@@ -672,6 +674,7 @@ type answer =
 
 let answer : type response. response command -> answer = function
   | Exact_projection -> In_its_drain_step
+  | Autonomous_chat_handoff_ready _ -> In_its_drain_step
   | Apply_meta _ -> In_its_drain_step
   | Exact_operation _ -> In_its_drain_step
   | Enter_direct_preparation _ | Direct_preparation_wait _ | Wait_direct_preparation _ | Retry_direct_preparation _ -> In_its_drain_step
@@ -1788,22 +1791,22 @@ let start
           | Native_call_closed_without_disposition ->
             fail_running_operation ~operation_id ~kind ~detail ~outcome_ref))
     in
-    let rec start_child_if_needed state shutdown_operation_id =
-      (* One named gate instead of six guard arms that ignored the runner
-         they matched. Order matters only in that cheap checks run first;
-         every gate is [||]-short-circuited exactly as the arms were. *)
-      let gates_closed state shutdown_operation_id runner =
-        Option.is_some (Atomic.get t.turn_in_flight)
-        || Option.is_some shutdown_operation_id
+    (* Shared by admission and the running autonomous child's boundary probe.
+       A queued row alone must not repeatedly stop work while its runner or
+       lifecycle cannot actually take the released slot. *)
+    let chat_gates_closed state shutdown_operation_id runner =
+        Option.is_some shutdown_operation_id
         || (Keeper_owner_reducer.projection state).stopping
         || not (turn_admission_open state)
         || Option.is_some !(t.operation_error)
         || Option.is_some !(t.metadata_error)
         || not (runner.ready ~keeper_name:t.keeper_name)
-      in
+    in
+    let rec start_child_if_needed state shutdown_operation_id =
       match operation_runner with
       | None -> ()
-      | Some runner when gates_closed state shutdown_operation_id runner -> ()
+      | Some runner when Option.is_some (Atomic.get t.turn_in_flight)
+                         || chat_gates_closed state shutdown_operation_id runner -> ()
       | Some runner ->
         let inventory = Atomic.get t.operation_projection in
         (* Direct input takes a released slot. *)
@@ -1993,6 +1996,20 @@ let start
         match Eio.Stream.take t.mailbox with
         | Command (Exact_projection, resolve) ->
           Eio.Promise.resolve resolve (Ok (Keeper_owner_reducer.projection state));
+          loop state
+        | Command (Autonomous_chat_handoff_ready child, resolve) ->
+          let ready =
+            match Atomic.get t.turn_in_flight, operation_runner with
+            | Some { lane = Autonomous; interrupt_token; _ }, Some runner
+              when Keeper_interrupt_token.equal child interrupt_token
+                   && not (chat_gates_closed state shutdown_operation_id runner) ->
+              let inventory = Atomic.get t.operation_projection in
+              inventory.has_claimable_queued
+              && Option.is_none inventory.running_operation_id
+            | Some { lane = Autonomous | Chat_operation | Maintenance; _ }, _
+            | None, _ -> false
+          in
+          Eio.Promise.resolve resolve (Ok ready);
           loop state
         | Command (Apply_meta (command,initial_input), resolve) ->
           (match !(t.metadata_error) with
@@ -3102,6 +3119,11 @@ let interrupt_running_operation t operation_id =
   request t (Interrupt_running_operation operation_id)
 ;;
 let wake_operation_drain t = request t Wake_operation_drain
+
+let autonomous_chat_handoff_ready t =
+  match Keeper_turn_preview_owner.current () with
+  | None -> Ok false
+  | Some child -> request t (Autonomous_chat_handoff_ready child)
 
 let submit_interactive_operation t ~operation_id ~source ~input ~intent =
   request t (Submit_interactive_operation {operation_id; source; input; intent})

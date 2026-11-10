@@ -1,0 +1,24 @@
+ 운영  작업  ▸키퍼  기능·플러그인  워크스페이스  시스템
+
+  MASC Keepers (34)                                            HTTP [connected]
+   list  state  cause  time  ▸memory  age  runtime  24h
+   Librarian: 처리 관측   lag: 읽지 않은 턴   detailed · name
+   fleet last observed: ok   running 25/28   turn capacity 28/28
+   fleet reading: stale · scans failing for 37s (refresh timed out)
+   failing 3 (retrying 3)   paused 6   awaiting verdict 16
+     keeper             ◂ turns 12h  1h ┃ librarian    ┃ lag ▹            dige…
+ ▌ − MEMORY FOLLOWING 22                ┃              ┃
+ ▌ ○ build-maniac          ············ ┃ caught up    ┃ ················ 47h
+ ▌ ● code-reviewer-mot…    ✓✓····✓✓✓·✓· ┃ caught up    ┃ ················ 36m
+ ▌ ● code-reviewer-unc…    ✓✓✓✓✓✓✓✓✓✓✓· ┃ yielded      ┃ ················ 68s
+ ▌ ● context-reviewer      ✓✓✗✓✓✓✗✗·✓✓· ┃ caught up    ┃ ················ 17m
+ ▌ ! e-masc-the-leader     ✓✗✗✗✗✗✓✗·✗✗· ┃ caught up    ┃ ················ 63m
+ ▌ ● ego-acceptance-20…    ···✓········ ┃ caught up    ┃ ················ 7h21m
+ ▌ ○ gayo-yoga-leader      ············ ┃ caught up    ┃ ················ 3d
+ ▌ ● geek-scout            ··✓✓✓✓✓✓✓✓✓✓ ┃ caught up    ┃ ················ 38m
+ ▌ ● glossary-maniac       ··✓✓✓✓✓✓✓✓✓· ┃ caught up    ┃ ················ 36m
+   [keepers 9–17/34]
+ ──────────────────────────────────────────────────────────────────────────────
+  v:view  o:order  Enter / Right:story / detail  Esc:dashboard  q:quit  …?
+ 일정 정보가 오래됐을 수 있음
+ › to build-maniac   (i to write)

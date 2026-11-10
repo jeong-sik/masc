@@ -157,7 +157,7 @@ let tool fixture =
        | [] -> fail "expected the existing keeper_skill tool"
        | instruction_skills ->
            Keeper_tool_composition_surface.make_instruction_skill_tool
-             ~config:fixture.config ~instruction_skills ())
+             ~config:fixture.config ~instruction_skills () |> Result.get_ok)
 let invoke tool id input =
   let invocation = Agent_core.Tool_contract.Invocation.create
     ~tool_use_id:id ~turn:0

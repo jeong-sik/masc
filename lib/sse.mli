@@ -142,6 +142,18 @@ val register_with_client :
     same-session client, and any cap-evicted session. An older registration
     cannot replace a newer same-session client and returns [Registration_stale]. *)
 
+val register_standalone_observer_with_client :
+  ?on_disconnect:(unit -> unit) -> observer_instance_id:string ->
+  auth:registration_auth -> string -> last_event_id:int ->
+  (client * client option * string option, registration_error) result
+(** Register a read-only Observer on a fresh server-generated connection id.
+    The transport must authenticate and admit the workspace before calling
+    this entrypoint, and must not pass a client-supplied session id. Bearer
+    validation, role, workspace scope and client lifetime are the same as
+    {!register_with_client}; no initialized MCP session is required or created.
+    Client-supplied ids and agent streams use {!register_with_client}, which
+    retains the existing session, expiry and owner checks. *)
+
 val unregister : string -> unit
 val unregister_if_current : string -> int -> unit
 

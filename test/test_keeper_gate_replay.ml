@@ -41,8 +41,8 @@ let cleanup_dir dir =
 let projected_model_text ~base_path
     (message : Masc.Keeper_gate_replay.model_message) =
   match message.replay_evidence with
-  | None -> Alcotest.fail "model message has no replay evidence"
-  | Some evidence ->
+  | [] | _ :: _ :: _ -> Alcotest.fail "model message requires one replay evidence"
+  | [ evidence ] ->
     (match
        Masc.Keeper_gate_replay.project_model_input
          ~base_path
@@ -206,6 +206,7 @@ let approved_execute_input =
     ~cwd:"/repo"
     ~sandbox_profile:"docker"
     ~sandbox_target:"docker:masc"
+    ~network_mode:Keeper_types_profile_sandbox.Network_none
 ;;
 
 let test_execute_args_are_the_approved_arguments () =
@@ -234,6 +235,7 @@ let test_execute_gate_input_round_trips () =
       ~cwd:"/approved"
       ~sandbox_profile:"docker"
       ~sandbox_target:"docker:masc"
+    ~network_mode:Keeper_types_profile_sandbox.Network_none
   in
   let submitted =
     producer
@@ -293,7 +295,7 @@ let test_execute_envelope_is_not_replayed () =
            (key ^ " is not carried into the replayed arguments")
            false
            (List.mem_assoc key fields))
-      [ "sandbox_profile"; "sandbox_target"; "schema" ]
+      [ "sandbox_profile"; "sandbox_target"; "network_mode"; "schema" ]
   | Ok _ -> Alcotest.fail "replayed execute arguments are not an object"
 ;;
 
@@ -559,8 +561,8 @@ let test_multimodal_goal_projects_replay_reference () =
        in
        let evidence =
          match message.replay_evidence with
-         | Some evidence -> evidence
-         | None -> Alcotest.fail "multimodal replay evidence is absent"
+         | [ evidence ] -> evidence
+         | [] | _ :: _ :: _ -> Alcotest.fail "multimodal replay evidence is not singular"
        in
        let image =
          Agent_core.Types.Image
@@ -629,8 +631,8 @@ let test_replay_projection_recovers_when_canonical_reference_is_absent () =
        in
        let evidence =
          match message.replay_evidence with
-         | Some evidence -> evidence
-         | None -> Alcotest.fail "replay evidence is absent"
+         | [ evidence ] -> evidence
+         | [] | _ :: _ :: _ -> Alcotest.fail "replay evidence is not singular"
        in
        match
          Masc.Keeper_gate_replay.project_model_input
@@ -993,6 +995,7 @@ let test_execute_summary_is_the_first_command_line () =
       ~cwd:"/repo"
       ~sandbox_profile:"docker"
       ~sandbox_target:"docker:masc"
+    ~network_mode:Keeper_types_profile_sandbox.Network_none
   in
   Alcotest.check
     summary
@@ -1124,7 +1127,7 @@ let test_resolution_absent_tells_the_model_once () =
   Alcotest.(check bool)
     "carries no replay evidence"
     true
-    (Option.is_none message.replay_evidence);
+    (message.replay_evidence = []);
   Alcotest.(check string)
     "the log line names the store's answer"
     "resolution_absent store=resolution_missing"

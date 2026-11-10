@@ -1516,6 +1516,7 @@ let prepare_prompt_internal
       Some (Keeper_id.Task_id.to_string task_id)
   in
   let content_of : Keeper_context_layers.layer_id -> string option = function
+    | Keeper_context_layers.Direct_input_source -> None
     (* 1. Active goals — stable turn context. Titles render when the caller
        resolved them (RFC-0315). The count and the list are read off the same
        list, so the heading can never claim goals the body does not show. *)
@@ -1940,7 +1941,7 @@ let project_prompt prepared ?workspace_memory_access ?own_recent_actions
       |> Option.map Keeper_context_layers.prepare_content
     | Own_recent_actions -> own_recent_actions_section
     | Recent_work -> Option.map Keeper_context_layers.prepare_content (format_recent_work recent_work)
-    | Active_goals | Goal_observations | Goals_awaiting_proof | Current_task | Approval_authority
+    | Active_goals | Direct_input_source | Goal_observations | Goals_awaiting_proof | Current_task | Approval_authority
     | Connected_surfaces
     | Namespace_state | Lane_updates | Autonomous_trigger | Scheduled_automation
     | Completion_authority | Task_cancellations | Pending_mentions | Scope_messages

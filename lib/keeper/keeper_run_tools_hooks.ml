@@ -132,10 +132,7 @@ let relax_strict_tool_choice_for_keeper = function
   | (Some (Agent_core.Types.Auto | Agent_core.Types.None_) | None) as other -> other
 
 let project_model_input ~base_path ~gate_replay_evidence messages =
-  match gate_replay_evidence with
-  | None -> Ok messages
-  | Some evidence ->
-    Keeper_gate_replay.project_model_input ~base_path evidence messages
+  Keeper_gate_replay.project_model_inputs ~base_path gate_replay_evidence messages
 ;;
 
 (* One tool result's identity as the skill ledger matches it. The wire content
@@ -982,6 +979,11 @@ let assemble_hooks
               match event with
               | Agent_core.Hooks.BeforeTurnParams
                   { turn; current_params; messages; last_tool_results; _ } ->
+                (match !active_checkpoint_owner with
+                 | None -> Agent_core.Hooks.HookFailed
+                     { stage = Before_turn_params
+                     ; detail = "context assembly has no resolved runtime attempt owner" }
+                 | Some checkpoint_owner ->
                 let hook_t0 = Time_compat.now () in
                 Keeper_memory_recall_blocks.begin_request recall_delivery;
                 acc.current_turn <- turn;
@@ -1263,6 +1265,7 @@ let assemble_hooks
                 let base_system_prompt = system.Keeper_turn_system.text in
                 let extra_system_context_assembly =
                   Keeper_run_prompt.assemble_request_context
+                    ~checkpoint_owner
                     ~system
                     ~post_tool_round
                     ~previous_assembly:acc.extra_system_context_assembly
@@ -1486,7 +1489,7 @@ let assemble_hooks
                   ; system_prompt_override = Keeper_context_assembly.system_prompt_override
                       ~previous:current_params.system_prompt_override extra_system_context_assembly
                   ; tool_choice
-                  }
+                  })
               | (Agent_core.Hooks.BeforeTurn _ | Agent_core.Hooks.AfterTurn _ | Agent_core.Hooks.PreToolUse _ | Agent_core.Hooks.PostToolUse _ | Agent_core.Hooks.PostToolUseFailure _ | Agent_core.Hooks.OnStop _ | Agent_core.Hooks.OnError _ | Agent_core.Hooks.OnToolError _) as _event -> Agent_core.Hooks.Continue))
       }
     in

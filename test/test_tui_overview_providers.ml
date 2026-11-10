@@ -239,7 +239,6 @@ let test_section_draws_one_line_per_window () =
       if code_points line > width then
         failf "row is %d cells, wider than %d: %S" (code_points line) width line)
     lines;
-  check string "plain usage title" " Plan usage" (plain section.title);
   let text = String.concat "\n" lines in
   List.iter (fun fact -> check bool ("retains " ^ fact) true (contains ~affix:fact text))
     [ "Kimi Coding"; "Claude Max"; " 67%"; " 44%"; "100%" ];

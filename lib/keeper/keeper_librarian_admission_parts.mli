@@ -3,7 +3,9 @@
     serializes the complete operation. All Store work is blocking; offload the
     whole scope in Eio. These ports never call a provider, save Memory or ACK
     queue candidates. Historical captures remain readable after an explicitly
-    qualified terminal frontier is replaced; only the active frontier runs. *)
+    qualified terminal frontier is replaced, until the whole forest closes
+    after complete committed-receipt and queue-ACK proof; only the active
+    frontier runs. *)
 type part
 type inventory
 type size_evidence
@@ -70,6 +72,13 @@ val runnable : inventory -> part list
 (** Original left-before-right leaf traversal. Children are runnable only
     after their exact two-child transaction is acknowledged. A parent with a
     pending transaction is not independently runnable. *)
+val completion_candidates : inventory -> Keeper_memory_os_current.explicit_candidate_id list option
+(** [Some ids] only for a nonempty forest whose partitions are all acknowledged
+    and whose active leaves exactly cover its active roots. Includes candidate
+    identities from historical parts too. This structural observation is not
+    execution completion, committed-receipt proof or queue ACK: the owner must
+    independently establish all three before closing the forest. [None]
+    preserves an empty or incompletely published forest. *)
 val find : inventory -> part_id:string -> (part, string) result
 val load_parent : inventory -> request_id:string ->
   (Keeper_memory_admission_queue.batch, string) result

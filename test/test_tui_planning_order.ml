@@ -177,9 +177,9 @@ let test_suspension_visibility_and_keys () =
     (Masc_tui_render_prim.planning_action_of_key read_key = None);
   check bool "paused Goal footer offers the Candle read" true
     (List.mem (read_key ^ ":Candle")
-       (String.split_on_char ' ' Masc_tui_keys.footer_hints_planning_goal_detail));
+       (String.split_on_char ' ' (Masc_tui_keys.footer_hints_planning_goal_detail ~lang:Masc_tui_types.Lang_en)));
   check bool "paused Goal footer does not call Resume refresh" false
-    (List.mem "r:refresh" (String.split_on_char ' ' Masc_tui_keys.footer_hints_planning_goal_detail))
+    (List.mem "r:refresh" (String.split_on_char ' ' (Masc_tui_keys.footer_hints_planning_goal_detail ~lang:Masc_tui_types.Lang_en)))
 
 let test_narrow_planning_rollup_and_clause_packing () =
   let cols = 80 in

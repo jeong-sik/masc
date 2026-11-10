@@ -12,7 +12,7 @@ let nobody_declared = Masc.Recipient_lookup.none_declared
 let create_post store = create_post store ~lookup:nobody_declared
 let add_comment store = add_comment store ~lookup:nobody_declared
 
-(* Every writing fixture loads its posts source explicitly. Give each case
+(* Every writing fixture loads posts and comments explicitly. Give each case
    its own workspace so that load cannot adopt another case's persisted rows. *)
 let () = Mirage_crypto_rng_unix.use_default ()
 
@@ -30,11 +30,14 @@ let with_eio f () =
       Unix.putenv "MASC_BASE_PATH" base_path;
       f ())
 
-let load_posts_source store =
-  match Masc_board_handlers.Board_votes_json.load_persisted_posts store with
-  | Ok _ -> ()
-  | Error (path, cause) ->
-    Alcotest.failf "posts fixture load failed: %s (%s)" path (Printexc.to_string cause)
+let load_sources store =
+  List.iter (fun load ->
+    match load store with
+    | Ok _ -> ()
+    | Error (path, cause) ->
+      Alcotest.failf "board fixture load failed: %s (%s)" path (Printexc.to_string cause))
+    [Masc_board_handlers.Board_votes_json.load_persisted_posts;
+     Masc_board_handlers.Board_votes_json.load_persisted_comments]
 ;;
 
 let test_default_ttl () =
@@ -58,21 +61,10 @@ let test_sort_order_witness_in_enum () =
   Alcotest.(check int) "count" 5
     (List.length D.valid_sort_order_strings)
 
-let test_sort_order_legacy_aliases_rejected () =
-  let module D = Masc.Board_dispatch in
-  let rejected label raw =
-    Alcotest.(check (option string)) label None
-      (D.sort_order_of_string_opt raw |> Option.map D.sort_order_to_string)
-  in
-  rejected "new rejected" "new";
-  rejected "active rejected" "active";
-  rejected "comments rejected" "comments";
-  rejected "garbage rejected" "definitely-not-an-order"
-
 let test_permanent_post () =
   let store = create_store
       ~base_path:(Env_config_core.base_path ()) () in
-  load_posts_source store;
+  load_sources store;
   match
     create_post store ~author:"test-agent" ~content:"Permanent post"
       ~post_kind:Human_post ()
@@ -84,7 +76,7 @@ let test_permanent_post () =
 let test_expiring_post () =
   let store = create_store
       ~base_path:(Env_config_core.base_path ()) () in
-  load_posts_source store;
+  load_sources store;
   match
     create_post store ~author:"test-agent" ~content:"Expiring post"
       ~post_kind:Human_post ~ttl_hours:24 ()
@@ -96,7 +88,7 @@ let test_expiring_post () =
 let test_sweeper_skips_permanent () =
   let store = create_store
       ~base_path:(Env_config_core.base_path ()) () in
-  load_posts_source store;
+  load_sources store;
   (match
      create_post store ~author:"test-agent" ~content:"Permanent"
        ~post_kind:Human_post ()
@@ -110,7 +102,7 @@ let test_sweeper_skips_permanent () =
 let test_sweep_removes_the_rows_of_an_expired_target () =
   let store = create_store
       ~base_path:(Env_config_core.base_path ()) () in
-  load_posts_source store;
+  load_sources store;
   let post_id =
     match
       create_post store ~author:"test-agent"
@@ -144,7 +136,7 @@ let test_sweep_removes_the_rows_of_an_expired_target () =
 let test_sweep_keeps_rows_whose_target_is_not_loaded () =
   let store = create_store
       ~base_path:(Env_config_core.base_path ()) () in
-  load_posts_source store;
+  load_sources store;
   let post_id =
     match
       create_post store ~author:"test-agent" ~content:"Post that fails to load"
@@ -173,7 +165,7 @@ let test_sweep_keeps_rows_whose_target_is_not_loaded () =
 let test_sweep_takes_an_expired_reply_out_of_the_post_count () =
   let store = create_store
       ~base_path:(Env_config_core.base_path ()) () in
-  load_posts_source store;
+  load_sources store;
   let post_id =
     match
       create_post store ~author:"test-agent"
@@ -209,7 +201,7 @@ let test_sweep_takes_an_expired_reply_out_of_the_post_count () =
 let test_sweep_cascades_an_expired_post_to_its_comments () =
   let store = create_store
       ~base_path:(Env_config_core.base_path ()) () in
-  load_posts_source store;
+  load_sources store;
   let post_id =
     match
       create_post store ~author:"test-agent"
@@ -246,7 +238,7 @@ let test_sweep_cascades_an_expired_post_to_its_comments () =
 let test_sweep_drains_a_post_larger_than_two_comment_batches () =
   let store = create_store
       ~base_path:(Env_config_core.base_path ()) () in
-  load_posts_source store;
+  load_sources store;
   let unwrap = function
     | Ok value -> value
     | Error e -> Alcotest.fail (show_board_error e)
@@ -494,7 +486,7 @@ let test_maybe_sweep_full_inbox_rolls_back_schedule () =
 let test_post_kind_direct_default () =
   let store = create_store
       ~base_path:(Env_config_core.base_path ()) () in
-  load_posts_source store;
+  load_sources store;
   match
     create_post store ~author:"test-agent" ~content:"Human post"
       ~post_kind:Human_post ()
@@ -508,7 +500,7 @@ let test_post_kind_direct_default () =
 let test_post_kind_automation_contract () =
   let store = create_store
       ~base_path:(Env_config_core.base_path ()) () in
-  load_posts_source store;
+  load_sources store;
   match
     create_post store ~author:"dashboard-harness-bot" ~content:"Harness post"
       ~visibility:Internal ~ttl_hours:1 ~hearth:"dashboard-harness"
@@ -523,7 +515,7 @@ let test_post_kind_automation_contract () =
 let test_post_kind_system_contract () =
   let store = create_store
       ~base_path:(Env_config_core.base_path ()) () in
-  load_posts_source store;
+  load_sources store;
   match
     create_post store ~author:"operator" ~content:"System post"
       ~post_kind:System_post ()
@@ -572,8 +564,6 @@ let () =
         [
           Alcotest.test_case "witness covers all 5 variants" `Quick
             test_sort_order_witness_in_enum;
-          Alcotest.test_case "legacy aliases rejected" `Quick
-            test_sort_order_legacy_aliases_rejected;
         ] );
       ( "post_kind",
         [

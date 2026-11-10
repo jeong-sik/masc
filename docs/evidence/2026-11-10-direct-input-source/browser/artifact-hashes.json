@@ -1,0 +1,19 @@
+{
+  "README.md": "9fa30fb7d658e9b9f8dafe32c7bb134458054466fe006ec6ffac99e1029d05ad",
+  "browser-receipt.json": "8527cb49db7384621991f4b838b280ca04bab4d116eab1bd2dc1750264ec7548",
+  "browser-dom.json": "f7f429b655a9a08dbb92ddf230253d60491a32dd8a49223d540740f34e6513b0",
+  "browser-snapshot.txt": "fc462784e9b63fa10aef931eac5d546fb8ab0ead2cc48d404f7bb325d52c88f0",
+  "memory-inspector-source-raw.png": "1bb090b68aa5dda154d7b84c37e839c2da2ab069b3644f3b2f7b1096d18ddac2",
+  "source-hashes-before.json": "a60e6d809513e8f8ee7c80be302a67e4c8c3ff73336ea78b19e30f5100ed6851",
+  "source-hashes-after.json": "313cdcb8882085d5028852ba1d5b435a435a7a5418b12d52fe4fdc5c2d2562e3",
+  "loaded-source-hashes.json": "853cab88ed8c086a8bfc34b947cb5ce8e02fcfb57ccfa49bd1812bf862135621",
+  "payload.json": "81f1c3a89bd9ff0a360b8ba80b38e47f13d5e69b8244c23177dbdb770ef79083",
+  "expected.json": "71c51259dad505792e635e48daaa312cb6ef901d95b1abbf1b37a3f228c14bdc",
+  "synthetic-provider-request.json": "b6cd2ef7517a3c30d778b409f3e5c5f7493548c86e1a01ca4a06170d80efd6dd",
+  "fixture.ts": "ec313977be366f8a14602c38499c514086ce27f8444302f19c3f18128ccd24f0",
+  "index.html": "2894489dda37eded9af184611b6d397606041506bebdd9b68745729cfcf1356d",
+  "vite-server.mjs": "e03c4145f511a91848b2f69fd9c1837fcad84727c28dbdf25bf5bc7877d9534d",
+  "http-requests.jsonl": "7ea9394407ebb9ed4a25dcfaa1bc8f67dc3218dbe389f78b5e0a9efa61edcf58",
+  "server-owner.json": "c286360583989f170bf03f7f693b59c2ecbfa4af7a839d5a3a8669e35719702d",
+  "task-space-finish.json": "f9d75bcc32c815b3a986ab2fd4b1dc4a36a3e6399a66338a3c93b8e815f8dff9"
+}

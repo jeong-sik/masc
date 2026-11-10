@@ -1,9 +1,9 @@
 open Alcotest
 open Masc
 
-(* The runtime-probe route never runs a probe: the server's probe loop does
-   (test_dashboard_runtime_probe_loop.ml). A read serves the loop's latest
-   value, or a warming-up envelope before the first probe lands.
+(* The runtime-probe route never runs a probe: the server's probe loop does.
+   A read serves the loop's latest value, or a warming-up envelope before the
+   first probe lands.
 
    "No probe on the request path" is asserted with a deterministic invocation
    COUNTER ([slow_runner_invoked]), not a wall-clock threshold. The

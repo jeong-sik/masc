@@ -2,6 +2,7 @@ type t =
   | Keeper_instructions
   | Dynamic_context
   | Active_goals
+  | Direct_input_source
   | Completion_authority
   | Goals_awaiting_proof
   | Constitution_amendments
@@ -20,6 +21,7 @@ let equal a b =
   | Keeper_instructions, Keeper_instructions
   | Dynamic_context, Dynamic_context
   | Active_goals, Active_goals
+  | Direct_input_source, Direct_input_source
   | Completion_authority, Completion_authority
   | Goals_awaiting_proof, Goals_awaiting_proof
   | Constitution_amendments, Constitution_amendments
@@ -31,7 +33,7 @@ let equal a b =
   | Operator_note, Operator_note
   | Skill_compositions, Skill_compositions
   | Arrived_stimuli, Arrived_stimuli -> true
-  | ( Keeper_instructions | Dynamic_context | Active_goals | Completion_authority
+  | ( Keeper_instructions | Dynamic_context | Active_goals | Direct_input_source | Completion_authority
     | Goals_awaiting_proof | Constitution_amendments | Temporal_summary | Memory_os_recall
     | Librarian_working_context | Recalled_memory | Recalled_memory_status | Operator_note
     | Skill_compositions | Arrived_stimuli )
@@ -41,6 +43,7 @@ let to_string = function
   | Keeper_instructions -> "keeper_instructions"
   | Dynamic_context -> "dynamic_context"
   | Active_goals -> "active_goals"
+  | Direct_input_source -> "direct_input_source"
   | Completion_authority -> "completion_authority"
   | Goals_awaiting_proof -> "goals_awaiting_proof"
   | Constitution_amendments -> "constitution_amendments"
@@ -62,6 +65,7 @@ let all_known =
   [ Keeper_instructions
   ; Dynamic_context
   ; Active_goals
+  ; Direct_input_source
   ; Completion_authority
   ; Goals_awaiting_proof
   ; Constitution_amendments
@@ -95,7 +99,7 @@ let cache_rank = function
      then the independently versioned Librarian index. *)
   | Memory_os_recall -> 3
   | Librarian_working_context -> 4
-  | Active_goals -> 5
+  | Active_goals | Direct_input_source -> 5
   (* RFC-0491 §3.3: the ids of the Goals in [Verifying]. Its text changes when
      a Goal is asked to complete or the verifier refutes the proof: after
      10-30 the two came 12 to 20 minutes apart. A Task decision is new on the
@@ -128,7 +132,7 @@ let cache_rank = function
 let injected_on_post_tool_round = function
   | Dynamic_context | Temporal_summary | Memory_os_recall | Librarian_working_context
   | Recalled_memory | Recalled_memory_status | Skill_compositions -> false
-  | Keeper_instructions | Active_goals | Completion_authority | Goals_awaiting_proof
+  | Keeper_instructions | Active_goals | Direct_input_source | Completion_authority | Goals_awaiting_proof
   | Constitution_amendments | Operator_note | Arrived_stimuli -> true
 ;;
 
@@ -136,7 +140,7 @@ let injected_on_post_tool_round = function
    a resume carries; it answers [false] because a resumed session already holds
    the system prompt it recorded at its first launch. *)
 let resent_when_held = function
-  | Keeper_instructions | Dynamic_context | Active_goals | Constitution_amendments
+  | Keeper_instructions | Dynamic_context | Active_goals | Direct_input_source | Constitution_amendments
   | Temporal_summary | Memory_os_recall | Librarian_working_context | Recalled_memory
   | Skill_compositions | Arrived_stimuli -> false
   | Completion_authority | Goals_awaiting_proof | Recalled_memory_status | Operator_note -> true

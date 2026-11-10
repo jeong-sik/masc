@@ -181,6 +181,14 @@ module For_testing : sig
 end
 val listed : retained -> Record.t
 (** The record {!discover} lists for this retained original, without its body. *)
+val record_to_json : Record.t -> Yojson.Safe.t
+(** Complete canonical owner metadata, including the original destination,
+    summary and progress. Carries no request body or execution authority. *)
+val load_settled : store:Lane_addon_store.t -> scope:string -> date:string -> request_id:string ->
+  (Record.t option, error) result
+(** Strict current owner-schema decoding of an archived record under its
+    exact scope, date and ID. Does not restore its removed body, prove a
+    domain commit/ACK or authorize settlement. *)
 type settle_error = Settle_unavailable of string | Settle_changed
 val settle : store:Lane_addon_store.t -> date:string -> Record.t -> (unit, settle_error) result
 (** Move one original's record into the settled archive under [date], then

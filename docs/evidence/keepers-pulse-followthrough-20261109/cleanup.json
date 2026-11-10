@@ -1,0 +1,16 @@
+{
+  "at_utc": "2026-11-09T13:31:36.067542+00:00",
+  "pid": 53551,
+  "owned_process_absent": true,
+  "native_exit_status_observed": 0,
+  "sigkill_sent": false,
+  "original_stop_receipt_sha256": "bcd7090ecf2367837c2bdac4a93c24bb098553e1b113a282324ad837535071b5",
+  "tmux_cleanup_verification": {
+    "command": "tmux -S <owned-private-socket> list-sessions",
+    "observed_exit_code": 1,
+    "observed_result": "no server running",
+    "stale_socket_unlinked": true,
+    "empty_owned_socket_directory_removed": true
+  },
+  "fault_flag_present": false
+}

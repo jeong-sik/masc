@@ -3,7 +3,7 @@
    another person. Read it against plan D2. *)
 
 (** Whether a CLI may start on an official account (multi-account plan D2,
-    and D3 for Muse).
+    and D3 for Muse and the host clients).
 
     A captured account ({!Runtime_official_account.t}) holds the environment
     its CLI starts with, and that environment can hold a credential. A CLI
@@ -91,6 +91,23 @@ val muse_account_home : _ muse_authorized -> string option
 (** The declared home, for a caller that prepares it before the call. *)
 val declared_muse_home : declared muse_authorized -> string
 
+(** {1 Host accounts}
+
+    Antigravity and Vibe start on accounts of the host, not of a person. The
+    credential of Antigravity is a copy in the setup registry, which has no
+    owner, and Vibe reads the configuration of the host user. A
+    multi-account process shares no account of its host (plan D3b), so only
+    a single-user process starts them. *)
+
+(** A client that starts on an account of the host. *)
+type host_client =
+  | Antigravity
+  | Vibe
+
+(** A start of a host client that the published access allows. Only
+    {!authorize_host} makes one. *)
+type host_account
+
 (** The access of a process. *)
 type t =
   | Single_user of Authz_boot_mode_read.single_user
@@ -157,6 +174,9 @@ type refusal =
   | Not_the_account_home of Authz_types.Provider_account_id.t
       (** The account was captured from another home than the one of this
           account of the person. *)
+  | Host_account of host_client
+      (** A host client in a multi-account process, which shares no account
+          of its host. *)
 
 val refusal_to_string : refusal -> string
 
@@ -166,3 +186,32 @@ val authorize : request -> 'client sealed -> ('client authorized, refusal) resul
 (** Authorizes a Muse account for [request] by the access the process
     published, by the rule of {!authorize}. *)
 val authorize_muse : request -> 'where muse_account -> ('where muse_authorized, refusal) result
+
+(** Allows a start of a host client in a single-user process, and refuses it
+    in a multi-account process with {!Host_account}. *)
+val authorize_host : host_client -> (host_account, refusal) result
+
+(** {1 Native tools}
+
+    An official CLI runs as the user of the server process, and its own tools
+    (Claude Code's Read, Codex's read-only sandbox, Muse's built-in tools)
+    reach what that user can read. In a multi-account process that includes
+    the account homes of other people, with their login credentials. No
+    measurement has shown yet that a native posture stays inside the turn's
+    own files, so a multi-account process runs a model turn only without
+    native tools (plan D3c). Codex and Muse cannot drop their native tools,
+    so their model turns are refused there until a measurement opens a
+    posture. Calls that run no model turn (a login check, a usage read, a
+    model list) take no native tools and are not judged here. *)
+
+type native_refusal =
+  | Native_unpublished  (** The process has not published its access. *)
+  | Native_tools_reach_other_homes of Runtime_native_tools.posture
+      (** A model turn with native tools in a multi-account process. *)
+
+val native_refusal_to_string : native_refusal -> string
+
+(** Whether a model turn may run with the native tools of [posture]: every
+    posture in a single-user process, and only
+    {!Runtime_native_tools.Native_none} in a multi-account process. *)
+val authorize_native : Runtime_native_tools.posture -> (unit, native_refusal) result

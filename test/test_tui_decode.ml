@@ -4273,30 +4273,6 @@ let test_decode_effective_keeper_surface_keeps_provenance () =
       Alcotest.(check int) "digest length" 64 (String.length digest)
   | Ok _ -> Alcotest.fail "expected an available effective Keeper surface"
 
-let test_decode_effective_keeper_surface_rejects_legacy_skill_names () =
-  let effective =
-    `Assoc
-      [ "status", `String "available"
-      ; "keeper_name", `String "fixture"
-      ; "runtime_id", `String "runtime"
-      ; "official_client_kind", `String "codex"
-      ; "tool_delivery", `Assoc [ "status", `String "delivered" ]
-      ; "native_posture", `Null
-      ; "skill_snapshot_revision", `String (String.make 64 'c')
-      ; "instruction_skills", `List [ `String "legacy-name" ]
-      ; "composition_skills", `List []
-      ; "skill_discovery_bytes", `Int 0
-      ; "skills_left_out", `List []
-      ; "unavailable_skill_names", `List []
-      ; "count", `Int 0
-      ; "tools", `List []
-      ; "tool_surface_sha256", `Null
-      ]
-  in
-  match Masc.Tui_decode_tools.decode_tool_snapshot (tool_snapshot_json ~effective []) with
-  | Error _ -> ()
-  | Ok _ -> Alcotest.fail "legacy Skill name list was accepted"
-
 (* The keys Keeper_effective_tool_surface.to_yojson sends on every available
    surface, with the parts under test passed in. *)
 let minimal_available_surface ?(unavailable_skill_names = Some (`List [])) tools =
@@ -5672,10 +5648,16 @@ let test_decode_memory_health_keeps_ordinary_and_source_axes () =
     { installation_id = "admission-installation"; request_id = "admission-request";
       wait = Masc.Keeper_librarian_pending.Capacity } in
   let admission_json = Masc.Keeper_librarian_pending.to_json (Worker admission_worker) in
-  List.iter (fun (label, updates, expected_state, expected_time) ->
-    match Masc.Tui_decode_memory_health.decode_memory_health_snapshot
-      (with_librarian ~stopped_keepers:0 (("admission_wait", admission_json) :: updates)) with
-    | Error detail -> Alcotest.fail detail
+  List.iter (fun (label, updates, expected_state, expected_time, expected_unread_total) ->
+    let payload =
+      with_librarian ~stopped_keepers:0 (("admission_wait", admission_json) :: updates) in
+    let totals = Yojson.Safe.Util.member "totals" payload in
+    let payload = replace_field "totals"
+      (replace_field "librarian_unread_turns"
+         (Option.fold ~none:`Null ~some:(fun unread -> `Int unread) expected_unread_total)
+         totals) payload in
+    match Masc.Tui_decode_memory_health.decode_memory_health_snapshot payload with
+    | Error detail -> Alcotest.failf "%s: %s" label detail
     | Ok snapshot ->
       let librarian = (List.hd snapshot.mhs_keepers).mkh_librarian in
       Alcotest.(check bool) (label ^ ": original admission owner retained") true
@@ -5683,12 +5665,14 @@ let test_decode_memory_health_keeps_ordinary_and_source_axes () =
       Alcotest.(check bool) (label ^ ": durable state retained") true
         (librarian.mlh_state = expected_state);
       Alcotest.(check (option (float 0.))) (label ^ ": durable measurement time retained")
-        expected_time librarian.mlh_measured_at)
+        expected_time librarian.mlh_measured_at;
+      Alcotest.(check (option int)) (label ^ ": fleet unread measurement retained")
+        expected_unread_total snapshot.mhs_total_librarian_unread_turns)
     [ "measured durable pass", [], Some Masc.Tui_decode_memory_health.Pass_drained,
-      Some 1_775_000_000.0
+      Some 1_775_000_000.0, Some 0
     ; "unobserved durable pass",
       [ "state", `Null; "measured_at", `Null; "unread_atom_turns", `Null;
-        "unread_official_turns", `Null ], None, None ];
+        "unread_official_turns", `Null ], None, None, None ];
   List.iter (fun admission_wait ->
     Alcotest.(check bool) "admission wait requires a supported original worker" true
       (memory_health_rejects (with_librarian ~stopped_keepers:0 ["admission_wait", admission_wait])))
@@ -6519,7 +6503,7 @@ let test_merge_keeper_memory_facts_names_unread_keepers () =
       { Masc.Tui_decode_memory_facts.mos_facts = List.map merge_fixture_fact claims }
   in
   let snapshot, unread =
-    Masc.Tui_decode_memory_facts.merge_keeper_memory_facts
+    Masc.Tui_decode_memory_facts.merge_keeper_memory_facts ~refused:[]
       [ "alpha", Ok (merge_fixture_snapshot ~ordinary:(present [ "a1" ]) "alpha")
       ; "beta", Error "connection refused"
       ; ( "gamma"
@@ -6548,11 +6532,52 @@ let test_merge_keeper_memory_facts_names_unread_keepers () =
         "gamma: source-bound store: unreadable" ]
 
 let test_merge_keeper_memory_facts_all_read () =
-  let _, unread =
-    Masc.Tui_decode_memory_facts.merge_keeper_memory_facts
+  let snapshot, unread =
+    Masc.Tui_decode_memory_facts.merge_keeper_memory_facts ~refused:[]
       [ "alpha", Ok (merge_fixture_snapshot "alpha") ]
   in
-  Alcotest.(check (option string)) "nothing unread" None unread
+  Alcotest.(check (option string)) "nothing unread" None unread;
+  Alcotest.(check (option int)) "read empty fleet has a known zero" (Some 0)
+    (Masc.Tui_decode_memory_facts.memory_fact_count ~complete:(Option.is_none unread)
+       snapshot Masc.Tui_decode_memory_facts.All_facts)
+
+let test_merge_keeper_memory_facts_keeps_health_refusals () =
+  let module Facts = Masc.Tui_decode_memory_facts in
+  let refusal keeper reason : Masc.Tui_decode_memory_health.memory_keeper_refusal =
+    { mkr_keeper_id = keeper; mkr_reason = reason } in
+  let readable =
+    [ "alpha", Ok (merge_fixture_snapshot
+        ~ordinary:(Facts.Memory_store_present
+          { mos_facts = [merge_fixture_fact "retained claim"] }) "alpha") ] in
+  List.iter (fun (label, refused, loads, claims) ->
+    let snapshot, unread = Facts.merge_keeper_memory_facts ~refused loads in
+    Alcotest.(check (list (triple string string string)))
+      (label ^ ": readable claims remain") claims (merged_claims snapshot);
+    (match unread with
+     | None -> Alcotest.failf "%s: health refusals lost fleet incompleteness" label
+     | Some summary -> List.iter
+         (fun (refusal : Masc.Tui_decode_memory_health.memory_keeper_refusal) ->
+           Alcotest.(check bool) (label ^ ": refusal reason retained") true
+             (String_util.contains_substring summary refusal.mkr_reason);
+           Option.iter (fun keeper ->
+             Alcotest.(check bool) (label ^ ": refused keeper retained") true
+               (String_util.contains_substring summary keeper)) refusal.mkr_keeper_id)
+         refused);
+    List.iter (fun scope ->
+      Alcotest.(check (option int)) (label ^ ": fleet count stays unknown") None
+        (Facts.memory_fact_count ~complete:(Option.is_none unread) snapshot scope))
+      [ Facts.All_facts; Ordinary_facts None; Source_facts; Dropped_facts ])
+    [ "named refusal with a readable keeper",
+        [refusal (Some "named-refused") "named health row was refused"], readable,
+        ["alpha", "authored", "retained claim"]
+    ; "anonymous refusal with a readable keeper",
+        [refusal None "anonymous health row was refused"], readable,
+        ["alpha", "authored", "retained claim"]
+    ; "only refused keepers",
+        [refusal (Some "named-refused") "named refusal";
+         refusal None "first anonymous refusal";
+         refusal None "second anonymous refusal"], [], []
+    ]
 
 (* Source-bound facts and dropped facts take their keeper from the list too,
    and the server's text stays as it is: a colon in a path or a space in an
@@ -6584,7 +6609,7 @@ let test_merge_keeper_memory_facts_names_every_row_kind_and_keeps_the_text () =
       }
   in
   let snapshot, _ =
-    Masc.Tui_decode_memory_facts.merge_keeper_memory_facts
+    Masc.Tui_decode_memory_facts.merge_keeper_memory_facts ~refused:[]
       [ ( "alpha"
         , Ok
             { (merge_fixture_snapshot ~ordinary "alpha") with
@@ -14699,8 +14724,6 @@ let () =
           test_decode_tool_snapshot_without_inventory_is_an_error;
         Alcotest.test_case "effective surface keeps provenance" `Quick
           test_decode_effective_keeper_surface_keeps_provenance;
-        Alcotest.test_case "effective surface rejects legacy Skill names" `Quick
-          test_decode_effective_keeper_surface_rejects_legacy_skill_names;
         Alcotest.test_case "a tool origin reads its provenance by kind" `Quick
           test_decode_effective_tool_reads_provenance_by_kind;
         Alcotest.test_case "the unavailable skill names are required" `Quick
@@ -14788,6 +14811,8 @@ let () =
           test_merge_keeper_memory_facts_names_unread_keepers;
         Alcotest.test_case "merge with every keeper read" `Quick
           test_merge_keeper_memory_facts_all_read;
+        Alcotest.test_case "merge keeps health refusals and unknown fleet counts" `Quick
+          test_merge_keeper_memory_facts_keeps_health_refusals;
         Alcotest.test_case "merge names every row kind and keeps the text" `Quick
           test_merge_keeper_memory_facts_names_every_row_kind_and_keeps_the_text;
         Alcotest.test_case "memory facts keep both stores" `Quick

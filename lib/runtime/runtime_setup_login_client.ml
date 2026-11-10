@@ -2,7 +2,12 @@ type client = Codex | Claude | Antigravity | Muse
 type native = Runtime_account_home_layout.client = Codex_home | Claude_home | Muse_home
 type t =
   | Native of { client : native; account_home : string }
-  | Antigravity_home of { home : Runtime_antigravity_setup.t; timeout_s : float }
+  | Antigravity_home of
+      { home : Runtime_antigravity_setup.t
+      ; timeout_s : float
+      ; host : Runtime_account_access.host_account
+          (** The start the access allowed when the login home was prepared. *)
+      }
 type observation = Authenticated | Login_completed | Credential_captured
 open Result.Syntax
 
@@ -71,19 +76,25 @@ let prepare ~runtime_root ~account_id ~client ~existing =
   | Claude -> native_home ~runtime_root ~account_id ~client:Claude_home existing
   | Muse -> native_home ~runtime_root ~account_id ~client:Muse_home existing
   | Antigravity ->
+    (* HIGH-RISK-UNREVIEWED: the login home holds a copy of a credential of the
+       host, and a multi-account process shares no account of its host (plan D3b). *)
+    let* host =
+      Runtime_account_access.authorize_host Runtime_account_access.Antigravity
+      |> Result.map_error Runtime_account_access.refusal_to_string
+    in
     let* home, timeout_s = match existing with
       | None ->
-        Runtime_antigravity_setup.prepare ~runtime_root ~account_id
+        Runtime_antigravity_setup.prepare ~host ~runtime_root ~account_id
         |> Result.map (fun home -> home, Runtime_antigravity.default_timeout_s)
         |> Result.map_error Runtime_antigravity_setup.error_message
       | Some (Runtime_setup_accounts.Antigravity_account {credential_file; timeout_s}) ->
-        Runtime_antigravity_setup.prepare_from_credential_file ~runtime_root
+        Runtime_antigravity_setup.prepare_from_credential_file ~host ~runtime_root
           ~account_id ~oauth_source:credential_file
         |> Result.map (fun home -> home, timeout_s)
         |> Result.map_error Runtime_antigravity_setup.error_message
       | Some (Runtime_setup_accounts.Native_home _) ->
         Error "The selected account belongs to another client transport."
-    in Ok (Antigravity_home {home; timeout_s})
+    in Ok (Antigravity_home {home; timeout_s; host})
 
 let home_dir = function
   | Native {account_home; _} -> account_home
@@ -144,7 +155,7 @@ let publish ~workspace ~integration_id ~cli_path = function
   | Native {account_home; _} ->
     Runtime_setup_accounts.register_home ~workspace ~integration_id ~cli_path ~account_home
     |> Result.map_error Runtime_setup_accounts.error_message
-  | Antigravity_home {home; timeout_s} ->
+  | Antigravity_home {home; timeout_s; host} ->
     let* credential = Runtime_antigravity_setup.credential_reference home
       |> Result.map_error Runtime_antigravity_setup.error_message in
     let* oauth_source = match credential with
@@ -156,7 +167,7 @@ let publish ~workspace ~integration_id ~cli_path = function
       ~import:(fun ~base_path ->
         let runtime_root = Common.masc_dir_from_base_path ~base_path in
         let* durable = Runtime_antigravity_setup.prepare_from_credential_file
-          ~runtime_root ~account_id:"login" ~oauth_source
+          ~host ~runtime_root ~account_id:"login" ~oauth_source
           |> Result.map_error (fun _ -> Runtime_setup_accounts.Import_failed) in
         let* credential = Runtime_antigravity_setup.credential_reference durable
           |> Result.map_error (fun _ -> Runtime_setup_accounts.Import_failed) in

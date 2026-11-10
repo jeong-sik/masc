@@ -68,7 +68,10 @@ type turn_failure =
 
 type turn_success =
   | Turn_completed of { meta : Keeper_meta_contract.keeper_meta }
-  | Turn_checkpointed of { meta : Keeper_meta_contract.keeper_meta }
+  | Turn_checkpointed of
+      { meta : Keeper_meta_contract.keeper_meta
+      ; followup : Keeper_agent_result.checkpoint_followup
+      }
       (** A newer durable stimulus arrived; the turn yielded so the next
           turn carries it. *)
   | Turn_input_required of Keeper_meta_contract.keeper_meta
@@ -126,7 +129,7 @@ val run_keeper_cycle
   -> turn_decision:Keeper_world_observation.keeper_cycle_decision
   -> ?shared_context:Agent_core.Context.t
   -> ?event_bus:Agent_core.Event_bus.t
-  -> ?hitl_resolution:Keeper_event_queue.hitl_resolution
+  -> ?hitl_resolutions:Keeper_hitl_resolution_batch.t
   -> unit
   -> (turn_success, turn_failure) result
 

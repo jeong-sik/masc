@@ -2,8 +2,12 @@
 
     The speaker is decided where the message is created and travels as
     AGENT_CORE message metadata under {!Agent_core.Types.Input_speaker.key}.
-    It is never read back out of the message text, never sent to a provider,
-    and never added to or removed from a message after it was created: replay
+    It is never read back out of the message text. The metadata entry itself
+    is never sent to a provider. An admitted direct request also carries
+    its original operation and source in the separate host-rendered
+    {!Keeper_direct_input_source} observation; that observation grants no
+    operator or effect authority. The metadata is never added to or removed
+    from a message after it was created: replay
     prefixes compare the whole message. The approval admission digest leaves
     the speaker out ({!Keeper_approval_input_admission}).
 

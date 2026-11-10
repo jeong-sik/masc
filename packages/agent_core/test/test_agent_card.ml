@@ -457,11 +457,6 @@ let test_interface_rejects_type_alias () =
   Agent_card.of_json json |> expect_invalid_config ~field:"supportedInterfaces[0].type"
 ;;
 
-let test_supported_interfaces_rejects_empty () =
-  Agent_card.supported_interfaces_of_list []
-  |> expect_invalid_config ~field:"supported_interfaces"
-;;
-
 let test_interface_rejects_non_https_url () =
   Agent_card.create_supported_interface
     ~url:"http://agent.example/a2a"
@@ -635,10 +630,6 @@ let () =
             "interface rejects type alias"
             `Quick
             test_interface_rejects_type_alias
-        ; test_case
-            "supported interfaces reject empty"
-            `Quick
-            test_supported_interfaces_rejects_empty
         ; test_case
             "interface rejects non-HTTPS URL"
             `Quick

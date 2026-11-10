@@ -39,7 +39,8 @@ val error_message : error -> string
     Eio cancellation is deferred across that bounded PTY phase to avoid leaving
     its separately-owned terminal process group alive. *)
 val observe
-  :  python_path:string
+  :  host:Runtime_account_access.host_account
+  -> python_path:string
   -> cli_path:string
   -> timeout_s:float
   -> oauth_source:string

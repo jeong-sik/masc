@@ -427,6 +427,66 @@ let test_a_changed_record_is_not_settled () = with_store (fun root store ->
   Alcotest.(check bool) "its body stays" true (Sys.file_exists (own_body root "original"));
   Alcotest.(check bool) "nothing is under the date" false (is_settled store "original"))
 
+let test_archived_metadata_preserves_the_complete_record_without_a_body () = with_store (fun root store ->
+  Alcotest.(check bool) "an absent archive is absent" true
+    (owned (Owner.load_settled ~store ~scope ~date:day ~request_id:"original")=None);
+  Alcotest.(check bool) "observation creates no store" false (Sys.file_exists root);
+  retain_own store "original";
+  let original=some (owned (load store "original")) in
+  let advanced=match get (Result.map_error Owner.update_error_to_string
+    (Owner.advance ~store ~expected:original ~event:Progress.Dispatch_intended)) with
+    | Owner.Stored value -> value
+    | Owner.Already_stored _ | Owner.Unconfirmed _ -> Alcotest.fail "intent was not stored" in
+  let expected=Owner.listed advanced in
+  settled_ok (settle store expected);
+  let actual=some (owned (Owner.load_settled ~store:(Store.create ~root) ~scope ~date:day ~request_id:"original")) in
+  Alcotest.check json "all original metadata and progress survive"
+    (Owner.record_to_json expected) (Owner.record_to_json actual);
+  Alcotest.(check bool) "metadata does not reconstruct a removed body" false
+    (Sys.file_exists (own_body root "original"));
+  Alcotest.(check bool) "another date grants no archive observation" true
+    (owned (Owner.load_settled ~store ~scope ~date:"2026-10-24" ~request_id:"original")=None))
+
+let test_archived_metadata_refuses_changed_schema_and_binding () = with_store (fun root store ->
+  retain_own store "original";
+  let original=listed store "original" in
+  settled_ok (settle store original);
+  let record=Owner.record_to_json original in
+  let fields=Yojson.Safe.Util.to_assoc record in
+  List.iter (fun (key,value) ->
+    save (settled_path root "original") (Yojson.Safe.to_string
+      (`Assoc (List.map (fun (name,old) -> name,if name=key then value else old) fields)));
+    fail_load (Owner.load_settled ~store ~scope ~date:day ~request_id:"original"))
+    ["schema",`String "old-owner-schema";"scope",`String "another-owner";
+     "request_id",`String "another-original";"request_digest",`String "not-a-digest";
+     "progress",`List [`Assoc ["event",`String "unknown"]]];
+  save (settled_path root "original") "{broken";
+  fail_load (Owner.load_settled ~store ~scope ~date:day ~request_id:"original"))
+
+let test_archived_metadata_refuses_unsafe_files_and_dates () = with_store (fun root store ->
+  retain_own store "original";
+  settled_ok (settle store (listed store "original"));
+  let archive=settled_path root "original" in
+  let bytes=Fs_compat.load_file archive in
+  let alias=Filename.concat root "archive-alias" in
+  Unix.link archive alias;
+  fail_load (Owner.load_settled ~store ~scope ~date:day ~request_id:"original");
+  Sys.remove alias;
+  Sys.remove archive;
+  save alias bytes;
+  Unix.symlink alias archive;
+  fail_load (Owner.load_settled ~store ~scope ~date:day ~request_id:"original");
+  Sys.remove archive;
+  Unix.mkfifo archive 0o600;
+  fail_load (Owner.load_settled ~store ~scope ~date:day ~request_id:"original");
+  Sys.remove archive;
+  save archive bytes;
+  Unix.chmod archive 0o666;
+  fail_load (Owner.load_settled ~store ~scope ~date:day ~request_id:"original");
+  Unix.chmod archive 0o600;
+  List.iter (fun date -> fail_load (Owner.load_settled ~store ~scope ~date ~request_id:"original"))
+    ["../escaped";"2026-10-23/x";"2026-10-2"])
+
 let test_settling_again_removes_a_body_left_after_the_record_moved () = with_store (fun root store ->
   retain_own store "original";
   let record = listed store "original" in
@@ -684,6 +744,12 @@ let () =
   Alcotest.test_case "actual held read serializes aliased publication without blocking other scopes" `Quick
     test_original_publication_waits_for_actual_read_across_store_aliases];
   "settle",[
+  Alcotest.test_case "archived metadata preserves the complete original without its body" `Quick
+    test_archived_metadata_preserves_the_complete_record_without_a_body;
+  Alcotest.test_case "archived metadata refuses changed schema and binding" `Quick
+    test_archived_metadata_refuses_changed_schema_and_binding;
+  Alcotest.test_case "archived metadata refuses unsafe files and dates" `Quick
+    test_archived_metadata_refuses_unsafe_files_and_dates;
   Alcotest.test_case "a settled original leaves the scope and its body is removed" `Quick
     test_a_settled_original_leaves_the_scope_and_its_body_is_removed;
   Alcotest.test_case "a changed record is not settled" `Quick test_a_changed_record_is_not_settled;

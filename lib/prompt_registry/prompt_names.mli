@@ -166,6 +166,9 @@ val keeper_constitution_amendments_added : string
 val keeper_constitution_amendments_removed : string
 (** The added and the removed articles, one line each. Variable: [articles]. *)
 
+val keeper_constitution_current : string
+(** Complete current norms when some articles are withheld. Variable: [articles]. *)
+
 val keeper_tags_system_open : string
 val keeper_tags_system_close : string
 val keeper_tags_instructions_open : string
@@ -185,6 +188,7 @@ val keeper_fleet_diagnose : string
 val keeper_antigravity_workspace_shared : string
 val keeper_antigravity_workspace_private : string
 val keeper_antigravity_additional_directories_label : string
+val keeper_context_direct_input_source : string
 val keeper_context_librarian_working : string
 val keeper_context_librarian_empty_artifact : string
 val keeper_context_librarian_empty : string

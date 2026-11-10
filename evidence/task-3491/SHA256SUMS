@@ -1,0 +1,43 @@
+# sha256sum -c SHA256SUMS  works in this directory: every file listed here exists.
+# The directory's own manifest files are not listed (they would have to contain
+# their own hash).
+#
+# The removed `probe.exe` is NOT in this manifest. Its hash and retrievable
+# location are recorded as comments at the bottom, with the limit of what that
+# proves stated there. A comment line is not a `sha256sum -c` entry.
+cbeabfd89b14da3a60c56f3542f48d34cadcba24b8f5dfb48f4092d1fa67dd30  .gitignore
+76e683f8875241f7b44813793854fef9318df96b84c4724b72969e1e1a5932c4  README.md
+b867f52cf05436058142526791d878ced6bf2c39ed8a5fa673b9feb8472b74cf  ci-dune-target.log
+a8eeaaece1d577af62c991054f88aae790bf425d2db2dab437edc5474d125053  drop.log
+7c8884e63d3c58ccead9245b9c1a146fd98cb54cdef32da0cf00eae9734e2c95  dune-attempt.log
+a88c4436719b60c0eab830ee3f55e0f8314cbd5ebbcbea2b215dc0893ce31b6d  masc.ml
+9d8710d86223a8f574a11db742c73f9d9356b992fa5c37272f2b43a7111f3bd9  mutant.log
+a08f7e8f9dbc4b534bf73825ccbdec987caea92ce855fc9d21a74c65a0f6fd0c  run.cmd.txt
+e944ea7d53a4fde33dd0028b56b17a8f7a7466e219f29e5bd1c7ba4578241997  run.log
+ed31a732f151723c6b9de8591afcb6193f402c906f6872c8a258611103a53fb2  string_util.ml
+53870fd70c10f1fcf5007deddfdf4627aae78224aaf773375fbba5241d18b994  test_tui_terminal_text.ml
+ec2348239b4a3a8a908c5912ade7688796155718290815d0d617c15fa354a27f  time_codec.ml
+ed957d4d881e31c9b1b01ca8f6cc503b88e705ba0e81bafab98b9a3da0b627e9  time_codec.mli
+e1700e0d5d20a86fc36979461cd880757f9f8e499dfcf0ad964074d72630c690  tui_terminal_text.ml
+36067de73345ae120fc2d725031b30a24e00ae23b00aa061d90ade5fe3139637  tui_terminal_text.mli
+#
+# --- removed binary: recorded as a comment, not as a manifest entry -----------
+#
+# probe.exe (sha256 below, 7,672,840 bytes, ELF 64-bit) was deleted from the
+# tree because a compiled artifact does not belong in the repository. The bytes
+# are still retrievable from git history, not from this directory:
+#
+#   base commit 24d54a4aa9b77cb3223ed8dfc75e7d74ae3560c5
+#   blob        fb99f6bb985a05a0e24ca17939542118a02411cf
+#
+#   sha256      4facd48239452f6695504ec0a621b9b552fb2dc4d95f6b3d8f1e1764ec3c4e33
+#
+# What this does and does not establish:
+#   - It does establish that a 7,672,840-byte ELF with this digest is a real
+#     object in this repository's history, retrievable by blob id.
+#   - It does NOT bind run.log or mutant.log to that binary. Those logs record a
+#     compile command, `./probe.exe`, and test output; neither one records the
+#     digest of the executable that ran. A matching digest today would show the
+#     same bytes exist, not that these bytes produced those logs.
+#   - A rebuild using run.cmd.txt is a rebuild, not a reproduction: no run has
+#     been shown to yield the same bytes.

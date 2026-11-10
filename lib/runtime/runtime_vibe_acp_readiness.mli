@@ -142,7 +142,10 @@ val decode_auth_status : Yojson.Safe.t -> (auth_status, error) result
 val decode_account : Yojson.Safe.t -> (account, error) result
 
 val read
-  :  mgr:_ Eio.Process.mgr
+  :  host:Runtime_account_access.host_account
+       (** The start the access allows: Vibe reads the configuration of the
+           host user (multi-account plan D3b). *)
+  -> mgr:_ Eio.Process.mgr
   -> clock:_ Eio.Time.clock
   -> fs:Eio.Fs.dir_ty Eio.Path.t
   -> workdir:string

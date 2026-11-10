@@ -366,9 +366,8 @@ let test_applied_gate_replay_seeds_terminal_settlement () =
     Masc.Keeper_tool_execution.Surface_post_completed
       (Masc.Keeper_surface_post.To_discord { channel_id = "D-approved" })
   in
-  let replay_delivery : Masc.Keeper_tools_agent_core.gate_replay_delivery =
-    { approval_id = "approval-terminal"
-    ; outcome =
+  let replay_delivery : Masc.Keeper_gate_replay.replay_execution =
+    { outcome =
         Masc.Keeper_gate_replay.Applied
           { operation = "connector_post"
           ; output_ref
@@ -377,9 +376,18 @@ let test_applied_gate_replay_seeds_terminal_settlement () =
     ; terminal_effect_receipt = Some receipt
     }
   in
+  let bound execution =
+    let resolution : Keeper_event_queue.hitl_resolution =
+      { approval_id = "approval-terminal"; decision = Keeper_event_queue.Hitl_approved
+      ; channel = Keeper_continuation_channel.unrouted "terminal fixture" } in
+    match Masc.Keeper_gate_replay.resolution_input ~resolution
+      ~replay_delivery:(Some (resolution.approval_id, execution)) with
+    | Ok input -> input
+    | Error error -> fail (Masc.Keeper_gate_replay.resolution_input_error_to_string error)
+  in
   let state =
     Masc.Keeper_tools_agent_core_bundle.For_testing.initial_terminal_effect_state
-      (Some replay_delivery)
+      [ bound replay_delivery ]
   in
   (match state with
    | Masc.Keeper_tools_agent_core.Terminal_effect_completed
@@ -392,8 +400,8 @@ let test_applied_gate_replay_seeds_terminal_settlement () =
      | Masc.Keeper_tools_agent_core.Terminal_effect_completed _
      | Masc.Keeper_tools_agent_core.Terminal_effect_failed _ ) ->
      fail "applied connector replay did not seed terminal completion");
-  let non_terminal_replay =
-    { replay_delivery with
+  let non_terminal_replay : Masc.Keeper_gate_replay.replay_execution =
+    {
       outcome =
         Masc.Keeper_gate_replay.Applied
           { operation = "network_read"
@@ -405,7 +413,7 @@ let test_applied_gate_replay_seeds_terminal_settlement () =
   in
   (match
      Masc.Keeper_tools_agent_core_bundle.For_testing.initial_terminal_effect_state
-       (Some non_terminal_replay)
+       [ bound non_terminal_replay ]
    with
    | Masc.Keeper_tools_agent_core.Terminal_effect_open -> ()
    | ( Masc.Keeper_tools_agent_core.Deferred_tool_result
@@ -447,6 +455,13 @@ let test_explicit_native_boundary_reasons () =
   check bool "open effect state continues" true
     (Masc.Keeper_agent_run.For_testing.tool_boundary_state
        ~repetition_execution:None
+       ~chat_handoff:(fun () -> Ok false)
+       Masc.Keeper_tools_agent_core.Terminal_effect_open
+     = Ok Runtime_agent.Continue);
+  check bool "chat handoff probe failure degrades to continue without failing settled tool" true
+    (Masc.Keeper_agent_run.For_testing.tool_boundary_state
+       ~repetition_execution:None
+       ~chat_handoff:(fun () -> Error (Agent_core.Error.Internal "inventory stopping"))
        Masc.Keeper_tools_agent_core.Terminal_effect_open
      = Ok Runtime_agent.Continue)
 ;;

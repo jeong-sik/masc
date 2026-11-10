@@ -191,6 +191,10 @@ val handle_get_mcp :
   Httpun.Request.t ->
   Http_reqd.t ->
   unit
+(** An authenticated Observer without a session header, query or cookie uses
+    a fresh server-generated connection id, scoped to the admitted workspace.
+    It does not initialize an MCP session. Supplied session ids and other
+    stream kinds keep the initialized-session registration checks. *)
 val handle_get_operator_mcp :
   deps:deps -> Httpun.Request.t -> Http_reqd.t -> unit
 val handle_delete_mcp :

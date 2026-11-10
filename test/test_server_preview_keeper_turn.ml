@@ -4,6 +4,8 @@
    login receipt of each account. The Claude Code CLI is a script that answers
    the stream-json protocol, the Codex CLI is a script that answers the
    app-server protocol, and each writes down what it was started with.
+   Codex has no turn without native tools, so the preview refuses a Codex
+   turn before Codex starts one (plan D3c).
    The access is published once per process, so the executable has one case
    and it runs in order. *)
 
@@ -169,12 +171,12 @@ type someone =
   ; account_id : string
   }
 
-(* The home of the account of [client], as the layout spells it. *)
-let home_of ?(client = Layout.Claude_home) ~base_path (who : someone) =
+(* The Claude Code home of the account, as the layout spells it. *)
+let home_of ~base_path (who : someone) =
   get_text
     (Layout.home
        ~runtime_root:(Layout.person_runtime_root ~base_path ~namespace:who.person.namespace)
-       client
+       Layout.Claude_home
        ~account_id:who.account_id)
 ;;
 
@@ -289,12 +291,6 @@ let seen script =
   | _ -> Alcotest.fail "the CLI wrote no record"
 ;;
 
-let member_of fields name =
-  match List.assoc_opt name fields with
-  | Some (`Assoc members) -> members
-  | _ -> Alcotest.failf "the CLI record has no %s" name
-;;
-
 let text_of fields name =
   match List.assoc_opt name fields with
   | Some (`String value) -> value
@@ -392,13 +388,12 @@ let test_turn () =
          with
          | Ok () -> ()
          | Error error -> Alcotest.fail (Access.publish_error_to_string error));
-        let answered ?(model = "claude-sonnet-5") keeper runtime text =
+        let answered keeper runtime text =
           ( 200
           , Printf.sprintf
-              {|{"keeper_id":"%s","runtime_id":"%s","model":"%s","text":"%s"}|}
+              {|{"keeper_id":"%s","runtime_id":"%s","model":"claude-sonnet-5","text":"%s"}|}
               keeper
               (Runtime_id.to_string runtime)
-              model
               text )
         in
         let reply (who : someone) body =
@@ -517,38 +512,21 @@ let test_turn () =
           "a home of its own"
           false
           (String.equal (home_of ~base_path alice) (home_of ~base_path bob));
-        (* Carol's Keeper answers on Codex, on the home of her account, in
-           a thread Codex keeps nothing of. *)
+        (* Carol's Keeper runs on Codex. Its least posture reads what the
+           server process reads, which holds the homes of other people, so
+           the turn is refused and Codex runs none. *)
         check_reply
-          "her Codex Keeper answers"
-          (answered ~model:"gpt-5.5" "keeper-carol" carol_runtime "echo: hello")
+          "her Codex Keeper is refused for its native tools"
+          ( 403
+          , Yojson.Safe.to_string
+              (`Assoc
+                  [ ( "error"
+                    , `String
+                        (Access.native_refusal_to_string
+                           (Access.Native_tools_reach_other_homes Runtime_native_tools.Native_read)) )
+                  ]) )
           (reply carol (body ~keeper:"keeper-carol" ~message:"hello"));
-        let codex_turn = seen codex in
-        Alcotest.(check string)
-          "on the Codex home of her account"
-          (home_of ~client:Layout.Codex_home ~base_path carol)
-          (text_of codex_turn "home");
-        Alcotest.(check string) "with her message to Codex" "hello" (text_of codex_turn "prompt");
-        let thread = member_of codex_turn "thread" in
-        Alcotest.(check bool)
-          "in an ephemeral thread"
-          true
-          (List.assoc_opt "ephemeral" thread = Some (`Bool true));
-        Alcotest.(check (option string))
-          "with read-only permissions"
-          (Some ":read-only")
-          (match List.assoc_opt "permissions" thread with
-           | Some (`String profile) -> Some profile
-           | _ -> None);
-        Alcotest.(check bool)
-          "with no shell"
-          true
-          (List.mem "features.shell_tool=false" (args_of codex_turn)
-           && List.mem "features.unified_exec=false" (args_of codex_turn));
-        Alcotest.(check bool)
-          "in a private directory that is gone after the Codex turn"
-          false
-          (Sys.file_exists (text_of thread "cwd"))))
+        Alcotest.(check bool) "Codex ran no turn" false (Sys.file_exists (codex ^ ".turn.json"))))
 ;;
 
 let () =

@@ -149,7 +149,7 @@ let turn_blocks observation = observation.first :: observation.others
 let is_turn_block = function
   | Prompt_block_id.(Completion_authority | Goals_awaiting_proof) -> true
   | Prompt_block_id.(
-      Keeper_instructions | Dynamic_context | Active_goals | Constitution_amendments
+      Keeper_instructions | Dynamic_context | Active_goals | Direct_input_source | Constitution_amendments
       | Temporal_summary | Memory_os_recall | Librarian_working_context | Recalled_memory
       | Recalled_memory_status | Operator_note | Skill_compositions | Arrived_stimuli) -> false
 ;;
@@ -393,7 +393,7 @@ let block_body assembly = function
      | Some sections -> World_state_sections (List.map world_state_section sections)
      | None -> Whole_text)
   | Prompt_block_id.(
-      Keeper_instructions | Active_goals | Completion_authority | Goals_awaiting_proof
+      Keeper_instructions | Active_goals | Direct_input_source | Completion_authority | Goals_awaiting_proof
       | Constitution_amendments | Temporal_summary | Memory_os_recall | Librarian_working_context | Recalled_memory
       | Recalled_memory_status | Operator_note | Skill_compositions | Arrived_stimuli) -> Whole_text
 ;;
@@ -868,7 +868,7 @@ let resume_prompt ~goal ~held ~turn_observation ?composed_context messages =
     | World_state_sections _,
       ( Session_store.Context_block
           Prompt_block_id.(
-            Keeper_instructions | Active_goals | Completion_authority | Goals_awaiting_proof
+            Keeper_instructions | Active_goals | Direct_input_source | Completion_authority | Goals_awaiting_proof
             | Constitution_amendments | Temporal_summary | Memory_os_recall | Librarian_working_context | Recalled_memory
             | Recalled_memory_status | Operator_note | Skill_compositions | Arrived_stimuli)
       | Session_store.Librarian_working_state
@@ -903,11 +903,38 @@ let resume_prompt ~goal ~held ~turn_observation ?composed_context messages =
                | Session_store.Codex_system_prompt ) as previous_context) ) ->
             current_context = previous_context)
   in
+  (* This operation-scoped observation is no longer current when a known
+     renderer partition omits it. Retire only its held receipt, not the
+     vendor's historical System bytes. An unavailable/unprojected partition
+     does not prove absence. *)
+  let direct_source_absent =
+    match composed_context with
+    | None -> false
+    | Some assembly ->
+      (match assembly.Keeper_context_assembly.system_prompt,
+             Keeper_context_assembly.dynamic_context_sections assembly with
+       | Some issued, Some sections ->
+         not (List.exists (function
+           | Keeper_context_assembly.Direct_input_source _ -> true
+           | Active_goals _ | Goals_awaiting_proof _ -> false) issued.observations)
+         && List.for_all (fun (section : Keeper_context_layers.section) ->
+           match section.section_source with
+           | Layer Direct_input_source | Unattributed Unprojected_input -> false
+           | Layer (Active_goals | Goal_observations | Goals_awaiting_proof | Current_task
+               | Approval_authority | Connected_surfaces | Namespace_state | Workspace_memory
+               | Wiki | Lane_updates | Autonomous_trigger | Scheduled_automation
+               | Completion_authority | Task_cancellations | Pending_mentions | Scope_messages
+               | Own_board_posts | Board_activity | Own_recent_actions | Recent_work | Fleet_messages)
+           | Unattributed (World_frame | Host_workspace_recall | Direct_turn) -> true) sections
+       | Some _, None | None, _ -> false)
+  in
   let held_context =
     composed
     @ List.filter
         (fun previous ->
-           not (List.exists (fun item -> supersedes item previous) carried))
+           not (direct_source_absent
+                && previous.Session_store.context = Session_store.Context_block Prompt_block_id.Direct_input_source)
+           && not (List.exists (fun item -> supersedes item previous) carried))
         held
   in
   let context_projection =

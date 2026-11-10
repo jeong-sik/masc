@@ -217,12 +217,17 @@ let attempt_agent_core ~sw ~net ?max_tokens ?timeout_s ?event_bus ~judge_system_
     ( Fusion_types.judge_synthesis * Fusion_types.usage
     , Fusion_types.judge_failure * Fusion_types.usage )
     result =
-  let tools = if web_tools then Fusion_agent_core.web_tool_bundle () else [] in
+  let tools = if web_tools then Fusion_agent_core.web_tool_bundle () else Ok [] in
   match
-    Fusion_agent_core.build_agent ~sw ~net ~system_prompt:judge_system_prompt
-      ?event_bus ~tools ?max_tokens ?timeout_s
-      ~provider_config_transform:apply_fusion_judge_output_contract
-      runtime_id
+    Result.bind
+      (Result.map_error
+         (fun error -> Fusion_types.Bridge_error (Tool_bridge.schema_error_to_string error))
+         tools)
+      (fun tools ->
+        Fusion_agent_core.build_agent ~sw ~net ~system_prompt:judge_system_prompt
+          ?event_bus ~tools ?max_tokens ?timeout_s
+          ~provider_config_transform:apply_fusion_judge_output_contract
+          runtime_id)
   with
   | Error reason ->
     Error

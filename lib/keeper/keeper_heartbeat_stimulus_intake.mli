@@ -3,11 +3,11 @@
     Admits a bounded batch of ready Event Layer stimuli from one durable
     snapshot. Payload families share queue order except for explicit
     owner-lane manual durable stimulus admission at persisted turn boundaries, and
-    Connector attention, which admits only the first ready conversation. An
-    Add-on batch contains only notices for one exact original invocation/source
-    and captured channel. It never shares a turn with general sources. The
-    first successfully read/admitted source chooses this boundary; an unreadable
-    notice remains queued without excluding later independent readable work.
+    Connector attention, which admits only the first ready conversation.
+    Scheduled requests share a batch under the reply-route rules documented
+    on [heartbeat_event_intake]. The first successfully read/admitted source
+    begins the compatible scope; an unreadable source remains queued without
+    excluding later independent readable work.
     An unready input remains queued without blocking later ready work. *)
 
 open Keeper_types
@@ -228,12 +228,26 @@ val reconcile_spent_selection
 
     RFC-0377's routing boundary remains: only members of the first ready
     [Connector_attention] conversation are eligible, and only the selected
-    batch is projected. Other connector conversations remain queued. At most
-    one [Hitl_resolved] is eligible because a turn carries one exact cycle grant.
-    Later ready HITL resolutions remain queued for their own replay turns.
-    A scheduled occurrence owns its own work scope: it is never batched with
-    another occurrence or unrelated attention. Its exact durable source remains
-    the continuation input until the owning turn completes or it is withdrawn.
+    batch is projected. Other connector conversations remain queued. Ready
+    [Hitl_resolved] inputs share a turn only as an ordered cohort of fresh
+    approved nonterminal host replays with the same exact reply route, or an
+    explicit no-reply partition. Rejections, recovery and model-issued or
+    terminal operations continue individually. The first incompatible ready
+    HITL input fences later HITL inputs for this turn; unready inputs do not.
+    Each member keeps its own exact grant and continuation receipt.
+    Scheduled requests without result delivery share the unrouted general batch;
+    they cannot remove another source's captured reply route. Requests
+    with result delivery share a batch only with scheduled requests for the same
+    exact reply route, preserving thread and reply-message coordinates.
+    Admission follows durable queue order, including urgency ordering and
+    checkpoint rotation, so batch composition is deterministic and can depend
+    on that order. General sources may join connector attention under the
+    existing continuation rule: a default reply route exists only when every
+    admitted member has a routable channel in the same conversation. It uses
+    the last member's route in intake order; a channel-less general source
+    leaves that default unset. Every
+    exact occurrence remains continuation input until the turn completes or it
+    is withdrawn; batching does not retire a request based on its message text.
     [source_batch] carries all exact admitted selections. Payloads and counts
     are derived from that batch. [diagnostic_selection] retains a withdrawn
     or failed source separately; it is never an admitted batch member merely

@@ -4,6 +4,7 @@
 type t
 
 val prepare :
+  direct_input_source:Keeper_direct_input_source.t option ->
   active_goal_summaries:
     (Keeper_unified_prompt.goal_summary list, Goal_store.unavailable) result ->
   current_task:Keeper_world_observation_inputs.current_task_observation ->
@@ -19,7 +20,8 @@ val prepare :
   turn_instructions_text:string ->
   unit ->
   t
-(** Eagerly render the common Goal, Task, Skills and Lane context once. The original
+(** Eagerly render the admitted operation source and common Goal, Task, Skills
+    and Lane context once. The original
     conversation, approval observation, worktree, telemetry and instructions
     are retained with it. Memory and wiki observations are captured, while their
     retrieval routes remain request-specific. A new turn, changed observation or
@@ -37,7 +39,8 @@ val project :
 val project_partition :
   t -> workspace_memory_access:Keeper_request_tool_access.t option -> Keeper_context_layers.rendered
 (** The same bytes as [project], with the captured Goal snapshot attributed to
-    [Active_goals], so request assembly retains it through tools, each
+    [Active_goals] and admitted operation source to [Direct_input_source], so request
+    assembly retains both through tools, each
     Goal's latest review, measurement and held-Task link to
     [Goal_observations], and the Goals in [Verifying] to
     [Goals_awaiting_proof]. *)

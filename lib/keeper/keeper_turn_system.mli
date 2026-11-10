@@ -38,6 +38,10 @@ type t = private
         (** The rendered {!Prompt_block_id.Constitution_amendments} block:
             [Some] only for a System rendered with articles the world has
             since changed. *)
+  ; current_norms : string option
+        (** The complete current article set for native resumption or a
+            projection containing isolated moves. Independent of the recorded System's basis; bounded by
+            the held articles rather than all inactive ids in history. *)
   }
 
 (** The articles a System was rendered with, the ledger position they were
@@ -140,12 +144,20 @@ val resend :
     with [held] read from that seed's checkpoint. When [held]'s issued basis
     rendered those bytes and its articles read back, the block names what
     changed since, and [runtime_id] now holds that basis. Otherwise which
-    articles rendered the bytes is not known and they go with no block. *)
+    articles rendered the bytes is not known and no ordinary delta is issued.
+    The turn preparer attaches {!with_current_norms} for every native seed,
+    independently of whether this historical basis could be reconstructed. *)
+
+val with_current_norms : World_constitution_types.t list -> t -> t
+(** Replace ordinary amendments with the complete current article set from
+    {!World_constitution_store.load_held}, including an empty set. The System
+    bytes and basis stay exact. Does not approve any isolated move. *)
 
 val with_bytes : issued:t -> string -> t
 (** The System a request sends when a hook overrides the bytes {!issue}
     gave: [issued] when they are its own, otherwise those bytes with no
-    amendments, since which articles rendered them is not known. *)
+    ordinary amendments, since which articles rendered them is not known.
+    The complete current norms remain true for any System and are preserved. *)
 
 val read : Agent_core.Context.t -> (held option, string) result
 (** What a session context holds. [Ok None] when nothing was written, as in

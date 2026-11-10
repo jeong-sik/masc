@@ -28,6 +28,12 @@ let requests =
   ]
 ;;
 
+let hosts = [ "Antigravity", Access.Antigravity; "Vibe", Access.Vibe ]
+
+let postures =
+  Runtime_native_tools.[ Native_none; Native_read; Native_full ]
+;;
+
 let test_published_once () =
   Eio_main.run (fun _env ->
     let root = Filename.temp_dir "runtime-account-access-" "" in
@@ -65,6 +71,32 @@ let test_published_once () =
             | Ok (_ : Account.claude_code Access.authorized) ->
               Alcotest.failf "a %s was authorized before the publication" label)
           requests;
+        List.iter
+          (fun (label, client) ->
+            match Access.authorize_host client with
+            | Error Access.Not_published -> ()
+            | Error refusal ->
+              Alcotest.failf
+                "%s was refused for another reason: %s"
+                label
+                (Access.refusal_to_string refusal)
+            | Ok (_ : Access.host_account) ->
+              Alcotest.failf "%s was allowed before the publication" label)
+          hosts;
+        List.iter
+          (fun posture ->
+            match Access.authorize_native posture with
+            | Error Access.Native_unpublished -> ()
+            | Error refusal ->
+              Alcotest.failf
+                "a turn with native %s tools was refused for another reason: %s"
+                (Runtime_native_tools.to_string posture)
+                (Access.native_refusal_to_string refusal)
+            | Ok () ->
+              Alcotest.failf
+                "a turn with native %s tools was allowed before the publication"
+                (Runtime_native_tools.to_string posture))
+          postures;
         (match Access.publish (Access.Single_user single_user) with
          | Ok () -> ()
          | Error error -> Alcotest.fail (Access.publish_error_to_string error));
@@ -79,7 +111,27 @@ let test_published_once () =
                   (Account.same (Access.account authorized) captured)
               | Error refusal ->
                 Alcotest.failf "a %s was refused: %s" label (Access.refusal_to_string refusal))
-            requests
+            requests;
+          (* A single user shares the accounts of the host (plan D3b). *)
+          List.iter
+            (fun (label, client) ->
+              match Access.authorize_host client with
+              | Ok (_ : Access.host_account) -> ()
+              | Error refusal ->
+                Alcotest.failf "%s was refused: %s" label (Access.refusal_to_string refusal))
+            hosts;
+          (* The one person of a single-user process owns every home its
+             native tools can read (plan D3c). *)
+          List.iter
+            (fun posture ->
+              match Access.authorize_native posture with
+              | Ok () -> ()
+              | Error refusal ->
+                Alcotest.failf
+                  "a turn with native %s tools was refused: %s"
+                  (Runtime_native_tools.to_string posture)
+                  (Access.native_refusal_to_string refusal))
+            postures
         in
         allowed ();
         (match Access.publish (Access.Single_user single_user) with

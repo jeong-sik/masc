@@ -57,6 +57,5 @@ val make_tools_with_authority :
   ?on_externalization_error:(Tool_bridge.externalization_error -> unit) ->
   descriptors:Keeper_tool_descriptor.t list ->
   unit ->
-  (Agent_core_base.Tool.t * Tool_definition_toml.loading *
-   Tool_output.model_projection)
-  list
+  ((Agent_core_base.Tool.t * Tool_definition_toml.loading *
+    Tool_output.model_projection) list, Tool_bridge.schema_error) result

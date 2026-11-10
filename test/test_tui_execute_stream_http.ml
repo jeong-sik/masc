@@ -864,6 +864,169 @@ let test_registered_fleet_route_replaces_its_scope env =
              | _ -> false))))
 ;;
 
+(* The waiting-inventory client opens its own Observer without initialize or
+   a shared MCP cookie. Keep that entrypoint distinct from initialized MCP. *)
+let with_standalone_observer_server env body =
+  let module Transport = Server_mcp_transport_http in
+  let workspace = Masc_test_deps.setup_test_workspace () in
+  Fun.protect
+    ~finally:(fun () -> Masc_test_deps.cleanup_test_workspace workspace)
+    (fun () -> Eio.Switch.run (fun sw ->
+      let clock = Eio.Stdenv.clock env in
+      let state = Masc.Mcp_server.For_testing.create_state ~base_path:workspace in
+      Auth.save_auth_config workspace
+        { Masc_domain.default_auth_config with enabled = true; require_token = true };
+      Masc_test_deps.ensure_rng_initialized ();
+      let token =
+        match Auth.create_token workspace ~agent_name:"waiting-observer" ~role:Masc_domain.Admin with
+        | Ok (token, _) -> token
+        | Error error -> Alcotest.fail (Masc_domain.masc_error_to_string error)
+      in
+      let authority =
+        match Server_request_authority.of_host_port ~host:"127.0.0.1" ~port:8935 with
+        | Ok authority -> authority
+        | Error `Malformed -> Alcotest.fail "fixture authority"
+      in
+      let verify check ~base_path request =
+        check ~base_path request
+        |> Result.map (fun _ -> ())
+        |> Result.map_error Server_mcp_transport_http_types.auth_failure_of_masc_error
+      in
+      let runtime : Transport.runtime =
+        { base_path = workspace; sw; clock
+        ; tool_allowed_in_profile = (fun _ _ -> true)
+        ; handle_request =
+            (fun ?profile:_ ?mcp_session_id:_ ?otel_mcp_protocol_version:_
+                 ?otel_transport_context:_ ?auth_token:_ ?internal_keeper_runtime:_ _ -> `Null)
+        ; clear_resource_subscriptions_for_session = (fun _ -> ())
+        }
+      in
+      let deps : Transport.deps =
+        { get_origin = (fun _ -> ""); cors_headers = (fun _ -> [])
+        ; auth_token_from_request = Server_auth.auth_token_from_request
+        ; is_ready = (fun () -> true); get_runtime_result = (fun () -> Ok runtime)
+        ; get_base_path = (fun () -> workspace); get_server_state = (fun () -> Some state)
+        ; verify_mcp_auth = verify Server_auth.verify_mcp_auth
+        ; verify_mcp_observer_stream_auth = verify Server_auth.verify_mcp_observer_stream_auth
+        ; verify_operator_mcp_auth = verify Server_auth.verify_operator_mcp_auth
+        ; verify_seat_mcp_auth = verify Server_auth.verify_seat_mcp_auth
+        }
+      in
+      let handler reqd =
+        let request = Httpun.Reqd.request reqd in
+        let reqd = Masc.Http_reqd.of_httpun reqd in
+        let uri = Uri.of_string request.target in
+        Server_request_authority.with_current authority (fun () ->
+          if String.equal (Uri.path uri) "/mcp" then
+            let sse_kind = match Uri.get_query_param uri "sse_kind" with
+              | Some "observer" -> Masc.Sse.Observer
+              | Some _ | None -> Masc.Sse.Agent_stream
+            in
+            Transport.handle_get_mcp ~deps ~sse_kind request reqd
+          else
+            Server_dashboard_http_keeper_api.handle_keeper_get_subroutes state request request reqd)
+      in
+      with_server env ~handler (fun ~port -> body ~workspace ~state ~token ~sw ~clock ~port)))
+;;
+
+let test_standalone_observer_delivers_waiting_inventory_changes env =
+  let module Transport = Server_mcp_transport_http in
+  with_standalone_observer_server env (fun ~workspace ~state ~token ~sw ~clock ~port ->
+    let profiles_before = Server_mcp_transport_http_session.For_testing.profile_count () in
+    let response, publish_response = Eio.Promise.create () in
+    let received, publish_received = Eio.Promise.create () in
+    let ended, publish_ended = Eio.Promise.create () in
+    let decoder = Sse_wire.create_decoder () in
+    let invalidation = `Assoc
+        [ "type", `String "keeper_waiting_inventory_changed"
+        ; "keeper_name", `String "alpha"; "queue_kind", `String "event_queue" ] in
+    let invalidation_json = Yojson.Safe.to_string invalidation in
+    let url = Printf.sprintf "http://127.0.0.1:%d/mcp?sse_kind=observer" port in
+    let headers = ["Accept", "text/event-stream"; "Authorization", "Bearer " ^ token] in
+    Eio.Fiber.fork ~sw (fun () ->
+      let result = Masc_http_client.get_stream ~clock ~idle_timeout_sec:3. ~url ~headers
+          ~on_response:(fun ~status ~headers ->
+            ignore (Eio.Promise.try_resolve publish_response (status, headers)))
+          ~on_chunk:(fun chunk ->
+            Sse_wire.feed decoder chunk |> List.iter (fun (frame : Sse_wire.frame) ->
+              if String.equal frame.data invalidation_json then
+                ignore (Eio.Promise.try_resolve publish_received ()))) () in
+      Eio.Promise.resolve publish_ended result);
+    let await promise = Eio.Time.with_timeout_exn clock 3. (fun () -> Eio.Promise.await promise) in
+    let status, response_headers = await response in
+    Alcotest.(check int) "fresh observer opens without initialize or a session cookie" 200 status;
+    let header name = List.find_map (fun (key, value) ->
+      if String.equal (String.lowercase_ascii key) name then Some value else None) response_headers in
+    let session_id = match header "mcp-session-id" with
+      | Some value -> value | None -> Alcotest.fail "fresh observer has no connection id" in
+    Fun.protect
+      ~finally:(fun () -> Eio.Cancel.protect (fun () -> Transport.stop_sse_session session_id))
+      (fun () ->
+        let instance = match Sse_wire.decode_observer_response response_headers with
+          | Ok (Some { instance_id; replay = Sse_wire.Fresh }) -> instance_id
+          | Ok (Some { replay = (Sse_wire.Resumed | Resumed_after_gap _ | Reset _); _ })
+          | Ok None | Error _ -> Alcotest.fail "fresh observer has no scoped handshake" in
+        Alcotest.(check bool) "observer does not initialize an MCP session" false
+          (Transport.is_known_session session_id);
+        Alcotest.(check bool) "observer creates no MCP backing session" true
+          (Option.is_none (Masc.Session.McpSessionStore.peek session_id));
+        Alcotest.(check int) "observer creates no orphan MCP profile" profiles_before
+          (Server_mcp_transport_http_session.For_testing.profile_count ());
+        let scope = Masc.Mcp_server.workspace_scope state in
+        let observer_scope = Masc.Sse.observer_scope
+            ~runtime_authority:(Masc.Sse.runtime_authority_exn ~base_path:workspace)
+            ~instance_id:instance in
+        Alcotest.(check string) "observer carries the admitted workspace instance"
+          (Server_observer_scope.instance_id scope) instance;
+        Masc.Sse.broadcast_to (Masc.Sse.Scoped_runtime_observers observer_scope) invalidation;
+        await received;
+        let inventory_url = Printf.sprintf "http://127.0.0.1:%d/api/v1/keepers/alpha/waiting-inventory" port in
+        let inventory = match Masc_http_client.get_response_sync ~clock ~timeout_sec:3.
+            ~url:inventory_url ~headers:["Authorization", "Bearer " ^ token;
+              Sse_wire.instance_header, instance] () with
+          | Ok value -> value | Error detail -> Alcotest.fail detail in
+        Alcotest.(check int) "the invalidated inventory is readable" 200 inventory.status;
+        Alcotest.(check (option string)) "inventory attests the same observer instance"
+          (Some instance)
+          (List.find_map (fun (key, value) ->
+             if String.equal (String.lowercase_ascii key) Sse_wire.instance_header
+             then Some value else None) inventory.headers);
+        let json = Yojson.Safe.from_string inventory.body in
+        Alcotest.(check string) "the response is the authoritative inventory"
+          "server_keeper_waiting_inventory" Yojson.Safe.Util.(json |> member "source" |> to_string);
+        Transport.stop_sse_session session_id;
+        (match await ended with
+         | Ok (Masc_http_client.Pool.Streamed _) -> ()
+         | Ok (Masc_http_client.Pool.Buffered _) -> Alcotest.fail "observer was buffered"
+         | Error detail -> Alcotest.failf "observer close failed: %s" detail);
+        Alcotest.(check bool) "disconnect removes the standalone observer" false
+          (Masc.Sse.exists session_id)))
+;;
+
+let test_standalone_observer_keeps_auth_and_supplied_session_checks env =
+  with_standalone_observer_server env (fun ~workspace:_ ~state:_ ~token ~sw:_ ~clock ~port ->
+    let client_count = Masc.Sse.client_count () in
+    let supplied_id = "unknown-waiting-observer-" ^ string_of_int (Random.bits ()) in
+    let bearer = ["Authorization", "Bearer " ^ token] in
+    let cases =
+      [ "missing credential", "/mcp?sse_kind=observer", [], 401
+      ; "forged credential", "/mcp?sse_kind=observer", ["Authorization", "Bearer forged"], 401
+      ; "supplied unknown observer id", "/mcp?sse_kind=observer",
+          ("Mcp-Session-Id", supplied_id) :: bearer, 404
+      ; "agent stream without initialize", "/mcp", bearer, 404
+      ] in
+    List.iter (fun (label, target, credentials, expected_status) ->
+      let url = Printf.sprintf "http://127.0.0.1:%d%s" port target in
+      let response = match Masc_http_client.get_response_sync ~clock ~timeout_sec:3.
+          ~url ~headers:(("Accept", "text/event-stream") :: credentials) () with
+        | Ok value -> value | Error detail -> Alcotest.failf "%s: %s" label detail in
+      Alcotest.(check int) label expected_status response.status;
+      Alcotest.(check int) (label ^ ": no observer registered") client_count (Masc.Sse.client_count ())) cases;
+    Alcotest.(check bool) "provided unknown id was not minted" true
+      (Option.is_none (Masc.Session.McpSessionStore.peek supplied_id));
+    Server_mcp_transport_http.forget_mcp_session supplied_id)
+;;
+
 (* Exercise the real MCP GET handler over H1. Authentication is supplied by
    this fixture; the assertion is that ambiguous cursors stop before SSE
    registration. *)
@@ -1638,7 +1801,11 @@ let () =
             test_cancelling_a_refusal_body_still_cancels_the_request
         ] )
     ; ( "observer replay"
-      , [ case "invalid handshake is not opened or read" test_observer_rejects_bad_replay_before_delivering_bytes
+      , [ case "standalone Observer delivers a waiting invalidation and inventory read"
+            test_standalone_observer_delivers_waiting_inventory_changes
+        ; case "standalone Observer keeps auth and supplied-session checks"
+            test_standalone_observer_keeps_auth_and_supplied_session_checks
+        ; case "invalid handshake is not opened or read" test_observer_rejects_bad_replay_before_delivering_bytes
         ; case "unusable replay retries without the requested cursor" test_observer_retries_without_cursor
         ; case "valid and unadvertised live streams still open" test_observer_accepts_valid_and_unadvertised_live_streams
         ; case "a controlled observer names its machine" test_observer_names_controlled_machine

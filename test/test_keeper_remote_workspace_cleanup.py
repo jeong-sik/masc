@@ -105,6 +105,101 @@ class RemoteWorkspaceCleanup(unittest.TestCase):
             self.assert_removed(entries, name)
         self.assertIn("free_kib_after", self.report)
 
+    def young(self, path: Path) -> None:
+        """Make [path] newer than the retention as the sweep sees it."""
+        later = time.time() + LATER
+        os.utime(path, (later, later))
+
+    def old_tree(self, path: Path) -> Path:
+        (path / "src").mkdir(parents=True)
+        (path / "src" / "copy.ml").write_text("let x = 1\n")
+        return path
+
+    def test_old_folder_inside_a_young_folder_is_removed(self) -> None:
+        memory = self.root / "memory"
+        self.old_tree(memory / "t05" / "q114")
+        self.old_tree(memory / "notes" / "r48110")
+        (memory / "notes" / "verdict.md").write_text("fresh note\n")
+        self.young(memory / "notes" / "verdict.md")
+        (memory / "old-note.md").write_text("old note\n")
+        entries = self.sweep()
+        self.assert_kept(entries, "memory", "touched within retention")
+        self.assert_removed(entries, "memory/t05")
+        self.assert_removed(entries, "memory/notes/r48110")
+        # A young directory on the way down gets no record; files inside a
+        # container stay even when old.
+        self.assertNotIn("memory/notes", entries)
+        self.assertTrue((memory / "notes" / "verdict.md").is_file())
+        self.assertTrue((memory / "old-note.md").is_file())
+
+    def test_a_unit_is_never_entered(self) -> None:
+        clone = self.clone("clone")
+        self.old_tree(clone / "docs")
+        self.young(clone / "README")
+        project = self.root / "project"
+        self.old_tree(project / "test")
+        (project / "dune-project").write_text("(lang dune 3.0)\n")
+        self.young(project / "dune-project")
+        container = self.root / "memory"
+        mirror = container / "mirror.git"
+        git(self.root, "init", "-q", "--bare", str(mirror))
+        self.old_tree(mirror / "objects" / "old-pack")
+        self.young(mirror / "HEAD")
+        entries = self.sweep()
+        self.assert_kept(entries, "clone", "touched within retention")
+        self.assert_kept(entries, "project", "touched within retention")
+        self.assertTrue((clone / "docs").is_dir())
+        self.assertTrue((project / "test").is_dir())
+        self.assertTrue((mirror / "objects" / "old-pack").is_dir())
+        self.assertEqual(
+            sorted(name for name in entries if "/" in name), [], self.report["entries"]
+        )
+
+    def test_old_unit_inside_a_young_folder_goes_whole(self) -> None:
+        container = self.root / "work"
+        project = self.old_tree(container / "q114")
+        (project / "dune-project").write_text("(lang dune 3.0)\n")
+        clean = container / "clean"
+        git(self.root, "clone", "-q", str(self.origin), str(clean))
+        (container / "fresh.md").write_text("note\n")
+        self.young(container / "fresh.md")
+        entries = self.sweep()
+        self.assert_removed(entries, "work/q114")
+        self.assert_removed(entries, "work/clean")
+
+    def test_old_folder_inside_keeps_the_same_protections(self) -> None:
+        container = self.root / "work"
+        local = container / "local"
+        git(self.root, "clone", "-q", str(self.origin), str(local))
+        (local / "change").write_text("local\n")
+        git(local, "add", "change")
+        git(local, "commit", "-q", "-m", "local only")
+        busy = self.old_tree(container / "busy")
+        process = self.proc / "4242"
+        (process / "fd").mkdir(parents=True)
+        (process / "cwd").symlink_to(busy)
+        (process / "exe").symlink_to("/usr/bin/true")
+        self.old_tree(container / ".cache")
+        (container / "link").symlink_to(self.old_tree(self.root.parent / "outside"))
+        (container / "fresh.md").write_text("note\n")
+        self.young(container / "fresh.md")
+        entries = self.sweep()
+        self.assert_kept(entries, "work/local", "only in local")
+        self.assert_kept(entries, "work/busy", "live process uses it")
+        self.assertNotIn("work/.cache", entries)
+        self.assertNotIn("work/link", entries)
+        self.assertTrue((container / ".cache").is_dir())
+        self.assertTrue((self.root.parent / "outside" / "src").is_dir())
+
+    def test_report_mode_removes_nothing_inside_either(self) -> None:
+        container = self.root / "work"
+        self.old_tree(container / "copy")
+        (container / "fresh.md").write_text("note\n")
+        self.young(container / "fresh.md")
+        entries = self.sweep(apply=False)
+        self.assertEqual(entries["work/copy"]["result"], "would remove")
+        self.assertTrue((container / "copy").is_dir())
+
     def test_report_mode_removes_nothing(self) -> None:
         self.clone("clean")
         entries = self.sweep(apply=False)

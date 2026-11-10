@@ -865,6 +865,12 @@ describe the returned roster's coverage. A listed Keeper is not proof that it
 has accepted work. Submit through `masc_keeper_delegate` and follow the original
 target and operation ID for the result.
 
+For a direct request, MASC also tells the receiving model who sent the original
+operation. A registered Keeper stays distinct from an unattributed
+`local_request`; the latter is not proof of operator identity. This source
+observation remains bound to that operation through tool use and host resume
+cues. It grants neither operator authority nor Task ownership.
+
 Open a Keeper's Turn Inspector and select a turn, then **입력과 실행**
 (input and execution). The view uses the complete `turn_ref` — trace and
 absolute turn together — rather than joining nearby timestamps.
@@ -947,6 +953,10 @@ A message that arrives while a direct Codex operation runs waits in the queue.
 MASC does not ask the running turn to stop. The turn finishes on its own, and
 the Owner then starts the waiting message. Use the interrupt controls to stop
 the running turn sooner.
+
+An autonomous turn can yield its Owner slot to runnable chat at a completed
+MASC tool boundary. It retains unfinished work for resumption. This does not
+interrupt a shell command or a vendor built-in tool that is still running.
 
 A direct operation can also end at a checkpoint instead of an answer, for
 example when a tool result arrives later. The retained continuation survives
@@ -1171,6 +1181,13 @@ not reset its pending deadline or create work by themselves.
 
 A due Keeper wake waits in the queue until the running turn ends; the next
 turn's intake admits it.
+
+Ready schedules without result delivery can share a turn with other work
+that has no reply route. Schedules with result delivery share only with
+schedules for the same exact reply route, including its thread and reply
+message. A checkpoint keeps unfinished requests pending; completion
+acknowledges the requests admitted to that turn. An arrival preview alone
+does not acknowledge a request.
 
 To investigate a delayed Job, inspect the exact schedule lookup at
 `/api/v1/dashboard/scheduled-automation?schedule_id=<id>`:

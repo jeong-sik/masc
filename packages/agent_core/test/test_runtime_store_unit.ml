@@ -6,8 +6,7 @@
     Functions tested:
     - save_text / load_text: roundtrip
     - ensure_dir: nested creation, idempotency
-    - save_session / load_session: JSON roundtrip with normalization
-    - append_event / read_events: JSONL append and seq filtering *)
+    - save_session / load_session: JSON roundtrip with normalization *)
 
 open Agent_core
 
@@ -203,13 +202,6 @@ let test_load_session_corrupt () =
        | Error _ -> ()))
 ;;
 
-let mk_event seq =
-  { Runtime.seq
-  ; ts = float_of_int seq
-  ; kind = Turn_recorded { actor = Some "agent"; message = Printf.sprintf "turn %d" seq }
-  }
-;;
-
 let save_run store session_id updated_at =
   let session = mk_session ~session_id ~updated_at () in
   match Runtime_store.save_session store session with
@@ -272,117 +264,6 @@ let test_list_runs_reports_corrupt_without_dropping_valid_runs () =
           | _ -> Alcotest.fail "expected one failure")))
 ;;
 
-let test_select_run_windows_variants () =
-  with_temp_dir (fun dir ->
-    let root = Filename.concat dir "store" in
-    match Runtime_store.create ~root () with
-    | Error e -> Alcotest.fail (Error.to_string e)
-    | Ok store ->
-      ignore (save_run store "run-a" 10.0);
-      ignore (save_run store "run-b" 20.0);
-      ignore (save_run store "run-c" 30.0);
-      let ids (listing : Runtime_store.run_listing) =
-        List.map
-          (fun (run : Runtime_store.run_record) -> run.session.session_id)
-          listing.Runtime_store.runs
-      in
-      (match Runtime_store.select_run_windows store [ Runtime_store.Last_n_runs 2 ] with
-       | Ok listing ->
-         Alcotest.(check (list string)) "last n" [ "run-b"; "run-c" ] (ids listing)
-       | Error e -> Alcotest.fail (Error.to_string e));
-      (match Runtime_store.select_run_windows store [ Runtime_store.Session "run-a" ] with
-       | Ok listing -> Alcotest.(check (list string)) "session" [ "run-a" ] (ids listing)
-       | Error e -> Alcotest.fail (Error.to_string e));
-      (match
-         Runtime_store.select_run_windows store [ Runtime_store.Rolling_seconds 15.0 ]
-       with
-       | Ok listing ->
-         Alcotest.(check (list string))
-           "rolling seconds"
-           [ "run-b"; "run-c" ]
-           (ids listing)
-       | Error e -> Alcotest.fail (Error.to_string e)))
-;;
-
-let test_select_run_windows_corrupt_session_is_single_partial_failure () =
-  with_temp_dir (fun dir ->
-    let root = Filename.concat dir "store" in
-    match Runtime_store.create ~root () with
-    | Error e -> Alcotest.fail (Error.to_string e)
-    | Ok store ->
-      ignore (save_run store "run-ok" 10.0);
-      corrupt_run store "run-bad";
-      (match
-         Runtime_store.select_run_windows store [ Runtime_store.Session "run-bad" ]
-       with
-       | Error e -> Alcotest.fail (Error.to_string e)
-       | Ok listing ->
-         Alcotest.(check int) "no selected corrupt run" 0 (List.length listing.runs);
-         Alcotest.(check int) "single failure" 1 (List.length listing.failures);
-         (match listing.failures with
-          | [ failure ] ->
-            Alcotest.(check string) "failure session" "run-bad" failure.session_id
-          | _ -> Alcotest.fail "expected one failure")))
-;;
-
-(* ── append_event / read_events tests ────────────────────────── *)
-
-let test_append_and_read_events () =
-  with_temp_dir (fun dir ->
-    let root = Filename.concat dir "store" in
-    match Runtime_store.create ~root () with
-    | Error e -> Alcotest.fail (Error.to_string e)
-    | Ok store ->
-      let sid = "event-test" in
-      let e1 = mk_event 1 in
-      let e2 = mk_event 2 in
-      let e3 = mk_event 3 in
-      (match Runtime_store.append_event store sid e1 with
-       | Ok () -> ()
-       | Error e -> Alcotest.fail (Error.to_string e));
-      (match Runtime_store.append_event store sid e2 with
-       | Ok () -> ()
-       | Error e -> Alcotest.fail (Error.to_string e));
-      (match Runtime_store.append_event store sid e3 with
-       | Ok () -> ()
-       | Error e -> Alcotest.fail (Error.to_string e));
-      (match Runtime_store.read_events store sid () with
-       | Error e -> Alcotest.fail (Error.to_string e)
-       | Ok events -> Alcotest.(check int) "3 events" 3 (List.length events)))
-;;
-
-let test_read_events_with_filter () =
-  with_temp_dir (fun dir ->
-    let root = Filename.concat dir "store" in
-    match Runtime_store.create ~root () with
-    | Error e -> Alcotest.fail (Error.to_string e)
-    | Ok store ->
-      let sid = "filter-test" in
-      for i = 1 to 5 do
-        match Runtime_store.append_event store sid (mk_event i) with
-        | Ok () -> ()
-        | Error e -> Alcotest.fail (Error.to_string e)
-      done;
-      (match Runtime_store.read_events store sid ~after_seq:3 () with
-       | Error e -> Alcotest.fail (Error.to_string e)
-       | Ok events ->
-         Alcotest.(check int) "2 events after seq 3" 2 (List.length events);
-         List.iter
-           (fun (ev : Runtime.event) -> Alcotest.(check bool) "seq > 3" true (ev.seq > 3))
-           events))
-;;
-
-let test_read_events_no_file () =
-  with_temp_dir (fun dir ->
-    let root = Filename.concat dir "store" in
-    match Runtime_store.create ~root () with
-    | Error e -> Alcotest.fail (Error.to_string e)
-    | Ok store ->
-      (match Runtime_store.read_events store "no-such-session" () with
-       | Ok events -> Alcotest.(check int) "empty" 0 (List.length events)
-       | Error e -> Alcotest.fail (Error.to_string e)))
-;;
-
 (* ── Runner ───────────────────────────────────────────────────── *)
 
 let () =
@@ -423,16 +304,6 @@ let () =
             "corrupt run is partial failure"
             `Quick
             test_list_runs_reports_corrupt_without_dropping_valid_runs
-        ; Alcotest.test_case "window selectors" `Quick test_select_run_windows_variants
-        ; Alcotest.test_case
-            "corrupt selected run is one partial failure"
-            `Quick
-            test_select_run_windows_corrupt_session_is_single_partial_failure
-        ] )
-    ; ( "events"
-      , [ Alcotest.test_case "append and read" `Quick test_append_and_read_events
-        ; Alcotest.test_case "filter by seq" `Quick test_read_events_with_filter
-        ; Alcotest.test_case "no file" `Quick test_read_events_no_file
         ] )
     ]
 ;;

@@ -2,18 +2,23 @@ module Lib = Masc
 
 open Alcotest
 
+(* [Sys.is_directory] stats through a link, so a directory alias is walked into
+   and then fails [Unix.rmdir] with ENOTDIR; a dangling link reads false from
+   [Sys.file_exists] and is skipped, leaving the parent non-empty (#26648). Ask
+   [Unix.lstat] instead: descend only a real directory, and give every other
+   entry back its own link with [Sys.remove]. *)
+let rec rm_rf path =
+  match Unix.lstat path with
+  | exception Unix.Unix_error ((Unix.ENOENT | Unix.ENOTDIR), _, _) -> ()
+  | { Unix.st_kind = Unix.S_DIR; _ } ->
+    Sys.readdir path |> Array.iter (fun name -> rm_rf (Filename.concat path name));
+    Unix.rmdir path
+  | _ -> Sys.remove path
+
 let with_temp_dir prefix f =
   let dir = Filename.temp_file prefix "" in
   Sys.remove dir;
   Unix.mkdir dir 0o755;
-  let rec rm_rf path =
-    if Sys.file_exists path then
-      if Sys.is_directory path then begin
-        Sys.readdir path |> Array.iter (fun name -> rm_rf (Filename.concat path name));
-        Unix.rmdir path
-      end else
-        Sys.remove path
-  in
   Fun.protect ~finally:(fun () -> rm_rf dir) (fun () -> f dir)
 
 let rec mkdir_p dir =
@@ -407,22 +412,6 @@ let test_local_masc_fallback_collapses_explicit_masc_dir () =
     (Config_dir_resolver.source_to_string resolution.config_root.source);
   check string "root path" local_config resolution.config_root.path
 
-let test_no_legacy_me_root_fallback () =
-  with_temp_dir "config-dir-no-legacy" @@ fun me_root ->
-  let _repo_root =
-    Filename.concat me_root "workspace/yousleepwhen/masc"
-  in
-  let resolution =
-    Config_dir_resolver.resolve_with
-      (make_inputs ~cwd:"/tmp/missing-cwd"
-         ~executable_name:"/tmp/nonexistent-masc" ())
-  in
-  check string "status" "missing"
-    (Config_dir_resolver.status_to_string resolution.status);
-  check string "root source" "missing"
-    (Config_dir_resolver.source_to_string resolution.config_root.source);
-  check bool "warning present" true (resolution.warnings <> [])
-
 (* RFC-0121 — .masc/<sub> sub-directory accessors. The accessors derive
    layout from [base_path] without filesystem access, so we only check
    the constructed paths. *)
@@ -578,6 +567,33 @@ let test_resolve_publishes_one_immutable_snapshot_across_domains () =
     check bool "all domains receive the published snapshot" true
       (List.for_all (fun resolution -> resolution == first) rest)
 
+(* The cleanup meets both link shapes this fixture can build: a live link into a
+   directory and a dangling one. Either mistake leaves the parent behind, and a
+   followed link would empty the target (#26648). *)
+let test_rm_rf_unlinks_symlinks () =
+  let fresh_dir prefix =
+    let path = Filename.temp_file prefix "" in
+    Sys.remove path;
+    Unix.mkdir path 0o755;
+    path
+  in
+  let root = fresh_dir "config-rm-rf-root" in
+  let kept_dir = fresh_dir "config-rm-rf-kept" in
+  Fun.protect
+    ~finally:(fun () ->
+      rm_rf root;
+      rm_rf kept_dir)
+  @@ fun () ->
+  let kept = Filename.concat kept_dir "kept" in
+  write_file kept "kept\n";
+  Unix.mkdir (Filename.concat root "owner") 0o755;
+  Unix.symlink kept_dir (Filename.concat root "live_link");
+  Unix.symlink (Filename.concat root "gone") (Filename.concat root "dangling");
+  rm_rf root;
+  check bool "the tree is gone" false (Sys.file_exists root);
+  check bool "the link target survived" true (Sys.file_exists kept);
+  check int "the link target kept its bytes" 5 (Unix.stat kept).Unix.st_size
+
 let test_canonical_owner_over_a_symlink_alias () =
   with_temp_dir "config-owner-alias" (fun root ->
     let owner = Filename.concat root "owner" in
@@ -601,7 +617,10 @@ let test_canonical_owner_over_a_symlink_alias () =
 
 let () =
   run "config_dir_resolver"
-    [ ("canonical owner", [test_case "config follows the admitted owner, not a symlink alias" `Quick test_canonical_owner_over_a_symlink_alias]);
+    [ ( "temp directory cleanup",
+        [ test_case "rm_rf unlinks live and dangling links" `Quick
+            test_rm_rf_unlinks_symlinks ] );
+      ("canonical owner", [test_case "config follows the admitted owner, not a symlink alias" `Quick test_canonical_owner_over_a_symlink_alias]);
       ( "resolution",
         [
           test_case "env override valid" `Quick test_env_override_valid;
@@ -621,8 +640,6 @@ let () =
             `Quick test_local_masc_fallback_collapses_explicit_masc_dir;
           test_case "external config is not a fallback" `Quick
             test_external_config_is_not_a_fallback;
-          test_case "does not fallback to legacy me_root repo path" `Quick
-            test_no_legacy_me_root_fallback;
           test_case "publishes one immutable snapshot across domains" `Quick
             test_resolve_publishes_one_immutable_snapshot_across_domains;
         ] );

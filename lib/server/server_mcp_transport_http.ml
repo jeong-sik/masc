@@ -726,7 +726,8 @@ let handle_get_mcp ~deps ?(profile = Full) ?(sse_kind = Sse.Agent_stream)
     respond_not_ready ~deps request reqd
   else
   let origin = deps.get_origin request in
-  let session_id = Mcp_session.get_or_generate (get_session_id_any request) in
+  let requested_session_id = get_session_id_any request in
+  let session_id = Mcp_session.get_or_generate requested_session_id in
   let protocol_version = get_protocol_version_for_session ~session_id request in
   let machine =
     match Server_machine_spectator.machine_of_request_target request.target with
@@ -889,8 +890,17 @@ let handle_get_mcp ~deps ?(profile = Full) ?(sse_kind = Sse.Agent_stream)
       in
       let observer_instance_id = Option.map
           (fun handshake -> handshake.Sse_wire.instance_id) observer_handshake in
+      let standalone_observer_instance =
+        match sse_kind, requested_session_id, observer_instance_id with
+        | Sse.Observer, None, Some instance -> Some instance
+        | Sse.Observer, None, None
+        | Sse.Observer, Some _, _
+        | (Sse.Agent_stream | Sse.Presence), _, _ -> None
+      in
       let otel_transport_context = transport_context_of_reqd reqd in
-      remember_mcp_profile ~otel_transport_context session_id profile;
+      (match standalone_observer_instance with
+       | Some _ -> ()
+       | None -> remember_mcp_profile ~otel_transport_context session_id profile);
       let token =
         match sse_kind with
         | Sse.Observer | Sse.Presence ->
@@ -906,8 +916,10 @@ let handle_get_mcp ~deps ?(profile = Full) ?(sse_kind = Sse.Agent_stream)
       | Ok () ->
           if Option.is_some last_event_id then
             Transport_metrics.inc_sse_reconnect ();
-          ensure_sse_backing_session_for_known_transport_session
-            ~transport_session_id:session_id ~sse_session_id:session_id;
+          (match standalone_observer_instance with
+           | Some _ -> ()
+           | None -> ensure_sse_backing_session_for_known_transport_session
+               ~transport_session_id:session_id ~sse_session_id:session_id);
           let expected_resource =
             Server_oauth_metadata.resource request_authority
           in
@@ -1008,9 +1020,14 @@ let handle_get_mcp ~deps ?(profile = Full) ?(sse_kind = Sse.Agent_stream)
           in
           (match
              Auth_oauth.with_expected_resource expected_resource (fun () ->
-               Sse.register_with_client ~kind:sse_kind ~auth ?observer_instance_id session_id
-                 ~last_event_id:(Option.value ~default:0 last_event_id)
-                 ~on_disconnect)
+               let last_event_id = Option.value ~default:0 last_event_id in
+               match standalone_observer_instance with
+               | Some observer_instance_id ->
+                 Sse.register_standalone_observer_with_client ~auth
+                   ~observer_instance_id ~on_disconnect session_id ~last_event_id
+               | None ->
+                 Sse.register_with_client ~kind:sse_kind ~auth ?observer_instance_id
+                   ~on_disconnect session_id ~last_event_id)
            with
            | Error reg_err ->
                let msg = Sse.registration_error_to_string reg_err in

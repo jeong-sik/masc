@@ -397,13 +397,18 @@ let test_reset_after_eof_prevents_body_delivery ~clock sw =
   check_next_body session delivered;
   check int "only the next valid body was delivered" 1 !deliveries
 
+(* The gateway fixture links a file at [active/outside.toml] inside the tree it
+   later removes. [Sys.is_directory] follows the link, and a link whose target is
+   gone reads false from [Sys.file_exists], so the cleanup could leave the parent
+   non-empty (#26648). Classify the entry itself with [Unix.lstat]. *)
 let rec rm_rf path =
-  if Sys.file_exists path then
-    if Sys.is_directory path then (
-      Sys.readdir path
-      |> Array.iter (fun name -> rm_rf (Filename.concat path name));
-      Unix.rmdir path)
-    else Sys.remove path
+  match Unix.lstat path with
+  | exception Unix.Unix_error ((Unix.ENOENT | Unix.ENOTDIR), _, _) -> ()
+  | { Unix.st_kind = Unix.S_DIR; _ } ->
+    Sys.readdir path
+    |> Array.iter (fun name -> rm_rf (Filename.concat path name));
+    Unix.rmdir path
+  | _ -> Sys.remove path
 
 let trust_policy () =
   match
@@ -1048,9 +1053,42 @@ let with_request_scope test () =
           ~max_pending_bytes:H2_response_limits.default_max_pending_bytes in
         Masc.Http_h2_response_ledger.with_request resources ~sw (fun () -> test ~clock sw))))
 
+(* The linked manifest above is a file link inside the tree the cleanup removes;
+   with a removed target it becomes a dangling link, which is the shape that used
+   to survive cleanup and fail [Unix.rmdir] with ENOTEMPTY (#26648). *)
+let test_rm_rf_unlinks_symlinks () =
+  let fresh_dir prefix =
+    let path = Filename.temp_file prefix "" in
+    Sys.remove path;
+    Unix.mkdir path 0o755;
+    path
+  in
+  let base_path = fresh_dir "h2-rm-rf-base" in
+  let kept_dir = fresh_dir "h2-rm-rf-kept" in
+  Fun.protect
+    ~finally:(fun () ->
+      rm_rf base_path;
+      rm_rf kept_dir)
+  @@ fun () ->
+  let active = Filename.concat base_path "active" in
+  Unix.mkdir active 0o755;
+  let manifest = Filename.concat base_path "lane.toml" in
+  write_file manifest "manifest";
+  let kept = Filename.concat kept_dir "kept" in
+  write_file kept "kept";
+  Unix.symlink manifest (Filename.concat active "outside.toml");
+  Unix.symlink kept (Filename.concat active "kept_link");
+  Unix.symlink (Filename.concat base_path "gone") (Filename.concat active "dangling");
+  rm_rf base_path;
+  check bool "the tree is gone" false (Sys.file_exists base_path);
+  check bool "the outside link target survived" true (Sys.file_exists kept)
+
 let () =
   run "H2 request body admission"
-    [ ("OAuth step-up", [
+    [ ( "temp directory cleanup"
+      , [ test_case "rm_rf unlinks live and dangling links" `Quick
+            test_rm_rf_unlinks_symlinks ] )
+    ; ("OAuth step-up", [
         test_case "scope refusal echoes numeric and string request ids" `Quick
           test_oauth_scope_refusal_preserves_request_ids])
     ; ("package catalog", [

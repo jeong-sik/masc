@@ -559,6 +559,7 @@ let execute_gate_input ~cwd argv =
     ~cwd
     ~sandbox_profile:"docker"
     ~sandbox_target:"docker:masc-keeper-sandbox:local"
+    ~network_mode:Keeper_types_profile_sandbox.Network_none
 ;;
 
 let test_host_context_identifies_registered_clone_and_destination_state () =

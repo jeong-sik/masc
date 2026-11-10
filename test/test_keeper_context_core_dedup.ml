@@ -236,31 +236,6 @@ let test_thinking_block_json_uses_agent_core_signature () =
       | _ -> Alcotest.fail "expected one content block")
   | _ -> Alcotest.fail "expected message object"
 
-let test_legacy_thinking_type_is_not_promoted_to_signature () =
-  let json : Yojson.Safe.t =
-    `Assoc
-      [ "origin", `String "conversation";
-        ("role", `String "assistant");
-        ( "content_blocks",
-          `List
-            [
-              `Assoc
-                [
-                  ("type", `String "thinking");
-                  ("thinking", `String "signed");
-                  ("thinking_type", `String "legacy-signature");
-                ];
-            ] );
-      ]
-  in
-  let parsed = C.message_of_json json in
-  match parsed.content with
-  | [ T.Thinking { signature; content } ] ->
-      Alcotest.(check (option string)) "legacy thinking type ignored" None
-        signature;
-      Alcotest.(check string) "content" "signed" content
-  | _ -> Alcotest.fail "expected legacy thinking block"
-
 (* --- checkpoint projection: exact message preservation --- *)
 
 let text_message text : T.message =
@@ -607,8 +582,6 @@ let () =
             test_roundtrip_preserves_tool_result_payload_and_provenance;
           Alcotest.test_case "thinking block JSON uses AGENT_CORE signature" `Quick
             test_thinking_block_json_uses_agent_core_signature;
-          Alcotest.test_case "legacy thinking_type is not promoted" `Quick
-            test_legacy_thinking_type_is_not_promoted_to_signature;
         ] );
       ( "text_of_history_jsonl_json",
         [

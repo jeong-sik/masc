@@ -23,8 +23,10 @@ module Span = Masc_tui_span
 module Status = Masc.Keeper_status_runtime
 
 val local_source_pending_note : state -> local_read_source -> string option
-(** The original local read's pending phase for the Work and Keeper surfaces.
-    [None] means that this source has no pending read. *)
+(** One recessed header row for a local read that has been in flight past the
+    display bar in [Masc_tui_types.pending_display_bar_ns], naming its stage
+    and elapsed seconds. A read inside the bar, or none at all, is [None]; the
+    stage words for younger reads live in the tui_local_read structured log. *)
 
 val runtime_assignment_label : runtime_assignment -> string
 (** The assignment shown in the runtime picker and Runtime Stats value. *)
@@ -171,13 +173,17 @@ val footer_line :
   ?status:Masc_tui_footer.status_item list ->
   ?position:string ->
   ?recovery_in_slot:recovery_row option ->
+  ?choices:string ->
   Masc_tui_types.state -> max_cells:int -> hints:string -> string
 (** [position] is where a scrolling surface stands in what it is scrolling.
     It is separate from [hints] because the fitter gives up key items from
     the back, and a position is the one item on the row that [?] cannot
     recover; kept with the keys that cannot be dropped. Use the footer when
     the detail has no spare content row; list panes with a window-reading row
-    keep their position in the body. *)
+    keep their position in the body. [choices] is an open menu's complete
+    decision, retained ahead of ambient notices when it fits whole; otherwise
+    its keys use the ordinary item fitter. Quit and input-recovery notices
+    keep their existing priority. It does not authorize an action. *)
 
 val keeper_split_threshold_cols : int
 
@@ -210,6 +216,9 @@ val finish_surface :
 type acting_pane_footer =
   | Footer_hints of { hints : string; position : string option }
       (** Drawn by {!footer_line}; [position] as there. *)
+  | Footer_choices of { choices : string; hints : string }
+      (** An open menu's decisions remain visible when passive key hints are
+          hidden. [hints] contains the optional shortcuts beside those choices. *)
   | No_footer
 
 (** The end of a surface that draws its own composer and footer instead of
@@ -230,11 +239,14 @@ val recovery_box_bottom : Masc_tui_types.state -> Buffer.t -> cols:int -> recove
     recovery notice when one fits. The result is the same selection passed to
     {!footer_line} to avoid duplicating it. *)
 
+(** [help_door] lets a surface with its own input, such as chat, supply
+    whether [?] currently opens help. *)
 val finish_frame_beside_acting_pane :
   Masc_tui_types.state ->
   ?clamped:Masc_tui_types.clamped_scroll ->
   ?roster:Masc_tui_pane_selection.roster_split ->
   ?recovery_in_slot:recovery_row option ->
+  ?help_door:bool ->
   surface_key:string ->
   cursor:Frame_presenter.cursor ->
   rows:int ->
@@ -491,7 +503,7 @@ val browser_lane_rows :
 
 val semantic_status_color : string -> string
 
-val planning_phase_label : Goal_phase.t -> string
+val planning_phase_label : ko:bool -> Goal_phase.t -> string
 
 val planning_action_key : Goal_phase.Public_action.t -> string
 
@@ -501,10 +513,10 @@ val planning_action_confirmation_keys : Goal_phase.Public_action.t -> string lis
 val planning_action_of_key : string -> Goal_phase.Public_action.t option
 (** Parse the same keys drawn in the Goal detail action strip. *)
 
-val planning_action_label : Goal_phase.Public_action.t -> string
+val planning_action_label : ko:bool -> Goal_phase.Public_action.t -> string
 (** What the goal detail's Actions and ARMED rows call that request. *)
 
-val planning_phase_column : int
+val planning_phase_column : ko:bool -> int
 
 val planning_phase_color : Goal_phase.t -> string
 

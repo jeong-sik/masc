@@ -959,8 +959,16 @@ let choice_case_of_code code =
 let selection_error_message = function
   | Activity_rejected rejection -> activity_rejection_message rejection
   | Transport_unsupported { transport; capability; _ } as error ->
-    let serving = match live_transports_serving capability with
-      | [] -> "no connection serves it"
+    (* The refusal already names the transport that did not serve the
+       capability, so the remedy must name the *other* connections that do.
+       Listing the reported transport again produced "this browser is
+       connected over ego_task_space, which does not serve touch_input; a
+       ego_task_space connection does" -- one sentence contradicting
+       itself. With one transport left over nothing, the sentence says so. *)
+    let serving = match
+      List.filter (fun other -> other <> transport) (live_transports_serving capability)
+    with
+      | [] -> "no other connection serves it"
       | transports ->
         "a " ^ String.concat " or " (List.map live_transport_to_string transports) ^ " connection does" in
     Printf.sprintf "%s: this browser is connected over %s, which does not serve %s; %s"

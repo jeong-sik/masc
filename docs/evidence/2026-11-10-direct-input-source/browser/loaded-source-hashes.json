@@ -1,0 +1,1101 @@
+{
+  "scope": "browser-requested source modules plus explicitly imported CSS and local CSS import closure; extra before-manifest files retained for stability checks",
+  "files": [
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/issue-campaign-20261109/26049-peer-source/browser/fixture.ts",
+      "sha256": "ec313977be366f8a14602c38499c514086ce27f8444302f19c3f18128ccd24f0"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/@noble+hashes@2.4.0/node_modules/@noble/hashes/_md.js",
+      "sha256": "60cf3010fda89e3e4d3f0e7ff1ce249e9c467f34b4fd41b6fd6101d9f69be763"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/@noble+hashes@2.4.0/node_modules/@noble/hashes/_u64.js",
+      "sha256": "b09da8c07fe8187c07649494cdb7cd0bcf13df90b506a9473d19e4d5f8c2e102"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/@noble+hashes@2.4.0/node_modules/@noble/hashes/sha2.js",
+      "sha256": "471746bba6ec4c6238ca41358d1d3b40b6ff31cf3363f0b4d550c649c1a8e83b"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/@noble+hashes@2.4.0/node_modules/@noble/hashes/utils.js",
+      "sha256": "037ad49adb78168b6b699598fd33f85f7877456b1d28b4d032e2a1a16807947c"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/Arbitrary.js",
+      "sha256": "41d01ebba9b026d0c1da1ec5555513a7b94693195fce71911464dda8cccc629a"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/Array.js",
+      "sha256": "f76f102a4f05685544ec9881f2491ff6278700cd8fd9c7baa5fb631923dffcc1"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/BigDecimal.js",
+      "sha256": "f682f1bdb925c23ab977195428b265fef6fecc90ac4c41f1221e707cba361e93"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/BigInt.js",
+      "sha256": "5bbb4e2f71b47dcc5b0592f70988abe545f02439c28062815d1b4afe9e251fea"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/Boolean.js",
+      "sha256": "c3ad2d774c901ba1792ed10cb834a3d471026c3ec497e0312e414ad06ace0eee"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/Brand.js",
+      "sha256": "f84612ed709ce6cd48d3d3ef815a2e3ed9185e3999ccae6f77aa9f90d6c23d99"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/Cache.js",
+      "sha256": "294e3af1894cb2f6f58d02120a6e69a98798896df8e8e28f58d28f9a94466381"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/Cause.js",
+      "sha256": "2d54e15e5999f472af97fd9b3f87b8dba77ce1453c8294bdedef0f6e1a122293"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/Channel.js",
+      "sha256": "5db0fc1776bd38e65a8b82ba9f8603dff0690f1ae700c8c10c6d24ca2ff307ca"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/ChildExecutorDecision.js",
+      "sha256": "294afa4880493c17ea7a4599da86fe7095944586268f00e9560b43c819eb0030"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/Chunk.js",
+      "sha256": "31c0ca143f4da2e8ed026c89d98991638ad547fdb59b01344c6b0c87367c8e1b"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/Clock.js",
+      "sha256": "959dde309aaee2bd1edbdcd4bdd96a40cad8c5f49d05077393107f52497652cc"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/Config.js",
+      "sha256": "b18c7f624e5da83f2aa08337f0a85b45aae361f40563c7131978acab4ed75b72"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/ConfigError.js",
+      "sha256": "d07b1ab687e4bf86199a23120a7f638c1d1d1126386cdfdb670c21d44e956602"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/ConfigProvider.js",
+      "sha256": "809dfbf85799fdfdbb0c91b394dd24e39e2f4ec3cffcf8a9daecb2158acf7f17"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/ConfigProviderPathPatch.js",
+      "sha256": "754d38dec525d043af6986d94b28f596bcb6d9404104328372dd9429f13da77b"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/Console.js",
+      "sha256": "904e333c672cc2d26d7221382f911282fa7cf8341b2af27919398b8d47317744"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/Context.js",
+      "sha256": "b319b7e193eeb432f59e252a375688c7d4325846b1ade7c7b42f9c03183cc9f2"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/Cron.js",
+      "sha256": "671be9ea565c1cf122bf1070cb0c970005615b22d18aea41705e14d3b45e308d"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/Data.js",
+      "sha256": "8acffd935484f6483cbd4bc9dd3578ea533432ae631a854a394bdf80b770e039"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/DateTime.js",
+      "sha256": "a96d6d2d61ed661830dd8928ee6dc5f35804e7a64b7f3993214df06e8f6542e1"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/DefaultServices.js",
+      "sha256": "9eceed382df9ec04b6e45ec5a5cbaedd3eee1a4946719e4f486a97e46b9870c2"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/Deferred.js",
+      "sha256": "f2be3acd3c3069fb970834e26f3fa5c05a58604e7b4be65af349759b1cd46094"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/Differ.js",
+      "sha256": "0629376323f3130bff0c73c274b9f25a20269342523f7e6b392714f138688553"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/Duration.js",
+      "sha256": "f5a31d2f1fcb592a25d8a9f7b098efbf2f137749cb55acf90e2eff0d06caefdc"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/Effect.js",
+      "sha256": "8f12ad8374f95b25cd4816f3deb45fbfaa547cef71e0f33b0fde8463011e74f5"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/Effectable.js",
+      "sha256": "5eed3ac34b1c72f787300a2049a523e4e0b4203b146734f11ef03f3c56d6d8dc"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/Either.js",
+      "sha256": "7700a53a084a1225006406b0eb4803b04b9f0a0ea8cc1a4037e188254986ad2d"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/Encoding.js",
+      "sha256": "330d2a793146866089a4bdb7b78deaef768e5ed4ce1fe18986f8ed27ae766712"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/Equal.js",
+      "sha256": "8367c4b48fe701544e764d3c11aa96c06bd2a50a48ab466c136db1e57be63f2b"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/Equivalence.js",
+      "sha256": "a12364e98220854f548931283e496ca62c2dc5c02e7b3dda7bb40825aa44d8b7"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/ExecutionPlan.js",
+      "sha256": "1615235059ef7c8d1a11b72e2af03b6cdf693cd741c94d0aa514cb26ef4ace0a"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/ExecutionStrategy.js",
+      "sha256": "622fac972a266d9a9f19321c67a4797e15d3f52d18964f00afe7768bda7e277f"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/Exit.js",
+      "sha256": "d5c3b1b908c18e9c00785d5d0a7aa854a25818018b7481205d18e23ba3b11345"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/FastCheck.js",
+      "sha256": "5c83635899a40405b7ef92370f957988b56714968cb146f8f4d5fffcf81c07eb"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/Fiber.js",
+      "sha256": "2dc1bbd03b813200aaf4768deac3e91c626639ebe98027a6f33026065e3c7c67"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/FiberHandle.js",
+      "sha256": "6b1c06db742f7f83ced580274b56fb80b5c7b304171833109defd3d4aea1746c"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/FiberId.js",
+      "sha256": "d0fc2ecfa52a09d6dee67d90ec3d4eb749a9acd3084a49438a4a22a5f52e6ff9"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/FiberMap.js",
+      "sha256": "795e33ca41e90977ec11a7f12ab0fb60061534aeee3da881ba260ccaf69cc211"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/FiberRef.js",
+      "sha256": "ea17f2376609bd3df59daf94f307826e9aa6bf2684101b575d8d703661d0d820"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/FiberRefs.js",
+      "sha256": "ffbefa08698eeda42e0ed3257a1e7b1ee57d0805c6609361e5b8c8c560bce6d5"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/FiberRefsPatch.js",
+      "sha256": "839dbab06e711ffcf30ac834a230b64c58ceaa62518c5304ccae2dc210bb6769"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/FiberSet.js",
+      "sha256": "f1136d72aae1dad40ce8a52ebb331574e165c1bb3f48fe3bb09e07835623339c"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/FiberStatus.js",
+      "sha256": "17fa6cef59859daa9fb44594cf05656939fdb8a27be0288df601ba31c5a3a3f2"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/Function.js",
+      "sha256": "6c346d5122b0880f6dea12db3722a18b7fc93f3b18029a9c503085de94031daa"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/GlobalValue.js",
+      "sha256": "0f0334af36d12adb42e20d278d8d37fb74e8deca2236e5317f538d77d3c780af"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/Graph.js",
+      "sha256": "9e58c8440d117010062704b53252f63bbe155b81fc9f3b16ba6a6efa4f3ca3d7"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/GroupBy.js",
+      "sha256": "02ced208574c76ba2480362479f0ac2751342aa9620de07497c32a9abdbb82d2"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/HKT.js",
+      "sha256": "14e2bdf970c660cc02b1587435d3375515d031f5628037b7ae74ac107ccc2d9e"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/Hash.js",
+      "sha256": "a6f1307bbfb32830e7d46ab14e2e4a6a9a348fe89611eb60a380cccd35fe5269"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/HashMap.js",
+      "sha256": "1ffea6ebfb7a10682db76540f8692a9a75672b8835469e3680f43b1307ee9c9c"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/HashRing.js",
+      "sha256": "b61b45b79fe9ca099e9432608aa0aa3661539ed406d416fed58b3ff7c8ab25e4"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/HashSet.js",
+      "sha256": "fa556eda298441a6f466c303410ec35b45f4269bef7d17b6c0dd52a27b87117c"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/Inspectable.js",
+      "sha256": "b5f8a1650f0a4eefecc4f62a0b188a5f98feb79f733f35b279c60a8338db0f99"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/Iterable.js",
+      "sha256": "f5f84135cf9720cccfaa422132f825cd0b8d5f5e4a937ae3aa0255b2c4390f42"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/JSONSchema.js",
+      "sha256": "0e4d77286f8ca8e18d466cf7b4ebbd8fbbf9c3f7232cf6e0d07ac515c3ae6f9c"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/KeyedPool.js",
+      "sha256": "4974e73e33998700ea658933e62a7029c7f0d52cb8df5cad223c8620a2e32caf"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/Layer.js",
+      "sha256": "ec617525d21d8a1e737895fb750a79cd0d57a5605895a36985c980613324b673"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/LayerMap.js",
+      "sha256": "a64164488584242a4aa2a223388ef8da3cbaee882f36e480059ef309d6b7149c"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/List.js",
+      "sha256": "0c70a0619e7ec7f3f697a355c6036563476623e5fac0106712945d1cdd308ca3"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/LogLevel.js",
+      "sha256": "c1b0818ed89964513a0882db3687a37610f8d66106d2c2b2db2d50e5c7f960e5"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/LogSpan.js",
+      "sha256": "3b29893679257e615ecfa071a7728aeb265b6cdddf84412235b2ce75b6d36e9e"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/Logger.js",
+      "sha256": "868bd8cc1e69861fe3f2e3eefe0f6ac09d9b5ed5f3211c654fbcacb1d09e5ac4"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/Mailbox.js",
+      "sha256": "7a4de2fb7f481e815d95b646115a825ff851eca2f37e58b60557b0d310c022a5"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/ManagedRuntime.js",
+      "sha256": "79ec4db94379b33c47efd7c83d164fa39ca574d6354ff15bfc94ac456f404ecc"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/Match.js",
+      "sha256": "211d907b1250fb528493854c90607c68fe17580872419d921b3db03efd5a0245"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/MergeDecision.js",
+      "sha256": "e350a141fe0ee2f1dab8d378a87702d857f44f0abccba01f29e9a2b35e70d2ae"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/MergeState.js",
+      "sha256": "8c5b92bedf3f16bff6ba4cfdb9bd93a2be78099c84899dfa13c937a9e30600d2"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/MergeStrategy.js",
+      "sha256": "8d29c279e6fcfd7b4a527b5917c46d463eed1cf007c6dfaa4b2ce882d2ef7c2a"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/Metric.js",
+      "sha256": "ffd11c2558809cf283b87df166aae1c3016af1f2f50808d1f97532292bf5a85f"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/MetricBoundaries.js",
+      "sha256": "a2fea8780877f34173b801d732b02c00a6045437f20d19bfb6ff0b0e2e843a49"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/MetricHook.js",
+      "sha256": "54ff0fa2851c8a6f39d2523d72d2001e78b86120413e07af0a37cf18507c26f8"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/MetricKey.js",
+      "sha256": "fea5f08635fcb8c22fcf7f1afb93a1d9792a5d3fbed3a9196626ff2a32fd02b7"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/MetricKeyType.js",
+      "sha256": "6a8660d401ea7ff62190bb40454f9732216687374d8061fc4c191502ab304ebe"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/MetricLabel.js",
+      "sha256": "0dfea5a98ff2c300ec86f95b1f9315d9d551b02c04082a12e4fd2ea2cf5f261c"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/MetricPair.js",
+      "sha256": "68b5de55b509ca4b11d87c61b1f795c13d7d066957be4dc5a10f8ce011cc62ad"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/MetricPolling.js",
+      "sha256": "355e83ff837c2490bd60209f42e80db75ddf7dfd5cc2d64aa6284b8adb0e4da7"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/MetricRegistry.js",
+      "sha256": "a0dc10e5c7578a4cea7a2da13c3c42860c094a48a1cb8fff1a3b5f824018e17d"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/MetricState.js",
+      "sha256": "b083fb71e842081fffb618acce003bc33095c6d9eaac6d68a39d5731e96b6284"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/Micro.js",
+      "sha256": "f2b1d40eb9b93e9d4145349af194b2b464759750b8a85e8d8f07ca64dbc9ec57"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/ModuleVersion.js",
+      "sha256": "7f7cc6327722d2255603af3ec7d864b3c545a3474431b22d0a7740d9e3ffabe4"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/MutableHashMap.js",
+      "sha256": "45e4c8d06cc0546c5cc02f9e3d1bc490de84444a97fb563818ad274542c35801"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/MutableHashSet.js",
+      "sha256": "01c14131a82dbff791aba84bf8230a2e1822533f0a7f77835c01379215b570a9"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/MutableList.js",
+      "sha256": "f63520a6085983366be750f09f914141f4015823c4d79dc9f7be5c1e2c580226"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/MutableQueue.js",
+      "sha256": "208499a74a6804f0cce29f5294da1da3ef3999d43339ba9907b565173497f5fb"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/MutableRef.js",
+      "sha256": "74194b4866f8bd879d1c587fcd9288ff95e81f5e1fdd9a2ff13a880402190089"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/NonEmptyIterable.js",
+      "sha256": "a8871213c30e951faf33aef1b8e6b2a2f6cac759ffe56bb0a3a92ef7e21bf56c"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/Number.js",
+      "sha256": "f2fc39f5412dc5a0f7278f7d84c916b82e49b8d9297070eff7a0494bf086f7bd"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/Option.js",
+      "sha256": "199188328cfbb34b4c0b1f88b5e928b0c72fd4478d0825e51cf0dbbf6089bc08"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/Order.js",
+      "sha256": "cc60a74b6c44c1839061f420adc33e5cae1de7810b8ebf3d372995bfc644442d"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/Ordering.js",
+      "sha256": "e0bfa9fcd46a1f7b76c6c9af4da18798c70ff39cc76c76453706b1230ed255b6"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/ParseResult.js",
+      "sha256": "a145698d4fb549ee3a54cea903af24ac2a1dba8270512db8f78029ddc2762a2b"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/PartitionedSemaphore.js",
+      "sha256": "7fcde7d32dd4cbc37fbb5c5fd1a10701af6a4c4100a0632ed9803af364554c26"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/Pipeable.js",
+      "sha256": "e89632e6689a573a82c89aaa86c25621f699cc51d27544b371b0ff7850fe3318"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/Pool.js",
+      "sha256": "4950a6149ec9e3ed2bc05decfa7d0ce52cd205990c5c3d1fd5549cf9ee08536a"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/Predicate.js",
+      "sha256": "4528ed66306d919dc57403c320e0a0f10e0551f0d40eff2c201d8a80f904d2e8"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/Pretty.js",
+      "sha256": "ef4633a4315a54775ca674c590e6ac0d3fd01faa8701784b68d7558645ab4cd3"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/index.js",
+      "sha256": "d01a7afc13ac36758aaec93e494cf81e947836f55131bb3f1e66d32ae5d6d191"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/uuid@14.0.0/node_modules/uuid/dist/index.js",
+      "sha256": "65e9fae8f22278e6c9ac5b016dbe1ead01b8014f66ce08a807741885d4bf01f1"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/uuid@14.0.0/node_modules/uuid/dist/max.js",
+      "sha256": "8f81a7b2a5f8704ea1b4e8f83d36659856fdf3d122b2bd16fe1b5c47c97b6ffa"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/uuid@14.0.0/node_modules/uuid/dist/md5.js",
+      "sha256": "dd40eb52bd4841e869444c2998779319b9db3cedd397717895c0ee6e2451e2a1"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/uuid@14.0.0/node_modules/uuid/dist/nil.js",
+      "sha256": "a6f8ac293df0b75af2946e5190d8f00336b826bb1340b96d669a09beb8885ff8"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/uuid@14.0.0/node_modules/uuid/dist/parse.js",
+      "sha256": "a383f50a691c05533a40bbb4a87f718daa050abbc96debc9715efdc74d8538b4"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/uuid@14.0.0/node_modules/uuid/dist/regex.js",
+      "sha256": "774bc4bc767a58458dfdd252430d96b71b3d380ac241b50df6cb757aaa1b4783"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/uuid@14.0.0/node_modules/uuid/dist/rng.js",
+      "sha256": "69d169609cd3f16d85b120b1d88e247216a59c7c5a27b321290c0604627db5c3"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/uuid@14.0.0/node_modules/uuid/dist/sha1.js",
+      "sha256": "c75c3ea675e5af8552ed41662cf6544daa0021eb04cee5c30589e837272a0016"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/uuid@14.0.0/node_modules/uuid/dist/stringify.js",
+      "sha256": "bb592b599f2b00be6ca9fb2ac2fb7350abf3a6e6e274201cf6865c8c15e52b6a"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/uuid@14.0.0/node_modules/uuid/dist/v1.js",
+      "sha256": "a3cd1c783a64f6e010af00593ac8e7e28c127a5e63266da4809b5687f1a081aa"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/uuid@14.0.0/node_modules/uuid/dist/v1ToV6.js",
+      "sha256": "f0a2d19ee0d4398607808fcfc3eebeb1ea7af08a0c17d71d42fc612f97241a3f"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/uuid@14.0.0/node_modules/uuid/dist/v3.js",
+      "sha256": "3b65ad31501886af057e13aeec03afedc54f1f85cc8d332b0eb89800b11fbce4"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/uuid@14.0.0/node_modules/uuid/dist/v35.js",
+      "sha256": "ce090c2ea41db958cff64383cdcd09de21b577d33a57fa281cad1dde2c87b02d"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/uuid@14.0.0/node_modules/uuid/dist/v4.js",
+      "sha256": "eb4b917bb2bfcb3e723fedf3c5d0256b83578a9285e85ebf4c60caa953aa3d39"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/uuid@14.0.0/node_modules/uuid/dist/v5.js",
+      "sha256": "daaf09616ea3b145ccd6a1dfea190b65d546267a9916c5741e026d4290c61ae9"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/uuid@14.0.0/node_modules/uuid/dist/v6.js",
+      "sha256": "32f4c875353e043cb8d790f2d63d46e7b23d592fa3d5d09ace6afcff1dd44e03"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/uuid@14.0.0/node_modules/uuid/dist/v6ToV1.js",
+      "sha256": "78475a282beaea6e8c45e5f2586134929be2e21728f159fb8559df06d7288475"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/uuid@14.0.0/node_modules/uuid/dist/v7.js",
+      "sha256": "38208cc85d447b13d7fc9e75377d4f82e17ad982334786396623c57c1406a257"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/uuid@14.0.0/node_modules/uuid/dist/validate.js",
+      "sha256": "78ba6a91a3c2d219e3a6980d7704c0998e8152cabcaece0f5a04989025d0e60c"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/uuid@14.0.0/node_modules/uuid/dist/version.js",
+      "sha256": "5a43d6eb8496806fd5e152f92edda603dbb1f77108045edcf034f22c9e320ce8"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/vite@7.3.7_@types+node@22.19.17_jiti@2.6.1_lightningcss@1.32.0_tsx@4.23.12/node_modules/vite/dist/client/env.mjs",
+      "sha256": "98339370fa9a7f50c9debe091db27248cbb7280e29cc9770d214e6dfa7b6f73a"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/design-system/migration-bridge.css",
+      "sha256": "9f6e8394acd71437df3da570fa4684db0dcc8402716692b949461f575cd79606"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/api/board.ts",
+      "sha256": "6887bf298bd1d4195f0912ccaefde7aa43f8e600da41d97e66d9f0513ed6a30a"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/api/core.ts",
+      "sha256": "ae0e79a5ada013b73f8d87387fcf1ac43f930df6ba845ac72eac946c0f4ccde0"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/api/dashboard-agent.ts",
+      "sha256": "29fb1ee9bedbb836dde210d4cb3b0d22fb5fc7ba64c3d37aea00602c1ef58bc7"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/api/dashboard-exact-lane-runs.ts",
+      "sha256": "48551149e4aae1de3eede457024ce251b65299c9247dd7906d704fae8352921e"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/api/dashboard-execution.ts",
+      "sha256": "757168047cf3ea651d4dbbd48be1cf686edb2de9c75fffbd8560d5cd86db8f0a"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/api/dashboard-fusion.ts",
+      "sha256": "cd046dea6ad7b41ec78819d30aba95f28d0a6d502e0c68f4312e00029dad103c"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/api/dashboard-gate.ts",
+      "sha256": "803bf2b1279b3fcd934754caa0e181178a695b8a6b0689a6b9492d184d0c2bd6"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/api/dashboard-goal-verification-runs.ts",
+      "sha256": "ecc9b8e9cfcefc81e831f16db2f5b7a131a9ac5d5dad1bb017fefc6c61d6d066"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/api/dashboard-goals.ts",
+      "sha256": "884a5387413a61b413fe15c7f59da45fcdcd6386a48f92b08d9ed67d7ffe9b8a"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/api/dashboard-hot.ts",
+      "sha256": "d950ed225782f517118499e49785cb2c86cb411ee3bab6885fd2794300e7a595"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/api/dashboard-keeper-config.ts",
+      "sha256": "52d809462d9931b9b083344a214d608ecfa0aa31e937e5cc48c9b6f86f1f7ca5"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/api/dashboard-keeper-cost.ts",
+      "sha256": "a04e8a3051fb2f5ec1c24f400170a0c21b15b044d6242c20b56eb16ed6075d1a"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/api/dashboard-keeper-prompt.ts",
+      "sha256": "19e1d10a9decb1dfd9d3a391b570eb04f7048f259cc44e3bcccfea3890a7e5f9"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/api/dashboard-keeper-tool-calls.ts",
+      "sha256": "efd89358ea456e4825d99350b0a2db3f2868e9fd6e32c9dfa0bffaaf0cfb287a"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/api/dashboard-keeper-tool-stats.ts",
+      "sha256": "50346054daa46de6c2c918541eec65d20370d2300419a333dcf95927cb4882c0"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/api/dashboard-keeper-trajectory.ts",
+      "sha256": "83ed902eafe50e595762ec7dbeb3fe7ee148bf969c93d40663fca8a91f9bf779"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/api/dashboard-misc.ts",
+      "sha256": "ff473520798132acaf9b17bb226666d17c7d49950f7db00e323f4d03f456f2a1"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/api/dashboard-mission.ts",
+      "sha256": "dc699c3963455a231b281b2007511420f730f923f5c4e6851faa17c0dc7a3c4b"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/api/dashboard-provider-input.ts",
+      "sha256": "a5df2bc2ab1eceace9af0e7532c0f9157d42709759c0c6231d15c16aa1b47731"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/api/dashboard-runtime.ts",
+      "sha256": "b80e1648394a708a78c9e7a7e8570dae6006829ee474e5aee042cf600a94a9af"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/api/dashboard-schedule.ts",
+      "sha256": "c5df4e768554255ebeb3fce3f7aaec1f8b3f6ac12f8c7e84a69f650b593e69cc"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/api/dashboard-scheduled-automation.ts",
+      "sha256": "262636c6126f1eb4d50c5d1d508d4a03badc5c2fbd74fbb444905b869e257d7c"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/api/dashboard-shared.ts",
+      "sha256": "2be7af9c625a097d5fc3de77d24abfb34102b5269cc4e87a54368f815033ffbe"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/api/dashboard-standalone-lanes.ts",
+      "sha256": "ba952133f76b371988eea98a0b8046f7cf505c7981e01e8d5e112dcba28d7fef"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/api/dashboard-telemetry.ts",
+      "sha256": "bb96e1f5508741104510687d5ff698a807ef9e4f08c84fbdd6e88d603594f7b2"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/api/dashboard-tools-prompts.ts",
+      "sha256": "0b8f08a65c05f80b8fd3fd628fb1c346f7e9d49268ad438efca1f107b6991378"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/api/dashboard-turn-records.ts",
+      "sha256": "5953dbede75c6d89c6fd7a7224a2dd23d760b9b661eef193980df6da05916edf"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/api/dashboard-verification-runs.ts",
+      "sha256": "1c5a38f9df64352a0532e7771519055020a9e401b3a76aaf35bea3b990c94137"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/api/dashboard.ts",
+      "sha256": "8f81ba5225cfcb6a0be7b48f1adf437b737a317b26c1349c7d5ac09bed2bca0b"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/api/dev-token.ts",
+      "sha256": "acb752ae3934f849524b5c53c4f1cb32c2004ead96bdbde483c4526cd7731910"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/api/goal-criterion-review.ts",
+      "sha256": "15f3c7a3995f5810ce208e50f7dde53e5e2add013923a77176c403fe460cd443"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/api/goal-lifecycle.ts",
+      "sha256": "2e9d942e0ef72a01ccbdf1814ab8d926d5db2dbefe243b8c3d1d3224779fe09b"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/api/goal-proof.ts",
+      "sha256": "181cfe69384c99a7e7b65501244857637bfbf6418ffd35d58e2fe7291d313232"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/api/published-artifacts.ts",
+      "sha256": "0aa26326a030944c5ec9615aa403eb7d4456cd643d7cba44aa4d20e102e7b639"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/api/schemas/prompt-authoring.ts",
+      "sha256": "32a2c2003e2bd7fa0230ee24d2f93c394ee532c45f26b26b58c6b3f4d5faf638"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/api/token-revision.ts",
+      "sha256": "fe7a83c8fab961a0071e52c8c7b202d8cc8649fbf565c86e324d95254e9246b7"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/api/tool-host-failure.ts",
+      "sha256": "9e17f8399d6899e6f82f838c049f44cab04aae9b27718506e7d6920b7cd9584d"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/components/btn.ts",
+      "sha256": "3073c01ca2669144e5b859795d59337584366c5d87b88b637de34ca75243c957"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/components/common/context-window-facts.ts",
+      "sha256": "d467c2284f28877e73dcdcf53c30ede9a28c756e879cd82fdd117137482885bb"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/components/common/json-viewer.ts",
+      "sha256": "a20de16b5397765c27c11f3772a7cd12957e64f5dcdefcdd1506adc34bd16c08"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/components/common/normalize.ts",
+      "sha256": "1f62adec4e5c7e75f9fdec80dba4b13ff938fd3241bbee625dd72eb0a6076239"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/components/common/turn-usage-scope.ts",
+      "sha256": "28ec5fb9a079a17b6c690c154e4f2e050f5c01952ffb08d7be5374c477dbe4cd"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/components/keeper-turn-inspector-panel.ts",
+      "sha256": "74c3d6f6071b6771c2978edf9b437b04cfa715be32cfe52f49fca8bbdf242f8f"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/components/memory-inspector.ts",
+      "sha256": "0866a0550a2169110ccd7bff03ee5d9c3c6453db1fedfbcf9fdb342e1fefb05b"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/config/constants.ts",
+      "sha256": "243373e6f738d04fc4de61951bd06050799da9dfbe2146c63fda4550a9bcc821"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/keeper-store-normalize.ts",
+      "sha256": "86c14016e15c9992fb74cead026f5ca558db85c3048e6a40891578dba13b81cb"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/lib/async-state.ts",
+      "sha256": "984eaba134bbec3e54431ab481f43510aa50404fc882da7e37eaaf068c9f0882"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/lib/format-string.ts",
+      "sha256": "becd133e124a247ddb9602f7583347fc666a55f3095a7ea5711336426edabd61"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/lib/format-time.ts",
+      "sha256": "958b9d273a97b7816aa33095e34ceec6aee32f04b924276084408146c83ba507"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/lib/gate-observation-state.ts",
+      "sha256": "f47bdb8579bbf0f34f43cbbaf2da7ea3a27c3320e7a44fe0925ff6d2c3e5d5c0"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/lib/goal-identity.ts",
+      "sha256": "536f79fb77447606d4c6b0f21769a29318d537700528ebd103df1e6d5180fc76"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/lib/goal-store-unavailable-labels.ts",
+      "sha256": "195ead58049420c1a504977bf45e5fdf43a17e19e82b71c70ce7dabfaa407243"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/lib/keeper-approval-audit.ts",
+      "sha256": "35fb137be0d28a138cc3152ffc68a1b5e4fe0609fbb1e753f86ada00c9db5da5"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/lib/keeper-approval-decision.ts",
+      "sha256": "3ca4a16de765902d721dd958ebca1dd7451e185e1c47665db1e663d37c33444e"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/lib/keyboard.ts",
+      "sha256": "b5788c18bc0f8257ee35517881e0cf0f919071ddf9ed4c43ef776c2f79a041cd"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/lib/rfc3339.ts",
+      "sha256": "af5c5be3ad47ffd14d8509a1fc1edc41f91e4903d2be5be6f16b3ef834fa1e21"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/lib/trust-disposition.ts",
+      "sha256": "667dc4d334825d42434fd091fe8a8ce4c6b399ed9d67bbcaecff98e750a0683c"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/lib/turn-context-window.ts",
+      "sha256": "053e9cc4ba85023ed4b1dac244ee3347bf7118309763995a5eb74a445458f3a4"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/lib/use-managed-async-resource.ts",
+      "sha256": "174564fdb4bf356ef0310c72822193cba30117634774987ba506cd92fc99b92a"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/a11y.css",
+      "sha256": "b5afb6b837ea4058446096d2669eb72c8f2f0b2f9ef79b3e2439da6b4a4b6ed5"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/agent-profile.css",
+      "sha256": "b7ed67422325c12829caaeafa6c1576ae844038a465c617d04024f8823df6255"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/app-shell-v2.css",
+      "sha256": "e87a663b29d4da3647d2ca097b66f0d70c9b673d145447a6b595e6ed3da94055"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/approvals-v2.css",
+      "sha256": "64572691ce42cc9bf93562080c89e5cb726d477b118287ea24980cd463f6d8a3"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/base.css",
+      "sha256": "83b59ce9e4769f24bf91c92244cd6c34c18513b2d881aa1dc9ca9fa267ef64f3"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/board-v2.css",
+      "sha256": "2127619eef90dc0d7ef6dd34a73b0bc7880a994a4b799edb1dabb295b137facb"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/board.css",
+      "sha256": "4ba86f7fa574323683dda253c28c2817dcf82dbad61c870cdfef1a29f1d44d1e"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/chat-blocks-v2.css",
+      "sha256": "e1ee8976aba1b13a971604c57519d23ae8ca0ef678983fa8b64bb95fd8cd2fa7"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/chat-layout.css",
+      "sha256": "f66de26ed5de68abd9012aadc379ff0a50e0c0c051fedd5d21a19b5d925cdfaf"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/chat.css",
+      "sha256": "be6d923601f8c8158abc0a3f145667994ac5b0863dfa8200b800d56ace0d994a"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/cockpit-v2.css",
+      "sha256": "0670184923fbea4d2d7e5c8ec62a505e18c7e269c0628fd4c9a17c1c854b1860"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/code.css",
+      "sha256": "1942666fc2f5d5c1c50088e30530c9678e4df32b8c695ac2a2f3bd6f209243ea"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/connectors-v2.css",
+      "sha256": "a9d990d1919847c1014071083e52d7ce4ff4849d6a07d91e833b3a66dfb421b0"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/copilot-dock.css",
+      "sha256": "10c307781c188963a60c152ce32a734f7920daac8c657a3530cf303887332d21"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/craft-v2.css",
+      "sha256": "1214205bbe96a3ecd39370e4a7380f2874ed190f57c270b2bea56a84daccbaec"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/dashboard.css",
+      "sha256": "928134acce4438d6ce324cc3383ed1d447967ca47b9df3c05a2e4f34195cefd0"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/deck.css",
+      "sha256": "521852fd1daf46e22e3cb97c4b00101ad0ac8a97b4b8ab30fa151895ebeda774"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/drawer.css",
+      "sha256": "f6b5eee80c3567ed987201d94cd6c69be58c5b0edddfcc1966e8080a1a46cba6"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/ds-theme-tokens.css",
+      "sha256": "69e2c6b1d9153c167af9a063fd74676526ee2d7142de4619fd77ebea9a5bbdd2"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/fonts-noto-sans-kr.css",
+      "sha256": "4253b3a2940a481c0361434580affaa3e623466d4d421d40e5ce588e9d1fdb6c"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/fonts.css",
+      "sha256": "4df26cea63978bf7ea5a5144bb001fb4e918688a3e5518e4e3361913d5ecaf25"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/fusion-v2.css",
+      "sha256": "549f3057ce8b86ea7ac0d810a5bcd54f26ceefcfe5b6e11969dc1943d2c43c0b"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/global.css",
+      "sha256": "2430f0c8bcedd56b76f82b014ff71ab9aac263a5b196f6e40af69781ff4726f0"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/ide-v2.css",
+      "sha256": "42381686b4bd53b9464edd5ca676dcd9b130bb32015d2e4c4ec6061e56c701fc"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/indicators-v2.css",
+      "sha256": "f72984519ac8ffee0a07df78e2cc5d6df0865dd6653f19460fa5a917e80ccc0a"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/keeper-asks-v2.css",
+      "sha256": "5cfb6004e39976236a05c7bd89852eed4ea056bc8d916dc718df8c5bf4f42235"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/keeper-memory-health-v2.css",
+      "sha256": "a5d3495973bcb67f91d52510e450378a1e7bddce0d3c678f63c67610091265f4"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/keeper-turn-inspector.css",
+      "sha256": "eb4bb9fe2376ec720d7339a1ee01415a13404ed82879bba72d8463dcf2dcad72"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/keeper-v2/colors_and_type.css",
+      "sha256": "554e9b272c3ce344b86f73603cb3074716b56af2ae19653f8dfb2910a62b57fb"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/keeper-v2/craft.css",
+      "sha256": "b3e9cd44dec9be08b6187c75647794dce579f912282470a30cac5ee50b45bc18"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/keeper-v2/dock.css",
+      "sha256": "eb40a82b92ab5bbe95d052439b2ef46044aff7128134716137b387f3bc00aec3"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/keeper-v2/fleet.css",
+      "sha256": "10caccf01f796fd7c3ffe647458212bda88eb6d20496d28cd4a3154f5c3f0a6d"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/keeper-v2/fusion.css",
+      "sha256": "30e2bfb9c02c7374101bc7cbc503223158166ad0b1fb7a091fdfb0e69c0c0c3b"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/keeper-v2/inspector.css",
+      "sha256": "de6c8012994aa2be63bd69ab7df01f58efbb74c5b83f7ef09f24940b2260be93"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/keeper-v2/keeper-config.css",
+      "sha256": "62ec004fb61bea678df976d135330b3e4727269eca111581e809dc69ea15408d"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/keeper-v2/lanes.css",
+      "sha256": "f31416f297f29f9aa74f6d72850632065e29fba330f0102f85bcd57bb8f4381c"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/keeper-v2/logs.css",
+      "sha256": "e8eb55cdfbe1cb00b713895603d1e2c75d0ed34cfd216cde8f5f3b9faf38538f"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/keeper-v2/memory.css",
+      "sha256": "ffb0c4796fa8fa19a17f0fdcfd1bfc006cc05d2a84fb6da0dbc87b22b0edaf01"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/keeper-v2/monitor.css",
+      "sha256": "ec980237ca63fdeb8d308a72ab9eacfb5237e1667de6ef3b6944e8e40cc8ddc8"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/keeper-v2/ops-cluster.css",
+      "sha256": "809edeb78be783ce7d5960c0a75393be1b96117290912ea9989f5a8ee9957afe"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/keeper-v2/perf.css",
+      "sha256": "b5a74985a3e429a4354bf6631d3c6f82166f56c415d7b6a0413596bddeee97ac"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/keeper-v2/prompt-book.css",
+      "sha256": "4c12130bbd2880c066798a56ea1211925ff8558720de436a7face4deef90fbf7"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/keeper-v2/registry.css",
+      "sha256": "2cd2ba49389219a5a2cee58f7b6834370a17ed6967972d638a65de986a6a2240"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/keeper-v2/runtime.css",
+      "sha256": "6159889f790894eaa17be626135df7f0f0edad1c1dc5e4271489ce065f36188e"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/keeper-v2/schedule.css",
+      "sha256": "886a34cfd0cc08912b7a4d908f1f393ef0da474d5a6a56f5cba590b7abd8c5ee"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/keeper-v2/surfaces.css",
+      "sha256": "4098fceddcf454e36f13d20cca00f6bc6ffc71cb82084c2794d4439eaa984282"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/keeper-v2/tempered.css",
+      "sha256": "7163042321b06c160d2be9dc00b867ccf0c1f02d46d6360885f7c036a8df6c64"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/keeper-v2/v2.css",
+      "sha256": "ec6db10a5b53382e09e71ad62fdbbea417e6df1afa4960caed4edf5f71ffd2d7"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/keeper-v2/verify.css",
+      "sha256": "c13b07886a8586f3f5bf20d7b03006d1f7e5f73570ffeec3c0a023ea39e9ebe2"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/keeper-workspace.css",
+      "sha256": "33e7443f2dec2c0dbc37411930dc30c88847cd8b60e3442f090fe0513c5b8d9a"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/keyframes.css",
+      "sha256": "9eb2889d1aaa16e2fe5dae435095b26654754826591a4e4b2506a92451ba1816"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/kpi.css",
+      "sha256": "2f624de2badb4f0acab4ca440ac2337041ba4058f5f43b8f1949770539dd24b3"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/layers.css",
+      "sha256": "f61ef99abe4432ee2a244a3e8ab781c8c885b206544e98f9f5c796c5028d0e63"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/layout.css",
+      "sha256": "496b4e216519fe999744025edf10c7f3cc6143122151268a6dbb3494ecde0faf"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/memory-inspector-v2.css",
+      "sha256": "2fb529b2bacc593fc3d036de85032cc9d8575421575b02108b386aa97da932c6"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/mobile-operator-targets.css",
+      "sha256": "d6759e319d949b7371d0cf20bbff53eb6f23d4af9cee89becf644f224d0cea99"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/ops.css",
+      "sha256": "d582e661b82497f39127700b9de5156300a2b27041392d674d22bf3557a0d4c4"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/paper-theme.css",
+      "sha256": "5540e43f932982da6287680ff59add26a72ce4c4131cb39269bc5942d3f66b12"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/pipeline.css",
+      "sha256": "2ce6dcb9e4a0b97eee74ad3f8a393c6134d54c2a3d08a8ba959af0fc98cb6ac6"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/primitives-v2.css",
+      "sha256": "97ab09622257870173750082d08d305c0bc8d26cfc7ec564c2746ad880fa751d"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/primitives.css",
+      "sha256": "ba75c4ada283eef870f01142506b628530ea1e5e44d1ffd60d21f75e3da712da"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/rail.css",
+      "sha256": "1d538df03a9a8c0fc9f9787b157a87d855e801d61215dedf9a5b3a885c38ca14"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/responsive.css",
+      "sha256": "954add9a1cda747f35402766e3e51f3c515e560e12293b739d32e1ff8649e6c5"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/runtime-editor-v2.css",
+      "sha256": "4f2cb713ba47c67ae45171bffc832744a7f9e3245e91191f8d2655b31ffadfe7"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/settings-surface.css",
+      "sha256": "04848219eb605506b346e9ea6fb0f40d421be68410f4f91f346bc9e5d0e559ac"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/skin-v2.css",
+      "sha256": "b87166daa43d8fae09dbbe1baeac0f32700c89e910656ebc8c3f6bc7a30818cf"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/ss-keeper-v2-bridge.css",
+      "sha256": "4449b5b2f024814d6e92e7d8cde9c8c02051edb58c7cff0bacd970b812f7a351"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/states.css",
+      "sha256": "02d239a4762b52ed2463ef2e280e11909f4a0f1b0509e6c7ba14dc2541aaf926"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/styleseed-base.css",
+      "sha256": "4f1f70c0cda3b950b8a3188589837de161e26ea9b75f3ac693b201b97f5d7069"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/styleseed-theme.css",
+      "sha256": "b91292ff8cec29b6e75d7e0c906f6cd1350c38612b820fe4370266a036908c96"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/styleseed-tokens.css",
+      "sha256": "9828f31cd23834e02b31117d01d77e0e08b45ab78d92cb9231e90d15ad87b493"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/surfaces-v2.css",
+      "sha256": "4ce33c56b380a0bf2645f69d72713afeb6f0a79d9afbb14c014a99da4596a9be"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/swimlanes.css",
+      "sha256": "50d7fbfccb21bf8b67a73990f157c7ccd657f4eb43903b7356591bf259cb1770"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/tokens.css",
+      "sha256": "fb1690e355a2ad0e86d3d501caabe90a42dded29405dacec6a081554a3a5d17d"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/tokens.generated.css",
+      "sha256": "778f7b3e03cb1110385cecc98704b9eb5249d80d77f6f9bb33e209ba39486ac1"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/tools.css",
+      "sha256": "868aed28b71e6df72f1853a4af47857973ed3e3e397d5986548f32a3191cefa1"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/ui.css",
+      "sha256": "6d9b323a59f6b8978929c3553f3d18a1eefc8b7a8b65f0d7707c0500612378dd"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/v2-command.css",
+      "sha256": "a9a189ed4363cc8ca68741b9fe5a16e7fa449d0ee127f4b7d9d223f009154e25"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/v2-connectors.css",
+      "sha256": "d7b4d8a629981912448f06f4d85a6c952d606700d9a6b24a5083473d6b798190"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/v2-ide.css",
+      "sha256": "4cd69e04cbd1f5f12475f62c244fa47e9c09217abda4b26cb9992ef918617326"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/v2-lab.css",
+      "sha256": "c0e6aa17d04dd046862750aec127e9ea3034e936fdddbf3d08c4623b25d9a3c3"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/v2-logs.css",
+      "sha256": "0ae6c54b7617f3fbe0cd576d8033f151b8a60b1ef119b87f2b68272b66759177"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/v2-monitoring.css",
+      "sha256": "7aa83f42a354fa5ae7b929cc0e2b12300aa579a690029b6562d6208369330af9"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/v2-overview.css",
+      "sha256": "406f518d5abe693b44fb6dd3f2864b47b859b8aa49fe652aab4df9330920e530"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/v2-shell.css",
+      "sha256": "6303afc6b08f42e99d3674b1f641ddda2454868e0ae670e2e4a92504177d6987"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/v2-theme.css",
+      "sha256": "f698e0af60b393c2c4612cd655fca916ddcabfd43630f91ce4890eed43a5e38d"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/v2-workspace.css",
+      "sha256": "44abc14b8ada693b3b76556e3bcee866f58fb54308e1a98c8de2db05603c24f7"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/variables.css",
+      "sha256": "13aec6ede6ca868309babdf79ebee7e2f0305e050e84e119114502fad2c78d6b"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/work-v2.css",
+      "sha256": "2db5c68551599a1aa825345c778c39864fc6757202577d7533a54829c981c57d"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/types/goal-store-unavailable.ts",
+      "sha256": "81f1c30233ad904470432a661287a7efce55493f8bda845ccbffe0795db17ac9"
+    }
+  ]
+}

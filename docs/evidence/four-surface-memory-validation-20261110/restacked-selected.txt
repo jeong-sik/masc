@@ -1,0 +1,9 @@
+2026-11-09T16:17:08.9586450Z   [FAIL]        decode_repositories                          8   memory healt...
+2026-11-09T16:17:09.0228907Z │ [FAIL]        decode_repositories                          8   memory he...  │
+2026-11-09T16:17:09.0229568Z FAIL memory health totals or alert summary disagree with keeper rows
+2026-11-09T16:17:09.0230651Z Called from Dune__exe__Test_tui_decode.test_decode_memory_health_keeps_ordinary_and_source_axes in file "test/test_tui_decode.ml", lines 5675-5691, characters 2-54
+2026-11-09T16:17:09.0231918Z 1 failure! in 0.041s. 407 tests run.
+2026-11-09T16:17:09.0232437Z [targeted] test/test_tui_decode: FAIL exit 1 in 0s
+2026-11-09T16:17:09.2157396Z   [OK]          one place per fact          1   Keeper queries accept canonic...
+2026-11-09T16:17:09.2157818Z Test Successful in 0.005s. 13 tests run.
+2026-11-09T16:17:09.2158309Z [targeted] test/test_tui_render_memory: OK in 0s

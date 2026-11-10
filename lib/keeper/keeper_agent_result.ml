@@ -85,6 +85,10 @@ type wire_prompt_tokens =
   ; prompt_n : int
   }
 
+type checkpoint_followup =
+  | Keep_cadence
+  | Resume_after_chat_handoff
+
 (** Result of a single Agent.run() keeper turn. *)
 type run_result =
   { response_text : string
@@ -110,6 +114,7 @@ type run_result =
   ; trace_ref : Agent_core.Raw_trace.run_ref option
   ; run_validation : Agent_core.Raw_trace.run_validation option
   ; stop_reason : Runtime_agent.stop_reason
+  ; checkpoint_followup : checkpoint_followup
   ; inference_telemetry : Agent_core.Types.inference_telemetry option
   ; wire_prompt_tokens : wire_prompt_tokens option
   ; tool_surface : tool_surface_metrics

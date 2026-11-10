@@ -405,7 +405,7 @@ let stream_projection ?on_native_tool_completion ~keeper_name ~raw_trace_run ~tu
     }
 ;;
 
-let run_without_lifecycle ~on_guidance_prepared ~result_scope ~input_source ~argument_source ~official_task_reference ~composed_context ~accepts_image_input ~on_session_settled ~on_results_ready ~required_native_posture ~official_client_continuation ~runtime_id ~configured_reasoning_effort ~turn_timeout_s ~keeper_name
+let run_without_lifecycle ~on_guidance_prepared ~result_scope ~input_source ~argument_source ~official_task_reference ~composed_context ~accepts_image_input ~on_session_settled ~on_results_ready ~required_native_posture ~official_client_continuation ~runtime_id ~host ~configured_reasoning_effort ~turn_timeout_s ~keeper_name
     ~on_model_input_window_observation
     ~carried_front_seed
     ~librarian_front
@@ -539,7 +539,7 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~input_source ~arg
     let runtime_root = Common.masc_dir_from_base_path ~base_path in
     let owner_leaf = Runtime_antigravity_home.keeper_owner_leaf
         ~keeper_name ~oauth_source:config.oauth_source in
-    let* home = Runtime_antigravity_home.prepare_account ~runtime_root ~owner_leaf
+    let* home = Runtime_antigravity_home.prepare_account ~host ~runtime_root ~owner_leaf
         ~oauth_source:config.oauth_source
       |> Result.map_error home_error_to_core_error in
     let account_home = Runtime_antigravity_home.home_dir home in
@@ -1101,6 +1101,7 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~input_source ~arg
                    (Runtime_antigravity.run_turn
                       ~conversation_mode
                       ~home_dir:(Runtime_antigravity_home.home_dir home)
+                      ~host
                       ~mgr:process_mgr
                       ~clock
                       ~cwd:process_cwd
@@ -1322,7 +1323,7 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~input_source ~arg
                   recovery_detail))))
 ;;
 
-let run ?(on_guidance_prepared = fun () -> Ok ()) ~input_source ?argument_source ?official_task_reference ?composed_context ~accepts_image_input ?required_native_posture ?official_client_continuation ~runtime_id ~configured_reasoning_effort ~turn_timeout_s ~keeper_name ~pre_tool_rejects ~base_path ~goal ~goal_blocks ~system_prompt
+let run ?(on_guidance_prepared = fun () -> Ok ()) ~input_source ?argument_source ?official_task_reference ?composed_context ~accepts_image_input ?required_native_posture ?official_client_continuation ~runtime_id ~host ~configured_reasoning_effort ~turn_timeout_s ~keeper_name ~pre_tool_rejects ~base_path ~goal ~goal_blocks ~system_prompt
     ~tools ?(loading_plan = Keeper_official_client_host.All_on_demand) ~initial_messages ~model_input_projection
     ~on_transmitted_model_input ~hooks ~context_injector
     ~context
@@ -1363,6 +1364,7 @@ let run ?(on_guidance_prepared = fun () -> Ok ()) ~input_source ?argument_source
       run_without_lifecycle ~on_guidance_prepared ~result_scope ~input_source ~argument_source ~official_task_reference ~composed_context ~accepts_image_input ~on_session_settled ~on_results_ready ~official_client_continuation
         ~required_native_posture
         ~runtime_id
+        ~host
         ~configured_reasoning_effort
         ~turn_timeout_s
         ~keeper_name

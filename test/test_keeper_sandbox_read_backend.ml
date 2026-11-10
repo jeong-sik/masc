@@ -615,22 +615,14 @@ let initialize_apple_attached_read_fixture ~sw ~net
 let test_attached_guest_endpoint_names_the_derived_guest ~fs ~net () =
   let context = Eio_context.snapshot_state () in
   let previous_fs = Fs_compat.get_fs_opt () in
-  Eio.Switch.run @@ fun sw ->
-  Eio_context.set_switch sw;
-  Eio_context.set_net net;
-  Fs_compat.set_fs fs;
-  let base, config, docker = setup_config ~base:(agent_temp_dir ()) "read-microvm-attach" in
-  let microvm =
-    { docker with
-      sandbox_profile = Keeper_types_profile_sandbox.Micro_vm
-    ; microvm_backend = Some Keeper_microvm_backend.Apple_container
-    }
-  in
   let bin_dir = temp_dir () in
-  let cli_path = Filename.concat bin_dir "container" in
-  write_file cli_path (fake_apple_attached_script ~base ~config ~meta:microvm);
-  Unix.chmod cli_path 0o755;
-  let path = bin_dir ^ ":" ^ Option.value ~default:"" (Sys.getenv_opt "PATH") in
+  let base = agent_temp_dir () in
+  (* The fake agent's socket is an [Eio.Net.listen] on [sw], and the switch
+     unlinks that socket file when it closes. The fixture directory must
+     outlive the switch: if the cleanup inside the switch removes the socket
+     first, the listener's own unlink raises Unix_error ENOENT and the switch
+     re-raises it after the test body already passed (gate run 42657800048).
+     So the cleanup runs in [finally] here, outside the switch. *)
   Fun.protect
     ~finally:(fun () ->
       Eio_context.restore_state context;
@@ -638,6 +630,21 @@ let test_attached_guest_endpoint_names_the_derived_guest ~fs ~net () =
       cleanup_fixture_dir base;
       cleanup_dir bin_dir)
   @@ fun () ->
+  Eio.Switch.run @@ fun sw ->
+  Eio_context.set_switch sw;
+  Eio_context.set_net net;
+  Fs_compat.set_fs fs;
+  let _, config, docker = setup_config ~base "read-microvm-attach" in
+  let microvm =
+    { docker with
+      sandbox_profile = Keeper_types_profile_sandbox.Micro_vm
+    ; microvm_backend = Some Keeper_microvm_backend.Apple_container
+    }
+  in
+  let cli_path = Filename.concat bin_dir "container" in
+  write_file cli_path (fake_apple_attached_script ~base ~config ~meta:microvm);
+  Unix.chmod cli_path 0o755;
+  let path = bin_dir ^ ":" ^ Option.value ~default:"" (Sys.getenv_opt "PATH") in
   with_env "PATH" path @@ fun () ->
   initialize_apple_attached_read_fixture ~sw ~net ~base ~config ~meta:microvm;
   match

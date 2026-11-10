@@ -136,10 +136,6 @@ let supported_interfaces_of_list_at ~field = function
   | first :: rest -> Ok (supported_interfaces first rest)
 ;;
 
-let supported_interfaces_of_list interfaces =
-  supported_interfaces_of_list_at ~field:"supported_interfaces" interfaces
-;;
-
 (* ── Manual JSON serialization ─────────────────────────── *)
 
 let capability_to_string = function

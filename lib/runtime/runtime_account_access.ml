@@ -38,6 +38,19 @@ let declared_muse_home (authorized : declared muse_authorized) =
   | Declared_home home -> home
 ;;
 
+type host_client =
+  | Antigravity
+  | Vibe
+
+(* The proof carries nothing: a single-user process shares every account of
+   its host, so one start of a host client is as allowed as another. *)
+type host_account = Shared_by_single_user
+
+let host_client_name = function
+  | Antigravity -> "Antigravity"
+  | Vibe -> "Vibe"
+;;
+
 type t =
   | Single_user of Authz_boot_mode_read.single_user
   | Multi_account of
@@ -103,6 +116,7 @@ type refusal =
   | Home_unresolved of string
   | Not_a_declared_home
   | Not_the_account_home of Authz_types.Provider_account_id.t
+  | Host_account of host_client
 
 let refusal_to_string = function
   | Not_published -> "this process has not published whether a CLI may start on an account"
@@ -126,6 +140,11 @@ let refusal_to_string = function
     Printf.sprintf
       "the account was captured from another home than the one of %s"
       (Authz_types.Provider_account_id.to_string provider_account_id)
+  | Host_account client ->
+    Printf.sprintf
+      "%s starts on an account of the host, and a multi-account process shares no \
+       account of its host"
+      (host_client_name client)
 ;;
 
 let layout_client (type client) (client : client Runtime_official_account.client) =
@@ -226,4 +245,41 @@ let authorize request sealed =
 let authorize_muse request account =
   judge request { client = Layout.Muse_home; declared_home = muse_account_home account }
   |> Result.map (fun () -> account)
+;;
+
+let authorize_host client =
+  match Atomic.get state with
+  | Unpublished -> Error Not_published
+  | Published (Single_user (_ : Authz_boot_mode_read.single_user)) -> Ok Shared_by_single_user
+  | Published (Multi_account { zone = _; base_path = _; now = _ }) -> Error (Host_account client)
+;;
+
+type native_refusal =
+  | Native_unpublished
+  | Native_tools_reach_other_homes of Runtime_native_tools.posture
+
+let native_refusal_to_string = function
+  | Native_unpublished ->
+    "this process has not published whether a model turn may use the native tools of its CLI"
+  | Native_tools_reach_other_homes posture ->
+    Printf.sprintf
+      "a multi-account process runs a model turn only without native tools, and this turn \
+       asks for the native posture %S: the CLI runs as the user of the server process, so \
+       its own tools could read the account homes of other people. A Keeper whose client \
+       supports the posture none runs here with keeper.tools.native = \"none\" in its \
+       profile; a client without it runs no model turn here"
+      (Runtime_native_tools.to_string posture)
+;;
+
+let authorize_native posture =
+  match Atomic.get state, posture with
+  | Unpublished, (Runtime_native_tools.Native_none | Native_read | Native_full) ->
+    Error Native_unpublished
+  | ( Published (Single_user (_ : Authz_boot_mode_read.single_user))
+    , (Runtime_native_tools.Native_none | Native_read | Native_full) ) -> Ok ()
+  | Published (Multi_account { zone = _; base_path = _; now = _ }), Runtime_native_tools.Native_none
+    -> Ok ()
+  | ( Published (Multi_account { zone = _; base_path = _; now = _ })
+    , (Runtime_native_tools.Native_read | Native_full) ) ->
+    Error (Native_tools_reach_other_homes posture)
 ;;

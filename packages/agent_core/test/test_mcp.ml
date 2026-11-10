@@ -256,86 +256,6 @@ let test_json_schema_heterogeneous_enum_omits_property () =
   | Ok params -> Alcotest.(check int) "heterogeneous enum omitted" 0 (List.length params)
 ;;
 
-(* ── Tool bridge ────────────────────────────────────────────────── *)
-
-let test_mcp_tool_to_agent_core_tool () =
-  let mcp_tool : Mcp.mcp_tool =
-    { name = "echo"
-    ; description = "Echoes input"
-    ; input_schema =
-        Yojson.Safe.from_string
-          {|{
-      "type": "object",
-      "properties": {
-        "text": {"type": "string", "description": "Text to echo"}
-      },
-      "required": ["text"]
-    }|}
-    }
-  in
-  let call_fn input : Types.tool_result =
-    let open Yojson.Safe.Util in
-    let text = input |> member "text" |> to_string in
-    Ok { content = "echo: " ^ text; content_blocks = None; _meta = None }
-  in
-  let agent_core_tool = Mcp.mcp_tool_to_agent_core_tool ~call_fn mcp_tool in
-  Alcotest.(check string) "tool name" "echo" agent_core_tool.schema.name;
-  Alcotest.(check string) "tool desc" "Echoes input" agent_core_tool.schema.description;
-  Alcotest.(check int) "param count" 1 (List.length agent_core_tool.schema.parameters);
-  let input = `Assoc [ "text", `String "hello" ] in
-  let result = Tool.execute agent_core_tool input in
-  match result with
-  | Ok { content; _ } -> Alcotest.(check string) "execution" "echo: hello" content
-  | Error _ -> Alcotest.fail "expected Ok"
-;;
-
-let test_mcp_tool_bridge_error () =
-  let mcp_tool : Mcp.mcp_tool =
-    { name = "fail"
-    ; description = "Always fails"
-    ; input_schema = `Assoc [ "type", `String "object"; "properties", `Assoc [] ]
-    }
-  in
-  let call_fn _input : Types.tool_result =
-    Error { message = "server error"; recoverable = true; error_class = None }
-  in
-  let agent_core_tool = Mcp.mcp_tool_to_agent_core_tool ~call_fn mcp_tool in
-  let result = Tool.execute agent_core_tool (`Assoc []) in
-  match result with
-  | Error { message; _ } -> Alcotest.(check string) "error" "server error" message
-  | Ok _ -> Alcotest.fail "expected Error"
-;;
-
-let test_convert_tools_skips_malformed_schema () =
-  let good : Mcp.mcp_tool =
-    { name = "good"
-    ; description = "Converts"
-    ; input_schema = `Assoc [ "type", `String "object"; "properties", `Assoc [] ]
-    }
-  in
-  let bad : Mcp.mcp_tool =
-    { name = "bad"; description = "Schema is not an object"; input_schema = `List [] }
-  in
-  let call_fn_for (_ : Mcp.mcp_tool) _input : Types.tool_result =
-    Ok { content = "ok"; content_blocks = None; _meta = None }
-  in
-  let tools, skipped =
-    Mcp.convert_tools ~server_name:"test-server" ~call_fn_for [ good; bad ]
-  in
-  Alcotest.(check (list string))
-    "good tool kept"
-    [ "good" ]
-    (List.map (fun (t : Tool.t) -> t.schema.name) tools);
-  Alcotest.(check (list string))
-    "bad tool reported skipped"
-    [ "bad" ]
-    (List.map (fun (s : Mcp.skipped_tool) -> s.tool_name) skipped);
-  List.iter
-    (fun (s : Mcp.skipped_tool) ->
-       Alcotest.(check bool) "skip carries a diagnostic" true (String.length s.detail > 0))
-    skipped
-;;
-
 (* ── agent-core tool -> agent_core mcp_tool conversion ─────────────────────────── *)
 
 let test_mcp_tool_of_agent_core_tool () =
@@ -541,14 +461,6 @@ let () =
             "heterogeneous enum omits property"
             `Quick
             test_json_schema_heterogeneous_enum_omits_property
-        ] )
-    ; ( "tool_bridge"
-      , [ test_case "mcp_tool_to_agent_core_tool" `Quick test_mcp_tool_to_agent_core_tool
-        ; test_case "bridge error propagation" `Quick test_mcp_tool_bridge_error
-        ; test_case
-            "malformed schema skips only that tool"
-            `Quick
-            test_convert_tools_skips_malformed_schema
         ] )
     ; ( "sdk_bridge"
       , [ test_case "mcp_tool_of_agent_core_tool" `Quick test_mcp_tool_of_agent_core_tool

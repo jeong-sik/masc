@@ -12,6 +12,7 @@ module KFR = Keeper_runtime_failure_route
 module Turn = Masc.Keeper_unified_turn
 module Loop = Masc.Keeper_heartbeat_loop
 module Cycle = Masc.Keeper_heartbeat_loop_cycle
+module Keeper_agent_result = Masc.Keeper_agent_result
 
 let test_meta () =
   match
@@ -184,6 +185,7 @@ let test_a_serving_deferred_suffix_starts_the_next_cycle_without_a_stimulus () =
     (Loop.For_testing.next_cycle_starts_now
        ~after_failure:continued
        ~stimuli_acked:false
+       ~checkpoint_followup:Keeper_agent_result.Keep_cadence
        ~pending_stimulus:(fun () ->
          incr pending_calls;
          false));
@@ -196,6 +198,7 @@ let test_a_serving_deferred_suffix_starts_the_next_cycle_without_a_stimulus () =
          (Loop.For_testing.next_cycle_starts_now
             ~after_failure
             ~stimuli_acked:false
+            ~checkpoint_followup:Keeper_agent_result.Keep_cadence
             ~pending_stimulus:(fun () ->
               incr pending_calls;
               true)))
@@ -211,6 +214,7 @@ let test_a_serving_deferred_suffix_starts_the_next_cycle_without_a_stimulus () =
          (Loop.For_testing.next_cycle_starts_now
             ~after_failure
             ~stimuli_acked
+            ~checkpoint_followup:Keeper_agent_result.Keep_cadence
             ~pending_stimulus:(fun () -> pending_stimulus)))
     [ "deferred unfinished input starts without a stimulus", continued, false, false, true
     ; "a resting path keeps sleeping", waiting, false, true, false
@@ -218,6 +222,50 @@ let test_a_serving_deferred_suffix_starts_the_next_cycle_without_a_stimulus () =
     ; "ordinary cadence keeps sleeping without a pending stimulus", None, true, false, false
     ; "ordinary cadence retains the existing wake", None, true, true, true
     ]
+;;
+
+let test_chat_handoff_followup_requires_retained_input () =
+  let meta = test_meta () in
+  let open Keeper_agent_result in
+  let followup cycle_outcome retained_stimulus =
+    Loop.For_testing.checkpoint_followup_after_retention
+      ~cycle_outcome ~retained_stimulus in
+  let yielded = Some (Cycle.Checkpointed {meta;followup=Resume_after_chat_handoff}) in
+  check bool "a ready-chat yield survives successful retention" true
+    (followup yielded true = Resume_after_chat_handoff);
+  check bool "failed retention cannot schedule a continuation" true
+    (followup yielded false = Keep_cadence);
+  List.iter (fun cycle_outcome ->
+    check bool "other outcomes cannot acquire chat continuation authority" true
+      (followup cycle_outcome true = Keep_cadence))
+    [ None; Some (Cycle.Checkpointed {meta;followup=Keep_cadence});
+      Some (Cycle.Completed {meta}); Some (Cycle.Input_required meta);
+      Some (Cycle.Cancelled meta); Some (Cycle.Skipped meta);
+      Some (failed_outcome (KFR.Rotate_now {rotate=KFR.Model_unavailable}));
+      Some (rested_outcome meta) ];
+  List.iter (fun (after_failure, pending, expected) ->
+    check bool "only a serving retained source starts another admission" expected
+      (Loop.For_testing.next_cycle_starts_now ~after_failure ~stimuli_acked:false
+        ~checkpoint_followup:Resume_after_chat_handoff ~pending_stimulus:(fun () -> pending)))
+    [ None, true, true; None, false, false; wait ~after:60., true, false ]
+;;
+
+let test_chat_handoff_observation_cannot_override_terminal_completion () =
+  let module Run = Masc.Keeper_agent_run.For_testing in
+  let open Keeper_agent_result in
+  let observed = ref Keep_cadence in
+  (match Run.observe_chat_handoff ~observed (fun () -> Error error) () with
+   | Error actual -> check bool "probe failure is preserved" true (actual = error)
+   | Ok _ -> fail "probe failure was swallowed");
+  check bool "an unavailable probe records no followup" true (!observed = Keep_cadence);
+  (match Run.observe_chat_handoff ~observed (fun () -> Ok true) () with
+   | Ok true -> ()
+   | Ok false -> fail "ready chat disappeared at its observation boundary"
+   | Error error -> fail (Agent_core.Error.to_string error));
+  check bool "the original ready observation is recorded" true (!observed = Resume_after_chat_handoff);
+  check bool "terminal completion discards an earlier advisory observation" true
+    (Run.checkpoint_followup_of_stop_reason ~observed:!observed
+       (Runtime_agent.Completed {provider_turn_ordinal=0}) = Keep_cadence)
 ;;
 
 let assert_no_queue_action label outcome =
@@ -400,7 +448,7 @@ let test_recorded_settlement_follows_the_batch_disposition () =
    | Loop.Continuation_settled_failed _ | Loop.Continuation_unsettled ->
      fail "a completed turn did not record its continuation");
   (match
-     Loop.continuation_settlement_of_cycle_outcome (Some (Cycle.Checkpointed { meta }))
+     Loop.continuation_settlement_of_cycle_outcome (Some (Cycle.Checkpointed { meta; followup = Keeper_agent_result.Keep_cadence }))
    with
    | Loop.Continuation_settled_recorded -> ()
    | Loop.Continuation_settled_failed _ | Loop.Continuation_unsettled ->
@@ -462,7 +510,7 @@ let test_checkpoint_records_hitl_continuation () =
     bool
     "HITL continuation projection is required before ACK"
     true
-    (Loop.batch_disposition_of_cycle_outcome (Some (Cycle.Checkpointed { meta }))
+    (Loop.batch_disposition_of_cycle_outcome (Some (Cycle.Checkpointed { meta; followup = Keeper_agent_result.Keep_cadence }))
      |> Loop.For_testing.batch_disposition_records_continuation)
 ;;
 
@@ -470,7 +518,7 @@ let test_durable_stimulus_checkpoint_acks_admitted_batch () =
   let meta = test_meta () in
   match
     Loop.batch_disposition_of_cycle_outcome
-      (Some (Cycle.Checkpointed { meta }))
+      (Some (Cycle.Checkpointed { meta; followup = Keeper_agent_result.Keep_cadence }))
   with
   | Loop.Batch_ack_attention_only -> ()
   | Loop.Batch_ack_completed ->
@@ -483,7 +531,11 @@ let () =
   run
     "keeper_failed_selection_disposition"
     [ ( "failed turn preserves admitted input"
-      , [ test_case
+      , [ test_case "retained chat handoff retries without an external wake" `Quick
+            test_chat_handoff_followup_requires_retained_input
+        ; test_case "terminal completion overrides advisory chat followup" `Quick
+            test_chat_handoff_observation_cannot_override_terminal_completion
+        ; test_case
             "every runtime failure route leaves the batch pending"
             `Quick
             test_every_failure_route_preserves_batch

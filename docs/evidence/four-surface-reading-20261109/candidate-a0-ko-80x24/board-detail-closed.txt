@@ -1,0 +1,24 @@
+ 운영  ▸작업  키퍼  기능·플러그인  워크스페이스  시스템
+
+  MASC 게시판
+ > 해결한 논의와 다음 글
+   @fixture-operator [작성자] · 2026-11-09 23:18:08 · 종료된 글 · 댓글 0
+ ──────────────────────────────────────────────────────────────────────────────
+   목록에서는 핵심을 읽고, 상세에서는 종결 기록과 후속 글을 확인합니다.
+     종료 결론
+     종료한 사람 fixture-operator
+     종료 시각 2026-11-09T14:18:08Z
+     후속 글 · S:열기 · masc://board/p-surface-open
+   요청과 근거를 읽는 순서를 정했습니다. Continued in the successor post.
+
+
+     글 주소 · masc://board/p-surface-closed
+
+
+
+
+
+
+  ACTION NEEDED 1  j/k:본문  v / V:추천 / 비추천  Left / Esc:뒤로  …?
+ 일정 정보가 오래됐을 수 있음
+ › to quietreader   (i to write)

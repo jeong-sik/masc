@@ -671,6 +671,9 @@ Runtime 조회: rg -n --glob '*.ml' '\bRuntime\.(get_runtime_by_id|resolve_assig
   - 계정 인가를 하는 곳은 없다. `validate_dispatch_credential`은 key가 비었는지만 본다. vision, 사용량 읽기, exact-output은 그것도 하지 않는다.
   - 실행 표 밖에서 호스트 key로 보내는 곳은 일곱 곳이다. D4b를 시작하며 D4a `3cd6d619bcc9`에서 key 변수 이름과 `api_key_env` 필드를 모두 세었다.
     - 모델 목록 조회와 serving window 관찰(`runtime_model_discovery.ml`, `runtime_serving_context.ml`). 서버의 setup 경로(`POST /api/v1/setup/models`, `POST /api/v1/setup/context`)가 부른다.
+      - setup 경로는 HTTP 연결을 모두 거절한다.
+      - credential이 없는 `Anonymous_endpoint` 연결은 호스트 key를 쓰지 않는다. 그래도 같이 거절한다.
+      - 그런 로컬 연결을 열려면 판정을 연결의 credential로 나눈다.
     - `masc_file_*` 도구의 `DEEPSEEK_API_KEY`(`keeper_tool_in_process_runtime.ml`).
     - 교체 카탈로그(`AGENT_CORE_MODEL_CATALOG`). 카탈로그 파일이 provider와 key를 따로 들고, exact-output 등록표가 그 key로 보낸다.
     - TypeSafe AI lane(`typesafeai_config.ml`). destination마다 key를 담은 변수 이름을 적는다.

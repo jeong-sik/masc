@@ -170,7 +170,8 @@ let purge store before = match store.deletion_source_io with
 type file_result = (Fs_compat.Private_jsonl_cursor.t, Fs_compat.private_jsonl_transaction_error) result
 type io_result =
   | Direct_io of file_result
-  | Parent_guard_io of file_result Fs_compat.private_jsonl_guard_result
+  | Deletion_readset_io of
+      file_result Fs_compat.private_jsonl_guard_result Fs_compat.private_jsonl_guard_result
 
 let retain_guard_diagnostics store diagnostics = match store.deletion_state with
   | Deletion_readable readable ->
@@ -221,21 +222,36 @@ let perform store ~before ~attempt ~bytes operation =
       | Ok () ->
         match operation () with
         | Direct_io result -> classify result []
-        | Parent_guard_io (Fs_compat.Guard_refused failure) ->
+        | Deletion_readset_io (Fs_compat.Guard_refused failure) ->
           let diagnostics = [Deletion_guard_diagnostic failure] in
           retain_guard_diagnostics store diagnostics;
           Not_written diagnostics
-        | Parent_guard_io (Fs_compat.Guard_executed { value; cleanup_failures }) ->
-          classify value (List.map (fun failure -> Deletion_guard_diagnostic failure) cleanup_failures) in
+        | Deletion_readset_io (Fs_compat.Guard_executed {
+            value = Fs_compat.Guard_refused failure; cleanup_failures }) ->
+          let diagnostics = List.map (fun failure -> Deletion_guard_diagnostic failure)
+              (failure :: cleanup_failures) in
+          retain_guard_diagnostics store diagnostics;
+          Not_written diagnostics
+        | Deletion_readset_io (Fs_compat.Guard_executed {
+            value = Fs_compat.Guard_executed { value; cleanup_failures = comments_cleanup };
+            cleanup_failures = parent_cleanup }) ->
+          classify value (List.map (fun failure -> Deletion_guard_diagnostic failure)
+            (comments_cleanup @ parent_cleanup)) in
   try transact () with exception_ ->
     let backtrace = Printexc.get_raw_backtrace () in
     fail ~unknown:true (Deletion_raised { exception_; backtrace }) [Deletion_raised_diagnostic { exception_; backtrace }]
 
-let record store ~(parent : posts_source_observation) plan = match store.deletion_state with
+let guard_with_io io path ~expected ~f = match io with
+  | None -> Fs_compat.with_private_jsonl_snapshot_guard_result path ~expected ~f
+  | Some io -> Fs_compat.with_private_jsonl_snapshot_guard_with_io_for_testing ~io path ~expected ~f
+
+let record store ~(parent : posts_source_observation) ~(comments : comments_source_observation) plan = match store.deletion_state with
   | Deletion_readable { observation; plan = None; _ } ->
     let bytes = encode plan in
     let workspace =
-      try Board_workspace_binding.revalidate store.workspace_binding parent.workspace_observation
+      try
+        let* () = Board_workspace_binding.revalidate store.workspace_binding parent.workspace_observation in
+        Board_workspace_binding.revalidate store.workspace_binding comments.workspace_observation
       with exception_ -> Error (Board_workspace_binding.Raised {
         exception_; backtrace = Printexc.get_raw_backtrace () }) in
     (match workspace with
@@ -244,20 +260,21 @@ let record store ~(parent : posts_source_observation) plan = match store.deletio
        retain_guard_diagnostics store diagnostics;
        Not_written diagnostics
      | Ok () ->
-       if not (String.equal parent.source_path (Board_paths.persist_path store)) then Not_written []
+       if not (String.equal parent.source_path (Board_paths.persist_path store)
+               && String.equal comments.source_path (Board_paths.comments_path store)) then Not_written []
        else
          let deletion_io = store.deletion_source_io in
          let parent_io = store.posts_source_io.posts in
+         let comments_io = store.comments_source_io in
          perform store ~before:observation ~attempt:(Recording_decision plan) ~bytes
          (fun () ->
            (* The worker touches only immutable IO/path/snapshot values and
               filesystem state. Source publication happens back in [classify]. *)
-           let f () = rewrite_with_io deletion_io observation bytes in
-           Parent_guard_io (match parent_io with
-             | None -> Fs_compat.with_private_jsonl_snapshot_guard_result
-                 parent.source_path ~expected:parent.snapshot ~f
-             | Some io -> Fs_compat.with_private_jsonl_snapshot_guard_with_io_for_testing
-                 ~io parent.source_path ~expected:parent.snapshot ~f)))
+           let record () = rewrite_with_io deletion_io observation bytes in
+           let guard_comments () = guard_with_io comments_io comments.source_path
+               ~expected:comments.snapshot ~f:record in
+           Deletion_readset_io (guard_with_io parent_io parent.source_path
+             ~expected:parent.snapshot ~f:guard_comments)))
   | Deletion_unobserved | Deletion_readable { plan = Some _; _ }
   | Deletion_pending _ | Deletion_unsettled _ | Deletion_refused _ | Deletion_projection_failed _ -> Not_written []
 

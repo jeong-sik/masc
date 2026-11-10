@@ -158,24 +158,25 @@ let test_individual_snapshot_failure path () =
   flush ();
   let active = store () in
   let path = path (store ()) in
-  let posts_obstructed = String.equal path (Board.persist_path active) in
+  let admission_source_obstructed = String.equal path (Board.persist_path active)
+    || String.equal path (Board.comments_path active) in
   let backup = path ^ ".before-delete" in
   Unix.rename path backup;
   Unix.mkdir path 0o700;
   Fun.protect
     ~finally:(fun () -> Unix.rmdir path; Unix.rename backup path)
     (fun () ->
-      (match posts_obstructed, Board_dispatch.delete_post ~authorization:Board.Operator_deletion ~post_id with
+      (match admission_source_obstructed, Board_dispatch.delete_post ~authorization:Board.Operator_deletion ~post_id with
        | true, Error (Board.Io_error _) -> ()
        | false, Ok (Board.Deletion_persistence_pending _) -> ()
        | _, Error error -> Alcotest.fail (Board.show_board_error error)
        | _, Ok (Board.Deletion_decision_pending detail) -> Alcotest.fail detail
        | true, Ok (Board.Deletion_persistence_pending _) | _, Ok Board.Durable_deletion ->
          Alcotest.fail "unexpected deletion boundary for the obstructed source");
-      Alcotest.(check bool) "only an admitted deletion creates snapshot retry work" (not posts_obstructed)
+      Alcotest.(check bool) "only an admitted deletion creates snapshot retry work" (not admission_source_obstructed)
         ((store ()).Board.dirty_posts || (store ()).Board.dirty_comments));
   Alcotest.(check bool) "retry retains the original store" true (active == store ());
-  if posts_obstructed then (
+  if admission_source_obstructed then (
     Alcotest.(check bool) "restored old posts file still contains the doomed row" true
       (row_has_post_id post_id (post_rows ()));
     ignore (require_ok (Board_dispatch.get_post ~reader:Masc_board_handlers.Board_access.Operator ~post_id));
@@ -202,81 +203,55 @@ let test_individual_snapshot_failure path () =
   Alcotest.(check int) "restart has no deleted votes" 0 (Hashtbl.length restored.vote_log);
   Alcotest.(check int) "restart has no deleted reactions" 0 (Hashtbl.length restored.reactions)
 
-let test_failed_prerequisite_preserves_dependents_until_retry () =
-  let doomed = create_post_exn ~content:"delete with ordered snapshot retries" in
+let test_failed_comments_write_preserves_later_sources () =
+  let armed = ref false and syncs = ref 0 in
+  let io : Fs_compat.private_jsonl_transaction_io_for_testing = {
+    before_sync_parent = (fun _ ->
+      incr syncs;
+      if !armed then (armed := false; raise (Sys_error "comments rewrite parent sync failed")));
+    close_fd = Unix.close } in
+  let base_path = Env_config_core.base_path () in
+  let active = Board.create_store_with_comments_io_for_testing ~base_path ~io () in
+  require_ok (Board.initialize_store active);
+  let doomed = match Board.create_post active ~lookup:Recipient_lookup.none_declared
+      ~author:"delete-rq-author" ~content:"ordered sources after admitted deletion"
+      ~post_kind:Board.Human_post () with
+    | Ok post -> post
+    | Error error -> Alcotest.fail (Board.Post_publication_failure.to_string error) in
   let post_id = Board.Post_id.to_string doomed.id in
-  ignore
-    (require_ok
-       (Board_dispatch.add_comment ~post_id ~author:"comment-author"
-          ~content:"dependent reply" ()));
-  ignore (require_ok (Board_dispatch.vote ~post_id ~voter:"voter" ~direction:Board.Up));
-  ignore
-    (require_ok
-       (Board_dispatch.toggle_reaction ~reader:Masc_board_handlers.Board_access.Operator ~target_type:Board.Reaction_post
-          ~target_id:post_id ~user_id:"reactor" ~emoji:"👍"));
-  flush ();
-  Alcotest.(check int) "comment is on disk before deletion" 1
-    (List.length (Fs_compat.load_jsonl (Board.comments_path (Board.global ()))));
-  Alcotest.(check int) "reaction is on disk before deletion" 1
-    (List.length (Fs_compat.load_jsonl (Board.reactions_path (Board.global ()))));
-  let active = store () in
-  let comments_before = Fs_compat.load_file (Board.comments_path active) in
-  let reactions_before = Fs_compat.load_file (Board.reactions_path active) in
-  let with_blocked_path path f =
-    let backup = path ^ ".before-delete" in
-    Unix.rename path backup;
-    Unix.mkdir path 0o700;
-    Fun.protect
-      ~finally:(fun () -> Unix.rmdir path; Unix.rename backup path)
-      f
-  in
-  with_blocked_path (Board.comments_path (Board.global ())) (fun () ->
-    with_blocked_path (Board.vote_log_path (Board.global ())) (fun () ->
-      let errors_before = Board.persist_error_count () in
-      (match Board_dispatch.delete_post ~authorization:Board.Operator_deletion ~post_id with
-       | Ok (Board.Deletion_decision_pending detail) -> Alcotest.fail detail
-       | Ok (Board.Deletion_persistence_pending _) -> ()
-       | Error error -> Alcotest.fail (Board.show_board_error error)
-       | Ok Board.Durable_deletion ->
-         Alcotest.fail "failed snapshots must leave deletion persistence pending");
-      Alcotest.(check int) "failed comments prerequisite stops before votes" 1
-        (Board.persist_error_count () - errors_before);
-      Alcotest.(check string) "posts deletion is known before comments refuse" ""
-        (Fs_compat.load_file (Board.persist_path (Board.global ())));
-      Alcotest.(check string) "reactions remain while parent deletion is blocked" reactions_before
-        (Fs_compat.load_file (Board.reactions_path (Board.global ())))));
-  Alcotest.(check bool) "multiple failures retain the original store" true
-    (active == store ());
-  check_post_deleted "multiple failures keep deletion applied before retry" post_id;
-  Alcotest.(check string) "restored comments retain the pending dependent row" comments_before
-    (Fs_compat.load_file (Board.comments_path active));
-  Alcotest.(check bool) "accepted parent deletion stays on disk" false
-    (row_has_post_id post_id (post_rows ()));
-  flush ();
-  Alcotest.(check bool) "multiple-failure retry uses the original store" true
-    (active == store ());
-  check_post_deleted "multiple-failure retry does not reload the doomed post" post_id;
-  Alcotest.(check bool) "multiple-failure retry removes the actual doomed row" false
-    (row_has_post_id post_id (post_rows ()));
-  Alcotest.(check bool) "multiple-failure retry clears posts work" false
-    active.Board.dirty_posts;
-  List.iter (fun load -> match load active with
-    | Ok _ -> ()
-    | Error (path, error) -> Alcotest.failf "reload after repaired retry %s: %s"
-        path (Printexc.to_string error))
-    [Masc_board_handlers.Board_votes_json.load_persisted_posts;
-     Masc_board_handlers.Board_votes_json.load_persisted_comments];
-  check_post_deleted "repaired retry allows reload without restoring the parent" post_id;
-  Board.reset_global_for_test ();
-  Board_dispatch.reset_for_test ();
-  Result.get_ok (Board_dispatch.init_jsonl
-    ~base_path:(Env_config_core.base_path ())
-    ~recipient_lookup:Recipient_lookup.none_declared ());
-  let restored = store () in
-  Alcotest.(check int) "restart has no deleted posts" 0 (Hashtbl.length restored.posts);
-  Alcotest.(check int) "restart has no deleted replies" 0 (Hashtbl.length restored.comments);
-  Alcotest.(check int) "restart has no deleted votes" 0 (Hashtbl.length restored.vote_log);
-  Alcotest.(check int) "restart has no deleted reactions" 0 (Hashtbl.length restored.reactions)
+  ignore (require_ok (Board.add_comment active ~lookup:Recipient_lookup.none_declared
+    ~post_id ~author:"comment-author" ~content:"original dependent reply" ()));
+  ignore (require_ok (Board.vote active ~post_id ~voter:"voter" ~direction:Board.Up));
+  ignore (require_ok (Board.toggle_reaction active ~target_type:Board.Reaction_post
+    ~target_id:post_id ~user_id:"reactor" ~emoji:"👍"));
+  Board.flush_dirty active;
+  let later = List.map (fun path -> path, Fs_compat.load_file path)
+    [Board.vote_log_path active; Board.reactions_path active] in
+  let check_later label = List.iter (fun (path, bytes) ->
+    Alcotest.(check string) label bytes (Fs_compat.load_file path)) later in
+  armed := true;
+  (match require_ok (Board.delete_post active ~authorization:Board.Operator_deletion ~post_id) with
+   | Board.Deletion_persistence_pending _ -> ()
+   | Board.Durable_deletion | Board.Deletion_decision_pending _ ->
+     Alcotest.fail "post-decision comments failure lost its applied/pending boundary");
+  Alcotest.(check string) "posts write completes before comments fail" ""
+    (Fs_compat.load_file (Board.persist_path active));
+  (match active.comments_source with
+   | Board.Comments_unsettled _ -> ()
+   | Board.Comments_unobserved | Board.Comments_readable _ | Board.Comments_publishing _
+   | Board.Comments_recovered _ | Board.Comments_refused _ ->
+     Alcotest.fail "actual post-rename comments uncertainty was not retained");
+  check_later "failed comments source stops before later writes";
+  let before_flush = !syncs in
+  Board.flush_dirty active;
+  Alcotest.(check int) "ordinary flush never replays unknown comments write" before_flush !syncs;
+  check_later "ordinary flush preserves unattempted later sources";
+  let restored = Board.create_store ~base_path () in
+  require_ok (Board.initialize_store restored);
+  Alcotest.(check int) "fresh recovery removes original post" 0 (Hashtbl.length restored.posts);
+  Alcotest.(check int) "fresh recovery removes original replies" 0 (Hashtbl.length restored.comments);
+  Alcotest.(check int) "fresh recovery removes original votes" 0 (Hashtbl.length restored.vote_log);
+  Alcotest.(check int) "fresh recovery removes original reactions" 0 (Hashtbl.length restored.reactions)
 
 let test_delete_refuses_changed_same_cursor_bytes () =
   let doomed = create_post_exn ~content:"body-aaaa" in
@@ -535,14 +510,14 @@ let () =
             (with_eio test_unrecorded_deletion_preserves_the_model)
         ; Alcotest.test_case "obstructed parent refuses before decision" `Quick
             (with_eio (test_individual_snapshot_failure Board.persist_path))
-        ; Alcotest.test_case "comments rewrite remains pending and retries" `Quick
+        ; Alcotest.test_case "obstructed comments refuse before decision" `Quick
             (with_eio (test_individual_snapshot_failure Board.comments_path))
         ; Alcotest.test_case "votes rewrite remains pending and retries" `Quick
             (with_eio (test_individual_snapshot_failure Board.vote_log_path))
         ; Alcotest.test_case "reactions rewrite remains pending and retries" `Quick
             (with_eio (test_individual_snapshot_failure Board.reactions_path))
-        ; Alcotest.test_case "failed prerequisite preserves dependents until retry" `Quick
-            (with_eio test_failed_prerequisite_preserves_dependents_until_retry)
+        ; Alcotest.test_case "post-decision comments failure preserves later sources" `Quick
+            (with_eio test_failed_comments_write_preserves_later_sources)
         ; Alcotest.test_case "deletion guard refuses changed same-cursor bytes" `Quick
             (with_eio test_delete_refuses_changed_same_cursor_bytes)
         ; Alcotest.test_case "unreadable snapshot refuses without a transition" `Quick

@@ -16,9 +16,10 @@ type write =
   | Not_written of deletion_diagnostic list
   | Unknown of deletion_diagnostic list
 
-val record : store -> parent:posts_source_observation -> deletion_plan -> write
-(** The exact parent snapshot stays guarded through marker IO. Its workspace
-    is revalidated before entry. A refused guard never records a decision;
+val record : store -> parent:posts_source_observation ->
+  comments:comments_source_observation -> deletion_plan -> write
+(** Exact Posts then Comments snapshots stay guarded through marker IO. Both
+    workspaces are revalidated before entry. A refused guard never records a decision;
     cleanup after record is retained before finish propagates a reserved cause. *)
 val fence_recovery : store -> write
 (** Rewrites the exact observed decision bytes through CAS to obtain a new

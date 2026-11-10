@@ -19,7 +19,9 @@ val delete_post :
     imply an applied deletion. Persistence_pending does. Error is pre-decision.
     Recheck actor/reader against the current model and the canonical parent in
     the expected source snapshot: settling a file write does not publish its
-    model. Guard that exact snapshot through recording, before model changes. *)
+    model. The child IDs come from the canonical comments snapshot. Guard Posts
+    then Comments through recording, so a child accepted before the decision
+    is captured or causes a pre-decision refusal, before model changes. *)
 val flush_dirty : store -> unit
 (** Resume owned known work; never replay a marker-unknown store. *)
 val recover_on_initialize : store -> (unit, board_error) result

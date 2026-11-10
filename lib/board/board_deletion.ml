@@ -5,6 +5,10 @@ open Result.Syntax
 module Source = Board_deletion_source
 module Batch = Board_snapshot_batch
 module String_set = Set_util.StringSet
+module Comment_set = Set.Make (struct
+  type t = Comment_id.t
+  let compare left right = String.compare (Comment_id.to_string left) (Comment_id.to_string right)
+end)
 
 type deletion_authorization =
   | Operator_deletion
@@ -87,6 +91,25 @@ let parent_in_snapshot ~post_id (snapshot : Fs_compat.private_jsonl_snapshot) =
         rows (line + 1) parent remaining in
   rows 1 None (String.split_on_char '\n' snapshot.bytes)
 
+let children_in_snapshot ~post_id (snapshot : Fs_compat.private_jsonl_snapshot) =
+  let rec rows children = function
+    | [] -> Ok (Comment_set.elements children)
+    | text :: remaining ->
+      if String.equal (String.trim text) "" then rows children remaining
+      else
+        match Yojson.Safe.from_string text with
+        | json ->
+          (match (Board_content_json.comment_of_yojson json).value with
+           | None -> Error (Io_error "Board data is unavailable.")
+           | Some comment ->
+             (* Like the loader, the last accepted row owns each ID, including
+                an ID whose later row no longer belongs to this parent. *)
+             let children = if String.equal (Post_id.to_string comment.post_id) post_id
+               then Comment_set.add comment.id children else Comment_set.remove comment.id children in
+             rows children remaining)
+        | exception Yojson.Json_error _ -> Error (Io_error "Board data is unavailable.") in
+  rows Comment_set.empty (String.split_on_char '\n' snapshot.bytes)
+
 let stage store ~authorization pid =
   let post_id = Post_id.to_string pid in
   match Hashtbl.find_opt store.posts post_id with
@@ -99,11 +122,12 @@ let stage store ~authorization pid =
         Error (Io_error "Board data is unavailable.") in
     let* source_parent = parent_in_snapshot ~post_id observation.snapshot in
     let* () = authorize ~authorization source_parent in
-    let deleted_comments = Hashtbl.fold (fun _ (comment : comment) ids ->
-      if String.equal (Post_id.to_string comment.post_id) post_id then comment.id :: ids else ids)
-      store.comments []
-      |> List.sort (fun left right -> String.compare (Comment_id.to_string left) (Comment_id.to_string right)) in
-    Ok ({ decision_id = Deletion_id.generate (); deleted_post = pid; deleted_comments }, observation)
+    let* comments = match store.comments_source with
+      | Comments_readable { observation; _ } -> Ok observation
+      | Comments_unobserved | Comments_publishing _ | Comments_recovered _
+      | Comments_refused _ | Comments_unsettled _ -> Error (Io_error "Board data is unavailable.") in
+    let* deleted_comments = children_in_snapshot ~post_id comments.snapshot in
+    Ok ({ decision_id = Deletion_id.generate (); deleted_post = pid; deleted_comments }, observation, comments)
 
 let apply store plan =
   let post_id = Post_id.to_string plan.deleted_post in
@@ -210,8 +234,8 @@ let delete_post store ~authorization ~post_id =
   with_persist_lock store (fun () ->
     let* () = require_sources store in
     let* () = Source.require_empty store in
-    let* plan, parent = with_lock store (fun () -> stage store ~authorization pid) in
-    let recorded = Source.record store ~parent plan in
+    let* plan, parent, comments = with_lock store (fun () -> stage store ~authorization pid) in
+    let recorded = Source.record store ~parent ~comments plan in
     match recorded with
     | Source.Not_written _ | Source.Cleared _ ->
       Source.finish recorded (Error (Io_error

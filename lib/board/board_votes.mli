@@ -206,7 +206,8 @@ val delete_post :
 (** Durably record the original post and comment IDs before removing them from
     memory. Authority is checked against both current memory and the expected
     source's canonical parent under persistence. The exact parent source stays
-    guarded through decision recording. Four complete source
+    guarded through decision recording together with the exact comments source
+    that supplies the canonical child set. Four complete source
     observations are required. Each snapshot uses
     its own exact CAS, and the decision is retired only after four known writes.
     [Error] is a pre-decision refusal. [Deletion_decision_pending] does not

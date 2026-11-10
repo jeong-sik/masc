@@ -49,6 +49,18 @@ type keeper_context = {
 
 (** {1 Brief builder} *)
 
+type agent_briefs_observation = {
+  json : Yojson.Safe.t list;
+  next_deadline_unix : float option;
+}
+
+val build_agent_briefs_observation :
+  now_ts:float -> Workspace.config -> attention_context list ->
+  Yojson.Safe.t list -> agent_briefs_observation
+(** Build the same source-dated agent rows and retain the next live-to-stale
+    transition from those rows. Existing integer age <=300 changes at
+    last_seen+301; incrementing display age does not wake a reader. *)
+
 val latest_message_to :
   string -> Masc_domain.message list -> Masc_domain.message option
 (** [latest_message_to agent_name messages] returns the most recent message

@@ -56,6 +56,17 @@ val build_workspace_attention_items : Workspace.config -> attention_item list
 val normalize_digest_target_type :
   string option -> (string, string) result
 
+val observe :
+  ?actor:string ->
+  ?target_type:string ->
+  ?target_id:string ->
+  ?include_workers:bool ->
+  'a Operator_pending_confirm.context ->
+  (Dashboard_projection_cache.digest_observation, string) result
+(** Read current store/ring inputs once and retain their policy deadlines:
+    the selected tool-host attention window and active judgment expiry.
+    No actor projection TTL is consulted here. *)
+
 val digest_json :
   ?actor:string ->
   ?target_type:string ->
@@ -63,3 +74,9 @@ val digest_json :
   ?include_workers:bool ->
   'a Operator_pending_confirm.context ->
   (Yojson.Safe.t, string) result
+
+module For_testing : sig
+  val tool_host_attention_observation :
+    now:float -> Log.Ring.entry list -> attention_item list * float option
+  (** The actual selected ring rows, de-duplication and strict age policy. *)
+end

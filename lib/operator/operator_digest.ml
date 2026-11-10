@@ -21,20 +21,20 @@ let health_from_attention_items (items : attention_item list) =
 
 let tool_host_attention_window_sec = 900.0
 
-let recent_tool_host_failures ~now () =
-  let rec dedup seen acc = function
-    | [] -> List.rev acc
+let earlier_deadline left right = match left, right with
+  | None, deadline | deadline, None -> deadline
+  | Some left, Some right -> Some (Float.min left right)
+
+let tool_host_attention_observation ~now entries =
+  let rec dedup seen acc deadline = function
+    | [] -> List.rev acc, deadline
     | (entry : Log.Ring.entry) :: rest ->
-        let fresh =
-          match Masc_domain.parse_iso8601_opt entry.ts with
-          | Some ts -> now -. ts <= tool_host_attention_window_sec
-          | None -> false
-        in
-        if not fresh then
-          dedup seen acc rest
-        else
-          match Failure_envelope.find_in_json entry.details with
-          | None -> dedup seen acc rest
+        match Masc_domain.parse_iso8601_opt entry.ts with
+        | Some ts when now -. ts <= tool_host_attention_window_sec
+            && String.equal (String.lowercase_ascii entry.module_name)
+                 (String.lowercase_ascii Failure_envelope.tool_host_log_module_name) ->
+          (match Failure_envelope.find_in_json entry.details with
+          | None -> dedup seen acc deadline rest
           | Some envelope ->
               let fingerprint =
                 String.concat "|"
@@ -45,7 +45,7 @@ let recent_tool_host_failures ~now () =
                   ]
               in
               if List.mem fingerprint seen then
-                dedup seen acc rest
+                dedup seen acc deadline rest
               else
                 let item =
                   {
@@ -65,12 +65,18 @@ let recent_tool_host_failures ~now () =
                         ];
                   }
                 in
-                dedup (fingerprint :: seen) (item :: acc) rest
+                let expires = Float.next_after (ts +. tool_host_attention_window_sec) infinity in
+                let next = if Float.is_finite expires then Some expires else None in
+                dedup (fingerprint :: seen) (item :: acc) (earlier_deadline deadline next) rest)
+        | Some _ | None -> dedup seen acc deadline rest
   in
-  Log.Ring.recent ~limit:12 ~module_filter:Failure_envelope.tool_host_log_module_name ()
-  |> dedup [] []
+  dedup [] [] None entries
 
-let build_workspace_attention_items config =
+let recent_tool_host_failure_observation ~now () =
+  Log.Ring.recent ~limit:12 ~module_filter:Failure_envelope.tool_host_log_module_name ()
+  |> tool_host_attention_observation ~now
+
+let build_workspace_attention_observation ~now config =
   let pending_confirms = read_pending_confirms config in
   let pending_items =
     if pending_confirms = [] then []
@@ -89,9 +95,11 @@ let build_workspace_attention_items config =
         };
       ]
   in
-  List.sort compare_attention
-    (recent_tool_host_failures ~now:(Time_compat.now ()) ()
-    @ pending_items)
+  let host_items, deadline = recent_tool_host_failure_observation ~now () in
+  List.sort compare_attention (host_items @ pending_items), deadline
+
+let build_workspace_attention_items config =
+  fst (build_workspace_attention_observation ~now:(Time_compat.now ()) config)
 
 (* [Paused_on_blocker] and [Paused] share the wire reason, so both are
    [keeper_paused]; the row's [next_human_action] tells them apart. *)
@@ -284,13 +292,14 @@ let workspace_state_json config =
         ("project", `String state.project);
       ]
 
-let digest_json ?actor ?target_type ?target_id:_target_id ?include_workers:_include_workers
+let observe ?actor ?target_type ?target_id:_target_id ?include_workers:_include_workers
     (ctx : 'a context) :
-    (Yojson.Safe.t, string) result =
+    (Dashboard_projection_cache.digest_observation, string) result =
   let config = ctx.config in
+  let now = Time_compat.now () in
   if not (Workspace.is_initialized config) then
     Ok
-      (`Assoc
+      {Dashboard_projection_cache.json = `Assoc
         [
           ("trace_id", `String (trace_id "opsd"));
           ( "target_type"
@@ -309,7 +318,7 @@ let digest_json ?actor ?target_type ?target_id:_target_id ?include_workers:_incl
           ("active_summary", summary_of_recommendations ~actor:"dashboard" []);
           ("active_recommended_actions", `List []);
           ("active_recommendation_summary", summary_of_recommendations ~actor:"dashboard" []);
-        ])
+        ]; next_deadline_unix = None}
   else
     let actor_name = normalized_actor ~context_actor:ctx.agent_name actor in
     let* target_type = normalize_digest_target_type target_type in
@@ -320,8 +329,9 @@ let digest_json ?actor ?target_type ?target_id:_target_id ?include_workers:_incl
         let keeper_attention =
           keeper_attention_projection_items config
         in
+        let workspace_attention, attention_deadline = build_workspace_attention_observation ~now config in
         let attention_items =
-          build_workspace_attention_items config
+          workspace_attention
           @ keeper_attention
           |> List.sort compare_attention
         in
@@ -333,6 +343,7 @@ let digest_json ?actor ?target_type ?target_id:_target_id ?include_workers:_incl
         in
         let active_guidance =
           active_guidance
+            ~now
             ~config
             ~target_type:Operator_action_constants.workspace_target_type
             ~target_id:None
@@ -340,7 +351,7 @@ let digest_json ?actor ?target_type ?target_id:_target_id ?include_workers:_incl
             ~empty_recommendation_summary
         in
         Ok
-          (`Assoc
+          {Dashboard_projection_cache.json = `Assoc
             ([
               ("trace_id", `String (trace_id "opsd"));
               ( "target_type"
@@ -354,7 +365,16 @@ let digest_json ?actor ?target_type ?target_id:_target_id ?include_workers:_incl
               ("recommendation_summary", active_guidance.recommendation_summary);
               ("workspace", workspace_state_json);
             ]
-            @ active_guidance.fields))
+            @ active_guidance.fields);
+           next_deadline_unix = earlier_deadline attention_deadline active_guidance.next_deadline_unix}
     | Some Operator_action_constants.Keeper
     | Some Operator_action_constants.Goal
     | None -> Error "unsupported target_type"
+
+let digest_json ?actor ?target_type ?target_id ?include_workers ctx =
+  observe ?actor ?target_type ?target_id ?include_workers ctx
+  |> Result.map (fun observation -> observation.Dashboard_projection_cache.json)
+
+module For_testing = struct
+  let tool_host_attention_observation = tool_host_attention_observation
+end

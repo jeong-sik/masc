@@ -1155,6 +1155,78 @@ let test_a_held_http_lane_rests_without_dispatch () =
         Alcotest.(check int) "the held slot is not called" 0 (Fixture.post_count server)))))
 ;;
 
+(* R5 on a lane that also declares a CLI slot: every HTTP slot waits, so the
+   lane keeps its HTTP order -- Jev first, then an HTTP walk that ends at rest
+   without a call -- and walks the CLI slot after it, as after a refused HTTP
+   flow. Prepared as CLI-only, the lane skipped Jev and reported no HTTP walk
+   ([prior_error = None]). *)
+let test_a_held_http_slot_keeps_the_http_order_of_a_mixed_lane () =
+  Fixture.with_official_client_runtimes (fun () ->
+  with_prompt_registry (fun () ->
+    run_eio (fun ~sw ~net ~clock ->
+      let candidate = candidate "board-attention-held-mixed-lane" in
+      let server =
+        Fixture.start_server ~sw ~net ~clock
+          (Fixture.Reply
+             (Fixture.openai_response (judgment_output ~candidate_id:candidate.candidate_id)))
+      in
+      let runtime =
+        match Runtime.get_runtime_by_id "stub-http.stub-model" with
+        | Some runtime -> runtime
+        | None -> Alcotest.fail "the fixture HTTP runtime must exist"
+      in
+      let scope = Runtime_instance.quota_scope_of_runtime runtime in
+      let held_slot = "board-attention-held-mixed" in
+      publish_lane
+        ~cli_slot_ids:[ Fixture.cli_primary_runtime ]
+        ~runtime_observations:
+          [ ( held_slot
+            , { Runtime_exact_output_registry.candidate =
+                  runtime.Runtime_instance.candidate_backpressure
+              ; quota_scope = scope
+              } ) ]
+        [ target held_slot server.base_url ];
+      Runtime_quota_window.reset_for_testing ();
+      Fun.protect ~finally:Runtime_quota_window.reset_for_testing (fun () ->
+        Runtime_quota_window.note_exhausted ~scope ~resets_at:(Time_compat.now () +. 3600.0);
+        let prepared =
+          match prepare_exact ~net:(Some net) candidate with
+          | Ok prepared -> prepared
+          | Error _ -> Alcotest.fail "a mixed lane whose HTTP slot waits must prepare"
+        in
+        let cli_calls = ref 0 in
+        let runner ~runtime:_ ~system_prompt:_ ~output_schema:_ ~prompt:_ =
+          incr cli_calls;
+          Error (Masc.Fusion_official_client.Setup_failure "client unavailable")
+        in
+        (match
+           Exact_flow.execute
+             ~cli_runner:runner
+             ~clock
+             ~callback_error_to_string:Fun.id
+             ~before_dispatch:(fun _ -> Alcotest.fail "a held HTTP slot must not bind a dispatch")
+             ~before_advance:(fun ~failed:_ ~next:_ -> Alcotest.fail "a held HTTP slot must not advance")
+             prepared
+         with
+         | Error
+             (Exact_flow.Cli_slots_exhausted
+                { prior_error =
+                    Some
+                      (Exact_flow.Providers_exhausted
+                        { attempts = []
+                        ; binding_standing = Agent_core.Exact_output.Every_binding_resting
+                        ; detail = _
+                        })
+                ; failures = [ _ ]
+                }) -> ()
+         | Error (Exact_flow.Cli_slots_exhausted { prior_error = None; _ }) ->
+           Alcotest.fail "a lane with a held HTTP slot ran as CLI-only, which skips Jev"
+         | Error _ -> Alcotest.fail "the CLI slot must be walked after the held HTTP walk"
+         | Ok _ -> Alcotest.fail "a CLI slot that fails setup must not produce a judgment");
+        Alcotest.(check int) "the held slot is not called" 0 (Fixture.post_count server);
+        Alcotest.(check int) "the CLI slot is walked once" 1 !cli_calls))))
+;;
+
 let test_cli_only_executes_without_http_provenance () =
   Fixture.with_official_client_runtimes (fun () ->
   with_prompt_registry (fun () ->
@@ -2945,6 +3017,8 @@ let () =
             test_cli_only_executes_without_http_provenance
         ; Alcotest.test_case "a held HTTP lane rests without a dispatch" `Quick
             test_a_held_http_lane_rests_without_dispatch
+        ; Alcotest.test_case "a held HTTP slot keeps the HTTP order of a mixed lane" `Quick
+            test_a_held_http_slot_keeps_the_http_order_of_a_mixed_lane
         ; Alcotest.test_case
             "a failed CLI-only walk keeps the slots it walked"
             `Quick

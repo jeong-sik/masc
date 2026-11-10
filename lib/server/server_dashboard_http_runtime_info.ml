@@ -979,8 +979,9 @@ let dashboard_runtime_provider_probe_json
           ~error:"runtime endpoint is not an absolute http(s) URL"
           ()
       else (
-      (* The probe sends the credential its operator declared, so it asks
-         the seal first (plan D4); a refused probe sends nothing. *)
+      (* HIGH-RISK-UNREVIEWED: the probe sends the credential its operator
+         declared, so it asks the seal first (plan D4); a refused probe sends
+         nothing. *)
       match Runtime_account_access.authorize_api sealed with
       | Error refusal ->
         make

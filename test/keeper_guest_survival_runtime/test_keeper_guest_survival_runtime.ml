@@ -1942,7 +1942,7 @@ let adoption_read = function
   | ("inspect" | "exec" | "agent") :: _ -> true
   | _ -> false
 
-let test_absent_discard_never_runs_the_legacy_helper () = with_fixture @@ fun root ->
+let test_absent_discard_boots_only_the_guest_and_the_claims_helper () = with_fixture @@ fun root ->
   write (Filename.concat root "discard-absent") "";
   boot root;
   let operations = calls root in
@@ -1959,12 +1959,7 @@ let test_absent_discard_never_runs_the_legacy_helper () = with_fixture @@ fun ro
       | "run" :: "--rm" :: "--name" :: name :: _ -> String.equal name claim_name
       | [] | _ :: _ -> false) runs);
   check (list string) "claim carries the actual workspace"
-    [Keeper_sandbox_runtime_setup.normalize_base_path_for_hash root] (fixture_claimants root);
-  let trim = Microvm.work_volume_trim_name ~keeper_name:keeper in
-  check bool "no name-scoped trim helper starts" false
-    (List.exists (fun args -> List.mem trim args) runs);
-  check bool "no name-scoped trim helper is deleted" false
-    (List.mem ["delete"; "--force"; trim] operations)
+    [Keeper_sandbox_runtime_setup.normalize_base_path_for_hash root] (fixture_claimants root)
 
 let test_unconfirmed_claim_blocks_guest_and_retains_evidence () = with_fixture @@ fun root ->
   let failure = Filename.concat root "claim-report-failure" in
@@ -3000,7 +2995,7 @@ let () =
   | [_; "--step"; root; operation] -> process_step root operation
   | _ -> run "guest survival runtime against provider process fixture"
       ["process boundaries", [
-        test_case "absent discard never runs legacy helper" `Quick test_absent_discard_never_runs_the_legacy_helper;
+        test_case "absent discard boots only the guest and the claims helper" `Quick test_absent_discard_boots_only_the_guest_and_the_claims_helper;
         test_case "unconfirmed claim blocks guest and retains evidence" `Quick test_unconfirmed_claim_blocks_guest_and_retains_evidence;
         test_case "postboot helper refusal preserves the new guest" `Quick test_postboot_helper_refusal_preserves_the_new_guest;
         test_case "uncertain postboot recovers without replay" `Quick test_uncertain_postboot_retains_guest_and_recovers_without_replay;

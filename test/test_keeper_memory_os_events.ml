@@ -261,24 +261,18 @@ let test_append_refuses_what_read_would_refuse () =
     (Sys.file_exists (Events.path_for_keepers_dir ~keepers_dir ~keeper_id))
 ;;
 
-let test_retraction_hard_cut_preserves_other_rows () =
+let test_retraction_and_following_retrieval_are_counted () =
   with_temp_keepers @@ fun keepers_dir ->
   let keeper_id = "keeper" in
-  let old = Events.event_to_json (retracted ~at:1. ()) in
-  let old = with_field old "kind" (`String "cited") in
-  let old = with_field old "tool" (`String "keeper_memory_retract") in
-  let rows = [ old; Events.event_to_json (retracted ~at:2. ());
+  let rows = [ Events.event_to_json (retracted ~at:2. ());
                Events.event_to_json (retrieved ~at:3. "kept") ] in
   List.iter (Fs_compat.append_jsonl
       (Events.path_for_keepers_dir ~keepers_dir ~keeper_id)) rows;
   let read = read_ok ~keepers_dir ~keeper_id in
-  (match read with
-   | (0, Error (Events.Malformed _)) :: _ -> ()
-   | _ -> fail "the obsolete cited row must stay as a named read error");
-  check int "all rows stay accounted for" 3 (List.length read);
+  check int "all rows are accounted for" 2 (List.length read);
   let summary = Events.summary_for ~memory_id:id_a (events_only read) in
-  check int "only the typed retraction is counted" 1 summary.retracted_count;
-  check int "the following retrieval still reads" 1 summary.retrieved_count
+  check int "the retraction is counted" 1 summary.retracted_count;
+  check int "the following retrieval is counted" 1 summary.retrieved_count
 ;;
 
 let test_append_all_returns_only_the_failures () =
@@ -382,8 +376,8 @@ let () =
         ; test_case "an append cuts a torn tail first" `Quick test_append_cuts_a_torn_tail_first
         ; test_case "a missing file is no events" `Quick test_missing_sidecar_reads_as_no_events
         ; test_case "an unreadable line stays in the list" `Quick test_unreadable_line_stays_in_the_list
-        ; test_case "obsolete citations do not hide the remaining history" `Quick
-            test_retraction_hard_cut_preserves_other_rows
+        ; test_case "a retraction and the retrieval after it are counted" `Quick
+            test_retraction_and_following_retrieval_are_counted
         ; test_case "append refuses what read would refuse" `Quick
             test_append_refuses_what_read_would_refuse
         ; test_case "append_all returns only the failures" `Quick

@@ -1,0 +1,9 @@
+Production 0b00cbce749dd2967f1837238133c3f40df72ddf:
+- history_redaction_response inspected the complete delta and direct APIs. No additional P0-P2 in that reading.
+- issue_disposition_review verified actual foreign-close/policy counterexamples, then found the normal accepted sub-board deletion hearth mismatch P2. This is the current blocking verdict; an earlier provisional clear does not override it.
+
+Upper fixture 2c7fc482f4cd95a12732ceaf2cdc349fdfcacc94:
+- Both independently read the corrected close_fd/data-FD/Posts-lock fault boundaries and actual initialization/read APIs. Earlier 3dc fixture findings were resolved in source.
+- Both found no additional fixture P0-P2. The ninth case exposes the unresolved production hearth P2 and is unexecuted.
+
+These are local independent source reads, not cross-model verification, formal GitHub approval, session independence established by GitHub identity, typing/warning checks or runtime execution.

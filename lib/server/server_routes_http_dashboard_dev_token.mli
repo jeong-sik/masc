@@ -25,6 +25,10 @@ val dashboard_dev_token_path : string -> string
 val dashboard_dev_token_pending_path : string -> string
 val token_error_to_string : token_error -> string
 val request_error_status : request_error -> Httpun.Status.t
+(** Transient token/credential reads and resumable journal I/O are 503.
+    The original pending token remains the rotation owner on every retry.
+    Invalid journals and typed validation/permission errors remain terminal
+    500; a non-loopback Host is 403 before any token I/O. *)
 val request_error_code : request_error -> string
 val request_error_to_string : request_error -> string
 

@@ -49,4 +49,8 @@ val lines : height:int -> width:int -> t -> string list
     selected invite and as many of its neighbours as [height] allows. When the
     text is taller than [height] the closing sentence goes first, then the two
     explanatory sentences, then the keys; the form, the messages and the
-    selected invite stay. Every text is sanitized before it is measured. *)
+    selected invite stay while [height] has rows for them. The frame says how
+    many rows it cut, but not that a sentence or the keys gave way: when what
+    is left fits without a cut, nothing says they are missing. Every text is
+    sanitized before it is measured, so every row returned is already clean
+    terminal text. *)

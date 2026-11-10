@@ -121,16 +121,18 @@ let test_actual_worker_follows_store_and_policy_inputs () = Eio_main.run (fun en
     (* Real-clock watchdog bounds fixture hangs only, not product freshness. *)
     Eio.Time.with_timeout_exn (Eio.Stdenv.clock env) 10.0 (fun () ->
       Eio.Switch.run (fun sw ->
-        Eio_context.with_test_env ~net:(Eio.Stdenv.net env) ~clock
+        Eio_context.with_test_env ~net:(Eio.Stdenv.net env)
+          ~clock:(clock :> float Eio.Time.clock_ty Eio.Resource.t)
           ~mono_clock:(Eio.Stdenv.mono_clock env) ~sw (fun () ->
-          Time_compat.set_clock clock;
+          Time_compat.set_clock (clock :> float Eio.Time.clock_ty Eio.Resource.t);
           let state = Mcp_server.For_testing.create_state ~base_path in
           let scope = Mcp_server.workspace_scope state in
           let config = scope.config in
           ignore (Workspace.init config ~agent_name:None);
           let initial_request = Server_dashboard_http_core_mission.request ~state
               (Httpun.Request.create `GET "/api/v1/dashboard/briefing") in
-          let cold = Server_dashboard_http_core_mission.json ~sw ~clock initial_request in
+          let cold = Server_dashboard_http_core_mission.json ~sw
+              ~clock:(clock :> float Eio.Time.clock_ty Eio.Resource.t) initial_request in
           check string "the actual cold HTTP read installs canonical default metadata" "ready"
             Yojson.Safe.Util.(cold |> member "mission_observation_state" |> to_string);
           check string "cold HTTP metadata belongs to its captured instance"
@@ -162,7 +164,8 @@ let test_actual_worker_follows_store_and_policy_inputs () = Eio_main.run (fun en
             | `String "error" -> fail "production Mission read failed"
             | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ | `Assoc _ ->
                 fail "Mission frame lost its closed observation state" in
-          Server_dashboard_http_core_mission.start ~state ~sw ~clock
+          Server_dashboard_http_core_mission.start ~state ~sw
+            ~clock:(clock :> float Eio.Time.clock_ty Eio.Resource.t)
             ~mono_clock:(Eio.Stdenv.mono_clock env);
           (* The cached cold fill and the initial source completion can both
              publish ready. Wait for the actual source attempt, then fence
@@ -217,7 +220,8 @@ let test_actual_worker_follows_store_and_policy_inputs () = Eio_main.run (fun en
               (Httpun.Request.create `GET "/api/v1/dashboard/briefing") in
           (match Mcp_server.set_workspace_config state config with
            | Ok () -> () | Error _ -> fail "same-path worker scope replacement failed");
-          let late = Server_dashboard_http_core_mission.json ~sw ~clock context in
+          let late = Server_dashboard_http_core_mission.json ~sw
+              ~clock:(clock :> float Eio.Time.clock_ty Eio.Resource.t) context in
           check string "request context cannot borrow the replacement instance after dispatch"
             (Server_observer_scope.instance_id scope)
             Yojson.Safe.Util.(late |> member "observer_instance_id" |> to_string))))))
@@ -238,9 +242,10 @@ let test_source_burst_preserves_completed_read_and_one_trailing_read () = Eio_ma
     match previous_fs with Some fs -> Fs_compat.set_fs fs | None -> Fs_compat.clear_fs ()) (fun () ->
     Eio.Time.with_timeout_exn (Eio.Stdenv.clock env) 10.0 (fun () ->
       Eio.Switch.run (fun sw ->
-        Eio_context.with_test_env ~net:(Eio.Stdenv.net env) ~clock
+        Eio_context.with_test_env ~net:(Eio.Stdenv.net env)
+          ~clock:(clock :> float Eio.Time.clock_ty Eio.Resource.t)
           ~mono_clock:(Eio.Stdenv.mono_clock env) ~sw (fun () ->
-          Time_compat.set_clock clock;
+          Time_compat.set_clock (clock :> float Eio.Time.clock_ty Eio.Resource.t);
           let state = Mcp_server.For_testing.create_state ~base_path in
           let scope = Mcp_server.workspace_scope state in
           ignore (Workspace.init scope.config ~agent_name:None);
@@ -277,7 +282,8 @@ let test_source_burst_preserves_completed_read_and_one_trailing_read () = Eio_ma
             | `String "error" -> fail "production Mission burst read failed"
             | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ | `Assoc _ ->
                 fail "Mission burst frame has no closed observation state" in
-          Server_dashboard_http_core_mission.start ~state ~sw ~clock
+          Server_dashboard_http_core_mission.start ~state ~sw
+            ~clock:(clock :> float Eio.Time.clock_ty Eio.Resource.t)
             ~mono_clock:(Eio.Stdenv.mono_clock env);
           Eio.Promise.await first_started;
           let owner = Owner.owner_for_scope ~state scope in

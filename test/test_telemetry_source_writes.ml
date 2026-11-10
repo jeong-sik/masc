@@ -1,6 +1,6 @@
 open Alcotest
 module Commit = Masc.Dashboard_observation_commit
-module Telemetry = Masc.Telemetry_unified
+module Telemetry = Telemetry_unified
 
 let fixture f = Eio_main.run (fun env ->
   let previous = Fs_compat.get_fs_opt () in

@@ -4,14 +4,17 @@
 type error = Invalid_request | Configuration_unavailable | Network_unavailable | Unsupported_connection | Disabled_connection
   | Credential_unavailable | Discovery_failed of Runtime_model_discovery.error
   | Save_failed of Runtime_setup_batch.error
+  | Account_refused of Runtime_account_access.refusal
 (** [Network_unavailable]: the route was reached on a server whose Eio context
-    holds no network, so discovery cannot start. *)
+    holds no network, so discovery cannot start. [Account_refused]: the
+    access of this process refuses the account an HTTP connection would send
+    with, the credential its operator declared (plan D4b). *)
 val error_message : error -> string
 val status_of_error : error -> Httpun.Status.t
-(** 400 for a wrong request or selected connection, 409 when the workspace
-    revision or writer lock moved, 502 when the connected runtime answered
-    badly, 503 when this server cannot read its configuration or reach the
-    network. *)
+(** 400 for a wrong request or selected connection, 403 when the access of
+    this process refuses the account, 409 when the workspace revision or
+    writer lock moved, 502 when the connected runtime answered badly, 503 when
+    this server cannot read its configuration or reach the network. *)
 val discover : binary:string -> sw:Eio.Switch.t -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t ->
   base_path:string -> Yojson.Safe.t -> (Yojson.Safe.t,error) result
 (** Explicit native account/server metadata request only, not response/tool verification. *)

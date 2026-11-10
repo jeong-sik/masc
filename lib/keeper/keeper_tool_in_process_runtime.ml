@@ -1935,7 +1935,11 @@ let masc_file_failure message =
 
 let handle_masc_file_with_outcome ~name ~args () =
   let start_time = Tool_timing.start () in
-  let require_env key =
+  (* HIGH-RISK-UNREVIEWED: the Files API is called with DEEPSEEK_API_KEY, an
+     account of the host, which a multi-account process shares with no person
+     (plan D4b). The key is read only with the proof that the access allows
+     it. *)
+  let require_env (_ : Runtime_account_access.host_account) key =
     (* The key is the caller's, but the floor is the same: a value set in
        runtime.toml has to answer here too, or masc_file refuses a variable the
        deployment did declare. *)
@@ -1943,8 +1947,14 @@ let handle_masc_file_with_outcome ~name ~args () =
     | Some v when v <> "" -> Ok v
     | _ -> Error ("masc_file requires the " ^ key ^ " environment variable")
   in
-  match Eio_context.get_root_switch_opt (), Eio_context.get_net_opt () with
-  | Some sw, Some net -> (
+  match
+    ( Eio_context.get_root_switch_opt ()
+    , Eio_context.get_net_opt ()
+    , Runtime_account_access.authorize_host Runtime_account_access.Files_api )
+  with
+  | _, _, Error refusal -> masc_file_failure (Runtime_account_access.refusal_to_string refusal)
+  | Some sw, Some net, Ok host -> (
+    let require_env = require_env host in
     match name with
     | "masc_file_upload" -> (
       match require_env "DEEPSEEK_API_KEY" with
@@ -2019,7 +2029,8 @@ let handle_masc_file_with_outcome ~name ~args () =
                 ~data:(`Assoc [ ("ok", `Bool true); ("count", `Int (List.length rows)); ("files", `List rows) ])
                 ())))
     | _ -> masc_file_failure ("unknown file tool " ^ name))
-  | _ ->
+  | None, _, Ok (_ : Runtime_account_access.host_account)
+  | _, None, Ok (_ : Runtime_account_access.host_account) ->
     masc_file_failure "masc_file requires the server root switch + net (unavailable)"
 ;;
 

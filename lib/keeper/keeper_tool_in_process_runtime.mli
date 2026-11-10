@@ -341,8 +341,10 @@ val handle_masc_fusion_with_outcome
     handler for the [masc_file_{upload,delete}] provider Files tools: it
     resolves the server root switch + net from {!Eio_context} (same reason as
     fusion: the upload must not be tied to the keeper turn) and the API key
-    from the [DEEPSEEK_API_KEY] environment. Every failure is an explicit
-    typed failure. *)
+    from the [DEEPSEEK_API_KEY] environment. The key is an account of the
+    host, so a process whose access refuses it ({!Runtime_account_access}
+    [Files_api], plan D4b) fails before it reads the key. Every failure is an
+    explicit typed failure. *)
 val handle_masc_file_with_outcome
   :  name:string
   -> args:Yojson.Safe.t

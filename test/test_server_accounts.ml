@@ -111,9 +111,14 @@ let status_from_table table ~meth ~path =
     | [] | [ (_ : string) ] -> None)
 ;;
 
+let refused (_ : Httpun.Request.t) reqd = Http_server_eio.Response.method_not_allowed reqd
+
 (* A router is one shared table that a registration changes in place, and the
-   registration function can keep the router it was given. A route of another
-   kind that is added after the check is not served. *)
+   registration function can keep the router it was given. The table is a copy
+   that the check made: a route that is registered afterwards is not in it,
+   whatever its kind. Every method of its path is the 404 of a table that
+   never held it, and a route of the table that it would replace answers as
+   before. *)
 let test_a_route_added_after_the_check () =
   let kept = ref None in
   let table =
@@ -134,19 +139,28 @@ let test_a_route_added_after_the_check () =
    | None -> Alcotest.fail "the registration was not called"
    | Some router ->
      let (_ : Http_server_eio.Router.t) =
-       Server_route.get
-         (Server_route.Self_authenticated Route_access.Loopback_dev_token)
-         late
-         answered
-         router
+       router
+       |> Server_route.get
+            (Server_route.Self_authenticated Route_access.Loopback_dev_token)
+            late
+            answered
+       |> Server_route.get
+            (Server_route.Self_authenticated Route_access.Loopback_dev_token)
+            Server_health_paths.health
+            refused
      in
      ());
   Alcotest.(check (option int))
-    "a route of another kind that was added after the check"
+    "a route that was registered after the check"
     (Some 404)
     (status_from_table table ~meth:"GET" ~path:late);
+  (* A router that holds the path answers another method of it with a 405. *)
   Alcotest.(check (option int))
-    "the route of the table, after it"
+    "another method of its path"
+    (Some 404)
+    (status_from_table table ~meth:"POST" ~path:late);
+  Alcotest.(check (option int))
+    "the route of the table that a later one would replace"
     (Some 200)
     (status_from_table table ~meth:"GET" ~path:Server_health_paths.health)
 ;;
@@ -375,7 +389,10 @@ let recorded_port ~base =
    vocabulary is refused and not kept. This case therefore runs before every
    case that reads the mode: after one of them the value below is not read. *)
 let test_stops_on_an_http_mode_outside_its_vocabulary () =
-  with_installation (fun env { base; config = _; store = _; multi_account } ->
+  with_installation (fun env { base; config = _; store; multi_account } ->
+    (* The store is gone too: a boot that opened the zone before it read the
+       mode would stop on the store. *)
+    remove_tree (Filename.dirname store);
     Unix.putenv "MASC_USE_H2" "sometimes";
     Alcotest.(check string)
       "the boot under an HTTP mode outside its vocabulary"

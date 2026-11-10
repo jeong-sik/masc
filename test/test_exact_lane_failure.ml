@@ -34,7 +34,17 @@ let test_provider_refusals () =
     ; Exact.Request_body_refused, F.Input_refused F.Request_body
     ; Exact.Invalid_request, F.Input_refused F.Invalid_request
     ; Exact.Context_overflow, F.Input_refused F.Context_overflow
-    ; Exact.Input_capacity, F.Input_refused F.Input_capacity ]
+    ; Exact.Input_capacity, F.Input_refused F.Input_capacity ];
+  (* A 402 that states a window holds its account's slots until then
+     (Runtime_exact_lane_backpressure.note_cause); called, it reads the same
+     as a held slot (RFC-exact-lane-waits-for-a-stated-reset R5). *)
+  List.iter (fun (retry_after_s, expected) ->
+      check failure "a payment refusal is transient only with a usable window" expected
+        (F.execution
+           (Exact.Provider_response_refused
+              { http_status = 402; refusal = Exact.Payment_required; retry_after_s })))
+    [ None, F.Configuration_refused; Some 0., F.Configuration_refused; Some nan, F.Configuration_refused
+    ; Some infinity, F.Configuration_refused; Some 60., F.Transient ]
 
 let test_answers_that_cannot_be_used () =
   List.iter (fun (label, cause) -> check failure label F.Output_unusable (F.execution cause))

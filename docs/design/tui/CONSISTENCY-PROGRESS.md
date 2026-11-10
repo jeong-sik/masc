@@ -311,3 +311,26 @@ retained as unsuccessful captures and do not prove screen behavior. Raw
 observations stay private in `artifacts/native-tui-proof-42732829605/`.
 This confirms those observed candidate views only, without proving production
 installation, the new navigation repair, or the remaining child/input states.
+
+## Tools catalog and volume reading (#50872)
+
+The catalog's long periodic volume report moves to an explicit child reading.
+The five Tools tabs remain unchanged. Catalog `V` captures its scroll position,
+opens the volume reading and requests a report, unless a request is already
+running. It never reuses an old reclaim arm. The child uses the existing
+report/reclaim protocol, exact candidate names, workspace request owner and
+uncertain-result messages. Esc returns to the captured catalog position.
+Skill and Keeper action keys do not act on the volume report; its footer names
+volume, scroll, refresh and return controls. Periodic inventory refresh does
+not reset the reading. A newly answered operator request starts at the first
+line, where an armed reclaim names its targets.
+
+The f89b3e6f native baseline was reobserved at 36x20 and 80x24. The narrower
+view contained no actual tool row; the wider view put a missing-image error
+before the catalog. These are baseline observations, not execution of this
+repair. Two independent source reviews covered the nine-file implementation
+and its three-file follow-up. Their refresh-key and inflight-documentation
+findings were repaired. Syntax parsing uses local OCaml 5.5.1; project type
+checking, candidate execution and installation remain separate. No new screen
+wording, layout or row-order tests were added. The full screen scope remains
+open.

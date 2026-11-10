@@ -2724,6 +2724,7 @@
 (include stanzas/test_board_persistence_load_contract.inc)
 
 (include stanzas/test_board_posts_source_authority.inc)
+(include stanzas/test_board_delete_order.inc)
 (include stanzas/test_board_comments_source.inc)
 (include stanzas/test_board_sub_boards_source.inc)
 (include stanzas/test_board_posts_preflight.inc)

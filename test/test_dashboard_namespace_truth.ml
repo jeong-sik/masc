@@ -740,7 +740,8 @@ let test_warm_dashboard_surfaces_populates_caches () =
       check bool "keeper_memory_health cache key populated" true
         (Option.is_some (Dashboard_cache.peek keeper_health_key));
       let board_key =
-        Printf.sprintf "board:memory:-;-;hot;false;false;100;0;%s;-" dir
+        Printf.sprintf "board:memory:%s;-;-;hot;false;false;100;0;%s;-"
+          Masc_board_handlers.Board_access.(cache_key Operator) dir
       in
       check bool "board cache key populated" true
         (Option.is_some (Dashboard_cache.peek_payload board_key)))

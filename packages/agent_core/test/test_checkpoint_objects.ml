@@ -658,6 +658,42 @@ let test_a_list_reads_back_only_as_far_as_it_finds () =
   | Error error -> Alcotest.fail (O.load_error_to_string error)
 ;;
 
+(* [find] is asked every message once, from the last to the first, through
+   the open messages, the head's turns and both segments: what it has been
+   asked so far is what follows the message it is asked now. *)
+let test_find_last_asks_from_the_last_message_to_the_first () =
+  let store = store () in
+  let memo = O.create_memo () in
+  let plans, closed = close_turns ~store ~memo ((2 * O.turns_per_segment) + 3) in
+  let last = List.nth plans (List.length plans - 1) in
+  let messages = closed @ [ user "open ask"; assistant "open answer" ] in
+  let open_plan = plan_ok ~previous:last.head memo O.Turn_continues (checkpoint messages) in
+  write store open_plan;
+  let head =
+    match O.head_of_string open_plan.head_bytes with
+    | Ok head -> head
+    | Error error -> Alcotest.fail (O.load_error_to_string error)
+  in
+  Alcotest.(check bool) "the head has segments, turns and open messages" true
+    (Option.is_some head.history.segment
+     && head.history.turns <> []
+     && head.history.open_messages <> []);
+  let asked = ref [] in
+  let ask (message : Types.message) : unit option =
+    asked := Types.text_of_message message :: !asked;
+    None
+  in
+  (match O.find_last ~read_object:(read store) head ask with
+   | Ok None -> ()
+   | Ok (Some ()) -> Alcotest.fail "nothing answered, so nothing is found"
+   | Error error -> Alcotest.fail (O.load_error_to_string error));
+  (* Each asked message went to the front, so the first message asked last
+     leaves them in the history's own order. *)
+  Alcotest.(check (list string)) "every message once, the last one first"
+    (List.map Types.text_of_message messages)
+    !asked
+;;
+
 (* However many turns close, a head names fewer than a segment's worth of
    them; the rest are segments, each written once, and the history loads
    back whole. *)
@@ -877,6 +913,8 @@ let () =
             test_a_rich_checkpoint_keeps_its_digest_and_bytes
         ; Alcotest.test_case "a memo gives the plan a fresh memo gives" `Quick
             test_a_memo_gives_the_plan_a_fresh_memo_gives
+        ; Alcotest.test_case "find_last asks from the last message to the first" `Quick
+            test_find_last_asks_from_the_last_message_to_the_first
         ; Alcotest.test_case "a list reads back only as far as it finds" `Quick
             test_a_list_reads_back_only_as_far_as_it_finds
         ; Alcotest.test_case "a head names fewer turns than a segment" `Quick

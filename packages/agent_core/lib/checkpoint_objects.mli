@@ -234,13 +234,16 @@ val system_prompt
   -> head
   -> (string option, load_error) result
 
-(** The first [Some] that [find] gives for [head]'s messages, last message
-    first. Objects are read only as far back as needed: the open messages,
-    then each turn's bundle from the last, then each segment and its turns.
-    Every object read is checked against its digest and every bundle against
-    its turn's message count; the chains are not, since they run from the
-    first message. So this is for showing a checkpoint, not for using it:
-    {!load} is. *)
+(** The first [Some] that [find] gives for [head]'s messages. [find] is asked
+    one message at a time, from the last message to the first, with none
+    skipped and none asked twice, and is not asked again once it gives
+    [Some]. Objects are read only as far back as needed: the open messages,
+    then each turn's bundle from the last, then each segment and its turns; a
+    bundle is read whole. Every object read is checked against its digest and
+    every bundle against its turn's message count. The chains are not
+    checked, since they run from the first message, and the header objects
+    are not read. So an answer says nothing about the messages [find] was not
+    asked, and a checkpoint to continue from comes from {!load}. *)
 val find_last
   :  read_object:(digest -> (string option, string) result)
   -> head

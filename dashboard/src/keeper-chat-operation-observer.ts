@@ -4,6 +4,8 @@ import {
   type KeeperChatOperationState,
 } from './api/keeper'
 import { setupObservationRefresh } from './lib/observation-refresh'
+import { captureDashboardObservationOwner, dashboardObservationOwnerIsCurrent,
+  subscribeDashboardObservationOwnerChanges } from './lib/observation-read-owner'
 
 export type TerminalKeeperChatOperation = KeeperChatOperation & {
   state: Exclude<KeeperChatOperationState, { kind: 'queued' } | { kind: 'running' }>
@@ -29,22 +31,27 @@ export function observeKeeperChatOperation(
 ): () => void {
   let active = true
   let stop = () => {}
+  let stopOwner = () => {}
+  const owner = captureDashboardObservationOwner()
   const dispose = () => {
     active = false
     stop()
+    stopOwner()
     options.signal?.removeEventListener('abort', aborted)
   }
   const aborted = () => {
+    if (!active) return
     dispose()
     options.onError?.(new DOMException('Operation observation retired', 'AbortError'))
   }
+  stopOwner = subscribeDashboardObservationOwnerChanges(aborted)
   stop = setupObservationRefresh(async signal => {
     if (!active) return
-    if (options.current?.() === false) { aborted(); return }
+    if (!dashboardObservationOwnerIsCurrent(owner) || options.current?.() === false) { aborted(); return }
     const readSignal = options.signal ? AbortSignal.any([signal, options.signal]) : signal
     const operation = await fetchKeeperChatOperation(keeperName, operationId, { signal: readSignal })
     if (!active || readSignal.aborted) return
-    if (options.current?.() === false) { aborted(); return }
+    if (!dashboardObservationOwnerIsCurrent(owner) || options.current?.() === false) { aborted(); return }
     await options.onOperation(operation)
   }, {
     topics: ['chat_operation'], keeperName, operationId,

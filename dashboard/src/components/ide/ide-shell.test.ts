@@ -1,3 +1,5 @@
+import { acceptedExecutionWorkspace } from '../../execution-workspace-authority'
+import { captureDashboardObservationOwner } from '../../lib/observation-read-owner'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { h } from 'preact'
 import { render } from 'preact'
@@ -64,6 +66,11 @@ import { resetIdeDataWorkspaceStoreForTest } from './ide-workspace-singleton'
 import { EMPTY_LSP_STATUS_SNAPSHOT, lspScopeKey, lspScopeSnapshot, lspStatusRejected, lspStatusSnapshot } from './ide-lsp-client'
 import type { LspDocumentStatus } from './ide-lsp-document-status'
 import { DEFAULT_MOBILE_BREAKPOINT } from '../../hooks/use-is-mobile'
+beforeEach(() => {
+  acceptedExecutionWorkspace.value = { epoch: 'trace-test', workspaceRoot: '/fixture/trace',
+    connectionGeneration: 1, observerInstanceId: 'trace-test-instance' }
+})
+
 
 function buttonByText(container: HTMLElement, text: string): HTMLButtonElement {
   const button = Array.from(container.querySelectorAll('button'))
@@ -1255,7 +1262,7 @@ describe('IdeShell', () => {
       source: 'anchored-thread',
       threadId: 'shell-mount-evt-1',
       line: null,
-    })
+    }, captureDashboardObservationOwner())
     route.value = {
       tab: 'code',
       params: { section: 'ide-shell', view: 'source', layers: 'keeper-trace' },
@@ -1276,7 +1283,7 @@ describe('IdeShell', () => {
       source: 'anchored-thread',
       threadId: 'shell-mount-evt-2',
       line: null,
-    })
+    }, captureDashboardObservationOwner())
     route.value = {
       tab: 'code',
       params: { section: 'ide-shell', view: 'source' },

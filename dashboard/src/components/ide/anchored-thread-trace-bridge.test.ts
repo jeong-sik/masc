@@ -1,3 +1,5 @@
+import { acceptedExecutionWorkspace } from '../../execution-workspace-authority'
+import { captureDashboardObservationOwner } from '../../lib/observation-read-owner'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import {
   bridgePostsToTrace,
@@ -7,6 +9,11 @@ import {
   clearTraces,
   keeperTraceState,
 } from './keeper-trace-store'
+beforeEach(() => {
+  acceptedExecutionWorkspace.value = { epoch: 'trace-test', workspaceRoot: '/fixture/trace',
+    connectionGeneration: 1, observerInstanceId: 'trace-test-instance' }
+})
+
 
 function post(
   id: string,
@@ -34,7 +41,7 @@ describe('bridgePostsToTrace — RFC-0028 PR-δ anchored-thread producer', () =>
         post('p2', '2026-05-06T01:00:01Z', 'moth'),
       ],
       new Set(),
-    )
+     captureDashboardObservationOwner())
 
     expect([...out].sort()).toEqual(['p1', 'p2'])
     const events = keeperTraceState.value.events
@@ -50,7 +57,7 @@ describe('bridgePostsToTrace — RFC-0028 PR-δ anchored-thread producer', () =>
         post('p2', '2026-05-06T01:00:01Z', 'moth'),
       ],
       known,
-    )
+     captureDashboardObservationOwner())
 
     const ids = keeperTraceState.value.events.map(e => e.id).sort()
     expect(ids).toEqual(['p2'])
@@ -60,13 +67,13 @@ describe('bridgePostsToTrace — RFC-0028 PR-δ anchored-thread producer', () =>
     const out = bridgePostsToTrace(
       [post('p1', '2026-05-06T01:00:00Z', 'scholar')],
       new Set(['p0']),
-    )
+     captureDashboardObservationOwner())
     expect([...out].sort()).toEqual(['p0', 'p1'])
   })
 
   it('returns the input set unchanged when posts is empty', () => {
     const before = new Set(['p0'])
-    const after = bridgePostsToTrace([], before)
+    const after = bridgePostsToTrace([], before, captureDashboardObservationOwner())
     expect(after).toBe(before)
     expect(keeperTraceState.value.events.length).toBe(0)
   })
@@ -78,7 +85,7 @@ describe('bridgePostsToTrace — RFC-0028 PR-δ anchored-thread producer', () =>
         post('p1', '2026-05-06T01:00:00Z', 'moth'),
       ],
       new Set(),
-    )
+     captureDashboardObservationOwner())
     const ids = keeperTraceState.value.events.map(e => e.id)
     expect(ids).toEqual(['p1'])
   })
@@ -87,7 +94,7 @@ describe('bridgePostsToTrace — RFC-0028 PR-δ anchored-thread producer', () =>
     bridgePostsToTrace(
       [post('p1', '2026-05-06T01:00:00Z', 'scholar', 42, 'lib/runtime.ml')],
       new Set(),
-    )
+     captureDashboardObservationOwner())
     const event = keeperTraceState.value.events[0]!
     expect(event.id).toBe('p1')
     expect(event.tsMs).toBe(Date.parse('2026-05-06T01:00:00Z'))
@@ -107,7 +114,7 @@ describe('bridgePostsToTrace — RFC-0028 PR-δ anchored-thread producer', () =>
         post('p1', '2026-05-06T01:00:01Z', 'moth'),
       ],
       new Set(),
-    )
+     captureDashboardObservationOwner())
 
     const lines = keeperTraceState.value.events
       .filter(event => event.source === 'anchored-thread')
@@ -121,9 +128,9 @@ describe('bridgePostsToTrace — RFC-0028 PR-δ anchored-thread producer', () =>
       post('p2', '2026-05-06T01:00:01Z', 'moth'),
     ]
     let known: ReadonlySet<string> = new Set()
-    known = bridgePostsToTrace(inputs, known)
-    known = bridgePostsToTrace(inputs, known)
-    known = bridgePostsToTrace(inputs, known)
+    known = bridgePostsToTrace(inputs, known, captureDashboardObservationOwner())
+    known = bridgePostsToTrace(inputs, known, captureDashboardObservationOwner())
+    known = bridgePostsToTrace(inputs, known, captureDashboardObservationOwner())
 
     expect(keeperTraceState.value.events.length).toBe(2)
   })

@@ -1,5 +1,7 @@
 import { pushTrace } from './keeper-trace-store'
 import { unixishToMs } from '../../lib/format-time'
+import { dashboardObservationOwnerHasWorkspace, dashboardObservationOwnerIsCurrent,
+  type DashboardObservationOwner } from '../../lib/observation-read-owner'
 import {
   normalizeTraceProducerContext,
   type KeeperTraceProducerContextInput,
@@ -79,7 +81,9 @@ function dedupKey(decision: DecisionLogProducerInput): string {
 export function bridgeDecisionsToTrace(
   decisions: ReadonlyArray<DecisionLogProducerInput>,
   alreadyEmitted: ReadonlySet<string>,
+  owner: DashboardObservationOwner,
 ): ReadonlySet<string> {
+  if (!dashboardObservationOwnerHasWorkspace(owner) || !dashboardObservationOwnerIsCurrent(owner)) return alreadyEmitted
   if (decisions.length === 0) return alreadyEmitted
   const next = new Set(alreadyEmitted)
   for (const decision of decisions) {
@@ -98,7 +102,7 @@ export function bridgeDecisionsToTrace(
       decisionChoice: decision.choice ?? null,
       decisionReason: decision.reason ?? null,
       ...normalizeTraceProducerContext(decision.context),
-    })
+    }, owner)
     next.add(key)
   }
   return next

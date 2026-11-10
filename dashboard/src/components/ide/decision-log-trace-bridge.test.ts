@@ -1,3 +1,5 @@
+import { acceptedExecutionWorkspace } from '../../execution-workspace-authority'
+import { captureDashboardObservationOwner } from '../../lib/observation-read-owner'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import {
   bridgeDecisionsToTrace,
@@ -7,6 +9,11 @@ import {
   clearTraces,
   keeperTraceState,
 } from './keeper-trace-store'
+beforeEach(() => {
+  acceptedExecutionWorkspace.value = { epoch: 'trace-test', workspaceRoot: '/fixture/trace',
+    connectionGeneration: 1, observerInstanceId: 'trace-test-instance' }
+})
+
 
 function dec(
   keeper_name: string,
@@ -35,7 +42,7 @@ describe('bridgeDecisionsToTrace — RFC-0028 PR-δ decision-log producer', () =
         dec('moth', 1_715_000_001),
       ],
       new Set(),
-    )
+     captureDashboardObservationOwner())
 
     expect(out.size).toBe(2)
     const events = keeperTraceState.value.events
@@ -51,7 +58,7 @@ describe('bridgeDecisionsToTrace — RFC-0028 PR-δ decision-log producer', () =
         dec('moth', 1_715_000_001),
       ],
       known,
-    )
+     captureDashboardObservationOwner())
 
     const ids = keeperTraceState.value.events.map(e => e.id)
     expect(ids).toEqual(['decision:moth:1715000001:turn'])
@@ -61,7 +68,7 @@ describe('bridgeDecisionsToTrace — RFC-0028 PR-δ decision-log producer', () =
     const out = bridgeDecisionsToTrace(
       [dec('scholar', 1_715_000_000)],
       new Set(['decision:other:0:turn']),
-    )
+     captureDashboardObservationOwner())
     expect([...out].sort()).toEqual([
       'decision:other:0:turn',
       'decision:scholar:1715000000:turn',
@@ -70,7 +77,7 @@ describe('bridgeDecisionsToTrace — RFC-0028 PR-δ decision-log producer', () =
 
   it('returns the input set unchanged when decisions is empty', () => {
     const before = new Set(['decision:scholar:0:turn'])
-    const after = bridgeDecisionsToTrace([], before)
+    const after = bridgeDecisionsToTrace([], before, captureDashboardObservationOwner())
     expect(after).toBe(before)
     expect(keeperTraceState.value.events.length).toBe(0)
   })
@@ -82,7 +89,7 @@ describe('bridgeDecisionsToTrace — RFC-0028 PR-δ decision-log producer', () =
         dec('moth', 1_715_000_000),
       ],
       new Set(),
-    )
+     captureDashboardObservationOwner())
     const ids = keeperTraceState.value.events.map(e => e.id)
     expect(ids).toEqual(['decision:moth:1715000000:turn'])
   })
@@ -94,7 +101,7 @@ describe('bridgeDecisionsToTrace — RFC-0028 PR-δ decision-log producer', () =
         dec('moth', 1_715_000_000),
       ],
       new Set(),
-    )
+     captureDashboardObservationOwner())
     const ids = keeperTraceState.value.events.map(e => e.id)
     expect(ids).toEqual(['decision:moth:1715000000:turn'])
   })
@@ -106,7 +113,7 @@ describe('bridgeDecisionsToTrace — RFC-0028 PR-δ decision-log producer', () =
         dec('moth', 1_715_000_001),
       ],
       new Set(),
-    )
+     captureDashboardObservationOwner())
     const events = keeperTraceState.value.events
     expect(events.length).toBe(1)
     expect(events[0]!.keeperName).toBe('moth')
@@ -116,7 +123,7 @@ describe('bridgeDecisionsToTrace — RFC-0028 PR-δ decision-log producer', () =
     bridgeDecisionsToTrace(
       [dec('scholar', 1_715_000_000, 'tool_use', 'error_retryable')],
       new Set(),
-    )
+     captureDashboardObservationOwner())
     const event = keeperTraceState.value.events[0]!
     expect(event.id).toBe('decision:scholar:1715000000:tool_use')
     expect(event.tsMs).toBe(1_715_000_000_000)
@@ -145,7 +152,7 @@ describe('bridgeDecisionsToTrace — RFC-0028 PR-δ decision-log producer', () =
         worker_run_id: 'worker-decision',
       })],
       new Set(),
-    )
+     captureDashboardObservationOwner())
     const event = keeperTraceState.value.events[0]!
     expect(event).toMatchObject({
       filePath: 'runtime.ts',
@@ -170,7 +177,7 @@ describe('bridgeDecisionsToTrace — RFC-0028 PR-δ decision-log producer', () =
         reason: 'verify touched test target',
       })],
       new Set(),
-    )
+     captureDashboardObservationOwner())
     const event = keeperTraceState.value.events[0]!
     if (event.source === 'decision-log') {
       expect(event.decisionChoice).toBe('use_shell')
@@ -182,7 +189,7 @@ describe('bridgeDecisionsToTrace — RFC-0028 PR-δ decision-log producer', () =
     bridgeDecisionsToTrace(
       [dec('scholar', 1_715_000_000, 'turn', null)],
       new Set(),
-    )
+     captureDashboardObservationOwner())
     const event = keeperTraceState.value.events[0]!
     if (event.source === 'decision-log') {
       expect(event.semanticOutcome).toBeNull()
@@ -195,9 +202,9 @@ describe('bridgeDecisionsToTrace — RFC-0028 PR-δ decision-log producer', () =
       dec('moth', 1_715_000_001),
     ]
     let known: ReadonlySet<string> = new Set()
-    known = bridgeDecisionsToTrace(inputs, known)
-    known = bridgeDecisionsToTrace(inputs, known)
-    known = bridgeDecisionsToTrace(inputs, known)
+    known = bridgeDecisionsToTrace(inputs, known, captureDashboardObservationOwner())
+    known = bridgeDecisionsToTrace(inputs, known, captureDashboardObservationOwner())
+    known = bridgeDecisionsToTrace(inputs, known, captureDashboardObservationOwner())
 
     expect(keeperTraceState.value.events.length).toBe(2)
   })

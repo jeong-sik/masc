@@ -1,3 +1,4 @@
+import { acceptedExecutionWorkspace } from '../../execution-workspace-authority'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { h } from 'preact'
 import { render } from 'preact'
@@ -15,6 +16,11 @@ import { activeIdeFile, focusIdeFile, ideContextFocus } from './ide-state'
 import { clearTraces, keeperTraceState } from './keeper-trace-store'
 import { ideReplayUntilMs, setIdeReplayUntilMs } from './ide-replay-state'
 import type { BoardPost } from '../../types/core'
+beforeEach(() => {
+  acceptedExecutionWorkspace.value = { epoch: 'trace-test', workspaceRoot: '/fixture/trace',
+    connectionGeneration: 1, observerInstanceId: 'trace-test-instance' }
+})
+
 
 function stubEmptyConversationFetch(): void {
   vi.stubGlobal('fetch', vi.fn(async (url: string) => {
@@ -524,6 +530,8 @@ describe('Reaction Thread source lifecycle', () => {
   const board = (body: string) => ({ posts: [{ id: 'post-refresh', author: 'editor', title: 'Review', body,
     created_at: '2026-09-13T00:00:00Z', updated_at: '2026-09-13T00:00:00Z', comment_count: 0, votes: 0 }] })
   it('preserves independent successful data through failure and retries only the selected source', async () => {
+    vi.useFakeTimers()
+    const settleRead = () => act(async () => { await vi.advanceTimersByTimeAsync(0) })
     let failBoard = true, failDecisions = true
     const calls = { board: 0, decisions: 0 }
     vi.stubGlobal('fetch', vi.fn(async (url: string) => {
@@ -535,24 +543,28 @@ describe('Reaction Thread source lifecycle', () => {
       return failDecisions ? response({}, 503) : response({ events: [], limit: 200, generated_at: null })
     }))
     const container = document.createElement('div')
-    render(h(IdeConversationRail, {}), container)
+    await act(async () => { render(h(IdeConversationRail, {}), container) })
     try {
-      await waitFor(() => expect(container.querySelectorAll('[data-load-state="error"]')).toHaveLength(2))
+      await settleRead()
+      expect(container.querySelectorAll('[data-load-state="error"]')).toHaveLength(2)
       expect(container.textContent).not.toContain('no conversation activity')
       failBoard = false
       fireEvent.click(container.querySelector<HTMLButtonElement>('[aria-label="Retry Board"]')!)
-      await waitFor(() => expect(container.textContent).toContain('Retained original Board note'))
+      await settleRead()
+      expect(container.textContent).toContain('Retained original Board note')
       expect(calls).toEqual({ board: 2, decisions: 1 })
       failBoard = true
       fireEvent.click(container.querySelector<HTMLButtonElement>('[aria-label="Refresh Board"]')!)
-      await waitFor(() => expect(container.textContent).toContain('Refresh failed; showing last successful data'))
+      await settleRead()
+      expect(container.textContent).toContain('Refresh failed; showing last successful data')
       expect(container.textContent).toContain('Retained original Board note')
       expect(container.querySelector('[data-conversation-source="Board"] time')).not.toBeNull()
       failDecisions = false
       fireEvent.click(container.querySelector<HTMLButtonElement>('[aria-label="Retry Decisions"]')!)
-      await waitFor(() => expect(container.querySelector('[data-conversation-source="Decisions"]')?.getAttribute('data-load-state')).toBe('ready'))
+      await settleRead()
+      expect(container.querySelector('[data-conversation-source="Decisions"]')?.getAttribute('data-load-state')).toBe('ready')
       expect(calls).toEqual({ board: 3, decisions: 2 })
-    } finally { render(null, container) }
+    } finally { render(null, container); vi.useRealTimers() }
   })
   it('aborts superseded and unmounted reads and ignores their late replies', async () => {
     const pending: Array<{ signal: AbortSignal; finish: (value: Response) => void }> = []

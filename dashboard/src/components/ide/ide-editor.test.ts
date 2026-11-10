@@ -1,3 +1,5 @@
+import { acceptedExecutionWorkspace } from '../../execution-workspace-authority'
+import { captureDashboardObservationOwner } from '../../lib/observation-read-owner'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { h } from 'preact'
 import { render } from 'preact'
@@ -13,6 +15,11 @@ import { ideConversationThreadSnapshot } from './ide-context-bridge'
 import { lspDiagnosticSnapshot } from './ide-lsp-client'
 import { clearTraces, pushTrace } from './keeper-trace-store'
 import { ideReplayUntilMs, setIdeReplayUntilMs } from './ide-replay-state'
+beforeEach(() => {
+  acceptedExecutionWorkspace.value = { epoch: 'trace-test', workspaceRoot: '/fixture/trace',
+    connectionGeneration: 1, observerInstanceId: 'trace-test-instance' }
+})
+
 
 describe('IdeEditor', () => {
   let container: HTMLDivElement
@@ -344,7 +351,7 @@ describe('IdeEditor', () => {
       threadId: 'thread-runtime',
       filePath: 'runtime.ts',
       line: 2,
-    })
+    }, captureDashboardObservationOwner())
     pushTrace({
       id: 'thread-other',
       tsMs: 3000,
@@ -353,7 +360,7 @@ describe('IdeEditor', () => {
       threadId: 'thread-other',
       filePath: 'other.ts',
       line: 1,
-    })
+    }, captureDashboardObservationOwner())
 
     render(
       h(IdeEditor, {
@@ -390,7 +397,7 @@ describe('IdeEditor', () => {
       threadId: 'thread-old',
       filePath: 'runtime.ts',
       line: 2,
-    })
+    }, captureDashboardObservationOwner())
     pushTrace({
       id: 'thread-future',
       tsMs: 3000,
@@ -399,7 +406,7 @@ describe('IdeEditor', () => {
       threadId: 'thread-future',
       filePath: 'runtime.ts',
       line: 1,
-    })
+    }, captureDashboardObservationOwner())
     setIdeReplayUntilMs(1500)
 
     render(
@@ -463,7 +470,7 @@ describe('IdeEditor', () => {
       filePath: 'runtime.ts',
       line: 1,
       surface: 'PR',
-    })
+    }, captureDashboardObservationOwner())
     pushTrace({
       id: 'thread-runtime',
       tsMs: 2000,
@@ -472,7 +479,7 @@ describe('IdeEditor', () => {
       threadId: 'thread-1',
       filePath: 'runtime.ts',
       line: 2,
-    })
+    }, captureDashboardObservationOwner())
     pushTrace({
       id: 'activity-other',
       tsMs: 4000,
@@ -482,7 +489,7 @@ describe('IdeEditor', () => {
       filePath: 'other.ts',
       line: 1,
       surface: 'Task',
-    })
+    }, captureDashboardObservationOwner())
 
     render(
       h(IdeEditor, {
@@ -541,7 +548,7 @@ describe('IdeEditor', () => {
       sessionId: 'sess-runtime',
       operationId: 'op-runtime',
       workerRunId: 'worker-runtime',
-    })
+    }, captureDashboardObservationOwner())
 
     render(
       h(IdeEditor, {

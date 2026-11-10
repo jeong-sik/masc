@@ -1,5 +1,6 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { KeeperChatOperation, KeeperChatOperationState } from './api/keeper'
+import { acceptedExecutionWorkspace } from './execution-workspace-authority'
 
 const { read } = vi.hoisted(() => ({ read: vi.fn() }))
 vi.mock('./api/keeper', () => ({ fetchKeeperChatOperation: read }))
@@ -11,6 +12,10 @@ const disposers: Array<() => void> = []
 const flush = async () => { for (let i = 0; i < 8; i++) await Promise.resolve() }
 const operation = (state: KeeperChatOperationState): KeeperChatOperation => ({
   operationId: 'original', sequence: '1', createdAt: 1, input: null, state,
+})
+beforeEach(() => {
+  acceptedExecutionWorkspace.value = { epoch: 'operation-test', workspaceRoot: '/fixture/operation',
+    connectionGeneration: 1, observerInstanceId: 'operation-test-instance' }
 })
 afterEach(() => {
   for (const dispose of disposers.splice(0)) dispose()

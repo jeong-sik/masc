@@ -1,5 +1,6 @@
 import { observeKeeperChatOperation, waitForKeeperChatOperationTerminal } from './keeper-chat-operation-observer'
 import { setupObservationRefresh } from './lib/observation-refresh'
+import { captureDashboardObservationOwner, dashboardObservationOwnerIsCurrent } from './lib/observation-read-owner'
 import { toolObservationContinues } from './keeper-tool-observations'
 import { initialKeeperResponseState, reduceKeeperResponse } from './lib/keeper-response-state'
 import { keeperStreamContract, normalizeStreamContract } from './keeper-stream-contract'
@@ -657,6 +658,7 @@ function retainFailedOperationObservation(
   current: () => boolean,
 ): void {
   const key = `${request.keeperName}:${request.operationId}`
+  if (!current()) return
   if (failedOperationRecoveries.has(key)) return
   let first = true
   let readError: unknown | null = error
@@ -679,6 +681,7 @@ function retainFailedOperationObservation(
   }, {
     topics: ['chat_operation'], keeperName: request.keeperName, operationId: request.operationId,
     readError: () => readError, onError: () => {},
+    resetRead: () => { if (!current()) { readError = null; dispose() } },
   })
   failedOperationRecoveries.set(key, dispose)
 }
@@ -938,12 +941,10 @@ async function hydrateTrackedKeeperChatOperation(
   request: TrackedKeeperChatOperation,
   recoveryOwned = false,
 ): Promise<unknown | null | void> {
-  const authority = executionWorkspaceAuthority.peek()
-  const authRevision = currentStoredTokenRevision()
+  const owner = captureDashboardObservationOwner()
   const epoch = operationObservationEpoch
   const current = () => epoch === operationObservationEpoch
-    && authority === executionWorkspaceAuthority.peek()
-    && authRevision === currentStoredTokenRevision()
+    && dashboardObservationOwnerIsCurrent(owner)
   let lookupError: unknown | null = null
   // A live in-session send stream still owns this request (e.g. the panel
   // remounted on an SPA route change while the reply was pending). Defer to

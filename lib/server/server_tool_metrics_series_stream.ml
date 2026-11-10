@@ -31,7 +31,9 @@ let response_headers () =
   Httpun.Headers.of_list
     (Http_server_eio.Response.scoped_headers ()
      @ [ "content-type", "text/event-stream"; "cache-control", "no-cache"
-       ; "connection", "close"; "x-accel-buffering", "no" ])
+       ; "connection", "close"; "x-accel-buffering", "no"
+       ; Server_mcp_transport_http_headers.observer_idle_timeout_header,
+         string_of_int Server_mcp_transport_http_headers.observer_idle_timeout_ms ])
 ;;
 
 let data_frame json = "data: " ^ Yojson.Safe.to_string json ^ "\n\n"

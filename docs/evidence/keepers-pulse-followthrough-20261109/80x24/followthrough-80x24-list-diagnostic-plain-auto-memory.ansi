@@ -1,0 +1,24 @@
+ [2m운영[0m  [2m작업[0m  [1;7m▸키퍼[0m  [2m기능·플러그인[0m  [2m워크스페이스[0m  [2m시스템[0m
+
+ [1m MASC Keepers · 일과 도움[0m                                     HTTP [connected]
+ [91m  운영 관측: blocked · keeper bootstrap off · 실행 0/2 · proactive every 5m[39m
+   [1m[96m▸list[0m  [2mstate[0m  [2mcause[0m  [2mtime[0m  [2mmemory[0m  [2mage[0m  [2mruntime[0m  [2m24h[0m
+ [92m✓ 1 recovered[39m [92m▪[39m  ○ 1 paused [1m·[0m  ? 1 unknown ?
+     fleet max 1        ??????[93m█[39m??[93m█[39m??[93m█[39m?? [96m┃[39m              [96m┃[39m ················ max 0
+ Keeper 목록 · 현재 상태 / 일과 대기
+ [7m›  pausedproof                                                    Ⅱ 일시정지  [0m
+    quietproof                                                     [93m× 오프라인  [39m
+    recoveredproof                                                 [93m× 오프라인  [39m
+
+ ──────────────────────────────────────────────────────────────────────────────
+ [1mpausedproof                                                                   [0m
+ 현재 일  턴 관측: 실행 중인 턴 없음 · 작업 이름 미관측
+ 도움  관측된 사람 대기 없음 · Approvals에서 확인
+ 최근 결과  최근 자율 턴: 아직 시작하지 않음
+ c:대화·원래 요청   →:상세   Enter:Story
+ Enter→m:기억   J:일정   l:로그
+ pausedproof Ⅱ 일시정지
+ ──────────────────────────────────────────────────────────────────────────────
+[2m  ACTION NEEDED 2  [96mEnter / Right[0m:story / detail  Esc:[2mdashboard[0m  q:[2mquit[0m  …?
+ 일정 정보가 오래됐을 수 있음
+[2m › to pausedproof   (i to write)

@@ -1,0 +1,1376 @@
+[
+  {
+    "file": "after-120x35-state-compact.txt",
+    "view": "state",
+    "size": "120x35",
+    "density": "compact",
+    "actual_sha256": "ffa6d80778ec4faacaeee6b04a7df45920760924d447b22f27cb9ab09875c1b2",
+    "mock": "cause-118x35.txt",
+    "mock_sha256": "3674eaeb2d4015019b8a1a7a2eef75edc9f8b4be07670a04a86ec1a85767b057",
+    "scope": "State compares grid geometry with cause mock; grouping/counts differ.",
+    "actual": {
+      "observed_bar_columns": [
+        62,
+        77
+      ],
+      "visible_keeper_rows": 3,
+      "visible_world_rows": 0,
+      "usable_columns": 118,
+      "allocated_name_cells_from_bars_and_RFC_pulse_field": 32,
+      "pulse_field_cells_contract": 24,
+      "observed_keeper_pulse_glyph_counts": [
+        24
+      ],
+      "observed_world_pulse_glyph_counts": [],
+      "observed_pulse_glyphs": "·▁▄█",
+      "strip_field_cells_contract": 25,
+      "observed_strip_glyphs": "·",
+      "now_shapes": [
+        "× offline",
+        "Ⅱ paused"
+      ],
+      "due_shapes": [],
+      "right_shapes": [
+        "9 ▁"
+      ],
+      "allocation_note": "Allocation uses observed bars and RFC field width; it is not maximum fixture label length.",
+      "data_note": "Glyph subsets and value shapes depend on fixture; absent rows are unmeasured, not successful parity."
+    },
+    "reference": {
+      "observed_bar_columns": [
+        62,
+        77
+      ],
+      "visible_keeper_rows": 2,
+      "visible_world_rows": 0,
+      "usable_columns": 118,
+      "allocated_name_cells_from_bars_and_RFC_pulse_field": 32,
+      "pulse_field_cells_contract": 24,
+      "observed_keeper_pulse_glyph_counts": [
+        24
+      ],
+      "observed_world_pulse_glyph_counts": [],
+      "observed_pulse_glyphs": "·█",
+      "strip_field_cells_contract": 25,
+      "observed_strip_glyphs": "·◷",
+      "now_shapes": [
+        "○ idle 99m"
+      ],
+      "due_shapes": [
+        "late"
+      ],
+      "right_shapes": [
+        "9 ▁"
+      ],
+      "allocation_note": "Allocation uses observed bars and RFC field width; it is not maximum fixture label length.",
+      "data_note": "Glyph subsets and value shapes depend on fixture; absent rows are unmeasured, not successful parity."
+    }
+  },
+  {
+    "file": "after-120x35-state-detailed.txt",
+    "view": "state",
+    "size": "120x35",
+    "density": "detailed",
+    "actual_sha256": "ffa6d80778ec4faacaeee6b04a7df45920760924d447b22f27cb9ab09875c1b2",
+    "mock": "cause-118x35.txt",
+    "mock_sha256": "3674eaeb2d4015019b8a1a7a2eef75edc9f8b4be07670a04a86ec1a85767b057",
+    "scope": "State compares grid geometry with cause mock; grouping/counts differ.",
+    "actual": {
+      "observed_bar_columns": [
+        62,
+        77
+      ],
+      "visible_keeper_rows": 3,
+      "visible_world_rows": 0,
+      "usable_columns": 118,
+      "allocated_name_cells_from_bars_and_RFC_pulse_field": 32,
+      "pulse_field_cells_contract": 24,
+      "observed_keeper_pulse_glyph_counts": [
+        24
+      ],
+      "observed_world_pulse_glyph_counts": [],
+      "observed_pulse_glyphs": "·▁▄█",
+      "strip_field_cells_contract": 25,
+      "observed_strip_glyphs": "·",
+      "now_shapes": [
+        "× offline",
+        "Ⅱ paused"
+      ],
+      "due_shapes": [],
+      "right_shapes": [
+        "9 ▁"
+      ],
+      "allocation_note": "Allocation uses observed bars and RFC field width; it is not maximum fixture label length.",
+      "data_note": "Glyph subsets and value shapes depend on fixture; absent rows are unmeasured, not successful parity."
+    },
+    "reference": {
+      "observed_bar_columns": [
+        62,
+        77
+      ],
+      "visible_keeper_rows": 2,
+      "visible_world_rows": 0,
+      "usable_columns": 118,
+      "allocated_name_cells_from_bars_and_RFC_pulse_field": 32,
+      "pulse_field_cells_contract": 24,
+      "observed_keeper_pulse_glyph_counts": [
+        24
+      ],
+      "observed_world_pulse_glyph_counts": [],
+      "observed_pulse_glyphs": "·█",
+      "strip_field_cells_contract": 25,
+      "observed_strip_glyphs": "·◷",
+      "now_shapes": [
+        "○ idle 99m"
+      ],
+      "due_shapes": [
+        "late"
+      ],
+      "right_shapes": [
+        "9 ▁"
+      ],
+      "allocation_note": "Allocation uses observed bars and RFC field width; it is not maximum fixture label length.",
+      "data_note": "Glyph subsets and value shapes depend on fixture; absent rows are unmeasured, not successful parity."
+    }
+  },
+  {
+    "file": "after-120x35-cause-compact.txt",
+    "view": "cause",
+    "size": "120x35",
+    "density": "compact",
+    "actual_sha256": "92d82d71dd5dbe973c394d6f6df53a0ed3f5c41ccd1def3468a344c6e3d1cf91",
+    "mock": "cause-118x35.txt",
+    "mock_sha256": "3674eaeb2d4015019b8a1a7a2eef75edc9f8b4be07670a04a86ec1a85767b057",
+    "scope": "Same usable-width mock; fixture counts and glyph subsets differ.",
+    "actual": {
+      "observed_bar_columns": [
+        62,
+        77
+      ],
+      "visible_keeper_rows": 1,
+      "visible_world_rows": 0,
+      "usable_columns": 118,
+      "allocated_name_cells_from_bars_and_RFC_pulse_field": 32,
+      "pulse_field_cells_contract": 24,
+      "observed_keeper_pulse_glyph_counts": [
+        24
+      ],
+      "observed_world_pulse_glyph_counts": [],
+      "observed_pulse_glyphs": "·",
+      "strip_field_cells_contract": 25,
+      "observed_strip_glyphs": "·",
+      "now_shapes": [
+        "× offline"
+      ],
+      "due_shapes": [],
+      "right_shapes": [
+        "9 ▁"
+      ],
+      "allocation_note": "Allocation uses observed bars and RFC field width; it is not maximum fixture label length.",
+      "data_note": "Glyph subsets and value shapes depend on fixture; absent rows are unmeasured, not successful parity."
+    },
+    "reference": {
+      "observed_bar_columns": [
+        62,
+        77
+      ],
+      "visible_keeper_rows": 2,
+      "visible_world_rows": 0,
+      "usable_columns": 118,
+      "allocated_name_cells_from_bars_and_RFC_pulse_field": 32,
+      "pulse_field_cells_contract": 24,
+      "observed_keeper_pulse_glyph_counts": [
+        24
+      ],
+      "observed_world_pulse_glyph_counts": [],
+      "observed_pulse_glyphs": "·█",
+      "strip_field_cells_contract": 25,
+      "observed_strip_glyphs": "·◷",
+      "now_shapes": [
+        "○ idle 99m"
+      ],
+      "due_shapes": [
+        "late"
+      ],
+      "right_shapes": [
+        "9 ▁"
+      ],
+      "allocation_note": "Allocation uses observed bars and RFC field width; it is not maximum fixture label length.",
+      "data_note": "Glyph subsets and value shapes depend on fixture; absent rows are unmeasured, not successful parity."
+    }
+  },
+  {
+    "file": "after-120x35-cause-detailed.txt",
+    "view": "cause",
+    "size": "120x35",
+    "density": "detailed",
+    "actual_sha256": "92d82d71dd5dbe973c394d6f6df53a0ed3f5c41ccd1def3468a344c6e3d1cf91",
+    "mock": "cause-118x35.txt",
+    "mock_sha256": "3674eaeb2d4015019b8a1a7a2eef75edc9f8b4be07670a04a86ec1a85767b057",
+    "scope": "Same usable-width mock; fixture counts and glyph subsets differ.",
+    "actual": {
+      "observed_bar_columns": [
+        62,
+        77
+      ],
+      "visible_keeper_rows": 1,
+      "visible_world_rows": 0,
+      "usable_columns": 118,
+      "allocated_name_cells_from_bars_and_RFC_pulse_field": 32,
+      "pulse_field_cells_contract": 24,
+      "observed_keeper_pulse_glyph_counts": [
+        24
+      ],
+      "observed_world_pulse_glyph_counts": [],
+      "observed_pulse_glyphs": "·",
+      "strip_field_cells_contract": 25,
+      "observed_strip_glyphs": "·",
+      "now_shapes": [
+        "× offline"
+      ],
+      "due_shapes": [],
+      "right_shapes": [
+        "9 ▁"
+      ],
+      "allocation_note": "Allocation uses observed bars and RFC field width; it is not maximum fixture label length.",
+      "data_note": "Glyph subsets and value shapes depend on fixture; absent rows are unmeasured, not successful parity."
+    },
+    "reference": {
+      "observed_bar_columns": [
+        62,
+        77
+      ],
+      "visible_keeper_rows": 2,
+      "visible_world_rows": 0,
+      "usable_columns": 118,
+      "allocated_name_cells_from_bars_and_RFC_pulse_field": 32,
+      "pulse_field_cells_contract": 24,
+      "observed_keeper_pulse_glyph_counts": [
+        24
+      ],
+      "observed_world_pulse_glyph_counts": [],
+      "observed_pulse_glyphs": "·█",
+      "strip_field_cells_contract": 25,
+      "observed_strip_glyphs": "·◷",
+      "now_shapes": [
+        "○ idle 99m"
+      ],
+      "due_shapes": [
+        "late"
+      ],
+      "right_shapes": [
+        "9 ▁"
+      ],
+      "allocation_note": "Allocation uses observed bars and RFC field width; it is not maximum fixture label length.",
+      "data_note": "Glyph subsets and value shapes depend on fixture; absent rows are unmeasured, not successful parity."
+    }
+  },
+  {
+    "file": "after-120x35-time-compact.txt",
+    "view": "time",
+    "size": "120x35",
+    "density": "compact",
+    "actual_sha256": "33fe08005cab45980479427bd655123adeac8d455c59ac585d6e13e885c10bc0",
+    "mock": "time-118x35.txt",
+    "mock_sha256": "6a360fcfea5ff691d9ebf52345b21bf7c482492b069e546d61187426bd53c6df",
+    "scope": "Same usable-width mock; fixture counts and glyph subsets differ.",
+    "actual": {
+      "observed_bar_columns": [
+        62,
+        77
+      ],
+      "visible_keeper_rows": 0,
+      "visible_world_rows": 0,
+      "usable_columns": 118,
+      "allocated_name_cells_from_bars_and_RFC_pulse_field": 32,
+      "pulse_field_cells_contract": 24,
+      "observed_keeper_pulse_glyph_counts": [],
+      "observed_world_pulse_glyph_counts": [],
+      "observed_pulse_glyphs": "",
+      "strip_field_cells_contract": 25,
+      "observed_strip_glyphs": "",
+      "now_shapes": [],
+      "due_shapes": [],
+      "right_shapes": [],
+      "allocation_note": "Allocation uses observed bars and RFC field width; it is not maximum fixture label length.",
+      "data_note": "Glyph subsets and value shapes depend on fixture; absent rows are unmeasured, not successful parity."
+    },
+    "reference": {
+      "observed_bar_columns": [
+        62,
+        77
+      ],
+      "visible_keeper_rows": 21,
+      "visible_world_rows": 0,
+      "usable_columns": 118,
+      "allocated_name_cells_from_bars_and_RFC_pulse_field": 32,
+      "pulse_field_cells_contract": 24,
+      "observed_keeper_pulse_glyph_counts": [
+        24
+      ],
+      "observed_world_pulse_glyph_counts": [],
+      "observed_pulse_glyphs": "·▁▄█",
+      "strip_field_cells_contract": 25,
+      "observed_strip_glyphs": "·◷",
+      "now_shapes": [
+        "○ idle 99m",
+        "○ paused",
+        "● idle 99m",
+        "● idle 99s",
+        "● idle 9m",
+        "● idle 9s"
+      ],
+      "due_shapes": [
+        "99:99",
+        "late"
+      ],
+      "right_shapes": [
+        "9 ▁",
+        "99 ▂",
+        "99 ▃",
+        "99 ▄",
+        "999 ▄",
+        "999 ▅",
+        "999 ▆",
+        "999 ▇"
+      ],
+      "allocation_note": "Allocation uses observed bars and RFC field width; it is not maximum fixture label length.",
+      "data_note": "Glyph subsets and value shapes depend on fixture; absent rows are unmeasured, not successful parity."
+    }
+  },
+  {
+    "file": "after-120x35-time-detailed.txt",
+    "view": "time",
+    "size": "120x35",
+    "density": "detailed",
+    "actual_sha256": "33fe08005cab45980479427bd655123adeac8d455c59ac585d6e13e885c10bc0",
+    "mock": "time-118x35.txt",
+    "mock_sha256": "6a360fcfea5ff691d9ebf52345b21bf7c482492b069e546d61187426bd53c6df",
+    "scope": "Same usable-width mock; fixture counts and glyph subsets differ.",
+    "actual": {
+      "observed_bar_columns": [
+        62,
+        77
+      ],
+      "visible_keeper_rows": 0,
+      "visible_world_rows": 0,
+      "usable_columns": 118,
+      "allocated_name_cells_from_bars_and_RFC_pulse_field": 32,
+      "pulse_field_cells_contract": 24,
+      "observed_keeper_pulse_glyph_counts": [],
+      "observed_world_pulse_glyph_counts": [],
+      "observed_pulse_glyphs": "",
+      "strip_field_cells_contract": 25,
+      "observed_strip_glyphs": "",
+      "now_shapes": [],
+      "due_shapes": [],
+      "right_shapes": [],
+      "allocation_note": "Allocation uses observed bars and RFC field width; it is not maximum fixture label length.",
+      "data_note": "Glyph subsets and value shapes depend on fixture; absent rows are unmeasured, not successful parity."
+    },
+    "reference": {
+      "observed_bar_columns": [
+        62,
+        77
+      ],
+      "visible_keeper_rows": 21,
+      "visible_world_rows": 0,
+      "usable_columns": 118,
+      "allocated_name_cells_from_bars_and_RFC_pulse_field": 32,
+      "pulse_field_cells_contract": 24,
+      "observed_keeper_pulse_glyph_counts": [
+        24
+      ],
+      "observed_world_pulse_glyph_counts": [],
+      "observed_pulse_glyphs": "·▁▄█",
+      "strip_field_cells_contract": 25,
+      "observed_strip_glyphs": "·◷",
+      "now_shapes": [
+        "○ idle 99m",
+        "○ paused",
+        "● idle 99m",
+        "● idle 99s",
+        "● idle 9m",
+        "● idle 9s"
+      ],
+      "due_shapes": [
+        "99:99",
+        "late"
+      ],
+      "right_shapes": [
+        "9 ▁",
+        "99 ▂",
+        "99 ▃",
+        "99 ▄",
+        "999 ▄",
+        "999 ▅",
+        "999 ▆",
+        "999 ▇"
+      ],
+      "allocation_note": "Allocation uses observed bars and RFC field width; it is not maximum fixture label length.",
+      "data_note": "Glyph subsets and value shapes depend on fixture; absent rows are unmeasured, not successful parity."
+    }
+  },
+  {
+    "file": "after-120x35-memory-compact.txt",
+    "view": "memory",
+    "size": "120x35",
+    "density": "compact",
+    "actual_sha256": "7506131f3ece263ed1f2005467fc522b5f2d92cc3b3bbfb9ae3212ef97047516",
+    "mock": "memory-118x35.txt",
+    "mock_sha256": "0f761e9611ec881ab65383b239f78d49db0f4a9ebf0f7eb879f60517cca64aa5",
+    "scope": "Same usable-width mock; fixture counts and glyph subsets differ.",
+    "actual": {
+      "observed_bar_columns": [
+        62,
+        77
+      ],
+      "visible_keeper_rows": 0,
+      "visible_world_rows": 1,
+      "usable_columns": 118,
+      "allocated_name_cells_from_bars_and_RFC_pulse_field": 32,
+      "pulse_field_cells_contract": 24,
+      "observed_keeper_pulse_glyph_counts": [],
+      "observed_world_pulse_glyph_counts": [
+        0
+      ],
+      "observed_pulse_glyphs": "",
+      "strip_field_cells_contract": 25,
+      "observed_strip_glyphs": "",
+      "now_shapes": [],
+      "due_shapes": [],
+      "right_shapes": [],
+      "allocation_note": "Allocation uses observed bars and RFC field width; it is not maximum fixture label length.",
+      "data_note": "Glyph subsets and value shapes depend on fixture; absent rows are unmeasured, not successful parity."
+    },
+    "reference": {
+      "observed_bar_columns": [
+        62,
+        77
+      ],
+      "visible_keeper_rows": 24,
+      "visible_world_rows": 1,
+      "usable_columns": 118,
+      "allocated_name_cells_from_bars_and_RFC_pulse_field": 32,
+      "pulse_field_cells_contract": 24,
+      "observed_keeper_pulse_glyph_counts": [
+        24
+      ],
+      "observed_world_pulse_glyph_counts": [
+        0
+      ],
+      "observed_pulse_glyphs": "·▁▄█",
+      "strip_field_cells_contract": 25,
+      "observed_strip_glyphs": "·█",
+      "now_shapes": [
+        "pending"
+      ],
+      "due_shapes": [
+        "99h",
+        "99m",
+        "9d",
+        "9h99m"
+      ],
+      "right_shapes": [
+        "9.9k",
+        "99",
+        "999"
+      ],
+      "allocation_note": "Allocation uses observed bars and RFC field width; it is not maximum fixture label length.",
+      "data_note": "Glyph subsets and value shapes depend on fixture; absent rows are unmeasured, not successful parity."
+    }
+  },
+  {
+    "file": "after-120x35-memory-detailed.txt",
+    "view": "memory",
+    "size": "120x35",
+    "density": "detailed",
+    "actual_sha256": "ef42e551997b8c3da42bc8ee01850a7e3970bd5e08a463bdd0ebe118bcf159c5",
+    "mock": "memory-118x35.txt",
+    "mock_sha256": "0f761e9611ec881ab65383b239f78d49db0f4a9ebf0f7eb879f60517cca64aa5",
+    "scope": "Same usable-width mock; fixture counts and glyph subsets differ.",
+    "actual": {
+      "observed_bar_columns": [
+        62,
+        77
+      ],
+      "visible_keeper_rows": 3,
+      "visible_world_rows": 1,
+      "usable_columns": 118,
+      "allocated_name_cells_from_bars_and_RFC_pulse_field": 32,
+      "pulse_field_cells_contract": 24,
+      "observed_keeper_pulse_glyph_counts": [
+        24
+      ],
+      "observed_world_pulse_glyph_counts": [
+        0
+      ],
+      "observed_pulse_glyphs": "·▁▄█",
+      "strip_field_cells_contract": 25,
+      "observed_strip_glyphs": "·",
+      "now_shapes": [
+        "stopped"
+      ],
+      "due_shapes": [
+        "—"
+      ],
+      "right_shapes": [],
+      "allocation_note": "Allocation uses observed bars and RFC field width; it is not maximum fixture label length.",
+      "data_note": "Glyph subsets and value shapes depend on fixture; absent rows are unmeasured, not successful parity."
+    },
+    "reference": {
+      "observed_bar_columns": [
+        62,
+        77
+      ],
+      "visible_keeper_rows": 24,
+      "visible_world_rows": 1,
+      "usable_columns": 118,
+      "allocated_name_cells_from_bars_and_RFC_pulse_field": 32,
+      "pulse_field_cells_contract": 24,
+      "observed_keeper_pulse_glyph_counts": [
+        24
+      ],
+      "observed_world_pulse_glyph_counts": [
+        0
+      ],
+      "observed_pulse_glyphs": "·▁▄█",
+      "strip_field_cells_contract": 25,
+      "observed_strip_glyphs": "·█",
+      "now_shapes": [
+        "pending"
+      ],
+      "due_shapes": [
+        "99h",
+        "99m",
+        "9d",
+        "9h99m"
+      ],
+      "right_shapes": [
+        "9.9k",
+        "99",
+        "999"
+      ],
+      "allocation_note": "Allocation uses observed bars and RFC field width; it is not maximum fixture label length.",
+      "data_note": "Glyph subsets and value shapes depend on fixture; absent rows are unmeasured, not successful parity."
+    }
+  },
+  {
+    "file": "after-120x35-age-compact.txt",
+    "view": "age",
+    "size": "120x35",
+    "density": "compact",
+    "actual_sha256": "639bcde009ba41f11e7ce770872384fc984dedc974fce2cce7af7fb6097cad65",
+    "mock": "age-118x35.txt",
+    "mock_sha256": "576864919daf099292cb9a9ae8971be1b59c73585f5f8600485a6ed06bc79307",
+    "scope": "Same usable-width mock; fixture counts and glyph subsets differ.",
+    "actual": {
+      "observed_bar_columns": [
+        62,
+        77
+      ],
+      "visible_keeper_rows": 3,
+      "visible_world_rows": 1,
+      "usable_columns": 118,
+      "allocated_name_cells_from_bars_and_RFC_pulse_field": 32,
+      "pulse_field_cells_contract": 24,
+      "observed_keeper_pulse_glyph_counts": [
+        24
+      ],
+      "observed_world_pulse_glyph_counts": [
+        24
+      ],
+      "observed_pulse_glyphs": "·▂▃▄▅▆█",
+      "strip_field_cells_contract": 25,
+      "observed_strip_glyphs": "·",
+      "now_shapes": [
+        "+ 99m"
+      ],
+      "due_shapes": [],
+      "right_shapes": [
+        "9 ▁",
+        "99 █"
+      ],
+      "allocation_note": "Allocation uses observed bars and RFC field width; it is not maximum fixture label length.",
+      "data_note": "Glyph subsets and value shapes depend on fixture; absent rows are unmeasured, not successful parity."
+    },
+    "reference": {
+      "observed_bar_columns": [
+        62,
+        77
+      ],
+      "visible_keeper_rows": 21,
+      "visible_world_rows": 1,
+      "usable_columns": 118,
+      "allocated_name_cells_from_bars_and_RFC_pulse_field": 32,
+      "pulse_field_cells_contract": 24,
+      "observed_keeper_pulse_glyph_counts": [
+        24
+      ],
+      "observed_world_pulse_glyph_counts": [
+        24
+      ],
+      "observed_pulse_glyphs": "·▁▂▃▄▅▆▇█",
+      "strip_field_cells_contract": 25,
+      "observed_strip_glyphs": "·█",
+      "now_shapes": [
+        "+ 99d",
+        "+ 99h",
+        "+ 99m",
+        "+ 9d",
+        "+ 9h99m"
+      ],
+      "due_shapes": [
+        "×9",
+        "×99"
+      ],
+      "right_shapes": [
+        "9 ▁",
+        "99 ▁",
+        "99 ▂",
+        "99 ▃",
+        "99 ▄",
+        "99 ▅",
+        "99 ▆",
+        "999 ▇"
+      ],
+      "allocation_note": "Allocation uses observed bars and RFC field width; it is not maximum fixture label length.",
+      "data_note": "Glyph subsets and value shapes depend on fixture; absent rows are unmeasured, not successful parity."
+    }
+  },
+  {
+    "file": "after-120x35-age-detailed.txt",
+    "view": "age",
+    "size": "120x35",
+    "density": "detailed",
+    "actual_sha256": "13e424f6463935c5a29fc0a8acfaed0f3cf2e9e9184a954c4368e7deb573b4e6",
+    "mock": "age-118x35.txt",
+    "mock_sha256": "576864919daf099292cb9a9ae8971be1b59c73585f5f8600485a6ed06bc79307",
+    "scope": "Same usable-width mock; fixture counts and glyph subsets differ.",
+    "actual": {
+      "observed_bar_columns": [
+        62,
+        77
+      ],
+      "visible_keeper_rows": 3,
+      "visible_world_rows": 1,
+      "usable_columns": 118,
+      "allocated_name_cells_from_bars_and_RFC_pulse_field": 32,
+      "pulse_field_cells_contract": 24,
+      "observed_keeper_pulse_glyph_counts": [
+        24
+      ],
+      "observed_world_pulse_glyph_counts": [
+        24
+      ],
+      "observed_pulse_glyphs": "·▂▃▄▅▆█",
+      "strip_field_cells_contract": 25,
+      "observed_strip_glyphs": "·",
+      "now_shapes": [
+        "+ 99m"
+      ],
+      "due_shapes": [],
+      "right_shapes": [
+        "9 ▁",
+        "99 █"
+      ],
+      "allocation_note": "Allocation uses observed bars and RFC field width; it is not maximum fixture label length.",
+      "data_note": "Glyph subsets and value shapes depend on fixture; absent rows are unmeasured, not successful parity."
+    },
+    "reference": {
+      "observed_bar_columns": [
+        62,
+        77
+      ],
+      "visible_keeper_rows": 21,
+      "visible_world_rows": 1,
+      "usable_columns": 118,
+      "allocated_name_cells_from_bars_and_RFC_pulse_field": 32,
+      "pulse_field_cells_contract": 24,
+      "observed_keeper_pulse_glyph_counts": [
+        24
+      ],
+      "observed_world_pulse_glyph_counts": [
+        24
+      ],
+      "observed_pulse_glyphs": "·▁▂▃▄▅▆▇█",
+      "strip_field_cells_contract": 25,
+      "observed_strip_glyphs": "·█",
+      "now_shapes": [
+        "+ 99d",
+        "+ 99h",
+        "+ 99m",
+        "+ 9d",
+        "+ 9h99m"
+      ],
+      "due_shapes": [
+        "×9",
+        "×99"
+      ],
+      "right_shapes": [
+        "9 ▁",
+        "99 ▁",
+        "99 ▂",
+        "99 ▃",
+        "99 ▄",
+        "99 ▅",
+        "99 ▆",
+        "999 ▇"
+      ],
+      "allocation_note": "Allocation uses observed bars and RFC field width; it is not maximum fixture label length.",
+      "data_note": "Glyph subsets and value shapes depend on fixture; absent rows are unmeasured, not successful parity."
+    }
+  },
+  {
+    "file": "after-80x24-state-compact.txt",
+    "view": "state",
+    "size": "80x24",
+    "density": "compact",
+    "actual_sha256": "fd4489f095826f29f164b30a7fc6f7fb0fad42bc988bc2c388e019f2fc8fc75b",
+    "mock": "cause-78x24.txt",
+    "mock_sha256": "103d22387bc93705eba6b24c5c3d4158a35fd74ab890a43b7d3904447b3a794d",
+    "scope": "State compares grid geometry with cause mock; grouping/counts differ.",
+    "actual": {
+      "observed_bar_columns": [
+        39,
+        54
+      ],
+      "visible_keeper_rows": 3,
+      "visible_world_rows": 0,
+      "usable_columns": 78,
+      "allocated_name_cells_from_bars_and_RFC_pulse_field": 18,
+      "pulse_field_cells_contract": 15,
+      "observed_keeper_pulse_glyph_counts": [
+        15
+      ],
+      "observed_world_pulse_glyph_counts": [],
+      "observed_pulse_glyphs": "·▁▄█",
+      "strip_field_cells_contract": 16,
+      "observed_strip_glyphs": "·",
+      "now_shapes": [
+        "× offline",
+        "Ⅱ paused"
+      ],
+      "due_shapes": [],
+      "right_shapes": [],
+      "allocation_note": "Allocation uses observed bars and RFC field width; it is not maximum fixture label length.",
+      "data_note": "Glyph subsets and value shapes depend on fixture; absent rows are unmeasured, not successful parity."
+    },
+    "reference": {
+      "observed_bar_columns": [
+        39,
+        54
+      ],
+      "visible_keeper_rows": 2,
+      "visible_world_rows": 0,
+      "usable_columns": 78,
+      "allocated_name_cells_from_bars_and_RFC_pulse_field": 18,
+      "pulse_field_cells_contract": 15,
+      "observed_keeper_pulse_glyph_counts": [
+        15
+      ],
+      "observed_world_pulse_glyph_counts": [],
+      "observed_pulse_glyphs": "·█",
+      "strip_field_cells_contract": 16,
+      "observed_strip_glyphs": "·◷",
+      "now_shapes": [
+        "○ idle 99m"
+      ],
+      "due_shapes": [
+        "late"
+      ],
+      "right_shapes": [],
+      "allocation_note": "Allocation uses observed bars and RFC field width; it is not maximum fixture label length.",
+      "data_note": "Glyph subsets and value shapes depend on fixture; absent rows are unmeasured, not successful parity."
+    }
+  },
+  {
+    "file": "after-80x24-state-detailed.txt",
+    "view": "state",
+    "size": "80x24",
+    "density": "detailed",
+    "actual_sha256": "fd4489f095826f29f164b30a7fc6f7fb0fad42bc988bc2c388e019f2fc8fc75b",
+    "mock": "cause-78x24.txt",
+    "mock_sha256": "103d22387bc93705eba6b24c5c3d4158a35fd74ab890a43b7d3904447b3a794d",
+    "scope": "State compares grid geometry with cause mock; grouping/counts differ.",
+    "actual": {
+      "observed_bar_columns": [
+        39,
+        54
+      ],
+      "visible_keeper_rows": 3,
+      "visible_world_rows": 0,
+      "usable_columns": 78,
+      "allocated_name_cells_from_bars_and_RFC_pulse_field": 18,
+      "pulse_field_cells_contract": 15,
+      "observed_keeper_pulse_glyph_counts": [
+        15
+      ],
+      "observed_world_pulse_glyph_counts": [],
+      "observed_pulse_glyphs": "·▁▄█",
+      "strip_field_cells_contract": 16,
+      "observed_strip_glyphs": "·",
+      "now_shapes": [
+        "× offline",
+        "Ⅱ paused"
+      ],
+      "due_shapes": [],
+      "right_shapes": [],
+      "allocation_note": "Allocation uses observed bars and RFC field width; it is not maximum fixture label length.",
+      "data_note": "Glyph subsets and value shapes depend on fixture; absent rows are unmeasured, not successful parity."
+    },
+    "reference": {
+      "observed_bar_columns": [
+        39,
+        54
+      ],
+      "visible_keeper_rows": 2,
+      "visible_world_rows": 0,
+      "usable_columns": 78,
+      "allocated_name_cells_from_bars_and_RFC_pulse_field": 18,
+      "pulse_field_cells_contract": 15,
+      "observed_keeper_pulse_glyph_counts": [
+        15
+      ],
+      "observed_world_pulse_glyph_counts": [],
+      "observed_pulse_glyphs": "·█",
+      "strip_field_cells_contract": 16,
+      "observed_strip_glyphs": "·◷",
+      "now_shapes": [
+        "○ idle 99m"
+      ],
+      "due_shapes": [
+        "late"
+      ],
+      "right_shapes": [],
+      "allocation_note": "Allocation uses observed bars and RFC field width; it is not maximum fixture label length.",
+      "data_note": "Glyph subsets and value shapes depend on fixture; absent rows are unmeasured, not successful parity."
+    }
+  },
+  {
+    "file": "after-80x24-cause-compact.txt",
+    "view": "cause",
+    "size": "80x24",
+    "density": "compact",
+    "actual_sha256": "9cd7a1499bd7fda945ba04a383251f6606d0c97ae912ca0138ac4cec36332476",
+    "mock": "cause-78x24.txt",
+    "mock_sha256": "103d22387bc93705eba6b24c5c3d4158a35fd74ab890a43b7d3904447b3a794d",
+    "scope": "Same usable-width mock; fixture counts and glyph subsets differ.",
+    "actual": {
+      "observed_bar_columns": [
+        39,
+        54
+      ],
+      "visible_keeper_rows": 1,
+      "visible_world_rows": 0,
+      "usable_columns": 78,
+      "allocated_name_cells_from_bars_and_RFC_pulse_field": 18,
+      "pulse_field_cells_contract": 15,
+      "observed_keeper_pulse_glyph_counts": [
+        15
+      ],
+      "observed_world_pulse_glyph_counts": [],
+      "observed_pulse_glyphs": "·",
+      "strip_field_cells_contract": 16,
+      "observed_strip_glyphs": "·",
+      "now_shapes": [
+        "× offline"
+      ],
+      "due_shapes": [],
+      "right_shapes": [],
+      "allocation_note": "Allocation uses observed bars and RFC field width; it is not maximum fixture label length.",
+      "data_note": "Glyph subsets and value shapes depend on fixture; absent rows are unmeasured, not successful parity."
+    },
+    "reference": {
+      "observed_bar_columns": [
+        39,
+        54
+      ],
+      "visible_keeper_rows": 2,
+      "visible_world_rows": 0,
+      "usable_columns": 78,
+      "allocated_name_cells_from_bars_and_RFC_pulse_field": 18,
+      "pulse_field_cells_contract": 15,
+      "observed_keeper_pulse_glyph_counts": [
+        15
+      ],
+      "observed_world_pulse_glyph_counts": [],
+      "observed_pulse_glyphs": "·█",
+      "strip_field_cells_contract": 16,
+      "observed_strip_glyphs": "·◷",
+      "now_shapes": [
+        "○ idle 99m"
+      ],
+      "due_shapes": [
+        "late"
+      ],
+      "right_shapes": [],
+      "allocation_note": "Allocation uses observed bars and RFC field width; it is not maximum fixture label length.",
+      "data_note": "Glyph subsets and value shapes depend on fixture; absent rows are unmeasured, not successful parity."
+    }
+  },
+  {
+    "file": "after-80x24-cause-detailed.txt",
+    "view": "cause",
+    "size": "80x24",
+    "density": "detailed",
+    "actual_sha256": "9cd7a1499bd7fda945ba04a383251f6606d0c97ae912ca0138ac4cec36332476",
+    "mock": "cause-78x24.txt",
+    "mock_sha256": "103d22387bc93705eba6b24c5c3d4158a35fd74ab890a43b7d3904447b3a794d",
+    "scope": "Same usable-width mock; fixture counts and glyph subsets differ.",
+    "actual": {
+      "observed_bar_columns": [
+        39,
+        54
+      ],
+      "visible_keeper_rows": 1,
+      "visible_world_rows": 0,
+      "usable_columns": 78,
+      "allocated_name_cells_from_bars_and_RFC_pulse_field": 18,
+      "pulse_field_cells_contract": 15,
+      "observed_keeper_pulse_glyph_counts": [
+        15
+      ],
+      "observed_world_pulse_glyph_counts": [],
+      "observed_pulse_glyphs": "·",
+      "strip_field_cells_contract": 16,
+      "observed_strip_glyphs": "·",
+      "now_shapes": [
+        "× offline"
+      ],
+      "due_shapes": [],
+      "right_shapes": [],
+      "allocation_note": "Allocation uses observed bars and RFC field width; it is not maximum fixture label length.",
+      "data_note": "Glyph subsets and value shapes depend on fixture; absent rows are unmeasured, not successful parity."
+    },
+    "reference": {
+      "observed_bar_columns": [
+        39,
+        54
+      ],
+      "visible_keeper_rows": 2,
+      "visible_world_rows": 0,
+      "usable_columns": 78,
+      "allocated_name_cells_from_bars_and_RFC_pulse_field": 18,
+      "pulse_field_cells_contract": 15,
+      "observed_keeper_pulse_glyph_counts": [
+        15
+      ],
+      "observed_world_pulse_glyph_counts": [],
+      "observed_pulse_glyphs": "·█",
+      "strip_field_cells_contract": 16,
+      "observed_strip_glyphs": "·◷",
+      "now_shapes": [
+        "○ idle 99m"
+      ],
+      "due_shapes": [
+        "late"
+      ],
+      "right_shapes": [],
+      "allocation_note": "Allocation uses observed bars and RFC field width; it is not maximum fixture label length.",
+      "data_note": "Glyph subsets and value shapes depend on fixture; absent rows are unmeasured, not successful parity."
+    }
+  },
+  {
+    "file": "after-80x24-time-compact.txt",
+    "view": "time",
+    "size": "80x24",
+    "density": "compact",
+    "actual_sha256": "0bb363e4753379700ba324db3b30d728e2487453feaf6cbd89c4b7eebe0845b0",
+    "mock": "time-78x24.txt",
+    "mock_sha256": "f03da06bd9d016ef86620bcdd530e2a7c039206313b8993ab8cd0cc0692e3361",
+    "scope": "Same usable-width mock; fixture counts and glyph subsets differ.",
+    "actual": {
+      "observed_bar_columns": [
+        39,
+        54
+      ],
+      "visible_keeper_rows": 0,
+      "visible_world_rows": 0,
+      "usable_columns": 78,
+      "allocated_name_cells_from_bars_and_RFC_pulse_field": 18,
+      "pulse_field_cells_contract": 15,
+      "observed_keeper_pulse_glyph_counts": [],
+      "observed_world_pulse_glyph_counts": [],
+      "observed_pulse_glyphs": "",
+      "strip_field_cells_contract": 16,
+      "observed_strip_glyphs": "",
+      "now_shapes": [],
+      "due_shapes": [],
+      "right_shapes": [],
+      "allocation_note": "Allocation uses observed bars and RFC field width; it is not maximum fixture label length.",
+      "data_note": "Glyph subsets and value shapes depend on fixture; absent rows are unmeasured, not successful parity."
+    },
+    "reference": {
+      "observed_bar_columns": [
+        39,
+        54
+      ],
+      "visible_keeper_rows": 13,
+      "visible_world_rows": 0,
+      "usable_columns": 78,
+      "allocated_name_cells_from_bars_and_RFC_pulse_field": 18,
+      "pulse_field_cells_contract": 15,
+      "observed_keeper_pulse_glyph_counts": [
+        15
+      ],
+      "observed_world_pulse_glyph_counts": [],
+      "observed_pulse_glyphs": "·▁▄█",
+      "strip_field_cells_contract": 16,
+      "observed_strip_glyphs": "·◷",
+      "now_shapes": [
+        "○ idle 99m",
+        "○ paused",
+        "● idle 99m",
+        "● idle 99s",
+        "● idle 9m",
+        "● idle 9s"
+      ],
+      "due_shapes": [
+        "99:99",
+        "late"
+      ],
+      "right_shapes": [],
+      "allocation_note": "Allocation uses observed bars and RFC field width; it is not maximum fixture label length.",
+      "data_note": "Glyph subsets and value shapes depend on fixture; absent rows are unmeasured, not successful parity."
+    }
+  },
+  {
+    "file": "after-80x24-time-detailed.txt",
+    "view": "time",
+    "size": "80x24",
+    "density": "detailed",
+    "actual_sha256": "0bb363e4753379700ba324db3b30d728e2487453feaf6cbd89c4b7eebe0845b0",
+    "mock": "time-78x24.txt",
+    "mock_sha256": "f03da06bd9d016ef86620bcdd530e2a7c039206313b8993ab8cd0cc0692e3361",
+    "scope": "Same usable-width mock; fixture counts and glyph subsets differ.",
+    "actual": {
+      "observed_bar_columns": [
+        39,
+        54
+      ],
+      "visible_keeper_rows": 0,
+      "visible_world_rows": 0,
+      "usable_columns": 78,
+      "allocated_name_cells_from_bars_and_RFC_pulse_field": 18,
+      "pulse_field_cells_contract": 15,
+      "observed_keeper_pulse_glyph_counts": [],
+      "observed_world_pulse_glyph_counts": [],
+      "observed_pulse_glyphs": "",
+      "strip_field_cells_contract": 16,
+      "observed_strip_glyphs": "",
+      "now_shapes": [],
+      "due_shapes": [],
+      "right_shapes": [],
+      "allocation_note": "Allocation uses observed bars and RFC field width; it is not maximum fixture label length.",
+      "data_note": "Glyph subsets and value shapes depend on fixture; absent rows are unmeasured, not successful parity."
+    },
+    "reference": {
+      "observed_bar_columns": [
+        39,
+        54
+      ],
+      "visible_keeper_rows": 13,
+      "visible_world_rows": 0,
+      "usable_columns": 78,
+      "allocated_name_cells_from_bars_and_RFC_pulse_field": 18,
+      "pulse_field_cells_contract": 15,
+      "observed_keeper_pulse_glyph_counts": [
+        15
+      ],
+      "observed_world_pulse_glyph_counts": [],
+      "observed_pulse_glyphs": "·▁▄█",
+      "strip_field_cells_contract": 16,
+      "observed_strip_glyphs": "·◷",
+      "now_shapes": [
+        "○ idle 99m",
+        "○ paused",
+        "● idle 99m",
+        "● idle 99s",
+        "● idle 9m",
+        "● idle 9s"
+      ],
+      "due_shapes": [
+        "99:99",
+        "late"
+      ],
+      "right_shapes": [],
+      "allocation_note": "Allocation uses observed bars and RFC field width; it is not maximum fixture label length.",
+      "data_note": "Glyph subsets and value shapes depend on fixture; absent rows are unmeasured, not successful parity."
+    }
+  },
+  {
+    "file": "after-80x24-memory-compact.txt",
+    "view": "memory",
+    "size": "80x24",
+    "density": "compact",
+    "actual_sha256": "31103868cae3c18ce385972883ff07ad93fe8b8c7d480bdf50dd867bc0442c27",
+    "mock": "memory-78x24.txt",
+    "mock_sha256": "6aa6d775944242870a1cd82df95e63744b7e8473f7bf668e45de49701f95384b",
+    "scope": "Same usable-width mock; fixture counts and glyph subsets differ.",
+    "actual": {
+      "observed_bar_columns": [
+        39,
+        54
+      ],
+      "visible_keeper_rows": 0,
+      "visible_world_rows": 1,
+      "usable_columns": 78,
+      "allocated_name_cells_from_bars_and_RFC_pulse_field": 18,
+      "pulse_field_cells_contract": 15,
+      "observed_keeper_pulse_glyph_counts": [],
+      "observed_world_pulse_glyph_counts": [
+        0
+      ],
+      "observed_pulse_glyphs": "",
+      "strip_field_cells_contract": 16,
+      "observed_strip_glyphs": "",
+      "now_shapes": [],
+      "due_shapes": [],
+      "right_shapes": [],
+      "allocation_note": "Allocation uses observed bars and RFC field width; it is not maximum fixture label length.",
+      "data_note": "Glyph subsets and value shapes depend on fixture; absent rows are unmeasured, not successful parity."
+    },
+    "reference": {
+      "observed_bar_columns": [
+        39,
+        54
+      ],
+      "visible_keeper_rows": 14,
+      "visible_world_rows": 1,
+      "usable_columns": 78,
+      "allocated_name_cells_from_bars_and_RFC_pulse_field": 18,
+      "pulse_field_cells_contract": 15,
+      "observed_keeper_pulse_glyph_counts": [
+        15
+      ],
+      "observed_world_pulse_glyph_counts": [
+        0
+      ],
+      "observed_pulse_glyphs": "·▁▄█",
+      "strip_field_cells_contract": 16,
+      "observed_strip_glyphs": "·█",
+      "now_shapes": [
+        "pending"
+      ],
+      "due_shapes": [
+        "99h",
+        "99m",
+        "9d"
+      ],
+      "right_shapes": [],
+      "allocation_note": "Allocation uses observed bars and RFC field width; it is not maximum fixture label length.",
+      "data_note": "Glyph subsets and value shapes depend on fixture; absent rows are unmeasured, not successful parity."
+    }
+  },
+  {
+    "file": "after-80x24-memory-detailed.txt",
+    "view": "memory",
+    "size": "80x24",
+    "density": "detailed",
+    "actual_sha256": "0db0bcbdb792e2cac5f0bb2bb749f29d9db8437ffd77f67d91c3b84f4778b824",
+    "mock": "memory-78x24.txt",
+    "mock_sha256": "6aa6d775944242870a1cd82df95e63744b7e8473f7bf668e45de49701f95384b",
+    "scope": "Same usable-width mock; fixture counts and glyph subsets differ.",
+    "actual": {
+      "observed_bar_columns": [
+        39,
+        54
+      ],
+      "visible_keeper_rows": 3,
+      "visible_world_rows": 1,
+      "usable_columns": 78,
+      "allocated_name_cells_from_bars_and_RFC_pulse_field": 18,
+      "pulse_field_cells_contract": 15,
+      "observed_keeper_pulse_glyph_counts": [
+        15
+      ],
+      "observed_world_pulse_glyph_counts": [
+        0
+      ],
+      "observed_pulse_glyphs": "·▁▄█",
+      "strip_field_cells_contract": 16,
+      "observed_strip_glyphs": "·",
+      "now_shapes": [
+        "stopped"
+      ],
+      "due_shapes": [
+        "—"
+      ],
+      "right_shapes": [],
+      "allocation_note": "Allocation uses observed bars and RFC field width; it is not maximum fixture label length.",
+      "data_note": "Glyph subsets and value shapes depend on fixture; absent rows are unmeasured, not successful parity."
+    },
+    "reference": {
+      "observed_bar_columns": [
+        39,
+        54
+      ],
+      "visible_keeper_rows": 14,
+      "visible_world_rows": 1,
+      "usable_columns": 78,
+      "allocated_name_cells_from_bars_and_RFC_pulse_field": 18,
+      "pulse_field_cells_contract": 15,
+      "observed_keeper_pulse_glyph_counts": [
+        15
+      ],
+      "observed_world_pulse_glyph_counts": [
+        0
+      ],
+      "observed_pulse_glyphs": "·▁▄█",
+      "strip_field_cells_contract": 16,
+      "observed_strip_glyphs": "·█",
+      "now_shapes": [
+        "pending"
+      ],
+      "due_shapes": [
+        "99h",
+        "99m",
+        "9d"
+      ],
+      "right_shapes": [],
+      "allocation_note": "Allocation uses observed bars and RFC field width; it is not maximum fixture label length.",
+      "data_note": "Glyph subsets and value shapes depend on fixture; absent rows are unmeasured, not successful parity."
+    }
+  },
+  {
+    "file": "after-80x24-age-compact.txt",
+    "view": "age",
+    "size": "80x24",
+    "density": "compact",
+    "actual_sha256": "6f17f2f0994ff610336cdb6651e5d31c741bb64bf62040dec4ad5ece55bf5c1d",
+    "mock": "age-78x24.txt",
+    "mock_sha256": "4d22007c3013b02d6c453298aa11f25669403d34316556df738728eadf7c8173",
+    "scope": "Same usable-width mock; fixture counts and glyph subsets differ.",
+    "actual": {
+      "observed_bar_columns": [
+        39,
+        54
+      ],
+      "visible_keeper_rows": 3,
+      "visible_world_rows": 1,
+      "usable_columns": 78,
+      "allocated_name_cells_from_bars_and_RFC_pulse_field": 18,
+      "pulse_field_cells_contract": 15,
+      "observed_keeper_pulse_glyph_counts": [
+        12
+      ],
+      "observed_world_pulse_glyph_counts": [
+        12
+      ],
+      "observed_pulse_glyphs": "·▁▃▅▆▇█",
+      "strip_field_cells_contract": 16,
+      "observed_strip_glyphs": "·",
+      "now_shapes": [
+        "+ 99m"
+      ],
+      "due_shapes": [],
+      "right_shapes": [],
+      "allocation_note": "Allocation uses observed bars and RFC field width; it is not maximum fixture label length.",
+      "data_note": "Glyph subsets and value shapes depend on fixture; absent rows are unmeasured, not successful parity."
+    },
+    "reference": {
+      "observed_bar_columns": [
+        39,
+        54
+      ],
+      "visible_keeper_rows": 12,
+      "visible_world_rows": 1,
+      "usable_columns": 78,
+      "allocated_name_cells_from_bars_and_RFC_pulse_field": 18,
+      "pulse_field_cells_contract": 15,
+      "observed_keeper_pulse_glyph_counts": [
+        15
+      ],
+      "observed_world_pulse_glyph_counts": [
+        15
+      ],
+      "observed_pulse_glyphs": "·▁▂▃▄▅▆▇█",
+      "strip_field_cells_contract": 16,
+      "observed_strip_glyphs": "·█",
+      "now_shapes": [
+        "+ 99h",
+        "+ 99m",
+        "+ 9d",
+        "+ 9h99m"
+      ],
+      "due_shapes": [
+        "×9",
+        "×99"
+      ],
+      "right_shapes": [],
+      "allocation_note": "Allocation uses observed bars and RFC field width; it is not maximum fixture label length.",
+      "data_note": "Glyph subsets and value shapes depend on fixture; absent rows are unmeasured, not successful parity."
+    }
+  },
+  {
+    "file": "after-80x24-age-detailed.txt",
+    "view": "age",
+    "size": "80x24",
+    "density": "detailed",
+    "actual_sha256": "b6d30dc5eb7572a992f01694bd3d24f5fca4411cdc88035228c92d4eb1511d21",
+    "mock": "age-78x24.txt",
+    "mock_sha256": "4d22007c3013b02d6c453298aa11f25669403d34316556df738728eadf7c8173",
+    "scope": "Same usable-width mock; fixture counts and glyph subsets differ.",
+    "actual": {
+      "observed_bar_columns": [
+        39,
+        54
+      ],
+      "visible_keeper_rows": 3,
+      "visible_world_rows": 1,
+      "usable_columns": 78,
+      "allocated_name_cells_from_bars_and_RFC_pulse_field": 18,
+      "pulse_field_cells_contract": 15,
+      "observed_keeper_pulse_glyph_counts": [
+        12
+      ],
+      "observed_world_pulse_glyph_counts": [
+        12
+      ],
+      "observed_pulse_glyphs": "·▁▃▅▆▇█",
+      "strip_field_cells_contract": 16,
+      "observed_strip_glyphs": "·",
+      "now_shapes": [
+        "+ 99m"
+      ],
+      "due_shapes": [],
+      "right_shapes": [],
+      "allocation_note": "Allocation uses observed bars and RFC field width; it is not maximum fixture label length.",
+      "data_note": "Glyph subsets and value shapes depend on fixture; absent rows are unmeasured, not successful parity."
+    },
+    "reference": {
+      "observed_bar_columns": [
+        39,
+        54
+      ],
+      "visible_keeper_rows": 12,
+      "visible_world_rows": 1,
+      "usable_columns": 78,
+      "allocated_name_cells_from_bars_and_RFC_pulse_field": 18,
+      "pulse_field_cells_contract": 15,
+      "observed_keeper_pulse_glyph_counts": [
+        15
+      ],
+      "observed_world_pulse_glyph_counts": [
+        15
+      ],
+      "observed_pulse_glyphs": "·▁▂▃▄▅▆▇█",
+      "strip_field_cells_contract": 16,
+      "observed_strip_glyphs": "·█",
+      "now_shapes": [
+        "+ 99h",
+        "+ 99m",
+        "+ 9d",
+        "+ 9h99m"
+      ],
+      "due_shapes": [
+        "×9",
+        "×99"
+      ],
+      "right_shapes": [],
+      "allocation_note": "Allocation uses observed bars and RFC field width; it is not maximum fixture label length.",
+      "data_note": "Glyph subsets and value shapes depend on fixture; absent rows are unmeasured, not successful parity."
+    }
+  }
+]

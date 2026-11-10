@@ -1,0 +1,35 @@
+ [2m운영[0m  [2m작업[0m  [1;7m▸키퍼[0m  [2m기능·플러그인[0m  [2m워크스페이스[0m  [2m시스템[0m
+
+ [1m MASC Keepers (3)[0m                                                                                     HTTP [connected]
+   [2mlist[0m  [2mstate[0m  [2mcause[0m  [2mtime[0m  [2mmemory[0m  [1m[96m▸age[0m  [2mruntime[0m  [2m24h[0m
+ [96m█ 3 fresh[39m [96m▪▪[1m▪[0m
+ [91m  fleet blocked[39m   running 0/2   turn capacity 0/2   keeper bootstrap off   proactive every 5m
+ [2m  paused 1[0m
+ [91m  not running: quietproof, recoveredproof[39m
+     keeper  facts by age ▸           30d   7d      1d      1h [96m┃[39m [1msaved       [0m [96m┃[39m [96mlag · unread turns ▹     [39m stale   facts
+ [96m▌ ■ [39mworld · shared                   ▇▅▄▂█▇▅▄▂█▇▅▄▂█[96m▇▅▄▂█▇▅▄▂[39m [96m┃[39m mem! ◷ pend… [96m┃[39m ? absent                             70
+ [96m▌[39m [1m−[0m [1m[96mUPDATED WITHIN 3H 3             [0m ▇▅▄▂█▇▅▄▂█▇▅▄▂█[96m▇▅▄▂█▇▅▄▂[39m [96m┃[39m [96m3           [39m [96m┃[39m Σ 70 facts · lag 0
+ ▌ [1m○[0m pausedproof                      ························ [96m┃[39m + 5m         [96m┃[39m ························· [93m     [39m     0 ▁
+ ▌ [1m●[0m quietproof                       ························ [96m┃[39m + 5m         [96m┃[39m ························· [93m     [39m     0 ▁
+[7m ▌ ● recoveredproof                   ▇▅▄▂█▇▅▄▂█▇▅▄▂█▇▅▄▂█▇▅▄▂ ┃ + 5m         ┃ ·························          70 █
+[0m                                                               [96m┃[39m              [96m┃[39m
+                                                               [96m┃[39m              [96m┃[39m
+                                                               [96m┃[39m              [96m┃[39m
+                                                               [96m┃[39m              [96m┃[39m
+                                                               [96m┃[39m              [96m┃[39m
+ ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+   [1mrecoveredproof[0m  [93moffline[39m                                                             [7m story [0m [2m s schedules [0m [2m m memory [0m
+ [2m  ◂ past  [0m[93mlast 12h ·······✗✗·✗·[39m
+           [93mdigest unknown, memory read failed: memory health load failed: GET failed: Malformed Response: unexpected e[39m…
+ [2m  ● now   [0m[93m× offline[2m[39m · health offline[0m
+           [2mMode S [0mA    [96mD[2m[39m   AGE —   offline deepseek.smoke[0m
+ [2m  ▹ next  nothing announced[0m
+
+
+
+
+
+ ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+[2m  WORKTREE server (not the root build)  ACTION NEEDED 2  [96mTab[0m:page  [96mEnter / Right[39m:close / detail  Esc:[2mclose[0m  q:[2mquit[0m  …?
+ 일정 정보가 오래됐을 수 있음
+[2m › to recoveredproof   (i to write)

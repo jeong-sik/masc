@@ -1,0 +1,351 @@
+{
+  "scope": "Selected TXT panels read by capture_audit; actual filenames and capture UTC recorded. ANSI bytes retained but not re-emulated. No wording/layout/order assertions added.",
+  "panels": [
+    {
+      "folder": "baseline-e2c-ko-120x35",
+      "panel": "goal-list",
+      "file": "baseline-e2c-ko-120x35/goal-list.txt",
+      "capture_at_utc": "2026-11-09T14:41:15.432936+00:00",
+      "requested_role": "list",
+      "navigation_action_count": 3,
+      "review": "selected TXT manually read; ANSI retained as captured bytes, not re-emulated"
+    },
+    {
+      "folder": "baseline-e2c-ko-120x35",
+      "panel": "goal-detail",
+      "file": "baseline-e2c-ko-120x35/goal-detail.txt",
+      "capture_at_utc": "2026-11-09T14:41:16.168136+00:00",
+      "requested_role": "detail",
+      "navigation_action_count": 4,
+      "review": "selected TXT manually read; ANSI retained as captured bytes, not re-emulated"
+    },
+    {
+      "folder": "baseline-e2c-ko-120x35",
+      "panel": "task-list",
+      "file": "baseline-e2c-ko-120x35/task-list.txt",
+      "capture_at_utc": "2026-11-09T14:41:17.627829+00:00",
+      "requested_role": "list",
+      "navigation_action_count": 6,
+      "review": "selected TXT manually read; ANSI retained as captured bytes, not re-emulated"
+    },
+    {
+      "folder": "baseline-e2c-ko-120x35",
+      "panel": "task-detail-active",
+      "file": "baseline-e2c-ko-120x35/task-detail-active.txt",
+      "capture_at_utc": "2026-11-09T14:41:18.361680+00:00",
+      "requested_role": "detail",
+      "navigation_action_count": 7,
+      "review": "selected TXT manually read; ANSI retained as captured bytes, not re-emulated"
+    },
+    {
+      "folder": "baseline-e2c-ko-120x35",
+      "panel": "board-list",
+      "file": "baseline-e2c-ko-120x35/board-list.txt",
+      "capture_at_utc": "2026-11-09T14:41:32.947721+00:00",
+      "requested_role": "list",
+      "navigation_action_count": 11,
+      "review": "selected TXT manually read; ANSI retained as captured bytes, not re-emulated"
+    },
+    {
+      "folder": "baseline-e2c-ko-120x35",
+      "panel": "board-detail-closed",
+      "file": "baseline-e2c-ko-120x35/board-detail-closed.txt",
+      "capture_at_utc": "2026-11-09T14:41:33.677429+00:00",
+      "requested_role": "detail-closed",
+      "navigation_action_count": 12,
+      "review": "selected TXT manually read; ANSI retained as captured bytes, not re-emulated"
+    },
+    {
+      "folder": "baseline-e2c-ko-120x35",
+      "panel": "memory-facts",
+      "file": "baseline-e2c-ko-120x35/memory-facts.txt",
+      "capture_at_utc": "2026-11-09T14:41:37.285358+00:00",
+      "requested_role": "facts",
+      "navigation_action_count": 17,
+      "review": "selected TXT manually read; ANSI retained as captured bytes, not re-emulated"
+    },
+    {
+      "folder": "baseline-e2c-ko-120x35",
+      "panel": "memory-detail",
+      "file": "baseline-e2c-ko-120x35/memory-detail.txt",
+      "capture_at_utc": "2026-11-09T14:41:38.025152+00:00",
+      "requested_role": "detail",
+      "navigation_action_count": 18,
+      "review": "selected TXT manually read; ANSI retained as captured bytes, not re-emulated"
+    },
+    {
+      "folder": "candidate-a0-ko-120x35",
+      "panel": "goal-list",
+      "file": "candidate-a0-ko-120x35/goal-list.txt",
+      "capture_at_utc": "2026-11-09T14:44:24.317530+00:00",
+      "requested_role": "list",
+      "navigation_action_count": 3,
+      "review": "selected TXT manually read; ANSI retained as captured bytes, not re-emulated"
+    },
+    {
+      "folder": "candidate-a0-ko-120x35",
+      "panel": "goal-detail",
+      "file": "candidate-a0-ko-120x35/goal-detail.txt",
+      "capture_at_utc": "2026-11-09T14:44:25.050095+00:00",
+      "requested_role": "detail",
+      "navigation_action_count": 4,
+      "review": "selected TXT manually read; ANSI retained as captured bytes, not re-emulated"
+    },
+    {
+      "folder": "candidate-a0-ko-120x35",
+      "panel": "task-list",
+      "file": "candidate-a0-ko-120x35/task-list.txt",
+      "capture_at_utc": "2026-11-09T14:44:26.503405+00:00",
+      "requested_role": "list",
+      "navigation_action_count": 6,
+      "review": "selected TXT manually read; ANSI retained as captured bytes, not re-emulated"
+    },
+    {
+      "folder": "candidate-a0-ko-120x35",
+      "panel": "task-detail-active",
+      "file": "candidate-a0-ko-120x35/task-detail-active.txt",
+      "capture_at_utc": "2026-11-09T14:54:41.123403+00:00",
+      "requested_role": "detail-active",
+      "navigation_action_count": 25,
+      "review": "selected TXT manually read; ANSI retained as captured bytes, not re-emulated"
+    },
+    {
+      "folder": "candidate-a0-ko-120x35",
+      "panel": "board-list",
+      "file": "candidate-a0-ko-120x35/board-list.txt",
+      "capture_at_utc": "2026-11-09T14:44:47.472034+00:00",
+      "requested_role": "list",
+      "navigation_action_count": 11,
+      "review": "selected TXT manually read; ANSI retained as captured bytes, not re-emulated"
+    },
+    {
+      "folder": "candidate-a0-ko-120x35",
+      "panel": "board-detail-closed",
+      "file": "candidate-a0-ko-120x35/board-detail-closed.txt",
+      "capture_at_utc": "2026-11-09T14:44:48.223372+00:00",
+      "requested_role": "detail-closed",
+      "navigation_action_count": 12,
+      "review": "selected TXT manually read; ANSI retained as captured bytes, not re-emulated"
+    },
+    {
+      "folder": "candidate-a0-ko-120x35",
+      "panel": "memory-facts",
+      "file": "candidate-a0-ko-120x35/memory-facts.txt",
+      "capture_at_utc": "2026-11-09T14:44:51.849093+00:00",
+      "requested_role": "facts",
+      "navigation_action_count": 17,
+      "review": "selected TXT manually read; ANSI retained as captured bytes, not re-emulated"
+    },
+    {
+      "folder": "candidate-a0-ko-120x35",
+      "panel": "memory-detail",
+      "file": "candidate-a0-ko-120x35/memory-detail.txt",
+      "capture_at_utc": "2026-11-09T14:44:52.584857+00:00",
+      "requested_role": "detail",
+      "navigation_action_count": 18,
+      "review": "selected TXT manually read; ANSI retained as captured bytes, not re-emulated"
+    },
+    {
+      "folder": "candidate-a0-ko-120x35",
+      "panel": "memory-health",
+      "file": "candidate-a0-ko-120x35/memory-health.txt",
+      "capture_at_utc": "2026-11-09T14:44:51.113152+00:00",
+      "requested_role": "health",
+      "navigation_action_count": 16,
+      "review": "selected TXT manually read; ANSI retained as captured bytes, not re-emulated"
+    },
+    {
+      "folder": "candidate-a0-en-120x35",
+      "panel": "goal-list",
+      "file": "candidate-a0-en-120x35/goal-list.txt",
+      "capture_at_utc": "2026-11-09T14:56:40.194957+00:00",
+      "requested_role": "list",
+      "navigation_action_count": 3,
+      "review": "selected TXT manually read; ANSI retained as captured bytes, not re-emulated"
+    },
+    {
+      "folder": "candidate-a0-en-120x35",
+      "panel": "goal-detail",
+      "file": "candidate-a0-en-120x35/goal-detail.txt",
+      "capture_at_utc": "2026-11-09T14:56:40.973468+00:00",
+      "requested_role": "detail",
+      "navigation_action_count": 4,
+      "review": "selected TXT manually read; ANSI retained as captured bytes, not re-emulated"
+    },
+    {
+      "folder": "candidate-a0-en-120x35",
+      "panel": "task-list",
+      "file": "candidate-a0-en-120x35/task-list.txt",
+      "capture_at_utc": "2026-11-09T14:56:41.735918+00:00",
+      "requested_role": "list",
+      "navigation_action_count": 5,
+      "review": "selected TXT manually read; ANSI retained as captured bytes, not re-emulated"
+    },
+    {
+      "folder": "candidate-a0-en-120x35",
+      "panel": "task-detail-active",
+      "file": "candidate-a0-en-120x35/task-detail-active.txt",
+      "capture_at_utc": "2026-11-09T14:56:42.493055+00:00",
+      "requested_role": "detail-active",
+      "navigation_action_count": 6,
+      "review": "selected TXT manually read; ANSI retained as captured bytes, not re-emulated"
+    },
+    {
+      "folder": "candidate-a0-en-120x35",
+      "panel": "board-list",
+      "file": "candidate-a0-en-120x35/board-list.txt",
+      "capture_at_utc": "2026-11-09T14:56:44.707104+00:00",
+      "requested_role": "list",
+      "navigation_action_count": 9,
+      "review": "selected TXT manually read; ANSI retained as captured bytes, not re-emulated"
+    },
+    {
+      "folder": "candidate-a0-en-120x35",
+      "panel": "board-detail-closed",
+      "file": "candidate-a0-en-120x35/board-detail-closed.txt",
+      "capture_at_utc": "2026-11-09T14:56:45.480620+00:00",
+      "requested_role": "detail-closed",
+      "navigation_action_count": 10,
+      "review": "selected TXT manually read; ANSI retained as captured bytes, not re-emulated"
+    },
+    {
+      "folder": "candidate-a0-en-120x35",
+      "panel": "memory-facts",
+      "file": "candidate-a0-en-120x35/memory-facts.txt",
+      "capture_at_utc": "2026-11-09T14:56:49.294129+00:00",
+      "requested_role": "facts",
+      "navigation_action_count": 15,
+      "review": "selected TXT manually read; ANSI retained as captured bytes, not re-emulated"
+    },
+    {
+      "folder": "candidate-a0-en-120x35",
+      "panel": "memory-detail",
+      "file": "candidate-a0-en-120x35/memory-detail.txt",
+      "capture_at_utc": "2026-11-09T14:56:50.043624+00:00",
+      "requested_role": "detail",
+      "navigation_action_count": 16,
+      "review": "selected TXT manually read; ANSI retained as captured bytes, not re-emulated"
+    },
+    {
+      "folder": "candidate-a0-en-120x35",
+      "panel": "board-detail-open",
+      "file": "candidate-a0-en-120x35/board-detail-open.txt",
+      "capture_at_utc": "2026-11-09T14:56:46.266945+00:00",
+      "requested_role": "detail-open",
+      "navigation_action_count": 11,
+      "review": "selected TXT manually read; ANSI retained as captured bytes, not re-emulated"
+    },
+    {
+      "folder": "candidate-a0-ko-80x24",
+      "panel": "goal-detail",
+      "file": "candidate-a0-ko-80x24/goal-detail.txt",
+      "capture_at_utc": "2026-11-09T14:44:25.050100+00:00",
+      "requested_role": "detail",
+      "navigation_action_count": 4,
+      "review": "selected TXT manually read; ANSI retained as captured bytes, not re-emulated"
+    },
+    {
+      "folder": "candidate-a0-ko-80x24",
+      "panel": "task-detail-active",
+      "file": "candidate-a0-ko-80x24/task-detail-active.txt",
+      "capture_at_utc": "2026-11-09T14:54:41.123325+00:00",
+      "requested_role": "detail-active",
+      "navigation_action_count": 25,
+      "review": "selected TXT manually read; ANSI retained as captured bytes, not re-emulated"
+    },
+    {
+      "folder": "candidate-a0-ko-80x24",
+      "panel": "board-detail-closed",
+      "file": "candidate-a0-ko-80x24/board-detail-closed.txt",
+      "capture_at_utc": "2026-11-09T14:44:54.303999+00:00",
+      "requested_role": "detail-closed",
+      "navigation_action_count": 12,
+      "review": "selected TXT manually read; ANSI retained as captured bytes, not re-emulated"
+    },
+    {
+      "folder": "candidate-a0-ko-80x24",
+      "panel": "memory-detail",
+      "file": "candidate-a0-ko-80x24/memory-detail.txt",
+      "capture_at_utc": "2026-11-09T14:44:58.663910+00:00",
+      "requested_role": "detail",
+      "navigation_action_count": 18,
+      "review": "selected TXT manually read; ANSI retained as captured bytes, not re-emulated"
+    },
+    {
+      "folder": "candidate-a0-ko-80x24",
+      "panel": "goal-list",
+      "file": "candidate-a0-ko-80x24/goal-list.txt",
+      "capture_at_utc": "2026-11-09T14:44:24.317598+00:00",
+      "requested_role": "list",
+      "navigation_action_count": 3,
+      "review": "selected TXT manually read; ANSI retained as captured bytes, not re-emulated"
+    },
+    {
+      "folder": "candidate-a0-ko-80x24",
+      "panel": "task-list",
+      "file": "candidate-a0-ko-80x24/task-list.txt",
+      "capture_at_utc": "2026-11-09T14:44:26.503379+00:00",
+      "requested_role": "list",
+      "navigation_action_count": 6,
+      "review": "selected TXT manually read; ANSI retained as captured bytes, not re-emulated"
+    },
+    {
+      "folder": "candidate-a0-en-80x24",
+      "panel": "goal-detail",
+      "file": "candidate-a0-en-80x24/goal-detail.txt",
+      "capture_at_utc": "2026-11-09T14:56:40.928442+00:00",
+      "requested_role": "detail",
+      "navigation_action_count": 4,
+      "review": "selected TXT manually read; ANSI retained as captured bytes, not re-emulated"
+    },
+    {
+      "folder": "candidate-a0-en-80x24",
+      "panel": "task-detail-active",
+      "file": "candidate-a0-en-80x24/task-detail-active.txt",
+      "capture_at_utc": "2026-11-09T14:56:42.477000+00:00",
+      "requested_role": "detail-active",
+      "navigation_action_count": 6,
+      "review": "selected TXT manually read; ANSI retained as captured bytes, not re-emulated"
+    },
+    {
+      "folder": "candidate-a0-en-80x24",
+      "panel": "board-detail-closed",
+      "file": "candidate-a0-en-80x24/board-detail-closed.txt",
+      "capture_at_utc": "2026-11-09T14:56:45.485946+00:00",
+      "requested_role": "detail-closed",
+      "navigation_action_count": 10,
+      "review": "selected TXT manually read; ANSI retained as captured bytes, not re-emulated"
+    },
+    {
+      "folder": "candidate-a0-en-80x24",
+      "panel": "memory-detail",
+      "file": "candidate-a0-en-80x24/memory-detail.txt",
+      "capture_at_utc": "2026-11-09T14:56:50.036398+00:00",
+      "requested_role": "detail",
+      "navigation_action_count": 16,
+      "review": "selected TXT manually read; ANSI retained as captured bytes, not re-emulated"
+    },
+    {
+      "folder": "candidate-a0-en-80x24",
+      "panel": "memory-health",
+      "file": "candidate-a0-en-80x24/memory-health.txt",
+      "capture_at_utc": "2026-11-09T14:56:48.500410+00:00",
+      "requested_role": "health",
+      "navigation_action_count": 14,
+      "review": "selected TXT manually read; ANSI retained as captured bytes, not re-emulated"
+    }
+  ],
+  "observations": {
+    "Goal": "Same long criterion is visible in baseline and A0. A0 wide uses the request/criterion preview; narrow list stacks preview below the list. Detail preserves Korean/English authored criterion and separate absent proof/measurement/review observations.",
+    "Task": "Both selected baseline/A0 detail panels identify task-surface-active and the same repeated original request. Baseline leads with ID/Goal/time metadata; A0 leads with request/status/owner. List selections and row order differ across fixtures. Task history shows actual HTTP 503 task_history_unavailable in wide detail, preserved independently of the readable request.",
+    "Board": "A0 retained closed-post panels show original body before closure summary/successor; selected EN wide open-post frame also contains the actual comment. The fixture has no hearth census; that observation remains visible.",
+    "Memory": "Selected source-bound fact content and file SHA are visible in list/detail; native health reports two ordinary + one source fact for sourcereader, zero ordinary + one source fact for quietreader. Snapshot save time, fact age, source counts and actual pass-stopped/Addon-unattached warnings are distinct. A0 health labels say failed while pass detail says stopped; final source corrects that label but is not natively recaptured.",
+    "Locale": "Separate A0 KO/EN sessions follow their configured UI language while bilingual authored titles, requests, post bodies, comments and memory content remain unchanged. IDs/proper names and raw server reasons are preserved."
+  },
+  "limits": [
+    "Static TTY capture windows only, not every scroll row or lifecycle permission/confirmation action.",
+    "Separate private fixture anchors differ; ages, timestamps, selected list item and order are not timing/performance comparisons.",
+    "A0 native source differs from final db182 source by four files.",
+    "No production preference update, installed binary replacement, model success, deployment or official approval is established."
+  ]
+}

@@ -3240,6 +3240,13 @@ let run_turn ?(dynamic_tools = []) ?(on_undelivered_tool_result = fun _ -> Error
     on_turn_started ~thread_id ~turn_id
   in
   let result =
+    (* HIGH-RISK-UNREVIEWED: the native tools of a turn reach what the user of
+       the server process can read, and a multi-account process allows none
+       (plan D3c). Judged before anything starts. *)
+    match Runtime_account_access.authorize_native config.native with
+    | Error refusal ->
+      Error (Invalid_config (Runtime_account_access.native_refusal_to_string refusal))
+    | Ok () ->
     match validate_turn_input ~dynamic_tools ~thread ~cwd config ~prompt ~images with
     | Error _ as error -> error
     | Ok protocol_cwd ->

@@ -23,10 +23,11 @@ val reason_lines : cells:int -> string -> string list
     drawn on: wrapped like {!row_lines}, each line in the warning colour. The
     Action needed card and the plain layout draw a reason through this. *)
 
-val reasons_title : int -> string
-(** The heading over the reasons, naming how many there are. *)
+val reasons_title : title:string -> int -> string
+(** The caller's localized heading over the reasons, naming how many there are. *)
 
 val plain_reasons :
+  title:string ->
   indent:string -> inner:int -> rows:int -> string list -> (string option * string) list
 (** The reasons as the plain layout draws them, one element to a row: the
     heading, the lines of each reason that is drawn and, when some are left
@@ -52,6 +53,7 @@ type titles =
 
 val draw :
   titles:titles ->
+  empty_decisions:string ->
   inner:int ->
   rows:int ->
   is_selected:('action -> bool) ->

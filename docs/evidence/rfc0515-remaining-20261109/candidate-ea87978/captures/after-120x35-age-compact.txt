@@ -1,0 +1,35 @@
+ 운영  작업  ▸키퍼  기능·플러그인  워크스페이스  시스템
+
+  MASC Keepers (3)                                                                                     HTTP [connected]
+   list  state  cause  time  memory  ▸age  runtime  24h
+ █ 3 fresh ▪▪▪
+   fleet blocked   running 0/2   turn capacity 0/2   keeper bootstrap off   proactive every 5m
+   paused 1
+   not running: quietproof, recoveredproof
+     keeper  facts by age ▸           30d  7d    1d   6h    1h ┃ saved        ┃ lag · unread turns ▹      stale   facts
+ ▌ ■ world · shared                   ▅▄▃▂▆▅▄▃▂▆▅▄▃▂▆▅▄▃▂▆█▃·▂ ┃ ◷ pending    ┃ ? absent                             70
+ ▌ − UPDATED WITHIN 3H 3              ▅▄▃▂▆▅▄▃▂▆▅▄▃▂▆▅▄▃▂▆█▃·▂ ┃ 3            ┃ Σ 70 facts · lag 0
+ ▌ ○ pausedproof                      ························ ┃ + 31m        ┃ ·························           0 ▁
+ ▌ ● quietproof                       ························ ┃ + 31m        ┃ ·························           0 ▁
+ ▌ ● recoveredproof                   ▅▄▃▂▆▅▄▃▂▆▅▄▃▂▆▅▄▃▂▆█▃·▂ ┃ + 31m        ┃ ·························          70 █
+                                                               ┃              ┃
+                                                               ┃              ┃
+                                                               ┃              ┃
+                                                               ┃              ┃
+                                                               ┃              ┃
+                                                               ┃              ┃
+                                                               ┃              ┃
+                                                               ┃              ┃
+                                                               ┃              ┃
+                                                               ┃              ┃
+                                                               ┃              ┃
+                                                               ┃              ┃
+                                                               ┃              ┃
+                                                               ┃              ┃
+                                                               ┃              ┃
+                                                               ┃              ┃
+ pausedproof Ⅱ paused
+ ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  WORKTREE server (not the root build)  ACTION NEEDED 2  v:view  Enter / Right:story / detail  Esc:dashboard  q:quit  …?
+ 일정 정보가 오래됐을 수 있음
+ › to pausedproof   (i to write)

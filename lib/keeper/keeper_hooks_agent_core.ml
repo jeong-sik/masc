@@ -280,17 +280,20 @@ type tool_result_commit_policy = Require_commit | Observe_commit
    tool-call ledger per tool and day. The result names the rejection class and
    says no effect began, the shape [handle_validation_error] gives a
    descriptor-level rejection, under the internal tool name the other observers
-   receive. *)
-let observe_refused_call ~tool_name ~error =
+   receive. Keep the validation duration Agent Core already measured. *)
+let observe_refused_call ~tool_name ~duration_ms ~error =
   Tool_dispatch.run_dispatch_observers
     Dispatch_outcome.Handled
     (Some
-       (Tool_result.make_err
-          ~tool_name:(Keeper_tool_descriptor_resolution.canonical_tool_name tool_name)
-          ~class_:Tool_result.Policy_rejection
-          ~effect_disposition:Tool_result.Proven_pre_effect
-          ~start_time:(Tool_timing.start ())
-          error))
+       (Tool_result.Failed
+          { effect_disposition = Tool_result.Proven_pre_effect
+          ; class_ = Tool_result.Policy_rejection
+          ; message = error
+          ; data_source = Tool_result.Explicit_data `Null
+          ; metadata = None
+          ; tool_name = Keeper_tool_descriptor_resolution.canonical_tool_name tool_name
+          ; duration_ms
+          }))
 
 let make_hooks
     ?preview
@@ -1201,7 +1204,7 @@ let make_hooks
            log_call_without_result ~disposition:None ~board_action_evidence:None
              ~wire_outcome:Tool_result.Error
              ~result_ready:true ~call_label:"rejected-call";
-           observe_refused_call ~tool_name ~error
+           observe_refused_call ~tool_name ~duration_ms ~error
          | Agent_core.Hooks.Cancelled_during_execution ->
            (* The call was cancelled while its handler ran: it ended with no
               result and its effect may or may not have happened. [Unknown]

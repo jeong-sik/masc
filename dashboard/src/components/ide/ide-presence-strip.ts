@@ -13,6 +13,7 @@ import {
   type KeeperPresenceSnapshot,
 } from './keeper-presence-store'
 import { parseAgentStatus } from '../../lib/agent-status'
+import { setupObservationRefresh } from '../../lib/observation-refresh'
 
 export interface ApiAgent {
   readonly name: string
@@ -75,11 +76,11 @@ export function unwrapEnvelope<T>(raw: unknown): T | undefined {
   return raw as T
 }
 
-async function fetchPresence(): Promise<KeeperPresenceSnapshot> {
+async function fetchPresence(signal: AbortSignal): Promise<KeeperPresenceSnapshot> {
   const [idePresence, agentsResponse, statusResponse] = await Promise.allSettled([
-    fetchIdePresence(),
-    get<unknown>('/api/v1/agents?limit=20'),
-    get<unknown>('/api/v1/status'),
+    fetchIdePresence({ signal }),
+    get<unknown>('/api/v1/agents?limit=20', { signal }),
+    get<unknown>('/api/v1/status', { signal }),
   ])
 
   // The IDE endpoint is the only source that has the runtime/branch and
@@ -146,9 +147,6 @@ function samePresence(a: KeeperPresenceSnapshot, b: KeeperPresenceSnapshot): boo
     })
 }
 
-/** How often the strip re-reads presence when the shell gives no cadence. */
-const DEFAULT_PRESENCE_POLL_MS = 10_000
-
 /**
  * The strip is mounted unconditionally in the IDE shell header, so it owns
  * the presence fetch for the whole IDE: every read lands in
@@ -159,35 +157,19 @@ const DEFAULT_PRESENCE_POLL_MS = 10_000
  */
 export function IdePresenceStrip({
   compact = false,
-  pollMs = DEFAULT_PRESENCE_POLL_MS,
-}: { readonly compact?: boolean; readonly pollMs?: number } = {}) {
+}: { readonly compact?: boolean } = {}) {
   const presenceStore = useMemo(() => createKeeperPresenceStore(globalPresenceSnapshot.value), [])
 
-  useEffect(() => {
-    let cancelled = false
-    let inFlight = false
-    const refresh = async () => {
-      // A slow server must not stack reads; the next tick picks it up.
-      if (inFlight) return
-      inFlight = true
-      try {
-        const snapshot = await fetchPresence()
-        // Every surface that reads presence re-renders on a write, so a
-        // poll that read the same presence leaves the signal alone.
-        if (!cancelled && !samePresence(globalPresenceSnapshot.value, snapshot)) {
-          globalPresenceSnapshot.value = snapshot
-        }
-      } finally {
-        inFlight = false
-      }
+  useEffect(() => setupObservationRefresh(async signal => {
+    const snapshot = await fetchPresence(signal)
+    // Unchanged observations leave every downstream presence consumer alone.
+    if (!signal.aborted && !samePresence(globalPresenceSnapshot.value, snapshot)) {
+      globalPresenceSnapshot.value = snapshot
     }
-    void refresh()
-    const timer = window.setInterval(() => { void refresh() }, pollMs)
-    return () => {
-      cancelled = true
-      window.clearInterval(timer)
+    if (!signal.aborted && snapshot.kind === 'disconnected' && snapshot.reason === 'fetch_failed') {
+      throw new Error('IDE presence is unavailable')
     }
-  }, [pollMs])
+  }, { topics: ['ide_presence'] }), [])
 
   useEffect(() => {
     const unsub = globalPresenceSnapshot.subscribe(() => {

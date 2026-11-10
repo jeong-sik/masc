@@ -301,6 +301,7 @@ describe('artifact library user flow', () => {
     vi.mocked(get).mockImplementationOnce(() => new Promise(r => { resolve = r }))
     const view = render(html`<${ArtifactDraftSessionProvider}><${ArtifactsSurface} /><//>`)
     expect(view.getByRole('status').textContent).toContain('목록을 불러오고')
+    await waitFor(() => expect(resolve).toBeTypeOf('function'))
     resolve?.({ artifacts: [], diagnostics: [] })
     expect(await view.findByText(/아직 게시된 아티팩트가 없습니다/)).toBeTruthy()
     vi.mocked(get).mockRejectedValueOnce(new Error('permission denied'))

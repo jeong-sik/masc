@@ -1541,9 +1541,15 @@ let test_unresolved_comment_name_cannot_become_a_recipient () =
    the reply is refused and nothing is stored. *)
 let test_direct_comment_cannot_address_a_non_reader () =
   Eio_main.run @@ fun _env ->
+  (* [latealias] stays unresolved for the first comment and resolves for the
+     second, so the two steps differ only in the name's state. *)
+  let resolved = ref false in
   let recipient_lookup =
     Recipient_lookup.make (fun candidate ->
-      Ok (Result.to_option (Board.Agent_id.parse (Recipient_lookup.Candidate.to_string candidate)))) in
+      let name = Recipient_lookup.Candidate.to_string candidate in
+      if String.equal name "latealias" && not !resolved
+      then Ok None
+      else Ok (Result.to_option (Board.Agent_id.parse name))) in
   with_board_workspace ~recipient_lookup @@ fun config ->
   Fun.protect
     ~finally:(fun () ->
@@ -1569,6 +1575,8 @@ let test_direct_comment_cannot_address_a_non_reader () =
           Alcotest.(check bool) "unresolved name stays a thread audience" true
             (comment.audience = Some Board.Thread_participants)
         | Error error -> fail (Board.show_board_error error));
+       (* The name resolves now, so the reply addresses it directly. *)
+       resolved := true;
        match
          Board_dispatch.add_comment
            ~reader:Masc_board_handlers.Board_access.Operator ~post_id

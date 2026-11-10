@@ -14,9 +14,11 @@
  (modules test_server_accounts)
  (libraries
   alcotest
+  bigstringaf
   eio
   eio.unix
   eio_main
+  httpun
   masc
   masc.auth
   masc.fs_compat

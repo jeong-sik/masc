@@ -80,12 +80,12 @@ val execution_cache : cached_surface
     fetch when this cache is still serving a successful
     snapshot. *)
 
-val execution_trust_cache : cached_surface
+val execution_trust_cache : state:Mcp_server.server_state -> cached_surface
 (** Cached execution-trust surface JSON.  The default
     [/api/v1/dashboard/execution-trust] route serves this last-good
-    surface after the first successful compute; the proactive refresh
-    loop keeps it current without making every dashboard poll pay the
-    receipt projection cost. *)
+    surface after the first successful compute. Each workspace scope gets a
+    separate cell; a retired read cannot replace the current scope's answer.
+    Original inputs and receipt-freshness deadlines keep it current. *)
 
 val broadcast_namespace_truth_ref :
   (Mcp_server.server_state -> unit) ref
@@ -221,10 +221,9 @@ val start_execution_trust_refresh_loop :
   sw:Eio.Switch.t ->
   clock:float Eio.Time.clock_ty Eio.Resource.t ->
   unit
-(** Forks the execution-trust cache refresh fiber.
-    Uses the existing dashboard execution-trust timeout and the shared
-    proactive-refresh circuit breaker; no additional operator env knob
-    is introduced for the interval. *)
+(** Fork the scope-bound execution-trust observer. A healthy read settles
+    until an affecting original input or its exact receipt-freshness deadline.
+    The existing timeout and failure retry policy remain. *)
 
 (** {1 HTTP route entries} *)
 

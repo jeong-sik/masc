@@ -467,7 +467,7 @@ let publish_execution_attempt_failure_message attempt message =
 
 let execution_trust_cache_key = "execution-trust:default"
 
-let execution_trust_cache : cached_surface =
+let create_execution_trust_cache () : cached_surface =
   Server_dashboard_http_cache.create_cached_surface
     (`Assoc
         [ "source", `String Dashboard_http_keeper_types.execution_trust_source
@@ -486,9 +486,27 @@ let execution_trust_cache : cached_surface =
 ;;
 
 let execution_trust_cache_mu = Stdlib.Mutex.create ()
+let execution_trust_cache_scope :
+    (Mcp_server.Workspace_scope_epoch.t * cached_surface) option ref = ref None
 
-let with_execution_trust_cache f =
-  Stdlib.Mutex.protect execution_trust_cache_mu f
+let execution_trust_cache_for_scope ~state (scope : Mcp_server.workspace_scope) =
+  Stdlib.Mutex.protect execution_trust_cache_mu (fun () ->
+    if not (Mcp_server.Workspace_scope_epoch.equal scope.epoch
+              (Mcp_server.workspace_scope state).epoch) then
+      (* A delayed old request must not retire the current worker's cell.
+         Its private answer may finish, but is never installed as current. *)
+      create_execution_trust_cache ()
+    else match !execution_trust_cache_scope with
+    | Some (epoch, cache)
+      when Mcp_server.Workspace_scope_epoch.equal epoch scope.epoch -> cache
+    | Some _ | None ->
+        let cache = create_execution_trust_cache () in
+        execution_trust_cache_scope := Some (scope.epoch, cache);
+        cache)
+;;
+
+let execution_trust_cache ~state =
+  execution_trust_cache_for_scope ~state (Mcp_server.workspace_scope state)
 ;;
 
 (** Invalidate the execution surface cache so the next
@@ -1596,7 +1614,7 @@ let start_transport_health_refresh_loop ~sw ~clock =
       broadcast_snapshot ())
 ;;
 
-let compute_execution_trust_json ~state ~sw ~clock =
+let compute_execution_trust_observation ~state ~config ~sw ~clock =
   (* NDT-OK: wall-clock is projection timing telemetry only; execution-trust
      content and routing do not branch on this value. *)
   let started_at = Unix.gettimeofday () in
@@ -1606,47 +1624,49 @@ let compute_execution_trust_json ~state ~sw ~clock =
     ?mono_clock:state.Mcp_server.mono_clock
     ~sw
     ~clock
-    ~config:(Mcp_server.workspace_config state)
+    ~config
     ~kind:Pool_work.Cpu ~name:__FUNCTION__
     (fun ~config ~sw:_ ->
-       Dashboard_http_keeper.execution_trust_dashboard_json config
-       |> Server_dashboard_http_core_cache.with_projection_diagnostics
+       let json, deadline = Dashboard_http_keeper.execution_trust_dashboard_observation config in
+       let json = Server_dashboard_http_core_cache.with_projection_diagnostics
             ~surface:"execution_trust"
             ~started_at
-            ~extra:[])
+            ~extra:[] json in
+       json, deadline)
 ;;
 
 let start_execution_trust_refresh_loop ~state ~sw ~clock =
-  let compute () =
-    with_execution_trust_cache (fun () ->
-      Server_dashboard_http_cache.mark_cached_surface_attempt execution_trust_cache);
-    compute_execution_trust_json ~state ~sw ~clock
-  in
-  Proactive_refresh.start
-    ~sw
-    ~clock
-    ~config:
-      { (Proactive_refresh.default_config
-           ~label:"execution_trust"
-           ~interval_s:Dashboard_http_keeper_types.execution_trust_refresh_interval_s)
-        with
-        timeout_s = Env_config_runtime.Dashboard.execution_trust_timeout_sec
-      ; on_failure =
-          Some
-            (fun failure ->
-              with_execution_trust_cache (fun () ->
+  Server_observation_refresh.start ~state ~sw ~clock ~surface:Execution_trust
+    ~generation:(fun ~scope ~sw ->
+      let cache = execution_trust_cache_for_scope ~state scope in
+      let announce () =
+        (* Source invalidation can be consumed before this read finishes.
+           Publish completion too, so the last-good cache is not mistaken for
+           the answer to that invalidation. Dashboard observations are output
+           only: the input decoder never feeds this back into the worker. *)
+        Dashboard_observation_commit.written
+          ~base_path:scope.config.base_path ~scope:`Workspace `Telemetry
+      in
+      { Server_observation_refresh.config =
+          { (Proactive_refresh.default_config
+               ~label:"execution_trust"
+               ~interval_s:Dashboard_http_keeper_types.execution_trust_refresh_interval_s)
+            with
+            timeout_s = Env_config_runtime.Dashboard.execution_trust_timeout_sec;
+            on_failure = Some (fun failure ->
                 Server_dashboard_http_cache.mark_cached_surface_error_message
-                  execution_trust_cache
-                  (Proactive_refresh.failure_message failure)))
-      ; warm_delay_s = 0.0
-      }
-    ~compute
-    ~on_result:
-      (fun json ->
-        with_execution_trust_cache (fun () ->
+                  cache (Proactive_refresh.failure_message failure);
+                announce ());
+            warm_delay_s = 0.0 }
+      ; compute = (fun () ->
+          Server_dashboard_http_cache.mark_cached_surface_attempt cache;
+          compute_execution_trust_observation ~state ~config:scope.config ~sw ~clock)
+      ; on_result = (fun (json, _) ->
           Server_dashboard_http_cache.mark_cached_surface_success
-            execution_trust_cache
-            json))
+            cache json;
+          announce ())
+      ; next_deadline = snd
+      })
 ;;
 
 let cached_dashboard_execution_http_response ~sw ~clock context =
@@ -1853,31 +1873,35 @@ let dashboard_execution_http_json ~state ~sw ~clock request =
 ;;
 
 let dashboard_execution_trust_http_json ~state ~sw ~clock _request =
+  let scope = Mcp_server.workspace_scope state in
+  let cache = execution_trust_cache_for_scope ~state scope in
+  let scoped_cache_key = execution_trust_cache_key ^ ":"
+    ^ Mcp_server.Workspace_scope_epoch.to_string scope.epoch in
   let attach_surface_envelope json =
     Server_dashboard_surface.attach
       ~surface:Dashboard_http_keeper_types.execution_trust_dashboard_surface
       ~source:Dashboard_http_keeper_types.execution_trust_source
-      ~cache_key:execution_trust_cache_key
+      ~cache_key:scoped_cache_key
       ~ttl_s:shell_surface_cache_ttl_s
       json
   in
   let has_success =
-    with_execution_trust_cache (fun () ->
-      Server_dashboard_http_cache.cached_surface_has_success execution_trust_cache)
+    Server_dashboard_http_cache.cached_surface_has_success cache
   in
   let json =
     if has_success
     then
-      with_execution_trust_cache (fun () ->
-        Server_dashboard_http_cache.cached_surface_json execution_trust_cache)
+      Server_dashboard_http_cache.cached_surface_json cache
     else
       Server_dashboard_http_cache.cached_surface_or_first_success_json
-        execution_trust_cache
-        ~cache_key:execution_trust_cache_key
+        cache
+        ~cache_key:scoped_cache_key
         ~ttl:shell_surface_cache_ttl_s
         ~clock
         ~timeout_sec:Env_config_runtime.Dashboard.execution_trust_timeout_sec
-        (Pool_work.cpu ~name:__FUNCTION__ (fun () -> compute_execution_trust_json ~state ~sw ~clock))
+        (Pool_work.cpu ~name:__FUNCTION__ (fun () ->
+           fst (compute_execution_trust_observation
+             ~state ~config:scope.config ~sw ~clock)))
   in
   attach_surface_envelope json
 ;;

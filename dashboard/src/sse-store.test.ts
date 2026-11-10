@@ -28,6 +28,7 @@ const refreshFusionRuns = vi.fn<() => void>(() => {})
 const invalidateDashboardCache = vi.fn<() => void>(() => {})
 const hydrateBoardSnapshot = vi.fn<(payload: unknown) => void>(() => {})
 const hydrateShellSnapshot = vi.fn<(payload: unknown, opts?: unknown) => void>(() => {})
+const hydrateShellRootSnapshot = vi.fn<(payload: unknown, completion?: boolean) => void>(() => {})
 const hydrateExecutionSnapshot = vi.fn<(payload: unknown) => void>(() => {})
 const invalidateExecutionSnapshotGeneration = vi.fn<(epoch: string, generation: number) => boolean>(() => true)
 const resetExecutionSnapshotGeneration = vi.fn<() => void>(() => {})
@@ -59,6 +60,7 @@ async function loadSseStore() {
     invalidateDashboardCache,
     hydrateBoardSnapshot,
     hydrateShellSnapshot,
+    hydrateShellRootSnapshot,
     hydrateExecutionSnapshot,
     invalidateExecutionSnapshotGeneration,
     resetExecutionSnapshotGeneration,
@@ -131,6 +133,7 @@ describe('setupServerPushReaction reconnect hydration', () => {
     invalidateDashboardCache.mockClear()
     hydrateBoardSnapshot.mockClear()
     hydrateShellSnapshot.mockClear()
+    hydrateShellRootSnapshot.mockClear()
     hydrateExecutionSnapshot.mockClear()
     invalidateExecutionSnapshotGeneration.mockClear()
     resetExecutionSnapshotGeneration.mockClear()
@@ -407,6 +410,7 @@ describe('setupServerPushReaction reconnect hydration', () => {
       },
     })
     expect(requestNamespaceTruthNow).not.toHaveBeenCalled()
+    expect(hydrateShellRootSnapshot).toHaveBeenCalledWith({ status: { project: 'default' } }, true)
 
   })
 

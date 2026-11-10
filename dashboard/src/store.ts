@@ -7,7 +7,7 @@ import { fetchKeeperDeletions, type KeeperDeletionInventory } from './api/keeper
 // SSE events and API responses update these signals;
 // subscribing components re-render automatically.
 
-import { signal, computed, batch, type ReadonlySignal } from '@preact/signals'
+import { signal, computed, batch, effect, type ReadonlySignal } from '@preact/signals'
 import type {
   Agent,
   Task,
@@ -40,15 +40,16 @@ import { normalizeKeepers } from './keeper-store-normalize'
 import { setArrayByKeyIfChanged } from './signal-utils'
 import { FetchScheduler } from './lib/fetch-scheduler'
 import { createReadRecovery } from './lib/read-recovery'
-import { ObservationPending, retainObservationReadFailure } from './lib/observation-refresh'
+import { ObservationPending, retainObservationReadFailure, setupObservationRefresh } from './lib/observation-refresh'
 import { isRecord, asString, asNumber } from './components/common/normalize'
-import { currentCanonicalDashboardActor, managedCredentialNeedsRevalidation, managedDashboardRefusal, setCanonicalDashboardActor } from './lib/dashboard-session-actor'
+import { currentCanonicalDashboardActor, dashboardActorRevision, managedCredentialNeedsRevalidation, managedDashboardRefusal, managedDashboardActorRevision, managedDashboardAuthRevision, setCanonicalDashboardActor } from './lib/dashboard-session-actor'
 import { sanitizeDashboardActorName } from './lib/dashboard-actor'
 import {
   captureDashboardCredentialOwner,
   ApiRequestError,
   dashboardCredentialOwnerIsCurrent,
   getStoredTokenMeta,
+  subscribeStoredTokenChanges,
   type DashboardCredentialOwner,
 } from './api/core'
 import { recoverFromRejectedCredential } from './api/dev-token'
@@ -567,8 +568,16 @@ export const tasksByStatus = computed(() => {
 // TTL values from config/constants.ts
 
 let inflightDashboardRefresh: Promise<void> | null = null
-let inflightShellRefresh: Promise<boolean> | null = null
-let inflightShellRefreshLight = false
+interface ShellRefreshFlight {
+  readonly light: boolean
+  readonly controller: AbortController
+  promise: Promise<boolean>
+  waiters: number
+  settled: boolean
+  stopAuthorityWatch: () => void
+}
+let inflightShellRefresh: ShellRefreshFlight | null = null
+let shellRootCompletionRevision = 0
 const shellReadRecovery = createReadRecovery()
 let inflightWorkspaceMessagesRefresh: Promise<void> | null = null
 let inflightWorkspaceMessagesRefreshProject: string | null = null
@@ -702,6 +711,8 @@ function hydrateDashboardBootstrap(
   executionRequestGeneration: number,
   goalOwnerAtStart: symbol,
   authOwner: DashboardCredentialOwner,
+  shellRootRevision: number,
+  namespaceRevision: number,
 ): void {
   if (!data.shell || bootstrapSliceError(data.shell)) {
     throw new Error('dashboard bootstrap shell slice unavailable')
@@ -710,19 +721,17 @@ function hydrateDashboardBootstrap(
     throw new Error('dashboard bootstrap execution slice unavailable')
   }
 
-  hydrateShellSnapshot(data.shell, { light: true, sentToken: authOwner.token, authOwner })
+  hydrateShellSnapshot(data.shell, { light: true, sentToken: authOwner.token, authOwner, rootRevision: shellRootRevision })
   hydrateExecutionSnapshot(data.execution, { requestGeneration: executionRequestGeneration })
 
-  if (data.namespace_truth && !bootstrapSliceError(data.namespace_truth)) {
+  if (data.namespace_truth && !bootstrapSliceError(data.namespace_truth)
+    && namespaceTruthReadRecovery.revision === namespaceRevision) {
     const normalized = normalizeNamespaceTruth(data.namespace_truth)
     namespaceTruth.value = normalized
     namespaceTruthError.value = null
     namespaceTruthInitializing.value = false
     namespaceTruthReadRecovery.succeeded()
-    serverStatus.value = mergeServerStatus(
-      serverStatus.value,
-      normalized.root.status ?? null,
-    )
+    hydrateShellRootSnapshot(normalized.root)
   }
   // A bootstrap may omit Goal slices. Such a response must not take ownership
   // away from an explicit refresh already loading the combined Goal snapshot.
@@ -783,11 +792,15 @@ export async function refreshDashboard(opts?: RefreshOptions): Promise<void> {
       executionError.value = null
       try {
         const authOwner = captureDashboardCredentialOwner()
+        const shellRootRevision = shellRootCompletionRevision
+        const namespaceRevision = namespaceTruthReadRecovery.revision
         hydrateDashboardBootstrap(
           await fetchDashboardBootstrap(),
           executionRequestGeneration,
           goalOwnerAtStart,
           authOwner,
+          shellRootRevision,
+          namespaceRevision,
         )
       } catch (bootstrapErr) {
         console.warn('[Dashboard] bootstrap refresh failed, falling back:', bootstrapErr)
@@ -906,11 +919,50 @@ function recoverFromRejectedShellAuth(
     })
 }
 
+type ShellRootSnapshot = Pick<DashboardShellResponse, 'generated_at' | 'counts' | 'configured_keepers'>
+  & { status?: ServerStatus | null }
+
+/** Shell and canonical project snapshots share this root projection. A push
+ * completion fences reads already in flight without claiming their auth or
+ * config/runtime-resolution slices were refreshed. */
+export function hydrateShellRootSnapshot(data: ShellRootSnapshot, completion = false): void {
+  if (completion) shellRootCompletionRevision += 1
+  const normalizedStatus = normalizeServerStatus(data.status, data.generated_at)
+  if (normalizedStatus) serverStatus.value = mergeServerStatus(serverStatus.value, normalizedStatus)
+  if (data.counts) {
+    const agents = asNumber(data.counts.agents)
+    const keepers = asNumber(data.counts.keepers)
+    const tasks = asNumber(data.counts.tasks)
+    const totalRuntimes = asNumber(data.counts.total_runtimes)
+      ?? (agents != null && keepers != null ? agents + keepers : undefined)
+    const configuredKeepers = asNumber(data.configured_keepers)
+    shellCounts.value = {
+      ...(agents != null ? { agents } : {}),
+      ...(tasks != null ? { tasks } : {}),
+      ...(keepers != null ? { keepers } : {}),
+      ...(totalRuntimes != null ? { total_runtimes: totalRuntimes } : {}),
+      ...(configuredKeepers != null ? { configured_keepers: configuredKeepers } : {}),
+    }
+  }
+}
+
 export function hydrateShellSnapshot(
   data: DashboardShellResponse,
-  opts: { light?: boolean; preserveAuth?: boolean; sentToken: string | null; authOwner?: DashboardCredentialOwner; recoverAuth?: boolean },
+  opts: { light?: boolean; preserveAuth?: boolean; sentToken: string | null; authOwner?: DashboardCredentialOwner; recoverAuth?: boolean; rootRevision?: number },
 ): boolean {
   const wantsLight = opts.light === true
+  const rootSuperseded = opts.rootRevision !== undefined && opts.rootRevision !== shellRootCompletionRevision
+  const status: unknown = data.status
+  const initializing = status === 'initializing' || (isRecord(status) && status.project === 'initializing')
+  if (rootSuperseded && initializing) {
+    // This read missed a completion we already accepted. Its synthetic auth
+    // and empty projections cannot replace it, and no second producer event
+    // is owed. Recover that one read after its current flight releases.
+    const revision = shellReadRecovery.revision
+    shellReadRecovery.waiting(() => { void refreshShell({ light: wantsLight, force: true }) })
+    queueMicrotask(() => { if (shellReadRecovery.revision === revision) shellReadRecovery.recover() })
+    return false
+  }
   const staleOwner = opts.authOwner !== undefined && !dashboardCredentialOwnerIsCurrent(opts.authOwner)
   const preserveAuth = opts.preserveAuth === true || staleOwner
   let applyAuth = !preserveAuth
@@ -944,24 +996,8 @@ export function hydrateShellSnapshot(
       && currentCanonicalDashboardActor() === nextActor
     if (applyAuth && opts.recoverAuth !== false) recoverFromRejectedShellAuth(normalizedAuth, opts.sentToken)
   }
-  const normalizedStatus = normalizeServerStatus(data.status, data.generated_at)
-  if (normalizedStatus) {
-    serverStatus.value = mergeServerStatus(serverStatus.value, normalizedStatus)
-  }
-  if (data.counts) {
-    const agents = data.counts.agents
-    const keepers = data.counts.keepers
-    const totalRuntimes = data.counts.total_runtimes
-      ?? (agents != null && keepers != null ? agents + keepers : undefined)
-    shellCounts.value = {
-      ...(agents != null ? { agents } : {}),
-      ...(data.counts.tasks != null ? { tasks: data.counts.tasks } : {}),
-      ...(keepers != null ? { keepers } : {}),
-      ...(totalRuntimes != null ? { total_runtimes: totalRuntimes } : {}),
-      ...(data.configured_keepers != null
-        ? { configured_keepers: data.configured_keepers }
-        : {}),
-    }
+  if (opts.rootRevision === undefined || opts.rootRevision === shellRootCompletionRevision) {
+    hydrateShellRootSnapshot(data)
   }
   if (applyAuth) {
     shellAuthSummary.value = normalizedAuth
@@ -977,41 +1013,105 @@ export function hydrateShellSnapshot(
   const admitted = !staleOwner && (opts.preserveAuth === true || applyAuth)
   lastShellRefreshAt = admitted ? Date.now() : 0
   if (admitted) {
-    const status: unknown = data.status
-    if (status === 'initializing' || (isRecord(status) && status.project === 'initializing')) {
+    if (initializing) {
       shellReadRecovery.waiting(() => { void refreshShell({ light: wantsLight, force: true }) })
     } else shellReadRecovery.succeeded()
   }
   return admitted
 }
 
-export async function refreshShell(opts?: RefreshOptions & { recoverAuth?: boolean }): Promise<boolean> {
+function retireShellRefresh(flight: ShellRefreshFlight): void {
+  flight.stopAuthorityWatch()
+  flight.controller.abort()
+  if (inflightShellRefresh === flight) {
+    inflightShellRefresh = null
+    lastShellRefreshAt = 0
+  }
+}
+
+/** A caller can leave a shared read without cancelling its other consumers. */
+function joinShellRefresh(flight: ShellRefreshFlight, signal?: AbortSignal): Promise<boolean> {
+  if (signal?.aborted || flight.controller.signal.aborted) {
+    if (!flight.settled && flight.waiters === 0) retireShellRefresh(flight)
+    return Promise.resolve(false)
+  }
+  flight.waiters += 1
+  return new Promise(resolve => {
+    let finished = false
+    const finish = (result: boolean) => {
+      if (finished) return
+      finished = true
+      signal?.removeEventListener('abort', abort)
+      flight.controller.signal.removeEventListener('abort', abort)
+      flight.waiters -= 1
+      if (!flight.settled && flight.waiters === 0) retireShellRefresh(flight)
+      resolve(result)
+    }
+    const abort = () => finish(false)
+    signal?.addEventListener('abort', abort, { once: true })
+    flight.controller.signal.addEventListener('abort', abort, { once: true })
+    void flight.promise.then(finish)
+  })
+}
+
+export async function refreshShell(opts?: RefreshOptions & { recoverAuth?: boolean; signal?: AbortSignal }): Promise<boolean> {
+  if (opts?.signal?.aborted) return false
   const wantsLight = opts?.light === true
   if (inflightShellRefresh) {
     // A forced refresh must observe state established by the caller before
     // this invocation (notably Settings clearing the browser token). Joining
     // an older request could otherwise hydrate auth from the pre-clear token
     // and falsely report that the cleared state was rechecked.
-    if (!opts?.force && (wantsLight || !inflightShellRefreshLight)) return inflightShellRefresh
-    await inflightShellRefresh
+    if (!opts?.force && (wantsLight || !inflightShellRefresh.light)) return joinShellRefresh(inflightShellRefresh, opts?.signal)
+    await joinShellRefresh(inflightShellRefresh, opts?.signal)
+    if (opts?.signal?.aborted) return false
     // Another waiter may have started the required follow-up refresh while
     // this caller resumed. Join it only when it fetches at least as much as
     // this caller asked for. A light follow-up does not satisfy a full
     // request, so a full waiter that joined one would resolve without ever
     // fetching the full shell surface it asked for.
-    if (inflightShellRefresh && (wantsLight || !inflightShellRefreshLight)) {
-      return inflightShellRefresh
+    if (inflightShellRefresh && (wantsLight || !inflightShellRefresh.light)) {
+      return joinShellRefresh(inflightShellRefresh, opts?.signal)
     }
   }
   if (!opts?.force && Date.now() - lastShellRefreshAt < SHELL_TTL_MS) return true
-  inflightShellRefreshLight = wantsLight
+  const flight: ShellRefreshFlight = {
+    light: wantsLight, controller: new AbortController(), promise: Promise.resolve(false), waiters: 0, settled: false,
+    stopAuthorityWatch: () => {},
+  }
+  inflightShellRefresh = flight
   shellReadRecovery.started()
-  inflightShellRefresh = (async () => {
-    const authOwner = captureDashboardCredentialOwner()
+  const authOwner = captureDashboardCredentialOwner()
+  const workspaceOwner = executionWorkspaceAuthority.peek()
+  const rootRevision = shellRootCompletionRevision
+  const unsubscribeToken = subscribeStoredTokenChanges(() => retireShellRefresh(flight))
+  const unsubscribeWorkspace = executionWorkspaceAuthority.subscribe(owner => {
+    if (owner !== workspaceOwner) retireShellRefresh(flight)
+  })
+  const unsubscribeActor = effect(() => {
+    dashboardActorRevision.value
+    managedDashboardActorRevision.value
+    managedDashboardAuthRevision.value
+    managedDashboardRefusal.value
+    if (!dashboardCredentialOwnerIsCurrent(authOwner)) retireShellRefresh(flight)
+  })
+  const stopAuthorityWatch = () => { unsubscribeToken(); unsubscribeWorkspace(); unsubscribeActor() }
+  flight.stopAuthorityWatch = stopAuthorityWatch
+  const current = () => !flight.controller.signal.aborted
+    && dashboardCredentialOwnerIsCurrent(authOwner) && executionWorkspaceAuthority.peek() === workspaceOwner
+  flight.promise = (async () => {
     try {
-      const data = await fetchDashboardShell({ light: wantsLight })
-      return hydrateShellSnapshot(data, { light: wantsLight, sentToken: authOwner.token, authOwner, recoverAuth: opts?.recoverAuth })
+      if (!current()) return false
+      const data = await fetchDashboardShell({ light: wantsLight, signal: flight.controller.signal })
+      if (!current()) return false
+      // Hydration may itself update the canonical actor. That response-owned
+      // transition is checked by hydrateShellSnapshot's credential CAS.
+      stopAuthorityWatch()
+      return hydrateShellSnapshot(data, { light: wantsLight, sentToken: authOwner.token, authOwner,
+        recoverAuth: opts?.recoverAuth, rootRevision })
     } catch (err) {
+      if (!current() || isAbortError(err)) return false
+      stopAuthorityWatch()
       if (dashboardCredentialOwnerIsCurrent(authOwner)) {
         setCanonicalDashboardActor(null)
         shellAuthSummary.value = null
@@ -1022,11 +1122,27 @@ export async function refreshShell(opts?: RefreshOptions & { recoverAuth?: boole
       console.warn('[Dashboard] shell fetch error:', err)
       return false
     } finally {
-      inflightShellRefresh = null
-      inflightShellRefreshLight = false
+      stopAuthorityWatch()
+      flight.settled = true
+      if (inflightShellRefresh === flight) inflightShellRefresh = null
     }
   })()
-  return inflightShellRefresh
+  return joinShellRefresh(flight, opts?.signal)
+}
+
+/** App owns initial boot separately; successful quiet observation does no HTTP. */
+export function setupShellObservation(): () => void {
+  const lifetime = new AbortController()
+  const stop = setupObservationRefresh(signal => refreshShell({ force: true, signal }), {
+    topics: ['runtime_resolved'], initial: false,
+  })
+  let previous = executionWorkspaceAuthority.peek()
+  const unsubscribe = executionWorkspaceAuthority.subscribe(authority => {
+    if (authority === previous) return
+    previous = authority
+    if (authority !== null) void refreshShell({ force: true, signal: lifetime.signal })
+  })
+  return () => { unsubscribe(); stop(); lifetime.abort() }
 }
 
 let executionPublicationEpoch: string | null = null
@@ -1361,6 +1477,7 @@ export function recoverShellReadDebt(authorityChanged = false): void {
 export function disposeExecutionReadRecovery(): void {
   executionReadRecovery.dispose()
   shellReadRecovery.dispose()
+  if (inflightShellRefresh) retireShellRefresh(inflightShellRefresh)
   executionScheduler.dispose()
 }
 

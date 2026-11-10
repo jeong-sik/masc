@@ -20,7 +20,7 @@ import { route, initRouter } from './router'
 import { requestNamespaceTruthNow, disposeNamespaceTruthScheduler } from './namespace-truth-store'
 import { cancelPendingServerPushRefreshes, registerGateRefresh, registerMissionRefresh, setupServerPushReaction } from './sse-store'
 import { initNotificationDelivery } from './notifications'
-import { refreshShell } from './store'
+import { refreshShell, setupShellObservation } from './store'
 import { connectDashboardObserver, disconnectDashboardObserver } from './dashboard-observer'
 import {
   ensureDevToken,
@@ -160,6 +160,8 @@ export function App() {
 
   useEffect(() => {
     let cancelled = false
+    const shellBoot = new AbortController()
+    const stopShellObservation = setupShellObservation()
 
     // Initialize hash router and compatible deep links
     initRouter()
@@ -173,7 +175,7 @@ export function App() {
     void ensureLoopbackAuth()
       .finally(() => {
         if (cancelled) return
-        void refreshShell({ light: true })
+        void refreshShell({ light: true, signal: shellBoot.signal })
         requestNamespaceTruthNow()
 
         connectDashboardObserver()
@@ -210,6 +212,8 @@ export function App() {
 
     return () => {
       cancelled = true
+      shellBoot.abort()
+      stopShellObservation()
       disconnectDashboardObserver()
       unsubscribeServerPush()
       unsubNotify()

@@ -1146,7 +1146,11 @@ let test_superseded_recall_pin_releases_only_after_history_retention () =
       (Yojson.Safe.from_string (Fs_compat.load_file pin) = `Null);
     let sweep () = List.iter (fun mode -> match Tool_blob_maintenance.run ~base_path
           ~scope:Server_tool_blob_scope.scope ~mode with
-      | Ok _ -> () | Error error -> Alcotest.fail (Tool_blob_maintenance.error_to_string error))
+      | Ok report ->
+        Printf.eprintf "PROBE c8 demand=%b deleted=%d candidates=%d unclassified=[%s]\n%!"
+          demand report.Tool_blob_maintenance.deleted report.candidates_recorded
+          (String.concat "; " report.unclassified)
+      | Error error -> Alcotest.fail (Tool_blob_maintenance.error_to_string error))
         [Tool_blob_maintenance.Observe_only; Delete_previous_candidates] in
     let present () = match Tool_blob_store.fetch store ~sha256:reference.sha256 with
       | Ok value -> Option.is_some value

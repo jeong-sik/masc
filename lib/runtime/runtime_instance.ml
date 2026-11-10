@@ -184,9 +184,8 @@ let materialize_binding ~construction (cfg : config) (b : binding) : (t, drop_re
            ; credential_admission
            ; candidate_backpressure = (
                let binding = match execution with
-                 | Runtime_execution.Agent_core config ->
-                     (match Agent_core.Binding_identity.of_provider_config
-                       ~transport:Agent_core.Binding_identity.Http config with
+                 | Runtime_execution.Agent_core sealed ->
+                     (match Runtime_account_access.api_binding_identity sealed with
                       | Ok binding -> Runtime_candidate_backpressure.Resolved_http_binding binding
                       | Error reason -> Runtime_candidate_backpressure.Http_binding_unavailable reason)
                  | Runtime_execution.Codex_app_server _
@@ -246,8 +245,9 @@ let partition_bindings (cfg : config) (bindings : binding list)
 
 let capabilities_for_runtime (rt : t) =
   match rt.execution with
-  | Runtime_execution.Agent_core provider_config ->
-    Llm_provider.Provider_config.capabilities_for_config_model provider_config
+  | Runtime_execution.Agent_core sealed ->
+    Llm_provider.Provider_config.capabilities_for_config_model
+      (Runtime_account_access.api_declaration sealed)
   | Runtime_execution.Codex_app_server _
   | Runtime_execution.Claude_code _
   | Runtime_execution.Antigravity_cli _

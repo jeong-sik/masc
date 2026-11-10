@@ -182,7 +182,8 @@ let validate_runtime_thinking_requests (runtimes : t list)
   =
   let refusal (r : t) : thinking_request_refusal option =
     match r.execution, Runtime_schema.thinking_request r.model with
-    | Runtime_execution.Agent_core provider_config, Some _ ->
+    | Runtime_execution.Agent_core sealed, Some _ ->
+      let provider_config = Runtime_account_access.api_declaration sealed in
       let request =
         Runtime_thinking_seed.apply (Runtime_thinking_seed.of_model r.model) provider_config
       in

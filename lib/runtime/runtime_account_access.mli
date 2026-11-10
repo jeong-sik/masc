@@ -96,7 +96,8 @@ val declared_muse_home : declared muse_authorized -> string
     Antigravity and Vibe start on accounts of the host, not of a person. The
     credential of Antigravity is a copy in the setup registry, which has no
     owner, and Vibe reads the configuration of the host user. An API provider
-    of the runtime table sends with the credential its operator declared. A
+    of the runtime table sends with the credential its operator declared, and
+    so do the requests outside the table that {!host_client} names. A
     multi-account process shares no account of its host (plans D3b and D4),
     so only a single-user process starts them. *)
 
@@ -106,6 +107,16 @@ type host_client =
   | Vibe
   | Api_provider
       (** An Agent_core Runtime of the runtime table: see {!api_sealed}. *)
+  | Model_list
+      (** A model-list or serving-window request of a setup connection, which
+          sends with the credential its operator declared (plan D4b). *)
+  | Files_api
+      (** The provider Files API of the [masc_file_*] tools, called with
+          [DEEPSEEK_API_KEY] (plan D4b). *)
+  | Replacement_catalog
+      (** The exact-output targets of the full replacement catalog
+          [AGENT_CORE_MODEL_CATALOG] names, which carries its own providers
+          and their credentials (plan D4b). *)
 
 (** A start of a host client that the published access allows. Only
     {!authorize_host} makes one. *)

@@ -369,7 +369,10 @@ val exact_output_resolver_catalog :
     {!exact_output_target_source} decides: the full replacement
     [AGENT_CORE_MODEL_CATALOG] names, or the embedded catalog with
     {!exact_output_targets} as its targets, less every slot rule 3 leaves out
-    for [exact_output_lane_decls]. Boot, every config commit, the save preview
+    for [exact_output_lane_decls]. The replacement carries the credentials of
+    its own providers, so a process that
+    {!Runtime_account_access.authorize_host} refuses gets the refusal for it
+    too (plan D4b). Boot, every config commit, the save preview
     and the on-disk rebuild check read this one derivation, and pass
     [catalog_exact_slots.emptied_lane_ids] as the lanes excused from the
     required set. *)

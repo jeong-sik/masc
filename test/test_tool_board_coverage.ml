@@ -1601,7 +1601,15 @@ let test_committed_board_projection_failure_reaches_callers_as_completed () =
   let activity_path = Filename.concat (Workspace.masc_dir config) Activity_graph.store_dirname in
   Out_channel.with_open_bin activity_path (fun channel -> output_string channel "blocked activity store");
   let name = Tool_name.Board_name.to_string Tool_name.Board_name.Board_post in
-  let arguments = `Assoc ["content", `String "A committed post survives projection failure"] in
+  (* Posting defaults to internal, and only a Public post reaches the activity
+     graph (mcp_tool_runtime_board.ml, public_created_post). This test needs the
+     projection attempt to happen and fail, so the post asks to be Public. *)
+  let arguments =
+    `Assoc
+      [ ("content", `String "A committed post survives projection failure")
+      ; ("visibility", `String "public")
+      ]
+  in
   let request = Mcp_server_eio_call_request.decode
       (Some (`Assoc ["name", `String name; "arguments", arguments])) |> Result.get_ok in
   let observed = ref None and dispatches = ref 0 in
@@ -1678,10 +1686,15 @@ let test_board_activity_does_not_complete_tasks () =
     result
   in
   let id result = Yojson.Safe.Util.(Tool_result.data result |> member "id" |> to_string) in
+  (* Only a Public post reaches the activity graph (mcp_tool_runtime_board.ml
+     public_created_post / public_post). Posting defaults to internal, so this
+     test asks for Public where it counts Board actions as observable. *)
   let posted = runtime "masc_board_post"
-    (make_args ["content", `String "A Board post is not a Task"]) |> id in
+    (make_args ["content", `String "A Board post is not a Task";
+                "visibility", `String "public"]) |> id in
   let other_post = dispatch_result "masc_board_post"
-    (make_args ["author", `String "other-author"; "content", `String "Discussion target"]) in
+    (make_args ["author", `String "other-author"; "content", `String "Discussion target";
+                "visibility", `String "public"]) in
   Alcotest.(check bool) "other author's post created" true (Tool_result.is_success other_post);
   let post_id = id other_post in
   ignore (runtime "masc_board_comment"
@@ -3385,6 +3398,16 @@ let test_native_board_evidence_survives_lost_output ~cancelled () =
   Eio.Switch.run @@ fun sw ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
+  (* [cleanup] wipes the ledger directory, but the index keeps a store handle
+     per ledger directory in this process. A handle left from an earlier test
+     still holds cursor rows whose continuity file is gone, and this test's
+     first read then raises Continuity_unavailable instead of starting a fresh
+     generation. Drop the handle so the read opens the wiped directory. *)
+  Keeper_tool_call_index.forget_for_ledger
+    ~ledger_dir:
+      (Filename.concat
+         (Workspace.masc_dir (Workspace.default_config _test_base_path))
+         "tool_calls");
   let module Log = Keeper_tool_call_log in
   Keeper_registry.For_testing.clear ();
   Fun.protect ~finally:(fun () ->

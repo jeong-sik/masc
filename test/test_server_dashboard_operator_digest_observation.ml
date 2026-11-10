@@ -137,8 +137,9 @@ let with_runtime f = Eio_main.run (fun env ->
   let previous_clock = Eio_context.get_clock_opt () in
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let base_path = Masc_test_deps.setup_test_workspace () in
-  let clock = Eio_mock.Clock.make () in
-  Eio_mock.Clock.set_time clock (Unix.gettimeofday ());
+  let mock_clock = Eio_mock.Clock.make () in
+  let clock = (mock_clock :> float Eio.Time.clock_ty Eio.Resource.t) in
+  Eio_mock.Clock.set_time mock_clock (Unix.gettimeofday ());
   Fun.protect ~finally:(fun () ->
     Eio_context.restore_state previous_context;
     (match previous_clock with Some clock -> Time_compat.set_clock clock | None -> Time_compat.clear_clock ());
@@ -152,9 +153,9 @@ let with_runtime f = Eio_main.run (fun env ->
           let state = Mcp_server.For_testing.create_state ~base_path in
           let scope = Mcp_server.workspace_scope state in
           ignore (Workspace.init scope.config ~agent_name:None);
-          f ~env ~sw ~clock ~state ~scope)))))
+          f ~env ~sw ~clock ~mock_clock ~state ~scope)))))
 
-let test_actual_cold_read_and_source_deadline () = with_runtime (fun ~env ~sw ~clock ~state ~scope ->
+let test_actual_cold_read_and_source_deadline () = with_runtime (fun ~env ~sw ~clock ~mock_clock ~state ~scope ->
   let cold = match Server_dashboard_http_core_operator_digest_http.operator_digest_http_json
       ~state ~sw ~clock (Httpun.Request.create `GET "/api/v1/operator/digest") with
     | Ok json -> json | Error _ -> fail "cold Digest read failed" in
@@ -194,7 +195,7 @@ let test_actual_cold_read_and_source_deadline () = with_runtime (fun ~env ~sw ~c
   check bool "retention does not invent a healthy refresh interval" true
     Yojson.Safe.Util.(initial |> member "retention" |> member "background_refresh_interval_s" = `Null);
   Eio.Fiber.yield ();
-  check bool "healthy empty Digest has no timer" false (Eio_mock.Clock.try_advance clock);
+  check bool "healthy empty Digest has no timer" false (Eio_mock.Clock.try_advance mock_clock);
   let now = Time_compat.now () in
   let confidence = match Operator_judgment.Confidence.of_float 0.91 with
     | Some value -> value | None -> fail "invalid fixture confidence" in
@@ -210,15 +211,15 @@ let test_actual_cold_read_and_source_deadline () = with_runtime (fun ~env ~sw ~c
   let owner = Owner.owner_for_scope ~state scope in
   check (option (float 0.0)) "same read owns the exact recorded deadline"
     (Some judgment.fresh_until_unix) (Owner.next_deadline_unix owner);
-  Eio_mock.Clock.set_time clock judgment.fresh_until_unix;
+  Eio_mock.Clock.set_time mock_clock judgment.fresh_until_unix;
   let expired = ready_after changed in
   check bool "the actual deadline retires the old recommended action" true
     Yojson.Safe.Util.(expired |> member "recommended_actions" = `List []);
   Eio.Fiber.yield ();
-  check bool "settled expiry and own output leave no cadence" false (Eio_mock.Clock.try_advance clock))
+  check bool "settled expiry and own output leave no cadence" false (Eio_mock.Clock.try_advance mock_clock))
 
 let test_parameter_cache_is_bound_to_the_original_workspace () =
-  with_runtime (fun ~env:_ ~sw ~clock ~state ~scope ->
+  with_runtime (fun ~env:_ ~sw ~clock ~mock_clock:_ ~state ~scope ->
     let other_base = Masc_test_deps.setup_test_workspace () in
     Fun.protect ~finally:(fun () -> Masc_test_deps.cleanup_test_workspace other_base) (fun () ->
       let other = Workspace.default_config other_base in
@@ -259,7 +260,7 @@ type partial_surface = Mission | Digest
 type expected_frame = Partial_frame | Ready_frame
 
 let test_actual_partial_retry_after_quiet_repair surface =
-  with_runtime (fun ~env ~sw ~clock ~state ~scope ->
+  with_runtime (fun ~env ~sw ~clock ~mock_clock ~state ~scope ->
     let event_type, state_field, sequence_field, retry_interval = match surface with
       | Mission -> "mission_snapshot", "mission_observation_state", "mission_publication_sequence", 120.0
       | Digest -> "operator_digest", "digest_observation_state", "digest_publication_sequence",
@@ -344,7 +345,7 @@ let test_actual_partial_retry_after_quiet_repair surface =
     Sys.remove broken;
     let rec advance_when_registered () =
       Eio.Fiber.yield ();
-      if not (Eio_mock.Clock.try_advance clock) then advance_when_registered () in
+      if not (Eio_mock.Clock.try_advance mock_clock) then advance_when_registered () in
     advance_when_registered ();
     let recovered = frame_after partial Ready_frame in
     check (float 0.) "recovery used the existing failure retry deadline"
@@ -355,16 +356,16 @@ let test_actual_partial_retry_after_quiet_repair surface =
       (diagnostic recovered "read_error" = `Null);
     check bool "recovered source still retains its original active judgment" true
       Yojson.Safe.Util.(recovered |> member "recommended_actions" = `List [action]);
-    Eio_mock.Clock.set_time clock judgment.fresh_until_unix;
+    Eio_mock.Clock.set_time mock_clock judgment.fresh_until_unix;
     let expired = frame_after recovered Ready_frame in
     check bool "the independent actual authority deadline is still observed" true
       Yojson.Safe.Util.(expired |> member "recommended_actions" = `List []);
     Eio.Fiber.yield ();
     check bool "after repair and actual expiry no healthy timer remains" false
-      (Eio_mock.Clock.try_advance clock))
+      (Eio_mock.Clock.try_advance mock_clock))
 
 let test_execution_partial_read_retries_after_quiet_repair () =
-  with_runtime (fun ~env ~sw ~clock ~state ~scope ->
+  with_runtime (fun ~env ~sw ~clock ~mock_clock ~state ~scope ->
     let module Execution = Server_dashboard_http_execution_surfaces in
     let module Attempt = Execution.For_testing in
     let owner = Attempt.owner_for_state ~state in
@@ -434,7 +435,7 @@ let test_execution_partial_read_retries_after_quiet_repair () =
     Sys.remove broken;
     let rec advance_when_registered () =
       Eio.Fiber.yield ();
-      if not (Eio_mock.Clock.try_advance clock) then advance_when_registered () in
+      if not (Eio_mock.Clock.try_advance mock_clock) then advance_when_registered () in
     advance_when_registered ();
     let rec complete_frame () =
       let payload = Eio.Stream.take frames in
@@ -462,10 +463,10 @@ let test_execution_partial_read_retries_after_quiet_repair () =
       (Server_observer_scope.instance_id scope)
       Yojson.Safe.Util.(recovered |> member "observer_instance_id" |> to_string);
     Eio.Fiber.yield ();
-    check bool "quiet recovered Execution has no healthy timer" false (Eio_mock.Clock.try_advance clock))
+    check bool "quiet recovered Execution has no healthy timer" false (Eio_mock.Clock.try_advance mock_clock))
 
 let test_execution_lifecycle_patch_preserves_typed_namespace_outcome () =
-  with_runtime (fun ~env:_ ~sw:_ ~clock:_ ~state ~scope ->
+  with_runtime (fun ~env:_ ~sw:_ ~clock:_ ~mock_clock:_ ~state ~scope ->
     let module Execution = Server_dashboard_http_execution_surfaces in
     let module Attempt = Execution.For_testing in
     let owner = Attempt.owner_for_state ~state in

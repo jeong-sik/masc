@@ -511,11 +511,24 @@ let test_cleanup_mixed_pending_and_refused_is_post_effect () =
   flush ();
   let repair_source = ref None in
   with_blocked_reactions (fun () ->
-    (* The hook runs after persistence unlock, so this is a real subsequent
-       source read rather than a reentrant loader under the write mutex. *)
+    (* The hook runs after persistence unlock. A real subsequent append CAS
+       observes the damaged source while the deletion model stays pending. *)
     Board_dispatch.set_board_sse_hook (function
       | Board_dispatch.Post_changed _ ->
-        repair_source := Some (refuse_posts_source ())
+        let active = store () in
+        let path = Board.persist_path active in
+        let original = In_channel.with_open_bin path In_channel.input_all in
+        Out_channel.with_open_gen [Open_wronly; Open_append; Open_binary] 0o600 path
+          (fun out -> output_string out "{invalid-post-source\n");
+        (match Board_dispatch.create_post ~author:"source-refusal-probe"
+           ~content:"must not append to a changed source" ~post_kind:Board.Human_post () with
+         | Error _ -> ()
+         | Ok _ -> Alcotest.fail "changed source unexpectedly accepted a probe post");
+        Alcotest.(check bool) "append CAS actually records source refusal" true
+          (Result.is_error (Board.with_persist_lock active (fun () ->
+             Board.require_posts_source_readable active)));
+        repair_source := Some (fun () ->
+          Out_channel.with_open_bin path (fun out -> output_string out original))
       | _ -> ());
     let result =
       Board_tool.handle_tool ~reader:Masc_board_handlers.Board_access.Operator ~result_boundary:Tool_output.Sent_to_client "masc_board_cleanup"
@@ -535,6 +548,14 @@ let test_cleanup_mixed_pending_and_refused_is_post_effect () =
   (match !repair_source with
    | Some repair -> repair ()
    | None -> Alcotest.fail "first applied deletion did not reach the corruption hook");
+  Board.reset_global_for_test ();
+  Board_dispatch.reset_for_test ();
+  Result.get_ok (Board_dispatch.init_jsonl
+    ~base_path:(Env_config_core.base_path ())
+    ~recipient_lookup:Recipient_lookup.none_declared ());
+  check_post_deleted "fresh store retains the applied parent deletion" pending_id;
+  Alcotest.(check bool) "fresh store retains the refused post" true
+    (Result.is_ok (Board_dispatch.get_post ~reader:Masc_board_handlers.Board_access.Operator ~post_id:refused_id))
   flush ()
 
 let () =

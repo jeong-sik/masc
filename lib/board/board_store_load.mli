@@ -1,4 +1,5 @@
-(** Quiescent startup loaders. Pending deletion models refuse replacement.
+(** Quiescent startup loaders. Posts, comments, votes and reactions refuse
+    model replacement while deletion work is pending.
     Counts describe accepted physical rows,
     including duplicate identities. These are not live reload/admission APIs. *)
 val load_persisted_posts : Board_types.store -> (int, string * exn) result

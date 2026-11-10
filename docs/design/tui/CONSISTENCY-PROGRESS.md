@@ -324,6 +324,8 @@ The baseline is retained in
 [#51023](https://github.com/jeong-sik/masc/pull/51023) gives those four children
 short KO/EN titles beneath the existing family strip. Exceptional connection
 evidence and each body's own missing/failed/retained reading remain separate.
+Long connection evidence uses Board's existing bounded typed state/gap summary,
+now shared rather than copied, so the failure is not lost beyond the frame.
 Clients still derives row ages from its roster observation; channel state and
 binding decisions are unchanged.
 

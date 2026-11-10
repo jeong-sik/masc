@@ -349,11 +349,16 @@ val reading_connection_notice : Masc_tui_types.state -> string option
 
 val feature_child_heading : Masc_tui_types.state -> cols:int -> title:string -> string
 (** Short identity for a Features child, followed by exceptional connection
-    evidence. The family strip supplies its parent; no clock or Runtime menu
+    evidence. Overflow uses the bounded typed summary and preserves observer
+    loss. The family strip supplies its parent; no clock or Runtime menu
     competes with the child name. Read notices remain owned by each body. *)
 
 val compact_connection_badge : Masc_tui_types.state -> width:int -> string * string option
 (** A narrow textual state and any longer status details that remain to show. *)
+
+val reading_connection_summary : width:int -> Masc_tui_types.state -> string
+(** Bounded connection/read state, retaining observer loss as a separate fact.
+    Shared by child headings and Board's existing overflow fallback. *)
 
 val badge_row : cols:int -> lead:string -> label:string -> badge:string -> string
 (** A header row of [lead], a bracketed [label] and [badge] for a surface drawn

@@ -126,7 +126,8 @@ let with_fixture f =
     (* Every answer comes at once, far inside the 90 s flush bound. *)
     let handler h2_reqd = gateway
       ~stream_end:(Masc.Http_h2_stream.Stream_end.create ~stream_sw:sw ~clock:(Eio.Stdenv.clock env)
-        ~stalled_after_s:Server_mcp_transport_http_headers.sse_stalled_after_s h2_reqd)
+        ~stalled_after_s:Server_mcp_transport_http_headers.sse_stalled_after_s
+        ~request:(H2.Reqd.request h2_reqd) h2_reqd)
       (`Tcp (Eio.Net.Ipaddr.V4.loopback, 54321)) h2_reqd in
     let h1 headers path =
       let token = List.assoc_opt "authorization" headers |> Option.map (fun value ->

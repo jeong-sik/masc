@@ -318,7 +318,8 @@ let test_the_guide_over_h2 () =
             gateway
               ~stream_end:
                 (Masc.Http_h2_stream.Stream_end.create ~stream_sw:sw ~clock:(Eio.Stdenv.clock env)
-                   ~stalled_after_s:Server_mcp_transport_http_headers.sse_stalled_after_s h2_reqd)
+                   ~stalled_after_s:Server_mcp_transport_http_headers.sse_stalled_after_s
+                   ~request:(H2.Reqd.request h2_reqd) h2_reqd)
               (`Tcp (Eio.Net.Ipaddr.V4.loopback, 54321)) h2_reqd
           in
           let get target = exchange_h2 ~handler target in

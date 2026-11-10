@@ -182,6 +182,7 @@ let http2_dashboard_asset_response path =
           ~stream_sw:sw
           ~clock:(Eio.Stdenv.clock env)
           ~stalled_after_s:Server_mcp_transport_http_headers.sse_stalled_after_s
+          ~request:(H2.Reqd.request h2_reqd)
           h2_reqd
       in
       let reqd =

@@ -3137,7 +3137,7 @@ let prepare_recall_program ~keepers_dir ~transaction_id ~initial recipes =
 
 let publish_recall_program ~keepers_dir ~transaction_id ~initial recipes =
   let anchor,source,program=prepare_recall_program ~keepers_dir ~transaction_id ~initial recipes in
-  Current.apply_program ~pass:Masc.Keeper_memory_commit_pass.Program_publish ~keepers_dir ~keeper_id:"keeper" ~now:400. ~anchor ~source
+  Current.apply_program ~pass:Masc.Keeper_memory_commit_pass.Durable ~keepers_dir ~keeper_id:"keeper" ~now:400. ~anchor ~source
     ~validate_source:(fun () -> Ok ()) program |> require_ok
 
 let recall_program_step ?(program_revision=2) ~transaction_id stage_index relation from_fact into_fact : Current.successor_program_step =
@@ -3310,7 +3310,7 @@ let test_successor_recall_program_pending_journal_recovers () =
      recall_program_recipe [b] ~claims:[c] ~dropped:[recall_program_drop b] ~revisions:[recall_program_revision b c]] in
   let journal=Current.journal_path_for_keepers_dir ~keepers_dir ~keeper_id:"keeper" in
   let birth=Fs_compat.load_file journal and callbacks=ref 0 in
-  let committed=Current.For_testing.apply_program_with_publication_io ~pass:Masc.Keeper_memory_commit_pass.Program_publish ~keepers_dir ~keeper_id:"keeper" ~now:400.
+  let committed=Current.For_testing.apply_program_with_publication_io ~pass:Masc.Keeper_memory_commit_pass.Durable ~keepers_dir ~keeper_id:"keeper" ~now:400.
     ~anchor ~source ~validate_source:(fun () -> Ok ())
     ~write_snapshot:Fs_compat.save_file_atomic_strict_staged ~sync_snapshot:(fun _ -> Error "fixture sync remains unconfirmed")
     ~before_journal:(fun () -> Fs_compat.invalidate_cached_writer journal;Sys.remove journal;Unix.mkdir journal 0o700)

@@ -2825,9 +2825,10 @@ let render_keeper_axes (state : state) =
       state.keeper_list_scroll
   in
   let entries_window = List.take window_entries (List.drop scroll_offset entries) in
+  (* Strip visual SGR before adding pressable marks: those marks also end in
+     [m] and must reach the frame presenter. *)
   let selected_line text =
-    box_line_styled buf cols ~style:(Theme.sidebar_selection ())
-      (Masc_tui_theme.strip_sgr text) in
+    box_line_styled buf cols ~style:(Theme.sidebar_selection ()) text in
   List.iter
     (function
       | Keeper_world as entry ->
@@ -2847,7 +2848,7 @@ let render_keeper_axes (state : state) =
             ; right = Message_layout.pad_left world.right grid.mem_cells }).text in
           let text = pressable Press_keeper_world (fit_width text inner) in
           if keeper_entry_selected stop entry then
-            selected_line text
+            selected_line (Masc_tui_theme.strip_sgr text)
           else box_line buf cols text
       | Keeper_group_heading (group, count) as entry ->
           let text =
@@ -2862,7 +2863,7 @@ let render_keeper_axes (state : state) =
                   ~pulse:(grid_group_pulse state grid list_reading group) title
           in
           if keeper_entry_selected stop entry then
-            selected_line text
+            selected_line (Masc_tui_theme.strip_sgr text)
           else box_line buf cols text
       | Keeper_display_row (position, row) as entry ->
           if wall_separator position then box_line buf cols (Theme.recede () ^ draw_hline inner ^ Ansi.reset);
@@ -2890,7 +2891,7 @@ let render_keeper_axes (state : state) =
           in
           let emit text =
             if selected then
-              selected_line (press text)
+              selected_line (press (Masc_tui_theme.strip_sgr text))
             else box_line buf cols (press text)
           in
           (match primary.motion with

@@ -7436,3 +7436,5 @@
 (include stanzas/test_server_skill_missing_on_disk.inc)
 
 (include stanzas/test_telemetry_source_writes.inc)
+
+(include stanzas/test_server_dashboard_keeper_decisions_current.inc)

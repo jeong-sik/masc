@@ -276,7 +276,17 @@ val start_post_ready_owner_lanes :
 
 (** {1 Main Entry Point} *)
 
-(** [on_ready] runs once the owner is ready and the HTTP listener is bound.
+(** Judges the account mode of [base_path] ({!Authz_boot_mode_read.boot}) and
+    runs what it names. A single user gets the owner state and the routes of
+    [make_routes]. An active multi-account installation gets
+    {!Server_accounts.run} on the same [address] and [port], with its own
+    route table: no owner state, no Keeper and no route of [make_routes] is
+    started for it, and [runtime_sw], [accept_store_quarantine] and the
+    handler makers are not used. A judgment that stops the boot, and an
+    account server that does not start, raise [Env_config_core.Config_error].
+
+    [on_ready] runs once the owner is ready and the HTTP listener is bound;
+    for the account server, once its listener is bound.
     It is not called when initialization fails before either boundary.
     [address] is the bind host already read by
     {!Server_bootstrap_http.parse_bind_address}. *)

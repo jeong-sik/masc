@@ -103,6 +103,7 @@ type keeper_row_outcome =
   | Keeper_unread of Keeper_snapshot_unread.t
 
 let keepers_json
+      ~read_policy
       ~keeper_names
       ?(include_recent_activity = false)
       ?(lightweight = false)
@@ -214,7 +215,7 @@ let keepers_json
                     let runtime_trust =
                       let t_trust = Time_compat.now () in
                       let result =
-                        try compact_keeper_runtime_trust_json ~config ~meta with
+                        try compact_keeper_runtime_trust_json ~read_policy ~config ~meta with
                         | Eio.Cancel.Cancelled _ as e -> raise e
                         | exn ->
                           Log.Dashboard.warn
@@ -299,7 +300,7 @@ let keepers_json
                     in
                     let t_audit = Time_compat.now () in
                     let audit_json =
-                      Operator_control_snapshot_tool_audit.cached_tool_audit_json
+                      Operator_control_snapshot_tool_audit.tool_audit_json ~read_policy
                         config
                         meta
                     in
@@ -359,7 +360,7 @@ let keepers_json
                     let runtime_trust =
                       let t_trust = Time_compat.now () in
                       let result =
-                        try compact_keeper_runtime_trust_json ~config ~meta with
+                        try compact_keeper_runtime_trust_json ~read_policy ~config ~meta with
                         | Eio.Cancel.Cancelled _ as e -> raise e
                         | exn ->
                           Log.Dashboard.warn
@@ -686,6 +687,7 @@ let snapshot_json
                 if initialized && include_keepers
                 then
                   keepers_json
+                    ~read_policy
                     ~keeper_names:keeper_names_listing
                     ~lightweight:lightweight_summary
                     ~include_recent_activity:(not lightweight_summary)

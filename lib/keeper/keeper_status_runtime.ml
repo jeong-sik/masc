@@ -397,11 +397,11 @@ let keeper_recoverable ~(health_state : keeper_health) ~next_action_path =
       | Recover -> true
       | Probe | Direct_message -> false)
 
-let keeper_diagnostic_json
+let keeper_diagnostic_observation
     ~(meta : keeper_meta)
     ~(phase : Keeper_state_machine.phase option)
     ~(history_items : Yojson.Safe.t list)
-    ~(now_ts : float) : Yojson.Safe.t =
+    ~(now_ts : float) : Dashboard_projection_read.observation =
   let keepalive_running = keepalive_running_of_phase phase in
   let quiet_reason = classify_keeper_quiet_reason ~meta ~keepalive_running ~now_ts in
   let health_state = keeper_health_state ~meta ~phase in
@@ -413,7 +413,7 @@ let keeper_diagnostic_json
      field. Do not reinterpret the display-oriented proactive reason as an
      error classifier. *)
   let last_error = `Null in
-  `Assoc
+  let json = `Assoc
     [
       ("health_state", `String (keeper_health_to_string health_state));
       ( "quiet_reason",
@@ -429,6 +429,20 @@ let keeper_diagnostic_json
       ("last_error", last_error);
       ("keepalive_running", `Bool keepalive_running);
     ]
+  in
+  let next_deadline_unix = match quiet_reason with
+    | Some Starting_up ->
+        (match Workspace_resilience.Time.parse_iso8601_opt meta.created_at with
+         | Some created when created > 0.0 ->
+             let deadline = Float.next_after (created +. agent_staleness_threshold_s) infinity in
+             if Float.is_finite deadline && deadline > now_ts then Some deadline else None
+         | Some _ | None -> None)
+    | Some (Proactive_disabled | Keepalive_not_running | Never_started) | None -> None
+  in
+  {json; next_deadline_unix; completeness = Dashboard_projection_read.Complete}
+
+let keeper_diagnostic_json ~meta ~phase ~history_items ~now_ts =
+  (keeper_diagnostic_observation ~meta ~phase ~history_items ~now_ts).json
 
 (** Derive pipeline stage directly from the Keeper lifecycle phase. *)
 let pipeline_stage_of_phase (phase : Keeper_state_machine.phase) : string =

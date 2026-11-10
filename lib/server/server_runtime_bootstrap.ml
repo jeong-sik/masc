@@ -552,7 +552,7 @@ let create_server_state ~sw ~base_path ?input_base_path ~clock ~mono_clock ~net
   Workspace_dataset_event.install_store_observers ();
   Server_lane_inventory.install ();
   Server_skill_usage_runtime.install ();
-  Server_memory_health_broadcast.install ~sw ~config;
+  Server_memory_health_broadcast.install ~sw ~mono_clock ~config;
   Server_dashboard_http_keeper_memory_health.install ();
   (* The harness health read is cached per workspace and query window. The
      verdict store belongs to the workspace that wrote the record, so its

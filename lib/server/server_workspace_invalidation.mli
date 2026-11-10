@@ -1,3 +1,12 @@
+module Make (Key : Map.OrderedType) : sig
+  val start :
+    sw:Eio.Switch.t -> mono_clock:_ Eio.Time.Mono.t ->
+    publish:(Key.t -> unit) -> (Key.t -> unit)
+  (** Coalesce each typed key independently, preserving a change that arrives
+      during its publication. Enqueue never waits for fanout. A failed
+      publication retains its key and retries; successful idle has no timer. *)
+end
+
 val start :
   sw:Eio.Switch.t -> mono_clock:_ Eio.Time.Mono.t ->
   publish:(base_path:string -> unit) -> (base_path:string -> unit)

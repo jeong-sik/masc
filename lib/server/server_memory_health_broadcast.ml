@@ -14,8 +14,14 @@ let rec physical dir =
 
 (* The two directories are spelled from [config.base_path] the way the
    writers spell them, then resolved. *)
-let install ~sw ~(config : Workspace.config) =
+let install ~sw ~mono_clock ~(config : Workspace.config) =
   let base_path = config.base_path in
+  let module Notices = Server_workspace_invalidation.Make (struct
+    type t = Workspace_dataset_event.dataset
+    let compare = Stdlib.compare
+  end) in
+  let enqueue = Notices.start ~sw ~mono_clock
+      ~publish:(Workspace_dataset_event.announce ~base_path) in
   let config_keepers_dir =
     physical (Config_dir_resolver.keepers_dir_for_base_path ~base_path)
   in
@@ -24,7 +30,7 @@ let install ~sw ~(config : Workspace.config) =
   let world_changed () =
     Dashboard_cache.invalidate
       (Server_dashboard_http_core_cache.workspace_memory_inventory_cache_key ~base_path);
-    Workspace_dataset_event.announce ~base_path Workspace_dataset_event.World_memory
+    enqueue Workspace_dataset_event.World_memory
   in
   let written ~keepers_dir ~keeper_id =
     if String.equal keepers_dir config_keepers_dir
@@ -33,8 +39,7 @@ let install ~sw ~(config : Workspace.config) =
       Dashboard_cache.invalidate
         (Server_dashboard_http_keeper_memory_health.fleet_cache_key ~base_path);
       world_changed ();
-      Workspace_dataset_event.announce ~base_path
-        (Workspace_dataset_event.Memory_health { keeper = keeper_id }))
+      enqueue (Workspace_dataset_event.Memory_health { keeper = keeper_id }))
   in
   let unsubscribe_inputs =
     Keeper_memory_health_input.subscribe

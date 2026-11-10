@@ -406,27 +406,63 @@ let test_log_of_another_bootstrap () =
     in
     write_log_line dirs (R.to_line record);
     let i = input dirs in
-    (match i.B.high_water with
-     | B.Judged (Authz_high_water.Mismatch _) -> ()
-     | B.Judged (Authz_high_water.Absent | Authz_high_water.Matches) | B.Store_unreadable _ ->
-       Alcotest.fail "expected a mismatch");
     let stop = Read.Authorization_uncertain in
     Alcotest.check decision "row 8" (Read.Stop stop) (Read.decide i);
-    Alcotest.(check bool) "the mismatch is in the message" true (snd (Read.messages i stop) <> []))
+    (match Read.boot ~base_path:dirs.base ~config_dir:(Some dirs.config) ~anonymous_mutations:false with
+     | Ok (Read.Single_user (_ : Read.single_user) | Read.Multi_account (_ : Read.multi_account)) ->
+       Alcotest.fail "row 8 booted"
+     | Error (first, (_ : string list)) ->
+       Alcotest.(check string)
+         "the entry of the boot stops for the same reason"
+         (fst (Read.messages i stop))
+         first);
+    match i.B.high_water with
+    | B.Judged (Authz_high_water.Mismatch (first, rest)) ->
+      Alcotest.(check (list string))
+        "the message names each reason of the mismatch"
+        (List.map
+           (fun reason ->
+             "the external store does not match the authorization log: "
+             ^ Authz_high_water.reason_to_string reason)
+           (first :: rest))
+        (snd (Read.messages i stop))
+    | B.Judged (Authz_high_water.Absent | Authz_high_water.Matches) | B.Store_unreadable _ ->
+      Alcotest.fail "expected a mismatch")
 ;;
 
 let test_boot_entry () =
   with_dirs (fun dirs ->
-    let boot () = Read.boot ~base_path:dirs.base ~config_dir:(Some dirs.config) ~anonymous_mutations:false in
-    Alcotest.(check bool) "single user" true (Result.is_ok (boot ()));
+    let boot ~anonymous_mutations =
+      Read.boot ~base_path:dirs.base ~config_dir:(Some dirs.config) ~anonymous_mutations
+    in
+    let never_set_up label = function
+      | Ok (Read.Single_user single_user) ->
+        Alcotest.(check string)
+          (label ^ ": the base path")
+          dirs.base
+          (Read.single_user_base_path single_user);
+        Alcotest.(check bool)
+          (label ^ ": no accounts were turned off")
+          true
+          (Option.is_none (Read.turned_off single_user))
+      | Ok (Read.Multi_account (_ : Read.multi_account)) ->
+        Alcotest.failf "%s: booted a multi-account installation" label
+      | Error (first, (_ : string list)) -> Alcotest.failf "%s: refused: %s" label first
+    in
+    never_set_up "single user" (boot ~anonymous_mutations:false);
     write_config dirs {|{"enabled":true,"require_token":true,"account_mode":"Multi_account"}|};
-    (match boot () with
+    (match boot ~anonymous_mutations:false with
      | Ok (Read.Single_user (_ : Read.single_user) | Read.Multi_account (_ : Read.multi_account)) ->
        Alcotest.fail "a Multi_account request booted before the bootstrap"
-     | Error (first, _) -> Alcotest.(check bool) "a reason" true (first <> ""));
+     | Error (first, (_ : string list)) ->
+       Alcotest.(check string)
+         "the reason is the activation that was asked for"
+         (fst (Read.messages (input dirs) Read.Activation_requested))
+         first);
     write_config dirs {|{"enabled":true,"require_token":true}|};
-    Alcotest.(check bool) "anonymous mutations do not matter to a single user" true
-      (Result.is_ok (Read.boot ~base_path:dirs.base ~config_dir:(Some dirs.config) ~anonymous_mutations:true)))
+    never_set_up
+      "anonymous mutations do not matter to a single user"
+      (boot ~anonymous_mutations:true))
 ;;
 
 (* Row 7 through the entry of the boot: the installation, and the store that
@@ -448,7 +484,11 @@ let test_boot_multi_account () =
     match Read.boot ~base_path:dirs.base ~config_dir:(Some dirs.config) ~anonymous_mutations:true with
     | Ok (Read.Single_user (_ : Read.single_user) | Read.Multi_account (_ : Read.multi_account)) ->
       Alcotest.fail "booted with anonymous mutations on"
-    | Error (first, _) -> Alcotest.(check bool) "a reason" true (first <> ""))
+    | Error (first, (_ : string list)) ->
+      Alcotest.(check string)
+        "the reason is the anonymous mutations"
+        (B.refusal_to_string B.Anonymous_mutations_in_multi_account)
+        first)
 ;;
 
 (* Plan D2-2: a host tool judges from presence alone and writes nothing. *)

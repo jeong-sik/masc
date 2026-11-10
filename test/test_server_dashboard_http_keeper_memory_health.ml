@@ -10,6 +10,12 @@ module Health = Server_dashboard_http_keeper_memory_health
 let test_now = 1_700_000_000.0
 let fresh_dir prefix = Filename.temp_dir prefix ""
 
+(* The projection caches each keeper's row and drops it when a writer reports a
+   commit. The server wires that at startup ([Server_runtime_bootstrap]); a test
+   that writes and then reads again has to wire the same observers, or the
+   second read answers from the row the first one cached. *)
+let () = Health.install ()
+
 let fact claim : Types.fact =
   Types.observed ~claim ~category:Types.Fact ~now:test_now
     ~origin:{ kind = Types.Authored; trace_id = "" }

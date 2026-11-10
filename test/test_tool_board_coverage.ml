@@ -3184,12 +3184,23 @@ let test_vote_requires_explicit_direction () =
   with_eio @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
+  (* The direction is checked after the target exists. A missing post_id is
+     refused by the access pre-check, which can say nothing about the
+     direction, so the target has to be a real post and a real comment. *)
+  let parent = dispatch_result "masc_board_post"
+    (make_args [("author", `String "poster"); ("content", `String "vote direction")]) in
+  let post_id = Yojson.Safe.Util.(Tool_result.data parent |> member "id" |> to_string) in
+  let comment = dispatch_result "masc_board_comment"
+    (make_args
+       [ ("post_id", `String post_id); ("author", `String "poster")
+       ; ("content", `String "comment for vote direction") ]) in
+  let comment_id = Yojson.Safe.Util.(Tool_result.data comment |> member "id" |> to_string) in
   let empty_direction =
     dispatch_result
       "masc_board_vote"
       (make_args
          [
-           ("post_id", `String "missing");
+           ("post_id", `String post_id);
            ("voter", `String "v");
            ("direction", `String "");
          ])
@@ -3204,7 +3215,7 @@ let test_vote_requires_explicit_direction () =
   let missing_direction =
     dispatch_result
       "masc_board_vote"
-      (make_args [ ("post_id", `String "missing"); ("voter", `String "v") ])
+      (make_args [ ("post_id", `String post_id); ("voter", `String "v") ])
   in
   Alcotest.(check bool) "missing direction rejected" false (Tool_result.is_success missing_direction);
   check_failure_class
@@ -3220,7 +3231,7 @@ let test_vote_requires_explicit_direction () =
   let comment_missing_direction =
     dispatch_result
       "masc_board_comment_vote"
-      (make_args [ ("comment_id", `String "c-missing"); ("voter", `String "v") ])
+      (make_args [ ("comment_id", `String comment_id); ("voter", `String "v") ])
   in
   Alcotest.(check bool)
     "comment vote missing direction rejected"
@@ -3260,8 +3271,14 @@ let test_comment_add_missing_author_rejected () =
   with_eio @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
+  (* The post has to exist. A missing post_id is refused by the access
+     pre-check before the write ever looks at the author, so it can say
+     nothing about author validation. *)
+  let parent = dispatch_result "masc_board_post"
+    (make_args [("author", `String "poster"); ("content", `String "author check")]) in
+  let post_id = Yojson.Safe.Util.(Tool_result.data parent |> member "id" |> to_string) in
   let ok, body = dispatch "masc_board_comment"
-    (make_args [("post_id", `String "missing"); ("content", `String "hi")]) in
+    (make_args [("post_id", `String post_id); ("content", `String "hi")]) in
   Alcotest.(check bool) "missing author rejected" false ok;
   Alcotest.(check bool) "error mentions author" true
     (String_util.contains_substring body "author")
@@ -3270,9 +3287,12 @@ let test_comment_add_anonymous_author_rejected () =
   with_eio @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
+  let parent = dispatch_result "masc_board_post"
+    (make_args [("author", `String "poster"); ("content", `String "anonymous check")]) in
+  let post_id = Yojson.Safe.Util.(Tool_result.data parent |> member "id" |> to_string) in
   let ok, body = dispatch "masc_board_comment"
     (make_args
-       [("post_id", `String "missing"); ("content", `String "hi"); ("author", `String "anonymous")]) in
+       [("post_id", `String post_id); ("content", `String "hi"); ("author", `String "anonymous")]) in
   Alcotest.(check bool) "anonymous author rejected" false ok;
   Alcotest.(check bool) "error mentions author" true
     (String_util.contains_substring body "author")

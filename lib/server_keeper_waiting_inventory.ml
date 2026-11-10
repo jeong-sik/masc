@@ -651,7 +651,28 @@ let chat_operation_rows ~base_path keeper_name =
     running @ queued
 ;;
 
-let owner_shutdown_rows ~base_path keeper_name =
+let shutdown_waiting_guidance (operation : Keeper_shutdown_types.t) =
+  let open Keeper_shutdown_types in
+  match operation.phase with
+  | Prepared | Joining_lanes | Joined_idle | Finalizing_tasks _ | Cleanup_ready _ ->
+    "종료 정리 진행 대기", "wait_for_keeper_shutdown"
+  | Reconciliation_required _ ->
+    "종료 전 실행 결과 확인 필요", "inspect_keeper_shutdown_reconciliation"
+  | Blocked _ ->
+    "종료 정리 막힘 · 수동 확인 필요", "inspect_blocked_keeper_shutdown"
+  | Finalized { completion = (Completion_pending _ | Completion_delivery_failed _); _ } ->
+    (match operation.cleanup_intent.reason with
+     | Dashboard_keeper_purge _ ->
+       "종료 후 정리 결과 전달 재시도 필요", "retry_keeper_shutdown_completion"
+     | Operator_stop_retain_meta | Operator_stop_remove_meta | Supervisor_cleanup ->
+       "종료 후 정리 결과 확인 필요", "inspect_keeper_shutdown_completion")
+  | Finalized { completion = (Completion_not_requested | Completion_delivered _); _ }
+  | Owner_absent _ | Operator_absence_acknowledged _ | Superseded _ ->
+    "종료 기록과 진입 차단 상태 확인 필요", "inspect_keeper_shutdown_fence"
+;;
+
+let owner_shutdown_rows ~config keeper_name =
+  let base_path = config.Workspace.base_path in
   match Keeper_owner_registry.get ~base_path ~keeper_name with
   | Error error ->
     [ { keeper_name = Some keeper_name
@@ -689,24 +710,56 @@ let owner_shutdown_rows ~base_path keeper_name =
     match Keeper_owner.shutdown_operation_id owner with
     | None -> []
     | Some operation_id ->
+      let operation_reading =
+        Keeper_shutdown_store.load ~config ~keeper_name operation_id
+      in
+      (* The fence alone grants no finalization capability. In particular a
+         blocked or effect-unknown operation cannot be replayed as cleanup.
+         This is an observation; an eventual action must recheck its guards. *)
+      let what, next_action, operation_detail, errors =
+        match operation_reading with
+        | Ok operation ->
+          let what, next_action = shutdown_waiting_guidance operation in
+          let failure_detail =
+            match operation.phase with
+            | Keeper_shutdown_types.Blocked failure ->
+              [ "failure_stage", `String (Keeper_shutdown_types.failure_stage_to_string failure.stage)
+              ; "failure_detail", `String failure.detail ]
+            | Prepared | Joining_lanes | Joined_idle | Finalizing_tasks _
+            | Cleanup_ready _ | Reconciliation_required _ | Finalized _
+            | Owner_absent _ | Operator_absence_acknowledged _ | Superseded _ -> []
+          in
+          what, next_action,
+          [ "shutdown_phase", `String (Keeper_shutdown_types.phase_to_string operation.phase)
+          ; "shutdown_revision", `Int operation.revision ] @ failure_detail,
+          []
+        | Error error ->
+          "종료 기록 확인 필요", "inspect_keeper_shutdown_record",
+          [ "shutdown_phase", `Null; "shutdown_revision", `Null ],
+          [ read_error_row ~keeper_name ~waiting_on:"keeper_shutdown_operation"
+              ~next_action:"inspect_keeper_shutdown_record"
+              (`Assoc
+                [ "shutdown_operation_id", `String (Keeper_shutdown_types.Operation_id.to_string operation_id)
+                ; "error", `String (Keeper_shutdown_store.error_to_string error) ]) ]
+      in
       [ { keeper_name = Some keeper_name
         ; source = Owner_shutdown
         ; waiting_on = "shutdown"
-        ; what = "종료 정리 중"
+        ; what
         ; wake_producer = Keeper_owner_actor
         ; since = None
         ; due_at = None
-        ; next_action = "keeper_shutdown_finalize"
+        ; next_action
         ; detail =
             `Assoc
-              [ ( "shutdown_operation_id"
+              ([ ( "shutdown_operation_id"
                 , `String
                     (Keeper_shutdown_types.Operation_id.to_string operation_id) )
               ; "admission_fenced", `Bool true
               ; "in_flight", in_flight_detail
-              ]
+              ] @ operation_detail)
         }
-      ]
+      ] @ errors
   in
   shutdown_rows
 ;;
@@ -1279,7 +1332,8 @@ let runtime_quota_spent_rows ~now ~base_path keeper_name =
          ])
 ;;
 
-let keeper_rows ~now ~base_path ~pending_approvals ~fusion_runs ~pending_confirms keeper_names =
+let keeper_rows ~now ~config ~pending_approvals ~fusion_runs ~pending_confirms keeper_names =
+  let base_path = config.Workspace.base_path in
   keeper_names
   |> List.map (fun keeper_name ->
     let queue_rows, queue_residence =
@@ -1288,7 +1342,7 @@ let keeper_rows ~now ~base_path ~pending_approvals ~fusion_runs ~pending_confirm
     let rows =
       queue_rows
       @ chat_operation_rows ~base_path keeper_name
-      @ owner_shutdown_rows ~base_path keeper_name
+      @ owner_shutdown_rows ~config keeper_name
       @ hitl_rows keeper_name pending_approvals
       @ external_attention_store_error_rows ~base_path ~keeper_name
       @ fusion_rows keeper_name fusion_runs
@@ -1379,7 +1433,7 @@ let read_inventory_snapshot ?keeper_name ~read_pending config =
   in
   let busy_names = busy_keeper_names ~base_path:config.Workspace.base_path in
   let per_keeper =
-    keeper_rows ~now ~base_path:config.Workspace.base_path ~pending_approvals ~fusion_runs
+    keeper_rows ~now ~config ~pending_approvals ~fusion_runs
       ~pending_confirms keeper_names
     |> List.map (fun (keeper_name, queue_residence, rows) ->
       let rows = rows @ rows_for_keeper keeper_name schedule_rows in

@@ -6511,11 +6511,6 @@ type code_navigation_owner = {
   cno_action : code_navigation_action;
 }
 
-type code_navigation_reading = {
-  cnr_owner : code_navigation_owner;
-  cnr_file : (string, Tui_decode.workspace_file_source) Masc_tui_fetched.t;
-}
-
 type code_file_load_intent =
   | Open_code_file
   | Refresh_code_file
@@ -6533,6 +6528,21 @@ type code_file_document = {
   cfd_body : code_file_body;
   cfd_revision : string;
   cfd_rows : (string * string) list array;
+  cfd_max_width : int;
+  cfd_memos : Masc_tui_memo.found list;
+}
+
+(* Prepared without reading UI state, before the owned async reply is delivered.
+   The original response is retained for exact draft/revision observation; the
+   UI installs the document and its derived values without scanning the file. *)
+type code_prepared_file = {
+  cpf_source : Tui_decode.workspace_file_source;
+  cpf_document : code_file_document;
+}
+
+type code_navigation_reading = {
+  cnr_owner : code_navigation_owner;
+  cnr_file : (string, code_prepared_file) Masc_tui_fetched.t;
 }
 
 type code_save_request = {
@@ -9019,6 +9029,9 @@ type sent_image_read =
   ; sir_name : string
   ; sir_owner : image_read_owner
   ; sir_resource : (Masc_tui_resource_catalog.key * Masc_tui_mcp.resource_content list) option
+  ; sir_memory_activity : Masc.Keeper_memory_activity.t option
+      (** Immutable activity used by a Memory chart. A later read must match
+          this full observation, not merely name the same Keeper. *)
   ; sir_skill_reference : Skill_reference.t option
   ; sir_purpose : image_read_purpose
   }
@@ -9040,6 +9053,15 @@ type image_inspection = {
   ii_origin : sent_image_read option;
   ii_frame : image_inspection_frame;
 }
+
+type image_pixel_source = {
+  ips_workspace : workspace_authority;
+  ips_origin : sent_image_read;
+  ips_unconfirmed : bool;
+  ips_footer : string;
+}
+(** Memory PNGs retain their captured reading in both the Kitty inspection
+    and ordinary pixel paths. The footer follows that reading's freshness. *)
 
 type unsaved_remote_image = {
   uri_bytes : string;
@@ -9541,6 +9563,7 @@ type state = {
   mutable image_open: bool;
   mutable image_inspection : image_inspection option;
   mutable image_cell_view : image_cell_view option;
+  mutable image_pixel_source : image_pixel_source option;
   mutable browser_viewport : (Browser_lane_view.screenshot * string) option;
   mutable image_request_generation: int;
   mutable image_catalog: image_catalog option;
@@ -10833,7 +10856,7 @@ type state = {
   mutable code_catalog:
     (code_workspace_scope * string, Tui_decode.workspace_file_catalog) Masc_tui_fetched.t;
   mutable code_finder_file:
-    (code_workspace_scope * string, Tui_decode.workspace_file_source) Masc_tui_fetched.t;
+    (code_workspace_scope * string, code_prepared_file) Masc_tui_fetched.t;
   (* The branch list of the checkout that owns the key's directory. *)
   mutable code_branches:
     (code_workspace_scope * string, Tui_decode.git_branches) Masc_tui_fetched.t;
@@ -19118,7 +19141,8 @@ let tools_keeper_observation_confirmed (state : state) =
   && state.local_keepers = Local_workspace_read && Option.is_none state.keepers_error
 
 let image_keeper_is_current (state : state) ~view ~keeper_name =
-  view = Resources || view = Board || keeper_name = state.msg_target_keeper_name
+  if view = Memory then state.memory_page = Memory_changes && keeper_name = state.memory_facts_keeper
+  else view = Resources || view = Board || keeper_name = state.msg_target_keeper_name
 
 let image_request_keeper_is_current (state : state) (request : sent_image_read) =
   match request.sir_view, request.sir_skill_reference with
@@ -19316,10 +19340,21 @@ let image_cell_source_unconfirmed (state : state) (origin : sent_image_read) =
         Effective_surface_unavailable _);_}) -> true in
   skill_unconfirmed || tools_skill_may_be_unread state origin || match origin.sir_owner with
   | Local_file_image_read _ | Remote_url_image_read _ | Draft_image_read _ -> false
-  | Peer_image_read _ ->
+  | Peer_image_read reading ->
       workspace_unconfirmed ||
       (if origin.sir_view = Resources then
          Option.is_none state.resource_content || Option.is_some state.resource_content_error
+       else if origin.sir_view = Memory then
+         state.view <> Memory || reading != state.workspace_read_authority
+         || not (image_request_keeper_is_current state origin)
+         || Masc_tui_fetched.in_flight state.memory_activity
+         || (match origin.sir_keeper, origin.sir_memory_activity with
+             | Some keeper, Some captured ->
+                 (match Masc_tui_fetched.view_for ~equal:String.equal state.memory_activity ~key:keeper with
+                  | Ready current ->
+                      not (current == captured || current = captured) || current.notes <> []
+                  | Absent | Loading | Stale _ | Failed _ -> true)
+             | None, (Some _ | None) | Some _, None -> true)
        else if origin.sir_view = Tools && Option.is_some origin.sir_skill_reference then
          not (tools_keeper_observation_confirmed state)
          || Option.map (fun (keeper : keeper) -> keeper.k_name) (selected_keeper state) <> origin.sir_keeper
@@ -19338,6 +19373,13 @@ let image_cell_source_unconfirmed (state : state) (origin : sent_image_read) =
                  | Board_diagram (Board_post_diagram _) -> false)
             | Absent | Loading | Failed _ -> true)
        | Board_list | Board_compose -> true)
+
+let image_pixel_source_for_redraw (state : state) (source : image_pixel_source) =
+  match image_cell_origin_for_redraw state ~workspace:source.ips_workspace source.ips_origin with
+  | None -> None
+  | Some origin ->
+      Some {source with ips_origin=origin;
+        ips_unconfirmed=image_cell_source_unconfirmed state origin}
 
 (* A completion belongs to the exact read that launched it, even if a later
    read happens to have the same name, surface and generation. *)
@@ -20106,6 +20148,7 @@ let create_state
   image_open = false;
   image_inspection = None;
   image_cell_view = None;
+  image_pixel_source = None;
   browser_viewport = None;
   image_request_generation = 0;
   image_catalog = None;

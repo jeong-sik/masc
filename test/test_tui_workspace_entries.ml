@@ -15,9 +15,13 @@ module Code_results = Masc_tui_code_results
 let file_source text : Decode.workspace_file_source =
   { wfs_content = text; wfs_revision = String.make 64 'a' }
 let apply_file ?intent state request result =
-  Code_results.apply_file ?intent state request (Result.map file_source result)
+  let path = Fetched.request_key request in
+  Code_results.apply_file ?intent state request
+    (Result.map (fun text -> Code_results.prepare_file ~path (file_source text)) result)
 let apply_found_file ?input_pending state request result =
-  Code_results.apply_found_file ?input_pending state request (Result.map file_source result)
+  let _, path = Fetched.request_key request in
+  Code_results.apply_found_file ?input_pending state request
+    (Result.map (fun text -> Code_results.prepare_file ~path (file_source text)) result)
 
 let start_read ~equal fetched key =
   match Fetched.start ~equal fetched ~key with
@@ -2078,8 +2082,9 @@ let test_revision_read_and_draft_reconciliation () =
   let state = create_state ~workspace:"" ~port:0 () in
   confirm_code_workspace state;
   state.workspace_identity <- Workspace_identity_match;
-  let source text character : Decode.workspace_file_source =
-    { wfs_content=text; wfs_revision=String.make 64 character } in
+  let source text character =
+    Code_results.prepare_file ~path:"source.ml"
+      { wfs_content=text; wfs_revision=String.make 64 character } in
   let read text character =
     let next, request = start_read ~equal:String.equal state.code_file "source.ml" in
     state.code_file <- next;

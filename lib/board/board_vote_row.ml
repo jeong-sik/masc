@@ -1,5 +1,15 @@
 open Board_types
 
+let direction_to_string = function Up -> "up" | Down -> "down"
+
+let to_yojson (vote, direction, ts) =
+  `Assoc
+    [ "target", `String (Board_vote_key.to_string vote)
+    ; "voter", `String (Agent_id.to_string (Board_vote_key.voter vote))
+    ; "direction", `String (direction_to_string direction)
+    ; "ts", `Float ts
+    ]
+
 let persisted_vote_direction_of_string_opt = function
   | "up" -> Some Up
   | "down" -> Some Down

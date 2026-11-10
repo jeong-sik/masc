@@ -1,4 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { confirmRuntimeTestWorkspace } from '../lib/runtime-workspace.test-fixture'
+import { acceptedExecutionWorkspace } from '../execution-workspace-authority'
 
 import {
   __resetFleetDataCoreForTests,
@@ -43,10 +45,12 @@ describe('fleet-data-core', () => {
   beforeEach(() => {
     __resetFleetDataCoreForTests()
     vi.unstubAllGlobals()
+    confirmRuntimeTestWorkspace()
   })
 
   afterEach(() => {
     __resetFleetDataCoreForTests()
+    acceptedExecutionWorkspace.value = null
     vi.unstubAllGlobals()
   })
 

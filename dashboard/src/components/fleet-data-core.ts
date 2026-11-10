@@ -23,6 +23,8 @@ import {
   type ToolQualityResponse,
 } from '../api/dashboard'
 import { isAbortError } from '../lib/async-state'
+import { captureDashboardObservationOwner, dashboardObservationOwnerHasWorkspace,
+  dashboardObservationOwnerIsCurrent } from '../lib/observation-read-owner'
 
 /**
  * Shared error formatter matching the previous tool-quality-panel behavior so
@@ -46,6 +48,8 @@ export const sharedToolQualityError: Signal<string | null> = signal(null)
 
 let toolQualityRequestId = 0
 let toolQualityController: AbortController | null = null
+let toolQualityReadError: unknown | null = null
+export const readSharedToolQualityError = (): unknown | null => toolQualityReadError
 
 interface RefreshSharedOptions {
   signal?: AbortSignal
@@ -56,6 +60,8 @@ interface RefreshSharedOptions {
 }
 
 export async function refreshSharedToolQuality(opts: RefreshSharedOptions = {}): Promise<void> {
+  const owner = captureDashboardObservationOwner()
+  if (!dashboardObservationOwnerHasWorkspace(owner)) { prepareSharedToolQualityRead(); return }
   const requestId = ++toolQualityRequestId
   toolQualityController?.abort()
   const controller = new AbortController()
@@ -70,6 +76,7 @@ export async function refreshSharedToolQuality(opts: RefreshSharedOptions = {}):
 
   sharedToolQualityLoading.value = true
   sharedToolQualityError.value = null
+  toolQualityReadError = null
 
   try {
     const json = await fetchToolQuality({
@@ -77,11 +84,12 @@ export async function refreshSharedToolQuality(opts: RefreshSharedOptions = {}):
       windowHours: opts.windowHours,
       signal: controller.signal,
     })
-    if (requestId !== toolQualityRequestId) return
+    if (requestId !== toolQualityRequestId || controller.signal.aborted || !dashboardObservationOwnerIsCurrent(owner)) return
     sharedToolQuality.value = json
   } catch (e) {
-    if (requestId !== toolQualityRequestId) return
+    if (requestId !== toolQualityRequestId || controller.signal.aborted || !dashboardObservationOwnerIsCurrent(owner)) return
     if (isAbortError(e)) return
+    toolQualityReadError = e
     sharedToolQualityError.value = formatFetchError(e)
   } finally {
     upstream?.removeEventListener('abort', abortFromUpstream)
@@ -101,6 +109,18 @@ export function cancelSharedToolQuality(): void {
   sharedToolQualityLoading.value = false
 }
 
+export function resetSharedToolQuality(): void {
+  cancelSharedToolQuality()
+  sharedToolQuality.value = null
+  sharedToolQualityError.value = null
+  toolQualityReadError = null
+}
+
+export function prepareSharedToolQualityRead(): void {
+  resetSharedToolQuality()
+  sharedToolQualityLoading.value = true
+}
+
 // ---------- Shared telemetry summary ----------
 
 export const sharedTelemetrySummary: Signal<TelemetrySummaryResponse | null> = signal(null)
@@ -109,8 +129,12 @@ export const sharedTelemetrySummaryError: Signal<string | null> = signal(null)
 
 let summaryRequestId = 0
 let summaryController: AbortController | null = null
+let summaryReadError: unknown | null = null
+export const readSharedTelemetrySummaryError = (): unknown | null => summaryReadError
 
 export async function refreshSharedTelemetrySummary(opts: { signal?: AbortSignal } = {}): Promise<void> {
+  const owner = captureDashboardObservationOwner()
+  if (!dashboardObservationOwnerHasWorkspace(owner)) { prepareSharedTelemetrySummaryRead(); return }
   const requestId = ++summaryRequestId
   summaryController?.abort()
   const controller = new AbortController()
@@ -125,14 +149,16 @@ export async function refreshSharedTelemetrySummary(opts: { signal?: AbortSignal
 
   sharedTelemetrySummaryLoading.value = true
   sharedTelemetrySummaryError.value = null
+  summaryReadError = null
 
   try {
     const json = await fetchTelemetrySummary({ signal: controller.signal })
-    if (requestId !== summaryRequestId) return
+    if (requestId !== summaryRequestId || controller.signal.aborted || !dashboardObservationOwnerIsCurrent(owner)) return
     sharedTelemetrySummary.value = json
   } catch (e) {
-    if (requestId !== summaryRequestId) return
+    if (requestId !== summaryRequestId || controller.signal.aborted || !dashboardObservationOwnerIsCurrent(owner)) return
     if (isAbortError(e)) return
+    summaryReadError = e
     sharedTelemetrySummaryError.value = formatFetchError(e)
   } finally {
     upstream?.removeEventListener('abort', abortFromUpstream)
@@ -148,14 +174,22 @@ function cancelSharedTelemetrySummary(): void {
   sharedTelemetrySummaryLoading.value = false
 }
 
+export function resetSharedTelemetrySummary(): void {
+  cancelSharedTelemetrySummary()
+  sharedTelemetrySummary.value = null
+  sharedTelemetrySummaryError.value = null
+  summaryReadError = null
+}
+
+export function prepareSharedTelemetrySummaryRead(): void {
+  resetSharedTelemetrySummary()
+  sharedTelemetrySummaryLoading.value = true
+}
+
 // ---------- Test-only reset ----------
 
 /** Reset all shared signals + controllers. Exposed for unit tests only. */
 export function __resetFleetDataCoreForTests(): void {
-  cancelSharedToolQuality()
-  cancelSharedTelemetrySummary()
-  sharedToolQuality.value = null
-  sharedToolQualityError.value = null
-  sharedTelemetrySummary.value = null
-  sharedTelemetrySummaryError.value = null
+  resetSharedToolQuality()
+  resetSharedTelemetrySummary()
 }

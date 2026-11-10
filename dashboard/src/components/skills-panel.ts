@@ -1,4 +1,4 @@
-import { setupObservationRefresh } from '../lib/observation-refresh'
+import { selectObservationReadFailure, setupObservationRefresh } from '../lib/observation-refresh'
 // Skills Panel — the published skill snapshot and exact parser-derived surface.
 import { html } from 'htm/preact'
 import { useEffect, useMemo, useRef } from 'preact/hooks'
@@ -887,8 +887,12 @@ function SkillsObservationPanel({ owner, onMutation }: {
   // Each Keeper's usage is its own read (RFC-0483), so reading every Keeper
   // does not carry every ledger. The catalog read does not wait for them, and
   // a newer round cancels the older one.
-  const loadUsage = async () => {
-    if (!current()) return
+  const usageReadError = useRef<unknown | null>(null)
+  const catalogReadError = useRef<unknown | null>(null)
+  const asyncReadError = useRef<unknown | null>(null)
+  const loadUsage = async (signal?: AbortSignal) => {
+    usageReadError.current = null
+    if (!current() || signal?.aborted) return
     usageController.current?.abort()
     usageController.current = null
     if (!executionLoaded.peek()) {
@@ -899,53 +903,69 @@ function SkillsObservationPanel({ owner, onMutation }: {
     }
     const controller = new AbortController()
     usageController.current = controller
+    const readSignal = signal ? AbortSignal.any([signal, controller.signal]) : controller.signal
     const names = keepers.peek().map(keeper => keeper.name)
     const settled = await Promise.allSettled(
-      names.map(name => fetchKeeperSkillUsage(name, { signal: controller.signal })),
+      names.map(name => fetchKeeperSkillUsage(name, { signal: readSignal })),
     )
-    if (!current() || controller.signal.aborted) return
+    if (!current() || readSignal.aborted) return
+    usageReadError.current = selectObservationReadFailure(settled.map(result => result.status === 'rejected' ? result.reason : null))
     keeperUsage.value = keeperUsageReading(
       names.map((keeper, index) => ({ keeper, result: settled[index]! })),
     )
   }
 
   const load = async (signal?: AbortSignal) => {
-    if (!current()) return
+    if (!current() || signal?.aborted) return
+    catalogReadError.current = null
     const generation = ++catalogGeneration.current
     try {
       const res = await fetchSkills({ signal })
-      if (!current() || generation !== catalogGeneration.current) return
+      if (!current() || signal?.aborted || generation !== catalogGeneration.current) return
       response.value = res
       error.value = null
-      if (res.state === 'ready') await loadUsage()
+      if (res.state === 'ready') await loadUsage(signal)
     } catch (cause) {
-      if (!current() || generation !== catalogGeneration.current || isAbortError(cause)) return
+      if (!current() || signal?.aborted || generation !== catalogGeneration.current || isAbortError(cause)) return
+      catalogReadError.current = cause
       error.value = cause instanceof Error ? cause.message : 'skills fetch failed'
     } finally {
-      if (current() && generation === catalogGeneration.current) loading.value = false
+      if (current() && !signal?.aborted && generation === catalogGeneration.current) loading.value = false
     }
   }
 
   useEffect(() => {
-    const ctl = new AbortController()
-    const loadAsyncObservation = async () => {
+    const loadAsyncObservation = async (signal: AbortSignal) => {
+      asyncReadError.current = null
       const generation = ++asyncGeneration.current
       try {
-        const observation = await fetchAsyncRequestObservation({ signal: ctl.signal })
-        if (!current() || generation !== asyncGeneration.current) return
+        const observation = await fetchAsyncRequestObservation({ signal: signal })
+        if (!current() || signal.aborted || generation !== asyncGeneration.current) return
         asyncObservation.value = observation
         asyncObservationError.value = null
       } catch (e) {
-        if (!current() || generation !== asyncGeneration.current || isAbortError(e)) return
+        if (!current() || signal.aborted || generation !== asyncGeneration.current || isAbortError(e)) return
+        asyncReadError.current = e
         asyncObservationError.value = (e as Error).message || 'async observation fetch failed'
       }
     }
-    const dispose = setupObservationRefresh(() => Promise.all([
-      load(ctl.signal), loadAsyncObservation(),
-    ]), { topics: ['skills', 'async_requests', 'skill_usage'] })
+    const dispose = setupObservationRefresh(signal => Promise.all([
+      load(signal), loadAsyncObservation(signal),
+    ]), { topics: ['skills', 'async_requests', 'skill_usage'], readError: () => selectObservationReadFailure([catalogReadError.current, asyncReadError.current, usageReadError.current]),
+      resetRead: () => {
+        usageController.current?.abort()
+        catalogReadError.current = null
+        asyncReadError.current = null
+        usageReadError.current = null
+        response.value = null
+        keeperUsage.value = null
+        asyncObservation.value = null
+        error.value = null
+        asyncObservationError.value = null
+        loading.value = true
+      } })
     return () => {
       active.current = false
-      ctl.abort()
       usageController.current?.abort()
       dispose()
     }

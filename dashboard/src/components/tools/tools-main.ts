@@ -28,7 +28,7 @@ import {
   type DashboardSkillActivationProjection,
   type DashboardToolsResponse,
 } from '../../api'
-import { setupObservationRefresh } from '../../lib/observation-refresh'
+import { selectObservationReadFailure, setupObservationRefresh } from '../../lib/observation-refresh'
 import {
   scheduledAutomationProjection,
   subscribeScheduledAutomationRefresh,
@@ -112,19 +112,25 @@ export function Tools() {
       return
     }
     let controller: AbortController | null = null
-    const refresh = () => {
+    const refresh = (signal: AbortSignal) => {
       controller?.abort()
       controller = new AbortController()
-      const current = controller
+      const current = { signal: AbortSignal.any([signal, controller.signal]) }
       setKeeperReceiptLoading(true)
       setKeeperReceiptError(null)
-      return Promise.all([
+      return Promise.allSettled([
         fetchDashboardTools({ keeperName: selectedKeeper, signal: current.signal }),
         fetchKeeperSkillActivations(selectedKeeper, { signal: current.signal }),
       ])
         .then(([response, activations]) => {
           if (current.signal.aborted) return
-          const receipt = keeperSkillReceipt(response, activations, selectedKeeper)
+          if (response.status === 'rejected' || activations.status === 'rejected') {
+            throw selectObservationReadFailure([
+              response.status === 'rejected' ? response.reason : null,
+              activations.status === 'rejected' ? activations.reason : null,
+            ])
+          }
+          const receipt = keeperSkillReceipt(response.value, activations.value, selectedKeeper)
           if (typeof receipt === 'string') {
             setKeeperReceipt(null)
             setKeeperReceiptError(receipt)
@@ -136,6 +142,7 @@ export function Tools() {
           if (current.signal.aborted) return
           setKeeperReceipt(null)
           setKeeperReceiptError(cause instanceof Error ? cause.message : String(cause))
+          throw cause
         })
         .finally(() => {
           if (!current.signal.aborted) setKeeperReceiptLoading(false)
@@ -143,6 +150,7 @@ export function Tools() {
     }
     const stopRefresh = setupObservationRefresh(refresh, {
       topics: ['tools', 'skill_activations'], keeperName: selectedKeeper,
+      resetRead: () => { setKeeperReceipt(null); setKeeperReceiptError(null); setKeeperReceiptLoading(true) },
     })
     return () => {
       stopRefresh()

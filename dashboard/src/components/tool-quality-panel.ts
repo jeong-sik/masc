@@ -12,6 +12,8 @@ import {
   refreshSharedToolQuality,
   sharedToolQuality,
   sharedToolQualityError,
+  readSharedToolQualityError,
+  prepareSharedToolQualityRead,
   sharedToolQualityLoading,
 } from './fleet-data-core'
 import { route } from '../router'
@@ -368,23 +370,10 @@ function FailureList({ categories }: { categories: FailureCategory[] }) {
 
 export function ToolQualityPanel() {
   useEffect(() => {
-    const lifecycleController = new AbortController()
-    const runRefresh = () =>
-      refreshSharedToolQuality({
-        signal: lifecycleController.signal,
-        windowHours: TOOL_QUALITY_WINDOW_HOURS,
-      })
-
-    const disposeAutoRefresh = setupObservationRefresh(() => {
-      if (lifecycleController.signal.aborted) return
-      return runRefresh()
-    }, { topics: ['tool_metrics'] })
-
-    return () => {
-      lifecycleController.abort()
-      cancelSharedToolQuality()
-      disposeAutoRefresh()
-    }
+    const dispose = setupObservationRefresh(signal => refreshSharedToolQuality({
+      signal, windowHours: TOOL_QUALITY_WINDOW_HOURS,
+    }), { topics: ['tool_metrics'], readError: readSharedToolQualityError, cancelRead: cancelSharedToolQuality, resetRead: prepareSharedToolQualityRead })
+    return () => { dispose(); cancelSharedToolQuality() }
   }, [])
 
   const d = data.value

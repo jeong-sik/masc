@@ -16,14 +16,16 @@ import { html } from 'htm/preact'
 import { useEffect } from 'preact/hooks'
 import { navigate } from '../../router'
 import { MISSING_DATA_DASH } from '../../lib/format-string'
-import { setupObservationRefresh } from '../../lib/observation-refresh'
+import { selectObservationReadFailure, setupObservationRefresh } from '../../lib/observation-refresh'
 import { formatMsCompact, formatNumber } from '../../lib/format-number'
-import { refreshShell, shellRuntimeResolution } from '../../store'
+import { readShell, shellRuntimeResolution } from '../../store'
 import {
   cancelSharedToolQuality,
   refreshSharedToolQuality,
   sharedToolQuality,
   sharedToolQualityError,
+  readSharedToolQualityError,
+  prepareSharedToolQualityRead,
   sharedToolQualityLoading,
 } from '../fleet-data-core'
 import { freshnessText } from '../common/source-health'
@@ -195,24 +197,21 @@ function FailureCategories() {
 
 export function ToolMonitorOperationsBoard() {
   useEffect(() => {
-    const controller = new AbortController()
-    const runRefresh = () => {
-      return Promise.all([
-        refreshSharedToolQuality({ signal: controller.signal, windowHours: TOOL_MONITOR_WINDOW_HOURS }),
-        refreshShell({ force: true }),
+    const dispose = setupObservationRefresh(async signal => {
+      const results = await Promise.allSettled([
+        refreshSharedToolQuality({ signal, windowHours: TOOL_MONITOR_WINDOW_HOURS }),
+        readShell({ force: true, signal }),
       ])
-    }
-
-    const disposeAutoRefresh = setupObservationRefresh(() => {
-      if (controller.signal.aborted) return
-      return runRefresh()
-    }, { topics: ['tool_metrics', 'health'] })
-
-    return () => {
-      controller.abort()
-      cancelSharedToolQuality()
-      disposeAutoRefresh()
-    }
+      if (signal.aborted) return
+      const shell = results[1]
+      const failure = selectObservationReadFailure([
+        ...results.map(result => result.status === 'rejected' ? result.reason : null),
+        readSharedToolQualityError(),
+        shell.status === 'fulfilled' && shell.value.kind === 'failed' ? shell.value.cause : null,
+      ])
+      if (failure !== null) throw failure
+    }, { topics: ['tool_metrics', 'health'], cancelRead: cancelSharedToolQuality, resetRead: prepareSharedToolQualityRead })
+    return () => { dispose(); cancelSharedToolQuality() }
   }, [])
 
   const quality = sharedToolQuality.value

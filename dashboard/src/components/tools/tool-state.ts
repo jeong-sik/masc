@@ -46,12 +46,12 @@ let stopToolsRefresh: (() => void) | null = null
 
 /** Share one tools observation across mounted tools, schedule,
  * and Keeper conversation surfaces. The managed resource deduplicates fetch state;
- * this subscription also deduplicates the timer and global visibility/focus
+ * this subscription also deduplicates the event and global visibility/focus
  * listeners that trigger it. */
 export function subscribeToolsAutoRefresh(): () => void {
   toolsRefreshSubscriberCount += 1
   if (toolsRefreshSubscriberCount === 1) {
-    stopToolsRefresh = setupObservationRefresh(loadTools, { topics: ['tools'] })
+    stopToolsRefresh = setupObservationRefresh(loadTools, { topics: ['tools'], readError: () => toolsError.peek(), cancelRead: () => toolsResource.cancel(), resetRead: () => toolsResource.reset() })
   }
   return () => {
     toolsRefreshSubscriberCount = Math.max(0, toolsRefreshSubscriberCount - 1)

@@ -453,7 +453,7 @@ let test_failure_reaches_journal
     incr attempts;
     answer
   in
-  Runtime.run_best_effort ~pass:Masc.Keeper_memory_commit_pass.Durable ~cli_runner:runner
+  Runtime.run_best_effort ~write_scope:(Runtime.Context_and_memory Masc.Keeper_memory_commit_pass.Durable) ~cli_runner:runner
     ~base_path ~keepers_dir ~keeper_id ~expected_revision:None (input ());
   check int "only admitted CLI slots reach the runner" calls !attempts;
   let api_failure = if cli_only then None else Some projection_failure in
@@ -560,7 +560,7 @@ let test_body_timeout_reaches_http_successor ~with_cli () =
     cli_calls := runtime_id :: !cli_calls;
     Ok (Yojson.Safe.to_string valid_selection_json)
   in
-  Runtime.run_best_effort ~pass:Masc.Keeper_memory_commit_pass.Durable ~cli_runner:runner
+  Runtime.run_best_effort ~write_scope:(Runtime.Context_and_memory Masc.Keeper_memory_commit_pass.Durable) ~cli_runner:runner
     ~base_path ~keepers_dir ~keeper_id ~expected_revision:(Some initial.revision)
     (input ());
   check int "the incomplete HTTP response was requested once" 1
@@ -671,7 +671,7 @@ let test_admission_worker_requires_actual_input_capacity () =
     let judge admission =
       sizes := List.length (Queue.candidates admission) :: !sizes;
       let outcome = ref (Worker.Deferred "missing runtime callback") in
-      Runtime.run_best_effort ~pass:Masc.Keeper_memory_commit_pass.Admission ~write_scope:Runtime.Memory_maintenance ~admission ~cli_runner:runner
+      Runtime.run_best_effort ~write_scope:(Runtime.Memory_maintenance Masc.Keeper_memory_commit_pass.Admission) ~admission ~cli_runner:runner
         ~on_memory_committed:(fun () -> outcome := Worker.Committed)
         ~on_admission_deferred:(fun () -> outcome := Worker.Awaiting_evidence)
         ~on_not_committed:(fun reason -> reports := reason :: !reports;
@@ -835,7 +835,7 @@ let test_oversized_supporting_candidates_do_not_split_the_admission_batch () =
   let judge admission =
     sizes := List.length (Queue.candidates admission) :: !sizes;
     let outcome = ref (Worker.Deferred "missing runtime callback") in
-    Runtime.run_best_effort ~pass:Masc.Keeper_memory_commit_pass.Admission ~write_scope:Runtime.Memory_maintenance ~admission ~cli_runner:runner
+    Runtime.run_best_effort ~write_scope:(Runtime.Memory_maintenance Masc.Keeper_memory_commit_pass.Admission) ~admission ~cli_runner:runner
       ~on_memory_committed:(fun () -> outcome := Worker.Committed)
       ~on_admission_deferred:(fun () -> outcome := Worker.Awaiting_evidence)
       ~on_not_committed:(fun reason -> reports := reason :: !reports;
@@ -896,7 +896,7 @@ let test_explicit_admission_envelope ?(transport_failure=false) ~deferred () =
         "outcome",`String outcome; "memory_claim",memory_claim;
         "reason",`String "same event; judgment fixture"]]])) in
   let committed = ref 0 and retained = ref 0 and awaiting_evidence = ref 0 in
-  Runtime.run_best_effort ~pass:Masc.Keeper_memory_commit_pass.Admission ~write_scope:Runtime.Memory_maintenance ~admission
+  Runtime.run_best_effort ~write_scope:(Runtime.Memory_maintenance Masc.Keeper_memory_commit_pass.Admission) ~admission
     ~cli_runner:runner ~on_memory_committed:(fun () -> incr committed)
     ~on_not_committed:(fun _ -> incr retained)
     ~on_admission_deferred:(fun () -> incr awaiting_evidence)
@@ -977,7 +977,7 @@ let test_admission_retirement_evidence ~reobserved () =
         "reason",`String "Injected decision after considering retirement and observation order."]]])) in
   let committed = ref 0 in
   let selected_input = { (input ()) with current=Some {Librarian.facts=[]}; messages=[] } in
-  Runtime.run_best_effort ~pass:Masc.Keeper_memory_commit_pass.Admission ~write_scope:Runtime.Memory_maintenance ~admission ~cli_runner:runner
+  Runtime.run_best_effort ~write_scope:(Runtime.Memory_maintenance Masc.Keeper_memory_commit_pass.Admission) ~admission ~cli_runner:runner
     ~on_memory_committed:(fun () -> incr committed)
     ~base_path ~keepers_dir ~keeper_id ~expected_revision:(Some snapshot.revision) selected_input;
   let prompt = match !captured with [prompt] -> prompt | _ -> fail "expected one captured request" in
@@ -1048,7 +1048,7 @@ let test_admission_unavailable_retirement_history () =
       "candidates",`List [`Assoc ["request_id",`String candidate.request_id;
         "outcome",`String "deferred"; "memory_claim",`Null;
         "reason",`String "Injected uncertainty because retirement evidence is unavailable."]]])) in
-  Runtime.run_best_effort ~pass:Masc.Keeper_memory_commit_pass.Admission ~write_scope:Runtime.Memory_maintenance ~admission ~cli_runner:runner
+  Runtime.run_best_effort ~write_scope:(Runtime.Memory_maintenance Masc.Keeper_memory_commit_pass.Admission) ~admission ~cli_runner:runner
     ~on_memory_committed:(fun () -> incr committed)
     ~on_not_committed:(fun _ -> incr deferred)
     ~base_path ~keepers_dir ~keeper_id ~expected_revision:(Some snapshot.revision) (input ());
@@ -1122,7 +1122,7 @@ let test_mixed_admission ~depends_on_deferred () =
         `Assoc ["request_id",`String confirmed_id;"outcome",`String "incorporated";
           "memory_claim",`String confirmed_claim;"reason",`String "Independent confirmed observation."]]])) in
   let selected_input = {(input ()) with current=Some {Librarian.facts=[]};messages=[]} in
-  Runtime.run_best_effort ~pass:Masc.Keeper_memory_commit_pass.Admission ~write_scope:Runtime.Memory_maintenance ~admission
+  Runtime.run_best_effort ~write_scope:(Runtime.Memory_maintenance Masc.Keeper_memory_commit_pass.Admission) ~admission
     ~cli_runner:runner ~on_memory_committed:(fun () -> incr committed)
     ~base_path ~keepers_dir ~keeper_id ~expected_revision:(Some initial.revision) selected_input;
   check int "one injected provider response" 1 !requests;
@@ -1512,7 +1512,7 @@ let test_gated_runtime_program_binding () =
   let range : Current.official_range_id = {receipt_scope="gated-runtime-program";
     after_boundary_line=0;turns=[1,source.turn_ref];unread_messages=[]} in
   let original_messages=first.source_input.messages@second.source_input.messages in
-  let committed=Current.apply_program ~pass:Masc.Keeper_memory_commit_pass.Program_publish ~keepers_dir ~keeper_id ~now:2_000_000. ~anchor
+  let committed=Current.apply_program ~pass:Masc.Keeper_memory_commit_pass.Durable ~keepers_dir ~keeper_id ~now:2_000_000. ~anchor
     ~source:(Current.Official_program_source {range;selected_turns=[1,source.turn_ref,original_messages]})
     ~validate_source:(fun () -> Ok ()) program |> require_memory in
   check_memory_payloads "actual Runtime program publishes its final gated Memory once"

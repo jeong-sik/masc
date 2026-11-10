@@ -399,14 +399,6 @@ let settle_diagnostics = function
     diagnostics
   | Posts_settle_nothing_to_settle -> []
 
-(* Byte-content evidence comparison for settlement. This compares observed
-   file bytes against retained write evidence; it never dispatches on
-   string tags. *)
-let bytes_have_prefix ~prefix bytes =
-  let prefix_length = String.length prefix in
-  String.length bytes >= prefix_length
-  && String.equal prefix (String.sub bytes 0 prefix_length)
-
 type settle_direction =
   | Direction_landed
   | Direction_absent
@@ -428,7 +420,7 @@ let settle_direction ~(pending : posts_unsettled_write) (observed : Fs_compat.pr
     let landed =
       String.equal current intended
       || (match pending.kind with
-          | Append_write -> bytes_have_prefix ~prefix:intended current
+          | Append_write -> String.starts_with ~prefix:intended current
           | Rewrite_write -> false)
     in
     if landed then Direction_landed else Direction_diverged

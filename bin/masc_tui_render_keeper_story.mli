@@ -68,8 +68,8 @@ val feed_lines :
 
 val memory_lines :
   Masc_tui_types.state -> cols:int -> max_lines:int -> now:float -> keeper_name:string -> string list
-(** Recently recorded claims, recorded retrievals and a committed change
-    table, with storage health on its own subpage. Reads are independently
+(** Compact preview of recently recorded claims, recorded retrievals and
+    committed changes. Its shortcuts open the shared Memory browser. Reads are independently
     keyed to the selected Keeper/workspace. Retained values, loading,
     failures and partial history remain explicit. Retrieval means a search
     returned the fact, not that an answer benefited from it. *)

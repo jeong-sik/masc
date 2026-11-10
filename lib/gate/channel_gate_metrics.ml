@@ -27,13 +27,6 @@ let error_kind_to_string = function
   | Ek_dispatch_unavailable -> "dispatch_unavailable"
   | Ek_internal -> "internal"
 
-let error_kind_of_string = function
-  | "validation" -> Some Ek_validation
-  | "keeper" -> Some Ek_keeper
-  | "dispatch_unavailable" -> Some Ek_dispatch_unavailable
-  | "internal" -> Some Ek_internal
-  | _ -> None
-
 type failure = {
   kind : error_kind;
   message : string;

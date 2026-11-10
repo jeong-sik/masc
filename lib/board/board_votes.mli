@@ -41,6 +41,13 @@ val vote_log_path : store -> string
     fields; [target] carries canonical typed target/voter identities and the
     derived [voter] field must match it. *)
 
+val reload_votes : store -> (int, board_error) result
+(** Explicit source/model reload under persistence then state. A complete load
+    replaces the ledger, retains valid orphan votes and rebuilds counts. The
+    result counts accepted physical rows. Reload refuses while a deletion is
+    pending. Unknown writes and interrupted model publication remain fail-stop
+    and require a fresh store. *)
+
 (** {1 Voting} *)
 
 val current_vote_for_post :
@@ -48,8 +55,8 @@ val current_vote_for_post :
   voter:string ->
   post_id:string ->
   (vote_direction option, board_error) Result.t
-(** Returns the persisted vote direction for [voter] on [post_id],
-    if any. *)
+(** Known vote direction in this store's readable source model. An incomplete
+    or unavailable vote source returns [Io_error], not a claim of no vote. *)
 
 val vote :
   store ->
@@ -67,25 +74,19 @@ val vote :
     {b without} earning credits, to prevent down/up
     alternation abuse).
 
-    Write-ahead: the vote is durably appended to the vote log {b before}
-    [store.posts] / [store.vote_log] are mutated, not after. Mutating first
-    and rolling back a failed append second would leave a window where a
-    racing [flush_dirty] snapshot-writes the not-yet-durable mutation before
-    the append either confirms or fails it, durably resurrecting a vote that
-    should not exist. If the append fails, [Error (Io_error _)] is returned
-    and nothing was ever mutated, so there is nothing to undo. If a second
-    call for the same [(voter, post_id)] commits first while this one's
-    append is in flight, this call's commit re-checks the vote log
-    immediately before mutating and returns [Error (Already_voted _)]
-    instead of clobbering the winner. *)
+    Staging, exact-source append and fresh model publication share one
+    persistence interval. The model changes only after known file success;
+    acknowledgement follows a normally successful model callback. A proven
+    nonwrite leaves the model unchanged. Unknown file effects and interrupted
+    model publication retain their exact source evidence and require a fresh
+    store; a normal error does not authorize replay. *)
 
 val current_vote_for_comment :
   store ->
   voter:string ->
   comment_id:string ->
   (vote_direction option, board_error) Result.t
-(** Returns the persisted vote direction for [voter] on [comment_id],
-    if any. *)
+(** Same readable-source rule as {!current_vote_for_post}. *)
 
 val vote_comment :
   store ->

@@ -48,6 +48,15 @@ let calls (series : S.t) =
 ;;
 
 let option_float = Alcotest.(option (float 0.0))
+let minute_ms = 60_000.0
+
+let long_counts (series : S.t) =
+  List.map (fun (bucket : S.bucket) -> bucket.summary.long_count) series.buckets
+;;
+
+let long_times (series : S.t) =
+  List.map (fun (bucket : S.bucket) -> bucket.summary.long_total_ms) series.buckets
+;;
 
 let test_window_rejects_what_it_cannot_chart () =
   let rejected label result =
@@ -225,6 +234,61 @@ let test_failed_and_deferred_calls_are_counted_and_timed () =
   Alcotest.(check option_float) "max" (Some 70.0) total.max_ms
 ;;
 
+(* The line between a short and a long call is one minute, the line of the
+   Execute wait census. A call of exactly one minute is long, and so is a long
+   call that failed or returned a receipt. *)
+let test_a_call_of_one_minute_is_long () =
+  Alcotest.(check (float 0.0)) "the line is one minute" minute_ms S.long_call_threshold_ms;
+  let window =
+    window_exn ~since:utc_midnight ~until:(utc_midnight +. hour) ~width:S.Hour ~offset:0
+  in
+  let series =
+    series_of
+      window
+      [ sample ~ts:utc_midnight ~tool:"a" (minute_ms -. 1.0)
+      ; sample ~ts:utc_midnight ~tool:"a" minute_ms
+      ; sample ~disposition:S.Failed ~ts:utc_midnight ~tool:"a" (2.0 *. minute_ms)
+      ; sample ~disposition:S.Deferred ~ts:utc_midnight ~tool:"a" (3.0 *. minute_ms)
+      ]
+  in
+  let total = series.total in
+  Alcotest.(check int) "every call is counted" 4 total.call_count;
+  Alcotest.(check int) "the call just under a minute is short" 3 total.long_count;
+  Alcotest.(check (float 0.0))
+    "the time of the long calls leaves the short call out"
+    (6.0 *. minute_ms)
+    total.long_total_ms;
+  Alcotest.(check (float 0.0))
+    "the total time still has the short call"
+    ((6.0 *. minute_ms) +. (minute_ms -. 1.0))
+    total.total_ms
+;;
+
+let test_long_calls_are_counted_per_bucket_and_per_tool () =
+  let window =
+    window_exn ~since:utc_midnight ~until:(utc_midnight +. (3.0 *. hour)) ~width:S.Hour ~offset:0
+  in
+  let series =
+    series_of
+      window
+      [ sample ~ts:utc_midnight ~tool:"wait" (5.0 *. minute_ms)
+      ; sample ~ts:utc_midnight ~tool:"wait" (2.0 *. minute_ms)
+      ; sample ~ts:utc_midnight ~tool:"read" 40.0
+      ; sample ~ts:(utc_midnight +. (2.0 *. hour)) ~tool:"build" minute_ms
+      ]
+  in
+  Alcotest.(check (list int)) "long calls per hour, none in the idle hour" [ 2; 0; 1 ] (long_counts series);
+  Alcotest.(check (list (float 0.0)))
+    "time inside the long calls per hour"
+    [ 7.0 *. minute_ms; 0.0; minute_ms ]
+    (long_times series);
+  Alcotest.(check (list (pair string int)))
+    "long calls per tool, longest total first"
+    [ "wait", 2; "build", 1; "read", 0 ]
+    (List.map (fun (tool : S.tool_usage) -> tool.name, tool.usage.long_count) series.top_by_time);
+  Alcotest.(check int) "the window total adds the hours" 3 series.total.long_count
+;;
+
 (* The retained snapshot's p50 and p95 come from [Tool_metrics]. A series over
    the same calls has to report the same numbers, or the same tool reads
    differently on two panels. *)
@@ -323,6 +387,40 @@ let test_json_carries_null_for_a_bucket_with_no_calls () =
   | other -> Alcotest.failf "expected two buckets, got %d" (List.length other)
 ;;
 
+(* A dashboard that read [long_count] as absent would draw no long call at
+   all. Every row of the answer carries both numbers, zero for an idle hour,
+   and the answer names the line they were counted from. *)
+let test_json_counts_long_calls_in_every_row_and_names_the_line () =
+  let window =
+    window_exn ~since:utc_midnight ~until:(utc_midnight +. (2.0 *. hour)) ~width:S.Hour ~offset:0
+  in
+  (* A short call beside the long one: the counts and the times of the long calls
+     differ from those of all calls, so a field read from the wrong one shows. *)
+  let series =
+    series_of
+      window
+      [ sample ~ts:(utc_midnight +. hour) ~tool:"a" (1.5 *. minute_ms)
+      ; sample ~ts:(utc_midnight +. hour) ~tool:"a" 30.0
+      ]
+  in
+  let json = S.to_json ~generated_at:utc_midnight series in
+  let open Yojson.Safe.Util in
+  Alcotest.(check (float 0.0)) "the line a long call starts at" minute_ms (json |> member "long_call_ms" |> to_float);
+  let long_fields row = member "long_count" row, member "long_total_ms" row in
+  let json_value = Alcotest.testable Yojson.Safe.pp Yojson.Safe.equal in
+  let json_pair = Alcotest.pair json_value json_value in
+  let one_long = `Int 1, `Float (1.5 *. minute_ms) in
+  Alcotest.check json_pair "window total" one_long (long_fields (member "total" json));
+  (match json |> member "buckets" |> to_list with
+   | [ idle; busy ] ->
+     Alcotest.check json_pair "an idle hour is zero, not null" (`Int 0, `Float 0.0) (long_fields idle);
+     Alcotest.check json_pair "a busy hour" one_long (long_fields busy)
+   | other -> Alcotest.failf "expected two buckets, got %d" (List.length other));
+  match json |> member "top_by_time" |> to_list with
+  | [ row ] -> Alcotest.check json_pair "a tool row" one_long (long_fields row)
+  | other -> Alcotest.failf "expected one tool row, got %d" (List.length other)
+;;
+
 (* The store: rows written by [insert] come back through [read_series]. *)
 
 let rec rm_rf path =
@@ -388,6 +486,25 @@ let test_read_series_groups_the_stored_calls () =
     Alcotest.(check (list int)) "calls of one tool" [ 0; 1 ] (calls only_write))
 ;;
 
+let test_read_series_counts_the_stored_long_calls () =
+  with_masc_root (fun ~masc_root ->
+    let insert = insert_exn ~masc_root in
+    insert ~record_id:"short" ~ts:(utc_midnight +. 10.0) ~tool_name:"Execute" ~disposition:"completed" (minute_ms -. 1.0);
+    insert ~record_id:"long" ~ts:(utc_midnight +. 20.0) ~tool_name:"Execute" ~disposition:"completed" minute_ms;
+    insert
+      ~record_id:"long-failed"
+      ~ts:(utc_midnight +. hour +. 5.0)
+      ~tool_name:"Execute"
+      ~disposition:"failed"
+      (10.0 *. minute_ms);
+    let window =
+      window_exn ~since:utc_midnight ~until:(utc_midnight +. (2.0 *. hour)) ~width:S.Hour ~offset:0
+    in
+    let series = read_series_exn ~masc_root ~window () in
+    Alcotest.(check (list int)) "long calls per hour" [ 1; 1 ] (long_counts series);
+    Alcotest.(check (float 0.0)) "time inside the long calls" (11.0 *. minute_ms) series.total.long_total_ms)
+;;
+
 let test_read_series_without_a_database_is_empty_and_creates_none () =
   with_masc_root (fun ~masc_root ->
     let window =
@@ -427,6 +544,11 @@ let () =
             "failed and deferred calls are counted and timed"
             `Quick
             test_failed_and_deferred_calls_are_counted_and_timed
+        ; Alcotest.test_case "a call of one minute is long" `Quick test_a_call_of_one_minute_is_long
+        ; Alcotest.test_case
+            "long calls are counted per bucket and per tool"
+            `Quick
+            test_long_calls_are_counted_per_bucket_and_per_tool
         ; Alcotest.test_case "percentiles match Tool_metrics" `Quick test_percentiles_match_tool_metrics
         ; Alcotest.test_case "top tools are ordered by time spent" `Quick test_top_tools_are_ordered_by_time_spent
         ; Alcotest.test_case "names parse into closed types" `Quick test_names_parse_into_closed_types
@@ -434,9 +556,14 @@ let () =
             "json carries null for a bucket with no calls"
             `Quick
             test_json_carries_null_for_a_bucket_with_no_calls
+        ; Alcotest.test_case
+            "json counts long calls in every row and names the line"
+            `Quick
+            test_json_counts_long_calls_in_every_row_and_names_the_line
         ] )
     ; ( "store"
       , [ Alcotest.test_case "read_series groups the stored calls" `Quick test_read_series_groups_the_stored_calls
+        ; Alcotest.test_case "read_series counts the stored long calls" `Quick test_read_series_counts_the_stored_long_calls
         ; Alcotest.test_case
             "read_series without a database is empty and creates none"
             `Quick

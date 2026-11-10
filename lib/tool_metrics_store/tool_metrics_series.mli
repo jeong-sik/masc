@@ -74,9 +74,17 @@ val add : builder -> sample -> (unit, string) result
     nothing when the timestamp is outside the window or the duration is
     negative or not finite. *)
 
+val long_call_threshold_ms : float
+(** A call that ran at least this long (one minute) is a long call. A
+    foreground call holds the turn that issued it until it ends. A call that
+    returns a receipt and finishes later, such as a background Execute, is
+    timed up to the receipt. *)
+
 (** Totals of a set of calls. [p50_ms], [p95_ms] and [max_ms] are [None] when
     the set is empty. Durations of completed, deferred and failed calls are
-    all included. *)
+    all included. [long_count] counts the calls that ran at least
+    {!long_call_threshold_ms}, and [long_total_ms] adds up their durations;
+    both are zero when the set is empty. *)
 type stat =
   { call_count : int
   ; failure_count : int
@@ -85,6 +93,8 @@ type stat =
   ; p50_ms : float option
   ; p95_ms : float option
   ; max_ms : float option
+  ; long_count : int
+  ; long_total_ms : float
   }
 
 type bucket =
@@ -120,4 +130,6 @@ val to_json
     the series. [generated_at] is when the series was read, in epoch seconds. [tool_name] is the filter the samples
     were selected with, [None] for all tools. [public_names] lists the names
     under which a stored tool name is offered to a model; each row of
-    [top_by_time] carries that list, empty by default. *)
+    [top_by_time] carries that list, empty by default. [long_call_ms] is
+    {!long_call_threshold_ms}, so a reader labels the long-call counts with the
+    line the server used. *)

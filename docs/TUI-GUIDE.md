@@ -647,8 +647,11 @@ Usage screen.
 `t` switches between Goals and Tasks. On Tasks, `j`/`k`, paging, Home/End,
 search, `Enter`, and `Esc` operate on the visible Task rows and detail. Goal
 details retain their criterion, measurement and linked Task references.
-`v` opens Task Review and Task Verdicts, then returns to Goals. `p` opens
-operator Approvals and Keeper questions; `Esc` returns to Work.
+Narrow terminals use a borderless list with a short selected-item preview;
+Goal previews lead with the success criterion. In Goal detail, `j`/`k` scroll
+the document and the action row shows the requests available in that phase.
+`v` opens Task Review and Task Verdicts, then returns to Goals. On the Goal
+list, `p` opens operator Approvals and Keeper questions; `Esc` returns to Work.
 
 ### Usage
 

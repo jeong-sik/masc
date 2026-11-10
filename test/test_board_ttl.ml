@@ -37,7 +37,10 @@ let load_sources store =
     | Error (path, cause) ->
       Alcotest.failf "board fixture load failed: %s (%s)" path (Printexc.to_string cause))
     [Masc_board_handlers.Board_votes_json.load_persisted_posts;
-     Masc_board_handlers.Board_votes_json.load_persisted_comments]
+     Masc_board_handlers.Board_votes_json.load_persisted_comments];
+  match reload_votes store with
+  | Ok _ -> ()
+  | Error error -> Alcotest.fail (show_board_error error)
 ;;
 
 let test_default_ttl () =

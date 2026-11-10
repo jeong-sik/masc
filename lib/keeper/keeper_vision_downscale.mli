@@ -129,9 +129,6 @@ val detect_dimensions : string -> dimensions option
     Supports PNG, JPEG, GIF (via {!Keeper_image_dimensions}), and WebP
     (VP8 lossy, VP8L lossless, and VP8X extended). *)
 
-val needs_downscale : ?max_dimension:int -> string -> bool
-(** True iff detected dimensions exceed [max_dimension]. *)
-
 val downscale_with_status
   :  ?max_dimension:int
   -> ?plans:(max_dim:int -> in_file:string -> out_file:string -> media_type -> scaler_plan list)

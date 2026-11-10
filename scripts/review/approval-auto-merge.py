@@ -422,6 +422,25 @@ def wake_main_build(repo):
             'stderr': operation.stderr.strip()[:300]}
 
 
+_WAKE = {'repo': None, 'enabled': False}
+
+
+def reports_a_completed_merge(result):
+    '''True when this emit payload reports a merge that actually happened.
+
+    Three paths reach a merged verdict: submit() after `gh pr merge`, the
+    auto-merge arming readback, and a resumed Native Stack receipt whose
+    follow() saw every member merged. All three must wake the main build; a
+    dry run and an unsettled receipt must not.
+    '''
+    if not isinstance(result, dict):
+        return False
+    if result.get('status') == 'merged':
+        return True
+    inner = result.get('result')
+    return isinstance(inner, dict) and inner.get('status') == 'merged'
+
+
 def requested_pr():
     if os.environ['GITHUB_EVENT_NAME'] == 'workflow_dispatch':
         raw = os.environ['DISPATCH_PR']
@@ -436,6 +455,8 @@ def requested_pr():
 
 
 def emit(result):
+    if _WAKE['enabled'] and reports_a_completed_merge(result):
+        result['main_build'] = wake_main_build(_WAKE['repo'])
     output = json.dumps(result, ensure_ascii=False, indent=2)
     print(output, flush=True)
     if os.environ.get('GITHUB_STEP_SUMMARY'):
@@ -452,6 +473,8 @@ def main():
         repo = os.environ['GITHUB_REPOSITORY']
         if REVIEWS.REPO.fullmatch(repo) is None:
             raise ValueError('invalid repository')
+        _WAKE['repo'] = repo
+        _WAKE['enabled'] = not args.dry_run
         number = requested_pr()
         raw_receipt = os.environ.get('DISPATCH_RECEIPT', '')
         if raw_receipt and os.environ['GITHUB_EVENT_NAME'] == 'workflow_dispatch':
@@ -471,8 +494,6 @@ def main():
             emit({'status': 'admitted', 'pr': selected, 'head': head, 'scope': scope})
         outcome = ({'status': 'eligible_dry_run'} if args.dry_run else
                    submit(repo, selected, head, scope))
-        if not args.dry_run and outcome.get('status') == 'merged':
-            outcome['main_build'] = wake_main_build(repo)
         result = {'pr': selected, 'head': head, 'scope': scope, 'result': outcome}
         if outcome.get('status') not in SUCCESS:
             exit_code = 1  # merged is the only success; everything else is visible red

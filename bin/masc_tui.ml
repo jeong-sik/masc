@@ -5948,6 +5948,12 @@ let launch_volume_gc state ~mailbox request =
       Masc_tui_volume_gc.answer_of_text ~is_error:outcome.Masc_tui_mcp.is_error
         outcome.Masc_tui_mcp.text)
 
+let press_tools_volume_gc state ~mailbox =
+  match Masc_tui_volume_gc.press state.volume_gc with
+  | Masc_tui_volume_gc.Still_running ->
+      report_action state "info" "volume GC: the previous request is still running"
+  | Masc_tui_volume_gc.Send request -> launch_volume_gc state ~mailbox request
+
 (* The pane draws the answer; the footer says it once. A failure without an
    answer is an error line, since after a reclaim it may hide a deletion. *)
 let settle_volume_gc state request result =
@@ -5955,6 +5961,11 @@ let settle_volume_gc state request result =
     (match result with
      | Ok answer -> Masc_tui_volume_gc.answered answer
      | Error detail -> Masc_tui_volume_gc.unanswered request detail);
+  (* A newly answered report can arm a reclaim. Show its first line before
+     the retained report position; periodic inventory reads do not move it. *)
+  if state.view = Tools
+     && Option.is_some (tools_volume_gc_parent_scroll state.tools_pane) then
+    tools_task_user_scroll state 0;
   let kind =
     match result with
     | Ok (Masc_tui_volume_gc.Report _) -> "system"
@@ -9962,7 +9973,8 @@ let launch_owed_tools state ~mailbox =
                   (fun owed -> state.tools_activations_owed <- owed)
              then [ Tools_activations_read ]
              else [])
-      | Tools_surface | Tools_catalog -> inventory_parts ()
+      | Tools_surface
+      | Tools_catalog (Tools_catalog_list | Tools_catalog_volumes _) -> inventory_parts ()
       | Tools_async -> []
     in
     match parts with
@@ -19232,7 +19244,8 @@ let enter_tools_pane state pane =
       owe_tools_catalog_read state;
       owe_every_skill_usage_read state
   | Tools_activations -> owe_tools_activations_read state
-  | Tools_surface | Tools_catalog | Tools_async -> ()
+  | Tools_surface | Tools_async
+  | Tools_catalog (Tools_catalog_list | Tools_catalog_volumes _) -> ()
 ;;
 
 (* The cursor restarts because the row under it belongs to the listing being
@@ -37363,6 +37376,22 @@ Use relative paths for resources already held in the package. -->
            if not compact_viewport then handle_skill_source_key k
            else if String.equal k "esc" then state.tools_skill_source_picker <- None
        | Some k
+         when state.view = Tools
+              && Option.is_some (tools_volume_gc_parent_scroll state.tools_pane)
+              && not (List.mem k
+                [ "?"; ":"; "q"; "\t"; "shift-tab"; "p"; "P"; "r"; "R"
+                ; "j"; "k"; "up"; "down"; "wheel-up"; "wheel-down"
+                ; "pageup"; "pagedown"; "home"; "end" ]) ->
+           (* This reading owns its action keys. Skill edits and Keeper
+              selection belong to the catalog, not the volume report. *)
+           if String.equal k Masc_tui_volume_gc.key then
+             press_tools_volume_gc state ~mailbox:async_messages
+           else if String.equal k "esc" then
+             Option.iter (fun catalog_scroll ->
+               enter_tools_pane state (Tools_catalog Tools_catalog_list);
+               tools_task_user_scroll state catalog_scroll)
+               (tools_volume_gc_parent_scroll state.tools_pane)
+       | Some k
          when state.view = Keepers Keeper_runtime_pick
               && (Option.is_some (keeper_runtime_picker_action state.runtime_pick_list k)
                   || text_input_target state ~compact_viewport
@@ -38482,14 +38511,14 @@ Use relative paths for resources already held in the package. -->
                 handle_skill_evidence ())
        | Some k
          when String.equal k Masc_tui_volume_gc.key
-              && state.view = Tools && state.tools_pane = Tools_catalog ->
-           (* The catalog lists every registered tool; this one is the
-              operator's own reclamation of retired Keepers' volumes. *)
-           (match Masc_tui_volume_gc.press state.volume_gc with
-            | Masc_tui_volume_gc.Still_running ->
-                report_action state "info" "volume GC: the previous request is still running"
-            | Masc_tui_volume_gc.Send request ->
-                launch_volume_gc state ~mailbox:async_messages request)
+              && state.view = Tools && state.tools_pane = Tools_catalog Tools_catalog_list ->
+           let catalog_scroll = tools_task_render_scroll state in
+           (* Opening cannot reuse an arm retained from a different view.
+              Disarming leaves an actual in-flight request alone. *)
+           state.volume_gc <- Masc_tui_volume_gc.disarm state.volume_gc;
+           enter_tools_pane state
+             (Tools_catalog (Tools_catalog_volumes {catalog_scroll}));
+           press_tools_volume_gc state ~mailbox:async_messages
        | Some "J" when state.view = Tools -> move_tools_skill_cursor state 1
        | Some "K" when state.view = Tools -> move_tools_skill_cursor state (-1)
        | Some "d" when state.view = Tools && state.tools_pane <> Tools_async ->
@@ -42375,8 +42404,8 @@ Use relative paths for resources already held in the package. -->
               | Tools_surface -> Tools_async
               | Tools_async -> Tools_activations
               | Tools_activations -> Tools_usage
-              | Tools_usage -> Tools_catalog
-              | Tools_catalog -> Tools_surface)
+              | Tools_usage -> Tools_catalog Tools_catalog_list
+              | Tools_catalog (Tools_catalog_list | Tools_catalog_volumes _) -> Tools_surface)
        | Some "p" | Some "P" when state.view = Config ->
            (* One surface, two files the server reads: runtime.toml and the
               prompt registry. [p] moves between them and loads the list the

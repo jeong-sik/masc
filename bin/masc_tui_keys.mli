@@ -168,7 +168,8 @@ val footer_hints :
 
 val footer_hints_tools :
   lang:Masc_tui_types.ui_language -> pane:Masc_tui_types.tools_pane -> string
-(** Tools' bracket keys select retained runs in Available and Keepers in other panes. *)
+(** Tools' bracket keys select retained runs in Available and Keepers in other
+    panes. The catalog's volume child shows only volume and reading controls. *)
 
 val footer_hints_metrics :
   lang:Masc_tui_types.ui_language ->

@@ -5904,12 +5904,22 @@ let config_pane_display_label ~lang pane fallback =
    past row 120. Nothing on the screen said they were there.
 
    The same shape the Config surface already has, and for the same reason. *)
+type tools_catalog_view =
+  | Tools_catalog_list
+  | Tools_catalog_volumes of { catalog_scroll : int }
+      (** The catalog's captured scroll position, restored by Esc. *)
+
 type tools_pane =
   | Tools_surface
   | Tools_async
   | Tools_activations
   | Tools_usage
-  | Tools_catalog
+  | Tools_catalog of tools_catalog_view
+
+let tools_volume_gc_parent_scroll = function
+  | Tools_catalog (Tools_catalog_volumes {catalog_scroll}) -> Some catalog_scroll
+  | Tools_surface | Tools_async | Tools_activations | Tools_usage
+  | Tools_catalog Tools_catalog_list -> None
 
 type tools_read_part =
   | Tools_inventory_read
@@ -10659,8 +10669,7 @@ type state = {
   mutable connector_unbind_all_armed:
     (string * Masc_tui_connector_unbind.target list) option;
   mutable connector_unbind_all_inflight: bool;
-  (* The catalog pane's volume GC: what the next [V] sends and the last
-     answer, which the pane draws in place. *)
+  (* The catalog's volume child: what the next [V] sends and its last answer. *)
   mutable volume_gc: Masc_tui_volume_gc.t;
   (* A Keeper the operator just paused or shut down, waiting for a fresh
      connector read to learn whether it still holds bindings to offer to

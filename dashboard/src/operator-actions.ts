@@ -1,6 +1,5 @@
 import {
   extractApiError,
-  fetchOperatorDigest,
   fetchOperatorSnapshot,
   runOperatorAction,
 } from './api/core'
@@ -15,26 +14,21 @@ import { UI_REFRESH_TTL_MS } from './config/constants'
 import { UNKNOWN_STATUS_LABEL } from './lib/format-string'
 import {
   operatorSnapshot,
-  operatorWorkspaceDigest,
   operatorLoading,
   operatorError,
   operatorErrorStatus,
-  operatorDigestLoading,
-  operatorDigestError,
-  operatorDigestErrorStatus,
   operatorActionBusy,
   operatorActionLog,
 } from './operator-signals'
-import { normalizeOperatorSnapshot, normalizeOperatorDigest } from './operator-normalizers'
+import { normalizeOperatorSnapshot } from './operator-normalizers'
+import { refreshOperatorWorkspaceDigest } from './operator-digest-observation'
+export { refreshOperatorWorkspaceDigest } from './operator-digest-observation'
 
 let nextLogId = 1
 
 let snapshotRefreshInflight: Promise<void> | null = null
-let workspaceDigestRefreshInflight: Promise<void> | null = null
 let snapshotFollowup: Promise<void> | null = null
-let digestFollowup: Promise<void> | null = null
 let lastSnapshotRefreshAt = 0
-let lastWorkspaceDigestRefreshAt = 0
 
 function stringifyUnknown(value: unknown): string {
   if (typeof value === 'string') return value
@@ -108,40 +102,6 @@ export async function refreshOperatorSnapshot(opts?: RefreshOptions): Promise<vo
     }
   })()
   return snapshotRefreshInflight
-}
-
-export async function refreshOperatorWorkspaceDigest(opts?: RefreshOptions): Promise<void> {
-  if (workspaceDigestRefreshInflight) {
-    if (!opts?.force) return workspaceDigestRefreshInflight
-    // A read admitted before the action cannot acknowledge that action.
-    // Coalesce callers behind one read admitted after the current one ends.
-    if (!digestFollowup) {
-      digestFollowup = workspaceDigestRefreshInflight.then(() => {
-        digestFollowup = null
-        return refreshOperatorWorkspaceDigest({ force: true })
-      })
-    }
-    return digestFollowup
-  }
-  if (isFresh(lastWorkspaceDigestRefreshAt, opts)) return
-  operatorDigestLoading.value = true
-  operatorDigestError.value = null
-  operatorDigestErrorStatus.value = null
-  workspaceDigestRefreshInflight = (async () => {
-    try {
-      const raw = await fetchOperatorDigest({ targetType: 'namespace' })
-      operatorWorkspaceDigest.value = normalizeOperatorDigest(raw)
-      lastWorkspaceDigestRefreshAt = Date.now()
-    } catch (err) {
-      const summary = extractApiError(err, 'operator 다이제스트 로드 실패')
-      operatorDigestError.value = summary.message
-      operatorDigestErrorStatus.value = summary.status
-    } finally {
-      operatorDigestLoading.value = false
-      workspaceDigestRefreshInflight = null
-    }
-  })()
-  return workspaceDigestRefreshInflight
 }
 
 type ActionRefreshOptions = { refresh?: 'await' | 'background' }

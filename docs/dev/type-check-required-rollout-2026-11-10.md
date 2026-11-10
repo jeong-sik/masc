@@ -41,3 +41,10 @@ Order, per operator answer c1 (ask `aske1aa44782fd05693`):
 rule: any keeper observing a bot merge dispatches the build immediately
 (`workflow_dispatch`, ref=main — run 42867165587 is the worked example). A
 separate PR will make `approval-auto-merge` do this itself.
+
+## 2026-11-10 19:38Z — 등록 완료와 측정 이월
+
+- ruleset 26823705 "Two approvals for main"에 `required_status_checks`(컨텍스트 `changes`·`type-check`) 등록(19:38:57Z, history version 57184716). `do_not_enforce_on_create=false`, `strict_required_status_checks_policy=false`.
+- 등록 API 422 원인: 현행 스키마는 parameters 에 `strict_required_status_checks_policy`(필수 boolean)와 `required_status_checks` 배열(`{context}`)을 요구. 구세대 `strict` 키·`checks` 배열 키는 oneOf 불일치.
+- 프로브 #51167(docs-only): `changes` 첫 시도는 설치 토큰 레이트리밋으로 fail-closed 실패(18:23:55Z), 재실행 success(19:14:11Z). `type-check` skipped(19:14:16Z). #51167 은 등록 전 19:29:51Z 병합되어, "skipped 가 required 를 통과하는가"의 종단 측정은 등록 뒤 개봉되는 docs-only PR(본 PR)에서 한다.
+- 근거 사건: #50746·#51157·#51161·#51149 — 전부 required status check 부재가 원인.

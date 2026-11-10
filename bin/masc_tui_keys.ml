@@ -557,6 +557,10 @@ let metrics_bindings =
   ; b ~ko:"종료" Meta "q" "quit", Metrics_all
   ]
 
+let memory_browser_pages =
+  [ b ~ko:"최근 / 조회 / 변화 / 저장" Act "1 / 2 / 3 / 4" "recent / retrievals / changes / storage"
+      ~help:"one Memory browser; changes require an individual Keeper, while storage opens the fleet health view" ]
+
 let for_surface = function
   | Overview ->
       [ b ~ko:"키퍼" Navigate "Left" "Keepers" ~help:"open the Keeper list; Enter opens a chat; Right or Esc returns"
@@ -1070,8 +1074,8 @@ let for_surface = function
       ]
       @ row_list_edges @ listing_meta
   | Memory ->
-      [ b ~ko:"최근 / 조회 / 변화 / 저장" Act "1 / 2 / 3 / 4" "recent / retrievals / changes / storage"
-      ; b ~ko:"선택" Navigate "j/k" "move" ~help:"move the keeper row"
+      memory_browser_pages @
+      [ b ~ko:"선택" Navigate "j/k" "move" ~help:"move the keeper row"
       ; b ~ko:"기억 항목" Act "Enter" "facts"
           ~help:"browse what the selected keeper actually remembers"
       ; b ~ko:"상태 상세" Act "v" "health details"
@@ -2231,10 +2235,6 @@ let footer_hints_git_diff =
    health row's under these names -- Enter opens the reading, s reorders
    instead of pausing a keeper -- so a reader who has not pressed them learns
    them only from [?], which is what [?] answers. *)
-let memory_browser_pages =
-  [ b ~ko:"최근 / 조회 / 변화 / 저장" Act "1 / 2 / 3 / 4" "recent / retrievals / changes / storage"
-      ~help:"one Memory browser; changes require an individual Keeper, while storage opens the fleet health view" ]
-
 let bindings_memory_changes =
   memory_browser_pages @
   [ b ~ko:"이동" Navigate "j/k" "move"

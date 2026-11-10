@@ -346,9 +346,17 @@ evidence meanings and column legends, including the distinction from a Keeper's
 callable surface and observed calls. Missing
 inventory remains a missing reading, and independent pending/failure/retained
 notices, Skill drafts and the volume child keep their existing owners.
-Candidate execution and the actual generated key reference remain pending;
-the baseline does not execute this follow-up. The full 23-surface and installed
-scope stays open.
+The committed key reference is the actual generator's complete output from
+source `072796b2`, SHA-256
+`40fe09893eca59360482bdb88e60bfeba7f967f734a4ee66bc47f7a8a85b3a16`.
+`Minimal manual checks` [run 42773110048](https://github.com/jeong-sik/masc/actions/runs/42773110048)
+completed successfully on workflow ref `main`, workflow head
+`fdde0336dd0166103aef3e470f0cacc85ee85c26`, selected source
+`072796b22fe3c289f6c5f476e238d55ecaff6fb8`. The receipt records matching
+server/TUI builds and the three workspace-file suites with zero suite/log exit
+codes; this is not Full CI. Matching candidate interaction and installation
+remain pending; the baseline does not execute this follow-up. The full
+23-surface scope stays open.
 
 ## Operations action-reason reading (#50913)
 

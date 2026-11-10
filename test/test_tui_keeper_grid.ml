@@ -59,7 +59,7 @@ let verdict_label = function
 let check name expected reading =
   Alcotest.(check string) name expected (verdict_label (Grid.verdict ~now reading))
 
-let test_failing_comes_first () =
+let test_pause_precedes_failing_health () =
   let failing = runtime (health "failing") in
   check "a failing health reading is failing" "failing" (Some failing);
   check "a failing Keeper whose path rests is resting" "failing, resting"
@@ -71,7 +71,7 @@ let test_failing_comes_first () =
        });
   check "a rest that did not read is not a rest" "failing"
     (Some { failing with kr_runtime_path_rest = Error "unreadable" });
-  check "a paused failing Keeper is still failing" "failing"
+  check "a paused failing Keeper is paused" "paused"
     (Some { failing with kr_paused = true })
 
 let test_the_pause_comes_before_the_pulse () =
@@ -96,8 +96,8 @@ let test_a_failed_half_hour_in_the_last_twelve_hours_is_a_recovery () =
   check "ok turns alone are sound" "sound" (Some (with_pulse [ slot_ago ~ok:3 0 ] healthy));
   check "no pulse is no failed half hour" "sound" (Some idle)
 
-let test_offline_and_unread_are_other () =
-  check "an offline Keeper with a failed half hour is not recovered" "other"
+let test_offline_can_recover_and_unread_is_other () =
+  check "an offline Keeper with a failed half hour is recovered" "recovered"
     (Some (with_pulse [ slot_ago ~failed:1 0 ] (runtime (health "offline"))));
   check "a Keeper the roster did not read" "other" None
 
@@ -142,12 +142,12 @@ let test_a_strip_half_hour_draws_one_mark () =
 let () =
   Alcotest.run "tui_keeper_grid"
     [ ( "verdict"
-      , [ Alcotest.test_case "failing comes first" `Quick test_failing_comes_first
+      , [ Alcotest.test_case "pause precedes failing health" `Quick test_pause_precedes_failing_health
         ; Alcotest.test_case "the pause comes before the pulse" `Quick
             test_the_pause_comes_before_the_pulse
         ; Alcotest.test_case "a failed half hour in the last twelve hours is a recovery" `Quick
             test_a_failed_half_hour_in_the_last_twelve_hours_is_a_recovery
-        ; Alcotest.test_case "offline and unread are other" `Quick test_offline_and_unread_are_other
+        ; Alcotest.test_case "offline can recover and unread is other" `Quick test_offline_can_recover_and_unread_is_other
         ] )
     ; ( "level"
       , [ Alcotest.test_case "the level rises with the value" `Quick

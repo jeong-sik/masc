@@ -1,0 +1,16 @@
+{
+  "source": "ea87978b18e3fc6c4a143cf8e74de8cbc495d67e",
+  "type_check": {
+    "id": 42607810219,
+    "status": "completed",
+    "conclusion": "success",
+    "job": 129128142998,
+    "workflow": "PR type-check (dune build @check)",
+    "head_ref": "feat/keepers-world-row-w1",
+    "url": "https://github.com/jeong-sik/masc/actions/runs/42607810219",
+    "observation": "Completed success and actual type-check step success were read at the prior work boundary; this is a retained summary, not a new API read."
+  },
+  "focused_test_receipt": "targeted-test-receipt.json",
+  "macos_artifact_receipt": "binary-identity-receipt.json",
+  "scope": "Frozen cumulative source only. Later external restacks and Plain projection changes were not executed by these checks. No local Dune, full regression, release, installation or deployment claim."
+}

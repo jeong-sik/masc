@@ -15,6 +15,8 @@ let world ~claims =
     ; excluded_count = 0
     ; classified_count = 0
     ; briefing = { Wire.status = Wire.Current; building = None }
+    ; ordinary_absence = Wire.Absence_complete
+        { facts = claims; absent = 0; available_stores = 1; missing_stores = 0 }
     }
 
 let first = world ~claims:1

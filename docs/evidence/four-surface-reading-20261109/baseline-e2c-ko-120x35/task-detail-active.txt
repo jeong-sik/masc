@@ -1,0 +1,35 @@
+ 운영  ▸작업  키퍼  기능·플러그인  워크스페이스  시스템
+                                 │
+  Tasks                     (3)  │  MASC Task  [task-surface-active]  HTTP [connected]
+  ─────────────────────────────  │ ────────────────────────────────────────────────────────────────────────────────────
+ ▸ 긴 요청을…task-surface-active │   [ 작업 식별 · 상태 및 목표 (Task Identity & Status) ]
+   Preserve …ask-surface-claimed │   title: 긴 요청을 상세에서 끝까지 읽기
+   요청의 핵…  task-surface-todo │   id: task-surface-active
+                                 │   goal: goal-surface-second
+                                 │   link: masc://planning/goal-surface-second
+                                 │   status: in progress
+                                 │   actor: sourcereader
+                                 │   started: 2026-11-09T14:38:04.908961Z
+                                 │   created: 2026-11-09T14:38:04.908961Z
+                                 │   creator: fixture-operator
+                                 │   priority: 2
+                                 │   cycles: 0
+                                 │
+                                 │   [ 작업 설명 · 대상 파일 (Description & Files) ]
+                                 │   what: 목록은 선택과 구분을 돕고 상세는 원래 요청 전체를 읽는 곳입니다.
+                                 │         목록은 선택과 구분을 돕고 상세는 원래 요청 전체를 읽는 곳입니다.
+                                 │         목록은 선택과 구분을 돕고 상세는 원래 요청 전체를 읽는 곳입니다.
+                                 │         목록은 선택과 구분을 돕고 상세는 원래 요청 전체를 읽는 곳입니다.
+                                 │         목록은 선택과 구분을 돕고 상세는 원래 요청 전체를 읽는 곳입니다.
+                                 │   file: fixture-sources/reading-contract.md
+                                 │
+                                 │   [ 상태 전환 이력 (HISTORY) ]
+                                 │ load failed: HTTP 503: task_history_unavailable
+                                 │
+                                 │
+                                 │
+                                 │
+                                 │
+  ACTION NEEDED 1 · keeper_memory_execution:addon_unattached  j/k:scroll  PgUp/PgDn:page  Home/End  Left / Esc:back  …?
+ 일정 정보가 오래됐을 수 있음
+ › to quietreader   (i to write)

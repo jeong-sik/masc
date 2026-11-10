@@ -6,9 +6,8 @@
     [GET /api/v1/dashboard/workspace-memory-inventory] from a 60 s cache and
     sends no change signal, so the screen asks on a clock: after each answer
     {!complete} sets the time before which {!start} gives out no read. The
-    caller asks from its per-iteration launcher while the Memory overview, the
-    screen that draws the line, is open and nowhere else, so there is no timer
-    of its own.
+    caller asks from its per-iteration launcher while the Memory overview or
+    the Keepers memory/age views draw it, so there is no timer of its own.
 
     Nothing here does I/O. The state is a value; every transition returns a new
     one. *)

@@ -9,6 +9,7 @@ type source = {
   related_posts : Masc_tui_types.board_post list;
   keeper_names : string list;
   columns : int;
+  language : Masc_tui_types.ui_language;
   styles : string list;
   table_frame : bool;
 }

@@ -176,3 +176,19 @@ let half_hour_mark = function
   | Half_hour_failed -> Mark.grid_full_mark
   | Half_hour_failed_and_ok -> Mark.grid_pulse_failed_and_ok_mark
 ;;
+
+type failure_count = Exact of int | At_least of int | Count_unknown
+
+let failure_count hours =
+  let count, unknown = List.fold_left (fun (count, unknown) -> function
+    | Half_hour_failed | Half_hour_failed_and_ok -> count + 1, unknown
+    | Half_hour_unknown -> count, true
+    | Half_hour_quiet | Half_hour_ok -> count, unknown) (0, false) hours in
+  if unknown then if count = 0 then Count_unknown else At_least count else Exact count
+
+let failure_lower_bound = function Exact n | At_least n -> n | Count_unknown -> 0
+
+let peak_failure_count counts =
+  let lower = List.fold_left (fun peak count -> max peak (failure_lower_bound count)) 0 counts in
+  let uncertain = List.exists (function Exact _ -> false | At_least _ | Count_unknown -> true) counts in
+  if uncertain then if lower = 0 then Count_unknown else At_least lower else Exact lower

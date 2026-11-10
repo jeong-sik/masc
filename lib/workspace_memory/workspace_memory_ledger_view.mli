@@ -8,7 +8,9 @@ val summary : base_path:string -> (Yojson.Safe.t, string) result
     bodies or workspace-sized fact array is returned. *)
 
 val inventory : ?now:float -> base_path:string -> unit -> (Yojson.Safe.t, string) result
-(** Availability, counts and briefing freshness, without memory bodies. *)
+(** Availability, counts, briefing freshness and ordinary fact absence from
+    that ledger snapshot, without memory bodies. Store discovery failures and
+    partial ordinary reads remain explicit; reasons for absence are not inferred. *)
 
 val briefing : ?now:float -> base_path:string -> unit -> (Yojson.Safe.t, string) result
 (** Explicitly retrieve the shared briefing with its freshness status. *)

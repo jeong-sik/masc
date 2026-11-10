@@ -44,7 +44,7 @@ let row_lines ~cells label =
 let reason_lines ~cells reason =
   List.map (fun line -> Theme.warn () ^ line ^ Ansi.reset) (row_lines ~cells reason)
 
-let reasons_title count = Printf.sprintf "Action needed (%d)" count
+let reasons_title ~title count = Printf.sprintf "%s (%d)" title count
 
 (* The reasons as the plain layout draws them, one element to a row: the
    heading, the lines of each reason that is drawn and, when some are left out,
@@ -53,11 +53,11 @@ let reasons_title count = Printf.sprintf "Action needed (%d)" count
    order: all of them when they fit [rows], else the longest run that fits
    together with the note. A short reason after one that does not fit never
    jumps ahead. *)
-let plain_reasons ~indent ~inner ~rows reasons =
+let plain_reasons ~title ~indent ~inner ~rows reasons =
   let cells = inner - Layout.display_width indent in
   let blocks = List.map (reason_lines ~cells) reasons in
   let total = List.length blocks in
-  let heading = Some Ansi.bold, " " ^ reasons_title total in
+  let heading = Some Ansi.bold, " " ^ reasons_title ~title total in
   let drawn count =
     let omitted = total - count in
     let lines =
@@ -84,7 +84,7 @@ let row_body ~is_selected ~cells (action, label) =
   let lines = row_lines ~cells label in
   if is_selected action then List.map (band ~cells) lines else lines
 
-let draw ~(titles : titles) ~inner ~rows ~is_selected ~decisions ~decisions_whole ~continuation ~status ~actions =
+let draw ~(titles : titles) ~empty_decisions ~inner ~rows ~is_selected ~decisions ~decisions_whole ~continuation ~status ~actions =
   let fits =
     Masc_tui_card.columns_that_fit ~inner_width:inner ~gap:column_gap
       ~min_card_width ~max_columns:column_count
@@ -101,7 +101,7 @@ let draw ~(titles : titles) ~inner ~rows ~is_selected ~decisions ~decisions_whol
              match decisions with
              (* The cards are drawn only for a whole window, so an empty list
                 means no decision waits. *)
-             | [] -> [ Theme.recede () ^ "No decision is waiting on you." ^ Ansi.reset ]
+             | [] -> [ Theme.recede () ^ empty_decisions ^ Ansi.reset ]
              | _ :: _ -> rows_of decisions ~cells)
       }
     in

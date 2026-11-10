@@ -1,0 +1,11 @@
+{
+  "tested_source": "b56552704a5b1350d636449d57c1ff0d920c8adc",
+  "base": "7175899d3af7801f489265afb42e6f4836a31f2e",
+  "git_entries_excluding_docs_and_changelog_sha256": "8f897e06f610aa53f988cdac0d6643fd4b5e5b2a669690605407085b13cd2a66",
+  "exclusions": [
+    "docs/",
+    "changelog.d/"
+  ],
+  "entry_count": 14828,
+  "purpose": "Fingerprint the b565 execution inputs; compare the later test-only decoder recheck with its separate binding. This is not a binary proof or a claim that the later Usage layer was executed."
+}

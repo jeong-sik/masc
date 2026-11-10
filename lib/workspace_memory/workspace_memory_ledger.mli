@@ -105,7 +105,9 @@ type observation =
 
 val observe : base_path:string -> observation
 (** Current durable ledger only. Old proposal files and publication descriptors
-    never count as an available ledger. A corrupt ledger is unavailable. *)
+    never count as an available ledger. A corrupt ledger or invalid workspace
+    base is unavailable. [Missing] means the ledger is absent in an existing
+    workspace, consistently with [load]. *)
 
 (** A fact the stores hold that the ledger has no disposition for. *)
 type pending_fact =
@@ -135,6 +137,24 @@ val reconcile : t -> Workspace_memory_context.keeper list -> reconciliation
     text is written once and never rewritten, so a claim or conflict that
     loses any member is dropped, and its other members lose their
     disposition, also in an [Unavailable] store. Makes no model call. *)
+
+type ordinary_absence_counts = {
+  facts : int;
+  absent : int;
+  available_stores : int;
+  missing_stores : int;
+}
+type ordinary_absence =
+  | Complete of ordinary_absence_counts
+  | Partial of { counts : ordinary_absence_counts; unavailable_stores : int }
+
+val ordinary_absence : t -> Workspace_memory_context.keeper list -> ordinary_absence
+(** Distinct current ordinary fact identities without a disposition in the
+    input ledger. Claim, conflict and excluded dispositions all count as present.
+    Unlike [reconcile.new_facts], this does not use the reconciled ledger.
+    Missing stores are known empty; unavailable ordinary stores make [facts]
+    and [absent] lower bounds. Source-bound stores do not affect this count.
+    This observes membership only, never why a fact is absent. *)
 
 (** One model decision for a changed fact. A new claim or conflict receives a
     stable id derived from its text; existing ids must already be in [t]. *)

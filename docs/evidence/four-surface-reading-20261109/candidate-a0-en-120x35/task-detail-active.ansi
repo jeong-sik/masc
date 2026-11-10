@@ -1,0 +1,35 @@
+ [2mOperations[0m  [1;7m▸Work[0m  [2mKeepers[0m  [2mFeatures & plugins[0m  [2mWorkspace[0m  [2mSystem[0m
+                                 │
+  Tasks                     (3)  │ [1m Task[0m  HTTP [connected]
+  ─────────────────────────────  │ ────────────────────────────────────────────────────────────────────────────────────
+   Preserve …ask-surface-claimed │   [1m[96m[ Request and status ][0m
+   요청의 핵…  task-surface-todo │   Title: 긴 요청을 상세에서 끝까지 읽기
+ ▸ 긴 요청을…task-surface-active │ [96m  Status: In progress[39m
+                                 │   Owner: sourcereader
+                                 │   Request: 목록은 선택과 구분을 돕고 상세는 원래 요청 전체를 읽는 곳입니다.
+                                 │            목록은 선택과 구분을 돕고 상세는 원래 요청 전체를 읽는 곳입니다.
+                                 │            목록은 선택과 구분을 돕고 상세는 원래 요청 전체를 읽는 곳입니다.
+                                 │            목록은 선택과 구분을 돕고 상세는 원래 요청 전체를 읽는 곳입니다.
+                                 │            목록은 선택과 구분을 돕고 상세는 원래 요청 전체를 읽는 곳입니다.
+                                 │   File: fixture-sources/reading-contract.md
+                                 │
+                                 │   [1m[96m[ Linked Goals ][0m
+                                 │   Goal: goal-surface-second
+                                 │ [2m  Link: masc://planning/goal-surface-second[0m
+                                 │
+                                 │   [1m[96m[ Details ][0m
+                                 │ [2m  Task ID: task-surface-active[0m
+                                 │ [2m  Started: 2026-11-09T14:18:08.552683Z[0m
+                                 │ [2m  Created: 2026-11-09T14:18:08.552683Z[0m
+                                 │ [2m  Creator: fixture-operator[0m
+                                 │ [2m  Priority: 2[0m
+                                 │ [2m  Cycles: 0[0m
+                                 │
+                                 │   [1m[96m[ History ][0m
+                                 │ load failed: HTTP 503: task_history_unavailable
+                                 │
+                                 │
+                                 │
+[2m  ACTION NEEDED 1 · keeper_memory_execution:addon_unattached  j/k:scroll  PgUp/PgDn:page  Home/End  Left / Esc:back  …?[0m
+ Schedule may be out of date
+[2m › to quietreader   (i to write)

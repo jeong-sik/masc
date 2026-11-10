@@ -400,8 +400,8 @@ let test_applied_gate_replay_seeds_terminal_settlement () =
      | Masc.Keeper_tools_agent_core.Terminal_effect_completed _
      | Masc.Keeper_tools_agent_core.Terminal_effect_failed _ ) ->
      fail "applied connector replay did not seed terminal completion");
-  let non_terminal_replay =
-    { replay_delivery with
+  let non_terminal_replay : Masc.Keeper_gate_replay.replay_execution =
+    {
       outcome =
         Masc.Keeper_gate_replay.Applied
           { operation = "network_read"

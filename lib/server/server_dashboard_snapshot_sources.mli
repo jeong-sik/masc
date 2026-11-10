@@ -9,7 +9,8 @@ val install :
 (** Subscribe before the initial reads. Each component has independent bounded
     read debt and failure retry; only telemetry's real freshness transitions
     create healthy deadlines. The captured epoch owns every subscription,
-    worker and publisher. Raw commit owners are resolved outside the writer.
+    worker and publisher. Raw commit, Goal and trajectory owners are resolved
+    outside their writers; trajectory roots retain their original trace owner.
     Completion is announced after the immutable value is installed and never
     reclassified as source input. [on_shell_published] installs both successful
     Shell projections into the canonical namespace owner's cache. *)

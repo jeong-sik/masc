@@ -1,0 +1,35 @@
+{
+ "schema": "masc.tinker.librarian.prompt_lines.v1",
+ "pass_lines_sha256": "6bd963c7f92fc89cc60e543ae577500761d769c600f473348fbeeffeaab9fe8a",
+ "baseline_template_sha256": "ec5cb66fa5a17d1c78844642123edc4e095aa0bc065d98c4e841162b3cd099c7",
+ "worse_sigmas": 2.5,
+ "better_sigmas": 2.0,
+ "better_from": [
+  "inkling"
+ ],
+ "models": {
+  "inkling": {
+   "provider": "tinker",
+   "model": "thinkingmachines/Inkling-2-Small:peft:262144",
+   "runs": 2,
+   "base_synth_rows_sha256": [
+    "c8261c7980c06d26a1d4cc90ed91f81b3a17ebfc7c67cf6495786c1a1a9b1b6c",
+    "250d7fd22e2402359c631397f8718adc8093be6b967c2f5c0ac6a7a1cde07c3c"
+   ],
+   "base_real_rows_sha256": [
+    "fedabb3c4ea419a84e17c2fe6396f53d2e4813c5bc5d1e2692dc26fa88835d85",
+    "c825aed03f7856eac93e51cafc16425c6d5c2b99209d203c179c5a704b242453"
+   ]
+  },
+  "glm": {
+   "provider": "glm",
+   "model": "glm-5.3-flash",
+   "runs": 1,
+   "base_synth_rows_sha256": [],
+   "base_real_rows_sha256": []
+  }
+ },
+ "files_sha256": {
+  "prompt_compare.py": "2bf4a1feb12ecc9a4f91a109e5544f8ae0332d12d280d2a8aaa6c36cadd7b327"
+ }
+}

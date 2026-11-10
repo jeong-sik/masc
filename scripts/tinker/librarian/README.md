@@ -63,6 +63,8 @@ Synthetic Keepers, memories and candidates are invented by the model from
 | `memory_scores.py` | Scores one answer: E-real against the live answer, E-synth by the memory it leaves |
 | `teacher_sample.py` | Keeps teacher answers that leave the memory their training labels ask for, and those that absorb a memory once the merge judge finds each absorb mergeable |
 | `train_sft.py` | Trains the candidate A on the teacher's answers |
+| `prompt_lines.json` | A prompt draft's comparison, fixed before the draft runs: the baseline runs, the runs per side and the noise widths |
+| `prompt_compare.py` | Decides whether a prompt draft goes in, from runs of the pinned template and of the draft |
 
 The tests are `scripts/tests/test_tinker_librarian_*.py`. They read only
 invented rows and the invented Keepers in
@@ -199,6 +201,21 @@ E-real prompt is first read with the pinned template, and its retirement
 evidence goes out under the new template's retirement policy. `summary.json`
 records the sha256 of the template the prompts were drawn with, and `verdict`
 refuses a run whose template is not the pinned one.
+
+`prompt_compare.py --runs <runs.json> --out <compare.json>` decides whether a
+draft of `config/prompts/librarian.md` goes in (RFC-0517 §2.3).
+`prompt_lines.json` fixes the comparison before the draft runs: the pass
+lines, the template and rows of each baseline run, two runs per side on
+Inkling and one on GLM, and the noise widths. Each metric counts hits over
+chances, summed over a side's runs. Its noise σ is the binomial standard error
+of the difference at the pooled rate. A metric is worse below -2.5σ and better
+above +2σ. The draft goes in when no metric of either model is worse and an
+Inkling E-synth quality metric is better: memory state, stale drops, judged
+merges or absorb precision. A draft runs on GLM only after its
+Inkling runs pass. The drop and merge judges of steps 6 and 7 class the
+E-synth runs of both sides under the pinned template's rules. E-real outcome
+agreement and the drops of memories the live answer kept are recorded, not
+judged: a person reads the drops that changed.
 
 `run --provider glm --target glm=<model> --max-calls <n>` measures the same
 sets on GLM (`glm_chat.py`). It sends no warm call, and its rows cost nothing

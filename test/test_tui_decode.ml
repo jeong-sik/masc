@@ -5233,6 +5233,15 @@ let empty_memory_context_cycle =
     "read_position_read_error", `Null; "rewriting_through", `Null;
     "prepared", `Null; "synthesis", `Null; "unread", empty_memory_unread_evidence]
 
+(* Every pass and change the server counts, none moved since it started. *)
+let no_memory_changes =
+  let changes = [ "added"; "absorbed"; "superseded"; "dropped" ] in
+  `Assoc
+    (List.map
+       (fun pass -> pass, `Assoc (List.map (fun change -> change, `Int 0) changes))
+       [ "admission"; "durable"; "continuity"; "cleanup"; "keeper_write"; "keeper_delete"
+       ; "operator_delete" ])
+
 let disabled_memory_execution =
   let module Execution = Masc.Keeper_memory_execution_availability in
   Masc.Keeper_librarian_addon.all
@@ -5258,6 +5267,8 @@ let test_decode_memory_health_keeps_ordinary_and_source_axes () =
         , if present
           then `List ([ `Int 3; `Int 4; `Int 3; `Int 2 ] @ List.init 20 (fun _ -> `Int 0))
           else `Null )
+      ; ("facts_by_hour", `List [])
+      ; ("changes_since_start", no_memory_changes)
       ; ("context_cycle", empty_memory_context_cycle)
       ; ( "librarian"
         , `Assoc
@@ -5308,7 +5319,7 @@ let test_decode_memory_health_keeps_ordinary_and_source_axes () =
   in
   let json =
     `Assoc
-      [ ("schema", `String "keeper.memory_os.current_health.v13")
+      [ ("schema", `String "keeper.memory_os.current_health.v14")
       ; ("execution", disabled_memory_execution)
       ; ("generated_at", `Float 1_775_000_000.0)
       ; ( "keepers"
@@ -5390,6 +5401,39 @@ let test_decode_memory_health_keeps_ordinary_and_source_axes () =
     ; "23 counts are refused", ints ([ 12 ] @ List.init 22 (fun _ -> 0))
     ; "25 counts are refused", ints ([ 12 ] @ List.init 24 (fun _ -> 0))
     ; "24 counts that miss a fact are refused", ints ([ 11 ] @ List.init 23 (fun _ -> 0))
+    ];
+  (* The trend holds one point per later clock hour and the change table every
+     pass and change, as the server writes them (RFC-0517 §2.2). *)
+  let healthy_field name value = map_keeper 1 (replace_field name value) json in
+  let point recorded_at facts = `Assoc [ ("recorded_at", `Float recorded_at); ("facts", `Int facts) ] in
+  Alcotest.(check bool) "a point in each later hour decodes" false
+    (memory_health_rejects
+       (healthy_field "facts_by_hour" (`List [ point 1_699_996_400. 11; point 1_699_999_900. 12 ])));
+  let changes_without_first_pass =
+    match no_memory_changes with
+    | `Assoc (_ :: passes) -> `Assoc passes
+    | other -> other
+  in
+  let changes_with_another_pass =
+    match no_memory_changes with
+    | `Assoc ((_, counts) :: _ as passes) -> `Assoc (passes @ [ ("later_pass", counts) ])
+    | other -> other
+  in
+  let changes_with_negative_count =
+    match no_memory_changes with
+    | `Assoc ((pass, counts) :: passes) ->
+      `Assoc ((pass, replace_field "dropped" (`Int (-1)) counts) :: passes)
+    | other -> other
+  in
+  List.iter
+    (fun (label, name, value) ->
+      Alcotest.(check bool) label true (memory_health_rejects (healthy_field name value)))
+    [ ( "two points in one hour are refused"
+      , "facts_by_hour"
+      , `List [ point 1_699_999_200. 11; point 1_699_999_900. 12 ] )
+    ; "a change table without a pass is refused", "changes_since_start", changes_without_first_pass
+    ; "a change table with another pass is refused", "changes_since_start", changes_with_another_pass
+    ; "a negative change count is refused", "changes_since_start", changes_with_negative_count
     ];
   let frontier = `Assoc ["trace_id", `String "context-trace";
     "end_atom", `Int 3; "boundary_line", `Int 5] in
@@ -5953,7 +5997,7 @@ let test_decode_memory_health_keeps_ordinary_and_source_axes () =
    that disagrees rather than trusting the string it was handed. *)
 let memory_alert_snapshot_with_extra extra_alert_fields ~code ~severity ~target =
   `Assoc
-    [ ("schema", `String "keeper.memory_os.current_health.v13")
+    [ ("schema", `String "keeper.memory_os.current_health.v14")
     ; ("execution", disabled_memory_execution)
     ; ("generated_at", `Float 1_775_000_000.0)
     ; ( "keepers"
@@ -5971,6 +6015,8 @@ let memory_alert_snapshot_with_extra extra_alert_fields ~code ~severity ~target 
               ; ("snapshot_present", `Bool false)
               ; ("updated_at", `Null)
               ; ("age_bins", `Null)
+              ; ("facts_by_hour", `List [])
+              ; ("changes_since_start", no_memory_changes)
               ; ("context_cycle", empty_memory_context_cycle)
               ; ( "librarian"
                 , `Assoc
@@ -6089,7 +6135,7 @@ let test_decode_memory_alert_keeps_the_code_contract () =
 let test_decode_memory_health_reads_the_librarian_position_beside_the_cut () =
   let snapshot_with context_cycle =
     `Assoc
-      [ ("schema", `String "keeper.memory_os.current_health.v13")
+      [ ("schema", `String "keeper.memory_os.current_health.v14")
       ; ("execution", disabled_memory_execution)
       ; ("generated_at", `Float 1_775_000_000.0)
       ; ( "keepers"
@@ -6107,6 +6153,8 @@ let test_decode_memory_health_reads_the_librarian_position_beside_the_cut () =
                 ; ("snapshot_present", `Bool true)
                 ; ("updated_at", `Float 1700000000.)
                 ; ("age_bins", `List (List.init 24 (fun _ -> `Int 0)))
+                ; ("facts_by_hour", `List [])
+                ; ("changes_since_start", no_memory_changes)
                 ; ("context_cycle", context_cycle)
                 ; ( "librarian"
                   , `Assoc

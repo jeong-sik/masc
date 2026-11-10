@@ -1888,6 +1888,22 @@ let connection_badge (state : state) =
   in
   source_loss ^ connection ^ refresh_progress_badge state
 
+(* The title row of a surface that names itself: [lead], the [readings] about
+   it (a count, a clock, each carrying its own leading gap), and the
+   connection badge last. The badge says whether the reading is live and
+   whether the server shares this workspace, so it is drawn whole. When the
+   row is short the readings are left out whole from the end, and the lead is
+   cut last.
+
+   A row put together with [Printf.sprintf] and drawn by [box_line] lost the
+   badge first: Memory at eighty columns read "HTTP…", and Tools, Schedules,
+   Code and Resources lost it at forty-four. [detail_heading] keeps the first
+   piece it is given and cuts it at its end, which leaves a clock as "1…", so
+   an empty piece goes first and every real reading is whole or left out. *)
+let surface_title_row ~cols (state : state) ~lead ~readings =
+  detail_heading ~cols ~lead:(Lead_text lead) ~id:"" ~after:("" :: readings)
+    ~tail:(connection_badge state)
+
 type compact_connection_state =
   | Compact_workspace_mismatch
   | Compact_workspace_unconfirmed
@@ -6135,12 +6151,11 @@ let answering_preview_rows = 3
    sits above both panes, so each pane gives up one row to it. *)
 let pane_surface_title_rows = 1
 
-let pane_surface_title (state : state) ~name =
+let pane_surface_title (state : state) ~cols ~name =
   let now = Unix.localtime (Unix.gettimeofday ()) in
-  Printf.sprintf "%s  %02d:%02d:%02d  %s"
-    (screen_title (" MASC " ^ name))
-    now.Unix.tm_hour now.Unix.tm_min now.Unix.tm_sec
-    (connection_badge state)
+  surface_title_row ~cols state ~lead:(screen_title (" MASC " ^ name))
+    ~readings:
+      [ Printf.sprintf "  %02d:%02d:%02d" now.Unix.tm_hour now.Unix.tm_min now.Unix.tm_sec ]
 
 (* The row between the strip and the title, then the title. Every other
    surface draws that row first -- a gap on its own, the box's top edge beside
@@ -6152,7 +6167,7 @@ let pane_surface_title (state : state) ~name =
    so a split frame keeps it there. The row count is the same either way. *)
 let pane_surface_header buf cols (state : state) ~name ~split =
   if not split then box_top buf cols;
-  box_line buf cols (pane_surface_title state ~name)
+  box_line buf cols (pane_surface_title state ~cols ~name)
 
 let pane_surface_content_height ~rows =
   max 1 (framed_content_height ~rows - pane_surface_title_rows)

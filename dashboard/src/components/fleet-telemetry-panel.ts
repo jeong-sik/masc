@@ -17,7 +17,9 @@ import {
 } from '../api/dashboard'
 import { resetKeeper } from '../api/keeper'
 import { telemetrySourceLabel } from '../config/telemetry-sources'
-import { setupObservationRefresh } from '../lib/observation-refresh'
+import { selectObservationReadFailure, setupObservationRefresh } from '../lib/observation-refresh'
+import { captureDashboardObservationOwner, dashboardObservationOwnerHasWorkspace,
+  dashboardObservationOwnerIsCurrent } from '../lib/observation-read-owner'
 import { useSavedSignal } from '../lib/saved-signal'
 import { normalizeKeepers } from '../keeper-store-normalize'
 import { normalizeNamespaceTruth } from '../namespace-truth-normalizers'
@@ -27,7 +29,7 @@ import { requestConfirm } from './common/confirm-dialog'
 import { Sparkline } from './common/sparkline'
 import { TextInput } from './common/input'
 import { coverageGapDisplay, freshnessText, sourceHealthClass } from './common/source-health'
-import { pushSnapshot, getTrend, type MetricKey, type TrendDirection } from './fleet-trend-store'
+import { pushSnapshot, getTrend, resetTrendStore, type MetricKey, type TrendDirection } from './fleet-trend-store'
 import type { DashboardAttentionEvent, DashboardReadinessPillar } from '../types'
 import {
   EMPTY_TOOL_QUALITY,
@@ -627,10 +629,19 @@ export function FleetTelemetryPanel() {
   const loadFleetTelemetry = async (signal?: AbortSignal) => {
     observationReadError.current = null
     activeController.current?.abort()
+    activeController.current = null
+    const owner = captureDashboardObservationOwner()
+    if (!dashboardObservationOwnerHasWorkspace(owner)) {
+      latestRequestId.current += 1
+      state.value = emptyState()
+      return
+    }
     const controller = new AbortController()
     activeController.current = controller
     const readSignal = signal ? AbortSignal.any([signal, controller.signal]) : controller.signal
     const requestId = ++latestRequestId.current
+    const current = () => !readSignal.aborted && requestId === latestRequestId.current
+      && dashboardObservationOwnerIsCurrent(owner)
     state.value = {
       ...state.value,
       loading: true,
@@ -647,10 +658,11 @@ export function FleetTelemetryPanel() {
         fetchDashboardNamespaceTruth({ signal: readSignal }),
       ])
 
-      if (readSignal.aborted || requestId !== latestRequestId.current) return
+      if (!current()) return
 
-      observationReadError.current = [executionResult, executionTrustResult, toolQualityResult, telemetrySummaryResult, namespaceTruthResult]
-        .find(result => result.status === 'rejected')?.reason ?? null
+      observationReadError.current = selectObservationReadFailure([
+        executionResult, executionTrustResult, toolQualityResult, telemetrySummaryResult, namespaceTruthResult,
+      ].map(result => result.status === 'rejected' ? result.reason : null))
       const warnings: string[] = []
 
       const keepers =
@@ -723,6 +735,10 @@ export function FleetTelemetryPanel() {
         namespace_truth: namespaceTruth,
         updated_at: updatedAt,
       }
+    } catch (cause) {
+      if (!current() || isAbortError(cause)) return
+      observationReadError.current = selectObservationReadFailure([observationReadError.current, cause])
+      state.value = { ...state.peek(), loading: false, error: errorMessageOrUnknown(cause) }
     } finally {
       if (activeController.current === controller) {
         activeController.current = null
@@ -731,14 +747,25 @@ export function FleetTelemetryPanel() {
   }
 
   useEffect(() => {
+    const cancelRead = () => {
+      latestRequestId.current += 1
+      activeController.current?.abort()
+      activeController.current = null
+    }
     const disposeAutoRefresh = setupObservationRefresh(loadFleetTelemetry, {
       topics: ['keeper_composite', 'keeper_turns', 'telemetry', 'tool_metrics', 'health'],
       readError: () => observationReadError.current,
+      cancelRead,
+      resetRead: () => {
+        cancelRead()
+        observationReadError.current = null
+        state.value = emptyState()
+        resetTrendStore()
+      },
     })
     return () => {
       disposeAutoRefresh()
-      activeController.current?.abort()
-      activeController.current = null
+      cancelRead()
     }
   }, [])
 

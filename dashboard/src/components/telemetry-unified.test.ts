@@ -112,6 +112,9 @@ async function loadPanel(
   },
 ) {
   vi.resetModules()
+  const { acceptedExecutionWorkspace } = await import('../execution-workspace-authority')
+  acceptedExecutionWorkspace.value = Object.freeze({ epoch: 'fixture', workspaceRoot: '/fixture',
+    connectionGeneration: 0, observerInstanceId: 'fixture-instance' })
   vi.doMock('../api/dashboard', () => ({
     fetchTelemetry,
     fetchTelemetrySummary,
@@ -176,7 +179,7 @@ describe('TelemetryUnified', () => {
     }
   })
 
-  it('polls automatically while the document is visible', async () => {
+  it('reads after a matching source change without healthy periodic HTTP', async () => {
     const fetchTelemetry = vi.fn().mockResolvedValue(baseTelemetry)
     const fetchTelemetrySummary = vi.fn().mockResolvedValue(baseSummary)
     const { TelemetryUnified } = await loadPanel(fetchTelemetry, fetchTelemetrySummary)
@@ -191,6 +194,12 @@ describe('TelemetryUnified', () => {
     expect(fetchTelemetrySummary).toHaveBeenCalledTimes(1)
 
     await vi.advanceTimersByTimeAsync(30_000)
+    await flushUi()
+
+    expect(fetchTelemetry).toHaveBeenCalledTimes(1)
+    expect(fetchTelemetrySummary).toHaveBeenCalledTimes(1)
+    const { publishDashboardObservationChange } = await import('../lib/observation-refresh')
+    publishDashboardObservationChange({ topic: 'telemetry' })
     await flushUi()
 
     expect(fetchTelemetry).toHaveBeenCalledTimes(2)
@@ -279,7 +288,6 @@ describe('TelemetryUnified', () => {
     expect(container.textContent).toContain('런타임 진단')
     expect(container.textContent).toContain('MASC telemetry store')
     expect(container.textContent).toContain('Refresh')
-    expect(container.textContent).toContain('Auto-refresh 30s')
     expect(container.textContent).toContain('MASC telemetry store entries')
     expect(container.textContent).toContain('mcp__masc__masc_status')
     expect(container.textContent).toContain('Query cache')

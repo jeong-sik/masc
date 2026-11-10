@@ -38892,7 +38892,7 @@ Use relative paths for resources already held in the package. -->
        | Some ("j" | "down" | "k" | "up" | "pageup" | "pagedown" | "g" | "G" as move)
          when state.view = Acting && Option.is_some state.acting_detail ->
            let terminal_rows, _ = get_terminal_size () in
-           let page = max 1 (surface_body_rows state ~terminal_rows) in
+           let page = Masc_tui_render_activity.acting_evidence_page_rows state ~terminal_rows in
            (match move with
             | "g" -> state.acting_detail_scroll <- 0
             | "G" ->
@@ -38910,7 +38910,7 @@ Use relative paths for resources already held in the package. -->
        | Some ("j" | "down" | "k" | "up" | "pageup" | "pagedown" as move)
          when state.view = Acting && state.acting_filter <> Masc_tui_acting.Turns ->
            let terminal_rows, _ = get_terminal_size () in
-           let page = max 1 (surface_body_rows state ~terminal_rows) in
+           let page = Masc_tui_render_activity.acting_page_rows state ~terminal_rows in
            let delta = match move with
              | "j" | "down" -> 1 | "k" | "up" -> -1
              | "pageup" -> -page | _ -> page in
@@ -40456,9 +40456,15 @@ Use relative paths for resources already held in the package. -->
                       Masc_tui_scroll.page_down ~count ~height state.tools_scroll
                     else
                       Masc_tui_scroll.page_up ~count ~height state.tools_scroll)
-             (* Overview's two panes and Activity's ring have no counted row
-                list to page; Config's panes carry cursors of their own. *)
-             | Overview | Acting | Config -> ())
+             (* Flat event lists and evidence have already answered above.
+                Turns owns a scroll, and the renderer clamps its folded rows. *)
+             | Acting ->
+                 state.acting_scroll <- Masc_tui_scroll.step_uncounted
+                   ~delta:(direction * page) state.acting_scroll;
+                 if state.acting_scroll = 0 then state.acting_unseen <- 0
+             (* Overview's two panes are handled earlier; Config's panes
+                carry cursors of their own. *)
+             | Overview | Config -> ())
        (* On Config, s and t hop to Resources and Tools and r is the global
           refresh, so the pane takes u, twice, for the destructive restore,
           and D, twice, for the delete. Its save key is n, answered inside

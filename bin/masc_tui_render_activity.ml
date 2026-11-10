@@ -631,18 +631,30 @@ let render_keeper_calls (state : state) =
    duration. Scrolling away from the newest row freezes the view and counts
    what arrives above it, so an operator reading the past is not pushed off
    it by the present. *)
+let acting_evidence_intro (state : state) =
+  [ Ansi.reset, screen_title " ACTING EVENT EVIDENCE" ^ "  " ^ connection_badge state
+  ; Ansi.dim, " Selected event snapshot; new arrivals do not replace this reading"
+  ; Ansi.dim, Printf.sprintf " Retained feed events: %d (selection pinned)" (List.length state.acting)
+  ; Ansi.dim, " " ^ Terminal_text.single_line
+      (observer_replay_description ~source_loss:state.observer_source_loss state.observer_replay)
+  ]
+
+let acting_evidence_content_height ~rows ~intro =
+  (* Top and divider surround the same one-line intro the renderer consumes. *)
+  max 1 (rows - (2 + List.length intro + listing_rows_below_the_body))
+
+let acting_evidence_page_rows state ~terminal_rows =
+  let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
+  let intro = acting_evidence_intro state in
+  Masc_tui_scroll.page_step ~height:(acting_evidence_content_height ~rows ~intro)
+
 let render_acting_evidence (state : state) entry =
   let terminal_rows, cols = get_terminal_size () in
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   let buf = Buffer.create 4096 in
+  let intro = acting_evidence_intro state in
   box_top buf cols;
-  box_line buf cols (screen_title " ACTING EVENT EVIDENCE" ^ "  " ^ connection_badge state);
-  box_line_styled buf cols ~style:Ansi.dim " Selected event snapshot; new arrivals do not replace this reading";
-  box_line_styled buf cols ~style:Ansi.dim
-    (Printf.sprintf " Retained feed events: %d (selection pinned)" (List.length state.acting));
-  box_line_styled buf cols ~style:Ansi.dim
-    (" " ^ Terminal_text.single_line
-       (observer_replay_description ~source_loss:state.observer_source_loss state.observer_replay));
+  List.iter (fun (style, line) -> box_line_styled buf cols ~style line) intro;
   box_divider buf cols;
   let lines =
     detail_section_lines ~first:true "1. 이벤트 식별 · 실행 컨텍스트 (Event Identity & Execution Context)"
@@ -693,7 +705,7 @@ let render_acting_evidence (state : state) entry =
     | Masc_tui_observer.Lane_resource _ | Masc_tui_observer.Snapshot _ | Masc_tui_observer.Execution_snapshot | Masc_tui_observer.Other _ -> []
   in
   let lines = lines @ io_lines in
-  let content_height = max 1 (rows - count_frame_lines buf - listing_rows_below_the_body) in
+  let content_height = acting_evidence_content_height ~rows ~intro in
   let max_scroll = max 0 (List.length lines - content_height) in
   let scroll = min max_scroll (max 0 state.acting_detail_scroll) in
   let lines_window = Rows.of_list ~first:scroll ~height:content_height lines in

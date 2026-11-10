@@ -609,7 +609,9 @@ Normal live-feed/replay explanations no longer occupy body rows. Off, opening,
 closed and failed feeds, retained events, dropped/undecodable/unseen counts,
 replay uncertainty/reset/gaps/source loss and unavailable traces keep separate
 notice rows. The same notice projection sets the rendered body height and list
-PageUp/PageDown step. Existing flat selection, aggregate scrolling, follow and
+PageUp/PageDown step in both the early flat-selection handler and the aggregate
+scroll handler. The immutable evidence reader uses its own shared intro/body
+budget for page keys. Existing flat selection, aggregate scrolling, follow and
 event attribution remain owned by their existing state.
 
 Logs lead with the original message and severity. Time and optional context

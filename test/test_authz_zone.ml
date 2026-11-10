@@ -690,6 +690,65 @@ let a_store_that_cannot_be_checked_is_not_opened () =
 
 (* ---- failures ---- *)
 
+let latest_ring_seq () =
+  match Log.Ring.recent ~limit:1 () with
+  | entry :: _ -> entry.Log.Ring.seq
+  | [] -> 0
+;;
+
+(* The reason of a failure names paths of the server. The text a caller gives
+   to a person has none, the detail has them, and the zone writes the detail
+   to the log when the commit fails. A record that was turned down says why
+   in both texts. *)
+let a_failure_is_told_without_the_paths_of_the_server () =
+  with_dirs (fun dirs ->
+    ignore (bootstrap dirs : B.completed);
+    let zone = open_zone dirs in
+    let root = Filename.dirname dirs.base in
+    let names_a_path text = String_util.contains_substring text root in
+    (match commit zone (mode_draft M.Fresh_bootstrap) with
+     | Ok (_ : Z.committed) -> Alcotest.fail "a second bootstrap was committed"
+     | Error error ->
+       Alcotest.(check string) "a record that was turned down" "Refused Mode" (error_name error);
+       Alcotest.(check string)
+         "it says why in both texts"
+         (Z.error_detail error)
+         (Z.error_to_string error));
+    let other = open_files dirs in
+    let head = other.replay.Z.Replay.head in
+    append_log_outside other [ record_at ~head (mode_draft ~at_ms:(at_ms + 1) M.Off) ];
+    let logged_before = latest_ring_seq () in
+    (match commit zone (mode_draft ~at_ms:(at_ms + 2) M.Off) with
+     | Ok (_ : Z.committed) -> Alcotest.fail "the commit wrote over a log that moved"
+     | Error error ->
+       Alcotest.(check string) "a failure" "Record_not_appended Diverged" (error_name error);
+       Alcotest.(check string)
+         "what a person is told"
+         "The server could not finish recording this. Try again later."
+         (Z.error_to_string error);
+       Alcotest.(check bool) "the detail names the log" true (names_a_path (Z.error_detail error)));
+    Alcotest.(check int)
+      "the zone wrote the detail to the log once"
+      1
+      (List.length
+         (List.filter
+            (fun (entry : Log.Ring.entry) ->
+              String_util.contains_substring entry.message "was not committed to the authorization zone"
+              && names_a_path entry.message)
+            (Log.Ring.recent ~limit:50 ~module_filter:"Auth" ~since_seq:logged_before ())));
+    match Z.read zone with
+    | Ok (_ : Z.trusted) -> Alcotest.fail "a decision rests on a log that stopped"
+    | Error uncertain ->
+      Alcotest.(check string)
+        "why no decision rests on the zone"
+        "the authorization log is stopped"
+        (Z.uncertain_to_string uncertain);
+      Alcotest.(check bool)
+        "the detail names the log"
+        true
+        (names_a_path (Z.uncertain_detail uncertain)))
+;;
+
 let a_locked_store_writes_nothing_and_stops_nothing () =
   with_dirs (fun dirs ->
     let completed = bootstrap dirs in
@@ -2043,6 +2102,10 @@ let () =
         ] )
     ; ( "failures"
       , [ Alcotest.test_case
+            "a failure is told without the paths of the server"
+            `Quick
+            a_failure_is_told_without_the_paths_of_the_server
+        ; Alcotest.test_case
             "a locked store writes nothing and stops nothing"
             `Quick
             a_locked_store_writes_nothing_and_stops_nothing

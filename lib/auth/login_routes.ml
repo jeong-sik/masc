@@ -193,7 +193,7 @@ let json_refused ?cookies failure text = json ?cookies (failure_status failure) 
 let zone_uncertain_message uncertain =
   Log.Auth.warn
     "a request was refused, because the authorization zone cannot be trusted: %s"
-    (Authz_zone.uncertain_to_string uncertain);
+    (Authz_zone.uncertain_detail uncertain);
   "The server cannot read its accounts right now. Try again later."
 ;;
 

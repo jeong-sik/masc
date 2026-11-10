@@ -91,7 +91,7 @@ raw trace(`.masc/keepers/<keeper>/raw-traces`)와 reaction ledger(`reaction-ledg
 - 한 줄: `- <urgency>, <나이> ago: <한 줄 설명>`. 설명은 reaction ledger 가 쓰는 `stimulus_payload_preview` 와 같은 글이다. Board 글 제목은 256바이트에서 잘린다.
 - 머리말: 도착한 행의 개수와 "그 행은 큐에 남고, 이 턴이 끝난 뒤 자기 턴을 시작한다"는 사실. 지시문이 아니라 상태다.
 - "보였다"고 치는 때: 모델이 그 요청에 답한 뒤(`after_turn`)다. 요청이 답 없이 실패하면 다음 요청이 같은 행을 다시 싣는다.
-- 읽기: `Keeper_registry_event_queue.pending_selections_result`. 읽기 전용이고 Keeper 소유자의 durable lock 을 잡고 디스크 상태를 읽는다. 읽지 못하면 그 요청은 블록 없이 가고 `Log.Keeper.warn` 한 줄을 남긴다. 읽은 값이 비면 블록이 없다.
+- 읽기: `Keeper_arrived_stimuli_reader.read`. 3.3 의 공식 클라이언트 경로도 같은 함수로 읽는다. Keeper 의 지금 meta 를 읽고, 큐의 대기 선택(`Keeper_registry_event_queue.pending_selections_result`) 중 그 Keeper 가 지금 읽을 수 있는 행만 돌려준다(`Keeper_board_audience.can_project_queued_stimulus`). 읽기 전용이고 Keeper 소유자의 durable lock 을 잡고 디스크 상태를 읽는다. meta 나 큐를 읽지 못하면 그 요청은 블록 없이 가고 `Log.Keeper.warn` 한 줄을 남긴다. 읽은 값이 비면 블록이 없다.
 - 순서: `cache_rank` 는 `Temporal_summary`(9) 다음 10이고, `Operator_note` 가 11로 밀린다. 운영자가 말하는 일이 가장 새 소식이라는 기존 약속을 지킨다.
 
 타입: `Prompt_block_id.Arrived_stimuli` 를 더한다. `injected_on_post_tool_round` 는 참이고 `resent_when_held` 는 거짓이다. 닫힌 합타입이라 빠진 match 는 컴파일 에러가 된다.

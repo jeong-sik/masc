@@ -57,15 +57,6 @@ let tool_of_input_schema_result
   | Error detail -> Error (Printf.sprintf "tool %S schema invalid: %s" name detail)
 ;;
 
-(** Convert {!mcp_tool} to SDK {!Tool.t} with the given call handler. *)
-let mcp_tool_to_agent_core_tool_result ~call_fn mcp_tool =
-  tool_of_input_schema_result
-    ~name:mcp_tool.name
-    ~description:mcp_tool.description
-    ~input_schema:mcp_tool.input_schema
-    call_fn
-;;
-
 [@@@coverage off]
 (* === Inline tests === *)
 

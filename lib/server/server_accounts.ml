@@ -84,7 +84,7 @@ let register zone router =
 ;;
 
 (* A value of the HTTP mode that is not in its vocabulary stops the boot here,
-   before a file is opened or a port is bound. *)
+   before [run] opens a file or binds a port. *)
 let http_mode () =
   match Env_config.Transport.configure_h2_from_env () with
   | mode -> Ok mode
@@ -94,7 +94,9 @@ let http_mode () =
 (* The zone that is served is the one the boot judged. The judgment read the
    files and the zone read them again when it opened: a file that changed
    between the two leaves a zone that cannot be trusted, or a log in another
-   mode, and the boot stops as the judgment would have stopped it. *)
+   mode, and the boot stops. The install record and config.json are not read
+   again: the zone is opened over the store path the judgment read, and the
+   mode is the mode of the log. *)
 let judged_again zone =
   match Authz_zone.read zone with
   | Error uncertain -> Error (Zone_not_trusted uncertain)
@@ -174,8 +176,8 @@ let run ~sw ~env ~address ~port ?on_ready multi_account =
       (Server_bootstrap_http.https_listener_of_env ~base_path ~bind_host:config.host)
   in
   (* The port is bound here and accepted on in [serve], below. The backends
-     of Eio raise the Unix error of the bind as it is (a port in use is
-     EADDRINUSE); [Eio.Io] is the error its interface names. *)
+     of Eio raise the Unix error of a TCP bind as it is (a port in use is
+     EADDRINUSE). *)
   let not_bound reason =
     Error (Listener_not_bound { host = config.host; port = config.port; reason })
   in
@@ -184,7 +186,6 @@ let run ~sw ~env ~address ~port ?on_ready multi_account =
     | socket -> Ok socket
     | exception Unix.Unix_error (error, call, (_ : string)) ->
       not_bound (Printf.sprintf "%s: %s" call (Unix.error_message error))
-    | exception (Eio.Io _ as exn) -> not_bound (Printexc.to_string exn)
   in
   let* () =
     Result.map_error
@@ -212,8 +213,8 @@ let run ~sw ~env ~address ~port ?on_ready multi_account =
          ~https_port
          ~explicit_base_url:(Env_config_core.masc_http_base_url_opt ()))
   in
-  (* Nothing below refuses: a boot that stops leaves no port for the CLI to
-     find and no fiber behind. *)
+  (* Nothing below refuses: a boot that stops records no port and leaves no
+     fiber behind. *)
   record_port ~base_path config;
   Rate_limit.start_global_cleanup_loop ~sw ~clock;
   Log.Server.info

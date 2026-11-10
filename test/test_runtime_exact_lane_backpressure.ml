@@ -210,6 +210,8 @@ let test_stated_account_reset_holds_every_slot_on_it () =
   Runtime_quota_window.note_succeeded ~scope;
   check (list string) "a success leaves the stated reset holding every slot" declared
     (held_ids (Lane.order_at ~now resolved));
+  check (list string) "at the stated reset itself every slot is walked" declared
+    (walked (Lane.order_at ~now:resets_at resolved));
   check (list string) "once the stated times pass every slot is walked again" declared
     (walked (Lane.order_at ~now:(noted_at +. 7200.0) resolved))
 

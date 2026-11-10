@@ -9,7 +9,8 @@
     the last frame. An initial or reset frame always goes out. Otherwise a
     frame goes out when a matching entry was pushed; a quiet ring sends an SSE comment every
     keepalive interval. A client that takes no frame for three intervals is
-    closed. *)
+    closed. The response advertises the shared observer idle deadline so a
+    client also retires a body whose keepalive bytes silently stop arriving. *)
 
 val stream_path : string
 

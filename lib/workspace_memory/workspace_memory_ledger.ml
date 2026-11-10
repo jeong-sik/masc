@@ -346,8 +346,9 @@ let save ~base_path t =
   io (fun () ->
     let* () = require_base ~base_path in
     Fs_compat.mkdir_p (directory ~base_path);
+    let changed_directory = Fs_compat.realpath_lenient (directory ~base_path) in
     Fun.protect
-      ~finally:(fun () -> Workspace_memory_changed.written ~directory:(directory ~base_path))
+      ~finally:(fun () -> Workspace_memory_changed.written ~directory:changed_directory)
       (fun () ->
     match Fs_compat.save_file_atomic_strict_staged (path ~base_path)
             (Yojson.Safe.to_string (to_json t)) with

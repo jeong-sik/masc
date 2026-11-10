@@ -16,7 +16,6 @@ let written ~directory =
   match Stdlib.Mutex.protect mutex (fun () -> !subscriptions) with
   | [] -> ()
   | current ->
-      let directory = Fs_compat.realpath_lenient directory in
       List.iter (fun subscription ->
         match subscription.callback ~directory with
         | () -> ()
@@ -24,6 +23,8 @@ let written ~directory =
             (* This is a non-yielding after-write notification. A subscriber's
                cancellation must not replace a commit outcome owned elsewhere;
                the writer's next suspension still observes its cancellation. *)
-            Log.Server.warn "workspace memory change subscriber failed: %s"
-              (Printexc.to_string exn)) current
+            (match Log.Server.warn "workspace memory change subscriber failed: %s"
+              (Printexc.exn_slot_name exn) with
+             | () -> ()
+             | exception _ -> ())) current
 ;;

@@ -1,11 +1,9 @@
 import { useEffect, useState } from 'preact/hooks'
-import { storedTokenRevision } from '../api/token-revision'
-import { executionWorkspaceAuthority } from '../execution-workspace-authority'
-import { dashboardActorRevision, managedDashboardActorRevision } from './dashboard-session-actor'
 import {
   captureDashboardObservationOwner,
   dashboardObservationOwnerHasWorkspace,
   dashboardObservationOwnerIsCurrent,
+  readDashboardObservationOwner,
   type DashboardObservationOwner,
 } from './observation-read-owner'
 import {
@@ -45,10 +43,7 @@ export function useManagedAsyncResource<T>(
 ): ManagedAsyncResource<T> {
   // Read the authority inputs reactively; the shared owner helper decides
   // whether a change actually affects this credential's request headers.
-  void storedTokenRevision.value
-  void dashboardActorRevision.value
-  void managedDashboardActorRevision.value
-  void executionWorkspaceAuthority.value
+  void readDashboardObservationOwner()
   const [scoped, setScoped] = useState<OwnerScopedResource<T>>(() => {
     const owner = captureDashboardObservationOwner()
     return { owner, resource: ownedResource(owner, initialData) }

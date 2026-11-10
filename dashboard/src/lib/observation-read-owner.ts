@@ -2,6 +2,7 @@ import {
   captureDashboardCredentialOwner,
   subscribeStoredTokenChanges,
 } from '../api/core'
+import { storedTokenRevision } from '../api/token-revision'
 import {
   executionWorkspaceAuthority,
   type ExecutionWorkspaceAuthority,
@@ -30,6 +31,16 @@ export function captureDashboardObservationOwner(): DashboardObservationOwner {
     actorRevision: credential.managed ? credential.managedActorRevision : credential.actorRevision,
     managed: credential.managed,
   }
+}
+
+/** Capture the same owner while tracking only inputs that change its actual
+ * request identity. Refusal observations do not re-admit a refused reader. */
+export function readDashboardObservationOwner(): DashboardObservationOwner {
+  void storedTokenRevision.value
+  void dashboardActorRevision.value
+  void managedDashboardActorRevision.value
+  void executionWorkspaceAuthority.value
+  return captureDashboardObservationOwner()
 }
 
 export function dashboardObservationOwnerIsCurrent(owner: DashboardObservationOwner): boolean {

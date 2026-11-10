@@ -21,36 +21,24 @@ let stream ~sw ~clock ~session request reqd =
     Server_sse_response.respond ~clock
       ~stalled_after_s:Server_mcp_transport_http_headers.sse_stalled_after_s
       reqd (Httpun.Response.create ~headers `OK) in
-  let closed = Atomic.make false in
-  let stopped, stop = Eio.Promise.create () in
-  let request_close () =
-    if Atomic.compare_and_set closed false true then (
-      Live.leave session; Eio.Promise.resolve stop ()) in
-  let send frame =
-    if not (Atomic.get closed) then
-      match Server_sse_response.send response frame with
-      | Server_sse_response.Written -> ()
-      | Closed | Stalled -> request_close () in
-  Eio.Fiber.fork ~sw (fun () ->
-    Eio.Switch.run (fun connection ->
-      Eio.Switch.on_release connection (fun () ->
-        request_close ();
-        Server_sse_response.close response);
-      let guarded f () =
-        (try f () with Eio.Cancel.Cancelled _ as exn -> raise exn
-          | exn -> Log.Server.debug "Artifact draft stream closed: %s" (Printexc.to_string exn));
-        request_close (); `Stop_daemon in
-      Eio.Fiber.fork_daemon ~sw:connection (guarded (fun () ->
-        let rec loop () = match Live.observe session with
-          | None -> ()
-          | Some (frame, pulse) ->
-            send ("event: draft\ndata: " ^ Yojson.Safe.to_string frame ^ "\n\n");
-            if not (Atomic.get closed) then (Eio.Promise.await pulse; loop ()) in loop ()));
-      Eio.Fiber.fork_daemon ~sw:connection (guarded (fun () ->
-        let rec loop () =
-          Eio.Time.sleep clock Server_mcp_transport_http_headers.sse_ping_interval_s;
-          if not (Atomic.get closed) then (send ": ping\n\n"; loop ()) in loop ()));
-      Eio.Promise.await stopped))
+  let sent frame =
+    match Server_sse_response.send response frame with
+    | Server_sse_response.Written -> true
+    | Closed | Stalled -> false in
+  let rec drafts () = match Live.observe session with
+    | None -> ()
+    | Some (frame, pulse) ->
+      if sent ("event: draft\ndata: " ^ Yojson.Safe.to_string frame ^ "\n\n")
+      then (Eio.Promise.await pulse; drafts ()) in
+  let rec pings () =
+    Eio.Time.sleep clock Server_mcp_transport_http_headers.sse_ping_interval_s;
+    if sent ": ping\n\n" then pings () in
+  (* The drafts and the pings are two loops on one response. Whichever ends
+     first ends the stream: a frame that was not taken, or a session that
+     left its room. The response ends both when its client is gone, and the
+     session leaves its room once they have ended. *)
+  Server_sse_response.serve ~sw response ~release:(fun () -> Live.leave session)
+    (fun () -> Eio.Fiber.first drafts pings)
 
 type presence = Position of Artifact_document_engine.selection option | Leave
 let parse_presence json =

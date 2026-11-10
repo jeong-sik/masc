@@ -366,6 +366,62 @@ let test_a_waiting_send_can_be_cancelled () =
     server.stop ())
 ;;
 
+(* Reads until the server ends the response, and gives what arrived. *)
+let read_to_end flow =
+  let buf = Cstruct.create 4096 and seen = Buffer.create 4096 in
+  (try
+     while true do
+       let n = Eio.Flow.single_read flow buf in
+       Buffer.add_string seen (Cstruct.to_string ~len:n buf)
+     done
+   with
+   | End_of_file -> ());
+  Buffer.contents seen
+;;
+
+let served_frame = "data: served\n\n"
+
+let send_served response =
+  match Sse.send response served_frame with
+  | Sse.Written -> ()
+  | Closed | Stalled -> fail "the served frame was not written"
+;;
+
+(* RFC-0518 D7 on HTTP/1.1. Each request's producer is served in [sw], the
+   switch of the whole test, as a route serves it in the server's. A
+   response that ends closes its connection, and [after_frame] runs once the
+   frame went out. The client of one request reads to that end, twice over:
+   the second request shows the server still serves. *)
+let serve_twice ~after_frame =
+  with_env (fun env sw ->
+    let releases = ref 0 in
+    let server =
+      start_server ~sw env ~stalled_after_s:kept_stalled_after_s ~on_response:(fun response ->
+        Sse.serve ~sw response
+          ~release:(fun () -> incr releases)
+          (fun () ->
+            send_served response;
+            after_frame ()))
+    in
+    let served () =
+      let flow = connect ~sw env ~port:server.port in
+      contains ~needle:served_frame (within env "the response to end" (fun () -> read_to_end flow))
+    in
+    check bool "the frame arrived and the response ended" true (served ());
+    check bool "the next request is served the same" true (served ());
+    check int "each producer's cleanup ran once" 2 !releases;
+    server.stop ())
+;;
+
+let test_a_producer_that_returns_ends_the_response () = serve_twice ~after_frame:ignore
+
+(* The failure reaches neither the server's switch nor the next request. An
+   HTTP/1.1 body that ends with its connection looks the same to the client
+   either way. *)
+let test_a_producer_that_raises_ends_the_response_only () =
+  serve_twice ~after_frame:(fun () -> failwith "fixture producer failure")
+;;
+
 let () =
   run "Server SSE response"
     [ ( "loopback"
@@ -381,6 +437,12 @@ let () =
         ; test_case "the stall bound counts from each send" `Quick
             test_the_stall_bound_counts_from_each_send
         ; test_case "a waiting send can be cancelled" `Quick test_a_waiting_send_can_be_cancelled
+        ] )
+    ; ( "producer scope"
+      , [ test_case "a producer that returns ends the response" `Quick
+            test_a_producer_that_returns_ends_the_response
+        ; test_case "a producer that raises ends the response only" `Quick
+            test_a_producer_that_raises_ends_the_response_only
         ] )
     ]
 ;;

@@ -20,6 +20,7 @@ import {
 import type { KeeperChatCustomEventName, KeeperChatStreamEvent } from '../lib/keeper-chat-stream-contract'
 import { isRecord } from '../lib/type-guards'
 import { isAgentCoreEventType } from '../lib/sse-event-type'
+import { missionPublication } from '../mission-observation-contract'
 
 type SchemaIssue = { path?: string; message: string }
 type SafeParseSuccess<T> = { success: true; data: T }
@@ -138,6 +139,7 @@ const FIXED_SSE_EVENT_TYPES = new Set([
   // entry in sse-store.ts.
   'masc/task_claimed',
   'project_snapshot',
+  'mission_snapshot',
   'execution_snapshot',
   'operator_snapshot',
   'operator_digest',
@@ -1243,6 +1245,10 @@ export const SSEMessageSchema = schema<SSEMessage>((value) => {
   if (!isRecord(value)) return fail(undefined, 'Expected SSE message object')
   if (!isSSEEventType(value.type)) {
     return fail('type', 'Expected known SSE event type or agent_core:* event type')
+  }
+
+  if (value.type === 'mission_snapshot' && missionPublication(value.payload) === null) {
+    return fail('payload', 'Expected captured Mission instance, generation, sequence and observation state')
   }
 
   for (const key of STRING_FIELDS) {

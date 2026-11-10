@@ -1497,7 +1497,7 @@ let copy_verdict_label = function
   | Not_judged _ -> "not_judged"
 ;;
 
-let count_evaluation ~keeper_id outcome copy_checks =
+let count_evaluated ~keeper_id outcome copy_checks =
   let source outcome decision =
     Otel_metric_store.inc_counter
       Keeper_metrics.(to_string LibrarianAbsorbSources)
@@ -1529,6 +1529,11 @@ let count_evaluation ~keeper_id outcome copy_checks =
     copy_checks
 ;;
 
+let count_judgment ~keeper_id = function
+  | Evaluated { outcome; copy_checks; evaluations = _ } -> count_evaluated ~keeper_id outcome copy_checks
+  | Skipped _ -> ()
+;;
+
 let run_resolved
     ?observe
     ?before_evaluate
@@ -1550,8 +1555,9 @@ let run_resolved
     let authority : live_authority = resolve_authority () in
     let keeper_id = authority.keeper_id in
     let evaluated outcome copy_checks evaluations =
-      count_evaluation ~keeper_id outcome copy_checks;
-      complete (Evaluated { outcome; copy_checks; evaluations }) in
+      let result = Evaluated { outcome; copy_checks; evaluations } in
+      count_judgment ~keeper_id result;
+      complete result in
     let guidance_failed reason = evaluated
         (Failed {reason;absorbed=[];left=[];conveyed=[];unjudged=absorbed;unjudgeable=[]})
         (not_judged_checks (copy_candidates ~new_claims ~absorbed ~applied:[]) Gate_judgment_failed)
@@ -1736,15 +1742,7 @@ let continue_captured ~(request_clock : request_clock) ~guidance ~keeper_id ~aut
     Eio.Cancel.protect (fun () -> after_evaluate ~evaluation_id evaluation);
     Eio.Fiber.check ();
     evaluation in
-  let result =
-    restore_with ~missing ~guidance ~authority ~cited_observations ~facts ~new_claims ~superseding ~absorbed ~evaluations
-  in
-  (* The captured paths finish a judgment here. [restore] replays the same
-     transcript on every read of the retained record, so it counts nothing. *)
-  (match result with
-   | Ok (Evaluated { outcome; copy_checks; evaluations = _ }) -> count_evaluation ~keeper_id outcome copy_checks
-   | Ok (Skipped _) | Error _ -> ());
-  result
+  restore_with ~missing ~guidance ~authority ~cited_observations ~facts ~new_claims ~superseding ~absorbed ~evaluations
 ;;
 
 let run

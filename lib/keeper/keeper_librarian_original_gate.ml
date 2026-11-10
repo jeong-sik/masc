@@ -781,6 +781,11 @@ let resume ~request_clock ~store ~owner ~capture ~record ~live_authority ~before
             | None -> Progress.Judgment_retained terminal
             | Some _ -> Progress.Refused {stage=Progress.Execution;evidence=terminal} in
           Eio.Cancel.protect (fun () -> publish event);
+          (* A captured judgment finishes when this call stores its terminal:
+             [publish] raises on every other outcome, so a resume after a failed
+             publication counts the judgment once, and a retained terminal
+             ([restored.complete] above) is never counted again. *)
+          Gate.count_judgment ~keeper_id:(Capture.keeper_id owner) confirmed;
           Ok (Complete (confirmed,!current))
       with Journal_error detail -> Error detail
 

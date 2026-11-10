@@ -278,6 +278,50 @@ let is_open = function
   | Keeper_ask.Open -> true
   | Keeper_ask.Answered_by _ | Keeper_ask.Withdrawn_because _ -> false
 
+(* The store keeps rows oldest first, and include_resolved returned all of
+   them. In the 72 hours before 2026-11-11 08:40 KST, 83 such calls carried
+   6.58 MB. 25 were over their lane's inline ceiling and reached the model as
+   a blob preview: the oldest row, with the open asks at the end out of view
+   (11 calls). The rest were up to 61 KB each.
+
+   Open asks come first because they are the ones that wait for an answer.
+   They keep the order they were asked in, which is the order the store lists
+   them, so a read of the open asks alone lists the same rows in the same
+   order. The resolved asks follow newest first. The ask id breaks a tie on
+   asked_at so two reads of the same store list the same order. *)
+let compare_rows (id_left, ((left : Keeper_ask.ask), resolution_left))
+    (id_right, ((right : Keeper_ask.ask), resolution_right)) =
+  let tie_break_on_ask_id = function
+    | 0 -> String.compare id_left id_right
+    | decided -> decided
+  in
+  match (is_open resolution_left, is_open resolution_right) with
+  | true, false -> -1
+  | false, true -> 1
+  | true, true -> tie_break_on_ask_id (Float.compare left.asked_at right.asked_at)
+  | false, false -> tie_break_on_ask_id (Float.compare right.asked_at left.asked_at)
+
+(* What the keeper name and the three counts around the rows take, with room
+   to spare (about 100 bytes). *)
+let envelope_slack_bytes = 512
+
+(* The longest prefix of [rows] whose serialized form, one comma between rows,
+   fits under Common.max_tool_result_wire_bytes, the lowest inline ceiling of
+   any lane, so the newest rows arrive inline everywhere. The first row is kept
+   even when it alone is over: a result that names no ask would answer
+   nothing. *)
+let rows_within_inline_ceiling rows =
+  let budget = Common.max_tool_result_wire_bytes - envelope_slack_bytes in
+  let rec take ~used shown = function
+    | [] -> List.rev shown
+    | row :: rest ->
+        let size = String.length (Yojson.Safe.to_string row) + 1 in
+        (match shown with
+         | _ :: _ when used + size > budget -> List.rev shown
+         | [] | _ :: _ -> take ~used:(used + size) (row :: shown) rest)
+  in
+  take ~used:0 [] rows
+
 let handle_ask_status ~tool_name ~start_time (ctx : context) : Tool_result.result option =
   let base_path = ctx.config.base_path in
   (* The same resolution the write side uses, and for a sharper reason: the
@@ -308,6 +352,9 @@ let handle_ask_status ~tool_name ~start_time (ctx : context) : Tool_result.resul
         id_matches && (include_resolved || is_open resolution))
       rows
   in
+  let shown =
+    rows_within_inline_ceiling (List.map row_json (List.sort compare_rows selected))
+  in
   Some
     (Tool_result.ok ~tool_name ~start_time
        (Yojson.Safe.to_string
@@ -315,8 +362,9 @@ let handle_ask_status ~tool_name ~start_time (ctx : context) : Tool_result.resul
             [
               ("keeper_name", `String keeper_name);
               ("open_count", `Int open_count);
-              ("returned", `Int (List.length selected));
-              ("asks", `List (List.map row_json selected));
+              ("matching", `Int (List.length selected));
+              ("returned", `Int (List.length shown));
+              ("asks", `List shown);
             ])))
 
 (* masc_ask_withdraw: taking back a question that stopped mattering.

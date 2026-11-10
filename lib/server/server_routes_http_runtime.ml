@@ -1969,14 +1969,14 @@ let board_post_detail_json ~reader ?(comment_request = default_board_comment_req
     ~reaction_actor ~response_format ~post_id () =
   match Board_dispatch.get_post_and_comments ~reader ~post_id with
   | Error err ->
-      (* Render a human-readable message (e.g. "Post not found: <id>") via the
-         shared Board_tool.board_error_to_string, matching the 404 contract in
-         the .mli and the convention already used for board errors in
-         server_routes_http_routes_activity.ml. The derived [show_board_error]
-         leaked the internal OCaml constructor name ("Post_not_found(...)") into
-         the public HTTP body. *)
-      (`Not_found, Printf.sprintf {|{"error":"%s"}|}
-         (String.escaped (Board_tool.board_error_to_string err)))
+      let status = match err with
+        | Board.Io_error _ -> `Service_unavailable
+        | Board.Invalid_id _ | Board.Post_not_found _ | Board.Comment_not_found _
+        | Board.Validation_error _ | Board.Already_voted _ | Board.Already_exists _
+        | Board.Unauthorized _ | Board.Recipient_lookup_failed _ -> `Not_found
+      in
+      (status, Yojson.Safe.to_string
+         (`Assoc ["error", `String (Board_tool.board_error_to_string err)]))
   | Ok (post, comments) ->
       let _, comment_positions =
         List.fold_left

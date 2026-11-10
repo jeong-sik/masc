@@ -458,10 +458,10 @@ let check_io_error ~where = function
   | Error e -> Alcotest.fail ("expected Io_error, got " ^ Board.show_board_error e)
   | Ok _ -> Alcotest.fail "expected Io_error"
 
-let check_posts_io_error = function
+let check_source_io_error = function
   | Error (Board.Io_error _) -> ()
   | Error error -> Alcotest.fail ("expected Io_error, got " ^ Board.show_board_error error)
-  | Ok _ -> Alcotest.fail "expected posts persistence Io_error"
+  | Ok _ -> Alcotest.fail "expected source persistence Io_error"
 
 let posts_observation store =
   match store.Board.posts_source with
@@ -485,7 +485,7 @@ let check_publication_io_error = function
       (Option.is_none (Board.Post_publication_failure.committed failure));
     (match Board.Post_publication_failure.cause failure with
      | Board.Post_publication_failure.Board_error error ->
-       check_posts_io_error (Error error)
+       check_source_io_error (Error error)
      | Board.Post_publication_failure.Raised _ ->
        Alcotest.fail ("expected Io_error, got " ^
          Board.Post_publication_failure.to_string failure))
@@ -1185,8 +1185,7 @@ let test_add_comment_persistence_failure_rolls_back_without_fanout () =
     | _ -> ());
   with_blocked_board_masc_dir (fun () ->
   let before_errors = Board.persist_error_count () in
-  check_io_error
-    ~where:"append_comment"
+  check_source_io_error
     (Board_dispatch.add_comment
        ~post_id
        ~author:"comment-persist-fail-responder"
@@ -2109,7 +2108,7 @@ let test_set_pinned_persistence_failure_rolls_back () =
   let observed_source = posts_observation active in
   with_blocked_board_masc_dir (fun () ->
   let before_errors = Board.persist_error_count () in
-  check_posts_io_error (Board_dispatch.set_pinned ~post_id ~pinned:true);
+  check_source_io_error (Board_dispatch.set_pinned ~post_id ~pinned:true);
   check_retained_posts_source observed_source active;
   Alcotest.(check bool)
     "persist error counter incremented"

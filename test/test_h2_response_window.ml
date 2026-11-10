@@ -101,7 +101,8 @@ let exchange ?error_handler
       (* No case waits the 90 s bound for a flush. *)
       let stream_end =
         Masc.Http_h2_stream.Stream_end.create ~stream_sw:sw ~clock:(Eio.Stdenv.clock env)
-          ~stalled_after_s:Server_mcp_transport_http_headers.sse_stalled_after_s h2_reqd
+          ~stalled_after_s:Server_mcp_transport_http_headers.sse_stalled_after_s
+          ~request:(H2.Reqd.request h2_reqd) h2_reqd
       in
       handler
         (Masc.Http_reqd.of_h2 ~stream_end

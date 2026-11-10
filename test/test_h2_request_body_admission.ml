@@ -15,7 +15,8 @@ module Request = Masc.Http_server_eio.Request
    no response flush stalls in these exchanges. *)
 let stream_end_of ~sw h2_reqd =
   Masc.Http_h2_stream.Stream_end.create ~stream_sw:sw ~clock:(Eio_mock.Clock.make ())
-    ~stalled_after_s:Server_mcp_transport_http_headers.sse_stalled_after_s h2_reqd
+    ~stalled_after_s:Server_mcp_transport_http_headers.sse_stalled_after_s
+    ~request:(H2.Reqd.request h2_reqd) h2_reqd
 
 let reqd_of_h2 ~sw h2_reqd =
   Masc.Http_reqd.of_h2 ~stream_end:(stream_end_of ~sw h2_reqd)

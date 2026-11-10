@@ -29,7 +29,8 @@ let wire_response ~clock ~handler ~headers target =
   H2.Body.Writer.close writer;
   let server = H2.Server_connection.create (fun h2_reqd ->
     let stream_end =
-      Masc.Http_h2_stream.Stream_end.create ~stream_sw:sw ~clock ~stalled_after_s h2_reqd in
+      Masc.Http_h2_stream.Stream_end.create ~stream_sw:sw ~clock ~stalled_after_s
+        ~request:(H2.Reqd.request h2_reqd) h2_reqd in
     handler (Masc.Http_reqd.of_h2 ~stream_end
       ~ledger:(Masc.Http_h2_response_ledger.current_exn ()) h2_reqd)) in
   let transfer next_write report_write read =

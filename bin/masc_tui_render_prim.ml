@@ -1872,6 +1872,11 @@ let refresh_progress_badge (state : state) =
            notices ^ " · " ^ pending)
   | Some _ | None -> foreground
 
+let observer_loss_badge (state : state) =
+  if state.observer_source_loss then
+    Some (Theme.warn () ^ ui_text state ~ko:"[이벤트 유실]" ~en:"[events lost]" ^ Ansi.reset)
+  else None
+
 let connection_badge (state : state) =
   let text = ui_text state in
   let connection = connection_status_badge ~ko:(state.ui_language = Lang_ko) state.connection_status in
@@ -1882,27 +1887,11 @@ let connection_badge (state : state) =
       connection ^ " " ^ Theme.text_status Masc_tui_theme.Warn ^ text ~ko:"[작업 공간 확인 대기]" ~en:"[workspace unconfirmed]" ^ Ansi.reset
   | Masc_tui_types.Workspace_identity_unread
   | Masc_tui_types.Workspace_identity_match -> connection in
-  let source_loss =
-    if state.observer_source_loss then Theme.warn () ^ text ~ko:"[이벤트 유실] " ~en:"[events lost] " ^ Ansi.reset
-    else ""
+  let source_loss = match observer_loss_badge state with
+    | Some badge -> badge ^ " "
+    | None -> ""
   in
   source_loss ^ connection ^ refresh_progress_badge state
-
-(* The title row of a surface that names itself: [lead], the [readings] about
-   it (a count, a clock, each carrying its own leading gap), and the
-   connection badge last. The badge says whether the reading is live and
-   whether the server shares this workspace, so it is drawn whole. When the
-   row is short the readings are left out whole from the end, and the lead is
-   cut last.
-
-   A row put together with [Printf.sprintf] and drawn by [box_line] lost the
-   badge first: Memory at eighty columns read "HTTP…", and Tools, Schedules,
-   Code and Resources lost it at forty-four. [detail_heading] keeps the first
-   piece it is given and cuts it at its end, which leaves a clock as "1…", so
-   an empty piece goes first and every real reading is whole or left out. *)
-let surface_title_row ~cols (state : state) ~lead ~readings =
-  detail_heading ~cols ~lead:(Lead_text lead) ~id:"" ~after:("" :: readings)
-    ~tail:(connection_badge state)
 
 type compact_connection_state =
   | Compact_workspace_mismatch
@@ -2036,6 +2025,45 @@ let feature_child_heading (state : state) ~cols ~title =
           ~width:(max 0 (width - Message_layout.display_width "  ")) state
           |> String.trim in
         detail_heading ~cols ~lead ~id:"" ~after:[] ~tail
+
+(* The full badge can itself exceed the title's width: at forty-four columns
+   HTTP, workspace mismatch and refresh details cannot all be kept whole.
+   Reuse the prioritized workspace/read observation, then keep observer loss
+   and HTTP when they fit. The ellipsis says that full context was omitted. *)
+let surface_connection_badge (state : state) ~width =
+  let cells text = Message_layout.display_width (Theme.strip_sgr text) in
+  let full = connection_badge state in
+  if cells full <= width then full
+  else if width < 1 then ""
+  else
+    let omitted = " …" in
+    let room = width - cells omitted in
+    let primary, _ = compact_connection_badge state ~width:room in
+    let loss = Option.to_list (observer_loss_badge state) in
+    let notices = match compact_connection_state state with
+      | Compact_http _ -> loss @ [primary]
+      | Compact_workspace_mismatch | Compact_workspace_unconfirmed
+      | Compact_workspace_unread | Compact_read_failed | Compact_read_partial
+      | Compact_read_interrupted | Compact_read_unfinished | Compact_reading ->
+          primary :: loss @ [connection_status_badge ~ko:(state.ui_language = Lang_ko)
+                             state.connection_status]
+    in
+    let warning = Theme.warn () ^ "!" ^ Ansi.reset in
+    if room < 1 then warning
+    else
+      let compact = match notices with
+        | first :: _ when cells first > room -> warning
+        | _ -> Message_layout.join_fitting ~sep:" " ~cells:room notices
+      in
+      compact ^ omitted
+
+(* Reserve the two-cell gap added by [detail_heading] before sizing the
+   status. Readings give way whole, then the title; an empty first reading
+   prevents the first real count or clock from being cut to a fragment. *)
+let surface_title_row ~cols (state : state) ~lead ~readings =
+  let width = max 0 (framed_inner_width cols - Message_layout.display_width "  ") in
+  detail_heading ~cols ~lead:(Lead_text lead) ~id:"" ~after:("" :: readings)
+    ~tail:(surface_connection_badge state ~width)
 
 (* A header row of [lead], a bracketed [label] and [badge]. The badge says
    whether the screen can be trusted, so it is drawn whole and the label gives

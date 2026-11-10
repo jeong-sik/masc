@@ -213,6 +213,24 @@ let release_handoff_context
     }
 ;;
 
+let read_operation_meta ~config operation =
+  match
+    Keeper_owner_registry.get
+      ~base_path:config.Workspace.base_path
+      ~keeper_name:operation.keeper_name
+  with
+  | Error error -> Error (Keeper_owner_registry.lookup_error_to_string error)
+  | Ok owner ->
+    (match Keeper_owner.exact_projection owner with
+     | Error error -> Error (Keeper_owner.error_to_string error)
+     | Ok { meta = None; _ } -> Error "Keeper metadata is absent"
+     | Ok { meta = Some meta; _ } ->
+       if
+         Keeper_id.Trace_id.equal meta.runtime.trace_id operation.trace_id
+       then Ok meta
+       else Error "Keeper metadata identity changed")
+;;
+
 let release_task ~config operation (owned : Keeper_current_task_reconcile.owned_active_task) =
   let assignee =
     match owned.task.task_status with
@@ -242,7 +260,8 @@ let release_task ~config operation (owned : Keeper_current_task_reconcile.owned_
       ()
 ;;
 
-let rec settle_tasks ~config ~meta operation settled_task_ids =
+let rec settle_tasks_observing ~before_release ~config ~meta operation
+    settled_task_ids =
   match
     Keeper_current_task_reconcile.owned_active_tasks_snapshot_for_meta_strict
       ~config
@@ -322,7 +341,9 @@ let rec settle_tasks ~config ~meta operation settled_task_ids =
                        (Masc_domain.Task
                           (Masc_domain.Task_error.InvalidState
                              "active task snapshot disappeared"))
-                   | Some owned -> release_task ~config current owned)
+                   | Some owned ->
+                     before_release ();
+                     release_task ~config current owned)
                 else
                   match find_task backlog task_id with
                   | Some task when task_has_operation_receipt current task ->
@@ -343,10 +364,15 @@ let rec settle_tasks ~config ~meta operation settled_task_ids =
                    (Masc_domain.Task
                       (Masc_domain.Task_error.BacklogVersionConflict _)) ->
                  (* The backlog lock refused this release before any effect.
-                    Re-read ownership and this operation's receipts through
-                    the same path used for a changed entry snapshot. Never
-                    promote the conflict's version into mutation authority. *)
-                 settle_tasks ~config ~meta current settled
+                    Re-read identity and ownership, and let the existing
+                    receipt/version planner CAS the same operation before
+                    another release. *)
+                 Eio.Fiber.yield ();
+                 (match read_operation_meta ~config current with
+                  | Error detail -> block ~config current Task_settlement detail
+                  | Ok meta ->
+                    settle_tasks_observing ~before_release ~config ~meta current
+                      settled)
                | Error
                    (( Masc_domain.Task
                         ( Masc_domain.Task_error.NotFound _
@@ -370,7 +396,8 @@ let rec settle_tasks ~config ~meta operation settled_task_ids =
                            latest_backlog.version
                            (current.expected_backlog_version + 1))
                     then
-                      settle_tasks ~config ~meta current settled
+                      settle_tasks_observing ~before_release ~config ~meta
+                        current settled
                     else
                       let settled = task_id :: settled in
                       (match
@@ -396,7 +423,9 @@ let rec settle_tasks ~config ~meta operation settled_task_ids =
                 ~expected_backlog_version:active_snapshot.backlog_version
             with
             | Error _ as error -> error
-            | Ok rebased -> settle_tasks ~config ~meta rebased settled_task_ids)
+            | Ok rebased ->
+              settle_tasks_observing ~before_release ~config ~meta rebased
+                settled_task_ids)
          | [ receipted_id ] ->
            let settled_task_ids = receipted_id :: settled_task_ids in
            (match
@@ -407,7 +436,9 @@ let rec settle_tasks ~config ~meta operation settled_task_ids =
                 ~expected_backlog_version:active_snapshot.backlog_version
             with
             | Error _ as error -> error
-            | Ok recovered -> settle_tasks ~config ~meta recovered settled_task_ids)
+            | Ok recovered ->
+              settle_tasks_observing ~before_release ~config ~meta recovered
+                settled_task_ids)
          | _ ->
            block
              ~config
@@ -425,6 +456,11 @@ let rec settle_tasks ~config ~meta operation settled_task_ids =
              active_snapshot.backlog_version)
 ;;
 
+let settle_tasks ~config ~meta operation settled_task_ids =
+  settle_tasks_observing ~before_release:(fun () -> ()) ~config ~meta
+    operation settled_task_ids
+;;
+
 let paused_meta (meta : Keeper_meta_contract.keeper_meta) =
   { meta with
     current_task_id = None
@@ -435,24 +471,6 @@ let paused_meta (meta : Keeper_meta_contract.keeper_meta) =
            { operator_actor = Keeper_latched_reason.operator_actor_keeper_down })
   ; updated_at = Masc_domain.now_iso ()
   }
-;;
-
-let read_operation_meta ~config operation =
-  match
-    Keeper_owner_registry.get
-      ~base_path:config.Workspace.base_path
-      ~keeper_name:operation.keeper_name
-  with
-  | Error error -> Error (Keeper_owner_registry.lookup_error_to_string error)
-  | Ok owner ->
-    (match Keeper_owner.exact_projection owner with
-     | Error error -> Error (Keeper_owner.error_to_string error)
-     | Ok { meta = None; _ } -> Error "Keeper metadata is absent"
-     | Ok { meta = Some meta; _ } ->
-       if
-         Keeper_id.Trace_id.equal meta.runtime.trace_id operation.trace_id
-       then Ok meta
-       else Error "Keeper metadata identity changed")
 ;;
 
 let validate_registry_owner_exact ~config operation =
@@ -1239,6 +1257,12 @@ let plan_blocked_replay ~config operation replay =
 ;;
 
 module For_testing = struct
+  let settle_tasks ~before_release ~config operation =
+    match read_operation_meta ~config operation with
+    | Error detail -> block ~config operation Meta_read detail
+    | Ok meta -> settle_tasks_observing ~before_release ~config ~meta operation []
+  ;;
+
   let paused_meta = paused_meta
   let remove_volumes_after_teardown = remove_volumes_after_teardown
 

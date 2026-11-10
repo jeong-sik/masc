@@ -77,6 +77,15 @@ val plan_blocked_replay :
   replay_plan
 
 module For_testing : sig
+  val settle_tasks :
+    before_release:(unit -> unit) ->
+    config:Workspace.config ->
+    Keeper_shutdown_types.t ->
+    (Keeper_shutdown_types.t * Keeper_id.Task_id.t list, error) result
+  (** Run real task settlement, observing the boundary after its authoritative
+      snapshot and before each release CAS. The observer belongs to this call;
+      production uses the same settlement with a no-op observer. *)
+
   val remove_volumes_after_teardown
     :  teardown:(unit, string) result
     -> remove:(unit -> (unit, string) result)

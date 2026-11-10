@@ -304,6 +304,200 @@ let meta_fixture_exn ~keeper_name =
   | Error detail -> failf "meta fixture rejected: %s" detail
 ;;
 
+let backlog_exn ~config =
+  match Workspace_backlog.read_backlog_r config with
+  | Ok backlog -> backlog
+  | Error detail -> fail detail
+;;
+
+let task_exn ~config task_id =
+  match List.find_opt (fun (task : Masc_domain.task) -> task.id = task_id)
+      (backlog_exn ~config).tasks with
+  | Some task -> task
+  | None -> failf "Task disappeared: %s" task_id
+;;
+
+let task_result_exn = function
+  | Ok value -> value
+  | Error error -> fail (Masc_domain.masc_error_to_string error)
+;;
+
+let add_task_exn ~config title =
+  match Workspace.add_task_with_result config ~title ~priority:2 ~description:title with
+  | Ok created -> created.task_id
+  | Error error -> fail (Workspace.add_task_error_to_string error)
+;;
+
+let claim_task_exn ~config ~keeper_name ?(auto_start = false) task_id =
+  ignore (task_result_exn
+    (Workspace.claim_task_r config ~agent_name:keeper_name ~task_id ~auto_start ()))
+;;
+
+let settlement_operation ~config ~keeper_name task_ids =
+  let typed_ids = List.map (fun id ->
+    match Keeper_id.Task_id.of_string id with
+    | Ok id -> id | Error detail -> fail detail) task_ids in
+  let operation =
+    { (make_operation ~keeper_name ~phase:Joined_idle ~turn_disposition:No_inflight_turn) with
+      expected_backlog_version = (backlog_exn ~config).version
+    ; owned_task_ids = typed_ids }
+  in
+  persist_exn ~config operation;
+  operation
+;;
+
+let settlement_exn ~config ~before_release operation =
+  match Keeper_shutdown_finalize.For_testing.settle_tasks ~before_release ~config operation with
+  | Ok settled -> settled
+  | Error error -> fail (Keeper_shutdown_finalize.error_to_string error)
+;;
+
+let receipt_ref operation =
+  "masc://keeper-shutdown/" ^ Operation_id.to_string operation.operation_id
+;;
+
+let check_returned_with_receipt ~config operation task_id =
+  let task = task_exn ~config task_id in
+  check bool "original Task is returned to Todo" true
+    (match task.task_status with
+     | Masc_domain.Todo -> true
+     | Claimed _ | InProgress _ | AwaitingVerification _ | Done _ | Cancelled _ -> false);
+  match task.handoff_context with
+  | None -> fail "release receipt missing"
+  | Some handoff ->
+    check (list string) "exact shutdown receipt is recorded once"
+      [ receipt_ref operation ] handoff.evidence_refs
+;;
+
+let check_settlement_blocked ~config operation result =
+  (match result with
+   | Error (Keeper_shutdown_finalize.Finalization_blocked
+       { phase = Blocked { stage = Task_settlement; _ }; _ }) -> ()
+   | Error error -> fail (Keeper_shutdown_finalize.error_to_string error)
+   | Ok _ -> fail "changed shutdown authority allowed Task settlement");
+  match Keeper_shutdown_store.load ~config ~keeper_name:operation.keeper_name operation.operation_id with
+  | Ok { phase = Blocked { stage = Task_settlement; _ }; _ } -> ()
+  | Ok operation -> failf "blocked settlement was not durable: %s" (phase_label operation)
+  | Error error -> fail (Keeper_shutdown_store.error_to_string error)
+;;
+
+let test_settlement_replans_after_unrelated_task_creation () =
+  with_workspace (fun ~config ->
+    let keeper_name = "settlement-version-race" in
+    write_keeper_meta_exn ~config ~keeper_name;
+    let first = add_task_exn ~config "owned claimed Task" in
+    let second = add_task_exn ~config "owned running Task" in
+    claim_task_exn ~config ~keeper_name first;
+    claim_task_exn ~config ~keeper_name ~auto_start:true second;
+    let operation = settlement_operation ~config ~keeper_name [first; second] in
+    let inserted = ref None in
+    let before_release () =
+      match !inserted with
+      | Some _ -> ()
+      | None ->
+        let id = add_task_exn ~config "unrelated concurrent Task" in
+        inserted := Some (task_exn ~config id)
+    in
+    let settled, settled_ids = settlement_exn ~config ~before_release operation in
+    List.iter (check_returned_with_receipt ~config operation) [first; second];
+    check (list string) "both original Task identities are settled"
+      (List.sort String.compare [first; second])
+      (List.map Keeper_id.Task_id.to_string settled_ids |> List.sort String.compare);
+    let backlog = backlog_exn ~config in
+    check int "only creation and the original releases change the backlog"
+      (operation.expected_backlog_version + 3) backlog.version;
+    check int "operation records the authoritative backlog revision"
+      backlog.version settled.expected_backlog_version;
+    match !inserted with
+    | None -> fail "release boundary was not reached"
+    | Some task -> check bool "unrelated Task is unchanged" true
+        (task = task_exn ~config task.id))
+;;
+
+let test_settlement_blocks_task_transferred_during_replan () =
+  with_workspace (fun ~config ->
+    let keeper_name = "settlement-owner-race" in
+    let successor = "settlement-new-owner" in
+    write_keeper_meta_exn ~config ~keeper_name;
+    write_keeper_meta_exn ~config ~keeper_name:successor;
+    let first = add_task_exn ~config "transferred Task" in
+    let second = add_task_exn ~config "unreleased original Task" in
+    List.iter (claim_task_exn ~config ~keeper_name) [first; second];
+    let operation = settlement_operation ~config ~keeper_name [first; second] in
+    let remaining = task_exn ~config second in
+    let transferred = ref None in
+    let before_release () =
+      match !transferred with
+      | Some _ -> ()
+      | None ->
+        ignore (task_result_exn (Workspace.release_task_r config ~agent_name:keeper_name ~task_id:first ()));
+        claim_task_exn ~config ~keeper_name:successor first;
+        transferred := Some (task_exn ~config first)
+    in
+    check_settlement_blocked ~config operation
+      (Keeper_shutdown_finalize.For_testing.settle_tasks ~before_release ~config operation);
+    check bool "remaining original Task stays owned" true (remaining = task_exn ~config second);
+    match !transferred with
+    | None -> fail "release boundary was not reached"
+    | Some task -> check bool "successor ownership is preserved" true
+        (task = task_exn ~config first))
+;;
+
+let test_settlement_replan_rechecks_keeper_trace () =
+  with_workspace (fun ~config ->
+    let keeper_name = "settlement-trace-race" in
+    write_keeper_meta_exn ~config ~keeper_name;
+    let task_id = add_task_exn ~config "original trace Task" in
+    claim_task_exn ~config ~keeper_name task_id;
+    let operation = settlement_operation ~config ~keeper_name [task_id] in
+    let original = task_exn ~config task_id in
+    let changed = ref false in
+    let before_release () =
+      if not !changed then begin
+        changed := true;
+        ignore (add_task_exn ~config "unrelated version race");
+        let owner = match Keeper_owner_registry.get ~base_path:config.base_path ~keeper_name with
+          | Ok owner -> owner | Error error -> fail (Keeper_owner_registry.lookup_error_to_string error) in
+        let before = match (Keeper_owner.projection owner).meta with
+          | Some meta -> meta | None -> fail "Keeper metadata missing" in
+        let after = { before with runtime =
+          { before.runtime with trace_id = trace_id_exn "trace-after-task-snapshot" } } in
+        match Keeper_owner_registry.commit_turn_runtime ~base_path:config.base_path ~keeper_name ~before ~after with
+        | Ok (Some _) -> ()
+        | Ok None -> fail "trace mutation removed metadata"
+        | Error error -> fail (Keeper_owner_registry.command_error_to_string error)
+      end
+    in
+    check_settlement_blocked ~config operation
+      (Keeper_shutdown_finalize.For_testing.settle_tasks ~before_release ~config operation);
+    check bool "old trace cannot release the original Task" true
+      (original = task_exn ~config task_id))
+;;
+
+let test_settlement_recovers_already_committed_receipt () =
+  with_workspace (fun ~config ->
+    let keeper_name = "settlement-receipt-replay" in
+    write_keeper_meta_exn ~config ~keeper_name;
+    let task_id = add_task_exn ~config "already released Task" in
+    claim_task_exn ~config ~keeper_name task_id;
+    let operation = settlement_operation ~config ~keeper_name [task_id] in
+    let handoff_context : Masc_domain.task_handoff_context =
+      { summary = "recorded handoff"; reason = None; next_step = None; failure_mode = None
+      ; evidence_refs = [receipt_ref operation]; updated_at = None; updated_by = None }
+    in
+    ignore (task_result_exn (Workspace.release_task_r config ~agent_name:keeper_name
+      ~task_id ~expected_version:operation.expected_backlog_version ~handoff_context ()));
+    let before = backlog_exn ~config in
+    let settled, settled_ids = settlement_exn ~config ~before_release:(fun () -> ()) operation in
+    check bool "receipt recovery does not rewrite or consume the Task again" true
+      (before = backlog_exn ~config);
+    check (list string) "committed receipt settles its original identity" [task_id]
+      (List.map Keeper_id.Task_id.to_string settled_ids);
+    check int "operation catches up to the committed release"
+      before.version settled.expected_backlog_version;
+    check_returned_with_receipt ~config operation task_id)
+;;
+
 let () =
   run
     "keeper-shutdown-reconciliation-settlement"
@@ -324,6 +518,16 @@ let () =
             "blocks a process interrupted during lane join"
             `Quick
             test_recovery_blocks_interrupted_lane_join
+        ] )
+    ; ( "task settlement"
+      , [ test_case "replans a real release CAS after unrelated Task creation" `Quick
+            test_settlement_replans_after_unrelated_task_creation
+        ; test_case "preserves a Task transferred to another owner" `Quick
+            test_settlement_blocks_task_transferred_during_replan
+        ; test_case "replan rejects a changed Keeper trace" `Quick
+            test_settlement_replan_rechecks_keeper_trace
+        ; test_case "recovers a committed release receipt without consuming again" `Quick
+            test_settlement_recovers_already_committed_receipt
         ] )
     ]
 ;;

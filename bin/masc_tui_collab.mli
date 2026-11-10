@@ -47,10 +47,14 @@ val lines : height:int -> width:int -> t -> string list
     machine keys stack when they do not fit one row, so nothing is cut at the
     frame's edge. Each invite takes the rows its text needs; the list shows the
     selected invite and as many of its neighbours as [height] allows. When the
-    text is taller than [height] the closing sentence goes first, then the two
-    explanatory sentences, then the keys; the form, the messages and the
-    selected invite stay while [height] has rows for them. The frame says how
-    many rows it cut, but not that a sentence or the keys gave way: when what
-    is left fits without a cut, nothing says they are missing. Every text is
-    sanitized before it is measured, so every row returned is already clean
-    terminal text. *)
+    text is taller than [height], the heading (two explanatory sentences with
+    the keys between them) stays whole only while the rows left by the form,
+    the messages, the other fixed text and the selected invite hold it, less
+    one row for the frame's note. Below that the sentences go together and the
+    keys stay, and below that the keys go too. The closing sentence is always
+    returned and is not counted, so the frame's cut at the end takes it first.
+    The form, the messages and the selected invite stay while [height] has rows
+    for them. The frame says how many rows it cut, but not that the sentences
+    or the keys gave way: when what is left fits without a cut, nothing says
+    they are missing. Every text is sanitized before it is measured, so every
+    row returned is already clean terminal text. *)

@@ -4,15 +4,15 @@ module Current = Keeper_memory_os_current
 module Codec = Keeper_memory_os_journal_codec
 module Program = Keeper_memory_os_program_types
 
-type kind = Created | Reobserved | Revised | Absorbed | Retracted | Removed | Invalidated
-type fact = { memory_id : string; claim : string }
+type kind = Created | Reobserved | Revised | Absorbed | Retracted | Removed | Invalidated | Relation_unavailable
+type fact = { memory_id : string; claim : string option }
 type event =
   { identity : string; recorded_at : float; revision : int; kind : kind
   ; before : fact list; after : fact list; reason : string option }
 type t = { limit : int; journal_lines : int; events : event list; notes : string list }
 
 let reference (fact : Memory.fact) =
-  { memory_id = Memory.memory_id fact; claim = fact.claim }
+  { memory_id = Memory.memory_id fact; claim = Some fact.claim }
 
 let changes ~identity ~recorded_at ~revision ~source ~before ~after
     ~(links : Memory.revision list) ~(absorbed : Memory.absorbed_statement list)
@@ -28,7 +28,7 @@ let changes ~identity ~recorded_at ~revision ~source ~before ~after
     List.filter_map (fun (link : Memory.revision) ->
       match find link.superseded removed, find link.superseded_by after with
       | Some old, Some successor ->
-          Some (make ("revision:" ^ link.superseded) Revised [old] [successor] None)
+          Some (make ("revision:" ^ link.superseded ^ ":" ^ link.superseded_by) Revised [old] [successor] None)
       | None, _ | _, None -> None) links
     @ (List.map (fun (link : Memory.absorbed_statement) -> link.into) absorbed
        |> List.sort_uniq String.compare
@@ -61,11 +61,12 @@ let changes ~identity ~recorded_at ~revision ~source ~before ~after
     | Some _ | None -> None) after in
   related @ removals @ additions @ updates
 
-let project ~identity ~absorbed json =
-  let* entry = Codec.journal_entry_of_json json in
+let project_entry ?snapshot ?archive_error ~identity ~absorbed json entry =
   match entry with
   | Current.Journal_failed _ | Current.Journal_quarantined _ -> Ok []
   | Current.Journal_committed {recorded_at; revision; source; change; dropped; program} ->
+    let* () = if Float.is_finite recorded_at && recorded_at >= 0.
+      then Ok () else Error "invalid journal observation clock" in
     let fields = match json with `Assoc fields -> fields | _ -> [] in
     let* transition = Codec.journal_commit_effect fields in
     match transition with
@@ -83,34 +84,74 @@ let project ~identity ~absorbed json =
               Memory.memory_id row.fact) stage.invalidated)) publication.execution.stages)
       | None ->
         let* links = Codec.journal_revision_links fields in
-        (* An archive append precedes publication. Require the committed
-           transition itself to contain both exact endpoints of that pass. *)
-        let absorbed = List.filter_map (fun (row : Keeper_memory_absorbed.record) ->
-          if row.trace_id = source.trace_id && row.recorded_at = recorded_at
-             && List.exists (fun fact -> Memory.memory_id fact = row.memory_id) change.removed
-             && List.exists (fun fact -> Memory.memory_id fact = row.into) change.added
-          then Some Memory.{absorbed = row.memory_id; into = row.into} else None) absorbed
+        let links = Option.value links ~default:[] in
+        let matches (observed : Current.t) = observed.revision = revision
+          && observed.updated_at = recorded_at && observed.source = source && observed.change = change in
+        let final_facts = match snapshot with
+          | Some observed when matches observed -> observed.facts
+          | Some _ | None -> change.added in
+        let find id facts = List.find_opt (fun fact -> Memory.memory_id fact = id) facts in
+        let archive = List.filter (fun (row : Keeper_memory_absorbed.record) ->
+          row.trace_id = source.trace_id && row.recorded_at = recorded_at
+          && match find row.memory_id change.removed with
+             | None -> false | Some original -> original = row.fact) absorbed in
+        let absorptions = List.map (fun (row : Keeper_memory_absorbed.record) ->
+            Memory.{absorbed = row.memory_id; into = row.into}) archive
           |> List.sort_uniq (fun a b ->
             compare (a.Memory.absorbed, a.into) (b.Memory.absorbed, b.into)) in
-        Ok (changes ~identity ~recorded_at ~revision ~source:source.kind
-          ~before:change.removed ~after:change.added ~links:(Option.value links ~default:[])
-          ~absorbed ~dropped:(Option.value dropped ~default:[])
-          ~invalidated:(List.map (fun (row : Current.support_invalidation) ->
-            Memory.memory_id row.fact) change.invalidated))
+        let invalidated = List.map (fun (row : Current.support_invalidation) ->
+            Memory.memory_id row.fact) change.invalidated in
+        let dropped = Option.value dropped ~default:[] in
+        let candidates = List.map (fun (link : Memory.revision) -> link.superseded, link.superseded_by) links
+          @ List.map (fun (link : Memory.absorbed_statement) -> link.absorbed, link.into) absorptions
+          |> List.sort_uniq compare in
+        let unresolved = List.filter_map (fun (from_id, into_id) ->
+          match find from_id change.removed, find into_id final_facts with
+          | Some original, None -> Some
+              {identity = identity ^ ":unresolved:" ^ from_id ^ ":" ^ into_id;
+               recorded_at; revision; kind = Relation_unavailable;
+               before = [reference original]; after = [{memory_id = into_id; claim = None}];
+               reason = Some "retained successor is not proven by this historical transition"}
+          | None, _ | _, Some _ -> None) candidates in
+        let unresolved = match archive_error, source.kind with
+          | None, _ | Some _, (Current.Explicit_write | Current.Explicit_retract) -> unresolved
+          | Some reason, Current.Librarian ->
+            List.filter_map (fun original ->
+              let id = Memory.memory_id original in
+              if List.mem id invalidated
+                 || List.exists (fun (row : Memory.dropped_statement) -> row.memory_id = id) dropped
+                 || List.exists (fun (from_id, _) -> from_id = id) candidates
+              then None else Some
+                {identity = identity ^ ":unresolved:" ^ id; recorded_at; revision;
+                 kind = Relation_unavailable; before = [reference original]; after = []; reason = Some reason})
+              change.removed @ unresolved in
+        (* Full matching current facts supply retained targets; keeping those
+           same facts on both sides does not invent new creation events. *)
+        let retained = List.filter (fun fact -> Option.is_none (find (Memory.memory_id fact) change.added)) final_facts in
+        let confirmed = changes ~identity ~recorded_at ~revision ~source:source.kind
+          ~before:(change.removed @ retained) ~after:final_facts ~links ~absorbed:absorptions
+          ~dropped ~invalidated in
+        let unknown_source id = List.exists (fun event ->
+          List.exists (fun fact -> fact.memory_id = id) event.before) unresolved in
+        Ok (List.filter (fun event -> match event.kind, event.before with
+          | Removed, [fact] -> not (unknown_source fact.memory_id)
+          | (Created | Reobserved | Revised | Absorbed | Retracted | Invalidated | Relation_unavailable), _
+          | Removed, ([] | _ :: _ :: _) -> true) confirmed @ unresolved)
+
+let project ?snapshot ?archive_error ~identity ~absorbed json =
+  let* entry = Codec.journal_entry_of_json json in
+  project_entry ?snapshot ?archive_error ~identity ~absorbed json entry
+
+module Archive_index = Map.Make (struct type t = string * float let compare = compare end)
 
 let read_inline ~keepers_dir ~keeper_id ~limit =
   let path = Current.journal_path_for_keepers_dir ~keepers_dir ~keeper_id in
-  let archive, archive_notes = match Keeper_memory_absorbed.read ~keepers_dir ~keeper_id with
-    | Error reason -> [], [reason]
-    | Ok rows -> List.fold_left (fun (facts, notes) (index, row) -> match row with
-        | Ok record -> record :: facts, notes
-        | Error error -> facts, (Printf.sprintf "absorption line %d: %s" index
-            (Keeper_memory_absorbed.read_error_to_string error)) :: notes) ([], []) rows in
+  (* Fix the journal window first: a commit visible here has already appended
+     its absorption rows. A concurrent later commit cannot enter this window. *)
   let rows =
     try Ok (Dated_jsonl.map_tail_rows path ~max_lines:limit ~f:(fun {Dated_jsonl.offset; line} ->
-      let identity = Printf.sprintf "memory:%s:%d" keeper_id offset in
       let result = match Yojson.Safe.from_string line with
-        | json -> project ~identity ~absorbed:archive json
+        | json -> Result.map (fun entry -> json, entry) (Codec.journal_entry_of_json json)
         | exception Yojson.Json_error reason -> Error reason in
       offset, result))
     with
@@ -118,10 +159,48 @@ let read_inline ~keepers_dir ~keeper_id ~limit =
     | Unix.Unix_error (error, op, arg) ->
         Error (Printf.sprintf "%s %s: %s" op arg (Unix.error_message error)) in
   match rows with
-  | Error reason -> {limit; journal_lines = 0; events = []; notes = reason :: archive_notes}
+  | Error reason -> {limit; journal_lines = 0; events = []; notes = [reason]}
   | Ok rows ->
-    let events, notes = List.fold_left (fun (events, notes) (offset, row) -> match row with
-      | Ok next -> List.rev_append next events, notes
+    let legacy_rewrite = function
+      | _, Ok (`Assoc fields, Current.Journal_committed {program = None; change; _}) ->
+          change.removed <> [] && Codec.journal_commit_effect fields = Ok (Some Current.Rewritten)
+      | _, (Error _ | Ok (_, (Current.Journal_committed _
+          | Current.Journal_failed _ | Current.Journal_quarantined _))) -> false in
+    let needs_legacy = List.exists legacy_rewrite rows in
+    let needs_archive = List.exists (fun row -> legacy_rewrite row && match row with
+      | _, Ok (_, Current.Journal_committed {source; _}) -> source.kind = Current.Librarian
+      | _, (Error _ | Ok (_, (Current.Journal_failed _ | Current.Journal_quarantined _))) -> false) rows in
+    let archive, archive_notes =
+      if not needs_archive then [], [] else
+      match Keeper_memory_absorbed.read ~keepers_dir ~keeper_id with
+      | Error reason -> [], [reason]
+      | Ok records -> List.fold_left (fun (facts, notes) (index, row) -> match row with
+          | Ok record -> record :: facts, notes
+          | Error error -> facts, (Printf.sprintf "absorption line %d: %s" index
+              (Keeper_memory_absorbed.read_error_to_string error)) :: notes) ([], []) records in
+    let index = List.fold_left (fun index (row : Keeper_memory_absorbed.record) ->
+      Archive_index.update (row.trace_id, row.recorded_at)
+        (fun previous -> Some (row :: Option.value previous ~default:[])) index) Archive_index.empty archive in
+    let snapshot = if not needs_legacy then None else
+      match Current.read_classified ~keepers_dir ~keeper_id with
+      | Current.Readable snapshot -> Some snapshot
+      | Current.No_snapshot | Current.Undecodable _ | Current.Io_unreadable _ -> None in
+    let events, notes = List.fold_left (fun (events, notes) (offset, row) ->
+      let identity = Printf.sprintf "memory:%s:%d" keeper_id offset in
+      let result = match row with
+        | Error reason -> Error reason
+        | Ok (json, entry) ->
+          let absorbed = match entry with
+            | Current.Journal_committed {source; recorded_at; _} ->
+                Option.value (Archive_index.find_opt (source.trace_id, recorded_at) index) ~default:[]
+            | Current.Journal_failed _ | Current.Journal_quarantined _ -> [] in
+          project_entry ?snapshot ?archive_error:(List.nth_opt archive_notes 0)
+            ~identity ~absorbed json entry in
+      match result with
+      | Ok next ->
+          let unknown = List.filter_map (fun event ->
+            if event.kind = Relation_unavailable then event.reason else None) next in
+          List.rev_append next events, List.rev_append unknown notes
       | Error reason -> events, (Printf.sprintf "journal byte %d: %s" offset reason) :: notes)
         ([], archive_notes) rows in
     {limit; journal_lines = List.length rows; events = List.rev events; notes = List.rev notes}
@@ -133,9 +212,9 @@ let read ~keepers_dir ~keeper_id ~limit =
 let kind_to_string = function
   | Created -> "created" | Reobserved -> "reobserved" | Revised -> "revised"
   | Absorbed -> "absorbed" | Retracted -> "retracted" | Removed -> "removed"
-  | Invalidated -> "invalidated"
+  | Invalidated -> "invalidated" | Relation_unavailable -> "relation_unavailable"
 
-let fact_to_json fact = `Assoc ["memory_id", `String fact.memory_id; "claim", `String fact.claim]
+let fact_to_json fact = `Assoc ["memory_id", `String fact.memory_id; "claim", (match fact.claim with None -> `Null | Some claim -> `String claim)]
 let event_to_json event = `Assoc
   [ "identity", `String event.identity; "recorded_at", `Float event.recorded_at
   ; "revision", `Int event.revision; "kind", `String (kind_to_string event.kind)
@@ -151,9 +230,10 @@ let of_json json =
   let open Tui_decode_fields in
   let fact json =
     let* memory_id = required_string_field json "memory_id" in
-    let* claim = required_string_field json "claim" in
-    if Memory.is_memory_id memory_id then Ok {memory_id; claim}
-    else Error "invalid activity memory identity" in
+    let* claim = optional_string_field json "claim" in
+    if Memory.is_memory_id memory_id
+       && (match claim with None -> true | Some text -> String.trim text <> "" && Memory.memory_id_of_claim text = memory_id)
+    then Ok {memory_id; claim} else Error "activity claim does not match its memory identity" in
   let event json =
     let* identity = required_string_field json "identity" in
     let* recorded_at = Json_util.require_float json "recorded_at" in
@@ -162,13 +242,21 @@ let of_json json =
     let* kind = match token with
       | "created" -> Ok Created | "reobserved" -> Ok Reobserved | "revised" -> Ok Revised
       | "absorbed" -> Ok Absorbed | "retracted" -> Ok Retracted | "removed" -> Ok Removed
-      | "invalidated" -> Ok Invalidated | _ -> Error ("unknown memory activity kind: " ^ token) in
+      | "invalidated" -> Ok Invalidated | "relation_unavailable" -> Ok Relation_unavailable
+      | _ -> Error ("unknown memory activity kind: " ^ token) in
     let* before_rows = required_list_field json "before" in
     let* before = decode_list "before" fact before_rows in
     let* after_rows = required_list_field json "after" in
     let* after = decode_list "after" fact after_rows in
     let* reason = optional_string_field json "reason" in
-    if Float.is_finite recorded_at && recorded_at >= 0. && revision >= 0 && identity <> ""
+    let complete facts = List.for_all (fun fact -> Option.is_some fact.claim) facts in
+    let shape = match kind with
+      | Created -> before = [] && after <> [] && complete after
+      | Reobserved | Revised | Absorbed -> before <> [] && after <> [] && complete before && complete after
+      | Retracted | Removed | Invalidated -> before <> [] && after = [] && complete before
+      | Relation_unavailable -> before <> [] && complete before &&
+          (match reason with Some text -> String.trim text <> "" | None -> false) in
+    if shape && Float.is_finite recorded_at && recorded_at >= 0. && revision >= 0 && identity <> ""
     then Ok {identity; recorded_at; revision; kind; before; after; reason}
     else Error "invalid memory activity clock or identity" in
   let* limit = required_int_field json "limit" in
@@ -176,6 +264,8 @@ let of_json json =
   let* rows = required_list_field json "events" in
   let* events = decode_list "events" event rows in
   let* notes = require_string_list json "notes" in
+  let identities = List.map (fun event -> event.identity) events in
   if limit > 0 && journal_lines >= 0 && journal_lines <= limit
+     && List.length (List.sort_uniq String.compare identities) = List.length identities
   then Ok {limit; journal_lines; events; notes}
   else Error "invalid memory activity window"

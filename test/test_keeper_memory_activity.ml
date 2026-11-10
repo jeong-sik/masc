@@ -9,10 +9,13 @@ let old_a = fact "original a"
 let old_b = fact "original b"
 let successor = fact "combined claim"
 
-let row ?(transition = Some "rewritten") ?(links = []) removed added =
-  let snapshot : Current.t =
-    { revision = 2; updated_at = 20.; source = {kind = Current.Librarian; trace_id = "pass"}
-    ; facts = added; change = {added; removed; retained = 0; invalidated = []} } in
+let snapshot ?(retained = []) removed added : Current.t =
+  { revision = 2; updated_at = 20.; source = {kind = Current.Librarian; trace_id = "pass"}
+  ; facts = added @ retained;
+    change = {added; removed; retained = List.length retained; invalidated = []} }
+
+let row ?(retained = []) ?(transition = Some "rewritten") ?(links = []) removed added =
+  let snapshot = snapshot ~retained removed added in
   let stored = Current.to_json snapshot in
   `Assoc
     ([ "outcome", `String "committed"; "recorded_at", `Float 20.; "revision", `Int 2
@@ -71,10 +74,64 @@ let test_codec () =
    | Error reason -> fail reason
    | Ok decoded ->
      check bool "identities, contents, lineage and notes round trip" true (decoded = activity));
-  let malformed = `Assoc ["limit", `Int 1; "journal_lines", `Int 0;
-    "events", `List [`Assoc ["kind", `String "invented"]]; "notes", `List []] in
-  check bool "malformed activity is not an empty success" true
-    (Result.is_error (Activity.of_json malformed))
+  let change_event field value = match Activity.to_json activity with
+    | `Assoc fields -> `Assoc (List.map (fun (key, content) -> if key <> "events" then key, content else
+      key, (match content with `List (`Assoc event :: rest) ->
+        `List (`Assoc ((field, value) :: List.remove_assoc field event) :: rest)
+        | _ -> fail "activity fixture has no event")) fields)
+    | _ -> fail "activity fixture is not an object" in
+  check bool "unknown kind does not become an empty success" true
+    (Result.is_error (Activity.of_json (change_event "kind" (`String "invented"))));
+  let forged = `List [`Assoc ["memory_id", `String (Memory.memory_id old_a);
+    "claim", `String "different bytes"]] in
+  check bool "claim must match its exact identity" true
+    (Result.is_error (Activity.of_json (change_event "before" forged)))
+
+let test_split () =
+  let events = project [] (row ~links:[old_a,old_b; old_a,successor] [old_a] [old_b; successor]) in
+  check int "both split successors survive" 2 (List.length events);
+  let ids = List.map (fun (event : Activity.event) -> event.identity) events in
+  check int "split edges have distinct identities" 2 (List.length (List.sort_uniq String.compare ids))
+
+let test_retained () =
+  let json = row ~retained:[successor] [old_a] [] in
+  let observed = snapshot ~retained:[successor] [old_a] [] in
+  let require = function Ok events -> events | Error reason -> fail reason in
+  let events = Activity.project ~snapshot:observed ~identity:"journal:42" ~absorbed:[archive old_a] json |> require in
+  check int "retained target creates only one formation event" 1 (List.length events);
+  check bool "matching guarded snapshot resolves absorption" true (has_absorption events);
+  let unknown = project [archive old_a] json in
+  check bool "historical retained successor stays unresolved" true
+    (List.exists (fun (event : Activity.event) -> event.kind = Activity.Relation_unavailable) unknown);
+  check bool "unresolved successor is not a confirmed claim" true
+    (List.exists (fun (event : Activity.event) ->
+       List.exists (fun (fact : Activity.fact) -> fact.memory_id = Memory.memory_id successor && fact.claim = None)
+         event.after) unknown);
+  let wrong = {observed with source = {observed.source with trace_id = "different pass"}} in
+  check bool "same revision alone cannot resolve lineage" false
+    (has_absorption (Activity.project ~snapshot:wrong ~identity:"journal:42" ~absorbed:[archive old_a] json |> require));
+  let revisions = Activity.project ~snapshot:observed ~identity:"journal:42" ~absorbed:[]
+      (row ~retained:[successor] ~links:[old_a,successor] [old_a] []) |> require in
+  check bool "retained revision is a revision" true
+    (List.exists (fun (event : Activity.event) -> event.kind = Activity.Revised) revisions)
+
+let test_bad_clock () =
+  List.iter (fun clock -> match row [old_a] [successor] with
+    | `Assoc fields ->
+      check bool "invalid clock refuses only this journal row" true
+        (Result.is_error (Activity.project ~identity:"journal:42" ~absorbed:[]
+          (`Assoc (("recorded_at", `Float clock) :: List.remove_assoc "recorded_at" fields))))
+    | _ -> fail "journal fixture is not an object") [-1.; Float.nan; Float.infinity]
+
+let test_partial_archive () =
+  match Activity.project ~archive_error:"archive unreadable" ~identity:"journal:42" ~absorbed:[]
+      (row [old_a] [successor]) with
+  | Error reason -> fail reason
+  | Ok events ->
+    check bool "unreadable archive does not assert generic removal" false
+      (List.exists (fun (event : Activity.event) -> event.kind = Activity.Removed) events);
+    check bool "lineage uncertainty remains visible" true
+      (List.exists (fun (event : Activity.event) -> event.kind = Activity.Relation_unavailable) events)
 
 let () = run "Keeper memory activity"
   ["committed lineage",
@@ -82,4 +139,8 @@ let () = run "Keeper memory activity"
      test_case "orphan archive is not commit evidence" `Quick test_orphan;
      test_case "unchanged and unmarked observations" `Quick test_unchanged;
      test_case "revision differs from absorption" `Quick test_revision;
-     test_case "read model codec" `Quick test_codec]]
+     test_case "read model codec" `Quick test_codec;
+     test_case "split edge identities" `Quick test_split;
+     test_case "retained successor evidence" `Quick test_retained;
+     test_case "bad observation clock" `Quick test_bad_clock;
+     test_case "partial archive" `Quick test_partial_archive]]

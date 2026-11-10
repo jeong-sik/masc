@@ -144,23 +144,6 @@ module Box : sig
   val r : string
 end
 
-(** A row's own weight, for chrome that carries no reading of its own:
-    Normal, Dim, or the single accent.
-
-    These three are the vocabulary for the frame around content -- a border,
-    a marker, a label. They are not a cap on how many colours a screen may
-    hold. A colour that reports health, phase, or attention draws through
-    {!status}; a colour that says what a piece of content *is* -- a keyword,
-    a string, a number, a diff line -- draws through {!Syntax}. What every
-    one of those has in common is a name: a renderer asks for the reading and
-    the theme answers with a colour, so one remap moves every site and the
-    readability lift applies. Picking an SGR code in a renderer is what this
-    rules out, not the number of colours on the screen. *)
-type tone = Normal | Dim | Accent
-
-val tone : tone -> string
-(** [Normal] is [""] — the terminal's own text needs no escape. *)
-
 (** Semantic state colours — the only place red, yellow, and green mean
     anything. A fact about health, phase, or attention draws through these
     names, so one remap moves every reading at once. *)

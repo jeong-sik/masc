@@ -1439,12 +1439,11 @@ let value_indent_cells = 2
 
 module Span = Masc_tui_span
 
-(* Frame vocabulary ([Masc_tui_theme.tone]): a label is the accent, and the
-   keys, bullets and stamps around a value are dim. Nothing here colours a
-   value by what it means. *)
-let muted_style () = Span.fg (Masc_tui_theme.tone Masc_tui_theme.Dim)
+(* A label is the accent, and the keys, bullets and stamps around a value are
+   dim. Nothing here colours a value by what it means. *)
+let muted_style () = Span.fg Masc_tui_theme.Sgr.dim
 let label_style () =
-  Span.combine (Span.fg (Masc_tui_theme.tone Masc_tui_theme.Accent)) (Span.weight Masc_tui_theme.Sgr.bold)
+  Span.combine (Span.fg (Masc_tui_ansi.Theme.accent ())) (Span.weight Masc_tui_theme.Sgr.bold)
 let bold_style () = Span.weight Masc_tui_theme.Sgr.bold
 
 (* Wrap [text] after a styled lead so continuation pieces start under the

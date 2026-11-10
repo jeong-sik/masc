@@ -2868,8 +2868,8 @@ let planning_phase_column ~ko =
    Completed and Dropped are how the goal is doing; Verifying is where it
    is, and a goal under review is neither well nor unwell. It used to keep a
    raw colour for want of anywhere else to put it -- the theme had [status]
-   for health, [tone] for weight and [Syntax] for what a token is, and
-   nothing for a kind.
+   for health, dim and the accent for weight and [Syntax] for what a token
+   is, and nothing for a kind.
 
    It takes a categorical slot now (RFC-0431). Slot 4 is magenta, the hue it
    already drew, and magenta is one of the two the status axis does not

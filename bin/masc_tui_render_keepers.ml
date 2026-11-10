@@ -714,7 +714,7 @@ let grid_blank_line (grid : Grid.t) =
   String.make (grid_lead_cells grid) ' ' ^ " " ^ grid_band grid_blank_now
 
 (* The mock's [okd]: the ok colour, receded. *)
-let grid_receded_ok () = Masc_tui_theme.tone Masc_tui_theme.Dim ^ Theme.ok ()
+let grid_receded_ok () = Ansi.dim ^ Theme.ok ()
 
 let grid_gutter_style = function
   | Grid.Failing { resting = false } -> Theme.warn ()

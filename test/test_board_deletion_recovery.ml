@@ -359,10 +359,13 @@ let test_settled_transfer_does_not_authorize_old_model base_path =
   check_bytes "refusal preserves proven foreign ownership" before;
   check_owner (fresh base_path) parent "next-owner"
 
-let test_parent_guard_cleanup_keeps_known_decision base_path =
+type readset_guard = Posts_guard | Comments_guard
+
+let test_readset_guard_cleanup_keeps_known_decision target base_path =
   let armed = ref false and captured = ref None in
-  let posts_path = Paths.file_path ~workspace_masc_dir:(Common.masc_dir_from_base_path ~base_path) Paths.Posts in
-  let lock_path = Fs_compat.private_jsonl_lock_path posts_path in
+  let file = match target with Posts_guard -> Paths.Posts | Comments_guard -> Paths.Comments in
+  let source_path = Paths.file_path ~workspace_masc_dir:(Common.masc_dir_from_base_path ~base_path) file in
+  let lock_path = Fs_compat.private_jsonl_lock_path source_path in
   let io : Fs_compat.private_jsonl_transaction_io_for_testing = {
     before_sync_parent = (fun _ -> ());
     close_fd = (fun fd ->
@@ -374,7 +377,9 @@ let test_parent_guard_cleanup_keeps_known_decision base_path =
           let backtrace = Printexc.get_raw_backtrace () in
           captured := Some backtrace;
           Printexc.raise_with_backtrace exception_ backtrace)) } in
-  let store = Board.create_store_with_source_io_for_testing ~base_path ~io:{ posts = Some io } () in
+  let store = match target with
+    | Posts_guard -> Board.create_store_with_source_io_for_testing ~base_path ~io:{ posts = Some io } ()
+    | Comments_guard -> Board.create_store_with_comments_io_for_testing ~base_path ~io () in
   require (Board.initialize_store store);
   let parent, reply = seed store in
   let before = snapshots store in
@@ -393,7 +398,7 @@ let test_parent_guard_cleanup_keeps_known_decision base_path =
           | Board.Deletion_guard_diagnostic guard ->
             (match guard.guard_error with
              | Fs_compat.Private_jsonl_operation_failed failure ->
-            String.equal guard.guard_path posts_path && failure.operation = Fs_compat.Close_stable_lock
+            String.equal guard.guard_path source_path && failure.operation = Fs_compat.Close_stable_lock
             && (match failure.exception_ with Eio.Time.Timeout -> true | _ -> false)
             && (match !captured with None -> false | Some backtrace ->
               let length = Printexc.raw_backtrace_length backtrace in
@@ -424,7 +429,130 @@ let test_parent_guard_cleanup_keeps_known_decision base_path =
   check_removed store parent reply;
   check_removed (fresh base_path) parent reply
 
-let () = Alcotest.run "board_deletion_recovery"
+let test_later_child_after_decision base_path =
+  let armed = ref false and calls = ref 0 in
+  let marker_path = Paths.file_path ~workspace_masc_dir:(Common.masc_dir_from_base_path ~base_path) Paths.Deletion in
+  let io = reserved_marker_io ~retirement:false marker_path armed calls in
+  let store = Board.create_store_with_deletion_io_for_testing ~base_path ~io () in
+  require (Board.initialize_store store);
+  let parent, original_reply = seed store in
+  let other = fresh base_path in
+  armed := true;
+  (match Board.delete_post store ~authorization:Board.Operator_deletion
+      ~post_id:(Board.Post_id.to_string parent.id) with
+   | Ok _ | Error _ -> Alcotest.fail "expected interruption after the fixed decision"
+   | exception Eio.Time.Timeout -> ());
+  expect_progress store Board.Decision_recorded;
+  Alcotest.(check bool) "original decision exists before foreign append" true (Sys.file_exists marker_path);
+  let later = require (Board.add_comment other ~lookup:Recipient_lookup.none_declared
+    ~post_id:(Board.Post_id.to_string parent.id) ~author:"late-reader"
+    ~content:"accepted after the fixed decision" ()) in
+  let comment_id = Board.Comment_id.to_string later.id in
+  ignore (require (Board.vote_comment other ~comment_id ~voter:"late-voter" ~direction:Board.Up));
+  ignore (require (Board.toggle_reaction other ~target_type:Board.Reaction_comment
+    ~target_id:comment_id ~user_id:"late-reactor" ~emoji:"👍"));
+  let before = List.map (fun path -> path, Fs_compat.load_file path)
+    [Board.comments_path other; Board.vote_log_path other; Board.reactions_path other] in
+  Board.flush_dirty store;
+  check_bytes "stale comments snapshot preserves the later child and its dependents" before;
+  let restarted = fresh base_path in
+  check_removed restarted parent original_reply;
+  let kept = require (Board.get_comment restarted ~comment_id) in
+  Alcotest.(check string) "later accepted child survives original decision recovery" later.content kept.content;
+  Alcotest.(check int) "later child's vote survives" 1 kept.votes_up;
+  Alcotest.(check bool) "later child retains its parent index" true
+    (match Hashtbl.find_opt restarted.comments_by_post (Board.Post_id.to_string parent.id) with
+     | None -> false | Some ids -> List.mem comment_id ids);
+  let reactions = require (Board.list_reactions restarted ~target_type:Board.Reaction_comment
+    ~target_id:comment_id ()) in
+  Alcotest.(check bool) "later child's reaction survives" true
+    (List.exists (fun (summary : Board.reaction_summary) ->
+       String.equal summary.emoji "👍" && summary.count = 1) reactions);
+  Alcotest.(check bool) "original decision can retire after preserving later child" false
+    (Sys.file_exists marker_path)
+
+let test_comments_refusal_and_parent_cleanup base_path =
+  let armed = ref false in
+  let posts_path = Paths.file_path ~workspace_masc_dir:(Common.masc_dir_from_base_path ~base_path) Paths.Posts in
+  let lock_path = Fs_compat.private_jsonl_lock_path posts_path in
+  let io : Fs_compat.private_jsonl_transaction_io_for_testing = {
+    before_sync_parent = (fun _ -> ());
+    close_fd = (fun fd ->
+      let stat = Unix.fstat fd and lock = Unix.lstat lock_path in
+      Unix.close fd;
+      if !armed && same_inode stat lock then (armed := false; raise Eio.Time.Timeout)) } in
+  let store = Board.create_store_with_source_io_for_testing ~base_path ~io:{ posts = Some io } () in
+  require (Board.initialize_store store);
+  let parent, _ = seed store in
+  let other = fresh base_path in
+  let foreign = require (Board.add_comment other ~lookup:Recipient_lookup.none_declared
+    ~post_id:(Board.Post_id.to_string parent.id) ~author:"foreign-reader"
+    ~content:"accepted before the deletion decision" ()) in
+  let before = snapshots other in
+  armed := true;
+  (match Board.delete_post store ~authorization:Board.Operator_deletion
+      ~post_id:(Board.Post_id.to_string parent.id) with
+   | Ok _ | Error _ -> Alcotest.fail "outer reserved cleanup cause was swallowed"
+   | exception Eio.Time.Timeout -> ());
+  (match store.deletion_state with
+   | Board.Deletion_readable { plan = None; diagnostics; _ } ->
+     let paths = List.filter_map (function
+       | Board.Deletion_guard_diagnostic failure -> Some failure.guard_path
+       | Board.Deletion_file_diagnostic _ | Board.Deletion_workspace_diagnostic _
+       | Board.Deletion_raised_diagnostic _ -> None) diagnostics in
+     Alcotest.(check (list string)) "inner refusal and outer cleanup retain both actual paths"
+       [Board.comments_path store; posts_path] paths
+   | Board.Deletion_unobserved | Board.Deletion_readable { plan = Some _; _ }
+   | Board.Deletion_pending _ | Board.Deletion_unsettled _ | Board.Deletion_refused _
+   | Board.Deletion_projection_failed _ -> Alcotest.fail "refused inner guard became an executed marker");
+  Alcotest.(check bool) "refused read-set never creates marker" false (Sys.file_exists (marker store));
+  check_bytes "pre-decision refusal preserves every accepted source" before;
+  let restarted = fresh base_path in
+  ignore (read_post restarted (Board.Post_id.to_string parent.id));
+  ignore (require (Board.get_comment restarted ~comment_id:(Board.Comment_id.to_string foreign.id)))
+
+let competing_comments_append path row =
+  match Fs_compat.append_private_jsonl_durable_stable_result path row with
+  | Error (Fs_compat.Stable_lock_contended _) -> 0
+  | Error _ -> 2
+  | Ok _ -> 3
+
+let test_comments_guard_spans_marker_io base_path =
+  let armed = ref false and comment_row = ref "" in
+  let workspace_masc_dir = Common.masc_dir_from_base_path ~base_path in
+  let comments_path = Paths.file_path ~workspace_masc_dir Paths.Comments in
+  let marker_path = Paths.file_path ~workspace_masc_dir Paths.Deletion in
+  let receipt_path = Filename.concat base_path "comment-contention.txt" in
+  let io : Fs_compat.private_jsonl_transaction_io_for_testing = {
+    before_sync_parent = (fun _ ->
+      if !armed && Sys.file_exists marker_path then (
+        armed := false;
+        (* Exec gives the competitor a fresh in-process mutex registry. This
+           runs only after marker rename, while its parent sync is pending. *)
+        let pid = Unix.create_process Sys.executable_name
+          [| Sys.executable_name; "--contend-comments"; comments_path; !comment_row |]
+          Unix.stdin Unix.stdout Unix.stderr in
+        let _, status = Unix.waitpid [] pid in
+        let observed = match status with
+          | Unix.WEXITED 0 -> "contended\n"
+          | Unix.WEXITED _ -> "not-contended\n"
+          | Unix.WSIGNALED _ | Unix.WSTOPPED _ -> "competitor-failed\n" in
+        Out_channel.with_open_bin receipt_path (fun output -> output_string output observed)));
+    close_fd = Unix.close } in
+  let store = Board.create_store_with_deletion_io_for_testing ~base_path ~io () in
+  require (Board.initialize_store store);
+  let parent, reply = seed store in
+  comment_row := Yojson.Safe.to_string (Board.comment_to_yojson reply) ^ "\n";
+  armed := true;
+  (match require (Board.delete_post store ~authorization:Board.Operator_deletion
+      ~post_id:(Board.Post_id.to_string parent.id)) with
+   | Board.Durable_deletion -> ()
+   | Board.Deletion_decision_pending detail | Board.Deletion_persistence_pending detail -> Alcotest.fail detail);
+  Alcotest.(check string) "real comments stable lock excludes writer through marker IO" "contended\n"
+    (In_channel.with_open_bin receipt_path In_channel.input_all);
+  check_removed (fresh base_path) parent reply
+
+let run_cases () = Alcotest.run "board_deletion_recovery"
   ["real files, interruption and restart", [
     Alcotest.test_case "unknown record does not apply and fresh startup recovers" `Quick (with_fixture test_unknown_record);
     Alcotest.test_case "known record survives reserved cleanup before model work" `Quick (with_fixture (test_reserved_marker false));
@@ -441,5 +569,17 @@ let () = Alcotest.run "board_deletion_recovery"
     Alcotest.test_case "source-only settled transfer cannot authorize stale model owner" `Quick
       (with_fixture test_settled_transfer_does_not_authorize_old_model);
     Alcotest.test_case "reserved parent guard cleanup retains known decision before model" `Quick
-      (with_fixture test_parent_guard_cleanup_keeps_known_decision)
+      (with_fixture (test_readset_guard_cleanup_keeps_known_decision Posts_guard));
+    Alcotest.test_case "reserved comments guard cleanup retains known decision before model" `Quick
+      (with_fixture (test_readset_guard_cleanup_keeps_known_decision Comments_guard));
+    Alcotest.test_case "only a comment accepted after decision remains outside its fixed IDs" `Quick
+      (with_fixture test_later_child_after_decision);
+    Alcotest.test_case "comments refusal plus outer cleanup leaves marker unrecorded" `Quick
+      (with_fixture test_comments_refusal_and_parent_cleanup);
+    Alcotest.test_case "comments lock spans actual marker publication" `Quick
+      (with_fixture test_comments_guard_spans_marker_io)
   ]]
+
+let () = match Array.to_list Sys.argv with
+  | [_; "--contend-comments"; path; row] -> exit (competing_comments_append path row)
+  | _ -> run_cases ()

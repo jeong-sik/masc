@@ -210,7 +210,7 @@ let head_json head =
     ]
 ;;
 
-(* ── Message entries and the memo ───────────────────────── *)
+(* ── Message entries ────────────────────────────────────── *)
 
 (* What one message is written as: the bytes the checkpoint codec writes for
    it, their digest, and the message those bytes decode to. *)
@@ -220,12 +220,55 @@ type entry =
   ; decoded : Types.message
   }
 
-module Entries = Hashtbl.Make (struct
+(* The entry of every message value this process has encoded or loaded and
+   still holds. A message's entry is a function of the value alone, so one
+   table serves every checkpoint, save and digest: whichever caller reaches a
+   value first encodes it, and no caller encodes it again. Before, a memo
+   passed from call to call held the entries, and a call with a new memo
+   encoded and decoded the whole history again: 335-454 ms and 105 MB for the
+   digest of 5,000 messages (11 MB of text) that the process had already
+   encoded, 11-15 ms and 5 MB with this table (2026-11-10).
+
+   Keys are compared by identity and held weakly: a binding goes when its
+   message does. An entry is also bound under the record it decodes to, which
+   is what a save after a load passes; that key is reachable from its own
+   data, which an ephemeron does not count as a reason to keep it.
+
+   Saves and loads run on pool domains, so the table has one lock. Under it
+   is one lookup or the inserts of one entry, never an encode. *)
+module Known = Ephemeron.K1.Make (struct
     type t = Types.message
 
     let equal = ( == )
     let hash = Types.Message_value.hash
   end)
+
+let known_entries : entry Known.t = Known.create 1024
+let known_entries_mutex = Stdlib.Mutex.create ()
+
+let known_entry message =
+  Stdlib.Mutex.protect known_entries_mutex (fun () -> Known.find_opt known_entries message)
+;;
+
+(* [entry] for [message], unless another domain bound one while this one was
+   encoding: then that one, so a value has one entry. *)
+let keep_encoded message (entry : entry) =
+  Stdlib.Mutex.protect known_entries_mutex (fun () ->
+    match Known.find_opt known_entries message with
+    | Some kept -> kept
+    | None ->
+      Known.replace known_entries message entry;
+      Known.replace known_entries entry.decoded entry;
+      entry)
+;;
+
+(* A loaded entry, under the record a load answers with. *)
+let keep_loaded (entry : entry) =
+  Stdlib.Mutex.protect known_entries_mutex (fun () ->
+    Known.replace known_entries entry.decoded entry)
+;;
+
+(* ── The memo ───────────────────────────────────────────── *)
 
 (* The messages of the last plan or load, by position, with each one's entry
    and [chains.(i)], the chain over the first [i]. A later save whose
@@ -237,28 +280,18 @@ type last =
   ; last_chains : chain array
   }
 
-type memo =
-  { mutable entries : entry Entries.t
-  ; mutable last : last option
-  }
+type memo = { mutable last : last option }
 
-let create_memo () = { entries = Entries.create 0; last = None }
+let create_memo () = { last = None }
 
-let encoded_entry memo message =
-  match Entries.find_opt memo.entries message with
+let encoded_entry message =
+  match known_entry message with
   | Some entry -> Ok entry
   | None ->
     let* { Checkpoint_codec.bytes; decoded } =
       Checkpoint_codec.validated_message_encoding message
     in
-    Ok { bytes; digest = digest_of_bytes bytes; decoded }
-;;
-
-(* The next memo holds each message of this save under its own identity and
-   under its decoded record, which is what a save after a load passes. *)
-let remember next message (entry : entry) =
-  Entries.replace next message entry;
-  Entries.replace next entry.decoded entry
+    Ok (keep_encoded message { bytes; digest = digest_of_bytes bytes; decoded })
 ;;
 
 (* ── Bundles ────────────────────────────────────────────── *)
@@ -320,7 +353,8 @@ let shared_prefix last (messages : Types.message array) =
 ;;
 
 (* Every message's entry and the chain over each prefix: the shared prefix
-   from [memo.last], the rest encoded (through [memo.entries]) and hashed. *)
+   from [memo.last], the rest from the entries this process holds or encoded,
+   and hashed. *)
 let entries_and_chains memo (messages : Types.message array) =
   let length = Array.length messages in
   let shared = shared_prefix memo.last messages in
@@ -336,12 +370,12 @@ let entries_and_chains memo (messages : Types.message array) =
     if index = length
     then Ok (Array.append entries (Array.of_list (List.rev rev_entries)))
     else
-      let* entry = encoded_entry memo messages.(index) in
+      let* entry = encoded_entry messages.(index) in
       chains.(index + 1) <- chain_step chains.(index) entry.digest;
       encode (entry :: rev_entries) (index + 1)
   in
   let* entries = encode [] shared in
-  Ok (shared, entries, chains)
+  Ok (entries, chains)
 ;;
 
 (* The longest run of [previous] turns whose chain values the new messages
@@ -379,21 +413,9 @@ let unwritten_open_objects ~previous_open entries =
   collect (Digest_set.of_list previous_open) [] entries
 ;;
 
-(* After a plan of [messages]: the table holds every message under its own
-   identity and its decoded record (a save after a load passes those). A
-   plan that extends the last one adds what is new; any other plan builds
-   the table again from its own messages. *)
-let remember_plan memo ~shared (messages : Types.message array) (entries : entry array) chains =
-  let extends_last =
-    match memo.last with
-    | Some last -> shared = Array.length last.last_messages
-    | None -> false
-  in
-  let table = if extends_last then memo.entries else Entries.create (Array.length messages) in
-  for index = (if extends_last then shared else 0) to Array.length messages - 1 do
-    remember table messages.(index) entries.(index)
-  done;
-  memo.entries <- table;
+(* After a plan of [messages], the memo holds them with their entries and
+   chain values for the next plan's shared prefix. *)
+let remember_plan memo (messages : Types.message array) (entries : entry array) chains =
   memo.last <- Some { last_messages = messages; last_entries = entries; last_chains = chains }
 ;;
 
@@ -449,7 +471,7 @@ let plan_save memo ?previous ?(absent = []) boundary (cp : Checkpoint_types.t) =
     split_header ~before_messages ~after_messages
   in
   let messages = Array.of_list cp.messages in
-  let* shared, entries, chains = entries_and_chains memo messages in
+  let* entries, chains = entries_and_chains memo messages in
   let absent = Digest_set.of_list absent in
   let present digest = not (Digest_set.mem digest absent) in
   let ((system_prompt, _) as system_prompt_object) = object_of_json system_prompt_json in
@@ -501,7 +523,7 @@ let plan_save memo ?previous ?(absent = []) boundary (cp : Checkpoint_types.t) =
       , unwritten_open_objects ~previous_open open_entries )
   in
   let segment, turns, segments = pack kept_segment closed [] in
-  remember_plan memo ~shared messages entries chains;
+  remember_plan memo messages entries chains;
   let head =
     { header =
         { session_id = decoded_header.session_id
@@ -536,7 +558,7 @@ let content_digest memo (cp : Checkpoint_types.t) =
     split_header ~before_messages ~after_messages
   in
   let messages = Array.of_list cp.messages in
-  let* (_ : int), (_ : entry array), chains = entries_and_chains memo messages in
+  let* (_ : entry array), chains = entries_and_chains memo messages in
   let header_objects =
     { system_prompt = fst (object_of_json system_prompt_json); tools = fst (object_of_json tools_json) }
   in
@@ -981,7 +1003,6 @@ let find_last ~read_object head find =
 ;;
 
 let load memo ~read_object head =
-  let next = Entries.create 0 in
   let* system_prompt = header_object ~read_object head.header_objects.system_prompt in
   let* tools = header_object ~read_object head.header_objects.tools in
   (* The segments' turns, oldest first, read from the last segment back. *)
@@ -1061,9 +1082,8 @@ let load memo ~read_object head =
   let entries = Array.map fst loaded in
   let chains = Array.make (Array.length loaded + 1) chain_start in
   Array.iteri (fun index ((_ : entry), chain) -> chains.(index + 1) <- chain) loaded;
-  Array.iter (fun (entry : entry) -> Entries.replace next entry.decoded entry) entries;
+  Array.iter keep_loaded entries;
   let messages = Array.map (fun (entry : entry) -> entry.decoded) entries in
-  memo.entries <- next;
   memo.last <- Some { last_messages = messages; last_entries = entries; last_chains = chains };
   Ok { header with messages = Array.to_list messages }
 ;;

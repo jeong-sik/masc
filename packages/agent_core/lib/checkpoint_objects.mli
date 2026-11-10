@@ -116,11 +116,14 @@ type boundary =
   | Turn_continues
   | Turn_closes
 
-(** The encoded messages of earlier saves and loads, by message identity
-    ([==]), so a save encodes only messages it has not seen; and the chain
-    values over the messages of the last save or load, so a save whose
-    messages begin with those values hashes only what follows them. One memo
-    serves one sequence of saves of one checkpoint. *)
+(** The messages of the last save or load with the chain values over them, so
+    a save whose messages begin with those values ([==]) hashes only what
+    follows them. One memo serves one sequence of saves of one checkpoint.
+
+    What a message is written as does not live here. The process keeps it for
+    every message value it has encoded or loaded, by identity ([==]), for as
+    long as the value is alive, so a save, a digest or another memo encodes
+    only values no call has seen. *)
 type memo
 
 val create_memo : unit -> memo
@@ -159,8 +162,8 @@ val plan_save
   -> Checkpoint_types.t
   -> (plan, Error.t) result
 
-(** The content digest of a value, encoding only the messages [memo] does not
-    hold. [memo] is left as it was. Fails as {!plan_save} does. *)
+(** The content digest of a value, hashing only the messages after those
+    [memo] holds. [memo] is left as it was. Fails as {!plan_save} does. *)
 val content_digest : memo -> Checkpoint_types.t -> (digest, Error.t) result
 
 (** {1 Loading} *)
@@ -216,7 +219,8 @@ val segment_of_string : digest:digest -> string -> (segment, load_error) result
     such object, or why it could not be read. Every object is checked against
     its digest, every bundle against its turn's count and chain, the segments
     against the count and chain the head names. [memo] then holds the loaded
-    messages, so a save that follows writes none of them. *)
+    messages, so a save that follows writes none of them; a save of them
+    through another memo encodes none of them either. *)
 val load
   :  memo
   -> read_object:(digest -> (string option, string) result)

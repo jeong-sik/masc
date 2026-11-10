@@ -369,6 +369,23 @@ let test_a_load_refuses_what_it_cannot_prove () =
   | Some _ | None -> Alcotest.fail "a head of another format must be Head_invalid"
 ;;
 
+(* A message value is encoded once in the process: a plan made through
+   another memo, and a save of loaded records through a memo the load did not
+   fill, answer with the records already decoded for those values. *)
+let test_a_value_is_encoded_once () =
+  let messages = turn 1 @ turn 2 in
+  let first = plan_ok (O.create_memo ()) O.Turn_closes (checkpoint messages) in
+  let second = plan_ok (O.create_memo ()) O.Turn_continues (checkpoint messages) in
+  Alcotest.(check bool) "another memo's plan decodes to the same records" true
+    (List.for_all2 ( == ) first.decoded.messages second.decoded.messages);
+  let store = store () in
+  write store first;
+  let loaded = load_ok store first in
+  let again = plan_ok (O.create_memo ()) O.Turn_closes loaded in
+  Alcotest.(check bool) "a loaded record saves as itself" true
+    (List.for_all2 ( == ) loaded.messages again.decoded.messages)
+;;
+
 (* A value and every head written for it, whatever its turns, have one
    content digest; another header or another message gives another. *)
 let test_one_content_digest_for_every_layout () =
@@ -808,6 +825,7 @@ let () =
             test_a_turn_names_the_chain_of_its_prefix
         ; Alcotest.test_case "a loaded checkpoint saves unchanged" `Quick
             test_a_loaded_checkpoint_saves_unchanged
+        ; Alcotest.test_case "a value is encoded once" `Quick test_a_value_is_encoded_once
         ; Alcotest.test_case "one content digest for every layout" `Quick
             test_one_content_digest_for_every_layout
         ; Alcotest.test_case "an absent object is written again" `Quick

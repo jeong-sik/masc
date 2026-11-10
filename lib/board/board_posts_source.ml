@@ -229,7 +229,8 @@ let read store = match store.posts_source with
                   | Rejected { error; diagnostics } ->
                     Board_content_diagnostics.emit diagnostics; errors := error :: !errors);
                 let posts = List.rev !posts and errors = List.rev !errors in
-                let observation = { source_path = path; snapshot = receipt.value; workspace_observation } in
+                let observation : posts_source_observation =
+                  { source_path = path; snapshot = receipt.value; workspace_observation } in
                 match errors with
                 | [] -> Posts_complete { observation; posts; diagnostics = !diagnostics }
                 | errors -> Posts_partial { observation; posts; errors; diagnostics = !diagnostics }
@@ -295,7 +296,7 @@ let classify_write store ~pre_write ~kind ~workspace_observation ~bytes ~diagnos
   | Ok receipt ->
     let diagnostics = diagnostics @ (match receipt.settlement_error with None -> []
       | Some error -> [File_diagnostic { file = Posts_file; error }]) in
-    let observation = { source_path = Board_paths.persist_path store;
+    let observation : posts_source_observation = { source_path = Board_paths.persist_path store;
       snapshot = { Fs_compat.bytes = bytes; cursor = receipt.value }; workspace_observation } in
     store.posts_source <- Posts_readable { observation; diagnostics };
     Posts_written { diagnostics }
@@ -465,7 +466,7 @@ let settle_prove store path ~failure ~workspace_observation ~diagnostics observe
        carry_reserved (Error (failure_to_board_error failure)) (Some (exception_, backtrace));
        Proof_reserved
      | None ->
-       let observation = { source_path = path;
+       let observation : posts_source_observation = { source_path = path;
          snapshot = { Fs_compat.bytes = observed.bytes; cursor = receipt.value };
          workspace_observation } in
        store.posts_source <- Posts_readable { observation; diagnostics };
@@ -543,7 +544,8 @@ let settle_inner store ~failure ~(pending : posts_unsettled_write) ~last_observe
                        Posts_settled_not_written { observation; diagnostics }
                      | Direction_diverged ->
                        let failure = Posts_snapshot_stale in
-                       let fresh = { source_path = path; snapshot = observed; workspace_observation } in
+                       let fresh : posts_source_observation =
+                         { source_path = path; snapshot = observed; workspace_observation } in
                        store.posts_source <- Posts_refused {
                          last_observed = Posts_observed fresh; failure; diagnostics };
                        Posts_settle_superseded { failure; diagnostics }

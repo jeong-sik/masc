@@ -23,13 +23,14 @@ let read ~transaction:(_ : Auth.credential_transaction) ~base_path credential =
     | (Unix.Unix_error _ | Sys_error _) as exn -> Error (Printexc.to_string exn))
 
 let write ~transaction:(_ : Auth.credential_transaction) ~base_path credential state =
-  Eio_guard.run_in_systhread ~label:"play-participation-write" (fun () ->
+  let result = Eio_guard.run_in_systhread ~label:"play-participation-write" (fun () ->
     let file = path ~base_path credential in
     try
       Fs_compat.mkdir_p (Filename.dirname file);
       Fs_compat.save_file_atomic_strict file
         (match state with Connected -> "connected\n" | Departed -> "departed\n")
-    with (Unix.Unix_error _ | Sys_error _ | Eio.Io _) as exn -> Error (Printexc.to_string exn))
+    with (Unix.Unix_error _ | Sys_error _ | Eio.Io _) as exn -> Error (Printexc.to_string exn)) in
+  Result.map (fun () -> Workspace_dataset_event.announce ~base_path Workspace_dataset_event.Play_seats) result
 
 let current ~transaction ~base_path ~name =
   let open Result.Syntax in

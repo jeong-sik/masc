@@ -5,6 +5,8 @@
 
 open Masc
 
+let execution_test_owner = Server_dashboard_http_execution_surfaces.For_testing.create_owner ()
+
 module Dashboard_projection_cache = Dashboard_projection_cache
 
 let check_json msg expected actual =
@@ -597,13 +599,13 @@ let test_task_mutation_hook_invalidates_all_execution_variants () =
   ignore (read planning_key planning_counter);
   let stale_generation =
     Server_dashboard_http_execution_surfaces.For_testing
-    .execution_publication_generation ()
+    .execution_publication_generation ~owner:execution_test_owner ()
   in
   Alcotest.(check bool)
     "initial execution publication accepted"
     true
     (Server_dashboard_http_execution_surfaces.For_testing
-     .publish_execution_success_if_current
+     .publish_execution_success_if_current ~owner:execution_test_owner
        ~generation:stale_generation
        (`Assoc [ "tasks", `List [] ]));
   let previous = Atomic.get Workspace_hooks.on_task_mutation_fn in
@@ -626,7 +628,7 @@ let test_task_mutation_hook_invalidates_all_execution_variants () =
         "pre-mutation execution publication rejected"
         false
         (Server_dashboard_http_execution_surfaces.For_testing
-         .publish_execution_success_if_current
+         .publish_execution_success_if_current ~owner:execution_test_owner
            ~generation:stale_generation
            (`Assoc [ "tasks", `List [ `String "stale" ] ]));
       Alcotest.(check bool)
@@ -634,7 +636,7 @@ let test_task_mutation_hook_invalidates_all_execution_variants () =
         true
         (Option.is_none
            (Server_dashboard_http_cache.snapshot
-              Server_dashboard_http_execution_surfaces.execution_cache)
+              (Server_dashboard_http_execution_surfaces.For_testing.cache execution_test_owner))
              .last_success_unix);
       ignore (read "execution:default:light" default_counter);
       ignore (read "execution:operator::full" full_counter);
@@ -653,7 +655,7 @@ let test_task_mutation_wakes_health_before_slow_subscriber ~clock () =
   let release, release_subscriber = Eio.Promise.create () in
   let health_invalidations = ref 0 in
   let generation_before =
-    Server_dashboard_http_execution_surfaces.For_testing.execution_publication_generation ()
+    Server_dashboard_http_execution_surfaces.For_testing.execution_publication_generation ~owner:execution_test_owner ()
   in
   let generation_at_health = ref None in
   let observed = ref None in
@@ -673,7 +675,7 @@ let test_task_mutation_wakes_health_before_slow_subscriber ~clock () =
           incr health_invalidations;
           generation_at_health := Some
             (Server_dashboard_http_execution_surfaces.For_testing
-             .execution_publication_generation ())) ();
+             .execution_publication_generation ~owner:execution_test_owner ())) ();
       Eio.Fiber.both
         (fun () -> (Atomic.get Workspace_hooks.on_task_mutation_fn) ())
         (fun () ->
@@ -695,7 +697,7 @@ let test_task_mutation_preserves_health_cancellation () =
   let subscriber = "task-health-cancel-subscriber" in
   let deliveries = ref 0 in
   let generation_before =
-    Server_dashboard_http_execution_surfaces.For_testing.execution_publication_generation ()
+    Server_dashboard_http_execution_surfaces.For_testing.execution_publication_generation ~owner:execution_test_owner ()
   in
   Masc.Sse.subscribe_external ~id:subscriber
     ~callback:(fun (event : Masc.Sse.external_event) ->
@@ -715,7 +717,7 @@ let test_task_mutation_preserves_health_cancellation () =
        | () -> Alcotest.fail "health callback cancellation must propagate");
       Alcotest.(check int) "execution invalidated" (generation_before + 1)
         (Server_dashboard_http_execution_surfaces.For_testing
-         .execution_publication_generation ());
+         .execution_publication_generation ~owner:execution_test_owner ());
       Alcotest.(check int) "execution invalidation delivered before cancellation" 1 !deliveries)
 ;;
 
@@ -725,7 +727,7 @@ module Execution_http = Server_dashboard_http_execution_surfaces.For_testing
 
 (* Encoding assertions only: observation changes have separate JSON assertions. *)
 let execution_cached_representation ~config request =
-  match Execution_http.cached_response ~config request with
+  match Execution_http.cached_response ~owner:execution_test_owner ~config request with
   | Some (Server_dashboard_http_execution_surfaces.Execution_payload payload) ->
     let body, headers = Dashboard_cache.select_http_representation
         ~accept_encoding:(Httpun.Headers.get request.Httpun.Request.headers "accept-encoding") payload in
@@ -734,14 +736,14 @@ let execution_cached_representation ~config request =
 
 let with_execution_http_fixture f =
   let config = Workspace.default_config "/tmp/execution-http-preparation" in
-  let invalidate = Server_dashboard_http_execution_surfaces.invalidate_execution_cache in
+  let invalidate () = Server_dashboard_http_execution_surfaces.For_testing.invalidate execution_test_owner in
   invalidate ();
   Fun.protect ~finally:invalidate (fun () -> f config)
 
 let publish_execution_fixture marker =
-  let generation = Execution_http.execution_publication_generation () in
+  let generation = Execution_http.execution_publication_generation ~owner:execution_test_owner () in
   Alcotest.(check bool) "publish snapshot" true
-    (Execution_http.publish_execution_success_if_current ~generation
+    (Execution_http.publish_execution_success_if_current ~owner:execution_test_owner ~generation
        (* The execution producer includes this observation even when Candle is
           off. Omitting it makes the fresh-observation gate reject these bytes. *)
        (`Assoc [ "marker", `String marker; "data", `String (String.make 4000 'x');
@@ -755,17 +757,17 @@ let test_execution_preparation_reuse_and_scope () =
   with_execution_http_fixture (fun config ->
     publish_execution_fixture "first";
     let snapshot = Server_dashboard_http_cache.snapshot
-        Server_dashboard_http_execution_surfaces.execution_cache in
+        (Server_dashboard_http_execution_surfaces.For_testing.cache execution_test_owner) in
     let preparations = ref 0 in
     let prepare body = incr preparations; Http_response_payload.prepare body in
-    ignore (Execution_http.refresh_execution_default_light_http_body ~prepare ~config ());
-    ignore (Execution_http.refresh_execution_default_light_http_body ~prepare ~config ());
+    ignore (Execution_http.refresh_execution_default_light_http_body ~owner:execution_test_owner ~prepare ~config ());
+    ignore (Execution_http.refresh_execution_default_light_http_body ~owner:execution_test_owner ~prepare ~config ());
     Alcotest.(check int) "one preparation for repeated refreshes" 1 !preparations;
     Alcotest.(check bool) "selected successful snapshot can reuse its bytes" true
-      (Option.is_some (Execution_http.prepared_payload_for_snapshot ~config snapshot));
+      (Option.is_some (Execution_http.prepared_payload_for_snapshot ~owner:execution_test_owner ~config snapshot));
     let other_workspace = { config with workspace_path = config.workspace_path ^ "/other" } in
     Alcotest.(check bool) "selected bytes stay bound to their workspace" true
-      (Option.is_none (Execution_http.prepared_payload_for_snapshot
+      (Option.is_none (Execution_http.prepared_payload_for_snapshot ~owner:execution_test_owner
                         ~config:other_workspace snapshot));
     let read ?target encoding =
       execution_cached_representation ~config (execution_request ?target encoding)
@@ -805,7 +807,7 @@ let test_execution_preparation_reuse_and_scope () =
             true (Option.is_none (scoped_read query)))
           [ "fixture=execution_smoke"; "fixture=sample" ]))
       [ "true"; "false" ];
-    Server_dashboard_http_execution_surfaces.invalidate_execution_cache ();
+    Server_dashboard_http_execution_surfaces.For_testing.invalidate execution_test_owner;
     Alcotest.(check bool) "mutation discards all representations" true
       (Option.is_none (read "gzip")))
 
@@ -813,14 +815,14 @@ let test_execution_preparation_cannot_resurrect_invalidated_snapshot () =
   with_execution_http_fixture (fun config ->
     publish_execution_fixture "obsolete";
     let snapshot = Server_dashboard_http_cache.snapshot
-        Server_dashboard_http_execution_surfaces.execution_cache in
+        (Server_dashboard_http_execution_surfaces.For_testing.cache execution_test_owner) in
     let prepare body =
-      Server_dashboard_http_execution_surfaces.invalidate_execution_cache ();
+      Server_dashboard_http_execution_surfaces.For_testing.invalidate execution_test_owner;
       Http_response_payload.prepare body
     in
-    ignore (Execution_http.refresh_execution_default_light_http_body ~prepare ~config ());
+    ignore (Execution_http.refresh_execution_default_light_http_body ~owner:execution_test_owner ~prepare ~config ());
     Alcotest.(check bool) "cold response cannot reuse bytes invalidated during preparation" true
-      (Option.is_none (Execution_http.prepared_payload_for_snapshot ~config snapshot));
+      (Option.is_none (Execution_http.prepared_payload_for_snapshot ~owner:execution_test_owner ~config snapshot));
     Alcotest.(check bool) "worker result cannot undo mutation" true
       (Option.is_none (execution_cached_representation ~config
                         (execution_request "gzip"))))
@@ -828,28 +830,28 @@ let test_execution_preparation_cannot_resurrect_invalidated_snapshot () =
 let test_execution_observation_cannot_serve_invalidated_snapshot () =
   with_execution_http_fixture (fun config ->
     publish_execution_fixture "obsolete";
-    ignore (Execution_http.refresh_execution_default_light_http_body ~config ());
+    ignore (Execution_http.refresh_execution_default_light_http_body ~owner:execution_test_owner ~config ());
     let observe ~config json =
       let observed = Dashboard_projection_cache.with_current_keeper_observations ~config json in
-      Server_dashboard_http_execution_surfaces.invalidate_execution_cache ();
+      Server_dashboard_http_execution_surfaces.For_testing.invalidate execution_test_owner;
       observed in
     Alcotest.(check bool) "observation cannot return metadata invalidated while it read" true
-      (Option.is_none (Execution_http.cached_response ~observe ~config
+      (Option.is_none (Execution_http.cached_response ~owner:execution_test_owner ~observe ~config
                         (execution_request "identity"))))
 
 let test_execution_observation_cannot_serve_replaced_snapshot () =
   with_execution_http_fixture (fun config ->
     publish_execution_fixture "old";
-    ignore (Execution_http.refresh_execution_default_light_http_body ~config ());
+    ignore (Execution_http.refresh_execution_default_light_http_body ~owner:execution_test_owner ~config ());
     let observe ~config json =
       let observed = Dashboard_projection_cache.with_current_keeper_observations ~config json in
       publish_execution_fixture "new";
       observed in
     Alcotest.(check bool) "observation cannot return a source superseded while it read" true
-      (Option.is_none (Execution_http.cached_response ~observe ~config
+      (Option.is_none (Execution_http.cached_response ~owner:execution_test_owner ~observe ~config
                         (execution_request "identity")));
-    ignore (Execution_http.refresh_execution_default_light_http_body ~config ());
-    match Execution_http.cached_response ~config (execution_request "identity") with
+    ignore (Execution_http.refresh_execution_default_light_http_body ~owner:execution_test_owner ~config ());
+    match Execution_http.cached_response ~owner:execution_test_owner ~config (execution_request "identity") with
     | None -> Alcotest.fail "new publication should be readable"
     | Some response ->
       let json = match response with
@@ -862,8 +864,8 @@ let test_execution_preparation_rejects_replaced_source () =
   with_execution_http_fixture (fun config ->
     publish_execution_fixture "old";
     let snapshot = Server_dashboard_http_cache.snapshot
-        Server_dashboard_http_execution_surfaces.execution_cache in
-    ignore (Execution_http.refresh_execution_default_light_http_body ~config ());
+        (Server_dashboard_http_execution_surfaces.For_testing.cache execution_test_owner) in
+    ignore (Execution_http.refresh_execution_default_light_http_body ~owner:execution_test_owner ~config ());
     (* A new success must hide the old bytes before its own codecs are ready. *)
     publish_execution_fixture "new";
     Alcotest.(check bool) "new source hides old prepared bytes immediately" true
@@ -873,13 +875,13 @@ let test_execution_preparation_rejects_replaced_source () =
       publish_execution_fixture "latest";
       Http_response_payload.prepare body
     in
-    ignore (Execution_http.refresh_execution_default_light_http_body ~prepare ~config ());
+    ignore (Execution_http.refresh_execution_default_light_http_body ~owner:execution_test_owner ~prepare ~config ());
     Alcotest.(check bool) "superseded worker bytes stay hidden" true
       (Option.is_none (execution_cached_representation ~config
                         (execution_request "identity")));
-    ignore (Execution_http.refresh_execution_default_light_http_body ~config ());
+    ignore (Execution_http.refresh_execution_default_light_http_body ~owner:execution_test_owner ~config ());
     Alcotest.(check bool) "new Ready bytes cannot replace an older selected response" true
-      (Option.is_none (Execution_http.prepared_payload_for_snapshot ~config snapshot));
+      (Option.is_none (Execution_http.prepared_payload_for_snapshot ~owner:execution_test_owner ~config snapshot));
     match execution_cached_representation ~config (execution_request "identity") with
     | None -> Alcotest.fail "latest snapshot was not prepared"
     | Some (body, _, _) ->
@@ -891,13 +893,13 @@ let test_execution_preparation_failure_releases_owner () =
     publish_execution_fixture "recoverable";
     let raised =
       try
-        ignore (Execution_http.refresh_execution_default_light_http_body
+        ignore (Execution_http.refresh_execution_default_light_http_body ~owner:execution_test_owner
                   ~prepare:(fun _ -> raise Exit) ~config ());
         false
       with Exit -> true
     in
     Alcotest.(check bool) "preparation failure propagates" true raised;
-    ignore (Execution_http.refresh_execution_default_light_http_body ~config ());
+    ignore (Execution_http.refresh_execution_default_light_http_body ~owner:execution_test_owner ~config ());
     Alcotest.(check bool) "later request can prepare" true
       (Option.is_some (execution_cached_representation ~config
                         (execution_request "gzip"))))
@@ -912,7 +914,7 @@ let test_execution_concurrent_polls_share_preparation () =
       Http_response_payload.prepare body
     in
     let refresh () =
-      Execution_http.refresh_execution_default_light_http_body ~prepare ~config ()
+      Execution_http.refresh_execution_default_light_http_body ~owner:execution_test_owner ~prepare ~config ()
     in
     let first, second = Eio.Fiber.pair refresh refresh in
     Alcotest.(check int) "simultaneous polls prepare once" 1 !preparations;
@@ -928,7 +930,7 @@ let test_execution_preparation_failure_wakes_waiter () =
       Http_response_payload.prepare body
     in
     let refresh () =
-      Execution_http.refresh_execution_default_light_http_body ~prepare ~config ()
+      Execution_http.refresh_execution_default_light_http_body ~owner:execution_test_owner ~prepare ~config ()
     in
     let failed, _ = Eio.Fiber.pair
       (fun () -> try ignore (refresh ()); false with Exit -> true) refresh

@@ -58,9 +58,14 @@ let test_outputs_are_not_inputs () =
   check bool "a real compact invalidation remains an input" true
     (Input.of_event (event (`Assoc
       ["type", `String Slices.execution_snapshot_type;
-       "execution_invalidated", `Bool true;
-       "execution_publication_epoch", `String "producer-epoch";
-       "execution_publication_generation", `Int 7])) = Some Input.Execution_invalidated)
+       "ts_unix", `Float 1.0;
+       "payload", `Assoc ["execution_invalidated", `Bool true;
+         "execution_publication_epoch", `String "producer-epoch";
+         "execution_publication_generation", `Int 7]])) = Some Input.Execution_invalidated);
+  check bool "fixture-only root fields are not the production tombstone" true
+    (Option.is_none (Input.of_event (event (`Assoc ["type", `String Slices.execution_snapshot_type;
+      "execution_invalidated", `Bool true; "execution_publication_epoch", `String "fixture";
+      "execution_publication_generation", `Int 7]))))
 ;;
 
 let test_notification_envelopes_are_exact () =

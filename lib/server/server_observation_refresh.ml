@@ -1,8 +1,8 @@
 module Input = Server_observation_input
 
-type surface = Execution_trust | Transport_health
+type surface = Execution_trust | Execution | Transport_health
 
-let affects_execution_trust = function
+let affects_trust = function
   | Input.Keeper { change =
       (Phase _ | Composite | Row | Turn | Tool_approval_waits
       | Tool_approval_mode | Gate_settings | Event_queue | Waiting_inventory _); _ }
@@ -25,7 +25,32 @@ let affects_execution_trust = function
   | Telemetry_gap { source = Some (Keeper_metric | Agent_event | Tool_call_io
       | Trajectory_tool_call | Tool_usage | Agent_core_event | Goal_event | Tool_metric); _ }
   | Chat_operation _ | Agent_core _ | Board | Execution_invalidated | Telemetry_sample
-  | Transport_state | Workspace_agent_signal _ | Workspace_messages _ -> false
+  | Workspace_agent_signal _ | Workspace_messages _ | Transport_state -> false
+;;
+
+let affects_execution input =
+  if affects_trust input then true else match input with
+  | Input.Workspace_agent_signal _ | Workspace_messages _
+  | Every_keeper_row | Execution_invalidated | Board | Chat_operation _
+  | Keeper {change = (Turn_preview | Chat | Native_tasks | Child_content | Asks); _}
+  | Store (Schedule | Pending_confirms | Goals | Skill_catalog | Lane_addon_exports)
+  | Dataset (Clients | Goals | Skill_catalog | Keeper_metrics _
+      | Skill_activations _ | Keeper_costs | Verification_requests) -> true
+  | Keeper {change = (Phase _ | Composite | Row | Turn | Tool_approval_waits
+      | Tool_approval_mode | Gate_settings | Event_queue | Waiting_inventory _); _}
+  | Gate _ | Connector _ | Keeper_tool_call _ | Keeper_approval_audit _
+  | Store (Runtime_config | Tools)
+  | Dataset (Runtime_config | Connectors | Runtime_probe | Provider_standing | Runtime_metrics)
+  | Telemetry_gap {source = Some Execution_receipt; _} -> true
+  | Keeper {change = (Memory_journal | Async_requests); _}
+  | Dataset (Repositories | Harness_verdicts | Account_emails | Provider_usage
+      | Workspace_health | Lanes | Machine_live _ | Play_room _ | Lane_addons _
+      | Browser_observation _ | Keeper_oauth_attempts _ | Memory_health _
+      | World_memory | Play_seats | Dashboard_observation _)
+  | Telemetry_gap {source = None; _}
+  | Telemetry_gap {source = Some (Keeper_metric | Agent_event | Tool_call_io
+      | Trajectory_tool_call | Tool_usage | Agent_core_event | Goal_event | Tool_metric); _}
+  | Agent_core _ | Telemetry_sample | Transport_state -> false
 ;;
 
 let affects_transport_health = function
@@ -42,9 +67,10 @@ let affects_transport_health = function
   | Workspace_agent_signal _ | Workspace_messages _ -> true
 ;;
 
-let affects = function
-  | Execution_trust -> affects_execution_trust
-  | Transport_health -> affects_transport_health
+let affects surface input = match surface with
+  | Execution_trust -> affects_trust input
+  | Execution -> affects_execution input
+  | Transport_health -> affects_transport_health input
 ;;
 
 type 'a generation = {

@@ -20,3 +20,8 @@ Seven backend scenarios are authored and unexecuted: stale toggle, stale ordinar
 This bundle does not establish an OCaml type/warning check, a backend build or run, durable multi-source deletion recovery, CI, installation, or deployment. Issue #26378 remains open for the remaining product work.
 
 The [integrated follow-up run](integrated/README.md) records the later vote-source merge, both-source integration, 218 focused tests, and fresh Chromium captures. The original capture manifest above remains historical.
+
+The [batch ordering follow-up](ordering/README.md) records a subsequently found
+P2, its failing baseline and repair, 224 focused tests, and a real feed whose
+late pre-toggle batch cannot undo its confirmed selected count. Earlier captures
+and their source pins remain historical.

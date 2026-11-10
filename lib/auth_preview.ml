@@ -246,7 +246,12 @@ document.getElementById("issue-pat").addEventListener("click", async () => {
     patToken.textContent = "the scope is not JSON";
     return;
   }
-  const expiry = patExpiry.value.trim() === "" ? null : Number(patExpiry.value);
+  const expiryText = patExpiry.value.trim();
+  const expiry = expiryText === "" ? null : Number(expiryText);
+  if (expiry !== null && !Number.isSafeInteger(expiry)) {
+    patToken.textContent = "expiry must be a safe integer in epoch milliseconds";
+    return;
+  }
   const answer = await post("%s", { scope: scope, expires_at_ms: expiry });
   const text = await answer.text();
   let json = null;

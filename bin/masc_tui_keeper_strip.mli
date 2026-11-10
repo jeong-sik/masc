@@ -11,6 +11,12 @@ val header :
 
 type wake_style = Keeper_wakes of { paused : bool } | Wake_counts
 
+val wake_summary : ko:bool -> Masc_tui_keeper_next_run.wake_slot list -> string
+(** State-view summary in the same width as the half-hour window. Counts
+    only known wakes; any unknown slot remains explicit, including beside a
+    positive count. Unknown and known empty windows have different labels.
+    A narrow partial window starts with [?] before the known count. *)
+
 val wake_strip :
   ko:bool -> style:wake_style -> Masc_tui_keeper_next_run.wake_slot list -> string
 (** One terminal cell per half hour. An entirely unknown window gets one

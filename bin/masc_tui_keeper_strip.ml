@@ -145,12 +145,30 @@ let header ~now ~cells ~view ~selected ~age rows =
 
 type wake_style = Keeper_wakes of { paused : bool } | Wake_counts
 
+let window_label ~cells full narrow =
+  Theme.recede ()
+  ^ Layout.fit_width (if Layout.display_width full <= cells then full else narrow) cells
+  ^ Ansi.reset
+
+let wake_summary ~ko slots =
+  let cells = List.length slots in
+  let known, unknown = List.fold_left (fun (known, unknown) -> function
+    | Next.Wakes count -> known + max 0 count, unknown
+    | Next.Wakes_unknown -> known, true) (0, false) slots in
+  let full, narrow = match known, unknown with
+    | 0, true -> (if ko then "일정 미확인" else "schedule unknown"), "?"
+    | 0, false -> (if ko then "구간 내 예약 없음" else "no runs in window"), "-"
+    | count, true ->
+        (if ko then Printf.sprintf "%d회 확인 · 일부 미확인" count
+         else Printf.sprintf "%d known · partial" count), Printf.sprintf "? %d+" count
+    | count, false ->
+        (if ko then Printf.sprintf "%d회 예약 확인" count
+         else Printf.sprintf "%d known wakes" count), string_of_int count in
+  if cells = 0 then "" else window_label ~cells full narrow
+
 let wake_strip ~ko ~style slots =
   let cells = List.length slots in
-  let label full narrow =
-    Theme.recede ()
-    ^ Layout.fit_width (if Layout.display_width full <= cells then full else narrow) cells
-    ^ Ansi.reset in
+  let label = window_label ~cells in
   if cells = 0 then ""
   else if List.for_all (function Next.Wakes_unknown -> true | Wakes _ -> false) slots then
     label (if ko then "일정 미확인" else "schedule unknown") "?"

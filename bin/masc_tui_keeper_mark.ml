@@ -150,7 +150,7 @@ let axis_now_header = axis_now_glyph ^ " now"
 (* The grid of the views (RFC-0515 §2.4). The row marks are the marks the
    list already draws for the same readings. *)
 let grid_gutter_glyph = "\xe2\x96\x8c" (* ▌ *)
-let grid_now_line = "\xe2\x94\x83" (* ┃ *)
+let grid_now_line = "│"
 let grid_dot_mark = pulse_quiet_mark
 let grid_wake_mark = "▁"
 let grid_unknown_range_mark = "─"
@@ -177,8 +177,8 @@ let grid_wait_glyph = "\xe2\x97\x8c" (* ◌ *)
 let grid_full_mark = "\xe2\x96\x88" (* █ *)
 let grid_chain_link = "\xe2\x94\x81" (* ━ *)
 let grid_more_mark = "\xe2\x80\xa6" (* … *)
-let grid_open_mark = "\xe2\x88\x92" (* − *)
-let grid_folded_mark = "+"
+let grid_open_mark = "▾"
+let grid_folded_mark = "▸"
 let grid_saved_mark = "+"
 let grid_stale_mark = "\xc3\x97" (* × *)
 let grid_since_word = "since"
@@ -229,7 +229,8 @@ let column_legend =
         "every view but the list draws a keeper on the same columns, fixed from the right \
          edge so the %s lines stand in one column: the row mark (%s failing, %s paused, %s \
          recovered in the cause view, %s the rest), the name, the turn pulse, the NOW cell, \
-         the half hours ahead (%s a scheduled wake, blank none, %s an unknown range; \
+         the state view's known wake count and any partial observation, or the other \
+         views' half hours ahead (%s a scheduled wake, blank none, %s an unknown range; \
          entirely unknown or empty windows have one label), the next \
          scheduled run (its time within a day, %s, %s, %s%s from an earlier reading, %s \
          unknown) and the librarian's unread turns with a level against the keeper \

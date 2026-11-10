@@ -106,19 +106,19 @@ let project_entry ?snapshot ?archive_error ~identity ~absorbed json entry =
           @ List.map (fun (link : Memory.absorbed_statement) -> link.absorbed, link.into) absorptions
           |> List.sort_uniq compare in
         let unresolved = List.filter_map (fun (from_id, into_id) ->
-          match find from_id change.removed, find into_id final_facts with
-          | Some original, None -> Some
+          match find from_id change.removed, find from_id final_facts, find into_id final_facts with
+          | Some original, None, None -> Some
               {identity = identity ^ ":unresolved:" ^ from_id ^ ":" ^ into_id;
                recorded_at; revision; kind = Relation_unavailable;
                before = [reference original]; after = [{memory_id = into_id; claim = None}];
                reason = Some "retained successor is not proven by this historical transition"}
-          | None, _ | _, Some _ -> None) candidates in
+          | None, _, _ | _, Some _, _ | _, _, Some _ -> None) candidates in
         let unresolved = match archive_error, source.kind with
           | None, _ | Some _, (Current.Explicit_write | Current.Explicit_retract) -> unresolved
           | Some reason, Current.Librarian ->
             List.filter_map (fun original ->
               let id = Memory.memory_id original in
-              if List.mem id invalidated
+              if Option.is_some (find id final_facts) || List.mem id invalidated
                  || List.exists (fun (row : Memory.dropped_statement) -> row.memory_id = id) dropped
                  || List.exists (fun (from_id, _) -> from_id = id) candidates
               then None else Some
@@ -163,7 +163,10 @@ let read_inline ~keepers_dir ~keeper_id ~limit =
   | Ok rows ->
     let legacy_rewrite = function
       | _, Ok (`Assoc fields, Current.Journal_committed {program = None; change; _}) ->
-          change.removed <> [] && Codec.journal_commit_effect fields = Ok (Some Current.Rewritten)
+          List.exists (fun original ->
+            not (List.exists (fun added -> Memory.memory_id original = Memory.memory_id added) change.added))
+            change.removed
+          && Codec.journal_commit_effect fields = Ok (Some Current.Rewritten)
       | _, (Error _ | Ok (_, (Current.Journal_committed _
           | Current.Journal_failed _ | Current.Journal_quarantined _))) -> false in
     let needs_legacy = List.exists legacy_rewrite rows in

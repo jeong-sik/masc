@@ -133,6 +133,28 @@ let test_partial_archive () =
     check bool "lineage uncertainty remains visible" true
       (List.exists (fun (event : Activity.event) -> event.kind = Activity.Relation_unavailable) events)
 
+let test_reobservation () =
+  let next = {old_a with last_seen = 11.} in
+  let json = row [old_a] [next] in
+  let require = function Ok value -> value | Error reason -> fail reason in
+  let events = Activity.project ~archive_error:"archive unreadable" ~identity:"journal:42"
+      ~absorbed:[] json |> require in
+  check int "payload update is one event" 1 (List.length events);
+  check bool "payload update is not retirement" true ((List.hd events).kind = Activity.Reobserved);
+  let keepers_dir = Filename.temp_file "memory-activity-" ".dir" in
+  Sys.remove keepers_dir;
+  Unix.mkdir keepers_dir 0o700;
+  Fun.protect ~finally:(fun () -> Fs_compat.remove_tree keepers_dir) (fun () ->
+    Fs_compat.save_file_atomic
+      (Current.journal_path_for_keepers_dir ~keepers_dir ~keeper_id:"alpha")
+      (Yojson.Safe.to_string json ^ "\n");
+    Fs_compat.save_file_atomic
+      (Masc.Keeper_memory_absorbed.path_for_keepers_dir ~keepers_dir ~keeper_id:"alpha")
+      "not JSON\n";
+    let observed = Activity.read ~keepers_dir ~keeper_id:"alpha" ~limit:50 in
+    check (list string) "payload update does not read unrelated broken archive" [] observed.notes;
+    check int "read retains one actual reobservation" 1 (List.length observed.events))
+
 let () = run "Keeper memory activity"
   ["committed lineage",
     [test_case "absorption retains endpoints" `Quick test_absorption;
@@ -143,4 +165,5 @@ let () = run "Keeper memory activity"
      test_case "split edge identities" `Quick test_split;
      test_case "retained successor evidence" `Quick test_retained;
      test_case "bad observation clock" `Quick test_bad_clock;
-     test_case "partial archive" `Quick test_partial_archive]]
+     test_case "partial archive" `Quick test_partial_archive;
+     test_case "reobservation is not retirement" `Quick test_reobservation]]

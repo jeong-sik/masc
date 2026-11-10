@@ -737,6 +737,7 @@ type resource_msg =
   | Resources_listed of
       unit ref * (Masc_tui_resource_catalog.listing, string) result
   | Resource_exported of string * (string, string) result
+  | Resource_saved of Masc_tui_types.resource_save_request * Masc_tui_types.resource_save_outcome
   | Resource_share_changed of Masc_tui_types.resource_share_request * (Masc_tui_types.resource_share_outcome, Masc_tui_types.resource_share_failure) result
   | Resource_share_recovery_loaded of Masc_tui_types.resource_share_recovery_lookup * (Masc_tui_artifact_share_pending.entry option, string) result
   | Resource_read of

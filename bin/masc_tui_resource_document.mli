@@ -1,4 +1,4 @@
-(** The exact current Resources document. Read failures, report state and
+(** The exact current Resources document. Original local-save receipts, read failures, report state and
     uncertain sharing/recovery lead the original body. Full source metadata is
     an explicit information reading. This projection does not change retained
     bytes, request ownership, selection or scroll. *)

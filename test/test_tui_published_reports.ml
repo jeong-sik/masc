@@ -431,7 +431,92 @@ let share_receipt_consistency () =
   refused (decode ~status:409 ~receipt:applied snapshot);
   refused (decode ~status:200 ~receipt:conflict snapshot)
 
+let save_receipt_ownership () =
+  let module Types = Masc_tui_types in
+  let module Export = Masc_tui_resource_export in
+  let state = state () in
+  let document = get (Export.create ~report:(report (entry (revision markdown))) ~source:markdown) in
+  let workspace : Types.workspace_input_identity = {
+    wi_base_path="/workspace";wi_masc_root="/workspace/.masc"} in
+  let prompt path : Types.resource_save_prompt =
+    let input = Masc_tui_message_input.create () in
+    Masc_tui_message_input.insert input path;
+    {rsp_owner=ref ();rsp_document=document;rsp_path=input;
+     rsp_authority=state.workspace_authority;rsp_read_authority=state.workspace_read_authority;
+     rsp_workspace=workspace;rsp_directory="/workspace";rsp_error=None} in
+  let original = prompt "first.md" in
+  let request : Types.resource_save_request = {
+    save_form=original.rsp_owner;save_document=document;save_input_path="first.md";
+    save_path="/workspace/first.md";save_workspace=workspace} in
+  state.resource_save_receipts <- [{save_request=request;save_phase=Resource_save_pending}];
+  state.resource_save_prompt <- Some original;
+  let foreign = {request with save_form=ref ()} in
+  check bool "unregistered completion is not applied" false
+    (Types.settle_resource_save state foreign (Resource_save_result (Ok ())));
+  check bool "original request remains pending" true
+    (Types.resource_save_pending_for_prompt state original);
+  let newer = prompt "newer draft.md" in
+  state.resource_save_prompt <- Some newer;
+  state.workspace_authority <- Types.Workspace_authority 1;
+  state.workspace_read_authority <- ref ();
+  check bool "original completion is retained" true
+    (Types.settle_resource_save state request (Resource_save_result (Ok ())));
+  check bool "late original success cannot close a replacement form" true
+    (match state.resource_save_prompt with Some actual -> actual == newer | None -> false);
+  check string "replacement path remains original input" "newer draft.md"
+    (Masc_tui_message_input.contents newer.rsp_path);
+  check bool "terminal receipt cannot be settled twice" false
+    (Types.settle_resource_save state request
+      (Resource_save_unconfirmed {detail="late dispatch failure";cause=None}));
+  check bool "late duplicate cannot replace successful effect" true
+    (match state.resource_save_receipts with
+     | [{save_phase=Resource_save_settled (Resource_save_result (Ok ()));_}] -> true
+     | _ -> false);
+  let newer_request : Types.resource_save_request = {
+    save_form=newer.rsp_owner;save_document=document;save_input_path="newer draft.md";
+    save_path="/workspace/newer draft.md";save_workspace=workspace} in
+  state.resource_save_receipts <- {save_request=newer_request;save_phase=Resource_save_pending}
+    :: state.resource_save_receipts;
+  ignore (Types.settle_resource_save state newer_request
+    (Resource_save_result (Error (Export.Invalid_destination "refused before file creation"))));
+  check bool "a refused save keeps the path form" true
+    (match state.resource_save_prompt with Some actual -> actual == newer | None -> false);
+  check string "refused path stays editable" "newer draft.md"
+    (Masc_tui_message_input.contents newer.rsp_path)
+
+let save_completion_keeps_newer_input () =
+  let module Types = Masc_tui_types in
+  let document = get (Masc_tui_resource_export.create
+    ~report:(report (entry (revision markdown))) ~source:markdown) in
+  let state = state () in
+  let input = Masc_tui_message_input.create () in
+  Masc_tui_message_input.insert input "/workspace/original.md";
+  let workspace : Types.workspace_input_identity = {
+    wi_base_path="/workspace";wi_masc_root="/workspace/.masc"} in
+  let prompt : Types.resource_save_prompt = {
+    rsp_owner=ref ();rsp_document=document;rsp_path=input;
+    rsp_authority=state.workspace_authority;rsp_read_authority=state.workspace_read_authority;
+    rsp_workspace=workspace;rsp_directory="/workspace";rsp_error=None} in
+  let request : Types.resource_save_request = {
+    save_form=prompt.rsp_owner;save_document=document;save_input_path="/workspace/original.md";
+    save_path="/workspace/original.md";save_workspace=workspace} in
+  state.resource_save_prompt <- Some prompt;
+  state.resource_save_receipts <- [{save_request=request;save_phase=Resource_save_pending}];
+  Masc_tui_message_input.clear input;
+  Masc_tui_message_input.insert input "/workspace/new input.md";
+  check bool "edited input cannot acquire the frozen path's receipt" true
+    (Option.is_none (Types.resource_save_prompt_receipt state prompt));
+  ignore (Types.settle_resource_save state request (Resource_save_result (Ok ())));
+  check bool "same form success does not erase input edited after dispatch" true
+    (Option.is_some state.resource_save_prompt);
+  check string "new input survives" "/workspace/new input.md"
+    (Masc_tui_message_input.contents input);
+  check string "receipt still names frozen original destination" "/workspace/original.md"
+    request.save_path
+
 let () = run "published report resources" ["report reading",[
+  test_case "save completion owns its original form and receipt" `Quick save_receipt_ownership;
+  test_case "save completion preserves input edited during dispatch" `Quick save_completion_keeps_newer_input;
   test_case "share receipt and current snapshot agree at equal versions" `Quick share_receipt_consistency;
   test_case "pinned revision and body integrity" `Quick exact_revision;
   test_case "HTML original admission" `Quick html_source;

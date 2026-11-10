@@ -147,14 +147,19 @@ let test_standalone_exclusive_publication ~fs () =
     Fs_compat.create_file_exclusive ~fs ~owner:"standalone-export-test"
       ~path:(Filename.concat directory leaf) ~permissions:0o600 content
   in
-  let require_created = function Ok () -> () | Error detail -> fail detail in
+  let require_created = function
+    | Ok () -> ()
+    | Error error -> fail (Fs_compat.create_file_error_to_string error)
+  in
   require_created (create "original" "exact bytes\000\r\n");
   check string "standalone exact payload" "exact bytes\000\r\n"
     (read_file (Filename.concat directory "original"));
   check int "standalone private mode" 0o600
     ((Unix.stat (Filename.concat directory "original")).Unix.st_perm land 0o777);
   (match create "original" "overwrite" with
-   | Error _ -> () | Ok () -> fail "standalone export overwrote existing file");
+   | Error error -> check bool "standalone refusal preserves target-effect evidence" true
+       (Fs_compat.create_file_error_target_effect error = Some Fs_compat.Target_unchanged)
+   | Ok () -> fail "standalone export overwrote existing file");
   Unix.symlink "original" (Filename.concat directory "alias");
   (match create "alias" "overwrite" with
    | Error _ -> () | Ok () -> fail "standalone export overwrote a symlink");
@@ -2124,8 +2129,13 @@ let test_create_commit_cancellation_reports_complete_effect ~fs () =
            : (unit, Fs_compat.capability_write_error) result));
       None
     with
-    | Eio.Cancel.Cancelled
-        (Fs_compat.Capability_write_cancelled (_, cancellation)) ->
+    | (Eio.Cancel.Cancelled
+        (Fs_compat.Capability_write_cancelled (_, cancellation)) as exception_) ->
+      (match Fs_compat.create_file_cancellation exception_ with
+       | None -> fail "typed create cancellation was not retained"
+       | Some interrupted ->
+           check bool "retained cancellation exposes complete creation" true
+             (Fs_compat.create_file_cancellation_effect interrupted = Some Fs_compat.Target_created));
       Some cancellation
     | Eio.Cancel.Cancelled _ -> fail "typed create commit state was lost"
   in

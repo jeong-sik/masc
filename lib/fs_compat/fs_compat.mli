@@ -960,19 +960,54 @@ val create_capability_directory_exclusive
 
 val capability_write_error_to_string : capability_write_error -> string
 
+type create_file_failure =
+  | Target_rejected of capability_publication_target_error
+  | Registry_failed of Publication_recovery.registry_error
+  | Lane_failed of Publication_recovery.lane_open_error
+  | Publication_failed of capability_write_error
+  | Lane_release_failed of {
+      value : (unit, capability_write_error) result;
+      release_failure : Publication_recovery.lane_release_failure;
+    }
+
+type create_file_error =
+  | Create_failed of create_file_failure
+  | Boundary_failed of {
+      observed : (unit, create_file_failure) result option;
+      failure : Eio.Exn.with_bt;
+    }
+
+val create_file_error_target_effect
+  : create_file_error -> capability_write_target_effect option
+(** [None] means no target-effect evidence was received. Preparation errors do
+    not establish the destination's state. Original publication results remain
+    available through lane-release and subsequent path-boundary failures. *)
+val create_file_error_to_string : create_file_error -> string
+
+type create_file_cancellation
+val create_file_cancellation : exn -> create_file_cancellation option
+(** Structural cancellation evidence retaining the original exception, including
+    nested publication/recovery/cleanup failures. This does not consume it. *)
+val create_file_cancellation_effect
+  : create_file_cancellation -> capability_write_target_effect option
+(** [None] is unobserved, never proof of an unchanged destination. *)
+val create_file_cancellation_to_string : create_file_cancellation -> string
+
 (** Path boundary for standalone file exports. The existing destination parent
     owns the durable [fs-publication-recovery] registry. [owner] is a stable
     caller identity reused on restart; recovery precedes publication. This uses
     the same mandatory recovery access and staged exclusive writer as capability
     callers. Recovery records are retained on uncertain outcomes, and cancellation
-    propagates. The destination parent is not created by this function. *)
+    propagates with the original backtrace. A returned write or lane-release
+    failure is preserved even if later path cleanup fails. The destination
+    parent is not created by this function. *)
 val create_file_exclusive
   : fs:Eio.Fs.dir_ty Eio.Path.t
   -> owner:string
   -> path:string
   -> permissions:int
   -> string
-  -> (unit, string) result
+  -> (unit, create_file_error) result
 
 val capability_write_operation_to_string : capability_write_operation -> string
 val capability_write_stage_to_string : capability_write_stage -> string

@@ -271,35 +271,203 @@ let create_capability_directory_exclusive =
 
 let capability_write_error_to_string = Atomic_write.capability_write_error_to_string
 
+type create_file_failure =
+  | Target_rejected of capability_publication_target_error
+  | Registry_failed of Publication_recovery.registry_error
+  | Lane_failed of Publication_recovery.lane_open_error
+  | Publication_failed of capability_write_error
+  | Lane_release_failed of {
+      value : (unit, capability_write_error) result;
+      release_failure : Publication_recovery.lane_release_failure;
+    }
+
+type create_file_error =
+  | Create_failed of create_file_failure
+  | Boundary_failed of {
+      observed : (unit, create_file_failure) result option;
+      failure : Eio.Exn.with_bt;
+    }
+
+let create_file_failure_target_effect = function
+  | Target_rejected _ | Registry_failed _ | Lane_failed _ -> None
+  | Publication_failed error -> Some error.target_effect
+  | Lane_release_failed { value = Ok (); _ } -> Some Target_created
+  | Lane_release_failed { value = Error error; _ } -> Some error.target_effect
+
+let create_file_error_target_effect = function
+  | Create_failed failure -> create_file_failure_target_effect failure
+  | Boundary_failed { observed = Some (Ok ()); _ } -> Some Target_created
+  | Boundary_failed { observed = Some (Error failure); _ } ->
+      create_file_failure_target_effect failure
+  | Boundary_failed { observed = None; _ } -> None
+
+let create_file_failure_to_string = function
+  | Target_rejected error -> capability_publication_target_error_to_string error
+  | Registry_failed error -> Publication_recovery.registry_error_to_string error
+  | Lane_failed error -> Publication_recovery.lane_open_error_to_string error
+  | Publication_failed error -> capability_write_error_to_string error
+  | Lane_release_failed { value; release_failure } ->
+      let publication = match value with
+        | Ok () -> "target_created; publication returned successfully"
+        | Error error -> capability_write_error_to_string error
+      in
+      publication ^ "; " ^ Publication_recovery.lane_release_failure_to_string release_failure
+
+let create_file_error_to_string = function
+  | Create_failed failure -> create_file_failure_to_string failure
+  | Boundary_failed { observed; failure = (exception_, _) } ->
+      let prior = match observed with
+        | None -> "target effect unobserved"
+        | Some (Ok ()) -> "target_created; publication returned successfully"
+        | Some (Error failure) -> create_file_failure_to_string failure
+      in
+      prior ^ "; path boundary failed: " ^ Format.asprintf "%a" Eio.Exn.pp exception_
+
+type create_file_cancellation = Create_file_cancellation of exn
+
+let rec contains_create_file_cancellation = function
+  | Eio.Cancel.Cancelled _ | Capability_write_cancelled _ -> true
+  | Publication_recovery.Cleanup_failed { body; cancellation; cleanup = (cleanup, _) } ->
+      Option.is_some cancellation
+      || Option.fold ~none:false ~some:(fun (exception_, _) ->
+           contains_create_file_cancellation exception_) body
+      || contains_create_file_cancellation cleanup
+  | Publication_recovery.Body_failed_during_cancellation _
+  | Publication_recovery.Reconciliation_cancellation_terminalization_failed _ -> true
+  | _ -> false
+
+let create_file_cancellation exception_ =
+  if contains_create_file_cancellation exception_
+  then Some (Create_file_cancellation exception_)
+  else None
+
+let combine_create_file_effect left right =
+  match left, right with
+  | None, None -> None
+  | Some observed_effect, None | None, Some observed_effect -> Some observed_effect
+  | Some left, Some right ->
+      Some (if left = right then left else Target_state_unknown)
+
+let rec create_file_exception_effect = function
+  | Eio.Cancel.Cancelled reason -> create_file_exception_effect reason
+  | Capability_write_cancelled (_, evidence) -> Some evidence.target_effect
+  | Publication_recovery.Cleanup_failed { body; cancellation; cleanup = (cleanup, _) } ->
+      let observed_effect = function
+        | None -> None
+        | Some (exception_, _) -> create_file_exception_effect exception_
+      in
+      combine_create_file_effect (observed_effect body)
+        (combine_create_file_effect (observed_effect cancellation) (create_file_exception_effect cleanup))
+  | Publication_recovery.Body_failed_during_cancellation
+      { body = (body, _); cancellation = (cancellation, _) } ->
+      combine_create_file_effect (create_file_exception_effect body)
+        (create_file_exception_effect cancellation)
+  | Publication_recovery.Reconciliation_cancellation_terminalization_failed
+      { cancellation = (cancellation, _); terminalization = (terminalization, _) } ->
+      combine_create_file_effect (create_file_exception_effect cancellation)
+        (create_file_exception_effect terminalization)
+  | _ -> None
+
+let create_file_cancellation_effect (Create_file_cancellation exception_) =
+  create_file_exception_effect exception_
+
+let create_file_primary_failure_to_string = function
+  | Write_primary_failure failure -> Atomic_write.capability_write_failure_to_string failure
+  | Recovery_primary_failure failure -> Atomic_write.capability_recovery_failure_to_string failure
+  | Recovery_access_primary_failure Recovery_access_not_available ->
+      "publication recovery access is not available for this Keeper lane"
+
+let create_file_cleanup_failure_to_string = function
+  | Write_cleanup_failure failure -> Atomic_write.capability_write_failure_to_string failure
+  | Recovery_cleanup_failure failure -> Atomic_write.capability_recovery_failure_to_string failure
+
+let rec create_file_exception_to_string = function
+  | Eio.Cancel.Cancelled reason -> "cancelled: " ^ create_file_exception_to_string reason
+  | Capability_write_cancelled (reason, evidence) ->
+      let details =
+        Option.to_list (Option.map create_file_primary_failure_to_string evidence.interrupted_primary_failure)
+        @ Option.to_list (Option.map Atomic_write.capability_recovery_failure_to_string evidence.interrupted_recovery)
+        @ List.map create_file_cleanup_failure_to_string evidence.cleanup_failures
+      in
+      Printf.sprintf "operation=%s target_effect=%s reason=%s%s"
+        (Atomic_write.capability_write_operation_to_string evidence.operation)
+        (Atomic_write.capability_write_target_effect_to_string evidence.target_effect)
+        (create_file_exception_to_string reason)
+        (match details with [] -> "" | _ :: _ -> "; " ^ String.concat "; " details)
+  | Publication_recovery.Cleanup_failed { body; cancellation; cleanup = (cleanup, _) } ->
+      let describe label = Option.map (fun (exception_, _) ->
+        label ^ create_file_exception_to_string exception_) in
+      String.concat "; "
+        (Option.to_list (describe "body: " body)
+         @ Option.to_list (describe "cancellation: " cancellation)
+         @ ["cleanup: " ^ create_file_exception_to_string cleanup])
+  | Publication_recovery.Body_failed_during_cancellation
+      { body = (body, _); cancellation = (cancellation, _) } ->
+      "body: " ^ create_file_exception_to_string body
+      ^ "; cancellation: " ^ create_file_exception_to_string cancellation
+  | Publication_recovery.Reconciliation_cancellation_terminalization_failed
+      { cancellation = (cancellation, _); terminalization = (terminalization, _) } ->
+      "cancellation: " ^ create_file_exception_to_string cancellation
+      ^ "; terminalization: " ^ create_file_exception_to_string terminalization
+  | exception_ -> Format.asprintf "%a" Eio.Exn.pp exception_
+
+let create_file_cancellation_to_string (Create_file_cancellation exception_) =
+  create_file_exception_to_string exception_
+
+let rec create_file_fatal_exception = function
+  | Out_of_memory | Stack_overflow | Sys.Break -> true
+  | Publication_recovery.Cleanup_failed { body; cleanup = (cleanup, _); _ } ->
+      Option.fold ~none:false ~some:(fun (exception_, _) ->
+        create_file_fatal_exception exception_) body
+      || create_file_fatal_exception cleanup
+  | Publication_recovery.Body_failed_during_cancellation { body = (body, _); _ } ->
+      create_file_fatal_exception body
+  | _ -> false
+
 let create_file_exclusive ~fs ~owner ~path ~permissions content =
-  let open Result.Syntax in
-  let path =
-    if Filename.is_relative path then Filename.concat (Sys.getcwd ()) path
-    else path
-  in
-  Eio.Path.with_open_dir Eio.Path.(fs / Filename.dirname path) (fun parent ->
-    let root = Eio.Path.stat ~follow:true parent in
-    let* target =
-      capability_publication_target
+  let observed = ref None in
+  let remember result = observed := Some result; result in
+  let perform () =
+    let path =
+      if Filename.is_relative path then Filename.concat (Sys.getcwd ()) path
+      else path
+    in
+    Eio.Path.with_open_dir Eio.Path.(fs / Filename.dirname path) (fun parent ->
+      let root = Eio.Path.stat ~follow:true parent in
+      match capability_publication_target
         ~allowed_root_path:(Filename.dirname path)
         ~allowed_root_device:root.dev ~allowed_root_inode:root.ino
         ~parent_components:[] ~target_leaf:(Filename.basename path) ~permissions
-      |> Result.map_error capability_publication_target_error_to_string
-    in
-    Eio.Switch.run @@ fun sw ->
-    let* registry =
-      Publication_recovery.open_registry ~sw ~fs ~registry_root:parent
-      |> Result.map_error Publication_recovery.registry_error_to_string
-    in
-    match Publication_recovery.with_lane ~registry ~owner (fun recovery ->
-      create_capability_file_exclusive ~recovery ~parent ~target content
-      |> Result.map_error capability_write_error_to_string)
-    with
-    | Error error -> Error (Publication_recovery.lane_open_error_to_string error)
-    | Ok (Publication_recovery.Lane_released result) -> result
-    | Ok (Publication_recovery.Lane_release_failed { value; release_failure }) ->
-      let detail = Publication_recovery.lane_release_failure_to_string release_failure in
-      Error (match value with Ok () -> detail | Error primary -> primary ^ "; " ^ detail))
+      with
+      | Error error -> remember (Error (Target_rejected error))
+      | Ok target ->
+        Eio.Switch.run @@ fun sw ->
+        match Publication_recovery.open_registry ~sw ~fs ~registry_root:parent with
+        | Error error -> remember (Error (Registry_failed error))
+        | Ok registry ->
+          let result = Publication_recovery.with_lane ~registry ~owner (fun recovery ->
+            let result = create_capability_file_exclusive ~recovery ~parent ~target content in
+            ignore (remember (Result.map_error (fun error -> Publication_failed error) result));
+            result)
+          in
+          remember (match result with
+            | Error error -> Error (Lane_failed error)
+            | Ok (Publication_recovery.Lane_released result) ->
+                Result.map_error (fun error -> Publication_failed error) result
+            | Ok (Publication_recovery.Lane_release_failed { value; release_failure }) ->
+                Error (Lane_release_failed { value; release_failure })))
+  in
+  let boundary exception_ =
+    let failure = exception_, Printexc.get_raw_backtrace () in
+    if contains_create_file_cancellation exception_ || create_file_fatal_exception exception_
+    then Printexc.raise_with_backtrace exception_ (snd failure)
+    else Error (Boundary_failed { observed = !observed; failure })
+  in
+  match perform () with
+  | result -> Result.map_error (fun failure -> Create_failed failure) result
+  | exception ((Eio.Io _ | Sys_error _ | Unix.Unix_error _) as exception_) -> boundary exception_
+  | exception (Publication_recovery.Cleanup_failed { cancellation = None; _ } as exception_) ->
+      boundary exception_
 ;;
 
 let capability_write_operation_to_string =

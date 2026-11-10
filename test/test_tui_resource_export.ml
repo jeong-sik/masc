@@ -29,6 +29,13 @@ let exact_source_and_link () =
   refused (Export.create ~report ~source:(String.mapi (fun i c -> if i=0 then '!' else c) source));
   let _, other = document ~number:4 source in
   check bool "different revision has different ownership" false (Export.same original other);
+  check bool "receipt matches its exact report key" true
+    (Export.matches_key original (Export.key original));
+  check bool "receipt refuses another revision" false
+    (Export.matches_key original (Export.key other));
+  let _, same_number_different_body = document "different original bytes" in
+  check bool "receipt refuses another body at the same revision number" false
+    (Export.matches_key original (Export.key same_number_different_body));
   let url = Uri.of_string (Export.dashboard_url ~host:"127.0.0.1" ~port:8935 original) in
   check (option string) "no userinfo" None (Uri.userinfo url);
   let fragment = Uri.of_string (Option.get (Uri.fragment url)) in
@@ -132,16 +139,31 @@ let exclusive_save () =
     Eio_main.run (fun env ->
       let _, original = document source in
       let path = Filename.concat root "선택한 원문.md" in
-      ignore (get (Export.save ~fs:env#fs ~path original));
+      get (Export.save ~fs:env#fs ~path original |> Result.map_error Export.error_to_string);
       check string "exact UTF8 and CRLF on disk" source (read path);
       check int "private mode" 0o600 ((Unix.stat path).Unix.st_perm land 0o777);
       let _, changed = document ~number:4 "other revision" in
-      refused (Export.save ~fs:env#fs ~path changed);
+      (match Export.save ~fs:env#fs ~path changed with
+       | Ok () -> fail "existing destination was replaced"
+       | Error error ->
+           check bool "existing destination refusal is typed" true
+             (Export.refused_existing_target error);
+           check bool "refused destination remains unchanged" true
+             (Export.error_target_effect error = Some Fs_compat.Target_unchanged));
       check string "existing file survives" source (read path);
       let link = Filename.concat root "alias.md" in
       Unix.symlink path link;
       refused (Export.save ~fs:env#fs ~path:link changed);
       check string "symlink target survives" source (read path);
+      let invalid = Filename.concat root "invalid\npath.md" in
+      (match Export.save ~fs:env#fs ~path:invalid original with
+       | Ok () -> fail "invalid destination was written"
+       | Error error ->
+           check bool "invalid destination never enters the writer" true
+             (Export.error_target_effect error = Some Fs_compat.Target_unchanged);
+           check bool "invalid destination is not an existing-file refusal" false
+             (Export.refused_existing_target error));
+      check bool "invalid destination is absent" false (Sys.file_exists invalid);
       refused (Export.save ~fs:env#fs ~path:(Filename.concat root "missing/report.md") original)))
 
 let () = run "original report export" ["source and filesystem", [

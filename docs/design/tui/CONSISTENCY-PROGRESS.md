@@ -312,6 +312,39 @@ observations stay private in `artifacts/native-tui-proof-42732829605/`.
 This confirms those observed candidate views only, without proving production
 installation, the new navigation repair, or the remaining child/input states.
 
+## Resources save results (in progress)
+
+The 072796b2 native baseline exclusively created the exact 393-byte fixture
+report, then refused an explicit second save to the same existing path. The
+36x20 success and refusal captures were identical: the footer had no space for
+the result. The refusal also closed the path form, whose footer advertised
+reader keys while printable keys still belonged to the path.
+
+The source now retains each original report/workspace/path and typed save
+outcome. The reader leads with the newest result for that exact report; `i`
+also exposes diagnostics and earlier saves. A failed save retains editable
+input, and a late result cannot close a replacement form or label an edited
+path as saved. Issued writes keep their own frozen destination. Closing input
+does not replay or cancel them, and their original receipt still settles after
+workspace read authority is withdrawn. The form footer reflects its actual
+keys; page keys can read a long result without editing the path.
+
+The canonical filesystem boundary preserves the original publication failure,
+target effect, lane-release value/failure and ordinary boundary exception.
+Existing files remain protected by the same staged exclusive writer, recovery
+registry and 0600 mode. None/unobserved and interrupted writes do not become
+unchanged or successful results. A nonblocking source-review limitation remains:
+plain cancellation after the wrapper observed creation can still be reported
+as unknown when that observation is not carried into the cancellation payload.
+
+Independent core/export and UI/state source reviews found no remaining P0-P2
+in their recorded scopes after three UI findings were repaired. OCaml parsing
+and diffcheck are separate from type/build/execution evidence. The changed Help
+still needs its actual generated reference; semantic file-effect and receipt
+ownership checks have not run for this source. The 6157b06b native results
+belong to the body-reading parent, not this save change. Matching execution,
+installation, GUI display and the rest of the 23-surface audit remain open.
+
 ## Feature child identity and resource body (#51023)
 
 The matching be3302c2 server/TUI baseline at 120x36 and 36x20 showed a

@@ -2045,11 +2045,11 @@ let launch_workspace_result ?key ?(operation = false) ?(observation = false)
       scoped message) perform
 
 (* Existing request/effect callers still recheck the endpoint before dispatch. *)
-let launch_workspace_request ?(operation = false) ?cancelled state ~mailbox ~boundary_error ~deliver read =
+let launch_workspace_request ?(operation = false) ?cancelled ?cancelled_by state ~mailbox ~boundary_error ~deliver read =
   let authority = state.workspace_authority in
   let identity = state.server_identity in
   let host = server_peer_host and port = state.port in
-  launch_workspace_result ~operation ?cancelled state ~mailbox ~boundary_error ~deliver (fun () ->
+  launch_workspace_result ~operation ?cancelled ?cancelled_by state ~mailbox ~boundary_error ~deliver (fun () ->
     match check_workspace_request state ~mailbox ~authority ~identity ~host ~port () with
     | Error detail -> Error (boundary_error detail)
     | Ok () -> read ())
@@ -2114,35 +2114,80 @@ let open_resource_save_prompt state =
   match Masc_tui_resource_document.export_source state with
   | Error detail -> report_action state "error" detail
   | Ok document ->
-    let path = Masc_tui_message_input.create () in
-    Masc_tui_message_input.insert path
-      (Filename.concat (Sys.getcwd ()) (Masc_tui_resource_export.suggested_name document));
-    state.resource_save_prompt <- Some {
-      rsp_document = document; rsp_path = path;
-      rsp_authority = state.workspace_authority;
-      rsp_read_authority = state.workspace_read_authority }
+    (match workspace_input_identity_of_server state.server_identity with
+     | None -> report_action state "error" "Confirm the workspace before saving this report"
+     | Some workspace ->
+       let directory = Sys.getcwd () in
+       let path = Masc_tui_message_input.create () in
+       Masc_tui_message_input.insert path
+         (Filename.concat directory (Masc_tui_resource_export.suggested_name document));
+       state.resource_save_prompt <- Some {
+         rsp_owner = ref (); rsp_document = document; rsp_path = path;
+         rsp_authority = state.workspace_authority;
+         rsp_read_authority = state.workspace_read_authority;
+         rsp_workspace = workspace; rsp_directory = directory; rsp_error = None })
+
+type resource_save_observation =
+  | Save_not_entered
+  | Save_entered
+  | Save_observed of resource_save_outcome
 
 let save_resource_source state ~mailbox prompt =
   match resource_export_is_current state prompt with
-  | Error detail -> report_action state "error" detail
+  | Error detail -> prompt.rsp_error <- Some detail
   | Ok () ->
-    let path = Masc_tui_message_input.contents prompt.rsp_path in
-    if String.trim path = "" then report_action state "error" "Enter a destination file path"
+    let input_path = Masc_tui_message_input.contents prompt.rsp_path in
+    if String.equal input_path "" then prompt.rsp_error <- Some "Enter a destination file path"
+    else if resource_save_pending_for_prompt state prompt then ()
     else match Eio_context.get_env_opt () with
-    | None -> report_action state "error" "The local filesystem is unavailable"
+    | None -> prompt.rsp_error <- Some "The local filesystem is unavailable"
     | Some env ->
-      (* Freeze the destination before the worker starts. The operation receipt
-         survives navigation; it never claims a different revision was saved. *)
-      let path = if Filename.is_relative path then Filename.concat (Sys.getcwd ()) path else path in
-      state.resource_save_prompt <- None;
-      launch_workspace_request ~operation:true state ~mailbox ~boundary_error:Fun.id
-        ~cancelled:(Resource_msg (Resource_exported (Masc_tui_resource_export.label prompt.rsp_document,
-          Error ("Save interrupted; the destination may contain complete or incomplete data. Inspect before retrying: " ^ path))))
-        ~deliver:(fun result -> Resource_msg (Resource_exported (Masc_tui_resource_export.label prompt.rsp_document, result)))
+      let request = {
+        save_form = prompt.rsp_owner;
+        save_document = prompt.rsp_document; save_input_path = input_path;
+        save_path = resource_save_path prompt; save_workspace = prompt.rsp_workspace } in
+      state.resource_save_receipts <- {save_request=request;save_phase=Resource_save_pending}
+        :: state.resource_save_receipts;
+      prompt.rsp_error <- None;
+      state.resource_scroll <- Masc_tui_scroll.Position.first;
+      let observed = ref Save_not_entered in
+      let boundary detail = match !observed with
+        | Save_not_entered -> Resource_save_not_started detail
+        | Save_entered -> Resource_save_unconfirmed {detail;cause=None}
+        | Save_observed outcome -> outcome in
+      let deliver outcome = Resource_msg (Resource_saved (request, outcome)) in
+      launch_workspace_request ~operation:true state ~mailbox ~boundary_error:boundary
+        ~cancelled_by:(fun () -> deliver (match !observed with
+          | Save_not_entered -> Resource_save_not_started "Save cancelled before file creation"
+          | Save_entered -> Resource_save_interrupted None
+          | Save_observed outcome -> outcome))
+        ~deliver:(function Ok outcome | Error outcome -> deliver outcome)
         (fun () ->
-          let open Result.Syntax in
-          let* () = resource_export_is_current state prompt in
-          Masc_tui_resource_export.save ~fs:env#fs ~path prompt.rsp_document)
+          match resource_export_is_current state prompt with
+          | Error detail -> Ok (Resource_save_not_started detail)
+          | Ok () ->
+            observed := Save_entered;
+            match Masc_tui_resource_export.save ~fs:env#fs ~path:request.save_path request.save_document with
+            | result ->
+                let outcome = Resource_save_result result in
+                observed := Save_observed outcome;
+                Ok outcome
+            | exception (Eio.Cancel.Cancelled _ as exn) ->
+                let backtrace = Printexc.get_raw_backtrace () in
+                observed := Save_observed (Resource_save_interrupted
+                  (Masc_tui_resource_export.cancellation exn));
+                Printexc.raise_with_backtrace exn backtrace
+            | exception exn ->
+                let backtrace = Printexc.get_raw_backtrace () in
+                (match Masc_tui_resource_export.cancellation exn with
+                 | Some cancellation ->
+                     observed := Save_observed (Resource_save_interrupted (Some cancellation));
+                     Printexc.raise_with_backtrace exn backtrace
+                 | None ->
+                     let outcome = Resource_save_unconfirmed {
+                       detail=Printexc.to_string exn;cause=Some exn} in
+                     observed := Save_observed outcome;
+                     Ok outcome))
 
 let open_resource_in_dashboard state ~mailbox =
   match Masc_tui_resource_document.export_source state with
@@ -8113,6 +8158,14 @@ let move_resource_document state movement =
       ~rows:(surface_rows state) ~cols in
   state.resource_scroll <- Masc_tui_scroll.Position.move ~count ~height
       movement state.resource_scroll
+
+let page_resource_document state direction =
+  let _, cols = get_terminal_size () in
+  let count, height = Masc_tui_render_resources.document_viewport state
+      ~rows:(surface_rows state) ~cols in
+  state.resource_scroll <- Masc_tui_scroll.Position.move ~count ~height
+    (Masc_tui_scroll.Position.By (direction * Masc_tui_scroll.page_step ~height))
+    state.resource_scroll
 
 (* Move the active surface's row cursor to the next row whose search text
    contains [query], scanning from [after] and wrapping; [backwards] walks
@@ -23372,6 +23425,10 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
           record_goal_action_receipt ~authority state ~goal_id ~ticket ~workspace result;
           report_action state "error" ("Goal " ^ goal_id ^ " from " ^ workspace
             ^ ": a confirmation outcome arrived after workspace authority was withdrawn; inspect Work summary")
+        | Workspace_operation (Resource_msg (Resource_saved (request, outcome))) ->
+          (* The local write already owns its original tuple. Withdrawal
+             removes read authority, not this outcome or its registered slot. *)
+          ignore (settle_resource_save state request outcome)
         | Workspace_operation (Resource_msg (Resource_share_changed (request, result))) ->
           if resource_share_is_owned state request then begin
             let read_key = finish_resource_share state request result in
@@ -23496,7 +23553,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
         | Play_invites_listed (_, _) | Play_invite_revoked (_, _, _, _))
         | Librarian_input_loaded (_, _) | (Resource_msg (Resources_listed _) | Artifact_msg (Artifact_checks_loaded _))
         | Acting_pane_changes_loaded (_, _)
-        | Resource_msg (Resource_exported _ | Resource_share_changed _ | Resource_share_recovery_loaded _ | Resource_read (_, _, _) | Resource_diagram_ready _) | Github_msg (Github_identity_view_loaded (_, _))
+        | Resource_msg (Resource_exported _ | Resource_saved _ | Resource_share_changed _ | Resource_share_recovery_loaded _ | Resource_read (_, _, _) | Resource_diagram_ready _) | Github_msg (Github_identity_view_loaded (_, _))
         | Identity_msg (Identity_providers_loaded (_, _, _) | Identity_switch_set (_, _, _, _)
         | Identity_login_started (_, _) | Identity_refreshed (_, _) | Identity_app_saved (_, _, _)
         | Identity_disconnected (_, _, _))
@@ -26346,6 +26403,17 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
          | Error detail -> report_action state "error"
              ("Confirmation result requires refresh: " ^ detail));
         launch_artifact_checks_load state ~mailbox
+      end
+  | Resource_msg (Resource_saved (request, outcome)) ->
+      if settle_resource_save state request outcome then begin
+        let category = match outcome with
+          | Resource_save_result (Ok ()) | Resource_save_not_started _ -> "system"
+          | Resource_save_result (Error _) | Resource_save_unconfirmed _
+          | Resource_save_interrupted _ -> "error" in
+        report_action state category
+          (resource_save_document_title request.save_document ^ " · "
+           ^ resource_save_summary state (Resource_save_settled outcome)
+           ^ " · " ^ request.save_path)
       end
   | Resource_msg (Resource_exported (label, result)) ->
       (match result with
@@ -34078,9 +34146,11 @@ Use relative paths for resources already held in the package. -->
                     paste.Masc_tui_paste.text)
             | Some Text_resource_save ->
                 (match Masc_tui_resource_export.path_input paste.Masc_tui_paste.text with
-                 | Error detail -> report_action state "error" detail
+                 | Error detail -> Option.iter (fun prompt -> prompt.rsp_error <- Some detail)
+                     state.resource_save_prompt
                  | Ok path -> Option.iter
-                     (fun prompt -> Masc_tui_message_input.insert prompt.rsp_path path)
+                     (fun prompt -> prompt.rsp_error <- None;
+                       Masc_tui_message_input.insert prompt.rsp_path path)
                      state.resource_save_prompt)
             | Some Text_preset_name ->
                 (match state.preset_save_draft_source with
@@ -35721,11 +35791,16 @@ Use relative paths for resources already held in the package. -->
               (match k with
                | "esc" -> state.resource_save_prompt <- None
                | "\r" | "\n" | "enter" -> save_resource_source state ~mailbox:async_messages prompt
-               | "\127" | "\b" | "backspace" -> Masc_tui_message_input.backspace input
+               | "\127" | "\b" | "backspace" ->
+                   prompt.rsp_error <- None;
+                   Masc_tui_message_input.backspace input
                | "left" -> Masc_tui_message_input.move_left input
                | "right" -> Masc_tui_message_input.move_right input
-               | "\021" -> Masc_tui_message_input.clear input
+               | "\021" -> prompt.rsp_error <- None; Masc_tui_message_input.clear input
+               | "pageup" -> page_resource_document state (-1)
+               | "pagedown" -> page_resource_document state 1
                | text when Masc_tui_message_layout.is_printable_utf8_scalar text ->
+                   prompt.rsp_error <- None;
                    Masc_tui_message_input.insert input text
                | _ -> ()))
        (* Typing a preset name. The pane owns every printable key while a

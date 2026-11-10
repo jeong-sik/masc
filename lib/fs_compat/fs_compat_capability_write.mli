@@ -479,10 +479,46 @@ val create_capability_directory_exclusive :
 
 val capability_write_error_to_string : capability_write_error -> string
 
+type create_file_failure =
+  | Target_rejected of capability_publication_target_error
+  | Registry_failed of Publication_recovery.registry_error
+  | Lane_failed of Publication_recovery.lane_open_error
+  | Publication_failed of capability_write_error
+  | Lane_release_failed of {
+      value : (unit, capability_write_error) result;
+      release_failure : Publication_recovery.lane_release_failure;
+    }
+
+type create_file_error =
+  | Create_failed of create_file_failure
+  | Boundary_failed of {
+      observed : (unit, create_file_failure) result option;
+      failure : Eio.Exn.with_bt;
+    }
+
+val create_file_error_target_effect :
+  create_file_error -> capability_write_target_effect option
+(** [None] means no target-effect evidence was received. Preparation errors do
+    not establish the destination's state. A returned write or lane-release
+    failure retains its original publication result, including creation. *)
+val create_file_error_to_string : create_file_error -> string
+
+type create_file_cancellation
+val create_file_cancellation : exn -> create_file_cancellation option
+(** Recognize cancellation structurally, retaining the original exception and
+    nested publication/recovery/cleanup evidence. Does not consume or re-raise it. *)
+val create_file_cancellation_effect :
+  create_file_cancellation -> capability_write_target_effect option
+(** [None] is unobserved, never proof that the destination was unchanged. *)
+val create_file_cancellation_to_string : create_file_cancellation -> string
+
 val create_file_exclusive :
   fs:Eio.Fs.dir_ty Eio.Path.t ->
   owner:string ->
-  path:string -> permissions:int -> string -> (unit, string) result
+  path:string -> permissions:int -> string -> (unit, create_file_error) result
+(** Preserve typed publication and lane-release results. Expected path-boundary
+    failures retain any result already observed before cleanup. Cancellation
+    and fatal exceptions propagate with their original backtraces. *)
 
 val capability_write_operation_to_string : capability_write_operation -> string
 

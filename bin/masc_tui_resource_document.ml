@@ -17,6 +17,34 @@ let diagrams_allowed (state : state) =
   Option.is_none state.resource_share_recovery_prompt
   && Option.value state.search ~default:state.search_last = ""
 
+let save_notice state entry =
+  let receipts = resource_save_receipts_for state (Catalog.key entry) in
+  let receipts = if state.resource_metadata_expanded then receipts else
+    match receipts with [] -> [] | receipt :: _ -> [receipt] in
+  let notice receipt =
+    let details = if not state.resource_metadata_expanded then
+        ui_text state ~ko:"i: 오류 정보·이전 저장" ~en:"i: diagnostics and earlier saves"
+      else
+        let detail = match receipt.save_phase with
+          | Resource_save_pending -> None
+          | Resource_save_settled (Resource_save_result (Ok ())) ->
+              Some (Masc_tui_resource_export.label receipt.save_request.save_document)
+          | Resource_save_settled (Resource_save_result (Error error)) ->
+              Some (Masc_tui_resource_export.error_to_string error)
+          | Resource_save_settled (Resource_save_not_started detail
+              | Resource_save_unconfirmed {detail;cause=_}) -> Some detail
+          | Resource_save_settled (Resource_save_interrupted cancellation) ->
+              Some (match cancellation with
+                | None -> "No authoritative target effect was observed."
+                | Some evidence -> Masc_tui_resource_export.cancellation_to_string evidence) in
+        Option.fold ~none:"" ~some:(Masc_tui_markdown_theme.fenced ~language:"text") detail in
+    "**" ^ resource_save_summary state receipt.save_phase ^ "**\n\n"
+    ^ Masc_tui_markdown_theme.fenced ~language:"text" receipt.save_request.save_path
+    ^ "\n\n" ^ details in
+  match receipts with
+  | [] -> None
+  | _ :: _ -> Some (String.concat "\n\n" (List.map notice receipts))
+
 let current (state : state) =
   let entries = match visible_resources state with Some rows -> rows | None -> [] in
   let cursor = max 0 (min state.resources_cursor (List.length entries - 1)) in
@@ -78,6 +106,7 @@ let current (state : state) =
             if share_uncertain || requested || Option.is_some error then None
             else state.resource_shared)
         ~share_uncertain
+        ~save_notice:(save_notice state entry)
         ~recovery_preview:(match state.resource_share_recovery_prompt with
           | Some prompt when prompt.recovery_workspace = state.workspace_authority
               && Catalog.equal_key prompt.recovery_key key ->
@@ -207,10 +236,10 @@ let pretty_resource_text ~mime text =
 
 type piece = Markdown_text of string | Html_text of string
 type origin = Metadata | Selection | Part_heading of int | Part_body of int
-  | Read_status | Report_status | Recovery | Progress | Failure of int
+  | Read_status | Report_status | Recovery | Save_result | Progress | Failure of int
 
 let resource_document entry
-    (contents : Masc_tui_mcp.resource_content list option) ~error ~requested ~image_cursor ~text_cursor ~revisions ~presentation ~metadata_expanded ~confirmation ~shared ~share_uncertain ~recovery_preview ~public_url =
+    (contents : Masc_tui_mcp.resource_content list option) ~error ~requested ~image_cursor ~text_cursor ~revisions ~presentation ~metadata_expanded ~confirmation ~shared ~share_uncertain ~recovery_preview ~save_notice ~public_url =
   let resource = Catalog.metadata entry in
   let present = function
     | Some text when String.trim text <> "" -> text
@@ -299,7 +328,8 @@ let resource_document entry
       [Metadata, Markdown_text (details ^ public_link ^ "\n\n---")]
     else [] in
   let recovery = Option.fold ~none:[] ~some:(fun preview -> [Recovery, Markdown_text preview]) recovery_preview in
-  recovery @ report_status @ read_status @ metadata @ body
+  let save_status = Option.fold ~none:[] ~some:(fun notice -> [Save_result, Markdown_text notice]) save_notice in
+  recovery @ save_status @ report_status @ read_status @ metadata @ body
 
 type diagram = {
   first_row : int;
@@ -327,6 +357,7 @@ let prepare_anchored_layout ~cols (reading : t) =
     ~presentation:reading.presentation ~metadata_expanded:reading.metadata_expanded
     ~confirmation:reading.confirmation ~shared:reading.shared ~share_uncertain:reading.share_uncertain
     ~recovery_preview:reading.recovery_preview
+    ~save_notice:reading.save_notice
     ~public_url:reading.public_url in
   let pieces = match reading.diagrams with
     | None -> pieces
@@ -478,7 +509,7 @@ let capture_anchor ~cols ~height state =
 let source_position anchor = match anchor.location with
   | Block (Part_body part,source_start,_) -> Some (part,source_start)
   | Top | End | Block ((Metadata | Selection | Part_heading _ | Read_status
-      | Report_status | Recovery | Progress | Failure _),_,_) -> None
+      | Report_status | Recovery | Save_result | Progress | Failure _),_,_) -> None
 
 let restore_anchor ~cols ~height state anchor =
   match anchor_reading state with
@@ -498,10 +529,10 @@ let restore_anchor ~cols ~height state anchor =
               | None,(Progress | Failure _) ->
                   List.find_opt (fun block -> match block.origin with
                     | Metadata | Selection | Part_heading _ | Part_body _
-                    | Read_status | Report_status | Recovery -> true
+                    | Read_status | Report_status | Recovery | Save_result -> true
                     | Progress | Failure _ -> false) rendered.blocks
               | (Some _ | None),(Metadata | Selection | Part_heading _ | Part_body _
-                  | Read_status | Report_status | Recovery)
+                  | Read_status | Report_status | Recovery | Save_result)
               | Some _,(Progress | Failure _) -> block in
             Option.map (fun block ->
               let last = max 0 (block.source.row_count-1) in

@@ -14,6 +14,7 @@ type t = private {
   shared : bool option;
   share_uncertain : bool;
   recovery_preview : string option;
+  save_notice : string option;
   public_url : (string, string) result option;
   diagrams : Masc_tui_resource_diagrams.t option;
 }
@@ -26,6 +27,7 @@ val create : entry:Masc_tui_resource_catalog.t ->
   shared:bool option ->
   share_uncertain:bool ->
   recovery_preview:string option ->
+  save_notice:string option ->
   public_url:(string, string) result option ->
   diagrams:Masc_tui_resource_diagrams.t option -> t
 val same_reading : t -> t -> bool

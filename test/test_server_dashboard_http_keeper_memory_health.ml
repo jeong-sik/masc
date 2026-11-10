@@ -1479,16 +1479,19 @@ let test_a_merged_row_is_the_fleet_read_after_the_write () =
        removed.Decode.mhs_total_facts
    | None -> Alcotest.fail "a removal merges into an answer with no refused row");
   let refused name = { Decode.mkr_keeper_id = Some name; mkr_reason = "refused" } in
+  (* These two read the answer just fetched, so they carry its time too. With
+     0.0 the first one was refused for staleness rather than for gamma's
+     refused row, and passed without ever reaching the check it names. *)
   Alcotest.(check bool) "another Keeper's refused row stops the merge" true
     (Option.is_none
        (Decode.with_keeper_row
           { held with Decode.mhs_refused_keepers = [ refused "gamma" ] }
-          ~generated_at:0.0 ~keeper_id:"alpha" (Some row)));
+          ~generated_at:answer.Decode.mhr_generated_at ~keeper_id:"alpha" (Some row)));
   Alcotest.(check bool) "the Keeper's own refused row is replaced by its row" true
     (Option.is_some
        (Decode.with_keeper_row
           { held with Decode.mhs_refused_keepers = [ refused "alpha" ] }
-          ~generated_at:0.0 ~keeper_id:"alpha" (Some row)));
+          ~generated_at:answer.Decode.mhr_generated_at ~keeper_id:"alpha" (Some row)));
   Alcotest.(check bool) "a row answer for another Keeper is refused" true
     (Result.is_error
        (Decode.decode_memory_health_row ~keeper:"beta"

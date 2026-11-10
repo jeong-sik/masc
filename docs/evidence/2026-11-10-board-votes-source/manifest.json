@@ -1,0 +1,34 @@
+{
+  "scope": "Real Chromium and actual Dashboard source components; isolated synthetic HTTP responses, no live backend writes or deployment proof",
+  "source_lower": "77d77a35e1ab9afcd297b1af8f8945577d0780ad",
+  "source_upper": "bfa7f71b8ac7117053b343eb184fe630d3ca5d63",
+  "dashboard_tree": "6e0d31bc264147c2e1b97e1dd4d4ae0d9e30fd44",
+  "frontend_check": "262 tests / 4 files, whole Dashboard tsc --noEmit and targeted ESLint passed; frontend tree identical to tested631f0cd",
+  "browser_space": 57,
+  "page": "p1",
+  "backend_new_cases_authored": 4,
+  "backend_new_cases_executed": 0,
+  "files": [
+    {
+      "path": "unknown.json",
+      "sha256": "b26f4195af5c3c35932439d7eb659ecbdb6c30faf5c4d63259a73ede9bf26b3e",
+      "captured_at": "2026-11-10T04:47:35.784679+00:00"
+    },
+    {
+      "path": "known.json",
+      "sha256": "fd3768a66af18d0cefa2436f861ba8d77a663ce6d267fdc988d7ef6b6af217e5",
+      "captured_at": "2026-11-10T04:51:11.163954+00:00"
+    },
+    {
+      "path": "unknown.png",
+      "sha256": "0ec59cce8427a69af016c79c19b928aa0f3ab8dbbdaf295d2b998e3f9304b7b2",
+      "captured_at": "2026-11-10T04:47:35.896807+00:00"
+    },
+    {
+      "path": "known.png",
+      "sha256": "02178071964243096b3f2db09f0e731aa49a3de92bd44adada88f2a4ac09c1d5",
+      "captured_at": "2026-11-10T04:51:11.268816+00:00"
+    }
+  ],
+  "visual_inspection": "Root opened both original PNGs with view_image; unknown text and disabled controls visible for feed, full post and comment; known absence has enabled controls. Known click updates feed pressed state via synthetic response."
+}

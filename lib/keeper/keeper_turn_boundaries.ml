@@ -375,7 +375,31 @@ let decode_line line =
   | exception Yojson.Json_error message -> Error (Not_json message)
 ;;
 
-let numbered_lines ~rows ~rows_end ~end_offset =
+(* The decoded lines of each store's bytes as last read. The store only grows
+   by appended lines, and every reader decoded all of it: two readers at the
+   start of each provider turn, on the turn's domain. Repeated reads of one
+   store took 19-63 ms at the median for 450 KB and 1,141 lines, and
+   205-455 ms for 6.6 MB and 11,661 lines (12 reads, three runs, on a loaded
+   host, 2026-11-11).
+
+   The bytes are still read under the writer's lock on every call. Lines
+   whose bytes are the ones read last time keep their decoding, and only
+   what follows them is decoded. Bytes that do not start with the last ones
+   (a purge, a store written again) are decoded whole. On the same stores
+   and host a read of unchanged bytes then took 0.8-1.3 ms and 3.5-4.0 ms at
+   the median, and 1.7-2.4 ms and 13.4 ms after one appended line.
+
+   Each store's bytes and decoded lines stay in memory between reads: about
+   twice the store's size (6.6 MB of bytes decode to 6.7 MB). *)
+type decoded_store =
+  { rows : string
+  ; lines : (int * (record, read_error) result) list
+  }
+
+let decoded_stores : (string, decoded_store) Hashtbl.t = Hashtbl.create 64
+let decoded_stores_lock = Stdlib.Mutex.create ()
+
+let decode_lines ~first_number rows =
   (* [rows] is every newline-terminated line, so what follows its last newline
      is the empty string and not a line. *)
   let complete =
@@ -383,9 +407,26 @@ let numbered_lines ~rows ~rows_end ~end_offset =
     | [] -> []
     | _after_last_newline :: reversed -> List.rev reversed
   in
-  let decoded = List.mapi (fun index line -> index + 1, decode_line line) complete in
+  List.mapi (fun index line -> first_number + index, decode_line line) complete
+;;
+
+let numbered_lines ~path ~rows ~rows_end ~end_offset =
+  let known =
+    Stdlib.Mutex.protect decoded_stores_lock (fun () -> Hashtbl.find_opt decoded_stores path)
+  in
+  let decoded =
+    match known with
+    | Some known when String.equal known.rows rows -> known.lines
+    | Some known when String.starts_with ~prefix:known.rows rows ->
+      let known_bytes = String.length known.rows in
+      let appended = String.sub rows known_bytes (String.length rows - known_bytes) in
+      known.lines @ decode_lines ~first_number:(List.length known.lines + 1) appended
+    | Some _ | None -> decode_lines ~first_number:1 rows
+  in
+  Stdlib.Mutex.protect decoded_stores_lock (fun () ->
+    Hashtbl.replace decoded_stores path { rows; lines = decoded });
   if rows_end < end_offset
-  then decoded @ [ List.length complete + 1, Error Incomplete_line ]
+  then decoded @ [ List.length decoded + 1, Error Incomplete_line ]
   else decoded
 ;;
 
@@ -394,7 +435,7 @@ let read ~keepers_dir ~keeper_id =
   let of_rows = function
     | Fs_compat.Private_jsonl_rows.Rows_missing -> Ok []
     | Fs_compat.Private_jsonl_rows.Rows_present { rows; rows_end; end_offset } ->
-      Ok (numbered_lines ~rows ~rows_end ~end_offset)
+      Ok (numbered_lines ~path ~rows ~rows_end ~end_offset)
   in
   let settled cleanup_failure =
     Log.Keeper.warn

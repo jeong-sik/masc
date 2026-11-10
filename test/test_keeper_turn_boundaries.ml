@@ -478,6 +478,42 @@ let test_appended_lines_read_back_in_order () =
     (Filename.basename (Boundaries.path_for_keepers_dir ~keepers_dir ~keeper_id))
 ;;
 
+(* A read decodes what was appended since the last read of the store. The
+   lines read before come back as the values already decoded, and a store
+   written again with other bytes is decoded whole, numbered from one. *)
+let test_lines_read_before_keep_their_decoding () =
+  with_temp_keepers @@ fun keepers_dir ->
+  let append line = append_lines ~keepers_dir [ line ] in
+  let read () =
+    match Boundaries.read ~keepers_dir ~keeper_id with
+    | Ok lines -> lines
+    | Error detail -> fail detail
+  in
+  append (record ~turn:1 atom_history);
+  append (record ~turn:2 Boundaries.Empty_atom_history);
+  let first = read () in
+  check int "both lines are read" 2 (List.length first);
+  check bool "an unchanged store answers with the lines already decoded" true
+    (List.for_all2 ( == ) first (read ()));
+  append (history_restarted ());
+  let grown = read () in
+  check int "the appended line is read" 3 (List.length grown);
+  check bool "the earlier lines keep their decoding" true
+    (List.for_all2 ( == ) first (List.filteri (fun index _ -> index < 2) grown));
+  (match List.rev grown with
+   | (number, Ok line) :: _ ->
+     check int "the appended line continues the numbering" 3 number;
+     check record_t "the appended line is the one written" (history_restarted ()) line
+   | (_, Error _) :: _ | [] -> fail "the appended line was not decoded");
+  Sys.remove (Boundaries.path_for_keepers_dir ~keepers_dir ~keeper_id);
+  append (record ~turn:9 Boundaries.Stale_noop);
+  match read () with
+  | [ (number, Ok line) ] ->
+    check int "a store written again is numbered from one" 1 number;
+    check record_t "and holds what was written" (record ~turn:9 Boundaries.Stale_noop) line
+  | _ -> fail "a store written again did not read as its one line"
+;;
+
 (* [Ids.Turn_ref.make] takes an empty trace id and [Ids.Turn_ref.of_string]
    refuses it, so writing such a line would leave a row no reader decodes. *)
 let test_a_line_no_reader_decodes_is_not_written () =
@@ -1041,6 +1077,8 @@ let () =
     ; ( "store"
       , [ test_case "appended lines read back in order" `Quick
             test_appended_lines_read_back_in_order
+        ; test_case "lines read before keep their decoding" `Quick
+            test_lines_read_before_keep_their_decoding
         ; test_case "the store states its history from the tail" `Quick
             test_history_stated_in_store_answers_from_the_tail
         ; test_case "an unreadable store reports its failure" `Quick

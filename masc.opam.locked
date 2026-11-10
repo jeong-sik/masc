@@ -183,8 +183,8 @@ depends: [
   "thread-local-storage" {= "0.2"}
   "thread-table" {= "1.0.0"}
   "time_now" {= "v0.17.0"}
-  "tls" {= "2.1.2"}
-  "tls-eio" {= "2.1.2"}
+  "tls" {= "2.1.5"}
+  "tls-eio" {= "2.1.5"}
   "topkg" {= "1.1.1"}
   "tyxml" {= "4.6.0" & with-doc}
   "uchar" {= "0.0.2"}
@@ -199,7 +199,7 @@ depends: [
   "ws-direct-core" {= "0.2.0"}
   "ws-direct-eio" {= "0.2.0"}
   "ws-direct-gluten" {= "0.2.0"}
-  "x509" {= "1.0.6"}
+  "x509" {= "1.2.0"}
   "yaml" {= "3.2.0"}
   "yojson" {= "3.0.0"}
   "zarith" {= "1.14"}

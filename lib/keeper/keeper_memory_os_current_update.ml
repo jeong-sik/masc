@@ -571,31 +571,39 @@ let update_locked_with_output
               | Eio.Cancel.Cancelled _ ->
                 Printexc.raise_with_backtrace failure.exception_ failure.backtrace
               | _ ->
+             let failed outcome =
+               Error
+                 (store_error
+                    (Printf.sprintf
+                       "current Memory OS atomic write failed path=%s: %s: %s"
+                       snapshot_path
+                       outcome
+                       (Fs_compat.atomic_replace_failure_to_string failure)))
+             in
              match failure.stage with
              | Fs_compat.After_rename when
                  sync_snapshot snapshot_path = Ok () -> complete ()
-             | Fs_compat.Before_rename | Fs_compat.After_rename ->
-             let outcome =
-               match failure.stage with
-               | Fs_compat.Before_rename -> "snapshot replacement did not occur"
-               | Fs_compat.After_rename ->
+             | Fs_compat.After_rename ->
+               (* [After_rename] means the rename returned and only the
+                  directory sync failed. A running kernel shows the new bytes
+                  from then on, so the next writer's recovery finalizes this
+                  transition. Only an OS crash or power loss can bring back
+                  the prior bytes a rollback needs, and that also restarts the
+                  process and its counters. So the commit counts now. *)
+               Keeper_memory_os_current_change_metrics.set_gauges ~keeper_id change_count next;
+               rewritten := Some (next, output);
+               failed
                  "snapshot replacement occurred but durability is unconfirmed; prepared receipts remain for recovery"
-             in
-             Error
-               (store_error
-                  (Printf.sprintf
-                     "current Memory OS atomic write failed path=%s: %s: %s"
-                     snapshot_path
-                     outcome
-                     (Fs_compat.atomic_replace_failure_to_string failure))))
+             | Fs_compat.Before_rename -> failed "snapshot replacement did not occur")
          in
          protected commit))
     in
     (* Count and dispatch only after BOTH locks unwind. The durable pending
        phase is written after exact journal finalization. If interrupted, a
        subsequent public read or writer resumes it without replaying the
-       producer callback. A commit whose journal evidence is still pending
-       returns an error but rewrote the snapshot, so it is counted too. *)
+       producer callback. A commit that returns an error after its rename,
+       because its journal evidence is still pending or the directory sync
+       failed, rewrote the snapshot, so it is counted too. *)
     let count () =
       Option.iter
         (fun (snapshot, output) ->

@@ -152,7 +152,7 @@ let test_current_observation_bypasses_actor_ttl_and_keeps_failure () =
     let base_path = Masc_test_deps.setup_test_workspace () in
     Fun.protect ~finally:(fun () ->
       Dashboard_projection_cache.register_operator_snapshot_json
-        {snapshot = Operator_control.snapshot_json};
+        {snapshot = Operator_control.snapshot_read};
       Dashboard_projection_cache.invalidate_snapshot_json
         ~config:(Workspace.default_config base_path);
       Masc_test_deps.cleanup_test_workspace base_path;

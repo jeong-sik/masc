@@ -389,6 +389,15 @@ let with_observed_store_lock config f =
     with_store_lock config (fun () -> f write))
 ;;
 
+let pending_confirm_deadline_unix entries =
+  List.fold_left (fun earliest (entry : pending_confirm) -> match entry.expires_at with
+    | None -> earliest
+    | Some value ->
+        let at = match parse_timestamp ~surface:"pending_confirm" ~field:"expires_at" value with
+          | Ok at -> at | Error detail -> raise_store_error detail in
+        Some (match earliest with None -> at | Some previous -> Float.min previous at))
+    None entries
+
 let pending_confirm_expired (entry : pending_confirm) =
   match entry.expires_at with
   | Some value ->

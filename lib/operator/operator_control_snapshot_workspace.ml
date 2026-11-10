@@ -1,7 +1,7 @@
 (** Operator dashboard workspace descriptor, extracted from
     [operator_control_snapshot.ml] (godfile decomp).
 
-    [workspace_json config] produces a minimal workspace-state summary for the
+    [workspace_observation config] produces a minimal workspace-state summary for the
     operator dashboard:
 
     - When the workspace is not yet initialized via [Workspace.init], returns
@@ -12,7 +12,7 @@
     - When initialized, returns the full snapshot: project, tempo
       interval, agent/task counts, and the current message_seq.
 
-    Pure helper move — local-only function with no .mli surface. *)
+    The same typed backlog read supplies its completeness. *)
 
 let backlog_authority_fields
     (recovered_from : Workspace.backlog_recovery option) =
@@ -64,14 +64,14 @@ let task_ownership_json backlog_observation =
         @ backlog_authority_fields recovered_from )
 ;;
 
-let workspace_json config =
+let workspace_observation config =
   let initialized = Workspace.is_initialized config in
   if not initialized
   then
-    `Assoc
+    {Dashboard_projection_read.json = `Assoc
       [ "initialized", `Bool false
       ; "project", `String (Filename.basename config.base_path)
-      ]
+      ]; next_deadline_unix = None; completeness = Complete}
   else (
     let state = Workspace.read_state config in
     let tempo = Tempo.get_tempo config in
@@ -88,7 +88,12 @@ let workspace_json config =
           | Some recovery -> `String recovery.primary_error) )
     in
     let agents = Workspace.get_agents_raw config in
-    `Assoc
+    let completeness = match backlog_observation with
+      | Error message -> Dashboard_projection_read.Partial message
+      | Ok { Workspace.recovered_from = Some recovery; observed_backlog = _ } ->
+          Partial recovery.primary_error
+      | Ok { Workspace.recovered_from = None; observed_backlog = _ } -> Complete in
+    {Dashboard_projection_read.json = `Assoc
       [ "initialized", `Bool true
       ; "project", `String state.project
       ; "tempo_interval_s", `Float tempo.current_interval_s
@@ -99,5 +104,5 @@ let workspace_json config =
       ; "task_count_error", task_count_error
       ; "task_ownership", task_ownership_json backlog_observation
       ; "message_seq", `Int state.message_seq
-      ])
+      ]; next_deadline_unix = None; completeness})
 ;;

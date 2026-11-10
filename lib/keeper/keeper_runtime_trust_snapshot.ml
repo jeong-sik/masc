@@ -790,8 +790,16 @@ let summary_json_of_raw ~(meta : keeper_meta) (raw : raw_observations) =
        ; ("latest_causal_event", latest_causal_event)
        ])
 
-let summary_json ~(config : Workspace.config) ~(meta : keeper_meta) =
-  collect_summary_raw ~config ~meta |> summary_json_of_raw ~meta
+let summary_observation ~(config : Workspace.config) ~(meta : keeper_meta) =
+  let raw = collect_summary_raw ~config ~meta in
+  let completeness = match raw.pending_approval_projection.error with
+    | None -> Dashboard_projection_read.Complete
+    | Some error -> Partial (Keeper_approval_queue_result.storage_error_to_string error) in
+  {Dashboard_projection_read.json = summary_json_of_raw ~meta raw;
+   next_deadline_unix = None; completeness}
+;;
+
+let summary_json ~config ~meta = (summary_observation ~config ~meta).json
 ;;
 
 let causal_timeline_json ~observed_at_unix ~recent_tool_call_rows

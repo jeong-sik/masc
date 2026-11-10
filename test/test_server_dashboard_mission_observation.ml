@@ -5,7 +5,7 @@ module Owner = Server_dashboard_mission_observation
 module Cache = Server_dashboard_http_cache
 
 let () =
-  Dashboard_projection_cache.register_operator_snapshot_json {snapshot = Operator_control.snapshot_json};
+  Dashboard_projection_cache.register_operator_snapshot_json {snapshot = Operator_control.snapshot_read};
   Dashboard_projection_cache.register_operator_digest_observer {observe_digest = Operator_control.observe}
 
 let with_owner f = Eio_main.run (fun env ->

@@ -66,6 +66,12 @@ val get_or_compute_digest_json :
   Yojson.Safe.t
 (** Cached read with TTL [5.0 s] for the heavier digest projection. *)
 
+type snapshot_read =
+  | Cached_json of Yojson.Safe.t
+  | Observed of Dashboard_projection_read.observation
+(** Ordinary request-cache JSON and an actual Current read are different
+    authorities. Cached bytes do not fabricate typed completeness/deadlines. *)
+
 type operator_snapshot_fn = {
   snapshot : 'a.
     ?read_policy:Dashboard_projection_read.t ->
@@ -76,7 +82,7 @@ type operator_snapshot_fn = {
     ?include_summary_fields:bool ->
     ?lightweight_summary:bool ->
     'a Tool_operator.context ->
-    Yojson.Safe.t;
+    snapshot_read;
 }
 
 type digest_observation = Dashboard_projection_read.observation = {
@@ -112,6 +118,18 @@ val operator_snapshot_json :
   ?lightweight_summary:bool ->
   'a Tool_operator.context ->
   Yojson.Safe.t
+(** Product JSON facade over the registered request/Current reader. *)
+
+val operator_snapshot_observation :
+  ?actor:string ->
+  ?view:string ->
+  ?include_messages:bool ->
+  ?include_keepers:bool ->
+  ?include_summary_fields:bool ->
+  ?lightweight_summary:bool ->
+  'a Tool_operator.context -> Dashboard_projection_read.observation
+(** Always requests Current and requires [Observed]. The returned rows,
+    read completeness and semantic deadline belong to that same read. *)
 
 val operator_digest_observation :
   ?actor:string ->

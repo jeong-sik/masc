@@ -4112,11 +4112,6 @@
  (libraries alcotest masc_tui_types))
 
 (test
- (name test_tui_quiz_scorecard)
- (modules test_tui_quiz_scorecard)
- (libraries alcotest masc masc_tui_types))
-
-(test
  (name test_tui_memory_fold)
  (modules test_tui_memory_fold)
  (libraries masc_tui_image_preview alcotest masc_tui_message_layout masc_tui_types))

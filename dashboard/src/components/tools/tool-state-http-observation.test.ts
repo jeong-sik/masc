@@ -4,6 +4,7 @@ import * as store from '../../store'
 import * as tools from './tool-state'
 import * as observations from '../../lib/observation-refresh'
 import { recordManagedCredentialRefusal } from '../../lib/dashboard-session-actor'
+import { fetchDashboardShell } from '../../api/dashboard-hot'
 let stop: (() => void) | undefined
 let generation = 0
 let connectionGeneration = 0
@@ -40,6 +41,29 @@ afterEach(() => {
 })
 
 describe('Tools observation through the actual HTTP API', () => {
+  it.each([401, 403])('keeps a store-owned original Shell HTTP %i refusal latched across recovery events', async status => {
+    const fetch = vi.fn(async (_path: RequestInfo | URL, _init?: RequestInit) => refusal(status))
+    vi.stubGlobal('fetch', fetch)
+    let originalCause: unknown
+    stop = observations.setupObservationRefresh(async signal => {
+      try { await fetchDashboardShell({ signal }) }
+      catch (cause) {
+        originalCause = observations.retainObservationReadFailure(cause)
+        throw originalCause
+      }
+    }, { topics: ['runtime_resolved'] })
+    await settle()
+    expect(originalCause).toBeInstanceOf(core.ApiRequestError)
+    expect((originalCause as core.ApiRequestError).status).toBe(status)
+    expect(fetch.mock.calls[0]?.[0]).toBe('/api/v1/dashboard/shell')
+    observations.publishDashboardObservationChange({ topic: 'runtime_resolved' })
+    window.dispatchEvent(new Event('focus'))
+    observations.publishDashboardObservationRecovery()
+    await vi.advanceTimersByTimeAsync(300_000)
+    expect(fetch).toHaveBeenCalledTimes(1)
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
   it.each([401, 403])('keeps HTTP %i refused for the same owner across source, focus and reconnect', async status => {
     const fetch = vi.fn(async () => refusal(status))
     vi.stubGlobal('fetch', fetch)

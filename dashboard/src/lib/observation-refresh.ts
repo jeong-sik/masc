@@ -161,6 +161,8 @@ export function setupObservationRefresh(
     } catch (error) {
       if (!current()) return
       if (error instanceof ApiRequestError && (error.status === 401 || error.status === 403)) {
+        // A store may own retry debt for this exact error. Its own refusal
+        // still blocks this mounted observer's source/focus/recovery reads.
         refused = true
         dirty = false
         clearRetry()

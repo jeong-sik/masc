@@ -113,7 +113,7 @@ CAMLprim value masc_file_change_create(value paths, value directories, value dev
     if (fstat(entry->descriptor, &status) < 0)
       failed(raw, "file_change_register", Field(paths, i));
     if (Val_long(status.st_dev) != Field(devices, i) || Val_long(status.st_ino) != Field(inodes, i)) {
-      errno = ESTALE; failed(raw, "file_change_register", Field(paths, i));
+      errno = ESTALE; failed(raw, "file_change_target_changed", Field(paths, i));
     }
     if (Bool_val(Field(directories, i))) {
       if (!S_ISDIR(status.st_mode)) {

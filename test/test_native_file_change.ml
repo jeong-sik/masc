@@ -56,7 +56,7 @@ let test_opened_inode_fence () = fixture (fun _env root ->
   Unix.rename replacement path;
   Eio.Switch.run (fun sw ->
     match N.create ~sw ~targets:[previous] with
-    | Error (N.System_error { operation = N.Register _; error = Unix.ESTALE }) -> ()
+    | Error N.Target_changed -> ()
     | Error error -> fail (N.error_to_string error)
     | Ok watcher -> N.close watcher; fail "a different inode was registered silently"))
 

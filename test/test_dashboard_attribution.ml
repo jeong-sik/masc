@@ -129,6 +129,29 @@ let test_reset_clears () =
   Alcotest.(check int) "empty after reset" 0 (List.length (DA.recent ()));
   Alcotest.(check int) "summary empty" 0 (List.length (DA.summary ()))
 
+let test_record_publishes_after_ring_commit () =
+  setup ();
+  let seen = ref [] in
+  let unsubscribe = Masc.Dashboard_observation_commit.subscribe (function
+    | Process topic ->
+        if topic = `Attribution then
+          seen := List.length (DA.recent ~gate:"observed" ()) :: !seen
+    | Workspace _ -> ())
+  in
+  Fun.protect ~finally:unsubscribe (fun () ->
+    let stop_failing = Masc.Dashboard_observation_commit.subscribe (fun _ -> raise Exit) in
+    Fun.protect ~finally:stop_failing (fun () ->
+      DA.record (pass "observed");
+      DA.record (fail_ "observed" "rejected");
+      ignore (DA.summary ());
+      ignore (DA.recent ());
+      Alcotest.(check (list int))
+        "notifications see committed rows and reads send nothing" [2; 1] !seen);
+    unsubscribe ();
+    unsubscribe ();
+    DA.record (pass "observed");
+    Alcotest.(check (list int)) "withdrawal is idempotent" [2; 1] !seen)
+
 let () =
   Alcotest.run "Dashboard_attribution"
     [
@@ -156,4 +179,6 @@ let () =
           Alcotest.test_case "multi-gate rows" `Quick test_summary_multi_gate;
         ] );
       ("reset", [ Alcotest.test_case "reset clears" `Quick test_reset_clears ]);
+      ("observations", [ Alcotest.test_case "record publishes committed ring" `Quick
+        test_record_publishes_after_ring_commit ]);
     ]

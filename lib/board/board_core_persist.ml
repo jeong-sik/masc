@@ -69,6 +69,7 @@ let create_store_with_source_io ~base_path posts_source_io comments_source_io su
   ; reactions = Hashtbl.create 4096
   ; dirty_posts = false
   ; dirty_comments = false
+  ; snapshot_retry = Independent_snapshots
   ; dirty_post_ids = Hashtbl.create 256
   ; dirty_comment_ids = Hashtbl.create 512
   ; post_rows = Hashtbl.create 1024

@@ -186,8 +186,8 @@ val reopen :
 type deletion_outcome =
   | Durable_deletion
   | Deletion_persistence_pending of string
-      (** The deletion is applied in memory and failed snapshot rewrites are
-          scheduled for [flush_dirty]. The detail names the write failures. *)
+      (** The deletion is applied in memory. Failed and unattempted rewrites
+          remain ordered work for [flush_dirty]. The detail names actual write failures. *)
 
 val delete_post :
   store -> post_id:string -> (deletion_outcome, board_error) Result.t
@@ -201,7 +201,9 @@ val delete_post :
     succeeded; [Ok (Deletion_persistence_pending detail)] keeps the applied
     transition distinct from a refused write. Retrying deletion is not a
     persistence retry: the post is already absent; [flush_dirty] retries the
-    failed snapshots. *)
+    failed and unattempted snapshots in deletion order, stopping on the first
+    error again. This retry context is process-local; #26378 retains durable
+    deletion-decision and multi-source recovery work. *)
 
 (** {1 Global store + lifecycle} *)
 

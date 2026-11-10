@@ -322,6 +322,7 @@ let delete_post store ~post_id : (deletion_outcome, board_error) Result.t =
       match Hashtbl.find_opt store.posts post_key with
       | None -> Error (Post_not_found post_id)
       | Some post ->
+        store.snapshot_retry <- Deletion_pending;
         let comment_ids =
           Hashtbl.fold
             (fun key (c : comment) acc ->
@@ -385,7 +386,11 @@ let delete_post store ~post_id : (deletion_outcome, board_error) Result.t =
        (* The snapshot cleared dirty flags while holding the state lock.
           Preserve failed writes for a later flush. *)
        with_lock store (fun () ->
-         List.iter (remark_snapshot_retry store) (Snapshot_batch.retries outcome));
+         let retries = Snapshot_batch.retries outcome in
+         List.iter (remark_snapshot_retry store) retries;
+         match retries with
+         | [] -> store.snapshot_retry <- Independent_snapshots
+         | _ :: _ -> ());
        Snapshot_batch.finish_settlement outcome;
        let failures =
          List.map show_board_error (Snapshot_batch.errors outcome)
@@ -415,7 +420,9 @@ let flush_dirty store =
   let batch =
     with_lock store (fun () ->
       let selection =
-        Snapshot_batch.for_flush
+        match store.snapshot_retry with
+        | Deletion_pending -> Snapshot_batch.for_delete
+        | Independent_snapshots -> Snapshot_batch.for_flush
           ~dirty_posts:store.dirty_posts
           ~dirty_comments:store.dirty_comments
           ~votes_readable:(Result.is_ok store.votes_load_result)
@@ -441,7 +448,11 @@ let flush_dirty store =
   (* A proven nonwrite may carry reserved descriptor cleanup as typed data,
      bypassing the callback's normal returned-error retry arm. *)
   with_lock store (fun () ->
-    List.iter (remark_snapshot_retry store) (Snapshot_batch.retries outcome));
+    let retries = Snapshot_batch.retries outcome in
+    List.iter (remark_snapshot_retry store) retries;
+    match retries with
+    | [] -> store.snapshot_retry <- Independent_snapshots
+    | _ :: _ -> ());
   Snapshot_batch.finish_settlement outcome)
 
 

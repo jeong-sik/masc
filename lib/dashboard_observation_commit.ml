@@ -16,12 +16,11 @@ let subscribe callback =
     subscriptions := List.filter (fun current -> current != subscription) !subscriptions)
 ;;
 
-let notify make_change =
+let notify change =
   let current = Stdlib.Mutex.protect mutex (fun () -> !subscriptions) in
   match current with
   | [] -> ()
   | _ :: _ ->
-      let change = make_change () in
       List.iter (fun subscription ->
         match subscription.callback change with
         | () -> ()
@@ -36,10 +35,8 @@ let notify make_change =
 ;;
 
 let written ~base_path ~scope topic =
-  notify (fun () ->
-    Workspace { base_path = Fs_compat.realpath_lenient base_path;
-                payload = { topic; scope } })
+  notify (Workspace { base_path; payload = { topic; scope } })
 ;;
 
-let process_written topic = notify (fun () -> Process topic)
+let process_written topic = notify (Process topic)
 ;;

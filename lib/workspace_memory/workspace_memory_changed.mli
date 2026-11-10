@@ -4,11 +4,13 @@
 
 val subscribe : (directory:string -> unit) -> (unit -> unit)
 (** Subscribe before reading an inventory. The directory passed to callbacks
-    is resolved through symlinks, including a not-yet-created leaf. Callbacks
+    was resolved by the writer before its atomic replacement attempt. Callbacks
     run synchronously on the writer's domain and must not block or yield.
     The returned unsubscribe is idempotent. *)
 
 val written : directory:string -> unit
 (** Notify after an atomic replacement was attempted, including an uncertain
-    post-rename failure. Subscribers belong to another lifecycle: their
+    post-rename failure. [directory] must already name the resolved owner;
+    resolving a path here would add a cancellation point after the commit.
+    Subscribers belong to another lifecycle: their
     exceptions are logged without replacing the writer's outcome. *)

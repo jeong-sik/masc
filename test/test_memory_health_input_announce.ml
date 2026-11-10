@@ -642,6 +642,29 @@ let test_briefing_prompt_changes_invalidate_without_a_curator () =
         check int "set and clear each announce once without a curator" 2 !seen)))
 ;;
 
+let test_world_commit_keeps_its_result_when_a_subscriber_cancels () =
+  with_workspace
+  @@ fun ~config ~fleet_key:_ ~elsewhere:_ ~config_keepers_dir:_
+       ~runtime_keepers_dir:_ ~heard:_ ->
+  let base_path = config.Workspace.base_path in
+  let reason = Failure "cancel World writer after its atomic commit" in
+  let returned = ref false in
+  (match Eio.Cancel.sub (fun owner ->
+     let unsubscribe = Workspace_memory_changed.subscribe (fun ~directory:_ ->
+       Eio.Cancel.cancel owner reason;
+       raise (Eio.Cancel.Cancelled Exit)) in
+     Fun.protect ~finally:unsubscribe (fun () ->
+       Workspace_memory_ledger.save ~base_path Workspace_memory_ledger.empty |> require;
+       returned := true;
+       Eio.Fiber.check ())) with
+   | () -> fail "the writer's actual cancellation disappeared"
+   | exception Eio.Cancel.Cancelled actual when actual == reason -> ()
+   | exception exn -> raise exn);
+  check bool "the committed save returned its original result before cancellation" true !returned;
+  check bool "the committed ledger remains readable" true
+    (Result.is_ok (Workspace_memory_ledger.load ~base_path))
+;;
+
 let () =
   run "memory_health_input_announce"
     [ ( "workspace"
@@ -653,6 +676,8 @@ let () =
             test_world_writes_invalidate_before_announcing
         ; test_case "briefing contract invalidates without a curator" `Quick
             test_briefing_prompt_changes_invalidate_without_a_curator
+        ; test_case "World commit keeps its result when a subscriber cancels" `Quick
+            test_world_commit_keeps_its_result_when_a_subscriber_cancels
         ] )
     ; ( "stores"
       , [ test_case "each store write tells the signal once" `Quick

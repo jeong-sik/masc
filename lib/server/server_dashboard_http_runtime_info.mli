@@ -140,13 +140,16 @@ val runtime_inventory_json : unit -> Yojson.Safe.t
     assignment blast radius without the dashboard parsing TOML independently. *)
 
 val dashboard_tools_http_result :
+  ?read_policy:Dashboard_projection_read.t ->
   ?keeper:string ->
   ?timing:Server_timing.t ->
   Workspace.config ->
   Dashboard_snapshot.tools_result
 (** The final decorated tools response with producer-owned readiness. Its
     classification travels with the returned cache payload, so a concurrent
-    fill cannot promote an already-returned warming response. *)
+    fill cannot promote an already-returned warming response. [Current] reads
+    directly on the caller's worker, bypassing the private TTL and any pending
+    HTTP cache fill. Ordinary HTTP readers default to [Reuse]. *)
 
 val dashboard_tools_http_json :
   ?keeper:string ->

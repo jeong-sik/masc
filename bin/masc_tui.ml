@@ -6618,7 +6618,7 @@ let launch_keeper_story_memory_read state ~mailbox ~keeper_name ~refresh
     | Masc_tui_fetched.Started (next, request) ->
       set_source next;
       set_owed (Masc_tui_owed_read.started owed);
-      launch_workspace_request state ~mailbox ~boundary_error:Fun.id
+      launch_workspace_json_read state ~mailbox
         ~deliver:(fun result -> Keeper_msg (deliver request result)) read
 
 let launch_memory_health_load state ~mailbox =

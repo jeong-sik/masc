@@ -221,7 +221,11 @@ let release_task ~config operation (owned : Keeper_current_task_reconcile.owned_
     | Masc_domain.Todo
     | Masc_domain.AwaitingVerification _
     | Masc_domain.Done _
-    | Masc_domain.Cancelled _ -> Error "snapshotted task is no longer actively owned"
+    | Masc_domain.Cancelled _ ->
+      Error
+        (Masc_domain.Task
+           (Masc_domain.Task_error.InvalidState
+              "snapshotted task is no longer actively owned"))
   in
   let handoff_context =
     release_handoff_context operation owned.task.handoff_context
@@ -236,7 +240,6 @@ let release_task ~config operation (owned : Keeper_current_task_reconcile.owned_
       ~expected_version:operation.expected_backlog_version
       ~handoff_context
       ()
-    |> Result.map_error Masc_domain.masc_error_to_string
 ;;
 
 let rec settle_tasks ~config ~meta operation settled_task_ids =
@@ -314,17 +317,49 @@ let rec settle_tasks ~config ~meta operation settled_task_ids =
                             task_id)
                        active_tasks
                    with
-                   | None -> Error "active task snapshot disappeared"
+                   | None ->
+                     Error
+                       (Masc_domain.Task
+                          (Masc_domain.Task_error.InvalidState
+                             "active task snapshot disappeared"))
                    | Some owned -> release_task ~config current owned)
                 else
                   match find_task backlog task_id with
                   | Some task when task_has_operation_receipt current task ->
                     Ok "already released"
-                  | Some _ -> Error "snapshotted task changed without shutdown receipt"
-                  | None -> Error "snapshotted task disappeared from the durable backlog"
+                  | Some _ ->
+                    Error
+                      (Masc_domain.Task
+                         (Masc_domain.Task_error.InvalidState
+                            "snapshotted task changed without shutdown receipt"))
+                  | None ->
+                    Error
+                      (Masc_domain.Task
+                         (Masc_domain.Task_error.InvalidState
+                            "snapshotted task disappeared from the durable backlog"))
               in
               (match settle_result with
-               | Error detail -> block ~config current Task_settlement detail
+               | Error
+                   (Masc_domain.Task
+                      (Masc_domain.Task_error.BacklogVersionConflict _)) ->
+                 (* The backlog lock refused this release before any effect.
+                    Re-read ownership and this operation's receipts through
+                    the same path used for a changed entry snapshot. Never
+                    promote the conflict's version into mutation authority. *)
+                 settle_tasks ~config ~meta current settled
+               | Error
+                   (( Masc_domain.Task
+                        ( Masc_domain.Task_error.NotFound _
+                        | Masc_domain.Task_error.AlreadyClaimed _
+                        | Masc_domain.Task_error.InvalidState _
+                        | Masc_domain.Task_error.InvalidId _
+                        | Masc_domain.Task_error.TransitionRejected _
+                        | Masc_domain.Task_error.VerificationSuperseded _ )
+                    | Masc_domain.Agent _
+                    | Masc_domain.Auth _
+                    | Masc_domain.System _ ) as error) ->
+                 block ~config current Task_settlement
+                   (Masc_domain.masc_error_to_string error)
                | Ok _ ->
                  (match strict_backlog ~config with
                   | Error detail -> block ~config current Task_settlement detail

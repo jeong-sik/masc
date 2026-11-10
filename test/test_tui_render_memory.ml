@@ -123,6 +123,7 @@ let make_keeper_health ~keeper_id ~facts ~snapshot_bytes : Masc.Tui_decode_memor
   ; mkh_librarian =
       { Masc.Tui_decode_memory_health.mlh_state = Some Masc.Tui_decode_memory_health.Pass_drained
       ; mlh_admission_wait = None
+      ; mlh_operator_action_required = false
       ; mlh_measured_at = Some 1_775_000_000.0
       ; mlh_unread_atom_turns = Some 0
       ; mlh_unread_official_turns = Some 0
@@ -167,6 +168,7 @@ let make_fleet_health keeper : Masc.Tui_decode_memory_health.memory_health_snaps
   ; mhs_warn_alerts = 0
   ; mhs_error_alerts = 0
   ; mhs_starving_keepers = 0
+  ; mhs_librarian_attention_required_keepers = 0
   }
 
 let fleet_health : Masc.Tui_decode_memory_health.memory_health_snapshot =
@@ -198,6 +200,7 @@ let fleet_health : Masc.Tui_decode_memory_health.memory_health_snapshot =
     ; mhs_warn_alerts = 0
     ; mhs_error_alerts = 0
     ; mhs_starving_keepers = 0
+    ; mhs_librarian_attention_required_keepers = 0
     }
   in
   health
@@ -500,6 +503,7 @@ let test_memory_selection_follows_sort_and_filter () =
     ; mhs_warn_alerts = 0
     ; mhs_error_alerts = 0
     ; mhs_starving_keepers = 0
+    ; mhs_librarian_attention_required_keepers = 0
     }
   in
   state.memory_health <- Some health;

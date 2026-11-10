@@ -17,6 +17,11 @@ Keeper 는 MASC 가 띄우고 지켜보고 기록하는 상주 에이전트입�
 라이브러리로 빌드한 것입니다. 따로 배포되는 SDK 버전이나 opam pin 이 없고, MASC 의
 커밋과 빌드 식별자가 기준입니다.
 
+### 메모리 처리와 복구
+
+Librarian 대기 상태, 원 결과 복원, `/memory sync`의 범위는
+[Keeper 메모리 처리와 복구](guides/KEEPER-MEMORY-RECOVERY.md)를 참고하세요.
+
 ### 모델을 바꿀 때의 체크포인트
 
 Keeper를 재개해도 원래 대화, 추론 출처, 완료된 도구 결과는 보존합니다. 모델을

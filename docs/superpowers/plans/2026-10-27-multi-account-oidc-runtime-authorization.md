@@ -239,7 +239,7 @@ Runtime 조회: rg -n --glob '*.ml' '\bRuntime\.(get_runtime_by_id|resolve_assig
   - 발행한 상태는 파일이 멈췄다는 것을 담지 않고, 구역에는 그것을 읽는 함수도 아직 없다. `/health`의 `Recovery_store_unavailable`(§8.4)과, 권한 축소 사건의 intent가 남았을 때 바로 세우는 §8.3 차단이 필요한 층이 그 함수를 구역에 더한다. §8.3 차단은 B2e가 더한다.
   - 이 층의 append는 레코드 하나다. 한 레코드에 사건 여럿을 담을지, 여러 레코드를 한 intent로 묶을지는 처음 필요한 층(B3c의 초대 소비)이 정한다. `Authz_log.append`는 중간에 끊기면 앞 레코드만 남을 수 있다.
   - B3b의 둘째 층: `Authz_bootstrap`이 첫 레코드를 `Authz_zone.install`로 쓴다. `install`은 부른 쪽이 연 두 손잡이 위에 그 호출 동안만 구역을 세우고, `commit`과 같은 함수로 쓴다. 다른 것은 들어갈 때의 판정 하나다. `commit`은 저장소에 답이 있어야 하고(`Answered`), `install`은 답이 없어야 한다(`Nothing_answered`). `Nothing_answered`는 포기할 `Fresh_bootstrap` intent를 함께 돌려준다. 그래서 bootstrap도 append 전에 `Authz_state.apply`를 돌리고(빈 상태는 `Fresh_bootstrap`만 받는다), 남은 intent를 포기하기 전에 `confirm_end`로 로그 끝을 확인한다. 확인하기 전에 그 intent의 레코드가 로그에 들어왔으면 포기하지 않고 로그를 멈춘다. 다음 부팅이 그 intent를 승격한다. 손잡이가 아는 로그에 레코드가 있으면(`Log_holds_records`) 아무것도 쓰지 않는다. bootstrap의 쓰기 오류는 구역 오류 하나(`Zone_failed`)로 받는다.
-  - 부팅 판정은 지금 두 파일을 구역과 같은 접기(`Authz_zone.Replay`)로 읽고 손잡이를 버린다. 다계정이 된 로그는 `Multi_account_not_served`로 멈추므로 구역을 쥘 곳이 없다. 구역의 열기는 두 파일이 다 있을 때만 구역을 만들고, 부팅은 하나가 없는 경우(설치 기록 없음, 로그 없음, 빈 로그)도 판정한다. 그 경우들을 구역의 열기가 어떤 값으로 돌려줄지는 S1이 `Multi_account_uncertain`에서 무엇을 서빙할지와 함께 정하고, S1이 부팅에서 연 구역을 쥔다.
+  - 부팅 판정은 두 파일을 구역과 같은 접기(`Authz_zone.Replay`)로 읽고 손잡이를 버린다. 구역의 열기는 두 파일이 다 있을 때만 구역을 만들고, 부팅은 하나가 없는 경우(설치 기록 없음, 로그 없음, 빈 로그)도 판정한다. 구역은 판정이 7행(`Multi_account`)일 때만 계정 서버가 연다(S1a-1). 7행은 저장소를 읽었고 로그가 다계정을 만든 경우라서 두 파일이 다 있다. 다른 행에서는 구역을 열지 않는다.
 - 첫 Admin(2026-11-05 사용자 결정): bootstrap 명령이 한 번 쓰는 Admin 초대 링크를 찍는다. 그 링크로 로그인한 사람의 초대 소비, User 생성, Admin 지정은 append 한 번이다. Principal 레코드는 인증된 author만 쓴다(설계 §6.3). `Local_operator`는 초대 기록만 쓴다. 그래서 초대는 Principal과 다른 Kind다.
 - ID 발급(§4.1): Human `user_id`는 OS CSPRNG가 만든 128비트 이상의 값이고 `(iss, sub)`나 email에서 유도하지 않는다. 발급은 writer lock 안에서 현재 principal과 ledger의 `Delete` 기록을 대조한다. `user_id`가 겹치면 다시 뽑고, `service_id`가 겹치면 등록을 거부하고, ledger를 읽지 못하면 발급하지 않는다.
 - B3c 층(2026-11-05). 층마다 Kind 하나나 사건 하나를 읽고, `Authz_state`에 필드 하나와 `apply` 갈래 하나를 더한다. B3c는 초대(§5.1-2의 (b))로 입장하는 길만 다룬다. 입장 요청 (c)는 2단계다(§1.1). allowlist (a)는 첫 Admin에 필요 없어서 B3c 뒤 층으로 두고, 자리는 그 층을 시작할 때 정한다.
@@ -252,10 +252,10 @@ Runtime 조회: rg -n --glob '*.ml' '\bRuntime\.(get_runtime_by_id|resolve_assig
   - B3c-5 비활성·삭제. Kind `Principal`의 `Disabled`·`Enabled`·`Deleted` 사건이다. `(iss, sub)`는 삭제 사건에만 싣는다(§4.1). 마지막 Admin의 비활성·삭제는 거절한다(§5.1-5). 사건은 활동 중인 Admin만 쓴다. 비활성은 `Disable`, 삭제는 `Delete` intent다. 재활성은 epoch를 올리지 않아 intent가 없다. 그래서 재활성 앞으로 되돌린 로그는 그 사람을 비활성으로 둔다. 삭제는 principal·`(iss, sub)` 결속·membership·Admin 지정을 지운다. `user_id`와 namespace는 다시 주지 않고, `(iss, sub)`는 새 초대로 새 principal이 되어 다시 들어올 수 있다. 비활성이거나 삭제된 principal은 레코드를 쓰지 못한다. 마지막 Admin을 셀 때는 비활성 Admin과, store가 회수를 포기해 막힌(§8.3) Admin을 빼고 센다.
 - B3d 층(2026-11-05). 호스트 로컬 bootstrap은 `Fresh_bootstrap`(B2)을 부르는 CLI 하위 명령이다. 서버를 멈추고 돌리고 BasePath lease를 쥔다(2026-11-05 사용자 결정). 그래서 서버와도, 다른 bootstrap과도 동시에 돌지 않는다(B2d의 한계 참고). loopback 엔드포인트는 쓰지 않는다. 터널이 localhost로 들어와서 원격 요청과 구분할 수 없다. 외부 저장소의 위치(§6의 결정 2)는 B2 전에 정해지므로 이 층이 열릴 때 이미 있다. 서버에는 열어 줄 bootstrap 경로가 없다. 그래서 활성화 전 요청(§5.1 표 5행)에서 부팅은 계속 멈추고, 멈춤 문구가 CLI 명령을 가리킨다. 원격 경로와 실행을 열지 않는다는 5행과 맞는다.
   - B3d-0 시계(#48716). 구역이 두 잠금 안에서 시계를 읽어 레코드의 `at_ms`를 정한다. draft에는 `at_ms`가 없다. 시계는 구역을 열 때(`open_at_start ~now_ms`, `install ~now_ms`) 함수로 받는다. 잠금을 기다리기 전에 읽은 시각이 레코드에 들어가지 않는다. `Authz_state`는 읽은 레코드의 가장 늦은 `at_ms`를 들고, 그보다 이른 입장 레코드를 `Admission_behind_log`로 거절한다. 그래서 되감긴 시계는 로그의 마지막 기록 앞으로 시각을 돌려 그때 이미 만료된 초대를 쓰지 못한다. replay도 같은 접기라 같은 검사를 한다. 다른 종류는 시각으로 판정하지 않으므로 이 검사에 걸지 않는다. 앞서 간 시계가 쓴 레코드가 있어도 회수·비활성·`off`는 시계가 따라잡기를 기다리지 않는다. 입장은 기다린다. 실제 시계가 그 시각을 지날 때까지 모든 입장이 거절되고, 운영자가 풀 길은 없다. 마지막 기록 뒤의 되감김(만료 뒤 기록이 없는 동안)은 막지 못한다. 그 경우는 시계를 믿는 수밖에 없다. `Authz_bootstrap`의 요청도 시각 대신 시계를 받는다.
-  - B3d-1 `masc auth bootstrap --external-store PATH`. BasePath lease를 쥔다(`Server_startup_takeover.acquire_base_path_lock`, 선례 `Released_workspace_upgrade.apply`). 서버가 떠 있으면 lease를 얻지 못해 아무것도 쓰지 않고 끝난다. 로직은 `Authz_activation`(lib)에 두고 시험한다. lease와 출력만 `bin/masc_cli_auth`가 한다. 쓰기 전에 부팅과 같은 판정(`Authz_boot_mode_read.input`·`decide`)을 돌리고, 5행일 때만 쓴다. 설정이 `Single_user`인 채로 `Fresh_bootstrap`을 쓰면 다음 부팅이 3행으로 멈추고, 이미 멈추는 줄에 쓰면 멈춤만 늘기 때문이다. 5행이 아니면 아무것도 쓰지 않고 이유를 나눠 말한다. 설정이 다계정을 묻지 않으면 `Not_asked`, `config.json`을 못 읽으면 그 이유를 단 `Config_unreadable`, 이미 켜진 설치(7행)면 `Already_active`, 나머지는 부팅이 찍는 문구 그대로인 `Boot_stops`다. 판정에 넣는 익명 쓰기 설정은 이 명령을 부른 셸의 환경 변수다. 서버는 자기 환경을 읽으므로, 다른 환경에서 띄운 서버와는 다를 수 있다. workspace id·invite id·token은 `Authz_activation`이 OS `getrandom`으로 뽑는다(`Random_id.hex`, §8.4 "새 workspace_id"). token은 32바이트의 hex 64자이고, 디스크에는 SHA-256 digest만 남는다(§5.1-4). token은 추상 타입 안에 있고 `Authz_activation.link`로만 꺼낸다. 외부 저장소 경로는 운영자가 정한다. 백업 범위를 masc가 알 수 없기 때문이다. `Fresh_bootstrap` 다음 같은 lease 안에서 구역을 열고 첫 Admin 초대를 `Local_operator`로 쓴다. 초대 만료는 24시간이다(§5.1-4가 계획에 맡긴 값). 링크 모양은 `<base url>/accounts/invite#<token>`이고, 화면(C6 ②)과 소비(C2a)가 이 경로(`Authz_activation.invitation_path`)를 쓴다. 링크는 한 번만 화면에 찍는다. base url은 `MASC_HTTP_BASE_URL`만 쓴다. Play 초대와 같은 검사(`Play_invite.is_http_public_base_url`)를 통과해야 한다. 셸의 `MASC_HOST`·`MASC_HTTP_PORT`로 만든 주소는 서버가 실제로 듣는 주소와 다를 수 있어서 쓰지 않는다. 이 값은 쓰기 전에 읽어서, 없거나 틀리면 아무것도 쓰지 않는다. 검사 자체는 `test_play_invite`가 본다. 거절 문구는 값을 찍지 않는다. 비밀번호가 든 URL일 수 있기 때문이다. 링크가 표준 출력에 닿지 못하면(flush 실패) 종료 코드 1로 알린다. bootstrap 뒤 초대 커밋이 실패하면 로그에는 bootstrap만 남고 초대는 B3d-2로 다시 쓴다. S1 전에 이 명령이 성공하면 그 설치에서 서버가 부팅을 멈추고(7행 `Multi_account_not_served`), 되돌리는 명령이 없다(`off`는 F3a). 도움말과 성공 문구가 이 사실과 지워서 되돌리는 길(B3d-3)을 말한다. §11의 readiness는 원격 다계정을 여는 부팅(S1)이 본다. 이 명령은 기록만 쓰고 서버를 열지 않는다. F5가 readiness를 만들면 §11-3에 따라 이 명령도 오래된 readiness에서 거부한다(F5 범위).
+  - B3d-1 `masc auth bootstrap --external-store PATH`. BasePath lease를 쥔다(`Server_startup_takeover.acquire_base_path_lock`, 선례 `Released_workspace_upgrade.apply`). 서버가 떠 있으면 lease를 얻지 못해 아무것도 쓰지 않고 끝난다. 로직은 `Authz_activation`(lib)에 두고 시험한다. lease와 출력만 `bin/masc_cli_auth`가 한다. 쓰기 전에 부팅과 같은 판정(`Authz_boot_mode_read.input`·`decide`)을 돌리고, 5행일 때만 쓴다. 설정이 `Single_user`인 채로 `Fresh_bootstrap`을 쓰면 다음 부팅이 3행으로 멈추고, 이미 멈추는 줄에 쓰면 멈춤만 늘기 때문이다. 5행이 아니면 아무것도 쓰지 않고 이유를 나눠 말한다. 설정이 다계정을 묻지 않으면 `Not_asked`, `config.json`을 못 읽으면 그 이유를 단 `Config_unreadable`, 이미 켜진 설치(7행)면 `Already_active`, 나머지는 부팅이 찍는 문구 그대로인 `Boot_stops`다. 판정에 넣는 익명 쓰기 설정은 이 명령을 부른 셸의 환경 변수다. 서버는 자기 환경을 읽으므로, 다른 환경에서 띄운 서버와는 다를 수 있다. workspace id·invite id·token은 `Authz_activation`이 OS `getrandom`으로 뽑는다(`Random_id.hex`, §8.4 "새 workspace_id"). token은 32바이트의 hex 64자이고, 디스크에는 SHA-256 digest만 남는다(§5.1-4). token은 추상 타입 안에 있고 `Authz_activation.link`로만 꺼낸다. 외부 저장소 경로는 운영자가 정한다. 백업 범위를 masc가 알 수 없기 때문이다. `Fresh_bootstrap` 다음 같은 lease 안에서 구역을 열고 첫 Admin 초대를 `Local_operator`로 쓴다. 초대 만료는 24시간이다(§5.1-4가 계획에 맡긴 값). 링크 모양은 `<base url>/accounts/invite#<token>`이고, 화면(C6 ②)과 소비(C2a)가 이 경로(`Authz_activation.invitation_path`)를 쓴다. 링크는 한 번만 화면에 찍는다. base url은 `MASC_HTTP_BASE_URL`만 쓴다. Play 초대와 같은 검사(`Play_invite.is_http_public_base_url`)를 통과해야 한다. 셸의 `MASC_HOST`·`MASC_HTTP_PORT`로 만든 주소는 서버가 실제로 듣는 주소와 다를 수 있어서 쓰지 않는다. 이 값은 쓰기 전에 읽어서, 없거나 틀리면 아무것도 쓰지 않는다. 검사 자체는 `test_play_invite`가 본다. 거절 문구는 값을 찍지 않는다. 비밀번호가 든 URL일 수 있기 때문이다. 링크가 표준 출력에 닿지 못하면(flush 실패) 종료 코드 1로 알린다. bootstrap 뒤 초대 커밋이 실패하면 로그에는 bootstrap만 남고 초대는 B3d-2로 다시 쓴다. 이 명령이 성공한 설치를 서버는 다계정 설치로 띄운다(7행, S1a-1). 도움말과 성공 문구가 이 사실과 끄는 명령(`masc auth off`, F3a)을 말한다. §11의 readiness는 원격 다계정을 여는 부팅(S1)이 본다. 이 명령은 기록만 쓰고 서버를 열지 않는다. F5가 readiness를 만들면 §11-3에 따라 이 명령도 오래된 readiness에서 거부한다(F5 범위).
   - B3d-2 `masc auth invite`. 서버가 멈춘 상태에서 `Local_operator`가 Admin 초대를 하나 더 쓴다. 첫 초대가 쓰이기 전에 만료되거나 링크를 잃었을 때 쓴다. 초대를 하나 더할 뿐 취소하지 않으므로, 잃어버린 링크도 쓰이거나 만료될 때까지 열려 있다. 초대 취소와 Member 초대는 C6 ③에서 Admin이 서버로 한다. 이 빌드에는 둘 다 없다. 부팅 판정이 `Multi_account`이고 외부 저장소가 로그와 맞을 때만 쓴다(§5.1 표 7행). 저장소 경로는 설치 기록에서 읽는다. lease, base url(`MASC_HTTP_BASE_URL`), 링크 출력은 B3d-1과 같다(`Authz_activation.invite`, `masc auth invite`).
-  - B3d-3 부팅 문구. 5행 거부의 이름은 판정이 내는 모드와 같은 `Activation_requested`다. 문구는 세 가지를 말한다. 이 빌드는 다계정을 서빙하지 않는다. `config.json`에서 `account_mode`를 빼면 단일 사용자로 뜬다. 서버를 멈춘 채 `masc auth bootstrap --external-store PATH`를 돌리면 활성화되지만, 그 뒤 이 빌드의 서버는 부팅을 멈추고 되돌리는 명령이 없다. CLI도 부팅 문구를 찍으므로 "this server"라고 쓰던 문구는 "this build"라고 쓴다. 거부는 S1 뒤에도 남는다. 5행에서 서버가 열 경로가 없기 때문이다.
-  - B3d-3의 되돌리는 길(2026-11-08 사용자 결정, §6 결정 10). 되돌리는 명령은 없지만 S1 전에는 단일 사용자로 돌아갈 수 있다. masc 프로세스를 모두 멈추고 세 가지를 지운다. `authz.jsonl`, 외부 저장소, 이 base path를 적은 설치 기록이다. 그리고 `config.json`에서 `account_mode`를 뺀다. 그러면 부팅은 이 base path를 활성화한 적 없는 설치와 가르지 못하고 1행대로 단일 사용자로 뜬다. 로그만 지우면 복원으로 보고 거부한다(2행). 로그와 외부 저장소만 지워도 1행이 되지만, 설치 기록까지 지워야 찌꺼기가 남지 않는다. 로그의 잠금 파일은 부팅이 다시 만드니 남아도 된다. 이 문장은 `Authz_boot_mode_read.single_user_again` 하나이고, bootstrap 도움말·성공 문구와 5행·`Multi_account_not_served` 부팅 문구가 같이 쓴다. 시험은 실제 `Fresh_bootstrap` 뒤 세 가지를 지우고 1행을 확인한다(`single user again`). S1 전에는 계정이 가진 Keeper·Runtime 기록이 없어서 지워도 잃는 것은 로그인 기록뿐이다.
+  - B3d-3 부팅 문구. 5행 거부의 이름은 판정이 내는 모드와 같은 `Activation_requested`다. 문구는 두 가지를 말한다. 서버를 멈춘 채 `masc auth bootstrap --external-store PATH`를 돌리면 활성화되고, 그 뒤 서버는 이 설치를 다계정 설치로 띄운다. `config.json`에서 `account_mode`를 빼면 단일 사용자로 뜬다. CLI도 이 문구를 찍는다. 거부는 S1 뒤에도 남는다. 5행에서 서버가 열 경로가 없기 때문이다.
+  - B3d-3 지우고 설치(2026-11-08 사용자 결정, §6 결정 10). masc 프로세스를 모두 멈추고 세 가지를 지운다. `authz.jsonl`, 외부 저장소, 이 base path를 적은 설치 기록이다. 그리고 `config.json`에서 `account_mode`를 뺀다. 그러면 부팅은 이 base path를 활성화한 적 없는 설치와 가르지 못하고 1행대로 단일 사용자로 뜬다. 로그만 지우면 복원으로 보고 거부한다(2행). 로그와 외부 저장소만 지워도 1행이 되지만, 설치 기록까지 지워야 찌꺼기가 남지 않는다. 로그의 잠금 파일은 부팅이 다시 만드니 남아도 된다. 시험은 실제 `Fresh_bootstrap` 뒤 세 가지를 지우고 1행을 확인한다(`everything deleted`). 문구는 이 길을 안내하지 않는다. 로그를 지우면 계정이 가진 Runtime·Keeper 기록과 로그인 기록이 같이 지워지기 때문이다. 문구가 안내하는 끄는 길은 `masc auth off`다(F3a).
 - 삭제 사건(§4.1): `(iss, sub)`는 `authz.jsonl`의 사건에만 싣고 ledger의 `Delete` 기록에는 ID만 둔다.
 - 표시가 붙은 상태는 D6에서 처음 생긴다. D6 전에는 삭제가 올릴 `Purge_pending` 대상이 없다.
 - 접힌 상태 `Authz_state.t`는 층별 하위 상태를 필드로 가진 레코드다. replay의 적용 함수 `step`은 `Kind.t`를 빠짐없이 match해 하위 모듈로 보낸다. 층마다 필드 한 줄과 갈래 한 줄이 는다. 이 타입은 저장소(B1b)가 아니라 `Authz_state` 모듈이 붙인다.
@@ -370,7 +370,7 @@ Runtime 조회: rg -n --glob '*.ml' '\bRuntime\.(get_runtime_by_id|resolve_assig
 - 지금 있는 것.
   - 초대 입장은 `Kind.Invite`, `Authz_invite_event`(`Issued`·`Revoked`), `Authz_invite_state`, 입장 레코드의 `invite_id`로 이어진다. `Authz_login.sign_in`은 초대 token도 결속도 없으면 `Not_invited`로 거절한다.
   - 초대 취소는 이미 `Revoke`(subject는 초대)로 intent를 쓰고, 발급은 쓰지 않는다(설계 §8.2).
-  - 다계정 부팅은 아직 `Multi_account_not_served`로 멈춘다. 그래서 어느 로그에도 입장 레코드가 없다. 입장 본문을 바꾸는 일은 hard cut이고, 옛 본문을 읽는 코드를 두지 않는다.
+  - 실제 서버는 아직 로그인 경로를 열지 않는다(S1a-3). 그래서 서버가 쓴 입장 레코드는 어느 로그에도 없다. 입장 본문을 바꾸는 일은 hard cut이고, 옛 본문을 읽는 코드를 두지 않는다.
 - 새로 두는 것.
   - Kind `Registration`. 쓰는 이는 인증된 principal이고, 그중 Admin만 받는다. 로컬 운영자는 등록하지 않는다. 로컬 운영자의 길은 `masc auth invite` 하나다.
   - 사건은 `Registered { registration_id; identity }`와 `Removed { registration_id }`다. id는 `Authz_types.Registration_id`다.
@@ -442,12 +442,12 @@ Runtime 조회: rg -n --glob '*.ml' '\bRuntime\.(get_runtime_by_id|resolve_assig
   - C3-9 Admin allowlist 경로의 답(`Login_allowlist_routes`). C2d가 main에 들어간 뒤 쌓았다(2026-11-07).
 - 옮긴 것.
   - WS/SSE의 세션 결속과 폐기 때 닫기는 C4로 옮긴다. 연결은 C4의 `Auth_gate.decide`가 요청을 세션으로 인증한 뒤에야 세션을 안다. C3에 두면 아무도 채우지 않는 필드가 남는다. `__Host-masc_mcp_session`도 transport 결속과 함께 C4가 만든다.
-  - 경로를 `make_routes`에 다는 일과 HTTP/2 갈래는 S1이 한다. S1 전에는 서버에 구역이 없다.
+  - 경로를 서버의 표에 다는 일은 S1a-3이 한다. 그 전에는 실제 서버에 이 경로가 없다.
 - 시험.
   - C3-4·5: 남의 세션 폐기 거절, 두 번 폐기 거절, 끝난 세션을 `replaces`로 받지 않음, 폐기와 `replaces` 발급의 intent, 7일 만료.
   - C3-6·7: secret이 틀린 쿠키, 만료된 세션, Disable된 principal의 세션, cookie와 bearer가 함께 온 요청, Origin 없는 POST, CSRF 불일치, 원격 query credential.
   - C3-8: 시험이 Google과 GitHub을 흉내 내고 구역을 직접 연다. 다른 흐름의 transaction 쿠키는 401, callback이 기존 세션을 끊음, 같은 초대의 동시 소비는 409, 거절 화면에 token과 secret이 없음.
-- 하지 않는 것: `Auth_gate.decide`와 요청 경로 연결(C4), MCP OAuth 결속(C5), 화면(C6), 경로 등록과 HTTP/2(S1).
+- 하지 않는 것: `Auth_gate.decide`와 요청 경로 연결(C4), MCP OAuth 결속(C5), 화면(C6), 경로 등록(S1a-3).
 
 **C4 범위** (다계정 credential 판정, 2026-11-07)
 
@@ -496,7 +496,7 @@ Runtime 조회: rg -n --glob '*.ml' '\bRuntime\.(get_runtime_by_id|resolve_assig
   - C4-6·7: secret이 틀린 token, 폐기된 token, Disable된 principal, legacy bearer, 둘 이상의 credential, query credential.
   - C4-8: 경로 종류와 credential 표시의 모든 쌍. credential이 없으면 자격이 필요한 모든 종류가 Reject한다(설계 §5.3의 다계정 개시 조건).
   - C4-11: token 해석 실패, Actor_hint와 다른 service.
-- 하지 않는 것: Single_user 경로 바꾸기, MCP OAuth 결속(C5), 화면(C6), 경로 등록·HTTP/2 갈래·부팅에서 모드 넘기기(S1), Service principal의 Disable·삭제, legacy 호출자를 Service credential로 옮기는 일(S1 전 개시 증거에서 목록으로 센다).
+- 하지 않는 것: Single_user 경로 바꾸기, MCP OAuth 결속(C5), 화면(C6), 경로 등록(S1a-3)·부팅에서 모드 넘기기(S1a-1), Service principal의 Disable·삭제, legacy 호출자를 Service credential로 옮기는 일(S1 전 개시 증거에서 목록으로 센다).
 
 **미리보기 범위** (localhost 다계정 확인, 2026-11-08)
 
@@ -508,7 +508,7 @@ Runtime 조회: rg -n --glob '*.ml' '\bRuntime\.(get_runtime_by_id|resolve_assig
   2. 세션이 생긴다.
   3. 서버가 그 사람을 누구로 보는지 확인한다.
   4. 로그아웃한다.
-- 서버(`masc serve`)는 바꾸지 않는다. 다계정 설치에서 부팅이 멈추는 것도 그대로다(S1). S1이 D1~D4 뒤인 이유는 소유권 검사 없이 Keeper와 Runtime을 서빙하면 안 되기 때문이다. 미리보기는 Keeper, Runtime, MCP, Board 경로를 하나도 열지 않는다.
+- 서버(`masc serve`)는 바꾸지 않는다. 서버가 다계정 설치를 띄우는 일은 S1이 한다. S1이 D1~D4 뒤인 이유는 소유권 검사 없이 Keeper와 Runtime을 서빙하면 안 되기 때문이다. 미리보기는 Keeper, Runtime, MCP, Board 경로를 하나도 열지 않는다.
 - 명령은 `masc auth preview --port N --github-client-id ID`다.
   - `masc auth invite`처럼 다계정이 활성인 설치에서만 간다(`Authz_activation`의 판정).
   - BasePath lease를 쥔다. 그래서 같은 base path에서 서버와 함께 돌지 않는다.
@@ -717,7 +717,7 @@ Runtime 조회: rg -n --glob '*.ml' '\bRuntime\.(get_runtime_by_id|resolve_assig
   - D4a, D4b, D4d의 판정은 `authorize_host`다. 대상마다 `host_client`에 닫힌 variant를 더해서, 거절 문장이 무엇을 막았는지 말한다. D4c는 lane의 이유가 이미 닫힌 variant라서 같은 결정(`host_access`)을 그 이유로 받는다.
 - D4a에서 남긴 것.
   - 시험 프로세스는 시작할 때 단일 사용자 접근을 게시한다(하네스 #50867). 그래서 D4a는 시험에 게시 호출을 더하지 않는다. 다계정 시험은 실행 표가 만든 API 런타임으로 verify를 불러, 거절(`account_not_authorized`)과 연결 0건을 본다.
-  - 다계정 서버 부팅: exact-output 대상 하나가 거절되면 등록표를 만들지 않고 설정 오류로 멈춘다. 지금은 전체 서버가 다계정으로 뜨지 않아서(`Multi_account_not_served`) 이 경로에 닿지 않는다. S1에서 정한다. 거절된 대상을 본문 시간 제한이 없는 slot처럼 gap으로 내리면, 그 slot만 가진 lane은 비고 부팅은 계속된다.
+  - 다계정 서버 부팅: exact-output 대상 하나가 거절되면 등록표를 만들지 않고 설정 오류로 멈춘다. 다계정 설치의 계정 서버는 owner 상태를 만들지 않아서(S1a-1) 이 경로에 닿지 않는다. 다계정 설치가 owner 상태를 띄우는 층에서 정한다. 거절된 대상을 본문 시간 제한이 없는 slot처럼 gap으로 내리면, 그 slot만 가진 lane은 비고 부팅은 계속된다.
 
 **D6 범위**
 
@@ -728,13 +728,37 @@ Runtime 조회: rg -n --glob '*.ml' '\bRuntime\.(get_runtime_by_id|resolve_assig
 
 ### S. 1단계 개시
 
+S1은 둘로 나눈다(2026-11-10 사용자). 다 만든 뒤에 여는 대신 돌아가는 상태부터 올린다. S1a는 미리보기가 하던 범위(로그인, 구독 연결, Runtime·Keeper, Keeper에게 묻기)를 실제 서버에 연다. S1b는 사람에게 MCP·Board·WebSocket을 연다.
+
 | 층 | 결과 | 설계 | 선행 |
 |---|---|---|---|
-| S1 | 부팅이 `Multi_account_not_served` 거부를 거두고 다계정 로그를 서빙한다. 활성화 전 요청(§5.1 표 5행)의 거부는 남는다(B3d). `masc auth bootstrap`의 도움말·성공 문구와 5행 부팅 문구(`Activation_requested`)에서 서버가 부팅을 멈춘다는 문장을 고친다. 지워서 되돌리는 문장(`single_user_again`)은 지운다. `off` 안내는 F3a-2가 넣었다. 부팅이 구역(`Authz_zone.open_at_start`)을 열어 쥐고, 그 구역을 C2a~C4의 다계정 경로와 D1~D4의 실행 게이트에 넘긴다. C3의 로그인 경로를 `make_routes`에 달고, 같은 경로의 HTTP/2 갈래를 `server_h2_gateway.ml`에 더한다(HTTP/2는 router의 `dispatch`를 거치지 않아 갈래가 없으면 404다). 설치 기록이 없거나 로그가 없거나 비었을 때 구역의 열기가 무엇을 돌려줄지, `Multi_account_uncertain`에서 무엇을 서빙할지 이 층이 정한다. 설계 §11.1의 1단계 개시 증거를 이 층에서 모은다. | §5.1, §8.2, §11.1 | B3, C4, C6, D4, F3a |
+| S1a-0 | 외부 저장소와 로그를 답의 수로도 맞춰 본다. 세부는 B2c 범위의 S1a-0 항목이다. | §5.1, §8.2 | B3, F3a |
+| S1a-1 | 서버 부팅이 7행(`Multi_account`)을 계정 서버로 넘긴다. 계정 서버는 구역을 열어 쥐고 자기 표만 서빙한다. 이 층의 표는 `GET /health` 하나다. 세부는 표 아래 S1a-1 범위다. | §5.1, §8.2 | S1a-0, D4 |
+| S1a-2 | 구역을 읽는 곳이 구역의 멈춤을 본다. 로그가 멈췄거나 저장소와 어긋난 구역에서는 세션·PAT 인증과 나머지 읽기가 거절한다. | §5.1, §8.2 | S1a-1 |
+| S1a-3 | C3의 로그인 경로와 사람의 경로(초대 입장, 구독 연결, Runtime·Keeper, Keeper에게 묻기)를 계정 서버의 표에 단다. login client는 서버 설정에서 읽는다. 설계 §11.1의 1단계 개시 증거를 이 층에서 모은다. | §5.1, §11.1 | S1a-2, F3a-3 |
+| S1b | 사람에게 MCP·Board·WebSocket 경로를 연다. | §11.1 | S1a-3, C4-11, C4-12, C6 |
 
-- S1이 1단계의 맨 끝인 까닭: 계정 층 없이 부팅하면 여러 사람이 소유한 기록을 한 사용자처럼 서빙하기 때문에 이 거부가 있다(`Authz_boot_mode_read`). 그 계정 층의 마지막이 D4다. D1이 소유권을, D2~D4가 실행 진입마다 인가를 검사하고, D3이 lane마다 다른 owner의 account-home을 읽지 못하는 증거를 남긴다. 그 전에 거부를 거두면 C4를 통과한 사용자가 다른 사람의 Runtime과 Keeper를 쓴다.
+- S1이 D4 뒤인 까닭: 계정 층 없이 다계정 설치를 서빙하면 여러 사람이 소유한 기록을 한 사용자처럼 서빙한다. 그 계정 층의 마지막이 D4다. D1이 소유권을, D2~D4가 실행 진입마다 인가를 검사하고, D3이 lane마다 다른 owner의 account-home을 읽지 못하는 증거를 남긴다. 그 전에 다계정 설치를 서빙하면 C4를 통과한 사용자가 다른 사람의 Runtime과 Keeper를 쓴다.
 - S1이 F3a 뒤인 까닭: S1부터 다계정 설치는 계정이 가진 Runtime·Keeper 기록을 쌓는다. 그때 "지우고 설치"는 그 기록을 지운다. 끄는 길 없이 켜는 길만 열면 실제 설치가 되돌릴 수 없이 다계정으로 넘어간다(§6 결정 10).
-- S1 전에는 다계정 설치로 서버가 뜨지 않는다. C2a~D4의 코드는 시험이 구역을 직접 열어 부르고, 실제 서버에서 로그인부터 Keeper 실행까지 잇는 확인은 S1에서 처음 한다.
+- S1a-3 전에는 실제 서버에 사람이 들어올 경로가 없다. C2a~D4의 코드는 시험과 `masc auth preview`가 구역을 직접 열어 부르고, 실제 서버에서 로그인부터 Keeper 실행까지 잇는 확인은 S1a-3에서 처음 한다.
+
+**S1a-1 범위**
+
+- 판정과 넘기기. `Authz_boot_mode_read.boot`가 `Single_user`나 `Multi_account`를 돌려준다. `Multi_account`는 base path와, 판정이 읽은 외부 저장소의 경로를 싣는다. `Server_runtime_bootstrap.run`이 그 값으로 갈라, 단일 사용자는 `run_single_user`로, 다계정은 `Server_accounts.run`으로 보낸다.
+- 계정 서버가 따로인 까닭. 단일 사용자 서버의 경로는 `Server_auth`의 래퍼로 인증하고, 그 래퍼는 단일 사용자의 credential을 읽는다. 부팅 거부만 거두면 그 경로가 전부 단일 사용자의 token으로 열린다. 경로 등록 호출이 `lib/server`에 409개라서(2026-11-10 `rg` 집계) 하나씩 닫으면 빠뜨린 곳을 컴파일러가 잡지 못한다. 계정 서버는 표를 따로 가진다. 달지 않은 경로는 router의 404다.
+- 표에 들어가는 종류. `Always_public`과 `Self_authenticated Browser_session`뿐이다. 나머지 종류는 `Server_auth`의 래퍼를 거친다. `Server_accounts.run`은 듣기 전에 표를 검사하고(`route_of_another_kind`), 다른 종류가 있으면 부팅을 멈춘다. 검사는 `Route_access.t`의 생성자를 모두 적은 `match`다. 종류가 늘면 컴파일러가 이 판정을 다시 묻는다.
+- 요청이 지나는 길. HTTP/1.1과 HTTP/2가 같은 표를 같은 ingress로 거친다(`Server_http_ingress.serve_table`). Host 검사와 주소별 rate limit은 단일 사용자 서버와 같은 코드다. agent별 rate limit, MCP 검사, workspace 전제 검사는 걸지 않는다. 셋 다 단일 사용자의 credential이나 owner 상태를 읽는다. 처리 중 예외가 나면 500의 본문에 예외 글을 싣지 않는다. 예외 글에 서버의 파일 경로가 들어갈 수 있다.
+- 띄우지 않는 것. owner 상태(`Mcp_server.server_state`), Keeper, 단일 사용자 서버의 경로다. 그래서 단일 사용자로 쓰던 설치를 다계정으로 켜면 그 설치의 Keeper는 돌지 않는다. 운영자의 Keeper를 사람에게 귀속하는 층이 생기기 전에는 base path를 따로 둔 설치로 다계정을 시작한다.
+- 8행(`Multi_account_uncertain`)은 부팅을 멈춘다(`Authorization_uncertain`). 설계 §5.1 표는 이 행을 "`AuthorizationUncertain`으로 시작한다"고 적는다. 그 상태에서 서빙할 것은 recovery(F3b)이고 2단계다. 그때까지는 열 경로가 없어서 듣지 않는다.
+- 구역의 열기. 구역은 7행에서만 연다. 판정과 열기 사이에 파일이 바뀌어 열기가 실패하면(`Zone_not_opened`) 부팅을 멈춘다.
+- stdio는 다계정 설치를 거절하고 끝난다. stdio runtime은 단일 사용자의 owner 상태다.
+- `/health`는 빌드 식별과 `account_mode`만 답한다. 인증 없이 누구나 부르므로 workspace의 경로나 Keeper 수는 싣지 않는다.
+- 문구. `masc auth bootstrap`의 도움말·성공 문구와 5행 부팅 문구(`Activation_requested`)가, 활성화한 설치를 서버가 다계정 설치로 띄운다고 말한다.
+- 시험.
+  - `test_server_accounts`: 실제 `Fresh_bootstrap`으로 만든 설치를 부팅 진입(`boot`)에 넣고, 그 값으로 계정 서버를 loopback 포트에 띄워 HTTP/1.1로 부른다. `GET /health`는 200이고 `account_mode`가 `Multi_account`다. 단일 사용자 서버의 경로 여섯(dev-token, status, MCP의 POST·DELETE, WebSocket, 루트)은 404다. 표에 없는 메서드는 405, listener가 아닌 Host는 400이다.
+  - 같은 파일의 표 검사: 계정 서버의 표와 `Browser_session` 경로는 통과하고, `Read_auth` 경로와 dev-token 종류는 거절한다.
+  - `test_authz_boot_mode_read`: 7행은 `Boot_multi_account`다. 진입은 판정이 읽은 저장소 경로를 싣는다. 익명 쓰기가 켜져 있으면 거절한다. 8행은 `Authorization_uncertain`으로 멈춘다.
+- 하지 않는 것: 구역의 멈춤을 읽는 일(S1a-2), 로그인 경로와 사람의 경로(S1a-3), `masc auth preview`를 계정 서버 코드로 옮기는 일(S1a-3), Keeper lane, MCP(S1b).
 
 ### E. official client 격리
 
@@ -786,7 +810,7 @@ Runtime 조회: rg -n --glob '*.ml' '\bRuntime\.(get_runtime_by_id|resolve_assig
   - 홈은 적힌 철자와 실제 경로를 둘 다 본다(`Runtime_account_home_layout.under_persons`). 실제 경로는 있는 가장 깊은 조상을 풀고 그 아래를 적힌 대로 붙인다. 링크, 대소문자만 다른 철자, 아직 없는 홈도 사람 쪽으로 읽힌다.
   - `masc auth bootstrap`(`Turned_off`)과 `masc auth invite`(`Accounts_turned_off`)는 끈 설치에 아무것도 쓰지 않는다.
   - account-home 점유: 1단계 코드에는 점유 기록이 없다(lease 저장소는 E1). `Release_pending`으로 바꿀 대상이 없다.
-  - 남은 질문: 끈 뒤 단일 사용자 Keeper의 native 도구는 `.masc/accounts`를 읽을 수 있다. D3c가 다계정에서 막은 경로와 같고, 지워서 되돌리는 길(B3d-3)도 같은 상태다. 사람 홈은 S1 전에는 `masc auth preview`의 로그인으로만 생긴다.
+  - 끈 뒤 단일 사용자 Keeper의 native 도구는 `.masc/accounts`를 읽을 수 있다. D3c가 다계정에서 막은 경로와 같고, 지우고 설치(B3d-3)도 같은 상태다. 결정(2026-11-10 사용자): 사람 홈이 `.masc/accounts` 아래 남아 있는 동안 Keeper 턴은 native 도구 없이(`Native_none`)만 돈다(F3a-3). 그동안 운영자 Keeper가 native 도구를 못 쓰는 비용은 받아들였다. 사람 홈은 S1a-3 전에는 `masc auth preview`의 로그인으로만 생긴다.
 - F3a-2(2026-11-10).
   - `masc auth off`는 bootstrap처럼 BasePath lease를 쥐고 `Authz_off.turn_off`를 부른다. 공개 주소와 익명 쓰기 설정은 읽지 않는다. 끄기는 로그와 외부 저장소만 본다.
   - 로그의 마지막 모드 사건이 `Multi_account`를 만들었고 외부 저장소가 로그와 맞을 때만 쓴다. 설정은 보지 않는다. 운영자가 `account_mode`를 먼저 뺐으면 부팅은 3행으로 멈추고, 거기서도 끌 수 있다.
@@ -794,7 +818,7 @@ Runtime 조회: rg -n --glob '*.ml' '\bRuntime\.(get_runtime_by_id|resolve_assig
   - 기록은 구역(`Authz_zone.commit`)으로 쓴다. 작성자는 `Local_operator`, 종류는 `Mode_event`다. 그래서 외부 저장소가 같은 기록을 받는다.
   - 판정 뒤 연 구역의 모드가 `Multi_account`가 아니면 `Mode_moved`로 끝난다. lease 아래에서는 판정과 구역이 같은 로그를 읽는다. 타입이 허락하는 갈래라 오류로 돌려준다.
   - `config.json`은 쓰지 않는다. 설정은 운영자의 요청이다(§5.1). 끈 뒤에도 설정이 `Multi_account`를 물으면 9행이다. 성공 문구가 `account_mode`를 빼라고 말한다.
-  - bootstrap 도움말과 성공 문구의 "되돌리는 명령이 없다"는 이 층부터 틀린 말이다. 그래서 S1을 기다리지 않고 `masc auth off` 안내로 고친다. 7행 부팅 문구와 3행 거부 문구도 `masc auth off`를 말한다. 8행은 저장소를 믿을 수 없어 끌 수 없으므로 말하지 않는다. "서버가 부팅을 멈춘다"는 문장과 `single_user_again`은 S1이 고친다.
+  - bootstrap 도움말과 성공 문구는 `masc auth off`를 안내한다. 3행 거부 문구도 `masc auth off`를 말한다. 8행은 저장소를 믿을 수 없어 끌 수 없으므로 말하지 않는다.
   - 시험은 실제 활성화(`Authz_activation.activate`)로 만든 설치에서 7행과 3행의 끄기, 끈 뒤의 4행·9행, 두 번째 끄기, 쓰지 않는 네 경우를 본다. F3a-1의 시험 셋도 손으로 쓰던 `off` 기록 대신 `Authz_off.turn_off`를 부른다.
 
 **F3b 범위**

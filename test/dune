@@ -5952,6 +5952,7 @@
 
 (include stanzas/test_h2_json_worker.inc)
 (include stanzas/test_https_listener.inc)
+(include stanzas/test_server_connection_socket.inc)
 (include stanzas/test_h2_request_fibers.inc)
 (include stanzas/test_h2_oauth_request_fibers.inc)
 (include stanzas/test_dashboard_asset_worker.inc)

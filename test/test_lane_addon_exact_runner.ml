@@ -575,13 +575,15 @@ let test_a_lane_whose_every_slot_waits_starts_nothing () =
    appraisal, the read woke the Add-on host, and the host ran the same
    request again through Lane_addon_exact.run (lane_addon_runtime.ml, host
    cycle). Every run started a call the provider refused. Before the stated
-   reset, no wake starts one now. *)
+   reset, no wake starts one now. The reset is a whole second, as Claude Code
+   states it; the store writes that as an integer, which every later wake
+   reads back with the retained record. *)
 let test_no_wake_before_the_reset_starts_a_call () =
   with_case (fun ~sw:_ ~net:_ ~clock:_ ~base_path ~store ->
     publish ~base_path ~cli_slots:[ F.cli_primary_runtime; F.cli_secondary_runtime ] [];
     Runtime_quota_window.reset_for_testing ();
     Fun.protect ~finally:Runtime_quota_window.reset_for_testing (fun () ->
-      let resets_at = Time_compat.now () +. 3600.0 in
+      let resets_at = Float.ceil (Time_compat.now () +. 3600.0) in
       Runtime_quota_window.note_exhausted
         ~scope:(Runtime_instance.quota_scope_of_runtime (fixture_runtime F.cli_primary_runtime)) ~resets_at;
       let calls = ref [] in
@@ -598,8 +600,9 @@ let test_no_wake_before_the_reset_starts_a_call () =
         | _ -> failf "wake %d must end held, uncalled" wake
       done;
       check (list string) "no wake started a client" [] !calls;
-      check bool "every retained attempt is a held deferral" true
-        (List.for_all (String.equal "every_slot_held") (attempt_labels ~store "h3"))))
+      check (list string) "each wake retains one held deferral and no Started attempt"
+        [ "every_slot_held"; "every_slot_held"; "every_slot_held" ]
+        (attempt_labels ~store "h3")))
 
 (* R5 when only some slots wait: a held slot ends the call as a slot that
    refused for its account's rest would, minus the call. A walked slot's input
@@ -626,6 +629,70 @@ let test_a_held_slot_keeps_the_request_open_without_a_call () =
        | _ -> fail "an input refusal must not end the request while a held slot may still answer");
       check int "the held slot is not called" 0 (F.post_count held);
       check int "the walked slot is called once" 1 (F.post_count refusing)))
+
+(* R4 on a lane that declares HTTP slots only: a slot held by its own
+   Retry-After is not called, and with no other slot the lane ends held. *)
+let test_an_http_lane_whose_every_slot_waits_starts_nothing () =
+  with_case (fun ~sw ~net ~clock ~base_path ~store ->
+    let held = F.start_server ~sw ~net ~clock (F.Reply (F.openai_response question)) in
+    let runtime = fixture_runtime "stub-http.stub-model" in
+    let candidate = runtime.Runtime_instance.candidate_backpressure in
+    publish ~base_path
+      ~runtime_observations:
+        [ ( "held"
+          , { Runtime_exact_output_registry.candidate
+            ; quota_scope = Runtime_instance.quota_scope_of_runtime runtime } ) ]
+      [ { F.id = "held"; base_url = held.base_url } ];
+    Fun.protect ~finally:(fun () -> Runtime_candidate_backpressure.note_candidate_success ~candidate) (fun () ->
+      Runtime_candidate_backpressure.note_rate_limit ~candidate ~retry_after:(Some 3600.0);
+      (match run_request ~base_path ~store "h5" with
+       | Exact.Not_final (Exact.Lane_unavailable (Exact.Every_slot_held _)) -> ()
+       | _ -> fail "an HTTP lane whose every slot waits must end held, uncalled");
+      check int "the held slot is not called" 0 (F.post_count held);
+      check (list string) "the host retains one deferral and no Started attempt"
+        [ "every_slot_held" ] (attempt_labels ~store "h5")))
+
+let cli_trace receipt field =
+  Yojson.Safe.Util.(
+    Keeper_exact_walk_receipt.to_json receipt |> member "cli" |> member field |> to_list
+    |> List.map to_string)
+
+(* R5 with a held CLI slot behind a walked HTTP slot: the CLI slot is visited
+   as Held and never started, and the receipt the host retains keeps that
+   observation. Its reset is a whole second, which the store writes as an
+   integer; reading the receipt back, and the next wake reading the record,
+   must accept that form. *)
+let test_a_held_cli_slot_survives_the_retained_receipt () =
+  with_case (fun ~sw ~net ~clock ~base_path ~store ->
+    let server =
+      F.start_server ~sw ~net ~clock
+        (F.Reply_with (fun index _ ->
+           if index = 0 then `Too_many_requests, refusal_body "rate_limit_error"
+           else `OK, F.openai_response question))
+    in
+    publish ~base_path ~cli_slots:[ F.cli_primary_runtime ] [ { F.id = "only"; base_url = server.base_url } ];
+    Runtime_quota_window.reset_for_testing ();
+    Fun.protect ~finally:Runtime_quota_window.reset_for_testing (fun () ->
+      let resets_at = Float.ceil (Time_compat.now () +. 3600.0) in
+      Runtime_quota_window.note_exhausted
+        ~scope:(Runtime_instance.quota_scope_of_runtime (fixture_runtime F.cli_primary_runtime)) ~resets_at;
+      let calls = ref [] in
+      let cli_runner : Keeper_lane_cli_oneshot.runner =
+        fun ~runtime:{ Runtime_instance.id = runtime_id; _ } ~system_prompt:_ ~output_schema:_ ~prompt:_ ->
+        calls := runtime_id :: !calls;
+        Ok (Yojson.Safe.to_string question)
+      in
+      let runner = Server_lane_addon_exact.For_testing.runner ~base_path ~cli_runner in
+      (match run_request ~runner ~base_path ~store "h4" with
+       | Exact.Not_final (Exact.Provider_refused (Exact.Provider_unavailable _)) -> ()
+       | _ -> fail "a rate-limited HTTP slot beside a held CLI slot must not end the request");
+      let receipt = original_receipt ~store "h4" in
+      check (list string) "the held CLI slot is visited" [ F.cli_primary_runtime ] (cli_trace receipt "visited");
+      check (list string) "the held CLI slot is not dispatched" [] (cli_trace receipt "dispatched");
+      check bool "the next wake reads the retained record and answers" true
+        (answered_by (run_request ~runner ~base_path ~store "h4") <> None);
+      check (list string) "the held CLI slot is never started" [] !calls;
+      check int "the HTTP slot is called on each wake" 2 (F.post_count server)))
 
 let test_an_unconfigured_lane_sends_nothing () =
   with_case (fun ~sw ~net ~clock ~base_path ~store ->
@@ -1324,6 +1391,10 @@ let () =
         ; test_case "no wake before the reset starts a call" `Quick test_no_wake_before_the_reset_starts_a_call
         ; test_case "a held slot keeps the request open without a call" `Quick
             test_a_held_slot_keeps_the_request_open_without_a_call
+        ; test_case "an HTTP lane whose every slot waits starts nothing" `Quick
+            test_an_http_lane_whose_every_slot_waits_starts_nothing
+        ; test_case "a held CLI slot survives the retained receipt" `Quick
+            test_a_held_cli_slot_survives_the_retained_receipt
         ; test_case "an unconfigured lane sends nothing" `Quick test_an_unconfigured_lane_sends_nothing
         ; test_case "an off lane sends nothing" `Quick test_an_off_lane_sends_nothing
         ; test_case "the cli tail answers after the http slots" `Quick test_the_cli_tail_answers_after_the_http_slots

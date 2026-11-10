@@ -1629,6 +1629,7 @@ let activate_owner_state
       ?(boot_stage = fun _ -> ())
       ~sw
       ~clock
+      ~mono_clock
       ~net
       ~proc_mgr
       (initialized : initialized_owner_state)
@@ -1826,6 +1827,7 @@ let run ~sw ~runtime_sw ~env ~address ~port ~base_path ?input_base_path ?on_read
         ~boot_stage
         ~sw
         ~clock
+        ~mono_clock
         ~net
         ~proc_mgr
         initialized_owner

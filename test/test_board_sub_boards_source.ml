@@ -119,6 +119,24 @@ let test_present_source_loss_is_not_initial_empty base_path =
 
 type query_source = Missing | Empty | Invalid_row | Torn_tail | Non_regular
 
+let test_live_nonregular_source_invalidates_queries base_path =
+  let store = new_store base_path in
+  ignore (require (create store "existing"));
+  let path = Board.sub_boards_path store in
+  let backup = path ^ ".retained" in
+  let bytes = Fs_compat.load_file path in
+  Unix.rename path backup;
+  Unix.mkdir path 0o700;
+  require_unavailable (Board.delete_sub_board store ~sub_board_id:"existing");
+  require_unavailable (Board.read_sub_boards store);
+  require_unavailable (Board.get_sub_board store ~sub_board_id:"existing");
+  Alcotest.(check string) "replaced source refusal preserves the original policy" bytes (Fs_compat.load_file backup);
+  Unix.rmdir path;
+  Unix.rename backup path;
+  require_unavailable (Board.read_sub_boards store);
+  Alcotest.(check int) "explicit reload restores complete policy authority" 1 (reload store);
+  ignore (require (create store "after-restore"))
+
 let with_started_store base_path f =
   let reset () = Board_dispatch.reset_for_test (); Board.reset_global_for_test () in
   reset ();
@@ -258,7 +276,8 @@ let () =
          (with_fixture test_stale_append_and_delete_preserve_foreign_policy)];
      "source loss and byte changes",
        [Alcotest.test_case "same-size source edit" `Quick (with_fixture test_same_size_edit_refuses_update);
-        Alcotest.test_case "Present source loss" `Quick (with_fixture test_present_source_loss_is_not_initial_empty)];
+        Alcotest.test_case "Present source loss" `Quick (with_fixture test_present_source_loss_is_not_initial_empty);
+        Alcotest.test_case "live nonregular source refuses queries" `Quick (with_fixture test_live_nonregular_source_invalidates_queries)];
      "actual query consumers",
        List.map (fun (name, source) -> Alcotest.test_case name `Quick (with_fixture (test_query_boundary source)))
          ["initial Missing", Missing; "Present empty", Empty; "invalid row", Invalid_row;

@@ -340,7 +340,8 @@ let exact_standing_reads_the_run_observation () =
         List.map (fun (other : Tui_decode.standalone_lane) ->
           if Standalone_lane.equal other.sl_lane lane.sl_lane then { other with sl_status; sl_running_count }
           else other) decoded.exact_snapshot.sls_lanes } } in
-  Alcotest.check standing "a configured lane with no runs yet is ready" S.Ready (Display.row_standing_in decoded row);
+  Alcotest.check standing "admitted candidates establish configuration, not execution readiness"
+    S.Configured (Display.row_standing_in decoded row);
   Alcotest.check standing "a lane whose latest runs fail is failing" S.Failing
     (Display.row_standing_in (with_status Tui_decode.Standalone_degraded 0) row);
   Alcotest.check standing "a lane switched off that still finishes runs is changing" S.Changing
@@ -379,7 +380,7 @@ let reading_lines_carry_how_much_each_one_matters () =
   check "an admission error is a failure" "Admission" [ L.Failure ] (admitted (Some "no registry"));
   check "no error leaves no admission line" "Admission" [] (admitted None);
   check "a dropped candidate needs attention" "Dropped HTTP slots" [ L.Attention ] (admitted None);
-  Alcotest.(check (list tone)) "each standing has one tone"
+  Alcotest.(check (list tone)) "existing runtime standings retain their tones"
     [ L.Plain; L.Attention; L.Attention; L.Failure; L.Quiet; L.Attention; L.Quiet ]
     (List.map Display.standing_tone
        [ S.Ready; S.Waiting; S.Changing; S.Failing; S.Off; S.Not_set_up; S.Unobserved ]);

@@ -103,6 +103,21 @@ class Review:
 
 
 @dataclass(frozen=True)
+class ReviewSubmission:
+    review_id: int
+    state: ReviewState
+    head: str
+    observed_login: str | None
+    account_id: int | None
+    submitted_at: str | None
+
+    def to_json(self) -> dict:
+        return {"review_id": self.review_id, "state": self.state.value,
+                "head": self.head, "observed_login": self.observed_login,
+                "account_id": self.account_id, "submitted_at": self.submitted_at}
+
+
+@dataclass(frozen=True)
 class Pull:
     identity: Identity
     state: PullState
@@ -118,6 +133,7 @@ class Pull:
     approval_ids: tuple[int, ...]
     ambiguous_reviews: tuple[Review, ...]
     superseded_change_requests: tuple[tuple[int, int, str], ...]
+    current_head_submissions: tuple[ReviewSubmission, ...]
 
 
 @dataclass(frozen=True)
@@ -135,6 +151,7 @@ class Action:
     superseded_change_requests: tuple[tuple[int, int, str], ...] = ()
     review_ids: tuple[int, ...] = ()
     review_authors: tuple[tuple[int, str], ...] = ()
+    current_head_submissions: tuple[ReviewSubmission, ...] = ()
 
     def to_json(self) -> dict:
         return {**self.identity.to_json(), "reason": self.reason.value,
@@ -156,7 +173,8 @@ class Action:
                     for rid, actor_id, actor in self.superseded_change_requests],
                 "review_ids": list(self.review_ids),
                 "review_authors": [{"account_id": actor_id, "observed_login": actor}
-                                   for actor_id, actor in self.review_authors]}
+                                   for actor_id, actor in self.review_authors],
+                "current_head_submissions": [r.to_json() for r in self.current_head_submissions]}
 
 
 @dataclass(frozen=True)
@@ -266,6 +284,26 @@ def parse_review(raw: object) -> Review | None:
                   instant(raw.get("submitted_at"), "review.submitted_at"))
 
 
+def current_head_submissions(records: Sequence[dict], head: str) -> tuple[ReviewSubmission, ...]:
+    # The native evaluator has checked record IDs and states. Keep comments as
+    # observations, outside its formal decisions. Missing comment metadata must
+    # not block routing or turn an unknown account into a roster identity.
+    result = []
+    for raw in records:
+        state = ReviewState(raw["state"])
+        if state is ReviewState.PENDING or raw.get("commit_id") != head:
+            continue
+        user = raw.get("user")
+        user = user if isinstance(user, dict) else {}
+        actor, actor_id, when = user.get("login"), user.get("id"), raw.get("submitted_at")
+        result.append(ReviewSubmission(
+            raw["id"], state, head,
+            actor if isinstance(actor, str) and actor.strip() else None,
+            actor_id if type(actor_id) is int and actor_id > 0 else None,
+            when if isinstance(when, str) else None))
+    return tuple(result)
+
+
 def parse_pull(raw: object) -> Pull:
     if not isinstance(raw, dict):
         raise ValueError("pull must be an object")
@@ -317,7 +355,7 @@ def parse_pull(raw: object) -> Pull:
                 unique_logins(raw["requested_teams"], "requested_teams"),
                 accounts, reviews, has_submitted_review, unresolved,
                 tuple(review_state["approval_ids"]), ambiguous,
-                superseded)
+                superseded, current_head_submissions(review_records, identity.head))
 
 
 def reviewer_eligibility(pull: Pull, account: str) -> ReviewerEligibility:
@@ -379,7 +417,8 @@ def plan(snapshot: Sequence[dict], roster: Sequence[str]) -> Worklist:
                               ambiguous_reviews=pull.ambiguous_reviews,
                               superseded_change_requests=pull.superseded_change_requests,
                               review_ids=tuple(r.review_id for r in reviews),
-                              review_authors=tuple((r.actor_id, r.actor) for r in reviews)))
+                              review_authors=tuple((r.actor_id, r.actor) for r in reviews),
+                              current_head_submissions=pull.current_head_submissions))
 
     # Ownership routes are planned first so first-review balancing includes the
     # requests needed to return changed code to the reviewers who refused it.

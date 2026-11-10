@@ -172,6 +172,47 @@ class WorklistFlow(unittest.TestCase):
         self.assertEqual({a['account'] for a in planned}, {'reviewer-a', 'reviewer-b'})
         self.assertNotIn('posts', state)
 
+    def test_draft_exposes_current_comment_without_calling_it_an_approval(self):
+        self.state['pulls']['1'] = pull() | {'draft': True}
+        old = {'id': 12, 'state': 'COMMENTED', 'commit_id': 'c' * 40,
+               'user': user('reviewer-a'), 'body': 'Earlier scope.',
+               'submitted_at': '2026-10-26T09:00:00Z'}
+        current = old | {'id': 13, 'commit_id': HEAD,
+                         'submitted_at': '2026-10-26T10:00:00Z'}
+        pending = current | {'id': 14, 'state': 'PENDING', 'submitted_at': None}
+        unknown_head = current | {'id': 15, 'commit_id': None}
+        self.state['review_pages'] = {'1': [[old], [current, pending, unknown_head]]}
+        result, out, state = self.run_cli()
+        self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+        [action] = out['actions']
+        self.assertEqual(action['reason'], 'draft')
+        self.assertEqual(action.get('current_head_submissions'), [
+            {'review_id': 13, 'state': 'COMMENTED', 'head': HEAD,
+             'observed_login': 'reviewer-a', 'account_id': uid('reviewer-a'),
+             'submitted_at': '2026-10-26T10:00:00Z'}])
+        self.assertEqual(action['approval_ids'], [])
+        self.assertNotIn('posts', state)
+
+    def test_comment_with_unavailable_identity_does_not_block_formal_routing(self):
+        cr = {'id': 12, 'state': 'CHANGES_REQUESTED', 'commit_id': HEAD,
+              'user': user('reviewer-b'), 'body': 'Please fix this head.',
+              'submitted_at': '2026-10-26T09:00:00Z'}
+        comment = {'id': 13, 'state': 'COMMENTED', 'commit_id': HEAD,
+                   'user': None, 'submitted_at': None}
+        self.state['review_pages'] = {'1': [[cr], [comment]]}
+        result, out, state = self.run_cli()
+        self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+        [action] = out['actions']
+        self.assertEqual((action['reason'], action['review_ids'], action['approval_ids']),
+                         ('awaiting_author', [12], []))
+        self.assertEqual(action.get('current_head_submissions'), [
+            {'review_id': 12, 'state': 'CHANGES_REQUESTED', 'head': HEAD,
+             'observed_login': 'reviewer-b', 'account_id': uid('reviewer-b'),
+             'submitted_at': '2026-10-26T09:00:00Z'},
+            {'review_id': 13, 'state': 'COMMENTED', 'head': HEAD,
+             'observed_login': None, 'account_id': None, 'submitted_at': None}])
+        self.assertNotIn('posts', state)
+
     def test_request_and_readback_then_rerun_adds_no_request(self):
         result, out, state = self.run_cli(request=True)
         self.assertEqual(result.returncode, 0, result.stdout)
@@ -289,6 +330,10 @@ class WorklistFlow(unittest.TestCase):
         self.assertEqual({a['reason'] for a in out['actions']}, {'ambiguous_review', 'approved'})
         self.assertTrue(all(a['approval_ids'] == [14] for a in out['actions']))
         self.assertTrue(all(a['ambiguous_review_ids'] == [12, 13] for a in out['actions']))
+        self.assertTrue(all(
+            [(r['review_id'], r['state']) for r in a['current_head_submissions']]
+            == [(12, 'APPROVED'), (13, 'DISMISSED'), (14, 'APPROVED')]
+            for a in out['actions']))
         self.assertEqual(out['requests'], [])
         self.assertNotIn('posts', state)
 

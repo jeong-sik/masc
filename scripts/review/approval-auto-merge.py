@@ -403,6 +403,25 @@ def submit(repo, selected, head, scope):
     return hand_off(repo, outcome) if outcome['status'] in UNSETTLED else outcome
 
 
+MAIN_BUILD_WORKFLOW = 'main-minimal-build.yml'
+
+
+def wake_main_build(repo):
+    """A bot merge emits no push event, so the main build never starts.
+
+    Dispatch it here. A failed dispatch must not change the merge verdict:
+    the merge already happened and this call cannot undo it.
+    """
+    operation = subprocess.run(
+        ['gh', 'api', '--method', 'POST',
+         f'repos/{repo}/actions/workflows/{MAIN_BUILD_WORKFLOW}/dispatches',
+         '-f', 'ref=main'],
+        capture_output=True, text=True, check=False)
+    return {'dispatched': operation.returncode == 0,
+            'exit_code': operation.returncode,
+            'stderr': operation.stderr.strip()[:300]}
+
+
 def requested_pr():
     if os.environ['GITHUB_EVENT_NAME'] == 'workflow_dispatch':
         raw = os.environ['DISPATCH_PR']
@@ -452,6 +471,8 @@ def main():
             emit({'status': 'admitted', 'pr': selected, 'head': head, 'scope': scope})
         outcome = ({'status': 'eligible_dry_run'} if args.dry_run else
                    submit(repo, selected, head, scope))
+        if not args.dry_run and outcome.get('status') == 'merged':
+            outcome['main_build'] = wake_main_build(repo)
         result = {'pr': selected, 'head': head, 'scope': scope, 'result': outcome}
         if outcome.get('status') not in SUCCESS:
             exit_code = 1  # merged is the only success; everything else is visible red

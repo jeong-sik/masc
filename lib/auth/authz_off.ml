@@ -41,7 +41,7 @@ let error_to_string = function
     ^ Authz_mode_state.to_string mode
     ^ ", although it was a moment before"
   | Body_not_built error -> "the body of the Off was refused: " ^ Authz_body.error_to_string error
-  | Commit_failed error -> "the Off was not committed: " ^ Z.error_to_string error
+  | Commit_failed error -> "the Off was not committed: " ^ Z.error_detail error
 ;;
 
 (* Design 5.1: the log made Multi_account and the store matches it, whatever

@@ -122,7 +122,7 @@ let error_to_string = function
   | Install_record_not_written error -> Install_record.write_error_to_string error
   | External_store_not_created { path; detail } ->
     Printf.sprintf "the external store %s was not created: %s" path detail
-  | Zone_failed error -> "the record of the bootstrap: " ^ Authz_zone.error_to_string error
+  | Zone_failed error -> "the record of the bootstrap: " ^ Authz_zone.error_detail error
   | Mode_event_not_built error ->
     Printf.sprintf "the body of the mode event was refused: %s" (Authz_body.error_to_string error)
 ;;

@@ -373,8 +373,8 @@ let with_execution_publication_lock ~owner f =
 
 let subscribe_execution_completion ~owner completed =
   let listener = {completed} in
-  Atomic.update owner.completion_listeners (fun current -> listener :: current);
-  fun () -> Atomic.update owner.completion_listeners
+  Lockfree_atomic.update owner.completion_listeners (fun current -> listener :: current);
+  fun () -> Lockfree_atomic.update owner.completion_listeners
     (List.filter (fun current -> current != listener))
 ;;
 

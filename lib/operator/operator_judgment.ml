@@ -47,8 +47,8 @@ let write_notification_failures = Atomic.make 0
 
 let subscribe_written notify =
   let listener = {notify} in
-  Atomic.update write_listeners (fun listeners -> listener :: listeners);
-  fun () -> Atomic.update write_listeners
+  Lockfree_atomic.update write_listeners (fun listeners -> listener :: listeners);
+  fun () -> Lockfree_atomic.update write_listeners
     (List.filter (fun current -> current != listener))
 
 let failed_write_notifications () = Atomic.get write_notification_failures

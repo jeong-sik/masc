@@ -90,7 +90,7 @@ let telemetry_for_config config =
 
 let update publisher change =
   let generated_at = Unix.gettimeofday () in
-  Atomic.update publisher.state (fun previous ->
+  Lockfree_atomic.update publisher.state (fun previous ->
     let next = change previous in
     match next.shell, next.tools, next.telemetry with
     | Some (shell, shell_light), Some tools, Some telemetry_summary ->
@@ -179,7 +179,7 @@ let public_activity_events config =
 ;;
 
 let invalidate_public_activity_events ~base_path =
-  Atomic.update public_activity_cache (function
+  Lockfree_atomic.update public_activity_cache (function
     | Some entry -> if String.equal entry.base_path base_path then None else Some entry
     | None -> None)
 ;;

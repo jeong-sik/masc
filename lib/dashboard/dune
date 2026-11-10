@@ -6,6 +6,7 @@
  (wrapped false)
  (flags :standard -open Masc -w +33)
  (libraries
+  masc.lockfree_atomic
   masc
   masc.keeper_cost_coverage
   masc.masc_candle_runtime

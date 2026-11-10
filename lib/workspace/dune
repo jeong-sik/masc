@@ -52,6 +52,7 @@
   workspace_goal_index
   nickname)
  (libraries
+  masc.lockfree_atomic
   masc_types
   masc_core
   masc_config

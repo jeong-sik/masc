@@ -83,8 +83,8 @@ let next_deadline_unix owner = Stdlib.Mutex.protect owner.mu (fun () -> !(owner.
 
 let subscribe_completed owner completed =
   let listener = {completed} in
-  Atomic.update owner.listeners (fun listeners -> listener :: listeners);
-  fun () -> Atomic.update owner.listeners (List.filter (fun current -> current != listener))
+  Lockfree_atomic.update owner.listeners (fun listeners -> listener :: listeners);
+  fun () -> Lockfree_atomic.update owner.listeners (List.filter (fun current -> current != listener))
 
 let completion_failures = Atomic.make 0
 let notify owner completion =

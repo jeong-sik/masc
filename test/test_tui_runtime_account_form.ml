@@ -91,7 +91,7 @@ let refusal = function
 
 (* The body of an 80-column and of a 120-column pane, as the frame gives it. *)
 let width_80 = Masc_tui_frame.inner_width ~cols:80
-let rows form = F.rows ~width:width_80 form
+let rows form = F.rows ~width:width_80 ~height:max_int form
 
 let contains text row =
   let n = String.length text in
@@ -253,7 +253,7 @@ let fits ?(field_value = "") width form =
       in
       if (not focused_field) && Masc_tui_message_layout.display_width row > width then
         Alcotest.failf "a row is wider than the %d-cell pane, which cuts it: %S" width row)
-    (F.rows ~width form)
+    (F.rows ~width ~height:max_int form)
 
 let parses command =
   Sys.command (Printf.sprintf "bash -n -c %s 2>/dev/null" (Filename.quote command)) = 0
@@ -281,7 +281,7 @@ let copied_command ~width form =
           (String.sub text (String.length command_label)
              (String.length text - String.length command_label))
       else text)
-    (from (F.rows ~width form))
+    (from (F.rows ~width ~height:max_int form))
 
 let saved_on ?(choose = []) home =
   let form = submitted (press (opened ()) (choose @ [ "\r"; "\r" ] @ typed home @ [ "\r" ])) in
@@ -346,7 +346,7 @@ let declare_muse_sign_in current =
   in
   match F.declare_on ~inherited_home (submitted (press form ([ "\r"; "\r" ] @ typed "/home/op/.muse-account2" @ [ "\r" ]))) current with
   | Ok { F.sign_in; _ } -> Option.map F.command sign_in
-  | Error form -> Alcotest.failf "refused: %s" (String.concat " / " (F.rows ~width:240 form))
+  | Error form -> Alcotest.failf "refused: %s" (String.concat " / " (F.rows ~width:240 ~height:max_int form))
 (* PATH, MUSE_INSTALL_DIR and HOME decide the hinted executable; hold all
    three so the suite passes with or without a Muse install around. *)
 let with_muse_env ~path ~install_dir ~home f =

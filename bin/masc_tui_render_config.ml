@@ -2161,21 +2161,37 @@ let render_voice (state : state) =
   field (ui_text state ~ko:"장치" ~en:"device")
     (Option.value state.voice_input_device ~default:(ui_text state ~ko:"미확인" ~en:"unknown"));
   voice_body_line buf cols "";
-  (* Where the endpoints above come from. With no [voice] section the loader
-     reads the standalone JSON, and naming runtime.toml there sent a reader to a
-     file that declares nothing. *)
-  let declared_by =
-    match Option.map (member [ "source" ]) state.voice_setup with
-    | Some (Some (`Assoc source)) -> (
-        match List.assoc_opt "path" source with
-        | Some (`String path) -> Terminal_text.single_line path
-        | Some _ | None -> "runtime.toml [voice]")
-    | Some (Some _ | None) | None -> "runtime.toml [voice]"
+  let source =
+    match state.voice_setup_error, state.voice_setup with
+    | Some _, (Some _ | None) -> `Read_failed
+    | None, None -> `Unobserved
+    | None, Some json ->
+        (match member [ "source" ] json with
+         | Some `Null -> `Absent
+         | Some (`Assoc fields) ->
+             (match List.assoc_opt "kind" fields with
+              | Some (`String "runtime_toml") -> `Runtime_toml
+              | Some (`String "standalone_json") ->
+                  (match List.assoc_opt "path" fields with
+                   | Some (`String path) when not (String.equal path "") ->
+                       `Standalone_json (Terminal_text.single_line path)
+                   | Some _ | None -> `Unobserved)
+              | Some _ | None -> `Unobserved)
+         | Some _ | None -> `Unobserved)
+  in
+  let source_line =
+    match source with
+    | `Runtime_toml -> "runtime.toml [voice]"
+    | `Standalone_json path -> path
+    | `Absent -> ui_text state ~ko:"서버에 적용된 음성 설정 없음"
+        ~en:"No active voice configuration on the server"
+    | `Read_failed -> ui_text state ~ko:"확인하지 못함 · 조회 실패"
+        ~en:"Unconfirmed · read failed"
+    | `Unobserved -> ui_text state ~ko:"미확인" ~en:"Unknown"
   in
   voice_body_line buf cols
-    (Printf.sprintf (if state.ui_language = Lang_ko then "  %s선언: %s · 위 상태는 서버가 읽은 값%s"
-                     else "  %sDeclared in %s · status above is what the server loaded%s")
-       Ansi.dim declared_by Ansi.reset);
+    (Printf.sprintf "  %s%s: %s%s" Ansi.dim
+       (ui_text state ~ko:"설정 출처" ~en:"Config source") source_line Ansi.reset);
   (* The keys are the table's, as on every other Config pane. The row was
      written here and left out Esc and q, which the fitter keeps only when
      the hints name them, so the voice pane was the one Config pane that
@@ -2236,7 +2252,8 @@ let render_config (state : state) =
       match state.runtime_account_form with
       | Some form ->
           List.iter c.push
-            (Masc_tui_runtime_account_form.rows ~width:(framed_inner_width cols) form);
+            (Masc_tui_runtime_account_form.rows ~width:(framed_inner_width cols)
+               ~height:content_height form);
           (* The saved form stays open for its copy key, and the footer can
              lose it: the save notice leads that row and the fitter keeps only
              the way out, so CI run 36397938379 drew "Enter / Esc:close"

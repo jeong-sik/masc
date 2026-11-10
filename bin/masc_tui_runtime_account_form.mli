@@ -88,15 +88,22 @@ val paste : t -> string -> t
 (** Pasted text into the focused text field, without its control
     characters. [Base] takes none. *)
 
-val rows : width:int -> t -> string list
-(** The form as rows of a pane [width] cells wide. Names read from the file
+val rows : width:int -> height:int -> t -> string list
+(** The form as rows of a pane [width] cells wide. While filling, at most
+    [height] rows are returned, with the current field visible whenever
+    [height] is positive. Refusals take space before introductions. A long
+    refusal retains its beginning and an explicit continuation marker; with
+    only one row, [!] on the selected field signals the retained refusal.
+    Login instructions that do not fit are replaced by a notice to enlarge
+    the pane, never by a partial shell command. Names read from the file
     are drawn on one line. The heading, the hints and a refusal wrap to
     [width]: at spaces, under their own indentation, and inside a word only
     where the word alone is wider than a row. The sign-in command is one row
     when it fits and otherwise breaks only after its [&&], where each row
     alone is a syntax error and the two pasted together are the command; a
-    first half wider than the pane is cut by the pane rather than broken
-    elsewhere. Each field keeps one row, so the label column holds. A saved
-    form draws the saved id and the sign-in hints, without the fields. The
+    first half wider than the pane is replaced with the whole-command copy
+    instruction. Each visible field keeps one row, so the label column holds.
+    The saved phase retains its existing complete saved-id and sign-in rows,
+    without the fields; [height] only selects the filling field window. The
     keys it reads are the footer's, not a row; the pane adds the saved
     form's keys under it, where no notice can crowd them out. *)

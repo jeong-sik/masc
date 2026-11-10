@@ -1808,12 +1808,6 @@ let observe_runtime_events_with_scopes ?play ~machine ~browser ~on_identity ~clo
       ~path:(observer_stream_path ^ machine_query ^ browser_query ^ play_query ^ "&" ^ expected_workspace_paths_query
                ~base_path:expected_base_path ~masc_root:expected_masc_root)
   in
-  let headers =
-    ("Accept", "text/event-stream")
-    :: ("Mcp-Session-Id", sanitize_header_value session_id)
-    :: auth_headers ()
-    @ Sse_wire.observer_cursor_headers cursor
-  in
   let checked_response ~status ~headers =
     check_sse_response ~status ~headers;
     if Masc.Tui_decode.is_success_http_status status then begin
@@ -1835,6 +1829,15 @@ let observe_runtime_events_with_scopes ?play ~machine ~browser ~on_identity ~clo
     end
   in
   match
+    (* Only a buffered admission 401 is retried: no stream chunk has reached
+       the reader. Rebuild the bearer while keeping this scope and cursor. *)
+    with_credential_refresh_on ~refused:stream_refused @@ fun () ->
+    let headers =
+      ("Accept", "text/event-stream")
+      :: ("Mcp-Session-Id", sanitize_header_value session_id)
+      :: auth_headers ()
+      @ Sse_wire.observer_cursor_headers cursor
+    in
     Masc_http_client.get_stream ~clock ~idle_timeout_sec:keeper_chat_timeout_sec
       ~url ~headers ~on_response:checked_response ~on_chunk ()
   with
@@ -1887,15 +1890,16 @@ let observe_fleet_stream ~clock ~(expected_workspace : Masc.Tui_decode.server_id
     url_of ~host ~port
       ~path:(Masc.Fleet_stream.stream_path ^ "?" ^ expected_workspace_query expected_workspace)
   in
-  let headers = ("Accept", "text/event-stream") :: auth_headers () in
   let checked_response ~status ~headers =
     check_sse_response ~status ~headers;
     if status = 200 && not (workspace_read_attested headers) then
       raise (Invalid_sse_response "workspace admission receipt is missing or invalid")
   in
   match
+    with_credential_refresh_on ~refused:stream_refused @@ fun () ->
     Masc_http_client.get_stream ~clock
-      ~idle_timeout_sec:fleet_stream_idle_timeout_sec ~url ~headers
+      ~idle_timeout_sec:fleet_stream_idle_timeout_sec ~url
+      ~headers:(("Accept", "text/event-stream") :: auth_headers ())
       ~on_response:checked_response ~on_chunk ()
   with
   | exception Invalid_sse_response detail -> Error (Invalid_handshake detail)
@@ -3852,7 +3856,6 @@ let observe_system_log_stream ~clock ~(host : string) ~(port : int) ?level ?sinc
       (match since_seq with None -> "" | Some seq -> Printf.sprintf "&since_seq=%d" seq)
   in
   let url = url_of ~host ~port ~path:("/api/v1/dashboard/logs/stream?" ^ query) in
-  let headers = ("Accept", "text/event-stream") :: auth_headers () in
   let on_response ~status ~headers =
     if Masc.Tui_decode.is_success_http_status status then
       match validate_sse_response ~status ~headers with
@@ -3860,8 +3863,10 @@ let observe_system_log_stream ~clock ~(host : string) ~(port : int) ?level ?sinc
       | Error detail -> raise (Invalid_stream_response detail)
   in
   match
+    with_credential_refresh_on ~refused:stream_refused @@ fun () ->
     Masc_http_client.get_stream ~clock ~idle_timeout_sec:system_log_stream_idle_timeout_sec
-      ~url ~headers ~on_response ~on_chunk ()
+      ~url ~headers:(("Accept", "text/event-stream") :: auth_headers ())
+      ~on_response ~on_chunk ()
   with
   | exception Invalid_stream_response detail -> "log stream: " ^ detail
   | Error detail -> report_err "Log stream failed" detail

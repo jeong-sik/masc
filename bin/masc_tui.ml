@@ -8564,6 +8564,9 @@ let owe_memory_health_read state =
   state.memory_activity_owed <- Masc_tui_owed_read.changed state.memory_activity_owed;
   state.memory_health_owed <- Masc_tui_owed_read.changed state.memory_health_owed
 
+let owe_memory_world_read state =
+  state.memory_world <- Masc_tui_memory_world.changed state.memory_world
+
 (* The input pane shows the selected Keeper's turn records. A memory health
    answer may be about them: the fleet read, or a pushed row of that Keeper. *)
 let owe_memory_input_read state =
@@ -8651,7 +8654,7 @@ let owe_dataset_read state (dataset : Masc.Workspace_dataset_event.dataset) =
       if Masc_tui_types.observer_browser_scope_of_state state = Some observation.scope then
         state.browser_observation_owed <- Masc_tui_owed_read.changed state.browser_observation_owed
   | Masc.Workspace_dataset_event.Memory_health { keeper } -> owe_memory_health_row state keeper
-  | Masc.Workspace_dataset_event.World_memory
+  | Masc.Workspace_dataset_event.World_memory -> owe_memory_world_read state
   | Masc.Workspace_dataset_event.Dashboard_observation _ -> ()
   | Masc.Workspace_dataset_event.Play_room _ | Masc.Workspace_dataset_event.Play_seats ->
       state.play_room <- Option.map Masc_tui_play_room.revalidate state.play_room
@@ -8688,6 +8691,7 @@ let launch_surface_reads state ~mailbox (surface : surface) =
       owe_tool_modes_read state;
       owe_async_requests_read state;
       owe_memory_health_read state;
+      owe_memory_world_read state;
       launch_memory_health_load state ~mailbox
   | Keepers
       ( Keeper_detail | Keeper_logs | Keeper_calls | Keeper_message
@@ -8720,6 +8724,7 @@ let launch_surface_reads state ~mailbox (surface : surface) =
      screen. Metrics shows the same health and owes it the same way. *)
   | Memory ->
       owe_memory_health_read state;
+      owe_memory_world_read state;
       launch_memory_health_load state ~mailbox
   | Repositories ->
       owe_repositories_read state;
@@ -9691,18 +9696,9 @@ let launch_owed_memory_health state ~mailbox =
     | Settled, None, [] -> ()
   end
 
-(* The server answers the workspace memory inventory from a cache of this many
-   seconds and sends no change signal, so the world line reads it no faster
-   than that (RFC-0511 D11). *)
-let memory_world_read_interval_s = Server_dashboard_http_core_cache.standard_cache_ttl_s
-
-(* Runs on every loop iteration. The Memory overview and the Keepers memory/age
-   views draw the same world reading. Each answer sets the time before which
-   no read starts, so an open screen asks once per interval, a failed read
-   waits the same interval, and a screen entered again within it draws the
-   inventory already held. The read carries the expected workspace and needs
-   the server's receipt for it, so an answer from another workspace is an
-   error and not a count. *)
+(* The world line reads on arrival, revalidation and World_memory changes.
+   Success settles its debt; a change during the read owes one follow-up and
+   a failure keeps the shared typed retry. Hidden views keep their debt. *)
 let launch_owed_memory_world state ~mailbox =
   let visible = (state.view = Memory && Option.is_none state.memory_facts_keeper)
     || (state.view = Keepers Keeper_list
@@ -20161,6 +20157,7 @@ let start_http_refresh state ~host ~port ~intent ~refresh_inflight
        owe_harness_read state;
        owe_clients_read state;
        owe_memory_health_read state;
+       owe_memory_world_read state;
        if Option.is_some (observer_browser_scope state) then
          state.browser_observation_owed <- Masc_tui_owed_read.changed state.browser_observation_owed;
        Masc_tui_types.owe_every_identity_login_read state;
@@ -28877,8 +28874,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
          [complete]; a failed refresh keeps the inventory held. *)
       state.memory_world <-
         Masc_tui_memory_world.complete
-          ~next_read_at:(monotonic_now_s () +. memory_world_read_interval_s)
-          state.memory_world request result
+          ~retry_s:stream_reconnect_s ~max_retry_s:keeper_execute_stream_max_reconnect_s
+          ~now:(monotonic_now_s ()) state.memory_world request result
   | Memory_msg (Memory_facts_loaded (request, result)) ->
       (* A late answer for a browser that closed, or for the keeper the reader
          already left, is dropped whole by [complete]. A failed refresh keeps
@@ -32669,10 +32666,6 @@ Use relative paths for resources already held in the package. -->
           ~now_ns:(Mtime_clock.elapsed_ns ())
           ~maximum:maximum_input_wait_seconds
       in
-      (* While the spectator is open, keep the loop waking a few times a second
-         so a machine a keeper is driving looks live, and re-fetch the server
-         frame on that cadence. The fetch is bounded work on loopback; drawing
-         from the cache is cheap, so an unchanged frame just repaints. *)
       let input_timeout =
         (* Machine observation does not wake the loop to read. This timeout only
            lets terminal animation and input continue while a game is open. *)

@@ -433,6 +433,8 @@ let wake_slot =
   Alcotest.testable
     (fun fmt -> function
        | Masc_tui_keeper_next_run.Wakes n -> Format.fprintf fmt "Wakes %d" n
+       | Masc_tui_keeper_next_run.Wakes_with_unknown n ->
+         Format.fprintf fmt "Wakes_with_unknown %d" n
        | Masc_tui_keeper_next_run.Wakes_unknown -> Format.pp_print_string fmt "Wakes_unknown")
     ( = )
 ;;

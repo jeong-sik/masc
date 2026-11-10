@@ -131,7 +131,7 @@ let strip_cell = function
   (* A slot holding both a known count and an unknown remainder draws as the
      unknown mark: the certain fact is that this slot is not fully known. *)
   | Masc_tui_keeper_next_run.Wakes_with_unknown _ ->
-      Masc_tui_keeper_grid.Strip_unknown
+      Strip_unknown
   | Masc_tui_keeper_next_run.Wakes_unknown -> Strip_unknown
 ;;
 

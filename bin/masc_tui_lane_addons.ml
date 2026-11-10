@@ -895,6 +895,30 @@ type technical_part =
 
 let technical_text lines = List.map (fun line -> Technical_text line) lines
 
+let evidence_text (evidence : Row.evidence) =
+  "Evidence " ^ evidence.uri ^ " · sha256 " ^ Option.value ~default:"unknown" evidence.sha256
+
+(* One document part as screen rows. JSON is code: it takes the code gutter
+   and the lexer colours that every other JSON view draws. *)
+let technical_rows ~width = function
+  | Technical_text text -> document_rows ~width text
+  | Technical_json {value;indent} ->
+      let lines = Yojson.Safe.pretty_to_string value
+        |> String.split_on_char '\n'
+        |> List.map Masc.Tui_terminal_text.sanitize_terminal_text in
+      let source = String.concat "\n" lines in
+      (* The gutter and indentation must not take space from a grapheme
+         that would otherwise fit in the pane. *)
+      let palette = Masc_tui_markdown_theme.palette ~closing:"" in
+      let gutter = Masc_tui_message_layout.display_width palette.code_gutter in
+      let widest = List.fold_left (fun widest line ->
+        max widest (Masc_tui_message_layout.widest_grapheme_cells line)) 0 lines in
+      if width < gutter + widest then document_rows ~width source
+      else
+        let indent = min indent (width - gutter - widest) in
+        Masc_tui_markdown_theme.code ~language:"json" ~width:(width - indent) source
+        |> List.map (fun line -> String.make indent ' ' ^ line)
+
 let instance_parts view instances =
   List.concat (List.mapi (fun i item ->
     technical_text [Printf.sprintf "%s %s · %s · %s · run %s · rev %s · seq %d · rows %d"
@@ -1076,24 +1100,6 @@ let rec finite_values = function
 
 let technical_lines ?(height=24) ?(failed_note = "") ~width view =
   let _ = height in
-  let render = function
-    | Technical_text text -> document_rows ~width text
-    | Technical_json {value;indent} ->
-        let lines = Yojson.Safe.pretty_to_string value
-          |> String.split_on_char '\n'
-          |> List.map Masc.Tui_terminal_text.sanitize_terminal_text in
-        let source = String.concat "\n" lines in
-        (* The gutter and indentation must not take space from a grapheme
-           that would otherwise fit in the pane. *)
-        let palette = Masc_tui_markdown_theme.palette ~closing:"" in
-        let gutter = Masc_tui_message_layout.display_width palette.code_gutter in
-        let widest = List.fold_left (fun widest line ->
-          max widest (Masc_tui_message_layout.widest_grapheme_cells line)) 0 lines in
-        if width < gutter + widest then document_rows ~width source
-        else
-          let indent = min indent (width - gutter - widest) in
-          Masc_tui_markdown_theme.code ~language:"json" ~width:(width - indent) source
-          |> List.map (fun line -> String.make indent ' ' ^ line) in
   let raw_row (row : Row.row) =
     technical_text ([row.title; "Row " ^ row.id; "Lane " ^ row.lane_id;
      "Observed " ^ utc_stamp row.observed_at ^ " UTC";
@@ -1102,9 +1108,7 @@ let technical_lines ?(height=24) ?(failed_note = "") ~width view =
     @ Option.to_list (Option.map (fun (clock : Row.clock) ->
         "Clock " ^ clock.domain ^ " · " ^ clock.value) row.clock))
     @ [Technical_json {value=`Assoc row.fields;indent=0}]
-    @ technical_text (List.map (fun (e : Row.evidence) ->
-        "Evidence " ^ e.uri ^ " · sha256 " ^ Option.value ~default:"unknown" e.sha256)
-        row.evidence
+    @ technical_text (List.map evidence_text row.evidence
     @ (if row.related_ids=[] then []
        else ["Related " ^ String.concat ", " row.related_ids])) in
   let content = match view.snapshot with
@@ -1153,7 +1157,7 @@ let technical_lines ?(height=24) ?(failed_note = "") ~width view =
     | Some text -> [(if view.naming then "New TOML filename: " else "Plugin command: ") ^ text] in
   let document = match selected_document view with
     | None -> [] | Some session -> document_application_lines view session @ Document.summary session in
-  List.concat_map render
+  List.concat_map (technical_rows ~width)
     (technical_text (["?:help  Esc:back  J/K:scroll"] @ diagnostic_lines view)
      @ content @ technical_text (draft @ document) @ action_parts view @ receipt)
 
@@ -2080,17 +2084,16 @@ let detail_lines ~height ~width view =
                    else []) config.declarations)
           @ host_request_lines item
           @ connection_worker_lines snapshot item)
-      | Rows -> List.concat_map wrap (
-          if record_rows=[] then empty_result_lines view item
+      | Rows ->
+          if record_rows=[] then List.concat_map wrap (empty_result_lines view item)
           else List.concat_map (fun (row : Row.row) ->
-            [(if Option.fold ~none:false ~some:(fun (selected : Row.row) -> selected.id = row.id)
+            technical_text [(if Option.fold ~none:false ~some:(fun (selected : Row.row) -> selected.id = row.id)
                  selected then "> " else "  ")
              ^ (if List.mem row.id view.selected then "[selected] " else "") ^ row.title;
-             "Row " ^ row.id;
-             Yojson.Safe.pretty_to_string (`Assoc row.fields)]
-            @ List.map (fun (e : Row.evidence) ->
-              "Evidence " ^ e.uri ^ " · sha256 " ^
-              Option.value ~default:"unknown" e.sha256) row.evidence) record_rows) in
+             "Row " ^ row.id]
+            @ [Technical_json {value=`Assoc row.fields;indent=0}]
+            @ technical_text (List.map evidence_text row.evidence)
+            |> List.concat_map (technical_rows ~width)) record_rows in
       head @ body
   | Some _, None -> ["Reading Plugins…"]
 

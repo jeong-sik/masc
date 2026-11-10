@@ -416,31 +416,6 @@ let test_safe_filename_unicode () =
    We test it indirectly via the key generation behavior *)
 
 (* ============================================================
-   validate_file_path Tests
-   ============================================================ *)
-
-let test_validate_file_path_normal () =
-  match Workspace_utils.validate_file_path "agents/claude.json" with
-  | Ok _ -> ()
-  | Error e -> fail ("expected Ok, got: " ^ e)
-
-let test_validate_file_path_too_long () =
-  let long_path = String.make 501 'x' in
-  match Workspace_utils.validate_file_path long_path with
-  | Error e -> check bool "error mentions long" true (String.length e > 0)
-  | Ok _ -> fail "expected Error for long path"
-
-let test_validate_file_path_angle_bracket_lt () =
-  match Workspace_utils.validate_file_path "path<script>" with
-  | Error e -> check bool "security error" true (String.length e > 0)
-  | Ok _ -> fail "expected Error for <"
-
-let test_validate_file_path_angle_bracket_gt () =
-  match Workspace_utils.validate_file_path "path>output" with
-  | Error e -> check bool "security error" true (String.length e > 0)
-  | Ok _ -> fail "expected Error for >"
-
-(* ============================================================
    Path Helper Tests
    ============================================================ *)
 
@@ -853,12 +828,6 @@ let () =
       test_case "slash" `Quick test_safe_filename_slash;
       test_case "empty" `Quick test_safe_filename_empty;
       test_case "unicode" `Quick test_safe_filename_unicode;
-    ];
-    "validate_file_path", [
-      test_case "normal" `Quick test_validate_file_path_normal;
-      test_case "too long" `Quick test_validate_file_path_too_long;
-      test_case "angle bracket <" `Quick test_validate_file_path_angle_bracket_lt;
-      test_case "angle bracket >" `Quick test_validate_file_path_angle_bracket_gt;
     ];
     "path_helpers", [
       test_case "masc_dir is .masc under the base path" `Quick

@@ -82,7 +82,366 @@ let reset ~stream_sw reqd cause =
     report_then_end ~report:report_failure ~stream_sw reqd cause exn ~keep_answer:true
 ;;
 
-let dispatch ~sw reqd work =
+(* Runs every thunk, whatever an earlier one raised. What they raised is
+   raised once all have run. *)
+let run_all thunks =
+  let failure =
+    List.fold_left
+      (fun failure thunk ->
+         match thunk () with
+         | () -> failure
+         | exception exn ->
+           let raised = exn, Printexc.get_raw_backtrace () in
+           Some
+             (match failure with
+              | None -> raised
+              | Some earlier -> Eio.Exn.combine earlier raised))
+      None
+      thunks
+  in
+  Option.iter (fun (exn, backtrace) -> Printexc.raise_with_backtrace exn backtrace) failure
+;;
+
+(* h2 answers a flush only when the connection writer drains the body. A
+   stream the peer reset, and a connection that ended while the stream's
+   window was 0, are never drained, so a flush registered before that would
+   wait for ever. The stream switch ends in both cases:
+   Server_h2_stream_registry fails it on RST_STREAM, and the connection scope
+   cancels it. That end answers every flush still waiting with [`Closed].
+
+   A peer that keeps the stream open with its window at 0 drains nothing
+   either, and nothing ends that stream. The watchdog gives the oldest flush
+   still waiting [stalled_after_s] to be answered and resets the stream with
+   [Stalled] when it is not (RFC-0518 D2). A response body reaches h2 in
+   slices, each behind its own flush ([Response_body], D3), so the bound is
+   on what one socket write carries of the body, a slice or two, not on the
+   whole body, and WINDOW_UPDATEs of a byte or two do not stretch it
+   (RFC-0518 §3.3).
+
+   All of it runs on the connection's domain, where h2's own body writer has
+   to be called: the table and the condition take no lock. *)
+module Stream_end = struct
+  type t =
+    { stream_sw : Eio.Switch.t
+    ; reqd : H2.Reqd.t
+    ; request : H2.Request.t
+    ; clock : float Eio.Time.clock_ty Eio.Resource.t
+    ; stalled_after_s : float
+    ; mutable ended : bool
+    ; waiting : (int, unit -> unit) Hashtbl.t
+    ; mutable next_id : int
+    ; mutable quiet_since : float
+    ; registered : Eio.Condition.t
+    ; signal : unit Eio.Promise.t
+    ; resolve_signal : unit Eio.Promise.u
+    }
+
+  let key : t Eio.Fiber.key = Eio.Fiber.create_key ()
+  let with_current t f = Eio.Fiber.with_binding key t f
+  let current () = Eio.Fiber.get key
+  let switch t = t.stream_sw
+  let request t = t.request
+  let ended t = t.ended
+  let signal t = t.signal
+
+  (* A query can carry a token, so log lines leave it out. *)
+  let path_of_target target =
+    match String.index_opt target '?' with
+    | Some query -> String.sub target 0 query
+    | None -> target
+  ;;
+
+  let request_line t =
+    Printf.sprintf
+      "%s %s"
+      (H2.Method.to_string t.request.meth)
+      (path_of_target t.request.target)
+  ;;
+
+  let stall t =
+    Log.Http.warn
+      "[h2] %s: response bytes waited %.0fs for the peer; resetting the stream"
+      (request_line t)
+      t.stalled_after_s;
+    reset ~stream_sw:t.stream_sw t.reqd Stalled
+  ;;
+
+  (* [quiet_since] is when the flushes now waiting last made progress: the
+     registration that found none waiting, or the latest answer. h2 answers a
+     body's flushes as its bytes drain, oldest first, so that is also when
+     the oldest flush still waiting became the oldest. A flush registered
+     behind others does not move it. The time is read again after the sleep:
+     an answer that came meanwhile moved it. *)
+  let rec watch t =
+    if Hashtbl.length t.waiting = 0
+    then (
+      Eio.Condition.await_no_mutex t.registered;
+      watch t)
+    else (
+      Eio.Time.sleep_until t.clock (t.quiet_since +. t.stalled_after_s);
+      if Hashtbl.length t.waiting > 0
+         && Eio.Time.now t.clock >= t.quiet_since +. t.stalled_after_s
+      then stall t
+      else watch t)
+  ;;
+
+  (* The answers are the callers' own callbacks. Each flush still waiting
+     gets its answer whatever an earlier one raised, oldest first as h2
+     would have answered them, and what they raised is raised once all have
+     run, so the end of the scope reports it. *)
+  let answer_all t =
+    let answers =
+      Hashtbl.fold (fun id answer answers -> (id, answer) :: answers) t.waiting []
+      |> List.sort (fun (older, _) (newer, _) -> Int.compare older newer)
+    in
+    Hashtbl.reset t.waiting;
+    run_all (List.map snd answers)
+  ;;
+
+  let create ~stream_sw ~clock ~stalled_after_s ~request reqd =
+    let clock = (clock :> float Eio.Time.clock_ty Eio.Resource.t) in
+    let signal, resolve_signal = Eio.Promise.create () in
+    let t =
+      { stream_sw
+      ; reqd
+      ; request
+      ; clock
+      ; stalled_after_s
+      ; ended = false
+      ; waiting = Hashtbl.create 2
+      ; next_id = 0
+      ; quiet_since = Eio.Time.now clock
+      ; registered = Eio.Condition.create ()
+      ; signal
+      ; resolve_signal
+      }
+    in
+    (* Eio runs the hooks of a switch newest first, so this one runs after
+       those the stream's work registered later. A flush such a hook
+       registers is still in the table when the answers go out. *)
+    Eio.Switch.on_release stream_sw (fun () ->
+      t.ended <- true;
+      (* The signal goes before the answers: producers on other switches
+         wait on it, whatever an answer raises. *)
+      Eio.Promise.resolve t.resolve_signal ();
+      answer_all t);
+    (* A daemon: the stream's scope ends with its response, not with this
+       fiber. *)
+    Eio.Fiber.fork_daemon ~sw:stream_sw (fun () ->
+      watch t;
+      `Stop_daemon);
+    t
+  ;;
+
+  (* [f] runs once: when h2 drains the body, or when the stream's end comes
+     first. At the stream's end the scope reports what [f] raises
+     ([answer_all]). *)
+  let flush t writer f =
+    if t.ended
+    then f `Closed
+    else (
+      let id = t.next_id in
+      t.next_id <- id + 1;
+      let answered = ref false in
+      let once outcome =
+        if not !answered
+        then (
+          answered := true;
+          Hashtbl.remove t.waiting id;
+          t.quiet_since <- Eio.Time.now t.clock;
+          f outcome)
+      in
+      if Hashtbl.length t.waiting = 0
+      then (
+        t.quiet_since <- Eio.Time.now t.clock;
+        Eio.Condition.broadcast t.registered);
+      Hashtbl.replace t.waiting id (fun () -> once `Closed);
+      (* h2 answers from the connection's write loop, and an exception there
+         ends the loop for every stream of the connection (gluten-eio
+         [write_loop]). What an answer raises is its own stream's failure,
+         as what the stream's handler raises is. *)
+      H2.Body.Writer.flush writer (fun outcome ->
+        try once outcome with
+        | Eio.Cancel.Cancelled _ as cancelled -> raise cancelled
+        | exn -> reset ~stream_sw:t.stream_sw t.reqd (Raised exn)))
+  ;;
+
+  (* h2#278: see the WORKAROUND at [close_after_flush] below. *)
+  let close_after_flush t writer =
+    flush t writer (function
+      | `Written | `Closed -> H2.Body.Writer.close writer)
+  ;;
+end
+
+(* RFC-0518 D3. h2 hands the connection as much of a body as the stream's and
+   the connection's windows allow, in one piece, and answers the body's
+   flushes once the socket took the whole piece (h2 scheduler.ml [write],
+   body.ml [transfer_to_writer]; gluten-eio writes the piece with one
+   [Eio.Flow.write]). A body h2 holds whole therefore has to cross the socket
+   within one stall bound when the peer's window covers it, however steadily
+   the peer reads, and the connection writes nothing else meanwhile.
+
+   So h2 holds two slices of a body at most. The rest waits here in the
+   order it was written, the flushes and the close in their place, and the
+   answer to a slice's flush sends the next slice. That answer comes from
+   h2's writer or from the end of the stream: no fiber waits, and the order
+   holds without a lock. *)
+module Response_body = struct
+  (* What h2 does not hold yet: payload bytes, and what is due once the bytes
+     before it left. A flush waits as its answer, the close as the answer
+     that closes h2's body. *)
+  type entry =
+    | Payload of
+        { text : string
+        ; mutable written : int
+        ; sent : unit -> unit
+        }
+    | After of ([ `Written | `Closed ] -> unit)
+
+  (* [in_flight]: the slices in h2 whose flushes have no answer yet. Entries
+     wait only while there are some, and a payload is the first of them. *)
+  type t =
+    { stream_end : Stream_end.t
+    ; writer : H2.Body.Writer.t
+    ; entries : entry Queue.t
+    ; mutable in_flight : int
+    ; mutable closed : bool
+    }
+
+  (* One DATA frame of the default SETTINGS_MAX_FRAME_SIZE (RFC 9113 §6.5.2). *)
+  let slice_bytes = 16_384
+
+  (* h2 fills a DATA frame from the bytes it holds of a body (serialize.ml
+     [schedule_iovecs]). With one slice in h2 a frame ended where the slice
+     did, whatever the peer's window still allowed. A peer that returns its
+     credit frame by frame then got the credit of one frame back as two
+     frames at every slice's end, and the frames only got smaller. With two
+     slices the one behind is in h2 when a frame reaches the end of the one
+     in front, and the frame goes on into it (RFC-0518 D3). *)
+  let slices_in_h2 = 2
+
+  let create stream_end writer =
+    { stream_end; writer; entries = Queue.create (); in_flight = 0; closed = false }
+  ;;
+
+  let is_closed t =
+    t.closed || Stream_end.ended t.stream_end || H2.Body.Writer.is_closed t.writer
+  ;;
+
+  let told outcome answers = List.map (fun answer () -> answer outcome) answers
+
+  (* Writes one slice from the head of the queue. Returns what the slice
+     settles once the socket took it: the payloads it finished, and what
+     waits behind them before the next payload byte. *)
+  let write_slice t =
+    let rec take room settled =
+      match Queue.peek_opt t.entries with
+      | Some (Payload payload) when room > 0 ->
+        let len = Int.min room (String.length payload.text - payload.written) in
+        H2.Body.Writer.write_string t.writer ~off:payload.written ~len payload.text;
+        payload.written <- payload.written + len;
+        if payload.written < String.length payload.text
+        then settled
+        else (
+          ignore (Queue.pop t.entries : entry);
+          take
+            (room - len)
+            ((fun (_ : [ `Written | `Closed ]) -> payload.sent ()) :: settled))
+      | Some (After answer) ->
+        ignore (Queue.pop t.entries : entry);
+        take room (answer :: settled)
+      | Some (Payload _) | None -> settled
+    in
+    List.rev (take slice_bytes [])
+  ;;
+
+  (* Nothing queued goes out any more: the stream ended, or h2 closed the
+     body. *)
+  let abandon t =
+    t.closed <- true;
+    let waiting =
+      Queue.fold
+        (fun waiting entry ->
+           match entry with
+           | Payload { sent; _ } -> (fun (_ : [ `Written | `Closed ]) -> sent ()) :: waiting
+           | After answer -> answer :: waiting)
+        []
+        t.entries
+    in
+    Queue.clear t.entries;
+    told `Closed (List.rev waiting)
+  ;;
+
+  (* Hands h2 slices until it holds [slices_in_h2] or nothing waits here, and
+     returns the answers that became due. Those are the answers of all that
+     waits here once h2 closed the body itself: h2 drops what is written to
+     a body it closed and answers a flush there as if the bytes had gone
+     (body.ml [write_string], [flush]), so such a body takes nothing more. *)
+  let rec fill t =
+    if t.in_flight < slices_in_h2 && not (Queue.is_empty t.entries)
+    then
+      if H2.Body.Writer.is_closed t.writer
+      then abandon t
+      else (
+        send_slice t;
+        fill t)
+    else []
+
+  (* The slices that follow start before the answers run, so an answer that
+     writes, flushes or closes finds the queue in order. Each answer runs
+     whatever another raised, and what they raise ends the stream
+     ([Stream_end.flush]). *)
+  and send_slice t =
+    let settled = write_slice t in
+    t.in_flight <- t.in_flight + 1;
+    Stream_end.flush t.stream_end t.writer (fun outcome ->
+      t.in_flight <- t.in_flight - 1;
+      match outcome with
+      | `Written ->
+        let due = fill t in
+        run_all (told `Written settled @ due)
+      | `Closed ->
+        let abandoned = abandon t in
+        run_all (told `Closed settled @ abandoned))
+  ;;
+
+  (* [write] and [flush] are for a body that is not closed. Http_reqd asks
+     [is_closed] first: a write has to know before it reserves in the
+     ledger, and nothing suspends between its question and the call here. *)
+  let write t ~sent text =
+    if String.length text = 0
+    then sent ()
+    else (
+      Queue.push (Payload { text; written = 0; sent }) t.entries;
+      run_all (fill t))
+  ;;
+
+  (* h2 answers the flushes of a body in the order of the bytes before them
+     (faraday.ml [shift_flushes]). With no payload waiting here it holds
+     every byte written so far, and answers at once when they all left. *)
+  let flush t answer =
+    if Queue.is_empty t.entries
+    then Stream_end.flush t.stream_end t.writer answer
+    else Queue.push (After answer) t.entries
+  ;;
+
+  (* h2 cuts a body that is closed with bytes pending at the peer's window
+     (anmonteiro/ocaml-h2#278). The close waits as a flush does, so h2 gets
+     it once every byte before it has left. A stream that ended first has no
+     body left to close. *)
+  let close t =
+    if not t.closed
+    then (
+      t.closed <- true;
+      flush t (function
+        | `Written -> H2.Body.Writer.close t.writer
+        | `Closed -> ()))
+  ;;
+end
+
+let dispatch stream_end work =
+  let sw = Stream_end.switch stream_end
+  and reqd = stream_end.Stream_end.reqd in
   let ledger = Http_h2_response_ledger.current () in
   Eio.Fiber.fork_daemon ~sw (fun () ->
     (* fork starts its child immediately. Return to h2's parser before any
@@ -93,9 +452,10 @@ let dispatch ~sw reqd work =
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn -> reset ~stream_sw:sw reqd (Raised exn)
     in
-    (match ledger with
-     | Some ledger -> Http_h2_response_ledger.with_current ledger run
-     | None -> run ());
+    Stream_end.with_current stream_end (fun () ->
+      match ledger with
+      | Some ledger -> Http_h2_response_ledger.with_current ledger run
+      | None -> run ());
     `Stop_daemon)
 ;;
 
@@ -114,8 +474,21 @@ let dispatch ~sw reqd work =
    which skips it while the window is 0, and that is the only path that drains
    the body when the connection dies. The writer is then left open and goes
    when the stream does. Measured on a peer RST_STREAM, on a connection kept
-   alive for 30 pings afterwards, and on transport close. *)
+   alive for 30 pings afterwards, and on transport close.
+
+   Http_reqd ends a response body with [Response_body.close], which keeps
+   the close behind every slice. The writers closed here carry a short answer
+   written at once: the 503 of a refused payload and the error answers h2
+   opens. A fiber with a bound [Stream_end] flushes through it, so a peer
+   that never drains the answer is reset after the stall bound and the writer
+   closes then. h2 opens its own error answers on the connection reader,
+   which has no stream fiber, and the registry reports a failure that ended
+   a stream's scope after that scope; those answers wait as before
+   (RFC-0518 D2, §5). *)
 let close_after_flush writer =
-  H2.Body.Writer.flush writer (function
-    | `Written | `Closed -> H2.Body.Writer.close writer)
+  match Stream_end.current () with
+  | Some stream_end -> Stream_end.close_after_flush stream_end writer
+  | None ->
+    H2.Body.Writer.flush writer (function
+      | `Written | `Closed -> H2.Body.Writer.close writer)
 ;;

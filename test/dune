@@ -2724,8 +2724,10 @@
 (include stanzas/test_board_persistence_load_contract.inc)
 
 (include stanzas/test_board_posts_source_authority.inc)
+(include stanzas/test_board_delete_order.inc)
 (include stanzas/test_board_comments_source.inc)
 (include stanzas/test_board_sub_boards_source.inc)
+(include stanzas/test_board_votes_source.inc)
 (include stanzas/test_board_posts_preflight.inc)
 
 (include stanzas/test_board_snapshot_rows.inc)
@@ -3389,6 +3391,7 @@
 (include stanzas/test_keeper_agent_core_retained_carrier.inc)
 (include stanzas/test_keeper_execute_background.inc)
 (include stanzas/test_keeper_host_result_retention.inc)
+(include stanzas/test_keeper_arrived_preview_readership.inc)
 (include stanzas/test_keeper_result_producer_liveness.inc)
 (include stanzas/test_runtime_claude_code.inc)
 (include stanzas/test_runtime_claude_input_attribution.inc)
@@ -4185,7 +4188,7 @@
 (test
  (name test_tui_palette_matching)
  (modules test_tui_palette_matching)
- (libraries masc.runtime masc_tui_palette masc_tui_pick_list alcotest masc.masc_types masc_tui_code_lexer masc_tui_types masc_tui_fetched masc))
+ (libraries masc.runtime masc_tui_palette masc_tui_pick_list alcotest masc.masc_types masc_tui_code_lexer masc_tui_types masc_tui_fetched masc_tui_code_results masc))
 
 (test
  (name test_tui_workspace_entries)
@@ -4706,6 +4709,11 @@
   masc_tui_theme
   masc_tui_types  unix
 ))
+
+(test
+ (name test_tui_memory_lineage)
+ (modules test_tui_memory_lineage)
+ (libraries alcotest masc masc_tui_memory_lineage))
 
 (test
  (name test_tui_memory_facts_explorer)
@@ -7085,7 +7093,7 @@
  (name test_tui_resource_image_admission)
  (modules test_tui_resource_image_admission)
  (libraries masc masc.agent_core.digest masc.skill_reference masc_tui_loader masc_tui_image_requests masc_tui_input_reader masc_tui_resource_diagrams masc_tui_keeper_chat_projection masc_tui_resource_catalog alcotest masc_tui_types masc_tui_mcp masc_tui_resource_images masc_tui_board_detail masc_tui_board_reader masc_tui_board_preview_work masc_tui_image_cache masc_tui_image_payload masc_tui_async_protocol masc_tui_attachment_action masc_tui_browser masc_tui_pele unix threads mtime.clock.os
-  masc_tui_image_preview masc_tui_image_viewport masc_tui_resources_updates
+  masc_tui_image_preview masc_tui_image_viewport masc_tui_resources_updates masc_tui_fetched
   masc_tui_workspace_result masc_eio_context eio eio_main))
 
 (test

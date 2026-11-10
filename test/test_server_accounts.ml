@@ -199,10 +199,24 @@ let test_serves_its_table_alone () =
                    (match List.assoc_opt "account_mode" fields with
                     | Some (`String mode) -> Some mode
                     | Some _ | None -> None);
+                 (* Anyone who reaches the listener reads this answer, so the
+                    test names all of it: a field of the host or of the
+                    workspace (the build record carries the path of the
+                    executable) does not come in unnoticed. *)
+                 Alcotest.(check (list string))
+                   "the health answer holds the server, its version and the mode, and no more"
+                   [ "account_mode"; "server"; "version" ]
+                   (List.sort String.compare (List.map fst fields));
                  Alcotest.(check bool)
-                   "the health answer says nothing of the paths of the workspace"
-                   false
-                   (List.mem_assoc "paths" fields)
+                   "every field of the health answer is a string"
+                   true
+                   (List.for_all
+                      (fun ((_ : string), value) ->
+                        match value with
+                        | `String (_ : string) -> true
+                        | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `Assoc _ | `List _ ->
+                          false)
+                      fields)
                | _ -> Alcotest.failf "the health answer is not an object: %S" body
                | exception Yojson.Json_error detail -> Alcotest.failf "%s: %S" detail body);
               (* The routes of the single-user server are not in the table,

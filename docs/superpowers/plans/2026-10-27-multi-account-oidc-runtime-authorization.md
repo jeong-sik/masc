@@ -752,10 +752,10 @@ S1은 둘로 나눈다(2026-11-10 사용자). 다 만든 뒤에 여는 대신 �
 - 8행(`Multi_account_uncertain`)은 부팅을 멈춘다(`Authorization_uncertain`). 설계 §5.1 표는 이 행을 "`AuthorizationUncertain`으로 시작한다"고 적는다. 그 상태에서 서빙할 것은 recovery(F3b)이고 2단계다. 그때까지는 열 경로가 없어서 듣지 않는다.
 - 구역의 열기. 구역은 7행에서만 연다. 판정과 열기 사이에 파일이 바뀌어 열기가 실패하면(`Zone_not_opened`) 부팅을 멈춘다.
 - stdio는 다계정 설치를 거절하고 끝난다. stdio runtime은 단일 사용자의 owner 상태다.
-- `/health`는 빌드 식별과 `account_mode`만 답한다. 인증 없이 누구나 부르므로 workspace의 경로나 Keeper 수는 싣지 않는다.
+- `/health`는 `server`, release 버전(`version`), `account_mode` 세 칸만 답한다. 인증 없이 누구나 부르므로 빌드 기록(`Build_identity`: 실행 파일과 checkout의 경로, commit, 시작 시각), workspace의 경로, Keeper 수는 싣지 않는다. 실제 바이너리로 띄워 본 첫 답에 빌드 기록의 경로가 실려 있어서 뺐다(2026-11-10).
 - 문구. `masc auth bootstrap`의 도움말·성공 문구와 5행 부팅 문구(`Activation_requested`)가, 활성화한 설치를 서버가 다계정 설치로 띄운다고 말한다.
 - 시험.
-  - `test_server_accounts`: 실제 `Fresh_bootstrap`으로 만든 설치를 부팅 진입(`boot`)에 넣고, 그 값으로 계정 서버를 loopback 포트에 띄워 HTTP/1.1로 부른다. `GET /health`는 200이고 `account_mode`가 `Multi_account`다. 단일 사용자 서버의 경로 여섯(dev-token, status, MCP의 POST·DELETE, WebSocket, 루트)은 404다. 표에 없는 메서드는 405, listener가 아닌 Host는 400이다.
+  - `test_server_accounts`: 실제 `Fresh_bootstrap`으로 만든 설치를 부팅 진입(`boot`)에 넣고, 그 값으로 계정 서버를 loopback 포트에 띄워 HTTP/1.1로 부른다. `GET /health`는 200이고 `account_mode`가 `Multi_account`다. 답의 칸은 `account_mode`·`server`·`version` 셋뿐이고 값은 모두 문자열이다. 단일 사용자 서버의 경로 여섯(dev-token, status, MCP의 POST·DELETE, WebSocket, 루트)은 404다. 표에 없는 메서드는 405, listener가 아닌 Host는 400이다.
   - 같은 파일의 표 검사: 계정 서버의 표와 `Browser_session` 경로는 통과하고, `Read_auth` 경로와 dev-token 종류는 거절한다.
   - `test_authz_boot_mode_read`: 7행은 `Boot_multi_account`다. 진입은 판정이 읽은 저장소 경로를 싣는다. 익명 쓰기가 켜져 있으면 거절한다. 8행은 `Authorization_uncertain`으로 멈춘다.
 - 하지 않는 것: 구역의 멈춤을 읽는 일(S1a-2), 로그인 경로와 사람의 경로(S1a-3), `masc auth preview`를 계정 서버 코드로 옮기는 일(S1a-3), Keeper lane, MCP(S1b).

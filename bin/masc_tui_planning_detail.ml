@@ -45,20 +45,100 @@ let wrapped_indent ~width ~indent tone text =
 
 let wrapped ~width tone text = wrapped_indent ~width ~indent:0 tone text
 
+(* [Yojson] reads the value once, to decide that it is JSON; the layout below
+   never re-reads it. Re-serialising the parsed value is not faithful enough
+   for evidence: this yojson (2.6.0) reads [1E400] as float infinity and
+   writes back the non-JSON word "Infinity", and it normalises [1.50] to
+   [1.5] -- the reader would see a different number than the wire carried.
+   So the display is the validated original substring with whitespace
+   inserted between tokens and nothing else: every string and number byte,
+   including its literal spelling, is copied as it arrived. On Yojson-valid
+   input a token run cannot bleed past its end -- after a number only
+   [,],}] or whitespace can follow, and [e],[E],[+],[-] inside the run occur
+   only within a number. *)
+let layout_validated_json (raw : string) : string =
+  let out = Buffer.create (String.length raw + 64) in
+  let depth = ref 0 in
+  let fresh_line = ref true in
+  let mark_written () = fresh_line := false in
+  let break_line () =
+    if not !fresh_line then begin
+      Buffer.add_char out '\n';
+      for _ = 1 to !depth do Buffer.add_string out "  " done;
+      fresh_line := true
+    end in
+  let at = ref 0 in
+  let length = String.length raw in
+  let copy_char () = Buffer.add_char out raw.[!at]; incr at; mark_written () in
+  let copy_while predicate =
+    while !at < length && predicate raw.[!at] do copy_char () done in
+  let copy_string () =
+    (* the opening quote *)
+    copy_char ();
+    let escaped = ref false in
+    let continue = ref true in
+    while !continue && !at < length do
+      let char = raw.[!at] in
+      copy_char ();
+      if !escaped then escaped := false
+      else if Char.equal char '\\' then escaped := true
+      else if Char.equal char '"' then continue := false
+    done in
+  let copy_number () =
+    copy_while (fun char ->
+        (Char.equal char '-')
+        || (Char.equal char '+')
+        || (Char.equal char '.')
+        || (Char.equal char 'e')
+        || (Char.equal char 'E')
+        || (char >= '0' && char <= '9')) in
+  let copy_word () = copy_while (fun char -> char >= 'a' && char <= 'z') in
+  let open_container close =
+    (* peek past the brace for an empty pair, which stays inline *)
+    let probe = ref (!at + 1) in
+    while !probe < length && (Char.equal raw.[!probe] ' ' || Char.equal raw.[!probe] '\t'
+                              || Char.equal raw.[!probe] '\n' || Char.equal raw.[!probe] '\r')
+    do incr probe done;
+    if !probe < length && Char.equal raw.[!probe] close then begin
+      copy_char ();
+      copy_char ()
+    end else begin
+      copy_char ();
+      incr depth;
+      break_line ()
+    end in
+  while !at < length do
+    (match raw.[!at] with
+     | ' ' | '\t' | '\n' | '\r' -> incr at
+     | '{' -> open_container '}'
+     | '[' -> open_container ']'
+     | '}' | ']' ->
+         decr depth;
+         break_line ();
+         copy_char ()
+     | ',' ->
+         copy_char ();
+         break_line ()
+     | ':' ->
+         copy_char ();
+         Buffer.add_char out ' ';
+         mark_written ()
+     | '"' -> copy_string ()
+     | '0' .. '9' | '-' -> copy_number ()
+     | 'a' .. 'z' -> copy_word ()
+     | _ -> copy_char ())
+  done;
+  Buffer.contents out
+
 (* A summary sometimes carries a whole JSON value -- a keeper's failed turn
    names its cause that way. Kept inside the sentence it is one long line the
-   terminal wraps mid-token; laid out by Yojson's own pretty printer the
-   reader sees the fields instead of the punctuation. The value is evidence,
-   so it is re-laid-out, never re-read: the pretty printer serialises the
-   parsed value, which keeps a string that holds JSON-looking text a string
-   and a string's inner newlines escaped -- unlike the chat document
-   renderer, which unfolds such strings into the tree above them. Yojson is
-   also the arbiter of what is JSON: the value must parse either to the end
-   of the summary or from the first brace to the last when prose follows it.
-   A cause the server previews to a byte prefix does not parse and stays the
-   sentence it arrived in, rather than a half-tree that reads as decided.
-   Answers (text before the value, the pretty-printed value, text after
-   it). *)
+   terminal wraps mid-token; laid out one member per line the reader sees the
+   fields instead of the punctuation. Yojson is the arbiter of what is JSON:
+   the value must parse either to the end of the summary or from the first
+   brace to the last when prose follows it. A cause the server previews to a
+   byte prefix does not parse and stays the sentence it arrived in, rather
+   than a half-tree that reads as decided. Answers (text before the value,
+   the value re-laid-out verbatim, text after it). *)
 let split_embedded_json (text : string) : (string * string * string) option =
   match String.index_opt text '{' with
   | None -> None
@@ -68,10 +148,11 @@ let split_embedded_json (text : string) : (string * string * string) option =
           Yojson.Safe.from_string (String.sub text start (stop - start))
         with
         | exception Yojson.Json_error _ -> None
-        | (`Assoc _ | `List _) as value ->
+        | (`Assoc _ | `List _) ->
+            let raw = String.sub text start (stop - start) in
             Some
               ( String.sub text 0 start
-              , Yojson.Safe.pretty_to_string value
+              , layout_validated_json raw
               , String.sub text stop (String.length text - stop) )
         | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Null -> None
       in

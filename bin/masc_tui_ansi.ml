@@ -291,12 +291,24 @@ module Theme = struct
   module Syntax = struct
     let keyword = Masc_tui_theme.Syntax.keyword
     let string = Masc_tui_theme.Syntax.string_
-    let code_comment = Masc_tui_theme.Syntax.code_comment
+
+    (* A comment says it is a comment by its slant, and it sits behind the code
+       around it. Its colour is the lifted bright black the tool trail already
+       draws through: a scheme whose bright black reads under 4.5:1 has it
+       raised to that floor, and a terminal that reported no palette keeps the
+       plain code. *)
+    let code_comment () = Masc_tui_theme.Sgr.italic ^ quiet_origin ()
+
     let code_number = Masc_tui_theme.Syntax.code_number
     let code_type = Masc_tui_theme.Syntax.code_type
     let code_span = Masc_tui_theme.Syntax.code_span
     let link = Masc_tui_theme.Syntax.link
-    let rule = Masc_tui_theme.Syntax.rule
+
+    (* The rule between sections and the border of a fence divide a document
+       the way a panel border divides a screen, so they take the panel
+       border's colour. *)
+    let rule () = recede ()
+
     let json_key = Masc_tui_theme.Syntax.json_key
     let json_number = Masc_tui_theme.Syntax.json_number
     let json_literal = Masc_tui_theme.Syntax.json_literal

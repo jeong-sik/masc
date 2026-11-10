@@ -1309,15 +1309,23 @@ let acting_pane_input (state : state) =
           state.workspace_identity = Workspace_identity_match
           && server_authority_ready state in
         let waiting =
-          if not workspace_ready || List.mem keeper.k_name state.keeper_waiting_unverified then
-            Masc_tui_keeper_list_model.Waiting_unavailable
-          else match state.keeper_waiting_failure with
-            | Some _ -> Masc_tui_keeper_list_model.Waiting_unavailable
+          (* A waiting change only marks the Keeper unverified until the read
+             that follows lands. Keeping the last observed row through that
+             window stops the pane line from flapping between the warning and
+             the count on every change burst; a Keeper never observed, or a
+             workspace that cannot answer, still shows the warning. *)
+          let last_row =
+            List.find_opt (fun (row : Tui_decode.keeper_waiting_row) ->
+              String.equal row.kwr_keeper_name keeper.k_name) state.keeper_waiting
+          in
+          if not workspace_ready then Masc_tui_keeper_list_model.Waiting_unavailable
+          else match last_row with
+            | Some row -> Masc_tui_keeper_list_model.Waiting_observed row
             | None ->
-                (match List.find_opt (fun (row : Tui_decode.keeper_waiting_row) ->
-                  String.equal row.kwr_keeper_name keeper.k_name) state.keeper_waiting with
-                 | Some row -> Masc_tui_keeper_list_model.Waiting_observed row
-                 | None -> Masc_tui_keeper_list_model.Waiting_unobserved) in
+                if List.mem keeper.k_name state.keeper_waiting_unverified
+                   || Option.is_some state.keeper_waiting_failure
+                then Masc_tui_keeper_list_model.Waiting_unavailable
+                else Masc_tui_keeper_list_model.Waiting_unobserved in
         let task_source = match state.local_keepers with
           | Local_workspace_unread -> Pane.Task_source_unread
           | Local_workspace_read -> Pane.Task_source_read

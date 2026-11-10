@@ -647,7 +647,7 @@ let run_continuity ?cli_runner ?has_waiting ~base_path ~keeper_name () =
       else
       (
       let saved = ref false and cli_limit = ref None and cause = ref None in
-      Runtime.run_best_effort ?cli_runner
+      Runtime.run_best_effort ?cli_runner ~pass:Keeper_memory_commit_pass.Continuity
         ~write_scope:(if memory_committed then Runtime.Context_only else Context_and_memory)
         ~continuity:selected
         ?durable_range_id:(if memory_committed then None else Some range_id)
@@ -1041,7 +1041,10 @@ let run_with_readers ~durable ~continuity ~cleanup ~base_path ~keeper_name =
       if context_pass_needed ~keepers_dir ~keeper_name working_context then (
         let inp = queue_input ~config:(Workspace.default_config base_path) ~keeper_id ~meta
             ~working_context in
+        (* A Context_only run writes no Memory, so the pass it must name
+           labels no commit. *)
         Keeper_librarian_runtime.run_best_effort
+          ~pass:Keeper_memory_commit_pass.Continuity
           ~write_scope:Keeper_librarian_runtime.Context_only
           ~on_context_committed:(remember_context_pass ~keepers_dir ~keeper_name working_context)
           ~base_path ~keepers_dir ~keeper_id:keeper_name

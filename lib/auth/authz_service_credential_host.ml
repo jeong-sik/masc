@@ -2,7 +2,9 @@
 
 let ( let* ) = Result.bind
 
-(* As the id of an invitation: 16 random bytes in hex. *)
+(* 128 random bits in hex. An id is never used again (design 4.1):
+   [Authz_service_credential.issue] draws again, or refuses an id that the
+   log holds. *)
 let id_bytes = 16
 
 type error =

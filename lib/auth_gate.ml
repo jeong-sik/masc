@@ -164,11 +164,16 @@ let role_of state = function
   | Principal.Service _ -> Masc_domain.Worker
 ;;
 
-let authenticated state principal binding pat_binding =
-  { principal; binding; pat_binding; role = role_of state principal }
+(* The role is read in the snapshot that authenticated the credential. *)
+let authenticated (trusted : Authz_zone.trusted) principal binding pat_binding =
+  { principal
+  ; binding
+  ; pat_binding
+  ; role = role_of (trusted :> Authz_zone.snapshot).Authz_zone.state principal
+  }
 ;;
 
-let session state ~now_ms request cookie =
+let session trusted ~now_ms request cookie =
   let browser =
     { Authz_browser_request.method_ = request.method_
     ; session_cookie = Some (Authz_browser_session.Cookie.to_value cookie)
@@ -178,12 +183,12 @@ let session state ~now_ms request cookie =
     ; csrf = request.csrf
     }
   in
-  match Authz_browser_request.check state ~now_ms browser with
+  match Authz_browser_request.check trusted ~now_ms browser with
   | Error refusal -> Error (Session_refused refusal)
   | Ok (Authz_browser_request.Session { cookie = _; signed_in }) ->
     Ok
       (authenticated
-         state
+         trusted
          (Principal.Human signed_in.Authz_browser_session.user_id)
          (Session signed_in.Authz_browser_session.session_id)
          Pat_binding.Not_pat)
@@ -194,25 +199,25 @@ let session state ~now_ms request cookie =
 ;;
 
 (* Who the presented credential is, or [None] when there is none. *)
-let authenticate state ~now_ms request : (authenticated option, reason) result =
+let authenticate trusted ~now_ms request : (authenticated option, reason) result =
   match Presentation.read request.credentials with
   | Presentation.No_credential -> Ok None
-  | Presentation.Session cookie -> Result.map Option.some (session state ~now_ms request cookie)
+  | Presentation.Session cookie -> Result.map Option.some (session trusted ~now_ms request cookie)
   | Presentation.Pat token ->
-    (match Authz_pat.authenticate state ~now_ms token with
+    (match Authz_pat.authenticate trusted ~now_ms token with
      | Error refusal -> Error (Pat_refused refusal)
      | Ok { Authz_pat.user_id; pat_id; pat_scope } ->
        Ok
          (Some
-            (authenticated state (Principal.Human user_id) (Pat pat_id) (Pat_binding.Pat pat_scope))))
+            (authenticated trusted (Principal.Human user_id) (Pat pat_id) (Pat_binding.Pat pat_scope))))
   | Presentation.Service_credential token ->
-    (match Authz_service_credential.authenticate state token with
+    (match Authz_service_credential.authenticate trusted token with
      | Error refusal -> Error (Service_credential_refused refusal)
      | Ok { Authz_service_credential.service_id; credential_id } ->
        Ok
          (Some
             (authenticated
-               state
+               trusted
                (Principal.Service service_id)
                (Service_credential credential_id)
                Pat_binding.Not_pat)))
@@ -279,28 +284,28 @@ let owns_keeper =
     ~scope_lacks:Pat_scope_lacks_own_keeper
 ;;
 
-let decide state ~now_ms access request =
+let decide trusted ~now_ms access request =
   let* need = need_of access in
   match need with
   | Judged_by_its_route -> Ok Judged_by_route
   | Not_served reason -> Error (Not_served_in_multi_account reason)
   | Nothing_needed ->
-    let* who = authenticate state ~now_ms request in
+    let* who = authenticate trusted ~now_ms request in
     (match who with
      | None -> Ok Anonymous
      | Some who -> Ok (Authenticated who))
   | Holds permission ->
-    let* who = authenticate state ~now_ms request in
+    let* who = authenticate trusted ~now_ms request in
     (match who with
      | None -> Error Credential_required
      | Some who -> holds who permission)
   | Own_provider ->
-    let* who = authenticate state ~now_ms request in
+    let* who = authenticate trusted ~now_ms request in
     (match who with
      | None -> Error Credential_required
      | Some who -> owns_provider who)
   | Own_keeper ->
-    let* who = authenticate state ~now_ms request in
+    let* who = authenticate trusted ~now_ms request in
     (match who with
      | None -> Error Credential_required
      | Some who -> owns_keeper who)

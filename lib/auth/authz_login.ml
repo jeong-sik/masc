@@ -78,14 +78,10 @@ let is_conflict = function
 
 let attempts = 3
 
-let signed_in zone user_id =
-  match Authz_zone.revocation zone (Subject.Principal (Principal.Human user_id)) with
-  | Authz_zone.Known Revocation_state.Not_pending -> Ok (Signed_in user_id)
-  | Authz_zone.Known Revocation_state.Pending -> Error (Blocked user_id)
-  | Authz_zone.Unknown_log_stopped _
-  | Authz_zone.Unknown_store_stopped _
-  | Authz_zone.Unknown_files_disagree _
-  | Authz_zone.Unknown_store_holds_no_answer -> Error Uncertain
+let signed_in (state : Authz_state.t) user_id =
+  match Authz_state.revocation state (Subject.Principal (Principal.Human user_id)) with
+  | Revocation_state.Not_pending -> Ok (Signed_in user_id)
+  | Revocation_state.Pending -> Error (Blocked user_id)
 ;;
 
 let drawn of_string draw = Result.map_error (fun error -> Id_not_drawn error) (of_string (draw ()))
@@ -174,11 +170,15 @@ let admission zone ~now_ms ~draw ~identity ~through_of =
 ;;
 
 let sign_in zone ~now_ms ~draw ~identity ~invite =
-  let principals = (Authz_zone.snapshot zone).state.principals in
-  match Principals.find_identity principals identity, invite with
-  | Some user_id, None ->
-    if Principals.is_active principals user_id then signed_in zone user_id else Error (Disabled user_id)
-  | Some user_id, Some _ -> Error (Already_joined user_id)
-  | None, None -> admission zone ~now_ms ~draw ~identity ~through_of:(through_registration identity)
-  | None, Some invite -> admission zone ~now_ms ~draw ~identity ~through_of:(through_invitation invite)
+  match Authz_zone.read zone with
+  | Error (_ : Authz_zone.uncertain) -> Error Uncertain
+  | Ok trusted ->
+    let state = (trusted :> Authz_zone.snapshot).state in
+    let principals = state.principals in
+    (match Principals.find_identity principals identity, invite with
+     | Some user_id, None ->
+       if Principals.is_active principals user_id then signed_in state user_id else Error (Disabled user_id)
+     | Some user_id, Some _ -> Error (Already_joined user_id)
+     | None, None -> admission zone ~now_ms ~draw ~identity ~through_of:(through_registration identity)
+     | None, Some invite -> admission zone ~now_ms ~draw ~identity ~through_of:(through_invitation invite))
 ;;

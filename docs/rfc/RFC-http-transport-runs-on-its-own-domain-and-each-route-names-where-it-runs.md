@@ -119,6 +119,8 @@ type route_target =
 
 serving 도메인이 꺼져 있으면 연결의 도메인이 메인이다. `Owner` 와 `Serving` 은 같은 곳에서 돌고 지금과 같다.
 
+타입은 첫 `Serving` 경로가 생기는 L4 에서 나눈다. 그 전에는 `Plain` 이 전부 `Owner` 처럼 돈다. 만드는 곳이 없는 생성자를 먼저 넣지 않는다.
+
 ### 3.3 Owner 경로: 응답 다리
 
 처리 함수는 응답을 돌려주지 않고 `Http_reqd.t` 에 직접 쓴다(`lib/http_reqd.mli`). 메인 도메인의 처리 함수가 serving 도메인의 writer 를 건드리면 안 되므로, `Owner` 경로의 처리 함수는 진짜 `Http_reqd.t` 대신 다리를 받는다.
@@ -140,17 +142,17 @@ sequenceDiagram
     participant S as serving 도메인 (연결 fiber)
     participant O as 메인 도메인 (처리 함수)
     C->>S: 요청
-    S->>S: rate limit, 경로 찾기
-    S->>O: Owner 경로면 처리 함수와 Relayed 를 넘긴다
+    S->>S: 경로 찾기 (WebSocket 인지)
+    S->>O: WebSocket 이 아니면 요청을 Relayed 와 함께 넘긴다 (rate limit, 인증, 처리 함수)
     O->>S: 응답 연산을 순서대로 넣는다
     S->>C: 연결 fiber 가 연산을 꺼내 진짜 writer 에 쓴다
-    O-->>S: 처리 함수 끝
-    S->>S: 남은 연산을 다 쓰고 요청을 끝낸다
+    S->>S: 응답이 끝나면 다리를 닫는다
 ```
 
-- 연결 fiber 는 요청마다 연산 큐 하나를 만든다. 큐는 `Eio.Stream` 이고 넣은 순서대로 나온다.
+- 요청마다 연산 큐 하나(`Domain_mailbox`)와 그 큐를 도는 fiber 하나를 만든다. fiber 는 HTTP/2 에서는 stream 의 switch, HTTP/1.1 에서는 연결의 switch 에 띄운다. 연산은 넣은 순서대로 나온다.
 - 처리 함수는 `Eio_context.run_on_owner_domain` 과 같은 길(`dispatch_stream`)로 메인 도메인에 넘어간다. 메인 도메인의 root switch 아래 fiber 에서 돈다. 그래서 처리 함수 안의 `Fiber.fork ~sw:state.sw` 는 지금처럼 된다. §1.3 의 `initialize` 500 이 여기서 없어진다.
-- 연결 fiber 는 큐에서 연산을 꺼내 진짜 `Http_reqd.t` 에 쓴다. 처리 함수가 끝나고 큐가 비면 요청을 끝낸다.
+- 그 fiber 가 큐에서 연산을 꺼내 진짜 `Http_reqd.t` 에 쓴다. 응답이 끝나면(문자열 응답을 썼거나, 본문을 닫았거나, transport 가 닫혔으면) 큐를 닫는다. switch 가 먼저 끝나도 닫는다.
+- 큐가 닫힌 뒤의 연산은 끝난 요청이 하는 대로 답한다. 응답은 거절되고, 스트리밍은 닫힌 writer 를 받고, `flush` 는 `` `Closed `` 다. 넣은 연산은 처리되거나 이렇게 답을 받거나 둘 중 하나라서, 답을 기다리는 처리 함수가 남지 않는다.
 
 `Http_reqd` 의 함수마다 `Relayed` 가 하는 일이다.
 
@@ -164,7 +166,7 @@ sequenceDiagram
 | `Body_writer.write_string`, `close` | 연산을 넣고 돌아온다 | 아니오 |
 | `Body_writer.flush f` | 연산을 넣는다. 연결 fiber 가 진짜 flush 의 결과를 메인 도메인으로 보내고 `f` 는 거기서 돈다 | 콜백 |
 | `Body_writer.is_closed` | 연결 fiber 가 닫힘을 알릴 때 고치는 `Atomic` 을 읽는다. 닫힌 직후 한동안 `false` 일 수 있다 | 아니오 |
-| `Body_writer.stream_end` | 연결 fiber 가 resolve 하는 promise. `Eio.Promise` 는 도메인 사이에서 써도 된다 | 아니오 |
+| `Body_writer.stream_end` | 진짜 writer 의 것을 그대로 준다. HTTP/2 는 stream 의 switch 가 끝날 때 resolve 되는 promise 이고 HTTP/1.1 은 지금처럼 `None` 이다. `Eio.Promise` 는 도메인 사이에서 써도 된다 | 아니오 |
 | `response_state` | 연결 fiber 에 물어본다 | 예 |
 | `report_exn` | 연산을 넣는다 | 아니오 |
 
@@ -223,10 +225,11 @@ SSE 와 같게 맞춘다. 콜백은 연결의 큐에 넣기만 하고, 연결의
 
 ### 3.7 취소와 실패
 
-- 클라이언트가 끊으면 연결 fiber 가 안다. `Relayed` 의 `stream_end` 를 resolve 하고 닫힘 `Atomic` 을 고친다. 처리 함수는 지금처럼 `flush` 의 `` `Closed `` 나 `stream_end` 로 알고 멈춘다.
+- 클라이언트가 끊으면 연결 쪽 switch 가 끝난다. 다리 fiber 가 큐를 닫고 닫힘 `Atomic` 을 고친다. HTTP/2 는 `stream_end` 도 resolve 된다. 처리 함수는 지금처럼 `flush` 의 `` `Closed `` 나 `stream_end` 로 알고 멈춘다.
 - 메인 도메인의 처리 함수 fiber 를 연결 쪽에서 취소하지 않는다. `POST /mcp` 는 지금도 클라이언트가 끊겨도 도구 호출을 끝까지 돌리려고 root switch 에 fiber 를 띄운다. 그 성질을 지킨다.
 - 처리 함수가 예외로 끝나면 지금과 같다. 응답 전이면 500, 스트리밍 중이면 `report_exn` 이다. 그 판단은 연결 fiber 가 진짜 `response_state` 로 한다.
-- 메인 도메인으로 넘기는 `dispatch_stream` 은 512칸이다. 가득 차면 넘기는 쪽(serving 도메인의 연결 fiber 하나)이 기다린다. 다른 연결 fiber 는 안 기다린다.
+- 메인 도메인으로 넘기는 큐(`dispatch_stream`)에는 상한이 없다. 넘기는 쪽은 기다리지 않는다. 연결 fiber 는 정리 중에도(취소를 막은 채로) `flush` 답을 넘기는데, 메인이 더 꺼내지 않는 종료 때 여기서 기다리면 serving 도메인이 끝나지 않는다.
+- 메인으로 넘긴 일의 예외는 그 큐가 버린다. 처리 함수의 예외는 ingress 가 지금처럼 500 이나 `report_exn` 으로 바꾸고, 본문·flush 콜백의 예외는 ingress 가 로그로 남긴다.
 
 ### 3.8 도메인 수
 
@@ -278,11 +281,10 @@ OCaml 5 의 minor GC 는 모든 도메인을 같이 세운다. serving 도메인
 
 | 단계 | 하는 일 | 확인 |
 |---|---|---|
-| L0 | E1, E2 시험을 넣는다. serving 도메인을 켠 쪽은 지금 실패하는 그대로 둔다 | 끈 쪽 통과, 켠 쪽은 `initialize` 에서 실패 |
-| L1 | `route_target` 을 `Owner`·`Serving`·`Ws` 로 나눈다. `Http_reqd.Relayed` 와 연산 큐. ingress 가 `Owner` 경로를 메인으로 넘긴다 | E1 의 `health`, `initialize`, `tools/list`, `tools/call` |
+| L1 | `Http_reqd.Relayed` 와 연산 큐(`Domain_mailbox`). ingress 가 WebSocket 이 아닌 요청을 인증·rate limit 까지 통째로 메인으로 넘긴다. 타입은 아직 나누지 않는다 | 도메인 둘에서 도는 `Http_reqd` 시험, E1 의 `health`, `initialize`, `tools/list`, `tools/call` |
 | L2 | `GET /mcp`, ag-ui, presence, artifact draft 가 다리로 쓰는지 E1 로 확인하고, 처리 함수 밖에서 메인 switch 를 쓰는 곳을 고친다 | E1 의 SSE 줄 |
 | L3 | WebSocket 을 큐와 pump 로 | E1 의 `/ws` 줄 |
-| L4 | `scheduler.serving_lag`, 첫 `Serving` 경로 여섯 | E2, E3 |
+| L4 | `scheduler.serving_lag`. `route_target` 을 `Owner`·`Serving`·`Ws` 로 나누고 첫 `Serving` 경로 여섯을 옮긴다 | E2, E3 |
 | L5 | TSan workflow | E4 |
 | L6 | 운영 서버에서 켜고 일주일 본 뒤 기본값으로 한다. `MASC_SERVING_DOMAIN_ENABLED` 와 끈 쪽 갈래를 지운다 | E3 |
 
@@ -302,6 +304,6 @@ L6 뒤에는 대시보드 읽기 경로를 하나씩 `Serving` 으로 옮긴다.
 
 - `Ws_wsd`(gluten) writer 가 mutex 로 순서만 지키면 다른 도메인의 쓰기를 견디는가. L3 은 견디지 않는다고 보고 설계했다.
 - `Server_auth.with_*` 가 읽는 상태가 전부 thread-safe 한가. `Serving` 경로에서는 인증이 serving 도메인에서 돈다. #33353 이 `Eio.Mutex` 를 `Stdlib.Mutex` 로 바꿨지만 전체를 다시 읽지 않았다. L4 에서 읽고 E4 로 확인한다.
-- `Server_http_ingress.admitted` 의 rate limit 과 workspace 전제 검사가 읽는 상태. 이 둘은 L1 부터 serving 도메인에서 돈다. L1 에서 읽는다.
-- `dispatch_stream` 512칸이 `Owner` 경로 전부를 받기에 맞는 크기인가. L4 에서 가득 찬 횟수를 잰다.
+- `Server_http_ingress.admitted` 의 rate limit 과 workspace 전제 검사가 읽는 상태. L1 은 `admitted` 를 통째로 메인에서 돌려서 이 질문을 미뤘다. `Serving` 경로가 생기는 L4 에서 읽는다.
+- 메인으로 넘기는 큐(`dispatch_stream`)는 L1 에서 상한을 없앴다. 연결 쪽이 정리 중에 넘길 때 기다리면 종료가 걸리기 때문이다. 요청 수는 연결과 stream 수가 묶는다. L4 에서 큐 길이를 잰다.
 - 평상 부하의 GC 정지 값(§4).

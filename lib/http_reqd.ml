@@ -14,10 +14,62 @@ module Response_body = Http_h2_stream.Response_body
    body writer [respond_with_streaming] opened: neither library hands it back,
    and [response_state] needs to know whether it is still open. [reported]
    is set once [report_exn] reported the request failed. *)
+type response_state =
+  | Not_started
+  | Streaming_open
+  | Answered
+
+type body_read_error =
+  | Too_large of int
+  | Internal of exn
+
+(* ── A request whose handler runs on another domain ──
+   (RFC http-transport-runs-on-its-own-domain §3.3)
+
+   httpun and h2 writers are not safe across domains, so the handler does not
+   touch them. Each thing it asks of the request is one of these, sent
+   through the mailbox to a fiber of the connection ([serve_relay]), which
+   applies them to the real request in the order they were sent. *)
+type relay_started =
+  | Relay_started of unit Eio.Promise.t option (* the writer's [stream_end] *)
+  | Relay_ended (* the request no longer takes a response *)
+  | Relay_raised of exn * Printexc.raw_backtrace
+
+type relay_op =
+  | Relay_respond of Httpun.Response.t * string * acceptance Eio.Promise.u
+  | Relay_start of
+      { flush_headers_immediately : bool option
+      ; response : Httpun.Response.t
+      ; started : relay_started Eio.Promise.u
+      }
+  | Relay_write of string
+  | Relay_flush of ([ `Written | `Closed ] -> unit)
+  | Relay_close
+  | Relay_read_body of
+      { max_bytes : int
+      ; on_body : string -> unit
+      ; on_error : body_read_error -> unit
+      }
+  | Relay_state of response_state Eio.Promise.u
+  | Relay_report of exn
+
+type relay =
+  { relay_request : Httpun.Request.t
+  ; relay_protocol : Transport_metrics.http_protocol
+  ; mailbox : relay_op Domain_mailbox.t
+  ; body_closed : bool Atomic.t
+    (* The streaming body is closed: the handler closed it, or the
+       connection's fiber saw the transport close it. *)
+  ; last_state : response_state Atomic.t
+    (* What the connection's fiber last read from the real request. It is
+       the answer to [response_state] once the mailbox has ended. *)
+  }
+
 type t =
   | Http1 of
       { reqd : Httpun.Reqd.t
       ; upgrade : upgrade option
+      ; connection : Eio.Switch.t option
       ; mutable streaming : Httpun.Body.Writer.t option
       ; mutable reported : bool
       }
@@ -28,6 +80,13 @@ type t =
       ; stream_end : Stream_end.t
       ; mutable streaming : Response_body.t option
       }
+  | Relayed of relay
+
+(* The switch of the HTTP/1.1 connection the current fiber serves. httpun
+   hands a request to its handler with no scope of its own, and a relayed
+   request needs one for the fiber that applies its operations. *)
+let connection_switch : Eio.Switch.t Eio.Fiber.key = Eio.Fiber.create_key ()
+let with_connection_switch sw f = Eio.Fiber.with_binding connection_switch sw f
 
 let of_gluten (gluten_reqd : Httpun.Reqd.t Gluten.Reqd.t) =
   let reqd = gluten_reqd.Gluten.Reqd.reqd in
@@ -38,12 +97,15 @@ let of_gluten (gluten_reqd : Httpun.Reqd.t Gluten.Reqd.t) =
           { switch_protocols = Httpun.Reqd.respond_with_upgrade reqd
           ; drive = gluten_reqd.Gluten.Reqd.upgrade
           }
+    ; connection = Eio.Fiber.get connection_switch
     ; streaming = None
     ; reported = false
     }
 ;;
 
-let of_httpun reqd = Http1 { reqd; upgrade = None; streaming = None; reported = false }
+let of_httpun reqd =
+  Http1 { reqd; upgrade = None; connection = None; streaming = None; reported = false }
+;;
 
 let http2_version = { Httpun.Version.major = 2; minor = 0 }
 
@@ -80,16 +142,19 @@ let of_h2 ~stream_end ~ledger reqd =
 let request = function
   | Http1 { reqd; _ } -> Httpun.Reqd.request reqd
   | Http2 { request; _ } -> request
+  | Relayed { relay_request; _ } -> relay_request
 ;;
 
 let protocol = function
   | Http1 _ -> Transport_metrics.H1
   | Http2 _ -> Transport_metrics.H2
+  | Relayed { relay_protocol; _ } -> relay_protocol
 ;;
 
+(* A WebSocket route runs on the connection's domain and is not relayed. *)
 let upgrade = function
   | Http1 { upgrade; _ } -> upgrade
-  | Http2 _ -> None
+  | Http2 _ | Relayed _ -> None
 ;;
 
 (* The [Failure] payloads are the only way httpun, h2 and their Faraday
@@ -241,7 +306,12 @@ let try_respond_with_string t response body =
          then (
            Log.Http.debug "[http] response skipped, the HTTP/2 stream is already over";
            Rejected_by_writer)
-         else h2_respond_with_string ~stream_end reqd ledger response body)
+         else h2_respond_with_string ~stream_end reqd ledger response body
+       | Relayed relay ->
+         let answer, resolver = Eio.Promise.create () in
+         if Domain_mailbox.send relay.mailbox (Relay_respond (response, body, resolver))
+         then Eio.Promise.await answer
+         else Rejected_by_writer)
 ;;
 
 let respond_with_string t response body =
@@ -258,13 +328,26 @@ module Body_writer = struct
         ; ledger : Http_h2_response_ledger.request
         ; stream_end : Stream_end.t
         }
-    (* An HTTP/2 stream that was over before the response opened. *)
+    (* An HTTP/2 stream that was over before the response opened, or a
+       relayed request that was. *)
     | Ended
+    | Relayed of
+        { relay : relay
+        ; stream_end : unit Eio.Promise.t option
+        }
 
+  (* For a relayed body the answer trails the transport: the connection's
+     fiber sets [body_closed] when it next looks at the real writer. *)
   let is_closed = function
     | H1 writer -> Httpun.Body.Writer.is_closed writer
     | H2 { reqd; body; stream_end; _ } -> h2_body_closed ~stream_end reqd body
     | Ended -> true
+    | Relayed { relay; stream_end } ->
+      Atomic.get relay.body_closed
+      ||
+      (match stream_end with
+       | Some stream_end -> Eio.Promise.is_resolved stream_end
+       | None -> false)
   ;;
 
   (* Exhausted capacity resets this stream, as the ledger's own drain did
@@ -298,6 +381,8 @@ module Body_writer = struct
              here too. *)
           Response_body.close body)
     | Ended -> ()
+    | Relayed { relay; _ } ->
+      if not (is_closed t) then ignore (Domain_mailbox.send relay.mailbox (Relay_write s) : bool)
   ;;
 
   (* The transport's own end of the stream under the writer. h2 reports a
@@ -307,6 +392,7 @@ module Body_writer = struct
     | H1 _ -> None
     | H2 { stream_end; _ } -> Some (Stream_end.signal stream_end)
     | Ended -> Some (Eio.Promise.create_resolved ())
+    | Relayed { stream_end; _ } -> stream_end
   ;;
 
   (* Both libraries answer a flush on a closed body from the connection
@@ -321,13 +407,20 @@ module Body_writer = struct
       match t with
       | H1 writer -> Httpun.Body.Writer.flush writer f
       | H2 { body; _ } -> Response_body.flush body f
-      | Ended -> f `Closed)
+      | Ended -> f `Closed
+      (* The connection's fiber answers through the handler's domain; a
+         mailbox that has ended answers here. *)
+      | Relayed { relay; _ } ->
+        if not (Domain_mailbox.send relay.mailbox (Relay_flush f)) then f `Closed)
   ;;
 
   let close = function
     | H1 writer -> Httpun.Body.Writer.close writer
     | H2 { body; _ } -> Response_body.close body
     | Ended -> ()
+    | Relayed { relay; _ } ->
+      Atomic.set relay.body_closed true;
+      ignore (Domain_mailbox.send relay.mailbox Relay_close : bool)
   ;;
 end
 
@@ -351,12 +444,19 @@ let respond_with_streaming ?flush_headers_immediately t response =
       let body = Response_body.create stream_end writer in
       http2.streaming <- Some body;
       Body_writer.H2 { reqd; body; ledger = http2.ledger; stream_end })
+  | Relayed relay ->
+    let started, resolver = Eio.Promise.create () in
+    if not
+         (Domain_mailbox.send
+            relay.mailbox
+            (Relay_start { flush_headers_immediately; response; started = resolver }))
+    then Body_writer.Ended
+    else (
+      match Eio.Promise.await started with
+      | Relay_started stream_end -> Body_writer.Relayed { relay; stream_end }
+      | Relay_ended -> Body_writer.Ended
+      | Relay_raised (exn, backtrace) -> Printexc.raise_with_backtrace exn backtrace)
 ;;
-
-type response_state =
-  | Not_started
-  | Streaming_open
-  | Answered
 
 let response_state = function
   | Http1 { reqd; streaming; _ } ->
@@ -371,11 +471,12 @@ let response_state = function
        if h2_body_closed ~stream_end reqd body then Answered else Streaming_open
      | None, Some _ -> Answered
      | None, None -> Not_started)
+  | Relayed relay ->
+    let answer, resolver = Eio.Promise.create () in
+    if Domain_mailbox.send relay.mailbox (Relay_state resolver)
+    then Eio.Promise.await answer
+    else Atomic.get relay.last_state
 ;;
-
-type body_read_error =
-  | Too_large of int
-  | Internal of exn
 
 let deliver_body ~on_body ~on_error body =
   try on_body body with
@@ -522,6 +623,11 @@ let read_body t ~max_bytes ~on_body ~on_error =
       ~on_error
   | Http2 { reqd; ledger; stream_end; _ } ->
     read_body_h2 reqd ~ledger ~stream_end ~max_bytes ~on_body ~on_error
+  (* A request that is over delivers no body, as a body cut short does. *)
+  | Relayed relay ->
+    ignore
+      (Domain_mailbox.send relay.mailbox (Relay_read_body { max_bytes; on_body; on_error })
+       : bool)
 ;;
 
 (* masc's HTTP/1.1 error handler writes the 500 without logging, and a cut
@@ -537,4 +643,141 @@ let report_exn t exn =
       ~stream_sw:(Stream_end.switch stream_end)
       reqd
       (Http_h2_stream.Raised exn)
+  | Relayed relay -> ignore (Domain_mailbox.send relay.mailbox (Relay_report exn) : bool)
+;;
+
+(* ── A relayed request: the connection's side ── *)
+
+let relay_scope = function
+  | Http1 { connection; _ } -> connection
+  | Http2 { stream_end; _ } -> Some (Stream_end.switch stream_end)
+  | Relayed _ -> None
+;;
+
+(* An operation the connection's fiber never applied still owes its sender
+   an answer: the one a request that is over gives. *)
+let relay_unhandled relay ~post = function
+  | Relay_respond (_, _, answer) ->
+    ignore (Eio.Promise.try_resolve answer Rejected_by_writer : bool)
+  | Relay_start { started; _ } -> ignore (Eio.Promise.try_resolve started Relay_ended : bool)
+  | Relay_flush f -> post (fun () -> f `Closed)
+  | Relay_state answer ->
+    ignore (Eio.Promise.try_resolve answer (Atomic.get relay.last_state) : bool)
+  | Relay_write _ | Relay_close | Relay_read_body _ | Relay_report _ -> ()
+;;
+
+(* A flush the transport was asked for. httpun drops the callback of a flush
+   still waiting when its connection dies (seen 2026-11-10: the client of a
+   chunked response closed its socket and the callback was called neither
+   way), and the handler's fiber is on another domain, so it does not end
+   with the connection either. The relay answers what the transport left. *)
+type relay_flush =
+  { answer : [ `Written | `Closed ] -> unit
+  ; mutable answered : bool
+  }
+
+(* Applies the handler's operations to [t], on the fiber of [t]'s connection,
+   until the response is whole and every flush is answered, or that fiber is
+   cancelled with the connection. [post] runs a callback on the handler's
+   domain. *)
+let serve_relay t relay ~post =
+  let writer = ref None in
+  let unanswered = ref [] in
+  let all_answered = Eio.Condition.create () in
+  let answer_flush flush outcome =
+    if not flush.answered
+    then (
+      flush.answered <- true;
+      unanswered := List.filter (fun other -> other != flush) !unanswered;
+      (match outcome with
+       | `Closed -> Atomic.set relay.body_closed true
+       | `Written -> ());
+      post (fun () -> flush.answer outcome);
+      if List.is_empty !unanswered then Eio.Condition.broadcast all_answered)
+  in
+  let look () =
+    (match !writer with
+     | Some body when Body_writer.is_closed body -> Atomic.set relay.body_closed true
+     | Some _ | None -> ());
+    let state = response_state t in
+    Atomic.set relay.last_state state;
+    match state with
+    | Answered -> `Finished
+    | Not_started | Streaming_open -> `Continue
+  in
+  let handle = function
+    | Relay_respond (response, body, answer) ->
+      let acceptance = try_respond_with_string t response body in
+      Atomic.set relay.last_state Answered;
+      Eio.Promise.resolve answer acceptance;
+      `Finished
+    | Relay_start { flush_headers_immediately; response; started } ->
+      (match respond_with_streaming ?flush_headers_immediately t response with
+       | body ->
+         writer := Some body;
+         Eio.Promise.resolve started (Relay_started (Body_writer.stream_end body))
+       | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+       | exception exn ->
+         Eio.Promise.resolve started (Relay_raised (exn, Printexc.get_raw_backtrace ())));
+      look ()
+    | Relay_write s ->
+      Option.iter (fun body -> Body_writer.write_string body s) !writer;
+      look ()
+    | Relay_flush f ->
+      (match !writer with
+       | Some body ->
+         let flush = { answer = f; answered = false } in
+         unanswered := flush :: !unanswered;
+         Body_writer.flush body (answer_flush flush)
+       | None -> post (fun () -> f `Closed));
+      look ()
+    | Relay_close ->
+      Option.iter Body_writer.close !writer;
+      look ()
+    | Relay_read_body { max_bytes; on_body; on_error } ->
+      read_body
+        t
+        ~max_bytes
+        ~on_body:(fun body -> post (fun () -> on_body body))
+        ~on_error:(fun error -> post (fun () -> on_error error));
+      `Continue
+    | Relay_state answer ->
+      Eio.Promise.resolve answer (response_state t);
+      `Continue
+    | Relay_report exn ->
+      report_exn t exn;
+      look ()
+  in
+  let ended () =
+    Atomic.set relay.body_closed true;
+    List.iter (fun flush -> answer_flush flush `Closed) !unanswered
+  in
+  match
+    Domain_mailbox.serve relay.mailbox ~handle ~unhandled:(relay_unhandled relay ~post);
+    (* The response is whole. A flush asked before its end is still the
+       transport's to answer, once the bytes before it are out. *)
+    while not (List.is_empty !unanswered) do
+      Eio.Condition.await_no_mutex all_answered
+    done
+  with
+  | () -> ended ()
+  | exception exn ->
+    let backtrace = Printexc.get_raw_backtrace () in
+    ended ();
+    Printexc.raise_with_backtrace exn backtrace
+;;
+
+let relay t ~sw ~post handler =
+  let relay =
+    { relay_request = request t
+    ; relay_protocol = protocol t
+    ; mailbox = Domain_mailbox.create ()
+    ; body_closed = Atomic.make false
+    ; last_state = Atomic.make Not_started
+    }
+  in
+  Eio.Fiber.fork_daemon ~sw (fun () ->
+    serve_relay t relay ~post;
+    `Stop_daemon);
+  post (fun () -> handler (Relayed relay))
 ;;

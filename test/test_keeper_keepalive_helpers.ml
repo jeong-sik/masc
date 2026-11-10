@@ -1760,7 +1760,7 @@ let test_committed_board_action_retains_unavailable_routing action () =
        ~voter:"external-voter" ~post_id ~direction:Board.Up))
    | `Reaction -> ignore (Result.get_ok (Board_dispatch.toggle_reaction
        ~reader:Masc_board_handlers.Board_access.Operator ~target_type:Board.Reaction_post
-       ~target_id:post_id ~user_id:"external-reactor" ~emoji:"safe")));
+       ~target_id:post_id ~user_id:"external-reactor" ~emoji:"👍")));
   let addressed = Option.get !committed in
   let pending () = match Keeper_registry_event_queue.pending_selections_result
     ~base_path:config.base_path meta.name with

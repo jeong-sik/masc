@@ -1463,7 +1463,11 @@ let test_a_merged_row_is_the_fleet_read_after_the_write () =
      Alcotest.(check bool) "it is observed when the row was" true
        (merged.Decode.mhs_generated_at >= answer.Decode.mhr_generated_at)
    | None -> Alcotest.fail "a row merges into an answer with no refused row");
-  (match Decode.with_keeper_row held ~generated_at:0.0 ~keeper_id:"beta" None with
+  (* A removal answer carries the time it was read, the same as a present one
+     ([masc_tui.ml] passes [mhr_generated_at] on both branches). Passing 0.0
+     here made this a stale answer, and [with_keeper_row] refuses a stale one
+     before it looks at the row at all (#50852). *)
+  (match Decode.with_keeper_row held ~generated_at:answer.Decode.mhr_generated_at ~keeper_id:"beta" None with
    | Some removed ->
      Alcotest.(check (list string)) "a Keeper that left loses its row" [ "alpha" ]
        (List.map (fun (keeper : Decode.memory_keeper_health) -> keeper.Decode.mkh_keeper_id)

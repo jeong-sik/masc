@@ -1976,7 +1976,7 @@ let test_history_fence_retains_unknown_and_blocks_late_observations () = with_fi
   let previous_range : Current.durable_range_id = match Boundary.position_of_messages first_messages |> get with
     | Boundary.Atom_history {end_atom;last_atom_digest} ->
       {original_range with start_atom=0;end_atom;last_atom_digest;end_boundary_line=1;boundary_lines_seen=1}
-    | Empty_atom_history | No_atom_history -> fail "fixture prefix has no atom history" in
+    | Empty_atom_history | No_atom_history | Stale_noop -> fail "fixture prefix has no atom history" in
   let fact = Types.observed ~claim:"Independent Memory after the original capture" ~category:Types.Fact
     ~now:(Time_compat.now ()) ~origin:{kind=Types.Authored;trace_id="independent-writer"} in
   memory_action fixture (fun () -> io (fun () -> Current.apply_disposition

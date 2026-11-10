@@ -1453,6 +1453,34 @@ let led_rows ~width ~lead ~text_style text =
     Span.concat [ (if index = 0 then lead else hang); Span.text text_style piece ])
     (match pieces with [] -> [ "" ] | pieces -> pieces)
 
+(* A page that lists facts. A heading names a group and takes the label
+   colour. Fields are label and value pairs: the fields of one indent share a
+   label column across the page, so their values start under each other, and
+   a long value hangs under itself. Text is a sentence and keeps its own
+   indent. *)
+type fact_row =
+  | Fact_heading of string
+  | Fact_fields of { indent : int; fields : (string * string) list }
+  | Fact_text of string
+
+let fact_spans ~width rows =
+  let label_cells indent = 1 + List.fold_left (fun widest -> function
+    | Fact_fields { indent = at; fields } when at = indent ->
+        List.fold_left (fun widest (label, _) ->
+          max widest (Masc_tui_message_layout.display_width label)) widest fields
+    | Fact_fields _ | Fact_heading _ | Fact_text _ -> widest) 0 rows in
+  let spans = function
+    | Fact_heading text -> led_rows ~width ~lead:Span.empty ~text_style:(label_style ()) text
+    | Fact_text text -> led_rows ~width ~lead:Span.empty ~text_style:Span.plain text
+    | Fact_fields { indent; fields } ->
+        List.concat_map (fun (label, value) ->
+          let lead = Span.concat
+            [ Span.text Span.plain (String.make indent ' ')
+            ; Span.pad_to (label_cells indent) Span.plain (Span.text (label_style ()) label) ] in
+          led_rows ~width ~lead ~text_style:Span.plain value) fields in
+  List.concat_map (fun row ->
+    List.map (fun span -> Span.render (Span.truncate width span)) (spans row)) rows
+
 let value_row_spans ~width (row : value_row) =
   let indent = String.make (row.depth * value_indent_cells) ' ' in
   let lead = Span.concat
@@ -1864,15 +1892,16 @@ let host_issue_text = function
   | Host_no_web_search_runner -> "this host has no web-search runner"
 let host_request_lines item = match item.host_requests with
   | None | Some (Ok { hr_cycles = 0; hr_waiting = []; hr_issue = None }) -> []
-  | Some (Error detail) -> [""; "Host requests: unreadable · " ^ detail]
+  | Some (Error detail) -> [Fact_text ""; Fact_text ("Host requests: unreadable · " ^ detail)]
   | Some (Ok { hr_cycles; hr_waiting; hr_issue }) ->
-      [""; Printf.sprintf "Host requests · last cycle (%d total)" hr_cycles]
-      @ (match hr_waiting, hr_issue with
-         | [], Some _ -> ["  waiting status incomplete"]
-         | [], None -> ["  nothing reported waiting"]
-         | waiting, _ -> List.map (fun (request_id, wait) -> "  " ^ request_id ^ ": " ^ host_wait_text wait) waiting)
-      @ (if hr_waiting <> [] && Option.is_some hr_issue then ["  waiting status incomplete"] else [])
-      @ Option.fold ~none:[] ~some:(fun issue -> ["  issue: " ^ host_issue_text issue]) hr_issue
+      Fact_text "" :: Fact_heading (Printf.sprintf "Host requests · last cycle (%d total)" hr_cycles)
+      :: List.map (fun line -> Fact_text line)
+        ((match hr_waiting, hr_issue with
+          | [], Some _ -> ["  waiting status incomplete"]
+          | [], None -> ["  nothing reported waiting"]
+          | waiting, _ -> List.map (fun (request_id, wait) -> "  " ^ request_id ^ ": " ^ host_wait_text wait) waiting)
+         @ (if hr_waiting <> [] && Option.is_some hr_issue then ["  waiting status incomplete"] else [])
+         @ Option.fold ~none:[] ~some:(fun issue -> ["  issue: " ^ host_issue_text issue]) hr_issue)
 
 let connection_workers (snapshot : snapshot) (item : instance) =
   match item.installation_id with
@@ -1894,21 +1923,22 @@ let connection_workers (snapshot : snapshot) (item : instance) =
 let connection_worker_lines (snapshot : snapshot) (item : instance) =
   let workers = connection_workers snapshot item in
   let lines (worker : instance) =
-    ["  " ^ worker.id ^ " · " ^ (match worker.runtime_presence with
+    [Fact_text ("  " ^ worker.id ^ " · " ^ (match worker.runtime_presence with
        | Live_entry -> "live" | Retained_binding -> "retained" | Presence_unknown -> "presence unknown")
-       ^ " · " ^ phase_label worker.phase;
-     "    installation " ^ Option.value ~default:"manual attachment" worker.installation_id;
-     "    incarnation " ^ worker.incarnation;
-     "    TOML " ^ Option.value ~default:"manual attachment" worker.source_path;
-     "    installed revision " ^ Option.value ~default:worker.revision worker.configuration_revision;
-     Printf.sprintf "    completed observation sequence %d · retained rows %d"
-       worker.observation_seq worker.rows_count]
-    @ (if worker.observation_seq=0 then ["    no completed observation received"] else []) in
-  [""; "Workers with this installation ID · each incarnation keeps its own results"]
+       ^ " · " ^ phase_label worker.phase);
+     Fact_fields { indent = 4; fields =
+       ["installation", Option.value ~default:"manual attachment" worker.installation_id;
+        "incarnation", worker.incarnation;
+        "TOML", Option.value ~default:"manual attachment" worker.source_path;
+        "installed revision", Option.value ~default:worker.revision worker.configuration_revision] };
+     Fact_text (Printf.sprintf "    completed observation sequence %d · retained rows %d"
+       worker.observation_seq worker.rows_count)]
+    @ (if worker.observation_seq=0 then [Fact_text "    no completed observation received"] else []) in
+  [Fact_text ""; Fact_heading "Workers with this installation ID · each incarnation keeps its own results"]
   @ List.concat_map lines workers.installation_workers
   @ (match workers.other_path_owners with
      | [] -> []
-     | owners -> [""; "Other installation IDs at this TOML path · separate owners, not the selected installation"]
+     | owners -> [Fact_text ""; Fact_heading "Other installation IDs at this TOML path · separate owners, not the selected installation"]
          @ List.concat_map lines owners)
 
 (* The Results list takes a third of the row, never less than
@@ -2064,24 +2094,26 @@ let detail_lines ~height ~width view =
                 | S.Msx_capture {id} | S.Dos_capture {id}
                 | S.Browser_document {id;_} -> "Input: " ^ id) sources in
           List.concat_map wrap (sources @ List.map (fun (name,_) -> "Output: " ^ name) item.outputs)
-      | Configurations -> List.concat_map wrap (
-          ["Source: " ^ Option.value ~default:"not supplied" item.source_path;
-           "Revision: " ^ item.revision;
-           "Instance: " ^ item.id;
-           "Incarnation: " ^ item.incarnation]
+      | Configurations -> fact_spans ~width (
+          [Fact_fields { indent = 0; fields =
+             ["Source:", Option.value ~default:"not supplied" item.source_path;
+              "Revision:", item.revision;
+              "Instance:", item.id;
+              "Incarnation:", item.incarnation] }]
           @ (match snapshot.configuration with
-             | None -> ["Installation inventory unavailable"]
+             | None -> [Fact_text "Installation inventory unavailable"]
              | Some config ->
                  List.concat_map (fun (declaration : declaration) ->
                    if Some declaration.source_path = item.source_path
-                   then ["Current declaration: " ^ (match declaration.enabled with
-                           | Some true -> "configured on"
-                           | Some false -> "configured off"
-                           | None -> "desired activity unknown");
-                         "Desired: " ^ Option.value ~default:"unknown" declaration.desired;
-                         "Applied: " ^ Option.value ~default:"unknown" declaration.applied;
-                         declaration_application view declaration]
-                        @ List.map (fun issue -> "Issue: " ^ issue) declaration.issues
+                   then [Fact_fields { indent = 0; fields =
+                           ["Current declaration:", (match declaration.enabled with
+                              | Some true -> "configured on"
+                              | Some false -> "configured off"
+                              | None -> "desired activity unknown");
+                            "Desired:", Option.value ~default:"unknown" declaration.desired;
+                            "Applied:", Option.value ~default:"unknown" declaration.applied] };
+                         Fact_text (declaration_application view declaration);
+                         Fact_fields { indent = 0; fields = List.map (fun issue -> "Issue:", issue) declaration.issues }]
                    else []) config.declarations)
           @ host_request_lines item
           @ connection_worker_lines snapshot item)

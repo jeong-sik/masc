@@ -231,7 +231,9 @@ let runtime_routes_detail_lines state ~width =
     | Some value -> fact ~tone:Page_line.Attention label value
   in
   let notice_and_stale =
-    (match state.runtime_lane_notice with
+    runtime_items ~tone:Page_line.Attention (text "후보 목록 조회" "Catalogue reading")
+      (Masc_tui_types.runtime_picker_catalogue_notices state)
+    @ (match state.runtime_lane_notice with
      | None -> []
      | Some notice ->
          fact ~tone:(runtime_lane_notice_tone notice) (text "작업 결과" "Action result")
@@ -551,10 +553,98 @@ let render_runtime_detail (state : state) target =
   finish_surface state ~clamped:(Runtime_detail_scroll scroll)
     ~surface_key:"runtime-detail" ~rows:terminal_rows ~cols buf
 
-(* Lane candidates come from /runtime/resolved; reachability comes from the
-   cached runtime-probe document. Exact runtime-id joining happened in the
-   decoder module, so drawing never parses ids or reconstructs a lane. *)
-let render_runtime (state : state) =
+(* The picker keeps the selected row at the head of its existing window.
+   Optional exact-slot identity detail follows that same candidate. *)
+let runtime_picker_choice_rows picker =
+  let rows = ref [] in
+  let push row = rows := row :: !rows in
+  if picker.rlp_choices = [] then
+    push
+      (Masc_tui_types.runtime_picker_empty_note picker)
+  else
+    List.iteri (fun offset choice ->
+      let mark = if picker.rlp_selected_row = Some offset then ">" else " " in
+      let label = match choice, picker.rlp_pick with
+        | Masc_tui_types.Runtime_choice runtime,
+          (Masc_tui_types.Pick_exact_lane _ | Masc_tui_types.Pick_exact_lane_replacement _) ->
+            Masc_tui_types.runtime_model_picker_title runtime
+        | Masc_tui_types.Runtime_choice _,
+          (Masc_tui_types.Pick_route_default | Masc_tui_types.Pick_media_failover
+          | Masc_tui_types.Pick_conversation_lane _ | Masc_tui_types.Pick_new_lane _)
+        | Masc_tui_types.Lane_choice _,
+          (Masc_tui_types.Pick_route_default | Masc_tui_types.Pick_media_failover
+          | Masc_tui_types.Pick_conversation_lane _ | Masc_tui_types.Pick_exact_lane _
+          | Masc_tui_types.Pick_exact_lane_replacement _ | Masc_tui_types.Pick_new_lane _) ->
+            Masc_tui_types.runtime_picker_label_for picker.rlp_pick choice in
+      match choice with
+      | Masc_tui_types.Lane_choice lane ->
+          let note =
+            if List.exists (String.equal lane.rrl_id) picker.rlp_already
+            then "  (current route)" else "" in
+          push
+            (Printf.sprintf "  %s %s%s" mark
+               label
+               (Ansi.dim ^ note ^ Ansi.reset))
+      | Masc_tui_types.Runtime_choice runtime ->
+          let note =
+            if List.exists (String.equal runtime.ro_id) picker.rlp_already
+            then (match picker.rlp_pick with
+              | Masc_tui_types.Pick_route_default -> "  (current route)"
+              | Pick_media_failover | Pick_conversation_lane _ | Pick_exact_lane _
+              | Pick_exact_lane_replacement (_, _, _) | Pick_new_lane _ -> "  (already a candidate)")
+            else if List.exists (String.equal runtime.ro_provider) picker.rlp_providers
+            then "  (same provider as a current candidate)"
+            else ""
+          in
+          let ctx =
+            Printf.sprintf " [%s %s]"
+              (format_context_tokens runtime.ro_effective_max_context)
+              (match picker.rlp_pick with
+               | Masc_tui_types.Pick_exact_lane _ | Masc_tui_types.Pick_exact_lane_replacement _ -> "context"
+               | Pick_media_failover | Pick_route_default | Pick_conversation_lane _
+               | Pick_new_lane _ -> "ctx")
+          in
+          let def = if runtime.ro_is_default then
+            (match picker.rlp_pick with
+             | Masc_tui_types.Pick_route_default -> " [entry runtime]"
+             | Pick_media_failover | Pick_conversation_lane _ | Pick_exact_lane _
+             | Pick_exact_lane_replacement (_, _, _) | Pick_new_lane _ -> " [default]") else "" in
+          push
+            (Printf.sprintf "  %s %s%s%s%s" mark
+               label
+               ctx def
+               (Ansi.dim ^ note ^ Ansi.reset));
+          (match picker.rlp_pick with
+           | Masc_tui_types.Pick_exact_lane _ | Masc_tui_types.Pick_exact_lane_replacement _ ->
+               push ("      Quota scope " ^ Terminal_text.single_line (runtime_quota_scope_label runtime)
+                 ^ " · Connection " ^ Terminal_text.single_line runtime.ro_provider_id
+                 ^ " · " ^ Terminal_text.single_line runtime.ro_id)
+           | Pick_media_failover | Pick_route_default | Pick_conversation_lane _
+           | Pick_new_lane _ -> ())) picker.rlp_choices;
+  List.rev !rows
+
+let runtime_picker_title ~ko ~notices pick =
+  let lane = Terminal_text.single_line (runtime_lane_pick_name pick) in
+  let purpose = match pick with
+    | Pick_route_default -> if ko then "기본 경로 선택" else "Choose default route"
+    | Pick_media_failover -> if ko then "이미지 예비 경로에 추가" else "Add media fallback"
+    | Pick_new_lane _ ->
+        Printf.sprintf (if ko then "새 경로 %s" else "Create lane %s") lane
+    | Pick_conversation_lane _ | Pick_exact_lane _ ->
+        Printf.sprintf (if ko then "%s에 런타임 추가" else "Add runtime to %s") lane
+    | Pick_exact_lane_replacement _ ->
+        Printf.sprintf (if ko then "%s 런타임 교체" else "Replace runtime in %s") lane
+  in
+  let heading = match notices with
+    | [] -> " MASC Runtime / "
+    | _ :: _ ->
+        Printf.sprintf
+          (if ko then "안내 %d개 · 닫고 v · Runtime / " else "%d notices · close, v · Runtime / ")
+          (List.length notices)
+  in
+  screen_title (heading ^ purpose)
+
+let render_runtime_reading (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   let ko = state.ui_language = Lang_ko in
   let ( runtime_lane_width
@@ -663,7 +753,7 @@ let render_runtime (state : state) =
     else ""
   in
   let hints =
-    scroll_hint ^ Masc_tui_keys.footer_hints_runtime ~mode:state.runtime_mode
+    scroll_hint ^ Masc_tui_keys.footer_hints_runtime ~mode:state.runtime_mode ~picker:None
   in
   surface_chrome ~overflow:Paged_by_cursor state ~terminal_rows ~cols ~surface_key:"runtime" ~title:header ~hints
     ~body:(fun ~budget:_ c ->
@@ -817,95 +907,6 @@ let render_runtime (state : state) =
            "  no slot selected; j/k selects a current slot";
        c.push_styled ~style:(Theme.recede ())
          "  j/k move · a add · x drop · J/K reorder · Esc close";
-       c.push_divider ());
-  (match runtime_picker_projection state with
-   | None -> ()
-   | Some picker ->
-       let what, enter =
-         match picker.rlp_pick with
-         | Masc_tui_types.Pick_new_lane lane ->
-             ( Printf.sprintf "first runtime of new lane %s" (Terminal_text.single_line lane)
-             , "Enter create" )
-         | (Masc_tui_types.Pick_conversation_lane _ | Masc_tui_types.Pick_exact_lane _) as pick ->
-             ( Printf.sprintf "adding a candidate to the candidate order of %s"
-                 (Terminal_text.single_line (Masc_tui_types.runtime_lane_pick_name pick))
-             , "Enter append" )
-         | Masc_tui_types.Pick_media_failover ->
-             ( "adding to [runtime].media_failover, the order the vision runtimes are called in"
-             , "Enter append" )
-         | Masc_tui_types.Pick_exact_lane_replacement _ ->
-             ("Replace selected candidate at its current position", "Enter replace")
-         | Masc_tui_types.Pick_route_default ->
-             (* Replaces rather than appends, and the row it replaces is
-                marked "(already a candidate)" in the choices below. *)
-             ("the route an unassigned keeper walks", "Enter replace")
-       in
-       c.push_styled ~style:(Theme.info ())
-         (Printf.sprintf "  %s — %s — %s" what picker.rlp_summary
-            (Masc_tui_types.runtime_picker_keys enter picker.rlp_filter));
-       if picker.rlp_choices = [] then
-         c.push_styled ~style:(Theme.recede ())
-           (Masc_tui_types.runtime_picker_empty_note picker)
-       else
-         List.iteri (fun offset choice ->
-           let mark = if picker.rlp_selected_row = Some offset then ">" else " " in
-           let label = match choice, picker.rlp_pick with
-             | Masc_tui_types.Runtime_choice runtime,
-               (Masc_tui_types.Pick_exact_lane _ | Masc_tui_types.Pick_exact_lane_replacement _) ->
-                 Masc_tui_types.runtime_model_picker_title runtime
-             | Masc_tui_types.Runtime_choice _,
-               (Masc_tui_types.Pick_route_default | Masc_tui_types.Pick_media_failover
-               | Masc_tui_types.Pick_conversation_lane _ | Masc_tui_types.Pick_new_lane _)
-             | Masc_tui_types.Lane_choice _,
-               (Masc_tui_types.Pick_route_default | Masc_tui_types.Pick_media_failover
-               | Masc_tui_types.Pick_conversation_lane _ | Masc_tui_types.Pick_exact_lane _
-               | Masc_tui_types.Pick_exact_lane_replacement _ | Masc_tui_types.Pick_new_lane _) ->
-                 Masc_tui_types.runtime_picker_label_for picker.rlp_pick choice in
-           match choice with
-           | Masc_tui_types.Lane_choice lane ->
-               let note =
-                 if List.exists (String.equal lane.rrl_id) picker.rlp_already
-                 then "  (current route)" else "" in
-               c.push
-                 (Printf.sprintf "  %s %s%s" mark
-                    label
-                    (Ansi.dim ^ note ^ Ansi.reset))
-           | Masc_tui_types.Runtime_choice runtime ->
-               let note =
-                 if List.exists (String.equal runtime.ro_id) picker.rlp_already
-                 then (match picker.rlp_pick with
-                   | Masc_tui_types.Pick_route_default -> "  (current route)"
-                   | Pick_media_failover | Pick_conversation_lane _ | Pick_exact_lane _
-                   | Pick_exact_lane_replacement (_, _, _) | Pick_new_lane _ -> "  (already a candidate)")
-                 else if List.exists (String.equal runtime.ro_provider) picker.rlp_providers
-                 then "  (same provider as a current candidate)"
-                 else ""
-               in
-               let ctx =
-                 Printf.sprintf " [%s %s]"
-                   (format_context_tokens runtime.ro_effective_max_context)
-                   (match picker.rlp_pick with
-                    | Masc_tui_types.Pick_exact_lane _ | Masc_tui_types.Pick_exact_lane_replacement _ -> "context"
-                    | Pick_media_failover | Pick_route_default | Pick_conversation_lane _
-                    | Pick_new_lane _ -> "ctx")
-               in
-               let def = if runtime.ro_is_default then
-                 (match picker.rlp_pick with
-                  | Masc_tui_types.Pick_route_default -> " [entry runtime]"
-                  | Pick_media_failover | Pick_conversation_lane _ | Pick_exact_lane _
-                  | Pick_exact_lane_replacement (_, _, _) | Pick_new_lane _ -> " [default]") else "" in
-               c.push
-                 (Printf.sprintf "  %s %s%s%s%s" mark
-                    label
-                    ctx def
-                    (Ansi.dim ^ note ^ Ansi.reset));
-               (match picker.rlp_pick with
-                | Masc_tui_types.Pick_exact_lane _ | Masc_tui_types.Pick_exact_lane_replacement _ ->
-                    c.push ("      Quota scope " ^ Terminal_text.single_line (runtime_quota_scope_label runtime)
-                      ^ " · Connection " ^ Terminal_text.single_line runtime.ro_provider_id
-                      ^ " · " ^ Terminal_text.single_line runtime.ro_id)
-                | Pick_media_failover | Pick_route_default | Pick_conversation_lane _
-                | Pick_new_lane _ -> ())) picker.rlp_choices;
        c.push_divider ());
   if shown = 0 then begin
     let empty =
@@ -1062,6 +1063,47 @@ let render_runtime (state : state) =
           else c.push line
     done;
 )
+;;
+
+(* An open picker owns the body. The inactive reading's probe, route table
+   and selection summary cannot push the candidate under the cursor away. *)
+let render_runtime (state : state) =
+  let terminal_rows, cols = get_terminal_size () in
+  let page = runtime_exact_picker_page state ~terminal_rows ~cols in
+  match runtime_picker_projection ~page state with
+  | None -> render_runtime_reading state
+  | Some picker ->
+      let ko = state.ui_language = Lang_ko in
+      let notices = runtime_picker_notices state in
+      let notes = runtime_picker_notice_rows ~cols state in
+      let hints =
+        Masc_tui_keys.footer_hints_runtime ~mode:state.runtime_mode
+          ~picker:(Some picker)
+      in
+      surface_chrome ~overflow:Fits state ~terminal_rows ~cols
+        ~surface_key:"runtime" ~title:(runtime_picker_title ~ko ~notices picker.rlp_pick)
+        ~hints ~body:(fun ~budget c ->
+          let choices = runtime_picker_choice_rows picker in
+          (* With just one body row the selected candidate takes it. With
+             room, the filter/count precedes the same cursor-following page. *)
+          let primary =
+            if budget > 1 then
+              ((Theme.info ()) ^ "  " ^ picker.rlp_summary ^ Ansi.reset) :: choices
+            else choices
+          in
+          let visible = List.take budget primary in
+          List.iter c.push visible;
+          let remaining = budget - List.length visible in
+          let count = List.length notes in
+          List.iteri
+            (fun index row ->
+              let row =
+                if count > remaining && index = remaining - 1 then
+                  "… " ^ row
+                else row
+              in
+              c.push_styled ~style:(Theme.warn ()) row)
+            (List.take remaining notes))
 ;;
 
 let tools_scrolled state =

@@ -33,6 +33,19 @@ let summaries store (parent : Board.post) user =
   require (Board.list_reactions store ~target_type:Board.Reaction_post
     ~target_id:(Board.Post_id.to_string parent.id) ~user_id:user ())
 
+let dirty_through_vote store (parent : Board.post) =
+  ignore (require (Board.vote store ~voter:"compaction-trigger"
+    ~post_id:(Board.Post_id.to_string parent.id) ~direction:Board.Up));
+  Alcotest.(check bool) "a real accepted vote schedules post compaction" true
+    store.Board.dirty_posts
+
+let reaction_cursor store =
+  match store.Board.reactions_source with
+  | Board.Reactions_readable observed ->
+    Fs_compat.Private_jsonl_cursor.fingerprint observed.reaction_snapshot.cursor
+  | Reactions_unobserved | Reactions_publishing _ | Reactions_refused _ | Reactions_unsettled _ ->
+    Alcotest.fail "expected a fully observed reaction source"
+
 let rec remove_tree path =
   if Sys.is_directory path then (
     Array.iter (fun name -> remove_tree (Filename.concat path name)) (Sys.readdir path);
@@ -83,11 +96,17 @@ let test_stale_flush_preserves_accepted_reaction base_path =
   let stale = fresh_store base_path in
   let parent = post stale "a stale ordinary flush cannot compact away another reaction" in
   ignore (require (toggle stale parent "first-reactor" "👍"));
+  dirty_through_vote stale parent;
   let other = fresh_store base_path in
   ignore (require (toggle other parent "foreign-reactor" "🔥"));
   let path = Board.reactions_path stale in
   let accepted = Fs_compat.load_file path in
   Board.flush_dirty stale;
+  (match stale.Board.reactions_source with
+   | Board.Reactions_refused { reaction_failure = Reactions_transaction_failed _; _ } -> ()
+   | Reactions_unobserved | Reactions_readable _ | Reactions_publishing _
+   | Reactions_unsettled _ | Reactions_refused _ ->
+     Alcotest.fail "ordinary flush did not reach the stale reaction transaction");
   Alcotest.(check string) "stale compaction leaves both accepted rows intact" accepted
     (Fs_compat.load_file path);
   let restarted = fresh_store base_path in
@@ -111,7 +130,12 @@ let test_valid_orphan_survives_compaction base_path =
   let loaded = fresh_store base_path in
   Alcotest.(check int) "a missing target does not invalidate a valid row" 1
     (require (Board.reload_reactions loaded));
+  let parent = post loaded "actual dirty work selects orphan-preserving compaction" in
+  dirty_through_vote loaded parent;
+  let before = reaction_cursor loaded in
   Board.flush_dirty loaded;
+  Alcotest.(check bool) "the real reaction rewrite published a fresh file receipt" false
+    (String.equal before (reaction_cursor loaded));
   Alcotest.(check string) "compaction preserves the orphan and its original timestamp" accepted
     (Fs_compat.load_file path);
   let restarted = fresh_store base_path in

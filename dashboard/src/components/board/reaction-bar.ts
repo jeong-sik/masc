@@ -198,7 +198,7 @@ export function ReactionBar({
       <span class="text-xs text-[var(--color-fg-muted)]" role="status" aria-live="polite" aria-atomic="true">
         ${message}
         ${visible.phase === 'unavailable' && visible.summaries.length > 0
-          ? '마지막 확인한 수치를 표시합니다.' : ''}
+          ? ' 마지막 확인한 수치를 표시합니다.' : ''}
       </span>
       ${visible.phase === 'unavailable' ? html`
         <button type="button" class="text-xs underline" aria-label="리액션 다시 확인" onClick=${() => refresh()}>

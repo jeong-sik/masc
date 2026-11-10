@@ -35,8 +35,12 @@ let expect_refusal expected = function
       let actual = match error with
         | Board.Io_error _ -> Some Source_unavailable
         | Validation_error _ -> Some Policy_denied
-        | Invalid_id _ | Post_not_found _ | Comment_not_found _ | Already_voted _
-        | Already_exists _ | Unauthorized _ -> None in
+        (* A recipient lookup failure is neither a source refusal nor a policy
+           one, so it stays in the "no classification" arm. Listing it keeps the
+           match exhaustive: if it ever happens this case fails loudly instead of
+           being read as source unavailability. *)
+        | Recipient_lookup_failed _ | Invalid_id _ | Post_not_found _ | Comment_not_found _
+        | Already_voted _ | Already_exists _ | Unauthorized _ -> None in
       Alcotest.(check bool) "actual source/policy refusal" true (actual = Some expected)
 
 let expect_io result =

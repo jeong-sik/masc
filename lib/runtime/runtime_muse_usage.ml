@@ -69,7 +69,15 @@ let observe ~scope origin usage =
        Runtime_quota_window.note_exhausted ~scope ~resets_at:(float_of_int reset_ms /. 1000.))
     (Runtime_muse_msp.exhausted_subscription_reset_ms usage);
   match report origin usage with
-  | Ok report -> Usage_window.record ~scope ~observed_at:(Time_compat.now ()) report
+  | Ok report ->
+    (* The host states when it took the snapshot. Settling against that time
+       keeps the report's own "is this reset ahead of the moment we saw it"
+       question inside one clock; wall clock here could answer with a time
+       after a stated reset and turn a spent window into an open one. *)
+    Usage_window.record
+      ~scope
+      ~observed_at:(float_of_int usage.observed_at_ms /. 1000.)
+      report
   | Error error ->
     Log.Runtime_agent.warn
       "Muse Code %s usage windows not recorded for %s: %s"

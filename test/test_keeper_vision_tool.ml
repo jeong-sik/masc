@@ -1176,8 +1176,14 @@ key = "VISION_SHARED_TEST_KEY"
           (Runtime_quota_window.is_exhausted ~scope ~now:(Time_compat.now ()));
         Alcotest.(check bool) "coarse 429 affects only attempted candidate" false (vision_has_rate b);
         (* The 429's Retry-After holds [a] until it ends
-           (RFC-exact-lane-waits-for-a-stated-reset); the typed quota cases
-           below have to reach it. *)
+           (RFC-exact-lane-waits-for-a-stated-reset): choosing it by id does
+           not call it. The typed quota cases below have to reach it, so the
+           hold is cleared after that is checked. *)
+        let must_not_call ~sw:_ ~net:_ ~clock:_ ~config:_ ~messages:_ ?tools:_ () =
+          Alcotest.fail "a runtime held by its Retry-After was called" in
+        (match run ~runtime_id:a.id must_not_call with
+         | Vt.Vo_runtimes_held _ -> ()
+         | _ -> Alcotest.fail "a runtime held by its Retry-After was not answered as held");
         Runtime_candidate_backpressure.note_candidate_success ~candidate:a.candidate_backpressure;
         List.iter (fun retry_after ->
           Runtime_quota_window.reset_for_testing ();

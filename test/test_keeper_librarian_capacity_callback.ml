@@ -550,6 +550,34 @@ let test_native_context_receipt_flags () =
      claude false false,true;claude false true,false;
      claude true false,false;claude true true,false]
 
+(* RFC-exact-lane-waits-for-a-stated-reset: a held CLI slot is kept in a
+   receipt as its own cause. The store writes a whole second as an integer
+   (Lane_addon_action.canonical), and Claude Code states its resets in whole
+   seconds, so the reader takes that form back. The slot was not called, so it
+   reads as undispatched and carries the held evidence alone. *)
+let test_held_cli_observation_round_trips () =
+  let module Shared = Keeper_exact_walk_failure in
+  let runtime_id = Fixture.cli_primary_runtime in
+  let observation until =
+    Shared.cli_observation (Keeper_lane_cli_oneshot.Held {runtime_id; until})
+    |> Shared.cli_observation_to_yojson in
+  List.iter (fun until ->
+    let json = observation until in
+    let stored = match Lane_addon_action.canonical json with
+      | Ok stored -> stored | Error detail -> Alcotest.fail detail in
+    let decoded = match Shared.cli_observation_of_yojson stored with
+      | Ok decoded -> decoded | Error detail -> Alcotest.fail detail in
+    Alcotest.(check bool) "a held slot was not dispatched" false (Shared.cli_was_dispatched decoded);
+    Alcotest.(check bool) "a held slot carries the held evidence alone" true
+      (Shared.of_cli_observation decoded = Shared.held);
+    Alcotest.(check bool) "the stored form reads back as what was written" true
+      (Yojson.Safe.equal json (Shared.cli_observation_to_yojson decoded)))
+    [1_794_268_800.0; 1_794_268_800.125];
+  List.iter (fun until ->
+    Alcotest.(check bool) "a held time that cannot be a stated reset is refused" true
+      (Result.is_error (Shared.cli_observation_of_yojson (observation until))))
+    [0.0; -1.0; Float.nan; Float.infinity]
+
 let test_size_verdict_table () =
   let module E = Agent_core.Exact_output in
   (* The verdict reads the refusal and never the status it arrived with. *)
@@ -897,6 +925,8 @@ let () =
        test_named_provider_input_refusals;
        Alcotest.test_case "original native context flags remain admission authority" `Quick
          test_native_context_receipt_flags;
+       Alcotest.test_case "a held CLI observation survives the stored form" `Quick
+         test_held_cli_observation_round_trips;
        Alcotest.test_case "every provider cause, one row each" `Quick
        test_size_verdict_table;
        Alcotest.test_case "every official-client failure, one row each" `Quick

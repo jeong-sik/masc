@@ -47,7 +47,6 @@ export type KeeperDecisionsLoadState =
   | { status: 'error'; message: string }
 
 export const viewMode = signal<ViewMode>('model')
-export const modelState = signal<ModelLoadState>({ status: 'idle' })
 export const keeperState = signal<KeeperLoadState>({ status: 'idle' })
 export const auditLedgerState = signal<AuditLedgerLoadState>({ status: 'idle' })
 export const keeperDecisionsState = signal<KeeperDecisionsLoadState>({ status: 'idle' })

@@ -12,6 +12,11 @@ const apiMocks = vi.hoisted(() => ({
 }))
 
 vi.mock('../api/dashboard', () => apiMocks)
+vi.mock('../api/model-metrics-stream', async original => {
+  const { modelMetricsSubscriptionFixture } = await import('../lib/model-metrics.test-fixture')
+  return { ...await original<typeof import('../api/model-metrics-stream')>(),
+    subscribeModelMetricsStream: modelMetricsSubscriptionFixture((window, bucket, options) => apiMocks.fetchRuntimeModelMetrics(window, bucket, options)) }
+})
 
 function modelMetrics({
   models = [
@@ -110,8 +115,10 @@ async function waitFor(assertion: () => boolean, label: string): Promise<void> {
 describe('CostDashboard route-backed focus behavior', () => {
   let container: HTMLDivElement
 
-  beforeEach(() => {
+  beforeEach(async () => {
     vi.resetModules()
+    const { confirmRuntimeTestWorkspace } = await import('../lib/runtime-workspace.test-fixture')
+    confirmRuntimeTestWorkspace()
     apiMocks.fetchRuntimeModelMetrics.mockReset().mockResolvedValue(modelMetrics())
     apiMocks.fetchKeeperCostMetrics.mockReset().mockResolvedValue(keeperMetrics())
     apiMocks.fetchAuditLedger.mockReset().mockResolvedValue({ entries: [], limit: 0 })
@@ -407,13 +414,12 @@ describe('CostDashboard route-backed focus behavior', () => {
   it('keeps runtime measurements unknown when the window has no lanes', async () => {
     apiMocks.fetchRuntimeModelMetrics.mockResolvedValue(modelMetrics({ models: [], latency_buckets: [] }))
     const { route } = await import('../router')
-    const { modelState } = await import('./cost/cost-store')
     const { CostDashboard } = await import('./cost-dashboard')
     route.value = {
       tab: 'monitoring', params: { section: 'runtime', view: 'cost' }, postId: null,
     }
     render(h(CostDashboard, { view: 'cost' }), container)
-    await waitFor(() => modelState.value.status === 'loaded' && container.querySelector('.kpi-cell') !== null,
+    await waitFor(() => container.querySelector('.kpi-cell') !== null,
       'empty runtime measurements')
 
     expect(tile(container, 'Total Cost').value).toBe('미보고')

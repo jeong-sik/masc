@@ -150,7 +150,7 @@ let tool name args =
     ~result_boundary:Tool_output.Sent_to_client name args
 
 let require_runtime_failure result = match result with
-  | Tool_result.Failed { class_ = Tool_result.Runtime_failure; _ } -> ()
+  | Tool_result.Failed { Tool_result.class_ = Tool_result.Runtime_failure; _ } -> ()
   | Tool_result.Failed _ | Tool_result.Completed _ | Tool_result.Deferred _ ->
     Alcotest.fail "policy source failure must remain a tool runtime failure"
 

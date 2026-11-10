@@ -416,7 +416,10 @@ let test_multi_account () =
                 | Access.Api_provider
                 | Access.Model_list
                 | Access.Files_api
-                | Access.Replacement_catalog )
+                | Access.Replacement_catalog
+                | Access.Web_search
+                | Access.Systemone_cloud
+                | Access.Voice_endpoint )
               , Ok (_ : Access.host_account) ) -> Alcotest.fail "a host client was allowed"
             | Access.Antigravity, Error (Access.Host_account Access.Antigravity)
             | Access.Vibe, Error (Access.Host_account Access.Vibe)
@@ -424,19 +427,34 @@ let test_multi_account () =
             | Access.Model_list, Error (Access.Host_account Access.Model_list)
             | Access.Files_api, Error (Access.Host_account Access.Files_api)
             | Access.Replacement_catalog, Error (Access.Host_account Access.Replacement_catalog)
+            | Access.Web_search, Error (Access.Host_account Access.Web_search)
+            | Access.Systemone_cloud, Error (Access.Host_account Access.Systemone_cloud)
+            | Access.Voice_endpoint, Error (Access.Host_account Access.Voice_endpoint)
               -> ()
             | ( ( Access.Antigravity
                 | Access.Vibe
                 | Access.Api_provider
                 | Access.Model_list
                 | Access.Files_api
-                | Access.Replacement_catalog )
+                | Access.Replacement_catalog
+                | Access.Web_search
+                | Access.Systemone_cloud
+                | Access.Voice_endpoint )
               , Error refusal ) ->
               Alcotest.failf
                 "a host client was refused for another reason: %s"
                 (Access.refusal_to_string refusal))
           Access.
-            [ Antigravity; Vibe; Api_provider; Model_list; Files_api; Replacement_catalog ];
+            [ Antigravity
+            ; Vibe
+            ; Api_provider
+            ; Model_list
+            ; Files_api
+            ; Replacement_catalog
+            ; Web_search
+            ; Systemone_cloud
+            ; Voice_endpoint
+            ];
         (match Access.host_access () with
          | Error Access.Host_not_shared -> ()
          | Error Access.Host_unpublished -> Alcotest.fail "the multi-account access was not published"
@@ -639,6 +657,95 @@ let test_multi_account () =
            | Ok { Server_memory_recall_standing.lane = Ok (); keepers = _ } ->
              Alcotest.fail "the recall reading says the lane has a key"
            | Error detail -> Alcotest.failf "the recall reading failed: %s" detail);
+          (* MASC tools that send with a key of the host (plan D4d). Web
+             search is given only a provider with a key, so it ends refused
+             before a provider is asked. The cloud backend of SystemOne and a
+             voice endpoint that names a key, here the local endpoint, end
+             refused before they read the key. *)
+          let web_search, addon_search =
+            with_env "MASC_WEB_SEARCH_PROVIDER_ORDER" "brave" (fun () ->
+              with_env "BRAVE_SEARCH_API_KEY" "brave-key" (fun () ->
+                ( Masc.Tool_misc_web_search.handle
+                    ~tool_name:"masc_web_search"
+                    ~start_time:(Tool_timing.start ())
+                    (`Assoc [ "query", `String "multi-account" ])
+                , Masc.Tool_misc_web_search.addon_search_runner
+                    ~query:"multi-account"
+                    ~limit:None )))
+          in
+          let web_refusal = Access.refusal_to_string (Access.Host_account Access.Web_search) in
+          Alcotest.(check bool)
+            "web search is refused as a policy"
+            true
+            (Tool_result.failure_class web_search = Some Tool_result.Policy_rejection);
+          Alcotest.(check bool)
+            "web search names the refusal"
+            true
+            (String.starts_with ~prefix:web_refusal (Tool_result.message web_search));
+          (match addon_search with
+           | Error message ->
+             Alcotest.(check bool)
+               "the Lane Add-on web search names the refusal"
+               true
+               (String.starts_with ~prefix:web_refusal message)
+           | Ok _ -> Alcotest.fail "the Lane Add-on web search was answered");
+          let module Systemone = Masc.Tool_local_runtime_systemone in
+          (match
+             with_env Systemone.cloud_key_env "cloud-key" (fun () ->
+               Systemone.decide
+                 ~timeout_sec:5
+                 { Systemone.model = "clef:cloud"
+                 ; state = "a multi-account process"
+                 ; questions =
+                     [ ( "risk"
+                       , Systemone.Noul
+                           { instructions = "Is it risky?"
+                           ; true_description = None
+                           ; false_description = None
+                           } )
+                     ]
+                 }
+                 Systemone.Cloud)
+           with
+           | Error message ->
+             Alcotest.(check string)
+               "the cloud backend of SystemOne is refused"
+               (Access.refusal_to_string (Access.Host_account Access.Systemone_cloud))
+               message
+           | Ok (_ : Yojson.Safe.t) -> Alcotest.fail "the cloud backend of SystemOne answered");
+          let voice_endpoint =
+            { Voice_config.id = "voice-d4d"
+            ; kind = Voice_config.Elevenlabs_direct
+            ; base_url = Some (Printf.sprintf "http://127.0.0.1:%d" port)
+            ; mcp_url = None
+            ; health_url = None
+            ; api_key_env = Some "MASC_TEST_D4D_VOICE_KEY"
+            ; enabled = true
+            ; timeout_seconds = Some 1.
+            ; default_voice = Some "voice"
+            ; agent_voices = []
+            ; command = None
+            ; model = None
+            }
+          in
+          let voices, spoken =
+            with_env "MASC_TEST_D4D_VOICE_KEY" "voice-key" (fun () ->
+              ( Masc.Voice_probe.list_voices_via_http voice_endpoint
+              , Masc.Voice_speak.speak_via_http_tts_to_file
+                  voice_endpoint
+                  ~agent_id:"reader"
+                  ~message:"hello"
+                  ~voice:"voice"
+                  ~model:"model"
+                  ~output_file:(Filename.concat root "voice.mp3") ))
+          in
+          let voice_refusal = Access.refusal_to_string (Access.Host_account Access.Voice_endpoint) in
+          (match voices with
+           | Error message -> Alcotest.(check string) "the voice catalogue is refused" voice_refusal message
+           | Ok (_ : Yojson.Safe.t) -> Alcotest.fail "the voice catalogue was read");
+          (match spoken with
+           | Error message -> Alcotest.(check string) "speech is refused" voice_refusal message
+           | Ok (_ : int) -> Alcotest.fail "speech was synthesized");
           Alcotest.(check int) "the endpoint saw no connection" 0 (Atomic.get connections));
         (* A native tool runs as the user of the server process and reaches
            the account homes of other people, so a model turn runs here only

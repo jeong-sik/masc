@@ -2093,7 +2093,8 @@ let test_failed_node_row_keeps_its_producer_roots () =
      |> List.map (fun (reference : Tool_output.artifact_ref) -> reference.sha256))
 ;;
 
-let test_board_write_survives_composition_output_schema_failure () =
+let test_board_write_survives_composition_output_schema_failure
+      ?(production=false) ?(post_commit_failure=false) () =
   let module Log = Masc.Keeper_tool_call_log in
   let module Board = Masc.Board in
   let module Board_dispatch = Masc.Board_dispatch in
@@ -2101,13 +2102,22 @@ let test_board_write_survives_composition_output_schema_failure () =
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   Time_compat.set_clock (Eio.Stdenv.clock env);
   Mirage_crypto_rng_unix.use_default ();
+  let inherited_base_path = Sys.getenv_opt "MASC_BASE_PATH" in
   with_export_base @@ fun base_path ->
   Fun.protect ~finally:(fun () ->
+    (match inherited_base_path with
+     | Some value -> Unix.putenv "MASC_BASE_PATH" value
+     | None -> Unix.unsetenv "MASC_BASE_PATH");
     Log.reset_for_testing ();
     Board_dispatch.reset_for_test ();
     Board.reset_global_for_test ()) @@ fun () ->
   Board_dispatch.reset_for_test ();
   Board.reset_global_for_test ();
+  (* The Board store resolves its own paths through MASC_BASE_PATH
+     (Board_paths.board_base_path -> Env_config_core.base_path), not through
+     init_jsonl's argument, so the env must agree with this case's base the
+     same way test_board_dispatch's with_eio aligns them (task-3483). *)
+  Unix.putenv "MASC_BASE_PATH" base_path;
   Result.get_ok (Board_dispatch.init_jsonl ~base_path
     ~recipient_lookup:Masc_board_handlers.Recipient_lookup.none_declared ());
   Log.reset_for_testing ();
@@ -2140,7 +2150,8 @@ let test_board_write_survives_composition_output_schema_failure () =
       ~schedule:{ planned_index = 0; batch_index = 0; batch_size = 1
                 ; execution_mode = Agent_core.Tool_contract.Serial }
       ~completion:Agent_core.Tool_contract.Continue_after_success in
-  let observed = ref None and producer_fact = ref None in
+  let observed = ref None and producer_fact = ref None and dispatched_tool_use_id = ref None in
+  let producer_invocation = ref None and producer_input = ref None in
   let record = Masc.Keeper_tool_composition_surface_observation.observe_node_result
       ~composition_tool:"keeper_compose_board-schema-fixture"
       ~composition_execution:Masc.Keeper_tool_composition_catalog.Inline
@@ -2148,22 +2159,77 @@ let test_board_write_survives_composition_output_schema_failure () =
       ~composition_run_id:(Plan.Composition_run_id.fresh ()) ~parent_invocation ~meta
       ~turn_context:Masc.Keeper_tool_call_log_context.empty_turn_context in
   let observe_node_result result = observed := Some result; record result in
-  let dispatch ?launch_replay:_ ~tool_use_id:_ ~node ~descriptor:_ ~schedule:_ ~input () =
+  (* Seam scope: this case drives the Board producer directly to isolate
+     output-validation ordering (the stricter consumer contract refuses the
+     committed write) and failed-node row roots. Carrier propagation from
+     the production execute_keeper dispatch through the invocation carrier
+     is exercised by the production cases below. *)
+  let dispatch ?launch_replay:_ ~tool_use_id ~node ~descriptor:_ ~schedule:_ ~input () =
+    dispatched_tool_use_id := Some tool_use_id;
     let args = match input with
       | `Assoc fields -> `Assoc (("author", `String "schema-board-keeper") :: fields)
       | _ -> fail "comment node input is not an object" in
+    check string "producer invocation carries the intended author"
+      "schema-board-keeper"
+      Yojson.Safe.Util.(args |> member "author" |> to_string);
     let result = write node.Plan.tool_name args in
     check bool "actual Board producer completed" true (Tool_result.is_success result);
     producer_fact := Board_tool_evidence.of_metadata (Tool_result.metadata result);
     Executor.dispatch_result result in
-  (match Executor.execute ~plan ~run_id:(Plan.Run_id.fresh ()) ~dispatch ~observe_node_result () with
+  let execution = if production then (
+    let contract=match Plan.contract plan node.id with
+      | Some contract -> contract | None -> fail "production comment lost its contract" in
+    (match contract.target with
+     | Plan.Descriptor_target target ->
+       check bool "production dispatch keeps canonical descriptor authority" true (target==canonical)
+     | Child_arguments _ | Child_submission _ | Child_result _ -> fail "comment has no descriptor target");
+    check bool "the independent plan output contract stays strict" true
+      (contract.composable_output=descriptor.composable_output);
+    let record_gate_result ~operation ~input result =
+      check string "the real handler invokes the comment producer" "masc_board_comment" operation;
+      check bool "the Board producer completed before consumer refusal" true (Tool_result.is_success result);
+      producer_input := Some input;
+      producer_fact := Board_tool_evidence.of_metadata (Tool_result.metadata result);
+      let invocation,evidence = match Log.pending_board_action_evidence_for_testing () with
+        | [entry] -> entry
+        | _ -> fail "the real handler did not retain exactly its invocation's Board fact" in
+      check bool "the live carrier holds this producer fact" true (Some evidence= !producer_fact);
+      producer_invocation := Some invocation;
+      dispatched_tool_use_id := Some (Agent_core.Tool_contract.Invocation.tool_use_id invocation);
+      (* Failure after the actual committed producer has no returned result
+         metadata. Only the executor's carrier read can preserve its fact. *)
+      if post_commit_failure then failwith "post-commit consumer callback failed"
+    in
+    let publication_recovery : Masc.Keeper_publication_recovery_availability.turn_context =
+      {provider=Masc.Keeper_publication_recovery_availability.non_runtime_provider;keeper_name=meta.name} in
+    Executor.Compatibility.execute_keeper ~plan ~run_id:(Plan.Run_id.fresh ())
+      ~parent_invocation ~config:(Masc.Workspace.default_config base_path) ~meta ~publication_recovery
+      ~ctx_snapshot:(Masc.Keeper_context_runtime.create ~eio:false ~system_prompt:"Board carrier regression")
+      ~keeper_turn_id:(fun () -> Some 1) ~clock:(Eio.Stdenv.clock env)
+      ~record_gate_result ~observe_node_result ())
+    else Executor.execute ~plan ~run_id:(Plan.Run_id.fresh ()) ~dispatch ~observe_node_result () in
+  (match execution with
    | Ok _ -> fail "the stricter output contract must reject the comment result"
    | Error _ -> ());
   let node = match !observed with
     | Some node -> node
     | None -> fail "the rejected output never reached the production observer" in
-  check bool "output validation happened after the producer" true
-    (Option.is_some node.Executor.output_validation_error);
+  check bool (if post_commit_failure then "post-commit failure precedes output validation"
+    else "output validation happened after the producer") true
+    (if post_commit_failure then Option.is_none node.Executor.output_validation_error
+     else Option.is_some node.Executor.output_validation_error);
+  if production then (
+    let invocation = match !producer_invocation with
+      | Some invocation -> invocation | None -> fail "the real producer invocation is absent" in
+    check bool "the executor clears the same invocation's carrier" true
+      (Log.peek_board_action_evidence ~invocation ()=None);
+    check int "no Board carrier leaks after composition dispatch" 0
+      (List.length (Log.pending_board_action_evidence_for_testing ()));
+    check string "the node retains its exact producer invocation"
+      (Agent_core.Tool_contract.Invocation.tool_use_id invocation) node.tool_use_id;
+    check bool "the physical execution belongs to that live producer invocation" true
+      (node.physical_execution_id=Some (Log.invocation_execution_id ~invocation));
+    check bool "the handler input stays attached to that node" true (!producer_input=Some node.input));
   let fact = match !producer_fact with
     | Some (Ok fact) -> fact
     | Some (Error detail) -> fail detail
@@ -2179,9 +2245,32 @@ let test_board_write_survives_composition_output_schema_failure () =
     (row |> member "board_action_evidence" |> Yojson.Safe.to_string);
   check string "evidence belongs to the original node execution"
     (Ids.Execution_id.to_string node.execution_id) (row |> member "execution_id" |> to_string);
+  check string "the row attributes the comment node"
+    "masc_board_comment" (row |> member "tool" |> to_string);
+  check string "the row keeps the node post_id"
+    post_id (row |> member "input" |> member "post_id" |> to_string);
+  check string "the row keeps the node content"
+    "committed before schema refusal" (row |> member "input" |> member "content" |> to_string);
+  check bool "the durable row retains the complete node input" true
+    (Yojson.Safe.equal node.input (row |> member "input"));
+  if production then (
+    let invocation=Option.get !producer_invocation in
+    check string "the row retains the actual physical producer execution"
+      (Ids.Execution_id.to_string (Log.invocation_execution_id ~invocation))
+      (row |> member "physical_execution_id" |> to_string));
+  (match (!dispatched_tool_use_id, row |> member "tool_use_id") with
+   | (Some dispatched, `String recorded) ->
+     check string "the row shares the dispatch identity" dispatched recorded
+   | (None, _) -> fail "dispatch never recorded its tool_use_id"
+   | (_, _) -> fail "comment-node row lacks tool_use_id");
   match Board_dispatch.get_comments ~reader:Masc_board_handlers.Board_access.Operator ~post_id with
-  | Ok [ comment ] -> check string "the failed consumer did not replay or undo the comment"
-      "committed before schema refusal" comment.content
+  | Ok [ comment ] ->
+    check string "the failed consumer did not replay or undo the comment"
+      "committed before schema refusal" comment.content;
+    check string "the production writer binds the Keeper author" meta.name comment.author;
+    check string "the retained fact is this exact durable Board comment"
+      (Board_tool_evidence.to_yojson (Board_tool_evidence.comment comment) |> Yojson.Safe.to_string)
+      (Board_tool_evidence.to_yojson fact |> Yojson.Safe.to_string)
   | Ok _ -> fail "expected exactly one committed comment"
   | Error error -> fail (Board.show_board_error error)
 ;;
@@ -2273,7 +2362,11 @@ let () =
         ; test_case "failed node row keeps its producer roots" `Quick
             test_failed_node_row_keeps_its_producer_roots
         ; test_case "Board write survives composition output schema failure" `Quick
-            test_board_write_survives_composition_output_schema_failure
+            (test_board_write_survives_composition_output_schema_failure ~production:false)
+        ; test_case "real Board handler carrier survives composition schema refusal" `Quick
+            (test_board_write_survives_composition_output_schema_failure ~production:true)
+        ; test_case "real Board handler carrier survives post-commit consumer exception" `Quick
+            (test_board_write_survives_composition_output_schema_failure ~production:true ~post_commit_failure:true)
         ; test_case "unwritten failed node row stops only when it kept roots" `Quick
             test_unwritten_failed_node_row_stops_only_with_roots
         ; Alcotest.test_case

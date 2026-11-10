@@ -511,5 +511,10 @@ val pending_truncation_count_for_testing : unit -> int
 val pending_file_change_evidence_count_for_testing : unit -> int
 (** Number of live invocation-scoped file change observations. Test only. *)
 
+val pending_board_action_evidence_for_testing : unit ->
+  (Agent_core.Tool_contract.Invocation.t * (Board_tool_evidence.t, string) result) list
+(** Read-only snapshot of live Board carriers, retaining their exact invocation
+    objects for producer/consumer boundary tests. No ordering is promised. *)
+
 val queued_count_for_testing : unit -> int
 (** Number of queued asynchronous append records. For unit tests only. *)

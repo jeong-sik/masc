@@ -38137,6 +38137,16 @@ Use relative paths for resources already held in the package. -->
        | Some "w" when state.view = Resources ->
            Masc_tui_resources_updates.toggle_layout state
        | Some "v"
+         when state.view = Approvals && not state.approval_detail_open
+              && state.ask_answer_mode = Ask_browsing
+              && not state.composer_focused
+              && not (modal_owns_keys state) && not state.palette_open
+              && not state.answering_open && not state.patch_modal_open && not state.link_modal_open
+              && Option.is_none (text_input_target state ~compact_viewport) ->
+           (match Masc_tui_render_approvals.answer_feedback_reading state with
+            | Some reading -> open_detail_reading state reading
+            | None -> report_action state "info" "No answer receipt in this workspace")
+       | Some "v"
          when state.view = Approvals && state.approval_detail_open
               && not state.composer_focused
               && not (modal_owns_keys state) && not state.palette_open
@@ -40468,13 +40478,11 @@ Use relative paths for resources already held in the package. -->
                 if state.resource_focus = Right_pane then
                   state.resource_focus <- Left_pane
                 else
-                  (* Off-ring child: the way out of the list is the ring
-                     parent, loaded, same as Connectors and Code. *)
-                  goto_surface state ~mailbox:async_messages Config
+                  goto_surface state ~mailbox:async_messages
+                    (Masc_tui_surface_navigation.surface_ring_family state.view)
              | Clients ->
-                 (* Off-ring child: the way out is the ring parent, loaded,
-                    the same exit Resources takes to Config. *)
-                 goto_surface state ~mailbox:async_messages Runtime
+                 goto_surface state ~mailbox:async_messages
+                   (Masc_tui_surface_navigation.surface_ring_family state.view)
              | Lanes ->
                 state.lanes_action_error <- None;
                 (match state.lanes_mode with
@@ -40560,13 +40568,14 @@ Use relative paths for resources already held in the package. -->
                   (* Off-ring child: the way out of the list is Activity,
                      the ring parent, same as the other hang-offs. *)
                   goto_surface state ~mailbox:async_messages Acting
-            | Connectors -> state.view <- Keepers Keeper_detail
+            | Connectors ->
+                goto_surface state ~mailbox:async_messages
+                  (Masc_tui_surface_navigation.surface_ring_family state.view)
             | Memory ->
                 (match memory_back state with
                  | Memory_stays -> ()
                  | Memory_leaves -> state.view <- Overview)
             | Tools ->
-                (* Off-ring child: back to the parent that opened it. *)
                 if Option.is_some state.tools_async_task_source then begin
                   close_tools_async_task state;
                   launch_tools_async_detail state ~mailbox:async_messages
@@ -40574,7 +40583,8 @@ Use relative paths for resources already held in the package. -->
                   (* Back on the request list, which reads on its own pushes
                      ([launch_owed_async_requests]). *)
                   close_tools_async_detail state
-                else goto_surface state ~mailbox:async_messages Config
+                else goto_surface state ~mailbox:async_messages
+                  (Masc_tui_surface_navigation.surface_ring_family state.view)
             | Config ->
                 state.runtime_model_jump <- None;
                 state.runtime_config_jump_section <- None;
@@ -42241,7 +42251,8 @@ Use relative paths for resources already held in the package. -->
             | Masc_tui_types.Runtime_all ->
                 enter_standalone_lanes state ~mailbox:async_messages)
        | Some "p" | Some "P" when state.view = Clients ->
-           goto_surface state ~mailbox:async_messages Runtime
+           goto_surface state ~mailbox:async_messages
+             (Masc_tui_surface_navigation.surface_ring_family state.view)
        | Some "p" | Some "P"
          when state.view = Lanes && state.lanes_mode = Lanes_overview ->
            goto_surface state ~mailbox:async_messages Runtime

@@ -33,7 +33,6 @@ module Ansi = struct
   let white = Masc_tui_theme.Sgr.white
 
   let default_fg = Masc_tui_theme.Sgr.default_fg
-  let gray = Masc_tui_theme.Sgr.gray
   let bright_red = Masc_tui_theme.Sgr.bright_red
   let bright_green = Masc_tui_theme.Sgr.bright_green
   let bright_yellow = Masc_tui_theme.Sgr.bright_yellow
@@ -292,12 +291,24 @@ module Theme = struct
   module Syntax = struct
     let keyword = Masc_tui_theme.Syntax.keyword
     let string = Masc_tui_theme.Syntax.string_
-    let code_comment = Masc_tui_theme.Syntax.code_comment
+
+    (* A comment says it is a comment by its slant, and it sits behind the code
+       around it. Its colour is the lifted bright black the tool trail already
+       draws through: a scheme whose bright black reads under 4.5:1 has it
+       raised to that floor, and a terminal that reported no palette keeps the
+       plain code. *)
+    let code_comment () = Masc_tui_theme.Sgr.italic ^ quiet_origin ()
+
     let code_number = Masc_tui_theme.Syntax.code_number
     let code_type = Masc_tui_theme.Syntax.code_type
     let code_span = Masc_tui_theme.Syntax.code_span
     let link = Masc_tui_theme.Syntax.link
-    let rule = Masc_tui_theme.Syntax.rule
+
+    (* The rule between sections and the border of a fence divide a document
+       the way a panel border divides a screen, so they take the panel
+       border's colour. *)
+    let rule () = recede ()
+
     let json_key = Masc_tui_theme.Syntax.json_key
     let json_number = Masc_tui_theme.Syntax.json_number
     let json_literal = Masc_tui_theme.Syntax.json_literal
@@ -800,7 +811,14 @@ let ctx_bar ratio width =
 
 (* The framed family keeps the full border box. Modals (palette, help) and
    side-by-side panes still need it: a border is what separates an overlay
-   from the surface under it, and two panes from each other. *)
+   from the surface under it, and two panes from each other.
+
+   The border is drawn in [Theme.recede], the colour the pane borders and
+   rules beside it already use, and not in the flat grey SGR 90. On a terminal
+   that reports its palette that grey is the terminal's own bright black, which
+   is 1.69:1 against Nord's background; [recede] is projected onto the reported
+   palette and held at 4.5:1. On a terminal that reports none, [recede] is the
+   default foreground, as it is for every pane border. *)
 
 (* The box's measurements live in [Masc_tui_frame] so the helpers that draw
    it and the callers that measure against it read one set. *)
@@ -811,15 +829,15 @@ let framed_content_height ~rows = Masc_tui_frame.content_height ~rows
 
 let framed_top buf cols =
   Buffer.add_string buf (Printf.sprintf "%s%s%s%s%s\n"
-    Ansi.gray Ansi.box_tl (draw_hline (framed_rule_width cols)) Ansi.box_tr Ansi.reset)
+    (Theme.recede ()) Ansi.box_tl (draw_hline (framed_rule_width cols)) Ansi.box_tr Ansi.reset)
 
 let framed_bottom buf cols =
   Buffer.add_string buf (Printf.sprintf "%s%s%s%s%s\n"
-    Ansi.gray Ansi.box_bl (draw_hline (framed_rule_width cols)) Ansi.box_br Ansi.reset)
+    (Theme.recede ()) Ansi.box_bl (draw_hline (framed_rule_width cols)) Ansi.box_br Ansi.reset)
 
 let framed_divider buf cols =
   Buffer.add_string buf (Printf.sprintf "%s%s%s%s%s\n"
-    Ansi.gray Ansi.box_l (draw_hline (framed_rule_width cols)) Ansi.box_r Ansi.reset)
+    (Theme.recede ()) Ansi.box_l (draw_hline (framed_rule_width cols)) Ansi.box_r Ansi.reset)
 
 (* What an overlay draws between its border glyph and the content, and what
    a borderless row draws in the border's place. Both come from the frame's
@@ -837,24 +855,27 @@ let add_row buf pieces =
 
 let framed_line buf cols content =
   let inner = framed_inner_width cols in
+  let edge = Theme.recede () in
   add_row buf
-    [ Ansi.gray; Ansi.box_v; Ansi.reset; border_padding
+    [ edge; Ansi.box_v; Ansi.reset; border_padding
     ; fit_width content inner
-    ; border_padding; Ansi.gray; Ansi.box_v; Ansi.reset ]
+    ; border_padding; edge; Ansi.box_v; Ansi.reset ]
 
 let framed_line_styled buf cols ~style content =
   let inner = framed_inner_width cols in
   let content = fit_width content inner in
+  let edge = Theme.recede () in
   add_row buf
-    [ Ansi.gray; Ansi.box_v; Ansi.reset; border_padding; style; content; Ansi.reset
-    ; border_padding; Ansi.gray; Ansi.box_v; Ansi.reset ]
+    [ edge; Ansi.box_v; Ansi.reset; border_padding; style; content; Ansi.reset
+    ; border_padding; edge; Ansi.box_v; Ansi.reset ]
 
 let framed_empty buf cols =
   let inner = framed_inner_width cols in
+  let edge = Theme.recede () in
   add_row buf
-    [ Ansi.gray; Ansi.box_v; Ansi.reset; border_padding
+    [ edge; Ansi.box_v; Ansi.reset; border_padding
     ; String.make inner ' '
-    ; border_padding; Ansi.gray; Ansi.box_v; Ansi.reset ]
+    ; border_padding; edge; Ansi.box_v; Ansi.reset ]
 
 (* Full-screen surfaces draw without the outer box: the terminal edge is
    already the frame, and a border around everything separates nothing (the
@@ -865,12 +886,11 @@ let framed_empty buf cols =
 let box_top buf _cols = Buffer.add_char buf '\n'
 let box_bottom buf _cols = Buffer.add_char buf '\n'
 
-(* The receded colour, not the flat grey it falls back to. [Theme.recede]
-   projects onto the probed palette and holds a 3:1 contrast floor; [Ansi.gray]
-   is the value it returns when there is no palette to project onto. So on a
-   terminal that reports one, this rule used to sit at whatever grey the SGR
-   table happened to give -- which can be the background -- while the rules
-   the surfaces draw beside it were receded. *)
+(* The receded colour, not a flat grey. [Theme.recede] projects onto the
+   probed palette and holds a 4.5:1 contrast floor. So on a terminal that
+   reports one, this rule used to sit at whatever grey the SGR table happened
+   to give -- which can be the background -- while the rules the surfaces
+   draw beside it were receded. *)
 let box_divider buf cols =
   Buffer.add_string buf
     (Printf.sprintf "%s%s%s%s%s\n" frame_margin (Theme.recede ())

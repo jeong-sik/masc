@@ -83,9 +83,9 @@ let config_bindings =
   ; b ~ko:"런타임" Navigate "9" "Runtime"
       ~help:"runtime status, lane routing, probes and connected clients", None
   ; b ~ko:"리소스" Navigate "s" "resources"
-      ~help:"the MCP resource catalog, off the ring under System", None
+      ~help:"the MCP resource catalog under Features & plugins", None
   ; b ~ko:"도구" Navigate "t" "tools"
-      ~help:"the tool catalog, receipts, and usage, off the ring under System", None
+      ~help:"the tool catalog, receipts, and usage under Features & plugins", None
   ; b ~ko:"편집" Act "e" "edit"
       ~help:"runtime.toml previews; models open fields; prompts save an override; voice opens the setup wizard",
       Some [ Config_runtime; Config_models; Config_prompts; Config_voice ]
@@ -443,6 +443,9 @@ let approval_read =
 let approval_value_bytes =
   b Navigate "v" "string bytes" ~detail:Detail_only
     ~help:"read decoded top-level Gate string values as bytes, not JSON wire; v or Esc returns"
+let approval_answer_receipt =
+  b ~ko:"마지막 답변" Navigate "v" "last answer" ~detail:List_only
+    ~help:"while browsing, capture the last answer receipt, original question identity and retained follow-up; scroll or search the complete text; v or Esc returns"
 let approval_answer =
   b Act "a" "answer a question"
     ~help:"open the selected question, from a Keeper or a Lane Add-on installation, in its own mode; Esc leaves it"
@@ -795,14 +798,8 @@ let for_surface = function
       [ b Navigate "j/k" "move" ~rows:Needs_row ~help:"move the roster cursor"
       ; b Act "Enter" "detail" ~rows:Needs_row
           ~help:"read the client's full identity and observation"
-        (* Two doors, one action: both call [goto_surface Runtime]. As two
-           bindings the sheet printed the answer twice, one row under the
-           other, and the second row's help differed from the first by a
-           pronoun. The compound spelling is the one the table already uses
-           for [Left / Esc] and [o / A], and [key_atoms] splits the slash, so
-           the footer keeps its Esc pin and both keys stay counted. *)
-      ; b Act "p / Esc" "runtime"
-          ~help:"back to the Runtime surface this hangs off"
+      ; b ~ko:"기능" Act "p / Esc" "features"
+          ~help:"back to Features & plugins"
       ; b Search "/" "find" ~rows:Needs_row
           ~help:"jump the cursor to a matching attached name"
       ; b Search "n / N" "next / previous match" ~rows:Needs_row
@@ -864,6 +861,7 @@ let for_surface = function
            argument is readable before y answers it. *)
       ; approval_read
       ; approval_value_bytes
+      ; approval_answer_receipt
       ; approval_decide
       ; approval_retry
         (* The footer names this key and the sheet did not, so an operator who
@@ -1144,7 +1142,7 @@ let for_surface = function
           ~help:"inside Browser Lane: preview the selected tab; any key returns"
       ; b Navigate "j/k" "scroll"
       ; b Act "b / u" "bind / unbind" ~help:"bind / unbind a channel"
-      ; b Act "Esc" "keeper" ~help:"back to the selected Keeper"
+      ; b ~ko:"기능" Act "Esc" "features" ~help:"back to Features & plugins"
       ; b Search "/" "find" ~help:"jump the cursor to a matching transport"
       ; b Search "n / N" "next / previous match"
       ]
@@ -1208,7 +1206,7 @@ let for_surface = function
       ; b Act "y" "copy source" ~detail:Detail_only
           ~help:"send the selected text part's original bytes via OSC 52; terminal support is unconfirmed"
       ; b Act "Esc" "back"
-          ~help:"the text hands back to the list; the list leaves for System"
+          ~help:"the text hands back to the list; the list returns to Features & plugins"
       ; b Search "/" "find"
           ~help:"find a resource name in the list, or text in the loaded detail"
       ; b Search "n / N" "next / previous match"
@@ -1319,9 +1317,9 @@ let for_surface = function
       ; b Act "d" "delete Skill"
           ~help:"remove the selected published package; press d again on the \
                  same row to confirm"
-      ; b Act "Esc" "system"
+      ; b ~ko:"기능" Act "Esc" "features"
           ~help:"return from original Task to request, then request to list; \
-                 otherwise back to the System surface it hangs off"
+                 otherwise back to Features & plugins"
       ]
       @ [ tools_refresh; listing_next; listing_quit ]
   | System_logs ->
@@ -1425,9 +1423,9 @@ let footer_hints_planning_goal_list ~lang ~has_rows =
 let footer_hints_planning_goal_detail ~lang =
   planning_goal_hints ~lang ~detail_open:true ~has_rows:None
 
-let footer_hints_tools ~pane =
+let footer_hints_tools ~lang ~pane =
   let bracket = tools_bracket_binding ~pane in
-  hints_of_bindings
+  hints_of_bindings ~lang
     (List.map (fun (binding : binding) ->
        if String.equal binding.key bracket.key then bracket else binding)
        (for_surface Tools))
@@ -1438,7 +1436,9 @@ type ask_supply =
   | Ask_selected
 
 type approvals_footer =
-  | Approval_browsing of { approvals : bool; asks : ask_supply; source : bool }
+  | Approval_browsing of {
+      approvals : bool; asks : ask_supply; source : bool; last_answer : bool;
+    }
   | Approval_writing
   | Approval_armed
   | Approval_answering of { has_choices : bool; takes_text : bool }
@@ -1450,8 +1450,8 @@ let footer_hints_approvals mode =
   let hint = key_hint in
   let row items = String.concat "  " items in
   match mode with
-  | Approval_browsing { approvals; asks; source } ->
-      (* Three things a key can need. [j/k] and [y / n] act on an approval
+  | Approval_browsing { approvals; asks; source; last_answer } ->
+      (* Each key follows its own source. [j/k] and [y / n] act on an approval
          row; with none the decision answers with a notice. [ / ] selects a
          waiting question and [a] opens the selected one, so a cursor on none
          of them keeps [ / ] and drops [a]. [o / O] read the source of a
@@ -1465,6 +1465,7 @@ let footer_hints_approvals mode =
             | Asks_unselected -> [ hint approval_walk ]
             | Ask_selected -> [ hint approval_walk; hint approval_answer ])
          @ (if source then [ hint approval_origin ] else [])
+         @ (if last_answer then [ hint approval_answer_receipt ] else [])
          @ [ hint listing_refresh; hint listing_next
              (* The way out: the two keys a cut row keeps
                 ([Masc_tui_footer.never_dropped_keys]). *)

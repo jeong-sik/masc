@@ -166,7 +166,8 @@ val footer_hints :
     the keys that need one, [Needs_reading] in the table. A failed read leaves
     no row and still has this, so the two answers differ there. *)
 
-val footer_hints_tools : pane:Masc_tui_types.tools_pane -> string
+val footer_hints_tools :
+  lang:Masc_tui_types.ui_language -> pane:Masc_tui_types.tools_pane -> string
 (** Tools' bracket keys select retained runs in Available and Keepers in other panes. *)
 
 val footer_hints_metrics :
@@ -181,11 +182,14 @@ type ask_supply =
   | Asks_unselected  (** questions wait and the cursor is on none of them *)
   | Ask_selected  (** the cursor is on a question *)
 
-(** The browsing footer follows three facts: [approvals] says the queue has a
+(** The browsing footer follows these facts: [approvals] says the queue has a
     row, [asks] what the ask list offers, and [source] that a question source
-    is on hand to read, the last answer's included. *)
+    is on hand to read, the last answer's included. [last_answer] exposes the
+    immutable receipt reader, independently of the current question. *)
 type approvals_footer =
-  | Approval_browsing of { approvals : bool; asks : ask_supply; source : bool }
+  | Approval_browsing of {
+      approvals : bool; asks : ask_supply; source : bool; last_answer : bool;
+    }
   | Approval_writing
   | Approval_armed
   | Approval_answering of { has_choices : bool; takes_text : bool }

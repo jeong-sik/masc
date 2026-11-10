@@ -116,9 +116,6 @@ let publish_telemetry publisher json =
   update publisher (fun state -> {state with telemetry = Some json})
 ;;
 
-type 'a projection_cache_entry = { refreshed_at : float; value : 'a }
-type 'a projection_cache = 'a projection_cache_entry option Atomic.t
-let make_projection_cache () : 'a projection_cache = Atomic.make None
 let should_reuse_projection ~now ~ttl ~refreshed_at =
   let age = now -. refreshed_at in age >= 0.0 && age < ttl
 ;;

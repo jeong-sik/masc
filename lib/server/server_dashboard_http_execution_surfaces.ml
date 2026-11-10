@@ -208,8 +208,8 @@ let () =
        | Some publication -> broadcast_operator_snapshot publication)
 ;;
 
-let broadcast_operator_digest =
-  broadcast_cached_surface ~encoding:Encode_inline ~event_type:"operator_digest"
+let broadcast_operator_digest json =
+  broadcast_cached_surface ~encoding:Encode_inline ~event_type:"operator_digest" json
 
 let create_execution_cache () : cached_surface =
   Server_dashboard_http_cache.create_cached_surface

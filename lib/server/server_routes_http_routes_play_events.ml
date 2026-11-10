@@ -174,8 +174,7 @@ let serve ~state ~name ~request ~reqd ~sw ~clock ~machine ~presence (credential 
           let rec deadlines () =
             let observed = Auth.with_credential_transaction config.base_path
                 Auth.list_current_credentials_in_transaction |> Result.join in
-            match Result.map_error (fun _ -> ()) observed
-                  |> Result.bind (fun credentials ->
+            match Result.bind (Result.map_error (fun _ -> ()) observed) (fun credentials ->
                     next_seat_expiry ~now:(Time_compat.now ()) credentials |> Result.map_error (fun _ -> ())) with
             | Error () ->
               ignore (Server_sse_response.send response unavailable);

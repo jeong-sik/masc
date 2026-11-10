@@ -283,7 +283,7 @@ module Key_map = Map.Make (String)
 let latest_by_key config =
   load_all config
   |> List.fold_left
-       (fun table value ->
+       (fun table (value : record) ->
           let key =
             key_of ~surface:value.surface ~target_type:value.target_type
               ~target_id:value.target_id

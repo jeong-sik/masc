@@ -9044,6 +9044,15 @@ type image_inspection = {
   ii_frame : image_inspection_frame;
 }
 
+type image_pixel_source = {
+  ips_workspace : workspace_authority;
+  ips_origin : sent_image_read;
+  ips_unconfirmed : bool;
+  ips_footer : string;
+}
+(** Memory PNGs retain their captured reading in both the Kitty inspection
+    and ordinary pixel paths. The footer follows that reading's freshness. *)
+
 type unsaved_remote_image = {
   uri_bytes : string;
   uri_image_url : string;
@@ -9544,6 +9553,7 @@ type state = {
   mutable image_open: bool;
   mutable image_inspection : image_inspection option;
   mutable image_cell_view : image_cell_view option;
+  mutable image_pixel_source : image_pixel_source option;
   mutable browser_viewport : (Browser_lane_view.screenshot * string) option;
   mutable image_request_generation: int;
   mutable image_catalog: image_catalog option;
@@ -19354,6 +19364,13 @@ let image_cell_source_unconfirmed (state : state) (origin : sent_image_read) =
             | Absent | Loading | Failed _ -> true)
        | Board_list | Board_compose -> true)
 
+let image_pixel_source_for_redraw (state : state) (source : image_pixel_source) =
+  match image_cell_origin_for_redraw state ~workspace:source.ips_workspace source.ips_origin with
+  | None -> None
+  | Some origin ->
+      Some {source with ips_origin=origin;
+        ips_unconfirmed=image_cell_source_unconfirmed state origin}
+
 (* A completion belongs to the exact read that launched it, even if a later
    read happens to have the same name, surface and generation. *)
 let take_image_read (state : state) (request : sent_image_read) =
@@ -20121,6 +20138,7 @@ let create_state
   image_open = false;
   image_inspection = None;
   image_cell_view = None;
+  image_pixel_source = None;
   browser_viewport = None;
   image_request_generation = 0;
   image_catalog = None;

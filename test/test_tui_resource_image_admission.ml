@@ -699,6 +699,39 @@ let test_memory_image_source_unavailable () =
   check bool "another fetched Keeper cannot confirm the capture" true
     (Types.image_cell_source_unconfirmed state origin)
 
+let test_memory_pixel_source_retention () =
+  let state, activity, origin=memory_image_capture () in
+  let source : Types.image_pixel_source =
+    {ips_workspace=state.workspace_authority;ips_origin=origin;
+     ips_unconfirmed=true;ips_footer=""} in
+  let current () = match Types.image_pixel_source_for_redraw state source with
+    | Some current -> current
+    | None -> fail "expected the captured Memory pixel source" in
+  check bool "fresh pixel source is confirmed" false (current ()).ips_unconfirmed;
+  let request=begin_memory_activity state "memory-keeper" in
+  check bool "pixel source becomes unconfirmed during refresh" true (current ()).ips_unconfirmed;
+  state.memory_activity <- Fetched.complete ~equal:String.equal state.memory_activity request
+    (Error "activity unavailable");
+  let retained=current () in
+  check bool "failed refresh retains the exact pixel origin" true (retained.ips_origin == origin);
+  check bool "failed refresh keeps the pixel source unconfirmed" true retained.ips_unconfirmed;
+  let request=begin_memory_activity state "memory-keeper" in
+  state.memory_activity <- Fetched.complete ~equal:String.equal state.memory_activity request
+    (Ok {activity with journal_lines=2});
+  check bool "changed activity retains the captured pixel origin" true
+    ((current ()).ips_origin == origin);
+  check bool "changed activity keeps the pixel source unconfirmed" true (current ()).ips_unconfirmed;
+  let request=begin_memory_activity state "memory-keeper" in
+  state.memory_activity <- Fetched.complete ~equal:String.equal state.memory_activity request (Ok activity);
+  check bool "matching successful activity reconfirms the pixel source" false (current ()).ips_unconfirmed;
+  state.memory_facts_keeper <- Some "another-keeper";
+  check bool "another selected Keeper withdraws the pixel source" true
+    (Option.is_none (Types.image_pixel_source_for_redraw state source));
+  state.memory_facts_keeper <- Some "memory-keeper";
+  state.workspace_authority <- Types.Workspace_authority 1;
+  check bool "another workspace withdraws the pixel source" true
+    (Option.is_none (Types.image_pixel_source_for_redraw state source))
+
 let test_tools_image_keeper_owner () =
   let state=state () in
   state.view <- Types.Tools;
@@ -1362,6 +1395,7 @@ let () =
   test_case "Memory diagram owns its keeper" `Quick test_memory_image_keeper_owner;
   test_case "Memory image freshness belongs to its captured activity" `Quick test_memory_image_source_freshness;
   test_case "Memory image keeps missing and partial observations unconfirmed" `Quick test_memory_image_source_unavailable;
+  test_case "Memory pixel source retains its captured reading" `Quick test_memory_pixel_source_retention;
   test_case "Tools image owns the selected keeper" `Quick test_tools_image_keeper_owner;
   test_case "roster navigation retires a pending image worker" `Quick test_roster_view_change_retires_pending_worker;
   test_case "image completions wait for input" `Quick test_image_preview_input_barrier;

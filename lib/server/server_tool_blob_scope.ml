@@ -238,6 +238,11 @@ let config_keepers =
       { suffix = Keeper_memory_os_current_layout.durable_range_receipt_suffix
       ; reason = M.Writes_no_reference
       }
+    (* Memory history events name a memory id, a trace id and a query. *)
+  ; M.Keeper_files
+      { suffix = Keeper_memory_os_events.suffix
+      ; reason = M.Writes_no_reference
+      }
   ; finder_metadata
   ; unpublished_writes
   ]

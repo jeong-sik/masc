@@ -19,6 +19,8 @@ module Capture = Keeper_librarian_durable_request
 module Owner = Lane_addon_tool_request_owner
 module Progress = Lane_addon_request_progress
 module Exact = Lane_addon_exact
+module Resolution = Keeper_librarian_history_resolution
+module Fence = Keeper_librarian_history_resolution_state
 module Store = Lane_addon_store
 module Runtime = Lane_addon_runtime
 module Protocol = Lane_addon_worker_protocol
@@ -321,6 +323,7 @@ let with_fixture ?(history_kind=Atoms) f =
         Memory_lane.For_testing.await_idle ~base_path ~keeper_name;
         let captures=originals base_path keepers_dir store in
         let matches=List.filter (fun ((record:Owner.retained),capture) ->
+          let unfenced=io (fun () -> Fence.read ~store ~scope:record.scope ~request_id:record.request_id |> get)=None in
           let original=Capture.request capture |> get in
           let schema=match original.Lane_addon_exact.schema with
             | Some schema -> schema | None -> fail "the captured admission schema is absent" in
@@ -334,7 +337,7 @@ let with_fixture ?(history_kind=Atoms) f =
             @ [message "user" (Agent_core.Exact_output.schema_instruction_text requirement)] in
           (* A new original may retry identical unread bytes after a terminal
              refusal; the provider is serving the live original, not that old ID. *)
-          (match Progress.phase record.progress with Rejected _ -> false
+          unfenced && (match Progress.phase record.progress with Rejected _ -> false
            | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _
            | Finished _ | Conflicted _ | Subdividing _ | Subdivided _ -> true)
           && Yojson.Safe.equal (`List sent) messages) captures in
@@ -1928,6 +1931,128 @@ let test_epoch_reset_refuses_old_original () = with_fixture (fun ~sw:_ fixture -
   let retained=Option.get retained in
   check json "old epoch evidence remains observable without restoring authority" original retained.Owner.request;
   check int "epoch invalidation starts no replacement provider" posts (F.post_count fixture.server))
+let retain_absent_history_original fixture =
+  let captured = ref None in
+  (match memory_action fixture (fun () -> Consumer.consume_one ~config:fixture.config ~keeper_name
+    ~commit:(fun source -> captured := Some source; Consumer.Memory_refused [])) with
+   | Ok (Consumer.Memory_not_committed _) -> ()
+   | Ok (Nothing_to_read | Baseline_advanced _ | Progress_advanced _ | Official_advanced _ | Pending _)
+   | Error _ -> fail "fixture did not retain an unread history source");
+  let source = Option.to_result ~none:"missing fixture source" !captured |> get in
+  let owner = io (fun () ->
+    ignore (Current.capture_program_anchor ~keepers_dir:fixture.keepers_dir ~keeper_id:keeper_name |> get);
+    Capture.observe_owner ~base_path:fixture.base_path ~keepers_dir:fixture.keepers_dir ~keeper_id:keeper_name |> get) in
+  let preparation = Keeper_librarian_runtime.prepare_durable ~now:(Time_compat.now ()) (Source.input source) |> get in
+  let destination = Keeper_librarian_durable_edge.with_destination ~config:fixture.config
+    ~reserved:(Keeper_librarian_durable_edge.reserved ()) (fun destination -> Ok destination) |> get in
+  let request = io (fun () -> Capture.create ~request_id:(Capture.fresh_request_id owner)
+    ~owner ~destination ~source ~preparation ()) |> get in
+  let original = memory_action fixture (fun () -> Durable_owner.retain ~store:fixture.store request)
+    |> Result.map_error Durable_owner.error_to_string |> get in
+  let advance original event = io (fun () ->
+    match Owner.advance ~store:fixture.store ~expected:original ~event with
+    | Ok (Owner.Stored original | Already_stored original) -> original
+    | Ok (Unconfirmed detail) -> fail detail
+    | Error error -> fail (Owner.update_error_to_string error)) in
+  let original = advance original Progress.Dispatch_intended in
+  let original = advance original (Progress.Execution_observed (Progress.Absent (`Assoc []))) in
+  original, request
+let fence_preview fixture request = io (fun () ->
+  Resolution.preview ~config:fixture.config ~keeper_name ~request_id:(Capture.request_id request)
+  |> Result.map_error Resolution.error_to_string |> get)
+let refuse_fenced_resume fixture original request =
+  let before = io (fun () -> current fixture.keepers_dir), progress fixture in
+  let result = memory_action fixture (fun () -> Durable_owner.resume ~store:fixture.store
+    ~config:fixture.config ~reserved:(Keeper_librarian_durable_edge.reserved ()) ~original ~request
+    ~call:(fun ~expected:_ ~original:_ ~arguments:_ -> fail "fenced original reached its worker")
+    ~publish:(fun ~original:_ ~request:_ ~proposal:_ -> fail "fenced original reached Memory publication")
+    ~wake:(fun () -> fail "fenced original scheduled a replacement")) in
+  check bool "fenced original refuses before any worker or Memory action" true (Result.is_error result);
+  check bool "fence refusal preserves Memory and source position" true
+    (before = (io (fun () -> current fixture.keepers_dir), progress fixture))
+let test_history_fence_retains_unknown_and_blocks_late_observations () = with_fixture (fun ~sw:_ fixture ->
+  let original, request = retain_absent_history_original fixture in
+  let original_range = Source.range_id (Capture.source request) |> Option.get in
+  let previous_range : Current.durable_range_id = match Boundary.position_of_messages first_messages |> get with
+    | Boundary.Atom_history {end_atom;last_atom_digest} ->
+      {original_range with start_atom=0;end_atom;last_atom_digest;end_boundary_line=1;boundary_lines_seen=1}
+    | Empty_atom_history | No_atom_history | Stale_noop -> fail "fixture prefix has no atom history" in
+  let fact = Types.observed ~claim:"Independent Memory after the original capture" ~category:Types.Fact
+    ~now:(Time_compat.now ()) ~origin:{kind=Types.Authored;trace_id="independent-writer"} in
+  memory_action fixture (fun () -> io (fun () -> Current.apply_disposition
+    ~durable_range_id:previous_range ~absorbed:[] ~revisions:[]
+    ~keepers_dir:fixture.keepers_dir ~keeper_id:keeper_name ~now:(Time_compat.now ())
+    ~source:{kind=Current.Librarian;trace_id} ~new_claims:[fact] () |> get)) |> ignore;
+  let preview = fence_preview fixture request in
+  check bool "preview uses current Memory, not the original captured revision" true
+    (preview.expected.memory_revision <> Source.expected_revision (Capture.source request));
+  let fence = memory_action fixture (fun () -> io (fun () ->
+    Resolution.fence_serialized ~config:fixture.config ~keeper_name ~request_id:original.request_id
+      ~expected:preview.expected ~actor:"operator" ~reason:"discard only this unknown result"
+      ~now:(Time_compat.now ()) |> Result.map_error Resolution.error_to_string |> get)) in
+  check json "original unknown record is preserved" (Owner.to_json original) fence.original_record;
+  let changed = io (fun () -> match Owner.advance ~store:fixture.store ~expected:original
+    ~event:(Progress.Execution_observed (Progress.Waiting (`Assoc []))) with
+    | Ok (Owner.Stored value | Already_stored value) -> value
+    | Ok (Unconfirmed detail) -> fail detail
+    | Error error -> fail (Owner.update_error_to_string error)) in
+  refuse_fenced_resume fixture changed request;
+  let path = Filename.concat (Store.root fixture.store)
+    (Store.history_fence_path ~scope:original.scope ~request_id:original.request_id) in
+  io (fun () -> write path "{unreadable fence");
+  refuse_fenced_resume fixture changed request)
+let test_history_fence_allows_the_next_history_pass () = with_fixture (fun ~sw:_ fixture ->
+  let original,request=retain_absent_history_original fixture in
+  let preview=fence_preview fixture request in
+  ignore (memory_action fixture (fun () -> io (fun () ->
+    Resolution.fence_serialized ~config:fixture.config ~keeper_name ~request_id:original.request_id
+      ~expected:preview.expected ~actor:"operator" ~reason:"rejudge the unread history"
+      ~now:(Time_compat.now ()) |> Result.map_error Resolution.error_to_string |> get)));
+  refuse_fenced_resume fixture original request;
+  no_memory fixture;
+  drive_advanced fixture;
+  check int "only the newly captured original reaches the provider" 1 (F.post_count fixture.server);
+  check bool "the next history pass actually commits Memory" true
+    (io (fun () -> claims fixture.keepers_dir)<>[]);
+  let retained=io (fun () -> Owner.load ~store:fixture.store ~scope:original.scope
+    ~request_id:original.request_id |> owned) in
+  check bool "the fenced unknown record stays live without a claimed completion" true
+    (Option.map Owner.to_json retained=Some (Owner.to_json original));
+  refuse_fenced_resume fixture original request;
+  let path=Filename.concat (Store.root fixture.store)
+    (Store.history_fence_path ~scope:original.scope ~request_id:original.request_id) in
+  io (fun () -> write path "{unreadable fence");
+  check bool "an unreadable fence still stops inventory" true (Result.is_error (run_worker fixture)))
+let test_history_fence_refuses_a_real_range_commit () = with_fixture (fun ~sw:_ fixture ->
+  let original, request = retain_absent_history_original fixture in
+  let source = Capture.source request in
+  memory_action fixture (fun () -> io (fun () -> Current.apply_disposition
+    ?durable_range_id:(Source.range_id source) ?official_range_id:(Source.official_range_id source)
+    ~absorbed:[] ~revisions:[] ~keepers_dir:fixture.keepers_dir ~keeper_id:keeper_name
+    ~now:(Time_compat.now ()) ~source:{kind=Current.Librarian;trace_id} ~new_claims:[] () |> get)) |> ignore;
+  (match io (fun () -> Resolution.preview ~config:fixture.config ~keeper_name ~request_id:original.request_id) with
+   | Error Resolution.Range_already_recorded -> ()
+   | Error error -> fail (Resolution.error_to_string error)
+   | Ok _ -> fail "a real original range receipt still allowed an apply fence");
+  check bool "apply-first does not manufacture a fence" true
+    (io (fun () -> Fence.read ~store:fixture.store ~scope:original.scope ~request_id:original.request_id |> get) = None))
+let test_history_fence_uncertain_publication_still_blocks () = with_fixture (fun ~sw:_ fixture ->
+  let original, request = retain_absent_history_original fixture in
+  let preview = fence_preview fixture request in
+  let fence = Fence.create ~request ~original ~expected:preview.expected ~actor:"operator"
+    ~reason:"explicit unknown-result decision" ~now:(Time_compat.now ()) |> get in
+  let result = io (fun () -> Store.For_testing.publish_history_fence
+    ~write_fence:(fun path bytes ->
+      let open Result.Syntax in
+      let* () = Fs_compat.save_file_atomic_strict path bytes in
+      Error "publication reported an error after replacement")
+    fixture.store ~scope:original.scope ~request_id:original.request_id
+    ~expected_owner:(Owner.to_json original) ~fence:(Fence.to_json fence)) |> get in
+  (match result with
+   | Store.History_fence_unconfirmed _ -> ()
+   | History_fence_stored | History_fence_already_stored | History_fence_owner_changed ->
+     fail "post-replacement error was reported as a confirmed fence");
+  refuse_fenced_resume fixture original request)
 let test_changed_memory_rebases_original_source_without_unknown_retry ?(lose_child_after_dispatch=false) ?(recover_unacked_child=false) ?(interrupt_settle=false) () = with_fixture (fun ~sw fixture ->
   let arrived,signal=Eio.Promise.create () and release,unblock=Eio.Promise.create () in
   let child_arrived,child_signal=Eio.Promise.create () and child_release,child_unblock=Eio.Promise.create () in
@@ -3319,6 +3444,14 @@ let () = Alcotest.run "keeper_librarian_durable_execution" ["actual configured c
   test_case "an original a stopped server interrupted settles and its range is read again" `Quick
     test_interrupted_original_settles_and_its_range_is_read_again;
   test_case "destructive Memory epoch reset refuses retained old owner" `Quick test_epoch_reset_refuses_old_original;
+  test_case "an explicit history fence blocks late observations and unreadable fence state" `Quick
+    test_history_fence_retains_unknown_and_blocks_late_observations;
+  test_case "a fenced unknown original does not block the next history pass" `Quick
+    test_history_fence_allows_the_next_history_pass;
+  test_case "an actual original range commit refuses a later fence" `Quick
+    test_history_fence_refuses_a_real_range_commit;
+  test_case "uncertain visible fence publication still blocks the original" `Quick
+    test_history_fence_uncertain_publication_still_blocks;
   test_case "concurrent explicit Memory write closes known basis and resumes original source once" `Quick
     (test_changed_memory_rebases_original_source_without_unknown_retry ~lose_child_after_dispatch:false);
   test_case "confirmed successor loss refuses fresh inference and late answer" `Quick

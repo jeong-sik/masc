@@ -271,6 +271,8 @@ let validate_inventory ~inventory ~store ~request ~record =
 
 type preparation = Ready of Owner.retained | Unavailable of string
 let publish_with ~before_settlement ~store ~config ~request ~(original : Owner.retained) ~proposal:_ ~fresh_authority =
+  let* ()=io (fun () -> Keeper_librarian_history_resolution_state.check_unfenced
+    ~store ~request ~original) in
   let owner=Request.physical_owner request in
   let keeper_id=Request.keeper_id owner in
   let pending detail=Ok (Publication.Publication_pending detail) in
@@ -403,6 +405,8 @@ let publish_with ~before_settlement ~store ~config ~request ~(original : Owner.r
           let applied=io (fun () ->
             Keeper_librarian_durable_source_lock.with_original ~request (fun () ->
               let* actual=reload ~store ~previous:record request in
+              let* ()=Keeper_librarian_history_resolution_state.check_unfenced
+                ~store ~request ~original:actual in
               let* ()=same (Progress.to_json actual.progress) (Progress.to_json record.Owner.progress) in
               let* proved=receipt_state request in
               let* ()=require (not proved) "Original history Memory effect is already receipt-proved" in

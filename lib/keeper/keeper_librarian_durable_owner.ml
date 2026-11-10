@@ -121,6 +121,8 @@ let resume ~store ~config ~reserved ~(original:Owner.retained) ~request ~(call:c
     let* actual=io (fun () -> Request.observe_owner ~base_path ~keepers_dir ~keeper_id:(Request.keeper_id owner)) |> rejected in
     rejected (Request.owner_matches_json actual (Request.owner_to_json owner)) in
   let* ()=check_request request original in
+  let* ()=io (fun () -> Keeper_librarian_history_resolution_state.check_unfenced
+    ~store ~request ~original) |> rejected in
   let* ()=confirm_live_owner () in
   let* ()=check_predecessor ~store ~dispatch:true request in
   let* exact=rejected (Request.request request) in

@@ -13,6 +13,7 @@ module Descent = Keeper_librarian_floor_descent
 module Floor_chain = Keeper_librarian_floor_chain
 module Floor_cleanup = Keeper_librarian_floor_cleanup
 module Floor_publish = Keeper_librarian_floor_publish
+module Resolution_state = Keeper_librarian_history_resolution_state
 open Result.Syntax
 let io f = Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ f
 let require condition detail = if condition then Ok () else Error detail
@@ -348,6 +349,13 @@ let rec consume_one ~config ~keeper_name ~wake =
           ~owner:(Request.physical_owner request)) in
         let* unfinished,settled=List.fold_left (fun result ((record,request) as original) ->
           let* unfinished,settled=result in
+          let* fence=io (fun () -> Resolution_state.read ~store ~scope:record.Retained.scope
+            ~request_id:record.request_id) in
+          match fence with
+          | Some fence ->
+            let+ ()=io (fun () -> Resolution_state.confirm_binding ~request ~original:record fence) in
+            unfinished,settled
+          | None ->
           let* frontier=io (fun () -> Commit.validate_inventory ~inventory ~store ~request ~record) in
           match frontier with
           | Commit.Unfinished -> Ok (original::unfinished,settled)

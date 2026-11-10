@@ -1,8 +1,8 @@
 module Input = Server_observation_input
 
-type surface = Execution_trust
+type surface = Execution_trust | Transport_health
 
-let affects Execution_trust = function
+let affects_execution_trust = function
   | Input.Keeper { change =
       (Phase _ | Composite | Row | Turn | Tool_approval_waits
       | Tool_approval_mode | Gate_settings | Event_queue | Waiting_inventory _); _ }
@@ -25,7 +25,26 @@ let affects Execution_trust = function
   | Telemetry_gap { source = Some (Keeper_metric | Agent_event | Tool_call_io
       | Trajectory_tool_call | Tool_usage | Agent_core_event | Goal_event | Tool_metric); _ }
   | Chat_operation _ | Agent_core _ | Board | Execution_invalidated | Telemetry_sample
-  | Workspace_agent_signal _ | Workspace_messages _ -> false
+  | Transport_state | Workspace_agent_signal _ | Workspace_messages _ -> false
+;;
+
+let affects_transport_health = function
+  | Input.Dataset (Dashboard_observation _) -> false
+  | Dataset (Repositories | Verification_requests | Harness_verdicts | Goals
+      | Runtime_config | Connectors | Keeper_metrics _ | Skill_activations _
+      | Skill_catalog | Clients | Account_emails | Provider_usage | Provider_standing
+      | Keeper_costs | Workspace_health | Runtime_probe | Runtime_metrics | Lanes
+      | Machine_live _ | Play_room _ | Lane_addons _ | Browser_observation _
+      | Keeper_oauth_attempts _ | Memory_health _ | World_memory | Play_seats)
+  | Keeper _ | Every_keeper_row | Chat_operation _ | Gate _ | Connector _ | Store _
+  | Board | Execution_invalidated | Agent_core _ | Telemetry_sample | Transport_state
+  | Telemetry_gap _ | Keeper_tool_call _ | Keeper_approval_audit _
+  | Workspace_agent_signal _ | Workspace_messages _ -> true
+;;
+
+let affects = function
+  | Execution_trust -> affects_execution_trust
+  | Transport_health -> affects_transport_health
 ;;
 
 type 'a generation = {

@@ -63,6 +63,48 @@ let () =
     relay_drop_stages
 ;;
 
+type source_listener = { notify : unit -> unit }
+let source_listeners : source_listener list Atomic.t = Atomic.make []
+let source_notification_failures = Atomic.make 0
+
+let rec update_source_listeners update =
+  let previous = Atomic.get source_listeners in
+  if not (Atomic.compare_and_set source_listeners previous (update previous)) then
+    update_source_listeners update
+;;
+
+let subscribe_source_changed notify =
+  let listener = { notify } in
+  update_source_listeners (fun previous -> listener :: previous);
+  fun () -> update_source_listeners (List.filter (fun current -> current != listener))
+;;
+
+let notify_source_changed () =
+  List.iter (fun listener ->
+    match listener.notify () with
+    | () -> ()
+    | exception _ ->
+      (* cancel-guard-ok: listeners cannot replace the source's committed
+         result. Reporting is an atomic counter, with no I/O at this boundary. *)
+      ignore (Atomic.fetch_and_add source_notification_failures 1))
+    (Atomic.get source_listeners)
+;;
+
+let record_sse_lifecycle_change = notify_source_changed
+let with_source_change update = Fun.protect ~finally:notify_source_changed update
+
+let source_gauge_mutex = Stdlib.Mutex.create ()
+let set_source_gauge metric value =
+  (* Serialize read/commit so a concurrent count writer cannot make the
+     unchanged-maintenance test suppress the last real lifecycle change.
+     Otel's short in-memory mutex does not yield; callbacks run after unlock. *)
+  let changed = Stdlib.Mutex.protect source_gauge_mutex (fun () ->
+    let previous = Otel_metric_store.get_metric_value metric () in
+    Otel_metric_store.set_gauge metric value;
+    previous <> Some value) in
+  if changed then notify_source_changed ()
+;;
+
 let set_sse_sessions ~kind count =
   let kind = sse_session_kind_to_string kind in
   Otel_metric_store.set_gauge
@@ -133,7 +175,7 @@ let set_sse_queue_snapshot ~avg_depth ~max_depth ~hot_sessions =
 ;;
 
 let set_sse_external_subscribers count =
-  Otel_metric_store.set_gauge Otel_metric_store.metric_sse_external_subscribers (float_of_int count)
+  set_source_gauge Otel_metric_store.metric_sse_external_subscribers (float_of_int count)
 ;;
 
 let inc_sse_client_evicted () =
@@ -156,10 +198,10 @@ let inc_sse_reject ~reason =
    typed [auth_error_code] ("invalid_token", "missing_token", ...), not
    free-form message text, so the label set stays bounded. *)
 let inc_mcp_auth_reject ~endpoint ~reason =
-  Otel_metric_store.inc_counter
+  with_source_change (fun () -> Otel_metric_store.inc_counter
     Otel_metric_store.metric_mcp_auth_rejects
     ~labels:[ "endpoint", endpoint; "reason", reason ]
-    ()
+    ())
 ;;
 
 let inc_sse_reconnect () = Otel_metric_store.inc_counter Otel_metric_store.metric_sse_reconnects ()
@@ -167,7 +209,7 @@ let inc_sse_reconnect () = Otel_metric_store.inc_counter Otel_metric_store.metri
 (** {1 gRPC Metrics} *)
 
 let set_grpc_active_streams count =
-  Otel_metric_store.set_gauge Otel_metric_store.metric_grpc_active_streams (float_of_int count)
+  set_source_gauge Otel_metric_store.metric_grpc_active_streams (float_of_int count)
 ;;
 
 let observe_grpc_heartbeat_latency seconds =
@@ -175,7 +217,7 @@ let observe_grpc_heartbeat_latency seconds =
 ;;
 
 let set_grpc_subscribers count =
-  Otel_metric_store.set_gauge Otel_metric_store.metric_grpc_subscribers (float_of_int count)
+  set_source_gauge Otel_metric_store.metric_grpc_subscribers (float_of_int count)
 ;;
 
 let inc_grpc_events_delivered ?(delta = 1) () =
@@ -192,7 +234,7 @@ let inc_grpc_events_dropped () =
 (** {1 WebSocket Metrics} *)
 
 let set_ws_sessions count =
-  Otel_metric_store.set_gauge Otel_metric_store.metric_ws_sessions (float_of_int count)
+  set_source_gauge Otel_metric_store.metric_ws_sessions (float_of_int count)
 ;;
 
 let inc_ws_bytes_cache_hit () =
@@ -312,10 +354,10 @@ let record_http_rate_limit_response ~acceptance ~protocol ~scope =
   match acceptance with
   | Rejected_by_writer -> ()
   | Accepted_by_writer ->
-    Otel_metric_store.inc_counter
+    with_source_change (fun () -> Otel_metric_store.inc_counter
       Otel_metric_store.metric_http_rate_limit_responses
       ~labels:(http_rate_limit_labels ~protocol ~scope)
-      ()
+      ())
 ;;
 
 let http_listener_mode_runtime : string Atomic.t = Atomic.make "unknown"
@@ -331,25 +373,28 @@ let set_http_connection_gauge value =
 ;;
 
 let record_http_listener_started ~mode =
-  Atomic.set http_listener_mode_runtime mode;
-  Atomic.set http_listener_status "listening";
-  set_http_connection_gauge (Atomic.get http_active_connections)
+  with_source_change (fun () ->
+    Atomic.set http_listener_mode_runtime mode;
+    Atomic.set http_listener_status "listening";
+    set_http_connection_gauge (Atomic.get http_active_connections))
 ;;
 
 let record_http_listener_stopped ~mode =
-  Atomic.set http_listener_mode_runtime mode;
-  Atomic.set http_listener_status "stopped";
-  set_http_connection_gauge (Atomic.get http_active_connections)
+  with_source_change (fun () ->
+    Atomic.set http_listener_mode_runtime mode;
+    Atomic.set http_listener_status "stopped";
+    set_http_connection_gauge (Atomic.get http_active_connections))
 ;;
 
 let record_http_accept ~mode =
-  Atomic.set http_listener_mode_runtime mode;
-  Atomic.set http_listener_status "listening";
-  Atomic.set http_last_accept_unix (Some (Unix.gettimeofday ()));
-  Atomic.set http_last_accept_error None;
-  Otel_metric_store.inc_counter Otel_metric_store.metric_http_accepts ~labels:[ "mode", mode ] ();
-  let active = Atomic.fetch_and_add http_active_connections 1 + 1 in
-  set_http_connection_gauge active
+  with_source_change (fun () ->
+    Atomic.set http_listener_mode_runtime mode;
+    Atomic.set http_listener_status "listening";
+    Atomic.set http_last_accept_unix (Some (Unix.gettimeofday ()));
+    Atomic.set http_last_accept_error None;
+    Otel_metric_store.inc_counter Otel_metric_store.metric_http_accepts ~labels:[ "mode", mode ] ();
+    let active = Atomic.fetch_and_add http_active_connections 1 + 1 in
+    set_http_connection_gauge active)
 ;;
 
 let rec dec_http_active_connections () =
@@ -361,16 +406,18 @@ let rec dec_http_active_connections () =
 ;;
 
 let record_http_connection_closed ~mode =
-  Atomic.set http_listener_mode_runtime mode;
-  let active = dec_http_active_connections () in
-  set_http_connection_gauge active
+  with_source_change (fun () ->
+    Atomic.set http_listener_mode_runtime mode;
+    let active = dec_http_active_connections () in
+    set_http_connection_gauge active)
 ;;
 
 let record_http_accept_error ~mode ~error =
-  Atomic.set http_listener_mode_runtime mode;
-  Atomic.set http_listener_status "accept_error";
-  Atomic.set http_last_accept_error (Some error);
-  Otel_metric_store.inc_counter Otel_metric_store.metric_http_accept_errors ~labels:[ "mode", mode ] ()
+  with_source_change (fun () ->
+    Atomic.set http_listener_mode_runtime mode;
+    Atomic.set http_listener_status "accept_error";
+    Atomic.set http_last_accept_error (Some error);
+    Otel_metric_store.inc_counter Otel_metric_store.metric_http_accept_errors ~labels:[ "mode", mode ] ())
 ;;
 
 let accept_latency_metric = "masc_http_accept_latency_seconds"
@@ -474,7 +521,10 @@ type grpc_listener_state =
   | Stopped
 
 let grpc_listener_state = Atomic.make Not_started
-let set_grpc_listener_state state = Atomic.set grpc_listener_state state
+let set_grpc_listener_state state =
+  let previous = Atomic.exchange grpc_listener_state state in
+  if previous <> state then notify_source_changed ()
+;;
 let grpc_listener_snapshot () = Atomic.get grpc_listener_state
 
 let grpc_listener_is_listening = function
@@ -501,7 +551,8 @@ let grpc_listener_fields state =
 
 let ws_same_origin_runtime_ready : bool Atomic.t = Atomic.make false
 let set_ws_same_origin_runtime_ready ready =
-  Atomic.set ws_same_origin_runtime_ready ready
+  let previous = Atomic.exchange ws_same_origin_runtime_ready ready in
+  if previous <> ready then notify_source_changed ()
 
 let grpc_enabled () = Env_config.Transport.grpc_enabled ()
 let grpc_port () = Env_config.Transport.grpc_port
@@ -516,7 +567,8 @@ let set_agent_heartbeat_age ~agent_name age_seconds =
     age_seconds
 ;;
 
-let inc_agent_stale () = Otel_metric_store.inc_counter Otel_metric_store.metric_agent_stale_total ()
+let inc_agent_stale () =
+  with_source_change (fun () -> Otel_metric_store.inc_counter Otel_metric_store.metric_agent_stale_total ())
 
 (** {1 Transport Health JSON Snapshot} *)
 
@@ -706,6 +758,7 @@ let transport_health_json () =
                 (queue_pressure_kind_to_string
                    (queue_pressure ~sse_queue_max ~relay_queue_depth)) )
           ; "external_fanout_targets", `Int sse_external_subscribers
+          ; "source_notification_failures", `Int (Atomic.get source_notification_failures)
           ] )
     ; ( "sse"
       , `Assoc

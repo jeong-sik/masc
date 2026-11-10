@@ -166,7 +166,7 @@ const AgentHealthSchema = Schema.Struct({
 })
 
 const ProjectionDiagnosticsSchema = Schema.Struct({
-  source: Schema.Literal('cached_surface'),
+  source: Schema.Literal('cached_surface', 'live_read'),
   cache_state: Schema.Literal('initializing', 'fresh', 'stale'),
   last_success_at: Schema.OptionFromNullOr(Schema.String),
   last_attempt_at: Schema.OptionFromNullOr(Schema.String),

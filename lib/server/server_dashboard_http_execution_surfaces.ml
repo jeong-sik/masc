@@ -973,8 +973,8 @@ let prepared_execution_payload_for_snapshot ~config snapshot =
     | Empty | Preparing _ | Ready _ -> None)
 ;;
 
-let with_transport_health_metadata json =
-  extend_projection_diagnostics json [ "source", `String "cached_surface" ]
+let with_transport_health_metadata ?(source = "cached_surface") json =
+  extend_projection_diagnostics json [ "source", `String source ]
 ;;
 
 let dashboard_execution_snapshot_json () =
@@ -1573,7 +1573,7 @@ module For_testing = struct
 end
 ;;
 
-let start_transport_health_refresh_loop ~sw ~clock =
+let start_transport_health_refresh_loop ~state ~sw ~clock =
   let timeout_s =
     float_of_env_default
       "MASC_DASHBOARD_TRANSPORT_HEALTH_TIMEOUT_S"
@@ -1593,11 +1593,11 @@ let start_transport_health_refresh_loop ~sw ~clock =
        |> with_transport_health_metadata)
   in
   let interval_s = 30.0 in
-  Proactive_refresh.start
-    ~sw
-    ~clock
-    ~config:
-      { (Proactive_refresh.default_config ~label:"transport_health" ~interval_s) with
+  Server_observation_refresh.start ~state ~sw ~clock
+    ~surface:Server_observation_refresh.Transport_health
+    ~generation:(fun ~scope:_ ~sw:_ ->
+      { Server_observation_refresh.config =
+        { (Proactive_refresh.default_config ~label:"transport_health" ~interval_s) with
         timeout_s
       ; on_failure =
           Some
@@ -1607,11 +1607,13 @@ let start_transport_health_refresh_loop ~sw ~clock =
                 (Proactive_refresh.failure_message failure);
               broadcast_snapshot ())
       ; warm_delay_s = 0.0
-      }
-    ~compute
-    ~on_result:(fun json ->
-      Server_dashboard_http_cache.mark_cached_surface_success transport_health_cache json;
-      broadcast_snapshot ())
+        }
+      ; compute
+      ; on_result = (fun json ->
+          Server_dashboard_http_cache.mark_cached_surface_success transport_health_cache json;
+          broadcast_snapshot ())
+      ; next_deadline = (fun _ -> None)
+      })
 ;;
 
 let compute_execution_trust_observation ~state ~config ~sw ~clock =
@@ -1907,6 +1909,12 @@ let dashboard_execution_trust_http_json ~state ~sw ~clock _request =
 ;;
 
 let dashboard_transport_health_http_json ~state:_ =
-  Server_dashboard_http_cache.cached_surface_json transport_health_cache
-  |> with_transport_health_metadata
+  (* An explicit HTTP read observes current mirror/delivery costs too. Keep
+     its formatting cell local: a manual sample must not overwrite or signal
+     the asynchronous source worker's publication. *)
+  let json = Transport_metrics.transport_health_json () in
+  let response = Server_dashboard_http_cache.create_cached_surface json in
+  Server_dashboard_http_cache.mark_cached_surface_success response json;
+  Server_dashboard_http_cache.cached_surface_json response
+  |> with_transport_health_metadata ~source:"live_read"
 ;;

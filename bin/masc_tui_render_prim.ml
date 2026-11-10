@@ -2713,7 +2713,7 @@ let bracketed ~max_cells text =
   "[" ^ Message_layout.truncate_middle max_cells text ^ "]"
 
 (* The Board reader's title row: the screen, which post, its hearth, its score
-   and its replies. The id is folded at the list's ID column. Replies read "💬3"
+   and its replies. The id uses the compact reference width. Replies read "💬3"
    and then "c0" at zero -- a second spelling for the same count -- and are one
    spelling now, receding at zero. *)
 let board_read_title ~screen ~id ~hearth ~votes ~replies =

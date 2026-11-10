@@ -361,3 +361,20 @@ suites; this is not Full CI. The generated output's SHA-256 is
 Operations interaction, installation, remaining Operations states and the full
 23-surface scope remain open. No new screen wording, layout, row-order or PTY
 assertion tests were added.
+
+## Board title-first reading
+
+The Board list leads with each post's title and author. Compact technical IDs
+no longer occupy a list column; the existing exact-reference copy action keeps
+the selected post identity. The list, composer and reader use the same short
+Board heading, without a repeating wall clock or connection badge. Sort,
+hearth, observed counts, retained/failed reads, original timestamps, publication
+receipts and the one-row cursor budget keep their existing owners.
+
+The matching f89b3e6f baseline was observed with stored fixture posts, a comment
+and a multiline draft at 120x36 and 36x20. The draft survived resizing, and its
+explicit publication returned to the list with a published receipt. This
+baseline exposed the ID-first wide list and the clock/HTTP heading in a narrow
+list and composer; it does not execute this source change. Candidate execution
+and installation, remaining Board input states and the full 23-surface scope
+remain open.

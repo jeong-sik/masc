@@ -69,11 +69,7 @@ let board_document_markdown ~width body =
    for the widest [span_text] draws, "99d23h": a board's oldest live threads are
    days old, so the day tier is the one it holds. *)
 
-(* The header and every row start with the kind mark at the frame's content
-   column, so the table gets the frame's whole inner width. Summing the widths
-   and their gaps by hand is what the column description replaced: the sum was
-   written once for the rows and once for the header, and the two drifted until
-   REPLIES sat past the right edge whatever the title was sized to. *)
+(* The header and rows use one title-first column layout inside the frame. *)
 let board_layout ~cols =
   Render_schedule.board_layout ~inner_width:(framed_inner_width cols)
 
@@ -140,14 +136,13 @@ let render_board_compose (state : state) =
             ~max_cells:(framed_inner_width cols) addressing
         ]
   in
-  let header = Printf.sprintf "%s  %s[%s]%s  %s"
-    (screen_title (words state " MASC 게시판" " MASC Board"))
+  let header = Printf.sprintf "%s  %s[%s]%s"
+    (screen_title (words state " 게시판" " Board"))
     (Masc_tui_theme.tone Masc_tui_theme.Accent)
     (match state.board_compose_reply_to with
      | Some _ -> words state "댓글" "reply"
      | None -> words state "새 글" "new post")
     Ansi.reset
-    (connection_badge state)
   in
   (* Staged files ride the post being written; a comment has no attachment
      wire, so like the hearth they are not named on a reply's pane. *)
@@ -431,9 +426,6 @@ let board_posts_status state =
 let render_board_list (state : state) =
   let terminal_rows, cols = get_terminal_size () in
 
-  let now = Unix.localtime (Unix.gettimeofday ()) in
-  let timestamp = Printf.sprintf "%02d:%02d:%02d"
-    now.Unix.tm_hour now.Unix.tm_min now.Unix.tm_sec in
   let count = List.length (board_posts state) in
   (* Read once for the whole list: the header word and every row's number name
      the same time, and they would drift the moment two readings of the sort
@@ -469,14 +461,13 @@ let render_board_list (state : state) =
      already on screen stays when a later refresh fails: those posts are
      still the last reading. *)
   let holding = board_census_holding state ~hearth:query.bq_hearth in
-  let header = Printf.sprintf "%s %s%s  %s  %s"
-    (screen_title (words state " MASC 게시판" " MASC Board"))
+  let header = Printf.sprintf "%s %s%s"
+    (screen_title (words state " 게시판" " Board"))
     (match Masc_tui_fetched.value observation with
      | Some _ ->
          list_count_text ~loaded:count ~holding
      | None -> if pending then (words state "(글 조회 중)" "(reading posts)") else words state (if Option.is_some list_error then "(조회 실패)" else "(미조회)") (title_missing_reading ~error:list_error))
-    hearth timestamp
-    (connection_badge state) in
+    hearth in
 
   let layout = board_layout ~cols in
   (* The frame, its fill and the footer are the contract's: this surface
@@ -485,21 +476,8 @@ let render_board_list (state : state) =
   surface_chrome ~overflow:Paged_by_cursor state ~terminal_rows ~cols ~surface_key:"board-list"
     ~title:header ~hints:(Masc_tui_keys.footer_hints ~lang:state.ui_language ~detail_open:false state.view)
     ~body:(fun ~budget c ->
-      (* The header is laid out by the same arithmetic as the rows below it,
-         because a header laid out by its own is a header that stops
-         describing them. It did: the rows size their title to [cols - 68]
-         and the header claimed a fixed 20, so at eighty columns the header
-         ran eight cells long. The overflow pushed SCORE into the frame's edge
-         and REPLIES off it -- two columns still drawn on every row, with
-         nothing left saying what they were. The mark ahead of the id is one
-         cell and the header reserved two, which put every label one cell
-         right of its data.
-
-         The column description in [Render_schedule] is the one place either
-         of them asks.
-
-         Each entry draws one row, so the list's height is asked of the rows
-         above it rather than kept beside them as a number. *)
+      (* Every post still occupies one row. Count the headings drawn above
+         those rows in the same content budget used for cursor paging. *)
       let heading =
         [ (fun () ->
             (* The sort first. It has no other home on this surface now, and
@@ -587,7 +565,6 @@ let render_board_list (state : state) =
             in
             let values =
               { Render_schedule.brow_mark = board_kind_mark p.bp_kind
-              ; brow_id = Terminal_text.single_line p.bp_id
               ; brow_hearth = hearth_text
               ; brow_author = Terminal_text.single_line p.bp_author
               ; brow_title = title_text
@@ -606,8 +583,7 @@ let render_board_list (state : state) =
               }
             in
             let styles =
-              { Render_schedule.bstyle_id = Theme.recede ()
-              ; bstyle_hearth =
+              { Render_schedule.bstyle_hearth =
                   if String.equal hearth_text "" then Ansi.dim
                   else Theme.info ()
               ; bstyle_author = Theme.ok ()
@@ -760,7 +736,7 @@ let board_read_pane ~focus (state : state) (list_post : board_post) ~rows ~cols 
         list_post
   in
 
-  let header = screen_title (words state " MASC 게시판" " MASC Board")
+  let header = screen_title (words state " 게시판" " Board")
     ^ (match Terminal_text.optional_single_line post.bp_hearth with
        | None -> "" | Some hearth -> " · #" ^ hearth) in
 

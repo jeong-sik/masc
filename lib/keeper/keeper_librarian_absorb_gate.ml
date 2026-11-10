@@ -884,7 +884,8 @@ let failure_detail ~absorbed = function
   | Skipped { reason = Unavailable reason; _ } ->
     (match reason with
      | Typesafeai_config.Absorb_gate_disabled | Typesafeai_config.Keeper_excluded -> None
-     | Typesafeai_config.Lane_disabled | Typesafeai_config.No_armed_destination
+     | Typesafeai_config.Lane_disabled | Typesafeai_config.Access_unpublished
+     | Typesafeai_config.Host_account_not_shared | Typesafeai_config.No_armed_destination
      | Typesafeai_config.Board_attention_disabled | Typesafeai_config.Context_review_disabled
      | Typesafeai_config.Skill_applicability_disabled | Typesafeai_config.Librarian_preflight_disabled
      | Typesafeai_config.Workspace_memory_selection_disabled
@@ -1211,6 +1212,8 @@ let replay_authority_of_yojson (json : Yojson.Safe.t) : (replay_authority, strin
         let reason =
           match Replay.field index "reason" json |> Replay.string index with
           | "lane_disabled" -> Typesafeai_config.Lane_disabled
+          | "access_unpublished" -> Typesafeai_config.Access_unpublished
+          | "host_account_not_shared" -> Typesafeai_config.Host_account_not_shared
           | "no_armed_destination" -> Typesafeai_config.No_armed_destination
           | "absorb_gate_disabled" -> Typesafeai_config.Absorb_gate_disabled
           | "board_attention_disabled" -> Typesafeai_config.Board_attention_disabled
@@ -1245,7 +1248,8 @@ let restore_with ~missing ~guidance ~authority ~cited_observations ~facts ~new_c
     | _ :: _, Gate_unavailable reason ->
       let applied = match reason with
         | Typesafeai_config.Absorb_gate_disabled | Typesafeai_config.Keeper_excluded -> absorbed
-        | Typesafeai_config.Lane_disabled | Typesafeai_config.No_armed_destination
+        | Typesafeai_config.Lane_disabled | Typesafeai_config.Access_unpublished
+        | Typesafeai_config.Host_account_not_shared | Typesafeai_config.No_armed_destination
         | Typesafeai_config.Board_attention_disabled | Typesafeai_config.Context_review_disabled
         | Typesafeai_config.Skill_applicability_disabled | Typesafeai_config.Librarian_preflight_disabled
         | Typesafeai_config.Workspace_memory_selection_disabled
@@ -1512,10 +1516,15 @@ let run_resolved
          (List.length absorbed);
        complete (Skipped { reason = Unavailable reason; absorbed })
      | Error
-         ((Typesafeai_config.Lane_disabled | Typesafeai_config.No_armed_destination) as reason)
+         ((Typesafeai_config.Lane_disabled
+          | Typesafeai_config.Access_unpublished
+          | Typesafeai_config.Host_account_not_shared
+          | Typesafeai_config.No_armed_destination) as reason)
        ->
        (* No evaluation ran. [failure_detail] defers the complete Memory
-          range, including new claims, and the runtime records the failure. *)
+          range, including new claims, and the runtime records the failure.
+          A multi-account process sends nothing with the keys of its host, so
+          a gate switched on defers there rather than apply unjudged. *)
        complete (Skipped { reason = Unavailable reason; absorbed = [] })
      | Error
          ((Typesafeai_config.Board_attention_disabled

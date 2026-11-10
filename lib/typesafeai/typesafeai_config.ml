@@ -18,6 +18,8 @@ type unavailable_reason =
   | Workspace_memory_selection_disabled
   | Memory_recall_disabled
   | Keeper_excluded
+  | Access_unpublished
+  | Host_account_not_shared
 
 let unavailable_reason_to_string = function
   | Lane_disabled -> "lane_disabled"
@@ -30,47 +32,58 @@ let unavailable_reason_to_string = function
   | Workspace_memory_selection_disabled -> "workspace_memory_selection_disabled"
   | Memory_recall_disabled -> "memory_recall_disabled"
   | Keeper_excluded -> "keeper_excluded"
+  | Access_unpublished -> "access_unpublished"
+  | Host_account_not_shared -> "host_account_not_shared"
 ;;
 
 let configured_destinations () = (policy ()).Runtime_schema.destinations
 
-(* A destination is armed when the variable it names holds a non-blank key.
-   One that does not is left out of the walk; the table keeps naming it. *)
-let arm (destination : Runtime_schema.typesafeai_destination) =
+let has_key (destination : Runtime_schema.typesafeai_destination) =
+  Env_config_core.raw_value_opt destination.api_key_env
+  |> Env_config_core.trim_opt
+  |> Option.is_some
+;;
+
+(* HIGH-RISK-UNREVIEWED: a destination is armed when the variable it names
+   holds a non-blank key. The key is an account of the host, so it is read
+   only with the proof that the access shares the accounts of the host (plan
+   D4c). One that holds no key is left out of the walk; the table keeps
+   naming it. *)
+let arm (_ : Runtime_account_access.host_account) (destination : Runtime_schema.typesafeai_destination) =
   Env_config_core.raw_value_opt destination.api_key_env
   |> Env_config_core.trim_opt
   |> Option.map (fun api_key ->
     { Typesafeai_client.endpoint = destination.endpoint; model = destination.model; api_key })
 ;;
 
-let armed () =
-  let first, rest = configured_destinations () in
-  match List.filter_map arm (first :: rest) with
-  | [] -> None
-  | first :: rest -> Some (first, rest)
-;;
-
 (* The destinations the walk leaves out while it still has one to ask: each
    names a variable that holds no key, so a misspelt variable name silently
    turns a reserve route off. With no destination armed the lane is simply
-   off, and nothing is singled out. *)
+   off, and nothing is singled out. Only the presence of a key is read. *)
 let unarmed_destinations () =
   let first, rest = configured_destinations () in
-  match armed () with
-  | None -> []
-  | Some _ ->
-    List.filter (fun destination -> Option.is_none (arm destination)) (first :: rest)
+  let destinations = first :: rest in
+  if List.exists has_key destinations
+  then List.filter (fun destination -> not (has_key destination)) destinations
+  else []
 ;;
 
 (* The table turns the lane off; it cannot turn it on without a key, and a
-   key in one named variable with the default table is enough to opt in. *)
+   key in one named variable with the default table is enough to opt in. A
+   process that does not share the accounts of its host sends nothing with
+   their keys, whatever the table says. *)
 let lane_destinations () =
   if not (policy ()).Runtime_schema.lane_enabled
   then Error Lane_disabled
   else (
-    match armed () with
-    | Some destinations -> Ok destinations
-    | None -> Error No_armed_destination)
+    match Runtime_account_access.host_access () with
+    | Error Runtime_account_access.Host_unpublished -> Error Access_unpublished
+    | Error Runtime_account_access.Host_not_shared -> Error Host_account_not_shared
+    | Ok host ->
+      let first, rest = configured_destinations () in
+      (match List.filter_map (arm host) (first :: rest) with
+       | [] -> Error No_armed_destination
+       | first :: rest -> Ok (first, rest)))
 ;;
 
 let is_enabled () = Result.is_ok (lane_destinations ())
@@ -193,7 +206,8 @@ let readiness () =
   then Off
   else (
     match lane_destinations () with
-    | Error (Lane_disabled | No_armed_destination) -> Off
+    | Error (Lane_disabled | Access_unpublished | Host_account_not_shared | No_armed_destination) ->
+      Off
     | Error
         ( Absorb_gate_disabled | Board_attention_disabled | Context_review_disabled
         | Skill_applicability_disabled | Librarian_preflight_disabled

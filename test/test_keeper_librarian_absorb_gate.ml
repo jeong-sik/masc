@@ -3043,7 +3043,8 @@ let test_replay_preserves_unavailable_authority () =
       (Gate.run_result_to_yojson result |> Yojson.Safe.to_string)
       (Gate.run_result_to_yojson continued |> Yojson.Safe.to_string))
     [Masc.Typesafeai_config.Absorb_gate_disabled,2; Masc.Typesafeai_config.Keeper_excluded,2;
-     Masc.Typesafeai_config.Lane_disabled,0; Masc.Typesafeai_config.No_armed_destination,0];
+     Masc.Typesafeai_config.Lane_disabled,0; Masc.Typesafeai_config.Access_unpublished,0;
+     Masc.Typesafeai_config.Host_account_not_shared,0; Masc.Typesafeai_config.No_armed_destination,0];
   Gate.restore ~guidance:None ~authority:(Gate.Gate_available (replay_destination,[]))
     ~cited_observations:(nothing_cited absorbed) ~facts ~new_claims:[merged] ~superseding:[] ~absorbed ~evaluations:[]
     |> refuse_replay "an available gate cannot replay without captured guidance"
@@ -3055,7 +3056,8 @@ let test_replay_preserves_unavailable_authority () =
 let test_replay_authority_round_trips_every_unavailable_reason () =
   let module Config = Masc.Typesafeai_config in
   let (_ : Config.unavailable_reason -> unit) = function
-    | Config.Lane_disabled | Config.No_armed_destination | Config.Absorb_gate_disabled
+    | Config.Lane_disabled | Config.Access_unpublished | Config.Host_account_not_shared
+    | Config.No_armed_destination | Config.Absorb_gate_disabled
     | Config.Board_attention_disabled | Config.Context_review_disabled
     | Config.Skill_applicability_disabled | Config.Librarian_preflight_disabled
     | Config.Workspace_memory_selection_disabled | Config.Memory_recall_disabled
@@ -3068,7 +3070,8 @@ let test_replay_authority_round_trips_every_unavailable_reason () =
         (decoded = authority)
     | Error detail ->
       Alcotest.failf "%s is not read back: %s" (Config.unavailable_reason_to_string reason) detail)
-    [ Config.Lane_disabled; Config.No_armed_destination; Config.Absorb_gate_disabled
+    [ Config.Lane_disabled; Config.Access_unpublished; Config.Host_account_not_shared
+    ; Config.No_armed_destination; Config.Absorb_gate_disabled
     ; Config.Board_attention_disabled; Config.Context_review_disabled
     ; Config.Skill_applicability_disabled; Config.Librarian_preflight_disabled
     ; Config.Workspace_memory_selection_disabled; Config.Memory_recall_disabled

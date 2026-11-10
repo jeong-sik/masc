@@ -35,7 +35,7 @@ import {
   type AgentTimelineEvent,
   type AgentTimelineResponse,
 } from '../api'
-import { missionSnapshot } from '../mission-store'
+import { missionSnapshot, missionError, missionInitializing } from '../mission-store'
 import { navigate } from '../router'
 import { formatDuration } from '../lib/format-time'
 import { trimText } from '../lib/truncate'
@@ -233,6 +233,8 @@ function CharacterPlate({ name }: { name: string }) {
       </div>
 
       <div class="flex flex-col gap-1.5 min-w-0">
+        ${missionError.value ? html`<p role="status" class="text-warning">활동 요약을 갱신하지 못했습니다.</p>`
+          : missionInitializing.value ? html`<p role="status" class="text-muted">활동 요약을 준비하고 있습니다.</p>` : null}
         <div class="flex items-baseline gap-2 flex-wrap">
           <h2 class="m-0 text-2xl text-[var(--ff-gold)] flex items-center gap-1.5">
             ${agentEmoji ? html`<span class="text-[1.4em]">${agentEmoji}</span>` : ''}

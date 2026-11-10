@@ -18,7 +18,7 @@ import { persistentSignal } from './lib/persistent-signal'
 import { isImeComposing } from './lib/keyboard'
 import { route, initRouter } from './router'
 import { requestNamespaceTruthNow, disposeNamespaceTruthScheduler } from './namespace-truth-store'
-import { cancelPendingServerPushRefreshes, registerGateRefresh, registerMissionRefresh, setupServerPushReaction } from './sse-store'
+import { cancelPendingServerPushRefreshes, registerGateRefresh, setupServerPushReaction } from './sse-store'
 import { initNotificationDelivery } from './notifications'
 import { refreshShell, setupShellObservation } from './store'
 import { connectDashboardObserver, disconnectDashboardObserver } from './dashboard-observer'
@@ -180,14 +180,6 @@ export function App() {
 
         connectDashboardObserver()
       })
-
-    registerMissionRefresh(() => {
-      void import('./mission-actions')
-        .then(({ refreshMissionSnapshot }) => refreshMissionSnapshot())
-        .catch(err => {
-          console.warn('[app] mission refresh unavailable', err instanceof Error ? err.message : err)
-        })
-    })
 
     // Gate/HITL approvals feed the always-visible nav-rail approvals
     // badge and topbar attention indicator (see approvalsBadge below), so the

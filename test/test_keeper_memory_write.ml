@@ -1057,7 +1057,10 @@ let test_recall_artifacts_follow_history_retention () =
   let sweep mode =
     match Tool_blob_maintenance.run ~base_path
         ~scope:Server_tool_blob_scope.scope ~mode with
-    | Ok _ -> ()
+    | Ok report ->
+      Printf.eprintf "PROBE sweep deleted=%d candidates=%d observed=%d unclassified=[%s]\n%!"
+        report.Tool_blob_maintenance.deleted report.candidates_recorded
+        report.blobs_observed (String.concat "; " report.unclassified)
     | Error error -> Alcotest.fail (Tool_blob_maintenance.error_to_string error)
   in
   let present (reference : Tool_output.artifact_ref) =

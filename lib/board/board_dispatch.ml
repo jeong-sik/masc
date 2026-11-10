@@ -1120,9 +1120,18 @@ let reopen ~post_id =
   let store = backend () in
     write_post ~visibility:(visibility_of_post store ~post_id) ~post_id Post_reopened (fun post_id -> Board.reopen store ~post_id)
 
-let delete_post ~post_id =
+let delete_post ~authorization ~post_id =
   let store = backend () in
-    write_post ~visibility:(visibility_of_post store ~post_id) ~post_id Post_deleted (fun post_id -> Board.delete_post store ~post_id)
+  let open Result.Syntax in
+  let* pid = Board.Post_id.of_string post_id in
+  let post_id = Board.Post_id.to_string pid in
+  let visibility = visibility_of_post store ~post_id in
+  match Board.delete_post store ~authorization ~post_id with
+  | Ok ((Board.Durable_deletion | Board.Deletion_persistence_pending _) as outcome) ->
+    emit_board_sse_event ~visibility (Post_changed { post_id; change = Post_deleted });
+    Ok outcome
+  | Ok (Board.Deletion_decision_pending _) as pending -> pending
+  | Error _ as refused -> refused
 
 let search ~reader ~query ~limit =
   let store = backend () in

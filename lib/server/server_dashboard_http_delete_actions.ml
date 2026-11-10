@@ -1284,19 +1284,21 @@ let add_delete_action_routes router =
              | None ->
                  respond_error ~request:req reqd (invalid_request "post_id")
              | Some post_id ->
-             match Board_dispatch.delete_post ~post_id with
+             match Board_dispatch.delete_post ~authorization:Board.Operator_deletion ~post_id with
              | Ok outcome ->
-                 let status, persistence, details =
+                 let status, persistence, applied, details =
                    match outcome with
-                   | Board.Durable_deletion -> `OK, "durable", []
+                   | Board.Durable_deletion -> `OK, "durable", true, []
                    | Board.Deletion_persistence_pending detail ->
-                     `Accepted, "pending", ["detail", `String detail]
+                     `Accepted, "pending", true, ["detail", `String detail]
+                   | Board.Deletion_decision_pending detail ->
+                     `Accepted, "decision_pending", false, ["detail", `String detail]
                  in
                  Http.Response.json_value ~status ~request:req
                    (`Assoc
                      ([ "ok", `Bool true
                       ; "post_id", `String post_id
-                      ; "applied", `Bool true
+                      ; "applied", `Bool applied
                       ; "persistence", `String persistence
                       ] @ details)) reqd
              | Error err ->

@@ -223,7 +223,7 @@ let test_activity_events_revalidate_public_parents () =
   let second = refresh compute in
   Alcotest.(check bool) "warm projection is reused" true (first == second);
   Alcotest.(check int) "warm request does not rescan Activity" 1 !calls;
-  ignore (Result.get_ok (Board_dispatch.delete_post ~post_id:public_id));
+  ignore (Result.get_ok (Board_dispatch.delete_post ~authorization:Board.Operator_deletion ~post_id:public_id));
   Alcotest.check_raises "deleted parent cannot authorize fallback" (Failure "refresh failed")
     (fun () -> ignore (refresh (fun ~keep:_ -> failwith "refresh failed")));
   let after = refresh compute in

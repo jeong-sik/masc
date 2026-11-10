@@ -348,7 +348,7 @@ let test_partial_load_never_rewrites_the_file () =
       Board.save_comments_snapshot store snapshot)));
   unchanged "direct save";
   Alcotest.(check bool) "delete is refused before it touches memory" true
-    (Result.is_error (Board.delete_post store ~post_id:before_id));
+    (Result.is_error (Board.delete_post store ~authorization:Board.Operator_deletion ~post_id:before_id));
   Alcotest.(check bool) "the post is still in memory" true
     (Result.is_ok (Board_core.read_post store ~post_id:before_id));
   unchanged "delete";
@@ -544,8 +544,9 @@ let test_all_persistence_stays_in_captured_workspace () =
       let room = board_ok (Board_dispatch.get_sub_board ~reader:Masc_board_handlers.Board_access.Operator ~sub_board_id:room_id) in
       Alcotest.(check bool) "updated policy reloaded" true (room.access = Board.Members_only);
       ignore (board_ok (Board_dispatch.delete_sub_board ~sub_board_id:room_id));
-      (match board_ok (Board_dispatch.delete_post ~post_id:pid) with
+      (match board_ok (Board_dispatch.delete_post ~authorization:Board.Operator_deletion ~post_id:pid) with
        | Board.Durable_deletion -> ()
+       | Board.Deletion_decision_pending detail -> Alcotest.fail detail
        | Board.Deletion_persistence_pending detail -> Alcotest.fail detail);
       Board.flush_dirty reloaded;
       b_unchanged "after deletion under EnvB";

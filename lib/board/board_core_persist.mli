@@ -64,15 +64,19 @@ val create_store_with_reactions_io_for_testing :
   unit -> store
 (** One immutable reaction-file transaction IO seam; creates/adopts nothing. *)
 
+val create_store_with_deletion_io_for_testing :
+  base_path:string -> io:Fs_compat.private_jsonl_transaction_io_for_testing ->
+  unit -> store
+(** Immutable decision-marker IO seam; constructor performs no IO. *)
+
 val require_persisted_snapshot_readable :
   (unit, string) result -> (unit, board_error) result
 (** Reject a mutation whose full-snapshot source did not load completely.
     The stored detail includes the authoritative path and malformed row. *)
 
 val require_model_reload_allowed : store -> path:string -> (unit, string * exn) result
-(** Pure loader precondition under persistence or quiescent startup. A pending
-    deletion retains its applied model until its snapshots finish or a fresh
-    store is opened; replacing one model would lose that deletion's meaning. *)
+(** Pure loader precondition under persistence or quiescent startup. A pending,
+    observed, refused or uncertain decision cannot be cleared by model reload. *)
 
 val invalidate_post_caches : store -> unit
 val invalidate_comment_caches : store -> unit

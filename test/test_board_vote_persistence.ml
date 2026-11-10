@@ -974,8 +974,9 @@ let test_delete_waiting_after_edit_keeps_other_edited_post () =
   let victim_id = Board.Post_id.to_string victim.id in
   test_snapshot_waiting_after_edit_keeps_edited_post
     (fun store ~post_id:_ () ->
-      match Board.delete_post store ~post_id:victim_id with
+      match Board.delete_post store ~authorization:Board.Operator_deletion ~post_id:victim_id with
       | Ok Board.Durable_deletion -> ()
+      | Ok (Board.Deletion_decision_pending detail) -> Alcotest.fail detail
       | Ok (Board.Deletion_persistence_pending detail) -> Alcotest.fail detail
       | Error error -> Alcotest.fail (Board.show_board_error error))
     ();

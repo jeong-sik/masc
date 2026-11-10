@@ -2160,7 +2160,7 @@ let test_each_post_write_announces_its_change () =
     (Board_dispatch.set_closed ~post_id ~closed_by:"write-hook"
        ~successor:Board.No_successor ~summary:"done" ());
   ok "reopen" (Board_dispatch.reopen ~post_id);
-  ok "delete" (Board_dispatch.delete_post ~post_id);
+  ok "delete" (Board_dispatch.delete_post ~authorization:Board.Operator_deletion ~post_id);
   Alcotest.(check (list (pair string string)))
     "each write is announced once, in order"
     (List.map (fun change -> (post_id, change))
@@ -2207,7 +2207,7 @@ let test_a_refused_post_write_announces_nothing () =
     (Board_dispatch.set_closed ~post_id:missing ~closed_by:"write-hook"
        ~successor:Board.No_successor ~summary:"done" ());
   refused "reopen" (Board_dispatch.reopen ~post_id:missing);
-  refused "delete" (Board_dispatch.delete_post ~post_id:missing);
+  refused "delete" (Board_dispatch.delete_post ~authorization:Board.Operator_deletion ~post_id:missing);
   Alcotest.(check int) "no refused write was announced" 0 !events
 
 let test_set_closed_and_reopen_round_trip () =

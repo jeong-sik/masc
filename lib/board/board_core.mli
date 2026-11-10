@@ -74,6 +74,11 @@ val create_store_with_reactions_io_for_testing :
   unit -> store
 (** One immutable reaction-file transaction IO seam; creates/adopts nothing. *)
 
+val create_store_with_deletion_io_for_testing :
+  base_path:string -> io:Fs_compat.private_jsonl_transaction_io_for_testing ->
+  unit -> store
+(** One immutable decision-marker transaction IO seam; creates/adopts nothing. *)
+
 (** {1 Locking + cache invalidation} *)
 
 (** [with_lock store f] runs [f ()] under

@@ -290,8 +290,9 @@ let test_delete_post_rewrites_persisted_snapshots () =
    with
    | Ok _ -> ()
    | Error e -> Alcotest.fail (Board.show_board_error e));
-  (match Board_dispatch.delete_post ~post_id:pid with
+  (match Board_dispatch.delete_post ~authorization:Board.Operator_deletion ~post_id:pid with
    | Ok Board.Durable_deletion -> ()
+   | Ok (Board.Deletion_decision_pending detail) -> Alcotest.fail detail
    | Ok (Board.Deletion_persistence_pending detail) -> Alcotest.fail detail
    | Error e -> Alcotest.fail (Board.show_board_error e));
   (match Board_dispatch.get_post ~reader:Masc_board_handlers.Board_access.Operator ~post_id:pid with

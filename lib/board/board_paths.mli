@@ -14,7 +14,7 @@ val capture_workspace_masc_dir : string -> string
 
     @raise Invalid_argument if the input is exactly empty. *)
 
-type persisted_file = Posts | Comments | Reactions | Sub_boards | Votes
+type persisted_file = Posts | Comments | Reactions | Sub_boards | Votes | Deletion
 val file_path : workspace_masc_dir:string -> persisted_file -> string
 val posts_file : workspace_masc_dir:string -> string
 (** [file_path ~workspace_masc_dir Posts]. *)

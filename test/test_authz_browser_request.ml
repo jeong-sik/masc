@@ -108,10 +108,13 @@ let cookie_of value =
 ;;
 
 let verdict zone request =
-  match Q.check (Z.snapshot zone).state ~now_ms:start_ms request with
-  | Ok Q.No_session -> "no session"
-  | Ok (Q.Session { signed_in = { Bs.user_id; _ }; cookie = _ }) -> "acts as " ^ User_id.to_string user_id
-  | Error refusal -> Q.refusal_to_string refusal
+  match Z.read zone with
+  | Error uncertain -> Alcotest.failf "the zone cannot be trusted: %s" (Z.uncertain_to_string uncertain)
+  | Ok trusted ->
+    (match Q.check trusted ~now_ms:start_ms request with
+     | Ok Q.No_session -> "no session"
+     | Ok (Q.Session { signed_in = { Bs.user_id; _ }; cookie = _ }) -> "acts as " ^ User_id.to_string user_id
+     | Error refusal -> Q.refusal_to_string refusal)
 ;;
 
 (* ---- the checks ---- *)

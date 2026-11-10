@@ -10,6 +10,18 @@ module Health = Server_dashboard_http_keeper_memory_health
 let test_now = 1_700_000_000.0
 let fresh_dir prefix = Filename.temp_dir prefix ""
 
+(* The projection caches each keeper's row and drops it when a writer reports a
+   commit. The server wires that at startup ([Server_runtime_bootstrap]); a test
+   that writes and then reads again has to wire the same observers, or the
+   second read answers from the row the first one cached.
+
+   Installing at module load is not idempotent: [install] retains the restore
+   closures it collects but never returns them, and each
+   [install_commit_observer] replaces the previous observer rather than
+   chaining, so a later [For_testing.with_runtime] restore can drop this
+   registration. *)
+let () = Health.install ()
+
 let fact claim : Types.fact =
   Types.observed ~claim ~category:Types.Fact ~now:test_now
     ~origin:{ kind = Types.Authored; trace_id = "" }
@@ -803,8 +815,12 @@ let test_context_cycle_separates_saved_and_prepared () =
   Fun.protect ~finally:(fun () -> O.forget ~config ~keeper_name; Fs_compat.remove_tree base) @@ fun () ->
   let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path:base in
   write_keeper_config ~keepers_dir ~keeper_id:keeper_name ();
-  let cycle () = member "context_cycle"
-    (keeper_obj keeper_name (Health.keeper_memory_health_http_json ~base_path:base)) in
+  let cycle () =
+    (* This fixture writes the snapshot and turn records itself, so no writer
+       announces the commit [install] listens for. *)
+    Health.For_testing.invalidate ~base_path:base ~keeper:keeper_name;
+    member "context_cycle"
+      (keeper_obj keeper_name (Health.keeper_memory_health_http_json ~base_path:base)) in
   Alcotest.(check bool) "no prepared request inferred from saved state" true
     (is_null (member "prepared" (cycle ())));
   let messages = [Agent_core.Types.make_message ~role:Agent_core.Types.User
@@ -914,6 +930,9 @@ let test_unread_evidence_is_observed_without_publication () =
     ; "unknown root field still refuses the response", `Assoc (("unexpected", `Null) :: fields)
     ];
   let reading () =
+    (* This fixture writes the snapshot and the ledger itself, so no writer
+       announces the commit [install] listens for. *)
+    Health.For_testing.invalidate ~base_path:base ~keeper:keeper_name;
     let json = Health.keeper_memory_health_http_json ~base_path:base in
     let decoded = D.decode_memory_health_snapshot json |> require_ok in
     match List.find_opt (fun (row : D.memory_keeper_health) -> row.mkh_keeper_id=keeper_name) decoded.mhs_keepers with
@@ -947,8 +966,15 @@ let test_context_cycle_reads_the_librarian_position_beside_the_cut () =
   Fun.protect ~finally:(fun () -> Fs_compat.remove_tree base) @@ fun () ->
   let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path:base in
   write_keeper_config ~keepers_dir ~keeper_id:keeper_name ();
-  let cycle () = member "context_cycle"
-    (keeper_obj keeper_name (Health.keeper_memory_health_http_json ~base_path:base)) in
+  let cycle ?(invalidate = true) () =
+    (* [P.write] announces its commit, and the observer [install] wires is
+       what must empty the row afterwards; pre-empting that with a manual
+       invalidation would hide the path this change repairs. The snapshot
+       below is written straight to a file, though, and no writer announces
+       that one, so the caller says which kind of read it is. *)
+    if invalidate then Health.For_testing.invalidate ~base_path:base ~keeper:keeper_name;
+    member "context_cycle"
+      (keeper_obj keeper_name (Health.keeper_memory_health_http_json ~base_path:base)) in
   Alcotest.(check bool) "a keeper that has read nothing has no position" true
     (is_null (member "read_position" (cycle ())));
   Alcotest.(check bool) "and no read error to explain it" true
@@ -979,7 +1005,9 @@ let test_context_cycle_reads_the_librarian_position_beside_the_cut () =
     {P.position = {trace_id; end_atom = 12887; last_atom_digest = String.make 64 'a'};
      boundary_lines_seen = 385}
   |> Result.map_error P.write_error_to_string |> get;
-  let observed = cycle () in
+  (* No manual invalidation: [P.write] fires the commit observer for the
+     runtime root, and that observer has to be what empties the row. *)
+  let observed = cycle ~invalidate:false () in
   Alcotest.(check int) "the cut the request starts at" snapshot.S.end_atom
     (int_field "end_atom" (member "saved" observed));
   Alcotest.(check int) "the position that cut is read against" 12887
@@ -1112,6 +1140,9 @@ let test_the_librarian_stalled_alarm_is_read_from_files () =
   write_keeper_config ~keepers_dir ~keeper_id:keeper_name ();
   Masc.Keeper_meta_store.replace_snapshot config meta |> get;
   let librarian () =
+    (* This fixture writes the snapshot and turn records itself, so no writer
+       announces the commit [install] listens for. *)
+    Health.For_testing.invalidate ~base_path:base ~keeper:keeper_name;
     member "librarian"
       (keeper_obj keeper_name (Health.keeper_memory_health_http_json ~base_path:base))
   in
@@ -1335,7 +1366,7 @@ let test_attention_retains_originals_and_clears_on_observation () =
   let module Queue = Masc.Keeper_librarian_queue_refresh in
   let module Worker = Masc.Keeper_memory_admission_worker in
   let base = fresh_dir "masc-memory-health-attention" in
-  let config = Workspace.default_config base in
+  let config = Masc.Workspace.default_config base in
   let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path:base in
   let keeper_name = "attention-original" in
   ignore (write_snapshot ~keepers_dir ~keeper_id:keeper_name [fact "retained"]);

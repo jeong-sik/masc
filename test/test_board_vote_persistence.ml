@@ -794,7 +794,7 @@ let test_unreadable_snapshots_reject_mutation_and_survive_flush () =
     [ "votes", store.votes_load_result
     ; "reactions", store.reactions_load_result
     ; "sub-boards", (Board.read_sub_boards store |> Result.map (fun _ -> ())
-        |> Result.map_error Board.error_to_string)
+        |> Result.map_error Board.show_board_error)
     ];
   expect_io_error
     "vote"

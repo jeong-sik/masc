@@ -802,6 +802,7 @@
  (libraries
   masc
   masc_tui_types
+  masc_tui_volume_gc
   masc_tui_fetched
   masc_tui_keeper_mark
   masc_tui_context_inspector

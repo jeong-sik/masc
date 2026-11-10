@@ -212,6 +212,14 @@ let test_rate_limit_failure_stays_retryable () =
          result.retryable_runtimes)
 ;;
 
+(* What a review that holds no verdict yet makes of one [report_review_verdict]
+   call: the verdict, or the refusal text. *)
+let verdict_of_first_call args =
+  match snd (AR.step_verdict_call AR.empty_verdict_call args) with
+  | AR.Verdict_recorded verdict -> Ok verdict
+  | AR.Verdict_refused { detail } | AR.Verdict_already_recorded { detail } -> Error detail
+;;
+
 let test_reject_without_reason_is_malformed () =
   let malformed =
     [ `Assoc [ "verdict", `String "REJECT" ]
@@ -221,7 +229,7 @@ let test_reject_without_reason_is_malformed () =
   in
   List.iter
     (fun args ->
-       match AR.parse_review_verdict_from_json args with
+       match verdict_of_first_call args with
        | Error _ -> ()
        | Ok (AR.Approve _) -> Alcotest.fail "malformed REJECT became APPROVE"
        | Ok (AR.Reject reason) ->
@@ -231,7 +239,7 @@ let test_reject_without_reason_is_malformed () =
 
 let test_reject_reason_is_preserved () =
   match
-    AR.parse_review_verdict_from_json
+    verdict_of_first_call
       (`Assoc
           [ "verdict", `String "REJECT"
           ; "reason", `String " evidence is incomplete "
@@ -250,7 +258,7 @@ let test_reject_reason_is_preserved () =
    be a new gate. *)
 let test_approve_reason_is_preserved () =
   (match
-     AR.parse_review_verdict_from_json
+     verdict_of_first_call
        (`Assoc
            [ "verdict", `String "APPROVE"
            ; "reason", `String "ran the suite in the sandbox: 9355/9355"
@@ -263,7 +271,7 @@ let test_approve_reason_is_preserved () =
        reason
    | Ok (AR.Reject _) -> Alcotest.fail "APPROVE became REJECT"
    | Error detail -> Alcotest.fail detail);
-  match AR.parse_review_verdict_from_json (`Assoc [ "verdict", `String "APPROVE" ]) with
+  match verdict_of_first_call (`Assoc [ "verdict", `String "APPROVE" ]) with
   | Ok (AR.Approve reason) ->
     Alcotest.(check string) "a silent approval stays silent" "" reason
   | Ok (AR.Reject _) -> Alcotest.fail "APPROVE became REJECT"

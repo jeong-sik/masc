@@ -40,8 +40,11 @@ let test_absorption () =
   check int "one committed formation, no duplicate deletion" 1 (List.length events);
   let event = List.hd events in
   check bool "absorption" true (event.kind = Activity.Absorbed);
-  check (list string) "exact originals" [Memory.memory_id old_a; Memory.memory_id old_b]
-    (List.map (fun (fact : Activity.fact) -> fact.memory_id) event.before);
+  (* Formation preserves its original members, not archive insertion order. *)
+  check (list string) "exact original members"
+    (List.sort String.compare [Memory.memory_id old_a; Memory.memory_id old_b])
+    (List.map (fun (fact : Activity.fact) -> fact.memory_id) event.before
+     |> List.sort String.compare);
   check (list string) "exact successor" [Memory.memory_id successor]
     (List.map (fun (fact : Activity.fact) -> fact.memory_id) event.after)
 

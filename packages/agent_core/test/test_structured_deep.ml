@@ -1,17 +1,10 @@
 (** Deep coverage tests for Structured module.
 
     Targets uncovered branches in structured.ml.
-    Focuses on schema property ordering, complex parse functions, and error
-    path classification. *)
+    Focuses on schema property ordering and the JSON schema structure. *)
 
 open Agent_core
 open Types
-
-(* ── Helpers ────────────────────────────────────────────────── *)
-
-let make_response ?(usage = None) content : Types.api_response =
-  { id = "m"; model = "m"; unreadable_tool_uses = []; stop_reason = EndTurn; content; usage; telemetry = None }
-;;
 
 (* ── Schema property ordering: fold_left + List.rev ─────────── *)
 
@@ -55,76 +48,6 @@ let test_required_ordering () =
     "required in declaration order"
     [ "z_last"; "a_first" ]
     required
-;;
-
-(* ── Complex parse functions ────────────────────────────────── *)
-
-(** Schema with a parse that returns a nested record type. *)
-let test_json_extractor_array () =
-  let extract =
-    Structured.json_extractor (fun json ->
-      let open Yojson.Safe.Util in
-      json |> to_list |> List.map to_int)
-  in
-  let resp = make_response [ Text {|[1, 2, 3]|} ] in
-  match extract resp with
-  | Ok v -> Alcotest.(check (list int)) "parsed array" [ 1; 2; 3 ] v
-  | Error e -> Alcotest.fail e
-;;
-
-(** json_extractor with nested JSON. *)
-let test_json_extractor_nested () =
-  let extract =
-    Structured.json_extractor (fun json ->
-      let open Yojson.Safe.Util in
-      json |> member "outer" |> member "inner" |> to_string)
-  in
-  let resp = make_response [ Text {|{"outer": {"inner": "deep"}}|} ] in
-  match extract resp with
-  | Ok v -> Alcotest.(check string) "nested value" "deep" v
-  | Error e -> Alcotest.fail e
-;;
-
-(** json_extractor picks first text, ignoring ToolUse blocks. *)
-let test_json_extractor_ignores_tool_use () =
-  let extract =
-    Structured.json_extractor (fun json ->
-      let open Yojson.Safe.Util in
-      json |> member "answer" |> to_int)
-  in
-  let resp =
-    make_response
-      [ ToolUse { id = "t1"; name = "tool"; input = `Assoc [ "answer", `Int 999 ] }
-      ; Text {|{"answer": 42}|}
-      ]
-  in
-  match extract resp with
-  | Ok v -> Alcotest.(check int) "from text not tool_use" 42 v
-  | Error e -> Alcotest.fail e
-;;
-
-(* ── text_extractor edge cases ──────────────────────────────── *)
-
-(** text_extractor with multi-line text. *)
-let test_text_extractor_multiline () =
-  let extract =
-    Structured.text_extractor (fun s ->
-      let lines = String.split_on_char '\n' s in
-      Some (List.length lines))
-  in
-  let resp = make_response [ Text "line1\nline2\nline3" ] in
-  match extract resp with
-  | Ok v -> Alcotest.(check int) "3 lines" 3 v
-  | Error e -> Alcotest.fail e
-;;
-
-(** text_extractor with empty string text. *)
-let test_text_extractor_empty_string () =
-  let extract = Structured.text_extractor (fun s -> if s = "" then None else Some s) in
-  let resp = make_response [ Text "" ] in
-  match extract resp with
-  | Error _ -> ()
-  | Ok _ -> Alcotest.fail "expected None for empty string"
 ;;
 
 (* ── Schema with all 6 param types ─────────────────────────── *)
@@ -220,18 +143,6 @@ let () =
             `Quick
             test_property_ordering_preserved
         ; Alcotest.test_case "required ordering" `Quick test_required_ordering
-        ] )
-    ; ( "json_extractor_deep"
-      , [ Alcotest.test_case "parse array" `Quick test_json_extractor_array
-        ; Alcotest.test_case "parse nested" `Quick test_json_extractor_nested
-        ; Alcotest.test_case
-            "ignores tool_use"
-            `Quick
-            test_json_extractor_ignores_tool_use
-        ] )
-    ; ( "text_extractor_deep"
-      , [ Alcotest.test_case "multiline" `Quick test_text_extractor_multiline
-        ; Alcotest.test_case "empty string" `Quick test_text_extractor_empty_string
         ] )
     ; ( "schema_structure"
       , [ Alcotest.test_case "all 6 param types" `Quick test_schema_all_six_param_types

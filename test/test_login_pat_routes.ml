@@ -289,6 +289,19 @@ let a_person_issues_lists_and_revokes_their_pats () =
          ; lasting, "open", "null"
          ; third, "expired", expiry_of_third
          ])
+      (listed (P.list t.routes (read admin)));
+    Alcotest.(check int)
+      "an expired PAT is revoked too"
+      204
+      (code (P.revoke t.routes (request admin) ~pat_id:third));
+    Alcotest.(check (list entry))
+      "and says revoked from then on"
+      (List.sort
+         compare
+         [ expiring, "revoked", expiry_of_expiring
+         ; lasting, "open", "null"
+         ; third, "revoked", expiry_of_third
+         ])
       (listed (P.list t.routes (read admin))))
 ;;
 

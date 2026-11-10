@@ -28,14 +28,17 @@ val path : string
     (design 4.4). An expiry that is not after now is a 400.
 
     The answer is a 200 [{"pat_id": ..., "token": ...}]. This is the only time
-    the token leaves the server. A person who is not active is a 403. *)
+    the token leaves the server. The session of a person who is not active
+    is refused before this with a 401. A person disabled between that check
+    and the commit gets a 403. *)
 val issue : Login_routes.t -> Authz_browser_request.request -> body:string -> Login_routes.answer
 
 (** The PATs of the person of the session, in the order of their ids:
     [{"pats": [...]}], each [{"pat_id", "scope", "expires_at_ms",
     "issued_at_ms", "status"}]. [status] is what {!Authz_pat_state.find_active}
-    says now: ["open"], ["expired"] or ["revoked"]. No token and no digest is
-    in the answer. *)
+    says now: ["open"], ["expired"] or ["revoked"]. ["unknown"] means the
+    state lost an id that the same snapshot listed, which is a bug. No token
+    and no digest is in the answer. *)
 val list : Login_routes.t -> Authz_browser_request.request -> Login_routes.answer
 
 (** [pat_id] is the [<id>] of the path; one that is not an id is a 400. The

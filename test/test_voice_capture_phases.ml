@@ -13,6 +13,7 @@
 
 open Alcotest
 module Bridge = Masc.Voice_bridge
+module Capture = Masc.Voice_capture
 module Config = Voice_config
 
 (* A room at -40 dB and a margin of 6 dB puts the trigger at -34; the quiet
@@ -89,7 +90,7 @@ let test_calibration_keeps_the_quietest_reading () =
   let phase = continues ~expect:"calibrating" ~now:0.3 ~level:(at (-35.0)) phase in
   match continues ~expect:"listening" ~now:1.5 ~level:(at (-45.0)) phase with
   | Bridge.Listening { floor } ->
-    check (float 0.5) "the quietest of the four" (-45.0) (Bridge.db_of_amplitude floor)
+    check (float 0.5) "the quietest of the four" (-45.0) (Capture.db_of_amplitude floor)
   | other -> failf "expected to be listening, got %s" (phase_name other)
 ;;
 
@@ -190,7 +191,7 @@ let test_a_discard_mid_sentence_says_a_sentence_was_thrown_away () =
        match Bridge.end_at_operator_stop Bridge.Discard phase with
        | Bridge.Discarded_after_speech floor ->
          check (float 0.5) "carrying the room it was speaking over" (-40.0)
-           (Bridge.db_of_amplitude floor)
+           (Capture.db_of_amplitude floor)
        | Bridge.Stopped_before_speech _ ->
          failf "a discard of %s is not a stop before speech" (phase_name phase)
        | Bridge.Ended_after_speech | Bridge.Ended_without_speech _ ->
@@ -365,7 +366,7 @@ let test_an_ending_without_speech_carries_the_room_it_measured () =
   match Bridge.end_at_deadline listening with
   | Bridge.Ended_without_speech (Some floor) ->
     check (float 0.5) "the room it was listening against" (-40.0)
-      (Bridge.db_of_amplitude floor)
+      (Capture.db_of_amplitude floor)
   | Bridge.Ended_without_speech None -> fail "the room was measured, so it must be reported"
   | Bridge.Ended_after_speech | Bridge.Stopped_before_speech _ | Bridge.Discarded_after_speech _ ->
     fail "listening with no speech must end without speech"

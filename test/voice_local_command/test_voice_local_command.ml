@@ -25,6 +25,7 @@
 
 module Overlay = Voice_runtime_overlay
 module Bridge = Masc.Voice_bridge
+module Catalogue = Masc.Voice_catalogue
 
 let endpoint ?command ~kind id =
   { Voice_config.id
@@ -348,23 +349,23 @@ let test_a_line_naming_no_voice_is_dropped () =
    mapping is checked. Measured 2026-09-13: say took yuna and YUNA as Yuna, and
    read a Korean sentence in an English voice for the bare name Eddy. *)
 let test_a_say_voice_is_looked_up_as_say_reads_names () =
-  let lookup voice = Bridge.say_voice_in_catalogue (voices ()) ~voice in
+  let lookup voice = Catalogue.say_voice_in_catalogue (voices ()) ~voice in
   let has = Alcotest.testable
       (fun ppf -> function
-         | Bridge.Say_has_it -> Format.pp_print_string ppf "Say_has_it"
-         | Bridge.Say_lacks_it { installed } ->
+         | Catalogue.Say_has_it -> Format.pp_print_string ppf "Say_has_it"
+         | Catalogue.Say_lacks_it { installed } ->
            Format.fprintf ppf "Say_lacks_it %d" installed)
       ( = )
   in
-  Alcotest.check has "a printed label" Bridge.Say_has_it (lookup "Yuna");
-  Alcotest.check has "in another ASCII case" Bridge.Say_has_it (lookup "yuna");
-  Alcotest.check has "with space around it" Bridge.Say_has_it (lookup " Yuna ");
-  Alcotest.check has "a whole parenthesised label" Bridge.Say_has_it
+  Alcotest.check has "a printed label" Catalogue.Say_has_it (lookup "Yuna");
+  Alcotest.check has "in another ASCII case" Catalogue.Say_has_it (lookup "yuna");
+  Alcotest.check has "with space around it" Catalogue.Say_has_it (lookup " Yuna ");
+  Alcotest.check has "a whole parenthesised label" Catalogue.Say_has_it
     (lookup "Eddy (\xed\x95\x9c\xea\xb5\xad\xec\x96\xb4(\xed\x95\x9c\xea\xb5\xad))");
   Alcotest.check has "a bare name say prints only with a language"
-    (Bridge.Say_lacks_it { installed = 5 }) (lookup "Eddy");
+    (Catalogue.Say_lacks_it { installed = 5 }) (lookup "Eddy");
   Alcotest.check has "a name nothing prints"
-    (Bridge.Say_lacks_it { installed = 5 }) (lookup "NoSuchVoice")
+    (Catalogue.Say_lacks_it { installed = 5 }) (lookup "NoSuchVoice")
 
 (* What espeak-ng actually printed, taken from the machine on 2026-10-07 with
    espeak-ng 1.52.0: the header, a voice with no aliases, one with one, and
@@ -456,7 +457,7 @@ let test_a_short_espeak_row_is_dropped () =
    NoSuchVoiceXYZ exited 1 -- so this check fails fast with the name before
    the clip does. *)
 let test_an_espeak_voice_is_looked_up_as_espeak_reads_names () =
-  let lookup voice = Bridge.espeak_voice_in_catalogue (espeak_voices ()) ~voice in
+  let lookup voice = Catalogue.espeak_voice_in_catalogue (espeak_voices ()) ~voice in
   Alcotest.(check bool) "a printed name" true (lookup "Korean");
   Alcotest.(check bool) "a name with its spaces back" true (lookup "English (America)");
   Alcotest.(check bool) "a printed language" true (lookup "en-us");

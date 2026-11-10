@@ -835,14 +835,16 @@ let timeline_lines ?(instances=[]) ?selected ~width rows =
         let fraction = if Float.is_finite span then (time -. since) /. span
           else (time /. 2. -. since /. 2.) /. (until /. 2. -. since /. 2.) in
         max 0 (min (axis_width - 1) (int_of_float (fraction *. float_of_int (axis_width - 1)))) in
-      [Printf.sprintf "Wall time %s → %s UTC" (utc_stamp since) (utc_stamp until);
-       "o event · v value · * relation"]
+      [Printf.sprintf "Wall time %s UTC"
+         (if since = until then utc_stamp since
+          else utc_stamp since ^ " → " ^ utc_stamp until)]
       @ List.map (fun lane ->
           let axis = Bytes.make axis_width '-' in
           List.iter (fun (row : Row.row) -> if row.lane_id = lane then
             Bytes.set axis (position row.observed_at) (match row.kind with Row.Event -> 'o' | Row.Value -> 'v' | Row.Relation -> '*')) rows;
           (match selected with Some (row : Row.row) when row.lane_id=lane -> ">" | _ -> " ")
           ^ label lane ^ " |" ^ Bytes.to_string axis ^ "|") lanes
+      @ ["o event · v value · * relation"]
       @ List.filter_map (fun instance ->
           if List.exists (fun (row : Row.row) ->
             String.starts_with ~prefix:(instance.id ^ "/") row.lane_id) rows then None

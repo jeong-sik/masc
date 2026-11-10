@@ -24078,7 +24078,7 @@ let runtime_picker_notice_rows ~cols state =
     (fun text ->
       Masc_tui_message_layout.boxed_rows
         ~inner:(Masc_tui_frame.inner_width ~cols)
-        (Masc.Tui_terminal_text.sanitize_terminal_text ~newlines:Preserve text))
+        (Masc.Tui_terminal_text.sanitize_terminal_lines text))
     (runtime_picker_notices state)
 
 let runtime_exact_picker_page (state : state) ~terminal_rows ~cols =

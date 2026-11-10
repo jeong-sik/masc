@@ -9,14 +9,12 @@ module Ps = Authz_principal_state
 
 let ( let* ) = Result.bind
 let requested = Effect_request.make Effect.Invoke_model [ Effect.Use_tool ]
-let attempts = 3
 
 type refusal =
   | Not_bootstrapped
   | Keeper_not_made of Keeper_id.t
   | No_authorized_runtime of Keeper_id.t
   | Denied of D.deny_reason
-  | Log_kept_moving
 
 let refusal_to_string = function
   | Not_bootstrapped -> "the authorization log was never bootstrapped"
@@ -24,8 +22,6 @@ let refusal_to_string = function
   | No_authorized_runtime id ->
     Printf.sprintf "the owner gave the Keeper %s no Runtime" (Keeper_id.to_string id)
   | Denied reason -> "denied: " ^ D.deny_reason_to_string reason
-  | Log_kept_moving ->
-    Printf.sprintf "records were appended during each of %d decisions" attempts
 ;;
 
 type turn =
@@ -99,16 +95,7 @@ let self_grant (state : Authz_state.t) principal runtime_id =
     -> D.Absent
 ;;
 
-let revocation zone subject =
-  match Authz_zone.revocation zone subject with
-  | Authz_zone.Known state -> D.Found state
-  | Authz_zone.Unknown_log_stopped _
-  | Authz_zone.Unknown_store_stopped _
-  | Authz_zone.Unknown_files_disagree _
-  | Authz_zone.Unknown_store_holds_no_answer -> D.Unreadable
-;;
-
-let facts zone (state : Authz_state.t) ~(keeper : Ks.keeper) ~now =
+let facts (state : Authz_state.t) ~(keeper : Ks.keeper) ~now =
   let owner = Principal.Human keeper.Ks.owner in
   { D.now
   ; principal = principal_status state
@@ -130,13 +117,15 @@ let facts zone (state : Authz_state.t) ~(keeper : Ks.keeper) ~now =
   ; runtime = runtime_row state
   ; provider_account = provider_account state
   ; grant = self_grant state
-  ; revocation = revocation zone
+  ; revocation = (fun subject -> D.Found (Authz_state.revocation state subject))
   ; dependencies = (fun (_ : D.Chain.t) -> D.Found Dependency_state.Cleared)
   }
 ;;
 
-(* One decision on one snapshot. *)
-let decide_on zone (state : Authz_state.t) ~keeper_id ~channel ~now =
+(* One decision on one snapshot: the facts and the gate read the same state,
+   so no record separates what they read. *)
+let decide (trusted : Authz_zone.trusted) ~keeper_id ~channel ~now =
+  let state = (trusted :> Authz_zone.snapshot).Authz_zone.state in
   let* workspace_id =
     Option.to_result ~none:Not_bootstrapped (Authz_mode_state.workspace state.mode)
   in
@@ -160,7 +149,7 @@ let decide_on zone (state : Authz_state.t) ~keeper_id ~channel ~now =
     ; requested
     }
   in
-  match D.allowed (facts zone state ~keeper ~now) request with
+  match D.allowed (facts state ~keeper ~now) request with
   | D.Deny reason -> Error (Denied reason)
   | D.Allow allowance ->
     (match Rs.find state.runtimes runtime_id with
@@ -176,24 +165,4 @@ let decide_on zone (state : Authz_state.t) ~keeper_id ~channel ~now =
      | None ->
        (* [allowed] found the Runtime in this same state. *)
        Error (Denied D.Authorization_uncertain))
-;;
-
-let same_head a b =
-  Int.equal (Authz_record.next_seq a) (Authz_record.next_seq b)
-  && Authz_record.Hash.equal (Authz_record.head_hash a) (Authz_record.head_hash b)
-;;
-
-let decide zone ~keeper_id ~channel ~now =
-  let rec go left =
-    if left <= 0
-    then Error Log_kept_moving
-    else (
-      let before = Authz_zone.snapshot zone in
-      let decision = decide_on zone before.Authz_zone.state ~keeper_id ~channel ~now in
-      let after = Authz_zone.snapshot zone in
-      if same_head before.Authz_zone.head after.Authz_zone.head
-      then decision
-      else go (left - 1))
-  in
-  go attempts
 ;;

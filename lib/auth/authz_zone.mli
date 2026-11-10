@@ -63,7 +63,7 @@
     the end of the log was confirmed leaves the snapshot with the block of that
     reduction and nothing else of the commit. A commit that fails in any other
     way leaves the snapshot as it was. The snapshot does not say that a file
-    stopped.
+    stopped; {!read} does.
 
     {b Probe.} The zone keeps the probe of the high-water mark in step with
     both files without reading the log again: it feeds
@@ -174,34 +174,49 @@ val open_at_start
   -> store_path:string
   -> (t, open_error) result
 
+(** What the zone last published, whatever the files say: the view of the
+    writer. A caller that goes on to {!commit} may read it for a check that
+    the commit makes again, because the commit judges the entry. A decision
+    that allows something without a commit reads {!read}. *)
 val snapshot : t -> snapshot
 
-(** What the gate reads for [revocation_pending(subject)] (design 8.3). *)
-type revocation =
-  | Known of Authz_records.Revocation_state.t
-      (** [Pending] while the published state holds a reduction of the
-          subject. A reduction whose record did not append is held from the
-          failed commit on, not from the next entry, and from the start when
-          the zone opens with its intent still pending. *)
-  | Unknown_log_stopped of Authz_log.stop
-      (** The log is stopped: its head is not trusted and no commit runs, so
-          the zone cannot say whether a reduction was given up
-          ([AuthorizationUncertain], plan B2). *)
-  | Unknown_store_stopped of Authz_external_store.stop
-      (** The external store is stopped, with the same consequence. *)
-  | Unknown_files_disagree of
+(** Why a decision cannot rest on the zone now ([AuthorizationUncertain],
+    plan B2). In each case no commit runs until a restart reads the files
+    again, so the zone can neither add nor close a block, and a session, a
+    token or a membership that was to be ended stays in the published state. *)
+type uncertain =
+  | Log_is_stopped of Authz_log.stop
+      (** The log is stopped: its head is not trusted. *)
+  | Store_is_stopped of Authz_external_store.stop
+  | Files_disagree of
       { first : Authz_high_water.reason
       ; rest : Authz_high_water.reason list
       }
       (** The store and the log disagree ({!Authz_high_water.Mismatch}): the
-          log went back, or was replaced. Every commit is refused
-          ({!Uncertain}), so the same consequence (design 8.2-4 and 8.2-5). *)
-  | Unknown_store_holds_no_answer
+          log went back, or was replaced (design 8.2-4 and 8.2-5). *)
+  | Store_answers_nothing
       (** The store holds no answer for a bootstrapped log: it was emptied, or
-          is not the store of this log. Every commit is refused
-          ({!Store_holds_no_answer}), so the same consequence. *)
+          is not the store of this log. *)
 
-val revocation : t -> Authz_records.Subject.t -> revocation
+val uncertain_to_string : uncertain -> string
+
+(** A snapshot that {!read} took while the zone could be trusted. Only {!read}
+    makes one, so a function that takes one cannot be handed the state of a
+    zone whose files stopped or disagree. It is read as a snapshot:
+    [(trusted :> snapshot).state]. *)
+type trusted = private snapshot
+
+(** The published state, for a decision. [Error] when a file of the zone is
+    stopped, the files disagree, or the store holds no answer: the judgments
+    of an entry of {!commit}, made on what the zone holds in memory, without a
+    read of a file. A change that another process made to a file and that no
+    write of the zone has met yet is not seen here either ({b Probe}).
+
+    The gate reads [revocation_pending(subject)] (design 8.3) in this state
+    with {!Authz_state.revocation}: a reduction whose record did not append
+    is held in it from the failed commit on, not from the next entry, and
+    from the start when the zone opens with its intent still pending. *)
+val read : t -> (trusted, uncertain) result
 
 (** The record to append. Its seq and previous hash come from the head, and its
     time from the clock of the zone. *)

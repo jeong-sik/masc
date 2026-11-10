@@ -380,6 +380,13 @@ let error_name : Z.error -> string = function
     "Answer_not_written " ^ store_append_error_name error
 ;;
 
+let uncertain_name : Z.uncertain -> string = function
+  | Z.Log_is_stopped _ -> "log stopped"
+  | Z.Store_is_stopped _ -> "store stopped"
+  | Z.Files_disagree _ -> "files disagree"
+  | Z.Store_answers_nothing -> "store holds no answer"
+;;
+
 let intent_name (intent : S.intent) =
   Printf.sprintf
     "%s>%s %s"
@@ -411,6 +418,17 @@ let check_error label expected zone timed =
   match commit zone timed with
   | Ok _ -> Alcotest.failf "%s: the commit succeeded" label
   | Error error -> Alcotest.(check string) label expected (error_name error)
+;;
+
+(* Whether a decision may rest on the zone. The published state is the same
+   one either way, and only [read] says that a file stopped. *)
+let check_decision label expected zone =
+  Alcotest.(check string)
+    label
+    expected
+    (match Z.read zone with
+     | Ok (_ : Z.trusted) -> "trusted"
+     | Error uncertain -> uncertain_name uncertain)
 ;;
 
 let check_settled label expected (committed : Z.committed) =
@@ -611,6 +629,7 @@ let a_store_with_no_answer_refuses_every_commit () =
         check_judgment (label ^ ": what the files say") dirs "Absent";
         let zone = open_zone dirs in
         let log_before = read_file (log_file dirs) in
+        check_decision (label ^ ": no decision rests on it") "store holds no answer" zone;
         check_error label "Store_holds_no_answer" zone (mode_draft M.Off);
         check_error
           (label ^ ", again")
@@ -914,18 +933,18 @@ let check_blocked label expected (state : Authz_state.t) =
     (List.map (fun held -> Subject.to_string held.Authz_state.subject) state.Authz_state.revocation_pending)
 ;;
 
-(* What the gate reads for a subject. *)
+(* What the gate reads for a subject: the state a decision may rest on, and
+   in it the reduction that holds the subject. *)
 let check_gate label expected zone subject =
   Alcotest.(check string)
     label
     expected
-    (match Z.revocation zone subject with
-     | Z.Known Authz_records.Revocation_state.Pending -> "pending"
-     | Z.Known Authz_records.Revocation_state.Not_pending -> "clear"
-     | Z.Unknown_log_stopped _ -> "log stopped"
-     | Z.Unknown_store_stopped _ -> "store stopped"
-     | Z.Unknown_files_disagree _ -> "files disagree"
-     | Z.Unknown_store_holds_no_answer -> "store holds no answer")
+    (match Z.read zone with
+     | Error uncertain -> uncertain_name uncertain
+     | Ok trusted ->
+       (match Authz_state.revocation (trusted :> Z.snapshot).Z.state subject with
+        | Authz_records.Revocation_state.Pending -> "pending"
+        | Authz_records.Revocation_state.Not_pending -> "clear"))
 ;;
 
 (* A revocation whose append failed leaves its intent, and its invitation is
@@ -1461,6 +1480,7 @@ let a_failed_store_write_stops_every_commit () =
           (mode_draft M.Off));
     check_files "both files are as they were" before dirs;
     check_snapshot "the published state" ~mode:on ~head:completed.B.record_hash (Z.snapshot zone);
+    check_decision "no decision rests on the stopped store" "store stopped" zone;
     check_error "the next commit" "Store_stopped" zone (mode_draft ~at_ms:(at_ms + 2) M.Off);
     check_files "the next commit wrote nothing" before dirs;
     ignore (check_restart "a restart" dirs ~mode:on ~head:completed.B.record_hash : opened))

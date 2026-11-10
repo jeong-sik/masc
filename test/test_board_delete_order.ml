@@ -66,7 +66,10 @@ let test_refused_parent_preserves_comments_after_flush base_path =
      Masc_board_handlers.Board_votes_json.load_persisted_comments];
   Alcotest.(check string) "refused parent deletion preserves comments" comments_before
     (Fs_compat.load_file comments_path);
+  let retry_errors_before = Board.persist_error_count () in
   Board.flush_dirty stale;
+  Alcotest.(check bool) "refused retry is recorded by the source writer" true
+    (Board.persist_error_count () > retry_errors_before);
   Alcotest.(check string) "retry flush preserves the failed parent's source" posts_before
     (Fs_compat.load_file posts_path);
   Alcotest.(check string) "retry flush retains the deletion dependency" comments_before

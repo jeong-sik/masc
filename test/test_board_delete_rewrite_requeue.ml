@@ -285,6 +285,13 @@ let test_failed_prerequisite_preserves_dependents_until_retry () =
     (row_has_post_id post_id (post_rows ()));
   Alcotest.(check bool) "multiple-failure retry clears posts work" false
     active.Board.dirty_posts;
+  List.iter (fun load -> match load active with
+    | Ok _ -> ()
+    | Error (path, error) -> Alcotest.failf "reload after repaired retry %s: %s"
+        path (Printexc.to_string error))
+    [Masc_board_handlers.Board_votes_json.load_persisted_posts;
+     Masc_board_handlers.Board_votes_json.load_persisted_comments];
+  check_post_deleted "repaired retry allows reload without restoring the parent" post_id;
   Board.reset_global_for_test ();
   Board_dispatch.reset_for_test ();
   Result.get_ok (Board_dispatch.init_jsonl

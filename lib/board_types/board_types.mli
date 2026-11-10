@@ -826,7 +826,13 @@ type sub_boards_source_state =
 
 type snapshot_retry = Independent_snapshots | Deletion_pending
 (** A failed deletion retains its cross-source ordering in subsequent flushes.
-    This process-local retry context does not durably record a deletion decision. *)
+    This process-local retry context does not durably record a deletion decision.
+    A proven nonwrite that preserves source authority can retry after repair.
+    A source refusal cannot be refreshed by these retries or a partial model
+    reload. Later obligations in the deletion batch remain pending; unrelated
+    writers retain their own source admission. A fresh store observes the files
+    without replaying the old memory-only intent, so an unwritten parent
+    deletion can reappear while completed file writes remain applied. *)
 
 type store = {
   (** Canonical posts observation/refusal/uncertainty, owned by persist_mutex.

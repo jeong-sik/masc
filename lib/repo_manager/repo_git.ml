@@ -382,41 +382,6 @@ let common_dir ?(timeout_sec = inspection_timeout_sec) ~local_path () =
   | Error detail -> Stdlib.Error detail
 ;;
 
-let branch_of_origin_head_ref refname =
-  let refname = String.trim refname in
-  let prefix = "refs/remotes/origin/" in
-  if String.starts_with ~prefix refname
-  then
-    let branch =
-      String.sub refname (String.length prefix) (String.length refname - String.length prefix)
-      |> String.trim
-    in
-    if String.equal branch ""
-    then
-      Stdlib.Error
-        (Printf.sprintf
-           "git symbolic-ref refs/remotes/origin/HEAD returned invalid ref: %S"
-           refname)
-    else Stdlib.Ok branch
-  else
-    Stdlib.Error
-      (Printf.sprintf
-         "git symbolic-ref refs/remotes/origin/HEAD returned invalid ref: %S"
-         refname)
-;;
-
-let origin_head_branch ~local_path =
-  match
-    run_git
-      ~cwd:local_path
-      ~env:read_only_git_env
-      ~timeout_sec:inspection_timeout_sec
-      [ "symbolic-ref"; "-q"; "refs/remotes/origin/HEAD" ]
-  with
-  | Ok (refname :: _) -> branch_of_origin_head_ref refname
-  | Ok [] -> Stdlib.Error "git symbolic-ref refs/remotes/origin/HEAD returned no output"
-  | Error msg -> Stdlib.Error msg
-
 let current_branch ?(timeout_sec = inspection_timeout_sec) ~repository () =
   match
     run_git ~cwd:repository.local_path ~env:read_only_git_env

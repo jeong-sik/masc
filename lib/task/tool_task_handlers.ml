@@ -71,7 +71,8 @@ let log_task_transition_failed ~agent_name err =
   let message = Masc_domain.masc_error_to_string err in
   match err with
   | Masc_domain.Task
-      (Masc_domain.Task_error.InvalidState _ | Masc_domain.Task_error.TransitionRejected _) ->
+      (Masc_domain.Task_error.InvalidState _ | Masc_domain.Task_error.TransitionRejected _
+       | Masc_domain.Task_error.BacklogVersionConflict _) ->
       task_agent_log_warn ~agent_name "task transition failed: %s" message
   | Masc_error.Task (Masc_error.Task_error.NotFound _ | (Masc_error.Task_error.AlreadyClaimed _ | (Masc_error.Task_error.InvalidId _ | Masc_error.Task_error.VerificationSuperseded _)))
   | Masc_error.Agent _ | Masc_error.Auth _ | Masc_error.System _ -> task_agent_log_error ~agent_name "task transition failed: %s" message

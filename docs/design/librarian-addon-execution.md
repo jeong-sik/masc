@@ -63,6 +63,16 @@ The Workspace Curator and the Librarian share one submit-once journal
 intent is written. A submit the host refused before sending declines that
 intent, so the next pass reads absence and submits the same request again.
 
+Before reading a dispatched worker request, the host owner may restore a
+lost Exact terminal publication from its confirmed execution proof. This
+publication-only recovery takes the original request claim and validates the
+complete record, all sparse proofs, the latest started attempt and its original
+schema. Only a matching completed call is published and reread. It does not
+resolve a route, contact the worker or call a provider. Active claims, missing
+proof and nonterminal provider refusals stay unresolved; an orphaned or invalid
+proof is an error. The consumer still validates the original domain answer
+before Memory publication. Worker absence alone grants no recovery or retry.
+
 Retain the raw proposal, validate it against that original input, run the
 existing host absorption gate and apply the existing locked Memory disposition.
 Only a matching original Memory receipt establishes commit and permits the

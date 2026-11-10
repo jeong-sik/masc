@@ -29,10 +29,13 @@ val is_current : owner -> bool
 val begin_attempt : owner -> origin:origin -> attempt
 val publish_success : attempt -> Dashboard_projection_cache.digest_observation -> bool
 val publish_failure_message : attempt -> string -> bool
-(** Admit only the captured scope/source generation and ordered attempt.
-    The same successful attempt cannot later publish a timeout failure. *)
+(** Admit only the captured scope and ordered attempt. Source notices during
+    a read leave trailing debt without discarding its completed observation.
+    Generation fences prepared payloads, not atomic source coherence. The same
+    successful attempt cannot later publish a timeout failure. *)
 
 val invalidate : owner -> unit
+(** Fence already prepared payloads and notify coalesced trailing read debt. *)
 val next_deadline_unix : owner -> float option
 val subscribe_completed : owner -> (completion -> unit) -> (unit -> unit)
 (** Synchronous, non-I/O metadata only; listeners may enqueue bounded debt.
@@ -41,7 +44,7 @@ val subscribe_completed : owner -> (completion -> unit) -> (unit -> unit)
 val publication : owner -> publication
 val publication_status : owner -> publication -> publication_status
 val publication_is_current : owner -> publication -> bool
-(** [Source_pending] means the current owner generation still owes a read.
+(** [Source_pending] means no read has completed since the latest input notice.
     An older preparation is [Superseded] after the current read has settled,
     preserving bounded publication debt without a source-pending busy loop. *)
 

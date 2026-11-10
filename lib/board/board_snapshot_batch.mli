@@ -5,10 +5,12 @@ type kind = Posts | Comments | Votes | Reactions
 
 type selection
 (** Selected kinds, each appearing once in Posts, Comments, Votes, Reactions
-    order. *)
+    order, with their deletion or independent-flush purpose. *)
 
 val for_delete : selection
-(** Select every kind after the caller has verified all sources are readable. *)
+(** Select every kind for ordered deletion work. The first returned write error
+    stops later sources. Retried deletions use this selection again, including
+    unreadable sources whose writers must refuse rather than omit their work. *)
 
 val for_flush :
   dirty_posts:bool ->
@@ -23,7 +25,7 @@ val for_flush :
 
 type payload =
   | Posts_payload of Board_core_persist.posts_snapshot
-  | Comments_payload of string
+  | Comments_payload of Board_core_persist.comments_snapshot
   | Votes_payload of string
   | Reactions_payload of string
 val kind_of_payload : payload -> kind
@@ -34,21 +36,24 @@ type t
 
 val capture : selection ->
   posts:(unit -> Board_core_persist.posts_snapshot) ->
-  comments:(unit -> string) -> votes:(unit -> string) -> reactions:(unit -> string) -> t
+  comments:(unit -> Board_core_persist.comments_snapshot) ->
+  votes:(unit -> string) -> reactions:(unit -> string) -> t
 (** Invoke the selected producer once for each selected kind, in selection order. The caller
     holds the state lock while the producer observes the store and updates row caches. *)
 
 type outcome
 (** Every selected obligation in batch order, distinguishing attempted writes
-    from work left pending after the first deferred reserved settlement. *)
+    from pending work after a failed deletion prerequisite or reserved settlement. *)
 
 val persist :
   t ->
   write:(payload -> (unit, Board_types.board_error) result) ->
   outcome
 (** Invoke selected [write] calls in batch order, including empty contents.
-    Returned errors do not stop later writes. The first private known-settlement
-    carrier stops further write calls; its result and original exception are
+    Deletion batches stop on the first returned error and retain later work as
+    pending. Independent flush batches continue after returned errors.
+    The first private known-settlement carrier stops further write calls for
+    either purpose; its result and original exception are
     retained until {!finish_settlement}, and every remaining selected kind stays
     pending for retry. Other exceptions propagate to the caller.
 

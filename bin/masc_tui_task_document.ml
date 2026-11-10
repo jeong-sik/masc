@@ -18,17 +18,17 @@ let section_rows ~width title =
   Masc_tui_text_block.rows ~max_cells:width ("[ " ^ title ^ " ]")
   |> List.map (fun line -> "  " ^ paint (heading_style ()) line)
 
-let history_heading_rows ~width = section_rows ~width "상태 전환 이력 (HISTORY)"
+let history_heading_rows ~ko ~width = section_rows ~width (if ko then "상태 기록" else "History")
 
 (* The colours the chat gives a served JSON document, out of the reader's own
    theme. A note's colours are chosen when its rows are prepared, like the
    Body's headings. *)
 let document_palette () : Masc_tui_tool_detail.palette =
   { Masc_tui_tool_detail.plain with
-    key = Theme.Syntax.json_key
-  ; string_ = Theme.Syntax.string
-  ; number = Theme.Syntax.json_number
-  ; literal = Theme.Syntax.json_literal
+    key = Theme.Syntax.json_key ()
+  ; string_ = Theme.Syntax.string ()
+  ; number = Theme.Syntax.json_number ()
+  ; literal = Theme.Syntax.json_literal ()
   ; punctuation = Theme.Syntax.json_punctuation
   ; reset = Ansi.reset
   }
@@ -52,8 +52,9 @@ let indented block =
   |> List.map (fun line -> note_indent ^ line)
   |> String.concat "\n"
 
-let history_blocks = function
-        | [] -> [ Plain_block "    (no events in the observed prefix)" ]
+let history_blocks ~ko =
+  let text korean english = if ko then korean else english in function
+        | [] -> [ Plain_block (text "    (조회한 범위에 기록 없음)" "    (no events in the observed prefix)") ]
         | events ->
             let palette = document_palette () in
             List.concat_map
@@ -62,13 +63,13 @@ let history_blocks = function
                   match event.Tui_decode.th_from_status, event.th_to_status with
                   | Some from_status, Some to_status ->
                       Printf.sprintf "  %s -> %s" from_status to_status
-                  | Some from_status, None -> "  from " ^ from_status
+                  | Some from_status, None -> (text "  이전 " "  from ") ^ from_status
                   | None, Some to_status -> "  -> " ^ to_status
                   | None, None -> ""
                 in
                 let actor =
                   match event.th_actor with
-                  | Some actor -> "  by " ^ actor
+                  | Some actor -> (text "  주체 " "  by ") ^ actor
                   | None -> ""
                 in
                 let provenance=match event.th_origin with
@@ -88,169 +89,137 @@ let history_blocks = function
                     | None -> []))
               events
 
-let history_status_lines ~width ~(view : Masc.Tui_decode_task_inspection.history Masc_tui_fetched.view) ~in_flight ~continuing =
+let history_status_lines ~ko ~width ~(view : Masc.Tui_decode_task_inspection.history Masc_tui_fetched.view) ~in_flight ~continuing =
+  let text korean english = if ko then korean else english in
   let rows =
     match view with
     | Masc_tui_fetched.Ready _ -> []
     | Masc_tui_fetched.Stale (_, detail) ->
         Masc_tui_text_block.rows ~max_cells:width
-          ("    history read failed; previous observation: " ^ Terminal_text.single_line detail)
+          ((text "    기록 조회 실패 · 이전 관측: " "    history read failed; previous observation: ") ^ Terminal_text.single_line detail)
     | Masc_tui_fetched.Failed detail -> Masc_tui_text_block.rows ~max_cells:width
-        ("    load failed: " ^ Terminal_text.single_line detail)
-    | Masc_tui_fetched.Absent -> [ "    history not requested" ]
-    | Masc_tui_fetched.Loading -> [ "    loading..." ]
+        ((text "    조회 실패: " "    load failed: ") ^ Terminal_text.single_line detail)
+    | Masc_tui_fetched.Absent -> [ (text "    기록 미조회" "    history not requested") ]
+    | Masc_tui_fetched.Loading -> [ (text "    조회 중" "    loading...") ]
   in
   let pending =
     if not in_flight then []
     else match view with
       | Masc_tui_fetched.Ready _ | Masc_tui_fetched.Stale _ ->
-          [ if continuing then "    reading earlier history; showing observed prefix"
-            else "    reading history; previous observation" ]
-      | Masc_tui_fetched.Failed _ -> [ "    retrying; previous failure remains" ]
+          [ if continuing then (text "    이전 기록 조회 중 · 조회한 범위 표시" "    reading earlier history; showing observed prefix")
+            else (text "    기록 조회 중 · 이전 관측" "    reading history; previous observation") ]
+      | Masc_tui_fetched.Failed _ -> [ (text "    재조회 중 · 이전 실패 유지" "    retrying; previous failure remains") ]
       | Masc_tui_fetched.Absent | Masc_tui_fetched.Loading -> [] in
   let boundary=match Masc_tui_fetched.value view with
     | None -> []
     | Some history -> [match history.history_next_cursor with
-        | Some _ when in_flight && continuing -> "    r:start a fresh prefix"
-        | Some _ -> "    H:read earlier stored history · r:start a fresh prefix"
-        | None -> "    observed stored prefix exhausted · r:read latest history"] in
+        | Some _ when in_flight && continuing -> (text "    r:최신 기록 조회" "    r:start a fresh prefix")
+        | Some _ -> (text "    H:이전 기록 조회 · r:최신 기록 조회" "    H:read earlier stored history · r:start a fresh prefix")
+        | None -> (text "    조회 범위 끝 · r:최신 기록 조회" "    observed stored prefix exhausted · r:read latest history")] in
   let sources=match Masc_tui_fetched.value view with
     | None -> []
     | Some history -> List.map (fun (source,state) ->
-      "    " ^ (match source with Tui_decode.Task_activity -> "Lifecycle" | Tui_decode.Task_audit -> "Audit")
-      ^ (match state with Masc.Tui_decode_task_inspection.Source_observed -> ": observed stored prefix"
-        | Masc.Tui_decode_task_inspection.Source_not_created -> ": store not yet created; no observations available")) history.history_sources in
+      "    " ^ (match source with Tui_decode.Task_activity -> (text "상태 전환" "Lifecycle") | Tui_decode.Task_audit -> (text "감사 기록" "Audit"))
+      ^ (match state with Masc.Tui_decode_task_inspection.Source_observed -> (text ": 조회한 저장 범위" ": observed stored prefix")
+        | Masc.Tui_decode_task_inspection.Source_not_created -> (text ": 저장소 미생성 · 관측 없음" ": store not yet created; no observations available"))) history.history_sources in
   pending @ rows @ sources @ boundary
 
-let body_lines ~cols ~goal_lines (task : Masc_domain.task) =
+let body_lines ~ko ~cols ~goal_lines (task : Masc_domain.task) =
+  let text korean english = if ko then korean else english in
   let width = max 1 (framed_inner_width cols - 2) in
-  let labeled_lines ?(style = "") label text =
+  let field ?(style = "") korean english value =
+    let label = text korean english in
     let prefix = "  " ^ label ^ ": " in
-    let prefix_width = Message_layout.display_width prefix in
-    (if prefix_width < framed_inner_width cols then
-       Masc_tui_text_block.rows ~max_cells:(framed_inner_width cols - prefix_width) text
+    let cells = Message_layout.display_width prefix in
+    (if cells < framed_inner_width cols then
+       Masc_tui_text_block.rows ~max_cells:(framed_inner_width cols - cells) value
        |> List.mapi (fun index line ->
-            (if index = 0 then prefix else String.make prefix_width ' ') ^ line)
-     else
-       (Message_layout.wrap_words ~max_cells:width label
-        |> List.map (fun line -> "  " ^ line))
-       @ (Masc_tui_text_block.rows ~max_cells:width text
-          |> List.map (fun line -> "  " ^ line)))
-    |> List.map (paint style)
-  in
-  let some_lines ?style label = function
+         (if index = 0 then prefix else String.make cells ' ') ^ line)
+     else (Message_layout.wrap_words ~max_cells:width label |> List.map ((^) "  "))
+       @ (Masc_tui_text_block.rows ~max_cells:width value |> List.map ((^) "  ")))
+    |> List.map (paint style) in
+  let optional ?style ko en = function None -> [] | Some value -> field ?style ko en value in
+  let many ko en values = List.concat_map (field ko en) values in
+  let quiet ko en value = field ~style:provenance_style ko en value in
+  let heading ko en = section_rows ~width (text ko en) in
+  let status value = field ~style:(task_state_style task.task_status) "상태" "Status" value in
+  let state, times = match task.task_status with
+    | Masc_domain.Todo -> status (text "할 일 · 미배정" "Todo · unassigned"), []
+    | Claimed {assignee; claimed_at} ->
+      status (text "담당됨" "Claimed") @ field "담당" "Owner" assignee,
+      quiet "담당 시각" "Claimed" claimed_at
+    | InProgress {assignee; started_at} ->
+      status (text "진행 중" "In progress") @ field "담당" "Owner" assignee,
+      quiet "시작" "Started" started_at
+    | AwaitingVerification {assignee; started_at; submitted_at; verification_id} ->
+      status (text "검증 대기" "Awaiting verification") @ field "담당" "Owner" assignee
+      @ field "검증 요청" "Verification" verification_id,
+      quiet "시작" "Started" started_at @ quiet "제출" "Submitted" submitted_at
+    | Done {assignee; completed_at; notes} ->
+      status (text "완료" "Done") @ field "담당" "Owner" assignee @ optional "메모" "Notes" notes,
+      quiet "완료 시각" "Completed" completed_at
+    | Cancelled {cancelled_by; cancelled_at; reason} ->
+      status (text "취소" "Cancelled") @ field "취소한 주체" "Cancelled by" cancelled_by
+      @ optional "사유" "Reason" reason,
+      quiet "취소 시각" "Cancelled" cancelled_at in
+  let request = heading "요청과 상태" "Request and status"
+    @ field "제목" "Title" task.title @ state
+    @ (if String.equal task.description "" then [] else field "요청" "Request" task.description)
+    @ many "대상 파일" "File" task.files in
+  let evidence = (match task.handoff_context with
     | None -> []
-    | Some text -> labeled_lines ?style label text
-  in
-  let list_lines label items = List.concat_map (labeled_lines label) items in
-  (* Status, actor and every transition's evidence are real rows in the same
-     reading as the description. No metadata field is a one-line preview. *)
-  let status_row text = labeled_lines ~style:(task_state_style task.task_status) "status" text in
-  let when_lines label at = labeled_lines ~style:provenance_style label at in
-  let status_lines =
-    match task.task_status with
-    | Masc_domain.Todo -> status_row "todo — unclaimed"
-    | Masc_domain.Claimed { assignee; claimed_at } ->
-        status_row "claimed" @ labeled_lines "actor" assignee
-        @ when_lines "claimed" claimed_at
-    | Masc_domain.InProgress { assignee; started_at } ->
-        status_row "in progress" @ labeled_lines "actor" assignee
-        @ when_lines "started" started_at
-    | Masc_domain.AwaitingVerification { assignee; started_at; submitted_at; verification_id } ->
-        status_row "awaiting verification" @ labeled_lines "actor" assignee
-        @ when_lines "started" started_at @ when_lines "submitted" submitted_at
-        @ labeled_lines "verification" verification_id
-    | Masc_domain.Done { assignee; completed_at; notes } ->
-        status_row "done" @ labeled_lines "actor" assignee
-        @ when_lines "completed" completed_at @ some_lines "notes" notes
-    | Masc_domain.Cancelled { cancelled_by; cancelled_at; reason } ->
-        status_row "cancelled" @ labeled_lines "actor" cancelled_by
-        @ when_lines "cancelled" cancelled_at @ some_lines "reason" reason
-  in
-  let section_head title = section_rows ~width title in
-  let identity_section =
-    section_head "작업 식별 · 상태 및 목표 (Task Identity & Status)"
-    @ labeled_lines "title" task.title
-    @ labeled_lines "id" task.id
-    @ goal_lines
-    @ status_lines
-    @ when_lines "created" task.created_at
-    @ labeled_lines "creator"
-        (match task.created_by with Some by -> by | None -> Masc_tui_theme.Glyph.no_value)
-    @ labeled_lines "priority" (string_of_int task.priority)
-    @ labeled_lines "cycles" (string_of_int task.cycle_count)
-    @ some_lines "predecessor" task.predecessor_task_id
-    @ some_lines "operation" task.execution_links.operation_id
-    @ some_lines "session" task.execution_links.session_id
-    @ List.concat_map
-        (fun skill ->
-          labeled_lines "skill" (Yojson.Safe.to_string (Skill_reference.to_yojson skill)))
-        task.skills
-  in
-  let description_items =
-    (if String.equal task.description "" then [] else labeled_lines "what" task.description)
-    @ list_lines "file" task.files
-  in
-  let description_section =
-    match description_items with
-    | [] -> []
-    | items ->
-        [ "" ]
-        @ section_head "작업 설명 · 대상 파일 (Description & Files)"
-        @ items
-  in
-  let handoff_and_contract_items =
-    (match task.handoff_context with
-     | None -> []
-     | Some handoff ->
-         some_lines "why" handoff.Masc_domain.reason
-         @ (if String.equal handoff.Masc_domain.summary "" then []
-            else labeled_lines "handoff" handoff.Masc_domain.summary)
-         @ some_lines "next" handoff.Masc_domain.next_step
-         @ some_lines "failure" handoff.Masc_domain.failure_mode
-         @ some_lines ~style:provenance_style "handoff updated" handoff.Masc_domain.updated_at
-         @ some_lines "handoff updater" handoff.Masc_domain.updated_by
-         @ list_lines "evidence" handoff.Masc_domain.evidence_refs)
-    @
-    match task.contract with
-    | None -> []
-    | Some contract ->
-        list_lines "done-when" contract.Masc_domain.completion_contract
-        @ list_lines "evidence" contract.Masc_domain.required_evidence
-        @ list_lines "inspection evidence" contract.Masc_domain.inspect_gate_evidence
-        @ list_lines "verification evidence" contract.Masc_domain.verify_gate_evidence
-  in
-  let contract_section =
-    match handoff_and_contract_items with
-    | [] -> []
-    | items ->
-        [ "" ]
-        @ section_head "인수인계 · 완료 계약 (Handoff & Completion Contract)"
-        @ items
-  in
-  identity_section @ description_section @ contract_section
+    | Some handoff -> optional "사유" "Reason" handoff.reason
+      @ (if String.equal handoff.summary "" then [] else field "인수인계" "Handoff" handoff.summary)
+      @ optional "다음 행동" "Next" handoff.next_step
+      @ optional "실패" "Failure" handoff.failure_mode
+      @ many "근거" "Evidence" handoff.evidence_refs)
+    @ (match task.contract with
+      | None -> []
+      | Some contract -> many "완료 조건" "Done when" contract.completion_contract
+        @ many "필요한 근거" "Required evidence" contract.required_evidence
+        @ many "점검 근거" "Inspection evidence" contract.inspect_gate_evidence
+        @ many "검증 근거" "Verification evidence" contract.verify_gate_evidence) in
+  let metadata = quiet "작업 ID" "Task ID" task.id @ times
+    @ quiet "생성" "Created" task.created_at
+    @ quiet "생성한 주체" "Creator" (Option.value task.created_by ~default:Masc_tui_theme.Glyph.no_value)
+    @ quiet "우선순위" "Priority" (string_of_int task.priority)
+    @ quiet "작업 회차" "Cycles" (string_of_int task.cycle_count)
+    @ optional ~style:provenance_style "이전 작업" "Predecessor" task.predecessor_task_id
+    @ optional ~style:provenance_style "실행 ID" "Operation" task.execution_links.operation_id
+    @ optional ~style:provenance_style "세션 ID" "Session" task.execution_links.session_id
+    @ (List.concat_map (fun skill -> quiet "스킬" "Skill"
+        (Yojson.Safe.to_string (Skill_reference.to_yojson skill))) task.skills)
+    @ (match task.handoff_context with None -> [] | Some handoff ->
+        optional ~style:provenance_style "인수인계 갱신" "Handoff updated" handoff.updated_at
+        @ optional ~style:provenance_style "갱신한 주체" "Handoff updater" handoff.updated_by) in
+  request
+  @ (if evidence = [] then [] else [""] @ heading "완료 조건과 근거" "Completion and evidence" @ evidence)
+  @ [""] @ heading "연결 목표" "Linked Goals" @ goal_lines
+  @ [""] @ heading "상세 정보" "Details" @ metadata
 
 
 type goals = Unread | Unavailable of string | Membership of string list | Canonical of string option
 type part = Body | History
-type input = Body_input of int * goals * Masc_domain.task | History_input of int * Tui_decode.task_history_event list
-let body ~cols ~goals task = Body_input (cols,goals,task)
-let history ~cols events = History_input (cols,events)
+type input = Body_input of bool * int * goals * Masc_domain.task | History_input of bool * int * Tui_decode.task_history_event list
+let body ~ko ~cols ~goals task = Body_input (ko,cols,goals,task)
+let history ~ko ~cols events = History_input (ko,cols,events)
 let part = function Body_input _ -> Body | History_input _ -> History
-let columns = function Body_input (cols,_,_) | History_input (cols,_) -> cols
+let columns = function Body_input (_,cols,_,_) | History_input (_,cols,_) -> cols
+let is_korean = function Body_input (ko,_,_,_) | History_input (ko,_,_) -> ko
 let equal_input a b = match a,b with
-  | Body_input (cols,goals,task),Body_input (other_cols,other_goals,other_task) ->
-      cols=other_cols && goals=other_goals && task==other_task
-  | History_input (cols,events),History_input (other_cols,other_events) -> cols=other_cols && events==other_events
+  | Body_input (ko,cols,goals,task),Body_input (other_ko,other_cols,other_goals,other_task) ->
+      ko=other_ko && cols=other_cols && goals=other_goals && task==other_task
+  | History_input (ko,cols,events),History_input (other_ko,other_cols,other_events) -> ko=other_ko && cols=other_cols && events==other_events
   | Body_input _,History_input _ | History_input _,Body_input _ -> false
 let prepare_input = function
-  | History_input (cols,events) ->
+  | History_input (ko,cols,events) ->
       let max_cells = max 1 (framed_inner_width cols) in
-      history_blocks events |> List.concat_map (function
+      history_blocks ~ko events |> List.concat_map (function
         | Plain_block block -> Masc_tui_text_block.preformatted_rows ~max_cells block
         | Document_block block ->
             Masc_tui_text_block.preformatted_styled_rows ~max_cells block)
-  | Body_input (cols,goals,task) ->
+  | Body_input (ko,cols,goals,task) ->
+      let text korean english = if ko then korean else english in
       let field ?(style = "") label text =
         let prefix="  " ^ label ^ ": " in
         let inner=max 1 (framed_inner_width cols) in
@@ -261,12 +230,12 @@ let prepare_input = function
         else Masc_tui_text_block.rows ~max_cells:inner (prefix ^ text))
         |> List.map (paint style) in
       let goal_lines=match goals with
-        | Unread -> field "goal" "(membership unknown: links not read)"
-        | Unavailable detail -> field "goal" ("(membership unknown: " ^ detail ^ ")")
-        | Membership [] -> field "goal" "(not linked to a goal)"
-        | Membership ids -> List.concat_map (fun id -> field "goal" id
-            @ field ~style:provenance_style "link" (Masc_tui_link.reference Masc_tui_link.Goal id)) ids
-        | Canonical goal -> field "canonical goal" (Option.fold ~none:"없음(기록)" ~some:Fun.id goal) in
-      body_lines ~cols ~goal_lines task
+        | Unread -> field (text "목표" "Goal") (text "연결 미조회" "Links not read")
+        | Unavailable detail -> field (text "목표" "Goal") (text "연결 조회 실패: " "Links unavailable: " ^ detail)
+        | Membership [] -> field (text "목표" "Goal") (text "연결 없음" "No link")
+        | Membership ids -> List.concat_map (fun id -> field (text "목표" "Goal") id
+            @ field ~style:provenance_style (text "링크" "Link") (Masc_tui_link.reference Masc_tui_link.Goal id)) ids
+        | Canonical goal -> field (text "기록된 목표" "Recorded Goal") (Option.fold ~none:(text "없음" "None") ~some:Fun.id goal) in
+      body_lines ~ko ~cols ~goal_lines task
 
 let prepare input = Message_layout.with_isolated_pieces_cache (fun () -> prepare_input input)

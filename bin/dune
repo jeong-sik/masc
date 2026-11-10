@@ -802,6 +802,7 @@
  (libraries
   masc
   masc_tui_types
+  masc_tui_volume_gc
   masc_tui_fetched
   masc_tui_keeper_mark
   masc_tui_context_inspector
@@ -1543,7 +1544,7 @@
  (name masc_tui_keeper_list_model)
  (wrapped false)
  (modules masc_tui_keeper_list_model)
- (libraries masc masc.masc_types masc_tui_keeper_control masc_tui_keeper_trail))
+ (libraries masc masc.masc_types masc_tui_keeper_control masc_tui_keeper_trail masc_tui_keeper_verdict))
 
 (library
  (name masc_tui_keeper_story)
@@ -2010,6 +2011,7 @@
  (modules masc_tui_keeper_axis)
  (libraries
   masc
+  masc.masc_schedule
   masc_tui_types
   masc_tui_keeper_list_model
   masc_tui_agenda
@@ -2049,6 +2051,12 @@
   masc_tui_message_layout))
 
 (library
+ (name masc_tui_keeper_verdict)
+ (wrapped false)
+ (modules masc_tui_keeper_verdict)
+ (libraries masc))
+
+(library
  (name masc_tui_keeper_grid)
  (wrapped false)
  (modules masc_tui_keeper_grid)
@@ -2057,6 +2065,25 @@
   masc.config
   masc_tui_keeper_list_model
   masc_tui_keeper_mark
+  masc_tui_keeper_next_run
+  masc_tui_keeper_pulse
+  masc_tui_keeper_verdict
+  masc_tui_message_layout
+  unix))
+
+(library
+ (name masc_tui_keeper_strip)
+ (wrapped false)
+ (modules masc_tui_keeper_strip)
+ (libraries
+  masc
+  masc.masc_schedule
+  masc_tui_ansi
+  masc_tui_keeper_axis_cell
+  masc_tui_keeper_control
+  masc_tui_keeper_grid
+  masc_tui_keeper_list_model
+  masc_tui_keeper_memory_reading
   masc_tui_keeper_next_run
   masc_tui_keeper_pulse
   masc_tui_message_layout
@@ -2820,8 +2847,10 @@
   masc_tui_render_activity
   masc_tui_render_config
   masc_tui_render_keepers
+  masc_tui_keeper_world
   masc_tui_keeper_wall
   masc_tui_render_keeper_story
+  masc_tui_render_keeper_memory
   masc_tui_render_runtime
   masc_tui_render_overlays
   masc_tui_render_connectors)
@@ -2847,6 +2876,8 @@
   masc_tui_keeper_wakes
   masc_tui_keeper_feed
   masc_tui_keeper_grid
+  masc_tui_keeper_strip
+  masc_tui_keeper_verdict
   masc_tui_lane_standing
   masc_tui_async_protocol
   masc_tui_board_requests

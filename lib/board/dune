@@ -5,6 +5,7 @@
  (public_name masc.board_handlers)
  (wrapped true)
  (private_modules
+  board_sub_boards_source
   board_content_json
   board_content_diagnostics
   board_posts_rows
@@ -16,10 +17,12 @@
   board_reactions
   board_comments
   board_posts_source
+  board_comments_source
   board_vote_row
   board_store_load
   board_store_lifecycle)
  (modules
+  board_sub_boards_source
   board
   board_access
   board_audience
@@ -38,6 +41,7 @@
   board_paths
   board_post_publication_failure
   board_posts_source
+  board_comments_source
   board_snapshot_batch
   board_snapshot_rows
   board_sort

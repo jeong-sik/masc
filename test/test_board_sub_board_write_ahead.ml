@@ -1,4 +1,4 @@
-(** Write-ahead durability for sub-board creation (#29004).
+(** Write-ahead durability for sub-board policy changes (#29004, #26378).
 
     create_sub_board previously mutated the in-memory store, then ran
     a durable append whose failure was swallowed (persist-error
@@ -26,11 +26,6 @@ let fresh_test_base_path () =
   Unix.putenv "MASC_BASE_PATH" dir;
   dir
 
-(* Replaces the board's [.masc] directory with a regular file so any
-   subsequent [Fs_compat.mkdir_p]/[append_file] under it raises
-   [Sys_error] (ENOTDIR). Same fixture as
-   [test_board_vote_persistence.ml], duplicated per that suite's
-   per-file fixture convention. *)
 (* Deny board writes through permissions instead of breaking the workspace
    boundary: the store files lose their write bits (append fails) and the
    workspace directory loses create/rename rights (the rewrite stage fails),
@@ -83,7 +78,7 @@ let create ~slug =
     ~owner:"subboard-wa-owner" ()
 
 let find_by_slug slug =
-  Board_dispatch.list_sub_boards ~reader:Masc_board_handlers.Board_access.Operator ()
+  (Result.get_ok (Board_dispatch.list_sub_boards ~reader:Masc_board_handlers.Board_access.Operator ()))
   |> List.find_opt (fun (sb : Board.sub_board) -> String.equal sb.slug slug)
 
 let test_failed_append_commits_nothing () =
@@ -124,6 +119,74 @@ let test_create_is_durable_across_restart () =
     Alcotest.(check string) "slug survives restart" "wa-durable" sb.Board.slug
   | None -> Alcotest.fail "sub-board lost across restart"
 
+let expect_io_error label = function
+  | Error (Board.Io_error _) -> ()
+  | Error error -> Alcotest.fail (label ^ ": " ^ Board.show_board_error error)
+  | Ok _ -> Alcotest.fail (label ^ ": the failed snapshot was reported as success")
+
+let test_failed_update_preserves_policy_and_retry_survives_restart () =
+  let slug = "wa-update" in
+  ignore (Result.get_ok (create ~slug));
+  let update () = Board_dispatch.update_sub_board
+    ~reader:Masc_board_handlers.Board_access.Operator ~sub_board_id:slug
+    ~name:"updated policy" ~access:Board.Owner_only () in
+  with_blocked_board_masc_dir (fun () ->
+    expect_io_error "blocked update" (update ());
+    match find_by_slug slug with
+    | None -> Alcotest.fail "a failed update removed the policy"
+    | Some sb ->
+      Alcotest.(check string) "failed update keeps the old name" "WA" sb.name;
+      match sb.access with
+      | Board.Open -> ()
+      | Board.Members_only | Board.Owner_only ->
+        Alcotest.fail "failed update published a new access policy");
+  ignore (Result.get_ok (update ()));
+  (* Restart before any flush: the successful policy snapshot is the source. *)
+  Board.reset_global_for_test ();
+  Board_dispatch.reset_for_test ();
+  Result.get_ok (Board_dispatch.init_jsonl
+    ~base_path:(Env_config_core.base_path ())
+    ~recipient_lookup:Recipient_lookup.none_declared ());
+  match find_by_slug slug with
+  | None -> Alcotest.fail "updated policy lost across restart"
+  | Some sb ->
+    Alcotest.(check string) "successful update survives restart" "updated policy" sb.name;
+    match sb.access with
+    | Board.Owner_only -> ()
+    | Board.Open | Board.Members_only ->
+      Alcotest.fail "restart lost the successful access policy"
+
+let test_failed_delete_keeps_policy_and_post_link () =
+  let slug = "wa-delete" in
+  ignore (Result.get_ok (create ~slug));
+  let post = match Board_dispatch.create_post
+      ~author:"subboard-wa-owner" ~content:"keep my topic on failure"
+      ~hearth:slug ~post_kind:Board.Human_post () with
+    | Ok post -> post
+    | Error error -> Alcotest.fail (Board.Post_publication_failure.to_string error)
+  in
+  let post_id = Board.Post_id.to_string post.id in
+  with_blocked_board_masc_dir (fun () ->
+    expect_io_error "blocked delete" (Board_dispatch.delete_sub_board ~sub_board_id:slug);
+    Alcotest.(check bool) "failed delete keeps the policy" true
+      (Option.is_some (find_by_slug slug));
+    match Board_dispatch.get_post
+      ~reader:Masc_board_handlers.Board_access.Operator ~post_id with
+    | Error error -> Alcotest.fail (Board.show_board_error error)
+    | Ok retained ->
+      Alcotest.(check (option string)) "failed delete keeps the post's topic"
+        (Some slug) retained.hearth);
+  ignore (Result.get_ok (Board_dispatch.delete_sub_board ~sub_board_id:slug));
+  Board.reset_global_for_test ();
+  Board_dispatch.reset_for_test ();
+  Result.get_ok (Board_dispatch.init_jsonl
+    ~base_path:(Env_config_core.base_path ())
+    ~recipient_lookup:Recipient_lookup.none_declared ());
+  (* This checks the policy source only. Cross-source durable hearth unlink
+     remains a separate transaction boundary tracked by #26378. *)
+  Alcotest.(check bool) "successful policy removal survives restart" false
+    (Option.is_some (find_by_slug slug))
+
 let () =
   Alcotest.run "board_sub_board_write_ahead"
     [
@@ -133,5 +196,9 @@ let () =
             (with_eio test_failed_append_commits_nothing);
           Alcotest.test_case "create is durable across restart" `Quick
             (with_eio test_create_is_durable_across_restart);
+          Alcotest.test_case "failed update keeps policy; retry survives restart" `Quick
+            (with_eio test_failed_update_preserves_policy_and_retry_survives_restart);
+          Alcotest.test_case "failed delete keeps policy and post link" `Quick
+            (with_eio test_failed_delete_keeps_policy_and_post_link);
         ] );
     ]

@@ -1,0 +1,35 @@
+ [2m운영[0m  [1;7m▸작업[0m  [2m키퍼[0m  [2m기능·플러그인[0m  [2m워크스페이스[0m  [2m시스템[0m
+                                 │
+  작업                      (3)  │ [1m 작업[0m  HTTP [연결됨]
+  ─────────────────────────────  │ ────────────────────────────────────────────────────────────────────────────────────
+   Preserve …ask-surface-claimed │   [1m[96m[ 요청과 상태 ][0m
+   요청의 핵…  task-surface-todo │   제목: 긴 요청을 상세에서 끝까지 읽기
+ ▸ 긴 요청을…task-surface-active │ [96m  상태: 진행 중[39m
+                                 │   담당: sourcereader
+                                 │   요청: 목록은 선택과 구분을 돕고 상세는 원래 요청 전체를 읽는 곳입니다.
+                                 │         목록은 선택과 구분을 돕고 상세는 원래 요청 전체를 읽는 곳입니다.
+                                 │         목록은 선택과 구분을 돕고 상세는 원래 요청 전체를 읽는 곳입니다.
+                                 │         목록은 선택과 구분을 돕고 상세는 원래 요청 전체를 읽는 곳입니다.
+                                 │         목록은 선택과 구분을 돕고 상세는 원래 요청 전체를 읽는 곳입니다.
+                                 │   대상 파일: fixture-sources/reading-contract.md
+                                 │
+                                 │   [1m[96m[ 연결 목표 ][0m
+                                 │   목표: goal-surface-second
+                                 │ [2m  링크: masc://planning/goal-surface-second[0m
+                                 │
+                                 │   [1m[96m[ 상세 정보 ][0m
+                                 │ [2m  작업 ID: task-surface-active[0m
+                                 │ [2m  시작: 2026-11-09T14:18:08.414218Z[0m
+                                 │ [2m  생성: 2026-11-09T14:18:08.414218Z[0m
+                                 │ [2m  생성한 주체: fixture-operator[0m
+                                 │ [2m  우선순위: 2[0m
+                                 │ [2m  작업 회차: 0[0m
+                                 │
+                                 │   [1m[96m[ 상태 기록 ][0m
+                                 │ 조회 실패: HTTP 503: task_history_unavailable
+                                 │
+                                 │
+                                 │
+[2m  ACTION NEEDED 1 · keeper_memory_execution:addon_unattached  j/k:스크롤  PgUp/PgDn:페이지  Left / Esc:뒤로  …?[0m
+ 일정 정보가 오래됐을 수 있음
+[2m › to quietreader   (i to write)

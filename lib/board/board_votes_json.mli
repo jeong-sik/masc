@@ -51,11 +51,18 @@ val load_persisted_posts : store -> (int, string * exn) result
     unchanged after the current ordered diagnostic trace has been retained.
     An exception during model projection crosses the state mutex before it is
     recorded, preserving poisoning for an uncertain partial model mutation.
-    Known read cleanup is finished after a normally returned state callback. *)
+    Known read cleanup is finished after a normally returned state callback.
+    Refused while deletion persistence is pending; open a fresh store instead
+    of replacing just one part of its applied deletion model. *)
 
 val load_persisted_comments : store -> (int, string * exn) result
-(** Missing comments are a legitimate empty source. Invalid rows retain the
-    partial-load failure until an explicit successful reload. *)
+(** Explicit source read and model publication under persist then state.
+    First observed Missing comments are legitimate empty input. Missing after
+    this store observed Present is refused. Complete reads replace comments
+    and their index; partial rows and complete prefixes before torn tails
+    remain display-only. Plain reload cannot settle unknown writes, acknowledge
+    recovery receipts or finish model publication. The pending-deletion model
+    restriction is the same as {!load_persisted_posts}. *)
 
 val propagate_workspace_check :
   (unit, Board_workspace_binding.rejection) result -> unit

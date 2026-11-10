@@ -1,14 +1,15 @@
 type kind = Posts | Comments | Votes | Reactions
 
-type selection = kind list
+type purpose = Delete | Flush
+type selection = { purpose : purpose; kinds : kind list }
 
 type payload =
   | Posts_payload of Board_core_persist.posts_snapshot
-  | Comments_payload of string
+  | Comments_payload of Board_core_persist.comments_snapshot
   | Votes_payload of string
   | Reactions_payload of string
 
-type t = payload list
+type t = { selection : selection; contents : payload list }
 
 let kind_of_payload = function
   | Posts_payload _ -> Posts | Comments_payload _ -> Comments
@@ -25,20 +26,22 @@ type outcome = {
 
 type retry = Retry_posts | Retry_comments
 
-let for_delete = [ Posts; Comments; Votes; Reactions ]
+let all_kinds = [ Posts; Comments; Votes; Reactions ]
+let for_delete = { purpose = Delete; kinds = all_kinds }
 
 let for_flush ~dirty_posts ~dirty_comments ~votes_readable ~reactions_readable =
   let had_dirty = dirty_posts || dirty_comments in
-  List.filter
+  let kinds = List.filter
     (function
       | Posts -> dirty_posts
       | Comments -> dirty_comments
       | Votes -> had_dirty && votes_readable
       | Reactions -> had_dirty && reactions_readable)
-    for_delete
+    all_kinds in
+  { purpose = Flush; kinds }
 
 let capture selection ~posts ~comments ~votes ~reactions =
-  List.fold_left
+  let contents = List.fold_left
     (fun reversed kind ->
        let content = match kind with
          | Posts -> Posts_payload (posts ())
@@ -47,8 +50,9 @@ let capture selection ~posts ~comments ~votes ~reactions =
          | Reactions -> Reactions_payload (reactions ()) in
        content :: reversed)
     []
-    selection
-  |> List.rev
+    selection.kinds
+  |> List.rev in
+  { selection; contents }
 
 let persist batch ~write =
   let rec loop reversed = function
@@ -58,13 +62,20 @@ let persist batch ~write =
         | Board_posts_source.Reserved_settlement deferred -> Error deferred in
       let kind = kind_of_payload content in
       match attempted with
-      | Ok result -> loop ((kind, Attempted result) :: reversed) remaining
+      | Ok result ->
+        (match batch.selection.purpose, result with
+         | Delete, Error _ ->
+           let pending = List.map (fun content -> kind_of_payload content, Pending) remaining in
+           { writes = List.rev_append reversed ((kind, Attempted result) :: pending);
+             settlement = None }
+         | Delete, Ok () | Flush, (Ok () | Error _) ->
+           loop ((kind, Attempted result) :: reversed) remaining)
       | Error deferred ->
         let pending = List.map (fun content -> kind_of_payload content, Pending) remaining in
         { writes = List.rev_append reversed ((kind, Attempted deferred.result) :: pending);
           settlement = Some deferred }
   in
-  loop [] batch
+  loop [] batch.contents
 
 let finish_settlement outcome = match outcome.settlement with
   | None -> ()

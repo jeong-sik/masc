@@ -19,19 +19,6 @@ type validation_error =
   | TaskIdInvalidChars
   | ProgressOutOfRange of float
 
-(** Validate task_id: non-empty, max 256 chars, printable ASCII only *)
-let validate_task_id s =
-  let len = String.length s in
-  if len = 0 then Error TaskIdEmpty
-  else if len > 256 then Error (TaskIdTooLong len)
-  else
-    let is_printable_ascii c =
-      let code = Char.code c in
-      code >= 32 && code <= 126
-    in
-    if String.for_all is_printable_ascii s then Ok s
-    else Error TaskIdInvalidChars
-
 (** Validate progress: 0.0 ~ 1.0 *)
 let validate_progress p =
   if p < 0.0 || p > 1.0 then Error (ProgressOutOfRange p)

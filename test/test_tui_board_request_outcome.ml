@@ -561,6 +561,61 @@ let test_detail_read_binds_the_original_workspace () = with_fixture
         (Result.is_error (read ~expected_base:(base_path ^ "/foreign") ~full_history)))
       [false; true])
 
+let test_detail_read_survives_reply_handoff () = with_fixture
+  (fun ~env:_ ~sw:_ ~base_path ~port ~posts:_ -> with_results @@ fun results ->
+    let publisher = state base_path port in
+    start publisher results;
+    let _, response = returned (take_outcome results) in
+    let post_id = check_committed response in
+    let reader = state base_path port in
+    reader.view <- Types.Board;
+    reader.board_mode <- Types.Board_read post_id;
+    let launch ~deliver read =
+      Results.launch ~observation:true reader ~results ~boundary_error:Fun.id
+        ~deliver read in
+    let start_read () =
+      Requests.start_board_post_refresh reader ~host:"127.0.0.1" ~port ~post_id ~launch in
+    let rec take_detail () = match Results.take_ready results with
+      | [] -> Eio.Fiber.yield (); take_detail ()
+      | [{ Results.message = Masc_tui_async_protocol.Board_msg
+             (Masc_tui_async_protocol.Board_post_refresh_done (request, result)); _ }] ->
+          request, result
+      | _ -> fail "expected one Board detail completion" in
+    let apply (request, result) =
+      Updates.apply_board_post_load reader
+        ~report_error:(fun error -> fail error) request result in
+    start_read ();
+    reader.board_mode <- Types.Board_compose;
+    let completion = take_detail () in
+    reader.board_compose_reply_to <- None;
+    apply completion;
+    check bool "a new post cannot consume a detail read" true
+      (Masc_tui_board_detail.reading reader.board_detail ~post_id);
+    reader.board_compose_reply_to <- Some "another-post";
+    apply completion;
+    check bool "a different reply target cannot consume the read" true
+      (Masc_tui_board_detail.reading reader.board_detail ~post_id);
+    reader.board_compose_reply_to <- Some post_id;
+    apply completion;
+    (match Masc_tui_board_detail.view_for reader.board_detail ~post_id with
+     | Ready (post, _, _) ->
+         check string "the reply receives the actual original post"
+           "original body" post.bp_body
+     | Absent | Loading | Failed _ -> fail "the reply dropped its original read");
+    check string "reading the original preserves the draft" "original draft"
+      (Buffer.contents reader.board_draft);
+    check (option string) "reading preserves the reply target"
+      (Some post_id) reader.board_compose_reply_to;
+    check bool "reading leaves the composer open" true
+      (reader.board_mode = Types.Board_compose);
+    start_read ();
+    apply completion;
+    check bool "an old completion cannot settle the reply's newer read" true
+      (Masc_tui_board_detail.reading reader.board_detail ~post_id);
+    apply (take_detail ());
+    check bool "the current completion settles its own read" false
+      (Masc_tui_board_detail.reading reader.board_detail ~post_id))
+
 let () = run "TUI Board request outcomes" ["actual request and registered routes", [
   test_case "committed HTTP400 preserves payload and late input" `Quick
     test_real_committed_error_keeps_payload_and_late_input;
@@ -581,5 +636,7 @@ let () = run "TUI Board request outcomes" ["actual request and registered routes
   test_case "an old comment result cannot settle a same-draft retry" `Quick
     test_old_comment_result_cannot_settle_same_draft_retry;
   test_case "detail requests bind normal and full-history reads to the original workspace" `Quick
-    test_detail_read_binds_the_original_workspace
+    test_detail_read_binds_the_original_workspace;
+  test_case "an actual detail read follows its reply target without consuming the draft" `Quick
+    test_detail_read_survives_reply_handoff
 ]]

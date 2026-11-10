@@ -133,7 +133,7 @@ let test_a_finished_selection_selects_nothing () =
 let test_work_includes_todo_backlog () =
   let rows = Tasks.work_rows tasks in
   check int "all open tasks have a Work row" 7 (List.length rows);
-  check (option int) "todo is selectable" (Some 4)
+  check (option int) "todo is selectable" (Some 0)
     (Tasks.work_selected_index tasks ~selected:(Some "task-1501"));
   check (option string) "Enter can open todo" (Some "task-1501")
     (Option.map (fun (task : Tui_decode.task) -> task.id)
@@ -159,8 +159,7 @@ let test_esc_after_a_landing_follows_nothing () =
   check bool "and Enter is not the list's" true
     (Option.is_none (Tasks.opening tasks after_esc))
 
-(* Work lists the Todo backlog after the held rows, so a landing on a Todo
-   task has a row to highlight and Enter opens it. *)
+(* A landing on a Todo task has a Work row and Enter opens it. *)
 let test_a_landing_on_a_todo_task_focuses_its_work_row () =
   check focus_pair "Work highlights the Todo row"
     (true, Some "task-1501")
@@ -168,7 +167,7 @@ let test_a_landing_on_a_todo_task_focuses_its_work_row () =
 
 let test_t_chooses_the_first_row () =
   let focused = Tasks.toggle tasks Tasks.No_task_focus in
-  check focus_pair "t focuses the first held row" (true, Some "task-1700")
+  check focus_pair "t focuses the first open row" (true, Some "task-1501")
     (focus_state focused);
   check focus_pair "t again lets go of the list and its choice" (false, None)
     (focus_state (Tasks.toggle tasks focused));

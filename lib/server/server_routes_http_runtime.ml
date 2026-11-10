@@ -553,6 +553,14 @@ let make_health_json ?(listener = default_listener) ?section_timings_ref
         |> Keeper_memory_execution_availability.to_json)
   in
   let keeper_config_operator_action_required = keeper_config_schema_blocking in
+  let memory_attention_json =
+    compute_section ~name:"keeper_memory_attention" ?section_timings_ref (fun () ->
+      match server_state with
+      | None -> `Assoc ["status", `String "snapshot_not_ready";
+          "operator_action_required", `Bool false]
+      | Some state -> Keeper_librarian_queue_refresh.attention_health_json
+          ~config:(Mcp_server.workspace_config state))
+  in
   (* The sections come first and the rollup reads them, rather than the rollup
      being handed the eight it used to name. The three rollup fields are
      appended after, so the payload's key order is unchanged. *)
@@ -599,6 +607,7 @@ let make_health_json ?(listener = default_listener) ?section_timings_ref
     ("keeper_fleet_safety", keeper_fleet_safety);
     ("keeper_identity_drift", keeper_identity_drift_json);
     ("keeper_memory_execution", memory_execution_json);
+    ("keeper_memory_attention", memory_attention_json);
     ("publication_recovery_activation", publication_recovery_activation_json);
     ("keeper_reaction_ledger", reaction_ledger_json);
     ("keeper_owner", keeper_owner_json);
@@ -790,6 +799,9 @@ let full_health_placeholder_fields ?error ?(component_timed_out = false)
     ( "keeper_memory_execution",
       full_health_component_placeholder ~component_timed_out ~status
         "keeper_memory_execution" );
+    ( "keeper_memory_attention",
+      full_health_component_placeholder ?error ~component_timed_out ~status
+        "keeper_memory_attention" );
     ( "keeper_owner",
       full_health_component_placeholder ?error ~component_timed_out ~status
         "keeper_owner" );
@@ -1969,14 +1981,14 @@ let board_post_detail_json ~reader ?(comment_request = default_board_comment_req
     ~reaction_actor ~response_format ~post_id () =
   match Board_dispatch.get_post_and_comments ~reader ~post_id with
   | Error err ->
-      (* Render a human-readable message (e.g. "Post not found: <id>") via the
-         shared Board_tool.board_error_to_string, matching the 404 contract in
-         the .mli and the convention already used for board errors in
-         server_routes_http_routes_activity.ml. The derived [show_board_error]
-         leaked the internal OCaml constructor name ("Post_not_found(...)") into
-         the public HTTP body. *)
-      (`Not_found, Printf.sprintf {|{"error":"%s"}|}
-         (String.escaped (Board_tool.board_error_to_string err)))
+      let status = match err with
+        | Board.Io_error _ -> `Service_unavailable
+        | Board.Invalid_id _ | Board.Post_not_found _ | Board.Comment_not_found _
+        | Board.Validation_error _ | Board.Already_voted _ | Board.Already_exists _
+        | Board.Unauthorized _ | Board.Recipient_lookup_failed _ -> `Not_found
+      in
+      (status, Yojson.Safe.to_string
+         (`Assoc ["error", `String (Board_tool.board_error_to_string err)]))
   | Ok (post, comments) ->
       let _, comment_positions =
         List.fold_left
@@ -2074,6 +2086,12 @@ let board_post_detail_json ~reader ?(comment_request = default_board_comment_req
 
 let board_sub_board_detail_prefix = "/api/v1/board/sub-boards/"
 
+let board_sub_board_error_status ~fallback = function
+  | Board.Io_error _ -> `Service_unavailable
+  | Board.Invalid_id _ | Board.Post_not_found _ | Board.Comment_not_found _
+  | Board.Validation_error _ | Board.Already_voted _ | Board.Already_exists _
+  | Board.Unauthorized _ | Board.Recipient_lookup_failed _ -> fallback
+
 let board_sub_board_detail_json ~reader ~path =
   match extract_path_param ~prefix:board_sub_board_detail_prefix path with
   | None ->
@@ -2082,7 +2100,7 @@ let board_sub_board_detail_json ~reader ~path =
     (match Board_dispatch.get_sub_board ~reader ~sub_board_id with
      | Ok sb -> (`OK, Board.sub_board_to_yojson sb)
      | Error e ->
-       ( `Not_found,
+       ( board_sub_board_error_status ~fallback:`Not_found e,
          `Assoc [ ("error", `String (Board_tool.board_error_to_string e)) ] ))
 
 (** CORS preflight handler *)

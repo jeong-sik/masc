@@ -421,33 +421,12 @@ let sidebar_selection palette =
 let border_focus = Sgr.bright_cyan
 
 module Syntax = struct
-  let keyword = Sgr.bright_magenta
-  let string_ = Sgr.bright_green
-
-  (* A served JSON payload is content the same way a keyword is: "this word is
-     yellow" says it is a number, not that anything is healthy. One role per
-     thing a reader distinguishes, because a payload drawn in one colour is
-     the wall of text the tool tree was built to stop being.
-
-     Keys lead: a reader scanning a nested result is looking for a name, and
-     the name is what the eye should land on. Punctuation recedes -- the
-     braces and commas are the structure the indentation already shows, and
-     drawing them at full weight is what makes a document look like noise. *)
-  let json_key = Sgr.bright_cyan
-  let json_number = Sgr.bright_yellow
-  let json_literal = Sgr.bright_magenta
+  (* What does not take a hue from the palette. The words a reader scans for
+     (keyword, string, number, type, link, a JSON key) are hues, and draw
+     through [Masc_tui_ansi.Theme.Syntax], which lifts them. Punctuation
+     recedes by weight instead, and a diff row pairs a fixed background with
+     fixed text. *)
   let json_punctuation = Sgr.dim
-
-  (* The rest of what a fenced block and a chat row hold. Content, not state:
-     a slanted comment says it is a comment, not that anything is unwell. Named
-     here for the same reason the keyword is -- a renderer that picks the code
-     itself is one the readability lift cannot reach. *)
-  let code_comment = Sgr.italic ^ Sgr.gray
-  let code_number = Sgr.bright_magenta
-  let code_type = Sgr.bright_blue
-  let code_span = Sgr.bright_cyan
-  let link = Sgr.bright_blue
-  let rule = Sgr.gray
 
   (* Diff rows are content, like a keyword or a literal: "this line is green"
      says the file gained it, not that anything is healthy. Named here so the

@@ -1,0 +1,24 @@
+ 운영  작업  ▸키퍼  기능·플러그인  워크스페이스  시스템
+
+  MASC Keepers (3)                                             HTTP [connected]
+   ▸list  state  cause  time  memory  age  runtime  24h
+ ✓ 1 recovered ▪  ○ 1 paused ·  ? 1 unknown ?
+     fleet max 1        ·····█··█··█··· ┃              ┃ ················ max 0
+   fleet blocked   running 0/2   turn capacity 0/2   keeper bootstrap off
+   paused 1
+   not running: quietproof, recoveredproof
+    KEEPER                           NOW             AGE DETAIL
+ ›  pausedproof                      Ⅱ paused          — health offline
+    quietproof                       × offline         — health offline
+    recoveredproof                   × offline         — health offline
+
+
+
+
+
+
+ pausedproof Ⅱ paused
+ ──────────────────────────────────────────────────────────────────────────────
+  ACTION NEEDED 2  Enter / Right:story / detail  Esc:dashboard  q:quit  …?
+ 일정 정보가 오래됐을 수 있음
+ › to pausedproof   (i to write)

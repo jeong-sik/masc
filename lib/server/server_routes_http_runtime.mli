@@ -408,7 +408,7 @@ val board_post_detail_json :
   response_format:Server_board_post_response_format.t ->
   post_id:string ->
   unit ->
-  [> `OK | `Not_found | `Bad_request ] * string
+  [> `OK | `Not_found | `Bad_request | `Service_unavailable ] * string
 (** [board_post_detail_json ~voter ~reaction_actor ~response_format ~post_id] returns
     [(status, json_string)] for [GET /api/v1/board/<post_id>].
     When [voter] is supplied, post/comment rows include vote state for
@@ -438,6 +438,7 @@ val board_post_detail_json :
     | Outcome | Status | Body |
     |---|---|---|
     | Post missing | [404 Not Found] | [{"error":"Post not found: <id>"}] |
+    | Required source unavailable | [503 Service Unavailable] | error |
     | Offset past total | [400 Bad Request] | error and code |
     | Found | [200 OK] | per response_format |
 
@@ -451,7 +452,7 @@ val board_sub_board_detail_prefix : string
 
 val board_sub_board_detail_json :
   reader:Masc_board_handlers.Board_access.reader ->
-  path:string -> [> `OK | `Bad_request | `Not_found ] * Yojson.Safe.t
+  path:string -> [> `OK | `Bad_request | `Not_found | `Service_unavailable ] * Yojson.Safe.t
 (** [board_sub_board_detail_json ~path] answers
     [GET /api/v1/board/sub-boards/<id_or_slug>] for both transports.
 
@@ -459,8 +460,14 @@ val board_sub_board_detail_json :
     |---|---|---|
     | Empty id after the prefix | [400 Bad Request] | [{"error":"sub_board_id is required"}] |
     | Unknown id or slug | [404 Not Found] | [{"error": <board error>}] |
+    | Source unavailable | [503 Service Unavailable] | [{"error": <board error>}] |
     | Found | [200 OK] | {!Board.sub_board_to_yojson} |
     *)
+
+val board_sub_board_error_status :
+  fallback:([> `Service_unavailable ] as 'a) ->
+  Masc_board_handlers.Board.board_error -> 'a
+(** Preserve existing input-error statuses and return 503 for policy IO failure. *)
 
 (** {1 OPTIONS} *)
 

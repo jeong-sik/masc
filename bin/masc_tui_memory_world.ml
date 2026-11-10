@@ -77,10 +77,9 @@ let reading t =
     Loaded { world; refresh_failure = Some failure }
   | Masc_tui_fetched.Failed failure -> Read_failed failure
 
-(* The words the line and the sheet share are spelled here once, so the screen
-   and the sheet cannot name a state two ways. The briefing statuses are the
-   server's words and stay as they are in Korean: translating [stale] would put
-   a second meaning on a word RFC-0418 keeps for what the server wrote. *)
+(* Translate only the server's typed briefing status. Fact age never selects
+   these states: RFC-0418 keeps age separate from source invalidation. The
+   reference sheet retains its English keys. *)
 let unknown = "?"
 let claim_noun = "claim"
 let conflict_noun = "conflict"
@@ -88,25 +87,25 @@ let briefing_word = "briefing"
 let building_word = "building"
 let read_failed_word ~ko = if ko then "읽기 실패" else "read failed"
 (* The Work screen words an unconfirmed workspace the same way. *)
-let suspended_word ~ko = if ko then "워크스페이스 미확인" else "workspace unconfirmed"
+let suspended_word ~ko = if ko then "작업 공간 미확인" else "workspace unconfirmed"
 let no_ledger_word ~ko = if ko then "장부 없음" else "no ledger"
 let label ~ko = if ko then "월드:" else "World:"
 
-let briefing_status_word = function
-  | Wire.Pending -> "pending"
-  | Wire.Current -> "current"
-  | Wire.Stale -> "stale"
-  | Wire.Unavailable -> "unavailable"
+let briefing_status_word ~ko = function
+  | Wire.Pending -> if ko then "미발행" else "pending"
+  | Wire.Current -> if ko then "현재 근거와 일치" else "current"
+  | Wire.Stale -> if ko then "갱신 필요" else "stale"
+  | Wire.Unavailable -> if ko then "조회 불가" else "unavailable"
 
 let briefing_clause ~ko status =
-  (if ko then "브리핑 " else briefing_word ^ " ") ^ briefing_status_word status
+  (if ko then "브리핑 " else briefing_word ^ " ") ^ briefing_status_word ~ko status
 
 (* The word is the server's field name. The pass it names is on disk; the
    server does not say that a model is running now, and the legend row for the
    word says so. *)
 let building_clause ~ko (pass : Wire.building_pass) =
   if ko
-  then Printf.sprintf "%s, %d개 중 %d개 남음" building_word pass.Wire.target pass.Wire.remaining
+  then Printf.sprintf "작성 중, %d개 중 %d개 남음" pass.Wire.target pass.Wire.remaining
   else Printf.sprintf "%s, %d of %d left" building_word pass.Wire.remaining pass.Wire.target
 
 let count_clause ~ko ~korean_noun ~noun count =

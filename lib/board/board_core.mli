@@ -57,6 +57,15 @@ val create_store_with_source_io_for_testing :
     A None slot uses production IO; the constructor creates/adopts nothing and
     leaves posts unobserved until explicit load. *)
 
+val create_store_with_comments_io_for_testing :
+  base_path:string -> io:Fs_compat.private_jsonl_transaction_io_for_testing ->
+  unit -> store
+(** One immutable comments transaction IO seam; creates/adopts nothing. *)
+val create_store_with_sub_boards_io_for_testing :
+  base_path:string -> io:Fs_compat.private_jsonl_transaction_io_for_testing ->
+  unit -> store
+(** One immutable sub-board transaction IO seam; creates/adopts nothing. *)
+
 (** {1 Locking + cache invalidation} *)
 
 (** [with_lock store f] runs [f ()] under
@@ -134,8 +143,13 @@ val reindex_hot_post : store -> previous:post -> updated:post -> unit
 val put_post : store -> post -> unit
 val rebuild_hot_post_index : store -> unit
 
-(** Appends one comment snapshot to {!comments_path}. *)
-val append_comment : store -> comment -> (unit, board_error) result
+type comment_append_receipt = Board_core_persist.comment_append_receipt
+val append_comment : store -> comment -> (comment_append_receipt, board_error) result
+val publish_comment_append : store -> comment_append_receipt -> (unit, board_error) result
+(** Append against the exact loaded comments observation while holding
+    persistence. Retain the receipt through a normal model publication; typed
+    rejection must record its owned row's dirty cleanup before acknowledgement.
+    A projection exception retains unfinished publication and denies rewrites. *)
 
 (** {1 Whole-state JSONL rewrite} *)
 
@@ -212,9 +226,18 @@ val inspect_posts_source_with_io_for_testing :
   io:Fs_compat.private_jsonl_transaction_io_for_testing -> posts_inspection
 
 
-(** {!save_posts_snapshot} for {!comments_path}, guarded by
-    [store.comments_load_result]. *)
-val save_comments_snapshot : store -> string -> (unit, board_error) result
+type comments_snapshot = Board_core_persist.comments_snapshot
+val capture_comments_snapshot : store -> comments_snapshot
+val save_comments_snapshot : store -> comments_snapshot -> (unit, board_error) result
+(** Capture under persist then state, retain persistence through the write.
+    The candidate is bound to its captured source bytes, cursor and workspace.
+    Failed/unknown loads and stale source changes grant no write authority. *)
+val require_comments_source_readable : store -> (unit, board_error) result
+val settle_comments_source : store -> (comments_recovery_receipt option, board_error) result
+val acknowledge_comments_recovery : store -> comments_recovery_receipt -> (unit, board_error) result
+(** Explicitly fence a fresh source without replay. Completed receipts survive
+    cleanup exceptions and can be retrieved again. Receive and acknowledge the
+    exact receipt under persistence, then reload the complete model. *)
 
 (** Atomically rewrites {!comments_path} from
     [store.comments]. The snapshot is captured under the state lock and written
@@ -395,12 +418,18 @@ val list_posts_by_run_origin : store -> post list
 (** Snapshot the exact run-origin index, newest publication first. Does not
     scan unrelated Board posts or inspect body text. *)
 
-(** Coalesces [read_post] + [read_comments] under a single
-    {!with_lock} block to avoid the two-call lock churn
-    that previously surfaced as
-    [Mutex.lock: Resource deadlock avoided] under contended
-    repeated agent polling.  Returns the whole thread in {!read_comments}
-    order; paging is {!Board_types.Comment_page}'s job. *)
+val observe_post_and_comments
+  : store
+  -> post_id:string
+  -> (post * comments_observation, board_read_error) Result.t
+(** Capture a post, indexed comments and comments-source completeness together
+    under persistence then state locks. Retains comment display rows when that
+    source is incomplete. Refuses an incomplete posts source before looking up
+    any post, so a source failure cannot distinguish hidden from absent posts. *)
+
+(** Complete thread in {!read_comments} order, observed in one persistence
+    then state critical section. Refuses an incomplete posts or comments source
+    with [Read_source_unavailable]. Paging is {!Board_types.Comment_page}'s job. *)
 val read_post_and_comments
   :  store
   -> post_id:string
@@ -459,15 +488,22 @@ val add_comment_with_audience
 (** Validate and freeze comment routing before the Board mutation, returning
     the same audience with the committed comment. *)
 
-(** Returns the comments for [post_id] oldest first: by [created_at], and by
+val observe_comments : store -> post_id:string -> (comments_observation, board_read_error) Result.t
+(** Display rows with their completeness captured in the same persistence then
+    state critical section. Incomplete rows cannot establish absence or totals. *)
+
+(** Returns complete comments for [post_id] oldest first: by [created_at], and by
     comment id among comments with the same [created_at], so every read of an
     unchanged thread returns the same order. *)
 val read_comments : store -> post_id:string -> (comment list, board_read_error) Result.t
-(** No indexed rows answers [Ok []]. This lookup does not check post
-    existence; retained orphan comments remain readable by their post ID. *)
+(** Only a complete source may answer [Ok []]. An incomplete source answers
+    [Read_source_unavailable]. This lookup does not check post existence;
+    retained orphan comments remain readable by their post ID. *)
 
 
-(** Returns one comment by id. *)
+(** Returns one comment by id from a complete comments source. Source failures
+    precede lookup for both cached and absent rows, so checked target readers
+    cannot infer a hidden comment's existence from different source errors. *)
 val get_comment : store -> comment_id:string -> (comment, board_error) Result.t
 
 (** Returns up to [limit] (default 1000) most recent
@@ -516,6 +552,10 @@ val sub_board_access_field_of_yojson
 val sub_board_to_yojson : sub_board -> Yojson.Safe.t
 val sub_board_of_yojson : Yojson.Safe.t -> sub_board option
 
+val reload_sub_boards : store -> (int, string * exn) result
+(** Explicit full policy load/reload under persist then state. Partial rows
+    remain display-only. Cannot clear unknown writes or interrupted publication. *)
+
 (** Creates a new sub-board with the given slug (unique, lowercase).
     [members] are canonicalised agent ids; the owner is always included.
     Returns [Validation_error] when the slug is invalid and [Already_exists]
@@ -535,19 +575,20 @@ val create_sub_board
 (** Resolves a sub-board by its ID or slug. *)
 val get_sub_board : store -> sub_board_id:string -> (sub_board, board_error) Result.t
 
-(** Returns all sub-boards sorted by [created_at] ascending. *)
+(** Best-effort display rows, sorted by [created_at]. This is not a complete
+    policy query or permission evidence. *)
 val list_sub_boards : store -> sub_board list
 
-(** Removes a sub-board by ID or slug under the state lock, then persists the
-    rewritten snapshot outside the state lock while retaining this store's
-    persistence lock. Snapshot-save failures retain their logging behavior. *)
+val read_sub_boards : store -> (sub_board list, board_error) result
+(** Capture policy completeness and rows under one persistence interval. *)
+
+(** Persist an exact-source-checked removal before publishing it in memory.
+    Post hearth unlinking remains dirty work, not a multi-source transaction. *)
 val delete_sub_board : store -> sub_board_id:string -> (unit, board_error) Result.t
 
 (** Updates an existing sub-board by ID or slug.
     Only provided fields are changed; owner and slug are immutable.
-    Takes this store's persistence lock before changing policy under the state
-    lock, then persists its snapshot outside the state lock. Snapshot-save
-    failures retain their logging behavior. *)
+    Persist an exact-source-checked candidate before publishing policy memory. *)
 val update_sub_board
   :  store
   -> sub_board_id:string

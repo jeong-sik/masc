@@ -95,17 +95,20 @@ let check_rejection_count label expected decode =
   value
 ;;
 
-let load_posts_source store =
-  match Masc_board_handlers.Board_votes_json.load_persisted_posts store with
-  | Ok _ -> ()
-  | Error (path, cause) ->
-    Alcotest.failf "posts fixture load failed: %s (%s)" path (Printexc.to_string cause)
+let load_sources store =
+  List.iter (fun load ->
+    match load store with
+    | Ok _ -> ()
+    | Error (path, cause) ->
+      Alcotest.failf "board fixture load failed: %s (%s)" path (Printexc.to_string cause))
+    [Masc_board_handlers.Board_votes_json.load_persisted_posts;
+     Masc_board_handlers.Board_votes_json.load_persisted_comments]
 ;;
 
 let test_post_decoder_retains_nested_rejections () =
   let store = Board_core.create_store
       ~base_path:(Env_config_core.base_path ()) () in
-  load_posts_source store;
+  load_sources store;
   let canonical = Board_core.post_to_yojson
       (create_no_origin store ~content:"nested validation stages") in
   let row = replace_key canonical "audience"
@@ -131,7 +134,7 @@ let test_post_decoder_retains_nested_rejections () =
 let test_closed_decoder_validates_only_a_complete_close_shape () =
   let store = Board_core.create_store
       ~base_path:(Env_config_core.base_path ()) () in
-  load_posts_source store;
+  load_sources store;
   let canonical = Board_core.post_to_yojson
       (create_no_origin store ~content:"closed validation stages") in
   let row = prepend_field canonical ("closed",
@@ -146,7 +149,7 @@ let test_closed_decoder_validates_only_a_complete_close_shape () =
 let test_comment_decoder_retains_nested_rejections () =
   let store = Board_core.create_store
       ~base_path:(Env_config_core.base_path ()) () in
-  load_posts_source store;
+  load_sources store;
   let post = create_no_origin store ~content:"comment validation stages" in
   let comment = match Board_core.add_comment store ~lookup:nobody_declared
       ~post_id:(Board.Post_id.to_string post.id) ~author:"reader"
@@ -220,7 +223,7 @@ let check_origin_producer_codec canonical =
 let test_codec_round_trip () =
   let store = Board_core.create_store
       ~base_path:(Env_config_core.base_path ()) () in
-  load_posts_source store;
+  load_sources store;
   let tr = Ids.Turn_ref.make ~trace_id:"trace-abc" ~absolute_turn:42 in
   let origin = make_origin ~fusion_producer:"origin-test" ~turn_ref:tr ~source:"fusion" ~fusion_run_id:"fus-7" () in
   let post = create store ~origin ~content:"round trip" in
@@ -245,7 +248,7 @@ let test_codec_round_trip () =
 let test_codec_absent_origin () =
   let store = Board_core.create_store
       ~base_path:(Env_config_core.base_path ()) () in
-  load_posts_source store;
+  load_sources store;
   let post = create_no_origin store ~content:"no origin" in
   Alcotest.(check bool) "post created without origin" true (Option.is_none post.origin);
   let decoded =
@@ -259,7 +262,7 @@ let test_codec_absent_origin () =
 let test_malformed_origin_rejected () =
   let store = Board_core.create_store
       ~base_path:(Env_config_core.base_path ()) () in
-  load_posts_source store;
+  load_sources store;
   let tr = Ids.Turn_ref.make ~trace_id:"t" ~absolute_turn:1 in
   let post = create store ~origin:(make_origin ~turn_ref:tr ()) ~content:"malformed origin" in
   let json = Board_core.post_to_yojson post in
@@ -283,7 +286,7 @@ let test_malformed_origin_rejected () =
 let test_current_post_schema_is_exact () =
   let store = Board_core.create_store
       ~base_path:(Env_config_core.base_path ()) () in
-  load_posts_source store;
+  load_sources store;
   let post = create_no_origin store ~content:"current schema" in
   let json = Board_core.post_to_yojson post in
   List.iter
@@ -336,7 +339,7 @@ let test_current_post_schema_is_exact () =
 let test_current_comment_schema_is_exact () =
   let store = Board_core.create_store
       ~base_path:(Env_config_core.base_path ()) () in
-  load_posts_source store;
+  load_sources store;
   let post = create_no_origin store ~content:"comment parent" in
   let comment =
     match
@@ -394,7 +397,7 @@ let test_current_comment_schema_is_exact () =
 let test_current_reaction_schema_is_exact () =
   let store = Board_core.create_store
       ~base_path:(Env_config_core.base_path ()) () in
-  load_posts_source store;
+  load_sources store;
   let post = create_no_origin store ~content:"reaction parent" in
   let user_id =
     match Board.Agent_id.of_string "reaction-user" with
@@ -448,6 +451,9 @@ let test_current_reaction_schema_is_exact () =
 let test_current_sub_board_schema_is_exact () =
   let store = Board_core.create_store
       ~base_path:(Env_config_core.base_path ()) () in
+  (match Board_core.reload_sub_boards store with
+   | Ok _ -> ()
+   | Error (path, error) -> Alcotest.failf "load %s: %s" path (Printexc.to_string error));
   let sub_board =
     match
       Board_core.create_sub_board
@@ -519,6 +525,9 @@ let test_current_sub_board_schema_is_exact () =
 let test_sub_board_update_rejects_invalid_members () =
   let store = Board_core.create_store
       ~base_path:(Env_config_core.base_path ()) () in
+  (match Board_core.reload_sub_boards store with
+   | Ok _ -> ()
+   | Error (path, error) -> Alcotest.failf "load %s: %s" path (Printexc.to_string error));
   let sub_board =
     match
       Board_core.create_sub_board
@@ -568,7 +577,7 @@ let test_keeper_authored_origin_with_turn_ref () =
      board codec (create -> encode -> decode). *)
   let store = Board_core.create_store
       ~base_path:(Env_config_core.base_path ()) () in
-  load_posts_source store;
+  load_sources store;
   let post = create store ~origin ~content:"keeper speech request-help" in
   let decoded =
     match decode (Board_core.post_to_yojson post) with
@@ -596,7 +605,7 @@ let test_keeper_authored_origin_without_turn_ref () =
 let test_index_lookup_hit_and_miss () =
   let store = Board_core.create_store
       ~base_path:(Env_config_core.base_path ()) () in
-  load_posts_source store;
+  load_sources store;
   let tr = Ids.Turn_ref.make ~trace_id:"idx-trace" ~absolute_turn:9 in
   let origin = make_origin ~fusion_producer:"origin-test" ~turn_ref:tr ~fusion_run_id:"run-xyz" () in
   let post = create store ~origin ~content:"indexed" in
@@ -616,7 +625,7 @@ let test_index_lookup_hit_and_miss () =
 let test_index_rebuilt_on_load () =
   let store1 = Board_core.create_store
       ~base_path:(Env_config_core.base_path ()) () in
-  load_posts_source store1;
+  load_sources store1;
   let tr = Ids.Turn_ref.make ~trace_id:"load-trace" ~absolute_turn:3 in
   let origin = make_origin ~fusion_producer:"origin-test" ~turn_ref:tr ~fusion_run_id:"load-run" () in
   let _ = create store1 ~origin ~content:"persisted with origin" in
@@ -637,7 +646,7 @@ let test_index_rebuilt_on_load () =
 let test_index_pruned_on_sweep () =
   let store = Board_core.create_store
       ~base_path:(Env_config_core.base_path ()) () in
-  load_posts_source store;
+  load_sources store;
   let tr = Ids.Turn_ref.make ~trace_id:"sweep-trace" ~absolute_turn:5 in
   let origin = make_origin ~fusion_producer:"origin-test" ~turn_ref:tr ~fusion_run_id:"sweep-run" () in
   let post = create store ~origin ~content:"to be swept" in

@@ -406,7 +406,8 @@ val read_comments : reader:Board_access.reader ->
   post_id:string ->
   (Board.comment list, Board.board_read_error) Result.t
 (** Comments on a readable post, oldest first. Missing or hidden parents
-    answer [Read_post_not_found]; a readable post with no comments answers [[]]. *)
+    answer [Read_post_not_found]. Incomplete comments answer
+    [Read_source_unavailable]; only a complete empty source answers [[]]. *)
 
 val get_comments : reader:Board_access.reader ->
   post_id:string ->
@@ -414,8 +415,10 @@ val get_comments : reader:Board_access.reader ->
 (** {!read_comments} as a [board_error] result. *)
 
 val require_persisted_sources_readable : unit -> (unit, Board.board_error) result
-(** Evidence requires complete post/comment source loads. Ordinary Board reads
-    remain best effort; a recorded failure clears only on a successful reload. *)
+(** Evidence requires complete post/comment source loads. Complete thread and
+    comment-list queries also refuse partial sources; display observations can
+    retain rows with explicit incompleteness. Errors use the public-safe read
+    projection; raw source diagnostics remain with their internal owner. *)
 
 val get_post_and_comments : reader:Board_access.reader ->
   post_id:string ->
@@ -562,7 +565,8 @@ val get_sub_board : reader:Board_access.reader ->
   sub_board_id:string ->
   (Board.sub_board, Board.board_error) Result.t
 
-val list_sub_boards : reader:Board_access.reader -> unit -> Board.sub_board list
+val list_sub_boards : reader:Board_access.reader -> unit ->
+  (Board.sub_board list, Board.board_error) result
 
 val delete_sub_board :
   sub_board_id:string ->

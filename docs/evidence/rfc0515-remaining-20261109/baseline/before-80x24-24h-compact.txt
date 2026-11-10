@@ -1,0 +1,24 @@
+ 운영  작업  ▸키퍼  기능·플러그인  워크스페이스  시스템
+
+  MASC Keepers (34)                                            HTTP [connected]
+   list  state  cause  time  memory  age  runtime  ▸24h
+   ! 0 attention   ◂ 4 failing   ▶ 5 active   ◌ 17 waiting   ○ 8 inactive
+   fleet last observed: ok   running 25/28   turn capacity 28/28
+   fleet reading: stale · scans failing for 42s (refresh timed out)
+   failing 3 (retrying 3)   paused 6   awaiting verdict 16
+     keeper             ◂ 12h        1h ┃ ● now        ┃ next ▹ 7h30m     due
+ ▌ ○ build-maniac          ············ ┃ Ⅱ paused     ┃ ················ ?
+ ▌ ● ego-acceptance-20…    ···✓········ ┃ ○ idle       ┃ ················ ?
+ ▌ ○ gayo-yoga-leader      ············ ┃ Ⅱ paused     ┃ ················ ?
+ ▌ ● geek-scout            ··✓✓✓✓✓✓✓✓✓✓ ┃ ◌ external   ┃ ················ ?
+ ▌ ● glossary-maniac       ··✓✓✓✓✓✓✓✓✓· ┃ ■ tool wait  ┃ ················ ?
+ ▌ ○ mad-scientist         ············ ┃ Ⅱ paused     ┃ ················ ?
+ ▌ ○ native-image-proo…    ············ ┃ Ⅱ paused     ┃ ················ ?
+ ▌ ● ocaml-agent-ic        ··✓✓✓✓✓✓✓·✓· ┃ ■ tool wait  ┃ ················ held?
+ ▌ ● polisher              ··✓✓✓✓✓✓✓✓✓✓ ┃ ◔ model wait ┃ ················ 19:00
+ ▌ ● rondo                 ··✓✓✓✓✓✓··✓· ┃ ■ tool wait  ┃ ················ ?
+   [keepers 22–31/34]
+ ──────────────────────────────────────────────────────────────────────────────
+  v:view  o:order  Enter / Right:story / detail  Esc:dashboard  q:quit  …?
+ 일정 정보가 오래됐을 수 있음
+ › to build-maniac   (i to write)

@@ -308,41 +308,18 @@ val selection : string
 
 val border_focus : string
 
-(** Content-syntax colours: "this word is green" is a diff or a code literal,
-    not a reading of state, so it stays out of [status]. *)
+(** Content colours that stay constant: "this word is green" is a diff or a
+    code literal, not a reading of state, so it stays out of [status]. The
+    words a reader scans for (keyword, string, number, type, link, a JSON key)
+    are hues of the palette and draw through [Masc_tui_ansi.Theme.Syntax],
+    which lifts them. *)
 module Syntax : sig
-  val keyword : string
-  val string_ : string
-
-  val json_key : string
-  val json_number : string
-  val json_literal : string
   val json_punctuation : string
-  (** The roles a served JSON payload is drawn through: an object's key, a
-      number, [true]/[false]/[null], and the braces, brackets, colons and
-      commas.
+  (** The braces, brackets, colons and commas of a served JSON payload.
 
-      Content, not state -- a yellow token says it is a number, not that
-      something is healthy. Keys lead because a reader scanning a nested
-      result is looking for a name; punctuation recedes because the
-      indentation already carries the structure, and drawing the braces at
-      full weight is what makes a document read as noise. Strings reuse
-      {!string_}, which is the same reading a code fence gives them. *)
-
-  val code_comment : string
-  val code_number : string
-  val code_type : string
-  val code_span : string
-  val link : string
-  val rule : string
-  (** The rest of what a fenced block and a chat row hold: a comment, a
-      number, a type name, an inline [`span`], a link's text, and the
-      horizontal rule that divides sections.
-
-      Content, not state -- a slanted comment says it is a comment, not that
-      anything is unwell. Named here for the same reason the keyword is: a
-      renderer that picks the code itself is one the readability lift cannot
-      reach, and there were ninety-odd of those before these names existed. *)
+      Content, not state. Punctuation recedes because the indentation already
+      carries the structure, and drawing the braces at full weight is what
+      makes a document read as noise. *)
 
   val diff_added : string
   val diff_removed : string

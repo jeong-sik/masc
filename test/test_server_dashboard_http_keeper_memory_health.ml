@@ -10,6 +10,18 @@ module Health = Server_dashboard_http_keeper_memory_health
 let test_now = 1_700_000_000.0
 let fresh_dir prefix = Filename.temp_dir prefix ""
 
+(* The projection caches each keeper's row and drops it when a writer reports a
+   commit. The server wires that at startup ([Server_runtime_bootstrap]); a test
+   that writes and then reads again has to wire the same observers, or the
+   second read answers from the row the first one cached.
+
+   Installing at module load is not idempotent: [install] retains the restore
+   closures it collects but never returns them, and each
+   [install_commit_observer] replaces the previous observer rather than
+   chaining, so a later [For_testing.with_runtime] restore can drop this
+   registration. *)
+let () = Health.install ()
+
 let fact claim : Types.fact =
   Types.observed ~claim ~category:Types.Fact ~now:test_now
     ~origin:{ kind = Types.Authored; trace_id = "" }
@@ -209,7 +221,7 @@ let test_reports_revision_snapshot_bytes_and_latest_delta () =
   let keeper = keeper_obj "solo" json in
   Alcotest.(check string)
     "schema"
-    "keeper.memory_os.current_health.v12"
+    "keeper.memory_os.current_health.v13"
     (string_field "schema" json);
   Alcotest.(check int) "revision" 2 (int_field "revision" keeper);
   Alcotest.(check int) "facts" 2 (int_field "facts" keeper);
@@ -803,8 +815,12 @@ let test_context_cycle_separates_saved_and_prepared () =
   Fun.protect ~finally:(fun () -> O.forget ~config ~keeper_name; Fs_compat.remove_tree base) @@ fun () ->
   let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path:base in
   write_keeper_config ~keepers_dir ~keeper_id:keeper_name ();
-  let cycle () = member "context_cycle"
-    (keeper_obj keeper_name (Health.keeper_memory_health_http_json ~base_path:base)) in
+  let cycle () =
+    (* This fixture writes the snapshot and turn records itself, so no writer
+       announces the commit [install] listens for. *)
+    Health.For_testing.invalidate ~base_path:base ~keeper:keeper_name;
+    member "context_cycle"
+      (keeper_obj keeper_name (Health.keeper_memory_health_http_json ~base_path:base)) in
   Alcotest.(check bool) "no prepared request inferred from saved state" true
     (is_null (member "prepared" (cycle ())));
   let messages = [Agent_core.Types.make_message ~role:Agent_core.Types.User
@@ -914,6 +930,9 @@ let test_unread_evidence_is_observed_without_publication () =
     ; "unknown root field still refuses the response", `Assoc (("unexpected", `Null) :: fields)
     ];
   let reading () =
+    (* This fixture writes the snapshot and the ledger itself, so no writer
+       announces the commit [install] listens for. *)
+    Health.For_testing.invalidate ~base_path:base ~keeper:keeper_name;
     let json = Health.keeper_memory_health_http_json ~base_path:base in
     let decoded = D.decode_memory_health_snapshot json |> require_ok in
     match List.find_opt (fun (row : D.memory_keeper_health) -> row.mkh_keeper_id=keeper_name) decoded.mhs_keepers with
@@ -947,8 +966,15 @@ let test_context_cycle_reads_the_librarian_position_beside_the_cut () =
   Fun.protect ~finally:(fun () -> Fs_compat.remove_tree base) @@ fun () ->
   let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path:base in
   write_keeper_config ~keepers_dir ~keeper_id:keeper_name ();
-  let cycle () = member "context_cycle"
-    (keeper_obj keeper_name (Health.keeper_memory_health_http_json ~base_path:base)) in
+  let cycle ?(invalidate = true) () =
+    (* [P.write] announces its commit, and the observer [install] wires is
+       what must empty the row afterwards; pre-empting that with a manual
+       invalidation would hide the path this change repairs. The snapshot
+       below is written straight to a file, though, and no writer announces
+       that one, so the caller says which kind of read it is. *)
+    if invalidate then Health.For_testing.invalidate ~base_path:base ~keeper:keeper_name;
+    member "context_cycle"
+      (keeper_obj keeper_name (Health.keeper_memory_health_http_json ~base_path:base)) in
   Alcotest.(check bool) "a keeper that has read nothing has no position" true
     (is_null (member "read_position" (cycle ())));
   Alcotest.(check bool) "and no read error to explain it" true
@@ -979,7 +1005,9 @@ let test_context_cycle_reads_the_librarian_position_beside_the_cut () =
     {P.position = {trace_id; end_atom = 12887; last_atom_digest = String.make 64 'a'};
      boundary_lines_seen = 385}
   |> Result.map_error P.write_error_to_string |> get;
-  let observed = cycle () in
+  (* No manual invalidation: [P.write] fires the commit observer for the
+     runtime root, and that observer has to be what empties the row. *)
+  let observed = cycle ~invalidate:false () in
   Alcotest.(check int) "the cut the request starts at" snapshot.S.end_atom
     (int_field "end_atom" (member "saved" observed));
   Alcotest.(check int) "the position that cut is read against" 12887
@@ -1112,6 +1140,9 @@ let test_the_librarian_stalled_alarm_is_read_from_files () =
   write_keeper_config ~keepers_dir ~keeper_id:keeper_name ();
   Masc.Keeper_meta_store.replace_snapshot config meta |> get;
   let librarian () =
+    (* This fixture writes the snapshot and turn records itself, so no writer
+       announces the commit [install] listens for. *)
+    Health.For_testing.invalidate ~base_path:base ~keeper:keeper_name;
     member "librarian"
       (keeper_obj keeper_name (Health.keeper_memory_health_http_json ~base_path:base))
   in
@@ -1256,7 +1287,7 @@ let test_one_keepers_row_is_its_fleet_row () =
   let fleet = Health.keeper_memory_health_http_json ~base_path:base in
   let answer = Health.keeper_memory_health_row_http_json ~base_path:base ~keeper:"solo" in
   Alcotest.(check string) "the row answer names the fleet schema"
-    "keeper.memory_os.current_health.v12" (string_field "schema" answer);
+    "keeper.memory_os.current_health.v13" (string_field "schema" answer);
   Alcotest.(check bool) "the row is the fleet's row for the Keeper" true
     (Yojson.Safe.equal (keeper_obj "solo" fleet) (member "keeper" answer));
   let row_of keeper =
@@ -1274,7 +1305,7 @@ let test_one_keepers_row_is_its_fleet_row () =
 let test_totals_count_the_rows () =
   let module Totals = Masc.Keeper_memory_health_totals in
   let row ?(unread = Some (1, 2)) ?(continuity = Some 3) ?(alerts = []) ?(failures = 0)
-      ?(snapshot_present = true) ?(stopped = false) ?(read_error = false) facts : Totals.Row.t =
+      ?(snapshot_present = true) ?(stopped = false) ?(attention = false) ?(read_error = false) facts : Totals.Row.t =
     { Totals.Row.facts
     ; observed_facts = facts
     ; derived_facts = 0
@@ -1294,6 +1325,7 @@ let test_totals_count_the_rows () =
     ; source_read_error = false
     ; snapshot_present
     ; librarian_stopped = stopped
+    ; librarian_attention_required = attention
     ; alerts
     }
   in
@@ -1308,7 +1340,7 @@ let test_totals_count_the_rows () =
     Totals.of_rows
       [ row 1 ~unread:None ~failures:1 ~snapshot_present:false ~stopped:true ~read_error:true
           ~alerts:[ Totals.Alert_warn; Totals.Alert_error ]
-      ; row 1
+      ; row 1 ~attention:true
       ]
   in
   Alcotest.(check (option int)) "one unmeasured row leaves unread turns unknown" None
@@ -1319,10 +1351,70 @@ let test_totals_count_the_rows () =
   Alcotest.(check int) "Keepers with alerts" 1 mixed.Totals.keepers_with_alerts;
   Alcotest.(check int) "read errors" 1 mixed.Totals.read_errors;
   Alcotest.(check int) "stopped Keepers" 1 mixed.Totals.librarian_stopped_keepers;
+  Alcotest.(check int) "attention is counted separately from stopped" 1
+    mixed.Totals.librarian_attention_required_keepers;
   Alcotest.(check int) "a Keeper with failures and no snapshot starves" 1
     mixed.Totals.librarian_starving_keepers;
   Alcotest.(check (option int)) "no row is a measured zero" (Some 0)
     (Totals.of_rows []).Totals.librarian_unread_turns
+;;
+
+(* A source observation can require attention before any durable measurement.
+   The producer preserves its original identity and does not call it stopped. *)
+let test_attention_retains_originals_and_clears_on_observation () =
+  let module Pending = Masc.Keeper_librarian_pending in
+  let module Queue = Masc.Keeper_librarian_queue_refresh in
+  let module Worker = Masc.Keeper_memory_admission_worker in
+  let base = fresh_dir "masc-memory-health-attention" in
+  let config = Masc.Workspace.default_config base in
+  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path:base in
+  let keeper_name = "attention-original" in
+  ignore (write_snapshot ~keepers_dir ~keeper_id:keeper_name [fact "retained"]);
+  let worker wait : Pending.worker =
+    {installation_id = "original-installation"; request_id = "original-request"; wait} in
+  let read () = Health.For_testing.with_runtime
+      ~keeper_health:Health.For_testing.keeper_health
+      (fun () -> Health.keeper_memory_health_http_json ~base_path:base) in
+  Fun.protect ~finally:(fun () -> Queue.forget_measurement ~config ~keeper_name) (fun () ->
+    List.iter (fun (wait, expected) ->
+      let original = worker wait in
+      Queue.For_testing.run_explicit_admission_with ~base_path:base ~keeper_name
+        ~run:(fun () -> Worker.Awaiting_worker original);
+      let json = read () in
+      let row = keeper_obj keeper_name json in
+      let librarian = member "librarian" row in
+      Alcotest.(check bool) "attention is derived from the original wait" expected
+        (bool_field "operator_action_required" librarian);
+      Alcotest.(check bool) "durable measurement remains absent" true
+        (is_null (member "state" librarian) && is_null (member "measured_at" librarian));
+      Alcotest.(check bool) "the admission original survives the wire" true
+        (Yojson.Safe.equal (Pending.to_json (Worker original)) (member "admission_wait" librarian));
+      Alcotest.(check (list string)) "attention alert follows the typed wait"
+        (if expected then ["librarian_attention_required"] else [])
+        (list_field "alerts" row |> List.map (string_field "code"));
+      Alcotest.(check int) "attention counts Keepers, not observations" (if expected then 1 else 0)
+        (int_field "librarian_attention_required_keepers" (alert_summary json));
+      Alcotest.(check int) "attention does not imply stopped" 0
+        (int_field "librarian_stopped_keepers" (alert_summary json)))
+      [ Pending.Capacity, false; Processing, false; Outcome_unknown, true;
+        Unreachable, false; Missing_after_dispatch, true; Journal_recheck, false ];
+    Alcotest.(check bool) "both observations derive one requirement" true
+      (Pending.attention_required
+        ~durable:(Some (Worker (worker Pending.Missing_after_dispatch)))
+        ~admission:(Some (worker Pending.Outcome_unknown)));
+    Alcotest.(check bool) "local recovery failure needs attention" true
+      (Pending.attention_required ~durable:(Some (Local_failure "source read failed")) ~admission:None);
+    List.iter (fun pending ->
+      Alcotest.(check bool) "unfinished publication is not an unknown execution" false
+        (Pending.attention_required ~durable:(Some pending) ~admission:None))
+      [ Pending.Publication {request_id="publication"; detail="settling"};
+        Basis_changed {request_id="basis"};
+        Message_floor {request_id="floor"; detail="waiting"} ];
+    Queue.For_testing.run_explicit_admission_with ~base_path:base ~keeper_name
+      ~run:(fun () -> Worker.Idle);
+    let json = read () in
+    Alcotest.(check int) "a later non-wait observation clears the derived requirement" 0
+      (int_field "librarian_attention_required_keepers" (alert_summary json)))
 ;;
 
 (* The TUI reads one Keeper's row after its push and merges it into the fleet
@@ -1545,6 +1637,8 @@ let () =
         ; Alcotest.test_case "one Keeper's row is its fleet row" `Quick
             test_one_keepers_row_is_its_fleet_row
         ; Alcotest.test_case "the totals count the rows" `Quick test_totals_count_the_rows
+        ; Alcotest.test_case "attention retains original observations" `Quick
+            test_attention_retains_originals_and_clears_on_observation
         ; Alcotest.test_case "a merged row is the fleet read after the write" `Quick
             test_a_merged_row_is_the_fleet_read_after_the_write
         ; Alcotest.test_case "unread evidence is observed without publication" `Quick

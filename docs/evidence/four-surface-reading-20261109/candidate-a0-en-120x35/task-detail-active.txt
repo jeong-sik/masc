@@ -1,0 +1,35 @@
+ Operations  ▸Work  Keepers  Features & plugins  Workspace  System
+                                 │
+  Tasks                     (3)  │  Task  HTTP [connected]
+  ─────────────────────────────  │ ────────────────────────────────────────────────────────────────────────────────────
+   Preserve …ask-surface-claimed │   [ Request and status ]
+   요청의 핵…  task-surface-todo │   Title: 긴 요청을 상세에서 끝까지 읽기
+ ▸ 긴 요청을…task-surface-active │   Status: In progress
+                                 │   Owner: sourcereader
+                                 │   Request: 목록은 선택과 구분을 돕고 상세는 원래 요청 전체를 읽는 곳입니다.
+                                 │            목록은 선택과 구분을 돕고 상세는 원래 요청 전체를 읽는 곳입니다.
+                                 │            목록은 선택과 구분을 돕고 상세는 원래 요청 전체를 읽는 곳입니다.
+                                 │            목록은 선택과 구분을 돕고 상세는 원래 요청 전체를 읽는 곳입니다.
+                                 │            목록은 선택과 구분을 돕고 상세는 원래 요청 전체를 읽는 곳입니다.
+                                 │   File: fixture-sources/reading-contract.md
+                                 │
+                                 │   [ Linked Goals ]
+                                 │   Goal: goal-surface-second
+                                 │   Link: masc://planning/goal-surface-second
+                                 │
+                                 │   [ Details ]
+                                 │   Task ID: task-surface-active
+                                 │   Started: 2026-11-09T14:18:08.552683Z
+                                 │   Created: 2026-11-09T14:18:08.552683Z
+                                 │   Creator: fixture-operator
+                                 │   Priority: 2
+                                 │   Cycles: 0
+                                 │
+                                 │   [ History ]
+                                 │ load failed: HTTP 503: task_history_unavailable
+                                 │
+                                 │
+                                 │
+  ACTION NEEDED 1 · keeper_memory_execution:addon_unattached  j/k:scroll  PgUp/PgDn:page  Home/End  Left / Esc:back  …?
+ Schedule may be out of date
+ › to quietreader   (i to write)

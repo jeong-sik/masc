@@ -43,14 +43,16 @@ let persist_io_error ~where msg =
   Error (Io_error (Printf.sprintf "%s: %s" where msg))
 ;;
 
-let create_store_with_source_io ~base_path posts_source_io () =
+let create_store_with_source_io ~base_path posts_source_io comments_source_io sub_boards_source_io () =
   let workspace_binding = Board_workspace_binding.capture ~base_path in
   { posts_source = Posts_unobserved
   ; posts_source_io
-  ; comments_load_result = Ok ()
+  ; comments_source = Comments_unobserved
+  ; comments_source_io
+  ; sub_boards_source = Policy_unobserved
+  ; sub_boards_source_io
   ; votes_load_result = Ok ()
   ; reactions_load_result = Ok ()
-  ; sub_boards_load_result = Ok ()
   ; workspace_binding
   ; posts = Hashtbl.create 1024
   ; comments = Hashtbl.create 4096
@@ -67,6 +69,7 @@ let create_store_with_source_io ~base_path posts_source_io () =
   ; reactions = Hashtbl.create 4096
   ; dirty_posts = false
   ; dirty_comments = false
+  ; snapshot_retry = Independent_snapshots
   ; dirty_post_ids = Hashtbl.create 256
   ; dirty_comment_ids = Hashtbl.create 512
   ; post_rows = Hashtbl.create 1024
@@ -81,13 +84,25 @@ let create_store_with_source_io ~base_path posts_source_io () =
 ;;
 
 let create_store ~base_path () =
-  create_store_with_source_io ~base_path { posts = None } ()
+  create_store_with_source_io ~base_path { posts = None } None None ()
 let create_store_with_source_io_for_testing ~base_path ~io () =
-  create_store_with_source_io ~base_path io ()
+  create_store_with_source_io ~base_path io None None ()
+let create_store_with_comments_io_for_testing ~base_path ~io () =
+  create_store_with_source_io ~base_path { posts = None } (Some io) None ()
+let create_store_with_sub_boards_io_for_testing ~base_path ~io () =
+  create_store_with_source_io ~base_path { posts = None } None (Some io) ()
+
+let require_comments_source_readable = Board_comments_source.require_readable
 
 let require_persisted_snapshot_readable = function
   | Ok () -> Ok ()
   | Error detail -> Error (Io_error detail)
+;;
+
+let require_model_reload_allowed store ~path = match store.snapshot_retry with
+  | Independent_snapshots -> Ok ()
+  | Deletion_pending -> Error (path, Failure
+      "Pending Board deletion requires a fresh store before model reload.")
 ;;
 
 (* RFC-0233 §7: maintain the origin secondary indexes. Shared by the create
@@ -294,7 +309,7 @@ let sweep store =
     (* Best-effort loaded rows remain readable, but cannot authorize deletion
        of a target and its dependents until all four sources loaded fully.
        The loader retains the typed failures for diagnosis and healthy reload. *)
-    match Board_posts_source.require_readable store, store.comments_load_result,
+    match Board_posts_source.require_readable store, require_comments_source_readable store,
           store.votes_load_result, store.reactions_load_result with
     | Error _, _, _, _ | _, Error _, _, _
     | _, _, Error _, _ | _, _, _, Error _ -> 0, 0
@@ -572,25 +587,6 @@ let ensure_masc_dir ~where store =
 include Board_core_json
 
 (** {1 Rewrite Helpers} *)
-(* A snapshot replaces the whole file with what memory holds. The loader reads
-   every line and keeps each row it can decode, but a line it cannot decode
-   never reaches memory, so the rewrite would delete that line: the only
-   evidence of the damage, possibly a row from a newer schema (#38595). Every
-   posts and comments snapshot write goes through the two functions below,
-   which refuse while the load that filled memory was partial. Appends do not
-   come here and never delete a row. *)
-let refuse_partial_snapshot ~where ~file load_result =
-  match load_result with
-  | Ok () -> Ok ()
-  | Error detail ->
-    persist_io_error ~where
-      (Printf.sprintf
-         "%s has a line the loader could not read (%s); a rewrite from memory would \
-          drop that line, so the file is left as it is until it loads fully (fix \
-          or remove that line, then restart)"
-         file detail)
-;;
-
 type posts_snapshot = Board_posts_source.snapshot
 type settle_direction = Board_posts_source.settle_direction =
   | Direction_landed
@@ -681,44 +677,56 @@ let inspect_posts_source_with_io_for_testing ~workspace_masc_dir ~io =
   Board_posts_inspection.read_with_io_for_testing ~workspace_masc_dir ~io
   |> finish_posts_inspection
 ;;
-let comments_jsonl_unlocked store =
-  let buf = Buffer.create 4096 in
-  Hashtbl.iter
-    (fun _ (cmt : comment) ->
-       Buffer.add_string buf (Yojson.Safe.to_string (comment_to_yojson cmt));
-       Buffer.add_char buf '\n')
-    store.comments;
-  Buffer.contents buf
-;;
-let save_comments_snapshot store content =
-  match
-    refuse_partial_snapshot ~where:"rewrite_comments" ~file:"comments"
-      store.comments_load_result
-  with
-  | Error _ as refused -> refused
-  | Ok () ->
+let finish_comments_write outcome =
+  let diagnostics = Board_comments_source.write_diagnostics outcome in
+  match Board_comments_source.reserved_diagnostics diagnostics with
+  | Some _ ->
+    (match outcome with
+     | Board_comments_source.Written _ -> List.iter (fun _ -> Atomic.incr persist_errors) diagnostics
+     | Not_written _ | Unknown _ -> Atomic.incr persist_errors);
+    Board_comments_source.finish_write outcome
+  | None ->
+    let result = Board_comments_source.finish_write outcome in
     (try
-       let* () = ensure_masc_dir ~where:"rewrite_comments" store in
-       match Fs_compat.save_file_atomic (comments_path store) content with
-       | Ok () -> Ok ()
-       | Error msg -> persist_io_error ~where:"rewrite_comments" msg
-     with
-     | Sys_error msg -> persist_io_error ~where:"rewrite_comments" msg)
-;;
-(* Snapshot capture and write share the persist lock, so a waiting rewrite
-   cannot overwrite a newer committed snapshot. A refused or failed write stays
-   scheduled for the next flush. *)
-let rewrite_comments store =
-  with_persist_lock store (fun () ->
-    let content = with_lock store (fun () -> comments_jsonl_unlocked store) in
-    match save_comments_snapshot store content with
+       (match outcome with
+        | Board_comments_source.Written _ ->
+          List.iter (fun diagnostic -> record_persist_error ~where:"comments settlement"
+            (Board_comments_source.diagnostic_to_string diagnostic)) diagnostics
+        | Not_written { failure; _ } | Unknown { failure; _ } ->
+          record_persist_error ~where:"comments source"
+            (show_board_error (Board_comments_source.failure_to_board_error failure)));
+       result
+     with exception_ ->
+       let backtrace = Printexc.get_raw_backtrace () in
+       Board_posts_source.defer_reserved ~result:(Result.map (fun _ -> ()) result) exception_ backtrace;
+       Printexc.raise_with_backtrace exception_ backtrace)
+
+type comments_snapshot = Board_comments_source.snapshot
+type comment_append_receipt = Board_comments_source.append_receipt
+let capture_comments_snapshot = Board_comments_source.capture
+let save_comments_snapshot store snapshot =
+  finish_comments_write (Board_comments_source.rewrite store snapshot)
+let settle_comments_source store = finish_comments_write (Board_comments_source.settle store)
+let acknowledge_comments_recovery = Board_comments_source.acknowledge_recovery
+let append_comment store comment = match Board_comments_source.append store comment with
+  | Written { value; _ } -> Ok value
+  | (Not_written _ | Unknown _) as outcome -> finish_comments_write outcome
+let publish_comment_append store receipt =
+  finish_comments_write (Board_comments_source.publish_append store receipt)
+
+let rewrite_comments_under_persistence store =
+    let snapshot = with_lock store (fun () -> capture_comments_snapshot store) in
+    match save_comments_snapshot store snapshot with
     | Ok () -> ()
     | Error _ ->
       with_lock store (fun () ->
         store.dirty_comments <- true;
         Hashtbl.iter
           (fun key _ -> Hashtbl.replace store.dirty_comment_ids key ())
-          store.comments))
+          store.comments)
+;;
+let rewrite_comments store =
+  with_persist_lock store (fun () -> rewrite_comments_under_persistence store)
 ;;
 let reactions_jsonl_unlocked store =
   let buf = Buffer.create 4096 in
@@ -738,17 +746,6 @@ let save_reactions_jsonl_result store content =
     | Error msg -> persist_io_error ~where:"rewrite_reactions" msg
   with
   | Sys_error msg -> persist_io_error ~where:"rewrite_reactions" msg
-;;
-
-(** {1 Comments append helper. Posts use the stable source owner above.} *)
-let append_comment store (c : comment) =
-  try
-    let* () = ensure_masc_dir ~where:"append_comment" store in
-    let path = comments_path store in
-    Fs_compat.append_file path (Yojson.Safe.to_string (comment_to_yojson c) ^ "\n");
-    Ok ()
-  with
-  | Sys_error msg -> persist_io_error ~where:"append_comment" msg
 ;;
 
 let sub_board_access_to_string = Board_sub_board_json.sub_board_access_to_string
@@ -802,7 +799,7 @@ let validate_sub_board_post_policy_unlocked store ~author_id ~hearth =
   | None -> Ok ()
   | Some slug ->
     Result.bind
-      (require_persisted_snapshot_readable store.sub_boards_load_result)
+      (Board_sub_boards_source.require_readable store)
       (fun () ->
         match Hashtbl.find_opt store.sub_boards_by_slug slug with
         | None -> Ok ()

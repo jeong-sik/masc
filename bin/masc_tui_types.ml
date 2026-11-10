@@ -5469,6 +5469,10 @@ type scrolled = {
    moves has to move the typed layout in the same change. *)
 let listing_chrome ~error = if Option.is_some error then 9 else 7
 
+(* The verdict list also draws the newest recorded timestamp above its column
+   heading, including when the page is empty or has not been observed. *)
+let harness_listing_chrome ~error = listing_chrome ~error + 1
+
 (* A listing draws a reading of the selected row under its list, and both are
    paid for out of the same frame. The reading was given exactly one row and
    cut there, while a list shorter than the frame drew blank rows under its
@@ -5900,12 +5904,22 @@ let config_pane_display_label ~lang pane fallback =
    past row 120. Nothing on the screen said they were there.
 
    The same shape the Config surface already has, and for the same reason. *)
+type tools_catalog_view =
+  | Tools_catalog_list
+  | Tools_catalog_volumes of { catalog_scroll : int }
+      (** The catalog's captured scroll position, restored by Esc. *)
+
 type tools_pane =
   | Tools_surface
   | Tools_async
   | Tools_activations
   | Tools_usage
-  | Tools_catalog
+  | Tools_catalog of tools_catalog_view
+
+let tools_volume_gc_parent_scroll = function
+  | Tools_catalog (Tools_catalog_volumes {catalog_scroll}) -> Some catalog_scroll
+  | Tools_surface | Tools_async | Tools_activations | Tools_usage
+  | Tools_catalog Tools_catalog_list -> None
 
 type tools_read_part =
   | Tools_inventory_read
@@ -6285,11 +6299,19 @@ type memory_category_filter =
   | Category_source
   | Category_dropped
 
-let memory_category_filter_label = function
-  | Category_all -> "All"
-  | Category_ordinary cat -> Memory_category.category_to_string cat
-  | Category_source -> "source"
-  | Category_dropped -> "dropped"
+let memory_category_text ~ko category =
+  let label = if not ko then Memory_category.category_to_string category
+  else match category with
+    | Memory_category.Code_change -> "코드 변경"
+    | Memory_category.Fact -> "사실"
+    | Memory_category.Preference -> "선호"
+    | Memory_category.Goal -> "목표"
+    | Memory_category.Constraint -> "제약"
+    | Memory_category.Validated_approach -> "검증된 방법"
+    | Memory_category.Lesson -> "교훈"
+    | Memory_category.Blocker -> "막힘"
+    | Memory_category.Custom _ -> Memory_category.category_to_string category in
+  Masc.Tui_terminal_text.sanitize_terminal_text label
 
 type memory_state =
   | Memory_ordinary
@@ -6353,6 +6375,66 @@ let memory_state_label = function
   | Memory_source_only -> "source-only"
   | Memory_starving -> "STARVING"
   | Memory_read_error -> "read-error"
+
+(* The health row and Keeper axis use the same words for a typed pass end.
+   Keeping both languages here also lets search follow either display without
+   depending on the active UI language or on a renderer. *)
+let memory_pass_text ~ko ending =
+  let open Masc.Tui_decode_memory_health in
+  let korean, english = match ending with
+    | Pass_off -> "꺼짐", "switched off"
+    | Pass_lane_unconfigured -> "처리 레인 없음", "no lane set"
+    | Pass_drained -> "현재까지 처리됨", "caught up"
+    | Pass_yielded_to_waiting_unit -> "대기 중인 처리에 양보", "yielded"
+    | Pass_pending pending ->
+        (match pending with
+         | Masc.Keeper_librarian_pending.Worker { wait = Capacity; _ } ->
+             "대기열 가득 참", "queue full"
+         | Worker { wait = Processing; _ } -> "처리 중", "processing"
+         | Worker { wait = (Outcome_unknown | Missing_after_dispatch); _ } ->
+             "결과 확인 필요", "check outcome"
+         | Worker { wait = Unreachable; _ } -> "작업자 연결 안 됨", "worker offline"
+         | Worker { wait = Journal_recheck; _ } -> "다시 확인 중", "rechecking"
+         | Publication _ -> "저장 확정 중", "settling"
+         | Basis_changed _ -> "원문 변경됨", "source changed"
+         | Message_floor _ -> "나누어 읽는 중", "reading parts"
+         | Local_failure _ -> "복구 실패", "recovery failed")
+    | Pass_not_committed -> "저장 없음", "saved none"
+    | Pass_stopped _ -> "중단됨", "stopped"
+    | Pass_raised _ -> "처리 실패", "crashed" in
+  if ko then korean else english
+
+let memory_state_text ~ko (keeper : Masc.Tui_decode_memory_health.memory_keeper_health) =
+  let text korean english = if ko then korean else english in
+  let pass () = match keeper.mkh_librarian.mlh_state with
+    | Some ending -> memory_pass_text ~ko ending
+    | None -> text "처리 결과 미관측" "pass not observed" in
+  match memory_state keeper with
+  | Memory_ordinary -> text "기억 관측됨" "memory observed"
+  | Memory_warning -> text "보고된 주의" "warning reported"
+  | Memory_degraded -> "Librarian " ^ pass ()
+  | Memory_no_current -> text "스냅샷 없음" "no snapshot"
+  | Memory_source_only -> text "출처 기억만 있음" "source memory only"
+  | Memory_starving -> text "스냅샷 없음 · " "no snapshot; " ^ "Librarian " ^ pass ()
+  | Memory_read_error -> text "기억 읽기 실패" "memory read failed"
+
+let memory_keeper_search_text (keeper : Masc.Tui_decode_memory_health.memory_keeper_health) =
+  let pass_words ending =
+    [memory_pass_text ~ko:true ending; memory_pass_text ~ko:false ending] in
+  let observed_pass_words =
+    Option.to_list keeper.mkh_librarian.mlh_state |> List.concat_map pass_words in
+  let admission_words =
+    match keeper.mkh_librarian.mlh_admission_wait with
+    | None -> []
+    | Some worker ->
+        pass_words (Masc.Tui_decode_memory_health.Pass_pending
+          (Masc.Keeper_librarian_pending.Worker worker)) in
+  String.concat " "
+    ([ keeper.mkh_keeper_id
+    ; memory_state_label (memory_state keeper)
+    ; memory_state_text ~ko:true keeper
+    ; memory_state_text ~ko:false keeper
+    ] @ observed_pass_words @ admission_words)
 
 type memory_overview_sort =
   | Mem_overview_facts
@@ -9958,8 +10040,9 @@ type state = {
   (* The group heading the cursor stands on, and the groups whose rows are
      folded away (RFC-0515 E12). Kept for this session only: neither is a
      choice [tui-keepers.toml] stores. *)
-  mutable keeper_list_heading: Masc_tui_keeper_list_model.heading_focus option;
+  mutable keeper_list_focus: Masc_tui_keeper_list_model.focus option;
   mutable keeper_list_folded: Masc_tui_keeper_list_model.group list;
+  mutable keeper_list_seen_groups: Masc_tui_keeper_list_model.group list;
   mutable keeper_story: Masc_tui_keeper_story.page option;
   (** The Story window below the Keepers list: [None] while it is closed,
       otherwise the page it shows. It follows the list cursor (RFC-0515
@@ -9972,6 +10055,15 @@ type state = {
   (* The read those turns owe: drawing them, a push about the Keeper's turns, a
      revalidation and a failed read each owe it. *)
   mutable keeper_story_turns_owed: Masc_tui_owed_read.t;
+  (* Independently delivered, Keeper-keyed reads for the Memory dock. *)
+  mutable keeper_story_memory_facts:
+    (string, Masc.Tui_decode_memory_facts.memory_fact_snapshot * string option) Masc_tui_fetched.t;
+  mutable keeper_story_memory_activity: (string, Masc.Keeper_memory_activity.t) Masc_tui_fetched.t;
+  mutable keeper_story_memory_facts_owed: Masc_tui_owed_read.t;
+  mutable keeper_story_memory_activity_owed: Masc_tui_owed_read.t;
+  mutable keeper_story_memory_view: Masc_tui_keeper_story.memory_view;
+  mutable keeper_story_memory_offset: int;
+  mutable keeper_story_memory_owner: string option;
   mutable keeper_list_sort: Masc_tui_keeper_list_model.sort;
   mutable keeper_list_preference_notice: string option;
   mutable keeper_list_preference_startup_error: string option;
@@ -10577,8 +10669,7 @@ type state = {
   mutable connector_unbind_all_armed:
     (string * Masc_tui_connector_unbind.target list) option;
   mutable connector_unbind_all_inflight: bool;
-  (* The catalog pane's volume GC: what the next [V] sends and the last
-     answer, which the pane draws in place. *)
+  (* The catalog's volume child: what the next [V] sends and its last answer. *)
   mutable volume_gc: Masc_tui_volume_gc.t;
   (* A Keeper the operator just paused or shut down, waiting for a fresh
      connector read to learn whether it still holds bindings to offer to
@@ -12636,7 +12727,7 @@ type roster_inputs = {
           is in; 0 for a view the clock cannot reorder. *)
 }
 
-let rows_of_keepers ~now ~outside (inputs : roster_inputs) keepers : Masc_tui_keeper_list_model.row list =
+let rows_of_keepers (inputs : roster_inputs) keepers : Masc_tui_keeper_list_model.row list =
   let turns =
     first_row_by_name inputs.ri_turns
       ~name:(fun (row : Tui_decode.keeper_turn_row) -> row.ktr_keeper_name)
@@ -12727,8 +12818,6 @@ let rows_of_keepers ~now ~outside (inputs : roster_inputs) keepers : Masc_tui_ke
       ; last_activity_at = keeper_activity_at ~turn ~waiting:activity_waiting keeper
       })
     keepers
-  |> Masc_tui_keeper_list_model.order_rows ~view:inputs.ri_view
-       ~sort:inputs.ri_sort ~now ~outside
 
 (* The full pattern makes a new input field a build error here until it is
    both named (warning 9) and compared (warning 27). The project leaves both
@@ -12753,6 +12842,7 @@ let[@warning "+9+27"] same_roster_inputs
    read at one instant, so a row that crosses a due or age bound between two
    reads cannot sit in one group and under another's heading. *)
 type keeper_list_reading = {
+  klr_all_rows : Masc_tui_keeper_list_model.row list;
   klr_rows : Masc_tui_keeper_list_model.row list;
   klr_groups : Masc_tui_keeper_list_model.group option list;
 }
@@ -12778,21 +12868,25 @@ let keeper_list_reading (state : state) : keeper_list_reading =
          | Some step -> int_of_float (Float.floor (now /. step))
          | None -> 0) }
   in
-  match !last_roster_rows with
+  let reading = match !last_roster_rows with
   | Some (seen, reading) when same_roster_inputs seen inputs -> reading
   | Some _ | None ->
       let outside ~keeper_name = state.keeper_outside_reading state ~now ~keeper_name in
-      let rows =
-        match inputs.ri_keepers with
-        | [] -> []
-        | keepers -> rows_of_keepers ~now ~outside inputs keepers
-      in
+      let all_rows = rows_of_keepers inputs inputs.ri_keepers in
+      let rows = Masc_tui_keeper_list_model.order_rows ~view:inputs.ri_view
+          ~sort:inputs.ri_sort ~now ~outside all_rows in
       let groups =
-        List.map (Masc_tui_keeper_list_model.group_of_view ~outside inputs.ri_view) rows
+        List.map (Masc_tui_keeper_list_model.group_of_view ~now ~outside inputs.ri_view) rows
       in
-      let reading = { klr_rows = rows; klr_groups = groups } in
+      let reading = { klr_all_rows = all_rows; klr_rows = rows; klr_groups = groups } in
       last_roster_rows := Some (inputs, reading);
       reading
+  in
+  let seen, folded = Masc_tui_keeper_list_model.first_folds
+      ~seen:state.keeper_list_seen_groups ~folded:state.keeper_list_folded reading.klr_groups in
+  state.keeper_list_seen_groups <- seen;
+  state.keeper_list_folded <- folded;
+  reading
 
 let keeper_list_rows (state : state) : Masc_tui_keeper_list_model.row list =
   (keeper_list_reading state).klr_rows
@@ -12815,7 +12909,7 @@ let keeper_index state keeper_name =
 
 (* A Keeper chosen by name is a row, never the heading above it. *)
 let select_keeper_name_with keepers state keeper_name =
-  state.keeper_list_heading <- None;
+  state.keeper_list_focus <- None;
   match List.find_index (fun (keeper : keeper) -> String.equal keeper.k_name keeper_name) keepers with
   | Some index -> state.keeper_cursor <- index
   | None ->
@@ -12828,41 +12922,45 @@ let keeper_list_select_name state keeper_name =
   select_keeper_name_with (ordered_keepers state) state keeper_name
 
 let keeper_list_stop (state : state) =
-  Masc_tui_keeper_list_model.current_stop ~folded:state.keeper_list_folded
-    ~focus:state.keeper_list_heading ~cursor:state.keeper_cursor
+  Masc_tui_keeper_list_model.current_stop ~view:state.keeper_list_view ~folded:state.keeper_list_folded
+    ~focus:state.keeper_list_focus ~cursor:state.keeper_cursor
     (keeper_list_reading state).klr_groups
 
 let keeper_list_stops (state : state) =
-  Masc_tui_keeper_list_model.stops ~folded:state.keeper_list_folded
+  Masc_tui_keeper_list_model.stops ~view:state.keeper_list_view ~folded:state.keeper_list_folded
     (keeper_list_reading state).klr_groups
 
 (* Only a focused heading or a folded group can put the cursor on a heading,
    so without either the list is not read. *)
 let keeper_list_on_heading (state : state) =
   state.view = Keepers Keeper_list
-  && (Option.is_some state.keeper_list_heading
+  && (Option.is_some state.keeper_list_focus
       || (match state.keeper_list_folded with [] -> false | _ :: _ -> true))
   && (match keeper_list_stop state with
       | Some (Masc_tui_keeper_list_model.Stop_heading _) -> true
-      | Some (Masc_tui_keeper_list_model.Stop_row _) | None -> false)
+      | Some (Masc_tui_keeper_list_model.Stop_world | Masc_tui_keeper_list_model.Stop_row _) | None -> false)
 
 (* A heading names no Keeper, so a key that acts on the selected Keeper finds
    none there. *)
 let selected_keeper (state : state) =
-  if keeper_list_on_heading state then None
+  if state.view = Keepers Keeper_list then
+    Option.bind (Masc_tui_keeper_list_model.keeper_position (keeper_list_stop state))
+      (List.nth_opt (keepers_for_selection state))
   else List.nth_opt (keepers_for_selection state) state.keeper_cursor
 
 (* The Keeper the cursor rests on. A heading rests the cursor on its group's
    first row, so this names a Keeper there too, where [selected_keeper] names
    none. A change that reorders or leaves the rows carries this one. *)
 let resting_keeper_name (state : state) =
-  Option.map (fun (keeper : keeper) -> keeper.k_name)
+  if state.view = Keepers Keeper_list
+     && keeper_list_stop state = Some Masc_tui_keeper_list_model.Stop_world then None
+  else Option.map (fun (keeper : keeper) -> keeper.k_name)
     (List.nth_opt (keepers_for_selection state) state.keeper_cursor)
 
 (* A row chosen by name or position is that row, not the heading above it,
    and on the Keepers list a folded group opens so the chosen row is drawn. *)
 let choose_keeper_row (state : state) index =
-  state.keeper_list_heading <- None;
+  state.keeper_list_focus <- None;
   state.keeper_cursor <- index;
   if state.view = Keepers Keeper_list then
     (match List.nth_opt (keeper_list_reading state).klr_groups index with
@@ -12875,9 +12973,9 @@ let choose_keeper_row (state : state) index =
 let place_keeper_list_stop (state : state) stop =
   Option.iter
     (fun (focus, cursor) ->
-      state.keeper_list_heading <- focus;
+      state.keeper_list_focus <- focus;
       state.keeper_cursor <- cursor)
-    (Masc_tui_keeper_list_model.placement (keeper_list_reading state).klr_groups stop)
+    (Masc_tui_keeper_list_model.placement ~view:state.keeper_list_view (keeper_list_reading state).klr_groups stop)
 
 let step_keeper_list_stop (state : state) ~delta =
   Option.iter
@@ -12895,16 +12993,18 @@ let jump_keeper_list_group (state : state) direction =
 
 (* The heading the cursor was placed on, while the cursor still stands on it. *)
 let keeper_list_focused_heading (state : state) =
-  match state.keeper_list_heading, keeper_list_stop state with
-  | Some focus, Some (Masc_tui_keeper_list_model.Stop_heading group)
+  match state.keeper_list_focus, keeper_list_stop state with
+  | Some (Masc_tui_keeper_list_model.Focus_heading focus), Some (Masc_tui_keeper_list_model.Stop_heading group)
     when focus.Masc_tui_keeper_list_model.heading = group -> Some group
-  | (Some _ | None), (Some (Masc_tui_keeper_list_model.Stop_heading _
+  | (Some (Masc_tui_keeper_list_model.Focus_heading _ | Masc_tui_keeper_list_model.Focus_world) | None),
+      (Some (Masc_tui_keeper_list_model.Stop_heading _ | Masc_tui_keeper_list_model.Stop_world
                            | Masc_tui_keeper_list_model.Stop_row _) | None) -> None
 
 (* A change that reorders or regroups the rows keeps what the cursor stands
    on: the heading it was placed on while that group still has rows, else the
    Keeper it rests on, found again by name. *)
 let carry_keeper_list_selection (state : state) update =
+  let world = keeper_list_stop state = Some Masc_tui_keeper_list_model.Stop_world in
   let heading = keeper_list_focused_heading state in
   let resting = resting_keeper_name state in
   let result = update () in
@@ -12912,17 +13012,18 @@ let carry_keeper_list_selection (state : state) update =
   Option.iter
     (fun group -> place_keeper_list_stop state (Masc_tui_keeper_list_model.Stop_heading group))
     heading;
+  if world then place_keeper_list_stop state Masc_tui_keeper_list_model.Stop_world;
   result
 
 (* A heading the cursor was placed on stays selected after either change.
    A heading that stood for the cursor's row inside a folded group gives way
    to that row once the group unfolds. *)
-let refold_keeper_list_heading (state : state) change =
+let refold_keeper_list_focus (state : state) change =
   match keeper_list_stop state with
   | Some (Masc_tui_keeper_list_model.Stop_heading group) ->
       state.keeper_list_folded <-
         Masc_tui_keeper_list_model.refold change group state.keeper_list_folded
-  | Some (Masc_tui_keeper_list_model.Stop_row _) | None -> ()
+  | Some (Masc_tui_keeper_list_model.Stop_world | Masc_tui_keeper_list_model.Stop_row _) | None -> ()
 
 let selected_tools_error (state : state) =
   held_tools_error
@@ -13018,8 +13119,14 @@ let transition_keeper_view state view =
 let set_keeper_list_view state view =
   let resting = resting_keeper_name state in
   state.keeper_list_view <- view;
-  state.keeper_list_heading <- None;
+  state.keeper_list_focus <- None;
   Option.iter (keeper_list_select_name state) resting
+
+let open_keeper_world state =
+  if not (Masc_tui_keeper_list_model.has_world state.keeper_list_view) then
+    set_keeper_list_view state Masc_tui_keeper_list_model.By_age;
+  place_keeper_list_stop state Masc_tui_keeper_list_model.Stop_world;
+  state.keeper_story <- Some Masc_tui_keeper_story.World
 
 let cycle_keeper_list_view state =
   set_keeper_list_view state (Masc_tui_keeper_list_model.next_view state.keeper_list_view)
@@ -14953,6 +15060,10 @@ let suspend_workspace_readings state =
   state.schedules_page_owed <- Masc_tui_owed_read.settled;
   state.keeper_schedules_owed <- None;
   state.keeper_story_turns <- Masc_tui_fetched.suspend state.keeper_story_turns;
+  state.keeper_story_memory_facts <- Masc_tui_fetched.suspend state.keeper_story_memory_facts;
+  state.keeper_story_memory_activity <- Masc_tui_fetched.suspend state.keeper_story_memory_activity;
+  state.keeper_story_memory_facts_owed <- Masc_tui_owed_read.settled;
+  state.keeper_story_memory_activity_owed <- Masc_tui_owed_read.settled;
   state.keeper_story_turns_owed <- Masc_tui_owed_read.settled;
   state.chat_native_tasks_owed <- None;
   state.chat_child_content_owed <- None;
@@ -15894,6 +16005,19 @@ let reconcile_fusion_launch (state : state) =
    list. *)
 let reconcile_keeper_story (state : state) =
   if state.view <> Keepers Keeper_list then state.keeper_story <- None
+  else match state.keeper_story, keeper_list_stop state with
+    | Some (Masc_tui_keeper_story.Story | Masc_tui_keeper_story.Schedule
+            | Masc_tui_keeper_story.Memory | Masc_tui_keeper_story.World),
+        Some Masc_tui_keeper_list_model.Stop_world ->
+        state.keeper_story <- Some Masc_tui_keeper_story.World
+    | Some Masc_tui_keeper_story.World, Some (Masc_tui_keeper_list_model.Stop_row _) ->
+        state.keeper_story <- Some Masc_tui_keeper_story.Story
+    | Some Masc_tui_keeper_story.World, (Some (Masc_tui_keeper_list_model.Stop_heading _) | None) ->
+        state.keeper_story <- None
+    | Some (Masc_tui_keeper_story.Story | Masc_tui_keeper_story.Schedule | Masc_tui_keeper_story.Memory),
+        (Some (Masc_tui_keeper_list_model.Stop_heading _ | Masc_tui_keeper_list_model.Stop_row _) | None)
+    | None, (Some (Masc_tui_keeper_list_model.Stop_world | Masc_tui_keeper_list_model.Stop_heading _
+                  | Masc_tui_keeper_list_model.Stop_row _) | None) -> ()
 
 type text_input_target =
   | Text_collab_form
@@ -20226,11 +20350,19 @@ let create_state
   keeper_list_view = Masc_tui_keeper_list_model.Plain;
   keeper_outside_reading = (fun _ ~now:_ ~keeper_name:_ -> Masc_tui_keeper_list_model.outside_unread);
   keeper_list_density = Masc_tui_keeper_list_model.Two_lines;
-  keeper_list_heading = None;
+  keeper_list_focus = None;
   keeper_list_folded = [];
+  keeper_list_seen_groups = [];
   keeper_story = None;
   keeper_story_turns = Masc_tui_fetched.initial;
   keeper_story_turns_owed = Masc_tui_owed_read.settled;
+  keeper_story_memory_facts = Masc_tui_fetched.initial;
+  keeper_story_memory_activity = Masc_tui_fetched.initial;
+  keeper_story_memory_facts_owed = Masc_tui_owed_read.settled;
+  keeper_story_memory_activity_owed = Masc_tui_owed_read.settled;
+  keeper_story_memory_view = Masc_tui_keeper_story.Memory_summary;
+  keeper_story_memory_offset = 0;
+  keeper_story_memory_owner = None;
   keeper_list_sort = Masc_tui_keeper_list_model.Priority;
   keeper_list_preference_notice = None;
   keeper_list_preference_startup_error = None;
@@ -22153,6 +22285,7 @@ let task_document_columns state ~terminal_cols =
 
 let task_document_inputs state ~cols =
   let module Document = Masc_tui_task_document in
+  let ko = state.ui_language = Lang_ko in
   let make target input = {tdk_target=target;tdk_input=input} in
   match state.view,state.planning_mode,state.task_detail_id,state.task_focus with
   | Planning,Planning_list,Some id,Masc_tui_overview_tasks.Task_focus _ ->
@@ -22165,9 +22298,9 @@ let task_document_inputs state ~cols =
          | Read ids -> Document.Membership ids in
        let history=Masc_tui_fetched.view_for ~equal:String.equal state.task_history ~key:id in
        let target=Work_task_document id in
-       Some (make target (Document.body ~cols ~goals task)),
+       Some (make target (Document.body ~ko ~cols ~goals task)),
        Option.map (fun (history : Masc.Tui_decode_task_inspection.history) ->
-         make target (Document.history ~cols history.history_events)) (Masc_tui_fetched.value history))
+         make target (Document.history ~ko ~cols history.history_events)) (Masc_tui_fetched.value history))
   | Tools,_,_,_ when state.tools_pane=Tools_async && state.tools_async_detail_open ->
     (match state.tools_async_task_source,state.tools_async_selection with
      | Some source,Some selection when Masc.Tui_decode_async_request.equal_target selection source.ats_request.target ->
@@ -22175,9 +22308,9 @@ let task_document_inputs state ~cols =
        let history=Masc_tui_fetched.view_for ~equal:equal_tools_async_task_source state.tools_async_task_history ~key:source in
        let target=Async_task_document source in
        Option.map (fun (detail : Masc.Tui_decode_task_inspection.detail) ->
-         make target (Document.body ~cols ~goals:(Document.Canonical detail.canonical_goal_id) detail.task)) (Masc_tui_fetched.value body),
+         make target (Document.body ~ko ~cols ~goals:(Document.Canonical detail.canonical_goal_id) detail.task)) (Masc_tui_fetched.value body),
        Option.map (fun (history : Masc.Tui_decode_task_inspection.history) ->
-         make target (Document.history ~cols history.history_events)) (Masc_tui_fetched.value history)
+         make target (Document.history ~ko ~cols history.history_events)) (Masc_tui_fetched.value history)
      | Some _,Some _ | Some _,None | None,_ -> None,None)
   | Planning,Planning_list,None,Masc_tui_overview_tasks.Task_focus _
   | Planning,Planning_list,_,Masc_tui_overview_tasks.No_task_focus
@@ -22197,8 +22330,9 @@ let sync_task_documents state ~cols =
       Option.iter (fun request -> Observation.observe request.tdr_observation
         (Retired Source_unavailable)) slot.tds_request;
       let previous = match part,slot.tds_previous with
-        | History,Some ({tdk_target=Work_task_document task_id;_},Some owner,_)
-          when owner == state.workspace_read_authority && task_history_owned_by state ~task_id -> slot.tds_previous
+        | History,Some ({tdk_target=Work_task_document task_id;tdk_input},Some owner,_)
+          when owner == state.workspace_read_authority && task_history_owned_by state ~task_id
+            && Masc_tui_task_document.is_korean tdk_input = (state.ui_language = Lang_ko) -> slot.tds_previous
         | History,(None | Some ({tdk_target=(Work_task_document _ | Async_task_document _);_},_,_))
         | Masc_tui_task_document.Body,(None | Some _) -> None in
       let reading = match Masc_tui_fetched.current slot.tds_reading,previous with
@@ -22276,28 +22410,30 @@ let task_document_lines state ~cols part =
   | None -> []
   | Some key ->
     let slot=task_document_slot state part in
+    let text ko en = ui_text state ~ko ~en in
     let notice text = Masc_tui_text_block.rows
       ~max_cells:(max 1 (Masc_tui_frame.inner_width ~cols)) text in
     let previous=match slot.tds_previous with
       | Some (old,_,rows) when equal_task_document_target old.tdk_target key.tdk_target
-          && Masc_tui_task_document.columns old.tdk_input=cols -> rows
+          && Masc_tui_task_document.columns old.tdk_input=cols
+          && Masc_tui_task_document.is_korean old.tdk_input = Masc_tui_task_document.is_korean key.tdk_input -> rows
       | Some _ | None -> [] in
     match Masc_tui_fetched.view_for ~equal:equal_task_document_key slot.tds_reading ~key with
     | Masc_tui_fetched.Ready rows -> rows
-    | Stale (rows,detail) -> notice (" Task 표시 재확인 실패: " ^ detail) @ rows
-    | Failed detail -> notice (" Task 표시를 준비하지 못했습니다: " ^ detail
-        ^ if previous=[] then "" else " · 이전 표시 유지") @ previous
+    | Stale (rows,detail) -> notice ((text " 작업 표시 재확인 실패: " " Task document refresh failed: ") ^ detail) @ rows
+    | Failed detail -> notice ((text " 작업 표시를 준비하지 못했습니다: " " Task document preparation failed: ") ^ detail
+        ^ if previous=[] then "" else (text " · 이전 표시 유지" " · previous document retained")) @ previous
     | Absent | Loading ->
       let phase=match slot.tds_request with
         | Some request when equal_task_document_key key (Masc_tui_fetched.request_key request.tdr_ticket) ->
           let facts=Masc_tui_task_document_observation.facts request.tdr_observation in
           (match facts.caller_observed,facts.worker_returned,facts.worker_entered with
-           | Some _,_,_ -> " Task 표시 반영 대기"
-           | None,Some _,_ -> " Task 준비 결과 전달 대기"
-           | None,None,Some _ -> " Task 내용을 정리 중"
-           | None,None,None -> " Task 준비 시작 대기")
-        | Some _ | None -> " Task 내용을 준비 중입니다" in
-      notice (phase ^ if previous=[] then "" else " · 이전 표시 유지") @ previous
+           | Some _,_,_ -> (text " 작업 표시 반영 대기" " Task document awaiting display")
+           | None,Some _,_ -> (text " 작업 준비 결과 전달 대기" " Task document delivery pending")
+           | None,None,Some _ -> (text " 작업 내용을 정리 중" " Preparing Task document")
+           | None,None,None -> (text " 작업 준비 시작 대기" " Task document preparation pending"))
+        | Some _ | None -> (text " 작업 내용을 준비 중입니다" " Preparing Task document") in
+      notice (phase ^ if previous=[] then "" else (text " · 이전 표시 유지" " · previous document retained")) @ previous
 
 let task_documents_pending state =
   Masc_tui_fetched.in_flight state.task_document_body.tds_reading
@@ -23124,6 +23260,7 @@ let memory_fact_search_text ~fleet row =
       with_keeper f.Masc.Tui_decode_memory_facts.mf_keeper
         (f.Masc.Tui_decode_memory_facts.mf_claim ^ " "
          ^ Memory_category.category_to_string f.Masc.Tui_decode_memory_facts.mf_category
+         ^ " " ^ memory_category_text ~ko:true f.Masc.Tui_decode_memory_facts.mf_category
          ^ " " ^ f.Masc.Tui_decode_memory_facts.mf_origin)
   | Memory_row_source_fact f ->
       with_keeper f.Masc.Tui_decode_memory_facts.msf_keeper
@@ -23243,8 +23380,7 @@ let project_memory_keepers ~sort ~query snapshot =
   else
     List.filter
       (fun k ->
-        Masc_tui_pick_list.lowercase_contains ~needle:query k.mkh_keeper_id
-        || Masc_tui_pick_list.lowercase_contains ~needle:query (memory_state_label (memory_state k)))
+        Masc_tui_pick_list.lowercase_contains ~needle:query (memory_keeper_search_text k))
       sorted_keepers
 
 let visible_memory_keepers (state : state) =
@@ -23925,13 +24061,6 @@ let runtime_picker_projection ?(page=runtime_picker_page) (state : state) =
 (* The feature landing and its key viewport share the complete physical
    heading, catalogue links and panel geometry. Destinations stay in Types;
    the renderer alone adds click marks and native panel styling. *)
-let lanes_overview_heading_rows (state : state) ~cols =
-  let cells = max 1 (Masc_tui_frame.inner_width ~cols) in
-  [ ui_text state ~ko:"여기서 무엇을 사용할 수 있나" ~en:"What can be used here"
-  ; ui_text state ~ko:"기능과 관측 상태를 고르고, 설정·워커·조치를 읽습니다."
-      ~en:"Select a capability and observation, then read configuration, workers and actions."
-  ] |> List.concat_map (Masc_tui_message_layout.wrap_words ~max_cells:cells)
-
 let lanes_overview_link_rows (state : state) ~cols =
   let cells = max 1 (Masc_tui_frame.inner_width ~cols) in
   let links =
@@ -23996,7 +24125,6 @@ let lanes_scrolled (state : state) ~cols:_ =
       }
 
 type lanes_overview_projection = {
-  lop_headings : string list;
   lop_links : (surface option * string) list list;
   lop_observation : bool;
   lop_notices : string list;
@@ -24014,7 +24142,6 @@ type lanes_overview_projection = {
 let lanes_overview_projection (state : state) ~rows ~cols =
   let budget = max 0 (rows - Masc_tui_frame.chrome_rows) in
   let width = max 1 (Masc_tui_frame.inner_width ~cols) in
-  let headings = lanes_overview_heading_rows state ~cols in
   let links = lanes_overview_link_rows state ~cols in
   let notices = lane_inventory_notice_lines ~cols state in
   let split, list_width, detail_width = lanes_overview_panel_widths state ~cols in
@@ -24028,7 +24155,7 @@ let lanes_overview_projection (state : state) ~rows ~cols =
       + lanes_overview_picker_rows state in
   let panel_edges = 2 in
   let native_minimum = (panel_edges + 1) * (if split then 1 else 2) in
-  let full = List.length headings + List.length links + List.length notices
+  let full = List.length links + List.length notices
       + 1 + full_tail_rows + native_minimum <= budget in
   let compact_tail =
     let picker = match runtime_picker_projection state with
@@ -24059,14 +24186,14 @@ let lanes_overview_projection (state : state) ~rows ~cols =
   let tail_rows = if full then full_tail_rows else List.length compact_tail in
   let minimum_body = min 2 (max 0 (budget - tail_rows)) in
   let intro_room = max 0 (budget - tail_rows - minimum_body) in
-  let headings, links, observation, notices = if full then headings, links, true, notices
+  let links, observation, notices = if full then links, true, notices
     else
       let observation = intro_room > 0 in
       let room = max 0 (intro_room - if observation then 1 else 0) in
       let notices = List.take room notices in
       let links = List.take (max 0 (room - List.length notices)) links in
-      [], links, observation, notices in
-  let intro_rows = List.length headings + List.length links
+      links, observation, notices in
+  let intro_rows = List.length links
       + (if observation then 1 else 0) + List.length notices in
   let boxed = full in
   let split = boxed && split in
@@ -24079,7 +24206,7 @@ let lanes_overview_projection (state : state) ~rows ~cols =
   let count = List.length (lane_inventory_entries state) in
   let position = list_slots > 1 && count > list_slots in
   let list_height = max 0 (list_slots - if position then 1 else 0) in
-  { lop_headings = headings; lop_links = links; lop_observation = observation;
+  { lop_links = links; lop_observation = observation;
     lop_notices = notices; lop_boxed = boxed; lop_split = split;
     lop_list_width = list_width; lop_detail_width = detail_width;
     lop_list_height = list_height; lop_detail_height = detail_height;
@@ -25384,10 +25511,15 @@ let scrolled_surface_rows (state : state) ~cols : surface -> scrolled option =
   | Harness ->
       if Option.is_some state.harness_detail then None
       else
-        listing ~error:state.harness_error
-          (match state.harness with
-           | None -> 0
-           | Some s -> List.length s.Tui_decode.hs_verdicts)
+        Some
+          { sc_count =
+              (match state.harness with
+               | None -> 0
+               | Some s -> List.length s.Tui_decode.hs_verdicts)
+          ; sc_chrome = harness_listing_chrome ~error:state.harness_error
+          ; sc_overflow_takes_row = true
+          ; sc_preview_keep = None
+          }
   | Repositories ->
       if state.repository_changes_open then repository_changes_listing ()
       else

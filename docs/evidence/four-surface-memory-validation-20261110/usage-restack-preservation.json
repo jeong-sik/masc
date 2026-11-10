@@ -1,0 +1,10 @@
+{
+  "old_base": "b56552704a5b1350d636449d57c1ff0d920c8adc",
+  "old_usage": "ed440a8c6d73d21a3e818f82c34e83f9900f0654",
+  "new_base": "f35a50b9ec9ba4d3cdd03cf0d03ea57f5924f657",
+  "new_usage": "81e91c6bd68f5897390ad883b7ffdac53f3965c6",
+  "full_index_binary_diff_bytes": 23236,
+  "full_index_binary_diff_sha256": "ce5c7b78b03387e301f9f2218381e46378f6fbd25d4c159cbde7fd45b7f834d0",
+  "identical_diff": true,
+  "scope": "Preservation only; not a new review or execution of Usage."
+}

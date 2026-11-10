@@ -793,7 +793,8 @@ let test_unreadable_snapshots_reject_mutation_and_survive_flush () =
       | Ok () -> Alcotest.failf "%s load silently accepted an unreadable row" label)
     [ "votes", store.votes_load_result
     ; "reactions", store.reactions_load_result
-    ; "sub-boards", store.sub_boards_load_result
+    ; "sub-boards", (Board.read_sub_boards store |> Result.map (fun _ -> ())
+        |> Result.map_error Board.show_board_error)
     ];
   expect_io_error
     "vote"
@@ -876,6 +877,75 @@ let test_snapshot_waiting_after_edit_keeps_edited_post
       "restart retains the committed edit"
       "after the edit" loaded.body;
     check_reloaded loaded
+
+let test_vote_survives_snapshot_before_persistence_release
+    (kind : Masc_board_handlers.Board_vote_key.target_kind) () =
+  let post = create_post_exn ~author:"publication-author" ~content:"vote publication" in
+  let post_id = Board.Post_id.to_string post.id in
+  let voter = "publication-voter" in
+  let cast, query =
+    match kind with
+    | Masc_board_handlers.Board_vote_key.Post ->
+      ( (fun () -> Board_dispatch.vote ~voter ~post_id ~direction:Board.Up)
+      , (fun store -> Board.current_vote_for_post store ~voter ~post_id) )
+    | Masc_board_handlers.Board_vote_key.Comment ->
+      let comment = add_comment_exn ~post_id ~author:"reply-author" ~content:"reply vote" in
+      let comment_id = Board.Comment_id.to_string comment.id in
+      ( (fun () -> Board_dispatch.vote_comment ~voter ~comment_id ~direction:Board.Up)
+      , (fun store -> Board.current_vote_for_comment store ~voter ~comment_id) )
+  in
+  let store = Board_dispatch.backend () in
+  let snapshot_pending = ref true in
+  let noop : Board_metrics_hooks.observer =
+    { observe_persist_lock_acquire_sec = (fun _ -> ())
+    ; observe_persist_lock_held_sec = (fun _ -> ())
+    ; inc_dispatch_flusher_start_outcome = (fun () -> ())
+    }
+  in
+  (* The existing completion observer runs under persistence after its work.
+     Reproduce a competing snapshot from the committed vote identities using
+     the actual appended rows and the shared atomic writer. The private vote
+     renderer stays private, and no recursive persistence lock is acquired.
+     Before the fix the old ledger omits the new append, so this erases it.
+     No scheduler or wall-clock delay selects the ordering. *)
+  let observer =
+    { noop with observe_persist_lock_held_sec = (fun _ ->
+        if !snapshot_pending then (
+          snapshot_pending := false;
+          let path = Board_votes.vote_log_path store in
+          let rows = Fs_compat.load_jsonl path in
+          let retained = Board.with_lock store (fun () ->
+            List.filter (fun row ->
+              let target = Yojson.Safe.Util.(row |> member "target" |> to_string) in
+              Hashtbl.mem store.Board.vote_log target) rows) in
+          let content = retained |> List.map (fun row ->
+            Yojson.Safe.to_string row ^ "\n") |> String.concat "" in
+          match Fs_compat.save_file_atomic path content with
+          | Ok () -> ()
+          | Error error -> Alcotest.fail error)) }
+  in
+  Fun.protect
+    ~finally:(fun () -> Board_metrics_hooks.set_observer noop)
+    (fun () ->
+      Board_metrics_hooks.set_observer observer;
+      match cast () with
+      | Ok _ -> ()
+      | Error error -> Alcotest.fail (Board.show_board_error error));
+  Alcotest.(check bool) "the actual snapshot write ran" false !snapshot_pending;
+  (* Restart immediately: another flush would repair the old lost row and
+     hide the successful-vote durability failure. *)
+  Board.reset_global_for_test ();
+  Board_dispatch.reset_for_test ();
+  Result.get_ok (Board_dispatch.init_jsonl
+    ~base_path:(Env_config_core.base_path ())
+    ~recipient_lookup:Recipient_lookup.none_declared ());
+  let restored = match query (Board.global ()) with
+    | Ok direction -> Option.map Board.vote_direction_to_string direction
+    | Error error -> Alcotest.fail (Board.show_board_error error)
+  in
+  Alcotest.(check (option string))
+    "the successfully cast vote survives the intervening snapshot and restart"
+    (Some "up") restored
 
 let test_pin_waiting_after_edit_keeps_edited_post () =
   test_snapshot_waiting_after_edit_keeps_edited_post
@@ -975,6 +1045,12 @@ let () =
         ] );
       ( "durability",
         [
+          Alcotest.test_case "post vote survives a snapshot before persistence release" `Quick
+            (with_eio (test_vote_survives_snapshot_before_persistence_release
+               Masc_board_handlers.Board_vote_key.Post));
+          Alcotest.test_case "comment vote survives a snapshot before persistence release" `Quick
+            (with_eio (test_vote_survives_snapshot_before_persistence_release
+               Masc_board_handlers.Board_vote_key.Comment));
           Alcotest.test_case "refused posts block vote and reaction effects" `Quick
             (with_eio test_refused_posts_source_blocks_vote_and_reaction_effects);
           Alcotest.test_case

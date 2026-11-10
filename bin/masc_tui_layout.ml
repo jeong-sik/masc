@@ -10,7 +10,7 @@ type board_read_allocation = {
 
 let board_comment_share = 3
 let board_comment_floor_rows = 5
-let board_read_box_rows = 7
+let board_read_box_rows = 6
 let board_read_footer_rows = 1
 let board_read_position_rows = 1
 

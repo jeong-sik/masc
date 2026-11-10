@@ -95,20 +95,50 @@ module Entry_cache = Ephemeron.K1.Make (struct
     entry.markdown_source, entry.body_presentation)
 end)
 
-(* Immutable entry identity owns discovery. Ephemeron keys release both URLs
-   and source indexes when the projection no longer retains that entry. *)
-let entry_urls = Entry_cache.create 64
+(* Only URL discovery and entry-local source coordinates use this equality.
+   Full-entry copies, such as [railed_entries], keep physical keys above. *)
+module Source_entry_cache = Ephemeron.K1.Make (struct
+  type t = Message_layout.entry
+  let equal (left : t) (right : t) =
+    left == right ||
+    match left.markdown_source, right.markdown_source with
+    | Message_layout.Markdown_stable a, Message_layout.Markdown_stable b ->
+        String.equal a.keeper_name b.keeper_name
+        && String.equal a.request_id b.request_id
+        && Float.equal a.observed_at b.observed_at
+        && left.style = right.style
+        && left.body_presentation = right.body_presentation
+        && String.equal left.body right.body
+        && left.journal = right.journal
+    | Message_layout.Markdown_stable _, (Message_layout.Markdown_growing _ | Markdown_streaming)
+    | (Message_layout.Markdown_growing _ | Markdown_streaming),
+      (Message_layout.Markdown_stable _ | Markdown_growing _ | Markdown_streaming) -> false
+  let hash (entry : t) =
+    match entry.markdown_source with
+    | Message_layout.Markdown_stable source ->
+        Hashtbl.hash (entry.style, source.keeper_name, source.request_id,
+          source.observed_at, entry.body_presentation, String.length entry.body)
+    | Message_layout.Markdown_growing _ | Markdown_streaming ->
+        Hashtbl.hash (entry.style, entry.markdown_source, entry.body_presentation)
+end)
+
+(* Stable entries share only exact body/presentation/journal projections of
+   the same producer, independently of their current list ordinal. Growing
+   and streaming entries retain physical-key semantics. Keys are refreshed
+   before replacing the old layout, so only currently retained entries keep
+   their observations alive through the ephemeron table. *)
+let entry_urls = Source_entry_cache.create 64
 let source_url_discoveries = ref 0
 
 let bare_urls_for_entry entry =
-  match Entry_cache.find_opt entry_urls entry with
+  match Source_entry_cache.find_opt entry_urls entry with
   | Some urls -> urls
   | None ->
       incr source_url_discoveries;
       let seen = Hashtbl.create 4 in
       let urls = Message_layout.bare_urls entry.Message_layout.body |> List.filter (fun url ->
         if Hashtbl.mem seen url then false else (Hashtbl.add seen url (); true)) in
-      Entry_cache.replace entry_urls entry urls;
+      Source_entry_cache.replace entry_urls entry urls;
       urls
 
 let chat_body_with_previews_internal ?on_field ~preview ~mode ~(entry : Message_layout.entry) ~width () =
@@ -513,7 +543,7 @@ let render_chat_row ~theme ~origin buf cols (row : Message_layout.row) =
          never recovers an outcome or a tool identity from those words. *)
       let dress rest =
         Masc_tui_message_layout.dress_bare_links
-          ~open_style:(Ansi.underline ^ Theme.Syntax.link)
+          ~open_style:(Ansi.underline ^ Theme.Syntax.link ())
           ~close_style:context.link_restore
           rest
       in
@@ -906,10 +936,10 @@ let tool_detail_palette () : Tool_detail.palette =
        the tree's own labels from the names inside a payload. *)
   ; label = Ansi.bold ^ Masc_tui_theme.tone Masc_tui_theme.Accent
   ; separator = Theme.recede ()
-  ; key = Masc_tui_theme.Syntax.json_key
-  ; string_ = Masc_tui_theme.Syntax.string_
-  ; number = Masc_tui_theme.Syntax.json_number
-  ; literal = Masc_tui_theme.Syntax.json_literal
+  ; key = Theme.Syntax.json_key ()
+  ; string_ = Theme.Syntax.string ()
+  ; number = Theme.Syntax.json_number ()
+  ; literal = Theme.Syntax.json_literal ()
   ; punctuation = Masc_tui_theme.Syntax.json_punctuation
   ; note = Theme.recede ()
     (* Span closure restores the measured secondary foreground. *)
@@ -2111,6 +2141,41 @@ let keeper_message_visible_entries visible_timeline =
 
 ;;
 
+(* A frame owns one preview snapshot and one semantic map per projected entry.
+   Physical row ordinals can change with terminal width or origin gutters;
+   only a producer-owned source byte can recover that same reading position. *)
+type source_body_index = {
+  source_rows : (chat_source_position, int) Hashtbl.t;
+  row_sources : (int, chat_source_position) Hashtbl.t;
+  row_end_sources : (int, chat_source_position) Hashtbl.t;
+}
+
+type source_body_key = {
+  source_workspace : workspace_authority;
+  source_width : int;
+  source_palette_generation : int;
+  source_origin : Message_layout.origin_display;
+  source_preview_mode : [`Off | `Compact | `Rich];
+  source_previews : Masc_tui_link_preview.og_preview list;
+  source_polled_input : (int * int * string) option;
+  source_polled_unavailable : bool;
+}
+
+type source_body_memo = { key : source_body_key; index : source_body_index option }
+
+let source_body_indexes = Source_entry_cache.create 64
+
+let rebind_entry_observations entry =
+  let rebind table =
+    Option.iter (fun value ->
+      (* [replace] need not replace an equal key's representative. Install the
+         current entry itself before the old layout loses its strong root. *)
+      Source_entry_cache.remove table entry;
+      Source_entry_cache.add table entry value) (Source_entry_cache.find_opt table entry)
+  in
+  rebind entry_urls;
+  rebind source_body_indexes
+
 (* Positions whose message record, projected moment, and turn edge all
    survived a conversation change keep the entry already computed for them.
    The first position that differs ends the sharing, because the index
@@ -2276,6 +2341,7 @@ let keeper_message_layout_entries ?messages (state : state) ~keeper_name
             @ compute_keeper_message_layout_entries state ~keeper_name ~request_owners
                 ~chat_cols ~start_index:(List.length prefix) suffix
       in
+      if entries != memo.lem_entries then List.iter rebind_entry_observations entries;
       layout_entries_memo :=
         Some
           { memo with
@@ -2291,6 +2357,7 @@ let keeper_message_layout_entries ?messages (state : state) ~keeper_name
         compute_keeper_message_layout_entries state ~keeper_name ~request_owners ~chat_cols
           ~start_index:0 visible_entries
       in
+      List.iter rebind_entry_observations entries;
       layout_entries_memo :=
         Some
           { lem_keeper_name = keeper_name;
@@ -3607,29 +3674,11 @@ let projection_index_of_scroll_anchor projection = function
   | (Scroll_pending _ | Scroll_polled _) as anchor ->
       Hashtbl.find_opt (scroll_anchor_index projection).transient_indices anchor
 
-(* A frame owns one preview snapshot and one semantic map per projected entry.
-   Physical row ordinals can change with terminal width or origin gutters;
-   only a producer-owned source byte can recover that same reading position. *)
-type source_body_index = {
-  source_rows : (chat_source_position, int) Hashtbl.t;
-  row_sources : (int, chat_source_position) Hashtbl.t;
-  row_end_sources : (int, chat_source_position) Hashtbl.t;
-}
-
-type source_body_key = {
-  source_width : int;
-  source_palette_generation : int;
-  source_origin : Message_layout.origin_display;
-  source_preview_mode : [`Off | `Compact | `Rich];
-  source_previews : Masc_tui_link_preview.og_preview list;
-  source_polled_input : (int * int * string) option;
-  source_polled_unavailable : bool;
-}
-
 (* Every field is compared, so a field added to the key and left out here is
    reported as never read. *)
 let same_source_body_key (a : source_body_key) (b : source_body_key) =
-  a.source_width = b.source_width
+  a.source_workspace = b.source_workspace
+  && a.source_width = b.source_width
   && a.source_palette_generation = b.source_palette_generation
   && a.source_origin = b.source_origin
   && a.source_preview_mode = b.source_preview_mode
@@ -3637,9 +3686,6 @@ let same_source_body_key (a : source_body_key) (b : source_body_key) =
   && a.source_polled_input = b.source_polled_input
   && Bool.equal a.source_polled_unavailable b.source_polled_unavailable
 
-type source_body_memo = { key : source_body_key; index : source_body_index option }
-
-let source_body_indexes = Entry_cache.create 64
 let source_index_builds = ref 0
 
 type source_mapping_owner =
@@ -3683,7 +3729,8 @@ let source_body_key state ~width ~theme ~preview ~polled_input ~unavailable
     | (Message_layout.Journal, Message_layout.Markdown_stable _, (`Compact | `Rich))
     | (Message_layout.Error, Message_layout.Markdown_stable _, (`Compact | `Rich))
     | (Message_layout.Thinking _, Message_layout.Markdown_stable _, (`Compact | `Rich)) -> bare_urls_for_entry entry in
-  {source_width=width;source_palette_generation=context.palette_generation;
+  {source_workspace=state.workspace_authority;
+   source_width=width;source_palette_generation=context.palette_generation;
    source_origin=state.msg_origin_display;source_preview_mode=state.link_previews_mode;
    source_previews=List.map preview urls;source_polled_input=polled_input;
    source_polled_unavailable=unavailable}
@@ -3702,7 +3749,7 @@ let source_body_lookup state ~keeper_name projection ~inner_width ~theme ~previe
           let owner, polled_input = source_mapping_owner state ~keeper_name projection entry_index in
           let key = source_body_key state ~width ~theme ~preview ~polled_input
             ~unavailable:(owner = Unknown_polled_source) entry in
-          match Entry_cache.find_opt source_body_indexes entry with
+          match Source_entry_cache.find_opt source_body_indexes entry with
           | Some memo when same_source_body_key memo.key key -> memo.index
           | Some _ | None ->
           incr source_index_builds;
@@ -3757,7 +3804,7 @@ let source_body_lookup state ~keeper_name projection ~inner_width ~theme ~previe
                       (Option.bind run.positions.(byte) convert)
                   done) ranges) run.visible_rows) body.runs;
           Some {source_rows;row_sources;row_end_sources} in
-          Entry_cache.replace source_body_indexes entry {key;index};
+          Source_entry_cache.replace source_body_indexes entry {key;index};
           index in
         Hashtbl.add mapped entry_index value;
         value
@@ -4343,6 +4390,14 @@ let render_keeper_message (state : state) =
      Activity pane, which [finish_frame_beside_acting_pane] draws beside it. *)
   let rows, cols = get_terminal_size () in
   let buf = Buffer.create 4096 in
+  (* Text search owns [?] before chat does. Keeper navigation then opens
+     help with any draft; the composer itself does so only while empty.
+     Both chat footers use the same decision as their help hint. *)
+  let help_door =
+    Option.is_none (text_input_target state ~compact_viewport:false)
+    && (state.keeper_navigation_open
+        || Masc_tui_message_input.length state.msg_input = 0)
+  in
 
   match state.msg_target_keeper_name with
   | None ->
@@ -4358,7 +4413,7 @@ let render_keeper_message (state : state) =
     done;
     box_bottom buf cols;
     finish_frame_beside_acting_pane state ~surface_key:"keeper-message" ~cursor:Frame_presenter.Hidden
-      ~rows ~cols
+      ~help_door ~rows ~cols
       ~footer:
         (Footer_hints
            { hints = Masc_tui_keys.footer_hints state.view; position = None })
@@ -5117,11 +5172,8 @@ let render_keeper_message (state : state) =
       | Some _ -> Some "↑/↓:select  Tab/Enter:insert  Esc:close"
       | None -> slash_hint_text ~restore:Ansi.default_fg (Masc_tui_message_input.contents state.msg_input)
     in
-    (* [?] opens the sheet only while the draft is empty, so the row says so
-       exactly while it is true -- a typing row that named the door would
-       advertise a key the draft owns. *)
     let help_hint =
-      if Masc_tui_message_input.length state.msg_input = 0 then "  ?:help"
+      if help_door then "  ?:help"
       else ""
     in
     let footer_hints =
@@ -5277,6 +5329,7 @@ let render_keeper_message (state : state) =
     finish_frame_beside_acting_pane state ~surface_key:"keeper-message"
       ~clamped:(Message_scroll scroll_feedback) ?roster
       ~recovery_in_slot
+      ~help_door
       ~cursor:
         (if state.keeper_message_focus = Left_pane then
            Frame_presenter.Hidden

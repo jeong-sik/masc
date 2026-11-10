@@ -33,7 +33,10 @@ let tab ~current page =
 (* Every tab when the title has room for them beside its lead, the current one
    alone when it has not. *)
 let title ~inner ~lead ~current =
-  let all = String.concat " " (List.map (tab ~current) Story.pages) in
+  let tabs = match current with
+    | Story.World -> [Story.World]
+    | Story.Story | Story.Schedule | Story.Memory -> Story.pages in
+  let all = String.concat " " (List.map (tab ~current) tabs) in
   let tabs =
     if Message_layout.display_width lead + 1 + Message_layout.display_width all <= inner
     then all
@@ -367,16 +370,27 @@ let wakes_source (state : Masc_tui_types.state) ~keeper_name =
                   [ refresh_note refresh "wakes from the first page only" ]) ))
 ;;
 
-(* The librarian's last digest from the memory-health reading, and a note for a
-   reading that is not there. A reading that says the Keeper has no digest, or
-   no memory-health row, has nothing to note. *)
+(* Keep a held digest as a past event, but a failed health refresh also leaves
+   its reason: the earlier observation says nothing about a newer digest.
+   A readable answer with no digest or no row has nothing to note. *)
 let digest_source (state : Masc_tui_types.state) ~keeper_name =
-  match memory_reading state ~keeper_name with
-  | Memory_reading.Row { digest_at; _ } -> digest_at, []
-  | Memory_reading.No_row -> None, []
-  | Memory_reading.Unknown -> None, [ Notice "digest not read yet" ]
-  | Memory_reading.Refused reason ->
-      None, [ Caution (with_detail "digest unknown, the memory-health row was refused" reason) ]
+  let digest_at, notes =
+    match memory_reading state ~keeper_name with
+    | Memory_reading.Row { digest_at; _ } -> digest_at, []
+    | Memory_reading.No_row -> None, []
+    | Memory_reading.Unknown -> None, [ Notice "digest not read yet" ]
+    | Memory_reading.Refused reason ->
+        None, [ Caution (with_detail "digest unknown, the memory-health row was refused" reason) ]
+  in
+  match state.memory_health_error with
+  | None -> digest_at, notes
+  | Some detail ->
+      let text = match digest_at with
+        | Some _ -> "digest (earlier read, refresh failed)"
+        | None -> "digest unknown, memory read failed"
+      in
+      let refusals = List.filter (function Caution _ -> true | Notice _ -> false) notes in
+      digest_at, Caution (with_detail text detail) :: refusals
 ;;
 
 (* The past group of the story page as one feed: the newest turns, the newest
@@ -488,10 +502,20 @@ let gap_text ~ko = function
   | Memory_reading.Gap_unmeasured -> if ko then "연속성 공백 미측정" else "continuity gap not measured"
 ;;
 
-let memory_lines (state : Masc_tui_types.state) ~now ~keeper_name =
+let memory_storage_lines (state : Masc_tui_types.state) ~now ~keeper_name =
   let text ko en = Masc_tui_types.ui_text state ~ko ~en in
   let ko = state.ui_language = Masc_tui_types.Lang_ko in
-  match memory_reading state ~keeper_name with
+  let read_failure = match state.memory_health_error with
+    | None -> []
+    | Some reason ->
+        let label = match state.memory_health with
+          | Some _ -> text "  마지막 기억 관측 · 갱신 실패: " "  last memory observation · refresh failed: "
+          | None -> text "  기억 읽기 실패: " "  memory-health read failed: "
+        in
+        [ warn (label ^ Terminal_text.single_line reason) ]
+  in
+  read_failure
+  @ match memory_reading state ~keeper_name with
   | Memory_reading.Unknown -> [ dim (text "  기억 상태 미조회" "  memory health is not read yet") ]
   | Memory_reading.No_row ->
       [ dim (text "  이 Keeper의 기억 관측 행이 없습니다" "  no memory-health row for this Keeper") ]
@@ -539,28 +563,23 @@ let memory_lines (state : Masc_tui_types.state) ~now ~keeper_name =
         | Some at -> text "최근 정리 " "last digest " ^ ago ~now at
         | None -> text "정리 시각 미기록" "no digest recorded"
       in
-      Option.to_list (Option.map
-        (fun reason -> warn (text "  마지막 기억 관측 · 갱신 실패: " "  last memory observation · refresh failed: "
-                            ^ Terminal_text.single_line reason))
-        state.memory_health_error)
-      @ [ labelled (text "기억 관측" "memory")
+      [ labelled (text "기억 관측" "memory")
           (memory_state_style memory
            ^ Masc_tui_types.memory_state_label memory
            ^ Ansi.reset)
       ; labelled (text "사실 나이" "fact age")
-          (ages ^ dim (text " · 오래됐다고 무효는 아닙니다" " · age does not invalidate a fact"))
+          ages
       ; labelled (text "저장 갱신" "saved")
-          (updated ^ dim (text " · 출처 재검증 시각과 다릅니다" " · not a source revalidation time"))
+          updated
       ; labelled (text "출처 무효화" "source") source
       ; labelled "Librarian" (lag_text ~ko lag ^ dim (" · " ^ pass ^ " · " ^ digest))
       ; labelled (text "연속성" "continuity")
           (match gap with
            | Memory_reading.No_gap -> dim (gap_text ~ko gap)
            | Memory_reading.Gap _ | Memory_reading.Gap_unmeasured -> warn (gap_text ~ko gap))
-      ; labelled (text "공유 World" "shared World")
-          (text ":go Memory 에서 별도 조회 · Keeper 사실 수와 합산하지 않습니다"
-             "read separately in :go Memory · not added to Keeper facts")
-      ; dim (text "  최근 처리 결과는 현재 모델 실행 상태가 아닙니다"
-               "  a last pass is not the model's current execution state")
       ]
 ;;
+
+let memory_lines state ~cols ~max_lines ~now ~keeper_name =
+  Masc_tui_render_keeper_memory.lines state ~cols ~max_lines ~now ~keeper_name
+    ~storage:(fun () -> memory_storage_lines state ~now ~keeper_name)

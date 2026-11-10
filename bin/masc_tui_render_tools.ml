@@ -329,9 +329,9 @@ let async_source_task_lines ~cols state source =
       (if source.ats_retained then " · 이전 확인 관측에서 열림" else ""))
   @ pending @ errors @ content
   @ [ "", "" ]
-  @ (Masc_tui_task_document.history_heading_rows ~width:(max 1 (width - 2))
+  @ (Masc_tui_task_document.history_heading_rows ~ko:(state.ui_language = Lang_ko) ~width:(max 1 (width - 2))
      |> List.map (fun row -> "", row))
-  @ (Masc_tui_task_document.history_status_lines ~width ~view:history
+  @ (Masc_tui_task_document.history_status_lines ~ko:(state.ui_language = Lang_ko) ~width ~view:history
        ~in_flight:(Masc_tui_fetched.in_flight state.tools_async_task_history)
        ~continuing:(Option.exists (fun request -> Option.is_some request.thr_page.hr_cursor)
          state.tools_async_task_history_request)
@@ -515,10 +515,8 @@ let skill_source_lines ~config ~(sources : Masc.Tui_decode_tools.skill_catalog_s
 ;;
 ;;
 
-(* The catalog pane's volume GC block, drawn above the catalog: what the
-   next press sends, the server's last periodic report from the catalog
-   reading, and the last answer. A reading would own every key and its
-   closing key would take an armed reclaim back. *)
+(* The catalog's volume child shows what the next press sends, the server's
+   last periodic inventory report, and the last operator-request answer. *)
 let volume_gc_lines (state : state) =
   let server_report =
     Option.map
@@ -545,16 +543,20 @@ let volume_gc_lines (state : state) =
    unmarked ones and the mark without the information colour, so the Tools
    row read "▸호출 범위 | 비동기 작업" under strips spelled two cells apart. *)
 let tools_pane_strip ~cols (state : state) =
+  let active_pane = match state.tools_pane with
+    | Tools_catalog (Tools_catalog_volumes _) -> Tools_catalog Tools_catalog_list
+    | (Tools_surface | Tools_async | Tools_activations | Tools_usage
+      | Tools_catalog Tools_catalog_list) as pane -> pane in
   tab_strip
     ~width:(tab_strip_width ~cols ~before:" " ~after:"")
     ~press:(fun pane text -> Masc_tui_press.(pressable (Press_tools_pane pane) text))
     (List.map
-       (fun (pane, label) -> (label, state.tools_pane = pane, pane))
+       (fun (pane, label) -> (label, active_pane = pane, pane))
        [ (Masc_tui_types.Tools_surface, "호출 범위")
        ; (Masc_tui_types.Tools_async, "비동기 작업")
        ; (Masc_tui_types.Tools_activations, "Skill 기록")
        ; (Masc_tui_types.Tools_usage, "Skill 사용 집계")
-       ; (Masc_tui_types.Tools_catalog, "전체 도구")
+       ; (Masc_tui_types.Tools_catalog Tools_catalog_list, "전체 도구")
        ])
 ;;
 
@@ -744,6 +746,8 @@ let tools_selection_line ~cols state =
   match state.tools_skill_source_picker with
   | Some picker -> Printf.sprintf "New %s · choose a save location"
       (if picker.ssp_composition then "Composition" else "Instruction")
+  | None when Option.is_some (tools_volume_gc_parent_scroll state.tools_pane) ->
+      ui_text state ~ko:"은퇴한 Keeper의 볼륨" ~en:"Retired Keeper volumes"
   | None ->
   if state.tools_pane=Tools_async then
     (match state.tools_async_selection with
@@ -2141,11 +2145,12 @@ let tools_display_lines ?(cols = 80) ?terminal_rows (state : state) =
         ; Ansi.dim, "   TRIGGERED/DELIVERED/ACTIONS=호출/전달/이후 행동 · 마지막 사용은 원장에 기록된 시각"
         ; Ansi.dim, "   호출 기록이 있는 행만 표시합니다. 읽지 못한 원장은 아래에 표시합니다."
         ]
-    | Masc_tui_types.Tools_catalog ->
+    | Masc_tui_types.Tools_catalog Tools_catalog_list ->
         [ Theme.info (), " MASC 전체 등록 도구 목록입니다. 선택 Keeper의 호출 범위는 별도입니다."
         ; Ansi.dim, "   DIRECT=직접 호출 허용 · SURFACES=도구가 노출되는 경로"
         ; Ansi.dim, "   surfaces=none은 노출 경로 없음입니다. 등록만으로 사용을 뜻하지 않습니다."
         ]
+    | Masc_tui_types.Tools_catalog (Tools_catalog_volumes _) -> []
   in
   let pane_lines =
     match state.tools_pane with
@@ -2153,12 +2158,13 @@ let tools_display_lines ?(cols = 80) ?terminal_rows (state : state) =
     | Masc_tui_types.Tools_async -> async_request_observation_lines ~cols state
     | Masc_tui_types.Tools_activations -> Lazy.force activation_lines
     | Masc_tui_types.Tools_usage -> Lazy.force usage_matrix_lines
-    | Masc_tui_types.Tools_catalog -> volume_gc_lines state @ [ "", "" ] @ Lazy.force catalog_lines
+    | Masc_tui_types.Tools_catalog Tools_catalog_list -> Lazy.force catalog_lines
+    | Masc_tui_types.Tools_catalog (Tools_catalog_volumes _) -> volume_gc_lines state
   in
   (* Each pane follows its own independent read. Retained rows are still
      useful during refresh; neither unread nor failed means a successful zero. *)
   let part, source, observed, error = match state.tools_pane with
-    | Tools_surface | Tools_catalog ->
+    | Tools_surface | Tools_catalog (Tools_catalog_list | Tools_catalog_volumes _) ->
         Tools_inventory_read, "tool inventory", Option.is_some state.tools_inventory,
         (selected_tools_error state)
     | Tools_activations ->
@@ -2178,7 +2184,8 @@ let tools_display_lines ?(cols = 80) ?terminal_rows (state : state) =
         (match pending with
          | Tools_catalog_read | Tools_usage_read _ -> true
          | Tools_inventory_read | Tools_activations_read | Tools_async_read -> false)
-    | Tools_surface | Tools_async | Tools_activations | Tools_catalog -> pending = part
+    | Tools_surface | Tools_async | Tools_activations
+    | Tools_catalog (Tools_catalog_list | Tools_catalog_volumes _) -> pending = part
   in
   let pending =
     if state.tools_pane = Tools_async then state.tools_async_observation_inflight
@@ -2222,7 +2229,9 @@ let tools_display_lines ?(cols = 80) ?terminal_rows (state : state) =
       (if draft.scd_composition then "Composition" else "Instruction") draft.scd_source_id
       (if draft.scd_composition then "C" else "c"))) (skill_create_drafts_for_current_workspace state) in
   let prefix=tools_selection_document ~cols state @ drafts @ reading_lines @ error_lines @ explanation in
-  if state.tools_pane=Tools_async && state.tools_async_detail_open && Option.is_some state.tools_async_task_source then
+  if Option.is_some (tools_volume_gc_parent_scroll state.tools_pane) then
+    wrap (pane_lines @ reading_lines @ error_lines)
+  else if state.tools_pane=Tools_async && state.tools_async_detail_open && Option.is_some state.tools_async_task_source then
     wrap prefix @ pane_lines
   else wrap (prefix @ pane_lines)
 ;;

@@ -36,6 +36,9 @@ module Row : sig
         (** The Keeper's last durable Librarian pass ended without draining:
             its lane is unconfigured, it did not commit, it stopped or it
             raised. *)
+    ; librarian_attention_required : bool
+        (** Derived from the Keeper's durable and explicit-admission pending
+            observations, independently of its stopped-pass count. *)
     ; alerts : alert_severity list
     }
 end
@@ -71,6 +74,7 @@ type t =
   ; snapshot_read_error_keepers : int
   ; source_snapshot_read_error_keepers : int
   ; librarian_stopped_keepers : int
+  ; librarian_attention_required_keepers : int
   ; librarian_starving_keepers : int
       (** Rows with Librarian failures and no memory snapshot. *)
   }

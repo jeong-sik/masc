@@ -194,6 +194,46 @@ let test_commit_rechecks_preview_and_records_verified_actor () =
     check bool "retry leaves evidence unchanged" true (load ~config operation = acknowledged))
 ;;
 
+let test_memory_resolution_requires_admin_and_matching_workspace () =
+  with_fixture (fun ~config ~router ~operation ~admin ~worker ->
+    let request_id = Yojson.Safe.to_string (`List
+      [ `String "keeper-librarian-history"; `String (String.make 64 'a');
+        `String (Random_id.uuid_v7 ()) ]) in
+    let path = Printf.sprintf "/api/v1/keepers/%s/memory-history-originals/%s/resolution"
+      operation.keeper_name (Uri.pct_encode request_id) in
+    let store = Lane_addon_store.directory ~masc_dir:(Workspace.masc_dir config) in
+    let store_present = Sys.file_exists store in
+    let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.base_path in
+    let epoch = Keeper_memory_os_current.epoch_path ~keepers_dir ~keeper_id:operation.keeper_name in
+    let epoch_present = Sys.file_exists epoch in
+    let backlog_path = Workspace_backlog.backlog_path config in
+    let backlog_bytes = Fs_compat.load_file backlog_path in
+    let status, _ = http ~router ~token:worker ~meth:"GET" ~path () in
+    check int "state-reading worker cannot observe operator resolution" 403 status;
+    let status, _ = http ~router ~token:worker ~meth:"POST" ~path () in
+    check int "state-reading worker cannot submit operator resolution" 403 status;
+    let fields =
+      [ "schema", `String "keeper.memory.history_original_resolution.request.v1"
+      ; "expected", `Assoc
+          [ "owner_record_sha256", `String (String.make 64 'a'); "memory_revision", `Null
+          ; "memory_sha256", `Null; "cursors_sha256", `String (String.make 64 'b') ]
+      ; "reason", `String "Explicit operator resolution" ] in
+    let post fields = http ~router ~token:admin ~meth:"POST" ~path
+      ~body:(Yojson.Safe.to_string (`Assoc fields)) () in
+    let status, _ = post fields in
+    check int "workspace precondition is required before durable acceptance" 400 status;
+    let status, refusal = post (("expected_workspace", `Assoc
+      [ "base_path", `String (Unix.realpath config.base_path ^ "-other")
+      ; "masc_root", `String (Unix.realpath (Workspace.masc_dir config)) ]) :: fields) in
+    check int "another workspace cannot submit durable intent" 409 status;
+    check string "workspace refusal precedes intent submission" "workspace_precondition_failed"
+      Yojson.Safe.Util.(refusal |> member "code" |> to_string);
+    check bool "refusals do not create the original intent store" store_present (Sys.file_exists store);
+    check bool "refusals do not initialize a Memory epoch" epoch_present (Sys.file_exists epoch);
+    check string "refusals preserve canonical Task data" backlog_bytes (Fs_compat.load_file backlog_path);
+    check bool "refusals preserve retained shutdown evidence" true (load ~config operation = operation))
+;;
+
 let test_purge_workspace_admission_and_retry () =
   with_fixture (fun ~config ~router ~operation:_ ~admin ~worker:_ ->
     let existing_name = "http-existing-purge" in
@@ -322,5 +362,7 @@ let () = run "keeper shutdown acknowledgement HTTP"
         test_real_router_requires_admin_for_preview_and_commit
     ; test_case "preview recheck and verified actor commit" `Quick
         test_commit_rechecks_preview_and_records_verified_actor
+    ; test_case "Memory resolution enforces operator and workspace authority" `Quick
+        test_memory_resolution_requires_admin_and_matching_workspace
     ; test_case "purge admits the captured workspace before existing and new work" `Quick
         test_purge_workspace_admission_and_retry ] ]

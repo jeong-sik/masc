@@ -17,6 +17,8 @@ module Keeper_event_queue_operator =
   Server_dashboard_http_keeper_event_queue_operator
 module Keeper_shutdown_reconciliation =
   Server_dashboard_http_keeper_shutdown_reconciliation
+module Keeper_memory_history_resolution =
+  Server_dashboard_http_keeper_memory_history_resolution
 
 let add_routes ~sw ~clock router =
   router
@@ -91,6 +93,13 @@ let add_routes ~sw ~clock router =
        | Some name ->
          with_public_read
            (fun state req reqd -> Keeper_portrait.handle_get state req reqd name)
+           request reqd
+       | None ->
+       match Keeper_memory_history_resolution.route (Http.Request.path request) with
+       | Some target ->
+         with_token_permission_auth ~permission:Keeper_memory_history_resolution.permission
+           (fun state _actor req reqd ->
+             Keeper_memory_history_resolution.handle_get state req reqd target)
            request reqd
        | None ->
        match Keeper_shutdown_reconciliation.route (Http.Request.path request) with
@@ -243,6 +252,14 @@ let add_routes ~sw ~clock router =
              Server_dashboard_http_hitl_recover.handle_journal_restore state req reqd)
            request reqd
        else
+       match Keeper_memory_history_resolution.route (Http.Request.path request) with
+       | Some target ->
+         with_token_permission_auth ~permission:Keeper_memory_history_resolution.permission
+           (fun state actor req reqd ->
+             Http.Request.read_body_async reqd (fun body ->
+               Keeper_memory_history_resolution.handle_post state ~actor req reqd target body))
+           request reqd
+       | None ->
        match Keeper_shutdown_reconciliation.route (Http.Request.path request) with
        | Some target ->
          with_token_permission_auth ~permission:Keeper_shutdown_reconciliation.permission

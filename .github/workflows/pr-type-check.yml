@@ -5,31 +5,22 @@ name: PR type-check (dune build @check)
 # check (changelog format only) and each then broke main's type-check:
 # #47672 (e745acf9), #47639 (4845937b), #47661 (804372bf).
 #
-# This is deliberately NOT a required status check. A `paths:` filtered
-# workflow produces no check context for PRs outside the filter, and a
-# required check that never appears blocks those PRs forever.
+# 2026-11-10: the `paths:` filter moved from the workflow trigger into a
+# `changes` job. A workflow-level filter produced no check context at all
+# for PRs outside the filter (observed: #51107, changelog+toml only, no
+# type-check check-run), and that absence is exactly what kept this check
+# from being made required — a required check that never appears blocks
+# those PRs forever. #50746 merged two minutes after its type-check went
+# red because nothing required the result (10:45:48Z failure, 10:48:19Z
+# merge). Operator decision (ask aske1aa44782fd05693, choice c1,
+# 2026-11-10): adopt in two stages — first give every PR a check context
+# (this change), verify the skip path, then require the check in the
+# branch ruleset.
 on:
   # workflow_dispatch lets a maintainer re-check a branch on demand, and is the
   # only way to time this job without opening a throwaway source change.
   workflow_dispatch: {}
-  pull_request:
-    paths:
-      # The root `dune` file builds every tracked directory, so sources are
-      # matched repository-wide. A list of directories missed packages/,
-      # tools/ and benchmarks/ (#48323).
-      - '**/*.ml'
-      - '**/*.mli'
-      - '**/*.inc'
-      - '**/dune'
-      - 'dune-project'
-      - '*.opam'
-      - '.github/actions/**'
-      # Include this file so a change to the workflow itself is checked
-      # by the workflow itself; otherwise such a PR gets no check-run.
-      - '.github/workflows/pr-type-check.yml'
-      # docs/evidence keeps .ml snapshots as data. No dune file under docs/
-      # builds them, so a docs-only PR needs no type-check.
-      - '!docs/**'
+  pull_request: {}
 
 permissions:
   contents: read
@@ -41,7 +32,55 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  changes:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      src: ${{ steps.filter.outputs.src }}
+    steps:
+      # No checkout: the PR file list comes from the API, so an out-of-scope
+      # PR costs one short job instead of a toolchain build.
+      - name: Match PR files against source patterns
+        id: filter
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -z "${PR_NUMBER:-}" ]; then
+            echo "workflow_dispatch — no PR to filter, running the check"
+            echo "src=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          src=false
+          while IFS= read -r f; do
+            case "$f" in
+              # docs/evidence keeps .ml snapshots as data. No dune file under
+              # docs/ builds them, so a docs-only PR needs no type-check.
+              docs/*) continue ;;
+              # The root `dune` file builds every tracked directory, so
+              # sources are matched repository-wide (#48323).
+              *.ml|*.mli|*.inc) src=true; break ;;
+              dune|*/dune|dune-project) src=true; break ;;
+              *.opam) src=true; break ;;
+              # A change to the reusable actions or to this workflow itself
+              # must be checked by this workflow.
+              .github/actions/*) src=true; break ;;
+              .github/workflows/pr-type-check.yml) src=true; break ;;
+            esac
+          done < <(gh api --paginate \
+            "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}/files?per_page=100" \
+            --jq '.[].filename')
+          echo "src=$src" >> "$GITHUB_OUTPUT"
+
   type-check:
+    needs: [changes]
+    # Skipped here rather than at the workflow level so the check context
+    # always exists; a skipped conclusion satisfies a required status check.
+    if: needs.changes.outputs.src == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     env:

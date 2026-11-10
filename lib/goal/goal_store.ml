@@ -752,7 +752,12 @@ let flush_pending_events_locked config =
       | Available { pending_events = []; _ } -> Ok ()
       | Available state ->
           let path = goal_events_path config in
-          let outcome = Fs_compat.update_private_file_durable_locked_result path (fun existing ->
+          let append_attempted = ref false in
+          let outcome = Fun.protect
+            ~finally:(fun () ->
+              if !append_attempted then
+                Goal_event_observation.attempted ~base_path:config.Workspace_utils.base_path)
+            (fun () -> Fs_compat.update_private_file_durable_locked_result path (fun existing ->
             let inspect () =
               if existing <> "" && not (String.ends_with ~suffix:"\n" existing) then
                 Error "goal event ledger has an incomplete tail"
@@ -791,7 +796,10 @@ let flush_pending_events_locked config =
                   | [] -> None, false
                   | events -> Some (String.concat "" (List.map (fun event ->
                       Yojson.Safe.to_string (pending_event_to_yojson event) ^ "\n") events)), true in
-                suffix, Ok changed) in
+                (* The transaction may leave visible bytes after an uncertain
+                   write. A read, empty outbox or duplicate suffix owes no hint. *)
+                if changed then append_attempted := true;
+                suffix, Ok changed)) in
           let appended = match outcome with
             | Fs_compat.Private_file_succeeded result -> result
             | Private_file_succeeded_with_cleanup_failure { value; cleanup_failure } ->

@@ -1,0 +1,24 @@
+ 운영  작업  ▸키퍼  기능·플러그인  워크스페이스  시스템
+
+  MASC Keepers (34)                 HTTP [connected] · reading confirmations +2
+   ▸list  state  cause  time  memory  age  runtime  24h
+   ! 0 attention   ◂ 4 failing   ▶ 5 active   ◌ 17 waiting   ○ 8 inactive
+   fleet last observed: ok   running 25/28   turn capacity 28/28
+   fleet reading: stale · scans failing for 29s (refresh timed out)
+   failing 3 (retrying 3)   paused 6   awaiting verdict 16
+    KEEPER           NOW             AGE DETAIL
+ ›  build-maniac     Ⅱ paused      2d00h Board 알림 대기 (즉시) (+7 more) · he…
+    code-reviewer    ◐ preparing      1s ↩ delegate result · ◷ schedule · code…
+    code-…er-brother > streaming      4s 대화 요청 1건 대기
+    code-…wer-father ■ tool wait      6s 진행 중인 대화 요청
+    code-…wer-mother ◔ model wait  3m25s 이전 실행 결과 회수 (즉시) (+80 more)
+    code-…wer-sister ○ idle          46s
+    code-…ewer-uncle > streaming   1m56s 이전 실행 결과 회수 (즉시) (+158 more)
+    context-reviewer ■ tool wait     14s ◷ schedule · Board 알림 대기 (+5 more)
+    e-mas…the-leader > streaming      6s ◂ 17m39s · connection · glm-coding.gl…
+    ego-a…61101-0213 ○ idle        7h22m
+   [keepers 1–10/34]
+ ──────────────────────────────────────────────────────────────────────────────
+  v:view  o:order  Enter / Right:story / detail  Esc:dashboard  q:quit  …?
+ 일정 정보가 오래됐을 수 있음
+ › to build-maniac   (i to write)

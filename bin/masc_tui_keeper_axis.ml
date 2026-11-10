@@ -160,3 +160,28 @@ let outside (state : Masc_tui_types.state) ~now ~keeper_name : Masc_tui_keeper_l
 let next_run (state : Masc_tui_types.state) ~keeper_name =
   Masc_tui_keeper_next_run.find (get_schedule_index state) ~keeper_name
 ;;
+
+let next_recurrence (state : Masc_tui_types.state) ~keeper_name =
+  match state.schedules_agenda_error, state.schedules_agenda, next_run state ~keeper_name with
+  | None, Some snapshot, Masc_tui_keeper_next_run.Scheduled_at due
+    when snapshot.scs_read_error = None ->
+      let matching = List.filter (fun (row : Masc_tui_types.schedule_row) ->
+        row.sch_payload_keeper_name = Some keeper_name && row.sch_runner_hold = None
+        && Masc_tui_types.schedule_row_due_time row = Some due
+        && (match Schedule_domain.schedule_status_of_string row.sch_status with
+            | Ok (Schedule_domain.Scheduled | Schedule_domain.Running) | Error _ -> true
+            | Ok (Schedule_domain.Due | Schedule_domain.Succeeded | Schedule_domain.Failed
+                 | Schedule_domain.Cancelled | Schedule_domain.Expired) -> false)) snapshot.scs_rows in
+      (match matching with
+       | [row] -> (match Schedule_domain.schedule_status_of_string row.sch_status, row.sch_recurrence with
+           | Ok (Schedule_domain.Scheduled | Schedule_domain.Running), Ok recurrence -> Some recurrence
+           | Ok (Schedule_domain.Scheduled | Schedule_domain.Running), Error _
+           | Ok (Schedule_domain.Due | Schedule_domain.Succeeded | Schedule_domain.Failed
+                | Schedule_domain.Cancelled | Schedule_domain.Expired), (Ok _ | Error _)
+           | Error _, (Ok _ | Error _) -> None)
+       | [] | _ :: _ :: _ -> None)
+  | (Some _ | None), (Some _ | None),
+      (Masc_tui_keeper_next_run.Scheduled_at _ | Masc_tui_keeper_next_run.No_schedule
+       | Masc_tui_keeper_next_run.Late_since _ | Masc_tui_keeper_next_run.Held_current _
+       | Masc_tui_keeper_next_run.Held_as_of _ | Masc_tui_keeper_next_run.Not_before _
+       | Masc_tui_keeper_next_run.Unknown) -> None

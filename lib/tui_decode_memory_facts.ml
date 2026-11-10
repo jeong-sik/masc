@@ -66,6 +66,35 @@ type memory_fact_snapshot = {
   mfs_events_read_error : string option;
 }
 
+type memory_fact_count_scope =
+  | All_facts
+  | Ordinary_facts of Keeper_memory_os_types.category option
+  | Source_facts
+  | Dropped_facts
+
+let memory_fact_count ~complete snapshot scope =
+  if not complete then None else
+  let ordinary category = match snapshot.mfs_ordinary with
+    | Memory_store_read_error _ -> None
+    | Memory_store_absent -> Some 0
+    | Memory_store_present store ->
+        Some (List.length (match category with
+          | None -> store.mos_facts
+          | Some category -> List.filter (fun fact -> fact.mf_category = category) store.mos_facts)) in
+  let source dropped = match snapshot.mfs_source with
+    | Memory_store_read_error _ -> None
+    | Memory_store_absent -> Some 0
+    | Memory_store_present store ->
+        Some (if dropped then List.length store.mss_invalidations else List.length store.mss_facts) in
+  match scope with
+  | Ordinary_facts category -> ordinary category
+  | Source_facts -> source false
+  | Dropped_facts -> source true
+  | All_facts ->
+      (match ordinary None, source false, source true with
+       | Some ordinary, Some source, Some dropped -> Some (ordinary + source + dropped)
+       | None, _, _ | _, None, _ | _, _, None -> None)
+
 (* The server computes these from the keeper's memory-events sidecar and
    never stores them (RFC-0418). This side shows the record as it is. *)
 let decode_memory_fact_events json =
@@ -185,7 +214,8 @@ let decode_memory_fact_snapshot json =
   in
   Ok { mfs_keeper; mfs_ordinary; mfs_source; mfs_events_read_error }
 
-let merge_keeper_memory_facts loads =
+let merge_keeper_memory_facts
+    ~(refused : Tui_decode_memory_health.memory_keeper_refusal list) loads =
   let step (ord, src, invals, event_errors, unread) (keeper_name, load) =
     match load with
     | Error detail -> ord, src, invals, event_errors, (keeper_name, detail) :: unread
@@ -246,15 +276,27 @@ let merge_keeper_memory_facts loads =
          | errors -> Some (String.concat "; " errors))
     }
   in
+  let failures =
+    List.rev_map (fun (keeper, detail) -> Some keeper, detail) unread
+    @ List.map (fun (refusal : Tui_decode_memory_health.memory_keeper_refusal) ->
+        refusal.mkr_keeper_id, refusal.mkr_reason) refused
+  in
   let unread_summary =
-    match List.rev unread with
+    match failures with
     | [] -> None
     | failures ->
+      let named = List.filter_map fst failures |> List.sort_uniq String.compare in
+      let unidentified = List.fold_left
+          (fun count (keeper, _) -> match keeper with
+            | None -> count + 1
+            | Some _ -> count)
+          0 failures in
       Some
         (Printf.sprintf "%d of %d keepers not read: %s"
-           (List.length (List.sort_uniq String.compare (List.map fst failures)))
-           (List.length loads)
+           (List.length named + unidentified)
+           (List.length loads + List.length refused)
            (String.concat "; "
-              (List.map (fun (keeper_name, detail) -> keeper_name ^ ": " ^ detail) failures)))
+              (List.map (fun (keeper, detail) ->
+                 Option.value keeper ~default:"unidentified keeper" ^ ": " ^ detail) failures)))
   in
   snapshot, unread_summary

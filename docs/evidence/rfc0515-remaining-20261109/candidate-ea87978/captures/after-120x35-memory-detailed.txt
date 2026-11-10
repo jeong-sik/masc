@@ -1,0 +1,35 @@
+ 운영  작업  ▸키퍼  기능·플러그인  워크스페이스  시스템
+
+  MASC Keepers (3)                                                                                     HTTP [connected]
+   list  state  cause  time  ▸memory  age  runtime  24h
+ ✓ 1 recovered ▪  ○ 1 paused ·  ? 1 unknown ?
+     fleet fail/30m max 1             ··············█··█··█··· ┃              ┃ ························· max 0
+   fleet blocked   running 0/2   turn capacity 0/2   keeper bootstrap off   proactive every 5m
+   paused 1
+   not running: quietproof, recoveredproof
+     keeper                           ◂ turns 12h          30m ┃ librarian    ┃ lag · unread turns ▹      digest    gap
+ ▌ ■ world · shared                   ledger + briefing        ┃ ◷ pending    ┃ ? absent                  ?           ?
+ ▌ − MEMORY FOLLOWING 3                                        ┃ 3            ┃ Σ lag 0
+ ▌ ○ pausedproof                      ························ ┃ stopped      ┃ ························· —
+ ▌ ● quietproof                       ························ ┃ stopped      ┃ ························· —
+ ▌ ● recoveredproof                   ··············█··█··▄▁·· ┃ stopped      ┃ ························· —
+                                                               ┃              ┃
+                                                               ┃              ┃
+                                                               ┃              ┃
+                                                               ┃              ┃
+                                                               ┃              ┃
+                                                               ┃              ┃
+                                                               ┃              ┃
+                                                               ┃              ┃
+                                                               ┃              ┃
+                                                               ┃              ┃
+                                                               ┃              ┃
+                                                               ┃              ┃
+                                                               ┃              ┃
+                                                               ┃              ┃
+                                                               ┃              ┃
+                                                               ┃              ┃
+ ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  WORKTREE server (not the root build)  ACTION NEEDED 2  v:view  o:order  Enter:world  Esc:dashboard  q:quit  …?
+ 일정 정보가 오래됐을 수 있음
+ › no keeper selected

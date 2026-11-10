@@ -1,0 +1,32 @@
+{
+  "run_id": 42607821655,
+  "run_attempt": 1,
+  "workflow_head": "6d0d6dcb4dae3d7353e50aadb9dd8510f05b6a54",
+  "candidate_source": "ea87978b18e3fc6c4a143cf8e74de8cbc495d67e",
+  "artifact_id": 13669083314,
+  "archive_sha256": "76237a8f8c6ba3f57b94eefc5fae38c73cfd03348458a19138178d1a7f3d30f9",
+  "sha256sums_entries_verified": 14,
+  "executables": {
+    "masc-tui": {
+      "build_commit": "ea87978b18e3fc6c4a143cf8e74de8cbc495d67e",
+      "sha256": "f0e09dfd1df96f5a477f9e2f434b2bacaad2cac93dad57009ae4aefe2f2ab9b5"
+    },
+    "masc": {
+      "build_commit": "ea87978b18e3fc6c4a143cf8e74de8cbc495d67e",
+      "sha256": "0fae0228912abef6b6510eb3e24acde3c6a36aeba09896505c3bf4c567f9a841"
+    }
+  },
+  "probe": {
+    "source_commit": "ea87978b18e3fc6c4a143cf8e74de8cbc495d67e",
+    "source_tree": "a71643d13da65ff683aa753a5014331cb78f5d7c",
+    "workflow_head": "6d0d6dcb4dae3d7353e50aadb9dd8510f05b6a54",
+    "platform": "macos-arm64",
+    "run_id": "42607821655",
+    "run_attempt": "1",
+    "release_verified": false,
+    "published": false
+  },
+  "installed": false,
+  "candidate_captures": false,
+  "source_tree_verified": "a71643d13da65ff683aa753a5014331cb78f5d7c"
+}

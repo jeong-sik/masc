@@ -126,7 +126,7 @@ let http1_dashboard_asset_response path =
 ;;
 
 let http2_dashboard_asset_response path =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   let ledger =
     Masc.Http_h2_response_ledger.create
@@ -176,9 +176,18 @@ let http2_dashboard_asset_response path =
   H2.Body.Writer.close request_body;
   let server =
     H2.Server_connection.create (fun h2_reqd ->
+      (* The asset is answered at once, far inside the 90 s bound. *)
+      let stream_end =
+        Masc.Http_h2_stream.Stream_end.create
+          ~stream_sw:sw
+          ~clock:(Eio.Stdenv.clock env)
+          ~stalled_after_s:Server_mcp_transport_http_headers.sse_stalled_after_s
+          ~request:(H2.Reqd.request h2_reqd)
+          h2_reqd
+      in
       let reqd =
         Masc.Http_reqd.of_h2
-          ~stream_sw:sw
+          ~stream_end
           ~ledger:(Masc.Http_h2_response_ledger.current_exn ())
           h2_reqd
       in

@@ -1068,7 +1068,7 @@ let render_runtime (state : state) =
       let notes = runtime_picker_notice_rows ~cols state in
       let hints =
         Masc_tui_keys.footer_hints_runtime ~mode:state.runtime_mode
-          ~picker:state.runtime_lane_pick
+          ~picker:(Some picker)
       in
       surface_chrome ~overflow:Fits state ~terminal_rows ~cols
         ~surface_key:"runtime" ~title:(runtime_picker_title ~ko picker.rlp_pick)

@@ -347,7 +347,7 @@ val footer_hints_code : pane:code_pane -> string
 
 val footer_hints_runtime :
   mode:Masc_tui_types.runtime_mode ->
-  picker:(Masc_tui_types.runtime_lane_pick * Masc_tui_pick_list.t) option ->
+  picker:Masc_tui_types.runtime_picker_projection option ->
   string
 (** The Runtime footer for the reading or its active picker. A picker names
     Enter's create, append or replace action; while filtering, letters belong

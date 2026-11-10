@@ -2051,13 +2051,14 @@ let footer_hints_runtime ~(mode : runtime_mode) ~picker =
       List.filter_map (runtime_footer_binding ~mode) runtime_keys
       @ row_list_edges @ listing_meta
       |> hints_of_bindings
-  | Some (pick, list) ->
+  | Some picker ->
+      let pick = picker.rlp_pick in
       let enter = match pick with
         | Pick_new_lane _ -> "create"
         | Pick_conversation_lane _ | Pick_exact_lane _ | Pick_media_failover -> "append"
         | Pick_exact_lane_replacement _ | Pick_route_default -> "replace"
       in
-      let controls = match list.Masc_tui_pick_list.query with
+      let controls = match picker.rlp_filter with
         | None ->
             [ b Act "e / E / Esc" "cancel"
             ; b Navigate "j/k" "move"

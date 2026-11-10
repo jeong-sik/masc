@@ -29,7 +29,7 @@ import {
   type LogEntry,
   type LogsError,
 } from '../api/dashboard-logs'
-import { dashboardRuntime, type DashboardHttp } from '../api/effect-http'
+import { dashboardRuntime, DashboardTransportError, type DashboardHttp } from '../api/effect-http'
 import {
   patchRuntimeLane,
   patchRuntimeMediaFailover,
@@ -1410,7 +1410,7 @@ function LogViewer() {
     }
 
     settingsLogsResource.reset()
-    const dispose = setupObservationRefresh(tick, { topics: ['logs'] })
+    const dispose = setupObservationRefresh(tick, { topics: ['logs'], cancelRead: () => settingsLogsResource.cancel(), resetRead: () => settingsLogsResource.reset(), readError: () => { const s = settingsLogsResource.state.peek(); return s._tag === 'Failure' ? (s.error instanceof DashboardTransportError ? s.error.cause : s.error) : null } })
 
     return () => {
       dispose()

@@ -148,7 +148,7 @@ export function GateMonitor() {
     resource.load(async (signal) => fetchGateToolEvents(windowMinutes.value, { signal }))
 
   useEffect(() => {
-    const disposeAutoRefresh = setupObservationRefresh(load, { topics: ['gate_tool_events', 'gate'] })
+    const disposeAutoRefresh = setupObservationRefresh(load, { topics: ['gate_tool_events', 'gate'], readError: () => resource.readError(), cancelRead: () => resource.cancel(), resetRead: () => resource.reset() })
     return () => {
       disposeAutoRefresh()
       resource.cancel()

@@ -14,7 +14,7 @@ import {
   type LogsError,
   type LogsRequest,
 } from '../api/dashboard-logs'
-import { dashboardRuntime, type DashboardHttp } from '../api/effect-http'
+import { dashboardRuntime, DashboardTransportError, type DashboardHttp } from '../api/effect-http'
 import { VirtualList } from './common/virtual-list'
 import { asRecord, asNullableString, mergeRouteRecord, hasRouteContext, type MutableRouteContext } from './common/normalize'
 import { TextInput } from './common/input'
@@ -871,7 +871,7 @@ export function LogViewer() {
       if (!autoRefresh.value) { void loadLogs('reset'); return }
       disposeObservation = setupObservationRefresh(
         () => loadLogs(Option.isSome(remotePrevious(logResource.state.value)) ? 'delta' : 'reset'),
-        { topics: ['logs'] },
+        { topics: ['logs'], cancelRead: () => logResource.cancel(), resetRead: () => logResource.reset(), readError: () => { const s = logResource.state.peek(); return s._tag === 'Failure' ? (s.error instanceof DashboardTransportError ? s.error.cause : s.error) : null } },
       )
     }
 

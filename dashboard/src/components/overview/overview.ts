@@ -670,16 +670,17 @@ export function buildOverviewTelemetrySnapshot({
 
 const overviewTelemetryResource: AsyncResource<OverviewTelemetrySnapshot> = createAsyncResource()
 
-function loadOverviewTelemetry(nowMs = Date.now()): Promise<void> {
+function loadOverviewTelemetry(nowMs = Date.now(), signal?: AbortSignal): Promise<void> {
   return overviewTelemetryResource.load(async () => {
     const sinceMs = nowMs - OVERVIEW_TELEMETRY_WINDOW_MINUTES * 60 * 1000
     const [telemetry, summary] = await Promise.all([
       fetchTelemetry({
         source: 'agent_core_event',
+        signal,
         since_ms: sinceMs,
         n: OVERVIEW_TELEMETRY_EVENT_SAMPLE_LIMIT,
       }),
-      fetchTelemetrySummary(),
+      fetchTelemetrySummary({ signal }),
     ])
     return buildOverviewTelemetrySnapshot({
       entries: telemetry.entries,
@@ -1312,7 +1313,7 @@ function OverviewDomainSection({
 export function Overview() {
   useNowSecondsTicker()
   useEffect(() => {
-    const dispose = setupObservationRefresh(() => loadOverviewTelemetry(), { topics: ['telemetry'] })
+    const dispose = setupObservationRefresh(signal => loadOverviewTelemetry(Date.now(), signal), { topics: ['telemetry'], cancelRead: () => overviewTelemetryResource.reset(), readError: () => overviewTelemetryResource.readError(), resetRead: () => overviewTelemetryResource.reset() })
     // Overview and the shell consume one shared full-health resource. The
     // subscriber owns ref-counted refresh lifetime, so mounting both surfaces
     // never creates a second backend poller.

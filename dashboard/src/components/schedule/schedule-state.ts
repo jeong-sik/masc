@@ -52,13 +52,14 @@ export function loadScheduledAutomation(
     if (!fresh) return loadInFlight
     if (freshLoadQueued) return freshLoadQueued
 
-    freshLoadQueued = loadInFlight
+    const queued: Promise<void> = loadInFlight
       .catch(() => undefined)
-      .then(() => loadScheduledAutomation())
+      .then(() => freshLoadQueued === queued ? loadScheduledAutomation() : undefined)
       .finally(() => {
-        freshLoadQueued = null
+        if (freshLoadQueued === queued) freshLoadQueued = null
       })
-    return freshLoadQueued
+    freshLoadQueued = queued
+    return queued
   }
 
   let request: Promise<void>
@@ -72,6 +73,12 @@ export function loadScheduledAutomation(
   return request
 }
 
+function cancelScheduledAutomationRead(): void {
+  scheduledAutomationResource.cancel()
+  loadInFlight = null
+  freshLoadQueued = null
+}
+
 let subscriberCount = 0
 let stopRefresh: (() => void) | null = null
 
@@ -79,7 +86,7 @@ let stopRefresh: (() => void) | null = null
 export function subscribeScheduledAutomationRefresh(): () => void {
   subscriberCount += 1
   if (subscriberCount === 1) {
-    stopRefresh = setupObservationRefresh(() => loadScheduledAutomation(), { topics: ['scheduled_automation'] })
+    stopRefresh = setupObservationRefresh(() => loadScheduledAutomation(), { topics: ['scheduled_automation'], readError: () => scheduledAutomationResource.readError(), cancelRead: cancelScheduledAutomationRead, resetRead: () => { cancelScheduledAutomationRead(); scheduledAutomationResource.reset() } })
   }
   return () => {
     subscriberCount -= 1

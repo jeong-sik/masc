@@ -33,26 +33,25 @@ export type KeeperDetailEvidenceState<T> = EvidenceState<T>
 export function useKeeperCompositeEvidence(keeperName: string): KeeperDetailEvidenceState<KeeperCompositeSnapshot> {
   const [evidence, setEvidence] = useState<KeeperDetailEvidenceState<KeeperCompositeSnapshot>>(loadingEvidence)
   useEffect(() => {
-    const controller = new AbortController()
     let cancelled = false
     setEvidence(loadingEvidence)
-    const refresh = async () => {
+    const refresh = async (signal: AbortSignal) => {
       try {
-        const result = await fetchKeeperComposite(keeperName, { signal: controller.signal })
-        if (!cancelled && !controller.signal.aborted) {
+        const result = await fetchKeeperComposite(keeperName, { signal: signal })
+        if (!cancelled && !signal.aborted) {
           setEvidence(applyFetchSucceeded(result, Date.now()))
         }
       } catch (err) {
-        if (!cancelled && !controller.signal.aborted) {
+        if (!cancelled && !signal.aborted) {
           const message = errorMessageOr(err, 'composite fetch failed')
           setEvidence((current) => applyFetchFailed(current, message, Date.now()))
+          throw err
         }
       }
     }
-    const cleanup = setupObservationRefresh(refresh, { topics: ['keeper_composite'], keeperName })
+    const cleanup = setupObservationRefresh(refresh, { topics: ['keeper_composite'], keeperName, resetRead: () => setEvidence(loadingEvidence) })
     return () => {
       cancelled = true
-      controller.abort()
       cleanup()
     }
   }, [keeperName])
@@ -65,29 +64,28 @@ export function useKeeperRuntimeTraceEvidence(keeperName: string): KeeperDetailE
   // a config save bumps it, re-running the effect below to re-fetch the trace.
   const refreshNonce = keeperRuntimeTraceRefreshNonce.value
   useEffect(() => {
-    const controller = new AbortController()
     let cancelled = false
     setEvidence(loadingEvidence)
-    const refresh = async () => {
+    const refresh = async (signal: AbortSignal) => {
       try {
         const result = await fetchKeeperRuntimeTrace(keeperName, {
           limit: 200,
-          signal: controller.signal,
+          signal: signal,
         })
-        if (!cancelled && !controller.signal.aborted) {
+        if (!cancelled && !signal.aborted) {
           setEvidence(applyFetchSucceeded(result, Date.now()))
         }
       } catch (err) {
-        if (!cancelled && !controller.signal.aborted) {
+        if (!cancelled && !signal.aborted) {
           const message = errorMessageOr(err, 'runtime trace fetch failed')
           setEvidence((current) => applyFetchFailed(current, message, Date.now()))
+          throw err
         }
       }
     }
-    const cleanup = setupObservationRefresh(refresh, { topics: ['keeper_runtime_trace'], keeperName })
+    const cleanup = setupObservationRefresh(refresh, { topics: ['keeper_runtime_trace'], keeperName, resetRead: () => setEvidence(loadingEvidence) })
     return () => {
       cancelled = true
-      controller.abort()
       cleanup()
     }
   }, [keeperName, refreshNonce])

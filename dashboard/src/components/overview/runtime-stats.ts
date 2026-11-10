@@ -143,43 +143,43 @@ export function OverviewRuntimeStats() {
     if (authority === null || usageCatalog === null || !usageCatalog.some(reportsUsageWindows)) return
     const controller = new AbortController()
     const current = () => !controller.signal.aborted && executionWorkspaceAuthority.peek() === authority
-    let inFlight = false
     const publish = (state: UsageState) => { if (current()) setUsageReading({ authority, catalog: usageCatalog, state }) }
     publish({ kind: 'loading' })
-    const refresh = async () => {
-      if (!current() || inFlight) return
-      inFlight = true
+    const refresh = async (signal: AbortSignal) => {
+      if (!current()) return
       try {
-        const value = await fetchRuntimeResolved({ signal: controller.signal })
-        publish({ kind: 'ready', value })
+        const value = await fetchRuntimeResolved({ signal: AbortSignal.any([signal, controller.signal]) })
+        if (!signal.aborted) publish({ kind: 'ready', value })
       } catch (error) {
+        if (signal.aborted) return
         publish({ kind: 'error', message: error instanceof Error ? error.message : String(error) })
-      } finally { inFlight = false }
+        throw error
+      }
     }
-    const stopRefresh = setupObservationRefresh(refresh, { topics: ['runtime_resolved'] })
+    const stopRefresh = setupObservationRefresh(refresh, { topics: ['runtime_resolved'], resetRead: () => setUsageReading(null) })
     return () => { stopRefresh(); controller.abort() }
   }, [authority, usageCatalog, generation])
   useEffect(() => {
     if (authority === null) return
     const controller = new AbortController()
     const current = () => !controller.signal.aborted && executionWorkspaceAuthority.peek() === authority
-    let inFlight = false
     const publish = (state: State) => { if (current()) setReading({ authority, state }) }
     publish({ kind: 'loading' })
-    const refresh = async () => {
-      if (!current() || inFlight) return
-      inFlight = true
+    const refresh = async (signal: AbortSignal) => {
+      if (!current()) return
       try {
-        const value = await fetchRuntimeModelMetrics(windowMinutes, 0, { signal: controller.signal })
-        publish({
+        const value = await fetchRuntimeModelMetrics(windowMinutes, 0, { signal: AbortSignal.any([signal, controller.signal]) })
+        if (!signal.aborted) publish({
           kind: value.cost_ledger_read?.state === 'pending' ? 'pending' : 'ready',
           value, receivedAt: new Date(),
         })
       } catch (error) {
+        if (signal.aborted) return
         publish({ kind: 'error', message: error instanceof Error ? error.message : String(error) })
-      } finally { inFlight = false }
+        throw error
+      }
     }
-    const stopRefresh = setupObservationRefresh(refresh, { topics: ['model_metrics'] })
+    const stopRefresh = setupObservationRefresh(refresh, { topics: ['model_metrics'], resetRead: () => setReading(null) })
     return () => { stopRefresh(); controller.abort() }
   }, [authority, windowMinutes, generation])
   const accounts = new Map<string, DashboardRuntimeProviderSnapshot>()

@@ -182,10 +182,12 @@ export function KeeperMemoryHealth() {
     // useEffect is appropriate here: this is external-system synchronization
     // (committed memory changes over the observation stream), not derived state.
     // The shared resource admits only the latest load and retires it on cleanup.
-    const refresh = (_signal: AbortSignal) => {
-      void resource.load(() => fetchKeeperMemoryHealth())
-    }
-    const cleanup = setupObservationRefresh(refresh, { topics: ['keeper_memory_health'] })
+    const refresh = (signal: AbortSignal) => resource.load(() => fetchKeeperMemoryHealth({ signal }))
+    const cleanup = setupObservationRefresh(refresh, {
+      topics: ['keeper_memory_health'],
+      readError: () => resource.readError(),
+      cancelRead: () => resource.cancel(), resetRead: () => resource.reset(),
+    })
 
     return () => {
       resource.cancel()

@@ -592,37 +592,19 @@ function healthChipClass(tone: DashboardHealthChipTone): string {
 
 export function DashboardHealthStrip({ hidden = false }: { hidden?: boolean }) {
   useEffect(() => {
-    let disposed = false
-    let inFlight = false
-    let activeController: AbortController | null = null
-    const refresh = async () => {
-      if (inFlight) return
-      inFlight = true
-      activeController = new AbortController()
+    return setupObservationRefresh(async signal => {
       try {
-        const response = await fetchDashboardRuntimeProbe(false, { signal: activeController.signal })
-        if (!disposed) {
-          shellRuntimeProviderProbe.value = response.probe
-          shellRuntimeProviderProbeError.value = null
-        }
+        const response = await fetchDashboardRuntimeProbe(false, { signal })
+        if (signal.aborted) return
+        shellRuntimeProviderProbe.value = response.probe
+        shellRuntimeProviderProbeError.value = null
       } catch (error) {
-        const name = typeof error === 'object' && error !== null && 'name' in error
-          ? String((error as { name?: unknown }).name)
-          : ''
-        if (!disposed && name !== 'AbortError') {
-          shellRuntimeProviderProbe.value = null
-          shellRuntimeProviderProbeError.value = error instanceof Error ? error.message : String(error)
-        }
-      } finally {
-        inFlight = false
+        if (signal.aborted) return
+        shellRuntimeProviderProbe.value = null
+        shellRuntimeProviderProbeError.value = error instanceof Error ? error.message : String(error)
+        throw error
       }
-    }
-    const dispose = setupObservationRefresh(refresh, { topics: ['runtime_probe'] })
-    return () => {
-      disposed = true
-      dispose()
-      activeController?.abort()
-    }
+    }, { topics: ['runtime_probe'], resetRead: () => { shellRuntimeProviderProbe.value = null; shellRuntimeProviderProbeError.value = null } })
   }, [])
 
   const live = dashboardWsReady.value

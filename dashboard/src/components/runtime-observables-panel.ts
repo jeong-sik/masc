@@ -131,27 +131,26 @@ export function RuntimeObservablesPanel() {
   useEffect(() => {
     // useEffect is appropriate here: external-system synchronization
     // (committed runtime changes), not derived state.
-    const controller = new AbortController()
 
-    const refresh = async () => {
+    const refresh = async (signal: AbortSignal) => {
       try {
-        const result = await fetchRuntimeObservables()
-        if (controller.signal.aborted) return
+        const result = await fetchRuntimeObservables({ signal })
+        if (signal.aborted) return
         setSnapshot(result)
         setError(null)
       } catch (err) {
-        if (controller.signal.aborted) return
+        if (signal.aborted) return
         setError(err instanceof Error ? err.message : 'runtime observables fetch failed')
+        throw err
       } finally {
-        if (!controller.signal.aborted) setLoading(false)
+        if (!signal.aborted) setLoading(false)
       }
     }
 
     setLoading(true)
-    const cleanup = setupObservationRefresh(refresh, { topics: ['runtime_observables'] })
+    const cleanup = setupObservationRefresh(refresh, { topics: ['runtime_observables'], resetRead: () => { setSnapshot(null); setError(null); setLoading(true) } })
 
     return () => {
-      controller.abort()
       cleanup()
     }
   }, [])

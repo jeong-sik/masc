@@ -61,6 +61,23 @@ let test_opened_inode_fence () = fixture (fun _env root ->
       fail (N.error_to_string error)
     | Ok watcher -> N.close watcher; fail "a different inode was registered silently"))
 
+let test_directory_permissions () = fixture (fun _env root ->
+  let path = Filename.concat root "source" in
+  write path "retained";
+  Eio.Switch.run (fun sw ->
+    let watcher = N.create ~sw ~targets:[target N.Directory root] |> require in
+    Fun.protect ~finally:(fun () -> Unix.chmod root 0o700) (fun () ->
+      Unix.chmod root 0o500;
+      (match N.await watcher |> require with
+      | N.Changed targets ->
+        check bool "directory permission change names its directory" true
+          (List.exists (fun t -> t.N.path = root && t.N.kind = N.Directory) targets)
+      | N.Coverage_lost _ -> fail "directory chmod lost watch coverage");
+      let current = target N.Directory root in
+      check int "reinventoried permissions reflect chmod" 0o500 (Unix.stat root).st_perm;
+      check bool "directory can be reinventoried after the hint" true
+        (current.N.path = root && Array.to_list (Sys.readdir root) = ["source"]))))
+
 let test_cancel_then_close () = fixture (fun env root ->
   let path = Filename.concat root "source" in write path "idle";
   Eio.Switch.run (fun sw ->
@@ -80,5 +97,6 @@ let () = run "native_file_change" [ "kernel", [
   test_case "in-place write with equal size and mtime" `Quick test_inplace_same_fingerprint;
   test_case "atomic replace uses a new native generation" `Quick test_atomic_replace_new_generation;
   test_case "opened inode matches inventory authority" `Quick test_opened_inode_fence;
+  test_case "directory permissions wake reinventory" `Quick test_directory_permissions;
   test_case "pending readiness cancellation and close" `Quick test_cancel_then_close;
 ] ]

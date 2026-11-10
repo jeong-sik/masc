@@ -2267,7 +2267,8 @@ let test_board_write_survives_composition_output_schema_failure
   | Ok [ comment ] ->
     check string "the failed consumer did not replay or undo the comment"
       "committed before schema refusal" comment.content;
-    check string "the production writer binds the Keeper author" meta.name comment.author;
+    check string "the production writer binds the Keeper author" meta.name
+      (Masc.Board.Agent_id.to_string comment.author);
     check string "the retained fact is this exact durable Board comment"
       (Board_tool_evidence.to_yojson (Board_tool_evidence.comment comment) |> Yojson.Safe.to_string)
       (Board_tool_evidence.to_yojson fact |> Yojson.Safe.to_string)

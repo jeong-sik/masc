@@ -48,9 +48,13 @@ type report =
   ; closed : int
   ; tool_results_appended : int
   ; unparseable : int
+        (** Of the histories read whole, which are those whose last request
+            awaits results. *)
   ; failed : int
-        (** Metadata, load, and commit failures only. [Unparseable] is counted
-            separately: it is a correct refusal, not a recovery failure. *)
+        (** Metadata, load, and commit failures only. A load failure is of the
+            head or the end of a history, or of a history read whole.
+            [Unparseable] is counted separately: it is a correct refusal, not
+            a recovery failure. *)
   ; outcomes : (string * keeper_outcome) list  (** In enumeration order. *)
   }
 

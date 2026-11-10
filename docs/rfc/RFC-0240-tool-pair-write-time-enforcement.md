@@ -521,10 +521,9 @@ and the only place that can be done for both graceful and hard death is
 or OOM.
 
 **Where.** Server boot already has the phase.
-`Keeper_persistence_prepare` runs `Restoring_shutdown` (`set_phase` at
-`lib/server/server_bootstrap_loops.ml:490`) then `Recovering_requests`
-(`:558`) **(verified 07-28)**. Closing belongs in `Recovering_requests`,
-before any keeper loop starts.
+`prepare_keeper_persistence` in `lib/server/server_bootstrap_loops.ml` sets
+`Restoring_shutdown` and then `Recovering_persistence`. Closing belongs in
+`Recovering_persistence`, before any keeper loop starts.
 
 **What.** Read how each restored checkpoint ends (RFC-0476 §3.5). When its
 last tool request awaits results, parse the whole history with `partition`. If

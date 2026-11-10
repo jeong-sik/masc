@@ -57,7 +57,8 @@ let test_opened_inode_fence () = fixture (fun _env root ->
   Eio.Switch.run (fun sw ->
     match N.create ~sw ~targets:[previous] with
     | Error N.Target_changed -> ()
-    | Error error -> fail (N.error_to_string error)
+    | Error ((N.Unsupported_platform | N.System_error _ | N.Ambiguous_watch_identity | N.Closed) as error) ->
+      fail (N.error_to_string error)
     | Ok watcher -> N.close watcher; fail "a different inode was registered silently"))
 
 let test_cancel_then_close () = fixture (fun env root ->

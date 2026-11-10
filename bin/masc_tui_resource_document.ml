@@ -266,33 +266,35 @@ let resource_document entry
     | None, Some parts ->
       let texts = text_parts parts in
       let text_selection = match selected_text_part texts text_cursor with
-        | Some (part, _) -> Printf.sprintf "Text %d/%d · part %d"
-            (text_cursor + 1) (List.length texts) part
-        | None -> "" in
+        | Some (part, _) -> Some (Printf.sprintf "Text %d/%d · part %d"
+            (text_cursor + 1) (List.length texts) part)
+        | None -> None in
       let images = Masc_tui_resource_images.images ~mime_type:resource.mime_type parts in
-      let selection = match List.nth_opt images image_cursor with
-        | Some (part, _) -> Printf.sprintf "Image %d/%d · part %d"
-            (image_cursor + 1) (List.length images) part
-        | None -> "" in
-      [], [Selection, Markdown_text (text_selection ^ "\n\n" ^ selection)]
+      let image_selection = match List.nth_opt images image_cursor with
+        | Some (part, _) -> Some (Printf.sprintf "Image %d/%d · part %d"
+            (image_cursor + 1) (List.length images) part)
+        | None -> None in
+      let selection = match List.filter_map Fun.id [text_selection; image_selection] with
+        | [] -> []
+        | labels -> [Selection, Markdown_text (String.concat "\n\n" labels)] in
+      [], selection
         @ List.concat (List.mapi (fun index part -> part_document (index + 1) part) parts) in
-  let confirmation = match confirmation with
-    | None -> ""
-    | Some status -> "\n\n**Confirmation:** " ^ Masc_tui_artifact_checks.description status in
+  let confirmation = Option.map (fun status ->
+    "**Confirmation:** " ^ Masc_tui_artifact_checks.description status) confirmation in
   let sharing = match entry, share_uncertain, shared with
-    | Catalog.Mcp _, (true | false), (Some _ | None) -> ""
+    | Catalog.Mcp _, (true | false), (Some _ | None) -> None
     | Catalog.Report _, true, (Some _ | None) ->
-      "\n\n**External sharing:** change unconfirmed; it may still apply. U shows the recorded change before confirmation."
-    | Catalog.Report _, false, None -> "\n\n**External sharing:** unknown (R: reread this revision)"
-    | Catalog.Report _, false, Some true -> "\n\n**External sharing:** last observed enabled (P: revoke)"
-    | Catalog.Report _, false, Some false -> "\n\n**External sharing:** last observed private (P: enable)" in
+      Some "**External sharing:** change unconfirmed; it may still apply. U shows the recorded change before confirmation."
+    | Catalog.Report _, false, None -> Some "**External sharing:** unknown (R: reread this revision)"
+    | Catalog.Report _, false, Some true -> Some "**External sharing:** last observed enabled (P: revoke)"
+    | Catalog.Report _, false, Some false -> Some "**External sharing:** last observed private (P: enable)" in
   let link_notice, public_link = match public_url with
-    | Some (Ok url) -> "", "\n\n**Public link:** `" ^ url ^ "` · Y: copy (origin not verified)"
-    | Some (Error detail) -> "\n\n**Public link unavailable:** " ^ detail, ""
-    | None -> "", "" in
-  let report_status = confirmation ^ sharing ^ link_notice in
-  let report_status = if report_status = "" then []
-    else [Report_status, Markdown_text report_status] in
+    | Some (Ok url) -> None, "\n\n**Public link:** `" ^ url ^ "` · Y: copy (origin not verified)"
+    | Some (Error detail) -> Some ("**Public link unavailable:** " ^ detail), ""
+    | None -> None, "" in
+  let report_status = match List.filter_map Fun.id [confirmation; sharing; link_notice] with
+    | [] -> []
+    | notices -> [Report_status, Markdown_text (String.concat "\n\n" notices)] in
   let metadata = if metadata_expanded then
       [Metadata, Markdown_text (details ^ public_link ^ "\n\n---")]
     else [] in

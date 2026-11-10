@@ -337,11 +337,20 @@ are unchanged. Source anchors keep separate notice origins and continue at the
 first actual document block when preparation chrome disappears. A returned
 empty part list remains distinct from unread or failed content.
 
+The d58145cf matching server/TUI reached the JSON body on the narrow first page,
+and its report information/source actions remained readable. A nonempty private
+report still had no body on the 36x20 first page: generated leading status space
+and an absent image-selection paragraph occupied four rows. The source now omits
+those empty pieces while preserving every confirmation and sharing notice.
+This final spacing change still needs matching execution observation.
+
 Local OCaml 5.5.1 parsing and `git diff --check` pass. The changed Help registry
-still needs its actual generated key reference. Independent source reviews,
-matching candidate build and manual interaction, failure/retained and nonempty
-states, installation and GUI display are separate work. No wording/layout/
-row-order tests were added, and the full 23-surface scope remains open.
+still needs its actual generated key reference. The native `resource-reading`
+run 42782496683 succeeded for source d58145cf only; its four targeted suites and
+manual PTY captures do not certify the rebased candidate or installed GUI.
+Independent review of the final delta, failure/retained and nonempty states,
+installation and GUI display remain separate work. No wording/layout/row-order
+tests were added, and the full 23-surface scope remains open.
 
 ## Tools catalog and volume reading (#50872)
 

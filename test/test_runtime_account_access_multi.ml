@@ -184,8 +184,43 @@ let own (who : person) ?(account = who.account) () =
   Access.Own_account { user_id = who.user_id; provider_account_id = account }
 ;;
 
+(* An API runtime as the runtime table materializes it: an OpenAI-compatible
+   endpoint on [port] with the credential its operator declared. *)
+let api_runtime ~port =
+  let toml =
+    Printf.sprintf
+      {|
+[runtime]
+default = "operator.first"
+[providers.operator]
+display-name = "Operator endpoint"
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:%d/v1"
+[providers.operator.credentials]
+type = "inline"
+value = "operator-key"
+[models.first]
+api-name = "first-model"
+max-context = 4096
+tools-support = true
+streaming = true
+[operator.first]
+|}
+      port
+  in
+  match Runtime_toml.parse_string toml with
+  | Error _ -> Alcotest.fail "the API runtime fixture does not parse"
+  | Ok config ->
+    (match config.Runtime_schema.bindings with
+     | [ binding ] ->
+       (match Runtime_instance.of_binding config binding with
+        | Ok runtime -> runtime
+        | Error reason -> Alcotest.fail (Runtime_config_error.string_of_drop_reason reason))
+     | [] | _ :: _ :: _ -> Alcotest.fail "the API runtime fixture declares one binding")
+;;
+
 let test_multi_account () =
-  Eio_main.run (fun _env ->
+  Eio_main.run (fun env ->
     let root = Filename.temp_dir "runtime-account-access-multi-" "" in
     Fun.protect
       ~finally:(fun () -> remove_tree root)
@@ -352,30 +387,69 @@ let test_multi_account () =
                 "a host client was refused for another reason: %s"
                 (Access.refusal_to_string refusal))
           [ Access.Antigravity; Access.Vibe; Access.Api_provider ];
-        (* A sender takes the sealed config of an API provider only through
-           the access, and a reader sees the declaration without the
-           credential. *)
-        let provider =
-          Access.seal_api
-            (Llm_provider.Provider_config.make
-               ~kind:Llm_provider.Provider_config.OpenAI_compat
-               ~model_id:"model-a"
-               ~base_url:"https://provider.example"
-               ~api_key:"operator-key"
-               ())
-        in
-        (match Access.authorize_api provider with
-         | Error (Access.Host_account Access.Api_provider) -> ()
-         | Error refusal ->
-           Alcotest.failf
-             "an API provider was refused for another reason: %s"
-             (Access.refusal_to_string refusal)
-         | Ok (_ : Llm_provider.Provider_config.t) ->
-           Alcotest.fail "an API provider was allowed");
-        Alcotest.(check string)
-          "a reader of the declaration sees no credential"
-          ""
-          ((Access.api_declaration provider).Llm_provider.Provider_config.api_key :> string);
+        (* An API runtime of the table is sealed. A sender takes its config
+           only through the access, which refuses it here; a reader sees the
+           declaration without the credential; and a verification, a real
+           sender, ends refused with nothing sent to the endpoint. *)
+        Eio.Switch.run (fun sw ->
+          let connections = Atomic.make 0 in
+          let listening =
+            Eio.Net.listen
+              ~sw
+              ~backlog:5
+              ~reuse_addr:true
+              env#net
+              (`Tcp (Eio.Net.Ipaddr.V4.loopback, 0))
+          in
+          Eio.Fiber.fork_daemon ~sw (fun () ->
+            while true do
+              Eio.Net.accept_fork ~sw listening ~on_error:(fun _ -> ()) (fun _flow _addr ->
+                Atomic.incr connections)
+            done);
+          let port =
+            match Eio.Net.listening_addr listening with
+            | `Tcp (_, port) -> port
+            | `Unix _ -> Alcotest.fail "the endpoint is not a TCP socket"
+          in
+          let runtime = api_runtime ~port in
+          let sealed =
+            match runtime.Runtime_instance.execution with
+            | Runtime_execution.Agent_core sealed -> sealed
+            | Runtime_execution.Codex_app_server _
+            | Runtime_execution.Claude_code _
+            | Runtime_execution.Antigravity_cli _
+            | Runtime_execution.Muse_serve _
+            | Runtime_execution.Vibe_cli _ -> Alcotest.fail "the API runtime fixture is not Agent Core"
+          in
+          (match Access.authorize_api sealed with
+           | Error (Access.Host_account Access.Api_provider) -> ()
+           | Error refusal ->
+             Alcotest.failf
+               "an API provider was refused for another reason: %s"
+               (Access.refusal_to_string refusal)
+           | Ok (_ : Llm_provider.Provider_config.t) ->
+             Alcotest.fail "an API provider was allowed");
+          Alcotest.(check string)
+            "a reader of the declaration sees no credential"
+            ""
+            ((Access.api_declaration sealed).Llm_provider.Provider_config.api_key :> string);
+          let verified =
+            Runtime_verification.verify_as_command
+              ~env
+              ~sw
+              ~private_dir:(Filename.temp_dir ~temp_dir:root "verify-" "")
+              ~timeout_s:5.
+              ~account_request:Access.Operator_call
+              runtime
+          in
+          (match verified.Runtime_verification.failure with
+           | Some failure ->
+             Alcotest.(check string)
+               "the verification is refused for the account"
+               "account_not_authorized"
+               (Runtime_verification.failure_code failure)
+           | None -> Alcotest.fail "the verification of an API runtime ran");
+          Alcotest.(check int) "the endpoint saw no connection" 0 (Atomic.get connections));
         (* A native tool runs as the user of the server process and reaches
            the account homes of other people, so a model turn runs here only
            without native tools (plan D3c). *)

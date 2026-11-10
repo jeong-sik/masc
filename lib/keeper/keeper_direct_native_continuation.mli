@@ -33,6 +33,17 @@ val load : binding:binding -> (admission, string) result
     call is not a restartable provider attempt. No canonical-history fallback
     is used for missing or inconsistent retained evidence. *)
 
+val journal_terminal :
+  base_path:string -> keeper_name:string -> session_root:string ->
+  operation_id:Keeper_chat_operation.Operation_id.t ->
+  (Agent_core.Agent.execution_terminal_disposition option, string) result
+(** Read-only gate for settling a restart: [Some disposition] means the Core
+    journal already terminated the call that the Owner receipt still calls
+    active, so re-queueing the operation would only fail again on dispatch;
+    [None] means the receipt is not active or its journal holds no terminal.
+    This never mutates the Owner receipt or the journal. Receipt and journal
+    read failures return [Error]; the store settles those as resumable. *)
+
 val reconcile_after_dispatch : binding -> (unit -> 'a) -> 'a
 (** Run the native dispatch. When it ends, by return or by exception, and the
     Owner call is still Active, copy the Core journal's terminal disposition,

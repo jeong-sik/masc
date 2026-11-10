@@ -3306,7 +3306,15 @@ let running_settlement_unacknowledged_detail = function
     "the operation store became unavailable before Owner receipt acknowledgement"
 ;;
 
-let settle_running_without_executor store ~cause ~now =
+(* The journal gate answers one question for a row whose Owner receipt is
+   still active: does the Core journal already hold a terminal for that call?
+   The store cannot read the journal itself, so the Owner installs this check.
+   [Ok (Some disposition)] records that terminal on the receipt and settles
+   the row as interrupted; [Ok None] and a read failure requeue it, because a
+   requeued call still terminates the same way on dispatch and the store
+   cannot tell the two states apart on its own. *)
+let settle_running_without_executor_with_journal_terminal
+    ~journal_terminal store ~cause ~now =
   let* () = ensure_open store in
   let* () =
     Operation.validate_timestamp ~field:"completed_at" now
@@ -3336,7 +3344,35 @@ let settle_running_without_executor store ~cause ~now =
       | Some (Keeper_native_call.Active call) ->
         (match cause with
          | After_process_restart ->
-           requeue_continuation_with_db store.db operation |> Result.map (fun _ -> interrupted)
+           (match journal_terminal operation.operation_id with
+            | Ok (Some disposition) ->
+              (* The Owner gate reports a journal terminal for this still-active
+                 receipt: record that terminal first, then settle. Settling an
+                 active receipt directly is refused with
+                 [Native_call_unsettled] — the receipt must name its
+                 disposition before the semantic layer accepts a terminal
+                 transition, the same path an After_store_recovery closure
+                 takes. Re-queueing would end in a bare string error on the
+                 next dispatch instead of one interrupted settlement the
+                 requester can read. *)
+              let* closed =
+                apply_direct_native_call_with_db store ~now ~operation_id:operation.operation_id
+                  ~execution_digest:operation.execution_digest
+                  (Keeper_native_call.Terminal
+                     { call_id = call.Keeper_native_call.call_id
+                     ; disposition
+                     })
+              in
+              let* next = semantic_transition ~now
+                (Semantic.Settle
+                   (Semantic.Failed (running_settlement_unacknowledged_detail cause)))
+                closed in
+              let* () = update_semantic store ~expected:closed next in
+              Ok (operation :: interrupted)
+            | Ok None ->
+              requeue_continuation_with_db store.db operation |> Result.map (fun _ -> interrupted)
+            | Error _ ->
+              requeue_continuation_with_db store.db operation |> Result.map (fun _ -> interrupted))
          | After_store_recovery ->
            let* closed =
              apply_direct_native_call_with_db store ~now ~operation_id:operation.operation_id
@@ -3407,6 +3443,11 @@ let settle_running_without_executor store ~cause ~now =
        their identity and source to leave an operator-visible failure row,
        which the store cannot write itself. *)
     Ok interrupted)
+;;
+
+let settle_running_without_executor store ~cause ~now =
+  settle_running_without_executor_with_journal_terminal
+    ~journal_terminal:(fun _ -> Ok None) store ~cause ~now
 ;;
 
 module For_testing = struct

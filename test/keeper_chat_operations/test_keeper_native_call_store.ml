@@ -52,6 +52,46 @@ let disposition recovery = {Agent.outcome=Agent.Terminal_failed; recovery}
 let terminal store operation recovery =
   commit store operation (Native.Terminal {call_id; disposition=disposition recovery})
 
+let test_journal_terminal_gates_active_restart () = with_store @@ fun path store operation ->
+  bind store operation (make_call operation);
+  with_reopened path store @@ fun reopened ->
+  let gated = Store.settle_running_without_executor_with_journal_terminal
+    ~journal_terminal:(fun _ -> Ok (Some (disposition Agent.Retire)))
+    ~cause:Store.After_process_restart reopened ~now:4. |> ok in
+  check int "a journal terminal is interrupted at boot" 1 (List.length gated);
+  check bool "the journal disposition is recorded on the receipt" true
+    (match read reopened with
+     | Native.Terminal_unacknowledged (_, {Agent.outcome=Agent.Terminal_failed; recovery=Agent.Retire; _}) -> true
+     | Native.No_native_call | Native.Active _ | Native.Terminal_unacknowledged _ -> false);
+  check bool "a gated call is never dispatched" true (Option.is_none (Store.claim_next reopened ~now:5. |> ok));
+  (match Store.get reopened operation_id |> ok with
+   | Some {Operation.state=Operation.Failed {failure={kind=Operation.Interrupted_by_restart; _}; _}; _} -> ()
+   | _ -> fail "a gated journal terminal settled differently")
+
+let test_journal_gate_keeps_a_resumable_active_restart () = with_store @@ fun path store operation ->
+  bind store operation (make_call operation);
+  with_reopened path store @@ fun reopened ->
+  let settled = Store.settle_running_without_executor_with_journal_terminal
+    ~journal_terminal:(fun _ -> Ok None)
+    ~cause:Store.After_process_restart reopened ~now:4. |> ok in
+  check int "a call without a journal terminal resumes" 0 (List.length settled);
+  (match Store.claim_next reopened ~now:5. |> ok with
+   | Some resumed -> check bool "the same operation resumed" true
+       (Operation.Operation_id.equal resumed.operation_id operation.operation_id)
+   | None -> fail "the resumable call was interrupted")
+
+let test_journal_gate_read_failure_keeps_resume () = with_store @@ fun path store operation ->
+  bind store operation (make_call operation);
+  with_reopened path store @@ fun reopened ->
+  let settled = Store.settle_running_without_executor_with_journal_terminal
+    ~journal_terminal:(fun _ -> Error "journal unreadable")
+    ~cause:Store.After_process_restart reopened ~now:4. |> ok in
+  check int "an unreadable journal keeps the resumable call" 0 (List.length settled);
+  (match Store.claim_next reopened ~now:5. |> ok with
+   | Some resumed -> check bool "the same operation resumed" true
+       (Operation.Operation_id.equal resumed.operation_id operation.operation_id)
+   | None -> fail "a read failure interrupted the call")
+
 let test_active_restart_preserves_seed_and_exact_identity () = with_store @@ fun path store operation ->
   let call = make_call operation in
   bind store operation call;
@@ -895,6 +935,9 @@ let () = run "native-call-owner-store" ["input ownership", [
   test_case "history shares native Bind commit and rejects retired reactivation" `Quick test_history_uses_the_native_bind_transaction;
   test_case "active restart preserves exact admission" `Quick test_active_restart_preserves_seed_and_exact_identity;
   test_case "terminal restart keeps its receipt without dispatch" `Quick test_terminal_restart_never_dispatches;
+  test_case "a journal terminal is interrupted at boot instead of requeued" `Quick test_journal_terminal_gates_active_restart;
+  test_case "a call without a journal terminal keeps resuming" `Quick test_journal_gate_keeps_a_resumable_active_restart;
+  test_case "an unreadable journal keeps the resumable call" `Quick test_journal_gate_read_failure_keeps_resume;
   test_case "unknown effect survives settlement and rejects retry" `Quick test_unknown_effect_survives_failure_and_rejects_retry;
   test_case "settling an active call is a precondition, not corruption" `Quick test_settling_an_active_call_is_a_precondition_not_corruption;
   test_case "unknown-effect receipt lets the operation fail but not complete" `Quick test_unknown_effect_receipt_lets_the_operation_fail_but_not_complete;

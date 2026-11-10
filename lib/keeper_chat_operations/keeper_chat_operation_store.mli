@@ -447,8 +447,8 @@ val resume_direct_runtime_retry :
 type running_settlement =
   | After_process_restart
       (** Boot: no executor survives a restart. An active native call resumes
-          from its checkpoint; rows that cannot resume fail as
-          [Interrupted_by_restart]. *)
+          from its checkpoint unless the journal already holds its terminal;
+          rows that cannot resume fail as [Interrupted_by_restart]. *)
   | After_store_recovery
       (** The store was reopened by the same process after an outage, with no
           chat child in flight. The child's terminal commit was lost to the
@@ -459,14 +459,26 @@ type running_settlement =
 
 (** Settle every [Running] operation that has no executor. A row with a durable
     continuation (checkpoint, runtime retry, Gate, and after a restart an
-    active native call) goes back to [Queued]; every other row fails with the
-    kind [cause] names. Returns
+    active native call whose journal holds no terminal) goes back to [Queued];
+    every other row fails with the kind [cause] names. Returns
     the failed operations as they were read, so the caller can leave an
     operator-visible failure row for each: without one, a request cut off this
     way vanished from the transcript with no answer (msx-retro-mania, three
     requests on 2026-09-14). *)
 val settle_running_without_executor :
   t -> cause:running_settlement -> now:float -> (Operation.t list, error) result
+val settle_running_without_executor_with_journal_terminal :
+  journal_terminal:(Operation.Operation_id.t ->
+    (Agent_core.Agent.execution_terminal_disposition option, string) result) ->
+  t -> cause:running_settlement -> now:float -> (Operation.t list, error) result
+(** The same settlement with the boot gate the Owner installs. For a row whose
+    Owner receipt is still active, [journal_terminal] reports the terminal the
+    Core journal already holds for that call: [Ok (Some disposition)] records
+    that disposition on the Owner receipt and fails the row as
+    [Interrupted_by_restart] instead of re-queueing a call whose next dispatch
+    would fail anyway; [Ok None] and a read failure keep the resume behavior.
+    The gate must not touch the operation store: it runs inside this
+    settlement's transaction and reads only the Owner receipt and the journal. *)
 val error_to_string : error -> string
 
 module For_testing : sig

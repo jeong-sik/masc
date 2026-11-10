@@ -1378,11 +1378,30 @@ let start
   (match operation_store_result with
    | Error _ as error -> error
    | Ok operation_store ->
+  (* The store cannot read the Core journal, so this gate answers for it. It
+     reports the terminal the journal already holds for a call whose Owner
+     receipt is still active: the store records that disposition on the
+     receipt and interrupts the row at boot instead of requeueing it into a
+     dispatch that fails with a bare string error later. *)
+  let journal_terminal operation_id =
+    let read =
+      Keeper_direct_native_continuation.journal_terminal
+        ~base_path ~keeper_name ~session_root ~operation_id in
+    (match read with
+     | Error detail ->
+       Log.Keeper.warn ~keeper_name
+         "restart journal gate could not read the journal operation=%s: %s"
+         (Chat_operation.Operation_id.to_string operation_id) detail
+     | Ok _ -> ());
+    read
+  in
   let startup_result =
     let startup_now = now () in
     match
       run_operation_store ~label:"settle Keeper chat operations after restart" (fun () ->
-        Chat_operation_store.settle_running_without_executor ~cause:Chat_operation_store.After_process_restart operation_store ~now:startup_now)
+        Chat_operation_store.settle_running_without_executor_with_journal_terminal
+          ~journal_terminal
+          ~cause:Chat_operation_store.After_process_restart operation_store ~now:startup_now)
       |> Result.map_error owner_error_of_operation_error
     with
     | Error _ as error -> error

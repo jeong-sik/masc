@@ -159,6 +159,27 @@ let reconcile_terminal binding (call : Native.t) =
         ~disposition:terminal.disposition |> owner in
     Ok (Some terminal)
 
+(* The boot settlement gate asks this read-only question: did the Core journal
+   already terminate the call that this Owner receipt still calls active? The
+   store cannot read the journal itself, so the Owner installs this check.
+   Reading never mutates the receipt or the journal; a read failure keeps the
+   resumable behavior, since a requeued call still terminates the same way. *)
+let journal_terminal ~base_path ~keeper_name ~session_root ~operation_id =
+  let* observed = Owner.direct_native_call ~base_path ~keeper_name ~operation_id |> owner in
+  match observed with
+  | Native.Active call ->
+    let session_id = Keeper_id.Trace_id.to_string call.seed_checkpoint.trace_id in
+    let binding : binding =
+      { base_path
+      ; keeper_name
+      ; operation_id
+      ; execution_digest = call.operation_digest
+      ; session_dir = Filename.concat session_root session_id
+      ; session_id } in
+    let* terminal = inspect_terminal binding call in
+    Ok (Option.map (fun terminal -> terminal.disposition) terminal)
+  | Native.No_native_call | Native.Terminal_unacknowledged _ -> Ok None
+
 (* Core records the terminal disposition under cancellation protection, but a
    cancelled writer supervisor, or a failed Owner write, can leave the Owner
    call Active while the journal holds the terminal. When the dispatch ends,

@@ -1111,6 +1111,7 @@ let test_transition_submit_for_verification_requires_notes () =
 let test_transition_version_mismatch () =
   with_test_env (fun config ->
     let _ = Workspace.add_task config ~title:"Test" ~priority:1 ~description:"" in
+    let observed_version = (Workspace.read_backlog config).version in
     (* Pass wrong expected version *)
     let result =
       Workspace.transition_task_r
@@ -1122,8 +1123,13 @@ let test_transition_version_mismatch () =
         ()
     in
     match result with
-    | Error (Masc_domain.Task (Masc_domain.Task_error.InvalidState _)) -> ()
-    | _ -> Alcotest.fail "Expected TaskInvalidState for version mismatch")
+    | Error (Masc_domain.Task
+               (Masc_domain.Task_error.BacklogVersionConflict { expected; actual })) ->
+      Alcotest.(check int) "requested backlog version" 999 expected;
+      Alcotest.(check int) "authoritative backlog version" observed_version actual;
+      Alcotest.(check int) "rejected transition did not commit" observed_version
+        (Workspace.read_backlog config).version
+    | _ -> Alcotest.fail "Expected typed backlog version conflict")
 ;;
 
 let test_transition_done_idempotent () =

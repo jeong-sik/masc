@@ -38137,6 +38137,16 @@ Use relative paths for resources already held in the package. -->
        | Some "w" when state.view = Resources ->
            Masc_tui_resources_updates.toggle_layout state
        | Some "v"
+         when state.view = Approvals && not state.approval_detail_open
+              && state.ask_answer_mode = Ask_browsing
+              && not state.composer_focused
+              && not (modal_owns_keys state) && not state.palette_open
+              && not state.answering_open && not state.patch_modal_open && not state.link_modal_open
+              && Option.is_none (text_input_target state ~compact_viewport) ->
+           (match Masc_tui_render_approvals.answer_feedback_reading state with
+            | Some reading -> open_detail_reading state reading
+            | None -> report_action state "info" "No answer receipt in this workspace")
+       | Some "v"
          when state.view = Approvals && state.approval_detail_open
               && not state.composer_focused
               && not (modal_owns_keys state) && not state.palette_open

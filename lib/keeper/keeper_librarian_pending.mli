@@ -30,3 +30,7 @@ val description : t -> string
 val needs_attention : t -> bool
 (** An unconfirmed execution or failed local recovery needs explicit attention;
     a waiting worker is not declared failed by elapsed time or backlog size. *)
+
+val attention_required : durable:t option -> admission:worker option -> bool
+(** Derive one Keeper's attention requirement from its independent durable and
+    admission observations. [None] is no observed wait, not completion. *)

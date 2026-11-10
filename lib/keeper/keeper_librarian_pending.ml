@@ -105,3 +105,7 @@ let needs_attention = function
   | Local_failure _ -> true
   | Worker { wait = (Capacity | Processing | Unreachable | Journal_recheck); _ }
   | Publication _ | Basis_changed _ | Message_floor _ -> false
+
+let attention_required ~durable ~admission =
+  Option.exists needs_attention durable
+  || Option.exists (fun worker -> needs_attention (Worker worker)) admission

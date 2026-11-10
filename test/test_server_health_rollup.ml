@@ -189,6 +189,18 @@ let test_memory_dependency_failure_reaches_overall_health () =
   check bool "missing dependency needs operator configuration" true action;
   check (list string) "cause is joined into health" ["keeper_memory_execution:addon_unattached"] reasons
 
+let test_memory_original_attention_reaches_overall_health () =
+  check bool "original outcome attention survives the background cache" true
+    (R.is_cached "keeper_memory_attention");
+  let status, action, reasons = summary ~sections:
+    ["keeper_memory_attention", `Assoc ["status",`String "degraded";
+      "operator_action_required",`Bool true;
+      "operator_action_reasons",`List [`String "keeper-a:librarian_attention_required"]]] () in
+  check string "a serving worker does not hide unresolved originals" "degraded" status;
+  check bool "outcome uncertainty reaches the operator" true action;
+  check (list string) "the Keeper and original outcome remain named"
+    ["keeper_memory_attention:keeper-a:librarian_attention_required"] reasons
+
 (* Most cached fields are not sections: keeper_fibers is an int, and
    keeper_config_errors a list. A field with no status says nothing about
    health and must not arrive as unknown. *)
@@ -350,6 +362,8 @@ let () =
             test_waiting_inventory_fault_is_cached_and_rolled_up
         ; test_case "Memory dependency failure reaches overall health" `Quick
             test_memory_dependency_failure_reaches_overall_health
+        ; test_case "original Memory outcome attention reaches overall health" `Quick
+            test_memory_original_attention_reaches_overall_health
         ; test_case "startup degradation is rolled up outside the cache" `Quick
             test_startup_degradation_is_rolled_up_outside_the_cache
         ] )

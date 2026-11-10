@@ -662,13 +662,6 @@ let direct_reply_projection json =
   | Error error -> Error (Turn_outcome_decode_error error)
 ;;
 
-let direct_reply_visible_text json =
-  match direct_reply_projection json with
-  | Ok (Keeper_chat_blocks.Connector_text text) -> Ok (Some text)
-  | Ok (Connector_status _ | Connector_no_visible_reply) -> Ok None
-  | Error error -> Error error
-;;
-
 let owner_operation_error_code error =
   Keeper_chat_public_error.(code (of_command_error error))
 ;;

@@ -1,8 +1,8 @@
 (** Closed Kata VMM identity: host-validated runtime ids only.
 
-    A Keeper chooses among [Qemu], [Cloud_hypervisor] and [Dragonball] by
-    name; the host maps that choice to a runtime id from a closed set.  The
-    Keeper never supplies a runtime id or a configuration path.  Observed
+    The host maps each of [Qemu], [Cloud_hypervisor] and [Dragonball] to a
+    runtime id from a closed set.  The Keeper never supplies a runtime id or
+    a configuration path.  Observed
     inventory rows are classified through [classify_runtime_id] — the single
     classification entry point — and anything outside the validated set stays
     an explicit [Unknown_runtime] mismatch (known-unsupported Kata family,
@@ -38,6 +38,3 @@ val kata_runtime_ids : string list
     default shim.  Membership means "ours", never "supported": ids outside
     this list are known-unsupported Kata family (e.g. Firecracker) or foreign
     — never adoptable; report them via {!classify_runtime_id}. *)
-
-val vmm_of_choice : string -> (vmm, string) result
-(** The Keeper-facing choice decoder: exactly three names, nothing else. *)

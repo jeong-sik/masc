@@ -51,11 +51,3 @@ let classify_runtime_id id =
 let kata_runtime_ids =
   default_shim_runtime_id :: [ runtime_id_of Qemu; runtime_id_of Cloud_hypervisor;
                                runtime_id_of Dragonball ]
-
-(* Keeper-visible choice: only these three, spelled exactly.  Any other wire
-   value is refused here rather than reaching containerd. *)
-let vmm_of_choice = function
-  | "qemu" -> Ok Qemu
-  | "cloud-hypervisor" -> Ok Cloud_hypervisor
-  | "dragonball" -> Ok Dragonball
-  | other -> Error ("unknown kata vmm: " ^ other)

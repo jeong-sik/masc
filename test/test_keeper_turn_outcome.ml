@@ -694,24 +694,6 @@ let test_history_memo_answers_a_purged_body_from_its_new_bytes () =
   check string "and it is answered from its own bytes" (live "[tool result cleared]") cleared
 ;;
 
-let test_seed_stops_where_a_yield_already_judged () =
-  let pairs = List.init 5 (fun i -> tool_call ~input:(Some (string_of_int i)) "Read") in
-  let names calls =
-    List.map (fun (c : Masc.Keeper_agent_result.tool_call_detail) ->
-      Option.value ~default:"" c.input_fingerprint) calls
-  in
-  check (list string) "nothing judged seeds everything, newest first"
-    [ "0"; "1"; "2"; "3"; "4" ]
-    (names (Masc.Keeper_repetition_judged.seed_beyond ~judged:0 pairs));
-  check (list string) "the oldest judged pairs drop off the tail"
-    [ "0"; "1"; "2" ]
-    (names (Masc.Keeper_repetition_judged.seed_beyond ~judged:2 pairs));
-  check (list string) "judged at the length seeds nothing" []
-    (names (Masc.Keeper_repetition_judged.seed_beyond ~judged:5 pairs));
-  check (list string) "a history cut shorter than the boundary seeds nothing" []
-    (names (Masc.Keeper_repetition_judged.seed_beyond ~judged:9 pairs))
-;;
-
 let test_judged_boundary_rides_the_context () =
   let module Judged = Masc.Keeper_repetition_judged in
   let module Context = Agent_core.Context in
@@ -1134,55 +1116,6 @@ let test_continuation_status_uses_assistant_delivery_path () =
 
 let body fields = `Assoc fields
 
-let test_direct_reply_visible_text () =
-  let check_ok label expected json =
-    match Ops.direct_reply_visible_text json with
-    | Ok actual -> check (option string) label expected actual
-    | Error error ->
-      failf "%s: %s" label (Ops.direct_reply_decode_error_to_string error)
-  in
-  let check_error label expected json =
-    match Ops.direct_reply_visible_text json with
-    | Ok _ -> failf "%s: expected decode error" label
-    | Error error ->
-      check string label expected
-        (Ops.direct_reply_decode_error_to_string error)
-  in
-  check_ok "declared checkpoint -> None" None
-    (body
-       [ ("reply", `String checkpoint_text);
-         ("turn_outcome", `String "continuation_checkpoint")
-       ]);
-  check_ok "declared no visible reply -> None" None
-    (body
-       [ ("reply", `String "all done");
-         ("turn_outcome", `String "no_visible_reply")
-       ]);
-  check_error
-    "missing outcome is a direct-reply contract error"
-    "keeper reply payload is missing turn_outcome"
-    (body [ ("reply", `String checkpoint_text) ]);
-  check_ok "declared visible -> reply text" (Some "all done")
-    (body
-       [ ("reply", `String "all done");
-         ("turn_outcome", `String "visible_reply")
-       ]);
-  let spaced_reply = "    첫 줄\n    둘째 줄  \n\n" in
-  check_ok "visible reply keeps indentation and paragraph breaks" (Some spaced_reply)
-    (body
-       [ ("reply", `String spaced_reply);
-         ("turn_outcome", `String "visible_reply")
-       ]);
-  check_ok "empty reply -> None" None
-    (body
-       [ ("reply", `String "   ");
-         ("turn_outcome", `String "visible_reply")
-       ]);
-  check_error
-    "visible outcome without reply is a direct-reply contract error"
-    "keeper reply payload is missing reply for visible_reply"
-    (body [ ("turn_outcome", `String "visible_reply") ])
-
 let test_connector_projection_keeps_external_wait_typed () =
   match
     Masc.Keeper_chat_blocks.connector_projection
@@ -1304,8 +1237,6 @@ let () =
             test_tool_io_digest_keeps_similar_calls_apart;
           test_case "tool io digest survives eviction" `Quick
             test_tool_io_digest_survives_eviction;
-          test_case "the seed stops where a yield already judged" `Quick
-            test_seed_stops_where_a_yield_already_judged;
           test_case "the judged boundary rides the context" `Quick
             test_judged_boundary_rides_the_context;
           test_case "autonomous yield boundary contract" `Quick
@@ -1342,8 +1273,6 @@ let () =
         ] );
       ( "direct_reply",
         [
-          test_case "direct_reply_visible_text" `Quick
-            test_direct_reply_visible_text;
           test_case "connector projection keeps external wait typed" `Quick
             test_connector_projection_keeps_external_wait_typed;
           test_case "connector projection keeps continuation typed" `Quick

@@ -73,3 +73,7 @@ val finish_write : write -> ('a, board_error) result -> ('a, board_error) result
 (** Finish after the model callback and its publication decision. Preserve the
     original reserved cleanup cause through the shared Board carrier. *)
 val require_readable : store -> (unit, board_error) result
+val observe_guard_refusal :
+  store -> votes_source_observation -> Fs_compat.private_jsonl_guard_failure -> unit
+(** Outside the filesystem worker, refuse only the exact current observation
+    contradicted by its own guard. Contention and pending effects are preserved. *)

@@ -11,10 +11,34 @@ module Comment_set = Set.Make (struct
   let compare left right = String.compare (Comment_id.to_string left) (Comment_id.to_string right)
 end)
 
+type cleanup_conditions = {
+  created_before : float;
+  require_no_comments : bool;
+  require_no_votes : bool;
+  title_pattern : string option;
+  author_pattern : string option;
+}
+
+let cleanup_conditions ~created_before ~require_no_comments ~require_no_votes
+    ~title_pattern ~author_pattern =
+  { created_before; require_no_comments; require_no_votes;
+    title_pattern = Option.map String.lowercase_ascii title_pattern;
+    author_pattern = Option.map String.lowercase_ascii author_pattern }
+
+let cleanup_candidate ~conditions ~has_comments ~has_votes (post : post) =
+  let matches pattern text = match pattern with
+    | None -> true
+    | Some needle -> String_util.contains_substring (String.lowercase_ascii text) needle in
+  Float.compare post.created_at conditions.created_before < 0
+  && (not conditions.require_no_comments || not has_comments)
+  && (not conditions.require_no_votes || not has_votes)
+  && matches conditions.title_pattern post.title
+  && matches conditions.author_pattern (Agent_id.to_string post.author)
+
 type deletion_authorization =
   | Operator_deletion
   | Author_deletion of { reader : Board_access.reader; author : Agent_id.t }
-  | Cleanup_deletion of Board_access.reader
+  | Cleanup_deletion of { reader : Board_access.reader; conditions : cleanup_conditions }
 
 let pending_detail = "Board deletion recovery is pending. Do not repeat the deletion."
 
@@ -114,7 +138,7 @@ let authorize ~authorization (post : post) = match authorization with
     if not (Board_access.can_read ~reader post) then Error (Post_not_found (Post_id.to_string post.id))
     else if String.equal (Agent_id.to_string author) (Agent_id.to_string post.author) then Ok ()
     else Error (Unauthorized "Only the current author can delete this post.")
-  | Cleanup_deletion reader ->
+  | Cleanup_deletion { reader; conditions = _ } ->
     if Board_access.can_read ~reader post then Ok ()
     else Error (Post_not_found (Post_id.to_string post.id))
 
@@ -169,6 +193,41 @@ let children_in_snapshot ~post_id (snapshot : Fs_compat.private_jsonl_snapshot) 
         | exception Yojson.Json_error _ -> Error (Io_error "Board data is unavailable.") in
   rows Comment_set.empty (String.split_on_char '\n' snapshot.bytes)
 
+let has_post_votes ~post_id (snapshot : Fs_compat.private_jsonl_snapshot) =
+  let rec rows found = function
+    | [] -> Ok found
+    | text :: remaining when String.equal (String.trim text) "" -> rows found remaining
+    | text :: remaining ->
+      match Yojson.Safe.from_string text with
+      | json ->
+        (match Board_vote_row.of_yojson json with
+         | None -> Error (Io_error "Board data is unavailable.")
+         | Some (key, _, _) ->
+           let matching = match Board_vote_key.target_kind key with
+             | Board_vote_key.Post -> String.equal post_id (Board_vote_key.target_id key)
+             | Board_vote_key.Comment -> false in
+           (* Up and Down both retain a vote. Repeated rows of the same typed
+              key keep that same target, so existence agrees with last-row load.
+              Still decode the entire source, including rows after a match. *)
+           rows (found || matching) remaining)
+      | exception Yojson.Json_error _ -> Error (Io_error "Board data is unavailable.") in
+  rows false (String.split_on_char '\n' snapshot.bytes)
+
+let cleanup_admission store ~authorization ~post ~children = match authorization with
+  | Operator_deletion | Author_deletion _ -> Ok None
+  | Cleanup_deletion { reader = _; conditions } ->
+    let* votes, has_votes =
+      if not conditions.require_no_votes then Ok (None, false)
+      else match store.votes_source with
+        | Votes_readable observation when String.equal observation.vote_path
+            (Board_paths.store_file_path store Board_paths.Votes) ->
+          let* has_votes = has_post_votes ~post_id:(Post_id.to_string post.id) observation.vote_snapshot in
+          Ok (Some observation, has_votes)
+        | Votes_readable _ | Votes_unobserved | Votes_publishing _
+        | Votes_refused _ | Votes_unsettled _ -> Error (Io_error "Board data is unavailable.") in
+    if cleanup_candidate ~conditions ~has_comments:(children <> []) ~has_votes post then Ok votes
+    else Error (Validation_error "Post no longer meets the cleanup conditions.")
+
 let stage store ~authorization pid =
   let post_id = Post_id.to_string pid in
   match Hashtbl.find_opt store.posts post_id with
@@ -186,8 +245,9 @@ let stage store ~authorization pid =
       | Comments_unobserved | Comments_publishing _ | Comments_recovered _
       | Comments_refused _ | Comments_unsettled _ -> Error (Io_error "Board data is unavailable.") in
     let* deleted_comments = children_in_snapshot ~post_id comments.snapshot in
+    let* votes = cleanup_admission store ~authorization ~post:source_parent ~children:deleted_comments in
     Ok ({ decision_id = Deletion_id.generate ();
-      operation = Delete_post { deleted_post = pid; deleted_comments } }, observation, comments)
+      operation = Delete_post { deleted_post = pid; deleted_comments } }, observation, comments, votes)
 
 let stage_sub_board store ~authorization ~sub_board_id =
   let unavailable () = Error (Io_error "Board model and source must be reloaded before deleting a sub-board.") in
@@ -405,8 +465,8 @@ let delete_post store ~authorization ~post_id =
   with_persist_lock store (fun () ->
     let* () = require_post_sources store in
     let* () = Source.require_empty store in
-    let* plan, parent, comments = with_lock store (fun () -> stage store ~authorization pid) in
-    let recorded = Source.record store ~readset:(Source.Post_readset { parent; comments }) plan in
+    let* plan, parent, comments, votes = with_lock store (fun () -> stage store ~authorization pid) in
+    let recorded = Source.record store ~readset:(Source.Post_readset { parent; comments; votes }) plan in
     match recorded with
     | Source.Not_written _ | Source.Cleared _ ->
       Source.finish recorded (Error (Io_error

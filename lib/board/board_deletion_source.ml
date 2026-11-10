@@ -8,6 +8,7 @@ type readset =
   | Post_readset of {
       parent : posts_source_observation;
       comments : comments_source_observation;
+      votes : votes_source_observation option;
     }
   | Sub_board_readset of {
       posts : posts_source_observation;
@@ -203,11 +204,37 @@ let purge store before = match store.deletion_source_io with
       ~io before.decision_path ~expected:before.decision_snapshot
 
 type file_result = (Fs_compat.Private_jsonl_cursor.t, Fs_compat.private_jsonl_transaction_error) result
-type dependency = Comments_dependency | Policy_dependency of sub_boards_source_observation
+type dependency =
+  | Posts_dependency of posts_source_observation
+  | Comments_dependency of comments_source_observation
+  | Votes_dependency of votes_source_observation
+  | Policy_dependency of sub_boards_source_observation
+type scope = {
+  dependency : dependency;
+  source_path : string;
+  snapshot : Fs_compat.private_jsonl_snapshot;
+  workspace : Board_workspace_binding.observation;
+  io : Fs_compat.private_jsonl_transaction_io_for_testing option;
+}
+type guarded =
+  | Readset_refused of {
+      dependency : dependency;
+      failure : Fs_compat.private_jsonl_guard_failure;
+      cleanup_failures : Fs_compat.private_jsonl_guard_failure list;
+    }
+  | Readset_executed of {
+      result : file_result;
+      cleanup_failures : Fs_compat.private_jsonl_guard_failure list;
+    }
 type io_result =
   | Direct_io of file_result
-  | Deletion_readset_io of dependency *
-      file_result Fs_compat.private_jsonl_guard_result Fs_compat.private_jsonl_guard_result
+  | Deletion_readset_io of guarded
+
+let observe_guard_refusal store dependency failure = match dependency with
+  | Posts_dependency observation -> Board_posts_source.observe_guard_refusal store observation failure
+  | Comments_dependency observation -> Board_comments_source.observe_guard_refusal store observation failure
+  | Votes_dependency observation -> Board_votes_source.observe_guard_refusal store observation failure
+  | Policy_dependency observation -> Board_sub_boards_source.observe_guard_refusal store observation failure
 
 let retain_guard_diagnostics store diagnostics = match store.deletion_state with
   | Deletion_readable readable ->
@@ -258,25 +285,14 @@ let perform store ~before ~attempt ~bytes operation =
       | Ok () ->
         match operation () with
         | Direct_io result -> classify result []
-        | Deletion_readset_io (_, Fs_compat.Guard_refused failure) ->
-          let diagnostics = [Deletion_guard_diagnostic failure] in
-          retain_guard_diagnostics store diagnostics;
-          Not_written diagnostics
-        | Deletion_readset_io (dependency, Fs_compat.Guard_executed {
-            value = Fs_compat.Guard_refused failure; cleanup_failures }) ->
-          (match dependency with
-           | Comments_dependency -> ()
-           | Policy_dependency observation ->
-             Board_sub_boards_source.observe_guard_refusal store observation failure);
+        | Deletion_readset_io (Readset_refused { dependency; failure; cleanup_failures }) ->
+          observe_guard_refusal store dependency failure;
           let diagnostics = List.map (fun failure -> Deletion_guard_diagnostic failure)
               (failure :: cleanup_failures) in
           retain_guard_diagnostics store diagnostics;
           Not_written diagnostics
-        | Deletion_readset_io (_, Fs_compat.Guard_executed {
-            value = Fs_compat.Guard_executed { value; cleanup_failures = comments_cleanup };
-            cleanup_failures = parent_cleanup }) ->
-          classify value (List.map (fun failure -> Deletion_guard_diagnostic failure)
-            (comments_cleanup @ parent_cleanup)) in
+        | Deletion_readset_io (Readset_executed { result; cleanup_failures }) ->
+          classify result (List.map (fun failure -> Deletion_guard_diagnostic failure) cleanup_failures) in
   try transact () with exception_ ->
     let backtrace = Printexc.get_raw_backtrace () in
     fail ~unknown:true (Deletion_raised { exception_; backtrace }) [Deletion_raised_diagnostic { exception_; backtrace }]
@@ -285,32 +301,63 @@ let guard_with_io io path ~expected ~f = match io with
   | None -> Fs_compat.with_private_jsonl_snapshot_guard_result path ~expected ~f
   | Some io -> Fs_compat.with_private_jsonl_snapshot_guard_with_io_for_testing ~io path ~expected ~f
 
+let rec guard_readset scopes record = match scopes with
+  | [] -> Readset_executed { result = record (); cleanup_failures = [] }
+  | (scope : scope) :: remaining ->
+    match guard_with_io scope.io scope.source_path ~expected:scope.snapshot
+        ~f:(fun () -> guard_readset remaining record) with
+    | Fs_compat.Guard_refused failure ->
+      Readset_refused { dependency = scope.dependency; failure; cleanup_failures = [] }
+    | Fs_compat.Guard_executed { value = Readset_refused refusal; cleanup_failures } ->
+      Readset_refused { refusal with cleanup_failures = refusal.cleanup_failures @ cleanup_failures }
+    | Fs_compat.Guard_executed {
+        value = Readset_executed { result; cleanup_failures = inner_cleanup };
+        cleanup_failures = outer_cleanup } ->
+      Readset_executed { result; cleanup_failures = inner_cleanup @ outer_cleanup }
+
 let record store ~readset plan = match store.deletion_state with
   | Deletion_readable { observation; plan = None; _ } ->
     let sources = match plan.operation, readset with
-      | Delete_post _, Post_readset { parent; comments } ->
+      | Delete_post _, Post_readset { parent; comments; votes } ->
         if String.equal parent.source_path (Board_paths.persist_path store)
            && String.equal comments.source_path (Board_paths.comments_path store) then
-          Some (Comments_dependency,
-            (parent.source_path, parent.snapshot, parent.workspace_observation, store.posts_source_io.posts),
-            (comments.source_path, comments.snapshot, comments.workspace_observation, store.comments_source_io))
+          let votes = match votes with
+            | None -> Some []
+            | Some observation when String.equal observation.vote_path
+                (Board_paths.store_file_path store Board_paths.Votes) ->
+              Some [{ dependency = Votes_dependency observation; source_path = observation.vote_path;
+                snapshot = observation.vote_snapshot; workspace = observation.vote_workspace;
+                io = store.votes_source_io }]
+            | Some _ -> None in
+          Option.map (fun votes -> [
+            { dependency = Posts_dependency parent; source_path = parent.source_path;
+              snapshot = parent.snapshot; workspace = parent.workspace_observation; io = store.posts_source_io.posts };
+            { dependency = Comments_dependency comments; source_path = comments.source_path;
+              snapshot = comments.snapshot; workspace = comments.workspace_observation; io = store.comments_source_io }
+          ] @ votes) votes
         else None
       | Delete_sub_board _, Sub_board_readset { posts; policy } ->
         if String.equal posts.source_path (Board_paths.persist_path store)
            && String.equal policy.policy_path (Board_paths.sub_boards_path store) then
-          Some (Policy_dependency policy,
-            (posts.source_path, posts.snapshot, posts.workspace_observation, store.posts_source_io.posts),
-            (policy.policy_path, policy.policy_snapshot, policy.policy_workspace, store.sub_boards_source_io))
+          Some [
+            { dependency = Posts_dependency posts; source_path = posts.source_path;
+              snapshot = posts.snapshot; workspace = posts.workspace_observation; io = store.posts_source_io.posts };
+            { dependency = Policy_dependency policy; source_path = policy.policy_path;
+              snapshot = policy.policy_snapshot; workspace = policy.policy_workspace; io = store.sub_boards_source_io }
+          ]
         else None
       | Delete_post _, Sub_board_readset _ | Delete_sub_board _, Post_readset _ -> None in
     (match sources with
      | None -> Not_written []
-     | Some (dependency, (parent_path, parent_snapshot, parent_workspace, parent_io),
-             (dependency_path, dependency_snapshot, dependency_workspace, dependency_io)) ->
+     | Some scopes ->
        let workspace =
          try
-           let* () = Board_workspace_binding.revalidate store.workspace_binding parent_workspace in
-           Board_workspace_binding.revalidate store.workspace_binding dependency_workspace
+           let rec revalidate = function
+             | [] -> Ok ()
+             | (scope : scope) :: remaining ->
+               let* () = Board_workspace_binding.revalidate store.workspace_binding scope.workspace in
+               revalidate remaining in
+           revalidate scopes
          with exception_ -> Error (Board_workspace_binding.Raised {
            exception_; backtrace = Printexc.get_raw_backtrace () }) in
        match workspace with
@@ -323,11 +370,8 @@ let record store ~readset plan = match store.deletion_state with
          let deletion_io = store.deletion_source_io in
          perform store ~before:observation ~attempt:(Recording_decision plan) ~bytes
            (fun () ->
-             let record () = rewrite_with_io deletion_io observation bytes in
-             let guard_dependency () = guard_with_io dependency_io dependency_path
-               ~expected:dependency_snapshot ~f:record in
-             Deletion_readset_io (dependency, guard_with_io parent_io parent_path
-               ~expected:parent_snapshot ~f:guard_dependency)))
+             Deletion_readset_io (guard_readset scopes
+               (fun () -> rewrite_with_io deletion_io observation bytes))))
   | Deletion_unobserved | Deletion_readable { plan = Some _; _ }
   | Deletion_pending _ | Deletion_unsettled _ | Deletion_refused _ | Deletion_projection_failed _ -> Not_written []
 

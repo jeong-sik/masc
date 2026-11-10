@@ -17,6 +17,7 @@ import {
   type KeeperMemoryHealthResponse,
 } from '../../api/dashboard'
 import { DEFAULT_PANEL_REFRESH_MS, formatAutoRefreshLabel, setupVisibleAutoRefresh } from '../../lib/auto-refresh'
+import { createManagedAsyncResource } from '../../lib/async-state'
 
 const SNAPSHOT_READ_ERROR_TARGET: KeeperMemoryHealthAlertTarget = 'snapshot_read_error'
 const SOURCE_SNAPSHOT_READ_ERROR_TARGET: KeeperMemoryHealthAlertTarget = 'source_snapshot_read_error'
@@ -109,6 +110,14 @@ function KeeperRow({ entry }: { entry: KeeperMemoryHealthKeeperEntry }) {
             ? html`<span class="kmh-badge kmh-badge--warn">${unread}</span>`
             : html`<span class="kmh-badge kmh-badge--ok">0</span>`}
         <div><small>${entry.librarian.state ?? '아직 측정 전'}</small></div>
+        ${entry.librarian.operator_action_required
+          ? html`<div><span class="kmh-badge kmh-badge--warn">조치 필요 · Librarian 처리·관측 원인과 복구 근거를 확인하세요</span></div>`
+          : ''}
+        ${entry.librarian.pending !== null || entry.librarian.admission_wait !== null
+          ? html`<details><summary>처리·관측 근거</summary><pre>${JSON.stringify({
+              durable: entry.librarian.pending, admission: entry.librarian.admission_wait,
+            }, null, 2)}</pre></details>`
+          : ''}
         <div><small>${entry.librarian.measured_at === null ? '측정 시각 없음'
           : `마지막 측정 ${new Date(entry.librarian.measured_at * 1000).toLocaleString()}`}</small></div>
         ${librarianStalledBadge(entry.librarian.stalled)}
@@ -166,40 +175,24 @@ function KeeperRow({ entry }: { entry: KeeperMemoryHealthKeeperEntry }) {
 }
 
 export function KeeperMemoryHealth() {
-  const [data, setData] = useState<KeeperMemoryHealthResponse | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
+  const [resource] = useState(() => createManagedAsyncResource<KeeperMemoryHealthResponse>())
+  const { data, loading, error } = resource.state.value
 
   useEffect(() => {
     // useEffect is appropriate here: this is external-system synchronization
     // (periodic HTTP fetch from the MASC API), not derived state or event response.
-    const controller = new AbortController()
-
-    const refresh = async () => {
-      try {
-        const result = await fetchKeeperMemoryHealth()
-        if (controller.signal.aborted) return
-        setData(result)
-        setError(null)
-      } catch (err) {
-        if (controller.signal.aborted) return
-        setError(err instanceof Error ? err.message : 'keeper-memory-health fetch failed')
-      } finally {
-        if (!controller.signal.aborted) setLoading(false)
-      }
-    }
-
-    setLoading(true)
-    void refresh()
-    const cleanup = setupVisibleAutoRefresh(() => { void refresh() }, DEFAULT_PANEL_REFRESH_MS)
+    // The shared resource admits only the latest load and retires it on cleanup.
+    const refresh = () => { void resource.load(() => fetchKeeperMemoryHealth()) }
+    refresh()
+    const cleanup = setupVisibleAutoRefresh(refresh, DEFAULT_PANEL_REFRESH_MS)
 
     return () => {
-      controller.abort()
+      resource.cancel()
       cleanup()
     }
-  }, [])
+  }, [resource])
 
-  if (loading && data === null) {
+  if (data === null && (loading || error === null)) {
     return html`
       <div class="kmh-panel">
         <p class="kmh-empty">로딩중...</p>
@@ -223,7 +216,7 @@ export function KeeperMemoryHealth() {
     `
   }
 
-  const generatedAt = new Date(data.generated_at * 1000).toLocaleTimeString()
+  const generatedAt = new Date(data.generated_at * 1000).toLocaleString()
   const totalAlerts = data.alert_summary.total_alerts
   const errorAlerts = data.alert_summary.error_alerts
   const readErrorWarn = data.alert_summary.snapshot_read_error_keepers > 0
@@ -245,6 +238,9 @@ export function KeeperMemoryHealth() {
     <div class="kmh-panel">
       <div class="kmh-header">
         <div class="kmh-title">키퍼 메모리 상태</div>
+        ${error !== null
+          ? html`<p role="alert" class="kmh-badge kmh-badge--warn">갱신 실패: ${error} · 마지막 관측값을 표시합니다.</p>`
+          : ''}
         <div class="kmh-totals-strip">
           <div class="kmh-stat" data-stat-key="facts">
             <span class="kmh-stat-label">전체 사실</span>
@@ -253,6 +249,12 @@ export function KeeperMemoryHealth() {
           <div class="kmh-stat" data-stat-key="observed-facts">
             <span class="kmh-stat-label">관측 사실</span>
             <span class="kmh-stat-value">${data.totals.observed_facts.toLocaleString()}</span>
+          </div>
+          <div class="kmh-stat" data-stat-key="librarian-attention-required">
+            <span class="kmh-stat-label">Librarian 조치 필요</span>
+            <span class=${`kmh-stat-value${data.alert_summary.librarian_attention_required_keepers > 0 ? ' kmh-stat-value--warn' : ''}`}>
+              ${data.alert_summary.librarian_attention_required_keepers}
+            </span>
           </div>
           <div class="kmh-stat" data-stat-key="derived-facts">
             <span class="kmh-stat-label">파생 사실</span>
@@ -348,7 +350,8 @@ export function KeeperMemoryHealth() {
           </div>
         </div>
         <div class="kmh-refresh-label">
-          ${formatAutoRefreshLabel(DEFAULT_PANEL_REFRESH_MS)} — 기준 ${generatedAt}
+          ${formatAutoRefreshLabel(DEFAULT_PANEL_REFRESH_MS)} — 마지막 관측 ${generatedAt}
+          ${loading ? ' · 갱신 중' : ''}
         </div>
       </div>
 

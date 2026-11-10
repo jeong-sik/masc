@@ -92,8 +92,8 @@ let resume ~store ~label ~(original : Owner.retained) ~request ~schema ~decode_f
       | Owner.Configuration id -> Ok id
       | Owner.Manual _ ->
         Error (Rejected ("Original " ^ label ^ " work requires its configured installation")) in
-    Eio_unix.run_in_systhread (fun () ->
-      Exact.observe_retained ~store ~declaration_id ~schema request)
+    Eio.Cancel.protect (fun () -> Eio_unix.run_in_systhread (fun () ->
+      Exact.recover_retained ~store ~declaration_id ~schema request))
     |> Result.map_error (fun detail -> Unavailable detail) in
   let observe (original : Owner.retained) reason observation evidence =
     let observation = observation evidence in

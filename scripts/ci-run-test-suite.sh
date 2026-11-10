@@ -181,18 +181,32 @@ sandbox_root="_build/.sandbox"
 # the next full run names its eater instead of guessing.
 disk_bands="30 20 10 5"
 disk_bands_seen=" "
+disk_evidence_log="$tmp/test-suite-disk-evidence.log"
+disk_usage() {
+  local budget="$1" depth="$2" rows="$3" result
+  # Walk from _build itself so hidden children (notably .sandbox) are included.
+  # awk consumes the entire sorted input; head could hide a SIGPIPE in pipefail.
+  timeout "$budget" du -xh --max-depth="$depth" "$repo_root/_build" \
+    | sort -rh | awk -v rows="$rows" 'NR <= rows'
+  result=$?
+  if [ "$result" -ne 0 ]; then
+    echo "[test-suite] disk usage depth ${depth} is incomplete (exit ${result}); the listing may be partial"
+  fi
+}
 disk_evidence() {
   echo "[test-suite] free space fell below ${1}G; what holds the bytes:"
   df -h /
   echo "[test-suite] largest _build entries (two levels: subtree then its biggest children):"
-  timeout 90 du -xh --max-depth=1 "$repo_root/_build" 2>/dev/null | sort -rh | head -8 || true
-  timeout 120 du -xh --max-depth=1 "$repo_root/_build"/* 2>/dev/null | sort -rh | head -15 || true
+  disk_usage 90 1 8
+  disk_usage 120 2 15
   echo "[test-suite] runner temp:"
-  du -sh "$tmp" 2>/dev/null || true
+  du -sh "$tmp" || echo "[test-suite] runner temp disk usage is incomplete"
   ls -lh "$log" "$trace" 2>/dev/null || true
   echo "[test-suite] /tmp:"
-  du -xsh /tmp 2>/dev/null || true
-  command -v docker >/dev/null 2>&1 && docker system df || true
+  du -xsh /tmp || echo "[test-suite] /tmp disk usage is incomplete"
+  if command -v docker >/dev/null 2>&1; then
+    docker system df || echo "[test-suite] docker disk usage is incomplete"
+  fi
 }
 watch_disk() {
   local avail_gb band
@@ -224,11 +238,22 @@ watch_disk() {
 run_suite_under_deadline() {
   opam exec -- dune build --root . --trace-file "$trace" "$alias_target" > "$log" 2>&1 &
   local dune_pid=$!
-  local exited
+  local exited disk_watcher_pid disk_watcher_exited
+  local disk_watcher_stopped=false
+  local disk_watcher_tree="$tmp/test-suite-disk-watcher-tree.txt"
   local now
   rc=""
   : > "$running_at_deadline"
   : > "$alcotest_outputs_at_deadline_file"
+  # Disk traversal can take minutes. Keep its band state and all diagnostics
+  # in one child so it cannot delay the deadline supervisor or suite verdict.
+  (
+    while kill -0 "$dune_pid" 2>/dev/null; do
+      watch_disk
+      sleep 5
+    done
+  ) > "$disk_evidence_log" 2>&1 &
+  disk_watcher_pid=$!
   while kill -0 "$dune_pid" 2>/dev/null; do
     now=$(date +%s)
     if [ $(( now - started )) -ge "$deadline" ]; then
@@ -240,11 +265,22 @@ run_suite_under_deadline() {
       rc=124
       break
     fi
-    watch_disk
     sleep 5
   done
   wait "$dune_pid"
   exited=$?
+  if kill -0 "$disk_watcher_pid" 2>/dev/null; then
+    process_table | process_tree_of "$disk_watcher_pid" > "$disk_watcher_tree"
+    echo "[test-suite] disk watcher stopped with the suite; unfinished observations may be partial" >> "$disk_evidence_log"
+    terminate_rows "$disk_watcher_tree" 0
+    disk_watcher_stopped=true
+  fi
+  wait "$disk_watcher_pid" 2>/dev/null
+  disk_watcher_exited=$?
+  cat "$disk_evidence_log"
+  if [ "$disk_watcher_stopped" = false ] && [ "$disk_watcher_exited" -ne 0 ]; then
+    echo "[test-suite] disk watcher failed (exit ${disk_watcher_exited}); disk observations may be incomplete"
+  fi
   [ -n "$rc" ] || rc="$exited"
 }
 

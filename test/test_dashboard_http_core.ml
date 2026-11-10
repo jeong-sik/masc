@@ -4203,7 +4203,7 @@ let test_dashboard_execution_trust_default_route_uses_cached_surface () =
       ]
   in
   with_cached_surface_success
-    Server_dashboard_http_execution_surfaces.execution_trust_cache
+    (Server_dashboard_http_execution_surfaces.execution_trust_cache ~state)
     seed
   @@ fun () ->
   let json =
@@ -4222,7 +4222,9 @@ let test_dashboard_execution_trust_default_route_uses_cached_surface () =
   check string "envelope cache state" "fresh"
     (json |> member "dashboard_surface_envelope" |> member "cache" |> member "state"
      |> to_string);
-  check string "envelope cache key" "execution-trust:default"
+  check string "envelope cache key"
+    ("execution-trust:default:" ^ Lib.Mcp_server.Workspace_scope_epoch.to_string
+      (Lib.Mcp_server.workspace_scope state).epoch)
     (json |> member "dashboard_surface_envelope" |> member "cache" |> member "key"
      |> to_string)
 

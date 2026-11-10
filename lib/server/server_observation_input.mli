@@ -60,6 +60,16 @@ type t =
       (** A committed [Dashboard_agent_core_bridge] sample. The published
           entry, shared timestamp and matching provider/model identity are
           checked; metric rows and provider/model labels are not retained. *)
+  | Telemetry_gap of {
+      source : Telemetry_unified_source.source option;
+      keeper : string option;
+    }
+      (** A coverage-gap append in this exact workspace. Unknown legacy source
+          names remain [None]; gap rows, traces and error text are not retained. *)
+  | Keeper_tool_call of { keeper : string }
+      (** An actual canonical tool-call ledger append, including async flush. *)
+  | Keeper_approval_audit of { keeper : string; event : Keeper_approval.Audit.event }
+      (** An actual approval audit row; no tool arguments or decision text. *)
 
 val of_event : Sse.external_event -> t option
 (** Validate exact wire names and input identities. Unknown or malformed
@@ -78,6 +88,8 @@ val subscribe :
 (** Subscribe before the initial read using the canonical runtime authority.
     Scope and visibility selection belong to {!Sse.subscribe_publication_inputs}.
     Non-external observer publications (Schedule, Goal, pending confirms and
-    exports included) use that same exact publication boundary. Callbacks are
+    exports included) use that same exact publication boundary. Coverage gaps
+    additionally use their exact after-append hook, comparing roots resolved
+    before the append and before subscription. Callbacks are
     synchronous and must not block or yield. Switch release unsubscribes only
     this listener. *)

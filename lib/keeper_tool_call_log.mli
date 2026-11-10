@@ -12,6 +12,18 @@ val max_output_len : int
     the diagnostic away with it (see
     [Keeper_tool_composition_surface.failure_payload]). *)
 
+type written = { canonical_masc_root : string; keeper_name : string }
+
+val subscribe_written : (written -> unit) -> (unit -> unit)
+(** Observe each actual JSONL row commit, including async flushes and a
+    commit followed by retention/cleanup failure. The metadata belongs to the
+    store captured by that append, even after reinitialization. Root resolution
+    happens during [init], not in the commit callback. Callbacks must not
+    block or yield; listener exceptions do not replace the append outcome. *)
+
+val failed_write_notifications : unit -> int
+(** Process-local count of exceptions from these observation callbacks. *)
+
 val invocation_execution_id :
   invocation:Agent_core.Tool_contract.Invocation.t -> Ids.Execution_id.t
 (** Journalled invocations use the canonical Core node identity, including

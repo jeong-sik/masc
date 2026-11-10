@@ -73,6 +73,20 @@ let health_fields ~now ~exists ~entry_count ~latest_ts ~freshness_slo_s
       if String.equal stale_reason "" then `Null else `String stale_reason );
   ]
 
+let next_health_change_unix ~now ~exists ~entry_count ~latest_ts
+    ~freshness_slo_s ?coverage_gap () =
+  match coverage_gap, latest_ts with
+  | None, Some ts when exists && entry_count > 0
+      && Float.is_finite now && Float.is_finite ts
+      && Float.is_finite freshness_slo_s
+      && max 0.0 (now -. ts) <= freshness_slo_s ->
+      (* Health uses strict [age > slo], so the boundary itself is still
+         healthy. One representable instant later consumes that transition. *)
+      let deadline = Float.next_after (ts +. freshness_slo_s) infinity in
+      if Float.is_finite deadline then Some deadline else None
+  | (Some _ | None), (Some _ | None) -> None
+;;
+
 let coverage_gaps_for_store ~source_name ~durable_store =
   if String.equal durable_store "" then []
   else

@@ -69,10 +69,13 @@ let expect_timeout f = match f () with
   | exception Eio.Time.Timeout -> ()
 
 type change = Comment | Vote | Title | Author
-let apply_change change store post = match change with
-  | Comment -> ignore (require (Board.add_comment store ~reader:Access.Operator
+let apply_change ?(vote_comment = false) change store post = match change with
+  | Comment ->
+    let comment = require (Board.add_comment store ~reader:Access.Operator
       ~lookup:Recipient_lookup.none_declared ~post_id:(id post)
-      ~author:"cleanup-owner" ~content:"new discussion" ~ttl_hours:0 ()))
+      ~author:"cleanup-owner" ~content:"new discussion" ~ttl_hours:0 ()) in
+    if vote_comment then ignore (require (Board.vote_comment store ~reader:Access.Operator
+      ~voter:"comment-voter" ~comment_id:(Board.Comment_id.to_string comment.id) ~direction:Board.Down))
   | Vote -> ignore (require (Board.vote store ~reader:Access.Operator
       ~voter:"late-voter" ~post_id:(id post) ~direction:Board.Up))
   | Title -> ignore (require (Board.update_post_with_outcome store
@@ -90,7 +93,7 @@ let test_selected_change change allowed base =
   Board_dispatch.set_board_sse_hook (function
     | Board_dispatch.Post_changed { post_id; change = Board_dispatch.Post_deleted }
       when String.equal post_id (id first) && not !changed ->
-      apply_change change store second;
+      apply_change ~vote_comment:(allowed && change = Comment) change store second;
       changed := true
     | Post_changed _ | Board_changed | Post_created _ | Comment_added _
     | Post_voted _ | Comment_voted _ | Reaction_changed _ -> ());

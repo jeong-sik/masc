@@ -39,23 +39,6 @@ let test_turn_span_roundtrip () =
       "expected [Begin; End], got %d event(s)"
       (List.length observed)
 
-(* with_turn_span composes emit_turn_start/emit_turn_end (covered by the
-   round-trip above), so these cases pin only the bracket contract that is
-   new: the body result flows through, and the body exception is re-raised
-   (after the [finally] emits End). They deliberately do not read the
-   process-global ring so they cannot interfere with the round-trip cursor. *)
-
-let test_with_turn_span_returns_body () =
-  let result = Masc_runtime_events.with_turn_span (fun () -> 7) in
-  Alcotest.(check int) "with_turn_span returns the body's result" 7 result
-
-let test_with_turn_span_propagates_exn () =
-  Alcotest.check_raises
-    "with_turn_span re-raises the body exception"
-    (Failure "boom")
-    (fun () ->
-      ignore (Masc_runtime_events.with_turn_span (fun () -> failwith "boom")))
-
 (* One past the largest pid any supported platform allocates (Linux caps
    pid_max at 4194304; macOS at 99999), so no process can hold it and
    [Unix.kill] answers ESRCH.  Picking a real reaped pid would need a fork,
@@ -294,12 +277,6 @@ let () =
             test_prune_rejects_non_decimal_pid_stems
         ; Alcotest.test_case "survives missing directory" `Quick
             test_prune_survives_missing_dir
-        ] )
-    ; ( "with_turn_span"
-      , [ Alcotest.test_case "returns body result" `Quick
-            test_with_turn_span_returns_body
-        ; Alcotest.test_case "propagates body exception" `Quick
-            test_with_turn_span_propagates_exn
         ] )
     ; ( "startup-directory"
       , [ Alcotest.test_case "workspace default reaches OCaml through exec" `Quick

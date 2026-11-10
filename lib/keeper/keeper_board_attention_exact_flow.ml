@@ -144,7 +144,8 @@ let registry_setup_error = function
   | Runtime_exact_output_registry.Lane_thinking_not_encodable _
   | Runtime_exact_output_registry.Required_lane_unavailable _
   | Runtime_exact_output_registry.Required_lane_disabled _
-  | Runtime_exact_output_registry.Resolver_snapshot_rejected _ ->
+  | Runtime_exact_output_registry.Resolver_snapshot_rejected _
+  | Runtime_exact_output_registry.Targets_refused _ ->
     Registry_unavailable
 ;;
 

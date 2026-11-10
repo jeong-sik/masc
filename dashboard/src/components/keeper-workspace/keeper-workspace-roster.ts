@@ -19,7 +19,8 @@ import { navigate } from '../../router'
 import { selectKeeper } from '../../keeper-actions'
 import { keeperMobilePane } from '../keeper-detail-state'
 import { BroadcastComposer } from './broadcast-composer'
-import { buildCompositeByKeeperKey, fleetCompositeSnapshot } from '../../composite-signals'
+import { buildCompositeByKeeperKey } from '../../composite-signals'
+import { useFleetComposite } from '../../lib/use-fleet-composite'
 import { compositeSnapshotForKeeper } from '../../lib/keeper-composite-lookup'
 import { formatCompactAge, formatRelativeSec } from '../../lib/format-time'
 import { persistentSignal } from '../../lib/persistent-signal'
@@ -576,7 +577,7 @@ export function KeeperWorkspaceRoster({
   // Composite-aware bucket resolution (same map agent-roster/registry use) so
   // a `synthetic_stall` keeper confirmed blocked by the composite attention
   // axis groups under 확인 필요 here too — not running.
-  const fleetSnapshot = fleetCompositeSnapshot.value
+  const fleetSnapshot = useFleetComposite().data
   const compositeByKeeperKey = useMemo(() => buildCompositeByKeeperKey(fleetSnapshot), [fleetSnapshot])
   const bucketOf: BucketOf = k => keeperBucket(k, compositeSnapshotForKeeper(k, compositeByKeeperKey))
   // Same composite the buckets use, so grouping and the attention badge cannot

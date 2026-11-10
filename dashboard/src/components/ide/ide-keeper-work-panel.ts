@@ -20,7 +20,8 @@ import {
   routeLinksForContext,
   type IdeContextRouteLink,
 } from './ide-context-lens'
-import { buildCompositeByKeeperKey, fleetCompositeSnapshot } from '../../composite-signals'
+import { buildCompositeByKeeperKey } from '../../composite-signals'
+import { useFleetComposite } from '../../lib/use-fleet-composite'
 import { compositeSnapshotForKeeper } from '../../lib/keeper-composite-lookup'
 import type { KeeperCompositeSnapshot } from '../../api/schemas/keeper-composite'
 
@@ -70,15 +71,10 @@ export function IdeKeeperWorkPanel({ keeperName }: IdeKeeperWorkPanelProps) {
     || summary.runtimeBlocker,
   )
 
-  // task-1740 C3: the live-turn fields (model / in-flight tools / last
-  // skip / turn attempts / board cursor) are read from the composite snapshot
-  // SSOT (`/api/v1/keepers/:name/composite` via `fleetCompositeSnapshot`),
-  // not re-derived from the global keepers/tasks store. `.value` access
-  // auto-subscribes this component to composite freshness, mirroring the
-  // `keepers.value` / `tasks.value` reads above.
+  const fleet = useFleetComposite().data
   const composite = compositeSnapshotForKeeper(
     keeper,
-    buildCompositeByKeeperKey(fleetCompositeSnapshot.value),
+    buildCompositeByKeeperKey(fleet),
   )
 
   return html`
@@ -277,12 +273,8 @@ function WorkMetric(label: string, value: string) {
   `
 }
 
-// task-1740 C3: render the keeper's live-turn state from the composite
-// snapshot SSOT. Every value below is read from `KeeperCompositeSnapshot`
-// (the drift-guarded schema), never re-derived from the global store.
-// When no snapshot resolves (pinned backend that predates these fields,
-// or fleet composite not yet hydrated) the strip is omitted rather than
-// falling back to a store-derived guess, keeping the source singular.
+// Live-turn fields come from the shared, schema-checked composite query.
+// An unavailable query leaves this strip absent.
 function LiveTurnStrip(composite: KeeperCompositeSnapshot | null) {
   if (!composite) return null
   const liveTurn = composite.live_turn ?? null

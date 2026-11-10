@@ -26,6 +26,12 @@ type reason =
           scope the switch names. *)
   | Keeper_excluded  (** The Keeper is named in [excluded_keepers]. *)
   | Lane_disabled  (** [\[typesafeai\] enabled = false]. *)
+  | Access_unpublished
+      (** The server has not published its account access, so the lane cannot
+          tell whether it may send with the keys of the host. *)
+  | Host_account_not_shared
+      (** A multi-account server shares no account of its host, and each key
+          of the lane is one (plan D4c). *)
   | No_armed_destination
       (** None of the variables the destinations name holds a key. *)
   | Refused_by_another_gate
@@ -49,6 +55,7 @@ val reason_of_unavailable : Typesafeai_config.unavailable_reason -> reason
 
 val lane_reason_of_unavailable : Typesafeai_config.unavailable_reason -> reason
 (** What a refusal of the lane comes to: {!Lane_disabled},
+    {!Access_unpublished}, {!Host_account_not_shared},
     {!No_armed_destination}, or {!Refused_by_another_gate} for any other
     reason, which {!Typesafeai_config.lane_destinations} does not give. *)
 
@@ -66,10 +73,11 @@ val lane_armed_word : string
 (** The word it puts for a lane that has a key. *)
 
 val reason_to_string : reason -> string
-(** The word a reading of the gate puts on the wire. Four use the word of a
+(** The word a reading of the gate puts on the wire. Six use the word of a
     {!Typesafeai_config.unavailable_reason} ([memory_recall_disabled],
-    [keeper_excluded], [lane_disabled], [no_armed_destination]); the other two
-    are [environment_switch_off] and [another_gate_refused]. *)
+    [keeper_excluded], [lane_disabled], [access_unpublished],
+    [host_account_not_shared], [no_armed_destination]); the other two are
+    [environment_switch_off] and [another_gate_refused]. *)
 
 val reason_of_string : string -> reason option
 (** The inverse of {!reason_to_string} over {!all_reasons}. *)

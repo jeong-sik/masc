@@ -3,6 +3,8 @@ import {
   publishDashboardObservationChange,
   publishDashboardObservationRecovery,
   setupObservationRefresh,
+  ObservationPending,
+  retainObservationReadFailure,
 } from './observation-refresh'
 
 const disposers: Array<() => void> = []
@@ -15,6 +17,38 @@ afterEach(() => {
 })
 
 describe('authoritative observation reads', () => {
+  it.each([
+    () => new ObservationPending('projection is initializing'),
+    () => retainObservationReadFailure(new Error('store owns failed read debt')),
+  ])('waits for its producer or store recovery without a duplicate retry timer', async failure => {
+    vi.useFakeTimers()
+    const read = vi.fn(async () => { throw failure() })
+    disposers.push(setupObservationRefresh(read, { topics: ['keeper_composite'] }))
+    await flush()
+    await vi.advanceTimersByTimeAsync(300_000)
+    expect(read).toHaveBeenCalledTimes(1)
+    expect(vi.getTimerCount()).toBe(0)
+    publishDashboardObservationChange({ topic: 'keeper_composite' })
+    await flush()
+    expect(read).toHaveBeenCalledTimes(2)
+  })
+
+  it('preserves a trailing invalidation received during an initializing read', async () => {
+    let finish!: () => void
+    const read = vi.fn(async () => {
+      if (read.mock.calls.length === 1) {
+        await new Promise<void>(resolve => { finish = resolve })
+        throw new ObservationPending('initializing')
+      }
+    })
+    disposers.push(setupObservationRefresh(read, { topics: ['keeper_composite'] }))
+    await flush()
+    publishDashboardObservationChange({ topic: 'keeper_composite' })
+    finish()
+    await flush(); await flush()
+    expect(read).toHaveBeenCalledTimes(2)
+  })
+
   it('reads initially and after a matching change, without periodic HTTP', async () => {
     vi.useFakeTimers()
     const read = vi.fn(async () => ({ state: 'ready' }))

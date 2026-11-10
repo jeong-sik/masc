@@ -27,6 +27,24 @@ type Observer = {
 
 const observers = new Set<Observer>()
 
+/** This read published no authoritative projection. Its producer, a newer
+ * accepted observation, or recovery/focus owns completion without polling. */
+export class ObservationPending extends Error {}
+
+const recoveryOwnedFailures = new WeakSet<object>()
+
+/** The store owns this failure's retry debt. Retain the exact error object,
+ * including HTTP status and identity, without mutating/forking its contract. */
+export function retainObservationReadFailure(cause: unknown): unknown {
+  const failure = typeof cause === 'object' && cause !== null ? cause : new Error(String(cause))
+  recoveryOwnedFailures.add(failure)
+  return failure
+}
+
+function hasReadRecoveryOwner(cause: unknown): boolean {
+  return typeof cause === 'object' && cause !== null && recoveryOwnedFailures.has(cause)
+}
+
 export function isDashboardObservationTopic(value: unknown): value is DashboardObservationTopic {
   try { readDashboardObservationTopic(value); return true } catch { return false }
 }
@@ -118,7 +136,11 @@ export function setupObservationRefresh(
         retryDelayMs = TRANSPORT_RETRY_BASE_MS
       }
     } catch (error) {
-      if (active && !controller.signal.aborted) {
+      if (error instanceof ObservationPending || hasReadRecoveryOwner(error)) {
+        retryDelayMs = TRANSPORT_RETRY_BASE_MS
+        // Retain any invalidation received during the read as one trailing
+        // read; otherwise the producer or store-owned recovery completes it.
+      } else if (active && !controller.signal.aborted) {
         dirty = true
         retryTimer = setTimeout(() => {
           retryTimer = null

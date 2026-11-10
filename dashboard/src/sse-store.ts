@@ -31,6 +31,9 @@ import {
   refreshExecution,
   refreshBoard,
   refreshFusionRuns,
+  recoverExecutionReadDebt,
+  recoverShellReadDebt,
+  disposeExecutionReadRecovery,
   serverStatus,
   boardPosts,
   boardSortMode,
@@ -70,8 +73,9 @@ import {
   SSE_DEFAULT_DEBOUNCE_MS,
   SSE_KEEPER_OPERATOR_DEBOUNCE_MS,
   SSE_KEEPER_THREAD_DEBOUNCE_MS,
-  SSE_RECONNECT_RETRY_MS,
 } from './config/constants'
+import { namespaceTruthInitializing, namespaceTruthLoading, namespaceTruthReadRecovery } from './namespace-truth-signals'
+import { subscribeStoredTokenChanges } from './api/core'
 
 // --- Refresh function registration (avoids circular imports) ---
 
@@ -365,6 +369,10 @@ function handleNamespaceTruthSnapshot(payload: unknown): void {
     const normalized = normalizeNamespaceTruth(payload)
     namespaceTruth.value = normalized
     namespaceTruthError.value = null
+    namespaceTruthInitializing.value = false
+    namespaceTruthLoading.value = false
+    namespaceTruthReadRecovery.succeeded()
+    recoverShellReadDebt()
     serverStatus.value = mergeServerStatus(
       serverStatus.value,
       normalized.root.status ?? null,
@@ -510,8 +518,8 @@ function handleReconnect(notify = true): void {
   if (notify) showToast(label, 'success', 3000)
 
   // Refresh all data to recover events missed during disconnect.
-  // If the server is still warming up after restart, the first fetch may fail.
-  // Schedule a single retry after 3s to cover the warm-up window.
+  // Failed reads retain their own recovery debt. Initializing projections
+  // await canonical completion rather than scheduling another status read.
   invalidateDashboardCache()
   resetExecutionSnapshotGeneration()
   void refreshExecution({ force: true })
@@ -552,22 +560,6 @@ async function hydrateAfterReconnect(): Promise<void> {
   void refreshActiveRoute().catch(err =>
     console.warn('[server-push] reconnect route refresh failed', err instanceof Error ? err.message : err),
   )
-  // Safety-net retry: if project-snapshot fetch failed (e.g. server warm-up),
-  // the scheduler's error signal will be set. Retry once after delay.
-  setTimeout(() => {
-    if (namespaceTruthError.value) {
-      requestNamespaceTruthNow()
-    }
-    void refreshDashboard({ force: true }).catch(retryErr =>
-      console.warn(
-        '[server-push] reconnect dashboard retry failed',
-        retryErr instanceof Error ? retryErr.message : retryErr,
-      ),
-    )
-    void refreshActiveRoute().catch(retryErr =>
-      console.warn('[server-push] reconnect route retry failed', retryErr instanceof Error ? retryErr.message : retryErr),
-    )
-  }, SSE_RECONNECT_RETRY_MS)
 }
 
 // --- Board incremental hydration ---
@@ -938,6 +930,19 @@ export function hydrateServerPushEvent(event: SSEEvent): boolean {
 // --- SSE server-push reaction setup ---
 
 export function setupServerPushReaction(): () => void {
+  const recoverReads = () => {
+    namespaceTruthReadRecovery.recover()
+    recoverExecutionReadDebt()
+    recoverShellReadDebt()
+  }
+  const recoverAuthority = () => {
+    namespaceTruthReadRecovery.recover(true)
+    recoverExecutionReadDebt(true)
+    recoverShellReadDebt(true)
+  }
+  window.addEventListener('focus', recoverReads)
+  window.addEventListener('online', recoverReads)
+  const unsubToken = subscribeStoredTokenChanges(recoverAuthority)
   const unsubReconnect = dashboardObserverAdmissionCount.subscribe((count) => {
     if (count > 0 && dashboardObserverReady.value) {
       handleReconnect(count > 1)
@@ -946,6 +951,11 @@ export function setupServerPushReaction(): () => void {
 
   return () => {
     unsubReconnect()
+    unsubToken()
+    window.removeEventListener('focus', recoverReads)
+    window.removeEventListener('online', recoverReads)
+    namespaceTruthReadRecovery.dispose()
+    disposeExecutionReadRecovery()
     for (const key of Object.keys(_debounceTimers)) {
       clearTimeout(_debounceTimers[key])
       delete _debounceTimers[key]

@@ -168,8 +168,8 @@ type tool_series_request =
   }
 
 let tool_series_window request ~until =
-  Tool_metrics_series.window
-    ~since:(until -. (request.since_hours *. Masc_time_constants.hour))
+  Tool_metrics_series.sliding_window
+    ~span_s:(request.since_hours *. Masc_time_constants.hour)
     ~until
     ~width:request.width
     ~utc_offset_min:request.utc_offset_min

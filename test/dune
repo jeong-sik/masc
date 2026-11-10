@@ -3240,6 +3240,7 @@
 (include stanzas/test_keeper_memory_admission_queue.inc)
 (include stanzas/test_keeper_memory_write.inc)
 (include stanzas/test_keeper_memory_write_growth_probe.inc)
+(include stanzas/test_keeper_memory_change_metrics.inc)
 (include stanzas/test_keeper_memory_recall_parts.inc)
 
 (include stanzas/test_keeper_memory_recall_flow.inc)

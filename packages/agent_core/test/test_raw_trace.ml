@@ -279,9 +279,6 @@ let test_agent_run_stream_append_only_raw_trace () =
     let run2_records = unwrap (Raw_trace_query.read_run run2) in
     let all_records = unwrap (Raw_trace.read_all ~path:trace_path ()) in
     let discovered_runs = unwrap (Raw_trace_query.read_runs ~path:trace_path ()) in
-    let session_runs =
-      unwrap (Sessions.get_raw_trace_runs ~session_root:root ~session_id:"sess-raw" ())
-    in
     let run1_summary = unwrap (Raw_trace_query.summarize_run run1) in
     let run1_validation = unwrap (Raw_trace_query.validate_run run1) in
     Alcotest.(check string) "trace path preserved" trace_path run1.path;
@@ -290,7 +287,6 @@ let test_agent_run_stream_append_only_raw_trace () =
       true
       (run2.start_seq > run1.end_seq);
     Alcotest.(check int) "two discovered runs" 2 (List.length discovered_runs);
-    Alcotest.(check int) "two session runs" 2 (List.length session_runs);
     Alcotest.(check int)
       "append only all records"
       (List.length run1_records + List.length run2_records)

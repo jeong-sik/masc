@@ -168,7 +168,16 @@ let handle_retry_get state request reqd target =
         | Supersession_intent_mismatch _ | Invalid_supersession_actor _ -> `Service_unavailable in
       respond request reqd ~status (`Assoc
         [ "ok", `Bool false; "error", `String (Store.error_to_string error) ])
-  | Error error -> respond_retry_error request reqd error
+  | Error (( Retry.Invalid_request _ | Retry.Ineligible_operation
+           | Retry.Owner_unavailable _ | Retry.Owner_observation_failed _
+           | Retry.Owner_stopping | Retry.Owner_metadata_absent
+           | Retry.Owner_trace_changed | Retry.Owner_turn_present
+           | Retry.Registry_lane_present | Retry.Lifecycle_reserved _
+           | Retry.Admission_mismatch | Retry.Backlog_unavailable _
+           | Retry.Backlog_revision_conflict _ | Retry.Corrupt_sibling _
+           | Retry.Conflicting_sibling _ | Retry.Unordered_sibling _
+           | Retry.New_owned_tasks _ | Retry.Recorded_task_changed _ ) as error) ->
+      respond_retry_error request reqd error
   | Ok (operation, eligibility) ->
       let eligible, backlog_version, receipted_ids, observation = match eligibility with
         | Ok preview when preview.operation.revision = operation.revision ->
@@ -226,7 +235,16 @@ let handle_retry_post state ~actor request reqd target body =
         Ok (operation, scheduled, scheduling_json, audit)
   in
   match result with
-  | Error error -> respond_retry_error request reqd error
+  | Error (( Retry.Invalid_request _ | Retry.Store_error _ | Retry.Ineligible_operation
+           | Retry.Owner_unavailable _ | Retry.Owner_observation_failed _
+           | Retry.Owner_stopping | Retry.Owner_metadata_absent
+           | Retry.Owner_trace_changed | Retry.Owner_turn_present
+           | Retry.Registry_lane_present | Retry.Lifecycle_reserved _
+           | Retry.Admission_mismatch | Retry.Backlog_unavailable _
+           | Retry.Backlog_revision_conflict _ | Retry.Corrupt_sibling _
+           | Retry.Conflicting_sibling _ | Retry.Unordered_sibling _
+           | Retry.New_owned_tasks _ | Retry.Recorded_task_changed _ ) as error) ->
+      respond_retry_error request reqd error
   | Ok (operation, scheduled, scheduling, audit) ->
       respond request reqd ~status:(if scheduled then `Accepted else `OK) (`Assoc
         [ "schema", `String "masc.keeper_shutdown.task_settlement_retry.result.v1"

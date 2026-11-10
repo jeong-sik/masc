@@ -1666,7 +1666,6 @@ let test_codex_resume_overflow_restarts_with_the_address_form () =
       (List.length injected))
 
 let () =
-  Masc_test_deps.publish_single_user_access ();
   run "Keeper current Codex context" ["native requests",[
   test_case "a Keeper's Codex client runs in its private directory" `Quick
     test_codex_runs_in_the_keepers_private_directory;

@@ -605,7 +605,7 @@ Runtime 조회: rg -n --glob '*.ml' '\bRuntime\.(get_runtime_by_id|resolve_assig
   - CLI를 띄우는 클라이언트 함수(Claude Code `run_turn`·`probe_subscription`, Codex `run_turn`·`probe_subscription`·`list_models`·`read_rate_limits`·`delete_threads`)가 모두 `authorized`를 받는다. `validate_turn`은 CLI를 띄우지 않으므로 받지 않는다. client `config`에는 계정 칸이 없다. login은 계정을 만드는 흐름이라 따로 둔다(`login_environment`).
 - 층.
   - D2-0 기록. Runtime 본문에 `self_effects`를, Keeper 본문에 `policy_id`와 `turn_scope`를 더한다. 두 본문은 미리보기에서만 쓰였으므로 hard cut이다. 미리보기 Keeper는 `autonomous`와 `direct` 채널을 허용하는 정책으로 만든다. Runtime과 효과는 배정과 Self grant가 제한한다.
-  - D2-1 adapter. 한 snapshot에서 Keeper 턴의 `facts`를 만든다. 배정이 없으면 `NoAuthorizedRuntime`이다. 1단계에는 Runtime과 ProviderAccount의 상태 기록이 없어서 둘 다 `Active`다. 회수는 구역의 게이트 값(`revocation_pending`)이다. 의존은 `Cleared`다. 1단계에는 복원 창이 없고(F2는 2단계), A2가 복원된 로그를 거절한다.
+  - D2-1 adapter. 한 snapshot에서 Keeper 턴의 `facts`를 만든다. 배정이 없으면 `NoAuthorizedRuntime`이다. 1단계에는 Runtime과 ProviderAccount의 상태 기록이 없어서 둘 다 `Active`다. 회수는 그 snapshot이 가진 보류다(`revocation_pending`). 의존은 `Cleared`다. 1단계에는 복원 창이 없고(F2는 2단계), A2가 복원된 로그를 거절한다.
   - D2-2 CLI 판정 `Authz_boot_mode_read.tool`.
   - D2-3 `Runtime_account_access`(봉인, 인가, 게시)와 게시 지점(owner state). 단일 사용자만 연다.
   - D2-4 다계정 인가(Keeper 턴, 자기 계정)와 홈 경로 하나(`Runtime_account_home_layout`). 미리보기가 `Multi_account`를 게시한다. 로그인 확인과 verify가 요청을 넘긴다(단일 사용자 setup은 `Operator_call`, 사람은 `Own_account`). `runtime-verify`와 setup의 모델 확인은 검증을 시작하는 함수(`verify_runtime_execution`) 한 곳에서 `tool` 판정 뒤 게시한다. 처음에는 `runtime-verify`만 게시해서 setup의 확인이 공식 CLI 런타임에서 늘 `Not_published`로 끝났다(#50421 리뷰). 클라이언트가 아직 config로 계정을 받으므로 인가된 계정을 그 칸에 넣는다(D2-5·D2-6에서 지운다). 2026-11-09 순서를 바꿨다. 클라이언트를 먼저 바꾸면 미리보기가 게시하지 않아 사람의 로그인 확인과 verify가 중간 층에서 멈춘다.
@@ -759,6 +759,33 @@ S1은 둘로 나눈다(2026-11-10 사용자). 다 만든 뒤에 여는 대신 �
   - 같은 파일의 표 검사: 계정 서버의 표와 `Browser_session` 경로는 통과하고, `Read_auth` 경로와 dev-token 종류는 거절한다.
   - `test_authz_boot_mode_read`: 7행은 `Boot_multi_account`다. 진입은 판정이 읽은 저장소 경로를 싣는다. 익명 쓰기가 켜져 있으면 거절한다. 8행은 `Authorization_uncertain`으로 멈춘다.
 - 하지 않는 것: 구역의 멈춤을 읽는 일(S1a-2), 로그인 경로와 사람의 경로(S1a-3), `masc auth preview`를 계정 서버 코드로 옮기는 일(S1a-3), Keeper lane, MCP(S1b).
+
+**S1a-2 범위**
+
+- 믿을 수 있는 읽기. `Authz_zone.read`는 구역을 믿을 수 있을 때만 snapshot을 준다(`Authz_zone.trusted`). 로그나 외부 저장소가 멈췄을 때, 두 파일이 어긋날 때, 저장소에 답이 없을 때는 그 사유(`uncertain`)를 준다. `commit`이 진입에서 하는 판정을 구역이 메모리에 가진 값으로 한다. 파일은 읽지 않는다.
+- 타입으로 묶은 곳. 세션·PAT·Service credential 인증(`authenticate`), 브라우저 요청 검사(`Authz_browser_request.check`), gate(`Auth_gate.decide`), Keeper 턴 판정(`Authz_keeper_turn.decide`)이 `Authz_zone.trusted`를 받는다. `trusted`는 `read`만 만든다. 그래서 이 함수들에는 멈춘 구역의 상태를 넘길 수 없다.
+- 거절하는 곳과 답.
+  - 로그인(`Authz_login.sign_in`)은 `Uncertain`으로 거절한다. 이미 묶인 사람의 로그인도, 초대나 allowlist로 들어오는 입장도 같은 답이다.
+  - 사람의 경로(who-am-I, 세션 읽기, 로그아웃, 구독 연결·검증, Runtime·Keeper, Keeper에게 묻기)는 503과 고정 문장 하나로 답한다(`Login_routes.zone_uncertain`). credential을 읽기 전에 답한다. 사유에는 서버의 파일 경로가 들어 있어서 로그에만 쓴다. 로그아웃의 503은 쿠키를 지우지 않는다. 파일을 다시 읽은 뒤에는 그 세션이 살아 있을 수 있다.
+  - CLI 시작(`Runtime_account_access`의 `Own_account`와 `Keeper_turn`)은 `Zone_uncertain`으로 거절한다. 요청 하나를 snapshot 하나에서 판정한다. 사람, 턴, 홈을 같은 상태에서 읽는다. 상태를 읽지 않는 거절(`No_operator`, `Not_a_keeper_id`)은 전과 같다.
+- Keeper 턴 판정은 snapshot 하나에서 끝난다. 상태와 회수 보류를 같은 snapshot에서 읽으므로 둘 사이에 레코드가 끼지 않고, 다시 판정하는 고리가 없다. 회수 보류는 `Authz_state.revocation`이 답한다.
+- 세션과 PAT 인증은 사람의 회수 보류도 본다(`Principal_revocation_pending`). 사람을 정지하는 레코드가 로그에 닿지 못하고 포기되면 그 사람은 상태에서 아직 활성이다. 로그인은 이 보류로 거절하고(`Blocked`), 그 사람의 세션과 PAT도 같은 보류로 거절한다.
+- `Authz_zone.snapshot`은 쓰는 쪽이 본다. 제품 코드에 남은 호출은 9곳이고, 모두 읽은 뒤 같은 함수에서 `commit`으로 간다. `commit`이 진입에서 다시 판정하므로 멈춘 구역에서는 거절이나 commit 실패로 끝난다.
+  - 입장 2곳(`Authz_login`의 `admission`과, commit 실패 뒤 로그가 움직였는지 보는 곳)
+  - 세션 교체(`Login_routes.still_acting`)
+  - id 다시 뽑기 4곳(`Authz_allowlist`, `Authz_browser_session`, `Authz_service_credential`, `Authz_pat`)
+  - Keeper 쓰기 전 검사(`Authz_keeper.write`)
+  - 끄기(`Authz_off.turn_off`)
+  - 확인 명령: `rg -n "(Authz_zone|Z)\.snapshot [a-z(]" lib bin --type ocaml`. 이 목록에 없는 줄이 나오면 그 줄이 `commit` 없이 무엇을 허용하는지 본다.
+- 시험.
+  - `test_authz_zone`: `read`가 네 사유를 하나씩 낸다(로그가 멈춘 구역, 저장소가 멈춘 구역, 두 파일이 어긋난 구역, 저장소에 답이 없는 구역). 믿을 수 있는 구역에서는 회수 보류를 그 snapshot의 상태에서 읽는다.
+  - `test_authz_browser_session`, `test_authz_credential_auth`: 로그가 멈춘 구역에서는 이미 받은 세션 쿠키, PAT, Service credential이 판정에 닿지 못한다. 사람을 정지하는 레코드가 포기되면 그 사람의 세션이 `Principal_revocation_pending`으로 거절된다. PAT 쪽의 같은 거절은 시험하지 않는다. PAT를 발급하는 제품 경로가 아직 없다.
+  - `test_authz_login`: 멈춘 로그에서는 이미 묶인 사람도, 유효한 초대를 든 새 사람도 `Uncertain`이다.
+  - `test_server_login_http`: Admin이 로그인한 설치의 로그를 멈춘다. who-am-I, 세션 읽기, 구독 목록, Keeper 목록과 만들기, 로그아웃, 새 로그인이 503이다. credential이 없는 who-am-I도 503이다. 답의 본문에 서버의 경로가 없고, 브라우저의 세션 쿠키는 남는다.
+  - `test_runtime_account_access_multi`: 멈춘 구역에서 자기 계정 요청과 Keeper 턴이 `Zone_uncertain`이고, 운영자 호출은 전처럼 `No_operator`다.
+  - 실제 바이너리(2026-11-10): 임시 설치에 `masc auth preview`를 띄워 믿을 수 있는 구역의 답이 전과 같은지 봤다. credential 없는 사람의 경로는 401, 첫 화면은 200, 다른 Host는 400이다. 멈춘 구역은 실제 바이너리로 만들지 못했다. 구역은 자기가 쓸 때 멈춤을 알고, 로그인 없이는 쓰게 할 길이 없다.
+- 남는 한계. 다른 프로세스가 파일에 쓴 것은 구역이 그 파일에 다음으로 쓸 때 안다. 그 전까지 `read`는 snapshot을 준다. 읽을 때마다 파일을 보는 일은 이 층이 하지 않는다.
+- 하지 않는 것: `commit`이 읽기·판정·쓰기를 한 잠금 안에서 하게 바꾸는 일(읽은 뒤 commit까지의 경합은 지금처럼 다시 읽어서 푼다), 계정 서버의 표에 경로를 다는 일(S1a-3).
 
 ### E. official client 격리
 

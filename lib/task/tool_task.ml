@@ -184,6 +184,7 @@ let handle_transition ~tool_name ~start_time ctx args =
        ( Masc_domain.Task
            ( Masc_domain.Task_error.AlreadyClaimed _
            | Masc_domain.Task_error.InvalidState _
+           | Masc_domain.Task_error.BacklogVersionConflict _
            | Masc_domain.Task_error.InvalidId _
            | Masc_domain.Task_error.TransitionRejected _
            | Masc_domain.Task_error.VerificationSuperseded _ )
@@ -229,23 +230,29 @@ let handle_transition ~tool_name ~start_time ctx args =
   | Ok _, (Masc_domain.Claim | Masc_domain.Start | Masc_domain.Submit_for_verification
             | Masc_domain.Release | Masc_domain.Done_action), _
   | Error _, _, _ -> ());
+  let invalid_state_response message =
+    workflow_rejection_result
+      ~tool_name
+      ~start_time
+      ~rule_id:"task_transition_invalid_state"
+      ~recoverable:false
+      ~extra_fields:
+        [ "task_id", `String task_id
+        ; "action", `String action_s
+        ; "requested_agent", `String ctx.agent_name
+        ]
+      (Printf.sprintf "Invalid task state: %s" message)
+  in
   let transition_result_to_response = function
     | Error (Masc_domain.Task (Masc_domain.Task_error.TransitionRejected rejection)) ->
       let data = Tool_task_transition_rejection.payload rejection in
       Tool_result.make_err ~tool_name ~start_time
         ~class_:Tool_result.Workflow_rejection ~data (Yojson.Safe.to_string data)
     | Error (Masc_domain.Task (Masc_domain.Task_error.InvalidState message)) ->
-      workflow_rejection_result
-        ~tool_name
-        ~start_time
-        ~rule_id:"task_transition_invalid_state"
-        ~recoverable:false
-        ~extra_fields:
-          [ "task_id", `String task_id
-          ; "action", `String action_s
-          ; "requested_agent", `String ctx.agent_name
-          ]
-        (Printf.sprintf "Invalid task state: %s" message)
+      invalid_state_response message
+    | Error (Masc_domain.Task (Masc_domain.Task_error.BacklogVersionConflict { expected; actual })) ->
+      invalid_state_response
+        (Printf.sprintf "Version mismatch (expected %d, got %d)" expected actual)
     | (Error (Masc_error.Task (Masc_error.Task_error.NotFound _ | (Masc_error.Task_error.AlreadyClaimed _ | (Masc_error.Task_error.InvalidId _ | Masc_error.Task_error.VerificationSuperseded _)))) | Error (Masc_error.Agent _ | (Masc_error.Auth _ | Masc_error.System _)) | Ok _) as result -> result_to_response ~tool_name ~start_time result
   in
   match result, !submission_receipt with

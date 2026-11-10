@@ -124,6 +124,7 @@ let task_recovery_failure_class = function
   | Masc_domain.Task (Task_error.AlreadyClaimed _)
   | Masc_domain.Task (Task_error.TransitionRejected _)
   | Masc_domain.Task (Task_error.InvalidState _) | Masc_domain.Task (Task_error.InvalidId _)
+  | Masc_domain.Task (Task_error.BacklogVersionConflict _)
   | Masc_domain.Task (Task_error.VerificationSuperseded _) -> Tool_result.Workflow_rejection
   | Masc_domain.Auth (Auth_error.Unauthorized _) | Masc_domain.Auth (Auth_error.Forbidden _)
   | Masc_domain.Auth (Auth_error.SameOriginBlocked) | Masc_domain.Auth (Auth_error.TokenExpired _)

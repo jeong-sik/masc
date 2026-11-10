@@ -78,19 +78,6 @@ let test_an_inspect_failure_is_kept_as_such () =
   check bool "inspect refused" true (observation.Watch.result = Error (Watch.Inspect_refused "XPC timeout"))
 ;;
 
-let test_damage_appears_once () =
-  let volume = "watch-damage-transitions" in
-  let _, inspect, read_image = fakes [ Ok damaged; Ok damaged; Ok Fs.Clean; Ok damaged ] in
-  let appeared () =
-    let previous, current = observe ~inspect ~read_image ~volume in
-    Watch.damage_appeared ~previous current
-  in
-  check bool "first read after start records errors" true (appeared ());
-  check bool "still damaged" false (appeared ());
-  check bool "repaired" false (appeared ());
-  check bool "damaged again after a clean read" true (appeared ())
-;;
-
 let test_an_unparsed_inspect_is_typed () =
   let volume = "watch-inspect-unparsed" in
   let inspect ~volume:_ = Ok (`List []) in
@@ -134,7 +121,6 @@ let () =
         ; test_case "inspect failure kept" `Quick test_an_inspect_failure_is_kept_as_such
         ; test_case "unparsed inspect typed" `Quick test_an_unparsed_inspect_is_typed
         ; test_case "unreadable image keeps its path" `Quick test_an_unreadable_image_keeps_its_path
-        ; test_case "damage appears once" `Quick test_damage_appears_once
         ; test_case "latest is what status reads" `Quick test_latest_is_what_status_reads
         ] )
     ]

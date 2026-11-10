@@ -29,7 +29,7 @@ let reload_sub_boards store =
       Board_sub_boards_source.fail_read store outcome exception_ (Printexc.get_raw_backtrace ()) in
     match Board_sub_boards_source.finish_read outcome with
     | Ok count -> Ok count
-    | Error error -> Error (Board_paths.sub_boards_path store, Failure (error_to_string error)))
+    | Error error -> Error (Board_paths.sub_boards_path store, Failure (show_board_error error)))
 
 type snapshot_change =
   | Replace_sub_board of sub_board
@@ -64,7 +64,7 @@ let publish_policy store outcome publish =
   let result = Board_sub_boards_source.finish_write outcome result in
   (match result with
    | Ok _ -> ()
-   | Error error -> record_persist_error ~where:"sub_board_policy" (error_to_string error));
+   | Error error -> record_persist_error ~where:"sub_board_policy" (show_board_error error));
   result
 ;;
 

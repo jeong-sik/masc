@@ -2,8 +2,8 @@ open Alcotest
 
 module Response = Masc.Http_server_eio.Response
 
-let reqd_of_h2 ~sw h2_reqd =
-  Masc.Http_reqd.of_h2 ~stream_sw:sw
+let reqd_of_h2 ~stream_end h2_reqd =
+  Masc.Http_reqd.of_h2 ~stream_end
     ~ledger:(Masc.Http_h2_response_ledger.current_exn ()) h2_reqd
 module Subs = Mcp_subscriptions
 module Protocol = Mcp_transport_protocol
@@ -193,12 +193,13 @@ let test_bound_goal_tree_compresses_before_capacity_reservation () =
 
 let test_listener_shares_capacity mode () =
   let released,release=Eio.Promise.create () in
-  let make_handler ~gateway:_ ~request_sw _ reqd =
+  let make_handler ~gateway:_ ~stream_end _ reqd =
+    let request_sw = Masc.Http_h2_stream.Stream_end.switch stream_end in
     match (H2.Reqd.request reqd).target with
     | "/held" ->
       Eio.Switch.on_release request_sw (fun () -> Eio.Promise.resolve release ());
-      Response.json ~compress:false payload (reqd_of_h2 ~sw:request_sw reqd)
-    | "/large" -> Response.json ~compress:false payload (reqd_of_h2 ~sw:request_sw reqd)
+      Response.json ~compress:false payload (reqd_of_h2 ~stream_end reqd)
+    | "/large" -> Response.json ~compress:false payload (reqd_of_h2 ~stream_end reqd)
     | _ -> fail "unexpected fixture route" in
   with_listener mode ~capacity:(String.length payload) make_handler (fun ~connect ~port ->
     let blocked=connect () and sibling=connect () in
@@ -226,7 +227,8 @@ let test_listener_stream_admission mode () =
   let admitted=ref [] and released=ref [] in
   let rec await_release target =
     if not (List.mem target !released) then (Eio.Fiber.yield ();await_release target) in
-  let make_handler ~gateway:_ ~request_sw _ reqd =
+  let make_handler ~gateway:_ ~stream_end _ reqd =
+    let request_sw = Masc.Http_h2_stream.Stream_end.switch stream_end in
     let target=(H2.Reqd.request reqd).target in
     admitted:=target::!admitted;
     Eio.Switch.on_release request_sw (fun () -> released:=target::!released);

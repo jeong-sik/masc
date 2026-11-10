@@ -15,8 +15,3 @@ let observe_silent ~kind:_ f =
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | _ -> ()
-
-let observe_or_default ~kind ?keeper_name ~default f =
-  match observe_or_fail ~kind ?keeper_name f with
-  | Ok v -> v
-  | Error _ -> default

@@ -1,0 +1,35 @@
+ Operations  ▸Work  Keepers  Features & plugins  Workspace  System
+
+  Work
+ ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+   p:Requests  :Board
+ ┌ Tasks ────────────────────────────────────────────────────────────┐  ┌ Request ────────────────────────────────────┐
+ │ › Preserve evidence when a read fails                             │  │ quietreader · claimed                       │
+ │   claimed · quietreader                                           │  │                                             │
+ │   요청의 핵심을 먼저 보여주기                                     │  │ Read the last observed values and the       │
+ │   todo · unassigned                                               │  │ actual failure separately.                  │
+ │   긴 요청을 상세에서 끝까지 읽기                                  │  │ 실패 이유를 지우거나 이전 관측을 현재       │
+ │   active · sourcereader                                           │  │ 정상이라고 표시하지 않습니다.               │
+ │                                                                   │  │ Enter: details                              │
+ │                                                                   │  │                                             │
+ │                                                                   │  │                                             │
+ │                                                                   │  │                                             │
+ │                                                                   │  │                                             │
+ │                                                                   │  │                                             │
+ │                                                                   │  │                                             │
+ │                                                                   │  │                                             │
+ │                                                                   │  │                                             │
+ │                                                                   │  │                                             │
+ │                                                                   │  │                                             │
+ │                                                                   │  │                                             │
+ │                                                                   │  │                                             │
+ │                                                                   │  │                                             │
+ │                                                                   │  │                                             │
+ │                                                                   │  │                                             │
+ │                                                                   │  │                                             │
+ │                                                                   │  │                                             │
+ └───────────────────────────────────────────────────────────────────┘  └─────────────────────────────────────────────┘
+
+  ACTION NEEDED 1 · keeper_memory_execution:addon_unattached  j/k:select  t / Esc:Goals  Enter:detail  q:quit  …?
+ Schedule may be out of date
+ › to quietreader   (i to write)

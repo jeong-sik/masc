@@ -488,6 +488,15 @@ val append_tool_calls_once :
   unit ->
   (append_once_result, string) result
 
+val append_autonomous_tool_calls_once :
+  base_dir:string -> keeper_name:string -> turn_ref:Ids.Turn_ref.t ->
+  input_binding:Keeper_chat_delivery_identity.approval_input_binding list ->
+  tool_calls:tool_call list -> unit ->
+  (append_once_result * tool_ownership list, string) result
+(** Internal prepared-input binding and common tool rows in one durable chat
+    update. The actual turn owns them. Binding conflicts preserve old bytes.
+    The receipt contains only newly added canonical execution ownerships. *)
+
 (** [append_assistant_message ~base_dir ~keeper_name ~content ?surface
     ?conversation_id ()]
     appends one keeper-initiated assistant line with no paired user

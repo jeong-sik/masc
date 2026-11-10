@@ -85,7 +85,7 @@ let approval_lifecycle_is_continuation = function
 let append_approval_lifecycle_at_slot_once
       ~base_dir
       ~keeper_name
-      ~lifecycle
+      ~(lifecycle : approval_lifecycle)
       ~transcript_slot
   =
   let open Keeper_chat_delivery_identity in
@@ -208,7 +208,8 @@ let existing_approval_lifecycle_at_slot
                 | Fusion_run _
                 | Workspace_message _
                 | Connector_message _
-                | Approval_lifecycle _ )
+                | Approval_lifecycle _
+                | Autonomous_turn _ )
             ; _
             } )
       , (None | Some _) ) -> None)

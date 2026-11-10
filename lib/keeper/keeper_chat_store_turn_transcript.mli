@@ -3,7 +3,9 @@
     [to_json_array] renders messages as a JSON array through
     [Keeper_chat_projection.message_to_json]. It looks up the trace block of a
     message by its turn ([trace_block_for_turn]) and sets [expired] on the
-    audio clip of a message.
+    audio clip of a message. Internal input-binding rows remain stored and
+    readable for idempotency, but are omitted from this presentation array.
+    Physical page cursors belong to the caller and are not recalculated here.
     A [turn_transcript] holds the user rows and the assistant rows of one turn;
     [transcript_of_messages] and [turn_transcript_to_json] are those of
     [Keeper_chat_projection].

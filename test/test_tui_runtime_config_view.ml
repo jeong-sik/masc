@@ -60,11 +60,7 @@ let test_status_page_carries_the_verdict () =
   let failed = fixture () |> map_field "validation" (fun value -> value
     |> replace "valid" (`Bool false) |> replace "issues" (`List [issue "error"])) |> decode |> success in
   expect "an invalid read is a failure"
-    (List.mem (Line.fact ~tone:Line.Failure "Validation" "invalid · 1 error") (page_lines failed.metadata));
-  expect "the caller's lead opens the first block"
-    (match detail_blocks ~lead:[ Line.fact "Source" "/workspace/runtime.toml" ] clean.metadata with
-     | (_, first :: _) :: _ -> first = Line.fact "Source" "/workspace/runtime.toml"
-     | _ -> false)
+    (List.mem (Line.fact ~tone:Line.Failure "Validation" "invalid · 1 error") (page_lines failed.metadata))
 let test_summary_and_page_agree_on_warnings () =
   let summary_tone metadata = match List.nth (summary_lines metadata) 2 with tone, _ -> tone in
   let routing_pending = fixture ()

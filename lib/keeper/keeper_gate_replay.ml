@@ -583,11 +583,54 @@ type model_evidence =
 
 type model_message =
   { text : string
-  ; replay_evidence : model_evidence option
-  ; instruction_resolution : Keeper_event_queue.hitl_resolution option
+  ; resolutions : Keeper_event_queue.hitl_resolution list
+  ; replay_evidence : model_evidence list
+  ; instruction_resolutions : Keeper_event_queue.hitl_resolution list
+  ; approval_input_bindings :
+      (Keeper_chat_delivery_identity.approval_input_binding list, string) result
   }
 
-let plain_model_message text = { text; replay_evidence = None; instruction_resolution = None }
+type resolution_input =
+  | Stored_resolution of Keeper_event_queue.hitl_resolution
+  | Approved_replay of
+      { resolution : Keeper_event_queue.hitl_resolution
+      ; execution : replay_execution
+      }
+
+type resolution_input_error =
+  | Replay_approval_mismatch of { resolution_id : string; replay_id : string }
+  | Replay_for_rejected_resolution of string
+
+let resolution_input_error_to_string = function
+  | Replay_approval_mismatch { resolution_id; replay_id } ->
+    Printf.sprintf "Gate resolution %s does not own replay %s" resolution_id replay_id
+  | Replay_for_rejected_resolution approval_id ->
+    Printf.sprintf "rejected Gate resolution %s cannot own an approved replay" approval_id
+;;
+
+let resolution_input ~(resolution : Keeper_event_queue.hitl_resolution) ~replay_delivery =
+  match replay_delivery with
+  | None -> Ok (Stored_resolution resolution)
+  | Some (replay_id, execution) ->
+    if not (String.equal resolution.approval_id replay_id)
+    then Error (Replay_approval_mismatch { resolution_id = resolution.approval_id; replay_id })
+    else
+      (match resolution.decision with
+       | Keeper_event_queue.Hitl_approved -> Ok (Approved_replay { resolution; execution })
+       | Keeper_event_queue.Hitl_rejected _ ->
+         Error (Replay_for_rejected_resolution resolution.approval_id))
+;;
+
+let input_resolution = function
+  | Stored_resolution resolution | Approved_replay { resolution; _ } -> resolution
+
+let input_replay_execution = function
+  | Stored_resolution _ -> None
+  | Approved_replay { execution; _ } -> Some execution
+
+let plain_model_message text =
+  { text; resolutions = []; replay_evidence = []; instruction_resolutions = []
+  ; approval_input_bindings = Ok [] }
 
 let replay_evidence_effect_to_string = function
   | Evidence_applied -> "applied"
@@ -628,9 +671,12 @@ let replay_evidence_fragment ?(include_journal = true) evidence =
   |> Inference_utils.sanitize_text_utf8
 ;;
 
+let canonical_evidence_fingerprint evidence =
+  payload_fingerprint (replay_evidence_json ~include_journal:false evidence)
+;;
+
 let approval_input evidence =
-  let stable = replay_evidence_json ~include_journal:false evidence in
-  let fingerprint = Agent_core_sha256.(digest_string stable |> to_hex) in
+  let fingerprint = canonical_evidence_fingerprint evidence in
   match Keeper_approval_input_admission.identity
           ~approval_id:evidence.approval_id ~evidence_fingerprint:fingerprint with
   | Error _ as error -> error
@@ -659,8 +705,10 @@ let replay_model_message
       String.concat
         "\n"
         [ user_message; ""; canonical_replay_evidence_fragment replay_evidence ]
-  ; replay_evidence = Some replay_evidence
-  ; instruction_resolution = None
+  ; resolutions = []
+  ; replay_evidence = [ replay_evidence ]
+  ; instruction_resolutions = []
+  ; approval_input_bindings = Ok []
   }
 ;;
 
@@ -739,14 +787,49 @@ let append_model_evidence_block evidence blocks =
   @ [ Agent_core.Types.Text (canonical_replay_evidence_fragment evidence) ]
 ;;
 
-let project_model_input ~base_path:_ evidence messages =
-  match approval_input evidence with
-  | Error error -> Error (Agent_core.Error.Internal
-      (Keeper_approval_input_admission.error_to_string error))
-  | Ok (identity, message) ->
-    if Keeper_approval_input_admission.contains ~identity ~message messages
-    then Ok messages
-    else Ok (messages @ [message])
+let project_model_inputs ~base_path:_ evidence messages =
+  let module Approval_ids = Set.Make (String) in
+  let invalid detail = Error (Agent_core.Error.Internal detail) in
+  let rec prepare seen reversed = function
+    | [] -> Ok (List.rev reversed)
+    | evidence :: rest ->
+      if Approval_ids.mem evidence.approval_id seen
+      then invalid "duplicate approval in ordered Gate evidence"
+      else
+        match approval_input evidence with
+        | Error error -> invalid (Keeper_approval_input_admission.error_to_string error)
+        | Ok (identity, message) ->
+          prepare (Approval_ids.add evidence.approval_id seen)
+            ((evidence.approval_id, identity, message) :: reversed) rest
+  in
+  match prepare Approval_ids.empty [] evidence with
+  | Error _ as error -> error
+  | Ok inputs ->
+    let matches current (_, identity, message) =
+      Keeper_approval_input_admission.contains ~identity ~message [ current ] in
+    let rec before approval_id reversed = function
+      | [] -> invalid "duplicate or reversed surviving Gate evidence"
+      | (id, _, message) :: rest ->
+        if String.equal id approval_id then Ok (reversed, rest)
+        else before approval_id (message :: reversed) rest in
+    let rec restore remaining reversed = function
+      | [] ->
+        let suffix = List.map (fun (_, _, message) -> message) remaining in
+        Ok (List.rev_append reversed suffix)
+      | current :: rest ->
+        match List.find_opt (matches current) inputs with
+        | None -> restore remaining (current :: reversed) rest
+        | Some (approval_id, _, _) ->
+          (match before approval_id reversed remaining with
+           | Error _ as error -> error
+           | Ok (reversed, remaining) ->
+             restore remaining (current :: reversed) rest)
+    in
+    restore inputs [] messages
+;;
+
+let project_model_input ~base_path evidence messages =
+  project_model_inputs ~base_path [ evidence ] messages
 ;;
 
 let approved_resolution_message ~approval_id ~tool_name ~input ~user_message =
@@ -781,7 +864,7 @@ let approved_resolution_message ~approval_id ~tool_name ~input ~user_message =
   String.concat "\n" [ user_message; ""; resolution_fragment ]
 ;;
 
-let user_message_with_hitl_resolution ~base_path ~user_message = function
+let message_for_stored_resolution ~base_path ~user_message = function
   | Some
       ({ Keeper_event_queue.approval_id
       ; decision = Keeper_event_queue.Hitl_approved
@@ -803,7 +886,7 @@ let user_message_with_hitl_resolution ~base_path ~user_message = function
             ~tool_name:request.tool_name
             ~input:request.input
             ~user_message) in
-       { message with instruction_resolution = Some resolution }
+       { message with instruction_resolutions = [ resolution ] }
      | Ok
          { request
          ; state = Keeper_approval_queue_result.Resolution_consumed
@@ -900,32 +983,98 @@ let user_message_with_hitl_resolution ~base_path ~user_message = function
                   ; Printf.sprintf "- rationale: %s" rationale
                   ])
          ]) in
-    { message with instruction_resolution = Some resolution }
+    { message with instruction_resolutions = [ resolution ] }
   | None -> plain_model_message user_message
+;;
+
+let binding_for_fragment ~(resolution : Keeper_event_queue.hitl_resolution) fragment =
+  let input = match fragment.replay_evidence with
+    | [] -> Ok ("resolution_fragment", payload_fingerprint fragment.text)
+    | [ evidence ] when String.equal evidence.approval_id resolution.approval_id ->
+      Ok ("canonical_replay_evidence", canonical_evidence_fingerprint evidence)
+    | [ _ ] -> Error "prepared Gate evidence belongs to another approval"
+    | _ :: _ :: _ -> Error "one resolution produced multiple canonical evidence inputs" in
+  Result.bind input (fun (input_kind, input_fingerprint) ->
+    let decision = match resolution.decision with
+      | Keeper_event_queue.Hitl_approved -> `String "approved"
+      | Keeper_event_queue.Hitl_rejected rationale -> `Assoc [ "rejected", `String rationale ] in
+    let source = `Assoc
+      [ "approval_id", `String resolution.approval_id; "decision", decision
+      ; "channel", Keeper_continuation_channel.to_yojson resolution.channel
+      ; "input_kind", `String input_kind; "input_fingerprint", `String input_fingerprint ] in
+    Keeper_chat_delivery_identity.approval_input_binding
+      ~approval_id:resolution.approval_id
+      ~input_fingerprint:(payload_fingerprint (Yojson.Safe.to_string source)))
+;;
+
+let bind_model_fragment ~resolution fragment =
+  { fragment with resolutions = [ resolution ]
+  ; approval_input_bindings =
+      binding_for_fragment ~resolution fragment |> Result.map (fun binding -> [ binding ]) }
+;;
+
+let user_message_with_hitl_resolution ~base_path ~user_message = function
+  | None -> plain_model_message user_message
+  | Some resolution ->
+    let fragment = message_for_stored_resolution ~base_path ~user_message:"" (Some resolution)
+      |> bind_model_fragment ~resolution in
+    { fragment with text = user_message ^ fragment.text }
 ;;
 
 let compose_model_message
       ~base_path
       ~user_message
-      ~hitl_resolution
-      ~replay_delivery
+      ~inputs
   =
-  match replay_delivery with
-  | Some
-      ( approval_id
-      , ( ( Applied _
-          | Applied_with_warning _
-          | Failed _
-          | Indeterminate _ )
-          as outcome ) ) ->
-    append_model_evidence ~approval_id ~user_message outcome
-  | Some (approval_id, ((Repair_required _ | Resolution_absent _) as outcome)) ->
-    append_model_evidence ~approval_id ~user_message outcome
-  | Some (_, Not_applicable) | None ->
-    user_message_with_hitl_resolution
-      ~base_path
-      ~user_message
-      hitl_resolution
+  let text, resolutions_rev, evidence_rev, instructions_rev, bindings_rev =
+    List.fold_left
+      (fun (text, resolutions_rev, evidence_rev, instructions_rev, bindings_rev) input ->
+         let resolution =
+           match input with
+           | Stored_resolution resolution
+           | Approved_replay { resolution; _ } -> resolution
+         in
+         let next =
+           match input with
+           | Stored_resolution resolution ->
+             user_message_with_hitl_resolution
+               ~base_path ~user_message:"" (Some resolution)
+           | Approved_replay { resolution; execution = { outcome = Not_applicable; _ } } ->
+             user_message_with_hitl_resolution
+               ~base_path ~user_message:"" (Some resolution)
+           | Approved_replay
+               { resolution
+               ; execution =
+                   { outcome =
+                       ( Applied _ | Applied_with_warning _ | Failed _
+                       | Indeterminate _ | Repair_required _ | Resolution_absent _ ) as outcome
+                   ; _ }
+               } ->
+             append_model_evidence
+               ~approval_id:resolution.approval_id ~user_message:"" outcome
+             |> bind_model_fragment ~resolution
+         in
+         text ^ next.text,
+         resolution :: resolutions_rev,
+         List.rev_append next.replay_evidence evidence_rev,
+         List.rev_append next.instruction_resolutions instructions_rev,
+         Result.bind bindings_rev (fun reversed ->
+           Result.map (fun bindings -> List.rev_append bindings reversed)
+             next.approval_input_bindings))
+      (user_message, [], [], [], Ok []) inputs
+  in
+  let approval_input_bindings = Result.bind bindings_rev (fun reversed ->
+    let bindings = List.rev reversed in
+    match bindings with
+    | [] -> Ok []
+    | _ :: _ -> Keeper_chat_delivery_identity.validate_approval_input_bindings bindings
+      |> Result.map (fun () -> bindings)) in
+  { text
+  ; resolutions = List.rev resolutions_rev
+  ; replay_evidence = List.rev evidence_rev
+  ; instruction_resolutions = List.rev instructions_rev
+  ; approval_input_bindings
+  }
 ;;
 
 let connector_post_terminal_effect_receipt connector_post =
@@ -1241,6 +1390,75 @@ let replay_approved_effect
      ~approval_id
      ())
     .outcome
+;;
+
+let replay_resolution_inputs ~config ~meta ~publication_recovery
+    ~turn_sandbox_factory ?gate_context batch =
+  let resolutions = Keeper_hitl_resolution_batch.resolutions batch in
+  let multiple = match resolutions with [] | [ _ ] -> false | _ :: _ :: _ -> true in
+  let check_nonterminal execution =
+    if not multiple then execution
+    else
+      match execution.outcome, execution.terminal_effect_receipt with
+      | Repair_required _, _
+      | (Applied _ | Applied_with_warning _ | Failed _ | Indeterminate _), None -> execution
+      | (Not_applicable | Resolution_absent _), _
+      | (Applied _ | Applied_with_warning _ | Failed _ | Indeterminate _), Some _ ->
+        { execution with outcome = Repair_required
+            { operation = "HITL cohort continuation"; stage = Invalid_resolution_state
+            ; detail = "A nonterminal host replay cohort produced an incompatible continuation"
+            } }
+  in
+  let rec replay reversed = function
+    | [] -> List.rev reversed
+    | (resolution : Keeper_event_queue.hitl_resolution) :: rest ->
+      let input = match resolution.decision with
+        | Keeper_event_queue.Hitl_rejected _ -> Stored_resolution resolution
+        | Keeper_event_queue.Hitl_approved ->
+          let execution = match Keeper_gate.cycle_grant_of_resolution resolution with
+            | Some grant ->
+              replay_approved_effect_with_receipt
+                ~config ~meta ~publication_recovery ~turn_sandbox_factory
+                ~continuation_channel:resolution.channel ?gate_context
+                ~grant ~approval_id:resolution.approval_id ()
+              |> check_nonterminal
+            | None -> replay_execution (Repair_required
+                { operation = "HITL cohort continuation"; stage = Invalid_resolution_state
+                ; detail = "Approved resolution has no exact cycle grant" }) in
+          (match execution.outcome with
+           | Not_applicable -> ()
+           | Applied _ -> Log.Keeper.info "gate replay approval=%s %s"
+               resolution.approval_id (outcome_to_string execution.outcome)
+           | Resolution_absent _ -> Log.Keeper.warn "gate replay approval=%s %s"
+               resolution.approval_id (outcome_to_string execution.outcome)
+           | Applied_with_warning _ | Failed _ | Indeterminate _ | Repair_required _ ->
+             Log.Keeper.error "gate replay approval=%s %s"
+               resolution.approval_id (outcome_to_string execution.outcome));
+          Approved_replay { resolution; execution }
+      in
+      let reversed = input :: reversed in
+      match input_replay_execution input with
+      | Some { outcome = Repair_required _; _ } -> List.rev reversed
+      | None
+      | Some { outcome = (Not_applicable | Applied _ | Applied_with_warning _
+                        | Failed _ | Indeterminate _ | Resolution_absent _); _ } ->
+        replay reversed rest
+  in
+  match Keeper_hitl_resolution_batch.validate_scope
+    ~base_path:config.Workspace.base_path ~keeper_name:meta.Keeper_meta_contract.name batch with
+  | Ok () -> replay [] resolutions
+  | Error error ->
+    (* A scope error is possible only for an opaque cohort, whose members
+       were all approved at construction. No grant or effect is touched. *)
+    match resolutions with
+    | [] -> []
+    | resolution :: _ ->
+      [ Approved_replay
+          { resolution
+          ; execution = replay_execution (Repair_required
+              { operation = "HITL cohort continuation"; stage = Invalid_resolution_state
+              ; detail = Keeper_hitl_resolution_batch.join_error_to_string error })
+          } ]
 ;;
 
 module For_testing = struct

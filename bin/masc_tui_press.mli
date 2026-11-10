@@ -31,6 +31,7 @@ type press_target =
   | Press_standalone_lanes
   | Press_usage_calls  (** The Dashboard's tool call line: Usage on its Calls section. *)
   | Press_context_tab of Masc_tui_context_inspector.tab
+  | Press_keeper_world
   | Press_keeper_row of string  (** a Keepers list row, by Keeper name *)
   | Press_keeper_view of Masc_tui_keeper_list_model.view
       (** a name on the Keepers list's view strip, the place [v] steps to *)

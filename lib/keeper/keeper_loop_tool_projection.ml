@@ -6,9 +6,27 @@ type t =
         (* The first mapping the collector rejected in the current attempt.
            Later rejections are not more informative than the first and the
            rows are dropped either way, so only the first is kept. *)
+  ; prepared_inputs :
+      ((Ids.Turn_ref.t * Keeper_chat_delivery_identity.approval_input_binding list, string) result) option ref
+        (* Frozen preparation association, independent of runtime attempts. *)
   }
 
-let create () = { accum = Keeper_stream_tool_accum.create (); rejection = ref None }
+let create () =
+  { accum = Keeper_stream_tool_accum.create (); rejection = ref None; prepared_inputs = ref None }
+
+let bind_prepared_inputs t ~turn_ref (model : Keeper_gate_replay.model_message) =
+  let prepared = Result.bind model.approval_input_bindings (fun inputs ->
+    Keeper_chat_delivery_identity.validate_approval_input_bindings inputs
+    |> Result.map (fun () -> turn_ref, inputs)) in
+  match !(t.prepared_inputs), prepared with
+  | None, prepared -> t.prepared_inputs := Some prepared
+  | Some (Error _), _ -> ()
+  | Some (Ok _), Error detail -> t.prepared_inputs := Some (Error detail)
+  | Some (Ok (owner, previous)), Ok (current_owner, current) ->
+    if not (Ids.Turn_ref.equal owner current_owner
+      && Keeper_chat_delivery_identity.approval_input_bindings_equal previous current)
+    then t.prepared_inputs := Some (Error "prepared approval input association changed within a turn")
+;;
 
 let record_rejection t detail =
   match !(t.rejection) with
@@ -51,12 +69,12 @@ let on_tool_stream_observation t
 
 type drop_reason =
   | Mapping_rejected of string
-  | Invalid_approval_id of string
+  | Input_binding_unavailable of string
   | Append_failed of string
 
 let drop_reason_to_string = function
   | Mapping_rejected detail -> "tool stream occurrence mapping rejected: " ^ detail
-  | Invalid_approval_id detail -> "approval id is not a delivery identity: " ^ detail
+  | Input_binding_unavailable detail -> "prepared approval input binding unavailable: " ^ detail
   | Append_failed detail -> "tool rows were not appended: " ^ detail
 ;;
 
@@ -76,41 +94,7 @@ type persisted =
   ; quarantined : protocol_error list
   }
 
-(* The store's once-append merges per transcript slot, and the slot of a
-   delivery-only tool row is its ordinal within the append. A second turn
-   continuing the same approval would have its first rows read as already
-   present and only its surplus appended, interleaving two turns' rows under
-   one identity with different turn refs. So the key is looked up before
-   anything is appended: one approval projects the rows of one turn, and a
-   later turn is reported as already present. *)
-let tool_row_already_under ~base_dir ~keeper_name ~delivery_key =
-  Keeper_chat_store.load_all ~base_dir ~keeper_name
-  |> List.find_map (fun (row : Keeper_chat_store.chat_message) ->
-       match row.delivery_provenance with
-       | Some
-           { Keeper_chat_delivery_identity.delivery_key = key
-           ; transcript_slot = (Keeper_chat_delivery_identity.Tool_delivery _ | Keeper_chat_delivery_identity.Tool_call _)
-           }
-         when Keeper_chat_delivery_identity.delivery_key_equal key delivery_key ->
-         Some row.id
-       | Some
-           { Keeper_chat_delivery_identity.transcript_slot =
-               ( Keeper_chat_delivery_identity.Accepted_user
-               | Keeper_chat_delivery_identity.Tool_call _
-               | Keeper_chat_delivery_identity.Tool_delivery _
-               | Keeper_chat_delivery_identity.Terminal_result
-               | Keeper_chat_delivery_identity.Settled_failure
-               | Keeper_chat_delivery_identity.Approval_request
-               | Keeper_chat_delivery_identity.Approval_resolution
-               | Keeper_chat_delivery_identity.Approval_replay
-               | Keeper_chat_delivery_identity.Approval_replay_correction
-               | Keeper_chat_delivery_identity.Approval_continuation )
-           ; _
-           }
-       | None -> None)
-;;
-
-let persist_continuation t ~base_dir ~keeper_name ~approval_id ~turn_ref ~turn_failed =
+let persist_continuation t ~base_dir ~keeper_name ~turn_ref ~turn_failed =
   let tool_calls =
     if turn_failed
     then Keeper_stream_tool_accum.to_tool_calls_for_failure t.accum
@@ -126,30 +110,25 @@ let persist_continuation t ~base_dir ~keeper_name ~approval_id ~turn_ref ~turn_f
   let outcome, committed_ownerships =
     match !(t.rejection), tool_calls with
     | Some detail, _ -> Projection_dropped (Mapping_rejected detail), []
-    | None, [] -> Nothing_to_project, []
-    | None, _ :: _ ->
-      (match Keeper_chat_delivery_identity.Request_id.of_string approval_id with
-       | Error detail -> Projection_dropped (Invalid_approval_id detail), []
-       | Ok request_id ->
-         let delivery_key = Keeper_chat_delivery_identity.Approval_lifecycle request_id in
-         (match tool_row_already_under ~base_dir ~keeper_name ~delivery_key with
-          | Some row_id -> Projected (Keeper_chat_store.Already_present { row_id }), []
-          | None ->
-            (match
-               Keeper_chat_store.append_tool_calls_once
-                 ~base_dir
-                 ~keeper_name
-                 ~delivery_key
-                 ~tool_calls
-                 ~turn_ref
-                 ()
-             with
-             | Ok (Keeper_chat_store.Appended _ as result) ->
-               Projected result,
-               List.map (fun ownership -> delivery_key, ownership)
-                 (Keeper_chat_store.tool_ownerships tool_calls)
-             | Ok (Keeper_chat_store.Already_present _ as result) -> Projected result, []
-             | Error detail -> Projection_dropped (Append_failed detail), [])))
+    | None, tool_calls ->
+      (match !(t.prepared_inputs), tool_calls with
+       | None, [] -> Nothing_to_project, []
+       | None, _ :: _ ->
+         Projection_dropped (Input_binding_unavailable "no actual prepared input observation"), []
+       | Some (Error detail), _ -> Projection_dropped (Input_binding_unavailable detail), []
+       | Some (Ok (owner, inputs)), _ ->
+         if not (Ids.Turn_ref.equal owner turn_ref)
+         then Projection_dropped (Input_binding_unavailable "prepared turn owner differs from projection owner"), []
+         else
+           let delivery_key = Keeper_chat_delivery_identity.Autonomous_turn owner in
+           match Keeper_chat_store.append_autonomous_tool_calls_once
+             ~base_dir ~keeper_name ~turn_ref:owner ~input_binding:inputs ~tool_calls () with
+           | Ok ((Keeper_chat_store.Appended _ as result), ownerships) ->
+             Projected result,
+             List.map (fun ownership -> delivery_key, ownership)
+               ownerships
+           | Ok ((Keeper_chat_store.Already_present _ as result), _) -> Projected result, []
+           | Error detail -> Projection_dropped (Append_failed detail), [])
   in
   { outcome; committed_ownerships; quarantined }
 ;;

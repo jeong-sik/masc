@@ -16,12 +16,18 @@ export type KeeperChatDeliveryKey =
   | { readonly kind: 'workspace_message'; readonly request_id: string }
   | { readonly kind: 'connector_message'; readonly event_id: string }
   | { readonly kind: 'approval_lifecycle'; readonly approval_id: string }
+  | { readonly kind: 'autonomous_turn'; readonly turn_ref: string }
   | {
       readonly kind: 'goal_notification'
       readonly goal_id: string
       readonly owner: string
       readonly event: string
     }
+
+export interface KeeperApprovalInputBinding {
+  readonly approval_id: string
+  readonly input_fingerprint: string
+}
 
 export type KeeperChatTranscriptSlot =
   | { readonly kind: 'accepted_user' }
@@ -32,6 +38,7 @@ export type KeeperChatTranscriptSlot =
   | { readonly kind: 'approval_replay' }
   | { readonly kind: 'approval_replay_correction' }
   | { readonly kind: 'approval_continuation' }
+  | { readonly kind: 'autonomous_input_binding'; readonly inputs: readonly KeeperApprovalInputBinding[] }
   | {
       readonly kind: 'tool_call'
       readonly execution_id: string
@@ -89,6 +96,8 @@ export function sameDeliveryKey(left: KeeperChatDeliveryKey, right: KeeperChatDe
       return right.kind === 'connector_message' && left.event_id === right.event_id
     case 'approval_lifecycle':
       return right.kind === 'approval_lifecycle' && left.approval_id === right.approval_id
+    case 'autonomous_turn':
+      return right.kind === 'autonomous_turn' && left.turn_ref === right.turn_ref
     case 'goal_notification':
       return right.kind === 'goal_notification'
         && left.goal_id === right.goal_id
@@ -118,6 +127,11 @@ function sameTranscriptSlot(
         && left.ordinal === right.ordinal
     case 'tool_delivery':
       return right.kind === 'tool_delivery' && left.ordinal === right.ordinal
+    case 'autonomous_input_binding':
+      return right.kind === 'autonomous_input_binding'
+        && left.inputs.length === right.inputs.length
+        && left.inputs.every((input, index) => input.approval_id === right.inputs[index]?.approval_id
+          && input.input_fingerprint === right.inputs[index]?.input_fingerprint)
   }
 }
 
@@ -170,8 +184,18 @@ function goalNotificationField(value: unknown): value is string {
   return typeof value === 'string' && GOAL_FIELD_PATTERN.test(value)
 }
 
+// The backend publishes Ids.Turn_ref.to_string's final '#' and decimal
+// ordinal. Keep the trace and ordinal opaque; do not coerce them to JS numbers.
+function canonicalTurnRef(value: unknown): value is string {
+  if (typeof value !== 'string') return false
+  const separator = value.lastIndexOf('#')
+  if (separator <= 0) return false
+  const ordinal = value.slice(separator + 1)
+  return ordinal !== '-0' && /^-?(?:0|[1-9][0-9]*)$/.test(ordinal)
+}
+
 // Mirrors delivery_key_to_yojson
-// (lib/keeper_chat_delivery_identity/keeper_chat_delivery_identity.ml:96):
+// (lib/keeper_chat_delivery_identity/keeper_chat_delivery_identity.ml):
 // one member per delivery_key constructor, with the same field names.
 function decodeDeliveryKey(raw: unknown): KeeperChatDeliveryKey | null {
   if (!plainObject(raw)) return null
@@ -204,6 +228,9 @@ function decodeDeliveryKey(raw: unknown): KeeperChatDeliveryKey | null {
     case 'approval_lifecycle':
       return hasExactKeys(raw, ['kind', 'approval_id']) && keeperRequestId(raw.approval_id)
         ? { kind: 'approval_lifecycle', approval_id: raw.approval_id } : null
+    case 'autonomous_turn':
+      return hasExactKeys(raw, ['kind', 'turn_ref']) && canonicalTurnRef(raw.turn_ref)
+        ? { kind: 'autonomous_turn', turn_ref: raw.turn_ref } : null
     case 'goal_notification':
       return hasExactKeys(raw, ['kind', 'goal_id', 'owner', 'event'])
         && goalNotificationField(raw.goal_id) && goalNotificationField(raw.owner) && goalNotificationField(raw.event)
@@ -233,6 +260,19 @@ function decodeTranscriptSlot(raw: unknown): KeeperChatTranscriptSlot | null {
     case 'tool_delivery':
       return hasExactKeys(raw, ['kind', 'ordinal']) && nonNegativeSafeInteger(raw.ordinal)
         ? { kind: 'tool_delivery', ordinal: raw.ordinal } : null
+    case 'autonomous_input_binding': {
+      if (!hasExactKeys(raw, ['kind', 'inputs']) || !Array.isArray(raw.inputs) || raw.inputs.length === 0) return null
+      const inputs: KeeperApprovalInputBinding[] = []
+      const approvals = new Set<string>()
+      for (const input of raw.inputs) {
+        if (!plainObject(input) || !hasExactKeys(input, ['approval_id', 'input_fingerprint'])
+          || !keeperRequestId(input.approval_id) || typeof input.input_fingerprint !== 'string'
+          || !SHA256_PATTERN.test(input.input_fingerprint) || approvals.has(input.approval_id)) return null
+        approvals.add(input.approval_id)
+        inputs.push({ approval_id: input.approval_id, input_fingerprint: input.input_fingerprint })
+      }
+      return { kind: 'autonomous_input_binding', inputs }
+    }
     default:
       return null
   }
@@ -247,6 +287,16 @@ export function decodeKeeperChatDeliveryProvenance(
   }
   const delivery_key = decodeDeliveryKey(deliveryKey)
   const transcript_slot = decodeTranscriptSlot(transcriptSlot)
+  if (delivery_key && transcript_slot) {
+    if (transcript_slot.kind === 'autonomous_input_binding' && delivery_key.kind !== 'autonomous_turn') {
+      return { status: 'invalid', value: null }
+    }
+    if (delivery_key.kind === 'autonomous_turn'
+      && transcript_slot.kind !== 'autonomous_input_binding'
+      && transcript_slot.kind !== 'tool_call' && transcript_slot.kind !== 'tool_delivery') {
+      return { status: 'invalid', value: null }
+    }
+  }
   return delivery_key && transcript_slot
     ? { status: 'valid', value: { delivery_key, transcript_slot } }
     : { status: 'invalid', value: null }

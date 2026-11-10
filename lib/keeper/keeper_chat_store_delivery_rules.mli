@@ -23,3 +23,18 @@ val validate_delivery_execution_identity :
 val validate_delivery_role :
   role_label:string ->
   Keeper_chat_delivery_identity.delivery_provenance -> (unit, string) result
+
+val validate_delivery_slot_owner :
+  Keeper_chat_delivery_identity.delivery_provenance -> (unit, string) result
+(** Validate the owner/slot pair before reads that may authorize an append.
+    Autonomous keys accept only their binding and common tool slots. *)
+
+val validate_delivery_fields :
+  provenance:Keeper_chat_delivery_identity.delivery_provenance ->
+  (string * Yojson.Safe.t) list -> (unit, string) result
+(** Shared row validation for strict readers, append candidates and the
+    provenance index. Autonomous rows require their key's exact [turn_ref].
+    Only System metadata may carry an autonomous input binding; its vector
+    must be valid and its content empty. The binding slot belongs only to an
+    autonomous key, which accepts only binding/tool slots. Other deliveries keep their
+    existing role/execution rules. *)

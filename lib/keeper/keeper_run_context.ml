@@ -124,10 +124,12 @@ let issue_system ~config ~profile_defaults ~(meta : keeper_meta) ~runtime_id ~he
     Keeper_constitution_roster.read ~config
     |> Result.map_error (fun error -> Constitution_unreadable error)
   in
-  let* current, at =
+  let* projection =
     World_constitution_store.load_held ~base_path ~resolve_subject
     |> Result.map_error (fun error -> Constitution_unreadable error)
   in
+  let current = projection.World_constitution_store.articles in
+  let at = projection.World_constitution_store.at in
   let articles_at = World_constitution_store.load_articles_at ~base_path ~resolve_subject in
   let* system, held =
     (match recorded_system with
@@ -140,6 +142,12 @@ let issue_system ~config ~profile_defaults ~(meta : keeper_meta) ~runtime_id ~he
          ~current ~at ~articles_at
        |> Result.map (fun (system, held) -> system, Some held))
     |> Result.map_error (fun error -> Constitution_unreadable error)
+  in
+  let system = match recorded_system, projection.status with
+    | Some _, (World_constitution_store.Resolved | World_constitution_store.Isolated_history)
+    | None, World_constitution_store.Isolated_history ->
+      Keeper_turn_system.with_current_norms projection.articles system
+    | None, World_constitution_store.Resolved -> system
   in
   Ok (workspace_root, system, held)
 

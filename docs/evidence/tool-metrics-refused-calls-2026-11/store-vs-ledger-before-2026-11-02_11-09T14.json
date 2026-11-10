@@ -1,0 +1,1866 @@
+{
+  "window": {
+    "since": "2026-11-02T00:00:00Z",
+    "end": "2026-11-09T14:00:00Z"
+  },
+  "tools_compared": 109,
+  "tools_with_refusals": 45,
+  "tools_where_refusals_are_the_whole_gap": [
+    "keeper_artifact_publish",
+    "keeper_artifact_read",
+    "keeper_broadcast",
+    "keeper_capability_search",
+    "keeper_memory_search",
+    "keeper_memory_write",
+    "keeper_task_cancel",
+    "keeper_task_create",
+    "keeper_task_done",
+    "keeper_task_release",
+    "keeper_wiki_read",
+    "masc_ask",
+    "masc_ask_withdraw",
+    "masc_board_comment_vote",
+    "masc_browser_goto",
+    "masc_dos_save",
+    "masc_schedule_cancel",
+    "masc_schedule_create",
+    "masc_schedule_notes_list",
+    "masc_web_search",
+    "tool_edit_file",
+    "tool_read_file",
+    "tool_search_files"
+  ],
+  "totals": {
+    "ledger_calls": 193922,
+    "ledger_refused": 1607,
+    "store_calls": 193614,
+    "store_failed": 2411,
+    "gap": 308,
+    "gap_minus_refused": -1299
+  },
+  "days": [
+    {
+      "day": "2026-11-02",
+      "ledger_calls": 48500,
+      "ledger_refused": 680,
+      "store_calls": 47927,
+      "store_failed": 444,
+      "gap": 573,
+      "gap_minus_refused": -107
+    },
+    {
+      "day": "2026-11-03",
+      "ledger_calls": 18122,
+      "ledger_refused": 341,
+      "store_calls": 17741,
+      "store_failed": 314,
+      "gap": 381,
+      "gap_minus_refused": 40
+    },
+    {
+      "day": "2026-11-04",
+      "ledger_calls": 25482,
+      "ledger_refused": 204,
+      "store_calls": 25040,
+      "store_failed": 305,
+      "gap": 442,
+      "gap_minus_refused": 238
+    },
+    {
+      "day": "2026-11-05",
+      "ledger_calls": 21264,
+      "ledger_refused": 101,
+      "store_calls": 21151,
+      "store_failed": 218,
+      "gap": 113,
+      "gap_minus_refused": 12
+    },
+    {
+      "day": "2026-11-06",
+      "ledger_calls": 14515,
+      "ledger_refused": 13,
+      "store_calls": 15373,
+      "store_failed": 162,
+      "gap": -858,
+      "gap_minus_refused": -871
+    },
+    {
+      "day": "2026-11-07",
+      "ledger_calls": 20262,
+      "ledger_refused": 13,
+      "store_calls": 20560,
+      "store_failed": 190,
+      "gap": -298,
+      "gap_minus_refused": -311
+    },
+    {
+      "day": "2026-11-08",
+      "ledger_calls": 12582,
+      "ledger_refused": 7,
+      "store_calls": 12674,
+      "store_failed": 171,
+      "gap": -92,
+      "gap_minus_refused": -99
+    },
+    {
+      "day": "2026-11-09",
+      "ledger_calls": 33195,
+      "ledger_refused": 248,
+      "store_calls": 33148,
+      "store_failed": 607,
+      "gap": 47,
+      "gap_minus_refused": -201
+    }
+  ],
+  "tools": [
+    {
+      "tool": "masc_board_comment",
+      "ledger_calls": 6733,
+      "ledger_refused": 591,
+      "store_calls": 6275,
+      "store_failed": 139,
+      "gap": 458,
+      "gap_minus_refused": -133
+    },
+    {
+      "tool": "keeper_memory_write",
+      "ledger_calls": 1638,
+      "ledger_refused": 136,
+      "store_calls": 1502,
+      "store_failed": 18,
+      "gap": 136,
+      "gap_minus_refused": 0
+    },
+    {
+      "tool": "tool_read_file",
+      "ledger_calls": 5460,
+      "ledger_refused": 119,
+      "store_calls": 5341,
+      "store_failed": 138,
+      "gap": 119,
+      "gap_minus_refused": 0
+    },
+    {
+      "tool": "tool_execute",
+      "ledger_calls": 104857,
+      "ledger_refused": 118,
+      "store_calls": 103884,
+      "store_failed": 556,
+      "gap": 973,
+      "gap_minus_refused": 855
+    },
+    {
+      "tool": "tool_write_file",
+      "ledger_calls": 3872,
+      "ledger_refused": 116,
+      "store_calls": 3755,
+      "store_failed": 21,
+      "gap": 117,
+      "gap_minus_refused": 1
+    },
+    {
+      "tool": "masc_board_post_get",
+      "ledger_calls": 8998,
+      "ledger_refused": 112,
+      "store_calls": 8975,
+      "store_failed": 182,
+      "gap": 23,
+      "gap_minus_refused": -89
+    },
+    {
+      "tool": "masc_board_search",
+      "ledger_calls": 2359,
+      "ledger_refused": 44,
+      "store_calls": 2344,
+      "store_failed": 1,
+      "gap": 15,
+      "gap_minus_refused": -29
+    },
+    {
+      "tool": "masc_board_post",
+      "ledger_calls": 648,
+      "ledger_refused": 42,
+      "store_calls": 692,
+      "store_failed": 7,
+      "gap": -44,
+      "gap_minus_refused": -86
+    },
+    {
+      "tool": "tool_search_files",
+      "ledger_calls": 3887,
+      "ledger_refused": 37,
+      "store_calls": 3850,
+      "store_failed": 124,
+      "gap": 37,
+      "gap_minus_refused": 0
+    },
+    {
+      "tool": "keeper_artifact_read",
+      "ledger_calls": 8969,
+      "ledger_refused": 35,
+      "store_calls": 8934,
+      "store_failed": 266,
+      "gap": 35,
+      "gap_minus_refused": 0
+    },
+    {
+      "tool": "tool_edit_file",
+      "ledger_calls": 2962,
+      "ledger_refused": 32,
+      "store_calls": 2930,
+      "store_failed": 90,
+      "gap": 32,
+      "gap_minus_refused": 0
+    },
+    {
+      "tool": "masc_web_fetch",
+      "ledger_calls": 596,
+      "ledger_refused": 31,
+      "store_calls": 537,
+      "store_failed": 37,
+      "gap": 59,
+      "gap_minus_refused": 28
+    },
+    {
+      "tool": "masc_browser_interact",
+      "ledger_calls": 964,
+      "ledger_refused": 27,
+      "store_calls": 945,
+      "store_failed": 218,
+      "gap": 19,
+      "gap_minus_refused": -8
+    },
+    {
+      "tool": "masc_ask",
+      "ledger_calls": 176,
+      "ledger_refused": 16,
+      "store_calls": 160,
+      "store_failed": 3,
+      "gap": 16,
+      "gap_minus_refused": 0
+    },
+    {
+      "tool": "masc_keeper_delegate",
+      "ledger_calls": 1433,
+      "ledger_refused": 16,
+      "store_calls": 1418,
+      "store_failed": 24,
+      "gap": 15,
+      "gap_minus_refused": -1
+    },
+    {
+      "tool": "keeper_task_done",
+      "ledger_calls": 278,
+      "ledger_refused": 14,
+      "store_calls": 264,
+      "store_failed": 3,
+      "gap": 14,
+      "gap_minus_refused": 0
+    },
+    {
+      "tool": "masc_goal_measure",
+      "ledger_calls": 116,
+      "ledger_refused": 14,
+      "store_calls": 108,
+      "store_failed": 3,
+      "gap": 8,
+      "gap_minus_refused": -6
+    },
+    {
+      "tool": "keeper_task_release",
+      "ledger_calls": 57,
+      "ledger_refused": 13,
+      "store_calls": 44,
+      "store_failed": 0,
+      "gap": 13,
+      "gap_minus_refused": 0
+    },
+    {
+      "tool": "keeper_task_create",
+      "ledger_calls": 250,
+      "ledger_refused": 11,
+      "store_calls": 239,
+      "store_failed": 1,
+      "gap": 11,
+      "gap_minus_refused": 0
+    },
+    {
+      "tool": "masc_browser_goto",
+      "ledger_calls": 515,
+      "ledger_refused": 10,
+      "store_calls": 505,
+      "store_failed": 27,
+      "gap": 10,
+      "gap_minus_refused": 0
+    },
+    {
+      "tool": "masc_browser_tabs",
+      "ledger_calls": 912,
+      "ledger_refused": 9,
+      "store_calls": 909,
+      "store_failed": 66,
+      "gap": 3,
+      "gap_minus_refused": -6
+    },
+    {
+      "tool": "masc_schedule_list",
+      "ledger_calls": 3531,
+      "ledger_refused": 9,
+      "store_calls": 3525,
+      "store_failed": 0,
+      "gap": 6,
+      "gap_minus_refused": -3
+    },
+    {
+      "tool": "keeper_task_cancel",
+      "ledger_calls": 68,
+      "ledger_refused": 7,
+      "store_calls": 61,
+      "store_failed": 1,
+      "gap": 7,
+      "gap_minus_refused": 0
+    },
+    {
+      "tool": "keeper_capability_search",
+      "ledger_calls": 206,
+      "ledger_refused": 4,
+      "store_calls": 202,
+      "store_failed": 0,
+      "gap": 4,
+      "gap_minus_refused": 0
+    },
+    {
+      "tool": "masc_dos_save",
+      "ledger_calls": 509,
+      "ledger_refused": 4,
+      "store_calls": 505,
+      "store_failed": 1,
+      "gap": 4,
+      "gap_minus_refused": 0
+    },
+    {
+      "tool": "masc_schedule_create",
+      "ledger_calls": 575,
+      "ledger_refused": 4,
+      "store_calls": 571,
+      "store_failed": 59,
+      "gap": 4,
+      "gap_minus_refused": 0
+    },
+    {
+      "tool": "masc_schedule_get",
+      "ledger_calls": 571,
+      "ledger_refused": 4,
+      "store_calls": 631,
+      "store_failed": 20,
+      "gap": -60,
+      "gap_minus_refused": -64
+    },
+    {
+      "tool": "masc_schedule_update",
+      "ledger_calls": 199,
+      "ledger_refused": 4,
+      "store_calls": 198,
+      "store_failed": 36,
+      "gap": 1,
+      "gap_minus_refused": -3
+    },
+    {
+      "tool": "keeper_artifact_publish",
+      "ledger_calls": 27,
+      "ledger_refused": 3,
+      "store_calls": 24,
+      "store_failed": 0,
+      "gap": 3,
+      "gap_minus_refused": 0
+    },
+    {
+      "tool": "keeper_memory_search",
+      "ledger_calls": 775,
+      "ledger_refused": 3,
+      "store_calls": 772,
+      "store_failed": 0,
+      "gap": 3,
+      "gap_minus_refused": 0
+    },
+    {
+      "tool": "masc_schedule_note_add",
+      "ledger_calls": 1529,
+      "ledger_refused": 3,
+      "store_calls": 1527,
+      "store_failed": 2,
+      "gap": 2,
+      "gap_minus_refused": -1
+    },
+    {
+      "tool": "keeper_broadcast",
+      "ledger_calls": 182,
+      "ledger_refused": 2,
+      "store_calls": 180,
+      "store_failed": 10,
+      "gap": 2,
+      "gap_minus_refused": 0
+    },
+    {
+      "tool": "masc_browser_act",
+      "ledger_calls": 380,
+      "ledger_refused": 2,
+      "store_calls": 380,
+      "store_failed": 34,
+      "gap": 0,
+      "gap_minus_refused": -2
+    },
+    {
+      "tool": "masc_browser_read",
+      "ledger_calls": 3069,
+      "ledger_refused": 2,
+      "store_calls": 3073,
+      "store_failed": 73,
+      "gap": -4,
+      "gap_minus_refused": -6
+    },
+    {
+      "tool": "masc_dos_press",
+      "ledger_calls": 5935,
+      "ledger_refused": 2,
+      "store_calls": 5932,
+      "store_failed": 2,
+      "gap": 3,
+      "gap_minus_refused": 1
+    },
+    {
+      "tool": "masc_schedule_cancel",
+      "ledger_calls": 76,
+      "ledger_refused": 2,
+      "store_calls": 74,
+      "store_failed": 19,
+      "gap": 2,
+      "gap_minus_refused": 0
+    },
+    {
+      "tool": "keeper_wiki_read",
+      "ledger_calls": 41,
+      "ledger_refused": 1,
+      "store_calls": 40,
+      "store_failed": 1,
+      "gap": 1,
+      "gap_minus_refused": 0
+    },
+    {
+      "tool": "masc_ask_withdraw",
+      "ledger_calls": 20,
+      "ledger_refused": 1,
+      "store_calls": 19,
+      "store_failed": 2,
+      "gap": 1,
+      "gap_minus_refused": 0
+    },
+    {
+      "tool": "masc_board_comment_vote",
+      "ledger_calls": 57,
+      "ledger_refused": 1,
+      "store_calls": 56,
+      "store_failed": 0,
+      "gap": 1,
+      "gap_minus_refused": 0
+    },
+    {
+      "tool": "masc_board_list",
+      "ledger_calls": 3415,
+      "ledger_refused": 1,
+      "store_calls": 3434,
+      "store_failed": 3,
+      "gap": -19,
+      "gap_minus_refused": -20
+    },
+    {
+      "tool": "masc_keeper_delegate_cancel",
+      "ledger_calls": 24,
+      "ledger_refused": 1,
+      "store_calls": 29,
+      "store_failed": 4,
+      "gap": -5,
+      "gap_minus_refused": -6
+    },
+    {
+      "tool": "masc_keeper_delegate_status",
+      "ledger_calls": 724,
+      "ledger_refused": 1,
+      "store_calls": 2023,
+      "store_failed": 53,
+      "gap": -1299,
+      "gap_minus_refused": -1300
+    },
+    {
+      "tool": "masc_keeper_list",
+      "ledger_calls": 79,
+      "ledger_refused": 1,
+      "store_calls": 266,
+      "store_failed": 2,
+      "gap": -187,
+      "gap_minus_refused": -188
+    },
+    {
+      "tool": "masc_schedule_notes_list",
+      "ledger_calls": 852,
+      "ledger_refused": 1,
+      "store_calls": 851,
+      "store_failed": 1,
+      "gap": 1,
+      "gap_minus_refused": 0
+    },
+    {
+      "tool": "masc_web_search",
+      "ledger_calls": 102,
+      "ledger_refused": 1,
+      "store_calls": 101,
+      "store_failed": 14,
+      "gap": 1,
+      "gap_minus_refused": 0
+    },
+    {
+      "tool": "keeper_constitution_read",
+      "ledger_calls": 12,
+      "ledger_refused": 0,
+      "store_calls": 13,
+      "store_failed": 1,
+      "gap": -1,
+      "gap_minus_refused": -1
+    },
+    {
+      "tool": "masc_board_post_update",
+      "ledger_calls": 64,
+      "ledger_refused": 0,
+      "store_calls": 68,
+      "store_failed": 4,
+      "gap": -4,
+      "gap_minus_refused": -4
+    },
+    {
+      "tool": "masc_goal_list",
+      "ledger_calls": 171,
+      "ledger_refused": 0,
+      "store_calls": 190,
+      "store_failed": 0,
+      "gap": -19,
+      "gap_minus_refused": -19
+    },
+    {
+      "tool": "masc_goal_transition",
+      "ledger_calls": 11,
+      "ledger_refused": 0,
+      "store_calls": 19,
+      "store_failed": 6,
+      "gap": -8,
+      "gap_minus_refused": -8
+    },
+    {
+      "tool": "masc_goal_upsert",
+      "ledger_calls": 9,
+      "ledger_refused": 0,
+      "store_calls": 22,
+      "store_failed": 3,
+      "gap": -13,
+      "gap_minus_refused": -13
+    },
+    {
+      "tool": "masc_lane_inspect",
+      "ledger_calls": 17,
+      "ledger_refused": 0,
+      "store_calls": 23,
+      "store_failed": 3,
+      "gap": -6,
+      "gap_minus_refused": -6
+    },
+    {
+      "tool": "masc_plan_get_task",
+      "ledger_calls": 531,
+      "ledger_refused": 0,
+      "store_calls": 539,
+      "store_failed": 8,
+      "gap": -8,
+      "gap_minus_refused": -8
+    },
+    {
+      "tool": "masc_task_history",
+      "ledger_calls": 171,
+      "ledger_refused": 0,
+      "store_calls": 345,
+      "store_failed": 0,
+      "gap": -174,
+      "gap_minus_refused": -174
+    }
+  ],
+  "by_day_tool_with_refusals": [
+    {
+      "day": "2026-11-02",
+      "tool": "keeper_artifact_publish",
+      "ledger_calls": 8,
+      "ledger_refused": 3,
+      "store_calls": 5,
+      "store_failed": 0,
+      "gap": 3,
+      "gap_minus_refused": 0
+    },
+    {
+      "day": "2026-11-02",
+      "tool": "keeper_artifact_read",
+      "ledger_calls": 6320,
+      "ledger_refused": 17,
+      "store_calls": 6303,
+      "store_failed": 135,
+      "gap": 17,
+      "gap_minus_refused": 0
+    },
+    {
+      "day": "2026-11-02",
+      "tool": "keeper_memory_write",
+      "ledger_calls": 555,
+      "ledger_refused": 55,
+      "store_calls": 500,
+      "store_failed": 9,
+      "gap": 55,
+      "gap_minus_refused": 0
+    },
+    {
+      "day": "2026-11-02",
+      "tool": "keeper_task_cancel",
+      "ledger_calls": 34,
+      "ledger_refused": 7,
+      "store_calls": 27,
+      "store_failed": 0,
+      "gap": 7,
+      "gap_minus_refused": 0
+    },
+    {
+      "day": "2026-11-02",
+      "tool": "keeper_task_create",
+      "ledger_calls": 97,
+      "ledger_refused": 8,
+      "store_calls": 89,
+      "store_failed": 0,
+      "gap": 8,
+      "gap_minus_refused": 0
+    },
+    {
+      "day": "2026-11-02",
+      "tool": "keeper_task_done",
+      "ledger_calls": 91,
+      "ledger_refused": 11,
+      "store_calls": 80,
+      "store_failed": 0,
+      "gap": 11,
+      "gap_minus_refused": 0
+    },
+    {
+      "day": "2026-11-02",
+      "tool": "keeper_task_release",
+      "ledger_calls": 31,
+      "ledger_refused": 9,
+      "store_calls": 22,
+      "store_failed": 0,
+      "gap": 9,
+      "gap_minus_refused": 0
+    },
+    {
+      "day": "2026-11-02",
+      "tool": "masc_board_comment",
+      "ledger_calls": 1863,
+      "ledger_refused": 396,
+      "store_calls": 1474,
+      "store_failed": 54,
+      "gap": 389,
+      "gap_minus_refused": -7
+    },
+    {
+      "day": "2026-11-02",
+      "tool": "masc_board_post",
+      "ledger_calls": 64,
+      "ledger_refused": 6,
+      "store_calls": 59,
+      "store_failed": 2,
+      "gap": 5,
+      "gap_minus_refused": -1
+    },
+    {
+      "day": "2026-11-02",
+      "tool": "masc_board_post_get",
+      "ledger_calls": 2560,
+      "ledger_refused": 3,
+      "store_calls": 2559,
+      "store_failed": 26,
+      "gap": 1,
+      "gap_minus_refused": -2
+    },
+    {
+      "day": "2026-11-02",
+      "tool": "masc_board_search",
+      "ledger_calls": 332,
+      "ledger_refused": 3,
+      "store_calls": 329,
+      "store_failed": 1,
+      "gap": 3,
+      "gap_minus_refused": 0
+    },
+    {
+      "day": "2026-11-02",
+      "tool": "masc_browser_act",
+      "ledger_calls": 125,
+      "ledger_refused": 1,
+      "store_calls": 124,
+      "store_failed": 5,
+      "gap": 1,
+      "gap_minus_refused": 0
+    },
+    {
+      "day": "2026-11-02",
+      "tool": "masc_browser_interact",
+      "ledger_calls": 80,
+      "ledger_refused": 9,
+      "store_calls": 71,
+      "store_failed": 15,
+      "gap": 9,
+      "gap_minus_refused": 0
+    },
+    {
+      "day": "2026-11-02",
+      "tool": "masc_goal_measure",
+      "ledger_calls": 42,
+      "ledger_refused": 7,
+      "store_calls": 35,
+      "store_failed": 1,
+      "gap": 7,
+      "gap_minus_refused": 0
+    },
+    {
+      "day": "2026-11-02",
+      "tool": "masc_keeper_delegate",
+      "ledger_calls": 50,
+      "ledger_refused": 1,
+      "store_calls": 49,
+      "store_failed": 6,
+      "gap": 1,
+      "gap_minus_refused": 0
+    },
+    {
+      "day": "2026-11-02",
+      "tool": "masc_schedule_cancel",
+      "ledger_calls": 24,
+      "ledger_refused": 2,
+      "store_calls": 22,
+      "store_failed": 2,
+      "gap": 2,
+      "gap_minus_refused": 0
+    },
+    {
+      "day": "2026-11-02",
+      "tool": "masc_schedule_list",
+      "ledger_calls": 112,
+      "ledger_refused": 3,
+      "store_calls": 110,
+      "store_failed": 0,
+      "gap": 2,
+      "gap_minus_refused": -1
+    },
+    {
+      "day": "2026-11-02",
+      "tool": "masc_schedule_note_add",
+      "ledger_calls": 247,
+      "ledger_refused": 1,
+      "store_calls": 246,
+      "store_failed": 0,
+      "gap": 1,
+      "gap_minus_refused": 0
+    },
+    {
+      "day": "2026-11-02",
+      "tool": "masc_schedule_update",
+      "ledger_calls": 30,
+      "ledger_refused": 2,
+      "store_calls": 29,
+      "store_failed": 4,
+      "gap": 1,
+      "gap_minus_refused": -1
+    },
+    {
+      "day": "2026-11-02",
+      "tool": "masc_web_fetch",
+      "ledger_calls": 202,
+      "ledger_refused": 1,
+      "store_calls": 173,
+      "store_failed": 10,
+      "gap": 29,
+      "gap_minus_refused": 28
+    },
+    {
+      "day": "2026-11-02",
+      "tool": "tool_edit_file",
+      "ledger_calls": 818,
+      "ledger_refused": 11,
+      "store_calls": 807,
+      "store_failed": 10,
+      "gap": 11,
+      "gap_minus_refused": 0
+    },
+    {
+      "day": "2026-11-02",
+      "tool": "tool_execute",
+      "ledger_calls": 25804,
+      "ledger_refused": 25,
+      "store_calls": 25606,
+      "store_failed": 47,
+      "gap": 198,
+      "gap_minus_refused": 173
+    },
+    {
+      "day": "2026-11-02",
+      "tool": "tool_read_file",
+      "ledger_calls": 1349,
+      "ledger_refused": 34,
+      "store_calls": 1315,
+      "store_failed": 49,
+      "gap": 34,
+      "gap_minus_refused": 0
+    },
+    {
+      "day": "2026-11-02",
+      "tool": "tool_search_files",
+      "ledger_calls": 136,
+      "ledger_refused": 11,
+      "store_calls": 125,
+      "store_failed": 3,
+      "gap": 11,
+      "gap_minus_refused": 0
+    },
+    {
+      "day": "2026-11-02",
+      "tool": "tool_write_file",
+      "ledger_calls": 701,
+      "ledger_refused": 54,
+      "store_calls": 647,
+      "store_failed": 5,
+      "gap": 54,
+      "gap_minus_refused": 0
+    },
+    {
+      "day": "2026-11-03",
+      "tool": "keeper_memory_write",
+      "ledger_calls": 265,
+      "ledger_refused": 75,
+      "store_calls": 190,
+      "store_failed": 1,
+      "gap": 75,
+      "gap_minus_refused": 0
+    },
+    {
+      "day": "2026-11-03",
+      "tool": "keeper_task_create",
+      "ledger_calls": 59,
+      "ledger_refused": 3,
+      "store_calls": 56,
+      "store_failed": 1,
+      "gap": 3,
+      "gap_minus_refused": 0
+    },
+    {
+      "day": "2026-11-03",
+      "tool": "keeper_task_done",
+      "ledger_calls": 49,
+      "ledger_refused": 3,
+      "store_calls": 46,
+      "store_failed": 0,
+      "gap": 3,
+      "gap_minus_refused": 0
+    },
+    {
+      "day": "2026-11-03",
+      "tool": "keeper_task_release",
+      "ledger_calls": 7,
+      "ledger_refused": 1,
+      "store_calls": 6,
+      "store_failed": 0,
+      "gap": 1,
+      "gap_minus_refused": 0
+    },
+    {
+      "day": "2026-11-03",
+      "tool": "masc_ask",
+      "ledger_calls": 34,
+      "ledger_refused": 8,
+      "store_calls": 26,
+      "store_failed": 2,
+      "gap": 8,
+      "gap_minus_refused": 0
+    },
+    {
+      "day": "2026-11-03",
+      "tool": "masc_board_comment",
+      "ledger_calls": 931,
+      "ledger_refused": 158,
+      "store_calls": 784,
+      "store_failed": 16,
+      "gap": 147,
+      "gap_minus_refused": -11
+    },
+    {
+      "day": "2026-11-03",
+      "tool": "masc_board_post",
+      "ledger_calls": 62,
+      "ledger_refused": 8,
+      "store_calls": 59,
+      "store_failed": 1,
+      "gap": 3,
+      "gap_minus_refused": -5
+    },
+    {
+      "day": "2026-11-03",
+      "tool": "masc_board_post_get",
+      "ledger_calls": 1100,
+      "ledger_refused": 1,
+      "store_calls": 1115,
+      "store_failed": 12,
+      "gap": -15,
+      "gap_minus_refused": -16
+    },
+    {
+      "day": "2026-11-03",
+      "tool": "masc_board_search",
+      "ledger_calls": 107,
+      "ledger_refused": 2,
+      "store_calls": 109,
+      "store_failed": 0,
+      "gap": -2,
+      "gap_minus_refused": -4
+    },
+    {
+      "day": "2026-11-03",
+      "tool": "masc_browser_tabs",
+      "ledger_calls": 124,
+      "ledger_refused": 1,
+      "store_calls": 123,
+      "store_failed": 12,
+      "gap": 1,
+      "gap_minus_refused": 0
+    },
+    {
+      "day": "2026-11-03",
+      "tool": "masc_goal_measure",
+      "ledger_calls": 28,
+      "ledger_refused": 7,
+      "store_calls": 21,
+      "store_failed": 1,
+      "gap": 7,
+      "gap_minus_refused": 0
+    },
+    {
+      "day": "2026-11-03",
+      "tool": "masc_keeper_delegate",
+      "ledger_calls": 195,
+      "ledger_refused": 6,
+      "store_calls": 189,
+      "store_failed": 1,
+      "gap": 6,
+      "gap_minus_refused": 0
+    },
+    {
+      "day": "2026-11-03",
+      "tool": "masc_schedule_list",
+      "ledger_calls": 103,
+      "ledger_refused": 2,
+      "store_calls": 101,
+      "store_failed": 0,
+      "gap": 2,
+      "gap_minus_refused": 0
+    },
+    {
+      "day": "2026-11-03",
+      "tool": "masc_schedule_note_add",
+      "ledger_calls": 36,
+      "ledger_refused": 2,
+      "store_calls": 34,
+      "store_failed": 2,
+      "gap": 2,
+      "gap_minus_refused": 0
+    },
+    {
+      "day": "2026-11-03",
+      "tool": "masc_schedule_update",
+      "ledger_calls": 34,
+      "ledger_refused": 2,
+      "store_calls": 32,
+      "store_failed": 11,
+      "gap": 2,
+      "gap_minus_refused": 0
+    },
+    {
+      "day": "2026-11-03",
+      "tool": "tool_edit_file",
+      "ledger_calls": 264,
+      "ledger_refused": 1,
+      "store_calls": 263,
+      "store_failed": 7,
+      "gap": 1,
+      "gap_minus_refused": 0
+    },
+    {
+      "day": "2026-11-03",
+      "tool": "tool_execute",
+      "ledger_calls": 10674,
+      "ledger_refused": 13,
+      "store_calls": 10546,
+      "store_failed": 77,
+      "gap": 128,
+      "gap_minus_refused": 115
+    },
+    {
+      "day": "2026-11-03",
+      "tool": "tool_read_file",
+      "ledger_calls": 557,
+      "ledger_refused": 5,
+      "store_calls": 552,
+      "store_failed": 17,
+      "gap": 5,
+      "gap_minus_refused": 0
+    },
+    {
+      "day": "2026-11-03",
+      "tool": "tool_write_file",
+      "ledger_calls": 411,
+      "ledger_refused": 43,
+      "store_calls": 368,
+      "store_failed": 3,
+      "gap": 43,
+      "gap_minus_refused": 0
+    },
+    {
+      "day": "2026-11-04",
+      "tool": "keeper_artifact_read",
+      "ledger_calls": 267,
+      "ledger_refused": 5,
+      "store_calls": 262,
+      "store_failed": 22,
+      "gap": 5,
+      "gap_minus_refused": 0
+    },
+    {
+      "day": "2026-11-04",
+      "tool": "keeper_broadcast",
+      "ledger_calls": 40,
+      "ledger_refused": 1,
+      "store_calls": 39,
+      "store_failed": 0,
+      "gap": 1,
+      "gap_minus_refused": 0
+    },
+    {
+      "day": "2026-11-04",
+      "tool": "keeper_memory_search",
+      "ledger_calls": 80,
+      "ledger_refused": 2,
+      "store_calls": 78,
+      "store_failed": 0,
+      "gap": 2,
+      "gap_minus_refused": 0
+    },
+    {
+      "day": "2026-11-04",
+      "tool": "masc_ask",
+      "ledger_calls": 13,
+      "ledger_refused": 1,
+      "store_calls": 12,
+      "store_failed": 0,
+      "gap": 1,
+      "gap_minus_refused": 0
+    },
+    {
+      "day": "2026-11-04",
+      "tool": "masc_board_comment",
+      "ledger_calls": 1230,
+      "ledger_refused": 12,
+      "store_calls": 1226,
+      "store_failed": 13,
+      "gap": 4,
+      "gap_minus_refused": -8
+    },
+    {
+      "day": "2026-11-04",
+      "tool": "masc_board_comment_vote",
+      "ledger_calls": 7,
+      "ledger_refused": 1,
+      "store_calls": 6,
+      "store_failed": 0,
+      "gap": 1,
+      "gap_minus_refused": 0
+    },
+    {
+      "day": "2026-11-04",
+      "tool": "masc_board_post",
+      "ledger_calls": 165,
+      "ledger_refused": 24,
+      "store_calls": 141,
+      "store_failed": 4,
+      "gap": 24,
+      "gap_minus_refused": 0
+    },
+    {
+      "day": "2026-11-04",
+      "tool": "masc_board_post_get",
+      "ledger_calls": 1525,
+      "ledger_refused": 49,
+      "store_calls": 1485,
+      "store_failed": 24,
+      "gap": 40,
+      "gap_minus_refused": -9
+    },
+    {
+      "day": "2026-11-04",
+      "tool": "masc_board_search",
+      "ledger_calls": 146,
+      "ledger_refused": 13,
+      "store_calls": 136,
+      "store_failed": 0,
+      "gap": 10,
+      "gap_minus_refused": -3
+    },
+    {
+      "day": "2026-11-04",
+      "tool": "masc_browser_interact",
+      "ledger_calls": 364,
+      "ledger_refused": 5,
+      "store_calls": 359,
+      "store_failed": 74,
+      "gap": 5,
+      "gap_minus_refused": 0
+    },
+    {
+      "day": "2026-11-04",
+      "tool": "masc_browser_read",
+      "ledger_calls": 704,
+      "ledger_refused": 1,
+      "store_calls": 702,
+      "store_failed": 24,
+      "gap": 2,
+      "gap_minus_refused": 1
+    },
+    {
+      "day": "2026-11-04",
+      "tool": "masc_keeper_delegate",
+      "ledger_calls": 185,
+      "ledger_refused": 4,
+      "store_calls": 181,
+      "store_failed": 2,
+      "gap": 4,
+      "gap_minus_refused": 0
+    },
+    {
+      "day": "2026-11-04",
+      "tool": "masc_keeper_delegate_status",
+      "ledger_calls": 112,
+      "ledger_refused": 1,
+      "store_calls": 156,
+      "store_failed": 9,
+      "gap": -44,
+      "gap_minus_refused": -45
+    },
+    {
+      "day": "2026-11-04",
+      "tool": "masc_schedule_create",
+      "ledger_calls": 51,
+      "ledger_refused": 1,
+      "store_calls": 50,
+      "store_failed": 4,
+      "gap": 1,
+      "gap_minus_refused": 0
+    },
+    {
+      "day": "2026-11-04",
+      "tool": "masc_schedule_get",
+      "ledger_calls": 15,
+      "ledger_refused": 4,
+      "store_calls": 11,
+      "store_failed": 0,
+      "gap": 4,
+      "gap_minus_refused": 0
+    },
+    {
+      "day": "2026-11-04",
+      "tool": "masc_schedule_list",
+      "ledger_calls": 70,
+      "ledger_refused": 2,
+      "store_calls": 68,
+      "store_failed": 0,
+      "gap": 2,
+      "gap_minus_refused": 0
+    },
+    {
+      "day": "2026-11-04",
+      "tool": "masc_web_fetch",
+      "ledger_calls": 55,
+      "ledger_refused": 4,
+      "store_calls": 51,
+      "store_failed": 4,
+      "gap": 4,
+      "gap_minus_refused": 0
+    },
+    {
+      "day": "2026-11-04",
+      "tool": "tool_execute",
+      "ledger_calls": 14461,
+      "ledger_refused": 21,
+      "store_calls": 14119,
+      "store_failed": 40,
+      "gap": 342,
+      "gap_minus_refused": 321
+    },
+    {
+      "day": "2026-11-04",
+      "tool": "tool_read_file",
+      "ledger_calls": 840,
+      "ledger_refused": 34,
+      "store_calls": 806,
+      "store_failed": 19,
+      "gap": 34,
+      "gap_minus_refused": 0
+    },
+    {
+      "day": "2026-11-04",
+      "tool": "tool_search_files",
+      "ledger_calls": 110,
+      "ledger_refused": 14,
+      "store_calls": 96,
+      "store_failed": 5,
+      "gap": 14,
+      "gap_minus_refused": 0
+    },
+    {
+      "day": "2026-11-04",
+      "tool": "tool_write_file",
+      "ledger_calls": 867,
+      "ledger_refused": 5,
+      "store_calls": 862,
+      "store_failed": 7,
+      "gap": 5,
+      "gap_minus_refused": 0
+    },
+    {
+      "day": "2026-11-05",
+      "tool": "keeper_artifact_read",
+      "ledger_calls": 177,
+      "ledger_refused": 1,
+      "store_calls": 176,
+      "store_failed": 11,
+      "gap": 1,
+      "gap_minus_refused": 0
+    },
+    {
+      "day": "2026-11-05",
+      "tool": "keeper_memory_write",
+      "ledger_calls": 539,
+      "ledger_refused": 1,
+      "store_calls": 538,
+      "store_failed": 0,
+      "gap": 1,
+      "gap_minus_refused": 0
+    },
+    {
+      "day": "2026-11-05",
+      "tool": "masc_ask",
+      "ledger_calls": 21,
+      "ledger_refused": 2,
+      "store_calls": 19,
+      "store_failed": 0,
+      "gap": 2,
+      "gap_minus_refused": 0
+    },
+    {
+      "day": "2026-11-05",
+      "tool": "masc_board_comment",
+      "ledger_calls": 887,
+      "ledger_refused": 1,
+      "store_calls": 901,
+      "store_failed": 22,
+      "gap": -14,
+      "gap_minus_refused": -15
+    },
+    {
+      "day": "2026-11-05",
+      "tool": "masc_board_post",
+      "ledger_calls": 210,
+      "ledger_refused": 1,
+      "store_calls": 217,
+      "store_failed": 0,
+      "gap": -7,
+      "gap_minus_refused": -8
+    },
+    {
+      "day": "2026-11-05",
+      "tool": "masc_board_post_get",
+      "ledger_calls": 1068,
+      "ledger_refused": 41,
+      "store_calls": 1053,
+      "store_failed": 26,
+      "gap": 15,
+      "gap_minus_refused": -26
+    },
+    {
+      "day": "2026-11-05",
+      "tool": "masc_board_search",
+      "ledger_calls": 124,
+      "ledger_refused": 11,
+      "store_calls": 117,
+      "store_failed": 0,
+      "gap": 7,
+      "gap_minus_refused": -4
+    },
+    {
+      "day": "2026-11-05",
+      "tool": "masc_keeper_delegate",
+      "ledger_calls": 80,
+      "ledger_refused": 1,
+      "store_calls": 79,
+      "store_failed": 4,
+      "gap": 1,
+      "gap_minus_refused": 0
+    },
+    {
+      "day": "2026-11-05",
+      "tool": "masc_keeper_delegate_cancel",
+      "ledger_calls": 2,
+      "ledger_refused": 1,
+      "store_calls": 1,
+      "store_failed": 0,
+      "gap": 1,
+      "gap_minus_refused": 0
+    },
+    {
+      "day": "2026-11-05",
+      "tool": "masc_web_fetch",
+      "ledger_calls": 93,
+      "ledger_refused": 13,
+      "store_calls": 80,
+      "store_failed": 6,
+      "gap": 13,
+      "gap_minus_refused": 0
+    },
+    {
+      "day": "2026-11-05",
+      "tool": "tool_execute",
+      "ledger_calls": 13179,
+      "ledger_refused": 8,
+      "store_calls": 12952,
+      "store_failed": 20,
+      "gap": 227,
+      "gap_minus_refused": 219
+    },
+    {
+      "day": "2026-11-05",
+      "tool": "tool_read_file",
+      "ledger_calls": 529,
+      "ledger_refused": 7,
+      "store_calls": 522,
+      "store_failed": 6,
+      "gap": 7,
+      "gap_minus_refused": 0
+    },
+    {
+      "day": "2026-11-05",
+      "tool": "tool_write_file",
+      "ledger_calls": 715,
+      "ledger_refused": 13,
+      "store_calls": 702,
+      "store_failed": 0,
+      "gap": 13,
+      "gap_minus_refused": 0
+    },
+    {
+      "day": "2026-11-06",
+      "tool": "keeper_broadcast",
+      "ledger_calls": 3,
+      "ledger_refused": 1,
+      "store_calls": 2,
+      "store_failed": 1,
+      "gap": 1,
+      "gap_minus_refused": 0
+    },
+    {
+      "day": "2026-11-06",
+      "tool": "masc_ask",
+      "ledger_calls": 20,
+      "ledger_refused": 1,
+      "store_calls": 19,
+      "store_failed": 0,
+      "gap": 1,
+      "gap_minus_refused": 0
+    },
+    {
+      "day": "2026-11-06",
+      "tool": "masc_dos_save",
+      "ledger_calls": 34,
+      "ledger_refused": 1,
+      "store_calls": 33,
+      "store_failed": 0,
+      "gap": 1,
+      "gap_minus_refused": 0
+    },
+    {
+      "day": "2026-11-06",
+      "tool": "masc_schedule_create",
+      "ledger_calls": 84,
+      "ledger_refused": 1,
+      "store_calls": 83,
+      "store_failed": 2,
+      "gap": 1,
+      "gap_minus_refused": 0
+    },
+    {
+      "day": "2026-11-06",
+      "tool": "masc_schedule_list",
+      "ledger_calls": 1484,
+      "ledger_refused": 1,
+      "store_calls": 1484,
+      "store_failed": 0,
+      "gap": 0,
+      "gap_minus_refused": -1
+    },
+    {
+      "day": "2026-11-06",
+      "tool": "tool_execute",
+      "ledger_calls": 7840,
+      "ledger_refused": 8,
+      "store_calls": 7832,
+      "store_failed": 9,
+      "gap": 8,
+      "gap_minus_refused": 0
+    },
+    {
+      "day": "2026-11-07",
+      "tool": "keeper_memory_write",
+      "ledger_calls": 38,
+      "ledger_refused": 2,
+      "store_calls": 36,
+      "store_failed": 2,
+      "gap": 2,
+      "gap_minus_refused": 0
+    },
+    {
+      "day": "2026-11-07",
+      "tool": "masc_ask",
+      "ledger_calls": 12,
+      "ledger_refused": 1,
+      "store_calls": 11,
+      "store_failed": 0,
+      "gap": 1,
+      "gap_minus_refused": 0
+    },
+    {
+      "day": "2026-11-07",
+      "tool": "masc_dos_press",
+      "ledger_calls": 1809,
+      "ledger_refused": 2,
+      "store_calls": 1807,
+      "store_failed": 0,
+      "gap": 2,
+      "gap_minus_refused": 0
+    },
+    {
+      "day": "2026-11-07",
+      "tool": "masc_dos_save",
+      "ledger_calls": 141,
+      "ledger_refused": 3,
+      "store_calls": 138,
+      "store_failed": 0,
+      "gap": 3,
+      "gap_minus_refused": 0
+    },
+    {
+      "day": "2026-11-07",
+      "tool": "masc_keeper_delegate",
+      "ledger_calls": 249,
+      "ledger_refused": 2,
+      "store_calls": 248,
+      "store_failed": 0,
+      "gap": 1,
+      "gap_minus_refused": -1
+    },
+    {
+      "day": "2026-11-07",
+      "tool": "masc_schedule_notes_list",
+      "ledger_calls": 3,
+      "ledger_refused": 1,
+      "store_calls": 2,
+      "store_failed": 0,
+      "gap": 1,
+      "gap_minus_refused": 0
+    },
+    {
+      "day": "2026-11-07",
+      "tool": "tool_execute",
+      "ledger_calls": 8242,
+      "ledger_refused": 2,
+      "store_calls": 8239,
+      "store_failed": 23,
+      "gap": 3,
+      "gap_minus_refused": 1
+    },
+    {
+      "day": "2026-11-08",
+      "tool": "masc_schedule_list",
+      "ledger_calls": 230,
+      "ledger_refused": 1,
+      "store_calls": 229,
+      "store_failed": 0,
+      "gap": 1,
+      "gap_minus_refused": 0
+    },
+    {
+      "day": "2026-11-08",
+      "tool": "tool_edit_file",
+      "ledger_calls": 249,
+      "ledger_refused": 2,
+      "store_calls": 247,
+      "store_failed": 6,
+      "gap": 2,
+      "gap_minus_refused": 0
+    },
+    {
+      "day": "2026-11-08",
+      "tool": "tool_execute",
+      "ledger_calls": 5617,
+      "ledger_refused": 4,
+      "store_calls": 5609,
+      "store_failed": 55,
+      "gap": 8,
+      "gap_minus_refused": 4
+    },
+    {
+      "day": "2026-11-09",
+      "tool": "keeper_artifact_read",
+      "ledger_calls": 1273,
+      "ledger_refused": 12,
+      "store_calls": 1261,
+      "store_failed": 34,
+      "gap": 12,
+      "gap_minus_refused": 0
+    },
+    {
+      "day": "2026-11-09",
+      "tool": "keeper_capability_search",
+      "ledger_calls": 28,
+      "ledger_refused": 4,
+      "store_calls": 24,
+      "store_failed": 0,
+      "gap": 4,
+      "gap_minus_refused": 0
+    },
+    {
+      "day": "2026-11-09",
+      "tool": "keeper_memory_search",
+      "ledger_calls": 131,
+      "ledger_refused": 1,
+      "store_calls": 130,
+      "store_failed": 0,
+      "gap": 1,
+      "gap_minus_refused": 0
+    },
+    {
+      "day": "2026-11-09",
+      "tool": "keeper_memory_write",
+      "ledger_calls": 47,
+      "ledger_refused": 3,
+      "store_calls": 44,
+      "store_failed": 1,
+      "gap": 3,
+      "gap_minus_refused": 0
+    },
+    {
+      "day": "2026-11-09",
+      "tool": "keeper_task_release",
+      "ledger_calls": 10,
+      "ledger_refused": 3,
+      "store_calls": 7,
+      "store_failed": 0,
+      "gap": 3,
+      "gap_minus_refused": 0
+    },
+    {
+      "day": "2026-11-09",
+      "tool": "keeper_wiki_read",
+      "ledger_calls": 14,
+      "ledger_refused": 1,
+      "store_calls": 13,
+      "store_failed": 0,
+      "gap": 1,
+      "gap_minus_refused": 0
+    },
+    {
+      "day": "2026-11-09",
+      "tool": "masc_ask",
+      "ledger_calls": 33,
+      "ledger_refused": 3,
+      "store_calls": 30,
+      "store_failed": 1,
+      "gap": 3,
+      "gap_minus_refused": 0
+    },
+    {
+      "day": "2026-11-09",
+      "tool": "masc_ask_withdraw",
+      "ledger_calls": 2,
+      "ledger_refused": 1,
+      "store_calls": 1,
+      "store_failed": 0,
+      "gap": 1,
+      "gap_minus_refused": 0
+    },
+    {
+      "day": "2026-11-09",
+      "tool": "masc_board_comment",
+      "ledger_calls": 600,
+      "ledger_refused": 24,
+      "store_calls": 595,
+      "store_failed": 10,
+      "gap": 5,
+      "gap_minus_refused": -19
+    },
+    {
+      "day": "2026-11-09",
+      "tool": "masc_board_list",
+      "ledger_calls": 195,
+      "ledger_refused": 1,
+      "store_calls": 195,
+      "store_failed": 0,
+      "gap": 0,
+      "gap_minus_refused": -1
+    },
+    {
+      "day": "2026-11-09",
+      "tool": "masc_board_post",
+      "ledger_calls": 80,
+      "ledger_refused": 3,
+      "store_calls": 98,
+      "store_failed": 0,
+      "gap": -18,
+      "gap_minus_refused": -21
+    },
+    {
+      "day": "2026-11-09",
+      "tool": "masc_board_post_get",
+      "ledger_calls": 684,
+      "ledger_refused": 18,
+      "store_calls": 670,
+      "store_failed": 23,
+      "gap": 14,
+      "gap_minus_refused": -4
+    },
+    {
+      "day": "2026-11-09",
+      "tool": "masc_board_search",
+      "ledger_calls": 632,
+      "ledger_refused": 15,
+      "store_calls": 622,
+      "store_failed": 0,
+      "gap": 10,
+      "gap_minus_refused": -5
+    },
+    {
+      "day": "2026-11-09",
+      "tool": "masc_browser_act",
+      "ledger_calls": 124,
+      "ledger_refused": 1,
+      "store_calls": 123,
+      "store_failed": 5,
+      "gap": 1,
+      "gap_minus_refused": 0
+    },
+    {
+      "day": "2026-11-09",
+      "tool": "masc_browser_goto",
+      "ledger_calls": 75,
+      "ledger_refused": 10,
+      "store_calls": 65,
+      "store_failed": 0,
+      "gap": 10,
+      "gap_minus_refused": 0
+    },
+    {
+      "day": "2026-11-09",
+      "tool": "masc_browser_interact",
+      "ledger_calls": 211,
+      "ledger_refused": 13,
+      "store_calls": 198,
+      "store_failed": 44,
+      "gap": 13,
+      "gap_minus_refused": 0
+    },
+    {
+      "day": "2026-11-09",
+      "tool": "masc_browser_read",
+      "ledger_calls": 280,
+      "ledger_refused": 1,
+      "store_calls": 279,
+      "store_failed": 1,
+      "gap": 1,
+      "gap_minus_refused": 0
+    },
+    {
+      "day": "2026-11-09",
+      "tool": "masc_browser_tabs",
+      "ledger_calls": 53,
+      "ledger_refused": 8,
+      "store_calls": 45,
+      "store_failed": 2,
+      "gap": 8,
+      "gap_minus_refused": 0
+    },
+    {
+      "day": "2026-11-09",
+      "tool": "masc_keeper_delegate",
+      "ledger_calls": 406,
+      "ledger_refused": 2,
+      "store_calls": 404,
+      "store_failed": 7,
+      "gap": 2,
+      "gap_minus_refused": 0
+    },
+    {
+      "day": "2026-11-09",
+      "tool": "masc_keeper_list",
+      "ledger_calls": 33,
+      "ledger_refused": 1,
+      "store_calls": 69,
+      "store_failed": 0,
+      "gap": -36,
+      "gap_minus_refused": -37
+    },
+    {
+      "day": "2026-11-09",
+      "tool": "masc_schedule_create",
+      "ledger_calls": 127,
+      "ledger_refused": 2,
+      "store_calls": 125,
+      "store_failed": 18,
+      "gap": 2,
+      "gap_minus_refused": 0
+    },
+    {
+      "day": "2026-11-09",
+      "tool": "masc_web_fetch",
+      "ledger_calls": 101,
+      "ledger_refused": 13,
+      "store_calls": 88,
+      "store_failed": 2,
+      "gap": 13,
+      "gap_minus_refused": 0
+    },
+    {
+      "day": "2026-11-09",
+      "tool": "masc_web_search",
+      "ledger_calls": 36,
+      "ledger_refused": 1,
+      "store_calls": 35,
+      "store_failed": 0,
+      "gap": 1,
+      "gap_minus_refused": 0
+    },
+    {
+      "day": "2026-11-09",
+      "tool": "tool_edit_file",
+      "ledger_calls": 558,
+      "ledger_refused": 18,
+      "store_calls": 540,
+      "store_failed": 10,
+      "gap": 18,
+      "gap_minus_refused": 0
+    },
+    {
+      "day": "2026-11-09",
+      "tool": "tool_execute",
+      "ledger_calls": 19040,
+      "ledger_refused": 37,
+      "store_calls": 18981,
+      "store_failed": 285,
+      "gap": 59,
+      "gap_minus_refused": 22
+    },
+    {
+      "day": "2026-11-09",
+      "tool": "tool_read_file",
+      "ledger_calls": 1410,
+      "ledger_refused": 39,
+      "store_calls": 1371,
+      "store_failed": 33,
+      "gap": 39,
+      "gap_minus_refused": 0
+    },
+    {
+      "day": "2026-11-09",
+      "tool": "tool_search_files",
+      "ledger_calls": 2042,
+      "ledger_refused": 12,
+      "store_calls": 2030,
+      "store_failed": 60,
+      "gap": 12,
+      "gap_minus_refused": 0
+    },
+    {
+      "day": "2026-11-09",
+      "tool": "tool_write_file",
+      "ledger_calls": 702,
+      "ledger_refused": 1,
+      "store_calls": 700,
+      "store_failed": 5,
+      "gap": 2,
+      "gap_minus_refused": 1
+    }
+  ],
+  "unmapped_ledger_tools": {
+    "keeper_skill": 882,
+    "keeper_tool_search": 467,
+    "keeper_compose_work-intake": 192,
+    "keeper_compose_sangokushi-3-end-month": 126,
+    "github_search_code": 88,
+    "cloudflare_execute": 80,
+    "github_get_file_contents": 72,
+    "atlassian_searchJiraIssuesUsingJql": 58,
+    "railway_get-logs": 53,
+    "atlassian_getJiraIssue": 35,
+    "BrowserSession": 31,
+    "github_pull_request_read": 30,
+    "railway_describe-service": 27,
+    "cloudflare_whoami": 25,
+    "railway_list-deployments": 25,
+    "cloudflare_docs": 24,
+    "github_issue_read": 21,
+    "keeper_compose_prior-art": 11,
+    "datadog_execute_code": 10,
+    "railway_update-service": 10,
+    "keeper_composition_status": 10,
+    "railway_list-projects": 9,
+    "atlassian_getAccessibleAtlassianResources": 7,
+    "github_list_branches": 6,
+    "railway_whoami": 5,
+    "keeper_composition_run": 5,
+    "datadog_search_datadog_monitors": 4,
+    "BrowserInstruct": 4,
+    "railway_list-services": 3,
+    "atlassian_getTeamworkGraphObject": 3,
+    "atlassian_searchConfluenceUsingCql": 2,
+    "atlassian_search": 2,
+    "atlassian_lookupJiraAccountId": 2,
+    "github_create_or_update_file": 2,
+    "github_search_pull_requests": 2,
+    "datadog_aggregate_rum_events": 1,
+    "datadog_search_datadog_rum_events": 1,
+    "datadog_search_datadog_sdk": 1,
+    "github_list_tags": 1,
+    "atlassian_getConfluencePage": 1,
+    "atlassian_getConfluencePageFooterComments": 1,
+    "atlassian_getConfluencePageInlineComments": 1,
+    "keeper_compose_browser-navigate-read": 1,
+    "railway_redeploy": 1,
+    "railway_list-variables": 1,
+    "atlassian_addCommentToJiraIssue": 1,
+    "github_list_commits": 1,
+    "railway_accept-deploy": 1
+  }
+}

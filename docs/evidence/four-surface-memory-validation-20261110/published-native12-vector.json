@@ -1,0 +1,74 @@
+[
+  {
+    "pr": 50671,
+    "head": "249c0951918e4ec8f121916e03daceebd866013b",
+    "base": "c9f811b2841761f999ebb9bd133b2fbced9653ab",
+    "branch": "feat/tui-work-simple-20261109"
+  },
+  {
+    "pr": 50677,
+    "head": "fc55ff057613374102ba1a2d9eac95ccb4f68a61",
+    "base": "249c0951918e4ec8f121916e03daceebd866013b",
+    "branch": "feat/tui-feature-simple-20261109"
+  },
+  {
+    "pr": 50688,
+    "head": "c2ff6e92a07dae7d4c76668a1edc18beb271dea7",
+    "base": "fc55ff057613374102ba1a2d9eac95ccb4f68a61",
+    "branch": "feat/tui-goal-simple-20261109"
+  },
+  {
+    "pr": 50690,
+    "head": "203f895656e863fe837cf0f1e174e673329fdb1b",
+    "base": "c2ff6e92a07dae7d4c76668a1edc18beb271dea7",
+    "branch": "feat/tui-system-simple-20261109"
+  },
+  {
+    "pr": 50689,
+    "head": "3e2b96286e8539337698dfe13460f1bcbf2d5244",
+    "base": "203f895656e863fe837cf0f1e174e673329fdb1b",
+    "branch": "docs/surface-reading-contract-20261109"
+  },
+  {
+    "pr": 50698,
+    "head": "70e2c132e22deb6b04f142f2ab5e9862aef63a10",
+    "base": "3e2b96286e8539337698dfe13460f1bcbf2d5244",
+    "branch": "feat/four-surface-reading-20261109"
+  },
+  {
+    "pr": 50695,
+    "head": "65e879658dba0de458b81f4408a6162f7e517900",
+    "base": "70e2c132e22deb6b04f142f2ab5e9862aef63a10",
+    "branch": "feat/tui-reading-priority-20261109"
+  },
+  {
+    "pr": 50703,
+    "head": "487393b725ff1f8070f1b698d04ae413746f570a",
+    "base": "65e879658dba0de458b81f4408a6162f7e517900",
+    "branch": "docs/four-surface-reading-evidence-20261109"
+  },
+  {
+    "pr": 50704,
+    "head": "d2c4f88abf3381204092b31c997a08257b30139b",
+    "base": "487393b725ff1f8070f1b698d04ae413746f570a",
+    "branch": "feat/tui-workspace-simple-20261109"
+  },
+  {
+    "pr": 50707,
+    "head": "7175899d3af7801f489265afb42e6f4836a31f2e",
+    "base": "d2c4f88abf3381204092b31c997a08257b30139b",
+    "branch": "feat/tui-operations-simple-20261110"
+  },
+  {
+    "pr": 50708,
+    "head": "f35a50b9ec9ba4d3cdd03cf0d03ea57f5924f657",
+    "base": "7175899d3af7801f489265afb42e6f4836a31f2e",
+    "branch": "fix/tui-memory-reading-20261110"
+  },
+  {
+    "pr": 50730,
+    "head": "81e91c6bd68f5897390ad883b7ffdac53f3965c6",
+    "base": "f35a50b9ec9ba4d3cdd03cf0d03ea57f5924f657",
+    "branch": "feat/tui-usage-simple-20261110"
+  }
+]

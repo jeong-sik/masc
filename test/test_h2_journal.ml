@@ -1326,6 +1326,21 @@ let test_first_loss_retains_unproven_effects mode () =
       check bool "retired preparation cannot settle a reentered same-ID document" true
         (Masc_tui_fetched.in_flight ui.task_document_body.tds_reading);
       List.iter (fun request -> Ui.complete_task_document ui ~cols:72 request (prepare request)) replacement_documents;
+      let previous_language = ui.ui_language in
+      ui.ui_language <- (match previous_language with Ui.Lang_ko -> Ui.Lang_en | Ui.Lang_en -> Ui.Lang_ko);
+      let translated = Ui.sync_task_documents ui ~cols:72 in
+      let old_language = find Document.Body translated in
+      ui.ui_language <- previous_language;
+      Ui.complete_task_document ui ~cols:72 old_language (prepare old_language);
+      check bool "a late prior-language preparation loses admission before the next sync" true
+        (match (Observation.facts old_language.tdr_observation).ui_disposition with
+         | Some (_,Observation.Rejected Source_or_width_changed) -> true | _ -> false);
+      let restored_language = Ui.sync_task_documents ui ~cols:72 in
+      check bool "the current language starts its own preparation owner" true
+        (List.exists (fun request ->
+          let key=Masc_tui_fetched.request_key request.Ui.tdr_ticket in
+          Document.part key.tdk_input=Document.Body) restored_language);
+      List.iter (fun request -> Ui.complete_task_document ui ~cols:72 request (prepare request)) restored_language;
       ui.view <- Ui.Tools;ui.task_payloads <- Ui.Task_payloads.empty;
       let refresh=Ui.begin_tools_async_task_body ui ~force:true |> Option.get in
       Ui.complete_tools_async_task_body ui refresh (Error "Task storage unavailable");

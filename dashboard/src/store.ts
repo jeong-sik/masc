@@ -1,5 +1,5 @@
 import { readCandleRosterObservation, type CandleReading } from './lib/candle-observation'
-import { acceptedExecutionWorkspace } from './execution-workspace-authority'
+import { acceptedExecutionWorkspace, executionWorkspaceAuthority } from './execution-workspace-authority'
 export { executionWorkspaceAuthority, type ExecutionWorkspaceAuthority } from './execution-workspace-authority'
 import { isObserverInstance } from './lib/observer-protocol'
 import { decodeGoalProof } from './api/goal-proof'

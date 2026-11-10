@@ -24,15 +24,44 @@ let observation marker next_deadline_unix : Dashboard_briefing.observation =
   {json = `Assoc ["marker", `String marker; "summary", `Assoc ["workspace_health", `String "ok"]];
    next_deadline_unix; completeness = Dashboard_projection_read.Complete}
 
+let test_partial_read_retains_body_without_success () = with_owner (fun _state _scope owner ->
+  let marker () = Yojson.Safe.Util.((Owner.publication owner).json |> member "marker" |> to_string) in
+  let read = Owner.begin_attempt owner ~origin:Source_read in
+  let partial = {(observation "readable partial rows" None) with
+    completeness = Dashboard_projection_read.Partial "actual storage failure"} in
+  check bool "a partial actual body is admitted" true (Owner.publish_observation read partial);
+  check bool "the retained body satisfies a cold GET" true (Owner.has_observation owner);
+  check (option (float 0.0)) "partial does not stamp a full success" None
+    (Cache.snapshot (Owner.cache owner)).last_success_unix;
+  check string "partial body is the actual new observation" "readable partial rows" (marker ());
+  let json = (Owner.publication owner).json in
+  check string "partial canonical state is error" "error"
+    Yojson.Safe.Util.(json |> member "mission_observation_state" |> to_string);
+  check string "typed partial outcome reaches the shared wire diagnostics" "partial"
+    Yojson.Safe.Util.(json |> member "projection_diagnostics" |> member "read_completeness" |> to_string);
+  check bool "outer failure retains partial rows" true (Owner.publish_failure_message read "retry retained");
+  check string "the outer failure does not restore older data" "readable partial rows" (marker ());
+  let recovered = Owner.begin_attempt owner ~origin:Source_read in
+  check bool "a later complete read recovers" true
+    (Owner.publish_observation recovered (observation "recovered" None));
+  check bool "the same success cannot be degraded to partial" false
+    (Owner.publish_observation recovered partial);
+  check string "complete read clears the original partial error" "complete"
+    Yojson.Safe.Util.((Owner.publication owner).json |> member "projection_diagnostics"
+      |> member "read_completeness" |> to_string);
+  check bool "complete diagnostics clear read_error" true
+    Yojson.Safe.Util.((Owner.publication owner).json |> member "projection_diagnostics"
+      |> member "read_error" = `Null))
+
 let test_own_success_and_newer_attempt_order () = with_owner (fun _state _scope owner ->
   let older = Owner.begin_attempt owner ~origin:Source_read in
   let newer = Owner.begin_attempt owner ~origin:Default_request in
   check bool "newer successful request is admitted" true
-    (Owner.publish_success newer (observation "newer" (Some 123.0)));
+    (Owner.publish_observation newer (observation "newer" (Some 123.0)));
   check bool "the same attempt cannot degrade its successful result" false
     (Owner.publish_failure_message newer "outer window closed");
   check bool "an older source read cannot replace the request" false
-    (Owner.publish_success older (observation "older" None));
+    (Owner.publish_observation older (observation "older" None));
   check bool "the older source failure is rejected too" false
     (Owner.publish_failure_message older "late source failure");
   check (option string) "successful result has no synthetic window error" None
@@ -43,7 +72,7 @@ let test_own_success_and_newer_attempt_order () = with_owner (fun _state _scope 
 let test_invalidated_read_remains_owed () = with_owner (fun _state _scope owner ->
   let first = Owner.begin_attempt owner ~origin:Source_read in
   check bool "initial answer is admitted" true
-    (Owner.publish_success first (observation "last-good" (Some 123.0)));
+    (Owner.publish_observation first (observation "last-good" (Some 123.0)));
   let prepared = Owner.publication owner in
   let in_flight = Owner.begin_attempt owner ~origin:Source_read in
   check bool "attempt diagnostics supersede prepared cache bytes" true
@@ -52,12 +81,12 @@ let test_invalidated_read_remains_owed () = with_owner (fun _state _scope owner 
   check bool "a dirty source is different from mere preparation supersession" true
     (Owner.publication_status owner prepared = Owner.Source_pending);
   check bool "a read completing after the mutation may publish its actual observation" true
-    (Owner.publish_success in_flight (observation "completed read" None));
+    (Owner.publish_observation in_flight (observation "completed read" None));
   check bool "the actual completed read replaces last-good rows despite newer inputs" true
     (Yojson.Safe.Util.member "marker" (Cache.snapshot (Owner.cache owner)).json = `String "completed read");
   let fresh = Owner.begin_attempt owner ~origin:Source_read in
   check bool "the actual follow-up read is admitted too" true
-    (Owner.publish_success fresh (observation "current source" None));
+    (Owner.publish_observation fresh (observation "current source" None));
   check bool "an older preparation owes publication after the current read has settled" true
     (Owner.publication_status owner prepared = Owner.Superseded);
   check bool "the current immutable publication can be sent" true
@@ -72,9 +101,9 @@ let test_same_path_retirement_keeps_its_original_instance () = with_owner (fun s
   let current = Owner.owner_for_scope ~state scope in
   check bool "same path receives a distinct cache owner" true (Owner.cache current != Owner.cache old_owner);
   let attempt = Owner.begin_attempt current ~origin:Source_read in
-  check bool "current source publishes" true (Owner.publish_success attempt (observation "current scope" None));
+  check bool "current source publishes" true (Owner.publish_observation attempt (observation "current scope" None));
   check bool "retired request success is rejected" false
-    (Owner.publish_success old_attempt (observation "retired request" None));
+    (Owner.publish_observation old_attempt (observation "retired request" None));
   check bool "retired request error is rejected" false
     (Owner.publish_failure_message old_attempt "late retired failure");
   let delayed = Owner.owner_for_scope ~state old_scope in
@@ -93,7 +122,7 @@ let test_failure_keeps_last_good_rows_and_callback_outcome () = with_owner (fun 
   Fun.protect ~finally:unsubscribe (fun () ->
     let ready = Owner.begin_attempt owner ~origin:Source_read in
     check bool "listener exception cannot replace a committed cache success" true
-      (Owner.publish_success ready (observation "last-good" None));
+      (Owner.publish_observation ready (observation "last-good" None));
     let failed = Owner.begin_attempt owner ~origin:Source_read in
     check bool "a newer actual read failure is retained" true
       (Owner.publish_failure_message failed "isolated read failure");
@@ -325,6 +354,7 @@ let test_source_burst_preserves_completed_read_and_one_trailing_read () = Eio_ma
 let () = run "Mission observation owner"
   ["publication", [
     test_case "own success and ordered attempts" `Quick test_own_success_and_newer_attempt_order;
+    test_case "partial rows retain failure debt without success" `Quick test_partial_read_retains_body_without_success;
     test_case "source invalidation keeps actual read debt" `Quick test_invalidated_read_remains_owed;
     test_case "same-path scope retirement preserves instance" `Quick test_same_path_retirement_keeps_its_original_instance;
     test_case "read failure retains rows and original outcome" `Quick test_failure_keeps_last_good_rows_and_callback_outcome;

@@ -1,5 +1,4 @@
 module Owner = Server_dashboard_operator_digest_observation
-module Cache = Server_dashboard_http_cache
 module Core_cache = Server_dashboard_http_core_cache
 module Query = Server_dashboard_http_core_operator_query
 
@@ -9,7 +8,7 @@ let attest_instance (scope : Mcp_server.workspace_scope) = function
   | (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _) as json -> json
 
 let default_json ~state ~scope ~owner ~sw ~clock =
-  let cached () = if Cache.cached_surface_has_success (Owner.cache owner)
+  let cached () = if Owner.has_observation owner
     then Some (Owner.publication owner).json else None in
   match cached () with
   | Some json -> json
@@ -27,8 +26,8 @@ let default_json ~state ~scope ~owner ~sw ~clock =
               ~actor:"dashboard" ~target_type:"workspace" () with
             | Ok observation -> observation
             | Error detail -> invalid_arg ("Operator Digest default read: " ^ detail) in
-          ignore (Owner.publish_success attempt observation);
-          observation.json
+          ignore (Owner.publish_observation attempt observation);
+          Dashboard_projection_read.json_with_read_diagnostics observation
         with
         | Eio.Cancel.Cancelled _ as exn -> raise exn
         | exn -> fail exn; raise exn) in
@@ -74,7 +73,7 @@ let operator_digest_http_json ~state ~sw ~clock request =
         (Pool_work.cpu ~name:__FUNCTION__ (fun () ->
           match Server_dashboard_operator_digest_compute.observe_current ~state ~scope ~sw ~clock
               ~query ?actor ~target_type:effective_target_type ?target_id ?include_workers () with
-          | Ok observation -> observation.json
+          | Ok observation -> Dashboard_projection_read.json_with_read_diagnostics observation
           | Error detail -> `Assoc ["error", `String "validation_error";
               "message", `String detail; "generated_at", `String (Masc_domain.now_iso ())])) in
   Ok (result |> Query.with_operator_digest_metadata ~config ~query |> attest_instance scope)

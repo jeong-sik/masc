@@ -22,6 +22,14 @@ val keeper_completeness :
 (** Classify the original typed roster/row reads without parsing rendered JSON
     or treating unread Keepers as an empty successful fleet. *)
 
+val json_with_read_diagnostics : observation -> Yojson.Safe.t
+(** Preserve the body and merge two fields into [projection_diagnostics]:
+    [read_completeness] is exactly ["complete"] or ["partial"], and
+    [read_error] is respectively [null] or the actual diagnostic string.
+    These values come from the producer's typed read outcome. Complete reads
+    explicitly clear the previous read error. Private actor/query HTTP uses
+    this without claiming default canonical publication authority. *)
+
 exception Incomplete_read of string
 (** After publishing partial rows, a source worker may pass this actual read
     failure to its existing retry mechanism. It must not discard the rows. *)

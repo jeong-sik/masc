@@ -17,6 +17,7 @@ type owner = {
   next_sequence : int ref;
   terminal : terminal option ref;
   next_deadline : float option ref;
+  retained_completeness : Dashboard_projection_read.completeness option ref;
   listeners : listener list Atomic.t;
 }
 
@@ -60,7 +61,7 @@ let create_owner ~state (scope : Mcp_server.workspace_scope) =
      |> with_metadata ~scope ~generation ~sequence:0 ~state:Initializing);
    mu = Stdlib.Mutex.create (); generation = ref generation; admitted_generation = ref generation;
    next_sequence = ref 0;
-   terminal = ref None; next_deadline = ref None; listeners = Atomic.make []}
+   terminal = ref None; next_deadline = ref None; retained_completeness = ref None; listeners = Atomic.make []}
 
 let active_mu = Stdlib.Mutex.create ()
 let active : owner option ref = ref None
@@ -79,6 +80,7 @@ let owner_for_scope ~state (scope : Mcp_server.workspace_scope) =
         | None -> if is_current candidate then active := Some candidate; candidate)
 
 let cache owner = owner.cache
+let has_observation owner = Stdlib.Mutex.protect owner.mu (fun () -> Option.is_some !(owner.retained_completeness))
 let next_deadline_unix owner = Stdlib.Mutex.protect owner.mu (fun () -> !(owner.next_deadline))
 
 let subscribe_completed owner completed =
@@ -109,19 +111,27 @@ let admits attempt ~failure =
          if failure then attempt.sequence > sequence else attempt.sequence >= sequence
      | Some (Failure sequence) -> attempt.sequence >= sequence
 
-let publish_success attempt (observation : Dashboard_briefing.observation) =
+let publish_observation attempt (observation : Dashboard_briefing.observation) =
   let owner = attempt.owner in
+  let now = Unix.gettimeofday () in
+  let failure = match observation.completeness with
+    | Dashboard_projection_read.Complete -> false | Partial _ -> true in
   let published = Stdlib.Mutex.protect owner.mu (fun () ->
-    if not (admits attempt ~failure:false) then false else (
+    if not (admits attempt ~failure) then false else (
       let generation = !(owner.generation) in
-      let json = observation.json |> with_metadata ~scope:owner.scope
-          ~generation ~sequence:attempt.sequence ~state:Ready in
-      Cache.mark_cached_surface_success owner.cache json;
-      owner.terminal := Some (Success attempt.sequence);
+      let state = if failure then Read_failed else Ready in
+      let json = Dashboard_projection_read.json_with_read_diagnostics observation
+          |> with_metadata ~scope:owner.scope ~generation ~sequence:attempt.sequence ~state in
+      (match observation.completeness with
+       | Complete -> Cache.mark_cached_surface_success owner.cache json
+       | Partial detail -> Cache.update_cached_surface owner.cache (fun current ->
+           {current with json; last_error = Some detail; last_error_unix = Some now}));
+      owner.terminal := Some (if failure then Failure attempt.sequence else Success attempt.sequence);
       owner.admitted_generation := generation;
+      owner.retained_completeness := Some observation.completeness;
       owner.next_deadline := observation.next_deadline_unix;
       true)) in
-  if published then notify owner (Installed attempt.origin);
+  if published then notify owner (if failure then Failed attempt.origin else Installed attempt.origin);
   published
 
 let publish_failure_message attempt message =

@@ -159,43 +159,46 @@ let freshness_fields ~now latest_ts =
   | None ->
     [ ("latest_ts_unix", `Null); ("latest_ts_iso", `Null); ("latest_age_s", `Null) ]
 
-let source_health_fields ~now ~exists ~entry_count ~latest_ts ~freshness_slo_s
+type source_health =
+  | Health_coverage_gap of Yojson.Safe.t
+  | Health_read_failed
+  | Health_not_yet
+  | Health_missing
+  | Health_empty
+  | Health_stale
+  | Health_current of float option
+
+let observe_source_health ~now ~exists ~entry_count ~latest_ts ~freshness_slo_s
     ?(optional_when_missing = false) ?(read_error = false)
     ?(producer_active = false) ?coverage_gap () =
-  match coverage_gap with
-  | Some gap ->
-    [
-      ("health", `String "coverage_gap");
-      ( "stale_reason",
-        `String
-          (Safe_ops.json_string ~default:"coverage_gap" "stale_reason" gap) );
-    ]
-  | None ->
-    let health, stale_reason =
-      (* [optional_when_missing] callers (Goal_event, which only materialises
-         after the first goal verification) have a legitimate "file does not
-         exist yet" state. Reporting that as a red [missing] alarm creates
-         dashboard fatigue; report a neutral [not_yet] with an explanatory
-         reason instead. Real write failures still surface via [coverage_gap]
-         regardless of this flag. *)
-      if read_error then ("error", "read_failed")
-      else if not exists && optional_when_missing then ("not_yet", "no_entries_yet")
-      else if not exists then ("missing", "store_missing")
-      else if entry_count = 0 then ("empty", "no_entries")
-      else
-        match latest_ts with
-        | None -> ("empty", "no_entries")
+  let state = match coverage_gap with
+    | Some gap -> Health_coverage_gap gap
+    | None ->
+      if read_error then Health_read_failed
+      else if not exists && optional_when_missing then Health_not_yet
+      else if not exists then Health_missing
+      else if entry_count = 0 then Health_empty
+      else match latest_ts with
+        | None -> Health_empty
         | Some ts ->
           let latest_age_s = max 0.0 (now -. ts) in
-          if latest_age_s > freshness_slo_s && not producer_active then
-            ("stale", "freshness_slo_exceeded")
-          else ("ok", "")
-    in
-    [
-      ("health", `String health);
-      ( "stale_reason",
-        if stale_reason = "" then `Null else `String stale_reason );
-    ]
+          if latest_age_s > freshness_slo_s && not producer_active then Health_stale
+          else
+            let at = Float.next_after (ts +. freshness_slo_s) infinity in
+            Health_current (if producer_active || not (Float.is_finite at)
+              then None else Some at)
+  in
+  let health, reason, deadline = match state with
+    | Health_coverage_gap gap ->
+      "coverage_gap", `String (Safe_ops.json_string ~default:"coverage_gap" "stale_reason" gap), None
+    | Health_read_failed -> "error", `String "read_failed", None
+    | Health_not_yet -> "not_yet", `String "no_entries_yet", None
+    | Health_missing -> "missing", `String "store_missing", None
+    | Health_empty -> "empty", `String "no_entries", None
+    | Health_stale -> "stale", `String "freshness_slo_exceeded", None
+    | Health_current deadline -> "ok", `Null, deadline
+  in
+  ["health", `String health; "stale_reason", reason], deadline, read_error
 
 let source_optional_when_missing = function
   | Goal_event -> true
@@ -1129,11 +1132,27 @@ let goal_event_summary_stats ~masc_root =
     in
     (List.length entries, latest_ts_of_entries entries)
 
-let summary_json ?keeper_keepalive_interval_s
+type summary_observation = {
+  json : Yojson.Safe.t;
+  next_change_at_unix : float option;
+  read_failed : bool;
+}
+
+let observe_summary ~now ?keeper_keepalive_interval_s
     ?(keeper_metric_producer_active = false) ~masc_root ()
-  : Yojson.Safe.t
   =
-  let now = Unix.gettimeofday () in
+  let next_change = ref None and read_failed = ref false in
+  let source_health_fields ~now ~exists ~entry_count ~latest_ts ~freshness_slo_s
+      ?optional_when_missing ?read_error ?producer_active ?coverage_gap () =
+    let fields, deadline, failed = observe_source_health ~now ~exists ~entry_count
+        ~latest_ts ~freshness_slo_s ?optional_when_missing ?read_error
+        ?producer_active ?coverage_gap () in
+    next_change := (match !next_change, deadline with
+      | None, value | value, None -> value
+      | Some left, Some right -> Some (Float.min left right));
+    read_failed := !read_failed || failed;
+    fields
+  in
   let coverage_gaps = Telemetry_coverage_gap.read_recent ~masc_root ~n:50 in
   let keeper_dirs = discover_keeper_metric_dirs masc_root in
   let keeper_total =
@@ -1403,12 +1422,18 @@ let summary_json ?keeper_keepalive_interval_s
   let total_entries =
     List.fold_left (fun acc (_json, count) -> acc + count) 0 source_summaries
   in
-  `Assoc [
-    ("generated_at", `String (Masc_domain.now_iso ()));
+  let json = `Assoc [
+    ("generated_at", `String (Masc_domain.iso8601_of_unix_seconds now));
     ("sources", `List (List.map fst source_summaries));
     ("coverage_gaps", `List coverage_gaps);
     ("total_entries", `Int total_entries);
-  ]
+  ] in
+  { json; next_change_at_unix = !next_change; read_failed = !read_failed }
+
+let summary_json ?keeper_keepalive_interval_s ?keeper_metric_producer_active
+    ~masc_root () =
+  (observe_summary ~now:(Unix.gettimeofday ()) ?keeper_keepalive_interval_s
+     ?keeper_metric_producer_active ~masc_root ()).json
 
 module For_testing = struct
   let trajectory_tool_call_summary_stats = trajectory_tool_call_summary_stats

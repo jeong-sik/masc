@@ -140,12 +140,6 @@ let sample_of_row json =
   | _ -> None
 ;;
 
-let sample_of_decision_line line =
-  match Yojson.Safe.from_string line with
-  | exception _ -> None
-  | json -> sample_of_row json
-;;
-
 (* The tail a seed reads from each log. Measured 2026-11-09 on the live
    workspace, a day of the busiest keeper's log took 2,715 lines and 2.3 MB, so
    these reach back a day with room; a log longer than this is read to here and

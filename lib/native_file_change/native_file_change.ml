@@ -5,6 +5,7 @@ type error =
   | Unsupported_platform
   | System_error of { operation : operation; error : Unix.error }
   | Ambiguous_watch_identity
+  | Target_changed
   | Closed
 type loss = Overflow | Target_retired | Unknown_watch
 type change = Changed of target list | Coverage_lost of loss
@@ -46,6 +47,8 @@ let create ~sw ~targets =
     match create_raw paths directories devices inodes with
     | exception Unix.Unix_error (Unix.EEXIST, "file_change_ambiguous", _) ->
       Error Ambiguous_watch_identity
+    | exception Unix.Unix_error (_, "file_change_target_changed", _) ->
+      Error Target_changed
     | exception Unix.Unix_error (error, operation, path) ->
       let operation = if String.equal operation "file_change_register" then Register path else Create in
       Error (System_error { operation; error })
@@ -93,6 +96,7 @@ let rec await t =
 let error_to_string = function
   | Unsupported_platform -> "kernel file observation is unsupported on this platform"
   | Ambiguous_watch_identity -> "kernel file watch identities changed during registration"
+  | Target_changed -> "kernel file watch target changed during registration"
   | Closed -> "kernel file observation is closed"
   | System_error { operation; error } ->
     let operation = match operation with Create -> "create" | Register _ -> "register" | Drain -> "drain" in

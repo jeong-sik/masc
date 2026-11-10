@@ -1584,7 +1584,7 @@
  (name masc_tui_memory_world)
  (wrapped false)
  (modules masc_tui_memory_world)
- (libraries masc masc_tui_fetched masc_tui_message_layout))
+ (libraries masc masc_tui_fetched masc_tui_message_layout masc_tui_owed_read))
 
 (library
  (name masc_tui_lane_read_decision)

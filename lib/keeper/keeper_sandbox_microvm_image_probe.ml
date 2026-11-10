@@ -383,10 +383,6 @@ let image_probe_with_inspect_for backend ~image ~timeout_sec =
   classify_image_probe_for backend ~image ~inspect ~listing, inspect
 ;;
 
-let image_probe_for backend ~image ~timeout_sec =
-  fst (image_probe_with_inspect_for backend ~image ~timeout_sec)
-;;
-
 (* Presence and the build marker come from the same store observation.
    Missing metadata warns but never blocks boot. *)
 let warn_if_lock_marker ~image (_, stdout, _) =

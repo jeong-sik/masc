@@ -519,22 +519,15 @@ let test_live_structured_image_probe () =
   | None -> ()
   | Some _ ->
     with_eio_fs @@ fun () ->
-    (match
-       M.image_probe_for
-         Backend.Apple_container
-         ~image:"masc-keeper-sandbox:local"
-         ~timeout_sec:15.0
-     with
-     | M.Image_present -> ()
-     | _ -> Alcotest.fail "present image did not produce Image_present");
     match
-      M.image_probe_for
+      M.image_present_for
         Backend.Apple_container
-        ~image:"masc-proof-definitely-missing:never"
+        ~name:(Some "base")
+        ~image:"masc-keeper-sandbox:local"
         ~timeout_sec:15.0
     with
-    | M.Image_missing -> ()
-    | _ -> Alcotest.fail "a definitely absent image did not produce Image_missing"
+    | Ok () -> ()
+    | Error reason -> Alcotest.fail reason
 
 (* The gate never builds: a Keeper's image is the build the host catalog
    promoted, and only [masc sandbox-image] builds one. An absent image comes

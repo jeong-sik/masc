@@ -83,7 +83,15 @@ let keeper_json keeper_id members =
   R.json R.Ok_200 (("keeper_id", `String (Authz_types.Keeper_id.to_string keeper_id)) :: members)
 ;;
 
-let state_of zone = (Authz_zone.snapshot zone).Authz_zone.state
+(* The Keepers of the state the zone can be trusted for. An answer that says
+   a Keeper is there is read from it, and a zone that cannot be trusted
+   answers no such thing. *)
+let keepers_of zone =
+  Result.map
+    (fun (trusted : Authz_zone.trusted) ->
+      (trusted :> Authz_zone.snapshot).Authz_zone.state.Authz_state.keepers)
+    (Authz_zone.read zone)
+;;
 
 let list state user_id =
   R.json
@@ -113,11 +121,14 @@ let make zone user_id ~body =
     let* keeper_id = keeper_id_of name in
     let made record = keeper_json keeper_id [ "record", `String record ] in
     let made_before () =
-      match Ks.find (state_of zone).Authz_state.keepers keeper_id with
-      | Some keeper when Authz_types.User_id.equal keeper.Ks.owner user_id ->
-        Some (Ok (made "existing"))
-      | Some (_ : Ks.keeper) -> Some (Error (error R.Conflict_409 taken))
-      | None -> None
+      match keepers_of zone with
+      | Error uncertain -> Some (Error (R.zone_uncertain uncertain))
+      | Ok keepers ->
+        (match Ks.find keepers keeper_id with
+         | Some keeper when Authz_types.User_id.equal keeper.Ks.owner user_id ->
+           Some (Ok (made "existing"))
+         | Some (_ : Ks.keeper) -> Some (Error (error R.Conflict_409 taken))
+         | None -> None)
     in
     match made_before () with
     | Some answer -> answer
@@ -158,14 +169,17 @@ let assign zone user_id ~body =
         ; "record", `String record
         ]
     in
-    match Ks.find (state_of zone).Authz_state.keepers keeper_id with
-    | Some { Ks.owner; runtime = Some current }
-      when Authz_types.User_id.equal owner user_id && Authz_types.Runtime_id.equal current runtime_id
-      -> Ok (assigned "existing")
-    | Some (_ : Ks.keeper) | None ->
-      (match Authz_keeper.assign zone ~user_id ~keeper_id ~runtime_id with
-       | Ok () -> Ok (assigned "assigned")
-       | Error error_ -> Error (failed error_))
+    match keepers_of zone with
+    | Error uncertain -> Error (R.zone_uncertain uncertain)
+    | Ok keepers ->
+      (match Ks.find keepers keeper_id with
+       | Some { Ks.owner; runtime = Some current }
+         when Authz_types.User_id.equal owner user_id
+              && Authz_types.Runtime_id.equal current runtime_id -> Ok (assigned "existing")
+       | Some (_ : Ks.keeper) | None ->
+         (match Authz_keeper.assign zone ~user_id ~keeper_id ~runtime_id with
+          | Ok () -> Ok (assigned "assigned")
+          | Error error_ -> Error (failed error_)))
   in
   Result.fold ~ok:Fun.id ~error:Fun.id answer
 ;;

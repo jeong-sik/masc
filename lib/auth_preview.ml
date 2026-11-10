@@ -296,8 +296,8 @@ let refused reason =
     [ "error", `String (Auth_gate.reason_to_string reason) ]
 ;;
 
-let whoami state ~now_ms request =
-  match Auth_gate.decide state ~now_ms Route_access.Read_auth request with
+let whoami trusted ~now_ms request =
+  match Auth_gate.decide trusted ~now_ms Route_access.Read_auth request with
   | Ok (Auth_gate.Authenticated { Auth_gate.principal; binding; role; pat_binding = _ }) ->
     R.json
       R.Ok_200
@@ -318,8 +318,8 @@ type person =
   }
 
 (* The human a [Manage_own_*] route lets through. *)
-let human state ~now_ms access ~service_refused request =
-  match Auth_gate.decide state ~now_ms access request with
+let human trusted ~now_ms access ~service_refused request =
+  match Auth_gate.decide trusted ~now_ms access request with
   | Error reason -> Error (refused reason)
   | Ok (Auth_gate.Authenticated { Auth_gate.principal = Principal.Human user_id; _ }) -> Ok user_id
   | Ok (Auth_gate.Authenticated { Auth_gate.principal = Principal.Service service_id; _ }) ->
@@ -333,10 +333,11 @@ let human state ~now_ms access ~service_refused request =
 
 (* The human a [Manage_own_*] route lets through, with the namespace their
    admission fixed. *)
-let member state ~now_ms access ~service_refused request =
-  match human state ~now_ms access ~service_refused request with
+let member (trusted : Authz_zone.trusted) ~now_ms access ~service_refused request =
+  match human trusted ~now_ms access ~service_refused request with
   | Error _ as refused -> refused
   | Ok user_id ->
+    let state = (trusted :> Authz_zone.snapshot).Authz_zone.state in
     (match Authz_principal_state.find_membership state.Authz_state.principals user_id with
      | Some { Authz_principal_state.account_home_namespace = namespace; workspace_id = _ } ->
        Ok { user_id; namespace }
@@ -346,27 +347,27 @@ let member state ~now_ms access ~service_refused request =
        Error (R.json R.Internal_error_500 [ "error", `String "the principal has no membership" ]))
 ;;
 
-let person state ~now_ms request =
+let person trusted ~now_ms request =
   member
-    state
+    trusted
     ~now_ms
     Route_access.Manage_own_provider
     ~service_refused:(fun service_id -> Auth_gate.Service_owns_no_provider service_id)
     request
 ;;
 
-let keeper_owner state ~now_ms request =
+let keeper_owner trusted ~now_ms request =
   human
-    state
+    trusted
     ~now_ms
     Route_access.Manage_own_keeper
     ~service_refused:(fun service_id -> Auth_gate.Service_owns_no_keeper service_id)
     request
 ;;
 
-let keeper_owner_person state ~now_ms request =
+let keeper_owner_person trusted ~now_ms request =
   member
-    state
+    trusted
     ~now_ms
     Route_access.Manage_own_keeper
     ~service_refused:(fun service_id -> Auth_gate.Service_owns_no_keeper service_id)

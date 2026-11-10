@@ -440,6 +440,43 @@ let response_capture_writes_redacted () =
     check_json_int "agent_core_turn recorded" "agent_core_turn" 4 json;
     check_json_null "missing trace_id is null" "trace_id" json)
 
+(* How many jobs whose name holds [fragment] the pool has run, as /health
+   reports them under [pool_wait]. *)
+let pool_jobs_named fragment =
+  let open Yojson.Safe.Util in
+  Pool_wait.to_json ()
+  |> member (Pool_lane.to_string Pool_lane.Background)
+  |> member "by_name"
+  |> to_list
+  |> List.fold_left
+       (fun total row ->
+          if contains ~needle:fragment (row |> member "name" |> to_string)
+          then total + (row |> member "count" |> to_int)
+          else total)
+       0
+
+(* With a pool in the process the text rows redact on it: each capture is
+   one pool job, and a row a worker domain redacted passes the checks of a
+   row redacted on the caller. *)
+let text_rows_redact_on_the_pool () =
+  Eio_main.run @@ fun env ->
+  Eio.Time.with_timeout_exn (Eio.Stdenv.clock env) 30.0 @@ fun () ->
+  Eio.Switch.run @@ fun sw ->
+  let pool = Domain_pool.create ~sw ~domain_count:1 (Eio.Stdenv.domain_mgr env) in
+  Domain_pool_ref.set pool;
+  Fun.protect ~finally:Domain_pool_ref.clear_for_tests @@ fun () ->
+  let request_jobs () = pool_jobs_named "Keeper_wire_capture.capture_request" in
+  let response_jobs () = pool_jobs_named "Keeper_wire_capture.capture_response" in
+  let requests_before = request_jobs () in
+  let responses_before = response_jobs () in
+  enabled_writes_redacted ();
+  request_captures_exact_redacted_tool_schemas ();
+  response_capture_writes_redacted ();
+  Alcotest.(check int) "each request capture ran one pool job" 2
+    (request_jobs () - requests_before);
+  Alcotest.(check int) "the response capture ran one pool job" 1
+    (response_jobs () - responses_before)
+
 let response_capture_failure_is_best_effort () =
   with_flag "1" (fun () ->
     let keeper_name = "wirecap_response_failure_metric" in
@@ -804,6 +841,8 @@ let () =
             response_disabled_is_noop;
           Alcotest.test_case "enabled writes redacted jsonl" `Quick
             response_capture_writes_redacted;
+          Alcotest.test_case "text rows redact on the pool" `Quick
+            text_rows_redact_on_the_pool;
           Alcotest.test_case "write failure is best effort" `Quick
             response_capture_failure_is_best_effort;
           Alcotest.test_case "current file cap rotates into a segment" `Quick

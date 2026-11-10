@@ -2130,21 +2130,51 @@ let keeper_plain_fleet_lines (state : state) ~now ~inner =
       @ Option.to_list (Option.map
           (fun trouble -> warning (Masc_tui_fleet_line.trouble_text ~now trouble)) trouble)
 
+let keeper_observation_errors (state : state) =
+  let text korean english = if state.ui_language = Lang_ko then korean else english in
+  List.filter_map Fun.id
+    [ Option.map (fun e -> (text "목록" "roster metadata", e)) state.keepers_error
+    ; Option.map (fun e -> (text "실행 관측" "live roster", e)) state.keeper_roster_error
+    ; Option.map (fun e -> (text "턴 관측" "turn observation", e)) state.keeper_turns_error
+    ; Option.map (fun e -> (text "대기 목록" "waiting inventory", e)) state.keeper_waiting_error
+    ; Option.map (fun e -> (text "별도 실행" "async observation", e)) state.tools_async_observation_error
+    ; Option.map (fun e -> (text "승인 요청" "approval reading", e)) state.keeper_tool_approvals_error
+    ; Option.map (fun e -> (text "질문" "questions", e)) state.asks_error
+    ]
+
+let keeper_observation_reading (state : state) =
+  match keeper_observation_errors state with
+  | [] -> None
+  | errors ->
+      let ko = state.ui_language = Lang_ko in
+      Some (Masc_tui_detail_reading.create ~ko
+        ~title:(if ko then "Keepers 관측 오류" else "Keeper observation errors")
+        (List.map (fun (heading, body) ->
+          ({heading; body} : Masc_tui_detail_reading.section)) errors))
+
 let keeper_plain_headers (state : state) ~now ~cols ~inner ~selected_reading ~pulse_headers =
   let text ko en = ui_text state ~ko ~en in
   let heading = screen_title (text " MASC Keepers · 일과 도움" " MASC Keepers · work and help") in
   let badge = connection_badge state in
   let gap = max 1 (inner - Message_layout.display_width heading - Message_layout.display_width badge) in
   let warning prefix reason = Theme.warn () ^ "  " ^ prefix ^ Terminal_text.single_line reason ^ Ansi.reset in
-  let errors = List.filter_map Fun.id
-      [ Option.map (warning (text "목록: " "roster metadata: ")) state.keepers_error
-      ; Option.map (warning (text "실행 관측: " "live roster: ")) state.keeper_roster_error
-      ; Option.map (warning (text "턴 관측: " "turn observation: ")) state.keeper_turns_error
-      ; Option.map (warning (text "대기 목록: " "waiting inventory: ")) state.keeper_waiting_error
-      ; Option.map (warning (text "별도 실행: " "async observation: ")) state.tools_async_observation_error
-      ; Option.map (warning (text "승인 요청: " "approval reading: ")) state.keeper_tool_approvals_error
-      ; Option.map (warning (text "질문: " "questions: ")) state.asks_error
-      ]
+  (* One failing read at most names itself with its reason; several at once
+     fold into a single summary line. Either way the header grows by one line
+     instead of one per failure, so a burst of read errors cannot shove the
+     whole list up and down. *)
+  let errors =
+    let cells = max 0 (inner - 2) in
+    match keeper_observation_errors state with
+    | [] -> []
+    | [ (label, reason) ] ->
+      [ warning "" (Message_layout.fit_width
+          ("! " ^ label ^ ": " ^ Terminal_text.single_line reason) cells) ]
+    | many ->
+      let prefix =
+        if state.ui_language = Lang_ko then Printf.sprintf "! 원문 · 오류 %d종: " (List.length many)
+        else Printf.sprintf "! details · %d errors: " (List.length many) in
+      let labels = String.concat " · " (List.map fst many) in
+      [ warning "" (Message_layout.fit_width (prefix ^ labels) cells) ]
   in
   let roster = match Keeper_control.roster_view state.keeper_roster with
     | Keeper_control.Roster_partial { observed; total } ->

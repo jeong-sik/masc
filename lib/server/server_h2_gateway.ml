@@ -13,13 +13,7 @@ let make_error_handler () =
      | Some ledger ->
        (match Http_h2_response_ledger.reserve ledger ~bytes:(String.length message) with
         | Error (Capacity_exhausted | Request_closed) -> ()
-        | Ok lease ->
-          (* One short diagnostic line: it needs no slices. *)
-          Http_h2_response_ledger.write_reserved
-            lease
-            ~write:(fun writer text -> H2.Body.Writer.write_string writer text)
-            body
-            message)
+        | Ok lease -> Http_h2_response_ledger.write_reserved lease body message)
      | None ->
        (* Parser failures have no admitted application scope. Their fixed
           diagnostic is bounded separately from application payloads. *)

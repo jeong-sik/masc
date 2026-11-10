@@ -703,6 +703,15 @@ let test_provider_reset_and_success_before_json_validation () =
      | Ok _ | Error _ -> fail "a slot inside its provider's stated reset must not be called");
     check (list string) "the client is not started inside a stated reset" calls_before
       (calls marker);
+    (* A call already under way when the reset was stated still answers.
+       [run] is that call: only the walk reads the standing. Its transport
+       success keeps the window the provider stated (R6). *)
+    (match Cli_oneshot.run ~base_dir:dir ~runtime_id:a1 ~system_prompt:"" ~requirement
+             ~prompt:"Judge this." () with
+     | Error (Cli_oneshot.Invalid_json_output _) -> ()
+     | Error _ | Ok _ -> fail "transport success must still fail strict domain JSON parsing");
+    check bool "success does not erase provider-stated window" true
+      (Runtime_quota_window.is_exhausted ~scope:account ~now:(Time_compat.now ()));
     Runtime_quota_window.reset_for_testing ();
     Runtime_quota_window.note_observed_exhausted ~scope:account;
     (match walk_real ~dir [a1] with

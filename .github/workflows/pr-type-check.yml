@@ -22,6 +22,13 @@ name: PR type-check (dune build @check)
 # job red instead of producing an empty list that would read as "no
 # sources" and skip the check. A PR at the 3000-file listing cap cannot be
 # filtered reliably and is checked in full.
+#
+# Stage-2 pairing: when this workflow's checks become required, `changes`
+# must be required together with `type-check`. GitHub counts a skipped
+# conclusion as satisfying a required check, so a red `changes` (the file
+# listing failed) is what blocks the merge that a skipped `type-check`
+# alone would still allow. Requiring only `type-check` would reopen the
+# unchecked merge this PR exists to close.
 on:
   # workflow_dispatch lets a maintainer re-check a branch on demand, and is the
   # only way to time this job without opening a throwaway source change.
@@ -101,7 +108,10 @@ jobs:
   type-check:
     needs: [changes]
     # Skipped here rather than at the workflow level so the check context
-    # always exists; a skipped conclusion satisfies a required status check.
+    # always exists; a skipped conclusion satisfies a required status check —
+    # which is exactly why `changes` must be required alongside this job
+    # (see the header note): a red `changes` blocks the merge that a
+    # skipped type-check alone would not.
     if: needs.changes.outputs.src == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 90

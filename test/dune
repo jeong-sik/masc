@@ -7178,7 +7178,7 @@
  (deps ../config/prompts/librarian.md
        ../config/prompts/keeper.md
        (source_tree ../addons/keeper-librarian) ../addons/protocol.py ../addons/exact_worker.py)
- (libraries masc_test_deps masc.server exact_output_fixture masc.masc_random_id))
+ (libraries masc masc_test_deps masc.server exact_output_fixture masc.masc_random_id))
 
 ; Not a test: prints one Librarian pass's allocation and stored bytes per
 ; already-read history size. Run by hand from _build/default/test.

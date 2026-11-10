@@ -73,7 +73,7 @@ let test_case ~base_path ~registry scenario () =
   let seeded = Current.replace ~keepers_dir ~keeper_id ~expected_revision:None ~now:100.
       ~source:{kind = Current.Librarian; trace_id = keeper_id} ~facts:[fact] () |> require in
   let seeded = if scenario = Context_only then
-      Current.apply_disposition ~revisions:[] ~keepers_dir ~keeper_id ~now:101.
+      Current.apply_disposition ~pass:Keeper_memory_commit_pass.Durable ~revisions:[] ~keepers_dir ~keeper_id ~now:101.
         ~source:{kind = Current.Librarian; trace_id = keeper_id}
         ~official_range_id:{unread_messages=[];receipt_scope = keepers_dir; after_boundary_line = 0;
           turns = [1, Ids.Turn_ref.make ~trace_id:keeper_id ~absolute_turn:1]}
@@ -175,7 +175,7 @@ let test_case ~base_path ~registry scenario () =
   let receipt_before = Fs_compat.load_file_opt receipt_path in
   let journal_before = Fs_compat.load_file_opt journal_path in
   let context_commits = ref [] in
-  let run () = Runtime.run_best_effort
+  let run () = Runtime.run_best_effort ~pass:Keeper_memory_commit_pass.Durable
       ~write_scope:(if scenario = Context_only then Runtime.Context_only else Runtime.Context_and_memory)
       ~on_context_committed:(fun version -> context_commits := version :: !context_commits)
       ~base_path ~keepers_dir ~keeper_id ~expected_revision:(Some seeded.revision) input in

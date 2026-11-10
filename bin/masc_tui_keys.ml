@@ -622,8 +622,8 @@ let for_surface = function
       :: (b Act "Right" "detail" ~help:"keeper detail")
       :: (b Act "Tab / s / m" "pages"
             ~help:"with a Keeper Story open: next page / schedules / memory; World keeps its own page; Esc closes either window")
-      :: (b Act "0 / 1 / 2 / 3 / 4 / [ / ]" "memory"
-            ~help:"with Keeper Memory open: overview / recent records / retrievals / committed changes / storage; brackets scroll the table")
+      :: (b Act "1 / 2 / 3 / 4" "memory"
+            ~help:"with Keeper Memory preview open: browse recent records / retrievals / committed changes / storage in the shared Memory browser; Enter also opens recent records")
       :: keeper_actions
       @ [ b Search "/" "search" ~help:"search names; Enter keeps the query"
         ; b Search "n / N" "next / previous match"
@@ -1070,7 +1070,8 @@ let for_surface = function
       ]
       @ row_list_edges @ listing_meta
   | Memory ->
-      [ b ~ko:"선택" Navigate "j/k" "move" ~help:"move the keeper row"
+      [ b ~ko:"최근 / 조회 / 변화 / 저장" Act "1 / 2 / 3 / 4" "recent / retrievals / changes / storage"
+      ; b ~ko:"선택" Navigate "j/k" "move" ~help:"move the keeper row"
       ; b ~ko:"기억 항목" Act "Enter" "facts"
           ~help:"browse what the selected keeper actually remembers"
       ; b ~ko:"상태 상세" Act "v" "health details"
@@ -2230,7 +2231,23 @@ let footer_hints_git_diff =
    health row's under these names -- Enter opens the reading, s reorders
    instead of pausing a keeper -- so a reader who has not pressed them learns
    them only from [?], which is what [?] answers. *)
+let memory_browser_pages =
+  [ b ~ko:"최근 / 조회 / 변화 / 저장" Act "1 / 2 / 3 / 4" "recent / retrievals / changes / storage"
+      ~help:"one Memory browser; changes require an individual Keeper, while storage opens the fleet health view" ]
+
+let bindings_memory_changes =
+  memory_browser_pages @
+  [ b ~ko:"이동" Navigate "j/k" "move"
+  ; b ~ko:"전문" Act "Enter" "full reading"
+      ~help:"read all original and successor claims of the selected committed change"
+  ; b ~ko:"페이지" Navigate "PgUp/PgDn" "page"
+  ; b ~ko:"뒤로" Act "Esc" "back to facts" ]
+  @ row_list_edges @ listing_meta
+
+let footer_hints_memory_changes ~lang = hints_of_bindings ~lang bindings_memory_changes
+
 let bindings_memory_facts =
+  memory_browser_pages @
   [ b ~ko:"이동 / 스크롤" Navigate "j/k" "move" ~rows:Needs_row
   ; b ~ko:"상세" Act "Enter" "detail" ~rows:Needs_row
       ~help:"read the whole fact in a wide overlay that owns the terminal"
@@ -2721,6 +2738,8 @@ let located_sections ?current () =
                List.map
                  (fun (key, help) -> (key, "in the facts browser: " ^ help))
                  (entries bindings_memory_facts)
+               @ List.map (fun (key, help) -> (key, "in the changes browser: " ^ help))
+                   (entries bindings_memory_changes)
                @ List.map
                    (fun (key, help) -> (key, "in the fact detail: " ^ help))
                    (entries bindings_memory_fact_detail)

@@ -409,6 +409,9 @@ val footer_hints_memory_facts : lang:Masc_tui_types.ui_language -> cols:int -> h
     [d:Category pane] on narrow frames where the Category rail does not fit,
     and the keys that act on a fact when [has_rows] is false. *)
 
+val footer_hints_memory_changes : lang:Masc_tui_types.ui_language -> string
+(** Shared Memory browser navigation and selected change reading. *)
+
 val bindings_memory_facts : binding list
 (** The fact browser's own keys. Separate from {!for_surface} because they are
     conditional on the browser being open: the health row's [Enter], [s] and

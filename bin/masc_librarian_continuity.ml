@@ -71,6 +71,29 @@ let check_output options =
     | Fs_compat.Exact_kind _ -> Error ("Output already exists: " ^ options.output_path)
     | Fs_compat.Exact_unknown -> Error ("Cannot inspect output path: " ^ options.output_path)
 
+(* HIGH-RISK-UNREVIEWED: a measurement is a call of the operator. Since D4a
+   the runtime refuses each provider of a process that has not published its
+   account access, and since D4c the TypeSafe AI judge reads its destinations
+   through the same access, so this host tool publishes first (plan D2-5).
+   The run reads only the files it names and the keys of the host, and its
+   publication is a view copy whose failure keeps the measurement, so it
+   belongs to no base path: it is judged on a fresh one, as compare-production
+   judges its isolated base path and as a test executable is judged. *)
+let publish_fresh_access () =
+  let* root =
+    try Ok (Filename.temp_dir "masc-librarian-continuity-" "") with Sys_error detail -> Error detail
+  in
+  let published =
+    Runtime_account_access.publish_host_tool ~base_path:root
+      ~config_dir:(Env_config_core.masc_config_dir_opt ())
+    |> Result.map_error (fun (first, rest) -> String.concat "; " (first :: rest))
+  in
+  (match Sys.rmdir root with
+   | () -> ()
+   | exception Sys_error detail ->
+     Log.Runtime.warn "librarian-continuity: the empty base path of the judgment stays: %s" detail);
+  published
+
 let prepare_runtime ?(prepare_exact_lane = false) options =
   let* observation =
     try
@@ -317,6 +340,7 @@ let publish options report bytes =
 let run options =
   let* () = check_output options in
   let* input_bytes, dataset = read_dataset options.input_path in
+  let* () = publish_fresh_access () in
   let* config_revision, provider_cfg = prepare_runtime options in
   let identity = Masc.Build_identity.current () in
   let report : R.t =
@@ -445,6 +469,7 @@ let arm_scored = function
 
 let run_comparison options =
   let module M = Masc.Librarian_working_state_evaluation in
+  let* () = publish_fresh_access () in
   let parse_dataset json = Result.map (fun (dataset : M.dataset) ->
     dataset.provenance,dataset.cases) (M.parse_dataset json) in
   run_paired options ~schema:"masc.librarian-working-state.v1" ~extra_fields:[] ~prepare_exact_lane:false

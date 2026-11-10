@@ -77,7 +77,8 @@ let test_refused_parent_preserves_comments_after_flush base_path =
   let restarted = fresh_store base_path in
   List.iter (fun (expected : Board.post) ->
     Alcotest.(check string) "both accepted posts survive a fresh load" expected.body
-      (require (Board.get_post restarted ~post_id:(Board.Post_id.to_string expected.id))).body)
+      (require (Board.read_post restarted ~post_id:(Board.Post_id.to_string expected.id)
+        |> Result.map_error Board.board_error_of_read_error)).body)
     [parent; foreign];
   Alcotest.(check string) "the retained parent still has its accepted reply" reply.content
     (require (Board.get_comment restarted ~comment_id:(Board.Comment_id.to_string reply.id))).content
@@ -153,7 +154,8 @@ let test_reserved_parent_cleanup_retains_deletion_order base_path =
     (Fs_compat.load_file comments_path);
   let restarted = fresh_store base_path in
   Alcotest.(check string) "foreign post survives the retry" foreign.body
-    (require (Board.get_post restarted ~post_id:(Board.Post_id.to_string foreign.id))).body;
+    (require (Board.read_post restarted ~post_id:(Board.Post_id.to_string foreign.id)
+      |> Result.map_error Board.board_error_of_read_error)).body;
   Alcotest.(check string) "valid orphan reply survives the retry" reply.content
     (require (Board.get_comment restarted ~comment_id:(Board.Comment_id.to_string reply.id))).content
 

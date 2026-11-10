@@ -12,6 +12,14 @@ val compute_with_buckets :
   bucket_minutes:int ->
   (aggregate, read_error) result
 
+val aggregate_reading :
+  window_minutes:int -> bucket_minutes:int ->
+  Model_inference_metrics_kept.reading -> (aggregate, read_error) result
+(** Aggregate one supplied immutable reading, without another store read or
+    clock sample. Zero [bucket_minutes] omits buckets; otherwise only buckets
+    containing an entry are emitted. Decision-read failures remain errors;
+    cost-read diagnostics retain the existing aggregate contract. *)
+
 val aggregate_buckets :
   base_path:string ->
   window_min:int ->

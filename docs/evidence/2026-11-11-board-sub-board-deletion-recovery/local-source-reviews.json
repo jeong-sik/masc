@@ -1,0 +1,49 @@
+{
+  "captured_at": "2026-11-10T15:34:00.072327+00:00",
+  "kind": "Independent local source reviews; no formal GitHub approval or backend execution",
+  "base": "da220af2151d63ad50166edd251ac741d3333099",
+  "lower_source": "4d730fd9c0f9a90e6c670da1c683fa14eaddc201",
+  "upper_source": "542d8d8ee44b73ce9c4e02f1f013025e5ac1a4a7",
+  "reviewers": [
+    {
+      "agent": "/root/issue_disposition_review",
+      "verdict": "No additional confirmed P0-P2 found at final source pins",
+      "scope": "Prior complete lower/upper diff plus final four production-file delta, public interfaces and direct Batch.capture consumer, two additional backend cases and Dune registration.",
+      "findings_resolved": [
+        "Preserve physical Policy row order and restore shadowed winner consistently in current and fresh stores",
+        "Keep dirty obligations and Model_applied state on typed capture failure",
+        "Notify exact Policy owner only for actual inner Policy guard refusal",
+        "Remove duplicate Dune includes"
+      ],
+      "not_executed": [
+        "OCaml typing/warnings",
+        "Build",
+        "40 backend cases",
+        "CI"
+      ]
+    },
+    {
+      "agent": "/root/history_redaction_response",
+      "verdict": "No additional confirmed P0-P2 found at final source pins",
+      "scope": "Previous 64 lower and 11 upper changed paths plus final four production-file delta, public interfaces, sole Batch.capture consumer, comment case 10, sub-board case 9 and Dune registrations.",
+      "findings_resolved": [
+        "Comment Policy owner notification",
+        "Dune duplicate includes",
+        "Winner fallback filters and reparses exact snapshot rows in original order",
+        "Capture failure retains dirty obligations and Model_applied progress"
+      ],
+      "not_executed": [
+        "OCaml typing/warnings",
+        "Build",
+        "40 backend cases",
+        "CI"
+      ]
+    }
+  ],
+  "limitations": [
+    "Source findings do not prove runtime behavior",
+    "Not cross-model review",
+    "Not formal GitHub approval",
+    "No merge or deployment proof"
+  ]
+}

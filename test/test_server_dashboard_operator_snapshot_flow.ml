@@ -344,6 +344,93 @@ let test_actual_no_result_failure_does_not_repeat_cold_reads () =
     Eio.Fiber.yield ();
     check bool "complete recovery leaves no healthy timer" false (Eio_mock.Clock.try_advance mock_clock))
 
+let test_actual_context_tail_failure_retries_after_quiet_raw_repair () =
+  with_runtime (fun ~env ~sw ~clock ~mock_clock ~state ~scope ->
+    let trace_id = "trace-1780648779957-00000" in
+    let meta = match Masc_test_deps.meta_of_json_fixture (`Assoc [
+        "name", `String "snapshot-context-keeper"; "trace_id", `String trace_id;
+        "total_turns", `Int 1; "activation_mode", `String "autonomous"]) with
+      | Ok meta -> {meta with paused = false} | Error detail -> fail detail in
+    (match Keeper_meta_store.replace_snapshot scope.config meta with
+     | Ok () -> () | Error detail -> fail detail);
+    let record : Turn_record.t = {
+      request_observations = []; execution_ids = []; keeper = meta.name;
+      agent_name = meta.name; turn_kind = Direct; trace_id; absolute_turn = 1;
+      turn_ref = Ids.Turn_ref.make ~trace_id ~absolute_turn:1;
+      blocks = [];
+      input_components = None; tool_surface_ref = None; runtime_profile = "fixture";
+      selected_model = None; finish_reason = Some "completed";
+      context_window = Some 131_072; provider_context_window = None;
+      price_input_per_million = None; price_output_per_million = None;
+      request_latency_ms = None; ttfrc_ms = None; request_wire_observation = None;
+      model_input_window = None; response_observed_model_input = None;
+      raw_trace_run_ref = None;
+      sampling = {temperature = None; top_p = None; max_tokens = None; enable_thinking = None};
+      usage = {input_tokens = Some 18_000; output_tokens = Some 412;
+        cache_creation_input_tokens = None; cache_read_input_tokens = None;
+        scope = Runtime_usage_scope.Per_request; input_provenance = None};
+      turn_output_tokens = None; ts = Eio.Time.now clock} in
+    let store = Keeper_types_support.keeper_turn_record_store scope.config meta.name in
+    Dated_jsonl.append store (Turn_record.to_json record);
+    Dated_jsonl.close store;
+    let base_dir = Dated_jsonl.base_dir store in
+    let held_dir = base_dir ^ ".fixture-held" in
+    Sys.rename base_dir held_dir;
+    let restored = ref false in
+    let restore () =
+      if not !restored then (
+        if Sys.file_exists base_dir then Sys.remove base_dir;
+        Sys.rename held_dir base_dir;
+        restored := true) in
+    Fun.protect ~finally:restore (fun () ->
+      let channel = open_out_bin base_dir in
+      output_string channel "not a directory";
+      close_out channel;
+      check bool "the isolated Keeper has no running registry phase" true
+        (Keeper_registry.get_phase ~base_path:scope.config.base_path meta.name = None);
+      let trust = Keeper_runtime_trust_snapshot.summary_observation ~config:scope.config ~meta in
+      check bool "Trust does not already classify this distinct context-tail failure" true
+        (trust.completeness = Dashboard_projection_read.Complete);
+      let keeper_row payload =
+        match Yojson.Safe.Util.(payload |> member "keepers" |> member "items" |> to_list)
+          |> List.find_opt (fun row -> Yojson.Safe.Util.member "name" row = `String meta.name) with
+        | Some row -> row | None -> fail "actual Snapshot omitted the context Keeper" in
+      let cold = read ~state ~sw ~clock "" in
+      check string "the actual tail failure settles as a canonical error" "error"
+        Yojson.Safe.Util.(cold |> member "snapshot_observation_state" |> to_string);
+      check bool "the same actual read retains Partial" true
+        Yojson.Safe.Util.(cold |> member "projection_diagnostics" |> member "read_completeness" = `String "partial");
+      check bool "the stopped unpaused row has no semantic wake deadline" true
+        Yojson.Safe.Util.(cold |> member "snapshot_fresh_until_unix" = `Null);
+      check bool "the context-reading branch is unpaused" true
+        Yojson.Safe.Util.(keeper_row cold |> member "paused" = `Bool false);
+      check bool "the actual context diagnostic retains its typed read failure" true
+        Yojson.Safe.Util.(keeper_row cold |> member "context_metrics_unavailable"
+          |> member "reason" = `String "turn_record_read_failed");
+      let now = Eio.Time.now clock in
+      let frames = frames ~sw ~scope "actual-snapshot-context-tail-retry" in
+      Worker.start_operator_snapshot_refresh_loop ~state ~sw ~clock ~mono_clock:(Eio.Stdenv.mono_clock env);
+      let failed = frame_after frames cold (fun payload ->
+        Yojson.Safe.Util.member "snapshot_observation_state" payload = `String "error") in
+      (* No metadata append, input, later GET, or elapsed healthy refresh
+         consumes this raw restoration. Only the existing failure debt can. *)
+      restore ();
+      let rec advance_when_registered () =
+        Eio.Fiber.yield ();
+        if not (Eio_mock.Clock.try_advance mock_clock) then advance_when_registered () in
+      advance_when_registered ();
+      let recovered = frame_after frames failed ready in
+      check (float 0.0) "context recovery uses the existing failure-only interval"
+        (now +. Server_dashboard_http_core_operator.operator_refresh_interval_s) (Eio.Time.now clock);
+      check bool "the repaired actual read is complete" true
+        Yojson.Safe.Util.(recovered |> member "projection_diagnostics" |> member "read_completeness" = `String "complete");
+      check int "the original same-trace measurement reaches canonical output" 18_000
+        Yojson.Safe.Util.(keeper_row recovered |> member "context_tokens" |> to_int);
+      check bool "the typed unavailable diagnostic clears" true
+        Yojson.Safe.Util.(keeper_row recovered |> member "context_metrics_unavailable" = `Null);
+      Eio.Fiber.yield ();
+      check bool "successful context repair leaves no healthy timer" false (Eio_mock.Clock.try_advance mock_clock)))
+
 let () = Alcotest.run "operator_snapshot_feature_flow" ["production", [
   test_case "cold HTTP and original input reach exact semantic expiry" `Quick
     test_actual_initial_source_change_and_semantic_deadline;
@@ -356,4 +443,6 @@ let () = Alcotest.run "operator_snapshot_feature_flow" ["production", [
   test_case "actual Board attention commit reaches scoped quarantine output" `Quick
     test_actual_board_attention_commit_updates_quarantine_without_get;
   test_case "actual no-result failure remains owed only to failure retry" `Quick
-    test_actual_no_result_failure_does_not_repeat_cold_reads]]
+    test_actual_no_result_failure_does_not_repeat_cold_reads;
+  test_case "actual context-tail failure repairs through failure-only retry" `Quick
+    test_actual_context_tail_failure_retries_after_quiet_raw_repair]]

@@ -1,0 +1,25 @@
+{
+  "window": {
+    "since": "2026-11-01T00:00:00Z",
+    "end": "2026-11-07T05:24:00Z",
+    "hours": 149.4
+  },
+  "calls": 17390,
+  "refused_missing": 280,
+  "refused_malformed": 30,
+  "refusal_rate": 0.0161,
+  "cause": {
+    "answer_fingerprint": 264,
+    "other": 16
+  },
+  "after": {
+    "fixed": 170,
+    "other_error": 44,
+    "none": 60,
+    "repeated": 6
+  },
+  "fix_delay_s": {
+    "median": 4.2,
+    "p90": 59.5
+  }
+}

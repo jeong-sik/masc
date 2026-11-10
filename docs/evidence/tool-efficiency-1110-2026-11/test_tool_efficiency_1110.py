@@ -344,11 +344,13 @@ class GithubWaitShapesTest(unittest.TestCase):
             "gh pr view 49811 --json headRefOid,statusCheckRollup": "pr_checks",
             "gh run list --repo o/r --workflow t.yml": None,
             "gh api repos/o/r/git/ref/heads/main": "api_other",
+            "gh pr list --state open && gh api repos/o/r/pulls/7/reviews": "api_other",
             "gh run view $ID --json status": "other",
             "dune build @check": None,
             "echo hello": None,
         }
         # `gh run list` alone is not in GITHUB, so it is not a GitHub wait unless another term matches.
+        # `gh pr list` lists pull requests and reads none, so it does not make a command `pr_checks`.
         for command, shape in cases.items():
             with self.subTest(command=command):
                 self.assertEqual(waits.shape_of(command), shape)

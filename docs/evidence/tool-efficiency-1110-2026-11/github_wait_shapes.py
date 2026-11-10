@@ -14,7 +14,7 @@ GITHUB. Its shape is the first rule of SHAPES that matches:
   single_run     names one Actions run by number (actions/runs/<id>, gh run view|watch <id>); the
                  masc_schedule_create until_github_run parameter is meant for this wait
   commit_checks  reads the check runs or status of a commit
-  pr_checks      reads a pull request (gh pr checks|view|status|list)
+  pr_checks      reads one pull request (gh pr checks|view|status)
   run_list       lists runs (gh run list)
   api_other      any other gh api call
   watch_other    any other --watch
@@ -60,7 +60,7 @@ RUN_ID = re.compile(r"actions/runs/(\d+)|gh\s+run\s+(?:view|watch)\s+(\d+)")
 SHAPES: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("single_run", RUN_ID),
     ("commit_checks", re.compile(r"/commits/[^\s/\"']+/(check-runs|status|check-suites)")),
-    ("pr_checks", re.compile(r"gh\s+pr\s+(checks|view|status|list)")),
+    ("pr_checks", re.compile(r"gh\s+pr\s+(checks|view|status)")),
     ("run_list", re.compile(r"gh\s+run\s+list")),
     ("api_other", re.compile(r"gh\s+api")),
     ("watch_other", re.compile(r"--watch")),

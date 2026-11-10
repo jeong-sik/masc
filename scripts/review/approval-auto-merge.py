@@ -403,6 +403,50 @@ def submit(repo, selected, head, scope):
     return hand_off(repo, outcome) if outcome['status'] in UNSETTLED else outcome
 
 
+MAIN_BUILD_WORKFLOW = 'main-minimal-build.yml'
+
+
+def wake_main_build(repo):
+    """A bot merge emits no push event, so the main build never starts.
+
+    Dispatch it here. A failed dispatch must not change the merge verdict:
+    the merge already happened and this call cannot undo it.
+    """
+    try:
+        operation = subprocess.run(
+            ['gh', 'api', '--method', 'POST',
+             f'repos/{repo}/actions/workflows/{MAIN_BUILD_WORKFLOW}/dispatches',
+             '-f', 'ref=main'],
+            capture_output=True, text=True, check=False, timeout=120)
+    except (OSError, subprocess.SubprocessError) as error:
+        # The merge already happened; a wake that cannot run must stay a
+        # recorded miss and never escape into the merge verdict.
+        return {'dispatched': False, 'exit_code': None,
+                'stderr': f'{type(error).__name__}: {error}'[:300]}
+    return {'dispatched': operation.returncode == 0,
+            'exit_code': operation.returncode,
+            'stderr': (operation.stderr or '').strip()[:300]}
+
+
+_WAKE = {'repo': None, 'enabled': False}
+
+
+def reports_a_completed_merge(result):
+    '''True when this emit payload reports a merge that actually happened.
+
+    Three paths reach a merged verdict: submit() after `gh pr merge`, the
+    auto-merge arming readback, and a resumed Native Stack receipt whose
+    follow() saw every member merged. All three must wake the main build; a
+    dry run and an unsettled receipt must not.
+    '''
+    if not isinstance(result, dict):
+        return False
+    if result.get('status') == 'merged':
+        return True
+    inner = result.get('result')
+    return isinstance(inner, dict) and inner.get('status') == 'merged'
+
+
 def requested_pr():
     if os.environ['GITHUB_EVENT_NAME'] == 'workflow_dispatch':
         raw = os.environ['DISPATCH_PR']
@@ -417,6 +461,8 @@ def requested_pr():
 
 
 def emit(result):
+    if _WAKE['enabled'] and reports_a_completed_merge(result):
+        result['main_build'] = wake_main_build(_WAKE['repo'])
     output = json.dumps(result, ensure_ascii=False, indent=2)
     print(output, flush=True)
     if os.environ.get('GITHUB_STEP_SUMMARY'):
@@ -433,6 +479,8 @@ def main():
         repo = os.environ['GITHUB_REPOSITORY']
         if REVIEWS.REPO.fullmatch(repo) is None:
             raise ValueError('invalid repository')
+        _WAKE['repo'] = repo
+        _WAKE['enabled'] = not args.dry_run
         number = requested_pr()
         raw_receipt = os.environ.get('DISPATCH_RECEIPT', '')
         if raw_receipt and os.environ['GITHUB_EVENT_NAME'] == 'workflow_dispatch':

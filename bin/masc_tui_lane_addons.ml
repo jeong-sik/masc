@@ -1439,10 +1439,12 @@ let label_style () =
 let bold_style () = Span.weight Masc_tui_theme.Sgr.bold
 
 (* Wrap [text] after a styled lead so continuation pieces start under the
-   text, not under the lead. *)
-let led_rows ~width ~lead ~text_style text =
+   text, not under the lead. [split] cuts the text to a width. By default it
+   cuts at the cell, which keeps the exact spaces of a value, and prose passes
+   a cut at spaces. *)
+let led_rows ?(split = fun ~width text -> document_rows ~width text) ~width ~lead ~text_style text =
   let lead_cells = Span.width lead in
-  let pieces = document_rows ~width:(max 1 (width - lead_cells)) text in
+  let pieces = split ~width:(max 1 (width - lead_cells)) text in
   let hang = Span.text Span.plain (String.make lead_cells ' ') in
   List.mapi (fun index piece ->
     Span.concat [ (if index = 0 then lead else hang); Span.text text_style piece ])
@@ -1722,14 +1724,15 @@ let help_lines ~width =
   let label_cells = 2 + List.fold_left (fun widest -> function
     | Help_keys { group; _ } -> max widest (Masc_tui_message_layout.display_width group)
     | Help_title _ | Help_about _ | Help_note _ -> widest) 0 help_rows in
+  let split ~width text = Masc_tui_message_layout.wrap_words ~max_cells:width text in
   let rows = function
-    | Help_title text -> led_rows ~width ~lead:Span.empty ~text_style:(label_style ()) text
-    | Help_about text -> led_rows ~width ~lead:Span.empty ~text_style:Span.plain text
+    | Help_title text -> led_rows ~split ~width ~lead:Span.empty ~text_style:(label_style ()) text
+    | Help_about text -> led_rows ~split ~width ~lead:Span.empty ~text_style:Span.plain text
     | Help_keys { group; keys } ->
         let lead = Span.pad_to label_cells Span.plain (Span.text (label_style ()) group) in
-        led_rows ~width ~lead ~text_style:Span.plain keys
+        led_rows ~split ~width ~lead ~text_style:Span.plain keys
     | Help_note text ->
-        led_rows ~width ~lead:(Span.text Span.plain (String.make label_cells ' ')) ~text_style:Span.plain text in
+        led_rows ~split ~width ~lead:(Span.text Span.plain (String.make label_cells ' ')) ~text_style:Span.plain text in
   List.concat_map (fun row ->
     List.map (fun span -> Span.render (Span.truncate width span)) (rows row)) help_rows
 

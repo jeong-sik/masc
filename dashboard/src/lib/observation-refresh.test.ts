@@ -1,4 +1,8 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { ApiRequestError, clearStoredToken, setStoredToken } from '../api/core'
+import { acceptedExecutionWorkspace } from '../execution-workspace-authority'
+import { createManagedAsyncResource } from './async-state'
+import { confirmRuntimeTestWorkspace } from './runtime-workspace.test-fixture'
 import {
   publishDashboardObservationChange,
   publishDashboardObservationRecovery,
@@ -8,8 +12,19 @@ import {
 const disposers: Array<() => void> = []
 const flush = async () => { await Promise.resolve(); await Promise.resolve() }
 
+beforeEach(() => {
+  setStoredToken('observation-token-a', { source: 'manual' })
+  confirmRuntimeTestWorkspace()
+  expect(acceptedExecutionWorkspace.peek()).toEqual({
+    epoch: expect.any(String), workspaceRoot: '/fixture/runtime-consumer',
+    connectionGeneration: expect.any(Number),
+  })
+})
+
 afterEach(() => {
   for (const dispose of disposers.splice(0)) dispose()
+  acceptedExecutionWorkspace.value = null
+  clearStoredToken()
   vi.restoreAllMocks()
   vi.useRealTimers()
 })
@@ -83,7 +98,7 @@ describe('authoritative observation reads', () => {
     expect(read).toHaveBeenCalledTimes(1)
   })
 
-  it('retires a crossing read on recovery and reads again after it settles', async () => {
+  it('starts the recovered read before the retired read settles', async () => {
     let finish!: () => void
     const signals: AbortSignal[] = []
     const read = vi.fn(async (signal: AbortSignal) => {
@@ -94,11 +109,134 @@ describe('authoritative observation reads', () => {
     await flush()
     publishDashboardObservationRecovery()
     expect(signals[0]!.aborted).toBe(true)
-    finish()
-    await flush()
     await flush()
     expect(read).toHaveBeenCalledTimes(2)
     expect(signals[1]!.aborted).toBe(false)
+    finish()
+    await flush()
+    expect(read).toHaveBeenCalledTimes(2)
+  })
+
+  it('withdraws the old workspace result and ignores its late completion', async () => {
+    const reads: Array<{ signal: AbortSignal; finish: (value: string) => void }> = []
+    let evidence: string | null = 'retained from an earlier mount'
+    const read = (signal: AbortSignal) => new Promise<string>(finish => {
+      reads.push({ signal, finish })
+    }).then(value => { if (!signal.aborted) evidence = value })
+    disposers.push(setupObservationRefresh(read, {
+      topics: ['keeper_composite'], resetRead: () => { evidence = null },
+    }))
+    expect(evidence).toBeNull()
+    await flush()
+    reads[0]!.finish('workspace A')
+    await flush(); await flush()
+    expect(evidence).toBe('workspace A')
+    publishDashboardObservationChange({ topic: 'keeper_composite' })
+    await flush()
+    acceptedExecutionWorkspace.value = Object.freeze({ epoch: 'workspace-b', workspaceRoot: '/workspace-b',
+      connectionGeneration: 1 })
+    expect(evidence).toBeNull()
+    expect(reads[1]!.signal.aborted).toBe(true)
+    await flush()
+    reads[2]!.finish('workspace B')
+    await flush(); await flush()
+    reads[1]!.finish('late workspace A')
+    await flush(); await flush()
+    expect(evidence).toBe('workspace B')
+  })
+
+  it.each([401, 403])('keeps HTTP %i refused until the credential owner changes', async status => {
+    vi.useFakeTimers()
+    let failure: unknown | null = new ApiRequestError({ method: 'GET', path: '/fixture', status })
+    const read = vi.fn(async () => {})
+    disposers.push(setupObservationRefresh(read, {
+      topics: ['health'], readError: () => failure, onError: () => {},
+    }))
+    await flush()
+    publishDashboardObservationChange({ topic: 'health' })
+    publishDashboardObservationRecovery()
+    window.dispatchEvent(new Event('focus'))
+    await vi.advanceTimersByTimeAsync(180_000)
+    expect(read).toHaveBeenCalledTimes(1)
+    expect(vi.getTimerCount()).toBe(0)
+    failure = null
+    setStoredToken('observation-token-b', { source: 'manual' })
+    await flush()
+    expect(read).toHaveBeenCalledTimes(2)
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it('waits without HTTP or a timer while the workspace has no accepted identity', async () => {
+    vi.useFakeTimers()
+    acceptedExecutionWorkspace.value = null
+    const read = vi.fn(async () => {})
+    disposers.push(setupObservationRefresh(read, { topics: ['health'] }))
+    publishDashboardObservationRecovery()
+    await vi.advanceTimersByTimeAsync(180_000)
+    expect(read).not.toHaveBeenCalled()
+    expect(vi.getTimerCount()).toBe(0)
+    confirmRuntimeTestWorkspace()
+    await flush()
+    expect(read).toHaveBeenCalledTimes(1)
+  })
+
+  it('retires resource-owned I/O and refuses its body after disposal', async () => {
+    const resource = createManagedAsyncResource<string>()
+    let signal!: AbortSignal
+    let finish!: (value: string) => void
+    const dispose = setupObservationRefresh(() => resource.load(readSignal => {
+      signal = readSignal
+      return new Promise<string>(resolve => { finish = resolve })
+    }), { topics: ['tools'], cancelRead: () => resource.cancel() })
+    disposers.push(dispose)
+    await flush()
+    dispose()
+    expect(signal.aborted).toBe(true)
+    finish('retired body')
+    await flush(); await flush()
+    expect(resource.state.peek().data).toBeNull()
+  })
+
+  it('repays a failed initial read once and leaves no timer after success', async () => {
+    vi.useFakeTimers()
+    const read = vi.fn().mockRejectedValueOnce(new Error('HTTP 500')).mockResolvedValue(undefined)
+    const onError = vi.fn()
+    disposers.push(setupObservationRefresh(read, { topics: ['health'], onError }))
+    await flush()
+    expect(onError).toHaveBeenCalledTimes(1)
+    expect(vi.getTimerCount()).toBe(1)
+    publishDashboardObservationChange({ topic: 'health' })
+    publishDashboardObservationChange({ topic: 'health' })
+    await flush()
+    expect(read).toHaveBeenCalledTimes(1)
+    await vi.advanceTimersByTimeAsync(1_000)
+    expect(read).toHaveBeenCalledTimes(2)
+    expect(vi.getTimerCount()).toBe(0)
+    await vi.advanceTimersByTimeAsync(180_000)
+    expect(read).toHaveBeenCalledTimes(2)
+  })
+
+  it('retains state-backed failure and cancels its retry when authority recovers', async () => {
+    vi.useFakeTimers()
+    let resourceError: string | null = 'HTTP 503'
+    const read = vi.fn(async () => {})
+    const dispose = setupObservationRefresh(read, {
+      topics: ['tools'], readError: () => resourceError, onError: () => {},
+    })
+    disposers.push(dispose)
+    await flush()
+    expect(vi.getTimerCount()).toBe(1)
+    resourceError = null
+    publishDashboardObservationRecovery()
+    await flush()
+    expect(read).toHaveBeenCalledTimes(2)
+    expect(vi.getTimerCount()).toBe(0)
+    resourceError = 'HTTP 500'
+    publishDashboardObservationChange({ topic: 'tools' })
+    await flush()
+    expect(vi.getTimerCount()).toBe(1)
+    dispose()
+    expect(vi.getTimerCount()).toBe(0)
   })
 
   it('stops trailing reads and listeners when the surface unmounts', async () => {

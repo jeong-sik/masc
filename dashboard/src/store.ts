@@ -1,4 +1,6 @@
 import { readCandleRosterObservation, type CandleReading } from './lib/candle-observation'
+import { acceptedExecutionWorkspace } from './execution-workspace-authority'
+export { executionWorkspaceAuthority, type ExecutionWorkspaceAuthority } from './execution-workspace-authority'
 import { decodeGoalProof } from './api/goal-proof'
 import { decodeGoalResumePhase } from './api/goal-lifecycle'
 import { fetchKeeperDeletions, type KeeperDeletionInventory } from './api/keeper-lifecycle'
@@ -1023,18 +1025,6 @@ let executionPublicationGenerationWatermark = -1
 let candleObservationSequenceWatermark = -1
 let executionHydrationRequestGeneration = 0
 const retiredExecutionPublicationEpochs = new Set<string>()
-
-export interface ExecutionWorkspaceAuthority {
-  readonly epoch: string
-  readonly workspaceRoot: string
-  readonly connectionGeneration: number
-}
-
-const acceptedExecutionWorkspace = signal<ExecutionWorkspaceAuthority | null>(null)
-/** Authority of an accepted execution response, not a retained display status.
- *  Object identity is the admission token: A → B → A cannot revive an old A read. */
-export const executionWorkspaceAuthority: ReadonlySignal<ExecutionWorkspaceAuthority | null>
-  = acceptedExecutionWorkspace
 
 function withdrawExecutionWorkspaceAuthority(): void {
   acceptedExecutionWorkspace.value = null

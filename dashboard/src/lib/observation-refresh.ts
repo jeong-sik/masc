@@ -1,3 +1,13 @@
+import { TRANSPORT_RETRY_BASE_MS, TRANSPORT_RETRY_MAX_MS } from '../config/constants'
+import { ApiRequestError } from '../api/core'
+import {
+  captureDashboardObservationOwner,
+  dashboardObservationOwnerHasWorkspace,
+  dashboardObservationOwnerIsCurrent,
+  subscribeDashboardObservationOwnerChanges,
+  type DashboardObservationOwner,
+} from './observation-read-owner'
+
 // Observation topics name authoritative read models. The transport publishes
 // invalidations here; a mounted consumer reads only the models it uses.
 export const DASHBOARD_OBSERVATION_TOPICS = [
@@ -67,10 +77,19 @@ export interface ObservationRefreshOptions extends DashboardObservationSelection
   /** Use false only when another mount effect owns the initial read. */
   readonly initial?: boolean
   readonly onError?: (error: unknown) => void
+  /** State-backed resources consume rejection to render it. Expose that
+   * failure here without changing their manual-refresh promise contract. */
+  readonly readError?: () => unknown | null
+  /** Retire an active state-resource read when its own controller owns I/O. */
+  readonly cancelRead?: () => void
+  /** Withdraw a previous owner's rows, including a cache retained while the
+   * surface was unmounted. Called before the first read and on owner change. */
+  readonly resetRead?: () => void
 }
 
 /** Subscribe before the first read. Invalidation during a read retains one
- * trailing read, including after recovery. Quiet streams never trigger HTTP.
+ * trailing read, including after recovery. Successful quiet streams never trigger HTTP.
+ * A failed owed read retains one capped-backoff retry until it succeeds.
  * Hidden consumers remember invalidation and read once when visible again. */
 export function setupObservationRefresh(
   refresh: (signal: AbortSignal) => void | Promise<unknown>,
@@ -78,60 +97,112 @@ export function setupObservationRefresh(
 ): () => void {
   let active = true
   let scheduled = false
-  let inFlight = false
+  let owner = captureDashboardObservationOwner()
+  let flight: { controller: AbortController; owner: DashboardObservationOwner } | null = null
+  let refused = false
   let dirty = false
-  let controller: AbortController | null = null
+  let retryTimer: ReturnType<typeof setTimeout> | null = null
+  let retryDelayMs = TRANSPORT_RETRY_BASE_MS
+  const clearRetry = () => {
+    if (retryTimer !== null) clearTimeout(retryTimer)
+    retryTimer = null
+  }
 
   const visible = () => typeof document.visibilityState !== 'string'
     || document.visibilityState === 'visible'
 
   const schedule = () => {
-    if (!active || scheduled || inFlight || !dirty || !visible()) return
+    if (!active || scheduled || flight !== null || refused || retryTimer !== null || !dirty
+      || !dashboardObservationOwnerHasWorkspace(owner) || !visible()) return
     scheduled = true
     queueMicrotask(() => { void drain() })
   }
 
   const invalidate = () => {
-    if (!active) return
+    if (!active || refused) return
     dirty = true
     schedule()
   }
 
   const drain = async () => {
     scheduled = false
-    if (!active || inFlight || !dirty || !visible()) return
+    if (!active || flight !== null || refused || !dirty
+      || !dashboardObservationOwnerHasWorkspace(owner) || !visible()) return
     dirty = false
-    inFlight = true
-    controller = new AbortController()
+    const request = { controller: new AbortController(), owner }
+    flight = request
+    const current = () => active && flight === request && !request.controller.signal.aborted
+      && dashboardObservationOwnerIsCurrent(request.owner)
     try {
-      await refresh(controller.signal)
+      await refresh(request.controller.signal)
+      if (current()) {
+        const error = options.readError?.()
+        if (error !== null && error !== undefined) throw error
+        retryDelayMs = TRANSPORT_RETRY_BASE_MS
+      }
     } catch (error) {
-      if (active && !controller.signal.aborted) {
+      if (!current()) return
+      if (error instanceof ApiRequestError && (error.status === 401 || error.status === 403)) {
+        refused = true
+        dirty = false
+        clearRetry()
+        if (options.onError) options.onError(error)
+      } else {
+        dirty = true
+        retryTimer = setTimeout(() => {
+          retryTimer = null
+          schedule()
+        }, retryDelayMs)
+        retryDelayMs = Math.min(retryDelayMs * 2, TRANSPORT_RETRY_MAX_MS)
         if (options.onError) options.onError(error)
         else console.warn('[observation] authoritative read failed', error)
       }
     } finally {
-      controller = null
-      inFlight = false
-      schedule()
+      if (flight === request) {
+        flight = null
+        schedule()
+      }
     }
   }
 
+  const retire = () => {
+    const previous = flight
+    flight = null
+    if (previous !== null) {
+      previous.controller.abort()
+      options.cancelRead?.()
+    }
+  }
   const recover = () => {
-    controller?.abort()
+    if (refused) return
+    clearRetry()
+    retryDelayMs = TRANSPORT_RETRY_BASE_MS
+    retire()
     invalidate()
   }
-  const refreshWhenVisible = () => { if (visible()) invalidate() }
+  const refreshWhenVisible = () => { if (visible()) recover() }
   const unsubscribe = subscribeDashboardObservation(options, invalidate, recover)
+  const unsubscribeOwner = subscribeDashboardObservationOwnerChanges(next => {
+    owner = next
+    clearRetry()
+    retryDelayMs = TRANSPORT_RETRY_BASE_MS
+    refused = false
+    retire()
+    options.resetRead?.()
+    invalidate()
+  })
   window.addEventListener('focus', refreshWhenVisible)
   document.addEventListener('visibilitychange', refreshWhenVisible)
+  options.resetRead?.()
   if (options.initial !== false) invalidate()
 
   return () => {
     active = false
     dirty = false
-    controller?.abort()
+    clearRetry()
+    retire()
     unsubscribe()
+    unsubscribeOwner()
     window.removeEventListener('focus', refreshWhenVisible)
     document.removeEventListener('visibilitychange', refreshWhenVisible)
   }

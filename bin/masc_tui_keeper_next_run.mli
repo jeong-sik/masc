@@ -30,6 +30,10 @@ val find : index -> keeper_name:string -> t
 
 type wake_slot =
   | Wakes of int  (** Wakes known to fall in the slot. [Wakes 0] is known empty. *)
+  | Wakes_with_unknown of int
+      (** Known wakes in the slot, beside a range this build cannot list. The
+          unknown stays explicit next to the positive count; adding slots
+          never absorbs it. *)
   | Wakes_unknown  (** No known wake, and the slot may hold one this build cannot list. *)
 
 val wake_strip :

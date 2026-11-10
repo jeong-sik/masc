@@ -99,13 +99,22 @@ let of_snapshot ~freshness ?runner ~keeper_name (snapshot : Masc_tui_types.sched
 
 type wake_slot =
   | Wakes of int
+  | Wakes_with_unknown of int
   | Wakes_unknown
 
+(* Every pair is written out: a known count never absorbs an unknown that
+   shares its slot. [Wakes_with_unknown] keeps both facts so the summary can
+   say "N known · partial" even when the overlap happens inside one slot. *)
 let add_wake_slot left right =
   match left, right with
   | Wakes l, Wakes r -> Wakes (l + r)
-  | Wakes known, Wakes_unknown | Wakes_unknown, Wakes known ->
-      if known > 0 then Wakes known else Wakes_unknown
+  | Wakes l, Wakes_with_unknown k -> Wakes_with_unknown (l + k)
+  | Wakes l, Wakes_unknown -> Wakes_with_unknown l
+  | Wakes_with_unknown k, Wakes r -> Wakes_with_unknown (k + r)
+  | Wakes_with_unknown a, Wakes_with_unknown b -> Wakes_with_unknown (a + b)
+  | Wakes_with_unknown k, Wakes_unknown -> Wakes_with_unknown k
+  | Wakes_unknown, Wakes k -> Wakes_with_unknown k
+  | Wakes_unknown, Wakes_with_unknown k -> Wakes_with_unknown k
   | Wakes_unknown, Wakes_unknown -> Wakes_unknown
 ;;
 

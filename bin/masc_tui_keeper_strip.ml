@@ -154,6 +154,7 @@ let wake_summary ~ko slots =
   let cells = List.length slots in
   let known, unknown = List.fold_left (fun (known, unknown) -> function
     | Next.Wakes count -> known + max 0 count, unknown
+    | Next.Wakes_with_unknown count -> known + max 0 count, true
     | Next.Wakes_unknown -> known, true) (0, false) slots in
   let full, narrow = match known, unknown with
     | 0, true -> (if ko then "일정 미확인" else "schedule unknown"), "?"
@@ -170,17 +171,24 @@ let wake_strip ~ko ~style slots =
   let cells = List.length slots in
   let label = window_label ~cells in
   if cells = 0 then ""
-  else if List.for_all (function Next.Wakes_unknown -> true | Wakes _ -> false) slots then
+  else if List.for_all (function
+    | Next.Wakes_unknown -> true
+    | Next.Wakes _ | Next.Wakes_with_unknown _ -> false) slots then
     label (if ko then "일정 미확인" else "schedule unknown") "?"
-  else if List.for_all (function Next.Wakes n -> n <= 0 | Wakes_unknown -> false) slots then
+  else if List.for_all (function
+    | Next.Wakes n -> n <= 0
+    | Next.Wakes_with_unknown _ | Next.Wakes_unknown -> false) slots then
     label (if ko then "구간 내 예약 없음" else "no runs in window") "-"
   else
     let peak = List.fold_left (fun peak -> function
-      | Next.Wakes count -> max peak count | Wakes_unknown -> peak) 0 slots in
+      | Next.Wakes count -> max peak count
+      | Next.Wakes_with_unknown count -> max peak count
+      | Wakes_unknown -> peak) 0 slots in
     String.concat "" (List.mapi (fun index slot ->
       let quiet cell = Theme.recede () ^ Grid.strip_mark cell ^ Ansi.reset in
       match slot with
       | Next.Wakes_unknown -> quiet Grid.Strip_unknown
+      | Next.Wakes_with_unknown _ -> quiet Grid.Strip_unknown
       | Wakes count ->
           if count <= 0 then quiet Grid.Strip_empty else
           let tone, mark = match style with
@@ -215,11 +223,14 @@ let fleet_cells ~ko ~now ~(grid : Grid.t) ~wakes rows =
         match runtime row with Some _ -> wakes row
         | None -> Next.unknown_strip ~ahead:(Grid.strip_cells grid - 1)) active) in
   let wake_peak = List.fold_left (fun p slot -> match slot with
-    | Next.Wakes n -> max p n | Next.Wakes_unknown -> p) 0 future in
+    | Next.Wakes n -> max p n
+    | Next.Wakes_with_unknown n -> max p n
+    | Next.Wakes_unknown -> p) 0 future in
   let strip = wake_strip ~ko ~style:Wake_counts future in
   let pulse_max = if peak = 0 && List.exists snd counts then "?" else string_of_int peak in
   let wake_max = if wake_peak = 0 && List.exists (function
-    | Next.Wakes_unknown -> true | Next.Wakes _ -> false) future then "?" else string_of_int wake_peak in
+    | Next.Wakes_unknown | Next.Wakes_with_unknown _ -> true
+    | Next.Wakes _ -> false) future then "?" else string_of_int wake_peak in
   { name = (if grid.name_cells >= 21 then "fleet fail/30m max " else "fleet max ") ^ pulse_max
   ; pulse; strip
   ; due = let label = "max " ^ wake_max in

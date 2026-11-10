@@ -1,4 +1,5 @@
-import { setupObservationRefresh } from '../lib/observation-refresh'
+import { subscribeDashboardLogsStream } from '../dashboard-logs-stream'
+import type { LogsStreamError } from '../api/dashboard-logs-stream'
 import { html } from 'htm/preact'
 import type { VNode } from 'preact'
 import { signal } from '@preact/signals'
@@ -14,7 +15,7 @@ import {
   type LogsError,
   type LogsRequest,
 } from '../api/dashboard-logs'
-import { dashboardRuntime, DashboardTransportError, type DashboardHttp } from '../api/effect-http'
+import { dashboardRuntime, type DashboardHttp } from '../api/effect-http'
 import { VirtualList } from './common/virtual-list'
 import { asRecord, asNullableString, mergeRouteRecord, hasRouteContext, type MutableRouteContext } from './common/normalize'
 import { TextInput } from './common/input'
@@ -24,7 +25,7 @@ import { LogFilter } from './common/log-filter'
 import { RouteLink } from './common/route-link'
 import { KeeperBadge } from './keeper-badge'
 import { createEffectResource } from '../lib/effect-resource'
-import { remotePrevious } from '../lib/remote-data'
+import { remoteLoading, remotePrevious, remoteSuccess } from '../lib/remote-data'
 import { toolCategory } from './tool-call-shared'
 import { StatusChip } from './common/status-chip'
 import {
@@ -65,6 +66,8 @@ export interface LogWindowSummary {
 const logResource = createEffectResource<DashboardHttp, LogsError, LogData>(
   dashboardRuntime,
 )
+const nativeLogError = signal<LogsStreamError | null>(null)
+let liveLogRevision = 0
 const levelFilter = signal<LogLevel>('INFO')
 const moduleInput = signal('')
 const appliedModuleFilter = signal('')
@@ -151,7 +154,7 @@ const LOG_KIND_LABELS: Record<LogDisplayKind, string> = {
   log: 'LOG',
 }
 
-type LoadMode = 'reset' | 'delta' | 'older'
+type LoadMode = 'reset' | 'older'
 type FailureEnvelope = {
   surface: string
   entity_kind: string
@@ -488,7 +491,7 @@ function mergeOlderLogData(current: LogData, response: LogsData): LogData {
     return { ...current, noMoreOlder: true }
   }
   return {
-    ...response,
+    ...(current.ring.total > response.ring.total ? current : response),
     entries: mergeLogEntries(
       current.entries,
       incoming,
@@ -508,22 +511,27 @@ async function loadLogs(mode: LoadMode = 'reset'): Promise<void> {
   const request = baseLogsRequest()
   let program: Effect.Effect<LogData, LogsError, DashboardHttp>
   switch (mode) {
-    case 'reset':
-      program = fetchLogs(request).pipe(Effect.map(resetLogData))
+    case 'reset': {
+      const revision = liveLogRevision
+      program = fetchLogs(request).pipe(Effect.map(response => {
+        const latest = Option.getOrUndefined(remotePrevious(logResource.state.peek()))
+        if (latest !== undefined && revision !== liveLogRevision) return latest
+        const reset = resetLogData(response)
+        return latest !== undefined && latest.ring.total > response.ring.total
+          ? mergeDeltaLogData(reset, latest) : reset
+      }))
       break
-    case 'delta':
-      if (current === undefined) return
-      program = fetchLogs({
-        ...request,
-        sinceSeq: Option.getOrUndefined(latestLogSeq(current.entries)),
-      }).pipe(Effect.map(response => mergeDeltaLogData(current, response)))
-      break
+    }
     case 'older': {
       if (current === undefined) return
       const beforeSeq = Option.getOrUndefined(oldestLogSeq(current.entries))
       if (beforeSeq === undefined || beforeSeq <= 0 || current.noMoreOlder) return
+      const revision = liveLogRevision
       program = fetchLogs({ ...request, beforeSeq }).pipe(
-        Effect.map(response => mergeOlderLogData(current, response)),
+        Effect.map(response => {
+          const latest = Option.getOrElse(remotePrevious(logResource.state.peek()), () => current)
+          return revision === liveLogRevision ? mergeOlderLogData(latest, response) : latest
+        }),
       )
       break
     }
@@ -868,11 +876,22 @@ export function LogViewer() {
       disposeObservation?.()
       disposeObservation = null
       logResource.reset()
+      nativeLogError.value = null
       if (!autoRefresh.value) { void loadLogs('reset'); return }
-      disposeObservation = setupObservationRefresh(
-        () => loadLogs(Option.isSome(remotePrevious(logResource.state.value)) ? 'delta' : 'reset'),
-        { topics: ['logs'], cancelRead: () => logResource.cancel(), resetRead: () => logResource.reset(), readError: () => { const s = logResource.state.peek(); return s._tag === 'Failure' ? (s.error instanceof DashboardTransportError ? s.error.cause : s.error) : null } },
-      )
+      disposeObservation = subscribeDashboardLogsStream(baseLogsRequest(), {
+        onReset: () => { liveLogRevision += 1; nativeLogError.value = null; logResource.reset() },
+        onError: error => { nativeLogError.value = error },
+        onFrame: frame => {
+          const state = logResource.state.peek()
+          const previous = Option.getOrUndefined(remotePrevious(state))
+          if (frame.reset) liveLogRevision += 1
+          const next = frame.reset || previous === undefined
+            ? resetLogData(frame.data) : mergeDeltaLogData(previous, frame.data)
+          nativeLogError.value = null
+          logResource.state.value = state._tag === 'Loading'
+            ? remoteLoading(Option.some(next)) : remoteSuccess(next)
+        },
+      })
     }
 
     restart()
@@ -907,8 +926,8 @@ export function LogViewer() {
   const logData = Option.getOrUndefined(remotePrevious(s))
   const logEntries = logData?.entries ?? EMPTY_LOG_ENTRIES
   const logTotal = logData?.total ?? 0
-  const logLoading = s._tag === 'Initial' || s._tag === 'Loading'
-  const logError = s._tag === 'Failure' ? s.error.message : undefined
+  const logLoading = nativeLogError.value === null && (s._tag === 'Initial' || s._tag === 'Loading')
+  const logError = nativeLogError.value?.message ?? (s._tag === 'Failure' ? s.error.message : undefined)
   // summarizeLogWindow iterates the full entries array (counts errors/warnings,
   // builds cause/module Maps). When logData is loaded the entries ref is stable
   // across unrelated re-renders (toolbar interactions, polling status flips);

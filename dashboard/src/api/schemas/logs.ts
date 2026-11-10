@@ -159,6 +159,11 @@ const LogsValidatedWireSchema = LogsWireSchema.pipe(
   Schema.filter(logsInvariantIssues),
 )
 
+const LogsStreamWireSchema = Schema.Struct({
+  ...LogsWireSchema.fields,
+  reset: Schema.Boolean,
+}).pipe(Schema.filter(logsInvariantIssues))
+
 export type LogLevel = Schema.Schema.Type<typeof LogLevelSchema>
 export type LogSource = Schema.Schema.Type<typeof LogSourceSchema>
 export type LogCategory = Schema.Schema.Type<typeof LogCategorySchema>
@@ -266,6 +271,19 @@ export function decodeLogsData(
     STRICT_PARSE_OPTIONS,
   )(data).pipe(
     Effect.map(toLogsData),
+    Effect.mapError(schemaDriftError),
+  )
+}
+
+export interface LogsStreamFrame {
+  readonly reset: boolean
+  readonly data: LogsData
+  readonly limit: number
+}
+
+export function decodeLogsStreamFrame(data: unknown): Effect.Effect<LogsStreamFrame, LogsSchemaDriftError> {
+  return Schema.decodeUnknown(LogsStreamWireSchema, STRICT_PARSE_OPTIONS)(data).pipe(
+    Effect.map(wire => ({ reset: wire.reset, data: toLogsData(wire), limit: wire.query.limit })),
     Effect.mapError(schemaDriftError),
   )
 }

@@ -2363,21 +2363,21 @@ let lexed_span (text, kind) =
   else
     let style =
       if String.equal kind Masc_tui_code_lexer.kind_keyword then
-        Theme.Syntax.keyword
+        Theme.Syntax.keyword ()
       else if String.equal kind Masc_tui_code_lexer.kind_string then
-        Theme.Syntax.string
+        Theme.Syntax.string ()
       else if String.equal kind Masc_tui_code_lexer.kind_comment then
         Theme.Syntax.code_comment ()
       else if String.equal kind Masc_tui_code_lexer.kind_number then
-        Theme.Syntax.code_number
+        Theme.Syntax.code_number ()
       else if String.equal kind Masc_tui_code_lexer.kind_type then
-        Ansi.bold ^ Theme.Syntax.code_type
+        Ansi.bold ^ Theme.Syntax.code_type ()
       else if String.equal kind Masc_tui_code_lexer.kind_json_key then
-        Theme.Syntax.json_key
+        Theme.Syntax.json_key ()
       else if String.equal kind Masc_tui_code_lexer.kind_json_number then
-        Theme.Syntax.json_number
+        Theme.Syntax.json_number ()
       else if String.equal kind Masc_tui_code_lexer.kind_json_literal then
-        Theme.Syntax.json_literal
+        Theme.Syntax.json_literal ()
       else if String.equal kind Masc_tui_code_lexer.kind_json_punctuation then
         Theme.Syntax.json_punctuation
       else ""

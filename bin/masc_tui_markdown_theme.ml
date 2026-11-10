@@ -21,7 +21,7 @@ let palette ~closing : Markdown.palette =
        inside a coloured row leaves the row's colour alone. *)
   ; emphasis = (Ansi.italic, Ansi.no_italic)
   ; strike = (Ansi.strike, Ansi.no_strike)
-  ; code = (Theme.Syntax.code_span, closing)
+  ; code = (Theme.Syntax.code_span (), closing)
   (* Two palette-relative accents give documents a visible hierarchy, with
      weight and underline in addition to hue. Lower headings keep bold. *)
   ; heading =
@@ -32,7 +32,7 @@ let palette ~closing : Markdown.palette =
           (Ansi.bold ^ Theme.category Theme.Slot_2, closing)
         else (Ansi.bold, closing))
   ; quote = (Ansi.dim, closing)
-  ; link_text = (Theme.Syntax.link, closing)
+  ; link_text = (Theme.Syntax.link (), closing)
   ; link_target = (Ansi.dim, closing)
   ; rule = (Theme.Syntax.rule (), closing)
   ; bullet = "\xe2\x80\xa2"
@@ -47,16 +47,16 @@ let palette ~closing : Markdown.palette =
   (* Fenced-code tokens, inside the cyan the plain code span already uses:
      one hue per role a keeper's eye scans for -- what binds, what is data,
      what the reader can skip. *)
-  ; code_keyword = (Theme.Syntax.keyword, closing)
-  ; code_string = (Theme.Syntax.string, closing)
+  ; code_keyword = (Theme.Syntax.keyword (), closing)
+  ; code_string = (Theme.Syntax.string (), closing)
   ; code_comment = (Theme.Syntax.code_comment (), closing)
-  ; code_number = (Theme.Syntax.code_number, closing)
-  ; code_type = (Ansi.bold ^ Theme.Syntax.code_type, closing)
+  ; code_number = (Theme.Syntax.code_number (), closing)
+  ; code_type = (Ansi.bold ^ Theme.Syntax.code_type (), closing)
   (* A JSON body has the four roles the chat's tool results and a Task note
      draw, so one payload reads the same wherever it is shown. *)
-  ; json_key = (Theme.Syntax.json_key, closing)
-  ; json_number = (Theme.Syntax.json_number, closing)
-  ; json_literal = (Theme.Syntax.json_literal, closing)
+  ; json_key = (Theme.Syntax.json_key (), closing)
+  ; json_number = (Theme.Syntax.json_number (), closing)
+  ; json_literal = (Theme.Syntax.json_literal (), closing)
   ; json_punctuation = (Theme.Syntax.json_punctuation, closing)
   (* Changed rows follow the dedicated diff surfaces: their background runs
      through the code gutter and the unused cells, so lines of different

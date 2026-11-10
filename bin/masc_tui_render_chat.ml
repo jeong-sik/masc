@@ -513,7 +513,7 @@ let render_chat_row ~theme ~origin buf cols (row : Message_layout.row) =
          never recovers an outcome or a tool identity from those words. *)
       let dress rest =
         Masc_tui_message_layout.dress_bare_links
-          ~open_style:(Ansi.underline ^ Theme.Syntax.link)
+          ~open_style:(Ansi.underline ^ Theme.Syntax.link ())
           ~close_style:context.link_restore
           rest
       in
@@ -906,10 +906,10 @@ let tool_detail_palette () : Tool_detail.palette =
        the tree's own labels from the names inside a payload. *)
   ; label = Ansi.bold ^ Masc_tui_theme.tone Masc_tui_theme.Accent
   ; separator = Theme.recede ()
-  ; key = Masc_tui_theme.Syntax.json_key
-  ; string_ = Masc_tui_theme.Syntax.string_
-  ; number = Masc_tui_theme.Syntax.json_number
-  ; literal = Masc_tui_theme.Syntax.json_literal
+  ; key = Theme.Syntax.json_key ()
+  ; string_ = Theme.Syntax.string ()
+  ; number = Theme.Syntax.json_number ()
+  ; literal = Theme.Syntax.json_literal ()
   ; punctuation = Masc_tui_theme.Syntax.json_punctuation
   ; note = Theme.recede ()
     (* Span closure restores the measured secondary foreground. *)

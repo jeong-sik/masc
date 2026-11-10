@@ -302,14 +302,19 @@ let test_sweep_drains_a_post_larger_than_two_comment_batches () =
     comment_key
   in
   let comment_ids =
-    List.init comment_count (fun _ ->
-      let comment_id = insert_filler_comment () in
+    List.init comment_count (fun _ -> insert_filler_comment ())
+  in
+  (* The large retained thread must exist in canonical Comments before new
+     votes/reactions can use it as a target. Keep the cap-bypass setup, then
+     persist it once before exercising the real mutation and sweep paths. *)
+  flush_dirty store;
+  List.iter
+    (fun comment_id ->
       ignore (unwrap (toggle_reaction store ~reader:Masc_board_handlers.Board_access.Operator ~target_type:Reaction_comment
         ~target_id:comment_id ~user_id:"reactor-agent" ~emoji:"👍"));
       ignore (unwrap (vote_comment store ~reader:Masc_board_handlers.Board_access.Operator ~voter:"voter-agent" ~comment_id
-        ~direction:Up));
-      comment_id)
-  in
+        ~direction:Up)))
+    comment_ids;
   ignore (unwrap (toggle_reaction store ~reader:Masc_board_handlers.Board_access.Operator ~target_type:Reaction_post
     ~target_id:post_id ~user_id:"reactor-agent" ~emoji:"👍"));
   ignore (unwrap (vote store ~reader:Masc_board_handlers.Board_access.Operator ~voter:"voter-agent" ~post_id ~direction:Up));

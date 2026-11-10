@@ -48,8 +48,10 @@ type tool_request_scope_reader = scope:string ->
   (Lane_addon_tool_request_owner.retained list, string) result
 type tool_request_archive_reader = scope:string -> date:string -> request_id:string ->
   (Lane_addon_tool_request_owner.Record.t option, string) result
+type history_resolution_reader = scope:string -> request_id:string -> (Yojson.Safe.t option, string) result
 type payload_validator = read:tool_request_reader -> read_scope:tool_request_scope_reader -> read_body:request_body_reader ->
   read_archive:tool_request_archive_reader ->
+  read_fence:history_resolution_reader -> read_resolution:history_resolution_reader ->
   Lane_addon_tool_request_owner.retained -> (unit, string) result
 (** Explicit read-only parent, scope inventory and body ports. Every returned original passes the
     same record identity, canonical body and digest checks as the scanned one.

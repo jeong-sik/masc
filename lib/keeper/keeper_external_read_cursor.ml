@@ -85,6 +85,15 @@ let save ~runtime_keepers_dir ~keeper_name state =
     Fs_compat.save_file_atomic_strict file (Yojson.Safe.to_string (json state))
   with Sys_error detail -> Error detail
      | Unix.Unix_error (e,f,a) -> Error (Printf.sprintf "%s(%s): %s" f a (Unix.error_message e))
+let restore_original_preparation ~runtime_keepers_dir ~keeper_name
+    ~expected:(Observed expected) ~original:(Observed original) =
+  let* current=load ~runtime_keepers_dir ~keeper_name in
+  if current<>expected || current.after<>original.after then
+    Error "Original external preparation observation or offset changed"
+  else if current=original then Ok () else
+    let* ()=save ~runtime_keepers_dir ~keeper_name original in
+    let* observed=load ~runtime_keepers_dir ~keeper_name in
+    if observed=original then Ok () else Error "Original external preparation readback differs"
 let acknowledge ~runtime_keepers_dir ~keeper_name =
   let* state = load ~runtime_keepers_dir ~keeper_name in
   match state.pending with

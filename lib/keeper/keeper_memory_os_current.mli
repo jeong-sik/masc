@@ -729,8 +729,11 @@ val apply_program :
     A later journal failure leaves a committed target with recoverable proof,
     not a rejection of the already published Memory.
 
-    [pass] labels the change counts as in {!apply_disposition}; a program's
-    counts are summed stage by stage from its proof. *)
+    [pass] labels the change counts as in {!apply_disposition}; a program is
+    counted once from its initial to its final facts. Each initial ID follows
+    all applied successor branches and counts by its first exit kind when
+    any branch survives in the final snapshot, or as dropped otherwise.
+    Facts created and removed within the program are not counted. *)
 
 type disposition_basis =
   { expected_revision : int option

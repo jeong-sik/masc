@@ -288,11 +288,88 @@ let test_a_commit_counts_its_changes_under_its_pass () =
     gauge_metrics
 ;;
 
+let check_program_carriers ~transaction_id ~initial ~expected ~final stages =
+  with_temp_keepers
+  @@ fun keepers_dir ->
+  Current.replace ~keepers_dir ~keeper_id ~expected_revision:None ~now:200.0
+    ~source:(source Current.Librarian) ~facts:initial ()
+  |> require_ok
+  |> ignore;
+  let committed =
+    check_commit ~commit:transaction_id ~pass:"continuity" ~expected
+    @@ fun () ->
+    (publish_program ~keepers_dir ~transaction_id ~current:initial
+       ~apply:(fun ~anchor ~source program ->
+         Current.apply_program ~pass:Pass.Continuity ~keepers_dir ~keeper_id ~now:300.0
+           ~anchor ~source ~validate_source:(fun () -> Ok ()) program)
+       stages
+     |> require_ok)
+      .snapshot
+  in
+  check (list string) "the committed facts retain exactly the surviving claims"
+    (List.sort String.compare (List.map (fun (value : Types.fact) -> value.claim) final))
+    (claims committed)
+;;
+
+let test_split_revision_keeps_surviving_carriers reverse =
+  let original = fact "split original"
+  and left = fact "split first branch"
+  and right = fact "split surviving branch" in
+  let revisions = [ revision original left; revision original right ] in
+  let transaction_id = if reverse then "split-right-first" else "split-left-first" in
+  check_program_carriers ~transaction_id ~initial:[ original ] ~expected:[ 1; 0; 1; 0 ]
+    ~final:[ right ]
+    [ stage ~input:[ original ] ~dropped:[ drop original "split correction" ]
+        ~revisions:(if reverse then List.rev revisions else revisions) [ left; right ]
+    ; stage ~input:[ left; right ] ~dropped:[ drop left "first branch withdrawn" ] []
+    ]
+;;
+
+let test_absorbed_carrier_split_keeps_first_exit reverse =
+  let original = fact "absorbed original"
+  and carrier = fact "absorbed carrier"
+  and left = fact "absorbed carrier first branch"
+  and right = fact "absorbed carrier surviving branch" in
+  let revisions = [ revision carrier left; revision carrier right ] in
+  let transaction_id = if reverse then "absorbed-split-right-first" else "absorbed-split-left-first" in
+  check_program_carriers ~transaction_id ~initial:[ original ] ~expected:[ 1; 1; 0; 0 ]
+    ~final:[ right ]
+    [ stage ~input:[ original ] ~absorbed:[ absorb original carrier ] [ carrier ]
+    ; stage ~input:[ carrier ] ~dropped:[ drop carrier "split correction" ]
+        ~revisions:(if reverse then List.rev revisions else revisions) [ left; right ]
+    ; stage ~input:[ left; right ] ~dropped:[ drop left "first branch withdrawn" ] []
+    ]
+;;
+
+let test_reintroduced_carrier_does_not_revive_dead_branches () =
+  let original = fact "retired split original"
+  and left = fact "retired split first branch"
+  and right = fact "retired split second branch" in
+  check_program_carriers ~transaction_id:"split-branches-retired" ~initial:[ original ]
+    ~expected:[ 1; 0; 0; 1 ] ~final:[ left ]
+    [ stage ~input:[ original ] ~dropped:[ drop original "split correction" ]
+        ~revisions:[ revision original left; revision original right ] [ left; right ]
+    ; stage ~input:[ left; right ]
+        ~dropped:[ drop left "first branch withdrawn"; drop right "second branch withdrawn" ] []
+    ; stage ~input:[] [ left ]
+    ]
+;;
+
 let () =
   run "keeper_memory_change_metrics"
     [ ( "store commit"
       , [ test_case "a commit counts its changes under its pass" `Quick
             test_a_commit_counts_its_changes_under_its_pass
+        ; test_case "a split retains its later surviving successor" `Quick
+            (fun () -> test_split_revision_keeps_surviving_carriers false)
+        ; test_case "split revision order does not change the net counts" `Quick
+            (fun () -> test_split_revision_keeps_surviving_carriers true)
+        ; test_case "an absorbed carrier retains its surviving split branch" `Quick
+            (fun () -> test_absorbed_carrier_split_keeps_first_exit false)
+        ; test_case "absorbed split revision order preserves its first exit" `Quick
+            (fun () -> test_absorbed_carrier_split_keeps_first_exit true)
+        ; test_case "reintroducing a retired carrier does not revive its original" `Quick
+            test_reintroduced_carrier_does_not_revive_dead_branches
         ] )
     ]
 ;;

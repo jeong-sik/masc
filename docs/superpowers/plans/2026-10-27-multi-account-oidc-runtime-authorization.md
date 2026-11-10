@@ -724,7 +724,7 @@ Runtime 조회: rg -n --glob '*.ml' '\bRuntime\.(get_runtime_by_id|resolve_assig
 
 | 층 | 결과 | 설계 | 선행 |
 |---|---|---|---|
-| S1 | 부팅이 `Multi_account_not_served` 거부를 거두고 다계정 로그를 서빙한다. 활성화 전 요청(§5.1 표 5행)의 거부는 남는다(B3d). `masc auth bootstrap`의 도움말·성공 문구와 5행 부팅 문구(`Activation_requested`)에서 서버가 부팅을 멈춘다는 문장을 고친다. 지워서 되돌리는 문장(`single_user_again`)은 지우고 F3a의 `off`를 안내한다. 부팅이 구역(`Authz_zone.open_at_start`)을 열어 쥐고, 그 구역을 C2a~C4의 다계정 경로와 D1~D4의 실행 게이트에 넘긴다. C3의 로그인 경로를 `make_routes`에 달고, 같은 경로의 HTTP/2 갈래를 `server_h2_gateway.ml`에 더한다(HTTP/2는 router의 `dispatch`를 거치지 않아 갈래가 없으면 404다). 설치 기록이 없거나 로그가 없거나 비었을 때 구역의 열기가 무엇을 돌려줄지, `Multi_account_uncertain`에서 무엇을 서빙할지 이 층이 정한다. 설계 §11.1의 1단계 개시 증거를 이 층에서 모은다. | §5.1, §8.2, §11.1 | B3, C4, C6, D4, F3a |
+| S1 | 부팅이 `Multi_account_not_served` 거부를 거두고 다계정 로그를 서빙한다. 활성화 전 요청(§5.1 표 5행)의 거부는 남는다(B3d). `masc auth bootstrap`의 도움말·성공 문구와 5행 부팅 문구(`Activation_requested`)에서 서버가 부팅을 멈춘다는 문장을 고친다. 지워서 되돌리는 문장(`single_user_again`)은 지운다. `off` 안내는 F3a-2가 넣었다. 부팅이 구역(`Authz_zone.open_at_start`)을 열어 쥐고, 그 구역을 C2a~C4의 다계정 경로와 D1~D4의 실행 게이트에 넘긴다. C3의 로그인 경로를 `make_routes`에 달고, 같은 경로의 HTTP/2 갈래를 `server_h2_gateway.ml`에 더한다(HTTP/2는 router의 `dispatch`를 거치지 않아 갈래가 없으면 404다). 설치 기록이 없거나 로그가 없거나 비었을 때 구역의 열기가 무엇을 돌려줄지, `Multi_account_uncertain`에서 무엇을 서빙할지 이 층이 정한다. 설계 §11.1의 1단계 개시 증거를 이 층에서 모은다. | §5.1, §8.2, §11.1 | B3, C4, C6, D4, F3a |
 
 - S1이 1단계의 맨 끝인 까닭: 계정 층 없이 부팅하면 여러 사람이 소유한 기록을 한 사용자처럼 서빙하기 때문에 이 거부가 있다(`Authz_boot_mode_read`). 그 계정 층의 마지막이 D4다. D1이 소유권을, D2~D4가 실행 진입마다 인가를 검사하고, D3이 lane마다 다른 owner의 account-home을 읽지 못하는 증거를 남긴다. 그 전에 거부를 거두면 C4를 통과한 사용자가 다른 사람의 Runtime과 Keeper를 쓴다.
 - S1이 F3a 뒤인 까닭: S1부터 다계정 설치는 계정이 가진 Runtime·Keeper 기록을 쌓는다. 그때 "지우고 설치"는 그 기록을 지운다. 끄는 길 없이 켜는 길만 열면 실제 설치가 되돌릴 수 없이 다계정으로 넘어간다(§6 결정 10).
@@ -781,6 +781,15 @@ Runtime 조회: rg -n --glob '*.ml' '\bRuntime\.(get_runtime_by_id|resolve_assig
   - `masc auth bootstrap`(`Turned_off`)과 `masc auth invite`(`Accounts_turned_off`)는 끈 설치에 아무것도 쓰지 않는다.
   - account-home 점유: 1단계 코드에는 점유 기록이 없다(lease 저장소는 E1). `Release_pending`으로 바꿀 대상이 없다.
   - 남은 질문: 끈 뒤 단일 사용자 Keeper의 native 도구는 `.masc/accounts`를 읽을 수 있다. D3c가 다계정에서 막은 경로와 같고, 지워서 되돌리는 길(B3d-3)도 같은 상태다. 사람 홈은 S1 전에는 `masc auth preview`의 로그인으로만 생긴다.
+- F3a-2(2026-11-10).
+  - `masc auth off`는 bootstrap처럼 BasePath lease를 쥐고 `Authz_off.turn_off`를 부른다. 공개 주소와 익명 쓰기 설정은 읽지 않는다. 끄기는 로그와 외부 저장소만 본다.
+  - 로그의 마지막 모드 사건이 `Multi_account`를 만들었고 외부 저장소가 로그와 맞을 때만 쓴다. 설정은 보지 않는다. 운영자가 `account_mode`를 먼저 뺐으면 부팅은 3행으로 멈추고, 거기서도 끌 수 있다.
+  - 모드 사건이 없으면 `Never_activated`, 이미 껐으면 `Already_off`다. 저장소가 답하지 않으면 `Store_absent`, 맞지 않으면 `Store_mismatch`다. 맞지 않는 저장소 위에 `off`를 쓰면 다음 부팅이 10행으로 멈추기 때문이다. 이때는 아무것도 쓰지 않는다.
+  - 기록은 구역(`Authz_zone.commit`)으로 쓴다. 작성자는 `Local_operator`, 종류는 `Mode_event`다. 그래서 외부 저장소가 같은 기록을 받는다.
+  - 판정 뒤 연 구역의 모드가 `Multi_account`가 아니면 `Mode_moved`로 끝난다. lease 아래에서는 판정과 구역이 같은 로그를 읽는다. 타입이 허락하는 갈래라 오류로 돌려준다.
+  - `config.json`은 쓰지 않는다. 설정은 운영자의 요청이다(§5.1). 끈 뒤에도 설정이 `Multi_account`를 물으면 9행이다. 성공 문구가 `account_mode`를 빼라고 말한다.
+  - bootstrap 도움말과 성공 문구의 "되돌리는 명령이 없다"는 이 층부터 틀린 말이다. 그래서 S1을 기다리지 않고 `masc auth off` 안내로 고친다. 7행 부팅 문구와 3행 거부 문구도 `masc auth off`를 말한다. 8행은 저장소를 믿을 수 없어 끌 수 없으므로 말하지 않는다. "서버가 부팅을 멈춘다"는 문장과 `single_user_again`은 S1이 고친다.
+  - 시험은 실제 활성화(`Authz_activation.activate`)로 만든 설치에서 7행과 3행의 끄기, 끈 뒤의 4행·9행, 두 번째 끄기, 쓰지 않는 네 경우를 본다. F3a-1의 시험 셋도 손으로 쓰던 `off` 기록 대신 `Authz_off.turn_off`를 부른다.
 
 **F3b 범위**
 

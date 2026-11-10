@@ -415,13 +415,11 @@ let render_connectors (state : state) =
   in
   let read_notice = connectors_read_notice state in
   surface_chrome ~overflow:Paged_by_cursor state ~terminal_rows ~cols ~surface_key:"connectors" ~title
-    (* Names the exit, which this row did not. Esc leaves for the selected
-       Keeper (masc_tui.ml reads it under [Connectors]) and the key sheet
-       says so, but the footer named no exit key at all. Surfaces built
-       through [hints_of_bindings] cannot drift this way -- footer and sheet
-       come from one list -- and this one writes its own. Esc goes last
-       because [drop_hint_items] never gives it up. *)
-    ~hints:"B:Browser Lane  j/k:scroll  b:bind  u:unbind  r:refresh  Esc:keeper"
+    (* Keep the transport keys here: the shared Connectors sheet also names
+       keys owned only by Browser Lane. Esc returns to Features & plugins. *)
+    ~hints:(ui_text state
+      ~ko:"B:Browser Lane  j/k:스크롤  b:연결  u:연결 해제  r:새로고침  Esc:기능"
+      ~en:"B:Browser Lane  j/k:scroll  b:bind  u:unbind  r:refresh  Esc:features")
     ~body:(fun ~budget c ->
       c.push_styled ~style:(Theme.recede ())
         ("  " ^ Masc_tui_table.header_row

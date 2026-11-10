@@ -2368,7 +2368,7 @@ let lexed_span (text, kind) =
       else if String.equal kind Masc_tui_code_lexer.kind_string then
         Theme.Syntax.string
       else if String.equal kind Masc_tui_code_lexer.kind_comment then
-        Theme.Syntax.code_comment
+        Theme.Syntax.code_comment ()
       else if String.equal kind Masc_tui_code_lexer.kind_number then
         Theme.Syntax.code_number
       else if String.equal kind Masc_tui_code_lexer.kind_type then

@@ -18,6 +18,11 @@ vi.mock('./api/dev-token', () => ({
   hasPendingDevTokenFailure: () => false,
   pendingDevTokenRetryDelayMs: () => 0,
 }))
+vi.mock('./lib/observation-read-owner', () => ({
+  captureDashboardObservationOwner: () => ({ workspace: null, token: mocks.token,
+    tokenRevision: 0, actor: 'transport-unit', actorRevision: 0, managed: false }),
+}))
+vi.mock('./operator-snapshot-observation', () => ({ rejectOperatorSnapshotFrame: vi.fn() }))
 vi.mock('./sse-store', () => ({ routeServerPushEvent: mocks.route }))
 vi.mock('./sse', () => ({ recordServerPushEvent: mocks.record }))
 

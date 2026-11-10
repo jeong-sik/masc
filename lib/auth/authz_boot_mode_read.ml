@@ -117,7 +117,7 @@ let read_log_and_store ~base_path ~config_dir =
     match log with
     | Log_not_there -> B.No_mode_event
     | Log_cannot_check detail | Log_opened (Error detail) -> B.Log_unreadable detail
-    | Log_opened (Ok replay) -> B.of_mode_state replay.Authz_zone.Replay.state.Authz_state.mode
+    | Log_opened (Ok replay) -> B.of_state replay.Authz_zone.Replay.state
   in
   let high_water =
     match store, log with
@@ -144,11 +144,13 @@ type stop =
 
 type decision =
   | Boot_single_user
+  | Boot_after_off of Authz_state.t
   | Stop of stop
 
 let decide input =
   match B.judge input with
   | Ok B.Single_user -> Boot_single_user
+  | Ok (B.Single_user_after_off state) -> Boot_after_off state
   | Ok B.Activation_requested -> Stop Activation_requested
   | Ok ((B.Multi_account | B.Multi_account_uncertain) as mode) ->
     Stop (Multi_account_not_served mode)
@@ -192,14 +194,27 @@ let messages (input : B.input) = function
     , high_water_detail input.high_water @ [ single_user_again ] )
 ;;
 
-type single_user = Judged_single_user of string
+type single_user =
+  | Never_set_up of string
+  | Turned_off of
+      { base_path : string
+      ; state : Authz_state.t
+      }
 
-let single_user_base_path (Judged_single_user base_path) = base_path
+let single_user_base_path = function
+  | Never_set_up base_path | Turned_off { base_path; state = _ } -> base_path
+;;
+
+let turned_off = function
+  | Never_set_up (_ : string) -> None
+  | Turned_off { base_path = _; state } -> Some state
+;;
 
 let boot ~base_path ~config_dir ~anonymous_mutations =
   let input = input ~base_path ~config_dir ~anonymous_mutations in
   match decide input with
-  | Boot_single_user -> Ok (Judged_single_user base_path)
+  | Boot_single_user -> Ok (Never_set_up base_path)
+  | Boot_after_off state -> Ok (Turned_off { base_path; state })
   | Stop stop -> Error (messages input stop)
 ;;
 
@@ -248,6 +263,9 @@ let tool ~base_path ~config_dir =
       }
     in
     (match decide input with
-     | Boot_single_user -> Ok (Judged_single_user base_path)
+     | Boot_single_user -> Ok (Never_set_up base_path)
+     | Boot_after_off (_ : Authz_state.t) ->
+       (* The input names no mode event, so the table does not read an Off. *)
+       Error (tool_refused, [])
      | Stop stop -> Error (messages input stop))
 ;;

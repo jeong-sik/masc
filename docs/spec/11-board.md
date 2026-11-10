@@ -161,7 +161,11 @@ Dashboard 삭제 응답은 다음 세 조합을 구분한다. `decision_pending`
 | 202 | `true` | `pending` | 모델 삭제 적용, 원본 저장 또는 결정 정리 대기 |
 | 202 | `false` | `decision_pending` | 결정 결과 또는 적용이 미확인 |
 
-MCP 단건 삭제는 원래 author와 reader를 보관해 현재 모델과 관측 원본 양쪽에 다시 검사한다. 일괄 cleanup은 실제 reader를 보관하며, Admin HTTP 경로만 operator 권한을 전달한다. 이 계약은 별도 정책 read-set이나 cleanup 후보 조건의 동시 재검증을 완료했다는 뜻이 아니다.
+MCP 단건 삭제는 원래 author와 reader를 보관해 현재 모델과 관측 원본 양쪽에 다시 검사한다. Admin HTTP 경로만 operator 권한을 전달한다.
+
+일괄 cleanup은 실제 reader와 요청 때 고정한 생성시각 cutoff·댓글 없음·투표 없음·제목/작성자 substring 조건을 함께 보관한다. 후보 표시는 현재 조회 결과로 계산하고, 실제 삭제 결정 전에는 같은 조건을 canonical 글·댓글·투표 원본으로 다시 검사한다. 댓글은 마지막 ID 행 기준 자식 집합을, 투표는 해당 게시글 대상의 표 존재를 사용한다. Up과 Down의 순점수가 0이어도 표가 있으면 “투표 없음”이 아니며, 댓글 대상의 표는 이 게시글 필터에 포함하지 않는다.
+
+기존 Posts → Comments guard에 “투표 없음” 조건이 요청된 경우만 Votes guard를 추가하고, 그 범위를 삭제 결정 기록까지 유지한다. 실제 guard 거절은 해당 원본 소유자에게만 전달한다. 조건을 해제한 cleanup과 일반 삭제에 추가 Votes 승인 guard를 적용하지 않는다. 기록된 결정의 재시작 복구는 원래 ID 집합을 따르며, cleanup 조건을 다시 검사해 이미 승인한 결정을 취소하지 않는다. 별도 소게시판 정책 read-set은 이 조건에 포함하지 않는다.
 
 **캐시:**
 - `sorted_posts_cache` -- 정렬된 게시물 목록 (invalidated on post mutation)

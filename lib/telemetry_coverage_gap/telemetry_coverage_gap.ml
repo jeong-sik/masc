@@ -107,10 +107,11 @@ let record ~masc_root ~source ~producer ~durable_store ~dashboard_surface
         ("error_class", class_json error_class);
       ]
   in
-  match Dated_jsonl.append_notifying_commit store json ~on_committed:(fun () ->
-    notify_changed {canonical_masc_root; source; keeper_name}) with
-  | () -> ()
-  | exception Dated_jsonl.Append_guard_skipped -> ()
+  Fun.protect ~finally:(fun () -> notify_changed {canonical_masc_root; source; keeper_name})
+    (fun () ->
+      match Dated_jsonl.append_notifying_commit store json ~on_committed:ignore with
+      | () -> ()
+      | exception Dated_jsonl.Append_guard_skipped -> ())
 
 let read_recent ~masc_root ~n =
   if n <= 0 then []

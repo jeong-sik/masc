@@ -9,6 +9,7 @@ type writer_state =
 
 type t =
   { path : string
+  ; owner : Trajectory_write_observation.owner
   ; mu : Stdlib.Mutex.t
   ; pending : item Queue.t
   ; mutable state : writer_state
@@ -31,20 +32,20 @@ let registry : (string, t) Hashtbl.t = Hashtbl.create 16
 let registry_mu = Stdlib.Mutex.create ()
 let with_writer writer f = Stdlib.Mutex.protect writer.mu f
 
-let acquire_with_append ~append ~path =
+let acquire_with_append ~owner ~append ~path =
   Stdlib.Mutex.protect registry_mu (fun () ->
     match Hashtbl.find_opt registry path with
     | Some writer -> writer.references <- writer.references + 1; writer
     | None ->
       let writer =
-        { path; mu=Stdlib.Mutex.create (); pending=Queue.create (); state=Ready
+        { path; owner; mu=Stdlib.Mutex.create (); pending=Queue.create (); state=Ready
         ; references=1; append }
       in
       Hashtbl.add registry path writer;
       writer)
 ;;
 
-let acquire ~path = acquire_with_append ~append:Trajectory_persistence.append ~path
+let acquire ~owner ~path = acquire_with_append ~owner ~append:Trajectory_persistence.append ~path
 
 let retire_unreferenced writer =
   Stdlib.Mutex.protect registry_mu (fun () ->
@@ -96,6 +97,9 @@ let flush_protected writer =
   match selected with
   | Error outcome -> outcome
   | Ok batch ->
+    Fun.protect
+      ~finally:(fun () -> Trajectory_write_observation.attempted writer.owner)
+      (fun () ->
     let written =
       match writer.append ~path:writer.path (List.map (fun row -> row.json) batch) with
       | outcome -> outcome
@@ -125,7 +129,7 @@ let flush_protected writer =
         Indeterminate_failure issue)
     in
     retire_unreferenced writer;
-    outcome
+    outcome)
 ;;
 
 let flush writer =

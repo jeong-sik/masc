@@ -25,6 +25,11 @@ val install : unit -> unit
 module For_testing : sig
   val keeper_health : config:Workspace.config -> keepers_dir:string -> string -> keeper_health
 
+  val invalidate : base_path:string -> keeper:string -> unit
+  (** Empty [keeper]'s cached row under [base_path]. A test that writes an
+      input file directly has no writer to announce the commit [install]
+      listens for, so it says so here instead. *)
+
   val with_runtime :
     keeper_health:(config:Workspace.config -> keepers_dir:string -> string -> keeper_health) ->
     (unit -> 'a) -> 'a

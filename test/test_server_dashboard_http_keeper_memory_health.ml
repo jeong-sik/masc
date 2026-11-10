@@ -809,8 +809,12 @@ let test_context_cycle_separates_saved_and_prepared () =
   Fun.protect ~finally:(fun () -> O.forget ~config ~keeper_name; Fs_compat.remove_tree base) @@ fun () ->
   let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path:base in
   write_keeper_config ~keepers_dir ~keeper_id:keeper_name ();
-  let cycle () = member "context_cycle"
-    (keeper_obj keeper_name (Health.keeper_memory_health_http_json ~base_path:base)) in
+  let cycle () =
+    (* This fixture writes the snapshot and turn records itself, so no writer
+       announces the commit [install] listens for. *)
+    Health.For_testing.invalidate ~base_path:base ~keeper:keeper_name;
+    member "context_cycle"
+      (keeper_obj keeper_name (Health.keeper_memory_health_http_json ~base_path:base)) in
   Alcotest.(check bool) "no prepared request inferred from saved state" true
     (is_null (member "prepared" (cycle ())));
   let messages = [Agent_core.Types.make_message ~role:Agent_core.Types.User
@@ -920,6 +924,9 @@ let test_unread_evidence_is_observed_without_publication () =
     ; "unknown root field still refuses the response", `Assoc (("unexpected", `Null) :: fields)
     ];
   let reading () =
+    (* This fixture writes the snapshot and the ledger itself, so no writer
+       announces the commit [install] listens for. *)
+    Health.For_testing.invalidate ~base_path:base ~keeper:keeper_name;
     let json = Health.keeper_memory_health_http_json ~base_path:base in
     let decoded = D.decode_memory_health_snapshot json |> require_ok in
     match List.find_opt (fun (row : D.memory_keeper_health) -> row.mkh_keeper_id=keeper_name) decoded.mhs_keepers with
@@ -953,8 +960,12 @@ let test_context_cycle_reads_the_librarian_position_beside_the_cut () =
   Fun.protect ~finally:(fun () -> Fs_compat.remove_tree base) @@ fun () ->
   let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path:base in
   write_keeper_config ~keepers_dir ~keeper_id:keeper_name ();
-  let cycle () = member "context_cycle"
-    (keeper_obj keeper_name (Health.keeper_memory_health_http_json ~base_path:base)) in
+  let cycle () =
+    (* This fixture writes the progress and snapshot files itself, so no
+       writer announces the commit [install] listens for. *)
+    Health.For_testing.invalidate ~base_path:base ~keeper:keeper_name;
+    member "context_cycle"
+      (keeper_obj keeper_name (Health.keeper_memory_health_http_json ~base_path:base)) in
   Alcotest.(check bool) "a keeper that has read nothing has no position" true
     (is_null (member "read_position" (cycle ())));
   Alcotest.(check bool) "and no read error to explain it" true
@@ -1118,6 +1129,9 @@ let test_the_librarian_stalled_alarm_is_read_from_files () =
   write_keeper_config ~keepers_dir ~keeper_id:keeper_name ();
   Masc.Keeper_meta_store.replace_snapshot config meta |> get;
   let librarian () =
+    (* This fixture writes the snapshot and turn records itself, so no writer
+       announces the commit [install] listens for. *)
+    Health.For_testing.invalidate ~base_path:base ~keeper:keeper_name;
     member "librarian"
       (keeper_obj keeper_name (Health.keeper_memory_health_http_json ~base_path:base))
   in

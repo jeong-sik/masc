@@ -887,6 +887,12 @@ let workspace_memory_context_http_json = Workspace_memory_context.http_json
 module For_testing = struct
   let keeper_health = keeper_health
 
+  let invalidate ~base_path ~keeper =
+    invalidate_after_write
+      ~keepers_dir:(Config_dir_resolver.keepers_dir_for_base_path ~base_path)
+      ~keeper_id:keeper
+  ;;
+
   let with_runtime ~keeper_health:reader f =
     let previous_reader = !health_reader in
     Stdlib.Mutex.protect health_cache_mutex (fun () ->

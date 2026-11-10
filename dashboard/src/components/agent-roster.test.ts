@@ -23,7 +23,7 @@ import {
 import { missionSnapshot } from '../mission-signals'
 import { namespaceTruth } from '../namespace-truth-store'
 import { fleetCompositeFixture } from '../lib/fleet-composite.test-fixture'
-import { operatorSnapshot } from '../operator-store'
+import { operatorSnapshotFixture as operatorSnapshot } from '../operator-snapshot.test-fixture'
 
 function makeAgent(overrides: Partial<Agent> = {}): Agent {
   return {
@@ -1943,4 +1943,10 @@ describe('AgentRoster keeper-v2 fleet.jsx parity chrome', () => {
     // confirmed request shuts the Keeper down durably before it cleans up.
     expect(keys).toEqual(['pause', 'wakeup', 'shutdown', 'purge'])
   })
+})
+
+vi.mock('../operator-snapshot-state', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../operator-snapshot-state')>()
+  const { operatorSnapshotFixture } = await import('../operator-snapshot.test-fixture')
+  return { ...actual, operatorSnapshot: operatorSnapshotFixture }
 })

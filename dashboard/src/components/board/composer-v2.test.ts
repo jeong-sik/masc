@@ -1,10 +1,10 @@
+import { operatorSnapshotFixture as operatorSnapshot } from '../../operator-snapshot.test-fixture'
 import { h } from 'preact'
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/preact'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ComposerV2, buildComposerV2Request } from './composer-v2'
 import {
   operatorActionBusy,
-  operatorSnapshot,
 } from '../../operator-store'
 import { keepers as dashboardKeepers } from '../../store'
 import type { Keeper, OperatorSnapshot } from '../../types'
@@ -287,4 +287,10 @@ describe('ComposerV2', () => {
     expect(select.value).toBe('keeper:fallback-a')
   })
 
+})
+
+vi.mock('../../operator-snapshot-state', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../operator-snapshot-state')>()
+  const { operatorSnapshotFixture } = await import('../../operator-snapshot.test-fixture')
+  return { ...actual, operatorSnapshot: operatorSnapshotFixture }
 })

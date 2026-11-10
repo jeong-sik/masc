@@ -1,34 +1,26 @@
 import {
   extractApiError,
-  fetchOperatorSnapshot,
   runOperatorAction,
 } from './api/core'
 import type {
   OperatorActionLogEntry,
   OperatorActionRequest,
   OperatorActionResult,
-  RefreshOptions,
 } from './types'
 import { registerOperatorRefresh } from './sse-store'
-import { UI_REFRESH_TTL_MS } from './config/constants'
 import { UNKNOWN_STATUS_LABEL } from './lib/format-string'
 import {
-  operatorSnapshot,
-  operatorLoading,
   operatorError,
   operatorErrorStatus,
   operatorActionBusy,
   operatorActionLog,
 } from './operator-signals'
-import { normalizeOperatorSnapshot } from './operator-normalizers'
 import { refreshOperatorWorkspaceDigest } from './operator-digest-observation'
+import { refreshOperatorSnapshot } from './operator-snapshot-observation'
+export { refreshOperatorSnapshot } from './operator-snapshot-observation'
 export { refreshOperatorWorkspaceDigest } from './operator-digest-observation'
 
 let nextLogId = 1
-
-let snapshotRefreshInflight: Promise<void> | null = null
-let snapshotFollowup: Promise<void> | null = null
-let lastSnapshotRefreshAt = 0
 
 function stringifyUnknown(value: unknown): string {
   if (typeof value === 'string') return value
@@ -62,46 +54,6 @@ function logMessageFromResult(result: OperatorActionResult): string {
   return stringifyUnknown(result.result)
     || stringifyUnknown(result.executed_action)
     || result.status
-}
-
-function isFresh(lastAt: number, opts?: RefreshOptions): boolean {
-  return !opts?.force && Date.now() - lastAt < UI_REFRESH_TTL_MS
-}
-
-export async function refreshOperatorSnapshot(opts?: RefreshOptions): Promise<void> {
-  if (snapshotRefreshInflight) {
-    if (!opts?.force) return snapshotRefreshInflight
-    // A read admitted before the action cannot acknowledge that action.
-    // Coalesce callers behind one read admitted after the current one ends.
-    if (!snapshotFollowup) {
-      snapshotFollowup = snapshotRefreshInflight.then(() => {
-        snapshotFollowup = null
-        return refreshOperatorSnapshot({ force: true })
-      })
-    }
-    return snapshotFollowup
-  }
-  if (isFresh(lastSnapshotRefreshAt, opts)) return
-  operatorLoading.value = true
-  operatorError.value = null
-  operatorErrorStatus.value = null
-  snapshotRefreshInflight = (async () => {
-    try {
-      const raw = await fetchOperatorSnapshot()
-      operatorSnapshot.value = normalizeOperatorSnapshot(raw)
-      lastSnapshotRefreshAt = Date.now()
-    } catch (err) {
-      const summary = extractApiError(err, 'operator 스냅샷 로드 실패')
-      operatorSnapshot.value = null
-      lastSnapshotRefreshAt = 0
-      operatorError.value = summary.message
-      operatorErrorStatus.value = summary.status
-    } finally {
-      operatorLoading.value = false
-      snapshotRefreshInflight = null
-    }
-  })()
-  return snapshotRefreshInflight
 }
 
 type ActionRefreshOptions = { refresh?: 'await' | 'background' }
@@ -158,6 +110,6 @@ export async function dispatchOperatorAction(
 }
 
 registerOperatorRefresh(() => {
-  void refreshOperatorSnapshot()
+  void refreshOperatorSnapshot({ force: true })
   void refreshOperatorWorkspaceDigest()
 })

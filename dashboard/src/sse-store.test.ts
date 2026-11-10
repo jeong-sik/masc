@@ -41,7 +41,7 @@ const showToast = vi.fn<(message: string, kind?: string, durationMs?: number) =>
 const replayAgentCoreRuntimeTelemetry = vi.fn<() => Promise<void>>(async () => {})
 const hydrateAgentCoreTelemetrySample = vi.fn<(event: unknown) => void>()
 const compositeTick = signal({ name: '', ts_unix: 0 })
-const hydrateFleetCompositeSnapshot = vi.fn<(payload: unknown) => void>()
+const hydrateOperatorSnapshot = vi.fn<(payload: unknown) => boolean>(() => true)
 const hydrateGoalTreeSnapshot = vi.fn<(payload: unknown) => boolean>(() => true)
 const hydrateTransportHealthFromSSE = vi.fn<(payload: unknown) => void>()
 const noteKeeperChatAppended = vi.fn<(name: string, audio?: unknown) => void>()
@@ -56,6 +56,7 @@ async function flushAsyncWork(): Promise<void> {
 
 async function loadSseStore() {
   vi.resetModules()
+  vi.doMock('./operator-snapshot-observation', () => ({ hydrateOperatorSnapshot, setupOperatorSnapshotObservation: () => () => {} }))
   vi.doMock('./store', () => ({
     invalidateDashboardCache,
     hydrateBoardSnapshot,
@@ -105,7 +106,6 @@ async function loadSseStore() {
   }))
   vi.doMock('./composite-signals', () => ({
     compositeTick,
-    hydrateFleetCompositeSnapshot,
   }))
   vi.doMock('./goal-tree-state', () => ({
     hydrateGoalTreeSnapshot,
@@ -152,7 +152,7 @@ describe('setupServerPushReaction reconnect hydration', () => {
     replayAgentCoreRuntimeTelemetry.mockResolvedValue(undefined)
     hydrateAgentCoreTelemetrySample.mockClear()
     refreshKnownKeeperChatHistories.mockReset()
-    hydrateFleetCompositeSnapshot.mockClear()
+    hydrateOperatorSnapshot.mockClear()
     hydrateGoalTreeSnapshot.mockClear()
     hydrateGoalTreeSnapshot.mockReturnValue(true)
     namespaceTruth.value = null
@@ -171,6 +171,7 @@ describe('setupServerPushReaction reconnect hydration', () => {
   afterEach(() => {
     vi.useRealTimers()
     vi.resetModules()
+    vi.doUnmock('./operator-snapshot-observation')
     vi.doUnmock('./store')
     vi.doUnmock('./namespace-truth-store')
     vi.doUnmock('./tab-refresh')
@@ -422,90 +423,12 @@ describe('setupServerPushReaction reconnect hydration', () => {
 
   })
 
-  it('clears operator state when a pushed snapshot violates the envelope contract', async () => {
-    const { sseStore, operatorSignals } = await loadSseStore()
-    operatorSignals.operatorSnapshot.value = {
-      root: {},
-      keepers: [],
-      inference_inflight: null,
-      persistent_agents: [],
-      recent_messages: [],
-      pending_confirm_envelope: {
-        items: [],
-        summary: {
-          actor_filter: null,
-          filter_active: false,
-          visible_count: 0,
-          total_count: 0,
-          hidden_count: 0,
-          hidden_actors: [],
-          confirm_required_actions: [],
-        },
-      },
-      available_actions: [],
-    }
-
-    sseStore.routeServerPushEvent({ type: 'operator_snapshot', payload: {
-      keepers: [],
-      snapshot_epoch: 'epoch-invalid-envelope',
-      snapshot_generation: 1,
-      snapshot_compute_sequence: 1,
-      snapshot_terminal_sequence: 1,
-    } })
-
-    expect(operatorSignals.operatorSnapshot.value).toBeNull()
-    expect(operatorSignals.operatorError.value).toBe('invalid pending_confirm_envelope')
-
-    sseStore.routeServerPushEvent({ type: 'operator_snapshot', payload: {
-      snapshot_epoch: 'epoch-recovered',
-      snapshot_generation: 1,
-      snapshot_compute_sequence: 2,
-      snapshot_terminal_sequence: 2,
-      pending_confirm_envelope: {
-        items: [],
-        summary: {
-          actor_filter: null,
-          filter_active: false,
-          visible_count: 0,
-          total_count: 0,
-          hidden_count: 0,
-          hidden_actors: [],
-          confirm_required_actions: [],
-        },
-      },
-    } })
-
-    expect(operatorSignals.operatorSnapshot.value).not.toBeNull()
-    expect(operatorSignals.operatorError.value).toBeNull()
-  })
-
-  it('clears operator state when the pushed snapshot payload is not an object', async () => {
-    const { sseStore, operatorSignals } = await loadSseStore()
-    operatorSignals.operatorSnapshot.value = {
-      root: {},
-      keepers: [],
-      inference_inflight: null,
-      persistent_agents: [],
-      recent_messages: [],
-      pending_confirm_envelope: {
-        items: [],
-        summary: {
-          actor_filter: null,
-          filter_active: false,
-          visible_count: 0,
-          total_count: 0,
-          hidden_count: 0,
-          hidden_actors: [],
-          confirm_required_actions: [],
-        },
-      },
-      available_actions: [],
-    }
-
-    sseStore.routeServerPushEvent({ type: 'operator_snapshot', payload: null } as unknown as Parameters<typeof sseStore.routeServerPushEvent>[0])
-
-    expect(operatorSignals.operatorSnapshot.value).toBeNull()
-    expect(operatorSignals.operatorError.value).toBe('operator snapshot payload is invalid')
+  it('delegates Snapshot admission and ordering to its owned consumer', async () => {
+    const { sseStore } = await loadSseStore()
+    const payload = { snapshot_epoch: 'original immutable publication' }
+    sseStore.routeServerPushEvent({ type: 'operator_snapshot', payload })
+    expect(hydrateOperatorSnapshot).toHaveBeenCalledExactlyOnceWith(payload)
+    expect(refreshDashboard).not.toHaveBeenCalled()
   })
 
   it('does not refresh hidden heavy surfaces for keeper lifecycle events on overview', async () => {
@@ -856,7 +779,6 @@ describe('setupServerPushReaction reconnect hydration', () => {
     await flushAsyncWork()
 
     expect(compositeTick.value).toEqual({ name: 'qa-king', ts_unix: 1710000000.123 })
-    expect(hydrateFleetCompositeSnapshot).not.toHaveBeenCalled()
   })
 
   it('routes agent_core_telemetry_sample to the telemetry read model without an HTTP refresh', async () => {

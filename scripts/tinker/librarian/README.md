@@ -82,14 +82,16 @@ then the schema instruction as the last user message, with
 An exact request carries `max_tokens` only when its lane declares
 `max_output_tokens`. A binding's `max-tokens` does not reach it. MASC sends the
 lane's value to every slot of the lane, clamped to each slot's declared or
-catalog output ceiling. Rollout saves 32,768 as the lane's
+catalog output ceiling. Rollout saves 65,536 as the admission lane's
 `max_output_tokens`, and the checkpoint's binding declares an output ceiling of
-32,768, so the checkpoint receives 32,768.
+32,768. The checkpoint receives 32,768, the value these runs send. The GLM slot
+(`glm-coding`, catalog ceiling 131,072) receives 65,536.
 
-A GLM run sends what MASC's GLM slot then sends: the same two messages, with
-thinking enabled, a `json_object` response format and the same `max_tokens`
-(GLM's output ceiling is higher). The slot declares no effort, so the request
-carries none, and the endpoint applies its default.
+A GLM run sends the two messages as MASC's GLM slot does, with thinking enabled
+and a `json_object` response format. It sends `max_tokens: 32768` too, so a
+prompt draft and its baseline meet the same ceiling. An answer cut at 32,768
+here can still finish in the live GLM slot. The slot declares no effort, so the
+request carries none, and the endpoint applies its default.
 
 ## Order
 

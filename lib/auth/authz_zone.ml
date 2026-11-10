@@ -150,31 +150,45 @@ let open_at_start ~now_ms ~log_path ~store_path =
 
 let snapshot t = Atomic.get t.current
 
-type revocation =
-  | Known of Authz_records.Revocation_state.t
-  | Unknown_log_stopped of L.stop
-  | Unknown_store_stopped of S.stop
-  | Unknown_files_disagree of
+type uncertain =
+  | Log_is_stopped of L.stop
+  | Store_is_stopped of S.stop
+  | Files_disagree of
       { first : H.reason
       ; rest : H.reason list
       }
-  | Unknown_store_holds_no_answer
+  | Store_answers_nothing
+
+let uncertain_to_string = function
+  | Log_is_stopped { L.path; reason } ->
+    Printf.sprintf "the authorization log %s is stopped: %s" path reason
+  | Store_is_stopped { S.path; reason } ->
+    Printf.sprintf "the external store %s is stopped: %s" path reason
+  | Files_disagree { first; rest } ->
+    "the external store and the log do not agree: "
+    ^ String.concat "; " (List.map H.reason_to_string (first :: rest))
+  | Store_answers_nothing ->
+    "the external store holds no answer, and the authorization log holds a Fresh_bootstrap"
+;;
+
+type trusted = snapshot
 
 (* A stopped file is not in the published state (plan B3b), and a zone that
-   cannot write cannot close or add a block either, so the gate asks the files
-   first. A zone whose files disagree, or whose store holds no answer, refuses
-   every commit, so it cannot close or add a block either (design 8.2-4 and
-   8.2-5). *)
-let revocation t subject =
+   cannot write cannot close or add a block either, so a decision asks the
+   files first. A zone whose files disagree, or whose store holds no answer,
+   refuses every commit, so it cannot close or add a block either (design
+   8.2-4 and 8.2-5). The probe is read first and the state after it, each as
+   the zone set it whole, so the state is the one published when the probe was
+   read, or a later one. *)
+let read t =
   match L.stopped t.log, S.stopped t.store with
-  | Some stop, (_ : S.stop option) -> Unknown_log_stopped stop
-  | None, Some stop -> Unknown_store_stopped stop
+  | Some stop, (_ : S.stop option) -> Error (Log_is_stopped stop)
+  | None, Some stop -> Error (Store_is_stopped stop)
   | None, None ->
     (match H.settle_on_entry (Atomic.get t.probe) with
-     | Error (first, rest) -> Unknown_files_disagree { first; rest }
-     | Ok H.Nothing_answered -> Unknown_store_holds_no_answer
-     | Ok (H.Answered (_ : H.settlement)) ->
-       Known (Authz_state.revocation (Atomic.get t.current).state subject))
+     | Error (first, rest) -> Error (Files_disagree { first; rest })
+     | Ok H.Nothing_answered -> Error Store_answers_nothing
+     | Ok (H.Answered (_ : H.settlement)) -> Ok (Atomic.get t.current))
 ;;
 
 type draft =
@@ -226,14 +240,10 @@ let entry_label = function
 ;;
 
 let error_to_string = function
-  | Store_stopped { S.path; reason } -> Printf.sprintf "the external store %s is stopped: %s" path reason
-  | Log_stopped { L.path; reason } ->
-    Printf.sprintf "the authorization log %s is stopped: %s" path reason
-  | Uncertain { first; rest } ->
-    "the external store and the log do not agree: "
-    ^ String.concat "; " (List.map H.reason_to_string (first :: rest))
-  | Store_holds_no_answer ->
-    "the external store holds no answer, and the authorization log holds a Fresh_bootstrap"
+  | Store_stopped stop -> uncertain_to_string (Store_is_stopped stop)
+  | Log_stopped stop -> uncertain_to_string (Log_is_stopped stop)
+  | Uncertain { first; rest } -> uncertain_to_string (Files_disagree { first; rest })
+  | Store_holds_no_answer -> uncertain_to_string Store_answers_nothing
   | Log_holds_records { next_seq } ->
     Printf.sprintf
       "the authorization log is to be installed and holds records: the next one is %d"

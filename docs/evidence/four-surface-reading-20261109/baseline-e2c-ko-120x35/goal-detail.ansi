@@ -1,0 +1,35 @@
+ [2m운영[0m  [1;7m▸작업[0m  [2m키퍼[0m  [2m기능·플러그인[0m  [2m워크스페이스[0m  [2m시스템[0m
+                                 │
+  Work                      (2)  │ [1m MASC 작업[0m  [1m[96m▸목표[0m  [2m작업 검토[0m  [2m작업 판정[0m  [paused] goal-surface-long
+  ─────────────────────────────  │ ────────────────────────────────────────────────────────────────────────────────────
+ ▸ [pause] P… 증거를 쉽게 읽는다 │   Actions: [2m[c] Request completion[0m   [x] Drop   [o] Reopen   [2m[p] Pause[0m   [r] Resume
+   [block] P…sed reading example │   [b] Block   [2m[u] Unblock
+[0m                                 │ [1m[96m  [ 1. 목표 개요 · 단계 및 지표 ]                                                   [0m
+                                 │   Title: 공유 화면에서 요청과 증거를 쉽게 읽는다
+                                 │   Goal: goal-surface-long
+                                 │   Stage: [paused]  resumes executing
+                                 │   Next: paused - [r] restores the prior state; linked Tasks continue independently
+                                 │   Metric: 세 기능의 원래 요청과 현재 상태를 읽고, 근거가 없는 상태를 완료로 오해하지
+                                 │           않는다. 긴 성공 조건도 상세에서 끝까지 읽을 수 있어야 한다. Original
+                                 │           English criterion content remains unchanged by the UI language.
+                                 │   Target: 3 / 3
+                                 │   Due: —
+                                 │   Priority: P2
+                                 │ [2m  Created: 2026-11-09T14:38:04.908961Z                                              [0m
+                                 │ [2m  Updated: 2026-11-09T14:38:04.908961Z                                              [0m
+                                 │ [2m  Link: masc://planning/goal-surface-long                                           [0m
+                                 │ [2m                                                                                    [0m
+                                 │ [1m[96m  [ 2. 연결된 작업 ]                                                                [0m
+                                 │   Open tasks: 2
+                                 │   task-surface-claimed  claimed · Preserve evidence when a read fails
+                                 │   task-surface-todo  todo · 요청의 핵심을 먼저 보여주기
+                                 │ [2m                                                                                    [0m
+                                 │ [1m[96m  [ Candle 지급 기록 [z:조회] ]                                                     [0m
+                                 │   Last observed config: off
+                                 │ [93m  Ledger: file absent; earlier history is not observed                              [39m
+                                 │ [2m  Model execution: not observed from the payout ledger                              [0m
+                                 │   [lines 1-24/38]
+                                 │
+[2m  ACTION NEEDED 1 · keeper_memory_execution:addon_unattached  z:Candle  j/k:move  Left / Esc:back  q:quit  …?[0m
+ 일정 정보가 오래됐을 수 있음
+[2m › to quietreader   (i to write)

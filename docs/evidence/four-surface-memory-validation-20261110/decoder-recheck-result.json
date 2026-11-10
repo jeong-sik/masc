@@ -1,0 +1,42 @@
+{
+  "schema": "masc.targeted-memory-validation.v1",
+  "phase": "decoder-fixture-recheck",
+  "workflow": "Test",
+  "workflow_path": ".github/workflows/test.yml",
+  "run_id": 42654972273,
+  "run_url": "https://github.com/jeong-sik/masc/actions/runs/42654972273",
+  "job_id": 129290915295,
+  "head": "f35a50b9ec9ba4d3cdd03cf0d03ea57f5924f657",
+  "ref": "fix/tui-memory-reading-20261110",
+  "event": "workflow_dispatch",
+  "attempt": 1,
+  "minimal": true,
+  "status": "completed",
+  "conclusion": "success",
+  "suites": [
+    {
+      "name": "test_tui_decode",
+      "cases": 407,
+      "passed": 407,
+      "failed": 0,
+      "conclusion": "success"
+    }
+  ],
+  "memory_success": {
+    "run_id": 42652183034,
+    "head": "b56552704a5b1350d636449d57c1ff0d920c8adc",
+    "suite": "test_tui_render_memory",
+    "cases": 13
+  },
+  "only_file_changed_since_memory_success": "test/test_tui_decode.ml",
+  "not_claimed": [
+    "Full CI",
+    "entire TUI/main build",
+    "native TUI execution",
+    "Enter event dispatch",
+    "Usage execution",
+    "installation",
+    "merge",
+    "deployment"
+  ]
+}

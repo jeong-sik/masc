@@ -77,6 +77,8 @@ let test_approval_lifecycle_roundtrip () =
 ;;
 
 let test_transcript_slot_roundtrip () =
+  let binding = Identity.approval_input_binding ~approval_id:"approval-a"
+      ~input_fingerprint:(String.make 64 'a') |> expect_ok in
   let slots =
     [ Identity.Accepted_user
     ; Identity.Tool_call
@@ -90,6 +92,7 @@ let test_transcript_slot_roundtrip () =
     ; Identity.Approval_replay
     ; Identity.Approval_replay_correction
     ; Identity.Approval_continuation
+    ; Identity.Autonomous_input_binding [ binding ]
     ]
   in
   List.iter
@@ -190,6 +193,28 @@ let test_provenance_pair_is_all_or_nothing () =
     ]
 ;;
 
+let test_autonomous_input_wire () =
+  let owner = Ids.Turn_ref.make ~trace_id:"trace-fixture" ~absolute_turn:7 in
+  let key = Identity.Autonomous_turn owner in
+  check bool "actual turn key survives the wire" true
+    (Identity.delivery_key_equal key
+       (Identity.delivery_key_to_yojson key |> Identity.delivery_key_of_yojson |> expect_ok));
+  let input id digest = `Assoc
+    [ "approval_id", `String id; "input_fingerprint", `String digest ] in
+  let first = input "approval-a" (String.make 64 'a')
+  and second = input "approval-b" (String.make 64 'b') in
+  let slot inputs = `Assoc [ "kind", `String "autonomous_input_binding"; "inputs", `List inputs ] in
+  let decode values = Identity.transcript_slot_of_yojson (slot values) in
+  let ordered = decode [ first; second ] |> expect_ok in
+  let reversed = decode [ second; first ] |> expect_ok in
+  check bool "canonical source order remains part of identity" false
+    (Identity.transcript_slot_equal ordered reversed);
+  List.iter (fun values -> match decode values with
+    | Error _ -> () | Ok _ -> fail "invalid canonical input vector was accepted")
+    [ []; [ first; first ]; [ input "approval-a" "bad-digest" ]
+    ; [ input "approval-a" (String.make 64 'A') ]; [ input "bad id" (String.make 64 'a') ] ]
+;;
+
 let () =
   run
     "keeper chat delivery identity"
@@ -209,6 +234,7 @@ let () =
             "transcript slots roundtrip"
             `Quick
             test_transcript_slot_roundtrip
+        ; test_case "autonomous input wire identity" `Quick test_autonomous_input_wire
         ; test_case
             "schema drift fails closed"
             `Quick

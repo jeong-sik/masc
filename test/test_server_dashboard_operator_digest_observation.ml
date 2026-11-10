@@ -465,6 +465,56 @@ let test_execution_partial_read_retries_after_quiet_repair () =
     Eio.Fiber.yield ();
     check bool "quiet recovered Execution has no healthy timer" false (Eio_mock.Clock.try_advance clock))
 
+let test_execution_lifecycle_patch_preserves_typed_namespace_outcome () =
+  with_runtime (fun ~env:_ ~sw:_ ~clock:_ ~state ~scope ->
+    let module Execution = Server_dashboard_http_execution_surfaces in
+    let module Attempt = Execution.For_testing in
+    let owner = Attempt.owner_for_state ~state in
+    let row = `Assoc ["name", `String "patched-keeper"; "status", `String "idle";
+      "phase", `String "running"; "keepalive_running", `Bool true] in
+    let payload row = `Assoc ["keepers", `List [row]] in
+    let completeness = [Dashboard_projection_read.Complete; Partial "original source read failed"] in
+    List.iter (fun completeness ->
+      let read = Attempt.begin_execution_attempt ~owner () in
+      check bool "actual source observation is installed" true
+        (Attempt.publish_execution_observation read {
+          json = payload row; next_deadline_unix = None; completeness});
+      let old_attempt = Attempt.begin_execution_attempt ~owner () in
+      let old_generation = Attempt.execution_publication_generation ~owner () in
+      Execution.patch_keeper_dependent_caches ~keeper_name:"patched-keeper"
+        ~event:(Keeper_lifecycle_events.Phase_event Keeper_state_machine.Paused);
+      let source, outcome = Execution.execution_cached_observation_for_scope ~state scope in
+      check bool "a patch retains the exact original typed read outcome" true (outcome = Some completeness);
+      check bool "the patch keeps its hard publication fence" true
+        (Attempt.execution_publication_generation ~owner () > old_generation);
+      check string "the actual lifecycle patch reached the cached row" "paused"
+        Yojson.Safe.Util.(source.json |> member "keepers" |> index 0 |> member "phase" |> to_string);
+      (match Server_dashboard_http_namespace_truth.namespace_truth_snapshot_from_caches state with
+       | None -> fail "actual patched observation disappeared from canonical Namespace"
+       | Some json ->
+           let expected = match completeness with Complete -> "complete" | Partial _ -> "partial" in
+           check string "Namespace retains the patched source's original completeness" expected
+             Yojson.Safe.Util.(json |> member "projection_diagnostics" |> member "read_completeness" |> to_string));
+      check bool "an attempt admitted before the lifecycle patch cannot publish" false
+        (Attempt.publish_execution_attempt_success old_attempt (payload row))) completeness;
+    let read = Attempt.begin_execution_attempt ~owner () in
+    let declaration = Keeper_declared_roster.to_json {
+      name = "patched-keeper"; requirements = [Runtime_check_required]} in
+    check bool "declaration snapshot is admitted" true
+      (Attempt.publish_execution_attempt_success read (payload declaration));
+    Execution.patch_keeper_dependent_caches ~keeper_name:"patched-keeper"
+      ~event:(Keeper_lifecycle_events.Custom_event {verb = Started; phase = None});
+    let _, outcome = Execution.execution_cached_observation_for_scope ~state scope in
+    check bool "a stale declaration uses actual invalidation, not outcome migration" true (outcome = None);
+    check bool "explicit invalidation still removes canonical Namespace readiness" true
+      (Option.is_none (Server_dashboard_http_namespace_truth.namespace_truth_snapshot_from_caches state));
+    (* The cache helper is also a typed complete writer used by existing
+       fixtures. Its explicit success marker remains a complete observation. *)
+    Cache.mark_cached_surface_success (Attempt.cache owner) (payload row);
+    let _, outcome = Execution.execution_cached_observation_for_scope ~state scope in
+    check bool "canonical cache success retains its existing typed contract" true
+      (outcome = Some Dashboard_projection_read.Complete))
+
 let () = run "Operator Digest observation owner" ["publication", [
   test_case "request and source admission" `Quick test_request_and_source_admission;
     test_case "partial rows retain failure debt without success" `Quick test_partial_read_retains_body_without_success;
@@ -478,4 +528,6 @@ let () = run "Operator Digest observation owner" ["publication", [
   test_case "Digest actual partial read recovers after quiet raw repair" `Quick
     (fun () -> test_actual_partial_retry_after_quiet_repair Digest);
   test_case "Execution actual partial read recovers after quiet raw repair" `Quick
-    test_execution_partial_read_retries_after_quiet_repair]]
+    test_execution_partial_read_retries_after_quiet_repair;
+  test_case "Execution lifecycle patch preserves typed Namespace outcome" `Quick
+    test_execution_lifecycle_patch_preserves_typed_namespace_outcome]]

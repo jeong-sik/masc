@@ -1,7 +1,7 @@
 // MASC Dashboard — Keeper runtime trace evidence (split from keeper.ts)
 
 import { isRecord } from '../components/common/normalize'
-import { fetchWithTimeout, jsonHeaders, DEFAULT_GET_TIMEOUT_MS } from './core'
+import { get } from './core'
 
 // --- Runtime trace evidence ---
 
@@ -690,11 +690,9 @@ export async function fetchKeeperRuntimeTrace(
   if (typeof opts?.turnId === 'number') params.set('turn_id', String(opts.turnId))
   if (typeof opts?.limit === 'number') params.set('limit', String(opts.limit))
   const qs = params.toString()
-  const resp = await fetchWithTimeout(
+  const raw = await get<unknown>(
     `/api/v1/keepers/${encodeURIComponent(name)}/runtime-trace${qs ? `?${qs}` : ''}`,
-    { headers: jsonHeaders(), signal: opts?.signal },
-    DEFAULT_GET_TIMEOUT_MS,
+    { signal: opts?.signal },
   )
-  if (!resp.ok) throw new Error(`runtime trace fetch failed: ${resp.status}`)
-  return parseKeeperRuntimeTrace(await resp.json())
+  return parseKeeperRuntimeTrace(raw)
 }

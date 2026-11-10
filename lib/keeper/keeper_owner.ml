@@ -2074,7 +2074,12 @@ let start
                 | Error error -> Log.Keeper.error ~keeper_name:t.keeper_name
                     "startup operation store close failed: %s"
                     (Chat_operation_store.error_to_string error));
-               Eio.Promise.resolve resolve response)
+               Eio.Promise.resolve resolve response;
+               (* The owner leaves the drain rather than looping: this handle is
+                  closed, so no queued or future command can be answered. The
+                  drain runs in [Eio.Fiber.fork_daemon], whose callback must
+                  return [`Stop_daemon]. *)
+               `Stop_daemon)
         | Command (Autonomous_chat_handoff_ready child, resolve) ->
           let ready =
             match Atomic.get t.turn_in_flight, operation_runner with

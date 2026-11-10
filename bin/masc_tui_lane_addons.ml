@@ -1439,13 +1439,12 @@ let value_indent_cells = 2
 
 module Span = Masc_tui_span
 
-(* Frame vocabulary ([Masc_tui_theme.tone]): a label is the accent, and the
-   keys, bullets and stamps around a value are dim. Nothing here colours a
-   value by what it means. *)
+(* Labels use the reader's foreground with bold weight: the raw Accent hue
+   can be unreadable on a light palette. Keys, bullets and stamps stay dim;
+   values keep their plain style. *)
 let muted_style () = Span.fg (Masc_tui_theme.tone Masc_tui_theme.Dim)
-let label_style () =
-  Span.combine (Span.fg (Masc_tui_theme.tone Masc_tui_theme.Accent)) (Span.weight Masc_tui_theme.Sgr.bold)
 let bold_style () = Span.weight Masc_tui_theme.Sgr.bold
+let label_style () = bold_style ()
 
 (* Wrap [text] after a styled lead so continuation pieces start under the
    text, not under the lead. [split] cuts the text to a width. By default it
@@ -1460,7 +1459,7 @@ let led_rows ?(split = fun ~width text -> document_rows ~width text) ~width ~lea
     (match pieces with [] -> [ "" ] | pieces -> pieces)
 
 (* A page that lists facts. A heading names a group and takes the label
-   colour. Fields are label and value pairs: the fields of one indent share a
+   weight. Fields are label and value pairs: the fields of one indent share a
    label column across the page, so their values start under each other, and
    a long value hangs under itself. Text is a sentence and keeps its own
    indent. A label column wider than half the width leaves the values a
@@ -2251,7 +2250,7 @@ let declared_layers ~identity workers =
   place [] [] nodes
 
 (* The flow of one Plugin, for the Links tab and the full flow: a heading takes
-   the label colour and a field shares the label column of [fact_spans]. The
+   the label style and a field shares the label column of [fact_spans]. The
    lines under a heading stay plain text. *)
 let flow_rows ?(embedded=false) view =
   let text line = Fact_text line in

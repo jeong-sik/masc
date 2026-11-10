@@ -1,4 +1,4 @@
-# Plugins Links 탭과 전체 흐름을 강조색 제목과 라벨 열로 그리기
+# Plugins Links 탭과 전체 흐름을 굵은 제목과 라벨 열로 그리기
 
 ## 무엇이 달라지나요
 
@@ -6,13 +6,21 @@ Plugins 상세의 `2 Links` 탭과 그 탭에서 `f` 로 여는 전체 흐름은
 
 이 PR 은 두 화면을 `fact_row` 목록으로 바꿔서 #51047(Installation 탭)과 같은 방식으로 그려요.
 
-- 제목 여섯 가지(`Declared Add-on layers · last received snapshot`, `Bound external inputs · declared sources`, `Add-on layers · worker state and latest completed result summary`, `Declared inputs and outputs`, `Result -> retained evidence -> …`, `Last evidence sharing receipt · this session`)와 `Layer N`, `Layer unavailable: …` 가 강조색이에요.
-- `Action target:`, `Read:`, `Input binding:`, `Input:`, `Output:` 은 라벨이 강조색이고, 페이지의 가장 긴 라벨에 한 칸을 더한 한 열에서 값이 시작해요.
+- 제목 여섯 가지(`Declared Add-on layers · last received snapshot`, `Bound external inputs · declared sources`, `Add-on layers · worker state and latest completed result summary`, `Declared inputs and outputs`, `Result -> retained evidence -> …`, `Last evidence sharing receipt · this session`)와 `Layer N`, `Layer unavailable: …` 가 굵은 글씨예요.
+- `Action target:`, `Read:`, `Input binding:`, `Input:`, `Output:` 은 라벨이 굵은 글씨이고, 페이지의 가장 긴 라벨에 한 칸을 더한 한 열에서 값이 시작해요.
 - 제목 아래 줄(`[fx-queue-watch]  |  [fx-health-probe]`, 워커 상태, 입력 소스 줄)은 문장 그대로예요. 앞 공백과 낱말을 안 바꿨어요.
 - Links 탭의 `Input:`·`Output:` 줄은 `detail_lines` 가, 흐름은 `lines` 가 따로 줄바꿈해서 두 묶음의 값이 시작하는 칸이 달랐어요. 이제 `links_lines` 한 곳에서 `fact_spans` 를 한 번 불러요.
-- 낱말은 그대로예요. 달라진 것은 색과 값이 시작하는 칸이에요.
+- 낱말은 그대로예요. 제목·라벨의 강조와 값이 시작하는 칸을 바꿔요.
 
-## 실측
+## 대비 지적 후 보완
+
+초기 후보는 공통 `label_style`의 밝은 cyan Accent를 제목과 라벨에 더 넓게 썼어요. 아래 `default-light` 캡처의 대비는 1.91:1이었어요. 별도 수리 #50964를 합친 증명 빌드의 측정은 이 후보에 그 수리가 들어있다는 증거가 아니에요.
+
+후속 수정은 기존 `bold_style`을 공통 `label_style`에서도 재사용해요. 색을 지정하지 않고 독자의 기본 글자색에서 굵기만 바꿔요. Links·전체 흐름뿐 아니라 같은 함수를 쓰는 Installation·도움말·선택 탭·읽기 라벨에도 적용해요. 값·오류 상태의 색과 줄바꿈 계산은 바꾸지 않아요. 새 색상 상수·설정·테마 의존성을 추가하지 않아요.
+
+현재 main 위의 rebase에서는 #51013의 폭을 받는 `help_lines ~width`를 보존하고, 전체 흐름만 `fact_spans ~width (flow_rows view)`로 그려요. 후속 후보는 구문·diff·changelog 검사와 소스 검토 범위이며 새 빌드·화면·대비 측정은 없어요. 아래 그림과 수치는 초기 색상 후보의 기록이에요.
+
+## 초기 후보의 실측
 
 고정 서버 위에서 증명 빌드로 같은 키 순서를 눌러 찍었어요. 앞은 #51047 의 코드 머리 `4e3818466142`(run `42787911079`)이고, 뒤는 이 코드를 main 위로 옮기기 전 머리 `83cdefa5d1de`(run `42788074374`)예요. main 위로 옮긴 코드 머리 `a2b4831ccd1e`(run `42794208207`)로는 120x50과 24x60 두 조건의 7장씩 14장을 다시 찍어, 뒤 화면과 칸 단위로 같은 것(글자와 색 모두)을 확인했어요. 세 빌드 모두 안의 시험 3개가 통과했어요.
 
@@ -76,13 +84,13 @@ Links 탭에서 글자 칸이 바뀌는 곳은 `Input:`, `Output:` 값이에요.
 - 넓은 화면에서 `Input:`, `Output:` 값이 앞보다 8칸 오른쪽에서 시작해요(7칸 -> 15칸). 라벨은 짧은데 값이 멀어 보일 수 있어요.
 - 24칸에서 Links 탭이 4행 길어져요(109 -> 113). 라벨이 따로 행을 쓰기 때문이에요.
 - 제목 아래 줄은 아직 문자열이에요. `Layer 0` 아래 `[fx-queue-watch]  |  [fx-health-probe]` 와 워커 상태 줄, `Declared inputs and outputs` 아래 목록은 기본 글자색 그대로예요. 이 PR 은 제목과 필드만 바꿔요.
-- `default-light` 에서 강조색 대비가 1.91:1 이에요(기본 팔레트는 7.97:1). 강조색을 올리는 스택(#50922 -> #50923 -> #50964)이 따로 열려 있어요.
-- 같은 모양의 라벨 열 그리기가 `Masc_tui_page_reading` 에도 있어요. 라벨 색(강조색 대 흐린색)이 달라서 이 PR 도 따로 그려요. 합치는 일은 이슈 #51036 에 적어 뒀어요.
+- 초기 후보의 `default-light` 강조색 대비는 1.91:1이었어요(기본 팔레트는 7.97:1). 후속 수정은 그 색을 지정하지 않지만 새 대비 수치는 측정하지 않았어요. 기본 글자색을 유지해도 터미널 자체의 전경·배경 설정까지 보장하지는 않아요.
+- 같은 모양의 라벨 열 그리기가 `Masc_tui_page_reading` 에도 있어요. 후속 후보의 라벨은 굵은 기본색, 그쪽은 흐린색이에요. 합치는 일은 이슈 #51036 에 적어 뒀어요.
 
 ## 안 잰 것
 
 - 실제 터미널(iTerm2, Terminal.app 등)에서 본 모습은 안 봤어요.
 - Plugins 응답은 직접 만든 값이에요. 이 걷기에 안 나오는 줄이 있어요: `Read:`(스냅샷을 못 읽었을 때), `Last evidence sharing receipt`, 순환 의존 문구(`Cyclic or unresolved upstream dependency`), 저장된 binding 만 있는 `Stored bindings`.
 - 전체 흐름에서 `J`/`K` 로 끝까지 내려 본 화면은 안 찍었어요(한 번 내린 화면만 찍었어요).
-- 기술 화면(`D`)과 Installation 탭은 이 PR 이 안 바꿔요. 찍지 않았어요.
-- 시험은 읽기만 했어요. 로컬 `dune` 은 안 돌렸고, CI 가 돌려요.
+- 기술 화면(`D`)과 Installation 탭은 초기 캡처에서 찍지 않았어요. 공통 라벨 스타일을 바꾼 후속 후보도 아직 화면으로 보지 않았어요.
+- 시험은 읽기만 했어요. 초기 빌드 기록은 위에 명시한 커밋만 검증해요. 후속 후보의 로컬 `dune`·타입 검사·시험·CI/Actions 조회나 실행은 하지 않았어요.

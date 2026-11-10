@@ -144,6 +144,8 @@ let reason_name : H.reason -> string = function
     Printf.sprintf "digest differs %s found %s" (intent_name intent) (label_of found)
   | H.Commit_not_in_log hash -> "commit not in log " ^ label_of hash
   | H.Intent_unplaced intent -> "intent unplaced " ^ intent_name intent
+  | H.Answers_differ { asked; answered } ->
+    Printf.sprintf "answers differ, %d asked and %d answered" asked answered
 ;;
 
 let value_name : H.t -> string = function
@@ -158,21 +160,70 @@ let settle_name : (H.settlement, H.reason) result -> string = function
   | Error reason -> "stays pending, " ^ reason_name reason
 ;;
 
+(* ---- which records take an intent ---- *)
+
+(* The probe is told, for each record, the change it takes an intent for.
+   [Authz_state.apply] says so for the records of a real log. The records of
+   these fixtures mean nothing to it, so a case says it. *)
+type events =
+  | Named_by_the_store
+      (* A record is the record of an event exactly when an intent of the store
+         names it, as in the files of a writer that never wrote outside its
+         zone. Every other record is one that only the log holds. *)
+  | Listed of R.t list
+      (* These records are the records of events, whatever the store names. *)
+
+let named_change entries (record : R.t) =
+  List.find_map
+    (function
+      | S.Intent_pending (intent : S.intent)
+        when R.Hash.equal intent.S.intended_next_record_digest record.R.hash ->
+        Some intent.S.change
+      | S.Intent_pending _ | S.Committed _ | S.Aborted_intent _ -> None)
+    entries
+;;
+
+(* The probe counts the changes and does not read them, so a listed record
+   takes the same change as any other. *)
+let high_water_of events entries (record : R.t) =
+  match events with
+  | Named_by_the_store -> named_change entries record
+  | Listed listed ->
+    if List.exists (fun (event : R.t) -> R.Hash.equal event.R.hash record.R.hash) listed
+    then Some revoke
+    else None
+;;
+
+let feed events entries probe record =
+  H.Probe.add probe record ~high_water:(high_water_of events entries record)
+;;
+
 (* ---- the judgments ---- *)
 
-let probe_of entries records =
-  List.fold_left H.Probe.add (H.Probe.create (state_of entries)) records
+let probe_of events entries records =
+  List.fold_left (feed events entries) (H.Probe.create (state_of entries)) records
 ;;
 
 type case =
   { label : string
   ; store : S.entry list
   ; records : R.t list
+  ; events : events
   ; value : string
   ; settle : string
   }
 
-let case label store records value settle = { label; store; records; value; settle }
+let case label store records value settle =
+  { label; store; records; events = Named_by_the_store; value; settle }
+;;
+
+(* A case whose log holds the records of events that the store did not take an
+   intent for, or holds fewer than the store answered. *)
+let case_of_events label store records events value settle =
+  { label; store; records; events = Listed events; value; settle }
+;;
+
+let probe_of_case c = probe_of c.events c.store c.records
 
 (* What a probe says, against what a case expects. *)
 let check_probe label expected probe =
@@ -401,6 +452,51 @@ let cases =
       (log 1 @ [ other_record 2 ])
       ("mismatch: commit not in log r2; " ^ differs "r1>r3" "other2")
       ("stays pending, " ^ differs "r1>r3" "other2")
+  ; (* The epochs (design 5.1): the log holds as many records of events as the
+       store answers. A mode event or a revocation that was appended outside
+       the zone is a record of an event that no intent names. *)
+    case_of_events
+      "an event that the store never took an intent for, after the last answered one"
+      booted
+      (log 2)
+      [ record 1; record 2 ]
+      "mismatch: answers differ, 2 asked and 1 answered"
+      "nothing to settle"
+  ; case_of_events
+      "an event that the store never took an intent for, with answered events built on it"
+      (booted @ [ intent_after 2 3; committed (hash_of_record 3) ])
+      (log 3)
+      [ record 1; record 2; record 3 ]
+      "mismatch: answers differ, 3 asked and 2 answered"
+      "nothing to settle"
+  ; case_of_events
+      "a promoted intent is an answer, and an event with no intent before it is not"
+      (booted @ [ intent_after 2 3 ])
+      (log 3)
+      [ record 1; record 2; record 3 ]
+      "mismatch: answers differ, 3 asked and 2 answered"
+      "promote r2>r3"
+  ; case_of_events
+      "an event with no intent, behind an intent that is given up"
+      (booted @ [ intent_after 2 3 ])
+      (log 2)
+      [ record 1; record 2 ]
+      "mismatch: answers differ, 2 asked and 1 answered"
+      "abort r2>r3"
+  ; case_of_events
+      "the store answered more events than the log holds"
+      (answered_to 2)
+      (log 2)
+      [ record 1 ]
+      "mismatch: answers differ, 1 asked and 2 answered"
+      "nothing to settle"
+  ; case_of_events
+      "an event with no intent is not counted while the store holds no answer"
+      []
+      (log 2)
+      [ record 1; record 2 ]
+      "absent"
+      "nothing to settle"
   ]
 ;;
 
@@ -436,7 +532,7 @@ let a_settlement_is_an_entry_that_closes_the_intent () =
   and aborted_count = ref 0 in
   List.iter
     (fun c ->
-      match H.settle (probe_of c.store c.records) with
+      match H.settle (probe_of_case c) with
       | Error _ -> ()
       | Ok settlement ->
         let state = state_of c.store in
@@ -471,7 +567,7 @@ let a_settlement_is_an_entry_that_closes_the_intent () =
 let a_promoted_bootstrap_gives_its_workspace () =
   let entries = [ bootstrap_intent ] in
   let state = state_of entries in
-  match H.settle (probe_of entries (log 1)) with
+  match H.settle (probe_of Named_by_the_store entries (log 1)) with
   | Error error -> Alcotest.failf "the bootstrap is not settled: %s" (reason_name error)
   | Ok settlement ->
     (match H.settlement_entry settlement with
@@ -501,8 +597,9 @@ let rec remove_tree path =
 let in_event_loop f = Eio_main.run (fun _env -> f ())
 
 (* The probe that [Authz_log.open_at_start] builds over a file that holds
-   [text], for a store in [state], and what the open found at the end of it. *)
-let probe_of_text text state =
+   [text], for a store that holds [entries], and what the open found at the
+   end of it. *)
+let probe_of_text events entries text =
   let base = Filename.temp_dir "authz-high-water-" "" in
   Fun.protect
     ~finally:(fun () -> remove_tree base)
@@ -513,8 +610,8 @@ let probe_of_text text state =
       match
         L.open_at_start
           ~path
-          ~init:(H.Probe.create state)
-          ~step:(fun probe record -> Ok (H.Probe.add probe record))
+          ~init:(H.Probe.create (state_of entries))
+          ~step:(fun probe record -> Ok (feed events entries probe record))
       with
       | Ok (_log, probe, recovered) -> probe, recovered
       | Error error ->
@@ -529,7 +626,7 @@ let a_file_gives_the_probe_the_records_of_a_list () =
   in_event_loop (fun () ->
     List.iter
       (fun c ->
-        let probe, _recovered = probe_of_text (text_of_records c.records) (state_of c.store) in
+        let probe, _recovered = probe_of_text c.events c.store (text_of_records c.records) in
         check_probe (c.label ^ " (from a file)") c probe)
       cases)
 ;;
@@ -543,13 +640,15 @@ let a_last_line_that_never_ended_is_not_seen () =
     let complete = text_of_records (log 1) in
     let second = R.to_line (record 2) in
     let torn = complete ^ String.sub second 0 (String.length second / 2) in
-    let probe, recovered = probe_of_text torn (state_of entries) in
+    let probe, recovered = probe_of_text Named_by_the_store entries torn in
     (match recovered.L.tail with
      | L.Cut _ -> ()
      | L.Complete -> Alcotest.fail "the open did not report the cut");
     Alcotest.(check string) "the value" "matches" (value_name (H.judge probe));
     Alcotest.(check string) "the record is not there" "abort r1>r2" (settle_name (H.settle probe));
-    let probe, recovered = probe_of_text (complete ^ second ^ "\n") (state_of entries) in
+    let probe, recovered =
+      probe_of_text Named_by_the_store entries (complete ^ second ^ "\n")
+    in
     (match recovered.L.tail with
      | L.Complete -> ()
      | L.Cut _ -> Alcotest.fail "a finished line was cut");
@@ -581,6 +680,7 @@ let reasons_name_the_records () =
       , [ R.Hash.to_hex (hash_of_record 3) ] )
     ; ( H.reason_to_string (H.Intent_unplaced first)
       , [ R.Hash.to_hex (hash_of_record 1); C.to_string first.S.change ] )
+    ; H.reason_to_string (H.Answers_differ { asked = 31; answered = 29 }), [ "31"; "29" ]
     ]
   in
   List.iter
@@ -599,11 +699,20 @@ type move =
   | Entry of S.entry
   | Record of R.t
 
+let entries_of moves =
+  List.filter_map
+    (function
+      | Entry entry -> Some entry
+      | Record _ -> None)
+    moves
+;;
+
 let moved_probe moves =
+  let entries = entries_of moves in
   List.fold_left
     (fun probe move ->
       match move with
-      | Record record -> H.Probe.add probe record
+      | Record record -> feed Named_by_the_store entries probe record
       | Entry entry ->
         (match H.Probe.store_moved probe entry with
          | Ok probe -> probe
@@ -616,11 +725,8 @@ let moved_probe moves =
 (* The probe built from the whole files, the way a start builds it. *)
 let probe_from_scratch moves =
   probe_of
-    (List.filter_map
-       (function
-         | Entry entry -> Some entry
-         | Record _ -> None)
-       moves)
+    Named_by_the_store
+    (entries_of moves)
     (List.filter_map
        (function
          | Record record -> Some record
@@ -692,7 +798,7 @@ let () =
         :: List.map
              (fun c ->
                Alcotest.test_case c.label `Quick (fun () ->
-                 check_probe c.label c (probe_of c.store c.records);
+                 check_probe c.label c (probe_of_case c);
                  match c.records with
                  | [] -> check_over_empty_log c.label c (state_of c.store)
                  | (_ : R.t) :: _ -> ()))

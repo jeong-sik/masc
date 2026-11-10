@@ -55,11 +55,15 @@ module Replay = struct
           List.exists (R.Hash.equal held.Authz_state.aborted) closed)
         replay.unreached
     in
-    match Authz_state.step (Authz_state.hold_revocations replay.state (helds named)) record with
-    | Ok state ->
+    match Authz_state.apply (Authz_state.hold_revocations replay.state (helds named)) record with
+    | Ok { Authz_state.state; high_water } ->
       Ok
         (reach
-           { state; unreached; probe = H.Probe.add replay.probe record; head = R.head_after record })
+           { state
+           ; unreached
+           ; probe = H.Probe.add replay.probe record ~high_water
+           ; head = R.head_after record
+           })
     | Error refusal -> Error refusal
   ;;
 
@@ -379,7 +383,7 @@ let in_zone t draft store_writer log_writer head settlement =
         (Option.bind intent Authz_state.held_of_intent);
       Error (Record_not_appended error)
   in
-  Atomic.set t.probe (H.Probe.add (Atomic.get t.probe) record);
+  Atomic.set t.probe (H.Probe.add (Atomic.get t.probe) record ~high_water);
   let snapshot = { state; head } in
   Atomic.set t.current snapshot;
   let* () =

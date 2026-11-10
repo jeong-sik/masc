@@ -17,6 +17,10 @@ type reason =
       }
   | Commit_not_in_log of Hash.t
   | Intent_unplaced of Store.intent
+  | Answers_differ of
+      { asked : int
+      ; answered : int
+      }
 
 type t =
   | Absent
@@ -31,13 +35,19 @@ module Probe = struct
         (* The first record that follows the previous_record_hash of the pending
            intent. *)
     ; commit_seen : bool (* A record has the hash of the last [Committed]. *)
+    ; asked : int (* The records seen that took an intent. *)
     }
 
   let create state =
-    { state; head = Hash.genesis; after_previous = None; commit_seen = false }
+    { state; head = Hash.genesis; after_previous = None; commit_seen = false; asked = 0 }
   ;;
 
-  let add probe (record : Authz_record.t) =
+  let add probe (record : Authz_record.t) ~high_water =
+    let asked =
+      match high_water with
+      | Some (_ : Store.Change.t) -> probe.asked + 1
+      | None -> probe.asked
+    in
     let after_previous =
       match probe.after_previous with
       | Some _ as found -> found
@@ -55,7 +65,7 @@ module Probe = struct
       | Some committed -> Hash.equal record.Authz_record.hash committed
       | None -> false
     in
-    { probe with head = record.Authz_record.hash; after_previous; commit_seen }
+    { probe with head = record.Authz_record.hash; after_previous; commit_seen; asked }
   ;;
 
   (* No record follows the previous hash of a new intent when that hash is the
@@ -121,6 +131,26 @@ type agreement =
   | Nothing_answered
   | Answered of settlement
 
+(* How many records the store answers once the settlement is written. A
+   promoted intent is a [Committed] that the store has not written yet (design
+   5.1). *)
+let answered_after (probe : Probe.t) = function
+  | Promote (_ : Store.intent) -> Store.State.answered probe.Probe.state + 1
+  | Nothing_to_settle | Abort (_ : Store.intent) -> Store.State.answered probe.Probe.state
+;;
+
+(* The third condition of design 5.1: the epochs of the replay are the ones
+   the store holds. Only a record that takes an intent raises an epoch or
+   changes the mode, and the last [Committed] fixes every record before it, as
+   a record hash covers the hash before it. So the two agree exactly when the
+   log holds as many records that take an intent as the store answers. *)
+let check_answers (probe : Probe.t) settlement =
+  let answered = answered_after probe settlement in
+  if Int.equal probe.Probe.asked answered
+  then Ok (Answered settlement)
+  else Error (Answers_differ { asked = probe.Probe.asked; answered }, [])
+;;
+
 let settle_on_entry (probe : Probe.t) =
   match check_commit probe, settle probe with
   | Error first, Error second -> Error (first, [ second ])
@@ -134,7 +164,7 @@ let settle_on_entry (probe : Probe.t) =
     (match Store.State.last_committed probe.Probe.state, settlement with
      | None, (Nothing_to_settle | Abort _) -> Ok Nothing_answered
      | None, Promote _ | Some _, (Nothing_to_settle | Promote _ | Abort _) ->
-       Ok (Answered settlement))
+       check_answers probe settlement)
 ;;
 
 (* Over a log with no record, no record follows the previous hash of an intent
@@ -176,4 +206,11 @@ let reason_to_string = function
       "the intent for %s has no record after %s in the log, and the log does not end there"
       (Store.Change.to_string intent.Store.change)
       (Hash.to_hex intent.Store.previous_record_hash)
+  | Answers_differ { asked; answered } ->
+    Printf.sprintf
+      "the log holds %d records that take an answer of the external store, and the store answers \
+       %d: a record that changes a permission or the mode was appended outside masc, or was \
+       written by a build that asks the store for other records"
+      asked
+      answered
 ;;

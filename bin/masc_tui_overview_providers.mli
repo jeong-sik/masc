@@ -22,10 +22,10 @@
     drawn is the runtime catalogue's [quota_exhausted], as an
     [exhausted (observed)] tag on the account whose quota scope it names.
 
+    The containing Usage view owns the title.
     Pure apart from reading the terminal's local zone for clock times. *)
 
 type section = {
-  title : string;
   lines : string list;
       (** The section's rows in draw order, grouped as {!plan} orders them. *)
 }

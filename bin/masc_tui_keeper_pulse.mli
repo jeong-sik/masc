@@ -94,3 +94,14 @@ val half_hour_mark : half_hour -> string
 (** The mark one half hour draws: [·] quiet, [▁] ok, [█] failed, [▄] failed
     and ok, {!Masc_tui_keeper_mark.unknown_mark} unknown. *)
 
+(** A failed-reading count never turns an unread slot into a known zero. *)
+type failure_count = Exact of int | At_least of int | Count_unknown
+
+val failure_count : half_hour list -> failure_count
+(** Failed and failed-and-ok each count once. Any unknown reading makes a
+    positive count a lower bound, or [Count_unknown] when none is known. *)
+val failure_lower_bound : failure_count -> int
+(** The known bound, with 0 for an unknown count; it does not assert an exact count. *)
+val peak_failure_count : failure_count list -> failure_count
+(** The greatest known lower bound. A peak with an uncertain input remains
+    uncertain; no positive lower bound is [Count_unknown]. Empty is [Exact 0]. *)

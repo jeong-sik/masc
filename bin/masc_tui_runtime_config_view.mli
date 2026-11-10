@@ -36,11 +36,14 @@ val decode_source : Yojson.Safe.t -> (reading, string) result
     only [decode] prepares model evidence for Config snapshots. *)
 val summary_lines : metadata -> (tone * string) list
 val source_heading : string
-(** The title of the status page's first block, the one that names the source. *)
+(** The title of the block that identifies the configuration source. *)
 val detail_blocks :
+  ?notices:Masc_tui_page_line.t list ->
   lead:Masc_tui_page_line.t list ->
   metadata ->
   (string * Masc_tui_page_line.t list) list
-(** The status page as headed blocks of reading lines. [lead] opens the first
-    block with what only the caller knows (the path of the file read). The block
-    of key lists is left out when no key is pending, preempted or applied. *)
+(** Validation and application precede source identifiers and key lists.
+    [notices] precede the status facts, including when a failed refresh leaves
+    only a retained observation. [lead] opens the source block with what only
+    the caller knows, such as the file path. The key block is absent when no
+    key is pending, preempted or applied. *)

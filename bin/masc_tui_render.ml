@@ -156,8 +156,8 @@ let overview_capacity_lines (state : state) =
         || state.workspace_identity <> Workspace_identity_match in
       let scope =
         if retained then
-          warning (text "보존 관측 · 현재 여력 미확인" "Retained reading · current capacity unknown")
-        else text "현재 관측 · fleet 스트림" "Current reading · fleet stream"
+          [warning (text "이전 관측 · 현재 여력 미확인" "Retained reading · current capacity unknown")]
+        else []
       in
       let grade = Masc_tui_fleet_line.status_text fleet.fs_status in
       let grade_style =
@@ -165,9 +165,11 @@ let overview_capacity_lines (state : state) =
         else if fleet.fs_operator_action_required then Theme.bad ()
         else if not (Masc_tui_fleet_line.status_is_ok fleet.fs_status)
         then Theme.warn () else Theme.ok () in
-      [scope
-      ; grade_style ^ grade ^ Ansi.reset
-      ; text
+      scope
+      @ (if not retained && Masc_tui_fleet_line.status_is_ok fleet.fs_status
+            && not fleet.fs_operator_action_required then []
+         else [grade_style ^ grade ^ Ansi.reset])
+      @ [text
           (Printf.sprintf "실행 중 %d · 기동 가능 %d" fleet.fs_running_count fleet.fs_bootable_count)
           (Printf.sprintf "Running %d · bootable %d" fleet.fs_running_count fleet.fs_bootable_count)
       ; text
@@ -187,7 +189,7 @@ let overview_capacity_lines (state : state) =
 
 let overview_header (state : state) ~cols =
   badge_row ~cols
-    ~lead:(screen_title (ui_text state ~ko:" 운영 · 지금 내 결정이 필요한 일" ~en:" Operations · What needs my decision?"))
+    ~lead:(screen_title (ui_text state ~ko:" 운영" ~en:" Operations"))
     ~label:(Terminal_text.single_line state.workspace)
     ~badge:(connection_badge state)
 
@@ -224,7 +226,7 @@ let render_overview (state : state) home =
     ~title:(overview_header state ~cols)
     ~status:[]
     ~hints:(if state.keeper_navigation_open then Masc_tui_keys.keeper_navigation_hints
-            else Masc_tui_keys.footer_hints Overview)
+            else Masc_tui_keys.footer_hints ~lang:state.ui_language Overview)
     ~body:(fun ~budget:chrome_budget c ->
       let rows_started = Masc_tui_frame_timing.start_stage () in
       (* The one-time door line: the first screen a reader meets names the
@@ -234,7 +236,8 @@ let render_overview (state : state) home =
       if not state.help_hint_shown then
         c.push
           (" " ^ Ansi.dim
-           ^ Masc_tui_footer.help_hint_item ^ " — every screen's keys"
+           ^ Masc_tui_footer.help_hint_item
+           ^ ui_text state ~ko:" — 화면별 조작" ~en:" — every screen's keys"
            ^ Ansi.reset);
       c.push
         (" " ^ pressable (Press_surface Approvals)
@@ -249,9 +252,11 @@ let render_overview (state : state) home =
         if Option.equal equal_home_action (Some action) selected then c.push_selected line else c.push line
       in
       let operator_actions = Masc_tui_types.operator_actions state in
+      let empty_decisions = ui_text state
+          ~ko:"대기 중인 요청이 없습니다." ~en:"No decision is waiting on you." in
       let titles : Masc_tui_overview_cards.titles =
-        { decisions = ui_text state ~ko:"지금 필요한 결정" ~en:"Needs your decision"
-        ; continuation = ui_text state ~ko:"이어가기" ~en:"Continue"
+        { decisions = ui_text state ~ko:"확인할 일" ~en:"Needs your decision"
+        ; continuation = ui_text state ~ko:"대화" ~en:"Conversations"
         ; capacity = ui_text state ~ko:"실행 여력" ~en:"Execution capacity"
         ; actions = ui_text state ~ko:"조치가 필요한 이유" ~en:"Why action is needed"
         }
@@ -281,7 +286,7 @@ let render_overview (state : state) home =
               (Message_layout.wrap_styled_words ~max_cells:(max 1 cells))
               capacity_lines
           in
-          Masc_tui_overview_cards.draw ~titles ~inner:(framed_inner_width cols)
+          Masc_tui_overview_cards.draw ~titles ~empty_decisions ~inner:(framed_inner_width cols)
             ~rows:(budget - warning_rows)
             ~is_selected:(fun action -> Some action = selected)
             ~decisions
@@ -304,7 +309,7 @@ let render_overview (state : state) home =
            and passive health/history context follows it. Both use only spare
            rows, so opening Home starts with a decision or a place to resume. *)
         let reasons =
-          Masc_tui_overview_cards.plain_reasons ~indent:row_indent
+          Masc_tui_overview_cards.plain_reasons ~title:titles.actions ~indent:row_indent
             ~inner:(framed_inner_width cols) ~rows:(budget - essential_rows)
             operator_actions
         in
@@ -327,8 +332,8 @@ let render_overview (state : state) home =
         in
         (match decisions with
          | [] -> c.push_styled ~style:(Theme.recede ())
-             (if all_decisions = [] then " No decision is waiting on you."
-              else " Decision rows above · j/k to choose")
+             (if all_decisions = [] then " " ^ empty_decisions
+              else ui_text state ~ko:" 다른 요청 · j/k:선택" ~en:" Decision rows above · j/k to choose")
          | _ :: _ ->
              c.push_styled ~style:Ansi.bold
                (if List.length decisions = List.length all_decisions then " " ^ titles.decisions
@@ -360,12 +365,16 @@ let render_overview (state : state) home =
         let window = List.drop first actions |> List.take height in
         if show_position then
           c.push_styled ~style:(Theme.recede ())
-            (Printf.sprintf " Home destinations · %d-%d/%d · j/k to choose"
+            (Printf.sprintf (if state.ui_language = Lang_ko then
+                " 바로가기 · %d-%d/%d · j/k:선택"
+              else " Home destinations · %d-%d/%d · j/k to choose")
                (first + 1) (first + List.length window) count);
         List.iter draw_row window
       end;
       (if selection_changed then
-         c.push_styled ~style:(Theme.warn ()) " Selection changed · j/k to choose again");
+         c.push_styled ~style:(Theme.warn ())
+           (ui_text state ~ko:" 선택한 항목이 바뀌었습니다 · j/k:다시 선택"
+              ~en:" Selection changed · j/k to choose again"));
       Masc_tui_frame_timing.finish_stage ~name:"overview.rows" rows_started)
 
 
@@ -415,15 +424,15 @@ let render_memory (state : state) =
     | None ->
         let reading_note =
           match state.memory_health_error with
-          | None -> title_missing_reading ~error:None
+          | None -> ui_text state ~ko:"(미조회)" ~en:(title_missing_reading ~error:None)
           | Some _ -> ""
         in
         Printf.sprintf "%s  %s  %s  %s"
-          (screen_title (if ko then " MASC 메모리" else " MASC Memory")) reading_note timestamp
+          (screen_title (if ko then " MASC 기억" else " MASC Memory")) reading_note timestamp
           (connection_badge state)
     | Some s ->
         Printf.sprintf "%s · %s · %s · %s  %s"
-          (screen_title (if ko then " MASC 메모리" else " MASC Memory"))
+          (screen_title (if ko then " MASC 기억" else " MASC Memory"))
           (if ko then Printf.sprintf "키퍼 %d명" shown else Masc_tui_message_layout.count_noun shown "keeper")
           (match current_memory_starving_count s with
            | Some count -> Printf.sprintf (if ko then "기억 필요 %d" else "%d need memory") count
@@ -435,7 +444,7 @@ let render_memory (state : state) =
           (connection_badge state)
   in
   surface_chrome ~overflow:Paged_by_cursor state ~terminal_rows ~cols ~surface_key:"memory"
-    ~title ~hints:(Masc_tui_keys.footer_hints state.view)
+    ~title ~hints:(Masc_tui_keys.footer_hints ~lang:state.ui_language state.view)
     ~body:(fun ~budget c ->
       Render_memory.render_memory_body ~cols ~budget state
         ~push:c.push ~push_styled:c.push_styled ~push_selected:c.push_selected
@@ -453,14 +462,16 @@ let render_memory (state : state) =
    window's "[lines a-b/n]" row under it. *)
 let render_memory_fact_detail (state : state) =
   let terminal_rows, cols = get_terminal_size () in
+  let ko = state.ui_language = Lang_ko in
   let facts = Masc_tui_types.memory_fact_rows state in
   let total = List.length facts in
   let cursor = max 0 (min state.memory_facts_cursor (max 0 (total - 1))) in
   let lines =
     match List.nth_opt facts cursor with
-    | None -> [ "    This list has no fact row to read." ]
-    | Some row -> Render_memory.memory_fact_detail_lines ~cols row
+    | None -> [ ui_text state ~ko:"    읽을 사실이 없습니다." ~en:"    This list has no fact row to read." ]
+    | Some row -> Render_memory.memory_fact_detail_lines ~ko ~cols row
   in
+  let lines = Render_memory.memory_facts_scope_lines ~full:true ~cols state @ lines in
   surface_chrome state ~terminal_rows ~cols ~surface_key:"memory-fact-detail"
     ~frame:Chrome_overlay
     (* The drawing says what it actually clamped to, so [G]'s sentinel and a
@@ -470,10 +481,10 @@ let render_memory_fact_detail (state : state) =
       (Scrolled
          { scroll = state.memory_fact_detail_scroll
          ; report = (fun scroll -> Memory_fact_detail_scroll scroll) })
-    ~title:(screen_title " MASC MEMORY - FACT DETAIL")
+    ~title:(screen_title (ui_text state ~ko:" MASC 기억 · 사실" ~en:" MASC Memory · fact"))
     (* The keys project the same bindings the help sheet carries, so the
        footer and [?] cannot teach different keys. *)
-    ~hints:Masc_tui_keys.memory_fact_detail_hints
+    ~hints:(Masc_tui_keys.memory_fact_detail_hints ~lang:state.ui_language)
     ~body:(fun ~budget:_ c -> List.iter c.push lines)
 
 let rec render_memory_facts (state : state) =
@@ -483,7 +494,8 @@ let rec render_memory_facts (state : state) =
 and render_memory_facts_list (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   let open Masc.Tui_decode in
-  let keeper_name = Render_memory.facts_keeper_label state.memory_facts_keeper in
+  let ko = state.ui_language = Lang_ko in
+  let keeper_name = Render_memory.facts_keeper_label ~ko state.memory_facts_keeper in
   let rows = Masc_tui_types.memory_fact_rows state in
   let total = List.length rows in
   let now = Unix.localtime (Unix.gettimeofday ()) in
@@ -492,34 +504,36 @@ and render_memory_facts_list (state : state) =
       now.Unix.tm_sec
   in
   let filter_label =
-    Masc_tui_types.memory_category_filter_label state.memory_facts_category
+    Render_memory.memory_category_filter_text ~ko state.memory_facts_category
   in
   let query_label =
     match state.search with
     | Some q when String.length (String.trim q) > 0 ->
-        Printf.sprintf " \xc2\xb7 find \"%s\"" (Terminal_text.single_line (String.trim q))
-    | Some _ -> " \xc2\xb7 find \"\""
+        Printf.sprintf (if ko then " · 찾기 \"%s\"" else " · find \"%s\"") (Terminal_text.single_line (String.trim q))
+    | Some _ -> if ko then " · 찾기 \"\"" else " · find \"\""
     | None ->
         if String.length (String.trim state.search_last) > 0 then
-          Printf.sprintf " \xc2\xb7 filter \"%s\"" (Terminal_text.single_line (String.trim state.search_last))
+          Printf.sprintf (if ko then " · 필터 \"%s\"" else " · filter \"%s\"") (Terminal_text.single_line (String.trim state.search_last))
         else ""
   in
   let title =
-    Render_memory.facts_title ~cols
-      ~screen:(screen_title " MASC Memory")
+    Render_memory.facts_title ~ko ~cols
+      ~screen:(screen_title (if ko then " MASC 기억" else " MASC Memory"))
       ~keeper:keeper_name
       ~reading:
         (match Masc_tui_types.memory_facts_snapshot state with
          | None ->
            Render_memory.Facts_unread
-             { reading = title_missing_reading ~error:(Masc_tui_types.memory_facts_failure state) }
+             { reading = ui_text state
+                 ~ko:(if Option.is_some (Masc_tui_types.memory_facts_failure state) then "(조회 실패)" else "(미조회)")
+                 ~en:(title_missing_reading ~error:(Masc_tui_types.memory_facts_failure state)) }
          | Some _ ->
            Render_memory.Facts_loaded { total; filter_label; query_label })
       ~timestamp
       ~badge:(connection_badge state)
   in
   surface_chrome ~overflow:Paged_by_cursor state ~terminal_rows ~cols ~surface_key:"memory-facts"
-    ~title ~hints:(Masc_tui_keys.footer_hints_memory_facts ~cols ~has_rows:(total > 0))
+    ~title ~hints:(Masc_tui_keys.footer_hints_memory_facts ~lang:state.ui_language ~cols ~has_rows:(total > 0))
     ~body:(fun ~budget c ->
       Render_memory.render_memory_facts_body ~cols ~budget state
         ~push:c.push ~push_styled:c.push_styled ~push_selected:c.push_selected
@@ -597,15 +611,15 @@ let render_surface ~home (state : state) =
                 | None ->
                     let terminal_rows, cols = get_terminal_size () in
                     surface_chrome ~overflow:Fits state ~terminal_rows ~cols ~surface_key:"board-read"
-                      ~title:(screen_title (" MASC Board / " ^ Terminal_text.single_line post_id))
-                      ~hints:Masc_tui_keys.footer_hints_board_pending
+                      ~title:(screen_title (ui_text state ~ko:" MASC 게시판 / " ~en:" MASC Board / " ^ Terminal_text.single_line post_id))
+                      ~hints:(Masc_tui_keys.footer_hints_board_pending ~lang:state.ui_language)
                       ~body:(fun ~budget:_ c ->
                         match Board_detail.view_for state.board_detail ~post_id with
                         | Board_detail.Failed detail ->
                             c.push_styled ~style:(Theme.bad ())
                               ("  " ^ Terminal_text.single_line detail)
-                        | Board_detail.Absent -> c.push "  Board post has not been loaded. Press r to retry."
-                        | Board_detail.Loading -> c.push "  Loading Board post..."
+                        | Board_detail.Absent -> c.push (ui_text state ~ko:"  글을 아직 읽지 못했습니다. r로 다시 읽습니다." ~en:"  Board post has not been loaded. Press r to retry.")
+                        | Board_detail.Loading -> c.push (ui_text state ~ko:"  글을 읽는 중…" ~en:"  Loading Board post…")
                         | Board_detail.Ready _ -> ())))
   | Planning -> Masc_tui_render_work.render_planning state
   | Approvals when (match state.ask_answer_mode with Ask_answering _ -> true | Ask_browsing -> false) ->

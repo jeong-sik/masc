@@ -20,7 +20,7 @@ let handle_tool ~reader ~result_boundary name args : Tool_result.result =
     else Ok ()
   in
   let access = match B.of_string name with
-    | Some (B.Board_post_get | B.Board_post_update | B.Board_comment | B.Board_vote
+    | Some (B.Board_post_update | B.Board_comment | B.Board_vote
         | B.Board_delete | B.Board_close | B.Board_reopen) ->
       require_target Board.Reaction_post (Tool_args.get_string args "post_id" "")
     | Some B.Board_comment_vote ->
@@ -29,7 +29,7 @@ let handle_tool ~reader ~result_boundary name args : Tool_result.result =
       (match Board.reaction_target_type_of_string_opt (Tool_args.get_string args "target_type" "") with
        | None -> Ok ()
        | Some target_type -> require_target target_type (Tool_args.get_string args "target_id" ""))
-    | None | Some (B.Board_post | B.Board_list | B.Board_stats | B.Board_search
+    | None | Some (B.Board_post | B.Board_post_get | B.Board_list | B.Board_stats | B.Board_search
         | B.Board_profile | B.Board_hearths | B.Board_curation_read | B.Board_curation_submit
         | B.Board_cleanup | B.Board_sub_board_create | B.Board_sub_board_list
         | B.Board_sub_board_get | B.Board_sub_board_update | B.Board_sub_board_delete) -> Ok ()

@@ -1,0 +1,35 @@
+ Operations  ▸Work  Keepers  Features & plugins  Workspace  System
+                                 │
+  Board                     (2)  │  MASC Board
+  ─────────────────────────────  │ > 함께 읽을 요청과 댓글
+   해결한 논의와 다음 글         │   @fixture-operator [Author] · 2026-11-09 23:18:08 · open · replies 1
+ ▸ 함께 읽을 요청과 댓글         │ ────────────────────────────────────────────────────────────────────────────────────
+                                 │   이 글은 private capture용 합성 자료입니다.
+                                 │
+                                 │   Keep original Korean and English body text intact.
+                                 │   A comment is discussion evidence, not a Task completion verdict.
+                                 │
+                                 │     Post reference · masc://board/p-surface-open
+                                 │
+                                 │
+                                 │
+                                 │
+                                 │
+                                 │
+                                 │
+                                 │
+                                 │
+                                 │
+                                 │
+                                 │
+                                 │
+                                 │
+                                 │ ────────────────────────────────────────────────────────────────────────────────────
+                                 │   Comments
+                                 │   @quietreader [Keeper]  2026-11-09 23:18:08   0
+                                 │     실패 상태와 원래 본문을 함께 남깁니다.
+                                 │     Original comment text stays in its authored language.
+                                 │
+  ACTION NEEDED 1 · keeper_memory_execution:addon_unattached  j/k:body  v / V:up / down  Left / Esc:back  …?
+ Schedule may be out of date
+ › to quietreader   (i to write)

@@ -186,6 +186,22 @@ let in_private_dir ~env turn =
         ~cwd:Eio.Path.(Eio.Stdenv.fs env / private_dir))
 ;;
 
+(* A multi-account process runs a model turn only without native tools (plan
+   D3c), so the posture is judged before the client starts. The refusal names
+   no path, so the answer carries it. *)
+let native_answer posture =
+  match Runtime_account_access.authorize_native posture with
+  | Ok () -> Ok ()
+  | Error (Runtime_account_access.Native_tools_reach_other_homes _ as refusal) ->
+    Error (error R.Forbidden_403 (Runtime_account_access.native_refusal_to_string refusal))
+  | Error (Runtime_account_access.Native_unpublished as refusal) ->
+    (* The preview publishes its access before it listens. *)
+    Log.Server.warn
+      "A Keeper turn was refused: %s"
+      (Runtime_account_access.native_refusal_to_string refusal);
+    Error (error R.Internal_error_500 unexpected_refusal)
+;;
+
 let call_claude ~env ~keeper_id ~(execution : Runtime_execution.claude_code) ~account ~message =
   in_private_dir ~env (fun ~mgr ~clock ~private_dir ~cwd ->
     let config =
@@ -196,6 +212,7 @@ let call_claude ~env ~keeper_id ~(execution : Runtime_execution.claude_code) ~ac
       ; timeout_s = Some turn_timeout_s
       }
     in
+    let* () = native_answer config.native in
     Runtime_claude_code.run_turn ~mgr ~clock ~cwd ~account config ~prompt:message ~images:[]
     |> Result.map (fun (turn : Runtime_claude_code.turn_result) -> turn.model, turn.text)
     |> Result.map_error (claude_failure_answer ~keeper_id))
@@ -203,7 +220,8 @@ let call_claude ~env ~keeper_id ~(execution : Runtime_execution.claude_code) ~ac
 
 (* An ephemeral thread: Codex writes no rollout and no history for it, as
    the turn writes nothing to the log. The posture is the default of the
-   client, its least one (Native_read): Codex has no Native_none. *)
+   client, its least one (Native_read): Codex has no Native_none, so the
+   multi-account preview refuses the turn before Codex starts (plan D3c). *)
 let call_codex
       ~env
       ~keeper_id
@@ -222,6 +240,7 @@ let call_codex
       ; timeout_s = Some turn_timeout_s
       }
     in
+    let* () = native_answer config.native in
     Runtime_codex_app_server.run_turn
       ~thread:Runtime_codex_app_server.Ephemeral
       ~mgr

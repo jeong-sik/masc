@@ -1918,6 +1918,14 @@ let run_turn
       ~images
   =
   let account_home = Runtime_account_access.muse_account_home account in
+  (* HIGH-RISK-UNREVIEWED: the native tools of a turn reach what the user of
+     the server process can read, and a multi-account process allows none
+     (plan D3c). Judged before anything starts. *)
+  let* () =
+    Runtime_account_access.authorize_native config.native
+    |> Result.map_error (fun refusal ->
+      Invalid_config (Runtime_account_access.native_refusal_to_string refusal))
+  in
   let* () =
     if Filename.is_relative (storage_root storage)
     then Error (Invalid_config "Muse Code storage root must be absolute")

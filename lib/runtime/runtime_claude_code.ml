@@ -3322,6 +3322,14 @@ let run_turn ?(dynamic_tools = []) ?reasoning_effort ?(session_mode = Start)
     ?(on_terminal_received = fun () -> ()) ?on_stream_event ?on_input_observation ~account config
     ~prompt ~images =
   let result =
+    (* HIGH-RISK-UNREVIEWED: the native tools of a turn reach what the user of
+       the server process can read, and a multi-account process allows none
+       (plan D3c). Judged before anything starts. *)
+    let* () =
+      Runtime_account_access.authorize_native config.native
+      |> Result.map_error (fun refusal ->
+        Invalid_config (Runtime_account_access.native_refusal_to_string refusal))
+    in
     let* () = validate_turn ~dynamic_tools ~session_mode config ~prompt ~images in
     let* _ = reasoning_args reasoning_effort in
     let* subscription =

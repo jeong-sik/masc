@@ -54,8 +54,12 @@ val load_persisted_posts : store -> (int, string * exn) result
     Known read cleanup is finished after a normally returned state callback. *)
 
 val load_persisted_comments : store -> (int, string * exn) result
-(** Missing comments are a legitimate empty source. Invalid rows retain the
-    partial-load failure until an explicit successful reload. *)
+(** Explicit source read and model publication under persist then state.
+    First observed Missing comments are legitimate empty input. Missing after
+    this store observed Present is refused. Complete reads replace comments
+    and their index; partial rows and complete prefixes before torn tails
+    remain display-only. Plain reload cannot settle unknown writes, acknowledge
+    recovery receipts or finish model publication. *)
 
 val propagate_workspace_check :
   (unit, Board_workspace_binding.rejection) result -> unit

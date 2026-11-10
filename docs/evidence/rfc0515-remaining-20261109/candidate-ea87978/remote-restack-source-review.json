@@ -1,0 +1,20 @@
+{
+  "source": "independent read-only agent /root/completion_review",
+  "reviewed_base": "b577c0b56cdf3b1185877effd1199c6471f715e7",
+  "heads": {
+    "G4": "37f9abf8dfcfdb0f92c0caebb6fd56a2db6e3013",
+    "V8": "26947182807acad4ae73eea72cf6d055c6e8209a",
+    "W1": "c3fcbb13f45e4ba5fa2e1c362c27d590b1252010"
+  },
+  "verdict": "No concrete P0/P1/P2 found in restack integration delta",
+  "findings": [
+    "Reviewed patches preserved by range-diff",
+    "V8 keeps incoming ko and padded arguments",
+    "New Plain projection handles World closed cases and explicit view; Plain excludes World selection",
+    "Incoming age API and exact-edge grouping use current shared merge/cells API without stale constructors"
+  ],
+  "checks": [
+    "git diff b577c0b5..c3fcbb13 --check passed"
+  ],
+  "limits": "Source integration only. Frozen ea87978 compiled artifacts, test results and terminal captures do not establish this base/head compiles or runs. Not formal GitHub approval."
+}

@@ -164,14 +164,13 @@ let add_comment_with_audience
     (match staged with
      | Error _ as e -> e
      | Ok comment ->
-        (match with_persist_lock store (fun () ->
+        with_persist_lock store (fun () ->
           (* A display-only parent cannot authorize a durable comment or its
              later participant routing. Check before the append while holding
              the same lock that serializes the posts source. *)
           let* () = require_posts_source_readable store in
-          match append_comment store comment with
-          | Error _ as e -> e
-          | Ok () -> Ok (with_lock store (fun () ->
+          let* receipt = append_comment store comment in
+          let committed = with_lock store (fun () ->
               (* Commit from a fresh read: the post can change or vanish
                  while the append is in flight; bumping the stale staged
                  copy would clobber a concurrent unrelated mutation. The
@@ -223,23 +222,24 @@ let add_comment_with_audience
                    mark_dirty_comment store comment_key;
                    invalidate_post_caches store;
                    invalidate_comment_caches store;
-                   Ok { comment; audience; unresolved }))))) with
-        | Error _ as e -> e
-        | Ok committed ->
+                   Ok { comment; audience; unresolved }))) in
+          (* A normal typed rejection precedes every model mutation above.
+             Record deletion of our own appended row before acknowledging
+             its known receipt. An exception leaves publication unfinished. *)
+          (match committed with
+           | Ok _ -> ()
+           | Error _ -> with_lock store (fun () ->
+               mark_dirty_comment store (Comment_id.to_string comment.id)));
+          let* () = publish_comment_append store receipt in
           (match committed with
            | Ok _ as ok -> ok
-           | Error _ as e ->
-             (* The durable append won but the commit lost (post deleted
-                or policy flipped mid-append), so the appended row is an
-                orphan on disk. Rewrite the comments snapshot to dispose
-                of it — the snapshot cannot contain the orphan because
-                it never reached memory. If the rewrite itself fails,
-                the next successful snapshot rewrite disposes of the
-                row; until then reply-count recalculation on load skips
-                comments whose post is gone, so the orphan cannot
-                distort counts. *)
-             rewrite_comments store;
-             e)))
+           | Error _ as error ->
+             (* Retain the same persistence interval and exact append receipt.
+                A foreign append makes cleanup CAS fail instead of deleting
+                its rows. Dirty retry is volatile; restart before cleanup can
+                still reload this rejected row (#26378). *)
+             rewrite_comments_under_persistence store;
+             error)))
 ;;
 
 let add_comment store ~lookup ~post_id ~author ~content ?parent_id ?ttl_hours () =
@@ -255,20 +255,37 @@ let add_comment store ~lookup ~post_id ~author ~content ?parent_id ?ttl_hours ()
   |> Result.map (fun creation -> creation.comment)
 ;;
 
-let read_comments store ~post_id : (comment list, board_read_error) Result.t =
+(* Both the rows and their absence authority belong to this one locked view. *)
+let observe_comments_unlocked store pid : comments_observation =
+  let post_key = Post_id.to_string pid in
+  let comment_ids =
+    Hashtbl.find_opt store.comments_by_post post_key |> Option.value ~default:[]
+  in
+  let comments =
+    List.filter_map (fun cid -> Hashtbl.find_opt store.comments cid) comment_ids
+    |> List.sort compare_comments_oldest_first
+  in
+  let completeness = match require_comments_source_readable store with
+    | Ok () -> Source_complete
+    | Error error -> Source_incomplete error
+  in
+  { comments; completeness }
+;;
+
+let observe_comments store ~post_id : (comments_observation, board_read_error) Result.t =
   maybe_sweep store;
   match Post_id.of_string_for_read post_id with
   | Error e -> Error e
   | Ok pid ->
-    with_lock store (fun () ->
-      let post_key = Post_id.to_string pid in
-      let comment_ids =
-        Hashtbl.find_opt store.comments_by_post post_key |> Option.value ~default:[]
-      in
-      let comments =
-        List.filter_map (fun cid -> Hashtbl.find_opt store.comments cid) comment_ids
-      in
-      Ok (List.sort compare_comments_oldest_first comments))
+    with_persist_lock store (fun () ->
+      with_lock store (fun () -> Ok (observe_comments_unlocked store pid)))
+;;
+
+let read_comments store ~post_id : (comment list, board_read_error) Result.t =
+  let* observation = observe_comments store ~post_id in
+  match observation.completeness with
+  | Source_complete -> Ok observation.comments
+  | Source_incomplete error -> Error (Read_source_unavailable error)
 ;;
 
 let get_comment store ~comment_id : (comment, board_error) Result.t =
@@ -276,11 +293,15 @@ let get_comment store ~comment_id : (comment, board_error) Result.t =
   match Comment_id.of_string comment_id with
   | Error e -> Error e
   | Ok cid ->
-    with_lock store (fun () ->
-      let comment_key = Comment_id.to_string cid in
-      match Hashtbl.find_opt store.comments comment_key with
-      | Some comment -> Ok comment
-      | None -> Error (Comment_not_found comment_id))
+    with_persist_lock store (fun () ->
+      match require_comments_source_readable store with
+      | Error error -> Error (board_error_of_read_error (Read_source_unavailable error))
+      | Ok () ->
+        with_lock store (fun () ->
+          let comment_key = Comment_id.to_string cid in
+          match Hashtbl.find_opt store.comments comment_key with
+          | Some comment -> Ok comment
+          | None -> Error (Comment_not_found comment_id)))
 ;;
 
 (** List all comments (for profile aggregation) *)

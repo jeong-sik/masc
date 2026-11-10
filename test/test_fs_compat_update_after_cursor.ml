@@ -2,7 +2,7 @@
     locked durable update of an append-only JSONL file. Its caller passes a
     cursor with what it kept from the rows before it. The decision receives the
     rows after the cursor and what was kept, or every row and nothing kept when
-    the cursor is not a prefix of the file. *)
+    the cursor is not the end of rows of the file. *)
 
 open Alcotest
 
@@ -149,6 +149,24 @@ let test_a_shortened_file_is_read_from_its_start () =
       ~incomplete_tail:"")
 ;;
 
+let test_a_cursor_inside_a_row_is_read_from_the_start () =
+  with_store (fun path ->
+    append_raw path "a\nb\n";
+    let first = update path ~after:None in
+    (* Written through the path: the same inode, and longer than what the
+       cursor covers. The cursor stands after "a\nb\n", where the new first
+       row is still going on. *)
+    Out_channel.with_open_bin path (fun channel ->
+      Out_channel.output_string channel "abcdef\ng\n");
+    let second = update path ~after:(after first ~kept:"of the rows that were there before") in
+    check_read
+      "a cursor where no row starts"
+      second
+      ~read:Fs_compat.Rows_from_start
+      ~rows:"abcdef\ng\n"
+      ~incomplete_tail:"")
+;;
+
 let test_an_incomplete_tail_is_kept_apart () =
   with_store (fun path ->
     append_raw path "a\nb";
@@ -198,7 +216,7 @@ let () =
         ; test_case "an incomplete tail is kept apart" `Quick test_an_incomplete_tail_is_kept_apart
         ; test_case "a missing file is created empty" `Quick test_a_missing_file_is_created_empty
         ] )
-    ; ( "a cursor that is not a prefix of the file"
+    ; ( "a cursor that is not the end of rows of the file"
       , [ test_case
             "a replaced file is read from its start"
             `Quick
@@ -207,6 +225,10 @@ let () =
             "a shortened file is read from its start"
             `Quick
             test_a_shortened_file_is_read_from_its_start
+        ; test_case
+            "a cursor inside a row is read from the start"
+            `Quick
+            test_a_cursor_inside_a_row_is_read_from_the_start
         ] )
     ]
 ;;

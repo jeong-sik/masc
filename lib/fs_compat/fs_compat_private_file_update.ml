@@ -109,6 +109,12 @@ let update_private_file_durable_locked_with_io ?(create=true) ?(locking=Wait_for
            (* See Unix.lseek: only the file-position side effect is required. *)
            ignore (Unix.lseek fd 0 Unix.SEEK_SET : int);
            let before_read = Unix.fstat fd in
+           (* A row starts at the first byte of the file and after each
+              newline. *)
+           let row_starts_at offset =
+             offset = 0
+             || Char.equal (private_jsonl_read_byte fd (Bytes.create 1) (offset - 1)) '\n'
+           in
            (* Where the read starts, whether that byte starts a row, and the
               decision over the bytes read from there. *)
            let from, starts_at_row, decide =
@@ -118,14 +124,12 @@ let update_private_file_durable_locked_with_io ?(create=true) ?(locking=Wait_for
                let from = Int.max 0 (before_read.Unix.st_size - max_bytes) in
                (* Only a tail read may start inside a row; it drops that
                   fragment. *)
-               ( from
-               , from = 0
-                 || Char.equal (private_jsonl_read_byte fd (Bytes.create 1) (from - 1)) '\n'
-               , decide )
+               from, row_starts_at from, decide
              | Read_after_cursor (after, decide) ->
-               (* A cursor of another file, or one past this file's end, is not
-                  a prefix of it: the read starts at the first byte, and what
-                  the caller kept with that cursor is not handed back. *)
+               (* A cursor of another file, one past this file's end, or one
+                  where no row of this file starts is not the end of rows read
+                  from it: the read starts at the first byte, and what the
+                  caller kept with that cursor is not handed back. *)
                let read, from =
                  match after with
                  | None -> Rows_from_start, 0
@@ -137,8 +141,9 @@ let update_private_file_durable_locked_with_io ?(create=true) ?(locking=Wait_for
                         ~inode:before_read.Unix.st_ino
                         ~file_length:before_read.Unix.st_size
                     with
-                    | Some end_offset -> Rows_after_cursor kept, end_offset
-                    | None -> Rows_from_start, 0)
+                    | Some end_offset when row_starts_at end_offset ->
+                      Rows_after_cursor kept, end_offset
+                    | Some _ | None -> Rows_from_start, 0)
                in
                ( from
                , true

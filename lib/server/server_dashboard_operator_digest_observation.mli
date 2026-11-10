@@ -29,6 +29,10 @@ val is_current : owner -> bool
 val has_observation : owner -> bool
 (** Complete and partial retained bodies satisfy the cold HTTP read; a failed
     read with no body does not. GET cannot bypass partial-read retry backoff. *)
+val has_terminal_answer : owner -> bool
+(** A current-scope actual read has completed or failed. A no-result error
+    answers default GET without bypassing the source worker's failure retry;
+    it does not become a successful observation. A new owner is still cold. *)
 val begin_attempt : owner -> origin:origin -> attempt
 val publish_observation : attempt -> Dashboard_projection_cache.digest_observation -> bool
 val publish_failure_message : attempt -> string -> bool

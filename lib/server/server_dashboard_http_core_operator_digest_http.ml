@@ -8,7 +8,7 @@ let attest_instance (scope : Mcp_server.workspace_scope) = function
   | (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _) as json -> json
 
 let default_json ~state ~scope ~owner ~sw ~clock =
-  let cached () = if Owner.has_observation owner
+  let cached () = if Owner.has_terminal_answer owner
     then Some (Owner.publication owner).json else None in
   match cached () with
   | Some json -> json

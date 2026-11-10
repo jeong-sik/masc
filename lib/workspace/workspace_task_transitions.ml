@@ -85,9 +85,41 @@ let transition_broadcast_content ~new_status ~task_id ~(stated_reason : string o
   | Masc_domain.Done _ -> None
 ;;
 
+type shutdown_task_release_plan =
+  | Release_with_handoff of Masc_domain.task_handoff_context
+  | Already_receipted of string
+
+type shutdown_task_release = Shutdown_released | Shutdown_receipted
+
+type shutdown_task_release_outcome =
+  { task_id : string
+  ; backlog_version : int
+  ; release : shutdown_task_release
+  ; post_commit_error : Masc_domain.masc_error option
+  }
+
+type executed_transition =
+  { result : transition_outcome Masc_domain.masc_result
+  ; task_id : string
+  ; backlog_version : int
+  }
+
+type prepared_transition =
+  | Continue_transition of Masc_domain.task_handoff_context option
+  | Observe_shutdown_receipt of string
+
+type committed_terminal =
+  { actor : Workspace_hooks.task_terminal_actor
+  ; task : Masc_domain.task
+  }
+
 type transition_request =
   | Agent_action of { agent_name : string; action : Masc_domain.task_action }
   | Operator_cancel of { operator_id : string }
+  | Shutdown_release of
+      { agent_name : string
+      ; plan : Masc_domain.backlog -> Masc_domain.task -> shutdown_task_release_plan Masc_domain.masc_result
+      }
 
 let perform_task_transition
       config
@@ -99,19 +131,22 @@ let perform_task_transition
       ?(reason = "")
       ?handoff_context
       ()
-  : transition_outcome Masc_domain.masc_result
+  : executed_transition Masc_domain.masc_result
   =
   let agent_name, action, actor_kind =
     match request with
     | Agent_action { agent_name; action } -> agent_name, action, Agent
     | Operator_cancel { operator_id } -> operator_id, Masc_domain.Cancel, Operator
+    | Shutdown_release { agent_name; _ } -> agent_name, Masc_domain.Release, Agent
   in
   let module Transaction = struct
     type t =
-      | Noop of transition_outcome
+      | Noop of executed_transition
       | Committed of
           { submission : verification_submission option
-          ; result : transition_outcome Masc_domain.masc_result
+          ; terminal : committed_terminal option
+          ; system_broadcast : (string * string) option
+          ; execution : executed_transition
           }
   end in
   (* The workspace API owns the task FSM, while persistence of the
@@ -183,9 +218,43 @@ let perform_task_transition
           | None -> Error (Masc_domain.Task (Masc_domain.Task_error.NotFound task_id))
           | Some task -> Ok task
         in
+        let* prepared_transition =
+          match request with
+          | Agent_action _ | Operator_cancel _ -> Ok (Continue_transition handoff_context)
+          | Shutdown_release { plan; _ } ->
+            let* planned = plan backlog task in
+            (match planned with
+             | Already_receipted receipt_id ->
+               let* receipt_id = validate_task_id_r receipt_id in
+               let invalid_receipt () =
+                  Error (Masc_domain.Task (Masc_domain.Task_error.InvalidState
+                    "shutdown receipt does not name one canonical Todo Task")) in
+               (match List.filter (fun (candidate : task) ->
+                   String.equal candidate.id receipt_id) backlog.tasks with
+                | [candidate] ->
+                  (match candidate.task_status with
+                   | Masc_domain.Todo -> Ok (Observe_shutdown_receipt receipt_id)
+                   | Claimed _ | InProgress _ | AwaitingVerification _ | Done _ | Cancelled _ ->
+                     invalid_receipt ())
+                | [] | _ :: _ :: _ -> invalid_receipt ())
+             | Release_with_handoff handoff ->
+               (match task.task_status with
+                | Masc_domain.Claimed _ | Masc_domain.InProgress _ ->
+                  Ok (Continue_transition (Some handoff))
+                | Masc_domain.Todo | Masc_domain.AwaitingVerification _
+                | Masc_domain.Done _ | Masc_domain.Cancelled _ ->
+                  Error (Masc_domain.Task (Masc_domain.Task_error.InvalidState
+                    "shutdown release plan does not match the canonical Task state"))))
+        in
+        match prepared_transition with
+        | Observe_shutdown_receipt task_id ->
+          Ok (Transaction.Noop
+            { result = Ok { message = task_id ^ " shutdown release already receipted"; noop = true }
+            ; task_id; backlog_version = backlog.version })
+        | Continue_transition handoff_context ->
         let projection_owner =
           match request with
-          | Agent_action { agent_name; _ } -> Some agent_name
+          | Agent_action { agent_name; _ } | Shutdown_release { agent_name; _ } -> Some agent_name
           | Operator_cancel _ -> task_assignee_of_status task.task_status
         in
         let now = now_iso () in
@@ -209,7 +278,7 @@ let perform_task_transition
           | Operator_cancel { operator_id } ->
             Workspace_task_lifecycle.decide_operator_cancel
               ~operator_id ~task_status:task.task_status ~now ~reason:stated_reason
-          | Agent_action _ ->
+          | Agent_action _ | Shutdown_release _ ->
             Workspace_task_lifecycle.decide
               ~new_verification_id:(fun () -> Random_id.prefixed ~prefix:"vrf-" ~bytes:16)
               ~same_agent:(same_task_actor config agent_name)
@@ -294,7 +363,7 @@ let perform_task_transition
         (* An operator stops the Task without authoring its owner's handoff. *)
         let backlog_update =
           match request with
-          | Agent_action _ -> backlog_update
+          | Agent_action _ | Shutdown_release _ -> backlog_update
           | Operator_cancel _ ->
             let transitioned_task =
               { backlog_update.transitioned_task with handoff_context = task.handoff_context }
@@ -372,13 +441,13 @@ let perform_task_transition
           Log.TaskState.debug "task %s: %s on %s — no-op" task_id action_s
             (task_status_to_string task.task_status);
           Ok (Transaction.Noop
-            { message =
+            { result = Ok { message =
                 Printf.sprintf
                   "%s already %s (no-op)"
                   task_id
                   (task_status_to_string task.task_status)
             ; noop = true
-            })
+            }; task_id; backlog_version = backlog.version })
         end
         else (
           let backlog_update =
@@ -417,14 +486,20 @@ let perform_task_transition
              supersede delete below exists to prevent. The dashboard shows such
              a record while [decide_verdict] refuses any verdict carrying its
              id. *)
-          (try write_backlog config backlog_update.backlog with
+          let persistence =
+          (try
+             match write_backlog_result config backlog_update.backlog with
+             | Ok persistence -> persistence
+             | Error message -> raise (Backlog_write_failed message)
+           with
            | Eio.Cancel.Cancelled _ as e -> raise e
            | exn ->
              (match pending_verification with
               | None -> ()
               | Some (_, verification_id, _) ->
                 compensate_verification_request ~verification_id);
-             raise exn);
+             raise exn)
+          in
           let submission = match pending_verification with
            | None -> None
            | Some (assignee, verification_id, claim) ->
@@ -445,8 +520,24 @@ let perform_task_transition
                       | Masc_domain.Cancelled _ -> None)
                  }
           in
+          let system_broadcast =
+            transition_broadcast_content ~new_status ~task_id ~stated_reason
+            |> Option.map (fun content -> content, agent_name)
+          in
+          let terminal =
+            if Masc_domain.task_status_is_terminal new_status
+               && not (Masc_domain.task_status_is_terminal task.task_status)
+            then Some
+              { actor = (match request with
+                  | Agent_action { agent_name; _ } | Shutdown_release { agent_name; _ } ->
+                    Workspace_hooks.Task_terminal_agent agent_name
+                  | Operator_cancel { operator_id } ->
+                    Workspace_hooks.Task_terminal_operator operator_id)
+              ; task = backlog_update.transitioned_task }
+            else None
+          in
           (* A projection error changes the public result, not the committed
-             submission. Cancellation still escapes without a receipt. *)
+             submission or terminal snapshot. Cancellation still escapes. *)
           let result =
             try
               let run_post_commit label f =
@@ -490,38 +581,6 @@ let perform_task_transition
                    ?reason:stated_reason
                    ?handoff_context:backlog_update.persisted_handoff_context
                    ()));
-              (* Post-commit projection, isolated like the terminal hook below. The
-                 backlog write already committed, so letting [broadcast] escape here
-                 would report a committed transition as [IoError] and skip both the
-                 activity event and [task_terminal_committed_fn] — the author would
-                 never be woken about a cancellation that did happen, which is the
-                 failure this change exists to remove. [Eio.Cancel.Cancelled] still
-                 propagates: a cancelled fiber must not be resumed. *)
-              (match
-                 transition_broadcast_content ~new_status ~task_id ~stated_reason
-               with
-               | None -> ()
-               | Some content ->
-                 (try
-                    match broadcast ~audience:System_record config ~from_agent:agent_name ~content with
-                    | Ok _ -> ()
-                    | Error error ->
-                      Log.TaskState.error
-                        "task transition committed but broadcast was not persisted task_id=%s agent=%s action=%s detail=%s"
-                        task_id
-                        agent_name
-                        action_s
-                        (broadcast_error_to_string error)
-                  with
-                  | Eio.Cancel.Cancelled _ as exn -> raise exn
-                  | exn ->
-                    Log.TaskState.error
-                      "task transition committed but broadcast failed task_id=%s \
-                       agent=%s action=%s detail=%s"
-                      task_id
-                      agent_name
-                      action_s
-                      (Printexc.to_string exn)));
               run_post_commit "activity" (fun () ->
               (match new_status with
                | Masc_domain.Claimed _ ->
@@ -617,38 +676,6 @@ let perform_task_transition
                 Masc_domain.task_status_is_done new_status
                 && not (Masc_domain.task_status_is_done task.task_status)
               in
-              let became_terminal =
-                Masc_domain.task_status_is_terminal new_status
-                && not (Masc_domain.task_status_is_terminal task.task_status)
-              in
-              if became_terminal
-              then (
-                let delivery =
-                  try
-                    (Atomic.get Workspace_hooks.task_terminal_committed_fn)
-                      config
-                      ~actor:(match request with
-                        | Agent_action { agent_name; _ } ->
-                          Workspace_hooks.Task_terminal_agent agent_name
-                        | Operator_cancel { operator_id } ->
-                          Workspace_hooks.Task_terminal_operator operator_id)
-                      ~task_id
-                  with
-                  | Eio.Cancel.Cancelled _ as exn -> raise exn
-                  | exn ->
-                    Workspace_hooks.Task_terminal_delivery_degraded
-                      { kind = "hook_exception"; detail = Printexc.to_string exn }
-                in
-                match delivery with
-                | Workspace_hooks.Task_terminal_delivered -> ()
-                | Workspace_hooks.Task_terminal_delivery_degraded { kind; detail } ->
-                  Log.TaskState.error
-                    "task terminal commit succeeded but reconciliation delivery degraded \
-                     task_id=%s agent=%s kind=%s detail=%s"
-                    task_id
-                    agent_name
-                    kind
-                    detail);
               let phase_duration_ms () =
                 task_duration_ms_since ~now:now_ts task.task_status
               in
@@ -716,7 +743,8 @@ let perform_task_transition
             | e ->
               Error (Masc_domain.System (Masc_domain.System_error.IoError (Printexc.to_string e)))
           in
-          Ok (Transaction.Committed { submission; result }))
+          Ok (Transaction.Committed { submission; terminal; system_broadcast
+            ; execution = { result; task_id; backlog_version = persistence.committed_revision } }))
     with
     | Eio.Cancel.Cancelled _ as e -> raise e
     | e ->
@@ -725,8 +753,46 @@ let perform_task_transition
   in
   match transaction with
   | Error _ as error -> error
-  | Ok (Transaction.Noop outcome) -> Ok outcome
-  | Ok (Transaction.Committed { submission; result }) ->
+  | Ok (Transaction.Noop execution) -> Ok execution
+  | Ok (Transaction.Committed { submission; terminal; system_broadcast; execution }) ->
+    (* System records retain their explicit mention semantics, so broadcast
+       delivery may acquire intake too. Keep the original broadcast -> terminal
+       order after releasing backlog, using only the captured commit. *)
+    let action_s = Masc_domain.task_action_to_string action in
+    (match system_broadcast with
+     | None -> ()
+     | Some (content, from_agent) ->
+       (try
+          match broadcast ~audience:System_record config ~from_agent ~content with
+          | Ok _ -> ()
+          | Error error ->
+            Log.TaskState.error
+              "task transition committed but broadcast was not persisted task_id=%s agent=%s action=%s detail=%s"
+              task_id from_agent action_s (broadcast_error_to_string error)
+        with
+        | Eio.Cancel.Cancelled _ as exn -> raise exn
+        | exn ->
+          Log.TaskState.error
+            "task transition committed but broadcast failed task_id=%s agent=%s action=%s detail=%s"
+            task_id from_agent action_s (Printexc.to_string exn)));
+    (* The backlog acquisition has ended. A cancellation delivery may acquire
+       intake, whose recovery paths acquire backlog; never call it under the
+       canonical lock. Use the immutable commit even if projections failed. *)
+    (match terminal with
+     | None -> ()
+     | Some { actor; task } ->
+       let delivery =
+         try (Atomic.get Workspace_hooks.task_terminal_committed_fn) config ~actor ~task with
+         | Eio.Cancel.Cancelled _ as exn -> raise exn
+         | exn -> Workspace_hooks.Task_terminal_delivery_degraded
+             { kind = "hook_exception"; detail = Printexc.to_string exn }
+       in
+       (match delivery with
+        | Workspace_hooks.Task_terminal_delivered -> ()
+        | Workspace_hooks.Task_terminal_delivery_degraded { kind; detail } ->
+          Log.TaskState.error
+            "task terminal commit succeeded but reconciliation delivery degraded task_id=%s agent=%s kind=%s detail=%s"
+            task.id agent_name kind detail));
     (match submission with
      | None -> ()
      | Some { task; assignee; verification_id; claim; superseded_verification_id }
@@ -767,19 +833,34 @@ let perform_task_transition
             task_id
             verification_id
             (Printexc.to_string exn)));
-    result
+    Ok execution
 ;;
 
 let transition_task_outcome_r config ~agent_name ~task_id ~action
     ?prepare_verification_request ?expected_version ?notes ?reason ?handoff_context () =
-  perform_task_transition config ~request:(Agent_action { agent_name; action })
+  let open Result.Syntax in
+  let* execution = perform_task_transition config ~request:(Agent_action { agent_name; action })
     ~task_id ?prepare_verification_request ?expected_version ?notes ?reason
-    ?handoff_context ()
+    ?handoff_context () in
+  execution.result
 ;;
 
 let cancel_task_as_operator_r config ~operator_id ~task_id ~reason ?expected_version () =
-  perform_task_transition config ~request:(Operator_cancel { operator_id })
-    ~task_id ~reason ?expected_version ()
+  let open Result.Syntax in
+  let* execution = perform_task_transition config ~request:(Operator_cancel { operator_id })
+    ~task_id ~reason ?expected_version () in
+  execution.result
+;;
+
+let release_task_for_shutdown_r config ~agent_name ~task_id ~plan () =
+  let open Result.Syntax in
+  let* execution = perform_task_transition config
+      ~request:(Shutdown_release { agent_name; plan }) ~task_id () in
+  let release, post_commit_error = match execution.result with
+    | Ok { noop = true; _ } -> Shutdown_receipted, None
+    | Ok { noop = false; _ } -> Shutdown_released, None
+    | Error error -> Shutdown_released, Some error in
+  Ok { task_id = execution.task_id; backlog_version = execution.backlog_version; release; post_commit_error }
 ;;
 
 let transition_task_r
@@ -951,6 +1032,7 @@ let commit_verdict_r
                { Masc_domain.task_id; verification_id; producer; authority; committed_at = now }
                :: backlog.pending_completion_approvals
            in
+           let committed_task = { task with task_status = new_status; handoff_context } in
            let new_backlog =
              { backlog with
                pending_completion_rejections;
@@ -960,11 +1042,7 @@ let commit_verdict_r
                  List.map
                    (fun (t : task) ->
                       if String.equal t.id task_id
-                      then
-                        { t with
-                          task_status = new_status
-                        ; handoff_context
-                        }
+                      then committed_task
                       else t)
                    backlog.tasks
              }
@@ -1016,7 +1094,7 @@ let commit_verdict_r
                         Workspace_hooks.Task_terminal_operator operator_id
                       | Masc_domain.System_llm_agent _ ->
                         Workspace_hooks.Task_terminal_system authority_actor)
-                    ~task_id
+                    ~task:committed_task
                 with
                 | Workspace_hooks.Task_terminal_delivered -> ()
                 | Workspace_hooks.Task_terminal_delivery_degraded { kind; detail } ->

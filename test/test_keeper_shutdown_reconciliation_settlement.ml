@@ -381,7 +381,7 @@ let check_settlement_blocked ~config operation result =
   | Error error -> fail (Keeper_shutdown_store.error_to_string error)
 ;;
 
-let test_settlement_replans_after_unrelated_task_creation () =
+let test_settlement_progresses_despite_each_unrelated_task_creation () =
   with_workspace (fun ~config ->
     let keeper_name = "settlement-version-race" in
     write_keeper_meta_exn ~config ~keeper_name;
@@ -390,13 +390,12 @@ let test_settlement_replans_after_unrelated_task_creation () =
     claim_task_exn ~config ~keeper_name first;
     claim_task_exn ~config ~keeper_name ~auto_start:true second;
     let operation = settlement_operation ~config ~keeper_name [first; second] in
-    let inserted = ref None in
+    let inserted = ref [] in
     let before_release () =
-      match !inserted with
-      | Some _ -> ()
-      | None ->
-        let id = add_task_exn ~config "unrelated concurrent Task" in
-        inserted := Some (task_exn ~config id)
+      (* A real unrelated writer wins the former gap on EVERY invocation.
+         Retrying a stale snapshot would never release the first Task. *)
+      let id = add_task_exn ~config "unrelated concurrent Task" in
+      inserted := task_exn ~config id :: !inserted
     in
     let settled, settled_ids = settlement_exn ~config ~before_release operation in
     List.iter (check_returned_with_receipt ~config operation) [first; second];
@@ -404,43 +403,15 @@ let test_settlement_replans_after_unrelated_task_creation () =
       (List.sort String.compare [first; second])
       (List.map Keeper_id.Task_id.to_string settled_ids |> List.sort String.compare);
     let backlog = backlog_exn ~config in
-    check int "only creation and the original releases change the backlog"
-      (operation.expected_backlog_version + 3) backlog.version;
+    check int "each original release progresses despite another real writer"
+      2 (List.length !inserted);
+    check int "only unrelated creation and original releases change the backlog"
+      (operation.expected_backlog_version + 4) backlog.version;
     check int "operation records the authoritative backlog revision"
       backlog.version settled.expected_backlog_version;
-    match !inserted with
-    | None -> fail "release boundary was not reached"
-    | Some task -> check bool "unrelated Task is unchanged" true
-        (task = task_exn ~config task.id))
-;;
-
-let test_settlement_blocks_task_transferred_during_replan () =
-  with_workspace (fun ~config ->
-    let keeper_name = "settlement-owner-race" in
-    let successor = "settlement-new-owner" in
-    write_keeper_meta_exn ~config ~keeper_name;
-    write_keeper_meta_exn ~config ~keeper_name:successor;
-    let first = add_task_exn ~config "transferred Task" in
-    let second = add_task_exn ~config "unreleased original Task" in
-    List.iter (claim_task_exn ~config ~keeper_name) [first; second];
-    let operation = settlement_operation ~config ~keeper_name [first; second] in
-    let remaining = task_exn ~config second in
-    let transferred = ref None in
-    let before_release () =
-      match !transferred with
-      | Some _ -> ()
-      | None ->
-        ignore (task_result_exn (Workspace.release_task_r config ~agent_name:keeper_name ~task_id:first ()));
-        claim_task_exn ~config ~keeper_name:successor first;
-        transferred := Some (task_exn ~config first)
-    in
-    check_settlement_blocked ~config operation
-      (Keeper_shutdown_finalize.For_testing.settle_tasks ~before_release ~config operation);
-    check bool "remaining original Task stays owned" true (remaining = task_exn ~config second);
-    match !transferred with
-    | None -> fail "release boundary was not reached"
-    | Some task -> check bool "successor ownership is preserved" true
-        (task = task_exn ~config first))
+    List.iter (fun (task : Masc_domain.task) ->
+      check bool "unrelated Task is unchanged" true
+        (task = task_exn ~config task.id)) !inserted)
 ;;
 
 let test_settlement_replan_rechecks_keeper_trace () =
@@ -474,28 +445,63 @@ let test_settlement_replan_rechecks_keeper_trace () =
       (original = task_exn ~config task_id))
 ;;
 
-let test_settlement_recovers_already_committed_receipt () =
+let test_settlement_records_nonprefix_receipt_before_another_release () =
   with_workspace (fun ~config ->
-    let keeper_name = "settlement-receipt-replay" in
+    let keeper_name = "settlement-nonprefix-receipt" in
     write_keeper_meta_exn ~config ~keeper_name;
-    let task_id = add_task_exn ~config "already released Task" in
-    claim_task_exn ~config ~keeper_name task_id;
-    let operation = settlement_operation ~config ~keeper_name [task_id] in
+    let first = add_task_exn ~config "still owned original Task" in
+    let second = add_task_exn ~config "already released second Task" in
+    List.iter (claim_task_exn ~config ~keeper_name) [first; second];
+    let operation = settlement_operation ~config ~keeper_name [first; second] in
     let handoff_context : Masc_domain.task_handoff_context =
-      { summary = "recorded handoff"; reason = None; next_step = None; failure_mode = None
+      { summary = "preserved second Task handoff"; reason = None; next_step = None; failure_mode = None
       ; evidence_refs = [receipt_ref operation]; updated_at = None; updated_by = None }
     in
     ignore (task_result_exn (Workspace.release_task_r config ~agent_name:keeper_name
-      ~task_id ~expected_version:operation.expected_backlog_version ~handoff_context ()));
+      ~task_id:second ~expected_version:operation.expected_backlog_version ~handoff_context ()));
     let before = backlog_exn ~config in
-    let settled, settled_ids = settlement_exn ~config ~before_release:(fun () -> ()) operation in
-    check bool "receipt recovery does not rewrite or consume the Task again" true
-      (before = backlog_exn ~config);
-    check (list string) "committed receipt settles its original identity" [task_id]
-      (List.map Keeper_id.Task_id.to_string settled_ids);
-    check int "operation catches up to the committed release"
-      before.version settled.expected_backlog_version;
-    check_returned_with_receipt ~config operation task_id)
+    let first_before = task_exn ~config first in
+    let second_before = task_exn ~config second in
+    let canonical_bytes = Fs_compat.load_file (Workspace_backlog.backlog_path config) in
+    let boundaries = ref 0 in
+    let before_release () =
+      incr boundaries;
+      match !boundaries with
+      | 1 -> ()
+      | 2 ->
+        (* A crash here must find B recorded while A is still owned. Merely
+           returning both IDs after releasing A would fail this boundary. *)
+        let stored = match Keeper_shutdown_store.load ~config ~keeper_name operation.operation_id with
+          | Ok stored -> stored | Error error -> fail (Keeper_shutdown_store.error_to_string error) in
+        (match stored.phase with
+         | Finalizing_tasks ids ->
+           check (list string) "only the committed second receipt was recorded"
+             [second] (List.map Keeper_id.Task_id.to_string ids)
+         | Prepared | Joining_lanes | Joined_idle | Cleanup_ready _ | Reconciliation_required _
+         | Finalized _ | Owner_absent _ | Operator_absence_acknowledged _ | Blocked _ | Superseded _ ->
+           fail "the existing receipt was not recorded before another release");
+        check int "receipt recovery keeps the observed canonical revision"
+          before.version stored.expected_backlog_version;
+        check bool "receipt recovery leaves the canonical backlog unchanged" true
+          (before = backlog_exn ~config);
+        check string "receipt recovery does not rewrite canonical bytes" canonical_bytes
+          (Fs_compat.load_file (Workspace_backlog.backlog_path config));
+        check bool "the first Task remains owned before its release" true
+          (first_before = task_exn ~config first)
+      | _ -> fail "settlement repeated a recorded original Task"
+    in
+    let settled, ids = settlement_exn ~config ~before_release operation in
+    check int "one receipt is recorded before the remaining Task is released" 2 !boundaries;
+    check (list string) "both original Task identities are recorded"
+      (List.sort String.compare [first; second])
+      (List.map Keeper_id.Task_id.to_string ids |> List.sort String.compare);
+    check int "only the remaining release advances the canonical backlog"
+      (before.version + 1) (backlog_exn ~config).version;
+    check int "operation records the actual remaining release revision"
+      (backlog_exn ~config).version settled.expected_backlog_version;
+    check bool "the prior receipt and handoff are preserved" true
+      (second_before = task_exn ~config second);
+    List.iter (check_returned_with_receipt ~config operation) [first; second])
 ;;
 
 let () =
@@ -520,14 +526,12 @@ let () =
             test_recovery_blocks_interrupted_lane_join
         ] )
     ; ( "task settlement"
-      , [ test_case "replans a real release CAS after unrelated Task creation" `Quick
-            test_settlement_replans_after_unrelated_task_creation
-        ; test_case "preserves a Task transferred to another owner" `Quick
-            test_settlement_blocks_task_transferred_during_replan
+      , [ test_case "settles original Tasks despite a writer at every former gap" `Quick
+            test_settlement_progresses_despite_each_unrelated_task_creation
         ; test_case "replan rejects a changed Keeper trace" `Quick
             test_settlement_replan_rechecks_keeper_trace
-        ; test_case "recovers a committed release receipt without consuming again" `Quick
-            test_settlement_recovers_already_committed_receipt
+        ; test_case "records a non-prefix receipt before releasing another original Task" `Quick
+            test_settlement_records_nonprefix_receipt_before_another_release
         ] )
     ]
 ;;

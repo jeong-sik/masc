@@ -82,9 +82,10 @@ module For_testing : sig
     config:Workspace.config ->
     Keeper_shutdown_types.t ->
     (Keeper_shutdown_types.t * Keeper_id.Task_id.t list, error) result
-  (** Run real task settlement, observing the boundary after its authoritative
-      snapshot and before each release CAS. The observer belongs to this call;
-      production uses the same settlement with a no-op observer. *)
+  (** Run real task settlement, observing the former read/release gap before
+      the per-release lifecycle key, exact owner observation and canonical
+      same-lock re-read, validation and release. The observer belongs to this
+      call; production uses the same path with a no-op observer. *)
 
   val remove_volumes_after_teardown
     :  teardown:(unit, string) result

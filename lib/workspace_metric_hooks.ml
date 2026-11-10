@@ -467,12 +467,12 @@ let install () =
 
   (* Tell the Task's author that the work they filed was cancelled.
      The Task's Goal links do not determine this recipient. *)
-  let deliver_task_cancellation config ~actor ~task_id =
+  let deliver_task_cancellation config ~actor ~task =
     match
       Keeper_task_cancellation_wake.notify_author
         ~config
         ~actor
-        ~task_id
+        ~task
     with
     | Keeper_task_cancellation_wake.Delivered _
     | Keeper_task_cancellation_wake.Already_present _
@@ -480,11 +480,6 @@ let install () =
     | Keeper_task_cancellation_wake.Self_cancelled
     | Keeper_task_cancellation_wake.No_author
     | Keeper_task_cancellation_wake.Author_not_a_keeper _ -> None
-    | Keeper_task_cancellation_wake.Backlog_read_failed { detail } ->
-      Some
-        { degraded_kind = "cancellation_author_backlog_read_failed"
-        ; degraded_detail = detail
-        }
     | Keeper_task_cancellation_wake.Author_lookup_failed { author; detail } ->
       Some
         { degraded_kind = "cancellation_author_lookup_failed"
@@ -505,9 +500,9 @@ let install () =
         }
   in
   Atomic.set Workspace_hooks.task_terminal_committed_fn
-    (fun config ~actor ~task_id ->
+    (fun config ~actor ~task ->
        let cancellation_degraded =
-         deliver_task_cancellation config ~actor ~task_id
+         deliver_task_cancellation config ~actor ~task
        in
        match cancellation_degraded with
        | None -> Workspace_hooks.Task_terminal_delivered

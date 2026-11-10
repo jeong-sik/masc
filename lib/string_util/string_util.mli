@@ -20,20 +20,6 @@ val query_tokens : string -> string list
     (space, tab, CR, LF) into non-empty tokens. UTF-8 bytes pass
     through opaquely. *)
 
-val ascii_punctuation_tokens : string -> string list
-(** [ascii_punctuation_tokens text] splits on ASCII punctuation and whitespace,
-    lowercases ASCII token bytes, and keeps UTF-8 bytes inside tokens. It is the
-    shared tokenizer for anti-rationalization-style contract-token matching,
-    where punctuation is a token boundary. *)
-
-val contains_contiguous_token_sequence
-  :  haystack:string list
-  -> needle:string list
-  -> bool
-(** [contains_contiguous_token_sequence ~haystack ~needle] is true when [needle]
-    appears as a contiguous token sequence inside [haystack]. Empty [needle]
-    returns [false]. *)
-
 val contains_query_term_ci : string -> string -> bool
 (** Free-text search matching. ASCII alphanumeric terms shorter than the
     trigram tokenizer's three-character minimum require ASCII word

@@ -8,8 +8,6 @@
     - [observe_or_fail] returns [Error msg] on a generic exception.
     - [observe_or_fail] re-raises [Eio.Cancel.Cancelled] without
       silently absorbing it (cooperative-cancel preservation).
-    - [observe_or_default] returns the success value on [Ok].
-    - [observe_or_default] returns the [default] on exception.
     - [observe_silent] absorbs ordinary exceptions without logging through
       the same warning path and preserves [Eio.Cancel.Cancelled].
 
@@ -117,35 +115,6 @@ let test_observe_or_fail_cancelled_does_not_count () =
     Alcotest.(check (float 0.0001))
       "Cancelled leaves failure counter unchanged" before after)
 
-let test_observe_or_default_returns_value () =
-  let v =
-    Telemetry_observe.observe_or_default ~kind:"test_default_ok"
-      ~default:0 (fun () -> 7)
-  in
-  Alcotest.(check int) "success returns 7" 7 v
-
-let test_observe_or_default_returns_default_on_exception () =
-  let v =
-    Telemetry_observe.observe_or_default ~kind:"test_default_err"
-      ~default:99 (fun () -> raise (Failure "boom"))
-  in
-  Alcotest.(check int) "exception returns default 99" 99 v
-
-let test_observe_or_default_reraises_cancelled () =
-  let raised = ref false in
-  (try
-     let _ =
-       Telemetry_observe.observe_or_default ~kind:"test_default_cancel"
-         ~default:0 (fun () ->
-           raise (Eio.Cancel.Cancelled (Failure "synthetic-cancel")))
-     in
-     ()
-   with
-  | Eio.Cancel.Cancelled _ -> raised := true);
-  Alcotest.(check bool)
-    "observe_or_default also re-raises Cancelled"
-    true !raised
-
 let test_observe_silent_absorbs_exception () =
   Telemetry_observe.observe_silent ~kind:"test_silent_err" (fun () ->
       raise (Failure "silent boom"));
@@ -179,15 +148,6 @@ let () =
             test_observe_or_fail_reraises_cancelled;
           Alcotest.test_case "Cancelled does not count" `Quick
             test_observe_or_fail_cancelled_does_not_count;
-        ] );
-      ( "observe_or_default",
-        [
-          Alcotest.test_case "returns value on success" `Quick
-            test_observe_or_default_returns_value;
-          Alcotest.test_case "returns default on exception" `Quick
-            test_observe_or_default_returns_default_on_exception;
-          Alcotest.test_case "re-raises Eio.Cancel.Cancelled" `Quick
-            test_observe_or_default_reraises_cancelled;
         ] );
       ( "observe_silent",
         [

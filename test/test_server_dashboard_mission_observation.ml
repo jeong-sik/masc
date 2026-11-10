@@ -145,17 +145,29 @@ let test_actual_worker_follows_store_and_policy_inputs () = Eio_main.run (fun en
               if Yojson.Safe.Util.member "type" event.Sse.ext_payload = `String "mission_snapshot" then
                 Eio.Stream.add frames (Yojson.Safe.Util.member "payload" event.ext_payload)) ();
           Eio.Switch.on_release sw (fun () -> Sse.unsubscribe_external id);
-          let rec ready () =
+          let ordering payload =
+            Yojson.Safe.Util.(payload |> member "mission_publication_generation" |> to_int),
+            Yojson.Safe.Util.(payload |> member "mission_publication_sequence" |> to_int) in
+          let rec ready_after ~previous ~source_changed =
             let payload = Eio.Stream.take frames in
             match Yojson.Safe.Util.member "mission_observation_state" payload with
-            | `String "ready" -> payload
-            | `String "initializing" -> ready ()
+            | `String "ready" ->
+                let generation, sequence = ordering payload in
+                let previous_generation, previous_sequence = ordering previous in
+                if (if source_changed then generation > previous_generation
+                    else generation > previous_generation ||
+                      (generation = previous_generation && sequence > previous_sequence))
+                then payload else ready_after ~previous ~source_changed
+            | `String "initializing" -> ready_after ~previous ~source_changed
             | `String "error" -> fail "production Mission read failed"
             | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ | `Assoc _ ->
                 fail "Mission frame lost its closed observation state" in
           Server_dashboard_http_core_mission.start ~state ~sw ~clock
             ~mono_clock:(Eio.Stdenv.mono_clock env);
-          let initial = ready () in
+          (* The cached cold fill and the initial source completion can both
+             publish ready. Wait for the actual source attempt, then fence
+             every later step against retained or duplicate earlier frames. *)
+          let initial = ready_after ~previous:cold ~source_changed:false in
           check string "canonical initial success uses the actual captured instance"
             (Server_observer_scope.instance_id scope)
             Yojson.Safe.Util.(initial |> member "observer_instance_id" |> to_string);
@@ -170,7 +182,7 @@ let test_actual_worker_follows_store_and_policy_inputs () = Eio_main.run (fun en
               ~fresh_until:(Masc_domain.iso8601_of_unix_seconds (now +. 60.0)) ~fresh_until_unix:(now +. 60.0)
               ~keeper_name:"actual-source-judge"
               ~recommended_action:(`Assoc ["action_kind", `String "actual-recorded-action"]) () in
-          let changed = ready () in
+          let changed = ready_after ~previous:initial ~source_changed:true in
           let actions payload = Yojson.Safe.Util.(payload |> member "recommended_actions" |> to_list) in
           check int "actual judgment append reaches the production worker and canonical frame" 1 (List.length (actions changed));
           check bool "canonical action is exactly the original recorded value" true
@@ -179,7 +191,7 @@ let test_actual_worker_follows_store_and_policy_inputs () = Eio_main.run (fun en
           check (option (float 0.0)) "the worker adopted the exact recorded expiry"
             (Some judgment.fresh_until_unix) (Owner.next_deadline_unix owner);
           Eio_mock.Clock.set_time clock judgment.fresh_until_unix;
-          let expired = ready () in
+          let expired = ready_after ~previous:changed ~source_changed:false in
           check int "at the actual policy deadline no old authority action survives" 0 (List.length (actions expired));
           let stamp = Masc_domain.iso8601_of_unix_seconds (Time_compat.now ()) in
           let agent : Masc_domain.agent = {id = None; name = "actual-mission-agent";
@@ -187,7 +199,7 @@ let test_actual_worker_follows_store_and_policy_inputs () = Eio_main.run (fun en
             current_task = None; session_bound_at = stamp; last_seen = stamp; meta = None} in
           Workspace_agent_record.write config (Filename.concat (Workspace.agents_dir config) "actual-mission-agent.json")
             ~previous:None agent;
-          let live = ready () in
+          let live = ready_after ~previous:expired ~source_changed:true in
           let truth payload = match Yojson.Safe.Util.(payload |> member "agent_briefs" |> to_list) with
             | [row] -> Yojson.Safe.Util.(row |> member "signal_truth" |> to_string)
             | rows -> failf "expected the one actual source agent, got %d" (List.length rows) in
@@ -197,7 +209,8 @@ let test_actual_worker_follows_store_and_policy_inputs () = Eio_main.run (fun en
           check (option (float 0.0)) "only the actual integer-policy boundary remains" (Some expected)
             (Owner.next_deadline_unix owner);
           Eio_mock.Clock.set_time clock expected;
-          check string "actual semantic expiry changes canonical agent truth" "stale" (truth (ready ()));
+          let stale = ready_after ~previous:live ~source_changed:false in
+          check string "actual semantic expiry changes canonical agent truth" "stale" (truth stale);
           Eio.Fiber.yield ();
           check bool "settled policies leave no healthy cadence or output feedback" false (Eio_mock.Clock.try_advance clock);
           let context = Server_dashboard_http_core_mission.request ~state

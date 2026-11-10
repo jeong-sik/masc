@@ -26,7 +26,6 @@ type outcome =
           and is not filtered out: that decision belongs to the durable intake
           gate in {!Keeper_registry_event_queue}, which admits every retention
           other than [Remove_meta] for all stimulus producers alike. *)
-  | Backlog_read_failed of { detail : string }
   | Author_lookup_failed of { author : string; detail : string }
   | Canceller_lookup_failed of { agent_name : string; detail : string }
       (** The agent actor's Keeper lookup failed. Nothing is enqueued because
@@ -39,8 +38,8 @@ val outcome_label : outcome -> string
 
 val notify_author :
   config:Workspace.config -> actor:Workspace_hooks.task_terminal_actor ->
-  task_id:string -> outcome
-(** Read [task_id] from the backlog and, when it is [Cancelled] by someone other
-    than its author, enqueue a durable [Task_cancelled] stimulus on the author's
-    lane and wake it. Every non-delivery is a typed outcome rather than a
-    silent return, so a caller can surface it. *)
+  task:Masc_domain.task -> outcome
+(** Use the captured committed Task, without re-reading its current backlog
+    row. When it is [Cancelled] by someone other than its author, enqueue a
+    durable [Task_cancelled] stimulus on the author's lane and wake it.
+    Every non-delivery is a typed outcome a caller can surface. *)

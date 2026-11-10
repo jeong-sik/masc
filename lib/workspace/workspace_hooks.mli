@@ -174,8 +174,12 @@ val push_task_event_fn :
 val task_terminal_committed_fn :
   (Workspace_utils_backend_setup.config ->
    actor:task_terminal_actor ->
-   task_id:string ->
+   task:Masc_domain.task ->
    task_terminal_delivery) Atomic.t
+(** Immutable Task and typed actor captured by its committing transaction.
+    Ordinary transitions invoke this after releasing the canonical backlog
+    acquisition, including a returned post-write projection error. Consumers
+    must use this snapshot rather than re-read a deleted or reassigned Task. *)
 
 (** Persists the immutable verification request used by the system LLM
     completion-authority lane. [task] is the current transitioned snapshot,

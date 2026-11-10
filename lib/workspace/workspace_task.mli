@@ -123,6 +123,43 @@ val release_task_r :
   ?expected_version:int ->
   ?handoff_context:Masc_domain.task_handoff_context -> unit -> string Masc_domain.masc_result
 
+type shutdown_task_release_plan = Workspace_task_transitions.shutdown_task_release_plan =
+  | Release_with_handoff of Masc_domain.task_handoff_context
+  | Already_receipted of string
+
+type shutdown_task_release = Workspace_task_transitions.shutdown_task_release =
+  | Shutdown_released
+  | Shutdown_receipted
+
+type shutdown_task_release_outcome = Workspace_task_transitions.shutdown_task_release_outcome =
+  { task_id : string
+  ; backlog_version : int
+  ; release : shutdown_task_release
+  ; post_commit_error : Masc_domain.masc_error option
+  }
+
+val release_task_for_shutdown_r :
+  config -> agent_name:string -> task_id:string ->
+  plan:(Masc_domain.backlog -> Masc_domain.task -> shutdown_task_release_plan Masc_domain.masc_result) ->
+  unit -> shutdown_task_release_outcome Masc_domain.masc_result
+(** Acquire the canonical backlog lock once, read its latest source, run the
+    pure shutdown planner, and release through the ordinary Task FSM/writer
+    before that acquisition ends. The planner must check the original shutdown
+    scope and exact operation receipt; it may return only a handoff or the ID
+    of an already-receipted original Todo (possibly before the requested Task).
+    The receipt branch skips the FSM, writes and events, returning that exact
+    ID for the caller to record before releasing any other Task. The planner
+    must not perform I/O, call owners or acquire locks.
+
+    [backlog_version] is the exact observed/committed canonical revision, not a
+    subsequent read. [Shutdown_receipted] is the checked receipt/no-write case.
+    [post_commit_error] preserves a returned Task post-write projection failure;
+    backlog mirror/recovery warnings retain the existing writer observations.
+    [Error] may also follow a primary commit: it is not proof of no effect.
+    Observe the canonical exact-operation receipt before any further action;
+    never blindly replay. Ordinary {!release_task_r} keeps its caller-supplied
+    global revision CAS contract. *)
+
 (** {1 Explicit operator recovery} *)
 
 type operator_task_recovery_result =

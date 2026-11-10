@@ -956,14 +956,42 @@ let test_terminal_hook_degradation_does_not_invalidate_task_commit () =
                ^ Masc_domain.masc_error_to_string error))
        in
        terminal_with
-         (fun _config ~actor:_ ~task_id:_ ->
+         (fun _config ~actor:_ ~task:_ ->
             Workspace_hooks.Task_terminal_delivery_degraded
               { kind = "injected"; detail = "delivery unavailable" })
          "typed delivery degradation";
        terminal_with
-         (fun _config ~actor:_ ~task_id:_ ->
+         (fun _config ~actor:_ ~task:_ ->
             failwith "injected hook exception")
          "hook exception";
+       let projection_task = "terminal snapshot after projection error" in
+       ignore (Workspace_task.add_task config ~title:projection_task ~priority:2 ~description:"");
+       let task = Masc.Workspace.get_tasks_raw config
+         |> List.find (fun (task : Masc_domain.task) -> String.equal task.title projection_task) in
+       (match transition_task task.id Masc_domain.Claim with
+        | Ok _ -> () | Error error -> fail (Masc_domain.masc_error_to_string error));
+       let captured = ref [] in
+       Atomic.set Workspace_hooks.task_terminal_committed_fn
+         (fun _ ~actor:_ ~(task : Masc_domain.task) ->
+           captured := task :: !captured;
+           Workspace_hooks.Task_terminal_delivered);
+       let previous_observer = Atomic.exchange Workspace_hooks.observe_task_transition_fn
+         (fun _ ~agent_name:_ ~task_id:_ ~transition:_ ~details:_ ->
+           failwith "injected post-write observation failure") in
+       let result = Fun.protect ~finally:(fun () ->
+           Atomic.set Workspace_hooks.observe_task_transition_fn previous_observer)
+         (fun () -> transition_task task.id Masc_domain.Cancel) in
+       check bool "ordinary post-write error remains an error result" true
+         (match result with Error _ -> true | Ok _ -> false);
+       (match !captured with
+        | [snapshot] ->
+          check string "terminal notification retains committed Task despite returned error"
+            task.id snapshot.id;
+          check bool "captured Task carries the committed cancellation" true
+            (match snapshot.task_status with
+             | Masc_domain.Cancelled _ -> true
+             | Todo | Claimed _ | InProgress _ | AwaitingVerification _ | Done _ -> false)
+        | _ -> fail "committed terminal snapshot was lost or notified more than once");
        let cancellation_title = "hook cancellation" in
        ignore
          (Workspace_task.add_task
@@ -984,7 +1012,7 @@ let test_terminal_hook_degradation_does_not_invalidate_task_commit () =
         | Ok _ -> ()
         | Error error -> fail (Masc_domain.masc_error_to_string error));
        Atomic.set Workspace_hooks.task_terminal_committed_fn
-         (fun _config ~actor:_ ~task_id:_ ->
+         (fun _config ~actor:_ ~task:_ ->
             raise
               (Eio.Cancel.Cancelled
                  (Failure "injected post-commit cancellation")));

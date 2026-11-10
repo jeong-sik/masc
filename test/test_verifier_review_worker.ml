@@ -399,7 +399,7 @@ let test_actual_host_commit_cancel_after_domain_write () =
     let hook=Atomic.get Workspace_hooks.task_terminal_committed_fn in
     Fun.protect ~finally:(fun () -> Atomic.set Workspace_hooks.task_terminal_committed_fn hook) (fun () ->
       Atomic.set Workspace_hooks.task_terminal_committed_fn
-        (fun _ ~actor:_ ~task_id:_ -> raise (Eio.Cancel.Cancelled Exit));
+        (fun _ ~actor:_ ~task:_ -> raise (Eio.Cancel.Cancelled Exit));
       (try
          ignore (Host.commit_original ~config ~task ~store ~attempt:0
            ~installation_id ~package_id ~verification_id ~notes);

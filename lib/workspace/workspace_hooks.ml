@@ -295,11 +295,11 @@ let push_task_event_fn
 let task_terminal_committed_fn
   : (Workspace_utils_backend_setup.config ->
      actor:task_terminal_actor ->
-     task_id:string ->
+     task:Masc_domain.task ->
      task_terminal_delivery) Atomic.t
   =
   Atomic.make
-    (fun _config ~actor:_ ~task_id:_ -> Task_terminal_delivered)
+    (fun _config ~actor:_ ~task:_ -> Task_terminal_delivered)
 
 let verification_submit_request_fn
   : (Workspace_utils_backend_setup.config ->

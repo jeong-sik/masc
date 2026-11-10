@@ -2112,6 +2112,8 @@
   ; The fallback descendant fixture uses the monotonic deadline owner.
   masc.monotonic_deadline
  masc_test_deps
+  masc.server
+  masc.config_dir_resolver
   masc.embedded_config
   masc.skill_config
   masc.skill_reference

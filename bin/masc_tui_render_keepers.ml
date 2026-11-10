@@ -1157,7 +1157,8 @@ let group_number = function
   | None -> "?"
 
 (* Each heading adds every member's known wakes, including paused Keepers.
-   The shared reducer keeps an unknown slot only when no known wake fills it. *)
+   The shared reducer retains unknowns alongside known counts; the state
+   summary exposes that partial observation. *)
 let group_wake_strip state (grid : Grid.t) ~now members =
   let open Masc_tui_keeper_next_run in
   let slots =

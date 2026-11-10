@@ -188,8 +188,8 @@ let wake_strip ~ko ~style slots =
       let quiet cell = Theme.recede () ^ Grid.strip_mark cell ^ Ansi.reset in
       match slot with
       | Next.Wakes_unknown -> quiet Grid.Strip_unknown
-      | Next.Wakes_with_unknown _ -> quiet Grid.Strip_unknown
-      | Wakes count ->
+      | Next.Wakes_with_unknown count when count <= 0 -> quiet Grid.Strip_unknown
+      | Next.Wakes_with_unknown count | Wakes count ->
           if count <= 0 then quiet Grid.Strip_empty else
           let tone, mark = match style with
             | Keeper_wakes { paused } ->

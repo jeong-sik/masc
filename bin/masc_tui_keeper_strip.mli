@@ -21,9 +21,11 @@ val wake_strip :
   ko:bool -> style:wake_style -> Masc_tui_keeper_next_run.wake_slot list -> string
 (** One terminal cell per half hour. An entirely unknown window gets one
     explicit label; a known empty window says no runs in this window. Mixed
-    windows retain every position: low bars for known wakes, thin lines for
-    unknown ranges and spaces for known empty slots. Only [Wake_counts]
-    scales known counts. Narrow labels fall back to one [?] or [-]. *)
+    windows retain every position: positive known counts keep their wake
+    glyph even when an unknown shares the slot. Unknown slots without known
+    wakes use thin lines; known empty slots use spaces. Only [Wake_counts]
+    scales known counts. {!wake_summary} retains the partial-count notice.
+    Narrow labels fall back to one [?] or [-]. *)
 
 type fleet_cells = { name : string; pulse : string; strip : string; due : string }
 

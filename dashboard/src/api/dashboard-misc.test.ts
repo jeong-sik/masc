@@ -9,13 +9,28 @@ vi.mock('./core', () => ({
 
 import {
   fetchKeeperMemoryHealth,
+  type KeeperMemoryChangesByPass,
   type KeeperMemoryHealthLibrarianStalled,
   type KeeperMemoryHealthResponse,
 } from './dashboard-misc'
 
+// Every pass and change the server counts, none moved since it started.
+function noMemoryChanges(): KeeperMemoryChangesByPass {
+  const none = () => ({ added: 0, absorbed: 0, superseded: 0, dropped: 0 })
+  return {
+    admission: none(),
+    durable: none(),
+    continuity: none(),
+    cleanup: none(),
+    keeper_write: none(),
+    keeper_delete: none(),
+    operator_delete: none(),
+  }
+}
+
 function keeperMemoryHealthPayload(): KeeperMemoryHealthResponse {
   return {
-    schema: 'keeper.memory_os.current_health.v13',
+    schema: 'keeper.memory_os.current_health.v14',
     generated_at: 1_700_000_000,
     keepers: [{
       keeper_id: 'healthy',
@@ -30,6 +45,14 @@ function keeperMemoryHealthPayload(): KeeperMemoryHealthResponse {
       removed: 2,
       snapshot_present: true,
       age_bins: [1, 1, 1, 1, ...Array<number>(20).fill(0)],
+      facts_by_hour: [
+        { recorded_at: 1_699_996_400, facts: 3 },
+        { recorded_at: 1_699_999_900, facts: 4 },
+      ],
+      changes_since_start: {
+        ...noMemoryChanges(),
+        durable: { added: 4, absorbed: 3, superseded: 2, dropped: 1 },
+      },
       context_cycle: { saved: null, saved_read_error: null, read_position: null, read_position_read_error: null, rewriting_through: null, unread: { snapshot: { kind: 'available', messages: [] }, memory: { kind: 'available', messages: [] } }, prepared: null, synthesis: null },
       librarian: {
         state: 'drained',
@@ -67,6 +90,8 @@ function keeperMemoryHealthPayload(): KeeperMemoryHealthResponse {
       removed: 0,
       snapshot_present: false,
       age_bins: null,
+      facts_by_hour: [],
+      changes_since_start: noMemoryChanges(),
       context_cycle: { saved: null, saved_read_error: null, read_position: null, read_position_read_error: null, rewriting_through: null, unread: { snapshot: { kind: 'available', messages: [] }, memory: { kind: 'available', messages: [] } }, prepared: null, synthesis: null },
       librarian: {
         state: 'drained',
@@ -144,7 +169,7 @@ function addLibrarianAttention(payload: KeeperMemoryHealthResponse) {
 
 function starvingKeeperPayload(): KeeperMemoryHealthResponse {
   return {
-    schema: 'keeper.memory_os.current_health.v13',
+    schema: 'keeper.memory_os.current_health.v14',
     generated_at: 1_700_000_000,
     keepers: [{
       keeper_id: 'starving',
@@ -159,6 +184,8 @@ function starvingKeeperPayload(): KeeperMemoryHealthResponse {
       removed: 0,
       snapshot_present: false,
       age_bins: null,
+      facts_by_hour: [],
+      changes_since_start: noMemoryChanges(),
       context_cycle: { saved: null, saved_read_error: null, read_position: null, read_position_read_error: null, rewriting_through: null, unread: { snapshot: { kind: 'available', messages: [] }, memory: { kind: 'available', messages: [] } }, prepared: null, synthesis: null },
       librarian: {
         state: 'drained',
@@ -491,6 +518,7 @@ describe('fetchKeeperMemoryHealth', () => {
     'keeper.memory_os.current_health.v10',
     'keeper.memory_os.current_health.v11',
     'keeper.memory_os.current_health.v12',
+    'keeper.memory_os.current_health.v13',
   ])('rejects an older memory-health envelope: %s', async schema => {
     getMock.mockResolvedValue({ ...keeperMemoryHealthPayload(), schema })
 
@@ -504,7 +532,7 @@ describe('fetchKeeperMemoryHealth', () => {
 
     const response = await fetchKeeperMemoryHealth()
 
-    expect(response.schema).toBe('keeper.memory_os.current_health.v13')
+    expect(response.schema).toBe('keeper.memory_os.current_health.v14')
     expect(response.keepers[0]).toMatchObject({
       keeper_id: 'healthy',
       revision: 7,
@@ -512,7 +540,13 @@ describe('fetchKeeperMemoryHealth', () => {
       facts: 4,
       snapshot_bytes: 512,
       age_bins: [1, 1, 1, 1, ...Array<number>(20).fill(0)],
+      facts_by_hour: [
+        { recorded_at: 1_699_996_400, facts: 3 },
+        { recorded_at: 1_699_999_900, facts: 4 },
+      ],
     })
+    expect(response.keepers[0]?.changes_since_start.durable)
+      .toEqual({ added: 4, absorbed: 3, superseded: 2, dropped: 1 })
     expect(response.keepers[1]?.read_error).toBe('invalid current snapshot')
     expect(response.keepers[1]?.updated_at).toBeNull()
     expect(response.alert_summary.snapshot_read_error_keepers).toBe(1)
@@ -527,6 +561,31 @@ describe('fetchKeeperMemoryHealth', () => {
   ])('rejects an age ladder that is not 24 counts adding up to the facts: %s', async (_label, age_bins) => {
     const payload = keeperMemoryHealthPayload()
     Object.assign(payload.keepers[0]!, { age_bins })
+    getMock.mockResolvedValue(payload)
+
+    await expect(fetchKeeperMemoryHealth()).rejects.toThrow(
+      '유효하지 않은 keeper memory health payload',
+    )
+  })
+
+  it.each([
+    ['two points in one clock hour', { facts_by_hour: [
+      { recorded_at: 1_699_999_200, facts: 3 },
+      { recorded_at: 1_699_999_900, facts: 4 },
+    ] }],
+    ['more points than the trend hours', { facts_by_hour: Array.from(
+      { length: 169 }, (_, hour) => ({ recorded_at: hour * 3600, facts: 4 })) }],
+    ['a change table without a pass', { changes_since_start: Object.fromEntries(
+      Object.entries(noMemoryChanges()).filter(([pass]) => pass !== 'operator_delete')) }],
+    ['a change table with another pass', { changes_since_start: {
+      ...noMemoryChanges(), later_pass: { added: 0, absorbed: 0, superseded: 0, dropped: 0 },
+    } }],
+    ['a negative change count', { changes_since_start: {
+      ...noMemoryChanges(), cleanup: { added: 0, absorbed: 0, superseded: 0, dropped: -1 },
+    } }],
+  ])('rejects a trend or change table the server does not write: %s', async (_label, fields) => {
+    const payload = keeperMemoryHealthPayload()
+    Object.assign(payload.keepers[0]!, fields)
     getMock.mockResolvedValue(payload)
 
     await expect(fetchKeeperMemoryHealth()).rejects.toThrow(

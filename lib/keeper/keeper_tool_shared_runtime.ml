@@ -42,13 +42,6 @@ let find_registry_meta ~(keeper_name : string) ~(source_layer : string)
     Some entry.meta
 ;;
 
-let with_registry_meta ~(keeper_name : string) ~(source_layer : string) f =
-  match find_registry_meta ~keeper_name ~source_layer with
-  | None ->
-    error_json (Printf.sprintf "keeper not found in registry: %s" keeper_name)
-  | Some meta -> f meta
-;;
-
 let assoc_override_string (key : string) (value : string) = function
   | `Assoc fields ->
     let kept_fields = List.filter (fun (k, _) -> k <> key) fields in

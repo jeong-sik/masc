@@ -1312,7 +1312,11 @@ let for_surface = function
       ; b Navigate "PgUp/PgDn" "page"
       ; b Navigate "Home/End" "top/bottom"
       ; b Navigate "p" "section"
-          ~help:"available / async runs / receipts / usage / all tools"
+          ~help:"available / async runs / receipts / usage / all tools. \
+                 All tools lists process-wide registrations, separately from \
+                 a Keeper's callable surface and observed calls. \
+                 DIRECT=direct calls allowed; SURFACES=exposure paths; \
+                 none=no exposure path."
       ; b Navigate "J/K" "Skill"
           ~help:"in async runs, select an original request; otherwise select \
                  a published Skill"

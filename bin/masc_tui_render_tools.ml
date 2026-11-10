@@ -1,15 +1,5 @@
 (** The Tools surface: what the selected Keeper's turn called, and what the
-    process has registered.
-
-    Lifted out of masc_tui_render.ml whole. The file that #3808 split out of
-    masc_tui.ml had grown back to 16,533 lines, and it could not be split
-    again while Ansi/Theme/Terminal_text lived inside the same executable
-    stanza -- any surface that draws has to reach them, so any surface that
-    moved had to stay. masc_tui_ansi is a library now, which is what makes a
-    per-surface module possible at all.
-
-    Twelve definitions moved; the interface exposes the two the rest of the
-    renderer actually calls. *)
+    process has registered. *)
 
 open Masc_tui_types
 open Tui_decode
@@ -1718,7 +1708,10 @@ let tools_display_lines ?(cols = 80) ?terminal_rows (state : state) =
     lazy begin
     match state.tools_inventory with
     | None ->
-        [ Theme.warn (), " Registered Catalog — no inventory reading" ]
+        [ Theme.warn (),
+          ui_text state
+            ~ko:" 전체 등록 도구 — 조회 자료 없음"
+            ~en:" All registered tools — no inventory reading" ]
     | Some { Masc.Tui_decode_tools.ts_usage; _ } ->
     let registered_rows = Tool_tree.rows registered_tools in
     let surfaces_text (tool : Masc.Tui_decode_tools.tool_entry) =
@@ -1749,9 +1742,12 @@ let tools_display_lines ?(cols = 80) ?terminal_rows (state : state) =
                 { calls = tu_calls; failures = tu_failures; p95_ms = tu_p95_ms })
     in
     let heading =
+      let count = List.length registered_tools in
       [ Ansi.bold,
-        Printf.sprintf " Registered Catalog — %s"
-          (Masc_tui_message_layout.count_noun (List.length registered_tools) "tool");
+        ui_text state
+          ~ko:(Printf.sprintf " 전체 등록 도구 — %d개" count)
+          ~en:(Printf.sprintf " All registered tools — %s"
+                 (Masc_tui_message_layout.count_noun count "tool"));
         Ansi.dim, Tool_table.catalog_tool_header layout ]
     in
     heading
@@ -2145,12 +2141,7 @@ let tools_display_lines ?(cols = 80) ?terminal_rows (state : state) =
         ; Ansi.dim, "   TRIGGERED/DELIVERED/ACTIONS=호출/전달/이후 행동 · 마지막 사용은 원장에 기록된 시각"
         ; Ansi.dim, "   호출 기록이 있는 행만 표시합니다. 읽지 못한 원장은 아래에 표시합니다."
         ]
-    | Masc_tui_types.Tools_catalog Tools_catalog_list ->
-        [ Theme.info (), " MASC 전체 등록 도구 목록입니다. 선택 Keeper의 호출 범위는 별도입니다."
-        ; Ansi.dim, "   DIRECT=직접 호출 허용 · SURFACES=도구가 노출되는 경로"
-        ; Ansi.dim, "   surfaces=none은 노출 경로 없음입니다. 등록만으로 사용을 뜻하지 않습니다."
-        ]
-    | Masc_tui_types.Tools_catalog (Tools_catalog_volumes _) -> []
+    | Masc_tui_types.Tools_catalog (Tools_catalog_list | Tools_catalog_volumes _) -> []
   in
   let pane_lines =
     match state.tools_pane with

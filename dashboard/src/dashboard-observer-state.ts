@@ -4,6 +4,8 @@ export const dashboardObserverConnected = signal(false)
 export const dashboardObserverReady = signal(false)
 export const dashboardObserverInstance = signal<string | null>(null)
 export const dashboardObserverLastError = signal<string | null>(null)
+export const dashboardObserverRejectedFrameCount = signal(0)
+export const dashboardObserverLastRejectedFrameError = signal<string | null>(null)
 export const dashboardObserverLastActivityAt = signal(0)
 export const dashboardObserverIdleTimeoutMs = signal<number | null>(null)
 export const dashboardObserverReconnectCount = signal(0)
@@ -29,6 +31,13 @@ export function noteDashboardObserverDisconnected(): void {
   dashboardObserverLastDisconnectedAt.value = Date.now()
 }
 
+/** Frame rejection is separate from stream failure: it cannot restart the
+ * admitted connection or turn one malformed event into global HTTP recovery. */
+export function noteDashboardObserverRejectedFrame(detail: string): void {
+  dashboardObserverRejectedFrameCount.value++
+  dashboardObserverLastRejectedFrameError.value = detail
+}
+
 export function noteDashboardObserverEvent(now: number = Date.now()): void {
   eventTimestamps.push(now)
   while (eventTimestamps.length && eventTimestamps[0]! < now - 60_000) eventTimestamps.shift()
@@ -43,6 +52,8 @@ export function _resetDashboardObserverCounterForTests(): void {
   dashboardObserverReady.value = false
   dashboardObserverInstance.value = null
   dashboardObserverLastError.value = null
+  dashboardObserverRejectedFrameCount.value = 0
+  dashboardObserverLastRejectedFrameError.value = null
   dashboardObserverLastActivityAt.value = 0
   dashboardObserverIdleTimeoutMs.value = null
   dashboardObserverReconnectCount.value = 0

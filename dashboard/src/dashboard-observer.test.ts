@@ -22,6 +22,7 @@ vi.mock('./sse', () => ({ recordServerPushEvent: mocks.record }))
 
 import { connectDashboardObserver, disconnectDashboardObserver, receiveDashboardObserverEvent } from './dashboard-observer'
 import { dashboardObserverReady, dashboardObserverAdmissionCount, _resetDashboardObserverCounterForTests } from './dashboard-observer-state'
+import * as observerState from './dashboard-observer-state'
 import { subscribeDashboardObservation } from './lib/observation-refresh'
 import { TRANSPORT_RETRY_BASE_MS } from './config/constants'
 
@@ -45,6 +46,59 @@ beforeEach(() => {
 afterEach(() => { disconnectDashboardObserver(); vi.useRealTimers() })
 
 describe('Dashboard observation SSE', () => {
+  it.each([
+    '{',
+    JSON.stringify({ type: 'workspace_dataset_changed', dataset: 'dashboard_observation',
+      topic: 'health', scope: ['future_scope', 'unconfirmed'] }),
+    JSON.stringify({ type: 'workspace_dataset_changed', dataset: 'dashboard_observation',
+      topic: 'health', scope: ['keeper', ' '] }),
+  ])('discards one invalid frame and delivers the next frame on the same admitted stream: %s', async invalid => {
+    mocks.fetch.mockResolvedValue(response())
+    const changed = vi.fn(), recovery = vi.fn()
+    const unsubscribe = subscribeDashboardObservation({ topics: ['health'] }, changed, recovery)
+    try {
+      connectDashboardObserver()
+      await flush()
+      const valid = JSON.stringify({ type: 'workspace_dataset_changed', dataset: 'dashboard_observation',
+        topic: 'health', scope: 'workspace' })
+      source.enqueue(new TextEncoder().encode(`data: ${invalid}\n\ndata: ${valid}\n\n`))
+      await flush()
+      expect(dashboardObserverReady.peek()).toBe(true)
+      expect(changed).toHaveBeenCalledTimes(1)
+      expect(observerState.dashboardObserverRejectedFrameCount.peek()).toBe(1)
+      expect(observerState.dashboardObserverLastRejectedFrameError.peek()).toEqual(expect.any(String))
+      for (let i = 0; i < 5; i++) {
+        source.enqueue(new TextEncoder().encode(': keepalive\n\n'))
+        await vi.advanceTimersByTimeAsync(60_000)
+      }
+      expect(mocks.fetch).toHaveBeenCalledTimes(1)
+      expect(recovery).toHaveBeenCalledTimes(1)
+      expect(dashboardObserverAdmissionCount.peek()).toBe(1)
+    } finally { unsubscribe() }
+  })
+
+  it('isolates a subscriber exception without reconnecting or dropping the following frame', async () => {
+    mocks.fetch.mockResolvedValue(response())
+    const changed = vi.fn().mockImplementationOnce(() => { throw new Error('subscriber failed') })
+    const recovery = vi.fn()
+    const unsubscribe = subscribeDashboardObservation({ topics: ['health'] }, changed, recovery)
+    try {
+      connectDashboardObserver()
+      await flush()
+      const valid = JSON.stringify({ type: 'workspace_dataset_changed', dataset: 'dashboard_observation',
+        topic: 'health', scope: 'workspace' })
+      source.enqueue(new TextEncoder().encode(`data: ${valid}\n\ndata: ${valid}\n\n`))
+      await flush()
+      expect(dashboardObserverReady.peek()).toBe(true)
+      expect(changed).toHaveBeenCalledTimes(2)
+      expect(observerState.dashboardObserverRejectedFrameCount.peek()).toBe(1)
+      expect(observerState.dashboardObserverLastRejectedFrameError.peek()).toBe('subscriber failed')
+      await vi.advanceTimersByTimeAsync(TRANSPORT_RETRY_BASE_MS)
+      expect(mocks.fetch).toHaveBeenCalledTimes(1)
+      expect(recovery).toHaveBeenCalledTimes(1)
+    } finally { unsubscribe() }
+  })
+
   it('admits an authenticated fresh stream before recovery and performs no healthy HTTP polling', async () => {
     mocks.fetch.mockResolvedValue(response())
     const order: boolean[] = []

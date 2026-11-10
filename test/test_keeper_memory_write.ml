@@ -193,7 +193,7 @@ let replace_current_facts ?expected_revision ~keepers_dir ~keeper_id facts =
 let seed_current ~config ~(meta : Masc.Keeper_meta_contract.keeper_meta) claim =
   let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.Masc.Workspace.base_path in
   let value = fact claim in
-  match Current.upsert_fact ~keepers_dir ~keeper_id:meta.name ~now:value.last_seen
+  match Current.upsert_fact ~pass:Masc.Keeper_memory_commit_pass.Keeper_write ~keepers_dir ~keeper_id:meta.name ~now:value.last_seen
       ~source:{Current.kind=Current.Explicit_write; trace_id="fixture"} value with
   | Ok _ -> Masc.Keeper_memory_os_types.memory_id value
   | Error _ -> Alcotest.fail "could not seed current fact"
@@ -205,7 +205,7 @@ let admit_pending ~keepers_dir ~keeper_id =
   let batch = match Queue.read_pending ~keepers_dir ~keeper_id |> require with
     | Some batch -> batch | None -> Alcotest.fail "pending input missing" in
   let facts = Queue.candidates batch |> List.map (fun (row : Queue.candidate) -> row.fact) in
-  ignore (Current.apply_disposition ~explicit_candidate_ids:(Queue.candidate_ids batch)
+  ignore (Current.apply_disposition ~pass:Masc.Keeper_memory_commit_pass.Admission ~explicit_candidate_ids:(Queue.candidate_ids batch)
     ~keepers_dir ~keeper_id ~now:(Time_compat.now ())
     ~source:{Current.kind=Current.Librarian;trace_id="fixture-admission"}
     ~absorbed:[] ~revisions:[] ~new_claims:facts () |> require);
@@ -2608,7 +2608,7 @@ let test_absorbed_search_preserves_board_basis source =
     | Error error -> Alcotest.fail (Librarian.parse_error_to_string error)
   in
   (match
-     Current.apply_disposition ~revisions:[]
+     Current.apply_disposition ~pass:Masc.Keeper_memory_commit_pass.Durable ~revisions:[]
        ~keepers_dir ~keeper_id:meta.name ~now:(Time_compat.now ())
        ~source:{ Current.kind = Current.Librarian; trace_id = "absorb-board-sources" }
        ~new_claims:selection.new_claims ~dropped_statements:selection.dropped
@@ -2680,7 +2680,7 @@ let test_absorbed_facts_are_searchable () =
   replace_current_facts ~keepers_dir ~keeper_id:meta.name [ alpha; beta; gamma ];
   let merged = fact "alpha and beta deploy on tuesday" in
   (match
-     Current.apply_disposition ~revisions:[]
+     Current.apply_disposition ~pass:Masc.Keeper_memory_commit_pass.Durable ~revisions:[]
        ~keepers_dir
        ~keeper_id:meta.name
        ~now:(Time_compat.now ())
@@ -2811,7 +2811,7 @@ let test_absorbed_rows_follow_later_merges_and_leave_room () =
   let id = Masc.Keeper_memory_os_types.memory_id in
   let absorb ~keeper_id ~trace_id pairs new_claims =
     match
-      Current.apply_disposition ~revisions:[]
+      Current.apply_disposition ~pass:Masc.Keeper_memory_commit_pass.Durable ~revisions:[]
         ~keepers_dir
         ~keeper_id
         ~now:(Time_compat.now ())
@@ -3188,7 +3188,7 @@ let test_a_query_of_several_words_is_answered () =
     [ apart; together; other; retired; retired_later ];
   let merged = fact "alpha deploys on a fixed weekday" in
   (match
-     Current.apply_disposition ~revisions:[]
+     Current.apply_disposition ~pass:Masc.Keeper_memory_commit_pass.Durable ~revisions:[]
        ~keepers_dir
        ~keeper_id:meta.name
        ~now:(Time_compat.now ())
@@ -3289,7 +3289,7 @@ let test_all_ranks_complete_queries_before_fragments_across_stores () =
     [ ordinary_fragment; absorbed_exact ];
   let merged = fact "merged weekday decision" in
   (match
-     Current.apply_disposition ~revisions:[]
+     Current.apply_disposition ~pass:Masc.Keeper_memory_commit_pass.Durable ~revisions:[]
        ~keepers_dir
        ~keeper_id:meta.name
        ~now:(Time_compat.now ())
@@ -3967,7 +3967,7 @@ let test_over_budget_retraction_recovers_incrementally () =
   with_env Env_config.KeeperMemoryOs.facts_max_bytes_env_key "200" @@ fun () ->
   let source = { Current.kind = Current.Explicit_write; trace_id = "retract" } in
   (match
-     Current.retract_fact
+     Current.retract_fact ~pass:Masc.Keeper_memory_commit_pass.Keeper_delete
        ~keepers_dir ~keeper_id ~now:(Time_compat.now ()) ~source
        ~memory_id:(Masc.Keeper_memory_os_types.memory_id first)
        ~reason:"less useful" ()
@@ -3994,7 +3994,7 @@ let test_over_budget_retraction_recovers_incrementally () =
   Alcotest.(check int) "growth left the current set alone" 1
     (List.length (current_facts ~keepers_dir ~keeper_id));
   (match
-     Current.retract_fact
+     Current.retract_fact ~pass:Masc.Keeper_memory_commit_pass.Keeper_delete
        ~keepers_dir ~keeper_id ~now:(Time_compat.now ()) ~source
        ~memory_id:(Masc.Keeper_memory_os_types.memory_id second)
        ~reason:"less useful" ()
@@ -4103,7 +4103,7 @@ let test_dropped_originals_are_historical_and_searchable () =
   Sys.remove journal;
   Unix.mkdir journal 0o700;
   let retract reason =
-    match Current.retract_fact ~keepers_dir ~keeper_id:meta.name ~now:3.
+    match Current.retract_fact ~pass:Masc.Keeper_memory_commit_pass.Keeper_delete ~keepers_dir ~keeper_id:meta.name ~now:3.
         ~source:{kind=Current.Explicit_retract;trace_id="drop"}
         ~memory_id:(Masc.Keeper_memory_os_types.memory_id retired) ~reason () with
     | Ok _ -> () | Error _ -> Alcotest.fail "retraction failed" in
@@ -4144,7 +4144,7 @@ let test_dropped_originals_are_historical_and_searchable () =
   Alcotest.(check int) "search does not restore memory" 1
     (List.length (current_facts ~keepers_dir ~keeper_id:meta.name));
   (* Explicit restoration is deduplicated by the ordinary write path. *)
-  (match Current.upsert_fact ~keepers_dir ~keeper_id:meta.name ~now:4.
+  (match Current.upsert_fact ~pass:Masc.Keeper_memory_commit_pass.Keeper_write ~keepers_dir ~keeper_id:meta.name ~now:4.
       ~source:{kind=Current.Explicit_write;trace_id="restore"} retired with
    | Ok _ -> () | Error _ -> Alcotest.fail "restoration failed");
   Alcotest.(check (list string)) "re-added identity leaves archive"

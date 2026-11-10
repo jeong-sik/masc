@@ -175,7 +175,7 @@ let test_cancel ?(observer_checks = true) ?(closed_pool = false) ~base_path ~reg
     Eio.Cancel.sub (fun cc ->
       Eio.Promise.resolve set_cancel_context cc;
       try
-        Runtime.run_best_effort
+        Runtime.run_best_effort ~pass:Keeper_memory_commit_pass.Durable
           ~on_memory_committed:(fun () -> memory_committed := true)
           ~base_path ~keepers_dir ~keeper_id
           ~expected_revision:(Some seeded.revision) input
@@ -323,7 +323,7 @@ let test_cancel ?(observer_checks = true) ?(closed_pool = false) ~base_path ~reg
    | Second_judgment | After_commit | After_completion ->
      let successor_committed = ref false in
      let successor = Eio.Fiber.fork_promise ~sw (fun () ->
-       Runtime.run_best_effort
+       Runtime.run_best_effort ~pass:Keeper_memory_commit_pass.Durable
          ~on_memory_committed:(fun () -> successor_committed := true)
          ~base_path ~keepers_dir ~keeper_id
          ~expected_revision:(Some seeded.revision) input) in

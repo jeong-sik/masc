@@ -713,7 +713,7 @@ let run_runtime_evidence () =
         ; excluded_keepers = (if scenario = Excluded_run then [ keeper_id ] else [])
         }
         (fun () ->
-          let run ()=Masc.Keeper_librarian_runtime.run_best_effort
+          let run ()=Masc.Keeper_librarian_runtime.run_best_effort ~pass:Masc.Keeper_memory_commit_pass.Durable
             ~base_path ~keepers_dir ~keeper_id ~expected_revision:(Some seeded.revision) input in
           match guidance_gap with
           | None -> run ()
@@ -2414,7 +2414,7 @@ let test_the_runtime_does_not_save_a_copy ~fail_reverse () =
       ; absorb_gate = true
       }
       (fun () ->
-        let run () = Masc.Keeper_librarian_runtime.run_best_effort
+        let run () = Masc.Keeper_librarian_runtime.run_best_effort ~pass:Masc.Keeper_memory_commit_pass.Durable
           ~on_memory_committed:(fun () -> incr committed)
           ~base_path ~keepers_dir ~keeper_id ~expected_revision:(Some seeded.revision) input in
         run ();
@@ -2532,7 +2532,7 @@ let check_failed_absorb_evaluations ~status ~body ~failure_code ~diagnostic () =
     | [] -> -1
     | entry :: _ -> entry.Log.Ring.seq in
   for turn = 1 to 3 do
-    Masc.Keeper_librarian_runtime.run_best_effort
+    Masc.Keeper_librarian_runtime.run_best_effort ~pass:Masc.Keeper_memory_commit_pass.Durable
       ~base_path ~keepers_dir ~keeper_id ~expected_revision:(Some seeded.revision)
       { input with turn_ref = Ids.Turn_ref.make ~trace_id:"payment-fixture" ~absolute_turn:turn };
     let stored = match Current.read_for_keepers_dir ~keepers_dir ~keeper_id |> require with

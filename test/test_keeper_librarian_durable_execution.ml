@@ -2977,7 +2977,7 @@ let test_a_commit_error_after_the_snapshot_was_renamed_does_not_hide_the_receipt
   fixture.set_step_response (answering_steps ["Original question to retain";"Original completed answer"]);
   let fin=finished (descend fixture candidate) in
   let apply ~keepers_dir ~keeper_id ~now ~anchor ~source ~validate_source program =
-    Current.For_testing.apply_program_with_publication_io ~pass:Keeper_memory_commit_pass.Program_publish
+    Current.For_testing.apply_program_with_publication_io ~pass:Keeper_memory_commit_pass.Durable
       ~write_snapshot:(Fs_compat.Atomic_replace_for_testing.save_file_atomic_strict_staged
         ~sync_file:(fun _ -> ()) ~sync_parent:(fun _ -> failwith "after the snapshot rename"))
       ~sync_snapshot:(fun _ -> Error "snapshot durability deliberately unconfirmed")

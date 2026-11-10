@@ -158,6 +158,12 @@ val json_headers :
     [deps.cors_headers origin].  The canonical "JSON response"
     builder used by every JSON-bodied response in the transport. *)
 
+val sessionless_json_headers :
+  deps:deps -> string -> string -> (string * string) list
+(** JSON content type, negotiated protocol version and CORS headers, without
+    an MCP session id or session cookie. A standalone Observer's refusal must
+    not advertise its internal connection id as a reusable MCP session. *)
+
 (** {1 SSE constants} *)
 
 val sse_retry_ms : int

@@ -1065,6 +1065,81 @@ let test_standalone_observer_reconnects_with_response_identifiers env =
         Alcotest.(check (option string)) "standalone response has no MCP session id" None session_id))
 ;;
 
+let test_standalone_observer_window_survives_connection_cleanup env =
+  let module Transport = Server_mcp_transport_http in
+  Masc_test_deps.with_process_env "MASC_SSE_RECONNECT_MIN_INTERVAL_S" (Some "3600") @@ fun () ->
+  Masc_test_deps.with_process_env "MASC_SSE_CONNECT_WINDOW_S" (Some "60") @@ fun () ->
+  Masc_test_deps.with_process_env "MASC_SSE_CONNECT_MAX_IN_WINDOW" (Some "2") @@ fun () ->
+  with_standalone_observer_server env (fun ~workspace ~state:_ ~token ~sw ~clock ~port ->
+    let before = (Atomic.get Masc.Sse.clients).entries in
+    let authority = Masc.Sse.runtime_authority_exn ~base_path:workspace in
+    let initial_count = Masc.Sse.client_count () in
+    let pending = ref [] in
+    let await promise = Eio.Time.with_timeout_exn clock 3. (fun () -> Eio.Promise.await promise) in
+    let url = Printf.sprintf "http://127.0.0.1:%d/mcp?sse_kind=observer" port in
+    let open_stream credential =
+      let response, publish_response = Eio.Promise.create () in
+      let ended, publish_ended = Eio.Promise.create () in
+      pending := ended :: !pending;
+      Eio.Fiber.fork ~sw (fun () ->
+        let result = Masc_http_client.get_stream ~clock ~idle_timeout_sec:3. ~url
+            ~headers:["Accept", "text/event-stream";
+                      "Authorization", "Bearer " ^ credential;
+                      "Mcp-Protocol-Version", "2025-03-26"]
+            ~on_response:(fun ~status ~headers ->
+              ignore (Eio.Promise.try_resolve publish_response (status, headers)))
+            ~on_chunk:ignore () in
+        Eio.Promise.resolve publish_ended result);
+      await response
+    in
+    let close_new_clients () =
+      Masc.Sse.SMap.iter (fun id (client : Masc.Sse.client) ->
+        if not (Masc.Sse.SMap.mem id before)
+           && Masc.Sse.equal_runtime_authority authority client.runtime_authority
+        then Transport.stop_sse_session id) (Atomic.get Masc.Sse.clients).entries;
+      List.iter (fun ended -> ignore (await ended)) !pending
+    in
+    Fun.protect
+      ~finally:(fun () -> Eio.Cancel.protect close_new_clients)
+      (fun () ->
+        let first, _ = open_stream token in
+        let concurrent, _ = open_stream token in
+        Alcotest.(check int) "first subscription" 200 first;
+        Alcotest.(check int) "another tab is not a same-session cooldown" 200 concurrent;
+        Alcotest.(check int) "both subscriptions remain registered"
+          (initial_count + 2) (Masc.Sse.client_count ());
+        close_new_clients ();
+        Alcotest.(check int) "fixture connections retired" initial_count (Masc.Sse.client_count ());
+        let limited, headers = open_stream token in
+        Alcotest.(check int) "new internal ids do not reset the actor window" 429 limited;
+        let header name = List.find_map (fun (key, value) ->
+          if String.equal (String.lowercase_ascii key) name then Some value else None) headers in
+        Alcotest.(check (option string)) "429 has no reusable MCP session id" None (header "mcp-session-id");
+        Alcotest.(check (option string)) "429 has no MCP cookie" None (header "set-cookie");
+        Alcotest.(check (option string)) "429 retains the negotiated protocol"
+          (Some "2025-03-26") (header "mcp-protocol-version");
+        Alcotest.(check bool) "429 supplies a positive retry delay" true
+          (Option.fold ~none:false ~some:(fun value ->
+            Option.fold ~none:false ~some:(fun seconds -> seconds > 0) (int_of_string_opt value))
+             (header "retry-after"));
+        let repeated, _ = open_stream token in
+        Alcotest.(check int) "a further sessionless attempt stays refused" 429 repeated;
+        let forged, _ = open_stream "forged" in
+        Alcotest.(check int) "authentication still precedes rate admission" 401 forged;
+        Alcotest.(check int) "refused attempts publish no client or eviction"
+          initial_count (Masc.Sse.client_count ());
+        let other_token = match Auth.create_token workspace ~agent_name:"independent-observer"
+            ~role:Masc_domain.Admin with
+          | Ok (token, _) -> token
+          | Error error -> Alcotest.fail (Masc_domain.masc_error_to_string error)
+        in
+        let independent, _ = open_stream other_token in
+        Alcotest.(check int) "another authenticated agent has its own window" 200 independent;
+        Masc_test_deps.with_process_env "MASC_SSE_CONNECT_MAX_IN_WINDOW" (Some "-1") (fun () ->
+          let disabled, _ = open_stream token in
+          Alcotest.(check int) "disabling the window does not enable a shared cooldown" 200 disabled)))
+;;
+
 let test_standalone_observer_keeps_auth_and_supplied_session_checks env =
   with_standalone_observer_server env (fun ~workspace:_ ~state:_ ~token ~sw:_ ~clock ~port ->
     let client_count = Masc.Sse.client_count () in
@@ -1869,6 +1944,8 @@ let () =
             test_standalone_observer_delivers_waiting_inventory_changes
         ; case "standalone Observer reconnects with response identifiers"
             test_standalone_observer_reconnects_with_response_identifiers
+        ; case "standalone Observer window survives connection cleanup"
+            test_standalone_observer_window_survives_connection_cleanup
         ; case "standalone Observer keeps auth and supplied-session checks"
             test_standalone_observer_keeps_auth_and_supplied_session_checks
         ; case "invalid handshake is not opened or read" test_observer_rejects_bad_replay_before_delivering_bytes

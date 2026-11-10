@@ -54,8 +54,18 @@ type sse_connect_guard_state = {
   connect_times : float list;
 }
 
-let sse_connect_guard_by_session :
-    sse_connect_guard_state SMap.t Atomic.t = Atomic.make SMap.empty
+module Connect_guard_key = struct
+  type t =
+    | Session of string
+    | Standalone_observer of { instance_id : string; agent_name : string }
+
+  let compare = Stdlib.compare
+end
+
+module Guard_map = Map.Make (Connect_guard_key)
+
+let sse_connect_guards :
+    sse_connect_guard_state Guard_map.t Atomic.t = Atomic.make Guard_map.empty
 
 (* Read through Env_config_runtime like every other knob. This file used to
    carry its own Sys.getenv_opt wrappers, the one place in the server that did
@@ -73,8 +83,14 @@ let sse_connect_window_s () = Env_config_runtime.Sse_connect_guard.Re_read.conne
 
 let sse_connect_max_in_window () = Env_config_runtime.Sse_connect_guard.Re_read.connect_max_in_window ()
 
-let guard_deadline state =
-  let min_interval_s = sse_reconnect_min_interval_s () in
+let guard_min_interval_s = function
+  | Connect_guard_key.Session _ -> sse_reconnect_min_interval_s ()
+  (* Different tabs can open at once with the same credential. Their shared
+     window bounds fresh registrations without treating them as one session. *)
+  | Connect_guard_key.Standalone_observer _ -> 0.0
+
+let guard_deadline key state =
+  let min_interval_s = guard_min_interval_s key in
   let window_s = sse_connect_window_s () in
   let session_deadline =
     if min_interval_s <= 0.0 || state.last_connect_at < 0.0 then
@@ -92,8 +108,13 @@ let guard_deadline state =
   in
   Float.max session_deadline window_deadline
 
-let guard_expired ~now ~session_id state =
-  not (SMap.mem session_id (Atomic.get sse_conn_by_session)) && now >= guard_deadline state
+let guard_expired ~now ~key state =
+  let connected = match key with
+    | Connect_guard_key.Session session_id ->
+        SMap.mem session_id (Atomic.get sse_conn_by_session)
+    | Connect_guard_key.Standalone_observer _ -> false
+  in
+  not connected && now >= guard_deadline key state
 
 (** Register an SSE connection in the session registry. All call sites use
     this instead of updating [sse_conn_by_session] directly. *)
@@ -156,7 +177,8 @@ let stop_sse_session_impl ~clear_guard session_id =
         SMap.remove session_id map
   );
   if clear_guard then
-    Atomic_util.update sse_connect_guard_by_session (fun map -> SMap.remove session_id map);
+    Atomic_util.update sse_connect_guards (fun map ->
+      Guard_map.remove (Connect_guard_key.Session session_id) map);
   match !info_opt with
   | None -> ()
   | Some info -> close_sse_conn info
@@ -169,7 +191,8 @@ let stop_sse_session_before ~client_id session_id =
         info_opt := Some info;
         SMap.remove session_id map
     | Some _ | None -> map);
-  Atomic_util.update sse_connect_guard_by_session (fun map -> SMap.remove session_id map);
+  Atomic_util.update sse_connect_guards (fun map ->
+    Guard_map.remove (Connect_guard_key.Session session_id) map);
   match !info_opt with
   | None -> ()
   | Some info -> close_sse_conn info
@@ -203,24 +226,22 @@ let active_session_count () =
 
 let reap_stale_guards () =
   let now = Time_compat.now () in
-  let stale =
-    SMap.fold (fun sid state acc ->
-      if guard_expired ~now ~session_id:sid state then sid :: acc
-      else acc
-    ) (Atomic.get sse_connect_guard_by_session) []
+  let rec reap () =
+    let current = Atomic.get sse_connect_guards in
+    let next = Guard_map.filter (fun key state ->
+      not (guard_expired ~now ~key state)) current in
+    if Atomic.compare_and_set sse_connect_guards current next then
+      Guard_map.cardinal current - Guard_map.cardinal next
+    else reap ()
   in
-  if stale <> [] then
-    Atomic_util.update sse_connect_guard_by_session (fun map ->
-      List.fold_left (fun acc sid -> SMap.remove sid acc) map stale
-    );
-  List.length stale
+  reap ()
 
 let close_all_sse_connections () =
   let infos =
     SMap.fold (fun _k v acc -> v :: acc) (Atomic.get sse_conn_by_session) []
   in
   Atomic.set sse_conn_by_session SMap.empty;
-  Atomic.set sse_connect_guard_by_session SMap.empty;
+  Atomic.set sse_connect_guards Guard_map.empty;
   List.iter close_sse_conn infos;
   Log.Server.info "MASC MCP: Closed %d SSE connections"
     (List.length infos)
@@ -335,23 +356,23 @@ let prune_connect_times ~now times =
   if window_s <= 0.0 then times
   else List.filter (fun ts -> now -. ts <= window_s) times
 
-let check_sse_connect_guard session_id =
+let check_connect_guard key =
   let now = Time_compat.now () in
   let result = ref (Ok ()) in
-  Atomic_util.update sse_connect_guard_by_session (fun map ->
+  Atomic_util.update sse_connect_guards (fun map ->
     let state =
-      match SMap.find_opt session_id map with
+      match Guard_map.find_opt key map with
       | Some v ->
           let pruned_times = prune_connect_times ~now v.connect_times in
           let v' = { v with connect_times = pruned_times } in
-          if guard_expired ~now ~session_id v' then
+          if guard_expired ~now ~key v' then
             { last_connect_at = -.1.0; connect_times = [] }
           else
             v'
       | None -> { last_connect_at = -.1.0; connect_times = [] }
     in
     let recent = state.connect_times in
-    let min_interval_s = sse_reconnect_min_interval_s () in
+    let min_interval_s = guard_min_interval_s key in
     let session_wait_s =
       if min_interval_s <= 0.0 then
         0.0
@@ -379,8 +400,19 @@ let check_sse_connect_guard session_id =
         map
       end else begin
         result := Ok ();
-        SMap.add session_id { last_connect_at = now; connect_times = now :: recent } map
+        Guard_map.add key { last_connect_at = now; connect_times = now :: recent } map
       end
     end
   );
   !result
+
+let check_sse_connect_guard session_id =
+  check_connect_guard (Connect_guard_key.Session session_id)
+
+let check_standalone_observer_connect_guard ~observer_instance_id
+    ~(credential : Masc_domain.agent_credential) =
+  if sse_connect_window_s () <= 0.0 || sse_connect_max_in_window () <= 0 then Ok ()
+  else
+    check_connect_guard
+      (Connect_guard_key.Standalone_observer
+         { instance_id = observer_instance_id; agent_name = credential.agent_name })

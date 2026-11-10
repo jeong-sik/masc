@@ -224,6 +224,20 @@ let config_keepers =
       { suffix = Keeper_memory_os_aggregate_lock.suffix
       ; reason = M.Writes_no_reference
       }
+    (* Receipts beside the snapshot: a publication marker, a retraction plan
+       and the Librarian range commit. They name store state, not a blob. *)
+  ; M.Keeper_files
+      { suffix = Keeper_memory_os_current_layout.publication_receipt_suffix
+      ; reason = M.Writes_no_reference
+      }
+  ; M.Keeper_files
+      { suffix = Keeper_memory_os_current_layout.retraction_plan_receipt_suffix
+      ; reason = M.Writes_no_reference
+      }
+  ; M.Keeper_files
+      { suffix = Keeper_memory_os_current_layout.durable_range_receipt_suffix
+      ; reason = M.Writes_no_reference
+      }
   ; finder_metadata
   ; unpublished_writes
   ]

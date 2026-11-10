@@ -62,26 +62,36 @@ let read_config ~base_path =
           absent ("not a JSON object: " ^ Yojson.Safe.to_string json)))
 ;;
 
-(* The state of the external store that the install record names. [None] when
-   there is no config directory, no record, or no store where the record points
-   (design 8.4). *)
-let store_state ~config_dir ~base_path : (S.State.t option, string) result =
+(* The external store that the install record names, as the boot found it. *)
+type store_read =
+  | Store_unreadable of string
+  | No_store
+      (* No config directory, no record, or no store where the record points
+         (design 8.4). *)
+  | Store_read of
+      { path : I.Store_path.t
+      ; state : S.State.t
+      }
+
+let read_store ~config_dir ~base_path =
   match I.locate ~config_dir ~base_path with
-  | Error error -> Error (I.locate_error_to_string error)
+  | Error error -> Store_unreadable (I.locate_error_to_string error)
   | Ok located ->
     (match I.read located with
-     | Error error -> Error (I.read_error_to_string error)
-     | Ok None -> Ok None
+     | Error error -> Store_unreadable (I.read_error_to_string error)
+     | Ok None -> No_store
      | Ok (Some store) ->
        let path = (store : I.Store_path.t :> string) in
        (match P.of_path path with
-        | P.Not_there -> Ok None
-        | P.Cannot_check detail -> Error (Printf.sprintf "the external store %s: %s" path detail)
+        | P.Not_there -> No_store
+        | P.Cannot_check detail ->
+          Store_unreadable (Printf.sprintf "the external store %s: %s" path detail)
         | P.There ->
           (match S.open_at_start ~path ~init:S.State.empty ~step:S.apply with
-           | Error error -> Error (S.open_error_to_string S.violation_to_string error)
-           | Ok (_store, _state, { S.contents = S.Missing; _ }) -> Ok None
-           | Ok (_store, state, { S.contents = S.Empty | S.Lines _; _ }) -> Ok (Some state))))
+           | Error error -> Store_unreadable (S.open_error_to_string S.violation_to_string error)
+           | Ok (_store, _state, { S.contents = S.Missing; _ }) -> No_store
+           | Ok (_store, state, { S.contents = S.Empty | S.Lines _; _ }) ->
+             Store_read { path = store; state })))
 ;;
 
 (* The log as the boot found it. Whether the log or the store is there is read
@@ -105,12 +115,20 @@ let read_log ~base_path ~state =
      | Ok (_log, replay, _recovered) -> Log_opened (Ok replay))
 ;;
 
-let read_log_and_store ~base_path ~config_dir =
-  let store = store_state ~config_dir ~base_path in
+(* The log and the store of one boot, read once: the store first, because the
+   replay of the log starts from its state. *)
+type files =
+  { store : store_read
+  ; log_mode : B.log_mode
+  ; high_water : B.high_water
+  }
+
+let read_files ~base_path ~config_dir =
+  let store = read_store ~config_dir ~base_path in
   let state =
     match store with
-    | Ok (Some state) -> state
-    | Ok None | Error _ -> S.State.empty
+    | Store_read { path = _; state } -> state
+    | No_store | Store_unreadable _ -> S.State.empty
   in
   let log = read_log ~base_path ~state in
   let log_mode =
@@ -121,30 +139,40 @@ let read_log_and_store ~base_path ~config_dir =
   in
   let high_water =
     match store, log with
-    | Error detail, (Log_not_there | Log_cannot_check _ | Log_opened _) -> B.Store_unreadable detail
-    | Ok None, (Log_not_there | Log_cannot_check _ | Log_opened _) -> B.Judged H.Absent
-    | Ok (Some _), Log_opened (Ok replay) -> B.Judged (H.judge replay.Authz_zone.Replay.probe)
-    | Ok (Some state), Log_not_there -> B.Judged (H.judge (H.Probe.create state))
-    | Ok (Some _), (Log_cannot_check _ | Log_opened (Error _)) ->
+    | Store_unreadable detail, (Log_not_there | Log_cannot_check _ | Log_opened _) ->
+      B.Store_unreadable detail
+    | No_store, (Log_not_there | Log_cannot_check _ | Log_opened _) -> B.Judged H.Absent
+    | Store_read _, Log_opened (Ok replay) -> B.Judged (H.judge replay.Authz_zone.Replay.probe)
+    | Store_read { path = _; state }, Log_not_there -> B.Judged (H.judge (H.Probe.create state))
+    | Store_read _, (Log_cannot_check _ | Log_opened (Error _)) ->
       B.Store_unreadable "it was not judged, because the authorization log cannot be read"
   in
+  { store; log_mode; high_water }
+;;
+
+let read_log_and_store ~base_path ~config_dir =
+  let { store = _; log_mode; high_water } = read_files ~base_path ~config_dir in
   log_mode, high_water
 ;;
 
-let input ~base_path ~config_dir ~anonymous_mutations =
+let input_of_files ~base_path ~anonymous_mutations { store = _; log_mode; high_water } =
   let requested, settings = read_config ~base_path in
-  let log_mode, high_water = read_log_and_store ~base_path ~config_dir in
   { B.requested; log_mode; high_water; settings; anonymous_mutations }
+;;
+
+let input ~base_path ~config_dir ~anonymous_mutations =
+  input_of_files ~base_path ~anonymous_mutations (read_files ~base_path ~config_dir)
 ;;
 
 type stop =
   | Refuse of B.refusal * B.refusal list
   | Activation_requested
-  | Multi_account_not_served of B.mode
+  | Authorization_uncertain
 
 type decision =
   | Boot_single_user
   | Boot_after_off of Authz_state.t
+  | Boot_multi_account
   | Stop of stop
 
 let decide input =
@@ -152,8 +180,8 @@ let decide input =
   | Ok B.Single_user -> Boot_single_user
   | Ok (B.Single_user_after_off state) -> Boot_after_off state
   | Ok B.Activation_requested -> Stop Activation_requested
-  | Ok ((B.Multi_account | B.Multi_account_uncertain) as mode) ->
-    Stop (Multi_account_not_served mode)
+  | Ok B.Multi_account -> Boot_multi_account
+  | Ok B.Multi_account_uncertain -> Stop Authorization_uncertain
   | Error (first, rest) -> Stop (Refuse (first, rest))
 ;;
 
@@ -164,15 +192,11 @@ let high_water_detail = function
       (fun reason ->
         "the external store does not match the authorization log: " ^ H.reason_to_string reason)
       (first :: rest)
-  | B.Judged (H.Absent | H.Matches) -> []
-;;
-
-let single_user_again =
-  "to go back to a single user, stop every masc process on the workspace, delete the \
-   authorization log .masc/auth/authz.jsonl, the external store, and the install record in the \
-   masc config directory that names this base path (authz-install-*.json), and take \
-   account_mode out of config.json; deleting the log alone makes a boot refuse, as after a \
-   restore"
+  | B.Judged H.Absent ->
+    [ "no external store answers for this base path: no install record of the masc config \
+       directory names it, or the store that the record names is not there or holds no answer"
+    ]
+  | B.Judged H.Matches -> []
 ;;
 
 let turn_off_line =
@@ -184,26 +208,15 @@ let messages (input : B.input) = function
   | Refuse (first, rest) -> B.refusal_to_string first, List.map B.refusal_to_string rest
   | Activation_requested ->
     ( "config.json asks for Multi_account and nothing is set up yet (Activation_requested)"
-    , [ "this build does not serve multi-account; without account_mode in config.json, a boot \
-         starts a single user"
-      ; "masc auth bootstrap --external-store PATH, run while no server runs, activates the \
-         workspace; a server of this build then stops at boot until masc auth off turns the \
-         accounts off"
-      ; single_user_again
+    , [ "masc auth bootstrap --external-store PATH, run while no server runs, activates the \
+         workspace; a server then boots it as a multi-account installation"
+      ; "without account_mode in config.json, a boot starts a single user"
       ] )
-  | Multi_account_not_served mode ->
-    ( Printf.sprintf
-        "the authorization log made Multi_account (%s); this build does not have the account \
-         layers that serve it"
-        (B.mode_to_string mode)
-    , high_water_detail input.high_water
-      @ (match mode with
-         | B.Multi_account -> [ turn_off_line ]
-         | B.Single_user
-         | B.Single_user_after_off (_ : Authz_state.t)
-         | B.Activation_requested
-         | B.Multi_account_uncertain -> [])
-      @ [ single_user_again ] )
+  | Authorization_uncertain ->
+    ( "the authorization log made Multi_account and the external store does not confirm it \
+       (AuthorizationUncertain); no server serves the workspace until the two agree, and this \
+       build has no recovery procedure that makes them agree"
+    , high_water_detail input.high_water )
 ;;
 
 type single_user =
@@ -222,12 +235,40 @@ let turned_off = function
   | Turned_off { base_path = _; state } -> Some state
 ;;
 
+type multi_account =
+  { base_path : string
+  ; external_store : I.Store_path.t
+  }
+
+let multi_account_base_path { base_path; external_store = _ } = base_path
+
+let multi_account_external_store { base_path = _; external_store } =
+  (external_store : I.Store_path.t :> string)
+;;
+
+type booted =
+  | Single_user of single_user
+  | Multi_account of multi_account
+
 let boot ~base_path ~config_dir ~anonymous_mutations =
-  let input = input ~base_path ~config_dir ~anonymous_mutations in
-  match decide input with
-  | Boot_single_user -> Ok (Never_set_up base_path)
-  | Boot_after_off state -> Ok (Turned_off { base_path; state })
-  | Stop stop -> Error (messages input stop)
+  let files = read_files ~base_path ~config_dir in
+  let input = input_of_files ~base_path ~anonymous_mutations files in
+  match decide input, files.store with
+  | Boot_single_user, (Store_unreadable _ | No_store | Store_read _) ->
+    Ok (Single_user (Never_set_up base_path))
+  | Boot_after_off state, (Store_unreadable _ | No_store | Store_read _) ->
+    Ok (Single_user (Turned_off { base_path; state }))
+  | Boot_multi_account, Store_read { path; state = _ } ->
+    Ok (Multi_account { base_path; external_store = path })
+  | Boot_multi_account, (Store_unreadable _ | No_store) ->
+    (* The table gives Multi_account only for a store that matches the log
+       ([B.Judged H.Matches]), which [read_files] makes only from a store it
+       read. A boot that got here has no store to open a zone over. *)
+    Error
+      ( "the account mode was judged Multi_account, and the boot read no external store to \
+         serve it over"
+      , [] )
+  | Stop stop, (Store_unreadable _ | No_store | Store_read _) -> Error (messages input stop)
 ;;
 
 let tool_refused =
@@ -276,8 +317,9 @@ let tool ~base_path ~config_dir =
     in
     (match decide input with
      | Boot_single_user -> Ok (Never_set_up base_path)
-     | Boot_after_off (_ : Authz_state.t) ->
-       (* The input names no mode event, so the table does not read an Off. *)
+     | Boot_after_off (_ : Authz_state.t) | Boot_multi_account ->
+       (* The input names no mode event, so the table reads neither an Off nor
+          an active installation. *)
        Error (tool_refused, [])
      | Stop stop -> Error (messages input stop))
 ;;

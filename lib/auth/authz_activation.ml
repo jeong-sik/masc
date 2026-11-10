@@ -92,14 +92,8 @@ let asked ~base_path ~config_dir ~anonymous_mutations =
     (match input.B.settings with
      | B.Settings_read _ -> Error Not_asked
      | B.Settings_unreadable detail -> Error (Config_unreadable detail))
-  | M.Stop (M.Multi_account_not_served B.Multi_account) -> Error Already_active
-  | M.Stop
-      ((M.Refuse _
-       | M.Multi_account_not_served
-           ( B.Single_user
-           | B.Single_user_after_off (_ : Authz_state.t)
-           | B.Activation_requested
-           | B.Multi_account_uncertain )) as stop) ->
+  | M.Boot_multi_account -> Error Already_active
+  | M.Stop ((M.Refuse _ | M.Authorization_uncertain) as stop) ->
     let first, rest = M.messages input stop in
     Error (Boot_stops (first, rest))
 ;;
@@ -180,16 +174,10 @@ let invite_error_to_string = function
 let active ~base_path ~config_dir ~anonymous_mutations =
   let input = M.input ~base_path ~config_dir ~anonymous_mutations in
   match M.decide input with
-  | M.Stop (M.Multi_account_not_served B.Multi_account) -> Ok ()
+  | M.Boot_multi_account -> Ok ()
   | M.Boot_single_user | M.Stop M.Activation_requested -> Error Not_activated
   | M.Boot_after_off (_ : Authz_state.t) -> Error Accounts_turned_off
-  | M.Stop
-      ((M.Refuse _
-       | M.Multi_account_not_served
-           ( B.Single_user
-           | B.Single_user_after_off (_ : Authz_state.t)
-           | B.Activation_requested
-           | B.Multi_account_uncertain )) as stop) ->
+  | M.Stop ((M.Refuse _ | M.Authorization_uncertain) as stop) ->
     let first, rest = M.messages input stop in
     Error (Not_served_as_active (first, rest))
 ;;

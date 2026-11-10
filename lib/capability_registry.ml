@@ -86,9 +86,6 @@ let require_unique_projections ~label projections =
          label
          (keys |> List.sort_uniq String.compare |> String.concat ", "))
 
-let prefixed_tool_names names =
-  names |> List.map Tool_transport_prefix.add
-
 let surface_to_string = function
   | Public_mcp -> "public_mcp"
   | Spawned_agent_mcp -> "spawned_agent_mcp"
@@ -124,9 +121,6 @@ let make_seed ?capability_id
 
 let spawned_agent_public_tool_names : string list =
   Tool_catalog_surfaces.spawned_agent_surface_tools
-
-let spawned_agent_prefixed_tools : string list =
-  prefixed_tool_names Tool_catalog_surfaces.spawned_agent_surface_tools
 
 let public_projection_seeds_from (public_tool_source_schemas : Masc_domain.tool_schema list) :
     capability_seed list =

@@ -153,15 +153,17 @@ export function setupObservationRefresh(
       }
     } catch (error) {
       if (!current()) return
-      if (error instanceof ObservationPending || hasReadRecoveryOwner(error)) {
-        retryDelayMs = TRANSPORT_RETRY_BASE_MS
-        // Retain any invalidation received during the read as one trailing
-        // read; otherwise the producer or store-owned recovery completes it.
-      } else if (error instanceof ApiRequestError && (error.status === 401 || error.status === 403)) {
+      if (error instanceof ApiRequestError && (error.status === 401 || error.status === 403)) {
+        // A store may own retry debt for this exact error. Its own refusal
+        // still blocks this mounted observer's source/focus/recovery reads.
         refused = true
         dirty = false
         clearRetry()
         if (options.onError) options.onError(error)
+      } else if (error instanceof ObservationPending || hasReadRecoveryOwner(error)) {
+        retryDelayMs = TRANSPORT_RETRY_BASE_MS
+        // Retain any invalidation received during the read as one trailing
+        // read; otherwise the producer or store-owned recovery completes it.
       } else {
         dirty = true
         retryTimer = setTimeout(() => {

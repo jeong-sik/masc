@@ -146,10 +146,12 @@ Prometheus 지표는 기존 recall 지표처럼 `Otel_metric_store` 에 `keeper`
 - 커밋이 `Unchanged` 면 세지 않는다. 그때 snapshot 의 `change` 는 앞선 커밋의 것이다.
 - `outcome` 은 forward 결과(conveyed·left·unjudged·unjudgeable)다. `decision` 은 원문 판정(mergeable·different_context·loses_knowledge·uncertain)이고, 판정이 없으면 `none` 이다. conveyed 의 판정은 늘 mergeable 이다.
 - `verdict` 는 reverse 판정(copy·carries_new_statement·not_judged)이다.
-- 흡수 게이트 판정은 두 자리에서 끝난다(`lib/keeper/keeper_librarian_absorb_gate.ml`, 사용자 2026-11-10).
-  - runtime 경로는 `run_resolved` 에서 끝난다. 지금 판정 로그는 여기에만 있다.
-  - admission·durable·floor 는 캡처를 이어 받는 길(`continue_captured`, `restore`)이라 `restore_with` 에서 끝난다. 이 길은 로그를 남기지 않는다.
-  - 두 자리가 같은 셈 함수를 부른다.
+- 흡수 게이트 판정은 두 자리에서 센다(사용자 2026-11-10).
+  - runtime 경로는 `run_resolved`(`lib/keeper/keeper_librarian_absorb_gate.ml`)에서 판정이 끝날 때 센다. 지금 판정 로그는 여기에만 있다.
+  - admission·durable·floor 는 캡처한 판정을 이어 받는다. 판정 끝 기록(`Judgment_retained`·`Refused`)을 저장한 뒤 `Keeper_librarian_original_gate.resume` 에서 센다.
+  - `restore_with`·`continue_captured` 는 세지 않는다. `restore_with` 는 Keeper 를 모르고, 기록을 읽을 때마다 다시 돈다.
+  - 끝 기록 저장이 실패하면 그때는 세지 않고, 다음 이어 받기가 저장한 뒤 센다. 판정 하나는 많아야 한 번 센다.
+  - 두 자리가 같은 셈 함수(`count_judgment`)를 부른다.
 - 슬롯 라벨은 두지 않는다. 캡처를 이어 받는 길은 답한 레인 슬롯을 모른다.
   롤아웃은 올리기 전·후 시간 창으로 견준다. 슬롯별로 나눠야 하면 exact 요청 기록과 맞춰 따로 본다.
 

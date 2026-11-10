@@ -1981,7 +1981,7 @@ let test_history_fence_retains_unknown_and_blocks_late_observations () = with_fi
     | Empty_atom_history | No_atom_history | Stale_noop -> fail "fixture prefix has no atom history" in
   let fact = Types.observed ~claim:"Independent Memory after the original capture" ~category:Types.Fact
     ~now:(Time_compat.now ()) ~origin:{kind=Types.Authored;trace_id="independent-writer"} in
-  memory_action fixture (fun () -> io (fun () -> Current.apply_disposition
+  memory_action fixture (fun () -> io (fun () -> Current.apply_disposition ~pass:Keeper_memory_commit_pass.Durable
     ~durable_range_id:previous_range ~absorbed:[] ~revisions:[]
     ~keepers_dir:fixture.keepers_dir ~keeper_id:keeper_name ~now:(Time_compat.now ())
     ~source:{kind=Current.Librarian;trace_id} ~new_claims:[fact] () |> get)) |> ignore;
@@ -2028,7 +2028,7 @@ let test_history_fence_allows_the_next_history_pass () = with_fixture (fun ~sw:_
 let test_history_fence_refuses_a_real_range_commit () = with_fixture (fun ~sw:_ fixture ->
   let original, request = retain_absent_history_original fixture in
   let source = Capture.source request in
-  memory_action fixture (fun () -> io (fun () -> Current.apply_disposition
+  memory_action fixture (fun () -> io (fun () -> Current.apply_disposition ~pass:Keeper_memory_commit_pass.Durable
     ?durable_range_id:(Source.range_id source) ?official_range_id:(Source.official_range_id source)
     ~absorbed:[] ~revisions:[] ~keepers_dir:fixture.keepers_dir ~keeper_id:keeper_name
     ~now:(Time_compat.now ()) ~source:{kind=Current.Librarian;trace_id} ~new_claims:[] () |> get)) |> ignore;

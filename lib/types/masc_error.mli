@@ -28,6 +28,10 @@ module Task_error : sig
     | NotFound of string
     | AlreadyClaimed of { task_id: string; by: string }
     | InvalidState of string
+    | BacklogVersionConflict of { expected : int; actual : int }
+      (** The authoritative backlog lock rejected an expected version before
+          applying the transition. Recovery must read and validate current
+          task ownership; replaying the same request is not sufficient. *)
     | InvalidId of string
     | TransitionRejected of transition_rejected
     | VerificationSuperseded of { task_id: string; requested: string; current: string }

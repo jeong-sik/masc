@@ -96,9 +96,9 @@ let standalone_lane_headline_state ~now (lane : Tui_decode.standalone_lane) =
     in
     Printf.sprintf "실행 중 — %s · %s" started_note last_run
   | Tui_decode.Lane_ready, Tui_decode.Standalone_idle ->
-    Printf.sprintf "정상 대기 · %s" last_run
+    Printf.sprintf "모델 설정됨 · %s" last_run
   | Tui_decode.Lane_ready, Tui_decode.Standalone_no_retained_observation ->
-    "정상 준비됨 · 아직 실행 기록 없음"
+    "모델 설정됨 · 보존된 실행 기록 없음"
   | Tui_decode.Lane_ready, Tui_decode.Standalone_unavailable ->
     Printf.sprintf "사용 불가 · %s" last_run
 
@@ -175,7 +175,7 @@ let standalone_lane_summary_lines state ~width ~standing
   let notices = Option.to_list (Option.map (fun error -> Theme.bad (),
       text "실행 준비 오류 · " "Admission error · " ^ error) lane.sl_admission_error) in
   let fields =
-    [ Ansi.reset, text "설정 · " "Configuration · " ^ declared
+    [ Ansi.reset, text "모델 설정 · " "Model configuration · " ^ declared
     ; Ansi.reset, text "현재 실행 · " "Current runs · " ^ current
     ]
     @ Option.to_list (Option.map (fun outcome -> Theme.recede (),
@@ -204,7 +204,7 @@ let inventory_row_summary_lines state ~width ~standing ~selected_output
           | Disabled _ -> text "꺼짐" "Off", text "새 실행 중지" "New runs disabled", []
           | Unconfigured detail -> text "미설정" "Not configured", detail, []
           | Registry_unavailable detail -> text "미관측" "Not observed", detail, [] in
-        [field (text "설정" "Configuration") declared;
+        [field (text "모델 설정" "Model configuration") declared;
          field (text "실행 준비" "Admission") applied;
          field (text "실행 기록" "Run history") (text "미관측" "Not observed")],
         errors, exact_lane_overview_actions state

@@ -7,21 +7,25 @@
     loader declares its name file-owned and puts the file's value in the boot
     store, and the process environment does not reach the reader (#50889).
 
-    Four properties:
+    Four properties of the reader:
 
     1. Without a file value the documented default applies (32 events).
     2. The file value wins over the default.
     3. A value in the process environment does not reach the reader.
-    4. The clamp keeps a stored value inside [1, 256]. *)
+    4. The reader stays inside [1, 256] whatever the store holds.
+
+    The loader's side of the same setting, the [turn.admission_max_events] key
+    and the load that refuses a value outside the range, is in
+    [test_file_owned_settings_ignore_env]. *)
 
 open Alcotest
 
 module B = Env_config_keeper.KeeperAdmissionBounds
 
-let name = "MASC_KEEPER_ADMISSION_MAX_EVENTS"
+let name = B.max_events_env_key
 
-(* The store as the loader leaves it: the name declared file-owned and
-   [value], when there is one, as the file's value. *)
+(* The name declared file-owned, as the loader declares it, and [value], when
+   there is one, in the boot store. *)
 let with_file_value value f =
   Config_boot_overrides.reset_for_tests ();
   Config_boot_overrides.declare_file_owned [ name ];
@@ -62,7 +66,11 @@ let test_process_env_does_not_reach_max_events () =
       check int "the file value, not the environment's 9" 7 (B.max_events ())))
 ;;
 
-(* --- 4. Clamps keep pathological values inside the range ----------- *)
+(* --- 4. The reader stays inside the range --------------------------- *)
+
+(* The loader refuses 0 and 100000 before they reach the store, so a server
+   never holds them. These cases put them there directly: the reader's own
+   result stays inside the range whatever the store holds. *)
 
 let test_max_events_floor_clamp () =
   with_file_value (Some "0") (fun () ->

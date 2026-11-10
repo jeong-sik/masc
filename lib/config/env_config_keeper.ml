@@ -496,6 +496,7 @@ module KeeperAdmissionBounds = struct
     max min_value (min max_value value)
   ;;
 
+  let max_events_env_key = "MASC_KEEPER_ADMISSION_MAX_EVENTS"
   let max_events_default = 32
   let max_events_floor = 1
   let max_events_ceiling = 256
@@ -508,7 +509,7 @@ module KeeperAdmissionBounds = struct
 
       @category Limits @ops_class operator *)
   let max_events () =
-    get_int_nonneg ~default:max_events_default "MASC_KEEPER_ADMISSION_MAX_EVENTS"
+    get_int_nonneg ~default:max_events_default max_events_env_key
     |> clamp_int ~min_value:max_events_floor ~max_value:max_events_ceiling
   ;;
 end

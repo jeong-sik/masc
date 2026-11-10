@@ -308,7 +308,7 @@ let with_installation f =
                }
            with
            | Ok (_ : Z.committed) -> ()
-           | Error error -> Alcotest.failf "invitation refused: %s" (Z.error_to_string error));
+           | Error error -> Alcotest.failf "invitation refused: %s" (Z.error_detail error));
           let client =
             match Login_client.make ~client_id ~client_secret ~redirect_uri with
             | Ok client -> client
@@ -510,7 +510,7 @@ let the_preview_follows_a_login () =
          ~draw:(fun () -> "grant-1")
      with
      | Ok grant -> Alcotest.(check string) "the Self grant" "grant-1" (Grant_id.to_string grant)
-     | Error error -> Alcotest.fail (Authz_runtime.error_to_string error));
+     | Error error -> Alcotest.fail (Authz_runtime.error_detail error));
     let owned = send admin router ~meth:"GET" ~path:Masc.Auth_preview.provider_accounts_path in
     Alcotest.(check (pair int string))
       "owns the subscription and its Runtime"

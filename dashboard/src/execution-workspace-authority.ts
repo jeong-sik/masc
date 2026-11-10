@@ -4,6 +4,7 @@ export interface ExecutionWorkspaceAuthority {
   readonly epoch: string
   readonly workspaceRoot: string
   readonly connectionGeneration: number
+  readonly observerInstanceId: string | null
 }
 
 // Only the execution hydrator writes this signal. Keeping the same signal in

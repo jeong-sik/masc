@@ -49,20 +49,23 @@ let is_invalidation (event : Sse.external_event) =
     | Ok payload -> payload.topic = `Model_metrics
 ;;
 
-let response_headers () =
+let response_headers owner =
   Httpun.Headers.of_list
     (Http_server_eio.Response.scoped_headers ()
      @ [ "content-type", "text/event-stream"; "cache-control", "no-cache"
        ; "connection", "close"; "x-accel-buffering", "no"
+       ; Sse_wire.instance_header, Server_observer_scope.stream_instance owner
        ; Server_mcp_transport_http_headers.observer_idle_timeout_header,
          string_of_int Server_mcp_transport_http_headers.observer_idle_timeout_ms ])
 ;;
 
 let data_frame json = "data: " ^ Yojson.Safe.to_string json ^ "\n\n"
 
-let serve ~sw ~clock ~base_path ~request reqd =
+let serve ~sw ~clock ~owner ~request reqd =
+  let base_path = (Server_observer_scope.stream_config owner).base_path in
+  let current () = Server_observer_scope.stream_is_current owner in
   let authority = Sse.runtime_authority_exn ~base_path in
-  let response = Httpun.Response.create ~headers:(response_headers ()) `OK in
+  let response = Httpun.Response.create ~headers:(response_headers owner) `OK in
   let output = Server_sse_response.respond ~clock
       ~stalled_after_s:Server_mcp_transport_http_headers.sse_stalled_after_s
       ~flush_headers_immediately:true reqd response in
@@ -74,7 +77,7 @@ let serve ~sw ~clock ~base_path ~request reqd =
       let active = Atomic.make true in
       let id = "model-metrics:" ^ Random_id.uuid_v7 () in
       let callback event =
-        if Atomic.get active && is_invalidation event then
+        if Atomic.get active && current () && is_invalidation event then
           Stdlib.Mutex.protect wake_mu (fun () ->
             if Eio.Stream.is_empty wake then Eio.Stream.add wake ()) in
       Server_bootstrap_http.with_cleanups_on_release ~sw:stream_sw
@@ -83,12 +86,13 @@ let serve ~sw ~clock ~base_path ~request reqd =
       (* Subscribe before the first pool read. A concurrent committed source
          retains one trailing read, including while the first answer is sent. *)
       Sse.subscribe_external ~runtime_authority:authority ~id ~callback
-        ~is_alive:(fun () -> Atomic.get active) ();
-      let send frame = match Server_sse_response.send output frame with
+        ~observer_instance_id:(Server_observer_scope.stream_instance owner)
+        ~is_alive:(fun () -> Atomic.get active && current ()) ();
+      let send frame = current () && (match Server_sse_response.send output frame with
         | Written -> true
-        | Closed | Stalled -> false in
+        | Closed | Stalled -> false) in
       let rec deliver () =
-        if not (Server_sse_response.is_closed output) then (
+        if current () && not (Server_sse_response.is_closed output) then (
           let previous = !kept in
           let next, result = Pool_work.submit (Pool_work.cpu ~name:__FUNCTION__ (fun () ->
             read_snapshot ~base_path ~request ~now:(Time_compat.now ()) previous)) in
@@ -115,7 +119,10 @@ let serve ~sw ~clock ~base_path ~request reqd =
         | `Changed | `Deadline -> deliver ()
         | `Keepalive -> if send ": keepalive\n\n" then wait deadline
       in
-      Eio.Fiber.first (fun () -> Server_sse_response.await_closed output) deliver) in
+      Eio.Fiber.first
+        (fun () -> Server_observer_scope.await_stream_replaced owner)
+        (fun () -> Eio.Fiber.first
+          (fun () -> Server_sse_response.await_closed output) deliver)) in
     match run () with
     | () -> ()
     | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
@@ -124,8 +131,13 @@ let serve ~sw ~clock ~base_path ~request reqd =
 
 let add_routes ~sw ~clock router =
   router |> Server_route.get Server_route.Public_read stream_path (fun state req reqd ->
+    Http_server_eio.Response.with_scoped_headers
+      (Http_server_eio.Response.scoped_headers () @ Server_auth.public_read_cors_headers req) (fun () ->
     match request req with
     | Error detail -> Http_server_eio.Response.json_value ~status:`Bad_request
         (`Assoc ["error", `String detail]) reqd
-    | Ok request -> serve ~sw ~clock ~base_path:(Mcp_server.workspace_config state).base_path ~request reqd)
+    | Ok request ->
+        (match Server_observer_scope.admit_stream ~state req with
+         | Error error -> Server_observer_scope.refuse_stream error reqd
+         | Ok owner -> serve ~sw ~clock ~owner ~request reqd)))
 ;;

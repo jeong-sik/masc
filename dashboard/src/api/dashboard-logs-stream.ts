@@ -8,10 +8,10 @@ export class LogsStreamError extends QueryStreamProtocolError {
 }
 
 export async function readDashboardLogsStream(
-  request: LogsRequest, signal: AbortSignal,
+  request: LogsRequest, observerInstance: string, signal: AbortSignal,
   onFrame: (frame: LogsStreamFrame) => void, onActivity?: () => void,
 ): Promise<void> {
-  await readQueryObservationStream(logsPath(request, true), signal, wire => {
+  await readQueryObservationStream(logsPath(request, true), observerInstance, signal, wire => {
     const decoded = Effect.runSync(Effect.either(decodeLogsStreamFrame(wire)))
     if (decoded._tag === 'Left') throw decoded.left
     return decoded.right

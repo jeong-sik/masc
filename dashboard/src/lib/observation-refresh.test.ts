@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ApiRequestError, clearStoredToken, setStoredToken } from '../api/core'
 import { acceptedExecutionWorkspace } from '../execution-workspace-authority'
 import { createManagedAsyncResource } from './async-state'
-import { confirmRuntimeTestWorkspace } from './runtime-workspace.test-fixture'
+import { confirmRuntimeTestWorkspace, RUNTIME_TEST_OBSERVER_INSTANCE } from './runtime-workspace.test-fixture'
 import {
   publishDashboardObservationChange,
   publishDashboardObservationRecovery,
@@ -21,6 +21,7 @@ beforeEach(() => {
   expect(acceptedExecutionWorkspace.peek()).toEqual({
     epoch: expect.any(String), workspaceRoot: '/fixture/runtime-consumer',
     connectionGeneration: expect.any(Number),
+    observerInstanceId: RUNTIME_TEST_OBSERVER_INSTANCE,
   })
 })
 
@@ -177,7 +178,7 @@ describe('authoritative observation reads', () => {
     publishDashboardObservationChange({ topic: 'keeper_composite' })
     await flush()
     acceptedExecutionWorkspace.value = Object.freeze({ epoch: 'workspace-b', workspaceRoot: '/workspace-b',
-      connectionGeneration: 1 })
+      connectionGeneration: 1, observerInstanceId: RUNTIME_TEST_OBSERVER_INSTANCE })
     expect(evidence).toBeNull()
     expect(reads[1]!.signal.aborted).toBe(true)
     await flush()

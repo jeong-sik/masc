@@ -8,13 +8,14 @@ let stalled_after_s = stalled_after_ping_intervals *. ping_interval_s
 
 let keepalive_frame = ": keepalive\n\n"
 
-let response_headers () =
+let response_headers owner =
   Httpun.Headers.of_list
     (Http_server_eio.Response.scoped_headers ()
      @ [ "content-type", "text/event-stream"
        ; "cache-control", "no-cache"
        ; "connection", "close"
        ; "x-accel-buffering", "no"
+       ; Sse_wire.instance_header, Server_observer_scope.stream_instance owner
        ; Server_mcp_transport_http_headers.observer_idle_timeout_header,
          string_of_int Server_mcp_transport_http_headers.observer_idle_timeout_ms
        ])
@@ -72,8 +73,10 @@ type ending =
   | Client_gone
   | Stalled
 
-let serve ~sw ~clock ~config ~(query : Server_logs_query.t) reqd =
-  let response = Httpun.Response.create ~headers:(response_headers ()) `OK in
+let serve ~sw ~clock ~owner ~(query : Server_logs_query.t) reqd =
+  let config = Server_observer_scope.stream_config owner in
+  let current () = Server_observer_scope.stream_is_current owner in
+  let response = Httpun.Response.create ~headers:(response_headers owner) `OK in
   let writer =
     Http_reqd.respond_with_streaming ~flush_headers_immediately:true reqd response
   in
@@ -81,7 +84,7 @@ let serve ~sw ~clock ~config ~(query : Server_logs_query.t) reqd =
      holds the loop here instead of the writer's buffer growing. Nothing in
      this path writes a log entry: an entry would wake the loop again. *)
   let send data =
-    if Http_reqd.Body_writer.is_closed writer
+    if not (current ()) || Http_reqd.Body_writer.is_closed writer
     then false
     else (
       Http_reqd.Body_writer.write_string writer data;
@@ -98,6 +101,7 @@ let serve ~sw ~clock ~config ~(query : Server_logs_query.t) reqd =
     | Error `Timeout -> Error Stalled
   in
   let rec deliver after =
+    if not (current ()) then Client_gone else
     let frame = next_frame query ~after in
     let sent =
       if worth_sending frame then send_within (sse_frame (frame_json ~config query frame))
@@ -130,7 +134,9 @@ let serve ~sw ~clock ~config ~(query : Server_logs_query.t) reqd =
         ];
       (* One line when the stream ends badly; the loop has stopped, so it
          wakes only the other streams, once. *)
-      match deliver query.since_seq with
+      match Eio.Fiber.first
+        (fun () -> Server_observer_scope.await_stream_replaced owner; Client_gone)
+        (fun () -> deliver query.since_seq) with
       | Client_gone -> ()
       | Stalled ->
         Log.Server.warn "Log stream closed: the client accepted no frame for %.0f seconds"
@@ -142,8 +148,13 @@ let serve ~sw ~clock ~config ~(query : Server_logs_query.t) reqd =
 let add_routes ~sw ~clock router =
   router
   |> Server_route.get Server_route.Public_read stream_path (fun state request reqd ->
+    Http_server_eio.Response.with_scoped_headers
+      (Http_server_eio.Response.scoped_headers () @ Server_auth.public_read_cors_headers request) (fun () ->
     match Server_logs_query.of_request request with
     | Error json ->
       Http_server_eio.Response.json_value ~status:`Bad_request ~request json reqd
-    | Ok query -> serve ~sw ~clock ~config:(Mcp_server.workspace_config state) ~query reqd)
+    | Ok query ->
+      (match Server_observer_scope.admit_stream ~state request with
+       | Error error -> Server_observer_scope.refuse_stream error reqd
+       | Ok owner -> serve ~sw ~clock ~owner ~query reqd)))
 ;;

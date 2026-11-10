@@ -1,4 +1,5 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { confirmRuntimeTestWorkspace, RUNTIME_TEST_OBSERVER_INSTANCE } from '../lib/runtime-workspace.test-fixture'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { readToolSeriesStream, subscribeToolSeriesStream } from './tool-metrics-series-stream'
 import type { ToolMetricsSeriesRequest } from './schemas/tool-metrics-series'
 import { publishDashboardObservationChange } from '../lib/observation-refresh'
@@ -6,9 +7,10 @@ import { TRANSPORT_RETRY_BASE_MS } from '../config/constants'
 
 vi.mock('./dev-token', () => ({ ensureDevToken: vi.fn(async () => {}), refreshDevTokenAfterAuthError: vi.fn(async () => false) }))
 const request: ToolMetricsSeriesRequest = { sinceHours: 1, bucket: 'hour', utcOffsetMin: 0, tool: null }
-const headers = { 'content-type': 'text/event-stream', 'x-masc-sse-idle-timeout-ms': '90000' }
+const headers = { 'content-type': 'text/event-stream', 'x-masc-sse-idle-timeout-ms': '90000', 'x-masc-sse-instance-id': RUNTIME_TEST_OBSERVER_INSTANCE }
 const flush = async () => { for (let i = 0; i < 12; i++) await Promise.resolve() }
 const releases: Array<() => void> = []
+beforeEach(confirmRuntimeTestWorkspace)
 afterEach(() => {
   for (const release of releases.splice(0)) release()
   vi.unstubAllGlobals(); vi.useRealTimers()
@@ -35,7 +37,9 @@ describe('native series query', () => {
     releases.push(a)
     await flush()
     expect(fetch.mock.calls[0]![0]).toBe('/api/v1/tool-metrics/series/stream?since_hours=1&bucket=hour&utc_offset_min=0')
-    expect(fetch.mock.calls[0]![1]).toMatchObject({ credentials: 'omit', headers: { Accept: 'text/event-stream' } })
+    expect(fetch.mock.calls[0]![1]).toMatchObject({ credentials: 'omit', headers: {
+      Accept: 'text/event-stream', 'x-masc-sse-instance-id': RUNTIME_TEST_OBSERVER_INSTANCE,
+    } })
     const emit = (count: number) => writer.enqueue(new TextEncoder().encode(`data: ${JSON.stringify(snapshot(count))}\n\n`))
     emit(2)
     await flush()
@@ -62,7 +66,7 @@ describe('native series query', () => {
     const body = new TextEncoder().encode(`data: ${JSON.stringify(snapshot(1, 'other-tool'))}\n\n`)
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(body, { headers })))
     const apply = vi.fn()
-    await expect(readToolSeriesStream(request, new AbortController().signal, apply))
+    await expect(readToolSeriesStream(request, RUNTIME_TEST_OBSERVER_INSTANCE, new AbortController().signal, apply))
       .rejects.toMatchObject({ name: 'ToolSeriesStreamError' })
     expect(apply).not.toHaveBeenCalled()
   })

@@ -16,7 +16,7 @@ vi.mock('../store', async () => {
   return { executionWorkspaceAuthority: signal(null), shellAuthSummary: signal({ effective_role: 'admin' }) }
 })
 import { LaneAddonOperator } from './lane-addon-operator'
-const authority: ExecutionWorkspaceAuthority = { epoch: 'fixture', workspaceRoot: '/fixture', connectionGeneration: 1 }
+const authority: ExecutionWorkspaceAuthority = { epoch: 'fixture', workspaceRoot: '/fixture', connectionGeneration: 1, observerInstanceId: null }
 const instance = parseLaneAddonSnapshot({ configuration: null, rows: [], coverage: [], instances: [{
   instance_id: 'original', incarnation: 'original', run_id: 'fixture', addon_id: 'fixture', title: 'Account', revision: '1',
   runtime_presence: 'live', action_schema: null, configuration: null, phase: { kind: 'attached' }, observation_seq: 0, rows_count: 0,
@@ -123,7 +123,7 @@ it('closes an opened popup immediately when unmounted before connect returns', a
 
 it('does not borrow a previous popup after a same-workspace connection generation changes', async () => {
   const screen = await begin()
-  const replacement = { ...authority, connectionGeneration: 2 }
+  const replacement = { ...authority, connectionGeneration: 2, observerInstanceId: null }
   await act(() => { (executionWorkspaceAuthority as Signal<ExecutionWorkspaceAuthority | null>).value = replacement })
   screen.rerender(html`<${LaneAddonOperator} instance=${instance} authority=${replacement} />`)
   await act(() => returned(callbackUrl()))

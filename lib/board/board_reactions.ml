@@ -318,11 +318,11 @@ let toggle_reaction store ~reader ~target_type ~target_id ~user_id ~emoji
         let* staged = stage_reaction_toggle_unlocked store ~admission ~target_type ~target_id ~user_id ~emoji in
         Ok (admission, staged)) in
       let outcome = Source.rewrite_admitted store ~admission staged.snapshot in
-      Log.BoardLog.warn "DIAG toggle outcome=%s"
+      prerr_endline ("DIAG toggle outcome=" ^
         (match outcome with
          | Source.Written _ -> "written"
          | Source.Not_written _ -> "not_written"
-         | Source.Unknown _ -> "unknown");
+         | Source.Unknown _ -> "unknown"));
       let result = match outcome with
         | Source.Written { publication; _ } ->
           let projected =
@@ -332,12 +332,12 @@ let toggle_reaction store ~reader ~target_type ~target_id ~user_id ~emoji
           (match projected with
            | Ok value ->
              let acked = Source.acknowledge_publication store publication in
-             Log.BoardLog.warn "DIAG toggle projected=ok acknowledge=%s"
-               (match acked with Ok () -> "ok" | Error _ -> "error");
+             prerr_endline ("DIAG toggle projected=ok acknowledge=" ^
+               (match acked with Ok () -> "ok" | Error _ -> "error"));
              let* () = acked in
              Ok value
            | Error error ->
-             Log.BoardLog.warn "DIAG toggle projected=error %s" (show_board_error error);
+             prerr_endline ("DIAG toggle projected=error " ^ show_board_error error);
              Source.reject_publication store publication error; Error error)
         | Source.Not_written _ | Source.Unknown _ -> Error (Io_error "Board data is unavailable.") in
       let result = Source.finish_write outcome result in

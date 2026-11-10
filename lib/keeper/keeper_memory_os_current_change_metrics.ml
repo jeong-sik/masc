@@ -42,28 +42,80 @@ let of_change ~absorbed ~revisions (change : Keeper_memory_os_current_types.chan
   classify ~before:change.removed ~after:change.added ~absorbed ~revisions
 ;;
 
-(* A program commits once, so it is counted once: from the facts it started
-   from to the facts it left, with the absorptions and revisions of all its
-   stages. Like a disposition, which needs the replacing claim in the
-   snapshot it commits, an absorption or revision counts only when the claim
-   it went into is in the final facts; a later stage that dropped that claim
-   leaves the initial fact dropped. A fact one stage added and a later stage
-   removed was never in a committed snapshot, so it counts nowhere. *)
+type exit_kind =
+  | Absorbed
+  | Superseded
+
+(* How [id] left [stage], if an applied absorption or revision took it. An
+   absorption comes first, as in [classify]. *)
+let exit_of (stage : Keeper_memory_os_program_types.stage) id =
+  match
+    List.find_opt
+      (fun (statement : Keeper_memory_os_types.absorbed_statement) -> String.equal statement.absorbed id)
+      stage.absorbed_applied
+  with
+  | Some statement -> Some (Absorbed, statement.into)
+  | None ->
+    List.find_opt
+      (fun (revision : Keeper_memory_os_types.revision) -> String.equal revision.superseded id)
+      stage.revisions_applied
+    |> Option.map (fun (revision : Keeper_memory_os_types.revision) -> Superseded, revision.superseded_by)
+;;
+
+(* Each initial fact that left through an absorption or a revision, with the
+   kind of that first exit and the ID that carries it after the last stage.
+   In each later stage the carrier follows its own absorption or revision.
+   The fold visits every stage once and moves a carrier at most one step per
+   stage, so even a malformed proof cannot make it loop. *)
+let carriers (execution : Keeper_memory_os_program_types.execution) =
+  List.fold_left
+    (fun carried stage ->
+       let moved =
+         Set_util.StringMap.map
+           (fun (first, carrier) ->
+              match exit_of stage carrier with
+              | Some (_, next) -> first, next
+              | None -> first, carrier)
+           carried
+       in
+       List.fold_left
+         (fun carried fact ->
+            let id = Keeper_memory_os_types.memory_id fact in
+            if Set_util.StringMap.mem id carried
+            then carried
+            else (
+              match exit_of stage id with
+              | Some first_exit -> Set_util.StringMap.add id first_exit carried
+              | None -> carried))
+         moved
+         execution.initial_facts)
+    Set_util.StringMap.empty
+    execution.stages
+;;
+
+(* A program commits once, so it is counted as the one disposition it
+   amounts to, from the facts it started from to the facts it left. An
+   initial fact whose chain of absorptions and revisions ends in the final
+   facts counts by the kind of its first exit; a chain that ends at a
+   dropped claim leaves it dropped, as a disposition needs its replacing
+   claim in the snapshot it commits. A fact one stage added and a later
+   stage removed was never in a committed snapshot, so it counts nowhere. *)
 let of_publication (publication : Keeper_memory_os_program_types.publication) =
   let execution = publication.execution in
   let final = ids execution.final_facts in
-  let applied select = List.concat_map select execution.stages in
-  classify
-    ~before:execution.initial_facts
-    ~after:execution.final_facts
-    ~absorbed:
-      (applied (fun (stage : Keeper_memory_os_program_types.stage) -> stage.absorbed_applied)
-       |> List.filter (fun (statement : Keeper_memory_os_types.absorbed_statement) ->
-         Ids.mem statement.into final))
-    ~revisions:
-      (applied (fun (stage : Keeper_memory_os_program_types.stage) -> stage.revisions_applied)
-       |> List.filter (fun (revision : Keeper_memory_os_types.revision) ->
-         Ids.mem revision.superseded_by final))
+  let absorbed, revisions =
+    Set_util.StringMap.fold
+      (fun id (first, carrier) (absorbed, revisions) ->
+         match Ids.mem carrier final, first with
+         | false, (Absorbed | Superseded) -> absorbed, revisions
+         | true, Absorbed ->
+           { Keeper_memory_os_types.absorbed = id; into = carrier } :: absorbed, revisions
+         | true, Superseded ->
+           absorbed, { Keeper_memory_os_types.superseded = id; superseded_by = carrier } :: revisions)
+      (carriers execution)
+      ([], [])
+  in
+  classify ~before:execution.initial_facts ~after:execution.final_facts ~absorbed ~revisions
 ;;
 
 type 'a change_count =

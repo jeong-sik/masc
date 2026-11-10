@@ -509,7 +509,7 @@ and UI admission decision; these are not painted-frame or key-latency evidence.
 |---|---|
 | `j/k` | move the roster cursor |
 | `Enter` | read the client's full identity and observation |
-| `p / Esc` | back to the Runtime surface this hangs off |
+| `p / Esc` | back to Features & plugins |
 | `/` | jump the cursor to a matching attached name |
 | `n / N` | next / previous match |
 | `PgUp/PgDn` | page |
@@ -761,7 +761,7 @@ count is drawn beyond the available space.
 | `Y` | copy the selected revision's link when external sharing is enabled |
 | `R` | reread the exact open resource, including an older report revision |
 | `y` | send the selected text part's original bytes via OSC 52; terminal support is unconfirmed |
-| `Esc` | the text hands back to the list; the list leaves for System |
+| `Esc` | the text hands back to the list; the list returns to Features & plugins |
 | `/` | find a resource name in the list, or text in the loaded detail |
 | `n / N` | next / previous match |
 | `r` | reload |
@@ -781,7 +781,7 @@ count is drawn beyond the available space.
 | `c / C` | open $EDITOR on a template for a new Skill; c starts an instruction Skill, C starts a composition Skill |
 | `e` | open the selected SKILL.md in $EDITOR, validate, CAS-save, and publish |
 | `d` | remove the selected published package; press d again on the same row to confirm |
-| `Esc` | return from original Task to request, then request to list; otherwise back to the System surface it hangs off |
+| `Esc` | return from original Task to request, then request to list; otherwise back to Features & plugins |
 | `r` | refresh the open original Task body/history, original request detail, or Tools list |
 | `Enter` | in async runs, read the selected original request; otherwise load retained evidence for the selected Skill |
 | `t / T` | from async request detail, read its original source Task and history |
@@ -829,7 +829,7 @@ or completion.
 | `Ctrl-O` | inside Browser Lane: preview the selected tab; any key returns |
 | `j/k` | scroll |
 | `b / u` | bind / unbind a channel |
-| `Esc` | back to the selected Keeper |
+| `Esc` | back to Features & plugins |
 | `/` | jump the cursor to a matching transport |
 | `n / N` | next / previous match |
 | `PgUp/PgDn` | page |

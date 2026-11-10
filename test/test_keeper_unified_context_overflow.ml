@@ -34,24 +34,30 @@ let measurement_unavailable constraint_ =
              Llm_provider.Input_token_count.Anthropic_messages_count_tokens
        })
 
-let test_is_context_overflow_only_for_overflow_errors () =
+let is_provider_context_overflow error =
+  let module E = Masc.Keeper_unified_turn_execution.For_testing in
+  match E.declared_lane_failure_of_error error with
+  | E.Provider_context_overflow -> true
+  | E.Declared_runtime_lane_exhausted -> false
+
+let test_only_a_typed_context_overflow_is_a_provider_overflow () =
   check
     bool
     "ContextOverflow matches"
     true
-    (EC.is_context_overflow
+    (is_provider_context_overflow
        (Agent_core.Error.Api (ContextOverflow { message = "exceeded"; limit = Some 32768 })));
   check
     bool
     "ContextOverflow without limit"
     true
-    (EC.is_context_overflow
+    (is_provider_context_overflow
        (Agent_core.Error.Api (ContextOverflow { message = "exceeded"; limit = None })));
   check
     bool
     "NetworkError does not match"
     false
-    (EC.is_context_overflow
+    (is_provider_context_overflow
        (Agent_core.Error.Api
           (NetworkError
              { message = "Connection_reset"
@@ -62,7 +68,7 @@ let test_is_context_overflow_only_for_overflow_errors () =
       "Context overflow: model_context_window_exceeded arbitrary provider text"
   in
   check bool "rendered internal text does not match" false
-    (EC.is_context_overflow rendered_only);
+    (is_provider_context_overflow rendered_only);
   check bool "rendered internal text is not auto-recoverable" false
     (EC.is_auto_recoverable_turn_error rendered_only);
   (* [Error.Agent (UnrecognizedStopReason _)] is never a context overflow here,
@@ -77,7 +83,7 @@ let test_is_context_overflow_only_for_overflow_errors () =
       (UnrecognizedStopReason { reason = "provider_specific_halt" })
   in
   check bool "unmodeled stop reason is not a context overflow" false
-    (EC.is_context_overflow unmodeled_stop_reason);
+    (is_provider_context_overflow unmodeled_stop_reason);
   check bool "unmodeled stop reason is not auto-recoverable"
     false
     (EC.is_auto_recoverable_turn_error unmodeled_stop_reason);
@@ -87,7 +93,7 @@ let test_is_context_overflow_only_for_overflow_errors () =
   in
   check bool "overflow token on an agent stop reason is still not classified here"
     false
-    (EC.is_context_overflow overflow_token_stop_reason)
+    (is_provider_context_overflow overflow_token_stop_reason)
 ;;
 
 let test_input_capacity_is_not_context_overflow () =
@@ -101,11 +107,6 @@ let test_input_capacity_is_not_context_overflow () =
          ; rejected_from = None
          })
   in
-  check
-    bool
-    "typed input capacity is not context overflow"
-    false
-    (EC.is_context_overflow capacity_error);
   check
     bool
     "typed input capacity does not classify as a lane overflow"
@@ -230,9 +231,9 @@ let () =
     "keeper_unified_context_overflow"
     [ ( "context_overflow"
       , [ test_case
-            "is_context_overflow only matches ContextOverflow"
+            "only a typed ContextOverflow is a provider context overflow"
             `Quick
-            test_is_context_overflow_only_for_overflow_errors
+            test_only_a_typed_context_overflow_is_a_provider_overflow
         ; test_case
             "context overflow is not auto-recoverable"
             `Quick

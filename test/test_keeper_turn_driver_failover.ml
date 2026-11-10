@@ -6030,6 +6030,12 @@ let context_overflow_error message =
   Agent_core.Error.Api
     (Agent_core.Retry.ContextOverflow { message; limit = Some 32768 })
 
+let is_provider_context_overflow error =
+  let module E = Masc.Keeper_unified_turn_execution.For_testing in
+  match E.declared_lane_failure_of_error error with
+  | E.Provider_context_overflow -> true
+  | E.Declared_runtime_lane_exhausted -> false
+
 let serving_constraint () =
   Llm_provider.Serving_constraint.make
     ~source_kind:Llm_provider.Serving_constraint.Probe
@@ -6156,7 +6162,7 @@ let test_attempt_loop_overflow_on_last_candidate_is_terminal () =
      Alcotest.(check bool)
        "typed overflow preserved through lane exhaustion"
        true
-       (Masc.Keeper_error_classify.is_context_overflow err));
+       (is_provider_context_overflow err));
   Alcotest.(check (list string))
     "every candidate attempted before terminal overflow"
     [ "small.test_model"; "smaller.test_model" ]
@@ -6202,7 +6208,7 @@ let test_attempt_loop_exhaustion_preserves_earlier_overflow () =
      Alcotest.(check bool)
        "typed overflow outranks the fallback rate limit"
        true
-       (Masc.Keeper_error_classify.is_context_overflow err));
+       (is_provider_context_overflow err));
   Alcotest.(check (list string))
     "both candidates attempted"
     [ "small.test_model"; "fallback.test_model" ]
@@ -6230,7 +6236,7 @@ let test_attempt_loop_exhaustion_preserves_earlier_overflow () =
     Alcotest.(check bool)
       "the reported lane error is the overflow itself"
       true
-      (Masc.Keeper_error_classify.is_context_overflow terminal.lane_error)
+      (is_provider_context_overflow terminal.lane_error)
 
 (* Overflow precedence applies only to an exhausted lane: a walk stopped
    mid-lane by a non-retryable error keeps that stopping error, which is the

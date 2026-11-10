@@ -541,31 +541,6 @@ let is_invalid_request_error : Agent_core.Error.t -> bool = function
   | Agent_core.Error.Orchestration _ | Agent_core.Error.Media _ | Agent_core.Error.Internal _
   | Agent_core.Error.Internal_carried _ -> false
 
-(** [true] when a structured error indicates context overflow.
-
-    This does not read [UnrecognizedStopReason { reason = "model_context_window_exceeded" }].
-    Agent core can construct that value: only
-    [Types.stop_reason_of_string] maps the overflow tokens to the typed
-    [ContextWindowExceeded]; the Ollama backend, the Ollama NDJSON terminal
-    chunk, and the OpenAI Responses decoder each build [Types.Unknown <raw>]
-    without consulting it, and [pipeline.ml] turns [Unknown] into
-    [UnrecognizedStopReason]. Classifying an [Error.Agent _] as a context
-    overflow here would be a string classifier standing in for a typed provider
-    signal, and no production caller would consume the result:
-    the live classifiers ([Keeper_turn_runtime_budget.capacity_transition_of_error],
-    [Keeper_turn_driver_try_runtime]) already treat every [Error.Agent _] as
-    not-overflow. Routing an Ollama-dialect overflow belongs in AGENT_CORE, at the
-    decoders that bypass [stop_reason_of_string]. *)
-let is_context_overflow (err : Agent_core.Error.t) : bool =
-  match err with
-  | Agent_core.Error.Api (ContextOverflow _) -> true
-  | Agent_core.Error.Api (InputCapacity _) -> false
-  | Agent_core.Error.Api (Llm_provider.Retry.RateLimited _ | (Llm_provider.Retry.Overloaded _ | (Llm_provider.Retry.ServerError _ | (Llm_provider.Retry.AuthError _ | (Llm_provider.Retry.AuthorizationError _ | (Llm_provider.Retry.PaymentRequired _ | (Llm_provider.Retry.InvalidRequest _ | (Llm_provider.Retry.NotFound _ | (Llm_provider.Retry.NetworkError _ | Llm_provider.Retry.Timeout _)))))))))
-  | Agent_core.Error.Provider _ | Agent_core.Error.Agent _ | Agent_core.Error.Mcp _
-  | Agent_core.Error.Config _ | Agent_core.Error.Serialization _ | Agent_core.Error.Io _
-  | Agent_core.Error.Orchestration _ | Agent_core.Error.Media _ | Agent_core.Error.Internal _
-  | Agent_core.Error.Internal_carried _ -> false
-
 (* Classification-only predicate: does this failure class describe a
    condition a later turn could clear without operator action?
 

@@ -3052,11 +3052,7 @@ let is_size_refusal = function
    and the same-run-retry-authority gate on their own.
 
    Classifies with [is_size_refusal] above -- the context overflow and the
-   provider's refusal of the request body, enumerated exhaustively -- rather
-   than [Keeper_error_classify.is_context_overflow]: the latter depends on
-   [Keeper_turn_driver], which depends on this module (it calls
-   [run_try_provider_with_truncation_recovery]), so reaching it here would
-   close a module cycle.
+   provider's refusal of the request body, enumerated exhaustively.
    [same_run_retry_authorized] mirrors the exact same-run authority gate
    [Keeper_turn_driver]'s declared-lane walk applies before rotating
    candidates ([same_run_retry_allowed] / [checkpoint_progress]): a

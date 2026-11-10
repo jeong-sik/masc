@@ -1,0 +1,65 @@
+{
+  "kind": "selected manual native PTY observations, not GUI screenshots or assertion tests",
+  "source_sha": "097b4c2d629498b18197de7da9c92765febab86e",
+  "workflow": {
+    "name": "Minimal manual checks",
+    "run_id": 42808378032,
+    "workflow_ref": "main",
+    "workflow_head": "8969425ef9ff430f3785998f7a31131011efbcc7",
+    "selected_source": "097b4c2d629498b18197de7da9c92765febab86e",
+    "scenario": "resource-reading",
+    "conclusion": "success"
+  },
+  "artifact_id": 13760693353,
+  "artifact_zip_sha256": "173c849797d39a02f15079227048bebe1de0a3ebd21842059af4439a6662b26c",
+  "executables": {
+    "server_sha256": "d18f9df689cc4cd6c01d4c39ad44e4667f725d29f7750caf8f20f080b3e74762",
+    "tui_sha256": "c3c6faaa67aa7ecf7d4256ddd54bba531e52cf60ece50b7ef9ac1256ecd474fc"
+  },
+  "generator": {
+    "producer": "bin/masc_tui_keys_doc_cli.exe",
+    "sha256": "e219ef686d1de8d862147b9dde70c11ebe061da618382e7874ce8d1c0ec911c5",
+    "bytes": 60306,
+    "copy": "complete output copied unchanged to docs/guides/TUI-KEYS.md"
+  },
+  "fixture": "one private artificial report, zero Keepers, own reused workspace, matching source server and TUI on port49678",
+  "files": [
+    {
+      "file": "saved-36x20.txt",
+      "source_capture": "save-candidate-success-36x20.txt",
+      "bytes": 689,
+      "sha256": "f763b5c0a87721ccbee66f348a936711841f8ca2854d5f0ffbdbcaee72b85b7b",
+      "observed_at": "2026-11-10T12:28:40.512368+00:00",
+      "pane": "38070 36 20 0 masc-tui"
+    },
+    {
+      "file": "saved-36x20.ansi",
+      "source_capture": "save-candidate-success-36x20.ansi",
+      "bytes": 838,
+      "sha256": "b3f8054cc3617638f309fb47a0fafdfd400842f3f8a358e9a51fa29383f8b607",
+      "observed_at": "2026-11-10T12:28:40.512368+00:00",
+      "pane": "38070 36 20 0 masc-tui"
+    },
+    {
+      "file": "existing-refused-36x20.txt",
+      "source_capture": "save-candidate-existing-refused-36x20.txt",
+      "bytes": 724,
+      "sha256": "9a4caca2915cd8772717cf76b75d6b191dd6da8427d1fcd102ae987601fdcdd6",
+      "observed_at": "2026-11-10T12:29:33.092257+00:00",
+      "pane": "38070 36 20 0 masc-tui"
+    },
+    {
+      "file": "existing-refused-36x20.ansi",
+      "source_capture": "save-candidate-existing-refused-36x20.ansi",
+      "bytes": 898,
+      "sha256": "bdc23a85385e8779c640f8be787aff19b5642be4faecac8e19cb1bcbd9019a49",
+      "observed_at": "2026-11-10T12:29:33.092257+00:00",
+      "pane": "38070 36 20 0 masc-tui"
+    }
+  ],
+  "limits": [
+    "PTY text and SGR captures, no physical GUI paint claim",
+    "isolated fixture, not production",
+    "not a full regression or full 23-surface audit"
+  ]
+}

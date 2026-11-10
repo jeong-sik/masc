@@ -338,31 +338,32 @@ plain cancellation after the wrapper observed creation can still be reported
 as unknown when that observation is not carried into the cancellation payload.
 
 Independent core/export and UI/state source reviews found no remaining P0-P2
-in their recorded scopes after three UI findings were repaired. OCaml parsing
-and diffcheck are separate from type/build/execution evidence. At 61217c4e,
-`Test` run 42799681363 on `fix/tui-report-save-receipts-20261110`, selecting only
-`test_tui_resource_export,test_fs_compat_capability_write`, failed while building
-before either suite ran: warning 4 rejected a wildcard over the nested result
-in `settle_resource_save`. `Minimal manual checks` run 42799673031, workflow
-`main` at 277b52f2 with selected source 61217c4e and `resource-reading`, failed
-at the same compilation boundary. The fallback now enumerates `Ok` and `Error`
-without changing receipt ownership or the form-closing guard. The changed Help
-still needs its actual generated reference; corrected-source execution is not
-established. The 6157b06b native results belong to the body-reading parent,
-not this save change. Matching execution, installation, GUI display and the
-rest of the 23-surface audit remain open.
+in their recorded scopes after three UI findings were repaired. Two subsequent
+compilation repairs were independently reread: enumerate the nested result
+constructors, and declare both direct input/export libraries in the published
+report test stanza. Their earlier failed runs remain in the working evidence.
 
-At repaired source af2391c4, `Test` run 42802898140 on
-`fix/tui-report-save-receipts-20261110` completed successfully with exactly
-`test_tui_resource_export,test_fs_compat_capability_write`: four export cases
-and 68 filesystem cases ran. This is the selected semantic scope, not full
-regression or native UI execution. `Minimal manual checks` run 42802891578,
-workflow `main` at b43d447c with selected source af2391c4 and
-`resource-reading`, failed while building `test_tui_published_reports`:
-its new input-ownership cases directly reference `Masc_tui_message_input`
-and `Masc_tui_resource_export`, but their stanza omitted both libraries.
-The stanza now lists those direct dependencies; corrected native compilation,
-the four resource suites and the actual key generator remain unverified.
+At source 097b4c2d, `Minimal manual checks` run 42808378032, workflow
+`main` at 8969425ef9ff430f3785998f7a31131011efbcc7 and `resource-reading`,
+completed successfully. Matching macOS server/TUI build commits and hashes,
+four complete unfiltered resource suites (20, 18, 37 and 12 cases), and the
+actual full key-generator output were verified. Its 60,306 bytes, SHA-256
+`e219ef686d1de8d862147b9dde70c11ebe061da618382e7874ce8d1c0ec911c5`,
+were copied unchanged into the guide. Separately, `Test` run 42802898140 on
+`fix/tui-report-save-receipts-20261110@af2391c4` succeeded with exactly
+`test_tui_resource_export,test_fs_compat_capability_write` (4 and 68 cases).
+That earlier-source scoped result was not repeated or called full regression.
+
+The matching 097b4c2d isolated native pair then showed distinct success and
+existing-file refusal at 36x20. Creation preserved all 393 original bytes with
+mode 0600; the existing baseline retained its measured bytes/mode/inode/mtime.
+Refusal kept the editable destination. Edited unsubmitted input, literal q,
+page navigation and retained original results were also observed. The actual
+original diagnostic and both results were readable in the wide expanded view.
+Selected raw captures, provenance and readbacks are preserved in
+`docs/evidence/tui-report-save-results-20261110/`.
+This is not installed GUI, native fault/late-completion coverage, whole-system
+health or completion of the full 23-surface audit; those remain open.
 
 ## Feature child identity and resource body (#51023)
 

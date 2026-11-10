@@ -4,12 +4,13 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { clearStoredToken, setStoredToken } from '../api/core'
 import { decodeSkillEvidenceResponse, type SkillsResponse, type SkillSurfaceProfile } from '../api/dashboard-skills'
 import { SkillsPanel } from './skills-panel'
+import { acceptedExecutionWorkspace } from '../execution-workspace-authority'
 
 const api = vi.hoisted(() => ({ fetchSkills: vi.fn(), fetchSkillEvidence: vi.fn(), fetchAsyncRequestObservation: vi.fn() }))
 vi.mock('../api/dashboard-skills', async original => ({ ...await original<typeof import('../api/dashboard-skills')>(), ...api }))
 vi.mock('../store', async () => {
   const { signal } = await import('@preact/signals')
-  return { executionWorkspaceAuthority: signal({ epoch: 'fixture', workspaceRoot: '/workspace', connectionGeneration: 1 }), keepers: signal([]), executionLoaded: signal(false) }
+  return { executionWorkspaceAuthority: (await import('../execution-workspace-authority')).acceptedExecutionWorkspace, keepers: signal([]), executionLoaded: signal(false) }
 })
 const reference = { identity: { source_id: 'workspace', package_id: 'proof', name: 'proof' }, content_revision: 'a'.repeat(64) }
 const profile: SkillSurfaceProfile = { activation_tool: 'keeper_skill', execution: 'model_orchestrated', io: { kind: 'model_orchestrated' },
@@ -48,6 +49,8 @@ async function loadEvidence() {
   await screen.findByText(/retained sessions inspected/)
 }
 beforeEach(() => {
+  acceptedExecutionWorkspace.value = Object.freeze({ epoch: 'fixture', workspaceRoot: '/workspace',
+    connectionGeneration: 1, observerInstanceId: 'fixture-instance' })
   vi.clearAllMocks(); setStoredToken('fixture')
   api.fetchSkills.mockResolvedValue(catalog())
   api.fetchAsyncRequestObservation.mockResolvedValue({ schema: 'masc.async-request-observation/v1', status: 'unavailable', error: {}, startup_recovery: null })

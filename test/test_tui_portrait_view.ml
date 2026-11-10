@@ -80,6 +80,18 @@ let frame ?(presented = Presenter.Unchanged) requests =
 
 let deleted = Masc_tui_graphics.delete_image ~image_id:mascot_id
 
+(* The view keeps one placement per image, under this id. *)
+let only_placement = 1
+
+(* What a put writes for [p]: the cursor moved to its corner, the pixels the
+   terminal already holds placed again, the cursor restored. *)
+let put_written p =
+  "\0277"
+  ^ Printf.sprintf "\027[%d;%dH" (p.View.row + 1) (p.View.column + 1)
+  ^ Masc_tui_graphics.put ~image_id:p.View.image_id ~placement_id:only_placement
+      ~rows:p.View.box.View.rows
+  ^ "\0278"
+
 let send_name = function
   | View.Keep -> "keep"
   | View.Put -> "put"
@@ -114,7 +126,7 @@ let test_flush_sends_only_what_changed () =
   check string "a clear screen took it, so it is transmitted again" (View.placement_bytes p)
     (frame ~presented:cleared [ p ]);
   let moved = { p with View.row = p.View.row + 1 } in
-  check string "a moved picture is put where it now stands" (View.put_bytes moved)
+  check string "a moved picture is put where it now stands" (put_written moved)
     (frame [ moved ]);
   let changed = placement ~row:moved.View.row 8 in
   check string "a changed picture is transmitted" (View.placement_bytes changed)
@@ -137,9 +149,9 @@ let test_a_rewritten_row_puts_back_only_the_picture_it_crosses () =
     (frame ~presented:(rows_written [ bottom + 1 ]) [ p ]);
   check string "a frame that moved only the cursor leaves it alone" ""
     (frame ~presented:(rows_written []) [ p ]);
-  check string "its top row puts it back" (View.put_bytes p)
+  check string "its top row puts it back" (put_written p)
     (frame ~presented:(rows_written [ top ]) [ p ]);
-  check string "its bottom row puts it back" (View.put_bytes p)
+  check string "its bottom row puts it back" (put_written p)
     (frame ~presented:(rows_written [ bottom ]) [ p ]);
   ignore (frame [])
 
@@ -152,11 +164,9 @@ let test_a_row_rewritten_every_step_never_resends_the_pixels () =
   let beside = p.View.row + 2 in
   for step = 1 to 20 do
     let written = frame ~presented:(rows_written [ beside ]) [ p ] in
-    check string (Printf.sprintf "step %d puts the held pixels back" step) (View.put_bytes p) written;
+    check string (Printf.sprintf "step %d puts the held pixels back" step) (put_written p) written;
     check bool (Printf.sprintf "step %d carries no PNG" step) false (contains ~sub:"f=100" written)
   done;
-  check bool "a put names the held image" true
-    (contains ~sub:(Printf.sprintf "a=p,i=%d," mascot_id) (View.put_bytes p));
   ignore (frame [])
 
 let test_a_second_request_replaces_the_first () =
@@ -183,9 +193,6 @@ let frame_png ?(presented = Presenter.Unchanged) ?(held = []) pngs =
   let written = Buffer.create 4096 in
   View.flush presented ~write:(Buffer.add_string written);
   Buffer.contents written
-
-(* The view keeps one placement per image, under this id. *)
-let only_placement = 1
 
 let evidence_deleted = Masc_tui_graphics.delete_image ~image_id:evidence_id
 

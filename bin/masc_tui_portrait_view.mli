@@ -84,11 +84,6 @@ val placement_bytes : placement -> string
     placement's id, which also places them, restore the cursor. [""] when
     the encoder refuses the pixels. *)
 
-val put_bytes : placement -> string
-(** Save the cursor, move to the corner, place the pixels the terminal
-    already holds under the placement's id ({!Masc_tui_graphics.put}),
-    restore the cursor. No pixels travel. *)
-
 (** {2 Pictures that arrive as PNG files}
 
     An evidence picture is a PNG file as the server sent it, not a frame this

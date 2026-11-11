@@ -18273,7 +18273,8 @@ let launch_local_source_followup state ~mailbox source =
     match source with
     | Local_keepers -> launch_local_keeper_read state ~mailbox ~intent:Snapshot_read.Poll state.local_base_path
     | Local_work ->
-        launch_local_work_read state ~mailbox ~intent:Snapshot_read.Poll state.local_base_path
+        launch_local_work_read state ~mailbox ~intent:Snapshot_read.Refresh
+          state.local_base_path
 
 let observe_local_source state ~source ~is_observed request result =
   let observation = Masc_tui_types.take_local_workspace_read state ~source ~is_observed request result in

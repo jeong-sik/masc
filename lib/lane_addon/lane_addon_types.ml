@@ -223,6 +223,14 @@ let output_selection_to_json = function
 let output_ports_to_json ports =
   `Assoc (List.map (fun (id, selection) -> id, output_selection_to_json selection) ports)
 let package_to_json (p : package) =
+  (* Every field is named here, so a field added to [package] stops the build
+     until it is written below. A declaration revision and
+     [same_execution_package] see a package only through this value. *)
+  let ({ id = _; revision = _; title = _; ui_category = _; contributions = _; execution = _;
+         worker_service = _; command = _; directory = _; action_tool = _; state_storage = _;
+         tool_invocation = _; exported_tools = _; tool_hooks = _; outputs = _;
+         refresh_policy = _; model_access = _; binding_schema = _; presentation = _;
+         skills_directory = _; exact_outputs = _; operator_asks = _; web_search = _ } : package) = p in
   (* runtime, exact_outputs and operator_asks are written only when they differ from what a
      package without the key means, so such a package keeps its revision. *)
   let runtime, image, resources = match p.execution with

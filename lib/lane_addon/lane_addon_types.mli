@@ -149,8 +149,8 @@ val execution_package_json : package -> Yojson.Safe.t
 (** The package as a declaration revision reads it: every field except
     [ui_category], object keys sorted. *)
 val same_execution_package : package -> package -> bool
-(** Equal {!execution_package_json}: two packages a declaration revision cannot
-    tell apart are the same package. Callers retain their
+(** [Yojson.Safe.equal] on {!execution_package_json}. Two packages a declaration
+    revision cannot tell apart are the same package. Callers retain their
     original owner, configuration and invocation checks; this is not admission. *)
 val output_selection_to_json : output_selection -> Yojson.Safe.t
 val output_ports_to_json : output_ports -> Yojson.Safe.t

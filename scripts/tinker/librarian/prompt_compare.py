@@ -16,7 +16,9 @@
 `drops` and `merges` are the blind judges' folders of the synth run (`e_synth_audit.py drops`,
 `merge_cases.py`), null when the run has no off-label drop or no absorb. A draft runs on GLM only
 after its Inkling runs pass, so a model may be left out; the result then says it is incomplete,
-and an incomplete draft does not go in.
+and an incomplete draft does not go in. Every model's draft runs draw their prompts with one
+template, and an answered call counts in one run only, so a run listed twice, or a folder copied
+from another run, is refused.
 
 prompt_lines.json fixes the comparison before a draft runs: the pass lines and the template the
 baseline runs were drawn with, the rows of each baseline run, how many runs each side takes, and
@@ -114,13 +116,15 @@ class Run:
 @dataclass(frozen=True, slots=True)
 class Measured:
     """One run's counts for the model's target, the template it drew its prompts with, its rows'
-    sha256 and its E-real record."""
+    sha256, its E-real record, and the answered calls it counts. A call is its key and the time it
+    was sent: two runs of one prompt share keys, never a sent call."""
 
     counts: Mapping[Metric, Count]
     template_sha256: str
     synth_rows_sha256: str
     real_rows_sha256: str
     real_record: JsonObject
+    answered: frozenset[tuple[str, float]]
 
 
 def sha256_file(path: Path) -> str:
@@ -215,8 +219,10 @@ def measure(run: Run, model: ModelLines, pin: str, items: tuple[int, int]) -> Me
     if len(real_rows) != items[1]:
         raise SystemExit(f"{run.real} has not answered all {items[1]} E-real items")
     counts[Metric.REAL_VALID] = Count(sum(bool(r["valid"]) for r in real_rows), len(real_rows))
+    answered = frozenset((cast(str, r["call_key"]), cast(float, r["sent_at"]))
+                         for r in [*(r for r in rows if r["target"] == target), *real_rows])
     return Measured(counts, cast(str, synth_summary["template_sha256"]), sha256_file(run.synth / "rows.jsonl"),
-                    sha256_file(run.real / "rows.jsonl"), real_record(real_rows))
+                    sha256_file(run.real / "rows.jsonl"), real_record(real_rows), answered)
 
 
 def side_problem(name: str, model: ModelLines, base: list[Measured], draft: list[Measured],
@@ -236,6 +242,21 @@ def side_problem(name: str, model: ModelLines, base: list[Measured], draft: list
     drafts = {m.template_sha256 for m in draft}
     if len(drafts) != 1 or baseline_template in drafts:
         return f"the {name} draft runs do not share one template other than the pinned one"
+    return None
+
+
+def plan_problem(sides: Mapping[str, tuple[list[Measured], list[Measured]]]) -> str | None:
+    """Why the models' runs cannot be compared together, or None: the draft runs of every model drew
+    their prompts with one template, so the result speaks of one draft, and no answered call counts
+    in two runs, so each run is its own sample."""
+    if len({m.template_sha256 for _, draft in sides.values() for m in draft}) > 1:
+        return "the models' draft runs drew their prompts with different templates"
+    seen: set[tuple[str, float]] = set()
+    for name, (base, draft) in sides.items():
+        for m in [*base, *draft]:
+            if m.answered & seen:
+                return f"two {name} runs count the same answered call: a run is listed twice or copied"
+            seen |= m.answered
     return None
 
 
@@ -307,6 +328,9 @@ def main() -> int:
         if problem is not None:
             raise SystemExit(problem)
         sides[name] = (base, draft)
+    problem = plan_problem(sides)
+    if problem is not None:
+        raise SystemExit(problem)
     result = compared(lines, sides)
     Path(cast(str, args.out)).write_text(json.dumps(result, indent=1) + "\n", encoding="utf-8")
     print(json.dumps({k: result[k] for k in ("worse", "better", "complete", "goes_in")}))

@@ -35,7 +35,8 @@ LINES = P.Lines(PIN, BASE_T, 2.5, 2.0, frozenset({"inkling"}), {"inkling": INKLI
 
 
 def synth_row(item: str, **counts: object) -> Row:
-    base: Row = {"target": "base", "item": item, "status": 200, "wall_s": 1.0, "valid": True, "cost_usd": 0.0,
+    base: Row = {"target": "base", "item": item, "call_key": f"key-{item}", "sent_at": 1.0,
+                 "status": 200, "wall_s": 1.0, "valid": True, "cost_usd": 0.0,
                  "prompt_tokens": 1, "cached_tokens": 1, "candidates": 2, "correct": 2, "dropped": 0,
                  "absorbed": 0, "dropped_expected": 0, "planted": 1, "planted_dropped": 0, "state_correct": 2,
                  "state_by_kind": {"new": [2, 2]}, "dropped_unmerged": [], "planted_absorbed": 0, "merges": 0,
@@ -45,7 +46,8 @@ def synth_row(item: str, **counts: object) -> Row:
 
 
 def real_row(item: str, **counts: object) -> Row:
-    base: Row = {"target": "base", "item": item, "status": 200, "wall_s": 1.0, "valid": True, "cost_usd": 0.0,
+    base: Row = {"target": "base", "item": item, "call_key": f"key-{item}", "sent_at": 2.0,
+                 "status": 200, "wall_s": 1.0, "valid": True, "cost_usd": 0.0,
                  "prompt_tokens": 1, "cached_tokens": 1, "candidates": 2, "agree": 1,
                  "dropped_not_in_live": [], "absorbed_not_in_live": [], "added": 0, "removed": 0,
                  "live_added": 0, "live_removed": 0}
@@ -60,9 +62,10 @@ def counts(hits: dict[str, tuple[int, int]]) -> dict[P.Metric, P.Count]:
 
 
 def measured(template: str, synth: str = "s", real: str = "r",
-             hits: dict[str, tuple[int, int]] | None = None) -> P.Measured:
+             hits: dict[str, tuple[int, int]] | None = None,
+             answered: frozenset[tuple[str, float]] = frozenset()) -> P.Measured:
     return P.Measured(counts(hits or {}), template, synth, real,
-                      {"agree": 1, "candidates": 2, "dropped_not_in_live": 0})
+                      {"agree": 1, "candidates": 2, "dropped_not_in_live": 0}, answered)
 
 
 def sides(inkling_draft: dict[str, tuple[int, int]], glm_draft: dict[str, tuple[int, int]] | None = None,
@@ -175,6 +178,26 @@ class SideProblemTest(unittest.TestCase):
                       P.side_problem("inkling", INKLING, self.base(), [measured(BASE_T)] * 2, BASE_T) or "")
 
 
+class PlanProblemTest(unittest.TestCase):
+    def test_one_draft_template_and_runs_with_their_own_calls_compare(self) -> None:
+        plan = {"inkling": ([measured(BASE_T, answered=frozenset({("a", 1.0)}))],
+                            [measured(DRAFT_T, answered=frozenset({("a", 2.0)}))]),
+                "glm": ([measured(BASE_T, answered=frozenset({("b", 1.0)}))],
+                        [measured(DRAFT_T, answered=frozenset({("c", 1.0)}))])}
+        self.assertIsNone(P.plan_problem(plan))
+
+    def test_models_whose_drafts_drew_different_templates_are_refused(self) -> None:
+        plan = {"inkling": ([measured(BASE_T)], [measured(DRAFT_T)]), "glm": ([measured(BASE_T)], [measured(OTHER_T)])}
+        self.assertIn("different templates", P.plan_problem(plan) or "")
+
+    def test_a_run_listed_twice_or_copied_is_refused(self) -> None:
+        run = measured(DRAFT_T, answered=frozenset({("k1", 1.0), ("k2", 1.0)}))
+        copied = measured(DRAFT_T, answered=frozenset({("k1", 1.0), ("k3", 1.0)}))
+        for name, draft in {"twice": [run, run], "copied": [run, copied]}.items():
+            with self.subTest(name=name):
+                self.assertIn("same answered call", P.plan_problem({"inkling": ([], draft)}) or "")
+
+
 class MeasureTest(unittest.TestCase):
     def setUp(self) -> None:
         self.tmp = tempfile.TemporaryDirectory()
@@ -206,6 +229,8 @@ class MeasureTest(unittest.TestCase):
                          (P.Count(1, 2), P.Count(1, 3), P.Count(0, 1), P.Count(1, 2)))
         self.assertEqual((got.template_sha256, got.synth_rows_sha256),
                          (DRAFT_T, hashlib.sha256((run.synth / "rows.jsonl").read_bytes()).hexdigest()))
+        self.assertEqual(got.answered, frozenset({("key-m1-01", 1.0), ("key-m2-01", 1.0),
+                                                  ("key-e1", 2.0), ("key-e2", 2.0)}))
 
     def test_refuses_runs_it_cannot_count(self) -> None:
         cases: dict[str, tuple[dict[str, object], tuple[int, int]]] = {

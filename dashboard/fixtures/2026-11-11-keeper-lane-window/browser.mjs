@@ -19,11 +19,22 @@ const ROWS = Number(process.env.LANE_WINDOW_ROWS ?? 5000)
 const REFRESH_SAMPLES = 9
 /** Idle time after a refresh in which the work it scheduled finishes. */
 const REFRESH_SETTLE_MS = 100
+/** Rows the Keeper consumes in one batch while the list sits at its end. */
+const CONSUMED_ROWS = 200
+/** Few enough rows that the list keeps every one of them mounted. */
+const SHORT_LIST_ROWS = 5
+/** The first row's bar is the next tab stop after the 기술 상세 toggle; this
+ *  bounds the walk if something else takes focus first. */
+const MAX_TAB_PRESSES = 5
+if (ROWS <= CONSUMED_ROWS + SHORT_LIST_ROWS) {
+  throw new Error(`LANE_WINDOW_ROWS must be above ${CONSUMED_ROWS + SHORT_LIST_ROWS}`)
+}
 /** The dev server transforms the whole module graph on the first request. */
 const COLD_START_TIMEOUT_MS = 120_000
 const SELECTORS = {
   list: '[aria-label="대기 나이순 작업 흐름"]',
   row: '[data-testid="keeper-lane-waiting-row"]',
+  bar: '[data-testid="keeper-lane-waiting-bar"]',
   what: '[data-testid="keeper-lane-waiting-what"]',
 }
 
@@ -64,9 +75,13 @@ const frames = () => page.evaluate(() => new Promise(resolve => {
   requestAnimationFrame(() => requestAnimationFrame(() => resolve(undefined)))
 }))
 const serials = async () => {
-  const first = await page.evaluate(() => window.laneFixture.firstSerial())
-  return { first, last: first + ROWS - 1 }
+  const { first, count } = await page.evaluate(() => ({
+    first: window.laneFixture.firstSerial(),
+    count: window.laneFixture.rowCount(),
+  }))
+  return { first, last: first + count - 1 }
 }
+const operationsSent = () => page.evaluate(() => window.laneFixture.operations.length)
 
 /** Scrolls the list to one edge the way an operator keeps scrolling: again
  *  until the list stays there. A windowed list measures rows as they mount,
@@ -199,8 +214,13 @@ try {
   measurements.readdress = {
     rowOpen: await first.evaluate(element => element.open),
     focus: await focusPlace(),
+    currentSourceIncarnation: await page.evaluate(
+      serial => window.laneFixture.incarnationOf(serial), alpha.first,
+    ),
   }
+  const sentBefore = await operationsSent()
   await page.keyboard.press('Enter')
+  measurements.readdress.operationsSent = await operationsSent() - sentBefore
   measurements.readdress.operatedSourceIncarnation = await page.evaluate(
     () => window.laneFixture.operations.at(-1)?.operation.sourceIncarnation ?? null,
   )
@@ -217,6 +237,60 @@ try {
     openRows: await page.locator(`${SELECTORS.row}[open]`).count(),
   }
   await page.screenshot({ path: `${out}keeper-switch.png`, fullPage: true })
+
+  // The Keeper consumes a batch while the list sits at its end. What the next
+  // frame shows is read inside the first animation frame after the change,
+  // before anything scheduled for after the paint has run.
+  await scrollToEdge('end')
+  measurements.consumedBatch = await page.evaluate(({ count, list: listSelector, row }) => new Promise(resolve => {
+    window.laneFixture.consume(count)
+    requestAnimationFrame(() => {
+      const element = document.querySelector(listSelector)
+      const top = element.getBoundingClientRect().top + element.clientTop
+      const bottom = top + element.clientHeight
+      const shown = [...document.querySelectorAll(row)]
+        .map(mounted => mounted.getBoundingClientRect())
+        .filter(rect => rect.bottom > top && rect.top < bottom)
+      resolve({
+        consumedRows: count,
+        rowsInViewNextFrame: shown.length,
+        emptyAbovePx: shown.length === 0 ? bottom - top : Math.max(0, Math.min(...shown.map(rect => rect.top)) - top),
+        emptyBelowPx: shown.length === 0 ? 0 : Math.max(0, bottom - Math.max(...shown.map(rect => rect.bottom))),
+      })
+    })
+  }), { count: CONSUMED_ROWS, ...SELECTORS })
+
+  // Consume down to a list short enough to keep every row mounted. Such a list
+  // clips each row to its own box, so the first row's keyboard focus ring has
+  // to fit inside that box.
+  const left = await page.evaluate(() => window.laneFixture.rowCount())
+  await page.evaluate(count => window.laneFixture.consume(count), left - SHORT_LIST_ROWS)
+  await frames()
+  await page.getByTestId('keeper-lane-dev-toggle').focus()
+  const firstBarFocused = () => page.evaluate(
+    bar => document.activeElement === document.querySelector(bar), SELECTORS.bar,
+  )
+  for (let presses = 0; presses < MAX_TAB_PRESSES && !(await firstBarFocused()); presses += 1) {
+    await page.keyboard.press('Tab')
+  }
+  measurements.shortList = await page.evaluate(({ list: listSelector, row, bar }) => {
+    const element = document.querySelector(bar)
+    const style = getComputedStyle(element)
+    // What clips the row: its own box in a short list, else the scroll list.
+    const clip = element.closest('.virtual-list-fallback-row') ?? document.querySelector(listSelector)
+    const barBox = element.getBoundingClientRect()
+    const box = clip.getBoundingClientRect()
+    return {
+      rows: document.querySelectorAll(bar).length,
+      keyboardFocused: document.activeElement === element && element.matches(':focus-visible'),
+      focusRingReachPx: Number.parseFloat(style.outlineWidth) + Number.parseFloat(style.outlineOffset),
+      roomAbovePx: barBox.top - box.top,
+      // The bar of the longest wait is as wide as its row, so the row's edge
+      // stands for the widest bar.
+      roomRightPx: box.right - element.closest(row).getBoundingClientRect().right,
+      roomBelowPx: box.bottom - barBox.bottom,
+    }
+  }, SELECTORS)
 
   measurements.errors = errors
   await writeFile(`${out}measurements.json`, `${JSON.stringify(measurements, null, 2)}\n`)
@@ -236,12 +310,27 @@ try {
   checks.push('a row opened by the operator is still open after it leaves the window and returns')
   assert.equal(measurements.readdress.rowOpen, true)
   assert.equal(measurements.readdress.focus, 'row')
-  assert.notEqual(measurements.readdress.operatedSourceIncarnation, String(alpha.first + 1))
+  assert.equal(measurements.readdress.operationsSent, 1)
+  assert.equal(
+    measurements.readdress.operatedSourceIncarnation,
+    measurements.readdress.currentSourceIncarnation,
+  )
   checks.push('a row stays open and focused when the queue re-addresses its event, and acts on the new address')
   assert.equal(measurements.keeperSwitch.scrollTopAfterPx, 0)
   assert.equal(measurements.keeperSwitch.firstRowInView, true)
   assert.equal(measurements.keeperSwitch.openRows, 0)
   checks.push('another Keeper starts at its first row with nothing open')
+  // Less than one row's height may be empty at either edge: the gap between
+  // rows is, a missing row is not.
+  assert.ok(measurements.consumedBatch.emptyAbovePx < measurements.initial.collapsedRowPitchPx)
+  assert.ok(measurements.consumedBatch.emptyBelowPx < measurements.initial.collapsedRowPitchPx)
+  checks.push('the frame after the Keeper consumes a batch shows rows across the list')
+  assert.equal(measurements.shortList.rows, SHORT_LIST_ROWS)
+  assert.equal(measurements.shortList.keyboardFocused, true)
+  for (const room of ['roomAbovePx', 'roomRightPx', 'roomBelowPx']) {
+    assert.ok(measurements.shortList[room] >= measurements.shortList.focusRingReachPx, room)
+  }
+  checks.push("a short list leaves room for the first row's keyboard focus ring above, beside and below it")
   assert.deepEqual(errors, [])
 
   const result = {

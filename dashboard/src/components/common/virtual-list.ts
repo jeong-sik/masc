@@ -8,7 +8,7 @@
 // The threshold check only affects the returned markup.
 
 import { html } from 'htm/preact'
-import { useRef, useEffect, useState, useMemo } from 'preact/hooks'
+import { useRef, useEffect, useLayoutEffect, useState, useMemo } from 'preact/hooks'
 import type { ComponentChildren } from 'preact'
 import { onFpsChange } from '../../utils/fps-adaptive'
 
@@ -45,6 +45,32 @@ function binarySearchOffset(offsets: number[], target: number): number {
     }
   }
   return lo
+}
+
+/** The items a scroll position shows, widened by the overscan on both sides.
+ *  `itemHeight` undefined means dynamic heights, read from `offsets`. */
+function rangeInView(
+  el: HTMLElement,
+  count: number,
+  overscan: number,
+  offsets: number[],
+  itemHeight: number | undefined,
+): VisibleRange {
+  const { scrollTop, clientHeight } = el
+  if (itemHeight === undefined) {
+    return {
+      start: Math.max(0, binarySearchOffset(offsets, scrollTop) - overscan),
+      end: Math.min(count, binarySearchOffset(offsets, scrollTop + clientHeight) + overscan),
+    }
+  }
+  return {
+    start: Math.max(0, Math.floor(scrollTop / itemHeight) - overscan),
+    end: Math.min(count, Math.ceil((scrollTop + clientHeight) / itemHeight) + overscan),
+  }
+}
+
+function sameRange(left: VisibleRange, right: VisibleRange): boolean {
+  return left.start === right.start && left.end === right.end
 }
 
 function readRowHeight(entry: ResizeObserverEntry): number {
@@ -140,6 +166,20 @@ export function VirtualList<T>({
     return acc
   }, [dynamicMode, items, measureTick, estimatedItemHeight])
 
+  // The effect below runs after the browser has painted. When the items change
+  // under a scrolled list, that paint would still show the previous range: a
+  // list that shrank slices past its end, and a list that crosses the
+  // activation threshold keeps the range of an earlier, longer list. Either
+  // leaves the top of the viewport, or all of it, without rows for a frame.
+  // Move the window to the scroll position before that paint.
+  useLayoutEffect(() => {
+    if (!virtualize) return
+    const el = containerRef.current
+    if (!el) return
+    const next = rangeInView(el, items.length, effectiveOverscan, offsets, itemHeight)
+    setRange(prev => (sameRange(prev, next) ? prev : next))
+  }, [virtualize, items.length, effectiveOverscan, offsets, itemHeight])
+
   useEffect(() => {
     if (!virtualize) return
     const el = containerRef.current
@@ -149,30 +189,8 @@ export function VirtualList<T>({
     const endThreshold = dynamicMode ? estimatedItemHeight * 5 : itemHeight! * 4
 
     const recompute = () => {
-      const os = effectiveOverscan
-      if (dynamicMode) {
-        const { scrollTop, clientHeight } = el
-        const startIdx = binarySearchOffset(offsets, scrollTop)
-        const newStart = Math.max(0, startIdx - os)
-        const endIdx = binarySearchOffset(offsets, scrollTop + clientHeight)
-        const newEnd = Math.min(items.length, endIdx + os)
-        setRange(prev => {
-          if (prev.start === newStart && prev.end === newEnd) return prev
-          return { start: newStart, end: newEnd }
-        })
-      } else {
-        const { scrollTop, clientHeight } = el
-        const ih = itemHeight!
-        const newStart = Math.max(0, Math.floor(scrollTop / ih) - os)
-        const newEnd = Math.min(
-          items.length,
-          Math.ceil((scrollTop + clientHeight) / ih) + os,
-        )
-        setRange(prev => {
-          if (prev.start === newStart && prev.end === newEnd) return prev
-          return { start: newStart, end: newEnd }
-        })
-      }
+      const next = rangeInView(el, items.length, effectiveOverscan, offsets, itemHeight)
+      setRange(prev => (sameRange(prev, next) ? prev : next))
     }
 
     const checkEndReached = () => {

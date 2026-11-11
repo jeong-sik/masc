@@ -1,9 +1,9 @@
 // Keeper lane strip over a large synthetic waiting inventory (#26606).
 //
 // The actual KeeperLaneStrip with no backend: two Keepers, `?rows=` pending
-// events each, a Keeper switch, an inventory refresh and a queue that gives
-// its events new addresses. `browser.mjs` drives this page; it also opens by
-// hand through the dashboard dev server.
+// events each, a Keeper switch, an inventory refresh, a consumed batch and a
+// queue that gives its events new addresses. `browser.mjs` drives this page;
+// it also opens by hand through the dashboard dev server.
 
 import { html } from 'htm/preact'
 import { render } from 'preact'
@@ -45,6 +45,11 @@ const startedAtSec = Math.floor(Date.now() / 1000)
 /** How many times the queue has re-addressed its pending events. */
 let readdressed = 0
 
+/** The exact-entry incarnation the queue currently gives the event `serial`. */
+function incarnationOf(serial: number): string {
+  return String(serial + 1 + readdressed * READDRESS_STRIDE)
+}
+
 /** One pending event per minute, oldest first, each with its own address. */
 function eventRow(name: KeeperName, serial: number): DashboardKeeperWaitingRow {
   const since = startedAtSec - (rowsPerKeeper - serial + NEWEST_ROW_AGE_MINUTES) * SECONDS_PER_MINUTE
@@ -59,15 +64,15 @@ function eventRow(name: KeeperName, serial: number): DashboardKeeperWaitingRow {
     next_action: 'keeper_drain_event_queue',
     detail: {
       source_ref: `${name === 'alpha' ? 'a' : 'b'}${serial.toString(16).padStart(63, '0')}`,
-      source_incarnation: String(serial + 1 + readdressed * READDRESS_STRIDE),
+      source_incarnation: incarnationOf(serial),
     },
   }
 }
 
 /** A fresh response body: every row is a new object, as after a JSON parse. */
-function inventoryFrom(firstSerial: number): DashboardKeeperWaitingInventory {
+function inventoryFrom(firstSerial: number, count: number): DashboardKeeperWaitingInventory {
   const keepers = KEEPER_NAMES.map(name => {
-    const waiting_on = Array.from({ length: rowsPerKeeper }, (_, index) => eventRow(name, firstSerial + index))
+    const waiting_on = Array.from({ length: count }, (_, index) => eventRow(name, firstSerial + index))
     return {
       keeper_name: name,
       state: 'waiting' as const,
@@ -79,7 +84,7 @@ function inventoryFrom(firstSerial: number): DashboardKeeperWaitingInventory {
   return {
     keeper_count: keepers.length,
     waiting_keeper_count: keepers.length,
-    row_count: keepers.length * rowsPerKeeper,
+    row_count: keepers.length * count,
     keepers,
   }
 }
@@ -96,7 +101,9 @@ const actions: LaneEventQueueActions = {
 
 let selected: KeeperName = 'alpha'
 let firstSerial = 0
-let inventory = inventoryFrom(firstSerial)
+/** Rows each Keeper holds now; a consumed batch lowers it. */
+let rowCount = rowsPerKeeper
+let inventory = inventoryFrom(firstSerial, rowCount)
 
 const root = document.getElementById('fixture')!
 
@@ -106,7 +113,7 @@ function draw(): void {
     html`
       <main class="min-h-screen px-4 py-8" style="background: var(--color-bg-page); color: var(--color-fg-primary);">
         <p class="mx-auto mb-3 max-w-[980px] text-xs">
-          합성 inventory · 실제 KeeperLaneStrip · 백엔드 없음 · Keeper마다 ${rowsPerKeeper.toLocaleString()}행
+          합성 inventory · 실제 KeeperLaneStrip · 백엔드 없음 · Keeper마다 ${rowCount.toLocaleString()}행
         </p>
         <div class="mx-auto mb-3 flex max-w-[980px] gap-2 text-xs">
           ${KEEPER_NAMES.map(name => html`
@@ -148,7 +155,7 @@ function select(name: KeeperName): void {
  *  forces. Paint is not included. */
 function refresh(): number {
   firstSerial += REFRESH_TURNOVER
-  inventory = inventoryFrom(firstSerial)
+  inventory = inventoryFrom(firstSerial, rowCount)
   const before = performance.now()
   draw()
   void document.body.offsetHeight
@@ -159,7 +166,16 @@ function refresh(): number {
  *  when it defers what a turn left unconsumed. Order and content stay. */
 function readdress(): void {
   readdressed += 1
-  inventory = inventoryFrom(firstSerial)
+  inventory = inventoryFrom(firstSerial, rowCount)
+  draw()
+}
+
+/** Drops the `count` oldest rows and adds none, as when the Keeper consumes a
+ *  batch in one turn. */
+function consume(count: number): void {
+  firstSerial += count
+  rowCount -= count
+  inventory = inventoryFrom(firstSerial, rowCount)
   draw()
 }
 
@@ -168,12 +184,23 @@ declare global {
     laneFixture: {
       /** Serial of the oldest row in the current inventory. */
       firstSerial: () => number
+      rowCount: () => number
+      incarnationOf: (serial: number) => string
       refresh: () => number
       readdress: () => void
+      consume: (count: number) => void
       operations: typeof operations
     }
   }
 }
 
-window.laneFixture = { firstSerial: () => firstSerial, refresh, readdress, operations }
+window.laneFixture = {
+  firstSerial: () => firstSerial,
+  rowCount: () => rowCount,
+  incarnationOf,
+  refresh,
+  readdress,
+  consume,
+  operations,
+}
 draw()

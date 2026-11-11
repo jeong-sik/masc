@@ -377,7 +377,8 @@ export function LaneWaitingRows({
   actions: LaneEventQueueActions | null
 }): VNode | null {
   // Sorted once per inventory response. A re-render of the surface around it,
-  // such as the 기술 상세 toggle, reuses the array and with it the list's keys.
+  // such as the 기술 상세 toggle, reuses the array, so the list below keeps its
+  // row offsets and its observers.
   const sorted = useMemo(() => waitingRowsOldestFirst(rows), [rows])
   if (sorted.length === 0) return null
   const nowMs = Date.now()
@@ -387,10 +388,13 @@ export function LaneWaitingRows({
     const age = ageMinutes(row, nowMs)
     return age === null ? max : Math.max(max, age)
   }, DAY_MINUTES)
+  // No gap between the axis and the list: every row brings its own gap above.
   return html`
-    <div class="grid gap-1">
-      <div class="font-mono text-3xs uppercase tracking-wide text-[var(--color-fg-muted)]">오래 기다린 순서</div>
-      <${LaneAgeAxis} axisMax=${axisMax} />
+    <div class="grid">
+      <div class="grid gap-1">
+        <div class="font-mono text-3xs uppercase tracking-wide text-[var(--color-fg-muted)]">오래 기다린 순서</div>
+        <${LaneAgeAxis} axisMax=${axisMax} />
+      </div>
       <${KeeperLaneInventoryWindow}
         rows=${sorted}
         renderRow=${(

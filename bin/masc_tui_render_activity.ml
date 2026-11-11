@@ -152,16 +152,25 @@ let activity_heading (state : state) ~cols ~on_logs ~reading =
   let ko = state.ui_language = Lang_ko in
   let tabs = activity_tabs ~ko ~on_logs in
   let source = System_logs_view.source state.system_logs in
+  (* The strip marks which of the two readings is on screen. Where it has no
+     room the path names that reading in its place. *)
   let title =
-    screen_title
-      (if on_logs then
-         " " ^ ui_text state ~ko:"로그" ~en:"Logs" ^ " · "
-         ^ (match source with
-            | Server -> ui_text state ~ko:"서버" ~en:"Server"
-            | This_tui -> "This TUI")
-       else if ko then " 활동" else " Activity")
+    here_path state
+      ~path:
+        (List.filter_map
+           (fun (label, active, _) -> if active then Some label else None)
+           tabs)
   in
-  let before = title ^ "  " and dot = "  \xc2\xb7" in
+  let reading =
+    if on_logs then
+      ("  "
+       ^ (match source with
+          | Server -> ui_text state ~ko:"서버" ~en:"Server"
+          | This_tui -> ui_text state ~ko:"이 TUI" ~en:"This TUI"))
+      :: reading
+    else reading
+  in
+  let before = here_path state ~path:[] ^ "  " and dot = "  \xc2\xb7" in
   let cells text =
     Message_layout.display_width (Masc_tui_theme.strip_sgr text)
   in

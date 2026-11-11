@@ -400,18 +400,18 @@ let keeper_list_view_names =
     (List.map Masc_tui_keeper_list_model.view_label Masc_tui_keeper_list_model.views)
 
 let keeper_actions =
-  [ b Act "c" "chat" ~help:"chat with the keeper"
-  ; b Act "l" "logs"
-  ; b Act keeper_calls_key "calls" ~help:"tool calls"
-  ; b Act "u" "runtime" ~help:"pick a runtime candidate order"
-  ; b Act "g" "yolo / auto" ~help:"toggle yolo / auto tool approval"
-  ; b Act "p / w" "pause / wake"
-  ; b Act "s" "shutdown"
-  ; b Act "e/E" "settings TOML/JSON"
-  ; b Act "f" "files" ~help:"file changes this keeper wrote"
-  ; b Act "a" "new" ~help:"new keeper"
-  ; b Act "x" "delete" ~help:"stop and permanently remove the confirmed keeper"
-  ; b Navigate "D" "deletions" ~help:"durable deletion records, failures and cleanup retry"
+  [ b ~ko:"채팅" Act "c" "chat" ~help:"chat with the keeper"
+  ; b ~ko:"로그" Act "l" "logs"
+  ; b ~ko:"호출" Act keeper_calls_key "calls" ~help:"tool calls"
+  ; b ~ko:"런타임" Act "u" "runtime" ~help:"pick a runtime candidate order"
+  ; b ~ko:"yolo / auto" Act "g" "yolo / auto" ~help:"toggle yolo / auto tool approval"
+  ; b ~ko:"일시 정지 / 깨우기" Act "p / w" "pause / wake"
+  ; b ~ko:"내리기" Act "s" "shutdown"
+  ; b ~ko:"설정 TOML/JSON" Act "e/E" "settings TOML/JSON"
+  ; b ~ko:"파일" Act "f" "files" ~help:"file changes this keeper wrote"
+  ; b ~ko:"새 키퍼" Act "a" "new" ~help:"new keeper"
+  ; b ~ko:"삭제" Act "x" "delete" ~help:"stop and permanently remove the confirmed keeper"
+  ; b ~ko:"삭제 기록" Navigate "D" "deletions" ~help:"durable deletion records, failures and cleanup retry"
 
   ]
 
@@ -612,54 +612,54 @@ let for_surface = function
   | Metrics ->
       List.map fst metrics_bindings
   | Keepers Keeper_list ->
-      (b Navigate "j/k" "move"
+      (b ~ko:"선택" Navigate "j/k" "move"
          ~help:"move the roster cursor; a grouping view also stops on each group heading")
-      :: (b Navigate "v" "view"
+      :: (b ~ko:"보기" Navigate "v" "view"
             ~help:("cycle " ^ keeper_list_view_names ^ "; a press on a name opens that view"))
-      :: (b Navigate "V" "density" ~help:"one or two lines per Keeper")
-      :: (b Navigate "[ / ]" "group"
+      :: (b ~ko:"줄 수" Navigate "V" "density" ~help:"one or two lines per Keeper")
+      :: (b ~ko:"그룹" Navigate "[ / ]" "group"
             ~help:"jump to the previous or next group heading in a grouping view")
-      :: (b Navigate "Left / Right" "fold" ~help:"on a group heading, fold or unfold its rows")
-      :: (b Navigate "o" "order" ~help:"cycle priority / recent / oldest / activity / name")
-      :: (b Act "J" "jobs" ~help:"open the selected Keeper's schedules")
-      :: (b Act "K" "relations" ~help:"browse Keeper-origin requests queued for the selected Keeper")
-      :: (b Act "Enter" "story"
+      :: (b ~ko:"접기 / 펴기" Navigate "Left / Right" "fold" ~help:"on a group heading, fold or unfold its rows")
+      :: (b ~ko:"정렬" Navigate "o" "order" ~help:"cycle priority / recent / oldest / activity / name")
+      :: (b ~ko:"일정" Act "J" "jobs" ~help:"open the selected Keeper's schedules")
+      :: (b ~ko:"Keeper 요청" Act "K" "relations" ~help:"browse Keeper-origin requests queued for the selected Keeper")
+      :: (b ~ko:"Story" Act "Enter" "story"
             ~help:"open the selected Keeper Story or shared World window; Enter closes its story/world page")
-      :: (b Act "W" "world"
+      :: (b ~ko:"World" Act "W" "world"
             ~help:"select shared World and open its dock; outside memory/age, switch to age; lowercase w still wakes a Keeper")
-      :: (b Act "Right" "detail" ~help:"keeper detail")
+      :: (b ~ko:"상세" Act "Right" "detail" ~help:"keeper detail")
       :: (b ~ko:"관측 오류" Act "!" "read errors"
             ~help:"read every current Keeper-list observation error and its complete reason; Esc returns")
-      :: (b Act "Tab / s / m" "pages"
+      :: (b ~ko:"쪽" Act "Tab / s / m" "pages"
             ~help:"with a Keeper Story open: next page / schedules / memory; World keeps its own page; Esc closes either window")
-      :: (b Act "1 / 2 / 3 / 4" "memory"
+      :: (b ~ko:"기억" Act "1 / 2 / 3 / 4" "memory"
             ~help:"with Keeper Memory preview open: browse recent records / retrievals / committed changes / storage in the shared Memory browser; Enter also opens recent records")
       :: keeper_actions
-      @ [ b Search "/" "search" ~help:"search names; Enter keeps the query"
-        ; b Search "n / N" "next / previous match"
-        ; b Act "Esc" "dashboard"
+      @ [ b ~ko:"찾기" Search "/" "search" ~help:"search names; Enter keeps the query"
+        ; b ~ko:"다음 / 이전 일치" Search "n / N" "next / previous match"
+        ; b ~ko:"뒤로" Act "Esc" "dashboard"
         ]
       @ row_list_jumps @ listing_meta
   | Keepers Keeper_detail ->
-      [ b Navigate "h/l" "pane" ~help:"move between roster and detail"
+      [ b ~ko:"창" Navigate "h/l" "pane" ~help:"move between roster and detail"
         (* The tabs come from the list the strip draws. Named by hand this row
            said "Info / Settings / Secrets / GitHub" while the strip drew
            nine, so a reader who trusted the sheet did not know Sandbox,
            Identity, Channels, Automation or Runs existed -- and Sandbox is
            the second tab. Config's [p] had the same drift and a test to
            catch it; this row cannot drift at all now. *)
-      ; b Navigate "[ / ]" "tabs"
+      ; b ~ko:"탭" Navigate "[ / ]" "tabs"
           ~help:
             ("detail tabs: "
              ^ String.concat " / "
                  (List.map Masc_tui_types.keeper_detail_tab_label
                     Masc_tui_types.keeper_detail_tabs))
-      ; b Act "o" "logs"
+      ; b ~ko:"로그" Act "o" "logs"
           ~help:"open container logs in Sandbox; Keeper activity elsewhere"
-      ; b Act "U" "runtime"
+      ; b ~ko:"런타임" Act "U" "runtime"
           ~help:"pick a runtime candidate order (on the Channels tab U is unbind all)"
-      ; b Act "Left / Esc" "back"
-      ; b Navigate "Home/End" "top/bottom" ~help:"the ends of this tab"
+      ; b ~ko:"뒤로" Act "Left / Esc" "back"
+      ; b ~ko:"처음/끝" Navigate "Home/End" "top/bottom" ~help:"the ends of this tab"
       ]
       @ List.filter
           (fun binding -> binding.key <> "l" && binding.key <> "u")
@@ -686,73 +686,73 @@ let for_surface = function
       ]
       @ listing_meta
   | Keepers Keeper_message ->
-      [ b Navigate "Left" "roster" ~help:"empty composer: open the Keeper list; with text: move the cursor left"
-      ; b Navigate "Right" "chat"
+      [ b ~ko:"목록" Navigate "Left" "roster" ~help:"empty composer: open the Keeper list; with text: move the cursor left"
+      ; b ~ko:"채팅" Navigate "Right" "chat"
           ~help:"roster focused: return focus to the chat composer"
       ; (* One key, several jobs: the roster when it holds focus, the history
            when the chat is scrolled back, the completions while a /command is
            typed, and otherwise the lines the operator sent. Listed once so the
            table keeps the one-key-one-row contract (#33236). *)
-        b Navigate "Up / Down" "roster move / scroll"
+        b ~ko:"목록 선택 / 스크롤" Navigate "Up / Down" "roster move / scroll"
           ~help:
             "roster focused: move; chat scrolled back: adjust by one line; \
              while a /command is typed: pick among its completions; \
              otherwise walk the history of lines you sent: Up recalls the \
              previous one (a line still waiting in the queue comes back as \
              an edit of that line), Down steps back toward your draft"
-      ; b Act "Enter" "send / open"
+      ; b ~ko:"전송 / 열기" Act "Enter" "send / open"
           ~help:"send from chat, or open the selected Keeper from the roster"
-      ; b Act "Ctrl-J" "newline"
+      ; b ~ko:"줄바꿈" Act "Ctrl-J" "newline"
           ~help:"newline in the draft; Shift-Enter does the same where the terminal reports it"
-      ; b Act "Tab / Shift-Tab" "complete"
+      ; b ~ko:"자동 완성" Act "Tab / Shift-Tab" "complete"
           ~help:
             "complete the /command being typed, or its argument such as a \
              Keeper name; the chat composer keeps these keys, so they do not \
              switch surface here"
-      ; b Act voice_speak_key "speak"
+      ; b ~ko:"말하기" Act voice_speak_key "speak"
           ~help:"record into the draft; again to stop and keep what was said"
-      ; b Act voice_listen_key "keep listening"
+      ; b ~ko:"계속 듣기" Act voice_listen_key "keep listening"
           ~help:"continuous capture on/off: each sentence starts the next capture"
-      ; b Act "Ctrl-G" "next keeper" ~help:"next keeper with a chat open"
-      ; b Act "Ctrl-U" "clear" ~help:"clear the draft"
-      ; b Act "Ctrl-K / Ctrl-P" "queued line"
+      ; b ~ko:"다음 키퍼" Act "Ctrl-G" "next keeper" ~help:"next keeper with a chat open"
+      ; b ~ko:"지우기" Act "Ctrl-U" "clear" ~help:"clear the draft"
+      ; b ~ko:"대기 줄" Act "Ctrl-K / Ctrl-P" "queued line"
           ~help:"cancel / edit the last queued line"
-      ; b Act chat_schedules_label "Job status"
+      ; b ~ko:"일정 상태" Act chat_schedules_label "Job status"
           ~help:"fold or expand this Keeper's scheduled Jobs, pending occurrences, holds and latest result"
-      ; b Act "Ctrl-T" "queue"
+      ; b ~ko:"대기열" Act "Ctrl-T" "queue"
           ~help:"inspect and manage waiting turns"
-      ; b Navigate "PgUp/PgDn" "history" ~help:"scroll history by a page"
-      ; b Navigate "Ctrl-E / End" "newest"
+      ; b ~ko:"이전 대화" Navigate "PgUp/PgDn" "history" ~help:"scroll history by a page"
+      ; b ~ko:"최신" Navigate "Ctrl-E / End" "newest"
           ~help:"after reading back, jump to the newest row"
-      ; b Act "Ctrl-R" "reasoning" ~help:"cycle reasoning hidden / folded / full"
-      ; b Act "Ctrl-D" "tool detail" ~help:"cycle compact / results / full tool detail"
-      ; b Act expand_turn_label "turn detail"
+      ; b ~ko:"추론" Act "Ctrl-R" "reasoning" ~help:"cycle reasoning hidden / folded / full"
+      ; b ~ko:"도구 상세" Act "Ctrl-D" "tool detail" ~help:"cycle compact / results / full tool detail"
+      ; b ~ko:"턴 상세" Act expand_turn_label "turn detail"
           ~help:
             "unfold the running turn's status rows, or fold them back to the \
              progress line"
-      ; b Act "Ctrl-N" "journal detail"
+      ; b ~ko:"기록 상세" Act "Ctrl-N" "journal detail"
           (* The three words are the states' own, the way Ctrl-R above spells
              its own. Pressing this answers "Librarian/Memory timeline: full",
              so a help promising "full detail" sends a reader looking for a
              state the pane never names. *)
           ~help:"cycle Memory journal summary / full / hidden"
-      ; b Act "Ctrl-F" "message metadata"
+      ; b ~ko:"메시지 정보" Act "Ctrl-F" "message metadata"
           ~help:"cycle no clock / inline clock / full timestamp and request id"
-      ; b Act "Ctrl-O" "image / diagram"
+      ; b ~ko:"이미지 / 다이어그램" Act "Ctrl-O" "image / diagram"
           ~help:"preview the newest image or Mermaid diagram; /images lists all; any key returns"
-      ; b Act "Ctrl-V" "paste image"
+      ; b ~ko:"이미지 붙여넣기" Act "Ctrl-V" "paste image"
           ~help:"paste the clipboard image: it is staged for the next message and an [Image #1] marker lands in the draft"
-      ; b Act "/approve /deny" "approval" ~help:"type a command and Enter to answer a tool approval"
-      ; b Act "/copy" "copy reply"
+      ; b ~ko:"승인 / 거절" Act "/approve /deny" "approval" ~help:"type a command and Enter to answer a tool approval"
+      ; b ~ko:"답 복사" Act "/copy" "copy reply"
           ~help:"send the selected Keeper's latest completed reply to the terminal clipboard via OSC 52"
-      ; b Act "Q / Ctrl-Q" "leave"
+      ; b ~ko:"나가기" Act "Q / Ctrl-Q" "leave"
           ~help:"Q on an active turn with an empty draft or hidden composer; Ctrl-Q always leaves without interrupting"
       ; (* One key, two focuses, listed once for the reason [Up / Down] above
            is: the dispatcher reads Esc from the roster as the way back to the
            composer and from the chat as the way off the screen. Spelled as two
            bindings, both reached the same row and the footer drew
            [Right / Esc:chat] and [Esc:back] side by side. *)
-        b Act "Esc" "chat / back"
+        b ~ko:"채팅 / 뒤로" Act "Esc" "chat / back"
           ~help:
             "roster focused: return to the composer; chat focused: back, and \
              during a turn interrupt it"
@@ -771,14 +771,14 @@ let for_surface = function
          and what it follows. The edge pair stays in the help until #39082
          decides what this screen owes a guard that reads help for key
          names. *)
-      [ b Navigate "j/k" "move" ~help:"move; Home/End jump to the top or bottom"
-      ; b Navigate "PgUp/PgDn" "page"
-      ; b Navigate "/" "filter"
+      [ b ~ko:"선택" Navigate "j/k" "move" ~help:"move; Home/End jump to the top or bottom"
+      ; b ~ko:"페이지" Navigate "PgUp/PgDn" "page"
+      ; b ~ko:"필터" Navigate "/" "filter"
           ~help:"type to narrow the lanes and runtimes; Esc drops the filter"
-      ; b Act "Enter" "choose"
-      ; b Act "d" "default"
+      ; b ~ko:"고르기" Act "Enter" "choose"
+      ; b ~ko:"기본값" Act "d" "default"
           ~help:"drop this Keeper's own binding and follow [runtime].default"
-      ; b Act "Esc" "back"
+      ; b ~ko:"뒤로" Act "Esc" "back"
       ]
   | Lanes ->
       [ b ~ko:"선택" Navigate "j/k" "move" ~help:"move the lane cursor"

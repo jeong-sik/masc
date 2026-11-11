@@ -38,8 +38,9 @@ let with_assets ~asset_body f =
     Fs_compat.clear_fs ();
     Masc_test_deps.with_process_env "MASC_ASSETS_DIR" (Some root) f)
 
-(* [hold ()] occupies the pool's one worker until the function it returns is
-   called. *)
+(* The pool's one worker is held until [release ()]. [hold_next ()] puts a
+   second hold in the pool's queue, behind what was submitted before it and
+   ahead of what comes after; it lasts until the end of the case. *)
 let with_occupied_pool f =
   Eio_main.run @@ fun env ->
   Eio.Time.with_timeout_exn (Eio.Stdenv.clock env) 10.0 @@ fun () ->
@@ -62,11 +63,12 @@ let with_occupied_pool f =
       Domain_pool.submit_cpu ~name:__FUNCTION__ pool (fun () ->
         Eio.Promise.resolve occupy ();
         Eio.Promise.await released));
-    Eio.Promise.await occupied;
-    release in
+    occupied, release in
   Fun.protect ~finally:(fun () -> List.iter (fun release -> release ()) !releases) (fun () ->
-    let release = hold () in
-    f ~sw ~release ~hold)
+    let occupied, release = hold () in
+    Eio.Promise.await occupied;
+    let hold_next () = ignore (hold () : unit Eio.Promise.t * (unit -> unit)) in
+    f ~sw ~release ~hold_next)
 
 let gunzip payload =
   let input = De.bigstring_create De.io_buffer_size in
@@ -105,7 +107,7 @@ let check_response ~encoding ~content_type expected response =
     | Some other -> failf "unsupported fixture encoding %s" other in
   check string "exact decoded asset" expected decoded
 
-let exercise ~asset_body ~encoding ~send ~progress ~started ~finished ~release ~hold =
+let exercise ~asset_body ~encoding ~send ~progress ~started ~finished ~release ~hold_next =
   let slow = send slow_path encoding in
   Eio.Promise.await started;
   (* The route has no earlier suspension (see with_assets). A direct codec
@@ -113,6 +115,11 @@ let exercise ~asset_body ~encoding ~send ~progress ~started ~finished ~release ~
   check bool "asset compression waits off the request domain" false
     (Eio.Promise.is_resolved finished);
   progress ();
+  (* A second request of the same asset, behind a hold that queued after the
+     first one's compression. It is answered by that one compression; one of
+     its own would wait behind the hold until the case's timeout. *)
+  hold_next ();
+  let second = send slow_path encoding in
   List.iter (fun (name, accept, body, content_type, vary) ->
     let response = Eio.Promise.await_exn (send ("/dashboard/assets/" ^ name) accept) in
     check_response ~encoding:None ~content_type body response;
@@ -130,19 +137,19 @@ let exercise ~asset_body ~encoding ~send ~progress ~started ~finished ~release ~
     ~content_type:"application/javascript; charset=utf-8" asset_body response;
   check (option string) "compressed asset Vary" (Some "Accept-Encoding")
     (List.assoc_opt "vary" response.headers);
-  (* The same bytes asked for again are answered from what the first response
-     left: with the worker held again, a second compression would not return
-     and the case would end at its timeout. *)
-  let release_again = hold () in
-  let again = Eio.Promise.await_exn (send slow_path encoding) in
-  release_again ();
   check_response ~encoding:(Some encoding)
-    ~content_type:"application/javascript; charset=utf-8" asset_body again
+    ~content_type:"application/javascript; charset=utf-8" asset_body
+    (Eio.Promise.await_exn second);
+  (* The worker is held again by now, so a request after the compression is
+     answered from what it left. *)
+  check_response ~encoding:(Some encoding)
+    ~content_type:"application/javascript; charset=utf-8" asset_body
+    (Eio.Promise.await_exn (send slow_path encoding))
 
 let test_h1 encoding () =
   let asset_body = asset_body_of ("HTTP/1 " ^ encoding) in
   with_assets ~asset_body @@ fun () ->
-  with_occupied_pool @@ fun ~sw ~release ~hold ->
+  with_occupied_pool @@ fun ~sw ~release ~hold_next ->
   let started, start = Eio.Promise.create () in
   let finished, finish = Eio.Promise.create () in
   let send path encoding = Eio.Fiber.fork_promise ~sw (fun () ->
@@ -179,12 +186,12 @@ let test_h1 encoding () =
     let response = Eio.Promise.await reply in
     Eio.Promise.await (Httpun_eio.Client.shutdown client);
     response) in
-  exercise ~asset_body ~encoding ~send ~progress:(fun () -> ()) ~started ~finished ~release ~hold
+  exercise ~asset_body ~encoding ~send ~progress:(fun () -> ()) ~started ~finished ~release ~hold_next
 
 let test_h2 encoding () =
   let asset_body = asset_body_of ("HTTP/2 " ^ encoding) in
   with_assets ~asset_body @@ fun () ->
-  with_occupied_pool @@ fun ~sw ~release ~hold ->
+  with_occupied_pool @@ fun ~sw ~release ~hold_next ->
   let started, start = Eio.Promise.create () in
   let finished, finish = Eio.Promise.create () in
   let handler ~stream_end _ h2_reqd =
@@ -226,7 +233,7 @@ let test_h2 encoding () =
   let progress () =
     match Eio.Promise.await (H2_eio.Client.ping client) with
     | Ok () -> () | Error `EOF -> fail "H2 closed before PING acknowledgement" in
-  exercise ~asset_body ~encoding ~send ~progress ~started ~finished ~release ~hold;
+  exercise ~asset_body ~encoding ~send ~progress ~started ~finished ~release ~hold_next;
   closing := true;
   (* The client reader owns an in-flight read. Shutdown reaches the peer
      immediately; close alone can wait for that read before closing the FD. *)
